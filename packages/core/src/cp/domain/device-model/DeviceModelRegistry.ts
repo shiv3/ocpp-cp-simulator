@@ -223,12 +223,11 @@ const COMPONENTS: readonly DeviceModelComponentDef[] = [
     evseScoped: true,
     summary: "The one connector of an EVSE.",
   },
+  { name: "DeviceDataCtrlr", summary: "Device model reporting." },
   // Components the station has but that publish no variable yet: a request
   // for one of their variables is UnknownVariable, not UnknownComponent.
-  // Variables are added with the behavior that backs them (#605, #606, #607,
-  // #612).
+  // Variables are added with the behavior that backs them (#605, #607, #612).
   { name: "ClockCtrlr", summary: "Station clock." },
-  { name: "DeviceDataCtrlr", summary: "Device model reporting." },
   { name: "TariffCostCtrlr", summary: "Tariff and cost." },
   { name: "ISO15118Ctrlr", summary: "ISO 15118 communication." },
 ];

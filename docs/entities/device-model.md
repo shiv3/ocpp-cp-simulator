@@ -6,7 +6,12 @@ sources:
   - packages/core/src/cp/domain/device-model/DeviceModelRegistry.ts
   - packages/core/src/cp/infrastructure/transport/v201/deviceModelMap.ts
   - packages/core/src/cp/domain/charge-point/ConfigurationStore.ts
+  - packages/core/src/cp/infrastructure/transport/v201/setVariablesV201.ts
+  - packages/core/src/cp/infrastructure/transport/v201/getVariablesV201.ts
+  - packages/core/src/cp/infrastructure/transport/v201/variableStatusInfo.ts
+  - packages/core/src/cp/infrastructure/transport/v201/variablesRequestLimits.ts
   - "issue #604"
+  - "issue #606"
   - "issue #569"
 related:
   - ../concepts/variable-monitoring.md
@@ -70,10 +75,10 @@ would accept a value that changes nothing.
 
 ## Components
 
-`OCPPCommCtrlr`, `TxCtrlr`, `SampledDataCtrlr`, `AlignedDataCtrlr`,
+`OCPPCommCtrlr`, `DeviceDataCtrlr`, `TxCtrlr`, `SampledDataCtrlr`, `AlignedDataCtrlr`,
 `LocalAuthListCtrlr`, `AuthCtrlr`, `AuthCacheCtrlr`, `MonitoringCtrlr`,
 `ChargingStation`, `SecurityCtrlr`, and the EVSE-scoped `EVSE` and `Connector`
-(which need `component.evse`). `ClockCtrlr`, `DeviceDataCtrlr`,
+(which need `component.evse`). `ClockCtrlr`,
 `TariffCostCtrlr` and `ISO15118Ctrlr` exist with no variable yet: a request for
 one of their variables answers `UnknownVariable`, not `UnknownComponent`.
 
@@ -105,6 +110,10 @@ one of their variables answers `UnknownVariable`, not `UnknownComponent`.
 | `TxCtrlr.StopTxOnEVSideDisconnect`                         | `StopTransactionOnEVSideDisconnect` (1.6) | ReadWrite  | boolean    | –                                                      | true                                              | Persistent  |
 | `TxCtrlr.TxStartPoint`                                     | `TxStartPoint`                            | ReadOnly   | MemberList | –                                                      | Authorized                                        | Volatile    |
 | `TxCtrlr.TxStopPoint`                                      | `TxStopPoint`                             | ReadOnly   | MemberList | –                                                      | Authorized,EVConnected                            | Volatile    |
+| `DeviceDataCtrlr.ItemsPerMessage[GetVariables]`            | `ItemsPerMessageGetVariables`             | ReadOnly   | integer    | –                                                      | 100                                               | Volatile    |
+| `DeviceDataCtrlr.BytesPerMessage[GetVariables]`            | `BytesPerMessageGetVariables`             | ReadOnly   | integer    | –                                                      | 65536                                             | Volatile    |
+| `DeviceDataCtrlr.ItemsPerMessage[SetVariables]`            | `ItemsPerMessageSetVariables`             | ReadOnly   | integer    | –                                                      | 100                                               | Volatile    |
+| `DeviceDataCtrlr.BytesPerMessage[SetVariables]`            | `BytesPerMessageSetVariables`             | ReadOnly   | integer    | –                                                      | 65536                                             | Volatile    |
 | `MonitoringCtrlr.ItemsPerMessage[SetVariableMonitoring]`   | `ItemsPerMessageSetVariableMonitoring`    | ReadOnly   | integer    | –                                                      | 100                                               | Volatile    |
 | `MonitoringCtrlr.BytesPerMessage[SetVariableMonitoring]`   | `BytesPerMessageSetVariableMonitoring`    | ReadOnly   | integer    | –                                                      | 65536                                             | Volatile    |
 | `MonitoringCtrlr.ItemsPerMessage[ClearVariableMonitoring]` | `ItemsPerMessageClearVariableMonitoring`  | ReadOnly   | integer    | –                                                      | 100                                               | Volatile    |
@@ -120,6 +129,56 @@ one of their variables answers `UnknownVariable`, not `UnknownComponent`.
 | `EVSE.Power`                                               | `EVSEPower`                               | ReadOnly   | decimal    | unit W                                                 | runtime                                           | Volatile    |
 | `EVSE.AvailabilityState`                                   | `EVSEAvailabilityState`                   | ReadOnly   | OptionList | one of Available/Occupied/Reserved/Unavailable/Faulted | runtime                                           | Volatile    |
 | `Connector.AvailabilityState`                              | `ConnectorAvailabilityState`              | ReadOnly   | OptionList | one of Available/Occupied/Reserved/Unavailable/Faulted | runtime                                           | Volatile    |
+
+## GetVariables and SetVariables results
+
+Both handlers answer from the entry (#606). Every element of a request gets a
+result (B05.FR.01, B06.FR.01); a result that is not `Accepted` carries
+`attributeStatusInfo.reasonCode` where the appendices define one (2.0.1 and 2.1
+Part 2 Appendices §5, same codes in both editions). The first matching row
+wins, in this order:
+
+| Request                                                                                                               | `attributeStatus`                      | `reasonCode`          | Clause                             |
+| --------------------------------------------------------------------------------------------------------------------- | -------------------------------------- | --------------------- | ---------------------------------- |
+| More elements than `ItemsPerMessage[<message>]`: every element                                                        | `Rejected`                             | `TooManyElements`     | B05.FR.11, B06.FR.05               |
+| Request payload longer than `BytesPerMessage[<message>]` (JSON, UTF-8): every element                                 | `Rejected`                             | `TooLargeElement`     | B05.FR.11, B06.FR.05               |
+| Unknown component / variable                                                                                          | `UnknownComponent` / `UnknownVariable` | none                  | B05.FR.04, FR.05, B06.FR.06, FR.07 |
+| `attributeType` the variable lacks                                                                                    | `NotSupportedAttributeType`            | none                  | B05.FR.06, B06.FR.08               |
+| Set: value not of the variable's `dataType` (not an integer, decimal or `true` / `false`), or not in its `valuesList` | `Rejected`                             | `InvalidValue`        | B05.FR.07                          |
+| Set: number below `min` or above `max`                                                                                | `Rejected`                             | `ValueOutOfRange`     | B05.FR.08                          |
+| Set: the variable is `ReadOnly` (checked after the two rows above)                                                    | `Rejected`                             | `ReadOnly`            | B05.FR.09                          |
+| Set: the store refuses a value the checks passed (for example an unknown `MemberList` member)                         | `Rejected`                             | `InvalidValue`        | B05.FR.07                          |
+| Get: the variable is `WriteOnly`                                                                                      | `Rejected`                             | `WriteOnly`           | B06.FR.09                          |
+| Get / Set: registered, but the store holds no value (a runtime value not published yet)                               | `Rejected`                             | `MissingDevModelInfo` | –                                  |
+
+`ItemsPerMessage` and `BytesPerMessage` are the `DeviceDataCtrlr` variables
+with the message as the instance (`GetVariables`, `SetVariables`), read-only
+constants of 100 and 65536. Over the limit the spec allows a CALLERROR for
+`GetVariables` (B06.FR.16 `OccurenceConstraintViolation`, B06.FR.17
+`FormatViolation`) but requires nothing for `SetVariables`; the simulator
+answers both with per-element results so the response keeps one result per
+element, and applies nothing. The byte count is that of the request payload, not
+of the OCPP-J frame around it. An integer is `-?digits` only: `1e2`, `1.5`,
+`+5` and padded values are `InvalidValue`.
+
+### MinSet and MaxSet
+
+`MinSet` and `MaxSet` bound the `Target` of a variable (Part 2 §3.2
+`AttributeEnumType`; the Part 1 §4 fan-speed example: "the target may not be set
+above / below this value"). Only a variable with a `Target` has them, which on a
+2.1 station is `EVSE.Power`
+([Variable monitoring](../concepts/variable-monitoring.md#target-attribute-21));
+every other variable, and every variable on 2.0.1, answers
+`NotSupportedAttributeType`. A configuration variable has no `Target` or limits
+because its value is its setting and the #569 rule forbids an attribute that
+changes nothing. Setting either takes a plain decimal and is kept in memory,
+like a `Target`:
+
+- a `Target` below `MinSet` or above `MaxSet` is `Rejected` / `ValueOutOfRange`;
+- `MinSet` above `MaxSet` (or `MaxSet` below `MinSet`) is `Rejected` /
+  `ValueOutOfRange`;
+- `GetVariables` answers an empty string while one is unset (B06.FR.13), and
+  `GetBaseReport` lists the attribute once it is set.
 
 ## Adding a variable
 

@@ -125,7 +125,9 @@ only variable with a target: a configuration variable's value is its
 setting, with no goal distinct from it, while the power is a measurement
 a CSMS can set a goal for. Every other variable, and every variable of a
 2.0.1 station, answers `NotSupportedAttributeType` for `Target` (B05.FR.06,
-B06.FR.08). Targets are kept in memory, not persisted.
+B06.FR.08). Targets are kept in memory, not persisted. The same variable has
+`MinSet` and `MaxSet` attributes that bound the Target (#606; see
+[GetVariables and SetVariables results](../entities/device-model.md#minset-and-maxset)).
 
 ## Monitor types
 

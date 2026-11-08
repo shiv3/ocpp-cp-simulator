@@ -128,7 +128,9 @@ placeholder transaction id (`0` until StartTransaction.conf):
 the CSMS's id. `transaction_message_rejected` and
 `transaction_message_discarded` do record `"0"` for a 1.6 message that
 carries no CSMS id: a StartTransaction.req, and the MeterValues.req and
-StopTransaction.req of a transaction whose start got no conf. A disconnect
+StopTransaction.req of a transaction whose start got no conf (once that
+request is discarded these two carry `-1` on the wire, and a later failure of
+one is recorded with `"-1"`, #565). A disconnect
 never records a "transaction interrupted" entry: a 1.6 transaction can
 legitimately continue offline.
 
@@ -136,7 +138,9 @@ legitimately continue offline.
 on the rejection: `StopTransactionOnInvalidId` on 1.6 (#181),
 `TxCtrlr/StopTxOnInvalidId` (default true) on 2.x. Before #447 a non-Accepted
 2.x `idTokenInfo` was ignored and recorded nothing; it is checked only while
-the transaction runs (not on an `Ended` event's answer).
+the transaction runs (not on an `Ended` event's answer). With the variable
+false the station keeps the transaction open and suspends the energy delivery
+([Charging sessions](charging-sessions.md)).
 
 The message fields of `transaction_message_rejected` and
 `transaction_message_discarded` are `transactionId`, `action`
@@ -148,8 +152,7 @@ code; it is `timeout` when no answer came within
 `OCPPCommCtrlr.MessageTimeout` (#529, 2.x only), and then there is no
 `errorCode`. On `transaction_message_discarded` they describe the last
 failure. On 1.6 that entry also reports, with no last attempt failing, a
-StartTransaction.req resend dropped because its transaction no longer runs, and
-a resend or replay that already met a lowered `TransactionMessageAttempts` (#527):
+resend or replay that already met a lowered `TransactionMessageAttempts` (#527):
 `attempts` counts the transmissions made, and `errorCode` is absent when it was
 dropped at a replay from the offline queue, since `pending_messages` does not
 store it; the summary then says `error code not recorded`. A CALLERROR answering

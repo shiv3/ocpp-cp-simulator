@@ -260,6 +260,11 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
    *  creation order (#528): a close queues them all (E11.FR.01/07). */
   private readonly _activeTransactionEvents =
     new Set<TransactionEventMessage>();
+  /** #565, E13.FR.04: TransactionEvents built while a resend waits. They
+   *  go out, in order, once no TransactionEvent is left failed and
+   *  unsettled; a close queues them with the others (E11), in creation
+   *  order, since they are tracked in `_activeTransactionEvents` too. */
+  private _heldTransactionEvents: TransactionEventMessage[] = [];
   /** True from `onWebSocketClosed` (and before the first connection) until
    *  a CALL is written again: no close is left to queue the TransactionEvents
    *  a drop strands, so the drop queues them itself (#528). */
@@ -913,8 +918,9 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
    * TransactionEvent.conf carries the CSMS's verdict on the event's idToken
    * in `idTokenInfo`. When it is not Accepted and the transaction is still
    * running, `TxCtrlr/StopTxOnInvalidId` (default true) ends it as
-   * Deauthorized / DeAuthorized; false leaves it running. Either way the
-   * rejection is reported like the 1.6 one.
+   * Deauthorized / DeAuthorized; false keeps it open but stops the energy
+   * delivery (SuspendedEVSE, after `MaxEnergyOnInvalidId` Wh when set;
+   * E05.FR.02/03). Either way the rejection is reported like the 1.6 one.
    */
   private applyTransactionEventResult(
     request: TransactionEventRequestV201,
@@ -946,6 +952,9 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         triggerReason: "Deauthorized",
         stoppedReason: "DeAuthorized",
       });
+    } else {
+      // E05.FR.02/03, C15.FR.06: the transaction stays, the energy stops.
+      this._chargePoint.holdEnergyOnInvalidId(connector);
     }
     this._chargePoint.notifyStartTransactionNotAccepted(
       connector.id,
@@ -967,7 +976,59 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       this.queueTransactionEvent(message);
       return;
     }
+    // #565, E13.FR.04: the next transaction-related message waits for the
+    // resend of an earlier one to settle, or to be discarded.
+    if (this.hasResendPending()) {
+      this._heldTransactionEvents.push(message);
+      this._logger.info(
+        `[v2.0.1] ${describeTransactionEvent(message.payload)} waits behind a TransactionEvent being resent (E13); ${this._heldTransactionEvents.length} held`,
+        LogType.TRANSACTION,
+      );
+      return;
+    }
     this.transmitTransactionEvent(message);
+  }
+
+  /** Whether a TransactionEvent failed (CALLERROR or timeout) and its next
+   *  transmission is still to come: a resend is waiting out its interval, or
+   *  was sent and has neither been answered nor failed. An earlier
+   *  transmission that only waits for a late answer does not hold anything
+   *  back: if the resend was dropped (a network-sim `queue_overflow`, a
+   *  behavior's `beforeSend`), no further attempt is scheduled and the hold
+   *  would never be released. */
+  private hasResendPending(): boolean {
+    for (const message of this._activeTransactionEvents) {
+      if (message.failed === 0 || message.done) continue;
+      if (message.resend !== undefined) return true;
+      for (const id of message.inFlight) {
+        // No pending entry yet: still travelling through the network-sim.
+        const attempt =
+          this._pendingRequests.get(id)?.transactionEvent?.attempt;
+        if (attempt === undefined || attempt > message.failed) return true;
+      }
+    }
+    return false;
+  }
+
+  /** #565: send the held TransactionEvents, in order, unless another resend
+   *  is pending by now. A message a close queued meanwhile is already done. */
+  private releaseHeldTransactionEvents(): void {
+    if (this._heldTransactionEvents.length === 0) return;
+    if (this.hasResendPending()) return;
+    const held = this._heldTransactionEvents;
+    this._heldTransactionEvents = [];
+    this._logger.info(
+      `[v2.0.1] Releasing ${held.length} TransactionEvent(s) held behind a resend`,
+      LogType.TRANSACTION,
+    );
+    for (const message of held) {
+      if (message.done) continue;
+      if (this._awaitingReplay) {
+        this.queueTransactionEvent(message);
+        continue;
+      }
+      this.transmitTransactionEvent(message);
+    }
   }
 
   private newTransactionEventMessage(
@@ -1039,8 +1100,10 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     }
     this.warnResendLost(message.payload, attempt, `dropped: ${reason}`);
     // A timed-out transmission still on the wire keeps the message open:
-    // its late answer can still settle it.
+    // its late answer can still settle it. It no longer holds the later
+    // events back, though: no further attempt is scheduled.
     if (message.inFlight.size === 0) this.forgetTransactionEvent(message);
+    else this.releaseHeldTransactionEvents();
   }
 
   /**
@@ -1054,7 +1117,9 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
    */
   private queueTransactionEvent(message: TransactionEventMessage): void {
     if (message.done) return;
-    this.forgetTransactionEvent(message);
+    // Held events are released after this one is queued: they follow it in
+    // the queue, and none is sent on a socket that is going down.
+    this.forgetTransactionEvent(message, false);
     this._awaitingReplay = true;
     this._pendingQueue.enqueue({
       action: "TransactionEvent",
@@ -1065,6 +1130,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       `[v2.0.1] ${describeTransactionEvent(message.payload)} queued while offline; queue size=${this._pendingQueue.size()}`,
       LogType.TRANSACTION,
     );
+    this.releaseHeldTransactionEvents();
   }
 
   /**
@@ -1106,7 +1172,10 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
 
   /** Settle or discard `message`: cancel its waiting resend and forget all
    *  its transmissions, so a later answer to any of them is ignored. */
-  private forgetTransactionEvent(message: TransactionEventMessage): void {
+  private forgetTransactionEvent(
+    message: TransactionEventMessage,
+    release = true,
+  ): void {
     message.done = true;
     this._activeTransactionEvents.delete(message);
     if (message.resend !== undefined) {
@@ -1118,6 +1187,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       this._pendingRequests.delete(id);
     }
     message.inFlight.clear();
+    if (release) this.releaseHeldTransactionEvents();
   }
 
   /**
@@ -1133,12 +1203,13 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
    * transmission that already timed out changes nothing, and neither does
    * any failure once the message is settled or discarded.
    *
-   * Known limitation: 2.x has no serial queue here (see `send`), so a
-   * waiting resend does not hold back the next transaction message. E13
-   * (Figure 62) describes sequential delivery; this station may deliver
-   * `Ended` before the resent `Started`, leaving the CSMS to reorder by
-   * `seqNo`. Both settings are read here, so a SetVariables applies to the
-   * next failure.
+   * E13.FR.04 continues "with the next transaction-related message" only
+   * after the final attempt, so a TransactionEvent built while a resend is
+   * pending waits for it (#565, `sendTransactionEventCall`): it goes out
+   * when the message is settled or discarded. One already written before the
+   * failure is not recalled (2.x has no serial queue, see `send`); the CSMS
+   * orders those by `seqNo`. Both settings are read here, so a SetVariables
+   * applies to the next failure.
    */
   private onTransactionEventFailure(
     delivery: TransactionEventDelivery,

@@ -277,6 +277,7 @@ export function parseArgs(argv: string[]): CLIOptions {
   let cpoName: string | undefined;
   let txUpdatedMeterValues = false;
   let inboundValidation: InboundValidationMode | undefined;
+  let reservationAuthorizeIdTag = false;
   let traceOutput: string | null = null;
 
   for (let i = 2; i < argv.length; i++) {
@@ -727,6 +728,9 @@ export function parseArgs(argv: string[]): CLIOptions {
         i++;
         break;
       }
+      case "--reservation-authorize-id-tag":
+        reservationAuthorizeIdTag = true;
+        break;
       case "--tx-updated-meter-values":
         txUpdatedMeterValues = true;
         break;
@@ -1328,6 +1332,7 @@ export function parseArgs(argv: string[]): CLIOptions {
     cpoName,
     ...(txUpdatedMeterValues ? { txUpdatedMeterValues } : {}),
     ...(inboundValidation ? { inboundValidation } : {}),
+    ...(reservationAuthorizeIdTag ? { reservationAuthorizeIdTag } : {}),
     tls,
     tlsCaPath,
     tlsCertPath,
@@ -1432,6 +1437,11 @@ Options:
                            payload breaks the request schema. warn (default)
                            logs and traces the violation and runs the handler;
                            enforce answers a CALLERROR; off skips the check.
+  --reservation-authorize-id-tag
+                           OCPP 1.6: authorize the idTag of a ReserveNow
+                           (local rules, then Authorize.req) before accepting
+                           it; a tag that is not Accepted answers Rejected.
+                           Off by default.
   --tx-updated-meter-values
                            OCPP 2.x: send the periodic meter samples taken
                            during a transaction as TransactionEvent(Updated,
@@ -1754,6 +1764,9 @@ export function buildBootstrap(
     ...(options.txUpdatedMeterValues ? { txUpdatedMeterValues: true } : {}),
     ...(options.inboundValidation
       ? { inboundValidation: options.inboundValidation }
+      : {}),
+    ...(options.reservationAuthorizeIdTag
+      ? { reservationAuthorizeIdTag: true }
       : {}),
     ...((options.useBehaviors?.length ?? 0) > 0
       ? { behaviors: [...options.useBehaviors!] }

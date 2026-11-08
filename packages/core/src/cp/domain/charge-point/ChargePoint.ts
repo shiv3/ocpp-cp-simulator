@@ -125,6 +125,11 @@ import {
 import type { ActiveChargingProfile } from "../connector/Connector";
 import { CertificateStore } from "../security/CertificateStore";
 import {
+  checkSecurityProfileChange,
+  isValidAuthorizationKey,
+  isCertificateCurrentlyValid,
+} from "../security/securityProfileChange";
+import {
   MONITORING_BASES,
   MonitoringStore,
 } from "../monitoring/MonitoringStore";
@@ -291,6 +296,12 @@ export interface ChargePointTransportOptions {
   /** Resolved idTags this charge point draws from (#299). */
   readonly idTags?: readonly string[];
   readonly idTagDistribution?: IdTagDistribution;
+  /**
+   * OCPP 1.6 ReserveNow: authorize the reservation's idTag (local rules, then
+   * Authorize.req) before accepting; a tag that is not `Accepted` answers
+   * `Rejected` (#595). Default `false`.
+   */
+  readonly reservationAuthorizeIdTag?: boolean;
 }
 
 export class ChargePoint {
@@ -429,6 +440,17 @@ export class ChargePoint {
     this._inboundValidation = mode;
   }
 
+  private _reservationAuthorizeIdTag: boolean;
+
+  /** See {@link ChargePointTransportOptions.reservationAuthorizeIdTag}. */
+  get reservationAuthorizeIdTag(): boolean {
+    return this._reservationAuthorizeIdTag;
+  }
+
+  setReservationAuthorizeIdTag(enabled: boolean): void {
+    this._reservationAuthorizeIdTag = enabled;
+  }
+
   constructor(
     private readonly _id: string,
     private readonly _bootNotification: BootNotification,
@@ -464,6 +486,8 @@ export class ChargePoint {
     this._transportUrl = transportOptions.centralSystemUrl ?? wsUrl;
     this._inboundValidation =
       transportOptions.inboundValidation ?? DEFAULT_INBOUND_VALIDATION;
+    this._reservationAuthorizeIdTag =
+      transportOptions.reservationAuthorizeIdTag ?? false;
     this._logger.setCpId(this._id);
     this._logRepository = new LogRepository(this._database);
     // #456: installed certificates survive a restart when state persists.
@@ -537,7 +561,11 @@ export class ChargePoint {
             LogType.OCPP,
           );
           this.updateConnectorStatus(connectorId, OCPPStatus.SuspendedEVSE);
-        } else if (!paused && connector.status === OCPPStatus.SuspendedEVSE) {
+        } else if (
+          !paused &&
+          connector.status === OCPPStatus.SuspendedEVSE &&
+          !connector.energyHeld
+        ) {
           this._logger.info(
             `Connector ${connectorId} schedule period limit=${watts}W, resuming → Charging`,
             LogType.OCPP,
@@ -557,6 +585,10 @@ export class ChargePoint {
       connector.events.on("transactionRestored", () =>
         this.startPeriodicSampling(connector),
       );
+      // The MaxEnergyOnInvalidId allowance ran out (E05.FR.03 → .02).
+      connector.events.on("invalidIdEnergyExhausted", () => {
+        this.reportEnergyHeld(connector);
+      });
       this._connectors.set(connectorId, connector);
     }
 
@@ -693,6 +725,9 @@ export class ChargePoint {
       this._configuration.applyChange("CpoName", cpoName);
     }
     this.wireConfigurationListeners();
+    if (!isOcpp2Version(this._ocppVersion) && this._webSocket) {
+      this.wireSecurityConfiguration();
+    }
     // §5.2: a CP-level Unavailable set previously must survive a reboot.
     // We don't actually transition status here (no WebSocket yet); the
     // saved flag is reapplied when ChangeAvailability runs or when the
@@ -1081,6 +1116,93 @@ export class ChargePoint {
       : { text };
   }
 
+  /**
+   * #724 (1.6 security whitepaper A01, A05): the transport sends the
+   * stored `AuthorizationKey` and `SecurityProfile` from the next attempt
+   * on, and a `SecurityProfile` change is checked against the A05
+   * prerequisites. Installed after the constructor applied its own initial
+   * values, which are not ChangeConfiguration requests.
+   */
+  private wireSecurityConfiguration(): void {
+    // §7.2: with profile 1 or 2 the key is the Basic Auth password; one the
+    // transport cannot derive it from (an empty or non-hex value) would stop
+    // every later connection attempt, so it is refused and the old key kept.
+    this._configuration.setChangeGuard("AuthorizationKey", (_current, next) => {
+      const profile = this._configuration.getInteger("SecurityProfile") ?? 0;
+      if (
+        (profile !== 1 && profile !== 2) ||
+        isValidAuthorizationKey(`${next}`)
+      ) {
+        return true;
+      }
+      this._logger.warn(
+        `ChangeConfiguration AuthorizationKey refused: security profile ${profile} needs a key of 16-20 bytes (32-40 hex digits), whitepaper §7.2`,
+        LogType.CONFIGURATION,
+      );
+      return false;
+    });
+    this._configuration.setChangeGuard("SecurityProfile", (current, next) => {
+      const now = this.nowDate();
+      const verdict = checkSecurityProfileChange({
+        current: typeof current === "number" ? current : 0,
+        next: typeof next === "number" ? next : 0,
+        authorizationKey:
+          this._configuration.getString("AuthorizationKey") ?? "",
+        // Only what the TLS connection validates the CSMS with: roots that
+        // InstallCertificate stored do not join its trust, so counting them
+        // would accept an upgrade that cannot connect.
+        hasCentralSystemRoot:
+          this._webSocket?.hasConfiguredTrustAnchors() ?? false,
+        hasChargePointCertificate:
+          this._certificateStore
+            .listSignedChains("ChargingStationCertificate")
+            .some((chain) => isCertificateCurrentlyValid(chain.pems[0], now)) ||
+          (this._webSocket?.hasClientCertificate() ?? false),
+      });
+      if (!verdict.allowed) {
+        this._logger.warn(
+          `ChangeConfiguration SecurityProfile=${next} refused (${verdict.requirement}): ${verdict.reason}`,
+          LogType.CONFIGURATION,
+        );
+      }
+      return verdict.allowed;
+    });
+    this._configuration.onChange((key, value) => {
+      if (key === "AuthorizationKey" && typeof value === "string") {
+        this._webSocket?.setSecurityCredentials({ authorizationKey: value });
+      } else if (key === "SecurityProfile" && typeof value === "number") {
+        this._webSocket?.setSecurityCredentials({
+          securityProfile: value as OcppSecurityProfile,
+        });
+      }
+    });
+  }
+
+  /**
+   * #724 A05.FR.06-08: after the CALLRESULT of an accepted `SecurityProfile`
+   * upgrade the station disconnects and reconnects with the new profile.
+   * When that connection does not open, the previous profile is put back
+   * and used for the next attempt (A05.FR.08).
+   */
+  switchSecurityProfile(previousProfile: number): void {
+    this._webSocket?.armSecurityProfileFallback(() => {
+      this._logger.warn(
+        `Could not connect with security profile ${this._configuration.getInteger("SecurityProfile")}; falling back to profile ${previousProfile} (A05.FR.08)`,
+        LogType.CONFIGURATION,
+      );
+      this._configuration.applyChange(
+        "SecurityProfile",
+        String(previousProfile),
+        { bypassGuard: true },
+      );
+    });
+    this._logger.info(
+      "SecurityProfile changed: reconnecting with the new profile (A05.FR.06/07)",
+      LogType.CONFIGURATION,
+    );
+    this.reset();
+  }
+
   /** Hook up subsystems that react to live Configuration changes. */
   private wireConfigurationListeners(): void {
     this._configuration.onChange((key, value) => {
@@ -1406,7 +1528,8 @@ export class ChargePoint {
     return this._webSocket.isConnected();
   }
 
-  /** Feed a CSMS verdict on `idToken` to the Authorization Cache (#452):
+  /** Feed a CSMS verdict on `idToken` to the Authorization Cache (#452) and
+   *  report a conflict with the Local Authorization List (#744):
    *  called by the Authorize / StartTransaction / StopTransaction result
    *  handlers. A no-op while the cache is disabled or for an identifier of
    *  the Local Authorization List (1.6 §3.5.3). */
@@ -1419,6 +1542,21 @@ export class ChargePoint {
         `Authorization cache updated: ${idToken} → ${result.status}`,
         LogType.TRANSACTION,
       );
+    }
+    // 1.6 §3.5.2: tell the CSMS when its verdict contradicts the Local
+    // Authorization List. 2.x has no such notification (its StatusNotification
+    // carries no errorCode).
+    if (
+      !isOcpp2Version(this._ocppVersion) &&
+      this._authorization.conflictsWithLocalList(idToken, result.status)
+    ) {
+      this._logger.warn(
+        `CSMS verdict ${result.status} for ${idToken} conflicts with the Local Authorization List; sending LocalListConflict`,
+        LogType.OCPP,
+      );
+      this.sendStatusNotificationRaw(0, this._status, {
+        errorCode: "LocalListConflict",
+      });
     }
   }
 
@@ -1628,6 +1766,35 @@ export class ChargePoint {
   /** #396: the answer to an incoming CSMS CALL is decided. */
   notifyIncomingCallCompleted(completion: IncomingCallCompletion): void {
     this._events.emit("incomingCallCompleted", completion);
+  }
+
+  /**
+   * `StopTransactionOnInvalidId=false` and the id was not accepted: keep the
+   * transaction but stop the energy delivery (2.0.1
+   * E05.FR.02/03, C15.FR.06; 2.x only, 1.6 errata 3.17 is #736). With `MaxEnergyOnInvalidId` > 0 that much energy
+   * is delivered first; the connector reports SuspendedEVSE either way once
+   * the delivery has stopped.
+   */
+  holdEnergyOnInvalidId(connector: Connector): void {
+    const allowance = this._configuration.maxEnergyOnInvalidId();
+    if (connector.holdEnergyForInvalidId(allowance)) {
+      this.reportEnergyHeld(connector);
+    }
+  }
+
+  private reportEnergyHeld(connector: Connector): void {
+    if (!connector.hasRunningTransaction) return;
+    if (
+      connector.status === OCPPStatus.Charging ||
+      connector.status === OCPPStatus.Preparing ||
+      connector.status === OCPPStatus.SuspendedEV
+    ) {
+      this._logger.info(
+        `Connector ${connector.id} energy delivery stopped after a non-Accepted id → SuspendedEVSE`,
+        LogType.TRANSACTION,
+      );
+      this.updateConnectorStatus(connector.id, OCPPStatus.SuspendedEVSE);
+    }
   }
 
   /** Called by StartTransactionResultHandler when StartTransaction.conf
@@ -2236,14 +2403,26 @@ export class ChargePoint {
     this._outbox.sendSignedFirmwareStatusNotification(status, requestId);
   }
 
+  /** #734: the device has (re)started and has not reported it yet. */
+  private _startupEventPending = true;
+
   /** Boot-notification gate accessors used by BootNotificationResultHandler. */
   markBootAccepted(): void {
     this._outbox.setBootStatus({ status: "Accepted" });
-    if (
-      this._ocppVersion === "OCPP-1.6J" &&
-      (this._configuration.getInteger("SecurityProfile") ?? 0) >= 1
-    ) {
-      void this._outbox.sendSecurityEventNotification("StartupOfTheDevice");
+    if (this._ocppVersion === "OCPP-1.6J") {
+      // #734 A04.FR.02: events raised while the station could not send them
+      // (ResetOrReboot among them) go out first, with their own timestamps.
+      this._outbox.flushQueuedSecurityEvents();
+      // StartupOfTheDevice reports a start of the device: once per process
+      // start and once per reset, not per reconnect or triggered boot. It is
+      // consumed by the first Accepted boot either way, so a later change of
+      // the security profile does not report a startup that already passed.
+      if (this._startupEventPending) {
+        this._startupEventPending = false;
+        if ((this._configuration.getInteger("SecurityProfile") ?? 0) >= 1) {
+          void this._outbox.sendSecurityEventNotification("StartupOfTheDevice");
+        }
+      }
     }
     // §4.7/§4.8/§4.10 + errata 3.18: flush queued transaction-related
     // messages now that the boot gate is open. Run via queueMicrotask so
@@ -2251,6 +2430,11 @@ export class ChargePoint {
     queueMicrotask(() => this._outbox.flushPendingQueue());
     // After the post-boot status fan-out, and with the gate already open.
     queueMicrotask(() => this.engine.bootAccepted());
+  }
+
+  /** §4.2: run `fn` as the answer to an accepted TriggerMessage. */
+  runTriggered<T>(fn: () => T): T {
+    return this._outbox.runTriggered(fn);
   }
 
   markBootPending(): void {
@@ -2555,6 +2739,14 @@ export class ChargePoint {
       }
     }
     this._logger.info(`Reset chargePoint: ${this._id}`, LogType.OCPP);
+    if (
+      this._ocppVersion === "OCPP-1.6J" &&
+      (this._configuration.getInteger("SecurityProfile") ?? 0) >= 1
+    ) {
+      // #734: reported once the station is back with an Accepted boot.
+      this._outbox.queueSecurityEventNotification("ResetOrReboot", reason);
+    }
+    this._startupEventPending = true;
     if (type === "Hard") {
       this.reset();
     } else {
@@ -2998,6 +3190,17 @@ export class ChargePoint {
     if (!connector) {
       this._logger.error(`Connector ${connectorId} not found`, LogType.SYSTEM);
       return;
+    }
+
+    // Energy held after a non-Accepted id (E05.FR.02): whichever path asks
+    // for Charging, the register is stopped, so report SuspendedEVSE.
+    if (
+      status === OCPPStatus.Charging &&
+      connector.energyHeld &&
+      connector.hasRunningTransaction
+    ) {
+      if (connector.status === OCPPStatus.SuspendedEVSE) return;
+      status = OCPPStatus.SuspendedEVSE;
     }
 
     this._engine.dispatch({

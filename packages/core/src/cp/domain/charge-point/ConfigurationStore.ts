@@ -25,6 +25,12 @@ import type { Database } from "../persistence/Database";
  * Status returned from a ChangeConfiguration.req attempt. Mirrors
  * OCPP 1.6 §5.3 / §7.22 ConfigurationStatus.
  */
+/** A check of a new value of one key: `false` refuses it. */
+export type ChangeGuard = (
+  current: ConfigurationValue["value"],
+  next: ConfigurationValue["value"],
+) => boolean;
+
 export type ConfigurationChangeStatus =
   "Accepted" | "Rejected" | "RebootRequired" | "NotSupported";
 
@@ -35,7 +41,10 @@ export type ConfigurationChangeStatus =
  */
 const REBOOT_REQUIRED_KEYS = new Set<string>([
   "ChargingScheduleMaxPeriods", // pre-allocated array sizes etc.
-  "SecurityProfile", // transport profile changes require reconnect/reboot.
+  // A SecurityProfile change needs a reconnect; a charge point with a
+  // transport that applies it installs a guard for it (#724) and answers
+  // `Accepted` instead. One without (OCPP-S) keeps answering RebootRequired.
+  "SecurityProfile",
   // (Extend as additional reboot-sensitive keys are wired in.)
 ]);
 
@@ -70,6 +79,8 @@ export class ConfigurationStore {
   private readonly listeners = new Set<ConfigurationChangeListener>();
   /** Keys published by `defineRuntimeKey` / `defineRuntimeIntegerKey`. */
   private readonly runtimeKeys = new Set<string>();
+  /** Per-key checks run by `applyChange` before a value is stored. */
+  private readonly changeGuards = new Map<string, ChangeGuard>();
 
   constructor(
     private readonly chargePointId: string,
@@ -225,6 +236,13 @@ export class ConfigurationStore {
    *  carries a non-Accepted idTagInfo.status (issue #181). */
   stopTransactionOnInvalidId(): boolean {
     return this.getBoolean("StopTransactionOnInvalidId") ?? true;
+  }
+
+  /** Canonical key `MaxEnergyOnInvalidId` (2.x `TxCtrlr.MaxEnergyOnInvalidId`);
+   *  default `0`. Wh still delivered after a non-Accepted id when
+   *  `StopTransactionOnInvalidId` is false (E05.FR.03; 2.x only, 1.6 errata 3.17 is #736). */
+  maxEnergyOnInvalidId(): number {
+    return this.getInteger("MaxEnergyOnInvalidId") ?? 0;
   }
 
   /** Canonical key `StopTransactionOnEVSideDisconnect` (2.x
@@ -416,12 +434,28 @@ export class ConfigurationStore {
   }
 
   /**
+   * Installs a check of a ChangeConfiguration of `name` (#724: the A05 check
+   * of `SecurityProfile`, the §7.2 format of `AuthorizationKey`):
+   * `applyChange` answers `Rejected` and keeps the value when the guard
+   * refuses it. The charge point installs the guards once its own initial
+   * values are applied; `applyChange(..., { bypassGuard: true })` skips them.
+   */
+  setChangeGuard(name: string, guard: ChangeGuard | null): void {
+    if (guard) this.changeGuards.set(name, guard);
+    else this.changeGuards.delete(name);
+  }
+
+  /**
    * Apply a ChangeConfiguration.req: parses the string value into the key's
    * declared type, persists, fires listeners, and returns the spec-defined
    * status. Unknown keys → `NotSupported`. Readonly keys → `Rejected`.
    * Parse failures → `Rejected`.
    */
-  applyChange(name: string, rawValue: string): ConfigurationChangeStatus {
+  applyChange(
+    name: string,
+    rawValue: string,
+    options: { bypassGuard?: boolean } = {},
+  ): ConfigurationChangeStatus {
     const entry = this.values.get(name);
     if (!entry) return "NotSupported";
     if (entry.key.readonly) return "Rejected";
@@ -429,12 +463,19 @@ export class ConfigurationStore {
     const parsed = parseValue(entry.key, rawValue);
     if (parsed === PARSE_FAILED) return "Rejected";
     if (!isConfigurationValueValid(entry.key, parsed)) return "Rejected";
+    const guard = this.changeGuards.get(name);
+    if (guard && options.bypassGuard !== true && !guard(entry.value, parsed)) {
+      return "Rejected";
+    }
 
     const next = { key: entry.key, value: parsed } as ConfigurationValue;
     this.values.set(name, next);
     this.persistOverride(name, parsed);
     this.emit(name, parsed);
 
+    if (name === "SecurityProfile" && this.changeGuards.has(name)) {
+      return "Accepted";
+    }
     return REBOOT_REQUIRED_KEYS.has(name) ? "RebootRequired" : "Accepted";
   }
 

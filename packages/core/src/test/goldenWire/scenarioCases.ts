@@ -3,9 +3,10 @@
 // template's README describes is played by the fake CSMS.
 import { ScenarioExecutor } from "../../cp/application/scenario/ScenarioExecutor";
 import { createScenarioExecutorCallbacks } from "../../cp/application/scenario/ScenarioRuntime";
-import type {
-  ScenarioDefinition,
-  ScenarioEvents,
+import {
+  ScenarioNodeType,
+  type ScenarioDefinition,
+  type ScenarioEvents,
 } from "../../cp/application/scenario/ScenarioTypes";
 import { EventEmitter } from "../../cp/shared/EventEmitter";
 import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
@@ -376,8 +377,113 @@ export const PINNED_TEMPLATE_IDS: readonly string[] = [
   "status-triggered-actions",
 ];
 
-export const scenarioCases: GoldenCase[] = scenarioTemplates.map((t) => ({
-  name: `16-scenario-${t.id}`,
-  version: "1.6",
-  run: (rig) => runTemplate(rig, t.id),
-}));
+/**
+ * #565, §3.7: a scenario that starts a transaction and stops it 0.3 s later,
+ * while the StartTransaction.req waits out its 1 s retry interval after a
+ * CALLERROR. The StopTransaction.req follows the resend and carries the id
+ * its conf assigns.
+ */
+function stopDuringStartRetry(): ScenarioDefinition {
+  const at = (y: number) => ({ x: 0, y });
+  return {
+    id: "golden-stop-during-start-retry",
+    name: "golden-stop-during-start-retry",
+    targetType: "connector",
+    targetId: 1,
+    nodes: [
+      {
+        id: "start",
+        type: ScenarioNodeType.START,
+        position: at(0),
+        data: { label: "Start" },
+      },
+      {
+        id: "tx-start",
+        type: ScenarioNodeType.TRANSACTION,
+        position: at(100),
+        data: { label: "Transaction Start", action: "start", tagId: "SC-565" },
+      },
+      {
+        id: "pause",
+        type: ScenarioNodeType.DELAY,
+        position: at(200),
+        data: { label: "Delay", delaySeconds: 0.3 },
+      },
+      {
+        id: "tx-stop",
+        type: ScenarioNodeType.TRANSACTION,
+        position: at(300),
+        data: { label: "Transaction Stop", action: "stop" },
+      },
+      {
+        id: "end",
+        type: ScenarioNodeType.END,
+        position: at(400),
+        data: { label: "End" },
+      },
+    ],
+    edges: [
+      { id: "e1", source: "start", target: "tx-start" },
+      { id: "e2", source: "tx-start", target: "pause" },
+      { id: "e3", source: "pause", target: "tx-stop" },
+      { id: "e4", source: "tx-stop", target: "end" },
+    ],
+    createdAt: "2026-11-08T00:00:00.000Z",
+    updatedAt: "2026-11-08T00:00:00.000Z",
+    defaultExecutionMode: "oneshot",
+    enabled: true,
+    trigger: { type: "manual" },
+  };
+}
+
+async function runStopDuringStartRetry(rig: Rig): Promise<void> {
+  rig.cp.configuration.applyChange("TransactionMessageAttempts", "3");
+  rig.cp.configuration.applyChange("TransactionMessageRetryInterval", "1");
+  rig.csms.responders.StartTransaction = (_p, c) =>
+    c.nth < 2
+      ? { error: { code: "InternalError", description: "x" } }
+      : { transactionId: 7, idTagInfo: { status: "Accepted" } };
+  rig.plugIn();
+  await rig.csms.settle();
+  const connector = rig.cp.getConnector(1)!;
+  const events = new EventEmitter<ScenarioEvents>();
+  let finished: (error?: unknown) => void = () => undefined;
+  const done = new Promise<void>((resolve, reject) => {
+    finished = (error) => (error ? reject(error) : resolve());
+  });
+  events.on("execution.completed", () => finished());
+  events.on("execution.error", (info) =>
+    finished(new Error(String(JSON.stringify(info)))),
+  );
+  const callbacks = createScenarioExecutorCallbacks({
+    chargePoint: rig.cp,
+    connector,
+  });
+  const executor = new ScenarioExecutor(
+    stopDuringStartRetry(),
+    callbacks,
+    events,
+  );
+  const running = executor.start();
+  try {
+    await done;
+    await new Promise((r) => setTimeout(r, 2500));
+  } finally {
+    executor.stop();
+    await running.catch(() => undefined);
+  }
+  await rig.csms.settle(400);
+}
+
+export const scenarioCases: GoldenCase[] = [
+  ...scenarioTemplates.map((t): GoldenCase => ({
+    name: `16-scenario-${t.id}`,
+    version: "1.6",
+    run: (rig) => runTemplate(rig, t.id),
+  })),
+  {
+    name: "16-scenario-stop-during-start-retry",
+    version: "1.6",
+    run: runStopDuringStartRetry,
+  },
+];

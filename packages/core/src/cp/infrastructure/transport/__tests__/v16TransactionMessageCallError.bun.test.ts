@@ -67,9 +67,9 @@ function callError(csms: MockCsms, frame: OcppFrame, code = "InternalError") {
 }
 
 /** A booted 1.6 station that resends at once, `skip` left unanswered. */
-async function station(id: string, skip: readonly string[]) {
+async function station(id: string, skip: readonly string[], connectors = 1) {
   const csms = startMockCsms();
-  const cp = await bootedChargePoint(csms, id, "OCPP-1.6J");
+  const cp = await bootedChargePoint(csms, id, "OCPP-1.6J", { connectors });
   cp.configuration.applyChange("AuthorizeBeforeLocalStart", "false");
   cp.configuration.applyChange("TransactionMessageRetryInterval", "0");
   const stopAnswering = answerEverythingElse(csms, skip);
@@ -161,7 +161,7 @@ describe("OCPP 1.6 transaction message CALLERROR (#527, §3.7.1)", () => {
     }
   });
 
-  it("a transaction whose StartTransaction was discarded stops with the placeholder id", async () => {
+  it("a transaction whose StartTransaction was discarded stops with transactionId -1 (1.6 errata 3.18)", async () => {
     const s = await station("CP16-527-STOP0", ["StartTransaction"]);
     try {
       s.cp.configuration.applyChange("TransactionMessageAttempts", "1");
@@ -172,7 +172,7 @@ describe("OCPP 1.6 transaction message CALLERROR (#527, §3.7.1)", () => {
       s.cp.stopTransaction(1, "Local");
       const stop = await nthCall(s.csms, "StopTransaction", 1);
 
-      expect((stop[3] as { transactionId: number }).transactionId).toBe(0);
+      expect((stop[3] as { transactionId: number }).transactionId).toBe(-1);
       expect(s.stops).toHaveLength(1);
     } finally {
       await s.stop();
@@ -239,40 +239,176 @@ describe("OCPP 1.6 transaction message CALLERROR (#527, §3.7.1)", () => {
     [
       "UnlockConnector",
       (_cp: ChargePoint, csms: MockCsms) =>
-        csms.send([2, "unlock-527", "UnlockConnector", { connectorId: 1 }]),
+        csms.send([2, "unlock-565", "UnlockConnector", { connectorId: 1 }]),
     ],
   ] as const) {
-    it(`${name} while the resend waits discards it: no StartTransaction.req after the StopTransaction.req`, async () => {
-      const s = await station(`CP16-527-STOP-${name}`, ["StartTransaction"]);
+    it(`${name} while the resend waits: the StopTransaction.req waits for it and carries the id its conf assigns (#565, §3.7)`, async () => {
+      const s = await station(`CP16-565-STOP-${name}`, ["StartTransaction"]);
       try {
         s.cp.configuration.applyChange("TransactionMessageRetryInterval", "1");
-        void s.cp.startTransaction("TAG-527", 1);
+        void s.cp.startTransaction("TAG-565", 1);
         callError(s.csms, await nthCall(s.csms, "StartTransaction", 1));
         await until(() => s.rejected.length === 1, "the CALLERROR");
 
         // The resend waits out its 1 s interval; the transaction stops.
         stop(s.cp, s.csms);
+        await until(() => s.stops.length === 1, "the stop");
+        expect(callsOf(s.csms, "StopTransaction")).toHaveLength(0);
+
+        const resend = await nthCall(s.csms, "StartTransaction", 2);
+        // Written and unanswered: the stop still waits.
+        await new Promise((r) => setTimeout(r, 100));
+        expect(callsOf(s.csms, "StopTransaction")).toHaveLength(0);
+        s.csms.replyCallResult(resend[1] as string, {
+          transactionId: 565,
+          idTagInfo: { status: "Accepted" },
+        });
         const stopReq = await nthCall(s.csms, "StopTransaction", 1);
-        expect((stopReq[3] as { transactionId: number }).transactionId).toBe(0);
-        await until(() => s.discarded.length === 1, "the discard");
         await drainWire(s.cp, s.csms);
 
-        expect(callsOf(s.csms, "StartTransaction")).toHaveLength(1);
-        expect(s.discarded).toEqual([
-          {
-            connectorId: 1,
-            transactionId: "0",
-            action: "StartTransaction",
-            reason: "callError",
-            errorCode: "InternalError",
-            attempts: 1,
-          },
-        ]);
+        expect((stopReq[3] as { transactionId: number }).transactionId).toBe(
+          565,
+        );
+        expect(callsOf(s.csms, "StartTransaction")).toHaveLength(2);
+        expect(s.csms.received.indexOf(resend)).toBeLessThan(
+          s.csms.received.indexOf(stopReq),
+        );
+        expect(s.discarded).toEqual([]);
       } finally {
         await s.stop();
       }
     });
   }
+
+  it("a stop waiting for the resend goes out with -1 once the resend is discarded (errata 3.18, §3.7.1)", async () => {
+    const s = await station("CP16-565-DISCARD", ["StartTransaction"]);
+    try {
+      s.cp.configuration.applyChange("TransactionMessageAttempts", "2");
+      s.cp.configuration.applyChange("TransactionMessageRetryInterval", "1");
+      void s.cp.startTransaction("TAG-565", 1);
+      callError(s.csms, await nthCall(s.csms, "StartTransaction", 1));
+      await until(() => s.rejected.length === 1, "the CALLERROR");
+      s.cp.stopTransaction(1, "Local");
+
+      callError(s.csms, await nthCall(s.csms, "StartTransaction", 2));
+      const stopReq = await nthCall(s.csms, "StopTransaction", 1);
+      await drainWire(s.cp, s.csms);
+
+      expect((stopReq[3] as { transactionId: number }).transactionId).toBe(-1);
+      expect(callsOf(s.csms, "StartTransaction")).toHaveLength(2);
+      expect(s.discarded).toMatchObject([
+        { action: "StartTransaction", attempts: 2 },
+      ]);
+      expect(s.csms.received.indexOf(stopReq)).toBeGreaterThan(
+        s.csms.received.indexOf(callsOf(s.csms, "StartTransaction")[1]!),
+      );
+    } finally {
+      await s.stop();
+    }
+  });
+
+  it("a RemoteStopTransaction.req for another connector's transaction waits behind the resend too", async () => {
+    const s = await station("CP16-565-REMOTE", ["StartTransaction"], 2);
+    try {
+      s.cp.configuration.applyChange("TransactionMessageRetryInterval", "1");
+      // Connector 2 runs a transaction the CSMS knows (id 77) ...
+      void s.cp.startTransaction("TAG-B", 2);
+      const startB = await nthCall(s.csms, "StartTransaction", 1);
+      s.csms.replyCallResult(startB[1] as string, {
+        transactionId: 77,
+        idTagInfo: { status: "Accepted" },
+      });
+      await until(() => s.cp.getConnector(2)?.transaction?.id === 77, "B's id");
+      // ... while connector 1's StartTransaction.req is being resent.
+      void s.cp.startTransaction("TAG-A", 1);
+      callError(s.csms, await nthCall(s.csms, "StartTransaction", 2));
+      await until(() => s.rejected.length === 1, "the CALLERROR");
+
+      s.csms.send([
+        2,
+        "remote-565",
+        "RemoteStopTransaction",
+        { transactionId: 77 },
+      ]);
+      const answer = await s.csms.waitForFrame(answerTo("remote-565"));
+      expect(answer[2]).toEqual({ status: "Accepted" });
+      await until(() => s.stops.length === 1, "the stop");
+      expect(callsOf(s.csms, "StopTransaction")).toHaveLength(0);
+
+      const resend = await nthCall(s.csms, "StartTransaction", 3);
+      s.csms.replyCallResult(resend[1] as string, {
+        transactionId: 78,
+        idTagInfo: { status: "Accepted" },
+      });
+      const stopReq = await nthCall(s.csms, "StopTransaction", 1);
+
+      expect((stopReq[3] as { transactionId: number }).transactionId).toBe(77);
+      expect(s.csms.received.indexOf(resend)).toBeLessThan(
+        s.csms.received.indexOf(stopReq),
+      );
+    } finally {
+      await s.stop();
+    }
+  });
+
+  it("a MeterValues.req of the transaction waits behind the resend too and takes its id", async () => {
+    const s = await station("CP16-565-METER", ["StartTransaction"]);
+    try {
+      s.cp.configuration.applyChange("TransactionMessageRetryInterval", "1");
+      void s.cp.startTransaction("TAG-565", 1);
+      callError(s.csms, await nthCall(s.csms, "StartTransaction", 1));
+      await until(() => s.rejected.length === 1, "the CALLERROR");
+      s.cp.sendMeterValue(1);
+      s.cp.stopTransaction(1, "Local");
+      await new Promise((r) => setTimeout(r, 200));
+      expect(callsOf(s.csms, "MeterValues")).toHaveLength(0);
+
+      const resend = await nthCall(s.csms, "StartTransaction", 2);
+      s.csms.replyCallResult(resend[1] as string, {
+        transactionId: 566,
+        idTagInfo: { status: "Accepted" },
+      });
+      await nthCall(s.csms, "StopTransaction", 1);
+      await drainWire(s.cp, s.csms);
+
+      const order = s.csms.received
+        .filter((f) => f[0] === 2)
+        .map((f) => f[2] as string)
+        .filter((a) =>
+          ["StartTransaction", "MeterValues", "StopTransaction"].includes(a),
+        );
+      expect(order).toEqual([
+        "StartTransaction",
+        "StartTransaction",
+        "MeterValues",
+        "StopTransaction",
+      ]);
+      expect(
+        (callsOf(s.csms, "MeterValues")[0]![3] as { transactionId: number })
+          .transactionId,
+      ).toBe(566);
+    } finally {
+      await s.stop();
+    }
+  });
+
+  it("a StopTransaction.req queued behind a StartTransaction.req in flight takes the id of its conf (#565)", async () => {
+    const s = await station("CP16-565-INFLIGHT", ["StartTransaction"]);
+    try {
+      void s.cp.startTransaction("TAG-565", 1);
+      const start = await nthCall(s.csms, "StartTransaction", 1);
+      s.cp.stopTransaction(1, "Local");
+      s.csms.replyCallResult(start[1] as string, {
+        transactionId: 567,
+        idTagInfo: { status: "Accepted" },
+      });
+      const stopReq = await nthCall(s.csms, "StopTransaction", 1);
+
+      expect((stopReq[3] as { transactionId: number }).transactionId).toBe(567);
+    } finally {
+      await s.stop();
+    }
+  });
 
   it("a stop while the resend is on the wire, then an accepted conf: the connector stays as the stop left it", async () => {
     const s = await station("CP16-527-LATE-STOP", ["StartTransaction"]);
@@ -333,12 +469,13 @@ describe("OCPP 1.6 transaction message CALLERROR (#527, §3.7.1)", () => {
 
       expect(s.cp.getConnector(1)?.transaction).toBe(b);
       expect(b.stopTime).toBeNull();
-      // A's Stop only: B was never stopped as DeAuthorized.
+      // A's Stop only, with the id A's conf assigned (it waited behind the
+      // resend, #565): B was never stopped as DeAuthorized.
       expect(
         callsOf(s.csms, "StopTransaction").map(
           (f) => (f[3] as { transactionId: number }).transactionId,
         ),
-      ).toEqual([0]);
+      ).toEqual([1001]);
       expect(s.cp.getConnector(1)?.status).toBe(OCPPStatus.Charging);
     } finally {
       await s.stop();
@@ -482,7 +619,7 @@ describe("OCPP 1.6 stop paths around a StartTransaction CALLERROR (#491, #527)",
   }
 
   for (const type of ["Soft", "Hard"] as const) {
-    it(`a ${type} Reset while a resend waits discards it: no StartTransaction.req after the reset`, async () => {
+    it(`a ${type} Reset while a resend waits: the resend and the stop go to the offline queue and are replayed in order after the boot (#565, §3.7)`, async () => {
       const s = await station(`CP16-527-RESET-${type}`, ["StartTransaction"]);
       try {
         s.cp.configuration.applyChange("TransactionMessageRetryInterval", "1");
@@ -491,27 +628,27 @@ describe("OCPP 1.6 stop paths around a StartTransaction CALLERROR (#491, #527)",
 
         s.csms.send([2, `reset-527-${type}`, "Reset", { type }]);
         await rebooted(s);
-        // Past the 1 s retry interval.
-        await new Promise((r) => setTimeout(r, 1_500));
-        // Before the sentinel: an unanswered resend would hold it back.
-        expect(callsOf(s.csms, "StartTransaction")).toHaveLength(1);
+        // Nothing went out before the reboot: the stop waited behind the resend.
+        const replay = await nthCall(s.csms, "StartTransaction", 2);
+        expect(callsOf(s.csms, "StopTransaction")).toHaveLength(0);
+        s.csms.replyCallResult(replay[1] as string, {
+          transactionId: 9,
+          idTagInfo: { status: "Accepted" },
+        });
+        const stops = await s.csms.waitForFrame(callOf("StopTransaction"));
         await drainWire(s.cp, s.csms);
-        expect(s.discarded).toMatchObject([
-          { action: "StartTransaction", attempts: 1 },
-        ]);
 
-        const stops = callsOf(s.csms, "StopTransaction");
-        expect(stops).toHaveLength(1);
-        expect((stops[0]![3] as { transactionId: number }).transactionId).toBe(
-          0,
-        );
+        expect(callsOf(s.csms, "StartTransaction")).toHaveLength(2);
+        expect(s.discarded).toEqual([]);
+        expect(callsOf(s.csms, "StopTransaction")).toHaveLength(1);
+        expect((stops[3] as { transactionId: number }).transactionId).toBe(9);
       } finally {
         await s.stop();
       }
     });
   }
 
-  it("a CALLERROR for a StartTransaction.req in flight across a Reset discards it: no StartTransaction.req after the StopTransaction.req", async () => {
+  it("a CALLERROR for a StartTransaction.req in flight across a Reset: it is resent, and the StopTransaction.req follows it with the id", async () => {
     const s = await station("CP16-527-RESET-INFLIGHT", ["StartTransaction"]);
     try {
       void s.cp.startTransaction("TAG-527", 1);
@@ -522,26 +659,23 @@ describe("OCPP 1.6 stop paths around a StartTransaction CALLERROR (#491, #527)",
       // queue); the CALLERROR arrives once the Reset stopped the transaction.
       await until(() => s.stops.length === 1, "the reset stop");
       callError(s.csms, start);
-      await nthCall(s.csms, "StopTransaction", 1);
       await rebooted(s);
-      // After the reboot: a resend salvaged at the reset's disconnect would
-      // be replayed from the offline queue by now.
+      // The resend and the stop were salvaged at the reset's disconnect and
+      // are replayed after the boot, the resend first.
+      const replay = await nthCall(s.csms, "StartTransaction", 2);
+      expect(callsOf(s.csms, "StopTransaction")).toHaveLength(0);
+      s.csms.replyCallResult(replay[1] as string, {
+        transactionId: 12,
+        idTagInfo: { status: "Accepted" },
+      });
+      const stopReq = await nthCall(s.csms, "StopTransaction", 1);
       await drainWire(s.cp, s.csms);
 
-      expect(callsOf(s.csms, "StartTransaction")).toHaveLength(1);
+      expect((stopReq[3] as { transactionId: number }).transactionId).toBe(12);
       expect(s.rejected.map((r) => [r.action, r.attempt])).toEqual([
         ["StartTransaction", 1],
       ]);
-      expect(s.discarded).toEqual([
-        {
-          connectorId: 1,
-          transactionId: "0",
-          action: "StartTransaction",
-          reason: "callError",
-          errorCode: "InternalError",
-          attempts: 1,
-        },
-      ]);
+      expect(s.discarded).toEqual([]);
     } finally {
       await s.stop();
     }
@@ -563,7 +697,7 @@ describe("OCPP 1.6 stop paths around a StartTransaction CALLERROR (#491, #527)",
     );
   }
 
-  it("after a discard, UnlockConnector sends exactly one StopTransaction.req, with id 0", async () => {
+  it("after a discard, UnlockConnector sends exactly one StopTransaction.req, with id -1", async () => {
     const s = await discardedStart("CP16-527-UNLOCK");
     try {
       s.csms.send([2, "unlock-527", "UnlockConnector", { connectorId: 1 }]);
@@ -571,20 +705,20 @@ describe("OCPP 1.6 stop paths around a StartTransaction CALLERROR (#491, #527)",
       await nthCall(s.csms, "StopTransaction", 1);
       await drainWire(s.cp, s.csms);
 
-      expect(stopIds(s.csms)).toEqual([0]);
+      expect(stopIds(s.csms)).toEqual([-1]);
     } finally {
       await s.stop();
     }
   });
 
-  it("after a discard, a Reset sends exactly one StopTransaction.req, with id 0", async () => {
+  it("after a discard, a Reset sends exactly one StopTransaction.req, with id -1", async () => {
     const s = await discardedStart("CP16-527-RESET-DISCARDED");
     try {
       s.csms.send([2, "reset-527", "Reset", { type: "Soft" }]);
       await rebooted(s);
       await drainWire(s.cp, s.csms);
 
-      expect(stopIds(s.csms)).toEqual([0]);
+      expect(stopIds(s.csms)).toEqual([-1]);
     } finally {
       await s.stop();
     }

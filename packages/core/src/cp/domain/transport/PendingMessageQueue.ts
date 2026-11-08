@@ -12,7 +12,7 @@ import type { SimClock } from "../../shared/clock";
  */
 export interface PendingMessage<A extends string = OCPPAction> {
   /** Action name (1.6: StartTransaction / StopTransaction / MeterValues;
-   *  2.x: TransactionEvent, NotifyEvent). */
+   *  2.x: TransactionEvent, NotifyEvent, SecurityEventNotification). */
   action: A;
   /** Serialized request payload. */
   payload: unknown;
@@ -50,7 +50,8 @@ interface PendingRow<A extends string> extends PendingMessage<A> {
  * under E11.FR.01 and replays them with `offline = true` (E11.FR.02); it
  * flushes with no attempt limit, since E13 owns the attempt counting there.
  * It also queues NotifyEvent reports (#538, N07.FR.04), replayed in the
- * same pass without `offline`.
+ * same pass without `offline`, and critical SecurityEventNotification
+ * requests (#552, A04.FR.02), replayed as built.
  *
  * OCPP 1.6: matches OCPP 1.6 §4.7 /
  * §4.8 / §4.10 + errata 3.18: "When the Central System fails to process
@@ -74,6 +75,9 @@ export class PendingMessageQueue<A extends string = OCPPAction> {
   /** Independent counter for the user-visible message id — keeping it apart
    *  from `nextSeq` stops an id allocation from perturbing the ordering key. */
   private nextIdSuffix = 0;
+  /** Rows handed to the socket whose answer is still awaited (#554). In
+   *  memory only: after a restart every row is replayed. */
+  private readonly delivering = new Set<string>();
   /** Actions of the persisted rows `load` deleted: not queued by this
    *  handler (#528). */
   readonly droppedOnLoad: string[] = [];
@@ -98,11 +102,13 @@ export class PendingMessageQueue<A extends string = OCPPAction> {
     return this.items.length;
   }
 
+  /** Enqueue and return the row id, which {@link remove}, {@link markDelivering}
+   *  and {@link release} take (#554). */
   enqueue(
     message: Omit<PendingMessage<A>, "queuedAt" | "attempts"> & {
       attempts?: number;
     },
-  ): void {
+  ): string {
     const row: PendingRow<A> = {
       ...message,
       queuedAt: this.clock.now(),
@@ -112,6 +118,78 @@ export class PendingMessageQueue<A extends string = OCPPAction> {
     };
     this.items.push(row);
     this.insertRow(row);
+    return row.messageId;
+  }
+
+  /**
+   * #554: the oldest rows of `action` not delivering, `payload` accepted by
+   * `where`, as row ids (oldest first). Used to pick a row to drop.
+   */
+  idleRows(action: A, where?: (payload: unknown) => boolean): string[] {
+    return this.items
+      .filter(
+        (item) =>
+          item.action === action &&
+          !this.delivering.has(item.messageId) &&
+          (where === undefined || where(item.payload)),
+      )
+      .map((item) => item.messageId);
+  }
+
+  /** #554: the payload of the row `messageId`, if queued. */
+  payloadOfRow(messageId: string): unknown {
+    return this.items.find((item) => item.messageId === messageId)?.payload;
+  }
+
+  /** Queued payloads of `action`, delivering ones included (#554). */
+  payloadsOf(action: A): unknown[] {
+    return this.items
+      .filter((item) => item.action === action)
+      .map((item) => item.payload);
+  }
+
+  /** Remove the row `messageId`, wherever it stands. Returns whether it was
+   *  there (#554). */
+  remove(messageId: string): boolean {
+    const index = this.items.findIndex((item) => item.messageId === messageId);
+    if (index < 0) return false;
+    this.items.splice(index, 1);
+    this.delivering.delete(messageId);
+    this.deleteRow(messageId);
+    return true;
+  }
+
+  /** The row was handed to the socket and awaits the CSMS's answer: it stays
+   *  in the table (and so survives a crash) but a replay pass skips it. */
+  markDelivering(messageId: string): void {
+    if (this.items.some((item) => item.messageId === messageId)) {
+      this.delivering.add(messageId);
+    }
+  }
+
+  /** The delivery of the row ended without an answer (a close): it waits for
+   *  the next replay in its place. Returns whether the row exists. */
+  release(messageId: string): boolean {
+    this.delivering.delete(messageId);
+    return this.items.some((item) => item.messageId === messageId);
+  }
+
+  /**
+   * #554: replay pass that keeps the rows. `send` gets each queued message
+   * that is not delivering, in order, with its row id; it returns whether the
+   * send went through (the row stays and is marked delivering, or `send`
+   * removes it itself) or was refused (the pass stops, the row stays
+   * idle). Returns the count sent.
+   */
+  replay(send: (message: PendingMessage<A>, rowId: string) => boolean): number {
+    let sent = 0;
+    for (const row of [...this.items]) {
+      if (this.delivering.has(row.messageId)) continue;
+      if (!this.items.includes(row)) continue;
+      if (!send(toPendingMessage(row), row.messageId)) break;
+      sent += 1;
+    }
+    return sent;
   }
 
   /** How many queued messages carry `action`. */
@@ -180,6 +258,7 @@ export class PendingMessageQueue<A extends string = OCPPAction> {
 
   clear(): void {
     this.items = [];
+    this.delivering.clear();
     if (this.database) {
       this.database.run("DELETE FROM pending_messages WHERE cp_id = ?", [
         this.chargePointId,

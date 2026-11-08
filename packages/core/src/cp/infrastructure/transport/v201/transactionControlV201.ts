@@ -35,24 +35,32 @@ export function handleRequestStopTransactionV201(
   return runTransactionDefault("RequestStopTransaction", payload, ctx);
 }
 
+/**
+ * E14: with a `transactionId`, `ongoingIndicator` is true for a transaction
+ * that has not stopped (E14.FR.02) and false for a stopped or unknown one
+ * (E14.FR.01/03). Without an id the response SHALL NOT have it (E14.FR.06).
+ * Same on 2.1 (the handler is shared).
+ */
 export function handleGetTransactionStatusV201(
   payload: unknown,
   ctx: V201InboundContext,
 ): V201HandlerResult {
   const req = payload as GetTransactionStatusRequestV201;
   const connectors = Array.from(ctx.chargePoint.connectors.values());
-  const ongoingIndicator =
-    req.transactionId !== undefined
-      ? connectors.some(
+  const ongoing =
+    req.transactionId === undefined
+      ? undefined
+      : connectors.some(
           (connector) =>
-            connector.transaction?.cpTransactionId === req.transactionId,
-        )
-      : connectors.some((connector) => connector.transaction !== null);
+            connector.transaction?.cpTransactionId === req.transactionId &&
+            connector.hasRunningTransaction,
+        );
 
   return {
     response: {
-      ongoingIndicator,
-      messagesInQueue: false,
+      ...(ongoing === undefined ? {} : { ongoingIndicator: ongoing }),
+      messagesInQueue:
+        ctx.hasTransactionEventsToDeliver?.(req.transactionId) ?? false,
     } satisfies GetTransactionStatusResponseV201,
   };
 }

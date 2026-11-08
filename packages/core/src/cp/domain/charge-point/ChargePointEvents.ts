@@ -1,5 +1,6 @@
 import type { OCPPStatus, OCPPAvailability } from "../types/OcppTypes";
 import type { ActiveChargingProfile } from "../connector/Connector";
+import type { IdTokenTypeName } from "../connector/Transaction";
 
 /** The CSMS's answer to BootNotification.req, as every OCPP version words it. */
 export type RegistrationStatus = "Accepted" | "Pending" | "Rejected";
@@ -78,6 +79,10 @@ export interface ChargePointEvents {
    *  any status transition the answer causes (#395). `connected` only means
    *  the socket opened; this is what says the CSMS registered the station. */
   bootNotificationResult: BootNotificationResult;
+  /** #702: the socket reopened after a connection loss and the station went
+   *  on without a BootNotification (OCPP-J 2.0.1 §5.4). `reportedAll` says
+   *  whether the outage exceeded `OfflineThreshold` (B04.FR.01). */
+  reconnectResumed: { offlineMs: number; reportedAll: boolean };
   disconnected: { code: number; reason: string };
   /** Emitted each time the transport schedules a reconnect after an
    *  unrequested close; `delayMs` is the wait before the next attempt. */
@@ -116,11 +121,14 @@ export interface ChargePointEvents {
   // Smart-charging events (#469)
   /** A profile was installed on a connector or, with `connectorId` 0, on the
    *  station store. `replaced` is true when it updated a profile with the
-   *  same id in that scope. */
+   *  same id in that scope; `replacedIds` lists the ids of other profiles in
+   *  that scope it displaced because they had the same stackLevel and purpose
+   *  (1.6 SetChargingProfile, #594). */
   chargingProfileApplied: {
     connectorId: number;
     profile: ActiveChargingProfile;
     replaced: boolean;
+    replacedIds: number[];
     source: ChargingProfileSource;
   };
   /** At least one profile was removed from one scope. Never emitted for a
@@ -134,6 +142,8 @@ export interface ChargePointEvents {
     connectorId: number;
     tagId: string;
     remoteStartId?: number;
+    /** 2.x: the `idToken.type` the CSMS sent (#599). */
+    idTokenType?: IdTokenTypeName;
   };
   /** Emitted when CSMS sends RemoteStopTransaction.req while a scenario
    *  has registered as the stop-side handler for this connector. The

@@ -25,3 +25,25 @@ describe("core-control v201 handlers", () => {
     }
   });
 });
+
+describe("TriggerMessage(BootNotification) (F06.FR.17)", () => {
+  const payload = { requestedMessage: "BootNotification" };
+  const ctx = (bootAccepted?: () => boolean) => ({ bootAccepted }) as never;
+
+  it("is Rejected, with nothing to send, after an Accepted boot", () => {
+    const result = handleTriggerMessageV201(
+      payload,
+      ctx(() => true),
+    );
+    expect(result).toEqual({ response: { status: "Rejected" } });
+  });
+
+  it("stays Accepted while the boot is not Accepted", () => {
+    const result = handleTriggerMessageV201(
+      payload,
+      ctx(() => false),
+    );
+    expect(result.response).toEqual({ status: "Accepted" });
+    expect(result.afterResult).toBeDefined();
+  });
+});

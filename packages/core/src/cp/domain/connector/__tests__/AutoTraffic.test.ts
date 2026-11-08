@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  AutoTrafficIdTagPicker,
   AutoTrafficPlanner,
   defaultAutoTrafficConfig,
   validateAutoTrafficConfig,
@@ -163,6 +164,128 @@ describe("validateAutoTrafficConfig (#300)", () => {
     ).toMatch(/probabilityOfStart/);
     expect(validateAutoTrafficConfig({ ...CONFIG, stopAfterSec: 0 })).toMatch(
       /stopAfterSec/,
+    );
+  });
+});
+
+describe("AutoTrafficIdTagPicker (#603)", () => {
+  const TAGS = ["T0", "T1", "T2", "T3", "T4"];
+  const draws = (picker: AutoTrafficIdTagPicker, n = 10): string[] =>
+    Array.from({ length: n }, () => picker.next());
+  const picker = (
+    strategy: "round-robin" | "random" | "connector-affinity",
+    over: {
+      seed?: number;
+      cpId?: string;
+      connector?: number;
+      index?: number;
+    } = {},
+  ) =>
+    new AutoTrafficIdTagPicker(
+      TAGS,
+      strategy,
+      over.seed ?? 7,
+      over.cpId ?? "CP1",
+      over.connector ?? 1,
+      over.index,
+    );
+
+  it("replays the same sequence for the same seed, whatever else drew", () => {
+    for (const strategy of [
+      "round-robin",
+      "random",
+      "connector-affinity",
+    ] as const) {
+      expect(draws(picker(strategy))).toEqual(draws(picker(strategy)));
+    }
+  });
+
+  it("round-robin walks the whole pool from an offset the cp index sets", () => {
+    const first = draws(picker("round-robin", { index: 0 }), 5);
+    expect(first).toEqual(["T0", "T1", "T2", "T3", "T4"]);
+    expect(draws(picker("round-robin", { index: 2 }), 5)).toEqual([
+      "T2",
+      "T3",
+      "T4",
+      "T0",
+      "T1",
+    ]);
+  });
+
+  it("spreads the first tag across a fleet", () => {
+    const firsts = new Set(
+      Array.from({ length: 5 }, (_, i) =>
+        picker("round-robin", { index: i }).next(),
+      ),
+    );
+    expect(firsts.size).toBe(5);
+    const affinity = new Set(
+      Array.from({ length: 5 }, (_, i) =>
+        picker("connector-affinity", { index: i }).next(),
+      ),
+    );
+    expect(affinity.size).toBe(5);
+  });
+
+  it("without an index, spreads by a stable hash of the charge point id", () => {
+    const a = draws(picker("round-robin", { cpId: "CP-A" }), 3);
+    expect(a).toEqual(draws(picker("round-robin", { cpId: "CP-A" }), 3));
+  });
+
+  it("connector-affinity gives a connector one tag and its neighbour another", () => {
+    const one = draws(
+      picker("connector-affinity", { index: 0, connector: 1 }),
+      4,
+    );
+    const two = draws(
+      picker("connector-affinity", { index: 0, connector: 2 }),
+      4,
+    );
+    expect(new Set(one)).toEqual(new Set(["T0"]));
+    expect(new Set(two)).toEqual(new Set(["T1"]));
+  });
+
+  it("random follows the seed and stays inside the pool", () => {
+    const a = draws(picker("random", { seed: 1 }), 30);
+    expect(a).not.toEqual(draws(picker("random", { seed: 2 }), 30));
+    for (const tag of a) expect(TAGS).toContain(tag);
+    expect(new Set(a).size).toBeGreaterThan(1);
+  });
+
+  it("refuses an empty pool", () => {
+    expect(
+      () => new AutoTrafficIdTagPicker([], "random", 1, "CP1", 1, 0),
+    ).toThrow();
+  });
+});
+
+describe("validateAutoTrafficConfig, #603 fields", () => {
+  it("accepts a stop time, a strategy and a cp index", () => {
+    expect(
+      validateAutoTrafficConfig({
+        ...CONFIG,
+        stopAt: "2026-11-08T12:00:00Z",
+        idTagStrategy: "random",
+        cpIndex: 3,
+      }),
+    ).toBeNull();
+  });
+
+  it("rejects what the runtime could not act on", () => {
+    expect(validateAutoTrafficConfig({ ...CONFIG, stopAt: "soon" })).toMatch(
+      /stopAt/,
+    );
+    expect(
+      validateAutoTrafficConfig({
+        ...CONFIG,
+        idTagStrategy: "nope" as unknown as "random",
+      }),
+    ).toMatch(/idTagStrategy/);
+    expect(validateAutoTrafficConfig({ ...CONFIG, cpIndex: -1 })).toMatch(
+      /cpIndex/,
+    );
+    expect(validateAutoTrafficConfig({ ...CONFIG, cpIndex: 1.5 })).toMatch(
+      /cpIndex/,
     );
   });
 });

@@ -156,5 +156,19 @@
   "scenarioEditor.callResponse.kindResult": "CALLRESULT(以负载应答)",
   "scenarioEditor.callResponse.payload": "负载(JSON)",
   "scenarioEditor.useBehavior.behaviorId": "行为 ID",
-  "scenarioEditor.useBehavior.behaviorIdPlaceholder": "例如:my-behavior"
+  "scenarioEditor.useBehavior.behaviorIdPlaceholder": "例如:my-behavior",
+  "scenarioEditor.useBehavior.mode": "模式",
+  "scenarioEditor.useBehavior.modeUse": "使用(带参数)",
+  "scenarioEditor.useBehavior.modeDisable": "本次运行中禁用",
+  "scenarioEditor.useBehavior.disableHelp": "运行期间,此行为负责应答的每个 CALL 都只返回充电桩 OCPP 版本的普通 accepted 应答,之后不执行任何操作。不接受参数。",
+  "scenarioEditor.useBehavior.paramsJson": "参数 (JSON)",
+  "scenarioEditor.useBehavior.paramsJsonPlaceholder": "{\"key\": \"value\"}",
+  "scenarioEditor.params.reset": "恢复默认值",
+  "scenarioEditor.params.firmware.stepMs": "状态间隔 (ms)",
+  "scenarioEditor.params.firmware.failAt": "以失败结束",
+  "scenarioEditor.params.firmware.startAt": "开始时机",
+  "scenarioEditor.params.signedFirmware.stepMs": "状态间隔 (ms)",
+  "scenarioEditor.params.logs.uploadMs": "上传时间 (ms)",
+  "scenarioEditor.params.reset.delayMs": "重置前的延迟 (ms)",
+  "scenarioEditor.params.unlock.outcome": "结果"
 }

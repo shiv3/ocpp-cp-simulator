@@ -531,8 +531,8 @@ describe("ScenarioRunsPage (#388)", () => {
     });
   });
 
-  it("explains that local mode keeps no run history", async () => {
-    const listScenarioRuns = vi.fn();
+  it("lists the browser's run history in local mode (#394)", async () => {
+    const listScenarioRuns = vi.fn(async () => ({ runs: [], total: 0 }));
     const service = createFakeChargePointService({
       snapshots,
       listScenarioRuns,
@@ -544,10 +544,22 @@ describe("ScenarioRunsPage (#388)", () => {
     cleanup = () => unmount(root);
     await flush();
 
-    expect(listScenarioRuns).not.toHaveBeenCalled();
-    expect(container.textContent).toContain(
-      "Run history needs the simulator daemon",
-    );
+    expect(listScenarioRuns).toHaveBeenCalled();
+    expect(container.textContent).not.toContain("Run history is not available");
+  });
+
+  it("says so when the service cannot list runs", async () => {
+    const service = createFakeChargePointService({ snapshots });
+    (service as unknown as Record<string, unknown>).listScenarioRuns =
+      undefined;
+    const { container, root } = await renderConsole("/scenarios/runs", {
+      service,
+      mode: "local",
+    });
+    cleanup = () => unmount(root);
+    await flush();
+
+    expect(container.textContent).toContain("Run history is not available");
   });
 
   it("is reachable from the sidebar, which lights it instead of Scenarios", async () => {

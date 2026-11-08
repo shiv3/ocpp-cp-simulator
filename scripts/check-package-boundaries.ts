@@ -26,6 +26,14 @@
 // at compile time, and `import()` is how a cycle is legitimately deferred. It
 // relies on the `consistent-type-imports` lint rule to mark an import used only
 // as a type, or the cycle it closes would be reported as a real one.
+//
+// Inside packages/core/src/cp the layers have a direction too (#571):
+// domain may import only domain and shared; application may import domain,
+// application and shared (never infrastructure); infrastructure may import
+// every layer; shared imports only shared. Every layer may use the other
+// workspace packages the package rules above allow. The edges that break this
+// today are listed in LAYER_EXEMPTIONS; an entry that stops matching fails the
+// run, so the list can only shrink. Tests are not checked.
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, posix, resolve } from "node:path";
@@ -249,6 +257,118 @@ export const TEST_ALLOW_LIST: readonly KnownViolation[] = [
 ];
 
 // ---------------------------------------------------------------------------
+// Layers inside packages/core/src/cp (#571)
+// ---------------------------------------------------------------------------
+
+export const CP_ROOT = "packages/core/src/cp/";
+export const LAYERS = [
+  "domain",
+  "application",
+  "infrastructure",
+  "shared",
+] as const;
+export type Layer = (typeof LAYERS)[number];
+
+/**
+ * Which layers each layer may import (itself always included). An import of a
+ * file under packages/core/src outside src/cp, or of an app, is also refused
+ * from domain and shared: those layers know nothing of the code around them.
+ */
+export const LAYER_RULES: Readonly<Record<Layer, readonly Layer[]>> = {
+  domain: ["domain", "shared"],
+  application: ["domain", "application", "shared"],
+  infrastructure: ["domain", "application", "infrastructure", "shared"],
+  shared: ["shared"],
+};
+
+/** Layers that may not import core code outside src/cp. */
+const SEALED_LAYERS: ReadonlySet<Layer> = new Set<Layer>(["domain", "shared"]);
+
+export function layerOf(file: string): Layer | null {
+  if (!file.startsWith(CP_ROOT)) return null;
+  const top = file.slice(CP_ROOT.length).split("/")[0];
+  return (LAYERS as readonly string[]).includes(top!) ? (top as Layer) : null;
+}
+
+/**
+ * Layer-breaking imports that exist today, one entry per importing file and
+ * imported file. Matching violations are printed as warnings and do not fail
+ * the run; an entry that matches nothing fails it, so delete each entry in
+ * the PR that removes the import. The goal (#577) is an empty list. Tests are
+ * not covered by the rule.
+ */
+export const LAYER_EXEMPTIONS: readonly KnownViolation[] = [
+  {
+    from: "packages/core/src/cp/application/engine/behaviors/diagnostics.ts",
+    to: "packages/core/src/cp/infrastructure/file_upload.ts",
+    why: "The diagnostics behavior calls the file-upload client directly; it needs a port in application.",
+  },
+  ...[
+    "application/behavior/BehaviorRegistry.ts",
+    "application/engine/ChargerEngine.ts",
+    "application/engine/behaviors/transaction.ts",
+    "application/services/HeartbeatService.ts",
+    "application/services/OperationalTimeline.ts",
+    "application/services/OperationalTimelineProjector.ts",
+    "application/services/StateManager.ts",
+  ].map((t) => ({
+    from: "packages/core/src/cp/domain/charge-point/ChargePoint.ts",
+    to: `packages/core/src/cp/${t}`,
+    why: "ChargePoint still wires the application services itself; clears with the ChargePoint split (#575).",
+  })),
+  ...[
+    "infrastructure/transport/OCPPWebSocket.ts",
+    "infrastructure/transport/RawFrameSender.ts",
+    "infrastructure/transport/SupervisionUrlPool.ts",
+    "infrastructure/transport/codec/ocppCallCatalog.ts",
+    "infrastructure/transport/network-sim/index.ts",
+    "infrastructure/transport/profile/profiles.ts",
+    "infrastructure/transport/soap/dialect.ts",
+    "infrastructure/transport/soap/index.ts",
+    "infrastructure/transport/v201/renderConfigValue.ts",
+    "infrastructure/transport/wsUrlWithBasic.ts",
+  ].map((t) => ({
+    from: "packages/core/src/cp/domain/charge-point/ChargePoint.ts",
+    to: `packages/core/src/cp/${t}`,
+    why: "ChargePoint still builds the transport itself; clears with the ChargePoint split (#575).",
+  })),
+  ...[
+    "application/scenario/ScenarioManager.ts",
+    "application/scenario/ScenarioTypes.ts",
+  ].map((t) => ({
+    from: "packages/core/src/cp/domain/connector/Connector.ts",
+    to: `packages/core/src/cp/${t}`,
+    why: "Connector holds the scenario manager and its types; clears with the ChargePoint / Connector split (#575).",
+  })),
+  {
+    from: "packages/core/src/cp/domain/persistence/ScenarioRepository.ts",
+    to: "packages/core/src/cp/application/scenario/ScenarioTypes.ts",
+    why: "The repository port names the scenario types; clears when they move to domain (#573).",
+  },
+  ...[
+    "application/verification/ScenarioAssertions.ts",
+    "application/verification/ScenarioRunSummary.ts",
+  ].map((t) => ({
+    from: "packages/core/src/cp/domain/persistence/ScenarioRunRepository.ts",
+    to: `packages/core/src/cp/${t}`,
+    why: "The repository port names the run summary types; clears when they move to domain (#573).",
+  })),
+  {
+    from: "packages/core/src/cp/domain/persistence/SqliteScenarioRepository.ts",
+    to: "packages/core/src/cp/application/scenario/ScenarioTypes.ts",
+    why: "SQLite implementation lives in domain; clears when it moves to infrastructure (#573).",
+  },
+  ...[
+    "application/verification/ScenarioAssertions.ts",
+    "application/verification/ScenarioRunSummary.ts",
+  ].map((t) => ({
+    from: "packages/core/src/cp/domain/persistence/SqliteScenarioRunRepository.ts",
+    to: `packages/core/src/cp/${t}`,
+    why: "SQLite implementation lives in domain; clears when it moves to infrastructure (#573).",
+  })),
+];
+
+// ---------------------------------------------------------------------------
 // Machinery
 // ---------------------------------------------------------------------------
 
@@ -260,6 +380,7 @@ export interface Config {
   readonly specifierAllowList: typeof SPECIFIER_ALLOW_LIST;
   readonly knownViolations: readonly KnownViolation[];
   readonly testAllowList: readonly KnownViolation[];
+  readonly layerExemptions: readonly KnownViolation[];
   /** Alias prefix -> repo-relative directory, e.g. "@/" -> "apps/web/src/". */
   readonly aliases: Readonly<Record<string, string>>;
 }
@@ -272,6 +393,7 @@ export const DEFAULT_CONFIG: Config = {
   specifierAllowList: SPECIFIER_ALLOW_LIST,
   knownViolations: KNOWN_VIOLATIONS,
   testAllowList: TEST_ALLOW_LIST,
+  layerExemptions: LAYER_EXEMPTIONS,
   aliases: { "@/": "apps/web/src/" },
 };
 
@@ -602,7 +724,7 @@ export interface Edge {
 }
 
 export interface Violation {
-  readonly type: "edge" | "specifier" | "relative";
+  readonly type: "edge" | "specifier" | "relative" | "layer";
   /** "client → apps/web" for an edge, "core ⊅ node" for a specifier. */
   readonly group: string;
   readonly file: string;
@@ -652,6 +774,30 @@ export interface Snapshot {
   readonly rootManifestText?: string;
 }
 
+/**
+ * The rule a core file breaks by importing `to`, or null. Only files under
+ * packages/core/src/cp/<layer>/ are judged; `to` is the resolved target.
+ */
+export function layerViolationOf(
+  from: string,
+  to: string,
+): { group: string } | null {
+  const a = layerOf(from);
+  if (!a) return null;
+  const b = layerOf(to);
+  if (b) {
+    return LAYER_RULES[a].includes(b) ? null : { group: `layer ${a} ⊅ ${b}` };
+  }
+  if (
+    SEALED_LAYERS.has(a) &&
+    (to.startsWith("apps/") ||
+      (to.startsWith("packages/core/") && !to.startsWith(CP_ROOT)) ||
+      (to.startsWith(CP_ROOT) && !b))
+  )
+    return { group: `layer ${a} ⊅ code outside the layers` };
+  return null;
+}
+
 export function checkBoundaries(
   snapshot: Snapshot,
   config: Config = DEFAULT_CONFIG,
@@ -679,6 +825,14 @@ export function checkBoundaries(
     matrix[p] = Object.fromEntries(PACKAGE_NAMES.map((q) => [q, 0]));
     fileCounts[p] = 0;
   }
+
+  const suppressLayer = (v: Violation): boolean => {
+    const hit = config.layerExemptions.find(
+      (k) => k.from === v.file && k.to === v.target,
+    );
+    if (hit) usedAllowances.add(`layer:${hit.from}->${hit.to}`);
+    return !!hit;
+  };
 
   const suppress = (v: Violation): boolean => {
     const list = v.test ? config.testAllowList : config.knownViolations;
@@ -767,6 +921,20 @@ export function checkBoundaries(
         viaPackage: res.viaPackage,
       });
       matrix[fromPkg]![toPkg]!++;
+      const layerViolation = test ? null : layerViolationOf(file, res.path);
+      if (layerViolation) {
+        const v: Violation = {
+          type: "layer",
+          group: layerViolation.group,
+          file,
+          target: res.path,
+          specifier: imp.specifier,
+          typeOnly: imp.typeOnly,
+          test,
+          message: `${file} imports ${res.path}${imp.typeOnly ? " (type-only)" : ""}`,
+        };
+        (suppressLayer(v) ? warnings : violations).push(v);
+      }
       if (fromPkg !== toPkg && !config.allowed[fromPkg].includes(toPkg)) {
         const v: Violation = {
           type: "edge",
@@ -803,6 +971,9 @@ export function checkBoundaries(
   for (const k of config.knownViolations)
     if (!usedAllowances.has(`known:${k.from}->${k.to}`))
       staleAllowances.push(`KNOWN_VIOLATIONS ${k.from} -> ${k.to}`);
+  for (const k of config.layerExemptions)
+    if (!usedAllowances.has(`layer:${k.from}->${k.to}`))
+      staleAllowances.push(`LAYER_EXEMPTIONS ${k.from} -> ${k.to}`);
   for (const k of config.testAllowList)
     if (!usedAllowances.has(`test:${k.from}->${k.to}`))
       staleAllowances.push(`TEST_ALLOW_LIST ${k.from} -> ${k.to}`);

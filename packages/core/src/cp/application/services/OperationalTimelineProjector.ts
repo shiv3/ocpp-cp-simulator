@@ -90,6 +90,16 @@ export class OperationalTimelineProjector {
         data: { attempt, delayMs },
       });
     });
+    on("gaveUp", ({ target, attempts }) => {
+      this.timeline.record({
+        kind: "gave_up",
+        summary:
+          target === "reconnect"
+            ? `Gave up reconnecting after ${attempts} attempt${attempts === 1 ? "" : "s"}`
+            : `Gave up BootNotification retries after ${attempts} retr${attempts === 1 ? "y" : "ies"}`,
+        data: { target, attempts },
+      });
+    });
     on("bootNotificationResult", ({ status, interval }) => {
       if (this.incident?.link === "up" && status === "Accepted") {
         this.incident.link = "booted";
@@ -146,6 +156,22 @@ export class OperationalTimelineProjector {
         summary: `Network fault injected by rule ${ruleId} (${ruleType}, reconnect blocked ${formatSeconds(reconnectDelayMs)})`,
         data: { ruleId, ruleType, reconnectDelayMs },
         at: startedAt,
+      });
+    });
+    on("powerLost", ({ transactions }) => {
+      this.timeline.record({
+        kind: "power_lost",
+        summary: `Power lost (${transactions} transaction${transactions === 1 ? "" : "s"} interrupted)`,
+        data: { transactions },
+      });
+    });
+    on("powerRestored", ({ outageMs, recovery, transactions }) => {
+      this.timeline.record({
+        kind: "power_restored",
+        summary: `Power restored after ${formatSeconds(outageMs)}${
+          recovery === "none" ? "" : `, transactions: ${recovery}`
+        }`,
+        data: { outageMs, recovery, transactions },
       });
     });
     on("transactionStarted", ({ connectorId, tagId }) => {
@@ -215,16 +241,25 @@ export class OperationalTimelineProjector {
     });
     on(
       "chargingProfileApplied",
-      ({ connectorId, profile, replaced, source }) => {
+      ({ connectorId, profile, replaced, replacedIds, source }) => {
         const { chargingProfileId: id, validTo } = profile;
+        // A displaced profile never expires on its own any more.
+        for (const replacedId of replacedIds) {
+          this.cancelExpiry(connectorId, replacedId);
+        }
+        const displaced =
+          replacedIds.length > 0
+            ? `, replacing profile ${replacedIds.join(", ")}`
+            : "";
         this.timeline.record({
           kind: "charging_profile_applied",
           ...connectorScope(connectorId),
-          summary: `Charging profile ${id} (${profile.chargingProfilePurpose}, stack level ${profile.stackLevel}) ${replaced ? "updated" : "applied"} ${scopeLabel(connectorId)}`,
+          summary: `Charging profile ${id} (${profile.chargingProfilePurpose}, stack level ${profile.stackLevel}) ${replaced ? "updated" : "applied"} ${scopeLabel(connectorId)}${displaced}`,
           data: {
             ...profileFields(connectorId, profile),
             source,
             replaced,
+            ...(replacedIds.length > 0 && { replacedIds }),
             ...(validTo !== undefined && { validTo }),
           },
         });

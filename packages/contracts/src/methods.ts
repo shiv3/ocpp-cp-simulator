@@ -36,6 +36,7 @@ import {
 import { subscribeResultSchema } from "./envelope";
 import { VEHICLE_METHODS, vehicleCatalogInfoSchema } from "./vehicle";
 import { labelsSchema } from "./labels";
+import { transportConfigSchema } from "./transportConfig";
 import {
   METER_READING_CONTEXTS,
   STOP_REASONS,
@@ -88,6 +89,11 @@ export const SCENARIO_RUNS_PAGE_MAX = 200;
  *  ask for (a charge point's whole retained history). */
 export const CHARGING_SESSIONS_PAGE_DEFAULT = 50;
 export const CHARGING_SESSIONS_PAGE_MAX = MAX_SESSIONS_PER_CP;
+/** #489: an ISO 8601 instant with a zone designator, e.g. 2026-11-08T00:00:00Z. */
+const ISO_INSTANT = z
+  .string()
+  .datetime({ offset: true })
+  .describe("ISO 8601 instant with a zone, e.g. 2026-11-08T00:00:00Z");
 /** #447: one charging session, the same shape for every OCPP version. */
 const chargingSessionSchema = z.object({
   sessionId: z.string(),
@@ -273,6 +279,23 @@ export const behaviorIdsSchema = ARRAY_1000(STR_256.min(1)).describe(
 );
 
 /**
+ * The params a charge point's selection sets on behaviors (#654): behavior id
+ * to a JSON object of that behavior's params. Ids and JSON only, exactly like
+ * {@link behaviorIdsSchema}: a param is a value the behavior's own schema
+ * checks (refused, never coerced), never a module, a path, a URL or source
+ * text. A key is a loaded behavior id or a built-in `default.*` id.
+ */
+export const BEHAVIOR_PARAMS_MAX_BYTES = 16_384;
+export const behaviorParamsSchema = z
+  .record(STR_256.min(1), boundedObject(BEHAVIOR_PARAMS_MAX_BYTES))
+  .refine((all) => Object.keys(all).length <= 1000, {
+    message: "at most 1000 behaviors",
+  })
+  .describe(
+    'Params per behavior id, e.g. {"default.firmware": {"stepMs": 500, "failAt": "DownloadFailed"}}. JSON values only, checked against the params schema the behavior declares (see behavior.list); a value that does not fit is an error, nothing is converted. A key is a built-in default.* id or one of the selected behaviors. On cp.update an omitted map keeps the current params; a given one replaces them',
+  );
+
+/**
  * Every field `cp.create` / `cp.update` accept, described in place.
  *
  * The descriptions are here rather than at a call site because the MCP
@@ -351,11 +374,44 @@ const cpParamsBaseSchema = z.object({
   cpoName: STR_64K.optional().describe(
     "CPO name used when generating certificate signing requests",
   ),
+  transport: transportConfigSchema
+    .optional()
+    .describe(
+      "Transport settings of this charge point. transport.reconnect sets the reconnect policy (max attempts, fixed or exponential, base and max delay, jitter) and the BootNotification retry limit; omitted fields keep the built-in behaviour",
+    ),
   txUpdatedMeterValues: z
     .boolean()
     .optional()
     .describe(
       "OCPP 2.x only: send the periodic meter samples taken during a transaction as TransactionEvent(Updated, MeterValuePeriodic) instead of MeterValues. Defaults to false",
+    ),
+  inboundValidation: z
+    .enum(["off", "warn", "enforce"])
+    .optional()
+    .describe(
+      "OCPP 1.6J only: what to do with an inbound CALL whose payload breaks the request schema. off skips the check, warn (default) logs and traces the violation and runs the handler, enforce answers a CALLERROR (FormationViolation, OccurenceConstraintViolation, PropertyConstraintViolation or TypeConstraintViolation)",
+    ),
+  capabilityProfile: z
+    .object({
+      disabledActions: z
+        .array(STR_256)
+        .max(256)
+        .optional()
+        .describe(
+          "CSMS->CP actions this charge point does not implement (e.g. GetCompositeSchedule, ReserveNow). An inbound CALL for one is answered with CALLERROR NotImplemented. On OCPP 2.x an action also matches its 1.6 spelling",
+        ),
+      triggerMessageTargets: z
+        .array(STR_256)
+        .max(256)
+        .optional()
+        .describe(
+          "The message types TriggerMessage / ExtendedTriggerMessage may request; any other target is answered NotImplemented. [] supports none. Omit to leave the targets as they are",
+        ),
+    })
+    .strict()
+    .optional()
+    .describe(
+      "Static capability profile (#618): declare the charge point as lacking features. A scenario inbound policy or response override keeps precedence. Not accepted for the OCPP SOAP versions (their calls bypass the inbound gate). Omit for current behavior",
     ),
   tlsCaPath: STR_64K.optional().describe(
     "Path to a PEM CA bundle verifying the CSMS certificate. Omit to use the system trust store; passing one REPLACES the default roots",
@@ -400,6 +456,7 @@ const cpParamsBaseSchema = z.object({
   // replaces it whole; cp.labels.set changes them without rebuilding the CP.
   labels: labelsSchema.optional(),
   behaviors: behaviorIdsSchema.optional(),
+  behaviorParams: behaviorParamsSchema.optional(),
 });
 
 const scenarioTemplateInfoSchema = z.object({
@@ -542,8 +599,23 @@ export const cpBehaviorsSetParamsSchema = z
       .describe(
         "The behavior ids to run; [] runs none, null runs every loaded behavior",
       ),
+    behaviorParams: behaviorParamsSchema
+      .optional()
+      .describe(
+        "Params for the behaviors, by id (built-in default.* ids included). The whole selection is replaced: omitted means no params, every behavior runs with its defaults",
+      ),
   })
   .strict();
+
+/**
+ * What `behavior.list` says about a behavior's params: the schema (a closed
+ * JSON Schema subset, see docs/concepts/charger-engine.md) and the defaults
+ * that apply when nothing is set.
+ */
+export const behaviorParamsInfoSchema = z.object({
+  schema: boundedObject(BEHAVIOR_PARAMS_MAX_BYTES),
+  defaults: boundedObject(BEHAVIOR_PARAMS_MAX_BYTES),
+});
 
 /** The library `--behavior` loaded: ids and where each came from. */
 export const behaviorListResultSchema = z.object({
@@ -552,6 +624,8 @@ export const behaviorListResultSchema = z.object({
       id: STR_256,
       /** The file it was loaded from, as given on the command line. */
       file: STR_64K.nullable(),
+      /** Its params schema and defaults, when it declares params (#654). */
+      params: behaviorParamsInfoSchema.optional(),
     }),
   ),
   /** Whether `--watch-behaviors` is on. */
@@ -560,7 +634,14 @@ export const behaviorListResultSchema = z.object({
    * The built-in behaviors every station has, and the CSMS actions each
    * answers: the actions `mode: "extend"` is possible for.
    */
-  defaults: ARRAY_1000(z.object({ id: STR_256, actions: ARRAY_1000(STR_256) })),
+  defaults: ARRAY_1000(
+    z.object({
+      id: STR_256,
+      actions: ARRAY_1000(STR_256),
+      /** Its params schema and defaults, when it declares params (#654). */
+      params: behaviorParamsInfoSchema.optional(),
+    }),
+  ),
 });
 
 /**
@@ -618,6 +699,44 @@ export const cpBulkResultSchema = z.object({
 });
 export type CpBulkResult = z.infer<typeof cpBulkResultSchema>;
 
+/**
+ * `cp.scenario.run` (#486): start one scenario template on every charge point
+ * carrying every pair of `labels`. A method of its own (decision D07), not a
+ * `cp.bulk` action: a scenario takes a connector, a template and options, and
+ * folding them into `cp.bulk` would make its params a union, which the MCP
+ * schema derivation avoids. The selector rule is `cp.bulk`'s.
+ */
+export const cpScenarioRunParamsSchema = z
+  .object({
+    labels: cpBulkParamsSchema.shape.labels,
+    connector: CONN_POS.describe(
+      "Connector the template runs on, on every selected charge point",
+    ),
+    templateId: NON_EMPTY_STR.describe("Scenario template identifier"),
+    evSettings: OBJ()
+      .optional()
+      .describe("Overrides for the template's EV settings"),
+    strict: z
+      .boolean()
+      .optional()
+      .describe("Promote warning-severity assertions to failures"),
+    once: z
+      .boolean()
+      .optional()
+      .describe(
+        "Run once: the instance is loaded disabled, so it does not re-arm on the next reconnect",
+      ),
+  })
+  .strict();
+
+export const cpScenarioRunResultSchema = z.object({
+  matched: ARRAY_1000(STR_64K),
+  /** One entry per charge point that started the run, with its scenario id. */
+  started: ARRAY_1000(z.object({ cpId: STR_64K, scenarioId: STR_64K })),
+  failed: ARRAY_1000(z.object({ cpId: STR_64K, reason: STR_64K })),
+});
+export type CpScenarioRunResult = z.infer<typeof cpScenarioRunResultSchema>;
+
 /** update CP — redacted snapshots may omit password; server preserves it. */
 const updateParamsSchema = cpParamsBaseSchema.extend({
   basicAuth: z
@@ -660,6 +779,144 @@ export const blueprintSchema = z.object({
 });
 
 export type Blueprint = z.infer<typeof blueprintSchema>;
+
+/** Most charge points one fleet template may stand for, ranges expanded. */
+export const FLEET_TEMPLATE_MAX_CPS = 1_000;
+
+/**
+ * One line of a fleet template (#445): which charge point(s), made from which
+ * blueprint, with which behaviour. Everything a line does not say comes from
+ * the blueprint it names, so a blueprint or scenario definition is never
+ * restated here — only referenced by id and, where one charge point must
+ * differ, overridden field by field.
+ *
+ * A line names one charge point (`cpId`) or a numbered range (`idPattern` and
+ * `count`, expanded like `cp.create_many`).
+ */
+export const fleetMemberSchema = z
+  .object({
+    cpId: NON_EMPTY_STR.optional().describe("One charge point's id"),
+    idPattern: STR_64K.refine((v) => ID_PATTERN_PLACEHOLDER.test(v), {
+      message:
+        "idPattern must contain {n} or {n:0W} with W at most 2 digits, e.g. CP{n:03}",
+    })
+      .optional()
+      .describe("Id template for a range, with count; {n} or {n:03}"),
+    count: z
+      .number()
+      .int()
+      .min(1)
+      .max(CP_CREATE_MANY_MAX)
+      .optional()
+      .describe(`Range size (1..${CP_CREATE_MANY_MAX}), with idPattern`),
+    startIndex: z
+      .number()
+      .int()
+      .min(0)
+      .optional()
+      .describe("First {n} of the range (default 1)"),
+    blueprintId: STR_256.min(1).describe(
+      "Blueprint (built-in or stored) this charge point is made from",
+    ),
+    scenarioTemplateId: STR_256.min(1)
+      .optional()
+      .describe(
+        "Scenario template loaded onto every connector; replaces the blueprint's",
+      ),
+    evSettings: OBJ()
+      .optional()
+      .describe("EV settings for every connector; replace the blueprint's"),
+    networkSimulation: OBJ()
+      .optional()
+      .describe(
+        "Per-charge-point network simulation layer (as network_sim.cp.save), applied before the charge point connects",
+      ),
+    labels: labelsSchema.optional().describe("Labels added to this line"),
+    overrides: blueprintSchema.shape.params
+      .omit({ labels: true })
+      .optional()
+      .describe(
+        "cp.create fields that replace the blueprint's for this line, e.g. vendor, model, connectors, ocppVersion, autoConnect",
+      ),
+  })
+  .refine((m) => (m.cpId !== undefined) !== (m.idPattern !== undefined), {
+    message: "a member needs exactly one of cpId or idPattern",
+  })
+  .refine((m) => (m.idPattern === undefined) === (m.count === undefined), {
+    message: "idPattern and count go together",
+  })
+  .refine((m) => m.cpId === undefined || m.startIndex === undefined, {
+    message: "startIndex belongs to a range, not to a single cpId",
+  });
+export type FleetMember = z.infer<typeof fleetMemberSchema>;
+
+/** A named set of members that share labels, e.g. a site. */
+export const fleetGroupSchema = z.object({
+  name: STR_256.min(1).describe("Group name, unique within the template"),
+  labels: labelsSchema
+    .optional()
+    .describe("Labels every member of the group gets"),
+  members: ARRAY_1000(fleetMemberSchema).min(1),
+});
+export type FleetGroup = z.infer<typeof fleetGroupSchema>;
+
+/**
+ * A reusable description of a whole heterogeneous fleet (#445, decision D09):
+ * the one shape both a template file (`--fleet-template`) and the state
+ * database hold, so what `fleet.template.save` stores is what a file says.
+ *
+ * It composes blueprints and scenario templates by id and owns no hardware
+ * or scenario definition of its own. `fleet.create` copies what it resolves
+ * into independent charge points; editing a template afterwards never touches
+ * a fleet that is already running.
+ */
+export const fleetTemplateSchema = z
+  .object({
+    id: STR_256.min(1).describe(
+      "Template identifier, unique within the daemon",
+    ),
+    name: STR_256.min(1).describe("Human-readable name"),
+    description: STR_1K.optional(),
+    labels: labelsSchema
+      .optional()
+      .describe("Labels every charge point of the template gets"),
+    groups: ARRAY_1000(fleetGroupSchema).min(1),
+  })
+  .refine(
+    (t) => new Set(t.groups.map((g) => g.name)).size === t.groups.length,
+    { message: "group names must be unique within a template" },
+  )
+  .refine(
+    (t) =>
+      t.groups.reduce(
+        (sum, g) => sum + g.members.reduce((n, m) => n + (m.count ?? 1), 0),
+        0,
+      ) <= FLEET_TEMPLATE_MAX_CPS,
+    {
+      message: `a template may stand for at most ${FLEET_TEMPLATE_MAX_CPS} charge points`,
+    },
+  );
+export type FleetTemplate = z.infer<typeof fleetTemplateSchema>;
+
+/** `fleet.create` parameters. */
+export const fleetCreateParamsSchema = z.object({
+  templateId: STR_256.min(1).describe("Fleet template to instantiate"),
+  wsUrl: z
+    .union([STR_64K, ARRAY_1000(STR_64K).min(1)])
+    .optional()
+    .describe(
+      "CSMS endpoint for every charge point whose line and blueprint name none. A line's overrides.wsUrl wins over this, this wins over the blueprint's",
+    ),
+  idPrefix: STR_64K.optional().describe(
+    "Prepended to every charge point id, so one template can be instantiated more than once",
+  ),
+  autoConnect: z
+    .boolean()
+    .optional()
+    .describe(
+      "Connect each charge point once its EV settings, scenario and network simulation are in place; a line's overrides.autoConnect wins. Default false",
+    ),
+});
 
 export const serverInfoSchema = z.object({
   version: z.string(),
@@ -722,6 +979,27 @@ export const createManyFromBlueprintSchema = createManyToolSchema.refine(
   (value) => value.wsUrl !== undefined || value.blueprintId !== undefined,
   { message: "either wsUrl or blueprintId is required" },
 );
+
+/** An outage of up to a week. */
+const POWER_OUTAGE_MAX_MS = 7 * 24 * 3600 * 1000;
+
+const powerRecoveryShape = {
+  transactions: z
+    .enum(["resume", "end"])
+    .optional()
+    .describe(
+      "What happens to the interrupted transactions after the reboot. Default: resume (1.x, 2.1), end (2.0.1)",
+    ),
+  txResumptionTimeoutSeconds: z
+    .number()
+    .int()
+    .min(0)
+    .max(86400)
+    .optional()
+    .describe(
+      "OCPP 2.1 TxResumptionTimeout: resume only when the outage lasted at most this long; absent or 0: end (E17.FR.01)",
+    ),
+};
 
 export const METHODS = {
   // -- lifecycle --
@@ -1190,6 +1468,31 @@ export const METHODS = {
     result: ANY,
   },
 
+  // #455: a power loss is neither a network loss nor an OCPP Reset. Answers
+  // `{ ok: true, ... }` or `{ ok: false, error }` (`cp_not_found`,
+  // `already_powered_off`, `not_powered_off`, `unsupported_transport` for an
+  // OCPP-S (SOAP) charge point).
+  "power.loss": {
+    params: z.object({
+      cpId: STR_64K,
+      restoreAfterMs: z
+        .number()
+        .int()
+        .min(0)
+        .max(POWER_OUTAGE_MAX_MS)
+        .optional()
+        .describe(
+          "Outage length; power returns by itself after it. Absent: off until power.restore",
+        ),
+      ...powerRecoveryShape,
+    }),
+    result: ANY,
+  },
+  "power.restore": {
+    params: z.object({ cpId: STR_64K, ...powerRecoveryShape }),
+    result: ANY,
+  },
+
   // -- explicit non-jsonMode ops (~10) --
   "cp.list": {
     params: cpListParamsSchema,
@@ -1219,6 +1522,31 @@ export const METHODS = {
       failed: ARRAY_1000(z.object({ cpId: STR_64K, reason: STR_64K })),
     }),
   },
+  "fleet.template.list": {
+    params: EMPTY,
+    result: ARRAY_1000(fleetTemplateSchema),
+  },
+  "fleet.template.get": {
+    params: z.object({ id: STR_256.min(1) }),
+    result: fleetTemplateSchema,
+  },
+  "fleet.template.save": {
+    params: z.object({ template: fleetTemplateSchema }),
+    result: z.object({ id: STR_256 }),
+  },
+  "fleet.template.delete": {
+    params: z.object({ id: STR_256.min(1) }),
+    result: z.object({ ok: z.literal(true) }),
+  },
+  // Partial success is the result, like `cp.create_many`.
+  "fleet.create": {
+    params: fleetCreateParamsSchema,
+    result: z.object({
+      templateId: STR_256,
+      created: ARRAY_1000(STR_64K),
+      failed: ARRAY_1000(z.object({ cpId: STR_64K, reason: STR_64K })),
+    }),
+  },
   "cp.update": { params: updateParamsSchema, result: ANY },
   "cp.delete": { params: z.object({ cpId: NON_EMPTY_STR }), result: ANY },
   "cp.labels.set": {
@@ -1244,6 +1572,11 @@ export const METHODS = {
   // #470: partial success is the result, like `cp.create_many`: every
   // selected id is in `matched`, then in exactly one of the other two.
   "cp.bulk": { params: cpBulkParamsSchema, result: cpBulkResultSchema },
+  // #486: `cp.bulk`'s selector, a scenario template instead of an action.
+  "cp.scenario.run": {
+    params: cpScenarioRunParamsSchema,
+    result: cpScenarioRunResultSchema,
+  },
   // `limit` selects the NEWEST n entries (tail), not the oldest -- it used to
   // be the oldest, which made the parameter useless on a charge point that had
   // been up for days. `offset` pages backwards from the newest; `order`
@@ -1316,9 +1649,16 @@ export const METHODS = {
       total: z.number().int().min(0),
     }),
   },
+  // #489: `cpId` omitted lists across every charge point (like
+  // `scenario.runs.list`), newest start first, ties by record order. `labels`
+  // narrows a fleet-wide listing to a selector (`{}` = all, as in `cp.list`);
+  // `startedFrom` (inclusive) / `startedTo` (exclusive) bound the start time.
   "sessions.list": {
     params: z.object({
-      cpId: NON_EMPTY_STR,
+      cpId: NON_EMPTY_STR.optional(),
+      labels: labelsSchema.optional(),
+      startedFrom: ISO_INSTANT.optional(),
+      startedTo: ISO_INSTANT.optional(),
       connectorId: CONN_POS.optional(),
       outcomes: z
         .array(z.enum(CHARGING_SESSION_OUTCOMES))
@@ -1419,6 +1759,11 @@ export const EXPLICIT_METHODS = [
   "blueprint.list",
   "blueprint.save",
   "blueprint.delete",
+  "fleet.template.list",
+  "fleet.template.get",
+  "fleet.template.save",
+  "fleet.template.delete",
+  "fleet.create",
   "cp.update",
   "cp.delete",
   "cp.labels.set",
@@ -1426,6 +1771,7 @@ export const EXPLICIT_METHODS = [
   "behavior.list",
   "behavior.reload",
   "cp.bulk",
+  "cp.scenario.run",
   "logs.get",
   "logs.clear",
   "state.reset",
@@ -1455,6 +1801,8 @@ export const EXPLICIT_METHODS = [
   "network_sim.cp.get",
   "network_sim.cp.save",
   "network_sim.disconnect.trigger",
+  "power.loss",
+  "power.restore",
   "vehicle_profiles.list",
   "vehicle_profiles.save",
   "vehicle_profiles.delete",

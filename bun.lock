@@ -97,6 +97,7 @@
         "@ocpp-cp-sim/contracts": "workspace:*",
         "@ocpp-cp-sim/core": "workspace:*",
         "@ocpp-cp-sim/k6-runtime": "workspace:*",
+        "@ocpp-cp-sim/ocpp": "workspace:*",
         "@ocpp-cp-sim/trace": "workspace:*",
       },
     },

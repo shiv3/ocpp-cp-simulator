@@ -53,5 +53,6 @@
   "scenarioNodes.transaction.start": "开始",
   "scenarioNodes.transaction.stop": "停止",
   "scenarioNodes.transaction.tag": "标签：{{value}}",
-  "scenarioNodes.callResponse.noAnswer": "不应答"
+  "scenarioNodes.callResponse.noAnswer": "不应答",
+  "scenarioNodes.useBehavior.disabled": "本次运行中禁用"
 }

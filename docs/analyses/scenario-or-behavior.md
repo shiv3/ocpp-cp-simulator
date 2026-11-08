@@ -145,6 +145,41 @@ A `csmsCallTrigger` (`behavior: "replace"`) then a `callResponse` whose payload 
 reads the request. The same in code reads `req`. Both answer once; a second CALL while the first is open gets
 `onBusy`.
 
+### Tune a default from a scenario
+
+The defaults have knobs ([which](../entities/default-behaviors.md#params)). Select the default by id and set the
+param; it lasts for the run and nothing else is rewritten:
+
+```json
+{
+  "type": "useBehavior",
+  "data": {
+    "behaviorId": "default.firmware",
+    "params": { "stepMs": 30000, "failAt": "InstallationFailed" }
+  }
+}
+```
+
+The same knobs for the station, not for a run: `--behavior-params 'default.firmware={"stepMs":30000}'`,
+`behaviorParams` on `cp.create` / `cp.update`, or `cp.behaviors.set`. A value that does not fit is refused with the
+reason (`"stepMs": "30000"` is not a number), never converted. When the knob you need does not exist, that is the
+signal to write a behavior (below) and select it with `useBehavior`; a node is not added per knob.
+
+### Switch a default off from a scenario
+
+```json
+{
+  "type": "useBehavior",
+  "data": { "behaviorId": "default.firmware", "mode": "disable" }
+}
+```
+
+For the run, `UpdateFirmware` is answered with the version's `Accepted` and nothing follows: no status
+notifications. Compare "Disable an action's follow-up" above, which is the same thing as a behavior for the
+station's whole life. `disable` works for any behavior id, a code behavior included (it then silences its rules for
+the run), and takes no params. Because it answers `Accepted` without acting, `default.reset` disabled does not
+reset and `default.transaction` disabled starts nothing; use `inboundPolicy` to refuse instead.
+
 ### Select a behavior from a scenario
 
 Load it dormant (`cp.loadBehavior(b, { dormant: true })` in embedding code; a behavior given with `--behavior` is
@@ -157,10 +192,14 @@ already serving), then add a `useBehavior` node with its id. While the run is al
 `runBehavior()` drives it on a virtual clock against an in-memory fake CSMS and a state that cannot be stored fails
 the test (`packages/core/src/test/behavior/runBehavior.ts`, [testing strategy](testing-strategy.md#behavior-tests)).
 
-## JSON node and `ctx` verb
+## Node ↔ ctx parity
 
 The same job has a name in each world. Where a column is empty there is no equivalent yet; the engine's intended
 end state is that the scenario executor becomes a client of `ctx` ([contract](../concepts/charger-engine.md#where-this-is-going)).
+Keep this table current: when a scenario node or a `ctx` member is added, its row is added in the same change, so the
+gap is visible instead of argued. A proposed new node must pass the [test for a new
+node](../concepts/scenario-format.md#what-the-format-will-not-do): a behavior parameter, a wait, a verb `ctx` already
+has, or a listed decision node.
 
 | Scenario node                                | `ctx` / behavior member                                                        | Note                                                                                                        |
 | -------------------------------------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
@@ -177,5 +216,8 @@ end state is that the scenario executor becomes a client of `ctx` ([contract](..
 | `statusTrigger`, `connectionTrigger`         | `on.connectorStatus`, `on.connected`, `on.disconnected`                        | A hook fires on every event; a trigger waits once                                                           |
 | `remoteStartTrigger`, `remoteStopTrigger`    | `onCall` for the remote actions                                                | The trigger parks the default; see [parking](../concepts/call-precedence.md#scenario-parking-is-not-a-rule) |
 | `useBehavior`                                | select by id (`--use-behavior`, `behaviors`, `cp.behaviors.set`)               |                                                                                                             |
+| `useBehavior` `params`                       | `Behavior.params` read as `ctx.params`; `--behavior-params`, `behaviorParams`  | A parameter of a behavior; the layer ends with the run                                                      |
+| `useBehavior` `mode: "disable"`              | `onCall` `replace` returning `ctx.accepted(action)`                            | For the run, scenario rules outrank code                                                                    |
+| `unlockOutcome`                              | `default.unlock` param `outcome`                                               | The node sets the connector's value (persistent); the param is for the station or a run                     |
 | —                                            | `beforeSend`, `on.callResult`, `on.transactionStarted` / `Stopped`, `onResume` | Code only: hooks and rewriting have no node                                                                 |
 | pause, step, resume, verdicts                | —                                                                              | Scenario only                                                                                               |

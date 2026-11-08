@@ -277,10 +277,19 @@ export type CallResponseNodeData = BaseNodeData &
     skipValidation?: boolean;
   };
 
-/** Use Behavior Node Data (schema 1.5, #566): data only, the id of a behavior
- *  loaded on the station. Fails the run if none has that id. */
+/** Use Behavior Node Data (schema 1.5, #566; `params` and `mode` 1.6, #654):
+ *  data only, the id of a behavior (loaded on the station, or a built-in
+ *  `default.*`). Fails the run if none has that id.
+ *
+ *  `mode: "use"` (the default) selects it; `params` are its knobs for the run,
+ *  merged over the station's selection and the behavior's defaults, validated
+ *  against its params schema, and refused (the run fails) when they do not
+ *  fit. `mode: "disable"` answers each of its CALLs with the version's
+ *  `accepted` answer and nothing after, for the run; it takes no params. */
 export type UseBehaviorNodeData = BaseNodeData & {
   behaviorId: string;
+  mode?: "use" | "disable";
+  params?: Record<string, unknown>;
 };
 
 /**
@@ -527,7 +536,7 @@ export interface ScenarioTrigger {
  * See `packages/core/schema/scenario.schema.json` (Draft 2020-12) and
  * `docs/concepts/scenario-format.md`.
  */
-export const SCENARIO_SCHEMA_VERSION = "1.5";
+export const SCENARIO_SCHEMA_VERSION = "1.6";
 
 /**
  * Scenario definition
@@ -897,8 +906,12 @@ export interface ScenarioExecutorCallbacks {
    *  armed and answer the CALLs it still owns with CALLERROR `InternalError`. */
   onRunEnded?: () => void;
   /** Schema 1.5: select the behavior loaded on the station with this id;
-   *  throws if there is none. */
-  onUseBehavior?: (behaviorId: string, nodeId: string) => void;
+   *  throws if there is none. Schema 1.6: `params` and `mode: "disable"`. */
+  onUseBehavior?: (
+    behaviorId: string,
+    nodeId: string,
+    options?: { mode: "use" | "disable"; params?: Record<string, unknown> },
+  ) => void;
   /** Issue #240: park until the WebSocket reaches `event`. Level-triggered;
    *  never rejects on disconnect. */
   onWaitForConnection?: (event: "connected" | "disconnected") => Promise<void>;

@@ -1,7 +1,7 @@
 ---
-title: Scenario file format (v1.5)
+title: Scenario file format (v1.6)
 type: concept
-summary: The node-graph JSON format for scripted charge-point behavior — 26 node types, edges, triggers, EV settings, assertions with a two-axis verdict — as exported by the editor and accepted by the CLI, daemon and MCP; JSON Schema is the source of truth.
+summary: The node-graph JSON format for scripted charge-point behavior — 26 node types, edges, triggers, EV settings, assertions with a two-axis verdict, `useBehavior` params and disable (1.6) and the limits of the format — as exported by the editor and accepted by the CLI, daemon and MCP; JSON Schema is the source of truth.
 sources:
   - packages/core/schema/scenario.schema.json
   - packages/core/src/cp/application/scenario/ScenarioTypes.ts
@@ -18,7 +18,7 @@ sources:
   - packages/core/src/cp/domain/connector/MeterValueScheduler.ts
   - packages/core/src/cp/infrastructure/transport/OCPPMessageHandlerV201.ts
   - packages/core/src/cp/infrastructure/transport/soap/OCPPSoapHandler.ts
-  - "issues #214, #240, #247, #239, #301, #332, #566"
+  - "issues #214, #240, #247, #239, #301, #332, #566, #654"
   - packages/core/src/cp/application/scenario/ScenarioRuntime.ts
   - packages/core/src/cp/application/scenario/resolveFrom.ts
   - apps/web/src/console/lib/scenarioLibrary.ts
@@ -34,7 +34,7 @@ related:
 updated: 2026-11-08
 ---
 
-# Scenario File Format (v1.5)
+# Scenario File Format (v1.6)
 
 A **node-graph JSON file** describing a scripted charge-point behavior: a
 directed graph of typed nodes (status changes, transactions, meter values,
@@ -52,7 +52,7 @@ that schema, not a replacement for it.
 
 ## Status & scope
 
-- **Version `1.5`** (`schemaVersion`). Files stamped `1.0` to `1.4` remain valid — 1.x
+- **Version `1.6`** (`schemaVersion`). Files stamped `1.0` to `1.5` remain valid — 1.x
   is purely additive (see [Versioning](#versioning)).
 - Covers the full 26-node discriminated union the scenario engine supports
   (see [Node types](#node-types) below).
@@ -82,7 +82,7 @@ Mirrors the [OCPP trace format](./trace-format.md#versioning)'s rules:
 
 | Field                   | Type                                                                            | Required | Notes                                                                                                                                                                                                      |
 | ----------------------- | ------------------------------------------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schemaVersion`         | string                                                                          | No       | e.g. `"1.5"` (current); `"1.4"`, `"1.3"`, `"1.2"`, `"1.1"` and `"1.0"` remain valid — additive. Absent on files predating issue #214 — still valid.                                                        |
+| `schemaVersion`         | string                                                                          | No       | e.g. `"1.6"` (current); `"1.5"`, `"1.4"`, `"1.3"`, `"1.2"`, `"1.1"` and `"1.0"` remain valid — additive. Absent on files predating issue #214 — still valid.                                               |
 | `id`                    | string                                                                          | Yes      | Stable scenario identifier.                                                                                                                                                                                |
 | `templateId`            | string                                                                          | No       | Set automatically when a built-in template is instantiated; absent on hand-authored scenarios. See [Template instances](#template-instances).                                                              |
 | `libraryId`             | string                                                                          | No       | Set by the web console on a connector's copy of a [Library](../entities/web-console.md#scenario-library) scenario: that scenario's `id` (v1.4). Absent on Library entries and on scenarios loaded by hand. |
@@ -145,7 +145,7 @@ shape depends on `type`).
 | `connectionTrigger`  | `event` (`"connected"` \| `"disconnected"`)                      | `timeout`. See [note](#connectiontrigger-notes) below.                                                                                                                                       |
 | `ocppCall`           | `action`, `payload`                                              | `skipValidation`, `applyResponse`. See [note](#ocppcall-notes) below.                                                                                                                        |
 | `callResponse`       | `kind` (`"result"` \| `"error"` \| `"none"`)                     | `payload`, `errorCode`, `errorDescription`, `skipValidation`. See [note](#csmscalltrigger-replace-callresponse-from-and-usebehavior-schema-15).                                              |
-| `useBehavior`        | `behaviorId`                                                     | See [note](#csmscalltrigger-replace-callresponse-from-and-usebehavior-schema-15).                                                                                                            |
+| `useBehavior`        | `behaviorId`                                                     | `mode` (`"use"` \| `"disable"`), `params` (1.6). See [note](#usebehavior-params-and-disable-schema-16).                                                                                      |
 
 `status` / `targetStatus` fields use the `OCPPStatus` enum: `Available`,
 `Preparing`, `Charging`, `SuspendedEVSE`, `SuspendedEV`, `Finishing`,
@@ -279,7 +279,7 @@ has the reasoning):
 true })`, or any loaded behavior). A dormant behavior is all or none: while a run that
   reached the node is alive it has its `onCall` rules, `main`, `on` hooks and `beforeSend`; when the last such run
   ends it has none of them. Data only: a scenario never carries code. The run fails if no behavior has that
-  id.
+  id. Schema 1.6 adds `params` and `mode`, see [below](#usebehavior-params-and-disable-schema-16).
 
 The CALL is **branch-scoped**: parallel branches from Start each own the CALL their own `csmsCallTrigger`
 took, and a `callResponse` answers the nearest one of its branch. The rule ends when its CALL is answered, so
@@ -295,8 +295,8 @@ the next CALL of the action is the station's again; a loop that reaches the node
 | `callResponse` without an exchange | Fails the run (also when the CALL of its branch is already answered)                                |
 | SOAP station                       | `behavior: "replace"` fails the run when the node arms; it never falls back to the default behavior |
 
-`export-k6` refuses `behavior: "replace"`, `onBusy`, `callResponse`, `useBehavior` and a `$from` payload with a
-clear error: the k6 runtime always lets the station answer.
+`export-k6` refuses `behavior: "replace"`, `onBusy`, `callResponse`, `useBehavior` (with or without `params` or
+`mode`) and a `$from` payload with a clear error: the k6 runtime always lets the station answer.
 
 **Who wins when several things want the CALL.** A running scenario's `replace` rule wins over code behaviors,
 whatever their order of loading; among scenarios the newest run wins, and a response override or an inbound
@@ -305,10 +305,10 @@ fits in are on one page: [Who answers an inbound CALL](call-precedence.md). If y
 `replace` node, `responseOverride` and a TypeScript behavior, read [Scenario or
 behavior?](../analyses/scenario-or-behavior.md).
 
-**The scenario editor.** The browser Scenario Editor authors all of schema 1.5: a `csmsCallTrigger` form with
-`behavior` (`observe` / `replace`) and `onBusy`, a `callResponse` node and a `useBehavior` node, and it exports
-`schemaVersion: "1.5"`. There is no dedicated control for `$from` (type it in the payload JSON) and the
-`useBehavior` id is free text.
+**The scenario editor.** The browser Scenario Editor authors all of schema 1.5 and 1.6: a `csmsCallTrigger` form
+with `behavior` (`observe` / `replace`) and `onBusy`, a `callResponse` node and a `useBehavior` node (with its
+mode and a params form), and it exports `schemaVersion: "1.6"`. There is no dedicated control for `$from` (type
+it in the payload JSON) and the `useBehavior` id is free text.
 
 ```json
 {
@@ -1130,8 +1130,90 @@ reported as 48 A. The scenario editor's panel is different by design — a field
 left empty there means "inherit", and it displays empty rather than a value it
 does not hold.
 
+## `useBehavior` params and disable (schema 1.6)
+
+**Issue #654.** `useBehavior` is how a scenario _tunes_ or _switches off_ what the station does, without
+reimplementing it. Every deviation from the default is data; every new behavior is code selected by data
+([Scenario or behavior?](../analyses/scenario-or-behavior.md)). Both fields are optional, so a 1.5 node means the
+same as before.
+
+| Field    | Values            | Meaning                                                                                                                                                                                               |
+| -------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mode`   | `"use"` (default) | Select the behavior for the run; `params` are its knobs.                                                                                                                                              |
+|          | `"disable"`       | For the run, every CALL of the behavior's actions is answered with `ctx.accepted(action)` of the station's OCPP version and **nothing follows**. Takes no `params`.                                   |
+| `params` | JSON object       | Keys of the behavior's params (`behavior.list` reports the schema and defaults per behavior; the [defaults page](../entities/default-behaviors.md#params) lists the built-in ones). JSON values only. |
+
+`behaviorId` may name a loaded behavior or a built-in `default.*` one (`default.firmware`, `default.logs`,
+`default.signedFirmware`, `default.reset`, `default.unlock`): `{ "behaviorId": "default.firmware", "params": {
+"stepMs": 30000, "failAt": "InstallationFailed" } }` is the whole feature for a firmware test.
+
+- **Merge.** The behavior sees its declared `defaults`, then the keys its station's selection set (`--behavior-params`,
+  `cp.behaviors.set`), then the keys of each running scenario (the newest run on top), key by key, one level
+  deep. A key replaces the whole value.
+- **Validation, at arm time.** The merged object is checked against the behavior's params schema when the node
+  runs. A wrong type, a value outside an enum or range, a key the schema does not know or params for a behavior
+  that declares none fail the run with the reason; nothing is armed and nothing is converted (`"2000"` is not
+  `2000`). `params` that are not a JSON object, or `disable` with `params`, fail the run the same way.
+- **Lifetime.** The params and the `disable` rules end with the run, like the rules of `csmsCallTrigger` replace;
+  a loop that reaches the node again replaces its own params instead of stacking them. A `ctx.params` is fixed
+  when a CALL arrives: an update already running keeps the values it started with.
+- **Precedence.** `disable` registers scenario rules, so it outranks the behavior's own rule and every code
+  behavior ([call precedence](call-precedence.md#params-and-disable-in-the-order)). The answer has no
+  follow-up: `default.reset` disabled answers `Accepted` and does not reset, `default.transaction` disabled
+  answers a `RemoteStartTransaction` `Accepted` and starts nothing. An action of the behavior that has no
+  `Accepted` answer on the station's version is left alone; a behavior with none at all fails the run.
+- **No code.** A `params` value is data. A string in it is never evaluated, a module path or URL is not a thing a
+  param can be, and the same holds on every surface that takes params (`--behavior-params`, `cp.behaviors.set`,
+  `cp.create`, MCP).
+
+`export-k6` refuses `useBehavior` with `params` or `mode` (the whole node is refused: the k6 runtime has no
+station behavior engine to hand them to).
+
+```json
+{
+  "id": "use-fw",
+  "type": "useBehavior",
+  "data": {
+    "label": "Fail the install after 30 s steps",
+    "behaviorId": "default.firmware",
+    "params": { "stepMs": 30000, "failAt": "InstallationFailed" }
+  }
+}
+```
+
+### What the format will not do
+
+The format does **sequence, wait, select, loop and read**. A node may _read_ a value through `$from` from a
+whitelisted root and _compare it for equality_; it never derives a value. A request that needs one of the
+things below is answered with "write a behavior and select it with `useBehavior` and `params`":
+
+| The format will not…                                              | Because                                                                                               |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| do arithmetic                                                     | A value computed from another is a program; a constant is a param.                                    |
+| build strings (`${cpId}-${requestId}.log`)                        | Templating is a language, and the k6 export would fork on it.                                         |
+| iterate over connectors or other collections                      | A scenario is bound to one connector; looping over a collection is code.                              |
+| define fragments with arguments (sub-flows, functions)            | Arguments make a call graph.                                                                          |
+| read host services outside the `$from` roots                      | The roots are the contract between a run and the station.                                             |
+| transform an outgoing payload                                     | A transform is a function; use a behavior's `beforeSend`.                                             |
+| run overlapping instances of one rule                             | A scenario is one run; an always-on, overlapping rule is a behavior.                                  |
+| carry code, a module path, a URL to code or a script in any field | The trust line: code enters only from files named on the command line (`--behavior`), selected by id. |
+
+**The test for a new node.** A proposed node must be one of: (1) a **parameter** of a behavior, (2) a **wait**,
+(3) a **verb** the station already has on `ctx` (`send`, `plugIn`, `startCharging`, `notify`, …), or (4) one of the
+listed decision nodes (an equality `switch`, a seeded `choice`, `setState`, none of which exist yet). If it needs
+a `default` branch of its own it is a `switch` in disguise; if it needs two values it is a function. Otherwise it
+is a behavior.
+
+**Budget.** Schema 1.6 ships params and `disable`, and stops: a 1.7 needs a written case that params did not
+cover. The parity of scenario nodes and `ctx` members is kept in
+[Scenario or behavior?](../analyses/scenario-or-behavior.md#node--ctx-parity).
+
 ## Changelog
 
+- **v1.6**: Issue #654. `useBehavior` gains `params` (a JSON object, validated against the behavior's params
+  schema when the node runs) and `mode` (`"use"` | `"disable"`); `behaviorId` may name a built-in `default.*`
+  behavior. Purely additive — `1.5` and older files remain valid. See
+  [the note](#usebehavior-params-and-disable-schema-16).
 - **v1.5**: Issue #566. `csmsCallTrigger` gains `behavior` (`"observe"` | `"replace"`) and `onBusy`; adds the
   `callResponse` and `useBehavior` node types and the `{ "$from": … }` payload reference. Purely additive —
   `1.4` and older files remain valid. See

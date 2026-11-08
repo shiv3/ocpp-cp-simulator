@@ -1,8 +1,9 @@
 import * as fs from "fs";
 
+import type { ChargePointCapabilityProfile } from "@ocpp-cp-sim/core/cp/domain/charge-point/CapabilityProfile";
 import { CLIChargePointService } from "../service";
 import type { SessionSettledInfo } from "../service";
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import type { Behavior, JsonObject } from "@ocpp-cp-sim/contracts/behavior";
 import {
   behaviorFitProblem,
   behaviorShapeProblem,
@@ -27,12 +28,14 @@ import { buildSoapCallbackUrl } from "../soapCallbackUrl";
 import { DEFAULT_SOAP_PATH } from "../soapPath";
 import { isSoapVersion } from "@ocpp-cp-sim/core/cp/domain/types/OcppVersion";
 import { perChargePointTables } from "@ocpp-cp-sim/core/cp/domain/persistence/schema";
+import { buildUpsert } from "@ocpp-cp-sim/core/cp/domain/persistence/upsert";
 import {
   labelsSchema,
   matchesLabelSelector,
   normalizeLabels,
   type Labels,
 } from "@ocpp-cp-sim/contracts/labels";
+import { transportConfigSchema } from "@ocpp-cp-sim/contracts/transportConfig";
 import type { ScenarioRunRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/ScenarioRunRepository";
 import { createScenarioRunRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/createScenarioRunRepository";
 import type { ChargingSessionRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/ChargingSessionRepository";
@@ -92,7 +95,11 @@ interface ChargePointRow {
   created_at: string;
   labels: string | null;
   behaviors: string | null;
+  behavior_params: string | null;
   tx_updated_meter_values: number | null;
+  inbound_validation: string | null;
+  capability_profile: string | null;
+  transport_options: string | null;
 }
 
 interface CPRegistryOptions {
@@ -146,6 +153,12 @@ export class CPRegistry {
    * back, so a run with fewer files does not shrink the stored selection.
    */
   private readonly storedSelection = new Map<string, string | null>();
+  /**
+   * The raw `behavior_params` column of the same rows, kept and written back
+   * under the same rule as {@link storedSelection}: the params of a behavior
+   * this run did not load are not lost with the selection that names it.
+   */
+  private readonly storedParams = new Map<string, string | null>();
 
   constructor(
     private readonly bus: EventBus,
@@ -244,7 +257,8 @@ export class CPRegistry {
         "central_system_url, soap_callback_url, soap_path, " +
         "security_profile, authorization_key, cpo_name, " +
         "tls_ca_path, tls_cert_path, tls_key_path, " +
-        "basic_auth, boot_notif, created_at, labels, behaviors, tx_updated_meter_values " +
+        "basic_auth, boot_notif, created_at, labels, behaviors, behavior_params, tx_updated_meter_values, " +
+        "inbound_validation, capability_profile, transport_options " +
         "FROM charge_points ORDER BY created_at ASC",
     );
     const restored: string[] = [];
@@ -309,10 +323,26 @@ export class CPRegistry {
           ) ?? undefined,
         labels: restoreLabels(row),
         ...restored_behaviors.init,
+        ...restoreBehaviorParams(
+          row,
+          this.library,
+          restored_behaviors.init.behaviors,
+        ),
         // #347: NULL — off, or a row older than the column — restores as off.
         ...(row.tx_updated_meter_values === 1
           ? { txUpdatedMeterValues: true }
           : {}),
+        // #593: NULL, or a value this build does not know, restores as the
+        // default (warn).
+        ...(row.inbound_validation === "off" ||
+        row.inbound_validation === "warn" ||
+        row.inbound_validation === "enforce"
+          ? { inboundValidation: row.inbound_validation }
+          : {}),
+        // #609: NULL restores the built-in behaviour.
+        ...restoreTransport(row),
+        // #618: NULL, or JSON this build cannot read, restores as no profile.
+        ...restoreCapabilityProfile(row.capability_profile),
       };
       // #354 follow-up: a SOAP charge point whose callback URL was derived
       // from a base the daemon no longer has — the tunnel was not opened this
@@ -342,6 +372,7 @@ export class CPRegistry {
         const svc = this.instantiate(init, { reconcileSessions: false });
         if (restored_behaviors.column !== undefined) {
           this.storedSelection.set(row.cp_id, restored_behaviors.column);
+          this.storedParams.set(row.cp_id, row.behavior_params ?? null);
         }
         // Restore per-connector runtime state (OCPP status, in-flight
         // transaction, meter, soc) BEFORE wiring the WebSocket so the
@@ -398,6 +429,7 @@ export class CPRegistry {
         // One row that cannot be rebuilt is not the daemon's end: the others
         // come back, and this one stays in the table for a start that can.
         this.storedSelection.delete(row.cp_id);
+        this.storedParams.delete(row.cp_id);
         // A step after `instantiate` failed: the service is registered but was
         // never wired. Take it out, or it sits in list() and never connects.
         const partial = this.services.get(row.cp_id);
@@ -587,19 +619,29 @@ export class CPRegistry {
   setBehaviors(
     cpId: string,
     ids: readonly string[] | undefined,
+    params?: Readonly<Record<string, JsonObject>>,
   ): string[] | null {
     const svc = this.services.get(cpId);
     if (!svc) return null;
     const wanted = this.library.select(ids);
     // Nothing is written until the station has shown it can run the selection:
-    // the version checks first, then the live change, then the row.
+    // the version checks first, then the params, then the live change, then
+    // the row.
     this.checkFit(svc.getInit().ocppVersion, wanted);
-    svc.setBehaviors(wanted, ids);
+    this.library.checkParams(wanted, params);
+    svc.setBehaviors(wanted, ids, params);
     this.database?.run(
-      "UPDATE charge_points SET behaviors = ? WHERE cp_id = ?",
-      [ids ? JSON.stringify(ids) : null, cpId],
+      "UPDATE charge_points SET behaviors = ?, behavior_params = ? WHERE cp_id = ?",
+      [
+        ids ? JSON.stringify(ids) : null,
+        params && Object.keys(params).length > 0
+          ? JSON.stringify(params)
+          : null,
+        cpId,
+      ],
     );
     this.storedSelection.delete(cpId);
+    this.storedParams.delete(cpId);
     this.notifyRegistryMembership({ change: "updated", cpId, service: svc });
     return svc.behaviorIds();
   }
@@ -689,6 +731,7 @@ export class CPRegistry {
     const preparedInit = this.prepareInit(init);
     // A removed station's stored selection does not follow its id.
     this.storedSelection.delete(init.cpId);
+    this.storedParams.delete(init.cpId);
     this.persistCreate(preparedInit);
     let svc: CLIChargePointService;
     try {
@@ -750,6 +793,7 @@ export class CPRegistry {
       : existing.engineStateSnapshot();
     const previousInit = existing.getInit();
     const previousColumn = this.storedSelection.get(init.cpId);
+    const previousParamsColumn = this.storedParams.get(init.cpId);
     // Find out before the old station is closed: a selection this engine
     // refuses must leave the station connected and as it was.
     existing.assertBehaviorsLoadable(
@@ -763,7 +807,15 @@ export class CPRegistry {
     // this run holds fewer behaviors than it lists.
     const keepStored =
       init.behaviors === undefined && previousColumn !== undefined;
-    this.persistCreate(preparedInit, keepStored ? previousColumn : undefined); // ON CONFLICT UPDATE — leaves scenarios intact
+    // The params follow the selection: kept from the row unless the request
+    // names new ones.
+    this.persistCreate(
+      preparedInit,
+      keepStored ? previousColumn : undefined,
+      keepStored && init.behaviorParams === undefined
+        ? previousParamsColumn
+        : undefined,
+    ); // ON CONFLICT UPDATE — leaves scenarios intact
     let svc: CLIChargePointService;
     try {
       svc = this.instantiate(preparedInit, { engineState });
@@ -779,7 +831,7 @@ export class CPRegistry {
             soapCallbackUrlDerived: undefined,
           }
         : previousInit;
-      this.persistCreate(stored, previousColumn);
+      this.persistCreate(stored, previousColumn, previousParamsColumn);
       const back = this.instantiate(previousInit, { engineState });
       // Everything the success path restores: the old station comes back whole.
       this.networkSimManager?.onCpCreated(previousInit.cpId);
@@ -793,7 +845,12 @@ export class CPRegistry {
       }
       throw error;
     }
-    if (!keepStored) this.storedSelection.delete(init.cpId);
+    if (!keepStored) {
+      this.storedSelection.delete(init.cpId);
+      this.storedParams.delete(init.cpId);
+    } else if (init.behaviorParams !== undefined) {
+      this.storedParams.delete(init.cpId);
+    }
     // Attach network simulation config so the re-created CP gets its faults.
     if (this.networkSimManager) {
       this.networkSimManager.onCpCreated(preparedInit.cpId);
@@ -862,7 +919,10 @@ export class CPRegistry {
     });
     if (engineState) svc.restoreEngineState(engineState);
     try {
-      svc.loadBehaviors(this.library.select(init.behaviors));
+      svc.loadBehaviors(
+        this.library.select(init.behaviors),
+        init.behaviorParams,
+      );
     } catch (error) {
       // A station that cannot load its behaviors is not registered: no ghost
       // under the id, nothing for a later `list` or restart to trip over.
@@ -915,7 +975,9 @@ export class CPRegistry {
     // Ids only: an id that names no loaded behavior is refused here, before
     // anything is persisted, with the loaded ids in the message.
     if (init.behaviors !== undefined) this.library.check(init.behaviors);
-    this.checkFit(init.ocppVersion, this.library.select(init.behaviors));
+    const selected = this.library.select(init.behaviors);
+    this.checkFit(init.ocppVersion, selected);
+    this.library.checkParams(selected, init.behaviorParams);
     if (
       (init.securityProfile === 1 || init.securityProfile === 2) &&
       !init.authorizationKey
@@ -957,79 +1019,82 @@ export class CPRegistry {
 
   /**
    * `behaviorsColumn`, when given, is written as the `behaviors` value instead
-   * of the init's own (see {@link storedSelection}).
+   * of the init's own, `paramsColumn` likewise for `behavior_params` (see
+   * {@link storedSelection}).
    */
   private persistCreate(
     init: ChargePointInitOptions,
     behaviorsColumn?: string | null,
+    paramsColumn?: string | null,
   ): void {
     if (!this.database) return;
-    this.database.run(
-      "INSERT INTO charge_points " +
-        "(cp_id, ws_url, supervision_urls, url_distribution, " +
-        "id_tags, id_tag_distribution, id_tag_file, " +
-        "connectors, vendor, model, ocpp_version, " +
-        "central_system_url, soap_callback_url, soap_path, " +
-        "security_profile, authorization_key, cpo_name, " +
-        "tls_ca_path, tls_cert_path, tls_key_path, " +
-        "basic_auth, boot_notif, created_at, labels, behaviors, tx_updated_meter_values) " +
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
-        "ON CONFLICT (cp_id) DO UPDATE SET " +
-        "ws_url = excluded.ws_url, " +
-        "supervision_urls = excluded.supervision_urls, " +
-        "url_distribution = excluded.url_distribution, " +
-        "id_tags = excluded.id_tags, " +
-        "id_tag_distribution = excluded.id_tag_distribution, " +
-        "id_tag_file = excluded.id_tag_file, " +
-        "connectors = excluded.connectors, " +
-        "vendor = excluded.vendor, model = excluded.model, " +
-        "ocpp_version = excluded.ocpp_version, " +
-        "central_system_url = excluded.central_system_url, " +
-        "soap_callback_url = excluded.soap_callback_url, " +
-        "soap_path = excluded.soap_path, " +
-        "security_profile = excluded.security_profile, " +
-        "authorization_key = excluded.authorization_key, " +
-        "cpo_name = excluded.cpo_name, " +
-        "tls_ca_path = excluded.tls_ca_path, " +
-        "tls_cert_path = excluded.tls_cert_path, " +
-        "tls_key_path = excluded.tls_key_path, " +
-        "basic_auth = excluded.basic_auth, boot_notif = excluded.boot_notif, " +
-        "labels = excluded.labels, " +
-        "behaviors = excluded.behaviors, " +
-        "tx_updated_meter_values = excluded.tx_updated_meter_values",
+    const { sql, params } = buildUpsert(
+      "charge_points",
       [
-        init.cpId,
-        init.wsUrl,
-        init.supervisionUrls ? JSON.stringify(init.supervisionUrls) : null,
-        init.urlDistribution ?? null,
-        init.idTags ? JSON.stringify(init.idTags) : null,
-        init.idTagDistribution ?? null,
-        init.idTagFile ?? null,
-        init.connectors,
-        init.vendor,
-        init.model,
-        init.ocppVersion ?? "OCPP-1.6J",
-        init.centralSystemUrl ?? init.wsUrl,
-        init.soapCallbackUrl ?? null,
-        init.soapPath ?? null,
-        init.securityProfile ?? null,
-        init.authorizationKey ?? null,
-        init.cpoName ?? null,
-        init.tlsCaPath ?? null,
-        init.tlsCertPath ?? null,
-        init.tlsKeyPath ?? null,
-        init.basicAuth ? JSON.stringify(init.basicAuth) : null,
-        init.bootNotification ? JSON.stringify(init.bootNotification) : null,
-        new Date().toISOString(),
-        labelsColumn(init.labels),
-        behaviorsColumn !== undefined
-          ? behaviorsColumn
-          : init.behaviors
-            ? JSON.stringify(init.behaviors)
+        ["cp_id", init.cpId],
+        ["ws_url", init.wsUrl],
+        [
+          "supervision_urls",
+          init.supervisionUrls ? JSON.stringify(init.supervisionUrls) : null,
+        ],
+        ["url_distribution", init.urlDistribution ?? null],
+        ["id_tags", init.idTags ? JSON.stringify(init.idTags) : null],
+        ["id_tag_distribution", init.idTagDistribution ?? null],
+        ["id_tag_file", init.idTagFile ?? null],
+        ["connectors", init.connectors],
+        ["vendor", init.vendor],
+        ["model", init.model],
+        ["ocpp_version", init.ocppVersion ?? "OCPP-1.6J"],
+        ["central_system_url", init.centralSystemUrl ?? init.wsUrl],
+        ["soap_callback_url", init.soapCallbackUrl ?? null],
+        ["soap_path", init.soapPath ?? null],
+        ["security_profile", init.securityProfile ?? null],
+        ["authorization_key", init.authorizationKey ?? null],
+        ["cpo_name", init.cpoName ?? null],
+        ["tls_ca_path", init.tlsCaPath ?? null],
+        ["tls_cert_path", init.tlsCertPath ?? null],
+        ["tls_key_path", init.tlsKeyPath ?? null],
+        ["basic_auth", init.basicAuth ? JSON.stringify(init.basicAuth) : null],
+        [
+          "boot_notif",
+          init.bootNotification ? JSON.stringify(init.bootNotification) : null,
+        ],
+        ["created_at", new Date().toISOString()],
+        ["labels", labelsColumn(init.labels)],
+        [
+          "behaviors",
+          behaviorsColumn !== undefined
+            ? behaviorsColumn
+            : init.behaviors
+              ? JSON.stringify(init.behaviors)
+              : null,
+        ],
+        [
+          "behavior_params",
+          paramsColumn !== undefined
+            ? paramsColumn
+            : init.behaviorParams && Object.keys(init.behaviorParams).length > 0
+              ? JSON.stringify(init.behaviorParams)
+              : null,
+        ],
+        ["tx_updated_meter_values", init.txUpdatedMeterValues ? 1 : null],
+        ["inbound_validation", init.inboundValidation ?? null],
+        [
+          "capability_profile",
+          init.capabilityProfile
+            ? JSON.stringify(init.capabilityProfile)
             : null,
-        init.txUpdatedMeterValues ? 1 : null,
+        ],
+        [
+          "transport_options",
+          init.transport ? JSON.stringify(init.transport) : null,
+        ],
       ],
+      ["cp_id"],
+      // The row keeps the time it was first created.
+      ["created_at"],
     );
+    this.database.run(sql, params);
   }
 
   private restoreTlsFromPaths(
@@ -1129,6 +1194,7 @@ export class CPRegistry {
     this.unsubscribes.delete(cpId);
     this.services.delete(cpId);
     this.storedSelection.delete(cpId);
+    this.storedParams.delete(cpId);
     if (opts.notify !== false) {
       this.notifyRegistryMembership({ change: "removed", cpId, service: svc });
     }
@@ -1214,6 +1280,26 @@ function restoreLabels(row: ChargePointRow): Labels | undefined {
 }
 
 /**
+ * #609: the stored transport settings, or nothing. A value that is not JSON or
+ * fails the schema is dropped with a warning, so one damaged row does not stop
+ * the restore: the charge point comes back with the built-in behaviour.
+ */
+function restoreTransport(
+  row: ChargePointRow,
+): Pick<ChargePointInitOptions, "transport"> {
+  const raw = safeJsonParse<unknown>(row.transport_options);
+  if (raw === null) return {};
+  const parsed = transportConfigSchema.safeParse(raw);
+  if (!parsed.success) {
+    console.warn(
+      `[CPRegistry] ignoring invalid stored transport options for ${row.cp_id}`,
+    );
+    return {};
+  }
+  return { transport: parsed.data };
+}
+
+/**
  * Read the stored selection back, for a station that speaks `ocppVersion`.
  *
  * What this run cannot honor is left out of memory only: an id the library
@@ -1265,6 +1351,73 @@ function restoreBehaviors(
     return { init: { behaviors: kept } };
   }
   return { init: { behaviors: kept }, column: row.behaviors };
+}
+
+/**
+ * Read the stored behavior params back. Like the selection, what this run
+ * cannot honor is left out of memory with a warning: an entry for a behavior
+ * the station does not run, or one that no longer fits the schema of the
+ * behavior (a reloaded file changed it). The station comes back with that
+ * behavior on its defaults rather than not at all.
+ */
+function restoreBehaviorParams(
+  row: ChargePointRow,
+  library: BehaviorLibrary,
+  selection: readonly string[] | undefined,
+): { behaviorParams?: Record<string, JsonObject> } {
+  const parsed = safeJsonParse<unknown>(row.behavior_params);
+  if (parsed === null) {
+    if (row.behavior_params) {
+      console.warn(
+        `[CPRegistry] ${row.cp_id}: the stored behavior params cannot be read; every behavior runs with its defaults`,
+      );
+    }
+    return {};
+  }
+  if (typeof parsed !== "object" || Array.isArray(parsed)) {
+    console.warn(
+      `[CPRegistry] ${row.cp_id}: the stored behavior params cannot be read; every behavior runs with its defaults`,
+    );
+    return {};
+  }
+  const kept: Record<string, JsonObject> = {};
+  const running = library.select(selection);
+  for (const [id, set] of Object.entries(parsed as Record<string, unknown>)) {
+    try {
+      library.checkParams(running, { [id]: set as JsonObject });
+      kept[id] = set as JsonObject;
+    } catch (error) {
+      console.warn(
+        `[CPRegistry] ${row.cp_id}: the stored params of ${id} are left out: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  return Object.keys(kept).length > 0 ? { behaviorParams: kept } : {};
+}
+
+function restoreCapabilityProfile(
+  raw: string | null,
+): { capabilityProfile: ChargePointCapabilityProfile } | Record<string, never> {
+  const parsed = safeJsonParse<unknown>(raw);
+  if (typeof parsed !== "object" || parsed === null) return {};
+  const { disabledActions, triggerMessageTargets } = parsed as Record<
+    string,
+    unknown
+  >;
+  const names = (value: unknown): string[] | undefined =>
+    Array.isArray(value) && value.every((v) => typeof v === "string")
+      ? (value as string[])
+      : undefined;
+  const profile: {
+    -readonly [
+      K in keyof ChargePointCapabilityProfile
+    ]: ChargePointCapabilityProfile[K];
+  } = {};
+  const disabled = names(disabledActions);
+  const targets = names(triggerMessageTargets);
+  if (disabled) profile.disabledActions = disabled;
+  if (targets) profile.triggerMessageTargets = targets;
+  return { capabilityProfile: profile };
 }
 
 function safeJsonParse<T>(raw: string | null): T | null {
@@ -1329,8 +1482,12 @@ function preserveOmittedInit(
     tlsKeyPath: next.tlsKeyPath ?? existing.tlsKeyPath,
     labels: next.labels ?? existing.labels,
     behaviors: next.behaviors ?? existing.behaviors,
+    behaviorParams: next.behaviorParams ?? existing.behaviorParams,
     txUpdatedMeterValues:
       next.txUpdatedMeterValues ?? existing.txUpdatedMeterValues,
+    inboundValidation: next.inboundValidation ?? existing.inboundValidation,
+    transport: next.transport ?? existing.transport,
+    capabilityProfile: next.capabilityProfile ?? existing.capabilityProfile,
   };
 }
 

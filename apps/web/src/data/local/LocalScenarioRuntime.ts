@@ -9,6 +9,7 @@ import type { ChargePoint } from "@ocpp-cp-sim/core/cp/domain/charge-point/Charg
 import type { Connector } from "@ocpp-cp-sim/core/cp/domain/connector/Connector";
 import type { SqliteScenarioRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/SqliteScenarioRepository";
 import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import type { ScenarioRunRecorder } from "@ocpp-cp-sim/core/cp/application/verification/ScenarioRunRecorder";
 import type { ChargePointEvent } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
 
 type ScenarioDefinitionSource = Pick<
@@ -46,6 +47,8 @@ export class LocalScenarioRuntime {
     private readonly chargePoint: ChargePoint,
     private readonly definitions: ScenarioDefinitionSource,
     private readonly emit: (event: ChargePointEvent) => void,
+    /** #394: writes each finished run's report to the run history. */
+    private readonly recorder?: ScenarioRunRecorder,
   ) {
     chargePoint.connectors.forEach((connector) => this.attach(connector));
 
@@ -78,6 +81,7 @@ export class LocalScenarioRuntime {
       chargePoint,
       () => createScenarioExecutorCallbacks({ chargePoint, connector }),
       connector.scenarioEvents,
+      this.recorder,
     );
     connector.setScenarioManager(manager);
 
@@ -158,9 +162,18 @@ export class LocalScenarioRuntime {
   private forwardScenarioEvents(connector: Connector): void {
     const events = connector.scenarioEvents;
     const connectorId = connector.id;
+    // #394: the run id the manager minted, on every lifecycle event.
+    const runIdOf = (scenarioId: string) => ({
+      runId: connector.scenarioManager?.getRunId(scenarioId),
+    });
     this.unsubscribes.push(
       events.on("execution.started", ({ scenarioId }) =>
-        this.emit({ type: "scenario-started", connectorId, scenarioId }),
+        this.emit({
+          type: "scenario-started",
+          connectorId,
+          scenarioId,
+          ...runIdOf(scenarioId),
+        }),
       ),
       events.on("node.execute", ({ scenarioId, nodeId }) =>
         this.emit({
@@ -168,18 +181,35 @@ export class LocalScenarioRuntime {
           connectorId,
           scenarioId,
           nodeId,
+          ...runIdOf(scenarioId),
         }),
       ),
       events.on("execution.completed", ({ scenarioId }) =>
-        this.emit({ type: "scenario-completed", connectorId, scenarioId }),
+        this.emit({
+          type: "scenario-completed",
+          connectorId,
+          scenarioId,
+          ...runIdOf(scenarioId),
+        }),
       ),
       // A stop ends the run too; the daemon reports it as completed, and so
       // the console's run tracking does not need a separate case.
       events.on("execution.stopped", ({ scenarioId }) =>
-        this.emit({ type: "scenario-completed", connectorId, scenarioId }),
+        this.emit({
+          type: "scenario-completed",
+          connectorId,
+          scenarioId,
+          ...runIdOf(scenarioId),
+        }),
       ),
       events.on("execution.error", ({ scenarioId, error }) =>
-        this.emit({ type: "scenario-error", connectorId, scenarioId, error }),
+        this.emit({
+          type: "scenario-error",
+          connectorId,
+          scenarioId,
+          error,
+          ...runIdOf(scenarioId),
+        }),
       ),
       events.on("wait.intervention", ({ scenarioId, nodeId, kind }) =>
         this.emit({
@@ -188,6 +218,7 @@ export class LocalScenarioRuntime {
           scenarioId,
           nodeId,
           kind,
+          ...runIdOf(scenarioId),
         }),
       ),
     );

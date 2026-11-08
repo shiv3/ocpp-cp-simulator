@@ -13,20 +13,22 @@ type handler21 struct {
 	v21h.UnimplementedCSMSHandler
 
 	rec *Recorder
+	beh *Behavior
 }
 
-func register21(srv *csms.Server, rec *Recorder) error {
-	return v21h.RegisterCSMS(srv, &handler21{rec: rec})
+func register21(srv *csms.Server, rec *Recorder, beh *Behavior) error {
+	return v21h.RegisterCSMS(srv, &handler21{rec: rec, beh: beh})
 }
 
 func (h *handler21) OnBootNotification(_ context.Context, conn *csms.Conn, req v21msg.BootNotificationRequest) (v21msg.BootNotificationResponse, error) {
 	if err := h.rec.Record(conn.ID(), "BootNotification", req); err != nil {
 		return v21msg.BootNotificationResponse{}, err
 	}
+	status, interval := h.beh.NextBoot(conn.ID())
 	return v21msg.BootNotificationResponse{
 		CurrentTime: time.Now().UTC(),
-		Interval:    300,
-		Status:      "Accepted",
+		Interval:    interval,
+		Status:      status,
 	}, nil
 }
 
@@ -49,7 +51,7 @@ func (h *handler21) OnAuthorize(_ context.Context, conn *csms.Conn, req v21msg.A
 		return v21msg.AuthorizeResponse{}, err
 	}
 	return v21msg.AuthorizeResponse{
-		IDTokenInfo: v21msg.IdTokenInfoType{Status: "Accepted"},
+		IDTokenInfo: v21msg.IdTokenInfoType{Status: h.beh.Authorize(req.IDToken.IDToken, time.Now()).status2x()},
 	}, nil
 }
 
@@ -57,7 +59,11 @@ func (h *handler21) OnTransactionEvent(_ context.Context, conn *csms.Conn, req v
 	if err := h.rec.Record(conn.ID(), "TransactionEvent", req); err != nil {
 		return v21msg.TransactionEventResponse{}, err
 	}
-	return v21msg.TransactionEventResponse{}, nil
+	resp := v21msg.TransactionEventResponse{}
+	if req.IDToken != nil && h.beh.Policed() {
+		resp.IDTokenInfo = &v21msg.IdTokenInfoType{Status: h.beh.Authorize(req.IDToken.IDToken, time.Now()).status2x()}
+	}
+	return resp, nil
 }
 
 func (h *handler21) OnMeterValues(_ context.Context, conn *csms.Conn, req v21msg.MeterValuesRequest) (v21msg.MeterValuesResponse, error) {

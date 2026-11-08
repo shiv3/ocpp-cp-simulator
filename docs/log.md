@@ -2419,3 +2419,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - A non-Accepted TransactionEvent.conf `idTokenInfo` with `TxCtrlr/StopTxOnInvalidId` false keeps the transaction open but stops the energy delivery (E05.FR.02, C15.FR.06): connector `SuspendedEVSE`, register frozen, one `TransactionEvent(Updated, ChargingStateChanged, SuspendedEVSE)`. `TxCtrlr/MaxEnergyOnInvalidId` (new 2.x name for the 1.6 key) delivers that many Wh first (E05.FR.03). The default (`true`) is unchanged.
 - Pages: [Charging sessions](concepts/charging-sessions.md), [Operational timeline](concepts/operational-timeline.md), [GitHub issues](sources/github-issues.md)
+
+## [2026-11-08] ingest | 1.6 StopTransactionOnInvalidId=false suspends the energy delivery (#736)
+
+- A non-Accepted StartTransaction.conf with `StopTransactionOnInvalidId` false keeps the transaction open but stops the energy delivery (§4.8, errata 3.17): connector `SuspendedEVSE`, register frozen; `MaxEnergyOnInvalidId` > 0 delivers that many Wh first. Shares the connector energy hold added for the 2.x twin (#696). `Preparing → SuspendedEVSE` is now an expected transition. Default (`true`) unchanged.
+- Pages: [Charging sessions](concepts/charging-sessions.md), [OCPP versions and transports](concepts/ocpp-versions-and-transports.md), [GitHub issues](sources/github-issues.md)

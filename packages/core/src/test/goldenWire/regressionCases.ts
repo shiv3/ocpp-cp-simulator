@@ -221,6 +221,22 @@ both("deauthorized-keep", async (r) => {
   r.cp.stopTransaction(1);
   await settle(r);
 });
+// 1.6 errata 3.17 (§4.8): MaxEnergyOnInvalidId > 0 lets the vehicle charge
+// first, so the connector goes to Charging before the energy stops.
+c16("deauthorized-keep-with-allowance", async (r) => {
+  cfg(r, "StopTransactionOnInvalidId", "false");
+  cfg(r, "MaxEnergyOnInvalidId", "500");
+  r.csms.responders.StartTransaction = () => ({
+    transactionId: 9,
+    idTagInfo: { status: "Invalid" },
+  });
+  r.plugIn();
+  await settle(r);
+  await r.cp.startTransaction("TAG-A", 1);
+  await settle(r);
+  r.cp.stopTransaction(1);
+  await settle(r);
+});
 // --- availability
 both(
   "avail-whole-two-connectors",

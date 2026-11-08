@@ -109,6 +109,13 @@ Two domain gaps were closed so these outcomes can be told apart:
   `transactionStartFailed` event is gone. `ChargePoint.stopTransaction` still
   ignores a transaction whose stop time is already set, such as one restored
   from a `connector_runtime` snapshot persisted before #491.
+- **1.6 `StopTransactionOnInvalidId` false (#736).** A non-Accepted
+  StartTransaction.conf `idTagInfo` keeps the transaction open and, per
+  §4.8 (errata 3.17), only stops the energy delivery: the connector goes to
+  `SuspendedEVSE` and the energy register stops rising until the CSMS or the
+  user stops the transaction. `MaxEnergyOnInvalidId` > 0 delivers that many
+  Wh first (the connector goes `Charging`, then `SuspendedEVSE` once the
+  allowance is used up). The default (`true`) still stops with `DeAuthorized`.
 - **2.x `idTokenInfo`.** TransactionEvent.conf `idTokenInfo` used to be
   ignored. A status other than `Accepted` for a running transaction now
   mirrors 1.6 (#181): with `TxCtrlr/StopTxOnInvalidId` (default true) the

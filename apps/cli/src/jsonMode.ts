@@ -32,6 +32,7 @@ import type { AutoMeterValueConfig } from "@ocpp-cp-sim/core/cp/domain/connector
 import type { AutoTrafficConfig } from "@ocpp-cp-sim/core/cp/domain/connector/AutoTraffic";
 import type { HistoryOptions } from "@ocpp-cp-sim/core/cp/application/services/types/StateSnapshot";
 import {
+  ID_TOKEN_TYPE_VALUES,
   METER_READING_CONTEXTS,
   STOP_REASONS,
   TRANSACTION_CHARGING_STATES,
@@ -143,6 +144,7 @@ export async function handleJsonCommand(
           "chargingState",
           TRANSACTION_CHARGING_STATES,
         ),
+        idTokenType: optionalEnum(params, "idTokenType", ID_TOKEN_TYPE_VALUES),
       });
       return undefined;
     }
@@ -270,7 +272,10 @@ export async function handleJsonCommand(
 
     case "authorize": {
       const tagId = requireString(params, "tagId");
-      await ops.authorize(tagId);
+      await ops.authorize(
+        tagId,
+        optionalEnum(params, "idTokenType", ID_TOKEN_TYPE_VALUES),
+      );
       return undefined;
     }
 

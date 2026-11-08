@@ -63,4 +63,21 @@ describe("LocalChargePointService txUpdatedMeterValues (#347)", () => {
     expect(scheduled).toHaveBeenCalledWith(1);
     expect(plain).not.toHaveBeenCalled();
   });
+
+  it("applies a change to a charge point that already exists (#550)", async () => {
+    const service = new LocalChargePointService();
+    await service.syncLocalChargePoints([localDefinition()]);
+    await service.syncLocalChargePoints([
+      localDefinition({ txUpdatedMeterValues: true }),
+    ]);
+    expect(chargePointOf(service, "CP-LOCAL-347").txUpdatedMeterValues).toBe(
+      true,
+    );
+    await service.syncLocalChargePoints([
+      localDefinition({ txUpdatedMeterValues: false }),
+    ]);
+    expect(chargePointOf(service, "CP-LOCAL-347").txUpdatedMeterValues).toBe(
+      false,
+    );
+  });
 });

@@ -1,0 +1,184 @@
+{
+  "id": "resilience-ev-disconnect-recovery",
+  "name": "Resilience: EV Disconnect Recovery",
+  "description": "Self-contained (OCPP 1.6 payload checks). Starts a session, pulls the cable mid-charge and passes when the transaction stopped with reason EVDisconnected (StopTransactionOnEVSideDisconnect=true, 1.6 \u00a74.10) and the connector came back to Available.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": {
+    "type": "manual"
+  },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": {
+        "x": 400,
+        "y": 50
+      },
+      "data": {
+        "label": "Start",
+        "triggerOn": "connect"
+      }
+    },
+    {
+      "id": "plug-in",
+      "type": "connectorPlug",
+      "position": {
+        "x": 400,
+        "y": 150
+      },
+      "data": {
+        "label": "Plug in",
+        "action": "plugin"
+      }
+    },
+    {
+      "id": "tx-start",
+      "type": "transaction",
+      "position": {
+        "x": 400,
+        "y": 250
+      },
+      "data": {
+        "label": "Start transaction",
+        "action": "start",
+        "tagId": "RESIL-EV"
+      }
+    },
+    {
+      "id": "meter",
+      "type": "meterValue",
+      "position": {
+        "x": 400,
+        "y": 350
+      },
+      "data": {
+        "label": "Charge for 10 s",
+        "value": 0,
+        "sendMessage": true,
+        "autoIncrement": true,
+        "incrementInterval": 5,
+        "incrementAmount": 500,
+        "maxTime": 10,
+        "maxValue": 0
+      }
+    },
+    {
+      "id": "plug-out",
+      "type": "connectorPlug",
+      "position": {
+        "x": 400,
+        "y": 450
+      },
+      "data": {
+        "label": "EV cable pulled",
+        "action": "plugout"
+      }
+    },
+    {
+      "id": "wait-available",
+      "type": "statusTrigger",
+      "position": {
+        "x": 400,
+        "y": 550
+      },
+      "data": {
+        "label": "Wait for Available",
+        "targetStatus": "Available",
+        "timeout": 60
+      }
+    },
+    {
+      "id": "settle",
+      "type": "delay",
+      "position": {
+        "x": 400,
+        "y": 650
+      },
+      "data": {
+        "label": "Let the last frames land",
+        "delaySeconds": 2
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": {
+        "x": 400,
+        "y": 750
+      },
+      "data": {
+        "label": "End"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "start-1",
+      "target": "plug-in"
+    },
+    {
+      "id": "e2",
+      "source": "plug-in",
+      "target": "tx-start"
+    },
+    {
+      "id": "e3",
+      "source": "tx-start",
+      "target": "meter"
+    },
+    {
+      "id": "e4",
+      "source": "meter",
+      "target": "plug-out"
+    },
+    {
+      "id": "e5",
+      "source": "plug-out",
+      "target": "wait-available"
+    },
+    {
+      "id": "e6",
+      "source": "wait-available",
+      "target": "settle"
+    },
+    {
+      "id": "e7",
+      "source": "settle",
+      "target": "end-1"
+    }
+  ],
+  "createdAt": "2026-11-08T00:00:00Z",
+  "updatedAt": "2026-11-08T00:00:00Z",
+  "assertions": [
+    {
+      "id": "stopped-by-ev",
+      "type": "payload_match",
+      "action": "StopTransaction",
+      "payload": {
+        "reason": "EVDisconnected"
+      },
+      "description": "StopTransaction reason EVDisconnected"
+    },
+    {
+      "id": "available-again",
+      "type": "state_transition",
+      "targetStatus": "Available",
+      "description": "Connector Available after the session"
+    },
+    {
+      "id": "stop-after-start",
+      "type": "message_after",
+      "before": {
+        "action": "StartTransaction"
+      },
+      "after": {
+        "action": "StopTransaction"
+      },
+      "description": "StopTransaction follows StartTransaction"
+    }
+  ]
+}

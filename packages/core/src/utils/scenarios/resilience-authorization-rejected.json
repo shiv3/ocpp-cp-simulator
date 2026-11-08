@@ -1,0 +1,171 @@
+{
+  "id": "resilience-authorization-rejected",
+  "name": "Resilience: Authorization Rejected",
+  "description": "Operator-prepared: the idTag RESIL-BLK must be Blocked on the CSMS. Plugs in, tries to start with it, and passes when Authorize was answered Blocked, no transaction started, and the connector is Available again after the cable was pulled (the run waits for it; OCPP 1.6 shape for the idTagInfo check).",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": {
+    "type": "manual"
+  },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": {
+        "x": 400,
+        "y": 50
+      },
+      "data": {
+        "label": "Start",
+        "triggerOn": "connect"
+      }
+    },
+    {
+      "id": "plug-in",
+      "type": "connectorPlug",
+      "position": {
+        "x": 400,
+        "y": 150
+      },
+      "data": {
+        "label": "Plug in",
+        "action": "plugin"
+      }
+    },
+    {
+      "id": "tx-start",
+      "type": "transaction",
+      "position": {
+        "x": 400,
+        "y": 250
+      },
+      "data": {
+        "label": "Start transaction (rejected idTag)",
+        "action": "start",
+        "tagId": "RESIL-BLK"
+      }
+    },
+    {
+      "id": "hold",
+      "type": "delay",
+      "position": {
+        "x": 400,
+        "y": 350
+      },
+      "data": {
+        "label": "Wait 2 s",
+        "delaySeconds": 2
+      }
+    },
+    {
+      "id": "plug-out",
+      "type": "connectorPlug",
+      "position": {
+        "x": 400,
+        "y": 450
+      },
+      "data": {
+        "label": "Plug out",
+        "action": "plugout"
+      }
+    },
+    {
+      "id": "wait-available",
+      "type": "statusTrigger",
+      "position": {
+        "x": 400,
+        "y": 550
+      },
+      "data": {
+        "label": "Wait for Available",
+        "targetStatus": "Available",
+        "timeout": 60
+      }
+    },
+    {
+      "id": "settle",
+      "type": "delay",
+      "position": {
+        "x": 400,
+        "y": 650
+      },
+      "data": {
+        "label": "Let the last frames land",
+        "delaySeconds": 2
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": {
+        "x": 400,
+        "y": 750
+      },
+      "data": {
+        "label": "End"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "start-1",
+      "target": "plug-in"
+    },
+    {
+      "id": "e2",
+      "source": "plug-in",
+      "target": "tx-start"
+    },
+    {
+      "id": "e3",
+      "source": "tx-start",
+      "target": "hold"
+    },
+    {
+      "id": "e4",
+      "source": "hold",
+      "target": "plug-out"
+    },
+    {
+      "id": "e5",
+      "source": "plug-out",
+      "target": "wait-available"
+    },
+    {
+      "id": "e6",
+      "source": "wait-available",
+      "target": "settle"
+    },
+    {
+      "id": "e7",
+      "source": "settle",
+      "target": "end-1"
+    }
+  ],
+  "createdAt": "2026-11-08T00:00:00Z",
+  "updatedAt": "2026-11-08T00:00:00Z",
+  "assertions": [
+    {
+      "id": "authorize-sent",
+      "type": "ocpp_sent",
+      "action": "Authorize",
+      "description": "Authorize sent"
+    },
+    {
+      "id": "authorize-blocked",
+      "type": "idtag_info_status",
+      "action": "Authorize",
+      "status": "Blocked",
+      "description": "Authorize answered Blocked"
+    },
+    {
+      "id": "no-start",
+      "type": "ocpp_absent",
+      "action": "StartTransaction",
+      "description": "No StartTransaction for a rejected idTag"
+    }
+  ]
+}

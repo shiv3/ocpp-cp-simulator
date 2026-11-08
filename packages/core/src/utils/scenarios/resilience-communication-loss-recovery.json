@@ -1,0 +1,131 @@
+{
+  "id": "resilience-communication-loss-recovery",
+  "name": "Resilience: Communication Loss Recovery",
+  "description": "Operator-driven. Cut the connection (network_sim.disconnect.trigger with a manual-disconnect rule, or any socket drop) while the connector is Available. The run waits for the drop and the reconnect, then for Available, then sends a DataTransfer probe (vendorId org.ocpp-cp-sim.resilience, messageId link-probe) and passes when the probe went out over the recovered link. It does not assert a BootNotification: OCPP-J says a station SHOULD NOT send one when it reconnects unless its boot data changed, so whether one follows depends on the OCPP version and settings. Version-agnostic.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": {
+    "type": "manual"
+  },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": {
+        "x": 400,
+        "y": 50
+      },
+      "data": {
+        "label": "Start",
+        "triggerOn": "connect"
+      }
+    },
+    {
+      "id": "wait-down",
+      "type": "connectionTrigger",
+      "position": {
+        "x": 400,
+        "y": 150
+      },
+      "data": {
+        "label": "Wait for the connection to drop",
+        "event": "disconnected",
+        "timeout": 600
+      }
+    },
+    {
+      "id": "wait-up",
+      "type": "connectionTrigger",
+      "position": {
+        "x": 400,
+        "y": 250
+      },
+      "data": {
+        "label": "Wait for the reconnect",
+        "event": "connected",
+        "timeout": 600
+      }
+    },
+    {
+      "id": "wait-available",
+      "type": "statusTrigger",
+      "position": {
+        "x": 400,
+        "y": 350
+      },
+      "data": {
+        "label": "Wait for Available again",
+        "targetStatus": "Available",
+        "timeout": 120
+      }
+    },
+    {
+      "id": "probe",
+      "type": "dataTransfer",
+      "position": {
+        "x": 400,
+        "y": 450
+      },
+      "data": {
+        "label": "Probe the recovered link",
+        "vendorId": "org.ocpp-cp-sim.resilience",
+        "messageId": "link-probe",
+        "data": "after-reconnect"
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": {
+        "x": 400,
+        "y": 550
+      },
+      "data": {
+        "label": "End"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "start-1",
+      "target": "wait-down"
+    },
+    {
+      "id": "e2",
+      "source": "wait-down",
+      "target": "wait-up"
+    },
+    {
+      "id": "e3",
+      "source": "wait-up",
+      "target": "wait-available"
+    },
+    {
+      "id": "e4",
+      "source": "wait-available",
+      "target": "probe"
+    },
+    {
+      "id": "e5",
+      "source": "probe",
+      "target": "end-1"
+    }
+  ],
+  "createdAt": "2026-11-08T00:00:00Z",
+  "updatedAt": "2026-11-08T00:00:00Z",
+  "assertions": [
+    {
+      "id": "link-probe-sent",
+      "type": "payload_match",
+      "action": "DataTransfer",
+      "payload": {
+        "vendorId": "org.ocpp-cp-sim.resilience",
+        "messageId": "link-probe"
+      },
+      "description": "The probe went out after the connection was lost and came back (no BootNotification is required: OCPP-J 1.6 \u00a75.4, 2.x Part 4 \u00a75.4)"
+    }
+  ]
+}

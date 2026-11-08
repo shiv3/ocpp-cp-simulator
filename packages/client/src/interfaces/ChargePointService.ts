@@ -24,6 +24,10 @@ import type {
   FirmwareStatus,
   UploadLogStatus,
 } from "@ocpp-cp-sim/core/cp/domain/types/FirmwareLogStatus";
+import type {
+  PowerLossOptions,
+  PowerRestoreOptions,
+} from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
 import type { AutoMeterValueConfig } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
 import type { ActiveChargingProfile } from "@ocpp-cp-sim/core/cp/domain/connector/Connector";
 import type {
@@ -517,6 +521,25 @@ export interface ChargePointService {
     cpId: string,
     ruleId: string,
   ): Promise<{ ok: true } | { ok: false; error: string }>;
+
+  /** #455: the station loses power (socket gone, transactions kept). */
+  powerLoss(
+    cpId: string,
+    options?: PowerLossOptions,
+  ): Promise<{ ok: true; transactions: number } | { ok: false; error: string }>;
+  /** #455: power returns; the station boots and recovers its transactions. */
+  powerRestore(
+    cpId: string,
+    options?: PowerRestoreOptions,
+  ): Promise<
+    | {
+        ok: true;
+        outageMs: number;
+        recovery: "resume" | "end" | "none";
+        transactions: number;
+      }
+    | { ok: false; error: string }
+  >;
 
   // Lifecycle
   connect(id: string): Promise<void>;

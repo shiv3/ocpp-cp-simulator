@@ -174,6 +174,16 @@ export interface ChargePointEvents {
     transactionId: number;
     reason?: string;
   };
+  /** The station lost power (#455): the socket is gone and nothing is sent
+   *  until power is restored. `transactions` is how many were running. */
+  powerLost: { transactions: number };
+  /** Power came back (#455) after `outageMs`; the station boots again.
+   *  `recovery` is what it decided for the interrupted transactions. */
+  powerRestored: {
+    outageMs: number;
+    recovery: "resume" | "end" | "none";
+    transactions: number;
+  };
   /** Emitted by AuthorizeResultHandler whenever an Authorize.conf arrives,
    *  tagId-correlated via the original Authorize.req payload (issue #181).
    *  `ChargePoint.authorizeAndWait` listens for this to resolve the

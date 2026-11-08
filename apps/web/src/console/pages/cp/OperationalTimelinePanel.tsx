@@ -22,6 +22,8 @@ type Tone = "fault" | "recovery" | "connection" | "neutral";
 
 const TONE_BY_KIND: Partial<Record<TimelineKind, Tone>> = {
   network_fault_injected: "fault",
+  power_lost: "fault",
+  power_restored: "recovery",
   disconnected: "fault",
   authorization_rejected: "fault",
   transaction_rejected: "fault",

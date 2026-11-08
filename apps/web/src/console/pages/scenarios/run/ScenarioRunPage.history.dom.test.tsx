@@ -192,7 +192,7 @@ describe("ScenarioRunPage run history (#388)", () => {
     );
   });
 
-  it("keeps the session-only history in local mode", async () => {
+  it("lists the recorded runs in local mode too (#394)", async () => {
     const service = serviceWith([summarizeRun(report())]);
     const { container, root } = await renderConsole(PATH, {
       service,
@@ -201,7 +201,7 @@ describe("ScenarioRunPage run history (#388)", () => {
     cleanup = () => unmount(root);
     await flush();
 
-    expect(service.listScenarioRuns).not.toHaveBeenCalled();
-    expect(container.textContent).toContain("No runs yet this session.");
+    expect(service.listScenarioRuns).toHaveBeenCalled();
+    expect(container.textContent).not.toContain("No runs yet this session.");
   });
 });

@@ -1,0 +1,159 @@
+{
+  "id": "resilience-connector-fault-recovery",
+  "name": "Resilience: Connector Fault Recovery",
+  "description": "Self-contained (OCPP 1.6 payload checks). Reports a Faulted connector with errorCode GroundFailure, holds it for 3 s, clears it with Available/NoError, and passes when both StatusNotifications were sent in that order.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": {
+    "type": "manual"
+  },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": {
+        "x": 400,
+        "y": 50
+      },
+      "data": {
+        "label": "Start",
+        "triggerOn": "connect"
+      }
+    },
+    {
+      "id": "fault",
+      "type": "statusNotification",
+      "position": {
+        "x": 400,
+        "y": 150
+      },
+      "data": {
+        "label": "Report a connector fault",
+        "status": "Faulted",
+        "errorCode": "GroundFailure",
+        "info": "Injected by the resilience template"
+      }
+    },
+    {
+      "id": "hold",
+      "type": "delay",
+      "position": {
+        "x": 400,
+        "y": 250
+      },
+      "data": {
+        "label": "Hold the fault",
+        "delaySeconds": 3
+      }
+    },
+    {
+      "id": "clear",
+      "type": "statusNotification",
+      "position": {
+        "x": 400,
+        "y": 350
+      },
+      "data": {
+        "label": "Clear the fault",
+        "status": "Available",
+        "errorCode": "NoError"
+      }
+    },
+    {
+      "id": "wait-available",
+      "type": "statusTrigger",
+      "position": {
+        "x": 400,
+        "y": 450
+      },
+      "data": {
+        "label": "Wait for Available",
+        "targetStatus": "Available",
+        "timeout": 60
+      }
+    },
+    {
+      "id": "settle",
+      "type": "delay",
+      "position": {
+        "x": 400,
+        "y": 550
+      },
+      "data": {
+        "label": "Let the last frames land",
+        "delaySeconds": 2
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": {
+        "x": 400,
+        "y": 650
+      },
+      "data": {
+        "label": "End"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "start-1",
+      "target": "fault"
+    },
+    {
+      "id": "e2",
+      "source": "fault",
+      "target": "hold"
+    },
+    {
+      "id": "e3",
+      "source": "hold",
+      "target": "clear"
+    },
+    {
+      "id": "e4",
+      "source": "clear",
+      "target": "wait-available"
+    },
+    {
+      "id": "e5",
+      "source": "wait-available",
+      "target": "settle"
+    },
+    {
+      "id": "e6",
+      "source": "settle",
+      "target": "end-1"
+    }
+  ],
+  "createdAt": "2026-11-08T00:00:00Z",
+  "updatedAt": "2026-11-08T00:00:00Z",
+  "assertions": [
+    {
+      "id": "fault-reported",
+      "type": "state_transition",
+      "targetStatus": "Faulted",
+      "description": "StatusNotification Faulted sent"
+    },
+    {
+      "id": "fault-code",
+      "type": "payload_match",
+      "action": "StatusNotification",
+      "payload": {
+        "status": "Faulted",
+        "errorCode": "GroundFailure"
+      },
+      "description": "The fault carries errorCode GroundFailure"
+    },
+    {
+      "id": "recovered",
+      "type": "state_transition",
+      "targetStatus": "Available",
+      "description": "StatusNotification Available sent after the fault"
+    }
+  ]
+}

@@ -151,8 +151,8 @@ const ScenarioRunsPage: React.FC = () => {
       <div className="p-6">
         <PageHeader title={t("scenarios.history.title")} />
         <EmptyState
-          title={t("scenarios.history.needsDaemonTitle")}
-          hint={t("scenarios.history.needsDaemonHint")}
+          title={t("scenarios.history.unavailableTitle")}
+          hint={t("scenarios.history.unavailableHint")}
         />
       </div>
     );

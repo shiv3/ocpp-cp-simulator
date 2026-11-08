@@ -1,4 +1,5 @@
 import {
+  AUTO_TRAFFIC_ID_TAG,
   AutoTrafficPlanner,
   emptyAutoTrafficCounters,
   type AutoTrafficConfig,
@@ -8,9 +9,25 @@ import { realClock } from "../../shared/clock";
 import type { SimClock, TimerHandle } from "../../shared/clock";
 
 export interface AutoTrafficHooks {
+  /**
+   * The idTag a session on this connector presents (#603). The runner asks
+   * once per session, so Authorize and the start use the same tag. Absent:
+   * {@link AUTO_TRAFFIC_ID_TAG}.
+   */
+  idTag?: (connectorId: number) => string;
+  /**
+   * Why a session cannot start now, or `null` when it can (#603): the charge
+   * point is not Accepted, the connector is not Available, or a transaction
+   * is active. Such a cycle counts as skipped.
+   */
+  startBlocker?: (connectorId: number) => string | null;
   /** Authorize a tag; resolve `false` when the CSMS refused. */
-  authorize: (connectorId: number) => Promise<boolean>;
-  startTransaction: (connectorId: number) => Promise<void>;
+  authorize: (connectorId: number, idTag: string) => Promise<boolean>;
+  /** Start a session; resolve `false` when it did not begin (#603). */
+  startTransaction: (
+    connectorId: number,
+    idTag: string,
+  ) => Promise<void | boolean>;
   stopTransaction: (connectorId: number) => Promise<void>;
   /** Whether a scenario currently owns this connector. */
   scenarioActive: (connectorId: number) => boolean;
@@ -35,6 +52,9 @@ export class AutoTrafficRunner {
   private stopped = false;
   /** Whether a session this runner started is still open. */
   private sessionOpen = false;
+  /** The start conf of the open session was already counted as refused, so
+   *  a later refusal in the same session corrects nothing (#603). */
+  private startConfSettled = false;
   private startedAtMs = 0;
   readonly counters: AutoTrafficCounters = emptyAutoTrafficCounters();
 
@@ -77,6 +97,20 @@ export class AutoTrafficRunner {
     }
   }
 
+  /**
+   * The CSMS answered this connector's StartTransaction with an idTagInfo that
+   * is not Accepted (#603). The session was counted `startAccepted` when the
+   * request went out; the conf corrects it to a refusal. `started` and
+   * `completed` still count the session, which the station may leave running
+   * (`StopTransactionOnInvalidId`).
+   */
+  noteStartConfRefused(): void {
+    if (!this.sessionOpen || this.startConfSettled) return;
+    this.startConfSettled = true;
+    if (this.counters.startAccepted > 0) this.counters.startAccepted--;
+    this.counters.startRejected++;
+  }
+
   /** Replace the config. Restarts the stream, so the seed takes effect. */
   reconfigure(config: AutoTrafficConfig): void {
     this.stop();
@@ -98,17 +132,33 @@ export class AutoTrafficRunner {
   }
 
   private expired(): boolean {
-    if (this.config.stopAfterSec === undefined) return false;
+    const now = this.clock.now();
+    if (
+      this.config.stopAfterSec !== undefined &&
+      now - this.startedAtMs >= this.config.stopAfterSec * 1000
+    ) {
+      return true;
+    }
+    // #603: the absolute stop time.
     return (
-      this.clock.now() - this.startedAtMs >= this.config.stopAfterSec * 1000
+      this.config.stopAt !== undefined && now >= Date.parse(this.config.stopAt)
     );
   }
+
+  /** A cycle that began no session (#603). */
+  private skip(): void {
+    this.counters.skipped++;
+    this.counters.consecutiveSkips++;
+    this.scheduleNext();
+  }
+
+  private lastSkipReason: string | null = null;
 
   private async runStep(start: boolean, durationSec: number): Promise<void> {
     if (this.stopped) return;
     if (this.expired()) {
       this.hooks.log(
-        `[auto-traffic] ${this.cpId}/${this.connectorId} stopped (stopAfterSec reached)`,
+        `[auto-traffic] ${this.cpId}/${this.connectorId} stopped (${this.config.stopAt !== undefined && this.clock.now() >= Date.parse(this.config.stopAt) ? "stopAt" : "stopAfterSec"} reached)`,
       );
       this.stop();
       return;
@@ -120,23 +170,62 @@ export class AutoTrafficRunner {
     }
 
     this.counters.attempted++;
+    const now = this.clock.now();
+    this.counters.firstRunAt ??= now;
+    this.counters.lastRunAt = now;
     if (!start) {
-      this.counters.skipped++;
-      this.scheduleNext();
+      this.skip();
+      return;
+    }
+    const blocker = this.hooks.startBlocker?.(this.connectorId) ?? null;
+    if (blocker !== null) {
+      // Once per reason: a fleet with disconnected charge points would log
+      // every cycle otherwise.
+      if (blocker !== this.lastSkipReason) {
+        this.lastSkipReason = blocker;
+        this.hooks.log(
+          `[auto-traffic] ${this.cpId}/${this.connectorId} cycle skipped: ${blocker}`,
+        );
+      }
+      this.skip();
       return;
     }
 
+    this.lastSkipReason = null;
+    const idTag = this.hooks.idTag?.(this.connectorId) ?? AUTO_TRAFFIC_ID_TAG;
     try {
       if (this.config.requireAuthorize) {
-        const accepted = await this.hooks.authorize(this.connectorId);
+        let accepted: boolean;
+        try {
+          accepted = await this.hooks.authorize(this.connectorId, idTag);
+        } catch (err) {
+          this.counters.authorizeRejected++;
+          throw err;
+        }
         if (this.stopped) return;
         if (!accepted) {
+          this.counters.authorizeRejected++;
           this.counters.rejected++;
           this.scheduleNext();
           return;
         }
+        this.counters.authorizeAccepted++;
       }
-      await this.hooks.startTransaction(this.connectorId);
+      const started = await this.hooks
+        .startTransaction(this.connectorId, idTag)
+        .catch((err: unknown) => {
+          this.counters.startRejected++;
+          throw err;
+        });
+      if (started === false) {
+        this.counters.startRejected++;
+        this.counters.rejected++;
+        this.hooks.log(
+          `[auto-traffic] ${this.cpId}/${this.connectorId} start refused`,
+        );
+        this.scheduleNext();
+        return;
+      }
       // Re-checked after every await: `stop()` can land while the authorize or
       // the start is in flight, and without this the runner would install a
       // fresh timer after cancellation.
@@ -147,7 +236,10 @@ export class AutoTrafficRunner {
         return;
       }
       this.sessionOpen = true;
+      this.startConfSettled = false;
       this.counters.started++;
+      this.counters.startAccepted++;
+      this.counters.consecutiveSkips = 0;
     } catch (err) {
       // A failed start is not a reason to stop generating: the CSMS being
       // unreachable for one attempt is exactly the condition a load run is
@@ -175,7 +267,9 @@ export class AutoTrafficRunner {
       this.sessionOpen = false;
       await this.hooks.stopTransaction(this.connectorId);
       this.counters.completed++;
+      this.counters.stopAccepted++;
     } catch (err) {
+      this.counters.stopRejected++;
       this.hooks.log(
         `[auto-traffic] ${this.cpId}/${this.connectorId} stop failed: ${err instanceof Error ? err.message : String(err)}`,
       );

@@ -364,6 +364,7 @@ export function parseArgs(argv: string[]): CLIOptions {
   let cpoName: string | undefined;
   let txUpdatedMeterValues = false;
   let inboundValidation: InboundValidationMode | undefined;
+  let reservationAuthorizeIdTag = false;
   // #609: reconnect flags collect here and are validated as one object below.
   const reconnect: Record<string, number | string> = {};
   // #611: `--ws-*` flags, validated with the reconnect ones.
@@ -919,6 +920,9 @@ export function parseArgs(argv: string[]): CLIOptions {
         i++;
         break;
       }
+      case "--reservation-authorize-id-tag":
+        reservationAuthorizeIdTag = true;
+        break;
       case "--reconnect-max-attempts":
         reconnect.maxAttempts = requireNumberFlag(arg, next, {
           integer: true,
@@ -1662,6 +1666,7 @@ export function parseArgs(argv: string[]): CLIOptions {
     cpoName,
     ...(txUpdatedMeterValues ? { txUpdatedMeterValues } : {}),
     ...(inboundValidation ? { inboundValidation } : {}),
+    ...(reservationAuthorizeIdTag ? { reservationAuthorizeIdTag } : {}),
     ...(Object.keys(reconnect).length > 0 || Object.keys(wsFlags).length > 0
       ? { transport: parseTransportFlags(reconnect, wsFlags, ocppVersion) }
       : {}),
@@ -1773,6 +1778,11 @@ Options:
                            payload breaks the request schema. warn (default)
                            logs and traces the violation and runs the handler;
                            enforce answers a CALLERROR; off skips the check.
+  --reservation-authorize-id-tag
+                           OCPP 1.6: authorize the idTag of a ReserveNow
+                           (local rules, then Authorize.req) before accepting
+                           it; a tag that is not Accepted answers Rejected.
+                           Off by default.
   --reconnect-max-attempts <n>
                            Reconnect attempts after a connection loss before
                            giving up. -1 = unlimited (default), 0 = never
@@ -2169,6 +2179,9 @@ export function buildBootstrap(
     ...(options.txUpdatedMeterValues ? { txUpdatedMeterValues: true } : {}),
     ...(options.inboundValidation
       ? { inboundValidation: options.inboundValidation }
+      : {}),
+    ...(options.reservationAuthorizeIdTag
+      ? { reservationAuthorizeIdTag: true }
       : {}),
     ...(options.transport ? { transport: options.transport } : {}),
     ...((options.useBehaviors?.length ?? 0) > 0

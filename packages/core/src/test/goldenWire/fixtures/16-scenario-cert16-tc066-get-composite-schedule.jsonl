@@ -7,4 +7,4 @@
 {"d":"CSMS>","k":"call","id":"id-4","a":"SetChargingProfile","p":{"connectorId":1,"csChargingProfiles":{"chargingProfileId":1,"stackLevel":0,"chargingProfilePurpose":"TxDefaultProfile","chargingProfileKind":"Absolute","chargingSchedule":{"chargingRateUnit":"W","chargingSchedulePeriod":[{"startPeriod":0,"limit":7000}]}}}}
 {"d":"CP>","k":"result","id":"id-4","p":{"status":"Accepted"}}
 {"d":"CSMS>","k":"call","id":"id-5","a":"GetCompositeSchedule","p":{"connectorId":1,"duration":600}}
-{"d":"CP>","k":"result","id":"id-5","p":{"status":"Accepted","connectorId":1,"scheduleStart":"<ts>","chargingSchedule":{"duration":600,"startSchedule":"<ts>","chargingRateUnit":"W","chargingSchedulePeriod":[{"startPeriod":0,"limit":7000}]}}}
+{"d":"CP>","k":"result","id":"id-5","p":{"status":"Accepted","connectorId":1,"scheduleStart":"<ts>","chargingSchedule":{"duration":600,"chargingRateUnit":"W","chargingSchedulePeriod":[{"startPeriod":0,"limit":7000}]}}}

@@ -47,6 +47,20 @@ export interface SampleBuildOptions {
 }
 
 /**
+ * Spell the samples for an OCPP-J 1.6 wire message. OCPP-J 1.6 errata (2025-04)
+ * §2.1: the original JSON schemas spell the Temperature unit `Celcius`, a
+ * Central System validating against them rejects `Celsius`, so Charge Point
+ * implementers are "advised to remain using the not corrected version of the
+ * spelling Celcius". OCPP-S 1.6 (WSDL) and 2.x keep `Celsius`; they do not call
+ * this.
+ */
+export function toOcppJ16Wire(samples: SampledValue[]): SampledValue[] {
+  return samples.map((sample) =>
+    sample.unit === "Celsius" ? { ...sample, unit: "Celcius" } : sample,
+  );
+}
+
+/**
  * The unit OCPP 2.0.1 / 2.1 Part 2 Appendices ch. 2 (Standardized Units of
  * Measure) assigns to a measurand, or `undefined` for a unitless one
  * (`Power.Factor`) and one this table does not know.

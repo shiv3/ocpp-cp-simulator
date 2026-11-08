@@ -88,6 +88,8 @@ describe("ConfigurationStore security whitepaper keys", () => {
   it("validates reads and ChangeConfiguration mutations", () => {
     const store = storeWithDefaults();
 
+    // No guard (a transport without the security extension, OCPP-S): the
+    // value is stored and the change needs a reboot, as before #724.
     expect(store.applyChange("SecurityProfile", "2")).toBe("RebootRequired");
     expect(store.getInteger("SecurityProfile")).toBe(2);
 
@@ -108,6 +110,46 @@ describe("ConfigurationStore security whitepaper keys", () => {
       "Rejected",
     );
     expect(store.applyChange("UnknownSecurityKey", "x")).toBe("NotSupported");
+  });
+
+  it("answers Rejected and keeps SecurityProfile when the A05 guard refuses (#724)", () => {
+    const store = storeWithDefaults();
+    const seen: Array<[number, number]> = [];
+    let allow = false;
+    store.setChangeGuard("SecurityProfile", (current, next) => {
+      seen.push([current as number, next as number]);
+      return allow;
+    });
+
+    expect(store.applyChange("SecurityProfile", "2")).toBe("Rejected");
+    expect(store.getInteger("SecurityProfile")).toBe(0);
+    allow = true;
+    expect(store.applyChange("SecurityProfile", "2")).toBe("Accepted");
+    expect(store.getInteger("SecurityProfile")).toBe(2);
+    // Other keys and a bypassing change never reach the guard.
+    expect(store.applyChange("CpoName", "x")).toBe("Accepted");
+    allow = false;
+    expect(
+      store.applyChange("SecurityProfile", "1", { bypassGuard: true }),
+    ).toBe("Accepted");
+    expect(store.getInteger("SecurityProfile")).toBe(1);
+    expect(seen).toEqual([
+      [0, 2],
+      [0, 2],
+    ]);
+  });
+
+  it("answers Rejected and keeps AuthorizationKey when its guard refuses (#724)", () => {
+    const store = storeWithDefaults();
+    store.applyChange("AuthorizationKey", "00112233445566778899aabbccddeeff");
+    store.setChangeGuard("AuthorizationKey", (_current, next) => next !== "");
+    expect(store.applyChange("AuthorizationKey", "")).toBe("Rejected");
+    expect(store.getString("AuthorizationKey")).toBe(
+      "00112233445566778899aabbccddeeff",
+    );
+    expect(store.applyChange("AuthorizationKey", "ab".repeat(16))).toBe(
+      "Accepted",
+    );
   });
 
   it("round-trips mutable security keys through persistence", () => {

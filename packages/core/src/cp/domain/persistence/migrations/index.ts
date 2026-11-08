@@ -3,7 +3,8 @@ import { capabilityProfile } from "./0026-capability-profile";
 import { migration0027FleetTemplates } from "./0027-fleet-templates";
 import { transportOptions } from "./0028-transport-options";
 import { migration0029BehaviorParams } from "./0029-behavior-params";
-import { migration0030ChargerCapabilities } from "./0030-charger-capabilities";
+import { migration0030ReservationAuthorizeIdTag } from "./0030-reservation-authorize-id-tag";
+import { migration0031ChargerCapabilities } from "./0031-charger-capabilities";
 
 /**
  * Forward migrations 26 and later, one file per version.
@@ -37,7 +38,8 @@ export const MIGRATIONS: readonly Migration[] = [
   migration0027FleetTemplates,
   transportOptions,
   migration0029BehaviorParams,
-  migration0030ChargerCapabilities,
+  migration0030ReservationAuthorizeIdTag,
+  migration0031ChargerCapabilities,
 ];
 
 /** Problems with a migration list; empty when it is well formed. */

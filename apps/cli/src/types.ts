@@ -248,6 +248,8 @@ export interface CLIOptions {
   readonly txUpdatedMeterValues?: boolean;
   /** `--inbound-validation` (#593). See ChargePointInitOptions. */
   readonly inboundValidation?: InboundValidationMode;
+  /** `--reservation-authorize-id-tag` (#595). See ChargePointInitOptions. */
+  readonly reservationAuthorizeIdTag?: boolean;
   /** `--reconnect-*` and `--boot-retry-limit` (#609). */
   readonly transport?: TransportConfig;
   readonly capabilityProfile?: ChargePointCapabilityProfile;
@@ -277,6 +279,8 @@ export interface ChargePointInitOptions {
   readonly urlDistribution?: UrlDistribution;
   /** OCPP 1.6J inbound CALL payload validation (#593). Default `warn`. */
   readonly inboundValidation?: InboundValidationMode;
+  /** OCPP 1.6 ReserveNow authorizes the idTag first (#595). Default false. */
+  readonly reservationAuthorizeIdTag?: boolean;
   /** Transport settings (#609): reconnect policy. Persisted. */
   readonly transport?: TransportConfig;
   readonly capabilityProfile?: ChargePointCapabilityProfile;
@@ -455,6 +459,7 @@ export interface ChargePointStatus {
     readonly cpoName?: string;
     readonly txUpdatedMeterValues?: boolean;
     readonly inboundValidation?: InboundValidationMode;
+    readonly reservationAuthorizeIdTag?: boolean;
     readonly capabilityProfile?: ChargePointCapabilityProfile;
     readonly transport?: TransportConfig;
     readonly chargerCapabilities?: ChargerCapabilities;

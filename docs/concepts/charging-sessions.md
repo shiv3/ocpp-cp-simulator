@@ -96,9 +96,10 @@ for 2.x):
 A [power loss](power-loss.md) (#455) that the station ends after the reboot closes the session `interrupted` with `PowerLoss`; one it resumes keeps the session `active`.
 | `completed` | Any other end: `Local`, `Remote`, `EVDisconnected`, `Other`, `EnergyLimitReached`, `SOCLimitReached`, `StoppedByEV`, … |
 
-A rejected id the station kept charging on (`StopTransactionOnInvalidId` /
-`TxCtrlr/StopTxOnInvalidId` false) still ends `completed`; its
-`authorizationStatus` keeps the CSMS's answer.
+A rejected id the station kept the transaction open for
+(`StopTransactionOnInvalidId` / `TxCtrlr/StopTxOnInvalidId` false) still ends
+`completed`; its `authorizationStatus` keeps the CSMS's answer. The station
+delivers no more energy on it (see below).
 
 ### Rejections and failed starts (#447)
 
@@ -114,12 +115,30 @@ Two domain gaps were closed so these outcomes can be told apart:
   `transactionStartFailed` event is gone. `ChargePoint.stopTransaction` still
   ignores a transaction whose stop time is already set, such as one restored
   from a `connector_runtime` snapshot persisted before #491.
+- **1.6 `StopTransactionOnInvalidId` false (#736).** A non-Accepted
+  StartTransaction.conf `idTagInfo` keeps the transaction open and, per
+  §4.8 (errata 3.17), only stops the energy delivery: the connector goes to
+  `SuspendedEVSE` and the energy register stops rising until the CSMS or the
+  user stops the transaction. `MaxEnergyOnInvalidId` > 0 delivers that many
+  Wh first (the connector goes `Charging`, then `SuspendedEVSE` once the
+  allowance is used up). The default (`true`) still stops with `DeAuthorized`.
 - **2.x `idTokenInfo`.** TransactionEvent.conf `idTokenInfo` used to be
   ignored. A status other than `Accepted` for a running transaction now
   mirrors 1.6 (#181): with `TxCtrlr/StopTxOnInvalidId` (default true) the
   station ends it with `triggerReason: Deauthorized` and
-  `stoppedReason: DeAuthorized`; with it false the transaction keeps running.
-  Either way `startTransactionNotAccepted` reports it.
+  `stoppedReason: DeAuthorized`; with it false the transaction stays open but
+  the energy delivery stops (#696, E05.FR.02, C15.FR.06): the connector goes
+  to `SuspendedEVSE`, the energy register stops rising, and the station sends
+  one `TransactionEvent(Updated)` with `triggerReason: ChargingStateChanged`
+  and `chargingState: SuspendedEVSE`. `TxCtrlr/MaxEnergyOnInvalidId` (the 1.6
+  key `MaxEnergyOnInvalidId`, default `0`) delivers that many more Wh first
+  (E05.FR.03; the register stops at that allowance, `unit: Wh` in
+  GetBaseReport), then the same suspension. The hold also applies when the EV
+  side was `SuspendedEV`, and a later request for `Charging` is reported as
+  `SuspendedEVSE` while the hold lasts. The hold ends with the transaction
+  and is not persisted: with `--state-db` a restart restores the transaction
+  but the energy flows again. 2.x only; 1.6 errata 3.17 is not applied
+  yet (#736). Either way `startTransactionNotAccepted` reports it.
 
 In both versions the CSMS's answer is written to the transaction
 (`Transaction.authorizationStatus`, persisted with it) before the station
@@ -313,8 +332,7 @@ WebSocket closes ([#488](https://github.com/shiv3/ocpp-cp-simulator/issues/488))
   [`pending_messages`](state-persistence.md) with `--state-db`, in memory
   otherwise) and replayed after the next accepted boot. So is a resend still
   waiting out its retry interval after a CALLERROR, which keeps its count of
-  transmissions; a StartTransaction.req resend is discarded instead if its
-  transaction no longer runs (#527). On 2.x the TransactionEvents
+  transmissions, and the transaction messages held behind it (#565). On 2.x the TransactionEvents
   (`Started`, `Updated`, `Ended`) go to the same queue (E11.FR.01): those
   produced offline, those written but unanswered when the socket closed, and
   a pending E13 resend. After the next accepted boot they are replayed in the
@@ -336,7 +354,8 @@ WebSocket closes ([#488](https://github.com/shiv3/ocpp-cp-simulator/issues/488))
   TransactionEvent `Updated` with `triggerReason` `CablePluggedIn` followed by
   `Charging`.
 - On 1.6, an Unplug while StartTransaction.conf is still pending stops the
-  transaction with StopTransaction `transactionId: 0`. This predates #488
+  transaction; the StopTransaction.req takes the id of that conf when it is
+  written (`-1` if the request is discarded, #565). This predates #488
   (`stop_transaction` does the same), but the Unplug button now reaches it.
 - A 1.6 StartTransaction that is never answered, or that is discarded after
   `TransactionMessageAttempts` CALLERRORs, keeps `transactionId: null`.
@@ -350,10 +369,17 @@ WebSocket closes ([#488](https://github.com/shiv3/ocpp-cp-simulator/issues/488))
   and one that already ended (a 1.6 StopTransaction.req, a 2.x `Ended` event)
   stays ended.
 - On 1.6 a transaction stopped before its StartTransaction.req got a conf
-  stops with `transactionId: 0`. A resend still waiting is discarded, but a
-  StartTransaction.req already on the wire or queued ahead of the stop reaches
-  the CSMS, which can keep open a transaction nothing stops
-  ([#565](https://github.com/shiv3/ocpp-cp-simulator/issues/565)).
+  stops with the `transactionId` that conf assigns when it arrives while the
+  request is resent or in flight (before its 30 s timeout): the
+  StopTransaction.req waits behind a StartTransaction.req being resent, or in
+  flight, and is built with the id when it is written (also when it is salvaged
+  to the offline queue). If the request is discarded, it carries `-1` (1.6
+  errata 3.18). Still `0`: a StartTransaction.req that timed out (1.6 does not
+  resend a timeout; errata 3.18 asks for `-1` there too), a resend lost when
+  the link closes, and a restart (the outcomes are kept in memory) (#727). A
+  StartTransaction.req resend is never dropped because its transaction stopped
+  ([#565](https://github.com/shiv3/ocpp-cp-simulator/issues/565),
+  [order of transaction messages](ocpp-versions-and-transports.md#transaction-message-retries-ocpp-j-16)).
 - The fleet-wide listing (#489) is a control-plane and MCP feature only: the
   console's Transactions tab and the `ChargePointService` client interface
   still read one charge point.

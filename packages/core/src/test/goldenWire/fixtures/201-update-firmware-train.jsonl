@@ -2,7 +2,7 @@
 {"d":"CSMS>","k":"result","id":"id-1","p":{"status":"Accepted","currentTime":"<ts>","interval":3600}}
 {"d":"CP>","k":"call","id":"id-2","a":"StatusNotification","p":{"timestamp":"<ts>","connectorStatus":"Available","evseId":1,"connectorId":1}}
 {"d":"CSMS>","k":"result","id":"id-2","p":{}}
-{"d":"CSMS>","k":"call","id":"id-3","a":"UpdateFirmware","p":{"requestId":9,"firmware":{"location":"https://fw.example.test/fw.bin","retrieveDateTime":"<ts>","signingCertificate":"cert","signature":"sig"}}}
+{"d":"CSMS>","k":"call","id":"id-3","a":"UpdateFirmware","p":{"requestId":9,"firmware":{"location":"https://fw.example.test/fw.bin","retrieveDateTime":"<ts>","signingCertificate":"-----BEGIN CERTIFICATE-----\nMIIBSjCB8aADAgECAgEBMAoGCCqGSM49BAMCMCwxGDAWBgNVBAMTD0Zpcm13YXJl\nIHNpZ25lcjEQMA4GA1UEChMHRXhhbXBsZTAgFw0yMDAxMDEwMDAwMDBaGA8yMTIw\nMDEwMTAwMDAwMFowLDEYMBYGA1UEAxMPRmlybXdhcmUgc2lnbmVyMRAwDgYDVQQK\nEwdFeGFtcGxlMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEm21H3Ln7i7qp1gv2\nMj/dJJHV0x3aMibFxu467VcGlLsNHKIz8xs/e9iewl3ia3vL1Ftn+ovT+Ocrz9a/\nkRhq16MCMAAwCgYIKoZIzj0EAwIDSAAwRQIgJOmTmXEb7S151H3RGW+s0bJhetHO\nFITfpLPtIJ8GiScCIQDFexvjme31IbvF73ScS+idyJWdLiO+txh13ry1LHjI+A==\n-----END CERTIFICATE-----","signature":"sig"}}}
 {"d":"CP>","k":"result","id":"id-3","p":{"status":"Accepted"}}
 {"d":"CP>","k":"call","id":"id-4","a":"FirmwareStatusNotification","p":{"status":"Downloading","requestId":9}}
 {"d":"CSMS>","k":"result","id":"id-4","p":{}}

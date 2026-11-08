@@ -1,6 +1,7 @@
 // Behavior params and the scenario-side disable (#654, step 1): ctx.params,
 // arm-time validation that refuses and never coerces, schema 1.6 useBehavior
 // params / mode, and the params of the built-in defaults.
+import { SIGNING_CERTIFICATE } from "../../cp/domain/security/__tests__/signingCertificateFixture";
 import { afterEach, describe, expect, test } from "bun:test";
 import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
 import { runBehavior, type BehaviorRun } from "./runBehavior";
@@ -394,7 +395,7 @@ describe("useBehavior params (schema 1.6)", () => {
       firmware: {
         location: "http://x/f",
         retrieveDateTime: "2020-01-01T00:00:00.000Z",
-        signingCertificate: "c",
+        signingCertificate: SIGNING_CERTIFICATE,
         signature: "s",
       },
     });

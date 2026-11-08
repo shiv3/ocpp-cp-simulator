@@ -217,3 +217,51 @@ describe("StationAuthorization — identifiers are case insensitive", () => {
     expect(cache.size()).toBe(0);
   });
 });
+
+// 1.6 §3.5.2 (#744)
+describe("StationAuthorization.conflictsWithLocalList", () => {
+  const list = (
+    b: ReturnType<typeof build>,
+    status: "Accepted" | "Blocked" | "Expired",
+    expiryDate?: string,
+  ) =>
+    b.localList.applyFull(
+      1,
+      [
+        {
+          idTag: "A",
+          idTagInfo: { status, ...(expiryDate ? { expiryDate } : {}) },
+        },
+      ],
+      LIMITS,
+    );
+
+  it("is true only when a listed identifier gets another status", () => {
+    const b = build();
+    list(b, "Accepted");
+    expect(b.auth.conflictsWithLocalList("A", "Blocked")).toBe(true);
+    expect(b.auth.conflictsWithLocalList("A", "Accepted")).toBe(false);
+    expect(b.auth.conflictsWithLocalList("UNLISTED", "Blocked")).toBe(false);
+  });
+
+  it("is false while the list is disabled", () => {
+    const b = build({ localListEnabled: false });
+    list(b, "Accepted");
+    expect(b.auth.conflictsWithLocalList("A", "Blocked")).toBe(false);
+  });
+
+  it("reads an Accepted entry past its expiry as Expired (§3.5.4)", () => {
+    const b = build();
+    list(b, "Accepted", "2026-10-29T11:00:00Z");
+    expect(b.auth.conflictsWithLocalList("A", "Expired")).toBe(false);
+    expect(b.auth.conflictsWithLocalList("A", "Accepted")).toBe(true);
+  });
+
+  it("does not change the list or the cache", () => {
+    const b = build();
+    list(b, "Accepted");
+    b.auth.conflictsWithLocalList("A", "Blocked");
+    expect(b.localList.getEntry("A")?.status).toBe("Accepted");
+    expect(b.cache.get("A")).toBeUndefined();
+  });
+});

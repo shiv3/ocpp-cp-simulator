@@ -6,6 +6,7 @@ import type {
 } from "@ocpp-cp-simulator/contracts/behavior";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { isOcpp2Version } from "../../../domain/types/OcppVersion";
+import { checkFirmwareSigningCertificate } from "../../../domain/security/signingCertificate";
 import { OCPPStatus } from "../../../domain/types/OcppTypes";
 import { LogType } from "../../../shared/Logger";
 
@@ -103,6 +104,7 @@ interface UpdateFirmwareRequest {
     retrieveDateTime?: string;
     installDateTime?: string;
     signature?: string;
+    signingCertificate?: unknown;
   };
 }
 
@@ -242,11 +244,16 @@ function startTime(ctx: BehaviorContext, date: string | undefined): number {
  * `InstallationFailed` at the Installed step. A second UpdateFirmware while a
  * train is running is ignored.
  *
- * OCPP 2.x (L01): the request is accepted and its `requestId` remembered for
- * the FirmwareStatusNotification reports the control plane drives; the station
- * reports nothing on its own, unless the `train` param is set (#600): then
- * the train below runs, and a request that replaces one in progress is
- * answered `AcceptedCanceled` (L01.FR.24).
+ * OCPP 2.x (L01): a `firmware.signingCertificate` is validated first
+ * (L01.FR.21): one that does not parse, is outside its validity period or is
+ * not issued by an installed ManufacturerRootCertificate is answered
+ * `InvalidCertificate` (L01.FR.22), no `requestId` is remembered and an
+ * `InvalidFirmwareSigningCertificate` SecurityEventNotification follows
+ * (L01.FR.02). Otherwise (or without a certificate) the request is accepted
+ * and its `requestId` remembered for the FirmwareStatusNotification reports
+ * the control plane drives; the station reports nothing on its own, unless the
+ * `train` param is set (#600): then the train below runs, and a request that
+ * replaces one in progress is answered `AcceptedCanceled` (L01.FR.24).
  *
  * Params: `stepMs`, `failAt`, `startAt` (#654); `train`,
  * `waitForTransactions`, `connectorsUnavailable`, `reboot`, `jitterMs` (#600),
@@ -276,6 +283,33 @@ export function firmwareBehavior(cp: ChargePoint): Behavior {
         handle: (request, ctx) => {
           const req = (request ?? {}) as UpdateFirmwareRequest;
           if (isOcpp2Version(cp.ocppVersion)) {
+            const signingCertificate = req.firmware?.signingCertificate;
+            if (signingCertificate !== undefined) {
+              const check = checkFirmwareSigningCertificate(
+                signingCertificate,
+                cp.nowDate(),
+                cp.certificateStore
+                  .listRootCertificates(["ManufacturerRootCertificate"])
+                  .map((root) => root.pem),
+              );
+              if (!check.ok) {
+                cp.logger.warn(
+                  `UpdateFirmware: InvalidCertificate (${check.problem}): ${check.detail}`,
+                  LogType.OCPP,
+                );
+                return {
+                  response: { status: "InvalidCertificate" },
+                  after: async () => {
+                    await cp
+                      .sendSecurityEventNotification(
+                        "InvalidFirmwareSigningCertificate",
+                        check.detail,
+                      )
+                      .catch(() => undefined);
+                  },
+                };
+              }
+            }
             if (typeof req.requestId === "number") {
               cp.noteFirmwareRequest(req.requestId);
             }

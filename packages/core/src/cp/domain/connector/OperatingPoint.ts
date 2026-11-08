@@ -193,6 +193,10 @@ export interface FaultTerm {
   offering: boolean;
   /** `SuspendedEV`: the register ticks but the offer is withheld. */
   energyOfferSuspended: boolean;
+  /** The id of the running transaction was not accepted and the
+   *  `MaxEnergyOnInvalidId` allowance is used up (E05.FR.02): the register
+   *  stops rising, the offer itself is unchanged. */
+  energyHeld?: boolean;
 }
 
 /** The input terms of one resolve (#327). Required and non-nullable on
@@ -297,7 +301,7 @@ export function resolveOperatingPoint(
     : 0;
 
   let accumulationCapW: number;
-  if (fault.energyOfferSuspended || exporting) {
+  if (fault.energyOfferSuspended || fault.energyHeld || exporting) {
     accumulationCapW = 0;
   } else if (!curve || curve.length === 0 || !Number.isFinite(evMaxW)) {
     accumulationCapW = boundW;

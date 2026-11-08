@@ -667,7 +667,17 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   private hasOlderUndeliveredEvent(message: TransactionEventMessage): boolean {
     for (const older of this._activeTransactionEvents) {
       if (older === message) return false;
-      if (older.resend !== undefined || older.inFlight.size > 0) return true;
+      if (older.resend !== undefined) return true;
+      for (const id of older.inFlight) {
+        // A transmission that already timed out only waits for a late answer:
+        // when its resend was dropped (a network-sim `queue_overflow`, a
+        // behavior's `beforeSend`) no further attempt is scheduled, and
+        // holding the later events for it would never end (#565). One still
+        // travelling through the network-sim has no pending entry yet.
+        const attempt =
+          this._pendingRequests.get(id)?.transactionEvent?.attempt;
+        if (attempt === undefined || attempt > older.failed) return true;
+      }
       if (
         this._callQueue.some((job) => job.transactionEvent?.message === older)
       ) {
@@ -1172,8 +1182,9 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
    * TransactionEvent.conf carries the CSMS's verdict on the event's idToken
    * in `idTokenInfo`. When it is not Accepted and the transaction is still
    * running, `TxCtrlr/StopTxOnInvalidId` (default true) ends it as
-   * Deauthorized / DeAuthorized; false leaves it running. Either way the
-   * rejection is reported like the 1.6 one.
+   * Deauthorized / DeAuthorized; false keeps it open but stops the energy
+   * delivery (SuspendedEVSE, after `MaxEnergyOnInvalidId` Wh when set;
+   * E05.FR.02/03). Either way the rejection is reported like the 1.6 one.
    */
   private applyTransactionEventResult(
     request: TransactionEventRequestV201,
@@ -1205,6 +1216,9 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         triggerReason: "Deauthorized",
         stoppedReason: "DeAuthorized",
       });
+    } else {
+      // E05.FR.02/03, C15.FR.06: the transaction stays, the energy stops.
+      this._chargePoint.holdEnergyOnInvalidId(connector);
     }
     this._chargePoint.notifyStartTransactionNotAccepted(
       connector.id,
@@ -1312,8 +1326,10 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     }
     this.warnResendLost(message.payload, attempt, `dropped: ${reason}`);
     // A timed-out transmission still on the wire keeps the message open:
-    // its late answer can still settle it.
+    // its late answer can still settle it. It no longer holds the later
+    // events back, though: no further attempt is scheduled.
     if (message.inFlight.size === 0) this.forgetTransactionEvent(message);
+    else this.pumpCalls();
   }
 
   /**
@@ -1875,12 +1891,13 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   ): V201MeterValuesSampledValue[] {
     const connector = this._chargePoint.getConnector(connectorId);
     if (!connector || measurands.length === 0) return [];
+    // #714: the same MeasurandEnumType filter as every other 2.x sample.
     return this.toV201SampledValues(
-      buildSampledValues(
+      this.buildSamples(
         connector,
         measurands,
         context,
-        { unitMultiplier: true },
+        undefined,
         point,
       ).filter(
         (sv) =>
@@ -2145,6 +2162,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     measurands: string[],
     context: ReadingContext,
     mainMeter?: NonNullable<ChargePoint["mainMeter"]>,
+    point?: OperatingPoint,
   ): SampledValue[] {
     const allowed = measurandEnumFor(this._chargePoint.ocppVersion);
     const kept = measurands.filter((m) => allowed.has(m));
@@ -2160,7 +2178,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     const options = { unitMultiplier: true };
     return mainMeter
       ? mainMeter.sampledValues(kept, context, options)
-      : buildSampledValues(connector!, kept, context, options);
+      : buildSampledValues(connector!, kept, context, options, point);
   }
 
   /** 1.6-shaped builder output → 2.0.1 SampledValueType. `context` is
@@ -2732,6 +2750,23 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
 
   private notifyEventDialect(): "v21" | "v201" {
     return this._chargePoint.ocppVersion === OCPP_2_1 ? "v21" : "v201";
+  }
+
+  /**
+   * H04.FR.01 / H01.FR.16-17 ReservationStatusUpdate.req (#712). Sent like
+   * StatusNotification: while the socket is down it is dropped (the CSMS
+   * learns the state of the station from the reconnect's boot and status
+   * notifications, and an Expired or Removed reservation has nothing to
+   * replay), see {@link send}.
+   */
+  public sendReservationStatusUpdate(
+    reservationId: number,
+    reservationUpdateStatus: "Expired" | "Removed",
+  ): void {
+    this.send("ReservationStatusUpdate", this.generateMessageId(), {
+      reservationId,
+      reservationUpdateStatus,
+    });
   }
 
   /** N01 LogStatusNotification.req (#345); `requestId` as above, from the

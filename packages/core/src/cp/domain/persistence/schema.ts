@@ -196,6 +196,9 @@ CREATE TABLE IF NOT EXISTS charge_points (
   -- #654: a JSON object of behavior id to params object; NULL (a row older
   -- than the column) is no params, every behavior runs with its defaults.
   behavior_params TEXT,
+  -- #595: 1 when OCPP 1.6 ReserveNow authorizes the reservation's idTag first;
+  -- NULL (a row older than the column) is off.
+  reservation_authorize_id_tag INTEGER,
   -- #327: a JSON object of the charger-side delivery caps per connector;
   -- NULL (a row older than the column) is no cap.
   charger_capabilities TEXT

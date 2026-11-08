@@ -1082,6 +1082,10 @@ export function parseCreateBody(
     }
     inboundValidation = body.inboundValidation;
   }
+  const reservationAuthorizeIdTag =
+    typeof body.reservationAuthorizeIdTag === "boolean"
+      ? body.reservationAuthorizeIdTag
+      : undefined;
   const capabilityProfile = parseCapabilityProfile(body.capabilityProfile);
   let chargerCapabilities: ChargePointInitOptions["chargerCapabilities"];
   if (body.chargerCapabilities !== undefined) {
@@ -1186,6 +1190,9 @@ export function parseCreateBody(
     cpoName,
     ...(txUpdatedMeterValues !== undefined ? { txUpdatedMeterValues } : {}),
     ...(inboundValidation ? { inboundValidation } : {}),
+    ...(reservationAuthorizeIdTag !== undefined
+      ? { reservationAuthorizeIdTag }
+      : {}),
     ...(capabilityProfile ? { capabilityProfile } : {}),
     ...(chargerCapabilities ? { chargerCapabilities } : {}),
     tls,

@@ -57,6 +57,11 @@ export interface InboundCallGateOptions {
   readonly ports: InboundCallGatePorts;
   /** Step 4. A registry that diverts nothing by default. */
   readonly registry?: BehaviorRegistry;
+  /**
+   * Checked after the CALL was announced: true leaves it unanswered and with
+   * no effect (1.6 §4.2, while BootNotification is Rejected).
+   */
+  readonly silenced?: () => boolean;
   /** Prefix of the gate's log lines, e.g. `"[v2.0.1] "`. */
   readonly logPrefix?: string;
   info(message: string): void;
@@ -94,6 +99,14 @@ export class InboundCallGate {
     const { ports } = this.options;
     const action = exchange.action;
     ports.notifyReceived(action, payload, exchange.messageId);
+
+    if (this.options.silenced?.()) {
+      this.options.warn(
+        `${this.prefix}Boot Rejected (§4.2): ignored ${action} (no response)`,
+      );
+      exchange.suppress();
+      return { kind: "settled" };
+    }
 
     const policy = ports.policyFor(action);
     if (policy) {

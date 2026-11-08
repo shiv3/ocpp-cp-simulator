@@ -13,6 +13,7 @@ import { firmwareBehavior } from "../../cp/application/engine/behaviors/firmware
 import { logsBehavior } from "../../cp/application/engine/behaviors/logs";
 import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
 import { runBehavior, type BehaviorRun } from "./runBehavior";
+import { SIGNING_CERTIFICATE } from "../../cp/domain/security/__tests__/signingCertificateFixture";
 
 let run: BehaviorRun | undefined;
 afterEach(async () => {
@@ -74,7 +75,7 @@ describe("OCPP 2.x firmware train (#600)", () => {
     select(run, { train: true, stepMs: 100 });
     const answer = await run.call(
       "UpdateFirmware",
-      fw2(4, { signingCertificate: "c", signature: "s" }),
+      fw2(4, { signingCertificate: SIGNING_CERTIFICATE, signature: "s" }),
     );
     expect(reply(answer)).toBe("Accepted");
     await run.advance(1000);
@@ -109,7 +110,7 @@ describe("OCPP 2.x firmware train (#600)", () => {
     select(run, { train: true, stepMs: 100, failAt: "InvalidSignature" });
     await run.call(
       "UpdateFirmware",
-      fw2(6, { signingCertificate: "c", signature: "s" }),
+      fw2(6, { signingCertificate: SIGNING_CERTIFICATE, signature: "s" }),
     );
     await run.advance(2000);
     expect(statuses(run)).toEqual([
@@ -425,12 +426,15 @@ describe("reboot after the update (#600)", () => {
   });
 
   test("a reboot the CSMS never accepts reports no Installed", async () => {
+    // The first boot is accepted: a station whose boot was Rejected does not
+    // answer CSMS calls at all (1.6 §4.2), so the update could not start.
+    let boots = 0;
     run = await runBehavior({
       version: "1.6",
       responders: {
         BootNotification: () => ({
           result: {
-            status: "Rejected",
+            status: ++boots === 1 ? "Accepted" : "Rejected",
             currentTime: new Date().toISOString(),
             interval: 3600,
           },
@@ -503,16 +507,17 @@ describe("OCPP 2.x GetLog upload (#601)", () => {
     expect(statuses(run, "LogStatusNotification")).toEqual([]);
   });
 
-  test("1.6 is unchanged: Uploading, Uploaded, no AcceptedCanceled", async () => {
+  test("1.6 keeps its own rule (N01.FR.11): the replaced upload is cancelled, only the new one reports Uploaded", async () => {
     run = await runBehavior({ version: "1.6" });
     expect(reply(await run.call("GetLog", getLog(46)))).toBe("Accepted");
     await run.advance(500);
-    expect(reply(await run.call("GetLog", getLog(47)))).toBe("Accepted");
+    expect(reply(await run.call("GetLog", getLog(47)))).toBe(
+      "AcceptedCanceled",
+    );
     await run.advance(5000);
     expect(statuses(run, "LogStatusNotification")).toEqual([
       "Uploading",
       "Uploading",
-      "Uploaded",
       "Uploaded",
     ]);
   });

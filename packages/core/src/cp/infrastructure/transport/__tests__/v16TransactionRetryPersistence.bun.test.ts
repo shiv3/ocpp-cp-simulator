@@ -288,7 +288,7 @@ describe("OCPP 1.6 transaction message retries across a restart (#527)", () => {
     }
   });
 
-  it("a salvaged resend whose transaction did not survive the restart is discarded", () => {
+  it("a salvaged resend whose transaction did not survive the restart is still replayed: a CSMS that opened it needs its StopTransaction.req (#565)", () => {
     const db = BunSqliteDatabase.open(":memory:");
     try {
       startResendSalvaged(db);
@@ -296,17 +296,10 @@ describe("OCPP 1.6 transaction message retries across a restart (#527)", () => {
       const after = station(db, null);
       after.handler.flushPendingQueue();
 
-      expect(after.socket.written).toEqual([]);
-      expect(after.discarded).toEqual([
-        {
-          connectorId: 1,
-          transactionId: "0",
-          action: "StartTransaction",
-          reason: "callError",
-          attempts: 1,
-        },
+      expect(after.socket.written.map((w) => w.action)).toEqual([
+        "StartTransaction",
       ]);
-      expect(attemptsStored(db)).toEqual([]);
+      expect(after.discarded).toEqual([]);
     } finally {
       db.close();
     }

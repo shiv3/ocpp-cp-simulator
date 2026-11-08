@@ -17,7 +17,7 @@ import {
 /**
  * #327: `chargerCapabilities` is carried through every boundary: the
  * `cp.create` parameters and a blueprint's `params`, the init options, the
- * `charge_points` row (schema v30) and the runtime `Connector`.
+ * `charge_points` row (schema v31) and the runtime `Connector`.
  */
 
 const servers: TestServer[] = [];

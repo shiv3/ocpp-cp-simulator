@@ -234,8 +234,7 @@ export interface ChargePointEvents {
    *  transaction (#527, Part 2 §3.7.1) report `reason: "callError"` only.
    *  `attempt` is the 1-based transmission that failed. The transaction stays
    *  as it is, running or ended; the station resends the message unless this
-   *  was its last attempt, or a 1.6 StartTransaction whose transaction no
-   *  longer runs. A 1.6 StartTransaction has no CSMS id yet: its
+   *  was its last attempt. A 1.6 StartTransaction has no CSMS id yet: its
    *  `transactionId` is the `"0"` placeholder. */
   transactionMessageRejected: {
     connectorId: number;
@@ -249,9 +248,8 @@ export interface ChargePointEvents {
   /** The last of the allowed transmissions failed too, so the message is
    *  dropped: `MessageAttempts[TransactionEvent]` on 2.x (E13.FR.04), the
    *  1.6 `TransactionMessageAttempts` (#527, §3.7.1). `reason` and
-   *  `errorCode` describe that last failure. On 1.6 a StartTransaction whose
-   *  transaction no longer runs, or a resend that already met a lowered limit,
-   *  is dropped with no last attempt failing, and a replay has no `errorCode`:
+   *  `errorCode` describe that last failure. On 1.6 a resend that already
+   *  met a lowered limit is dropped with no last attempt failing, and a replay has no `errorCode`:
    *  the offline queue does not store it. The transaction stays as it is,
    *  running or ended. */
   transactionMessageDiscarded: {

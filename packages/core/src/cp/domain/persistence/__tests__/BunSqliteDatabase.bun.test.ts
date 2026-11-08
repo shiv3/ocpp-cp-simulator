@@ -789,7 +789,7 @@ describe("behavior params schema, v29 (#654)", () => {
   });
 });
 
-describe("charger capabilities schema, v30 (#327)", () => {
+describe("charger capabilities schema, v31 (#327)", () => {
   it("adds charger_capabilities to a database stamped 29 and keeps its rows uncapped", () => {
     const db = BunSqliteDatabase.open(":memory:");
     try {
@@ -818,7 +818,7 @@ describe("charger capabilities schema, v30 (#327)", () => {
         "SELECT value FROM schema_meta WHERE key = 'version'",
       );
       expect(Number(version?.value)).toBe(SCHEMA_VERSION);
-      expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(30);
+      expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(31);
 
       // Guarded: re-running on a database that already has the column is a no-op.
       db.run("UPDATE schema_meta SET value = '29' WHERE key = 'version'");

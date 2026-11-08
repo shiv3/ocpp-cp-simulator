@@ -90,6 +90,14 @@ export class Outbox implements IChargePointMessageHandler {
     return this.handler.sendSecurityEventNotification(type, techInfo);
   }
 
+  queueSecurityEventNotification(type: string, techInfo?: string): void {
+    this.handler.queueSecurityEventNotification?.(type, techInfo);
+  }
+
+  flushQueuedSecurityEvents(): void {
+    this.handler.flushQueuedSecurityEvents?.();
+  }
+
   sendSignCertificate(
     csr?: Parameters<IChargePointMessageHandler["sendSignCertificate"]>[0],
   ): ReturnType<IChargePointMessageHandler["sendSignCertificate"]> {
@@ -141,6 +149,13 @@ export class Outbox implements IChargePointMessageHandler {
     return this.handler.sendSignedFirmwareStatusNotification(status, requestId);
   }
 
+  sendReservationStatusUpdate(
+    reservationId: number,
+    status: "Expired" | "Removed",
+  ): void {
+    this.handler.sendReservationStatusUpdate?.(reservationId, status);
+  }
+
   sendNotifyEvent(
     events: Parameters<IChargePointMessageHandler["sendNotifyEvent"]>[0],
   ): ReturnType<IChargePointMessageHandler["sendNotifyEvent"]> {
@@ -163,6 +178,10 @@ export class Outbox implements IChargePointMessageHandler {
     status: Parameters<IChargePointMessageHandler["setBootStatus"]>[0],
   ): ReturnType<IChargePointMessageHandler["setBootStatus"]> {
     return this.handler.setBootStatus(status);
+  }
+
+  runTriggered<T>(fn: () => T): T {
+    return this.handler.runTriggered ? this.handler.runTriggered(fn) : fn();
   }
 
   getDataTransferHandler(): ReturnType<

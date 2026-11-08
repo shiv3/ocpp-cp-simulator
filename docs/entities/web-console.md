@@ -541,14 +541,16 @@ it. A failed or refused value keeps the dialog open with the reason.
   (`saveSocMeterSync`) and applies it (`setConnectorSocMeterSync`). Until the
   preference is read the switch is disabled; if it cannot be read, the dialog
   says so.
-- **Auto meter** (#418): **Enabled**, `every [n] s`, **Stop at target SoC**,
+- **Auto meter** (#418): **Enabled**, `every [n] s` (how often the register
+  moves; on 1.x the MeterValues themselves go out every
+  `MeterValueSampleInterval`, #722; on 2.x they follow `n`), **Stop at target SoC**,
   the presets **Constant 7.4 kW**, **Ramp and hold** and **Taper (DC-like)**
   (under the EV's max power), and the **curve editor**: power (kW) over the
   session (minutes) as an SVG, points dragged with the pointer (kept between
   their neighbours, at whole minutes and 0.1 kW, and under the EV's max power,
   drawn as a dashed red line), a points table (minute, kW, ✕; at least two
   points) with **+ Add point**, and a summary (duration, energy over the curve
-  and its share of the battery, peak, the number of MeterValues at the
+  and its share of the battery, peak, the number of meter updates at the
   interval). It starts on the connector's live configuration, else the one
   saved for it, else the default; when the saved one cannot be read, the tab
   says so and offers no editor (it would start on the default). **Save**

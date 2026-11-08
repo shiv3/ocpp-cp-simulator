@@ -447,16 +447,18 @@ bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 1
    ever close it, at precisely the moment the session is most likely to be
    real.
 
-   Preserving it costs **one CALL, not a stream**. The charge point never cycles
-   again and runs no meter scheduler: `Connector.startConfiguredMeterValue`
-   needs `autoConfig.enabled` or an increment fallback, `cp.create` accepts no
-   field that sets either, and the daemon constructs every charge point with
-   `autoMeterValueSetting = null` (`apps/cli/src/service.ts`). The one frame it does
-   still emit is at the moment the late conf lands, when
-   `StartTransactionResultHandler` drives the connector to `Charging` and a
-   `StatusNotification` goes out — one frame per retired charge point, against
-   the whole transaction cycle it no longer runs. Teardown's closing sweep
-   issues the stop, outside every measurement window and late enough that the
+   Preserving it costs **a trickle, not a stream**. The charge point never
+   cycles again and runs no auto-meter scheduler (`cp.create` accepts no field
+   that enables one and the daemon constructs every charge point with
+   `autoMeterValueSetting = null`, `apps/cli/src/service.ts`). But a running
+   1.x transaction is sampled by the station itself every
+   `MeterValueSampleInterval` seconds (default 60, #722), so a retired charge
+   point also sends one `MeterValues` a minute until teardown: with the
+   placeholder `transactionId` `0` until a late conf assigns the real one, and
+   inside the measurement windows it spans. On top of that it emits the
+   `StatusNotification` produced when the late conf drives the connector to
+   `Charging` — against the whole transaction cycle it no longer runs.
+   Teardown's closing sweep issues the stop, outside every measurement window and late enough that the
    conf has usually landed, so the stop carries the real id. What that does
    _not_ guarantee is listed under "Known limitations".
 
@@ -1148,9 +1150,10 @@ read its commands there to repeat it.
 - `timeouts` and every other number is fleet-wide, not per charge point:
   `/metrics` carries no `cpId` label by design. That is why the preflight
   refuses a daemon with a pre-existing fleet.
-- No MeterValues are driven during a transaction — set
-  `MeterValueSampleInterval` on the CPs' config if you want that traffic
-  included (not currently a flag on this script).
+- No MeterValues are driven by the script. A 1.6 CP still sends one every
+  `MeterValueSampleInterval` seconds (default 60) while its transaction runs
+  (#722); set the key to `0` on the CPs' config to leave that traffic out
+  (not currently a flag on this script).
 
 ## Directory layout
 

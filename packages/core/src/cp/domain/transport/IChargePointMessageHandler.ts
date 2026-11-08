@@ -106,6 +106,13 @@ export interface IChargePointMessageHandler {
    * logs it.
    */
   sendSecurityEventNotification(type: string, techInfo?: string): Promise<void>;
+  /**
+   * 1.6 (#734): raise a critical security event now and send it after the
+   * next Accepted boot (A04.FR.02). Absent on the other handlers.
+   */
+  queueSecurityEventNotification?(type: string, techInfo?: string): void;
+  /** 1.6 (#734): send the queued security events, oldest first. */
+  flushQueuedSecurityEvents?(): void;
   sendSignCertificate(csr?: string): Promise<void>;
   sendDiagnosticsStatusNotification(status: DiagnosticsStatus): void;
   /** FirmwareStatusNotification.req. `requestId` is carried on 2.0.1 (from
@@ -122,6 +129,12 @@ export interface IChargePointMessageHandler {
     status: FirmwareStatus,
     requestId?: number,
   ): void;
+  /** OCPP 2.x ReservationStatusUpdate.req (H04.FR.01, H01.FR.16/17, #712):
+   *  a reservation ended without a transaction. 1.6 has no such message. */
+  sendReservationStatusUpdate?(
+    reservationId: number,
+    status: "Expired" | "Removed",
+  ): void;
   /** OCPP 2.x NotifyEvent.req for variable-monitor events (N07, #457):
    *  one request, one eventData per event. 1.6 has no such message. */
   sendNotifyEvent(events: readonly MonitoringEvent[]): void;
@@ -137,6 +150,12 @@ export interface IChargePointMessageHandler {
       | { status: "Pending" }
       | { status: "Rejected"; retryAfter: Date },
   ): void;
+  /**
+   * OCPP-J 1.6 §4.2: run `fn`, whose CALLs answer an accepted TriggerMessage,
+   * so they pass the boot gate while it is Pending. Absent where the transport
+   * has no such gate.
+   */
+  runTriggered?<T>(fn: () => T): T;
   getDataTransferHandler(): DataTransferVendorRegistry;
   /** #537: whether a transaction message awaits its write, its answer or
    *  a resend, which the CSMS may still settle before a close. Implemented

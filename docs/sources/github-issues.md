@@ -1,7 +1,7 @@
 ---
 title: "Source: GitHub issues referenced by the wiki"
 type: source
-summary: Index of the issue / PR numbers that wiki pages cite as the origin of a design decision, so "why" questions can be traced back.
+summary: Archive, frozen 2026-11-08. Index of the issue / PR numbers that wiki pages cited as the origin of a design decision; newer provenance is in git.
 sources:
   - https://github.com/shiv3/ocpp-cp-simulator/issues
 related:
@@ -11,7 +11,12 @@ related:
 updated: 2026-11-08
 ---
 
-# Source: GitHub issues referenced by the wiki
+# Source: GitHub issues referenced by the wiki (archive)
+
+> **Archived: no longer updated as of 2026-11-08.** Do not add rows. Pages cite
+> issue numbers inline for provenance; to trace a newer decision use
+> `git log --grep '#N'`, `git log -- docs/`, the PR that closed the issue, or the
+> branch name `<type>/<issue number>-<slug>`.
 
 All under https://github.com/shiv3/ocpp-cp-simulator unless noted.
 
@@ -144,6 +149,7 @@ All under https://github.com/shiv3/ocpp-cp-simulator unless noted.
 | #457                                             | OCPP 2.x variable monitoring: custom monitors, statuses, reports, NotifyEvent, level filtering, SetMonitoringBase, persistence                                                                                                   | [Variable monitoring](../concepts/variable-monitoring.md)                                                                                                                                                                                                                                                                                                                            |
 | #524                                             | 1.6 `GetCompositeSchedule` limit must be `multipleOf 0.1`: a converted limit is floored to 0.1                                                                                                                                   | [Scenario format](../concepts/scenario-format.md#charging-curve-v12)                                                                                                                                                                                                                                                                                                                 |
 | #538                                             | 2.x monitoring follow-ups: catalogs, full SetMonitoringBase, MonitoringCtrlr, report parts, transactionId, periodic, TargetDelta, runtime values, offline queuing                                                                | [Variable monitoring](../concepts/variable-monitoring.md)                                                                                                                                                                                                                                                                                                                            |
+| #585                                             | OCPP-S 1.6 retries a transaction-related message answered with a SOAP Fault or an HTTP error (errata 3.2), after a Heartbeat probe; 1.2 and 1.5 unchanged                                                                        | [OCPP versions and transports](../concepts/ocpp-versions-and-transports.md#deviation-ocpp-s-16-retries-after-a-soap-fault)                                                                                                                                                                                                                                                           |
 | #527                                             | A 1.6 StartTransaction / StopTransaction / transaction MeterValues CALLERROR follows §3.7.1: resent, then discarded; the transaction runs on                                                                                     | [OCPP versions and transports](../concepts/ocpp-versions-and-transports.md#transaction-message-retries-ocpp-j-16), [Charging sessions](../concepts/charging-sessions.md#rejections-and-failed-starts-447)                                                                                                                                                                            |
 | #537                                             | Certificate follow-ups: OCSP (M06), Get15118EVCertificate relay, renewed TLS client certificate, Sign* trigger, back-off, security events                                                                                        | [Security profiles](../concepts/security-profiles.md#certificate-follow-ups-537)                                                                                                                                                                                                                                                                                                     |
 | #570                                             | Import cycle in `packages/core/src/cp` broken; `check:boundaries` refuses value-import cycles, ESLint enforces `import type`                                                                                                     | [Overview](../overview.md#source-layout-and-package-boundaries)                                                                                                                                                                                                                                                                                                                      |

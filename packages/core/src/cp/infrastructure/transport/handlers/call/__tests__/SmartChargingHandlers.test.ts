@@ -155,10 +155,10 @@ describe("ClearChargingProfileHandler", () => {
     expect(stationProfiles.all()).toEqual([]);
   });
 
-  it("Accepted even when no profiles matched (§5.4)", () => {
+  it("answers Unknown when no profile matched (§7.21)", () => {
     const { ctx, chargePoint } = buildContext();
     const res = new ClearChargingProfileHandler().handle({ id: 999 }, ctx);
-    expect(res).toEqual({ status: "Accepted" });
+    expect(res).toEqual({ status: "Unknown" });
     expect(
       chargePoint.timeline.query({ kinds: ["charging_profile_cleared"] }).total,
     ).toBe(0);
@@ -584,5 +584,87 @@ describe("GetCompositeSchedule.conf startSchedule (errata 3.57)", () => {
     expect(res.scheduleStart).toEqual(expect.any(String));
     expect(res.chargingSchedule).not.toHaveProperty("startSchedule");
     expect(isValidGetCompositeScheduleResponseV16(res)).toBe(true);
+  });
+});
+
+describe("ClearChargingProfile matching (errata 3.25, 3.26)", () => {
+  const install = (
+    chargePoint: ChargePoint,
+    id: number,
+    connectorId: number,
+    stackLevel: number,
+    purpose = ChargingProfilePurposeType.TxDefaultProfile,
+  ) =>
+    chargePoint.applyChargingProfile(
+      {
+        chargingProfileId: id,
+        connectorId,
+        stackLevel,
+        chargingProfilePurpose: purpose,
+        chargingProfileKind: "Absolute" as never,
+        chargingRateUnit: "W" as never,
+        chargingSchedulePeriods: [{ startPeriod: 0, limit: 1000 }],
+      },
+      "SetChargingProfile",
+    );
+  const clear = (
+    ctx: HandlerContext,
+    payload: Parameters<ClearChargingProfileHandler["handle"]>[0],
+  ) => new ClearChargingProfileHandler().handle(payload, ctx);
+
+  it("answers Unknown for no fields when nothing is installed", () => {
+    const { ctx } = buildContext();
+    expect(clear(ctx, {})).toEqual({ status: "Unknown" });
+  });
+
+  it("lets id override connectorId and stackLevel", () => {
+    const { ctx, chargePoint, connectors } = buildContext();
+    install(chargePoint, 1, 1, 3);
+    expect(clear(ctx, { id: 1, connectorId: 2, stackLevel: 9 })).toEqual({
+      status: "Accepted",
+    });
+    expect(connectors.get(1)!.chargingProfiles).toEqual([]);
+  });
+
+  it("lets id override the purpose and finds a station profile", () => {
+    const { ctx, chargePoint, stationProfiles } = buildContext();
+    install(
+      chargePoint,
+      4,
+      0,
+      0,
+      ChargingProfilePurposeType.ChargePointMaxProfile,
+    );
+    expect(
+      clear(ctx, {
+        id: 4,
+        connectorId: 1,
+        chargingProfilePurpose: "TxProfile",
+      }),
+    ).toEqual({ status: "Accepted" });
+    expect(stationProfiles.all()).toEqual([]);
+  });
+
+  it("still ANDs connectorId, purpose and stackLevel without an id", () => {
+    const { ctx, chargePoint, connectors } = buildContext();
+    install(chargePoint, 1, 1, 3);
+    install(chargePoint, 2, 1, 4);
+    install(chargePoint, 3, 2, 3);
+    // Wrong stack level on connector 1: nothing matches.
+    expect(clear(ctx, { connectorId: 2, stackLevel: 4 })).toEqual({
+      status: "Unknown",
+    });
+    expect(clear(ctx, { connectorId: 1, stackLevel: 3 })).toEqual({
+      status: "Accepted",
+    });
+    expect(
+      connectors.get(1)!.chargingProfiles.map((p) => p.chargingProfileId),
+    ).toEqual([2]);
+    expect(connectors.get(2)!.chargingProfiles).toHaveLength(1);
+    expect(
+      clear(ctx, {
+        chargingProfilePurpose: "TxProfile",
+      }),
+    ).toEqual({ status: "Unknown" });
   });
 });

@@ -29,6 +29,6 @@
 {"d":"CSMS>","k":"call","id":"id-15","a":"GetCompositeSchedule","p":{"connectorId":1,"duration":600}}
 {"d":"CP>","k":"result","id":"id-15","p":{"status":"Accepted","connectorId":1,"scheduleStart":"<ts>","chargingSchedule":{"duration":600,"chargingRateUnit":"W","chargingSchedulePeriod":[{"startPeriod":0,"limit":2000}]}}}
 {"d":"CSMS>","k":"call","id":"id-16","a":"ClearChargingProfile","p":{"id":1}}
-{"d":"CP>","k":"result","id":"id-16","p":{"status":"Accepted"}}
+{"d":"CP>","k":"result","id":"id-16","p":{"status":"Unknown"}}
 {"d":"CSMS>","k":"call","id":"id-17","a":"ClearChargingProfile","p":{"id":2}}
 {"d":"CP>","k":"result","id":"id-17","p":{"status":"Accepted"}}

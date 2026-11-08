@@ -68,3 +68,55 @@ v16("get-log-cancelled", async (rig, advance) => {
   await rig.csms.call("GetLog", request(22));
   await advance(5000);
 });
+
+/** Fails the case when a CP>-frame of `action` with `status` is (not) there. */
+function sent(rig: Rig, action: string, status: string): boolean {
+  return rig.csms.frames.some(
+    (f) =>
+      f.dir === "CP>" &&
+      f.action === action &&
+      (f.payload as { status?: string }).status === status,
+  );
+}
+
+function expectSent(rig: Rig, status: string, expected: boolean): void {
+  if (sent(rig, "SignedFirmwareStatusNotification", status) !== expected) {
+    throw new Error(
+      `expected ${status} to ${expected ? "be" : "not be"} sent by now`,
+    );
+  }
+}
+
+// The virtual clock starts at 2030-01-01T00:00:00Z.
+// #741 L01.FR.13: a future retrieveDateTime is announced with
+// DownloadScheduled, and Downloading starts at that time.
+v16("signed-update-firmware-download-scheduled", async (rig, advance) => {
+  await rig.csms.call(
+    "SignedUpdateFirmware",
+    signedFirmware(11, { retrieveDateTime: "2030-01-01T00:10:00.000Z" }),
+  );
+  await advance(9 * 60_000);
+  expectSent(rig, "DownloadScheduled", true);
+  expectSent(rig, "Downloading", false);
+  await advance(60_000);
+  expectSent(rig, "Downloading", true);
+  await advance(20_000);
+});
+
+// #741 L01.FR.16/17: a future installDateTime is announced with
+// InstallScheduled after SignatureVerified, and Installing starts at that time.
+v16("signed-update-firmware-install-scheduled", async (rig, advance) => {
+  await rig.csms.call(
+    "SignedUpdateFirmware",
+    signedFirmware(11, { installDateTime: "2030-01-01T01:00:00.000Z" }),
+  );
+  await advance(30_000);
+  expectSent(rig, "SignatureVerified", true);
+  expectSent(rig, "InstallScheduled", true);
+  expectSent(rig, "Installing", false);
+  await advance(59 * 60_000);
+  expectSent(rig, "Installing", false);
+  await advance(60_000);
+  expectSent(rig, "Installing", true);
+  await advance(20_000);
+});

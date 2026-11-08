@@ -84,7 +84,7 @@
   "settings.curve.title": "Configure Auto MeterValue",
   "settings.curve.enable": "Enable Auto MeterValue",
   "settings.curve.canvasHint": "Click to add control points, drag to move them",
-  "settings.curve.stopAtTarget": "Charge until battery full (stop at EV's target SoC)",
+  "settings.curve.stopAtTarget": "Charge until the EV's target SoC",
   "settings.curve.stopAtTargetHelp": "Ignores the chart's max time/value. Uses EV Settings → Target SoC. Once reached, the in-flight transaction is stopped.",
   "settings.curve.presets": "Presets",
   "settings.curve.linear": "Linear",
@@ -99,7 +99,7 @@
   "settings.page.backToHome": "Back to Home",
   "settings.page.tagsSaved": "RFID Tag IDs saved.",
   "settings.page.resetUnsupported": "This runtime does not support state reset",
-  "settings.page.resetConfirm": "Reset all simulator data?\n\nScenarios, configuration overrides, charging profiles, availability flags, pending messages, logs and saved vehicle profiles will be erased. The page will reload afterwards.",
+  "settings.page.resetConfirm": "Reset all simulator data?\n\nScenarios, configuration overrides, charging profiles, availability flags, pending messages, logs and saved vehicle profiles will be erased. In remote mode, every charge point registered on the daemon is deleted too. The page will reload afterwards.",
   "settings.page.evSaved": "Default EV settings saved. New connectors will start with these values.",
   "settings.page.evReset": "Default EV settings reset to the built-in defaults.",
   "settings.page.exported": "Configuration exported successfully!",
@@ -161,5 +161,5 @@
   "settings.page.note1": "Individual charge point settings can be configured from the Home page",
   "settings.page.note2": "Click the gear icon next to each charge point tab to edit its settings",
   "settings.page.note3": "Use the \"+ Add Charge Point\" button to add new charge points",
-  "settings.page.note4": "This page is for bulk configuration import/export only"
+  "settings.page.note4": "Besides bulk configuration import/export, this page holds simulator-wide settings and data reset"
 }

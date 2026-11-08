@@ -144,6 +144,7 @@ function setup(
       transactionMessageAttempts: vi.fn(() => config.attempts ?? 3),
       transactionMessageRetryInterval: vi.fn(() => config.interval ?? 60),
       messageTimeout: vi.fn(() => config.timeout ?? 30),
+      offlineQueueMaxEvents: vi.fn(() => 1000),
       stopTransactionOnInvalidId: vi.fn(() => true),
       meterValuesSampledData: vi.fn(() => []),
     },

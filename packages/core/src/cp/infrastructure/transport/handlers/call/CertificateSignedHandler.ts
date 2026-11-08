@@ -7,6 +7,8 @@ import type {
 } from "@ocpp-cp-sim/ocpp/index";
 import { isValidCertificateSignedRequestV16 } from "@ocpp-cp-sim/ocpp/index";
 import { CERTIFICATE_PEM_RE } from "../../../../domain/security/certificateHash";
+import { checkSignedChain } from "../../../../domain/security/signedChain";
+import type { HandlerOutcome } from "../../network-sim/ResponseEffectQueue";
 import { LogType } from "../../../../shared/Logger";
 import type { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
 
@@ -19,7 +21,7 @@ export class CertificateSignedHandler implements CallHandler<
   async handle(
     payload: CertificateSignedRequestV16,
     context: HandlerContext,
-  ): Promise<CertificateSignedResponseV16> {
+  ): Promise<CertificateSignedResponseV16 | HandlerOutcome> {
     if (!isValidCertificateSignedRequestV16(payload)) {
       context.logger.warn(
         "CertificateSigned rejected: invalid request payload",
@@ -28,14 +30,30 @@ export class CertificateSignedHandler implements CallHandler<
       return { status: "Rejected" };
     }
 
-    const chain = splitPemChain(payload.certificateChain);
-    if (!chain) {
+    // A02.FR.07: a certificate that is not valid is answered Rejected,
+    // discarded, and reported with an InvalidChargePointCertificate security
+    // event once the answer is written.
+    const rejectInvalid = (reason: string): HandlerOutcome => {
       context.logger.warn(
-        "CertificateSigned rejected: malformed or empty certificate chain",
+        `CertificateSigned rejected: ${reason}`,
         LogType.OCPP,
       );
-      return { status: "Rejected" };
-    }
+      return {
+        kind: "handler-outcome",
+        payload: { status: "Rejected" },
+        afterResponseSettled: () => {
+          void context.chargePoint
+            .sendSecurityEventNotification(
+              "InvalidChargePointCertificate",
+              reason,
+            )
+            .catch(() => undefined);
+        },
+      };
+    };
+
+    const chain = splitPemChain(payload.certificateChain);
+    if (!chain) return rejectInvalid("malformed or empty certificate chain");
 
     // Check certificate quirk: requiredCertificateSignatureAlgorithms.
     // If set and non-empty, verify the leaf certificate's signature
@@ -53,11 +71,9 @@ export class CertificateSignedHandler implements CallHandler<
         if (
           !quirks.requiredCertificateSignatureAlgorithms.includes(sigAlgName)
         ) {
-          context.logger.warn(
-            `CertificateSigned: rejected — signature algorithm ${sigAlgName} not in [${quirks.requiredCertificateSignatureAlgorithms.join(", ")}] (certificate quirk)`,
-            LogType.OCPP,
+          return rejectInvalid(
+            `signature algorithm ${sigAlgName} not in [${quirks.requiredCertificateSignatureAlgorithms.join(", ")}] (certificate quirk)`,
           );
-          return { status: "Rejected" };
         }
       } catch (err) {
         context.logger.warn(
@@ -68,7 +84,19 @@ export class CertificateSignedHandler implements CallHandler<
       }
     }
 
-    // 1.6: stored unconditionally; the pending-CSR check is 2.x-only (#456).
+    // A02.FR.06 (#732): validity period, signature chain, the installed CSMS
+    // roots and the pending CSR's key. Without a pending CSR (a chain pushed
+    // unasked) the key is not compared.
+    const store = context.chargePoint.certificateStore;
+    const check = await checkSignedChain(chain, {
+      now: context.chargePoint.nowDate(),
+      trustedRoots: store
+        .listRootCertificates(["CsmsRootCertificate"])
+        .map((root) => root.pem),
+      pendingCsr: store.pendingCsr("ChargingStationCertificate"),
+    });
+    if (!check.ok) return rejectInvalid(`${check.problem}: ${check.detail}`);
+
     await context.chargePoint.certificateStore.storeSignedChain(chain);
     context.logger.info(
       `CertificateSigned accepted: stored ${chain.length} certificate(s)`,

@@ -9,10 +9,21 @@ import type {
   UnlockConnectorRequestV16,
   UnlockConnectorResponseV16,
 } from "@ocpp-cp-sim/ocpp/index";
-import type { HandlerOutcome } from "../../network-sim/ResponseEffectQueue";
+import {
+  isHandlerOutcome,
+  type HandlerOutcome,
+} from "../../network-sim/ResponseEffectQueue";
 import { REDACTED_VALUE } from "../../../../shared/redaction";
 import { LogType } from "../../../../shared/Logger";
 import { defaultBehavior16 } from "./defaultBehavior";
+import {
+  diagnosticsTriggerStatus,
+  firmwareTriggerStatus,
+} from "./triggerStatus";
+import type {
+  DiagnosticsStatus,
+  FirmwareStatus,
+} from "../../../../domain/types/FirmwareLogStatus";
 
 export class ChangeConfigurationHandler implements CallHandler<
   ChangeConfigurationRequestV16,
@@ -51,11 +62,35 @@ export function isUnknownConnector(
   );
 }
 
+/**
+ * §4.2: the message an accepted TriggerMessage asks for may go out while the
+ * boot gate is Pending, so the deferred effect runs inside the gate's
+ * triggered scope. A response with no effect passes through.
+ */
+export function sendWhileTriggered<T>(
+  result: T | HandlerOutcome,
+  context: HandlerContext,
+): T | HandlerOutcome {
+  if (!isHandlerOutcome(result)) return result;
+  const send = result.afterResponseSettled;
+  return {
+    ...result,
+    afterResponseSettled: () => context.chargePoint.runTriggered(send),
+  };
+}
+
 export class TriggerMessageHandler implements CallHandler<
   TriggerMessageRequestV16,
   TriggerMessageResponseV16
 > {
   handle(
+    payload: TriggerMessageRequestV16,
+    context: HandlerContext,
+  ): TriggerMessageResponseV16 | HandlerOutcome {
+    return sendWhileTriggered(this.respond(payload, context), context);
+  }
+
+  private respond(
     payload: TriggerMessageRequestV16,
     context: HandlerContext,
   ): TriggerMessageResponseV16 | HandlerOutcome {
@@ -142,25 +177,31 @@ export class TriggerMessageHandler implements CallHandler<
       }
 
       case "DiagnosticsStatusNotification": {
-        // §4.4: when not busy uploading diagnostics, respond Idle.
+        // §4.4: Idle only when not busy uploading diagnostics.
         const response = { status: "Accepted" } as const;
         const outcome: HandlerOutcome = {
           kind: "handler-outcome",
           payload: response,
           afterResponseSettled: () =>
-            context.chargePoint.sendDiagnosticsStatusNotification("Idle"),
+            context.chargePoint.sendDiagnosticsStatusNotification(
+              diagnosticsTriggerStatus(context.chargePoint.engine.state)
+                .status as DiagnosticsStatus,
+            ),
         };
         return outcome;
       }
 
       case "FirmwareStatusNotification": {
-        // §4.5: same shape as DiagnosticsStatus — Idle if not busy.
+        // §4.5: Idle only when not downloading or installing.
         const response = { status: "Accepted" } as const;
         const outcome: HandlerOutcome = {
           kind: "handler-outcome",
           payload: response,
           afterResponseSettled: () =>
-            context.chargePoint.sendFirmwareStatusNotification("Idle"),
+            context.chargePoint.sendFirmwareStatusNotification(
+              firmwareTriggerStatus(context.chargePoint.engine.state)
+                .status as FirmwareStatus,
+            ),
         };
         return outcome;
       }

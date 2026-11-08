@@ -134,6 +134,13 @@ export const handleTriggerMessageV201 = (
 
   switch (req.requestedMessage) {
     case "BootNotification":
+      // F06.FR.17: after an Accepted boot the answer is Rejected and nothing
+      // is sent. Pending, Rejected and unanswered boots keep Accepted.
+      if (ctx.bootAccepted?.()) {
+        return {
+          response: { status: "Rejected" } satisfies TriggerMessageResponseV201,
+        };
+      }
       return {
         response: accepted,
         afterResult: () => ctx.chargePoint.boot(),

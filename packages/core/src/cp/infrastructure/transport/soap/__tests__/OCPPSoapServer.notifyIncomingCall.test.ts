@@ -138,6 +138,7 @@ describe("OCPPSoapServer reports the answer to an inbound call (#396)", () => {
           `completed:${c.action}:${c.messageId}:${c.outcome}${c.outcome === "CallError" ? `:${c.errorCode}` : ""}`,
         ),
       sendCurrentStatusNotification: () => order.push("effect"),
+      runTriggered: <T>(fn: () => T): T => fn(),
     } as unknown as ChargePoint;
     return new OCPPSoapServer(
       {

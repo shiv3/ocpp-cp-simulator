@@ -48,6 +48,7 @@ import {
   withoutNulls,
 } from "./EVSettings";
 import {
+  isScheduleInEffect,
   resolveEffectiveLimitWatts,
   resolveEffectivePhaseLimit,
 } from "./ChargingScheduleResolver";
@@ -61,6 +62,7 @@ import {
 import {
   partitionProfiles,
   upsertProfile,
+  type ApplyChargingProfileOptions,
   type ChargingProfileStore,
   type ProfileRemoveCriteria,
 } from "../charge-point/ChargingProfileStore";
@@ -111,6 +113,16 @@ export interface ActiveChargingProfile {
   recurrencyKind?: RecurrencyKindType;
   validFrom?: string; // ISO 8601 timestamp
   validTo?: string; // ISO 8601 timestamp
+  /**
+   * `chargingSchedule.startSchedule`: the instant an Absolute or Recurring
+   * schedule's `startPeriod` offsets count from (1.6 §7.13). Distinct from
+   * `validFrom`, which only bounds when the profile may apply.
+   */
+  startSchedule?: string; // ISO 8601 timestamp
+  /** `chargingSchedule.duration` in seconds: the schedule ends after it (per cycle for Recurring). */
+  duration?: number;
+  /** `chargingSchedule.minChargingRate`, kept so the profile round-trips. */
+  minChargingRate?: number;
   chargingSchedulePeriods: ChargingSchedulePeriod[];
 }
 
@@ -144,6 +156,11 @@ export interface ConnectorEvents {
    *  profile). The ChargePoint listens and flips Charging ↔ SuspendedEVSE
    *  accordingly. `watts` is the new effective cap. */
   scheduleLimitChange: { paused: boolean; watts: number };
+  /** The `MaxEnergyOnInvalidId` allowance of a transaction whose id was not
+   *  accepted is used up: the energy hold has just started (E05.FR.02;
+   *  2.x only, 1.6 errata 3.17 is #736). The ChargePoint moves the connector to
+   *  SuspendedEVSE. */
+  invalidIdEnergyExhausted: Record<string, never>;
 }
 
 interface IncrementStrategyConfig {
@@ -242,6 +259,21 @@ export class Connector {
    * `SuspendedEV` and when a transaction begins. Not persisted.
    */
   private energyOfferSuspendedValue = false;
+
+  /**
+   * The CSMS did not accept the id of the running transaction and
+   * `StopTransactionOnInvalidId` is false: the station keeps the transaction
+   * but stops the energy delivery (2.0.1 E05.FR.02; 2.x only, 1.6 errata 3.17
+   * is #736). While
+   * held, the meter cap is zero and the energy register does not rise; the
+   * scheduler keeps ticking. Unlike {@link energyOfferSuspendedValue} it
+   * survives status changes (SuspendedEVSE). Cleared when a transaction
+   * begins. Not persisted.
+   */
+  private energyHeldForInvalidId = false;
+  /** Register value (Wh) at which the hold starts, from
+   *  `MaxEnergyOnInvalidId` > 0; null when no allowance is running. */
+  private invalidIdHoldAtWh: number | null = null;
 
   private autoConfig: AutoMeterValueConfig = { ...defaultAutoMeterValueConfig };
   private incrementFallback: IncrementStrategyConfig | null = null;
@@ -370,7 +402,17 @@ export class Connector {
       connectorId,
       {
         getCurrentValue: () => this.meterValueWh,
-        updateValue: (value) => this.applyMeterValue(value),
+        updateValue: (value) => {
+          // MaxEnergyOnInvalidId (E05.FR.03): the register stops at the
+          // allowance, not one tick past it.
+          const hold = this.invalidIdHoldAtWh;
+          this.applyMeterValue(
+            hold !== null && !this.energyHeldForInvalidId
+              ? Math.min(value, hold)
+              : value,
+          );
+          this.invalidIdAllowanceUsedUp();
+        },
         onSend: (id) => {
           if (this.onMeterSend) {
             this.onMeterSend(id);
@@ -628,6 +670,7 @@ export class Connector {
     const scheduleW = this.currentScheduleLimitWatts();
     // Resolved first so the schedule latch bookkeeping still runs (#301).
     if (this.energyOfferSuspendedValue) return 0;
+    if (this.invalidIdAllowanceUsedUp()) return 0;
     const curve = this._evSettings.chargingCurve;
     const maxKw = this._evSettings.maxChargingPowerKw ?? 0;
     const evMaxW = maxKw > 0 ? maxKw * 1000 : Infinity;
@@ -913,6 +956,37 @@ export class Connector {
     return this.transaction !== null && this.transaction.stopTime === null;
   }
 
+  /** See {@link energyHeldForInvalidId}. */
+  get energyHeld(): boolean {
+    return this.energyHeldForInvalidId;
+  }
+
+  /**
+   * Stop the energy delivery of the running transaction after a non-Accepted
+   * idTokenInfo / idTagInfo with `StopTransactionOnInvalidId=false`. With
+   * `allowanceWh` > 0 that much more energy is delivered first
+   * (`MaxEnergyOnInvalidId`, E05.FR.03); the connector then emits
+   * `invalidIdEnergyExhausted`. Returns true when the hold is already in
+   * force (the caller reports SuspendedEVSE now).
+   */
+  holdEnergyForInvalidId(allowanceWh: number): boolean {
+    if (allowanceWh > 0) {
+      this.invalidIdHoldAtWh ??= this.meterValueWh + allowanceWh;
+      return this.invalidIdAllowanceUsedUp();
+    }
+    this.energyHeldForInvalidId = true;
+    return true;
+  }
+
+  private invalidIdAllowanceUsedUp(): boolean {
+    if (this.energyHeldForInvalidId) return true;
+    if (this.invalidIdHoldAtWh === null) return false;
+    if (this.meterValueWh < this.invalidIdHoldAtWh) return false;
+    this.energyHeldForInvalidId = true;
+    this.eventsEmitter.emit("invalidIdEnergyExhausted", {});
+    return true;
+  }
+
   /** See {@link energyOfferSuspendedValue} (#488). */
   get energyOfferSuspended(): boolean {
     return this.energyOfferSuspendedValue;
@@ -1097,10 +1171,13 @@ export class Connector {
   getActiveChargingProfile(
     now: Date = this.nowDate(),
   ): ActiveChargingProfile | null {
+    const txStart = this.transaction?.startTime ?? null;
     const isValid = (profile: ActiveChargingProfile) => {
       if (profile.validFrom && new Date(profile.validFrom) > now) return false;
       if (profile.validTo && new Date(profile.validTo) < now) return false;
-      return true;
+      // A schedule past its `duration` (or not yet at its `startSchedule`)
+      // yields to the next lower stackLevel (1.6 errata 3.43).
+      return isScheduleInEffect(profile, txStart, now);
     };
 
     // Tier 1: TxProfile on this connector wins outright (§3.13.3).
@@ -1163,10 +1240,14 @@ export class Connector {
    * Add or update a charging profile. If a profile with the same ID exists, it is replaced.
    * @returns Whether a profile with the same ID was replaced
    */
-  addChargingProfile(profile: ActiveChargingProfile): boolean {
+  addChargingProfile(
+    profile: ActiveChargingProfile,
+    options: ApplyChargingProfileOptions = {},
+  ): boolean {
     const { profiles, replaced } = upsertProfile(
       this._chargingProfiles,
       profile,
+      options,
     );
     this._chargingProfiles = profiles;
     this.emitProfileChanges();
@@ -1285,6 +1366,8 @@ export class Connector {
     // has no `startTime` to resolve against and so disarms on its own.
     this.lastSchedulePaused = null;
     this.energyOfferSuspendedValue = false;
+    this.energyHeldForInvalidId = false;
+    this.invalidIdHoldAtWh = null;
     this.openSessionSoc(this.txView ?? transaction);
     this.startConfiguredMeterValue();
     this.eventsEmitter.emit("transactionChange", { transaction });

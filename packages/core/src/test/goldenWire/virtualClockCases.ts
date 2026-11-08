@@ -1,0 +1,196 @@
+// Golden cases that run on a VirtualClock with the station and the fake CSMS
+// wired in memory: scheduled and cancelled firmware / log trains, whose timers
+// would take real seconds. The clock starts at 2030-01-01 and moves only when
+// a case advances it.
+import { SIGNING_CERTIFICATE } from "../../cp/domain/security/__tests__/signingCertificateFixture";
+import { tcpPort } from "../bunServe";
+import { drainMicrotasks, VirtualClock } from "../../cp/shared/clock";
+import type { GoldenCase } from "./cases";
+import type { Rig } from "./rig";
+
+export const virtualClockCases: GoldenCase[] = [];
+
+const PAST = "2020-01-01T00:00:00.000Z";
+
+type VirtualRun = (
+  rig: Rig,
+  advance: (ms: number) => Promise<void>,
+) => Promise<void>;
+
+/** A 1.6 case on its own VirtualClock; `advance` moves it and settles. */
+function v16(name: string, run: VirtualRun): void {
+  const clock = new VirtualClock();
+  virtualClockCases.push({
+    name: `16-${name}`,
+    version: "1.6",
+    options: { memory: true, simulation: { clock, seed: "golden" } },
+    run: (rig) =>
+      run(rig, async (ms) => {
+        await clock.advanceBy(ms);
+        await rig.csms.settle();
+        await drainMicrotasks();
+      }),
+  });
+}
+
+const signedFirmware = (
+  requestId: number,
+  extra: Record<string, unknown> = {},
+) => ({
+  requestId,
+  firmware: {
+    location: "https://fw.example.test/signed.bin",
+    retrieveDateTime: PAST,
+    signingCertificate: SIGNING_CERTIFICATE,
+    signature: "c2lnbmF0dXJl",
+    ...extra,
+  },
+});
+
+// #740 L01.FR.26: a second SignedUpdateFirmware mid-train cancels the first
+// (AcceptedCanceled); only the second request's train runs to Installed.
+v16("signed-update-firmware-cancelled", async (rig, advance) => {
+  await rig.csms.call("SignedUpdateFirmware", signedFirmware(11));
+  await advance(2500);
+  await rig.csms.call("SignedUpdateFirmware", signedFirmware(12));
+  await advance(20_000);
+});
+
+// #740 N01.FR.11: a second GetLog mid-upload cancels the first
+// (AcceptedCanceled); only the second requestId reaches Uploaded.
+v16("get-log-cancelled", async (rig, advance) => {
+  const request = (requestId: number) => ({
+    logType: "DiagnosticsLog",
+    requestId,
+    log: { remoteLocation: "http://upload.example.test/log" },
+  });
+  await rig.csms.call("GetLog", request(21));
+  await advance(500);
+  await rig.csms.call("GetLog", request(22));
+  await advance(5000);
+});
+
+/** Fails the case when a CP>-frame of `action` with `status` is (not) there. */
+function sent(rig: Rig, action: string, status: string): boolean {
+  return rig.csms.frames.some(
+    (f) =>
+      f.dir === "CP>" &&
+      f.action === action &&
+      (f.payload as { status?: string }).status === status,
+  );
+}
+
+function expectSent(rig: Rig, status: string, expected: boolean): void {
+  if (sent(rig, "SignedFirmwareStatusNotification", status) !== expected) {
+    throw new Error(
+      `expected ${status} to ${expected ? "be" : "not be"} sent by now`,
+    );
+  }
+}
+
+// The virtual clock starts at 2030-01-01T00:00:00Z.
+// #741 L01.FR.13: a future retrieveDateTime is announced with
+// DownloadScheduled, and Downloading starts at that time.
+v16("signed-update-firmware-download-scheduled", async (rig, advance) => {
+  await rig.csms.call(
+    "SignedUpdateFirmware",
+    signedFirmware(11, { retrieveDateTime: "2030-01-01T00:10:00.000Z" }),
+  );
+  await advance(9 * 60_000);
+  expectSent(rig, "DownloadScheduled", true);
+  expectSent(rig, "Downloading", false);
+  await advance(60_000);
+  expectSent(rig, "Downloading", true);
+  await advance(20_000);
+});
+
+// #741 L01.FR.16/17: a future installDateTime is announced with
+// InstallScheduled after SignatureVerified, and Installing starts at that time.
+v16("signed-update-firmware-install-scheduled", async (rig, advance) => {
+  await rig.csms.call(
+    "SignedUpdateFirmware",
+    signedFirmware(11, { installDateTime: "2030-01-01T01:00:00.000Z" }),
+  );
+  await advance(30_000);
+  expectSent(rig, "SignatureVerified", true);
+  expectSent(rig, "InstallScheduled", true);
+  expectSent(rig, "Installing", false);
+  await advance(59 * 60_000);
+  expectSent(rig, "Installing", false);
+  await advance(60_000);
+  expectSent(rig, "Installing", true);
+  await advance(20_000);
+});
+
+/** Real time passes while the station talks to a real HTTP target. */
+async function realWaitFor(condition: () => boolean, what: string) {
+  for (let i = 0; i < 200; i++) {
+    if (condition()) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`timed out waiting for ${what}`);
+}
+
+const realPause = (ms: number) =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+// #743 §6.25 (errata 3.50): `retries: 2`, `retryInterval: 1` against a target
+// that refuses: three attempts, one second apart on the station's clock,
+// `Uploading` once and one final `UploadFailed`.
+v16("get-diagnostics-retries", async (rig, advance) => {
+  let hits = 0;
+  const target = Bun.serve({
+    port: 0,
+    fetch: () => {
+      hits++;
+      return new Response("no", { status: 500 });
+    },
+  });
+  try {
+    await rig.csms.call("GetDiagnostics", {
+      location: `http://127.0.0.1:${tcpPort(target)}/upload`,
+      retries: 2,
+      retryInterval: 1,
+    });
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      await realWaitFor(() => hits === attempt, `attempt ${attempt}`);
+      await realPause(50);
+      if (attempt < 3) {
+        await advance(999);
+        if (hits !== attempt) throw new Error("retried before retryInterval");
+        await advance(1);
+      }
+    }
+    await advance(0);
+    await advance(10_000);
+    if (hits !== 3) throw new Error(`expected 3 attempts, saw ${hits}`);
+  } finally {
+    await target.stop(true);
+  }
+});
+
+// #743: a target that never answers ends in UploadFailed after the timeout of
+// the attempt (no retries asked: one attempt).
+v16("get-diagnostics-timeout", async (rig, advance) => {
+  let hits = 0;
+  const target = Bun.serve({
+    port: 0,
+    fetch: () => {
+      hits++;
+      return new Promise<Response>(() => undefined);
+    },
+  });
+  try {
+    await rig.csms.call("GetDiagnostics", {
+      location: `http://127.0.0.1:${tcpPort(target)}/upload`,
+    });
+    await realWaitFor(() => hits === 1, "the attempt");
+    await realPause(50);
+    await advance(59_000);
+    await advance(2_000);
+    await realPause(50);
+    await advance(0);
+  } finally {
+    await target.stop(true);
+  }
+});

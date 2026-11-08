@@ -223,7 +223,7 @@ export class ConfigurationStore {
 
   /** Canonical key `MaxEnergyOnInvalidId` (2.x `TxCtrlr.MaxEnergyOnInvalidId`);
    *  default `0`. Wh still delivered after a non-Accepted id when
-   *  `StopTransactionOnInvalidId` is false (1.6 errata 3.17, E05.FR.03). */
+   *  `StopTransactionOnInvalidId` is false (E05.FR.03; 2.x only, 1.6 errata 3.17 is #736). */
   maxEnergyOnInvalidId(): number {
     return this.getInteger("MaxEnergyOnInvalidId") ?? 0;
   }

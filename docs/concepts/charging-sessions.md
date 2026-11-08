@@ -119,8 +119,13 @@ Two domain gaps were closed so these outcomes can be told apart:
   one `TransactionEvent(Updated)` with `triggerReason: ChargingStateChanged`
   and `chargingState: SuspendedEVSE`. `TxCtrlr/MaxEnergyOnInvalidId` (the 1.6
   key `MaxEnergyOnInvalidId`, default `0`) delivers that many more Wh first
-  (E05.FR.03), then the same suspension. The hold ends with the transaction.
-  Either way `startTransactionNotAccepted` reports it.
+  (E05.FR.03; the register stops at that allowance, `unit: Wh` in
+  GetBaseReport), then the same suspension. The hold also applies when the EV
+  side was `SuspendedEV`, and a later request for `Charging` is reported as
+  `SuspendedEVSE` while the hold lasts. The hold ends with the transaction
+  and is not persisted: with `--state-db` a restart restores the transaction
+  but the energy flows again. 2.x only; 1.6 errata 3.17 is not applied
+  yet (#736). Either way `startTransactionNotAccepted` reports it.
 
 In both versions the CSMS's answer is written to the transaction
 (`Transaction.authorizationStatus`, persisted with it) before the station

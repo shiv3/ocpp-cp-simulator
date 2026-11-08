@@ -2442,3 +2442,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - A non-Accepted TransactionEvent.conf `idTokenInfo` with `TxCtrlr/StopTxOnInvalidId` false keeps the transaction open but stops the energy delivery (E05.FR.02, C15.FR.06): connector `SuspendedEVSE`, register frozen, one `TransactionEvent(Updated, ChargingStateChanged, SuspendedEVSE)`. `TxCtrlr/MaxEnergyOnInvalidId` (new 2.x name for the 1.6 key) delivers that many Wh first (E05.FR.03). The default (`true`) is unchanged.
 - Pages: [Charging sessions](concepts/charging-sessions.md), [Operational timeline](concepts/operational-timeline.md), [GitHub issues](sources/github-issues.md)
+
+## [2026-11-08] fix | StopTxOnInvalidId review follow-ups (#696)
+
+- [Charging sessions](concepts/charging-sessions.md): the hold also applies to a `SuspendedEV` connector, a later `Charging` request is reported as `SuspendedEVSE`, the `MaxEnergyOnInvalidId` register stops exactly at the allowance, the hold is not persisted, and the feature is 2.x only (1.6 is #736). GetBaseReport lists `TxCtrlr.MaxEnergyOnInvalidId` with `unit: Wh` (snapshot updated).

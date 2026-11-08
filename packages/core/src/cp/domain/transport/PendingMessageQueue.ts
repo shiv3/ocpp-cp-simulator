@@ -12,7 +12,7 @@ import type { SimClock } from "../../shared/clock";
  */
 export interface PendingMessage<A extends string = OCPPAction> {
   /** Action name (1.6: StartTransaction / StopTransaction / MeterValues;
-   *  2.x: TransactionEvent, NotifyEvent). */
+   *  2.x: TransactionEvent, NotifyEvent, SecurityEventNotification). */
   action: A;
   /** Serialized request payload. */
   payload: unknown;
@@ -50,7 +50,8 @@ interface PendingRow<A extends string> extends PendingMessage<A> {
  * under E11.FR.01 and replays them with `offline = true` (E11.FR.02); it
  * flushes with no attempt limit, since E13 owns the attempt counting there.
  * It also queues NotifyEvent reports (#538, N07.FR.04), replayed in the
- * same pass without `offline`.
+ * same pass without `offline`, and critical SecurityEventNotification
+ * requests (#552, A04.FR.02), replayed as built.
  *
  * OCPP 1.6: matches OCPP 1.6 §4.7 /
  * §4.8 / §4.10 + errata 3.18: "When the Central System fails to process

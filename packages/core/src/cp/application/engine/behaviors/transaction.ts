@@ -94,13 +94,15 @@ export function transactionBehavior(cp: ChargePoint): Behavior {
           const { transactionId } = request as { transactionId: number };
           // #491, #527: a transaction whose StartTransaction.req was answered
           // with a CALLERROR runs on the `0` placeholder the CSMS never
-          // issued; a request naming it is not about this transaction. A `0`
-          // the CSMS assigned is (#328).
+          // issued; a request naming it is not about this transaction, and
+          // neither is one naming a placeholder the CSMS never answered
+          // (`startUnanswered`, #727). A `0` the CSMS assigned is (#328).
           const connector = Array.from(cp.connectors.values()).find(
             (c) =>
               c.transaction &&
               c.transaction.id === transactionId &&
-              !c.transaction.startCallError,
+              !c.transaction.startCallError &&
+              !c.transaction.startUnanswered,
           );
           if (!connector) return { response: { status: "Rejected" } };
           if (cp.isScenarioStopHandled(connector.id)) {
@@ -436,6 +438,8 @@ export async function startTransaction(
       : {}),
     startTriggerReason: options.triggerReason,
     startChargingState: options.chargingState,
+    // #727: the `0` id is a placeholder until StartTransaction.conf (1.x).
+    ...(isOcpp2Version(cp.ocppVersion) ? {} : { startUnanswered: true }),
     batteryCapacityKwh,
     initialSoc,
   };
@@ -459,25 +463,41 @@ export async function startTransaction(
   // sees first (#176). A connector already in Preparing has sent it: a second
   // StatusNotification(Preparing) is a transition OCPP 1.6 does not have
   // (#496); its ConnectionTimeOut restarts (#527).
-  if (connector.status === OCPPStatus.Preparing) {
-    ports.startConnectionTimeout(connectorId);
-  } else {
-    cp.updateConnectorStatus(connectorId, OCPPStatus.Preparing);
+  // #727, 1.6 Part 2 §3.7: a stop requested by a listener of the Preparing
+  // status (before this function queued the StartTransaction.req) waits for
+  // the start, so that the StopTransaction.req follows it with the id its
+  // conf assigns, in the order the messages came about.
+  const deferredStops: Array<() => void> = [];
+  const deferStops = !isOcpp2Version(cp.ocppVersion);
+  if (deferStops) startsInProgress.set(connector, deferredStops);
+  try {
+    if (connector.status === OCPPStatus.Preparing) {
+      ports.startConnectionTimeout(connectorId);
+    } else {
+      cp.updateConnectorStatus(connectorId, OCPPStatus.Preparing);
+    }
+    ports.sendTransactionEvent({
+      phase: "started",
+      transaction: live,
+      connectorId,
+    });
+  } finally {
+    if (deferStops) startsInProgress.delete(connector);
   }
-  ports.sendTransactionEvent({
-    phase: "started",
-    transaction: live,
-    connectorId,
-  });
 
   cp.events.emit("transactionStarted", {
     connectorId,
     transactionId: 0,
     tagId,
   });
+  for (const stop of deferredStops) stop();
 
   return { started: true };
 }
+
+/** #727: connectors whose StartTransaction.req (1.x) is not queued yet, with
+ *  the stops requested meanwhile. */
+const startsInProgress = new WeakMap<Connector, Array<() => void>>();
 
 export function stopTransaction(
   cp: ChargePoint,
@@ -495,6 +515,14 @@ export function stopTransaction(
     const connId =
       typeof connectorOrId === "number" ? connectorOrId : connectorOrId.id;
     logger.error(`Connector ${connId} not found`, LogType.TRANSACTION);
+    return;
+  }
+
+  const waitingForStart = startsInProgress.get(connector);
+  if (waitingForStart) {
+    waitingForStart.push(() =>
+      stopTransaction(cp, ports, connector, reason, options),
+    );
     return;
   }
 

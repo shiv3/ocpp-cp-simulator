@@ -189,6 +189,14 @@ export interface Transaction {
    *  `0` is then a placeholder the CSMS failed to process, not an id it
    *  issued: RemoteStopTransaction does not match it (#491, #527). */
   startCallError?: boolean;
+  /** OCPP 1.x (#727): no StartTransaction.conf has assigned `id` yet, so its
+   *  `0` is a placeholder, not an id the CSMS issued (a CSMS-issued `0` is
+   *  real, #328). Set when the transaction begins, cleared by the conf. While
+   *  it is set and no StartTransaction.req of the transaction is still on its
+   *  way (it timed out, was discarded, or was lost in a restart), the
+   *  transaction's StopTransaction.req and MeterValues.req carry `-1` (1.6
+   *  errata 3.18), and RemoteStopTransaction does not match it. */
+  startUnanswered?: boolean;
   connectorId: number;
   tagId: string;
   meterStart: number;

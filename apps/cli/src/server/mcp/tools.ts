@@ -151,7 +151,7 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
   // with --behavior.
   mcp.tool("cp_behaviors_set", {
     description:
-      "Choose which of the daemon's loaded behaviors (see behavior_list) a charge point runs, by id; [] runs none, null runs every loaded behavior. Applied in place: the charge point stays connected. Only ids are accepted, never code; an unknown id is an error that names the loaded ids.",
+      "Choose which of the daemon's loaded behaviors (see behavior_list) a charge point runs, by id; [] runs none, null runs every loaded behavior. Applied in place: the charge point stays connected. Only ids and JSON params are accepted, never code; an unknown id is an error that names the loaded ids. behaviorParams sets the knobs of behaviors (built-in default.* ones included) by id, checked against the schema behavior_list reports; a value that does not fit is refused, never converted. The selection is replaced as a whole: leave behaviorParams out and every behavior runs with its defaults.",
     inputSchema: cpBehaviorsSetParamsSchema,
     handler: async (args) => {
       try {
@@ -168,7 +168,7 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
 
   mcp.tool("behavior_list", {
     description:
-      "List the behaviors the daemon loaded at start (--behavior) with the file each came from, whether --watch-behaviors is on, and the built-in default behaviors with the CSMS actions each answers (the actions that mode extend works for).",
+      "List the behaviors the daemon loaded at start (--behavior) with the file each came from, whether --watch-behaviors is on, and the built-in default behaviors with the CSMS actions each answers (the actions that mode extend works for). A behavior that has params also reports its params schema and defaults.",
     inputSchema: z.object({}).strict(),
     handler: async () => {
       try {

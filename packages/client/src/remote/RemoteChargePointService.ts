@@ -271,6 +271,9 @@ function toSnapshotConfig(config: WireConfig): ChargePointSnapshot["config"] {
     bootNotification: config.bootNotification ?? null,
     labels: config.labels,
     ...(config.behaviors === undefined ? {} : { behaviors: config.behaviors }),
+    ...(config.behaviorParams === undefined
+      ? {}
+      : { behaviorParams: config.behaviorParams }),
   };
 }
 

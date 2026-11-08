@@ -273,6 +273,23 @@ export const behaviorIdsSchema = ARRAY_1000(STR_256.min(1)).describe(
 );
 
 /**
+ * The params a charge point's selection sets on behaviors (#654): behavior id
+ * to a JSON object of that behavior's params. Ids and JSON only, exactly like
+ * {@link behaviorIdsSchema}: a param is a value the behavior's own schema
+ * checks (refused, never coerced), never a module, a path, a URL or source
+ * text. A key is a loaded behavior id or a built-in `default.*` id.
+ */
+export const BEHAVIOR_PARAMS_MAX_BYTES = 16_384;
+export const behaviorParamsSchema = z
+  .record(STR_256.min(1), boundedObject(BEHAVIOR_PARAMS_MAX_BYTES))
+  .refine((all) => Object.keys(all).length <= 1000, {
+    message: "at most 1000 behaviors",
+  })
+  .describe(
+    'Params per behavior id, e.g. {"default.firmware": {"stepMs": 500, "failAt": "DownloadFailed"}}. JSON values only, checked against the params schema the behavior declares (see behavior.list); a value that does not fit is an error, nothing is converted. A key is a built-in default.* id or one of the selected behaviors. On cp.update an omitted map keeps the current params; a given one replaces them',
+  );
+
+/**
  * Every field `cp.create` / `cp.update` accept, described in place.
  *
  * The descriptions are here rather than at a call site because the MCP
@@ -400,6 +417,7 @@ const cpParamsBaseSchema = z.object({
   // replaces it whole; cp.labels.set changes them without rebuilding the CP.
   labels: labelsSchema.optional(),
   behaviors: behaviorIdsSchema.optional(),
+  behaviorParams: behaviorParamsSchema.optional(),
 });
 
 const scenarioTemplateInfoSchema = z.object({
@@ -542,8 +560,23 @@ export const cpBehaviorsSetParamsSchema = z
       .describe(
         "The behavior ids to run; [] runs none, null runs every loaded behavior",
       ),
+    behaviorParams: behaviorParamsSchema
+      .optional()
+      .describe(
+        "Params for the behaviors, by id (built-in default.* ids included). The whole selection is replaced: omitted means no params, every behavior runs with its defaults",
+      ),
   })
   .strict();
+
+/**
+ * What `behavior.list` says about a behavior's params: the schema (a closed
+ * JSON Schema subset, see docs/concepts/charger-engine.md) and the defaults
+ * that apply when nothing is set.
+ */
+export const behaviorParamsInfoSchema = z.object({
+  schema: boundedObject(BEHAVIOR_PARAMS_MAX_BYTES),
+  defaults: boundedObject(BEHAVIOR_PARAMS_MAX_BYTES),
+});
 
 /** The library `--behavior` loaded: ids and where each came from. */
 export const behaviorListResultSchema = z.object({
@@ -552,6 +585,8 @@ export const behaviorListResultSchema = z.object({
       id: STR_256,
       /** The file it was loaded from, as given on the command line. */
       file: STR_64K.nullable(),
+      /** Its params schema and defaults, when it declares params (#654). */
+      params: behaviorParamsInfoSchema.optional(),
     }),
   ),
   /** Whether `--watch-behaviors` is on. */
@@ -560,7 +595,14 @@ export const behaviorListResultSchema = z.object({
    * The built-in behaviors every station has, and the CSMS actions each
    * answers: the actions `mode: "extend"` is possible for.
    */
-  defaults: ARRAY_1000(z.object({ id: STR_256, actions: ARRAY_1000(STR_256) })),
+  defaults: ARRAY_1000(
+    z.object({
+      id: STR_256,
+      actions: ARRAY_1000(STR_256),
+      /** Its params schema and defaults, when it declares params (#654). */
+      params: behaviorParamsInfoSchema.optional(),
+    }),
+  ),
 });
 
 /**

@@ -2,7 +2,7 @@ import * as fs from "fs";
 
 import { CLIChargePointService } from "../service";
 import type { SessionSettledInfo } from "../service";
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import type { Behavior, JsonObject } from "@ocpp-cp-sim/contracts/behavior";
 import {
   behaviorFitProblem,
   behaviorShapeProblem,
@@ -92,6 +92,7 @@ interface ChargePointRow {
   created_at: string;
   labels: string | null;
   behaviors: string | null;
+  behavior_params: string | null;
   tx_updated_meter_values: number | null;
 }
 
@@ -244,7 +245,7 @@ export class CPRegistry {
         "central_system_url, soap_callback_url, soap_path, " +
         "security_profile, authorization_key, cpo_name, " +
         "tls_ca_path, tls_cert_path, tls_key_path, " +
-        "basic_auth, boot_notif, created_at, labels, behaviors, tx_updated_meter_values " +
+        "basic_auth, boot_notif, created_at, labels, behaviors, behavior_params, tx_updated_meter_values " +
         "FROM charge_points ORDER BY created_at ASC",
     );
     const restored: string[] = [];
@@ -309,6 +310,11 @@ export class CPRegistry {
           ) ?? undefined,
         labels: restoreLabels(row),
         ...restored_behaviors.init,
+        ...restoreBehaviorParams(
+          row,
+          this.library,
+          restored_behaviors.init.behaviors,
+        ),
         // #347: NULL — off, or a row older than the column — restores as off.
         ...(row.tx_updated_meter_values === 1
           ? { txUpdatedMeterValues: true }
@@ -587,17 +593,26 @@ export class CPRegistry {
   setBehaviors(
     cpId: string,
     ids: readonly string[] | undefined,
+    params?: Readonly<Record<string, JsonObject>>,
   ): string[] | null {
     const svc = this.services.get(cpId);
     if (!svc) return null;
     const wanted = this.library.select(ids);
     // Nothing is written until the station has shown it can run the selection:
-    // the version checks first, then the live change, then the row.
+    // the version checks first, then the params, then the live change, then
+    // the row.
     this.checkFit(svc.getInit().ocppVersion, wanted);
-    svc.setBehaviors(wanted, ids);
+    this.library.checkParams(wanted, params);
+    svc.setBehaviors(wanted, ids, params);
     this.database?.run(
-      "UPDATE charge_points SET behaviors = ? WHERE cp_id = ?",
-      [ids ? JSON.stringify(ids) : null, cpId],
+      "UPDATE charge_points SET behaviors = ?, behavior_params = ? WHERE cp_id = ?",
+      [
+        ids ? JSON.stringify(ids) : null,
+        params && Object.keys(params).length > 0
+          ? JSON.stringify(params)
+          : null,
+        cpId,
+      ],
     );
     this.storedSelection.delete(cpId);
     this.notifyRegistryMembership({ change: "updated", cpId, service: svc });
@@ -862,7 +877,10 @@ export class CPRegistry {
     });
     if (engineState) svc.restoreEngineState(engineState);
     try {
-      svc.loadBehaviors(this.library.select(init.behaviors));
+      svc.loadBehaviors(
+        this.library.select(init.behaviors),
+        init.behaviorParams,
+      );
     } catch (error) {
       // A station that cannot load its behaviors is not registered: no ghost
       // under the id, nothing for a later `list` or restart to trip over.
@@ -915,7 +933,9 @@ export class CPRegistry {
     // Ids only: an id that names no loaded behavior is refused here, before
     // anything is persisted, with the loaded ids in the message.
     if (init.behaviors !== undefined) this.library.check(init.behaviors);
-    this.checkFit(init.ocppVersion, this.library.select(init.behaviors));
+    const selected = this.library.select(init.behaviors);
+    this.checkFit(init.ocppVersion, selected);
+    this.library.checkParams(selected, init.behaviorParams);
     if (
       (init.securityProfile === 1 || init.securityProfile === 2) &&
       !init.authorizationKey
@@ -972,8 +992,8 @@ export class CPRegistry {
         "central_system_url, soap_callback_url, soap_path, " +
         "security_profile, authorization_key, cpo_name, " +
         "tls_ca_path, tls_cert_path, tls_key_path, " +
-        "basic_auth, boot_notif, created_at, labels, behaviors, tx_updated_meter_values) " +
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+        "basic_auth, boot_notif, created_at, labels, behaviors, behavior_params, tx_updated_meter_values) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
         "ON CONFLICT (cp_id) DO UPDATE SET " +
         "ws_url = excluded.ws_url, " +
         "supervision_urls = excluded.supervision_urls, " +
@@ -996,6 +1016,7 @@ export class CPRegistry {
         "basic_auth = excluded.basic_auth, boot_notif = excluded.boot_notif, " +
         "labels = excluded.labels, " +
         "behaviors = excluded.behaviors, " +
+        "behavior_params = excluded.behavior_params, " +
         "tx_updated_meter_values = excluded.tx_updated_meter_values",
       [
         init.cpId,
@@ -1027,6 +1048,9 @@ export class CPRegistry {
           : init.behaviors
             ? JSON.stringify(init.behaviors)
             : null,
+        init.behaviorParams && Object.keys(init.behaviorParams).length > 0
+          ? JSON.stringify(init.behaviorParams)
+          : null,
         init.txUpdatedMeterValues ? 1 : null,
       ],
     );
@@ -1267,6 +1291,48 @@ function restoreBehaviors(
   return { init: { behaviors: kept }, column: row.behaviors };
 }
 
+/**
+ * Read the stored behavior params back. Like the selection, what this run
+ * cannot honor is left out of memory with a warning: an entry for a behavior
+ * the station does not run, or one that no longer fits the schema of the
+ * behavior (a reloaded file changed it). The station comes back with that
+ * behavior on its defaults rather than not at all.
+ */
+function restoreBehaviorParams(
+  row: ChargePointRow,
+  library: BehaviorLibrary,
+  selection: readonly string[] | undefined,
+): { behaviorParams?: Record<string, JsonObject> } {
+  const parsed = safeJsonParse<unknown>(row.behavior_params);
+  if (parsed === null) {
+    if (row.behavior_params) {
+      console.warn(
+        `[CPRegistry] ${row.cp_id}: the stored behavior params cannot be read; every behavior runs with its defaults`,
+      );
+    }
+    return {};
+  }
+  if (typeof parsed !== "object" || Array.isArray(parsed)) {
+    console.warn(
+      `[CPRegistry] ${row.cp_id}: the stored behavior params cannot be read; every behavior runs with its defaults`,
+    );
+    return {};
+  }
+  const kept: Record<string, JsonObject> = {};
+  const running = library.select(selection);
+  for (const [id, set] of Object.entries(parsed as Record<string, unknown>)) {
+    try {
+      library.checkParams(running, { [id]: set as JsonObject });
+      kept[id] = set as JsonObject;
+    } catch (error) {
+      console.warn(
+        `[CPRegistry] ${row.cp_id}: the stored params of ${id} are left out: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  return Object.keys(kept).length > 0 ? { behaviorParams: kept } : {};
+}
+
 function safeJsonParse<T>(raw: string | null): T | null {
   if (!raw) return null;
   try {
@@ -1329,6 +1395,7 @@ function preserveOmittedInit(
     tlsKeyPath: next.tlsKeyPath ?? existing.tlsKeyPath,
     labels: next.labels ?? existing.labels,
     behaviors: next.behaviors ?? existing.behaviors,
+    behaviorParams: next.behaviorParams ?? existing.behaviorParams,
     txUpdatedMeterValues:
       next.txUpdatedMeterValues ?? existing.txUpdatedMeterValues,
   };

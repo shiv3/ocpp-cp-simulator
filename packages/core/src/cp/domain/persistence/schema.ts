@@ -13,7 +13,7 @@
  * persistence layer was localStorage and we explicitly do NOT carry it
  * forward (see plan).
  */
-export const SCHEMA_VERSION = 24;
+export const SCHEMA_VERSION = 25;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -182,6 +182,9 @@ CREATE TABLE IF NOT EXISTS charge_points (
   -- Ids of the loaded behaviors (--behavior) this charge point runs, a JSON
   -- array of strings. NULL: every loaded behavior (the default).
   behaviors      TEXT,
+  -- Params the selection sets on behaviors (#654), a JSON object of behavior
+  -- id to params object. NULL: none, every behavior runs with its defaults.
+  behavior_params TEXT,
   -- #347: 1 when the scheduler's in-transaction samples ride OCPP 2.x
   -- TransactionEvent(Updated); NULL (a row older than the column) is off.
   tx_updated_meter_values INTEGER
@@ -736,6 +739,15 @@ export function runMigrations(db: Database): void {
     const cols = db.all<{ name: string }>("PRAGMA table_info(charge_points)");
     if (!new Set(cols.map((c) => c.name)).has("behaviors")) {
       db.exec("ALTER TABLE charge_points ADD COLUMN behaviors TEXT");
+    }
+  }
+
+  // v24 → v25 (#654): `charge_points.behavior_params`. NULL (every row of an
+  // older database) means no params, which is what ran before.
+  if (stored < 25) {
+    const cols = db.all<{ name: string }>("PRAGMA table_info(charge_points)");
+    if (!new Set(cols.map((c) => c.name)).has("behavior_params")) {
+      db.exec("ALTER TABLE charge_points ADD COLUMN behavior_params TEXT");
     }
   }
 

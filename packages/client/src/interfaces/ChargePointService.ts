@@ -155,6 +155,8 @@ export interface ChargePointSnapshot {
     labels?: Labels;
     /** Ids of the loaded behaviors it runs; absent: every loaded behavior. */
     behaviors?: readonly string[];
+    /** Params the selection sets on behaviors (#654), by behavior id. */
+    behaviorParams?: BehaviorParamsByIdWire;
   };
 }
 
@@ -212,7 +214,14 @@ export interface CreateChargePointParams {
   labels?: Labels;
   /** Ids of the loaded behaviors to run; absent: all (on update: keep the current). */
   behaviors?: readonly string[];
+  /** Params for the behaviors, by id (#654); JSON only. On update, omitted keeps the current ones. */
+  behaviorParams?: BehaviorParamsByIdWire;
 }
+
+/** Behavior id to the JSON object of its params. */
+export type BehaviorParamsByIdWire = Readonly<
+  Record<string, Readonly<Record<string, unknown>>>
+>;
 
 export type ChargePointEvent =
   | { type: "status"; status: OCPPStatus }

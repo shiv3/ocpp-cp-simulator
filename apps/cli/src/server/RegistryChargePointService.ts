@@ -97,6 +97,7 @@ import { scenarioTemplates } from "@ocpp-cp-sim/core/utils/scenarioTemplates";
 import type { CLIChargePointService, CLIEvent } from "../service";
 import type { ChargePointInitOptions, ChargePointStatus } from "../types";
 import type { Labels } from "@ocpp-cp-sim/contracts/labels";
+import type { JsonObject } from "@ocpp-cp-sim/contracts/behavior";
 import type {
   CPRegistry,
   RegistryMembershipChange,
@@ -1073,6 +1074,11 @@ function toInitOptions(
     // that keeps the current labels when an update omits them.
     labels: params.labels,
     ...(params.behaviors === undefined ? {} : { behaviors: params.behaviors }),
+    ...(params.behaviorParams === undefined
+      ? {}
+      : {
+          behaviorParams: params.behaviorParams as Record<string, JsonObject>,
+        }),
   };
 }
 
@@ -1134,6 +1140,9 @@ function toChargePointSnapshot(status: ChargePointStatus): ChargePointSnapshot {
           ...(status.config.behaviors === undefined
             ? {}
             : { behaviors: status.config.behaviors }),
+          ...(status.config.behaviorParams === undefined
+            ? {}
+            : { behaviorParams: status.config.behaviorParams }),
         }
       : undefined,
   };

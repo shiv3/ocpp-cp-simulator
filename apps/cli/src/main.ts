@@ -38,6 +38,8 @@ import { runAnalyze } from "./analyze/runAnalyze";
 import { behaviorFlagProblem } from "./behavior/flags";
 import { buildBehaviorFile, parseBehaviorArgs } from "./behavior/buildBehavior";
 import { BehaviorLibrary } from "./behavior/BehaviorLibrary";
+import { collectBehaviorParams } from "./behavior/paramsFlag";
+import type { JsonObject } from "@ocpp-cp-sim/contracts/behavior";
 import { parseExportK6Args } from "./exportK6/parseExportK6Args";
 import { runExportK6 } from "./exportK6/runExportK6";
 import {
@@ -227,6 +229,7 @@ export function parseArgs(argv: string[]): CLIOptions {
   let unsafeRemote = false;
   const behaviorFiles: string[] = [];
   const useBehaviors: string[] = [];
+  const behaviorParamSpecs: string[] = [];
   let watchBehaviors = false;
   let allowBehaviorReload = false;
   let allowBehaviorCode = false;
@@ -471,6 +474,16 @@ export function parseArgs(argv: string[]): CLIOptions {
           process.exit(1);
         }
         useBehaviors.push(next);
+        i++;
+        break;
+      case "--behavior-params":
+        if (!next || next.startsWith("--")) {
+          process.stderr.write(
+            "Error: --behavior-params requires <id>=<json file or inline json>\n",
+          );
+          process.exit(1);
+        }
+        behaviorParamSpecs.push(next);
         i++;
         break;
       case "--watch-behaviors":
@@ -1078,6 +1091,27 @@ export function parseArgs(argv: string[]): CLIOptions {
     );
     process.exit(1);
   }
+  let behaviorParams: Record<string, JsonObject> = {};
+  try {
+    behaviorParams = collectBehaviorParams(behaviorParamSpecs);
+  } catch (err) {
+    process.stderr.write(
+      `Error: ${err instanceof Error ? err.message : String(err)}\n`,
+    );
+    process.exit(1);
+  }
+  if (isClientMode && behaviorParamSpecs.length > 0) {
+    process.stderr.write(
+      "Error: --behavior-params applies to a running charge point, not to --send / --stop / --events\n",
+    );
+    process.exit(1);
+  }
+  if (behaviorParamSpecs.length > 0 && !cpId) {
+    process.stderr.write(
+      "Error: --behavior-params requires --cp-id (it sets the params of the bootstrapped charge points)\n",
+    );
+    process.exit(1);
+  }
   if (useBehaviors.length > 0 && !cpId) {
     // Same reasoning as --label: without a cpId nothing is bootstrapped, so
     // the selection would have no charge point to land on.
@@ -1195,6 +1229,7 @@ export function parseArgs(argv: string[]): CLIOptions {
     behaviorFiles,
     allowBehaviorCode,
     useBehaviors,
+    behaviorParams,
     watchBehaviors,
     allowBehaviorReload,
     corsOrigins,
@@ -1365,6 +1400,14 @@ Options:
                            default: every --behavior). Charge points created
                            later pick theirs with the "behaviors" parameter
                            or cp.behaviors.set; ids only, never code.
+  --behavior-params <id>=<json file or inline json>
+                           Params for a behavior on the charge points started
+                           from --cp-id (repeatable, one per id): a loaded
+                           behavior or a built-in default.*, e.g.
+                           --behavior-params 'default.firmware={"stepMs":500}'.
+                           JSON only, checked against the behavior's params
+                           schema (behavior.list); a value that does not fit
+                           is refused, never converted.
   --watch-behaviors        Reload a --behavior file when it (or a file in its
                            directory) changes: new calls use the new code,
                            exchanges in flight finish on the old one, ctx.state
@@ -1630,6 +1673,9 @@ export function buildBootstrap(
     ...((options.useBehaviors?.length ?? 0) > 0
       ? { behaviors: [...options.useBehaviors!] }
       : {}),
+    ...(Object.keys(options.behaviorParams ?? {}).length > 0
+      ? { behaviorParams: { ...options.behaviorParams } }
+      : {}),
     tls: options.tls,
     tlsCaPath: options.tlsCaPath,
     tlsCertPath: options.tlsCertPath,
@@ -1683,13 +1729,11 @@ function createStandaloneChargePointRuntime(
     connectorSettingsRepository,
   });
   const standalone = CLIChargePointService.fromOptions(options, database);
-  standalone.loadBehaviors(
-    behaviors.select(
-      (options.useBehaviors?.length ?? 0) > 0
-        ? options.useBehaviors
-        : undefined,
-    ),
+  const selected = behaviors.select(
+    (options.useBehaviors?.length ?? 0) > 0 ? options.useBehaviors : undefined,
   );
+  behaviors.checkParams(selected, options.behaviorParams);
+  standalone.loadBehaviors(selected, options.behaviorParams);
   const eventSource = registry.registerExisting(standalone);
 
   return {

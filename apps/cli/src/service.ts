@@ -763,6 +763,9 @@ export class CLIChargePointService {
         ...(init.inboundValidation
           ? { inboundValidation: init.inboundValidation }
           : {}),
+        ...(init.reservationAuthorizeIdTag
+          ? { reservationAuthorizeIdTag: true }
+          : {}),
         ...(init.idTags ? { idTags: init.idTags } : {}),
         ...(init.idTagDistribution
           ? { idTagDistribution: init.idTagDistribution }
@@ -863,6 +866,9 @@ export class CLIChargePointService {
         ...(options.txUpdatedMeterValues ? { txUpdatedMeterValues: true } : {}),
         ...(options.inboundValidation
           ? { inboundValidation: options.inboundValidation }
+          : {}),
+        ...(options.reservationAuthorizeIdTag
+          ? { reservationAuthorizeIdTag: true }
           : {}),
         tls: options.tls,
         tlsCaPath: options.tlsCaPath,
@@ -1011,6 +1017,7 @@ export class CLIChargePointService {
         cpoName: this._init.cpoName,
         txUpdatedMeterValues: this._init.txUpdatedMeterValues,
         inboundValidation: this._init.inboundValidation,
+        reservationAuthorizeIdTag: this._init.reservationAuthorizeIdTag,
         tlsCaPath: this._init.tlsCaPath,
         tlsCertPath: this._init.tlsCertPath,
         tlsKeyPath: this._init.tlsKeyPath,
@@ -2649,10 +2656,10 @@ export class CLIChargePointService {
       this.notifySessionSettled({ connectorId, scenarioId: null });
     }
 
+    // Only the reservation made for this connector: a connector-0 one is
+    // nobody's session to clear (#595).
     const reservation =
-      this._chargePoint.reservationManager.getReservationForConnector(
-        connectorId,
-      );
+      this._chargePoint.reservationManager.reservationOn(connectorId);
     if (reservation) {
       this._chargePoint.reservationManager.cancelReservation(
         reservation.reservationId,

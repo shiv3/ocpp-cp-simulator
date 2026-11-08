@@ -345,8 +345,7 @@ StartTransaction.req carries no transaction id: its events report the
 placeholder `transactionId` `"0"`. Once it is discarded the transaction
 runs on under that placeholder: its MeterValues.req and StopTransaction.req
 carry `transactionId: 0`, as they do while a StartTransaction.conf is still
-pending, and a connector still in `Preparing` goes to `Charging`, as when
-`StopTransactionOnInvalidId` is false. Any other status, such as one a
+pending, and a connector still in `Preparing` goes to `Charging`. Any other status, such as one a
 scenario set meanwhile, is left alone. On 1.x, `ConnectionTimeOut` does not
 apply while the transaction runs, so it never moves a connector waiting in
 `Preparing` for the conf to `Finishing`. On 2.x it maps to

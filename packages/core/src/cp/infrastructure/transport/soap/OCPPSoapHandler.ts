@@ -1160,6 +1160,7 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
         entry,
         entry.attempt - 1,
         "the connection was closed during the retry interval",
+        { proceed: false },
       );
     }
   }
@@ -1371,8 +1372,26 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
     failed: RetryEntry,
     epoch: number,
   ): Promise<void> {
+    // A stop while the request was in flight: no probe from a stopped CP.
+    if (epoch !== this._retryEpoch) {
+      this.discardRetry(
+        failed,
+        failed.attempt,
+        "the connection was closed before the retry",
+        { proceed: false },
+      );
+      return;
+    }
     const reachable = await this.probeCentralSystem();
-    if (epoch !== this._retryEpoch) return;
+    if (epoch !== this._retryEpoch) {
+      this.discardRetry(
+        failed,
+        failed.attempt,
+        "the connection was closed before the retry",
+        { proceed: false },
+      );
+      return;
+    }
     if (!reachable) {
       this._logger.warn(
         `${failed.retry.action} of transaction ${failed.retry.transactionId} not retried: the Heartbeat probe did not reach the Central System, so this is a connection issue, not a failure to process`,
@@ -1396,8 +1415,11 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
     const attempts = Math.max(1, config.transactionMessageAttempts());
     const startOutlived =
       retry.startedTransaction !== undefined && started === null;
-    this._chargePoint.notifyTransactionMessageRejected({ ...report, attempt });
     if (attempt >= attempts || startOutlived) {
+      this._chargePoint.notifyTransactionMessageRejected({
+        ...report,
+        attempt,
+      });
       this.discardRetry(
         failed,
         attempt,
@@ -1420,6 +1442,9 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
     }, delayMs);
     unrefTimerHandle(timer);
     this._transactionRetries.set(timer, resend);
+    // After the timer is registered: a listener that stops the CP finds it
+    // and cancels it.
+    this._chargePoint.notifyTransactionMessageRejected({ ...report, attempt });
   }
 
   /** A resend falls due: the transaction may have ended, or the limit been
@@ -1431,6 +1456,11 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
       retry.startedTransaction() === null
     ) {
       this.discardRetry(resend, attempt - 1, "its transaction no longer runs");
+      return;
+    }
+    const action = OPERATION_ACTION[resend.operation];
+    if (action && !this.isCallAllowed(action)) {
+      this.discardRetry(resend, attempt - 1, "blocked by the boot gate");
       return;
     }
     const limit = Math.max(
@@ -1458,6 +1488,9 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
     entry: RetryEntry,
     attempts: number,
     cause: string,
+    // `proceed: false` on a stop: the discard is announced, but the
+    // connector does not move on to Charging after the user disconnected.
+    { proceed = true }: { proceed?: boolean } = {},
   ): void {
     const { retry } = entry;
     this._logger.warn(
@@ -1474,7 +1507,7 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
     });
     // After the discard's listeners ran: one may have stopped the
     // transaction or started another, which waits for its own conf.
-    retry.proceedWithoutConf?.();
+    if (proceed) retry.proceedWithoutConf?.();
   }
 
   /** Errata 3.2: a Heartbeat tells a failure to process from a connection

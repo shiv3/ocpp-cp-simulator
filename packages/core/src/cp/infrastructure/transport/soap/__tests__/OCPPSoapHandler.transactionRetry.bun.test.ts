@@ -136,6 +136,8 @@ function setup(
     },
   };
   const rejected: Array<ChargePointEvents["transactionMessageRejected"]> = [];
+  const hooks: { onRejected?: () => void } = {};
+  const settings = { attempts: config.attempts ?? 3 };
   const discarded: Array<ChargePointEvents["transactionMessageDiscarded"]> = [];
   const chargePoint = {
     id: "CP-585",
@@ -152,12 +154,15 @@ function setup(
     cleanTransaction: () => undefined,
     notifyTransactionMessageRejected: (
       e: ChargePointEvents["transactionMessageRejected"],
-    ) => rejected.push(e),
+    ) => {
+      rejected.push(e);
+      hooks.onRejected?.();
+    },
     notifyTransactionMessageDiscarded: (
       e: ChargePointEvents["transactionMessageDiscarded"],
     ) => discarded.push(e),
     configuration: {
-      transactionMessageAttempts: () => config.attempts ?? 3,
+      transactionMessageAttempts: () => settings.attempts,
       transactionMessageRetryInterval: () => config.interval ?? 60,
       meterValuesSampledData: () => ["Energy.Active.Import.Register"],
     },
@@ -168,7 +173,7 @@ function setup(
     { centralSystemUrl: CS_URL, dialect },
   );
   handler.setBootStatus({ status: "Accepted" });
-  return { clock, connector, handler, rejected, discarded };
+  return { clock, connector, handler, rejected, discarded, hooks, settings };
 }
 
 /** Lets the request chain and its fetches settle. */
@@ -366,6 +371,82 @@ describe("OCPP-S 1.6 transaction message retry (#585, errata 3.2)", () => {
     await clock.advanceBy(600_000);
     await settle();
     expect(csms.count("StartTransaction")).toBe(1);
+    // The stop is not a go-ahead: the connector stays Preparing, and nothing
+    // (a StatusNotification) is posted after the close.
+    expect(connector.status).toBe(OCPPStatus.Preparing);
+    expect(csms.posts).toEqual(["StartTransaction", "Heartbeat"]);
+  });
+
+  it("finds the timer when a rejected listener stops the CP", async () => {
+    csms.script = { StartTransaction: ["fault"] };
+    const { clock, connector, handler, hooks } = setup();
+    hooks.onRejected = () => handler.onWebSocketClosed();
+    start(handler, connector.transaction!);
+    await settle();
+    await clock.advanceBy(600_000);
+    await settle();
+    expect(csms.count("StartTransaction")).toBe(1);
+    expect(clock.pending).toBe(0);
+  });
+
+  it("sends no Heartbeat for a Fault that lands after a stop, and notices the discard", async () => {
+    csms.script = { StartTransaction: ["fault"] };
+    const { clock, connector, handler, discarded } = setup();
+    start(handler, connector.transaction!);
+    handler.onWebSocketClosed();
+    await settle();
+    expect(csms.posts).toEqual(["StartTransaction"]);
+    expect(discarded).toEqual([
+      expect.objectContaining({ action: "StartTransaction", attempts: 1 }),
+    ]);
+    expect(connector.status).toBe(OCPPStatus.Preparing);
+    expect(clock.pending).toBe(0);
+  });
+
+  it("discards a resend that falls due while the boot gate is closed", async () => {
+    csms.script = { StartTransaction: ["fault"] };
+    const { clock, connector, handler, discarded } = setup();
+    start(handler, connector.transaction!);
+    await settle();
+    handler.setBootStatus({ status: "Rejected" });
+    await clock.advanceBy(60_000);
+    await settle();
+    expect(csms.count("StartTransaction")).toBe(1);
+    expect(discarded).toEqual([
+      expect.objectContaining({ action: "StartTransaction", attempts: 1 }),
+    ]);
+  });
+
+  it("discards a waiting resend when TransactionMessageAttempts is lowered", async () => {
+    csms.script = { StartTransaction: ["fault"] };
+    const { clock, connector, handler, discarded, settings } = setup();
+    start(handler, connector.transaction!);
+    await settle();
+    settings.attempts = 1;
+    await clock.advanceBy(60_000);
+    await settle();
+    expect(csms.count("StartTransaction")).toBe(1);
+    expect(discarded).toEqual([
+      expect.objectContaining({ action: "StartTransaction", attempts: 1 }),
+    ]);
+  });
+
+  it("follows a MeterValues discard end to end", async () => {
+    csms.script = { MeterValues: ["fault"] };
+    const { clock, handler, rejected, discarded } = setup({
+      attempts: 2,
+      interval: 5,
+    });
+    handler.sendMeterValue(101, 1);
+    await settle();
+    await clock.advanceBy(5_000);
+    await settle();
+    expect(csms.count("MeterValues")).toBe(2);
+    expect(rejected.map((r) => r.attempt)).toEqual([1, 2]);
+    expect(discarded).toEqual([
+      expect.objectContaining({ action: "MeterValues", attempts: 2 }),
+    ]);
+    expect(clock.pending).toBe(0);
   });
 
   it("schedules nothing when a stop lands during the probe", async () => {

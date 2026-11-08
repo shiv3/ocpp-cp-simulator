@@ -2393,3 +2393,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#deviation-ocpp-s-16-retries-after-a-soap-fault): the "OCPP-S does not retry" sentence now covers 1.2 and 1.5 only; new section on the 1.6S deviation (errata 3.2): Heartbeat probe, `TransactionMessageAttempts` / `TransactionMessageRetryInterval`, `transactionMessageRejected` / `transactionMessageDiscarded`, discard of an outlived StartTransaction, cancel on stop and dispose. 1.2 and 1.5 were not checked against their specs.
 - [GitHub issues](sources/github-issues.md): #585.
+
+## [2026-11-08] fix | OCPP-S 1.6 transaction retry review follow-ups (#585)
+
+- [Charging sessions](concepts/charging-sessions.md): the "CALLERROR is not a failed start" paragraph names the OCPP-S 1.6 SOAP Fault / HTTP error case. A stop no longer moves a waiting `StartTransaction` connector to `Charging`; a Fault landing after a stop sends no Heartbeat; a resend due while the boot gate is closed is discarded with a notice. [GitHub issues](sources/github-issues.md): `updated:` bumped.

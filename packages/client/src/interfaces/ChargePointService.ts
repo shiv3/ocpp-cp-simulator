@@ -139,6 +139,8 @@ export interface ChargePointSnapshot {
     cpoName?: string;
     /** #347: periodic samples ride TransactionEvent(Updated) on OCPP 2.x. */
     txUpdatedMeterValues?: boolean;
+    /** #595: OCPP 1.6 ReserveNow authorizes the idTag first. */
+    reservationAuthorizeIdTag?: boolean;
     tlsCaPath?: string;
     tlsCertPath?: string;
     tlsKeyPath?: string;
@@ -194,6 +196,9 @@ export interface CreateChargePointParams {
   /** #347: periodic samples ride TransactionEvent(Updated) on OCPP 2.x.
    *  Omitted on an update keeps the current value. */
   txUpdatedMeterValues?: boolean;
+  /** #595: OCPP 1.6 ReserveNow authorizes the idTag first.
+   *  Omitted on an update keeps the current value. */
+  reservationAuthorizeIdTag?: boolean;
   tls?: OcppTlsOptions;
   tlsCaPath?: string;
   tlsCertPath?: string;

@@ -57,7 +57,12 @@ export class ReservationManager {
    * @param options `replaceExisting`: OCPP 1.6 ReserveNow replaces the
    *   reservation that has the same `reservationId` (#595); the other checks
    *   run as if it were already gone, and it is only dropped when the new one
-   *   is accepted. Without it a repeated id is `Rejected`, as on 2.x.
+   *   is accepted. Without it a repeated id is `Rejected`. That is still what
+   *   2.x does, although OCPP 2.0.1 H01.FR.02 also asks for replacement (a
+   *   follow-up, not part of #595).
+   *   `shareAnyConnector`: connector-0 reservations do not exclude each other
+   *   (1.6 only needs one connector kept free per reservation); the caller
+   *   checks that enough connectors remain.
    * @returns ReservationStatus
    */
   createReservation(
@@ -66,7 +71,7 @@ export class ReservationManager {
     idTag: string,
     parentIdTag: string | undefined,
     reservationId: number,
-    options: { replaceExisting?: boolean } = {},
+    options: { replaceExisting?: boolean; shareAnyConnector?: boolean } = {},
   ): ReservationStatus {
     const replaced = options.replaceExisting
       ? this.reservations.get(reservationId)
@@ -78,6 +83,7 @@ export class ReservationManager {
       idTag,
       parentIdTag,
       reservationId,
+      options.shareAnyConnector === true,
     );
     if (replaced && status !== ReservationStatus.Accepted) {
       this.reservations.set(reservationId, replaced);
@@ -91,6 +97,7 @@ export class ReservationManager {
     idTag: string,
     parentIdTag: string | undefined,
     reservationId: number,
+    shareAnyConnector: boolean,
   ): ReservationStatus {
     // Check if reservation ID already exists
     if (this.reservations.has(reservationId)) {
@@ -101,8 +108,14 @@ export class ReservationManager {
       return ReservationStatus.Rejected;
     }
 
-    // Check if connector already has a reservation
-    const existingReservation = this.getReservationForConnector(connectorId);
+    // Check if connector already has a reservation: its own, exactly. A
+    // connector-0 reservation is not "on" any connector, so it neither blocks
+    // a specific reservation nor (with `shareAnyConnector`) another
+    // connector-0 one; the caller counts the connectors that remain.
+    const existingReservation =
+      shareAnyConnector && connectorId === 0
+        ? undefined
+        : this.reservationOn(connectorId);
     if (existingReservation) {
       this.logger.warn(
         `Connector ${connectorId} already has an active reservation`,
@@ -216,7 +229,48 @@ export class ReservationManager {
   }
 
   /**
-   * Get reservation for a specific connector
+   * The reservation made for exactly `connectorId` (connector 0 included), if
+   * any. A connector-0 reservation is never returned for another connector.
+   */
+  reservationOn(connectorId: number): Reservation | undefined {
+    this.cleanupExpiredReservations();
+    for (const reservation of this.reservations.values()) {
+      if (reservation.connectorId === connectorId) return reservation;
+    }
+    return undefined;
+  }
+
+  /** Whether {@link reservationOn} finds a reservation for `connectorId`. */
+  hasReservationOn(connectorId: number): boolean {
+    return this.reservationOn(connectorId) !== undefined;
+  }
+
+  /**
+   * The reservation that applies to a session of `idTag` on `connectorId`
+   * (OCPP 1.6 §5.13, §3.11): the one made for exactly that connector, else a
+   * connector-0 reservation whose `idTag` or `parentIdTag` is `idTag`. A
+   * connector-0 reservation held by someone else is never returned, so another
+   * tag's session neither consumes nor cancels it.
+   */
+  reservationFor(connectorId: number, idTag: string): Reservation | undefined {
+    const exact = this.reservationOn(connectorId);
+    if (exact || connectorId === 0) return exact;
+    for (const reservation of this.reservations.values()) {
+      if (
+        reservation.connectorId === 0 &&
+        (reservation.idTag === idTag || reservation.parentIdTag === idTag)
+      ) {
+        return reservation;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Get reservation for a specific connector, falling back to any connector-0
+   * reservation whatever its tag. Only for observing ("is there a reservation
+   * that could concern this connector?"); consuming or cancelling goes through
+   * {@link reservationFor} / {@link reservationOn}.
    * @param connectorId Connector ID
    * @returns Reservation if found, undefined otherwise
    */

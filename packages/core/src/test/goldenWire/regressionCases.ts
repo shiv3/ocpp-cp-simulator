@@ -344,6 +344,22 @@ c16(
   },
   two,
 );
+// #595: a connector-0 reservation is its idTag's. A stranger starting on the
+// other connector neither consumes it (no reservationId on that
+// StartTransaction.req) nor cancels it; the owner's start does carry it.
+c16(
+  "res-connector0-stranger-starts",
+  async (r) => {
+    r.cp.configuration.setRuntimeValue("ReserveConnectorZeroSupported", true);
+    await reserve(r, 22, 0, "OWNER", FUT);
+    await settle(r);
+    await r.remoteStart("STRANGER", 2);
+    await settle(r);
+    await r.remoteStart("OWNER", 1);
+    await settle(r);
+  },
+  two,
+);
 both("res-then-inoperative", async (r) => {
   await reserve(r, 11, 1, "OWNER", FUT);
   await settle(r);

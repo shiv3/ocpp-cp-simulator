@@ -62,6 +62,9 @@ function runParseArgs(args: string[]) {
     "  txUpdatedMeterValues: options.txUpdatedMeterValues ?? null,",
     "  bootstrapTxUpdatedMeterValues:",
     "    buildBootstrap(options)?.txUpdatedMeterValues ?? null,",
+    "  reservationAuthorizeIdTag: options.reservationAuthorizeIdTag ?? null,",
+    "  bootstrapReservationAuthorizeIdTag:",
+    "    buildBootstrap(options)?.reservationAuthorizeIdTag ?? null,",
     "}));",
   ].join("\n");
 
@@ -215,6 +218,26 @@ describe("parseArgs OCPP 1.6 security flags", () => {
         )}`,
       },
       tls: { rejectUnauthorized: true },
+    });
+  });
+
+  it("--reservation-authorize-id-tag turns the #595 option on for the bootstrap charge point", () => {
+    const base = [
+      "--cp-id",
+      "CP-595",
+      "--ws-url",
+      "ws://csms.example.test/ocpp/",
+    ];
+    const on = runParseArgs([...base, "--reservation-authorize-id-tag"]);
+    expect(on.status).toBe(0);
+    expect(JSON.parse(on.stdout)).toMatchObject({
+      reservationAuthorizeIdTag: true,
+      bootstrapReservationAuthorizeIdTag: true,
+    });
+    const off = runParseArgs(base);
+    expect(JSON.parse(off.stdout)).toMatchObject({
+      reservationAuthorizeIdTag: null,
+      bootstrapReservationAuthorizeIdTag: null,
     });
   });
 

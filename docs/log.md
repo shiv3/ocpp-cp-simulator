@@ -2389,3 +2389,9 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - 1.6 `ReserveNow` replaces a held `reservationId` (moving it frees the first connector), accepts `connectorId` 0 only when `ReserveConnectorZeroSupported` is true (any connector, no status change), and authorizes the idTag first when the opt-in `reservationAuthorizeIdTag` is on (default off). 2.x unchanged. Golden: `16-res-remote-start-reserved` re-recorded (the repeated id 9 is now `Accepted`, was `Rejected`); new cases `16-res-connector0-supported`, `16-res-replace-moves-connector`.
 - Pages: [Default behaviors](entities/default-behaviors.md), [GitHub issues](sources/github-issues.md).
+
+## [2026-11-08] ingest | ReserveNow review fixes: exact lookups, idTag-owned connector-0 reservations, capacity, wiring (#595 review)
+
+- `ReservationManager` gains `reservationOn` / `hasReservationOn` (exact) and `reservationFor(connectorId, idTag)` (a connector-0 reservation only for its `idTag` / `parentIdTag`). A moved reservation now frees the connector it left even while a connector-0 reservation exists; a stranger's session no longer consumes or cancels a connector-0 reservation; several connector-0 reservations may coexist and ReserveNow answers `Occupied` when no connector would be left for one (`free − specific − connector-0 ≥ 1`). New golden case `16-res-connector0-stranger-starts`.
+- `reservationAuthorizeIdTag` is settable: `--reservation-authorize-id-tag`, `cp.create` / `cp.update`, persisted in `charge_points.reservation_authorize_id_tag` (schema v25). The station's own checks run before the Authorize.req. The default-behaviors row now puts the 1.6 rules in the 1.6 column and states what 2.x does.
+- Pages: [Default behaviors](entities/default-behaviors.md), [CLI](entities/cli.md), [Daemon](entities/daemon.md), [Control plane](concepts/control-plane.md), [State persistence](concepts/state-persistence.md).

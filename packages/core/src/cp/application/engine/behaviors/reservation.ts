@@ -7,7 +7,7 @@ import {
 } from "../../../domain/types/OcppTypes";
 import { isOcpp2Version } from "../../../domain/types/OcppVersion";
 
-interface ReserveNow16Request {
+export interface ReserveNow16Request {
   connectorId: number;
   expiryDate: string;
   idTag: string;
@@ -47,9 +47,12 @@ interface CancelReservationRequest {
  * `reservationId` exists, it is replaced"); when the old one sat on another
  * connector, that connector goes back to `Available`. `connectorId` 0 means
  * "any connector": it is accepted only when `ReserveConnectorZeroSupported`
- * is true (else `Rejected`), is `Faulted` / `Occupied` / `Unavailable` only
- * when no connector at all can take it, and leaves every connector's status
- * alone.
+ * is true (else `Rejected`) and leaves every connector's status alone. A
+ * connector-0 reservation belongs to its `idTag` / `parentIdTag`: only that
+ * tag's session consumes it. The station keeps one connector available for
+ * each reservation, so a ReserveNow (connector 0 or specific) is `Occupied`
+ * when the free connectors, less those with their own reservation and less
+ * one per connector-0 reservation, cannot take it ({@link reserveNowRefusal16}).
  */
 export function reservationBehavior(cp: ChargePoint): Behavior {
   return {
@@ -62,25 +65,29 @@ export function reservationBehavior(cp: ChargePoint): Behavior {
           const two = isOcpp2Version(cp.ocppVersion);
           const req = request as ReserveNow16Request & ReserveNow2Request;
           const connectorId = two ? (req.evseId ?? 1) : req.connectorId;
-          if (!two && connectorId === 0) {
-            return reserveAnyConnector(cp, req);
+          if (!two) {
+            const refusal = reserveNowRefusal16(cp, req);
+            if (refusal) return { response: { status: refusal } };
+            if (connectorId === 0) return acceptAnyConnector(cp, req);
+          } else {
+            const connector = cp.getConnector(connectorId);
+            if (!connector) {
+              return { response: { status: ReservationStatus.Rejected } };
+            }
+            if (connector.status === OCPPStatus.Faulted) {
+              return { response: { status: ReservationStatus.Faulted } };
+            }
+            if (
+              connector.status === OCPPStatus.Charging ||
+              connector.transaction
+            ) {
+              return { response: { status: ReservationStatus.Occupied } };
+            }
+            if (connector.availability !== "Operative") {
+              return { response: { status: ReservationStatus.Unavailable } };
+            }
           }
-          const connector = cp.getConnector(connectorId);
-          if (!connector) {
-            return { response: { status: ReservationStatus.Rejected } };
-          }
-          if (connector.status === OCPPStatus.Faulted) {
-            return { response: { status: ReservationStatus.Faulted } };
-          }
-          if (
-            connector.status === OCPPStatus.Charging ||
-            connector.transaction
-          ) {
-            return { response: { status: ReservationStatus.Occupied } };
-          }
-          if (connector.availability !== "Operative") {
-            return { response: { status: ReservationStatus.Unavailable } };
-          }
+          const connector = cp.getConnector(connectorId)!;
           const replaced = two
             ? undefined
             : cp.reservationManager.getReservation(req.reservationId);
@@ -99,7 +106,7 @@ export function reservationBehavior(cp: ChargePoint): Behavior {
                 req.idTag,
                 req.parentIdTag,
                 req.reservationId,
-                { replaceExisting: true },
+                { replaceExisting: true, shareAnyConnector: true },
               );
           const reserve = (): void =>
             cp.updateConnectorStatus(connectorId, OCPPStatus.Reserved);
@@ -161,47 +168,104 @@ function releaseIfUnreserved(cp: ChargePoint, connectorId: number): void {
   if (
     connector &&
     connector.status === OCPPStatus.Reserved &&
-    !cp.reservationManager.isConnectorReserved(connectorId)
+    !cp.reservationManager.hasReservationOn(connectorId)
   ) {
     cp.updateConnectorStatus(connectorId, OCPPStatus.Available);
   }
 }
 
-/**
- * OCPP 1.6 ReserveNow with `connectorId` 0 (#595): a reservation that any
- * connector can honour. `ReserveConnectorZeroSupported` (default false)
- * decides whether the station takes it at all.
- */
-function reserveAnyConnector(
-  cp: ChargePoint,
-  req: ReserveNow16Request,
-): { response: { status: ReservationStatus } } {
-  if (cp.configuration.getBoolean("ReserveConnectorZeroSupported") !== true) {
-    return { response: { status: ReservationStatus.Rejected } };
-  }
-  const connectors = [...cp.connectors.values()].filter((c) => c.id !== 0);
-  if (
-    connectors.length > 0 &&
-    connectors.every((c) => c.status === OCPPStatus.Faulted)
-  ) {
-    return { response: { status: ReservationStatus.Faulted } };
-  }
-  const usable = connectors.filter((c) => c.status !== OCPPStatus.Faulted);
-  if (
-    usable.length > 0 &&
-    usable.every((c) => c.availability !== "Operative")
-  ) {
-    return { response: { status: ReservationStatus.Unavailable } };
-  }
-  const free = usable.filter(
+/** Connectors that can still take a reservation or a session right now. */
+function freeConnectors(cp: ChargePoint) {
+  return [...cp.connectors.values()].filter(
     (c) =>
+      c.id !== 0 &&
+      c.status !== OCPPStatus.Faulted &&
       c.availability === "Operative" &&
       c.status !== OCPPStatus.Charging &&
       !c.transaction,
   );
-  if (connectors.length > 0 && free.length === 0) {
-    return { response: { status: ReservationStatus.Occupied } };
+}
+
+/**
+ * Why an OCPP 1.6 ReserveNow cannot be accepted, or `null` when the station
+ * can take it. Everything here depends on the station only (the reservation
+ * manager's own checks, an expired date or a taken connector, come after), so
+ * a caller can run it before it spends an Authorize.req on the idTag.
+ *
+ * Capacity (#595): the station keeps one connector available for each
+ * reservation. With `free` the connectors that can still take a session,
+ * `specific` those among them that hold their own reservation and `zero` the
+ * connector-0 reservations (the one this ReserveNow replaces is left out of
+ * both), a connector-0 ReserveNow needs `free − specific − zero ≥ 1`, and a
+ * ReserveNow for connector `n` needs the connectors other than `n` to still
+ * cover `zero`. Otherwise the answer is `Occupied`.
+ */
+export function reserveNowRefusal16(
+  cp: ChargePoint,
+  req: ReserveNow16Request,
+): ReservationStatus | null {
+  const { connectorId } = req;
+  if (
+    connectorId === 0 &&
+    cp.configuration.getBoolean("ReserveConnectorZeroSupported") !== true
+  ) {
+    return ReservationStatus.Rejected;
   }
+  if (connectorId !== 0) {
+    const connector = cp.getConnector(connectorId);
+    if (!connector) return ReservationStatus.Rejected;
+    if (connector.status === OCPPStatus.Faulted) {
+      return ReservationStatus.Faulted;
+    }
+    if (connector.status === OCPPStatus.Charging || connector.transaction) {
+      return ReservationStatus.Occupied;
+    }
+    if (connector.availability !== "Operative") {
+      return ReservationStatus.Unavailable;
+    }
+  } else {
+    const connectors = [...cp.connectors.values()].filter((c) => c.id !== 0);
+    if (
+      connectors.length > 0 &&
+      connectors.every((c) => c.status === OCPPStatus.Faulted)
+    ) {
+      return ReservationStatus.Faulted;
+    }
+    const usable = connectors.filter((c) => c.status !== OCPPStatus.Faulted);
+    if (
+      usable.length > 0 &&
+      usable.every((c) => c.availability !== "Operative")
+    ) {
+      return ReservationStatus.Unavailable;
+    }
+  }
+
+  const held = cp.reservationManager
+    .getAllReservations()
+    .filter((r) => r.reservationId !== req.reservationId);
+  const owned = new Set(
+    held.filter((r) => r.connectorId !== 0).map((r) => r.connectorId),
+  );
+  const zero = held.filter((r) => r.connectorId === 0).length;
+  const spare = freeConnectors(cp).filter(
+    (c) => !owned.has(c.id) && c.id !== connectorId,
+  ).length;
+  // Connector 0 itself needs one of the spare connectors; a specific
+  // reservation takes its own connector and leaves the rest to `zero`.
+  if (spare - zero < (connectorId === 0 ? 1 : 0)) {
+    return ReservationStatus.Occupied;
+  }
+  return null;
+}
+
+/**
+ * OCPP 1.6 ReserveNow with `connectorId` 0 (#595): a reservation that any
+ * connector can honour, once {@link reserveNowRefusal16} found room for it.
+ */
+function acceptAnyConnector(
+  cp: ChargePoint,
+  req: ReserveNow16Request,
+): { response: { status: ReservationStatus } } {
   const replaced = cp.reservationManager.getReservation(req.reservationId);
   const status = cp.reservationManager.createReservation(
     0,
@@ -209,7 +273,7 @@ function reserveAnyConnector(
     req.idTag,
     req.parentIdTag,
     req.reservationId,
-    { replaceExisting: true },
+    { replaceExisting: true, shareAnyConnector: true },
   );
   if (status === ReservationStatus.Accepted && replaced) {
     releaseIfUnreserved(cp, replaced.connectorId);

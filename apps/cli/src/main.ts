@@ -269,6 +269,7 @@ export function parseArgs(argv: string[]): CLIOptions {
   let insecureTlsKeyPerms = false;
   let cpoName: string | undefined;
   let txUpdatedMeterValues = false;
+  let reservationAuthorizeIdTag = false;
   let traceOutput: string | null = null;
 
   for (let i = 2; i < argv.length; i++) {
@@ -690,6 +691,9 @@ export function parseArgs(argv: string[]): CLIOptions {
       case "--cpo-name":
         cpoName = requireFlagValue("--cpo-name", next);
         i++;
+        break;
+      case "--reservation-authorize-id-tag":
+        reservationAuthorizeIdTag = true;
         break;
       case "--tx-updated-meter-values":
         txUpdatedMeterValues = true;
@@ -1217,6 +1221,7 @@ export function parseArgs(argv: string[]): CLIOptions {
     authorizationKey,
     cpoName,
     ...(txUpdatedMeterValues ? { txUpdatedMeterValues } : {}),
+    ...(reservationAuthorizeIdTag ? { reservationAuthorizeIdTag } : {}),
     tls,
     tlsCaPath,
     tlsCertPath,
@@ -1307,6 +1312,11 @@ Options:
                            --insecure-tls-key-perms is passed.
   --insecure-tls-key-perms Allow --tls-key files readable by group/other.
   --cpo-name <name>        CPO name for generated SignCertificate CSRs.
+  --reservation-authorize-id-tag
+                           OCPP 1.6: authorize the idTag of a ReserveNow
+                           (local rules, then Authorize.req) before accepting
+                           it; a tag that is not Accepted answers Rejected.
+                           Off by default.
   --tx-updated-meter-values
                            OCPP 2.x: send the periodic meter samples taken
                            during a transaction as TransactionEvent(Updated,
@@ -1627,6 +1637,9 @@ export function buildBootstrap(
     authorizationKey: options.authorizationKey,
     cpoName: options.cpoName,
     ...(options.txUpdatedMeterValues ? { txUpdatedMeterValues: true } : {}),
+    ...(options.reservationAuthorizeIdTag
+      ? { reservationAuthorizeIdTag: true }
+      : {}),
     ...((options.useBehaviors?.length ?? 0) > 0
       ? { behaviors: [...options.useBehaviors!] }
       : {}),

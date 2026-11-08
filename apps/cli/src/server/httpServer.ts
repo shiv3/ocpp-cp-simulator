@@ -1015,6 +1015,10 @@ export function parseCreateBody(
     typeof body.txUpdatedMeterValues === "boolean"
       ? body.txUpdatedMeterValues
       : undefined;
+  const reservationAuthorizeIdTag =
+    typeof body.reservationAuthorizeIdTag === "boolean"
+      ? body.reservationAuthorizeIdTag
+      : undefined;
   const tlsCaPath =
     typeof body.tlsCaPath === "string" ? body.tlsCaPath : undefined;
   const tlsCertPath =
@@ -1097,6 +1101,9 @@ export function parseCreateBody(
     authorizationKey,
     cpoName,
     ...(txUpdatedMeterValues !== undefined ? { txUpdatedMeterValues } : {}),
+    ...(reservationAuthorizeIdTag !== undefined
+      ? { reservationAuthorizeIdTag }
+      : {}),
     tls,
     tlsCaPath,
     tlsCertPath,

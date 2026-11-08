@@ -357,6 +357,12 @@ const cpParamsBaseSchema = z.object({
     .describe(
       "OCPP 2.x only: send the periodic meter samples taken during a transaction as TransactionEvent(Updated, MeterValuePeriodic) instead of MeterValues. Defaults to false",
     ),
+  reservationAuthorizeIdTag: z
+    .boolean()
+    .optional()
+    .describe(
+      "OCPP 1.6 only: authorize the idTag of a ReserveNow (local rules, then Authorize.req) before accepting it; a tag that is not Accepted answers Rejected. Defaults to false",
+    ),
   tlsCaPath: STR_64K.optional().describe(
     "Path to a PEM CA bundle verifying the CSMS certificate. Omit to use the system trust store; passing one REPLACES the default roots",
   ),

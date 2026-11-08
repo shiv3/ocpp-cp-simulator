@@ -251,9 +251,9 @@ export async function startTransaction(
 
   // §5.13: if the connector was Reserved (or the reservation is for
   // connectorId=0 with this idTag), consume that reservation and carry its id
-  // into StartTransaction.req so CSMS can close it out.
-  const reservation =
-    cp.reservationManager.getReservationForConnector(connectorId);
+  // into StartTransaction.req so CSMS can close it out. A connector-0
+  // reservation belongs to its idTag / parentIdTag only (#595).
+  const reservation = cp.reservationManager.reservationFor(connectorId, tagId);
   const reservationId = reservation?.reservationId;
 
   const transaction: Transaction = {

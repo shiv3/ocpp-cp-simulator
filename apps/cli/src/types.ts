@@ -199,6 +199,8 @@ export interface CLIOptions {
   readonly cpoName?: string;
   /** `--tx-updated-meter-values` (#347). See ChargePointInitOptions. */
   readonly txUpdatedMeterValues?: boolean;
+  /** `--reservation-authorize-id-tag` (#595). See ChargePointInitOptions. */
+  readonly reservationAuthorizeIdTag?: boolean;
   readonly tls?: OcppTlsOptions;
   readonly tlsCaPath?: string;
   readonly tlsCertPath?: string;
@@ -386,6 +388,7 @@ export interface ChargePointStatus {
     readonly securityProfile?: OcppSecurityProfile;
     readonly cpoName?: string;
     readonly txUpdatedMeterValues?: boolean;
+    readonly reservationAuthorizeIdTag?: boolean;
     readonly tlsCaPath?: string;
     readonly tlsCertPath?: string;
     readonly tlsKeyPath?: string;

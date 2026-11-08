@@ -51,6 +51,11 @@ describe("LanguageToggle", () => {
     expect(t("scenarios.count.step", { count: 0 })).toBe("0 étape");
     expect(t("scenarios.count.step", { count: 1 })).toBe("1 étape");
     expect(t("scenarios.count.step", { count: 2 })).toBe("2 étapes");
+    // 1,000,000 falls in the "many" plural category in French
+    expect(new Intl.PluralRules("fr").select(1_000_000)).toBe("many");
+    expect(t("scenarios.count.step", { count: 1_000_000 })).toBe(
+      "1000000 étapes",
+    );
     await setLocale("en");
     expect(t("scenarios.count.step", { count: 1 })).toBe("1 step");
     expect(t("scenarios.count.step", { count: 3 })).toBe("3 steps");

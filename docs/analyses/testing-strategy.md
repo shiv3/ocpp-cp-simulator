@@ -63,6 +63,13 @@ is why that project's `rootDir` is the repository root.
   with a leading `./` or `/` — a bare path is taken as a name filter, and
   this name matches none of Bun's test-file patterns.
 
+In CI each suite runs once, with coverage, in its own job: `vitest` runs
+`bun run test:coverage` and then `test:bun:cli`, and `bun` runs the `test:bun`
+files in three fixed shards (`scripts/bun-test-shard.sh`: tracked
+`*.bun.test.ts(x)` files, sorted and dealt round-robin). Static checks and the
+packaging smokes stay in `test`. Every job has a timeout, and a new push to a
+pull request cancels the run for the previous push.
+
 Coverage (`bun run test:coverage` / `test:coverage:bun`, uploaded to Codecov
 in CI) merges both reports — `coverage/lcov.info` (Vitest) and
 `coverage/bun/lcov.info` (Bun) — so the **line** coverage of code exercised

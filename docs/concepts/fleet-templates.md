@@ -6,7 +6,7 @@ sources:
   - packages/contracts/src/methods.ts (fleetTemplateSchema, fleetCreateParamsSchema)
   - apps/cli/src/server/socketServer.ts (planFleet, createFleet)
   - apps/cli/src/server/fleetTemplateFiles.ts
-  - packages/core/src/cp/domain/persistence/FleetTemplateRepository.ts
+  - packages/core/src/cp/infrastructure/persistence/FleetTemplateRepository.ts
   - apps/cli/src/server/__tests__/fleetTemplates.bun.test.ts
   - docs/examples/fleet-templates/operations-lab.json
   - "issue #445"

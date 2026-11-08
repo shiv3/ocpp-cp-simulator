@@ -136,9 +136,9 @@ Rules the check enforces:
 - An import (value, `import type`, `export … from`, `import()`, `new URL("./x", import.meta.url)`, relative, `@/` or `@ocpp-cp-simulator/…`) from a package into one that is not in its "may depend on" column fails, **type-only imports included**: TypeScript project references forbid cycles at the type level too. Test files are checked like any other and belong to the package of the directory they sit in.
 - Across packages the import must be an `@ocpp-cp-simulator/<package>/…` specifier that resolves through the package's `exports`, never a relative path into another package. Inside one package imports stay relative (inside `apps/web` the `@/` alias, `apps/web/src`, also works).
 - Each `package.json` is private, named after its directory, and declares exactly the `workspace:*` dependencies its imports need — no more, no less. The root `package.json` must not use `workspace:` anywhere, or the published tarball would not install outside the repository.
-- `ocpp`, `contracts`, `trace`, `k6-runtime`, `core` and `client` must run in both Bun and the browser, so their non-test files may not import `react*`, `jotai`, `zustand`, `@xyflow/*`, `@radix-ui/*`, Vite-only specifiers (`?url`, `?raw`, `virtual:`), `bun:*` or Node built-ins, except for the files on the commented allow-list in the script (today only `packages/core/src/cp/domain/persistence/BunSqliteDatabase.ts`, the daemon's `bun:sqlite` store). Type-only imports of such packages are erased and not flagged.
+- `ocpp`, `contracts`, `trace`, `k6-runtime`, `core` and `client` must run in both Bun and the browser, so their non-test files may not import `react*`, `jotai`, `zustand`, `@xyflow/*`, `@radix-ui/*`, Vite-only specifiers (`?url`, `?raw`, `virtual:`), `bun:*` or Node built-ins, except for the files on the commented allow-list in the script (today only `packages/core/src/cp/infrastructure/persistence/BunSqliteDatabase.ts`, the daemon's `bun:sqlite` store). Type-only imports of such packages are erased and not flagged.
 - A file under `packages/` or `apps/` that matches no `PACKAGE_MAP` entry fails the check, so a new workspace directory has to be registered on purpose. Known exceptions go in the script's `KNOWN_VIOLATIONS` / `TEST_ALLOW_LIST`, each with a reason; a stale entry also fails.
-- Inside `packages/core/src/cp/` the layers have a direction ([#571](sources/github-issues.md)): `domain/` imports only `domain/` and `shared/`; `application/` imports `domain/`, `application/` and `shared/`, never `infrastructure/`; `infrastructure/` may import every layer; `shared/` imports only `shared/`. `domain/` and `shared/` also may not import core code outside `src/cp` or anything under `apps/`; other workspace packages stay governed by the table above. Type-only imports count, test files are not checked. The imports that break the rule today are the `LAYER_EXEMPTIONS` list in the script (26 entries, each with the follow-up that clears it: [#573](sources/github-issues.md), [#575](sources/github-issues.md)); a new violation fails, and so does an entry that no longer matches, so the list only shrinks. The goal of the epic ([#577](sources/github-issues.md)) is an empty list.
+- Inside `packages/core/src/cp/` the layers have a direction ([#571](sources/github-issues.md)): `domain/` imports only `domain/` and `shared/`; `application/` imports `domain/`, `application/` and `shared/`, never `infrastructure/`; `infrastructure/` may import every layer; `shared/` imports only `shared/`. `domain/` and `shared/` also may not import core code outside `src/cp` or anything under `apps/`; other workspace packages stay governed by the table above. Type-only imports count, test files are not checked. The imports that break the rule today are the `LAYER_EXEMPTIONS` list in the script (20 entries, which the follow-up [#575](sources/github-issues.md) clears); a new violation fails, and so does an entry that no longer matches, so the list only shrinks. The goal of the epic ([#577](sources/github-issues.md)) is an empty list.
 - A file under `packages/` or `apps/`, test files included, may not reach itself through static value imports, in one package or across several; there is no allow-list for this rule. `import`, a side-effect import, `export … from` (`export *` included, even of a types-only module) and `require` count; `import type`, `export type … from`, `import("x").T` and a dynamic `import()` do not ([#570](sources/github-issues.md)). The ESLint rule `@typescript-eslint/consistent-type-imports` makes an import used only as a type say so, or it would count here. `scripts/` and `e2e/` are not scanned.
 
 ### What goes where in `packages/core/src`
@@ -153,11 +153,15 @@ bullet above, not repeated here.
   needs, such as the repository interfaces under `domain/persistence/`.
 - `cp/application/` — the use cases that drive the domain: the charger engine
   and its behaviors, services (state history, heartbeat), the scenario engine
-  (`application/scenario/`) and run verification, and the ports they own.
+  (`application/scenario/`) and run verification, and the ports they own,
+  such as `ScenarioRepository` and `ScenarioRunRepository`.
 - `cp/infrastructure/` — adapters to the outside: WebSocket and SOAP
-  transports, SQLite, HTTP (`fileUpload.ts`), the vehicle catalog. The SQLite
-  stores still sit in `domain/persistence/` until
-  [#573](https://github.com/shiv3/ocpp-cp-simulator/issues/573), and the files
+  transports, the SQLite stores, schema and migrations
+  (`infrastructure/persistence/`, since
+  [#573](https://github.com/shiv3/ocpp-cp-simulator/issues/573)), HTTP
+  (`fileUpload.ts`), the vehicle catalog. `LogRepository` stays in
+  `domain/persistence/` until
+  [#575](https://github.com/shiv3/ocpp-cp-simulator/issues/575), and the files
   that break the direction today are listed in `LAYER_EXEMPTIONS`.
 - `cp/shared/` — dependency-free utilities: clock, RNG, timers, logger,
   event emitter, reconnect policy, redaction.

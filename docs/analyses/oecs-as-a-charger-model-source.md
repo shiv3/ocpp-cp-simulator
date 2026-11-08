@@ -149,7 +149,7 @@ maxValue, unit, readOnly, rebootRequired}`, which lines up with OCPP 1.6
 - **Provenance.** `blueprintSchema` has no `source`-shaped field, and Zod object
   parsing strips unknown keys, so an imported document's origin would be silently
   discarded today. The good news is that
-  [`BlueprintRepository`](../../packages/core/src/cp/domain/persistence/BlueprintRepository.ts)
+  [`BlueprintRepository`](../../packages/core/src/cp/infrastructure/persistence/BlueprintRepository.ts)
   stores the definition as a JSON blob validated only at the control-plane
   boundary — adding fields needs a `blueprintSchema` change but **no SQLite
   migration**.

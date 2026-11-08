@@ -3,7 +3,11 @@ title: State persistence
 type: concept
 summary: Both the daemon (`bun:sqlite` via `--state-db`) and the browser (sql.js + IndexedDB) back their state with the same SQLite schema — scenarios, configuration overrides, charging profiles, availability, pending messages, the authorization cache, CP registry, logs, saved vehicle profiles, charging sessions, installed certificates, variable monitors and the daemon's scenario run history survive restart / reload.
 sources:
-  - packages/core/src/cp/domain/persistence/ (persistence layer, CPRegistry.restoreFromDatabase)
+  - packages/core/src/cp/domain/persistence/ (repository ports, `Database`)
+  - packages/core/src/cp/application/scenario/ScenarioRepository.ts
+  - packages/core/src/cp/application/verification/ScenarioRunRepository.ts
+  - packages/core/src/cp/infrastructure/persistence/ (SQLite schema, migrations, repositories)
+  - apps/cli/src/server/CPRegistry.ts (`restoreFromDatabase`)
   - docker-compose.yml (`STATE_DB`)
 related:
   - ../entities/daemon.md
@@ -49,6 +53,28 @@ sqlite3 ./state.db ".tables"
 # In-memory (default)
 ocpp-cp-sim --daemon ...
 ```
+
+## Where the code lives
+
+The store follows the layer direction of `packages/core/src/cp/`
+([Overview → What goes where](../overview.md#what-goes-where-in-packagescoresrc),
+[#573](https://github.com/shiv3/ocpp-cp-simulator/issues/573)):
+
+- **Ports, in `domain/persistence/`** — `Database` (the SQL handle that domain
+  stores such as `CertificateStore` and `AuthorizationCache` write through),
+  `ChargingSessionRepository`, `ConnectorRuntimeRepository` and
+  `EngineStateRepository`. `LogRepository`, a concrete class built by
+  `ChargePoint`, also sits there until
+  [#575](https://github.com/shiv3/ocpp-cp-simulator/issues/575).
+- **Scenario ports, in `application/`** — `scenario/ScenarioRepository.ts` and
+  `verification/ScenarioRunRepository.ts`; no domain code uses them.
+- **SQLite, in `infrastructure/persistence/`** — `BunSqliteDatabase` (the
+  daemon's `bun:sqlite` handle), `schema.ts` with `migrations/`, the `Sqlite*`
+  repositories and their `create*Repository` factories,
+  `BlueprintRepository`, `FleetTemplateRepository`,
+  `VehicleProfileRepository`, `upsert.ts` and `resetState.ts`.
+
+The browser's `Database` is `SqlJsDatabase`, in `apps/web/src/data/sqlite/`.
 
 ## Tables
 
@@ -101,7 +127,7 @@ read selects no behavior. Only ids are stored, never code
 
 `runMigrations` (`schema.ts`) runs on every open. A database newer than the build's `SCHEMA_VERSION` is refused with `SchemaVersionMismatchError`; an older one is migrated forward and re-stamped. Versions 3..25 are the `if (stored < N)` branches inside `runMigrations` and stay there. From version 26 on, a migration is one file:
 
-1. Add `migrations/NNNN-<slug>.ts` under `packages/core/src/cp/domain/persistence/` exporting a `Migration` (`version`, `name`, an idempotent `up(db)` that probes `PRAGMA table_info` before `ALTER TABLE`). `version` is the current `SCHEMA_VERSION` plus one.
+1. Add `migrations/NNNN-<slug>.ts` under `packages/core/src/cp/infrastructure/persistence/` exporting a `Migration` (`version`, `name`, an idempotent `up(db)` that probes `PRAGMA table_info` before `ALTER TABLE`). `version` is the current `SCHEMA_VERSION` plus one.
 2. Append it to `MIGRATIONS` in `migrations/index.ts`.
 
 `SCHEMA_VERSION` is derived from the last entry; do not edit it. `migrations.bun.test.ts` fails when versions are duplicated, skipped or out of order, so two PRs that both take version N+1 fail CI after the second merge (the fix is renaming one of them to N+2). Every `INSERT ... ON CONFLICT` that carries a long column list (`charge_points`, `connector_runtime`, `scenario_runs`) is built from one list of `[column, value]` pairs by `buildUpsert` (`upsert.ts`), so a new column is one line.
@@ -119,7 +145,7 @@ await rpc({ method: "state.reset", params: {} });
 `state.reset` truncates every simulator-owned table (schema preserved) and
 disconnects / forgets every in-memory CP. "Every" is enforced, not
 remembered (#326): the table set is one list, `TABLES` in
-`packages/core/src/cp/domain/persistence/schema.ts`, with a flag per table for the two
+`packages/core/src/cp/infrastructure/persistence/schema.ts`, with a flag per table for the two
 cleanup paths — `state.reset` truncates every table flagged for it (all but
 `schema_meta`), and `cp.delete` removes the charge point's rows from every
 `cp_id`-keyed table (`charge_points`, `charge_point_state`, `connector_runtime`, `engine_state`,

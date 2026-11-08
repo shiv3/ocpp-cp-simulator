@@ -57,8 +57,11 @@ import {
   OCPPStatus,
 } from "../../domain/types/OcppTypes";
 import {
+  DEFAULT_ID_TOKEN_TYPE,
+  ID_TOKEN_TYPE_VALUES_V21_ONLY,
   endedStoppedReason,
   endedTriggerReason,
+  type IdTokenTypeName,
   type Transaction,
   type TransactionChargingState,
   type TransactionUpdateOptions,
@@ -1412,10 +1415,50 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     }
   }
 
-  public authorize(tagId: string): void {
+  /**
+   * The `IdToken` of the wire: `NoAuthorization` carries an empty `idToken`
+   * ("IdToken field SHALL be left empty", IdTokenEnumType); a 2.1-only type
+   * on a 2.0.1 station, where the schema would refuse it, falls back to the
+   * default type with a warning (#599).
+   */
+  private wireIdToken(
+    tagId: string,
+    type: IdTokenTypeName = DEFAULT_ID_TOKEN_TYPE,
+  ): AuthorizeRequestV201["idToken"] {
+    let effective = type;
+    if (
+      this._chargePoint.ocppVersion !== OCPP_2_1 &&
+      (ID_TOKEN_TYPE_VALUES_V21_ONLY as readonly string[]).includes(type)
+    ) {
+      this._logger.warn(
+        `[v2.0.1] IdToken type ${type} exists on OCPP 2.1 only; sending ${DEFAULT_ID_TOKEN_TYPE}`,
+        LogType.OCPP,
+      );
+      effective = DEFAULT_ID_TOKEN_TYPE;
+    }
+    return {
+      idToken: effective === "NoAuthorization" ? "" : tagId,
+      // The generated 2.0.1 type lists IdTokenEnumType only; on 2.1 the field
+      // is a free string.
+      type: effective as AuthorizeRequestV201["idToken"]["type"],
+    };
+  }
+
+  public authorize(
+    tagId: string,
+    idTokenType: IdTokenTypeName = DEFAULT_ID_TOKEN_TYPE,
+  ): void {
+    if (idTokenType === "NoAuthorization") {
+      // Nothing to authorize: the token is empty (IdTokenEnumType).
+      this._logger.info(
+        "[v2.0.1] IdToken type NoAuthorization: no Authorize sent",
+        LogType.OCPP,
+      );
+      return;
+    }
     const messageId = this.generateMessageId();
     const payload: AuthorizeRequestV201 = {
-      idToken: { idToken: tagId, type: "ISO14443" },
+      idToken: this.wireIdToken(tagId, idTokenType),
     };
     this.send("Authorize", messageId, payload);
   }
@@ -1462,7 +1505,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       ...(transaction.reservationId !== undefined
         ? { reservationId: transaction.reservationId }
         : {}),
-      idToken: { idToken: transaction.tagId, type: "ISO14443" },
+      idToken: this.wireIdToken(transaction.tagId, transaction.idTokenType),
       evse: v201TransactionEvse(connectorId),
       meterValue: [
         {
@@ -1563,7 +1606,12 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         ? { reservationId: transaction.reservationId }
         : {}),
       ...(transaction.tagId
-        ? { idToken: { idToken: transaction.tagId, type: "ISO14443" as const } }
+        ? {
+            idToken: this.wireIdToken(
+              transaction.tagId,
+              transaction.idTokenType,
+            ),
+          }
         : {}),
       evse: v201TransactionEvse(connectorId),
       meterValue:

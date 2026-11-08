@@ -1867,6 +1867,7 @@ async function dispatchFacadeCpCommand(
           {
             triggerReason: params.triggerReason,
             chargingState: params.chargingState,
+            idTokenType: params.idTokenType,
           },
         );
       });
@@ -1902,6 +1903,7 @@ async function dispatchFacadeCpCommand(
         chargePointService.authorize(
           id,
           chargePointService.resolveIdTag(id, params.tagId),
+          params.idTokenType,
         ),
       );
       return handled(undefined);

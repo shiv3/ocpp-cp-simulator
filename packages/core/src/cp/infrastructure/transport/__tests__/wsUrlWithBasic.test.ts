@@ -1,7 +1,7 @@
 import { createServer, type Server, type Socket } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { neverReachedCsms } from "./OCPPWebSocket";
+import { neverReachedCsms } from "../OCPPWebSocket";
 import {
   authorizationKeyToBasicPassword,
   buildOcppBasicAuthorization,
@@ -10,7 +10,7 @@ import {
   classifyBasicAuthSource,
   OcppSecurityProfileConfigError,
   openOcppWebSocket,
-} from "./wsUrlWithBasic";
+} from "../wsUrlWithBasic";
 
 describe("OCPP WebSocket Basic auth", () => {
   it("keeps CLI credentials out of the WebSocket URL", () => {

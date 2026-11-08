@@ -16,7 +16,7 @@ This builds the Go CSMS fixture once, then runs the suites listed in the
 `test:e2e` script of `package.json`: the per-version suites
 (`e2e/ocpp16.gocpp.e2e.ts`, `e2e/ocpp201.gocpp.e2e.ts`, `e2e/ocpp21.gocpp.e2e.ts`),
 `e2e/chargingProfile.gocpp.e2e.ts` (OCPP 1.6 smart charging),
-`e2e/scenario.gocpp.e2e.ts` and `e2e/comprehensive.gocpp.e2e.ts`.
+`e2e/scenario.gocpp.e2e.ts`, `e2e/comprehensive.gocpp.e2e.ts` and `e2e/daemonShutdown.gocpp.e2e.ts` (a real daemon process: `StopTransaction` on SIGTERM with `--shutdown-stop-transactions`, `--no-connect-restored`; #622).
 Run a single suite with `bun test ./e2e/ocpp201.gocpp.e2e.ts`.
 
 ## Requirements (local-only)

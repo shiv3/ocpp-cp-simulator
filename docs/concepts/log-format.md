@@ -14,7 +14,7 @@ related:
   - trace-format.md
   - ../entities/analyze.md
   - ../entities/cli.md
-updated: 2026-11-05
+updated: 2026-11-08
 ---
 
 # Log format
@@ -48,6 +48,12 @@ downloaded log file (see [Docker image → Structured logs](../entities/docker-i
 for an example). The same lines are what the [trace adapter](trace-format.md#producing-records)
 turns into trace records, which is how [`analyze --from-daemon`](../entities/analyze.md#reading-from-a-running-daemon---from-daemon)
 works without a trace file.
+
+## Level and file output
+
+`--log-level debug|info|warn|error` (default `debug`, nothing is dropped) filters what the daemon writes to the console, and `--log-file <path>` copies the same lines into a file (#621). Both wrap `console.debug/info/warn/error`, which is how the Logger prints its four levels, so the wire lines (`[WebSocket] Sent:` / `Received:`) are in the file exactly as on stdout, in `plain` or `json`. The `[server] …` setup chatter goes to stderr only. The `logs` table and `logs.get` are the post-mortem record and keep every entry whatever the level. Without either flag the console is not wrapped at all.
+
+The file rotates by size (`--log-max-size 10m`, `512k` or bytes: the line that would pass the limit goes to a fresh file), by date (`--log-rotate-daily`, local time; a file left by an earlier run counts as the day it was last written) or both, keeping `--log-keep` rotated files (default `5`): `daemon.log`, `daemon.log.1` (newest) … `daemon.log.5`; the oldest is deleted. A write error is reported once on stderr and the file is dropped; the daemon keeps running. The code lives in `apps/cli/src/logSink.ts`, outside `core`.
 
 ## Redaction
 

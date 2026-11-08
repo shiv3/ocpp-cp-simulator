@@ -2441,3 +2441,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-08] ingest | Fleet-wide charging session listing (#489)
 
 - `sessions.list` and the `list_charging_sessions` MCP tool accept a missing `cpId` and list across every charge point, with new `labels` (selector, fleet-wide only), `startedFrom` (inclusive) and `startedTo` (exclusive) filters; order is start time then record order. Pages: [Charging sessions](concepts/charging-sessions.md#reading-it), [Socket.IO control plane](concepts/control-plane.md), [MCP endpoint](entities/mcp-endpoint.md), [index](index.md).
+
+## [2026-11-08] ingest | Daemon access hardening, log level / file output, graceful shutdown (#620, #621, #622)
+
+- `--allowed-host`, `--trusted-proxy`, `--require-tls`, `--rate-limit-per-ip` / `--rate-limit-max-ips` (all off by default; `Forwarded` and `X-Forwarded-*` conflicts refused with `400` from a trusted proxy); `--log-level`, `--log-file`, `--log-max-size`, `--log-rotate-daily`, `--log-keep`; `--shutdown-stop-transactions` / `--shutdown-wait-ms`, `--no-connect-restored`, `--cp-bulk-wait-ms`.
+- Pages: [Access control](concepts/access-control.md#hardening-for-shared-environments), [Log format](concepts/log-format.md#level-and-file-output), [Daemon](entities/daemon.md#shutdown-and-restore), [CLI](entities/cli.md), [Control plane](concepts/control-plane.md), [GitHub issues](sources/github-issues.md).

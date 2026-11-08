@@ -158,5 +158,19 @@
   "scenarioEditor.callResponse.kindResult": "CALLRESULT (répondre avec un payload)",
   "scenarioEditor.callResponse.payload": "Payload (JSON)",
   "scenarioEditor.useBehavior.behaviorId": "Identifiant du comportement",
-  "scenarioEditor.useBehavior.behaviorIdPlaceholder": "ex. my-behavior"
+  "scenarioEditor.useBehavior.behaviorIdPlaceholder": "ex. my-behavior",
+  "scenarioEditor.useBehavior.mode": "Mode",
+  "scenarioEditor.useBehavior.modeUse": "Utiliser (avec paramètres)",
+  "scenarioEditor.useBehavior.modeDisable": "Désactiver pour cette exécution",
+  "scenarioEditor.useBehavior.disableHelp": "Pendant l’exécution, chaque CALL que ce comportement traite reçoit la réponse d’acceptation simple de la version OCPP de la borne, sans suite. Il n’accepte aucun paramètre.",
+  "scenarioEditor.useBehavior.paramsJson": "Paramètres (JSON)",
+  "scenarioEditor.useBehavior.paramsJsonPlaceholder": "{\"key\": \"value\"}",
+  "scenarioEditor.params.reset": "Rétablir les valeurs par défaut",
+  "scenarioEditor.params.firmware.stepMs": "Délai entre les statuts (ms)",
+  "scenarioEditor.params.firmware.failAt": "Terminer par un échec",
+  "scenarioEditor.params.firmware.startAt": "Démarrer à",
+  "scenarioEditor.params.signedFirmware.stepMs": "Délai entre les statuts (ms)",
+  "scenarioEditor.params.logs.uploadMs": "Durée du téléversement (ms)",
+  "scenarioEditor.params.reset.delayMs": "Délai avant la réinitialisation (ms)",
+  "scenarioEditor.params.unlock.outcome": "Résultat"
 }

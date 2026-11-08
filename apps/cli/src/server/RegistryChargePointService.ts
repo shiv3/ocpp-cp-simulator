@@ -103,6 +103,7 @@ import { redactSensitiveText } from "@ocpp-cp-sim/core/cp/shared/redaction";
 import { scenarioTemplates } from "@ocpp-cp-sim/core/utils/scenarioTemplates";
 import type { CLIChargePointService, CLIEvent } from "../service";
 import type { ChargePointInitOptions, ChargePointStatus } from "../types";
+import { redactTransport } from "@ocpp-cp-sim/contracts/events";
 import type { Labels } from "@ocpp-cp-sim/contracts/labels";
 import type { JsonObject } from "@ocpp-cp-sim/contracts/behavior";
 import type {
@@ -1202,6 +1203,9 @@ function toChargePointSnapshot(status: ChargePointStatus): ChargePointSnapshot {
           txUpdatedMeterValues: status.config.txUpdatedMeterValues,
           inboundValidation: status.config.inboundValidation,
           capabilityProfile: status.config.capabilityProfile,
+          ...(status.config.transport === undefined
+            ? {}
+            : { transport: redactTransport(status.config.transport) }),
           tlsCaPath: status.config.tlsCaPath,
           tlsCertPath: status.config.tlsCertPath,
           tlsKeyPath: status.config.tlsKeyPath,

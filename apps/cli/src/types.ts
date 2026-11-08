@@ -448,6 +448,7 @@ export interface ChargePointStatus {
     readonly txUpdatedMeterValues?: boolean;
     readonly inboundValidation?: InboundValidationMode;
     readonly capabilityProfile?: ChargePointCapabilityProfile;
+    readonly transport?: TransportConfig;
     readonly tlsCaPath?: string;
     readonly tlsCertPath?: string;
     readonly tlsKeyPath?: string;

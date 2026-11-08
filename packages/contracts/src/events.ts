@@ -13,6 +13,10 @@ import { normalizeKeyName, redactSensitiveValue } from "./redaction";
 import { OBJ_MAX_BYTES, STR_256, STR_64K, boundedObject } from "./limits";
 import { labelsSchema, type Labels } from "./labels";
 import type { OcppSecurityProfile } from "./securityProfile";
+import {
+  transportConfigSchema,
+  type TransportConfigWire,
+} from "./transportConfig";
 
 // ---------------------------------------------------------------------------
 // Redaction helpers
@@ -28,6 +32,15 @@ export function redactUrl(url: string): string {
   } catch {
     return url.replace(/\/\/[^@/]*@/, "//");
   }
+}
+
+/** The transport settings with the proxy URL's `user:pass@` removed (#684). */
+export function redactTransport(
+  transport: TransportConfigWire,
+): TransportConfigWire {
+  const proxy = transport.ws?.proxy;
+  if (proxy === undefined || !transport.ws) return transport;
+  return { ...transport, ws: { ...transport.ws, proxy: redactUrl(proxy) } };
 }
 
 interface FullBootNotification {
@@ -62,6 +75,8 @@ interface FullCpConfig {
   txUpdatedMeterValues?: boolean;
   inboundValidation?: "off" | "warn" | "enforce";
   capabilityProfile?: WireCapabilityProfile;
+  /** Reconnect policy and WebSocket client options (#609, #611). */
+  transport?: TransportConfigWire;
   tlsCaPath?: string;
   tlsCertPath?: string;
   tlsKeyPath?: string;
@@ -113,6 +128,9 @@ export function redactCp(config: FullCpConfig): WireCpConfig {
             : {}),
         }
       : undefined,
+    ...(config.transport
+      ? { transport: redactTransport(config.transport) }
+      : {}),
     tlsCaPath: config.tlsCaPath,
     tlsCertPath: config.tlsCertPath,
     tlsKeyPath: config.tlsKeyPath,
@@ -164,6 +182,7 @@ export const wireCpConfigSchema = z
         triggerMessageTargets: z.array(STR_256).optional(),
       })
       .optional(),
+    transport: transportConfigSchema.optional(),
     tlsCaPath: STR_64K.optional(),
     tlsCertPath: STR_64K.optional(),
     tlsKeyPath: STR_64K.optional(),

@@ -1010,6 +1010,7 @@ export class CLIChargePointService {
         txUpdatedMeterValues: this._init.txUpdatedMeterValues,
         inboundValidation: this._init.inboundValidation,
         capabilityProfile: this._init.capabilityProfile,
+        transport: this._init.transport,
         tlsCaPath: this._init.tlsCaPath,
         tlsCertPath: this._init.tlsCertPath,
         tlsKeyPath: this._init.tlsKeyPath,

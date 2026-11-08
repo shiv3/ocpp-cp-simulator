@@ -857,6 +857,46 @@ export const goldenCases: GoldenCase[] = [
     await settle(rig);
   }),
 
+  // 2.0.1 K09.FR.02 / K09.FR.04: an EVSE query reports only that EVSE's
+  // profiles (one report); the unscoped query sends one report per EVSE and
+  // marks every report but the last with tbc.
+  c201(
+    "get-charging-profiles-scope-tbc",
+    async (rig) => {
+      const install = (evseId: number, id: number) =>
+        rig.csms.call("SetChargingProfile", {
+          evseId,
+          chargingProfile: {
+            id,
+            stackLevel: id,
+            chargingProfilePurpose: "TxDefaultProfile",
+            chargingProfileKind: "Absolute",
+            chargingSchedule: [
+              {
+                id,
+                chargingRateUnit: "W",
+                chargingSchedulePeriod: [{ startPeriod: 0, limit: 7000 }],
+              },
+            ],
+          },
+        });
+      await install(0, 1);
+      await install(2, 2);
+      await rig.csms.call("GetChargingProfiles", {
+        requestId: 1,
+        evseId: 2,
+        chargingProfile: {},
+      });
+      await settle(rig);
+      await rig.csms.call("GetChargingProfiles", {
+        requestId: 2,
+        chargingProfile: {},
+      });
+      await settle(rig);
+    },
+    { connectors: 2 },
+  ),
+
   // --- connection loss ---------------------------------------------------
   ...both("csms-drops-connection", async (rig) => {
     rig.csms.dropConnection();

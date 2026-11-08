@@ -2433,3 +2433,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-08] fix | OCPP-S 1.6 transaction retry review follow-ups (#585)
 
 - [Charging sessions](concepts/charging-sessions.md): the "CALLERROR is not a failed start" paragraph names the OCPP-S 1.6 SOAP Fault / HTTP error case. A stop no longer moves a waiting `StartTransaction` connector to `Charging`; a Fault landing after a stop sends no Heartbeat; a resend due while the boot gate is closed is discarded with a notice. [GitHub issues](sources/github-issues.md): `updated:` bumped.
+
+## [2026-11-08] ingest | 2.x GetChargingProfiles scopes by evseId and sets tbc (#706, #735)
+
+- K09.FR.04-06: an `evseId > 0` query reports only that EVSE's profiles (it no longer adds the EVSE 0 ones); `0` stays station-level only, absent stays all. K09.FR.02: when the answer spans several `ReportChargingProfiles` requests (one per EVSE group), every one but the last carries `tbc: true`. New page: [Smart charging](concepts/smart-charging.md). New golden case `201-get-charging-profiles-scope-tbc`; no existing fixture changes.

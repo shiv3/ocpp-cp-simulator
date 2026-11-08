@@ -364,7 +364,12 @@ function getCandidateProfiles(
   ctx: V201InboundContext,
   evseId: number | undefined,
 ): ActiveChargingProfile[] {
-  const profiles = [...ctx.chargePoint.stationProfiles.all()];
+  // K09.FR.04-06: an EVSE n > 0 reports the profiles installed on that EVSE,
+  // EVSE 0 only the station-level ones, no evseId all of them.
+  const profiles: ActiveChargingProfile[] = [];
+  if (evseId === undefined || evseId === 0) {
+    profiles.push(...ctx.chargePoint.stationProfiles.all());
+  }
   if (evseId === undefined) {
     for (const connector of ctx.chargePoint.connectors.values()) {
       profiles.push(...connector.chargingProfiles);
@@ -426,7 +431,10 @@ export function handleGetChargingProfilesV201(
       status: "Accepted",
     } satisfies GetChargingProfilesResponseV201,
     afterResult: () => {
-      for (const [evseId, profiles] of groupByConnectorId(matches)) {
+      // One report per EVSE; K09.FR.02: every report but the last says more
+      // follow, so the CSMS can tell when the answer is complete.
+      const groups = [...groupByConnectorId(matches)];
+      groups.forEach(([evseId, profiles], index) => {
         const chargingProfile = profiles.map(domainProfileToV201) as [
           ReportChargingProfileType,
           ...ReportChargingProfileType[],
@@ -434,10 +442,11 @@ export function handleGetChargingProfilesV201(
         ctx.sendCall("ReportChargingProfiles", {
           requestId: req.requestId,
           chargingLimitSource: REPORT_SOURCE,
+          ...(index < groups.length - 1 && { tbc: true }),
           evseId,
           chargingProfile,
         } satisfies ReportChargingProfilesRequestV201);
-      }
+      });
     },
   };
 }

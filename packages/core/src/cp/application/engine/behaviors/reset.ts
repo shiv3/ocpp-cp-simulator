@@ -79,7 +79,7 @@ export function resetBehavior(cp: ChargePoint): Behavior {
                   }
                 }
               }
-              cp.boot();
+              cp.boot("RemoteReset");
             },
           };
         },

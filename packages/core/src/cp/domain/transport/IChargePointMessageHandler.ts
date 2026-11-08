@@ -11,6 +11,7 @@ import type {
 } from "../types/FirmwareLogStatus";
 import type {
   BootNotification,
+  BootReason,
   ChargePointErrorCode,
   OCPPStatus,
 } from "../types/OcppTypes";
@@ -30,7 +31,10 @@ export interface DataTransferVendorRegistry {
 }
 
 export interface IChargePointMessageHandler {
-  sendBootNotification(bootPayload: BootNotification): void;
+  sendBootNotification(
+    bootPayload: BootNotification,
+    reason?: BootReason,
+  ): void;
   sendHeartbeat(): void;
   sendStatusNotification(
     connectorId: number,

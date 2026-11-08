@@ -136,7 +136,7 @@ export const handleTriggerMessageV201 = (
     case "BootNotification":
       return {
         response: accepted,
-        afterResult: () => ctx.chargePoint.boot(),
+        afterResult: () => ctx.chargePoint.boot("Triggered"),
       };
 
     case "Heartbeat":

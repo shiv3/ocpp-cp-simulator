@@ -1904,24 +1904,23 @@ export class OCPPMessageHandler {
    * running or ended, as on 2.x (#490).
    *
    * A discarded StartTransaction.req leaves the transaction without a CSMS
-   * id: it keeps the `0` placeholder, which its MeterValues.req and
-   * StopTransaction.req then carry, and a connector still in Preparing goes
+   * id: its MeterValues.req and StopTransaction.req then carry `-1` (1.6
+   * errata 3.18), and a connector still in Preparing goes
    * to Charging, as when StopTransactionOnInvalidId=false keeps a rejected
    * start running.
    *
-   * A StartTransaction.req whose transaction no longer runs is not sent
-   * again: it would reach the CSMS after the StopTransaction.req and open a
-   * transaction nothing stops. A CALLERROR answering one in flight discards
-   * it at once; a resend already waiting is discarded by
-   * `discardOutlivedStartResend`, whichever stop path ended the transaction.
-   *
-   * Known limitation, as on 2.x: a waiting resend does not hold back the
-   * next transaction-related message (§3.7 asks for chronological order). A
-   * MeterValues.req can overtake the StartTransaction.req being retried, and
-   * a StopTransaction.req goes out ahead of it with the `0` placeholder, then
-   * discards it (#565). Both settings are read here, so a ChangeConfiguration
-   * applies to the next failure; `discardResendPastLimit` applies the limit
-   * to a resend already waiting too.
+   * §3.7 asks for chronological delivery ("The delivery of new
+   * transaction-related messages SHALL wait until the queue has been
+   * emptied"), so the transaction-related messages that follow a failed one
+   * wait for it (#565): `_held`, released when the resend is answered,
+   * discarded, dropped or timed out (`releaseHold`), moved behind it to the
+   * offline queue when it leaves for there (`holdToOfflineQueue`). A
+   * StartTransaction.req resend is sent even if its transaction stopped
+   * meanwhile: the StopTransaction.req follows it, with the id its conf
+   * assigns or `-1` once it is discarded (1.6 errata 3.18,
+   * `applyStartOutcome`). Both settings are read here, so a
+   * ChangeConfiguration applies to the next failure; `discardResendPastLimit`
+   * applies the limit to a resend already waiting too.
    */
   private onTransactionMessageCallError(
     request: OCPPRequest,

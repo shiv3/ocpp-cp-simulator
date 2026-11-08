@@ -26,7 +26,7 @@ related:
   - ../entities/cli.md
   - local-vs-remote-mode.md
   - local-authorization.md
-updated: 2026-11-05
+updated: 2026-11-08
 ---
 
 # Charging sessions
@@ -248,8 +248,7 @@ WebSocket closes ([#488](https://github.com/shiv3/ocpp-cp-simulator/issues/488))
   [`pending_messages`](state-persistence.md) with `--state-db`, in memory
   otherwise) and replayed after the next accepted boot. So is a resend still
   waiting out its retry interval after a CALLERROR, which keeps its count of
-  transmissions; a StartTransaction.req resend is discarded instead if its
-  transaction no longer runs (#527). On 2.x the TransactionEvents
+  transmissions, and the transaction messages held behind it (#565). On 2.x the TransactionEvents
   (`Started`, `Updated`, `Ended`) go to the same queue (E11.FR.01): those
   produced offline, those written but unanswered when the socket closed, and
   a pending E13 resend. After the next accepted boot they are replayed in the
@@ -269,7 +268,8 @@ WebSocket closes ([#488](https://github.com/shiv3/ocpp-cp-simulator/issues/488))
   TransactionEvent `Updated` with `triggerReason` `CablePluggedIn` followed by
   `Charging`.
 - On 1.6, an Unplug while StartTransaction.conf is still pending stops the
-  transaction with StopTransaction `transactionId: 0`. This predates #488
+  transaction; the StopTransaction.req takes the id of that conf when it is
+  written (`-1` if the request is discarded, #565). This predates #488
   (`stop_transaction` does the same), but the Unplug button now reaches it.
 - A 1.6 StartTransaction that is never answered, or that is discarded after
   `TransactionMessageAttempts` CALLERRORs, keeps `transactionId: null`.
@@ -283,10 +283,13 @@ WebSocket closes ([#488](https://github.com/shiv3/ocpp-cp-simulator/issues/488))
   and one that already ended (a 1.6 StopTransaction.req, a 2.x `Ended` event)
   stays ended.
 - On 1.6 a transaction stopped before its StartTransaction.req got a conf
-  stops with `transactionId: 0`. A resend still waiting is discarded, but a
-  StartTransaction.req already on the wire or queued ahead of the stop reaches
-  the CSMS, which can keep open a transaction nothing stops
-  ([#565](https://github.com/shiv3/ocpp-cp-simulator/issues/565)).
+  stops with the `transactionId` that conf assigns, whenever it arrives: the
+  StopTransaction.req waits behind a StartTransaction.req being resent, or in
+  flight, and is built with the id when it is written. If the request is
+  discarded, it carries `-1` (1.6 errata 3.18). A StartTransaction.req resend
+  is never dropped because its transaction stopped
+  ([#565](https://github.com/shiv3/ocpp-cp-simulator/issues/565),
+  [order of transaction messages](ocpp-versions-and-transports.md#transaction-message-retries-ocpp-j-16)).
 - `sessions.list` takes one charge point; there is no fleet-wide listing yet
   ([#489](https://github.com/shiv3/ocpp-cp-simulator/issues/489)).
 - Local mode does not drop a removed charge point's sessions until

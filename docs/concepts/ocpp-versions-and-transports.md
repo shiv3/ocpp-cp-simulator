@@ -194,10 +194,19 @@ see [variable monitoring](variable-monitoring.md#monitoringctrlr-variables),
 #538). Every other mapped variable has no instance and answers whatever
 instance the CSMS names, as before.
 
-Known limitation: 2.x has no serial queue here as on 1.6, so a waiting
-resend does not hold back the next transaction message. E13 (Figure 62)
-describes sequential delivery; this station may deliver `Ended` before the
-resent `Started`, and the CSMS has to order the messages by `seqNo`. When
+While a resend is pending (a TransactionEvent failed and is neither settled
+nor discarded: its resend waits out `MessageAttemptInterval`, was written, or
+an earlier transmission can still be answered late), the next
+TransactionEvent the station builds waits for it, E13.FR.04: "The Charging
+Station SHALL discard the message and continue with the next
+transaction-related message". An `Ended` built during the retry of `Started`
+goes out after `Started` is answered or discarded, never before, and so does
+every event built after it, in order (#565). This is the only hold: 2.x has
+no serial queue (see `send`), so an event already written when an earlier one
+fails is not recalled, and the CSMS orders those by `seqNo`; the
+[E11 replay](#e11-offline-queue-for-transactionevent) is a burst for the same
+reason. There is no id to resolve on 2.x: the station chooses the
+`transactionId`. When
 the WebSocket closes (network loss, disconnect, reset, delete), a resend
 still waiting and a written TransactionEvent still waiting for its answer
 are not dropped: they go to the
@@ -285,9 +294,10 @@ Limits:
 - The queue has no size cap for TransactionEvents (only the NotifyEvent
   reports are capped, #538), so the E11.FR.04/FR.05 memory-pressure drop
   of `Updated` events is not modelled.
-- The replay goes out as a burst: 2.x has no serial queue (see the known
-  limitation above), so the station does not wait for one answer before
-  sending the next replayed event.
+- The replay goes out as a burst: 2.x has no serial queue (see the hold
+  above, which covers only events built while a resend is pending), so the
+  station does not wait for one answer before sending the next replayed
+  event.
 - A row leaves the table when its replay is handed to the socket, as on
   1.6. A process crash before the answer loses it, where the E04 failure
   postcondition keeps an unanswered event in the queue.
@@ -339,11 +349,17 @@ attempts value below 1 counts as 1, a negative interval as 0.
 
 StartTransaction.req carries no transaction id: its events report the
 placeholder `transactionId` `"0"`. Once it is discarded the transaction
-runs on under that placeholder: its MeterValues.req and StopTransaction.req
-carry `transactionId: 0`, as they do while a StartTransaction.conf is still
-pending, and a connector still in `Preparing` goes to `Charging`, as when
-`StopTransactionOnInvalidId` is false. Any other status, such as one a
-scenario set meanwhile, is left alone. On 1.x, `ConnectionTimeOut` does not
+runs on without an id, and its MeterValues.req and StopTransaction.req carry
+`transactionId: -1`: 1.6 errata 3.18 (added in errata sheet v4.0) says "the
+Charge Point SHALL send any Transaction related messages for this transaction
+to the Central System with a transactionId = -1" when it "was unable to
+deliver the StartTransaction.req despite repeated attempts". Before that the
+station-side `0` stands in for the id, and a message built then takes the
+id its conf assigns, or `-1` if the request is discarded, when it is
+sent (below). A connector still in `Preparing` goes to `Charging` when the
+request is discarded, as when `StopTransactionOnInvalidId` is false. Any
+other status, such as one a scenario set meanwhile, is left alone. On 1.x,
+`ConnectionTimeOut` does not
 apply while the transaction runs, so it never moves a connector waiting in
 `Preparing` for the conf to `Finishing`. On 2.x it maps to
 `TxCtrlr/EVConnectionTimeOut`, which targets exactly a transaction started
@@ -354,7 +370,7 @@ RemoteStopTransaction for id `0` is `Rejected`, with no
 StopTransaction.req: the CSMS never issued that id (#491). A `0` the CSMS
 did assign in a StartTransaction.conf is stopped as any other id (#328).
 Unlock, Reset and the other stop paths stop the
-transaction with one StopTransaction.req carrying `transactionId: 0`, and a
+transaction with one StopTransaction.req, and a
 ChangeAvailability to `Inoperative` answers `Scheduled`.
 
 A StartTransaction.conf belongs to the transaction its request started,
@@ -362,34 +378,58 @@ identified by the request's `idTag` and `timestamp`. When it answers a resend
 after that transaction stopped, or after another one began on the connector,
 it is logged and ignored: neither the transaction id nor the connector
 status changes, and a non-`Accepted` `idTagInfo` stops nothing. It still
-updates the Authorization Cache. OCPP-S binds its StartTransaction answer
-the same way, though it never resends: a slow HTTP exchange can return
-after the transaction stopped.
+updates the Authorization Cache, and its `transactionId` goes to the
+StopTransaction.req and MeterValues.req of that transaction (below). OCPP-S
+binds its StartTransaction answer the same way, though it never resends: a
+slow HTTP exchange can return after the transaction stopped.
 
-A StartTransaction.req resend whose transaction no longer runs is discarded
-instead of sent: it would reach the CSMS after the StopTransaction.req and
-open a transaction nothing stops. This holds whatever stopped it (a local stop,
-UnlockConnector, an EV disconnect, a Reset) and wherever the resend waits: on
-its retry interval, in the serial queue behind another CALL, or in the offline
-queue. The station emits
-`transactionMessageDiscarded` with `attempts` the transmissions actually made
-and `errorCode` the last CALLERROR's, absent when the discard happens at a
-replay, since that code is not persisted. The request's `idTag` and
-`timestamp` identify the transaction, so a resend replayed for a transaction
-restored after a restart still goes out. A CALLERROR answering a
-StartTransaction.req whose transaction stopped while the request was in flight
-is not resent either: the request is reported rejected, then discarded after
-that one attempt.
+**Order of transaction messages (#565, §3.7).** OCPP 1.6 edition 2 §3.7: "The Charge Point SHOULD deliver transaction-related
+messages to the Central System in chronological order", and "The delivery of
+new transaction-related messages SHALL wait until the queue has been emptied".
+§3.7.1 lets it skip a message only after the allowed failures, and the
+errata (3.18) gives the messages of a transaction whose StartTransaction.req
+was never delivered `transactionId = -1`. So the station holds back the
+transaction-related messages (StartTransaction.req, StopTransaction.req and a
+MeterValues.req of a transaction) that follow a message being resent:
 
-This covers resends only. A StartTransaction.req on the wire when its
-transaction stops, and a first transmission queued before the stop, online or
-offline, still reach the CSMS ahead of the StopTransaction.req. Their conf is
-ignored as above and the StopTransaction.req carries `transactionId: 0`, so
-the CSMS can keep open a transaction nothing stops
-([#565](https://github.com/shiv3/ocpp-cp-simulator/issues/565)).
+- From the first CALLERROR of one until it settles, every transaction-related
+  message the station builds waits behind it, whatever connector it is for
+  (§3.7 is about the queue, not a transaction). A Heartbeat,
+  StatusNotification, Authorize or other CALL that is not transaction-related
+  is not held, as §3.7 allows. Messages already queued in the serial queue behind the
+  failed CALL join the held ones, in order.
+- The resend is **settled** when it is answered with a CALLRESULT, discarded
+  (the last attempt failed, or `TransactionMessageAttempts` was lowered to
+  below its count), dropped by a behavior's `beforeSend`, or times out (1.6
+  does not retry a timeout). The held messages then go out in order, through
+  the serial queue; if the first of them fails in turn, the rest wait again.
+- A StartTransaction.req resend is therefore sent even if its transaction
+  stopped meanwhile (a local stop, UnlockConnector, an EV disconnect, a
+  Reset, a scenario's stop node): it reaches the CSMS **before** the
+  StopTransaction.req, which closes the transaction it opens. Nothing is
+  discarded for that reason any more.
+- A StopTransaction.req or MeterValues.req takes its `transactionId` when
+  it is written, not when it is built: the `transactionId` of the
+  StartTransaction.conf of its transaction, whenever that arrived, including
+  a conf answering a request still in flight when the transaction stopped
+  (the stop waits behind it in the serial queue); `-1` when the
+  StartTransaction.req was discarded. A message for which nothing is known
+  (a transaction restored after a restart whose start was answered before)
+  keeps the id it was built with.
+- When the WebSocket closes, a resend and the messages held behind it go to
+  the offline queue in that order (§3.7: "When offline, the Charge Point MUST
+  queue any transaction-related messages"), and the replay after the next
+  accepted boot sends the StartTransaction.req first. A stop or meter message
+  still carrying `0` in the queue takes the id of the StartTransaction.req
+  replayed before it for the same connector, so the order and the id
+  survive a restart. The same holds when the resend falls due behind a closed
+  boot gate.
+- Held messages are kept in memory, like the resend itself: a process that
+  ends without closing the socket loses them.
 
 A resend still waiting when the WebSocket closes goes to the 1.6 offline
-queue (§3.7), ahead of the CALLs still queued, and is replayed after the
+queue (§3.7), ahead of the CALLs still queued and the messages held behind
+it, and is replayed after the
 next accepted boot like any queued transaction message. So does a resend
 that falls due while the boot gate is closed on a live link (a
 BootNotification answered `Pending`, e.g. after a TriggerMessage). That
@@ -399,8 +439,8 @@ is discarded after `TransactionMessageAttempts` transmissions however often
 the link drops. A resend or replay that already met the limit, lowered while
 it waited, is not sent: it is discarded with `transactionMessageDiscarded` (a
 replay has no `errorCode`, the queue does not store it), and a
-StartTransaction.req whose transaction still runs ends as after a last attempt.
-A row stored by an older release holds `0` and replays as a first transmission,
+StartTransaction.req whose transaction still runs ends as after a last attempt;
+the messages held behind it go out. A row stored by an older release holds `0` and replays as a first transmission,
 as does any message never transmitted, whatever the limit. The replay goes out
 right after the boot, without waiting out what was left of the retry interval.
 
@@ -410,12 +450,7 @@ it and 1.6 does not retry a timeout. Nor does it make the `0` placeholder one
 a RemoteStopTransaction refuses, as above. A CALLRESULT arriving that late
 still applies, to the transaction its request started.
 
-Known limitations, as on 2.x: a waiting resend does not hold back the next
-transaction-related message, against the chronological order §3.7 asks for. A
-MeterValues.req can overtake the StartTransaction.req being retried, and a
-StopTransaction.req goes out ahead of it with `transactionId: 0`, which then
-discards the resend
-([#565](https://github.com/shiv3/ocpp-cp-simulator/issues/565)). Unlike 2.x
+Unlike 2.x
 (#529), a message left unanswered is not retried: only a CALLERROR is.
 A resend waiting out its interval is held in memory, like the CALLs in the
 serial queue. It reaches the persisted offline queue only when the socket

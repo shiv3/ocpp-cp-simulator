@@ -1645,6 +1645,22 @@ c201("event-callerror-retries", async (r) => {
   await settle(r);
 });
 
+// #565, E13.FR.04: the Ended event built during the Started event's retry
+// waits for the resend.
+c201("event-callerror-stop-during-retry", async (r) => {
+  cfg(r, "TransactionMessageAttempts", "3");
+  cfg(r, "TransactionMessageRetryInterval", "1");
+  r.csms.responders.TransactionEvent = (_p, c) =>
+    c.nth < 2 ? { error: { code: "InternalError", description: "x" } } : {};
+  r.plugIn();
+  await settle(r);
+  await r.cp.startTransaction("TAG-E", 1);
+  await wait(200);
+  r.cp.stopTransaction(1);
+  await wait(2500);
+  await settle(r);
+});
+
 // Connection close with work in flight on the other side.
 both("close-during-remote-start-follow-up", async (r) => {
   r.plugIn();

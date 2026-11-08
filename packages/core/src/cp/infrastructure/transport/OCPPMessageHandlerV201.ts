@@ -260,6 +260,11 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
    *  creation order (#528): a close queues them all (E11.FR.01/07). */
   private readonly _activeTransactionEvents =
     new Set<TransactionEventMessage>();
+  /** #565, E13.FR.04: TransactionEvents built while a resend waits. They
+   *  go out, in order, once no TransactionEvent is left failed and
+   *  unsettled; a close queues them with the others (E11), in creation
+   *  order, since they are tracked in `_activeTransactionEvents` too. */
+  private _heldTransactionEvents: TransactionEventMessage[] = [];
   /** True from `onWebSocketClosed` (and before the first connection) until
    *  a CALL is written again: no close is left to queue the TransactionEvents
    *  a drop strands, so the drop queues them itself (#528). */
@@ -966,7 +971,48 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       this.queueTransactionEvent(message);
       return;
     }
+    // #565, E13.FR.04: the next transaction-related message waits for the
+    // resend of an earlier one to settle, or to be discarded.
+    if (this.hasResendPending()) {
+      this._heldTransactionEvents.push(message);
+      this._logger.info(
+        `[v2.0.1] ${describeTransactionEvent(message.payload)} waits behind a TransactionEvent being resent (E13); ${this._heldTransactionEvents.length} held`,
+        LogType.TRANSACTION,
+      );
+      return;
+    }
     this.transmitTransactionEvent(message);
+  }
+
+  /** Whether a TransactionEvent failed (CALLERROR or timeout) and is not yet
+   *  settled or discarded: a resend is waiting, written, or its earlier
+   *  transmission is still open to a late answer. */
+  private hasResendPending(): boolean {
+    for (const message of this._activeTransactionEvents) {
+      if (message.failed > 0 && !message.done) return true;
+    }
+    return false;
+  }
+
+  /** #565: send the held TransactionEvents, in order, unless another resend
+   *  is pending by now. A message a close queued meanwhile is already done. */
+  private releaseHeldTransactionEvents(): void {
+    if (this._heldTransactionEvents.length === 0) return;
+    if (this.hasResendPending()) return;
+    const held = this._heldTransactionEvents;
+    this._heldTransactionEvents = [];
+    this._logger.info(
+      `[v2.0.1] Releasing ${held.length} TransactionEvent(s) held behind a resend`,
+      LogType.TRANSACTION,
+    );
+    for (const message of held) {
+      if (message.done) continue;
+      if (this._awaitingReplay) {
+        this.queueTransactionEvent(message);
+        continue;
+      }
+      this.transmitTransactionEvent(message);
+    }
   }
 
   private newTransactionEventMessage(
@@ -1117,6 +1163,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       this._pendingRequests.delete(id);
     }
     message.inFlight.clear();
+    this.releaseHeldTransactionEvents();
   }
 
   /**
@@ -1132,12 +1179,13 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
    * transmission that already timed out changes nothing, and neither does
    * any failure once the message is settled or discarded.
    *
-   * Known limitation: 2.x has no serial queue here (see `send`), so a
-   * waiting resend does not hold back the next transaction message. E13
-   * (Figure 62) describes sequential delivery; this station may deliver
-   * `Ended` before the resent `Started`, leaving the CSMS to reorder by
-   * `seqNo`. Both settings are read here, so a SetVariables applies to the
-   * next failure.
+   * E13.FR.04 continues "with the next transaction-related message" only
+   * after the final attempt, so a TransactionEvent built while a resend is
+   * pending waits for it (#565, `sendTransactionEventCall`): it goes out
+   * when the message is settled or discarded. One already written before the
+   * failure is not recalled (2.x has no serial queue, see `send`); the CSMS
+   * orders those by `seqNo`. Both settings are read here, so a SetVariables
+   * applies to the next failure.
    */
   private onTransactionEventFailure(
     delivery: TransactionEventDelivery,

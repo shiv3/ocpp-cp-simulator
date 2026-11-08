@@ -2414,3 +2414,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - A `warn` / `enforce` violation is traced: the inbound CALL's record carries `meta.validation = { mode, errorCode, description }` (a structured `Inbound validation:` line on the `WebSocket` log channel, merged by `logLinesToTrace` and held back by the live `--trace-output` writer for one tick). `inboundValidation` is settable: `--inbound-validation`, `cp.create` / `cp.update` (contracts, HTTP, MCP), persisted in `charge_points.inbound_validation` (schema v25). The wiki states the order with the #594 `NotSupported`.
 - Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#inbound-call-validation-on-ocpp-j-16), [Trace format](concepts/trace-format.md#validation-violations-meta), [CLI](entities/cli.md), [Daemon](entities/daemon.md), [Control plane](concepts/control-plane.md), [State persistence](concepts/state-persistence.md).
+
+## [2026-11-08] ingest | 1.6 RemoteStartTransaction answers Accepted only when a start will be attempted (#728)
+
+- `RemoteStartTransaction` is `Rejected` for a named connector that is unknown, inoperative, Faulted, already in a transaction or reserved for another idTag; without `connectorId` the lowest connector that can start is used and `Rejected` is answered when none can (§5.11, errata 3.32). 2.x `RequestStartTransaction` is unchanged.
+- Pages: [Default behaviors](entities/default-behaviors.md), [GitHub issues](sources/github-issues.md)

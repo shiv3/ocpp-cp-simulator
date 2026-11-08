@@ -65,9 +65,18 @@ export function transactionBehavior(cp: ChargePoint): Behavior {
             idTag: string;
             connectorId?: number;
           };
-          const resolved = connectorId || 1;
-          const connector = cp.getConnector(resolved);
-          if (!connector || connector.availability !== "Operative") {
+          // 1.6 §5.11 (errata 3.32): `Accepted` means a start will be
+          // attempted. A named connector must be able to start; without one
+          // the lowest connector that can start is used.
+          const resolved = connectorId
+            ? remoteStartable(cp, connectorId, idTag)
+              ? connectorId
+              : undefined
+            : [...cp.connectors.keys()]
+                .filter((id) => id > 0)
+                .sort((a, b) => a - b)
+                .find((id) => remoteStartable(cp, id, idTag));
+          if (resolved === undefined) {
             return { response: { status: "Rejected" } };
           }
           // 1.6 §5.11: the transaction starts while the answer is built.
@@ -155,6 +164,26 @@ export function transactionBehavior(cp: ChargePoint): Behavior {
       },
     },
   };
+}
+
+/**
+ * Whether a remote start for `idTag` can be attempted on the connector (1.6
+ * §5.11, errata 3.32): known, Operative, not Faulted, no running transaction
+ * and not reserved for another idTag (§5.13).
+ */
+function remoteStartable(
+  cp: ChargePoint,
+  connectorId: number,
+  idTag: string,
+): boolean {
+  const connector = cp.getConnector(connectorId);
+  if (!connector || connector.availability !== "Operative") return false;
+  if (connector.status === OCPPStatus.Faulted) return false;
+  if (connector.hasRunningTransaction) return false;
+  const reservation = cp.reservationManager.getReservationForConnector(
+    connector.id,
+  );
+  return reservation === undefined || reservation.idTag === idTag;
 }
 
 /**

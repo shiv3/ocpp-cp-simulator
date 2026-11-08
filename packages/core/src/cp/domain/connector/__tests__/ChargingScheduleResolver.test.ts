@@ -177,3 +177,96 @@ describe("resolveScheduleLimitWatts", () => {
     ).toBe(0);
   });
 });
+
+describe("startSchedule and duration (1.6 §7.13, errata 3.43, 3.44)", () => {
+  const txStart = new Date("2026-01-01T00:00:00Z");
+  const now = new Date("2026-01-01T01:00:00Z");
+
+  it("counts an Absolute profile from startSchedule, not from the transaction start", () => {
+    const profile = makeProfile({
+      chargingProfileKind: ChargingProfileKindType.Absolute,
+      startSchedule: "2026-01-01T00:30:00Z",
+      chargingSchedulePeriods: [
+        { startPeriod: 0, limit: 11000 },
+        { startPeriod: 3600, limit: 3000 },
+      ],
+    });
+    // 30 min after startSchedule (1 h after the transaction start).
+    expect(resolveScheduleLimitWatts(profile, txStart, now).watts).toBe(11000);
+    // 1 h 30 min after startSchedule.
+    expect(
+      resolveScheduleLimitWatts(
+        profile,
+        txStart,
+        new Date("2026-01-01T02:00:00Z"),
+      ).watts,
+    ).toBe(3000);
+  });
+
+  it("is not in effect before startSchedule", () => {
+    const profile = makeProfile({
+      chargingProfileKind: ChargingProfileKindType.Absolute,
+      startSchedule: "2026-01-01T02:00:00Z",
+    });
+    expect(resolveScheduleLimitWatts(profile, txStart, now).watts).toBe(
+      Infinity,
+    );
+  });
+
+  it("ends an Absolute profile at its duration", () => {
+    const profile = makeProfile({
+      chargingProfileKind: ChargingProfileKindType.Absolute,
+      startSchedule: "2026-01-01T00:00:00Z",
+      duration: 600,
+    });
+    const at = (s: number) => new Date(txStart.getTime() + s * 1000);
+    expect(resolveScheduleLimitWatts(profile, txStart, at(599)).watts).toBe(
+      7000,
+    );
+    expect(resolveScheduleLimitWatts(profile, txStart, at(600)).watts).toBe(
+      Infinity,
+    );
+  });
+
+  it("ends a Relative profile at its duration", () => {
+    const profile = makeProfile({ duration: 600 });
+    expect(
+      resolveScheduleLimitWatts(
+        profile,
+        txStart,
+        new Date(txStart.getTime() + 601_000),
+      ).watts,
+    ).toBe(Infinity);
+  });
+
+  it("cycles a Daily profile from startSchedule and ignores periods past 24 h", () => {
+    const profile = makeProfile({
+      chargingProfileKind: ChargingProfileKindType.Recurring,
+      recurrencyKind: RecurrencyKindType.Daily,
+      startSchedule: "2026-01-01T00:00:00Z",
+      chargingSchedulePeriods: [
+        { startPeriod: 0, limit: 2000 },
+        { startPeriod: 3600 * 2, limit: 5000 },
+        { startPeriod: 86_400 + 3600, limit: 9000 },
+      ],
+    });
+    const at = (iso: string) =>
+      resolveScheduleLimitWatts(profile, txStart, new Date(iso)).watts;
+    expect(at("2026-01-02T01:00:00Z")).toBe(2000); // cycle 2, 1 h in
+    expect(at("2026-01-02T03:00:00Z")).toBe(5000); // cycle 2, 3 h in
+    expect(at("2026-01-01T23:59:59Z")).toBe(5000); // never the 9000 period
+  });
+
+  it("restarts a Recurring duration every cycle", () => {
+    const profile = makeProfile({
+      chargingProfileKind: ChargingProfileKindType.Recurring,
+      recurrencyKind: RecurrencyKindType.Daily,
+      startSchedule: "2026-01-01T00:00:00Z",
+      duration: 3600,
+    });
+    const at = (iso: string) =>
+      resolveScheduleLimitWatts(profile, txStart, new Date(iso)).watts;
+    expect(at("2026-01-02T00:30:00Z")).toBe(7000);
+    expect(at("2026-01-02T02:00:00Z")).toBe(Infinity);
+  });
+});

@@ -26,6 +26,7 @@ related:
   - ../entities/cli.md
   - local-vs-remote-mode.md
   - local-authorization.md
+  - smart-charging.md
 updated: 2026-11-08
 ---
 

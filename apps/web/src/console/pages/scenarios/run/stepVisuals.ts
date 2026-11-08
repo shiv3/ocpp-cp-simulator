@@ -1,6 +1,6 @@
 import type { ComponentType } from "react";
 import { CircleDot, Hourglass, Wrench } from "lucide-react";
-import { CarPlugged, ChargingSession } from "@evicons/react";
+import { CarPlugged, ChargingBolt } from "@evicons/react";
 
 import {
   NODE_FORM_REGISTRY,
@@ -41,7 +41,7 @@ type TileIcon = ComponentType<{
 const CATEGORY_TILES: Record<string, { icon: TileIcon; className: string }> = {
   Status: { icon: CircleDot, className: "bg-cx-emerald/14 text-cx-emerald" },
   Transaction: {
-    icon: ChargingSession,
+    icon: ChargingBolt,
     className: "bg-cx-blue/14 text-cx-blue",
   },
   "Meter & EV": { icon: CarPlugged, className: "bg-cx-amber/14 text-cx-amber" },

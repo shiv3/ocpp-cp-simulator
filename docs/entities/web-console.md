@@ -1259,7 +1259,7 @@ The console draws its icons from two libraries (#823):
 | Sidebar **Charge Points** link, dashboard empty state | `ChargingStation` | the charge points           |
 | Dashboard Hierarchy row head, colored by status       | `ChargingStation` | the charge point            |
 | [Connector card](#connector-card) header              | `ChargingPlug`    | a connector                 |
-| Step tile, **Transaction** category                   | `ChargingSession` | Transaction, Unlock Outcome |
+| Step tile, **Transaction** category                   | `ChargingBolt`    | Transaction, Unlock Outcome |
 | Step tile, **Meter & EV** category                    | `CarPlugged`      | Meter Value, Connector Plug |
 
 Rules:
@@ -1269,9 +1269,14 @@ Rules:
   `ChargingSocket` ("no tethered cable") and the connector-standard icons
   (`PlugType2`, `PlugCcs2`, …) are not used: OCPP data does not tell the
   physical connector, and the console never infers it from a connector id or
-  status.
-- Domain icons are decorative (`aria-hidden`) and always sit beside a text
-  label; a status color on an icon repeats the status written next to it.
+  status. A category tile names every step type of its category, so it takes
+  a general icon: `ChargingBolt` ("charging or electricity in general") for
+  Transaction, which also holds Unlock Outcome, rather than `ChargingSession`
+  ("a live session").
+- Domain icons are decorative (`aria-hidden`) and sit beside a text label.
+  One exception: in the collapsed sidebar the **Charge Points** icon stands
+  alone, and the link keeps its label as accessible name and tooltip. A status
+  color on an icon repeats the status written next to it.
 - Icons draw in `currentColor`, so they follow the light and dark themes.
 - EVIcons draws a 1.5 stroke by default, Lucide 2: pass `strokeWidth={2}`
   where an EVIcons icon sits among Lucide ones. A component that takes either

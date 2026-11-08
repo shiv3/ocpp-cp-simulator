@@ -41,8 +41,8 @@ describe("StepTile", () => {
   });
 
   it.each([
-    [ScenarioNodeType.TRANSACTION, "evicon-charging-session"],
-    [ScenarioNodeType.UNLOCK_OUTCOME, "evicon-charging-session"],
+    [ScenarioNodeType.TRANSACTION, "evicon-charging-bolt"],
+    [ScenarioNodeType.UNLOCK_OUTCOME, "evicon-charging-bolt"],
     [ScenarioNodeType.METER_VALUE, "evicon-car-plugged"],
     [ScenarioNodeType.CONNECTOR_PLUG, "evicon-car-plugged"],
   ])("a %s step shows the EV-domain icon %s", async (type, iconClass) => {

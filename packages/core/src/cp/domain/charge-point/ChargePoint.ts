@@ -56,7 +56,7 @@ import type {
   CloseCause,
   GenerationToken,
   ResolvedNetworkSimConfig,
-} from "../../infrastructure/transport/network-sim";
+} from "../transport/networkSim";
 import type { OcppSecurityProfile } from "@ocpp-cp-simulator/contracts/securityProfile";
 import type { OcppTlsOptions } from "../transport/ConnectionSecurity";
 import { getProtocolProfile } from "../../infrastructure/transport/profile/profiles";

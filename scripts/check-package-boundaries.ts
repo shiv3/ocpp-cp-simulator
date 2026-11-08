@@ -321,7 +321,6 @@ export const LAYER_EXEMPTIONS: readonly KnownViolation[] = [
     "infrastructure/transport/RawFrameSender.ts",
     "infrastructure/transport/SupervisionUrlPool.ts",
     "infrastructure/transport/codec/ocppCallCatalog.ts",
-    "infrastructure/transport/network-sim/index.ts",
     "infrastructure/transport/profile/profiles.ts",
     "infrastructure/transport/soap/dialect.ts",
     "infrastructure/transport/soap/index.ts",

@@ -26,6 +26,20 @@ const UseBehaviorNode: React.FC<NodeProps<Node<UseBehaviorNodeData>>> = ({
       >
         {data.behaviorId}
       </div>
+      {data.mode === "disable" ? (
+        <div className="text-xs text-red-600 dark:text-red-400 mt-1">
+          {t("scenarioNodes.useBehavior.disabled")}
+        </div>
+      ) : data.params && Object.keys(data.params).length > 0 ? (
+        <div
+          className="text-xs font-mono text-secondary mt-1 truncate"
+          title={JSON.stringify(data.params)}
+        >
+          {Object.entries(data.params)
+            .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
+            .join(" ")}
+        </div>
+      ) : null}
       <Handle type="source" position={Position.Bottom} className="w-3 h-3" />
     </div>
   );

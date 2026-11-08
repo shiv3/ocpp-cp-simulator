@@ -4,6 +4,7 @@ import {
   blueprintSchema,
   createManyToolSchema,
   cpBulkParamsSchema,
+  cpScenarioRunParamsSchema,
   behaviorReloadParamsSchema,
   cpBehaviorsSetParamsSchema,
   cpLabelsSetParamsSchema,
@@ -209,6 +210,25 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
     handler: async (args) => {
       try {
         const result = await runRpc(deps, { method: "cp.bulk", params: args });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  // #486: `cp_bulk`'s selector with a scenario template; schema derived from
+  // `cp.scenario.run`'s.
+  mcp.tool("cp_scenario_run", {
+    description:
+      "Run a scenario template on one connector of every charge point carrying all the given label pairs (exact match; at least one pair, {} is refused). Returns the matched ids, the ones that started (with their scenarioId, to follow with scenario_status) and the ones that failed with the reason -- a partial result is normal, not an error. Each charge point is waited for at most 10 s.",
+    inputSchema: cpScenarioRunParamsSchema,
+    handler: async (args) => {
+      try {
+        const result = await runRpc(deps, {
+          method: "cp.scenario.run",
+          params: args,
+        });
         return successResult(result);
       } catch (err) {
         return errorResult(err);

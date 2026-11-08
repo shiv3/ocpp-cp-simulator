@@ -7,6 +7,15 @@ export interface ProfileRemoveCriteria {
   stackLevel?: number;
 }
 
+export interface ApplyChargingProfileOptions {
+  /**
+   * Also replace the profile that has the same `stackLevel` and
+   * `chargingProfilePurpose` (OCPP 1.6 SetChargingProfile, #594). Off for
+   * 2.x, which keeps replacing by id only.
+   */
+  replaceSameSlot?: boolean;
+}
+
 /**
  * `profiles` with `profile` in place of any profile with the same id
  * (§5.16: SetChargingProfile.req with an existing chargingProfileId is an
@@ -16,9 +25,16 @@ export interface ProfileRemoveCriteria {
 export function upsertProfile(
   profiles: readonly ActiveChargingProfile[],
   profile: ActiveChargingProfile,
+  options: ApplyChargingProfileOptions = {},
 ): { profiles: ActiveChargingProfile[]; replaced: boolean } {
   const others = profiles.filter(
-    (p) => p.chargingProfileId !== profile.chargingProfileId,
+    (p) =>
+      p.chargingProfileId !== profile.chargingProfileId &&
+      !(
+        options.replaceSameSlot &&
+        p.stackLevel === profile.stackLevel &&
+        p.chargingProfilePurpose === profile.chargingProfilePurpose
+      ),
   );
   return {
     profiles: [...others, profile],
@@ -65,8 +81,15 @@ export class ChargingProfileStore {
   private profiles: ActiveChargingProfile[] = [];
 
   /** @returns whether a profile with the same id was replaced. */
-  add(profile: ActiveChargingProfile): boolean {
-    const { profiles, replaced } = upsertProfile(this.profiles, profile);
+  add(
+    profile: ActiveChargingProfile,
+    options: ApplyChargingProfileOptions = {},
+  ): boolean {
+    const { profiles, replaced } = upsertProfile(
+      this.profiles,
+      profile,
+      options,
+    );
     this.profiles = profiles;
     return replaced;
   }

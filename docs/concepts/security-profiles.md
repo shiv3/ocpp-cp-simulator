@@ -21,7 +21,7 @@ related:
   - access-control.md
   - scenario-format.md
   - state-persistence.md
-updated: 2026-11-05
+updated: 2026-11-08
 ---
 
 # OCPP 1.6 security profiles
@@ -378,9 +378,16 @@ CALLERROR.
   `SignV2GCertificate` answers `Accepted` (#537). Once the answer is written
   (F06.FR.04) the station generates a new key pair and CSR (A02.FR.02) and
   sends a `SignCertificateRequest` whose `certificateType` names the
-  triggered certificate (A02.FR.03, A02.FR.13). `SignCombinedCertificate`
-  and the 2.1 `SignV2G20Certificate` still answer `NotImplemented`
-  (F06.FR.08).
+  triggered certificate (A02.FR.03, A02.FR.13). On 2.1 the same applies
+  to `SignV2G20Certificate` (`certificateType` `V2G20Certificate`) and to
+  `SignCombinedCertificate` (F06.FR.08, #553): the latter sends one new CSR
+  with `certificateType` omitted, which the 2.1 enum describes as a
+  certificate for both the 15118 connection and the CSMS connection. The
+  simulator has no 15118 stack, so the chain that answers (with or without
+  a `certificateType` in `CertificateSigned`) is stored as its Charging
+  Station certificate. The CSR is the pending one and is resent by the
+  back-off, unchanged. 2.0.1 has no V2G20 certificate, and its
+  `SignCombinedCertificate` still answers `NotImplemented`.
 - The `SignCertificateResponse` status is logged: `Accepted` at INFO, any
   other status at WARN. A `Rejected` answer (A02.FR.12) leaves the CSR
   pending, since A02 has no rule to discard it. An answer to a request
@@ -520,6 +527,15 @@ connected.
 - A station that is not connected then (reconnect back-off, a simulated
   outage, a manual disconnect) does not reconnect for it: it presents the
   renewed certificate at its next connection, on that connection's timing.
+- The renewed certificate is handed to the transport as soon as the chain is
+  stored, as the next connection's certificate, before the `CertificateSigned`
+  answer is written (#564). Only the reconnect of an open connection waits for
+  the answer, so the answer goes out on the connection that received the
+  request. An answer that never reaches the wire (network-simulation latency
+  holds it and the operator disconnects) therefore does not lose the switch:
+  the next connect presents the renewed certificate, once. The reconnect is
+  skipped when the open connection already presents it, and handing the same
+  identity over twice changes nothing, so no connect starts another switch.
 - A connected station first waits, up to 60 s, until no `TransactionEvent`
   awaits its write (network-simulation latency can hold it), its answer or
   its resend (`MessageAttemptInterval`, E13). The close would not lose
@@ -626,6 +642,7 @@ ids are the 2.0.1 and 2.1 Part 2 ones unless marked.
 | V2G certificate as the TLS server one towards the EV                  | Declined: no EV link, no ISO 15118 stack | A00.FR.428, A00.FR.513                       |
 | `V2G20Certificate` chains under `V2GCertificateChain`                 | Implemented on 2.1                       | M03.FR.05                                    |
 | TriggerMessage `SignChargingStationCertificate`, `SignV2GCertificate` | Implemented                              | F06.FR.04, A02.FR.02/03/13                   |
+| TriggerMessage `SignV2G20Certificate`, `SignCombinedCertificate`      | Implemented on 2.1                       | F06.FR.08 (#553)                             |
 | Resend SignCertificate with back-off                                  | Implemented                              | A02.FR.17-19; A02.FR.20 has no case yet      |
 | 2.x `security_event_notification`                                     | Implemented                              | A04.FR.01                                    |
 | Queue SecurityEventNotification while offline                         | Deferred: needs the 2.x queue of #528    | A04.FR.02                                    |
@@ -634,11 +651,8 @@ ids are the 2.0.1 and 2.1 Part 2 ones unless marked.
 | `serialNumber` without leading zeroes                                 | Implemented                              | `CertificateHashDataType.serialNumber` field |
 | 1.6: keep the CSMS root the connection uses                           | Implemented                              | whitepaper M04.FR.06                         |
 
-`SignV2G20Certificate` and `SignCombinedCertificate` still answer
-`NotImplemented` (F06.FR.08), so a 2.1 station only gets a
-`V2G20Certificate` chain for a CSR generated another way. Offline queuing
-(A04.FR.02) is left to a follow-up: the 2.x offline queue of #528 does not
-take `SecurityEventNotification`.
+Offline queuing (A04.FR.02) is left to a follow-up: the 2.x offline queue of
+#528 does not take `SecurityEventNotification`.
 
 ### Persistence
 

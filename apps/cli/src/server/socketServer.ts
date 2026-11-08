@@ -9,7 +9,7 @@ import {
 } from "socket.io";
 
 import { handleJsonCommand } from "../jsonMode";
-import { runCpBulk } from "./cpBulk";
+import { runCpBatch, runCpBulk } from "./cpBulk";
 import type { CLIChargePointService } from "../service";
 import {
   INFLIGHT_CAP,
@@ -26,6 +26,7 @@ import {
   ARRAY_MAX_ITEMS,
   CP_BULK_WAIT_MS,
   type CpBulkResult,
+  type CpScenarioRunResult,
   isRpcMethod,
   redactSimulatorConfig,
   registryCpToWire,
@@ -553,6 +554,8 @@ export async function dispatchRpcCore(
       return reloadBehaviors(deps);
     case "cp.bulk":
       return bulkCps(deps, call.params);
+    case "cp.scenario.run":
+      return runScenarioOnSelector(deps, call.params);
     case "logs.get":
       return getLogs(deps, call.params);
     case "logs.clear":
@@ -738,6 +741,49 @@ async function bulkCps(
     (cpId) => runFacadeOperation(() => service[action](cpId)),
     { waitMs: CP_BULK_WAIT_MS, failureReason: batchFailureReason },
   );
+}
+
+/**
+ * `cp.scenario.run` (#486): `run_scenario_template` on every charge point a
+ * label selector matches, through the same facade call as the per-CP method.
+ * Each entry reports the scenario id its charge point started, to follow with
+ * `scenario_status` / `scenario.runs.list`. Selection, the over-1,000 refusal
+ * and the fan-out are `cp.bulk`'s.
+ */
+async function runScenarioOnSelector(
+  deps: RuntimeSocketIoDeps,
+  params: Params<"cp.scenario.run">,
+): Promise<CpScenarioRunResult> {
+  const service = deps.chargePointService;
+  const cpIds = service.selectChargePointIds(params.labels);
+  if (cpIds.length > ARRAY_MAX_ITEMS) {
+    throw new RpcFailure(
+      "invalid_params",
+      `the selector matches ${cpIds.length} charge points, more than ${ARRAY_MAX_ITEMS}; narrow it`,
+    );
+  }
+  const { once } = params;
+  const batch = await runCpBatch(
+    cpIds,
+    (cpId) =>
+      runFacadeOperation(() =>
+        service.runScenarioTemplate(cpId, params.templateId, {
+          connectorId: params.connector,
+          evSettings: params.evSettings as Partial<EVSettings> | undefined,
+          strict: params.strict,
+          ...(once === undefined ? {} : { once }),
+        }),
+      ),
+    { waitMs: CP_BULK_WAIT_MS, failureReason: batchFailureReason },
+  );
+  return {
+    matched: batch.matched,
+    started: batch.succeeded.map(({ cpId, value }) => ({
+      cpId,
+      scenarioId: value.scenarioId,
+    })),
+    failed: batch.failed,
+  };
 }
 
 /**
@@ -2758,6 +2804,7 @@ function mergeUpdateParams(
     "txUpdatedMeterValues",
     init.txUpdatedMeterValues,
   );
+  preserveWhenMissing(merged, "inboundValidation", init.inboundValidation);
   preserveWhenMissing(merged, "tlsCaPath", init.tlsCaPath);
   preserveWhenMissing(merged, "tlsCertPath", init.tlsCertPath);
   preserveWhenMissing(merged, "tlsKeyPath", init.tlsKeyPath);

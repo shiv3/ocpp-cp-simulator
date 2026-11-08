@@ -361,6 +361,25 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
         },
         {
           "component": {
+            "name": "AuthCtrlr",
+          },
+          "variable": {
+            "name": "MasterPassGroupId",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "string",
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
             "name": "AuthCacheCtrlr",
           },
           "variable": {

@@ -3,6 +3,7 @@ import {
   type DataTransferData,
   type DataTransferResult,
 } from "../../domain/types/DataTransfer";
+import { inboundV2xViolation } from "./codec/validateV2x";
 import { behaviorTapOf } from "./behaviorTap";
 import type {
   DiagnosticsStatus,
@@ -605,7 +606,9 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       const entry = this._inbound.get(action);
       if (entry) {
         if (!entry.validate(payload)) {
-          exchange.replyError("FormatViolation", `Invalid ${action} payload`);
+          // Part 4 §4.3 Table 8: the code names the kind of violation.
+          const violation = inboundV2xViolation(action, payload);
+          exchange.replyError(violation.errorCode, violation.description);
           return;
         }
 

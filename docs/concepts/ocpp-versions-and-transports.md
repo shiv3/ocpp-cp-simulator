@@ -831,6 +831,19 @@ Validation runs after the [inbound gate](call-precedence.md): an inbound policy,
 
 **With SmartCharging not advertised (#594).** `NotImplemented` (no handler) comes before validation, and the `NotSupported` that `SetChargingProfile` answers when `SmartCharging` is missing from `SupportedFeatureProfiles` comes from inside the handler. So on such a station, under `enforce`, an invalid `SetChargingProfile` payload gets the constraint-violation CALLERROR and a valid one gets `NotSupported`.
 
+## Inbound CALL validation on OCPP 2.0.1 / 2.1
+
+An inbound CALL on a 2.x charge point whose payload fails the request schema of its action is answered with a CALLERROR (always on; the `inboundValidation` setting is 1.6J only). The code follows OCPP-J 2.0.1 / 2.1 Part 4 §4.3 Table 8 (#715), using the same keyword mapping as [1.6J](#inbound-call-validation-on-ocpp-j-16), most structural first:
+
+| Code                            | When                                                                        |
+| ------------------------------- | --------------------------------------------------------------------------- |
+| `FormatViolation`               | the payload is not an object, or has a property the schema does not declare |
+| `OccurrenceConstraintViolation` | a required property is missing, or an array has too few or too many items   |
+| `TypeConstraintViolation`       | a property has the wrong JSON type                                          |
+| `PropertyConstraintViolation`   | right type, invalid value: enum, range, length, pattern                     |
+
+The description names the action and the failing properties, cut to 255 characters (Part 4 §4.2.3). The check runs after the [inbound gate](call-precedence.md), so an inbound policy, response override or scenario rule still owns a malformed CALL. Both 2.0.1 and 2.1 stations validate against the 2.0.1 request schemas; a 2.1-only action has its own handler and answers its own way. Code: `codec/validateV2x.ts`, `codec/violationKind.ts` (shared with 1.6J).
+
 ## Inbound CS→CP request validation
 
 An inbound SOAP request on an **OCPP 1.6-S** charge point is validated

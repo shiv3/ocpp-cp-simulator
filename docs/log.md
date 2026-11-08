@@ -2414,3 +2414,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - A `warn` / `enforce` violation is traced: the inbound CALL's record carries `meta.validation = { mode, errorCode, description }` (a structured `Inbound validation:` line on the `WebSocket` log channel, merged by `logLinesToTrace` and held back by the live `--trace-output` writer for one tick). `inboundValidation` is settable: `--inbound-validation`, `cp.create` / `cp.update` (contracts, HTTP, MCP), persisted in `charge_points.inbound_validation` (schema v25). The wiki states the order with the #594 `NotSupported`.
 - Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#inbound-call-validation-on-ocpp-j-16), [Trace format](concepts/trace-format.md#validation-violations-meta), [CLI](entities/cli.md), [Daemon](entities/daemon.md), [Control plane](concepts/control-plane.md), [State persistence](concepts/state-persistence.md).
+
+## [2026-11-08] ingest | OCPP-J error codes for invalid inbound payloads on 2.0.1 / 2.1 (#715)
+
+- A 2.x inbound CALL that fails its request schema is answered `OccurrenceConstraintViolation`, `TypeConstraintViolation`, `PropertyConstraintViolation` or `FormatViolation` (Part 4 §4.3 Table 8) instead of always `FormatViolation`; the keyword mapping is shared with 1.6J.
+- Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#inbound-call-validation-on-ocpp-201--21).

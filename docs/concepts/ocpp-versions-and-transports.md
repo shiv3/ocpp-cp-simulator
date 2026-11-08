@@ -30,7 +30,7 @@ related:
   - operational-timeline.md
   - expert-ocpp-calls.md
   - variable-monitoring.md
-updated: 2026-11-07
+updated: 2026-11-08
 ---
 
 # OCPP versions and transports
@@ -243,8 +243,13 @@ is restored (E11 "Connection Loss During Transaction", #528):
 - **E13 still applies to a replayed event**, with fresh counters: its
   `MessageAttempts[TransactionEvent]` budget and `transactionMessageRejected`
   `attempt` restart at 1, as a 1.6 replay goes through the serial queue
-  anew. A row leaves the queue when its replay is handed to the socket; a
-  close before the answer queues the event again. A replay the socket
+  anew. A row stays in the table (and so survives a crash) until the CSMS
+  answers the replay or the event is discarded after
+  `MessageAttempts[TransactionEvent]` failures (#554); a close before the
+  answer hands the same row back to the queue, in its place, instead of
+  adding a second one. After a restart every remaining row replays again
+  with `offline: true`, so the CSMS may see an event twice and
+  de-duplicates by `transactionId` and `seqNo`. A replay the socket
   refuses while the connection stays up (a network-sim refusal or
   overflow) stays at the head of the queue, with a `warn` (category
   `TRANSACTION`); the replay stops there, and that row, the rows behind it
@@ -280,22 +285,38 @@ is restored (E11 "Connection Loss During Transaction", #528):
   StatusNotifications first, then the replay, as on 1.6
   (`ChargePoint.markBootAccepted` defers the flush to a microtask).
 
+- **Size limit** (#554, E11.FR.04 / E11.FR.05). The simulator key
+  `OfflineQueueMaxEvents` (2.x only, ReadWrite, default `1000`, `0` = no
+  limit; not an OCPP variable, the spec sets none for the size) bounds the
+  TransactionEvents in the queue, rows whose replay awaits an answer
+  included. With the queue full, `Updated` events are dropped and
+  `Started` and `Ended` never are: a queued `Updated` with trigger reason
+  `MeterValuePeriodic` or `MeterValueClock` goes first (oldest first), else
+  the oldest queued `Updated`; if none can go, a new `Updated` is dropped
+  itself, while a new `Started` or `Ended` is queued past the limit with a
+  `warn`. A dropped event leaves a gap in the `seqNo` of its transaction,
+  which is how the CSMS sees the loss. One `warn` (category `TRANSACTION`)
+  at the first drop of an outage, one with the count at the replay. The
+  order of the drops is the simulator's choice; the rule that only
+  `Updated` events go is E11.FR.04/FR.05's.
+- **E14 `GetTransactionStatus`** (#554): `messagesInQueue` is `true` while a
+  TransactionEvent of the asked `transactionId` (of any transaction when the
+  request names none) is still to be delivered: queued, replayed but not
+  yet answered, or live and not yet settled (awaiting its answer or the
+  wait for an E13 resend). It is `false` once the CSMS has answered them all
+  or they were discarded.
+
 Limits:
 
-- The queue has no size cap for TransactionEvents (only the NotifyEvent
-  reports are capped, #538), so the E11.FR.04/FR.05 memory-pressure drop
-  of `Updated` events is not modelled.
 - The replay goes out as a burst: 2.x has no serial queue (see the known
   limitation above), so the station does not wait for one answer before
   sending the next replayed event.
-- A row leaves the table when its replay is handed to the socket, as on
-  1.6. A process crash before the answer loses it, where the E04 failure
-  postcondition keeps an unanswered event in the queue.
+- A live event (never queued) that is written and unanswered when the
+  process crashes is lost: only the E11 queue is durable. A replayed event
+  is durable until answered (#554), as the E04 failure postcondition asks.
 - A restart replays the queued events, but the 2.x `transactionId` and
   `seqNo` counter of a transaction restored after the restart are not
   persisted, so its later events do not continue the replayed ones.
-- `GetTransactionStatus` answers `messagesInQueue: false` whatever the
-  queue holds (E14).
 
 ## Transaction message retries (OCPP-J 1.6)
 

@@ -79,7 +79,7 @@ snapshot, and `connect` is the one place that refuses while off.
 no other request until it is Accepted or Pending; 2.x B01.FR.03 names a "power
 outage" as a reboot reason, and the 2.x BootNotification carries `reason`
 `PowerUp`). Once it is **Accepted**, the station sends, in this order, the
-status fan-out, the queued transaction messages (1.6 §4.7 / errata 3.18; 2.x
+status fan-out (without the connectors whose transaction the recovery ends, below), the queued transaction messages (1.6 §4.7 / errata 3.18; 2.x
 E04 / E12.FR.01-02, marked offline), then the recovery of the interrupted
 transactions:
 
@@ -94,6 +94,12 @@ On 2.1 a requested `resume` is therefore still subject to the timeout, and
 variable `TxCtrlr.TxResumptionTimeout`, which the simulator does not expose as a
 configuration key; it is accepted on every version but only 2.1 reads it.
 
+A connector whose transaction is about to end is left out of the status
+fan-out: the station decided at the loss, so a post-boot `Charging` would
+suggest energy flowed after the restart, and the CSMS hears the recovery's own
+`Finishing` and `Available` first (a resumed transaction is still reported with
+the status it had).
+
 An `end` goes through the normal stop path: after the `StopTransaction` /
 `Ended` the connector reports `Finishing` and `Available`, exactly as for any
 stop. If the boot is not Accepted, the recovery waits for the next Accepted
@@ -103,7 +109,14 @@ boot. A second `power.loss` before then replaces it.
 
 `TxAllowEnergyTransferResumption` (E17.FR.12-13: resuming into
 `SuspendedEVSE`) and `EnergyTransferResumptionRandomRange` (E17.FR.18) are not
-modeled; a resumed transaction returns in the state it had. The 2.x `offline`
+modeled; a resumed transaction returns in the state it had, which is the
+behavior of `TxAllowEnergyTransferResumption = true` (a 2.1 station that was
+`Charging` resumes as `Charging`, never `SuspendedEVSE` or `EVConnected`). Neither
+variable is read from the device model: a CSMS `SetVariables` on
+`TxCtrlr.TxResumptionTimeout` has no effect, only the `power.restore` option does.
+The `powerRestored` timeline event reports the plan made at restore time
+(`recovery`), which equals what the recovery then does: nothing can end or start
+a transaction while the station is off. The 2.x `offline`
 flag on events produced during the outage follows the existing offline queue.
 OCPP-S (SOAP) charge points have no socket to drop: `power.loss` on one is
 refused with `unsupported_transport` and changes nothing.

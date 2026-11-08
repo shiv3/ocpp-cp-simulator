@@ -629,6 +629,7 @@ export class OCPPMessageHandler {
             connector,
             endMeasurands,
             "Transaction.End",
+            {},
             endPoint,
           )
         : [];
@@ -987,8 +988,13 @@ export class OCPPMessageHandler {
     overrides: MeterSampleOverrides = {},
   ): void {
     const messageId = this.generateMessageId();
-    const connector = this._chargePoint.getConnector(connectorId);
-    if (!connector) {
+    // Connector 0 is the station main meter, when the station has one (#617).
+    const mainMeter =
+      connectorId === 0 ? this._chargePoint.mainMeter : undefined;
+    const connector = mainMeter
+      ? undefined
+      : this._chargePoint.getConnector(connectorId);
+    if (!connector && !mainMeter) {
       this._logger.warn(
         `sendMeterValue: connector ${connectorId} not found`,
         LogType.METER_VALUE,
@@ -999,15 +1005,19 @@ export class OCPPMessageHandler {
     const measurands =
       overrides.measurands ??
       this._chargePoint.configuration.meterValuesSampledData();
-    const sampledValue = buildSampledValues(connector, measurands, context);
+    const sampledValue = mainMeter
+      ? mainMeter.sampledValues(measurands, context)
+      : buildSampledValues(connector!, measurands, context);
+    if (mainMeter && sampledValue.length === 0) return;
     // The sender is the tick owner: announce a schedule crossing after the
     // read, so this sample describes the state before the status flip (#327).
-    connector.announceScheduleCrossingNow();
+    connector?.announceScheduleCrossingNow();
     const timestamp = overrides.timestamp ?? new Date(this.clock.now());
     // #315: during a transaction, also send the energy register signed.
     // Clock-aligned samples are not signed (no aligned/fiscal records yet).
-    const transaction = connector.transaction;
+    const transaction = connector?.transaction;
     if (
+      connector &&
       context !== "Sample.Clock" &&
       transactionId !== undefined &&
       transaction &&

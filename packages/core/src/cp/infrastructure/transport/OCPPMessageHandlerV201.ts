@@ -1407,7 +1407,13 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     const connector = this._chargePoint.getConnector(connectorId);
     if (!connector || measurands.length === 0) return [];
     return this.toV201SampledValues(
-      buildSampledValues(connector, measurands, context, point).filter(
+      buildSampledValues(
+        connector,
+        measurands,
+        context,
+        { unitMultiplier: true },
+        point,
+      ).filter(
         (sv) =>
           !(
             sv.measurand === "Energy.Active.Import.Register" &&
@@ -1539,7 +1545,9 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         options.measurands ??
         this._chargePoint.configuration.meterValuesSampledData();
       const context = options.context ?? "Sample.Periodic";
-      const built = buildSampledValues(connector, measurands, context);
+      const built = buildSampledValues(connector, measurands, context, {
+        unitMultiplier: true,
+      });
       // The sender is the tick owner: announce a schedule crossing after the
       // read, so this sample describes the state before the status flip (#327).
       connector.announceScheduleCrossingNow();
@@ -1662,7 +1670,15 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     return sampledValues.map((sv) => ({
       value: Number(sv.value),
       measurand: sv.measurand as V201MeterValuesSampledValue["measurand"],
-      unitOfMeasure: sv.unit ? { unit: sv.unit } : undefined,
+      unitOfMeasure:
+        sv.unit || sv.multiplier !== undefined
+          ? {
+              ...(sv.unit ? { unit: sv.unit } : {}),
+              ...(sv.multiplier !== undefined
+                ? { multiplier: sv.multiplier }
+                : {}),
+            }
+          : undefined,
       ...(sv.context
         ? { context: sv.context as V201MeterValuesSampledValue["context"] }
         : {}),
@@ -1671,6 +1687,11 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       // four indistinguishable samples per measurand (#301).
       ...(sv.phase
         ? { phase: sv.phase as V201MeterValuesSampledValue["phase"] }
+        : {}),
+      // `location` was computed and dropped before the overrides of #616 (and
+      // the main meter's Inlet, #617) could set it.
+      ...(sv.location
+        ? { location: sv.location as V201MeterValuesSampledValue["location"] }
         : {}),
     }));
   }
@@ -1682,8 +1703,13 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     overrides: MeterSampleOverrides = {},
   ): void {
     const messageId = this.generateMessageId();
-    const connector = this._chargePoint.getConnector(connectorId);
-    if (!connector) {
+    // EVSE 0 is the station main meter, when the station has one (#617).
+    const mainMeter =
+      connectorId === 0 ? this._chargePoint.mainMeter : undefined;
+    const connector = mainMeter
+      ? undefined
+      : this._chargePoint.getConnector(connectorId);
+    if (!connector && !mainMeter) {
       this._logger.warn(
         `[v2.0.1] sendMeterValue: connector ${connectorId} not found`,
         LogType.METER_VALUE,
@@ -1694,10 +1720,14 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     const measurands =
       overrides.measurands ??
       this._chargePoint.configuration.meterValuesSampledData();
-    const sampledValues = buildSampledValues(connector, measurands, context);
+    const sampledValues = mainMeter
+      ? mainMeter.sampledValues(measurands, context, { unitMultiplier: true })
+      : buildSampledValues(connector!, measurands, context, {
+          unitMultiplier: true,
+        });
     // The sender is the tick owner: announce a schedule crossing after the
     // read, so this sample describes the state before the status flip (#327).
-    connector.announceScheduleCrossingNow();
+    connector?.announceScheduleCrossingNow();
     const timestamp = overrides.timestamp ?? new Date(this.clock.now());
     let sampledValue = this.toV201SampledValues(sampledValues) as [
       V201MeterValuesSampledValue,
@@ -1705,7 +1735,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     ];
     // #315: during a transaction, sign the energy register too. Done before
     // the empty check, so an empty measurand list still sends the signed one.
-    const transaction = connector.transaction;
+    const transaction = connector?.transaction;
     if (transaction && !transaction.stopTime) {
       sampledValue = this.withSignedEnergy(
         sampledValue,

@@ -1,4 +1,5 @@
 import type { Connector } from "./Connector";
+import { convertUnit, type SampledValueOverride } from "./MeterRealism";
 import type { OperatingPoint } from "./OperatingPoint";
 
 /** Subset of ReadingContext values we actually use (§7.35). */
@@ -33,6 +34,16 @@ export interface SampledValue {
   phase?: string;
   location?: string;
   format?: "Raw" | "SignedData";
+  /** Power of ten of `value` (2.0.1 `unitOfMeasure.multiplier`, #616). Only
+   *  set when the caller asked for it with `unitMultiplier`; 1.6 has none. */
+  multiplier?: number;
+}
+
+/** How the caller's protocol dialect shapes the samples (#616). */
+export interface SampleBuildOptions {
+  /** The dialect carries `unitOfMeasure.multiplier` (OCPP 2.x). Without it a
+   *  configured multiplier is ignored, never half-applied. */
+  unitMultiplier?: boolean;
 }
 
 /**
@@ -59,10 +70,19 @@ export function buildSampledValues(
   connector: Connector,
   measurands: string[],
   context: ReadingContext,
+  options: SampleBuildOptions = {},
   capturedPoint?: OperatingPoint,
 ): SampledValue[] {
   const samples: SampledValue[] = [];
   const meterWh = connector.meterValue;
+  const realism = connector.meterRealism;
+  // The Interval and Export measurands carry real values only on a connector
+  // with meter realism (#615); otherwise they stay the historical zero.
+  const real = realism !== undefined;
+  const interval =
+    real && measurands.some((m) => m.endsWith(".Interval"))
+      ? connector.takeIntervalEnergyWh()
+      : { importWh: 0, exportWh: 0 };
   // Formatting only: every physical quantity below comes from one operating
   // point resolved at one instant (#327), so the samples of a MeterValue
   // describe one instant and the energy register reads the same record. The
@@ -80,6 +100,7 @@ export function buildSampledValues(
     powerFactor,
     boundW,
     activePhases: phases,
+    phaseDetail,
   } = point;
 
   for (const measurand of measurands) {
@@ -94,8 +115,26 @@ export function buildSampledValues(
       powerFactor,
       limitW: boundW,
       limitA,
+      real,
+      exportWh: real ? connector.exportRegisterWh : 0,
+      exportW: point.exportW,
+      exportCurrentA: point.exportCurrentA,
+      intervalImportWh: interval.importWh,
+      intervalExportWh: interval.exportWh,
     });
     if (sample) samples.push(sample);
+    if (phaseDetail && measurand === "Voltage") {
+      const names = ["L1-N", "L2-N", "L3-N"];
+      phaseDetail.voltageV.forEach((v, i) =>
+        samples.push({ ...voltageSample(v, context), phase: names[i] }),
+      );
+      if (phaseDetail.lineToLine) {
+        const ll = ["L1-L2", "L2-L3", "L3-L1"];
+        phaseDetail.lineToLineV.forEach((v, i) =>
+          samples.push({ ...voltageSample(v, context), phase: ll[i] }),
+        );
+      }
+    }
     // Per-phase samples, but only when all three phases are actually in use.
     // A profile restricting a 3-phase connector to fewer would otherwise have
     // the message claim consumption on phases the CSMS excluded — and OCPP's
@@ -120,12 +159,105 @@ export function buildSampledValues(
           // is unchanged.
           limitW: boundW / 3,
           limitA,
+          real,
+          exportWh: 0,
+          exportW: 0,
+          exportCurrentA: 0,
+          intervalImportWh: 0,
+          intervalExportWh: 0,
         });
+        if (perPhase && phaseDetail) {
+          // Independent phases (#615): each leg reads its own quantities.
+          const i = ["L1", "L2", "L3"].indexOf(phase);
+          if (measurand === "Current.Import") {
+            perPhase.value = formatBounded(phaseDetail.currentA[i], limitA, 1);
+          } else if (measurand === "Power.Active.Import") {
+            perPhase.value = formatBounded(phaseDetail.powerW[i], Infinity, 0);
+          }
+        }
         if (perPhase) samples.push({ ...perPhase, phase });
       }
     }
   }
-  return samples;
+  const rules = realism?.sampledValues;
+  return rules && rules.length > 0
+    ? applySampledValueOverrides(samples, rules, options)
+    : samples;
+}
+
+function voltageSample(volts: number, context: ReadingContext): SampledValue {
+  return {
+    value: String(Math.round(volts * 10) / 10),
+    context,
+    measurand: "Voltage",
+    unit: "V",
+  };
+}
+
+/**
+ * Reshape the built samples with a connector's overrides (#616). A rule
+ * matches by measurand (and phase when it names one) and changes the unit
+ * (converting inside a family), location, context, phase or value of what it
+ * matches; the first matching rule wins. Pure: the input is not changed.
+ *
+ * The unit names are those of OCPP 1.6 §7.45 UnitOfMeasure and 2.0.1
+ * UnitOfMeasureType; a `multiplier` (a power of ten, 2.0.1 only) divides the
+ * reported value so that `value × 10^multiplier` is the actual one.
+ */
+export function applySampledValueOverrides(
+  samples: readonly SampledValue[],
+  rules: readonly SampledValueOverride[],
+  options: SampleBuildOptions = {},
+): SampledValue[] {
+  const out: SampledValue[] = [];
+  for (const sample of samples) {
+    const rule = rules.find(
+      (r) =>
+        r.measurand === sample.measurand &&
+        (r.phase === undefined || r.phase === sample.phase),
+    );
+    if (!rule) {
+      out.push(sample);
+      continue;
+    }
+    const { set } = rule;
+    if (set.omit) continue;
+    const next: SampledValue = { ...sample };
+    if (set.value !== undefined) {
+      next.value = set.value;
+    } else {
+      let numeric = Number(sample.value);
+      if (Number.isFinite(numeric)) {
+        if (set.unit !== undefined && sample.unit !== undefined) {
+          const converted = convertUnit(numeric, sample.unit, set.unit);
+          if (converted !== null) {
+            numeric = converted;
+            next.value = trimNumber(numeric, set.decimals ?? 3);
+          }
+        }
+        if (options.unitMultiplier && set.multiplier !== undefined) {
+          numeric = numeric / 10 ** set.multiplier;
+          next.value = trimNumber(numeric, set.decimals ?? 3);
+        } else if (set.decimals !== undefined) {
+          next.value = trimNumber(numeric, set.decimals);
+        }
+      }
+    }
+    if (set.unit !== undefined) next.unit = set.unit;
+    if (options.unitMultiplier && set.multiplier !== undefined) {
+      next.multiplier = set.multiplier;
+    }
+    if (set.location !== undefined) next.location = set.location;
+    if (set.context !== undefined) next.context = set.context as ReadingContext;
+    if (set.phase !== undefined) next.phase = set.phase;
+    out.push(next);
+  }
+  return out;
+}
+
+/** `value` to at most `decimals` decimals, without trailing zeros. */
+function trimNumber(value: number, decimals: number): string {
+  return String(Number(value.toFixed(decimals)));
 }
 
 interface MeasurandInputs {
@@ -142,6 +274,14 @@ interface MeasurandInputs {
   limitW: number;
   /** The same cap in amperes, `Infinity` when uncapped. */
   limitA: number;
+  /** The connector has meter realism: Interval and Export measurands carry
+   *  real values (#615). */
+  real: boolean;
+  exportWh: number;
+  exportW: number;
+  exportCurrentA: number;
+  intervalImportWh: number;
+  intervalExportWh: number;
 }
 
 /**
@@ -168,7 +308,10 @@ function buildSingleSample(
       };
     case "Voltage":
       return {
-        value: String(inputs.voltageV),
+        // A fluctuated voltage is a long float: one decimal, as a meter reads.
+        value: inputs.real
+          ? String(Math.round(inputs.voltageV * 10) / 10)
+          : String(inputs.voltageV),
         context,
         measurand,
         unit: "V",
@@ -237,14 +380,49 @@ function buildSingleSample(
         measurand,
       };
     case "Energy.Active.Import.Interval":
+      if (!inputs.real) return { value: "0", context, measurand };
+      return {
+        value: String(inputs.intervalImportWh),
+        context,
+        measurand,
+        unit: "Wh",
+      };
+    case "Energy.Active.Export.Register":
+      if (!inputs.real) return { value: "0", context, measurand };
+      return {
+        value: String(inputs.exportWh),
+        context,
+        measurand,
+        unit: "Wh",
+      };
+    case "Energy.Active.Export.Interval":
+      if (!inputs.real) return { value: "0", context, measurand };
+      return {
+        value: String(inputs.intervalExportWh),
+        context,
+        measurand,
+        unit: "Wh",
+      };
+    case "Power.Active.Export":
+      if (!inputs.real) return { value: "0", context, measurand };
+      return {
+        value: formatBounded(inputs.exportW, Infinity, 0),
+        context,
+        measurand,
+        unit: "W",
+      };
+    case "Current.Export":
+      if (!inputs.real) return { value: "0", context, measurand };
+      return {
+        value: formatBounded(inputs.exportCurrentA, Infinity, 1),
+        context,
+        measurand,
+        unit: "A",
+      };
     case "Energy.Reactive.Import.Register":
     case "Energy.Reactive.Import.Interval":
-    case "Energy.Active.Export.Register":
-    case "Energy.Active.Export.Interval":
     case "Energy.Reactive.Export.Register":
     case "Energy.Reactive.Export.Interval":
-    case "Current.Export":
-    case "Power.Active.Export":
     case "Power.Reactive.Import":
     case "Power.Reactive.Export":
     case "RPM":

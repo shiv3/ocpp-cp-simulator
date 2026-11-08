@@ -18,6 +18,8 @@ const JSONMODE_COMMAND_IDS = [
   "stop_transaction",
   "transaction_event",
   "ev_disconnected",
+  "ev_plug_in",
+  "ev_ready",
   "set_meter_value",
   "send_meter_value",
   "heartbeat",

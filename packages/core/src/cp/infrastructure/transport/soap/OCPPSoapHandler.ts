@@ -905,8 +905,13 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
     context: ReadingContext = "Sample.Periodic",
     overrides: MeterSampleOverrides = {},
   ): void {
-    const connector = this._chargePoint.getConnector(connectorId);
-    if (!connector) {
+    // Connector 0 is the station main meter, when the station has one (#617).
+    const mainMeter =
+      connectorId === 0 ? this._chargePoint.mainMeter : undefined;
+    const connector = mainMeter
+      ? undefined
+      : this._chargePoint.getConnector(connectorId);
+    if (!connector && !mainMeter) {
       this._logger.warn(
         `sendMeterValue: connector ${connectorId} not found`,
         LogType.METER_VALUE,
@@ -917,10 +922,13 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
     const measurands =
       overrides.measurands ??
       this._chargePoint.configuration.meterValuesSampledData();
-    const sampledValue = buildSampledValues(connector, measurands, context);
+    const sampledValue = mainMeter
+      ? mainMeter.sampledValues(measurands, context)
+      : buildSampledValues(connector!, measurands, context);
+    if (mainMeter && sampledValue.length === 0) return;
     // The sender is the tick owner: announce a schedule crossing after the
     // read, so this sample describes the state before the status flip (#327).
-    connector.announceScheduleCrossingNow();
+    connector?.announceScheduleCrossingNow();
     const payload = this._wireProfile.toMeterValuesRequest(
       connectorId,
       transactionId,

@@ -183,6 +183,7 @@ function bareInputs(
     vehicle: vehicleTermOf(undefined),
     session: { initialSoc: undefined },
     charger: chargerTermOf(undefined),
+    meter: {},
     fault: faultOf(false),
     ...overrides,
   };

@@ -130,6 +130,21 @@ follow-up also ends when the behavior is unloaded or the station is disposed.
 | `RemoteStartTransaction` / `RequestStartTransaction` | `Rejected` for an unknown or inoperative connector; else `Accepted`, with `AuthorizeRemoteTxRequests` honored (an `Authorize` first), and the transaction started while the answer is built. A connector a `remoteStartTrigger` is parked on hands the request to the scenario instead                 | Same rules; the start runs once the answer settled, with `triggerReason: "RemoteStart"`                                                                                                                                                                                                                                                                  | Parking: see [call precedence](../concepts/call-precedence.md#scenario-parking-is-not-a-rule) |
 | `RemoteStopTransaction` / `RequestStopTransaction`   | `Rejected` when no running transaction has that id (a transaction on the `0` placeholder after a CALLERROR does not count); else `Accepted`, connector to `SuspendedEVSE`, stop with reason `Remote` (parked connectors hand it to the scenario)                                                       | `Rejected` for an unknown transaction UUID; else `Accepted` and, once settled, the stop with `triggerReason: "RemoteStop"` (or the scenario hand-over)                                                                                                                                                                                                   | Parking                                                                                       |
 
+A local start follows its own rule ([#181](https://github.com/shiv3/ocpp-cp-simulator/issues/181),
+[#452](https://github.com/shiv3/ocpp-cp-simulator/issues/452),
+[#762](https://github.com/shiv3/ocpp-cp-simulator/issues/762)): with the custom key
+`AuthorizeBeforeLocalStart` on (the default) the transaction starts only after
+the Authorize answer, and any status other than `Accepted` refuses it. A remote start
+does not take this path; it follows `AuthorizeRemoteTxRequests` above. When the
+Authorize gets no answer within 10 seconds while the socket is still up, the station
+warns and proceeds as if `Accepted` (unless a not-valid local-list or cache entry
+for the tag decides first). **This is deliberate and unchanged**: the transaction
+then starts and the CSMS decides in `StartTransaction.conf` / `TransactionEvent`
+response. A CSMS that wants a hard gate must answer Authorize. A disconnect while
+waiting, or a socket that is gone at the timeout, applies the offline rules
+instead. Source: `ChargePoint.authorizeAndWait`,
+`application/engine/behaviors/transaction.ts`.
+
 Version differences that are on purpose and part of the contract: 1.6 `UpdateFirmware` runs a status train
 and 2.x does not, and 1.6 reservation / availability change the connector while the answer is built where
 2.x does it once the answer settled. Both are the behavior of the simulator before the engine existed, and

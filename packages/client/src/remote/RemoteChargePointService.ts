@@ -229,6 +229,7 @@ function toConnectorSnapshot(c: ServerConnectorStatus): ConnectorSnapshot {
       : null,
     transactionTagId: c.transactionTagId ?? null,
     transactionBatteryCapacityKwh: c.transactionBatteryCapacityKwh ?? null,
+    evConnection: c.evConnection,
   };
 }
 
@@ -271,6 +272,7 @@ function toSnapshotConfig(config: WireConfig): ChargePointSnapshot["config"] {
     txUpdatedMeterValues: config.txUpdatedMeterValues,
     inboundValidation: config.inboundValidation,
     capabilityProfile: config.capabilityProfile,
+    ...(config.transport === undefined ? {} : { transport: config.transport }),
     chargerCapabilities: config.chargerCapabilities,
     tlsCaPath: config.tlsCaPath,
     tlsCertPath: config.tlsCertPath,
@@ -1058,6 +1060,18 @@ export class RemoteChargePointService implements ChargePointService {
 
   async evDisconnected(id: string, connectorId: number): Promise<void> {
     await this.runCpRpc(id, "ev_disconnected", { connector: connectorId });
+  }
+
+  async evPlugIn(id: string, connectorId: number): Promise<void> {
+    await this.runCpRpc(id, "ev_plug_in", { connector: connectorId });
+  }
+
+  async evSetReady(
+    id: string,
+    connectorId: number,
+    ready: boolean,
+  ): Promise<void> {
+    await this.runCpRpc(id, "ev_ready", { connector: connectorId, ready });
   }
 
   async sendStatusNotification(

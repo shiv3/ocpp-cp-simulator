@@ -1,5 +1,6 @@
 import {
   maxDeliveryPowerWFor,
+  meterRealismFor,
   type ChargerCapabilities,
 } from "./ChargerCapabilities";
 import type {
@@ -26,6 +27,7 @@ import type {
 import type { LogEntry } from "../../shared/Logger";
 import { Logger, LogType } from "../../shared/Logger";
 import { HeartbeatService } from "../../application/services/HeartbeatService";
+import { MainMeter } from "./MainMeter";
 import { ClockAlignedMeterScheduler } from "./ClockAlignedMeterScheduler";
 import { StateManager } from "../../application/services/StateManager";
 import { OperationalTimeline } from "../../application/services/OperationalTimeline";
@@ -409,6 +411,8 @@ export interface ChargePointTransportOptions {
 
 export class ChargePoint {
   private readonly _connectors: Map<number, Connector> = new Map();
+  /** The station main meter on connector 0 / EVSE 0 (#617); opt-in. */
+  private _mainMeter: MainMeter | undefined;
   // cpId is injected later in the constructor body so the Logger can
   // stamp every JSON line with the CP it belongs to (multi-CP daemons).
   private readonly _logger = new Logger();
@@ -573,7 +577,11 @@ export class ChargePoint {
 
   /** May TriggerMessage request `target` under the capability profile (#618)? */
   isTriggerTargetSupported(target: string): boolean {
-    return isTriggerTargetSupported(this._capabilityProfile, target);
+    return isTriggerTargetSupported(
+      this._capabilityProfile,
+      target,
+      translatesCsmsActionNames(this._ocppVersion),
+    );
   }
 
   /** See {@link InboundValidationMode}. Read on every inbound CALL. */
@@ -661,6 +669,9 @@ export class ChargePoint {
       connector.setMaxDeliveryPowerW(
         maxDeliveryPowerWFor(transportOptions.chargerCapabilities, connectorId),
       );
+      connector.setMeterRealism(
+        meterRealismFor(transportOptions.chargerCapabilities, connectorId),
+      );
       // §5.2: Unavailable set via ChangeAvailability persists across
       // reboots. Restore the persisted value before any event listeners
       // have a chance to react.
@@ -711,6 +722,15 @@ export class ChargePoint {
         }
       });
       this._connectors.set(connectorId, connector);
+    }
+
+    const mainMeterConfig = transportOptions.chargerCapabilities?.mainMeter;
+    if (mainMeterConfig) {
+      this._mainMeter = new MainMeter(
+        mainMeterConfig,
+        () => this._connectors,
+        this._clock,
+      );
     }
 
     if (isSoapVersion(this._ocppVersion)) {
@@ -1482,6 +1502,12 @@ export class ChargePoint {
 
   get connectorNumber(): number {
     return this._connectors.size;
+  }
+
+  /** The station main meter (connector 0 / EVSE 0), `undefined` when the
+   *  station has none (#617). */
+  get mainMeter(): MainMeter | undefined {
+    return this._mainMeter;
   }
 
   get connectors(): Map<number, Connector> {
@@ -2595,7 +2621,13 @@ export class ChargePoint {
   private applyBootAccepted(interval: number): void {
     // Send connector 0 (charge point level) status first
     this.updateConnectorStatus(0, OCPPStatus.Available);
+    // #455: a transaction the power-loss recovery is about to end was already
+    // decided at the loss. Reporting its pre-loss status (Charging) after the
+    // reboot would suggest energy flowed after the restart, so the recovery's
+    // own Finishing / Available is the first thing the CSMS hears (#811).
+    const ending = this.connectorsEndedByPowerRecovery();
     this.connectors.forEach((connector) => {
+      if (ending.has(connector.id)) return;
       // Reset to Available only when this is a fresh post-boot state —
       // i.e. autoReset is enabled AND no transaction is in flight. A
       // connector that was restored from `connector_runtime` with an
@@ -2686,6 +2718,12 @@ export class ChargePoint {
         timestamp,
       });
     });
+    if (this._mainMeter) {
+      this._outbox.sendMeterValue(undefined, 0, "Sample.Clock", {
+        measurands,
+        timestamp,
+      });
+    }
   }
 
   /**
@@ -2978,6 +3016,19 @@ export class ChargePoint {
     return timeout > 0 && outageMs <= timeout * 1000 ? "resume" : "end";
   }
 
+  /** Connectors whose running transaction the pending recovery will end. */
+  private connectorsEndedByPowerRecovery(): ReadonlySet<number> {
+    const pending = this._powerRecovery;
+    const out = new Set<number>();
+    if (!pending || pending.options.transactions !== "end") return out;
+    for (const { connectorId } of pending.loss.transactions) {
+      if (this.getConnector(connectorId)?.hasRunningTransaction) {
+        out.add(connectorId);
+      }
+    }
+    return out;
+  }
+
   /** Run the pending power-loss recovery; the boot is Accepted. */
   private runPowerRecovery(): void {
     const pending = this._powerRecovery;
@@ -3231,8 +3282,9 @@ export class ChargePoint {
    *   triggerReason `EVCommunicationLost` (E10); the StatusNotification
    *   that follows is de-duplicated against it. A second unplug while so
    *   suspended sends nothing.
-   * Without a transaction the connector goes Available, as an unplug did
-   * before.
+   * Without a transaction a Preparing, Finishing or Suspended* connector goes
+   * Available (1.6 §4.9 B1); an Unavailable, Faulted or Reserved one keeps its
+   * status. The EV and cable model (#453) records the cable as unplugged.
    */
   evDisconnected(connectorId: number): void {
     const connector = this.getConnector(connectorId);
@@ -3244,8 +3296,19 @@ export class ChargePoint {
       return;
     }
 
+    connector.markEvUnplugged();
     if (!connector.hasRunningTransaction) {
-      this.updateConnectorStatus(connectorId, OCPPStatus.Available);
+      // Only the states that exist because a cable is plugged in fall back
+      // to Available (#453); an unplug does not lift an Unavailable, Faulted
+      // or Reserved connector, nor repeat an Available.
+      if (
+        connector.status === OCPPStatus.Preparing ||
+        connector.status === OCPPStatus.Finishing ||
+        connector.status === OCPPStatus.SuspendedEV ||
+        connector.status === OCPPStatus.SuspendedEVSE
+      ) {
+        this.updateConnectorStatus(connectorId, OCPPStatus.Available);
+      }
       return;
     }
 
@@ -3284,6 +3347,74 @@ export class ChargePoint {
       });
     }
     this.updateConnectorStatus(connectorId, OCPPStatus.SuspendedEV);
+  }
+
+  /**
+   * A cable was plugged into the connector's EV side (#453). Idempotent: a
+   * second plug-in changes nothing. An idle `Available` connector reports
+   * `Preparing` (1.6 §4.9 transition A2, "insert plug"; 2.x StatusNotification
+   * `Occupied`, the cable plugged in before the driver authorizes), which starts the
+   * ConnectionTimeOut and allows the authorize / start that follows. In any
+   * other state (a running transaction, Unavailable, Faulted, Reserved,
+   * power lost) the cable is recorded and the status stays: the plug-in
+   * does not lift them. Unplug with {@link evDisconnected}.
+   */
+  evPlugIn(connectorId: number): void {
+    const connector = this.getConnector(connectorId);
+    if (!connector || connectorId === 0) {
+      this._logger.error(
+        `Connector ${connectorId} not found`,
+        LogType.TRANSACTION,
+      );
+      return;
+    }
+    if (connector.evConnection !== "disconnected") return;
+    connector.markEvPluggedIn();
+    if (
+      !this.poweredOff &&
+      !connector.hasRunningTransaction &&
+      connector.status === OCPPStatus.Available
+    ) {
+      this.updateConnectorStatus(connectorId, OCPPStatus.Preparing);
+    }
+  }
+
+  /**
+   * The EV asks for energy (`ready`) or stops asking (#453). Needs a
+   * plugged-in cable. With a running transaction, "not ready" suspends the
+   * energy offer and reports `SuspendedEV` (1.6 §4.9 C4; 2.x TransactionEvent
+   * Updated, chargingState `SuspendedEV`, triggerReason `ChargingStateChanged`),
+   * and "ready" resumes `Charging` from that (D3). Without a transaction
+   * the readiness is recorded and nothing is sent. Idempotent.
+   */
+  evSetReady(connectorId: number, ready: boolean): void {
+    const connector = this.getConnector(connectorId);
+    if (!connector || connectorId === 0) {
+      this._logger.error(
+        `Connector ${connectorId} not found`,
+        LogType.TRANSACTION,
+      );
+      return;
+    }
+    if (connector.evConnection === "disconnected") {
+      throw new Error(`Connector ${connectorId} has no EV plugged in`);
+    }
+    connector.markEvReady(ready);
+    if (!connector.hasRunningTransaction) return;
+    if (!ready) {
+      if (connector.status !== OCPPStatus.Charging) return;
+      connector.suspendEnergyOffer();
+      // On 2.x the status write carries the TransactionEvent(Updated).
+      this.updateConnectorStatus(connectorId, OCPPStatus.SuspendedEV);
+      return;
+    }
+    if (
+      connector.status !== OCPPStatus.SuspendedEV ||
+      !connector.energyOfferSuspended
+    ) {
+      return;
+    }
+    this.updateConnectorStatus(connectorId, OCPPStatus.Charging);
   }
 
   cleanTransaction(connectorOrId: Connector | number): void {
@@ -3333,6 +3464,10 @@ export class ChargePoint {
   }
 
   sendMeterValue(connectorId: number, context?: ReadingContext): void {
+    if (connectorId === 0 && this._mainMeter) {
+      this._outbox.sendMeterValue(undefined, 0, context);
+      return;
+    }
     const connector = this.getConnector(connectorId);
     if (!connector) {
       this._logger.error(

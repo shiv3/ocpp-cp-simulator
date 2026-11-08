@@ -78,6 +78,23 @@ const ONE_TO_ONE_V16: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * `action` and its other-version spelling, for the one-to-one pairs only
+ * (`RequestStartTransaction` / `RemoteStartTransaction`). The folded pairs
+ * (`TriggerMessage` / `ExtendedTriggerMessage`, `GetLog` / `GetDiagnostics`,
+ * `UpdateFirmware` / `SignedUpdateFirmware`) stay apart: they are different
+ * messages, and naming one must not switch the other off (#791).
+ */
+export function oneToOneCsmsActionAliases(action: string): readonly string[] {
+  const out = [action];
+  for (const v16 of ONE_TO_ONE_V16) {
+    const v201 = V16_TO_V201_CSMS_ACTION[v16];
+    if (action === v16 && !out.includes(v201)) out.push(v201);
+    if (action === v201 && !out.includes(v16)) out.push(v16);
+  }
+  return out;
+}
+
+/**
  * Like {@link csmsActionMatches}, for the rules of code behaviors, whose
  * contract accepts an action "in either OCPP version's spelling": on 1.6 the
  * 2.x name of a one-to-one pair (`RequestStartTransaction`) names the 1.6

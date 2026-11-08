@@ -132,7 +132,9 @@ export async function handleJsonCommand(
     case "start_transaction": {
       const connectorId = requirePositiveInt(params, "connector");
       const tagId = requireString(params, "tagId");
-      await ops.startTransaction(connectorId, tagId, {
+      // Answers once the transaction exists or the start was refused (#813),
+      // so the next command can follow at once.
+      const outcome = await ops.startTransaction(connectorId, tagId, {
         triggerReason: optionalEnum(
           params,
           "triggerReason",
@@ -144,7 +146,7 @@ export async function handleJsonCommand(
           TRANSACTION_CHARGING_STATES,
         ),
       });
-      return undefined;
+      return outcome;
     }
 
     case "stop_transaction": {
@@ -181,6 +183,19 @@ export async function handleJsonCommand(
 
     case "ev_disconnected": {
       await ops.evDisconnected(requirePositiveInt(params, "connector"));
+      return undefined;
+    }
+
+    case "ev_plug_in": {
+      await ops.evPlugIn(requirePositiveInt(params, "connector"));
+      return undefined;
+    }
+
+    case "ev_ready": {
+      await ops.evSetReady(
+        requirePositiveInt(params, "connector"),
+        requireBoolean(params, "ready"),
+      );
       return undefined;
     }
 

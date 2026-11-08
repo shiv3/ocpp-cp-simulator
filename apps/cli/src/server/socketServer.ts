@@ -2350,6 +2350,20 @@ async function dispatchFacadeCpCommand(
       );
       return handled(undefined);
     }
+    case "ev_plug_in": {
+      const { params } = call;
+      await runFacadeOperation(() =>
+        chargePointService.evPlugIn(id, params.connector),
+      );
+      return handled(undefined);
+    }
+    case "ev_ready": {
+      const { params } = call;
+      await runFacadeOperation(() =>
+        chargePointService.evSetReady(id, params.connector, params.ready),
+      );
+      return handled(undefined);
+    }
     case "set_meter_value": {
       const { params } = call;
       await runFacadeOperation(() =>
@@ -3049,6 +3063,7 @@ function connectorSnapshotToWire(
     transactionStartTime: toIsoStringOrNull(connector.transactionStartTime),
     transactionTagId: connector.transactionTagId,
     transactionBatteryCapacityKwh: connector.transactionBatteryCapacityKwh,
+    evConnection: connector.evConnection,
   };
 }
 

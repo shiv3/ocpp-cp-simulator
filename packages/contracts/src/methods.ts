@@ -399,14 +399,14 @@ const cpParamsBaseSchema = z.object({
         .max(256)
         .optional()
         .describe(
-          "CSMS->CP actions this charge point does not implement (e.g. GetCompositeSchedule, ReserveNow). An inbound CALL for one is answered with CALLERROR NotImplemented. On OCPP 2.x an action also matches its 1.6 spelling",
+          "CSMS->CP actions this charge point does not implement (e.g. GetCompositeSchedule, ReserveNow). An inbound CALL for one is answered with CALLERROR NotImplemented. On OCPP 2.x a one-to-one action also matches its 1.6 spelling (RemoteStartTransaction for RequestStartTransaction); a folded pair does not (ExtendedTriggerMessage does not disable TriggerMessage)",
         ),
       triggerMessageTargets: z
         .array(STR_256)
         .max(256)
         .optional()
         .describe(
-          "The message types TriggerMessage / ExtendedTriggerMessage may request; any other target is answered NotImplemented. [] supports none. Omit to leave the targets as they are",
+          "The message types TriggerMessage / ExtendedTriggerMessage may request; any other target is answered NotImplemented. On OCPP 2.x the 1.6 spellings DiagnosticsStatusNotification and SignChargePointCertificate also stand for LogStatusNotification and SignChargingStationCertificate. [] supports none. Omit to leave the targets as they are",
         ),
     })
     .strict()
@@ -1266,6 +1266,19 @@ export const METHODS = {
   // transaction StopTransactionOnEVSideDisconnect stops or suspends it.
   ev_disconnected: {
     params: z.object({ connector: CONN_POS }),
+    result: ANY,
+  },
+  // #453: a cable was plugged into the EV side. An idle Available connector
+  // reports Preparing; any other state is unchanged. Idempotent.
+  ev_plug_in: {
+    params: z.object({ connector: CONN_POS }),
+    result: ANY,
+  },
+  // #453: the EV asks for energy or stops asking. With a running transaction
+  // "not ready" suspends it (SuspendedEV), "ready" resumes Charging. Needs a
+  // plugged-in cable.
+  ev_ready: {
+    params: z.object({ connector: CONN_POS, ready: z.boolean() }),
     result: ANY,
   },
   set_meter_value: {

@@ -17,6 +17,10 @@ import {
 } from "./chargerCapabilities";
 import { labelsSchema, type Labels } from "./labels";
 import type { OcppSecurityProfile } from "./securityProfile";
+import {
+  transportConfigSchema,
+  type TransportConfigWire,
+} from "./transportConfig";
 
 // ---------------------------------------------------------------------------
 // Redaction helpers
@@ -32,6 +36,15 @@ export function redactUrl(url: string): string {
   } catch {
     return url.replace(/\/\/[^@/]*@/, "//");
   }
+}
+
+/** The transport settings with the proxy URL's `user:pass@` removed (#684). */
+export function redactTransport(
+  transport: TransportConfigWire,
+): TransportConfigWire {
+  const proxy = transport.ws?.proxy;
+  if (proxy === undefined || !transport.ws) return transport;
+  return { ...transport, ws: { ...transport.ws, proxy: redactUrl(proxy) } };
 }
 
 interface FullBootNotification {
@@ -66,6 +79,8 @@ interface FullCpConfig {
   txUpdatedMeterValues?: boolean;
   inboundValidation?: "off" | "warn" | "enforce";
   capabilityProfile?: WireCapabilityProfile;
+  /** Reconnect policy and WebSocket client options (#609, #611). */
+  transport?: TransportConfigWire;
   tlsCaPath?: string;
   tlsCertPath?: string;
   tlsKeyPath?: string;
@@ -119,6 +134,9 @@ export function redactCp(config: FullCpConfig): WireCpConfig {
             : {}),
         }
       : undefined,
+    ...(config.transport
+      ? { transport: redactTransport(config.transport) }
+      : {}),
     tlsCaPath: config.tlsCaPath,
     tlsCertPath: config.tlsCertPath,
     tlsKeyPath: config.tlsKeyPath,
@@ -131,7 +149,15 @@ export function redactCp(config: FullCpConfig): WireCpConfig {
           connectors: config.chargerCapabilities.connectors.map((c) => ({
             connectorId: c.connectorId,
             maxDeliveryPowerW: c.maxDeliveryPowerW,
+            ...(c.meter ? { meter: structuredClone(c.meter) } : {}),
           })),
+          ...(config.chargerCapabilities.mainMeter
+            ? {
+                mainMeter: structuredClone(
+                  config.chargerCapabilities.mainMeter,
+                ),
+              }
+            : {}),
         }
       : undefined,
   };
@@ -178,6 +204,7 @@ export const wireCpConfigSchema = z
         triggerMessageTargets: z.array(STR_256).optional(),
       })
       .optional(),
+    transport: transportConfigSchema.optional(),
     tlsCaPath: STR_64K.optional(),
     tlsCertPath: STR_64K.optional(),
     tlsKeyPath: STR_64K.optional(),
@@ -307,6 +334,10 @@ export const connectorStatusWireSchema = z
     transactionStartTime: z.string().nullable(),
     transactionTagId: z.string().nullable(),
     transactionBatteryCapacityKwh: z.number().nullable(),
+    // #453: absent from a daemon that predates the cable model.
+    evConnection: z
+      .enum(["disconnected", "connected-ready", "connected-not-ready"])
+      .optional(),
   })
   .strict();
 

@@ -134,9 +134,16 @@ export const handleTriggerMessageV201 = (
 
   switch (req.requestedMessage) {
     case "BootNotification":
+      // F06.FR.17: after an Accepted boot the answer is Rejected and nothing
+      // is sent. Pending, Rejected and unanswered boots keep Accepted.
+      if (ctx.bootAccepted?.()) {
+        return {
+          response: { status: "Rejected" } satisfies TriggerMessageResponseV201,
+        };
+      }
       return {
         response: accepted,
-        afterResult: () => ctx.chargePoint.boot(),
+        afterResult: () => ctx.chargePoint.boot("Triggered"),
       };
 
     case "Heartbeat":
@@ -156,13 +163,23 @@ export const handleTriggerMessageV201 = (
       return {
         response: accepted,
         afterResult: () => {
+          // F06.FR.06: the measurands of AlignedDataCtrlr.Measurands, with
+          // context Trigger (ReadingContextEnumType). An empty aligned list
+          // falls back to the sampled list: TC_F_11_CS/TC_F_12_CS expect a
+          // MeterValuesRequest from a station that configured neither.
+          const aligned =
+            ctx.chargePoint.configuration.meterValuesAlignedData();
+          const measurands =
+            aligned.length > 0
+              ? aligned
+              : ctx.chargePoint.configuration.meterValuesSampledData();
+          const send = (id: number): void =>
+            ctx.chargePoint.sendMeterValue(id, "Trigger", { measurands });
           if (connectorId === undefined || connectorId === 0) {
-            for (const id of ctx.chargePoint.connectors.keys()) {
-              ctx.chargePoint.sendMeterValue(id);
-            }
+            for (const id of ctx.chargePoint.connectors.keys()) send(id);
             return;
           }
-          ctx.chargePoint.sendMeterValue(connectorId);
+          send(connectorId);
         },
       };
 

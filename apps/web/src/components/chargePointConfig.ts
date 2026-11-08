@@ -57,7 +57,10 @@ export interface ChargePointConfig {
   securityProfile?: OcppSecurityProfile;
   authorizationKey?: string;
   cpoName?: string;
-  /** #347: no form input; carried so an edit sends back what it read. */
+  /**
+   * #347 / #550: send CP-initiated meter values of an OCPP 2.x transaction as
+   * TransactionEvent(Updated). `undefined` keeps what the charge point has.
+   */
   txUpdatedMeterValues?: boolean;
   tls?: OcppTlsOptions;
   tlsCaPath?: string;

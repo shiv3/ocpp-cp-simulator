@@ -51,7 +51,7 @@ describe("schema migration guard", () => {
 
 describe("runMigrations with file migrations", () => {
   const addColumn: Migration = {
-    version: LEGACY_SCHEMA_VERSION + 1,
+    version: latestVersion(MIGRATIONS) + 1,
     name: "test-column",
     up(db) {
       db.exec("ALTER TABLE charge_points ADD COLUMN test_column TEXT");
@@ -61,8 +61,8 @@ describe("runMigrations with file migrations", () => {
   it("applies a migration newer than the stored version, once", () => {
     const db = BunSqliteDatabase.open(":memory:");
     runMigrations(db);
-    runMigrations(db, [addColumn]);
-    runMigrations(db, [addColumn]);
+    runMigrations(db, [...MIGRATIONS, addColumn]);
+    runMigrations(db, [...MIGRATIONS, addColumn]);
     const cols = db.all<{ name: string }>("PRAGMA table_info(charge_points)");
     expect(cols.some((c) => c.name === "test_column")).toBe(true);
     const row = db.get<{ value: string }>(
@@ -73,7 +73,7 @@ describe("runMigrations with file migrations", () => {
 
   it("refuses a database written by a newer schema", () => {
     const db = BunSqliteDatabase.open(":memory:");
-    runMigrations(db, [addColumn]);
+    runMigrations(db, [...MIGRATIONS, addColumn]);
     expect(() => runMigrations(db)).toThrow();
   });
 });

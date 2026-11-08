@@ -153,7 +153,7 @@ change how the network simulation logs a discard, which rule 4 forbids). A CALL 
 (`incomingCallCompleted`) even when its first write threw and the caller answers again with a CALLERROR.
 
 `InboundCallGate` runs, once for every OCPP version: `incomingCallReceived`; `inboundPolicy`;
-`responseOverride`; `BehaviorRegistry.resolve()`; then the default path (2.x validates its payload here).
+`responseOverride`; the static [capability profile](call-precedence.md#capability-profile) (#618); `BehaviorRegistry.resolve()`; then the default path (2.x validates its payload here).
 Step 4 runs before validation, so a rule can own a malformed CALL. The full order and what wins is in
 [Who answers an inbound CALL](call-precedence.md).
 

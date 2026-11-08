@@ -1055,6 +1055,7 @@ export function parseCreateBody(
     }
     inboundValidation = body.inboundValidation;
   }
+  const capabilityProfile = parseCapabilityProfile(body.capabilityProfile);
   const tlsCaPath =
     typeof body.tlsCaPath === "string" ? body.tlsCaPath : undefined;
   const tlsCertPath =
@@ -1138,6 +1139,7 @@ export function parseCreateBody(
     cpoName,
     ...(txUpdatedMeterValues !== undefined ? { txUpdatedMeterValues } : {}),
     ...(inboundValidation ? { inboundValidation } : {}),
+    ...(capabilityProfile ? { capabilityProfile } : {}),
     tls,
     tlsCaPath,
     tlsCertPath,
@@ -1145,5 +1147,30 @@ export function parseCreateBody(
     ...(bootNotification ? { bootNotification } : {}),
     ...(labels !== undefined ? { labels } : {}),
     ...(behaviors !== undefined ? { behaviors } : {}),
+  };
+}
+
+/** #618: `undefined` when absent, an Error when malformed. */
+function parseCapabilityProfile(
+  value: unknown,
+): ChargePointInitOptions["capabilityProfile"] {
+  if (value === undefined) return undefined;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("capabilityProfile must be an object");
+  }
+  const raw = value as Record<string, unknown>;
+  const names = (key: string): string[] | undefined => {
+    const list = raw[key];
+    if (list === undefined) return undefined;
+    if (!Array.isArray(list) || list.some((v) => typeof v !== "string")) {
+      throw new Error(`capabilityProfile.${key} must be an array of strings`);
+    }
+    return list as string[];
+  };
+  const disabledActions = names("disabledActions");
+  const triggerMessageTargets = names("triggerMessageTargets");
+  return {
+    ...(disabledActions ? { disabledActions } : {}),
+    ...(triggerMessageTargets ? { triggerMessageTargets } : {}),
   };
 }

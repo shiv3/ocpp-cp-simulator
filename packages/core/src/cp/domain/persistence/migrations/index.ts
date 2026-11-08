@@ -1,4 +1,5 @@
 import type { Database } from "../Database";
+import { capabilityProfile } from "./0026-capability-profile";
 
 /**
  * Forward migrations 26 and later, one file per version.
@@ -27,7 +28,7 @@ export interface Migration {
 /** The highest version handled by the legacy branches in `runMigrations`. */
 export const LEGACY_SCHEMA_VERSION = 25;
 
-export const MIGRATIONS: readonly Migration[] = [];
+export const MIGRATIONS: readonly Migration[] = [capabilityProfile];
 
 /** Problems with a migration list; empty when it is well formed. */
 export function validateMigrations(

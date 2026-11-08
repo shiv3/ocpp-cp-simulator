@@ -187,7 +187,9 @@ CREATE TABLE IF NOT EXISTS charge_points (
   tx_updated_meter_values INTEGER,
   -- #593: off | warn | enforce, the OCPP 1.6J inbound CALL validation mode.
   -- NULL (a row older than the column) is the default, warn.
-  inbound_validation TEXT
+  inbound_validation TEXT,
+  -- #618: JSON static capability profile; NULL is none.
+  capability_profile TEXT
 );
 
 -- Per-CP UI / operator state. Currently holds the "desired connected"

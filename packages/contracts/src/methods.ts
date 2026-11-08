@@ -368,6 +368,28 @@ const cpParamsBaseSchema = z.object({
     .describe(
       "OCPP 1.6J only: what to do with an inbound CALL whose payload breaks the request schema. off skips the check, warn (default) logs and traces the violation and runs the handler, enforce answers a CALLERROR (FormationViolation, OccurenceConstraintViolation, PropertyConstraintViolation or TypeConstraintViolation)",
     ),
+  capabilityProfile: z
+    .object({
+      disabledActions: z
+        .array(STR_256)
+        .max(256)
+        .optional()
+        .describe(
+          "CSMS->CP actions this charge point does not implement (e.g. GetCompositeSchedule, ReserveNow). An inbound CALL for one is answered with CALLERROR NotImplemented. On OCPP 2.x an action also matches its 1.6 spelling",
+        ),
+      triggerMessageTargets: z
+        .array(STR_256)
+        .max(256)
+        .optional()
+        .describe(
+          "The message types TriggerMessage / ExtendedTriggerMessage may request; any other target is answered NotImplemented. [] supports none. Omit to leave the targets as they are",
+        ),
+    })
+    .strict()
+    .optional()
+    .describe(
+      "Static capability profile (#618): declare the charge point as lacking features. A scenario inbound policy or response override keeps precedence. Not accepted for the OCPP SOAP versions (their calls bypass the inbound gate). Omit for current behavior",
+    ),
   tlsCaPath: STR_64K.optional().describe(
     "Path to a PEM CA bundle verifying the CSMS certificate. Omit to use the system trust store; passing one REPLACES the default roots",
   ),

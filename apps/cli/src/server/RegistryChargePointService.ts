@@ -1,3 +1,4 @@
+import { isSoapVersion } from "@ocpp-cp-sim/core/cp/domain/types/OcppVersion";
 import * as fs from "fs";
 import type {
   AuthorizationCacheSeedEntry,
@@ -158,12 +159,14 @@ export class RegistryChargePointService implements ChargePointService {
   }
 
   async createChargePoint(params: CreateChargePointParams): Promise<void> {
+    refuseProfileOnSoap(params);
     this.registry.create(toInitOptions(params));
   }
 
   async updateChargePoint(params: CreateChargePointParams): Promise<void> {
     const existing = this.registry.get(params.cpId);
     if (!existing) throw new Error(`cpId not found: ${params.cpId}`);
+    refuseProfileOnSoap(params, existing.getInit().ocppVersion);
     this.registry.update(toInitOptions(params, existing.getInit()));
   }
 
@@ -1120,6 +1123,7 @@ function toInitOptions(
     txUpdatedMeterValues:
       params.txUpdatedMeterValues ?? existing?.txUpdatedMeterValues,
     inboundValidation: params.inboundValidation ?? existing?.inboundValidation,
+    capabilityProfile: params.capabilityProfile ?? existing?.capabilityProfile,
     tls: params.tls ?? existing?.tls,
     tlsCaPath: params.tlsCaPath ?? existing?.tlsCaPath,
     tlsCertPath: params.tlsCertPath ?? existing?.tlsCertPath,
@@ -1184,6 +1188,7 @@ function toChargePointSnapshot(status: ChargePointStatus): ChargePointSnapshot {
           cpoName: status.config.cpoName,
           txUpdatedMeterValues: status.config.txUpdatedMeterValues,
           inboundValidation: status.config.inboundValidation,
+          capabilityProfile: status.config.capabilityProfile,
           tlsCaPath: status.config.tlsCaPath,
           tlsCertPath: status.config.tlsCertPath,
           tlsKeyPath: status.config.tlsKeyPath,
@@ -1391,5 +1396,19 @@ function toChargePointEvent(evt: CLIEvent): ChargePointEvent | null {
       };
     default:
       return null;
+  }
+}
+
+/** #618: OCPP-S (SOAP) dispatch bypasses the inbound gate, so a capability
+ *  profile would be accepted and then ignored; refuse it instead. */
+function refuseProfileOnSoap(
+  params: CreateChargePointParams,
+  existingVersion?: string,
+): void {
+  const version = params.ocppVersion ?? existingVersion ?? "OCPP-1.6J";
+  if (params.capabilityProfile && isSoapVersion(version)) {
+    throw new Error(
+      "capabilityProfile is not supported for the OCPP SOAP versions: their calls do not pass the inbound gate",
+    );
   }
 }

@@ -373,12 +373,14 @@ synchronously, so the late `StartTransaction.conf` — which is still routed to
 `StartTransactionResultHandler`, since the watchdog never evicts the request —
 would find `Connector.transactionId`'s setter with nothing to write to and
 return. The placeholder stop destroys the only handle that could close the CSMS
-session. Preserving it costs **one CALL, not a stream**: the charge point never
-cycles again and runs no meter scheduler (`cp.create` accepts no field that
-enables one and the daemon constructs every charge point with
-`autoMeterValueSetting = null`), and the single frame it still emits is the
-`StatusNotification` produced when the late conf drives the connector to
-`Charging`. Teardown's closing sweep issues the stop instead, outside every
+session. Preserving it costs **a trickle, not a stream**: the charge point never
+cycles again and runs no auto-meter scheduler (`cp.create` accepts no field
+that enables one and the daemon constructs every charge point with
+`autoMeterValueSetting = null`), but a running 1.x transaction is sampled by
+the station every `MeterValueSampleInterval` seconds (default 60, #722), so one
+`MeterValues` a minute (`transactionId` `0` until a late conf assigns the real
+id) also goes out until teardown, besides the `StatusNotification` produced
+when the late conf drives the connector to `Charging`. Teardown's closing sweep issues the stop instead, outside every
 measurement window and late enough that the conf has usually landed.
 
 **A create whose client deadline expired keeps creating.** `cp.create_many`

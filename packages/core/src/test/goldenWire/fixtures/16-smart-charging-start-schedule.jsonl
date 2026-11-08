@@ -17,8 +17,8 @@
 {"d":"CSMS>","k":"call","id":"id-9","a":"SetChargingProfile","p":{"connectorId":1,"csChargingProfiles":{"chargingProfileId":2,"stackLevel":2,"chargingProfilePurpose":"TxDefaultProfile","chargingProfileKind":"Absolute","chargingSchedule":{"chargingRateUnit":"W","startSchedule":"<ts>","duration":3600,"chargingSchedulePeriod":[{"startPeriod":0,"limit":3000}]}}}}
 {"d":"CP>","k":"result","id":"id-9","p":{"status":"Accepted"}}
 {"d":"CSMS>","k":"call","id":"id-10","a":"GetCompositeSchedule","p":{"connectorId":1,"duration":600}}
-{"d":"CP>","k":"result","id":"id-10","p":{"status":"Accepted","connectorId":1,"scheduleStart":"<ts>","chargingSchedule":{"duration":600,"startSchedule":"<ts>","chargingRateUnit":"W","chargingSchedulePeriod":[{"startPeriod":0,"limit":7000}]}}}
+{"d":"CP>","k":"result","id":"id-10","p":{"status":"Accepted","connectorId":1,"scheduleStart":"<ts>","chargingSchedule":{"duration":600,"chargingRateUnit":"W","chargingSchedulePeriod":[{"startPeriod":0,"limit":7000}]}}}
 {"d":"CSMS>","k":"call","id":"id-11","a":"SetChargingProfile","p":{"connectorId":1,"csChargingProfiles":{"chargingProfileId":3,"stackLevel":3,"chargingProfilePurpose":"TxDefaultProfile","chargingProfileKind":"Absolute","chargingSchedule":{"chargingRateUnit":"W","startSchedule":"<ts>","chargingSchedulePeriod":[{"startPeriod":0,"limit":11000},{"startPeriod":100000000,"limit":2000}]}}}}
 {"d":"CP>","k":"result","id":"id-11","p":{"status":"Accepted"}}
 {"d":"CSMS>","k":"call","id":"id-12","a":"GetCompositeSchedule","p":{"connectorId":1,"duration":600}}
-{"d":"CP>","k":"result","id":"id-12","p":{"status":"Accepted","connectorId":1,"scheduleStart":"<ts>","chargingSchedule":{"duration":600,"startSchedule":"<ts>","chargingRateUnit":"W","chargingSchedulePeriod":[{"startPeriod":0,"limit":2000}]}}}
+{"d":"CP>","k":"result","id":"id-12","p":{"status":"Accepted","connectorId":1,"scheduleStart":"<ts>","chargingSchedule":{"duration":600,"chargingRateUnit":"W","chargingSchedulePeriod":[{"startPeriod":0,"limit":2000}]}}}

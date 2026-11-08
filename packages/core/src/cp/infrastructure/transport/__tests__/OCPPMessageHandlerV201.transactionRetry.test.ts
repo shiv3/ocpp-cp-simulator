@@ -330,6 +330,57 @@ describe("OCPP 2.x TransactionEvent CALLERROR retry (#490, E13)", () => {
     expect(types()).toEqual(["Started", "Started", "Updated"]);
   });
 
+  // #565 (E13.FR.04), kept on top of the one-CALL-in-flight rule (#708).
+  it("goes out in order once the final attempt failed", () => {
+    const { socket, tx, handler, discarded } = setup({ attempts: 2 });
+    handler.sendTransactionEvent({
+      phase: "started",
+      transaction: tx,
+      connectorId: 1,
+    });
+    socket.callError(socket.last().messageId);
+    handler.sendTransactionUpdate(1, { triggerReason: "MeterValuePeriodic" });
+    handler.sendTransactionUpdate(1, { triggerReason: "MeterValuePeriodic" });
+    const types = () =>
+      socket
+        .transactionEvents()
+        .map((c) => (c.payload as TransactionEventRequestV201).eventType);
+
+    vi.advanceTimersByTime(60_000);
+    socket.callError(socket.last().messageId);
+
+    expect(discarded).toHaveLength(1);
+    expect(types()).toEqual(["Started", "Started", "Updated"]);
+    socket.callResult(socket.last().messageId, {});
+    expect(types()).toEqual(["Started", "Started", "Updated", "Updated"]);
+  });
+
+  it("is queued with the older events when the socket closes, in creation order", () => {
+    const { socket, tx, handler } = setup();
+    handler.sendTransactionEvent({
+      phase: "started",
+      transaction: tx,
+      connectorId: 1,
+    });
+    socket.callError(socket.last().messageId);
+    handler.sendTransactionUpdate(1, { triggerReason: "MeterValuePeriodic" });
+
+    socket.connected = false;
+    handler.onWebSocketClosed();
+    socket.connected = true;
+    handler.flushPendingQueue();
+
+    const sent = () =>
+      socket
+        .transactionEvents()
+        .map((c) => (c.payload as TransactionEventRequestV201).eventType);
+    // One CALL in flight (#708): the replayed Started first, Updated after
+    // its answer, in creation order.
+    expect(sent()).toEqual(["Started", "Started"]);
+    socket.callResult(socket.last().messageId, {});
+    expect(sent()).toEqual(["Started", "Started", "Updated"]);
+  });
+
   it("reads the settings at each CALLERROR", () => {
     const { socket, tx, handler, cp, discarded } = setup();
     handler.sendTransactionEvent({

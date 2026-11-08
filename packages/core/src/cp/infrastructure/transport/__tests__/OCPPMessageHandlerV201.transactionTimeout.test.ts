@@ -379,6 +379,23 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       expect(vi.getTimerCount()).toBe(0);
     });
 
+    it("releases the hold when the resend is dropped and the earlier transmission has timed out (#565)", () => {
+      const { socket, start, handler } = setup(version);
+      const eventTypes = () =>
+        socket
+          .transactionEvents()
+          .map((c) => (c.payload as TransactionEventRequestV201).eventType);
+      start();
+      // Attempt 1 times out; the resend finds the network-sim queue full.
+      vi.advanceTimersByTime(30_000);
+      socket.outcomes.push("queue_overflow");
+      vi.advanceTimersByTime(60_000);
+      expect(eventTypes()).toEqual(["Started", "Started"]);
+
+      handler.sendTransactionUpdate(1, { triggerReason: "MeterValuePeriodic" });
+      expect(eventTypes()).toEqual(["Started", "Started", "Updated"]);
+    });
+
     it("ignores a CALLRESULT arriving after the message was discarded", () => {
       const { socket, start, discarded, cp } = setup(version, {
         attempts: 1,

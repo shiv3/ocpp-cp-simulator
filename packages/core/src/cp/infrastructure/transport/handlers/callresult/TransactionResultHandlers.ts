@@ -99,8 +99,8 @@ export class StartTransactionResultHandler implements CallResultHandler<StartTra
     } else {
       // Issue #181: §4.8 StopTransactionOnInvalidId — a non-Accepted
       // idTagInfo on StartTransaction.conf either administratively stops
-      // the transaction (DeAuthorized, default) or is logged and the
-      // transaction keeps running, per the key's value.
+      // the transaction (DeAuthorized, default) or keeps it open and stops
+      // only the energy delivery (SuspendedEVSE), per the key's value.
       const status = idTagInfo.status;
       const stopOnInvalid =
         context.chargePoint.configuration.stopTransactionOnInvalidId();
@@ -120,13 +120,21 @@ export class StartTransactionResultHandler implements CallResultHandler<StartTra
         }
         if (stopOnInvalid) {
           context.chargePoint.stopTransaction(connector, "DeAuthorized");
-        } else if (connector.status !== OCPPStatus.Charging) {
-          // StopTransactionOnInvalidId=false: the CP doesn't stop on its
-          // own initiative — the transaction proceeds as if accepted.
-          context.chargePoint.updateConnectorStatus(
-            this.connectorId,
-            OCPPStatus.Charging,
-          );
+        } else {
+          // StopTransactionOnInvalidId=false (errata 3.17, §4.8): the
+          // transaction stays open and only the energy delivery stops. With
+          // a MaxEnergyOnInvalidId allowance the vehicle charges until it is
+          // used up (Charging first), then SuspendedEVSE.
+          if (
+            context.chargePoint.configuration.maxEnergyOnInvalidId() > 0 &&
+            connector.status !== OCPPStatus.Charging
+          ) {
+            context.chargePoint.updateConnectorStatus(
+              this.connectorId,
+              OCPPStatus.Charging,
+            );
+          }
+          context.chargePoint.holdEnergyOnInvalidId(connector);
         }
       }
       context.chargePoint.notifyStartTransactionNotAccepted(

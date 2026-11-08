@@ -6,8 +6,12 @@ import {
   ReservationStatus,
 } from "../../../domain/types/OcppTypes";
 import { isOcpp2Version } from "../../../domain/types/OcppVersion";
+import {
+  reserveNowRefusal,
+  syncUnspecifiedReservations,
+} from "../../../domain/reservation/reservationModel";
 
-interface ReserveNow16Request {
+export interface ReserveNow16Request {
   connectorId: number;
   expiryDate: string;
   idTag: string;
@@ -41,6 +45,27 @@ interface CancelReservationRequest {
  *
  * OCPP 1.6 changes the connector while it builds the answer, 2.x once the
  * answer settled.
+ *
+ * One model for both versions (domain/reservation/reservationModel.ts).
+ * A ReserveNow whose id is already held replaces that reservation (1.6
+ * ReserveNow.req; 2.x H01.FR.02, #710); when the old one sat on another
+ * connector, that connector goes back to `Available`. A reservation that
+ * names no connector (1.6 `connectorId` 0, 2.x no `evseId`) is accepted only
+ * when `ReserveConnectorZeroSupported` / `ReservationCtrlr.NonEvseSpecific`
+ * is true (else `Rejected`, H01.FR.19, #709). It belongs to its idTag /
+ * parentIdTag: only that tag's session consumes it. The station keeps one
+ * connector available for each reservation, so a ReserveNow is `Occupied`
+ * when the free connectors, less those with their own reservation and less
+ * one per reservation without a connector, cannot take it
+ * ({@link reserveNowRefusal}), and for the whole validity of such a
+ * reservation a session of another tag that would take the last such
+ * connector is refused (`startRefusalByReservation`). 1.6 leaves the
+ * connectors' status alone for it; 2.x shows Reserved on the free EVSEs once
+ * the reservations equal them (H01.FR.20). A 2.x EVSE that is not Available
+ * (a plugged cable counts) answers `Occupied` (H01.FR.11).
+ *
+ * A start on a connector reserved for another tag does not happen (1.6
+ * §5.13, H03.FR.09): see transaction.ts.
  */
 export function reservationBehavior(cp: ChargePoint): Behavior {
   return {
@@ -52,54 +77,52 @@ export function reservationBehavior(cp: ChargePoint): Behavior {
         handle: (request) => {
           const two = isOcpp2Version(cp.ocppVersion);
           const req = request as ReserveNow16Request & ReserveNow2Request;
-          const connectorId = two ? (req.evseId ?? 1) : req.connectorId;
-          const connector = cp.getConnector(connectorId);
-          if (!connector) {
-            return { response: { status: ReservationStatus.Rejected } };
-          }
-          if (connector.status === OCPPStatus.Faulted) {
-            return { response: { status: ReservationStatus.Faulted } };
-          }
-          if (
-            connector.status === OCPPStatus.Charging ||
-            connector.transaction
-          ) {
-            return { response: { status: ReservationStatus.Occupied } };
-          }
-          if (connector.availability !== "Operative") {
-            return { response: { status: ReservationStatus.Unavailable } };
-          }
+          const reservationId = two ? req.id : req.reservationId;
+          // 0 names no connector: 1.6 connector 0, 2.x ReserveNow without
+          // `evseId` (a reservation on an unspecified EVSE, H01.FR.04).
+          const connectorId = two ? (req.evseId ?? 0) : req.connectorId;
+          const refusal = reserveNowRefusal(cp, connectorId, reservationId);
+          if (refusal) return { response: { status: refusal } };
 
+          const manager = cp.reservationManager;
+          const replaced = manager.getReservation(reservationId);
           const status = two
-            ? cp.reservationManager.createReservation(
+            ? manager.createReservation(
                 connectorId,
                 new Date(req.expiryDateTime),
                 req.idToken.idToken,
                 req.groupIdToken?.idToken,
-                req.id,
+                reservationId,
+                { replaceExisting: true, shareAnyConnector: true },
               )
-            : cp.reservationManager.createReservation(
+            : manager.createReservation(
                 connectorId,
                 new Date(req.expiryDate),
                 req.idTag,
                 req.parentIdTag,
-                req.reservationId,
+                reservationId,
+                { replaceExisting: true, shareAnyConnector: true },
               );
-          const reserve = (): void =>
-            cp.updateConnectorStatus(connectorId, OCPPStatus.Reserved);
           if (status !== ReservationStatus.Accepted) {
             return { response: { status } };
-          }
-          if (two) {
-            return {
-              response: { status },
-              after: async () => reserve(),
-            };
           }
           // A bare `connector.status = …` fires only the connector-local
           // event and the CSMS never sees the transition, hence
           // `updateConnectorStatus`.
-          reserve();
+          const settle = (): void => {
+            if (replaced && replaced.connectorId !== connectorId) {
+              releaseIfUnreserved(cp, replaced.connectorId);
+            }
+            const connector = cp.getConnector(connectorId);
+            if (connector && connector.status !== OCPPStatus.Reserved) {
+              cp.updateConnectorStatus(connectorId, OCPPStatus.Reserved);
+            }
+            syncUnspecifiedReservations(cp);
+          };
+          if (two) {
+            return { response: { status }, after: async () => settle() };
+          }
+          settle();
           return { response: { status } };
         },
       },
@@ -121,6 +144,7 @@ export function reservationBehavior(cp: ChargePoint): Behavior {
                 OCPPStatus.Available,
               );
             }
+            syncUnspecifiedReservations(cp);
           };
           if (isOcpp2Version(cp.ocppVersion)) {
             return {
@@ -134,4 +158,28 @@ export function reservationBehavior(cp: ChargePoint): Behavior {
       },
     },
   };
+}
+
+/** A connector that shows `Reserved` but no longer holds a reservation goes back to `Available`. */
+function releaseIfUnreserved(cp: ChargePoint, connectorId: number): void {
+  const connector = cp.getConnector(connectorId);
+  if (
+    connector &&
+    connector.status === OCPPStatus.Reserved &&
+    !cp.reservationManager.hasReservationOn(connectorId)
+  ) {
+    cp.updateConnectorStatus(connectorId, OCPPStatus.Available);
+  }
+}
+
+/**
+ * Why an OCPP 1.6 ReserveNow cannot be accepted, or `null` when the station
+ * can take it ({@link reserveNowRefusal}; the station-only checks, so a caller
+ * can run it before it spends an Authorize.req on the idTag).
+ */
+export function reserveNowRefusal16(
+  cp: ChargePoint,
+  req: ReserveNow16Request,
+): ReservationStatus | null {
+  return reserveNowRefusal(cp, req.connectorId, req.reservationId);
 }

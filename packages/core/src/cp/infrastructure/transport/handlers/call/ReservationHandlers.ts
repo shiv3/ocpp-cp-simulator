@@ -5,6 +5,8 @@ import type {
   ReserveNowRequestV16,
   ReserveNowResponseV16,
 } from "@ocpp-cp-simulator/ocpp/index";
+import { LogType } from "../../../../shared/Logger";
+import { reserveNowRefusal16 } from "../../../../application/engine/behaviors/reservation";
 import { defaultBehavior16 } from "./defaultBehavior";
 
 /**
@@ -19,12 +21,30 @@ export class ReserveNowHandler implements CallHandler<
   handle(
     payload: ReserveNowRequestV16,
     context: HandlerContext,
-  ): ReserveNowResponseV16 {
-    return defaultBehavior16(
-      context.chargePoint,
-      "ReserveNow",
-      payload,
-    ) as ReserveNowResponseV16;
+  ): ReserveNowResponseV16 | Promise<ReserveNowResponseV16> {
+    const reserve = (): ReserveNowResponseV16 =>
+      defaultBehavior16(
+        context.chargePoint,
+        "ReserveNow",
+        payload,
+      ) as ReserveNowResponseV16;
+    if (!context.chargePoint.reservationAuthorizeIdTag) return reserve();
+    // Opt-in (#595): the tag the reservation is for must be authorized first,
+    // but not before the station's own checks: a ReserveNow it would refuse
+    // anyway (unknown connector, connector 0 unsupported, no room) costs no
+    // Authorize.req.
+    const refusal = reserveNowRefusal16(context.chargePoint, payload);
+    if (refusal) return { status: refusal } as ReserveNowResponseV16;
+    return context.chargePoint
+      .authorizeAndWait(payload.idTag)
+      .then((status) => {
+        if (status === "Accepted") return reserve();
+        context.logger.warn(
+          `ReserveNow rejected: idTag ${payload.idTag} was not authorized (${status})`,
+          LogType.OCPP,
+        );
+        return { status: "Rejected" } as ReserveNowResponseV16;
+      });
   }
 }
 

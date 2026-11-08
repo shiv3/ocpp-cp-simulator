@@ -142,6 +142,14 @@ export interface ConnectorEvents {
    */
   transactionChange: { transaction: Transaction | null };
   transactionIdChange: { transactionId: number };
+  /**
+   * `restoreRuntimeSnapshot` put a running transaction back after a restart.
+   * `transactionChange` stays silent on a restore (it would persist and
+   * announce what is already stored), so a subscriber that has to act on a
+   * transaction that is running again (the periodic sampler, #722) listens
+   * to this one.
+   */
+  transactionRestored: { transaction: Transaction };
   meterValueChange: { meterValue: number };
   socChange: { soc: number | null };
   availabilityChange: { availability: OCPPAvailability };
@@ -160,6 +168,11 @@ export interface ConnectorEvents {
    *  profile). The ChargePoint listens and flips Charging ↔ SuspendedEVSE
    *  accordingly. `watts` is the new effective cap. */
   scheduleLimitChange: { paused: boolean; watts: number };
+  /** The `MaxEnergyOnInvalidId` allowance of a transaction whose id was not
+   *  accepted is used up: the energy hold has just started (E05.FR.02;
+   *  2.x only, 1.6 errata 3.17 is #736). The ChargePoint moves the connector to
+   *  SuspendedEVSE. */
+  invalidIdEnergyExhausted: Record<string, never>;
 }
 
 interface IncrementStrategyConfig {
@@ -259,9 +272,30 @@ export class Connector {
    */
   private energyOfferSuspendedValue = false;
 
+  /**
+   * The CSMS did not accept the id of the running transaction and
+   * `StopTransactionOnInvalidId` is false: the station keeps the transaction
+   * but stops the energy delivery (2.0.1 E05.FR.02; 2.x only, 1.6 errata 3.17
+   * is #736). While
+   * held, the meter cap is zero and the energy register does not rise; the
+   * scheduler keeps ticking. Unlike {@link energyOfferSuspendedValue} it
+   * survives status changes (SuspendedEVSE). Cleared when a transaction
+   * begins. Not persisted.
+   */
+  private energyHeldForInvalidId = false;
+  /** Register value (Wh) at which the hold starts, from
+   *  `MaxEnergyOnInvalidId` > 0; null when no allowance is running. */
+  private invalidIdHoldAtWh: number | null = null;
+
   private autoConfig: AutoMeterValueConfig = { ...defaultAutoMeterValueConfig };
   private incrementFallback: IncrementStrategyConfig | null = null;
   private onMeterSend: ((connectorId: number) => void) | null = null;
+  /** #722: the ChargePoint sends the periodic MeterValues of this
+   *  connector's transaction (`MeterValueSampleInterval`). */
+  private stationOwnsMeterSampling = false;
+  /** #722: the running meter strategy is the configured one (curve or
+   *  increment fallback), not a scenario's own. */
+  private configuredStrategyRunning = false;
 
   private modeValue: ScenarioMode = "manual";
   private _scenarioManager?: ScenarioManager;
@@ -362,6 +396,11 @@ export class Connector {
     // one waiting for the next session (#301).
     this.socAwaitsNextTransaction = snapshot.socAwaitsNextTransaction ?? false;
     this.lastAutoStartedScenarioKeyValue = snapshot.lastAutoStartedScenarioKey;
+    if (this.transaction && this.hasRunningTransaction) {
+      this.eventsEmitter.emit("transactionRestored", {
+        transaction: this.transaction,
+      });
+    }
   }
 
   /**
@@ -386,8 +425,23 @@ export class Connector {
       connectorId,
       {
         getCurrentValue: () => this.meterValueWh,
-        updateValue: (value) => this.applyMeterValue(value),
+        updateValue: (value) => {
+          // MaxEnergyOnInvalidId (E05.FR.03): the register stops at the
+          // allowance, not one tick past it.
+          const hold = this.invalidIdHoldAtWh;
+          this.applyMeterValue(
+            hold !== null && !this.energyHeldForInvalidId
+              ? Math.min(value, hold)
+              : value,
+          );
+          this.invalidIdAllowanceUsedUp();
+        },
         onSend: (id) => {
+          // #722: once the station owns the periodic sampling, the configured
+          // strategy's ticks move the register without sending.
+          if (this.stationOwnsMeterSampling && this.configuredStrategyRunning) {
+            return;
+          }
           if (this.onMeterSend) {
             this.onMeterSend(id);
           }
@@ -646,7 +700,11 @@ export class Connector {
       schedule: { scheduleLimitW: watts, activePhases },
       vehicle: vehicleTermOf(this._evSettings),
       session: { initialSoc: this.sessionIntent().initialSoc },
-      fault: { energyOfferSuspended: this.energyOfferSuspendedValue },
+      fault: {
+        energyOfferSuspended: this.energyOfferSuspendedValue,
+        // Resolved after the schedule, as before (#301); E05.FR.02.
+        energyHeld: this.invalidIdAllowanceUsedUp(),
+      },
     });
   }
 
@@ -933,6 +991,37 @@ export class Connector {
    */
   get hasRunningTransaction(): boolean {
     return this.transaction !== null && this.transaction.stopTime === null;
+  }
+
+  /** See {@link energyHeldForInvalidId}. */
+  get energyHeld(): boolean {
+    return this.energyHeldForInvalidId;
+  }
+
+  /**
+   * Stop the energy delivery of the running transaction after a non-Accepted
+   * idTokenInfo / idTagInfo with `StopTransactionOnInvalidId=false`. With
+   * `allowanceWh` > 0 that much more energy is delivered first
+   * (`MaxEnergyOnInvalidId`, E05.FR.03); the connector then emits
+   * `invalidIdEnergyExhausted`. Returns true when the hold is already in
+   * force (the caller reports SuspendedEVSE now).
+   */
+  holdEnergyForInvalidId(allowanceWh: number): boolean {
+    if (allowanceWh > 0) {
+      this.invalidIdHoldAtWh ??= this.meterValueWh + allowanceWh;
+      return this.invalidIdAllowanceUsedUp();
+    }
+    this.energyHeldForInvalidId = true;
+    return true;
+  }
+
+  private invalidIdAllowanceUsedUp(): boolean {
+    if (this.energyHeldForInvalidId) return true;
+    if (this.invalidIdHoldAtWh === null) return false;
+    if (this.meterValueWh < this.invalidIdHoldAtWh) return false;
+    this.energyHeldForInvalidId = true;
+    this.eventsEmitter.emit("invalidIdEnergyExhausted", {});
+    return true;
   }
 
   /** See {@link energyOfferSuspendedValue} (#488). */
@@ -1336,6 +1425,8 @@ export class Connector {
     // has no `startTime` to resolve against and so disarms on its own.
     this.lastSchedulePaused = null;
     this.energyOfferSuspendedValue = false;
+    this.energyHeldForInvalidId = false;
+    this.invalidIdHoldAtWh = null;
     this.openSessionSoc(this.txView ?? transaction);
     this.startConfiguredMeterValue();
     this.eventsEmitter.emit("transactionChange", { transaction });
@@ -1439,13 +1530,20 @@ export class Connector {
     this.eventsEmitter.emit("transactionChange", { transaction: null });
   }
 
+  /** #722: see {@link stationOwnsMeterSampling}. */
+  setStationOwnsMeterSampling(owns: boolean): void {
+    this.stationOwnsMeterSampling = owns;
+  }
+
   startManualMeterStrategy(strategy: MeterValueStrategy): void {
+    this.configuredStrategyRunning = false;
     this.meterScheduler.start(strategy);
   }
 
   startConfiguredMeterValue(): void {
     if (!this.transaction) return;
 
+    this.configuredStrategyRunning = true;
     if (this.autoConfig.enabled) {
       this.meterScheduler.start({ kind: "curve", config: this.autoConfig });
       return;
@@ -1464,10 +1562,12 @@ export class Connector {
       return;
     }
 
+    this.configuredStrategyRunning = false;
     this.meterScheduler.stop();
   }
 
   stopAutoMeterValue(): void {
+    this.configuredStrategyRunning = false;
     this.meterScheduler.stop();
   }
 

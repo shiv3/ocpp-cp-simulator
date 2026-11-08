@@ -34,7 +34,9 @@ interface GetLogRequest {
  * OCPP 1.6 Security Whitepaper: the response returns the log's file name,
  * then, once it settled, the station sends LogStatusNotification `Uploading`
  * and, two seconds later, `Uploaded`, both carrying `requestId`. There is no
- * real log to upload, so the sequence is timer-driven.
+ * real log to upload, so the sequence is timer-driven. A request that arrives
+ * while an upload runs cancels it and is answered `AcceptedCanceled`
+ * (whitepaper N01.FR.11): only the new request's `Uploaded` is sent.
  *
  * OCPP 2.x (N01): the request is accepted with a file name and its
  * `requestId` remembered for the LogStatusNotification reports the control
@@ -71,16 +73,29 @@ export function logsBehavior(cp: ChargePoint): Behavior {
             `GetLog request received: logType=${req.logType} requestId=${req.requestId}`,
             LogType.DIAGNOSTICS,
           );
+          // N01.FR.11 / L01.FR.26: a request while an upload runs cancels it
+          // and is answered AcceptedCanceled. Taking the next run number is
+          // the cancellation: the old upload sends nothing more.
+          const cancelsRunning = ctx.state.inFlight === true;
+          const run = Number(ctx.state.run ?? 0) + 1;
+          ctx.state.run = run;
           return {
             response: {
-              status: "Accepted",
+              status: cancelsRunning ? "AcceptedCanceled" : "Accepted",
               filename: `${cp.id}-${req.logType}-${req.requestId}.log`,
             },
             // Status notifications follow the CALLRESULT, never precede it.
             after: async (): Promise<void> => {
-              ctx.notify.logStatus("Uploading", { requestId: req.requestId });
-              await ctx.sleep(ctx.params.uploadMs as number);
-              ctx.notify.logStatus("Uploaded", { requestId: req.requestId });
+              if (ctx.state.run !== run) return;
+              ctx.state.inFlight = true;
+              try {
+                ctx.notify.logStatus("Uploading", { requestId: req.requestId });
+                await ctx.sleep(ctx.params.uploadMs as number);
+                if (ctx.state.run !== run) return;
+                ctx.notify.logStatus("Uploaded", { requestId: req.requestId });
+              } finally {
+                if (ctx.state.run === run) ctx.state.inFlight = false;
+              }
             },
           };
         },

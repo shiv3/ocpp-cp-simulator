@@ -5,6 +5,12 @@ import type {
 } from "@ocpp-cp-simulator/ocpp/index";
 import type { HandlerOutcome } from "../../network-sim/ResponseEffectQueue";
 import { LogType } from "../../../../shared/Logger";
+import { logTriggerStatus, signedFirmwareTriggerStatus } from "./triggerStatus";
+import type {
+  FirmwareStatus,
+  UploadLogStatus,
+} from "../../../../domain/types/FirmwareLogStatus";
+import { isUnknownConnector, sendWhileTriggered } from "./OtherCallHandlers";
 
 /**
  * §2 ExtendedTriggerMessage.req (OCPP 1.6 Security Whitepaper): a superset
@@ -19,6 +25,13 @@ export class ExtendedTriggerMessageHandler implements CallHandler<
   ExtendedTriggerMessageResponseV16
 > {
   handle(
+    payload: ExtendedTriggerMessageRequestV16,
+    context: HandlerContext,
+  ): ExtendedTriggerMessageResponseV16 | HandlerOutcome {
+    return sendWhileTriggered(this.respond(payload, context), context);
+  }
+
+  private respond(
     payload: ExtendedTriggerMessageRequestV16,
     context: HandlerContext,
   ): ExtendedTriggerMessageResponseV16 | HandlerOutcome {
@@ -37,6 +50,18 @@ export class ExtendedTriggerMessageHandler implements CallHandler<
       ) === false
     ) {
       return { status: "NotImplemented" };
+    }
+    // Same rule as TriggerMessage (§5.17): no connector, no message to send.
+    if (
+      (payload.requestedMessage === "StatusNotification" ||
+        payload.requestedMessage === "MeterValues") &&
+      isUnknownConnector(context, payload.connectorId)
+    ) {
+      context.logger.warn(
+        `Extended trigger message ${payload.requestedMessage} rejected: connector ${payload.connectorId} does not exist`,
+        LogType.OCPP,
+      );
+      return { status: "Rejected" };
     }
 
     switch (payload.requestedMessage) {
@@ -120,8 +145,15 @@ export class ExtendedTriggerMessageHandler implements CallHandler<
         const outcome: HandlerOutcome = {
           kind: "handler-outcome",
           payload: response,
-          afterResponseSettled: () =>
-            context.chargePoint.sendLogStatusNotification("Idle"),
+          afterResponseSettled: () => {
+            const { status, requestId } = logTriggerStatus(
+              context.chargePoint.engine.state,
+            );
+            context.chargePoint.sendLogStatusNotification(
+              status as UploadLogStatus,
+              requestId,
+            );
+          },
         };
         return outcome;
       }
@@ -131,8 +163,15 @@ export class ExtendedTriggerMessageHandler implements CallHandler<
         const outcome: HandlerOutcome = {
           kind: "handler-outcome",
           payload: response,
-          afterResponseSettled: () =>
-            context.chargePoint.sendSignedFirmwareStatusNotification("Idle"),
+          afterResponseSettled: () => {
+            const { status, requestId } = signedFirmwareTriggerStatus(
+              context.chargePoint.engine.state,
+            );
+            context.chargePoint.sendSignedFirmwareStatusNotification(
+              status as FirmwareStatus,
+              requestId,
+            );
+          },
         };
         return outcome;
       }

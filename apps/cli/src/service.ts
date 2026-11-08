@@ -717,7 +717,7 @@ export class CLIChargePointService {
       );
     }
 
-    // OCPPWebSocket concatenates wsUrl + cpId, so strip trailing cpId if present.
+    // OCPPWebSocket appends the identity to wsUrl, so strip a trailing cpId if present.
     // OCPP SOAP versions post to the CentralSystemService URL exactly as configured.
     const baseUrl = isSoapVersion(ocppVersion)
       ? centralSystemUrl
@@ -753,6 +753,9 @@ export class CLIChargePointService {
           : {}),
         ...(init.inboundValidation
           ? { inboundValidation: init.inboundValidation }
+          : {}),
+        ...(init.reservationAuthorizeIdTag
+          ? { reservationAuthorizeIdTag: true }
           : {}),
         ...(init.transport?.reconnect
           ? { reconnect: init.transport.reconnect }
@@ -861,6 +864,9 @@ export class CLIChargePointService {
         ...(options.txUpdatedMeterValues ? { txUpdatedMeterValues: true } : {}),
         ...(options.inboundValidation
           ? { inboundValidation: options.inboundValidation }
+          : {}),
+        ...(options.reservationAuthorizeIdTag
+          ? { reservationAuthorizeIdTag: true }
           : {}),
         ...(options.capabilityProfile
           ? { capabilityProfile: options.capabilityProfile }
@@ -1012,6 +1018,7 @@ export class CLIChargePointService {
         cpoName: this._init.cpoName,
         txUpdatedMeterValues: this._init.txUpdatedMeterValues,
         inboundValidation: this._init.inboundValidation,
+        reservationAuthorizeIdTag: this._init.reservationAuthorizeIdTag,
         capabilityProfile: this._init.capabilityProfile,
         tlsCaPath: this._init.tlsCaPath,
         tlsCertPath: this._init.tlsCertPath,
@@ -1035,6 +1042,34 @@ export class CLIChargePointService {
    */
   setLabels(labels: ChargePointInitOptions["labels"]): void {
     this._init = { ...this._init, labels: normalizeLabels(labels) };
+  }
+
+  /**
+   * #724: a ChangeConfiguration of `AuthorizationKey` / `SecurityProfile` (and
+   * the A05.FR.08 fallback) is the station's new credential. `getInit()` follows
+   * it, so a `cp.update` that omits the field keeps the changed value, and
+   * `listener` lets the registry write it to the charge point's row: a restart
+   * rebuilds the station from that row. Not for 2.x, which has no such keys.
+   */
+  onSecurityCredentialsChange(
+    listener: (change: {
+      securityProfile?: 0 | 1 | 2 | 3;
+      authorizationKey?: string;
+    }) => void,
+  ): () => void {
+    if (this._init.ocppVersion?.startsWith("OCPP-2")) return () => {};
+    return this._chargePoint.configuration.onChange((key, value) => {
+      if (key === "AuthorizationKey" && typeof value === "string") {
+        this._init = { ...this._init, authorizationKey: value };
+        listener({ authorizationKey: value });
+      } else if (
+        key === "SecurityProfile" &&
+        (value === 0 || value === 1 || value === 2 || value === 3)
+      ) {
+        this._init = { ...this._init, securityProfile: value };
+        listener({ securityProfile: value });
+      }
+    });
   }
 
   /** Original init the CP was constructed from. Used by socket.io control
@@ -2629,10 +2664,10 @@ export class CLIChargePointService {
       this.notifySessionSettled({ connectorId, scenarioId: null });
     }
 
+    // Only the reservation made for this connector: a connector-0 one is
+    // nobody's session to clear (#595).
     const reservation =
-      this._chargePoint.reservationManager.getReservationForConnector(
-        connectorId,
-      );
+      this._chargePoint.reservationManager.reservationOn(connectorId);
     if (reservation) {
       this._chargePoint.reservationManager.cancelReservation(
         reservation.reservationId,
@@ -3709,7 +3744,8 @@ export class CLIChargePointService {
 }
 
 /**
- * OCPPWebSocket concatenates `${wsUrl}${cpId}` when connecting.
+ * OCPPWebSocket appends the percent-encoded identity as a path segment when
+ * connecting (`wsUrlWithBasic.ts`, OCPP-J 1.6 §3.1.1).
  * If the user provides a full URL like `wss://host/chargepoint/CP001`,
  * strip the trailing cpId so it doesn't get doubled.
  * If the URL is already a base URL like `wss://host/chargepoint/`, use as-is.

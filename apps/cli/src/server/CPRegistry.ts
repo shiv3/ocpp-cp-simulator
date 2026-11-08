@@ -101,6 +101,7 @@ interface ChargePointRow {
   behavior_params: string | null;
   tx_updated_meter_values: number | null;
   inbound_validation: string | null;
+  reservation_authorize_id_tag: number | null;
   capability_profile: string | null;
   transport_options: string | null;
 }
@@ -261,7 +262,8 @@ export class CPRegistry {
         "security_profile, authorization_key, cpo_name, " +
         "tls_ca_path, tls_cert_path, tls_key_path, " +
         "basic_auth, boot_notif, created_at, labels, behaviors, behavior_params, tx_updated_meter_values, " +
-        "inbound_validation, capability_profile, transport_options " +
+        "inbound_validation, capability_profile, transport_options, " +
+        "reservation_authorize_id_tag " +
         "FROM charge_points ORDER BY created_at ASC",
     );
     const restored: string[] = [];
@@ -341,6 +343,10 @@ export class CPRegistry {
         row.inbound_validation === "warn" ||
         row.inbound_validation === "enforce"
           ? { inboundValidation: row.inbound_validation }
+          : {}),
+        // #595: NULL — off, or a row older than the column — restores as off.
+        ...(row.reservation_authorize_id_tag === 1
+          ? { reservationAuthorizeIdTag: true }
           : {}),
         // #609: NULL restores the built-in behaviour.
         ...restoreTransport(row),
@@ -915,10 +921,16 @@ export class CPRegistry {
     const unsubSettled = svc.onSessionSettled((info) =>
       this.notifySessionSettled(init.cpId, info),
     );
+    // #724: the credentials the CSMS changed with ChangeConfiguration are the
+    // row's too, so a restart does not bring the creation-time ones back.
+    const unsubCredentials = svc.onSecurityCredentialsChange((change) =>
+      this.persistSecurityCredentials(init.cpId, change),
+    );
     this.services.set(init.cpId, svc);
     this.unsubscribes.set(init.cpId, () => {
       unsub();
       unsubSettled();
+      unsubCredentials();
     });
     if (engineState) svc.restoreEngineState(engineState);
     try {
@@ -940,6 +952,25 @@ export class CPRegistry {
     // create(), update() and restoreFromDatabase() all land here.
     this.notifyInitChange();
     return svc;
+  }
+
+  private persistSecurityCredentials(
+    cpId: string,
+    change: { securityProfile?: number; authorizationKey?: string },
+  ): void {
+    if (!this.database) return;
+    if (change.authorizationKey !== undefined) {
+      this.database.run(
+        "UPDATE charge_points SET authorization_key = ? WHERE cp_id = ?",
+        [change.authorizationKey, cpId],
+      );
+    }
+    if (change.securityProfile !== undefined) {
+      this.database.run(
+        "UPDATE charge_points SET security_profile = ? WHERE cp_id = ?",
+        [change.securityProfile, cpId],
+      );
+    }
   }
 
   /**
@@ -1091,6 +1122,10 @@ export class CPRegistry {
         [
           "transport_options",
           init.transport ? JSON.stringify(init.transport) : null,
+        ],
+        [
+          "reservation_authorize_id_tag",
+          init.reservationAuthorizeIdTag ? 1 : null,
         ],
       ],
       ["cp_id"],
@@ -1489,6 +1524,8 @@ function preserveOmittedInit(
     txUpdatedMeterValues:
       next.txUpdatedMeterValues ?? existing.txUpdatedMeterValues,
     inboundValidation: next.inboundValidation ?? existing.inboundValidation,
+    reservationAuthorizeIdTag:
+      next.reservationAuthorizeIdTag ?? existing.reservationAuthorizeIdTag,
     transport: next.transport ?? existing.transport,
     capabilityProfile: next.capabilityProfile ?? existing.capabilityProfile,
   };

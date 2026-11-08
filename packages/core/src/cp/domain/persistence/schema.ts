@@ -195,7 +195,10 @@ CREATE TABLE IF NOT EXISTS charge_points (
   transport_options TEXT,
   -- #654: a JSON object of behavior id to params object; NULL (a row older
   -- than the column) is no params, every behavior runs with its defaults.
-  behavior_params TEXT
+  behavior_params TEXT,
+  -- #595: 1 when OCPP 1.6 ReserveNow authorizes the reservation's idTag first;
+  -- NULL (a row older than the column) is off.
+  reservation_authorize_id_tag INTEGER
 );
 
 -- Per-CP UI / operator state. Currently holds the "desired connected"

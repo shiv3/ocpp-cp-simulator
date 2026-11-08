@@ -1,7 +1,7 @@
 ---
 title: MCP endpoint (`POST /mcp`)
 type: entity
-summary: Stateless, tools-only Model Context Protocol endpoint served by the daemon so MCP clients such as Claude Code can drive the simulator; 35 curated tools + 3 network-sim tools + a generic escape hatch.
+summary: Stateless, tools-only Model Context Protocol endpoint served by the daemon so MCP clients such as Claude Code can drive the simulator; curated tools + network-sim tools + power-loss tools + a generic escape hatch.
 sources:
   - apps/cli/src/server/mcp/tools.ts
   - apps/cli/src/server/__tests__/mcp.test.ts
@@ -11,6 +11,7 @@ related:
   - daemon.md
   - ../concepts/control-plane.md
   - ../concepts/network-simulation.md
+  - ../concepts/power-loss.md
   - ../analyses/driving-from-an-ai-agent.md
   - ../concepts/expert-ocpp-calls.md
   - ../concepts/vehicle-profiles.md
@@ -42,7 +43,7 @@ claude mcp add --transport http ocpp-sim http://127.0.0.1:9700/mcp \
 
 ## Curated Tools
 
-The endpoint exposes 35 curated tools wrapping the daemon's
+The endpoint exposes the curated tools listed below, wrapping the daemon's
 [RPC methods](../concepts/control-plane.md):
 
 | Tool                          | RPC Method                    | Params                                                                                                                                                                                                                                                                                                                                                                               |
@@ -102,7 +103,7 @@ they can call.
 
 ### Network-simulation tools
 
-Three further tools wrap the [network simulation](../concepts/network-simulation.md)
+Further tools wrap the [network simulation](../concepts/network-simulation.md)
 RPC methods:
 
 | Tool                             | RPC Method(s)                                    | Params                                                                                        |
@@ -110,6 +111,10 @@ RPC methods:
 | `network_sim_get`                | `network_sim.global.get`, `network_sim.cp.get`   | `cpId?` — if omitted, returns global config; if set, returns per-CP config and resolved state |
 | `network_sim_set`                | `network_sim.global.save`, `network_sim.cp.save` | `cpId?`, `config` — if omitted, saves global config; if set, saves per-CP config              |
 | `network_sim_trigger_disconnect` | `network_sim.disconnect.trigger`                 | `cpId`, `ruleId` — triggers a manual-disconnect rule for the CP                               |
+
+Two more tools simulate a [power loss](../concepts/power-loss.md) (#455): `power_loss`
+(`cpId`, `restoreAfterMs?`, `transactions?`, `txResumptionTimeoutSeconds?`) wraps `power.loss`, `power_restore`
+(`cpId`, `transactions?`, `txResumptionTimeoutSeconds?`) wraps `power.restore`.
 
 ## Generic Escape Hatch
 

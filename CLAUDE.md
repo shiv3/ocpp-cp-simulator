@@ -14,21 +14,24 @@ every page is catalogued in [`docs/index.md`](docs/index.md).
 | Layer       | Location                                                                                                                                                                                                                                                                                                                                                                              | Rule                                                                                                                                                                          |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Raw sources | `packages/`, `apps/`, `src-tauri/`, `e2e/`, `scripts/`, `packages/core/schema/scenario.schema.json`, `packages/ocpp/vendor/ocpp-schemas/`, `docs/examples/`, `docs/images/`, READMEs beside code (`e2e/README.md`, `scripts/steve-verify/README.md`, `scripts/poc/README.md`, `packages/core/src/utils/scenarios/README.md`, `examples/testcontainers-java/README.md`), GitHub issues | Ground truth. Wiki work reads them and never rewrites them. Code changes go through normal engineering PRs. `packages/ocpp/vendor/ocpp-schemas/` is verbatim-only (CC BY-ND). |
-| Wiki        | `docs/` — `overview.md`, `index.md`, `log.md`, `conventions.md`, `entities/`, `concepts/`, `sources/`, `analyses/`                                                                                                                                                                                                                                                                    | You own it: create, update, cross-link, keep consistent.                                                                                                                      |
+| Wiki        | `docs/` — `overview.md`, `index.md`, `conventions.md`, `entities/`, `concepts/`, `sources/`, `analyses/`                                                                                                                                                                                                                                                                              | You own it: create, update, cross-link, keep consistent.                                                                                                                      |
 | Schema      | This file                                                                                                                                                                                                                                                                                                                                                                             | Co-evolved with the humans; update it when a workflow changes.                                                                                                                |
 
 `README.md` is the GitHub landing page (quick start + links into the wiki), not
 a wiki page. Keep it short; deep content belongs in `docs/`. `CONTRIBUTING.md`
-(checks, wiki update rule, issue / PR triage convention) is not a wiki page
-either; keep it in sync with `.github/release-drafter.yml`.
+(checks, wiki update rule, contribution terms, issue / PR triage convention)
+is not a wiki page either; keep it in sync with `.github/release-drafter.yml`
+and with the checklist in `.github/pull_request_template.md`.
+`CODE_OF_CONDUCT.md` and the issue forms in `.github/ISSUE_TEMPLATE/` are
+likewise outside the wiki.
 
 ## Layout
 
 ```
 docs/
 ├── overview.md        # master summary — what the project is, how pieces fit
-├── index.md           # catalog of every page with one-line summary (update on every change)
-├── log.md             # append-only operations log
+├── index.md           # catalog of every page with one-line summary (update when a page is added, renamed or removed)
+├── log.md             # ARCHIVE, frozen 2026-11-08 (history is git: `git log -- docs/`)
 ├── conventions.md     # page format, naming, linking rules
 ├── entities/          # shipped components + external systems (cli, daemon, web-console, docker-image, mcp-endpoint, analyze, scenario-templates, csms-peers, ocpp-debugkit, …)
 ├── concepts/          # formats / protocols / mechanisms (control-plane, scenario-format, trace-format, state-persistence, log-format, access-control, network-simulation, ocpp-versions-and-transports, security-profiles, local-vs-remote-mode)
@@ -62,7 +65,8 @@ external document the maintainer hands you.
    both ways, and ensure at least one inbound link.
 5. Keep paths in code comments / `--help` text / `packages/core/schema/scenario.schema.json`
    that point into `docs/` working (`grep -rn "docs/" packages apps docker-compose.yml Dockerfile examples`).
-6. Append a `log.md` entry: `## [YYYY-MM-DD] ingest | <title>` + pages touched.
+6. Record the change in the commit message and the PR description (which pages
+   changed and why). There is no log file: `docs/log.md` is a frozen archive.
 7. Bump `updated:` on each page you changed.
 
 Do the ingest in the **same PR** as the code change whenever you are the one
@@ -76,7 +80,7 @@ making the code change.
    trust the code, answer from the code, and file a lint fix.
 3. If the answer required synthesis worth keeping (a comparison, a decision
    rationale, a migration path), file it as an `analyses/` page, link it from
-   `index.md`, and log it as `query | <title>`.
+   `index.md`, and say so in the commit message.
 
 ### Lint — periodic health check
 
@@ -127,19 +131,25 @@ Run when asked, after a batch of ingests, or when something looks stale:
 - **Missing pages** — a concept mentioned on three or more pages without its
   own page probably deserves one.
 - **Duplication** — the same table on two pages: keep one, link the other.
-- Log the pass as `lint | <what was checked / fixed>`.
+- Record the pass in the commit message and PR description (what was checked /
+  fixed).
 
 ## Conventions that matter most (summary of `docs/conventions.md`)
 
 - English; precise about defaults, error codes, exit codes and "never / always"
   guarantees — those sentences are the contract.
 - Relative markdown links; repo-relative links to raw sources; issue numbers
-  for provenance (index in `docs/sources/github-issues.md`).
+  for provenance, cited inline on the page that states the behaviour
+  (`docs/sources/github-issues.md` is a frozen archive; find newer provenance
+  with `git log --grep '#N'`).
 - One canonical table per fact. CP command methods live in
   `concepts/control-plane.md`; CLI flags in `entities/cli.md`; daemon-only
   flags are repeated in `entities/daemon.md` deliberately (that page is the
   operator's entry point) — keep both in sync.
-- `index.md` and `log.md` change in the same commit as the pages.
+- `index.md` changes in the same commit when a page is added, renamed or removed.
+- Branches are named `<type>/<issue number>-<slug>`; the PR body closes or
+  references its issues (`Closes #N` / `Refs #N`) and lists the wiki pages
+  changed and why.
 
 ## Human ↔ LLM division of labour
 

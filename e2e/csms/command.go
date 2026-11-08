@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -43,9 +44,12 @@ type commandResponse struct {
 	Error  string `json:"error,omitempty"`
 }
 
-func newControlHandler(version string, reg *registry) http.Handler {
+func newControlHandler(version string, reg *registry, beh *Behavior) http.Handler {
 	h := &controlHandler{version: version, reg: reg}
+	seq := newSequencer(h.execute)
 	mux := http.NewServeMux()
+	mux.HandleFunc("/behavior", beh.handleBehavior)
+	mux.HandleFunc("/sequence", seq.handle)
 	mux.HandleFunc("/healthz", h.healthz)
 	mux.HandleFunc("/command", h.command)
 	return mux
@@ -71,35 +75,42 @@ func (h *controlHandler) command(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	result, status, err := h.execute(r.Context(), body)
+	if err != nil {
+		writeCommandError(w, status, err.Error())
+		return
+	}
+	writeCommandJSON(w, http.StatusOK, commandResponse{OK: true, Result: result})
+}
+
+// execute runs one CSMS->CP command given as the JSON body of POST /command.
+// The status is the HTTP status to answer when err is not nil: a command the
+// CP answers with an error is a 200 with ok:false, like any other outcome.
+func (h *controlHandler) execute(parent context.Context, body []byte) (any, int, error) {
 	var base commandEnvelope
 	if err := json.Unmarshal(body, &base); err != nil {
-		writeCommandError(w, http.StatusBadRequest, fmt.Sprintf("decode command: %v", err))
-		return
+		return nil, http.StatusBadRequest, fmt.Errorf("decode command: %v", err)
 	}
 	if base.CPID == "" {
-		writeCommandError(w, http.StatusBadRequest, "cpId is required")
-		return
+		return nil, http.StatusBadRequest, errors.New("cpId is required")
 	}
 	if base.Action == "" {
-		writeCommandError(w, http.StatusBadRequest, "action is required")
-		return
+		return nil, http.StatusBadRequest, errors.New("action is required")
 	}
 
 	conn, ok := h.reg.get(base.CPID)
 	if !ok {
-		writeCommandError(w, http.StatusNotFound, fmt.Sprintf("charge point %q is not connected", base.CPID))
-		return
+		return nil, http.StatusNotFound, fmt.Errorf("charge point %q is not connected", base.CPID)
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 	defer cancel()
 
 	result, err := h.dispatch(ctx, conn, base.Action, body)
 	if err != nil {
-		writeCommandError(w, http.StatusOK, err.Error())
-		return
+		return nil, http.StatusOK, err
 	}
-	writeCommandJSON(w, http.StatusOK, commandResponse{OK: true, Result: result})
+	return result, http.StatusOK, nil
 }
 
 func (h *controlHandler) dispatch(ctx context.Context, conn *csms.Conn, action string, body []byte) (any, error) {

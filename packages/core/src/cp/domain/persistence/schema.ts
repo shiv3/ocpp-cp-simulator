@@ -7,13 +7,13 @@
  * those shapes already evolve with OCPP changes, so packing them as JSON
  * keeps the schema stable while the data inside drifts.
  *
- * Migration policy: bump SCHEMA_VERSION and add a branch in `runMigrations`
- * when the columns must change. There are no migrations to write today
- * because the simulator has no prior SQLite users — the previous
- * persistence layer was localStorage and we explicitly do NOT carry it
- * forward (see plan).
+ * Migration policy: versions 3..25 are the legacy `if (stored < N)` branches
+ * in `runMigrations`. A new migration is a file in `migrations/` appended to
+ * `MIGRATIONS` (see `migrations/index.ts`); SCHEMA_VERSION follows the last
+ * entry, so it is never edited by hand. The previous persistence layer was
+ * localStorage and we explicitly do NOT carry it forward.
  */
-export const SCHEMA_VERSION = 26;
+export const SCHEMA_VERSION = latestVersion(MIGRATIONS);
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -404,6 +404,7 @@ export function perChargePointTables(): readonly string[] {
 }
 
 import type { Database } from "./Database";
+import { latestVersion, MIGRATIONS, type Migration } from "./migrations";
 import {
   LEGACY_STARTUP_SOURCE_PREFIX,
   legacyGeneratedBaseId,
@@ -443,7 +444,11 @@ export class SchemaVersionMismatchError extends Error {
  *     Older simulator running against a DB the newer simulator wrote;
  *     bail out instead of corrupting it.
  */
-export function runMigrations(db: Database): void {
+export function runMigrations(
+  db: Database,
+  migrations: readonly Migration[] = MIGRATIONS,
+): void {
+  const targetVersion = latestVersion(migrations);
   // schema_meta itself has to exist before we can read the stored
   // version, so run the table-create pass first. It's a no-op on an
   // already-migrated DB.
@@ -453,8 +458,8 @@ export function runMigrations(db: Database): void {
     "SELECT value FROM schema_meta WHERE key = 'version'",
   );
   const stored = row ? Number(row.value) : 0;
-  if (Number.isFinite(stored) && stored > SCHEMA_VERSION) {
-    throw new SchemaVersionMismatchError(stored, SCHEMA_VERSION);
+  if (Number.isFinite(stored) && stored > targetVersion) {
+    throw new SchemaVersionMismatchError(stored, targetVersion);
   }
 
   // v2 → v3: add `scenario_position_json` column to `connector_runtime`
@@ -753,20 +758,14 @@ export function runMigrations(db: Database): void {
     }
   }
 
-  // v25 → v26 (#618): `charge_points.capability_profile` (JSON). Existing
-  // rows stay NULL, which restores as no profile.
-  if (stored < 26) {
-    const cols = db.all<{ name: string }>("PRAGMA table_info(charge_points)");
-    if (!new Set(cols.map((c) => c.name)).has("capability_profile")) {
-      db.exec("ALTER TABLE charge_points ADD COLUMN capability_profile TEXT");
-    }
+  // v26 and later: one file each under `migrations/`.
+  for (const migration of migrations) {
+    if (stored < migration.version) migration.up(db);
   }
-
-  // (Place future forward migrations here, gated on `stored < N`.)
 
   db.run(
     "INSERT INTO schema_meta (key, value) VALUES ('version', ?) " +
       "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-    [String(SCHEMA_VERSION)],
+    [String(targetVersion)],
   );
 }

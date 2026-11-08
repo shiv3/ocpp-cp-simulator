@@ -6,7 +6,7 @@ Before pushing, run the checks CI runs: `bun run lint`, `bun run check:boundarie
 
 ## Documentation
 
-`docs/` is an LLM-maintained wiki. [`CLAUDE.md`](CLAUDE.md) is its schema (layers, layout, ingest / query / lint workflows) and [`docs/conventions.md`](docs/conventions.md) holds the page conventions. When a change alters behaviour, update the affected wiki pages, `docs/index.md` and `docs/log.md` in the same PR.
+`docs/` is an LLM-maintained wiki. [`CLAUDE.md`](CLAUDE.md) is its schema (layers, layout, ingest / query / lint workflows) and [`docs/conventions.md`](docs/conventions.md) holds the page conventions. When a change alters behaviour, update the affected wiki pages in the same PR (and `docs/index.md` when a page is added, renamed or removed). Name the branch `<type>/<issue number>-<slug>`, close or reference the issue in the PR body, and say in the PR description which pages changed and why; `docs/log.md` is a frozen archive and is no longer appended to.
 
 ## Web console strings
 

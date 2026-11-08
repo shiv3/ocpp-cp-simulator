@@ -13,7 +13,7 @@
  * persistence layer was localStorage and we explicitly do NOT carry it
  * forward (see plan).
  */
-export const SCHEMA_VERSION = 25;
+export const SCHEMA_VERSION = 26;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -187,7 +187,10 @@ CREATE TABLE IF NOT EXISTS charge_points (
   tx_updated_meter_values INTEGER,
   -- #593: off | warn | enforce, the OCPP 1.6J inbound CALL validation mode.
   -- NULL (a row older than the column) is the default, warn.
-  inbound_validation TEXT
+  inbound_validation TEXT,
+  -- #595: 1 when OCPP 1.6 ReserveNow authorizes the reservation's idTag first;
+  -- NULL (a row older than the column) is off.
+  reservation_authorize_id_tag INTEGER
 );
 
 -- Per-CP UI / operator state. Currently holds the "desired connected"
@@ -748,6 +751,17 @@ export function runMigrations(db: Database): void {
     const cols = db.all<{ name: string }>("PRAGMA table_info(charge_points)");
     if (!new Set(cols.map((c) => c.name)).has("inbound_validation")) {
       db.exec("ALTER TABLE charge_points ADD COLUMN inbound_validation TEXT");
+    }
+  }
+
+  // v25 → v26 (#595): `charge_points.reservation_authorize_id_tag`. Guarded
+  // like the v16 column; existing rows stay NULL, which restores as off.
+  if (stored < 26) {
+    const cols = db.all<{ name: string }>("PRAGMA table_info(charge_points)");
+    if (!new Set(cols.map((c) => c.name)).has("reservation_authorize_id_tag")) {
+      db.exec(
+        "ALTER TABLE charge_points ADD COLUMN reservation_authorize_id_tag INTEGER",
+      );
     }
   }
 

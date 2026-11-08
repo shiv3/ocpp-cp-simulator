@@ -164,6 +164,10 @@ export class Outbox implements IChargePointMessageHandler {
     return this.handler.setBootStatus(status);
   }
 
+  runTriggered<T>(fn: () => T): T {
+    return this.handler.runTriggered ? this.handler.runTriggered(fn) : fn();
+  }
+
   getDataTransferHandler(): ReturnType<
     IChargePointMessageHandler["getDataTransferHandler"]
   > {

@@ -56,6 +56,8 @@
   "settings.form.disableLegacyBasic": "Disable legacy Basic Authentication",
   "settings.form.noAuth": "No authentication configured. Set Security Profile to 1 above to enable Basic Authentication.",
   "settings.form.authKeyGoverned": "Authentication is governed by the Authorization Key in the Security section above (security profile {{profile}}).",
+  "settings.form.txUpdatedMeterValues": "Send periodic meter values as TransactionEvent (Updated)",
+  "settings.form.txUpdatedMeterValuesHint": "While an OCPP 2.x transaction runs, scheduled meter values are sent as TransactionEvent(Updated, MeterValuePeriodic) instead of MeterValues. Ignored on OCPP 1.x.",
   "settings.form.enableAutoMeter": "Enable Auto Meter Value",
   "settings.form.intervalSeconds": "Interval (seconds)",
   "settings.form.incrementKwh": "Increment Value (kWh)",

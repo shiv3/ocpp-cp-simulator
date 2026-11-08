@@ -1,0 +1,65 @@
+name: E2E
+
+# #624: the gocpp end-to-end suite (e2e/README.md) needs Go and takes a few
+# minutes, and it is not part of CI, so a regression against the independent
+# CSMS was found only when someone ran it locally. This workflow runs it on a
+# schedule, and by hand from the Actions tab. The gocpp revision under test is
+# the one pinned in e2e/csms/go.mod and go.sum, so a red run means the
+# simulator changed, not the oracle.
+on:
+  schedule:
+    # Mondays 03:17 UTC, off the hour.
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e
+  cancel-in-progress: false
+
+jobs:
+  gocpp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Where e2e/support/gocppCsms.ts writes the fixture's trace.
+      E2E_TRACE_DIR: ${{ github.workspace }}/e2e-traces
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      # The toolchain version comes from the fixture's own go.mod.
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: e2e/csms/go.mod
+          cache-dependency-path: e2e/csms/go.sum
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # The fixture is an independent Go program with its own checks.
+      - name: Fixture lint and unit tests
+        run: |
+          bun run lint:e2e-csms
+          bun run test:e2e-csms
+
+      - name: gocpp e2e suites
+        run: bun run test:e2e
+
+      # What the fixture received (NDJSON, in receive order) and wrote to
+      # stderr, one pair of files per fixture process.
+      - name: Keep the traces
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-traces
+          path: e2e-traces/
+          if-no-files-found: warn
+          retention-days: 30

@@ -2445,3 +2445,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-08] ingest | Web console toggle for `txUpdatedMeterValues` (#550)
 
 - The Add and Edit forms of an OCPP 2.0.1 / 2.1 charge point have a `txUpdatedMeterValues` checkbox (en / ja / zh-CN). Remote mode sends it with `cp.create` / `cp.update`; Local mode stores it in the shared simulator config (new optional `txUpdatedMeterValues` field of the config wire schema, kept by the browser config port), `useChargePoints` passes it to the local charge points and `syncLocalChargePoints` applies a change to running ones. Updated [Web console](entities/web-console.md), [OCPP versions and transports](concepts/ocpp-versions-and-transports.md).
+
+## [2026-11-08] ingest | Switchable e2e CSMS fixture and weekly e2e run (#623, #624)
+
+- The Go fixture in `e2e/csms` has `POST /behavior` (BootNotification answer sequence per charge point, `whitelist` / `blacklist` / `rate-limit` / `offline` modes) and `POST /sequence` (commands in order, with delays or periodically); default wire output unchanged. New `e2e/behavior.gocpp.e2e.ts` and Go unit tests (`bun run lint:e2e-csms`, `bun run test:e2e-csms`). New `.github/workflows/e2e.yml` runs the Go checks and `bun run test:e2e` on Mondays and on demand, uploading `e2e-traces` on failure (`E2E_TRACE_DIR`). Pages: [Source: e2e/README.md](sources/e2e-readme.md), [CSMS peers](entities/csms-peers.md#gocpp), [Testing strategy](analyses/testing-strategy.md), [GitHub issues](sources/github-issues.md), [index](index.md).

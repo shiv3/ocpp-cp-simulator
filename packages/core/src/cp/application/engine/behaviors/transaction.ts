@@ -320,7 +320,9 @@ export async function startTransaction(
     tagId,
     meterStart: connector.meterValue,
     meterStop: null,
-    startTime: nowDate(cp),
+    startTime: isOcpp2Version(cp.ocppVersion)
+      ? nowDate(cp)
+      : connector.nextStartTime(nowDate(cp)),
     stopTime: null,
     meterSent: false,
     reservationId,

@@ -74,7 +74,10 @@ pull request cancels the run for the previous push.
 
 `test`, `test:bun`, `test:coverage:bun` and the shard script run `bun test
 --isolate`, so each file gets a fresh global and module registry and cannot
-inherit what an earlier file left behind (#803). Without it, on Bun 1.4.x,
+inherit the in-process state an earlier file left behind (#803). The isolation
+stops there: files share one process, so files on disk, bound ports, child
+processes and other external state carry over, and each test must still clean
+up what it creates. Without it, on Bun 1.4.x,
 every test ending on a rejected `expect(...).rejects` that runs after
 `goldenWire.bun.test.ts` (340 `test.concurrent` cases) in the same process
 stalls the event loop for seconds: `E11 1.6 GetConfiguration` in

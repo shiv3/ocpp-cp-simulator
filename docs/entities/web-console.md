@@ -63,7 +63,7 @@ The detection rules are in [Local vs Remote mode](../concepts/local-vs-remote-mo
 Local mode can also run **behavior code**: `LocalChargePointService.loadBehaviorBundle(id, blob | text)` imports a bundle
 built with `ocpp-cp-sim behavior build` through `import(blobUrl)` and loads it onto one charge point of the page. It is
 programmatic only (no console UI), runs with the page's full authority, and is not persisted across a reload. Verified in
-Chromium: [Charger engine design → Verification results](../analyses/charger-engine.md#verification-results).
+Chromium: [Charger engine migration → Verification results](../analyses/charger-engine-migration.md#verification-results).
 
 ## Layout (route prefixes)
 

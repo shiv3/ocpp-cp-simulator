@@ -29,7 +29,7 @@ related:
   - ../concepts/charging-sessions.md
   - ../concepts/log-format.md
   - ../concepts/local-authorization.md
-  - ../analyses/charger-engine.md
+  - ../concepts/charger-engine.md
 updated: 2026-11-08
 ---
 
@@ -640,9 +640,14 @@ daemon's stored logs and writes a Markdown / HTML report. It has its own page:
 
 ### Behavior code: `--behavior` and `behavior build`
 
-A [behavior](../analyses/charger-engine.md#behavior-api-packagescontracts-types-only) is a TypeScript or
-JavaScript module whose default export is a behavior (`{ api: 1, id, requires?, onCall?, main?, onResume? }`)
-or an array of them. It answers CSMS CALLs and drives the station through a narrow `ctx` port.
+A [behavior](../concepts/charger-engine.md#behavior-api) is a TypeScript or
+JavaScript module whose default export is a behavior (`{ api: 1, id, requires?, onCall?, on?, beforeSend?, main?, onResume? }`)
+or an array of them. It answers CSMS CALLs and drives the station through a narrow `ctx` port. **`api: 1` is a
+preview** ([Stability](../concepts/charger-engine.md#stability) lists the experimental members: `ctx.raw`,
+`ctx.setConnectorStatus`, `onResume`, `useBehavior`, the browser loader). What the station does without any
+behavior is in [Default behaviors](default-behaviors.md); which of a scenario, a policy and a behavior answers a
+CALL is in [Who answers an inbound CALL](../concepts/call-precedence.md); whether to write JSON or code is in
+[Scenario or behavior?](../analyses/scenario-or-behavior.md).
 
 ```shell
 ocpp-cp-sim --cp-id CP001 --ws-url ws://localhost:9000 --behavior examples/behaviors/flaky-firmware.ts
@@ -652,8 +657,20 @@ ocpp-cp-sim behavior build examples/behaviors/flaky-firmware.ts --out dist/flaky
 - `--behavior <file>` (repeatable) bundles the file with `Bun.build` (TypeScript is read directly, relative
   imports are followed, `k6/*` stays external), imports it and loads every behavior onto every charge point
   the process runs: the one of a single-CP session, and in a daemon the bootstrap, the restored and the ones
-  created over RPC. A file that does not load (syntax error, bad default export, a duplicate id, a `requires`
-  the station cannot meet) stops the start with exit code 1 and the file's name.
+  created over RPC. A file that does not load (syntax error, bad default export, a duplicate id, an id starting
+  with `default.` or naming an object member, an unknown `requires`, a physical verb or `ctx.raw` used without
+  `physical` / `raw-frames` listed, `mode: "extend"` on an action with [no default](default-behaviors.md#actions-with-no-default),
+  a `requires` the station cannot meet) stops the start with exit code 1 and the file's name.
+- **`after` and the answer.** An `after` returned with an answer runs once that answer settled on the wire, and is
+  skipped with a warning when it was not delivered (a closed or changed connection): do not hang a reboot you
+  need on an answer the CSMS may not have got. `after` does not keep the rule busy.
+- **Disable a default.** There is no `disable` mode: replace the action with the valid answer and no follow-up,
+  `onCall: { UpdateFirmware: { mode: "replace", handle: (_req, ctx) => ({ response: ctx.accepted("UpdateFirmware") }) } }`
+  (the station answers and does nothing else), or `{ noResponse: true }` to stay silent, or `{ error: { code:
+"NotSupported", description: "…" } }`. For a station-initiated message (Heartbeat, MeterValues, StatusNotification)
+  use `beforeSend: { Heartbeat: () => ({ drop: true }) }`; the station then never gets an answer to it, and what that
+  breaks (a dropped `StartTransaction` leaves the transaction without a CSMS id) is yours. More recipes:
+  [Scenario or behavior?](../analyses/scenario-or-behavior.md#recipes).
 - **The code runs with this process's full authority.** It comes from the command line and nowhere else:
   Socket.IO, MCP and OCPP carry data, never code, and there is no RPC method that loads a behavior. A scenario
   that arrives over `load_scenario` with fields that look like code is stored or refused as data
@@ -682,7 +699,7 @@ disconnected, callResult, callReceived }` observes the station (after the turn t
   nested in it, not awaited, a throw is logged and changes nothing) and `beforeSend: { MeterValues(payload, ctx)
 { … } }` rewrites or drops (`{ drop: true }`) a station-initiated CALL before it is queued, synchronously;
   `ctx.accepted("UpdateFirmware")` / `ctx.rejected(…)` return the valid canned response of this station's OCPP
-  version. Details and decisions: [Charger engine design](../analyses/charger-engine.md#status-stage-e-hooks-send-interception-assignment-reload);
+  version. Details and decisions: [Charger engine](../concepts/charger-engine.md#event-hooks-behavioron) and its [migration history](../analyses/charger-engine-migration.md#stage-e-hooks-send-interception-assignment-reload);
   `examples/behaviors/disconnect-on-charging.ts` is a template using hooks and `beforeSend`.
 
 #### Choosing behaviors per charge point and reloading them
@@ -842,7 +859,7 @@ Refused at export, with the file and the reason named:
 
 | Refused                                                                                                     | Why                                                                                                                    |
 | ----------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `requires` of `physical`, `virtual-time` or `ocpp2.x`                                                       | The k6 host has no connector model, runs on real time, and speaks 1.6J only.                                           |
+| `requires` of `physical` or `ocpp2.x`                                                                       | The k6 host has no connector model, runs on real time, and speaks 1.6J only.                                           |
 | `mode: "extend"`, `ctx.defaultBehavior`                                                                     | The k6 auto-responder has no default behavior with follow-ups to extend.                                               |
 | `ctx.connector`, `ctx.plugIn`, `unplug`, `authorize`, `startCharging`, `stopCharging`, `setConnectorStatus` | No connector model. The check is syntactic (it also flags a property of that name); the members throw at run time too. |
 | `on.connectorStatus`, `on.transactionStarted`, `on.transactionStopped`                                      | They need a connector and transaction model the k6 host does not have; never silently ignored.                         |
@@ -856,7 +873,7 @@ Per-charger assignment and reload do not apply to k6 (one export, one set of beh
 
 Responses are not checked against the OCPP schema (`skipValidation` has nothing to skip), and a CALL no rule claims
 is answered by the same auto-responder as in a scenario export. Environment variables are in the generated README.
-Measured results: [Charger engine design → Verification results](../analyses/charger-engine.md#verification-results).
+Measured results: [Charger engine migration → Verification results](../analyses/charger-engine-migration.md#verification-results).
 
 | `evSettings` field   | Honoured                                                       |
 | -------------------- | -------------------------------------------------------------- |

@@ -678,7 +678,10 @@ export class Connector {
     return this.store.read().status;
   }
 
-  /** A bare write: only this connector's own `statusChange` listeners hear it. */
+  /**
+   * TRANSITIONAL (removed with #575): kept so callers and tests need not change.
+   * A bare write: only this connector's own `statusChange` listeners hear it.
+   */
   set status(newStatus: OCPPStatus) {
     this.store.write({ kind: "status", status: newStatus, scope: "local" });
   }
@@ -921,6 +924,10 @@ export class Connector {
     this.energyOfferSuspendedValue = true;
   }
 
+  /**
+   * TRANSITIONAL (removed with #575): a live `Proxy` view of the engine's record;
+   * assigning stores a copy, so the view is not the object you assigned.
+   */
   get transaction(): Transaction | null {
     return this.txView;
   }

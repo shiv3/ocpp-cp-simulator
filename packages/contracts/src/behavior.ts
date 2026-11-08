@@ -5,6 +5,12 @@
  * `Math.random` or timers, because every wait and every draw goes through
  * {@link BehaviorContext}.
  *
+ * **`api: 1` is a preview**: it is not final until the charger-engine work is
+ * on `main`, and a breaking change bumps `api`. Members marked EXPERIMENTAL
+ * below (`raw`, `setConnectorStatus`, `onResume`, and the dormant meaning of
+ * `useBehavior`) are the most likely to change. See "Stability" in
+ * docs/concepts/charger-engine.md.
+ *
  * The API has to work on k6 as well: nothing here needs `AbortController`,
  * `URL`, `structuredClone`, `queueMicrotask`, `performance`, async generators
  * or `for await`.
@@ -181,7 +187,11 @@ export interface Behavior {
    */
   beforeSend?: Record<string, BeforeSend>;
   main?(ctx: BehaviorContext): Promise<void>;
-  /** After the station state was restored; async positions are not. */
+  /**
+   * EXPERIMENTAL. Runs when the boot is accepted, after the station state was
+   * restored; async positions are not restored. A station that never boots
+   * never resumes, and a dormant behavior gets none.
+   */
   onResume?(ctx: BehaviorContext): Promise<void>;
 }
 
@@ -245,13 +255,20 @@ export interface BehaviorContext {
   readonly state: Record<string, JsonValue>;
   /** A station-initiated CALL through the normal path; resolves to its result. */
   send(action: string, payload: unknown, opts?: SendOptions): Promise<unknown>;
-  /** Explicit opt-in for non-compliant traffic, via the raw frame sender. */
+  /**
+   * EXPERIMENTAL. Explicit opt-in for non-compliant traffic, via the raw frame
+   * sender: no validation, no `beforeSend`. Needs `raw-frames` in `requires`.
+   */
   raw(frame: string): void;
   plugIn(connectorId: number): void;
   unplug(connectorId: number): void;
   authorize(idTag: string): void;
   startCharging(connectorId: number, idTag?: string): void;
   stopCharging(connectorId: number, reason?: string): void;
+  /**
+   * EXPERIMENTAL. Writes a status without the checks the physical verbs keep.
+   * Prefer `plugIn`, `unplug`, `startCharging`, `stopCharging`. Needs `physical`.
+   */
   setConnectorStatus(connectorId: number, status: string): void;
   readonly notify: BehaviorNotify;
   /**

@@ -8,6 +8,10 @@
 // code under `application/engine/` may use them. Everything else asks the
 // charge point (`updateConnectorStatus`) or dispatches an event itself.
 //
+// TRANSITIONAL: the setters, the `Transaction` proxy view and the three write
+// scopes exist for wire compatibility and are removed with #575 as the lines
+// move out of `ChargePoint` (docs/concepts/charger-engine.md, "Transitional").
+//
 // This check fails when non-test code outside `application/engine/` assigns
 // one of those properties on a connector. It is syntactic: an assignment
 // (`=`, `+=`, ..., `++`) to `<receiver>.<field>` counts when the receiver's

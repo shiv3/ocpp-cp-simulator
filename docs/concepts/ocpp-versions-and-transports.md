@@ -774,6 +774,19 @@ with protocol `ocpp1.2S`, `ocpp1.5S`, or `ocpp1.6S`, status Accepted).
 
 ### SOAP limitations elsewhere in the simulator
 
+### SOAP and behaviors
+
+[Behaviors and the charger engine](charger-engine.md) reach a SOAP station only in part:
+
+- **`replace` does not work.** A scenario `csmsCallTrigger` with `behavior: "replace"` fails the run when the node
+  arms (`behavior "replace" needs an OCPP-J station`); it never falls back to the default silently.
+- **`beforeSend` is refused.** A behavior that has a `beforeSend` table is refused at load on a SOAP station
+  (`Behavior x uses beforeSend, which needs an OCPP-J station`). Event hooks beyond `connected` / `disconnected` are
+  not exercised on SOAP.
+- **Defaults bypass the gate.** A SOAP station answers CSMS operations with the same default behaviors
+  ([list](../entities/default-behaviors.md)), but they do not go through the inbound gate, so no policy, override or
+  rule applies to them ([who answers a CALL](call-precedence.md)).
+
 - [Network simulation](network-simulation.md) applies to WebSocket CPs only.
 - `WebSocketPingInterval` is not a key a SOAP CP has: `ChangeConfiguration`
   answers `NotSupported` ([WebSocket ping](#websocket-ping-websocketpinginterval)).

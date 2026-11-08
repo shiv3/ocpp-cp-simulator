@@ -28,7 +28,7 @@ related:
   - control-plane.md
   - ../entities/cli.md
   - vehicle-profiles.md
-  - ../analyses/charger-engine.md
+  - charger-engine.md
 updated: 2026-11-07
 ---
 
@@ -256,7 +256,7 @@ pre-#240 behavior) matches any payload.
 
 **Issue #566.** By default a `csmsCallTrigger` only _observes_: the station answers the CALL with its own
 behavior and the node waits for its arrival. Schema 1.5 lets a scenario _own_ the CALL, for any action and on
-OCPP 1.6 and 2.x alike (the [charger engine design](../analyses/charger-engine.md#scenario-schema-15-additive)
+OCPP 1.6 and 2.x alike (the [charger engine](charger-engine.md#scenario-schema-15)
 has the reasoning):
 
 - `csmsCallTrigger.behavior`: `"observe"` (default, as before) or `"replace"`. With `replace`, a CALL that
@@ -274,8 +274,9 @@ has the reasoning):
   `call.payload.<key>[.<key>…]` (array items by index). A path that names nothing fails the run, as does a
   `$from` in a branch that holds no CALL. An object with other keys next to `$from` is an ordinary object.
 - `useBehavior`: `behaviorId` selects a behavior loaded on the station (`cp.loadBehavior(behavior, { dormant:
-true })`, or any loaded behavior). A dormant behavior serves its `onCall` rules only while a run that
-  reached the node is alive. Data only: a scenario never carries code. The run fails if no behavior has that
+true })`, or any loaded behavior). A dormant behavior is all or none: while a run that
+  reached the node is alive it has its `onCall` rules, `main`, `on` hooks and `beforeSend`; when the last such run
+  ends it has none of them. Data only: a scenario never carries code. The run fails if no behavior has that
   id.
 
 The CALL is **branch-scoped**: parallel branches from Start each own the CALL their own `csmsCallTrigger`
@@ -294,6 +295,18 @@ the next CALL of the action is the station's again; a loop that reaches the node
 
 `export-k6` refuses `behavior: "replace"`, `onBusy`, `callResponse`, `useBehavior` and a `$from` payload with a
 clear error: the k6 runtime always lets the station answer.
+
+**Who wins when several things want the CALL.** A running scenario's `replace` rule wins over code behaviors,
+whatever their order of loading; among scenarios the newest run wins, and a response override or an inbound
+policy comes before both. The whole order, every pair of it, and how the older RemoteStart / RemoteStop parking
+fits in are on one page: [Who answers an inbound CALL](call-precedence.md). If you are choosing between a
+`replace` node, `responseOverride` and a TypeScript behavior, read [Scenario or
+behavior?](../analyses/scenario-or-behavior.md).
+
+**The scenario editor.** The browser Scenario Editor authors all of schema 1.5: a `csmsCallTrigger` form with
+`behavior` (`observe` / `replace`) and `onBusy`, a `callResponse` node and a `useBehavior` node, and it exports
+`schemaVersion: "1.5"`. There is no dedicated control for `$from` (type it in the payload JSON) and the
+`useBehavior` id is free text.
 
 ```json
 {

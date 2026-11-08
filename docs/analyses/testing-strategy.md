@@ -16,7 +16,8 @@ related:
   - ../sources/steve-verify-readme.md
   - ../sources/testcontainers-java-readme.md
   - ../entities/csms-peers.md
-  - charger-engine.md
+  - ../concepts/charger-engine.md
+  - charger-engine-migration.md
 updated: 2026-11-08
 ---
 
@@ -153,7 +154,7 @@ must be re-verified whenever the pinned DebugKit version changes
 ## Golden wire test
 
 `packages/core/src/test/goldenWire/` is the regression oracle of the
-[charger engine](charger-engine.md) work (rule 4: with nothing configured, the bytes on the wire and
+[charger engine](../concepts/charger-engine.md) work (rule 4: with nothing configured, the bytes on the wire and
 their order do not change). `goldenWire.bun.test.ts` drives real `ChargePoint` instances against an
 in-process fake CSMS (`FakeCsms.ts`, `Bun.serve`) on OCPP 1.6 and 2.0.1, records every OCPP-J frame
 in both directions in arrival order, normalizes it, and compares it with a committed fixture under
@@ -178,7 +179,8 @@ in both directions in arrival order, normalizes it, and compares it with a commi
     message id that is not UUID-shaped is marked `(raw)`. The fixtures of the first set are not strict.
 - **Frames the fake CSMS cannot parse** (not JSON, not an array, an unknown message type) are recorded as
   `raw` frames, not dropped, so a station that emits one fails the case.
-- **Cases**: three sets, 332 in all. `cases.ts` holds 103 scripted cases over both versions (boot
+- **Cases**: three sets, 335 in all (103 scripted + 54 templates + 178 regression = 335 fixtures; the suite
+  reports 338 tests, the 335 cases plus 3 harness checks). `cases.ts` holds 103 scripted cases over both versions (boot
   including Pending and Rejected, status walk, authorize, local and remote start / stop, meter values, EV
   disconnect, reset, `UpdateFirmware` including `SimulatedFirmwareUpdateFailure`, `SignedUpdateFirmware`,
   `GetDiagnostics` / `GetLog`, `ChangeAvailability` including `Scheduled`, reservations, unlock,
@@ -186,9 +188,9 @@ in both directions in arrival order, normalizes it, and compares it with a commi
   list, smart charging, disconnect and reconnect, transactions stopped offline). `scenarioCases.ts` runs
   the 54 built-in scenario templates on OCPP 1.6 with the fake CSMS playing the operator the
   [scenario README](../../packages/core/src/utils/scenarios/README.md) describes.
-  `regressionCases.ts` holds 175 more, **recorded on ca01d302 (the commit before the charger engine),
-  never on the branch** (a fixture that a later commit of main changes is re-recorded on a worktree at
-  that commit, still never on the branch; five were after #635, three cases for `Reset` `OnIdle` were added),
+  `regressionCases.ts` holds 178 more: 175 **recorded on ca01d302 (the commit before the charger engine),
+  never on the branch**, and 3 `Reset` `OnIdle` cases recorded on `c099aac9` (#635) (a fixture that a later commit of main changes is re-recorded on a worktree at
+  that commit, still never on the branch; five were after #635),
   after a review found 29 of 63 mutants of the engine survived the first set
   (no retry after CALLERROR, an offline queue flushed in the wrong order, follow-ups of a close, policy
   versus override, a TxProfile surviving its transaction, a whole-station `ChangeAvailability` during a
@@ -228,10 +230,10 @@ write), `InboundCallGate.test.ts` (order of policy, override and registry; 2.x s
 async behavior on a `VirtualClock` replays: 1,000 simulated chargers run twice with one seed (same
 effect hash), once with another (different hash), with a control on unseeded streams and a pinned
 hash for a small fleet. The result and its limits are in the
-[Charger engine design](charger-engine.md#determinism). The same fleet (`virtualFleet.ts`) runs in real Chromium
+[Charger engine](../concepts/charger-engine.md#determinism). The same fleet (`virtualFleet.ts`) runs in real Chromium
 through `scripts/verify/browser/run.ts` (Playwright is not a dependency; the script says how to supply it) and must hash
 identically to Bun; the k6 host is run for real with a k6 binary against `scripts/verify/fakeCsms16.ts`. Both are
-manual verifications, not part of `bun run test`: [Verification results](charger-engine.md#verification-results).
+manual verifications, not part of `bun run test`: [Verification results](charger-engine-migration.md#verification-results).
 
 ## Behavior tests
 
@@ -267,7 +269,7 @@ methods, persistence, and that no code or path is accepted); `behaviorHost.test.
 for the k6 host and its refusals. `scripts/verify/e2e/behaviorsDaemon.ts` drives the real daemon end to end.
 
 The tests of the scenario 1.5 features are `scenario15.bun.test.ts` (one test per row of the runtime
-contract in the [Charger engine design](charger-engine.md#scenario-schema-15-additive)) and
+contract in the [Charger engine](../concepts/charger-engine.md#scenario-schema-15)) and
 `ScenarioExecutor`-level `callResponse.test.ts`. The acceptance tests for #566 are
 `acceptance566.bun.test.ts`: for OCPP 1.6 and 2.0.1 and for a JSON scenario and a code behavior alike, an
 incoming `UpdateFirmware` is matched, replaced completely, answered and followed by notifications whose

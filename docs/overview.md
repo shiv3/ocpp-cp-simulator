@@ -99,7 +99,7 @@ the package-to-package import counts.
 [`scripts/check-direct-time.ts`](../scripts/check-direct-time.ts): the code
 under `packages/core/src/cp/domain/` and `application/` reads time and arms
 timers through the charge point's `SimClock`, and draws random numbers and ids
-from its `RngStreams` ([Charger engine design](analyses/charger-engine.md#clock-and-random-packagescoresrccpsharedclockts-rngts)).
+from its `RngStreams` ([Charger engine](concepts/charger-engine.md#clock-and-random)).
 The script lists every direct `Date.now()`, argument-less `new Date()`,
 `performance.now()`, `Math.random()`, `crypto.randomUUID()` and global timer
 call that is left, against a shrinking exemption list (`EXEMPTIONS`): it fails
@@ -107,7 +107,7 @@ on a use the list does not allow and on an entry that allows more than the file
 has. It also runs [`scripts/check-single-writer.ts`](../scripts/check-single-writer.ts):
 only `packages/core/src/cp/application/engine/` may assign a connector's `status`,
 `availability`, `scheduledAvailability`, `currentErrorCode`, `errorInfo` or
-`vendorErrorCode`, `transaction`, `transactionId` or a transaction's fields ([Charger engine design](analyses/charger-engine.md#charger-engine-applicationengine)).
+`vendorErrorCode`, `transaction`, `transactionId` or a transaction's fields ([Charger engine](concepts/charger-engine.md#the-engine)).
 
 | Package (`@ocpp-cp-sim/<dir>`) | Holds                                                                                                                                                                                                   | May depend on                      |
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |

@@ -1,7 +1,7 @@
 ---
-title: Charger engine design
+title: Charger engine migration history
 type: analysis
-summary: Design of the charger engine — one owner of charge point state, behaviors written as TypeScript modules behind a narrow ctx port, one inbound gate, and an injectable clock — and the staged migration from handler-embedded behavior.
+summary: How the charger engine was built, stage by stage — the decisions each stage took where the design left a choice, the verification numbers and the two reviews; the current contract is in concepts/charger-engine.md.
 sources:
   - packages/core/src/cp/domain/charge-point/ChargePoint.ts
   - packages/core/src/cp/infrastructure/transport/OCPPMessageHandler.ts
@@ -15,13 +15,21 @@ sources:
   - scripts/bench/engineScale.ts
   - "issues #566, #569, #575, #600, #618"
 related:
+  - ../concepts/charger-engine.md
+  - ../entities/default-behaviors.md
   - ../concepts/scenario-format.md
   - ../entities/cli.md
   - ../sources/bench-readme.md
 updated: 2026-11-08
 ---
 
-# Charger engine design
+# Charger engine: migration history
+
+This page is the record of how the [charger engine](../concepts/charger-engine.md) was built: the problem, the stages, the decisions
+each stage took where the design left a choice, the measurements, and the reviews. It is history, ordered by stage. The
+contract as shipped (rules, parts, API, timings, security line) is [`concepts/charger-engine.md`](../concepts/charger-engine.md);
+what the station does by default is [Default behaviors](../entities/default-behaviors.md). Where an old decision below was
+superseded, the entry says so and points at the stage that changed it ("Review fixes 3" is the last).
 
 ## Problem
 
@@ -32,75 +40,9 @@ is initialized but production code sends it no transitions; `updateConnectorStat
 `connector.status` directly, from about ten files. Time and randomness are read directly, so a run
 cannot be replayed. Scenarios cannot replace behavior generically (#566).
 
-## Target
+## Stage log
 
-```
-Driver (scenario, console, EV model) ─┐
-Behavior module (TypeScript) ─────────┤
-                                      ▼
-                     ctx (BehaviorContext port): time, wait, random, send, state, physical verbs
-                                      ▼
-Charger engine: single event queue, sole writer of charger state, default behaviors
-                                      ▼
-InboundCallGate / CallExchange  ◄──►  OCPP adapters (1.6 JSON, 2.x, SOAP): translation only
-```
-
-Rules:
-
-1. **Behavior is code.** Behaviors are plain TypeScript modules, not a JSON DSL. Default behaviors are
-   written against the same `ctx` API as user behaviors. Users override a part; they never reimplement
-   a charger.
-2. **Calculations stay as services.** `ChargingScheduleResolver`, `MeterValueBuilder`, charging curves,
-   `CertificateStore`, `ConfigurationStore`, authorization cache, OCPP codecs and network simulation are
-   not rewritten.
-3. **JSON scenarios stay.** They keep GUI editing, pause / step / resume, and fleet declaration. They
-   drive the engine and may select behaviors. Existing files keep working unchanged.
-4. **No behavior change unless configured.** With no behavior configured, the bytes on the wire and
-   their order are the same as before. In particular 2.x `UpdateFirmware` stays ack-only by default.
-5. **No code over the wire.** Socket.IO, MCP and OCPP accept JSON only (#569 forbids executable
-   content). Code loads only from local files named on the command line, behind an explicit flag. It
-   enters a running daemon only by a re-read of those files that the operator asked for with
-   `--watch-behaviors` or `--allow-behavior-reload`; the `behavior.reload` method is refused otherwise.
-   A daemon that runs code answers cross-origin browser requests with `same-origin` CORS by default.
-   Plain execution has no isolation: `vm`, Worker and ShadowRealm are not called isolation anywhere.
-
-## Parts
-
-### Clock and random (`packages/core/src/cp/shared/clock.ts`, `rng.ts`)
-
-```ts
-export interface SimClock {
-  now(): number; // epoch ms
-  setTimeout(fn: () => void, ms: number): TimerHandle;
-  clearTimeout(handle: TimerHandle): void;
-  setInterval(fn: () => void, ms: number): TimerHandle;
-  clearInterval(handle: TimerHandle): void;
-}
-```
-
-`RealClock` wraps the platform. `VirtualClock` keeps one queue ordered by (time, charger id, sequence)
-and offers `advanceBy(ms)`, `advanceTo(t)` and `runUntilIdle()`. Between two timers these `await` a
-full microtask drain so that async behaviors settle before time moves on. `RngStreams(seed)` derives
-a stream from `hash(seed, chargerId, streamName)`, so adding a charger or a stream does not change the
-numbers of another.
-
-`ChargePoint` takes an optional clock and seed; the default is `RealClock`, which keeps behavior
-identical. All `domain/` and `application/` code uses the injected clock, and so do the two JSON message
-handlers (`OCPPMessageHandler`, `OCPPMessageHandlerV201`) with the waiters and senders they own
-(`CallWaiters`, `ExpertCalls`, `RawFrameSender`): their timestamps, the 30 s CALL timeout, the
-`TransactionEvent` resend and timeout timers, and their message and transaction ids (streams `message-id` and
-`transaction-id`) come from the station's clock and seed. A CI check lists direct `Date.now`, `new Date()`,
-`setTimeout`, `setInterval` and `Math.random` in `domain/`, `application/` and those five files against a
-shrinking exemption list.
-
-**What virtual time covers, exactly.** Everything above, and the engine and the behaviors. It does _not_ cover
-the rest of `infrastructure/transport`: the WebSocket (reconnect back-off, ping and pong timers, the network
-simulation's delays), the SOAP handler and the certificate-refresh machinery keep platform timers, as does the
-real socket to the fake CSMS. A virtual-time run therefore has to be driven so that nothing waits on those
-(the in-memory socket of `runBehavior()` has no such timers), and `effectHash` normalizes the timestamps and
-ids of the wire, so it proves the order of effects, not the values on the wire; the values are checked by
-the tests in `packages/core/src/test/regression/virtualWire.bun.test.ts`. A seeded run draws message ids and
-transaction ids from the seed, so two runs of one seed agree on them.
+### Stage A: clock, random, CallExchange, InboundCallGate
 
 Status (stage A): `clock.ts` and `rng.ts` exist, `ChargePoint` takes them as its last constructor
 argument (`{ clock, seed }`), and the check is `scripts/check-direct-time.ts`, run by
@@ -127,28 +69,6 @@ argument (`{ clock, seed }`), and the check is `scripts/check-direct-time.ts`, r
   the repositories' row bookkeeping stamps, the log flush pacing, and the `now` defaults of the pure
   schedule resolvers (their production callers pass the clock). Not covered: `infrastructure/`
   (the 2.x handler still mints transaction UUIDs with `crypto.randomUUID`) and the apps.
-
-### CallExchange and InboundCallGate
-
-`CallExchange` is one inbound CALL. State: `open | answered | suppressed | abandoned`. The first answer
-is sent; a later answer is not sent and throws. `respond()` and `respondError()` return a promise of
-`ExchangeSettlement` that always resolves: `{ delivered: true }` or `{ delivered: false, reason }`.
-`ResponseEffectQueue.register` gains an optional `onDropped` so that a dropped or stale effect reports
-back. Existing callers are unaffected.
-
-`InboundCallGate` replaces the policy and override blocks duplicated in the 1.6 and 2.x handlers. Order:
-
-1. `incomingCallReceived` (unchanged)
-2. `inboundPolicy`
-3. `responseOverride`
-4. `BehaviorRegistry.resolve()`, synchronous
-5. default path (2.x validates its payload here)
-
-Step 4 runs before validation, as policies do, so a behavior can own a malformed CALL. The gate is
-synchronous: 2.x must not defer a CALLRESULT by a microtask (#456). Action matching uses
-`csmsActionMatches`. SOAP: a `replace` rule on a SOAP station fails the run at arm time, it never
-silently falls back; a SOAP station does get default behaviors, which do not go through the gate in
-this version.
 
 Status (stage A): `infrastructure/transport/inbound/CallExchange.ts` and `InboundCallGate.ts` exist,
 `application/behavior/BehaviorRegistry.ts` is a stub whose `resolve()` always answers `default`, and the
@@ -180,60 +100,7 @@ promise is asynchronous. The SOAP handler is untouched. Decisions the design lef
 - **Registry input.** `resolve()` gets the action, the payload and the connector id the CALL names
   (`connectorId`, else `evse.connectorId`).
 
-### Behavior API (`packages/contracts`, types only)
-
-```ts
-export interface Behavior {
-  api: 1;
-  id: string;
-  requires?: readonly BehaviorCapability[]; // "ocpp1.6" | "ocpp2.x" | "physical" | "virtual-time" ...
-  onCall?: Record<string, CallBehavior>; // keyed by action, either version's spelling
-  on?: BehaviorEvents; // connectorStatus, transactionStarted/Stopped, connected, disconnected, callResult, callReceived
-  beforeSend?: Record<string, BeforeSend>; // station-initiated CALLs, keyed by action
-  main?(ctx: BehaviorContext): Promise<void>;
-  onResume?(ctx: BehaviorContext): Promise<void>;
-}
-
-export type CallBehavior = {
-  mode: "replace" | "extend";
-  match?: Record<string, unknown>; // deepPartialMatch
-  onBusy?: CallAnswer; // default: CALLERROR GenericError
-  handle(
-    req: unknown,
-    ctx: BehaviorContext,
-  ): CallOutcome | Promise<CallOutcome>;
-};
-
-export type CallOutcome =
-  | { response: unknown; skipValidation?: boolean; after?: () => Promise<void> }
-  | {
-      error: { code: string; description: string };
-      after?: () => Promise<void>;
-    }
-  | { noResponse: true; after?: () => Promise<void> };
-```
-
-`extend` runs the default behavior: `ctx.defaultBehavior(req)` returns the default response and
-registers its effect, and the handler may wrap it. `after` runs once the response settled, and is
-skipped with a warning if it was not delivered.
-
-`BehaviorContext`:
-
-- `now()`, `sleep(ms)`, `until(promise, { ms })`, `random(stream)`, `stopping`
-- `state`: user data that must be JSON-serializable; held by the engine
-- `send(action, payload, opts?)`: a station-initiated CALL through the normal path
-- `raw(frame)`: explicit opt-in for non-compliant traffic, via `RawFrameSender`
-- physical verbs, independent of OCPP version: `plugIn`, `unplug`, `authorize`, `startCharging`,
-  `stopCharging`, `setConnectorStatus`
-- `accepted(action)` / `rejected(action)`: the valid canned response of this station's version
-- `notify`: version-neutral notifications such as `firmwareStatus(status)`, `logStatus(status)`
-- `connector(id)`, `charger`: read-only snapshots
-- `log(message)`
-
-Behavior modules import types only. They must not use module-scope mutable state, `Date`,
-`Math.random` or timers; an ESLint config shipped for behaviors reports these. The API must work on
-k6: no `AbortController`, `URL`, `structuredClone`, `queueMicrotask`, `performance`, async generators or
-`for await`.
+### Stage B: behavior API, registry, scenario 1.5, engine
 
 Status (stage B): the types are in `packages/contracts/src/behavior.ts` (import them as
 `@ocpp-cp-sim/contracts/behavior`; they are not re-exported from the package index, whose names would
@@ -267,41 +134,6 @@ collide). Decisions the design left open:
 - **`ctx.random(stream)`** draws from the charge point's streams under the name `<behaviorId>/<stream>`,
   so two behaviors never share numbers by accident.
 
-### BehaviorRegistry (`application/behavior/`)
-
-One per charge point. Holds rules from two providers: code behaviors, and scenario rules.
-
-- Owner: `{ kind: "code", behaviorId }` or `{ kind: "scenario", scenarioId, connectorId, nodeId }`.
-- Selection: exact connector match, then oldest registration; a warning names the losers. A CALL
-  without a connector matches any rule.
-- A rule holds at most one open exchange. A second matching CALL gets `onBusy` at once and never
-  reaches the default path.
-- Scenario rules end with their run, released by owner. Code rules last as long as the behavior is
-  loaded.
-
-### Scenario schema 1.5 (additive)
-
-- `csmsCallTrigger.behavior`: `"observe"` (default, as today) or `"replace"`, plus `onBusy`.
-- `callResponse` node: `kind: "result" | "error" | "none"`, `payload`, `errorCode`, `errorDescription`,
-  `skipValidation`. It waits for settlement.
-- `{ "$from": "call.payload.requestId" }` as a whole value in `ocppCall` and `callResponse` payloads,
-  resolved against the exchange of that branch. A missing path fails the run.
-- `useBehavior` node: selects a behavior already loaded on the station by id. Data only.
-- The exchange is branch-scoped: pass a flow context through `executeSequentialFlow`, so parallel
-  branches from Start can own different calls. Ownership lasts from first reaching the node until the
-  run ends.
-
-Runtime contract:
-
-| Case                               | Behavior                                                                                      |
-| ---------------------------------- | --------------------------------------------------------------------------------------------- |
-| Disconnect before answering        | exchange `abandoned`, `incomingCallCompleted` is `NoResponse`, the run fails like other waits |
-| Run ends or stops unanswered       | CALLERROR `InternalError` with a warning; silence needs `kind: "none"`                        |
-| Answer after reconnect             | not sent, settles `stale`                                                                     |
-| Send failed or dropped             | `callResponse` receives `delivered: false` and fails the run                                  |
-| Time before answering              | never timed out by the simulator; delay nodes and `timeout` bound it                          |
-| `callResponse` without an exchange | fails the run                                                                                 |
-
 Status (stage B): all of the above is implemented, and the schema is 1.5
 ([Scenario format](../concepts/scenario-format.md#csmscalltrigger-replace-callresponse-from-and-usebehavior-schema-15)).
 Decisions the design left open:
@@ -333,25 +165,6 @@ Decisions the design left open:
 - The tests are `packages/core/src/test/behavior/scenario15.bun.test.ts` (one test per row of the table above,
   on a virtual clock against the fake CSMS) and `ScenarioExecutor`-level `callResponse.test.ts`, which holds the
   rows that need a stub: a send that failed or was dropped, and SOAP.
-
-### Charger engine (`application/engine/`)
-
-`ChargerEngine` is one per charge point. It owns `ChargerState`, a JSON-serializable record of
-connector status, availability, transaction, firmware, log and reservation state. Every mutation goes
-through `engine.dispatch(event)`, processed in order on one queue. Handlers and `ChargePoint` translate
-to events and do not write state.
-
-`ChargePoint` remains as a facade with its public API. `Connector` fields become read views of the
-engine state. `ConnectorStateMachine` is deleted; `ALLOWED_CONNECTOR_STATUS_TRANSITIONS` stays, and is
-enforced only as a warning so that scenarios can keep forcing transitions. `StateManager` is reduced to
-recording `StateHistory` from engine output. `ChargePointEvents` keep their names and payloads, emitted
-from engine output. Persistence stores engine state.
-
-Default behaviors move one at a time into `application/engine/behaviors/`: firmware, signed firmware,
-diagnostics and logs, reset, availability, reservation, unlock, then transaction and connector status.
-Each move deletes the old code in the same commit. Calculations are called as services.
-
-Resume: state is restored, and `onResume` runs. Async positions are not restored.
 
 Status (stage B): `ChargerEngine` and `ChargerState` are in `application/engine/`; `ChargePoint` owns one
 (`cp.engine`) and offers `cp.loadBehavior(behavior)` and `cp.unloadBehavior(id)`. Decisions the
@@ -415,11 +228,7 @@ design left open:
   [testing strategy](testing-strategy.md#behavior-tests). Time is virtual, but the socket and the fake
   CSMS are real I/O, so the effect hash covers the ordered, normalized frames and not their timing.
 
-### Determinism
-
-Virtual-time mode runs on Bun and browsers against an in-process fake CSMS or a trace replay: one queue,
-a fixed tie-break, seeded streams. Same seed, same effects. Real-time mode (k6, a real CSMS) promises
-only explanation through seed and trace.
+### Determinism check (V1)
 
 **V1 (verified on Bun 1.3.14).** `packages/core/src/cp/shared/__tests__/virtualTime.determinism.bun.test.ts`
 runs 1,000 simulated chargers with behavior-shaped `async` loops on a `VirtualClock`: random sleeps,
@@ -439,28 +248,9 @@ has no real I/O of its own process in flight (the in-process fake CSMS must itse
 virtual timers or settle synchronously). Browsers: verified in stage D2 (see [Verification results](#verification-results));
 k6 runs on real time and promises only explanation through seed and trace.
 
-### Loading code
+### Stage C1: connector status, availability, error info
 
-- CLI and daemon: `--behavior <file>`, repeatable (stage D1: done, see its Status). The daemon needs `--allow-behavior-code` and refuses
-  the combination with `--unsafe-remote`. Loaded at start by dynamic import, bundled with `Bun.build`, into a library
-  by behavior id. Which charge point runs which behavior is data, chosen by id (stage E: done); `--watch-behaviors` and
-  `behavior.reload` re-read the same files (stage E: done); `behavior.reload` answers only with `--watch-behaviors` or
-  `--allow-behavior-reload` (review fixes 2).
-- `ocpp-cp-sim behavior build <file>` type-checks and writes one ESM bundle with `--external 'k6/*'`.
-- Web (stage D2: done): `LocalChargePointService.loadBehaviorBundle(id, blob | text)` loads a built bundle through
-  `import(blobUrl)`, in the local runtime only.
-- k6 (stage D2: done): `export-k6 --behavior <file>` generates a static import. The k6 host implements `ctx` over the
-  existing `ScenarioHost`, OCPP 1.6J only. A behavior whose `requires` the host cannot meet is refused
-  at export. Never degrade silently.
-- A test harness `runBehavior()` drives a behavior on a `VirtualClock` with a fake CSMS, and asserts the
-  same seed gives the same effect hash.
-
-## Out of scope
-
-QuickJS or any sandbox, remote delivery of code, an external-process plugin protocol, a console UI for
-writing behaviors, and retiring `export-k6`'s separate implementation.
-
-Status (stage C1): connector status, availability and error info are engine state, with one writer.
+connector status, availability and error info are engine state, with one writer.
 Decisions the design left open:
 
 - **State.** `ChargerState.connectors[id]` is a `ConnectorRecord` (`domain/connector/ConnectorRecord.ts`):
@@ -494,7 +284,9 @@ Decisions the design left open:
   state snapshots.
 - **Not in C1.** Transactions, persistence of engine state and resume: see stage C2.
 
-Status (stage C2): transactions, persistence and resume. Decisions the design left open:
+### Stage C2: transactions, persistence, resume
+
+transactions, persistence and resume. Decisions the design left open:
 
 - **State.** The transaction is a field of the connector's record: `ConnectorRecord.transaction` is a
   `TransactionRecord` (`domain/connector/TransactionRecord.ts`), plain JSON: the same shape as `Transaction`
@@ -534,7 +326,9 @@ Status (stage C2): transactions, persistence and resume. Decisions the design le
   interval and a callback, and is used on its own by scenarios and tests; moving it needs a store port and a
   codec like the transaction's, which is not a small change.
 
-Status (stage D1): loading behavior code. Decisions the design left open:
+### Stage D1: loading behavior code
+
+loading behavior code. Decisions the design left open:
 
 - **Loading.** `--behavior <file>` (repeatable) goes through `apps/cli/src/behavior/`: `Bun.build` bundles the
   file (`target: "bun"`, ESM, `k6` and `k6/*` external), the bundle is written to a temporary directory,
@@ -584,7 +378,9 @@ Status (stage D1): loading behavior code. Decisions the design left open:
   a real server, so a test of those two uploads is not free of real I/O.
 - **Not in D1.** Web loading of a bundle, `export-k6 --behavior` and a k6 `ctx` host (stage E).
 
-Status (stage D2): k6, browser and scale. Decisions the design left open:
+### Stage D2: k6, browser and scale
+
+k6, browser and scale. Decisions the design left open:
 
 - **k6 host.** `BehaviorHost` (`packages/k6-runtime/src/behaviorHost.ts`) implements `BehaviorContext` over
   `OcppChargePoint`, which is the `ScenarioHost` the interpreter drives. The charge point got three small
@@ -618,23 +414,14 @@ Status (stage D2): k6, browser and scale. Decisions the design left open:
 - **`drainMicrotasks` hops with a `MessageChannel` where `setImmediate` is absent** (browsers). `setTimeout(0)` was
   the fallback; see the measurement below.
 
-### Status (stage E): hooks, send interception, assignment, reload
+### Stage E: hooks, send interception, assignment, reload
 
 Everything below is additive. With no behavior that uses these features, the wire traffic is unchanged: the golden
 wire test passes with the fixtures of its first 157 cases untouched (`testing-strategy.md` lists what its
 normalization hides and the 175 cases added later), and the hot paths cost one boolean check
 (`hooked` / `intercepting` on the engine). Decisions the design left open:
 
-**Event hooks (`Behavior.on`).**
-
-| Hook                         | Payload                                                        | Raised when                                                                                                                                                                  |
-| ---------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `connectorStatus`            | `{ connectorId, from, to }`                                    | A connector's status record changes (every writer, local ones included; a write that keeps the value raises nothing, a restore raises nothing)                               |
-| `transactionStarted`         | `{ connectorId, transactionId, idTag }`                        | The connector gets a transaction record; on 1.6 `transactionId` is `0` until the CSMS answers, on 2.x the station's UUID                                                     |
-| `transactionStopped`         | `{ connectorId, transactionId, idTag, reason? }`               | The record gets its stop time (or is removed while running), once per transaction                                                                                            |
-| `connected` / `disconnected` | `{ at }` / `{ at, code?, reason? }`                            | The socket really opened / closed. The synthesized `connected` of a repeated `connect()` is not one. SOAP: when the callback is up                                           |
-| `callResult`                 | `{ action, messageId, outcome: "result" \| "error", payload }` | The CSMS answered a station-initiated CALL, any of them (automatic messages, `ctx.send`, the `ocppCall` node). An error carries `{ errorCode, errorDescription }` as payload |
-| `callReceived`               | `{ action, messageId, payload }`                               | The CSMS sent a CALL, before the gate looks at it. Observation only: it cannot change the answer                                                                             |
+**Event hooks (`Behavior.on`).** The table of hooks and their payloads is in the [contract](../concepts/charger-engine.md#event-hooks-behavioron).
 
 - **Delivery.** Events go on one FIFO queue and are delivered in a microtask after the turn that caused them,
   so a hook never runs inside the event (or inside the handler that raised it) and the state it sees is the state
@@ -646,7 +433,7 @@ normalization hides and the 175 cases added later), and the hot paths cost one b
   The order depends only on program order, so the same seed gives the same effects on a `VirtualClock`
   (`hooks.bun.test.ts`, 16 cases, one of them hashes two runs).
 - Payloads of `callResult` / `callReceived` are copies; a hook cannot change what the engine holds.
-- Dormant behaviors (loaded for a scenario's `useBehavior`) do not get hooks or `beforeSend`.
+- Dormant behaviors (loaded for a scenario's `useBehavior`) do not get hooks or `beforeSend` (superseded by review fixes 3: all or none).
 
 **Send interception (`Behavior.beforeSend`).**
 
@@ -735,7 +522,7 @@ Tests that target code this stage changes: none was deleted or weakened. `method
 tests with hand-written station doubles needed nothing: the transports read the engine through `behaviorTapOf`, which
 passes everything through for a double without an engine.
 
-### Status (review fixes 1): core regressions
+### Review fixes 1: core regressions
 
 An independent review of stages A to E found defects in the engine and in the way it reaches the wire. The
 golden wire test was strengthened first (see [testing strategy](testing-strategy.md#golden-wire-test)): the
@@ -785,7 +572,7 @@ Decisions the design left open:
 - **Tests changed because they pinned a defect:** `InboundCallGate.test.ts` expected `evse.connectorId` to pick
   the connector.
 
-### Status (review fixes 2): CLI, daemon, persistence, security, k6
+### Review fixes 2: CLI, daemon, persistence, security, k6
 
 The same review's findings outside the engine core. Decisions the design left open:
 
@@ -841,6 +628,46 @@ g.Date.now()`), `eval`, a connector reached through a parameter or `this`, and t
   installing no observer), `service.engineResume` and `service.engineStatePersistence` (they call
   `bootAccepted()`). The reviewer's A4 (a `default.` id keeps its state) now asserts the load is refused.
 
+### Review fixes 3: the re-review and the design review
+
+PR #637 passed CI and was reviewed twice more: a re-review of the code (all 56 earlier findings fixed; new
+findings N1 to N13 and three suspected ones P1 to P3) and a review of the design from the documents (M1 to M8,
+S1 to S11, C1 to C7). The maintainer's owner decided one thing: **a running scenario wins over code behaviors**.
+Decisions the reviews left open:
+
+- **Precedence (M1).** Policy, override, scenario rule (newest run first), code behavior (load order), default; kind
+  ranks before the exact connector. One page, [Who answers an inbound CALL](../concepts/call-precedence.md), tested
+  pair by pair on 1.6 and 2.0.1 including a CALL that names no connector. `_scenarioHandledConnectors` parking is
+  consulted only when a CALL reaches the default, so a `replace` rule bypasses it and an `extend` rule does not.
+- **Dormant behaviors are all or none (S1, N8).** While a run holds one, it has rules, `main`, hooks and `beforeSend`;
+  when the last holder lets go it has none. Supersedes "Dormant behaviors … do not get hooks or `beforeSend`"
+  (stage E) and "starts its `main` the first time" (review fixes 1): `main` now stops with the run.
+- **`virtual-time` is gone (S3).** `requires` is a closed set (`ocpp1.6`, `ocpp2.x`, `physical`, `raw-frames`); an
+  unknown name is refused at load. A physical verb or `ctx.raw` used without its capability is refused when the file
+  loads (a syntactic scan of `ctx.<member>`, `ctx["member"]` and `const { member } = ctx`; an alias still fails at
+  the call). Supersedes the template remark in stage D1 and the k6 refusal of `virtual-time` in stage D2.
+- **One door for refused behaviors (N2, N4).** The library refuses everything an engine always refuses when a file
+  loads; `cp.update` checks loadability before it closes the old station (N3); restore checks shape and fit per
+  behavior and gives up a single row only for a failure it could not foresee (and then unregisters it, P2).
+- **Rebinding (N5).** With `--allow-behavior-code`, same-origin CORS also needs the request's `Host` to be an IP
+  literal, `localhost` or the bind address; the web console on a LAN IP keeps working, one on a DNS name needs
+  `--cors-origin`. A `content-type` check on `/mcp` was not added: the Host guard closes the rebinding path and the
+  origin check already refuses cross-site pages.
+- **`beforeSend` keys on 2.x (S2).** Strict wire keys with two documented sugars (`StartTransaction`,
+  `StopTransaction` for `TransactionEvent` `Started` / `Ended`); the table is in the contract. `MeterValues` inside
+  a 2.x transaction is a `TransactionEvent`.
+- **`ctx.state` (S4, N12).** A key set to `undefined` is absent; the test harness throws on a value that cannot be
+  stored, the daemon warns and keeps the last storable value.
+- **Clock reads (P1).** `GetCompositeSchedule`, `SecurityEventNotification` and report stamps use
+  `ChargePoint.nowDate()`; `stationNow()` tolerates a hand-written station double.
+- **k6 (P3, N11).** The k6 host has a getter-only `ctx.state`. The hook order differs from core (k6 reports the boot
+  answer before `connected`); that is documented, not changed.
+- **Not done.** `mode: "disable"` (C7): it needs a new member in the contract, the k6 mirror and the schema, and the
+  recipe (`replace` with `ctx.accepted`, `noResponse`, `beforeSend` drop) is two lines. `ctx.waitForCall` (C2) and a
+  scripted mutant set (C6) were skipped as the task allowed.
+- **Tests changed because they pinned the old code:** `ChargerState.test` (`{ a: undefined }` is storable), and
+  `behaviorHost.test` (the k6 `ctx.state` assignment throws; `virtual-time` leaves the capability lists).
+
 ## Verification results
 
 All numbers were measured in the stage D2 container (4 cores, 11 GiB RAM, Linux x86_64, Bun 1.3.14), on
@@ -853,7 +680,7 @@ All numbers were measured in the stage D2 container (4 cores, 11 GiB RAM, Linux 
 | k6, `gracefulStop`               | `scripts/verify/behaviors/hang.ts` (a `main` awaiting a promise that never settles), `VUS=2 DURATION=8s`                                                                                                                                                    | **Pass.** 4 iterations, 0 interrupted: two of 7.5 s (stopped at `DURATION` − 2 s = 6 s, the hung `main` abandoned after 1.5 s) and two of 0.5 s (the wait-out of the last seconds). The run ended at 8.0 s; a hung iteration would have kept it open for k6's default 30 s `gracefulStop` more. The hang was reported, not hidden: `scenario_success` 0 % and `main of "hang" did not stop in time`                                                         |
 | k6, refusals                     | `behaviorExport.bun.test.ts`                                                                                                                                                                                                                                | **Pass.** `requires` `physical` / `ocpp2.x`, `mode: "extend"`, `ctx.plugIn`, a destructured `connector`, a missing file and `--scenario` together with `--behavior` each exit 1 with the reason and write nothing. The runtime copies import no `sleep` from `k6`                                                                                                                                                                                           |
 | Browser, behavior                | Playwright (`playwright-core` 1.65.0) driving the preinstalled Chromium 158 (revision 1254, nothing to install): the page loads `flaky-firmware.bundle.js` from a file input with `import(blobUrl)` on `LocalChargePointService`, connects to the fake CSMS | **Pass.** The CSMS saw BootNotification, two StatusNotifications and the four `FirmwareStatusNotification`s of the same behavior. `typeof setImmediate` is `"undefined"` in the page                                                                                                                                                                                                                                                                        |
-| Browser, determinism             | The V1 fleet of `virtualFleet.ts` run in the page and on Bun, effects hashed with SHA-256                                                                                                                                                                   | **Pass: identical.** 25 chargers x 1 h: `c745d5ba…` (the pinned hash of the Bun test); 200 x 1 h: `dbe7112e…`; 1,000 x 6 h: `e2babcf3…`, 1,317,480 effects, 980,637 timers; Chromium 9.9 s, Bun 8.6 s (**the 1,000 x 6 h hash no longer holds** since review fixes 1 changed the virtual clock; see "Review fixes 2" below)                                                                                                                                 |
+| Browser, determinism             | The V1 fleet of `virtualFleet.ts` run in the page and on Bun, effects hashed with SHA-256                                                                                                                                                                   | **Pass: identical.** 25 chargers x 1 h: `c745d5ba…` (the pinned hash of the Bun test); 200 x 1 h: `dbe7112e…`; 1,000 x 6 h: `e2babcf3…`, 1,317,480 effects, 980,637 timers; Chromium 9.9 s, Bun 8.6 s (**`e2babcf3…` could not be reproduced later**: the value at this commit and every later one is `e1a21e65…`; see [Why the 1,000 x 6 h hash changed](#why-the-1000-x-6-h-hash-changed))                                                                |
 | Browser, `setImmediate` fallback | Same fleet, 25 chargers x 1 virtual hour                                                                                                                                                                                                                    | **The first fallback failed on speed, not on correctness.** With `setTimeout(0)` the hash matched but took **17.3 s** in Chromium (38 ms on Bun): a browser clamps nested timers to 4 ms per macrotask hop. `drainMicrotasks` now uses a `MessageChannel`: 200 chargers x 1 h in 284 ms (Bun 182 ms), same hashes. `clock.browserHop.bun.test.ts` covers the path                                                                                           |
 | Scale, bare behavior loops       | `bun scripts/bench/engineScale.ts --mode bare`, one process per row                                                                                                                                                                                         | 1,000: 1.1 KB heap and 13 KB RSS per charger, 0.18 s per virtual hour. **10,000: heap +11 MB (1.2 KB each), RSS 99 to 148 MB, 2.9 s per virtual hour**, 595,684 timers                                                                                                                                                                                                                                                                                      |
 | Scale, real `ChargePoint`        | `--mode cp`, in-memory socket, 1.6J, no database                                                                                                                                                                                                            | **10,000 real `ChargePoint` instances fit, using about 1.3 GB at peak of the 11 GiB.** 1,000: heap 54 KB per charger, RSS 150 KB, 2.0 s per virtual hour; 2,000: 52 KB, 133 KB, 4.4 s; 5,000: 50 KB, 127 KB, 12.7 s; **10,000: heap 495 MB (49 KB per charger), RSS peak 1,312 MB (it fell to 736 MB after a GC), 31.9 s per virtual hour** for 625,100 messages and 1,195,100 timers. Time per charger-hour grows from 2.0 ms at 1,000 to 3.2 ms at 10,000 |
@@ -897,20 +724,20 @@ timed-out CALL (there is no answer to report; the waiter's own timeout is the si
 
 Re-run on 2026-11-08 at the head of this stage, after `VirtualClock`, the transports and the k6 host changed (same container class, Bun 1.3.14, k6 v2.3.0, Chromium 158 through `playwright-core` 1.65.0). Raw output is under `/work/scratch/out` and `/work/scratch/k6v`.
 
-| Item                                                                                            | Result now                                                                                                                                                                                                                                                                                                                                                                                      | Against before                                                |
-| ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| Real daemon, end to end (`scripts/verify/e2e/behaviorsDaemon.ts`, run with `--watch-behaviors`) | **Pass**, `ALL CHECKS PASSED`, 16 PASS lines                                                                                                                                                                                                                                                                                                                                                    | was 15 checks; unchanged otherwise                            |
-| k6, 5 VUs (`flaky-firmware`)                                                                    | **Pass.** 120 frames, 5 charge points x 2 iterations, 4 `FirmwareStatusNotification`s each, `scenario_success` 100 % (10 of 10), `ocpp_calls` 50, 17 iterations, 0 interrupted                                                                                                                                                                                                                  | identical frame counts                                        |
-| k6, 1 VU x 8 chargers (`heartbeat-loop`, `DURATION=14s`)                                        | **Pass.** 192 frames, 11 Heartbeats each, `scenario_success` 100 %, 0 interrupted                                                                                                                                                                                                                                                                                                               | identical                                                     |
-| k6, `gracefulStop` (`hang`, `VUS=2 DURATION=8s`)                                                | **Pass.** Ended at 8.0 s, 4 iterations, 0 interrupted; the hang is reported (`main of "hang" did not stop in time`, `scenario_success` 0 %)                                                                                                                                                                                                                                                     | identical                                                     |
-| k6, hooks (`k6-hooks`, `RUN_FOR_MS=6000`)                                                       | **Pass.** `Downloading`, `Installing`, `Installed` with `requestId: 42` (`beforeSend` rewrite), `Downloaded` dropped; `scenario_success` 100 % (2 of 2), 3 iterations, 0 interrupted                                                                                                                                                                                                            | identical; the host is now attached before boot               |
-| Chromium, behavior from a file input                                                            | **Pass.** `Downloading`, `Downloaded`, `Installing`, `Installed` at the CSMS; `typeof setImmediate` is `"undefined"`                                                                                                                                                                                                                                                                            | identical                                                     |
-| Bun vs Chromium hash                                                                            | **Agree** at all three sizes. 25 x 1 h `c745d5ba…` (5,627 effects) and 200 x 1 h `dbe7112e…` (45,459) are **unchanged**. 1,000 x 6 h is now `e1a21e65…` with 1,316,818 effects and 980,642 timers (was `e2babcf3…`, 1,317,480 and 980,637): the cause was not isolated (review fixes 1 changed the virtual clock and the transports' use of it); browser and Bun still agree. 6.6 s in the page | the old 1,000 x 6 h value is retired                          |
-| Scale, 10,000 real `ChargePoint`s                                                               | heap 508 MB after setup, 531 MB after the hour (50.5 KB per charger), **RSS peak 1,376 MB** (845 MB at the end), **36.9 s** per virtual hour, 625,100 messages, 1,195,100 timers. 1,000: 2.2 s, 56 KB heap per charger                                                                                                                                                                          | was 495 MB, 1,312 MB, 31.9 s: about 16 % slower, 5 % more RSS |
-| Scale, 10,000 bare loops                                                                        | heap +11 MB (1.2 KB each), 2.5 s per hour, 595,684 timers                                                                                                                                                                                                                                                                                                                                       | was 2.9 s                                                     |
-| Scale, 1,000 on real sockets                                                                    | heap 56 KB per charger, 3.3 s per virtual hour                                                                                                                                                                                                                                                                                                                                                  | was 55 KB, 3.6 s                                              |
-| Golden wire                                                                                     | 335 tests pass, fixtures untouched (no diff under `goldenWire`)                                                                                                                                                                                                                                                                                                                                 |                                                               |
-| Suites                                                                                          | `tsc -b`, `lint`, `check:boundaries` green. `vitest run`: 6 files / 80 tests fail (`CloseEvent is not defined`, the baseline), 5418 pass (baseline 5260). `bun test bun.test`: 2438 pass, 1 skip, 0 fail (baseline 1719)                                                                                                                                                                        |                                                               |
+| Item                                                                                            | Result now                                                                                                                                                                                                                                                                                                                                                                                                  | Against before                                                |
+| ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| Real daemon, end to end (`scripts/verify/e2e/behaviorsDaemon.ts`, run with `--watch-behaviors`) | **Pass**, `ALL CHECKS PASSED`, 16 PASS lines                                                                                                                                                                                                                                                                                                                                                                | was 15 checks; unchanged otherwise                            |
+| k6, 5 VUs (`flaky-firmware`)                                                                    | **Pass.** 120 frames, 5 charge points x 2 iterations, 4 `FirmwareStatusNotification`s each, `scenario_success` 100 % (10 of 10), `ocpp_calls` 50, 17 iterations, 0 interrupted                                                                                                                                                                                                                              | identical frame counts                                        |
+| k6, 1 VU x 8 chargers (`heartbeat-loop`, `DURATION=14s`)                                        | **Pass.** 192 frames, 11 Heartbeats each, `scenario_success` 100 %, 0 interrupted                                                                                                                                                                                                                                                                                                                           | identical                                                     |
+| k6, `gracefulStop` (`hang`, `VUS=2 DURATION=8s`)                                                | **Pass.** Ended at 8.0 s, 4 iterations, 0 interrupted; the hang is reported (`main of "hang" did not stop in time`, `scenario_success` 0 %)                                                                                                                                                                                                                                                                 | identical                                                     |
+| k6, hooks (`k6-hooks`, `RUN_FOR_MS=6000`)                                                       | **Pass.** `Downloading`, `Installing`, `Installed` with `requestId: 42` (`beforeSend` rewrite), `Downloaded` dropped; `scenario_success` 100 % (2 of 2), 3 iterations, 0 interrupted                                                                                                                                                                                                                        | identical; the host is now attached before boot               |
+| Chromium, behavior from a file input                                                            | **Pass.** `Downloading`, `Downloaded`, `Installing`, `Installed` at the CSMS; `typeof setImmediate` is `"undefined"`                                                                                                                                                                                                                                                                                        | identical                                                     |
+| Bun vs Chromium hash                                                                            | **Agree** at all three sizes. 25 x 1 h `c745d5ba…` (5,627 effects) and 200 x 1 h `dbe7112e…` (45,459) are **unchanged**. 1,000 x 6 h is now `e1a21e65…` with 1,316,818 effects and 980,642 timers (was `e2babcf3…`, 1,317,480 and 980,637): review fixes 1 did **not** change it (see [Why the 1,000 x 6 h hash changed](#why-the-1000-x-6-h-hash-changed)); browser and Bun still agree. 6.6 s in the page | the old 1,000 x 6 h value is retired                          |
+| Scale, 10,000 real `ChargePoint`s                                                               | heap 508 MB after setup, 531 MB after the hour (50.5 KB per charger), **RSS peak 1,376 MB** (845 MB at the end), **36.9 s** per virtual hour, 625,100 messages, 1,195,100 timers. 1,000: 2.2 s, 56 KB heap per charger                                                                                                                                                                                      | was 495 MB, 1,312 MB, 31.9 s: about 16 % slower, 5 % more RSS |
+| Scale, 10,000 bare loops                                                                        | heap +11 MB (1.2 KB each), 2.5 s per hour, 595,684 timers                                                                                                                                                                                                                                                                                                                                                   | was 2.9 s                                                     |
+| Scale, 1,000 on real sockets                                                                    | heap 56 KB per charger, 3.3 s per virtual hour                                                                                                                                                                                                                                                                                                                                                              | was 55 KB, 3.6 s                                              |
+| Golden wire                                                                                     | 335 tests pass, fixtures untouched (no diff under `goldenWire`)                                                                                                                                                                                                                                                                                                                                             |                                                               |
+| Suites                                                                                          | `tsc -b`, `lint`, `check:boundaries` green. `vitest run`: 6 files / 80 tests fail (`CloseEvent is not defined`, the baseline), 5418 pass (baseline 5260). `bun test bun.test`: 2438 pass, 1 skip, 0 fail (baseline 1719)                                                                                                                                                                                    |                                                               |
 
 The 10,000-charger slowdown is not attributed: the run was not repeated on a quiet machine and the earlier figure came from another container.
 
@@ -930,7 +757,7 @@ An independent review of ca01d302..30b57145 (a verdict of "not ready to merge") 
 | k6 (false success, unanswered CALLs, late hooks, no stop time, random streams, parity)                                                           | F7, F8, F37 to F39, F56, S2                  | **Review fixes 2**                                                                                         |
 | Source checks easy to bypass                                                                                                                     | S1                                           | **Review fixes 2** for the cheap forms; the rest is an accepted limit (see the status above)               |
 
-What remains: the accepted limits of the two source checks; a partial reload is retried in full (stations that already run the new version restart their `main`); a reloaded module whose top level never settles stays pending in memory; `onResume` does not run on a station that never boots; the 1,000 x 6 h determinism hash was re-pinned by review fixes 1, and the 10,000-charger run is slower than in stage D2 for a reason not found. The mutation runs of the review were not repeated for this stage.
+What remains: the accepted limits of the two source checks; a partial reload is retried in full (stations that already run the new version restart their `main`); a reloaded module whose top level never settles stays pending in memory; `onResume` does not run on a station that never boots; the 1,000 x 6 h determinism hash differs from the one first recorded, for a reason that could not be found (see below), and the 10,000-charger run is slower than in stage D2 for a reason not found. The mutation runs of the review were not repeated for this stage.
 
 ## Reset OnIdle after the merge of main
 
@@ -953,3 +780,28 @@ What remains: the accepted limits of the two source checks; a partial reload is 
   and a closed transaction no longer blocks the reset to `Available` (`16/201-ns-avail-drop`,
   `16/201-restart-closed-attached`). New cases: `201-reset-onidle-idle`, `201-reset-onidle-waits-for-last`,
   `201-reset-onidle-then-immediate`.
+
+### Why the 1,000 x 6 h hash changed
+
+Stage D2 recorded the 1,000 x 6 h hash as `e2babcf3…` (1,317,480 effects, 980,637 timers) on Bun and in Chromium.
+Review fixes 2 recorded `e1a21e65…` (1,316,818 effects, 980,642 timers), and the text blamed the clock changes of
+review fixes 1 without isolating them. The rule for a pinned determinism hash is the one the golden fixtures have: it
+changes only with a written cause. This is the investigation (2026-11-08, Bun 1.3.14, seed `pinned`, the fleet of
+`virtualFleet.ts`, `clock.ts` and `rng.ts` taken from each commit):
+
+| Commit                                                        | 25 x 1 h    | 1,000 x 6 h | Effects   | Timers  |
+| ------------------------------------------------------------- | ----------- | ----------- | --------- | ------- |
+| `aa935df8` (the commit of D2: browser, `virtualFleet.ts`)     | `c745d5ba…` | `e1a21e65…` | 1,316,818 | 980,642 |
+| `240fc270` (D2 verification results)                          | `c745d5ba…` | `e1a21e65…` | 1,316,818 | 980,642 |
+| `30b57145` (stage E)                                          | `c745d5ba…` | `e1a21e65…` | 1,316,818 | 980,642 |
+| `1fb1411d~1` and `1fb1411d` (the clock fix of review fixes 1) | `c745d5ba…` | `e1a21e65…` | 1,316,818 | 980,642 |
+| `HEAD`                                                        | `c745d5ba…` | `e1a21e65…` | 1,316,818 | 980,642 |
+
+Findings: (1) **Review fixes 1 did not change the hash**; the clock change is not the cause. (2) The value `e2babcf3…`
+cannot be reproduced at the commit it was recorded for or at any other. (3) The run does not depend on machine load
+(two runs side by side with four busy processes gave the same hash). The 25 x 1 h and 200 x 1 h values were stable
+throughout. The cause of the first value is therefore **unknown**; the likely explanations are a working tree that
+differed from the commit at the time of the measurement (the fleet was extracted into `virtualFleet.ts` in the same
+commit) or a different container, and neither can be checked now. What is pinned from here on is `e1a21e65…` for
+1,000 x 6 h, and `c745d5ba…` for 25 x 1 h (the one the Bun test holds); a change to either needs a written cause in
+this section.

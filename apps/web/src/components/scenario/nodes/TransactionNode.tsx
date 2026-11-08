@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, { memo } from "react";
 import type { NodeProps } from "@xyflow/react";
 import { Handle, Position, type Node } from "@xyflow/react";
@@ -7,6 +8,7 @@ const TransactionNode: React.FC<NodeProps<Node<TransactionNodeData>>> = ({
   data,
   selected,
 }) => {
+  const { t } = useTranslation();
   const actionColor =
     data.action === "start" ? "bg-green-600" : "bg-orange-600";
   const actionIcon = data.action === "start" ? "▶" : "■";
@@ -20,7 +22,7 @@ const TransactionNode: React.FC<NodeProps<Node<TransactionNodeData>>> = ({
       <Handle type="target" position={Position.Top} className="w-3 h-3" />
 
       <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-        Transaction
+        {t("scenarioNodes.title.transaction")}
       </div>
       <div className="flex items-center gap-2">
         <div
@@ -29,11 +31,15 @@ const TransactionNode: React.FC<NodeProps<Node<TransactionNodeData>>> = ({
           {actionIcon}
         </div>
         <div className="font-bold text-sm text-primary">
-          {data.action === "start" ? "Start" : "Stop"}
+          {data.action === "start"
+            ? t("scenarioNodes.transaction.start")
+            : t("scenarioNodes.transaction.stop")}
         </div>
       </div>
       {data.action === "start" && data.tagId && (
-        <div className="text-xs text-muted mt-1">Tag: {data.tagId}</div>
+        <div className="text-xs text-muted mt-1">
+          {t("scenarioNodes.transaction.tag", { value: data.tagId })}
+        </div>
       )}
       <Handle type="source" position={Position.Bottom} className="w-3 h-3" />
     </div>

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { t } from "../../i18n";
 import type { EVSettings } from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
 import type { ChargePointService } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
 
@@ -80,7 +81,7 @@ export function useSocMeterSync({
           return;
         }
         setError(
-          `Sync preference not read (${describeError(err)}): Set SoC leaves the meter alone until you turn sync on.`,
+          t("cp.socMeterSync.readFailed", { error: describeError(err) }),
         );
       });
 
@@ -95,7 +96,9 @@ export function useSocMeterSync({
       .setConnectorSocMeterSync(cpId, connectorId, autoSyncSocMeter)
       .catch((err) => {
         console.error("Failed to apply SoC/Meter sync to the connector", err);
-        setError(`Sync not applied to the connector: ${describeError(err)}`);
+        setError(
+          t("cp.socMeterSync.applyFailed", { error: describeError(err) }),
+        );
       });
   }, [chargePointService, cpId, connectorId, autoSyncSocMeter, isKnown]);
 

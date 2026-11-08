@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, { useRef } from "react";
 
 import { cn } from "@/lib/utils";
@@ -28,6 +29,7 @@ const ConnectorTabs: React.FC<ConnectorTabsProps> = ({
   onSelect,
   panelId,
 }) => {
+  const { t } = useTranslation();
   const tabRefs = useRef(new Map<number, HTMLButtonElement>());
 
   const move = (event: React.KeyboardEvent) => {
@@ -58,7 +60,7 @@ const ConnectorTabs: React.FC<ConnectorTabsProps> = ({
   return (
     <div
       role="tablist"
-      aria-label="Connectors"
+      aria-label={t("cp.connectors.label")}
       onKeyDown={move}
       className="inline-flex max-w-full flex-wrap gap-0.5 rounded-[9px] bg-cx-sub p-[3px]"
     >
@@ -76,7 +78,10 @@ const ConnectorTabs: React.FC<ConnectorTabsProps> = ({
             aria-selected={selected}
             aria-controls={panelId}
             tabIndex={selected ? 0 : -1}
-            title={`Connector ${connector.id} · ${connector.status}`}
+            title={t("cp.connectors.tabTitle", {
+              id: connector.id,
+              status: connector.status,
+            })}
             onClick={() => onSelect(connector.id)}
             className={cn(
               "inline-flex items-center gap-1.5 rounded-[7px] px-3 py-1 font-mono text-[13px] font-medium text-cx-muted hover:text-cx-fg",

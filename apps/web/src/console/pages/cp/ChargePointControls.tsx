@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, { useId, useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 
@@ -47,6 +48,7 @@ const ChargePointControls: React.FC<ChargePointControlsProps> = ({
   connected,
   heartbeat,
 }) => {
+  const { t } = useTranslation();
   const { chargePointService } = useDataContext();
   const { tagIds } = useGlobalTagIds();
   // Re-render every second: the countdown and the bar follow the clock.
@@ -78,7 +80,10 @@ const ChargePointControls: React.FC<ChargePointControlsProps> = ({
       console.error(`${label} failed on ${cpId}`, err);
       setErrors((prev) => ({
         ...prev,
-        [group]: `${label} failed: ${err instanceof Error ? err.message : String(err)}`,
+        [group]: t("cp.common.actionFailed", {
+          action: label,
+          message: err instanceof Error ? err.message : String(err),
+        }),
       }));
     } finally {
       setIsPending(false);
@@ -105,29 +110,36 @@ const ChargePointControls: React.FC<ChargePointControlsProps> = ({
     lastSentAt == null ? null : (now - lastSentAt.getTime()) / 1000;
   const lastSent =
     lastSentAt == null
-      ? "not sent yet"
-      : `last sent ${formatRelativeTime(lastSentAt)}`;
+      ? t("cp.cpControls.notSentYet")
+      : t("cp.cpControls.lastSent", { time: formatRelativeTime(lastSentAt) });
   let note: string;
-  if (!configured) note = "not configured";
+  if (!configured) note = t("cp.cpControls.notConfigured");
   else if (!connected || elapsed == null) note = lastSent;
-  else note = `next in ${Math.max(0, Math.ceil(intervalSeconds - elapsed))}s`;
+  else
+    note = t("cp.cpControls.nextIn", {
+      seconds: Math.max(0, Math.ceil(intervalSeconds - elapsed)),
+    });
   const pct =
     configured && elapsed != null ? (elapsed / intervalSeconds) * 100 : 0;
 
   return (
     <section
       data-testid="charge-point-controls"
-      aria-label="Charge point"
+      aria-label={t("cp.cpControls.title")}
       className="mb-4 rounded-[10px] border border-cx-border bg-cx-card px-[18px] py-4"
     >
       <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
         <div className="flex items-baseline gap-2 whitespace-nowrap">
-          <b className="text-[15px] font-semibold text-cx-fg">Charge point</b>
-          <span className="text-[12.5px] text-cx-muted">connector 0</span>
+          <b className="text-[15px] font-semibold text-cx-fg">
+            {t("cp.cpControls.title")}
+          </b>
+          <span className="text-[12.5px] text-cx-muted">
+            {t("cp.cpControls.connector0")}
+          </span>
         </div>
         <dl
           className="m-0 min-w-[180px]"
-          title="Set by BootNotification.conf and ChangeConfiguration HeartbeatInterval (§4.6)"
+          title={t("cp.cpControls.heartbeatTitle")}
         >
           <Figure
             label="Heartbeat"
@@ -152,7 +164,7 @@ const ChargePointControls: React.FC<ChargePointControlsProps> = ({
             disabled={disabled}
             onClick={() => void sendHeartbeat()}
           >
-            Send Heartbeat
+            {t("cp.cpControls.sendHeartbeat")}
           </Button>
           <Button
             type="button"
@@ -163,7 +175,7 @@ const ChargePointControls: React.FC<ChargePointControlsProps> = ({
             onClick={() => setOpen((v) => !v)}
             className={cn(open && "bg-cx-sub text-cx-fg")}
           >
-            Controls
+            {t("cp.cpControls.controls")}
             {open ? (
               <ChevronUp className="h-3.5 w-3.5" />
             ) : (
@@ -186,8 +198,10 @@ const ChargePointControls: React.FC<ChargePointControlsProps> = ({
       >
         <Group title="Heartbeat" error={open ? errors.heartbeat : null}>
           <Hint>
-            {configured ? `every ${intervalSeconds} s` : "not configured"} ·{" "}
-            {lastSent}
+            {configured
+              ? t("cp.cpControls.every", { seconds: intervalSeconds })
+              : t("cp.cpControls.notConfigured")}{" "}
+            · {lastSent}
           </Hint>
           <Row>
             <Button
@@ -197,7 +211,7 @@ const ChargePointControls: React.FC<ChargePointControlsProps> = ({
               disabled={disabled}
               onClick={() => void sendHeartbeat()}
             >
-              Send Heartbeat
+              {t("cp.cpControls.sendHeartbeat")}
             </Button>
           </Row>
         </Group>
@@ -205,18 +219,18 @@ const ChargePointControls: React.FC<ChargePointControlsProps> = ({
         <Group title="Authorize" error={errors.authorize}>
           <Row>
             <select
-              aria-label="TagID to authorize"
+              aria-label={t("cp.cpControls.tagToAuthorize")}
               value={tagId}
               onChange={(e) => setTagIdInput(e.target.value)}
               disabled={tagIds.length === 0}
               className={cn(SELECT_CLASS, "disabled:opacity-60")}
             >
               {tagIds.length === 0 ? (
-                <option value="">No TagIDs configured</option>
+                <option value="">{t("cp.cpControls.noTagIds")}</option>
               ) : (
-                tagIds.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
+                tagIds.map((tag) => (
+                  <option key={tag} value={tag}>
+                    {tag}
                   </option>
                 ))
               )}
@@ -235,13 +249,15 @@ const ChargePointControls: React.FC<ChargePointControlsProps> = ({
               Authorize
             </Button>
           </Row>
-          {tagIds.length === 0 && <Hint>Tag IDs come from Settings</Hint>}
+          {tagIds.length === 0 && (
+            <Hint>{t("cp.cpControls.tagIdsFromSettings")}</Hint>
+          )}
         </Group>
 
-        <Group title="Status and faults" error={errors.status}>
+        <Group title={t("cp.cpControls.statusAndFaults")} error={errors.status}>
           <Row>
             <select
-              aria-label="Charge point status"
+              aria-label={t("cp.cpControls.statusLabel")}
               value={status}
               onChange={(e) => setStatus(e.target.value as OCPPStatus)}
               className={SELECT_CLASS}
@@ -253,11 +269,11 @@ const ChargePointControls: React.FC<ChargePointControlsProps> = ({
               ))}
             </select>
             <select
-              aria-label="Error code"
+              aria-label={t("cp.cpControls.errorCode")}
               value={errorCode}
               onChange={(e) => setErrorCode(e.target.value)}
               disabled={status !== OCPPStatus.Faulted}
-              title="errorCode sent with Faulted"
+              title={t("cp.cpControls.errorCodeTitle")}
               className={cn(SELECT_CLASS, "disabled:opacity-60")}
             >
               {FAULT_ERROR_CODES.map((code) => (
@@ -273,12 +289,10 @@ const ChargePointControls: React.FC<ChargePointControlsProps> = ({
               disabled={disabled}
               onClick={() => void sendStatus()}
             >
-              Send status
+              {t("cp.cpControls.sendStatus")}
             </Button>
           </Row>
-          <Hint>
-            StatusNotification for connector 0 · errorCode only with Faulted
-          </Hint>
+          <Hint>{t("cp.cpControls.statusHint")}</Hint>
         </Group>
       </div>
     </section>

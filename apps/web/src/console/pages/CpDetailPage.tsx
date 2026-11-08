@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, { useCallback, useRef } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 
@@ -20,6 +21,7 @@ import ScenarioRunContent from "./scenarios/run/ScenarioRunContent";
  * panel's editor).
  */
 const CpDetailPage: React.FC = () => {
+  const { t } = useTranslation();
   const { cpId = "" } = useParams<{ cpId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const raw = searchParams.get("connector");
@@ -86,7 +88,7 @@ const CpDetailPage: React.FC = () => {
       <SidePanel
         open={runScenarioId !== null}
         onClose={handlePanelEscape}
-        label="Scenario run"
+        label={t("dashboard.detail.scenarioRunLabel")}
       >
         {runScenarioId !== null && (
           // Keyed so another run starts from a clean state.

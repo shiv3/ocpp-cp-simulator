@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, { useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -29,6 +30,7 @@ import {
 } from "../../lib/vehicleCatalog";
 import CurvePreview from "./CurvePreview";
 import ImportVehicleDialog from "./ImportVehicleDialog";
+import { t, type MessageKey } from "@/i18n";
 
 /**
  * Settings → Vehicle profiles (#458): the saved vehicles a connector, the
@@ -37,6 +39,7 @@ import ImportVehicleDialog from "./ImportVehicleDialog";
 const VehicleProfilesCard: React.FC<{ now?: () => string }> = ({
   now = () => new Date().toISOString(),
 }) => {
+  const { t } = useTranslation();
   const store = useVehicleProfiles();
   // Read once for every row: each Refresh uses the same catalog.
   const access = useVehicleCatalog();
@@ -49,42 +52,46 @@ const VehicleProfilesCard: React.FC<{ now?: () => string }> = ({
     >
       <div className="mb-4 flex items-start gap-3">
         <div className="flex-1">
-          <h2 className="text-lg font-semibold text-cx-fg">Vehicle profiles</h2>
+          <h2 className="text-lg font-semibold text-cx-fg">
+            {t("consoleShared.vehicle.title")}
+          </h2>
           <p className="mt-1 text-sm text-cx-muted">
-            Reusable vehicles for connectors, the default EV and scenarios.
-            Import one from Open EV Directory; it is stored here and works
-            offline afterwards. Your edits are kept when you refresh it.
+            {t("consoleShared.vehicle.description")}
           </p>
         </div>
         {store.supported && (
           <Button size="sm" onClick={() => setImporting(true)}>
-            Import from Open EV Directory
+            {t("consoleShared.vehicle.importButton")}
           </Button>
         )}
       </div>
 
       {!store.supported ? (
         <p className="text-sm text-cx-muted">
-          This console cannot store vehicle profiles.
+          {t("consoleShared.vehicle.unsupported")}
         </p>
       ) : store.error && !store.isKnown ? (
         <div
           role="alert"
           className="flex items-center gap-2 text-sm text-cx-rose"
         >
-          Vehicle profiles could not be read: {store.error}
+          {t("consoleShared.vehicle.readError", { error: store.error })}
           <Button
             size="sm"
             variant="outline"
             onClick={() => void store.reload()}
           >
-            Retry
+            {t("consoleShared.vehicle.retry")}
           </Button>
         </div>
       ) : !store.isKnown ? (
-        <p className="text-sm text-cx-muted">Loading…</p>
+        <p className="text-sm text-cx-muted">
+          {t("consoleShared.vehicle.loading")}
+        </p>
       ) : store.profiles.length === 0 ? (
-        <p className="text-sm text-cx-muted">No saved vehicle profile yet.</p>
+        <p className="text-sm text-cx-muted">
+          {t("consoleShared.vehicle.empty")}
+        </p>
       ) : (
         <ul className="flex flex-col gap-2">
           {store.profiles.map((profile) => (
@@ -124,12 +131,14 @@ const ProfileRow: React.FC<{
   onDelete: (id: string) => Promise<void>;
   now: () => string;
 }> = ({ profile, access, onSave, onDelete, now }) => {
+  const { t } = useTranslation();
   const [mode, setMode] = useState<RowMode>({ kind: "view" });
   const [message, setMessage] = useState<{
     text: string;
     error: boolean;
   } | null>(null);
   const specs = effectiveSpecs(profile);
+  const missingText = t("consoleShared.vehicle.missing");
   const origin = profile.origin;
   const missing = {
     AC: missingFields(profile, "AC"),
@@ -170,8 +179,8 @@ const ProfileRow: React.FC<{
         setMessage({
           text:
             result.reason === "curve_not_found"
-              ? "The imported curve is no longer published; the profile is unchanged."
-              : "The imported source record is no longer published; the profile is unchanged.",
+              ? t("consoleShared.vehicle.curveGone")
+              : t("consoleShared.vehicle.recordGone"),
           error: true,
         });
         return;
@@ -179,7 +188,7 @@ const ProfileRow: React.FC<{
       if (result.upToDate) {
         setMode({ kind: "view" });
         setMessage({
-          text: "Up to date with Open EV Directory.",
+          text: t("consoleShared.vehicle.upToDate"),
           error: false,
         });
         return;
@@ -197,7 +206,7 @@ const ProfileRow: React.FC<{
         );
         if (flagged) {
           setMessage({
-            text: "Open EV Directory no longer has this vehicle; the profile is kept as it is.",
+            text: t("consoleShared.vehicle.removedUpstream"),
             error: true,
           });
         }
@@ -213,23 +222,38 @@ const ProfileRow: React.FC<{
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="font-medium text-cx-fg">{profile.name}</span>
           <span className="font-mono text-xs text-cx-fg2">
-            battery {specs.usableBatteryKwh ?? "missing"} kWh · AC{" "}
-            {specs.acMaxKw ?? "missing"} kW
-            {specs.acPhases ? `, ${specs.acPhases} ph` : ""} · DC{" "}
-            {specs.dcMaxKw ?? "missing"} kW
-            {Object.keys(profile.overrides).length > 0 && " · edited"}
+            {t("consoleShared.vehicle.specsLine", {
+              battery: specs.usableBatteryKwh ?? missingText,
+              ac: specs.acMaxKw ?? missingText,
+              phases: specs.acPhases
+                ? t("consoleShared.vehicle.phases", { count: specs.acPhases })
+                : "",
+              dc: specs.dcMaxKw ?? missingText,
+              edited:
+                Object.keys(profile.overrides).length > 0
+                  ? t("consoleShared.vehicle.editedSuffix")
+                  : "",
+            })}
           </span>
           {origin ? (
             <span className="text-xs text-cx-muted">
-              Open EV Directory · specs from {origin.sourceId}
+              {t("consoleShared.vehicle.originSpecs", {
+                source: origin.sourceId,
+              })}
               {origin.curveId
-                ? ` · curve from ${origin.curveSourceId}, ${origin.curveQuality?.toLowerCase()}`
-                : " · no curve"}
+                ? ` · ${t("consoleShared.vehicle.originCurve", {
+                    source: origin.curveSourceId ?? "",
+                    quality: origin.curveQuality?.toLowerCase() ?? "",
+                  })}`
+                : ` · ${t("consoleShared.vehicle.originNoCurve")}`}
               {origin.datasetVersion ? ` · ${origin.datasetVersion}` : ""}
-              {origin.removedUpstream && " · no longer in the catalog"}
+              {origin.removedUpstream &&
+                ` · ${t("consoleShared.vehicle.originRemoved")}`}
             </span>
           ) : (
-            <span className="text-xs text-cx-muted">Made by hand</span>
+            <span className="text-xs text-cx-muted">
+              {t("consoleShared.vehicle.madeByHand")}
+            </span>
           )}
           {origin && origin.observations.length > 0 && (
             <span className="text-xs text-cx-amber">
@@ -240,8 +264,12 @@ const ProfileRow: React.FC<{
             (type) =>
               missing[type].length > 0 && (
                 <span key={type} className="text-xs text-cx-amber">
-                  Not usable for {type}:{" "}
-                  {missing[type].map((f) => FIELD_LABELS[f]).join(", ")} missing
+                  {t("consoleShared.vehicle.notUsable", {
+                    type,
+                    fields: missing[type]
+                      .map((f) => FIELD_LABELS[f])
+                      .join(", "),
+                  })}
                 </span>
               ),
           )}
@@ -255,7 +283,7 @@ const ProfileRow: React.FC<{
             variant="outline"
             onClick={() => setMode({ kind: "edit" })}
           >
-            Edit
+            {t("consoleShared.vehicle.edit")}
           </Button>
           {/* Still offered for a vehicle the catalog dropped: a later
               refresh that finds it again clears the flag. */}
@@ -266,7 +294,9 @@ const ProfileRow: React.FC<{
               disabled={mode.kind === "refreshing"}
               onClick={() => void refresh()}
             >
-              {mode.kind === "refreshing" ? "Refreshing…" : "Refresh"}
+              {mode.kind === "refreshing"
+                ? t("consoleShared.vehicle.refreshing")
+                : t("consoleShared.vehicle.refresh")}
             </Button>
           )}
           <Button
@@ -274,14 +304,16 @@ const ProfileRow: React.FC<{
             variant="destructive"
             onClick={() => setMode({ kind: "delete" })}
           >
-            Delete
+            {t("consoleShared.vehicle.delete")}
           </Button>
         </div>
       </div>
 
       {origin && (
         <details className="mt-1.5 text-xs text-cx-muted">
-          <summary className="cursor-pointer">Attribution</summary>
+          <summary className="cursor-pointer">
+            {t("consoleShared.vehicle.attribution")}
+          </summary>
           {origin.licenses.map((l) => (
             <p key={`${l.sourceId}:${l.id}`} className="mt-1">
               {l.attribution}
@@ -294,9 +326,11 @@ const ProfileRow: React.FC<{
         <InlineConfirm
           className="mt-2"
           danger
-          message={`Delete ${profile.name}? Connectors and scenarios keep the values they took from it.`}
-          confirmLabel="Delete"
-          cancelLabel="Keep"
+          message={t("consoleShared.vehicle.deleteConfirm", {
+            name: profile.name,
+          })}
+          confirmLabel={t("consoleShared.vehicle.delete")}
+          cancelLabel={t("consoleShared.vehicle.keep")}
           onCancel={() => setMode({ kind: "view" })}
           onConfirm={() => {
             setMode({ kind: "view" });
@@ -308,10 +342,10 @@ const ProfileRow: React.FC<{
       {mode.kind === "review" && (
         <div className="mt-2 rounded-md border border-cx-border bg-cx-sub px-3 py-2">
           <p className="font-medium text-cx-fg">
-            Open EV Directory has changed:
+            {t("consoleShared.vehicle.changed")}
           </p>
           <ul
-            aria-label="Refresh changes"
+            aria-label={t("consoleShared.vehicle.refreshChanges")}
             className="my-1 list-disc pl-4 text-xs"
           >
             {mode.changes.map((change) => (
@@ -319,20 +353,23 @@ const ProfileRow: React.FC<{
             ))}
           </ul>
           <p className="text-xs text-cx-muted">
-            Your edits are kept either way.
+            {t("consoleShared.vehicle.editsKept")}
           </p>
           <InlineConfirm
             className="mt-2"
-            message="Replace the imported values?"
-            confirmLabel="Replace"
-            cancelLabel="Keep current"
+            message={t("consoleShared.vehicle.replaceQuestion")}
+            confirmLabel={t("consoleShared.vehicle.replace")}
+            cancelLabel={t("consoleShared.vehicle.keepCurrent")}
             onCancel={() => setMode({ kind: "view" })}
             onConfirm={() => {
               const next = mode.next;
               setMode({ kind: "view" });
               void act(async () => {
                 await onSave(next);
-                setMessage({ text: "Refreshed.", error: false });
+                setMessage({
+                  text: t("consoleShared.vehicle.refreshed"),
+                  error: false,
+                });
               });
             }}
           />
@@ -367,37 +404,39 @@ const ProfileRow: React.FC<{
   );
 };
 
-const CHANGE_LABELS: Record<RefreshChange["field"], string> = {
-  ...FIELD_LABELS,
-  acConnectors: "AC connectors",
-  dcConnectors: "DC connectors",
-  variantId: "Variant id",
-  datasetVersion: "Dataset version",
-  dcCurve: "The DC curve",
-  licenses: "The licenses or their attribution",
-  backInCatalog: "Back in the catalog after being removed",
-  provider: "Provider",
-  makeName: "Make name",
-  modelName: "Model name",
-  variantName: "Variant name",
-  sourceId: "Source",
-  sourceRecordKey: "Source record",
-  sourceUrl: "Source URL",
-  curveId: "Curve id",
-  curveSourceId: "Curve source",
-  curveQuality: "Curve quality",
-  qualityBasis: "Curve quality basis",
-  observations: "Curve observations",
+const CHANGE_LABEL_KEYS: Partial<Record<RefreshChange["field"], MessageKey>> = {
+  acConnectors: "consoleShared.vehicle.change.acConnectors",
+  dcConnectors: "consoleShared.vehicle.change.dcConnectors",
+  variantId: "consoleShared.vehicle.change.variantId",
+  datasetVersion: "consoleShared.vehicle.change.datasetVersion",
+  dcCurve: "consoleShared.vehicle.change.dcCurve",
+  licenses: "consoleShared.vehicle.change.licenses",
+  backInCatalog: "consoleShared.vehicle.change.backInCatalog",
+  provider: "consoleShared.vehicle.change.provider",
+  makeName: "consoleShared.vehicle.change.makeName",
+  modelName: "consoleShared.vehicle.change.modelName",
+  variantName: "consoleShared.vehicle.change.variantName",
+  sourceId: "consoleShared.vehicle.change.sourceId",
+  sourceRecordKey: "consoleShared.vehicle.change.sourceRecordKey",
+  sourceUrl: "consoleShared.vehicle.change.sourceUrl",
+  curveId: "consoleShared.vehicle.change.curveId",
+  curveSourceId: "consoleShared.vehicle.change.curveSourceId",
+  curveQuality: "consoleShared.vehicle.change.curveQuality",
+  qualityBasis: "consoleShared.vehicle.change.qualityBasis",
+  observations: "consoleShared.vehicle.change.observations",
 };
 
 function showChangeValue(v: unknown): string {
-  if (v == null) return "missing";
-  if (Array.isArray(v)) return v.join(", ") || "none";
+  if (v == null) return t("consoleShared.vehicle.missing");
+  if (Array.isArray(v)) return v.join(", ") || t("consoleShared.vehicle.none");
   return String(v);
 }
 
 function describeChange(change: RefreshChange): string {
-  const label = CHANGE_LABELS[change.field];
+  const labelKey = CHANGE_LABEL_KEYS[change.field];
+  const label = labelKey
+    ? t(labelKey)
+    : FIELD_LABELS[change.field as keyof typeof FIELD_LABELS];
   if (!("before" in change)) return label;
   return `${label}: ${showChangeValue(change.before)} → ${showChangeValue(change.after)}`;
 }
@@ -412,6 +451,7 @@ const EditForm: React.FC<{
   onCancel: () => void;
   onSave: (profile: VehicleProfile) => void;
 }> = ({ profile, onCancel, onSave }) => {
+  const { t } = useTranslation();
   const [name, setName] = useState(profile.name);
   const [values, setValues] = useState<Record<EditableSpecField, string>>(
     () => {
@@ -440,9 +480,9 @@ const EditForm: React.FC<{
   return (
     <div className="mt-2 grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-x-3 gap-y-2 rounded-md border border-cx-border bg-cx-sub p-3">
       <label className="col-span-full flex flex-col gap-1 text-[11px] uppercase tracking-[0.06em] text-cx-faint">
-        Name
+        {t("consoleShared.vehicle.name")}
         <input
-          aria-label="Profile name"
+          aria-label={t("consoleShared.vehicle.profileName")}
           value={name}
           onChange={(e) => setName(e.target.value)}
           className={cn(FILTER_INPUT_CLASS, "normal-case tracking-normal")}
@@ -461,7 +501,7 @@ const EditForm: React.FC<{
             value={values[field]}
             placeholder={
               profile.specs[field] == null
-                ? "missing"
+                ? t("consoleShared.vehicle.missing")
                 : String(profile.specs[field])
             }
             onChange={(e) =>
@@ -477,7 +517,9 @@ const EditForm: React.FC<{
       <div className="col-span-full flex items-center justify-end gap-2">
         {invalid && (
           <span className="mr-auto text-xs text-cx-rose">
-            {FIELD_LABELS[invalid]} must be a number, 0 or more.
+            {t("consoleShared.vehicle.mustBeNumber", {
+              field: FIELD_LABELS[invalid],
+            })}
           </span>
         )}
         {Object.keys(profile.overrides).length > 0 && (
@@ -486,18 +528,18 @@ const EditForm: React.FC<{
             variant="ghost"
             onClick={() => onSave({ ...profile, overrides: {} })}
           >
-            Reset to imported values
+            {t("consoleShared.vehicle.resetToImported")}
           </Button>
         )}
         <Button size="sm" variant="outline" onClick={onCancel}>
-          Cancel
+          {t("consoleShared.vehicle.cancel")}
         </Button>
         <Button
           size="sm"
           disabled={!name.trim() || invalid !== undefined}
           onClick={save}
         >
-          Save
+          {t("consoleShared.vehicle.save")}
         </Button>
       </div>
     </div>

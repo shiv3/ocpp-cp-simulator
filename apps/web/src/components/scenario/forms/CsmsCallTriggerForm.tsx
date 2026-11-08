@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import {
   NumberField,
   JsonTextareaField,
@@ -11,6 +12,7 @@ export default function CsmsCallTriggerForm({
   value,
   onChange,
 }: NodeFormComponentProps<NodeFormData>) {
+  const { t } = useTranslation();
   const actionOptions = CSMS_CALL_TRIGGER_ACTIONS.map((action) => ({
     value: action,
     label: action,
@@ -19,37 +21,37 @@ export default function CsmsCallTriggerForm({
   return (
     <div className="space-y-3">
       <TextField
-        label="Label"
+        label={t("scenarioEditor.form.label")}
         value={(value.label as string | undefined) ?? ""}
         onChange={(label) => onChange({ ...value, label })}
       />
       <SelectField
-        label="Action"
+        label={t("scenarioEditor.form.action")}
         value={(value.action as string | undefined) ?? "Reset"}
         onChange={(action) => onChange({ ...value, action })}
         options={actionOptions}
       />
       <div>
         <NumberField
-          label="Timeout (seconds)"
+          label={t("scenarioEditor.form.timeoutSeconds")}
           value={typeof value.timeout === "number" ? value.timeout : 0}
           onChange={(timeout) => onChange({ ...value, timeout: timeout ?? 0 })}
           min={0}
         />
         <p className="text-xs text-muted mt-1">
-          0 = No timeout (wait indefinitely for CSMS call)
+          {t("scenarioEditor.csmsCallTrigger.timeoutHelp")}
         </p>
       </div>
       <div>
         <JsonTextareaField
-          label="Payload condition (JSON, optional)"
+          label={t("scenarioEditor.csmsCallTrigger.payloadCondition")}
           value={value.payload}
           onChange={(payload) => onChange({ ...value, payload })}
           placeholder='{"key": "HeartbeatInterval"}'
           optional
         />
         <p className="text-xs text-muted mt-1">
-          Partial match against the incoming call payload. Empty = any payload.
+          {t("scenarioEditor.csmsCallTrigger.payloadHelp")}
         </p>
       </div>
     </div>

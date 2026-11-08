@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, { useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -73,6 +74,7 @@ const ConnectorControls: React.FC<ConnectorControlsProps> = ({
   soc,
   evSettings,
 }) => {
+  const { t } = useTranslation();
   const { chargePointService: service } = useDataContext();
   const [pending, setPending] = useState<GroupId | null>(null);
   const [errors, setErrors] = useState<Record<GroupId, string | null>>({
@@ -126,9 +128,7 @@ const ConnectorControls: React.FC<ConnectorControlsProps> = ({
   // point is created again (reload, daemon restart).
   const handleRemove = async () => {
     if (
-      !window.confirm(
-        `Remove connector ${connectorId} from ${cpId}? The removal is not saved: the connector comes back when the charge point is created again.`,
-      )
+      !window.confirm(t("cp.controls.confirmRemove", { id: connectorId, cpId }))
     ) {
       return;
     }
@@ -139,7 +139,9 @@ const ConnectorControls: React.FC<ConnectorControlsProps> = ({
       console.error(`Failed to remove ${cpId}/${connectorId}`, err);
       setErrors((prev) => ({
         ...prev,
-        connector: `Connector not removed: ${describeError(err)}`,
+        connector: t("cp.controls.removeFailed", {
+          message: describeError(err),
+        }),
       }));
     }
   };
@@ -151,21 +153,21 @@ const ConnectorControls: React.FC<ConnectorControlsProps> = ({
       className="mt-3.5 rounded-[9px] border border-cx-border bg-[color-mix(in_srgb,var(--cx-sub)_55%,transparent)] px-3.5 py-3"
     >
       <h3 className="mb-2.5 flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.06em] text-cx-faint">
-        Simulator controls{" "}
+        {t("cp.controls.title")}{" "}
         <small className="text-xs font-normal normal-case tracking-normal text-cx-muted">
-          — what a real charger would not do by itself
+          {t("cp.controls.subtitle")}
         </small>
       </h3>
       <div className="grid grid-cols-[repeat(auto-fit,minmax(250px,1fr))] gap-2.5">
-        <Group title="Readings" error={errors.readings}>
+        <Group title={t("cp.controls.readings")} error={errors.readings}>
           <Row>
             <Hint className="w-11">SoC</Hint>
             <input
               type="number"
               min={0}
               max={100}
-              aria-label="SoC (%)"
-              placeholder="not reported"
+              aria-label={t("cp.controls.socAria")}
+              placeholder={t("cp.controls.notReported")}
               value={socShown}
               onChange={(e) => setSocText(e.target.value)}
               className={cn(INPUT, "min-w-[7.5rem]")}
@@ -189,13 +191,13 @@ const ConnectorControls: React.FC<ConnectorControlsProps> = ({
                 })
               }
             >
-              Set
+              {t("cp.controls.set")}
             </Button>
             <Button
               type="button"
               variant="outline"
               size="sm"
-              title="The next MeterValues carries no SoC sample"
+              title={t("cp.controls.clearSocTitle")}
               disabled={pending === "readings"}
               onClick={() =>
                 void run("readings", async () => {
@@ -204,16 +206,16 @@ const ConnectorControls: React.FC<ConnectorControlsProps> = ({
                 })
               }
             >
-              Clear
+              {t("cp.controls.clear")}
             </Button>
           </Row>
           <Row>
-            <Hint className="w-11">Meter</Hint>
+            <Hint className="w-11">{t("cp.controls.meter")}</Hint>
             <input
               type="number"
               min={0}
               step="0.01"
-              aria-label="Meter (kWh)"
+              aria-label={t("cp.controls.meterAria")}
               value={meterShown}
               onChange={(e) => setMeterText(e.target.value)}
               className={INPUT}
@@ -236,7 +238,7 @@ const ConnectorControls: React.FC<ConnectorControlsProps> = ({
                 })
               }
             >
-              Set
+              {t("cp.controls.set")}
             </Button>
           </Row>
           <Row>
@@ -251,15 +253,15 @@ const ConnectorControls: React.FC<ConnectorControlsProps> = ({
                 )
               }
             >
-              Send MeterValues now
+              {t("cp.controls.sendMeterValues")}
             </Button>
           </Row>
         </Group>
 
-        <Group title="Status and faults" error={errors.status}>
+        <Group title={t("cp.controls.statusAndFaults")} error={errors.status}>
           <Row>
             <select
-              aria-label="Status"
+              aria-label={t("cp.controls.status")}
               value={statusPick}
               onChange={(e) => setStatusPick(e.target.value as OCPPStatus)}
               className={SELECT}
@@ -277,13 +279,13 @@ const ConnectorControls: React.FC<ConnectorControlsProps> = ({
               disabled={pending === "status"}
               onClick={() => void sendStatus(statusPick)}
             >
-              Send status
+              {t("cp.controls.sendStatus")}
             </Button>
           </Row>
           <Row>
             <select
-              aria-label="Fault error code"
-              title="errorCode sent with Faulted"
+              aria-label={t("cp.controls.faultErrorCode")}
+              title={t("cp.controls.errorCodeTitle")}
               value={errorCode}
               onChange={(e) => setErrorCode(e.target.value)}
               className={SELECT}
@@ -301,17 +303,17 @@ const ConnectorControls: React.FC<ConnectorControlsProps> = ({
               disabled={pending === "status"}
               onClick={() => void sendStatus(OCPPStatus.Faulted)}
             >
-              Send Faulted
+              {t("cp.controls.sendFaulted")}
             </Button>
           </Row>
           <Hint>
-            Availability:{" "}
-            <b className="font-medium text-cx-fg2">{availability}</b> (the CSMS
-            sets it with ChangeAvailability)
+            {t("cp.controls.availability")}{" "}
+            <b className="font-medium text-cx-fg2">{availability}</b>{" "}
+            {t("cp.controls.availabilityNote")}
           </Hint>
         </Group>
 
-        <Group title="Connector" error={errors.connector}>
+        <Group title={t("cp.controls.connector")} error={errors.connector}>
           <Row>
             <Button
               type="button"
@@ -322,7 +324,7 @@ const ConnectorControls: React.FC<ConnectorControlsProps> = ({
                 void run("connector", () => plugIn(service, cpId, connectorId))
               }
             >
-              Plug in
+              {t("cp.controls.plugIn")}
             </Button>
             <Button
               type="button"
@@ -333,7 +335,7 @@ const ConnectorControls: React.FC<ConnectorControlsProps> = ({
                 void run("connector", () => unplug(service, cpId, connectorId))
               }
             >
-              Unplug
+              {t("cp.controls.unplug")}
             </Button>
           </Row>
           <Row>
@@ -341,16 +343,15 @@ const ConnectorControls: React.FC<ConnectorControlsProps> = ({
               type="button"
               variant="destructive"
               size="sm"
-              aria-label={`Remove connector ${connectorId}`}
+              aria-label={t("cp.controls.removeConnectorAria", {
+                id: connectorId,
+              })}
               onClick={() => void handleRemove()}
             >
-              Remove connector
+              {t("cp.controls.removeConnector")}
             </Button>
           </Row>
-          <Hint>
-            Removal is not saved; the connector comes back when the charge point
-            is created again.
-          </Hint>
+          <Hint>{t("cp.controls.removeHint")}</Hint>
         </Group>
       </div>
     </div>

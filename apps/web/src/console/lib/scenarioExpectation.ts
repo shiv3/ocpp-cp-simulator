@@ -1,3 +1,4 @@
+import { t } from "../../i18n";
 import type { ScenarioExpectation } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
 
 /** `m:ss` for a duration in ms (negative clamps to 0:00). */
@@ -21,7 +22,7 @@ export function describeExpectation(expectation: ScenarioExpectation): string {
     expectation.targetStatus ??
     expectation.event ??
     expectation.type
-  }${payloadConditioned ? " (payload condition)" : ""}`;
+  }${payloadConditioned ? ` (${t("common.payloadCondition")})` : ""}`;
 }
 
 /** Ms left before the parked node times out, or null when it waits forever.

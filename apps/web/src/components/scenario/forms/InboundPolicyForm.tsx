@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { SelectField, TextField } from "./FormFields";
 import type { NodeFormComponentProps, NodeFormData } from "./types";
 import {
@@ -14,15 +15,16 @@ export default function InboundPolicyForm({
   value,
   onChange,
 }: NodeFormComponentProps<NodeFormData>) {
+  const { t } = useTranslation();
   const actionOptions = INBOUND_POLICY_ACTIONS.map((action) => ({
     value: action,
     label: action,
   }));
 
   const policyOptions = [
-    { value: "answer", label: "Clear (Resume Normal)" },
-    { value: "callerror", label: "Reject with CallError" },
-    { value: "ignore", label: "Ignore (No Response)" },
+    { value: "answer", label: t("scenarioEditor.inboundPolicy.clear") },
+    { value: "callerror", label: t("scenarioEditor.inboundPolicy.reject") },
+    { value: "ignore", label: t("scenarioEditor.inboundPolicy.ignore") },
   ];
 
   const errorCodeOptions = INBOUND_POLICY_ERROR_CODES.map((code) => ({
@@ -59,18 +61,18 @@ export default function InboundPolicyForm({
   return (
     <div className="space-y-3">
       <TextField
-        label="Label"
+        label={t("scenarioEditor.form.label")}
         value={(value.label as string | undefined) ?? ""}
         onChange={(label) => onChange({ ...value, label })}
       />
       <SelectField
-        label="Action"
+        label={t("scenarioEditor.form.action")}
         value={currentAction}
         onChange={handleActionChange}
         options={actionOptions}
       />
       <SelectField
-        label="Policy"
+        label={t("scenarioEditor.inboundPolicy.policy")}
         value={currentPolicy}
         onChange={handlePolicyChange}
         options={policyOptions}
@@ -78,13 +80,13 @@ export default function InboundPolicyForm({
       {currentPolicy === "callerror" && (
         <>
           <SelectField
-            label="Error Code"
+            label={t("scenarioEditor.inboundPolicy.errorCode")}
             value={currentErrorCode}
             onChange={handleErrorCodeChange}
             options={errorCodeOptions}
           />
           <TextField
-            label="Error Description (optional)"
+            label={t("scenarioEditor.inboundPolicy.errorDescription")}
             value={(value.errorDescription as string | undefined) ?? ""}
             onChange={handleErrorDescriptionChange}
           />

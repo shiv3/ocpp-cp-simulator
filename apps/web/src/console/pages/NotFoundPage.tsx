@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React from "react";
 import { Link, useLocation } from "react-router-dom";
 import PageHeader from "../components/PageHeader";
@@ -5,17 +6,23 @@ import PageHeader from "../components/PageHeader";
 /** Any path the console does not route (and no legacy redirect claimed). */
 const NotFoundPage: React.FC = () => {
   const { pathname } = useLocation();
+  const { t } = useTranslation();
+  const [before, after = ""] = t("common.notFound.nothingAt", {
+    path: "\u0001",
+  }).split("\u0001");
   return (
     <div className="p-6">
       <Link
         to="/"
         className="mb-2 inline-block text-sm text-cx-accent hover:underline"
       >
-        ← Back to charge points
+        {t("common.notFound.back")}
       </Link>
-      <PageHeader title="Page not found" />
+      <PageHeader title={t("common.notFound.title")} />
       <p className="text-sm text-cx-fg2">
-        Nothing lives at <span className="font-mono">{pathname}</span>.
+        {before}
+        <span className="font-mono">{pathname}</span>
+        {after}
       </p>
     </div>
   );

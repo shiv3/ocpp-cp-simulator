@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, {
   Suspense,
   lazy,
@@ -44,6 +45,7 @@ import { getConfigBasicAuthPassword } from "@ocpp-cp-sim/client/configPort";
 import { useChargePointView } from "@/data/hooks/useChargePointView";
 import { downloadStoredLogs } from "@/lib/downloadStoredLogs";
 import { cn } from "@/lib/utils";
+import { t as translate, type MessageKey } from "@/i18n";
 import { useConfig } from "@/data/hooks/useConfig";
 import { useDataContext } from "@/data/providers/DataProvider";
 import { useServerInfo } from "@/data/hooks/useServerInfo";
@@ -97,14 +99,14 @@ type Section =
   | "network";
 
 /** The lower half's tabs, in order; `log` is the default. */
-const SECTIONS: ReadonlyArray<{ value: Section; label: string }> = [
-  { value: "log", label: "Message log" },
-  { value: "transactions", label: "Transactions" },
-  { value: "events", label: "Operational events" },
-  { value: "analysis", label: "Session analysis" },
-  { value: "diagnostics", label: "Diagnostics" },
-  { value: "expert", label: "Expert" },
-  { value: "network", label: "Network simulation" },
+const SECTIONS: ReadonlyArray<{ value: Section; labelKey: MessageKey }> = [
+  { value: "log", labelKey: "cp.section.log" },
+  { value: "transactions", labelKey: "cp.section.transactions" },
+  { value: "events", labelKey: "cp.section.events" },
+  { value: "analysis", labelKey: "cp.section.analysis" },
+  { value: "diagnostics", labelKey: "cp.section.diagnostics" },
+  { value: "expert", labelKey: "cp.section.expert" },
+  { value: "network", labelKey: "cp.section.network" },
 ];
 
 function isSection(value: string | null): value is Exclude<Section, "log"> {
@@ -224,6 +226,7 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
   selectedConnectorId,
   onSelectConnector,
 }) => {
+  const { t } = useTranslation();
   const isPanel = variant === "panel";
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -317,7 +320,7 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
         setNetworkSimLoadError(
           err instanceof Error
             ? err.message
-            : "Failed to load network simulation config",
+            : translate("cp.page.networkSimLoadFailed"),
         );
       });
   }, [cpId, chargePointService]);
@@ -374,7 +377,9 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
         void chargePointService.clearStoredLogs(cpId).catch((err) => {
           console.error(`Failed to clear stored logs for ${cpId}`, err);
           alert(
-            `Failed to clear stored logs: ${err instanceof Error ? err.message : String(err)}`,
+            translate("cp.page.clearLogsFailed", {
+              message: err instanceof Error ? err.message : String(err),
+            }),
           );
         });
       }
@@ -386,7 +391,9 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
     void downloadStoredLogs(chargePointService, [cpId], cpId).catch((err) => {
       console.error(`Failed to download logs for ${cpId}`, err);
       alert(
-        `Failed to download logs: ${err instanceof Error ? err.message : String(err)}`,
+        translate("cp.page.downloadLogsFailed", {
+          message: err instanceof Error ? err.message : String(err),
+        }),
       );
     });
   }, [chargePointService, cpId]);
@@ -483,7 +490,7 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
   };
 
   const handleDelete = async () => {
-    if (!window.confirm(`Delete charge point ${cpId}?`)) {
+    if (!window.confirm(translate("cp.page.confirmDelete", { id: cpId }))) {
       return;
     }
     setIsDeletePending(true);
@@ -558,7 +565,7 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
             to={backToListHref}
             className="mb-2 inline-block text-sm text-cx-accent hover:underline"
           >
-            ← Back to charge points
+            {t("cp.page.backToList")}
           </Link>
         )}
 
@@ -575,8 +582,8 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
                   disabled={labels === undefined}
                   title={
                     labels === undefined
-                      ? "Labels unknown: the charge point's config could not be read"
-                      : "Edit labels without reconnecting"
+                      ? t("cp.page.labelsUnknown")
+                      : t("cp.page.editLabelsTitle")
                   }
                   aria-expanded={isLabelsOpen}
                   aria-controls={isLabelsOpen ? labelsCardId : undefined}
@@ -587,7 +594,7 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
                   )}
                 >
                   <Tag className="h-3.5 w-3.5" />
-                  Labels
+                  {t("cp.page.labels")}
                 </Button>
               )}
               <Button
@@ -603,7 +610,7 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
                 )}
               >
                 <Settings className="h-3.5 w-3.5" />
-                Config
+                {t("cp.page.config")}
               </Button>
               <Button
                 type="button"
@@ -612,7 +619,7 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
                 disabled={isConnectPending}
                 onClick={() => void handleToggleConnect()}
               >
-                {isConnected ? "Disconnect" : "Connect"}
+                {isConnected ? t("cp.page.disconnect") : t("cp.page.connect")}
               </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -621,8 +628,8 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
                     variant="outline"
                     size="sm"
                     className="px-2"
-                    aria-label="More"
-                    title="More"
+                    aria-label={t("cp.page.more")}
+                    title={t("cp.page.more")}
                   >
                     <MoreHorizontal className="h-3.5 w-3.5" />
                   </Button>
@@ -632,7 +639,7 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
                     <Link
                       to={`/scenarios?tab=library&cp=${encodeURIComponent(cpId)}`}
                     >
-                      Scenarios
+                      {t("cp.page.scenarios")}
                     </Link>
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
@@ -642,7 +649,7 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
                     onSelect={() => void handleDelete()}
                   >
                     <Trash2 className="mr-2 h-3.5 w-3.5" />
-                    Delete
+                    {t("cp.page.delete")}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -653,12 +660,12 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
                     variant="outline"
                     size="sm"
                     className="px-2"
-                    title="Open as full page"
+                    title={t("cp.page.openFullPage")}
                   >
                     <Link
                       to={fullPageHref}
                       state={{ from: "/" }}
-                      aria-label="Open as full page"
+                      aria-label={t("cp.page.openFullPage")}
                     >
                       <Maximize2 className="h-3.5 w-3.5" />
                     </Link>
@@ -668,8 +675,8 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
                     variant="outline"
                     size="sm"
                     className="px-2"
-                    aria-label="Close side panel"
-                    title="Close (Esc)"
+                    aria-label={t("cp.page.closePanel")}
+                    title={t("cp.page.closeTitle")}
                     onClick={closePanel}
                   >
                     <X className="h-3.5 w-3.5" />
@@ -735,8 +742,8 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
 
         {connectorList.length === 0 ? (
           <EmptyState
-            title="No connectors"
-            hint="This charge point has no connectors yet."
+            title={t("cp.page.noConnectors")}
+            hint={t("cp.page.noConnectorsHint")}
           />
         ) : (
           <>
@@ -755,7 +762,9 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
                   <div
                     role="tabpanel"
                     id={connectorPanelId}
-                    aria-label={`Connector ${activeConnectorId}`}
+                    aria-label={t("cp.connector.title", {
+                      id: activeConnectorId,
+                    })}
                     className="mt-3"
                   >
                     <ConnectorCard
@@ -795,7 +804,7 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
                 <div
                   data-testid="connector-grid"
                   role="region"
-                  aria-label="Connectors"
+                  aria-label={t("cp.connectors.label")}
                   tabIndex={0}
                   className="relative grid snap-x snap-proximity items-start gap-4 overflow-x-auto overscroll-x-contain pb-2 [grid-auto-flow:column]"
                   style={{
@@ -832,9 +841,12 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
       </div>
 
       <BottomPanel
-        label="Charge point panel"
-        tabsLabel="Charge point sections"
-        tabs={visibleSections}
+        label={t("cp.page.panelLabel")}
+        tabsLabel={t("cp.page.sectionsLabel")}
+        tabs={visibleSections.map((item) => ({
+          value: item.value,
+          label: t(item.labelKey),
+        }))}
         active={section}
         onSelect={setSection}
         storageKey={
@@ -849,11 +861,11 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
             <>
               {logFilteredToActiveConnector && (
                 <span className="inline-flex items-center gap-1 rounded-full border border-cx-border bg-cx-sub px-2 text-[11.5px] leading-5 text-cx-fg2">
-                  Connector {activeConnectorId}
+                  {t("cp.connector.title", { id: activeConnectorId })}
                   <button
                     type="button"
-                    aria-label="Show every connector"
-                    title="Show every connector"
+                    aria-label={t("cp.page.showEveryConnector")}
+                    title={t("cp.page.showEveryConnector")}
                     onClick={() => setLogConnectorFilter([])}
                     className="inline-flex items-center rounded-full text-cx-muted hover:text-cx-fg"
                   >
@@ -865,7 +877,7 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
                 to={`/logs?cp=${encodeURIComponent(cpId)}`}
                 className="truncate whitespace-nowrap text-xs text-cx-accent hover:underline"
               >
-                Open in Message Log →
+                {t("cp.page.openInMessageLog")}
               </Link>
             </>
           ) : undefined
@@ -901,7 +913,7 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
             <Suspense
               fallback={
                 <div className="p-6 text-sm text-cx-muted">
-                  Loading operational events…
+                  {t("cp.page.loadingEvents")}
                 </div>
               }
             >
@@ -915,7 +927,7 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
             <Suspense
               fallback={
                 <div className="p-6 text-sm text-cx-muted">
-                  Loading session analysis…
+                  {t("cp.page.loadingAnalysis")}
                 </div>
               }
             >
@@ -932,14 +944,14 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
             {connectorList.length > 1 && (
               <select
                 data-testid="diagnostics-connector"
-                aria-label="Connector"
+                aria-label={t("cp.page.connectorSingular")}
                 value={activeConnectorId ?? ""}
                 onChange={(e) => onSelectConnector(Number(e.target.value))}
                 className={cn(FILTER_SELECT_CLASS, "mb-3")}
               >
                 {connectorList.map((connector) => (
                   <option key={connector.id} value={connector.id}>
-                    Connector {connector.id}
+                    {t("cp.connector.title", { id: connector.id })}
                   </option>
                 ))}
               </select>
@@ -949,7 +961,7 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
                 <Suspense
                   fallback={
                     <div className="p-6 text-sm text-cx-muted">
-                      Loading state diagram…
+                      {t("cp.page.loadingDiagram")}
                     </div>
                   }
                 >
@@ -961,8 +973,8 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
               </div>
             ) : (
               <EmptyState
-                title="State diagram unavailable"
-                hint="The state transition diagram is available in local mode only."
+                title={t("cp.page.diagramUnavailable")}
+                hint={t("cp.page.diagramUnavailableHint")}
               />
             )}
           </section>
@@ -988,21 +1000,21 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
               )}
               {networkSimGlobalConfig === undefined && !networkSimLoadError && (
                 <p className="text-sm text-cx-muted">
-                  Loading network simulation…
+                  {t("cp.page.loadingNetworkSim")}
                 </p>
               )}
               {networkSimGlobalConfig === null && !networkSimLoadError && (
                 // No global layer saved: this charge point's settings are an
                 // override of it, so there is nothing to edit yet.
                 <EmptyState
-                  title="Network simulation is not set up"
-                  hint="Create the global layer first; this charge point's settings are an override of it."
+                  title={t("cp.page.networkSimNotSetUp")}
+                  hint={t("cp.page.networkSimNotSetUpHint")}
                   action={
                     <Link
                       to="/settings#network-simulation"
                       className="text-sm text-cx-accent hover:underline"
                     >
-                      Open Settings → Network simulation
+                      {t("cp.page.openNetworkSettings")}
                     </Link>
                   }
                 />
@@ -1043,7 +1055,7 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
                     snapshot.networkSim.manualRuleIds.length > 0 && (
                       <div className="mt-6 border-t border-cx-border pt-6">
                         <h3 className="mb-4 text-base font-semibold text-cx-fg">
-                          Manual Rules
+                          {t("cp.page.manualRules")}
                         </h3>
                         <ManualDisconnectButtons
                           manualRuleIds={snapshot.networkSim.manualRuleIds}

@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -78,6 +79,7 @@ const RunReportView: React.FC<RunReportViewProps> = ({
   scenarioId,
   runId,
 }) => {
+  const { t } = useTranslation();
   const { chargePointService } = useDataContext();
   const [state, setState] = useState<ReportState>({ status: "loading" });
 
@@ -103,19 +105,21 @@ const RunReportView: React.FC<RunReportViewProps> = ({
   }, [chargePointService, cpId, connectorId, scenarioId, runId]);
 
   if (state.status === "loading") {
-    return <p className="text-sm text-cx-muted">Loading…</p>;
+    return (
+      <p className="text-sm text-cx-muted">{t("scenarioRun.report.loading")}</p>
+    );
   }
   if (state.status === "missing") {
     return (
       <p className="text-sm text-cx-muted">
-        The report for run {runId} is no longer available.
+        {t("scenarioRun.report.missing", { runId })}
       </p>
     );
   }
   if (state.status === "error") {
     return (
       <p className="text-sm text-cx-rose">
-        Could not load the report: {state.message}
+        {t("scenarioRun.report.loadError", { error: state.message })}
       </p>
     );
   }
@@ -151,41 +155,45 @@ const RunReportView: React.FC<RunReportViewProps> = ({
             )
           }
         >
-          Download JSON
+          {t("scenarioRun.report.downloadJson")}
         </Button>
       </div>
 
       <dl className="mt-3 grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-xs">
-        <dt className="text-cx-muted">Target</dt>
+        <dt className="text-cx-muted">{t("scenarioRun.report.target")}</dt>
         <dd>
           {report.cpId} · C{report.connectorId} ·{" "}
           {report.scenarioName ?? report.scenarioId}
         </dd>
-        <dt className="text-cx-muted">Started</dt>
+        <dt className="text-cx-muted">{t("scenarioRun.report.started")}</dt>
         <dd>{startedAt.toLocaleString()}</dd>
-        <dt className="text-cx-muted">Ended</dt>
+        <dt className="text-cx-muted">{t("scenarioRun.report.ended")}</dt>
         <dd>
           {endedAt.toLocaleString()} ({formatDurationMs(report.durationMs)})
         </dd>
-        <dt className="text-cx-muted">Execution</dt>
+        <dt className="text-cx-muted">{t("scenarioRun.report.execution")}</dt>
         <dd>
           {report.executionState}
-          {report.stopped ? " · stopped by an operator" : ""}
+          {report.stopped ? t("scenarioRun.report.stopped") : ""}
           {report.timeout
-            ? ` · timed out on node ${report.timeout.nodeId}`
+            ? t("scenarioRun.report.timedOut", {
+                nodeId: report.timeout.nodeId,
+              })
             : ""}
         </dd>
-        <dt className="text-cx-muted">Conformance</dt>
+        <dt className="text-cx-muted">{t("scenarioRun.report.conformance")}</dt>
         <dd>{report.conformanceVerdict}</dd>
-        <dt className="text-cx-muted">Compatibility</dt>
+        <dt className="text-cx-muted">
+          {t("scenarioRun.report.compatibility")}
+        </dt>
         <dd>
           {report.compatibilityVerdict}
-          {report.strict ? " (strict)" : ""}
+          {report.strict ? t("scenarioRun.report.strict") : ""}
         </dd>
       </dl>
 
       {report.errors.length > 0 && (
-        <Section title="Errors">
+        <Section title={t("scenarioRun.report.errors")}>
           <ul className="list-disc pl-5 text-cx-rose">
             {report.errors.map((message, index) => (
               <li key={index}>{message}</li>
@@ -194,10 +202,14 @@ const RunReportView: React.FC<RunReportViewProps> = ({
         </Section>
       )}
 
-      <Section title={`Assertions (${report.assertions.length})`}>
+      <Section
+        title={t("scenarioRun.report.assertions", {
+          count: report.assertions.length,
+        })}
+      >
         {report.assertions.length === 0 ? (
           <p className="text-xs text-cx-muted">
-            The scenario declares no assertions.
+            {t("scenarioRun.report.noAssertions")}
           </p>
         ) : (
           <ul className="space-y-1">
@@ -223,14 +235,13 @@ const RunReportView: React.FC<RunReportViewProps> = ({
       </Section>
 
       {report.interventions.length > 0 && (
-        <Section title="Wait interventions">
+        <Section title={t("scenarioRun.report.interventions")}>
           <ul className="space-y-1 text-xs">
             {report.interventions.map((intervention, index) => (
               <li key={index}>
                 {formatLogTime(new Date(intervention.at))} · {intervention.kind}
-                {intervention.seconds
-                  ? ` +${intervention.seconds} s`
-                  : ""} on{" "}
+                {intervention.seconds ? ` +${intervention.seconds} s` : ""}{" "}
+                {t("scenarioRun.report.onNode")}{" "}
                 <span className="font-mono">{intervention.nodeId}</span>
               </li>
             ))}
@@ -238,10 +249,14 @@ const RunReportView: React.FC<RunReportViewProps> = ({
         </Section>
       )}
 
-      <Section title={`Transcript (${report.transcript.length} messages)`}>
+      <Section
+        title={t("scenarioRun.report.transcript", {
+          count: report.transcript.length,
+        })}
+      >
         {report.transcript.length === 0 ? (
           <p className="text-xs text-cx-muted">
-            No OCPP message was exchanged during the run.
+            {t("scenarioRun.report.noTranscript")}
           </p>
         ) : (
           <div className="max-h-[400px] overflow-auto rounded-lg border border-cx-border">
@@ -249,9 +264,15 @@ const RunReportView: React.FC<RunReportViewProps> = ({
               <thead className="sticky top-0 bg-cx-sub text-cx-muted">
                 <tr>
                   <th className="px-2 py-1 font-medium">#</th>
-                  <th className="px-2 py-1 font-medium">Time</th>
-                  <th className="px-2 py-1 font-medium">Dir</th>
-                  <th className="px-2 py-1 font-medium">Message</th>
+                  <th className="px-2 py-1 font-medium">
+                    {t("scenarioRun.report.time")}
+                  </th>
+                  <th className="px-2 py-1 font-medium">
+                    {t("scenarioRun.report.dir")}
+                  </th>
+                  <th className="px-2 py-1 font-medium">
+                    {t("scenarioRun.report.message")}
+                  </th>
                 </tr>
               </thead>
               <tbody>

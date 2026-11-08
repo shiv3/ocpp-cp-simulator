@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React from "react";
 
 import { cn } from "@/lib/utils";
@@ -13,12 +14,13 @@ export interface LabelChipsProps {
  * daemon returned them. Renders nothing when there are none.
  */
 const LabelChips: React.FC<LabelChipsProps> = ({ labels, className }) => {
+  const { t } = useTranslation();
   const entries = Object.entries(labels ?? {});
   if (entries.length === 0) return null;
   return (
     <span
       className={cn("inline-flex flex-wrap items-center gap-1", className)}
-      aria-label="Labels"
+      aria-label={t("consoleShared.labelChips.label")}
     >
       {entries.map(([key, value]) => (
         <span

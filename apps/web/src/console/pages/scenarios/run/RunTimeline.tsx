@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, { useMemo } from "react";
 import { Check } from "lucide-react";
 
@@ -29,20 +30,21 @@ const RunTimeline: React.FC<RunTimelineProps> = ({
   executedNodeIds,
   state,
 }) => {
+  const { t } = useTranslation();
   const { steps, isLinear } = useMemo(
     () => deriveDisplayedSteps(scenario),
     [scenario],
   );
 
   if (steps.length === 0) {
-    return <p className="text-sm text-cx-muted">This scenario has no steps.</p>;
+    return <p className="text-sm text-cx-muted">{t("scenarioRun.noSteps")}</p>;
   }
 
   return (
     <div className="space-y-2">
       {!isLinear && (
         <div className="rounded-md border border-cx-amber/40 bg-cx-amber/10 px-3 py-2 text-xs text-cx-amber">
-          branching scenario — order approximate
+          {t("scenarioRun.timeline.branching")}
         </div>
       )}
       <ol className="space-y-1.5">
@@ -83,7 +85,13 @@ const RunTimeline: React.FC<RunTimelineProps> = ({
                   isFailedNode && "bg-cx-rose/10 text-cx-rose",
                 )}
                 aria-label={
-                  isFailedNode ? "failed" : status === "done" ? "done" : status
+                  isFailedNode
+                    ? t("scenarioRun.phase.failed")
+                    : status === "done"
+                      ? t("scenarioRun.phase.done")
+                      : status === "pending"
+                        ? t("scenarioRun.phase.pending")
+                        : t("scenarioRun.phase.current")
                 }
               >
                 {isFailedNode ? (

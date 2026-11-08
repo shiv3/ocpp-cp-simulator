@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React from "react";
 
 import type { ActiveChargingProfile } from "@ocpp-cp-sim/core/cp/domain/connector/Connector";
@@ -21,20 +22,18 @@ const ChargingProfilesList: React.FC<ChargingProfilesListProps> = ({
   profiles,
   current,
 }) => {
+  const { t } = useTranslation();
   const shown = profiles.length > 0 ? profiles : current ? [current] : [];
 
   return (
     <details data-testid="charging-profiles" className="text-xs">
       {/* Styled as the card's other key-figure labels; the list opens below. */}
       <summary className="cursor-pointer select-none text-[11px] uppercase tracking-[0.06em] text-cx-faint hover:text-cx-fg2">
-        Charging profiles ({shown.length})
+        {t("cp.profiles.summary", { count: shown.length })}
       </summary>
       <div className="mt-2 space-y-2">
         {shown.length === 0 ? (
-          <p className="text-cx-muted">
-            No charging profile: the connector charges at its unrestricted rate
-            until the CSMS sends a SetChargingProfile.
-          </p>
+          <p className="text-cx-muted">{t("cp.profiles.empty")}</p>
         ) : (
           shown.map((profile) => {
             const paused = profile.chargingSchedulePeriods.every(
@@ -53,13 +52,16 @@ const ChargingProfilesList: React.FC<ChargingProfilesListProps> = ({
                     #{profile.chargingProfileId}
                   </span>
                   <span className={paused ? "text-cx-amber" : "text-cx-fg2"}>
-                    {paused ? "Paused · " : ""}
-                    {isCurrent ? "Current" : "Stored"}
+                    {paused ? `${t("cp.profiles.paused")} · ` : ""}
+                    {isCurrent
+                      ? t("cp.profiles.current")
+                      : t("cp.profiles.stored")}
                   </span>
                 </div>
                 <div className="mt-0.5 text-cx-fg2">
                   {profile.chargingProfilePurpose} ·{" "}
-                  {profile.chargingProfileKind} · stack {profile.stackLevel}
+                  {profile.chargingProfileKind} ·{" "}
+                  {t("cp.profiles.stack", { level: profile.stackLevel })}
                 </div>
                 <ul className="mt-1 space-y-0.5 font-mono">
                   {profile.chargingSchedulePeriods.map((period, idx) => (

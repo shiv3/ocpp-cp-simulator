@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -9,6 +10,7 @@ import {
   type OcppCallCatalog,
 } from "@ocpp-cp-sim/core/cp/infrastructure/transport/codec/ocppCallCatalog";
 import EmptyState from "../../components/EmptyState";
+import { type MessageKey } from "../../../i18n";
 
 export interface ExpertCallPanelProps {
   cpId: string;
@@ -22,15 +24,15 @@ const pretty = (value: unknown) => JSON.stringify(value, null, 2);
 /** The payload text as an object, or why it cannot be sent at all. */
 function parsePayload(
   text: string,
-): { payload: Record<string, unknown> } | { problem: string } {
+): { payload: Record<string, unknown> } | { problemKey: MessageKey } {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch {
-    return { problem: "Payload is not valid JSON" };
+    return { problemKey: "cpPanels.expert.notJson" };
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    return { problem: "Payload must be a JSON object" };
+    return { problemKey: "cpPanels.expert.notObject" };
   }
   return { payload: parsed as Record<string, unknown> };
 }
@@ -48,20 +50,21 @@ const ExpertCallPanel: React.FC<ExpertCallPanelProps> = ({
   ocppVersion,
   connected,
 }) => {
+  const { t } = useTranslation();
   const catalog = ocppVersion ? getOcppCallCatalog(ocppVersion) : null;
   if (!ocppVersion) {
     return (
       <EmptyState
-        title="OCPP version unknown"
-        hint="Expert calls need the charge point's OCPP version."
+        title={t("cpPanels.expert.versionUnknown")}
+        hint={t("cpPanels.expert.versionUnknownHint")}
       />
     );
   }
   if (!catalog) {
     return (
       <EmptyState
-        title="Expert OCPP calls are not available over SOAP"
-        hint={`${ocppVersion} builds each SOAP envelope per operation; only OCPP-J stations (1.6J, 2.0.1, 2.1) can send an arbitrary call.`}
+        title={t("cpPanels.expert.soapTitle")}
+        hint={t("cpPanels.expert.soapHint", { version: ocppVersion })}
       />
     );
   }
@@ -84,6 +87,7 @@ const ExpertCallForm: React.FC<{
   catalog: OcppCallCatalog;
   connected: boolean;
 }> = ({ cpId, ocppVersion, catalog, connected }) => {
+  const { t } = useTranslation();
   const { chargePointService } = useDataContext();
   // Every OCPP-J version has it (ocppCallCatalog.test.ts), and it needs no
   // payload.
@@ -137,21 +141,21 @@ const ExpertCallForm: React.FC<{
     }
   };
 
-  const problem = "problem" in parsed ? parsed.problem : schemaWarning;
+  const problem = "problemKey" in parsed ? t(parsed.problemKey) : schemaWarning;
 
   return (
     <div className="space-y-4 rounded-[10px] border border-cx-border bg-cx-card shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none p-6 text-sm">
       <p className="text-cx-fg2">
-        Send any station-initiated {ocppVersion} call through the normal
-        connection. The answer is logged and shown below; it changes the
-        station's state only when you ask for it.
+        {t("cpPanels.expert.intro", { version: ocppVersion })}
       </p>
 
       <div className="flex flex-wrap items-end gap-3">
         <label className="flex flex-col gap-1">
-          <span className="text-xs font-semibold text-cx-fg2">Action</span>
+          <span className="text-xs font-semibold text-cx-fg2">
+            {t("cpPanels.expert.action")}
+          </span>
           <select
-            aria-label="Action"
+            aria-label={t("cpPanels.expert.action")}
             value={action}
             onChange={(e) => loadDefault(e.target.value)}
             className="rounded-md border border-cx-border-strong px-2 py-1 text-sm text-cx-fg"
@@ -169,16 +173,16 @@ const ExpertCallForm: React.FC<{
           size="sm"
           onClick={() => loadDefault(action)}
         >
-          Reset to default
+          {t("cpPanels.expert.resetDefault")}
         </Button>
       </div>
 
       <label className="flex flex-col gap-1">
         <span className="text-xs font-semibold text-cx-fg2">
-          Payload (JSON)
+          {t("cpPanels.expert.payloadJson")}
         </span>
         <Textarea
-          aria-label="Payload"
+          aria-label={t("cpPanels.expert.payloadAria")}
           value={payloadText}
           onChange={(e) => setPayloadText(e.target.value)}
           rows={12}
@@ -201,10 +205,7 @@ const ExpertCallForm: React.FC<{
             checked={skipValidation}
             onChange={(e) => setSkipValidation(e.target.checked)}
           />
-          <span>
-            Skip schema validation — send a schema-invalid payload on purpose
-            (this call only)
-          </span>
+          <span>{t("cpPanels.expert.skipValidation")}</span>
         </label>
         <label className="flex items-center gap-2">
           <input
@@ -213,16 +214,16 @@ const ExpertCallForm: React.FC<{
             checked={applyResponse}
             onChange={(e) => setApplyResponse(e.target.checked)}
           />
-          <span>Apply the answer to the station's state</span>
+          <span>{t("cpPanels.expert.applyResponse")}</span>
         </label>
       </div>
 
       <Button type="button" disabled={!canSend} onClick={handleSend}>
-        Send
+        {t("cpPanels.expert.send")}
       </Button>
       {!connected && (
         <p className="text-xs text-cx-muted">
-          Connect the charge point to send a call.
+          {t("cpPanels.expert.connectFirst")}
         </p>
       )}
 
@@ -233,9 +234,11 @@ const ExpertCallForm: React.FC<{
       )}
 
       {outcome && (
-        <section aria-label="Result" className="space-y-2">
+        <section aria-label={t("cpPanels.expert.result")} className="space-y-2">
           <div>
-            <div className="text-xs font-semibold text-cx-fg2">Sent frame</div>
+            <div className="text-xs font-semibold text-cx-fg2">
+              {t("cpPanels.expert.sentFrame")}
+            </div>
             <pre className="whitespace-pre-wrap break-all rounded bg-cx-sub p-2 font-mono text-xs">
               {outcome.sentFrame}
             </pre>

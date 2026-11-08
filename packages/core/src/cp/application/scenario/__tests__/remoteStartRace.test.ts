@@ -144,6 +144,9 @@ describe("run_scenario / RemoteStartTransaction race — bypass visibility", () 
     await cp.startTransaction("RACE-TAG", 1, undefined, undefined, {
       triggerReason: "RemoteStart",
     });
+    // The CSMS issued the id (a `0` is real, #328); a RemoteStopTransaction
+    // cannot name a transaction whose StartTransaction.conf never came (#727).
+    connector.assignTransactionId(7);
     const txId = connector.transaction?.id;
     if (txId == null) throw new Error("the transaction got no id");
 

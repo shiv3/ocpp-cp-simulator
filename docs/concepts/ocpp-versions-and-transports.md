@@ -447,6 +447,27 @@ An `Inoperative` availability change scheduled during a transaction remains
 `Unavailable` after the accepted reboot and continues to reject new local
 transaction starts.
 
+## Periodic meter values in a 1.x transaction (`MeterValueSampleInterval`, #722)
+
+OCPP 1.6 errata 3.15 (§4.7, §9.1.15): while a transaction runs and
+`MeterValueSampleInterval` is greater than zero, the charge point sends a
+`MeterValues.req` every `MeterValueSampleInterval` seconds, with the
+transaction id, `context` `Sample.Periodic` and the `MeterValuesSampledData`
+measurands. The default is `60`, so a default 1.6 transaction now sends one
+sample a minute (a wire change from the earlier "nothing unless an auto-meter
+is configured"); `0` sends none.
+
+- The value is read when the transaction starts. A `ChangeConfiguration`
+  applies to the next transaction.
+- It does not matter what drives the register. A configured auto-meter curve
+  or increment fallback only moves the register at its own interval (the
+  curve's `intervalSeconds`); the sample goes out on the
+  `MeterValueSampleInterval` tick, so there is one sample per tick and not two
+  schedules. A scenario's own meter strategy (a `meterValue` node with
+  auto-increment) keeps sending at its own interval.
+- Nothing is sent while the station is offline. 1.x only: the 2.x sampling
+  below is unchanged.
+
 ## Clock-aligned meter values (`ClockAlignedDataInterval`)
 
 Every `ClockAlignedDataInterval` seconds a charge point sends one

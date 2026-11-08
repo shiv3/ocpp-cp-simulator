@@ -7,6 +7,7 @@
    these cases reach into station internals (configuration, listeners, runtime
    snapshots) that the public types do not expose */
 import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
+import { VirtualClock } from "../../cp/shared/clock";
 import { resolveNetworkSimConfig } from "../../cp/infrastructure/transport/network-sim";
 import type { GoldenCase as Case } from "./cases";
 import { Rig, type RigOptions } from "./rig";
@@ -221,6 +222,71 @@ both("deauthorized-keep", async (r) => {
   r.cp.stopTransaction(1);
   await settle(r);
 });
+// 1.6 errata 3.15 (§4.7, #722): MeterValueSampleInterval drives periodic
+// MeterValues.req of a running transaction. Virtual time, in-memory socket.
+const periodic = async (r: Rig, clock: VirtualClock, seconds: number) => {
+  for (let i = 0; i < seconds; i++) {
+    await clock.advanceBy(1000);
+    await settle(r);
+  }
+};
+const periodicClock = new VirtualClock();
+c16(
+  "meter-periodic-default",
+  async (r) => {
+    r.plugIn();
+    await settle(r);
+    await r.cp.startTransaction("TAG-A", 1);
+    await settle(r);
+    await periodic(r, periodicClock, 125);
+    r.cp.stopTransaction(1);
+    await settle(r);
+  },
+  { memory: true, simulation: { clock: periodicClock, seed: "g722" } },
+);
+const periodicOffClock = new VirtualClock();
+c16(
+  "meter-periodic-disabled",
+  async (r) => {
+    cfg(r, "MeterValueSampleInterval", "0");
+    r.plugIn();
+    await settle(r);
+    await r.cp.startTransaction("TAG-A", 1);
+    await settle(r);
+    await periodic(r, periodicOffClock, 125);
+    r.cp.stopTransaction(1);
+    await settle(r);
+  },
+  { memory: true, simulation: { clock: periodicOffClock, seed: "g722" } },
+);
+// With an auto-meter curve (a host wires the scheduler's tick to the station
+// as the CLI and the web console do) the curve moves the register every 10 s,
+// and the samples still go out once per MeterValueSampleInterval.
+const periodicCurveClock = new VirtualClock();
+c16(
+  "meter-periodic-with-curve",
+  async (r) => {
+    const connector = r.cp.getConnector(1)!;
+    connector.setOnMeterValueSend((id) => r.cp.sendScheduledMeterValue(id));
+    connector.autoMeterValueConfig = {
+      enabled: true,
+      curvePoints: [
+        { time: 0, value: 0 },
+        { time: 1800, value: 50 },
+      ],
+      intervalSeconds: 10,
+      autoCalculateInterval: false,
+    };
+    r.plugIn();
+    await settle(r);
+    await r.cp.startTransaction("TAG-A", 1);
+    await settle(r);
+    await periodic(r, periodicCurveClock, 125);
+    r.cp.stopTransaction(1);
+    await settle(r);
+  },
+  { memory: true, simulation: { clock: periodicCurveClock, seed: "g722" } },
+);
 // --- availability
 both(
   "avail-whole-two-connectors",

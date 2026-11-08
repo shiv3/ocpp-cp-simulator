@@ -1135,9 +1135,10 @@ a spare machine and a CSMS.
 - `timeouts` and every other number is fleet-wide, not per charge point:
   `/metrics` carries no `cpId` label by design. That is why the preflight
   refuses a daemon with a pre-existing fleet.
-- No MeterValues are driven during a transaction — set
-  `MeterValueSampleInterval` on the CPs' config if you want that traffic
-  included (not currently a flag on this script).
+- No MeterValues are driven by the script. A 1.6 CP still sends one every
+  `MeterValueSampleInterval` seconds (default 60) while its transaction runs
+  (#722); set the key to `0` on the CPs' config to leave that traffic out
+  (not currently a flag on this script).
 
 ## Directory layout
 

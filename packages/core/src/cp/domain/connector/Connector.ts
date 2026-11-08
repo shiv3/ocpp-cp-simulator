@@ -246,6 +246,12 @@ export class Connector {
   private autoConfig: AutoMeterValueConfig = { ...defaultAutoMeterValueConfig };
   private incrementFallback: IncrementStrategyConfig | null = null;
   private onMeterSend: ((connectorId: number) => void) | null = null;
+  /** #722: the ChargePoint sends the periodic MeterValues of this
+   *  connector's transaction (`MeterValueSampleInterval`). */
+  private stationOwnsMeterSampling = false;
+  /** #722: the running meter strategy is the configured one (curve or
+   *  increment fallback), not a scenario's own. */
+  private configuredStrategyRunning = false;
 
   private modeValue: ScenarioMode = "manual";
   private _scenarioManager?: ScenarioManager;
@@ -372,6 +378,11 @@ export class Connector {
         getCurrentValue: () => this.meterValueWh,
         updateValue: (value) => this.applyMeterValue(value),
         onSend: (id) => {
+          // #722: once the station owns the periodic sampling, the configured
+          // strategy's ticks move the register without sending.
+          if (this.stationOwnsMeterSampling && this.configuredStrategyRunning) {
+            return;
+          }
           if (this.onMeterSend) {
             this.onMeterSend(id);
           }
@@ -1385,13 +1396,20 @@ export class Connector {
     this.eventsEmitter.emit("transactionChange", { transaction: null });
   }
 
+  /** #722: see {@link stationOwnsMeterSampling}. */
+  setStationOwnsMeterSampling(owns: boolean): void {
+    this.stationOwnsMeterSampling = owns;
+  }
+
   startManualMeterStrategy(strategy: MeterValueStrategy): void {
+    this.configuredStrategyRunning = false;
     this.meterScheduler.start(strategy);
   }
 
   startConfiguredMeterValue(): void {
     if (!this.transaction) return;
 
+    this.configuredStrategyRunning = true;
     if (this.autoConfig.enabled) {
       this.meterScheduler.start({ kind: "curve", config: this.autoConfig });
       return;
@@ -1410,10 +1428,12 @@ export class Connector {
       return;
     }
 
+    this.configuredStrategyRunning = false;
     this.meterScheduler.stop();
   }
 
   stopAutoMeterValue(): void {
+    this.configuredStrategyRunning = false;
     this.meterScheduler.stop();
   }
 

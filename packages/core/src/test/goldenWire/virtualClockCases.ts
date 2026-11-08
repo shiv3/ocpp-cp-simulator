@@ -3,6 +3,7 @@
 // would take real seconds. The clock starts at 2030-01-01 and moves only when
 // a case advances it.
 import { SIGNING_CERTIFICATE } from "../../cp/domain/security/__tests__/signingCertificateFixture";
+import { tcpPort } from "../bunServe";
 import { drainMicrotasks, VirtualClock } from "../../cp/shared/clock";
 import type { GoldenCase } from "./cases";
 import type { Rig } from "./rig";
@@ -119,4 +120,77 @@ v16("signed-update-firmware-install-scheduled", async (rig, advance) => {
   await advance(60_000);
   expectSent(rig, "Installing", true);
   await advance(20_000);
+});
+
+/** Real time passes while the station talks to a real HTTP target. */
+async function realWaitFor(condition: () => boolean, what: string) {
+  for (let i = 0; i < 200; i++) {
+    if (condition()) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`timed out waiting for ${what}`);
+}
+
+const realPause = (ms: number) =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+// #743 §6.25 (errata 3.50): `retries: 2`, `retryInterval: 1` against a target
+// that refuses: three attempts, one second apart on the station's clock,
+// `Uploading` once and one final `UploadFailed`.
+v16("get-diagnostics-retries", async (rig, advance) => {
+  let hits = 0;
+  const target = Bun.serve({
+    port: 0,
+    fetch: () => {
+      hits++;
+      return new Response("no", { status: 500 });
+    },
+  });
+  try {
+    await rig.csms.call("GetDiagnostics", {
+      location: `http://127.0.0.1:${tcpPort(target)}/upload`,
+      retries: 2,
+      retryInterval: 1,
+    });
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      await realWaitFor(() => hits === attempt, `attempt ${attempt}`);
+      await realPause(50);
+      if (attempt < 3) {
+        await advance(999);
+        if (hits !== attempt) throw new Error("retried before retryInterval");
+        await advance(1);
+      }
+    }
+    await advance(0);
+    await advance(10_000);
+    if (hits !== 3) throw new Error(`expected 3 attempts, saw ${hits}`);
+  } finally {
+    await target.stop(true);
+  }
+});
+
+// #743: a target that never answers ends in UploadFailed after the timeout of
+// the attempt (no retries asked: one attempt).
+v16("get-diagnostics-timeout", async (rig, advance) => {
+  let hits = 0;
+  const target = Bun.serve({
+    port: 0,
+    fetch: () => {
+      hits++;
+      return new Promise<Response>(() => undefined);
+    },
+  });
+  try {
+    await rig.csms.call("GetDiagnostics", {
+      location: `http://127.0.0.1:${tcpPort(target)}/upload`,
+    });
+    await realWaitFor(() => hits === 1, "the attempt");
+    await realPause(50);
+    await advance(59_000);
+    await advance(2_000);
+    await realPause(50);
+    await advance(0);
+  } finally {
+    await target.stop(true);
+  }
 });

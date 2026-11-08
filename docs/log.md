@@ -2426,3 +2426,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-08] ingest | A second SignedUpdateFirmware or GetLog cancels the running one (#740)
 
 - 1.6 `default.signedFirmware` and `default.logs`: a request that arrives while a train or upload runs cancels it and is answered `AcceptedCanceled` (L01.FR.26, N01.FR.11); the old run stops at its next step, so only the new request's `requestId` reaches `Installed` / `Uploaded` (before, the signed one was answered `Accepted` and dropped, and a second GetLog ran an interleaved train). Page touched: [Default behaviors](entities/default-behaviors.md). Golden: new `16-signed-update-firmware-cancelled` and `16-get-log-cancelled` on a virtual clock (`virtualClockCases.ts`); the single-request fixtures are unchanged.
+
+## [2026-11-08] ingest | SignedUpdateFirmware sends DownloadScheduled and InstallScheduled (#741)
+
+- 1.6 `default.signedFirmware`: a future `retrieveDateTime` is announced with `DownloadScheduled` right after the answer and `Downloading` starts at that time (L01.FR.13); a future `installDateTime` is announced with `InstallScheduled` after `SignatureVerified` and `Installing` follows at that time (L01.FR.16/17). Past or absent times keep the plain train. Page touched: [Default behaviors](entities/default-behaviors.md). Golden: new `16-signed-update-firmware-download-scheduled` and `16-signed-update-firmware-install-scheduled` on a virtual clock; `16-signed-update-firmware` is unchanged.

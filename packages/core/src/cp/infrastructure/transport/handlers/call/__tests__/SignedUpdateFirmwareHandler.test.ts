@@ -93,12 +93,14 @@ describe("SignedUpdateFirmwareHandler", () => {
     );
     if (!isHandlerOutcome(res)) throw new Error("expected an outcome");
     res.afterResponseSettled();
+    // L01.FR.13: a retrieveDateTime in the future is announced at once.
     await vi.advanceTimersByTimeAsync(999);
-    expect(sent).toEqual([]);
+    expect(sent).toEqual([{ status: "DownloadScheduled", requestId: 9 }]);
     await vi.advanceTimersByTimeAsync(1);
-    expect(sent).toEqual([{ status: "Downloading", requestId: 9 }]);
+    expect(sent.at(-1)).toEqual({ status: "Downloading", requestId: 9 });
     await vi.advanceTimersByTimeAsync(8000);
     expect(sent).toEqual([
+      { status: "DownloadScheduled", requestId: 9 },
       { status: "Downloading", requestId: 9 },
       { status: "Downloaded", requestId: 9 },
       { status: "SignatureVerified", requestId: 9 },

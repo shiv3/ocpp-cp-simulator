@@ -11,9 +11,10 @@ function build(
   version: string,
   reconnect?: Partial<ReconnectPolicy>,
   seed?: string,
+  id = "cp-609",
 ): ChargePoint {
   return new ChargePoint(
-    "cp-609",
+    id,
     DefaultBootNotification,
     1,
     "ws://localhost:8080",
@@ -93,6 +94,31 @@ describe("ChargePoint reconnect policy (#609)", () => {
     ).not.toBe("Accepted");
   });
 
+  // Neither the CLI nor cp.create sets a simulation seed, so a charge point
+  // without one seeds its jitter from its id.
+  const jitterDelays = (seed?: string, id?: string) => {
+    const cp = build("OCPP-1.6J", { jitterMs: 5000 }, seed, id);
+    const out: number[] = [];
+    cp.events.on("reconnecting", ({ delayMs }) => out.push(delayMs));
+    for (let i = 0; i < 3; i++) {
+      cp["_webSocket"]!["_pendingReconnectNotice"] = null;
+      cp["_webSocket"]!["attemptReconnect"]();
+      cp["_webSocket"]!.observers.emit(
+        "reconnectScheduled",
+        cp["_webSocket"]!["_pendingReconnectNotice"]!,
+      );
+    }
+    cp["_webSocket"]!.dispose();
+    return out;
+  };
+
+  it("without a simulation seed the jitter is seeded by the charge point id", () => {
+    const a = jitterDelays(undefined, "CP-A");
+    expect(jitterDelays(undefined, "CP-A")).toEqual(a);
+    expect(jitterDelays(undefined, "CP-B")).not.toEqual(a);
+    expect(new Set(a).size).toBeGreaterThan(1);
+  });
+
   it("jitter is seeded: the same seed replays the same delays", () => {
     const delays = (seed: string) => {
       const cp = build("OCPP-1.6J", { jitterMs: 5000 }, seed);
@@ -155,16 +181,50 @@ describe("ChargePoint reconnect policy (#609)", () => {
       const seen: unknown[] = [];
       cp.events.on("gaveUp", (e) => seen.push(e));
 
-      for (let i = 0; i < 4; i++) {
+      // The first answer and two re-sends' answers; the third gives up.
+      for (let i = 0; i < 3; i++) {
         rejected(cp);
         vi.advanceTimersByTime(10_000);
       }
 
       expect(boot).toHaveBeenCalledTimes(2);
-      expect(seen).toEqual([
-        { target: "boot_notification", attempts: 2 },
-        { target: "boot_notification", attempts: 2 },
-      ]);
+      expect(seen).toEqual([{ target: "boot_notification", attempts: 2 }]);
+    });
+
+    it("records the give-up after the Rejected answer that caused it", () => {
+      vi.useFakeTimers();
+      const cp = build("OCPP-1.6J", { bootRetryLimit: 0 });
+      vi.spyOn(cp, "boot").mockImplementation(() => {});
+      const order: string[] = [];
+      cp.events.on("bootNotificationResult", () => order.push("result"));
+      cp.events.on("gaveUp", () => order.push("gaveUp"));
+      rejected(cp);
+      expect(order).toEqual(["result", "gaveUp"]);
+    });
+
+    it("a new connection restores the budget", () => {
+      vi.useFakeTimers();
+      const cp = build("OCPP-1.6J", { bootRetryLimit: 1 });
+      const boot = vi.spyOn(cp, "boot").mockImplementation(() => {});
+      let onOpen: (() => void) | undefined;
+      vi.spyOn(cp["_webSocket"]!, "connect").mockImplementation((open) => {
+        onOpen = open;
+      });
+      const seen: unknown[] = [];
+      cp.events.on("gaveUp", (e) => seen.push(e));
+
+      rejected(cp);
+      vi.advanceTimersByTime(10_000);
+      rejected(cp); // gives up
+      expect(seen).toHaveLength(1);
+
+      cp.connect();
+      onOpen?.();
+      expect(boot).toHaveBeenCalledTimes(2); // re-send + the new connection's
+      rejected(cp);
+      vi.advanceTimersByTime(10_000);
+      expect(boot).toHaveBeenCalledTimes(3); // budget is back: it re-sends
+      expect(seen).toHaveLength(1);
     });
 
     it("an Accepted answer restores the budget", () => {

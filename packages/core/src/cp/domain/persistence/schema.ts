@@ -13,7 +13,7 @@
  * persistence layer was localStorage and we explicitly do NOT carry it
  * forward (see plan).
  */
-export const SCHEMA_VERSION = 25;
+export const SCHEMA_VERSION = 28;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -742,9 +742,11 @@ export function runMigrations(db: Database): void {
     }
   }
 
-  // v24 → v25 (#609): `charge_points.transport_options`. Guarded like the v16
+  // v27 → v28 (#609): `charge_points.transport_options`. Guarded like the v16
   // column; NULL (every row of an older database) is the built-in behaviour.
-  if (stored < 25) {
+  // Gated on `< 28`, not on the number the branch started with: a database
+  // already stamped 25-27 by main has the other columns but not this one.
+  if (stored < 28) {
     const cols = db.all<{ name: string }>("PRAGMA table_info(charge_points)");
     if (!new Set(cols.map((c) => c.name)).has("transport_options")) {
       db.exec("ALTER TABLE charge_points ADD COLUMN transport_options TEXT");

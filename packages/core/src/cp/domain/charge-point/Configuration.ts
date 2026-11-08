@@ -464,7 +464,7 @@ export const ConfigurationKeys = {
       type: "integer",
       min: 1,
     } as IntegerConfigurationKey,
-    // #609: OCPP 2.0.1 / 2.1 OCPPCommCtrlr RetryBackOff* (Part 2 B.1), 2.x
+    // #609: OCPP 2.0.1 / 2.1 OCPPCommCtrlr RetryBackOff* (Part 4 §5.4; variables in the Part 2 Appendices), 2.x
     // only. Seconds to wait before the first reconnect, the random extra
     // wait [0, RandomRange], and how many times the wait doubles.
     RetryBackOffWaitMinimum: {

@@ -361,8 +361,8 @@ export class ConfigurationStore {
     return this.getInteger("WebSocketPingInterval") ?? 0;
   }
 
-  /** 2.x `OCPPCommCtrlr.RetryBackOffWaitMinimum` in seconds (#609, Part 2
-   *  B.1); the default is derived from the reconnect policy, 1 without one. */
+  /** 2.x `OCPPCommCtrlr.RetryBackOffWaitMinimum` in seconds (#609, Part 4
+   *  §5.4); the default is derived from the reconnect policy, 1 without one. */
   retryBackOffWaitMinimum(): number {
     return this.getInteger("RetryBackOffWaitMinimum") ?? 1;
   }

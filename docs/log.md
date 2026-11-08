@@ -2391,7 +2391,11 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 ## [2026-11-08] ingest | Configurable reconnect policy and 2.x `RetryBackOff*` (#609)
 
-- [OCPP versions & transports](concepts/ocpp-versions-and-transports.md#reconnect-policy-and-retrybackoff-609): new section, the canonical table of the reconnect policy (`maxAttempts`, `mode`, `baseDelayMs`, `maxDelayMs`, `jitterMs`, `bootRetryLimit`; defaults are the previous 1 s → 30 s forever), seeded jitter, giving up, and the OCPP 2.0.1 B.1 variables `RetryBackOffWaitMinimum` / `RandomRange` / `RepeatTimes` (decision: wait = minimum × 2^min(N−1, RepeatTimes) + random).
+- [OCPP versions & transports](concepts/ocpp-versions-and-transports.md#reconnect-policy-and-retrybackoff-609): new section, the canonical table of the reconnect policy (`maxAttempts`, `mode`, `baseDelayMs`, `maxDelayMs`, `jitterMs`, `bootRetryLimit`; defaults are the previous 1 s → 30 s forever), seeded jitter, giving up, and the OCPP 2.0.1 Part 4 §5.4 variables `RetryBackOffWaitMinimum` / `RandomRange` / `RepeatTimes` (decision: wait = minimum × 2^min(N−1, RepeatTimes) + random).
 - [CLI](entities/cli.md) flags `--reconnect-*` and `--boot-retry-limit`; [Daemon](entities/daemon.md) and [Control plane](concepts/control-plane.md) (`cp.create` `transport`) in sync.
-- [State persistence](concepts/state-persistence.md): schema v25 `charge_points.transport_options`.
+- [State persistence](concepts/state-persistence.md): schema v28 `charge_points.transport_options` (v25-v27 belong to #658, #660 and #680).
 - [Operational timeline](concepts/operational-timeline.md): format `1.4`, new kind `gave_up`.
+
+## [2026-11-08] lint | Reconnect policy review fixes (#609)
+
+- 2.x follows the `RetryBackOff*` variables as set (no `maxDelayMs` cap unless they still equal the derived defaults); the wait plus jitter is clamped to the timer limit; the jitter stream is seeded by the charge point id when there is no simulation seed; the BootNotification retry budget is restored by every new connection and its `gave_up` entry follows the Rejected answer. The migration is schema v28 (`stored < 28`). Spec citations are Part 4 §5.4 and the Part 2 Appendices. Updated [OCPP versions & transports](concepts/ocpp-versions-and-transports.md#reconnect-policy-and-retrybackoff-609), [State persistence](concepts/state-persistence.md), [GitHub issues](sources/github-issues.md).

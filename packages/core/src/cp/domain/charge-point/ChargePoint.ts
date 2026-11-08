@@ -305,6 +305,8 @@ export class ChargePoint {
   private readonly _reconnectPolicy: ReconnectPolicy;
   /** #609: automatic BootNotification re-sends since the last Accepted. */
   private _bootRetries = 0;
+  /** A boot give-up waiting for its `bootNotificationResult` to be emitted. */
+  private _bootGaveUp: number | null = null;
 
   /** The resolved reconnect policy (#609); also read by the default 2.x
    *  `RetryBackOff*` variables. */
@@ -568,7 +570,13 @@ export class ChargePoint {
         tls,
       );
       this._rawFrames = new RawFrameSender(this._webSocket, () => this._clock);
-      const reconnectRng = this.rng("reconnect");
+      // Seeded even without `simulation.seed` (no CLI flag or `cp.create`
+      // field sets one): by the charge point id, so the same id draws the
+      // same jitter on every run, like the SupervisionUrlPool's hash (#609).
+      const reconnectRng =
+        simulation.seed === undefined
+          ? new RngStreams(this._id).stream(this._id, "reconnect")
+          : this.rng("reconnect");
       this._webSocket.setReconnectPolicy(this._reconnectPolicy, () =>
         reconnectRng.next(),
       );
@@ -1842,6 +1850,7 @@ export class ChargePoint {
         `Connecting via ${this._ocppVersion} SOAP client`,
         LogType.OCPP,
       );
+      this._bootRetries = 0;
       this.boot();
       this._events.emit("connected", undefined);
       this._engine.observe({ type: "connected" });
@@ -1872,6 +1881,8 @@ export class ChargePoint {
     }
     this._webSocket.connect(
       () => {
+        // A new connection starts a fresh BootNotification budget (#609).
+        this._bootRetries = 0;
         this.boot();
         this._events.emit("connected", undefined);
         this._engine.observe({ type: "connected" });
@@ -2234,10 +2245,8 @@ export class ChargePoint {
         `Giving up BootNotification after ${this._bootRetries} retr${this._bootRetries === 1 ? "y" : "ies"} (reconnect.bootRetryLimit=${limit})`,
         LogType.OCPP,
       );
-      this._events.emit("gaveUp", {
-        target: "boot_notification",
-        attempts: this._bootRetries,
-      });
+      // Reported once `bootNotificationResult` (Rejected), its cause, is out.
+      this._bootGaveUp = this._bootRetries;
       return;
     }
     this._bootRetries++;
@@ -2296,6 +2305,11 @@ export class ChargePoint {
       interval,
       currentTime: result.currentTime,
     });
+    if (this._bootGaveUp !== null) {
+      const attempts = this._bootGaveUp;
+      this._bootGaveUp = null;
+      this._events.emit("gaveUp", { target: "boot_notification", attempts });
+    }
     if (status === "Accepted") {
       this.applyBootAccepted(interval);
     } else {

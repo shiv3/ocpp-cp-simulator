@@ -100,14 +100,14 @@ the **reconnect policy**, one object per charge point (`transport.reconnect` on
 Every field is optional and **the defaults are the schedule before the policy
 existed**: 1 s, doubling to 30 s, forever, no jitter.
 
-| Field            | Default       | Meaning                                                                                                                                                              |
-| ---------------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `maxAttempts`    | `-1`          | Reconnect attempts after a loss before giving up; `-1` unlimited, `0` never reconnects. The count restarts when a connection opens.                                  |
-| `mode`           | `exponential` | `exponential` waits `min(baseDelayMs × 2^(attempt−1), maxDelayMs)`; `fixed` waits `baseDelayMs` every time.                                                          |
-| `baseDelayMs`    | `1000`        | Wait before the first attempt.                                                                                                                                       |
-| `maxDelayMs`     | `30000`       | Cap of the exponential wait; must be ≥ `baseDelayMs`.                                                                                                                |
-| `jitterMs`       | `0`           | A random extra wait in `[0, jitterMs]`, drawn from the charge point's seeded `reconnect` stream: the same seed replays the same waits. No draw happens at `0`.       |
-| `bootRetryLimit` | `-1`          | Automatic BootNotification re-sends after a `Rejected` answer (§4.2) before stopping; `-1` unlimited. An `Accepted` answer restores the budget. Applies to SOAP too. |
+| Field            | Default       | Meaning                                                                                                                                                                                                                                                                                                         |
+| ---------------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `maxAttempts`    | `-1`          | Reconnect attempts after a loss before giving up; `-1` unlimited, `0` never reconnects. The count restarts when a connection opens.                                                                                                                                                                             |
+| `mode`           | `exponential` | `exponential` waits `min(baseDelayMs × 2^(attempt−1), maxDelayMs)`; `fixed` waits `baseDelayMs` every time.                                                                                                                                                                                                     |
+| `baseDelayMs`    | `1000`        | Wait before the first attempt.                                                                                                                                                                                                                                                                                  |
+| `maxDelayMs`     | `30000`       | Cap of the exponential wait; must be ≥ `baseDelayMs`.                                                                                                                                                                                                                                                           |
+| `jitterMs`       | `0`           | A random extra wait in `[0, jitterMs]`, drawn from the charge point's seeded `reconnect` stream: the same seed replays the same waits. Without a simulation seed (the CLI and `cp.create` set none) the stream is seeded by the charge point id, so the same id replays the same waits. No draw happens at `0`. |
+| `bootRetryLimit` | `-1`          | Automatic BootNotification re-sends after a `Rejected` answer (§4.2) before stopping; `-1` unlimited. An `Accepted` answer or a new connection restores the budget. Applies to SOAP too.                                                                                                                        |
 
 An invalid value is refused when the charge point is created (a typo does not
 silently leave the default in place). The delay a network-simulation
@@ -118,9 +118,11 @@ silently leave the default in place). The delay a network-simulation
 `gaveUp` and records a `gave_up` entry (`target` `reconnect` or
 `boot_notification`, `attempts`) in the [operational timeline](operational-timeline.md).
 The charge point then stays offline until an explicit `connect`, which starts
-with a fresh budget.
+with a fresh budget; so does every new connection: the BootNotification budget
+is restored when a socket opens, not only on an `Accepted` answer. The
+`gave_up` entry of a BootNotification follows the `Rejected` answer that caused it.
 
-**OCPP 2.0.1 / 2.1 (Part 2, B.1).** A 2.x charge point reads three
+**OCPP 2.0.1 / 2.1 (Part 4 §5.4 "Reconnecting").** A 2.x charge point reads three
 `OCPPCommCtrlr` variables, ReadWrite and persisted like the others, and they
 replace `baseDelayMs`, `jitterMs` and the number of doublings:
 
@@ -131,10 +133,15 @@ replace `baseDelayMs`, `jitterMs` and the number of doublings:
 | `RetryBackOffRepeatTimes` | count   | How many times the wait doubles (0–30); after that it stays constant. |
 
 The wait before attempt N is `RetryBackOffWaitMinimum × 2^min(N−1, RepeatTimes)`
-plus the random extra. Reading B.1 this way is a decision of this simulator: the
-spec describes the doubling and the random range in prose, not as a formula.
-`mode: fixed` never doubles, `maxDelayMs` still caps the doubled part (but never
-below `RetryBackOffWaitMinimum`), and `maxAttempts` still ends the loop. The
+plus the random extra (Part 4 §5.4 describes the doubling and the random range
+in prose, not as a formula; the variables are defined in the Part 2 Appendices
+under `OCPPCommCtrlr`). `RepeatTimes` 2 with a minimum of 20 s waits 20, 40, 80,
+80 s. The spec sets no ceiling, so a CSMS's values are followed as set: only the
+timer's own limit (2147483647 ms) applies, to the wait and to the wait plus the
+random extra. One exception keeps the default schedule: while the three variables
+still equal the values derived from the policy (nobody changed them), `maxDelayMs`
+caps the doubled part, so 1, 2, 4, 8, 16 does not become 32 s on the sixth attempt.
+`mode: fixed` never doubles and `maxAttempts` still ends the loop. The
 variable defaults are derived from the policy (whole seconds, at least 1 for the
 minimum), so a 2.x charge point with no policy reconnects after 1, 2, 4, 8, 16
 and 30 s, like 1.6; a policy with sub-second values is rounded up in the

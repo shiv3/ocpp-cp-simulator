@@ -64,7 +64,7 @@ describe("ReconnectPolicy (#609)", () => {
     expect(() => resolveReconnectPolicy({ jitterMs: -1 })).toThrow(/jitterMs/);
   });
 
-  describe("OCPP 2.x RetryBackOff variables (B.1)", () => {
+  describe("OCPP 2.x RetryBackOff variables (Part 4 §5.4)", () => {
     it("derives variable defaults that reproduce the default schedule", () => {
       const vars = retryBackOffDefaults(DEFAULT_RECONNECT_POLICY);
       expect(vars).toEqual({
@@ -83,10 +83,49 @@ describe("ReconnectPolicy (#609)", () => {
         randomRangeSeconds: 0,
         repeatTimes: 2,
       };
-      const p = resolveReconnectPolicy({ maxDelayMs: 600_000 });
-      expect(delays(p, 5, never, vars)).toEqual([
+      expect(delays(DEFAULT_RECONNECT_POLICY, 5, never, vars)).toEqual([
         10_000, 20_000, 40_000, 40_000, 40_000,
       ]);
+    });
+
+    // TC_B_57_CS (2.0.1 Part 6): the station follows what the CSMS set, not
+    // the simulator's own 30 s ceiling.
+    it("follows WaitMinimum 20 / RepeatTimes 2 with the default policy", () => {
+      const vars = {
+        waitMinimumSeconds: 20,
+        randomRangeSeconds: 0,
+        repeatTimes: 2,
+      };
+      expect(delays(DEFAULT_RECONNECT_POLICY, 4, never, vars)).toEqual([
+        20_000, 40_000, 80_000, 80_000,
+      ]);
+    });
+
+    it("keeps the 30 s ceiling while the variables are the derived defaults", () => {
+      const vars = retryBackOffDefaults(DEFAULT_RECONNECT_POLICY);
+      expect(delays(DEFAULT_RECONNECT_POLICY, 7, never, vars)).toEqual([
+        1000, 2000, 4000, 8000, 16000, 30000, 30000,
+      ]);
+    });
+
+    it("never exceeds the timer limit, with or without variables", () => {
+      const vars = {
+        waitMinimumSeconds: 2_000_000,
+        randomRangeSeconds: 1_000_000,
+        repeatTimes: 30,
+      };
+      const max = 2_147_483_647;
+      expect(delays(DEFAULT_RECONNECT_POLICY, 3, () => 0.999, vars)).toEqual([
+        max,
+        max,
+        max,
+      ]);
+      const p = resolveReconnectPolicy({
+        baseDelayMs: max,
+        maxDelayMs: max,
+        jitterMs: max,
+      });
+      expect(delays(p, 1, () => 0.999)).toEqual([max]);
     });
 
     it("adds a random time in [0, RandomRange] seconds", () => {
@@ -95,7 +134,7 @@ describe("ReconnectPolicy (#609)", () => {
         randomRangeSeconds: 10,
         repeatTimes: 2,
       };
-      const p = resolveReconnectPolicy({ maxDelayMs: 600_000 });
+      const p = DEFAULT_RECONNECT_POLICY;
       expect(delays(p, 1, () => 0, vars)).toEqual([10_000]);
       expect(delays(p, 2, () => 0.999999, vars).at(-1)).toBe(30_000);
     });
@@ -107,7 +146,7 @@ describe("ReconnectPolicy (#609)", () => {
         repeatTimes: 3,
       };
       expect(delays(DEFAULT_RECONNECT_POLICY, 3, never, vars)).toEqual([
-        60_000, 60_000, 60_000,
+        60_000, 120_000, 240_000,
       ]);
     });
 

@@ -913,8 +913,9 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
    * TransactionEvent.conf carries the CSMS's verdict on the event's idToken
    * in `idTokenInfo`. When it is not Accepted and the transaction is still
    * running, `TxCtrlr/StopTxOnInvalidId` (default true) ends it as
-   * Deauthorized / DeAuthorized; false leaves it running. Either way the
-   * rejection is reported like the 1.6 one.
+   * Deauthorized / DeAuthorized; false keeps it open but stops the energy
+   * delivery (SuspendedEVSE, after `MaxEnergyOnInvalidId` Wh when set;
+   * E05.FR.02/03). Either way the rejection is reported like the 1.6 one.
    */
   private applyTransactionEventResult(
     request: TransactionEventRequestV201,
@@ -946,6 +947,9 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         triggerReason: "Deauthorized",
         stoppedReason: "DeAuthorized",
       });
+    } else {
+      // E05.FR.02/03, C15.FR.06: the transaction stays, the energy stops.
+      this._chargePoint.holdEnergyOnInvalidId(connector);
     }
     this._chargePoint.notifyStartTransactionNotAccepted(
       connector.id,

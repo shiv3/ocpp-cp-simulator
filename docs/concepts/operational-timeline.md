@@ -136,7 +136,9 @@ legitimately continue offline.
 on the rejection: `StopTransactionOnInvalidId` on 1.6 (#181),
 `TxCtrlr/StopTxOnInvalidId` (default true) on 2.x. Before #447 a non-Accepted
 2.x `idTokenInfo` was ignored and recorded nothing; it is checked only while
-the transaction runs (not on an `Ended` event's answer).
+the transaction runs (not on an `Ended` event's answer). With the variable
+false the station keeps the transaction open and suspends the energy delivery
+([Charging sessions](charging-sessions.md)).
 
 The message fields of `transaction_message_rejected` and
 `transaction_message_discarded` are `transactionId`, `action`

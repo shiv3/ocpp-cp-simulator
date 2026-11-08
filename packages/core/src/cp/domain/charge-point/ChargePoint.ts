@@ -553,13 +553,21 @@ export class ChargePoint {
             LogType.OCPP,
           );
           this.updateConnectorStatus(connectorId, OCPPStatus.SuspendedEVSE);
-        } else if (!paused && connector.status === OCPPStatus.SuspendedEVSE) {
+        } else if (
+          !paused &&
+          connector.status === OCPPStatus.SuspendedEVSE &&
+          !connector.energyHeld
+        ) {
           this._logger.info(
             `Connector ${connectorId} schedule period limit=${watts}W, resuming → Charging`,
             LogType.OCPP,
           );
           this.updateConnectorStatus(connectorId, OCPPStatus.Charging);
         }
+      });
+      // The MaxEnergyOnInvalidId allowance ran out (E05.FR.03 → .02).
+      connector.events.on("invalidIdEnergyExhausted", () => {
+        this.reportEnergyHeld(connector);
       });
       this._connectors.set(connectorId, connector);
     }
@@ -1632,6 +1640,35 @@ export class ChargePoint {
   /** #396: the answer to an incoming CSMS CALL is decided. */
   notifyIncomingCallCompleted(completion: IncomingCallCompletion): void {
     this._events.emit("incomingCallCompleted", completion);
+  }
+
+  /**
+   * `StopTransactionOnInvalidId=false` and the id was not accepted: keep the
+   * transaction but stop the energy delivery (2.0.1
+   * E05.FR.02/03, C15.FR.06; 2.x only, 1.6 errata 3.17 is #736). With `MaxEnergyOnInvalidId` > 0 that much energy
+   * is delivered first; the connector reports SuspendedEVSE either way once
+   * the delivery has stopped.
+   */
+  holdEnergyOnInvalidId(connector: Connector): void {
+    const allowance = this._configuration.maxEnergyOnInvalidId();
+    if (connector.holdEnergyForInvalidId(allowance)) {
+      this.reportEnergyHeld(connector);
+    }
+  }
+
+  private reportEnergyHeld(connector: Connector): void {
+    if (!connector.hasRunningTransaction) return;
+    if (
+      connector.status === OCPPStatus.Charging ||
+      connector.status === OCPPStatus.Preparing ||
+      connector.status === OCPPStatus.SuspendedEV
+    ) {
+      this._logger.info(
+        `Connector ${connector.id} energy delivery stopped after a non-Accepted id → SuspendedEVSE`,
+        LogType.TRANSACTION,
+      );
+      this.updateConnectorStatus(connector.id, OCPPStatus.SuspendedEVSE);
+    }
   }
 
   /** Called by StartTransactionResultHandler when StartTransaction.conf
@@ -2956,6 +2993,17 @@ export class ChargePoint {
     if (!connector) {
       this._logger.error(`Connector ${connectorId} not found`, LogType.SYSTEM);
       return;
+    }
+
+    // Energy held after a non-Accepted id (E05.FR.02): whichever path asks
+    // for Charging, the register is stopped, so report SuspendedEVSE.
+    if (
+      status === OCPPStatus.Charging &&
+      connector.energyHeld &&
+      connector.hasRunningTransaction
+    ) {
+      if (connector.status === OCPPStatus.SuspendedEVSE) return;
+      status = OCPPStatus.SuspendedEVSE;
     }
 
     this._engine.dispatch({

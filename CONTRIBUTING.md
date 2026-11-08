@@ -18,8 +18,6 @@ User-visible text in `apps/web` goes through react-i18next, never a string liter
 
 ## Contribution terms
 
-<!-- MAINTAINER: this section is a proposal. The license sentence only states what GitHub's terms and the Apache-2.0 license already say; whether the project wants a CLA or a DCO sign-off is your decision and nothing is required here. The AI-generated code policy is a proposal for you to keep, change or drop. -->
-
 - **License.** The project is licensed under [Apache-2.0](LICENSE). By opening a pull request you agree that your contribution is licensed under the same terms (Section 5 of the license: a contribution submitted for inclusion is under its terms unless you state otherwise). Only submit what you have the right to submit. There is no CLA and no sign-off requirement.
 - **Third-party code.** Do not copy code from another project unless its license allows it and you say so in the pull request. The OCPP JSON schemas under `packages/ocpp/vendor/ocpp-schemas/` are verbatim copies and stay that way. Check behavior against the OCPP specification itself and cite the clause in the pull request; do not port it from another simulator.
 - **AI-generated code.** Assistance from AI tools is welcome, and the same rules apply to it as to anything else you submit. You are the author of record: read, understand and test every line, and be able to explain it in review. You are responsible for its license status as for hand-written code, so do not submit output you suspect reproduces someone else's code. Name the tool in the pull request description when it wrote a substantial part of the change. A maintainer may close a pull request that shows no sign of having been read or run.

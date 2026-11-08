@@ -174,7 +174,9 @@ func (s *sequencer) handle(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodPost:
 		var req sequenceRequest
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&req); err != nil {
 			writeCommandError(w, http.StatusBadRequest, fmt.Sprintf("decode sequence: %v", err))
 			return
 		}

@@ -36,6 +36,8 @@ body:
       options:
         - OCPP 1.6J
         - OCPP 1.6 SOAP
+        - OCPP 1.5 SOAP
+        - OCPP 1.2 SOAP
         - OCPP 2.0.1
         - OCPP 2.1
         - Not protocol related

@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -115,5 +118,15 @@ func TestSequenceValidation(t *testing.T) {
 		if _, err := s.Start(req); err == nil {
 			t.Fatalf("case %d: expected an error", i)
 		}
+	}
+}
+
+func TestSequenceHandlerRejectsUnknownFields(t *testing.T) {
+	s := newSequencer((&fakeExec{}).exec)
+	req := httptest.NewRequest(http.MethodPost, "/sequence", strings.NewReader(`{"steps":[],"period":5}`))
+	rec := httptest.NewRecorder()
+	s.handle(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for an unknown field", rec.Code)
 	}
 }

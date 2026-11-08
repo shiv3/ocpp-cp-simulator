@@ -1,0 +1,68 @@
+name: Bug report
+description: Something the simulator does that the OCPP specification or the documentation says it should not.
+labels: ["type:bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. A maintainer adds the `area:*` and `priority:*` labels and the milestone ([triage](https://github.com/shiv3/ocpp-cp-simulator/blob/main/CONTRIBUTING.md#triage)).
+        For a protocol bug, the clause of the specification you compare against helps most.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happens
+      description: What you did, what you expected and what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: The command line or control-plane calls, and the scenario JSON if one is involved. A minimal case is best.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: trace
+    attributes:
+      label: Wire trace or log
+      description: The OCPP frames around the problem (the `Sent:` / `Received:` log lines or a trace file). Remove passwords, tokens and private hostnames first.
+      render: text
+  - type: dropdown
+    id: version
+    attributes:
+      label: OCPP version and transport
+      multiple: true
+      options:
+        - OCPP 1.6J
+        - OCPP 1.6 SOAP
+        - OCPP 2.0.1
+        - OCPP 2.1
+        - Not protocol related
+    validations:
+      required: true
+  - type: dropdown
+    id: how
+    attributes:
+      label: How you run it
+      options:
+        - CLI (bun / npm package)
+        - Daemon
+        - Docker image
+        - Web console (local mode)
+        - Desktop app
+        - From source
+    validations:
+      required: true
+  - type: input
+    id: simulator-version
+    attributes:
+      label: Simulator version or commit
+      description: "`ocpp-cp-sim --version`, the image tag, or the commit."
+    validations:
+      required: true
+  - type: input
+    id: csms
+    attributes:
+      label: CSMS you connect to
+      description: Name and version, or "none" when the problem does not involve one.

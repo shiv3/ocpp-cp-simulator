@@ -2449,3 +2449,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-08] ingest | Switchable e2e CSMS fixture and weekly e2e run (#623, #624)
 
 - The Go fixture in `e2e/csms` has `POST /behavior` (BootNotification answer sequence per charge point, `whitelist` / `blacklist` / `rate-limit` / `offline` modes) and `POST /sequence` (commands in order, with delays or periodically); default wire output unchanged. New `e2e/behavior.gocpp.e2e.ts` and Go unit tests (`bun run lint:e2e-csms`, `bun run test:e2e-csms`). New `.github/workflows/e2e.yml` runs the Go checks and `bun run test:e2e` on Mondays and on demand, uploading `e2e-traces` on failure (`E2E_TRACE_DIR`). Pages: [Source: e2e/README.md](sources/e2e-readme.md), [CSMS peers](entities/csms-peers.md#gocpp), [Testing strategy](analyses/testing-strategy.md), [GitHub issues](sources/github-issues.md), [index](index.md).
+
+## [2026-11-08] ingest | Issue forms, PR template, code of conduct and contribution terms (#625)
+
+- New `.github/ISSUE_TEMPLATE/` (bug report and feature request forms, blank issues off), `.github/pull_request_template.md` (the `CONTRIBUTING.md` checklist), `CODE_OF_CONDUCT.md` and a "Contribution terms" section in `CONTRIBUTING.md` (Apache-2.0 inbound, third-party code, AI-generated code). The legal wording and the reporting contact are proposals marked for the maintainer in HTML comments. Pages: [Wiki conventions](conventions.md), `CLAUDE.md` schema note.

@@ -2,7 +2,7 @@
 title: Wiki conventions
 type: conventions
 summary: How pages in docs/ are named, structured, linked and kept consistent — the human-readable companion to the LLM schema in CLAUDE.md.
-updated: 2026-11-05
+updated: 2026-11-08
 ---
 
 # Wiki conventions
@@ -23,8 +23,10 @@ humans read, with the operating schema in the repository-root
 
 `README.md` at the root is the GitHub landing page, not a wiki page: it holds
 the quick start and links into the wiki. `CONTRIBUTING.md` holds the
-contribution rules: pre-push checks, the wiki update rule, and the issue / PR
-triage convention (labels, milestones, release-drafter bumps).
+contribution rules: pre-push checks, the wiki update rule, the contribution
+terms (license, third-party and AI-generated code) and the issue / PR triage
+convention (labels, milestones, release-drafter bumps); the issue forms,
+`.github/pull_request_template.md` and `CODE_OF_CONDUCT.md` sit beside it.
 
 ## Page types and directories
 

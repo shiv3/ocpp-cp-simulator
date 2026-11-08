@@ -19,8 +19,11 @@ every page is catalogued in [`docs/index.md`](docs/index.md).
 
 `README.md` is the GitHub landing page (quick start + links into the wiki), not
 a wiki page. Keep it short; deep content belongs in `docs/`. `CONTRIBUTING.md`
-(checks, wiki update rule, issue / PR triage convention) is not a wiki page
-either; keep it in sync with `.github/release-drafter.yml`.
+(checks, wiki update rule, contribution terms, issue / PR triage convention)
+is not a wiki page either; keep it in sync with `.github/release-drafter.yml`
+and with the checklist in `.github/pull_request_template.md`.
+`CODE_OF_CONDUCT.md` and the issue forms in `.github/ISSUE_TEMPLATE/` are
+likewise outside the wiki.
 
 ## Layout
 

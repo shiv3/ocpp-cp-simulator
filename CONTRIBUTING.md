@@ -8,6 +8,10 @@ Before pushing, run the checks CI runs: `bun run lint`, `bun run check:boundarie
 
 `docs/` is an LLM-maintained wiki. [`CLAUDE.md`](CLAUDE.md) is its schema (layers, layout, ingest / query / lint workflows) and [`docs/conventions.md`](docs/conventions.md) holds the page conventions. When a change alters behaviour, update the affected wiki pages, `docs/index.md` and `docs/log.md` in the same PR.
 
+## Web console translations
+
+UI text lives in `apps/web/src/i18n/locales/{en,ja,zh-CN}/`. Add the key to `en` first, then to `ja` and `zh-CN`, and use it with `useT()`; never translate OCPP action names, protocol fields or identifiers. `bun run test:vitest apps/web/src/i18n` fails when a locale lacks a key. Details: [Web console internationalization](docs/concepts/web-console-i18n.md).
+
 ## Triage
 
 Issues and pull requests are triaged with three label families and six milestones. Their descriptions live on GitHub and are the reference: [labels](https://github.com/shiv3/ocpp-cp-simulator/labels), [milestones](https://github.com/shiv3/ocpp-cp-simulator/milestones).

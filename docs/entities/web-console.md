@@ -11,6 +11,7 @@ related:
   - desktop-app.md
   - daemon.md
   - ../concepts/local-vs-remote-mode.md
+  - ../concepts/web-console-i18n.md
   - ../concepts/state-persistence.md
   - ../concepts/expert-ocpp-calls.md
   - ../concepts/scenario-format.md

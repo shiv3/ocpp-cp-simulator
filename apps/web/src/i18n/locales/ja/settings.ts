@@ -1,4 +1,200 @@
 import type { Messages } from "../../types";
 
-const settings: Messages = {};
+const settings: Messages = {
+  "settings.common.save": "保存",
+  "settings.common.cancel": "キャンセル",
+  "settings.common.copy": "コピー",
+  "settings.common.copied": "コピーしました",
+  "settings.common.keepCurrent": "空欄の場合は現在の値を維持",
+  "settings.form.copyFailed": "コピーに失敗しました",
+  "settings.form.effectiveCallbackUrl": "有効なコールバックURL",
+  "settings.form.copySoapCallbackAria": "SOAPコールバックURLをコピー",
+  "settings.form.effectiveWsUrl": "有効なWebSocket URL",
+  "settings.form.copyWsAria": "有効なWebSocket URLをコピー",
+  "settings.form.effectiveWsUrlHint":
+    "WebSocket URLと下記のBasic認証を組み合わせた、充電器が実際に接続するURLです。",
+  "settings.form.soapHelpLocal":
+    "中央システムがこのCPに到達するためのSOAP ChargePointServiceコールバックURL。デーモン使用時のみ必須です。",
+  "settings.form.soapHelpDerived":
+    "空欄の場合はデーモンの{source}を使用します: {url}",
+  "settings.form.soapHelpRequired":
+    "中央システムがこのCPに到達するためのSOAP ChargePointServiceコールバックURL。必須です。",
+  "settings.form.errSoapCallbackRequired":
+    "リモートモードのSOAPバージョンではSOAPコールバックURLが必須です。",
+  "settings.form.errProfile3Cert":
+    "セキュリティプロファイル3 (相互TLS) にはクライアント証明書と秘密鍵が必要です。",
+  "settings.form.derivedNote":
+    "{source}から取得 — デーモンの実行ごとにURLが変わる場合があります",
+  "settings.form.section.model": "モデル仕様",
+  "settings.form.section.connection": "接続",
+  "settings.form.section.security": "セキュリティ",
+  "settings.form.section.labels": "ラベル",
+  "settings.form.section.optional": "オプション設定",
+  "settings.form.vendor": "ベンダー",
+  "settings.form.model": "モデル",
+  "settings.form.firmwareVersion": "ファームウェアバージョン",
+  "settings.form.connectorCount": "コネクタ数",
+  "settings.form.cpId": "充電器ID",
+  "settings.form.protocol": "プロトコル",
+  "settings.form.version": "バージョン",
+  "settings.form.centralSystemUrlSoap": "中央システムURL (SOAPエンドポイント)",
+  "settings.form.wsUrl": "WebSocket URL",
+  "settings.form.localSoapNoteTitle": "ブラウザのローカルモード (送信のみ):",
+  "settings.form.localSoapNoteBody":
+    "CP→CSMSの呼び出し (BootNotification、Authorizeなど) は動作しますが、CSMSからのコマンド (RemoteStart、Resetなど) にはコールバックエンドポイントを提供するCLI/デーモンが必要です。CSMS側でこのオリジンからのCORSを許可する必要があります。",
+  "settings.form.soapCallbackUrl": "SOAPコールバックURL",
+  "settings.form.optionalParen": "(任意)",
+  "settings.form.soapPath": "SOAPパス (任意)",
+  "settings.form.securityProfile": "セキュリティプロファイル",
+  "settings.form.profile0": "0 — 認証なし、TLSなし",
+  "settings.form.profile1": "1 — Basic認証",
+  "settings.form.profile2": "2 — Basic認証 + TLS (サーバー証明書)",
+  "settings.form.profile3": "3 — 相互TLS (クライアント証明書)",
+  "settings.form.authorizationKey": "認可キー",
+  "settings.form.caCert": "CA証明書PEM (任意)",
+  "settings.form.serverName": "サーバー名 (任意)",
+  "settings.form.verifyServerCert": "サーバー証明書を検証する",
+  "settings.form.clientCert": "クライアント証明書PEM",
+  "settings.form.privateKey": "秘密鍵PEM",
+  "settings.form.enableBasicAuth": "Basic認証を有効にする",
+  "settings.form.username": "ユーザー名",
+  "settings.form.password": "パスワード",
+  "settings.form.authMtls":
+    "認証は上のセキュリティセクションにある相互TLSのクライアント証明書と鍵で管理されます (セキュリティプロファイル3)。",
+  "settings.form.legacyBefore":
+    "Basic認証は従来のオプション設定のトグルで現在有効になっています (ユーザー名:",
+  "settings.form.legacyNone": "(なし)",
+  "settings.form.legacyAfter":
+    ")。このまま動作し続けます。代わりにセキュリティセクションで認証を管理するには、上でセキュリティプロファイルを1 (Basic認証) に設定し、認可キーを入力してください。その場合、通信上のユーザー名は充電器IDになり、上の従来のユーザー名と異なる場合があります。",
+  "settings.form.disableLegacyBasic": "従来のBasic認証を無効にする",
+  "settings.form.noAuth":
+    "認証は設定されていません。Basic認証を有効にするには、上でセキュリティプロファイルを1に設定してください。",
+  "settings.form.authKeyGoverned":
+    "認証は上のセキュリティセクションの認可キーで管理されます (セキュリティプロファイル{profile})。",
+  "settings.form.enableAutoMeter": "自動メーター値を有効にする",
+  "settings.form.intervalSeconds": "間隔 (秒)",
+  "settings.form.incrementKwh": "増加量 (kWh)",
+  "settings.labels.keyAria": "ラベル{index}のキー",
+  "settings.labels.keyPlaceholder": "キー (例: site)",
+  "settings.labels.valueAria": "ラベル{index}の値",
+  "settings.labels.valuePlaceholder": "値",
+  "settings.labels.removeAria": "ラベル{index}を削除",
+  "settings.labels.add": "ラベルを追加",
+  "settings.labels.help":
+    "サイト、テナント、環境などで充電器をグループ化します。ダッシュボードのフィルターとcp.list APIがこれらで絞り込みます。",
+  "settings.labels.errNoKey": "ラベルの値「{value}」にキーがありません。",
+  "settings.labels.errInvalidKey":
+    "ラベルのキー「{key}」が不正です。{reason}。",
+  "settings.labels.errValueTooLong": "ラベル「{key}」の値が長すぎます。",
+  "settings.labels.errDuplicate": "ラベルのキー「{key}」が重複しています。",
+  "settings.labels.errMax": "ラベルは最大{max}個までです。",
+  "settings.soapBase.tunnel": "{provider}トンネル",
+  "settings.soapBase.publicBase": "SOAP公開ベース",
+  "settings.modal.addTitle": "新しい充電器を追加",
+  "settings.modal.configureTitle": "{cpId}を設定",
+  "settings.curve.axisTime": "時間 (秒)",
+  "settings.curve.axisValue": "MeterValue (kWh)",
+  "settings.curve.minPoints": "制御点は少なくとも2つ必要です",
+  "settings.curve.close": "閉じる",
+  "settings.curve.title": "自動MeterValueの設定",
+  "settings.curve.enable": "自動MeterValueを有効にする",
+  "settings.curve.canvasHint": "クリックで制御点を追加、ドラッグで移動します",
+  "settings.curve.stopAtTarget": "バッテリー満充電まで充電 (EVの目標SoCで停止)",
+  "settings.curve.stopAtTargetHelp":
+    "グラフの最大時間/最大値は無視されます。EV設定の目標SoCを使用し、到達すると進行中のトランザクションを停止します。",
+  "settings.curve.presets": "プリセット",
+  "settings.curve.linear": "線形",
+  "settings.curve.exponential": "指数",
+  "settings.curve.step": "ステップ",
+  "settings.curve.sendInterval": "送信間隔 (秒)",
+  "settings.curve.autoCalculate": "自動計算",
+  "settings.curve.controlPoints": "制御点",
+  "settings.curve.addPoint": "点を追加",
+  "settings.curve.unitSec": "秒",
+  "settings.page.title": "設定",
+  "settings.page.backToHome": "ホームに戻る",
+  "settings.page.tagsSaved": "RFIDタグIDを保存しました。",
+  "settings.page.resetUnsupported":
+    "このランタイムは状態のリセットに対応していません",
+  "settings.page.resetConfirm":
+    "シミュレーターのデータをすべてリセットしますか?\n\nシナリオ、設定の上書き、充電プロファイル、可用性フラグ、保留中のメッセージ、ログ、保存済みの車両プロファイルが消去されます。完了後、ページが再読み込みされます。",
+  "settings.page.evSaved":
+    "デフォルトのEV設定を保存しました。新しいコネクタはこの値で開始します。",
+  "settings.page.evReset":
+    "デフォルトのEV設定を組み込みの既定値にリセットしました。",
+  "settings.page.exported": "設定をエクスポートしました。",
+  "settings.page.imported": "設定をインポートしました。",
+  "settings.page.invalidFile":
+    "JSONファイルが不正です。ファイル形式を確認してください。",
+  "settings.page.applied": "設定を適用しました。",
+  "settings.page.invalidJson": "JSONが不正です。構文を確認してください。",
+  "settings.page.runtimeMode": "ランタイムモード",
+  "settings.page.runtimeModeBefore":
+    "シミュレーターは、UIの配信元に応じてローカルまたはリモートを自動的に選択します。",
+  "settings.page.runtimeModeMid":
+    "(またはDockerイメージ) で開くと、UIはそのデーモンとリモートで通信します。静的ビルド (GitHub Pages、",
+  "settings.page.runtimeModeAfter":
+    ") から開くと、充電器はブラウザ内でローカルとして動作します。手動の切り替えはありません。",
+  "settings.page.mode": "モード:",
+  "settings.page.server": "サーバー: {url}",
+  "settings.page.resetData": "データのリセット",
+  "settings.page.resetDataHelp":
+    "永続化されたシミュレーターの記録 (シナリオ、ChangeConfigurationの上書き、充電プロファイル、可用性フラグ、保留中のトランザクションメッセージ、保存済みのログ、保存済みの車両プロファイル) をすべて消去します。スキーマはそのままで、次回の読み込みはクリーンなDBから始まります。リモートモードでは、デーモンに登録されたすべての充電器も削除されます。",
+  "settings.page.resetting": "リセット中…",
+  "settings.page.resetAll": "シミュレーターのデータをすべてリセット",
+  "settings.page.resetFailed": "リセットに失敗しました",
+  "settings.page.defaultEv": "デフォルトEV設定",
+  "settings.page.defaultEvHelp":
+    "この値は、このデバイス上のすべての新しいコネクタのEV (バッテリー容量、目標SoCなど) の初期値になります。「シナリオEV設定」を空のままにしたシナリオは、コネクタが現在保持している値を使用します。その値の初期値がこのデフォルトです。",
+  "settings.page.evPreset": "EVモデルプリセット",
+  "settings.page.battery": "バッテリー (kWh)",
+  "settings.page.maxPower": "最大電力 (kW)",
+  "settings.page.initialSoc": "初期SoC (%)",
+  "settings.page.targetSoc": "目標SoC (%)",
+  "settings.page.electrical": "電気的特性",
+  "settings.page.currentType": "電流種別",
+  "settings.page.phases": "相数",
+  "settings.page.phase1": "1 (単相)",
+  "settings.page.phase3": "3 (三相)",
+  "settings.page.voltage": "電圧 (V)",
+  "settings.page.powerFactor": "力率",
+  "settings.page.chargingCurve": "充電カーブ",
+  "settings.page.chargingCurveHelp":
+    "各SoCにおけるバッテリーの受け入れ割合 (最大電力に対する比率)。空 (点なし) の場合は、セッション全体で最大電力を一定に受け入れます (カーブ導入前の動作と同じ)。",
+  "settings.page.curveSocAria": "充電カーブ点{index}のSoC (%)",
+  "settings.page.curveSocUnit": "% SoC →",
+  "settings.page.curveFractionAria": "充電カーブ点{index}の電力比率",
+  "settings.page.curveFractionUnit": "最大電力に対する比率",
+  "settings.page.curveRemoveAria": "充電カーブ点{index}を削除",
+  "settings.page.addPoint": "点を追加",
+  "settings.page.resetBuiltIn": "組み込みの既定値に戻す",
+  "settings.page.overrideActive":
+    "ユーザーによる上書きが有効です。新しいコネクタはこの値で開始します。",
+  "settings.page.noOverride":
+    "上書きなし。新しいコネクタは組み込みの汎用EVデフォルト (75 kWh / 目標80 %) で開始します。",
+  "settings.page.rfid": "RFIDタグID",
+  "settings.page.rfidHelp":
+    "すべての充電器で共有されるタグプロファイルです。Start Transactionの前に、コネクタカードのTagIDドロップダウンから選択します。CPごとではなく全体で保存されます。",
+  "settings.page.tagIds": "タグID (カンマ区切り)",
+  "settings.page.tagIdsPlaceholder": "例: 123456, ABCDEF, TAG001",
+  "settings.page.noTags": "タグはまだ設定されていません。",
+  "settings.page.tagsActive": "有効なタグ: {count}件",
+  "settings.page.configMgmt": "設定管理",
+  "settings.page.configMgmtHelp":
+    "現在の設定をJSONファイルにエクスポートしたり、以前保存した設定をインポートしたりできます。下のJSON設定を直接編集することもできます。",
+  "settings.page.export": "設定をエクスポート",
+  "settings.page.import": "設定をインポート",
+  "settings.page.configJson": "設定JSON",
+  "settings.page.jsonPlaceholder": "設定のJSONをここに貼り付け...",
+  "settings.page.jsonHelp":
+    "JSON設定を直接編集し、「保存」をクリックして更新します。",
+  "settings.page.note": "注意",
+  "settings.page.note1": "個々の充電器の設定はホームページから行えます",
+  "settings.page.note2":
+    "各充電器タブの横にある歯車アイコンをクリックして設定を編集します",
+  "settings.page.note3":
+    "「+ Add Charge Point」ボタンで新しい充電器を追加します",
+  "settings.page.note4":
+    "このページは設定の一括インポート/エクスポート専用です",
+};
 export default settings;

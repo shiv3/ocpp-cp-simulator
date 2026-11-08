@@ -2288,3 +2288,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-07] fix | OCPP 2.x Reset OnIdle follow-ups (#635)
 
 - Reset OnIdle now checks for running transactions rather than retained stopped transaction objects, rechecks immediately after scheduling, and is reevaluated when a connector is removed. Scoped Immediate resets cancel only the pending reset in their scope; other EVSE resets remain queued. An Inoperative connector stays Unavailable after the accepted reboot. [OCPP versions and transports](concepts/ocpp-versions-and-transports.md).
+
+## [2026-11-08] ingest | Web console internationalization (#634)
+
+- The console is translated into English (default), Simplified Chinese and Japanese with a typed in-house `t()` layer under `apps/web/src/i18n/`. The language selector sits beside the theme toggle in the sidebar footer; the choice persists in `localStorage` and is shared by Local and Remote mode. OCPP action names, protocol fields, enum values and identifiers stay untranslated. New page: [Web console internationalization](concepts/web-console-i18n.md); a completeness test fails when `ja` / `zh-CN` lack a key of `en`.

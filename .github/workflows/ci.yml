@@ -281,6 +281,22 @@ jobs:
             exit 1
           fi
 
+      # JSON mode without overriding the entrypoint, and the legacy
+      # `--entrypoint bun src/cli/main.ts` shape open-ocpp-tck still uses
+      # (#346). Each sends one command, closes stdin and expects a reply and
+      # exit 0 (the CSMS URL is a closed port; the reply does not need it).
+      - name: Image runs JSON mode (entrypoint and legacy shim)
+        run: |
+          cmd='{"id":1,"command":"status"}'
+          echo "$cmd" | timeout 60 docker run -i --rm ocpp-cp-sim:ci \
+            --json --cp-id ci-json --ws-url ws://127.0.0.1:9/ocpp/ | tee /tmp/json-entrypoint.out
+          grep -q '"id":1' /tmp/json-entrypoint.out
+          grep -q '"ok":true' /tmp/json-entrypoint.out
+          echo "$cmd" | timeout 60 docker run -i --rm --entrypoint bun -w /app ocpp-cp-sim:ci \
+            src/cli/main.ts --json --cp-id ci-json --ws-url ws://127.0.0.1:9/ocpp/ | tee /tmp/json-shim.out
+          grep -q '"id":1' /tmp/json-shim.out
+          grep -q '"ok":true' /tmp/json-shim.out
+
       - name: Stop the container
         if: always()
         run: docker rm -f ocpp-cp-sim-ci || true

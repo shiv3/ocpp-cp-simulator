@@ -63,6 +63,8 @@ import { AutoTrafficRunner } from "@ocpp-cp-sim/core/cp/application/services/Aut
 import {
   AUTO_TRAFFIC_ID_TAG,
   AutoTrafficIdTagPicker,
+  autoTrafficVehicleLabel,
+  autoTrafficVehiclePatch,
   defaultAutoTrafficConfig,
   emptyAutoTrafficCounters,
   validateAutoTrafficConfig,
@@ -1442,7 +1444,19 @@ export class CLIChargePointService {
       },
       // `intent` is set under `sessionModel: "intent"` (#327): the session
       // opens at the drawn SoC, targets the drawn SoC and stops there.
-      startTransaction: async (id, idTag, intent) => {
+      startTransaction: async (id, idTag, intent, vehicle) => {
+        // #627: the drawn vehicle becomes the connector's, before the start,
+        // so the transaction (battery capacity, opening SoC) and every
+        // MeterValues of the session read the vehicle the traffic drew.
+        if (vehicle) {
+          this.requireConnector(id).applyEvSettingsOverride(
+            autoTrafficVehiclePatch(vehicle),
+          );
+          this._chargePoint.logger.info(
+            `[auto-traffic] ${this._init.cpId}/${id} vehicle ${autoTrafficVehicleLabel(vehicle)}`,
+            LogType.TRANSACTION,
+          );
+        }
         const outcome = await this._chargePoint.startTransaction(
           idTag,
           id,

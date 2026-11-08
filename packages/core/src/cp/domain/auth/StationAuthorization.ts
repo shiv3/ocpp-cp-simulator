@@ -107,6 +107,28 @@ export class StationAuthorization {
     return true;
   }
 
+  /**
+   * Whether a CSMS verdict `status` on `idToken` contradicts the Local
+   * Authorization List (1.6 §3.5.2: "Conflicts between the local
+   * authorization list and the validity reported in, for instance, a
+   * StartTransaction.conf message might occur"). False while the list is
+   * disabled, for an identifier it does not hold, and when both agree. An
+   * Accepted entry past its `expiryDate` counts as Expired (§3.5.4), the
+   * status the station itself would act on. Read-only: the list stays the
+   * authority until the CSMS sends a new one.
+   */
+  conflictsWithLocalList(idToken: string, status: string): boolean {
+    if (!this.deps.policy().localListEnabled) return false;
+    const listed = this.deps.localList.getEntry(idToken);
+    if (!listed) return false;
+    const known = toKnown(listed);
+    const expired =
+      known.status === "Accepted" &&
+      known.expiresAt !== undefined &&
+      known.expiresAt <= this.now();
+    return (expired ? "Expired" : known.status) !== status;
+  }
+
   /** Empty the cache (1.6 §5.4, C11.FR.01). False when it could not be. */
   clearCache(): boolean {
     return this.deps.cache.clear();

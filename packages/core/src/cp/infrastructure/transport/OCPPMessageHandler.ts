@@ -1,3 +1,4 @@
+import { isCriticalSecurityEvent16 } from "../../domain/security/securityEvents16";
 import {
   DATA_TRANSFER_RESPONSE_TIMEOUT_MS,
   type DataTransferData,
@@ -94,6 +95,7 @@ import {
 } from "../../domain/connector/Transaction";
 import {
   buildSampledValues,
+  toOcppJ16Wire,
   type MeterSampleOverrides,
   type ReadingContext,
 } from "../../domain/connector/MeterValueBuilder";
@@ -248,6 +250,18 @@ interface OCPPRequest {
  */
 function isTransactionRelated(action: OCPPAction): boolean {
   return QUEUED_ON_OCPP16.has(action);
+}
+
+/** A04.FR.02 (#734): a critical SecurityEventNotification the station keeps
+ *  while it cannot send it. */
+function isCriticalSecurityEventCall(entry: {
+  action: OCPPAction;
+  payload: unknown;
+}): boolean {
+  return (
+    entry.action === OCPPAction.SecurityEventNotification &&
+    isCriticalSecurityEvent16((entry.payload as { type?: string }).type ?? "")
+  );
 }
 
 /**
@@ -442,7 +456,7 @@ export class OCPPMessageHandler {
     this._pendingQueue = new PendingMessageQueue(
       chargePoint.id,
       chargePoint.database,
-      QUEUED_ON_OCPP16,
+      new Set([...QUEUED_ON_OCPP16, OCPPAction.SecurityEventNotification]),
       chargePoint.clock,
     );
     // #528: `cp.update` can switch ocppVersion over the same --state-db,
@@ -465,6 +479,7 @@ export class OCPPMessageHandler {
     this._gate = new InboundCallGate({
       ports: ports16(chargePoint),
       registry: chargePoint.behaviors,
+      silenced: () => this._bootGate.isInboundSilenced(),
       info: (message) => this._logger.info(message, LogType.OCPP),
       warn: (message) => this._logger.warn(message, LogType.OCPP),
     });
@@ -533,6 +548,11 @@ export class OCPPMessageHandler {
    * - Rejected: nothing goes out at all until retryAfter elapses.
    * - Idle (pre-handshake): allow BootNotification only.
    */
+  /** §4.2: CALLs made inside `fn` are the answer to a TriggerMessage. */
+  public runTriggered<T>(fn: () => T): T {
+    return this._bootGate.runTriggered(fn);
+  }
+
   private isCallAllowed(action: OCPPAction): boolean {
     return this._bootGate.isCallAllowed(action);
   }
@@ -818,14 +838,76 @@ export class OCPPMessageHandler {
     type: string,
     techInfo?: string,
   ): Promise<void> {
-    const messageId = this.generateMessageId();
-    const payload: SecurityEventNotificationRequestV16 = {
+    const payload = this.securityEventPayload(type, techInfo);
+    // A04.FR.02: a critical event raised while the station cannot send it
+    // (no connection, or the boot not Accepted yet) is queued, with its own
+    // timestamp, and goes out after the next Accepted boot.
+    if (
+      isCriticalSecurityEvent16(type) &&
+      (!this._webSocket.isConnected() ||
+        !this.isCallAllowed(OCPPAction.SecurityEventNotification))
+    ) {
+      this.queueSecurityEventPayload(payload);
+      return Promise.resolve();
+    }
+    this.sendRequest(
+      OCPPAction.SecurityEventNotification,
+      this.generateMessageId(),
+      payload,
+    );
+    return Promise.resolve();
+  }
+
+  /**
+   * #734: raises a critical security event now but sends it only after the
+   * next Accepted boot (`ResetOrReboot`: the station reports the reset once
+   * it is back). Persisted with the other queued messages.
+   */
+  public queueSecurityEventNotification(type: string, techInfo?: string): void {
+    this.queueSecurityEventPayload(this.securityEventPayload(type, techInfo));
+  }
+
+  private securityEventPayload(
+    type: string,
+    techInfo?: string,
+  ): SecurityEventNotificationRequestV16 {
+    return {
       type,
       timestamp: new Date(this.clock.now()).toISOString(),
       ...(techInfo !== undefined ? { techInfo } : {}),
     };
-    this.sendRequest(OCPPAction.SecurityEventNotification, messageId, payload);
-    return Promise.resolve();
+  }
+
+  private queueSecurityEventPayload(
+    payload: SecurityEventNotificationRequestV16,
+  ): void {
+    this._pendingQueue.enqueue({
+      action: OCPPAction.SecurityEventNotification,
+      payload,
+    });
+    this._logger.info(
+      `Queued security event ${payload.type} until the next Accepted boot (A04.FR.02); size=${this._pendingQueue.size()}`,
+      LogType.OCPP,
+    );
+  }
+
+  /**
+   * #734: sends the queued security events, oldest first, each with the
+   * timestamp it was raised with. Called when a boot is Accepted, before any
+   * other traffic that follows it.
+   */
+  public flushQueuedSecurityEvents(): void {
+    const queued = this._pendingQueue
+      .all()
+      .filter((m) => m.action === OCPPAction.SecurityEventNotification);
+    for (const message of queued) {
+      this._pendingQueue.removeOldest(OCPPAction.SecurityEventNotification);
+      this.sendRequest(
+        OCPPAction.SecurityEventNotification,
+        this.generateMessageId(),
+        message.payload as OcppMessageRequestPayload,
+      );
+    }
   }
 
   /** Generate or forward a CSR for the charge point certificate signing flow. */
@@ -836,6 +918,12 @@ export class OCPPMessageHandler {
     let payloadCsr: string;
     if (csr) {
       payloadCsr = csr;
+      // #732: a CertificateSigned is matched against it like a generated one
+      // (a CSR that does not parse is only forwarded).
+      this._chargePoint.certificateStore.recordPendingCsr(
+        "ChargingStationCertificate",
+        csr,
+      );
     } else {
       // Log when a non-default key algorithm is used
       if (quirks.csrKeyAlgorithm === "RSA") {
@@ -985,7 +1073,9 @@ export class OCPPMessageHandler {
     const measurands =
       overrides.measurands ??
       this._chargePoint.configuration.meterValuesSampledData();
-    const sampledValue = buildSampledValues(connector, measurands, context);
+    const sampledValue = toOcppJ16Wire(
+      buildSampledValues(connector, measurands, context),
+    );
     const timestamp = overrides.timestamp ?? new Date(this.clock.now());
     // #315: during a transaction, also send the energy register signed.
     // Clock-aligned samples are not signed (no aligned/fiscal records yet).
@@ -1278,10 +1368,13 @@ export class OCPPMessageHandler {
       entry.onDropped(reason);
       return;
     }
-    if (isTransactionRelated(entry.action)) {
+    if (
+      isTransactionRelated(entry.action) ||
+      isCriticalSecurityEventCall(entry)
+    ) {
       // #565: the id its StartTransaction.req got, if the conf (or the
       // discard) came after the message was built.
-      this.applyStartOutcome(entry);
+      if (isTransactionRelated(entry.action)) this.applyStartOutcome(entry);
       this._pendingQueue.enqueue({
         action: entry.action,
         payload: entry.payload,
@@ -1517,6 +1610,8 @@ export class OCPPMessageHandler {
    * `TransactionMessageAttempts`.
    */
   public flushPendingQueue(): void {
+    if (this._pendingQueue.size() === 0) return;
+    this.flushQueuedSecurityEvents();
     if (this._pendingQueue.size() === 0) return;
     const maxAttempts =
       this._chargePoint.configuration.transactionMessageAttempts();

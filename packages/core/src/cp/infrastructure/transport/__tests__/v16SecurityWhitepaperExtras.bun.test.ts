@@ -1,3 +1,4 @@
+import { SIGNING_CERTIFICATE } from "../../../domain/security/__tests__/signingCertificateFixture";
 import "reflect-metadata";
 import { describe, expect, it } from "bun:test";
 import * as x509 from "@peculiar/x509";
@@ -357,8 +358,7 @@ describe.skipIf(!canBindBunServe())(
             firmware: {
               location: "http://example.invalid/firmware.bin",
               retrieveDateTime: new Date().toISOString(),
-              signingCertificate:
-                "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----",
+              signingCertificate: SIGNING_CERTIFICATE,
               signature: "deadbeef",
             },
           },

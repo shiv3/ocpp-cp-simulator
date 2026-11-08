@@ -1,6 +1,7 @@
 import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { isOcpp2Version } from "../../../domain/types/OcppVersion";
+import { checkFirmwareSigningCertificate } from "../../../domain/security/signingCertificate";
 import { LogType } from "../../../shared/Logger";
 
 /** Time between two statuses of the simulated update. */
@@ -12,6 +13,7 @@ interface UpdateFirmwareRequest {
   retries?: number | null;
   retryInterval?: number | null;
   requestId?: number;
+  firmware?: { signingCertificate?: unknown };
 }
 
 /**
@@ -27,9 +29,14 @@ interface UpdateFirmwareRequest {
  * `InstallationFailed` at the Installed step. A second UpdateFirmware while a
  * train is running is ignored.
  *
- * OCPP 2.x (L01): the request is accepted and its `requestId` remembered for
- * the FirmwareStatusNotification reports the control plane drives; the station
- * reports nothing on its own. A user behavior can opt in to a train.
+ * OCPP 2.x (L01): a `firmware.signingCertificate` is validated first
+ * (L01.FR.21): one that does not parse, is outside its validity period or is
+ * not issued by an installed ManufacturerRootCertificate is answered
+ * `InvalidCertificate` (L01.FR.22), no `requestId` is remembered and an
+ * `InvalidFirmwareSigningCertificate` SecurityEventNotification follows
+ * (L01.FR.02). Otherwise (or without a certificate) the request is accepted
+ * and its `requestId` remembered for the FirmwareStatusNotification reports
+ * the control plane drives; the station reports nothing on its own. A user behavior can opt in to a train.
  */
 export function firmwareBehavior(cp: ChargePoint): Behavior {
   return {
@@ -41,6 +48,33 @@ export function firmwareBehavior(cp: ChargePoint): Behavior {
         handle: (request, ctx) => {
           const req = (request ?? {}) as UpdateFirmwareRequest;
           if (isOcpp2Version(cp.ocppVersion)) {
+            const signingCertificate = req.firmware?.signingCertificate;
+            if (signingCertificate !== undefined) {
+              const check = checkFirmwareSigningCertificate(
+                signingCertificate,
+                cp.nowDate(),
+                cp.certificateStore
+                  .listRootCertificates(["ManufacturerRootCertificate"])
+                  .map((root) => root.pem),
+              );
+              if (!check.ok) {
+                cp.logger.warn(
+                  `UpdateFirmware: InvalidCertificate (${check.problem}): ${check.detail}`,
+                  LogType.OCPP,
+                );
+                return {
+                  response: { status: "InvalidCertificate" },
+                  after: async () => {
+                    await cp
+                      .sendSecurityEventNotification(
+                        "InvalidFirmwareSigningCertificate",
+                        check.detail,
+                      )
+                      .catch(() => undefined);
+                  },
+                };
+              }
+            }
             if (typeof req.requestId === "number") {
               cp.noteFirmwareRequest(req.requestId);
             }

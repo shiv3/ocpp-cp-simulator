@@ -1,7 +1,7 @@
 ---
 title: "Source: GitHub issues referenced by the wiki"
 type: source
-summary: Index of the issue / PR numbers that wiki pages cite as the origin of a design decision, so "why" questions can be traced back.
+summary: Archive, frozen 2026-11-08. Index of the issue / PR numbers that wiki pages cited as the origin of a design decision; newer provenance is in git.
 sources:
   - https://github.com/shiv3/ocpp-cp-simulator/issues
 related:
@@ -11,7 +11,12 @@ related:
 updated: 2026-11-08
 ---
 
-# Source: GitHub issues referenced by the wiki
+# Source: GitHub issues referenced by the wiki (archive)
+
+> **Archived: no longer updated as of 2026-11-08.** Do not add rows. Pages cite
+> issue numbers inline for provenance; to trace a newer decision use
+> `git log --grep '#N'`, `git log -- docs/`, the PR that closed the issue, or the
+> branch name `<type>/<issue number>-<slug>`.
 
 All under https://github.com/shiv3/ocpp-cp-simulator unless noted.
 
@@ -155,7 +160,6 @@ All under https://github.com/shiv3/ocpp-cp-simulator unless noted.
 | #569                                             | No executable content over the wire (Socket.IO, MCP, OCPP carry data only): behavior code loads from local files named on the command line                                                                                       |
 | #575                                             | `ChargePoint` size: the transitional facades (`Connector` setters, the transaction view, the three write scopes) go as lines move out ([transitional list](../concepts/charger-engine.md#transitional))                          |
 | #593                                             | Inbound 1.6J CALL payloads are validated per `inboundValidation` (`off` / `warn` default / `enforce`); violations answer OCPP-J 1.6 error codes                                                                                  | [OCPP versions & transports](../concepts/ocpp-versions-and-transports.md#inbound-call-validation-on-ocpp-j-16)                                                                                                                                                                                                                                                                       |
-| #565                                             | A 1.6 / 2.x transaction-related message waits behind a pending resend (§3.7, E13.FR.04); a 1.6 StopTransaction.req / MeterValues.req takes the id of its StartTransaction.conf when sent, or `-1` once discarded (errata 3.18)   | [OCPP versions and transports](../concepts/ocpp-versions-and-transports.md#transaction-message-retries-ocpp-j-16), [Charging sessions](../concepts/charging-sessions.md)                                                                                                                                                                                                             |
 | #594                                             | 1.6 SetChargingProfile replaces by `stackLevel` + purpose too; TxProfile needs the active transaction; `NotSupported` without SmartCharging                                                                                      | [OCPP versions & transports](../concepts/ocpp-versions-and-transports.md#ocpp-16-setchargingprofile)                                                                                                                                                                                                                                                                                 |
 | #600                                             | Cited as a source of the [charger engine](../concepts/charger-engine.md) design; the wiki does not record what it asks (read the issue)                                                                                          |
 | #618                                             | Cited as a source of the [charger engine](../concepts/charger-engine.md) design; the wiki does not record what it asks (read the issue)                                                                                          |

@@ -1,11 +1,17 @@
 ---
-title: Log
+title: Log (archive)
 type: log
-summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
+summary: Archive, frozen 2026-11-08. Chronological record of wiki operations up to that date; history now lives in git.
 updated: 2026-11-08
 ---
 
-# Log
+# Log (archive)
+
+> **Archived: no longer updated as of 2026-11-08.** Do not append here. Wiki
+> changes are now recorded by git: `git log -- docs/` (add `-p` for diffs),
+> `git log --grep '#N'` for an issue or PR number, the PR that closed the issue,
+> and branch names `<type>/<issue number>-<slug>`. The commit message and PR
+> description say which pages changed and why.
 
 Format: `## [YYYY-MM-DD] <op> | <title>` then bullets of pages touched.
 `grep "^## \[" docs/log.md | tail -5` shows the latest entries.
@@ -2438,16 +2444,20 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - New `cp.scenario.run { labels, connector, templateId, evSettings?, strict?, once? }` and MCP `cp_scenario_run`: `run_scenario_template` on every charge point a label selector matches, with `cp.bulk`'s selector rules, fan-out and partial-success result (`started` carries each `scenarioId`). A method of its own (decision D07), not a `cp.bulk` action. Pages: [Socket.IO control plane](concepts/control-plane.md#charge-point-labels), [MCP endpoint](entities/mcp-endpoint.md).
 
-## [2026-11-08] ingest | Transaction messages wait behind a pending resend; Stop and MeterValues take the StartTransaction.conf id (#565)
+## [2026-11-08] ingest | Fleet-wide charging session listing (#489)
 
-- Replaces the "known limitation" of [#527](https://github.com/shiv3/ocpp-cp-simulator/issues/527) and #490. 1.6: after a CALLERROR on a transaction-related message, the transaction-related messages that follow wait behind its resend (edition 2 §3.7 "SHALL wait until the queue has been emptied"), in the serial queue, the offline queue and across a close; they go out when the resend is answered, discarded (§3.7.1), dropped or timed out. A StartTransaction.req resend whose transaction stopped is no longer discarded: it is sent, ahead of the StopTransaction.req.
-- A StopTransaction.req and a MeterValues.req take their `transactionId` when written: the id of the StartTransaction.conf, also one that arrives after the stop (including a request still in flight), or `-1` when the request was discarded (1.6 errata 3.18). Wire change: a message built after a discard carried `0` before.
-- 2.x: a TransactionEvent built while an earlier one is failed and unsettled waits for it (E13.FR.04); an event already written is not recalled.
-- Fixtures: `16-start-callerror-stop-during-retry` and `16-transaction-started-listener-stops` re-recorded; new `16-start-callerror-stop-during-retry-conf`, `16-start-callerror-unlock-during-retry`, `16-start-callerror-meter-and-stop-during-retry`, `16-scenario-stop-during-start-retry`, `201-event-callerror-stop-during-retry`.
-- Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#transaction-message-retries-ocpp-j-16), [Charging sessions](concepts/charging-sessions.md), [Operational timeline](concepts/operational-timeline.md), [GitHub issues](sources/github-issues.md).
+- `sessions.list` and the `list_charging_sessions` MCP tool accept a missing `cpId` and list across every charge point, with new `labels` (selector, fleet-wide only), `startedFrom` (inclusive) and `startedTo` (exclusive) filters; order is start time then record order. Pages: [Charging sessions](concepts/charging-sessions.md#reading-it), [Socket.IO control plane](concepts/control-plane.md), [MCP endpoint](entities/mcp-endpoint.md), [index](index.md).
 
-## [2026-11-08] fix | Transaction message hold review follow-ups (#565)
+## [2026-11-08] ingest | Web console toggle for `txUpdatedMeterValues` (#550)
 
-- 2.x: a resend dropped before the wire (network-sim `queue_overflow`, a behavior's `beforeSend`) while the earlier transmission only awaits a late answer no longer holds later TransactionEvents back; a close queues the failing event before the held ones are released.
-- 1.6: a message moved from the serial queue to the hold keeps its `wire`, attempt count and last error code and is not intercepted by `beforeSend` a second time; a salvaged message takes the StartTransaction outcome too.
-- Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#transaction-message-retries-ocpp-j-16), [Charging sessions](concepts/charging-sessions.md). The `-1` / conf id still cannot reach a StartTransaction.req that timed out, a resend lost on close or a restart (#727); a `write_failed` salvage on a live link is a known gap in the hold's order.
+- The Add and Edit forms of an OCPP 2.0.1 / 2.1 charge point have a `txUpdatedMeterValues` checkbox (en / ja / zh-CN). Remote mode sends it with `cp.create` / `cp.update`; Local mode stores it in the shared simulator config (new optional `txUpdatedMeterValues` field of the config wire schema, kept by the browser config port), `useChargePoints` passes it to the local charge points and `syncLocalChargePoints` applies a change to running ones. Updated [Web console](entities/web-console.md), [OCPP versions and transports](concepts/ocpp-versions-and-transports.md).
+
+## [2026-11-08] ingest | 2.x TriggerMessage(BootNotification) after an Accepted boot is Rejected (#690)
+
+- F06.FR.17: on 2.0.1 / 2.1 the answer is `Rejected` and no BootNotification follows when the last BootNotification answer was `Accepted`; Pending, Rejected and unanswered boots still answer `Accepted` and send it. Golden `201-trigger-message-all` re-recorded (id-4).
+- Page: [Control plane](concepts/control-plane.md).
+
+## [2026-11-08] ingest | Configurable daemon startup concurrency and staggering (#610)
+
+- `entities/daemon.md`, `entities/cli.md`: `--bootstrap-concurrency` (default 8, the previous fixed value), `--start-delay`, `--start-jitter`, `--start-seed`; all four need a server mode and `--cp-id`, and a bad number exits 1. Review fixes: a charge point deleted or updated while it waits is skipped, the flags are refused next to a client mode, and the schedule is bounded by the 2^31-1 ms timer limit; `daemon.md` states the requirements and that `--state-db` restores are not paced.
+- `index.md`: no change (no page added).

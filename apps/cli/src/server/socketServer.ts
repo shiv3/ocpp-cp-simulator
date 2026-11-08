@@ -1378,16 +1378,39 @@ async function getTimeline(
   return { version: TIMELINE_FORMAT_VERSION, ...page };
 }
 
-/** #447: an unknown cpId is `not_found`, like `timeline.get`. */
+/**
+ * #447: an unknown cpId is `not_found`, like `timeline.get`. #489: without
+ * `cpId` the listing spans the fleet, `labels` narrowing it.
+ */
 async function listChargingSessions(
   deps: RuntimeSocketIoDeps,
-  { cpId, ...query }: Params<"sessions.list">,
+  { cpId, labels, startedFrom, startedTo, ...query }: Params<"sessions.list">,
 ): Promise<Result<"sessions.list">> {
+  const page = {
+    ...query,
+    // Normalised to the form `startedAt` is stored in, so a zone offset in
+    // the request compares correctly as text.
+    ...(startedFrom === undefined
+      ? {}
+      : { startedFrom: new Date(startedFrom).toISOString() }),
+    ...(startedTo === undefined
+      ? {}
+      : { startedTo: new Date(startedTo).toISOString() }),
+    limit: query.limit ?? CHARGING_SESSIONS_PAGE_DEFAULT,
+  };
+  if (cpId !== undefined) {
+    if (labels !== undefined) {
+      throw new RpcFailure(
+        "invalid_params",
+        "labels selects charge points; it cannot be combined with cpId",
+      );
+    }
+    return runFacadeOperation(() =>
+      deps.chargePointService.listChargingSessions(cpId, page),
+    );
+  }
   return runFacadeOperation(() =>
-    deps.chargePointService.listChargingSessions(cpId, {
-      ...query,
-      limit: query.limit ?? CHARGING_SESSIONS_PAGE_DEFAULT,
-    }),
+    deps.chargePointService.listFleetChargingSessions({ ...page, labels }),
   );
 }
 
@@ -2782,6 +2805,11 @@ function mergeUpdateParams(
     init.txUpdatedMeterValues,
   );
   preserveWhenMissing(merged, "inboundValidation", init.inboundValidation);
+  preserveWhenMissing(
+    merged,
+    "reservationAuthorizeIdTag",
+    init.reservationAuthorizeIdTag,
+  );
   preserveWhenMissing(merged, "tlsCaPath", init.tlsCaPath);
   preserveWhenMissing(merged, "tlsCertPath", init.tlsCertPath);
   preserveWhenMissing(merged, "tlsKeyPath", init.tlsKeyPath);

@@ -88,6 +88,11 @@ export const SCENARIO_RUNS_PAGE_MAX = 200;
  *  ask for (a charge point's whole retained history). */
 export const CHARGING_SESSIONS_PAGE_DEFAULT = 50;
 export const CHARGING_SESSIONS_PAGE_MAX = MAX_SESSIONS_PER_CP;
+/** #489: an ISO 8601 instant with a zone designator, e.g. 2026-11-08T00:00:00Z. */
+const ISO_INSTANT = z
+  .string()
+  .datetime({ offset: true })
+  .describe("ISO 8601 instant with a zone, e.g. 2026-11-08T00:00:00Z");
 /** #447: one charging session, the same shape for every OCPP version. */
 const chargingSessionSchema = z.object({
   sessionId: z.string(),
@@ -362,6 +367,12 @@ const cpParamsBaseSchema = z.object({
     .optional()
     .describe(
       "OCPP 1.6J only: what to do with an inbound CALL whose payload breaks the request schema. off skips the check, warn (default) logs and traces the violation and runs the handler, enforce answers a CALLERROR (FormationViolation, OccurenceConstraintViolation, PropertyConstraintViolation or TypeConstraintViolation)",
+    ),
+  reservationAuthorizeIdTag: z
+    .boolean()
+    .optional()
+    .describe(
+      "OCPP 1.6 only: authorize the idTag of a ReserveNow (local rules, then Authorize.req) before accepting it; a tag that is not Accepted answers Rejected. Defaults to false",
     ),
   tlsCaPath: STR_64K.optional().describe(
     "Path to a PEM CA bundle verifying the CSMS certificate. Omit to use the system trust store; passing one REPLACES the default roots",
@@ -1365,9 +1376,16 @@ export const METHODS = {
       total: z.number().int().min(0),
     }),
   },
+  // #489: `cpId` omitted lists across every charge point (like
+  // `scenario.runs.list`), newest start first, ties by record order. `labels`
+  // narrows a fleet-wide listing to a selector (`{}` = all, as in `cp.list`);
+  // `startedFrom` (inclusive) / `startedTo` (exclusive) bound the start time.
   "sessions.list": {
     params: z.object({
-      cpId: NON_EMPTY_STR,
+      cpId: NON_EMPTY_STR.optional(),
+      labels: labelsSchema.optional(),
+      startedFrom: ISO_INSTANT.optional(),
+      startedTo: ISO_INSTANT.optional(),
       connectorId: CONN_POS.optional(),
       outcomes: z
         .array(z.enum(CHARGING_SESSION_OUTCOMES))

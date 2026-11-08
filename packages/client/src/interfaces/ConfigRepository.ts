@@ -6,6 +6,8 @@ export interface Config {
   connectorNumber: number;
   tagID: string;
   ocppVersion: string;
+  /** #550: shared by every browser charge point; absent means off. */
+  txUpdatedMeterValues?: boolean;
   basicAuthSettings: BasicAuthSettings;
   autoMeterValueSetting: AutoMeterValueSetting;
   Experimental: Experimental | null;

@@ -88,6 +88,10 @@ expressible on 2.0.1 at all; it now consults them at the same point the 1.6
 handler does, before payload validation and handler lookup, so policies are
 sticky across reconnects the same way and an override answers once.
 
+## Identity in the connection URL
+
+On OCPP-J (1.6, 2.0.1, 2.1) the connection URL is the configured endpoint, a `/` and the charge point identity. The identity is percent-encoded as one path segment with `encodeURIComponent` (OCPP-J 1.6 §3.1.1, RFC 3986; #742): `CP001` stays `CP001`, `a/b` becomes `a%2Fb`, `a%41` becomes `a%2541`, `RDAM 123` becomes `RDAM%20123`. The builder (`buildOcppWebSocketUrl`) adds the `/` itself, so an endpoint with or without a trailing `/` gives the same URL. The HTTP Basic Auth username stays the unencoded identity ([Security profiles](security-profiles.md)).
+
 ## WebSocket ping (`WebSocketPingInterval`)
 
 An OCPP-J charge point sends a WebSocket ping frame every
@@ -309,6 +313,21 @@ Limits:
 - `GetTransactionStatus` answers `messagesInQueue: false` whatever the
   queue holds (E14).
 
+## OCPP-J 1.6 triggered status notifications
+
+A triggered `DiagnosticsStatusNotification`, `FirmwareStatusNotification`,
+`LogStatusNotification` or `SignedFirmwareStatusNotification` reports what the
+station is doing, not a fixed `Idle` (#730; 1.6 §4.4, §4.5, security whitepaper
+L01.FR.28/29, N01.FR.12). The status comes from the last one the engine sent
+(`ChargerState`):
+
+| Trigger                                              | Busy: reported as it is                                        | Otherwise |
+| ---------------------------------------------------- | -------------------------------------------------------------- | --------- |
+| `TriggerMessage(DiagnosticsStatusNotification)`      | `Uploading`                                                    | `Idle`    |
+| `TriggerMessage(FirmwareStatusNotification)`         | `Downloading`, `Downloaded` (waiting to install), `Installing` | `Idle`    |
+| `ExtendedTriggerMessage(LogStatusNotification)`      | `Uploading`, with the GetLog `requestId`                       | `Idle`    |
+| `ExtendedTriggerMessage(FirmwareStatusNotification)` | the last sent status with its `requestId`, unless `Installed`  | `Idle`    |
+
 ## Transaction message retries (OCPP-J 1.6)
 
 OCPP 1.6 Part 2 §3.7.1 lets a charge point skip a transaction-related
@@ -518,6 +537,35 @@ MeterValues.req carrying a `transactionId`:
 The known limitations of the OCPP-J section apply here too (a waiting resend
 does not hold back the next message; a crash loses the resend).
 
+## OCPP-J 1.6 boot gate (§4.2)
+
+Outgoing CALLs follow the status of the last `BootNotification.conf`
+(`BootGate`): `Accepted` lets everything out; before the first answer and while
+`Pending` only `BootNotification` goes out, and while `Rejected` nothing does
+until the retry interval has passed. One exception (#725): §4.2 lets a
+`Pending` station send what the CSMS "instructed ... with a TriggerMessage.req",
+so the CALL that follows an accepted `TriggerMessage` or `ExtendedTriggerMessage`
+(StatusNotification, Heartbeat, MeterValues, the status notifications) passes
+the gate while `Pending`. Anything not triggered (transaction messages, status
+changes, heartbeats) stays suppressed, and a `Rejected` station sends nothing
+even when triggered.
+
+## OCPP-J 1.6 boot gate (§4.2)
+
+Outgoing CALLs follow the status of the last `BootNotification.conf`
+(`BootGate`): `Accepted` lets everything out; before the first answer and while
+`Pending` only `BootNotification` goes out, and while `Rejected` nothing does
+until the retry interval has passed.
+
+Inbound CALLs are gated too (#726). §4.2: "While Rejected, the Charge Point
+SHALL NOT respond to any Central System initiated message", so from a
+`Rejected` answer until the retry interval has passed the station sends no
+CALLRESULT or CALLERROR for a CSMS CALL and runs nothing (a `Reset` does not
+reboot). The CALL is announced, logged (`Boot Rejected (§4.2): ignored …`) and
+shown on the timeline as unanswered. When the retry BootNotification is due the
+station answers again. Pending and Accepted answer as usual. There is no
+opt-out.
+
 ## OCPP 2.x Reset OnIdle
 
 For OCPP 2.0.1 and 2.1, `Reset` with `type: OnIdle` is answered `Accepted` and
@@ -594,7 +642,10 @@ would change the wire for every existing 2.x integration.
 
 A charge point created with `txUpdatedMeterValues: true` (`cp.create`,
 `cp.update`, `cp.create_many`, the MCP `cp_create` tools) or with
-`--tx-updated-meter-values` opts in. It is persisted with `--state-db`.
+`--tx-updated-meter-values` opts in. It is persisted with `--state-db`. The
+[web console](../entities/web-console.md) has a checkbox for it on the Add and
+Edit forms of an OCPP 2.0.1 / 2.1 charge point (#550); in Local mode it is a
+setting of the shared config, so it applies to every browser charge point.
 
 | Scheduler sample, OCPP 2.x | Option off (default) | Option on                                         |
 | -------------------------- | -------------------- | ------------------------------------------------- |
@@ -680,6 +731,16 @@ set; the advertised key is always the connector's own:
   scenario nodes to switch the mode mid-session (set the key with a
   `configSet` node or, on 1.6J, `ChangeConfiguration` instead). 2.x has no
   `ChangeConfiguration` and no `SignedMeterDataMode` variable.
+
+## OCPP-J 1.6 TriggerMessage and a connector that does not exist
+
+§5.17: "the Charge Point SHALL indicate whether it will send it or not". On 1.6J
+`TriggerMessage` and `ExtendedTriggerMessage` for `StatusNotification` or
+`MeterValues` with a `connectorId` above 0 that names no connector are answered
+`Rejected` and nothing is scheduled (#738). Connector 0, an absent
+`connectorId` and the messages that take no connector (Heartbeat,
+BootNotification, the status notifications) behave as before: a
+`TriggerMessage(Heartbeat, connectorId 99)` still sends the Heartbeat.
 
 ## SOAP versions (1.2, 1.5, 1.6S)
 
@@ -892,6 +953,10 @@ with protocol `ocpp1.2S`, `ocpp1.5S`, or `ocpp1.6S`, status Accepted).
   all of them through unchanged. The canonical statement, with the reasoning
   and the tradeoff, is in
   [Scenario format → Charging curve](scenario-format.md#charging-curve-v12).
+
+## Temperature unit spelling on OCPP-J 1.6
+
+The `Temperature` measurand carries `unit: "Celcius"` on OCPP-J 1.6 `MeterValues.req` — the spelling of the original JSON schemas, which OCPP-J 1.6 errata (2025-04) §2.1 advises Charge Point implementers to keep, because a Central System validating against the original schema rejects `Celsius` (#745). The vendored schema accepts both. OCPP-S 1.6 (the WSDL says `Celsius`) and OCPP 2.0.1 / 2.1 send `Celsius`. The conversion is `toOcppJ16Wire` in `MeterValueBuilder.ts`, applied only by the 1.6J handler; a future sampled `transactionData` in `StopTransaction.req` must use it too.
 
 ## Inbound CALL validation on OCPP-J 1.6
 

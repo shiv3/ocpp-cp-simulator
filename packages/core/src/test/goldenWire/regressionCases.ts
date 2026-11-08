@@ -6,6 +6,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any --
    these cases reach into station internals (configuration, listeners, runtime
    snapshots) that the public types do not expose */
+import { SIGNING_CERTIFICATE } from "../../cp/domain/security/__tests__/signingCertificateFixture";
 import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
 import { resolveNetworkSimConfig } from "../../cp/infrastructure/transport/network-sim";
 import type { GoldenCase as Case } from "./cases";
@@ -111,6 +112,34 @@ both("remote-start-twice", async (r) => {
   await r.remoteStart("TAG-A");
   await r.remoteStart("TAG-B");
   await r.remoteStop();
+});
+// 1.6 §5.11 (errata 3.32, #728): Accepted only when a start will be attempted.
+c16(
+  "remote-start-without-connector-picks-free",
+  async (r) => {
+    await charging(r, "A", 1);
+    r.plugIn(2);
+    await settle(r);
+    await r.csms.call("RemoteStartTransaction", { idTag: "B" });
+    await settle(r);
+    r.cp.stopTransaction(1);
+    r.cp.stopTransaction(2);
+    await settle(r);
+  },
+  two,
+);
+c16("remote-start-busy-connector-rejected", async (r) => {
+  await charging(r, "A", 1);
+  await r.csms.call("RemoteStartTransaction", { idTag: "B", connectorId: 1 });
+  await settle(r);
+  r.cp.stopTransaction(1);
+  await settle(r);
+});
+c16("remote-start-faulted-connector-rejected", async (r) => {
+  r.cp.updateConnectorStatus(1, OCPPStatus.Faulted);
+  await settle(r);
+  await r.csms.call("RemoteStartTransaction", { idTag: "B", connectorId: 1 });
+  await settle(r);
 });
 both("remote-start-preparing", async (r) => {
   r.plugIn();
@@ -263,6 +292,22 @@ both("deauthorized-keep", async (r) => {
   r.cp.stopTransaction(1);
   await settle(r);
 });
+// 1.6 errata 3.17 (§4.8): MaxEnergyOnInvalidId > 0 lets the vehicle charge
+// first, so the connector goes to Charging before the energy stops.
+c16("deauthorized-keep-with-allowance", async (r) => {
+  cfg(r, "StopTransactionOnInvalidId", "false");
+  cfg(r, "MaxEnergyOnInvalidId", "500");
+  r.csms.responders.StartTransaction = () => ({
+    transactionId: 9,
+    idTagInfo: { status: "Invalid" },
+  });
+  r.plugIn();
+  await settle(r);
+  await r.cp.startTransaction("TAG-A", 1);
+  await settle(r);
+  r.cp.stopTransaction(1);
+  await settle(r);
+});
 // --- availability
 both(
   "avail-whole-two-connectors",
@@ -369,6 +414,58 @@ c16("res-connector0", async (r) => {
   await reserve(r, 10, 0, "OWNER", FUT);
   await settle(r);
 });
+// #595: connector 0 is accepted once the station supports it, and a ReserveNow
+// with a held reservationId moves that reservation to the other connector.
+c16("res-connector0-supported", async (r) => {
+  r.cp.configuration.setRuntimeValue("ReserveConnectorZeroSupported", true);
+  await reserve(r, 20, 0, "OWNER", FUT);
+  await settle(r);
+});
+c16(
+  "res-replace-moves-connector",
+  async (r) => {
+    await reserve(r, 21, 1, "OWNER", FUT);
+    await settle(r);
+    await reserve(r, 21, 2, "OWNER", FUT);
+    await settle(r);
+  },
+  two,
+);
+// #595: a connector-0 reservation is its idTag's. A stranger starting on the
+// other connector neither consumes it (no reservationId on that
+// StartTransaction.req) nor cancels it; the owner's start does carry it.
+c16(
+  "res-connector0-stranger-starts",
+  async (r) => {
+    r.cp.configuration.setRuntimeValue("ReserveConnectorZeroSupported", true);
+    await reserve(r, 22, 0, "OWNER", FUT);
+    await settle(r);
+    await r.remoteStart("STRANGER", 2);
+    await settle(r);
+    await r.remoteStart("OWNER", 1);
+    await settle(r);
+  },
+  two,
+);
+// #595, 1.6 §5.13: a connector-0 reservation keeps one connector free for its
+// idTag for its whole validity. A stranger takes the first of two connectors,
+// is Rejected on the last one (RemoteStartTransaction.conf Rejected, no
+// StartTransaction.req), and the owner still gets it, carrying the reservationId.
+c16(
+  "res-connector0-keeps-a-connector",
+  async (r) => {
+    r.cp.configuration.setRuntimeValue("ReserveConnectorZeroSupported", true);
+    await reserve(r, 23, 0, "OWNER", FUT);
+    await settle(r);
+    await r.remoteStart("STRANGER", 1);
+    await settle(r);
+    await r.remoteStart("STRANGER2", 2);
+    await settle(r);
+    await r.remoteStart("OWNER", 2);
+    await settle(r);
+  },
+  two,
+);
 both("res-then-inoperative", async (r) => {
   await reserve(r, 11, 1, "OWNER", FUT);
   await settle(r);
@@ -645,7 +742,7 @@ c16("ns-signed-firmware-drop", async (r) => {
     firmware: {
       location: "http://x",
       retrieveDateTime: "2020-01-01T00:00:00.000Z",
-      signingCertificate: "c",
+      signingCertificate: SIGNING_CERTIFICATE,
       signature: "s",
     },
   });
@@ -819,7 +916,7 @@ c16("firmware-invalid-date", async (r) => {
     firmware: {
       location: "http://x",
       retrieveDateTime: "nope",
-      signingCertificate: "c",
+      signingCertificate: SIGNING_CERTIFICATE,
       signature: "s",
     },
   });
@@ -866,6 +963,54 @@ c201("malformed-calls", async (r) => {
     await r.csms.call(a, p, 3000).catch(() => undefined);
     await wait(30);
   }
+  await settle(r);
+});
+// 1.6 §3.5.2 (#744): a CSMS verdict that contradicts the Local Authorization
+// List is reported with StatusNotification(0, LocalListConflict).
+const sendLocalList16 = (r: Rig, status = "Accepted") =>
+  r.csms.call("SendLocalList", {
+    listVersion: 1,
+    updateType: "Full",
+    localAuthorizationList: [{ idTag: "LOCAL-1", idTagInfo: { status } }],
+  });
+c16(
+  "local-list-conflict-authorize",
+  async (r) => {
+    await sendLocalList16(r);
+    r.cp.authorize("LOCAL-1");
+    await wait(300);
+    await settle(r);
+  },
+  {
+    responders: {
+      Authorize: () => ({ idTagInfo: { status: "Blocked" } }),
+    },
+  },
+);
+c16(
+  "local-list-conflict-start",
+  async (r) => {
+    await sendLocalList16(r);
+    r.plugIn();
+    await settle(r);
+    await r.cp.startTransaction("LOCAL-1", 1);
+    await wait(300);
+    await settle(r);
+  },
+  {
+    responders: {
+      StartTransaction: () => ({
+        transactionId: 7,
+        idTagInfo: { status: "Blocked" },
+      }),
+    },
+  },
+);
+c16("local-list-no-conflict", async (r) => {
+  await sendLocalList16(r);
+  r.cp.authorize("LOCAL-1");
+  r.cp.authorize("OTHER-1");
+  await wait(300);
   await settle(r);
 });
 c16("malformed-calls", async (r) => {
@@ -1539,7 +1684,7 @@ c16(
       firmware: {
         location: "http://x",
         retrieveDateTime: FAR_PAST,
-        signingCertificate: "c",
+        signingCertificate: SIGNING_CERTIFICATE,
         signature: "s",
       },
     },
@@ -1631,6 +1776,16 @@ c16("meter-callerror-no-retry", async (r) => {
   await wait(2500);
   await settle(r);
 });
+// OCPP-J 1.6 errata (2025-04) §2.1 (#745): the Temperature unit stays `Celcius`
+// on the 1.6J wire.
+c16("meter-temperature-celcius", async (r) => {
+  cfg(r, "MeterValuesSampledData", "Energy.Active.Import.Register,Temperature");
+  await charging(r);
+  r.cp.setMeterValue(1, 100);
+  r.cp.sendMeterValue(1);
+  await wait(300);
+  await settle(r);
+});
 c201("event-callerror-retries", async (r) => {
   cfg(r, "TransactionMessageAttempts", "3");
   cfg(r, "TransactionMessageRetryInterval", "1");
@@ -1689,3 +1844,74 @@ both("close-during-reset", async (r) => {
   await wait(1500);
   await settle(r);
 });
+
+// --- 1.6 security events (#734, whitepaper A04.FR.01/02) -------------------
+// With SecurityProfile >= 1 the station reports its startup and resets.
+const profile1 = (cp: {
+  configuration: { applyChange: (k: string, v: string) => unknown };
+}) => void cp.configuration.applyChange("SecurityProfile", "1");
+const resetCase = (type: "Soft" | "Hard") => async (r: Rig) => {
+  await r.csms.call("Reset", { type });
+  await r.csms.waitForCall("BootNotification", { nth: 2, timeoutMs: 30000 });
+  await wait(300);
+  await settle(r);
+};
+// A Reset ends with the boot, then ResetOrReboot, then StartupOfTheDevice.
+c16("reset-soft-security-events", resetCase("Soft"), {
+  beforeConnect: profile1,
+});
+c16("reset-hard-security-events", resetCase("Hard"), {
+  beforeConnect: profile1,
+});
+// A reconnect after a dropped socket, and an accepted TriggerMessage of a
+// BootNotification, do not report a device startup that did not happen.
+c16(
+  "reconnect-no-startup-event",
+  async (r) => {
+    r.csms.dropConnection();
+    await r.csms.waitForCall("BootNotification", { nth: 2, timeoutMs: 30000 });
+    await wait(300);
+    await r.csms.call("TriggerMessage", {
+      requestedMessage: "BootNotification",
+    });
+    await r.csms.waitForCall("BootNotification", { nth: 3, timeoutMs: 30000 });
+    await wait(300);
+    await settle(r);
+  },
+  { beforeConnect: profile1 },
+);
+// A critical event raised while disconnected is delivered after the next
+// Accepted boot with the timestamp it was raised with.
+c16(
+  "security-event-queued-offline",
+  async (r) => {
+    r.cp.disconnect();
+    await wait(200);
+    const raisedAt = Date.now();
+    await r.cp.sendSecurityEventNotification(
+      "TamperDetectionActivated",
+      "case",
+    );
+    // A non-critical type is not kept.
+    await r.cp.sendSecurityEventNotification("InvalidMessages", "case");
+    await wait(1200);
+    await r.connectAndBoot();
+    await wait(300);
+    const sent = r.csms.frames.find(
+      (f) =>
+        f.dir === "CP>" &&
+        f.action === "SecurityEventNotification" &&
+        (f.payload as { type?: string }).type === "TamperDetectionActivated",
+    );
+    const stamp = Date.parse(
+      (sent?.payload as { timestamp?: string }).timestamp ?? "",
+    );
+    if (!(stamp >= raisedAt - 1000 && stamp <= raisedAt + 500)) {
+      throw new Error(
+        `the queued event lost its timestamp (${stamp} vs ${raisedAt})`,
+      );
+    }
+    await settle(r);
+  },
+  { beforeConnect: profile1 },
+);

@@ -106,6 +106,10 @@ where it used to start. And identifiers are case insensitive: SendLocalList
 entries that differ only by case become one entry, and a differential
 update removing `abc` removes `ABC`.
 
+## LocalListConflict (OCPP 1.6)
+
+1.6 §3.5.2: when the validity the CSMS reports contradicts the Local Authorization List, the charge point informs the CSMS with a `StatusNotification` for connector `0` and `errorCode` `LocalListConflict` (#744). Every CSMS verdict that reaches `recordAuthorizationResult` is compared with the list entry of the same `idTag`: the `idTagInfo.status` of `Authorize.conf`, `StartTransaction.conf` and the optional one of `StopTransaction.conf`. The notification carries the current connector-0 status. No notification is sent when the two statuses agree, when the `idTag` is not in the list, or while `LocalAuthListEnabled` is false. An `Accepted` entry past its `expiryDate` counts as `Expired` (§3.5.4). The list stays the authority: the verdict is not cached for a listed identifier (§3.5.3) and the list changes only with the next `SendLocalList`. 2.x has no such message, so nothing is sent there.
+
 ## Authorization Cache
 
 One entry per identifier: the status as received (valid and NOT-valid alike,
@@ -222,8 +226,6 @@ with ISO `expiresAt`, `insertedAt` and `updatedAt`.
 
 ## Limits
 
-- No `StatusNotification` with `LocalListConflict` (§3.5.2) is sent when a
-  CSMS answer contradicts the Local Authorization List.
 - No Master Pass group (`AuthCtrlr.MasterPassGroupId`, C12.FR.09) and no
   `AuthCacheCtrlr.DisablePostAuthorize`.
 - `AuthCacheCtrlr.LifeTime` runs from the entry's last update by the CSMS,

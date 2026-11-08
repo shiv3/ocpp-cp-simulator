@@ -265,7 +265,17 @@ export interface ChargePointSimulationOptions {
 export type ChargePointResetType = "Hard" | "Soft";
 type ChargePointResetSource = "ocpp-call" | "ocpp15-soap";
 
+/**
+ * What an OCPP 1.6J charge point does with an inbound CALL whose payload
+ * breaks the request schema (#593): `off` skips the check, `warn` logs it and
+ * runs the handler anyway, `enforce` answers a CALLERROR (OCPP-J 1.6 §4.2.3).
+ */
+export type InboundValidationMode = "off" | "warn" | "enforce";
+export const DEFAULT_INBOUND_VALIDATION: InboundValidationMode = "warn";
+
 export interface ChargePointTransportOptions {
+  /** OCPP 1.6J only. Default `warn`. */
+  readonly inboundValidation?: InboundValidationMode;
   readonly centralSystemUrl?: string;
   readonly soapCallbackUrl?: string;
   readonly soapPath?: string;
@@ -405,6 +415,17 @@ export class ChargePoint {
     manualRuleIds: string[];
   } | null = null;
 
+  private _inboundValidation: InboundValidationMode;
+
+  /** See {@link InboundValidationMode}. Read on every inbound CALL. */
+  get inboundValidation(): InboundValidationMode {
+    return this._inboundValidation;
+  }
+
+  setInboundValidation(mode: InboundValidationMode): void {
+    this._inboundValidation = mode;
+  }
+
   constructor(
     private readonly _id: string,
     private readonly _bootNotification: BootNotification,
@@ -438,6 +459,8 @@ export class ChargePoint {
           : new RngStreams(simulation.seed);
     this._autoMeterValueSetting = autoMeterValueSetting;
     this._transportUrl = transportOptions.centralSystemUrl ?? wsUrl;
+    this._inboundValidation =
+      transportOptions.inboundValidation ?? DEFAULT_INBOUND_VALIDATION;
     this._logger.setCpId(this._id);
     this._logRepository = new LogRepository(this._database);
     // #456: installed certificates survive a restart when state persists.

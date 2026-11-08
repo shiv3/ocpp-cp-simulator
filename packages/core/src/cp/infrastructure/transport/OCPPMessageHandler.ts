@@ -136,6 +136,7 @@ import {
   DataTransferHandler,
 } from "./handlers";
 import { HandlerCallError } from "./handlers/HandlerCallError";
+import { inboundV16Violation } from "./codec/validateV16";
 import { CallExchange } from "./inbound/CallExchange";
 import { InboundCallGate, ports16 } from "./inbound/InboundCallGate";
 import type { GenerationToken } from "./network-sim/NetworkSimController";
@@ -1455,6 +1456,36 @@ export class OCPPMessageHandler {
         "This action is not supported",
       );
       return;
+    }
+
+    // The gate has run: policies, overrides and behavior rules may own a
+    // malformed CALL (docs/concepts/call-precedence.md); validation guards
+    // only what reaches the default handler (#593).
+    const mode = this._chargePoint.inboundValidation;
+    if (mode !== "off") {
+      const violation = inboundV16Violation(action, payload);
+      if (violation) {
+        const message = `Inbound ${action} ${violation.errorCode}: ${violation.description}`;
+        // Structured line for the trace (`meta.validation` on the CALL's
+        // record, packages/trace). It goes out on the WebSocket channel the
+        // trace writer already follows, before the handler or the error reply.
+        this._logger.warn(
+          `Inbound validation: ${JSON.stringify({
+            messageId,
+            action,
+            mode,
+            errorCode: violation.errorCode,
+            description: violation.description,
+          })}`,
+          LogType.WEBSOCKET,
+        );
+        if (mode === "enforce") {
+          this._logger.warn(message, LogType.OCPP);
+          exchange.replyError(violation.errorCode, violation.description);
+          return;
+        }
+        this._logger.warn(`${message} (handler still runs)`, LogType.OCPP);
+      }
     }
 
     try {

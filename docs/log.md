@@ -2414,3 +2414,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - A `warn` / `enforce` violation is traced: the inbound CALL's record carries `meta.validation = { mode, errorCode, description }` (a structured `Inbound validation:` line on the `WebSocket` log channel, merged by `logLinesToTrace` and held back by the live `--trace-output` writer for one tick). `inboundValidation` is settable: `--inbound-validation`, `cp.create` / `cp.update` (contracts, HTTP, MCP), persisted in `charge_points.inbound_validation` (schema v25). The wiki states the order with the #594 `NotSupported`.
 - Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#inbound-call-validation-on-ocpp-j-16), [Trace format](concepts/trace-format.md#validation-violations-meta), [CLI](entities/cli.md), [Daemon](entities/daemon.md), [Control plane](concepts/control-plane.md), [State persistence](concepts/state-persistence.md).
+
+## [2026-11-08] ingest | 1.6 ClearChargingProfile answers Unknown and lets id override (#729)
+
+- `ClearChargingProfile` answers `Unknown` when no profile was removed (1.6 §7.21) and, when `id` is present, ignores `connectorId`, `chargingProfilePurpose` and `stackLevel` and searches the station store and every connector (errata 3.26); without `id` the fields still AND (errata 3.25). New page: [Smart charging](concepts/smart-charging.md). Golden: `16-txprofile-cleared-at-end` re-recorded (its second ClearChargingProfile removed nothing, `Accepted` → `Unknown`); new case `16-clear-charging-profile-unknown`.

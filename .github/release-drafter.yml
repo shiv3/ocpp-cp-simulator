@@ -5,9 +5,9 @@
 # (docker-publish.yml). The draft is just notes until you publish it.
 name-template: "v$RESOLVED_VERSION"
 tag-template: "v$RESOLVED_VERSION"
-# The desktop train only: the CLI's `cli-v*` releases must not become the
-# baseline for the next desktop version. Without this, publishing cli-v0.4.1
-# right after v0.8.0 produced a draft "v0.4.1" (compare cli-v0.4.0...v0.4.1).
+# Publishing the draft creates the `vX.Y.Z` tag, which builds BOTH the desktop
+# app and the CLI (one tag train). `tag-prefix` keeps the legacy `cli-v*`
+# releases from being used as the baseline for the next version.
 tag-prefix: "v"
 
 # The repository triages with `type:*` labels; the bare names are kept for

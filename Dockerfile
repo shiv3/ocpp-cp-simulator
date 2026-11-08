@@ -150,6 +150,12 @@ RUN apk add --no-cache su-exec
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
+# `bun src/cli/main.ts …` keeps working for callers that still override the
+# entrypoint with it (open-ocpp-tck, #346): a shim that runs the bundle. New
+# callers use `docker run -i <image> --json …`, see docker/entrypoint.sh.
+RUN mkdir -p /app/src/cli
+COPY docker/cli-shim.ts /app/src/cli/main.ts
+
 # IMPORTANT: stay as root so the entrypoint can chown /data. The shim
 # drops to `bun` via su-exec before exec'ing the simulator.
 USER root
@@ -186,6 +192,9 @@ EXPOSE 9700
 #   2. Compose --http-host 0.0.0.0 --unix-socket none --web-console
 #      $HTTP_PORT [--state-db $STATE_DB] and append any user CMD args.
 #   3. Exec bun dist-cli/main.js as the non-root `bun` user.
+# When the first argument is `cli`, `analyze`, `export-k6` or `behavior`, or
+# `--json` is among the arguments, step 2 is skipped and the arguments go to
+# the CLI as they are (JSON mode over stdin, subcommands); #346.
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 
 # No-args default — the daemon comes up empty; create CPs via POST /v1/cp

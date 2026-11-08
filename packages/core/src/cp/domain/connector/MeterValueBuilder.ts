@@ -38,6 +38,42 @@ export interface SampledValue {
 }
 
 /**
+ * The unit OCPP 2.0.1 / 2.1 Part 2 Appendices ch. 2 (Standardized Units of
+ * Measure) assigns to a measurand, or `undefined` for a unitless one
+ * (`Power.Factor`) and one this table does not know.
+ *
+ * The builder leaves `Frequency` (1.6 errata 3.86: 1.6 has no Hz) and the
+ * measurands it does not model without a unit, which is right for 1.6 but on
+ * 2.x the Appendix says the default of `unit` is always `Wh`: a 50 Hz sample
+ * without `unitOfMeasure` reads as 50 Wh (#713). The 2.x message handler fills
+ * the gap from here; 1.6 never calls this.
+ */
+export function unitOfMeasurandV2x(measurand: string): string | undefined {
+  if (measurand === "Power.Factor") return undefined;
+  switch (measurand) {
+    case "Frequency":
+      return "Hz";
+    case "Voltage":
+      return "V";
+    case "SoC":
+      return "Percent";
+    case "RPM":
+      return "RPM";
+    case "Temperature":
+      return "Celsius";
+  }
+  // Quantity families, by the prefix the enum names them with.
+  if (measurand.startsWith("Current.")) return "A";
+  if (measurand.startsWith("Energy.Active.")) return "Wh";
+  if (measurand.startsWith("Energy.Reactive.")) return "varh";
+  if (measurand.startsWith("Energy.Apparent.")) return "VAh";
+  if (measurand.startsWith("Power.Active.")) return "W";
+  if (measurand.startsWith("Power.Reactive.")) return "var";
+  if (measurand.startsWith("Power.Offered")) return "W";
+  return undefined;
+}
+
+/**
  * Default electrical characteristics used when the connector domain doesn't
  * model the value directly. Real Charge Points read these off the meter
  * hardware; the simulator synthesizes plausible numbers so CSMS-side parsers

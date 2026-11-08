@@ -484,6 +484,16 @@ export const ConfigurationKeys = {
       min: MIN_MONITOR_SEVERITY,
       max: MAX_MONITOR_SEVERITY,
     } as IntegerConfigurationKey,
+    // #554: simulator key (no OCPP variable): most TransactionEvents the E11
+    // offline queue holds before it drops Updated ones (E11.FR.04/05). 0 =
+    // no limit. 2.x only.
+    OfflineQueueMaxEvents: {
+      name: "OfflineQueueMaxEvents",
+      required: false,
+      readonly: false,
+      type: "integer",
+      min: 0,
+    } as IntegerConfigurationKey,
     // #537: OCPP 2.x `SecurityCtrlr` variables (2.0.1 / 2.1 Part 2
     // referenced components §2.2.4, §2.2.7-§2.2.9). 1.6 has none of them,
     // so only 2.x charge points carry these keys.
@@ -732,6 +742,10 @@ export const defaultConfiguration: (cp: ChargePoint) => Configuration = (
     // only Emergency events while offline.
     ...(isOcpp2Version(cp.ocppVersion)
       ? [intVal(ConfigurationKeys.Custom.OfflineQueuingSeverity, 0)]
+      : []),
+    // #554: 2.x only; the E11 queue holds at most this many TransactionEvents.
+    ...(isOcpp2Version(cp.ocppVersion)
+      ? [intVal(ConfigurationKeys.Custom.OfflineQueueMaxEvents, 1000)]
       : []),
     // #537: 2.x only (SecurityCtrlr). CertificateEntries starts at 0; the
     // charge point sets it from its certificate store once both exist.

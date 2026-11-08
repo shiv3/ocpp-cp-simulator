@@ -203,6 +203,14 @@ export class ConfigurationStore {
     return this.getInteger("MessageTimeout") ?? 30;
   }
 
+  /** 2.x key `OfflineQueueMaxEvents` (#554): most TransactionEvents the E11
+   *  offline queue holds before it drops `Updated` ones (E11.FR.04/05);
+   *  default `1000`, `0` = no limit. A simulator key: the spec has no
+   *  variable for the size. */
+  offlineQueueMaxEvents(): number {
+    return this.getInteger("OfflineQueueMaxEvents") ?? 1000;
+  }
+
   /** 2.x key `OfflineQueuingSeverity` (0-9); default `0` (#538). 2.x reads
    *  it as `MonitoringCtrlr.OfflineQueuingSeverity`. */
   offlineQueuingSeverity(): number {

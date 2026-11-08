@@ -1112,6 +1112,34 @@ both(
     },
   },
 );
+// F01.FR.01/02: a Blocked answer keeps the 2.x start from happening (the
+// RequestStartTransaction answer is Accepted first); Central and
+// NoAuthorization tokens are never sent to Authorize.
+c201(
+  "remote-start-authorize-blocked",
+  async (r) => {
+    authorizeRemote(r, true);
+    r.plugIn();
+    await settle(r);
+    await r.remoteStart("TAG-BLOCKED");
+    await settle(r);
+  },
+  {
+    responders: { Authorize: () => ({ idTokenInfo: { status: "Blocked" } }) },
+  },
+);
+c201("remote-start-authorize-central-token", async (r) => {
+  authorizeRemote(r, true);
+  r.plugIn();
+  await settle(r);
+  await r.csms.call("RequestStartTransaction", {
+    idToken: { idToken: "CENTRAL-1", type: "Central" },
+    remoteStartId: 1,
+    evseId: 1,
+  });
+  await settle(r);
+  await r.remoteStop();
+});
 both("remote-start-no-authorize", async (r) => {
   authorizeRemote(r, false);
   r.plugIn();

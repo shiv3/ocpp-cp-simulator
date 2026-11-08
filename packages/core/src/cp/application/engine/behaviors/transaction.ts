@@ -71,7 +71,7 @@ export function transactionBehavior(cp: ChargePoint): Behavior {
             return { response: { status: "Rejected" } };
           }
           // 1.6 §5.11: the transaction starts while the answer is built.
-          remoteStart(cp, resolved, idTag, undefined);
+          void remoteStart(cp, resolved, idTag, undefined);
           return { response: { status: "Accepted" } };
         },
       },
@@ -108,7 +108,7 @@ export function transactionBehavior(cp: ChargePoint): Behavior {
           const req = request as {
             evseId?: number;
             remoteStartId: number;
-            idToken: { idToken: string };
+            idToken: { idToken: string; type?: string };
           };
           const connectorId = req.evseId ?? 1;
           const connector = cp.getConnector(connectorId);
@@ -118,11 +118,12 @@ export function transactionBehavior(cp: ChargePoint): Behavior {
           return {
             response: { status: "Accepted" },
             after: async () => {
-              remoteStart(
+              await remoteStart(
                 cp,
                 connectorId,
                 req.idToken.idToken,
                 req.remoteStartId,
+                req.idToken.type,
               );
             },
           };
@@ -158,26 +159,53 @@ export function transactionBehavior(cp: ChargePoint): Behavior {
 }
 
 /**
- * The start of a remote start on either version (1.6 §5.11, 2.x F01):
- * `AuthorizeRemoteTxRequests` asks for an Authorize.req first, then the
- * scenario waiting on the connector gets the request or the default starts
- * the transaction with `triggerReason: "RemoteStart"` (so the local
+ * The start of a remote start on either version (1.6 §5.11, 2.x F01).
+ *
+ * 1.6: `AuthorizeRemoteTxRequests` asks for an Authorize.req alongside the
+ * start. 2.x (F01.FR.01/02): with `AuthorizeRemoteStart` true and an
+ * `idToken.type` other than `Central` / `NoAuthorization` the station behaves
+ * as for a local action and starts only after the authorization (local list,
+ * cache or Authorize.req) is `Accepted`; otherwise it starts without checking
+ * and sends no Authorize. The RequestStartTransaction answer has gone out
+ * before this runs. A scenario waiting on the connector gets the request
+ * (with the Authorize sent alongside, as before); otherwise the default
+ * starts the transaction with `triggerReason: "RemoteStart"` (so the local
  * authorize gate does not authorize twice).
  */
-function remoteStart(
+async function remoteStart(
   cp: ChargePoint,
   connectorId: number,
   idTag: string,
   remoteStartId: number | undefined,
-): void {
-  if (cp.configuration.authorizeRemoteTxRequests()) {
-    if (!isOcpp2Version(cp.ocppVersion)) {
+  idTokenType?: string,
+): Promise<void> {
+  const ocpp2 = isOcpp2Version(cp.ocppVersion);
+  const centrallyAuthorized =
+    idTokenType === "Central" || idTokenType === "NoAuthorization";
+  if (cp.configuration.authorizeRemoteTxRequests() && !centrallyAuthorized) {
+    if (!ocpp2) {
       cp.logger.info(
         `AuthorizeRemoteTxRequests=true: sending Authorize.req for ${idTag}`,
         LogType.OCPP,
       );
     }
-    cp.authorize(idTag);
+    if (ocpp2 && !cp.isScenarioHandled(connectorId)) {
+      const status = await cp.authorizeAndWait(idTag);
+      if (status !== "Accepted") {
+        cp.logger.warn(
+          `Authorize.conf ${status} for ${idTag}; not starting the remote transaction on connector ${connectorId} (F01.FR.01)`,
+          LogType.TRANSACTION,
+        );
+        cp.events.emit("authorizeDenied", {
+          connectorId,
+          tagId: idTag,
+          status,
+        });
+        return;
+      }
+    } else {
+      cp.authorize(idTag);
+    }
   }
   if (cp.isScenarioHandled(connectorId)) {
     cp.notifyRemoteStartReceived(connectorId, idTag, remoteStartId);

@@ -1634,13 +1634,13 @@ export class ChargerEngine {
     scope: Scope,
     env?: CallEnv,
   ): BehaviorContext {
-    const dispatch = (event: EngineEvent): void => this.dispatch(event);
     const touch = (): void => this.touch();
     const warn = (message: string): void => this.warn(message);
     const readState = (): ChargerState => this._state;
     const runDefault = (action: string, req: unknown): DefaultResult =>
       this.runDefault(action, req);
     const host = this.host;
+    const snapshotCharger = (): ChargerSnapshot => this.snapshotCharger();
     const clock = host.clock;
     const behavior = this.loaded.get(behaviorId);
     const requires = new Set(behavior?.requires ?? []);
@@ -1661,26 +1661,8 @@ export class ChargerEngine {
     const live = (): void => {
       if (scope.cancelled) throw new BehaviorStopped();
     };
-    const connectorSnapshot = (id: number): ConnectorSnapshot | undefined => {
-      const connector = host.getConnector(id);
-      if (!connector) return undefined;
-      const point = connector.operatingPoint();
-      return {
-        id: connector.id,
-        status: connector.status,
-        availability: connector.availability,
-        transactionId: connector.transaction
-          ? (connector.transaction.cpTransactionId ?? connector.transaction.id)
-          : null,
-        idTag: connector.transaction?.tagId ?? null,
-        power: {
-          acceptedW: point.acceptedW,
-          offeredW: point.offeredW,
-          soc: point.soc,
-          limitedBy: point.limitedBy,
-        },
-      };
-    };
+    const connectorSnapshot = (id: number): ConnectorSnapshot | undefined =>
+      this.snapshotConnector(id);
     const ctx: BehaviorContext = {
       now: () => clock.now(),
       sleep: (ms: number): Promise<void> => {
@@ -1833,38 +1815,19 @@ export class ChargerEngine {
       notify: {
         firmwareStatus: (status, opts) => {
           live();
-          dispatch({
-            type: "notified",
-            kind: "firmware",
-            status,
-            ...(opts?.requestId === undefined
-              ? {}
-              : { requestId: opts.requestId }),
-          });
+          this.notifyStatus("firmware", status, opts?.requestId);
         },
         signedFirmwareStatus: (status, requestId) => {
           live();
-          dispatch({
-            type: "notified",
-            kind: "signedFirmware",
-            status,
-            requestId,
-          });
+          this.notifyStatus("signedFirmware", status, requestId);
         },
         logStatus: (status, opts) => {
           live();
-          dispatch({
-            type: "notified",
-            kind: "log",
-            status,
-            ...(opts?.requestId === undefined
-              ? {}
-              : { requestId: opts.requestId }),
-          });
+          this.notifyStatus("log", status, opts?.requestId);
         },
         diagnosticsStatus: (status) => {
           live();
-          dispatch({ type: "notified", kind: "diagnostics", status });
+          this.notifyStatus("diagnostics", status);
         },
       },
       defaultBehavior: (req) => {
@@ -1884,17 +1847,65 @@ export class ChargerEngine {
       connector: connectorSnapshot,
       params,
       get charger(): ChargerSnapshot {
-        return {
-          id: host.id,
-          ocppVersion: host.ocppVersion,
-          status: String(host.status),
-          connectorIds: [...host.connectors.keys()],
-        };
+        return snapshotCharger();
       },
       log: (message) =>
         host.logger.info(`[behavior ${behaviorId}] ${message}`, LogType.OCPP),
     };
     return ctx;
+  }
+
+  /**
+   * A read-only view of one connector: what `ctx.connector(id)` returns, and
+   * what the scenario `$from` root `connector` reads (#654).
+   */
+  snapshotConnector(id: number): ConnectorSnapshot | undefined {
+    const connector = this.host.getConnector(id);
+    if (!connector) return undefined;
+    const point = connector.operatingPoint();
+    return {
+      id: connector.id,
+      status: connector.status,
+      availability: connector.availability,
+      transactionId: connector.transaction
+        ? (connector.transaction.cpTransactionId ?? connector.transaction.id)
+        : null,
+      idTag: connector.transaction?.tagId ?? null,
+      power: {
+        acceptedW: point.acceptedW,
+        offeredW: point.offeredW,
+        soc: point.soc,
+        limitedBy: point.limitedBy,
+      },
+    };
+  }
+
+  /** A read-only view of the station: `ctx.charger`, and the `$from` root `charger`. */
+  snapshotCharger(): ChargerSnapshot {
+    return {
+      id: this.host.id,
+      ocppVersion: this.host.ocppVersion,
+      status: String(this.host.status),
+      connectorIds: [...this.host.connectors.keys()],
+    };
+  }
+
+  /**
+   * Send a station status notification (`ctx.notify`, the scenario `notify`
+   * node, #654): FirmwareStatusNotification, SignedFirmwareStatusNotification,
+   * LogStatusNotification or DiagnosticsStatusNotification.
+   */
+  notifyStatus(
+    kind: "firmware" | "signedFirmware" | "log" | "diagnostics",
+    status: string,
+    requestId?: number,
+  ): void {
+    this.dispatch({
+      type: "notified",
+      kind,
+      status,
+      ...(requestId === undefined ? {} : { requestId }),
+    });
   }
 
   /** `effectiveParams`, but a context never fails to be made over a stale layer. */

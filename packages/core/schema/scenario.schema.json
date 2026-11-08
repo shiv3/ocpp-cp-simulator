@@ -220,11 +220,23 @@
         "animated": { "type": "boolean" }
       }
     },
+    "fromReference": {
+      "$comment": "v1.5 (#566), roots v1.6 (#654). A whole value read from a root: call (the CALL of the branch), charger, connector or state (what setState stored). Read-only; a path that names nothing fails the run.",
+      "type": "object",
+      "required": ["$from"],
+      "properties": {
+        "$from": {
+          "type": "string",
+          "pattern": "^(call|charger|connector|state)\\."
+        }
+      },
+      "additionalProperties": false
+    },
     "callResponseSpec": {
-      "$comment": "v1.5 (#566). How a scenario answers a CALL it owns: a CALLRESULT with `payload`, a CALLERROR with `errorCode` / `errorDescription`, or silence (`none`).",
+      "$comment": "v1.5 (#566). How a scenario answers a CALL it owns: a CALLRESULT with `payload`, a CALLERROR with `errorCode` / `errorDescription`, or silence (`none`). v1.6 (#654): `accepted` / `rejected` are the version-neutral answers of the CALL's own action (ctx.accepted / ctx.rejected) and take no payload.",
       "type": "object",
       "properties": {
-        "kind": { "enum": ["result", "error", "none"] },
+        "kind": { "enum": ["result", "error", "none", "accepted", "rejected"] },
         "payload": { "type": "object" },
         "errorCode": { "type": "string" },
         "errorDescription": { "type": "string" }
@@ -274,7 +286,11 @@
             "connectionTrigger",
             "ocppCall",
             "callResponse",
-            "useBehavior"
+            "useBehavior",
+            "notify",
+            "switch",
+            "choice",
+            "setState"
           ]
         },
         "position": { "$ref": "#/$defs/position" },
@@ -349,7 +365,17 @@
               "data": {
                 "required": ["delaySeconds"],
                 "properties": {
-                  "delaySeconds": { "type": "number" }
+                  "delaySeconds": { "type": "number" },
+                  "until": {
+                    "$comment": "v1.6 (#654). Wait until this instant on the station's clock or for delaySeconds, whichever is longer.",
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "jitterSeconds": {
+                    "$comment": "v1.6 (#654). Add a seeded draw of 0..jitterSeconds (millisecond resolution); the same seed gives the same wait.",
+                    "type": "number",
+                    "minimum": 0
+                  }
                 }
               }
             }
@@ -669,6 +695,91 @@
                     "type": "array",
                     "items": { "type": "string" }
                   }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "notify" } } },
+          "then": {
+            "properties": {
+              "data": {
+                "$comment": "v1.6 (#654). ctx.notify as a node: sends the status notification and goes on without waiting for the CSMS. The status must belong to the kind's vocabulary (checked at run time). requestId may be a $from; signedFirmwareStatus needs one.",
+                "required": ["kind", "status"],
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "firmwareStatus",
+                      "signedFirmwareStatus",
+                      "logStatus",
+                      "diagnosticsStatus"
+                    ]
+                  },
+                  "status": { "type": "string", "minLength": 1 },
+                  "requestId": {
+                    "oneOf": [
+                      { "type": "integer", "minimum": 0 },
+                      { "$ref": "#/$defs/fromReference" }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "switch" } } },
+          "then": {
+            "properties": {
+              "data": {
+                "$comment": "v1.6 (#654). The run goes on along the edge whose sourceHandle is case-<n> for the first case equal to value, else along `default`; a branch with no such edge ends. Equality is JSON equality and never converts types. cases are constants (no $from).",
+                "required": ["value", "cases"],
+                "properties": {
+                  "value": {},
+                  "cases": { "type": "array" }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "choice" } } },
+          "then": {
+            "properties": {
+              "data": {
+                "$comment": "v1.6 (#654). A seeded, weighted draw among options; the run goes on along the edge whose sourceHandle is option-<n>. weight defaults to 1 and must be above 0. The same seed gives the same draw.",
+                "required": ["options"],
+                "properties": {
+                  "options": {
+                    "type": "array",
+                    "minItems": 2,
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "weight": { "type": "number", "exclusiveMinimum": 0 },
+                        "label": { "type": "string" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "setState" } } },
+          "then": {
+            "properties": {
+              "data": {
+                "$comment": "v1.6 (#654). Stores a JSON value (a whole value may be a $from) under key in the state of this run; {\"$from\": \"state.<key>\"} reads it back. The state lives for the run, is shared by its parallel branches and is not persisted.",
+                "required": ["key", "value"],
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                  },
+                  "value": {}
                 }
               }
             }

@@ -42,6 +42,9 @@ export async function selfSignedRoot(
 }
 
 export interface IssuedOptions {
+  /** Override the default validity period (a minute ago, a day ahead). */
+  notBefore?: Date;
+  notAfter?: Date;
   /** OCSP responder URL put in an Authority Information Access extension
    *  (#537, M06). */
   ocspUrl?: string;
@@ -106,6 +109,8 @@ export async function leafForCsr(
     subject: csr.subject,
     issuer: issuer.name,
     ...validity(),
+    ...(options.notBefore ? { notBefore: options.notBefore } : {}),
+    ...(options.notAfter ? { notAfter: options.notAfter } : {}),
     signingAlgorithm: EC_ALG,
     publicKey: csr.publicKey,
     signingKey: issuer.keys.privateKey,

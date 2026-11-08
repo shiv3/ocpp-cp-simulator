@@ -109,6 +109,8 @@ import {
   V2_CONNECTOR_STATUSES,
 } from "./runtimeValueKeys";
 import { ReservationManager } from "../reservation/Reservation";
+import type { Reservation } from "../reservation/Reservation";
+import { syncUnspecifiedReservations } from "../reservation/reservationModel";
 import { LocalAuthListManager } from "../auth/LocalAuthList";
 import { idTokenMaxLength } from "../auth/AuthorizationCacheSeed";
 import { AuthorizationCache } from "../auth/AuthorizationCache";
@@ -352,6 +354,8 @@ export class ChargePoint {
   private readonly _timelineProjector: OperationalTimelineProjector;
   private readonly _logRepository: LogRepository;
   private readonly _reservationManager: ReservationManager;
+  /** Parent id / groupIdToken of the tags the CSMS authorized (reservations). */
+  private readonly _authorizedParents = new Map<string, string>();
   /** #597: Reset OnIdle requests answered `Scheduled`, each run once its transactions end. */
   private _pendingResetsOnIdle: { evseId?: number }[] = [];
   private readonly _localAuthListManager: LocalAuthListManager;
@@ -659,7 +663,8 @@ export class ChargePoint {
 
     this._reservationManager = new ReservationManager(
       this._logger,
-      (connectorId) => this.onReservationExpired(connectorId),
+      (connectorId, reservation) =>
+        this.onReservationExpired(connectorId, reservation),
       this._clock,
     );
     this._localAuthListManager = new LocalAuthListManager(this._logger);
@@ -1487,17 +1492,64 @@ export class ChargePoint {
   }
 
   /**
-   * A reservation lapsed (ReservationManager expiry cleanup) without an
-   * explicit CancelReservation. Mirror the cancel path — drive the connector
-   * back to Available through updateConnectorStatus so the CSMS sees the
-   * transition on the wire — but only when it's still Reserved: a connector
-   * that moved to Charging/Preparing/etc. in the meantime must not be clobbered.
+   * A reservation lapsed (its expiry timer, or the ReservationManager sweep)
+   * without an explicit CancelReservation. OCPP 2.x first reports it
+   * (H04.FR.01, ReservationStatusUpdate `Expired`), then mirrors the cancel
+   * path (H04.FR.03, OCPP 1.6 §5.13): drive the connector back to Available
+   * through updateConnectorStatus so the CSMS sees the transition on the wire,
+   * but only when it's still Reserved: a connector that moved to
+   * Charging/Preparing/etc. in the meantime must not be clobbered.
    */
-  private onReservationExpired(connectorId: number): void {
+  private onReservationExpired(
+    connectorId: number,
+    reservation: Reservation,
+  ): void {
+    if (isOcpp2Version(this._ocppVersion)) {
+      this._outbox.sendReservationStatusUpdate(
+        reservation.reservationId,
+        "Expired",
+      );
+    }
     const connector = this.getConnector(connectorId);
     if (connector && connector.status === OCPPStatus.Reserved) {
       this.updateConnectorStatus(connectorId, OCPPStatus.Available);
     }
+    syncUnspecifiedReservations(this);
+  }
+
+  /**
+   * OCPP 1.6 §5.13 ("a reservation SHALL be terminated ... when the Charge
+   * Point or connector are set to Faulted or Unavailable") and 2.0.1
+   * H01.FR.16/17: a connector (or, for connector 0, the whole station) that
+   * became Faulted or Unavailable ends the reservations it held. OCPP 2.x
+   * reports each as ReservationStatusUpdate `Removed`. The connector keeps
+   * the status it just took.
+   */
+  private terminateReservationsOf(connectorId: number): void {
+    const terminated = this._reservationManager.terminateReservations(
+      connectorId === 0 ? "all" : { connectorId },
+    );
+    if (!isOcpp2Version(this._ocppVersion)) return;
+    for (const reservation of terminated) {
+      this._outbox.sendReservationStatusUpdate(
+        reservation.reservationId,
+        "Removed",
+      );
+    }
+  }
+
+  /**
+   * The parent id (1.6) or groupIdToken (2.x) the station knows for `idTag`:
+   * Local Authorization List, then Authorization Cache, then the last
+   * Authorize.conf (kept even when the cache is off). Reservation matching by
+   * parent (1.6 §5.13, H03.FR.04/07) uses it; it never asks the CSMS itself.
+   */
+  knownParentIdOf(idTag: string): string | undefined {
+    return (
+      this._localAuthListManager.getEntry(idTag)?.parentIdTag ??
+      this._authorization.cache.get(idTag)?.parentId ??
+      this._authorizedParents.get(idTag)
+    );
   }
 
   get localAuthListManager(): LocalAuthListManager {
@@ -1537,6 +1589,11 @@ export class ChargePoint {
     idToken: string,
     result: CsmsAuthorizationResult,
   ): void {
+    if (result.parentId !== undefined) {
+      this._authorizedParents.set(idToken, result.parentId);
+    } else {
+      this._authorizedParents.delete(idToken);
+    }
     if (this._authorization.recordCsmsResult(idToken, result)) {
       this._logger.debug(
         `Authorization cache updated: ${idToken} → ${result.status}`,
@@ -3183,6 +3240,9 @@ export class ChargePoint {
       // errorCode available, so we'd pass NoError by default. Callers that
       // want to set a CP-level fault should use sendCpFaultedNotification.
       this._outbox.sendStatusNotification(0, status);
+      // The station is out of service: no reservation survives (after the
+      // status, which the CSMS sees first: H01.FR.16/17).
+      if (status !== OCPPStatus.Available) this.terminateReservationsOf(0);
       return;
     }
 
@@ -3245,6 +3305,13 @@ export class ChargePoint {
       info: connector.errorInfo ?? undefined,
       vendorErrorCode: connector.vendorErrorCode ?? undefined,
     });
+
+    // A connector that is Faulted or Unavailable holds no reservation: it is
+    // ended after the status the CSMS just saw (H01.FR.16/17).
+    if (status === OCPPStatus.Faulted || status === OCPPStatus.Unavailable) {
+      this.terminateReservationsOf(connectorId);
+    }
+    syncUnspecifiedReservations(this);
   }
 
   /** OCPP 1.x (#527): a connector whose transaction runs is past

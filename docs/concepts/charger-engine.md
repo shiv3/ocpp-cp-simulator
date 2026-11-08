@@ -308,7 +308,7 @@ behavior. A reload of a held dormant behavior keeps the old rules until the run 
 `ChargerEngine` is one per charge point (`application/engine/`). It owns `ChargerState`, a JSON-serializable
 record of the connectors (status, availability, scheduled availability, error info, the transaction), the last
 firmware, signed firmware, log and diagnostics status reported, and `behaviors`, the `ctx.state` of every
-loaded behavior. Reservations stay in `ReservationManager` (a map of dated records with an expiry interval; it is
+loaded behavior. Reservations stay in `ReservationManager` (a map of dated records with an expiry timer each; it is
 used on its own by scenarios and tests), so `engine.snapshot()` is not the whole station. Every mutation goes
 through `engine.dispatch(event)`; handlers and `ChargePoint` translate to events and do not write state. The
 rule is enforced by `scripts/check-single-writer.ts` (in `check:boundaries`); it is syntactic, and its limits

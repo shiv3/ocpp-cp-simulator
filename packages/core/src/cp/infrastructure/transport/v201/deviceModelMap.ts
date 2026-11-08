@@ -40,6 +40,9 @@ export const V201_VARIABLE_TO_V16_KEY: ReadonlyMap<string, string> = new Map([
   ["AuthCtrlr/LocalAuthorizeOffline", "LocalAuthorizeOffline"],
   ["AuthCtrlr/OfflineTxForUnknownIdEnabled", "AllowOfflineTxForUnknownId"],
   ["AuthCacheCtrlr/Enabled", "AuthorizationCacheEnabled"],
+  // #709: H01.FR.18/19, the 2.x name of 1.6 ReserveConnectorZeroSupported:
+  // whether a ReserveNow may leave the EVSE open. ReadOnly (Part 2 §2.8.3).
+  ["ReservationCtrlr/NonEvseSpecific", "ReserveConnectorZeroSupported"],
   ["AuthCacheCtrlr/LifeTime", "AuthCacheLifeTime"],
   ["TxCtrlr/StopTxOnInvalidId", "StopTransactionOnInvalidId"],
   ["TxCtrlr/MaxEnergyOnInvalidId", "MaxEnergyOnInvalidId"],

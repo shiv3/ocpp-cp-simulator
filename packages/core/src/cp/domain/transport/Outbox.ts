@@ -148,6 +148,13 @@ export class Outbox implements IChargePointMessageHandler {
     return this.handler.sendSignedFirmwareStatusNotification(status, requestId);
   }
 
+  sendReservationStatusUpdate(
+    reservationId: number,
+    status: "Expired" | "Removed",
+  ): void {
+    this.handler.sendReservationStatusUpdate?.(reservationId, status);
+  }
+
   sendNotifyEvent(
     events: Parameters<IChargePointMessageHandler["sendNotifyEvent"]>[0],
   ): ReturnType<IChargePointMessageHandler["sendNotifyEvent"]> {

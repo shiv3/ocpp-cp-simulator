@@ -92,6 +92,14 @@ function callPayload(
     "cert16-tc055-trigger-message-rejected:TriggerMessage": {
       requestedMessage: "Heartbeat",
     },
+    // The template starts with its hardcoded CERT-RES01, so that is the tag
+    // the CSMS reserves for (a start by another tag is refused, 1.6 §5.13).
+    "cert16-reservation-basic:ReserveNow": {
+      connectorId: 1,
+      expiryDate: FUTURE,
+      idTag: "CERT-RES01",
+      reservationId: 1,
+    },
     "cert16-tc056-central-smart-charging-txdefault:SetChargingProfile": {
       connectorId: 1,
       csChargingProfiles: {

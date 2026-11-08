@@ -29,4 +29,4 @@
 {"d":"CP>","k":"call","id":"id-15","a":"StatusNotification","p":{"timestamp":"<ts>","connectorStatus":"Reserved","evseId":1,"connectorId":1}}
 {"d":"CSMS>","k":"result","id":"id-15","p":{}}
 {"d":"CSMS>","k":"call","id":"id-16","a":"ReserveNow","p":{"id":9,"evseId":1,"expiryDateTime":"<ts>","idToken":{"idToken":"OWNER2","type":"ISO14443"}}}
-{"d":"CP>","k":"result","id":"id-16","p":{"status":"Rejected"}}
+{"d":"CP>","k":"result","id":"id-16","p":{"status":"Accepted"}}

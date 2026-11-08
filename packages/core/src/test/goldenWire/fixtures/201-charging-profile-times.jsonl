@@ -1,0 +1,14 @@
+{"d":"CP>","k":"call","id":"id-1","a":"BootNotification","p":{"reason":"PowerUp","chargingStation":{"model":"Model","vendorName":"Vendor","serialNumber":"123456","firmwareVersion":"1.0"}}}
+{"d":"CSMS>","k":"result","id":"id-1","p":{"status":"Accepted","currentTime":"<ts>","interval":3600}}
+{"d":"CP>","k":"call","id":"id-2","a":"StatusNotification","p":{"timestamp":"<ts>","connectorStatus":"Available","evseId":0,"connectorId":0}}
+{"d":"CSMS>","k":"result","id":"id-2","p":{}}
+{"d":"CP>","k":"call","id":"id-3","a":"StatusNotification","p":{"timestamp":"<ts>","connectorStatus":"Available","evseId":1,"connectorId":1}}
+{"d":"CSMS>","k":"result","id":"id-3","p":{}}
+{"d":"CSMS>","k":"call","id":"id-4","a":"SetChargingProfile","p":{"evseId":1,"chargingProfile":{"id":1,"stackLevel":1,"chargingProfilePurpose":"TxDefaultProfile","chargingProfileKind":"Absolute","validFrom":"<ts>","validTo":"<ts>","chargingSchedule":[{"id":1,"startSchedule":"<ts>","chargingRateUnit":"W","chargingSchedulePeriod":[{"startPeriod":0,"limit":7000}]}]}}}
+{"d":"CP>","k":"result","id":"id-4","p":{"status":"Accepted"}}
+{"d":"CSMS>","k":"call","id":"id-5","a":"SetChargingProfile","p":{"evseId":1,"chargingProfile":{"id":2,"stackLevel":2,"chargingProfilePurpose":"TxDefaultProfile","chargingProfileKind":"Absolute","chargingSchedule":[{"id":2,"startSchedule":"<ts>","chargingRateUnit":"W","chargingSchedulePeriod":[{"startPeriod":0,"limit":7000}]}]}}}
+{"d":"CP>","k":"result","id":"id-5","p":{"status":"Accepted"}}
+{"d":"CSMS>","k":"call","id":"id-6","a":"GetChargingProfiles","p":{"requestId":1,"chargingProfile":{}}}
+{"d":"CP>","k":"result","id":"id-6","p":{"status":"Accepted"}}
+{"d":"CP>","k":"call","id":"id-7","a":"ReportChargingProfiles","p":{"requestId":1,"chargingLimitSource":"CSO","evseId":1,"chargingProfile":[{"id":2,"stackLevel":2,"chargingProfilePurpose":"TxDefaultProfile","chargingProfileKind":"Absolute","chargingSchedule":[{"id":2,"startSchedule":"<ts>","chargingRateUnit":"W","chargingSchedulePeriod":[{"startPeriod":0,"limit":7000}]}]},{"id":1,"stackLevel":1,"chargingProfilePurpose":"TxDefaultProfile","chargingProfileKind":"Absolute","validFrom":"<ts>","validTo":"<ts>","chargingSchedule":[{"id":1,"startSchedule":"<ts>","chargingRateUnit":"W","chargingSchedulePeriod":[{"startPeriod":0,"limit":7000}]}]}]}}
+{"d":"CSMS>","k":"result","id":"id-7","p":{}}

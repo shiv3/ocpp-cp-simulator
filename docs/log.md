@@ -2418,3 +2418,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-08] ingest | 1.6 charging profiles keep startSchedule and duration (#723)
 
 - `SetChargingProfile` stores `chargingSchedule.startSchedule`, `duration` and `minChargingRate`. Absolute and Recurring schedules count from `startSchedule` (else `validFrom`, else the transaction start), a schedule ends at its `duration` (per cycle for Recurring) so the next lower `stackLevel` applies (errata 3.43), and a Recurring schedule ignores periods past its cycle (errata 3.44). `GetCompositeSchedule` follows the same anchor and end. New page: [Smart charging](concepts/smart-charging.md); [Charging sessions](concepts/charging-sessions.md) links it. New golden case `16-smart-charging-start-schedule`; no existing fixture changes.
+
+## [2026-11-08] ingest | 2.x keeps validFrom, validTo and startSchedule apart (#707)
+
+- The 2.0.1 / 2.1 mapping no longer folds `startSchedule` into `validFrom` (and no longer reports `validFrom` as `startSchedule`): the three are stored on the profile as sent, periods are anchored on `startSchedule` (K01.FR.30), validity follows `validFrom` / `validTo` (K01.FR.36, K01.FR.37), and `ReportChargingProfiles` omits a field that was never sent. Page touched: [Smart charging](concepts/smart-charging.md). New golden case `201-charging-profile-times`; no existing fixture changes. Builds on the #723 domain fields.

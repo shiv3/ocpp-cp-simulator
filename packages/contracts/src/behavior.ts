@@ -29,6 +29,48 @@ export type JsonValue =
   | readonly JsonValue[]
   | { readonly [key: string]: JsonValue };
 
+/** A JSON object: what a behavior's params are. */
+export type JsonObject = { readonly [key: string]: JsonValue };
+
+/**
+ * The subset of JSON Schema a behavior's `params` may use. It is closed: a
+ * schema with any other keyword is refused when the behavior loads, so an
+ * author never believes a constraint is enforced when it is not. An object
+ * refuses keys that are not in `properties` unless `additionalProperties` is
+ * `true`. `title` and `description` label the field in the scenario editor.
+ */
+export interface ParamsSchema {
+  readonly type?:
+    "object" | "string" | "number" | "integer" | "boolean" | "array" | "null";
+  readonly title?: string;
+  readonly description?: string;
+  readonly enum?: readonly JsonValue[];
+  readonly const?: JsonValue;
+  readonly minimum?: number;
+  readonly maximum?: number;
+  readonly minLength?: number;
+  readonly maxLength?: number;
+  readonly properties?: { readonly [key: string]: ParamsSchema };
+  readonly required?: readonly string[];
+  readonly additionalProperties?: boolean;
+  readonly items?: ParamsSchema;
+  readonly minItems?: number;
+  readonly maxItems?: number;
+}
+
+/**
+ * The knobs of a behavior, as data. `schema` describes them (its root is an
+ * object) and `defaults` is what a selector that sets nothing gets. A selector
+ * (`--use-behavior`, `cp.behaviors.set`, a `useBehavior` node) sets keys; the
+ * engine merges them over `defaults` (shallow, one level), validates the
+ * result against `schema` when the behavior is armed and refuses on a
+ * mismatch. It never coerces: `"2000"` is not `2000`.
+ */
+export interface BehaviorParams {
+  readonly schema: ParamsSchema;
+  readonly defaults: JsonObject;
+}
+
 /**
  * How a behavior answers an inbound CSMS CALL. `after` runs once, when the
  * answer has settled on the wire; it is skipped, with a warning, if the
@@ -178,6 +220,8 @@ export interface Behavior {
   api: 1;
   id: string;
   requires?: readonly BehaviorCapability[];
+  /** The behavior's knobs; see {@link BehaviorParams}. Read them as `ctx.params`. */
+  params?: BehaviorParams;
   /** Keyed by action, in either OCPP version's spelling. */
   onCall?: Record<string, CallBehavior>;
   on?: BehaviorEvents;
@@ -253,6 +297,14 @@ export interface BehaviorContext {
    * `ctx.state` itself (core refuses it).
    */
   readonly state: Record<string, JsonValue>;
+  /**
+   * The behavior's params: its `defaults` with what the selector set on top,
+   * validated against its `schema`. Read-only (deeply frozen) and fixed when
+   * the context is made: a CALL's handler and its follow-up see the params
+   * the CALL arrived with; a `main` keeps the ones it started with. `{}` for a
+   * behavior that declares no params.
+   */
+  readonly params: Readonly<Record<string, JsonValue>>;
   /** A station-initiated CALL through the normal path; resolves to its result. */
   send(action: string, payload: unknown, opts?: SendOptions): Promise<unknown>;
   /**

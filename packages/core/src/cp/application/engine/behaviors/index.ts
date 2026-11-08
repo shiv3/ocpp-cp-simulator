@@ -1,3 +1,4 @@
+import type { BehaviorParams } from "@ocpp-cp-sim/contracts/behavior";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { ChargerEngine } from "../ChargerEngine";
 import { availabilityBehavior } from "./availability";
@@ -40,6 +41,7 @@ export function registerDefaultBehaviors(
 export function describeDefaultBehaviors(): Array<{
   id: string;
   actions: string[];
+  params?: BehaviorParams;
 }> {
   // The handlers close over the station and touch it only when a CALL comes.
   const none = undefined as unknown as ChargePoint;

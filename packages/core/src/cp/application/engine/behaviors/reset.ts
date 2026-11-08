@@ -1,7 +1,25 @@
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import type { Behavior, BehaviorParams } from "@ocpp-cp-sim/contracts/behavior";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { isOcpp2Version } from "../../../domain/types/OcppVersion";
 import { LogType } from "../../../shared/Logger";
+
+/** The knob of Reset; the default adds no wait. */
+const PARAMS: BehaviorParams = {
+  schema: {
+    type: "object",
+    properties: {
+      delayMs: {
+        type: "integer",
+        minimum: 0,
+        maximum: 3_600_000,
+        title: "Delay (ms)",
+        description:
+          "Wait this long after the answer settled before the reset takes effect (transactions stopped, then the boot)",
+      },
+    },
+  },
+  defaults: { delayMs: 0 },
+};
 
 interface Reset16Request {
   type: "Hard" | "Soft";
@@ -31,16 +49,21 @@ export function resetBehavior(cp: ChargePoint): Behavior {
   return {
     api: 1,
     id: "default.reset",
+    params: PARAMS,
     onCall: {
       Reset: {
         mode: "replace",
-        handle: (request) => {
+        handle: (request, ctx) => {
+          // A wait of 0 adds no turn (not even an `await`): the work runs in
+          // the turn it always did.
+          const delayMs = ctx.params.delayMs as number;
           if (!isOcpp2Version(cp.ocppVersion)) {
             const { type } = request as Reset16Request;
             cp.logger.info(`Reset request received: ${type}`, LogType.OCPP);
             return {
               response: { status: "Accepted" },
               after: async () => {
+                if (delayMs > 0) await ctx.sleep(delayMs);
                 cp.applyRemoteReset(type);
               },
             };
@@ -69,6 +92,7 @@ export function resetBehavior(cp: ChargePoint): Behavior {
           return {
             response: { status: "Accepted" },
             after: async () => {
+              if (delayMs > 0) await ctx.sleep(delayMs);
               if (type !== "ImmediateAndResume") {
                 cp.cancelPendingResetsOnIdle(evseId);
                 for (const connector of targets) {

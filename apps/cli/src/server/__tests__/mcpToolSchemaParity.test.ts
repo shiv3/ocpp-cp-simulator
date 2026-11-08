@@ -344,6 +344,8 @@ describe("MCP curated tool schema parity (general, #299)", () => {
       tool: "network_sim_trigger_disconnect",
       method: "network_sim.disconnect.trigger",
     },
+    { tool: "power_loss", method: "power.loss" },
+    { tool: "power_restore", method: "power.restore" },
   ];
 
   for (const { tool, method } of oneToOneCases) {

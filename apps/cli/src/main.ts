@@ -46,6 +46,7 @@ import { collectBehaviorParams } from "./behavior/paramsFlag";
 import type { JsonObject } from "@ocpp-cp-simulator/contracts/behavior";
 import { parseExportK6Args } from "./exportK6/parseExportK6Args";
 import { runExportK6 } from "./exportK6/runExportK6";
+import { initErrorReporting, reportFatalError } from "./errorReporting";
 import {
   startServer,
   startupScenarioOptionConflict,
@@ -2261,6 +2262,9 @@ function createStandaloneChargePointRuntime(
 }
 
 async function main(): Promise<void> {
+  // Opt-in (#794): a no-op without SENTRY_DSN. First, so every mode reports.
+  await initErrorReporting();
+
   // `analyze` is a subcommand, not a flag combination: it never bootstraps a
   // charge point, so it is dispatched before parseArgs() (which requires
   // --cp-id/--ws-url or a server mode) even sees argv. Its own small parser
@@ -2503,10 +2507,11 @@ async function main(): Promise<void> {
 }
 
 if (import.meta.main) {
-  main().catch((err) => {
+  main().catch(async (err) => {
     process.stderr.write(
       `Fatal: ${err instanceof Error ? err.message : err}\n`,
     );
+    await reportFatalError(err);
     process.exit(1);
   });
 }

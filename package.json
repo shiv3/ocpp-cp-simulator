@@ -83,6 +83,8 @@
     "@radix-ui/react-select": "^2.4.1",
     "@radix-ui/react-slot": "^1.5.0",
     "@radix-ui/react-tabs": "^1.2.1",
+    "@sentry/bun": "^11.11.0",
+    "@sentry/react": "^11.11.0",
     "@socket.io/bun-engine": "^0.1.2",
     "@tauri-apps/api": "^2.12.4",
     "@xyflow/react": "^12.12.1",

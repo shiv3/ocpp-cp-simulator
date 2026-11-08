@@ -7,6 +7,7 @@ sources:
   - apps/cli/src/main.ts
   - scripts/bench/README.md
 related:
+  - ../concepts/error-reporting.md
   - cli.md
   - web-console.md
   - docker-image.md
@@ -359,6 +360,14 @@ says only whether one is set.
 **Restore.** With `--state-db` every stored charge point is rebuilt at start and dialled (after the watches are back, see [File hot-reload](#file-hot-reload)). `--no-connect-restored` rebuilds them and leaves them disconnected until `cp.connect` or `cp.bulk { action: "connect" }`; a charge point named by `--cp-id` is still connected by the bootstrap.
 
 **Waits.** `cp.bulk` (including `reset`) and `cp.scenario.run` wait for each charge point at most 10 s; `--cp-bulk-wait-ms` changes that ([Control plane](../concepts/control-plane.md#charge-point-labels)). A Reset itself needs no wait of the daemon's own: the station answers, stops its transactions and reconnects.
+
+## Error reporting
+
+`SENTRY_DSN` (and optionally `SENTRY_ENVIRONMENT`) in the daemon's environment
+turns on opt-in Sentry error reporting ([#794](https://github.com/shiv3/ocpp-cp-simulator/issues/794)): uncaught exceptions, unhandled
+rejections and fatal exits, scrubbed of credentials. It does not reach the
+console the daemon serves, whose DSN is fixed when the UI is built
+(`VITE_SENTRY_DSN`). Details: [Error reporting](../concepts/error-reporting.md).
 
 ## Docker
 

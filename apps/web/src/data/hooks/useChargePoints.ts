@@ -125,6 +125,7 @@ export function useChargePoints(
             : null,
           autoMeterValueSetting: config.autoMeterValueSetting ?? null,
           ocppVersion: config.ocppVersion,
+          txUpdatedMeterValues: config.txUpdatedMeterValues,
         }));
 
       chargePointService

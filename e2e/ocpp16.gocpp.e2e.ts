@@ -460,7 +460,11 @@ test(
       // The CSMS client reports the CALLERROR as a failed command whose error
       // carries the OCPP-J 1.6 code; the station did not reset.
       expect(response.ok).toBe(false);
-      expect(JSON.stringify(response)).toContain("PropertyConstraintViolation");
+      // Only the command error carries the CALLERROR code; a match anywhere
+      // else in the response would not prove the station sent it.
+      expect(typeof response.error).toBe("string");
+      expect(response.error).toContain("PropertyConstraintViolation");
+      expect(response.result).toBeUndefined();
       expect(cp.getConnector(1)?.status).toBe(OCPPStatus.Available);
     } finally {
       await cp.disconnect();

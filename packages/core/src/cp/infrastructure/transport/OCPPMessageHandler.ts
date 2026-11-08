@@ -1465,6 +1465,19 @@ export class OCPPMessageHandler {
       const violation = inboundV16Violation(action, payload);
       if (violation) {
         const message = `Inbound ${action} ${violation.errorCode}: ${violation.description}`;
+        // Structured line for the trace (`meta.validation` on the CALL's
+        // record, packages/trace). It goes out on the WebSocket channel the
+        // trace writer already follows, before the handler or the error reply.
+        this._logger.warn(
+          `Inbound validation: ${JSON.stringify({
+            messageId,
+            action,
+            mode,
+            errorCode: violation.errorCode,
+            description: violation.description,
+          })}`,
+          LogType.WEBSOCKET,
+        );
         if (mode === "enforce") {
           this._logger.warn(message, LogType.OCPP);
           exchange.replyError(violation.errorCode, violation.description);

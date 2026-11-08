@@ -2389,3 +2389,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - `OCPPMessageHandler.handleCall` validates the payload of a CALL that reached the default handler against the vendored 1.6 request schema (formats checked) and, per `inboundValidation` (`off` / `warn` default / `enforce`), logs it or answers a CALLERROR with the OCPP-J 1.6 §4.2.3 code (`FormationViolation`, `OccurenceConstraintViolation`, `TypeConstraintViolation`, `PropertyConstraintViolation`). Policies, overrides and rules answer first.
 - Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#inbound-call-validation-on-ocpp-j-16), [Who answers an inbound CALL](concepts/call-precedence.md), [GitHub issues](sources/github-issues.md).
+
+## [2026-11-08] ingest | Inbound validation: traced violations and the `inboundValidation` setting (#593 review)
+
+- A `warn` / `enforce` violation is traced: the inbound CALL's record carries `meta.validation = { mode, errorCode, description }` (a structured `Inbound validation:` line on the `WebSocket` log channel, merged by `logLinesToTrace` and held back by the live `--trace-output` writer for one tick). `inboundValidation` is settable: `--inbound-validation`, `cp.create` / `cp.update` (contracts, HTTP, MCP), persisted in `charge_points.inbound_validation` (schema v25). The wiki states the order with the #594 `NotSupported`.
+- Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#inbound-call-validation-on-ocpp-j-16), [Trace format](concepts/trace-format.md#validation-violations-meta), [CLI](entities/cli.md), [Daemon](entities/daemon.md), [Control plane](concepts/control-plane.md), [State persistence](concepts/state-persistence.md).

@@ -806,13 +806,13 @@ with protocol `ocpp1.2S`, `ocpp1.5S`, or `ocpp1.6S`, status Accepted).
 
 ## Inbound CALL validation on OCPP-J 1.6
 
-An inbound CALL on an **OCPP 1.6J** charge point is checked against the vendored 1.6 request schema for its action (#593). The setting `inboundValidation` (`ChargePoint` transport option `inboundValidation`, `ChargePoint.setInboundValidation()`, and `inboundValidation` in the CLI `ChargePointInitOptions`) has three values:
+An inbound CALL on an **OCPP 1.6J** charge point is checked against the vendored 1.6 request schema for its action (#593). The setting `inboundValidation` has three values. Set it with `--inbound-validation <off|warn|enforce>` ([CLI](../entities/cli.md), [daemon](../entities/daemon.md)), the `inboundValidation` field of `cp.create` / `cp.update` ([control plane](control-plane.md#cpcreate)), or, from library code, the `ChargePoint` transport option and `ChargePoint.setInboundValidation()`. The CLI persists it with `--state-db` ([State persistence](state-persistence.md)); a row from before the column restores as `warn`.
 
-| Value     | A schema-invalid CALL                                                                            |
-| --------- | ------------------------------------------------------------------------------------------------ |
-| `off`     | is not checked; the handler runs                                                                 |
-| `warn`    | (default) is logged as a warning in the `OCPP` log; the handler still runs and answers as before |
-| `enforce` | is answered with a CALLERROR (OCPP-J 1.6 §4.2.3) and the handler does not run                    |
+| Value     | A schema-invalid CALL                                                                         |
+| --------- | --------------------------------------------------------------------------------------------- |
+| `off`     | is not checked; the handler runs                                                              |
+| `warn`    | (default) is logged as a warning and **traced**; the handler still runs and answers as before |
+| `enforce` | is answered with a CALLERROR (OCPP-J 1.6 §4.2.3) and the handler does not run                 |
 
 The error code follows the first kind of violation, most structural first (formats count, as for 1.6-S):
 
@@ -826,6 +826,10 @@ The error code follows the first kind of violation, most structural first (forma
 The codes use the **1.6 spelling**: `FormationViolation` (2.x says `FormatViolation`) and `OccurenceConstraintViolation` (the 1.6 specification spells it with one `r`; 2.x corrected it). The CALLERROR description names the action and the failing properties, cut to 255 characters.
 
 Validation runs after the [inbound gate](call-precedence.md): an inbound policy, a response override and a scenario or code rule answer first, so any of them can own a malformed CALL; it guards only what reaches the default handler. An action without a request schema is left to the handler lookup (`NotImplemented`). Wire behavior under `off` and `warn` is unchanged; the golden wire fixtures did not change.
+
+**Tracing.** Under `warn` and `enforce` a violation is traced, not only logged: the inbound CALL's [trace record](trace-format.md#validation-violations-meta) carries `meta.validation = { mode, errorCode, description }` (the code is what `enforce` answers, and what `warn` would have). The charge point writes one structured `Inbound validation: {json}` line on the `WebSocket` log channel for it; `--trace-output` and the `logLinesToTrace` adapter turn it into the `meta` field. Under `off` nothing is checked and nothing is traced.
+
+**With SmartCharging not advertised (#594).** `NotImplemented` (no handler) comes before validation, and the `NotSupported` that `SetChargingProfile` answers when `SmartCharging` is missing from `SupportedFeatureProfiles` comes from inside the handler. So on such a station, under `enforce`, an invalid `SetChargingProfile` payload gets the constraint-violation CALLERROR and a valid one gets `NotSupported`.
 
 ## Inbound CS→CP request validation
 

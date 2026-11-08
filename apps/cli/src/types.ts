@@ -200,6 +200,8 @@ export interface CLIOptions {
   readonly cpoName?: string;
   /** `--tx-updated-meter-values` (#347). See ChargePointInitOptions. */
   readonly txUpdatedMeterValues?: boolean;
+  /** `--inbound-validation` (#593). See ChargePointInitOptions. */
+  readonly inboundValidation?: InboundValidationMode;
   readonly tls?: OcppTlsOptions;
   readonly tlsCaPath?: string;
   readonly tlsCertPath?: string;
@@ -387,6 +389,7 @@ export interface ChargePointStatus {
     readonly securityProfile?: OcppSecurityProfile;
     readonly cpoName?: string;
     readonly txUpdatedMeterValues?: boolean;
+    readonly inboundValidation?: InboundValidationMode;
     readonly tlsCaPath?: string;
     readonly tlsCertPath?: string;
     readonly tlsKeyPath?: string;

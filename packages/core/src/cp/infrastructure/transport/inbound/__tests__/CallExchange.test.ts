@@ -130,6 +130,14 @@ describe("CallExchange", () => {
       ]);
     });
 
+    it("a CALL is announced once even when its first write threw", () => {
+      const ex = h.exchange();
+      h.failNextWrite = true;
+      expect(() => ex.reply({ status: "Accepted" })).toThrow("write failed");
+      ex.replyError("InternalError", "write failed");
+      expect(h.announced).toHaveLength(1);
+    });
+
     it("a write that throws leaves the CALL open for a CALLERROR", () => {
       const ex = h.exchange();
       h.failNextWrite = true;

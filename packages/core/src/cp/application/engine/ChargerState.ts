@@ -6,7 +6,7 @@ import {
 } from "../../domain/connector/ConnectorRecord";
 
 /**
- * The charger engine's state (docs/analyses/charger-engine.md, "Charger
+ * The charger engine's state (docs/concepts/charger-engine.md, "Charger
  * engine"): a plain, JSON-serializable record. Only
  * {@link reduceChargerState} writes the fields the engine owns; the user data
  * of a behavior (`ctx.state`) lives under `behaviors` and is the one thing a
@@ -183,6 +183,9 @@ export function assertJsonSerializable(value: unknown, path = "state"): void {
         throw new TypeError(`${path} is not a plain object`);
       }
       for (const [key, item] of Object.entries(value as object)) {
+        // A key set to `undefined` is an absent key (JSON drops it): the usual
+        // way to clear one.
+        if (item === undefined) continue;
         assertJsonSerializable(item, `${path}.${key}`);
       }
       return;

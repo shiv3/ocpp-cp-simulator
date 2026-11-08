@@ -861,6 +861,7 @@ export const createScenarioExecutorCallbacks = (
       const mine = new Set(armedOwners.values());
       armedOwners.clear();
       const open = chargePoint.behaviors.release((owner) => mine.has(owner));
+      chargePoint.engine.deactivateBehaviors((owner) => mine.has(owner));
       for (const exchange of open) {
         chargePoint.logger.warn(
           `${exchange.action}: the scenario ended before it answered this call; answering InternalError (use callResponse kind "none" to stay silent)`,

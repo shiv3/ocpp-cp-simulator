@@ -1,3 +1,4 @@
+import { stationNow } from "../stationNow";
 import type {
   FirmwareStatusNotificationRequestV201,
   LogStatusNotificationRequestV201,
@@ -257,7 +258,7 @@ export function handleGetBaseReportV201(
     afterResult: () =>
       ctx.sendCall("NotifyReport", {
         requestId: req.requestId,
-        generatedAt: new Date().toISOString(),
+        generatedAt: stationNow(ctx.chargePoint).toISOString(),
         seqNo: 0,
         tbc: false,
         reportData: [first, ...reportData.slice(1)],
@@ -298,7 +299,7 @@ export function handleGetReportV201(
     afterResult: () =>
       ctx.sendCall("NotifyReport", {
         requestId: req.requestId,
-        generatedAt: new Date().toISOString(),
+        generatedAt: stationNow(ctx.chargePoint).toISOString(),
         seqNo: 0,
         tbc: false,
         reportData: [first, ...reportData.slice(1)],

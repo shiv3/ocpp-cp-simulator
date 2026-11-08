@@ -45,6 +45,12 @@ export interface AnswerOptions {
   readonly onEffectDropped?: EffectDroppedHandler;
 }
 
+/** A default behavior's effect carries the hook that ends its scope when dropped. */
+function droppedHookOf(effect: unknown): (() => void) | undefined {
+  const hook = (effect as { onDropped?: () => void } | undefined)?.onDropped;
+  return hook;
+}
+
 /** What an exchange needs from the adapter that owns the socket. */
 export interface CallExchangeDeps {
   readonly action: string;
@@ -72,7 +78,7 @@ export interface CallExchangeDeps {
 }
 
 /**
- * One inbound CSMS CALL and its single answer (docs/analyses/charger-engine.md,
+ * One inbound CSMS CALL and its single answer (docs/concepts/charger-engine.md,
  * "CallExchange and InboundCallGate").
  *
  * - `open`: nothing decided yet.
@@ -233,6 +239,8 @@ export class CallExchange {
     this.closed();
   }
 
+  private announcedAnswer = false;
+
   private requireNotAnswered(): void {
     if (this._state === "answered" || this._state === "suppressed") {
       throw new CallExchangeError(
@@ -250,7 +258,7 @@ export class CallExchange {
   ): Promise<ExchangeSettlement> {
     this.requireNotAnswered();
     if (this._state === "abandoned") {
-      options.onEffectDropped?.("stale");
+      (options.onEffectDropped ?? droppedHookOf(options.effect))?.("stale");
       return this.settled;
     }
     if (!this.deps.isGenerationCurrent(this.deps.generation)) {
@@ -258,7 +266,7 @@ export class CallExchange {
         `${this.deps.action} answered after the connection changed; not sent`,
       );
       this.abandon();
-      options.onEffectDropped?.("stale");
+      (options.onEffectDropped ?? droppedHookOf(options.effect))?.("stale");
       return this.settled;
     }
 
@@ -266,16 +274,21 @@ export class CallExchange {
       ? this.deps.effects.register(
           this.deps.generation,
           options.effect,
-          options.onEffectDropped,
+          options.onEffectDropped ?? droppedHookOf(options.effect),
         )
       : undefined;
     // Announced while still open: a subscriber that throws leaves the CALL
-    // unanswered for the caller to answer with a CALLERROR.
-    this.deps.announce({
-      action: this.deps.action,
-      messageId: this.deps.messageId,
-      ...completion,
-    });
+    // unanswered for the caller to answer with a CALLERROR. A CALL is
+    // announced once: when the write below throws and the caller answers
+    // again, the second answer is not announced.
+    if (!this.announcedAnswer) {
+      this.announcedAnswer = true;
+      this.deps.announce({
+        action: this.deps.action,
+        messageId: this.deps.messageId,
+        ...completion,
+      });
+    }
     this._state = "answered";
     this.closed();
     let reported = false;
@@ -304,6 +317,8 @@ export class CallExchange {
       // caller may answer it another way (a CALLERROR for the failure).
       this._state = "open";
       reported = true;
+      // An effect registered for this answer will never run: say so.
+      effectSettled?.({ outcome: "write_failed" } as Settlement);
       throw error;
     }
     return this.settled;

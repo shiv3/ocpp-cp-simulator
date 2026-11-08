@@ -40,7 +40,10 @@ describe("ChargerState", () => {
   });
 
   it("rejects state that JSON would change", () => {
-    expect(() => assertJsonSerializable({ a: undefined })).toThrow();
+    // A key set to undefined is an absent key (JSON drops it): the usual way
+    // to clear one. In an array, undefined would become null: refused.
+    expect(() => assertJsonSerializable({ a: undefined })).not.toThrow();
+    expect(() => assertJsonSerializable({ a: [undefined] })).toThrow();
     expect(() => assertJsonSerializable({ a: new Date() })).toThrow();
     expect(() => assertJsonSerializable({ a: Number.NaN })).toThrow();
     expect(() => assertJsonSerializable({ a: () => 1 })).toThrow();

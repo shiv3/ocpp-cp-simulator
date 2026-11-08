@@ -1,3 +1,4 @@
+import { stationNow } from "../stationNow";
 import type {
   ClearChargingProfileRequestV201,
   ClearChargingProfileResponseV201,
@@ -446,7 +447,7 @@ export function handleGetCompositeScheduleV201(
   ctx: V201InboundContext,
 ): V201HandlerResult {
   const req = payload as GetCompositeScheduleRequestV201;
-  const anchor = new Date();
+  const anchor = stationNow(ctx.chargePoint);
   let txProfile: ActiveChargingProfile | null = null;
 
   if (req.evseId > 0) {

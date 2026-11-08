@@ -6,7 +6,7 @@ import type { CallExchange } from "./CallExchange";
 
 /**
  * The ordered checks an inbound CSMS CALL passes before the default path
- * (docs/analyses/charger-engine.md, "CallExchange and InboundCallGate"), once
+ * (docs/concepts/charger-engine.md, "CallExchange and InboundCallGate"), once
  * for every OCPP version:
  *
  * 1. `incomingCallReceived`, announced to the scenario layer and the control plane

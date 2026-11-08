@@ -249,7 +249,7 @@ export interface CertificateQuirks {
 }
 
 /**
- * What makes a run replayable (docs/analyses/charger-engine.md): the clock
+ * What makes a run replayable (docs/concepts/charger-engine.md): the clock
  * every timer and timestamp of the charge point reads, and the seed its
  * random streams derive from. With neither, the platform clock and
  * `Math.random` are used and nothing differs from a charge point built
@@ -290,6 +290,11 @@ export class ChargePoint {
   private readonly _events = new EventEmitter<ChargePointEvents>();
   private readonly _webSocket: OCPPWebSocket | null;
   private readonly _clock: SimClock;
+
+  /** The station's current time, from its clock (virtual under a VirtualClock). */
+  nowDate(): Date {
+    return new Date(this._clock.now());
+  }
   private readonly _rngSource: RngSource;
   private readonly _behaviors = new BehaviorRegistry({
     ocppVersion: () => this._ocppVersion,
@@ -721,7 +726,7 @@ export class ChargePoint {
   }
 
   /**
-   * Load a behavior object (docs/analyses/charger-engine.md, "Behavior API")
+   * Load a behavior object (docs/concepts/charger-engine.md, "Behavior API")
    * into this station: its `onCall` rules take the matching inbound CALLs over
    * from the default behavior, and `main` starts. Throws on a duplicate id or
    * a `requires` this station cannot meet.
@@ -2871,7 +2876,7 @@ export class ChargePoint {
     });
   }
 
-  /** A write to a connector's engine record (docs/analyses/charger-engine.md). */
+  /** A write to a connector's engine record (docs/concepts/charger-engine.md). */
   private writeConnector(connectorId: number, write: ConnectorWrite): void {
     this._engine.dispatch({ type: "connector.write", connectorId, write });
   }

@@ -163,3 +163,31 @@ describe("exchange", () => {
     expect(order.length).toBe(2);
   });
 });
+
+describe("N12: a key set to undefined is an absent key", () => {
+  test("the same turn's other writes are still saved", async () => {
+    const saves: Array<{ behaviors: Record<string, Record<string, unknown>> }> =
+      [];
+    const b: Behavior = {
+      api: 1,
+      id: "u",
+      onCall: {
+        Reset: {
+          mode: "replace",
+          handle: (_q, ctx) => {
+            ctx.state.ok = 1;
+            (ctx.state as Record<string, unknown>).pending = undefined;
+            return { response: { status: "Accepted" } };
+          },
+        },
+      },
+    };
+    const run = await start({ version: "1.6", behaviors: [b] });
+    const { engine } = run.cp;
+    engine.onPersist(() => saves.push(engine.persistable() as never));
+    await run.call("Reset", { type: "Soft" });
+    await run.settle();
+    expect(saves.length).toBeGreaterThan(0);
+    expect(saves.at(-1)!.behaviors.u).toEqual({ ok: 1 });
+  });
+});

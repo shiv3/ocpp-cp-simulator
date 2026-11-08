@@ -20,7 +20,11 @@ import type {
 import { isAllowedConnectorStatusTransition } from "../../domain/connector/ConnectorTransitions";
 import { OCPPStatus } from "../../domain/types/OcppTypes";
 import { isOcpp2Version } from "../../domain/types/OcppVersion";
-import { behaviorFitProblem } from "./behaviorFit";
+import {
+  RESERVED_PREFIX,
+  behaviorFitProblem,
+  behaviorShapeProblem,
+} from "./behaviorFit";
 import { LogType } from "../../shared/Logger";
 import type { SimClock, TimerHandle } from "../../shared/clock";
 import { csmsActionAliases } from "../../domain/types/csmsActionNames";
@@ -43,7 +47,6 @@ import { registerDefaultBehaviors } from "./behaviors";
 import { cannedResponse, responseProblems } from "./responseValidation";
 
 /** Ids with this prefix belong to the built-in behaviors; none can be loaded. */
-const RESERVED_PREFIX = "default.";
 
 /** Thrown into a behavior's waits when it is unloaded or its connection ends. */
 export class BehaviorStopped extends Error {
@@ -63,8 +66,10 @@ export class BehaviorTimeout extends Error {
 
 export interface LoadBehaviorOptions {
   /**
-   * Load without serving: no rule is registered and `main` does not start
-   * until a scenario selects the behavior with `useBehavior`.
+   * Load without serving: no rule is registered, `main` does not start and
+   * no `on` hook or `beforeSend` runs until a scenario selects the behavior
+   * with `useBehavior`. All of it, or none of it: while a run holds the
+   * behavior it is complete; when the last holder lets go it is idle again.
    */
   readonly dormant?: boolean;
 }
@@ -73,7 +78,10 @@ export interface LoadBehaviorOptions {
 export interface DefaultResult {
   readonly response: unknown;
   /** Starts the work that follows the response; run it once the response settled. */
-  readonly effect?: () => void;
+  readonly effect?: (() => void) & {
+    /** The exchange told the queue to drop the effect: it will never run. */
+    onDropped?: () => void;
+  };
 }
 
 /**
@@ -118,7 +126,7 @@ class Scope {
  * Default behaviors whose follow-up stops when the connection closes: the
  * firmware status trains, whose timers `ChargePoint` cleared on a close before
  * the engine. The log and diagnostics uploads were not tied to the socket and
- * go on across a reconnect. Rule 4 of docs/analyses/charger-engine.md: this is
+ * go on across a reconnect. Rule 4 of docs/concepts/charger-engine.md: this is
  * the behavior of ca01d302, kept as it was.
  */
 const CONNECTION_BOUND_DEFAULTS: ReadonlySet<string> = new Set([
@@ -156,7 +164,7 @@ function describe(error: unknown): string {
 }
 
 /**
- * One per charge point (docs/analyses/charger-engine.md, "Charger engine").
+ * One per charge point (docs/concepts/charger-engine.md, "Charger engine").
  * It owns {@link ChargerState}, processes every event on one queue in order,
  * runs code behaviors and default behaviors against the same
  * {@link BehaviorContext}, and registers the rules of loaded behaviors with
@@ -176,6 +184,13 @@ export class ChargerEngine {
   private readonly loaded = new Map<string, Behavior>();
   /** Ids of behaviors loaded `dormant`. */
   private readonly dormant = new Set<string>();
+  /**
+   * Owners (by key) that selected a dormant behavior, per behavior id. A
+   * dormant behavior is fully active, with its `onCall` rules, `main`, `on`
+   * hooks and `beforeSend`, while at least one owner holds it, and fully idle
+   * otherwise (`onResume` aside: a dormant behavior never resumes).
+   */
+  private readonly holders = new Map<string, Map<string, RuleOwner>>();
   private readonly mainScopes = new Map<string, Scope>();
   /** The scope of each behavior's `onResume`. */
   private readonly resumeScopes = new Map<string, Scope>();
@@ -283,6 +298,18 @@ export class ChargerEngine {
     };
     assertJsonSerializable(state);
     return JSON.parse(JSON.stringify(state)) as PersistedEngineState;
+  }
+
+  /**
+   * Throws if the `ctx.state` of a user behavior holds something that is not
+   * JSON (a `Date`, a `Map`, a function, `NaN`). The daemon only warns, so a
+   * station keeps running; a test harness calls this so the slip fails the test.
+   */
+  assertStorableState(): void {
+    for (const [id, data] of Object.entries(this._state.behaviors)) {
+      if (id.startsWith(RESERVED_PREFIX)) continue;
+      assertJsonSerializable(data, `ctx.state of ${id}`);
+    }
   }
 
   /**
@@ -640,10 +667,13 @@ export class ChargerEngine {
     }
   }
 
+  /** A dormant behavior that no run holds: no rules, no `main`, no hooks. */
+  private isIdle(id: string): boolean {
+    return this.dormant.has(id) && !this.holders.has(id);
+  }
+
   private refreshHooked(): void {
-    const active = [...this.loaded.values()].filter(
-      (b) => !this.dormant.has(b.id),
-    );
+    const active = [...this.loaded.values()].filter((b) => !this.isIdle(b.id));
     this.hooked = active.some((b) => b.on !== undefined);
     this.intercepting = active.some((b) => b.beforeSend !== undefined);
   }
@@ -671,7 +701,7 @@ export class ChargerEngine {
     let current = payload;
     for (const behavior of [...this.loaded.values()]) {
       const table = behavior.beforeSend;
-      if (!table || this.dormant.has(behavior.id)) continue;
+      if (!table || this.isIdle(behavior.id)) continue;
       for (const name of names) {
         const fn = table[name];
         if (typeof fn !== "function") continue;
@@ -789,7 +819,7 @@ export class ChargerEngine {
 
   private deliverHook(name: keyof BehaviorEvents, event: unknown): void {
     for (const behavior of [...this.loaded.values()]) {
-      if (this.dormant.has(behavior.id)) continue;
+      if (this.isIdle(behavior.id)) continue;
       const hook = behavior.on?.[name] as
         ((event: unknown, ctx: BehaviorContext) => unknown) | undefined;
       if (typeof hook !== "function") continue;
@@ -840,36 +870,12 @@ export class ChargerEngine {
 
   /** Throws if this station cannot run `behavior`. */
   assertLoadable(behavior: Behavior): void {
-    if (behavior.api !== 1) {
-      throw new Error(
-        `Behavior ${behavior.id}: unsupported api ${String(behavior.api)}`,
-      );
-    }
-    if (!behavior.id) throw new Error("A behavior needs an id");
-    if (behavior.id.startsWith(RESERVED_PREFIX)) {
-      throw new Error(
-        `Behavior id "${behavior.id}" is reserved: ids starting with "${RESERVED_PREFIX}" belong to the built-in behaviors`,
-      );
-    }
-    if (behavior.id in Object.prototype) {
-      throw new Error(
-        `Behavior id "${behavior.id}" is not allowed: it names a member of every object`,
-      );
-    }
-    for (const [action, call] of Object.entries(behavior.onCall ?? {})) {
-      if (call.mode === "extend" && !this.hasDefaultFor(action)) {
-        throw new Error(
-          `Behavior ${behavior.id}: onCall.${action} uses mode "extend", but ${action} has no default behavior to extend; use mode "replace"`,
-        );
-      }
-    }
-    const host = this.host;
+    const shape = behaviorShapeProblem(behavior, (action) =>
+      this.hasDefaultFor(action),
+    );
+    if (shape) throw new Error(shape);
     const problem = behaviorFitProblem(behavior, {
       ocppVersion: this.host.ocppVersion,
-      // Read only when a `requires` asks for it.
-      get virtualTime() {
-        return "advanceBy" in host.clock;
-      },
     });
     if (problem) throw new Error(problem);
   }
@@ -970,7 +976,7 @@ export class ChargerEngine {
     const startNew = (): void => {
       if (startedNew) return;
       startedNew = true;
-      if (dormant || !next.main || this.disposed) return;
+      if (this.isIdle(next.id) || !next.main || this.disposed) return;
       if (this.loaded.get(next.id) !== next) return;
       const scope = new Scope(next.id, false);
       this.mainScopes.set(next.id, scope);
@@ -1025,7 +1031,14 @@ export class ChargerEngine {
     const key = ruleOwnerKey(owner);
     this.host.behaviors.release((held) => ruleOwnerKey(held) === key);
     this.registerRules(behavior, owner);
-    // `main` of a behavior loaded dormant starts when a scenario first selects it.
+    const held = this.holders.get(id) ?? new Map<string, RuleOwner>();
+    const first = held.size === 0;
+    held.set(key, owner);
+    this.holders.set(id, held);
+    if (!first) return;
+    // The first owner switches the whole behavior on: `main` starts, hooks
+    // and `beforeSend` are delivered.
+    this.refreshHooked();
     if (behavior.main && !this.mainScopes.has(id) && !this.disposed) {
       const scope = new Scope(id, false);
       this.mainScopes.set(id, scope);
@@ -1034,6 +1047,26 @@ export class ChargerEngine {
         this.runDetached(id, scope, (ctx) => behavior.main!(ctx)),
       );
     }
+  }
+
+  /**
+   * The runs that selected dormant behaviors let go (the end of a run): a
+   * dormant behavior no owner holds any more stops its `main` and its hooks.
+   * Rules are released with `BehaviorRegistry.release`, which the caller does.
+   */
+  deactivateBehaviors(owned: (owner: RuleOwner) => boolean): void {
+    for (const [id, held] of [...this.holders]) {
+      for (const [key, owner] of [...held]) if (owned(owner)) held.delete(key);
+      if (held.size > 0) continue;
+      this.holders.delete(id);
+      this.pendingMains.get(id)?.();
+      this.pendingMains.delete(id);
+      this.mainScopes.get(id)?.cancel();
+      this.mainScopes.delete(id);
+      this.mainRuns.delete(id);
+      this.endHookContext(id);
+    }
+    this.refreshHooked();
   }
 
   private registerRules(
@@ -1072,6 +1105,7 @@ export class ChargerEngine {
     if (!behavior) return false;
     this.loaded.delete(id);
     this.dormant.delete(id);
+    this.holders.delete(id);
     this.refreshHooked();
     this.endHookContext(id);
     this.pendingMains.get(id)?.();
@@ -1369,15 +1403,14 @@ export class ChargerEngine {
       this.endScope(scope);
       return { response: outcome.response };
     }
-    return {
-      response: outcome.response,
-      effect: () => {
-        scope.connectionBound = CONNECTION_BOUND_DEFAULTS.has(
-          entry.behavior.id,
-        );
-        this.runAfter(entry.behavior.id, scope, ctx, after);
-      },
+    const effect = (): void => {
+      scope.connectionBound = CONNECTION_BOUND_DEFAULTS.has(entry.behavior.id);
+      this.runAfter(entry.behavior.id, scope, ctx, after);
     };
+    // The response queue drops an effect on a close the station made, a stale
+    // generation or a dispose: nothing would end this scope then.
+    effect.onDropped = (): void => this.endScope(scope);
+    return { response: outcome.response, effect };
   }
 
   // ---- the context --------------------------------------------------------

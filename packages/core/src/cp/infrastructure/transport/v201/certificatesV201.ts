@@ -1,3 +1,4 @@
+import { stationNow } from "../stationNow";
 import type {
   CertificateSignedRequestV201,
   DeleteCertificateRequestV201,
@@ -404,7 +405,7 @@ async function certificateSigned(
     afterResult: () =>
       ctx.sendCall("SecurityEventNotification", {
         type: "InvalidChargingStationCertificate",
-        timestamp: new Date().toISOString(),
+        timestamp: stationNow(ctx.chargePoint).toISOString(),
         techInfo: reason,
       }),
   };

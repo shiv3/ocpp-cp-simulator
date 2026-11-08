@@ -496,6 +496,9 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       onDropped?.("not_connected");
       return;
     }
+    // The CALL as built: answers are matched with it, not with the copy a
+    // behavior's beforeSend rewrote (the same rule as on 1.6).
+    const built = payload;
     if (!intercepted) {
       const decision = behaviorTapOf(this._chargePoint).beforeSend(
         action,
@@ -535,7 +538,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
           }
           this._pendingRequests.set(messageId, {
             action,
-            payload,
+            payload: built,
             ...(transactionEvent
               ? {
                   transactionEvent,
@@ -2218,8 +2221,15 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     for (const [index, part] of parts.entries()) {
       let refused = false;
       let sending = true;
-      this.send("NotifyEvent", this.generateMessageId(), part, () => {
-        if (sending) refused = true;
+      this.send("NotifyEvent", this.generateMessageId(), part, (reason) => {
+        // A drop a behavior's beforeSend asked for is spent, not refused.
+        if (!sending) return;
+        if (reason === "dropped_by_behavior") {
+          this._logger.warn(
+            `[v2.0.1] Replay of a queued NotifyEvent part ${index + 1} dropped by a behavior's beforeSend`,
+            LogType.OCPP,
+          );
+        } else refused = true;
       });
       sending = false;
       if (!refused) continue;

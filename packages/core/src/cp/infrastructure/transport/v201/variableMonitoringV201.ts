@@ -1,6 +1,7 @@
 // OCPP 2.0.1 / 2.1 variable monitoring handlers (N02, N04, N05, N06) on the
 // charge point's MonitoringStore. Component/variable resolution goes through
 // the same device-model map as GetVariables / SetVariables.
+import { stationNow } from "../stationNow";
 import type {
   ClearVariableMonitoringRequestV201,
   ClearVariableMonitoringResponseV201,
@@ -212,6 +213,7 @@ export function buildMonitoringReportV201(
   monitoring: MonitoringStore,
   dialect: MonitoringReportDialect,
   itemsPerPart: number = MONITORING_ITEMS_PER_PART,
+  now: () => Date = () => new Date(),
 ): MonitoringReport {
   let types: Set<SupportedMonitorType> | undefined;
   if (req.monitoringCriteria !== undefined) {
@@ -238,7 +240,7 @@ export function buildMonitoringReportV201(
   // N02.FR.03 / FR.04 / FR.09: one or more parts with the request's
   // requestId, seqNo from 0 and tbc on every part but the last (#538). A
   // component/variable group is never split across two parts.
-  const generatedAt = new Date().toISOString();
+  const generatedAt = now().toISOString();
   return {
     response: { status: "Accepted" }, // N02.FR.01
     reports: splitIntoParts([first, ...monitor.slice(1)], itemsPerPart).map(
@@ -302,6 +304,8 @@ export function createGetMonitoringReportHandlerV201(
       payload as GetMonitoringReportRequestV201,
       ctx.chargePoint.monitoring,
       dialect,
+      undefined,
+      () => stationNow(ctx.chargePoint),
     );
     return reports.length === 0
       ? { response }

@@ -815,12 +815,12 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
               />
               <NodePaletteItem
                 type={ScenarioNodeType.CALL_RESPONSE}
-                label="Call Response"
+                label={t("scenarioEditor.palette.callResponse")}
                 icon="↩️"
               />
               <NodePaletteItem
                 type={ScenarioNodeType.USE_BEHAVIOR}
-                label="Use Behavior"
+                label={t("scenarioEditor.palette.useBehavior")}
                 icon="🎭"
               />
             </div>

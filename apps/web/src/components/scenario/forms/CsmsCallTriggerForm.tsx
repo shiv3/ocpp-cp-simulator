@@ -34,7 +34,7 @@ export default function CsmsCallTriggerForm({
       />
       <div>
         <SelectField
-          label="Behavior"
+          label={t("scenarioEditor.csmsCallTrigger.behavior")}
           value={value.behavior === "replace" ? "replace" : "observe"}
           onChange={(behavior) =>
             onChange({
@@ -43,13 +43,18 @@ export default function CsmsCallTriggerForm({
             })
           }
           options={[
-            { value: "observe", label: "observe (default)" },
-            { value: "replace", label: "replace" },
+            {
+              value: "observe",
+              label: t("scenarioEditor.csmsCallTrigger.observe"),
+            },
+            {
+              value: "replace",
+              label: t("scenarioEditor.csmsCallTrigger.replace"),
+            },
           ]}
         />
         <p className="text-xs text-muted mt-1">
-          replace means the scenario owns the CALL and a Call Response node must
-          answer it.
+          {t("scenarioEditor.csmsCallTrigger.replaceHelp")}
         </p>
       </div>
       <div>
@@ -78,7 +83,7 @@ export default function CsmsCallTriggerForm({
       {value.behavior === "replace" && (
         <fieldset className="space-y-3 rounded border border-gray-300 dark:border-gray-600 p-3">
           <legend className="px-1 text-xs font-semibold text-primary">
-            On busy (answer to a second CALL while the first is unanswered)
+            {t("scenarioEditor.csmsCallTrigger.onBusy")}
           </legend>
           <CallResponseSpecFields
             value={

@@ -1,4 +1,5 @@
 {
+  "scenarioNodes.title.callResponse": "CALL 応答",
   "scenarioNodes.title.cancelReservation": "予約取消",
   "scenarioNodes.title.certQuirks": "証明書の挙動設定",
   "scenarioNodes.title.connectionTrigger": "接続トリガー",
@@ -18,6 +19,7 @@
   "scenarioNodes.title.statusTrigger": "ステータストリガー",
   "scenarioNodes.title.transaction": "トランザクション",
   "scenarioNodes.title.unlockOutcome": "アンロック結果 (§5.18)",
+  "scenarioNodes.title.useBehavior": "ビヘイビアを使用",
   "scenarioNodes.reservationId": "予約ID: {{id}}",
   "scenarioNodes.certQuirks.clearAll": "すべて解除",
   "scenarioNodes.certQuirks.preset": "プリセット {{preset}}",
@@ -50,5 +52,6 @@
   "scenarioNodes.conn": "コネクタ {{id}}",
   "scenarioNodes.transaction.start": "開始",
   "scenarioNodes.transaction.stop": "停止",
-  "scenarioNodes.transaction.tag": "タグ: {{value}}"
+  "scenarioNodes.transaction.tag": "タグ: {{value}}",
+  "scenarioNodes.callResponse.noAnswer": "応答なし"
 }

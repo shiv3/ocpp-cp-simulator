@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import {
   CheckboxField,
   JsonTextareaField,
@@ -7,10 +8,10 @@ import {
 import type { NodeFormComponentProps, NodeFormData } from "./types";
 
 const KIND_OPTIONS = [
-  { value: "result", label: "CALLRESULT (answer with a payload)" },
-  { value: "error", label: "CALLERROR (answer with an error)" },
-  { value: "none", label: "None (stay silent)" },
-];
+  { value: "result", labelKey: "scenarioEditor.callResponse.kindResult" },
+  { value: "error", labelKey: "scenarioEditor.callResponse.kindError" },
+  { value: "none", labelKey: "scenarioEditor.callResponse.kindNone" },
+] as const;
 
 function isJsonObject(value: unknown): boolean {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -26,46 +27,50 @@ export function CallResponseSpecFields({
   value: NodeFormData;
   onChange: (value: NodeFormData) => void;
 }) {
+  const { t } = useTranslation();
   const kind =
     value.kind === "error" || value.kind === "none" ? value.kind : "result";
   return (
     <div className="space-y-3">
       <SelectField
-        label="Answer"
+        label={t("scenarioEditor.callResponse.answer")}
         value={kind}
         onChange={(next) => onChange({ ...value, kind: next })}
-        options={KIND_OPTIONS}
+        options={KIND_OPTIONS.map((o) => ({
+          value: o.value,
+          label: t(o.labelKey),
+        }))}
       />
       {kind === "result" && (
         <div>
           <JsonTextareaField
-            label="Payload (JSON)"
+            label={t("scenarioEditor.callResponse.payload")}
             value={value.payload}
             onChange={(payload) => onChange({ ...value, payload })}
             placeholder="{}"
           />
           {value.payload !== undefined && !isJsonObject(value.payload) && (
             <p role="alert" className="text-xs text-red-600 dark:text-red-400">
-              The payload must be a JSON object. It is kept as typed, and the
-              run fails on this step until it is one.
+              {t("scenarioEditor.ocppCall.payloadNotObject")}
             </p>
           )}
           <p className="text-xs text-muted mt-1">
-            A whole value can be taken from the CALL the branch took, for
-            example {'{"$from": "call.payload.requestId"}'}.
+            {t("scenarioEditor.callResponse.fromHelp", {
+              example: '{"$from": "call.payload.requestId"}',
+            })}
           </p>
         </div>
       )}
       {kind === "error" && (
         <>
           <TextField
-            label="Error code"
+            label={t("scenarioEditor.callResponse.errorCode")}
             value={(value.errorCode as string | undefined) ?? ""}
             onChange={(errorCode) => onChange({ ...value, errorCode })}
-            placeholder="e.g., GenericError, NotSupported"
+            placeholder={t("scenarioEditor.callResponse.errorCodePlaceholder")}
           />
           <TextField
-            label="Error description"
+            label={t("scenarioEditor.callResponse.errorDescription")}
             value={(value.errorDescription as string | undefined) ?? ""}
             onChange={(errorDescription) =>
               onChange({ ...value, errorDescription })
@@ -83,17 +88,18 @@ export default function CallResponseForm({
   value,
   onChange,
 }: NodeFormComponentProps<NodeFormData>) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-3">
       <TextField
-        label="Label"
+        label={t("scenarioEditor.form.label")}
         value={(value.label as string | undefined) ?? ""}
         onChange={(label) => onChange({ ...value, label })}
       />
       <CallResponseSpecFields value={value} onChange={onChange} />
       <CheckboxField
         id="call-response-skip-validation"
-        label="Skip schema validation (send an invalid payload on purpose)"
+        label={t("scenarioEditor.ocppCall.skipValidation")}
         checked={value.skipValidation === true}
         onChange={(skipValidation) => onChange({ ...value, skipValidation })}
       />

@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { TextField } from "./FormFields";
 import type { NodeFormComponentProps, NodeFormData } from "./types";
 
@@ -7,18 +8,19 @@ export default function UseBehaviorForm({
   value,
   onChange,
 }: NodeFormComponentProps<NodeFormData>) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-3">
       <TextField
-        label="Label"
+        label={t("scenarioEditor.form.label")}
         value={(value.label as string | undefined) ?? ""}
         onChange={(label) => onChange({ ...value, label })}
       />
       <TextField
-        label="Behavior id"
+        label={t("scenarioEditor.useBehavior.behaviorId")}
         value={(value.behaviorId as string | undefined) ?? ""}
         onChange={(behaviorId) => onChange({ ...value, behaviorId })}
-        placeholder="e.g., my-behavior"
+        placeholder={t("scenarioEditor.useBehavior.behaviorIdPlaceholder")}
       />
     </div>
   );

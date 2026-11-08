@@ -1,4 +1,5 @@
 {
+  "scenarioNodes.title.callResponse": "Call Response",
   "scenarioNodes.title.cancelReservation": "Cancel Reservation",
   "scenarioNodes.title.certQuirks": "Certificate Quirks",
   "scenarioNodes.title.connectionTrigger": "Connection Trigger",
@@ -18,6 +19,7 @@
   "scenarioNodes.title.statusTrigger": "Status Trigger",
   "scenarioNodes.title.transaction": "Transaction",
   "scenarioNodes.title.unlockOutcome": "Unlock Outcome (§5.18)",
+  "scenarioNodes.title.useBehavior": "Use Behavior",
   "scenarioNodes.reservationId": "Reservation ID: {{id}}",
   "scenarioNodes.certQuirks.clearAll": "clear all",
   "scenarioNodes.certQuirks.preset": "{{preset}} preset",
@@ -50,5 +52,6 @@
   "scenarioNodes.conn": "conn {{id}}",
   "scenarioNodes.transaction.start": "Start",
   "scenarioNodes.transaction.stop": "Stop",
-  "scenarioNodes.transaction.tag": "Tag: {{value}}"
+  "scenarioNodes.transaction.tag": "Tag: {{value}}",
+  "scenarioNodes.callResponse.noAnswer": "no answer"
 }

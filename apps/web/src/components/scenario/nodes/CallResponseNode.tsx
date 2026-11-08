@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, { memo } from "react";
 import type { NodeProps } from "@xyflow/react";
 import { Handle, Position, type Node } from "@xyflow/react";
@@ -11,11 +12,12 @@ const CallResponseNode: React.FC<NodeProps<Node<CallResponseNodeData>>> = ({
   data,
   selected,
 }) => {
+  const { t } = useTranslation();
   const summary =
     data.kind === "error"
       ? `CALLERROR ${data.errorCode ?? "GenericError"}`
       : data.kind === "none"
-        ? "no answer"
+        ? t("scenarioNodes.callResponse.noAnswer")
         : "CALLRESULT";
   return (
     <div
@@ -25,13 +27,15 @@ const CallResponseNode: React.FC<NodeProps<Node<CallResponseNodeData>>> = ({
     >
       <Handle type="target" position={Position.Top} className="w-3 h-3" />
       <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-        Call Response
+        {t("scenarioNodes.title.callResponse")}
       </div>
       <div className="text-sm font-mono text-primary truncate" title={summary}>
         {summary}
       </div>
       {data.skipValidation && (
-        <div className="text-xs text-muted">unvalidated</div>
+        <div className="text-xs text-muted">
+          {t("scenarioNodes.ocppCall.unvalidated")}
+        </div>
       )}
       <Handle type="source" position={Position.Bottom} className="w-3 h-3" />
     </div>

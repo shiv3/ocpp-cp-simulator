@@ -1069,13 +1069,13 @@ export const NODE_FORM_REGISTRY = {
     formToNodeData: ocppCallFormToNodeData,
   },
   [ScenarioNodeType.CALL_RESPONSE]: {
-    title: "Call Response",
+    title: "scenarioEditor.node.callResponse",
     Component: CallResponseForm,
     nodeDataToForm: callResponseNodeDataToForm,
     formToNodeData: callResponseFormToNodeData,
   },
   [ScenarioNodeType.USE_BEHAVIOR]: {
-    title: "Use Behavior",
+    title: "scenarioEditor.node.useBehavior",
     Component: UseBehaviorForm,
     nodeDataToForm: useBehaviorNodeDataToForm,
     formToNodeData: useBehaviorFormToNodeData,

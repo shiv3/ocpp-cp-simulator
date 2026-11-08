@@ -1,7 +1,7 @@
 ---
 title: "Source: GitHub issues referenced by the wiki"
 type: source
-summary: Index of the issue / PR numbers that wiki pages cite as the origin of a design decision, so "why" questions can be traced back.
+summary: Archive, frozen 2026-11-08. Index of the issue / PR numbers that wiki pages cited as the origin of a design decision; newer provenance is in git.
 sources:
   - https://github.com/shiv3/ocpp-cp-simulator/issues
 related:
@@ -11,7 +11,12 @@ related:
 updated: 2026-11-08
 ---
 
-# Source: GitHub issues referenced by the wiki
+# Source: GitHub issues referenced by the wiki (archive)
+
+> **Archived: no longer updated as of 2026-11-08.** Do not add rows. Pages cite
+> issue numbers inline for provenance; to trace a newer decision use
+> `git log --grep '#N'`, `git log -- docs/`, the PR that closed the issue, or the
+> branch name `<type>/<issue number>-<slug>`.
 
 All under https://github.com/shiv3/ocpp-cp-simulator unless noted.
 
@@ -92,7 +97,6 @@ All under https://github.com/shiv3/ocpp-cp-simulator unless noted.
 | #383                                             | RPC handlers get the zod-parsed params; unknown connector status / mode / timestamp is `invalid_params`                                                                                                                          | [Control plane](../concepts/control-plane.md#rpc)                                                                                                                                                                                                                                                                                                                                    |
 | #388                                             | Persisted scenario run history: `scenario.runs.list`, `scenario_runs` table, run page history and the `/v3/scenarios/runs` page                                                                                                  | [Control plane](../concepts/control-plane.md#scenario-run-history), [State persistence](../concepts/state-persistence.md#tables), [Web console](../entities/web-console.md)                                                                                                                                                                                                          |
 | #389                                             | Expert OCPP calls: any station-initiated CALL with an edited payload, per-call schema bypass, `applyResponse`; `ocppCall` node                                                                                                   | [Expert OCPP calls](../concepts/expert-ocpp-calls.md), [Control plane](../concepts/control-plane.md#cp-command-methods), [Scenario format](../concepts/scenario-format.md#ocppcall-notes), [Web console](../entities/web-console.md)                                                                                                                                                 |
-| #394                                             | Scenario run history in browser-local mode: shared `ScenarioRunRecorder`, `scenario_runs` in sql.js                                                                                                                              | [Local vs Remote mode](../concepts/local-vs-remote-mode.md)                                                                                                                                                                                                                                                                                                                          |
 | #395                                             | `boot_notification` control-plane event: the CSMS's BootNotification answer, distinct from `connected`                                                                                                                           | [Control plane → event push](../concepts/control-plane.md#event-push-and-rooms), [CLI → events](../entities/cli.md#events)                                                                                                                                                                                                                                                           |
 | #396                                             | Generic `csms_call_received` / `csms_call_completed` events for every OCPP-J CSMS CALL and dispatchable SOAP one, payload redacted                                                                                               | [CLI → CSMS call events](../entities/cli.md#csms-call-events), [Control plane](../concepts/control-plane.md#event-push-and-rooms)                                                                                                                                                                                                                                                    |
 | #399                                             | 2.x: a CSMS CALL whose handler throws is answered `CALLERROR InternalError`, like 1.6J                                                                                                                                           | [CLI → CSMS call events](../entities/cli.md#csms-call-events)                                                                                                                                                                                                                                                                                                                        |

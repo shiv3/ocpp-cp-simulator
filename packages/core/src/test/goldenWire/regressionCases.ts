@@ -210,6 +210,48 @@ c16("start-callerror-stop-during-retry", async (r) => {
   await wait(4000);
   await settle(r);
 });
+// #565, §3.7: a stop during a StartTransaction retry waits for the resend,
+// and carries the id the CSMS assigns to it.
+const startFailsOnce = (r: Rig) => {
+  cfg(r, "TransactionMessageAttempts", "3");
+  cfg(r, "TransactionMessageRetryInterval", "1");
+  r.csms.responders.StartTransaction = (_p, c) =>
+    c.nth < 2
+      ? { error: { code: "InternalError", description: "x" } }
+      : { transactionId: 7, idTagInfo: { status: "Accepted" } };
+};
+c16("start-callerror-stop-during-retry-conf", async (r) => {
+  startFailsOnce(r);
+  r.plugIn();
+  await settle(r);
+  await r.cp.startTransaction("TAG-A", 1);
+  await wait(200);
+  r.cp.stopTransaction(1);
+  await wait(2500);
+  await settle(r);
+});
+c16("start-callerror-unlock-during-retry", async (r) => {
+  startFailsOnce(r);
+  r.plugIn();
+  await settle(r);
+  await r.cp.startTransaction("TAG-A", 1);
+  await wait(200);
+  await r.csms.call("UnlockConnector", { connectorId: 1 });
+  await wait(2500);
+  await settle(r);
+});
+c16("start-callerror-meter-and-stop-during-retry", async (r) => {
+  startFailsOnce(r);
+  r.plugIn();
+  await settle(r);
+  await r.cp.startTransaction("TAG-A", 1);
+  await wait(200);
+  r.cp.sendMeterValue(1);
+  await wait(100);
+  r.cp.stopTransaction(1);
+  await wait(2500);
+  await settle(r);
+});
 c16("stop-callerror-retry", async (r) => {
   cfg(r, "TransactionMessageAttempts", "2");
   cfg(r, "TransactionMessageRetryInterval", "1");
@@ -1755,6 +1797,22 @@ c201("event-callerror-retries", async (r) => {
   await wait(4000);
   await settle(r);
   r.cp.stopTransaction(1);
+  await settle(r);
+});
+
+// #565, E13.FR.04: the Ended event built during the Started event's retry
+// waits for the resend.
+c201("event-callerror-stop-during-retry", async (r) => {
+  cfg(r, "TransactionMessageAttempts", "3");
+  cfg(r, "TransactionMessageRetryInterval", "1");
+  r.csms.responders.TransactionEvent = (_p, c) =>
+    c.nth < 2 ? { error: { code: "InternalError", description: "x" } } : {};
+  r.plugIn();
+  await settle(r);
+  await r.cp.startTransaction("TAG-E", 1);
+  await wait(200);
+  r.cp.stopTransaction(1);
+  await wait(2500);
   await settle(r);
 });
 

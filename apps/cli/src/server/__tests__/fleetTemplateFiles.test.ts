@@ -80,3 +80,44 @@ describe("the shipped example (#445)", () => {
     for (const id of refs) expect(getTemplateById(id)).toBeTruthy();
   });
 });
+
+describe("loadFleetTemplateFiles: limits and network simulation (#445)", () => {
+  it("refuses a member whose networkSimulation is not a valid layer config", () => {
+    const bad = {
+      ...T("a"),
+      groups: [
+        {
+          name: "g",
+          members: [
+            {
+              cpId: "a-1",
+              blueprintId: "ac-22kw",
+              networkSimulation: {
+                enabled: true,
+                rules: { r: { type: "no-such-rule-type" } },
+              },
+            },
+          ],
+        },
+      ],
+    };
+    expect(() =>
+      loadFleetTemplateFiles(
+        ["a.json"],
+        reader({ "a.json": JSON.stringify(bad) }),
+      ),
+    ).toThrow(
+      /--fleet-template a\.json: template "a": group "g", member 1: invalid networkSimulation/,
+    );
+  });
+
+  it("refuses more templates than the list result can carry", () => {
+    const many = Array.from({ length: 1001 }, (_, i) => T(`t${i}`));
+    expect(() =>
+      loadFleetTemplateFiles(
+        ["a.json"],
+        reader({ "a.json": JSON.stringify(many) }),
+      ),
+    ).toThrow(/at most 1000 templates/);
+  });
+});

@@ -13,7 +13,19 @@
  * persistence layer was localStorage and we explicitly do NOT carry it
  * forward (see plan).
  */
-export const SCHEMA_VERSION = 25;
+export const SCHEMA_VERSION = 27;
+
+/**
+ * The `fleet_templates` table (#445), shared by `SCHEMA_SQL` and the v27
+ * migration step so the two cannot drift.
+ */
+const FLEET_TEMPLATES_TABLE_SQL = `CREATE TABLE IF NOT EXISTS fleet_templates (
+  id          TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  description TEXT,
+  definition  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);`;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -209,13 +221,7 @@ CREATE TABLE IF NOT EXISTS blueprints (
 
 -- Heterogeneous fleet templates (#445): blueprint and scenario-template ids
 -- composed into one reusable fleet. Daemon-side only, like \`blueprints\`.
-CREATE TABLE IF NOT EXISTS fleet_templates (
-  id          TEXT PRIMARY KEY,
-  name        TEXT NOT NULL,
-  description TEXT,
-  definition  TEXT NOT NULL,
-  updated_at  TEXT NOT NULL
-);
+${FLEET_TEMPLATES_TABLE_SQL}
 
 CREATE TABLE IF NOT EXISTS charge_point_state (
   cp_id             TEXT PRIMARY KEY,
@@ -750,8 +756,17 @@ export function runMigrations(db: Database): void {
     }
   }
 
-  // v24 → v25 (#445): the `fleet_templates` table, `IF NOT EXISTS` in
-  // SCHEMA_SQL like the v14 step. Additive.
+  // v24 → v27 (#445): the `fleet_templates` table. Versions 25 and 26 belong to
+  // the other branches that were open when this one was written (#658, #660);
+  // the step is gated on `stored < 27` so a database those already stamped 25
+  // or 26 still gets it. `IF NOT EXISTS` in SCHEMA_SQL has created it by now;
+  // the `sqlite_master` probe keeps the step correct on its own. Additive.
+  if (stored < 27) {
+    const present = db.get<{ name: string }>(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'fleet_templates'",
+    );
+    if (!present) db.exec(FLEET_TEMPLATES_TABLE_SQL);
+  }
 
   // (Place future forward migrations here, gated on `stored < N`.)
 

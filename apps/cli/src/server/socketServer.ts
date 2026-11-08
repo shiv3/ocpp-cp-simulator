@@ -10,6 +10,7 @@ import {
 
 import { handleJsonCommand } from "../jsonMode";
 import { runCpBulk } from "./cpBulk";
+import { fleetTemplateNetworkSimulationError } from "./fleetTemplateFiles";
 import type { CLIChargePointService } from "../service";
 import {
   INFLIGHT_CAP,
@@ -95,7 +96,10 @@ import {
   OcppCallNoAnswerError,
   OcppCallRejectedError,
 } from "@ocpp-cp-sim/core/cp/domain/errors/OcppCallErrors";
-import type { NetworkSimLayerConfig } from "@ocpp-cp-sim/core/cp/infrastructure/transport/network-sim/config";
+import {
+  validateLayerConfig,
+  type NetworkSimLayerConfig,
+} from "@ocpp-cp-sim/core/cp/infrastructure/transport/network-sim/config";
 import type { AutoTrafficConfig } from "@ocpp-cp-sim/core/cp/domain/connector/AutoTraffic";
 import { createScenarioRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/createScenarioRepository";
 import { SqliteConnectorSettingsRepository } from "@ocpp-cp-sim/client/sqlite/SqliteConnectorSettingsRepository";
@@ -1076,6 +1080,8 @@ function saveFleetTemplate(
       `"${template.id}" comes from a --fleet-template file and cannot be replaced; choose another id`,
     );
   }
+  const layerError = fleetTemplateNetworkSimulationError(template);
+  if (layerError) throw new RpcFailure("invalid_params", layerError);
   // The list result carries the file templates too, so the ceiling is checked
   // against all of them before the write.
   const all = deps.fleetTemplates.list();
@@ -1153,6 +1159,15 @@ function planFleet(
           `no scenario template "${scenarioTemplateId}" (${where})`,
         );
       }
+      if (member.networkSimulation !== undefined) {
+        const layer = validateLayerConfig(member.networkSimulation);
+        if (!layer.ok) {
+          throw new RpcFailure(
+            "invalid_params",
+            `${where}: invalid networkSimulation: ${layer.errors[0] ?? "invalid layer config"}`,
+          );
+        }
+      }
       const labels = labelsSchema.safeParse({
         ...blueprint.params.labels,
         ...template.labels,
@@ -1208,11 +1223,20 @@ function planFleet(
               `${where}: soapCallbackUrl must expand to a route whose charge point segment is "${cpId}"`,
             );
           }
+          if (url.length > MAX_SOAP_CALLBACK_URL_LENGTH) {
+            throw new RpcFailure(
+              "invalid_params",
+              `${where}: soapCallbackUrl expands to more than ${MAX_SOAP_CALLBACK_URL_LENGTH} characters`,
+            );
+          }
           merged.soapCallbackUrl = url;
         }
+        // Member override, then the call, then the blueprint, then off: the
+        // caller's explicit choice beats what a blueprint saved.
         const autoConnect =
-          (merged.autoConnect as boolean | undefined) ??
+          member.overrides?.autoConnect ??
           call.autoConnect ??
+          blueprint.params.autoConnect ??
           false;
         // Connecting waits until the EV settings, scenario and network
         // simulation are in place, so the CP never dials in a half-configured

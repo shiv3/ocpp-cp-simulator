@@ -1,8 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- test ack payloads */
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, spyOn } from "bun:test";
 import type { Socket } from "socket.io-client";
 
 import { BunSqliteDatabase } from "@ocpp-cp-sim/core/cp/domain/persistence/BunSqliteDatabase";
+import type { FleetTemplate } from "@ocpp-cp-sim/contracts/index";
 import { FleetTemplateRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/FleetTemplateRepository";
 import { fleetTemplateSchema } from "@ocpp-cp-sim/contracts/index";
 import { NetworkSimManager } from "../NetworkSimManager";
@@ -381,6 +382,167 @@ describe("fleet templates over the control plane (#445)", () => {
       const ack = await rpc(socket, "fleet.create", { templateId: "urls" });
       expect(ack.result.created).toEqual(["U1", "U2"]);
       expect(ack.result.failed).toEqual([]);
+    } finally {
+      socket.disconnect();
+    }
+  });
+
+  it("creates nothing when a member's networkSimulation is not a valid layer config", async () => {
+    const template = {
+      id: "bad-net",
+      name: "Bad network",
+      groups: [
+        {
+          name: "g",
+          members: [
+            { cpId: "N1", blueprintId: "ac-22kw" },
+            {
+              cpId: "N2",
+              blueprintId: "ac-22kw",
+              networkSimulation: {
+                enabled: true,
+                rules: { r: { type: "no-such-rule-type" } },
+              },
+            },
+          ],
+        },
+      ],
+    };
+    // Refused when saved, so it can never be stored…
+    const plain = await start();
+    const plainSocket = await connectTestClient(plain);
+    try {
+      const saved = await rpc(plainSocket, "fleet.template.save", {
+        template,
+      });
+      expect(saved.ok).toBe(false);
+      expect(saved.error.code).toBe("invalid_params");
+      expect(saved.error.message).toContain('group "g", member 2');
+    } finally {
+      plainSocket.disconnect();
+    }
+    // …and a template that got in anyway (a row an older build stored) fails
+    // `fleet.create` in the resolve step: nothing is created and rolled back.
+    const server = await start({
+      fleetTemplates: new FleetTemplateRepository(null, [
+        template as FleetTemplate,
+      ]),
+    });
+    const socket = await connectTestClient(server);
+    const create = spyOn(server.registry, "create");
+    try {
+      const ack = await rpc(socket, "fleet.create", {
+        templateId: "bad-net",
+        wsUrl: WS,
+      });
+      expect(ack.ok).toBe(false);
+      expect(ack.error.code).toBe("invalid_params");
+      expect(await cpList(socket)).toEqual([]);
+      // Not even created and rolled back.
+      expect(create).not.toHaveBeenCalled();
+    } finally {
+      socket.disconnect();
+    }
+  });
+
+  it("autoConnect precedence is the line, then the call, then the blueprint, then off", async () => {
+    const server = await start();
+    const socket = await connectTestClient(server);
+    const dialled: string[] = [];
+    const csms = Bun.serve({
+      port: 0,
+      fetch(req) {
+        dialled.push(new URL(req.url).pathname);
+        return new Response("no", { status: 400 });
+      },
+    });
+    const url = `ws://127.0.0.1:${csms.port}/ocpp/`;
+    try {
+      await rpc(socket, "blueprint.save", {
+        blueprint: {
+          id: "dials",
+          name: "Dials",
+          params: { autoConnect: true },
+        },
+      });
+      await rpc(socket, "fleet.template.save", {
+        template: {
+          id: "ac",
+          name: "AC",
+          groups: [
+            {
+              name: "g",
+              members: [{ cpId: "A1", blueprintId: "dials" }],
+            },
+          ],
+        },
+      });
+      // The caller's explicit false beats what the blueprint saved.
+      const off = await rpc(socket, "fleet.create", {
+        templateId: "ac",
+        wsUrl: url,
+        autoConnect: false,
+      });
+      expect(off.result.created).toEqual(["A1"]);
+      await new Promise((r) => setTimeout(r, 400));
+      expect(dialled).toEqual([]);
+      // Without a call value the blueprint's applies.
+      const on = await rpc(socket, "fleet.create", {
+        templateId: "ac",
+        wsUrl: url,
+        idPrefix: "b-",
+      });
+      expect(on.result.created).toEqual(["b-A1"]);
+      const deadline = Date.now() + 5000;
+      while (dialled.length === 0 && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      expect(dialled.some((p) => p.endsWith("/b-A1"))).toBe(true);
+      expect(
+        dialled.some((p) => p.endsWith("/A1") && !p.endsWith("b-A1")),
+      ).toBe(false);
+    } finally {
+      csms.stop(true);
+      socket.disconnect();
+    }
+  });
+
+  it("refuses a range whose SOAP callback URL expands past the length cap", async () => {
+    const server = await start();
+    const socket = await connectTestClient(server);
+    try {
+      const longPath = "x".repeat(2100);
+      await rpc(socket, "blueprint.save", {
+        blueprint: {
+          id: "soap-long",
+          name: "SOAP long",
+          params: {
+            ocppVersion: "1.6-soap",
+            soapCallbackUrl: `http://cb.example/${longPath}/{n:03}/`,
+          },
+        },
+      });
+      await rpc(socket, "fleet.template.save", {
+        template: {
+          id: "soap-t",
+          name: "SOAP",
+          groups: [
+            {
+              name: "g",
+              members: [
+                { idPattern: "S{n:03}", count: 2, blueprintId: "soap-long" },
+              ],
+            },
+          ],
+        },
+      });
+      const ack = await rpc(socket, "fleet.create", {
+        templateId: "soap-t",
+        wsUrl: "http://csms.example/soap",
+      });
+      expect(ack.ok).toBe(false);
+      expect(ack.error.code).toBe("invalid_params");
+      expect(await cpList(socket)).toEqual([]);
     } finally {
       socket.disconnect();
     }

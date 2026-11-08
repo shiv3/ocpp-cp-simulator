@@ -87,7 +87,8 @@ A complete example is [`docs/examples/fleet-templates/operations-lab.json`](../e
 | member   | `labels?`                                             | Added to this line.                                                                                                                                  |
 | member   | `overrides?`                                          | `cp.create` fields (`vendor`, `model`, `connectors`, `ocppVersion`, `wsUrl`, `autoConnect`, …) replacing the blueprint's for this line. No `labels`. |
 
-A template stands for at most 1000 charge points, ranges expanded. Labels merge
+A template stands for at most 1000 charge points, ranges expanded, and the
+daemon loads at most 1000 templates from `--fleet-template` files. Labels merge
 blueprint → template → group → member, later keys winning; the result must
 still satisfy the [label limits](control-plane.md#charge-point-labels).
 
@@ -111,9 +112,12 @@ The web console has no fleet-template screen yet; it is split out of #445.
 
 1. **Resolve, with no side effect.** Every member's blueprint and scenario
    template must exist (`not_found`), every merged parameter block must be a
-   valid `cp.create` (`invalid_params`), the labels must fit, and no charge
-   point id may appear twice in the template (`invalid_params`). Any failure
-   here fails the call and creates nothing.
+   valid `cp.create` (`invalid_params`), every `networkSimulation` must be a
+   valid layer config (`invalid_params`; `fleet.template.save` and the
+   `--fleet-template` loader refuse the same template up front), an expanded
+   `soapCallbackUrl` must stay within 2048 characters, the labels must fit, and
+   no charge point id may appear twice in the template (`invalid_params`). Any
+   failure here fails the call and creates nothing.
 2. **Create in template order**: groups in order, members in order, a range
    ascending. Each charge point goes through the same path as `cp.create_many`.
    Then, per connector, the line's (else the blueprint's) EV settings and
@@ -126,11 +130,21 @@ The web console has no fleet-template screen yet; it is split out of #445.
    back and listed in `failed`; the others stay. As with `cp.create_many`, a
    partial batch is a normal result, not an error.
 
+   Creation is sequential, so a large template can outlast the 30 s control-plane
+   deadline: the call then answers `timeout` while the daemon keeps creating.
+   After a `timeout`, list the fleet with `cp.list`
+   instead of retrying `fleet.create`, which would report every created id as
+   already registered.
+
 `wsUrl` precedence, highest first: the member's `overrides.wsUrl`, the call's
 `wsUrl`, the blueprint's own. Without any of them the call fails
 `invalid_params`. `autoConnect` precedence: the member's `overrides.autoConnect`,
-the call's, then off. `idPrefix` is prepended to every id, so one template can
-be instantiated more than once (`a-CP001`, `b-CP001`).
+the call's, the blueprint's own, then off, so a caller's explicit
+`autoConnect: false` beats what a blueprint saved. `idPrefix` is prepended to
+every id, so one template can be instantiated more than once (`a-CP001`,
+`b-CP001`). A member with a `soapCallbackUrl` cannot be combined with
+`idPrefix`: the prefixed id no longer matches the id inside the callback URL
+(only the index is expanded), so the call fails `invalid_params`.
 
 Instances are independent: `fleet.create` copies what it resolved, nothing links
 a charge point back to its template, and editing or deleting a template never
@@ -139,7 +153,7 @@ line's overrides apply to its charge points only.
 
 ## Persistence and files
 
-- With `--state-db` templates live in the `fleet_templates` table (schema v25)
+- With `--state-db` templates live in the `fleet_templates` table (schema v27)
   and survive a restart; without it the repository keeps them in memory, like
   [blueprints](state-persistence.md). A stored row that no longer matches the
   schema is skipped, not fatal.

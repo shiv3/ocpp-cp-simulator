@@ -2408,5 +2408,6 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-08] ingest | Heterogeneous fleet templates (#445)
 
 - New `concepts/fleet-templates.md`: the shared schema (D09), `fleet.template.*` and `fleet.create`, resolve-then-create semantics, `wsUrl` / `autoConnect` precedence, `--fleet-template` files.
-- `concepts/control-plane.md`: method row and `related`. `concepts/state-persistence.md`: `fleet_templates` table (schema v25). `entities/mcp-endpoint.md`: five tools. `entities/daemon.md`, `entities/cli.md`: `--fleet-template`. `sources/github-issues.md`, `index.md`: entries.
+- `concepts/control-plane.md`: method row and `related`. `concepts/state-persistence.md`: `fleet_templates` table (schema v27). `entities/mcp-endpoint.md`: five tools. `entities/daemon.md`, `entities/cli.md`: `--fleet-template`. `sources/github-issues.md`, `index.md`: entries.
 - `docs/examples/fleet-templates/operations-lab.json`: example, validated by a test.
+- Review fixes: the schema step is v27 (`stored < 27`, guarded; v25 and v26 are taken by #658 and #660) and `concepts/state-persistence.md` / `concepts/fleet-templates.md` say so; every `networkSimulation` is validated before anything is stored or created (`fleet.template.save`, the `--fleet-template` loader, the resolve step of `fleet.create`); `autoConnect` precedence includes the blueprint; the expanded SOAP callback URL is capped; `idPrefix` with SOAP, the 30 s deadline and the 1000-template file cap are documented.

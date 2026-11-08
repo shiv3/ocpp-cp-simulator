@@ -86,7 +86,7 @@ c16("firmware-reconnect-then-again", async (r) => {
   });
   await wait(300);
   r.csms.dropConnection();
-  await r.csms.waitForCall("BootNotification", { nth: 2, timeoutMs: 30000 });
+  await r.reconnected();
   await settle(r);
   await r.csms.call("UpdateFirmware", {
     location: "http://x",
@@ -98,7 +98,7 @@ c16("firmware-reconnect-then-again", async (r) => {
 c16("diagnostics-disconnect", async (r) => {
   await r.csms.call("GetDiagnostics", { location: r.uploadUrl() });
   r.csms.dropConnection();
-  await r.csms.waitForCall("BootNotification", { nth: 2, timeoutMs: 30000 });
+  await r.reconnected();
   await settle(r);
 });
 // --- remote start
@@ -553,7 +553,7 @@ both("offline-start-stop", async (r) => {
 both("offline-mid-tx-reconnect", async (r) => {
   await charging(r);
   r.csms.dropConnection();
-  await r.csms.waitForCall("BootNotification", { nth: 2, timeoutMs: 30000 });
+  await r.reconnected();
   await settle(r);
   await r.remoteStop();
   await settle(r);
@@ -565,7 +565,7 @@ both("disconnect-with-remote-stop-noack", async (r) => {
     ? r.csms.callNoWait("RemoteStopTransaction", { transactionId: id })
     : r.csms.callNoWait("RequestStopTransaction", { transactionId: id }));
   r.csms.dropConnection();
-  await r.csms.waitForCall("BootNotification", { nth: 2, timeoutMs: 30000 });
+  await r.reconnected();
   await settle(r);
 });
 
@@ -584,7 +584,7 @@ const latency = (r: Rig, ms = 500) =>
   );
 const dropAndBack = async (r: Rig, nth = 2) => {
   r.csms.dropConnection();
-  await r.csms.waitForCall("BootNotification", { nth, timeoutMs: 30000 });
+  await r.reconnected(nth);
   await settle(r);
 };
 c16("ns-firmware-drop", async (r) => {
@@ -706,6 +706,36 @@ both("ns-reserve-drop", async (r) => {
   await wait(100);
   await dropAndBack(r);
   await wait(1000);
+  await settle(r);
+});
+// OCPP-J 2.0.1 §5.4, B04.FR.01/02 (#702): a reconnect sends no BootNotification
+// while the boot data is unchanged; the connectors are reported only when the
+// outage exceeded OfflineThreshold (here 0 s: any outage does).
+c201(
+  "reconnect-exceeds-offline-threshold",
+  async (r) => {
+    cfg(r, "OfflineThreshold", "0");
+    r.csms.dropConnection();
+    await r.reconnected();
+    await settle(r);
+  },
+  two,
+);
+// The simulator option BootOnReconnect keeps a BootNotification on every connect.
+c201("reconnect-boot-on-reconnect", async (r) => {
+  cfg(r, "BootOnReconnect", "true");
+  r.csms.dropConnection();
+  await r.reconnected();
+  await settle(r);
+});
+// Changed boot data is a reason to boot again (§5.4).
+c201("reconnect-boot-data-changed", async (r) => {
+  (r.cp as any)._bootNotification = {
+    ...(r.cp as any)._bootNotification,
+    firmwareVersion: "2.0",
+  };
+  r.csms.dropConnection();
+  await r.reconnected();
   await settle(r);
 });
 both("ns-remote-start-order", async (r) => {
@@ -1509,7 +1539,7 @@ both(
 );
 both("reconnect-pace", async (r) => {
   r.csms.dropConnection();
-  await r.csms.waitForCall("BootNotification", { nth: 2, timeoutMs: 6000 });
+  await r.reconnected(2, 6000);
   await settle(r);
 });
 both("connection-handshake", async (r) => {

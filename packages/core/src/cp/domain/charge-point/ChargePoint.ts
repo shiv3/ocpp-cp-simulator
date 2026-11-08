@@ -110,7 +110,10 @@ import {
   toV2ConnectorStatus,
   V2_CONNECTOR_STATUSES,
 } from "./runtimeValueKeys";
-import { ReservationManager } from "../reservation/Reservation";
+import {
+  ReservationManager,
+  type Reservation,
+} from "../reservation/Reservation";
 import { LocalAuthListManager } from "../auth/LocalAuthList";
 import { idTokenMaxLength } from "../auth/AuthorizationCacheSeed";
 import { AuthorizationCache } from "../auth/AuthorizationCache";
@@ -338,6 +341,34 @@ export class ChargePoint {
   private readonly _outbox: Outbox;
   private readonly _heartbeat: HeartbeatService;
   private readonly _clockAligned: ClockAlignedMeterScheduler;
+  /** #702: the next socket open is a (re)start of the link — the first
+   *  connect, an operator `connect()`, a Reset — and sends a
+   *  BootNotification. Only the transport's automatic reconnect after a
+   *  connection loss finds it false. */
+  private _bootOnNextOpen = true;
+  /** #702: a BootNotification was sent and not answered yet; a close in
+   *  between loses it, so the next open sends one again. */
+  private _bootUnanswered = false;
+  /** #702: the BootNotification payload last sent, as JSON. */
+  private _bootSentFingerprint: string | null = null;
+  /** #702: the payload of the last BootNotification the CSMS Accepted; null
+   *  while the last one was Pending or Rejected, or none was sent. */
+  private _bootedWith: string | null = null;
+  /** #702: when the current outage began (first teardown of it). */
+  private _offlineSince: number | null = null;
+  /** #702: the statuses (0 = the charge point) the station had when the
+   *  outage began, before the teardown made them Unavailable. */
+  private _statusAtDrop: Map<number, OCPPStatus> = new Map();
+  /** #702: the connectors whose Unavailable was made by the teardown
+   *  cascade (not by an availability change), with the status they had. */
+  private _cascadedAtDrop: Map<number, OCPPStatus> = new Map();
+  /** #702: the reservations held when the outage began; a resumed link gets
+   *  them back (a reboot does not). */
+  private _reservationsAtDrop: Reservation[] = [];
+  /** #702: the status the CSMS last *answered* for each connector (0 = the
+   *  charge point). A StatusNotification still in flight when the link closed
+   *  is not in it, so a resume sends that one again (B04.FR.02). */
+  private _ackedStatus: Map<number, OCPPStatus> = new Map();
   private readonly _stateManager: StateManager;
   private readonly _timeline: OperationalTimeline;
   private readonly _timelineProjector: OperationalTimelineProjector;
@@ -1879,10 +1910,12 @@ export class ChargePoint {
       }
       return;
     }
+    this._bootOnNextOpen = true;
     this._webSocket.connect(
       () => {
-        this.boot();
+        const resumed = this.onSocketOpen();
         this._events.emit("connected", undefined);
+        if (resumed) this._events.emit("reconnectResumed", resumed);
         this._engine.observe({ type: "connected" });
         // The queued-message flush itself is triggered by
         // markBootAccepted(); we just need the WebSocket to come up and
@@ -2235,6 +2268,12 @@ export class ChargePoint {
     this._outbox.sendSignedFirmwareStatusNotification(status, requestId);
   }
 
+  /** The CSMS answered a StatusNotification for `connectorId` (0 = the charge
+   *  point) with `status` (#702). */
+  noteStatusAcknowledged(connectorId: number, status: OCPPStatus): void {
+    this._ackedStatus.set(connectorId, status);
+  }
+
   /** Boot-notification gate accessors used by BootNotificationResultHandler. */
   markBootAccepted(): void {
     this._bootReason = "PowerUp";
@@ -2276,6 +2315,7 @@ export class ChargePoint {
    * run — so the event precedes every status change it causes (#395).
    */
   onBootNotificationResult(result: BootNotificationResult): void {
+    this._bootUnanswered = false;
     const status: RegistrationStatus =
       result.status === "Accepted" || result.status === "Pending"
         ? result.status
@@ -2287,9 +2327,12 @@ export class ChargePoint {
     switch (status) {
       case "Accepted":
         this._logger.info("Boot notification accepted", LogType.OCPP);
+        this._bootedWith = this._bootSentFingerprint;
+        this.clearOutage();
         this.markBootAccepted();
         break;
       case "Pending":
+        this._bootedWith = null;
         this._logger.warn(
           `BootNotification Pending — only CSMS-initiated traffic allowed${
             interval > 0 ? `, retry interval=${interval}s` : ""
@@ -2301,6 +2344,7 @@ export class ChargePoint {
         this.markBootPending();
         break;
       case "Rejected": {
+        this._bootedWith = null;
         const wait = interval > 0 ? interval : 60;
         this._logger.error(
           `BootNotification Rejected — silent for ${wait}s before retry`,
@@ -2404,12 +2448,143 @@ export class ChargePoint {
   }
 
   /**
+   * The socket is open. A (re)start of the link sends a BootNotification; the
+   * transport's automatic reconnect after a connection loss on OCPP 2.x does
+   * not while the boot data is unchanged and the last boot was Accepted
+   * (OCPP-J 2.0.1 §5.4: "SHOULD NOT send a BootNotification unless one or
+   * more of the elements … have changed"; #702). `BootOnReconnect` keeps the
+   * boot on every connect.
+   */
+  private onSocketOpen(): ChargePointEvents["reconnectResumed"] | null {
+    const restart = this._bootOnNextOpen;
+    this._bootOnNextOpen = false;
+    if (
+      !restart &&
+      isOcpp2Version(this._ocppVersion) &&
+      !this._configuration.bootOnReconnect() &&
+      this._bootedWith !== null &&
+      this._bootedWith === JSON.stringify(this._bootNotification)
+    ) {
+      return this.resumeAfterReconnect();
+    }
+    this.clearOutage();
+    this.boot();
+    return null;
+  }
+
+  /** The outage is over: forget what it recorded (#702). */
+  private clearOutage(): void {
+    this._offlineSince = null;
+    this._statusAtDrop = new Map();
+    this._cascadedAtDrop = new Map();
+    this._reservationsAtDrop = [];
+  }
+
+  /**
+   * The effects of an Accepted boot that a reconnect still needs, without the
+   * BootNotification (#702): B04.FR.01/02 status reports, the heartbeat, the
+   * clock-aligned and monitoring timers and the E11 replay of the queued
+   * TransactionEvents (E11.FR.02).
+   *
+   * The connection loss left the connectors `Unavailable` locally (the CSMS
+   * never heard of it). They get their status back without a wire message;
+   * a StatusNotification goes out for those whose status differs from what
+   * the CSMS knew, and for all of them when the outage was longer than
+   * `OfflineThreshold`.
+   */
+  private resumeAfterReconnect(): ChargePointEvents["reconnectResumed"] {
+    const offlineMs =
+      this._offlineSince === null ? 0 : this._clock.now() - this._offlineSince;
+    const atDrop = this._statusAtDrop;
+    const cascaded = this._cascadedAtDrop;
+    const reservations = this._reservationsAtDrop;
+    this.clearOutage();
+    const reportAll = offlineMs > this._configuration.offlineThreshold() * 1000;
+    this._logger.info(
+      `Reconnected after ${Math.round(offlineMs / 1000)}s offline; no BootNotification (boot data unchanged), reporting ${
+        reportAll ? "all connectors" : "the connectors that changed"
+      }`,
+      LogType.OCPP,
+    );
+    this._outbox.setBootStatus({ status: "Accepted" });
+    this.error = "";
+
+    // A link loss is not a reboot: the reservations survive it (B01.FR.13
+    // keeps Reserved even across a reboot), with their expiry timer.
+    const reserved = new Set(
+      this._reservationManager
+        .restore(reservations)
+        .map((reservation) => reservation.connectorId),
+    );
+
+    // What the CSMS last answered is what it knows; the station's own state
+    // now decides what is true, and the difference is reported (B04.FR.02).
+    const acked = this._ackedStatus;
+    const cpAtDrop = (atDrop.get(0) ?? OCPPStatus.Available) as
+      OCPPStatus.Available | OCPPStatus.Unavailable | OCPPStatus.Faulted;
+    const cpNow = this._status;
+    const cpTarget = cpNow === OCPPStatus.Unavailable ? cpAtDrop : cpNow;
+    if (cpTarget !== cpNow) this.status = cpTarget;
+    // Compared as the 2.x wire carries them (Preparing and Charging are both
+    // `Occupied`): the CSMS knows nothing else.
+    const knows = (id: number, target: OCPPStatus): boolean => {
+      const known = acked.get(id);
+      return (
+        known !== undefined &&
+        toV2ConnectorStatus(known) === toV2ConnectorStatus(target)
+      );
+    };
+    if (reportAll || !knows(0, cpTarget)) {
+      this.updateConnectorStatus(0, cpTarget);
+    }
+    this.connectors.forEach((connector) => {
+      let target = connector.status;
+      const made = cascaded.get(connector.id);
+      if (
+        target === OCPPStatus.Unavailable &&
+        made !== undefined &&
+        connector.transaction === null &&
+        // An availability change made while the link was going down is real.
+        connector.availability !== "Inoperative"
+      ) {
+        target =
+          made === OCPPStatus.Reserved && !reserved.has(connector.id)
+            ? OCPPStatus.Available
+            : made;
+        this.writeConnector(connector.id, {
+          kind: "status",
+          status: target,
+          scope: "event",
+        });
+      }
+      if (reportAll || !knows(connector.id, target)) {
+        this.updateConnectorStatus(connector.id, target);
+      }
+    });
+
+    // The interval in force (the CSMS's, or one set since) survives the
+    // teardown, which only stopped the timer; re-arm it.
+    this.startHeartbeat(this._heartbeat.intervalSeconds);
+    this._clockAligned.enable();
+    this._monitorEvaluation?.setReporting(true);
+    // After the status reports, as for an accepted boot.
+    queueMicrotask(() => this._outbox.flushPendingQueue());
+    return { offlineMs, reportedAll: reportAll };
+  }
+
+  /**
    * Send BootNotification.req. `reason` (2.x B01.FR.09) is remembered until
    * the boot is Accepted, so the retry after a Rejected answer repeats it;
    * an Accepted boot falls back to PowerUp, the reason of a plain reconnect.
    */
   boot(reason?: BootReason): void {
     if (reason) this._bootReason = reason;
+    // A boot asked for while the socket is down (a Reset, a retry timer) is
+    // lost on the wire: the next open must send it (#702).
+    if (!this.isOnline()) this._bootOnNextOpen = true;
+    this._bootUnanswered = true;
+    this._ackedStatus = new Map();
+    this._bootSentFingerprint = JSON.stringify(this._bootNotification);
     // OCPP 1.6J §4.2: the CP MUST NOT send any other CALL message until
     // BootNotification has been Accepted. The connector-level
     // StatusNotification fan-out happens in BootNotificationResultHandler
@@ -2439,6 +2614,19 @@ export class ChargePoint {
    * a dead socket.
    */
   private teardownAfterClose(): void {
+    // #702: remember what the CSMS knew when the outage began; a repeated
+    // teardown of the same outage must not record the Unavailable it made.
+    if (this._bootUnanswered) this._bootOnNextOpen = true;
+    if (this._offlineSince === null) {
+      this._offlineSince = this._clock.now();
+      this._statusAtDrop = new Map([
+        [0, this._status],
+        ...[...this._connectors.values()].map(
+          (connector) => [connector.id, connector.status] as const,
+        ),
+      ]);
+      this._reservationsAtDrop = this._reservationManager.getAllReservations();
+    }
     // A `triggerOn: "connect"` scenario is armed once per connect, recorded on
     // `Connector.lastAutoStartedScenarioKey` so re-emitting Available doesn't
     // restart something already running. That arm must not survive the socket
@@ -2459,6 +2647,19 @@ export class ChargePoint {
       connector.lastAutoStartedScenarioKey = null;
     });
     this.status = OCPPStatus.Unavailable;
+    if (this._cascadedAtDrop.size === 0) {
+      // First teardown of the outage: which Unavailable did the cascade make?
+      for (const connector of this._connectors.values()) {
+        const before = this._statusAtDrop.get(connector.id);
+        if (
+          before !== undefined &&
+          before !== OCPPStatus.Unavailable &&
+          connector.status === OCPPStatus.Unavailable
+        ) {
+          this._cascadedAtDrop.set(connector.id, before);
+        }
+      }
+    }
     this._heartbeat.cleanup();
     this._clockAligned.disable();
     // Offline: events at or below OfflineQueuingSeverity are queued

@@ -26,6 +26,8 @@ export const V201_VARIABLE_TO_V16_KEY: ReadonlyMap<string, string> = new Map([
   // #529: OCPP 2.0.1 / 2.1 Part 2 §2.1.3 "DefaultMessageTimeout" —
   // variableInstance "Default", ReadOnly, seconds.
   ["OCPPCommCtrlr/MessageTimeout/Default", "MessageTimeout"],
+  // #702: OCPPCommCtrlr.OfflineThreshold (Part 2 §2.1.8, B04.FR.01/02).
+  ["OCPPCommCtrlr/OfflineThreshold", "OfflineThreshold"],
   ["TxCtrlr/EVConnectionTimeOut", "ConnectionTimeOut"],
   ["SampledDataCtrlr/TxUpdatedInterval", "MeterValueSampleInterval"],
   ["SampledDataCtrlr/TxUpdatedMeasurands", "MeterValuesSampledData"],

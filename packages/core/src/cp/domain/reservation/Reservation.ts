@@ -315,6 +315,21 @@ export class ReservationManager {
   }
 
   /**
+   * Put reservations back after a connection loss that was not a reboot
+   * (#702): those whose expiry has not passed, with the cleanup timer
+   * running again. Returns the ones restored.
+   */
+  restore(reservations: readonly Reservation[]): Reservation[] {
+    const now = this.clock.now();
+    const kept = reservations.filter((r) => r.expiryDate.getTime() > now);
+    for (const reservation of kept) {
+      this.reservations.set(reservation.reservationId, { ...reservation });
+    }
+    if (!this.cleanupTimer) this.startCleanupTimer();
+    return kept;
+  }
+
+  /**
    * Cleanup all resources
    */
   dispose(): void {

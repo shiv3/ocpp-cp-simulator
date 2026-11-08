@@ -463,6 +463,27 @@ export const ConfigurationKeys = {
       type: "integer",
       min: 1,
     } as IntegerConfigurationKey,
+    // #702: OCPP 2.0.1 / 2.1 OCPPCommCtrlr.OfflineThreshold (Part 2 §2.1.8,
+    // Required, ReadWrite, seconds): after an offline period longer than this
+    // the station reports all its connectors when it is back (B04.FR.01), else
+    // only those whose status changed (B04.FR.02). 2.x only.
+    OfflineThreshold: {
+      name: "OfflineThreshold",
+      required: false,
+      readonly: false,
+      type: "integer",
+      min: 0,
+    } as IntegerConfigurationKey,
+    // #702: simulator option, 2.x only. false (default): a reconnect after a
+    // connection loss sends no BootNotification while the boot data is
+    // unchanged (OCPP-J 2.0.1 §5.4); true keeps the BootNotification on every
+    // connect.
+    BootOnReconnect: {
+      name: "BootOnReconnect",
+      required: false,
+      readonly: false,
+      type: "boolean",
+    } as BooleanConfigurationKey,
     // #598: OCPP 2.0.1 / 2.1 AuthCtrlr.MasterPassGroupId (Part 2 §2.3): tokens
     // of this group can stop transactions but cannot start one. "" (default)
     // = no master pass. 2.x only.
@@ -734,9 +755,15 @@ export const defaultConfiguration: (cp: ChargePoint) => Configuration = (
     ...(isOcpp2Version(cp.ocppVersion)
       ? [intVal(ConfigurationKeys.Custom.MessageTimeout, 30)]
       : []),
+    // #702: 2.x only (OCPPCommCtrlr.OfflineThreshold, and the simulator's
+    // BootOnReconnect option). The spec gives no default threshold: 60 s.
     // #598: 2.x only (AuthCtrlr.MasterPassGroupId); "" = no master pass.
     ...(isOcpp2Version(cp.ocppVersion)
-      ? [strVal(ConfigurationKeys.Custom.MasterPassGroupId, "")]
+      ? [
+          intVal(ConfigurationKeys.Custom.OfflineThreshold, 60),
+          boolVal(ConfigurationKeys.Custom.BootOnReconnect, false),
+          strVal(ConfigurationKeys.Custom.MasterPassGroupId, ""),
+        ]
       : []),
     // #538: 2.x only (MonitoringCtrlr.OfflineQueuingSeverity); 0 queues
     // only Emergency events while offline.

@@ -86,6 +86,13 @@ export interface IChargePointMessageHandler {
    * logs it.
    */
   sendSecurityEventNotification(type: string, techInfo?: string): Promise<void>;
+  /**
+   * 1.6 (#734): raise a critical security event now and send it after the
+   * next Accepted boot (A04.FR.02). Absent on the other handlers.
+   */
+  queueSecurityEventNotification?(type: string, techInfo?: string): void;
+  /** 1.6 (#734): send the queued security events, oldest first. */
+  flushQueuedSecurityEvents?(): void;
   sendSignCertificate(csr?: string): Promise<void>;
   sendDiagnosticsStatusNotification(status: DiagnosticsStatus): void;
   /** FirmwareStatusNotification.req. `requestId` is carried on 2.0.1 (from

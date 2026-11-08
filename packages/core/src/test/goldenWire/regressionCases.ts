@@ -1631,3 +1631,74 @@ both("close-during-reset", async (r) => {
   await wait(1500);
   await settle(r);
 });
+
+// --- 1.6 security events (#734, whitepaper A04.FR.01/02) -------------------
+// With SecurityProfile >= 1 the station reports its startup and resets.
+const profile1 = (cp: {
+  configuration: { applyChange: (k: string, v: string) => unknown };
+}) => void cp.configuration.applyChange("SecurityProfile", "1");
+const resetCase = (type: "Soft" | "Hard") => async (r: Rig) => {
+  await r.csms.call("Reset", { type });
+  await r.csms.waitForCall("BootNotification", { nth: 2, timeoutMs: 30000 });
+  await wait(300);
+  await settle(r);
+};
+// A Reset ends with the boot, then ResetOrReboot, then StartupOfTheDevice.
+c16("reset-soft-security-events", resetCase("Soft"), {
+  beforeConnect: profile1,
+});
+c16("reset-hard-security-events", resetCase("Hard"), {
+  beforeConnect: profile1,
+});
+// A reconnect after a dropped socket, and an accepted TriggerMessage of a
+// BootNotification, do not report a device startup that did not happen.
+c16(
+  "reconnect-no-startup-event",
+  async (r) => {
+    r.csms.dropConnection();
+    await r.csms.waitForCall("BootNotification", { nth: 2, timeoutMs: 30000 });
+    await wait(300);
+    await r.csms.call("TriggerMessage", {
+      requestedMessage: "BootNotification",
+    });
+    await r.csms.waitForCall("BootNotification", { nth: 3, timeoutMs: 30000 });
+    await wait(300);
+    await settle(r);
+  },
+  { beforeConnect: profile1 },
+);
+// A critical event raised while disconnected is delivered after the next
+// Accepted boot with the timestamp it was raised with.
+c16(
+  "security-event-queued-offline",
+  async (r) => {
+    r.cp.disconnect();
+    await wait(200);
+    const raisedAt = Date.now();
+    await r.cp.sendSecurityEventNotification(
+      "TamperDetectionActivated",
+      "case",
+    );
+    // A non-critical type is not kept.
+    await r.cp.sendSecurityEventNotification("InvalidMessages", "case");
+    await wait(1200);
+    await r.connectAndBoot();
+    await wait(300);
+    const sent = r.csms.frames.find(
+      (f) =>
+        f.dir === "CP>" &&
+        f.action === "SecurityEventNotification" &&
+        (f.payload as { type?: string }).type === "TamperDetectionActivated",
+    );
+    const stamp = Date.parse(
+      (sent?.payload as { timestamp?: string }).timestamp ?? "",
+    );
+    if (!(stamp >= raisedAt - 1000 && stamp <= raisedAt + 500)) {
+      throw new Error(
+        `the queued event lost its timestamp (${stamp} vs ${raisedAt})`,
+      );
+    }
+    await settle(r);
+  },
+  { beforeConnect: profile1 },
+);

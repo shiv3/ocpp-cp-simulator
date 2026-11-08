@@ -76,6 +76,7 @@ import ConnectorTabs from "./ConnectorTabs";
 import CpLabelsCard from "./CpLabelsCard";
 import ScenarioCard from "./ScenarioCard";
 import TransactionsTab from "./TransactionsTab";
+import ConfigurationKeysTab from "./ConfigurationKeysTab";
 import { useCpConfigActions } from "../dashboard/useCpConfigActions";
 import { useChargePointLabels } from "./useChargePointLabels";
 import { NetworkSimEditor } from "../../components/network-sim/NetworkSimEditor";
@@ -95,6 +96,7 @@ type Section =
   | "events"
   | "analysis"
   | "diagnostics"
+  | "configuration"
   | "expert"
   | "network";
 
@@ -105,6 +107,7 @@ const SECTIONS: ReadonlyArray<{ value: Section; labelKey: MessageKey }> = [
   { value: "events", labelKey: "cp.section.events" },
   { value: "analysis", labelKey: "cp.section.analysis" },
   { value: "diagnostics", labelKey: "cp.section.diagnostics" },
+  { value: "configuration", labelKey: "cp.section.configuration" },
   { value: "expert", labelKey: "cp.section.expert" },
   { value: "network", labelKey: "cp.section.network" },
 ];
@@ -977,6 +980,12 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
                 hint={t("cp.page.diagramUnavailableHint")}
               />
             )}
+          </section>
+        )}
+
+        {section === "configuration" && (
+          <section>
+            <ConfigurationKeysTab cpId={cpId} />
           </section>
         )}
 

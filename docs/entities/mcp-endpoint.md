@@ -1,7 +1,7 @@
 ---
 title: MCP endpoint (`POST /mcp`)
 type: entity
-summary: Stateless, tools-only Model Context Protocol endpoint served by the daemon so MCP clients such as Claude Code can drive the simulator; 35 curated tools + 3 network-sim tools + a generic escape hatch.
+summary: Stateless, tools-only Model Context Protocol endpoint served by the daemon so MCP clients such as Claude Code can drive the simulator; 37 curated tools + 3 network-sim tools + a generic escape hatch.
 sources:
   - apps/cli/src/server/mcp/tools.ts
   - apps/cli/src/server/__tests__/mcp.test.ts
@@ -18,7 +18,7 @@ related:
   - ../concepts/operational-timeline.md
   - ../concepts/charging-sessions.md
   - ../concepts/local-authorization.md
-updated: 2026-11-07
+updated: 2026-11-08
 ---
 
 # MCP endpoint (`POST /mcp`)
@@ -42,7 +42,7 @@ claude mcp add --transport http ocpp-sim http://127.0.0.1:9700/mcp \
 
 ## Curated Tools
 
-The endpoint exposes 35 curated tools wrapping the daemon's
+The endpoint exposes 37 curated tools wrapping the daemon's
 [RPC methods](../concepts/control-plane.md):
 
 | Tool                          | RPC Method                    | Params                                                                                                                                                                                                                                                                                                                                                                               |
@@ -82,6 +82,8 @@ The endpoint exposes 35 curated tools wrapping the daemon's
 | `get_logs`                    | `logs.get`                    | `cpId`, `limit?`, `offset?`, `order?` — `limit` takes the most recent N ([Log windowing](../concepts/log-format.md#log-windowing))                                                                                                                                                                                                                                                   |
 | `get_timeline`                | `timeline.get`                | `cpId`, `connectorId?`, `runId?`, `incidentId?`, `kinds?`, `limit?`, `offset?`, `order?` — the [operational timeline](../concepts/operational-timeline.md), windowed like `get_logs` (#448)                                                                                                                                                                                          |
 | `list_charging_sessions`      | `sessions.list`               | `cpId`, `connectorId?`, `outcomes?`, `limit?` (default 50), `offset?`, `order?` — the [charging sessions](../concepts/charging-sessions.md), newest first by default (#447)                                                                                                                                                                                                          |
+| `get_config_keys`             | `cp.config_keys.get`          | `cpId`, `keys?` — the OCPP [configuration keys](../concepts/control-plane.md#configuration-keys-612) of a running charge point; a write-only value is returned empty (#612)                                                                                                                                                                                                          |
+| `set_config_key`              | `cp.config_keys.set`          | `cpId`, `key`, `value` — write one key; `not_found` for an unknown key, `invalid_params` for a read-only key or a refused value (#612)                                                                                                                                                                                                                                               |
 
 Most of these tools hand-declare a copy of their method's fields rather than
 deriving it (`cp_create` / `cp_create_many`, `cp_list`, `cp_labels_set` and
@@ -89,7 +91,7 @@ deriving it (`cp_create` / `cp_create_many`, `cp_list`, `cp_labels_set` and
 [cp.create parameters](../concepts/control-plane.md#cpcreate-parameters)), so
 a field the method later gains, or an optional field the tool over-tightened
 to required, could silently drift out of reach of an MCP agent (#284, #299).
-`get_timeline` and `list_charging_sessions` sit in between: they list their
+`get_timeline`, `list_charging_sessions`, `get_config_keys` and `set_config_key` sit in between: they list their
 fields by hand but take each field's schema from the method's, so a field
 cannot be over-tightened, while a field the method gains still has to be added.
 `mcpToolSchemaParity.test.ts` guards against both directions for every

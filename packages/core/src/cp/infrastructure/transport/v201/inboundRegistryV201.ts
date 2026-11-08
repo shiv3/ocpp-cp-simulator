@@ -15,6 +15,7 @@ import type {
   GetVariablesRequestV201,
   HeartbeatRequestV201,
   MeterValuesRequestV201,
+  NotifyCustomerInformationRequestV201,
   NotifyReportRequestV201,
   ReportChargingProfilesRequestV201,
   ClearVariableMonitoringRequestV201,
@@ -83,7 +84,6 @@ import {
 import {
   handleClearDisplayMessageAckV201,
   handleCostUpdatedAckV201,
-  handleCustomerInformationAckV201,
   handleDataTransferAckV201,
   handleGetDisplayMessagesAckV201,
   handleGetLocalListVersionAckV201,
@@ -129,6 +129,7 @@ import {
   handleGetCompositeScheduleV201,
   handleSetChargingProfileV201,
 } from "./smartChargingV201";
+import { handleCustomerInformationV201 } from "./customerInformationV201";
 
 export type V201Action =
   | "BootNotification"
@@ -139,6 +140,8 @@ export type V201Action =
   | "Authorize"
   | "DataTransfer"
   | "NotifyReport"
+  // #602: N09 report answering CustomerInformation.
+  | "NotifyCustomerInformation"
   // #457: N02 report answering GetMonitoringReport.
   | "NotifyMonitoringReport"
   // #457: N07 variable-monitor events.
@@ -162,6 +165,7 @@ export type V201RequestPayload =
   | AuthorizeRequestV201
   | DataTransferRequestV201
   | NotifyReportRequestV201
+  | NotifyCustomerInformationRequestV201
   | NotifyMonitoringReportPayload
   | NotifyEventPayload
   | ReportChargingProfilesRequestV201
@@ -528,7 +532,7 @@ export function buildV201InboundRegistry(): V201InboundRegistry {
       "CustomerInformation",
       {
         validate: isValidCustomerInformationRequestV201,
-        handle: handleCustomerInformationAckV201,
+        handle: handleCustomerInformationV201,
       },
     ],
     [

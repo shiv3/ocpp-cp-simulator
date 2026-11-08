@@ -8,6 +8,7 @@ import { clearTimeout, setTimeout } from "k6/timers";
 import { BehaviorHost, type CannedResponses } from "./behaviorHost.ts";
 import type { Behavior } from "./behaviorTypes.ts";
 import { OcppChargePoint } from "./ocppClient.ts";
+import { DEFAULT_DURATIONS } from "./profiles.ts";
 import type { CpIdentity, Wire } from "./types.ts";
 
 /** An iteration with no `main` and no RUN_FOR_MS serves CALLs this long. */
@@ -79,6 +80,13 @@ export function identitiesOfVu(
   return out;
 }
 
+/** The length of a constant-vus run: DURATION, else the profile's default. */
+function runDurationMs(env: Record<string, string | undefined>): number | null {
+  const profile = env.PROFILE ?? "steady";
+  if (profile === "spike") return null;
+  return parseDurationMs(env.DURATION ?? DEFAULT_DURATIONS[profile]);
+}
+
 /** When the iteration has to start stopping (epoch ms), or null for "when the
  *  mains are done". */
 export function stopAtMs(
@@ -99,14 +107,21 @@ export function stopAtMs(
   }
   // constant-vus profiles end at DURATION: stop in time for k6's own
   // gracefulStop never to be needed.
-  if ((env.PROFILE ?? "steady") !== "spike") {
-    const duration = parseDurationMs(env.DURATION ?? undefined);
-    if (duration !== null) {
-      candidates.push(scenarioStartMs + duration - STOP_MARGIN_MS);
-    }
+  const duration = runDurationMs(env);
+  if (duration !== null) {
+    candidates.push(scenarioStartMs + duration - STOP_MARGIN_MS);
   }
-  if (candidates.length === 0) return hasMain ? null : nowMs + DEFAULT_HOLD_MS;
-  return Math.min(...candidates);
+  // Without a main and without a length of its own, the iteration serves CALLs
+  // for DEFAULT_HOLD_MS (a profile's default end is far away); an explicit
+  // DURATION is the length asked for.
+  if (
+    !hasMain &&
+    (env.RUN_FOR_MS ?? "") === "" &&
+    parseDurationMs(env.DURATION ?? undefined) === null
+  ) {
+    candidates.push(nowMs + DEFAULT_HOLD_MS);
+  }
+  return candidates.length === 0 ? null : Math.min(...candidates);
 }
 
 export interface BehaviorRunResult {
@@ -126,16 +141,14 @@ export async function runBehaviorIteration(
   const problems: string[] = [];
   // The last seconds of a constant-vus run: k6 would loop through
   // connect-and-stop iterations until the end. Wait it out instead.
-  if ((opts.env.PROFILE ?? "steady") !== "spike") {
-    const duration = parseDurationMs(opts.env.DURATION ?? undefined);
-    if (duration !== null) {
-      const end = exec.scenario.startTime + duration;
-      if (Date.now() >= end - STOP_MARGIN_MS) {
-        await new Promise<void>((resolve) => {
-          setTimeout(resolve, Math.max(0, end - Date.now()));
-        });
-        return { ok: true, skipped: true, problems };
-      }
+  const duration = runDurationMs(opts.env);
+  if (duration !== null) {
+    const end = exec.scenario.startTime + duration;
+    if (Date.now() >= end - STOP_MARGIN_MS) {
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, Math.max(0, end - Date.now()));
+      });
+      return { ok: true, skipped: true, problems };
     }
   }
   const cps = ids.map(
@@ -148,6 +161,20 @@ export async function runBehaviorIteration(
       }),
   );
   const hosts: BehaviorHost[] = [];
+  // Every host is attached before its socket opens: the BootNotification
+  // passes `beforeSend`, and its answer reaches `callResult`.
+  const attached = cps.map((cp) => {
+    const host = new BehaviorHost({
+      cp,
+      behaviors: opts.behaviors,
+      timers,
+      seed,
+      ...(opts.canned === undefined ? {} : { canned: opts.canned }),
+      log: (m) => log(`[${cp.cpId}] ${m}`),
+    });
+    host.attach();
+    return host;
+  });
   try {
     const connected = await Promise.all(
       cps.map((cp) =>
@@ -162,16 +189,11 @@ export async function runBehaviorIteration(
         ),
       ),
     );
-    cps.forEach((cp, i) => {
-      if (!connected[i]) return;
-      const host = new BehaviorHost({
-        cp,
-        behaviors: opts.behaviors,
-        timers,
-        seed,
-        ...(opts.canned === undefined ? {} : { canned: opts.canned }),
-        log: (m) => log(`[${cp.cpId}] ${m}`),
-      });
+    attached.forEach((host, i) => {
+      if (!connected[i]) {
+        void host.stop(0);
+        return;
+      }
       host.start();
       hosts.push(host);
     });
@@ -200,6 +222,8 @@ export async function runBehaviorIteration(
           }),
         );
       }
+      // A connection the CSMS drops ends the iteration (and fails it).
+      for (const host of hosts) waits.push(host.whenClosed());
       await Promise.race(waits);
       clearTimeout(id);
     }
@@ -212,6 +236,7 @@ export async function runBehaviorIteration(
         problems.push(`main of "${id}" did not stop in time`);
     }
     for (const cp of cps) cp.close();
+    for (const host of hosts) problems.push(...host.problems);
   }
   return { ok: problems.length === 0, skipped: false, problems };
 }

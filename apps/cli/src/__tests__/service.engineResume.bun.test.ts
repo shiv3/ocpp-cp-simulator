@@ -22,6 +22,7 @@ interface Privates {
   _chargePoint: {
     connectors: Map<number, Connector>;
     engine: {
+      bootAccepted(): void;
       state: {
         connectors: Record<string, { status: string; transaction: unknown }>;
       };
@@ -90,6 +91,10 @@ describe("engine state across a restart", () => {
     expect(resumed).toEqual([]);
     svc.reconcileChargingSessions();
     svc.resumeEngine();
+    // onResume waits for the CSMS to accept the boot: the gate refuses a send
+    // before that.
+    expect(resumed).toEqual([]);
+    cp.engine.bootAccepted();
 
     const record = cp.engine.state.connectors["1"];
     expect(record.status).toBe("Charging");

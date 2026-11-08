@@ -35,6 +35,8 @@ export interface CLIOptions {
   readonly useBehaviors?: readonly string[];
   /** `--watch-behaviors`: reload a behavior file when it changes. */
   readonly watchBehaviors?: boolean;
+  /** `--allow-behavior-reload`: the daemon answers the `behavior.reload` method. */
+  readonly allowBehaviorReload?: boolean;
   readonly wsUrl: string;
   readonly cpId: string | null;
   /**

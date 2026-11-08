@@ -139,6 +139,12 @@ export interface ServerOptions {
   readonly behaviors?: BehaviorLibrary | readonly Behavior[];
   /** `--watch-behaviors`: reload a behavior file when it changes. */
   readonly watchBehaviors?: boolean;
+  /**
+   * `--allow-behavior-reload`: answer `behavior.reload` without watching. The
+   * method also works with {@link watchBehaviors}. Otherwise it is refused: new
+   * code enters a running daemon only when the operator asked for it.
+   */
+  readonly allowBehaviorReload?: boolean;
   readonly allowBehaviorCode?: boolean;
   readonly autoConnect: boolean;
   readonly startupScenario: {
@@ -323,6 +329,8 @@ export async function startServer(
   // --watch-behaviors: the registry's library re-reads the files given at
   // start when one changes; the registry applies the new version to every
   // charge point running it.
+  registry.library.rpcReloadAllowed =
+    opts.allowBehaviorReload === true || opts.watchBehaviors === true;
   const stopBehaviorWatch =
     opts.watchBehaviors && registry.library.size > 0
       ? registry.library.watch()
@@ -718,6 +726,25 @@ export async function startServer(
         `Bootstrap matches restored CP "${init.cpId}"; reusing` +
           labelsNotAppliedNote(init.labels, existing.getInit().labels),
       );
+      // `--use-behavior` names the selection of this run: it replaces the
+      // stored one, the way `cp.behaviors.set` would.
+      const wanted = init.behaviors;
+      if (
+        wanted &&
+        JSON.stringify([...wanted].sort()) !==
+          JSON.stringify([...existing.behaviorIds()].sort())
+      ) {
+        try {
+          registry.setBehaviors(init.cpId, wanted);
+          serverLog(
+            `CP "${init.cpId}": --use-behavior ${wanted.join(", ")} replaces its stored behavior selection`,
+          );
+        } catch (error) {
+          serverLog(
+            `CP "${init.cpId}" keeps its behaviors; --use-behavior ${wanted.join(", ")} was not applied: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
     } else {
       serverLog(`Bootstrapped CP "${init.cpId}"`);
     }

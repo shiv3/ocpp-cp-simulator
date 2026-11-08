@@ -79,7 +79,10 @@ import {
   SOAP_CHARGE_POINT_SERVICE_ROUTE,
 } from "../soapPath";
 import { appVersion } from "../appVersion";
-import { UnknownBehaviorError } from "../behavior/BehaviorLibrary";
+import {
+  BehaviorNotLoadableError,
+  UnknownBehaviorError,
+} from "../behavior/BehaviorLibrary";
 import { OcppSecurityProfileConfigError } from "@ocpp-cp-sim/core/cp/infrastructure/transport/wsUrlWithBasic";
 import { ScenarioRunStateError } from "@ocpp-cp-sim/core/cp/domain/errors/ScenarioRunStateError";
 import {
@@ -1122,6 +1125,18 @@ async function setCpBehaviors(
   return { cpId: params.cpId, behaviors };
 }
 
+/** The result schema holds 1000 entries; a large fleet can refuse more. */
+const MAX_RELOAD_FAILURES = 1000;
+
+function capFailures(failures: readonly string[]): string[] {
+  const text = (m: string): string => m.slice(0, 60_000);
+  if (failures.length <= MAX_RELOAD_FAILURES) return failures.map(text);
+  return [
+    ...failures.slice(0, MAX_RELOAD_FAILURES - 1).map(text),
+    `... and ${failures.length - (MAX_RELOAD_FAILURES - 1)} more charge points kept the old version`,
+  ];
+}
+
 /**
  * `behavior.reload`: re-read the files given at start. It takes no parameters,
  * so neither a path nor code can come from the caller.
@@ -1129,6 +1144,12 @@ async function setCpBehaviors(
 async function reloadBehaviors(
   deps: RuntimeSocketIoDeps,
 ): Promise<Result<"behavior.reload">> {
+  if (!deps.registry.library.rpcReloadAllowed) {
+    throw new RpcFailure(
+      "unavailable",
+      "behavior.reload is off: start the daemon with --watch-behaviors or --allow-behavior-reload to let it re-read the --behavior files",
+    );
+  }
   const files = await deps.registry.library.reload();
   return {
     files: files.map((f) => ({
@@ -1138,7 +1159,7 @@ async function reloadBehaviors(
       unchanged: f.unchanged,
       ...(f.error === undefined ? {} : { error: f.error.slice(0, 60_000) }),
       applied: f.applied,
-      failures: f.failures.map((m) => m.slice(0, 60_000)),
+      failures: capFailures(f.failures),
     })),
   };
 }
@@ -2452,7 +2473,10 @@ export function classifyFacadeError(err: unknown): RpcFailure | null {
   }
   // An id in `behaviors` that names no loaded behavior; the message lists
   // the loaded ids.
-  if (err instanceof UnknownBehaviorError) {
+  if (
+    err instanceof UnknownBehaviorError ||
+    err instanceof BehaviorNotLoadableError
+  ) {
     return new RpcFailure("invalid_params", err.message);
   }
   // #458: a set_ev_settings patch that would remove a required field.

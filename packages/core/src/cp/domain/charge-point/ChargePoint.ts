@@ -2162,6 +2162,8 @@ export class ChargePoint {
     // messages now that the boot gate is open. Run via queueMicrotask so
     // any post-boot StatusNotification fan-out goes first.
     queueMicrotask(() => this._outbox.flushPendingQueue());
+    // After the post-boot status fan-out, and with the gate already open.
+    queueMicrotask(() => this.engine.bootAccepted());
   }
 
   markBootPending(): void {

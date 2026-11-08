@@ -74,7 +74,8 @@ describe("stopAtMs", () => {
   });
   it("holds a behavior with no main, and lets mains end the others", () => {
     expect(stopAtMs({}, 1000, 0, false)).toBe(1000 + DEFAULT_HOLD_MS);
-    expect(stopAtMs({}, 1000, 0, true)).toBeNull();
+    // No DURATION: the profile's default (steady 5m) is the end of the run.
+    expect(stopAtMs({}, 1000, 0, true)).toBe(5 * 60_000 - 2000);
     expect(() => stopAtMs({ RUN_FOR_MS: "1.5" }, 0, 0, true)).toThrow(
       /RUN_FOR_MS/,
     );

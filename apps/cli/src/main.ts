@@ -228,6 +228,7 @@ export function parseArgs(argv: string[]): CLIOptions {
   const behaviorFiles: string[] = [];
   const useBehaviors: string[] = [];
   let watchBehaviors = false;
+  let allowBehaviorReload = false;
   let allowBehaviorCode = false;
   let serveStatic: string | null = null;
   // --web-console: enabled flag + optional explicit port. When the port is
@@ -474,6 +475,9 @@ export function parseArgs(argv: string[]): CLIOptions {
         break;
       case "--watch-behaviors":
         watchBehaviors = true;
+        break;
+      case "--allow-behavior-reload":
+        allowBehaviorReload = true;
         break;
       case "--cors-origin":
         if (!next || next.startsWith("--")) {
@@ -1053,6 +1057,7 @@ export function parseArgs(argv: string[]): CLIOptions {
     unsafeRemote,
     useBehaviors,
     watchBehaviors,
+    allowBehaviorReload,
   });
   if (behaviorProblem) {
     process.stderr.write(`${behaviorProblem}\n`);
@@ -1063,11 +1068,12 @@ export function parseArgs(argv: string[]): CLIOptions {
     (behaviorFiles.length > 0 ||
       allowBehaviorCode ||
       useBehaviors.length > 0 ||
-      watchBehaviors)
+      watchBehaviors ||
+      allowBehaviorReload)
   ) {
     process.stderr.write(
       "Error: --behavior, --allow-behavior-code, --use-behavior and " +
-        "--watch-behaviors apply to a running charge point, not to " +
+        "--watch-behaviors and --allow-behavior-reload apply to a running charge point, not to " +
         "--send / --stop / --events\n",
     );
     process.exit(1);
@@ -1190,6 +1196,7 @@ export function parseArgs(argv: string[]): CLIOptions {
     allowBehaviorCode,
     useBehaviors,
     watchBehaviors,
+    allowBehaviorReload,
     corsOrigins,
     trustForwardedHeaders,
     serveStatic,
@@ -1362,12 +1369,22 @@ Options:
                            directory) changes: new calls use the new code,
                            exchanges in flight finish on the old one, ctx.state
                            stays. A file that does not build keeps the old
-                           version. Daemon: also the behavior.reload method.
+                           version. Daemon: also enables the behavior.reload
+                           method.
+  --allow-behavior-reload  Daemon only: answer the behavior.reload method
+                           (re-reads the --behavior files, runs their code)
+                           without watching them. Without this flag or
+                           --watch-behaviors the method is refused and new
+                           code enters only at start.
   --cors-origin <origin>   Restrict CORS to this origin (repeatable). Pass "*"
                            for open CORS. Default: open on a loopback bind;
                            same-origin-only when bound to a non-loopback host
                            (0.0.0.0 / LAN) so cross-site browser calls are
-                           rejected.
+                           rejected, and also same-origin-only with
+                           --allow-behavior-code, on any bind (a page in
+                           your browser must not drive a daemon that runs
+                           code; a web console on another origin then needs
+                           --cors-origin <its origin>).
   --trust-forwarded-headers
                            With the same-origin default, also accept the
                            public origin a reverse proxy reports via
@@ -1546,6 +1563,18 @@ function resolveCorsPolicy(
     return { kind: "allowlist", origins: [...options.corsOrigins] };
   }
   const host = options.httpHost;
+  if (options.allowBehaviorCode) {
+    process.stderr.write(
+      "[server] --allow-behavior-code: applying same-origin-only CORS, so a " +
+        "page from another origin cannot call /socket.io or /mcp. A web " +
+        "console served from another origin needs `--cors-origin <origin>`; " +
+        '`--cors-origin "*"` opens it again.\n',
+    );
+    return {
+      kind: "same-origin",
+      trustForwardedHeaders: options.trustForwardedHeaders,
+    };
+  }
   if (isLoopbackHost(host)) return { kind: "any" };
   if (!options.trustForwardedHeaders) {
     process.stderr.write(
@@ -1786,6 +1815,7 @@ async function main(): Promise<void> {
     await startServer({
       behaviors,
       watchBehaviors: options.watchBehaviors,
+      allowBehaviorReload: options.allowBehaviorReload,
       allowBehaviorCode: options.allowBehaviorCode,
       httpPort: options.httpPort,
       httpHost: options.httpHost,

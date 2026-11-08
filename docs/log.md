@@ -2,7 +2,7 @@
 title: Log
 type: log
 summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
-updated: 2026-11-07
+updated: 2026-11-08
 ---
 
 # Log
@@ -2350,3 +2350,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - [Testing strategy → Golden wire test](analyses/testing-strategy.md#golden-wire-test): what normalization hides (exhaustively), the 175 regression cases recorded on ca01d302, strict cases, raw frames, the harness checks (orphan fixture, pinned template set, per-server URL token); the case counts were wrong (157 cases plus the uniqueness test, not 158 cases).
 - [Charger engine design](analyses/charger-engine.md#status-review-fixes-1-core-regressions): default follow-ups across a close (rule 4 against ca01d302), cut-off contexts, `after` and undelivered answers, reload rank, ids, `extend` without a default, spelling on 1.6, the connector of a 2.x CALL, hook payloads, persistence timing, `ctx.state` read-only, one `beforeSend` rule for both versions, what virtual time covers.
+
+## [2026-11-08] ingest | Review fixes 2: CLI, daemon, persistence, security, k6 (charger engine)
+
+- [Charger engine design](analyses/charger-engine.md#status-review-fixes-2-cli-daemon-persistence-security-k6): checked-before-written selections and restore that never stops the daemon, opt-in `behavior.reload`, same-origin CORS with `--allow-behavior-code`, all-or-nothing reload, `onResume` after boot, k6 host parity, source-check limits; new "Review" section and re-run verification table.
+- [Control plane](concepts/control-plane.md#behaviors), [State persistence](concepts/state-persistence.md), [Access control](concepts/access-control.md#cors), [CLI](entities/cli.md), [Daemon](entities/daemon.md): `--allow-behavior-reload`, restore and selection rules, resume timing, CORS row.

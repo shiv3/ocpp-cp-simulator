@@ -56,6 +56,7 @@ export type UseKind =
   | "crypto.randomUUID"
   | "crypto.getRandomValues"
   | "setTimeout"
+  | "setImmediate"
   | "setInterval"
   | "clearTimeout"
   | "clearInterval";
@@ -83,7 +84,108 @@ const GLOBAL_TIMERS = new Set([
   "clearInterval",
 ]);
 
-/** The direct clock / randomness uses in one source text. */
+/** Names that are one object whatever global object they hang from. */
+function globalName(expression: ts.Expression): string | null {
+  if (ts.isIdentifier(expression)) return expression.text;
+  if (
+    ts.isPropertyAccessExpression(expression) &&
+    ts.isIdentifier(expression.expression) &&
+    GLOBAL_OBJECTS.has(expression.expression.text)
+  ) {
+    return expression.name.text;
+  }
+  return null;
+}
+
+/** `x.name` and `x["name"]`. */
+function memberOf(
+  node: ts.Node,
+): { object: ts.Expression; name: string } | null {
+  if (ts.isPropertyAccessExpression(node)) {
+    return { object: node.expression, name: node.name.text };
+  }
+  if (
+    ts.isElementAccessExpression(node) &&
+    ts.isStringLiteralLike(node.argumentExpression)
+  ) {
+    return { object: node.expression, name: node.argumentExpression.text };
+  }
+  return null;
+}
+
+/** Is this identifier a value being read, not a name being declared or a type? */
+function isValueReference(id: ts.Identifier): boolean {
+  const p = id.parent;
+  if (ts.isPropertyAccessExpression(p) && p.name === id) return false;
+  if (
+    (ts.isPropertyAssignment(p) ||
+      ts.isMethodDeclaration(p) ||
+      ts.isPropertyDeclaration(p) ||
+      ts.isPropertySignature(p) ||
+      ts.isMethodSignature(p) ||
+      ts.isParameter(p) ||
+      ts.isVariableDeclaration(p) ||
+      ts.isFunctionDeclaration(p) ||
+      ts.isClassDeclaration(p) ||
+      ts.isBindingElement(p) ||
+      ts.isEnumMember(p)) &&
+    p.name === id
+  ) {
+    return false;
+  }
+  if (ts.isBindingElement(p) && p.propertyName === id) return false;
+  if (
+    ts.isImportSpecifier(p) ||
+    ts.isExportSpecifier(p) ||
+    ts.isTypeReferenceNode(p) ||
+    ts.isTypeQueryNode(p) ||
+    ts.isQualifiedName(p) ||
+    ts.isExpressionWithTypeArguments(p)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * `Date` used as a value that can reach `Date.now`: not `Date.x`, `new Date(...)`,
+ * `x instanceof Date` or a call (those are handled, or are not clock reads).
+ */
+function isLoneDateReference(id: ts.Identifier): boolean {
+  const p = id.parent;
+  if (ts.isPropertyAccessExpression(p) && p.expression === id) return false;
+  if (ts.isElementAccessExpression(p) && p.expression === id) return false;
+  if (ts.isNewExpression(p) || ts.isCallExpression(p)) {
+    return p.expression !== id; // an argument: `defer(Date)`
+  }
+  if (ts.isBinaryExpression(p)) {
+    return p.operatorToken.kind === ts.SyntaxKind.EqualsToken && p.right === id;
+  }
+  return !ts.isTypeOfExpression(p);
+}
+
+const OTHER_CLOCK_MEMBERS: ReadonlyArray<[string, string, UseKind]> = [
+  ["Date", "now", "Date.now"],
+  ["performance", "now", "performance.now"],
+  ["Math", "random", "Math.random"],
+  ["crypto", "randomUUID", "crypto.randomUUID"],
+  ["crypto", "getRandomValues", "crypto.getRandomValues"],
+];
+
+/**
+ * The direct clock / randomness uses in one source text.
+ *
+ * Seen, besides the plain calls: the same through `globalThis` / `window` /
+ * `self` / `global` (`globalThis.Date.now()`), through `x["now"]`, by
+ * reference (`[1].map(Math.random)`, `defer(setTimeout)`, `const t =
+ * setTimeout`, `setTimeout.call(...)`), `Date()` called as a function,
+ * `const { now } = Date`, `setImmediate`, `process.hrtime`, `Bun.sleep` and
+ * `Bun.nanoseconds`, and an import of `randomUUID` / `randomBytes` /
+ * `randomInt` from node:crypto or of node:timers/promises. Not seen: an alias
+ * that is passed through a function or a property (`const g = globalThis;
+ * g.Date.now()`), `eval`, and `new Function`. The check is a guard against the
+ * easy slip, not a proof.
+ */
 export function scanSource(fileName: string, text: string): Use[] {
   const source = ts.createSourceFile(
     fileName,
@@ -98,37 +200,89 @@ export function scanSource(fileName: string, text: string): Use[] {
       line:
         source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1,
     });
+  const counted = new Set<ts.Node>();
 
   const visit = (node: ts.Node): void => {
     if (ts.isNewExpression(node)) {
       if (
-        ts.isIdentifier(node.expression) &&
-        node.expression.text === "Date" &&
-        (node.arguments?.length ?? 0) === 0
+        globalName(node.expression) === "Date" &&
+        (node.arguments ?? []).every((a) => ts.isSpreadElement(a))
       ) {
         add(node, "new Date()");
+        counted.add(node.expression);
       }
     } else if (ts.isCallExpression(node)) {
       const callee = node.expression;
-      if (ts.isIdentifier(callee) && GLOBAL_TIMERS.has(callee.text)) {
-        add(node, callee.text as UseKind);
-      } else if (
-        ts.isPropertyAccessExpression(callee) &&
-        ts.isIdentifier(callee.expression)
-      ) {
-        const object = callee.expression.text;
-        const name = callee.name.text;
-        if (object === "Date" && name === "now") add(node, "Date.now");
-        else if (object === "performance" && name === "now") {
+      if (globalName(callee) === "Date") {
+        add(node, "new Date()"); // `Date()` is the current time as a string
+        counted.add(callee);
+      }
+    }
+    const member = memberOf(node);
+    if (member) {
+      const object = globalName(member.object);
+      if (object !== null) {
+        const hit = OTHER_CLOCK_MEMBERS.find(
+          ([o, n]) => o === object && n === member.name,
+        );
+        if (hit) {
+          add(node, hit[2]);
+          counted.add(member.object);
+        } else if (object === "process" && member.name === "hrtime") {
           add(node, "performance.now");
-        } else if (object === "Math" && name === "random") {
-          add(node, "Math.random");
-        } else if (object === "crypto" && name === "randomUUID") {
-          add(node, "crypto.randomUUID");
-        } else if (object === "crypto" && name === "getRandomValues") {
-          add(node, "crypto.getRandomValues");
-        } else if (GLOBAL_OBJECTS.has(object) && GLOBAL_TIMERS.has(name)) {
-          add(node, name as UseKind);
+        } else if (
+          object === "Bun" &&
+          (member.name === "sleep" || member.name === "nanoseconds")
+        ) {
+          add(node, "performance.now");
+        }
+      }
+      // `window.setTimeout(...)`, `globalThis["setTimeout"](...)`.
+      if (
+        ts.isIdentifier(member.object) &&
+        GLOBAL_OBJECTS.has(member.object.text) &&
+        GLOBAL_TIMERS.has(member.name)
+      ) {
+        add(node, member.name as UseKind);
+      }
+    } else if (ts.isIdentifier(node) && isValueReference(node)) {
+      if (GLOBAL_TIMERS.has(node.text)) {
+        add(node, node.text as UseKind);
+      } else if (node.text === "setImmediate") {
+        add(node, "setImmediate");
+      } else if (
+        node.text === "Date" &&
+        !counted.has(node) &&
+        isLoneDateReference(node)
+      ) {
+        // `const d = Date; d.now()`, `const { now } = Date`, `use(Date)`
+        add(node, "Date.now");
+      } else if (
+        (node.text === "Math" || node.text === "performance") &&
+        ts.isCallExpression(node.parent) &&
+        node.parent.arguments.includes(node)
+      ) {
+        add(node, node.text === "Math" ? "Math.random" : "performance.now");
+      }
+    }
+    if (
+      ts.isImportDeclaration(node) &&
+      ts.isStringLiteralLike(node.moduleSpecifier)
+    ) {
+      const from = node.moduleSpecifier.text.replace(/^node:/, "");
+      if (from === "timers/promises") add(node, "setTimeout");
+      if (from === "crypto") {
+        const named = node.importClause?.namedBindings;
+        if (named && ts.isNamedImports(named)) {
+          for (const el of named.elements) {
+            const name = (el.propertyName ?? el.name).text;
+            if (name === "randomUUID") add(el, "crypto.randomUUID");
+            else if (name === "randomBytes" || name === "randomInt") {
+              add(el, "crypto.getRandomValues");
+            } else if (name === "getRandomValues") {
+              add(el, "crypto.getRandomValues");
+            }
+          }
         }
       }
     }

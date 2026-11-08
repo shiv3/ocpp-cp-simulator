@@ -3,6 +3,12 @@
 // RAMP_DURATION tune it. Soak keeps each VU's connection alive after the
 // scenario (see the generated entry's cp.hold()).
 
+/** What DURATION defaults to for a constant-vus profile (spike has none of its own). */
+export const DEFAULT_DURATIONS: Readonly<Record<string, string>> = {
+  steady: "5m",
+  soak: "1h",
+};
+
 export function buildOptions(
   env: Record<string, string | undefined>,
 ): Record<string, unknown> {
@@ -18,7 +24,7 @@ export function buildOptions(
           steady: {
             executor: "constant-vus",
             vus,
-            duration: env.DURATION ?? "5m",
+            duration: env.DURATION ?? DEFAULT_DURATIONS.steady,
           },
         },
       };
@@ -45,7 +51,7 @@ export function buildOptions(
           soak: {
             executor: "constant-vus",
             vus,
-            duration: env.DURATION ?? "1h",
+            duration: env.DURATION ?? DEFAULT_DURATIONS.soak,
           },
         },
       };

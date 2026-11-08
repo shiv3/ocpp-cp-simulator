@@ -9,6 +9,7 @@ export interface BehaviorFlags {
   readonly unsafeRemote: boolean;
   readonly useBehaviors?: readonly string[];
   readonly watchBehaviors?: boolean;
+  readonly allowBehaviorReload?: boolean;
 }
 
 /** An error message, or null when the combination is allowed. */
@@ -43,6 +44,18 @@ export function behaviorFlagProblem(flags: BehaviorFlags): string | null {
     return (
       "Error: --watch-behaviors reloads the files given with --behavior; " +
       "no --behavior file was given."
+    );
+  }
+  if (flags.allowBehaviorReload && !flags.serverMode) {
+    return (
+      "Error: --allow-behavior-reload enables the daemon's behavior.reload " +
+      "method; it does nothing outside the daemon (use --watch-behaviors)."
+    );
+  }
+  if (flags.allowBehaviorReload && flags.behaviorFiles.length === 0) {
+    return (
+      "Error: --allow-behavior-reload reloads the files given with " +
+      "--behavior; no --behavior file was given."
     );
   }
   return null;

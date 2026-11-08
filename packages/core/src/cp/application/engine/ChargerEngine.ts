@@ -19,7 +19,8 @@ import type {
 } from "../../domain/connector/ConnectorRecord";
 import { isAllowedConnectorStatusTransition } from "../../domain/connector/ConnectorTransitions";
 import { OCPPStatus } from "../../domain/types/OcppTypes";
-import { isOcpp2Version, isSoapVersion } from "../../domain/types/OcppVersion";
+import { isOcpp2Version } from "../../domain/types/OcppVersion";
+import { behaviorFitProblem } from "./behaviorFit";
 import { LogType } from "../../shared/Logger";
 import type { SimClock, TimerHandle } from "../../shared/clock";
 import { csmsActionAliases } from "../../domain/types/csmsActionNames";
@@ -233,6 +234,9 @@ export class ChargerEngine {
    */
   private orphans: Record<string, Record<string, JsonValue>> = {};
   private persistListener: (() => void) | null = null;
+  private readonly lastGoodState: Record<string, Record<string, JsonValue>> =
+    Object.create(null) as Record<string, Record<string, JsonValue>>;
+  private readonly badState = new Set<string>();
 
   /**
    * The part of the state that survives a restart. A deep copy; throws if a
@@ -241,17 +245,41 @@ export class ChargerEngine {
   persistable(): PersistedEngineState {
     const { schema, firmware, signedFirmware, log, diagnostics, behaviors } =
       this._state;
-    // The built-in defaults keep no user data worth storing.
-    const user = Object.fromEntries(
-      Object.entries(behaviors).filter(([id]) => !id.startsWith("default.")),
-    );
+    // The built-in defaults keep no user data worth storing. Each behavior's
+    // entry is checked on its own: one that put something into `ctx.state` that
+    // is not JSON keeps its last saved value, and the rest of the station's
+    // state is stored all the same.
+    const user: Record<string, Record<string, JsonValue>> = {};
+    for (const [id, data] of Object.entries(behaviors)) {
+      if (id.startsWith("default.")) continue;
+      try {
+        assertJsonSerializable(data, `ctx.state of ${id}`);
+        user[id] = data;
+        this.lastGoodState[id] = JSON.parse(JSON.stringify(data)) as Record<
+          string,
+          JsonValue
+        >;
+        this.badState.delete(id);
+      } catch (error) {
+        if (!this.badState.has(id)) {
+          this.badState.add(id);
+          this.warn(
+            `Behavior ${id}: ${describe(error)}; its ctx.state keeps the last value that could be stored`,
+          );
+        }
+        const kept = this.lastGoodState[id];
+        if (kept) user[id] = kept;
+      }
+    }
+    // An entry still waiting to be adopted by a behavior that is loading is the
+    // stored one, not the empty object the load just created.
     const state = {
       schema,
       firmware,
       signedFirmware,
       log,
       diagnostics,
-      behaviors: { ...this.orphans, ...user },
+      behaviors: { ...user, ...this.orphans },
     };
     assertJsonSerializable(state);
     return JSON.parse(JSON.stringify(state)) as PersistedEngineState;
@@ -311,6 +339,11 @@ export class ChargerEngine {
       });
     }
     return true;
+  }
+
+  /** The loaded behavior with this id, if any. */
+  behaviorOf(id: string): Behavior | undefined {
+    return this.loaded.get(id);
   }
 
   /** Ids of the loaded code behaviors. */
@@ -830,19 +863,15 @@ export class ChargerEngine {
         );
       }
     }
-    if (behavior.beforeSend && isSoapVersion(this.host.ocppVersion)) {
-      throw new Error(
-        `Behavior ${behavior.id} uses beforeSend, which needs an OCPP-J station; ${this.host.ocppVersion} is SOAP`,
-      );
-    }
-    for (const capability of behavior.requires ?? []) {
-      const problem = this.unmet(capability);
-      if (problem) {
-        throw new Error(
-          `Behavior ${behavior.id} requires ${capability}: ${problem}`,
-        );
-      }
-    }
+    const host = this.host;
+    const problem = behaviorFitProblem(behavior, {
+      ocppVersion: this.host.ocppVersion,
+      // Read only when a `requires` asks for it.
+      get virtualTime() {
+        return "advanceBy" in host.clock;
+      },
+    });
+    if (problem) throw new Error(problem);
   }
 
   /**
@@ -1067,7 +1096,26 @@ export class ChargerEngine {
     return true;
   }
 
-  /** Run `onResume` of every loaded behavior; call it after state was restored. */
+  private resumeWaiting = false;
+
+  /**
+   * Run `onResume` once the CSMS has accepted the next BootNotification: the
+   * boot gate refuses everything else until then, so a `ctx.send` from
+   * `onResume` run any earlier would only be refused. Nothing is sent or
+   * changed by waiting.
+   */
+  resumeAfterBoot(): void {
+    this.resumeWaiting = true;
+  }
+
+  /** The station's boot was accepted: run the `onResume` that was waiting for it. */
+  bootAccepted(): void {
+    if (!this.resumeWaiting) return;
+    this.resumeWaiting = false;
+    this.resume();
+  }
+
+  /** Run `onResume` of every loaded behavior now; call it after state was restored. */
   resume(): void {
     for (const behavior of this.loaded.values()) {
       if (!behavior.onResume || this.dormant.has(behavior.id)) continue;
@@ -1075,22 +1123,6 @@ export class ChargerEngine {
       const scope = new Scope(behavior.id, false);
       this.resumeScopes.set(behavior.id, scope);
       this.runDetached(behavior.id, scope, (ctx) => behavior.onResume!(ctx));
-    }
-  }
-
-  private unmet(capability: BehaviorCapability): string | null {
-    const version = this.host.ocppVersion;
-    switch (capability) {
-      case "ocpp1.6":
-        return version === "OCPP-1.6J" ? null : `the station speaks ${version}`;
-      case "ocpp2.x":
-        return isOcpp2Version(version) ? null : `the station speaks ${version}`;
-      case "virtual-time":
-        return "advanceBy" in this.host.clock
-          ? null
-          : "the station runs on real time";
-      default:
-        return null;
     }
   }
 

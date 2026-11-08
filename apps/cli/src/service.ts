@@ -93,7 +93,10 @@ import { legacyGeneratedBaseId } from "@ocpp-cp-sim/core/cp/domain/persistence/l
 import { SqliteScenarioRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/SqliteScenarioRepository";
 import type { ScenarioRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/ScenarioRepository";
 import { SqliteEngineStateRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/EngineStateRepository";
-import { parsePersistedEngineState } from "@ocpp-cp-sim/core/cp/application/engine/ChargerState";
+import {
+  parsePersistedEngineState,
+  type PersistedEngineState,
+} from "@ocpp-cp-sim/core/cp/application/engine/ChargerState";
 import { SqliteConnectorRuntimeRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/SqliteConnectorRuntimeRepository";
 import type { ScenarioRunRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/ScenarioRunRepository";
 import { createScenarioRunRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/createScenarioRunRepository";
@@ -2804,6 +2807,10 @@ export class CLIChargePointService {
     // sessions open for the next start to reconcile.
     this._sessionRecorder.dispose();
     if (permanent) {
+      // The station is gone for good: a `main` that writes `ctx.state` while it
+      // stops must not bring the `engine_state` row back for the next station
+      // under this id.
+      this._chargePoint.engine.onPersist(null);
       this._chargePoint.dispose();
     } else {
       // #538: the periodic monitors keep their timers offline. Stopped
@@ -3196,6 +3203,16 @@ export class CLIChargePointService {
     for (const behavior of behaviors) this._chargePoint.loadBehavior(behavior);
   }
 
+  /** The engine state that survives a rebuild (see `ChargerEngine.persistable`). */
+  engineStateSnapshot(): PersistedEngineState {
+    return this._chargePoint.engine.persistable();
+  }
+
+  /** Put a {@link engineStateSnapshot} back, before behaviors load. */
+  restoreEngineState(saved: PersistedEngineState): void {
+    this._chargePoint.engine.restoreState(saved);
+  }
+
   /** Ids of the code behaviors loaded on this charge point, in load order. */
   behaviorIds(): string[] {
     return [...this._chargePoint.engine.behaviorIds];
@@ -3232,18 +3249,42 @@ export class CLIChargePointService {
     };
   }
 
-  /** Put a new version of a loaded behavior in its place (a reload). */
-  replaceBehavior(behavior: Behavior): void {
-    this._chargePoint.engine.replaceBehavior(behavior);
+  /**
+   * Put new versions of loaded behaviors in their place (a reload), all or
+   * none: each is checked before any is replaced, and if one still fails the
+   * ones already replaced go back to the version they had.
+   */
+  replaceBehaviors(next: readonly Behavior[]): void {
+    const engine = this._chargePoint.engine;
+    for (const behavior of next) engine.assertLoadable(behavior);
+    const done: Behavior[] = [];
+    try {
+      for (const behavior of next) {
+        const previous = engine.behaviorOf(behavior.id);
+        engine.replaceBehavior(behavior);
+        if (previous) done.push(previous);
+      }
+    } catch (error) {
+      for (const previous of done.reverse()) {
+        try {
+          engine.replaceBehavior(previous);
+        } catch {
+          // The old version ran here a moment ago; if it cannot be put back
+          // the original error is still the one to report.
+        }
+      }
+      throw error;
+    }
   }
 
   /**
-   * Run `onResume` of the loaded behaviors. Call it once, after
+   * Have the loaded behaviors' `onResume` run once the CSMS accepts the next
+   * BootNotification. Call it once, after
    * {@link restoreConnectorRuntimeFromDatabase} and
    * {@link reconcileChargingSessions}.
    */
   resumeEngine(): void {
-    this._chargePoint.engine.resume();
+    this._chargePoint.engine.resumeAfterBoot();
   }
 
   /**

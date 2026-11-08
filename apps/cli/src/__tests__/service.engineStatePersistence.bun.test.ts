@@ -17,6 +17,7 @@ const INIT: ChargePointInitOptions = {
 };
 
 interface Engine {
+  bootAccepted(): void;
   state: {
     firmware: { status: string; requestId: number | null };
     behaviors: Record<string, Record<string, unknown>>;
@@ -78,6 +79,7 @@ describe("engine state persistence", () => {
     });
     second.loadBehaviors([counter(seen)]);
     second.resumeEngine();
+    engineOf(second).bootAccepted();
     await new Promise((resolve) => setTimeout(resolve, 20));
     // onResume saw the stored state; main ran once more on top of it.
     expect(seen).toEqual([{ runs: 2 }]);

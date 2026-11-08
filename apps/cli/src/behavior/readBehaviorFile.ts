@@ -8,7 +8,10 @@ import { behaviorsOfModule } from "@ocpp-cp-sim/core/cp/application/engine/behav
 import { bundleBehavior } from "./bundleBehavior";
 
 export interface BehaviorFileContents {
+  /** Empty when `unchanged`: the module was not run. */
   readonly behaviors: Behavior[];
+  /** The bundle hashes to the `previousHash` the caller passed. */
+  readonly unchanged?: boolean;
   /** Hash of the bundle: equal for two reads of an unchanged file and its imports. */
   readonly hash: string;
 }
@@ -26,6 +29,12 @@ export interface BehaviorFileContents {
  */
 export async function readBehaviorFile(
   file: string,
+  options: {
+    /** When the new bundle hashes to this, the module is not run. */
+    readonly previousHash?: string;
+    /** How long the module's top level may take; it then counts as failed. */
+    readonly timeoutMs?: number;
+  } = {},
 ): Promise<BehaviorFileContents> {
   const bundled = await bundleBehavior(file, { mode: "load" });
   if (!bundled.ok) {
@@ -33,16 +42,33 @@ export async function readBehaviorFile(
       `Cannot load behavior ${file}:\n  ${bundled.problems.join("\n  ")}`,
     );
   }
+  const hash = createHash("sha256").update(bundled.code).digest("hex");
+  if (hash === options.previousHash) {
+    return { behaviors: [], unchanged: true, hash };
+  }
   const dir = mkdtempSync(path.join(tmpdir(), "ocpp-behavior-"));
   try {
     const out = path.join(dir, "behavior.mjs");
     writeFileSync(out, bundled.code);
-    const mod: unknown = await import(pathToFileURL(out).href);
-    return {
-      behaviors: behaviorsOfModule(file, mod),
-      hash: createHash("sha256").update(bundled.code).digest("hex"),
-    };
+    const mod = await withTimeout(
+      import(pathToFileURL(out).href) as Promise<unknown>,
+      options.timeoutMs ?? 10_000,
+      `Cannot load behavior ${file}: its top level did not finish in time (a top-level await that never settles?)`,
+    );
+    return { behaviors: behaviorsOfModule(file, mod), hash };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  message: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
+  });
+  return Promise.race([promise, late]).finally(() => clearTimeout(timer));
 }

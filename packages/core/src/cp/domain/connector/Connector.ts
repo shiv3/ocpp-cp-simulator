@@ -48,6 +48,7 @@ import {
   withoutNulls,
 } from "./EVSettings";
 import {
+  isScheduleInEffect,
   resolveEffectiveLimitWatts,
   resolveEffectivePhaseLimit,
 } from "./ChargingScheduleResolver";
@@ -111,6 +112,16 @@ export interface ActiveChargingProfile {
   recurrencyKind?: RecurrencyKindType;
   validFrom?: string; // ISO 8601 timestamp
   validTo?: string; // ISO 8601 timestamp
+  /**
+   * `chargingSchedule.startSchedule`: the instant an Absolute or Recurring
+   * schedule's `startPeriod` offsets count from (1.6 §7.13). Distinct from
+   * `validFrom`, which only bounds when the profile may apply.
+   */
+  startSchedule?: string; // ISO 8601 timestamp
+  /** `chargingSchedule.duration` in seconds: the schedule ends after it (per cycle for Recurring). */
+  duration?: number;
+  /** `chargingSchedule.minChargingRate`, kept so the profile round-trips. */
+  minChargingRate?: number;
   chargingSchedulePeriods: ChargingSchedulePeriod[];
 }
 
@@ -1097,10 +1108,13 @@ export class Connector {
   getActiveChargingProfile(
     now: Date = this.nowDate(),
   ): ActiveChargingProfile | null {
+    const txStart = this.transaction?.startTime ?? null;
     const isValid = (profile: ActiveChargingProfile) => {
       if (profile.validFrom && new Date(profile.validFrom) > now) return false;
       if (profile.validTo && new Date(profile.validTo) < now) return false;
-      return true;
+      // A schedule past its `duration` (or not yet at its `startSchedule`)
+      // yields to the next lower stackLevel (1.6 errata 3.43).
+      return isScheduleInEffect(profile, txStart, now);
     };
 
     // Tier 1: TxProfile on this connector wins outright (§3.13.3).

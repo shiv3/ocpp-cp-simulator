@@ -305,6 +305,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   private readonly _signBackoff: SignCertificateBackoff;
   private readonly _certificateSigning: V201CertificateSigning = {
     requestSignature: (use) => this.requestSignature(use),
+    requestCombinedSignature: () => this.sendSignCertificate(),
     certificateInstalled: (use) => {
       this._signBackoff.stop(use);
       if (V2G_CERTIFICATE_USES.includes(use)) {

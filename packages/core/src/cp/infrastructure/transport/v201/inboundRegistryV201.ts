@@ -184,6 +184,14 @@ export interface V201CertificateSigning {
    */
   requestSignature(use: SignedCertificateUse): Promise<void>;
   /**
+   * TriggerMessage SignCombinedCertificate (2.1 F06.FR.08, #553): a new
+   * CSR sent without `certificateType`, which asks for one certificate for
+   * both the CSMS connection and the 15118 connection. The simulator has no
+   * 15118 stack, so the chain that answers is its Charging Station
+   * certificate.
+   */
+  requestCombinedSignature(): Promise<void>;
+  /**
    * A chain for `use` was installed, the only thing that ends its CSR's
    * resend back-off (a rejected chain leaves it running, #537): for a V2G
    * certificate the station asks the CSMS for the OCSP status of the certificate and its sub-CAs

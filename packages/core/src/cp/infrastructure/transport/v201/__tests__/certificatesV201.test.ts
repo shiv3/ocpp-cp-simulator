@@ -413,6 +413,7 @@ describe.each(VERSIONS)(
           ...context(store, 10, maxChainSize).ctx,
           certificateSigning: {
             requestSignature: vi.fn(),
+            requestCombinedSignature: vi.fn(),
             certificateInstalled,
           },
         };

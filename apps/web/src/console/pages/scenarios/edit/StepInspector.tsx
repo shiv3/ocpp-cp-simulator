@@ -81,7 +81,7 @@ const StepInspector: React.FC<StepInspectorProps> = ({ node, onChange }) => {
   // the window width says nothing about where the inspector sits.
   return (
     <div data-testid="step-inspector" className="@container space-y-4">
-      <h2 className="text-base font-semibold text-cx-fg">{entry.title}</h2>
+      <h2 className="text-base font-semibold text-cx-fg">{t(entry.title)}</h2>
 
       <div className="grid grid-cols-1 gap-3 border-b border-cx-border pb-4 @lg:grid-cols-2">
         <TextField

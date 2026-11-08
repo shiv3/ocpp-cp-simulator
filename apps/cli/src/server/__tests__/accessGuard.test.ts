@@ -123,10 +123,11 @@ describe("Host allowlist", () => {
       trustedProxies: ["127.0.0.1"],
     });
     // DNS-rebinding page behind a stock proxy that passes Forwarded through.
-    for (const headers of [
+    const cases: Array<Record<string, string>> = [
       { host: "attacker.com", forwarded: "host=localhost" },
       { host: "attacker.com", "x-forwarded-host": "localhost" },
-    ]) {
+    ];
+    for (const headers of cases) {
       expect(
         g.check(req("http://attacker.com/", headers), "127.0.0.1").refuse,
       ).toMatchObject({ status: 403 });
@@ -233,10 +234,11 @@ describe("--require-tls", () => {
       requireTls: true,
       trustedProxies: ["10.0.0.0/8"],
     });
-    for (const headers of [
+    const cases: Array<Record<string, string>> = [
       { "x-forwarded-proto": "https, http", "x-forwarded-for": "203.0.113.9" },
       { forwarded: "proto=https, proto=http;for=203.0.113.9" },
-    ]) {
+    ];
+    for (const headers of cases) {
       expect(
         g.check(req("http://x/", headers), "10.0.0.1").refuse,
       ).toMatchObject({ status: 403, message: "TLS required" });

@@ -447,6 +447,10 @@ An `Inoperative` availability change scheduled during a transaction remains
 `Unavailable` after the accepted reboot and continues to reject new local
 transaction starts.
 
+## Units of 2.x meter value samples
+
+On OCPP 2.0.1 / 2.1 every sample in `MeterValues` and in a `TransactionEvent`'s `meterValue` carries `unitOfMeasure.unit`, except `Power.Factor`, which is unitless. Part 2 Appendices ch. 2 makes `Wh` the default of `unit`, so a sample without one reads as watt-hours: a 50 Hz `Frequency` sample used to be read as 50 Wh (#713). The unit comes from the measurand (`unitOfMeasurandV2x` in `MeterValueBuilder.ts`): `Hz` for `Frequency`, `A` for `Current.*`, `W` / `var` for `Power.Active.*` / `Power.Reactive.*`, `Wh` / `varh` / `VAh` for `Energy.Active.*` / `Energy.Reactive.*` / `Energy.Apparent.*`, `V`, `Percent` for `SoC`. The signed energy register reports `kWh`. OCPP 1.6 output is unchanged: 1.6 has no `Hz`, so `Frequency` stays without a unit there (errata 3.86).
+
 ## Clock-aligned meter values (`ClockAlignedDataInterval`)
 
 Every `ClockAlignedDataInterval` seconds a charge point sends one

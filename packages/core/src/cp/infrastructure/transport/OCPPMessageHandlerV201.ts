@@ -65,6 +65,7 @@ import {
 } from "../../domain/connector/Transaction";
 import {
   buildSampledValues,
+  unitOfMeasurandV2x,
   type MeterSampleOverrides,
   type ReadingContext,
   type SampledValue,
@@ -1603,20 +1604,27 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   private toV201SampledValues(
     sampledValues: SampledValue[],
   ): V201MeterValuesSampledValue[] {
-    return sampledValues.map((sv) => ({
-      value: Number(sv.value),
-      measurand: sv.measurand as V201MeterValuesSampledValue["measurand"],
-      unitOfMeasure: sv.unit ? { unit: sv.unit } : undefined,
-      ...(sv.context
-        ? { context: sv.context as V201MeterValuesSampledValue["context"] }
-        : {}),
-      // 2.0.1/2.1 SampledValueType carries `phase` (§2.36 / §2.44) — pass the
-      // builder's L1/L2/L3 tag through rather than letting a CSMS receive
-      // four indistinguishable samples per measurand (#301).
-      ...(sv.phase
-        ? { phase: sv.phase as V201MeterValuesSampledValue["phase"] }
-        : {}),
-    }));
+    return sampledValues.map((sv) => {
+      // #713: the unit of the measurand (Part 2 Appendices ch. 2) when the
+      // builder left it out; "Wh" is the default a CSMS assumes without one.
+      const unit =
+        sv.unit ??
+        (sv.measurand ? unitOfMeasurandV2x(sv.measurand) : undefined);
+      return {
+        value: Number(sv.value),
+        measurand: sv.measurand as V201MeterValuesSampledValue["measurand"],
+        unitOfMeasure: unit ? { unit } : undefined,
+        ...(sv.context
+          ? { context: sv.context as V201MeterValuesSampledValue["context"] }
+          : {}),
+        // 2.0.1/2.1 SampledValueType carries `phase` (§2.36 / §2.44) — pass the
+        // builder's L1/L2/L3 tag through rather than letting a CSMS receive
+        // four indistinguishable samples per measurand (#301).
+        ...(sv.phase
+          ? { phase: sv.phase as V201MeterValuesSampledValue["phase"] }
+          : {}),
+      };
+    });
   }
 
   public sendMeterValue(

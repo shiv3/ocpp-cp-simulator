@@ -45,6 +45,7 @@ function threePhaseConnectorStub(): unknown {
     // Three phases in use: no profile restricts them (#301).
     activePhaseCount: () => 3,
     // One resolve, one instant (#301).
+    announceScheduleCrossingNow() {},
     operatingPoint() {
       return stubOperatingPoint(this, Infinity, 3);
     },
@@ -162,6 +163,7 @@ function taperedConnectorStub(): unknown {
     // DC has no phases (#301).
     activePhaseCount: () => 1,
     // One resolve, one instant (#301).
+    announceScheduleCrossingNow() {},
     operatingPoint() {
       return stubOperatingPoint(this, Infinity, 1);
     },

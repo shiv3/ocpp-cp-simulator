@@ -13,7 +13,11 @@ import {
 } from "../../types/OcppTypes";
 import { buildSampledValues } from "../MeterValueBuilder";
 import type { EVSettings } from "../EVSettings";
-import { resolveOperatingPoint } from "../OperatingPoint";
+import {
+  resolveOperatingPoint,
+  vehicleTermOf,
+  type OperatingPointInputs,
+} from "../OperatingPoint";
 
 const CURVE = [
   { socPercent: 0, powerFraction: 1 },
@@ -108,7 +112,7 @@ describe("one operating point feeds the register and the report (#327)", () => {
     });
   }
 
-  it("a sample build resolves the point once and announces one crossing", () => {
+  it("a sample build is a pure read; the sender announces one crossing", () => {
     const connector = charging(
       { currentType: "AC", phases: 3, voltageV: 230 },
       profile(0),
@@ -122,19 +126,128 @@ describe("one operating point feeds the register and the report (#327)", () => {
       "Sample.Periodic",
     );
     expect(resolve).toHaveBeenCalledTimes(1);
+    expect(events).toHaveLength(0);
+    connector.announceScheduleCrossingNow();
+    connector.announceScheduleCrossingNow();
     expect(events).toHaveLength(1);
   });
 
-  it("is a pure function of its inputs (no clock, no connector)", () => {
-    const inputs = {
-      charging: true,
-      settings: undefined,
-      soc: null,
-      transactionInitialSoc: undefined,
-      scheduleLimitW: Infinity,
-      activePhases: 1,
-      energyOfferSuspended: false,
-    };
+  it("reading the operating point never announces", () => {
+    const connector = charging(
+      { currentType: "AC", phases: 3, voltageV: 230 },
+      profile(0),
+    );
+    const events: unknown[] = [];
+    connector.events.on("scheduleLimitChange", (e) => events.push(e));
+    connector.operatingPoint();
+    connector.operatingPoint();
+    expect(events).toHaveLength(0);
+  });
+
+  it("the register tick announces a crossing and gets the register bound", () => {
+    const connector = charging(
+      { currentType: "AC", phases: 3, voltageV: 230 },
+      profile(0),
+    );
+    const events: unknown[] = [];
+    connector.events.on("scheduleLimitChange", (e) => events.push(e));
+    const scheduler = (
+      connector as unknown as {
+        meterScheduler: {
+          callbacks: { getScheduleLimitWatts: () => number };
+        };
+      }
+    ).meterScheduler;
+    const getCap = scheduler.callbacks.getScheduleLimitWatts;
+    expect(getCap()).toBe(0);
+    expect(getCap()).toBe(0);
+    expect(events).toEqual([{ paused: true, watts: 0 }]);
+  });
+});
+
+/** Inputs for a charging connector with no vehicle, schedule or fault. */
+function bareInputs(
+  overrides: Partial<OperatingPointInputs> = {},
+): OperatingPointInputs {
+  return {
+    at: 0,
+    charging: true,
+    soc: null,
+    schedule: { scheduleLimitW: Infinity, activePhases: 1 },
+    vehicle: vehicleTermOf(undefined),
+    session: { initialSoc: undefined },
+    fault: { energyOfferSuspended: false },
+    ...overrides,
+  };
+}
+
+describe("accumulationCapW invariants (#327)", () => {
+  const withCurve = (extra: Partial<EVSettings> = {}) =>
+    vehicleTermOf({
+      ...new Connector(1, new Logger(LogLevel.ERROR)).evSettings,
+      maxChargingPowerKw: 22,
+      chargingCurve: CURVE,
+      ...extra,
+    });
+
+  it("charging with a curve: the register bound is the accepted power", () => {
+    for (const scheduleLimitW of [Infinity, 3_000, 0]) {
+      const point = resolveOperatingPoint(
+        bareInputs({
+          soc: 80,
+          vehicle: withCurve(),
+          schedule: { scheduleLimitW, activePhases: 1 },
+        }),
+      );
+      expect(point.accumulationCapW).toBe(point.acceptedW);
+    }
+  });
+
+  it("no curve: the register bound is the schedule limit, whatever the vehicle max", () => {
+    for (const maxChargingPowerKw of [0, 22]) {
+      for (const scheduleLimitW of [Infinity, 3_000]) {
+        const point = resolveOperatingPoint(
+          bareInputs({
+            vehicle: withCurve({
+              maxChargingPowerKw,
+              chargingCurve: undefined,
+            }),
+            schedule: { scheduleLimitW, activePhases: 1 },
+          }),
+        );
+        expect(point.accumulationCapW).toBe(scheduleLimitW);
+      }
+    }
+  });
+
+  it("a suspended energy offer bounds the register at 0, in either shape", () => {
+    for (const vehicle of [withCurve(), vehicleTermOf(undefined)]) {
+      expect(
+        resolveOperatingPoint(
+          bareInputs({ vehicle, fault: { energyOfferSuspended: true } }),
+        ).accumulationCapW,
+      ).toBe(0);
+    }
+  });
+
+  it("any other status bounds the register like the charging case", () => {
+    const vehicle = withCurve();
+    const schedule = { scheduleLimitW: 3_000, activePhases: 1 };
+    expect(
+      resolveOperatingPoint(
+        bareInputs({ soc: 50, vehicle, schedule, charging: false }),
+      ).accumulationCapW,
+    ).toBe(
+      resolveOperatingPoint(
+        bareInputs({ soc: 50, vehicle, schedule, charging: true }),
+      ).accumulationCapW,
+    );
+  });
+});
+
+describe("the operating point is a pure function of its named terms (#327)", () => {
+  it("is deterministic and reproduces the pre-refactor bare-connector values", () => {
+    const inputs = bareInputs();
     expect(resolveOperatingPoint(inputs)).toEqual(
       resolveOperatingPoint(inputs),
     );
@@ -143,10 +256,48 @@ describe("one operating point feeds the register and the report (#327)", () => {
     const bare = resolveOperatingPoint(inputs);
     expect(bare.accumulationCapW).toBe(Infinity);
     expect(bare.acceptedW).toBe(0);
+    expect(bare.limitedBy).toBe("none");
     expect(
-      resolveOperatingPoint({ ...inputs, energyOfferSuspended: true })
-        .accumulationCapW,
+      resolveOperatingPoint(
+        bareInputs({ fault: { energyOfferSuspended: true } }),
+      ).accumulationCapW,
     ).toBe(0);
+  });
+
+  it("cannot be called without a vehicle term (checked by tsc, not run)", () => {
+    // Never invoked: the assertions are the `@ts-expect-error` lines, which
+    // `bun run typecheck` fails on if the vehicle term ever becomes optional.
+    const typeLevelOnly = (): void => {
+      const { vehicle: _omitted, ...withoutVehicle } = bareInputs();
+      // @ts-expect-error the vehicle term is required, not optional
+      resolveOperatingPoint(withoutVehicle);
+      resolveOperatingPoint({
+        ...withoutVehicle,
+        // @ts-expect-error and it is not nullable either
+        vehicle: undefined,
+      });
+    };
+    expect(typeLevelOnly).toBeTypeOf("function");
+  });
+
+  it("names what binds the offer", () => {
+    const vehicle = vehicleTermOf({
+      ...new Connector(1, new Logger(LogLevel.ERROR)).evSettings,
+      maxChargingPowerKw: 22,
+      chargingCurve: undefined,
+    });
+    const at = (scheduleLimitW: number, energyOfferSuspended = false) =>
+      resolveOperatingPoint(
+        bareInputs({
+          vehicle,
+          schedule: { scheduleLimitW, activePhases: 1 },
+          fault: { energyOfferSuspended },
+        }),
+      ).limitedBy;
+    expect(at(Infinity)).toBe("vehicle");
+    expect(at(3_000)).toBe("schedule");
+    expect(at(0)).toBe("schedule");
+    expect(at(3_000, true)).toBe("suspended");
   });
 });
 
@@ -180,6 +331,17 @@ describe("the resolution is protocol-agnostic (#327)", () => {
       "currentScheduleLimitWatts",
     ]) {
       expect(source).not.toContain(banned);
+    }
+  });
+
+  it("the opening SoC is read from the session intent in one place", () => {
+    const dir = dirname(fileURLToPath(import.meta.url));
+    const source = readFileSync(join(dir, "..", "Connector.ts"), "utf8");
+    expect(source).not.toMatch(/_evSettings\.(initialSoc|targetSoc)/);
+    const intent = readFileSync(join(dir, "..", "SessionIntent.ts"), "utf8");
+    const imports = [...intent.matchAll(/from\s+"([^"]+)"/g)].map((m) => m[1]);
+    for (const spec of imports) {
+      expect(spec).not.toMatch(/infrastructure\/transport|\/ocpp\//);
     }
   });
 });

@@ -12,6 +12,7 @@ sources:
   - packages/core/src/cp/domain/connector/ChargingCurve.ts
   - packages/core/src/cp/domain/connector/MeterValueBuilder.ts
   - packages/core/src/cp/domain/connector/OperatingPoint.ts
+  - packages/core/src/cp/domain/connector/SessionIntent.ts
   - packages/core/src/cp/domain/connector/Connector.ts
   - packages/core/src/cp/domain/connector/ChargingScheduleResolver.ts
   - packages/core/src/cp/domain/connector/MeterValueScheduler.ts
@@ -687,14 +688,48 @@ the cap the meter enforces. Consecutive periods merge only when they restate
 the same limit, unit and `numberPhases`, so 6 A / 3 phases followed by
 18 A / 1 phase stays two periods though both are 4140 W.
 
-**One operating point per sample (#327).** `Connector.operatingPoint()` resolves
-the schedule limit, active phase count, battery acceptance, EVSE offer, line
-currents, voltage, power factor and SoC once, from one instant. The energy
-register (`MeterValueScheduler`) accumulates against its `accumulationCapW` and
-`MeterValueBuilder` only formats the rest, so a MeterValue's samples describe
-one instant and the register and the reported `Power.Active.Import` cannot
-disagree. The resolution (`OperatingPoint.ts`) imports nothing from the
-transport layer or `ocpp/`. This is a refactor: no wire byte changes.
+**One operating point per sample (#327).** `Connector.operatingPoint()` is the
+only resolver: a pure function that reads the schedule limit, active phase
+count, battery acceptance, EVSE offer, line currents, voltage, power factor and
+SoC once, from one instant, out of five named input terms (`at`, `schedule`,
+`vehicle`, `session`, `fault`; `OperatingPointInputs`). The energy register
+(`MeterValueScheduler`) accumulates against the point's `accumulationCapW` and
+`MeterValueBuilder` only formats the rest, so the samples of a MeterValue
+describe one instant. The resolution (`OperatingPoint.ts`) imports nothing from
+the transport layer or `ocpp/`. Readers (the console, `reportedActivePowerW`,
+the behavior snapshot `ctx.connector(id).power`) call `operatingPoint()` and
+need no bookkeeping. A schedule crossing (`scheduleLimitChange`) is announced
+by the two tick owners instead: the register tick and the code that sends a
+sample set (`Connector.announceScheduleCrossingNow()`, called after the read).
+
+The register and `Power.Active.Import` agree **only for a connector with a
+charging curve and a `maxChargingPowerKw`**: there `accumulationCapW` is the
+accepted power, so one tick adds exactly what the sample reports. Without a
+curve (or without a finite `maxChargingPowerKw`) the register follows its own
+increment or bezier trajectory under the schedule limit alone, and
+`Power.Active.Import` is the vehicle ceiling under that limit, or 0 when
+neither is known. `accumulationCapW` is the upper bound on one tick's register
+delta, not a cap on acceptance, and three invariants are pinned by test:
+
+| State                                  | `accumulationCapW`                       |
+| -------------------------------------- | ---------------------------------------- |
+| curve and finite `maxChargingPowerKw`  | `acceptedW`                              |
+| no curve, or no finite vehicle ceiling | the schedule limit (`Infinity` uncapped) |
+| energy offer suspended (`SuspendedEV`) | 0                                        |
+
+Outside `Charging` the bound is the same as when charging (the scheduler ticks
+through `SuspendedEVSE`; whether it ticks at all is not the point's decision),
+whereas `acceptedW` and `offeredW` are 0. The point also carries `limitedBy`
+(`schedule`, `vehicle`, `suspended`, `none`), a diagnostic that never reaches
+the wire. This is a refactor: no wire byte changes.
+
+**A session's opening and target SoC come from its `SessionIntent` (#327).**
+`resolveSessionIntent()` (`SessionIntent.ts`) is the one place that decides
+them: the transaction's own `initialSoc` / `targetSoc`, else the connector's EV
+settings default. The SoC-from-register derivation, its inverse, the curve's
+opening SoC and the target-SoC auto-stop all read it, so they cannot disagree
+about the session. A target is session intent, not a car property:
+`EVSettings.targetSoc` stays as the default a session copies.
 
 **Known limitation, not a guarantee: a connector declaring none of the four
 electrical fields keeps the pre-1.2 mismatch.** It converts an amp limit with

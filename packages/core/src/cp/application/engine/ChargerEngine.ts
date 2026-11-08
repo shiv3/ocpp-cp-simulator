@@ -1664,6 +1664,7 @@ export class ChargerEngine {
     const connectorSnapshot = (id: number): ConnectorSnapshot | undefined => {
       const connector = host.getConnector(id);
       if (!connector) return undefined;
+      const point = connector.operatingPoint();
       return {
         id: connector.id,
         status: connector.status,
@@ -1672,6 +1673,12 @@ export class ChargerEngine {
           ? (connector.transaction.cpTransactionId ?? connector.transaction.id)
           : null,
         idTag: connector.transaction?.tagId ?? null,
+        power: {
+          acceptedW: point.acceptedW,
+          offeredW: point.offeredW,
+          soc: point.soc,
+          limitedBy: point.limitedBy,
+        },
       };
     };
     const ctx: BehaviorContext = {

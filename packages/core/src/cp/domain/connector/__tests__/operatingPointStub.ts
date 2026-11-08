@@ -1,5 +1,10 @@
 import type { EVSettings } from "../EVSettings";
-import { resolveOperatingPoint, type OperatingPoint } from "../OperatingPoint";
+import {
+  resolveOperatingPoint,
+  vehicleTermOf,
+  type OperatingPoint,
+} from "../OperatingPoint";
+import { resolveSessionIntent } from "../SessionIntent";
 
 /** The slice of a connector stub `operatingPoint()` resolves from. */
 interface StubState {
@@ -22,12 +27,15 @@ export function stubOperatingPoint(
 ): OperatingPoint {
   const state = stubThis as StubState;
   return resolveOperatingPoint({
+    at: 0,
     charging: state.status === "Charging",
-    settings: state.evSettings as EVSettings | undefined,
     soc: state.soc,
-    transactionInitialSoc: state.transaction?.initialSoc,
-    scheduleLimitW,
-    activePhases,
-    energyOfferSuspended,
+    schedule: { scheduleLimitW, activePhases },
+    vehicle: vehicleTermOf(state.evSettings as EVSettings | undefined),
+    session: {
+      initialSoc: resolveSessionIntent(state.transaction, state.evSettings)
+        .initialSoc,
+    },
+    fault: { energyOfferSuspended },
   });
 }

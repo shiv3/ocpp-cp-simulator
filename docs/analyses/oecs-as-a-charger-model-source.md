@@ -250,7 +250,8 @@ The agreed first slice:
 - **one** authoritative effective-limit calculation,
   `min(EV acceptance, connector delivery, active schedule)`, used by every
   consumer. Since #327 steps 1–2 that calculation is a single record:
-  `Connector.operatingPoint()` resolves the schedule limit and phase count from
+  `Connector.operatingPoint()` (pure; the tick owners announce a schedule
+  crossing) resolves the schedule limit and phase count from
   one instant and hands `MeterValueScheduler` (`accumulationCapW`) and
   `MeterValueBuilder` (`acceptedW`, `offeredW`, currents) the **same** result,
   through the pure `resolveOperatingPoint()` in

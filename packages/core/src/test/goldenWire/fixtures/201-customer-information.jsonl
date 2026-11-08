@@ -1,0 +1,18 @@
+{"d":"CP>","k":"call","id":"id-1","a":"BootNotification","p":{"reason":"PowerUp","chargingStation":{"model":"Model","vendorName":"Vendor","serialNumber":"123456","firmwareVersion":"1.0"}}}
+{"d":"CSMS>","k":"result","id":"id-1","p":{"status":"Accepted","currentTime":"<ts>","interval":3600}}
+{"d":"CP>","k":"call","id":"id-2","a":"StatusNotification","p":{"timestamp":"<ts>","connectorStatus":"Available","evseId":0,"connectorId":0}}
+{"d":"CSMS>","k":"result","id":"id-2","p":{}}
+{"d":"CP>","k":"call","id":"id-3","a":"StatusNotification","p":{"timestamp":"<ts>","connectorStatus":"Available","evseId":1,"connectorId":1}}
+{"d":"CSMS>","k":"result","id":"id-3","p":{}}
+{"d":"CSMS>","k":"call","id":"id-4","a":"CustomerInformation","p":{"requestId":1,"report":true,"clear":false,"idToken":{"idToken":"TAG-C","type":"Central"}}}
+{"d":"CP>","k":"result","id":"id-4","p":{"status":"Accepted"}}
+{"d":"CSMS>","k":"call","id":"id-5","a":"CustomerInformation","p":{"requestId":2,"report":true,"clear":true,"idToken":{"idToken":"TAG-C","type":"Central"}}}
+{"d":"CP>","k":"call","id":"id-6","a":"NotifyCustomerInformation","p":{"data":"Customer information of TAG-C\nAuthorization cache TAG-C: status Accepted\nLocal authorization list TAG-C: no entry","seqNo":0,"generatedAt":"<ts>","requestId":1}}
+{"d":"CSMS>","k":"result","id":"id-6","p":{}}
+{"d":"CP>","k":"result","id":"id-5","p":{"status":"Accepted"}}
+{"d":"CSMS>","k":"call","id":"id-7","a":"CustomerInformation","p":{"requestId":3,"report":false,"clear":false,"idToken":{"idToken":"TAG-C","type":"Central"}}}
+{"d":"CP>","k":"call","id":"id-8","a":"NotifyCustomerInformation","p":{"data":"Customer information of TAG-C\nAuthorization cache TAG-C: status Accepted\nLocal authorization list TAG-C: no entry\nCleared 1 authorization cache entries","seqNo":0,"generatedAt":"<ts>","requestId":2}}
+{"d":"CSMS>","k":"result","id":"id-8","p":{}}
+{"d":"CP>","k":"result","id":"id-7","p":{"status":"Rejected","statusInfo":{"reasonCode":"NoAction","additionalInfo":"Neither report nor clear is set"}}}
+{"d":"CSMS>","k":"call","id":"id-9","a":"CustomerInformation","p":{"requestId":4,"report":true,"clear":false}}
+{"d":"CP>","k":"result","id":"id-9","p":{"status":"Invalid","statusInfo":{"reasonCode":"MissingParam","additionalInfo":"One of idToken, customerIdentifier or customerCertificate is required"}}}

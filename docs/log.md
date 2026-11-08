@@ -1,11 +1,17 @@
 ---
-title: Log
+title: Log (archive)
 type: log
-summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
+summary: Archive, frozen 2026-11-08. Chronological record of wiki operations up to that date; history now lives in git.
 updated: 2026-11-08
 ---
 
-# Log
+# Log (archive)
+
+> **Archived: no longer updated as of 2026-11-08.** Do not append here. Wiki
+> changes are now recorded by git: `git log -- docs/` (add `-p` for diffs),
+> `git log --grep '#N'` for an issue or PR number, the PR that closed the issue,
+> and branch names `<type>/<issue number>-<slug>`. The commit message and PR
+> description say which pages changed and why.
 
 Format: `## [YYYY-MM-DD] <op> | <title>` then bullets of pages touched.
 `grep "^## \[" docs/log.md | tail -5` shows the latest entries.
@@ -2451,6 +2457,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 - F06.FR.17: on 2.0.1 / 2.1 the answer is `Rejected` and no BootNotification follows when the last BootNotification answer was `Accepted`; Pending, Rejected and unanswered boots still answer `Accepted` and send it. Golden `201-trigger-message-all` re-recorded (id-4).
 - Page: [Control plane](concepts/control-plane.md).
 
-## [2026-11-08] restructure | Drop pinned counts (MCP tools, EXPLICIT_METHODS)
+## [2026-11-08] ingest | Configurable daemon startup concurrency and staggering (#610)
 
-- The MCP endpoint prose no longer states how many tools there are (the tables list them; `mcpToolSchemaParity.test.ts` already requires a parity case or a named exemption for every tool), and `methods.test.ts` checks that the explicit ops are unique and disjoint from the jsonMode ids instead of pinning `EXPLICIT_METHODS.length`, so adding a method or tool no longer edits a number. Pages: [MCP endpoint](entities/mcp-endpoint.md), [Driving the simulator from an AI agent](analyses/driving-from-an-ai-agent.md), [index](index.md).
+- `entities/daemon.md`, `entities/cli.md`: `--bootstrap-concurrency` (default 8, the previous fixed value), `--start-delay`, `--start-jitter`, `--start-seed`; all four need a server mode and `--cp-id`, and a bad number exits 1. Review fixes: a charge point deleted or updated while it waits is skipped, the flags are refused next to a client mode, and the schedule is bounded by the 2^31-1 ms timer limit; `daemon.md` states the requirements and that `--state-db` restores are not paced.
+- `index.md`: no change (no page added).

@@ -1,4 +1,5 @@
 import type { ActiveChargingProfile } from "../connector/Connector";
+import { isScheduleInEffect } from "../connector/ChargingScheduleResolver";
 import type { ChargingProfilePurposeType } from "../types/OcppTypes";
 
 export interface ProfileRemoveCriteria {
@@ -109,16 +110,19 @@ export class ChargingProfileStore {
    * Highest-stackLevel, currently-valid profile matching the given
    * purpose. Returns `null` if none. Validity respects `validFrom` /
    * `validTo` if set; missing bounds count as "always valid" on that side.
+   * A profile whose schedule `duration` has elapsed is skipped, so the next
+   * lower stackLevel applies (1.6 errata 3.43).
    */
   getActive(
     purpose: ChargingProfilePurposeType,
     now: Date = new Date(),
+    transactionStart: Date | null = null,
   ): ActiveChargingProfile | null {
     const candidates = this.profiles.filter((p) => {
       if (p.chargingProfilePurpose !== purpose) return false;
       if (p.validFrom && new Date(p.validFrom) > now) return false;
       if (p.validTo && new Date(p.validTo) < now) return false;
-      return true;
+      return isScheduleInEffect(p, transactionStart, now);
     });
     if (candidates.length === 0) return null;
     return candidates.reduce((best, c) =>

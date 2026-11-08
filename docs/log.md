@@ -2393,6 +2393,38 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - [Overview](overview.md): new rule bullet for the `src/cp` layers (`domain` / `application` / `infrastructure` / `shared`) and the shrinking `LAYER_EXEMPTIONS` list (26 entries at introduction: 15 domain → application, 10 domain → infrastructure, 1 application → infrastructure). The check lives in `scripts/check-package-boundaries.ts`, not in ESLint, so it shares the type-only edge handling, the stale-entry failure and the `--json` output with the other rules.
 
+## [2026-11-08] ingest | The renewed client certificate no longer depends on the CertificateSigned answer (#564)
+
+- On 2.0.1 / 2.1 profile 3 the renewed Charging Station certificate is handed to the transport when the chain is stored (`certificateStored`, `ChargePoint.adoptRenewedClientCertificate`), not from the `afterResult` effect; that effect keeps only the reconnect of an open connection, and skips it when the open connection already presents the certificate (`OCPPWebSocket.presentsClientCertificate`). Handing the same identity over twice is a no-op. Page touched: [Security profiles](concepts/security-profiles.md#renewed-client-certificate). Wire behavior is unchanged (golden fixtures untouched).
+
+## [2026-11-08] ingest | CustomerInformation and NotifyCustomerInformation (#602)
+
+- `concepts/local-authorization.md`: new "CustomerInformation" section (answers, report parts, clear semantics); `entities/default-behaviors.md`: `CustomerInformation` moves to the cache and local list row.
+
+## [2026-11-08] ingest | TriggerMessage SignV2G20Certificate and SignCombinedCertificate on 2.1 (#553)
+
+- F06.FR.08: on 2.1 `SignV2G20Certificate` answers `Accepted` and sends a new CSR with `certificateType = V2G20Certificate`; `SignCombinedCertificate` answers `Accepted` and sends one new CSR with `certificateType` omitted (the 2.1 enum: both the 15118 and the CSMS connection), stored as the Charging Station certificate when the chain comes back. 2.0.1 `SignCombinedCertificate` stays `NotImplemented`. Page touched: [Security profiles](concepts/security-profiles.md). No existing wire fixture changes.
+
+## [2026-11-08] ingest | Inbound OCPP 1.6J CALL validation (#593)
+
+- `OCPPMessageHandler.handleCall` validates the payload of a CALL that reached the default handler against the vendored 1.6 request schema (formats checked) and, per `inboundValidation` (`off` / `warn` default / `enforce`), logs it or answers a CALLERROR with the OCPP-J 1.6 §4.2.3 code (`FormationViolation`, `OccurenceConstraintViolation`, `TypeConstraintViolation`, `PropertyConstraintViolation`). Policies, overrides and rules answer first.
+- Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#inbound-call-validation-on-ocpp-j-16), [Who answers an inbound CALL](concepts/call-precedence.md), [GitHub issues](sources/github-issues.md).
+
+## [2026-11-08] ingest | Inbound validation: traced violations and the `inboundValidation` setting (#593 review)
+
+- A `warn` / `enforce` violation is traced: the inbound CALL's record carries `meta.validation = { mode, errorCode, description }` (a structured `Inbound validation:` line on the `WebSocket` log channel, merged by `logLinesToTrace` and held back by the live `--trace-output` writer for one tick). `inboundValidation` is settable: `--inbound-validation`, `cp.create` / `cp.update` (contracts, HTTP, MCP), persisted in `charge_points.inbound_validation` (schema v25). The wiki states the order with the #594 `NotSupported`.
+- Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#inbound-call-validation-on-ocpp-j-16), [Trace format](concepts/trace-format.md#validation-violations-meta), [CLI](entities/cli.md), [Daemon](entities/daemon.md), [Control plane](concepts/control-plane.md), [State persistence](concepts/state-persistence.md).
+
+## [2026-11-08] ingest | OCPP 1.6 SetChargingProfile replacement and TxProfile preconditions (#594)
+
+- `SetChargingProfile` on 1.6 replaces by `chargingProfileId` or by `stackLevel` + purpose (2.x unchanged), rejects a TxProfile without an active transaction or with another `transactionId`, and answers CALLERROR `NotSupported` when `SupportedFeatureProfiles` lacks `SmartCharging`. Handlers can now answer a CALLERROR by throwing `HandlerCallError`. No golden fixture changed.
+- Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#ocpp-16-setchargingprofile), [GitHub issues](sources/github-issues.md).
+
+## [2026-11-08] ingest | SetChargingProfile review fixes: displaced profiles, NotSupported scope, running transaction (#594 review)
+
+- `chargingProfileApplied` carries `replacedIds` (profiles displaced by the same-slot rule); `replaced` now means "same id updated", so the timeline no longer reports an update for a profile it never had, and a displaced profile's expiry timer is cancelled. The TxProfile precondition uses `hasRunningTransaction`. `ClearChargingProfile` and `GetCompositeSchedule` answer `NotSupported` without `SmartCharging` too. The wiki states the 1.6-S behavior (generic SOAP Fault).
+- Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#ocpp-16-setchargingprofile), [Operational timeline](concepts/operational-timeline.md#smart-charging-profiles).
+
 ## [2026-11-08] ingest | Critical SecurityEventNotification is queued while offline on 2.x (#552)
 
-- A04.FR.02: on 2.0.1 / 2.1 a critical security event (`isCriticalSecurityEvent`: the 16 types the Part 2 Appendices, chapter 1 "Security Events", mark Critical in 2.0.1 edition 4 and 2.1 edition 2, which list the same ones; the 1.6 whitepaper flags only seven of them) sent while the socket is down, or whose CALL the pipeline dropped as `socket_closed` / `write_failed` after the socket was up, is queued in the E11 `pending_messages` queue (persisted with `--state-db`) and replayed after the next Boot Accepted with the time it happened; other types are still dropped. At most 1000 are kept. Pages touched: [Security profiles](concepts/security-profiles.md), [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#e11-offline-queue-for-transactionevent), [State persistence](concepts/state-persistence.md), [Control plane](concepts/control-plane.md), [MCP endpoint](entities/mcp-endpoint.md). No wire fixture changes (the golden suite has no offline security event).
+- A04.FR.02: on 2.0.1 / 2.1 a critical security event (`isCriticalSecurityEvent`: the 16 types the Part 2 Appendices, chapter 1 "Security Events", mark Critical in 2.0.1 edition 4 and 2.1 edition 2, which list the same ones; the 1.6 Security Whitepaper edition 4 has its own table with 1.6 names) sent while the socket is down, or whose CALL the pipeline dropped as `socket_closed` / `write_failed` after the socket was up, is queued in the E11 `pending_messages` queue (persisted with `--state-db`) and replayed after the next Boot Accepted with the time it happened; other types are still dropped. At most 1000 are kept. Pages touched: [Security profiles](concepts/security-profiles.md), [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#e11-offline-queue-for-transactionevent), [State persistence](concepts/state-persistence.md), [Control plane](concepts/control-plane.md), [MCP endpoint](entities/mcp-endpoint.md). No wire fixture changes (the golden suite has no offline security event).

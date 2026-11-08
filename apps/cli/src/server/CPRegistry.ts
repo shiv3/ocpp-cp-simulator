@@ -93,6 +93,7 @@ interface ChargePointRow {
   labels: string | null;
   behaviors: string | null;
   tx_updated_meter_values: number | null;
+  inbound_validation: string | null;
 }
 
 interface CPRegistryOptions {
@@ -244,7 +245,8 @@ export class CPRegistry {
         "central_system_url, soap_callback_url, soap_path, " +
         "security_profile, authorization_key, cpo_name, " +
         "tls_ca_path, tls_cert_path, tls_key_path, " +
-        "basic_auth, boot_notif, created_at, labels, behaviors, tx_updated_meter_values " +
+        "basic_auth, boot_notif, created_at, labels, behaviors, tx_updated_meter_values, " +
+        "inbound_validation " +
         "FROM charge_points ORDER BY created_at ASC",
     );
     const restored: string[] = [];
@@ -312,6 +314,13 @@ export class CPRegistry {
         // #347: NULL — off, or a row older than the column — restores as off.
         ...(row.tx_updated_meter_values === 1
           ? { txUpdatedMeterValues: true }
+          : {}),
+        // #593: NULL, or a value this build does not know, restores as the
+        // default (warn).
+        ...(row.inbound_validation === "off" ||
+        row.inbound_validation === "warn" ||
+        row.inbound_validation === "enforce"
+          ? { inboundValidation: row.inbound_validation }
           : {}),
       };
       // #354 follow-up: a SOAP charge point whose callback URL was derived
@@ -972,8 +981,8 @@ export class CPRegistry {
         "central_system_url, soap_callback_url, soap_path, " +
         "security_profile, authorization_key, cpo_name, " +
         "tls_ca_path, tls_cert_path, tls_key_path, " +
-        "basic_auth, boot_notif, created_at, labels, behaviors, tx_updated_meter_values) " +
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+        "basic_auth, boot_notif, created_at, labels, behaviors, tx_updated_meter_values, inbound_validation) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
         "ON CONFLICT (cp_id) DO UPDATE SET " +
         "ws_url = excluded.ws_url, " +
         "supervision_urls = excluded.supervision_urls, " +
@@ -996,7 +1005,8 @@ export class CPRegistry {
         "basic_auth = excluded.basic_auth, boot_notif = excluded.boot_notif, " +
         "labels = excluded.labels, " +
         "behaviors = excluded.behaviors, " +
-        "tx_updated_meter_values = excluded.tx_updated_meter_values",
+        "tx_updated_meter_values = excluded.tx_updated_meter_values, " +
+        "inbound_validation = excluded.inbound_validation",
       [
         init.cpId,
         init.wsUrl,
@@ -1028,6 +1038,7 @@ export class CPRegistry {
             ? JSON.stringify(init.behaviors)
             : null,
         init.txUpdatedMeterValues ? 1 : null,
+        init.inboundValidation ?? null,
       ],
     );
   }
@@ -1331,6 +1342,7 @@ function preserveOmittedInit(
     behaviors: next.behaviors ?? existing.behaviors,
     txUpdatedMeterValues:
       next.txUpdatedMeterValues ?? existing.txUpdatedMeterValues,
+    inboundValidation: next.inboundValidation ?? existing.inboundValidation,
   };
 }
 

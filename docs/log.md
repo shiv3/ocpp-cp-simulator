@@ -2388,3 +2388,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-08] ingest | CI runs each suite once, in parallel jobs
 
 - `ci.yml`: the vitest and bun suites ran one after the other in the `test` job and then a second time for coverage, which made the job about 18 minutes. Each now runs once with coverage in its own job (`vitest`, and `bun` in three shards through `scripts/bun-test-shard.sh`); `test` keeps the static checks and the packaging smokes. Every job has a timeout, and a new push to a pull request cancels the previous run. Updated [Testing strategy](analyses/testing-strategy.md).
+
+## [2026-11-08] ingest | 1.6 DeleteCertificate refuses only the root that validates the connection (#563)
+
+- The Node `ws` transport reads the self-signed root that ended the CSMS chain when the socket opens (`getPeerCertificate(true)`), and `OCPPWebSocket.connectionTrustAnchorsPem()` returns that root when it is in the `--tls-ca` bundle; `DeleteCertificate` therefore answers `Accepted` for another bundle root. Bun's native client and the browser cannot read the chain and keep the bundle-wide `Failed`. Page touched: [Security profiles](concepts/security-profiles.md). Wire behavior of existing fixtures is unchanged.

@@ -2,6 +2,7 @@ import type { Logger } from "../../shared/Logger";
 import { LogType } from "../../shared/Logger";
 import { encodeCallFrame } from "./callFrame";
 import { redactSensitiveText } from "../../shared/redaction";
+import { isCertificateInBundle } from "../../domain/security/certificateHash";
 import {
   isBrowserRuntime,
   openOcppWebSocket,
@@ -310,16 +311,24 @@ export class OCPPWebSocket {
    * every charge point until now — should not have to pass anything.
    */
   /**
-   * The PEM bundle that validates the current CSMS connection: the
-   * `--tls-ca` certificates of a `wss://` connection that verifies the
-   * server (#537, 1.6 whitepaper M04.FR.06). `undefined` over `ws://`,
-   * without `--tls-ca` (the runtime's own trust store then validates) or
-   * with verification turned off.
+   * The PEM that validates the current CSMS connection: the `--tls-ca`
+   * certificates of a `wss://` connection that verifies the server (#537,
+   * 1.6 whitepaper M04.FR.06), narrowed to the one root that ended the
+   * server's chain when the client can read it (the Node `ws` client, #563)
+   * and that root is in the bundle. Bun's native client and the browser
+   * cannot, so the whole bundle stays. `undefined` over `ws://`, without
+   * `--tls-ca` (the runtime's own trust store then validates) or with
+   * verification turned off.
    */
   public connectionTrustAnchorsPem(): string | undefined {
     if (!/^wss:/i.test(this._url)) return undefined;
     if (this._tls?.rejectUnauthorized === false) return undefined;
-    return this._tls?.ca;
+    const bundle = this._tls?.ca;
+    if (bundle === undefined) return undefined;
+    const root = this._ws?.validatingRootPem?.();
+    return root !== undefined && isCertificateInBundle(root, bundle)
+      ? root
+      : bundle;
   }
 
   /** Whether the CSMS link authenticates with a client certificate

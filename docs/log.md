@@ -2392,3 +2392,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-08] ingest | Device Model registry with variable metadata (#604)
 
 - The 2.x component/variable mapping moved from `deviceModelMap.ts` into a typed registry (`packages/core/src/cp/domain/device-model/DeviceModelRegistry.ts`) with mutability, data type, values list, limits, unit, default and persistence per variable; GetVariables, SetVariables, SetVariableMonitoring and GetBaseReport resolve through it, shared 1.6 keys still map to the `ConfigurationStore`. `ClockCtrlr`, `DeviceDataCtrlr`, `TariffCostCtrlr` and `ISO15118Ctrlr` are registered without variables; `TxCtrlr.TxStartPoint` / `TxStopPoint` are registered `ReadOnly` (#569: no writable variable without simulated behavior). Wire output unchanged. New page: [Device Model registry](entities/device-model.md); updated [Variable monitoring](concepts/variable-monitoring.md) and [Local authorization](concepts/local-authorization.md).
+
+## [2026-11-08] lint | Device Model registry review fixes (#604)
+
+- `OCPPCommCtrlr.ResetRetries` is `ReadOnly` on 2.x (the 2.x `ConfigurationStore` key is read-only, the 1.6 key stays read-write): nothing retries a reset, so a writable value would change nothing (#569). Every `MemberList` variable now reports a `valuesList` (`TxStartPoint`, `TxStopPoint`, the measurands), and the registry refuses a `MemberList` without one. Updated [Device Model registry](entities/device-model.md).

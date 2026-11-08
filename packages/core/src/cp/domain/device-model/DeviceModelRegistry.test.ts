@@ -81,7 +81,34 @@ describe("DEVICE_MODEL", () => {
         array: "MemberList",
       }[entry.key.type];
       expect(def.dataType, id).toBe(expectedType);
-      expect(def.valuesList, id).toEqual(entry.key.allowed);
+      // A MemberList may advertise values the store does not enforce (the
+      // measurands); an OptionList's values are the store's `allowed`.
+      if (entry.key.allowed !== undefined || def.dataType !== "MemberList") {
+        expect(def.valuesList, id).toEqual(entry.key.allowed);
+      }
+    }
+  });
+
+  it("keeps ResetRetries read-write on 1.6 and ReadOnly on 2.x", () => {
+    const resetRetries = (version: "OCPP-1.6J" | "OCPP-2.0.1") =>
+      defaultConfiguration(cpOf(version)).find(
+        (e) => e.key.name === "ResetRetries",
+      )?.key.readonly;
+    expect(resetRetries("OCPP-1.6J")).toBe(false);
+    expect(resetRetries("OCPP-2.0.1")).toBe(true);
+    expect(DEVICE_MODEL.find("OCPPCommCtrlr", "ResetRetries")?.mutability).toBe(
+      "ReadOnly",
+    );
+  });
+
+  it("reports a valuesList for every MemberList", () => {
+    for (const def of DEVICE_MODEL.variables) {
+      if (def.dataType === "MemberList") {
+        expect(
+          def.valuesList?.length,
+          deviceModelVariableId(def),
+        ).toBeGreaterThan(0);
+      }
     }
   });
 
@@ -146,13 +173,30 @@ describe("createDeviceModelRegistry", () => {
     ],
     ["default out of range", [{ ...base, max: 2, default: 3 }], /above max/],
     [
-      "valuesList without OptionList",
+      "valuesList without OptionList or MemberList",
       [{ ...base, valuesList: ["a"] }],
-      /valuesList goes with OptionList/,
+      /valuesList goes with OptionList and MemberList/,
     ],
     [
       "default outside valuesList",
       [{ ...base, dataType: "OptionList", valuesList: ["a"], default: "b" }],
+      /outside valuesList/,
+    ],
+    [
+      "a MemberList without valuesList",
+      [{ ...base, dataType: "MemberList" }],
+      /valuesList goes with OptionList and MemberList/,
+    ],
+    [
+      "a MemberList default outside valuesList",
+      [
+        {
+          ...base,
+          dataType: "MemberList",
+          valuesList: ["a", "b"],
+          default: "a,c",
+        },
+      ],
       /outside valuesList/,
     ],
     ["shared key", [base, { ...base, variable: "W" }], /already registered/],

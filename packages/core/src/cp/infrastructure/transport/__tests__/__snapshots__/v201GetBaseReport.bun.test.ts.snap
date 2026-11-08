@@ -58,7 +58,7 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           },
           "variableAttribute": [
             {
-              "mutability": "ReadWrite",
+              "mutability": "ReadOnly",
               "type": "Actual",
               "value": "1",
             },
@@ -184,6 +184,7 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           "variableCharacteristics": {
             "dataType": "MemberList",
             "supportsMonitoring": true,
+            "valuesList": "Energy.Active.Import.Register,Energy.Active.Import.Interval,Energy.Active.Export.Register,Energy.Active.Export.Interval,Energy.Reactive.Import.Register,Energy.Reactive.Import.Interval,Energy.Reactive.Export.Register,Energy.Reactive.Export.Interval,Voltage,Current.Import,Current.Export,Current.Offered,Power.Active.Import,Power.Active.Export,Power.Reactive.Import,Power.Reactive.Export,Power.Offered,Power.Factor,SoC,Temperature,Frequency,RPM",
           },
         },
         {
@@ -243,6 +244,7 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           "variableCharacteristics": {
             "dataType": "MemberList",
             "supportsMonitoring": true,
+            "valuesList": "Energy.Active.Import.Register,Energy.Active.Import.Interval,Energy.Active.Export.Register,Energy.Active.Export.Interval,Energy.Reactive.Import.Register,Energy.Reactive.Import.Interval,Energy.Reactive.Export.Register,Energy.Reactive.Export.Interval,Voltage,Current.Import,Current.Export,Current.Offered,Power.Active.Import,Power.Active.Export,Power.Reactive.Import,Power.Reactive.Export,Power.Offered,Power.Factor,SoC,Temperature,Frequency,RPM",
           },
         },
         {
@@ -434,6 +436,46 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           "variableCharacteristics": {
             "dataType": "boolean",
             "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "TxCtrlr",
+          },
+          "variable": {
+            "name": "TxStartPoint",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "Authorized",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "MemberList",
+            "supportsMonitoring": true,
+            "valuesList": "Authorized",
+          },
+        },
+        {
+          "component": {
+            "name": "TxCtrlr",
+          },
+          "variable": {
+            "name": "TxStopPoint",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "Authorized,EVConnected",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "MemberList",
+            "supportsMonitoring": true,
+            "valuesList": "Authorized,EVConnected",
           },
         },
         {

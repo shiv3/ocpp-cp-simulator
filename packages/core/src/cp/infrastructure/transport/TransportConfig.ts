@@ -1,5 +1,5 @@
-import type { ReconnectPolicy } from "./ReconnectPolicy";
-import type { WsClientOptions } from "./WsClientOptions";
+import type { ReconnectPolicy } from "../../shared/ReconnectPolicy";
+import type { WsClientOptions } from "../../shared/WsClientOptions";
 
 /**
  * Per-charge-point transport settings, kept in one object so the control

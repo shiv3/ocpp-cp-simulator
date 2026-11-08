@@ -1,3 +1,5 @@
+import { MAX_TIMER_MS } from "./timers";
+
 /**
  * The reconnect policy of a charge point's WebSocket client (#609).
  *
@@ -39,9 +41,9 @@ export const DEFAULT_RECONNECT_POLICY: ReconnectPolicy = Object.freeze({
 });
 
 /**
- * OCPP 2.0.1 / 2.1 Part 2 appendix, OCPPCommCtrlr (B.1 "Reconnection
- * behaviour"): `RetryBackOffWaitMinimum` (s), `RetryBackOffRandomRange` (s)
- * and `RetryBackOffRepeatTimes`. Replaces the policy's base delay, jitter and
+ * OCPP 2.0.1 / 2.1 Part 4 §5.4 "Reconnecting", with the OCPPCommCtrlr
+ * variables of the Part 2 Appendices: `RetryBackOffWaitMinimum` (s),
+ * `RetryBackOffRandomRange` (s) and `RetryBackOffRepeatTimes`. Replaces the policy's base delay, jitter and
  * number of doublings on a 2.x charge point.
  */
 export interface RetryBackOffVariables {
@@ -130,11 +132,15 @@ export type ReconnectDecision =
  * `min(baseDelayMs * 2^(attempt-1), maxDelayMs) + jitter` in `exponential`
  * mode and `baseDelayMs + jitter` in `fixed` mode.
  *
- * With `variables` (2.x, B.1) the wait is
+ * With `variables` (2.x, Part 4 §5.4) the wait is
  * `RetryBackOffWaitMinimum * 2^min(attempt-1, RetryBackOffRepeatTimes)`
  * plus a random time in [0, `RetryBackOffRandomRange`]: it doubles for
- * `RetryBackOffRepeatTimes` attempts and then stays constant. The policy's
- * `maxDelayMs` still caps the doubled part, but never below the minimum, and
+ * `RetryBackOffRepeatTimes` attempts and then stays constant. The spec sets no
+ * ceiling, so a CSMS's values are followed as they are (only the timer's own
+ * limit applies). The one exception keeps today's schedule: while the three
+ * variables still equal {@link retryBackOffDefaults} of the policy (nobody
+ * changed them) the policy's `maxDelayMs` caps the doubled part, so the
+ * default 1, 2, 4, 8, 16, 30 s does not become 32 s on the sixth attempt.
  * `fixed` mode never doubles.
  *
  * `random` returns a number in [0, 1).
@@ -155,9 +161,15 @@ export function nextReconnectDelayMs(
     const minimumMs = variables.waitMinimumSeconds * 1000;
     const doublings =
       policy.mode === "fixed" ? 0 : Math.min(step, variables.repeatTimes);
-    waitMs = Math.max(
-      minimumMs,
-      Math.min(minimumMs * 2 ** doublings, policy.maxDelayMs),
+    const derived = retryBackOffDefaults(policy);
+    const untouched =
+      variables.waitMinimumSeconds === derived.waitMinimumSeconds &&
+      variables.randomRangeSeconds === derived.randomRangeSeconds &&
+      variables.repeatTimes === derived.repeatTimes;
+    const doubled = minimumMs * 2 ** doublings;
+    waitMs = Math.min(
+      untouched ? Math.min(doubled, policy.maxDelayMs) : doubled,
+      MAX_TIMER_MS,
     );
     jitterMs = variables.randomRangeSeconds * 1000;
   } else {
@@ -173,5 +185,6 @@ export function nextReconnectDelayMs(
   // Only draw when there is jitter: a policy without it must not advance the
   // seeded stream.
   const extra = jitterMs > 0 ? Math.floor(random() * (jitterMs + 1)) : 0;
-  return { kind: "retry", delayMs: waitMs + extra };
+  // A sum past the timer's limit would fire at once (a reconnect storm).
+  return { kind: "retry", delayMs: Math.min(waitMs + extra, MAX_TIMER_MS) };
 }

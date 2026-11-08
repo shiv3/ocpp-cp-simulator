@@ -2389,14 +2389,67 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - `ci.yml`: the vitest and bun suites ran one after the other in the `test` job and then a second time for coverage, which made the job about 18 minutes. Each now runs once with coverage in its own job (`vitest`, and `bun` in three shards through `scripts/bun-test-shard.sh`); `test` keeps the static checks and the packaging smokes. Every job has a timeout, and a new push to a pull request cancels the previous run. Updated [Testing strategy](analyses/testing-strategy.md).
 
+## [2026-11-08] ingest | Layer dependency direction in `check:boundaries` (#571)
+
+- [Overview](overview.md): new rule bullet for the `src/cp` layers (`domain` / `application` / `infrastructure` / `shared`) and the shrinking `LAYER_EXEMPTIONS` list (26 entries at introduction: 15 domain → application, 10 domain → infrastructure, 1 application → infrastructure). The check lives in `scripts/check-package-boundaries.ts`, not in ESLint, so it shares the type-only edge handling, the stale-entry failure and the `--json` output with the other rules.
+
+## [2026-11-08] ingest | The renewed client certificate no longer depends on the CertificateSigned answer (#564)
+
+- On 2.0.1 / 2.1 profile 3 the renewed Charging Station certificate is handed to the transport when the chain is stored (`certificateStored`, `ChargePoint.adoptRenewedClientCertificate`), not from the `afterResult` effect; that effect keeps only the reconnect of an open connection, and skips it when the open connection already presents the certificate (`OCPPWebSocket.presentsClientCertificate`). Handing the same identity over twice is a no-op. Page touched: [Security profiles](concepts/security-profiles.md#renewed-client-certificate). Wire behavior is unchanged (golden fixtures untouched).
+
+## [2026-11-08] ingest | CustomerInformation and NotifyCustomerInformation (#602)
+
+- `concepts/local-authorization.md`: new "CustomerInformation" section (answers, report parts, clear semantics); `entities/default-behaviors.md`: `CustomerInformation` moves to the cache and local list row.
+
+## [2026-11-08] ingest | TriggerMessage SignV2G20Certificate and SignCombinedCertificate on 2.1 (#553)
+
+- F06.FR.08: on 2.1 `SignV2G20Certificate` answers `Accepted` and sends a new CSR with `certificateType = V2G20Certificate`; `SignCombinedCertificate` answers `Accepted` and sends one new CSR with `certificateType` omitted (the 2.1 enum: both the 15118 and the CSMS connection), stored as the Charging Station certificate when the chain comes back. 2.0.1 `SignCombinedCertificate` stays `NotImplemented`. Page touched: [Security profiles](concepts/security-profiles.md). No existing wire fixture changes.
+
+## [2026-11-08] ingest | Inbound OCPP 1.6J CALL validation (#593)
+
+- `OCPPMessageHandler.handleCall` validates the payload of a CALL that reached the default handler against the vendored 1.6 request schema (formats checked) and, per `inboundValidation` (`off` / `warn` default / `enforce`), logs it or answers a CALLERROR with the OCPP-J 1.6 §4.2.3 code (`FormationViolation`, `OccurenceConstraintViolation`, `TypeConstraintViolation`, `PropertyConstraintViolation`). Policies, overrides and rules answer first.
+- Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#inbound-call-validation-on-ocpp-j-16), [Who answers an inbound CALL](concepts/call-precedence.md), [GitHub issues](sources/github-issues.md).
+
+## [2026-11-08] ingest | Inbound validation: traced violations and the `inboundValidation` setting (#593 review)
+
+- A `warn` / `enforce` violation is traced: the inbound CALL's record carries `meta.validation = { mode, errorCode, description }` (a structured `Inbound validation:` line on the `WebSocket` log channel, merged by `logLinesToTrace` and held back by the live `--trace-output` writer for one tick). `inboundValidation` is settable: `--inbound-validation`, `cp.create` / `cp.update` (contracts, HTTP, MCP), persisted in `charge_points.inbound_validation` (schema v25). The wiki states the order with the #594 `NotSupported`.
+- Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#inbound-call-validation-on-ocpp-j-16), [Trace format](concepts/trace-format.md#validation-violations-meta), [CLI](entities/cli.md), [Daemon](entities/daemon.md), [Control plane](concepts/control-plane.md), [State persistence](concepts/state-persistence.md).
+
+## [2026-11-08] ingest | OCPP 1.6 SetChargingProfile replacement and TxProfile preconditions (#594)
+
+- `SetChargingProfile` on 1.6 replaces by `chargingProfileId` or by `stackLevel` + purpose (2.x unchanged), rejects a TxProfile without an active transaction or with another `transactionId`, and answers CALLERROR `NotSupported` when `SupportedFeatureProfiles` lacks `SmartCharging`. Handlers can now answer a CALLERROR by throwing `HandlerCallError`. No golden fixture changed.
+- Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#ocpp-16-setchargingprofile), [GitHub issues](sources/github-issues.md).
+
+## [2026-11-08] ingest | SetChargingProfile review fixes: displaced profiles, NotSupported scope, running transaction (#594 review)
+
+- `chargingProfileApplied` carries `replacedIds` (profiles displaced by the same-slot rule); `replaced` now means "same id updated", so the timeline no longer reports an update for a profile it never had, and a displaced profile's expiry timer is cancelled. The TxProfile precondition uses `hasRunningTransaction`. `ClearChargingProfile` and `GetCompositeSchedule` answer `NotSupported` without `SmartCharging` too. The wiki states the 1.6-S behavior (generic SOAP Fault).
+- Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#ocpp-16-setchargingprofile), [Operational timeline](concepts/operational-timeline.md#smart-charging-profiles).
+
+## [2026-11-08] ingest | OCPP-S 1.6 retries transaction-related messages after a SOAP Fault (#585)
+
+- [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#deviation-ocpp-s-16-retries-after-a-soap-fault): the "OCPP-S does not retry" sentence now covers 1.2 and 1.5 only; new section on the 1.6S deviation (errata 3.2): Heartbeat probe, `TransactionMessageAttempts` / `TransactionMessageRetryInterval`, `transactionMessageRejected` / `transactionMessageDiscarded`, discard of an outlived StartTransaction, cancel on stop and dispose. 1.2 and 1.5 were not checked against their specs.
+- [GitHub issues](sources/github-issues.md): #585.
+
+## [2026-11-08] fix | OCPP-S 1.6 transaction retry review follow-ups (#585)
+
+- [Charging sessions](concepts/charging-sessions.md): the "CALLERROR is not a failed start" paragraph names the OCPP-S 1.6 SOAP Fault / HTTP error case. A stop no longer moves a waiting `StartTransaction` connector to `Charging`; a Fault landing after a stop sends no Heartbeat; a resend due while the boot gate is closed is discarded with a notice. [GitHub issues](sources/github-issues.md): `updated:` bumped.
+
 ## [2026-11-08] ingest | Configurable reconnect policy and 2.x `RetryBackOff*` (#609)
 
-- [OCPP versions & transports](concepts/ocpp-versions-and-transports.md#reconnect-policy-and-retrybackoff-609): new section, the canonical table of the reconnect policy (`maxAttempts`, `mode`, `baseDelayMs`, `maxDelayMs`, `jitterMs`, `bootRetryLimit`; defaults are the previous 1 s → 30 s forever), seeded jitter, giving up, and the OCPP 2.0.1 B.1 variables `RetryBackOffWaitMinimum` / `RandomRange` / `RepeatTimes` (decision: wait = minimum × 2^min(N−1, RepeatTimes) + random).
+- [OCPP versions & transports](concepts/ocpp-versions-and-transports.md#reconnect-policy-and-retrybackoff-609): new section, the canonical table of the reconnect policy (`maxAttempts`, `mode`, `baseDelayMs`, `maxDelayMs`, `jitterMs`, `bootRetryLimit`; defaults are the previous 1 s → 30 s forever), seeded jitter, giving up, and the OCPP 2.0.1 Part 4 §5.4 variables `RetryBackOffWaitMinimum` / `RandomRange` / `RepeatTimes` (decision: wait = minimum × 2^min(N−1, RepeatTimes) + random).
 - [CLI](entities/cli.md) flags `--reconnect-*` and `--boot-retry-limit`; [Daemon](entities/daemon.md) and [Control plane](concepts/control-plane.md) (`cp.create` `transport`) in sync.
-- [State persistence](concepts/state-persistence.md): schema v25 `charge_points.transport_options`.
+- [State persistence](concepts/state-persistence.md): schema v28 `charge_points.transport_options` (v25-v27 belong to #658, #660 and #680).
 - [Operational timeline](concepts/operational-timeline.md): format `1.4`, new kind `gave_up`.
+
+## [2026-11-08] lint | Reconnect policy review fixes (#609)
+
+- 2.x follows the `RetryBackOff*` variables as set (no `maxDelayMs` cap unless they still equal the derived defaults); the wait plus jitter is clamped to the timer limit; the jitter stream is seeded by the charge point id when there is no simulation seed; the BootNotification retry budget is restored by every new connection and its `gave_up` entry follows the Rejected answer. The migration is schema v28 (`stored < 28`). Spec citations are Part 4 §5.4 and the Part 2 Appendices. Updated [OCPP versions & transports](concepts/ocpp-versions-and-transports.md#reconnect-policy-and-retrybackoff-609), [State persistence](concepts/state-persistence.md), [GitHub issues](sources/github-issues.md).
 
 ## [2026-11-08] ingest | WebSocket client options and the Bun / Node PoC (#611)
 
 - [OCPP versions & transports](concepts/ocpp-versions-and-transports.md#websocket-client-options-611): new section with the `transport.ws` options, the per-runtime support matrix, the PoC results (Bun 1.3.14, Node 22 `ws`), why an unsupported option refuses the charge point instead of warning, and the Local mode limits.
 - [CLI](entities/cli.md) `--ws-*` flags; [Daemon](entities/daemon.md), [Control plane](concepts/control-plane.md) (`transport.ws`) and [State persistence](concepts/state-persistence.md) in sync.
+
+## [2026-11-08] lint | WebSocket client options moved to src/cp/shared (#611)
+
+- `WsClientOptions.ts` moved from `infrastructure/transport/` to `shared/` (with `ReconnectPolicy.ts` from #609): the charge point in `domain` uses it, and `check:boundaries` forbids `domain` → `infrastructure`. Updated [OCPP versions & transports](concepts/ocpp-versions-and-transports.md#websocket-client-options-611).

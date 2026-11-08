@@ -2,7 +2,10 @@ import type { ChargePoint } from "./ChargePoint";
 import { OcppFeatureProfile } from "../types/OcppTypes";
 import { isOcpp2Version } from "../types/OcppVersion";
 import { MAX_TIMER_MS } from "../../shared/timers";
-import { retryBackOffDefaults } from "../../infrastructure/transport/ReconnectPolicy";
+import {
+  DEFAULT_RECONNECT_POLICY,
+  retryBackOffDefaults,
+} from "../../shared/ReconnectPolicy";
 import { SIGNED_METER_MODES } from "../connector/SignedMeterData";
 import {
   MAX_MONITOR_SEVERITY,
@@ -464,7 +467,7 @@ export const ConfigurationKeys = {
       type: "integer",
       min: 1,
     } as IntegerConfigurationKey,
-    // #609: OCPP 2.0.1 / 2.1 OCPPCommCtrlr RetryBackOff* (Part 2 B.1), 2.x
+    // #609: OCPP 2.0.1 / 2.1 OCPPCommCtrlr RetryBackOff* (Part 4 §5.4; variables in the Part 2 Appendices), 2.x
     // only. Seconds to wait before the first reconnect, the random extra
     // wait [0, RandomRange], and how many times the wait doubles.
     RetryBackOffWaitMinimum: {
@@ -632,6 +635,11 @@ export const defaultConfiguration: (cp: ChargePoint) => Configuration = (
     value: string,
   ): StringConfigurationValue => ({ key, value });
 
+  // A stand-in without a policy (a test double) gets the built-in one.
+  const retryBackOff = retryBackOffDefaults(
+    cp.reconnectPolicy ?? DEFAULT_RECONNECT_POLICY,
+  );
+
   return [
     // ── Core profile ────────────────────────────────────────────────────
     boolVal(ConfigurationKeys.Core.AllowOfflineTxForUnknownId, false),
@@ -749,15 +757,15 @@ export const defaultConfiguration: (cp: ChargePoint) => Configuration = (
       ? [
           intVal(
             ConfigurationKeys.Custom.RetryBackOffWaitMinimum,
-            retryBackOffDefaults(cp.reconnectPolicy).waitMinimumSeconds,
+            retryBackOff.waitMinimumSeconds,
           ),
           intVal(
             ConfigurationKeys.Custom.RetryBackOffRandomRange,
-            retryBackOffDefaults(cp.reconnectPolicy).randomRangeSeconds,
+            retryBackOff.randomRangeSeconds,
           ),
           intVal(
             ConfigurationKeys.Custom.RetryBackOffRepeatTimes,
-            retryBackOffDefaults(cp.reconnectPolicy).repeatTimes,
+            retryBackOff.repeatTimes,
           ),
         ]
       : []),

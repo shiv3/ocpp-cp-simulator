@@ -6,9 +6,10 @@ import type {
   ChargePointInitOptions,
   SoapTunnelConfig,
 } from "./types";
+import type { InboundValidationMode } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
 import { CLIChargePointService } from "./service";
 import { transportConfigSchema } from "@ocpp-cp-sim/contracts/transportConfig";
-import { assertWsClientOptions } from "@ocpp-cp-sim/core/cp/infrastructure/transport/WsClientOptions";
+import { assertWsClientOptions } from "@ocpp-cp-sim/core/cp/shared/WsClientOptions";
 import type { TransportConfig } from "@ocpp-cp-sim/core/cp/infrastructure/transport/TransportConfig";
 import { startRepl } from "./repl";
 import { startJsonMode } from "./jsonMode";
@@ -330,6 +331,7 @@ export function parseArgs(argv: string[]): CLIOptions {
   let insecureTlsKeyPerms = false;
   let cpoName: string | undefined;
   let txUpdatedMeterValues = false;
+  let inboundValidation: InboundValidationMode | undefined;
   // #609: reconnect flags collect here and are validated as one object below.
   const reconnect: Record<string, number | string> = {};
   // #611: `--ws-*` flags, validated with the reconnect ones.
@@ -756,6 +758,18 @@ export function parseArgs(argv: string[]): CLIOptions {
         cpoName = requireFlagValue("--cpo-name", next);
         i++;
         break;
+      case "--inbound-validation": {
+        const value = requireFlagValue("--inbound-validation", next);
+        if (value !== "off" && value !== "warn" && value !== "enforce") {
+          process.stderr.write(
+            "Error: --inbound-validation must be off, warn or enforce\n",
+          );
+          process.exit(1);
+        }
+        inboundValidation = value;
+        i++;
+        break;
+      }
       case "--reconnect-max-attempts":
         reconnect.maxAttempts = requireNumberFlag(arg, next, {
           integer: true,
@@ -1344,6 +1358,7 @@ export function parseArgs(argv: string[]): CLIOptions {
     authorizationKey,
     cpoName,
     ...(txUpdatedMeterValues ? { txUpdatedMeterValues } : {}),
+    ...(inboundValidation ? { inboundValidation } : {}),
     ...(Object.keys(reconnect).length > 0 || Object.keys(wsFlags).length > 0
       ? { transport: parseTransportFlags(reconnect, wsFlags, ocppVersion) }
       : {}),
@@ -1437,6 +1452,11 @@ Options:
                            --insecure-tls-key-perms is passed.
   --insecure-tls-key-perms Allow --tls-key files readable by group/other.
   --cpo-name <name>        CPO name for generated SignCertificate CSRs.
+  --inbound-validation <off|warn|enforce>
+                           OCPP 1.6J: what to do with an inbound CALL whose
+                           payload breaks the request schema. warn (default)
+                           logs and traces the violation and runs the handler;
+                           enforce answers a CALLERROR; off skips the check.
   --reconnect-max-attempts <n>
                            Reconnect attempts after a connection loss before
                            giving up. -1 = unlimited (default), 0 = never
@@ -1791,6 +1811,9 @@ export function buildBootstrap(
     authorizationKey: options.authorizationKey,
     cpoName: options.cpoName,
     ...(options.txUpdatedMeterValues ? { txUpdatedMeterValues: true } : {}),
+    ...(options.inboundValidation
+      ? { inboundValidation: options.inboundValidation }
+      : {}),
     ...(options.transport ? { transport: options.transport } : {}),
     ...((options.useBehaviors?.length ?? 0) > 0
       ? { behaviors: [...options.useBehaviors!] }

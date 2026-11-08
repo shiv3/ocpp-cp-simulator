@@ -119,6 +119,7 @@ import {
 import type { LocalOnlyDecision } from "../auth/LocalAuthorizationResolver";
 import {
   ChargingProfileStore,
+  type ApplyChargingProfileOptions,
   type ProfileRemoveCriteria,
 } from "./ChargingProfileStore";
 import type { ActiveChargingProfile } from "../connector/Connector";
@@ -155,11 +156,11 @@ import {
 import {
   assertWsClientOptions,
   type WsClientOptions,
-} from "../../infrastructure/transport/WsClientOptions";
+} from "../../shared/WsClientOptions";
 import {
   resolveReconnectPolicy,
   type ReconnectPolicy,
-} from "../../infrastructure/transport/ReconnectPolicy";
+} from "../../shared/ReconnectPolicy";
 import { BehaviorRegistry } from "../../application/behavior/BehaviorRegistry";
 import {
   ChargerEngine,
@@ -272,7 +273,17 @@ export interface ChargePointSimulationOptions {
 export type ChargePointResetType = "Hard" | "Soft";
 type ChargePointResetSource = "ocpp-call" | "ocpp15-soap";
 
+/**
+ * What an OCPP 1.6J charge point does with an inbound CALL whose payload
+ * breaks the request schema (#593): `off` skips the check, `warn` logs it and
+ * runs the handler anyway, `enforce` answers a CALLERROR (OCPP-J 1.6 §4.2.3).
+ */
+export type InboundValidationMode = "off" | "warn" | "enforce";
+export const DEFAULT_INBOUND_VALIDATION: InboundValidationMode = "warn";
+
 export interface ChargePointTransportOptions {
+  /** OCPP 1.6J only. Default `warn`. */
+  readonly inboundValidation?: InboundValidationMode;
   readonly centralSystemUrl?: string;
   readonly soapCallbackUrl?: string;
   readonly soapPath?: string;
@@ -315,6 +326,8 @@ export class ChargePoint {
   private readonly _reconnectPolicy: ReconnectPolicy;
   /** #609: automatic BootNotification re-sends since the last Accepted. */
   private _bootRetries = 0;
+  /** A boot give-up waiting for its `bootNotificationResult` to be emitted. */
+  private _bootGaveUp: number | null = null;
 
   /** The resolved reconnect policy (#609); also read by the default 2.x
    *  `RetryBackOff*` variables. */
@@ -435,6 +448,17 @@ export class ChargePoint {
     manualRuleIds: string[];
   } | null = null;
 
+  private _inboundValidation: InboundValidationMode;
+
+  /** See {@link InboundValidationMode}. Read on every inbound CALL. */
+  get inboundValidation(): InboundValidationMode {
+    return this._inboundValidation;
+  }
+
+  setInboundValidation(mode: InboundValidationMode): void {
+    this._inboundValidation = mode;
+  }
+
   constructor(
     private readonly _id: string,
     private readonly _bootNotification: BootNotification,
@@ -472,6 +496,8 @@ export class ChargePoint {
           : new RngStreams(simulation.seed);
     this._autoMeterValueSetting = autoMeterValueSetting;
     this._transportUrl = transportOptions.centralSystemUrl ?? wsUrl;
+    this._inboundValidation =
+      transportOptions.inboundValidation ?? DEFAULT_INBOUND_VALIDATION;
     this._logger.setCpId(this._id);
     this._logRepository = new LogRepository(this._database);
     // #456: installed certificates survive a restart when state persists.
@@ -582,7 +608,13 @@ export class ChargePoint {
       );
       this._rawFrames = new RawFrameSender(this._webSocket, () => this._clock);
       this._webSocket.setWsClientOptions(wsClientOptions);
-      const reconnectRng = this.rng("reconnect");
+      // Seeded even without `simulation.seed` (no CLI flag or `cp.create`
+      // field sets one): by the charge point id, so the same id draws the
+      // same jitter on every run, like the SupervisionUrlPool's hash (#609).
+      const reconnectRng =
+        simulation.seed === undefined
+          ? new RngStreams(this._id).stream(this._id, "reconnect")
+          : this.rng("reconnect");
       this._webSocket.setReconnectPolicy(this._reconnectPolicy, () =>
         reconnectRng.next(),
       );
@@ -1456,7 +1488,9 @@ export class ChargePoint {
 
   /**
    * Install a profile on the station store (`connectorId` 0) or on its
-   * connector, replacing any profile with the same id in that scope, and
+   * connector, replacing any profile with the same id in that scope (and,
+   * with `options.replaceSameSlot`, the one with the same stackLevel and
+   * purpose), and
    * emit `chargingProfileApplied`. Validation is the caller's job.
    *
    * @returns `false`, changing nothing, when the connector does not exist.
@@ -1464,19 +1498,33 @@ export class ChargePoint {
   applyChargingProfile(
     profile: ActiveChargingProfile,
     source: ChargingProfileSource,
+    options: ApplyChargingProfileOptions = {},
   ): boolean {
-    let replaced: boolean;
+    const idsBefore = (list: readonly ActiveChargingProfile[]) =>
+      list.map((p) => p.chargingProfileId);
+    let before: number[];
+    let after: number[];
     if (profile.connectorId === 0) {
-      replaced = this._stationProfiles.add(profile);
+      before = idsBefore(this._stationProfiles.all());
+      this._stationProfiles.add(profile, options);
+      after = idsBefore(this._stationProfiles.all());
     } else {
       const connector = this.getConnector(profile.connectorId);
       if (!connector) return false;
-      replaced = connector.addChargingProfile(profile);
+      before = idsBefore(connector.chargingProfiles);
+      connector.addChargingProfile(profile, options);
+      after = idsBefore(connector.chargingProfiles);
     }
+    const replaced = before.includes(profile.chargingProfileId);
+    // Other profiles the same-slot rule displaced (#594).
+    const replacedIds = before.filter(
+      (id) => id !== profile.chargingProfileId && !after.includes(id),
+    );
     this._events.emit("chargingProfileApplied", {
       connectorId: profile.connectorId,
       profile,
       replaced,
+      replacedIds,
       source,
     });
     return true;
@@ -1856,6 +1904,7 @@ export class ChargePoint {
         `Connecting via ${this._ocppVersion} SOAP client`,
         LogType.OCPP,
       );
+      this._bootRetries = 0;
       this.boot();
       this._events.emit("connected", undefined);
       this._engine.observe({ type: "connected" });
@@ -1886,6 +1935,8 @@ export class ChargePoint {
     }
     this._webSocket.connect(
       () => {
+        // A new connection starts a fresh BootNotification budget (#609).
+        this._bootRetries = 0;
         this.boot();
         this._events.emit("connected", undefined);
         this._engine.observe({ type: "connected" });
@@ -2052,6 +2103,25 @@ export class ChargePoint {
    * supersedes it.
    */
   async useRenewedClientCertificate(): Promise<void> {
+    await this.switchClientCertificate(true);
+  }
+
+  /**
+   * #564: the same switch without the reconnect: the renewed certificate is
+   * handed to the transport as soon as the chain is stored, so the next
+   * connection presents it even if the CertificateSigned answer is dropped
+   * before it is written (a manual disconnect while network simulation holds
+   * it). The reconnect of an open connection stays with
+   * {@link useRenewedClientCertificate}, run once the answer is written, so
+   * the answer goes out on the connection that received the request.
+   * Handing the same identity over again changes nothing, and neither call
+   * runs on a connect, so no connection reconnects for it again.
+   */
+  async adoptRenewedClientCertificate(): Promise<void> {
+    await this.switchClientCertificate(false);
+  }
+
+  private async switchClientCertificate(reconnect: boolean): Promise<void> {
     if (this._clientCertificateSwitchReleased) return;
     this.cancelClientCertificateSwitch();
     const request = this._clientCertificateSwitchSeq;
@@ -2071,7 +2141,8 @@ export class ChargePoint {
         `Renewed Charging Station certificate valid from ${identity.notBefore.toISOString()}; switching then (A02.FR.08)`,
         LogType.WEBSOCKET,
       );
-      // Unref'd: a wait of days must not keep the process alive.
+      // Unref'd: a wait of days must not keep the process alive. When it
+      // passes, an open connection reconnects whichever call set it.
       this._cancelClientCertificateSwitchTimer = setTimeoutAt(
         identity.notBefore.getTime(),
         () => {
@@ -2083,6 +2154,7 @@ export class ChargePoint {
       return;
     }
     webSocket.useRenewedClientCertificate(identity);
+    if (!reconnect) return;
     // A station that is not connected (back-off, simulated outage, manual
     // disconnect) presents it at its next connection, on that one's timing.
     if (!webSocket.isOpenOrConnecting()) {
@@ -2095,6 +2167,7 @@ export class ChargePoint {
     this.reconnectWithRenewedCertificate(
       webSocket.currentGeneration(),
       this._clock.now() + RENEWED_CERTIFICATE_RECONNECT_MAX_DEFER_MS,
+      identity.cert,
     );
   }
 
@@ -2104,11 +2177,14 @@ export class ChargePoint {
   private reconnectWithRenewedCertificate(
     generation: GenerationToken,
     deadline: number,
+    cert: string,
   ): void {
     this._cancelClientCertificateSwitchTimer = null;
     const webSocket = this._webSocket;
     if (!webSocket?.isOpenOrConnecting()) return;
     if (webSocket.currentGeneration() !== generation) return;
+    // Opened with it meanwhile (#564): nothing to switch.
+    if (webSocket.presentsClientCertificate(cert)) return;
     if (
       this._outbox.hasTransactionMessagesInFlight() &&
       this._clock.now() < deadline
@@ -2118,7 +2194,7 @@ export class ChargePoint {
           this._clock.now() + RENEWED_CERTIFICATE_RECONNECT_POLL_MS,
           deadline,
         ),
-        () => this.reconnectWithRenewedCertificate(generation, deadline),
+        () => this.reconnectWithRenewedCertificate(generation, deadline, cert),
         { clock: this._clock },
       );
       return;
@@ -2248,10 +2324,8 @@ export class ChargePoint {
         `Giving up BootNotification after ${this._bootRetries} retr${this._bootRetries === 1 ? "y" : "ies"} (reconnect.bootRetryLimit=${limit})`,
         LogType.OCPP,
       );
-      this._events.emit("gaveUp", {
-        target: "boot_notification",
-        attempts: this._bootRetries,
-      });
+      // Reported once `bootNotificationResult` (Rejected), its cause, is out.
+      this._bootGaveUp = this._bootRetries;
       return;
     }
     this._bootRetries++;
@@ -2310,6 +2384,11 @@ export class ChargePoint {
       interval,
       currentTime: result.currentTime,
     });
+    if (this._bootGaveUp !== null) {
+      const attempts = this._bootGaveUp;
+      this._bootGaveUp = null;
+      this._events.emit("gaveUp", { target: "boot_notification", attempts });
+    }
     if (status === "Accepted") {
       this.applyBootAccepted(interval);
     } else {

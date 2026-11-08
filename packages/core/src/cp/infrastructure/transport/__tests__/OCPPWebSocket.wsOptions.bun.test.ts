@@ -2,7 +2,7 @@ import net from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { OCPPWebSocket } from "../OCPPWebSocket";
 import type { Logger } from "../../../shared/Logger";
-import type { WsClientOptions } from "../WsClientOptions";
+import type { WsClientOptions } from "../../../shared/WsClientOptions";
 
 // #611: the PoC, kept as a test. Real Bun sockets against local servers, so a
 // Bun release that starts (or stops) honouring an option shows up here and the

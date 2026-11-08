@@ -13,7 +13,7 @@
  * persistence layer was localStorage and we explicitly do NOT carry it
  * forward (see plan).
  */
-export const SCHEMA_VERSION = 25;
+export const SCHEMA_VERSION = 28;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -185,6 +185,9 @@ CREATE TABLE IF NOT EXISTS charge_points (
   -- #347: 1 when the scheduler's in-transaction samples ride OCPP 2.x
   -- TransactionEvent(Updated); NULL (a row older than the column) is off.
   tx_updated_meter_values INTEGER,
+  -- #593: off | warn | enforce, the OCPP 1.6J inbound CALL validation mode.
+  -- NULL (a row older than the column) is the default, warn.
+  inbound_validation TEXT,
   -- #609: the per-charge-point transport settings (reconnect policy, ...), a
   -- JSON object. NULL: the built-in behaviour.
   transport_options TEXT
@@ -742,9 +745,20 @@ export function runMigrations(db: Database): void {
     }
   }
 
-  // v24 → v25 (#609): `charge_points.transport_options`. Guarded like the v16
-  // column; NULL (every row of an older database) is the built-in behaviour.
+  // v24 → v25 (#593): `charge_points.inbound_validation`. Guarded like the
+  // v16 column; existing rows stay NULL, which restores as the default (warn).
   if (stored < 25) {
+    const cols = db.all<{ name: string }>("PRAGMA table_info(charge_points)");
+    if (!new Set(cols.map((c) => c.name)).has("inbound_validation")) {
+      db.exec("ALTER TABLE charge_points ADD COLUMN inbound_validation TEXT");
+    }
+  }
+
+  // v27 → v28 (#609): `charge_points.transport_options`. Guarded like the v16
+  // column; NULL (every row of an older database) is the built-in behaviour.
+  // Gated on `< 28`, not on the number the branch started with: a database
+  // already stamped 25-27 by main has the other columns but not this one.
+  if (stored < 28) {
     const cols = db.all<{ name: string }>("PRAGMA table_info(charge_points)");
     if (!new Set(cols.map((c) => c.name)).has("transport_options")) {
       db.exec("ALTER TABLE charge_points ADD COLUMN transport_options TEXT");

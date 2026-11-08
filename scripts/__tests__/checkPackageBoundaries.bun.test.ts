@@ -11,6 +11,7 @@ import {
   formatReport,
   hasFailures,
   jsonSummary,
+  layerViolationOf,
   loadConfig,
   loadSnapshot,
   readAliases,
@@ -167,6 +168,7 @@ describe("package boundaries on synthetic input", () => {
     const config = {
       ...DEFAULT_CONFIG,
       testAllowList: [],
+      layerExemptions: [],
       specifierAllowList: {
         "packages/core/src/cp/a.ts": {
           specifiers: ["bun:sqlite", "bun:ffi"],
@@ -529,5 +531,140 @@ describe("package manifests", () => {
     ).toEqual([
       'package.json: the published root package must not use any "workspace:" dependency',
     ]);
+  });
+});
+
+describe("layer direction inside src/cp (#571)", () => {
+  const cp = "packages/core/src/cp";
+  const run = (
+    files: Record<string, string>,
+    exemptions: { from: string; to: string; why: string }[] = [],
+  ) =>
+    checkBoundaries(snapshot(files), {
+      ...DEFAULT_CONFIG,
+      knownViolations: [],
+      testAllowList: [],
+      specifierAllowList: {},
+      layerExemptions: exemptions,
+    });
+
+  it("judges each pair of layers", () => {
+    const ok = [
+      ["domain", "domain"],
+      ["domain", "shared"],
+      ["application", "domain"],
+      ["application", "shared"],
+      ["infrastructure", "domain"],
+      ["infrastructure", "application"],
+      ["infrastructure", "shared"],
+      ["shared", "shared"],
+    ];
+    for (const [a, b] of ok)
+      expect(layerViolationOf(`${cp}/${a}/x.ts`, `${cp}/${b}/y.ts`)).toBeNull();
+    const bad = [
+      ["domain", "application"],
+      ["domain", "infrastructure"],
+      ["application", "infrastructure"],
+      ["shared", "domain"],
+      ["shared", "application"],
+      ["shared", "infrastructure"],
+    ];
+    for (const [a, b] of bad)
+      expect(layerViolationOf(`${cp}/${a}/x.ts`, `${cp}/${b}/y.ts`)).toEqual({
+        group: `layer ${a} ⊅ ${b}`,
+      });
+  });
+
+  it("seals domain and shared from core code outside src/cp and from apps", () => {
+    for (const a of ["domain", "shared"]) {
+      expect(
+        layerViolationOf(`${cp}/${a}/x.ts`, "packages/core/src/utils/y.ts"),
+      ).not.toBeNull();
+      expect(
+        layerViolationOf(`${cp}/${a}/x.ts`, "apps/cli/src/y.ts"),
+      ).not.toBeNull();
+    }
+    expect(
+      layerViolationOf(
+        `${cp}/application/x.ts`,
+        "packages/core/src/utils/y.ts",
+      ),
+    ).toBeNull();
+    expect(
+      layerViolationOf(`${cp}/domain/x.ts`, "packages/ocpp/src/y.ts"),
+    ).toBeNull();
+  });
+
+  it("fails on an import against the direction, type-only ones included", () => {
+    const r = run({
+      [`${cp}/domain/a.ts`]: 'import type { B } from "../application/b";',
+      [`${cp}/application/b.ts`]: "export type B = 1;",
+    });
+    expect(r.violations.map((v) => [v.type, v.group, v.typeOnly])).toEqual([
+      ["layer", "layer domain ⊅ application", true],
+    ]);
+    expect(hasFailures(r)).toBe(true);
+  });
+
+  it("does not check test files", () => {
+    const r = run({
+      [`${cp}/domain/a.test.ts`]: 'import "../infrastructure/b";',
+      [`${cp}/infrastructure/b.ts`]: "export const b = 1;",
+    });
+    expect(r.violations).toEqual([]);
+  });
+
+  it("downgrades an exempted edge to a warning and fails once the exemption is stale", () => {
+    const files = {
+      [`${cp}/domain/a.ts`]: 'import { b } from "../infrastructure/b";',
+      [`${cp}/infrastructure/b.ts`]: "export const b = 1;",
+    };
+    const exemption = {
+      from: `${cp}/domain/a.ts`,
+      to: `${cp}/infrastructure/b.ts`,
+      why: "test",
+    };
+    const r = run(files, [exemption]);
+    expect(r.violations).toEqual([]);
+    expect(r.warnings).toHaveLength(1);
+    expect(r.staleAllowances).toEqual([]);
+
+    const fixed = run(
+      {
+        [`${cp}/domain/a.ts`]: "export const a = 1;",
+        [`${cp}/infrastructure/b.ts`]: "export const b = 1;",
+      },
+      [exemption],
+    );
+    expect(fixed.staleAllowances).toEqual([
+      `LAYER_EXEMPTIONS ${exemption.from} -> ${exemption.to}`,
+    ]);
+    expect(hasFailures(fixed)).toBe(true);
+  });
+
+  it("exempts one pair only, not the whole importing file", () => {
+    const r = run(
+      {
+        [`${cp}/domain/a.ts`]:
+          'import "../infrastructure/b";\nimport "../infrastructure/c";',
+        [`${cp}/infrastructure/b.ts`]: "export const b = 1;",
+        [`${cp}/infrastructure/c.ts`]: "export const c = 1;",
+      },
+      [
+        {
+          from: `${cp}/domain/a.ts`,
+          to: `${cp}/infrastructure/b.ts`,
+          why: "test",
+        },
+      ],
+    );
+    expect(r.violations.map((v) => v.target)).toEqual([
+      `${cp}/infrastructure/c.ts`,
+    ]);
+  });
+
+  it("every exemption of the real tree carries a reason", () => {
+    for (const e of DEFAULT_CONFIG.layerExemptions)
+      expect(e.why.length).toBeGreaterThan(20);
   });
 });

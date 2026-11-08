@@ -4,7 +4,7 @@
  * many CSMS implementations accept (e.g. `ocpp_ws_secret`). CLI runtimes (Bun
  * / Node `ws`) send the credentials as a real HTTP Basic header instead.
  */
-import type { WsClientOptions } from "./WsClientOptions";
+import type { WsClientOptions } from "../../shared/WsClientOptions";
 import {
   OCPP_WEBSOCKET_PROTOCOL_16,
   OCPP_WEBSOCKET_PROTOCOL_201,

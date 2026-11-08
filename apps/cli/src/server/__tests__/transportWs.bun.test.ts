@@ -8,7 +8,7 @@ import { createRuntimeDeps } from "../socketServer";
 import { BunSqliteDatabase } from "@ocpp-cp-sim/core/cp/domain/persistence/BunSqliteDatabase";
 import { ChargePoint } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
 import { DefaultBootNotification } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
-import { UnsupportedWsOptionError } from "@ocpp-cp-sim/core/cp/infrastructure/transport/WsClientOptions";
+import { UnsupportedWsOptionError } from "@ocpp-cp-sim/core/cp/shared/WsClientOptions";
 
 // #611 on Bun: handshakeTimeoutMs, perMessageDeflate and proxy are honoured;
 // maxPayloadBytes and localAddress are not and are refused, never ignored.

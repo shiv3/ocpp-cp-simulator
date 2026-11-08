@@ -66,6 +66,9 @@ function runParseArgs(args: string[]) {
     "  inboundValidation: options.inboundValidation ?? null,",
     "  bootstrapInboundValidation:",
     "    buildBootstrap(options)?.inboundValidation ?? null,",
+    "  reservationAuthorizeIdTag: options.reservationAuthorizeIdTag ?? null,",
+    "  bootstrapReservationAuthorizeIdTag:",
+    "    buildBootstrap(options)?.reservationAuthorizeIdTag ?? null,",
     "}));",
   ].join("\n");
 
@@ -245,6 +248,26 @@ describe("parseArgs OCPP 1.6 security flags", () => {
     const bad = runParseArgs([...base, "--inbound-validation", "strict"]);
     expect(bad.status).toBe(1);
     expect(bad.stderr).toContain("--inbound-validation must be");
+  });
+
+  it("--reservation-authorize-id-tag turns the #595 option on for the bootstrap charge point", () => {
+    const base = [
+      "--cp-id",
+      "CP-595",
+      "--ws-url",
+      "ws://csms.example.test/ocpp/",
+    ];
+    const on = runParseArgs([...base, "--reservation-authorize-id-tag"]);
+    expect(on.status).toBe(0);
+    expect(JSON.parse(on.stdout)).toMatchObject({
+      reservationAuthorizeIdTag: true,
+      bootstrapReservationAuthorizeIdTag: true,
+    });
+    const off = runParseArgs(base);
+    expect(JSON.parse(off.stdout)).toMatchObject({
+      reservationAuthorizeIdTag: null,
+      bootstrapReservationAuthorizeIdTag: null,
+    });
   });
 
   it("--tx-updated-meter-values turns the #347 option on for the bootstrap charge point", () => {

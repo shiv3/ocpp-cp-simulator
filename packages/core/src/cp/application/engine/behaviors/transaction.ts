@@ -16,6 +16,7 @@ import {
 } from "../../../domain/types/OcppTypes";
 import { isOcpp2Version } from "../../../domain/types/OcppVersion";
 import { LogType } from "../../../shared/Logger";
+import { startBlockedByReservation16 } from "./reservation";
 
 /**
  * What the transaction defaults need from the station beyond its public API.
@@ -68,6 +69,11 @@ export function transactionBehavior(cp: ChargePoint): Behavior {
           const resolved = connectorId || 1;
           const connector = cp.getConnector(resolved);
           if (!connector || connector.availability !== "Operative") {
+            return { response: { status: "Rejected" } };
+          }
+          // 1.6 §5.13: a connector-0 reservation of another tag keeps its
+          // connector; one answer per CALL, so refuse before `Accepted`.
+          if (startBlockedByReservation16(cp, resolved, idTag)) {
             return { response: { status: "Rejected" } };
           }
           // 1.6 §5.11: the transaction starts while the answer is built.
@@ -249,11 +255,23 @@ export async function startTransaction(
     }
   }
 
+  // 1.6 §5.13: a connector-0 reservation of another tag keeps a connector
+  // free for its whole validity. Checked after the Authorize gate, where an
+  // expired reservation is dropped as before; the session does not start and
+  // no StartTransaction.req is sent.
+  if (startBlockedByReservation16(cp, connectorId, tagId)) {
+    logger.warn(
+      `Refusing transaction start for ${tagId} on connector ${connectorId}: it would leave no connector for a connector-0 reservation (OCPP 1.6 §5.13)`,
+      LogType.TRANSACTION,
+    );
+    return { started: false };
+  }
+
   // §5.13: if the connector was Reserved (or the reservation is for
   // connectorId=0 with this idTag), consume that reservation and carry its id
-  // into StartTransaction.req so CSMS can close it out.
-  const reservation =
-    cp.reservationManager.getReservationForConnector(connectorId);
+  // into StartTransaction.req so CSMS can close it out. A connector-0
+  // reservation belongs to its idTag / parentIdTag only (#595).
+  const reservation = cp.reservationManager.reservationFor(connectorId, tagId);
   const reservationId = reservation?.reservationId;
 
   const transaction: Transaction = {

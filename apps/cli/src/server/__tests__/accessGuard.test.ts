@@ -102,14 +102,43 @@ describe("Host allowlist", () => {
       allowedHosts: ["sim.example.com"],
       trustedProxies: ["10.0.0.0/8"],
     });
-    const viaProxy = req("http://internal:9700/", {
+    const viaProxy = req("http://sim.example.com/", {
       "x-forwarded-host": "evil.example",
     });
     expect(g.check(viaProxy, "10.0.0.5").refuse?.status).toBe(403);
-    const fine = req("http://internal:9700/", {
+    const fine = req("http://sim.example.com/", {
       "x-forwarded-host": "sim.example.com",
     });
     expect(g.check(fine, "10.0.0.5").refuse).toBeUndefined();
+  });
+  it("also checks the request's own Host, so a forged Forwarded host cannot launder it (#790)", () => {
+    const g = createAccessGuard({
+      allowedHosts: ["sim.example.com"],
+      trustedProxies: ["127.0.0.1"],
+    });
+    // DNS-rebinding page behind a stock proxy that passes Forwarded through.
+    for (const headers of [
+      { host: "attacker.com", forwarded: "host=localhost" },
+      { host: "attacker.com", "x-forwarded-host": "localhost" },
+    ]) {
+      expect(
+        g.check(req("http://attacker.com/", headers), "127.0.0.1").refuse,
+      ).toMatchObject({ status: 403 });
+    }
+  });
+  it("believes the rightmost forwarded host, the hop the proxy wrote (#790)", () => {
+    const g = createAccessGuard({
+      allowedHosts: ["sim.example.com"],
+      trustedProxies: ["127.0.0.1"],
+    });
+    const forged = req("http://sim.example.com/", {
+      forwarded: "host=localhost, host=evil.example",
+    });
+    expect(g.check(forged, "127.0.0.1").refuse?.status).toBe(403);
+    const forgedX = req("http://sim.example.com/", {
+      "x-forwarded-host": "localhost, evil.example",
+    });
+    expect(g.check(forgedX, "127.0.0.1").refuse?.status).toBe(403);
   });
 });
 
@@ -192,6 +221,22 @@ describe("--require-tls", () => {
     );
     const remote = req("http://x/", { "x-forwarded-for": "203.0.113.9" });
     expect(loopbackProxy.check(remote, "127.0.0.1").refuse?.status).toBe(403);
+  });
+  it("believes the rightmost forwarded proto, not a client-supplied https (#790)", () => {
+    const g = createAccessGuard({
+      requireTls: true,
+      trustedProxies: ["10.0.0.0/8"],
+    });
+    for (const headers of [
+      { "x-forwarded-proto": "https, http", "x-forwarded-for": "203.0.113.9" },
+      { forwarded: "proto=https, proto=http;for=203.0.113.9" },
+    ]) {
+      expect(
+        g.check(req("http://x/", headers), "10.0.0.1").refuse,
+      ).toMatchObject({ status: 403, message: "TLS required" });
+    }
+    const ok = req("http://x/", { "x-forwarded-proto": "http, https" });
+    expect(g.check(ok, "10.0.0.1").refuse).toBeUndefined();
   });
   it("exempts the health path", () => {
     expect(

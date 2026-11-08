@@ -143,17 +143,23 @@ export interface ForwardedInfo {
   readonly forClients: readonly string[];
 }
 
-function firstValue(header: string | null): string | null {
+/**
+ * The last (rightmost) element of a comma-separated header: the hop the
+ * trusted proxy appended. Anything to its left was written by the client or by
+ * an earlier hop and is not believed.
+ */
+function lastValue(header: string | null): string | null {
   if (!header) return null;
-  const first = header.split(",")[0]?.trim() ?? "";
-  return first.length > 0 ? first : null;
+  const parts = header.split(",");
+  const last = parts[parts.length - 1]?.trim() ?? "";
+  return last.length > 0 ? last : null;
 }
 
 function unquote(value: string): string {
   return value.replace(/^"(.*)"$/, "$1");
 }
 
-/** The first element of an RFC 7239 `Forwarded` header, plus every `for=`. */
+/** The last element of an RFC 7239 `Forwarded` header, plus every `for=`. */
 function parseForwardedHeader(header: string | null): {
   proto: string | null;
   host: string | null;
@@ -166,6 +172,7 @@ function parseForwardedHeader(header: string | null): {
   };
   if (!header) return result;
   const elements = header.split(",");
+  const lastIndex = elements.length - 1;
   elements.forEach((element, index) => {
     for (const pair of element.split(";")) {
       const eq = pair.indexOf("=");
@@ -173,8 +180,9 @@ function parseForwardedHeader(header: string | null): {
       const key = pair.slice(0, eq).trim().toLowerCase();
       const value = unquote(pair.slice(eq + 1).trim());
       if (key === "for") result.forClients.push(value);
-      if (index === 0 && key === "proto") result.proto = value.toLowerCase();
-      if (index === 0 && key === "host") result.host = value;
+      if (index === lastIndex && key === "proto")
+        result.proto = value.toLowerCase();
+      if (index === lastIndex && key === "host") result.host = value;
     }
   });
   return result;
@@ -190,8 +198,8 @@ export function readForwarded(
   headers: Headers,
 ): { ok: true; info: ForwardedInfo } | { ok: false; reason: string } {
   const standard = parseForwardedHeader(headers.get("forwarded"));
-  const xProto = firstValue(headers.get("x-forwarded-proto"))?.toLowerCase();
-  const xHost = firstValue(headers.get("x-forwarded-host"));
+  const xProto = lastValue(headers.get("x-forwarded-proto"))?.toLowerCase();
+  const xHost = lastValue(headers.get("x-forwarded-host"));
   if (standard.proto && xProto && standard.proto !== xProto) {
     return {
       ok: false,
@@ -364,11 +372,16 @@ export function createAccessGuard(options: AccessGuardOptions): AccessGuard {
       }
 
       if (allowedHosts.length > 0) {
-        // Behind a trusted proxy the name the client typed is the forwarded
-        // host; otherwise it is the Host the request itself carries.
-        const hostHeader =
-          forwarded?.host ?? req.headers.get("host") ?? new URL(req.url).host;
-        if (!hostAllowed(hostHeader)) {
+        // The request's own `Host` must always be allowed: a client can
+        // forge any forwarding header a proxy does not overwrite (stock nginx
+        // passes `Forwarded` and `X-Forwarded-Host` through), but not the
+        // `Host` a rebinding page's browser sends. Behind a trusted proxy the
+        // forwarded host must be allowed as well.
+        const ownHost = req.headers.get("host") ?? new URL(req.url).host;
+        if (
+          !hostAllowed(ownHost) ||
+          (forwarded?.host && !hostAllowed(forwarded.host))
+        ) {
           return {
             refuse: { status: 403, message: "host not allowed" },
             forwardedTrusted,

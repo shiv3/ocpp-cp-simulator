@@ -300,3 +300,53 @@ describe("BootGate", () => {
     });
   });
 });
+
+describe("BootGate.isInboundSilenced (§4.2)", () => {
+  const retryAfter = new Date("2030-01-01T00:00:00Z");
+
+  it("is silent only while Rejected and before the retry is due", () => {
+    const gate = new BootGate();
+    expect(gate.isInboundSilenced()).toBe(false);
+    gate.set({ status: "Pending" });
+    expect(gate.isInboundSilenced()).toBe(false);
+    gate.set({ status: "Accepted" });
+    expect(gate.isInboundSilenced()).toBe(false);
+    gate.set({ status: "Rejected", retryAfter });
+    expect(gate.isInboundSilenced(new Date("2029-12-31T23:59:59Z"))).toBe(true);
+    expect(gate.isInboundSilenced(retryAfter)).toBe(false);
+  });
+});
+
+describe("BootGate.runTriggered (§4.2)", () => {
+  const retryAfter = new Date("2030-01-01T00:00:00Z");
+  const before = new Date("2029-12-31T23:59:00Z");
+
+  it("lets a CALL pass while Pending, only inside the scope", () => {
+    const gate = new BootGate();
+    gate.set({ status: "Pending" });
+    expect(gate.isCallAllowed(OCPPAction.Heartbeat)).toBe(false);
+    expect(
+      gate.runTriggered(() => gate.isCallAllowed(OCPPAction.Heartbeat)),
+    ).toBe(true);
+    expect(gate.isCallAllowed(OCPPAction.Heartbeat)).toBe(false);
+  });
+
+  it("leaves Rejected closed until the retry interval has passed", () => {
+    const gate = new BootGate();
+    gate.set({ status: "Rejected", retryAfter });
+    expect(
+      gate.runTriggered(() => gate.isCallAllowed(OCPPAction.Heartbeat, before)),
+    ).toBe(false);
+  });
+
+  it("closes the scope when fn throws", () => {
+    const gate = new BootGate();
+    gate.set({ status: "Pending" });
+    expect(() =>
+      gate.runTriggered(() => {
+        throw new Error("boom");
+      }),
+    ).toThrow("boom");
+    expect(gate.isCallAllowed(OCPPAction.Heartbeat)).toBe(false);
+  });
+});

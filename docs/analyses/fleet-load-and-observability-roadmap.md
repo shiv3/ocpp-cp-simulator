@@ -16,7 +16,7 @@ related:
   - choosing-an-interface.md
   - ../sources/github-issues.md
   - ../sources/bench-readme.md
-updated: 2026-11-07
+updated: 2026-11-08
 ---
 
 # Fleet, load and observability roadmap
@@ -37,8 +37,8 @@ criteria and a size. Per the [ingest rule](../../CLAUDE.md), the PR that ships
 an item updates its row here — status and issue number — in the same commit, so
 this page stays true as work lands.
 
-Issue provenance for every row below is indexed in
-[GitHub issues](../sources/github-issues.md).
+Issue numbers for provenance are cited inline in each row (the
+[GitHub issues](../sources/github-issues.md) table is a frozen archive).
 
 **Size key:** S = a few files, one RPC. M = a new subsystem behind an existing
 seam. L = crosses persistence, UI and the scenario schema, or changes the

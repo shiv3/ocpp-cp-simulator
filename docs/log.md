@@ -2414,3 +2414,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - A `warn` / `enforce` violation is traced: the inbound CALL's record carries `meta.validation = { mode, errorCode, description }` (a structured `Inbound validation:` line on the `WebSocket` log channel, merged by `logLinesToTrace` and held back by the live `--trace-output` writer for one tick). `inboundValidation` is settable: `--inbound-validation`, `cp.create` / `cp.update` (contracts, HTTP, MCP), persisted in `charge_points.inbound_validation` (schema v25). The wiki states the order with the #594 `NotSupported`.
 - Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#inbound-call-validation-on-ocpp-j-16), [Trace format](concepts/trace-format.md#validation-violations-meta), [CLI](entities/cli.md), [Daemon](entities/daemon.md), [Control plane](concepts/control-plane.md), [State persistence](concepts/state-persistence.md).
+
+## [2026-11-08] ingest | 1.6 triggered status notifications report the current status (#730)
+
+- 1.6 §4.4 / §4.5, whitepaper L01.FR.28/29 and N01.FR.12: TriggerMessage / ExtendedTriggerMessage for Diagnostics, Firmware, Log and SignedFirmware status read the engine's last sent status instead of always sending `Idle`. Golden `16-firmware-trigger-status` re-recorded (id-10: `Downloaded` between Downloaded and Installing); `16-trigger-status-while-busy` added. 2.x is #596 / PR #673.
+- Page: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#ocpp-j-16-triggered-status-notifications).

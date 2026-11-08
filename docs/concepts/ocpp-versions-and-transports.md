@@ -297,6 +297,21 @@ Limits:
 - `GetTransactionStatus` answers `messagesInQueue: false` whatever the
   queue holds (E14).
 
+## OCPP-J 1.6 triggered status notifications
+
+A triggered `DiagnosticsStatusNotification`, `FirmwareStatusNotification`,
+`LogStatusNotification` or `SignedFirmwareStatusNotification` reports what the
+station is doing, not a fixed `Idle` (#730; 1.6 §4.4, §4.5, security whitepaper
+L01.FR.28/29, N01.FR.12). The status comes from the last one the engine sent
+(`ChargerState`):
+
+| Trigger                                              | Busy: reported as it is                                        | Otherwise |
+| ---------------------------------------------------- | -------------------------------------------------------------- | --------- |
+| `TriggerMessage(DiagnosticsStatusNotification)`      | `Uploading`                                                    | `Idle`    |
+| `TriggerMessage(FirmwareStatusNotification)`         | `Downloading`, `Downloaded` (waiting to install), `Installing` | `Idle`    |
+| `ExtendedTriggerMessage(LogStatusNotification)`      | `Uploading`, with the GetLog `requestId`                       | `Idle`    |
+| `ExtendedTriggerMessage(FirmwareStatusNotification)` | the last sent status with its `requestId`, unless `Installed`  | `Idle`    |
+
 ## Transaction message retries (OCPP-J 1.6)
 
 OCPP 1.6 Part 2 §3.7.1 lets a charge point skip a transaction-related

@@ -686,6 +686,27 @@ describe("OCPP 1.6 transaction message CALLERROR retry (#527, §3.7.1)", () => {
       expect(idOf(socket.of("StopTransaction")[0]!)).toBe(23);
     });
 
+    it("queues the held stop when the resend settles behind a closed boot gate", async () => {
+      const station = retrying();
+      const { socket, handler } = station;
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(socket.of("StartTransaction")).toHaveLength(2);
+      stop(station);
+      handler.setBootStatus({ status: "Pending" });
+
+      socket.callResult(socket.last().id, {
+        transactionId: 25,
+        idTagInfo: { status: "Accepted" },
+      });
+      expect(socket.of("StopTransaction")).toHaveLength(0);
+
+      handler.setBootStatus({ status: "Accepted" });
+      handler.flushPendingQueue();
+      expect(socket.of("StopTransaction")).toHaveLength(1);
+      expect(idOf(socket.of("StopTransaction")[0]!)).toBe(25);
+      expect(station.discarded).toEqual([]);
+    });
+
     it("an offline stop follows the salvaged resend at the replay and takes its id", async () => {
       const { socket, connector, handler, discarded } = setup();
       handler.sendTransactionEvent({

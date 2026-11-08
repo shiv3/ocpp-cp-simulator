@@ -1296,6 +1296,14 @@ export class OCPPMessageHandler {
       LogType.TRANSACTION,
     );
     for (const entry of held) {
+      // The boot gate closed while the resend was settling (a
+      // TriggerMessage(BootNotification) answered Pending): sendRequest would
+      // drop the message. §3.7 queues it instead, as on a close (the timer
+      // path does the same).
+      if (!this.isCallAllowed(entry.action)) {
+        this.salvageOrDiscard(entry, "boot gate");
+        continue;
+      }
       this.applyStartOutcome(entry);
       if (entry.intercepted) {
         // Already seen by beforeSend (and carrying its `wire`, `attempt` and

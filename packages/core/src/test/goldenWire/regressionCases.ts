@@ -19,6 +19,8 @@ const c16 = (name: string, run: Case["run"], options?: Case["options"]) =>
   cases.push({ name: `16-${name}`, version: "1.6", run, options });
 const c201 = (name: string, run: Case["run"], options?: Case["options"]) =>
   cases.push({ name: `201-${name}`, version: "2.0.1", run, options });
+const c21 = (name: string, run: Case["run"], options?: Case["options"]) =>
+  cases.push({ name: `21-${name}`, version: "2.1", run, options });
 const both = (name: string, run: Case["run"], options?: Case["options"]) => {
   c16(name, run, options);
   c201(name, run, options);
@@ -1339,6 +1341,22 @@ c201("reset-unknown-evse", async (r) => {
 c201("reset-immediate-resume-charging", async (r) => {
   await charging(r);
   await r.csms.call("Reset", { type: "ImmediateAndResume", evseId: 1 });
+  await settle(r);
+});
+
+// 2.1 I07.FR.01 / I11.FR.01: without local cost calculation SetDefaultTariff
+// and ChangeTransactionTariff are an RPC CALLERROR NotSupported, not a status;
+// GetTariffs / ClearTariffs (I09.FR.03, I10.FR.06) stay NoTariff results.
+c21("tariff-without-local-cost-calculation", async (r) => {
+  await charging(r);
+  const tariff = { tariffId: "T-1", currency: "EUR" };
+  await r.csms.call("SetDefaultTariff", { evseId: 1, tariff });
+  await r.csms.call("ChangeTransactionTariff", {
+    tariff,
+    transactionId: r.transactionId(1),
+  });
+  await r.csms.call("GetTariffs", { evseId: 1 });
+  await r.csms.call("ClearTariffs", {});
   await settle(r);
 });
 

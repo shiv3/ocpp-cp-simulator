@@ -224,6 +224,8 @@ export interface V201InboundContext {
 export interface V201HandlerResult {
   readonly response: unknown;
   readonly afterResult?: () => void;
+  /** Answer with an RPC CALLERROR instead of a CALLRESULT (`response` is unused). */
+  readonly callError?: { readonly code: string; readonly description: string };
 }
 
 export interface V201InboundHandler {

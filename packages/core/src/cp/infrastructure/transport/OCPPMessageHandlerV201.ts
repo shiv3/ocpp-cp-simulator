@@ -636,7 +636,15 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
             ),
           );
         };
-        const finish = ({ response, afterResult }: V201HandlerResult): void => {
+        const finish = ({
+          response,
+          afterResult,
+          callError,
+        }: V201HandlerResult): void => {
+          if (callError) {
+            exchange.replyError(callError.code, callError.description);
+            return;
+          }
           exchange.reply(response, {
             ...(afterResult ? { effect: afterResult } : {}),
           });

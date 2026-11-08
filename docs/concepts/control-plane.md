@@ -26,7 +26,7 @@ related:
   - charging-sessions.md
   - local-authorization.md
   - fleet-templates.md
-updated: 2026-11-08
+updated: 2026-11-09
 ---
 
 # Socket.IO control plane
@@ -778,7 +778,9 @@ Guarantees a conformance driver can rely on:
   remains the explicit way to produce one such frame on demand.
 - The register reading of `TransactionEvent(Started)` carries
   `context: "Transaction.Begin"` and that of `Ended`
-  `context: "Transaction.End"` (#347), signed or not.
+  `context: "Transaction.End"` (#347), signed or not. With the transaction-end
+  settings set they carry more samples; see
+  [Transaction-end meter data](ocpp-versions-and-transports.md#transaction-end-meter-data-607).
 
 ### Daemon methods
 

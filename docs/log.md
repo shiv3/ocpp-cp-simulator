@@ -2414,3 +2414,9 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - A `warn` / `enforce` violation is traced: the inbound CALL's record carries `meta.validation = { mode, errorCode, description }` (a structured `Inbound validation:` line on the `WebSocket` log channel, merged by `logLinesToTrace` and held back by the live `--trace-output` writer for one tick). `inboundValidation` is settable: `--inbound-validation`, `cp.create` / `cp.update` (contracts, HTTP, MCP), persisted in `charge_points.inbound_validation` (schema v25). The wiki states the order with the #594 `NotSupported`.
 - Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#inbound-call-validation-on-ocpp-j-16), [Trace format](concepts/trace-format.md#validation-violations-meta), [CLI](entities/cli.md), [Daemon](entities/daemon.md), [Control plane](concepts/control-plane.md), [State persistence](concepts/state-persistence.md).
+
+## [2026-11-08] ingest | 2.1 Reset ImmediateAndResume is Rejected without transaction resumption (#717)
+
+- B13.FR.01: the station has no `TxCtrlr.TxResumptionTimeout`, so a 2.1 `Reset` with `type = ImmediateAndResume` and an ongoing transaction on a targeted EVSE answers `Rejected`; the transaction keeps running and no BootNotification follows. B13.FR.02: with none ongoing it is `Accepted` and behaves as `Immediate`. 2.0.1 is unchanged (the type is a FormatViolation there).
+- Golden wire: the harness knows `2.1`; new cases `21-reset-immediate-resume-charging` and `21-reset-immediate-resume-idle`.
+- Pages: [Default behaviors](entities/default-behaviors.md).

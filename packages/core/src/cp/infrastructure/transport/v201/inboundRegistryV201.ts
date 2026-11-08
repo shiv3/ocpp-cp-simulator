@@ -188,6 +188,14 @@ export interface V201CertificateSigning {
    */
   requestSignature(use: SignedCertificateUse): Promise<void>;
   /**
+   * TriggerMessage SignCombinedCertificate (2.1 F06.FR.08, #553): a new
+   * CSR sent without `certificateType`, which asks for one certificate for
+   * both the CSMS connection and the 15118 connection. The simulator has no
+   * 15118 stack, so the chain that answers is its Charging Station
+   * certificate.
+   */
+  requestCombinedSignature(): Promise<void>;
+  /**
    * A chain for `use` was just stored, before its CALLRESULT is written
    * (#564): a security-profile-3 station hands a new Charging Station
    * certificate to the transport as the next connection's TLS client

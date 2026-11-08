@@ -94,6 +94,7 @@ import {
 } from "../../domain/connector/Transaction";
 import {
   buildSampledValues,
+  toOcppJ16Wire,
   type MeterSampleOverrides,
   type ReadingContext,
 } from "../../domain/connector/MeterValueBuilder";
@@ -135,6 +136,7 @@ import {
   AuthorizeResultHandler,
   DataTransferHandler,
 } from "./handlers";
+import { HandlerCallError } from "./handlers/HandlerCallError";
 import { inboundV16Violation } from "./codec/validateV16";
 import { CallExchange } from "./inbound/CallExchange";
 import { InboundCallGate, ports16 } from "./inbound/InboundCallGate";
@@ -493,6 +495,11 @@ export class OCPPMessageHandler {
    * - Rejected: nothing goes out at all until retryAfter elapses.
    * - Idle (pre-handshake): allow BootNotification only.
    */
+  /** §4.2: CALLs made inside `fn` are the answer to a TriggerMessage. */
+  public runTriggered<T>(fn: () => T): T {
+    return this._bootGate.runTriggered(fn);
+  }
+
   private isCallAllowed(action: OCPPAction): boolean {
     return this._bootGate.isCallAllowed(action);
   }
@@ -944,7 +951,9 @@ export class OCPPMessageHandler {
     const measurands =
       overrides.measurands ??
       this._chargePoint.configuration.meterValuesSampledData();
-    const sampledValue = buildSampledValues(connector, measurands, context);
+    const sampledValue = toOcppJ16Wire(
+      buildSampledValues(connector, measurands, context),
+    );
     const timestamp = overrides.timestamp ?? new Date(this.clock.now());
     // #315: during a transaction, also send the energy register signed.
     // Clock-aligned samples are not signed (no aligned/fiscal records yet).
@@ -1509,6 +1518,16 @@ export class OCPPMessageHandler {
         ...(effect ? { effect } : {}),
       });
     } catch (error) {
+      if (error instanceof HandlerCallError) {
+        this._logger.warn(
+          `${action} answered with CALLERROR ${error.errorCode}: ${error.description}`,
+          LogType.OCPP,
+        );
+        if (exchange.state === "open") {
+          exchange.replyError(error.errorCode, error.description);
+        }
+        return;
+      }
       this._logger.error(`Error handling ${action}: ${error}`, LogType.OCPP);
       if (exchange.state === "open") {
         exchange.replyError(OCPPErrorCodeV16.InternalError, String(error));

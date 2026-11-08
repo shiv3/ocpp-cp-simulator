@@ -118,3 +118,46 @@ export async function leafForCsr(
   });
   return cert.toString("pem");
 }
+
+export interface SigningLeafOptions {
+  notBefore?: Date;
+  notAfter?: Date;
+  /** The CA that signs the leaf; absent: a self-signed certificate. */
+  issuer?: TestAuthority;
+}
+
+/**
+ * A firmware signing certificate (L01.FR.21 / L01.FR.23) with a validity
+ * period of the test's choosing, so an expired or not-yet-valid one can be
+ * built. Self-signed unless `issuer` is given.
+ */
+export async function signingLeaf(
+  options: SigningLeafOptions = {},
+): Promise<string> {
+  const keys = await crypto.subtle.generateKey(EC_ALG, true, [
+    "sign",
+    "verify",
+  ]);
+  const { notBefore, notAfter } = { ...validity(), ...options };
+  const subject = "CN=Firmware signer,O=Example";
+  const cert = options.issuer
+    ? await x509.X509CertificateGenerator.create({
+        serialNumber: "0a1b",
+        subject,
+        issuer: options.issuer.name,
+        notBefore,
+        notAfter,
+        signingAlgorithm: EC_ALG,
+        publicKey: keys.publicKey,
+        signingKey: options.issuer.keys.privateKey,
+      })
+    : await x509.X509CertificateGenerator.createSelfSigned({
+        serialNumber: "0a1b",
+        name: subject,
+        notBefore,
+        notAfter,
+        signingAlgorithm: EC_ALG,
+        keys,
+      });
+  return cert.toString("pem");
+}

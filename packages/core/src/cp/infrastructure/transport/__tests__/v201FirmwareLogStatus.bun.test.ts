@@ -2,6 +2,10 @@ import { describe, it, expect } from "bun:test";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
 import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
+import {
+  selfSignedRoot,
+  signingLeaf,
+} from "../../../domain/security/__tests__/certificateFixtures";
 
 /**
  * #345: on OCPP 2.0.1 the station can follow an accepted UpdateFirmware /
@@ -198,3 +202,123 @@ describe("OCPP 2.0.1 firmware / log lifecycles (#345)", () => {
     }
   });
 });
+
+/**
+ * #716 L01.FR.21 / L01.FR.22 / L01.FR.02: the signingCertificate of an
+ * UpdateFirmware is validated before the request is accepted.
+ */
+describe.each(["OCPP-2.0.1", "OCPP-2.1"] as const)(
+  "%s UpdateFirmware signing certificate (#716)",
+  (version) => {
+    const DAY = 86_400_000;
+    const updateFirmware = (id: string, signingCertificate?: string) =>
+      [
+        2,
+        id,
+        "UpdateFirmware",
+        {
+          requestId: 51,
+          firmware: {
+            location: "https://files.example/fw.bin",
+            retrieveDateTime: "2026-09-17T00:00:00.000Z",
+            ...(signingCertificate !== undefined ? { signingCertificate } : {}),
+          },
+        },
+      ] as OcppFrame;
+
+    async function refused(signingCertificate: string, id: string) {
+      const csms = startMockCsms();
+      const cp = await bootedChargePoint(csms, id, version);
+      try {
+        csms.send(updateFirmware("uf-bad", signingCertificate));
+        const ack = await csms.waitForFrame(resultFor("uf-bad"));
+        expect(ack[2]).toEqual({ status: "InvalidCertificate" });
+        const event = await csms.waitForCall("SecurityEventNotification");
+        expect(event.payload).toMatchObject({
+          type: "InvalidFirmwareSigningCertificate",
+        });
+        // No requestId remembered: a status report has none to stamp.
+        expect(cp.lastFirmwareRequestId).toBeUndefined();
+      } finally {
+        cp.disconnect();
+        await csms.stop();
+      }
+    }
+
+    it("answers InvalidCertificate for an unparsable certificate", async () => {
+      await refused("garbage", `CP-${version}-FW-GARBAGE`);
+    });
+
+    it("answers InvalidCertificate for an expired certificate", async () => {
+      const pem = await signingLeaf({
+        notBefore: new Date(Date.now() - 3 * DAY),
+        notAfter: new Date(Date.now() - DAY),
+      });
+      await refused(pem, `CP-${version}-FW-EXPIRED`);
+    });
+
+    it("accepts a valid certificate and remembers its requestId", async () => {
+      const csms = startMockCsms();
+      const cp = await bootedChargePoint(csms, `CP-${version}-FW-OK`, version);
+      try {
+        csms.send(updateFirmware("uf-ok", await signingLeaf()));
+        const ack = await csms.waitForFrame(resultFor("uf-ok"));
+        expect(ack[2]).toEqual({ status: "Accepted" });
+        expect(cp.lastFirmwareRequestId).toBe(51);
+        expect(
+          csms.received.some(
+            (f) => f[0] === 2 && f[2] === "SecurityEventNotification",
+          ),
+        ).toBe(false);
+      } finally {
+        cp.disconnect();
+        await csms.stop();
+      }
+    });
+
+    it("leaves a request without a signingCertificate Accepted", async () => {
+      const csms = startMockCsms();
+      const cp = await bootedChargePoint(
+        csms,
+        `CP-${version}-FW-NONE`,
+        version,
+      );
+      try {
+        csms.send(updateFirmware("uf-none"));
+        const ack = await csms.waitForFrame(resultFor("uf-none"));
+        expect(ack[2]).toEqual({ status: "Accepted" });
+      } finally {
+        cp.disconnect();
+        await csms.stop();
+      }
+    });
+
+    it("answers InvalidCertificate when a ManufacturerRootCertificate is installed and did not sign it", async () => {
+      const root = await selfSignedRoot("01", "Manufacturer Root");
+      const csms = startMockCsms();
+      const cp = await bootedChargePoint(
+        csms,
+        `CP-${version}-FW-ROOT`,
+        version,
+      );
+      try {
+        await cp.certificateStore.installRootCertificate(
+          "ManufacturerRootCertificate",
+          root.pem,
+          { maxEntries: 10 },
+        );
+        csms.send(updateFirmware("uf-self", await signingLeaf()));
+        const bad = await csms.waitForFrame(resultFor("uf-self"));
+        expect(bad[2]).toEqual({ status: "InvalidCertificate" });
+        csms.send(
+          updateFirmware("uf-issued", await signingLeaf({ issuer: root })),
+        );
+        const ok = await csms.waitForFrame(resultFor("uf-issued"));
+        expect(ok[2]).toEqual({ status: "Accepted" });
+      } finally {
+        cp.disconnect();
+        await csms.stop();
+      }
+    });
+  },
+);

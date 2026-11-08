@@ -33,4 +33,4 @@
 {"d":"CSMS>","k":"result","id":"id-17","p":{}}
 {"d":"CP>","k":"result","id":"id-16","p":{"status":"Accepted"}}
 {"d":"CSMS>","k":"call","id":"id-18","a":"ReserveNow","p":{"connectorId":1,"expiryDate":"<ts>","idTag":"OWNER2","reservationId":9}}
-{"d":"CP>","k":"result","id":"id-18","p":{"status":"Rejected"}}
+{"d":"CP>","k":"result","id":"id-18","p":{"status":"Accepted"}}

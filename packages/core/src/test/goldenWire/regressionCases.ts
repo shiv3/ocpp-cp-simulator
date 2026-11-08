@@ -895,6 +895,54 @@ c201("malformed-calls", async (r) => {
   }
   await settle(r);
 });
+// 1.6 §3.5.2 (#744): a CSMS verdict that contradicts the Local Authorization
+// List is reported with StatusNotification(0, LocalListConflict).
+const sendLocalList16 = (r: Rig, status = "Accepted") =>
+  r.csms.call("SendLocalList", {
+    listVersion: 1,
+    updateType: "Full",
+    localAuthorizationList: [{ idTag: "LOCAL-1", idTagInfo: { status } }],
+  });
+c16(
+  "local-list-conflict-authorize",
+  async (r) => {
+    await sendLocalList16(r);
+    r.cp.authorize("LOCAL-1");
+    await wait(300);
+    await settle(r);
+  },
+  {
+    responders: {
+      Authorize: () => ({ idTagInfo: { status: "Blocked" } }),
+    },
+  },
+);
+c16(
+  "local-list-conflict-start",
+  async (r) => {
+    await sendLocalList16(r);
+    r.plugIn();
+    await settle(r);
+    await r.cp.startTransaction("LOCAL-1", 1);
+    await wait(300);
+    await settle(r);
+  },
+  {
+    responders: {
+      StartTransaction: () => ({
+        transactionId: 7,
+        idTagInfo: { status: "Blocked" },
+      }),
+    },
+  },
+);
+c16("local-list-no-conflict", async (r) => {
+  await sendLocalList16(r);
+  r.cp.authorize("LOCAL-1");
+  r.cp.authorize("OTHER-1");
+  await wait(300);
+  await settle(r);
+});
 c16("malformed-calls", async (r) => {
   for (const [a, p] of [
     ["RemoteStartTransaction", {}],

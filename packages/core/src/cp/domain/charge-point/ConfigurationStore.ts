@@ -221,6 +221,13 @@ export class ConfigurationStore {
     return this.getBoolean("StopTransactionOnInvalidId") ?? true;
   }
 
+  /** Canonical key `MaxEnergyOnInvalidId` (2.x `TxCtrlr.MaxEnergyOnInvalidId`);
+   *  default `0`. Wh still delivered after a non-Accepted id when
+   *  `StopTransactionOnInvalidId` is false (E05.FR.03; 2.x only, 1.6 errata 3.17 is #736). */
+  maxEnergyOnInvalidId(): number {
+    return this.getInteger("MaxEnergyOnInvalidId") ?? 0;
+  }
+
   /** Canonical key `StopTransactionOnEVSideDisconnect` (2.x
    *  `TxCtrlr.StopTxOnEVSideDisconnect`); default `true`. Whether an EV-side
    *  cable disconnect stops the running transaction (1.6 §4.10, 2.0.1 E09) or
@@ -334,6 +341,15 @@ export class ConfigurationStore {
   removeRuntimeKey(name: string): boolean {
     if (!this.runtimeKeys.delete(name)) return false;
     return this.values.delete(name);
+  }
+
+  /**
+   * Whether `SupportedFeatureProfiles` lists `SmartCharging` (#594); true when
+   * the key is absent.
+   */
+  smartChargingSupported(): boolean {
+    const profiles = this.getArray("SupportedFeatureProfiles");
+    return profiles === undefined || profiles.includes("SmartCharging");
   }
 
   /** Canonical key `LocalAuthListEnabled`; default `true`. */

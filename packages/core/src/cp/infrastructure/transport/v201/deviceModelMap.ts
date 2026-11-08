@@ -42,6 +42,7 @@ export const V201_VARIABLE_TO_V16_KEY: ReadonlyMap<string, string> = new Map([
   ["AuthCacheCtrlr/Enabled", "AuthorizationCacheEnabled"],
   ["AuthCacheCtrlr/LifeTime", "AuthCacheLifeTime"],
   ["TxCtrlr/StopTxOnInvalidId", "StopTransactionOnInvalidId"],
+  ["TxCtrlr/MaxEnergyOnInvalidId", "MaxEnergyOnInvalidId"],
   ["TxCtrlr/StopTxOnEVSideDisconnect", "StopTransactionOnEVSideDisconnect"],
   // #538: MonitoringCtrlr (2.0.1 Part 2 §2.11.3-§2.11.9, 2.1 §2.13.3-
   // §2.13.9), read-only values the station defines at runtime (2.x only).

@@ -18,6 +18,8 @@
  *   it), not on the connector's electrical model (#323).
  */
 
+import { OCPPErrorCodeV16 } from "@ocpp-cp-sim/ocpp/index";
+import { HandlerCallError } from "../HandlerCallError";
 import { stationNow } from "../../stationNow";
 import type { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
 import type {
@@ -188,6 +190,7 @@ function applyProfileStatus(
   } else if (
     !paused &&
     connector.status === OCPPStatus.SuspendedEVSE &&
+    !connector.energyHeld &&
     connector.transaction != null
   ) {
     chargePoint.updateConnectorStatus(connector.id, OCPPStatus.Charging);
@@ -195,7 +198,33 @@ function applyProfileStatus(
 }
 
 /**
+ * Without the SmartCharging feature profile in `SupportedFeatureProfiles` the
+ * station does not know the smart-charging messages at all: OCPP-J 1.6 §4.2.3
+ * `NotSupported`, not a Rejected status (#594). Shared by SetChargingProfile,
+ * ClearChargingProfile and GetCompositeSchedule.
+ */
+function requireSmartCharging(context: HandlerContext, action: string): void {
+  if (context.chargePoint.configuration.smartChargingSupported()) return;
+  context.logger.warn(
+    `${action}: SmartCharging is not in SupportedFeatureProfiles → NotSupported`,
+    LogType.OCPP,
+  );
+  throw new HandlerCallError(
+    OCPPErrorCodeV16.NotSupported,
+    "SmartCharging is not supported",
+  );
+}
+
+/**
  * §5.10 SetChargingProfile.req
+ *
+ * Replacement: a profile with the same `chargingProfileId`, or with the same
+ * `stackLevel` and `chargingProfilePurpose`, on the same connector (or the
+ * station store) replaces the installed one. TxProfile preconditions: the
+ * connector has an active transaction and `transactionId`, when given, is its
+ * id, else `Rejected`. Without SmartCharging in `SupportedFeatureProfiles`
+ * the answer is CALLERROR `NotSupported`; so it is for ClearChargingProfile and
+ * GetCompositeSchedule.
  *
  * Routing:
  *   - `connectorId = 0` → ChargePoint.stationProfiles (single station copy)
@@ -215,6 +244,8 @@ export class SetChargingProfileHandler implements CallHandler<
   ): SetChargingProfileResponseV16 {
     const { connectorId, csChargingProfiles } = payload;
 
+    requireSmartCharging(context, "SetChargingProfile");
+
     context.logger.info(
       `SetChargingProfile received for connector ${connectorId}: profileId=${csChargingProfiles.chargingProfileId}, purpose=${csChargingProfiles.chargingProfilePurpose}, stackLevel=${csChargingProfiles.stackLevel}`,
       LogType.OCPP,
@@ -233,6 +264,37 @@ export class SetChargingProfileHandler implements CallHandler<
       return { status: "Rejected" };
     }
 
+    // §3.13.3 / SetChargingProfile.req: a TxProfile belongs to the transaction
+    // running on its connector. With no transaction there is nothing to bind
+    // it to, and a transactionId that is not the active one names another
+    // transaction; both are Rejected (#594).
+    if (
+      csChargingProfiles.chargingProfilePurpose ===
+      ChargingProfilePurposeType.TxProfile
+    ) {
+      const connector = context.chargePoint.getConnector(connectorId);
+      // A closed transaction can stay attached (stopTime set; older snapshots
+      // restore one): only a running one counts.
+      const transaction = connector?.hasRunningTransaction
+        ? connector.transaction
+        : null;
+      if (!transaction) {
+        context.logger.warn(
+          `SetChargingProfile rejected: TxProfile but connector ${connectorId} has no active transaction`,
+          LogType.OCPP,
+        );
+        return { status: "Rejected" };
+      }
+      const requested = csChargingProfiles.transactionId;
+      if (requested != null && requested !== transaction.id) {
+        context.logger.warn(
+          `SetChargingProfile rejected: TxProfile transactionId ${requested} is not the active transaction ${transaction.id}`,
+          LogType.OCPP,
+        );
+        return { status: "Rejected" };
+      }
+    }
+
     const periods = csChargingProfiles.chargingSchedule.chargingSchedulePeriod;
     const profile = {
       chargingProfileId: csChargingProfiles.chargingProfileId,
@@ -248,11 +310,19 @@ export class SetChargingProfileHandler implements CallHandler<
         RecurrencyKindType | undefined,
       validFrom: csChargingProfiles.validFrom,
       validTo: csChargingProfiles.validTo,
+      startSchedule: csChargingProfiles.chargingSchedule.startSchedule,
+      duration: csChargingProfiles.chargingSchedule.duration,
+      minChargingRate: csChargingProfiles.chargingSchedule.minChargingRate,
       chargingSchedulePeriods: periods,
     };
 
     if (
-      !context.chargePoint.applyChargingProfile(profile, "SetChargingProfile")
+      !context.chargePoint.applyChargingProfile(
+        profile,
+        "SetChargingProfile",
+        // §3.13.2: the same stackLevel and purpose replaces, as the same id.
+        { replaceSameSlot: true },
+      )
     ) {
       context.logger.warn(`Connector ${connectorId} not found`, LogType.OCPP);
       return { status: "Rejected" };
@@ -280,19 +350,19 @@ export class SetChargingProfileHandler implements CallHandler<
 }
 
 /**
- * §5.4 ClearChargingProfile.req
+ * §5.5 ClearChargingProfile.req, §6.13, §7.21
  *
- * Filter dimensions (id / purpose / stackLevel) compose with the
- * connector target the same way for both station and connector layers:
+ * Matching (errata 3.25, 3.26):
  *
- *   - `connectorId == null` → clear matching profiles from station store
- *     AND every connector.
- *   - `connectorId === 0` → station store only.
- *   - `connectorId > 0`   → that one connector.
+ *   - `id` present → that profile, wherever it is installed (station store or
+ *     any connector); every other field is ignored.
+ *   - Otherwise the given `connectorId`, `chargingProfilePurpose` and
+ *     `stackLevel` all have to match (logical AND); none given clears all.
+ *     `connectorId` absent searches the station store and every connector,
+ *     `0` the station store only, `> 0` that one connector.
  *
- * Spec note: returns Accepted as long as the request was understood,
- * even when zero profiles matched (this matches §5.4's "the CP MAY return
- * Accepted regardless of whether profiles were cleared").
+ * Answers `Unknown` ("No Charging Profile(s) were found matching the
+ * request", §7.21) when nothing was removed, `Accepted` otherwise.
  */
 export class ClearChargingProfileHandler implements CallHandler<
   ClearChargingProfileRequestV16,
@@ -302,19 +372,24 @@ export class ClearChargingProfileHandler implements CallHandler<
     payload: ClearChargingProfileRequestV16,
     context: HandlerContext,
   ): ClearChargingProfileResponseV16 {
+    requireSmartCharging(context, "ClearChargingProfile");
+
     context.logger.info(
       `ClearChargingProfile received: id=${payload.id}, connectorId=${payload.connectorId}, purpose=${payload.chargingProfilePurpose}, stackLevel=${payload.stackLevel}`,
       LogType.OCPP,
     );
 
-    const criteria = {
-      profileId: payload.id,
-      purpose: payload.chargingProfilePurpose as
-        ChargingProfilePurposeType | undefined,
-      stackLevel: payload.stackLevel,
-    };
+    // An id overrides every other field (errata 3.26).
+    const byId = payload.id != null;
+    const criteria = byId
+      ? { profileId: payload.id }
+      : {
+          purpose: payload.chargingProfilePurpose as
+            ChargingProfilePurposeType | undefined,
+          stackLevel: payload.stackLevel,
+        };
     const cleared = context.chargePoint.clearChargingProfiles(
-      payload.connectorId ?? undefined,
+      byId ? undefined : (payload.connectorId ?? undefined),
       criteria,
       "ClearChargingProfile",
     );
@@ -345,6 +420,7 @@ export class ClearChargingProfileHandler implements CallHandler<
         "No profiles matched the clearing criteria",
         LogType.OCPP,
       );
+      return { status: "Unknown" };
     }
     return { status: "Accepted" };
   }
@@ -370,6 +446,8 @@ export class GetCompositeScheduleHandler implements CallHandler<
     payload: GetCompositeScheduleRequestV16,
     context: HandlerContext,
   ): GetCompositeScheduleResponseV16 {
+    requireSmartCharging(context, "GetCompositeSchedule");
+
     const { connectorId, duration, chargingRateUnit } = payload;
 
     context.logger.info(
@@ -414,7 +492,6 @@ export class GetCompositeScheduleHandler implements CallHandler<
       scheduleStart: anchor.toISOString(),
       chargingSchedule: {
         duration,
-        startSchedule: anchor.toISOString(),
         chargingRateUnit: responseUnit,
         chargingSchedulePeriod,
       },

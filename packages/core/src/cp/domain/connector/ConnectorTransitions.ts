@@ -17,6 +17,7 @@ export const ALLOWED_CONNECTOR_STATUS_TRANSITIONS: Readonly<
   ],
   [OCPPStatus.Preparing]: [
     OCPPStatus.Charging,
+    OCPPStatus.SuspendedEVSE,
     OCPPStatus.Available,
     OCPPStatus.Unavailable,
     OCPPStatus.Faulted,

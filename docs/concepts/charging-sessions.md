@@ -26,7 +26,8 @@ related:
   - ../entities/cli.md
   - local-vs-remote-mode.md
   - local-authorization.md
-updated: 2026-11-05
+  - smart-charging.md
+updated: 2026-11-08
 ---
 
 # Charging sessions
@@ -90,9 +91,10 @@ for 2.x):
 | `interrupted` | It ended with `EmergencyStop`, `HardReset`, `SoftReset`, `ImmediateReset`, `Reboot`, `PowerLoss`, `UnlockCommand`, `GroundFault`, `OvercurrentFault`, `PowerQuality`, `Timeout`, or `DeAuthorized` without a CSMS rejection; or its end was lost across a restart. |
 | `completed`   | Any other end: `Local`, `Remote`, `EVDisconnected`, `Other`, `EnergyLimitReached`, `SOCLimitReached`, `StoppedByEV`, …                                                                                                                                             |
 
-A rejected id the station kept charging on (`StopTransactionOnInvalidId` /
-`TxCtrlr/StopTxOnInvalidId` false) still ends `completed`; its
-`authorizationStatus` keeps the CSMS's answer.
+A rejected id the station kept the transaction open for
+(`StopTransactionOnInvalidId` / `TxCtrlr/StopTxOnInvalidId` false) still ends
+`completed`; its `authorizationStatus` keeps the CSMS's answer. The station
+delivers no more energy on it (see below).
 
 ### Rejections and failed starts (#447)
 
@@ -108,12 +110,30 @@ Two domain gaps were closed so these outcomes can be told apart:
   `transactionStartFailed` event is gone. `ChargePoint.stopTransaction` still
   ignores a transaction whose stop time is already set, such as one restored
   from a `connector_runtime` snapshot persisted before #491.
+- **1.6 `StopTransactionOnInvalidId` false (#736).** A non-Accepted
+  StartTransaction.conf `idTagInfo` keeps the transaction open and, per
+  §4.8 (errata 3.17), only stops the energy delivery: the connector goes to
+  `SuspendedEVSE` and the energy register stops rising until the CSMS or the
+  user stops the transaction. `MaxEnergyOnInvalidId` > 0 delivers that many
+  Wh first (the connector goes `Charging`, then `SuspendedEVSE` once the
+  allowance is used up). The default (`true`) still stops with `DeAuthorized`.
 - **2.x `idTokenInfo`.** TransactionEvent.conf `idTokenInfo` used to be
   ignored. A status other than `Accepted` for a running transaction now
   mirrors 1.6 (#181): with `TxCtrlr/StopTxOnInvalidId` (default true) the
   station ends it with `triggerReason: Deauthorized` and
-  `stoppedReason: DeAuthorized`; with it false the transaction keeps running.
-  Either way `startTransactionNotAccepted` reports it.
+  `stoppedReason: DeAuthorized`; with it false the transaction stays open but
+  the energy delivery stops (#696, E05.FR.02, C15.FR.06): the connector goes
+  to `SuspendedEVSE`, the energy register stops rising, and the station sends
+  one `TransactionEvent(Updated)` with `triggerReason: ChargingStateChanged`
+  and `chargingState: SuspendedEVSE`. `TxCtrlr/MaxEnergyOnInvalidId` (the 1.6
+  key `MaxEnergyOnInvalidId`, default `0`) delivers that many more Wh first
+  (E05.FR.03; the register stops at that allowance, `unit: Wh` in
+  GetBaseReport), then the same suspension. The hold also applies when the EV
+  side was `SuspendedEV`, and a later request for `Charging` is reported as
+  `SuspendedEVSE` while the hold lasts. The hold ends with the transaction
+  and is not persisted: with `--state-db` a restart restores the transaction
+  but the energy flows again. 2.x only; 1.6 errata 3.17 is not applied
+  yet (#736). Either way `startTransactionNotAccepted` reports it.
 
 In both versions the CSMS's answer is written to the transaction
 (`Transaction.authorizationStatus`, persisted with it) before the station
@@ -121,9 +141,10 @@ stops on it, so the stop already carries its cause.
 
 A CALLERROR answering a transaction-related message is not a failed start,
 on any version: a 2.0.1 / 2.1 TransactionEvent (`Started`, `Updated` or
-`Ended`; OCPP E13, #490), or an OCPP-J 1.6 StartTransaction.req,
+`Ended`; OCPP E13, #490), an OCPP-J 1.6 StartTransaction.req,
 StopTransaction.req or MeterValues.req of a transaction (Part 2 §3.7.1,
-#527). Both treat it as a failure to process the message: the station
+#527), or the same three over OCPP-S 1.6 answered with a SOAP Fault or an
+HTTP error status (#585). All of them treat it as a failure to process the message: the station
 resends the message and finally discards it, and leaves the transaction as
 it was: still running, or already stopped for a StopTransaction.req or an
 `Ended` event (see
@@ -189,12 +210,30 @@ browser reload (which restores none) leaves it `interrupted`.
 
 ## Reading it
 
-- **Control plane:** [`sessions.list`](control-plane.md) — `cpId` (required),
-  filters `connectorId` and `outcomes`, then a window like `logs.get`'s:
+- **Control plane:** [`sessions.list`](control-plane.md) — `cpId` selects one
+  charge point; **omitted, it lists across the fleet** (#489, below). Filters
+  `connectorId` and `outcomes`, `startedFrom` / `startedTo`, then a window like `logs.get`'s:
   `limit` takes the newest N (default 50, at most 500), `offset` skips the
   newest N first, and `order` (`"desc"`, newest first, by default; by start
   time) only orders the returned page.
   Answers `{ sessions, total }`; an unknown `cpId` answers `not_found`.
+- **Fleet-wide (#489):** without `cpId`, `sessions.list` pages through every
+  charge point's sessions together, so "which sessions failed in the last
+  hour?" is one call: `{ outcomes: ["failed"], startedFrom: "<an hour ago>" }`.
+  `labels` (the [label selector](control-plane.md#charge-point-labels); `{}` or
+  omitted means every charge point, as in `cp.list`) narrows the fleet; it is
+  refused with `invalid_params` together with `cpId`. `startedFrom` is
+  inclusive and `startedTo` exclusive, ISO 8601 with a zone designator
+  (`2026-11-08T00:00:00Z`, `+09:00` accepted; anything else is
+  `invalid_params`), so adjacent windows never overlap. They also apply to a
+  single charge point. The order is start time (newest first by default), then
+  record order, newest record first, so charge points with equal start times
+  keep a fixed place and `offset` paging never skips or repeats a session. Each
+  session names its charge point in `cpId`; `total` counts the matches across
+  the fleet; a selector matching no charge point answers
+  `{ sessions: [], total: 0 }`, not `not_found`. The retention above is per
+  charge point, so a fleet page can reach back further for a quiet charge point
+  than for a busy one.
 - **MCP:** the curated [`list_charging_sessions`](../entities/mcp-endpoint.md)
   tool.
 - **Push:** every stored change is pushed to subscribers of the charge point
@@ -287,7 +326,8 @@ WebSocket closes ([#488](https://github.com/shiv3/ocpp-cp-simulator/issues/488))
   StartTransaction.req already on the wire or queued ahead of the stop reaches
   the CSMS, which can keep open a transaction nothing stops
   ([#565](https://github.com/shiv3/ocpp-cp-simulator/issues/565)).
-- `sessions.list` takes one charge point; there is no fleet-wide listing yet
-  ([#489](https://github.com/shiv3/ocpp-cp-simulator/issues/489)).
+- The fleet-wide listing (#489) is a control-plane and MCP feature only: the
+  console's Transactions tab and the `ChargePointService` client interface
+  still read one charge point.
 - Local mode does not drop a removed charge point's sessions until
   `state.reset`.

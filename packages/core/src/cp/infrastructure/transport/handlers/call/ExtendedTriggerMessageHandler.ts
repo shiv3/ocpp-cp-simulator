@@ -5,6 +5,7 @@ import type {
 } from "@ocpp-cp-sim/ocpp/index";
 import type { HandlerOutcome } from "../../network-sim/ResponseEffectQueue";
 import { LogType } from "../../../../shared/Logger";
+import { sendWhileTriggered } from "./OtherCallHandlers";
 
 /**
  * §2 ExtendedTriggerMessage.req (OCPP 1.6 Security Whitepaper): a superset
@@ -19,6 +20,13 @@ export class ExtendedTriggerMessageHandler implements CallHandler<
   ExtendedTriggerMessageResponseV16
 > {
   handle(
+    payload: ExtendedTriggerMessageRequestV16,
+    context: HandlerContext,
+  ): ExtendedTriggerMessageResponseV16 | HandlerOutcome {
+    return sendWhileTriggered(this.respond(payload, context), context);
+  }
+
+  private respond(
     payload: ExtendedTriggerMessageRequestV16,
     context: HandlerContext,
   ): ExtendedTriggerMessageResponseV16 | HandlerOutcome {

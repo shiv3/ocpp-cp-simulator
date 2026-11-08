@@ -54,9 +54,38 @@ export class ReservationManager {
    * @param idTag ID tag for which the reservation is made
    * @param parentIdTag Optional parent ID tag
    * @param reservationId Reservation ID from central system
+   * @param options `replaceExisting`: OCPP 1.6 ReserveNow replaces the
+   *   reservation that has the same `reservationId` (#595); the other checks
+   *   run as if it were already gone, and it is only dropped when the new one
+   *   is accepted. Without it a repeated id is `Rejected`, as on 2.x.
    * @returns ReservationStatus
    */
   createReservation(
+    connectorId: number,
+    expiryDate: Date,
+    idTag: string,
+    parentIdTag: string | undefined,
+    reservationId: number,
+    options: { replaceExisting?: boolean } = {},
+  ): ReservationStatus {
+    const replaced = options.replaceExisting
+      ? this.reservations.get(reservationId)
+      : undefined;
+    if (replaced) this.reservations.delete(reservationId);
+    const status = this.tryCreate(
+      connectorId,
+      expiryDate,
+      idTag,
+      parentIdTag,
+      reservationId,
+    );
+    if (replaced && status !== ReservationStatus.Accepted) {
+      this.reservations.set(reservationId, replaced);
+    }
+    return status;
+  }
+
+  private tryCreate(
     connectorId: number,
     expiryDate: Date,
     idTag: string,

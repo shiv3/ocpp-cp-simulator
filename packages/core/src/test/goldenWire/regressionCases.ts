@@ -327,6 +327,23 @@ c16("res-connector0", async (r) => {
   await reserve(r, 10, 0, "OWNER", FUT);
   await settle(r);
 });
+// #595: connector 0 is accepted once the station supports it, and a ReserveNow
+// with a held reservationId moves that reservation to the other connector.
+c16("res-connector0-supported", async (r) => {
+  r.cp.configuration.setRuntimeValue("ReserveConnectorZeroSupported", true);
+  await reserve(r, 20, 0, "OWNER", FUT);
+  await settle(r);
+});
+c16(
+  "res-replace-moves-connector",
+  async (r) => {
+    await reserve(r, 21, 1, "OWNER", FUT);
+    await settle(r);
+    await reserve(r, 21, 2, "OWNER", FUT);
+    await settle(r);
+  },
+  two,
+);
 both("res-then-inoperative", async (r) => {
   await reserve(r, 11, 1, "OWNER", FUT);
   await settle(r);

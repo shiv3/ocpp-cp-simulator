@@ -221,6 +221,8 @@ export interface ChargePointInitOptions {
   /** All supervision URLs, when more than one was given. OCPP-J only. */
   readonly supervisionUrls?: readonly string[];
   readonly urlDistribution?: UrlDistribution;
+  /** OCPP 1.6 ReserveNow authorizes the idTag first (#595). Default false. */
+  readonly reservationAuthorizeIdTag?: boolean;
   /**
    * Resolved idTags this charge point draws from when a call names none. The
    * `file` form is resolved at creation, so what is stored and persisted is

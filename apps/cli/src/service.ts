@@ -760,6 +760,9 @@ export class CLIChargePointService {
         ...(init.urlDistribution
           ? { urlDistribution: init.urlDistribution }
           : {}),
+        ...(init.reservationAuthorizeIdTag
+          ? { reservationAuthorizeIdTag: true }
+          : {}),
         ...(init.idTags ? { idTags: init.idTags } : {}),
         ...(init.idTagDistribution
           ? { idTagDistribution: init.idTagDistribution }

@@ -30,7 +30,9 @@ interface SignedUpdateFirmwareRequest {
  * answered `InvalidCertificate` (L01.FR.24), no train runs, and an
  * `InvalidFirmwareSigningCertificate` SecurityEventNotification follows
  * (L01.FR.02). No signature is verified (there is no binary to fetch), so
- * `SignatureVerified` always fires. `retries` / `retryInterval` are logged,
+ * `SignatureVerified` always fires. A request that arrives while a train runs
+ * cancels it and is answered `AcceptedCanceled` (L01.FR.26): only the new
+ * request's train goes on. `retries` / `retryInterval` are logged,
  * not exercised. A train is separate from the plain UpdateFirmware train.
  */
 export function signedFirmwareBehavior(cp: ChargePoint): Behavior {
@@ -85,16 +87,24 @@ export function signedFirmwareBehavior(cp: ChargePoint): Behavior {
           const startsAt = Number.isNaN(retrieveDate.getTime())
             ? ctx.now()
             : retrieveDate.getTime();
+          // L01.FR.26: a request while a train runs cancels it. Taking the
+          // next run number is the cancellation: the old train notices at its
+          // next step and sends nothing more.
+          const cancelsRunning = ctx.state.inFlight === true;
+          const run = Number(ctx.state.run ?? 0) + 1;
+          ctx.state.run = run;
+          if (cancelsRunning) {
+            cp.logger.info(
+              "SignedUpdateFirmware: cancelling the running update (L01.FR.26)",
+              LogType.OCPP,
+            );
+          }
           return {
-            response: { status: "Accepted" },
+            response: {
+              status: cancelsRunning ? "AcceptedCanceled" : "Accepted",
+            },
             after: async () => {
-              if (ctx.state.inFlight === true) {
-                cp.logger.warn(
-                  "SignedUpdateFirmware: a previous simulated update is still in flight; ignoring",
-                  LogType.OCPP,
-                );
-                return;
-              }
+              if (ctx.state.run !== run) return;
               ctx.state.inFlight = true;
               try {
                 await ctx.sleep(Math.max(0, startsAt - ctx.now()));
@@ -105,6 +115,7 @@ export function signedFirmwareBehavior(cp: ChargePoint): Behavior {
                   "Installing",
                   "Installed",
                 ]) {
+                  if (ctx.state.run !== run) return;
                   ctx.notify.signedFirmwareStatus(step, req.requestId);
                   if (step === "Installed") {
                     // L01.FR.33: right after Installed.
@@ -115,7 +126,7 @@ export function signedFirmwareBehavior(cp: ChargePoint): Behavior {
                   await ctx.sleep(STEP_MS);
                 }
               } finally {
-                ctx.state.inFlight = false;
+                if (ctx.state.run === run) ctx.state.inFlight = false;
               }
             },
           };

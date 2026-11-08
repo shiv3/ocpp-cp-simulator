@@ -119,24 +119,89 @@ describe("SignedUpdateFirmwareHandler", () => {
     expect(sent[0]).toEqual({ status: "Downloading", requestId: 1 });
   });
 
-  it("ignores a second request while a train is running and stops on disconnect", async () => {
+  it("cancels the running train for a second request and answers AcceptedCanceled (L01.FR.26), and stops on disconnect", async () => {
     const { ctx, sent } = buildContext();
     const handler = new SignedUpdateFirmwareHandler();
-    for (let i = 0; i < 2; i++) {
+    const answers: unknown[] = [];
+    for (const requestId of [5, 6]) {
       const res = handler.handle(
         firmwarePayload({
+          requestId,
           retrieveDateTime: new Date(Date.now() - 1000).toISOString(),
         }),
         ctx,
       );
       if (!isHandlerOutcome(res)) throw new Error("expected an outcome");
+      answers.push(res.payload);
       res.afterResponseSettled();
       await vi.advanceTimersByTimeAsync(0);
     }
-    expect(sent).toEqual([{ status: "Downloading", requestId: 5 }]);
+    expect(answers).toEqual([
+      { status: "Accepted" },
+      { status: "AcceptedCanceled" },
+    ]);
+    // The first train's Downloading, then the second one's.
+    expect(sent).toEqual([
+      { status: "Downloading", requestId: 5 },
+      { status: "Downloading", requestId: 6 },
+    ]);
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(sent.filter((n) => n.requestId === 5)).toHaveLength(1);
     ctx.chargePoint.disconnect();
+    const count = sent.length;
     await vi.advanceTimersByTimeAsync(20_000);
-    expect(sent).toHaveLength(1);
+    expect(sent).toHaveLength(count);
+  });
+});
+
+describe("SignedUpdateFirmwareHandler signing certificate (#733)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("answers InvalidCertificate and runs no train for an unparsable certificate (L01.FR.24)", async () => {
+    const { ctx, sent } = buildContext();
+    const security = vi
+      .spyOn(ctx.chargePoint, "sendSecurityEventNotification")
+      .mockResolvedValue(undefined);
+    const payload = firmwarePayload({
+      retrieveDateTime: new Date(Date.now() - 1000).toISOString(),
+    });
+    payload.firmware.signingCertificate =
+      "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----";
+    const res = new SignedUpdateFirmwareHandler().handle(payload, ctx);
+    expect(isHandlerOutcome(res)).toBe(true);
+    if (!isHandlerOutcome(res)) return;
+    expect(res.payload).toEqual({ status: "InvalidCertificate" });
+    res.afterResponseSettled();
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(security).toHaveBeenCalledWith(
+      "InvalidFirmwareSigningCertificate",
+      expect.any(String),
+    );
+    expect(sent).toEqual([]);
+  });
+
+  it("sends FirmwareUpdated right after Installed (L01.FR.33)", async () => {
+    const { ctx, sent } = buildContext();
+    const security = vi
+      .spyOn(ctx.chargePoint, "sendSecurityEventNotification")
+      .mockResolvedValue(undefined);
+    const res = new SignedUpdateFirmwareHandler().handle(
+      firmwarePayload({
+        retrieveDateTime: new Date(Date.now() - 1000).toISOString(),
+      }),
+      ctx,
+    );
+    if (!isHandlerOutcome(res)) throw new Error("expected an outcome");
+    res.afterResponseSettled();
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(sent.at(-1)?.status).toBe("Installed");
+    expect(security).toHaveBeenCalledTimes(1);
+    expect(security).toHaveBeenCalledWith("FirmwareUpdated");
   });
 });
 

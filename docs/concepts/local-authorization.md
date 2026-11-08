@@ -167,6 +167,11 @@ Get/SetVariables and GetBaseReport reach the keys through the device model
 | `AuthCtrlr.OfflineTxForUnknownIdEnabled` | `AllowOfflineTxForUnknownId` |
 | `LocalAuthListCtrlr.Enabled`             | `LocalAuthListEnabled`       |
 
+- `GetLocalListVersion` answers `versionNumber: 0` ("no Local Authorization
+  List") when `LocalAuthListCtrlr.Enabled` is not true (D02.FR.03) and when
+  the CSMS has sent no update yet (D02.FR.02), otherwise the version of the
+  last `SendLocalList` (D02.FR.01) (#695). OCPP 1.6 answers `-1` for a
+  disabled list (§5.10).
 - `AuthCacheLifeTime` exists on 2.x charge points only, so a 1.6
   GetConfiguration lists the same keys as before. It counts seconds from an
   entry's last CSMS update (see [Limits](#limits)); `0`, the default, means no lifetime, and

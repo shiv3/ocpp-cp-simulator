@@ -107,6 +107,23 @@ export class OperationalTimelineProjector {
         }, RECOVERY_SETTLE_MS);
       }
     });
+    on("reconnectResumed", ({ offlineMs, reportedAll }) => {
+      // No BootNotification on a pure reconnect (#702): the resumed link is
+      // the booted state.
+      if (this.incident?.link === "up") this.incident.link = "booted";
+      this.timeline.record({
+        kind: "reconnected_without_boot",
+        summary: "Reconnected without BootNotification",
+        data: { offlineMs, reportedAll },
+      });
+      this.checkRecovery();
+      if (this.incident?.link === "booted" && this.settleTimer === null) {
+        this.settleTimer = this.clock.setTimeout(() => {
+          this.settleTimer = null;
+          this.closeIncident(this.unrestoredConnectors().length === 0);
+        }, RECOVERY_SETTLE_MS);
+      }
+    });
     on("statusChange", ({ status, previousStatus }) => {
       if (status === previousStatus) return;
       this.timeline.record({
@@ -215,16 +232,25 @@ export class OperationalTimelineProjector {
     });
     on(
       "chargingProfileApplied",
-      ({ connectorId, profile, replaced, source }) => {
+      ({ connectorId, profile, replaced, replacedIds, source }) => {
         const { chargingProfileId: id, validTo } = profile;
+        // A displaced profile never expires on its own any more.
+        for (const replacedId of replacedIds) {
+          this.cancelExpiry(connectorId, replacedId);
+        }
+        const displaced =
+          replacedIds.length > 0
+            ? `, replacing profile ${replacedIds.join(", ")}`
+            : "";
         this.timeline.record({
           kind: "charging_profile_applied",
           ...connectorScope(connectorId),
-          summary: `Charging profile ${id} (${profile.chargingProfilePurpose}, stack level ${profile.stackLevel}) ${replaced ? "updated" : "applied"} ${scopeLabel(connectorId)}`,
+          summary: `Charging profile ${id} (${profile.chargingProfilePurpose}, stack level ${profile.stackLevel}) ${replaced ? "updated" : "applied"} ${scopeLabel(connectorId)}${displaced}`,
           data: {
             ...profileFields(connectorId, profile),
             source,
             replaced,
+            ...(replacedIds.length > 0 && { replacedIds }),
             ...(validTo !== undefined && { validTo }),
           },
         });

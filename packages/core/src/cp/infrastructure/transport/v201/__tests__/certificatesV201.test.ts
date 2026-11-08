@@ -414,6 +414,7 @@ describe.each(VERSIONS)(
           ...context(store, 10, maxChainSize).ctx,
           certificateSigning: {
             requestSignature: vi.fn(),
+            isKnownSignRequestId: () => true,
             requestCombinedSignature: vi.fn(),
             certificateStored,
             certificateInstalled,

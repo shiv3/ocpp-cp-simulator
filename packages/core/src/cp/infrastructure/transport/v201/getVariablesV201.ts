@@ -20,6 +20,9 @@ export interface DeviceModelContext {
   /** The variables with a Target attribute and their targets (2.1 only);
    *  without it, `Target` is NotSupportedAttributeType everywhere. */
   readonly targets?: DeviceModelTargets;
+  /** The station's OCPP version, to pick the `MeasurandEnumType` a measurand
+   *  list is checked against (#714); without it, lists are not checked. */
+  readonly ocppVersion?: string;
 }
 
 export function handleGetVariablesV201(

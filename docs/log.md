@@ -2414,3 +2414,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - A `warn` / `enforce` violation is traced: the inbound CALL's record carries `meta.validation = { mode, errorCode, description }` (a structured `Inbound validation:` line on the `WebSocket` log channel, merged by `logLinesToTrace` and held back by the live `--trace-output` writer for one tick). `inboundValidation` is settable: `--inbound-validation`, `cp.create` / `cp.update` (contracts, HTTP, MCP), persisted in `charge_points.inbound_validation` (schema v25). The wiki states the order with the #594 `NotSupported`.
 - Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#inbound-call-validation-on-ocpp-j-16), [Trace format](concepts/trace-format.md#validation-violations-meta), [CLI](entities/cli.md), [Daemon](entities/daemon.md), [Control plane](concepts/control-plane.md), [State persistence](concepts/state-persistence.md).
+
+## [2026-11-08] ingest | 1.6 CertificateSigned checks the signed certificate and reports InvalidChargePointCertificate (#732)
+
+- A02.FR.06/07: the 1.6 handler checks validity period, signature chain, the installed CSMS roots and the pending CSR's key (`domain/security/signedChain.ts`); a chain that fails, or does not parse, is `Rejected`, discarded and followed by `SecurityEventNotification{InvalidChargePointCertificate}`. A CSR given to `sign_certificate` is now recorded as pending on 1.6 as well. Page touched: [Security profiles](concepts/security-profiles.md). No golden fixture changes.

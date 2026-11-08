@@ -789,6 +789,12 @@ export class OCPPMessageHandler {
     let payloadCsr: string;
     if (csr) {
       payloadCsr = csr;
+      // #732: a CertificateSigned is matched against it like a generated one
+      // (a CSR that does not parse is only forwarded).
+      this._chargePoint.certificateStore.recordPendingCsr(
+        "ChargingStationCertificate",
+        csr,
+      );
     } else {
       // Log when a non-default key algorithm is used
       if (quirks.csrKeyAlgorithm === "RSA") {

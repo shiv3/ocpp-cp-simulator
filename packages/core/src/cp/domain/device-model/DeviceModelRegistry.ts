@@ -52,7 +52,11 @@ export interface DeviceModelVariableDef {
   readonly sharedWith16: boolean;
   readonly mutability: DeviceModelMutability;
   readonly dataType: DeviceModelDataType;
-  /** The accepted values of an `OptionList`. */
+  /**
+   * The accepted values of an `OptionList` / `MemberList`; for a ReadOnly
+   * variable, the values it supports (VariableCharacteristicsType.valuesList
+   * is mandatory for OptionList, MemberList and SequenceList).
+   */
   readonly valuesList?: readonly string[];
   /** Inclusive bounds of an `integer` / `decimal` variable. */
   readonly min?: number;
@@ -158,19 +162,28 @@ export function createDeviceModelRegistry(
     if (v.min !== undefined && v.max !== undefined && v.min > v.max) {
       fail("min above max");
     }
-    if ((v.dataType === "OptionList") !== (v.valuesList !== undefined)) {
-      fail("valuesList goes with OptionList, and only with it");
+    const listed = v.dataType === "OptionList" || v.dataType === "MemberList";
+    if (listed !== (v.valuesList !== undefined)) {
+      fail(
+        "valuesList goes with OptionList and MemberList, and only with them",
+      );
     }
     if (typeof v.default === "number") {
       if (v.min !== undefined && v.default < v.min) fail("default below min");
       if (v.max !== undefined && v.default > v.max) fail("default above max");
     }
-    if (
-      v.valuesList !== undefined &&
-      typeof v.default === "string" &&
-      !v.valuesList.includes(v.default)
-    ) {
-      fail("default outside valuesList");
+    if (v.valuesList !== undefined && v.default !== undefined) {
+      const members =
+        typeof v.default === "string"
+          ? v.dataType === "MemberList"
+            ? v.default.split(",")
+            : [v.default]
+          : Array.isArray(v.default)
+            ? v.default
+            : [];
+      if (members.some((m) => !v.valuesList?.includes(m))) {
+        fail("default outside valuesList");
+      }
     }
     const ownerKey = componentByName.get(v.component)?.evseScoped
       ? `evse:${v.valueKey}`
@@ -270,6 +283,32 @@ const runtime = (
   ...rest,
 });
 
+/** The measurands the meter value builder models (`MeterValueBuilder`). */
+const METER_MEASURANDS: readonly string[] = [
+  "Energy.Active.Import.Register",
+  "Energy.Active.Import.Interval",
+  "Energy.Active.Export.Register",
+  "Energy.Active.Export.Interval",
+  "Energy.Reactive.Import.Register",
+  "Energy.Reactive.Import.Interval",
+  "Energy.Reactive.Export.Register",
+  "Energy.Reactive.Export.Interval",
+  "Voltage",
+  "Current.Import",
+  "Current.Export",
+  "Current.Offered",
+  "Power.Active.Import",
+  "Power.Active.Export",
+  "Power.Reactive.Import",
+  "Power.Reactive.Export",
+  "Power.Offered",
+  "Power.Factor",
+  "SoC",
+  "Temperature",
+  "Frequency",
+  "RPM",
+];
+
 const VARIABLES: readonly DeviceModelVariableDef[] = [
   persistent("OCPPCommCtrlr", "HeartbeatInterval", "HeartbeatInterval", {
     mutability: "ReadWrite",
@@ -290,11 +329,14 @@ const VARIABLES: readonly DeviceModelVariableDef[] = [
       effect: "The WebSocket ping timer restarts; 0 disables client pings.",
     },
   ),
+  // ReadOnly on 2.x although 1.6 lists the key read-write (§9.1): the
+  // simulated reset never fails, so nothing retries and a writable value
+  // would change nothing (#569). `defaultConfiguration` marks the 2.x store
+  // key read-only to match.
   persistent("OCPPCommCtrlr", "ResetRetries", "ResetRetries", {
-    mutability: "ReadWrite",
+    mutability: "ReadOnly",
     dataType: "integer",
     default: 1,
-    effect: "Reset retries after a Rejected reset.",
   }),
   // #490: OCPP 2.0.1 §2.1.10/2.1.11, 2.1 §2.1.12 — variableInstance
   // "TransactionEvent".
@@ -350,6 +392,7 @@ const VARIABLES: readonly DeviceModelVariableDef[] = [
     {
       mutability: "ReadWrite",
       dataType: "MemberList",
+      valuesList: METER_MEASURANDS,
       default: ["Energy.Active.Import.Register", "Power.Active.Import"],
       effect: "The measurands of the sampled meter values.",
     },
@@ -371,6 +414,7 @@ const VARIABLES: readonly DeviceModelVariableDef[] = [
   persistent("AlignedDataCtrlr", "Measurands", "MeterValuesAlignedData", {
     mutability: "ReadWrite",
     dataType: "MemberList",
+    valuesList: METER_MEASURANDS,
     default: [],
     effect: "The measurands of the clock-aligned meter values.",
   }),
@@ -457,11 +501,13 @@ const VARIABLES: readonly DeviceModelVariableDef[] = [
   // would accept a value that changes nothing (#569).
   runtime("TxCtrlr", "TxStartPoint", "TxStartPoint", {
     dataType: "MemberList",
+    valuesList: ["Authorized"],
     default: "Authorized",
     constant: true,
   }),
   runtime("TxCtrlr", "TxStopPoint", "TxStopPoint", {
     dataType: "MemberList",
+    valuesList: ["Authorized", "EVConnected"],
     default: "Authorized,EVConnected",
     constant: true,
   }),

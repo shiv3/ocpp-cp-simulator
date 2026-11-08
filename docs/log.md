@@ -2401,3 +2401,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-08] lint | Configuration keys control review fixes (#612)
 
 - `cp.config_keys.get` without `keys` on 2.x no longer reports the unregistered store keys as `unknown`. A write longer than 500 (1.6) / 1000 (2.x) characters is refused with `invalid_params`, and an operator write is logged on the `Configuration` channel (write-only values redacted). `AuthorizationKey` carries `mutability: WriteOnly` on 1.6 so the console shows its placeholder; an integer key cannot be saved from an empty field; the ja label of the CP page tab is `設定キー`. Updated [Control plane](concepts/control-plane.md#configuration-keys-612).
+
+## [2026-11-08] lint | Device Model registry review fixes (#604)
+
+- `OCPPCommCtrlr.ResetRetries` is `ReadOnly` on 2.x (the 2.x `ConfigurationStore` key is read-only, the 1.6 key stays read-write): nothing retries a reset, so a writable value would change nothing (#569). Every `MemberList` variable now reports a `valuesList` (`TxStartPoint`, `TxStopPoint`, the measurands), and the registry refuses a `MemberList` without one. Updated [Device Model registry](entities/device-model.md).

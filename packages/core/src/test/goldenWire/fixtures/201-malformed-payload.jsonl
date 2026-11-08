@@ -5,4 +5,4 @@
 {"d":"CP>","k":"call","id":"id-3","a":"StatusNotification","p":{"timestamp":"<ts>","connectorStatus":"Available","evseId":1,"connectorId":1}}
 {"d":"CSMS>","k":"result","id":"id-3","p":{}}
 {"d":"CSMS>","k":"call","id":"id-4","a":"UnlockConnector","p":{"evseId":"one"}}
-{"d":"CP>","k":"error","id":"id-4","p":{"code":"FormatViolation","description":"Invalid UnlockConnector payload","details":{}}}
+{"d":"CP>","k":"error","id":"id-4","p":{"code":"OccurrenceConstraintViolation","description":"Invalid UnlockConnector payload: must have required property 'connectorId'; /evseId must be integer","details":{}}}

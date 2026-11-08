@@ -66,6 +66,7 @@ import type {
 import type {
   MeterReadingContext,
   StartTransactionCommandOptions,
+  IdTokenTypeName,
   StopTransactionCommandOptions,
   TransactionUpdateOptions,
 } from "@ocpp-cp-sim/core/cp/domain/connector/Transaction";
@@ -297,8 +298,12 @@ export class RegistryChargePointService implements ChargePointService {
     this.requireService(id).stopHeartbeat();
   }
 
-  async authorize(id: string, tagId: string): Promise<void> {
-    this.requireService(id).authorize(tagId);
+  async authorize(
+    id: string,
+    tagId: string,
+    idTokenType?: IdTokenTypeName,
+  ): Promise<void> {
+    this.requireService(id).authorize(tagId, idTokenType);
   }
 
   /** Daemon-only: the tag a control-plane call without one presents, drawn
@@ -622,9 +627,30 @@ export class RegistryChargePointService implements ChargePointService {
 
   async listChargingSessions(
     id: string,
-    query?: Omit<ChargingSessionQuery, "cpId">,
+    query?: Omit<ChargingSessionQuery, "cpId" | "cpIds">,
   ): Promise<ChargingSessionPage> {
     return this.requireService(id).listChargingSessions(query);
+  }
+
+  /**
+   * #489: the sessions of every charge point, or of the ones `labels` selects
+   * (`undefined` and `{}` both mean all, as in `cp.list`). Read straight from
+   * the registry's shared store, so charge points are paged together in one
+   * order: start time, then record order.
+   */
+  async listFleetChargingSessions(
+    query: Omit<ChargingSessionQuery, "cpId" | "cpIds"> & {
+      labels?: Labels;
+    } = {},
+  ): Promise<ChargingSessionPage> {
+    const { labels, ...rest } = query;
+    // Narrowed by label only when a selector was given: listing the whole
+    // store also reaches the sessions of a charge point that is gone.
+    const hasSelector = labels !== undefined && Object.keys(labels).length > 0;
+    return this.registry.chargingSessions.list({
+      ...rest,
+      ...(hasSelector ? { cpIds: this.registry.selectByLabels(labels) } : {}),
+    });
   }
 
   async listScenarioDefinitions(

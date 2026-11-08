@@ -470,6 +470,7 @@ export async function startTransaction(
   const deferredStops: Array<() => void> = [];
   const deferStops = !isOcpp2Version(cp.ocppVersion);
   if (deferStops) startsInProgress.set(connector, deferredStops);
+  let queued = false;
   try {
     if (connector.status === OCPPStatus.Preparing) {
       ports.startConnectionTimeout(connectorId);
@@ -481,8 +482,24 @@ export async function startTransaction(
       transaction: live,
       connectorId,
     });
+    queued = true;
   } finally {
     if (deferStops) startsInProgress.delete(connector);
+    // A listener or the send threw: the stops requested meanwhile are not
+    // lost with the exception. They run now, on the transaction as it is
+    // (the original error still propagates).
+    if (!queued) {
+      for (const stop of deferredStops) {
+        try {
+          stop();
+        } catch (error) {
+          cp.logger.error(
+            `Deferred stop of connector ${connectorId} failed: ${String(error)}`,
+            LogType.TRANSACTION,
+          );
+        }
+      }
+    }
   }
 
   cp.events.emit("transactionStarted", {

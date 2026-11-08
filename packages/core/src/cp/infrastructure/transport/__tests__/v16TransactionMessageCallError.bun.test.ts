@@ -274,6 +274,35 @@ describe("OCPP 1.6 transaction message CALLERROR (#527, §3.7.1)", () => {
     }
   });
 
+  it("a stop requested while the connector goes to Preparing is not lost when queueing the StartTransaction.req throws (#727)", async () => {
+    const s = await station("CP16-727-THROW", ["StartTransaction"]);
+    try {
+      let done = false;
+      s.cp.events.on("connectorStatusChange", (e) => {
+        if (e.status === OCPPStatus.Preparing && !done) {
+          done = true;
+          s.cp.stopTransaction(1, "Other");
+        }
+      });
+      const outbox = (
+        s.cp as unknown as {
+          _outbox: { sendTransactionEvent: (event: unknown) => void };
+        }
+      )._outbox;
+      const original = outbox.sendTransactionEvent.bind(outbox);
+      outbox.sendTransactionEvent = () => {
+        outbox.sendTransactionEvent = original;
+        throw new Error("send failure");
+      };
+      await s.cp.startTransaction("TAG-727", 1).catch(() => undefined);
+      expect(done).toBe(true);
+      // The requested stop ran although the start was interrupted.
+      expect(s.cp.getConnector(1)?.hasRunningTransaction).toBe(false);
+    } finally {
+      await s.stop();
+    }
+  });
+
   it("RemoteStopTransaction for an id 0 the CSMS assigned stops the transaction (#328)", async () => {
     const s = await station("CP16-527-REMOTESTOP-ZERO", ["StartTransaction"]);
     try {

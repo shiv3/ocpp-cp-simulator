@@ -11,4 +11,4 @@
 {"d":"CSMS>","k":"call","id":"id-6","a":"Reset","p":{"type":"ImmediateAndResume"}}
 {"d":"CP>","k":"call","id":"id-7","a":"StatusNotification","p":{"timestamp":"<ts>","connectorStatus":"Occupied","evseId":1,"connectorId":1}}
 {"d":"CSMS>","k":"result","id":"id-7","p":{}}
-{"d":"CP>","k":"error","id":"id-6","p":{"code":"FormatViolation","description":"Invalid Reset payload","details":{}}}
+{"d":"CP>","k":"error","id":"id-6","p":{"code":"PropertyConstraintViolation","description":"Invalid Reset payload: /type must be equal to one of the allowed values","details":{}}}

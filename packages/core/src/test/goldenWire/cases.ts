@@ -191,6 +191,23 @@ export const goldenCases: GoldenCase[] = [
       await settle(rig);
     }
   }),
+  // F06.FR.06: a triggered MeterValues holds the aligned measurands only and
+  // every sampledValue has context Trigger.
+  c201("trigger-meter-values-distinct-lists", async (rig) => {
+    rig.cp.configuration.applyChange(
+      "MeterValuesSampledData",
+      "Energy.Active.Import.Register",
+    );
+    rig.cp.configuration.applyChange(
+      "MeterValuesAlignedData",
+      "Power.Active.Import",
+    );
+    await rig.csms.call("TriggerMessage", {
+      requestedMessage: "MeterValues",
+      evse: { id: 1, connectorId: 1 },
+    });
+    await settle(rig);
+  }),
   ...both("trigger-message-unsupported", async (rig) => {
     await rig.csms.call("TriggerMessage", {
       requestedMessage: "NoSuchMessage",
@@ -329,6 +346,11 @@ export const goldenCases: GoldenCase[] = [
   }),
   c201("reset-immediate-idle", async (rig) => {
     await rig.csms.call("Reset", { type: "Immediate" });
+    await waitCall(rig, "BootNotification", 0, 2);
+  }),
+  // B01.FR.09: a reset the operator starts on the station is LocalReset.
+  c201("reset-local", async (rig) => {
+    rig.cp.reset();
     await waitCall(rig, "BootNotification", 0, 2);
   }),
   c201("reset-immediate-charging", async (rig) => {
@@ -831,6 +853,50 @@ export const goldenCases: GoldenCase[] = [
     await rig.csms.call("ClearChargingProfile", { id: 1 });
     await settle(rig);
   }),
+  // 1.6 §7.13 startSchedule/duration, errata 3.43: the ended stack-2 profile
+  // yields to stack 0, then an Absolute profile counts from startSchedule.
+  c16("smart-charging-start-schedule", async (rig) => {
+    await charging(rig);
+    const profile = (
+      id: number,
+      stackLevel: number,
+      schedule: Record<string, unknown>,
+    ) =>
+      rig.csms.call("SetChargingProfile", {
+        connectorId: 1,
+        csChargingProfiles: {
+          chargingProfileId: id,
+          stackLevel,
+          chargingProfilePurpose: "TxDefaultProfile",
+          chargingProfileKind: "Absolute",
+          chargingSchedule: { chargingRateUnit: "W", ...schedule },
+        },
+      });
+    await profile(1, 0, {
+      chargingSchedulePeriod: [{ startPeriod: 0, limit: 7000 }],
+    });
+    await profile(2, 2, {
+      startSchedule: "2020-01-01T00:00:00Z",
+      duration: 3600,
+      chargingSchedulePeriod: [{ startPeriod: 0, limit: 3000 }],
+    });
+    await rig.csms.call("GetCompositeSchedule", {
+      connectorId: 1,
+      duration: 600,
+    });
+    await profile(3, 3, {
+      startSchedule: "2020-01-01T00:00:00Z",
+      chargingSchedulePeriod: [
+        { startPeriod: 0, limit: 11000 },
+        { startPeriod: 100_000_000, limit: 2000 },
+      ],
+    });
+    await rig.csms.call("GetCompositeSchedule", {
+      connectorId: 1,
+      duration: 600,
+    });
+    await settle(rig);
+  }),
   c201("smart-charging", async (rig) => {
     await charging(rig);
     await rig.csms.call("SetChargingProfile", {
@@ -857,13 +923,153 @@ export const goldenCases: GoldenCase[] = [
     await settle(rig);
   }),
 
+  // 2.0.1 K01.FR.09 / .33 / .52 / .53: a TxProfile needs the EVSE's running
+  // transaction; a TxDefaultProfile cannot repeat a stack level across EVSE 0
+  // and a specific EVSE under another id.
+  c201("set-charging-profile-preconditions", async (rig) => {
+    const profile = (
+      evseId: number,
+      id: number,
+      purpose: string,
+      extra: Record<string, unknown> = {},
+      stackLevel = 1,
+    ) => ({
+      evseId,
+      chargingProfile: {
+        id,
+        stackLevel,
+        chargingProfilePurpose: purpose,
+        chargingProfileKind: "Absolute",
+        ...extra,
+        chargingSchedule: [
+          {
+            id,
+            chargingRateUnit: "W",
+            chargingSchedulePeriod: [{ startPeriod: 0, limit: 7000 }],
+          },
+        ],
+      },
+    });
+    await rig.csms.call(
+      "SetChargingProfile",
+      profile(1, 1, "TxProfile", { transactionId: "no-such-transaction" }),
+    );
+    await charging(rig);
+    await rig.csms.call(
+      "SetChargingProfile",
+      profile(1, 1, "TxProfile", { transactionId: "other-transaction" }),
+    );
+    await rig.csms.call(
+      "SetChargingProfile",
+      profile(1, 2, "TxProfile", { transactionId: rig.transactionId(1) }),
+    );
+    await rig.csms.call(
+      "SetChargingProfile",
+      profile(1, 3, "TxDefaultProfile", {}, 5),
+    );
+    await rig.csms.call(
+      "SetChargingProfile",
+      profile(0, 4, "TxDefaultProfile", {}, 5),
+    );
+    await rig.csms.call(
+      "SetChargingProfile",
+      profile(0, 5, "TxDefaultProfile", {}, 6),
+    );
+    await rig.csms.call(
+      "SetChargingProfile",
+      profile(1, 6, "TxDefaultProfile", {}, 6),
+    );
+    await settle(rig);
+  }),
+
+  // 2.0.1 K09.FR.02 / K09.FR.04: an EVSE query reports only that EVSE's
+  // profiles (one report); the unscoped query sends one report per EVSE and
+  // marks every report but the last with tbc.
+  c201(
+    "get-charging-profiles-scope-tbc",
+    async (rig) => {
+      const install = (evseId: number, id: number) =>
+        rig.csms.call("SetChargingProfile", {
+          evseId,
+          chargingProfile: {
+            id,
+            stackLevel: id,
+            chargingProfilePurpose: "TxDefaultProfile",
+            chargingProfileKind: "Absolute",
+            chargingSchedule: [
+              {
+                id,
+                chargingRateUnit: "W",
+                chargingSchedulePeriod: [{ startPeriod: 0, limit: 7000 }],
+              },
+            ],
+          },
+        });
+      await install(0, 1);
+      await install(2, 2);
+      await rig.csms.call("GetChargingProfiles", {
+        requestId: 1,
+        evseId: 2,
+        chargingProfile: {},
+      });
+      await settle(rig);
+      await rig.csms.call("GetChargingProfiles", {
+        requestId: 2,
+        chargingProfile: {},
+      });
+      await settle(rig);
+    },
+    { connectors: 2 },
+  ),
+
+  // 2.0.1 K01.FR.30 / K01.FR.36: validFrom, validTo and startSchedule are
+  // stored and reported apart; an absent one stays absent.
+  c201("charging-profile-times", async (rig) => {
+    const profile = (
+      id: number,
+      times: Record<string, string>,
+      scheduleTimes: Record<string, string>,
+    ) => ({
+      evseId: 1,
+      chargingProfile: {
+        id,
+        stackLevel: id,
+        chargingProfilePurpose: "TxDefaultProfile",
+        chargingProfileKind: "Absolute",
+        ...times,
+        chargingSchedule: [
+          {
+            id,
+            ...scheduleTimes,
+            chargingRateUnit: "W",
+            chargingSchedulePeriod: [{ startPeriod: 0, limit: 7000 }],
+          },
+        ],
+      },
+    });
+    await rig.csms.call(
+      "SetChargingProfile",
+      profile(
+        1,
+        { validFrom: "2099-01-09T00:00:00Z", validTo: "2099-02-09T00:00:00Z" },
+        { startSchedule: "2099-01-01T00:00:00Z" },
+      ),
+    );
+    await rig.csms.call(
+      "SetChargingProfile",
+      profile(2, {}, { startSchedule: "2099-01-01T00:00:00Z" }),
+    );
+    await rig.csms.call("GetChargingProfiles", {
+      requestId: 1,
+      chargingProfile: {},
+    });
+    await settle(rig);
+  }),
+
   // --- connection loss ---------------------------------------------------
   ...both("csms-drops-connection", async (rig) => {
     rig.csms.dropConnection();
-    await rig.csms.waitForCall("BootNotification", {
-      nth: 2,
-      timeoutMs: 30_000,
-    });
+    await rig.reconnected();
     await settle(rig);
   }),
   ...both("cp-disconnect-connect", async (rig) => {
@@ -885,10 +1091,7 @@ export const goldenCases: GoldenCase[] = [
     rig.csms.callNoWait("DataTransfer", { vendorId: "com.example" });
     await settle(rig);
     rig.csms.dropConnection();
-    await rig.csms.waitForCall("BootNotification", {
-      nth: 2,
-      timeoutMs: 30_000,
-    });
+    await rig.reconnected();
     await settle(rig);
   }),
 ];

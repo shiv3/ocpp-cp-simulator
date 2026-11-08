@@ -426,6 +426,9 @@ stdin is a JSON command; each line of stdout is a JSON response or event.
 ocpp-cp-sim --ws-url ws://localhost:9000/ocpp --cp-id CP001 --json
 ```
 
+In the [Docker image](docker-image.md#running-the-cli) the same arguments work
+without `--entrypoint`: `docker run -i <image> --json --cp-id CP001 --ws-url …`.
+
 #### Request Format
 
 ```json

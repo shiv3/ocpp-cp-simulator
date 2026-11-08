@@ -27,7 +27,7 @@ beyond loopback (`--http-host 0.0.0.0`, a LAN address) requires one of:
   Socket.IO handshake while leaving health unauthenticated,
 - `--unsafe-remote`, for trusted networks or deployments protected by another
   boundary (the [Docker image](../entities/docker-image.md) pins this in its
-  entrypoint because a container intentionally binds non-loopback).
+  entrypoint, unless it runs the CLI ([Running the CLI](../entities/docker-image.md#running-the-cli)), because a container intentionally binds non-loopback).
 
 Otherwise startup fails before CORS comes into play. Pair remote exposure with
 a tight `--cors-origin` allowlist when browsers can reach the daemon. CORS is

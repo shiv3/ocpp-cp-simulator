@@ -364,7 +364,8 @@ says only whether one is set.
 A `Dockerfile` and `docker-compose.yml` ship at the repo root, and a multi-arch
 image is published on every push to `main` / version tag at
 `ghcr.io/shiv3/ocpp-cp-simulator`. The image is the daemon with
-`--http-host 0.0.0.0 --unsafe-remote --web-console` pinned in its entrypoint —
+`--http-host 0.0.0.0 --unsafe-remote --web-console` pinned in its entrypoint
+(unless it runs the CLI, see [Running the CLI](docker-image.md#running-the-cli)) —
 see [Docker image](docker-image.md).
 
 ## File hot-reload

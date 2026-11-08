@@ -15,9 +15,14 @@ function fakeService(opts: {
   let handler: FrameHandler | null = null;
   const stopped: number[] = [];
   const options: unknown[] = [];
+  const queued = { count: 0 };
   const svc = {
     isOnline: () => opts.online ?? true,
     isSoapChargePoint: () => opts.soap ?? false,
+    queueUnansweredStop: () => {
+      queued.count++;
+      return true;
+    },
     openTransactionConnectorIds: () => opts.live?.() ?? opts.connectors ?? [1],
     onWireFrame: (h: FrameHandler) => {
       handler = h;
@@ -34,6 +39,7 @@ function fakeService(opts: {
     svc,
     stopped,
     options,
+    queued,
     emit: (d: "Sent" | "Received", raw: string) => handler?.(d, raw),
     subscribed: () => handler !== null,
   };
@@ -83,6 +89,7 @@ describe("stopTransactionsAndWait", () => {
     const cp = fakeService({ connectors: [1] });
     const report = await stopTransactionsAndWait(registryOf({ A: cp }), 150);
     expect(report).toEqual({ stopped: 1, delivered: 0, timedOut: true });
+    expect(cp.queued.count).toBe(1); // the unanswered stop is not lost
   });
 
   it("does not wait for a charge point that is offline", async () => {

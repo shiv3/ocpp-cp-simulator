@@ -140,9 +140,24 @@ export async function stopTransactionsAndWait(
     wake = null;
   }
   for (const off of unsubscribes) off();
+  // Stops written but unanswered when the wait ends (limit or second signal)
+  // would be dropped by the close: queue them for the next start.
+  if (delivered < expected) {
+    for (const cpId of watched) {
+      try {
+        if (registry.get(cpId)?.queueUnansweredStop()) {
+          log(`Queued the unanswered stop of ${cpId} for the next start`);
+        }
+      } catch (err) {
+        log(
+          `Could not queue the unanswered stop of ${cpId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+  }
   if (timedOut) {
     log(
-      `${expected - delivered} stop(s) not answered within ${waitMs} ms; they are queued when the sockets close and replayed on the next start (kept across restarts only with --state-db)`,
+      `${expected - delivered} stop(s) not answered within ${waitMs} ms; they are queued and replayed on the next start (kept across restarts only with --state-db)`,
     );
   }
   return { stopped, delivered, timedOut };

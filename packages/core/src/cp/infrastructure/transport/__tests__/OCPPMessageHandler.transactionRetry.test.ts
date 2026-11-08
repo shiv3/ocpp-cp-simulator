@@ -322,7 +322,7 @@ describe("OCPP 1.6 transaction message CALLERROR retry (#527, §3.7.1)", () => {
     expect(rejected.map((r) => r.attempt)).toEqual([1, 2]);
   });
 
-  it("on close, a written but unanswered transaction message goes to the offline queue and is replayed after the boot", async () => {
+  it("a written but unanswered transaction message queued at shutdown goes to the offline queue and is replayed after the boot", async () => {
     const { socket, connector, handler } = setup();
     handler.sendTransactionEvent({
       phase: "started",
@@ -330,7 +330,8 @@ describe("OCPP 1.6 transaction message CALLERROR retry (#527, §3.7.1)", () => {
       connectorId: 1,
     });
     const first = socket.last();
-    // No answer: the socket closes with the CALL in flight (§3.7).
+    // No answer when a graceful shutdown stops waiting (§3.7).
+    expect(handler.queueUnansweredTransactionCall()).toBe(true);
     socket.connected = false;
     handler.onWebSocketClosed();
     await vi.advanceTimersByTimeAsync(600_000);

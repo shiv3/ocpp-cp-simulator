@@ -1089,6 +1089,12 @@ export class CLIChargePointService {
     );
   }
 
+  /** Queue the transaction message written but not answered, so the next
+   *  start delivers it (#622: the shutdown wait ended first). */
+  queueUnansweredStop(): boolean {
+    return this._chargePoint.queueUnansweredTransactionCall();
+  }
+
   /** Whether the socket to the CSMS is open right now (#622). */
   isOnline(): boolean {
     return this._chargePoint.isOnline();

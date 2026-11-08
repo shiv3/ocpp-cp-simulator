@@ -1100,45 +1100,51 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
    * `OfflineQueueMaxEvents` (0 = no limit). With the queue full, an `Updated`
    * event is dropped, never a `Started` or `Ended`: the oldest queued
    * `Updated` carrying a meter-value trigger first, else the oldest
-   * `Updated`; when no queued `Updated` can go, the new one is dropped if it
-   * is `Updated`. A new `Started` or `Ended` is always queued, even past the
-   * limit. A row whose replay awaits its answer is not dropped. The dropped
-   * events leave a `seqNo` gap the CSMS can see. Returns whether `message`
-   * may be queued.
+   * `Updated`. A new meter-value `Updated` never displaces a queued
+   * non-meter-value `Updated` (`Authorized`, `ChargingStateChanged`, ...): it
+   * is dropped itself when no queued meter-value `Updated` can go. When no
+   * queued `Updated` can go, a new `Updated` is dropped, and a new `Started`
+   * or `Ended` is queued past the limit. Rows are dropped until the queue is
+   * under the limit, so a queue left above it (events queued past it, rows
+   * loaded after a restart) shrinks back. A row whose replay awaits its
+   * answer is not dropped. The dropped events leave a `seqNo` gap the CSMS
+   * can see. Returns whether `message` may be queued.
    */
   private makeRoomForTransactionEvent(
     message: TransactionEventMessage,
   ): boolean {
     const limit = this._chargePoint.configuration.offlineQueueMaxEvents();
     if (limit <= 0) return true;
-    if (this._pendingQueue.payloadsOf("TransactionEvent").length < limit) {
-      return true;
-    }
     const isUpdated = (p: unknown) =>
       (p as TransactionEventRequestV201).eventType === "Updated";
-    const victim =
-      this._pendingQueue.idleRows(
-        "TransactionEvent",
-        (p) =>
-          isUpdated(p) &&
-          METER_VALUE_TRIGGERS.has(
-            (p as TransactionEventRequestV201).triggerReason,
-          ),
-      )[0] ?? this._pendingQueue.idleRows("TransactionEvent", isUpdated)[0];
-    const first = this._droppedTransactionEvents === 0;
-    if (victim !== undefined) {
-      this._pendingQueue.remove(victim);
-    } else if (message.payload.eventType === "Updated") {
-      this.noteDroppedTransactionEvent(first, message.payload, limit);
-      return false;
-    } else {
+    const isMeterUpdated = (p: unknown) =>
+      isUpdated(p) &&
+      METER_VALUE_TRIGGERS.has(
+        (p as TransactionEventRequestV201).triggerReason,
+      );
+    const newIsMeterUpdated = isMeterUpdated(message.payload);
+    while (this._pendingQueue.payloadsOf("TransactionEvent").length >= limit) {
+      const victim =
+        this._pendingQueue.idleRows("TransactionEvent", isMeterUpdated)[0] ??
+        (newIsMeterUpdated
+          ? undefined
+          : this._pendingQueue.idleRows("TransactionEvent", isUpdated)[0]);
+      const first = this._droppedTransactionEvents === 0;
+      if (victim !== undefined) {
+        this._pendingQueue.remove(victim);
+        this.noteDroppedTransactionEvent(first, message.payload, limit);
+        continue;
+      }
+      if (message.payload.eventType === "Updated") {
+        this.noteDroppedTransactionEvent(first, message.payload, limit);
+        return false;
+      }
       this._logger.warn(
         `[v2.0.1] ${describeTransactionEvent(message.payload)} queued past the limit of ${limit}: only Updated events are dropped (E11.FR.05)`,
         LogType.TRANSACTION,
       );
       return true;
     }
-    this.noteDroppedTransactionEvent(first, message.payload, limit);
     return true;
   }
 
@@ -2288,8 +2294,9 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
    * (E11.FR.07: a queued message is set Offline). The seqNo is the one the
    * event was built with. Each replay is a fresh E13 delivery: its
    * transmission and failure counts restart at zero, as a 1.6 replay goes
-   * through `sendRequest` anew. A row leaves the queue when its replay is
-   * handed to the socket; a close before the answer queues it again. A
+   * through `sendRequest` anew. A row stays in the queue until the CSMS answers
+   * it or E13 discards it (#554); a close before the answer puts the same
+   * row back in its old position. A
    * replay the socket refuses while it stays open (`not_accepted`, a
    * network-sim overflow) stays at the head and the replay stops there, so
    * the order holds; it waits for the next Boot Accepted. E13 owns the

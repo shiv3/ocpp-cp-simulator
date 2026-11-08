@@ -287,14 +287,22 @@ is restored (E11 "Connection Loss During Transaction", #528):
 
 - **Size limit** (#554, E11.FR.04 / E11.FR.05). The simulator key
   `OfflineQueueMaxEvents` (2.x only, ReadWrite, default `1000`, `0` = no
-  limit; not an OCPP variable, the spec sets none for the size) bounds the
+  limit; not an OCPP variable, the spec sets none for the size, and it is
+  not in the device model, so a CSMS cannot reach it with
+  `GetVariables` / `SetVariables`: set it in the simulator's own
+  configuration) bounds the
   TransactionEvents in the queue, rows whose replay awaits an answer
   included. With the queue full, `Updated` events are dropped and
   `Started` and `Ended` never are: a queued `Updated` with trigger reason
   `MeterValuePeriodic` or `MeterValueClock` goes first (oldest first), else
-  the oldest queued `Updated`; if none can go, a new `Updated` is dropped
-  itself, while a new `Started` or `Ended` is queued past the limit with a
-  `warn`. A dropped event leaves a gap in the `seqNo` of its transaction,
+  the oldest queued `Updated` — except that a new meter-value `Updated`
+  never displaces a queued non-meter-value one (`Authorized`,
+  `ChargingStateChanged`, ...): with no queued meter-value `Updated` it is
+  dropped itself. If none can go, a new `Updated` is dropped itself, while a
+  new `Started` or `Ended` is queued past the limit with a `warn`. Each
+  insert drops until the queue is under the limit again, so a queue left
+  above it (events queued past the limit, rows loaded after a restart)
+  shrinks back. A dropped event leaves a gap in the `seqNo` of its transaction,
   which is how the CSMS sees the loss. One `warn` (category `TRANSACTION`)
   at the first drop of an outage, one with the count at the replay. The
   order of the drops is the simulator's choice; the rule that only

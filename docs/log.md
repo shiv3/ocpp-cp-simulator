@@ -2389,3 +2389,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#e11-offline-queue-for-transactionevent): a replayed row stays in `pending_messages` until the CSMS answers (a crash replays it again); the simulator key `OfflineQueueMaxEvents` (default 1000, 0 = no limit) bounds the queue and drops `Updated` events only (E11.FR.04/05); `GetTransactionStatus` reports `messagesInQueue` from the queue. The three matching limits are removed.
 - [Charging sessions](concepts/charging-sessions.md): the E14 limit is removed and the queue behaviour summarised. [GitHub issues](sources/github-issues.md): #554.
+
+## [2026-11-08] fix | 2.x offline queue review follow-ups (#554)
+
+- [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#e11-offline-queue-for-transactionevent): a new meter-value `Updated` never displaces a queued non-meter-value `Updated`; the queue is trimmed until it is under the limit; `OfflineQueueMaxEvents` is not reachable with `GetVariables` / `SetVariables`. [GitHub issues](sources/github-issues.md): `updated:` bumped.

@@ -359,7 +359,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
           ["Updated", "Authorized", 1],
           ["Updated", "MeterValueClock", 3],
         ]);
-        // An Ended is queued past the limit; no Updated is left but one.
+        // An Ended replaces the next Updated; Started and Ended stay.
         handler.sendTransactionEvent({
           phase: "ended",
           transaction: tx,
@@ -379,6 +379,52 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
         expect(dropWarnings).toHaveLength(1);
       } finally {
         run?.handler.onWebSocketClosed();
+        db.close();
+      }
+    });
+
+    it("keeps a new meter-value Updated from displacing an Authorized Updated (#554)", async () => {
+      const db = BunSqliteDatabase.open(":memory:");
+      try {
+        const { tx, handler } = station(db, version, silentLogger(), 2);
+        handler.sendTransactionEvent({
+          phase: "started",
+          transaction: tx,
+          connectorId: 1,
+        });
+        handler.sendTransactionUpdate(1, { triggerReason: "Authorized" });
+        handler.sendTransactionUpdate(1, {
+          triggerReason: "MeterValuePeriodic",
+        });
+        await Promise.resolve();
+        expect(
+          rows(db).map((r) => JSON.parse(r.payload).triggerReason),
+        ).toEqual(["Authorized", "Authorized"]);
+      } finally {
+        db.close();
+      }
+    });
+
+    it("queues Ended past the limit of 1 behind Started (#554)", async () => {
+      const db = BunSqliteDatabase.open(":memory:");
+      try {
+        const { tx, handler } = station(db, version, silentLogger(), 1);
+        handler.sendTransactionEvent({
+          phase: "started",
+          transaction: tx,
+          connectorId: 1,
+        });
+        handler.sendTransactionEvent({
+          phase: "ended",
+          transaction: tx,
+          connectorId: 1,
+        });
+        await Promise.resolve();
+        expect(rows(db).map((r) => JSON.parse(r.payload).eventType)).toEqual([
+          "Started",
+          "Ended",
+        ]);
+      } finally {
         db.close();
       }
     });

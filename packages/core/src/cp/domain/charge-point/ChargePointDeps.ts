@@ -1,5 +1,6 @@
 import type { OcppSecurityProfile } from "@ocpp-cp-simulator/contracts/securityProfile";
 import type { Logger } from "../../shared/Logger";
+import type { LogSink } from "../persistence/LogSink";
 import type { OcppTlsOptions } from "../transport/ConnectionSecurity";
 import type { ChargePointSocket } from "../transport/ChargePointSocket";
 import type { IChargePointMessageHandler } from "../transport/IChargePointMessageHandler";
@@ -10,6 +11,7 @@ import type {
   ChargePoint,
   ChargePointTransportOptions,
 } from "./ChargePoint";
+import type { FileUploader } from "./FileUploader";
 
 /**
  * What a {@link ChargePoint} is built with from outside the domain (#575).
@@ -24,6 +26,13 @@ export interface ChargePointDeps {
    * reconnect policy, the WS client options and its observers on the socket.
    */
   createTransport(cp: ChargePoint, ctx: TransportContext): ChargePointTransport;
+  /**
+   * Persists the charge point's log entries; owned by this charge point,
+   * flushed on `flushLogs` and on a transport close, closed on `dispose`.
+   */
+  logSink: LogSink;
+  /** Uploads the GetDiagnostics file (read when an upload starts). */
+  fileUploader: FileUploader;
 }
 
 /** The constructor arguments and resolved state the transport is built from. */

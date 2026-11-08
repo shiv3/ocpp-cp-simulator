@@ -322,19 +322,6 @@ export const EXEMPTIONS: readonly Exemption[] = [
     reason:
       "default of now in the resolvers; production callers pass the clock",
   },
-  // Log persistence batches writes on a real timer; it is I/O pacing.
-  {
-    file: "packages/core/src/cp/domain/persistence/LogRepository.ts",
-    kind: "setTimeout",
-    count: 1,
-    reason: "flush pacing of the log table, I/O batching",
-  },
-  {
-    file: "packages/core/src/cp/domain/persistence/LogRepository.ts",
-    kind: "clearTimeout",
-    count: 1,
-    reason: "flush pacing of the log table, I/O batching",
-  },
 ];
 
 export interface Finding {

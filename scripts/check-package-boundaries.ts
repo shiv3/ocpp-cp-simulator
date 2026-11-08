@@ -298,11 +298,6 @@ export function layerOf(file: string): Layer | null {
  * not covered by the rule.
  */
 export const LAYER_EXEMPTIONS: readonly KnownViolation[] = [
-  {
-    from: "packages/core/src/cp/application/engine/behaviors/diagnostics.ts",
-    to: "packages/core/src/cp/infrastructure/fileUpload.ts",
-    why: "The diagnostics behavior calls the file-upload client directly; it needs a port in application.",
-  },
   ...[
     "application/behavior/BehaviorRegistry.ts",
     "application/engine/ChargerEngine.ts",

@@ -2,8 +2,6 @@ import { cyrb128, draw, xoshiro128ss } from "../../shared/SeededRng";
 
 import type { UrlDistribution } from "../../domain/transport/UrlDistribution";
 
-export type { UrlDistribution };
-
 export const DEFAULT_URL_DISTRIBUTION: UrlDistribution = "round-robin";
 
 /**

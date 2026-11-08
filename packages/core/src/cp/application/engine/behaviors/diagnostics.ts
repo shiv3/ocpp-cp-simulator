@@ -1,6 +1,5 @@
 import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
-import { UploadFile } from "../../../infrastructure/fileUpload";
 import { LogType } from "../../../shared/Logger";
 
 /** How long one upload attempt may take before it counts as failed. */
@@ -39,9 +38,9 @@ export function linesBetween(
  * The default behavior of GetDiagnostics.req (OCPP 1.6 §4.4, §6.7): the
  * response names the file the station uploads; once it settled, the station
  * sends DiagnosticsStatusNotification `Uploading` while the POST is in flight,
- * then `Uploaded` or `UploadFailed`. The upload is `UploadFile(location,
- * file)`, a multipart POST to the URL the CSMS gave; a scheme `fetch` cannot
- * speak surfaces as `UploadFailed`.
+ * then `Uploaded` or `UploadFailed`. The upload is
+ * `cp.fileUploader(location, file)`, by default a multipart POST to the URL
+ * the CSMS gave; a scheme `fetch` cannot speak surfaces as `UploadFailed`.
  *
  * `retries` (§6.25, errata 3.50) is how many times the station retries after
  * the first attempt before giving up, `retryInterval` the seconds between
@@ -83,7 +82,7 @@ export function diagnosticsBehavior(cp: ChargePoint): Behavior {
               for (let attempt = 1; attempt <= attempts; attempt++) {
                 const abort = new AbortController();
                 try {
-                  const upload = UploadFile(location, file, abort.signal);
+                  const upload = cp.fileUploader(location, file, abort.signal);
                   // A rejection after the timeout is the abort itself.
                   upload.catch(() => undefined);
                   const res = await ctx.until(upload, {

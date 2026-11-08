@@ -55,6 +55,7 @@ import type {
 import type { RawFrameSink } from "../transport/RawFrameSink";
 import type { OcppCallActions } from "../transport/OcppCallActions";
 import type { ChargePointDeps, ChargePointTransport } from "./ChargePointDeps";
+import type { FileUploader } from "./FileUploader";
 import type {
   CloseCause,
   GenerationToken,
@@ -83,7 +84,7 @@ import {
   type Get15118EVCertificateResult,
 } from "../security/get15118EVCertificate";
 import type { Database } from "../persistence/Database";
-import { LogRepository } from "../persistence/LogRepository";
+import type { LogSink } from "../persistence/LogSink";
 import type {
   ChargePointErrorCode,
   OCPPAvailability,
@@ -527,7 +528,8 @@ export class ChargePoint {
   private readonly _stateManager: StateManager;
   private readonly _timeline: OperationalTimeline;
   private readonly _timelineProjector: OperationalTimelineProjector;
-  private readonly _logRepository: LogRepository;
+  private readonly _logSink: LogSink;
+  private readonly _fileUploader: FileUploader;
   private readonly _reservationManager: ReservationManager;
   /** Parent id / groupIdToken of the tags the CSMS authorized (reservations). */
   private readonly _authorizedParents = new Map<string, string>();
@@ -710,7 +712,8 @@ export class ChargePoint {
       transportOptions.reservationAuthorizeIdTag ?? false;
     this._capabilityProfile = transportOptions.capabilityProfile;
     this._logger.setCpId(this._id);
-    this._logRepository = new LogRepository(this._database);
+    this._logSink = deps.logSink;
+    this._fileUploader = deps.fileUploader;
     // #456: installed certificates survive a restart when state persists.
     this._certificateStore = new CertificateStore(
       this._id,
@@ -729,10 +732,10 @@ export class ChargePoint {
         type: entry.type,
         message: entry.message,
       });
-      // Buffered SQLite write — LogRepository batches up to 50 entries
-      // before hitting the DB so high-frequency log lines don't thrash
-      // the IndexedDB flush in the browser.
-      this._logRepository.append(this._id, entry);
+      // Buffered write — the default LogRepository batches up to 50
+      // entries before hitting the DB so high-frequency log lines don't
+      // thrash the IndexedDB flush in the browser.
+      this._logSink.append(this._id, entry);
     };
 
     for (let connectorId = 1; connectorId <= connectorCount; connectorId++) {
@@ -1082,9 +1085,9 @@ export class ChargePoint {
 
   /** Force any buffered log lines to be flushed to the DB. Used before
    *  the Download Logs export so the file includes the last seconds of
-   *  activity the LogRepository hasn't pushed out yet. */
+   *  activity the log sink hasn't pushed out yet. */
   flushLogs(): void {
-    this._logRepository.flush();
+    this._logSink.flush();
   }
 
   /** In-memory log entries the Logger has accumulated this session,
@@ -1771,6 +1774,11 @@ export class ChargePoint {
   /** #448: operational timeline of this charge point. */
   get timeline(): OperationalTimeline {
     return this._timeline;
+  }
+
+  /** Uploads the GetDiagnostics file (#575: injected through deps). */
+  get fileUploader(): FileUploader {
+    return this._fileUploader;
   }
 
   get logger(): Logger {
@@ -3453,7 +3461,7 @@ export class ChargePoint {
     this._outbox.onWebSocketClosed();
     // Flush any buffered log lines so the operator can still see the
     // last seconds of activity after the CP went down.
-    this._logRepository.flush();
+    this._logSink.flush();
   }
 
   reset(reason: BootReason = "LocalReset"): void {
@@ -3678,12 +3686,12 @@ export class ChargePoint {
     this._localAuthListManager.dispose();
     this._timelineProjector.dispose();
     // The socket's real close event still arrives asynchronously and its
-    // handler logs "WebSocket closed" through this repository. Closing it
+    // handler logs "WebSocket closed" through this log sink. Closing it
     // here (not in teardownAfterClose, which a plain disconnect shares)
     // drops that late line instead of buffering it — otherwise a `cp.delete`
     // that just cascaded to `logs` gets one row back for the deleted id
     // (#326).
-    this._logRepository.close();
+    this._logSink.close();
   }
 
   applyRemoteReset(

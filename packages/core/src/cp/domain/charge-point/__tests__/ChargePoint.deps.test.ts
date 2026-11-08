@@ -6,7 +6,10 @@ import type {
   TransportContext,
 } from "../ChargePointDeps";
 import { createDefaultTransport } from "../../../infrastructure/charge-point/createDefaultTransport";
+import { LogRepository } from "../../../infrastructure/persistence/LogRepository";
+import { UploadFile } from "../../../infrastructure/fileUpload";
 import { DefaultBootNotification } from "../../types/OcppTypes";
+import type { LogSink } from "../../persistence/LogSink";
 
 /**
  * #575: the charge point builds its transport through
@@ -17,6 +20,7 @@ function build(
   ocppVersion: string,
   wrap: (transport: ChargePointTransport) => ChargePointTransport = (t) => t,
   transportOptions: ConstructorParameters<typeof ChargePoint>[10] = {},
+  overrides: Partial<Omit<ChargePointDeps, "createTransport">> = {},
 ): {
   cp: ChargePoint;
   calls: { cp: ChargePoint; ctx: TransportContext }[];
@@ -30,6 +34,8 @@ function build(
       built = wrap(createDefaultTransport(cp, ctx));
       return built;
     },
+    logSink: overrides.logSink ?? new LogRepository(null),
+    fileUploader: overrides.fileUploader ?? UploadFile,
   };
   const cp = new ChargePoint(
     "cp-deps",
@@ -149,5 +155,44 @@ describe("ChargePoint deps.createTransport (#575)", () => {
     expect(transport().callCatalog).toBeNull();
     expect(cp.isSoapChargePoint()).toBe(true);
     expect(cp.wsUrl).toBe("http://localhost:9/cs");
+  });
+});
+
+describe("ChargePoint deps.logSink and deps.fileUploader (#575)", () => {
+  function sink() {
+    return {
+      append: vi.fn<LogSink["append"]>(),
+      flush: vi.fn<LogSink["flush"]>(),
+      close: vi.fn<LogSink["close"]>(),
+    };
+  }
+
+  it("appends every log entry to the log sink under the charge point id", () => {
+    const logSink = sink();
+    const { cp } = build("OCPP-1.6J", undefined, {}, { logSink });
+    logSink.append.mockClear();
+    cp.logger.info("hello sink");
+    expect(logSink.append).toHaveBeenCalledWith(
+      "cp-deps",
+      expect.objectContaining({ message: "hello sink" }),
+    );
+    cp.disconnect();
+  });
+
+  it("flushes the log sink on flushLogs and closes it on dispose", () => {
+    const logSink = sink();
+    const { cp } = build("OCPP-1.6J", undefined, {}, { logSink });
+    cp.flushLogs();
+    expect(logSink.flush).toHaveBeenCalledTimes(1);
+    expect(logSink.close).not.toHaveBeenCalled();
+    cp.dispose();
+    expect(logSink.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("exposes the file uploader it was given", () => {
+    const fileUploader = vi.fn();
+    const { cp } = build("OCPP-1.6J", undefined, {}, { fileUploader });
+    expect(cp.fileUploader).toBe(fileUploader);
+    cp.disconnect();
   });
 });

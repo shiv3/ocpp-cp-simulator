@@ -60,8 +60,6 @@ import type {
 } from "../../domain/transport/ChargePointSocket";
 import { EventEmitter } from "../../shared/EventEmitter";
 
-export type { SocketClose, TransportObserverEvents };
-
 /**
  * #393: sees every well-shaped incoming frame (an array of 3 to 5 elements)
  * before the message handler. Returning true consumes it: the station's

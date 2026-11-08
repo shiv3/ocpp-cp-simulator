@@ -698,6 +698,47 @@ describe("engine state schema, v23", () => {
   });
 });
 
+describe("behavior params schema, v26 (#654)", () => {
+  it("adds behavior_params to a database stamped 25 and keeps its rows without params", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      // The v25 shape of `charge_points`: everything but the new column.
+      db.exec("ALTER TABLE charge_points DROP COLUMN behavior_params");
+      db.run(
+        "INSERT INTO charge_points (cp_id, ws_url, connectors, vendor, model, created_at, inbound_validation) " +
+          "VALUES ('CP1', 'ws://h', 1, 'v', 'm', '2026-11-08T00:00:00Z', 'enforce')",
+      );
+      db.run("UPDATE schema_meta SET value = '25' WHERE key = 'version'");
+
+      runMigrations(db);
+
+      const row = db.get<{
+        cp_id: string;
+        inbound_validation: string | null;
+        behavior_params: string | null;
+      }>(
+        "SELECT cp_id, inbound_validation, behavior_params FROM charge_points",
+      );
+      expect(row).toEqual({
+        cp_id: "CP1",
+        inbound_validation: "enforce",
+        behavior_params: null,
+      });
+      const version = db.get<{ value: string }>(
+        "SELECT value FROM schema_meta WHERE key = 'version'",
+      );
+      expect(Number(version?.value)).toBe(SCHEMA_VERSION);
+      expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(26);
+
+      // Guarded: re-running on a database that already has the column is a no-op.
+      db.run("UPDATE schema_meta SET value = '25' WHERE key = 'version'");
+      expect(() => runMigrations(db)).not.toThrow();
+    } finally {
+      db.close();
+    }
+  });
+});
+
 describe("charging sessions schema, v17 (#447)", () => {
   it("creates charging_sessions on a database stamped 16", () => {
     const db = BunSqliteDatabase.open(":memory:");

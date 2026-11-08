@@ -326,7 +326,16 @@ The charge point page (`/cp/:id`) is one column, top to bottom:
   embedded (the URL the charge point dials), with a **Copy** button (**Copied**
   for 1.5 s; it does nothing when the browser has no clipboard API). It is not
   an input: the value is edited in the WebSocket URL and Basic Auth fields
-  only. The Add dialog opens with the Charge Point ID focused. The helpers are in
+  only. The **Send periodic meter values as TransactionEvent (Updated)**
+  checkbox (#550) is the `txUpdatedMeterValues` option
+  ([OCPP versions and transports](../concepts/ocpp-versions-and-transports.md);
+  off by default). It is offered only for OCPP 2.0.1 and 2.1, because 1.x
+  ignores the option, and it follows the version select. In Remote mode the
+  Add and Edit forms send it with `cp.create` / `cp.update` (an Edit that
+  never touched it sends back the value it read). In Local mode the config is
+  shared by every browser charge point, so the option is stored in that shared
+  config like the OCPP version: it applies to all local charge points,
+  including already running ones. The Add dialog opens with the Charge Point ID focused. The helpers are in
   [`chargePointConfig.ts`](../../apps/web/src/components/chargePointConfig.ts).
 - **Charge point (connector 0)**, a card above the connectors (below).
 - **The connectors.** The full page shows **every connector at once**, like the

@@ -15,6 +15,7 @@ import type {
   GetVariablesRequestV201,
   HeartbeatRequestV201,
   MeterValuesRequestV201,
+  NotifyCustomerInformationRequestV201,
   NotifyReportRequestV201,
   ReportChargingProfilesRequestV201,
   ClearVariableMonitoringRequestV201,
@@ -83,7 +84,6 @@ import {
 import {
   handleClearDisplayMessageAckV201,
   handleCostUpdatedAckV201,
-  handleCustomerInformationAckV201,
   handleDataTransferAckV201,
   handleGetDisplayMessagesAckV201,
   handleGetLocalListVersionAckV201,
@@ -129,6 +129,7 @@ import {
   handleGetCompositeScheduleV201,
   handleSetChargingProfileV201,
 } from "./smartChargingV201";
+import { handleCustomerInformationV201 } from "./customerInformationV201";
 
 export type V201Action =
   | "BootNotification"
@@ -139,6 +140,8 @@ export type V201Action =
   | "Authorize"
   | "DataTransfer"
   | "NotifyReport"
+  // #602: N09 report answering CustomerInformation.
+  | "NotifyCustomerInformation"
   // #457: N02 report answering GetMonitoringReport.
   | "NotifyMonitoringReport"
   // #457: N07 variable-monitor events.
@@ -162,6 +165,7 @@ export type V201RequestPayload =
   | AuthorizeRequestV201
   | DataTransferRequestV201
   | NotifyReportRequestV201
+  | NotifyCustomerInformationRequestV201
   | NotifyMonitoringReportPayload
   | NotifyEventPayload
   | ReportChargingProfilesRequestV201
@@ -184,10 +188,26 @@ export interface V201CertificateSigning {
    */
   requestSignature(use: SignedCertificateUse): Promise<void>;
   /**
+   * TriggerMessage SignCombinedCertificate (2.1 F06.FR.08, #553): a new
+   * CSR sent without `certificateType`, which asks for one certificate for
+   * both the CSMS connection and the 15118 connection. The simulator has no
+   * 15118 stack, so the chain that answers is its Charging Station
+   * certificate.
+   */
+  requestCombinedSignature(): Promise<void>;
+  /**
+   * A chain for `use` was just stored, before its CALLRESULT is written
+   * (#564): a security-profile-3 station hands a new Charging Station
+   * certificate to the transport as the next connection's TLS client
+   * certificate now, so it is used even when the answer is dropped before it
+   * is written (a manual disconnect while network simulation holds it).
+   */
+  certificateStored(use: SignedCertificateUse): void;
+  /**
    * A chain for `use` was installed, the only thing that ends its CSR's
    * resend back-off (a rejected chain leaves it running, #537): for a V2G
    * certificate the station asks the CSMS for the OCSP status of the certificate and its sub-CAs
-   * (M06.FR.07); a security-profile-3 station switches to a new Charging
+   * (M06.FR.07); a security-profile-3 station reconnects with a new Charging
    * Station certificate as its TLS client certificate (A02.FR.08).
    */
   certificateInstalled(use: SignedCertificateUse): void;
@@ -199,6 +219,11 @@ export interface V201InboundContext {
   readonly sendCall: (action: V201Action, payload: V201RequestPayload) => void;
   /** Absent in contexts built without a message handler (unit tests). */
   readonly certificateSigning?: V201CertificateSigning;
+  /**
+   * Whether the CSMS's answer to the last BootNotificationRequest was
+   * Accepted. Absent in contexts built without a message handler.
+   */
+  readonly bootAccepted?: () => boolean;
 }
 
 export interface V201HandlerResult {
@@ -528,7 +553,7 @@ export function buildV201InboundRegistry(): V201InboundRegistry {
       "CustomerInformation",
       {
         validate: isValidCustomerInformationRequestV201,
-        handle: handleCustomerInformationAckV201,
+        handle: handleCustomerInformationV201,
       },
     ],
     [

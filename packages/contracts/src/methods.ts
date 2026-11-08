@@ -88,6 +88,11 @@ export const SCENARIO_RUNS_PAGE_MAX = 200;
  *  ask for (a charge point's whole retained history). */
 export const CHARGING_SESSIONS_PAGE_DEFAULT = 50;
 export const CHARGING_SESSIONS_PAGE_MAX = MAX_SESSIONS_PER_CP;
+/** #489: an ISO 8601 instant with a zone designator, e.g. 2026-11-08T00:00:00Z. */
+const ISO_INSTANT = z
+  .string()
+  .datetime({ offset: true })
+  .describe("ISO 8601 instant with a zone, e.g. 2026-11-08T00:00:00Z");
 /** #447: one charging session, the same shape for every OCPP version. */
 const chargingSessionSchema = z.object({
   sessionId: z.string(),
@@ -374,6 +379,12 @@ const cpParamsBaseSchema = z.object({
     .describe(
       "OCPP 2.x only: send the periodic meter samples taken during a transaction as TransactionEvent(Updated, MeterValuePeriodic) instead of MeterValues. Defaults to false",
     ),
+  inboundValidation: z
+    .enum(["off", "warn", "enforce"])
+    .optional()
+    .describe(
+      "OCPP 1.6J only: what to do with an inbound CALL whose payload breaks the request schema. off skips the check, warn (default) logs and traces the violation and runs the handler, enforce answers a CALLERROR (FormationViolation, OccurenceConstraintViolation, PropertyConstraintViolation or TypeConstraintViolation)",
+    ),
   tlsCaPath: STR_64K.optional().describe(
     "Path to a PEM CA bundle verifying the CSMS certificate. Omit to use the system trust store; passing one REPLACES the default roots",
   ),
@@ -659,6 +670,44 @@ export const cpBulkResultSchema = z.object({
   failed: ARRAY_1000(z.object({ cpId: STR_64K, reason: STR_64K })),
 });
 export type CpBulkResult = z.infer<typeof cpBulkResultSchema>;
+
+/**
+ * `cp.scenario.run` (#486): start one scenario template on every charge point
+ * carrying every pair of `labels`. A method of its own (decision D07), not a
+ * `cp.bulk` action: a scenario takes a connector, a template and options, and
+ * folding them into `cp.bulk` would make its params a union, which the MCP
+ * schema derivation avoids. The selector rule is `cp.bulk`'s.
+ */
+export const cpScenarioRunParamsSchema = z
+  .object({
+    labels: cpBulkParamsSchema.shape.labels,
+    connector: CONN_POS.describe(
+      "Connector the template runs on, on every selected charge point",
+    ),
+    templateId: NON_EMPTY_STR.describe("Scenario template identifier"),
+    evSettings: OBJ()
+      .optional()
+      .describe("Overrides for the template's EV settings"),
+    strict: z
+      .boolean()
+      .optional()
+      .describe("Promote warning-severity assertions to failures"),
+    once: z
+      .boolean()
+      .optional()
+      .describe(
+        "Run once: the instance is loaded disabled, so it does not re-arm on the next reconnect",
+      ),
+  })
+  .strict();
+
+export const cpScenarioRunResultSchema = z.object({
+  matched: ARRAY_1000(STR_64K),
+  /** One entry per charge point that started the run, with its scenario id. */
+  started: ARRAY_1000(z.object({ cpId: STR_64K, scenarioId: STR_64K })),
+  failed: ARRAY_1000(z.object({ cpId: STR_64K, reason: STR_64K })),
+});
+export type CpScenarioRunResult = z.infer<typeof cpScenarioRunResultSchema>;
 
 /** update CP — redacted snapshots may omit password; server preserves it. */
 const updateParamsSchema = cpParamsBaseSchema.extend({
@@ -1286,6 +1335,11 @@ export const METHODS = {
   // #470: partial success is the result, like `cp.create_many`: every
   // selected id is in `matched`, then in exactly one of the other two.
   "cp.bulk": { params: cpBulkParamsSchema, result: cpBulkResultSchema },
+  // #486: `cp.bulk`'s selector, a scenario template instead of an action.
+  "cp.scenario.run": {
+    params: cpScenarioRunParamsSchema,
+    result: cpScenarioRunResultSchema,
+  },
   // `limit` selects the NEWEST n entries (tail), not the oldest -- it used to
   // be the oldest, which made the parameter useless on a charge point that had
   // been up for days. `offset` pages backwards from the newest; `order`
@@ -1358,9 +1412,16 @@ export const METHODS = {
       total: z.number().int().min(0),
     }),
   },
+  // #489: `cpId` omitted lists across every charge point (like
+  // `scenario.runs.list`), newest start first, ties by record order. `labels`
+  // narrows a fleet-wide listing to a selector (`{}` = all, as in `cp.list`);
+  // `startedFrom` (inclusive) / `startedTo` (exclusive) bound the start time.
   "sessions.list": {
     params: z.object({
-      cpId: NON_EMPTY_STR,
+      cpId: NON_EMPTY_STR.optional(),
+      labels: labelsSchema.optional(),
+      startedFrom: ISO_INSTANT.optional(),
+      startedTo: ISO_INSTANT.optional(),
       connectorId: CONN_POS.optional(),
       outcomes: z
         .array(z.enum(CHARGING_SESSION_OUTCOMES))
@@ -1468,6 +1529,7 @@ export const EXPLICIT_METHODS = [
   "behavior.list",
   "behavior.reload",
   "cp.bulk",
+  "cp.scenario.run",
   "logs.get",
   "logs.clear",
   "state.reset",

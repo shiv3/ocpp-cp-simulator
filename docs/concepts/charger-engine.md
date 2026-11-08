@@ -45,7 +45,7 @@ the [CLI](../entities/cli.md#behavior-code---behavior-and-behavior-build) page.
 **`api: 1` is a preview.** The behavior contract (`@ocpp-cp-sim/contracts/behavior`, `Behavior.api: 1`) is
 usable and tested, but it is not final until the charger-engine work is on `main` and has been used outside
 this repository. Until then a breaking change to it bumps `api` (a behavior with another `api` is refused at
-load), and the change is listed in the [log](../log.md). The word _experimental_ below marks the members most
+load), and the change is called out in the PR description and commit message of that change. The word _experimental_ below marks the members most
 likely to change; the type comments in the contract say the same.
 
 | Member                                          | Status                                                                                                                                                     |
@@ -489,7 +489,7 @@ carries on. Delivery is in the table above.
   whether `--watch-behaviors` is on, and `defaults`: the built-in behaviors with the actions each answers and
   their params.
 - **Params travel with the selection.** `behaviorParams` is a map of behavior id to a JSON object, accepted
-  wherever `behaviors` is, stored with the charge point (`charge_points.behavior_params`, schema v25; `NULL` =
+  wherever `behaviors` is, stored with the charge point (`charge_points.behavior_params`, schema v26; `NULL` =
   none) and restored with it. A key is a `default.*` id or one of the selected behaviors; a key that is neither,
   or a value that does not fit the schema, is `invalid_params` before anything is written. `cp.update` keeps the
   params when they are omitted and replaces them when given; `cp.behaviors.set` replaces the whole selection, so

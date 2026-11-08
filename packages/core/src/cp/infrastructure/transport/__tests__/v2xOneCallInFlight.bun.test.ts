@@ -98,7 +98,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
         const outcome = cp.authorizeAndWait("TAG-762", 300, undefined, {
           failClosed: true,
         });
-        const authorize = await csms.waitForCall("Authorize");
+        const authorize = await csms.waitForCall("Authorize", 8000);
         csms.replyCallResult(authorize.messageId, {
           idTokenInfo: { status: "Blocked" },
         });

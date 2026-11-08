@@ -55,5 +55,9 @@ export function describeDefaultBehaviors(): Array<{
     reservationBehavior(none),
     unlockBehavior(none),
     transactionBehavior(none),
-  ].map((b) => ({ id: b.id, actions: Object.keys(b.onCall ?? {}) }));
+  ].map((b) => ({
+    id: b.id,
+    actions: Object.keys(b.onCall ?? {}),
+    ...(b.params ? { params: b.params } : {}),
+  }));
 }

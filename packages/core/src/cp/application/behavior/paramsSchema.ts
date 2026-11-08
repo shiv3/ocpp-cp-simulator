@@ -92,6 +92,7 @@ export function jsonProblem(
       }
       if (!isPlainObject(value)) return `${path}: not a plain JSON object`;
       for (const [key, inner] of Object.entries(value)) {
+        if (key === "__proto__") return `${path}: "__proto__" is not a name`;
         const problem = jsonProblem(inner, `${path}.${key}`, depth + 1);
         if (problem) return problem;
       }
@@ -316,7 +317,18 @@ export function mergeParams(
     return EMPTY_PARAMS;
   }
   const merged: Record<string, JsonValue> = { ...declared.defaults };
-  for (const layer of set) Object.assign(merged, layer);
+  for (const layer of set) {
+    // A layer is checked for JSON-ness below, but copy by definition so a
+    // "__proto__" key can never reach the object's prototype.
+    for (const [key, value] of Object.entries(layer)) {
+      Object.defineProperty(merged, key, {
+        value,
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
+    }
+  }
   const problem = validateParams(declared.schema, merged);
   if (problem) {
     throw new Error(`Behavior ${behaviorId}: invalid params: ${problem}`);

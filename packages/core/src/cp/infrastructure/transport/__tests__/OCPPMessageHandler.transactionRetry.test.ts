@@ -1389,6 +1389,100 @@ describe("OCPP 1.6 transaction messages without a CSMS id carry -1 (#727)", () =
     expect(socket.of("StopTransaction").map(idOf)).toEqual([9]);
   });
 
+  it("a timed-out Start lets its transaction go on to Charging, as a discarded one does", async () => {
+    const { socket, connector, handler } = setup();
+    connector.transaction = transaction({ startUnanswered: true });
+    handler.sendTransactionEvent({
+      phase: "started",
+      transaction: connector.transaction,
+      connectorId: 1,
+    });
+    expect(socket.of("StartTransaction")).toHaveLength(1);
+    expect(connector.status).toBe(OCPPStatus.Preparing);
+
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(connector.status).toBe(OCPPStatus.Charging);
+  });
+
+  it("a Start of another connector with the same tag and time does not make this one's Start live", () => {
+    const { socket, connector, handler } = setup();
+    connector.transaction = transaction({ startUnanswered: true });
+    handler.sendTransactionEvent({
+      phase: "started",
+      transaction: connector.transaction,
+      connectorId: 1,
+    });
+    // Connector 2's Start was lost in a restart: its Stop is built while
+    // connector 1's Start (same idTag and timestamp) is in flight.
+    handler.sendTransactionEvent({
+      phase: "ended",
+      transaction: ended({ connectorId: 2 }),
+      connectorId: 2,
+    });
+
+    socket.callResult(socket.last().id, {
+      transactionId: 5,
+      idTagInfo: { status: "Accepted" },
+    });
+
+    expect(socket.of("StopTransaction").map(idOf)).toEqual([-1]);
+  });
+
+  it("a conf for a transaction that no longer runs and nothing waits on is not recorded", async () => {
+    const { socket, connector, handler } = setup();
+    connector.transaction = transaction({ startUnanswered: true });
+    handler.sendTransactionEvent({
+      phase: "started",
+      transaction: connector.transaction,
+      connectorId: 1,
+    });
+    const start = socket.last();
+    await vi.advanceTimersByTimeAsync(30_000);
+    handler.sendTransactionEvent({
+      phase: "ended",
+      transaction: ended(),
+      connectorId: 1,
+    });
+    expect(socket.of("StopTransaction").map(idOf)).toEqual([-1]);
+    connector.transaction = null;
+
+    socket.callResult(start.id, {
+      transactionId: 727,
+      idTagInfo: { status: "Accepted" },
+    });
+
+    const outcomes = (
+      handler as unknown as { _startOutcomes: Map<string, number> }
+    )._startOutcomes;
+    // The Stop consumed the timeout's -1; the late conf adds nothing.
+    expect(outcomes.size).toBe(0);
+  });
+
+  it("a conf still remembered while a Stop waits on it, even once the transaction ended", () => {
+    const { socket, connector, handler } = setup();
+    connector.transaction = transaction({ startUnanswered: true });
+    handler.sendTransactionEvent({
+      phase: "started",
+      transaction: connector.transaction,
+      connectorId: 1,
+    });
+    const start = socket.last();
+    handler.sendTransactionEvent({
+      phase: "ended",
+      transaction: ended(),
+      connectorId: 1,
+    });
+    connector.transaction = null;
+
+    socket.callResult(start.id, {
+      transactionId: 9,
+      idTagInfo: { status: "Accepted" },
+    });
+
+    expect(socket.of("StopTransaction").map(idOf)).toEqual([9]);
+  });
+
   it("a CSMS-issued 0 stays 0", () => {
     const { socket, handler } = setup();
 

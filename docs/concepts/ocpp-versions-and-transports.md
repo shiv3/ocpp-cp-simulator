@@ -552,9 +552,10 @@ ChangeAvailability to `Inoperative` answers `Scheduled`.
 A StartTransaction.conf belongs to the transaction its request started,
 identified by the request's `idTag` and `timestamp`. So that the pair differs
 between two transactions of one tag, a start on a connector gets a `startTime`
-strictly after the previous transaction's there: a stop then a start in the
+different from the previous transaction's there: a stop then a start in the
 same millisecond sends a timestamp 1 ms later than the clock (#586; 1.x only,
-2.x does not match on it). When it answers a resend
+2.x does not match on it). Only that collision bumps the time: a clock stepped
+back is stamped as it reads. When it answers a resend
 after that transaction stopped, or after another one began on the connector,
 it is logged and ignored: neither the transaction id nor the connector
 status changes, and a non-`Accepted` `idTagInfo` stops nothing. It still
@@ -595,7 +596,9 @@ MeterValues.req of a transaction) that follow a message being resent:
   transaction stopped (the stop waits behind it in the serial queue); `-1` when
   the StartTransaction.req was discarded or timed out (1.6 does not resend a
   timeout, and a conf that still arrives later is applied to the messages sent
-  after it). This also holds for a message salvaged to the offline queue.
+  after it). A StartTransaction.req that timed out also lets its transaction
+  go on from `Preparing` to `Charging`, as after a discard. This also holds
+  for a message salvaged to the offline queue.
 - A transaction records `startUnanswered` from its start until a
   StartTransaction.conf assigns its id (persisted with the transaction, #727):
   its `0` is a placeholder, not an id the CSMS issued (errata 3.54: a CSMS may
@@ -603,8 +606,12 @@ MeterValues.req of a transaction) that follow a message being resent:
   MeterValues.req built for such a transaction while no StartTransaction.req of
   it is in flight, queued, waiting out a resend or in the offline queue (it
   was lost with a restart or a closed link, or it timed out) is built with
-  `-1` (errata 3.18). RemoteStopTransaction naming `0` or `-1` for it is
-  `Rejected`.
+  `-1` (errata 3.18). A start is matched by connector, `idTag` and
+  `timestamp`. RemoteStopTransaction naming `0` or `-1` for it is `Rejected`.
+  A transaction persisted by a release before #727 holds `0` without the flag,
+  so after the upgrade its `0` is taken for one the CSMS issued: its
+  StopTransaction.req carries `0` and RemoteStopTransaction naming `0`
+  matches it.
 - A stop requested before the StartTransaction.req is queued (a
   `connectorStatusChange` listener of the `Preparing` status calling
   `stop_transaction`) waits for it, so on the wire the StartTransaction.req

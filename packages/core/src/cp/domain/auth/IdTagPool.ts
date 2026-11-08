@@ -64,6 +64,11 @@ export class IdTagPool {
     return tag;
   }
 
+  /** The distribution this pool draws with. */
+  get distributionPolicy(): IdTagDistribution {
+    return this.distribution;
+  }
+
   /** The tags, for reporting. */
   list(): readonly string[] {
     return this.tags;

@@ -197,18 +197,27 @@ scraper read HTML as a successful scrape. Setting `--health-path /metrics`
 alongside `--metrics` is refused at startup, since the health route matches
 first and would leave the metrics endpoint unreachable.
 
-| Metric                                    | Type      | Labels                | Meaning                                     |
-| ----------------------------------------- | --------- | --------------------- | ------------------------------------------- |
-| `ocppcp_charge_points`                    | gauge     | `state`               | Registered charge points by current status. |
-| `ocppcp_connectors`                       | gauge     | `status`              | Connectors across all charge points.        |
-| `ocppcp_transactions_active`              | gauge     | —                     | Connectors currently in a transaction.      |
-| `ocppcp_ocpp_messages_total`              | counter   | `action`, `direction` | OCPP messages observed.                     |
-| `ocppcp_ocpp_call_errors_total`           | counter   | `action`              | CALLERROR frames.                           |
-| `ocppcp_ocpp_call_duration_seconds`       | histogram | `action`              | CALL to CALLRESULT/CALLERROR round trip.    |
-| `ocppcp_ocpp_call_timeouts_total`         | counter   | `action`              | CALLs the transport gave up on.             |
-| `ocppcp_ocpp_pending_calls_evicted_total` | counter   | —                     | Latency-correlation cache overflows.        |
-| `ocppcp_rpc_requests_total`               | counter   | `method`, `outcome`   | Control-plane rpc calls.                    |
-| `ocppcp_ws_reconnects_total`              | counter   | —                     | WebSocket reconnect attempts.               |
+| Metric                                            | Type      | Labels                | Meaning                                               |
+| ------------------------------------------------- | --------- | --------------------- | ----------------------------------------------------- |
+| `ocppcp_charge_points`                            | gauge     | `state`               | Registered charge points by current status.           |
+| `ocppcp_connectors`                               | gauge     | `status`              | Connectors across all charge points.                  |
+| `ocppcp_transactions_active`                      | gauge     | —                     | Connectors currently in a transaction.                |
+| `ocppcp_ocpp_messages_total`                      | counter   | `action`, `direction` | OCPP messages observed.                               |
+| `ocppcp_ocpp_call_errors_total`                   | counter   | `action`              | CALLERROR frames.                                     |
+| `ocppcp_ocpp_call_duration_seconds`               | histogram | `action`              | CALL to CALLRESULT/CALLERROR round trip.              |
+| `ocppcp_ocpp_call_timeouts_total`                 | counter   | `action`              | CALLs the transport gave up on.                       |
+| `ocppcp_ocpp_pending_calls_evicted_total`         | counter   | —                     | Latency-correlation cache overflows.                  |
+| `ocppcp_rpc_requests_total`                       | counter   | `method`, `outcome`   | Control-plane rpc calls.                              |
+| `ocppcp_ws_reconnects_total`                      | counter   | —                     | WebSocket reconnect attempts.                         |
+| `ocppcp_auto_traffic_cycles_total`                | counter   | `result`              | AutoTraffic cycles: `attempted`, `skipped`.           |
+| `ocppcp_auto_traffic_steps_total`                 | counter   | `step`, `outcome`     | AutoTraffic authorize/start/stop outcomes.            |
+| `ocppcp_auto_traffic_consecutive_skips`           | gauge     | —                     | Current run of skipped cycles (max over connectors).  |
+| `ocppcp_auto_traffic_first_run_timestamp_seconds` | gauge     | —                     | First AutoTraffic cycle (Unix s; absent before any).  |
+| `ocppcp_auto_traffic_last_run_timestamp_seconds`  | gauge     | —                     | Latest AutoTraffic cycle (Unix s; absent before any). |
+
+The AutoTraffic series (#603) sum the [background traffic](../concepts/control-plane.md#background-traffic)
+counters of the connectors that run it; a connector whose traffic is turned off
+drops out (a reconfigure keeps its counters), so a counter can fall, which Prometheus reads as a reset.
 
 **No `cpId` label, deliberately.** It is unbounded by construction once a
 daemon holds a fleet, and a Prometheus server pays for every series it has ever

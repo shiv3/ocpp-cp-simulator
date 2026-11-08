@@ -150,6 +150,7 @@ describe("LocalChargePointService scenario runtime (no UI mounted)", () => {
       "scenario-node-execute:s-run:set",
       "scenario-node-execute:s-run:end",
       "scenario-completed:s-run",
+      "scenario-run-recorded:s-run",
     ]);
   });
 
@@ -170,6 +171,7 @@ describe("LocalChargePointService scenario runtime (no UI mounted)", () => {
       "scenario-node-execute:s-unavailable:set",
       "scenario-node-execute:s-unavailable:end",
       "scenario-completed:s-unavailable",
+      "scenario-run-recorded:s-unavailable",
     ]);
   });
 
@@ -233,6 +235,7 @@ describe("LocalChargePointService scenario runtime (no UI mounted)", () => {
       scenarioId: "s-wait",
       nodeId: "wait",
       kind: "continue",
+      runId: expect.any(String),
     });
   });
 

@@ -492,6 +492,7 @@ function idTagInfo16(idTag: string): Record<string, unknown> {
     return { status: "Expired", expiryDate: "2020-01-01T00:00:00.000Z" };
   }
   if (idTag.startsWith("CERT023-BLK")) return { status: "Blocked" };
+  if (idTag.startsWith("RESIL-BLK")) return { status: "Blocked" };
   return { status: "Accepted" };
 }
 

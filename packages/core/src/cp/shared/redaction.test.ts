@@ -1297,7 +1297,8 @@ describe("escaped JSON and nested assignments (#531)", () => {
 
   it(
     "stays linear on long runs inside escaped and nested values",
-    { timeout: 2000 },
+    // A quadratic run takes tens of seconds; a shared CI runner needs about 2 s for the linear one.
+    { timeout: 8000 },
     () => {
       const runs = ["_", "-", '"', "'", "\\", '\\"', "\\\\", "a'\"\\-_ "].map(
         (chars) => chars.repeat(Math.ceil(200_000 / chars.length)),

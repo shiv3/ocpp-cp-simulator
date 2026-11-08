@@ -545,7 +545,10 @@ would change the wire for every existing 2.x integration.
 
 A charge point created with `txUpdatedMeterValues: true` (`cp.create`,
 `cp.update`, `cp.create_many`, the MCP `cp_create` tools) or with
-`--tx-updated-meter-values` opts in. It is persisted with `--state-db`.
+`--tx-updated-meter-values` opts in. It is persisted with `--state-db`. The
+[web console](../entities/web-console.md) has a checkbox for it on the Add and
+Edit forms of an OCPP 2.0.1 / 2.1 charge point (#550); in Local mode it is a
+setting of the shared config, so it applies to every browser charge point.
 
 | Scheduler sample, OCPP 2.x | Option off (default) | Option on                                         |
 | -------------------------- | -------------------- | ------------------------------------------------- |

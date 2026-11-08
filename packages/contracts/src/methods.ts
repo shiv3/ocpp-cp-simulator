@@ -618,6 +618,44 @@ export const cpBulkResultSchema = z.object({
 });
 export type CpBulkResult = z.infer<typeof cpBulkResultSchema>;
 
+/**
+ * `cp.scenario.run` (#486): start one scenario template on every charge point
+ * carrying every pair of `labels`. A method of its own (decision D07), not a
+ * `cp.bulk` action: a scenario takes a connector, a template and options, and
+ * folding them into `cp.bulk` would make its params a union, which the MCP
+ * schema derivation avoids. The selector rule is `cp.bulk`'s.
+ */
+export const cpScenarioRunParamsSchema = z
+  .object({
+    labels: cpBulkParamsSchema.shape.labels,
+    connector: CONN_POS.describe(
+      "Connector the template runs on, on every selected charge point",
+    ),
+    templateId: NON_EMPTY_STR.describe("Scenario template identifier"),
+    evSettings: OBJ()
+      .optional()
+      .describe("Overrides for the template's EV settings"),
+    strict: z
+      .boolean()
+      .optional()
+      .describe("Promote warning-severity assertions to failures"),
+    once: z
+      .boolean()
+      .optional()
+      .describe(
+        "Run once: the instance is loaded disabled, so it does not re-arm on the next reconnect",
+      ),
+  })
+  .strict();
+
+export const cpScenarioRunResultSchema = z.object({
+  matched: ARRAY_1000(STR_64K),
+  /** One entry per charge point that started the run, with its scenario id. */
+  started: ARRAY_1000(z.object({ cpId: STR_64K, scenarioId: STR_64K })),
+  failed: ARRAY_1000(z.object({ cpId: STR_64K, reason: STR_64K })),
+});
+export type CpScenarioRunResult = z.infer<typeof cpScenarioRunResultSchema>;
+
 /** update CP — redacted snapshots may omit password; server preserves it. */
 const updateParamsSchema = cpParamsBaseSchema.extend({
   basicAuth: z
@@ -1244,6 +1282,11 @@ export const METHODS = {
   // #470: partial success is the result, like `cp.create_many`: every
   // selected id is in `matched`, then in exactly one of the other two.
   "cp.bulk": { params: cpBulkParamsSchema, result: cpBulkResultSchema },
+  // #486: `cp.bulk`'s selector, a scenario template instead of an action.
+  "cp.scenario.run": {
+    params: cpScenarioRunParamsSchema,
+    result: cpScenarioRunResultSchema,
+  },
   // `limit` selects the NEWEST n entries (tail), not the oldest -- it used to
   // be the oldest, which made the parameter useless on a charge point that had
   // been up for days. `offset` pages backwards from the newest; `order`
@@ -1426,6 +1469,7 @@ export const EXPLICIT_METHODS = [
   "behavior.list",
   "behavior.reload",
   "cp.bulk",
+  "cp.scenario.run",
   "logs.get",
   "logs.clear",
   "state.reset",

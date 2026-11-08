@@ -12,6 +12,8 @@ sources:
   - scripts/verify-install-urls.sh
   - scripts/roll-cli-latest.sh
   - .github/workflows/cli-release.yml
+  - .github/workflows/install-urls.yml
+  - .github/workflows/ci.yml
   - "issue #320"
   - "issue #321"
   - apps/cli/src/vehicleCatalogConfig.ts
@@ -34,7 +36,7 @@ related:
   - ../concepts/log-format.md
   - ../concepts/local-authorization.md
   - ../concepts/charger-engine.md
-updated: 2026-11-08
+updated: 2026-11-09
 ---
 
 # CLI (`ocpp-cp-sim`)
@@ -322,15 +324,26 @@ be, because it is that group's own eviction behaviour that the convergence
 above is written to survive. `verify-install-urls.sh` asserts this placement so
 the group cannot migrate back up.
 
-CI runs `scripts/verify-install-urls.sh` on every pull request. It **fetches**
-every install command this page and `README.md` advertise and fails if one does
-not return 200 — an earlier version of the guard only checked that the places
-restating the command agreed with each other, which is no guard at all, since
-several places agreeing on a broken URL is precisely the state #321 describes.
-It also refuses any `releases/latest/download` install command, and asserts
-that `cli-release.yml` still advertises the rolling URL and still moves it
-through the roll script. Prose that merely names a URL (such as the block
-above) is exempt: it is not an instruction a reader will paste.
+CI runs `scripts/verify-install-urls.sh` on every pull request, and what it
+does there depends on the diff (#808). It **fetches** every install command
+this page and `README.md` advertise and fails if one does not return 200 — an
+earlier version of the guard only checked that the places restating the command
+agreed with each other, which is no guard at all, since several places agreeing
+on a broken URL is precisely the state #321 describes. It also refuses any
+`releases/latest/download` install command, and asserts that `cli-release.yml`
+still advertises the rolling URL and still moves it through the roll script.
+Prose that merely names a URL (such as the block above) is exempt: it is not an
+instruction a reader will paste.
+
+The fetch needs a reachable GitHub release, so it is not run for every pull
+request. A pull request gets the full script only when its diff adds or removes
+a line matching `(pnpm|bun|npm) install -g https://` in a Markdown file (the
+pattern the script itself greps for) or touches `cli-release.yml`,
+`roll-cli-latest.sh` or the script; any other pull request runs
+`scripts/verify-install-urls.sh --offline`, which keeps every repository-only
+invariant and skips the fetch. A push to `main` always fetches, and the
+`Install URLs` workflow (`.github/workflows/install-urls.yml`) fetches daily,
+so a broken `cli-latest` is still noticed between such changes.
 
 ### What the package ships
 

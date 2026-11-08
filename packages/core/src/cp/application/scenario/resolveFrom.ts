@@ -26,6 +26,17 @@ export function isFromReference(value: unknown): value is { $from: string } {
   );
 }
 
+/** Whether `value` holds a `{ "$from": … }` anywhere {@link resolveFromExchange}
+ *  would resolve it, i.e. whether resolving it needs a CALL. */
+export function containsFromReference(value: unknown): boolean {
+  if (isFromReference(value)) return true;
+  if (Array.isArray(value)) return value.some(containsFromReference);
+  if (typeof value === "object" && value !== null) {
+    return Object.values(value).some(containsFromReference);
+  }
+  return false;
+}
+
 /**
  * Replace every `{ "$from": "<path>" }` that stands for a whole value in
  * `value` with what the path names (schema 1.5, #566; roots 1.6, #654). A path

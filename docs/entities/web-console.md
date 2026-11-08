@@ -1023,7 +1023,7 @@ scenario or a copy of one (`libraryId`). All use the same content
   **After this step** select — _End of scenario_ or _Loop back to step N_ — that
   sets or clears the link (`setLaneLink`); a link keeps leaving the lane's last
   card through inserts, moves and deletes, and is dropped when its target is
-  deleted. A chain closed by a loop takes no **+ branch**. Above the steps, a warning box lists wiring the executor would only half run (`validateScenarioGraph`, see [connection rules](../concepts/scenario-format.md#connection-rules)): a fork after a step, a step nothing reaches, an edge to a missing node. It never blocks Save. A scenario with a
+  deleted. A chain closed by a loop takes no **+ branch**. Above the steps, a warning box lists wiring the executor would only half run (`validateScenarioGraph`, see [connection rules](../concepts/scenario-format.md#connection-rules)): a fork after a step, a step nothing reaches, an edge to a missing node, a Call Response its branch holds no CALL for, a `replace` trigger whose CALL is never answered. It never blocks Save. A scenario with a
   second fork, or a node no path reaches, cannot be drawn: it is shown as an
   outline list (steps in running order with where each jumps to) whose steps
   can be selected and edited, but not re-wired. There is no ReactFlow editor

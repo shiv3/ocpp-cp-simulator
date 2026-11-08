@@ -452,23 +452,63 @@ allows but does not require.
 The edge type does not say which nodes may connect; the rules below are what
 `ScenarioExecutor` honours, written down in
 [`scenarioConnectionRules.ts`](../../packages/core/src/scenario/scenarioConnectionRules.ts)
-(`connectionRule`, `validateScenarioGraph`). They are advisory like the schema:
-the web console's editor lists the issues above the steps and never blocks Save.
+as `CONNECTION_RULES`, one entry per node type. The table is typed
+(`ConnectionRuleTable`, keyed by every `ScenarioNodeType`), so a new node type
+does not compile until it declares its rule. `validateScenarioGraph` checks a
+scenario against it. The checks are advisory like the schema: the web
+console's editor lists the issues above the steps and never blocks Save.
 
-| Node type   | Edges in | Edges out                                                     |
-| ----------- | -------- | ------------------------------------------------------------- |
-| `start`     | none     | any number — **only START runs several in parallel**          |
-| `end`       | any      | none                                                          |
-| every other | any      | one — with more, only the first edge to an existing node runs |
+Two kinds of rule are real. **How a node is left** (`out`):
 
-Loops (an edge back to an earlier node) and joins (several edges into one node)
-are allowed; Stop ends an endless loop. `validateScenarioGraph` reports
-`missingStart` (error: the run throws "No start node found"), `multipleStart`,
-`edgeIntoStart`, `edgeOutOfEnd`, `extraOutgoing` (a fork anywhere but START),
-`danglingEdge` and `unreachable` (no path from START). Every shipped template
-is clean (tested). Note that a fork after a step, as the console's "+ Add
-parallel branch" builds when the chain already has steps, is `extraOutgoing`:
-at run time only its first branch runs.
+| Node type   | `out`      | What the executor does                                                          |
+| ----------- | ---------- | ------------------------------------------------------------------------------- |
+| `start`     | `parallel` | every outgoing edge becomes a branch, each with its own CALL slot               |
+| `end`       | `none`     | the branch stops; an edge out of it is never followed                           |
+| every other | `next`     | the first edge to an existing node is followed; with more, the rest are ignored |
+
+**The CALL a branch holds** (`call`, [schema 1.5](#csmscalltrigger-replace-callresponse-from-and-usebehavior-schema-15)),
+the one place where one node type must come before another on the path:
+
+| Node                                       | `call`      | Needs                                                    |
+| ------------------------------------------ | ----------- | -------------------------------------------------------- |
+| `csmsCallTrigger` with `behavior: replace` | `takesOver` | nothing; the branch now holds a new, unanswered CALL     |
+| `callResponse`                             | `answers`   | an unanswered CALL taken over earlier in the branch      |
+| `ocppCall` whose `payload` has a `$from`   | `reads`     | a CALL taken over earlier in the branch, answered or not |
+| everything else                            | `none`      | —                                                        |
+
+`validateScenarioGraph` reports `missingStart` (error: the run throws "No
+start node found"), `multipleStart`, `edgeOutOfEnd`, `extraOutgoing` (a fork
+anywhere but Start), `danglingEdge`, `unreachable` (no path from Start), and,
+following the CALL along the edges the executor really takes:
+
+- `noCallHeld` (error) — a `callResponse`, or an `ocppCall` with `$from`, on a
+  path whose branch holds no CALL: right after Start, after an `observe`
+  trigger, or after a join from another branch. The run fails there.
+- `callAlreadyAnswered` (error) — a second `callResponse` for one CALL. The run
+  fails there.
+- `callLeftOpen` (warning, on the trigger) — a `replace` trigger whose CALL its
+  branch can end with, or drop by taking over another CALL, unanswered. The
+  station then answers `InternalError` only when the run ends; silence on
+  purpose is `callResponse` with `kind: "none"`.
+- `edgeIntoStart` (warning) — an edge back into a Start that fans out. It is
+  followed, but Start then runs as a step: the run goes on along its first
+  edge only. Into a Start with one edge it is an ordinary loop.
+
+Not constrained, because the executor needs nothing there: any step may follow
+any step, including a wait (`*Trigger`) right after Start or after another
+wait; loops and joins are allowed (Stop ends an endless loop); a CALL held
+across a loop is fine as long as each pass answers it. An operator's
+**Continue** on a parked `replace` trigger leaves the branch's CALL as it was;
+the check does not model that manual escape.
+
+The executor still honours two legacy label tests, and the check mirrors them:
+the run starts from the first node of type `start` **or labelled "Start"**, and
+a node **labelled "End"** of any type ends its branch after it runs. Every
+shipped template and every file in
+[`docs/examples/scenarios/`](../examples/scenarios/) is clean (tested). Note
+that a fork after a step, as the console's "+ Add parallel branch" builds when
+the chain already has steps, is `extraOutgoing`: at run time only its first
+branch runs.
 
 ## Assertions & verdicts
 

@@ -158,7 +158,7 @@
   "scenarios.editor.outlineOnlyNote": "此场景的形状步骤编辑器无法绘制(第二个分支,或无法到达的步骤)。步骤按执行顺序列出;可以编辑每个步骤的设置,但不能修改连接方式。",
   "scenarios.editor.issue.missingStart": "此场景没有 Start 节点,无法运行。",
   "scenarios.editor.issue.multipleStart": "存在多个 Start 节点,只运行第一个。",
-  "scenarios.editor.issue.edgeIntoStart": "有一条边指回 Start,不会被执行。",
+  "scenarios.editor.issue.edgeIntoStart": "有一条边指回 Start。它会被执行,但之后只沿 Start 的第一个分支继续;并行分支只在运行开始时启动。",
   "scenarios.editor.issue.edgeOutOfEnd": "有一条边从 End 节点引出,不会被执行。",
   "scenarios.editor.issue.extraOutgoing": "步骤 {{n}}({{title}})有多个后续步骤,但只有 Start 能并行分支:运行时只会执行第一个。",
   "scenarios.editor.issue.danglingEdge": "有一条边指向不存在的步骤,该分支到此结束。",
@@ -169,5 +169,8 @@
   "scenarios.templateBrowser.selectStepHint": "选择一个步骤以查看其设置。",
   "scenarios.templateBrowser.listLabel": "模板",
   "scenarios.templateBrowser.previewTemplate": "预览 {{name}}",
-  "scenarios.templateBrowser.nothingToPreview": "没有可预览的模板。"
+  "scenarios.templateBrowser.nothingToPreview": "没有可预览的模板。",
+  "scenarios.editor.issue.noCallHeld": "步骤 {{n}}({{title}})需要本分支接管的 CSMS 调用(同一分支中更早的 behavior 为“replace”的 CSMS Call Trigger),但有路径上没有:运行会在此失败。",
+  "scenarios.editor.issue.callAlreadyAnswered": "步骤 {{n}}({{title}})在某条路径上应答了本分支已应答过的 CSMS 调用:运行会在此失败。",
+  "scenarios.editor.issue.callLeftOpen": "步骤 {{n}}({{title}})接管的 CSMS 调用可能在本分支中一直未应答;站点只会在运行结束时以 InternalError 应答。请添加 Call Response(有意保持沉默时使用 kind“none”)。"
 }

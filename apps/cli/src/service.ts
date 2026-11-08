@@ -63,6 +63,8 @@ import { AutoTrafficRunner } from "@ocpp-cp-sim/core/cp/application/services/Aut
 import {
   AUTO_TRAFFIC_ID_TAG,
   AutoTrafficIdTagPicker,
+  autoTrafficVehicleLabel,
+  autoTrafficVehiclePatch,
   defaultAutoTrafficConfig,
   emptyAutoTrafficCounters,
   validateAutoTrafficConfig,
@@ -985,6 +987,7 @@ export class CLIChargePointService {
         transactionStartTime: tx?.startTime ? tx.startTime.toISOString() : null,
         transactionTagId: tx?.tagId ?? null,
         transactionBatteryCapacityKwh: tx?.batteryCapacityKwh ?? null,
+        evConnection: connector.evConnection,
       });
     });
 
@@ -1213,6 +1216,16 @@ export class CLIChargePointService {
     this._chargePoint.evDisconnected(connectorId);
   }
 
+  /** #453: a cable was plugged into the EV side of `connectorId`. */
+  evPlugIn(connectorId: number): void {
+    this._chargePoint.evPlugIn(connectorId);
+  }
+
+  /** #453: the EV on `connectorId` asks for energy or stops asking. */
+  evSetReady(connectorId: number, ready: boolean): void {
+    this._chargePoint.evSetReady(connectorId, ready);
+  }
+
   setMeterValue(connectorId: number, value: number): void {
     this._chargePoint.setMeterValue(connectorId, value);
   }
@@ -1431,7 +1444,19 @@ export class CLIChargePointService {
       },
       // `intent` is set under `sessionModel: "intent"` (#327): the session
       // opens at the drawn SoC, targets the drawn SoC and stops there.
-      startTransaction: async (id, idTag, intent) => {
+      startTransaction: async (id, idTag, intent, vehicle) => {
+        // #627: the drawn vehicle becomes the connector's, before the start,
+        // so the transaction (battery capacity, opening SoC) and every
+        // MeterValues of the session read the vehicle the traffic drew.
+        if (vehicle) {
+          this.requireConnector(id).applyEvSettingsOverride(
+            autoTrafficVehiclePatch(vehicle),
+          );
+          this._chargePoint.logger.info(
+            `[auto-traffic] ${this._init.cpId}/${id} vehicle ${autoTrafficVehicleLabel(vehicle)}`,
+            LogType.TRANSACTION,
+          );
+        }
         const outcome = await this._chargePoint.startTransaction(
           idTag,
           id,

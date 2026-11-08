@@ -410,6 +410,9 @@ export interface ConnectorStatus {
   readonly transactionStartTime: string | null;
   readonly transactionTagId: string | null;
   readonly transactionBatteryCapacityKwh: number | null;
+  /** The EV and cable state (#453). */
+  readonly evConnection?:
+    "disconnected" | "connected-ready" | "connected-not-ready";
 }
 
 export interface ChargePointStatus {

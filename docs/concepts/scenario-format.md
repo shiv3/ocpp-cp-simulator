@@ -15,6 +15,8 @@ sources:
   - packages/core/src/cp/domain/connector/OperatingPoint.ts
   - packages/core/src/cp/domain/connector/SessionIntent.ts
   - packages/core/src/cp/domain/connector/Connector.ts
+  - packages/core/src/cp/domain/connector/EvConnection.ts
+  - "issue #453"
   - packages/core/src/cp/domain/connector/ChargingScheduleResolver.ts
   - packages/core/src/cp/domain/connector/MeterValueScheduler.ts
   - packages/core/src/cp/infrastructure/transport/OCPPMessageHandlerV201.ts
@@ -337,15 +339,21 @@ it in the payload JSON) and the `useBehavior` id is free text.
 
 ### `connectorPlug` notes
 
-A plug-in is a no-op in the simulator: it sends nothing (a `transaction`
-start drives `Preparing` itself, #176). A plug-out **during a transaction** is an
-EV-side disconnect (`ChargePoint.evDisconnected`, #488):
+Both actions drive the connector's [EV and cable
+model](charging-sessions.md#ev-and-cable-model) (#453), the same operations the
+control plane's `ev_plug_in` and `ev_disconnected` call; the node no longer
+needs a status node beside it. A plug-in on an idle `Available` connector
+reports `Preparing` (2.x `Occupied`) once; the `transaction` start that follows
+finds the connector already there and sends no second one (#176, #496). In any
+other state the cable is recorded and the status stays. A plug-out **during a
+transaction** is an EV-side disconnect (`ChargePoint.evDisconnected`, #488):
 `StopTransactionOnEVSideDisconnect` (2.x `TxCtrlr.StopTxOnEVSideDisconnect`,
 default `true`) stops the transaction with `EVDisconnected`, or with `false`
 keeps it as `SuspendedEV` (2.x: `TransactionEvent(Updated)`, `triggerReason`
 `EVCommunicationLost`). A later `transaction` stop node then finds no running
-transaction under `true` and does nothing. A plug-out without a transaction is
-still a no-op. The full matrix is in
+transaction under `true` and does nothing. A plug-out without a transaction
+returns a `Preparing` or `Finishing` connector to `Available` and leaves any
+other status alone. The full matrix is in
 [Charging sessions](charging-sessions.md#ev-side-disconnect-and-connection-loss).
 
 The exported k6 runtime keeps no configuration: its plug-in sends

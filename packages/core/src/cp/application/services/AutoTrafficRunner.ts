@@ -1,10 +1,12 @@
 import {
   AUTO_TRAFFIC_ID_TAG,
   AutoTrafficPlanner,
+  autoTrafficVehicleLabel,
   emptyAutoTrafficCounters,
   type AutoTrafficConfig,
   type AutoTrafficCounters,
   type AutoTrafficIntent,
+  type AutoTrafficVehicle,
 } from "../../domain/connector/AutoTraffic";
 import { realClock } from "../../shared/clock";
 import type { SimClock, TimerHandle } from "../../shared/clock";
@@ -30,11 +32,17 @@ export interface AutoTrafficHooks {
   startBlocker?: (connectorId: number) => string | null;
   /** Authorize a tag; resolve `false` when the CSMS refused. */
   authorize: (connectorId: number, idTag: string) => Promise<boolean>;
-  /** Start a session; resolve `false` when it did not begin (#603). */
+  /**
+   * Start a session; resolve `false` when it did not begin (#603). `vehicle`
+   * is the pool vehicle drawn for the session (#627): the hook makes the
+   * connector that vehicle before the start, so the traffic and the meter
+   * model read the same one. Absent: the connector's own EV settings.
+   */
   startTransaction: (
     connectorId: number,
     idTag: string,
     intent?: AutoTrafficIntent,
+    vehicle?: AutoTrafficVehicle,
   ) => Promise<void | boolean>;
   /**
    * `sessionModel: "intent"` only (#327): whether the connector still has the
@@ -148,7 +156,11 @@ export class AutoTrafficRunner {
     this.timer = this.clock.setTimeout(
       () => {
         this.timer = null;
-        void this.runStep(step.start, step.durationSec, step.intent);
+        const vehicle =
+          step.vehicleIndex !== undefined
+            ? this.config.vehiclePool?.[step.vehicleIndex]
+            : undefined;
+        void this.runStep(step.start, step.durationSec, step.intent, vehicle);
       },
       Math.max(0, step.gapSec * 1000),
     );
@@ -181,6 +193,7 @@ export class AutoTrafficRunner {
     start: boolean,
     durationSec: number,
     intent?: AutoTrafficIntent,
+    vehicle?: AutoTrafficVehicle,
   ): Promise<void> {
     if (this.stopped) return;
     if (this.expired()) {
@@ -239,7 +252,7 @@ export class AutoTrafficRunner {
         this.counters.authorizeAccepted++;
       }
       const started = await this.hooks
-        .startTransaction(this.connectorId, idTag, intent)
+        .startTransaction(this.connectorId, idTag, intent, vehicle)
         .catch((err: unknown) => {
           this.counters.startRejected++;
           throw err;
@@ -266,6 +279,11 @@ export class AutoTrafficRunner {
       this.startConfSettled = false;
       this.counters.started++;
       this.counters.startAccepted++;
+      if (vehicle) {
+        const label = autoTrafficVehicleLabel(vehicle);
+        const vehicles = (this.counters.vehicles ??= {});
+        vehicles[label] = (vehicles[label] ?? 0) + 1;
+      }
       this.counters.consecutiveSkips = 0;
     } catch (err) {
       // A failed start is not a reason to stop generating: the CSMS being

@@ -1,5 +1,6 @@
 import { cyrb128, draw, xoshiro128ss } from "../../shared/SeededRng";
 import type { IdTagDistribution } from "../auth/IdTagPool";
+import type { EVSettings, EVSettingsPatch } from "./EVSettings";
 
 /**
  * Background charging traffic for one connector (#300).
@@ -67,6 +68,85 @@ export interface AutoTrafficConfig {
    *  below the opening SoC is raised to one point above it (capped at 100). */
   targetSocMin?: number;
   targetSocMax?: number;
+  /**
+   * A weighted pool of vehicles (#627): each cycle draws one, from its own
+   * seeded stream, and the session charges as that vehicle, so the traffic
+   * is a mix of cars instead of the connector's one fixed vehicle. Absent
+   * or empty, the connector's current EV settings are the vehicle and the
+   * draws of every other field are unchanged.
+   */
+  vehiclePool?: AutoTrafficVehicle[];
+}
+
+/**
+ * One vehicle of {@link AutoTrafficConfig.vehiclePool}: a **copy** of what a
+ * vehicle profile resolves to (`resolveEvSettings`), taken when the pool is
+ * saved. Nothing reads a profile or the catalog while the traffic runs, so
+ * the pool works offline and an edit of the profile does not change it (the
+ * offline guarantee of vehicle profiles, #458).
+ */
+export interface AutoTrafficVehicle {
+  /** Relative weight, a finite number above 0. `[3, 1]` draws the first
+   *  vehicle three times in four. */
+  weight: number;
+  /** The profile this was resolved from; a label for counters and logs. */
+  profileId?: string;
+  /** The vehicle itself, the vehicle part of `EVSettings`. */
+  vehicle: AutoTrafficVehicleSettings;
+}
+
+/** The part of EV settings a vehicle determines; the session's own SoCs and
+ *  the electrical values a vehicle does not determine are not in it. */
+export type AutoTrafficVehicleSettings = Pick<
+  EVSettings,
+  "modelName" | "batteryCapacityKwh" | "maxChargingPowerKw"
+> &
+  Partial<
+    Pick<EVSettings, "chargingCurve" | "currentType" | "phases" | "attribution">
+  >;
+
+/** The label a pool vehicle is counted and logged under. */
+export function autoTrafficVehicleLabel(entry: AutoTrafficVehicle): string {
+  return entry.profileId ?? entry.vehicle.modelName;
+}
+
+/**
+ * The EV settings patch that makes a connector this vehicle. Replaces the
+ * previous vehicle whole: a field the vehicle lacks is removed (`null`), never
+ * left to the vehicle before it, because the connector merges a patch into its
+ * settings (see `applyVehicleSettings`, docs/concepts/vehicle-profiles.md).
+ */
+export function autoTrafficVehiclePatch(
+  entry: AutoTrafficVehicle,
+): EVSettingsPatch {
+  const v = entry.vehicle;
+  return {
+    modelName: v.modelName,
+    batteryCapacityKwh: v.batteryCapacityKwh,
+    maxChargingPowerKw: v.maxChargingPowerKw,
+    chargingCurve: v.chargingCurve ?? [],
+    currentType: v.currentType ?? null,
+    phases: v.phases ?? null,
+    attribution: v.attribution ?? null,
+  };
+}
+
+/**
+ * Index of the entry a uniform draw `unit` in [0, 1) selects, each entry in
+ * proportion to its weight. Pure, so "same seed, same sequence" is a property
+ * of the draw alone.
+ */
+export function pickWeightedIndex(
+  weights: readonly number[],
+  unit: number,
+): number {
+  const total = weights.reduce((sum, w) => sum + w, 0);
+  let point = unit * total;
+  for (let i = 0; i < weights.length; i++) {
+    point -= weights[i]!;
+    if (point < 0) return i;
+  }
+  return weights.length - 1;
 }
 
 export type AutoTrafficSessionModel = "duration" | "intent";
@@ -107,6 +187,8 @@ export interface AutoTrafficStep {
   durationSec: number;
   /** The session's SoC intent; present only under `sessionModel: "intent"`. */
   intent?: AutoTrafficIntent;
+  /** Index into `vehiclePool` of the drawn vehicle; present only with a pool (#627). */
+  vehicleIndex?: number;
 }
 
 /**
@@ -137,6 +219,11 @@ export interface AutoTrafficCounters {
   /** When the first and the latest cycle ran, epoch ms (#603). */
   firstRunAt: number | null;
   lastRunAt: number | null;
+  /**
+   * Sessions begun per pool vehicle, by {@link autoTrafficVehicleLabel}
+   * (#627). Absent until a session of a pooled vehicle begins.
+   */
+  vehicles?: Record<string, number>;
 }
 
 export function emptyAutoTrafficCounters(): AutoTrafficCounters {
@@ -235,6 +322,12 @@ export class AutoTrafficIdTagPicker {
  */
 export class AutoTrafficPlanner {
   private readonly rng: () => number;
+  /**
+   * The vehicle draws have a stream of their own (#627), so a pool changes
+   * which car a session is and nothing else: the gaps, durations, intents and
+   * rolls of a seed are the ones it gives without a pool.
+   */
+  private readonly vehicleRng: () => number;
 
   constructor(
     private readonly config: AutoTrafficConfig,
@@ -246,6 +339,12 @@ export class AutoTrafficPlanner {
     const state = cyrb128(`${config.seed}:${cpId}:${connectorId}`);
     this.rng = xoshiro128ss(
       state.every((word) => word === 0) ? [1, 2, 3, 4] : state,
+    );
+    const vehicleState = cyrb128(
+      `${config.seed}:${cpId}:${connectorId}:vehicle`,
+    );
+    this.vehicleRng = xoshiro128ss(
+      vehicleState.every((word) => word === 0) ? [1, 2, 3, 4] : vehicleState,
     );
   }
 
@@ -264,11 +363,22 @@ export class AutoTrafficPlanner {
     const intent =
       this.config.sessionModel === "intent" ? this.drawIntent() : undefined;
     const roll = draw(this.rng, 1_000_000) / 1_000_000;
+    // Drawn on every step, whether or not the attempt fires, so the vehicle
+    // sequence does not depend on which attempts did (#627).
+    const pool = this.config.vehiclePool;
+    const vehicleIndex =
+      pool && pool.length > 0
+        ? pickWeightedIndex(
+            pool.map((entry) => entry.weight),
+            (this.vehicleRng() >>> 0) / 4_294_967_296,
+          )
+        : undefined;
     return {
       gapSec,
       start: roll < this.config.probabilityOfStart,
       durationSec,
       ...(intent ? { intent } : {}),
+      ...(vehicleIndex !== undefined ? { vehicleIndex } : {}),
     };
   }
 
@@ -386,11 +496,76 @@ export function validateAutoTrafficConfig(
   ) {
     return "targetSocMax must be at least targetSocMin";
   }
+  const poolProblem = validateVehiclePool(config.vehiclePool);
+  if (poolProblem) return poolProblem;
   if (
     config.cpIndex !== undefined &&
     (!Number.isInteger(config.cpIndex) || config.cpIndex < 0)
   ) {
     return "cpIndex must be a non-negative integer";
+  }
+  return null;
+}
+
+/** Reject a vehicle pool the traffic could not draw from (#627). */
+function validateVehiclePool(pool: unknown): string | null {
+  if (pool === undefined) return null;
+  if (!Array.isArray(pool)) return "vehiclePool must be an array";
+  if (pool.length === 0) {
+    return "vehiclePool must not be empty (omit it to use the connector's EV settings)";
+  }
+  for (const [i, entry] of pool.entries()) {
+    const at = `vehiclePool[${i}]`;
+    if (typeof entry !== "object" || entry === null) {
+      return `${at} must be an object`;
+    }
+    const { weight, vehicle } = entry as Partial<AutoTrafficVehicle>;
+    if (typeof weight !== "number" || !Number.isFinite(weight) || weight <= 0) {
+      return `${at}.weight must be a finite number above 0`;
+    }
+    if (typeof vehicle !== "object" || vehicle === null) {
+      return `${at}.vehicle must be an object`;
+    }
+    if (typeof vehicle.modelName !== "string" || vehicle.modelName === "") {
+      return `${at}.vehicle.modelName must be a non-empty string`;
+    }
+    for (const key of ["batteryCapacityKwh", "maxChargingPowerKw"] as const) {
+      const value = vehicle[key];
+      if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+        return `${at}.vehicle.${key} must be a finite number above 0`;
+      }
+    }
+    if (
+      vehicle.currentType !== undefined &&
+      vehicle.currentType !== "AC" &&
+      vehicle.currentType !== "DC"
+    ) {
+      return `${at}.vehicle.currentType must be "AC" or "DC"`;
+    }
+    if (
+      vehicle.phases !== undefined &&
+      vehicle.phases !== 1 &&
+      vehicle.phases !== 3
+    ) {
+      return `${at}.vehicle.phases must be 1 or 3`;
+    }
+    if (vehicle.chargingCurve !== undefined) {
+      if (!Array.isArray(vehicle.chargingCurve)) {
+        return `${at}.vehicle.chargingCurve must be an array`;
+      }
+      for (const point of vehicle.chargingCurve) {
+        if (
+          !Number.isFinite(point?.socPercent) ||
+          point.socPercent < 0 ||
+          point.socPercent > 100 ||
+          !Number.isFinite(point?.powerFraction) ||
+          point.powerFraction < 0 ||
+          point.powerFraction > 1
+        ) {
+          return `${at}.vehicle.chargingCurve points need socPercent 0-100 and powerFraction 0-1`;
+        }
+      }
+    }
   }
   return null;
 }

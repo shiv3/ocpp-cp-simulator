@@ -129,7 +129,9 @@ bucket with the same numbers).
 | `firmware_status_notification`    | `{ "status": FirmwareStatus, "requestId"?: number }`                                                                      | Send `FirmwareStatusNotification.req`. On 2.0.1 — and on 2.1, whose inbound registry and outbound handler are the 2.0.1 ones — the station **accepts** `UpdateFirmware` (it used to answer `Rejected`) and remembers its `requestId`; a report sent without one carries that id, an explicit one wins, and the status set is the full 2.0.1 `FirmwareStatusEnumType` (#345). Nothing is downloaded and, unlike 1.6, the 2.0.1 station does not walk the status machine on its own — the driver sends each report. On 1.6 `requestId` is dropped (the request has no such field) and the seven 1.6 statuses apply.                                                                                                  |
 | `log_status_notification`         | `{ "status": UploadLogStatus, "requestId"?: number }`                                                                     | Send `LogStatusNotification.req` (1.6 Security Whitepaper / 2.0.1 N01). On 2.0.1 the station **accepts** `GetLog` with a `filename` and remembers its `requestId`, used when the command gives none; nothing is really uploaded (#345). Since #601 the station also sends `Uploading` and `Uploaded` itself after an accepted `GetLog` (a command-driven notification comes on top; `default.logs` with `auto: false` silences the automatic ones). `PublishFirmware` stays refused with `reasonCode: NotLocalController` — the station is not a Local Controller, so `PublishFirmwareStatusNotification` is never sent.                                                                                           |
 | `update_connector_status`         | `{ "connector": number, "status": OCPPStatus, "timestamp"?: string, … }`                                                  | Only this connector-taking method accepts connector `0`. `status` is one of `Available`, `Preparing`, `Charging`, `SuspendedEVSE`, `SuspendedEV`, `Finishing`, `Reserved`, `Unavailable`, `Faulted`; `timestamp` must be a date string. Since #383 anything else is `invalid_params` (it used to be `internal`).                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `ev_disconnected`                 | `{ "connector": number }`                                                                                                 | The EV side of the cable was unplugged (#488). With a running transaction `StopTransactionOnEVSideDisconnect` stops it (`EVDisconnected`) or keeps it as `SuspendedEV`; without one the connector goes `Available`. See [EV-side disconnect](charging-sessions.md#ev-side-disconnect-and-connection-loss).                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `ev_disconnected`                 | `{ "connector": number }`                                                                                                 | The EV side of the cable was unplugged (#488, #453). With a running transaction `StopTransactionOnEVSideDisconnect` stops it (`EVDisconnected`) or keeps it as `SuspendedEV`; without one a `Preparing` or `Finishing` connector goes `Available` (an `Unavailable`, `Faulted` or `Reserved` one keeps its status). See [EV-side disconnect](charging-sessions.md#ev-side-disconnect-and-connection-loss).                                                                                                                                                                                                                                                                                                         |
+| `ev_plug_in`                      | `{ "connector": number }`                                                                                                 | A cable was plugged into the EV side (#453). An idle `Available` connector with no transaction reports `Preparing` (2.x `Occupied`); in any other state (a transaction, `Unavailable`, `Faulted`, `Reserved`, no power) the cable is recorded and the status stays. Idempotent. See [EV and cable model](charging-sessions.md#ev-and-cable-model).                                                                                                                                                                                                                                                                                                                                                                 |
+| `ev_ready`                        | `{ "connector": number, "ready": boolean }`                                                                               | The EV asks for energy or stops asking (#453). With a running transaction `false` suspends it (`SuspendedEV`, the energy register stops) and `true` resumes `Charging`; without one the readiness is only recorded. Fails when no cable is plugged in. See [EV and cable model](charging-sessions.md#ev-and-cable-model).                                                                                                                                                                                                                                                                                                                                                                                          |
 | `set_meter_value`                 | `{ "connector": number, "value": number }`                                                                                | `value` is Wh and must be a non-negative integer.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `send_meter_value`                | `{ "connector": number, "context"?: string }`                                                                             | Send current meter value to the CSMS. `context` (#335) is the `ReadingContext` the sampled values carry (default `Sample.Periodic`); on 2.x it is now emitted as `sampledValue.context`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `remove_connector`                | `{ "connector": number }`                                                                                                 | Remove a connector from the simulated CP.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
@@ -297,6 +299,33 @@ scenario is loaded.
   "idTagStrategy": "random", // optional (#603)
   "cpIndex": 12, // optional (#603)
   "sessionModel": "duration", // optional: "duration" (default) | "intent" (#327)
+  "vehiclePool": [
+    // optional (#627): a weighted pool, one vehicle drawn per session
+    {
+      "weight": 3,
+      "profileId": "small-ac",
+      "vehicle": {
+        "modelName": "City AC",
+        "batteryCapacityKwh": 40,
+        "maxChargingPowerKw": 7,
+        "currentType": "AC",
+        "phases": 1,
+      },
+    },
+    {
+      "weight": 1,
+      "vehicle": {
+        "modelName": "Fast DC",
+        "batteryCapacityKwh": 90,
+        "maxChargingPowerKw": 120,
+        "currentType": "DC",
+        "chargingCurve": [
+          { "socPercent": 0, "powerFraction": 1 },
+          { "socPercent": 100, "powerFraction": 0.2 },
+        ],
+      },
+    },
+  ],
 }
 ```
 
@@ -345,6 +374,33 @@ durations it gives under `"duration"`; the intent ends the session through
 `completed` without a `stopAccepted`. Validation:
 `sessionModel must be "duration" or "intent"`, and each bound a number from 0 to 100
 with min not above max.
+
+**Vehicle pool** (#627). `vehiclePool` replaces the connector's one fixed
+vehicle with a mix of cars. Each entry is a `weight` (a finite number above 0,
+relative to the others: `[3, 1]` draws the first three times in four), an
+optional `profileId` (a label for counters and logs) and a `vehicle`: a
+**copy** of what a [vehicle profile](vehicle-profiles.md) resolves to
+(`modelName`, `batteryCapacityKwh`, `maxChargingPowerKw` and optionally
+`currentType`, `phases`, `chargingCurve` as `powerFraction`s, `attribution`),
+taken by the caller when it saves the pool. Nothing reads a profile or the
+catalog while the traffic runs, so the pool works offline and editing a profile
+does not change it. Every cycle draws one entry, whether or not the attempt
+fires, from a stream of its own keyed on `seed:cpId:connectorId:vehicle`: the
+same seed gives the same vehicle sequence, and a pool changes which car a
+session is and nothing else, so the gaps, durations, intents and rolls of a
+seed are the ones it gives without a pool. Before the start the connector
+**becomes** the drawn vehicle (a merge patch that replaces the previous
+vehicle whole: a field the entry lacks is removed, not inherited), so the
+transaction (battery capacity, opening SoC) and every MeterValues of the
+session read the vehicle the traffic drew, and the connector shows the last
+drawn vehicle afterwards. It composes with both session models: under
+`"intent"` the SoC targets are drawn as before and the vehicle decides how fast
+they are reached. `connector.autoTraffic` counters gain `vehicles` (sessions
+begun per label), present once a pooled session has begun. Validation:
+`vehiclePool must not be empty` (omit it instead), `vehiclePool[i].weight must
+be a finite number above 0`, and a `vehicle` needs a non-empty `modelName`,
+positive `batteryCapacityKwh` and `maxChargingPowerKw`, `currentType` `AC` or
+`DC`, `phases` 1 or 3 and curve points within 0–100 % and 0–1.
 
 **Start preconditions** (#603). A cycle starts only when the charge point's
 BootNotification was `Accepted` (and the connection has not closed since), the

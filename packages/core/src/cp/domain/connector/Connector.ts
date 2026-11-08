@@ -63,6 +63,7 @@ import {
   vehicleTermOf,
   type OperatingPoint,
 } from "./OperatingPoint";
+import { evConnectionOf, type EvConnectionState } from "./EvConnection";
 import type { MeterRealism } from "./MeterRealism";
 import { resolveSessionIntent, type SessionIntent } from "./SessionIntent";
 import {
@@ -261,6 +262,16 @@ export class Connector {
    */
   private energyOfferSuspendedValue = false;
 
+  /**
+   * The physical EV and cable side of the connector (#453): is a cable
+   * plugged in, and is the EV asking for energy. Orthogonal to the OCPP
+   * status, which the engine's record owns: this is what the status
+   * reacts to, not a second state machine. In memory only; a transaction
+   * that attaches (also a restored one) implies a plugged-in, ready EV.
+   */
+  private evCableConnected = false;
+  private evReadyValue = true;
+
   private autoConfig: AutoMeterValueConfig = { ...defaultAutoMeterValueConfig };
   private incrementFallback: IncrementStrategyConfig | null = null;
   private onMeterSend: ((connectorId: number) => void) | null = null;
@@ -380,6 +391,19 @@ export class Connector {
     // one waiting for the next session (#301).
     this.socAwaitsNextTransaction = snapshot.socAwaitsNextTransaction ?? false;
     this.lastAutoStartedScenarioKeyValue = snapshot.lastAutoStartedScenarioKey;
+    // The cable is not stored (#453). What a restart shows of it is inferred
+    // from what the snapshot proves: a running transaction, or a status that
+    // only exists with an EV on the cable, means a plugged-in EV. Nothing
+    // else is invented; a restart is not a cable event.
+    this.evCableConnected =
+      (snapshot.transaction !== null &&
+        snapshot.transaction.stopTime === null) ||
+      snapshot.status === OCPPStatus.Preparing ||
+      snapshot.status === OCPPStatus.Finishing ||
+      snapshot.status === OCPPStatus.SuspendedEV ||
+      snapshot.status === OCPPStatus.SuspendedEVSE ||
+      snapshot.status === OCPPStatus.Charging;
+    this.evReadyValue = snapshot.status !== OCPPStatus.SuspendedEV;
   }
 
   /**
@@ -1044,6 +1068,29 @@ export class Connector {
     return this.energyOfferSuspendedValue;
   }
 
+  /** The EV and cable state now (#453), see {@link EvConnectionState}. */
+  get evConnection(): EvConnectionState {
+    return evConnectionOf(this.evCableConnected, this.evReadyValue);
+  }
+
+  /** Record the cable as plugged in; the EV is ready until it says otherwise.
+   *  The status change that follows is the charge point's (#453). */
+  markEvPluggedIn(): void {
+    this.evCableConnected = true;
+    this.evReadyValue = true;
+  }
+
+  /** Record the cable as unplugged. */
+  markEvUnplugged(): void {
+    this.evCableConnected = false;
+    this.evReadyValue = true;
+  }
+
+  /** Record the EV as ready or not ready for energy; needs a plugged-in cable. */
+  markEvReady(ready: boolean): void {
+    this.evReadyValue = ready;
+  }
+
   /** Stop the energy offer of the running transaction after an EV-side
    *  disconnect (#488): the register freezes, sampling goes on. */
   suspendEnergyOffer(): void {
@@ -1418,6 +1465,10 @@ export class Connector {
     // has no `startTime` to resolve against and so disarms on its own.
     this.lastSchedulePaused = null;
     this.energyOfferSuspendedValue = false;
+    // A transaction means an EV on the cable (#453): a start without a prior
+    // plug-in, and a restored transaction, imply one.
+    this.evCableConnected = true;
+    this.evReadyValue = true;
     this.openSessionSoc(this.txView ?? transaction);
     this.startConfiguredMeterValue();
     this.eventsEmitter.emit("transactionChange", { transaction });

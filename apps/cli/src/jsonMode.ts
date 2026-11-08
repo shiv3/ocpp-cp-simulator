@@ -186,6 +186,19 @@ export async function handleJsonCommand(
       return undefined;
     }
 
+    case "ev_plug_in": {
+      await ops.evPlugIn(requirePositiveInt(params, "connector"));
+      return undefined;
+    }
+
+    case "ev_ready": {
+      await ops.evSetReady(
+        requirePositiveInt(params, "connector"),
+        requireBoolean(params, "ready"),
+      );
+      return undefined;
+    }
+
     case "set_meter_value": {
       const connectorId = requirePositiveInt(params, "connector");
       const value = requireNumber(params, "value");

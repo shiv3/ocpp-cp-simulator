@@ -818,12 +818,16 @@ export const createScenarioExecutorCallbacks = (
           );
       }
     },
-    // #488: a plug-out during a transaction is an EV-side disconnect, which
-    // StopTransactionOnEVSideDisconnect turns into a stop or a suspension.
-    // Without a transaction, and for a plug-in, the node stays a no-op: the
-    // templates follow it with their own status nodes.
+    // #453: the node drives the connector's EV and cable model, the same
+    // operations as the control plane. A plug-in moves an idle Available
+    // connector to Preparing; a plug-out is an EV-side disconnect, which
+    // StopTransactionOnEVSideDisconnect turns into a stop or a suspension
+    // when a transaction runs (#488) and otherwise returns a Preparing or
+    // Finishing connector to Available.
     onConnectorPlug: async (action) => {
-      if (action === "plugout" && connector.hasRunningTransaction) {
+      if (action === "plugin") {
+        chargePoint.evPlugIn(connector.id);
+      } else {
         chargePoint.evDisconnected(connector.id);
       }
     },

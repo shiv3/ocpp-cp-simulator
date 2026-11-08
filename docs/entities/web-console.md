@@ -19,7 +19,7 @@ related:
   - open-ev-directory.md
   - ../concepts/operational-timeline.md
   - ../concepts/charging-sessions.md
-updated: 2026-11-08
+updated: 2026-11-09
 ---
 
 # Web console (browser UI)
@@ -468,11 +468,12 @@ bottom:
   (**Charging (faulted)** with a transaction) with nothing to press;
   `Unavailable` disables every step and says _Unavailable: send Available in
   Controls to plug in_. Start calls `startTransaction(cp, n, tag)`, Stop
-  `stopTransaction`. **Plug in** sends a StatusNotification `Preparing`
-  (`sendStatusNotification`), as the exported k6 runtime does for a
-  `connectorPlug` plug-in. **Unplug** is an EV-side disconnect
-  (`evDisconnected`, #488): the station sends `Available` without a
-  transaction; with one, `StopTransactionOnEVSideDisconnect` stops it with
+  `stopTransaction`. **Plug in** drives the connector's EV and cable model
+  (`evPlugIn`, #453): an idle `Available` connector reports `Preparing`, in
+  any other state the cable is only recorded (see
+  [Charging sessions](../concepts/charging-sessions.md#ev-and-cable-model)). **Unplug** is an EV-side disconnect
+  (`evDisconnected`, #488): the station returns a `Preparing` or `Finishing` connector to `Available`
+  without a transaction; with one, `StopTransactionOnEVSideDisconnect` stops it with
   `EVDisconnected` or keeps it as `SuspendedEV` (see
   [Charging sessions](../concepts/charging-sessions.md#ev-side-disconnect-and-connection-loss)).
   The stepper offers Unplug only in `Finishing` or, without a transaction,

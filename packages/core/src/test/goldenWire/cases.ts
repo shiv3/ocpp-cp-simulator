@@ -380,6 +380,33 @@ export const goldenCases: GoldenCase[] = [
     }
     await settle(rig);
   }),
+  // #453: the EV and cable model. A plug-in reports Preparing (2.x Occupied)
+  // by itself, readiness suspends and resumes the transaction, an unplug of
+  // an idle connector returns to Available.
+  ...both("ev-cable-plug-unplug-idle", async (rig) => {
+    rig.cp.evPlugIn(1);
+    rig.cp.evPlugIn(1);
+    await settle(rig);
+    rig.cp.evDisconnected(1);
+    await settle(rig);
+  }),
+  ...both("ev-cable-ready-cycle", async (rig) => {
+    rig.cp.evPlugIn(1);
+    await settle(rig);
+    await rig.startLocal("TAG-A", 1);
+    await settle(rig);
+    // 2.x leaves the connector status to the caller once the start is sent.
+    if (!rig.is16) rig.cp.updateConnectorStatus(1, OCPPStatus.Charging);
+    await settle(rig);
+    rig.cp.evSetReady(1, false);
+    await settle(rig);
+    rig.cp.evSetReady(1, true);
+    await settle(rig);
+    rig.cp.stopTransaction(1);
+    await settle(rig);
+    rig.cp.evDisconnected(1);
+    await settle(rig);
+  }),
   ...both("ev-disconnect-during-transaction", async (rig) => {
     await charging(rig);
     rig.cp.evDisconnected(1);

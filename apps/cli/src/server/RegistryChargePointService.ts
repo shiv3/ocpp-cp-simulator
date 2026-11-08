@@ -396,6 +396,18 @@ export class RegistryChargePointService implements ChargePointService {
     this.requireService(id).evDisconnected(connectorId);
   }
 
+  async evPlugIn(id: string, connectorId: number): Promise<void> {
+    this.requireService(id).evPlugIn(connectorId);
+  }
+
+  async evSetReady(
+    id: string,
+    connectorId: number,
+    ready: boolean,
+  ): Promise<void> {
+    this.requireService(id).evSetReady(connectorId, ready);
+  }
+
   async sendStatusNotification(
     id: string,
     connectorId: number,
@@ -1249,6 +1261,7 @@ function toConnectorSnapshot(
       : null,
     transactionTagId: connector.transactionTagId,
     transactionBatteryCapacityKwh: connector.transactionBatteryCapacityKwh,
+    evConnection: connector.evConnection,
   };
 }
 

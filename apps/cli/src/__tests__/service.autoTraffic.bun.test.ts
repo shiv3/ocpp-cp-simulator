@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
 import {
+  AutoTrafficPlanner,
   defaultAutoTrafficConfig,
   type AutoTrafficConfig,
+  type AutoTrafficVehicle,
 } from "@ocpp-cp-sim/core/cp/domain/connector/AutoTraffic";
 import { CLIChargePointService } from "../service";
 import type { ChargePointInitOptions } from "../types";
@@ -226,5 +228,89 @@ describe("AutoTraffic on a charge point (#603)", () => {
     expect(() =>
       svc.setAutoTrafficConfig(1, { ...CONFIG, stopAt: "later" }),
     ).toThrow(/stopAt/);
+  });
+});
+
+describe("AutoTraffic vehicle pool on a charge point (#627)", () => {
+  const POOL: AutoTrafficVehicle[] = [
+    {
+      weight: 1,
+      profileId: "city-ac",
+      vehicle: {
+        modelName: "City AC",
+        batteryCapacityKwh: 35,
+        maxChargingPowerKw: 7,
+        currentType: "AC",
+        phases: 1,
+      },
+    },
+    {
+      weight: 1,
+      profileId: "fast-dc",
+      vehicle: {
+        modelName: "Fast DC",
+        batteryCapacityKwh: 90,
+        maxChargingPowerKw: 120,
+        currentType: "DC",
+        chargingCurve: [
+          { socPercent: 0, powerFraction: 1 },
+          { socPercent: 100, powerFraction: 0.2 },
+        ],
+      },
+    },
+  ];
+
+  it("makes the connector the drawn vehicle before each start, in the seeded order", async () => {
+    const { svc } = station();
+    const cp = (
+      svc as unknown as {
+        _chargePoint: {
+          getConnector(id: number): {
+            evSettings: {
+              modelName: string;
+              batteryCapacityKwh: number;
+              maxChargingPowerKw: number;
+              currentType?: string;
+              chargingCurve?: unknown[];
+            };
+          };
+          startTransaction: (tag: string) => Promise<{ started: boolean }>;
+        };
+      }
+    )._chargePoint;
+    const atStart: string[] = [];
+    cp.startTransaction = async () => {
+      // What the meter model reads at the moment the session begins.
+      const ev = cp.getConnector(1).evSettings;
+      atStart.push(
+        `${ev.modelName}/${ev.batteryCapacityKwh}/${ev.maxChargingPowerKw}/${ev.currentType}/${ev.chargingCurve?.length ?? 0}`,
+      );
+      return { started: true };
+    };
+    const config: AutoTrafficConfig = { ...CONFIG, vehiclePool: POOL };
+    svc.setAutoTrafficConfig(1, config);
+    await wait(3_500);
+    const counters = { ...svc.getAutoTrafficCounters(1) };
+    svc.setAutoTrafficConfig(1, { ...config, enabled: false });
+    expect(atStart.length).toBeGreaterThan(1);
+
+    const planner = new AutoTrafficPlanner(config, "cp-traffic", 1);
+    const expected = atStart.map(() => {
+      const entry = POOL[planner.next().vehicleIndex!]!.vehicle;
+      return `${entry.modelName}/${entry.batteryCapacityKwh}/${entry.maxChargingPowerKw}/${entry.currentType}/${entry.chargingCurve?.length ?? 0}`;
+    });
+    expect(atStart).toEqual(expected);
+    const total = Object.values(counters.vehicles ?? {}).reduce(
+      (a, b) => a + b,
+      0,
+    );
+    expect(total).toBe(counters.started);
+  });
+
+  it("refuses an invalid pool", () => {
+    const { svc } = station();
+    expect(() =>
+      svc.setAutoTrafficConfig(1, { ...CONFIG, vehiclePool: [] }),
+    ).toThrow(/vehiclePool/);
   });
 });

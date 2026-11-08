@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   defaultAutoTrafficConfig,
   type AutoTrafficConfig,
+  type AutoTrafficVehicle,
 } from "../../../domain/connector/AutoTraffic";
 import { AutoTrafficRunner, type AutoTrafficHooks } from "../AutoTrafficRunner";
 
@@ -617,6 +618,69 @@ describe("stopping ends the session it started (#300)", () => {
       } finally {
         runner.stop();
       }
+    });
+  });
+
+  describe("vehiclePool (#627)", () => {
+    const pool: AutoTrafficVehicle[] = [
+      {
+        weight: 1,
+        profileId: "a",
+        vehicle: {
+          modelName: "A",
+          batteryCapacityKwh: 40,
+          maxChargingPowerKw: 7,
+        },
+      },
+      {
+        weight: 1,
+        profileId: "b",
+        vehicle: {
+          modelName: "B",
+          batteryCapacityKwh: 80,
+          maxChargingPowerKw: 11,
+        },
+      },
+    ];
+    const POOLED: AutoTrafficConfig = { ...CONFIG, vehiclePool: pool };
+
+    async function drawn(config: AutoTrafficConfig, sessions: number) {
+      const seen: (string | undefined)[] = [];
+      const h = hooks({
+        startTransaction: async (_id, _tag, _intent, vehicle) => {
+          seen.push(vehicle?.profileId);
+        },
+      });
+      const runner = new AutoTrafficRunner(config, "CP1", 1, h);
+      runner.start();
+      try {
+        // gap 5 s + duration 10 s per session
+        await advance(15_000 * sessions);
+      } finally {
+        runner.stop();
+      }
+      return { seen, runner };
+    }
+
+    it("hands the drawn vehicle to the start and counts sessions per vehicle", async () => {
+      const { seen, runner } = await drawn(POOLED, 8);
+      expect(seen.length).toBeGreaterThanOrEqual(7);
+      expect(seen.every((v) => v === "a" || v === "b")).toBe(true);
+      const counted = runner.counters.vehicles ?? {};
+      expect((counted.a ?? 0) + (counted.b ?? 0)).toBe(runner.counters.started);
+    });
+
+    it("replays the same vehicle order for the same seed", async () => {
+      const first = await drawn(POOLED, 8);
+      const second = await drawn(POOLED, 8);
+      expect(second.seen).toEqual(first.seen);
+      expect(new Set(first.seen).size).toBe(2);
+    });
+
+    it("hands no vehicle and keeps no vehicle counter without a pool", async () => {
+      const { seen, runner } = await drawn(CONFIG, 2);
+      expect(seen).toEqual([undefined, undefined]);
+      expect(runner.counters.vehicles).toBeUndefined();
     });
   });
 });

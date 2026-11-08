@@ -1268,6 +1268,19 @@ export const METHODS = {
     params: z.object({ connector: CONN_POS }),
     result: ANY,
   },
+  // #453: a cable was plugged into the EV side. An idle Available connector
+  // reports Preparing; any other state is unchanged. Idempotent.
+  ev_plug_in: {
+    params: z.object({ connector: CONN_POS }),
+    result: ANY,
+  },
+  // #453: the EV asks for energy or stops asking. With a running transaction
+  // "not ready" suspends it (SuspendedEV), "ready" resumes Charging. Needs a
+  // plugged-in cable.
+  ev_ready: {
+    params: z.object({ connector: CONN_POS, ready: z.boolean() }),
+    result: ANY,
+  },
   set_meter_value: {
     params: z.object({ connector: CONN_POS, value: z.number().int().min(0) }),
     result: ANY,

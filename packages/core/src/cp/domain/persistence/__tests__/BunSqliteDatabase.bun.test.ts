@@ -678,7 +678,7 @@ describe("transport options schema, v28 (#609)", () => {
           "INSERT INTO charge_points (cp_id, ws_url, connectors, vendor, model, created_at) " +
             "VALUES ('CP1', 'ws://h', 1, 'v', 'm', '2026-11-08T00:00:00Z')",
         );
-        db.exec("ALTER TABLE charge_points DROP COLUMN transport_options");
+        dropColumnByRebuild(db, "charge_points", "transport_options");
         db.run("UPDATE schema_meta SET value = ? WHERE key = 'version'", [
           stamp,
         ]);
@@ -748,12 +748,54 @@ describe("engine state schema, v23", () => {
   });
 });
 
+/**
+ * Rebuild `table` without `column`, from `PRAGMA table_info`, instead of
+ * `ALTER TABLE .. DROP COLUMN` (#816): SQLite rewrites the stored CREATE TABLE
+ * text on a drop and re-parses it, and a commented last column made that
+ * re-parse fail on the system SQLite macOS links (3.51.0). Keeps names, types,
+ * NOT NULL, defaults and the primary key; the fixture tables have no foreign
+ * keys, indexes or triggers pointing at them.
+ */
+function dropColumnByRebuild(
+  db: BunSqliteDatabase,
+  table: string,
+  column: string,
+): void {
+  const cols = db
+    .all<{
+      name: string;
+      type: string;
+      notnull: number;
+      dflt_value: string | null;
+      pk: number;
+    }>(`PRAGMA table_info(${table})`)
+    .filter((c) => c.name !== column);
+  const defs = cols.map(
+    (c) =>
+      `${c.name} ${c.type}${c.pk ? " PRIMARY KEY" : ""}${
+        c.notnull ? " NOT NULL" : ""
+      }${c.dflt_value === null ? "" : ` DEFAULT ${c.dflt_value}`}`,
+  );
+  const names = cols.map((c) => c.name).join(", ");
+  db.exec(
+    `CREATE TABLE ${table}__old (${defs.join(", ")});` +
+      `INSERT INTO ${table}__old (${names}) SELECT ${names} FROM ${table};` +
+      `DROP TABLE ${table};` +
+      `ALTER TABLE ${table}__old RENAME TO ${table};`,
+  );
+}
+
 describe("behavior params schema, v29 (#654)", () => {
   it("adds behavior_params to a database stamped 25 and keeps its rows without params", () => {
     const db = BunSqliteDatabase.open(":memory:");
     try {
       // The v25 shape of `charge_points`: everything but the new column.
-      db.exec("ALTER TABLE charge_points DROP COLUMN behavior_params");
+      dropColumnByRebuild(db, "charge_points", "behavior_params");
+      expect(
+        db
+          .all<{ name: string }>("PRAGMA table_info(charge_points)")
+          .map((c) => c.name),
+      ).not.toContain("behavior_params");
       db.run(
         "INSERT INTO charge_points (cp_id, ws_url, connectors, vendor, model, created_at, inbound_validation) " +
           "VALUES ('CP1', 'ws://h', 1, 'v', 'm', '2026-11-08T00:00:00Z', 'enforce')",

@@ -15,6 +15,9 @@ const repoRoot = resolve(
   "../../../..",
 );
 
+// Each call starts a bun process (hundreds of ms, seconds under a loaded full
+// run). Make ONE call per test (#473, #783): a test with several calls spends
+// several start-ups against the default 5 s timeout. Use it.each for cases.
 function runParseArgs(args: string[]) {
   const script = [
     'import { buildBootstrap, parseArgs } from "./apps/cli/src/main.ts";',
@@ -234,27 +237,40 @@ describe("parseArgs OCPP 1.6 security flags", () => {
     });
   });
 
+  const INBOUND_BASE = [
+    "--cp-id",
+    "CP-593",
+    "--ws-url",
+    "ws://csms.example.test/ocpp/",
+  ];
+
   it("--inbound-validation sets the #593 mode for the bootstrap charge point", () => {
-    const base = [
-      "--cp-id",
-      "CP-593",
-      "--ws-url",
-      "ws://csms.example.test/ocpp/",
-    ];
-    const enforce = runParseArgs([...base, "--inbound-validation", "enforce"]);
+    const enforce = runParseArgs([
+      ...INBOUND_BASE,
+      "--inbound-validation",
+      "enforce",
+    ]);
     expect(enforce.status).toBe(0);
     expect(JSON.parse(enforce.stdout)).toMatchObject({
       inboundValidation: "enforce",
       bootstrapInboundValidation: "enforce",
     });
+  });
 
-    const unset = runParseArgs(base);
+  it("leaves --inbound-validation unset by default (#593)", () => {
+    const unset = runParseArgs(INBOUND_BASE);
     expect(JSON.parse(unset.stdout)).toMatchObject({
       inboundValidation: null,
       bootstrapInboundValidation: null,
     });
+  });
 
-    const bad = runParseArgs([...base, "--inbound-validation", "strict"]);
+  it("refuses an unknown --inbound-validation mode (#593)", () => {
+    const bad = runParseArgs([
+      ...INBOUND_BASE,
+      "--inbound-validation",
+      "strict",
+    ]);
     expect(bad.status).toBe(1);
     expect(bad.stderr).toContain("--inbound-validation must be");
   });
@@ -274,7 +290,9 @@ describe("parseArgs OCPP 1.6 security flags", () => {
       txUpdatedMeterValues: true,
       bootstrapTxUpdatedMeterValues: true,
     });
+  });
 
+  it("--tx-updated-meter-values stays off by default (#347)", () => {
     const off = runParseArgs([
       "--cp-id",
       "CP-347",
@@ -434,13 +452,16 @@ describe("parseArgs OCPP 1.6 security flags", () => {
     expect(parsed.openOptions.headers).toEqual({ "X-Trace": "trace-1" });
   });
 
-  it("collects the reconnect flags into transport.reconnect (#609)", () => {
-    const base = ["--cp-id", "CP-1", "--ws-url", "ws://127.0.0.1:9000/ocpp"];
-    const none = JSON.parse(runParseArgs(base).stdout);
-    expect(none.transport).toBeNull();
+  const WS_BASE = ["--cp-id", "CP-1", "--ws-url", "ws://127.0.0.1:9000/ocpp"];
 
+  it("has no transport options unless a reconnect or --ws-* flag is given (#609)", () => {
+    const none = JSON.parse(runParseArgs(WS_BASE).stdout);
+    expect(none.transport).toBeNull();
+  });
+
+  it("collects the reconnect flags into transport.reconnect (#609)", () => {
     const result = runParseArgs([
-      ...base,
+      ...WS_BASE,
       "--reconnect-max-attempts",
       "5",
       "--reconnect-mode",
@@ -467,10 +488,9 @@ describe("parseArgs OCPP 1.6 security flags", () => {
     });
   });
 
-  it("collects --ws-* flags into transport.ws and refuses what Bun ignores (#611)", () => {
-    const base = ["--cp-id", "CP-1", "--ws-url", "ws://127.0.0.1:9000/ocpp"];
+  it("collects --ws-* flags into transport.ws (#611)", () => {
     const ok = runParseArgs([
-      ...base,
+      ...WS_BASE,
       "--ws-handshake-timeout-ms",
       "4000",
       "--ws-no-compression",
@@ -485,18 +505,22 @@ describe("parseArgs OCPP 1.6 security flags", () => {
         proxy: "http://proxy.example:3128",
       },
     });
+  });
 
-    const payload = runParseArgs([...base, "--ws-max-payload", "1024"]);
-    expect(payload.status).toBe(1);
-    expect(payload.stderr).toContain(
-      '"maxPayloadBytes" is not supported on bun',
-    );
-    const local = runParseArgs([...base, "--ws-local-address", "10.0.0.5"]);
-    expect(local.status).toBe(1);
-    expect(local.stderr).toContain('"localAddress" is not supported on bun');
-    const badProxy = runParseArgs([...base, "--ws-proxy", "socks5://p:1"]);
-    expect(badProxy.status).toBe(1);
-    expect(badProxy.stderr).toContain("ws.proxy");
+  it.each([
+    [["--ws-max-payload", "1024"], '"maxPayloadBytes" is not supported on bun'],
+    [
+      ["--ws-local-address", "10.0.0.5"],
+      '"localAddress" is not supported on bun',
+    ],
+    [["--ws-proxy", "socks5://p:1"], "ws.proxy"],
+  ])("refuses %j, which Bun ignores (#611)", (flags, message) => {
+    const result = runParseArgs([...WS_BASE, ...flags]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(message);
+  });
+
+  it("refuses --ws-* flags on a SOAP version (#611)", () => {
     const soap = runParseArgs([
       "--cp-id",
       "CP-1",
@@ -512,24 +536,19 @@ describe("parseArgs OCPP 1.6 security flags", () => {
     expect(soap.stderr).toContain("SOAP versions have none");
   });
 
-  it("rejects bad reconnect flag values (#609)", () => {
-    const base = ["--cp-id", "CP-1", "--ws-url", "ws://127.0.0.1:9000/ocpp"];
-    const fail = (flags: string[], message: string) => {
-      const result = runParseArgs([...base, ...flags]);
-      expect(result.status).toBe(1);
-      expect(result.stderr).toContain(message);
-    };
-    fail(["--reconnect-mode", "linear"], "--reconnect-mode must be");
-    fail(
-      ["--reconnect-max-attempts", "-2"],
-      "--reconnect-max-attempts must be",
-    );
-    fail(["--reconnect-max-attempts", "1.5"], "an integer");
-    fail(["--reconnect-jitter-ms", "abc"], "--reconnect-jitter-ms must be");
-    fail(
+  it.each([
+    [["--reconnect-mode", "linear"], "--reconnect-mode must be"],
+    [["--reconnect-max-attempts", "-2"], "--reconnect-max-attempts must be"],
+    [["--reconnect-max-attempts", "1.5"], "an integer"],
+    [["--reconnect-jitter-ms", "abc"], "--reconnect-jitter-ms must be"],
+    [
       ["--reconnect-base-delay-ms", "5000", "--reconnect-max-delay-ms", "1000"],
       "maxDelayMs must be >= baseDelayMs",
-    );
+    ],
+  ])("rejects bad reconnect flags %j (#609)", (flags, message) => {
+    const result = runParseArgs([...WS_BASE, ...flags]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(message);
   });
 
   it("rejects invalid security profiles", () => {
@@ -1337,10 +1356,13 @@ describe("parseArgs --fleet-template (#445)", () => {
     );
   });
 
-  it("is refused without a path and outside a server mode", () => {
+  it("is refused without a path", () => {
     const noPath = runParseArgs([...DAEMON, "--fleet-template"]);
     expect(noPath.status).toBe(1);
     expect(noPath.stderr).toContain("--fleet-template needs a file path");
+  });
+
+  it("is refused outside a server mode", () => {
     const standalone = runParseArgs([
       "--cp-id",
       "CP",
@@ -1473,6 +1495,9 @@ describe("parseArgs startup pacing (#610)", () => {
       startJitterMs: 100,
       startSeed: 7,
     });
+  });
+
+  it("fills the pacing defaults around a single flag", () => {
     const partial = runParseArgs([...DAEMON, "--start-delay", "50"]);
     expect(JSON.parse(partial.stdout).bootstrapPacing).toEqual({
       concurrency: 8,
@@ -1497,7 +1522,7 @@ describe("parseArgs startup pacing (#610)", () => {
     expect(result.stderr).toContain(message);
   });
 
-  it("refuses the flags outside a server mode or without --cp-id", () => {
+  it("refuses the flags outside a server mode", () => {
     const standalone = runParseArgs([
       "--cp-id",
       "CP",
@@ -1508,6 +1533,9 @@ describe("parseArgs startup pacing (#610)", () => {
     ]);
     expect(standalone.status).toBe(1);
     expect(standalone.stderr).toContain("--start-delay needs a server mode");
+  });
+
+  it("refuses the flags without --cp-id", () => {
     const noCp = runParseArgs(["--daemon", "--start-delay", "10"]);
     expect(noCp.status).toBe(1);
     expect(noCp.stderr).toContain("--start-delay needs a server mode");
@@ -1530,10 +1558,13 @@ describe("parseArgs startup pacing (#610)", () => {
     );
   });
 
-  it("refuses a schedule longer than a timer can hold, and accepts the largest one", () => {
+  it("refuses a schedule longer than a timer can hold", () => {
     const tooLong = runParseArgs([...DAEMON, "--start-delay", "200000000"]);
     expect(tooLong.status).toBe(1);
     expect(tooLong.stderr).toContain("must not exceed 2147483647 ms");
+  });
+
+  it("accepts the largest schedule a timer can hold", () => {
     // (20 - 1) × 113025455 = 2147483645, plus a jitter of 2.
     const edge = runParseArgs([
       ...DAEMON,
@@ -1543,6 +1574,9 @@ describe("parseArgs startup pacing (#610)", () => {
       "2",
     ]);
     expect(edge.status).toBe(0);
+  });
+
+  it("refuses a schedule one millisecond over the largest one", () => {
     const over = runParseArgs([
       ...DAEMON,
       "--start-delay",

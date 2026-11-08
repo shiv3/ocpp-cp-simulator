@@ -137,6 +137,9 @@ export class FakeCsms {
         open: (ws) => {
           this.socket = ws;
           this.opens++;
+          // An open is traffic: settle() must wait for what the station does
+          // in answer to it (#824), not count the quiet before the drop.
+          this.lastFrameAt = Date.now();
           for (const wake of [...this.connectionWaiters]) wake();
         },
         message: (_ws, message) => {
@@ -397,6 +400,13 @@ export class FakeCsms {
       },
       { timeoutMs: options.timeoutMs },
     );
+  }
+
+  /** Count "now" as traffic for settle(): a step that changed state the
+   *  station answers on its own (a resumed connection) restarts the quiet
+   *  window (#824). */
+  noteActivity(): void {
+    this.lastFrameAt = Date.now();
   }
 
   /** Number of frames recorded so far; use as the `from` of a later wait. */

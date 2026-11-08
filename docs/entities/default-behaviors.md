@@ -99,12 +99,16 @@ way you rebuild the answer by hand (for `Accepted` / `Rejected`, `ctx.accepted(a
 
 The 2.x `TriggerMessage` answers `Accepted` and then sends the requested message for `BootNotification`,
 `Heartbeat`, `StatusNotification`, `MeterValues`, the certificate signing requests and, since #596,
-`TransactionEvent` (an `Updated` event with `triggerReason: "Trigger"` for the running transaction of
+`TransactionEvent` (an `Updated` event with `triggerReason: "Trigger"`, the connector's current
+`chargingState` and a meter sample with context `Trigger` (F06.FR.07), for the running transaction of
 `evse.id`, or of every EVSE without one; `Rejected` with reason code `TxNotFound` when none runs),
-`FirmwareStatusNotification` and `LogStatusNotification` (the status in the engine state of
-`default.firmware` / `default.logs` with its `requestId` while an update or upload is in progress, else
-`Idle` without a `requestId`, as L01 and N01 have it; `Installed` and the failed statuses end an update, so
-they read as `Idle`). Every other requested message is `NotImplemented`.
+`FirmwareStatusNotification` and `LogStatusNotification` (the last status the station sent, which the
+engine holds in `default.firmware` / `default.logs` whether a behavior, a scenario or the
+`firmware_status_notification` / `log_status_notification` control-plane command sent it, with its
+`requestId`; L01.FR.26. `Idle` without a `requestId` when nothing was sent (F06.FR.16) or the last
+firmware status was `Installed` (L01.FR.25); a failed status such as `DownloadFailed` is repeated. A log is
+`Uploading` while uploading and `Idle` otherwise (F06.FR.14 / FR.15); `requestId` is optional for `Idle`
+when triggered, FirmwareStatusNotification and N01.FR.13). Every other requested message is `NotImplemented`.
 
 An action in neither table is not implemented by the station and gets a CALLERROR `NotImplemented`; a rule
 can still own it (`replace`).

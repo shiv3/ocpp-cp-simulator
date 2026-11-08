@@ -17,6 +17,6 @@
 {"d":"CSMS>","k":"result","id":"id-9","p":{}}
 {"d":"CP>","k":"result","id":"id-8","p":{"status":"Accepted"}}
 {"d":"CSMS>","k":"call","id":"id-10","a":"TriggerMessage","p":{"requestedMessage":"TransactionEvent","evse":{"id":2}}}
-{"d":"CP>","k":"call","id":"id-11","a":"TransactionEvent","p":{"eventType":"Updated","timestamp":"<ts>","triggerReason":"Trigger","seqNo":1,"transactionInfo":{"transactionId":"<uuid-1>"},"evse":{"id":1,"connectorId":1}}}
+{"d":"CP>","k":"call","id":"id-11","a":"TransactionEvent","p":{"eventType":"Updated","timestamp":"<ts>","triggerReason":"Trigger","seqNo":1,"transactionInfo":{"transactionId":"<uuid-1>","chargingState":"Charging"},"evse":{"id":1,"connectorId":1},"meterValue":[{"timestamp":"<ts>","sampledValue":[{"value":0,"measurand":"Energy.Active.Import.Register","unitOfMeasure":{"unit":"Wh"},"context":"Trigger"},{"value":150000,"measurand":"Power.Active.Import","unitOfMeasure":{"unit":"W"},"context":"Trigger"}]}]}}
 {"d":"CSMS>","k":"result","id":"id-11","p":{}}
 {"d":"CP>","k":"result","id":"id-10","p":{"status":"Rejected","statusInfo":{"reasonCode":"TxNotFound","additionalInfo":"No transaction is running on the requested EVSE"}}}

@@ -2392,3 +2392,4 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-08] ingest | 2.x TriggerMessage for TransactionEvent, FirmwareStatusNotification and LogStatusNotification (#596)
 
 - `entities/default-behaviors.md`: the targets of the 2.x `TriggerMessage`, the EVSE handling of `TransactionEvent` and the `Idle` rule (no `requestId`) of the two status messages.
+- Review fixes: a trigger answers the last status the station sent by any route, including the `firmware_status_notification` / `log_status_notification` commands (the engine records it, new `reported` event); L01.FR.25/26 and F06.FR.14-16 decide Idle, `Installed` and failed statuses; the triggered `TransactionEvent` carries `chargingState` and a `Trigger` meter sample (F06.FR.07; fixture `201-trigger-transaction-event` re-recorded). [Control plane](concepts/control-plane.md): the `Idle` rule of the two commands.

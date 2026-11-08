@@ -282,7 +282,7 @@ is restored (E11 "Connection Loss During Transaction", #528):
   while offline is queued too and replayed in the same pass, in production
   order, as built: the request carries the time of the event and no `offline`
   marker. A queued security event never holds a live TransactionEvent back; a
-  refused replay stays at the head. At most 1000 are kept per charge point.
+  refused replay stays at the head. A replayed row (and a NotifyEvent row) stays in the queue until the CSMS answers: a close while the CALL waits for the one-CALL slot, or before the answer, puts it back for the next replay (#664), and a critical event written online but unanswered at a close is queued the same way. At most 1000 are kept per charge point.
 - **Other 2.x messages are not queued.** StatusNotification, Heartbeat,
   MeterValues, the NotifyEvents above the severity and the rest are
   dropped while offline, as before. `OCPPCommCtrlr.QueueAllMessages` (optional, not implemented) is

@@ -308,6 +308,14 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
    *  the CALLRESULT / CALLERROR, the `MessageTimeout` or a close. */
   private _callQueue: CallJob[] = [];
   private _callSlot: CallSlot | null = null;
+  /** Written CALLs whose loss a close must make good until the answer comes
+   *  (#664): a critical SecurityEventNotification (A04.FR.02) and the queued
+   *  rows of the E11 table (security events, NotifyEvent parts) that stay in
+   *  the table until the CSMS answers. By messageId. */
+  private readonly _unansweredDeliveries = new Map<
+    string,
+    { onAnswer: () => void; onLost: () => void }
+  >();
   /** StatusNotification CALLs sent and not answered yet, by messageId (#702):
    *  the answer tells the charge point what the CSMS knows. */
   private readonly _statusAcks = new Map<
@@ -904,6 +912,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         this.observeAnswer(messageId, "result", payload);
         this.handleCallResult(messageId, payload as V201ResponsePayload);
       } finally {
+        this.settleDelivery(messageId);
         // The answer frees the §4.1.1 slot (#708), whatever handling it did.
         this.releaseCall(messageId);
       }
@@ -911,6 +920,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       try {
         this.handleCallError(messageId, payload);
       } finally {
+        this.settleDelivery(messageId);
         this.releaseCall(messageId);
       }
     }
@@ -2241,6 +2251,14 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     return answer;
   }
 
+  /** The answer to `messageId` arrived: its delivery is complete (#664). */
+  private settleDelivery(messageId: string): void {
+    const delivery = this._unansweredDeliveries.get(messageId);
+    if (delivery === undefined) return;
+    this._unansweredDeliveries.delete(messageId);
+    delivery.onAnswer();
+  }
+
   /**
    * A04 SecurityEventNotificationRequest (#537), sent by the control-plane
    * `security_event_notification` method. While offline (A04.FR.02, #552) a
@@ -2291,7 +2309,17 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
           );
         },
         undefined,
-        resolve,
+        () => {
+          // #664: written is not delivered. A critical event whose connection
+          // closes before the answer is queued like an offline one.
+          if (isCriticalSecurityEvent(type)) {
+            this._unansweredDeliveries.set(id, {
+              onAnswer: () => undefined,
+              onLost: () => this.queueSecurityEvent(payload),
+            });
+          }
+          resolve();
+        },
       );
     });
   }
@@ -2726,6 +2754,11 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     for (const job of waiting) {
       if (job.transactionEvent === undefined) job.onDropped?.("socket_closed");
     }
+    // #664: written but unanswered critical events and queued rows go back to
+    // the E11 table (a row never left it; a live event is queued now).
+    const unanswered = [...this._unansweredDeliveries.values()];
+    this._unansweredDeliveries.clear();
+    for (const delivery of unanswered) delivery.onLost();
     for (const message of [...this._activeTransactionEvents]) {
       this.queueTransactionEvent(message);
     }
@@ -2810,29 +2843,42 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
    * N07.FR.07), with no offline marker: NotifyEventRequest has none. A
    * first part the socket refuses keeps the whole row at the head, like a
    * refused TransactionEvent; a later part refused loses the rest of the
-   * report, with a warning. A part written is not queued again by a later
-   * close.
+   * report, with a warning. #664: the row stays in the table until every
+   * part sent is answered; a close or a drop before that puts it back for
+   * the next replay.
    */
   private replayNotifyEvent(
     queued: PendingMessage<V201QueuedAction>,
+    rowId: string,
   ): "replayed" | "held" {
     const parts = notifyEventReportParts(
       queued.payload as NotifyEventReport,
       this.notifyEventDialect(),
     );
+    const group = this.newRowDelivery(rowId);
     for (const [index, part] of parts.entries()) {
       let refused = false;
       let sending = true;
-      this.send("NotifyEvent", this.generateMessageId(), part, (reason) => {
-        // A drop a behavior's beforeSend asked for is spent, not refused.
-        if (!sending) return;
-        if (reason === "dropped_by_behavior") {
-          this._logger.warn(
-            `[v2.0.1] Replay of a queued NotifyEvent part ${index + 1} dropped by a behavior's beforeSend`,
-            LogType.OCPP,
-          );
-        } else refused = true;
-      });
+      const id = this.generateMessageId();
+      group.expect(id);
+      this.send(
+        "NotifyEvent",
+        id,
+        part,
+        (reason) => {
+          group.dropped(id, reason);
+          // A drop a behavior's beforeSend asked for is spent, not refused.
+          if (!sending) return;
+          if (reason === "dropped_by_behavior") {
+            this._logger.warn(
+              `[v2.0.1] Replay of a queued NotifyEvent part ${index + 1} dropped by a behavior's beforeSend`,
+              LogType.OCPP,
+            );
+          } else refused = true;
+        },
+        undefined,
+        () => group.written(id),
+      );
       sending = false;
       if (!refused) continue;
       if (index === 0) {
@@ -2840,14 +2886,16 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
           `[v2.0.1] Replay of a queued NotifyEvent refused by the socket; kept at the head of the queue (size=${this._pendingQueue.size()})`,
           LogType.OCPP,
         );
+        group.abandon();
         return "held";
       }
       this._logger.warn(
         `[v2.0.1] Replay of a queued NotifyEvent refused at part ${index + 1} of ${parts.length}; the rest of the report is lost`,
         LogType.OCPP,
       );
-      return "replayed";
+      break;
     }
+    group.seal();
     return "replayed";
   }
 
@@ -2856,18 +2904,25 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
    * built, with the time of the event. The request has no offline marker. A
    * CALL the socket refuses while it stays open keeps the row at the head
    * and stops the replay, like a refused TransactionEvent; one a behavior's
-   * beforeSend withdrew is spent.
+   * beforeSend withdrew is spent. #664: the row stays in the table until the
+   * CSMS answers; a close or a drop before that puts it back for the next
+   * replay.
    */
   private replaySecurityEvent(
     queued: PendingMessage<V201QueuedAction>,
+    rowId: string,
   ): "replayed" | "held" {
     let refused = false;
     let sending = true;
+    const group = this.newRowDelivery(rowId);
+    const id = this.generateMessageId();
+    group.expect(id);
     this.send(
       "SecurityEventNotification",
-      this.generateMessageId(),
+      id,
       queued.payload as SecurityEventNotificationRequestV201,
       (reason) => {
+        group.dropped(id, reason);
         if (!sending) return;
         if (reason === "dropped_by_behavior") {
           this._logger.warn(
@@ -2876,14 +2931,84 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
           );
         } else refused = true;
       },
+      undefined,
+      () => group.written(id),
     );
     sending = false;
-    if (!refused) return "replayed";
-    this._logger.warn(
-      `[v2.0.1] Replay of a queued SecurityEventNotification refused by the socket; kept at the head of the queue (size=${this._pendingQueue.size()})`,
-      LogType.OCPP,
-    );
-    return "held";
+    if (refused) {
+      this._logger.warn(
+        `[v2.0.1] Replay of a queued SecurityEventNotification refused by the socket; kept at the head of the queue (size=${this._pendingQueue.size()})`,
+        LogType.OCPP,
+      );
+      group.abandon();
+      return "held";
+    }
+    group.seal();
+    return "replayed";
+  }
+
+  /**
+   * #664: the delivery of one E11 row made of CALLs that are not
+   * TransactionEvents (no E13 resend of their own). The row is marked
+   * delivering at once and removed once every CALL expected is answered. A
+   * close, or a drop other than a behavior's own, before that releases the
+   * row so the next replay sends it again; the rows are not lost behind the
+   * §4.1.1 queue (#802).
+   */
+  private newRowDelivery(rowId: string) {
+    const open = new Set<string>();
+    let sealed = false;
+    let ended = false;
+    const queue = this._pendingQueue;
+    const finish = (remove: boolean) => {
+      if (ended) return;
+      ended = true;
+      for (const id of open) this._unansweredDeliveries.delete(id);
+      open.clear();
+      if (remove) queue.remove(rowId);
+      else queue.release(rowId);
+    };
+    return {
+      expect: (id: string) => open.add(id),
+      /** The CALL is on the wire: a close before its answer releases the row. */
+      written: (id: string) => {
+        if (ended) return;
+        this._unansweredDeliveries.set(id, {
+          onAnswer: () => {
+            open.delete(id);
+            if (sealed && open.size === 0) finish(true);
+          },
+          onLost: () => finish(false),
+        });
+      },
+      dropped: (id: string, reason: string) => {
+        if (ended) return;
+        if (reason === "dropped_by_behavior") {
+          // Withdrawn on purpose: this part is spent.
+          open.delete(id);
+          if (sealed && open.size === 0) finish(true);
+          return;
+        }
+        // Refused at the hand-over: the caller decides (abandon, or the rest
+        // of a report is lost); refused or lost later: the row waits for the
+        // next replay.
+        open.delete(id);
+        if (sealed) finish(false);
+      },
+      /** All CALLs are handed over: mark the row delivering. */
+      seal: () => {
+        if (ended) return;
+        sealed = true;
+        if (open.size === 0) finish(true);
+        else queue.markDelivering(rowId);
+      },
+      /** The first CALL was refused: the row stays idle at the head. */
+      abandon: () => {
+        ended = true;
+        for (const id of open) this._unansweredDeliveries.delete(id);
+        open.clear();
+      },
+    };
   }
 
   /** Send one queued message again. Each queued action gets its own case. */
@@ -2931,16 +3056,12 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         return "replayed";
       }
       case "NotifyEvent": {
-        const result = this.replayNotifyEvent(queued);
-        // A NotifyEvent has no E13 delivery: it leaves once handed over.
-        if (result === "replayed") this._pendingQueue.remove(rowId);
-        return result;
+        // A NotifyEvent has no E13 delivery: its row leaves once answered.
+        return this.replayNotifyEvent(queued, rowId);
       }
       case "SecurityEventNotification": {
-        const result = this.replaySecurityEvent(queued);
-        // Like a NotifyEvent, it leaves once handed over (#552, #554).
-        if (result === "replayed") this._pendingQueue.remove(rowId);
-        return result;
+        // Like a NotifyEvent, its row leaves once answered (#552, #554, #664).
+        return this.replaySecurityEvent(queued, rowId);
       }
     }
   }

@@ -4,6 +4,7 @@ import { encodeCallFrame } from "./callFrame";
 import { redactSensitiveText } from "../../shared/redaction";
 import {
   isBrowserRuntime,
+  OcppSecurityProfileConfigError,
   openOcppWebSocket,
   probeUpgradeRefusal,
   type OcppSocket,
@@ -235,6 +236,10 @@ export class OCPPWebSocket {
   private _ocppVersion: string;
   private _securityProfile?: OcppSecurityProfile;
   private _authorizationKey?: string;
+  private _securityProfileFallback: (() => void) | null = null;
+  /** `setSecurityCredentials` ran: a credential that cannot open a
+   *  connection is then reported and retried, not thrown (#724). */
+  private _credentialsChangedAtRuntime = false;
   private _cpoName?: string;
   private _tls?: OcppTlsOptions;
   /**
@@ -374,6 +379,43 @@ export class OCPPWebSocket {
     if (!/^wss:/i.test(this._url)) return undefined;
     if (this._tls?.rejectUnauthorized === false) return undefined;
     return this._tls?.ca;
+  }
+
+  /**
+   * #724 A01.FR.03 / A05.FR.07: the credentials the next connection attempt
+   * sends. Read on every attempt, so a ChangeConfiguration of
+   * `AuthorizationKey` or `SecurityProfile` is used by the next reconnect.
+   */
+  public setSecurityCredentials(credentials: {
+    securityProfile?: OcppSecurityProfile;
+    authorizationKey?: string;
+  }): void {
+    this._credentialsChangedAtRuntime = true;
+    if ("securityProfile" in credentials) {
+      this._securityProfile = credentials.securityProfile;
+    }
+    if ("authorizationKey" in credentials) {
+      this._authorizationKey = credentials.authorizationKey;
+    }
+  }
+
+  /**
+   * #724 A05.FR.08: until a connection opens, a socket close that is not a
+   * manual disconnect calls `fallback` once, before the next attempt, so the
+   * caller can put the previous security profile back.
+   */
+  public armSecurityProfileFallback(fallback: () => void): void {
+    this._securityProfileFallback = fallback;
+  }
+
+  /** `--tls-ca` certificates are configured. */
+  public hasConfiguredTrustAnchors(): boolean {
+    return !!this._tls?.ca;
+  }
+
+  /** A client certificate is configured (`--tls-cert`) or was renewed. */
+  public hasClientCertificate(): boolean {
+    return !!this._tls?.cert || this._renewedClientCertificate !== null;
   }
 
   /** Whether the CSMS link authenticates with a client certificate
@@ -536,6 +578,7 @@ export class OCPPWebSocket {
     let opened = false;
     const onopenHandler = () => {
       opened = true;
+      this._securityProfileFallback = null;
       this.clearHandshakeTimer();
       this.onClientCertificateOpened(attempt.renewed);
       // A working connection clears the refusal budget, so the next genuine
@@ -569,6 +612,11 @@ export class OCPPWebSocket {
       );
       // Generation guard: only process close if this socket belongs to the current generation
       if (socketGeneration === this._generationCounter) {
+        if (!opened && !this._isManualDisconnect) {
+          const fallback = this._securityProfileFallback;
+          this._securityProfileFallback = null;
+          fallback?.();
+        }
         // Only a failed connection attempt counts, not one the station
         // closed itself before it opened, nor one no CSMS ever saw.
         if (!opened && closeCause === "network" && !neverReachedCsms(ev)) {
@@ -594,30 +642,52 @@ export class OCPPWebSocket {
       this._url = this._urlPool.next();
     }
 
-    this._ws = openOcppWebSocket({
-      baseUrl: this._url,
-      chargePointId: this._chargePointId,
-      basicAuth: this._basicAuth,
-      extraHeaders: this._extraHeaders,
-      extraSubprotocols: this._extraSubprotocols,
-      ocppVersion: this._ocppVersion,
-      securityProfile: this._securityProfile,
-      authorizationKey: this._authorizationKey,
-      cpoName: this._cpoName,
-      tls: attempt.tls,
-      ...(Object.keys(this._wsOptions).length > 0
-        ? { ws: this._wsOptions }
-        : {}),
-      warn: (message) => this._logger.warn(message, LogType.WEBSOCKET),
-      onConnectOptions: (options) => {
-        this._lastConnectOptions = options;
-        this._refusalStatusReported = false;
-      },
-      onopen: onopenHandler,
-      onmessage: onmessageHandler,
-      onerror: onerrorHandler,
-      onclose: oncloseHandler,
-    });
+    try {
+      this._ws = openOcppWebSocket({
+        baseUrl: this._url,
+        chargePointId: this._chargePointId,
+        basicAuth: this._basicAuth,
+        extraHeaders: this._extraHeaders,
+        extraSubprotocols: this._extraSubprotocols,
+        ocppVersion: this._ocppVersion,
+        securityProfile: this._securityProfile,
+        authorizationKey: this._authorizationKey,
+        cpoName: this._cpoName,
+        tls: attempt.tls,
+        ...(Object.keys(this._wsOptions).length > 0
+          ? { ws: this._wsOptions }
+          : {}),
+        warn: (message) => this._logger.warn(message, LogType.WEBSOCKET),
+        onConnectOptions: (options) => {
+          this._lastConnectOptions = options;
+          this._refusalStatusReported = false;
+        },
+        onopen: onopenHandler,
+        onmessage: onmessageHandler,
+        onerror: onerrorHandler,
+        onclose: oncloseHandler,
+      });
+    } catch (error) {
+      // A credential a ChangeConfiguration left unusable (#724) must not end
+      // the reconnect loop: report it, undo a pending security-profile switch
+      // and try again. A misconfiguration at start-up still throws.
+      if (
+        !(error instanceof OcppSecurityProfileConfigError) ||
+        !this._credentialsChangedAtRuntime
+      ) {
+        throw error;
+      }
+      this._logger.error(
+        `Cannot open the connection: ${error.message}`,
+        LogType.WEBSOCKET,
+      );
+      const fallback = this._securityProfileFallback;
+      this._securityProfileFallback = null;
+      fallback?.();
+      this._ws = null;
+      if (!this._isManualDisconnect && !this._disposed) this.attemptReconnect();
+      return;
+    }
     this._socketToken = socketToken;
     this.armHandshakeTimer(this._ws);
   }
@@ -659,6 +729,9 @@ export class OCPPWebSocket {
 
     // Set manual disconnect flag to prevent auto-reconnect
     this._isManualDisconnect = true;
+    // A05.FR.08 covers the connection that follows the switch only: an
+    // operator's disconnect ends it.
+    this._securityProfileFallback = null;
 
     // Clear reconnect timer to prevent reconnection attempts
     if (this._reconnectTimer) {
@@ -712,6 +785,7 @@ export class OCPPWebSocket {
     }
 
     this._disposed = true;
+    this._securityProfileFallback = null;
 
     // Shut down controller with reason 'disposed'
     this._controller.shutdownPipelines({ reason: "disposed" });

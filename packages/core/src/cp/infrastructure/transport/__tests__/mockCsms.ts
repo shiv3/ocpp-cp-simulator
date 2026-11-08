@@ -32,6 +32,9 @@ export interface MockCsms {
   url: string;
   port: number;
   received: OcppFrame[];
+  /** The `Authorization` header of every WebSocket upgrade request, in
+   *  order (#724: the Basic credentials a station presents). */
+  upgradeAuthorizations: Array<string | null>;
   waitForConnection: (timeoutMs?: number) => Promise<void>;
   waitForFrame: (
     pred: (f: OcppFrame) => boolean,
@@ -79,6 +82,7 @@ export interface MockCsmsOptions {
 
 export function startMockCsms(options: MockCsmsOptions = {}): MockCsms {
   const received: OcppFrame[] = [];
+  const upgradeAuthorizations: Array<string | null> = [];
   const waiters = new Set<FrameWaiter>();
   const connectionWaiters = new Set<ConnectionWaiter>();
   const connectionsList: MockCsmsConnection[] = [];
@@ -107,6 +111,7 @@ export function startMockCsms(options: MockCsmsOptions = {}): MockCsms {
         }
       : {}),
     fetch(req, srv) {
+      upgradeAuthorizations.push(req.headers.get("authorization"));
       if (srv.upgrade(req)) {
         return undefined;
       }
@@ -227,6 +232,7 @@ export function startMockCsms(options: MockCsmsOptions = {}): MockCsms {
     url: `${tls ? "wss" : "ws"}://localhost:${port}/`,
     port,
     received,
+    upgradeAuthorizations,
     waitForConnection(timeoutMs = 2000) {
       if (socket) {
         return Promise.resolve();

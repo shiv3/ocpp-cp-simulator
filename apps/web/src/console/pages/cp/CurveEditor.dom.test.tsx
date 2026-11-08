@@ -197,6 +197,6 @@ describe("CurveEditor: power over the session, points you drag", () => {
       "Energy over the curve 6.6 kWh (9 % of the battery)",
     );
     expect(summary?.textContent).toContain("Peak 7.4 kW");
-    expect(summary?.textContent).toContain("360 MeterValues at 10 s");
+    expect(summary?.textContent).toContain("360 meter updates at 10 s");
   });
 });

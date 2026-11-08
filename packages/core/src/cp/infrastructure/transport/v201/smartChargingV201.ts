@@ -238,7 +238,11 @@ function applyProfileStatusV201(
         connector.id,
         OCPPStatus.SuspendedEVSE,
       );
-    } else if (watts > 0 && connector.status === OCPPStatus.SuspendedEVSE) {
+    } else if (
+      watts > 0 &&
+      connector.status === OCPPStatus.SuspendedEVSE &&
+      !connector.energyHeld
+    ) {
       ctx.chargePoint.updateConnectorStatus(connector.id, OCPPStatus.Charging);
     }
   }

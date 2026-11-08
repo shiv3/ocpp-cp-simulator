@@ -101,7 +101,15 @@ export function buildOcppWebSocketUrl(params: {
       params.basicAuth.password,
     );
   }
-  url.pathname += params.chargePointId;
+  // OCPP-J 1.6 §3.1.1: the identity is appended to the endpoint URL and "has
+  // to be percent-encoded as necessary as described in [RFC3986]". The `/`
+  // between endpoint and identity belongs here, so every caller (CLI, daemon,
+  // web console) gets the same URL whether or not its endpoint ends in `/`.
+  // encodeURIComponent keeps an identity containing `/`, `%`, `?` or `#` in one
+  // path segment; the URL parser would leave a `/` as a separator and a `%`
+  // raw. The Basic Auth username stays the unencoded identity.
+  if (!url.pathname.endsWith("/")) url.pathname += "/";
+  url.pathname += encodeURIComponent(params.chargePointId);
   return url.toString();
 }
 

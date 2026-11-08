@@ -50,16 +50,22 @@ export function buildBaseReportData(
     if (!entry) continue;
 
     const { component, variable, instance } = parseV201VariableKey(v201Key);
-    reportData.push(
-      reportDatum(
-        { name: component },
-        {
-          name: variable,
-          ...(instance !== undefined ? { instance } : {}),
-        },
-        entry,
-      ),
+    const datum = reportDatum(
+      { name: component },
+      {
+        name: variable,
+        ...(instance !== undefined ? { instance } : {}),
+      },
+      entry,
     );
+    // Appendix variables.csv: MaxEnergyOnInvalidId is an integer in Wh.
+    if (v201Key === "TxCtrlr/MaxEnergyOnInvalidId") {
+      datum.variableCharacteristics = {
+        ...datum.variableCharacteristics!,
+        unit: "Wh",
+      };
+    }
+    reportData.push(datum);
   }
 
   const evses = [...evseIds].filter((id) => id >= 1).sort((a, b) => a - b);

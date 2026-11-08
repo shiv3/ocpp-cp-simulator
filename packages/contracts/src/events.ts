@@ -61,6 +61,7 @@ interface FullCpConfig {
   cpoName?: string;
   txUpdatedMeterValues?: boolean;
   inboundValidation?: "off" | "warn" | "enforce";
+  reservationAuthorizeIdTag?: boolean;
   capabilityProfile?: WireCapabilityProfile;
   tlsCaPath?: string;
   tlsCertPath?: string;
@@ -99,6 +100,7 @@ export function redactCp(config: FullCpConfig): WireCpConfig {
     cpoName: config.cpoName,
     txUpdatedMeterValues: config.txUpdatedMeterValues,
     inboundValidation: config.inboundValidation,
+    reservationAuthorizeIdTag: config.reservationAuthorizeIdTag,
     capabilityProfile: config.capabilityProfile
       ? {
           ...(config.capabilityProfile.disabledActions
@@ -158,6 +160,7 @@ export const wireCpConfigSchema = z
     cpoName: STR_64K.optional(),
     txUpdatedMeterValues: z.boolean().optional(),
     inboundValidation: z.enum(["off", "warn", "enforce"]).optional(),
+    reservationAuthorizeIdTag: z.boolean().optional(),
     capabilityProfile: z
       .object({
         disabledActions: z.array(STR_256).optional(),

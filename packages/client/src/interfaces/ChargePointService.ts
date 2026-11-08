@@ -147,6 +147,8 @@ export interface ChargePointSnapshot {
     txUpdatedMeterValues?: boolean;
     /** #593: OCPP 1.6J inbound CALL validation mode. */
     inboundValidation?: "off" | "warn" | "enforce";
+    /** #595: OCPP 1.6 ReserveNow authorizes the idTag first. */
+    reservationAuthorizeIdTag?: boolean;
     /** #618: static capability profile. */
     capabilityProfile?: {
       disabledActions?: readonly string[];
@@ -215,6 +217,9 @@ export interface CreateChargePointParams {
   /** #593: OCPP 1.6J inbound CALL validation (off | warn | enforce).
    *  Omitted on an update keeps the current value. */
   inboundValidation?: "off" | "warn" | "enforce";
+  /** #595: OCPP 1.6 ReserveNow authorizes the idTag first.
+   *  Omitted on an update keeps the current value. */
+  reservationAuthorizeIdTag?: boolean;
   /** #618: static capability profile (omitted on an update keeps it). */
   capabilityProfile?: {
     disabledActions?: readonly string[];

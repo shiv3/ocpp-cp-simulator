@@ -1,4 +1,5 @@
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { startRefusalByReservation } from "../../../domain/reservation/reservationModel";
 import { OCPP_2_1 } from "../../../domain/types/OcppVersion";
 
 /** `IdTokenEnumType` of OCPP 2.0.1 Part 2 §3.43. On 2.1 `IdTokenType.type` is
@@ -166,19 +167,23 @@ export function decideRemoteStart(
     return !!tx && tx.stopTime === null;
   };
   // A reservation belongs to this request when it was made for this idToken
-  // or for this groupIdToken (F01.FR.21 / F01.FR.22).
-  const reservedForOther = (id: number): boolean => {
-    const reservation = cp.reservationManager.peekReservationForConnector(id);
-    if (!reservation) return false;
-    const group = request.groupIdToken?.idToken;
-    return (
-      reservation.idTag !== request.idToken?.idToken &&
-      !(group !== undefined && reservation.parentIdTag === group)
-    );
-  };
+  // or for its group (F01.FR.21 / F01.FR.22): the request's groupIdToken, else
+  // the group the station knows for the token (H03.FR.04/07). The reservation
+  // model decides, so a connector-0 reservation keeps its connector too.
+  const idToken = request.idToken?.idToken;
+  const requestGroup = request.groupIdToken?.idToken;
+  const groupId =
+    typeof requestGroup === "string"
+      ? requestGroup
+      : typeof idToken === "string"
+        ? cp.knownParentIdOf(idToken)
+        : undefined;
+  const reservedForOther = (id: number): boolean =>
+    typeof idToken === "string" &&
+    startRefusalByReservation(cp, id, idToken, groupId) !== null;
   const reservedForRequest = (id: number): boolean =>
-    cp.reservationManager.peekReservationForConnector(id) !== undefined &&
-    !reservedForOther(id);
+    typeof idToken === "string" &&
+    cp.reservationManager.reservationFor(id, idToken, groupId) !== undefined;
 
   if (request.evseId !== undefined) {
     const connector =

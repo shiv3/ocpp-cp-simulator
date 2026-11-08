@@ -21,7 +21,7 @@ related:
   - access-control.md
   - scenario-format.md
   - state-persistence.md
-updated: 2026-11-08
+updated: 2026-11-09
 ---
 
 # OCPP 1.6 security profiles
@@ -208,6 +208,61 @@ signature algorithms, hidden `CpoName`) can be armed from a scenario with the
 `certQuirks` node and its `octt` preset — see
 [Scenario format → certificate quirks](scenario-format.md#inboundpolicy-and-certificate-quirks-notes).
 
+### Changing `AuthorizationKey` and `SecurityProfile` (1.6)
+
+`ChangeConfiguration` of these two keys reaches the transport (#724). The
+station side of the 1.6 security whitepaper (edition 4) is A01.FR.01/02 (the
+password lives in `AuthorizationKey`, set by `ChangeConfiguration`) and A05;
+A01.FR.03/04 are the CSMS's rules (after `Accepted` it stops accepting the old
+password, after `Rejected`/`NotSupported` it keeps it).
+
+- **`AuthorizationKey`**: after `Accepted` the stored value is what every later
+  connection attempt sends as the Basic Auth password on profiles 1 and 2: the
+  next reconnect, a `Reset`, a TriggerMessage-driven reconnect. The legacy
+  `--basic-auth-*` credentials of profile 0 are not replaced by it. The station
+  does not reconnect by itself; the CSMS, which no longer accepts the old
+  password, closes the link.
+  - While the profile is 1 or 2 a value that is not 16 to 20 bytes written as
+    32 to 40 hex digits (whitepaper §7.2: at least 16 bytes, at most 40 hex
+    digits) is `Rejected` and the old key is kept: the transport cannot derive
+    the password from it, and every later connection attempt would fail. The
+    reconnect loop also survives a key that became unusable some other way: the
+    attempt is logged as an error and retried with backoff.
+  - The key survives a daemon restart: the charge point's registry row is
+    updated with every accepted change (and with the A05.FR.08 fallback), and a
+    restart or `cp.update` that omits the field rebuilds the station from it.
+    A standalone CLI process that is given `--authorization-key` /
+    `--security-profile` on every start takes those flags over the stored value.
+- **`SecurityProfile`**: the value is checked first and answered `Rejected`,
+  leaving the profile unchanged, when
+  - it is greater than 1 and lower than or equal to the current one
+    (A05.FR.01; `AllowSecurityProfileDowngrade` is not implemented, so a 3 → 2
+    downgrade is refused too);
+  - it is lower than the current one and 0 or 1 (A00.FR.005 and §7.8: the
+    profile is never lowered to 1 or below over OCPP). An unchanged 0 or 1
+    matches neither rule and is `Accepted`;
+  - it is 1 or 2, higher than the current one, and the stored `AuthorizationKey`
+    does not meet §7.2 (A05.FR.02);
+  - it is 2 or 3, higher than the current one, and the station has no
+    CentralSystemRoot its TLS connection validates the CSMS with, which today
+    is `--tls-ca` (A05.FR.03). A root installed with `InstallCertificate` does
+    not join the connection's TLS trust, so it is not counted: the upgrade
+    would be `Accepted` and then fail to connect;
+  - it is 3 and the station has no currently valid ChargePointCertificate (a
+    stored Charging Station chain, or `--tls-cert`) (A05.FR.04).
+
+  A valid upgrade answers `Accepted` (A05.FR.05, not `RebootRequired`). Once
+  that answer is written the station disconnects and reconnects with the new
+  profile (A05.FR.06/07, the same teardown as `Reset`, which also drops the
+  reservations and the charging profiles). If that connection does not open,
+  the previous profile is put back and the next attempt uses it (A05.FR.08,
+  a SHOULD); an operator's disconnect, a dispose or a newer switch ends that
+  fallback. The new profile is written to the registry row like the key. The
+  initial profile from `--security-profile` is not a `ChangeConfiguration` and
+  is not checked.
+  A charge point without the WebSocket security extension (OCPP-S SOAP) has no
+  guard and keeps answering `RebootRequired` without reconnecting.
+
 ## Certificate store
 
 Each charge point keeps one certificate store
@@ -290,10 +345,20 @@ chain is reported as its leaf, with the sub-CAs as `childCertificateHashData`
   certificate of a `wss://` connection that verifies the server. Over
   `ws://`, without `--tls-ca` (the runtime's trust store validates) or with
   verification off, no root is in use. 2.x has no such rule.
-- `CertificateSigned` stores a well-formed chain that passes the certificate
-  quirks without checking it against the pending CSR, and leaves that CSR
-  pending. The chain replaces the previous one, so a persisted store keeps
-  one chain; no 1.6 message reads it back.
+- `CertificateSigned` checks the chain first (A02.FR.06, #732): every
+  certificate is inside its validity period, each is signed by the next, when
+  `CentralSystemRootCertificate`s are installed the top certificate is one of
+  them or is signed by one, and, when a CSR is pending, the leaf carries its
+  public key (a CSR given to `sign_certificate` is pending too). The
+  Certificate Properties (key usage and the like) are not inspected. A chain
+  that fails any check, does not parse, or fails the signature-algorithm
+  quirk is answered `Rejected`, discarded (the stored chain is kept), and
+  followed by a `SecurityEventNotification` of type
+  `InvalidChargePointCertificate` once the answer is written (A02.FR.07). A
+  valid chain is `Accepted` with no event, leaves the CSR pending, and
+  replaces the previous chain, so a persisted store keeps one chain; no 1.6
+  message reads it back. A chain pushed with no CSR pending skips only the
+  key comparison.
 - The 1.6 dispatcher starts each CALL without waiting for the previous
   one, so the answer of an async handler (`InstallCertificate`,
   `CertificateSigned`) can follow the answer to a later CALL. The store
@@ -301,6 +366,34 @@ chain is reported as its leaf, with the sub-CAs as `childCertificateHashData`
   `GetInstalledCertificateIds` or `DeleteCertificate` sent right after an
   `InstallCertificate`, without waiting for its answer, sees the installed
   certificate.
+
+### Security events on 1.6
+
+The whitepaper's table marks 15 event types critical: `FirmwareUpdated`,
+`SettingSystemTime`, `StartupOfTheDevice`, `ResetOrReboot`,
+`SecurityLogWasCleared`, `MemoryExhaustion`, `TamperDetectionActivated`,
+`InvalidFirmwareSigningCertificate`, `InvalidCentralSystemCertificate`,
+`InvalidChargePointCertificate`, `InvalidTLSVersion`, `InvalidTLSCipherSuite`,
+`MaintenanceLoginAccepted`, `MaintenanceLoginFailed` and
+`DiscardedRenewedClientCertificate` (`InvalidFirmwareSignature` is not critical
+on 1.6, unlike 2.x). The station treats them as follows (#734):
+
+- A critical event raised while the station cannot send it (no connection, or
+  the boot not `Accepted` yet) is queued with the timestamp it was raised
+  with, and sent oldest first right after the next `Accepted` boot, before the
+  status fan-out (A04.FR.01/02). The queue is the one of the transaction
+  messages (`pending_messages`), so it survives a restart with `--state-db`.
+  A critical event in flight when the socket closes is queued too. A
+  non-critical type, a vendor's own included, is dropped while offline.
+- `ResetOrReboot` is raised by every `Reset` (Soft and Hard) and sent after the
+  boot that follows it, with the reset reason as `techInfo`.
+- `StartupOfTheDevice` is sent once per process start, once per `Reset` and
+  once per power restore (`restorePower`, #455), on the first `Accepted` boot
+  after it. A reconnect after a dropped socket and a
+  boot answered to a `TriggerMessage` are not startups and send none.
+- Both automatic events keep the `SecurityProfile >= 1` gate: a profile-0
+  station sends neither. This is a decision, not a requirement of the
+  whitepaper; the gate predates #734 and was kept.
 
 ### OCPP 2.0.1 and 2.1 behaviour
 
@@ -476,9 +569,11 @@ CALLERROR.
   control plane and the MCP tool, like a dropped first
   `get_15118_ev_certificate` CALL, and fails in JSON Lines mode. 1.6 still
   answers success once the CALL is queued or the boot gate suppressed it, and
-  SOAP once it is logged: a 1.6 CALL dropped after that, the socket closing
-  for one, is only logged, so that success does not say it reached the CSMS.
-  The automatic `StartupOfTheDevice` event stays 1.6-only.
+  SOAP once it is logged: a non-critical 1.6 CALL dropped after that, the
+  socket closing for one, is only logged, so that success does not say it
+  reached the CSMS. A critical 1.6 event is queued instead, see
+  [Security events on 1.6](#security-events-on-16). The automatic
+  `StartupOfTheDevice` and `ResetOrReboot` events stay 1.6-only.
 
 #### Get15118EVCertificate relay
 
@@ -608,8 +703,7 @@ connected.
 - The key is memory-only, so a restart or a `cp.update` presents
   `--tls-cert` / `--tls-key` again although the state database still
   holds the renewed chain.
-- 1.6 does not switch: its `CertificateSigned` stores the chain without
-  matching it to a CSR.
+- 1.6 does not switch.
 
 In ISO 15118 the V2G (SECC) certificate is the station's TLS server
 certificate towards the EV, and A00.FR.428 lets the Charging Station
@@ -656,25 +750,25 @@ What became of each item of
 [#537](https://github.com/shiv3/ocpp-cp-simulator/issues/537). Requirement
 ids are the 2.0.1 and 2.1 Part 2 ones unless marked.
 
-| Item                                                                  | Outcome                                  | Requirement                                  |
-| --------------------------------------------------------------------- | ---------------------------------------- | -------------------------------------------- |
-| `GetCertificateStatus` and OCSP fixtures                              | Implemented                              | M06.FR.02/03/04/06/07/10                     |
-| `Get15118EVCertificate`                                               | Implemented, as a control-plane relay    | M01.FR.01, M02.FR.01; 2.1 M01.FR.06          |
-| Rewrite `remainingContracts` into the EXI answer                      | Declined: no EXI codec                   | 2.1 M01.FR.05                                |
-| Indicate a failure to the EV                                          | Declined: no EV link                     | M01 / M02 error handling (no FR id)          |
-| Renewed Charging Station certificate as the TLS client one            | Implemented: 2.x, security profile 3     | A02.FR.08; 2.1 A02.FR.28, A02.FR.10          |
-| `DiscardedRenewedClientCertificate` security event                    | Implemented on 2.1                       | 2.1 A02.FR.29 (SHOULD)                       |
-| V2G certificate as the TLS server one towards the EV                  | Declined: no EV link, no ISO 15118 stack | A00.FR.428, A00.FR.513                       |
-| `V2G20Certificate` chains under `V2GCertificateChain`                 | Implemented on 2.1                       | M03.FR.05                                    |
-| TriggerMessage `SignChargingStationCertificate`, `SignV2GCertificate` | Implemented                              | F06.FR.04, A02.FR.02/03/13                   |
-| TriggerMessage `SignV2G20Certificate`, `SignCombinedCertificate`      | Implemented on 2.1                       | F06.FR.08 (#553)                             |
-| Resend SignCertificate with back-off                                  | Implemented                              | A02.FR.17-19; A02.FR.20 has no case yet      |
-| 2.x `security_event_notification`                                     | Implemented                              | A04.FR.01                                    |
-| Queue critical SecurityEventNotification while offline                | Implemented on 2.x                       | A04.FR.02, Part 2 Appendices ch. 1 (#552)    |
-| `SecurityCtrlr.CertificateEntries`                                    | Implemented                              | variable; the limit of M05.FR.06             |
-| `MaxCertificateChainSize`                                             | Implemented                              | A02.FR.16                                    |
-| `serialNumber` without leading zeroes                                 | Implemented                              | `CertificateHashDataType.serialNumber` field |
-| 1.6: keep the CSMS root the connection uses                           | Implemented                              | whitepaper M04.FR.06                         |
+| Item                                                                  | Outcome                                                        | Requirement                                  |
+| --------------------------------------------------------------------- | -------------------------------------------------------------- | -------------------------------------------- |
+| `GetCertificateStatus` and OCSP fixtures                              | Implemented                                                    | M06.FR.02/03/04/06/07/10                     |
+| `Get15118EVCertificate`                                               | Implemented, as a control-plane relay                          | M01.FR.01, M02.FR.01; 2.1 M01.FR.06          |
+| Rewrite `remainingContracts` into the EXI answer                      | Declined: no EXI codec                                         | 2.1 M01.FR.05                                |
+| Indicate a failure to the EV                                          | Declined: no EV link                                           | M01 / M02 error handling (no FR id)          |
+| Renewed Charging Station certificate as the TLS client one            | Implemented: 2.x, security profile 3                           | A02.FR.08; 2.1 A02.FR.28, A02.FR.10          |
+| `DiscardedRenewedClientCertificate` security event                    | Implemented on 2.1                                             | 2.1 A02.FR.29 (SHOULD)                       |
+| V2G certificate as the TLS server one towards the EV                  | Declined: no EV link, no ISO 15118 stack                       | A00.FR.428, A00.FR.513                       |
+| `V2G20Certificate` chains under `V2GCertificateChain`                 | Implemented on 2.1                                             | M03.FR.05                                    |
+| TriggerMessage `SignChargingStationCertificate`, `SignV2GCertificate` | Implemented                                                    | F06.FR.04, A02.FR.02/03/13                   |
+| TriggerMessage `SignV2G20Certificate`, `SignCombinedCertificate`      | Implemented on 2.1                                             | F06.FR.08 (#553)                             |
+| Resend SignCertificate with back-off                                  | Implemented                                                    | A02.FR.17-19; A02.FR.20 has no case yet      |
+| 2.x `security_event_notification`                                     | Implemented                                                    | A04.FR.01                                    |
+| Queue critical SecurityEventNotification while offline                | Implemented on 1.6 (#734) and 2.x (critical events only, #552) | A04.FR.02, Part 2 Appendices ch. 1           |
+| `SecurityCtrlr.CertificateEntries`                                    | Implemented                                                    | variable; the limit of M05.FR.06             |
+| `MaxCertificateChainSize`                                             | Implemented                                                    | A02.FR.16                                    |
+| `serialNumber` without leading zeroes                                 | Implemented                                                    | `CertificateHashDataType.serialNumber` field |
+| 1.6: keep the CSMS root the connection uses                           | Implemented                                                    | whitepaper M04.FR.06                         |
 
 ### Persistence
 

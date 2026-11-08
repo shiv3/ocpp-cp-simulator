@@ -129,6 +129,7 @@ import {
   ReservationManager,
   type Reservation,
 } from "../reservation/Reservation";
+import { syncUnspecifiedReservations } from "../reservation/reservationModel";
 import { LocalAuthListManager } from "../auth/LocalAuthList";
 import { idTokenMaxLength } from "../auth/AuthorizationCacheSeed";
 import { AuthorizationCache } from "../auth/AuthorizationCache";
@@ -144,6 +145,11 @@ import {
 } from "./ChargingProfileStore";
 import type { ActiveChargingProfile } from "../connector/Connector";
 import { CertificateStore } from "../security/CertificateStore";
+import {
+  checkSecurityProfileChange,
+  isValidAuthorizationKey,
+  isCertificateCurrentlyValid,
+} from "../security/securityProfileChange";
 import {
   MONITORING_BASES,
   MonitoringStore,
@@ -223,6 +229,10 @@ export interface StartTransactionOptions {
   /** OCPP 2.x `IdToken.type` of the transaction's Authorize and
    *  TransactionEvents (#599); `ISO14443` when absent. */
   idTokenType?: IdTokenTypeName;
+  /** The `groupIdToken` of a RequestStartTransaction (F01.FR.21/22): the group
+   *  the reservation check uses for this start, before what the station
+   *  knows of the token. */
+  groupIdToken?: string;
 }
 
 /**
@@ -402,6 +412,12 @@ export interface ChargePointTransportOptions {
   /** Resolved idTags this charge point draws from (#299). */
   readonly idTags?: readonly string[];
   readonly idTagDistribution?: IdTagDistribution;
+  /**
+   * OCPP 1.6 ReserveNow: authorize the reservation's idTag (local rules, then
+   * Authorize.req) before accepting; a tag that is not `Accepted` answers
+   * `Rejected` (#595). Default `false`.
+   */
+  readonly reservationAuthorizeIdTag?: boolean;
 }
 
 export class ChargePoint {
@@ -457,6 +473,9 @@ export class ChargePoint {
   private readonly _outbox: Outbox;
   private readonly _heartbeat: HeartbeatService;
   private readonly _clockAligned: ClockAlignedMeterScheduler;
+  /** #722: the per-connector `MeterValueSampleInterval` timers of running 1.x
+   *  transactions. */
+  private readonly _periodicSamplers: Map<number, TimerHandle> = new Map();
   /** #702: the next socket open is a (re)start of the link — the first
    *  connect, an operator `connect()`, a Reset — and sends a
    *  BootNotification. Only the transport's automatic reconnect after a
@@ -494,6 +513,8 @@ export class ChargePoint {
   private readonly _timelineProjector: OperationalTimelineProjector;
   private readonly _logRepository: LogRepository;
   private readonly _reservationManager: ReservationManager;
+  /** Parent id / groupIdToken of the tags the CSMS authorized (reservations). */
+  private readonly _authorizedParents = new Map<string, string>();
   /** #597: Reset OnIdle requests answered `Scheduled`, each run once its transactions end. */
   private _pendingResetsOnIdle: { evseId?: number }[] = [];
   /** Reason of the next BootNotification (2.x B01.FR.09); see {@link boot}. */
@@ -613,6 +634,17 @@ export class ChargePoint {
     this._inboundValidation = mode;
   }
 
+  private _reservationAuthorizeIdTag: boolean;
+
+  /** See {@link ChargePointTransportOptions.reservationAuthorizeIdTag}. */
+  get reservationAuthorizeIdTag(): boolean {
+    return this._reservationAuthorizeIdTag;
+  }
+
+  setReservationAuthorizeIdTag(enabled: boolean): void {
+    this._reservationAuthorizeIdTag = enabled;
+  }
+
   constructor(
     private readonly _id: string,
     private readonly _bootNotification: BootNotification,
@@ -652,6 +684,8 @@ export class ChargePoint {
     this._transportUrl = transportOptions.centralSystemUrl ?? wsUrl;
     this._inboundValidation =
       transportOptions.inboundValidation ?? DEFAULT_INBOUND_VALIDATION;
+    this._reservationAuthorizeIdTag =
+      transportOptions.reservationAuthorizeIdTag ?? false;
     this._capabilityProfile = transportOptions.capabilityProfile;
     this._logger.setCpId(this._id);
     this._logRepository = new LogRepository(this._database);
@@ -727,13 +761,33 @@ export class ChargePoint {
             LogType.OCPP,
           );
           this.updateConnectorStatus(connectorId, OCPPStatus.SuspendedEVSE);
-        } else if (!paused && connector.status === OCPPStatus.SuspendedEVSE) {
+        } else if (
+          !paused &&
+          connector.status === OCPPStatus.SuspendedEVSE &&
+          !connector.energyHeld
+        ) {
           this._logger.info(
             `Connector ${connectorId} schedule period limit=${watts}W, resuming → Charging`,
             LogType.OCPP,
           );
           this.updateConnectorStatus(connectorId, OCPPStatus.Charging);
         }
+      });
+      // #722: MeterValueSampleInterval drives the periodic MeterValues of a
+      // 1.x transaction; the interval is read when the transaction starts.
+      connector.events.on("transactionChange", ({ transaction }) => {
+        if (transaction && connector.hasRunningTransaction) {
+          this.startPeriodicSampling(connector);
+        } else this.stopPeriodicSampling(connectorId);
+      });
+      // A transaction restored after a daemon restart is running again and
+      // gets its sampler back (the restore itself emits no transactionChange).
+      connector.events.on("transactionRestored", () =>
+        this.startPeriodicSampling(connector),
+      );
+      // The MaxEnergyOnInvalidId allowance ran out (E05.FR.03 → .02).
+      connector.events.on("invalidIdEnergyExhausted", () => {
+        this.reportEnergyHeld(connector);
       });
       this._connectors.set(connectorId, connector);
     }
@@ -819,7 +873,8 @@ export class ChargePoint {
 
     this._reservationManager = new ReservationManager(
       this._logger,
-      (connectorId) => this.onReservationExpired(connectorId),
+      (connectorId, reservation) =>
+        this.onReservationExpired(connectorId, reservation),
       this._clock,
     );
     this._localAuthListManager = new LocalAuthListManager(this._logger);
@@ -885,6 +940,9 @@ export class ChargePoint {
       this._configuration.applyChange("CpoName", cpoName);
     }
     this.wireConfigurationListeners();
+    if (!isOcpp2Version(this._ocppVersion) && this._webSocket) {
+      this.wireSecurityConfiguration();
+    }
     // §5.2: a CP-level Unavailable set previously must survive a reboot.
     // We don't actually transition status here (no WebSocket yet); the
     // saved flag is reapplied when ChangeAvailability runs or when the
@@ -1274,6 +1332,93 @@ export class ChargePoint {
       : { text };
   }
 
+  /**
+   * #724 (1.6 security whitepaper A01, A05): the transport sends the
+   * stored `AuthorizationKey` and `SecurityProfile` from the next attempt
+   * on, and a `SecurityProfile` change is checked against the A05
+   * prerequisites. Installed after the constructor applied its own initial
+   * values, which are not ChangeConfiguration requests.
+   */
+  private wireSecurityConfiguration(): void {
+    // §7.2: with profile 1 or 2 the key is the Basic Auth password; one the
+    // transport cannot derive it from (an empty or non-hex value) would stop
+    // every later connection attempt, so it is refused and the old key kept.
+    this._configuration.setChangeGuard("AuthorizationKey", (_current, next) => {
+      const profile = this._configuration.getInteger("SecurityProfile") ?? 0;
+      if (
+        (profile !== 1 && profile !== 2) ||
+        isValidAuthorizationKey(`${next}`)
+      ) {
+        return true;
+      }
+      this._logger.warn(
+        `ChangeConfiguration AuthorizationKey refused: security profile ${profile} needs a key of 16-20 bytes (32-40 hex digits), whitepaper §7.2`,
+        LogType.CONFIGURATION,
+      );
+      return false;
+    });
+    this._configuration.setChangeGuard("SecurityProfile", (current, next) => {
+      const now = this.nowDate();
+      const verdict = checkSecurityProfileChange({
+        current: typeof current === "number" ? current : 0,
+        next: typeof next === "number" ? next : 0,
+        authorizationKey:
+          this._configuration.getString("AuthorizationKey") ?? "",
+        // Only what the TLS connection validates the CSMS with: roots that
+        // InstallCertificate stored do not join its trust, so counting them
+        // would accept an upgrade that cannot connect.
+        hasCentralSystemRoot:
+          this._webSocket?.hasConfiguredTrustAnchors() ?? false,
+        hasChargePointCertificate:
+          this._certificateStore
+            .listSignedChains("ChargingStationCertificate")
+            .some((chain) => isCertificateCurrentlyValid(chain.pems[0], now)) ||
+          (this._webSocket?.hasClientCertificate() ?? false),
+      });
+      if (!verdict.allowed) {
+        this._logger.warn(
+          `ChangeConfiguration SecurityProfile=${next} refused (${verdict.requirement}): ${verdict.reason}`,
+          LogType.CONFIGURATION,
+        );
+      }
+      return verdict.allowed;
+    });
+    this._configuration.onChange((key, value) => {
+      if (key === "AuthorizationKey" && typeof value === "string") {
+        this._webSocket?.setSecurityCredentials({ authorizationKey: value });
+      } else if (key === "SecurityProfile" && typeof value === "number") {
+        this._webSocket?.setSecurityCredentials({
+          securityProfile: value as OcppSecurityProfile,
+        });
+      }
+    });
+  }
+
+  /**
+   * #724 A05.FR.06-08: after the CALLRESULT of an accepted `SecurityProfile`
+   * upgrade the station disconnects and reconnects with the new profile.
+   * When that connection does not open, the previous profile is put back
+   * and used for the next attempt (A05.FR.08).
+   */
+  switchSecurityProfile(previousProfile: number): void {
+    this._webSocket?.armSecurityProfileFallback(() => {
+      this._logger.warn(
+        `Could not connect with security profile ${this._configuration.getInteger("SecurityProfile")}; falling back to profile ${previousProfile} (A05.FR.08)`,
+        LogType.CONFIGURATION,
+      );
+      this._configuration.applyChange(
+        "SecurityProfile",
+        String(previousProfile),
+        { bypassGuard: true },
+      );
+    });
+    this._logger.info(
+      "SecurityProfile changed: reconnecting with the new profile (A05.FR.06/07)",
+      LogType.CONFIGURATION,
+    );
+    this.reset();
+  }
+
   /** Hook up subsystems that react to live Configuration changes. */
   /** #609: hand the 2.x `RetryBackOff*` variables to the transport. */
   private applyRetryBackOff(): void {
@@ -1295,10 +1440,10 @@ export class ChargePoint {
           }
           break;
         case "MeterValueSampleInterval":
-          // §9.1.15: takes effect on the *next* transaction. Existing
-          // per-connector schedulers keep their original cadence until
-          // restarted; the new value is honored when a fresh transaction
-          // starts (see Connector.startAutoMeterValue).
+          // §9.1.19: takes effect on the *next* transaction. The periodic
+          // sampler of a running transaction keeps its cadence; the new
+          // value is read when a fresh transaction starts
+          // (startPeriodicSampling, #722).
           this._logger.info(
             `MeterValueSampleInterval=${String(value)} (applies to next transaction)`,
             LogType.CONFIGURATION,
@@ -1596,17 +1741,66 @@ export class ChargePoint {
   }
 
   /**
-   * A reservation lapsed (ReservationManager expiry cleanup) without an
-   * explicit CancelReservation. Mirror the cancel path — drive the connector
-   * back to Available through updateConnectorStatus so the CSMS sees the
-   * transition on the wire — but only when it's still Reserved: a connector
-   * that moved to Charging/Preparing/etc. in the meantime must not be clobbered.
+   * A reservation lapsed (its expiry timer, or the ReservationManager sweep)
+   * without an explicit CancelReservation. OCPP 2.x first reports it
+   * (H04.FR.01, ReservationStatusUpdate `Expired`), then mirrors the cancel
+   * path (H04.FR.03, OCPP 1.6 §5.13): drive the connector back to Available
+   * through updateConnectorStatus so the CSMS sees the transition on the wire,
+   * but only when it's still Reserved: a connector that moved to
+   * Charging/Preparing/etc. in the meantime must not be clobbered.
    */
-  private onReservationExpired(connectorId: number): void {
+  private onReservationExpired(
+    connectorId: number,
+    reservation: Reservation,
+  ): void {
+    if (isOcpp2Version(this._ocppVersion)) {
+      this._outbox.sendReservationStatusUpdate(
+        reservation.reservationId,
+        "Expired",
+      );
+    }
     const connector = this.getConnector(connectorId);
     if (connector && connector.status === OCPPStatus.Reserved) {
       this.updateConnectorStatus(connectorId, OCPPStatus.Available);
     }
+    syncUnspecifiedReservations(this);
+  }
+
+  /**
+   * OCPP 1.6 §5.13 ("a reservation SHALL be terminated ... when the Charge
+   * Point or connector are set to Faulted or Unavailable") and 2.0.1
+   * H01.FR.16/17: a connector (or, for connector 0, the whole station) that
+   * became Faulted or Unavailable ends the reservations it held. OCPP 2.x
+   * reports each as ReservationStatusUpdate `Removed`. The connector keeps
+   * the status it just took.
+   */
+  private terminateReservationsOf(connectorId: number): void {
+    const terminated = this._reservationManager.terminateReservations(
+      connectorId === 0 ? "all" : { connectorId },
+    );
+    if (!isOcpp2Version(this._ocppVersion)) return;
+    for (const reservation of terminated) {
+      this._outbox.sendReservationStatusUpdate(
+        reservation.reservationId,
+        "Removed",
+      );
+    }
+  }
+
+  /**
+   * The parent id (1.6) or groupIdToken (2.x) the station knows for `idTag`:
+   * Local Authorization List, then Authorization Cache, then the last
+   * Authorize.conf (kept even when the cache is off). Reservation matching by
+   * parent (1.6 §5.13, H03.FR.04/07) uses it; it never asks the CSMS itself.
+   */
+  knownParentIdOf(idTag: string): string | undefined {
+    // A malformed CALL (warn mode runs the handler anyway) can name no tag.
+    if (typeof idTag !== "string") return undefined;
+    return (
+      this._localAuthListManager.getEntry(idTag)?.parentIdTag ??
+      this._authorization.cache.get(idTag)?.parentId ??
+      this._authorizedParents.get(idTag)
+    );
   }
 
   get localAuthListManager(): LocalAuthListManager {
@@ -1644,7 +1838,8 @@ export class ChargePoint {
     return this._webSocket.isConnected();
   }
 
-  /** Feed a CSMS verdict on `idToken` to the Authorization Cache (#452):
+  /** Feed a CSMS verdict on `idToken` to the Authorization Cache (#452) and
+   *  report a conflict with the Local Authorization List (#744):
    *  called by the Authorize / StartTransaction / StopTransaction result
    *  handlers. A no-op while the cache is disabled or for an identifier of
    *  the Local Authorization List (1.6 §3.5.3). */
@@ -1652,11 +1847,31 @@ export class ChargePoint {
     idToken: string,
     result: CsmsAuthorizationResult,
   ): void {
+    if (result.parentId !== undefined) {
+      this._authorizedParents.set(idToken, result.parentId);
+    } else {
+      this._authorizedParents.delete(idToken);
+    }
     if (this._authorization.recordCsmsResult(idToken, result)) {
       this._logger.debug(
         `Authorization cache updated: ${idToken} → ${result.status}`,
         LogType.TRANSACTION,
       );
+    }
+    // 1.6 §3.5.2: tell the CSMS when its verdict contradicts the Local
+    // Authorization List. 2.x has no such notification (its StatusNotification
+    // carries no errorCode).
+    if (
+      !isOcpp2Version(this._ocppVersion) &&
+      this._authorization.conflictsWithLocalList(idToken, result.status)
+    ) {
+      this._logger.warn(
+        `CSMS verdict ${result.status} for ${idToken} conflicts with the Local Authorization List; sending LocalListConflict`,
+        LogType.OCPP,
+      );
+      this.sendStatusNotificationRaw(0, this._status, {
+        errorCode: "LocalListConflict",
+      });
     }
   }
 
@@ -1868,6 +2083,35 @@ export class ChargePoint {
   /** #396: the answer to an incoming CSMS CALL is decided. */
   notifyIncomingCallCompleted(completion: IncomingCallCompletion): void {
     this._events.emit("incomingCallCompleted", completion);
+  }
+
+  /**
+   * `StopTransactionOnInvalidId=false` and the id was not accepted: keep the
+   * transaction but stop the energy delivery (2.0.1
+   * E05.FR.02/03, C15.FR.06; 2.x only, 1.6 errata 3.17 is #736). With `MaxEnergyOnInvalidId` > 0 that much energy
+   * is delivered first; the connector reports SuspendedEVSE either way once
+   * the delivery has stopped.
+   */
+  holdEnergyOnInvalidId(connector: Connector): void {
+    const allowance = this._configuration.maxEnergyOnInvalidId();
+    if (connector.holdEnergyForInvalidId(allowance)) {
+      this.reportEnergyHeld(connector);
+    }
+  }
+
+  private reportEnergyHeld(connector: Connector): void {
+    if (!connector.hasRunningTransaction) return;
+    if (
+      connector.status === OCPPStatus.Charging ||
+      connector.status === OCPPStatus.Preparing ||
+      connector.status === OCPPStatus.SuspendedEV
+    ) {
+      this._logger.info(
+        `Connector ${connector.id} energy delivery stopped after a non-Accepted id → SuspendedEVSE`,
+        LogType.TRANSACTION,
+      );
+      this.updateConnectorStatus(connector.id, OCPPStatus.SuspendedEVSE);
+    }
   }
 
   /** Called by StartTransactionResultHandler when StartTransaction.conf
@@ -2546,6 +2790,8 @@ export class ChargePoint {
     this._outbox.sendSignedFirmwareStatusNotification(status, requestId);
   }
 
+  /** #734: the device has (re)started and has not reported it yet. */
+  private _startupEventPending = true;
   /** The CSMS answered a StatusNotification for `connectorId` (0 = the charge
    *  point) with `status` (#702). */
   noteStatusAcknowledged(connectorId: number, status: OCPPStatus): void {
@@ -2557,11 +2803,21 @@ export class ChargePoint {
     this._bootReason = "PowerUp";
     this._bootAccepted = true;
     this._outbox.setBootStatus({ status: "Accepted" });
-    if (
-      this._ocppVersion === "OCPP-1.6J" &&
-      (this._configuration.getInteger("SecurityProfile") ?? 0) >= 1
-    ) {
-      void this._outbox.sendSecurityEventNotification("StartupOfTheDevice");
+    if (this._ocppVersion === "OCPP-1.6J") {
+      // #734 A04.FR.02: events raised while the station could not send them
+      // (ResetOrReboot among them) go out first, with their own timestamps.
+      this._outbox.flushQueuedSecurityEvents();
+      // StartupOfTheDevice reports a start of the device: once per process
+      // start, per reset and per power restore, not per reconnect or
+      // triggered boot. It is
+      // consumed by the first Accepted boot either way, so a later change of
+      // the security profile does not report a startup that already passed.
+      if (this._startupEventPending) {
+        this._startupEventPending = false;
+        if ((this._configuration.getInteger("SecurityProfile") ?? 0) >= 1) {
+          void this._outbox.sendSecurityEventNotification("StartupOfTheDevice");
+        }
+      }
     }
     // §4.7/§4.8/§4.10 + errata 3.18: flush queued transaction-related
     // messages now that the boot gate is open. Run via queueMicrotask so
@@ -2569,6 +2825,11 @@ export class ChargePoint {
     queueMicrotask(() => this._outbox.flushPendingQueue());
     // After the post-boot status fan-out, and with the gate already open.
     queueMicrotask(() => this.engine.bootAccepted());
+  }
+
+  /** §4.2: run `fn` as the answer to an accepted TriggerMessage. */
+  runTriggered<T>(fn: () => T): T {
+    return this._outbox.runTriggered(fn);
   }
 
   markBootPending(): void {
@@ -3100,6 +3361,9 @@ export class ChargePoint {
     const restoredAt = this._nowDate();
     const outageMs = Math.max(0, restoredAt.getTime() - loss.at.getTime());
     this._powerLoss = null;
+    // Power returning is a start of the device: the Accepted boot that follows
+    // reports StartupOfTheDevice again (#734, A04.FR.01).
+    this._startupEventPending = true;
     const recovery = this.planPowerRecovery(loss, outageMs, options);
     this._powerRecovery =
       loss.transactions.length > 0
@@ -3213,6 +3477,9 @@ export class ChargePoint {
       this._powerRestoreTimer = null;
     }
     this.releaseRenewedClientCertificate();
+    for (const connectorId of [...this._periodicSamplers.keys()]) {
+      this.stopPeriodicSampling(connectorId);
+    }
     this._webSocket?.dispose(); // terminal: shuts controller down, clears reservation, closes socket
     this.teardownAfterClose(); // final CP-side teardown
     this._engine.dispose();
@@ -3248,6 +3515,14 @@ export class ChargePoint {
       }
     }
     this._logger.info(`Reset chargePoint: ${this._id}`, LogType.OCPP);
+    if (
+      this._ocppVersion === "OCPP-1.6J" &&
+      (this._configuration.getInteger("SecurityProfile") ?? 0) >= 1
+    ) {
+      // #734: reported once the station is back with an Accepted boot.
+      this._outbox.queueSecurityEventNotification("ResetOrReboot", reason);
+    }
+    this._startupEventPending = true;
     if (type === "Hard") {
       this.reset("RemoteReset");
     } else {
@@ -3551,6 +3826,53 @@ export class ChargePoint {
   }
 
   /**
+   * #722, 1.6 errata 3.15 (Part 2 §4.7) and §3.16.1 / §9.1.19: while a
+   * transaction runs and `MeterValueSampleInterval` > 0, a MeterValues.req
+   * with the `MeterValuesSampledData` measurands goes out every interval,
+   * whatever drives the register. The connector's configured meter strategy
+   * (auto-meter curve, increment fallback) then only moves the register, so
+   * there is one sample per tick, not two schedules. 1.x only (SOAP
+   * included): on 2.x the existing sampling is unchanged.
+   *
+   * The spec does not say when the interval is read; the simulator reads it
+   * when the sampler starts (the transaction's start, or its restore after a
+   * restart), so a ChangeConfiguration applies to the next transaction.
+   * Called again for the same running transaction (the `transactionChange`
+   * that persists a `startCallError` or an id), it keeps the timer and so the
+   * phase.
+   */
+  private startPeriodicSampling(connector: Connector): void {
+    if (isOcpp2Version(this._ocppVersion)) return;
+    if (this._periodicSamplers.has(connector.id)) return;
+    connector.setStationOwnsMeterSampling(true);
+    const seconds = this._configuration.meterValueSampleInterval();
+    if (seconds <= 0) return;
+    const timer = this._clock.setInterval(() => {
+      if (!connector.hasRunningTransaction) {
+        this.stopPeriodicSampling(connector.id);
+        return;
+      }
+      // A transaction whose StartTransaction.req was answered with a
+      // CALLERROR (#527) is sampled too (errata 3.15, §4.7: every interval,
+      // SHALL): the MeterValues.req carries the id its StartTransaction got,
+      // or -1 until it has one (errata 3.18, §4.8; #565).
+      // Offline too: §3.7 "When offline, the Charge Point MUST queue any
+      // transaction-related messages", periodic MeterValues included. The
+      // outbox queues it (a MeterValues of a transaction) and replays it in
+      // order after the reconnect.
+      this.sendScheduledMeterValue(connector.id);
+    }, seconds * 1000);
+    this._periodicSamplers.set(connector.id, timer);
+  }
+
+  private stopPeriodicSampling(connectorId: number): void {
+    const timer = this._periodicSamplers.get(connectorId);
+    if (timer === undefined) return;
+    this._clock.clearInterval(timer);
+    this._periodicSamplers.delete(connectorId);
+  }
+
+  /**
    * One sample from the connector's meter-value scheduler (#347).
    *
    * With {@link txUpdatedMeterValues} on and an OCPP 2.x transaction
@@ -3677,6 +3999,9 @@ export class ChargePoint {
       // errorCode available, so we'd pass NoError by default. Callers that
       // want to set a CP-level fault should use sendCpFaultedNotification.
       this._outbox.sendStatusNotification(0, status);
+      // The station is out of service: no reservation survives (after the
+      // status, which the CSMS sees first: H01.FR.16/17).
+      if (status !== OCPPStatus.Available) this.terminateReservationsOf(0);
       return;
     }
 
@@ -3684,6 +4009,17 @@ export class ChargePoint {
     if (!connector) {
       this._logger.error(`Connector ${connectorId} not found`, LogType.SYSTEM);
       return;
+    }
+
+    // Energy held after a non-Accepted id (E05.FR.02): whichever path asks
+    // for Charging, the register is stopped, so report SuspendedEVSE.
+    if (
+      status === OCPPStatus.Charging &&
+      connector.energyHeld &&
+      connector.hasRunningTransaction
+    ) {
+      if (connector.status === OCPPStatus.SuspendedEVSE) return;
+      status = OCPPStatus.SuspendedEVSE;
     }
 
     this._engine.dispatch({
@@ -3728,6 +4064,13 @@ export class ChargePoint {
       info: connector.errorInfo ?? undefined,
       vendorErrorCode: connector.vendorErrorCode ?? undefined,
     });
+
+    // A connector that is Faulted or Unavailable holds no reservation: it is
+    // ended after the status the CSMS just saw (H01.FR.16/17).
+    if (status === OCPPStatus.Faulted || status === OCPPStatus.Unavailable) {
+      this.terminateReservationsOf(connectorId);
+    }
+    syncUnspecifiedReservations(this);
   }
 
   /** OCPP 1.x (#527): a connector whose transaction runs is past

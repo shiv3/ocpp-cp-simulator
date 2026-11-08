@@ -200,6 +200,10 @@ export interface ChargePointEvents {
     connectorId: number;
     status: string;
     stopped: boolean;
+    /** OCPP 2.x: the refusal answered a TransactionEvent after `Started`
+     *  (an `Updated` carrying the idToken), not the start. Absent
+     *  otherwise (#603). */
+    midSession?: true;
   };
   /** A transmission of a transaction-related message failed. OCPP 2.0.1 /
    *  2.1 TransactionEvent (E13.FR.02): the CSMS answered it with a CALLERROR

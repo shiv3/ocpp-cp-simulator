@@ -286,11 +286,44 @@ scenario is loaded.
   "probabilityOfStart": 0.8,
   "requireAuthorize": true,
   "stopAfterSec": 3600,
+  "stopAt": "2026-11-09T18:00:00Z", // optional, absolute (#603)
+  "idTagStrategy": "random", // optional (#603)
+  "cpIndex": 12, // optional (#603)
 }
 ```
 
-The loop is: wait a drawn gap, roll `probabilityOfStart`, optionally Authorize,
-start a session, wait a drawn duration, stop, repeat.
+The loop is: wait a drawn gap, roll `probabilityOfStart`, check the start
+preconditions, optionally Authorize, start a session, wait a drawn duration,
+stop, repeat.
+
+**Stop time.** `stopAfterSec` counts from when the traffic starts; `stopAt`
+(#603) is an absolute ISO 8601 time. Whichever comes first ends the traffic,
+checked at the start of each cycle: a session open then runs to its end. A
+`stopAt` already past leaves the traffic idle.
+
+**idTags come from the pool** (#603). A session presents one tag, for its
+Authorize and its start. With an [idTag pool](#idtag-pool) the traffic reads
+the pool's tags and, unless `idTagStrategy` names another, its `distribution`
+(`round-robin`, `random` or `connector-affinity`), and draws with **its own**
+cursor and stream, seeded by `seed`, the charge point and the connector. That
+is deliberate: `ChargePoint.nextIdTag` draws from state the whole charge point
+shares, which scenarios and control-plane calls advance too, so the same seed
+would not give the same sequence. A `--watch` reload of the pool is seen at
+the next draw. The charge point index (`cpIndex`, else a stable hash of the
+`cpId`) is mixed into the start offset of `round-robin`, the shift of
+`connector-affinity` and the seed of `random`, so the charge points of a fleet
+sharing one tag list do not all present the same tag first. For that reason the
+tag AutoTraffic presents for a connector can differ from the one
+`ChargePoint.nextIdTag` gives, which has no `cpIndex` shift, and the
+per-connector round-robin cursors of one charge point can present the same tag
+at the same time. Reconfiguring a connector's traffic rebuilds the stream from
+the new `idTagStrategy`, `cpIndex` and `seed`. Without a pool the
+traffic presents `123456`, as before.
+
+**Start preconditions** (#603). A cycle starts only when the charge point's
+BootNotification was `Accepted` (and the connection has not closed since), the
+connector is `Available` and has no running transaction. Any other cycle is
+counted as skipped, with a log line, and the loop goes on.
 
 **Seeded, and that is the point.** Every draw comes from the same PRNG
 [network simulation](network-simulation.md) uses, keyed on
@@ -309,9 +342,21 @@ attempt is _skipped_, not queued: queuing would burst the moment the scenario
 ended, which is the interference the rule exists to prevent. A run's verdict
 must never depend on whether background traffic fired.
 
-Per-connector counters — attempted, started, skipped, rejected, completed — are
-the assertion surface for a load run. A refused Authorize or a failed start is
-counted and the loop continues; surviving those is what a load run is for.
+Per-connector counters are the assertion surface for a load run:
+`attempted` (cycles that ran), `skipped` (a roll below `probabilityOfStart` or
+a failed start precondition), `started`, `rejected` and `completed`, plus
+`authorizeAccepted` / `authorizeRejected`, `startAccepted` / `startRejected`
+(`startAccepted` counts the start when `StartTransaction.req` goes out; a
+`StartTransaction.conf` whose idTagInfo is not Accepted moves it to
+`startRejected`, once per session; on 2.x only the answer to the `Started`
+TransactionEvent does, a refusal in the answer to a later `Updated` does not), `stopAccepted` / `stopRejected` (the stop that ends a
+session on its own timer; the stop issued by turning the traffic off or by
+`stopAt` is not counted, and `stopRejected` is a stop that failed),
+`consecutiveSkips` (cycles skipped since the last session begun, so it
+returns to 0 on a start) and `firstRunAt` / `lastRunAt` (epoch ms, `null` before the
+first cycle). A refused Authorize or a failed start is counted and the loop
+continues; surviving those is what a load run is for. The daemon sums them
+into [`/metrics`](../entities/daemon.md#metrics) (#603).
 
 Config is persisted in `connector_settings.auto_traffic` (schema v10), and every
 runner's timers are stopped when the charge point is deleted.

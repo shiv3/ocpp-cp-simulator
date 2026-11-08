@@ -54,6 +54,7 @@ import { LogType } from "@ocpp-cp-sim/core/cp/shared/Logger";
 import { AutoTrafficRunner } from "@ocpp-cp-sim/core/cp/application/services/AutoTrafficRunner";
 import {
   AUTO_TRAFFIC_ID_TAG,
+  AutoTrafficIdTagPicker,
   defaultAutoTrafficConfig,
   emptyAutoTrafficCounters,
   validateAutoTrafficConfig,
@@ -490,6 +491,12 @@ export class CLIChargePointService {
   private readonly _evSettingsOwnerByConnector: Map<number, string> = new Map();
   private readonly _autoTraffic = new Map<number, AutoTrafficRunner>();
   private readonly _autoTrafficConfigs = new Map<number, AutoTrafficConfig>();
+  /** The idTag stream of each running connector, rebuilt on every
+   *  reconfigure so a new strategy, cpIndex or seed takes effect (#603). */
+  private readonly _autoTrafficPickers = new Map<
+    number,
+    AutoTrafficIdTagPicker | null
+  >();
   // Resolvers for waitForScenarioArmed(scenarioId), keyed like _executors.
   // Populated only when a caller actually opts in (run_scenario's
   // awaitArmed); resolved and cleared by the onStateChange hook in
@@ -1298,22 +1305,55 @@ export class CLIChargePointService {
     this._autoTrafficConfigs.set(connectorId, config);
     const existing = this._autoTraffic.get(connectorId);
     if (existing) {
+      // The picker restarts with the runner's seeded stream.
+      this._autoTrafficPickers.set(
+        connectorId,
+        config.enabled
+          ? this.autoTrafficIdTagPicker(connectorId, config)
+          : null,
+      );
       existing.reconfigure(config);
-      if (!config.enabled) this._autoTraffic.delete(connectorId);
+      if (!config.enabled) {
+        this._autoTraffic.delete(connectorId);
+        this._autoTrafficPickers.delete(connectorId);
+      }
       return;
     }
     if (!config.enabled) return;
 
+    this._autoTrafficPickers.set(
+      connectorId,
+      this.autoTrafficIdTagPicker(connectorId, config),
+    );
     const runner = new AutoTrafficRunner(config, this._init.cpId, connectorId, {
+      // One tag per session (#603), from the pool when the charge point has
+      // one.
+      idTag: () =>
+        this._autoTrafficPickers.get(connectorId)?.next() ??
+        AUTO_TRAFFIC_ID_TAG,
+      // A cycle starts only on an Accepted charge point, an Available
+      // connector and no active transaction (#603); otherwise it is skipped.
+      startBlocker: (id) => {
+        if (!this._chargePoint.bootAccepted) {
+          return "the charge point is not Accepted";
+        }
+        const connector = this._chargePoint.getConnector(id);
+        if (!connector) return `connector ${id} not found`;
+        if (connector.hasRunningTransaction) return "a transaction is active";
+        if (connector.status !== OCPPStatus.Available) {
+          return `the connector is ${connector.status}`;
+        }
+        return null;
+      },
       // Awaited: a CSMS that refuses the tag must be counted as a refusal, not
       // reported as a started session.
-      authorize: async () => {
-        const status =
-          await this._chargePoint.authorizeAndWait(AUTO_TRAFFIC_ID_TAG);
+      authorize: async (_id, idTag) => {
+        const status = await this._chargePoint.authorizeAndWait(idTag);
         return status === "Accepted";
       },
-      startTransaction: async (id) => {
-        this._chargePoint.startTransaction(AUTO_TRAFFIC_ID_TAG, id);
+      startTransaction: async (id, idTag) => {
+        const outcome = await this._chargePoint.startTransaction(idTag, id);
+        return outcome.started;
       },
       stopTransaction: async (id) => this.stopTransaction(id),
       // A scenario owns the connector while any executor is running: a run's
@@ -1324,6 +1364,24 @@ export class CLIChargePointService {
     });
     this._autoTraffic.set(connectorId, runner);
     runner.start();
+  }
+
+  /** The traffic's idTag stream, or `null` without a pool (#603). */
+  private autoTrafficIdTagPicker(
+    connectorId: number,
+    config: AutoTrafficConfig,
+  ): AutoTrafficIdTagPicker | null {
+    const pool = this._chargePoint.idTagPoolInfo();
+    if (!pool) return null;
+    return new AutoTrafficIdTagPicker(
+      // Read at each draw: `--watch` swaps the pool's list (#314).
+      () => this._chargePoint.idTagPoolInfo()?.tags ?? pool.tags,
+      config.idTagStrategy ?? pool.distribution,
+      config.seed,
+      this._init.cpId,
+      connectorId,
+      config.cpIndex,
+    );
   }
 
   getAutoTrafficConfig(connectorId: number): AutoTrafficConfig {
@@ -2653,6 +2711,7 @@ export class CLIChargePointService {
     // alongside its replacement.
     for (const runner of this._autoTraffic.values()) runner.stop();
     this._autoTraffic.clear();
+    this._autoTrafficPickers.clear();
 
     // #447: detached before the teardown, so a shutdown leaves running
     // sessions open for the next start to reconcile.
@@ -2740,6 +2799,21 @@ export class CLIChargePointService {
   }
 
   private attachEventForwarders(): void {
+    // #603: a StartTransaction.conf that is not Accepted turns a start the
+    // runner counted as accepted (the request went out) into a refusal;
+    // once per session, and only for the answer to the start.
+    this._unsubscribes.push(
+      this._chargePoint.events.on(
+        "startTransactionNotAccepted",
+        ({ connectorId, midSession }) => {
+          // 2.x: an Updated that carries the idToken can be refused after
+          // the start was accepted; that is not a start refusal.
+          if (!midSession) {
+            this._autoTraffic.get(connectorId)?.noteStartConfRefused();
+          }
+        },
+      ),
+    );
     this._unsubscribes.push(
       this._chargePoint.timeline.onRecord((entry) =>
         this.emit({ event: "timeline_entry", data: entry }),

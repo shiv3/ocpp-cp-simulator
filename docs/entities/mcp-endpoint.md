@@ -18,7 +18,7 @@ related:
   - ../concepts/operational-timeline.md
   - ../concepts/charging-sessions.md
   - ../concepts/local-authorization.md
-updated: 2026-11-07
+updated: 2026-11-08
 ---
 
 # MCP endpoint (`POST /mcp`)
@@ -81,7 +81,7 @@ The endpoint exposes 35 curated tools wrapping the daemon's
 | `control_scenario_wait`       | `<action>_scenario_wait`      | `cpId`, `connector`, `scenarioId`, `action` (`extend` / `retry` / `continue`), `seconds?` — required by `extend` (#240)                                                                                                                                                                                                                                                              |
 | `get_logs`                    | `logs.get`                    | `cpId`, `limit?`, `offset?`, `order?` — `limit` takes the most recent N ([Log windowing](../concepts/log-format.md#log-windowing))                                                                                                                                                                                                                                                   |
 | `get_timeline`                | `timeline.get`                | `cpId`, `connectorId?`, `runId?`, `incidentId?`, `kinds?`, `limit?`, `offset?`, `order?` — the [operational timeline](../concepts/operational-timeline.md), windowed like `get_logs` (#448)                                                                                                                                                                                          |
-| `list_charging_sessions`      | `sessions.list`               | `cpId`, `connectorId?`, `outcomes?`, `limit?` (default 50), `offset?`, `order?` — the [charging sessions](../concepts/charging-sessions.md), newest first by default (#447)                                                                                                                                                                                                          |
+| `list_charging_sessions`      | `sessions.list`               | `cpId?` (omitted: the whole fleet, #489), `labels?`, `startedFrom?`, `startedTo?`, `connectorId?`, `outcomes?`, `limit?` (default 50), `offset?`, `order?` — the [charging sessions](../concepts/charging-sessions.md), newest first by default (#447)                                                                                                                               |
 
 Most of these tools hand-declare a copy of their method's fields rather than
 deriving it (`cp_create` / `cp_create_many`, `cp_list`, `cp_labels_set` and

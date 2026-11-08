@@ -924,14 +924,27 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
   const sessions = METHODS["sessions.list"].params.shape;
   mcp.tool("list_charging_sessions", {
     description:
-      "List a charge point's charging sessions (#447): one normalized record " +
+      "List charging sessions (#447): one charge point's with cpId, or every " +
+      "charge point's when cpId is omitted (#489; labels narrows the fleet " +
+      "to a selector, startedFrom/startedTo bound the start time). One normalized record " +
       "per transaction, the same shape for OCPP 1.6 and 2.x — connector, " +
       "transaction id, idTag, start/end, duration, meter start/stop, energy " +
       "(Wh), stop reason and an outcome (active, completed, interrupted, " +
       "failed). Unknown values are null, never guessed. Newest first; no " +
       "billing or tariff data.",
     inputSchema: z.object({
-      cpId: sessions.cpId.describe("Charge point identifier"),
+      cpId: sessions.cpId.describe(
+        "Charge point identifier; omit to list across the fleet",
+      ),
+      labels: sessions.labels.describe(
+        "Fleet-wide only (not with cpId): the charge points carrying every one of these label pairs (exact match); {} or omitted = all",
+      ),
+      startedFrom: sessions.startedFrom.describe(
+        "Only sessions that started at or after this instant (ISO 8601 with a zone)",
+      ),
+      startedTo: sessions.startedTo.describe(
+        "Only sessions that started before this instant (ISO 8601 with a zone)",
+      ),
       connectorId: sessions.connectorId.describe(
         "Only sessions on this connector",
       ),

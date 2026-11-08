@@ -65,7 +65,7 @@ On a connector with a `meter` object (even `{}`), `Energy.Active.Import.Interval
 `Energy.Active.Export.Register`, `Energy.Active.Export.Interval`,
 `Power.Active.Export` and `Current.Export` carry real values (OCPP 1.6 §7.31
 Measurand; 2.0.1 MeasurandEnumType). An Interval is the energy moved since the
-previous Interval sample, the first one since the transaction's `meterStart`.
+previous Interval sample **of the same stream**, the first one since the transaction's `meterStart`. The streams are the sampled readings (periodic, trigger, begin / end), the clock-aligned ones, and the transaction-end history of each (#607), so two readers in one tick do not take each other's interval. The export register integrates from the start of a session, not over the idle time before it.
 Without a `meter` object they stay the historical `"0"` without unit. Reactive
 measurands are still zero.
 

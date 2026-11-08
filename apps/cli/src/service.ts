@@ -726,7 +726,7 @@ export class CLIChargePointService {
       );
     }
 
-    // OCPPWebSocket concatenates wsUrl + cpId, so strip trailing cpId if present.
+    // OCPPWebSocket appends the identity to wsUrl, so strip a trailing cpId if present.
     // OCPP SOAP versions post to the CentralSystemService URL exactly as configured.
     const baseUrl = isSoapVersion(ocppVersion)
       ? centralSystemUrl
@@ -3674,7 +3674,8 @@ export class CLIChargePointService {
 }
 
 /**
- * OCPPWebSocket concatenates `${wsUrl}${cpId}` when connecting.
+ * OCPPWebSocket appends the percent-encoded identity as a path segment when
+ * connecting (`wsUrlWithBasic.ts`, OCPP-J 1.6 §3.1.1).
  * If the user provides a full URL like `wss://host/chargepoint/CP001`,
  * strip the trailing cpId so it doesn't get doubled.
  * If the URL is already a base URL like `wss://host/chargepoint/`, use as-is.

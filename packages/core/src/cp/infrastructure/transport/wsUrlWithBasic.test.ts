@@ -23,6 +23,54 @@ describe("OCPP WebSocket Basic auth", () => {
     ).toBe("wss://csms.example.com/ocpp/CP001");
   });
 
+  // OCPP-J 1.6 §3.1.1 (#742): the identity is percent-encoded per RFC 3986
+  // and the builder inserts the `/` between endpoint and identity.
+  it.each([
+    ["CP001", "CP001"],
+    ["a/b", "a%2Fb"],
+    ["a%41", "a%2541"],
+    ["RDAM 123", "RDAM%20123"],
+    ["a?b#c", "a%3Fb%23c"],
+  ])("percent-encodes the identity %j", (identity, encoded) => {
+    for (const base of [
+      "wss://csms.example.com/ocpp/",
+      "wss://csms.example.com/ocpp",
+      "wss://csms.example.com",
+    ]) {
+      const prefix = base.endsWith("/") ? base : `${base}/`;
+      expect(
+        buildOcppWebSocketUrl({
+          baseUrl: base,
+          chargePointId: identity,
+          basicAuth: null,
+        }),
+      ).toBe(`${prefix}${encoded}`);
+    }
+  });
+
+  it("keeps the Basic Auth username the unencoded identity", () => {
+    const opts = buildOcppWebSocketConnectOptions({
+      baseUrl: "wss://csms.example.com/ocpp/",
+      chargePointId: "a/b",
+      basicAuth: null,
+      securityProfile: 1,
+      authorizationKey: "0123456789abcdef",
+    });
+    expect(opts.url).toBe("wss://csms.example.com/ocpp/a%2Fb");
+    expect(opts.headers.Authorization).toBe(
+      buildOcppBasicAuthorization({
+        username: "a/b",
+        password: "0123456789abcdef",
+      }),
+    );
+    expect(
+      Buffer.from(
+        opts.headers.Authorization!.replace("Basic ", ""),
+        "base64",
+      ).toString(),
+    ).toMatch(/^a\/b:/);
+  });
+
   it("builds the HTTP Basic Authorization header", () => {
     expect(
       buildOcppBasicAuthorization({

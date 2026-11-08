@@ -14,7 +14,7 @@ related:
   - trace-format.md
   - ../entities/analyze.md
   - ../entities/cli.md
-updated: 2026-11-05
+updated: 2026-11-08
 ---
 
 # Log format
@@ -147,14 +147,16 @@ at all, and only secret-named members get this: the 1.6 `{ key, value }`, 2.0.1
 JSON objects only. Escaped JSON indented with raw newlines
 (`"{\"privateKey\": {\n  \"d\": \"S1\"…`, which `JSON.stringify` never
 emits) leaves the members after the first line readable.
-A regex engine may give up on a very long value and report no match where
-another completes it: under Bun (JavaScriptCore) a quoted value of some 50k
-characters was logged in clear while Node (V8) redacted it (#547). A quoted
-secret-named assignment the patterns above left unredacted is therefore cut
-again in code, failing closed: the value ends at the first unescaped matching
-quote on its first line, and a PEM value, or one with no such quote, is
-redacted to the end of the message. Where the patterns completed this changes
-nothing. The redaction tests run under both vitest and `bun test`
+A regex engine may give up on, or crawl through, a very long value: under Bun
+(JavaScriptCore) a quoted value of some 50k characters was logged in clear
+while Node (V8) redacted it (#547), and one regex over a value ran at some
+8 µs per character, seconds for `password="___…` with 200k characters (#567).
+Only the opening of a quoted or escaped-quote assignment (name, separator,
+quote) is matched by a regex; its value is cut in code, by the same rules as
+above (PEM, delimiter-checked quote on a later line, first unescaped quote,
+end of line), failing closed. A 200k-character value takes milliseconds on both
+runtimes, and the timing rows in the redaction tests have the same 2 s budget
+under both. The redaction tests run under both vitest and `bun test`
 (`packages/core/src/cp/shared/redaction.bun.test.ts`).
 
 ## WebSocket close lines

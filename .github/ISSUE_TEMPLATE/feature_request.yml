@@ -1,0 +1,44 @@
+name: Feature request
+description: A behavior, option or integration the simulator does not have.
+labels: ["type:feature"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A maintainer adds the `area:*` and `priority:*` labels and the milestone ([triage](https://github.com/shiv3/ocpp-cp-simulator/blob/main/CONTRIBUTING.md#triage)).
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you are trying to do
+      description: The situation (for example "test how my CSMS handles X") rather than the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like
+      description: The behavior you expect, a flag or message name if you have one, and the clause of the OCPP specification it comes from.
+    validations:
+      required: true
+  - type: dropdown
+    id: version
+    attributes:
+      label: OCPP version
+      multiple: true
+      options:
+        - OCPP 1.6J
+        - OCPP 1.6 SOAP
+        - OCPP 2.0.1
+        - OCPP 2.1
+        - Not protocol related
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do today
+      description: Workarounds and alternatives you considered.
+  - type: checkboxes
+    id: pr
+    attributes:
+      label: Contribution
+      options:
+        - label: I would send a pull request for this.

@@ -7,13 +7,13 @@
  * those shapes already evolve with OCPP changes, so packing them as JSON
  * keeps the schema stable while the data inside drifts.
  *
- * Migration policy: bump SCHEMA_VERSION and add a branch in `runMigrations`
- * when the columns must change. There are no migrations to write today
- * because the simulator has no prior SQLite users — the previous
- * persistence layer was localStorage and we explicitly do NOT carry it
- * forward (see plan).
+ * Migration policy: versions 3..25 are the legacy `if (stored < N)` branches
+ * in `runMigrations`. A new migration is a file in `migrations/` appended to
+ * `MIGRATIONS` (see `migrations/index.ts`); SCHEMA_VERSION follows the last
+ * entry, so it is never edited by hand. The previous persistence layer was
+ * localStorage and we explicitly do NOT carry it forward.
  */
-export const SCHEMA_VERSION = 24;
+export const SCHEMA_VERSION = latestVersion(MIGRATIONS);
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -184,7 +184,10 @@ CREATE TABLE IF NOT EXISTS charge_points (
   behaviors      TEXT,
   -- #347: 1 when the scheduler's in-transaction samples ride OCPP 2.x
   -- TransactionEvent(Updated); NULL (a row older than the column) is off.
-  tx_updated_meter_values INTEGER
+  tx_updated_meter_values INTEGER,
+  -- #593: off | warn | enforce, the OCPP 1.6J inbound CALL validation mode.
+  -- NULL (a row older than the column) is the default, warn.
+  inbound_validation TEXT
 );
 
 -- Per-CP UI / operator state. Currently holds the "desired connected"
@@ -399,6 +402,7 @@ export function perChargePointTables(): readonly string[] {
 }
 
 import type { Database } from "./Database";
+import { latestVersion, MIGRATIONS, type Migration } from "./migrations";
 import {
   LEGACY_STARTUP_SOURCE_PREFIX,
   legacyGeneratedBaseId,
@@ -438,7 +442,11 @@ export class SchemaVersionMismatchError extends Error {
  *     Older simulator running against a DB the newer simulator wrote;
  *     bail out instead of corrupting it.
  */
-export function runMigrations(db: Database): void {
+export function runMigrations(
+  db: Database,
+  migrations: readonly Migration[] = MIGRATIONS,
+): void {
+  const targetVersion = latestVersion(migrations);
   // schema_meta itself has to exist before we can read the stored
   // version, so run the table-create pass first. It's a no-op on an
   // already-migrated DB.
@@ -448,8 +456,8 @@ export function runMigrations(db: Database): void {
     "SELECT value FROM schema_meta WHERE key = 'version'",
   );
   const stored = row ? Number(row.value) : 0;
-  if (Number.isFinite(stored) && stored > SCHEMA_VERSION) {
-    throw new SchemaVersionMismatchError(stored, SCHEMA_VERSION);
+  if (Number.isFinite(stored) && stored > targetVersion) {
+    throw new SchemaVersionMismatchError(stored, targetVersion);
   }
 
   // v2 → v3: add `scenario_position_json` column to `connector_runtime`
@@ -739,11 +747,23 @@ export function runMigrations(db: Database): void {
     }
   }
 
-  // (Place future forward migrations here, gated on `stored < N`.)
+  // v24 → v25 (#593): `charge_points.inbound_validation`. Guarded like the
+  // v16 column; existing rows stay NULL, which restores as the default (warn).
+  if (stored < 25) {
+    const cols = db.all<{ name: string }>("PRAGMA table_info(charge_points)");
+    if (!new Set(cols.map((c) => c.name)).has("inbound_validation")) {
+      db.exec("ALTER TABLE charge_points ADD COLUMN inbound_validation TEXT");
+    }
+  }
+
+  // v26 and later: one file each under `migrations/`.
+  for (const migration of migrations) {
+    if (stored < migration.version) migration.up(db);
+  }
 
   db.run(
     "INSERT INTO schema_meta (key, value) VALUES ('version', ?) " +
       "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-    [String(SCHEMA_VERSION)],
+    [String(targetVersion)],
   );
 }

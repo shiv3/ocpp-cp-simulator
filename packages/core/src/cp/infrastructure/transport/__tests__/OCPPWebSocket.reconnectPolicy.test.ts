@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OCPPWebSocket } from "../OCPPWebSocket";
-import { resolveReconnectPolicy } from "../ReconnectPolicy";
+import { resolveReconnectPolicy } from "../../../shared/ReconnectPolicy";
 import type { Logger } from "../../../shared/Logger";
 
 // #609: the reconnect loop follows the configured policy.

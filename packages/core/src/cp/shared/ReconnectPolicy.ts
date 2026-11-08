@@ -1,4 +1,4 @@
-import { MAX_TIMER_MS } from "../../shared/timers";
+import { MAX_TIMER_MS } from "./timers";
 
 /**
  * The reconnect policy of a charge point's WebSocket client (#609).

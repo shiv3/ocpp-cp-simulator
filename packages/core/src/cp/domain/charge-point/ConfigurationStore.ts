@@ -336,6 +336,15 @@ export class ConfigurationStore {
     return this.values.delete(name);
   }
 
+  /**
+   * Whether `SupportedFeatureProfiles` lists `SmartCharging` (#594); true when
+   * the key is absent.
+   */
+  smartChargingSupported(): boolean {
+    const profiles = this.getArray("SupportedFeatureProfiles");
+    return profiles === undefined || profiles.includes("SmartCharging");
+  }
+
   /** Canonical key `LocalAuthListEnabled`; default `true`. */
   localAuthListEnabled(): boolean {
     return this.getBoolean("LocalAuthListEnabled") ?? true;

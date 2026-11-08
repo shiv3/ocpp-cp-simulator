@@ -121,6 +121,41 @@ describe("transport.reconnect on the control plane (#609)", () => {
     }
   });
 
+  it("stores the transport settings next to the inbound validation mode", () => {
+    // Both columns share one INSERT: a missing `?` placeholder fails every
+    // cp.create under --state-db.
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      const first = new CPRegistry(new EventBus(), db);
+      first.create(
+        {
+          cpId: "CP-BOTH",
+          wsUrl: "ws://a/ocpp/",
+          connectors: 1,
+          vendor: "V",
+          model: "M",
+          basicAuth: null,
+          inboundValidation: "enforce",
+          transport: { reconnect: RECONNECT },
+        },
+        { seedDefault: false },
+      );
+      first.shutdownAll();
+
+      const second = new CPRegistry(new EventBus(), db);
+      try {
+        second.restoreFromDatabase();
+        const init = second.get("CP-BOTH")?.getInit();
+        expect(init?.inboundValidation).toBe("enforce");
+        expect(init?.transport).toEqual({ reconnect: RECONNECT });
+      } finally {
+        second.shutdownAll();
+      }
+    } finally {
+      db.close();
+    }
+  });
+
   it("drops a damaged stored value with the defaults instead of failing the restore", () => {
     const db = BunSqliteDatabase.open(":memory:");
     try {

@@ -120,11 +120,14 @@ export interface ChargePointEvents {
   // Smart-charging events (#469)
   /** A profile was installed on a connector or, with `connectorId` 0, on the
    *  station store. `replaced` is true when it updated a profile with the
-   *  same id in that scope. */
+   *  same id in that scope; `replacedIds` lists the ids of other profiles in
+   *  that scope it displaced because they had the same stackLevel and purpose
+   *  (1.6 SetChargingProfile, #594). */
   chargingProfileApplied: {
     connectorId: number;
     profile: ActiveChargingProfile;
     replaced: boolean;
+    replacedIds: number[];
     source: ChargingProfileSource;
   };
   /** At least one profile was removed from one scope. Never emitted for a

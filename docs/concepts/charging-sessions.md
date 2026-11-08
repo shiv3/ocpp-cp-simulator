@@ -26,7 +26,7 @@ related:
   - ../entities/cli.md
   - local-vs-remote-mode.md
   - local-authorization.md
-updated: 2026-11-05
+updated: 2026-11-08
 ---
 
 # Charging sessions
@@ -121,9 +121,10 @@ stops on it, so the stop already carries its cause.
 
 A CALLERROR answering a transaction-related message is not a failed start,
 on any version: a 2.0.1 / 2.1 TransactionEvent (`Started`, `Updated` or
-`Ended`; OCPP E13, #490), or an OCPP-J 1.6 StartTransaction.req,
+`Ended`; OCPP E13, #490), an OCPP-J 1.6 StartTransaction.req,
 StopTransaction.req or MeterValues.req of a transaction (Part 2 §3.7.1,
-#527). Both treat it as a failure to process the message: the station
+#527), or the same three over OCPP-S 1.6 answered with a SOAP Fault or an
+HTTP error status (#585). All of them treat it as a failure to process the message: the station
 resends the message and finally discards it, and leaves the transaction as
 it was: still running, or already stopped for a StopTransaction.req or an
 `Ended` event (see

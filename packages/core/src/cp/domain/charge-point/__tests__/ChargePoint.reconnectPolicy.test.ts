@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChargePoint } from "../ChargePoint";
 import { DefaultBootNotification } from "../../types/OcppTypes";
 import { V201_VARIABLE_TO_V16_KEY } from "../../../infrastructure/transport/v201/deviceModelMap";
-import type { ReconnectPolicy } from "../../../infrastructure/transport/ReconnectPolicy";
+import type { ReconnectPolicy } from "../../../shared/ReconnectPolicy";
 
 // #609: the policy reaches the transport, 2.x RetryBackOff* variables are
 // registered, and giving up is an event (and a timeline entry).
@@ -208,7 +208,7 @@ describe("ChargePoint reconnect policy (#609)", () => {
       const boot = vi.spyOn(cp, "boot").mockImplementation(() => {});
       let onOpen: (() => void) | undefined;
       vi.spyOn(cp["_webSocket"]!, "connect").mockImplementation((open) => {
-        onOpen = open;
+        onOpen = open ?? undefined;
       });
       const seen: unknown[] = [];
       cp.events.on("gaveUp", (e) => seen.push(e));

@@ -94,6 +94,7 @@ interface ChargePointRow {
   labels: string | null;
   behaviors: string | null;
   tx_updated_meter_values: number | null;
+  inbound_validation: string | null;
   transport_options: string | null;
 }
 
@@ -247,7 +248,7 @@ export class CPRegistry {
         "security_profile, authorization_key, cpo_name, " +
         "tls_ca_path, tls_cert_path, tls_key_path, " +
         "basic_auth, boot_notif, created_at, labels, behaviors, tx_updated_meter_values, " +
-        "transport_options " +
+        "inbound_validation, transport_options " +
         "FROM charge_points ORDER BY created_at ASC",
     );
     const restored: string[] = [];
@@ -315,6 +316,13 @@ export class CPRegistry {
         // #347: NULL — off, or a row older than the column — restores as off.
         ...(row.tx_updated_meter_values === 1
           ? { txUpdatedMeterValues: true }
+          : {}),
+        // #593: NULL, or a value this build does not know, restores as the
+        // default (warn).
+        ...(row.inbound_validation === "off" ||
+        row.inbound_validation === "warn" ||
+        row.inbound_validation === "enforce"
+          ? { inboundValidation: row.inbound_validation }
           : {}),
         // #609: NULL restores the built-in behaviour.
         ...restoreTransport(row),
@@ -978,8 +986,8 @@ export class CPRegistry {
         "security_profile, authorization_key, cpo_name, " +
         "tls_ca_path, tls_cert_path, tls_key_path, " +
         "basic_auth, boot_notif, created_at, labels, behaviors, tx_updated_meter_values, " +
-        "transport_options) " +
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+        "inbound_validation, transport_options) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
         "ON CONFLICT (cp_id) DO UPDATE SET " +
         "ws_url = excluded.ws_url, " +
         "supervision_urls = excluded.supervision_urls, " +
@@ -1003,6 +1011,7 @@ export class CPRegistry {
         "labels = excluded.labels, " +
         "behaviors = excluded.behaviors, " +
         "tx_updated_meter_values = excluded.tx_updated_meter_values, " +
+        "inbound_validation = excluded.inbound_validation, " +
         "transport_options = excluded.transport_options",
       [
         init.cpId,
@@ -1035,6 +1044,7 @@ export class CPRegistry {
             ? JSON.stringify(init.behaviors)
             : null,
         init.txUpdatedMeterValues ? 1 : null,
+        init.inboundValidation ?? null,
         init.transport ? JSON.stringify(init.transport) : null,
       ],
     );
@@ -1359,6 +1369,7 @@ function preserveOmittedInit(
     behaviors: next.behaviors ?? existing.behaviors,
     txUpdatedMeterValues:
       next.txUpdatedMeterValues ?? existing.txUpdatedMeterValues,
+    inboundValidation: next.inboundValidation ?? existing.inboundValidation,
     transport: next.transport ?? existing.transport,
   };
 }

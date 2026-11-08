@@ -1,4 +1,4 @@
-import type { ReconnectPolicy } from "./ReconnectPolicy";
+import type { ReconnectPolicy } from "../../shared/ReconnectPolicy";
 
 /**
  * Per-charge-point transport settings, kept in one object so the control

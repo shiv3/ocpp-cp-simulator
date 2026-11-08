@@ -1,8 +1,10 @@
+import { useTranslation } from "react-i18next";
 import React, { useCallback, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { WaitControlAction } from "../lib/waitControl";
+import { type MessageKey } from "@/i18n";
 
 /** Seconds the "+30 s" control adds to the parked wait's timeout. */
 export const WAIT_EXTENSION_SECONDS = 30;
@@ -17,23 +19,23 @@ export interface WaitControlsProps {
 
 const CONTROLS: ReadonlyArray<{
   action: WaitControlAction;
-  label: string;
-  title: string;
+  label: MessageKey;
+  title: MessageKey;
 }> = [
   {
     action: "extend",
-    label: `+${WAIT_EXTENSION_SECONDS} s`,
-    title: `Add ${WAIT_EXTENSION_SECONDS} seconds to the timeout`,
+    label: "consoleShared.waitControls.extendLabel",
+    title: "consoleShared.waitControls.extendTitle",
   },
   {
     action: "retry",
-    label: "Retry",
-    title: "Re-arm the wait with its full timeout",
+    label: "consoleShared.waitControls.retry",
+    title: "consoleShared.waitControls.retryTitle",
   },
   {
     action: "continue",
-    label: "Continue",
-    title: "Move on to the next step without the awaited event",
+    label: "consoleShared.waitControls.continue",
+    title: "consoleShared.waitControls.continueTitle",
   },
 ];
 
@@ -49,6 +51,7 @@ const WaitControls: React.FC<WaitControlsProps> = ({
   onControl,
   className,
 }) => {
+  const { t } = useTranslation();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -81,11 +84,11 @@ const WaitControls: React.FC<WaitControlsProps> = ({
               variant="outline"
               size="sm"
               disabled={pending}
-              title={control.title}
+              title={t(control.title, { seconds: WAIT_EXTENSION_SECONDS })}
               onClick={() => void send(control.action)}
               className="h-7 text-xs"
             >
-              {control.label}
+              {t(control.label, { seconds: WAIT_EXTENSION_SECONDS })}
             </Button>
           ),
         )}

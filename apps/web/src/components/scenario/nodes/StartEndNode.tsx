@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, { memo } from "react";
 import type { NodeProps } from "@xyflow/react";
 import { Handle, Position, type Node } from "@xyflow/react";
@@ -15,6 +16,7 @@ const StartEndNode: React.FC<StartEndNodeProps> = ({
   selected,
   nodeType,
 }) => {
+  const { t } = useTranslation();
   const isStart = nodeType === "start";
   const bgColor = isStart
     ? "bg-green-100 dark:bg-green-900"
@@ -31,8 +33,10 @@ const StartEndNode: React.FC<StartEndNodeProps> = ({
   const triggerOn = startData?.triggerOn ?? "connect";
   const triggerLabel =
     triggerOn === "status"
-      ? `on ${startData?.targetStatus ?? "<status>"}`
-      : "on connect";
+      ? t("scenarioNodes.startEnd.onStatus", {
+          status: startData?.targetStatus ?? "<status>",
+        })
+      : t("scenarioNodes.startEnd.onConnect");
 
   return (
     <div
@@ -45,7 +49,9 @@ const StartEndNode: React.FC<StartEndNodeProps> = ({
       )}
 
       <div className={`text-center font-bold ${textColor}`}>
-        {isStart ? "🟢 Start" : "🔴 End"}
+        {isStart
+          ? t("scenarioNodes.startEnd.start")
+          : t("scenarioNodes.startEnd.end")}
       </div>
       {isStart && (
         <div className={`text-center text-xs mt-0.5 ${textColor}`}>

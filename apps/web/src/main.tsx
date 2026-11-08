@@ -10,11 +10,18 @@ import "@fontsource/ibm-plex-mono/400.css";
 import "@fontsource/ibm-plex-mono/500.css";
 import "./index.css";
 import { DataProvider } from "./data/providers/DataProvider";
+import { i18nReady } from "./i18n";
 
-ReactDOM.createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <DataProvider>
-      <App />
-    </DataProvider>
-  </React.StrictMode>,
-);
+// Wait for the saved language (English is bundled, so this is immediate for
+// the default) so the first paint is already translated.
+void i18nReady
+  .catch(() => undefined) // a failed chunk load falls back to English
+  .then(() =>
+    ReactDOM.createRoot(document.getElementById("root")!).render(
+      <React.StrictMode>
+        <DataProvider>
+          <App />
+        </DataProvider>
+      </React.StrictMode>,
+    ),
+  );

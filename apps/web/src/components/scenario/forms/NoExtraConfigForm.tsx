@@ -1,7 +1,9 @@
+import { useTranslation } from "react-i18next";
 export default function NoExtraConfigForm() {
+  const { t } = useTranslation();
   return (
     <div className="text-sm text-muted">
-      This node type does not have configurable properties.
+      {t("scenarioEditor.noExtraConfig")}
     </div>
   );
 }

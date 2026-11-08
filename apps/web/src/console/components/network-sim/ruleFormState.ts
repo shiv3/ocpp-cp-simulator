@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 import {
   type NetworkSimLayerConfig,
   type NetworkSimRule,
@@ -181,11 +182,11 @@ export function formToLayerConfig(
   // Parse seed
   let seed: number | undefined;
   if (form.seed === "") {
-    errors["seed"] = "Seed is required";
+    errors["seed"] = t("consoleShared.networkSim.err.seedRequired");
   } else {
     const parsed = Number(form.seed);
     if (!Number.isInteger(parsed) || parsed < 0 || parsed > 4_294_967_295) {
-      errors["seed"] = "Seed must be an integer from 0 to 4,294,967,295";
+      errors["seed"] = t("consoleShared.networkSim.err.seedInvalid");
     } else {
       seed = parsed;
     }
@@ -196,12 +197,17 @@ export function formToLayerConfig(
   for (let i = 0; i < form.rules.length; i += 1) {
     const rule = form.rules[i];
     if (!rule.id.trim()) {
-      errors[`rules.${i}.id`] = "Rule ID cannot be empty";
+      errors[`rules.${i}.id`] = t("consoleShared.networkSim.err.ruleIdEmpty");
     } else if (rule.id.length > NETWORK_SIM_LIMITS.maxIdLength) {
-      errors[`rules.${i}.id`] =
-        `Rule ID must be at most ${NETWORK_SIM_LIMITS.maxIdLength} characters`;
+      errors[`rules.${i}.id`] = t(
+        "consoleShared.networkSim.err.ruleIdTooLong",
+        { max: NETWORK_SIM_LIMITS.maxIdLength },
+      );
     } else if (seenIds.has(rule.id)) {
-      errors[`rules.${i}.id`] = `Duplicate rule ID: "${rule.id}"`;
+      errors[`rules.${i}.id`] = t(
+        "consoleShared.networkSim.err.ruleIdDuplicate",
+        { id: rule.id },
+      );
     } else {
       seenIds.add(rule.id);
     }
@@ -209,8 +215,9 @@ export function formToLayerConfig(
 
   // Check rule count
   if (form.rules.length > NETWORK_SIM_LIMITS.maxRulesPerLayer) {
-    errors["rules"] =
-      `At most ${NETWORK_SIM_LIMITS.maxRulesPerLayer} rules are allowed`;
+    errors["rules"] = t("consoleShared.networkSim.err.tooManyRules", {
+      max: NETWORK_SIM_LIMITS.maxRulesPerLayer,
+    });
   }
 
   // Validate per-rule fields
@@ -220,14 +227,18 @@ export function formToLayerConfig(
 
     if (rule.type === "latency") {
       if (!rule.delayMs && rule.delayMs !== 0) {
-        errors[`${prefix}.delayMs`] = "Delay is required";
+        errors[`${prefix}.delayMs`] = t(
+          "consoleShared.networkSim.err.delayRequired",
+        );
       } else if (
         !Number.isInteger(rule.delayMs) ||
         rule.delayMs < 0 ||
         rule.delayMs > NETWORK_SIM_LIMITS.maxDelayMs
       ) {
-        errors[`${prefix}.delayMs`] =
-          `Delay must be 0-${NETWORK_SIM_LIMITS.maxDelayMs}ms`;
+        errors[`${prefix}.delayMs`] = t(
+          "consoleShared.networkSim.err.delayRange",
+          { max: NETWORK_SIM_LIMITS.maxDelayMs },
+        );
       }
 
       if (rule.jitterMs !== undefined) {
@@ -236,8 +247,10 @@ export function formToLayerConfig(
           rule.jitterMs < 0 ||
           rule.jitterMs > NETWORK_SIM_LIMITS.maxDelayMs
         ) {
-          errors[`${prefix}.jitterMs`] =
-            `Jitter must be 0-${NETWORK_SIM_LIMITS.maxDelayMs}ms`;
+          errors[`${prefix}.jitterMs`] = t(
+            "consoleShared.networkSim.err.jitterRange",
+            { max: NETWORK_SIM_LIMITS.maxDelayMs },
+          );
         }
       }
 
@@ -249,15 +262,19 @@ export function formToLayerConfig(
 
         if (actionList.length > 0) {
           if (actionList.length > NETWORK_SIM_LIMITS.maxActions) {
-            errors[`${prefix}.actions`] =
-              `At most ${NETWORK_SIM_LIMITS.maxActions} actions are allowed`;
+            errors[`${prefix}.actions`] = t(
+              "consoleShared.networkSim.err.tooManyActions",
+              { max: NETWORK_SIM_LIMITS.maxActions },
+            );
           }
 
           for (let j = 0; j < actionList.length; j += 1) {
             const action = actionList[j];
             if (action.length > NETWORK_SIM_LIMITS.maxActionLength) {
-              errors[`${prefix}.actions`] =
-                `Each action must be at most ${NETWORK_SIM_LIMITS.maxActionLength} characters`;
+              errors[`${prefix}.actions`] = t(
+                "consoleShared.networkSim.err.actionTooLong",
+                { max: NETWORK_SIM_LIMITS.maxActionLength },
+              );
               break;
             }
           }
@@ -265,24 +282,32 @@ export function formToLayerConfig(
       }
     } else if (rule.type === "manual-disconnect") {
       if (!rule.reconnectDelayMs && rule.reconnectDelayMs !== 0) {
-        errors[`${prefix}.reconnectDelayMs`] = "Reconnect delay is required";
+        errors[`${prefix}.reconnectDelayMs`] = t(
+          "consoleShared.networkSim.err.reconnectRequired",
+        );
       } else if (
         !Number.isInteger(rule.reconnectDelayMs) ||
         rule.reconnectDelayMs < 0 ||
         rule.reconnectDelayMs > NETWORK_SIM_LIMITS.maxDelayMs
       ) {
-        errors[`${prefix}.reconnectDelayMs`] =
-          `Reconnect delay must be 0-${NETWORK_SIM_LIMITS.maxDelayMs}ms`;
+        errors[`${prefix}.reconnectDelayMs`] = t(
+          "consoleShared.networkSim.err.reconnectRange",
+          { max: NETWORK_SIM_LIMITS.maxDelayMs },
+        );
       }
     } else if (rule.type === "periodic-disconnect") {
       if (!rule.intervalMs && rule.intervalMs !== 0) {
-        errors[`${prefix}.intervalMs`] = "Interval is required";
+        errors[`${prefix}.intervalMs`] = t(
+          "consoleShared.networkSim.err.intervalRequired",
+        );
       } else if (
         !Number.isInteger(rule.intervalMs) ||
         rule.intervalMs < 1 ||
         rule.intervalMs > 2_147_483_647
       ) {
-        errors[`${prefix}.intervalMs`] = "Interval must be 1-2,147,483,647ms";
+        errors[`${prefix}.intervalMs`] = t(
+          "consoleShared.networkSim.err.intervalRange",
+        );
       }
 
       if (rule.intervalJitterMs !== undefined) {
@@ -291,20 +316,25 @@ export function formToLayerConfig(
           rule.intervalJitterMs < 0 ||
           rule.intervalJitterMs > 2_147_483_647
         ) {
-          errors[`${prefix}.intervalJitterMs`] =
-            "Interval jitter must be 0-2,147,483,647ms";
+          errors[`${prefix}.intervalJitterMs`] = t(
+            "consoleShared.networkSim.err.intervalJitterRange",
+          );
         }
       }
 
       if (!rule.reconnectDelayMs && rule.reconnectDelayMs !== 0) {
-        errors[`${prefix}.reconnectDelayMs`] = "Reconnect delay is required";
+        errors[`${prefix}.reconnectDelayMs`] = t(
+          "consoleShared.networkSim.err.reconnectRequired",
+        );
       } else if (
         !Number.isInteger(rule.reconnectDelayMs) ||
         rule.reconnectDelayMs < 0 ||
         rule.reconnectDelayMs > NETWORK_SIM_LIMITS.maxDelayMs
       ) {
-        errors[`${prefix}.reconnectDelayMs`] =
-          `Reconnect delay must be 0-${NETWORK_SIM_LIMITS.maxDelayMs}ms`;
+        errors[`${prefix}.reconnectDelayMs`] = t(
+          "consoleShared.networkSim.err.reconnectRange",
+          { max: NETWORK_SIM_LIMITS.maxDelayMs },
+        );
       }
     }
   }
@@ -453,12 +483,19 @@ export function formToCpLayer(
   const seenIds = new Set<string>();
   for (const { rule, index } of editableRulesWithIndex) {
     if (!rule.id.trim()) {
-      errors[`rules.${index}.id`] = "Rule ID cannot be empty";
+      errors[`rules.${index}.id`] = t(
+        "consoleShared.networkSim.err.ruleIdEmpty",
+      );
     } else if (rule.id.length > NETWORK_SIM_LIMITS.maxIdLength) {
-      errors[`rules.${index}.id`] =
-        `Rule ID must be at most ${NETWORK_SIM_LIMITS.maxIdLength} characters`;
+      errors[`rules.${index}.id`] = t(
+        "consoleShared.networkSim.err.ruleIdTooLong",
+        { max: NETWORK_SIM_LIMITS.maxIdLength },
+      );
     } else if (seenIds.has(rule.id)) {
-      errors[`rules.${index}.id`] = `Duplicate rule ID: "${rule.id}"`;
+      errors[`rules.${index}.id`] = t(
+        "consoleShared.networkSim.err.ruleIdDuplicate",
+        { id: rule.id },
+      );
     } else {
       seenIds.add(rule.id);
     }
@@ -466,8 +503,9 @@ export function formToCpLayer(
 
   // Check rule count (editable only)
   if (editableRulesWithIndex.length > NETWORK_SIM_LIMITS.maxRulesPerLayer) {
-    errors["rules"] =
-      `At most ${NETWORK_SIM_LIMITS.maxRulesPerLayer} rules are allowed`;
+    errors["rules"] = t("consoleShared.networkSim.err.tooManyRules", {
+      max: NETWORK_SIM_LIMITS.maxRulesPerLayer,
+    });
   }
 
   // Validate per-rule fields (only for editable rules)
@@ -476,14 +514,18 @@ export function formToCpLayer(
 
     if (rule.type === "latency") {
       if (!rule.delayMs && rule.delayMs !== 0) {
-        errors[`${prefix}.delayMs`] = "Delay is required";
+        errors[`${prefix}.delayMs`] = t(
+          "consoleShared.networkSim.err.delayRequired",
+        );
       } else if (
         !Number.isInteger(rule.delayMs) ||
         rule.delayMs < 0 ||
         rule.delayMs > NETWORK_SIM_LIMITS.maxDelayMs
       ) {
-        errors[`${prefix}.delayMs`] =
-          `Delay must be 0-${NETWORK_SIM_LIMITS.maxDelayMs}ms`;
+        errors[`${prefix}.delayMs`] = t(
+          "consoleShared.networkSim.err.delayRange",
+          { max: NETWORK_SIM_LIMITS.maxDelayMs },
+        );
       }
 
       if (rule.jitterMs !== undefined) {
@@ -492,8 +534,10 @@ export function formToCpLayer(
           rule.jitterMs < 0 ||
           rule.jitterMs > NETWORK_SIM_LIMITS.maxDelayMs
         ) {
-          errors[`${prefix}.jitterMs`] =
-            `Jitter must be 0-${NETWORK_SIM_LIMITS.maxDelayMs}ms`;
+          errors[`${prefix}.jitterMs`] = t(
+            "consoleShared.networkSim.err.jitterRange",
+            { max: NETWORK_SIM_LIMITS.maxDelayMs },
+          );
         }
       }
 
@@ -505,15 +549,19 @@ export function formToCpLayer(
 
         if (actionList.length > 0) {
           if (actionList.length > NETWORK_SIM_LIMITS.maxActions) {
-            errors[`${prefix}.actions`] =
-              `At most ${NETWORK_SIM_LIMITS.maxActions} actions are allowed`;
+            errors[`${prefix}.actions`] = t(
+              "consoleShared.networkSim.err.tooManyActions",
+              { max: NETWORK_SIM_LIMITS.maxActions },
+            );
           }
 
           for (let j = 0; j < actionList.length; j += 1) {
             const action = actionList[j];
             if (action.length > NETWORK_SIM_LIMITS.maxActionLength) {
-              errors[`${prefix}.actions`] =
-                `Each action must be at most ${NETWORK_SIM_LIMITS.maxActionLength} characters`;
+              errors[`${prefix}.actions`] = t(
+                "consoleShared.networkSim.err.actionTooLong",
+                { max: NETWORK_SIM_LIMITS.maxActionLength },
+              );
               break;
             }
           }
@@ -521,24 +569,32 @@ export function formToCpLayer(
       }
     } else if (rule.type === "manual-disconnect") {
       if (!rule.reconnectDelayMs && rule.reconnectDelayMs !== 0) {
-        errors[`${prefix}.reconnectDelayMs`] = "Reconnect delay is required";
+        errors[`${prefix}.reconnectDelayMs`] = t(
+          "consoleShared.networkSim.err.reconnectRequired",
+        );
       } else if (
         !Number.isInteger(rule.reconnectDelayMs) ||
         rule.reconnectDelayMs < 0 ||
         rule.reconnectDelayMs > NETWORK_SIM_LIMITS.maxDelayMs
       ) {
-        errors[`${prefix}.reconnectDelayMs`] =
-          `Reconnect delay must be 0-${NETWORK_SIM_LIMITS.maxDelayMs}ms`;
+        errors[`${prefix}.reconnectDelayMs`] = t(
+          "consoleShared.networkSim.err.reconnectRange",
+          { max: NETWORK_SIM_LIMITS.maxDelayMs },
+        );
       }
     } else if (rule.type === "periodic-disconnect") {
       if (!rule.intervalMs && rule.intervalMs !== 0) {
-        errors[`${prefix}.intervalMs`] = "Interval is required";
+        errors[`${prefix}.intervalMs`] = t(
+          "consoleShared.networkSim.err.intervalRequired",
+        );
       } else if (
         !Number.isInteger(rule.intervalMs) ||
         rule.intervalMs < 1 ||
         rule.intervalMs > 2_147_483_647
       ) {
-        errors[`${prefix}.intervalMs`] = "Interval must be 1-2,147,483,647ms";
+        errors[`${prefix}.intervalMs`] = t(
+          "consoleShared.networkSim.err.intervalRange",
+        );
       }
 
       if (rule.intervalJitterMs !== undefined) {
@@ -547,20 +603,25 @@ export function formToCpLayer(
           rule.intervalJitterMs < 0 ||
           rule.intervalJitterMs > 2_147_483_647
         ) {
-          errors[`${prefix}.intervalJitterMs`] =
-            "Interval jitter must be 0-2,147,483,647ms";
+          errors[`${prefix}.intervalJitterMs`] = t(
+            "consoleShared.networkSim.err.intervalJitterRange",
+          );
         }
       }
 
       if (!rule.reconnectDelayMs && rule.reconnectDelayMs !== 0) {
-        errors[`${prefix}.reconnectDelayMs`] = "Reconnect delay is required";
+        errors[`${prefix}.reconnectDelayMs`] = t(
+          "consoleShared.networkSim.err.reconnectRequired",
+        );
       } else if (
         !Number.isInteger(rule.reconnectDelayMs) ||
         rule.reconnectDelayMs < 0 ||
         rule.reconnectDelayMs > NETWORK_SIM_LIMITS.maxDelayMs
       ) {
-        errors[`${prefix}.reconnectDelayMs`] =
-          `Reconnect delay must be 0-${NETWORK_SIM_LIMITS.maxDelayMs}ms`;
+        errors[`${prefix}.reconnectDelayMs`] = t(
+          "consoleShared.networkSim.err.reconnectRange",
+          { max: NETWORK_SIM_LIMITS.maxDelayMs },
+        );
       }
     }
   }

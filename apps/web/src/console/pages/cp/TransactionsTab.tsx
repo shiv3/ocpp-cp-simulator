@@ -1,6 +1,8 @@
+import { useTranslation } from "react-i18next";
 import React from "react";
 
 import { cn } from "@/lib/utils";
+import type { MessageKey } from "@/i18n";
 import { formatEnergyKwh, formatSessionDuration } from "@/lib/connectorFormat";
 import type { ChargingSessionOutcome } from "@ocpp-cp-sim/core/cp/domain/session/ChargingSession";
 
@@ -18,6 +20,13 @@ const OUTCOME_DOT: Record<ChargingSessionOutcome, string> = {
   failed: "bg-cx-rose",
 };
 
+const OUTCOME_KEY: Record<ChargingSessionOutcome, MessageKey> = {
+  active: "cp.transactions.outcome.active",
+  completed: "cp.transactions.outcome.completed",
+  interrupted: "cp.transactions.outcome.interrupted",
+  failed: "cp.transactions.outcome.failed",
+};
+
 const DASH = "—";
 
 /**
@@ -27,19 +36,18 @@ const DASH = "—";
  * as a dash, never a guess.
  */
 const TransactionsTab: React.FC<TransactionsTabProps> = ({ cpId }) => {
+  const { t } = useTranslation();
   const { page, isLoading, error } = useChargingSessions(cpId);
 
   if (error) {
-    return (
-      <EmptyState title="Could not load the charging sessions" hint={error} />
-    );
+    return <EmptyState title={t("cp.transactions.loadFailed")} hint={error} />;
   }
 
   if (!isLoading && page.sessions.length === 0) {
     return (
       <EmptyState
-        title="No charging session yet"
-        hint="Start a transaction on a connector to see it recorded here."
+        title={t("cp.transactions.empty")}
+        hint={t("cp.transactions.emptyHint")}
       />
     );
   }
@@ -49,14 +57,28 @@ const TransactionsTab: React.FC<TransactionsTabProps> = ({ cpId }) => {
       <table className="w-full text-left text-sm">
         <thead className="bg-cx-sub text-xs uppercase tracking-wide text-cx-muted">
           <tr>
-            <th className="px-3 py-2 font-medium">Started</th>
-            <th className="px-3 py-2 font-medium">Connector</th>
-            <th className="px-3 py-2 font-medium">Transaction</th>
+            <th className="px-3 py-2 font-medium">
+              {t("cp.transactions.started")}
+            </th>
+            <th className="px-3 py-2 font-medium">
+              {t("cp.transactions.connector")}
+            </th>
+            <th className="px-3 py-2 font-medium">
+              {t("cp.transactions.transaction")}
+            </th>
             <th className="px-3 py-2 font-medium">idTag</th>
-            <th className="px-3 py-2 font-medium">Duration</th>
-            <th className="px-3 py-2 font-medium">Energy</th>
-            <th className="px-3 py-2 font-medium">Stop reason</th>
-            <th className="px-3 py-2 font-medium">Outcome</th>
+            <th className="px-3 py-2 font-medium">
+              {t("cp.transactions.duration")}
+            </th>
+            <th className="px-3 py-2 font-medium">
+              {t("cp.transactions.energy")}
+            </th>
+            <th className="px-3 py-2 font-medium">
+              {t("cp.transactions.stopReason")}
+            </th>
+            <th className="px-3 py-2 font-medium">
+              {t("cp.transactions.outcome")}
+            </th>
           </tr>
         </thead>
         <tbody className="divide-y divide-cx-border">
@@ -100,7 +122,9 @@ const TransactionsTab: React.FC<TransactionsTabProps> = ({ cpId }) => {
                   className="inline-flex items-center gap-1.5 whitespace-nowrap text-[12.5px] font-medium text-cx-fg2"
                   title={
                     session.authorizationStatus
-                      ? `CSMS answered ${session.authorizationStatus}`
+                      ? t("cp.transactions.csmsAnswered", {
+                          status: session.authorizationStatus,
+                        })
                       : undefined
                   }
                 >
@@ -111,7 +135,7 @@ const TransactionsTab: React.FC<TransactionsTabProps> = ({ cpId }) => {
                       OUTCOME_DOT[session.outcome],
                     )}
                   />
-                  {session.outcome}
+                  {t(OUTCOME_KEY[session.outcome])}
                 </span>
               </td>
             </tr>

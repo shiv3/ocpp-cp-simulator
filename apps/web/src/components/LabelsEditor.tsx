@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React from "react";
 import { Plus, X } from "lucide-react";
 
@@ -16,6 +17,7 @@ export interface LabelsEditorProps {
  * Used by the Add form and by the charge point page's Labels card (#471).
  */
 const LabelsEditor: React.FC<LabelsEditorProps> = ({ rows, onChange }) => {
+  const { t } = useTranslation();
   const setRow = (index: number, patch: Partial<LabelRow>) =>
     onChange(rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
   return (
@@ -24,8 +26,8 @@ const LabelsEditor: React.FC<LabelsEditorProps> = ({ rows, onChange }) => {
         <div key={index} className="flex items-center gap-2">
           <Input
             type="text"
-            aria-label={`Label ${index + 1} key`}
-            placeholder="key, e.g. site"
+            aria-label={t("settings.labels.keyAria", { index: index + 1 })}
+            placeholder={t("settings.labels.keyPlaceholder")}
             value={row.key}
             onChange={(e) => setRow(index, { key: e.target.value })}
             className="font-mono"
@@ -33,8 +35,8 @@ const LabelsEditor: React.FC<LabelsEditorProps> = ({ rows, onChange }) => {
           />
           <Input
             type="text"
-            aria-label={`Label ${index + 1} value`}
-            placeholder="value"
+            aria-label={t("settings.labels.valueAria", { index: index + 1 })}
+            placeholder={t("settings.labels.valuePlaceholder")}
             value={row.value}
             onChange={(e) => setRow(index, { value: e.target.value })}
             spellCheck={false}
@@ -44,7 +46,7 @@ const LabelsEditor: React.FC<LabelsEditorProps> = ({ rows, onChange }) => {
             variant="ghost"
             size="sm"
             className="shrink-0"
-            aria-label={`Remove label ${index + 1}`}
+            aria-label={t("settings.labels.removeAria", { index: index + 1 })}
             onClick={() => onChange(rows.filter((_, i) => i !== index))}
           >
             <X className="h-4 w-4" />
@@ -58,12 +60,9 @@ const LabelsEditor: React.FC<LabelsEditorProps> = ({ rows, onChange }) => {
         onClick={() => onChange([...rows, { key: "", value: "" }])}
       >
         <Plus className="mr-1 h-4 w-4" />
-        Add label
+        {t("settings.labels.add")}
       </Button>
-      <p className="mt-1 text-xs text-cx-muted">
-        Group charge points by site, tenant, environment… The dashboard filter
-        and the cp.list API select on them.
-      </p>
+      <p className="mt-1 text-xs text-cx-muted">{t("settings.labels.help")}</p>
     </div>
   );
 };

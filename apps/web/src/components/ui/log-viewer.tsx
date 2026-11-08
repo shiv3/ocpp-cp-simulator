@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, SlidersHorizontal } from "lucide-react";
 
@@ -165,6 +166,7 @@ const FilterGroup: React.FC<{
   /** Tailwind `max-h-*` of the option list. */
   listClassName?: string;
 }> = ({ title, options, emptyText, listClassName = "max-h-48" }) => {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(true);
   const [search, setSearch] = useState("");
   const query = search.toLowerCase();
@@ -190,8 +192,8 @@ const FilterGroup: React.FC<{
       {expanded && (
         <div className="space-y-2 px-3 pb-3">
           <Input
-            placeholder="Filter values"
-            aria-label={`Filter ${title} values`}
+            placeholder={t("common.log.filterValues")}
+            aria-label={t("common.log.filterGroupValues", { title })}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="h-7 text-xs"
@@ -251,6 +253,7 @@ export function LogViewer({
   defaultFiltersOpen = true,
   className,
 }: LogViewerProps) {
+  const { t } = useTranslation();
   const filtersId = useId();
   const [filtersOpen, setFiltersOpen] = useState(defaultFiltersOpen);
   const [filter, setFilter] = useState("");
@@ -463,10 +466,10 @@ export function LogViewer({
       key: value === null ? "none" : `c${value}`,
       label:
         value === null
-          ? "(none)"
+          ? t("common.log.none")
           : value === 0
-            ? "0 (charge point)"
-            : `Connector ${value}`,
+            ? t("common.log.chargePointZero")
+            : t("common.log.connectorN", { id: value }),
       count: stats.connectorCounts.get(value) ?? 0,
       checked: logConnectorFilter.includes(value),
       onToggle: () => setLogConnectorFilter(toggled(logConnectorFilter, value)),
@@ -476,7 +479,12 @@ export function LogViewer({
     .sort((a, b) => (a === null ? 1 : b === null ? -1 : a.localeCompare(b)))
     .map((value) => ({
       key: value ?? "none",
-      label: value === null ? "(none)" : value === "sent" ? "Sent" : "Received",
+      label:
+        value === null
+          ? t("common.log.none")
+          : value === "sent"
+            ? t("common.log.sent")
+            : t("common.log.received"),
       count: stats.directionCounts.get(value) ?? 0,
       checked: logDirectionFilter.includes(value),
       dot: value === null ? undefined : DIRECTION_DOT[value],
@@ -494,7 +502,7 @@ export function LogViewer({
     )
     .map((value) => ({
       key: value ?? "none",
-      label: value ?? "(none)",
+      label: value ?? t("common.log.none"),
       count: stats.actionCounts.get(value) ?? 0,
       checked: logActionFilter.includes(value),
       onToggle: () => setLogActionFilter(toggled(logActionFilter, value)),
@@ -527,32 +535,35 @@ export function LogViewer({
         className="flex w-64 shrink-0 flex-col border-r border-cx-border bg-cx-side"
       >
         <div className="border-b border-cx-border px-3 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-cx-muted">
-          Filters
+          {t("common.log.filters")}
         </div>
         <div className="flex-1 overflow-y-auto">
           {hasCp && (
             <FilterGroup
-              title="Charge point"
+              title={t("common.log.chargePoint")}
               options={cpOptions}
-              emptyText="No charge points yet"
+              emptyText={t("common.log.noChargePoints")}
             />
           )}
-          <FilterGroup title="Level" options={levelOptions} />
+          <FilterGroup title={t("common.log.level")} options={levelOptions} />
           <FilterGroup
-            title="Type"
+            title={t("common.log.type")}
             options={typeOptions}
             listClassName="max-h-64"
           />
           <FilterGroup
-            title="Connector"
+            title={t("common.log.connector")}
             options={connectorOptions}
-            emptyText="No connector references yet"
+            emptyText={t("common.log.noConnectors")}
           />
-          <FilterGroup title="Direction" options={directionOptions} />
           <FilterGroup
-            title="Action"
+            title={t("common.log.direction")}
+            options={directionOptions}
+          />
+          <FilterGroup
+            title={t("common.log.action")}
             options={actionOptions}
-            emptyText="No OCPP actions parsed yet"
+            emptyText={t("common.log.noActions")}
             listClassName="max-h-64"
           />
         </div>
@@ -575,22 +586,27 @@ export function LogViewer({
               variant="outline"
               aria-pressed={filtersOpen}
               aria-controls={filtersId}
-              aria-label="Filters"
-              title="Show or hide the filters"
+              aria-label={t("common.log.filters")}
+              title={t("common.log.filtersToggleTitle")}
               onClick={() => setFiltersOpen((open) => !open)}
               className={cn(filtersOpen && "bg-cx-sub text-cx-fg")}
             >
               <SlidersHorizontal className="h-3.5 w-3.5" />
-              Filters
+              {t("common.log.filters")}
               {!filtersOpen && activeFilterGroups > 0 && (
                 <span className="rounded-full bg-cx-accent px-1.5 text-[10.5px] leading-4 text-white">
                   {activeFilterGroups}
                 </span>
               )}
             </Button>
-            <h3 className="text-[13px] font-semibold text-cx-fg">Logs</h3>
+            <h3 className="text-[13px] font-semibold text-cx-fg">
+              {t("common.log.logs")}
+            </h3>
             <span className="font-mono text-[11.5px] text-cx-muted">
-              {logs.length} total / {filteredLogs.length} filtered
+              {t("common.log.counts", {
+                total: logs.length,
+                filtered: filteredLogs.length,
+              })}
             </span>
           </div>
           <div
@@ -603,7 +619,7 @@ export function LogViewer({
                 checked={autoScroll}
                 onChange={(e) => setAutoScroll(e.target.checked)}
               />
-              Auto-scroll
+              {t("common.log.autoScroll")}
             </label>
             {onDownload && (
               <Button
@@ -611,9 +627,9 @@ export function LogViewer({
                 size="sm"
                 variant="outline"
                 onClick={onDownload}
-                title="Download every persisted log row as a JSON Lines file."
+                title={t("common.log.downloadTitle")}
               >
-                Download
+                {t("common.log.download")}
               </Button>
             )}
             {onClear && (
@@ -623,18 +639,18 @@ export function LogViewer({
                   size="sm"
                   variant="outline"
                   onClick={() => onClear("screen")}
-                  title="Hide the currently-displayed log lines. Persisted history stays."
+                  title={t("common.log.clearScreenTitle")}
                 >
-                  Clear screen
+                  {t("common.log.clearScreen")}
                 </Button>
                 <Button
                   type="button"
                   size="sm"
                   variant="destructive"
                   onClick={() => onClear("all")}
-                  title="Hide the displayed lines AND delete the persisted log rows."
+                  title={t("common.log.clearAllTitle")}
                 >
-                  Clear screen + DB
+                  {t("common.log.clearAll")}
                 </Button>
               </>
             )}
@@ -644,7 +660,7 @@ export function LogViewer({
         {/* Search */}
         <div className="border-b border-cx-border p-3">
           <Input
-            placeholder="Search in messages..."
+            placeholder={t("common.log.search")}
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             className="w-full"
@@ -661,17 +677,29 @@ export function LogViewer({
             <thead className="sticky top-0 z-10 border-b border-cx-border bg-cx-card">
               <tr>
                 <th className="h-9 w-8 px-2">
-                  <span className="sr-only">Details</span>
+                  <span className="sr-only">{t("common.log.details")}</span>
                 </th>
-                <th className={cn(TH_CLASS, "w-[110px]")}>Timestamp</th>
+                <th className={cn(TH_CLASS, "w-[110px]")}>
+                  {t("common.log.timestamp")}
+                </th>
                 {hasCp && (
-                  <th className={cn(TH_CLASS, "w-[120px]")}>Charge point</th>
+                  <th className={cn(TH_CLASS, "w-[120px]")}>
+                    {t("common.log.chargePoint")}
+                  </th>
                 )}
-                <th className={cn(TH_CLASS, "w-[90px]")}>Level</th>
-                <th className={cn(TH_CLASS, "w-[140px]")}>Type</th>
-                <th className={cn(TH_CLASS, "w-[110px]")}>Direction</th>
-                <th className={cn(TH_CLASS, "w-[180px]")}>Action</th>
-                <th className={TH_CLASS}>Message</th>
+                <th className={cn(TH_CLASS, "w-[90px]")}>
+                  {t("common.log.level")}
+                </th>
+                <th className={cn(TH_CLASS, "w-[140px]")}>
+                  {t("common.log.type")}
+                </th>
+                <th className={cn(TH_CLASS, "w-[110px]")}>
+                  {t("common.log.direction")}
+                </th>
+                <th className={cn(TH_CLASS, "w-[180px]")}>
+                  {t("common.log.action")}
+                </th>
+                <th className={TH_CLASS}>{t("common.log.message")}</th>
               </tr>
             </thead>
             <tbody>
@@ -682,8 +710,8 @@ export function LogViewer({
                     className="px-2 py-8 text-center text-cx-muted"
                   >
                     {logs.length === 0
-                      ? "No logs yet"
-                      : "No logs match the current filters"}
+                      ? t("common.log.noLogs")
+                      : t("common.log.noMatch")}
                   </td>
                 </tr>
               ) : (
@@ -698,7 +726,11 @@ export function LogViewer({
                           <button
                             type="button"
                             aria-expanded={open}
-                            aria-label={open ? "Hide details" : "Show details"}
+                            aria-label={
+                              open
+                                ? t("common.log.hideDetails")
+                                : t("common.log.showDetails")
+                            }
                             onClick={() => toggleExpanded(id)}
                             className="rounded p-0.5 text-cx-faint hover:bg-cx-sub hover:text-cx-fg2"
                           >
@@ -755,8 +787,8 @@ export function LogViewer({
                                 )}
                               />
                               {ocppInfo.direction === "sent"
-                                ? "→ Sent"
-                                : "← Received"}
+                                ? t("common.log.sentArrow")
+                                : t("common.log.receivedArrow")}
                             </span>
                           ) : (
                             <span className="text-cx-faint">—</span>

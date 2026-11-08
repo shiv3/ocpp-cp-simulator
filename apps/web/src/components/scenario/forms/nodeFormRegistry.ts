@@ -33,6 +33,7 @@ import {
   type UnlockOutcomeNodeData,
 } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
 import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import type { MessageKey } from "../../../i18n";
 import type { CurvePoint } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
 import CancelReservationForm from "./CancelReservationForm";
 import CertQuirksForm from "./CertQuirksForm";
@@ -61,7 +62,8 @@ import UnlockOutcomeForm from "./UnlockOutcomeForm";
 import type { NodeFormComponent, NodeFormData } from "./types";
 
 export interface NodeFormEntry<TFormData extends NodeFormData = NodeFormData> {
-  title: string;
+  /** Message key of the node type's display name. */
+  title: MessageKey;
   Component: NodeFormComponent<TFormData>;
   nodeDataToForm: (nodeData: ScenarioNodeData) => TFormData;
   formToNodeData: (formData: TFormData) => ScenarioNodeData;
@@ -843,145 +845,145 @@ function connectionTriggerFormToNodeData(
 
 export const NODE_FORM_REGISTRY = {
   [ScenarioNodeType.STATUS_CHANGE]: {
-    title: "Status Change",
+    title: "scenarioEditor.node.statusChange",
     Component: StatusChangeForm,
     nodeDataToForm: statusChangeNodeDataToForm,
     formToNodeData: statusChangeFormToNodeData,
   },
   [ScenarioNodeType.TRANSACTION]: {
-    title: "Transaction",
+    title: "scenarioEditor.node.transaction",
     Component: TransactionForm,
     nodeDataToForm: transactionNodeDataToForm,
     formToNodeData: transactionFormToNodeData,
   },
   [ScenarioNodeType.METER_VALUE]: {
-    title: "Meter Value",
+    title: "scenarioEditor.node.meterValue",
     Component: MeterValueForm,
     nodeDataToForm: meterValueNodeDataToForm,
     formToNodeData: meterValueFormToNodeData,
   },
   [ScenarioNodeType.DELAY]: {
-    title: "Delay",
+    title: "scenarioEditor.node.delay",
     Component: DelayForm,
     nodeDataToForm: delayNodeDataToForm,
     formToNodeData: delayFormToNodeData,
   },
   [ScenarioNodeType.NOTIFICATION]: {
-    title: "Notification",
+    title: "scenarioEditor.node.notification",
     Component: NotificationForm,
     nodeDataToForm: notificationNodeDataToForm,
     formToNodeData: notificationFormToNodeData,
   },
   [ScenarioNodeType.CONNECTOR_PLUG]: {
-    title: "Connector Plug",
+    title: "scenarioEditor.node.connectorPlug",
     Component: ConnectorPlugForm,
     nodeDataToForm: connectorPlugNodeDataToForm,
     formToNodeData: connectorPlugFormToNodeData,
   },
   [ScenarioNodeType.REMOTE_START_TRIGGER]: {
-    title: "Remote Start Trigger",
+    title: "scenarioEditor.node.remoteStartTrigger",
     Component: RemoteStartTriggerForm,
     nodeDataToForm: remoteStartTriggerNodeDataToForm,
     formToNodeData: remoteStartTriggerFormToNodeData,
   },
   [ScenarioNodeType.REMOTE_STOP_TRIGGER]: {
-    title: "Remote Stop Trigger",
+    title: "scenarioEditor.node.remoteStopTrigger",
     Component: RemoteStopTriggerForm,
     nodeDataToForm: remoteStopTriggerNodeDataToForm,
     formToNodeData: remoteStopTriggerFormToNodeData,
   },
   [ScenarioNodeType.STATUS_TRIGGER]: {
-    title: "Status Trigger",
+    title: "scenarioEditor.node.statusTrigger",
     Component: StatusTriggerForm,
     nodeDataToForm: statusTriggerNodeDataToForm,
     formToNodeData: statusTriggerFormToNodeData,
   },
   [ScenarioNodeType.RESERVE_NOW]: {
-    title: "Reserve Now",
+    title: "scenarioEditor.node.reserveNow",
     Component: ReserveNowForm,
     nodeDataToForm: reserveNowNodeDataToForm,
     formToNodeData: reserveNowFormToNodeData,
   },
   [ScenarioNodeType.CANCEL_RESERVATION]: {
-    title: "Cancel Reservation",
+    title: "scenarioEditor.node.cancelReservation",
     Component: CancelReservationForm,
     nodeDataToForm: cancelReservationNodeDataToForm,
     formToNodeData: cancelReservationFormToNodeData,
   },
   [ScenarioNodeType.RESERVATION_TRIGGER]: {
-    title: "Reservation Trigger",
+    title: "scenarioEditor.node.reservationTrigger",
     Component: ReservationTriggerForm,
     nodeDataToForm: reservationTriggerNodeDataToForm,
     formToNodeData: reservationTriggerFormToNodeData,
   },
   [ScenarioNodeType.START]: {
-    title: "Start",
+    title: "scenarioEditor.node.start",
     Component: StartForm,
     nodeDataToForm: startNodeDataToForm,
     formToNodeData: startFormToNodeData,
   },
   [ScenarioNodeType.END]: {
-    title: "End",
+    title: "scenarioEditor.node.end",
     Component: EndForm,
     nodeDataToForm: endNodeDataToForm,
     formToNodeData: endFormToNodeData,
   },
   [ScenarioNodeType.STATUS_NOTIFICATION]: {
-    title: "Status Notification",
+    title: "scenarioEditor.node.statusNotification",
     Component: StatusNotificationForm,
     nodeDataToForm: statusNotificationNodeDataToForm,
     formToNodeData: statusNotificationFormToNodeData,
   },
   [ScenarioNodeType.UNLOCK_OUTCOME]: {
-    title: "Unlock Outcome",
+    title: "scenarioEditor.node.unlockOutcome",
     Component: UnlockOutcomeForm,
     nodeDataToForm: unlockOutcomeNodeDataToForm,
     formToNodeData: unlockOutcomeFormToNodeData,
   },
   [ScenarioNodeType.CSMS_CALL_TRIGGER]: {
-    title: "CSMS Call Trigger",
+    title: "scenarioEditor.node.csmsCallTrigger",
     Component: CsmsCallTriggerForm,
     nodeDataToForm: csmsCallTriggerNodeDataToForm,
     formToNodeData: csmsCallTriggerFormToNodeData,
   },
   [ScenarioNodeType.RESPONSE_OVERRIDE]: {
-    title: "Response Override",
+    title: "scenarioEditor.node.responseOverride",
     Component: ResponseOverrideForm,
     nodeDataToForm: responseOverrideNodeDataToForm,
     formToNodeData: responseOverrideFormToNodeData,
   },
   [ScenarioNodeType.INBOUND_POLICY]: {
-    title: "Inbound Policy",
+    title: "scenarioEditor.node.inboundPolicy",
     Component: InboundPolicyForm,
     nodeDataToForm: inboundPolicyNodeDataToForm,
     formToNodeData: inboundPolicyFormToNodeData,
   },
   [ScenarioNodeType.CERT_QUIRKS]: {
-    title: "Certificate Quirks",
+    title: "scenarioEditor.node.certQuirks",
     Component: CertQuirksForm,
     nodeDataToForm: certQuirksNodeDataToForm,
     formToNodeData: certQuirksFormToNodeData,
   },
   [ScenarioNodeType.CONFIG_SET]: {
-    title: "Config Set",
+    title: "scenarioEditor.node.configSet",
     Component: ConfigSetForm,
     nodeDataToForm: configSetNodeDataToForm,
     formToNodeData: configSetFormToNodeData,
   },
   [ScenarioNodeType.DATA_TRANSFER]: {
-    title: "Data Transfer",
+    title: "scenarioEditor.node.dataTransfer",
     Component: DataTransferForm,
     nodeDataToForm: dataTransferNodeDataToForm,
     formToNodeData: dataTransferFormToNodeData,
   },
   [ScenarioNodeType.OCPP_CALL]: {
-    title: "OCPP Call (expert)",
+    title: "scenarioEditor.node.ocppCall",
     Component: OcppCallForm,
     nodeDataToForm: ocppCallNodeDataToForm,
     formToNodeData: ocppCallFormToNodeData,
   },
   [ScenarioNodeType.CONNECTION_TRIGGER]: {
-    title: "Connection Trigger",
+    title: "scenarioEditor.node.connectionTrigger",
     Component: ConnectionTriggerForm,
     nodeDataToForm: connectionTriggerNodeDataToForm,
     formToNodeData: connectionTriggerFormToNodeData,

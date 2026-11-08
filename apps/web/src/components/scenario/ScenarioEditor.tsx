@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, {
   useState,
   useCallback,
@@ -174,6 +175,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
   scenario,
   onGraphChange,
 }) => {
+  const { t } = useTranslation();
   const { chargePointService } = useDataContext();
   const { isDark } = useDarkMode();
   // Latest callback without re-running the graph effect when the page
@@ -459,7 +461,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
           (node) => node.type === ScenarioNodeType.START,
         );
         if (hasStart) {
-          alert("Only one Start node is allowed per scenario");
+          alert(t("scenarioEditor.editor.onlyOneStart"));
           return;
         }
       }
@@ -467,7 +469,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       if (type === ScenarioNodeType.END) {
         const hasEnd = nodes.some((node) => node.type === ScenarioNodeType.END);
         if (hasEnd) {
-          alert("Only one End node is allowed per scenario");
+          alert(t("scenarioEditor.editor.onlyOneEnd"));
           return;
         }
       }
@@ -481,7 +483,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
       const newNode = createNodeByType(type, position);
       setNodes((nds) => nds.concat(newNode));
     },
-    [setNodes, nodes],
+    [setNodes, nodes, t],
   );
 
   /**
@@ -611,7 +613,9 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
   );
 
   const getNodeTypeName = (type: string | undefined) =>
-    isScenarioNodeType(type) ? NODE_FORM_REGISTRY[type].title : "Node";
+    isScenarioNodeType(type)
+      ? t(NODE_FORM_REGISTRY[type].title)
+      : t("scenarioEditor.node.unknown");
 
   // Render node config form from the exhaustive registry.
   const renderNodeConfigForm = () => {
@@ -643,7 +647,9 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
         <Suspense
           fallback={
             <div className="fixed inset-0 bg-black/50 flex items-center justify-center">
-              <div className="text-white">Loading...</div>
+              <div className="text-white">
+                {t("scenarioEditor.editor.loading")}
+              </div>
             </div>
           }
         >
@@ -665,7 +671,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
               onClick={handleUndo}
               disabled={historyRef.current.past.length === 0}
               className="btn-secondary text-xs px-2 py-1 disabled:opacity-40 disabled:cursor-not-allowed"
-              title="戻る (Undo · Cmd/Ctrl+Z)"
+              title={t("scenarioEditor.editor.undoTitle")}
               data-history-tick={historyTick}
             >
               ↶
@@ -674,7 +680,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
               onClick={handleRedo}
               disabled={historyRef.current.future.length === 0}
               className="btn-secondary text-xs px-2 py-1 disabled:opacity-40 disabled:cursor-not-allowed"
-              title="進む (Redo · Cmd/Ctrl+Shift+Z)"
+              title={t("scenarioEditor.editor.redoTitle")}
               data-history-tick={historyTick}
             >
               ↷
@@ -690,55 +696,55 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
           <div className="panel p-2 flex-shrink-0">
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-xs font-semibold text-primary">
-                Node Palette
+                {t("scenarioEditor.editor.nodePalette")}
               </h3>
               <button
                 onClick={handleDeleteSelected}
                 className="btn-danger text-xs px-2 py-1"
-                title="Delete selected nodes and edges (or press Delete/Backspace)"
+                title={t("scenarioEditor.editor.deleteSelectedTitle")}
               >
-                🗑️ Delete Selected
+                {t("scenarioEditor.editor.deleteSelected")}
               </button>
             </div>
             <div className="flex gap-2 flex-wrap">
               <NodePaletteItem
                 type={ScenarioNodeType.START}
-                label="Start"
+                label={t("scenarioEditor.palette.start")}
                 icon="🟢"
               />
               <NodePaletteItem
                 type={ScenarioNodeType.END}
-                label="End"
+                label={t("scenarioEditor.palette.end")}
                 icon="🔴"
               />
               <NodePaletteItem
                 type={ScenarioNodeType.STATUS_CHANGE}
-                label="Status"
+                label={t("scenarioEditor.palette.statusChange")}
                 icon="📊"
               />
               <NodePaletteItem
                 type={ScenarioNodeType.TRANSACTION}
-                label="Transaction"
+                label={t("scenarioEditor.palette.transaction")}
                 icon="💳"
               />
               <NodePaletteItem
                 type={ScenarioNodeType.METER_VALUE}
-                label="Meter"
+                label={t("scenarioEditor.palette.meterValue")}
                 icon="⚡"
               />
               <NodePaletteItem
                 type={ScenarioNodeType.DELAY}
-                label="Delay"
+                label={t("scenarioEditor.palette.delay")}
                 icon="⏱️"
               />
               <NodePaletteItem
                 type={ScenarioNodeType.NOTIFICATION}
-                label="Message"
+                label={t("scenarioEditor.palette.notification")}
                 icon="📤"
               />
               <NodePaletteItem
                 type={ScenarioNodeType.CONNECTOR_PLUG}
-                label="Plug"
+                label={t("scenarioEditor.palette.connectorPlug")}
                 icon="🔌"
               />
               <NodePaletteItem
@@ -763,17 +769,17 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
               />
               <NodePaletteItem
                 type={ScenarioNodeType.CONNECTION_TRIGGER}
-                label="Connection"
+                label={t("scenarioEditor.palette.connectionTrigger")}
                 icon="🔗"
               />
               <NodePaletteItem
                 type={ScenarioNodeType.RESPONSE_OVERRIDE}
-                label="Override"
+                label={t("scenarioEditor.palette.responseOverride")}
                 icon="🚫"
               />
               <NodePaletteItem
                 type={ScenarioNodeType.INBOUND_POLICY}
-                label="Inbound Policy"
+                label={t("scenarioEditor.palette.inboundPolicy")}
                 icon="🔐"
               />
               <NodePaletteItem
@@ -842,8 +848,8 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                 <Controls>
                   <ControlButton
                     onClick={handleAutoLayout}
-                    title="Auto-arrange nodes top-to-bottom"
-                    aria-label="Auto-arrange nodes"
+                    title={t("scenarioEditor.editor.autoArrangeTitle")}
+                    aria-label={t("scenarioEditor.editor.autoArrange")}
                   >
                     <svg
                       width="14"
@@ -905,7 +911,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                 onClick={() => setSelectedNode(null)}
                 className="flex-1 btn-secondary text-sm"
               >
-                Cancel
+                {t("scenarioEditor.editor.cancel")}
               </button>
               <button
                 onClick={() => {
@@ -921,7 +927,7 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
                 className="flex-1 btn-primary text-sm"
               >
                 {/* Applies to the graph; the page's own Save persists it. */}
-                Save
+                {t("scenarioEditor.editor.save")}
               </button>
             </div>
           </div>

@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, { memo, useContext } from "react";
 import type { NodeProps } from "@xyflow/react";
 import { Handle, Position, type Node } from "@xyflow/react";
@@ -22,6 +23,7 @@ const MeterValueNode: React.FC<NodeProps<Node<ExtendedMeterValueNodeData>>> = ({
   data,
   selected,
 }) => {
+  const { t } = useTranslation();
   const progress = data.progress;
   const progressPercent = progress
     ? ((progress.total - progress.remaining) / progress.total) * 100
@@ -37,7 +39,7 @@ const MeterValueNode: React.FC<NodeProps<Node<ExtendedMeterValueNodeData>>> = ({
       <Handle type="target" position={Position.Top} className="w-3 h-3" />
 
       <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-        Meter Value
+        {t("scenarioNodes.title.meterValue")}
       </div>
       <div className="flex items-center gap-2">
         <div className="text-2xl">⚡</div>
@@ -46,15 +48,19 @@ const MeterValueNode: React.FC<NodeProps<Node<ExtendedMeterValueNodeData>>> = ({
             {formatMeterReading(displayValue)}
           </div>
           <div className="text-xs text-muted">
-            {data.sendMessage ? "Send message" : "Set value only"}
+            {data.sendMessage
+              ? t("scenarioNodes.meter.sendMessage")
+              : t("scenarioNodes.meter.setValueOnly")}
           </div>
         </div>
       </div>
 
       {data.autoIncrement && (
         <div className="text-xs text-green-700 dark:text-green-300 mt-1 font-semibold">
-          ⚡ Auto +{data.incrementAmount || 1000}Wh /{" "}
-          {data.incrementInterval || 10}s
+          {t("scenarioNodes.meter.autoIncrement", {
+            amount: data.incrementAmount || 1000,
+            interval: data.incrementInterval || 10,
+          })}
           {progress && progress.remaining > 0 && (
             <span className="ml-1">({progress.remaining.toFixed(1)}s)</span>
           )}

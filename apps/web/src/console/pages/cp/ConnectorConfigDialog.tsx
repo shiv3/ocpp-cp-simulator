@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, { useEffect, useId, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -40,6 +41,7 @@ import {
 } from "../../components/filterStyles";
 import StatusPill from "../../components/StatusPill";
 import Switch from "../../components/Switch";
+import { type MessageKey } from "../../../i18n";
 import { describeError } from "./connectorActions";
 import CurveEditor from "./CurveEditor";
 import {
@@ -66,9 +68,9 @@ export interface ConnectorConfigDialogProps {
 
 type BodyProps = Omit<ConnectorConfigDialogProps, "open">;
 
-const TABS: ReadonlyArray<{ id: ConfigTab; label: string }> = [
-  { id: "ev", label: "EV" },
-  { id: "auto", label: "Auto meter" },
+const TABS: ReadonlyArray<{ id: ConfigTab; labelKey: MessageKey }> = [
+  { id: "ev", labelKey: "cpPanels.config.tabEv" },
+  { id: "auto", labelKey: "cpPanels.config.tabAuto" },
 ];
 
 const CUSTOM = "Custom";
@@ -117,6 +119,7 @@ const ConfigBody: React.FC<BodyProps> = ({
   evSettings,
   liveAutoMeter,
 }) => {
+  const { t } = useTranslation();
   const { chargePointService } = useDataContext();
   const tabsId = useId();
   const tabRefs = useRef(new Map<ConfigTab, HTMLButtonElement>());
@@ -212,7 +215,9 @@ const ConfigBody: React.FC<BodyProps> = ({
         if (!cancelled) {
           setLoad({
             state: "error",
-            message: `Saved auto meter values not read: ${describeError(err)}`,
+            message: t("cpPanels.config.autoReadFailed", {
+              error: describeError(err),
+            }),
           });
         }
       });
@@ -248,7 +253,7 @@ const ConfigBody: React.FC<BodyProps> = ({
     tabRefs.current.get(next)?.focus();
   };
   const onRailKey = (event: React.KeyboardEvent) => {
-    const index = TABS.findIndex((t) => t.id === tab);
+    const index = TABS.findIndex((item) => item.id === tab);
     const step =
       event.key === "ArrowDown" || event.key === "ArrowRight"
         ? 1
@@ -272,17 +277,17 @@ const ConfigBody: React.FC<BodyProps> = ({
       };
       const problem =
         values.battery == null || values.battery <= 0
-          ? "Battery must be above 0 kWh."
+          ? t("cpPanels.config.errBattery")
           : values.maxKw == null || values.maxKw <= 0
-            ? "Max power must be above 0 kW."
+            ? t("cpPanels.config.errMaxPower")
             : values.initialSoc == null ||
                 values.initialSoc < 0 ||
                 values.initialSoc > 100
-              ? "Initial SoC must be between 0 and 100 %."
+              ? t("cpPanels.config.errInitialSoc")
               : values.targetSoc == null ||
                   values.targetSoc < 0 ||
                   values.targetSoc > 100
-                ? "Target SoC must be between 0 and 100 %."
+                ? t("cpPanels.config.errTargetSoc")
                 : null;
       if (problem) {
         setTab("ev");
@@ -296,7 +301,7 @@ const ConfigBody: React.FC<BodyProps> = ({
       const interval = parse(shownInterval);
       if (interval == null || interval < 1 || !Number.isInteger(interval)) {
         setTab("auto");
-        setError("The interval must be a whole number of seconds, 1 or more.");
+        setError(t("cpPanels.config.errInterval"));
         return;
       }
       auto = {
@@ -320,7 +325,9 @@ const ConfigBody: React.FC<BodyProps> = ({
             `Failed to set EV settings on ${cpId}/${connectorId}`,
             err,
           );
-          setError(`EV settings not applied: ${describeError(err)}`);
+          setError(
+            t("cpPanels.config.evNotApplied", { error: describeError(err) }),
+          );
           return;
         }
         setEvDirty(false);
@@ -342,7 +349,9 @@ const ConfigBody: React.FC<BodyProps> = ({
             `Failed to apply auto meter values on ${cpId}/${connectorId}`,
             err,
           );
-          setError(`Auto meter values not applied: ${describeError(err)}`);
+          setError(
+            t("cpPanels.config.autoNotApplied", { error: describeError(err) }),
+          );
           return;
         }
         try {
@@ -353,7 +362,7 @@ const ConfigBody: React.FC<BodyProps> = ({
             err,
           );
           setError(
-            `Auto meter values applied, but not saved: ${describeError(err)}`,
+            t("cpPanels.config.autoNotSaved", { error: describeError(err) }),
           );
           return;
         }
@@ -371,32 +380,32 @@ const ConfigBody: React.FC<BodyProps> = ({
       <div className="grid min-h-[380px] flex-1 grid-cols-1 overflow-auto sm:grid-cols-[170px_minmax(0,1fr)]">
         <div
           role="tablist"
-          aria-label="Config sections"
+          aria-label={t("cpPanels.config.sections")}
           aria-orientation="vertical"
           onKeyDown={onRailKey}
           className="flex gap-0.5 overflow-x-auto border-b border-cx-border bg-cx-sub px-2 py-2.5 sm:flex-col sm:border-b-0 sm:border-r"
         >
-          {TABS.map((t) => (
+          {TABS.map((item) => (
             <button
-              key={t.id}
+              key={item.id}
               ref={(el) => {
-                if (el) tabRefs.current.set(t.id, el);
-                else tabRefs.current.delete(t.id);
+                if (el) tabRefs.current.set(item.id, el);
+                else tabRefs.current.delete(item.id);
               }}
               type="button"
               role="tab"
-              id={`${tabsId}-${t.id}-tab`}
-              aria-selected={tab === t.id}
-              aria-controls={`${tabsId}-${t.id}`}
-              tabIndex={tab === t.id ? 0 : -1}
-              onClick={() => setTab(t.id)}
+              id={`${tabsId}-${item.id}-tab`}
+              aria-selected={tab === item.id}
+              aria-controls={`${tabsId}-${item.id}`}
+              tabIndex={tab === item.id ? 0 : -1}
+              onClick={() => setTab(item.id)}
               className={cn(
                 "whitespace-nowrap rounded-[7px] px-2.5 py-[7px] text-left text-[13px] font-medium text-cx-muted hover:text-cx-fg",
-                tab === t.id &&
+                tab === item.id &&
                   "bg-cx-card text-cx-fg shadow-[0_0_0_1px_var(--cx-border-strong)]",
               )}
             >
-              {t.label}
+              {t(item.labelKey)}
             </button>
           ))}
         </div>
@@ -409,16 +418,17 @@ const ConfigBody: React.FC<BodyProps> = ({
             className="flex flex-col gap-3.5 px-[18px] pb-[18px] pt-4"
           >
             <div>
-              <h3 className="text-[15px] font-semibold text-cx-fg">EV</h3>
+              <h3 className="text-[15px] font-semibold text-cx-fg">
+                {t("cpPanels.config.evHeading")}
+              </h3>
               <p className="mt-0.5 text-[12.5px] text-cx-muted">
-                The vehicle on this connector: its battery sets what the SoC
-                means, its max power caps the curve.
+                {t("cpPanels.config.evIntro")}
               </p>
             </div>
             <div className="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-x-3.5 gap-y-2.5">
-              <Field label="Vehicle" wide>
+              <Field label={t("cpPanels.config.vehicle")} wide>
                 <select
-                  aria-label="Vehicle"
+                  aria-label={t("cpPanels.config.vehicle")}
                   value={vehicle}
                   onChange={(e) => {
                     const preset = e.target.value;
@@ -478,7 +488,7 @@ const ConfigBody: React.FC<BodyProps> = ({
                   {Object.entries(EV_PRESETS).map(([name, values]) => (
                     <option key={name} value={name}>
                       {name === CUSTOM
-                        ? CUSTOM
+                        ? t("cpPanels.config.custom")
                         : `${name} · ${values.batteryCapacityKwh} kWh · ${values.maxChargingPowerKw} kW`}
                     </option>
                   ))}
@@ -488,51 +498,55 @@ const ConfigBody: React.FC<BodyProps> = ({
                 <span className="text-xs text-cx-muted">
                   {draftEv.currentType ?? "AC"}
                   {draftEv.currentType !== "DC" &&
-                    ` · ${draftEv.phases ?? 1} phase${(draftEv.phases ?? 1) > 1 ? "s" : ""}`}
+                    ` · ${t("cpPanels.config.phase", {
+                      count: draftEv.phases ?? 1,
+                    })}`}
                   {" · "}
                   {draftEv.chargingCurve?.length
-                    ? `${draftEv.chargingCurve.length}-point charging curve`
-                    : "flat charging curve"}
+                    ? t("cpPanels.config.curvePoints", {
+                        count: draftEv.chargingCurve.length,
+                      })
+                    : t("cpPanels.config.flatCurve")}
                 </span>
                 <VehicleChoiceNotes notes={vehicleNotes} />
               </div>
-              <Field label="Battery" unit="kWh">
+              <Field label={t("cpPanels.config.battery")} unit="kWh">
                 <input
                   type="number"
                   min={1}
-                  aria-label="Battery (kWh)"
+                  aria-label={t("cpPanels.config.batteryAria")}
                   value={battery}
                   onChange={(e) => editEv(setBattery)(e.target.value)}
                   className={NUMBER_CLASS}
                 />
               </Field>
-              <Field label="Max power" unit="kW">
+              <Field label={t("cpPanels.config.maxPower")} unit="kW">
                 <input
                   type="number"
                   min={1}
-                  aria-label="Max power (kW)"
+                  aria-label={t("cpPanels.config.maxPowerAria")}
                   value={maxKw}
                   onChange={(e) => editEv(setMaxKw)(e.target.value)}
                   className={NUMBER_CLASS}
                 />
               </Field>
-              <Field label="Initial SoC" unit="%">
+              <Field label={t("cpPanels.config.initialSoc")} unit="%">
                 <input
                   type="number"
                   min={0}
                   max={100}
-                  aria-label="Initial SoC (%)"
+                  aria-label={t("cpPanels.config.initialSocAria")}
                   value={initialSoc}
                   onChange={(e) => editEv(setInitialSoc)(e.target.value)}
                   className={NUMBER_CLASS}
                 />
               </Field>
-              <Field label="Target SoC" unit="%">
+              <Field label={t("cpPanels.config.targetSoc")} unit="%">
                 <input
                   type="number"
                   min={0}
                   max={100}
-                  aria-label="Target SoC (%)"
+                  aria-label={t("cpPanels.config.targetSocAria")}
                   value={targetSoc}
                   onChange={(e) => editEv(setTargetSoc)(e.target.value)}
                   className={NUMBER_CLASS}
@@ -540,18 +554,18 @@ const ConfigBody: React.FC<BodyProps> = ({
               </Field>
             </div>
             <Switch
-              label="Sync SoC and meter"
+              label={t("cpPanels.config.syncLabel")}
               checked={syncShown}
               disabled={!canSync || (!sync.isKnown && sync.error === null)}
               onChange={setSyncDraft}
               title={
                 canSync
-                  ? "Derive the SoC from the meter (and back) with the battery capacity and initial SoC"
-                  : "Needs a battery capacity above 0 kWh"
+                  ? t("cpPanels.config.syncTitleOk")
+                  : t("cpPanels.config.syncTitleNeedsBattery")
               }
               className="text-[13px]"
             >
-              Sync SoC and meter through the battery capacity
+              {t("cpPanels.config.syncText")}
             </Switch>
             {sync.error && (
               <p role="alert" className="text-xs text-cx-rose">
@@ -570,16 +584,15 @@ const ConfigBody: React.FC<BodyProps> = ({
           >
             <div>
               <h3 className="text-[15px] font-semibold text-cx-fg">
-                Auto meter values
+                {t("cpPanels.config.autoHeading")}
               </h3>
               <p className="mt-0.5 text-[12.5px] text-cx-muted">
-                MeterValues the connector sends on its own while a transaction
-                runs. Drag the points to shape the power over the session.
+                {t("cpPanels.config.autoIntro")}
               </p>
             </div>
             {load.state === "loading" && (
               <p className="text-[12.5px] text-cx-muted">
-                Reading the saved auto meter values…
+                {t("cpPanels.config.autoLoading")}
               </p>
             )}
             {load.state === "error" && (
@@ -591,18 +604,18 @@ const ConfigBody: React.FC<BodyProps> = ({
               <>
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-[12.5px] text-cx-muted">
                   <Switch
-                    label="Enabled"
+                    label={t("cpPanels.config.enabled")}
                     checked={shownEnabled}
                     onChange={setEnabled}
                   >
-                    Enabled
+                    {t("cpPanels.config.enabled")}
                   </Switch>
                   <span className="inline-flex items-center gap-1.5">
-                    every
+                    {t("cpPanels.config.every")}
                     <input
                       type="number"
                       min={1}
-                      aria-label="Interval (s)"
+                      aria-label={t("cpPanels.config.intervalAria")}
                       value={shownInterval}
                       onChange={(e) => setIntervalText(e.target.value)}
                       className={cn(FILTER_INPUT_CLASS, "w-16 py-1 font-mono")}
@@ -610,16 +623,18 @@ const ConfigBody: React.FC<BodyProps> = ({
                     s
                   </span>
                   <Switch
-                    label="Stop at target SoC"
+                    label={t("cpPanels.config.stopAtTarget")}
                     checked={shownStop}
                     onChange={setStopAtTarget}
-                    title="End the transaction once the SoC reaches the EV's target"
+                    title={t("cpPanels.config.stopAtTargetTitle")}
                   >
-                    Stop at target SoC
+                    {t("cpPanels.config.stopAtTarget")}
                   </Switch>
                 </div>
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="mr-1 text-xs text-cx-muted">Presets</span>
+                  <span className="mr-1 text-xs text-cx-muted">
+                    {t("cpPanels.config.presets")}
+                  </span>
                   {powerCurvePresets(capKw).map((preset) => (
                     <Button
                       key={preset.id}
@@ -656,14 +671,14 @@ const ConfigBody: React.FC<BodyProps> = ({
           variant="outline"
           onClick={() => onOpenChange(false)}
         >
-          Cancel
+          {t("cpPanels.config.cancel")}
         </Button>
         <Button
           type="button"
           disabled={saving}
           onClick={() => void handleSave()}
         >
-          Save
+          {t("cpPanels.config.save")}
         </Button>
       </div>
     </>
@@ -680,21 +695,24 @@ const ConfigBody: React.FC<BodyProps> = ({
 const ConnectorConfigDialog: React.FC<ConnectorConfigDialogProps> = ({
   open,
   ...body
-}) => (
-  <Dialog open={open} onOpenChange={body.onOpenChange}>
-    <DialogContent className="flex max-h-[calc(100vh-32px)] w-[min(880px,calc(100vw-32px))] max-w-none flex-col gap-0 overflow-hidden border-cx-border-strong bg-cx-card p-0 text-cx-fg sm:rounded-xl">
-      <div className="flex items-center gap-2.5 border-b border-cx-border py-3 pl-4 pr-12">
-        <DialogTitle className="text-[15px] font-semibold tracking-normal">
-          Connector {body.connectorId} · Config
-        </DialogTitle>
-        <StatusPill status={body.status} />
-        <DialogDescription className="sr-only">
-          The EV on this connector and its auto meter values.
-        </DialogDescription>
-      </div>
-      {open && <ConfigBody {...body} />}
-    </DialogContent>
-  </Dialog>
-);
+}) => {
+  const { t } = useTranslation();
+  return (
+    <Dialog open={open} onOpenChange={body.onOpenChange}>
+      <DialogContent className="flex max-h-[calc(100vh-32px)] w-[min(880px,calc(100vw-32px))] max-w-none flex-col gap-0 overflow-hidden border-cx-border-strong bg-cx-card p-0 text-cx-fg sm:rounded-xl">
+        <div className="flex items-center gap-2.5 border-b border-cx-border py-3 pl-4 pr-12">
+          <DialogTitle className="text-[15px] font-semibold tracking-normal">
+            {t("cpPanels.config.dialogTitle", { id: body.connectorId })}
+          </DialogTitle>
+          <StatusPill status={body.status} />
+          <DialogDescription className="sr-only">
+            {t("cpPanels.config.dialogDescription")}
+          </DialogDescription>
+        </div>
+        {open && <ConfigBody {...body} />}
+      </DialogContent>
+    </Dialog>
+  );
+};
 
 export default ConnectorConfigDialog;

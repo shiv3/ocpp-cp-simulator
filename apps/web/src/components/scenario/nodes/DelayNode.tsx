@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, { memo } from "react";
 import type { NodeProps } from "@xyflow/react";
 import { Handle, Position, type Node } from "@xyflow/react";
@@ -14,6 +15,7 @@ const DelayNode: React.FC<NodeProps<Node<ExtendedDelayNodeData>>> = ({
   data,
   selected,
 }) => {
+  const { t } = useTranslation();
   const progress = data.progress;
   const progressPercent = progress
     ? ((progress.total - progress.remaining) / progress.total) * 100
@@ -28,7 +30,7 @@ const DelayNode: React.FC<NodeProps<Node<ExtendedDelayNodeData>>> = ({
       <Handle type="target" position={Position.Top} className="w-3 h-3" />
 
       <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-        Delay
+        {t("scenarioNodes.title.delay")}
       </div>
       <div className="flex items-center gap-2">
         <div className="text-2xl">⏱️</div>
@@ -38,10 +40,14 @@ const DelayNode: React.FC<NodeProps<Node<ExtendedDelayNodeData>>> = ({
           </div>
           {progress && progress.remaining > 0 ? (
             <div className="text-xs text-blue-700 dark:text-blue-300 font-semibold">
-              {progress.remaining.toFixed(1)}s remaining
+              {t("scenarioNodes.delay.remaining", {
+                seconds: progress.remaining.toFixed(1),
+              })}
             </div>
           ) : (
-            <div className="text-xs text-muted">Wait</div>
+            <div className="text-xs text-muted">
+              {t("scenarioNodes.delay.wait")}
+            </div>
           )}
         </div>
       </div>

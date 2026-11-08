@@ -12,6 +12,7 @@ import {
 import { useServerInfo } from "@/data/hooks/useServerInfo";
 import { useDataContext } from "@/data/providers/DataProvider";
 
+import { t } from "../../i18n";
 import { describeError } from "../pages/cp/connectorActions";
 
 /**
@@ -164,20 +165,22 @@ export function describeCatalogError(
   switch (error.kind) {
     case "unauthorized":
       return mode === "local"
-        ? "Open EV Directory refused the API key: it is missing, invalid, expired or revoked. Enter your personal key."
-        : "Open EV Directory refused the daemon's API key: it is missing, invalid, expired or revoked. Set OED_API_KEY on the daemon.";
+        ? t("common.catalog.unauthorizedLocal")
+        : t("common.catalog.unauthorizedRemote");
     case "rate_limited":
       return error.retryAfterSeconds !== undefined
-        ? `Open EV Directory's rate limit is reached; try again in ${error.retryAfterSeconds} s.`
-        : "Open EV Directory's rate limit is reached; try again later.";
+        ? t("common.catalog.rateLimitedIn", {
+            seconds: error.retryAfterSeconds,
+          })
+        : t("common.catalog.rateLimited");
     case "network":
       return mode === "local"
-        ? "Open EV Directory could not be reached. You may be offline, or the API does not allow calls from this page (CORS): import through the daemon instead (start it with --oed-base-url and OED_API_KEY)."
-        : `Open EV Directory could not be reached: ${error.message}`;
+        ? t("common.catalog.networkLocal")
+        : t("common.catalog.networkRemote", { message: error.message });
     case "timeout":
-      return "Open EV Directory did not answer in time; try again.";
+      return t("common.catalog.timeout");
     case "not_found":
-      return `Not found in Open EV Directory: ${error.message}`;
+      return t("common.catalog.notFound", { message: error.message });
     case "not_configured":
       return catalogNotConfiguredMessage(mode);
     default:
@@ -188,6 +191,6 @@ export function describeCatalogError(
 /** Why there is no catalog to call, and how to get one. */
 export function catalogNotConfiguredMessage(mode: "local" | "remote"): string {
   return mode === "local"
-    ? "Enter the Open EV Directory URL first."
-    : "Vehicle import is turned off on the daemon (--oed-base-url none or OED_BASE_URL=none).";
+    ? t("common.catalog.notConfiguredLocal")
+    : t("common.catalog.notConfiguredRemote");
 }

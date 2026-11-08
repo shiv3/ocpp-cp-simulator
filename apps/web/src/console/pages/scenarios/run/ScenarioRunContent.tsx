@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { Maximize2, Settings, X } from "lucide-react";
@@ -30,12 +31,13 @@ import ScenarioEditorContent, {
 import RunTimeline from "./RunTimeline";
 import StepsGraphView from "./StepsGraphView";
 import StepsView from "./StepsView";
+import { type MessageKey } from "../../../../i18n";
 
 type RunView = "steps" | "graph";
 
-const VIEW_OPTIONS: ReadonlyArray<{ value: RunView; label: string }> = [
-  { value: "steps", label: "Steps" },
-  { value: "graph", label: "Graph" },
+const VIEW_OPTIONS: ReadonlyArray<{ value: RunView; label: MessageKey }> = [
+  { value: "steps", label: "scenarioRun.run.viewSteps" },
+  { value: "graph", label: "scenarioRun.run.viewGraph" },
 ];
 
 interface LoadedDefinition {
@@ -173,6 +175,7 @@ const ScenarioRunContent: React.FC<ScenarioRunContentProps> = ({
   onEditingChange,
   cancelEditRef,
 }) => {
+  const { t } = useTranslation();
   const isPanel = variant === "panel";
   const editing = isPanel && editingProp && onEditingChange !== undefined;
   const location = useLocation();
@@ -266,8 +269,8 @@ const ScenarioRunContent: React.FC<ScenarioRunContentProps> = ({
       variant="outline"
       size="sm"
       className="px-2"
-      aria-label="Close side panel"
-      title="Close (Esc)"
+      aria-label={t("scenarioRun.run.closePanel")}
+      title={t("scenarioRun.run.closeEsc")}
       onClick={onClose}
     >
       <X className="h-3.5 w-3.5" />
@@ -275,7 +278,11 @@ const ScenarioRunContent: React.FC<ScenarioRunContentProps> = ({
   );
 
   if (isLoading) {
-    return <div className="text-sm text-cx-muted">Loading…</div>;
+    return (
+      <div className="text-sm text-cx-muted">
+        {t("scenarioRun.run.loading")}
+      </div>
+    );
   }
 
   if (!scenario || !layout) {
@@ -285,10 +292,15 @@ const ScenarioRunContent: React.FC<ScenarioRunContentProps> = ({
           <div className="mb-2 flex justify-end">{closeButton}</div>
         )}
         <EmptyState
-          title="Scenario not found"
-          hint={`No scenario "${scenarioId}" for ${cpId}${
-            connectorId != null ? ` · connector ${connectorId}` : ""
-          }.`}
+          title={t("scenarioRun.run.notFound")}
+          hint={t("scenarioRun.run.notFoundHint", {
+            scenarioId,
+            cpId,
+            connector:
+              connectorId != null
+                ? t("scenarioRun.run.notFoundConnector", { id: connectorId })
+                : "",
+          })}
         />
       </div>
     );
@@ -306,8 +318,8 @@ const ScenarioRunContent: React.FC<ScenarioRunContentProps> = ({
       expand: {
         to: editScenarioUrl(cpId, scopeConnectorId, scenario),
         label: target.library
-          ? "Open in the Library editor"
-          : "Open in the editor",
+          ? t("scenarioRun.run.openLibraryEditor")
+          : t("scenarioRun.run.openEditor"),
       },
       onClose,
     };
@@ -346,7 +358,7 @@ const ScenarioRunContent: React.FC<ScenarioRunContentProps> = ({
               variant="outline"
               size="sm"
               className="px-2"
-              title="Open the run as a full page"
+              title={t("scenarioRun.run.openFullPage")}
             >
               <Link
                 to={buildScenarioUrl("run", cpId, connectorId, scenarioId, {
@@ -354,7 +366,7 @@ const ScenarioRunContent: React.FC<ScenarioRunContentProps> = ({
                 })}
                 // Back on the run page returns here, panel open.
                 state={{ from: here }}
-                aria-label="Open the run as a full page"
+                aria-label={t("scenarioRun.run.openFullPage")}
               >
                 <Maximize2 className="h-3.5 w-3.5" />
               </Link>
@@ -376,7 +388,7 @@ const ScenarioRunContent: React.FC<ScenarioRunContentProps> = ({
         {runId && (
           <span
             className="font-mono text-xs text-cx-faint"
-            title="Runtime run id"
+            title={t("scenarioRun.run.runtimeRunId")}
           >
             {runId}
           </span>
@@ -384,7 +396,7 @@ const ScenarioRunContent: React.FC<ScenarioRunContentProps> = ({
       </div>
       <div
         role="progressbar"
-        aria-label="Steps executed"
+        aria-label={t("scenarioRun.run.stepsExecuted")}
         aria-valuemin={0}
         aria-valuemax={steps.length}
         aria-valuenow={executedCount}
@@ -404,7 +416,7 @@ const ScenarioRunContent: React.FC<ScenarioRunContentProps> = ({
             variant="destructive"
             onClick={() => void stop()}
           >
-            Stop
+            {t("scenarioRun.run.stop")}
           </Button>
         ) : (
           <Button
@@ -417,7 +429,7 @@ const ScenarioRunContent: React.FC<ScenarioRunContentProps> = ({
             }
             onClick={() => void start()}
           >
-            Start
+            {t("scenarioRun.run.start")}
           </Button>
         )}
         {isPanel && onEditingChange ? (
@@ -430,7 +442,7 @@ const ScenarioRunContent: React.FC<ScenarioRunContentProps> = ({
             onClick={() => onEditingChange(true)}
           >
             <Settings className="h-3.5 w-3.5" />
-            Edit scenario
+            {t("scenarioRun.run.editScenario")}
           </Button>
         ) : (
           <Button asChild variant="outline" size="sm">
@@ -439,14 +451,17 @@ const ScenarioRunContent: React.FC<ScenarioRunContentProps> = ({
               to={editScenarioUrl(cpId, scopeConnectorId, scenario)}
             >
               <Settings className="h-3.5 w-3.5" />
-              Edit scenario
+              {t("scenarioRun.run.editScenario")}
             </Link>
           </Button>
         )}
         {!isPanel && layout.supported && (
           <SegmentedControl
-            label="View"
-            options={VIEW_OPTIONS}
+            label={t("scenarioRun.run.view")}
+            options={VIEW_OPTIONS.map((o) => ({
+              value: o.value,
+              label: t(o.label),
+            }))}
             value={view}
             onChange={setView}
             className="ml-auto"
@@ -456,8 +471,10 @@ const ScenarioRunContent: React.FC<ScenarioRunContentProps> = ({
 
       {requestedRunGone && (
         <div className="mt-3 rounded-md border border-cx-accent/40 bg-cx-accent/10 px-3 py-2 text-sm text-cx-accent">
-          Run {requestedRunId} is no longer active
-          {isRunning && runId ? ` — showing the current run ${runId}.` : "."}
+          {t("scenarioRun.run.gone", { runId: requestedRunId ?? "" })}
+          {isRunning && runId
+            ? t("scenarioRun.run.showingCurrent", { runId })
+            : "."}
         </div>
       )}
 
@@ -480,9 +497,7 @@ const ScenarioRunContent: React.FC<ScenarioRunContentProps> = ({
           id={`cp-scope-note-${variant}`}
           className="mt-3 rounded-md border border-cx-amber/40 bg-cx-amber/10 px-3 py-2 text-sm text-cx-amber"
         >
-          This is a charge-point-scope scenario — it runs automatically per
-          connector when its trigger fires, not via a manual Start here. Start
-          is disabled on this console.
+          {t("scenarioRun.run.cpScopeNote")}
         </div>
       )}
 

@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Plus, PlugZap, SearchX } from "lucide-react";
 
@@ -28,6 +29,7 @@ import { useCpListParams } from "./dashboard/useCpListParams";
 import { useCpListRows } from "./dashboard/useCpListRows";
 
 const DashboardPage: React.FC = () => {
+  const { t } = useTranslation();
   const { mode } = useDataContext();
   const serverInfo = useServerInfo();
   const { config, isLoading } = useConfig();
@@ -107,7 +109,7 @@ const DashboardPage: React.FC = () => {
   const addButton = (
     <Button type="button" onClick={() => setIsAddOpen(true)}>
       <Plus />
-      Add Charge Point
+      {t("dashboard.page.addChargePoint")}
     </Button>
   );
 
@@ -115,8 +117,11 @@ const DashboardPage: React.FC = () => {
     <>
       <div className="min-h-full p-6" onClick={handleBackgroundClick}>
         <PageHeader
-          title="Charge Points"
-          count={`${chargePoints.length} registered · ${connectedCount} connected`}
+          title={t("dashboard.page.title")}
+          count={t("dashboard.page.count", {
+            total: chargePoints.length,
+            connected: connectedCount,
+          })}
           actions={
             <>
               <ViewSwitch view={view} onChange={setView} />
@@ -145,8 +150,8 @@ const DashboardPage: React.FC = () => {
         {chargePoints.length === 0 ? (
           <EmptyState
             icon={PlugZap}
-            title="No charge points"
-            hint="Add a charge point to start simulating OCPP traffic."
+            title={t("dashboard.page.empty.title")}
+            hint={t("dashboard.page.empty.hint")}
             action={addButton}
           />
         ) : (
@@ -165,8 +170,8 @@ const DashboardPage: React.FC = () => {
             {complete && shownRows.length === 0 ? (
               <EmptyState
                 icon={SearchX}
-                title="No charge points match the current filters."
-                hint="Change or clear a filter above."
+                title={t("dashboard.page.noMatch.title")}
+                hint={t("dashboard.page.noMatch.hint")}
               />
             ) : (
               <div
@@ -205,7 +210,7 @@ const DashboardPage: React.FC = () => {
       <SidePanel
         open={panelCpId !== null}
         onClose={closePanel}
-        label="Charge point"
+        label={t("dashboard.page.panelLabel")}
         // The content owns scrolling: its bottom panel stays docked.
         padded={false}
       >

@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, { memo } from "react";
 import type { NodeProps } from "@xyflow/react";
 import { Handle, Position, type Node } from "@xyflow/react";
@@ -12,6 +13,7 @@ import type { StatusNotificationNodeData } from "@ocpp-cp-sim/core/cp/applicatio
 const StatusNotificationNode: React.FC<
   NodeProps<Node<StatusNotificationNodeData>>
 > = ({ data, selected }) => {
+  const { t } = useTranslation();
   return (
     <div
       className={`px-4 py-3 rounded-lg border-2 bg-white dark:bg-gray-800 min-w-[200px] ${
@@ -25,7 +27,9 @@ const StatusNotificationNode: React.FC<
       </div>
       <div className="text-sm font-bold text-primary">
         {data.status}
-        {data.connectorId !== undefined ? ` · conn ${data.connectorId}` : ""}
+        {data.connectorId !== undefined
+          ? ` · ${t("scenarioNodes.conn", { id: data.connectorId })}`
+          : ""}
       </div>
       {data.errorCode && data.errorCode !== "NoError" && (
         <div className="text-xs text-red-700 dark:text-red-300 font-mono">

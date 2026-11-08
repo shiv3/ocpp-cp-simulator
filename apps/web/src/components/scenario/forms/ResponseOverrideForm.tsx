@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { SelectField, TextField } from "./FormFields";
 import type { NodeFormComponentProps, NodeFormData } from "./types";
 import {
@@ -12,6 +13,7 @@ export default function ResponseOverrideForm({
   value,
   onChange,
 }: NodeFormComponentProps<NodeFormData>) {
+  const { t } = useTranslation();
   const actionOptions = RESPONSE_OVERRIDE_ACTIONS.map((action) => ({
     value: action,
     label: action,
@@ -44,18 +46,18 @@ export default function ResponseOverrideForm({
   return (
     <div className="space-y-3">
       <TextField
-        label="Label"
+        label={t("scenarioEditor.form.label")}
         value={(value.label as string | undefined) ?? ""}
         onChange={(label) => onChange({ ...value, label })}
       />
       <SelectField
-        label="Action"
+        label={t("scenarioEditor.form.action")}
         value={currentAction}
         onChange={handleActionChange}
         options={actionOptions}
       />
       <SelectField
-        label="Status"
+        label={t("scenarioEditor.form.status")}
         value={(value.status as string | undefined) ?? validStatuses[0]}
         onChange={(status) => onChange({ ...value, status })}
         options={statusOptions}

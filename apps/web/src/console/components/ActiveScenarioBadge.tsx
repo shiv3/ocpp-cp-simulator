@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React from "react";
 
 import { cn } from "@/lib/utils";
@@ -20,6 +21,7 @@ const ActiveScenarioBadge: React.FC<ActiveScenarioBadgeProps> = ({
   isActive,
   waitingExpectation,
 }) => {
+  const { t } = useTranslation();
   if (!isActive) {
     return null;
   }
@@ -29,7 +31,11 @@ const ActiveScenarioBadge: React.FC<ActiveScenarioBadgeProps> = ({
   return (
     <span
       title={
-        isWaiting ? `Waiting for ${waitingExpectation}` : "Scenario running"
+        isWaiting
+          ? t("consoleShared.scenarioBadge.waitingTitle", {
+              expectation: waitingExpectation,
+            })
+          : t("consoleShared.scenarioBadge.runningTitle")
       }
       className="inline-flex items-center gap-1.5 whitespace-nowrap text-[12.5px] font-medium text-cx-fg2"
     >
@@ -40,7 +46,11 @@ const ActiveScenarioBadge: React.FC<ActiveScenarioBadgeProps> = ({
           isWaiting ? "bg-cx-amber" : "bg-cx-blue",
         )}
       />
-      {isWaiting ? `Waiting: ${waitingExpectation}` : "Scenario"}
+      {isWaiting
+        ? t("consoleShared.scenarioBadge.waitingLabel", {
+            expectation: waitingExpectation,
+          })
+        : t("consoleShared.scenarioBadge.label")}
     </span>
   );
 };

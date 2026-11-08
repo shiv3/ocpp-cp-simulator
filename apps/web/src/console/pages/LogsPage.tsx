@@ -1,7 +1,9 @@
+import { useTranslation } from "react-i18next";
 import React, { useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
+import { t as translate } from "../../i18n";
 import {
   LogViewer,
   type ClearLogsScope,
@@ -29,6 +31,7 @@ import { useGlobalLogs, type GlobalLogEntry } from "../lib/useGlobalLogs";
  * selected charge points, on all of them when none is.
  */
 const LogsPage: React.FC = () => {
+  const { t } = useTranslation();
   const { config, isLoading } = useConfig();
   const { chargePoints } = useChargePoints(config, { isLoading });
   const { entries, paused, setPaused, clear } = useGlobalLogs();
@@ -83,7 +86,9 @@ const LogsPage: React.FC = () => {
       (err) => {
         console.error("Failed to download logs", err);
         alert(
-          `Failed to download logs: ${err instanceof Error ? err.message : String(err)}`,
+          translate("dashboard.logs.downloadFailed", {
+            error: err instanceof Error ? err.message : String(err),
+          }),
         );
       },
     );
@@ -99,7 +104,9 @@ const LogsPage: React.FC = () => {
     ).catch((err) => {
       console.error("Failed to clear stored logs", err);
       alert(
-        `Failed to clear stored logs: ${err instanceof Error ? err.message : String(err)}`,
+        translate("dashboard.logs.clearFailed", {
+          error: err instanceof Error ? err.message : String(err),
+        }),
       );
     });
   };
@@ -108,7 +115,7 @@ const LogsPage: React.FC = () => {
     // h-screen: the viewer scrolls its own table, so the page itself must not.
     <div className="flex h-screen flex-col p-6">
       <PageHeader
-        title="Message Log"
+        title={t("dashboard.logs.title")}
         actions={
           <Button
             type="button"
@@ -116,7 +123,7 @@ const LogsPage: React.FC = () => {
             variant="outline"
             onClick={() => setPaused(!paused)}
           >
-            {paused ? "Resume" : "Pause"}
+            {paused ? t("dashboard.logs.resume") : t("dashboard.logs.pause")}
           </Button>
         }
       />

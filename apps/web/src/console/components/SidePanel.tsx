@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, {
   useCallback,
   useEffect,
@@ -67,6 +68,7 @@ const SidePanel: React.FC<SidePanelProps> = ({
   padded = true,
   children,
 }) => {
+  const { t } = useTranslation();
   // null = nothing stored and not resized yet: the CSS default applies.
   const [width, setWidth] = useState<number | null>(readStoredWidth);
   const dragging = useRef(false);
@@ -126,7 +128,7 @@ const SidePanel: React.FC<SidePanelProps> = ({
       <div
         role="separator"
         aria-orientation="vertical"
-        aria-label="Resize side panel"
+        aria-label={t("consoleShared.sidePanel.resize")}
         aria-valuenow={width ?? defaultWidth()}
         aria-valuemin={MIN_WIDTH}
         tabIndex={0}

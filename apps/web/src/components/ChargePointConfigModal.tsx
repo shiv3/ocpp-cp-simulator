@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React from "react";
 import {
   Dialog,
@@ -56,41 +57,48 @@ const ChargePointConfigModal: React.FC<ChargePointConfigModalProps> = ({
   isNewChargePoint = false,
   mode = "local",
   soapPublicBase = null,
-}) => (
-  <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-    <DialogContent
-      className="sm:max-w-5xl max-h-[90vh] overflow-y-auto"
-      // The Charge Point ID is no longer the first field (Model specification
-      // comes first), so a new charge point opens with the id focused, where
-      // the first Tab used to land.
-      onOpenAutoFocus={(event) => {
-        const cpId = isNewChargePoint ? document.getElementById("cpId") : null;
-        if (!(cpId instanceof HTMLInputElement)) return;
-        event.preventDefault();
-        cpId.focus();
-        cpId.select();
-      }}
-    >
-      <DialogHeader>
-        <DialogTitle>
-          {isNewChargePoint
-            ? "Add New Charge Point"
-            : `Configure ${(initialConfig ?? defaultChargePointConfig).cpId}`}
-        </DialogTitle>
-      </DialogHeader>
-      <ChargePointConfigForm
-        initialConfig={initialConfig}
-        isNewChargePoint={isNewChargePoint}
-        mode={mode}
-        soapPublicBase={soapPublicBase}
-        onSave={(config) => {
-          onSave(config);
-          onClose();
+}) => {
+  const { t } = useTranslation();
+  return (
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent
+        className="sm:max-w-5xl max-h-[90vh] overflow-y-auto"
+        // The Charge Point ID is no longer the first field (Model specification
+        // comes first), so a new charge point opens with the id focused, where
+        // the first Tab used to land.
+        onOpenAutoFocus={(event) => {
+          const cpId = isNewChargePoint
+            ? document.getElementById("cpId")
+            : null;
+          if (!(cpId instanceof HTMLInputElement)) return;
+          event.preventDefault();
+          cpId.focus();
+          cpId.select();
         }}
-        onCancel={onClose}
-      />
-    </DialogContent>
-  </Dialog>
-);
+      >
+        <DialogHeader>
+          <DialogTitle>
+            {isNewChargePoint
+              ? t("settings.modal.addTitle")
+              : t("settings.modal.configureTitle", {
+                  cpId: (initialConfig ?? defaultChargePointConfig).cpId,
+                })}
+          </DialogTitle>
+        </DialogHeader>
+        <ChargePointConfigForm
+          initialConfig={initialConfig}
+          isNewChargePoint={isNewChargePoint}
+          mode={mode}
+          soapPublicBase={soapPublicBase}
+          onSave={(config) => {
+            onSave(config);
+            onClose();
+          }}
+          onCancel={onClose}
+        />
+      </DialogContent>
+    </Dialog>
+  );
+};
 
 export default ChargePointConfigModal;

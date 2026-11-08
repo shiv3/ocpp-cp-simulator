@@ -8,6 +8,7 @@ import {
 } from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
 import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
 
+import { t } from "@/i18n";
 import { curveDurationMin, curvePeakKw, type PowerPoint } from "./powerCurve";
 
 export type BatteryTone = "charging" | "idle" | "full" | "faulted";
@@ -34,7 +35,7 @@ export function evDisplayName(ev: EVSettings): string {
       values.batteryCapacityKwh === ev.batteryCapacityKwh &&
       values.maxChargingPowerKw === ev.maxChargingPowerKw,
   );
-  return preset?.[0] ?? "Custom EV";
+  return preset?.[0] ?? t("cp.connector.customEv");
 }
 
 /** The chart's viewBox and plot margins, in SVG units. */

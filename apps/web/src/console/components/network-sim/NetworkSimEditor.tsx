@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, { useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 
@@ -33,6 +34,7 @@ type NetworkSimEditorProps =
     };
 
 export const NetworkSimEditor: React.FC<NetworkSimEditorProps> = (props) => {
+  const { t } = useTranslation();
   const isGlobalMode = props.mode === "global";
   const inheritedRules = props.mode === "cp" ? props.inheritedRules : undefined;
 
@@ -78,7 +80,7 @@ export const NetworkSimEditor: React.FC<NetworkSimEditorProps> = (props) => {
         setSaveError(
           error instanceof Error
             ? error.message
-            : "Failed to save configuration",
+            : t("consoleShared.networkSim.saveFailed"),
         );
       } finally {
         setIsSaving(false);
@@ -99,7 +101,7 @@ export const NetworkSimEditor: React.FC<NetworkSimEditorProps> = (props) => {
         setSaveError(
           error instanceof Error
             ? error.message
-            : "Failed to save configuration",
+            : t("consoleShared.networkSim.saveFailed"),
         );
       } finally {
         setIsSaving(false);
@@ -117,7 +119,9 @@ export const NetworkSimEditor: React.FC<NetworkSimEditorProps> = (props) => {
       await props.onDeleteOverride();
     } catch (error) {
       setSaveError(
-        error instanceof Error ? error.message : "Failed to delete override",
+        error instanceof Error
+          ? error.message
+          : t("consoleShared.networkSim.deleteFailed"),
       );
     } finally {
       setIsDeletingOverride(false);
@@ -210,15 +214,18 @@ export const NetworkSimEditor: React.FC<NetworkSimEditorProps> = (props) => {
   const rules = form?.rules ?? [];
 
   if (!form) {
-    return <div className="text-sm text-cx-muted">Loading…</div>;
+    return (
+      <div className="text-sm text-cx-muted">
+        {t("consoleShared.networkSim.loading")}
+      </div>
+    );
   }
 
   return (
     <div className="space-y-6">
       <div>
         <p className="mb-4 text-sm text-cx-fg2">
-          Network simulation rules apply to WebSocket charge points only. SOAP
-          CPs are unaffected.
+          {t("consoleShared.networkSim.intro")}
         </p>
       </div>
 
@@ -237,7 +244,7 @@ export const NetworkSimEditor: React.FC<NetworkSimEditorProps> = (props) => {
                 htmlFor="network-sim-enabled"
                 className="text-sm font-medium text-cx-fg2"
               >
-                Enable network simulation
+                {t("consoleShared.networkSim.enable")}
               </label>
             </div>
           ) : (
@@ -254,7 +261,7 @@ export const NetworkSimEditor: React.FC<NetworkSimEditorProps> = (props) => {
                 htmlFor="network-sim-seed"
                 className="block text-sm font-medium text-cx-fg2"
               >
-                Seed
+                {t("consoleShared.networkSim.seed")}
               </label>
               <input
                 id="network-sim-seed"
@@ -277,7 +284,10 @@ export const NetworkSimEditor: React.FC<NetworkSimEditorProps> = (props) => {
           <div>
             <div className="mb-3 flex items-center justify-between">
               <h3 className="text-sm font-semibold text-cx-fg2">
-                Rules ({rules.length}/{NETWORK_SIM_LIMITS.maxRulesPerLayer})
+                {t("consoleShared.networkSim.rules", {
+                  count: rules.length,
+                  max: NETWORK_SIM_LIMITS.maxRulesPerLayer,
+                })}
               </h3>
               <button
                 type="button"
@@ -286,7 +296,9 @@ export const NetworkSimEditor: React.FC<NetworkSimEditorProps> = (props) => {
                 className="inline-flex items-center gap-1.5 rounded-md bg-cx-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-cx-primary-hover disabled:bg-cx-gray disabled:cursor-not-allowed"
               >
                 <Plus className="h-3.5 w-3.5" />
-                {isGlobalMode ? "Add Rule" : "Add Local Rule"}
+                {isGlobalMode
+                  ? t("consoleShared.networkSim.addRule")
+                  : t("consoleShared.networkSim.addLocalRule")}
               </button>
             </div>
 
@@ -327,7 +339,9 @@ export const NetworkSimEditor: React.FC<NetworkSimEditorProps> = (props) => {
               : "bg-cx-primary hover:bg-cx-primary-hover"
           }`}
         >
-          {isSaving ? "Saving…" : "Save"}
+          {isSaving
+            ? t("consoleShared.networkSim.saving")
+            : t("consoleShared.networkSim.save")}
         </button>
         {!isGlobalMode && (
           <button
@@ -336,7 +350,9 @@ export const NetworkSimEditor: React.FC<NetworkSimEditorProps> = (props) => {
             disabled={isDeletingOverride || isSaving}
             className="inline-flex items-center gap-2 rounded-md border border-cx-rose px-4 py-2 text-sm font-medium text-cx-rose hover:bg-cx-rose/10 disabled:border-cx-border-strong disabled:text-cx-faint disabled:cursor-not-allowed"
           >
-            {isDeletingOverride ? "Deleting…" : "Delete per-CP override"}
+            {isDeletingOverride
+              ? t("consoleShared.networkSim.deleting")
+              : t("consoleShared.networkSim.deleteOverride")}
           </button>
         )}
       </div>
@@ -355,22 +371,25 @@ const TriStateEnabledControl: React.FC<TriStateEnabledControlProps> = ({
   inheritedEnabled,
   onChange,
 }) => {
+  const { t } = useTranslation();
   const options: Array<{
     label: string;
     value: boolean | undefined;
   }> = [
     {
-      label: `Inherit (${inheritedEnabled ? "on" : "off"})`,
+      label: inheritedEnabled
+        ? t("consoleShared.networkSim.inheritOn")
+        : t("consoleShared.networkSim.inheritOff"),
       value: undefined,
     },
-    { label: "On", value: true },
-    { label: "Off", value: false },
+    { label: t("consoleShared.networkSim.on"), value: true },
+    { label: t("consoleShared.networkSim.off"), value: false },
   ];
 
   return (
     <div>
       <label className="block text-sm font-medium text-cx-fg2 mb-2">
-        Enable network simulation
+        {t("consoleShared.networkSim.enable")}
       </label>
       <div className="flex gap-2">
         {options.map((option) => (
@@ -407,6 +426,7 @@ const RuleEditor: React.FC<RuleEditorProps> = ({
   onUpdate,
   onRemove,
 }) => {
+  const { t } = useTranslation();
   const prefix = `rules.${index}`;
   const getError = (field: string) => errors[`${prefix}.${field}`];
 
@@ -415,7 +435,7 @@ const RuleEditor: React.FC<RuleEditorProps> = ({
       <div className="mb-4 flex items-start justify-between gap-2">
         <div className="flex-1">
           <label className="block text-xs font-medium text-cx-fg2">
-            Rule ID
+            {t("consoleShared.networkSim.ruleId")}
           </label>
           <input
             type="text"
@@ -441,7 +461,9 @@ const RuleEditor: React.FC<RuleEditorProps> = ({
       </div>
 
       <div className="mb-4">
-        <label className="block text-xs font-medium text-cx-fg2">Type</label>
+        <label className="block text-xs font-medium text-cx-fg2">
+          {t("consoleShared.networkSim.type")}
+        </label>
         <select
           value={rule.type}
           onChange={(e) =>
@@ -459,9 +481,15 @@ const RuleEditor: React.FC<RuleEditorProps> = ({
           }
           className="mt-1 block w-full rounded-md border border-cx-border-strong bg-cx-card px-2 py-1.5 text-xs focus:border-cx-accent focus:outline-none focus:ring-1 focus:ring-cx-accent"
         >
-          <option value="latency">Latency</option>
-          <option value="manual-disconnect">Manual Disconnect</option>
-          <option value="periodic-disconnect">Periodic Disconnect</option>
+          <option value="latency">
+            {t("consoleShared.networkSim.typeLatency")}
+          </option>
+          <option value="manual-disconnect">
+            {t("consoleShared.networkSim.typeManual")}
+          </option>
+          <option value="periodic-disconnect">
+            {t("consoleShared.networkSim.typePeriodic")}
+          </option>
         </select>
       </div>
 
@@ -470,7 +498,7 @@ const RuleEditor: React.FC<RuleEditorProps> = ({
           <>
             <div>
               <label className="block text-xs font-medium text-cx-fg2">
-                Direction (optional)
+                {t("consoleShared.networkSim.direction")}
               </label>
               <select
                 value={rule.direction || ""}
@@ -483,16 +511,22 @@ const RuleEditor: React.FC<RuleEditorProps> = ({
                 }
                 className="mt-1 block w-full rounded-md border border-cx-border-strong bg-cx-card px-2 py-1.5 text-xs focus:border-cx-accent focus:outline-none focus:ring-1 focus:ring-cx-accent"
               >
-                <option value="">Not set</option>
-                <option value="upstream">Upstream</option>
-                <option value="downstream">Downstream</option>
-                <option value="both">Both</option>
+                <option value="">{t("consoleShared.networkSim.notSet")}</option>
+                <option value="upstream">
+                  {t("consoleShared.networkSim.upstream")}
+                </option>
+                <option value="downstream">
+                  {t("consoleShared.networkSim.downstream")}
+                </option>
+                <option value="both">
+                  {t("consoleShared.networkSim.both")}
+                </option>
               </select>
             </div>
 
             <div>
               <label className="block text-xs font-medium text-cx-fg2">
-                Actions (optional, comma-separated)
+                {t("consoleShared.networkSim.actions")}
               </label>
               <textarea
                 value={rule.actions || ""}
@@ -515,7 +549,7 @@ const RuleEditor: React.FC<RuleEditorProps> = ({
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-medium text-cx-fg2">
-                  Delay (ms)
+                  {t("consoleShared.networkSim.delay")}
                 </label>
                 <input
                   type="number"
@@ -545,7 +579,7 @@ const RuleEditor: React.FC<RuleEditorProps> = ({
 
               <div>
                 <label className="block text-xs font-medium text-cx-fg2">
-                  Jitter (ms, optional)
+                  {t("consoleShared.networkSim.jitter")}
                 </label>
                 <input
                   type="number"
@@ -579,7 +613,7 @@ const RuleEditor: React.FC<RuleEditorProps> = ({
         {rule.type === "manual-disconnect" && (
           <div>
             <label className="block text-xs font-medium text-cx-fg2">
-              Reconnect Delay (ms)
+              {t("consoleShared.networkSim.reconnectDelay")}
             </label>
             <input
               type="number"
@@ -612,7 +646,7 @@ const RuleEditor: React.FC<RuleEditorProps> = ({
           <>
             <div>
               <label className="block text-xs font-medium text-cx-fg2">
-                Interval (ms)
+                {t("consoleShared.networkSim.interval")}
               </label>
               <input
                 type="number"
@@ -642,7 +676,7 @@ const RuleEditor: React.FC<RuleEditorProps> = ({
 
             <div>
               <label className="block text-xs font-medium text-cx-fg2">
-                Interval Jitter (ms, optional)
+                {t("consoleShared.networkSim.intervalJitter")}
               </label>
               <input
                 type="number"
@@ -672,7 +706,7 @@ const RuleEditor: React.FC<RuleEditorProps> = ({
 
             <div>
               <label className="block text-xs font-medium text-cx-fg2">
-                Reconnect Delay (ms)
+                {t("consoleShared.networkSim.reconnectDelay")}
               </label>
               <input
                 type="number"

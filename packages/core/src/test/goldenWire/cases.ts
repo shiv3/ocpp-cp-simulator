@@ -1,3 +1,4 @@
+import { SIGNING_CERTIFICATE } from "../../cp/domain/security/__tests__/signingCertificateFixture";
 import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
 import type { WireVersion } from "./FakeCsms";
 import type { Rig, RigOptions } from "./rig";
@@ -14,6 +15,7 @@ export interface GoldenCase {
 }
 
 const PAST = "2020-01-01T00:00:00.000Z";
+
 const FUTURE = "2099-01-01T00:00:00.000Z";
 
 const c16 = (
@@ -459,6 +461,29 @@ export const goldenCases: GoldenCase[] = [
       firmware: {
         location: "https://fw.example.test/signed.bin",
         retrieveDateTime: PAST,
+        signingCertificate: SIGNING_CERTIFICATE,
+        signature: "c2lnbmF0dXJl",
+      },
+    });
+    await rig.csms.waitForFrame(
+      (f) =>
+        f.dir === "CP>" &&
+        f.action === "SecurityEventNotification" &&
+        (f.payload as { type?: string }).type === "FirmwareUpdated",
+      { from, timeoutMs: 30_000 },
+    );
+    await settle(rig);
+  }),
+  // #733 L01.FR.23/24/02: a signing certificate that does not parse is
+  // answered InvalidCertificate, followed by the security event, and no
+  // train runs.
+  c16("signed-update-firmware-invalid-certificate", async (rig) => {
+    const from = rig.csms.mark();
+    await rig.csms.call("SignedUpdateFirmware", {
+      requestId: 12,
+      firmware: {
+        location: "https://fw.example.test/signed.bin",
+        retrieveDateTime: PAST,
         signingCertificate:
           "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----",
         signature: "c2lnbmF0dXJl",
@@ -467,8 +492,9 @@ export const goldenCases: GoldenCase[] = [
     await rig.csms.waitForFrame(
       (f) =>
         f.dir === "CP>" &&
-        f.action === "SignedFirmwareStatusNotification" &&
-        (f.payload as { status?: string }).status === "Installed",
+        f.action === "SecurityEventNotification" &&
+        (f.payload as { type?: string }).type ===
+          "InvalidFirmwareSigningCertificate",
       { from, timeoutMs: 30_000 },
     );
     await settle(rig);

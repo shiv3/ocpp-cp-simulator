@@ -4,6 +4,7 @@ import { ChargePoint } from "../../../../../domain/charge-point/ChargePoint";
 import { DefaultBootNotification } from "../../../../../domain/types/OcppTypes";
 import { Logger } from "../../../../../shared/Logger";
 import type { HandlerContext } from "../../MessageHandlerRegistry";
+import { SIGNING_CERTIFICATE } from "../../../../../domain/security/__tests__/signingCertificateFixture";
 import { isHandlerOutcome } from "../../../network-sim/ResponseEffectQueue";
 
 /**
@@ -46,8 +47,7 @@ function firmwarePayload(
       location: "http://example.invalid/firmware.bin",
       retrieveDateTime:
         overrides.retrieveDateTime ?? new Date(Date.now() + 1000).toISOString(),
-      signingCertificate:
-        "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----",
+      signingCertificate: SIGNING_CERTIFICATE,
       signature: "deadbeef",
     },
   };
@@ -137,5 +137,56 @@ describe("SignedUpdateFirmwareHandler", () => {
     ctx.chargePoint.disconnect();
     await vi.advanceTimersByTimeAsync(20_000);
     expect(sent).toHaveLength(1);
+  });
+});
+
+describe("SignedUpdateFirmwareHandler signing certificate (#733)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("answers InvalidCertificate and runs no train for an unparsable certificate (L01.FR.24)", async () => {
+    const { ctx, sent } = buildContext();
+    const security = vi
+      .spyOn(ctx.chargePoint, "sendSecurityEventNotification")
+      .mockResolvedValue(undefined);
+    const payload = firmwarePayload({
+      retrieveDateTime: new Date(Date.now() - 1000).toISOString(),
+    });
+    payload.firmware.signingCertificate =
+      "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----";
+    const res = new SignedUpdateFirmwareHandler().handle(payload, ctx);
+    expect(isHandlerOutcome(res)).toBe(true);
+    if (!isHandlerOutcome(res)) return;
+    expect(res.payload).toEqual({ status: "InvalidCertificate" });
+    res.afterResponseSettled();
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(security).toHaveBeenCalledWith(
+      "InvalidFirmwareSigningCertificate",
+      expect.any(String),
+    );
+    expect(sent).toEqual([]);
+  });
+
+  it("sends FirmwareUpdated right after Installed (L01.FR.33)", async () => {
+    const { ctx, sent } = buildContext();
+    const security = vi
+      .spyOn(ctx.chargePoint, "sendSecurityEventNotification")
+      .mockResolvedValue(undefined);
+    const res = new SignedUpdateFirmwareHandler().handle(
+      firmwarePayload({
+        retrieveDateTime: new Date(Date.now() - 1000).toISOString(),
+      }),
+      ctx,
+    );
+    if (!isHandlerOutcome(res)) throw new Error("expected an outcome");
+    res.afterResponseSettled();
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(sent.at(-1)?.status).toBe("Installed");
+    expect(security).toHaveBeenCalledTimes(1);
+    expect(security).toHaveBeenCalledWith("FirmwareUpdated");
   });
 });

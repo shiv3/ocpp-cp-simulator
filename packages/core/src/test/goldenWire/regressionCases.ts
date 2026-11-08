@@ -6,6 +6,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any --
    these cases reach into station internals (configuration, listeners, runtime
    snapshots) that the public types do not expose */
+import { SIGNING_CERTIFICATE } from "../../cp/domain/security/__tests__/signingCertificateFixture";
 import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
 import { resolveNetworkSimConfig } from "../../cp/infrastructure/transport/network-sim";
 import type { GoldenCase as Case } from "./cases";
@@ -655,7 +656,7 @@ c16("ns-signed-firmware-drop", async (r) => {
     firmware: {
       location: "http://x",
       retrieveDateTime: "2020-01-01T00:00:00.000Z",
-      signingCertificate: "c",
+      signingCertificate: SIGNING_CERTIFICATE,
       signature: "s",
     },
   });
@@ -829,7 +830,7 @@ c16("firmware-invalid-date", async (r) => {
     firmware: {
       location: "http://x",
       retrieveDateTime: "nope",
-      signingCertificate: "c",
+      signingCertificate: SIGNING_CERTIFICATE,
       signature: "s",
     },
   });
@@ -1549,7 +1550,7 @@ c16(
       firmware: {
         location: "http://x",
         retrieveDateTime: FAR_PAST,
-        signingCertificate: "c",
+        signingCertificate: SIGNING_CERTIFICATE,
         signature: "s",
       },
     },

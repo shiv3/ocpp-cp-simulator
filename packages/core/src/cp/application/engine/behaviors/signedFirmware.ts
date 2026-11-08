@@ -1,5 +1,6 @@
 import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { checkFirmwareSigningCertificate } from "../../../domain/security/signingCertificate";
 import { LogType } from "../../../shared/Logger";
 
 /** Time between two statuses of the simulated update. */
@@ -9,7 +10,11 @@ interface SignedUpdateFirmwareRequest {
   requestId: number;
   retries?: number | null;
   retryInterval?: number | null;
-  firmware: { location?: string; retrieveDateTime: string };
+  firmware: {
+    location?: string;
+    retrieveDateTime: string;
+    signingCertificate?: unknown;
+  };
 }
 
 /**
@@ -18,7 +23,13 @@ interface SignedUpdateFirmwareRequest {
  * settled, the station walks Downloading → Downloaded → SignatureVerified →
  * Installing → Installed with SignedFirmwareStatusNotification, two seconds
  * apart from `retrieveDateTime`, carrying the request's `requestId` on every
- * notification. No signature is verified (there is no binary to fetch), so
+ * notification, and ends with a `FirmwareUpdated` SecurityEventNotification
+ * (L01.FR.33). The `signingCertificate` is validated before the request is
+ * accepted (L01.FR.23): one that does not parse, is outside its validity
+ * period or is not issued by an installed ManufacturerRootCertificate is
+ * answered `InvalidCertificate` (L01.FR.24), no train runs, and an
+ * `InvalidFirmwareSigningCertificate` SecurityEventNotification follows
+ * (L01.FR.02). No signature is verified (there is no binary to fetch), so
  * `SignatureVerified` always fires. `retries` / `retryInterval` are logged,
  * not exercised. A train is separate from the plain UpdateFirmware train.
  */
@@ -31,6 +42,30 @@ export function signedFirmwareBehavior(cp: ChargePoint): Behavior {
         mode: "replace",
         handle: (request, ctx) => {
           const req = request as SignedUpdateFirmwareRequest;
+          const check = checkFirmwareSigningCertificate(
+            req.firmware.signingCertificate,
+            cp.nowDate(),
+            cp.certificateStore
+              .listRootCertificates(["ManufacturerRootCertificate"])
+              .map((root) => root.pem),
+          );
+          if (!check.ok) {
+            cp.logger.warn(
+              `SignedUpdateFirmware: InvalidCertificate (${check.problem}): ${check.detail}`,
+              LogType.OCPP,
+            );
+            return {
+              response: { status: "InvalidCertificate" },
+              after: async () => {
+                await cp
+                  .sendSecurityEventNotification(
+                    "InvalidFirmwareSigningCertificate",
+                    check.detail,
+                  )
+                  .catch(() => undefined);
+              },
+            };
+          }
           const retrieveDate = new Date(req.firmware.retrieveDateTime);
           if (Number.isNaN(retrieveDate.getTime())) {
             cp.logger.warn(
@@ -71,6 +106,12 @@ export function signedFirmwareBehavior(cp: ChargePoint): Behavior {
                   "Installed",
                 ]) {
                   ctx.notify.signedFirmwareStatus(step, req.requestId);
+                  if (step === "Installed") {
+                    // L01.FR.33: right after Installed.
+                    await cp
+                      .sendSecurityEventNotification("FirmwareUpdated")
+                      .catch(() => undefined);
+                  }
                   await ctx.sleep(STEP_MS);
                 }
               } finally {

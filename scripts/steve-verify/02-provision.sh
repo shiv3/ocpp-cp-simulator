@@ -27,7 +27,7 @@ source "$SCRIPT_DIR/lib.sh"
 require_cmd docker
 require_cmd curl
 
-SCENARIOS_DIR="$REPO_ROOT/src/utils/scenarios"
+SCENARIOS_DIR="$REPO_ROOT/packages/core/src/utils/scenarios"
 [ -d "$SCENARIOS_DIR" ] || die "scenarios dir not found: $SCENARIOS_DIR"
 
 _db_ping() { db_scalar "SELECT 1;" >/dev/null 2>&1; }

@@ -52,7 +52,11 @@ interface CancelReservationRequest {
  * tag's session consumes it. The station keeps one connector available for
  * each reservation, so a ReserveNow (connector 0 or specific) is `Occupied`
  * when the free connectors, less those with their own reservation and less
- * one per connector-0 reservation, cannot take it ({@link reserveNowRefusal16}).
+ * one per connector-0 reservation, cannot take it ({@link reserveNowRefusal16}),
+ * and for the whole validity of a connector-0 reservation a session of another
+ * tag that would take the last such connector is refused
+ * ({@link startBlockedByReservation16}): RemoteStartTransaction answers
+ * `Rejected`, a local start does not start (no message is sent).
  */
 export function reservationBehavior(cp: ChargePoint): Behavior {
   return {
@@ -187,6 +191,51 @@ function freeConnectors(cp: ChargePoint) {
 }
 
 /**
+ * The capacity rule of OCPP 1.6 §5.13, shared by ReserveNow and the start of a
+ * session so both count the same way: the connectors that can still take a
+ * session, other than `takenConnectorId` and those holding their own
+ * reservation, less one per connector-0 reservation (`ignoreReservationId`,
+ * the reservation a ReserveNow replaces, is left out). A negative result means
+ * the connector-0 reservations no longer have a connector each.
+ */
+function connectorCapacityShortfall16(
+  cp: ChargePoint,
+  takenConnectorId: number,
+  ignoreReservationId?: number,
+): number {
+  const held = cp.reservationManager
+    .getAllReservations()
+    .filter((r) => r.reservationId !== ignoreReservationId);
+  const owned = new Set(
+    held.filter((r) => r.connectorId !== 0).map((r) => r.connectorId),
+  );
+  const zero = held.filter((r) => r.connectorId === 0).length;
+  const spare = freeConnectors(cp).filter(
+    (c) => !owned.has(c.id) && c.id !== takenConnectorId,
+  ).length;
+  return spare - zero;
+}
+
+/**
+ * Whether a session of `idTag` on `connectorId` must be refused because it
+ * would leave an active connector-0 reservation of another tag without a
+ * connector (OCPP 1.6 edition 2 §5.13: "at any time during the validity of the
+ * reservation, one connector remains available for the reserved idTag"). A tag
+ * that holds the reservation that applies to this connector (its own, or via
+ * `parentIdTag`) is never refused. Uses the capacity rule of
+ * {@link reserveNowRefusal16}.
+ */
+export function startBlockedByReservation16(
+  cp: ChargePoint,
+  connectorId: number,
+  idTag: string,
+): boolean {
+  if (isOcpp2Version(cp.ocppVersion)) return false;
+  if (cp.reservationManager.reservationFor(connectorId, idTag)) return false;
+  return connectorCapacityShortfall16(cp, connectorId) < 0;
+}
+
+/**
  * Why an OCPP 1.6 ReserveNow cannot be accepted, or `null` when the station
  * can take it. Everything here depends on the station only (the reservation
  * manager's own checks, an expired date or a taken connector, come after), so
@@ -240,19 +289,12 @@ export function reserveNowRefusal16(
     }
   }
 
-  const held = cp.reservationManager
-    .getAllReservations()
-    .filter((r) => r.reservationId !== req.reservationId);
-  const owned = new Set(
-    held.filter((r) => r.connectorId !== 0).map((r) => r.connectorId),
-  );
-  const zero = held.filter((r) => r.connectorId === 0).length;
-  const spare = freeConnectors(cp).filter(
-    (c) => !owned.has(c.id) && c.id !== connectorId,
-  ).length;
   // Connector 0 itself needs one of the spare connectors; a specific
   // reservation takes its own connector and leaves the rest to `zero`.
-  if (spare - zero < (connectorId === 0 ? 1 : 0)) {
+  if (
+    connectorCapacityShortfall16(cp, connectorId, req.reservationId) <
+    (connectorId === 0 ? 1 : 0)
+  ) {
     return ReservationStatus.Occupied;
   }
   return null;

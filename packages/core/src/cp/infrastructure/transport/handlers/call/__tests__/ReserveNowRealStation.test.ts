@@ -336,3 +336,130 @@ describe("ReserveNow checks the station before it authorizes (#595 review)", () 
     expect(authorize).not.toHaveBeenCalled();
   });
 });
+
+describe("a connector-0 reservation keeps a connector free for its tag (#595, 1.6 §5.13)", () => {
+  const FUTURE = () => new Date(Date.now() + 3_600_000);
+
+  it("refuses a stranger the last spare connector, in both start paths", async () => {
+    const { chargePoint, reserve, enableZero } = setup();
+    enableZero();
+    await reserve(0, 50, "OWNER");
+    // The first connector leaves the second one for OWNER.
+    expect(
+      (
+        await chargePoint.startTransaction(
+          "S1",
+          1,
+          undefined,
+          undefined,
+          remote,
+        )
+      ).started,
+    ).toBe(true);
+    // The second would leave none: refused, locally and by RemoteStart.
+    expect(
+      (
+        await chargePoint.startTransaction(
+          "S2",
+          2,
+          undefined,
+          undefined,
+          remote,
+        )
+      ).started,
+    ).toBe(false);
+    expect((await chargePoint.startTransaction("S2", 2)).started).toBe(false);
+    expect(chargePoint.getConnector(2)!.transaction).toBeFalsy();
+    expect(chargePoint.reservationManager.getReservation(50)).toBeDefined();
+  });
+
+  it("does not refuse the owner or the parentIdTag", async () => {
+    const { chargePoint, enableZero } = setup();
+    enableZero();
+    chargePoint.reservationManager.createReservation(
+      0,
+      FUTURE(),
+      "OWNER",
+      "FLEET",
+      51,
+    );
+    await chargePoint.startTransaction("S1", 1, undefined, undefined, remote);
+    expect(
+      (
+        await chargePoint.startTransaction(
+          "FLEET",
+          2,
+          undefined,
+          undefined,
+          remote,
+        )
+      ).started,
+    ).toBe(true);
+    expect(chargePoint.getConnector(2)!.transaction?.reservationId).toBe(51);
+  });
+
+  it("answers RemoteStartTransaction Rejected for the stranger and Accepted for the owner", async () => {
+    const { chargePoint, reserve, enableZero } = setup();
+    enableZero();
+    await reserve(0, 52, "OWNER");
+    await chargePoint.startTransaction("S1", 1, undefined, undefined, remote);
+    const answer = (idTag: string) =>
+      chargePoint.engine.runDefault("RemoteStartTransaction", {
+        idTag,
+        connectorId: 2,
+      }).response;
+    expect(answer("S2")).toMatchObject({ status: "Rejected" });
+    expect(chargePoint.getConnector(2)!.transaction).toBeFalsy();
+    expect(answer("OWNER")).toMatchObject({ status: "Accepted" });
+  });
+
+  it("uses the capacity of ReserveNow: connectors with their own reservation do not count as spare", async () => {
+    const { chargePoint, reserve, enableZero } = setup({ connectors: 3 });
+    enableZero();
+    await reserve(0, 53, "OWNER");
+    await reserve(3, 54, "OTHER");
+    // 1 and 2 are spare; 3 is OTHER's. One session fits, the second would
+    // leave OWNER nothing.
+    expect(
+      (
+        await chargePoint.startTransaction(
+          "S1",
+          1,
+          undefined,
+          undefined,
+          remote,
+        )
+      ).started,
+    ).toBe(true);
+    expect(
+      (
+        await chargePoint.startTransaction(
+          "S2",
+          2,
+          undefined,
+          undefined,
+          remote,
+        )
+      ).started,
+    ).toBe(false);
+  });
+
+  it("does not hold a session back once the reservation is gone", async () => {
+    const { chargePoint, reserve, enableZero } = setup();
+    enableZero();
+    await reserve(0, 55, "OWNER");
+    await chargePoint.startTransaction("S1", 1, undefined, undefined, remote);
+    chargePoint.reservationManager.cancelReservation(55);
+    expect(
+      (
+        await chargePoint.startTransaction(
+          "S2",
+          2,
+          undefined,
+          undefined,
+          remote,
+        )
+      ).started,
+    ).toBe(true);
+  });
+});

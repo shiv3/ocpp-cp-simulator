@@ -360,6 +360,25 @@ c16(
   },
   two,
 );
+// #595, 1.6 §5.13: a connector-0 reservation keeps one connector free for its
+// idTag for its whole validity. A stranger takes the first of two connectors,
+// is Rejected on the last one (RemoteStartTransaction.conf Rejected, no
+// StartTransaction.req), and the owner still gets it, carrying the reservationId.
+c16(
+  "res-connector0-keeps-a-connector",
+  async (r) => {
+    r.cp.configuration.setRuntimeValue("ReserveConnectorZeroSupported", true);
+    await reserve(r, 23, 0, "OWNER", FUT);
+    await settle(r);
+    await r.remoteStart("STRANGER", 1);
+    await settle(r);
+    await r.remoteStart("STRANGER2", 2);
+    await settle(r);
+    await r.remoteStart("OWNER", 2);
+    await settle(r);
+  },
+  two,
+);
 both("res-then-inoperative", async (r) => {
   await reserve(r, 11, 1, "OWNER", FUT);
   await settle(r);

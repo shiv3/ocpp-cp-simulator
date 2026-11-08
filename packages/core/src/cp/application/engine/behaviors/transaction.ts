@@ -16,6 +16,7 @@ import {
 } from "../../../domain/types/OcppTypes";
 import { isOcpp2Version } from "../../../domain/types/OcppVersion";
 import { LogType } from "../../../shared/Logger";
+import { startBlockedByReservation16 } from "./reservation";
 
 /**
  * What the transaction defaults need from the station beyond its public API.
@@ -68,6 +69,11 @@ export function transactionBehavior(cp: ChargePoint): Behavior {
           const resolved = connectorId || 1;
           const connector = cp.getConnector(resolved);
           if (!connector || connector.availability !== "Operative") {
+            return { response: { status: "Rejected" } };
+          }
+          // 1.6 §5.13: a connector-0 reservation of another tag keeps its
+          // connector; one answer per CALL, so refuse before `Accepted`.
+          if (startBlockedByReservation16(cp, resolved, idTag)) {
             return { response: { status: "Rejected" } };
           }
           // 1.6 §5.11: the transaction starts while the answer is built.
@@ -224,6 +230,17 @@ export async function startTransaction(
   if (connector.availability !== "Operative") {
     logger.warn(
       `Connector ${connectorId} is ${connector.availability}; refusing to start transaction`,
+      LogType.TRANSACTION,
+    );
+    return { started: false };
+  }
+
+  // 1.6 §5.13: a connector-0 reservation of another tag keeps a connector
+  // free for its whole validity. Checked before the Authorize gate (it only
+  // reads state) and not reported to the CSMS: the session does not start.
+  if (startBlockedByReservation16(cp, connectorId, tagId)) {
+    logger.warn(
+      `Refusing transaction start for ${tagId} on connector ${connectorId}: it would leave no connector for a connector-0 reservation (OCPP 1.6 §5.13)`,
       LogType.TRANSACTION,
     );
     return { started: false };

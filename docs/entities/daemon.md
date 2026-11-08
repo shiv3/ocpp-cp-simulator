@@ -670,12 +670,27 @@ the same axis ran with a 5 s cycle (`--tx-interval 5`, `--counts 500,1000,1600`;
 **The knee and the ceiling.** On this machine and under this load, active
 traffic runs flat to about **1,200 OCPP calls/s** (2000 charge points on a 15 s
 cycle, or 500 on a 5 s one), turns visibly slower at about **1,400
-calls/s** (N=1000 on a 5 s cycle: p95 179 ms) and **saturates at about 1,450
-calls/s**: at N=1600 the offered load doubled but the answered calls did not
-(1,470/s), p50 reached 1.4 s and 1,303 transactions were left unconfirmed. In
-terms of fleets, that is roughly **2,000 charge points cycling a transaction
+calls/s** (N=1000 on a 5 s cycle: p95 179 ms) and **stops following the
+offered load at about 1,450 calls/s**: at N=1600 the offered load was about
+2,250 calls/s (the N=500 and N=1000 rate per charge point, times 1,600) and
+1,470 were answered, p50 reached 1.4 s and 1,303 transactions were left
+unconfirmed.
+
+**Which process limited it was not isolated.** The daemon, the mock CSMS and
+`fleet-bench.ts` shared 4 CPUs with other work (load average 3 to 7.4), one
+30 s run per step, and no per-process CPU was recorded for the 5 s steps. The
+daemon's own signal, a single loop at 100% of one core, is therefore not shown
+for the step that stopped following the load. The call duration includes the
+mock's turnaround, and `unconf.tx` is counted by the load generator's
+watcher, which receives the daemon's full `"*"` event stream on the same host
+(that subscription is part of the daemon load being measured). So the data
+cannot tell daemon saturation from CPU starvation or a lagging mock or bench.
+N=1600 at `--tx-interval 5` is also the most the bench pool sustains
+(`320 × tx-interval`). Read **about 1,450 calls/s** as what this setup
+(daemon, mock and bench on a busy shared host) reached, not as the daemon's
+own limit. In terms of fleets, that is roughly **2,000 charge points cycling a transaction
 every 15 s**, or **about 1,000 on a 5 s cycle**, and **more than 2,000 idle**
-ones. Resident memory was 0.7 GiB at 2000 idle charge points on a fresh daemon, 1.5
+ones, for this setup. Resident memory was 0.7 GiB at 2000 idle charge points on a fresh daemon, 1.5
 GiB at the end of the 2000-charge-point active sweep and 2.1 GiB after four
 sweeps in the same process, so memory is not the limit on 12 GiB. No run showed
 `ocppcp_ocpp_call_timeouts_total`, CALLERRORs or reconnects above zero: the

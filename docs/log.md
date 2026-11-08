@@ -2394,3 +2394,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 - [Daemon → Measured scale ceiling](entities/daemon.md#result-first-measured-ceiling-626-2026-11-08): environment (4 CPUs shared with other tasks, 12 GiB, bun 1.3.14, loopback mock CSMS), the idle, active (15 s and 5 s cycle) tables, the knee and ceiling, the file-descriptor trap, the commands to repeat it. The "no number yet" text is gone from there and from [Limits & Roadmap](entities/daemon.md#limits--roadmap).
 - [Fleet load roadmap → 5a / 5b](analyses/fleet-load-and-observability-roadmap.md#5b-worker-model-conditional): 5a marked measured; 5b decided: not built, with the condition to revisit.
 - [Bench README source](sources/bench-readme.md), [GitHub issues](sources/github-issues.md): #626. New script `scripts/bench/mockCsmsServer.ts`.
+
+## [2026-11-08] fix | Fleet-bench ceiling: wording and 5b status (#626)
+
+- [Daemon → Measured scale ceiling](entities/daemon.md#result-first-measured-ceiling-626-2026-11-08): the 5 s axis is described as the point where answered calls stopped following the offered load (about 2,250 calls/s offered at N=1600, 1,470 answered); which process limited it was not isolated (shared host, no per-process CPU, the bench's `"*"` subscription is part of the load). No re-measure.
+- [Fleet load roadmap](analyses/fleet-load-and-observability-roadmap.md#5b-worker-model-conditional): 5b is `decided: not built (#626)` in the status table; the decision says the run was OCPP 1.6J and lists a 2.x fleet among the revisit conditions; typo fixed. [GitHub issues](sources/github-issues.md): the #626 row says 1.6J and moves to the end of the table.

@@ -32,6 +32,12 @@ describe("LanguageToggle", () => {
     expect(t("settings.page.tagsActive", { count: 1 })).toBe(
       t("settings.page.tagsActive", { count: 2 }).replace("2", "1"),
     );
+    // French uses the singular for 0 as well as 1
+    await setLocale("fr");
+    expect(document.documentElement.lang).toBe("fr");
+    expect(t("scenarios.count.step", { count: 0 })).toBe("0 étape");
+    expect(t("scenarios.count.step", { count: 1 })).toBe("1 étape");
+    expect(t("scenarios.count.step", { count: 2 })).toBe("2 étapes");
     await setLocale("en");
     expect(t("scenarios.count.step", { count: 1 })).toBe("1 step");
     expect(t("scenarios.count.step", { count: 3 })).toBe("3 steps");

@@ -68,6 +68,24 @@ describe("locale completeness", () => {
       expect(extra, `${locale} has unknown keys`).toEqual([]);
     });
 
+    it(`${locale} has the plural forms of its language`, () => {
+      // i18next picks the suffix with Intl.PluralRules: a form missing here
+      // falls back to English, an extra one is never used.
+      const categories = new Intl.PluralRules(locale)
+        .resolvedOptions()
+        .pluralCategories.map((c) => `_${c}`)
+        .sort();
+      const plurals = [...enBases].filter((b) => `${b}_other` in en);
+      const bad = plurals.filter((b) => {
+        const forms = Object.keys(table)
+          .filter((k) => base(k) === b && PLURAL_SUFFIX.test(k))
+          .map((k) => k.slice(b.length))
+          .sort();
+        return JSON.stringify(forms) !== JSON.stringify(categories);
+      });
+      expect(bad, `plural forms in ${locale}`).toEqual([]);
+    });
+
     it(`${locale} has no empty strings`, () => {
       const empty = Object.keys(table).filter((k) => table[k].trim() === "");
       expect(empty).toEqual([]);
@@ -102,6 +120,7 @@ describe("t", () => {
   it("recognises supported locales only", () => {
     expect(isLocale("ja")).toBe(true);
     expect(isLocale("zh-CN")).toBe(true);
-    expect(isLocale("fr")).toBe(false);
+    expect(isLocale("fr")).toBe(true);
+    expect(isLocale("de")).toBe(false);
   });
 });

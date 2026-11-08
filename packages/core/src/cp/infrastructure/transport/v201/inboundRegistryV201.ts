@@ -75,7 +75,13 @@ import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { matchesComponentVariable } from "../../../domain/monitoring/selectMonitors";
 import type { SignedCertificateUse } from "../../../domain/security/certificateUse";
 import type { Logger } from "../../../shared/Logger";
-import { buildBaseReportData } from "./baseReportV201";
+import { buildBaseReportData, selectReportBase } from "./baseReportV201";
+import { splitIntoSizedParts } from "./reportParts";
+import {
+  DEVICE_DATA_CTRLR_KEYS,
+  REPORT_MAX_BYTES,
+  REPORT_MAX_ITEMS,
+} from "../../../domain/device-model/reportLimits";
 import {
   buildCertificateHandlersV2x,
   V201_CERTIFICATE_MAPPING,
@@ -238,12 +244,58 @@ function fullReportData(ctx: V201InboundContext): ReportDataType[] {
   );
 }
 
+/**
+ * The ReportData as NotifyReport parts of at most `ItemsPerMessage[GetReport]`
+ * entries and `BytesPerMessage[GetReport]` bytes (#605). Every part carries
+ * the request's requestId (B07.FR.04, B08.FR.04), the first has seqNo 0 and
+ * seqNo grows by one per part (B07.FR.10, B08.FR.14), and every part but the
+ * last has tbc true (B08.FR.05).
+ */
+function notifyReportParts(
+  requestId: number,
+  reportData: readonly [ReportDataType, ...ReportDataType[]],
+  ctx: V201InboundContext,
+): NotifyReportRequestV201[] {
+  const store = ctx.chargePoint.configuration;
+  const limit = (key: string, fallback: number): number => {
+    const v = Number(store.get(key)?.value);
+    return Number.isInteger(v) && v >= 1 ? v : fallback;
+  };
+  const generatedAt = stationNow(ctx.chargePoint).toISOString();
+  const part = (
+    items: readonly ReportDataType[],
+    seqNo: number,
+    tbc: boolean,
+  ): NotifyReportRequestV201 => ({
+    requestId,
+    generatedAt,
+    seqNo,
+    tbc,
+    reportData: [...items] as [ReportDataType, ...ReportDataType[]],
+  });
+  // The OCPP-J CALL frame around the payload: [2,"<uuid>","NotifyReport",...].
+  const frameBytes = (items: readonly ReportDataType[], seqNo: number) =>
+    NOTIFY_REPORT_FRAME_BYTES +
+    new TextEncoder().encode(JSON.stringify(part(items, seqNo, true))).length;
+  return splitIntoSizedParts(
+    reportData,
+    limit(DEVICE_DATA_CTRLR_KEYS.itemsPerGetReport, REPORT_MAX_ITEMS),
+    limit(DEVICE_DATA_CTRLR_KEYS.bytesPerGetReport, REPORT_MAX_BYTES),
+    frameBytes,
+  ).map((p) => part(p.items, p.seqNo, p.tbc));
+}
+
+/** `[2,"` + 36-character message id + `","NotifyReport",` + `]`. */
+const NOTIFY_REPORT_FRAME_BYTES = 5 + 36 + 16 + 1;
+
 export function handleGetBaseReportV201(
   payload: unknown,
   ctx: V201InboundContext,
 ): V201HandlerResult {
   const req = payload as GetBaseReportRequestV201;
-  const reportData = fullReportData(ctx);
+  // B07.FR.01/FR.12: all three bases are supported, so NotSupported
+  // (B07.FR.02) cannot happen for a request the schema accepted.
+  const reportData = selectReportBase(fullReportData(ctx), req.reportBase);
   const first = reportData[0];
   if (first === undefined) {
     return {
@@ -255,14 +307,15 @@ export function handleGetBaseReportV201(
 
   return {
     response: { status: "Accepted" } satisfies GetBaseReportResponseV201,
-    afterResult: () =>
-      ctx.sendCall("NotifyReport", {
-        requestId: req.requestId,
-        generatedAt: stationNow(ctx.chargePoint).toISOString(),
-        seqNo: 0,
-        tbc: false,
-        reportData: [first, ...reportData.slice(1)],
-      }),
+    afterResult: () => {
+      for (const part of notifyReportParts(
+        req.requestId,
+        [first, ...reportData.slice(1)],
+        ctx,
+      )) {
+        ctx.sendCall("NotifyReport", part);
+      }
+    },
   };
 }
 
@@ -296,14 +349,15 @@ export function handleGetReportV201(
 
   return {
     response: { status: "Accepted" } satisfies GetReportResponseV201,
-    afterResult: () =>
-      ctx.sendCall("NotifyReport", {
-        requestId: req.requestId,
-        generatedAt: stationNow(ctx.chargePoint).toISOString(),
-        seqNo: 0,
-        tbc: false,
-        reportData: [first, ...reportData.slice(1)],
-      }),
+    afterResult: () => {
+      for (const part of notifyReportParts(
+        req.requestId,
+        [first, ...reportData.slice(1)],
+        ctx,
+      )) {
+        ctx.sendCall("NotifyReport", part);
+      }
+    },
   };
 }
 

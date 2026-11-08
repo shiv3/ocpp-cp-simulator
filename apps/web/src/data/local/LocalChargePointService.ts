@@ -1465,6 +1465,8 @@ export class LocalChargePointService implements ChargePointService {
         this.registerChargePoint(cp);
       } else {
         cp.autoMeterValueSetting = definition.autoMeterValueSetting;
+        // #550: the console toggles this on a running charge point.
+        cp.txUpdatedMeterValues = definition.txUpdatedMeterValues === true;
         // TODO: handle connector count changes if necessary
       }
 

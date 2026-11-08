@@ -27,6 +27,7 @@ import { buildSoapCallbackUrl } from "../soapCallbackUrl";
 import { DEFAULT_SOAP_PATH } from "../soapPath";
 import { isSoapVersion } from "@ocpp-cp-sim/core/cp/domain/types/OcppVersion";
 import { perChargePointTables } from "@ocpp-cp-sim/core/cp/domain/persistence/schema";
+import { buildUpsert } from "@ocpp-cp-sim/core/cp/domain/persistence/upsert";
 import {
   labelsSchema,
   matchesLabelSelector,
@@ -93,6 +94,7 @@ interface ChargePointRow {
   labels: string | null;
   behaviors: string | null;
   tx_updated_meter_values: number | null;
+  inbound_validation: string | null;
 }
 
 interface CPRegistryOptions {
@@ -244,7 +246,8 @@ export class CPRegistry {
         "central_system_url, soap_callback_url, soap_path, " +
         "security_profile, authorization_key, cpo_name, " +
         "tls_ca_path, tls_cert_path, tls_key_path, " +
-        "basic_auth, boot_notif, created_at, labels, behaviors, tx_updated_meter_values " +
+        "basic_auth, boot_notif, created_at, labels, behaviors, tx_updated_meter_values, " +
+        "inbound_validation " +
         "FROM charge_points ORDER BY created_at ASC",
     );
     const restored: string[] = [];
@@ -312,6 +315,13 @@ export class CPRegistry {
         // #347: NULL — off, or a row older than the column — restores as off.
         ...(row.tx_updated_meter_values === 1
           ? { txUpdatedMeterValues: true }
+          : {}),
+        // #593: NULL, or a value this build does not know, restores as the
+        // default (warn).
+        ...(row.inbound_validation === "off" ||
+        row.inbound_validation === "warn" ||
+        row.inbound_validation === "enforce"
+          ? { inboundValidation: row.inbound_validation }
           : {}),
       };
       // #354 follow-up: a SOAP charge point whose callback URL was derived
@@ -964,72 +974,55 @@ export class CPRegistry {
     behaviorsColumn?: string | null,
   ): void {
     if (!this.database) return;
-    this.database.run(
-      "INSERT INTO charge_points " +
-        "(cp_id, ws_url, supervision_urls, url_distribution, " +
-        "id_tags, id_tag_distribution, id_tag_file, " +
-        "connectors, vendor, model, ocpp_version, " +
-        "central_system_url, soap_callback_url, soap_path, " +
-        "security_profile, authorization_key, cpo_name, " +
-        "tls_ca_path, tls_cert_path, tls_key_path, " +
-        "basic_auth, boot_notif, created_at, labels, behaviors, tx_updated_meter_values) " +
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
-        "ON CONFLICT (cp_id) DO UPDATE SET " +
-        "ws_url = excluded.ws_url, " +
-        "supervision_urls = excluded.supervision_urls, " +
-        "url_distribution = excluded.url_distribution, " +
-        "id_tags = excluded.id_tags, " +
-        "id_tag_distribution = excluded.id_tag_distribution, " +
-        "id_tag_file = excluded.id_tag_file, " +
-        "connectors = excluded.connectors, " +
-        "vendor = excluded.vendor, model = excluded.model, " +
-        "ocpp_version = excluded.ocpp_version, " +
-        "central_system_url = excluded.central_system_url, " +
-        "soap_callback_url = excluded.soap_callback_url, " +
-        "soap_path = excluded.soap_path, " +
-        "security_profile = excluded.security_profile, " +
-        "authorization_key = excluded.authorization_key, " +
-        "cpo_name = excluded.cpo_name, " +
-        "tls_ca_path = excluded.tls_ca_path, " +
-        "tls_cert_path = excluded.tls_cert_path, " +
-        "tls_key_path = excluded.tls_key_path, " +
-        "basic_auth = excluded.basic_auth, boot_notif = excluded.boot_notif, " +
-        "labels = excluded.labels, " +
-        "behaviors = excluded.behaviors, " +
-        "tx_updated_meter_values = excluded.tx_updated_meter_values",
+    const { sql, params } = buildUpsert(
+      "charge_points",
       [
-        init.cpId,
-        init.wsUrl,
-        init.supervisionUrls ? JSON.stringify(init.supervisionUrls) : null,
-        init.urlDistribution ?? null,
-        init.idTags ? JSON.stringify(init.idTags) : null,
-        init.idTagDistribution ?? null,
-        init.idTagFile ?? null,
-        init.connectors,
-        init.vendor,
-        init.model,
-        init.ocppVersion ?? "OCPP-1.6J",
-        init.centralSystemUrl ?? init.wsUrl,
-        init.soapCallbackUrl ?? null,
-        init.soapPath ?? null,
-        init.securityProfile ?? null,
-        init.authorizationKey ?? null,
-        init.cpoName ?? null,
-        init.tlsCaPath ?? null,
-        init.tlsCertPath ?? null,
-        init.tlsKeyPath ?? null,
-        init.basicAuth ? JSON.stringify(init.basicAuth) : null,
-        init.bootNotification ? JSON.stringify(init.bootNotification) : null,
-        new Date().toISOString(),
-        labelsColumn(init.labels),
-        behaviorsColumn !== undefined
-          ? behaviorsColumn
-          : init.behaviors
-            ? JSON.stringify(init.behaviors)
-            : null,
-        init.txUpdatedMeterValues ? 1 : null,
+        ["cp_id", init.cpId],
+        ["ws_url", init.wsUrl],
+        [
+          "supervision_urls",
+          init.supervisionUrls ? JSON.stringify(init.supervisionUrls) : null,
+        ],
+        ["url_distribution", init.urlDistribution ?? null],
+        ["id_tags", init.idTags ? JSON.stringify(init.idTags) : null],
+        ["id_tag_distribution", init.idTagDistribution ?? null],
+        ["id_tag_file", init.idTagFile ?? null],
+        ["connectors", init.connectors],
+        ["vendor", init.vendor],
+        ["model", init.model],
+        ["ocpp_version", init.ocppVersion ?? "OCPP-1.6J"],
+        ["central_system_url", init.centralSystemUrl ?? init.wsUrl],
+        ["soap_callback_url", init.soapCallbackUrl ?? null],
+        ["soap_path", init.soapPath ?? null],
+        ["security_profile", init.securityProfile ?? null],
+        ["authorization_key", init.authorizationKey ?? null],
+        ["cpo_name", init.cpoName ?? null],
+        ["tls_ca_path", init.tlsCaPath ?? null],
+        ["tls_cert_path", init.tlsCertPath ?? null],
+        ["tls_key_path", init.tlsKeyPath ?? null],
+        ["basic_auth", init.basicAuth ? JSON.stringify(init.basicAuth) : null],
+        [
+          "boot_notif",
+          init.bootNotification ? JSON.stringify(init.bootNotification) : null,
+        ],
+        ["created_at", new Date().toISOString()],
+        ["labels", labelsColumn(init.labels)],
+        [
+          "behaviors",
+          behaviorsColumn !== undefined
+            ? behaviorsColumn
+            : init.behaviors
+              ? JSON.stringify(init.behaviors)
+              : null,
+        ],
+        ["tx_updated_meter_values", init.txUpdatedMeterValues ? 1 : null],
+        ["inbound_validation", init.inboundValidation ?? null],
       ],
+      ["cp_id"],
+      // The row keeps the time it was first created.
+      ["created_at"],
     );
+    this.database.run(sql, params);
   }
 
   private restoreTlsFromPaths(
@@ -1331,6 +1324,7 @@ function preserveOmittedInit(
     behaviors: next.behaviors ?? existing.behaviors,
     txUpdatedMeterValues:
       next.txUpdatedMeterValues ?? existing.txUpdatedMeterValues,
+    inboundValidation: next.inboundValidation ?? existing.inboundValidation,
   };
 }
 

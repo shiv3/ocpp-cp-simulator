@@ -25,6 +25,8 @@ export interface RigOptions {
   readonly responders?: Readonly<Record<string, CsmsResponder>>;
   /** Run before `connect()`, to arm configuration, policies or overrides. */
   readonly beforeConnect?: (cp: ChargePoint) => void;
+  /** Transport options of the station (hardware, `chargerCapabilities`). */
+  readonly transportOptions?: import("../../cp/domain/charge-point/ChargePoint").ChargePointTransportOptions;
   /** Leave the station unconnected; the case connects it itself. */
   readonly noConnect?: boolean;
   /** A clock and a seed for the station (the behavior test harness). */
@@ -62,7 +64,7 @@ export class Rig {
       {},
       [],
       OCPP_VERSION_STRING[options.version],
-      {},
+      options.transportOptions ?? {},
       undefined,
       undefined,
       undefined,

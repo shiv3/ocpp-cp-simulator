@@ -6,6 +6,12 @@ import {
   resolveSocForCurve,
 } from "./ChargingCurve";
 import type { EVSettings } from "./EVSettings";
+import {
+  rampFactor,
+  secondBucket,
+  seededUnit,
+  type MeterRealism,
+} from "./MeterRealism";
 
 /**
  * The physical state of one connector at one instant, resolved once.
@@ -78,6 +84,44 @@ export interface OperatingPoint {
    * the vehicle's ceiling, `"none"` when nothing is known to bind.
    */
   limitedBy: OperatingPointLimit;
+  /**
+   * Multiplier the opt-in meter realism applied to the accepted power
+   * (power ramp-up × seeded power fluctuation, #614); exactly 1 when neither
+   * is configured. The register tick scales a configured increment by it, so
+   * the energy it adds is the integral of the power that is reported.
+   */
+  deliveryFactor: number;
+  /** Power the connector exports (V2X, #615) in watts; 0 unless a discharge
+   *  term is configured and the connector is `Charging`. */
+  exportW: number;
+  /** Line current for {@link exportW}. */
+  exportCurrentA: number;
+  /** Independent per-phase quantities (#615); `null` unless configured and
+   *  all three phases are in use. */
+  phaseDetail: PhaseDetail | null;
+}
+
+/** Per-phase quantities of a 3-phase connector, resolved with the point. */
+export interface PhaseDetail {
+  /** L1-N, L2-N, L3-N volts. */
+  voltageV: [number, number, number];
+  /** L1-L2, L2-L3, L3-L1 volts. */
+  lineToLineV: [number, number, number];
+  /** Current of each phase for its share of {@link OperatingPoint.acceptedW}. */
+  currentA: [number, number, number];
+  /** Active power of each phase; adds up to `acceptedW`. */
+  powerW: [number, number, number];
+  /** Whether the line-to-line voltages are reported. */
+  lineToLine: boolean;
+}
+
+/** The opt-in meter realism of one resolve (#614, #615). */
+export interface MeterTerm {
+  /** `undefined`: the historical, constant output. */
+  realism?: MeterRealism;
+  /** Epoch ms the running transaction started, for the ramp-up; `undefined`
+   *  outside a transaction (no ramp). */
+  sessionStartedAt?: number;
 }
 
 export type OperatingPointLimit =
@@ -165,6 +209,8 @@ export interface OperatingPointInputs {
   session: SessionTerm;
   charger: ChargerTerm;
   fault: FaultTerm;
+  /** `{}` for a connector without meter realism. */
+  meter: MeterTerm;
 }
 
 /** The vehicle term for the connector's resolved EV settings (`undefined`:
@@ -183,28 +229,62 @@ export function vehicleTermOf(settings: EVSettings | undefined): VehicleTerm {
 export function resolveOperatingPoint(
   inputs: OperatingPointInputs,
 ): OperatingPoint {
-  const { at, schedule, vehicle, session, charger, fault } = inputs;
+  const { at, schedule, vehicle, session, charger, fault, meter } = inputs;
   const { scheduleLimitW, activePhases } = schedule;
   const chargerCapW = charger.maxDeliveryW;
   // The one narrowing of the CSMS allocation by the hardware: every term
   // below (acceptance, offer, register bound, report bound) reads it, so a
   // cap cannot bind one and not another.
   const boundW = Math.min(scheduleLimitW, chargerCapW);
-  const { maxW: evMaxW, curve, electrical } = vehicle;
+  const { maxW: evMaxW, curve } = vehicle;
+  const realism = meter.realism;
+  const seed = realism?.seed ?? 0;
+  const bucket = secondBucket(at);
+  const draw = (channel: number, halfWidthPct: number | undefined): number =>
+    halfWidthPct
+      ? 1 + (halfWidthPct / 100) * seededUnit(seed, bucket, channel)
+      : 1;
+  // The voltage that produces every current below: fluctuated once here, so
+  // the sample set and the register read the same value (#614).
+  const voltageFactor = draw(1, realism?.fluctuation?.voltagePct);
+  const electrical: Partial<EVSettings> =
+    voltageFactor === 1
+      ? vehicle.electrical
+      : {
+          ...vehicle.electrical,
+          voltageV: effectiveVoltageV(vehicle.electrical) * voltageFactor,
+        };
+  const ramp =
+    realism?.rampUp && meter.sessionStartedAt !== undefined
+      ? rampFactor(realism.rampUp, at - meter.sessionStartedAt)
+      : 1;
+  const deliveryFactor = ramp * draw(2, realism?.fluctuation?.powerPct);
+  const exportConfigW = realism?.export?.powerW ?? 0;
+  const exporting = inputs.charging && exportConfigW > 0;
   const curveSoc = resolveSocForCurve(
     inputs.soc,
     session.initialSoc,
     undefined,
   );
 
-  const acceptedW = inputs.charging
-    ? effectiveChargingPowerW({
-        evMaxW,
-        curve,
-        socPercent: curveSoc,
-        scheduleLimitWatts: boundW,
-      })
-    : 0;
+  const baseAcceptedW =
+    inputs.charging && !exporting
+      ? effectiveChargingPowerW({
+          evMaxW,
+          curve,
+          socPercent: curveSoc,
+          scheduleLimitWatts: boundW,
+        })
+      : 0;
+  // Ramp and fluctuation never carry the report past the bound (the CSMS
+  // allocation narrowed by the hardware) or the vehicle's own ceiling, so a
+  // fluctuating load at full power dips below it and never rises above.
+  const ceilingW = Math.min(boundW, evMaxW);
+  const acceptedW =
+    deliveryFactor === 1
+      ? baseAcceptedW
+      : Math.min(baseAcceptedW * deliveryFactor, ceilingW);
+  const exportW = exporting ? Math.min(exportConfigW, chargerCapW, evMaxW) : 0;
   // The curve describes battery acceptance, not EVSE capability: a 100 kW
   // charger still offers 100 kW to a nearly full battery (#301).
   const offeredW = fault.offering
@@ -217,7 +297,7 @@ export function resolveOperatingPoint(
     : 0;
 
   let accumulationCapW: number;
-  if (fault.energyOfferSuspended) {
+  if (fault.energyOfferSuspended || exporting) {
     accumulationCapW = 0;
   } else if (!curve || curve.length === 0 || !Number.isFinite(evMaxW)) {
     accumulationCapW = boundW;
@@ -229,6 +309,12 @@ export function resolveOperatingPoint(
       scheduleLimitWatts: boundW,
     });
   }
+  if (deliveryFactor !== 1 && Number.isFinite(accumulationCapW)) {
+    accumulationCapW = Math.min(accumulationCapW * deliveryFactor, ceilingW);
+  }
+
+  // Jitter of the current as a meter reads it, on top of the load (#614).
+  const currentFactor = draw(3, realism?.fluctuation?.currentPct);
 
   return {
     at,
@@ -238,12 +324,24 @@ export function resolveOperatingPoint(
     activePhases,
     acceptedW,
     offeredW,
-    currentA: currentAmpsFor(acceptedW, electrical, activePhases),
+    currentA:
+      currentAmpsFor(acceptedW, electrical, activePhases) * currentFactor,
     offeredCurrentA: currentAmpsFor(offeredW, electrical, activePhases),
     limitA: currentAmpsFor(boundW, electrical, activePhases),
     voltageV: effectiveVoltageV(electrical),
     powerFactor: effectivePowerFactor(electrical),
     soc: inputs.soc,
+    deliveryFactor,
+    exportW,
+    exportCurrentA: currentAmpsFor(exportW, electrical, activePhases),
+    phaseDetail: phaseDetailOf(
+      realism,
+      electrical,
+      activePhases,
+      acceptedW,
+      seed,
+      bucket,
+    ),
     accumulationCapW,
     limitedBy: limitedByOf(
       fault.energyOfferSuspended,
@@ -277,4 +375,57 @@ function limitedByOf(
   const capBy = chargerCapW < scheduleLimitW ? "charger" : "schedule";
   if (Number.isFinite(evMaxW)) return capW < vehicleW ? capBy : "vehicle";
   return Number.isFinite(capW) ? capBy : "none";
+}
+
+/** The independent per-phase quantities (#615), or `null` when not
+ *  configured or not all three phases are in use (the same rule as the
+ *  per-phase samples: a subset of L1/L2/L3 would invent an allocation). */
+function phaseDetailOf(
+  realism: MeterRealism | undefined,
+  electrical: Partial<EVSettings>,
+  activePhases: number,
+  acceptedW: number,
+  seed: number,
+  bucket: number,
+): PhaseDetail | null {
+  const config = realism?.phases;
+  if (!config || activePhases !== 3 || electrical.currentType === "DC") {
+    return null;
+  }
+  const nominalV = effectiveVoltageV(electrical);
+  const powerFactor = effectivePowerFactor(electrical);
+  const swing = (channel: number, halfWidthPct: number | undefined): number =>
+    1 + ((halfWidthPct ?? 0) / 100) * seededUnit(seed, bucket, channel);
+  const voltageV: [number, number, number] = [
+    nominalV * swing(11, config.voltageImbalancePct),
+    nominalV * swing(12, config.voltageImbalancePct),
+    nominalV * swing(13, config.voltageImbalancePct),
+  ];
+  const weights = [
+    swing(21, config.loadImbalancePct),
+    swing(22, config.loadImbalancePct),
+    swing(23, config.loadImbalancePct),
+  ];
+  const weightSum = weights[0] + weights[1] + weights[2];
+  const powerW = weights.map((w) => (acceptedW * w) / weightSum) as [
+    number,
+    number,
+    number,
+  ];
+  const currentA = powerW.map((p, i) =>
+    p > 0 ? p / (voltageV[i] * powerFactor) : 0,
+  ) as [number, number, number];
+  // Phasors 120 degrees apart: |a - b|^2 = a^2 + b^2 + ab.
+  const between = (a: number, b: number) => Math.sqrt(a * a + b * b + a * b);
+  return {
+    voltageV,
+    lineToLineV: [
+      between(voltageV[0], voltageV[1]),
+      between(voltageV[1], voltageV[2]),
+      between(voltageV[2], voltageV[0]),
+    ],
+    currentA,
+    powerW,
+    lineToLine: config.lineToLine !== false,
+  };
 }

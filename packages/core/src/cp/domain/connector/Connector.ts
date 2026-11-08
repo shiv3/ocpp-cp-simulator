@@ -63,6 +63,7 @@ import {
   vehicleTermOf,
   type OperatingPoint,
 } from "./OperatingPoint";
+import type { MeterRealism } from "./MeterRealism";
 import { resolveSessionIntent, type SessionIntent } from "./SessionIntent";
 import {
   partitionProfiles,
@@ -277,6 +278,19 @@ export class Connector {
   /** The charger's delivery cap on this connector in watts (#327);
    *  `undefined` when the hardware declares none. Set once at construction. */
   private _maxDeliveryPowerW: number | undefined;
+  /** Opt-in meter realism (#614-#616); `undefined` keeps the constant,
+   *  historical output. Set once at construction, like the delivery cap. */
+  private _meterRealism: MeterRealism | undefined;
+  /** Energy exported so far in Wh (a V2X term, #615), as a float; runtime
+   *  only. */
+  private exportWh = 0;
+  private exportTickedAt: number | null = null;
+  /** Register values the last Interval sample was measured from (#615). */
+  private intervalBaseline: {
+    key: string;
+    importWh: number;
+    exportWh: number;
+  } | null = null;
   private _chargingProfiles: ActiveChargingProfile[] = [];
 
   /**
@@ -404,6 +418,8 @@ export class Connector {
         // `MeterValueBuilder` reports, instead of the curve only ever
         // affecting the *reported* number while the register kept climbing
         // on its original trajectory.
+        getDeliveryFactor: () => this.operatingPoint().deliveryFactor,
+        onTick: () => this.integrateExport(),
         getScheduleLimitWatts: () => {
           // The register tick is a tick owner: it announces a schedule
           // crossing, the resolve itself is pure (#327).
@@ -651,6 +667,12 @@ export class Connector {
       vehicle: vehicleTermOf(this._evSettings),
       session: { initialSoc: this.sessionIntent().initialSoc },
       charger: chargerTermOf(this._maxDeliveryPowerW),
+      meter: {
+        realism: this._meterRealism,
+        sessionStartedAt: this.hasRunningTransaction
+          ? this.transaction?.startTime?.getTime()
+          : undefined,
+      },
       fault: {
         // A running transaction in a state where the EVSE energizes the
         // connector; SuspendedEVSE and everything outside the session offer
@@ -675,6 +697,61 @@ export class Connector {
    *  built, before it samples. */
   setMaxDeliveryPowerW(watts: number | undefined): void {
     this._maxDeliveryPowerW = watts;
+  }
+
+  /** The opt-in meter realism of this connector, `undefined` when none. */
+  get meterRealism(): MeterRealism | undefined {
+    return this._meterRealism;
+  }
+
+  /** Declare the meter realism (#614-#616); call when the connector is
+   *  built, before it samples. */
+  setMeterRealism(realism: MeterRealism | undefined): void {
+    this._meterRealism = realism;
+  }
+
+  /** Energy exported so far in whole Wh (`Energy.Active.Export.Register`). */
+  get exportRegisterWh(): number {
+    return Math.round(this.exportWh);
+  }
+
+  /** Integrate the export power since the previous tick. Called at the start
+   *  of every register tick; a no-op without a discharge term. */
+  private integrateExport(): void {
+    if (!this._meterRealism?.export) return;
+    const now = this.clock.now();
+    const point = this.operatingPoint();
+    if (this.exportTickedAt !== null && point.exportW > 0) {
+      this.exportWh +=
+        (point.exportW * (now - this.exportTickedAt)) / 3_600_000;
+    }
+    this.exportTickedAt = now;
+  }
+
+  /**
+   * The energy moved since the previous Interval sample (#615,
+   * `Energy.Active.{Import,Export}.Interval`), then start a new interval. The
+   * first Interval sample of a transaction starts at its `meterStart` (import)
+   * or at the export register as it reads then. Called by the
+   * sample builder only when an Interval measurand is asked for.
+   */
+  takeIntervalEnergyWh(): { importWh: number; exportWh: number } {
+    const key = String(this.transaction?.startTime?.getTime() ?? "none");
+    const importNow = this.meterValueWh;
+    const exportNow = this.exportRegisterWh;
+    const start =
+      this.intervalBaseline?.key === key
+        ? this.intervalBaseline
+        : {
+            key,
+            importWh: this.transaction?.meterStart ?? importNow,
+            exportWh: exportNow,
+          };
+    this.intervalBaseline = { key, importWh: importNow, exportWh: exportNow };
+    return {
+      importWh: Math.max(0, importNow - start.importWh),
+      exportWh: Math.max(0, exportNow - start.exportWh),
+    };
   }
 
   /**

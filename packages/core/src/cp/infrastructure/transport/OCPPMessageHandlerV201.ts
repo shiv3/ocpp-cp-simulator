@@ -276,6 +276,12 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
    *  idToken has to come from the original Authorize.req. Entries are
    *  removed once the matching CALLRESULT/CALLERROR arrives. */
   private readonly _pendingRequests = new Map<string, PendingRequest>();
+  /** StatusNotification CALLs sent and not answered yet, by messageId (#702):
+   *  the answer tells the charge point what the CSMS knows. */
+  private readonly _statusAcks = new Map<
+    string,
+    { connectorId: number; status: OCPPStatus }
+  >();
   /** Every TransactionEvent not yet settled, discarded or queued, in
    *  creation order (#528): a close queues them all (E11.FR.01/07). */
   private readonly _activeTransactionEvents =
@@ -778,6 +784,15 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   ): void {
     const pending = this._pendingRequests.get(messageId);
     this._pendingRequests.delete(messageId);
+
+    const statusAck = this._statusAcks.get(messageId);
+    if (statusAck) {
+      this._statusAcks.delete(messageId);
+      this._chargePoint.noteStatusAcknowledged(
+        statusAck.connectorId,
+        statusAck.status,
+      );
+    }
 
     if (this._expertCalls.claimResult(messageId, payload)) return;
 
@@ -1408,6 +1423,9 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       evseId: ev.evseId,
       connectorId: ev.connectorId,
     };
+    if (this._webSocket.isConnected()) {
+      this._statusAcks.set(messageId, { connectorId, status });
+    }
     this.send("StatusNotification", messageId, payload);
     const chargingState = ocppStatusToTransactionChargingState(status);
     if (chargingState && !opts?.suppressChargingStateTransactionEvent) {
@@ -2413,6 +2431,8 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     // Clear written-but-unanswered correlation entries on disconnect.
     // A disconnect must not leave stale correlation state.
     this._pendingRequests.clear();
+    // A StatusNotification not answered by now is not known to the CSMS (#702).
+    this._statusAcks.clear();
     this._expertCalls.onClosed();
     // #537: the weekly OCSP refresh dies with the connection too. The
     // SignCertificate back-off waits for the next accepted boot: A02.FR.17

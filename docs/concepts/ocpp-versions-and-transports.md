@@ -541,28 +541,45 @@ reopens the socket and **sends no `BootNotification`** when
 - the last `BootNotification` was `Accepted` and the boot data is unchanged, and
 - `BootOnReconnect` (a 2.x simulator key, default `false`) is not `true`.
 
-A first connect, an operator `connect()`, a `Reset`, a
-`TriggerMessage(BootNotification)`, a boot that a closed socket lost, a last
-boot that was `Pending` or `Rejected`, and changed boot data all still send it. OCPP 1.x and
-SOAP always boot on connect.
+A first connect, an operator `connect()`, a `Reset`, a boot that a closed
+socket lost, a last boot that was `Pending` or `Rejected`, and changed boot data
+all still send it, and so does `TriggerMessage(BootNotification)` while the boot
+is not `Accepted` (after an `Accepted` boot the request is answered `Rejected`,
+F06.FR.17, so a resumed link rejects it too). OCPP 1.x and SOAP always boot on
+connect: that is a deliberate choice of the simulator, not something the spec
+requires (OCPP-J 1.6 §5.4 carries the same "should not send" sentence); the
+issue is 2.x-only and the 1.6 certification flows rely on the boot.
 
 Instead the station resumes what an accepted boot starts (B04, E11):
 
-- **Status reports.** The connection loss made the connectors `Unavailable`
-  locally only. They get their status back without a wire message, and a
-  `StatusNotification` goes out for the connectors whose status differs from
-  what the CSMS last knew (B04.FR.02), and for the charge point and **all**
-  connectors when the outage lasted longer than `OCPPCommCtrlr.OfflineThreshold`
+- **Status reports.** The connection loss made the idle connectors `Unavailable`
+  locally only. Each connector's status is derived again from its state: one
+  the loss made `Unavailable` gets the status it had back (`Reserved` only
+  while its reservation is still held, else `Available`), one made
+  `Inoperative` meanwhile stays `Unavailable`, and a status changed during the
+  outage (a plug-in, a stop) stands. A `StatusNotification` goes out for each
+  connector whose status differs from what the CSMS last **answered**
+  (B04.FR.02): a notification still in flight when the link closed counts as
+  not delivered and is sent again. Statuses are compared as the 2.x wire
+  carries them (`Preparing` and `Charging` are both `Occupied`). All
+  connectors are reported, and the charge point too
+  when the outage lasted longer than `OCPPCommCtrlr.OfflineThreshold`
   seconds (B04.FR.01; key `OfflineThreshold`, 2.x only, default `60`, the spec
   gives none).
+- **Reservations** survive the loss with their expiry (a link loss is not a
+  reboot, and B01.FR.13 even keeps `Reserved` across a reboot). A `Reset` still
+  drops them, as before: persisting a reservation across a reboot is not
+  modeled. Station-level charging profiles (connectorId 0) are still
+  cleared by every connection loss (`ConnectionClosed`), and no boot follows
+  to hint at it; connector and transaction profiles stay.
 - The heartbeat timer (with the interval in force), the clock-aligned samples
   and the variable-monitoring reports are re-armed.
 - The [E11 queue](#e11-offline-queue-for-transactionevent) is replayed after
   the status reports, as after an accepted boot.
 
 `connected` is emitted as always; no `boot_notification` event follows it on
-such a reconnect, and the operational timeline records "Reconnected without
-BootNotification" in its place.
+such a reconnect, and the [operational timeline](operational-timeline.md)
+records `reconnected_without_boot` (`offlineMs`, `reportedAll`) in its place.
 
 ## Clock-aligned meter values (`ClockAlignedDataInterval`)
 

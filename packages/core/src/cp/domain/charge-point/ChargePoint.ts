@@ -109,7 +109,10 @@ import {
   toV2ConnectorStatus,
   V2_CONNECTOR_STATUSES,
 } from "./runtimeValueKeys";
-import { ReservationManager } from "../reservation/Reservation";
+import {
+  ReservationManager,
+  type Reservation,
+} from "../reservation/Reservation";
 import { LocalAuthListManager } from "../auth/LocalAuthList";
 import { idTokenMaxLength } from "../auth/AuthorizationCacheSeed";
 import { AuthorizationCache } from "../auth/AuthorizationCache";
@@ -352,9 +355,19 @@ export class ChargePoint {
   private _bootedWith: string | null = null;
   /** #702: when the current outage began (first teardown of it). */
   private _offlineSince: number | null = null;
-  /** #702: the statuses (0 = the charge point) the CSMS last knew, taken
-   *  when the outage began, before the teardown made them Unavailable. */
+  /** #702: the statuses (0 = the charge point) the station had when the
+   *  outage began, before the teardown made them Unavailable. */
   private _statusAtDrop: Map<number, OCPPStatus> = new Map();
+  /** #702: the connectors whose Unavailable was made by the teardown
+   *  cascade (not by an availability change), with the status they had. */
+  private _cascadedAtDrop: Map<number, OCPPStatus> = new Map();
+  /** #702: the reservations held when the outage began; a resumed link gets
+   *  them back (a reboot does not). */
+  private _reservationsAtDrop: Reservation[] = [];
+  /** #702: the status the CSMS last *answered* for each connector (0 = the
+   *  charge point). A StatusNotification still in flight when the link closed
+   *  is not in it, so a resume sends that one again (B04.FR.02). */
+  private _ackedStatus: Map<number, OCPPStatus> = new Map();
   private readonly _stateManager: StateManager;
   private readonly _timeline: OperationalTimeline;
   private readonly _timelineProjector: OperationalTimelineProjector;
@@ -2252,6 +2265,12 @@ export class ChargePoint {
     this._outbox.sendSignedFirmwareStatusNotification(status, requestId);
   }
 
+  /** The CSMS answered a StatusNotification for `connectorId` (0 = the charge
+   *  point) with `status` (#702). */
+  noteStatusAcknowledged(connectorId: number, status: OCPPStatus): void {
+    this._ackedStatus.set(connectorId, status);
+  }
+
   /** Boot-notification gate accessors used by BootNotificationResultHandler. */
   markBootAccepted(): void {
     this._outbox.setBootStatus({ status: "Accepted" });
@@ -2305,7 +2324,7 @@ export class ChargePoint {
       case "Accepted":
         this._logger.info("Boot notification accepted", LogType.OCPP);
         this._bootedWith = this._bootSentFingerprint;
-        this._offlineSince = null;
+        this.clearOutage();
         this.markBootAccepted();
         break;
       case "Pending":
@@ -2444,9 +2463,17 @@ export class ChargePoint {
     ) {
       return this.resumeAfterReconnect();
     }
-    this._offlineSince = null;
+    this.clearOutage();
     this.boot();
     return null;
+  }
+
+  /** The outage is over: forget what it recorded (#702). */
+  private clearOutage(): void {
+    this._offlineSince = null;
+    this._statusAtDrop = new Map();
+    this._cascadedAtDrop = new Map();
+    this._reservationsAtDrop = [];
   }
 
   /**
@@ -2465,8 +2492,9 @@ export class ChargePoint {
     const offlineMs =
       this._offlineSince === null ? 0 : this._clock.now() - this._offlineSince;
     const atDrop = this._statusAtDrop;
-    this._offlineSince = null;
-    this._statusAtDrop = new Map();
+    const cascaded = this._cascadedAtDrop;
+    const reservations = this._reservationsAtDrop;
+    this.clearOutage();
     const reportAll = offlineMs > this._configuration.offlineThreshold() * 1000;
     this._logger.info(
       `Reconnected after ${Math.round(offlineMs / 1000)}s offline; no BootNotification (boot data unchanged), reporting ${
@@ -2477,30 +2505,55 @@ export class ChargePoint {
     this._outbox.setBootStatus({ status: "Accepted" });
     this.error = "";
 
+    // A link loss is not a reboot: the reservations survive it (B01.FR.13
+    // keeps Reserved even across a reboot), with their expiry timer.
+    const reserved = new Set(
+      this._reservationManager
+        .restore(reservations)
+        .map((reservation) => reservation.connectorId),
+    );
+
+    // What the CSMS last answered is what it knows; the station's own state
+    // now decides what is true, and the difference is reported (B04.FR.02).
+    const acked = this._ackedStatus;
     const cpAtDrop = (atDrop.get(0) ?? OCPPStatus.Available) as
       OCPPStatus.Available | OCPPStatus.Unavailable | OCPPStatus.Faulted;
     const cpNow = this._status;
     const cpTarget = cpNow === OCPPStatus.Unavailable ? cpAtDrop : cpNow;
     if (cpTarget !== cpNow) this.status = cpTarget;
-    if (reportAll || cpTarget !== cpAtDrop) {
+    // Compared as the 2.x wire carries them (Preparing and Charging are both
+    // `Occupied`): the CSMS knows nothing else.
+    const knows = (id: number, target: OCPPStatus): boolean => {
+      const known = acked.get(id);
+      return (
+        known !== undefined &&
+        toV2ConnectorStatus(known) === toV2ConnectorStatus(target)
+      );
+    };
+    if (reportAll || !knows(0, cpTarget)) {
       this.updateConnectorStatus(0, cpTarget);
     }
     this.connectors.forEach((connector) => {
-      const before = atDrop.get(connector.id) ?? connector.status;
       let target = connector.status;
+      const made = cascaded.get(connector.id);
       if (
         target === OCPPStatus.Unavailable &&
-        before !== OCPPStatus.Unavailable &&
-        connector.transaction === null
+        made !== undefined &&
+        connector.transaction === null &&
+        // An availability change made while the link was going down is real.
+        connector.availability !== "Inoperative"
       ) {
-        target = before;
+        target =
+          made === OCPPStatus.Reserved && !reserved.has(connector.id)
+            ? OCPPStatus.Available
+            : made;
         this.writeConnector(connector.id, {
           kind: "status",
           status: target,
           scope: "event",
         });
       }
-      if (reportAll || target !== before) {
+      if (reportAll || !knows(connector.id, target)) {
         this.updateConnectorStatus(connector.id, target);
       }
     });
@@ -2520,6 +2573,7 @@ export class ChargePoint {
     // lost on the wire: the next open must send it (#702).
     if (!this.isOnline()) this._bootOnNextOpen = true;
     this._bootUnanswered = true;
+    this._ackedStatus = new Map();
     this._bootSentFingerprint = JSON.stringify(this._bootNotification);
     // OCPP 1.6J §4.2: the CP MUST NOT send any other CALL message until
     // BootNotification has been Accepted. The connector-level
@@ -2561,6 +2615,7 @@ export class ChargePoint {
           (connector) => [connector.id, connector.status] as const,
         ),
       ]);
+      this._reservationsAtDrop = this._reservationManager.getAllReservations();
     }
     // A `triggerOn: "connect"` scenario is armed once per connect, recorded on
     // `Connector.lastAutoStartedScenarioKey` so re-emitting Available doesn't
@@ -2582,6 +2637,19 @@ export class ChargePoint {
       connector.lastAutoStartedScenarioKey = null;
     });
     this.status = OCPPStatus.Unavailable;
+    if (this._cascadedAtDrop.size === 0) {
+      // First teardown of the outage: which Unavailable did the cascade make?
+      for (const connector of this._connectors.values()) {
+        const before = this._statusAtDrop.get(connector.id);
+        if (
+          before !== undefined &&
+          before !== OCPPStatus.Unavailable &&
+          connector.status === OCPPStatus.Unavailable
+        ) {
+          this._cascadedAtDrop.set(connector.id, before);
+        }
+      }
+    }
     this._heartbeat.cleanup();
     this._clockAligned.disable();
     // Offline: events at or below OfflineQueuingSeverity are queued

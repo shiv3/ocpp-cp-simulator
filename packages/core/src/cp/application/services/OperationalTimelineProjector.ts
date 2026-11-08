@@ -112,9 +112,9 @@ export class OperationalTimelineProjector {
       // the booted state.
       if (this.incident?.link === "up") this.incident.link = "booted";
       this.timeline.record({
-        kind: "boot_notification",
+        kind: "reconnected_without_boot",
         summary: "Reconnected without BootNotification",
-        data: { resumed: true, offlineMs, reportedAll },
+        data: { offlineMs, reportedAll },
       });
       this.checkRecovery();
       if (this.incident?.link === "booted" && this.settleTimer === null) {

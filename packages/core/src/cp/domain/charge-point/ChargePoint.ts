@@ -119,6 +119,7 @@ import {
 import type { LocalOnlyDecision } from "../auth/LocalAuthorizationResolver";
 import {
   ChargingProfileStore,
+  type ApplyChargingProfileOptions,
   type ProfileRemoveCriteria,
 } from "./ChargingProfileStore";
 import type { ActiveChargingProfile } from "../connector/Connector";
@@ -290,6 +291,12 @@ export interface ChargePointTransportOptions {
   /** Resolved idTags this charge point draws from (#299). */
   readonly idTags?: readonly string[];
   readonly idTagDistribution?: IdTagDistribution;
+  /**
+   * OCPP 1.6 ReserveNow: authorize the reservation's idTag (local rules, then
+   * Authorize.req) before accepting; a tag that is not `Accepted` answers
+   * `Rejected` (#595). Default `false`.
+   */
+  readonly reservationAuthorizeIdTag?: boolean;
 }
 
 export class ChargePoint {
@@ -425,6 +432,17 @@ export class ChargePoint {
     this._inboundValidation = mode;
   }
 
+  private _reservationAuthorizeIdTag: boolean;
+
+  /** See {@link ChargePointTransportOptions.reservationAuthorizeIdTag}. */
+  get reservationAuthorizeIdTag(): boolean {
+    return this._reservationAuthorizeIdTag;
+  }
+
+  setReservationAuthorizeIdTag(enabled: boolean): void {
+    this._reservationAuthorizeIdTag = enabled;
+  }
+
   constructor(
     private readonly _id: string,
     private readonly _bootNotification: BootNotification,
@@ -460,6 +478,8 @@ export class ChargePoint {
     this._transportUrl = transportOptions.centralSystemUrl ?? wsUrl;
     this._inboundValidation =
       transportOptions.inboundValidation ?? DEFAULT_INBOUND_VALIDATION;
+    this._reservationAuthorizeIdTag =
+      transportOptions.reservationAuthorizeIdTag ?? false;
     this._logger.setCpId(this._id);
     this._logRepository = new LogRepository(this._database);
     // #456: installed certificates survive a restart when state persists.
@@ -1420,7 +1440,9 @@ export class ChargePoint {
 
   /**
    * Install a profile on the station store (`connectorId` 0) or on its
-   * connector, replacing any profile with the same id in that scope, and
+   * connector, replacing any profile with the same id in that scope (and,
+   * with `options.replaceSameSlot`, the one with the same stackLevel and
+   * purpose), and
    * emit `chargingProfileApplied`. Validation is the caller's job.
    *
    * @returns `false`, changing nothing, when the connector does not exist.
@@ -1428,19 +1450,33 @@ export class ChargePoint {
   applyChargingProfile(
     profile: ActiveChargingProfile,
     source: ChargingProfileSource,
+    options: ApplyChargingProfileOptions = {},
   ): boolean {
-    let replaced: boolean;
+    const idsBefore = (list: readonly ActiveChargingProfile[]) =>
+      list.map((p) => p.chargingProfileId);
+    let before: number[];
+    let after: number[];
     if (profile.connectorId === 0) {
-      replaced = this._stationProfiles.add(profile);
+      before = idsBefore(this._stationProfiles.all());
+      this._stationProfiles.add(profile, options);
+      after = idsBefore(this._stationProfiles.all());
     } else {
       const connector = this.getConnector(profile.connectorId);
       if (!connector) return false;
-      replaced = connector.addChargingProfile(profile);
+      before = idsBefore(connector.chargingProfiles);
+      connector.addChargingProfile(profile, options);
+      after = idsBefore(connector.chargingProfiles);
     }
+    const replaced = before.includes(profile.chargingProfileId);
+    // Other profiles the same-slot rule displaced (#594).
+    const replacedIds = before.filter(
+      (id) => id !== profile.chargingProfileId && !after.includes(id),
+    );
     this._events.emit("chargingProfileApplied", {
       connectorId: profile.connectorId,
       profile,
       replaced,
+      replacedIds,
       source,
     });
     return true;

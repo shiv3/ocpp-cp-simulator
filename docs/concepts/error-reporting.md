@@ -85,6 +85,10 @@ and breadcrumb then goes through `scrubErrorReport` before it leaves:
   `Proxy-Authorization`, `Cookie` or `Set-Cookie` (any case) at any depth:
   the request's headers, and a header map logged into a breadcrumb.
 
+The scrubbing recognises these names and forms only. A credential that is
+neither, such as `Authorization: Basic …` quoted inside an error message or a
+bare password in free text, is sent as it is.
+
 The host name (`server_name`) and the stack traces are sent. The data goes only
 to the project behind the DSN the operator configured.
 

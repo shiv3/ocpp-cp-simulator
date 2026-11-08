@@ -365,7 +365,8 @@ says only whether one is set.
 
 `SENTRY_DSN` (and optionally `SENTRY_ENVIRONMENT`) in the daemon's environment
 turns on opt-in Sentry error reporting ([#794](https://github.com/shiv3/ocpp-cp-simulator/issues/794)): uncaught exceptions, unhandled
-rejections and fatal exits, scrubbed of credentials. It does not reach the
+rejections and fatal exits, with the credentials the redaction recognises
+scrubbed (an unlabelled one in an error message is not). It does not reach the
 console the daemon serves, whose DSN is fixed when the UI is built
 (`VITE_SENTRY_DSN`). Details: [Error reporting](../concepts/error-reporting.md).
 

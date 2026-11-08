@@ -83,6 +83,22 @@ function parseIp(ip: string): { family: 4 | 6; bytes: number[] } | null {
   return { family: 6, bytes };
 }
 
+/**
+ * The rate-limit bucket of a client: an IPv4 address (or an IPv4-mapped one)
+ * by itself, an IPv6 address by its /64, since one subscriber holds a whole
+ * /64 and could otherwise rotate addresses past the limit. Anything that is
+ * not an IP is its own key.
+ */
+export function rateLimitKey(client: string): string {
+  const ip = parseIp(client);
+  if (!ip || ip.family === 4) return ip ? ip.bytes.join(".") : client;
+  const groups: string[] = [];
+  for (let i = 0; i < 8; i += 2) {
+    groups.push(((ip.bytes[i] << 8) | ip.bytes[i + 1]).toString(16));
+  }
+  return `${groups.join(":")}::/64`;
+}
+
 /** Parse `1.2.3.4`, `10.0.0.0/8`, `::1`, `fd00::/8`; null when malformed. */
 export function parseTrustedProxy(entry: string): Range | null {
   const [address, prefix, ...rest] = entry.trim().split("/");
@@ -363,12 +379,15 @@ export function createAccessGuard(options: AccessGuardOptions): AccessGuard {
       const client = clientIp(peerAddress, forwarded?.forClients ?? []);
 
       if (requireTls && !exempt) {
-        const viaProxy = forwarded?.proto != null;
         // Direct loopback callers (the bundled CLI, a local probe) are not on
-        // a network that needs encrypting; everything else must have been
-        // carried over TLS, as far as a trusted proxy says.
-        const local = !viaProxy && isLoopbackIp(client);
-        const secure = viaProxy && forwarded?.proto === "https";
+        // a network that needs encrypting. A request from a trusted proxy is
+        // never "direct", even from a loopback peer: it must carry
+        // `proto=https`, or a plain-HTTP client of a same-host proxy (which
+        // may send no forwarding headers, or a forged loopback `for`) would
+        // pass. Everything else must have been carried over TLS, as far as a
+        // trusted proxy says.
+        const local = !fromProxy && isLoopbackIp(peerAddress);
+        const secure = forwarded?.proto === "https";
         if (!local && !secure) {
           return {
             refuse: { status: 403, message: "TLS required" },
@@ -378,7 +397,7 @@ export function createAccessGuard(options: AccessGuardOptions): AccessGuard {
       }
 
       if (rate > 0 && !exempt) {
-        const wait = take(client ?? "unknown");
+        const wait = take(client ? rateLimitKey(client) : "unknown");
         if (wait !== null) {
           return {
             refuse: {

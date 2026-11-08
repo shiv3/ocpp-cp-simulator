@@ -44,45 +44,72 @@ export async function stopTransactionsAndWait(
   let wake: (() => void) | null = null;
   const notify = () => wake?.();
 
-  for (const cpId of registry.list()) {
-    const svc = registry.get(cpId);
-    if (!svc) continue;
-    const connectors = svc.openTransactionConnectorIds();
-    if (connectors.length === 0) continue;
-    const online = svc.isOnline();
-    unsubscribes.push(
-      svc.onWireFrame((direction, raw) => {
-        const frame = parseFrame(raw);
-        if (!frame) return;
-        if (
-          direction === "Sent" &&
-          frame.type === 2 &&
-          STOP_ACTIONS.has(frame.action ?? "") &&
-          isStop(frame.action, frame.payload)
-        ) {
-          awaiting.add(`${cpId}/${frame.id}`);
-        } else if (
-          direction === "Received" &&
-          (frame.type === 3 || frame.type === 4) &&
-          awaiting.delete(`${cpId}/${frame.id}`)
-        ) {
-          delivered++;
-          notify();
-        }
-      }),
-    );
-    for (const connectorId of connectors) {
-      try {
-        svc.stopTransaction(connectorId, { reason: "Other" });
-        stopped++;
-        if (online) expected++;
-      } catch (err) {
-        log(
-          `Could not stop the transaction on ${cpId} connector ${connectorId}: ${err instanceof Error ? err.message : String(err)}`,
+  const watched = new Set<string>(); // charge points with a frame listener
+  // Connectors this run stopped and still reports open; a key leaves when the
+  // connector is seen closed, so a transaction opened later is stopped too.
+  const stoppedOn = new Map<string, Set<number>>();
+  /** One pass over the registry: stop every transaction still open. Run
+   *  again while waiting, because a `start_transaction` command, a scenario or
+   *  background traffic can open one after the first pass. */
+  const stopPass = (): void => {
+    for (const cpId of registry.list()) {
+      const svc = registry.get(cpId);
+      if (!svc) continue;
+      const open = svc.openTransactionConnectorIds();
+      const mine = stoppedOn.get(cpId) ?? new Set<number>();
+      stoppedOn.set(cpId, mine);
+      for (const id of [...mine]) if (!open.includes(id)) mine.delete(id);
+      const connectors = open.filter((id) => !mine.has(id));
+      if (connectors.length === 0) continue;
+      // A SOAP charge point has no JSON frames to watch: its answer cannot be
+      // observed here, so it is stopped but never waited for.
+      const soap = svc.isSoapChargePoint();
+      const online = svc.isOnline() && !soap;
+      if (!watched.has(cpId) && !soap) {
+        watched.add(cpId);
+        unsubscribes.push(
+          svc.onWireFrame((direction, raw) => {
+            const frame = parseFrame(raw);
+            if (!frame) return;
+            if (
+              direction === "Sent" &&
+              frame.type === 2 &&
+              STOP_ACTIONS.has(frame.action ?? "") &&
+              isStop(frame.action, frame.payload)
+            ) {
+              awaiting.add(`${cpId}/${frame.id}`);
+            } else if (
+              direction === "Received" &&
+              (frame.type === 3 || frame.type === 4) &&
+              awaiting.delete(`${cpId}/${frame.id}`)
+            ) {
+              delivered++;
+              notify();
+            }
+          }),
         );
       }
+      for (const connectorId of connectors) {
+        try {
+          // 1.6 `Reason` Other ("any other reason"); 2.x has no value for a
+          // station going down, and StopAuthorized (the default) would claim
+          // an EV driver authorized the stop, so name AbnormalCondition.
+          svc.stopTransaction(connectorId, {
+            reason: "Other",
+            triggerReason: "AbnormalCondition",
+          });
+          mine.add(connectorId);
+          stopped++;
+          if (online) expected++;
+        } catch (err) {
+          log(
+            `Could not stop the transaction on ${cpId} connector ${connectorId}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
     }
-  }
+  };
+  stopPass();
 
   if (stopped === 0) return { stopped, delivered, timedOut: false };
   log(
@@ -95,7 +122,9 @@ export async function stopTransactionsAndWait(
   // Done when every stop of an online charge point has been answered. Stops of
   // an offline one cannot be, and are not waited for.
   let timedOut = false;
-  while (delivered < expected && !skipped) {
+  while (!skipped) {
+    stopPass();
+    if (delivered >= expected) break;
     const left = deadline - Date.now();
     if (left <= 0) {
       timedOut = true;
@@ -113,7 +142,7 @@ export async function stopTransactionsAndWait(
   for (const off of unsubscribes) off();
   if (timedOut) {
     log(
-      `${expected - delivered} stop(s) not answered within ${waitMs} ms; unsent ones stay queued for the next start`,
+      `${expected - delivered} stop(s) not answered within ${waitMs} ms; they are queued when the sockets close and replayed on the next start (kept across restarts only with --state-db)`,
     );
   }
   return { stopped, delivered, timedOut };

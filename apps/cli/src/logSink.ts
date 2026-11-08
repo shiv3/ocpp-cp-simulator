@@ -7,7 +7,8 @@ import { format } from "node:util";
  *
  * Everything the simulator logs reaches the console through `console.debug`,
  * `console.info`, `console.warn` and `console.error` (the core `Logger` maps
- * its four levels onto them). {@link installLogSink} wraps those four so the
+ * its four levels onto them), and a few lines use `console.log`, which counts
+ * as info. {@link installLogSink} wraps those so the
  * daemon can drop lines below `--log-level` and copy the rest into a rotated
  * file. Nothing is wrapped when neither is asked for, so stdout and stderr are
  * byte-for-byte what they were — the open-ocpp-tck contract depends on the
@@ -152,7 +153,7 @@ export function isLogSinkRequested(options: LogSinkOptions): boolean {
  */
 export function installLogSink(
   options: LogSinkOptions,
-  target: Pick<Console, ConsoleLevel> = console,
+  target: Pick<Console, ConsoleLevel> & Partial<Pick<Console, "log">> = console,
 ): () => void {
   if (!isLogSinkRequested(options)) return () => {};
   const threshold = LOG_LEVELS.indexOf(options.level ?? "debug");
@@ -167,8 +168,19 @@ export function installLogSink(
       file?.write(format(...args));
     };
   });
+  // `console.log` (the Logger's fallback, the restore lines) counts as info.
+  const originalLog = target.log;
+  if (originalLog) {
+    const log = originalLog.bind(target) as (...args: unknown[]) => void;
+    target.log = (...args: unknown[]): void => {
+      if (LOG_LEVELS.indexOf("info") < threshold) return;
+      log(...args);
+      file?.write(format(...args));
+    };
+  }
   return () => {
     for (const level of LOG_LEVELS) target[level] = originals[level];
+    if (originalLog) target.log = originalLog;
     file?.close();
   };
 }

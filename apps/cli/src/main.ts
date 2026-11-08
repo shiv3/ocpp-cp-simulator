@@ -1237,6 +1237,24 @@ export function parseArgs(argv: string[]): CLIOptions {
     process.exit(1);
   }
 
+  // On a loopback bind a same-host reverse proxy reaches the daemon from
+  // 127.0.0.1, which counts as a direct local caller unless the proxy is
+  // listed, so --require-tls would let its plain-HTTP clients through.
+  if (
+    !isClientMode &&
+    isServerMode &&
+    requireTls &&
+    isLoopbackHost(httpHost) &&
+    trustedProxies.length === 0
+  ) {
+    process.stderr.write(
+      "Warning: --require-tls without --trusted-proxy only constrains " +
+        "clients that connect from another host. Behind a reverse proxy on " +
+        "this host, add --trusted-proxy 127.0.0.1 so the proxy has to report " +
+        "https.\n",
+    );
+  }
+
   // Same all-or-nothing rule for the client-side credentials.
   if ((httpBasicAuthUser === "") !== (httpBasicAuthPass === "")) {
     process.stderr.write(
@@ -1563,7 +1581,8 @@ Options:
   --log-rotate-daily       Rotate --log-file when the local date changes.
   --log-keep <n>           Rotated files to keep (default 5).
   --shutdown-stop-transactions
-                           On SIGINT/SIGTERM stop running transactions and wait
+                           On any shutdown (signal, server.shutdown) stop running
+                           transactions and wait
                            for the CSMS to answer before exiting.
   --shutdown-wait-ms <ms>  Longest wait for those answers (default 5000).
   --no-connect-restored    Restore charge points from --state-db without dialling

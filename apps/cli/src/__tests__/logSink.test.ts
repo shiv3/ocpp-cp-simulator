@@ -88,7 +88,8 @@ describe("installLogSink", () => {
         info: make("info"),
         warn: make("warn"),
         error: make("error"),
-      } as Pick<Console, "debug" | "info" | "warn" | "error">,
+        log: make("log"),
+      } as Pick<Console, "debug" | "info" | "warn" | "error" | "log">,
     };
   }
 
@@ -112,6 +113,22 @@ describe("installLogSink", () => {
     restore();
     expect(seen).toEqual(["info:a %s b", "warn:w", "error:e"].map((l) => l));
     expect(fs.readFileSync(file, "utf-8")).toBe("a b\nw\ne\n");
+  });
+
+  it("treats console.log as info", () => {
+    const { console: c, seen } = fakeConsole();
+    const file = path.join(dir, "l.log");
+    const original = c.log;
+    const restore = installLogSink({ level: "warn", file: { file } }, c);
+    c.log("below warn");
+    restore();
+    expect(seen).toEqual([]);
+    expect(c.log).toBe(original);
+    const again = installLogSink({ level: "info", file: { file } }, c);
+    c.log("restore line");
+    again();
+    expect(seen).toEqual(["log:restore line"]);
+    expect(fs.readFileSync(file, "utf-8")).toBe("restore line\n");
   });
 
   it("restores the console on teardown", () => {

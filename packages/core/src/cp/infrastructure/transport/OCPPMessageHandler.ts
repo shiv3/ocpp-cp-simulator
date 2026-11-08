@@ -1291,15 +1291,38 @@ export class OCPPMessageHandler {
   /** Called by the ChargePoint after the WebSocket has closed (during teardown,
    *  after the pipeline drain in Task 7 ordering). Cancels the in-flight timer,
    *  salvages unsent queued CALLs, and clears the queue. The written-but-unanswered
-   *  in-flight CALL is not salvaged here (it keeps existing discard behavior);
-   *  it was already handled via onSerialSettled during the drain when the
-   *  settlement fired (socket_closed). */
+   *  in-flight CALL is salvaged here when it is transaction-related (a
+   *  StartTransaction, StopTransaction or MeterValues); other actions are
+   *  dropped. A CALL not yet written was handled via onSerialSettled during
+   *  the drain when the settlement fired (socket_closed). */
   public onWebSocketClosed(): void {
     if (this._serialInFlight) {
-      if (this._serialInFlight.phase === "written") {
-        this.clock.clearTimeout(this._serialInFlight.timer);
+      const inFlight = this._serialInFlight;
+      if (inFlight.phase === "written") {
+        this.clock.clearTimeout(inFlight.timer);
+        // §3.7 / errata 3.36: a transaction-related CALL written but not
+        // answered when the socket closes goes to the offline queue, like
+        // the unsent ones below, so it is delivered after the next boot.
+        // One whose watchdog already expired was given up (no retry on a
+        // timeout), and one with a waiting caller is that caller's.
+        const request = this._requests.get(inFlight.id);
+        if (
+          request &&
+          !request.timedOut &&
+          isTransactionRelated(request.action)
+        ) {
+          this.salvageOrDiscard(
+            {
+              action: request.action,
+              id: request.id,
+              payload: request.payload as OcppMessageRequestPayload,
+              connectorId: request.connectorId ?? undefined,
+              attempt: request.attempt,
+            },
+            "socket_closed before the answer",
+          );
+        }
       }
-      // The written-but-unanswered in-flight CALL keeps existing discard behavior (pre-existing limitation).
       this._serialInFlight = null;
     }
     // No answer can reach a waiter over a closed socket; say so now rather

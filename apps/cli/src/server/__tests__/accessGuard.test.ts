@@ -5,6 +5,7 @@ import {
   isAccessGuardActive,
   isLoopbackIp,
   parseTrustedProxy,
+  rateLimitKey,
   readForwarded,
 } from "../accessGuard";
 import { createHttpHandlers } from "../httpServer";
@@ -175,6 +176,23 @@ describe("--require-tls", () => {
     });
     expect(loopbackProxy.check(plain, "127.0.0.1").refuse?.status).toBe(403);
   });
+  it("does not treat a request from a trusted loopback proxy as direct", () => {
+    const loopbackProxy = createAccessGuard({
+      requireTls: true,
+      trustedProxies: ["127.0.0.1"],
+    });
+    // Stock `proxy_pass` sends no forwarding headers at all.
+    expect(
+      loopbackProxy.check(req("http://x/"), "127.0.0.1").refuse?.status,
+    ).toBe(403);
+    // A client-supplied loopback `X-Forwarded-For` does not make it local.
+    const forged = req("http://x/", { "x-forwarded-for": "127.0.0.1" });
+    expect(loopbackProxy.check(forged, "127.0.0.1").refuse?.message).toBe(
+      "TLS required",
+    );
+    const remote = req("http://x/", { "x-forwarded-for": "203.0.113.9" });
+    expect(loopbackProxy.check(remote, "127.0.0.1").refuse?.status).toBe(403);
+  });
   it("exempts the health path", () => {
     expect(
       guard.check(req("http://x/health"), "192.168.1.5").refuse,
@@ -183,6 +201,21 @@ describe("--require-tls", () => {
 });
 
 describe("per-IP rate limit", () => {
+  it("keys an IPv6 client by its /64 and an IPv4-mapped one by its IPv4", () => {
+    expect(rateLimitKey("2001:db8::1")).toBe(rateLimitKey("2001:db8::ffff"));
+    expect(rateLimitKey("2001:db8:0:1::1")).not.toBe(
+      rateLimitKey("2001:db8::1"),
+    );
+    expect(rateLimitKey("::ffff:1.2.3.4")).toBe("1.2.3.4");
+    expect(rateLimitKey("1.2.3.4")).toBe("1.2.3.4");
+  });
+  it("is not escaped by rotating addresses inside one /64", () => {
+    const guard = createAccessGuard({ rateLimitPerIp: 1, now: () => 0 });
+    const r = req("http://x/a");
+    expect(guard.check(r, "2001:db8::1").refuse).toBeUndefined();
+    expect(guard.check(r, "2001:db8::2").refuse?.status).toBe(429);
+    expect(guard.trackedIps()).toBe(1);
+  });
   it("allows a burst of `rate` then answers 429 with Retry-After", () => {
     let t = 0;
     const guard = createAccessGuard({

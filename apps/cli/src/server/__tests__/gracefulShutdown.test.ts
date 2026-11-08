@@ -5,25 +5,35 @@ import type { CPRegistry } from "../CPRegistry";
 
 type FrameHandler = (direction: "Sent" | "Received", raw: string) => void;
 
-function fakeService(opts: { online?: boolean; connectors?: number[] }) {
+function fakeService(opts: {
+  online?: boolean;
+  soap?: boolean;
+  connectors?: number[];
+  /** Read on every pass, so a test can open a transaction mid-wait. */
+  live?: () => number[];
+}) {
   let handler: FrameHandler | null = null;
   const stopped: number[] = [];
+  const options: unknown[] = [];
   const svc = {
     isOnline: () => opts.online ?? true,
-    openTransactionConnectorIds: () => opts.connectors ?? [1],
+    isSoapChargePoint: () => opts.soap ?? false,
+    openTransactionConnectorIds: () => opts.live?.() ?? opts.connectors ?? [1],
     onWireFrame: (h: FrameHandler) => {
       handler = h;
       return () => {
         handler = null;
       };
     },
-    stopTransaction: (id: number) => {
+    stopTransaction: (id: number, o?: unknown) => {
       stopped.push(id);
+      options.push(o);
     },
   };
   return {
     svc,
     stopped,
+    options,
     emit: (d: "Sent" | "Received", raw: string) => handler?.(d, raw),
     subscribed: () => handler !== null,
   };
@@ -81,6 +91,37 @@ describe("stopTransactionsAndWait", () => {
     const report = await stopTransactionsAndWait(registryOf({ A: cp }), 5000);
     expect(report).toMatchObject({ stopped: 2, timedOut: false });
     expect(Date.now() - started).toBeLessThan(1000);
+  });
+
+  it("names a reason that is not a driver's authorization on 2.x", async () => {
+    const cp = fakeService({ connectors: [1], online: false });
+    await stopTransactionsAndWait(registryOf({ A: cp }), 0);
+    expect(cp.options).toEqual([
+      { reason: "Other", triggerReason: "AbnormalCondition" },
+    ]);
+  });
+
+  it("does not wait for a SOAP charge point", async () => {
+    const cp = fakeService({ connectors: [1], soap: true });
+    const started = Date.now();
+    const report = await stopTransactionsAndWait(registryOf({ A: cp }), 5000);
+    expect(report).toMatchObject({ stopped: 1, timedOut: false });
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+
+  it("stops a transaction opened while it waits", async () => {
+    let open = [1];
+    const cp = fakeService({ live: () => open });
+    const done = stopTransactionsAndWait(registryOf({ A: cp }), 5000);
+    cp.emit("Sent", '[2,"s1","StopTransaction",{"transactionId":1}]');
+    open = []; // the first stop closed connector 1 ...
+    await new Promise((r) => setTimeout(r, 20));
+    open = [2]; // ... and a command opens connector 2 before s1 is answered
+    await vi.waitFor(() => expect(cp.stopped).toEqual([1, 2]));
+    cp.emit("Received", '[3,"s1",{}]');
+    cp.emit("Sent", '[2,"s2","StopTransaction",{"transactionId":2}]');
+    cp.emit("Received", '[3,"s2",{}]');
+    await expect(done).resolves.toMatchObject({ stopped: 2, delivered: 2 });
   });
 
   it("stops waiting when told to skip", async () => {

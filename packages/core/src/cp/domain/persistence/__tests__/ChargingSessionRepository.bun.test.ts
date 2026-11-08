@@ -218,6 +218,91 @@ describe.each(implementations)(
       repo.clear();
       expect(repo.list({ cpId: "CP-B" }).total).toBe(0);
     });
+    describe("across charge points (#489)", () => {
+      // Same start time on purpose: the order across charge points must not
+      // depend on which one the store happens to visit first.
+      function fleet() {
+        const repo = create();
+        const t = "2026-11-08T10:00:00.000Z";
+        const a1 = session({ cpId: "CP-A", sessionId: "a1", startedAt: t });
+        const b1 = session({ cpId: "CP-B", sessionId: "b1", startedAt: t });
+        const a2 = session({
+          cpId: "CP-A",
+          sessionId: "a2",
+          startedAt: "2026-11-08T11:00:00.000Z",
+          outcome: "failed",
+        });
+        const c1 = session({
+          cpId: "CP-C",
+          sessionId: "c1",
+          startedAt: "2026-11-08T09:00:00.000Z",
+        });
+        [a1, b1, a2, c1].forEach((s) => repo.upsert(s));
+        return { repo };
+      }
+      const ids = (page: { sessions: ChargingSession[] }) =>
+        page.sessions.map((s) => s.sessionId);
+
+      it("lists every charge point newest first, ties by record order", () => {
+        const { repo } = fleet();
+        expect(ids(repo.list({}))).toEqual(["a2", "b1", "a1", "c1"]);
+        expect(repo.list({}).total).toBe(4);
+        expect(ids(repo.list({ order: "asc" }))).toEqual([
+          "c1",
+          "a1",
+          "b1",
+          "a2",
+        ]);
+      });
+
+      it("pages without skipping or repeating a session", () => {
+        const { repo } = fleet();
+        const pages = [0, 2].map((offset) =>
+          ids(repo.list({ limit: 2, offset })),
+        );
+        expect(pages.flat()).toEqual(["a2", "b1", "a1", "c1"]);
+      });
+
+      it("narrows to cpIds, and an empty list matches nothing", () => {
+        const { repo } = fleet();
+        expect(ids(repo.list({ cpIds: ["CP-B", "CP-C"] }))).toEqual([
+          "b1",
+          "c1",
+        ]);
+        expect(repo.list({ cpIds: [] })).toEqual({ sessions: [], total: 0 });
+      });
+
+      it("filters by outcome and a half-open start-time range", () => {
+        const { repo } = fleet();
+        expect(ids(repo.list({ outcomes: ["failed"] }))).toEqual(["a2"]);
+        expect(
+          ids(
+            repo.list({
+              startedFrom: "2026-11-08T10:00:00.000Z",
+              startedTo: "2026-11-08T11:00:00.000Z",
+            }),
+          ),
+        ).toEqual(["b1", "a1"]);
+        expect(
+          repo.list({
+            startedFrom: "2026-11-08T10:00:00.000Z",
+            startedTo: "2026-11-08T10:00:00.000Z",
+          }).total,
+        ).toBe(0);
+      });
+
+      it("applies the time range to one charge point too", () => {
+        const { repo } = fleet();
+        expect(
+          ids(
+            repo.list({
+              cpId: "CP-A",
+              startedFrom: "2026-11-08T10:30:00.000Z",
+            }),
+          ),
+        ).toEqual(["a2"]);
+      });
+    });
   },
 );
 

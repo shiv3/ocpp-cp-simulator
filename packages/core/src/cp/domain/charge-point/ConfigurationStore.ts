@@ -203,6 +203,19 @@ export class ConfigurationStore {
     return this.getInteger("MessageTimeout") ?? 30;
   }
 
+  /** 2.x key `OfflineThreshold` (seconds); default `60` (#702). 2.x reads it
+   *  as `OCPPCommCtrlr.OfflineThreshold` (B04.FR.01/02). */
+  offlineThreshold(): number {
+    return this.getInteger("OfflineThreshold") ?? 60;
+  }
+
+  /** 2.x simulator key `BootOnReconnect`; default `false` (#702): whether
+   *  every connect, a reconnect after a connection loss included, sends a
+   *  BootNotification (OCPP-J 2.0.1 §5.4 says SHOULD NOT). */
+  bootOnReconnect(): boolean {
+    return this.getBoolean("BootOnReconnect") ?? false;
+  }
+
   /** 2.x key `OfflineQueuingSeverity` (0-9); default `0` (#538). 2.x reads
    *  it as `MonitoringCtrlr.OfflineQueuingSeverity`. */
   offlineQueuingSeverity(): number {

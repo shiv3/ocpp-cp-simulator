@@ -463,6 +463,27 @@ export const ConfigurationKeys = {
       type: "integer",
       min: 1,
     } as IntegerConfigurationKey,
+    // #702: OCPP 2.0.1 / 2.1 OCPPCommCtrlr.OfflineThreshold (Part 2 §2.1.8,
+    // Required, ReadWrite, seconds): after an offline period longer than this
+    // the station reports all its connectors when it is back (B04.FR.01), else
+    // only those whose status changed (B04.FR.02). 2.x only.
+    OfflineThreshold: {
+      name: "OfflineThreshold",
+      required: false,
+      readonly: false,
+      type: "integer",
+      min: 0,
+    } as IntegerConfigurationKey,
+    // #702: simulator option, 2.x only. false (default): a reconnect after a
+    // connection loss sends no BootNotification while the boot data is
+    // unchanged (OCPP-J 2.0.1 §5.4); true keeps the BootNotification on every
+    // connect.
+    BootOnReconnect: {
+      name: "BootOnReconnect",
+      required: false,
+      readonly: false,
+      type: "boolean",
+    } as BooleanConfigurationKey,
     // #538: OCPP 2.0.1 / 2.1 MonitoringCtrlr.OfflineQueuingSeverity (Part 2
     // §2.11.7 / 2.1 §2.13.7, ReadWrite): while offline, NotifyEvents of
     // monitors at or below this severity are queued (N07.FR.04, N08.FR.03).
@@ -714,6 +735,14 @@ export const defaultConfiguration: (cp: ChargePoint) => Configuration = (
     // 1.6 serial queue's CALL timeout.
     ...(isOcpp2Version(cp.ocppVersion)
       ? [intVal(ConfigurationKeys.Custom.MessageTimeout, 30)]
+      : []),
+    // #702: 2.x only (OCPPCommCtrlr.OfflineThreshold, and the simulator's
+    // BootOnReconnect option). The spec gives no default threshold: 60 s.
+    ...(isOcpp2Version(cp.ocppVersion)
+      ? [
+          intVal(ConfigurationKeys.Custom.OfflineThreshold, 60),
+          boolVal(ConfigurationKeys.Custom.BootOnReconnect, false),
+        ]
       : []),
     // #538: 2.x only (MonitoringCtrlr.OfflineQueuingSeverity); 0 queues
     // only Emergency events while offline.

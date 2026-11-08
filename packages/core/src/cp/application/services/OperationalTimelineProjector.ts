@@ -107,6 +107,23 @@ export class OperationalTimelineProjector {
         }, RECOVERY_SETTLE_MS);
       }
     });
+    on("reconnectResumed", ({ offlineMs, reportedAll }) => {
+      // No BootNotification on a pure reconnect (#702): the resumed link is
+      // the booted state.
+      if (this.incident?.link === "up") this.incident.link = "booted";
+      this.timeline.record({
+        kind: "boot_notification",
+        summary: "Reconnected without BootNotification",
+        data: { resumed: true, offlineMs, reportedAll },
+      });
+      this.checkRecovery();
+      if (this.incident?.link === "booted" && this.settleTimer === null) {
+        this.settleTimer = this.clock.setTimeout(() => {
+          this.settleTimer = null;
+          this.closeIncident(this.unrestoredConnectors().length === 0);
+        }, RECOVERY_SETTLE_MS);
+      }
+    });
     on("statusChange", ({ status, previousStatus }) => {
       if (status === previousStatus) return;
       this.timeline.record({

@@ -860,10 +860,7 @@ export const goldenCases: GoldenCase[] = [
   // --- connection loss ---------------------------------------------------
   ...both("csms-drops-connection", async (rig) => {
     rig.csms.dropConnection();
-    await rig.csms.waitForCall("BootNotification", {
-      nth: 2,
-      timeoutMs: 30_000,
-    });
+    await rig.reconnected();
     await settle(rig);
   }),
   ...both("cp-disconnect-connect", async (rig) => {
@@ -885,10 +882,7 @@ export const goldenCases: GoldenCase[] = [
     rig.csms.callNoWait("DataTransfer", { vendorId: "com.example" });
     await settle(rig);
     rig.csms.dropConnection();
-    await rig.csms.waitForCall("BootNotification", {
-      nth: 2,
-      timeoutMs: 30_000,
-    });
+    await rig.reconnected();
     await settle(rig);
   }),
 ];

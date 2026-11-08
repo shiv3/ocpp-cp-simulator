@@ -851,7 +851,11 @@ reads two events and nothing else: `connected` means the WebSocket opened (the
 station is booting), and `boot_notification` carries the CSMS's answer to
 `BootNotification.req` once it has been processed (`status`: `Accepted`,
 `Pending` or `Rejected`, plus `interval` and `currentTime`). It is emitted once
-per `BootNotification.conf` — first boot, reconnect, retry after `Rejected` —
+per `BootNotification.conf` — first boot, reconnect (OCPP 1.x and SOAP; a 2.x
+reconnect after a connection loss sends no `BootNotification` and so emits no
+`boot_notification`, see [Reconnect without
+BootNotification](ocpp-versions-and-transports.md#reconnect-without-bootnotification-ocpp-2x-702)),
+retry after `Rejected` —
 after the `connected` of that socket and before the `connector_status` /
 `status_change` events the answer causes. One exception: a `connect` on a
 socket that is already open sends no new `BootNotification.req`, but still

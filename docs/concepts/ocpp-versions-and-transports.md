@@ -447,6 +447,40 @@ An `Inoperative` availability change scheduled during a transaction remains
 `Unavailable` after the accepted reboot and continues to reject new local
 transaction starts.
 
+## Reconnect without BootNotification (OCPP 2.x, #702)
+
+OCPP-J 2.0.1 §5.4: when reconnecting, a charging station "SHOULD NOT send a
+BootNotification unless one or more of the elements in the BootNotification
+have changed". On 2.0.1 and 2.1 the station follows it. The transport's
+automatic reconnect after a connection loss (a CSMS close, a network-sim cut)
+reopens the socket and **sends no `BootNotification`** when
+
+- the last `BootNotification` was `Accepted` and the boot data is unchanged, and
+- `BootOnReconnect` (a 2.x simulator key, default `false`) is not `true`.
+
+A first connect, an operator `connect()`, a `Reset`, a
+`TriggerMessage(BootNotification)`, a boot that a closed socket lost, a last
+boot that was `Pending` or `Rejected`, and changed boot data all still send it. OCPP 1.x and
+SOAP always boot on connect.
+
+Instead the station resumes what an accepted boot starts (B04, E11):
+
+- **Status reports.** The connection loss made the connectors `Unavailable`
+  locally only. They get their status back without a wire message, and a
+  `StatusNotification` goes out for the connectors whose status differs from
+  what the CSMS last knew (B04.FR.02), and for the charge point and **all**
+  connectors when the outage lasted longer than `OCPPCommCtrlr.OfflineThreshold`
+  seconds (B04.FR.01; key `OfflineThreshold`, 2.x only, default `60`, the spec
+  gives none).
+- The heartbeat timer (with the interval in force), the clock-aligned samples
+  and the variable-monitoring reports are re-armed.
+- The [E11 queue](#e11-offline-queue-for-transactionevent) is replayed after
+  the status reports, as after an accepted boot.
+
+`connected` is emitted as always; no `boot_notification` event follows it on
+such a reconnect, and the operational timeline records "Reconnected without
+BootNotification" in its place.
+
 ## Clock-aligned meter values (`ClockAlignedDataInterval`)
 
 Every `ClockAlignedDataInterval` seconds a charge point sends one

@@ -2389,6 +2389,21 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - `ci.yml`: the vitest and bun suites ran one after the other in the `test` job and then a second time for coverage, which made the job about 18 minutes. Each now runs once with coverage in its own job (`vitest`, and `bun` in three shards through `scripts/bun-test-shard.sh`); `test` keeps the static checks and the packaging smokes. Every job has a timeout, and a new push to a pull request cancels the previous run. Updated [Testing strategy](analyses/testing-strategy.md).
 
+## [2026-11-08] ingest | Layer dependency direction in `check:boundaries` (#571)
+
+- [Overview](overview.md): new rule bullet for the `src/cp` layers (`domain` / `application` / `infrastructure` / `shared`) and the shrinking `LAYER_EXEMPTIONS` list (26 entries at introduction: 15 domain → application, 10 domain → infrastructure, 1 application → infrastructure). The check lives in `scripts/check-package-boundaries.ts`, not in ESLint, so it shares the type-only edge handling, the stale-entry failure and the `--json` output with the other rules.
+
+## [2026-11-08] ingest | The renewed client certificate no longer depends on the CertificateSigned answer (#564)
+
+- On 2.0.1 / 2.1 profile 3 the renewed Charging Station certificate is handed to the transport when the chain is stored (`certificateStored`, `ChargePoint.adoptRenewedClientCertificate`), not from the `afterResult` effect; that effect keeps only the reconnect of an open connection, and skips it when the open connection already presents the certificate (`OCPPWebSocket.presentsClientCertificate`). Handing the same identity over twice is a no-op. Page touched: [Security profiles](concepts/security-profiles.md#renewed-client-certificate). Wire behavior is unchanged (golden fixtures untouched).
+
+## [2026-11-08] ingest | CustomerInformation and NotifyCustomerInformation (#602)
+
+- `concepts/local-authorization.md`: new "CustomerInformation" section (answers, report parts, clear semantics); `entities/default-behaviors.md`: `CustomerInformation` moves to the cache and local list row.
+
+## [2026-11-08] ingest | TriggerMessage SignV2G20Certificate and SignCombinedCertificate on 2.1 (#553)
+
+- F06.FR.08: on 2.1 `SignV2G20Certificate` answers `Accepted` and sends a new CSR with `certificateType = V2G20Certificate`; `SignCombinedCertificate` answers `Accepted` and sends one new CSR with `certificateType` omitted (the 2.1 enum: both the 15118 and the CSMS connection), stored as the Charging Station certificate when the chain comes back. 2.0.1 `SignCombinedCertificate` stays `NotImplemented`. Page touched: [Security profiles](concepts/security-profiles.md). No existing wire fixture changes.
 ## [2026-11-08] ingest | AutoTraffic: idTag pool, start preconditions, per-outcome counters (#603)
 
 - [Control plane → Background traffic](concepts/control-plane.md#background-traffic): `stopAt`, `idTagStrategy`, `cpIndex`; tags from the pool with the traffic's own seeded cursor (why not `nextIdTag`); start preconditions (Accepted, Available, no transaction); the full counter list.

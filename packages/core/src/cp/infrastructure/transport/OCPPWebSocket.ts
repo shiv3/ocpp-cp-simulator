@@ -235,6 +235,8 @@ export class OCPPWebSocket {
     confirmed: boolean;
     presentNext: boolean;
   } | null = null;
+  /** #564: the client certificate (PEM) the current attempt presents. */
+  private _connectionClientCertificate: string | undefined;
 
   // Network simulation
   private _controller: NetworkSimController;
@@ -337,6 +339,11 @@ export class OCPPWebSocket {
   public useRenewedClientCertificate(identity: ClientIdentity): void {
     if (!this.usesClientCertificate()) return;
     const previous = this._renewedClientCertificate;
+    // Handed over again (#564): the first hand-over stands, with whatever
+    // the connections since have settled about it.
+    if (previous?.cert === identity.cert && previous.key === identity.key) {
+      return;
+    }
     // A02.FR.28: the fallback is the certificate in use, which is a
     // renewal confirmed earlier rather than the configured one.
     const fallback = previous?.confirmed
@@ -349,6 +356,14 @@ export class OCPPWebSocket {
       confirmed: false,
       presentNext: true,
     };
+  }
+
+  /** Whether the open (or opening) connection presents `cert` as its client
+   *  certificate (#564): one that does needs no reconnect to switch to it. */
+  public presentsClientCertificate(cert: string): boolean {
+    return (
+      this._connectionClientCertificate === cert && this.isOpenOrConnecting()
+    );
   }
 
   /**
@@ -465,6 +480,7 @@ export class OCPPWebSocket {
     this._selfRequestedClose = false;
 
     const attempt = this.nextTlsOptions();
+    this._connectionClientCertificate = attempt.tls?.cert;
     let opened = false;
     const onopenHandler = () => {
       opened = true;

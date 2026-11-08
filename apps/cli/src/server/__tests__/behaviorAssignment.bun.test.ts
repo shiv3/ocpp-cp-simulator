@@ -295,10 +295,19 @@ export default b;`;
     const library = await BehaviorLibrary.fromFiles([file], () => undefined);
     const { server, socket } = await client({ behaviors: library });
     const list = await rpc(socket, "behavior.list", {});
-    expect(list.result).toEqual({
+    expect(list.result).toMatchObject({
       behaviors: [{ id: "rb", file }],
       watching: false,
     });
+    // The built-in behaviors and the actions each answers (C1).
+    const defaults = list.result.defaults as Array<{
+      id: string;
+      actions: string[];
+    }>;
+    expect(defaults.map((d) => d.id)).toContain("default.firmware");
+    expect(defaults.find((d) => d.id === "default.reset")?.actions).toEqual([
+      "Reset",
+    ]);
     await rpc(socket, "cp.create", { ...BASE, cpId: "RB" });
     const before = server.registry.library.get("rb");
 

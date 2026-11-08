@@ -12,7 +12,7 @@
 //     --behavior examples/behaviors/disconnect-on-charging.ts
 //
 // Event hooks run after the turn that caused the event, in load order, and are
-// not awaited; `beforeSend` is synchronous. See docs/analyses/charger-engine.md.
+// not awaited; `beforeSend` is synchronous. See docs/concepts/charger-engine.md.
 import type {
   Behavior,
   BehaviorContext,

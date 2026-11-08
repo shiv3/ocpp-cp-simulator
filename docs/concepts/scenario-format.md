@@ -691,8 +691,8 @@ the same limit, unit and `numberPhases`, so 6 A / 3 phases followed by
 **One operating point per sample (#327).** `Connector.operatingPoint()` is the
 only resolver: a pure function that reads the schedule limit, active phase
 count, battery acceptance, EVSE offer, line currents, voltage, power factor and
-SoC once, from one instant, out of five named input terms (`at`, `schedule`,
-`vehicle`, `session`, `fault`; `OperatingPointInputs`). The energy register
+SoC once, from one instant, out of six named input terms (`at`, `schedule`,
+`vehicle`, `session`, `charger`, `fault`; `OperatingPointInputs`). The energy register
 (`MeterValueScheduler`) accumulates against the point's `accumulationCapW` and
 `MeterValueBuilder` only formats the rest, so the samples of a MeterValue
 describe one instant. The resolution (`OperatingPoint.ts`) imports nothing from
@@ -711,17 +711,43 @@ increment or bezier trajectory under the schedule limit alone, and
 neither is known. `accumulationCapW` is the upper bound on one tick's register
 delta, not a cap on acceptance, and three invariants are pinned by test:
 
-| State                                  | `accumulationCapW`                       |
-| -------------------------------------- | ---------------------------------------- |
-| curve and finite `maxChargingPowerKw`  | `acceptedW`                              |
-| no curve, or no finite vehicle ceiling | the schedule limit (`Infinity` uncapped) |
-| energy offer suspended (`SuspendedEV`) | 0                                        |
+| State                                  | `accumulationCapW`                                                                 |
+| -------------------------------------- | ---------------------------------------------------------------------------------- |
+| curve and finite `maxChargingPowerKw`  | `acceptedW`                                                                        |
+| no curve, or no finite vehicle ceiling | `boundW`: the schedule limit narrowed by the charger cap (`Infinity` with neither) |
+| energy offer suspended (`SuspendedEV`) | 0                                                                                  |
 
 Outside `Charging` the bound is the same as when charging (the scheduler ticks
 through `SuspendedEVSE`; whether it ticks at all is not the point's decision),
-whereas `acceptedW` and `offeredW` are 0. The point also carries `limitedBy`
-(`schedule`, `vehicle`, `suspended`, `none`), a diagnostic that never reaches
-the wire. This is a refactor: no wire byte changes.
+whereas `acceptedW` is 0. The point also carries `limitedBy`
+(`schedule`, `charger`, `vehicle`, `suspended`, `none`), a diagnostic that never
+reaches the wire.
+
+**The charger cap (#327).** `chargerCapabilities` (`cp.create` parameter, a
+blueprint's `params`, `charge_points.charger_capabilities`) declares per
+connector what the hardware delivers, in watts (`maxDeliveryPowerW`). It is the
+third operand of the one narrowing, `boundW = min(schedule limit, charger cap)`,
+and `boundW` is what acceptance, the offer, **both** `accumulationCapW` branches
+and the rounding bound of every sample read, so the cap narrows the energy
+register, `Power.Active.Import`, `Power.Offered` and `Current.Import` together
+and none of them can contradict another. A connector the capability does not
+list has no cap and resolves byte for byte as before. It is not the vehicle's
+`maxChargingPowerKw` (what the EV accepts) and not a charging profile (what the
+CSMS allows); the aggregate of a station is not modelled (there is no power
+sharing), so connectors are never clamped to a sum. `GetCompositeSchedule`
+restates the CSMS profiles, not hardware, and is unaffected. When the schedule
+and the cap are equal `limitedBy` names the schedule, the term an operator can
+change at run time.
+
+**`Power.Offered` is gated on the EVSE energizing the connector.** `offeredW` is
+non-zero for a running transaction in `Charging` **or `SuspendedEV`** and 0 in
+`SuspendedEVSE`, `Preparing`, `Finishing` and every state outside a session. In
+`SuspendedEV` the EVSE still offers energy and the vehicle takes none (OCPP 1.6
+§7.7 `SuspendedEV`; 2.0.1 `ChargingStateEnumType`), and `Power.Offered` is the
+maximum power offered to the EV (1.6 §7.31 Measurand; 2.0.1 Part 2 §3.50
+MeasurandEnumType), so it reads the offer there while `Power.Active.Import`
+reads 0. `SuspendedEVSE` withholds energy, so it offers nothing. Before #327 the
+offer was gated on `Charging` alone and read 0 in `SuspendedEV`.
 
 **A session's opening and target SoC come from its `SessionIntent` (#327).**
 `resolveSessionIntent()` (`SessionIntent.ts`) is the one place that decides
@@ -729,7 +755,13 @@ them: the transaction's own `initialSoc` / `targetSoc`, else the connector's EV
 settings default. The SoC-from-register derivation, its inverse, the curve's
 opening SoC and the target-SoC auto-stop all read it, so they cannot disagree
 about the session. A target is session intent, not a car property:
-`EVSettings.targetSoc` stays as the default a session copies.
+`EVSettings.targetSoc` stays as the default a session copies. The writers of
+the session's own values are the `startTransaction` options `targetSoc` and
+`stopAtTarget` (`Transaction.targetSoc` / `Transaction.stopAtTarget`, persisted
+with the transaction in `connector_runtime.transaction_json`, so a restart
+keeps them without a migration) and its `initialSoc` argument. Today the one
+caller is auto-traffic's [`sessionModel: "intent"`](control-plane.md#background-traffic);
+`stopAtTarget` on the transaction wins over the connector's `stopAtTargetSoc`.
 
 **Known limitation, not a guarantee: a connector declaring none of the four
 electrical fields keeps the pre-1.2 mismatch.** It converts an amp limit with
@@ -926,7 +958,7 @@ value. Collinearity alone is not enough: `(0,0) (5,5) (20,20)` is collinear,
 unevenly spaced, and differs by 2.5 kWh at its widest.
 
 `Power.Offered` / `Current.Offered` are the EVSE's own offer —
-`min(maxChargingPowerKw, ChargingScheduleResolver limit)` — **not** what the
+`min(maxChargingPowerKw, charger cap, ChargingScheduleResolver limit)` — **not** what the
 curve says the battery accepts. A 100 kW charger still offers 100 kW to a
 nearly-full battery that the curve says only draws 10% of it; conflating the
 two would make a charger appear to shrink as a car fills up.

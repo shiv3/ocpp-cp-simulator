@@ -14,6 +14,7 @@ import {
 import { buildSampledValues } from "../MeterValueBuilder";
 import type { EVSettings } from "../EVSettings";
 import {
+  chargerTermOf,
   resolveOperatingPoint,
   vehicleTermOf,
   type OperatingPointInputs,
@@ -165,6 +166,11 @@ describe("one operating point feeds the register and the report (#327)", () => {
   });
 });
 
+/** A fault term for a charging connector, suspended or not. */
+function faultOf(energyOfferSuspended: boolean) {
+  return { offering: true, energyOfferSuspended };
+}
+
 /** Inputs for a charging connector with no vehicle, schedule or fault. */
 function bareInputs(
   overrides: Partial<OperatingPointInputs> = {},
@@ -176,7 +182,8 @@ function bareInputs(
     schedule: { scheduleLimitW: Infinity, activePhases: 1 },
     vehicle: vehicleTermOf(undefined),
     session: { initialSoc: undefined },
-    fault: { energyOfferSuspended: false },
+    charger: chargerTermOf(undefined),
+    fault: faultOf(false),
     ...overrides,
   };
 }
@@ -203,7 +210,7 @@ describe("accumulationCapW invariants (#327)", () => {
     }
   });
 
-  it("no curve: the register bound is the schedule limit, whatever the vehicle max", () => {
+  it("no curve: the register bound is the schedule limit (no charger cap), whatever the vehicle max", () => {
     for (const maxChargingPowerKw of [0, 22]) {
       for (const scheduleLimitW of [Infinity, 3_000]) {
         const point = resolveOperatingPoint(
@@ -223,9 +230,8 @@ describe("accumulationCapW invariants (#327)", () => {
   it("a suspended energy offer bounds the register at 0, in either shape", () => {
     for (const vehicle of [withCurve(), vehicleTermOf(undefined)]) {
       expect(
-        resolveOperatingPoint(
-          bareInputs({ vehicle, fault: { energyOfferSuspended: true } }),
-        ).accumulationCapW,
+        resolveOperatingPoint(bareInputs({ vehicle, fault: faultOf(true) }))
+          .accumulationCapW,
       ).toBe(0);
     }
   });
@@ -258,9 +264,8 @@ describe("the operating point is a pure function of its named terms (#327)", () 
     expect(bare.acceptedW).toBe(0);
     expect(bare.limitedBy).toBe("none");
     expect(
-      resolveOperatingPoint(
-        bareInputs({ fault: { energyOfferSuspended: true } }),
-      ).accumulationCapW,
+      resolveOperatingPoint(bareInputs({ fault: faultOf(true) }))
+        .accumulationCapW,
     ).toBe(0);
   });
 
@@ -291,7 +296,7 @@ describe("the operating point is a pure function of its named terms (#327)", () 
         bareInputs({
           vehicle,
           schedule: { scheduleLimitW, activePhases: 1 },
-          fault: { energyOfferSuspended },
+          fault: faultOf(energyOfferSuspended),
         }),
       ).limitedBy;
     expect(at(Infinity)).toBe("vehicle");
@@ -343,5 +348,141 @@ describe("the resolution is protocol-agnostic (#327)", () => {
     for (const spec of imports) {
       expect(spec).not.toMatch(/infrastructure\/transport|\/ocpp\//);
     }
+  });
+});
+
+describe("the charger cap is one more term of the resolution (#327)", () => {
+  const CAP_CASES: Array<[string, Partial<EVSettings>, number]> = [
+    [
+      "DC",
+      { currentType: "DC", voltageV: 400, maxChargingPowerKw: 100 },
+      30_000,
+    ],
+    [
+      "single-phase AC",
+      { currentType: "AC", phases: 1, voltageV: 230, maxChargingPowerKw: 22 },
+      3_000,
+    ],
+    [
+      "three-phase AC",
+      {
+        currentType: "AC",
+        phases: 3,
+        voltageV: 230,
+        powerFactor: 0.9,
+        maxChargingPowerKw: 22,
+      },
+      6_000,
+    ],
+  ];
+
+  for (const [name, settings, capW] of CAP_CASES) {
+    it(`${name}: a binding cap narrows the register, Power.Active.Import, Power.Offered and Current.Import together`, () => {
+      for (const curve of [CURVE, undefined]) {
+        const connector = charging({ ...settings, chargingCurve: curve });
+        connector.setMaxDeliveryPowerW(capW);
+        const point = connector.operatingPoint();
+        expect(point.chargerCapW).toBe(capW);
+        expect(point.boundW).toBe(capW);
+        // The register's bound and the reported power are the same number.
+        expect(point.accumulationCapW).toBeLessThanOrEqual(capW);
+        expect(point.acceptedW).toBeLessThanOrEqual(capW);
+        expect(point.offeredW).toBe(capW);
+        expect(point.limitedBy).toBe("charger");
+        if (curve) expect(point.accumulationCapW).toBe(point.acceptedW);
+        else expect(point.accumulationCapW).toBe(capW);
+
+        const samples = buildSampledValues(
+          connector,
+          ["Power.Active.Import", "Power.Offered", "Current.Import"],
+          "Sample.Periodic",
+        );
+        const value = (measurand: string) =>
+          Number(
+            samples.find((s) => s.measurand === measurand && !s.phase)!.value,
+          );
+        expect(value("Power.Active.Import")).toBeLessThanOrEqual(capW);
+        expect(value("Power.Active.Import")).toBeCloseTo(point.acceptedW, 0);
+        expect(value("Power.Offered")).toBe(capW);
+        // Bounded by the same cap, in amperes (rounded down, never over).
+        expect(value("Current.Import")).toBeLessThanOrEqual(point.limitA);
+        expect(Math.abs(value("Current.Import") - point.currentA)).toBeLessThan(
+          0.1,
+        );
+      }
+    });
+  }
+
+  it("a connector without a cap resolves exactly as before", () => {
+    const withCap = (watts: number | undefined) => {
+      const connector = charging({ currentType: "AC", phases: 3 });
+      connector.setMaxDeliveryPowerW(watts);
+      return connector.operatingPoint();
+    };
+    const none = withCap(undefined);
+    expect(none.chargerCapW).toBe(Infinity);
+    expect(none.boundW).toBe(none.scheduleLimitW);
+    // A cap above everything else does not bind.
+    const loose = withCap(1_000_000);
+    expect({ ...loose, at: 0, chargerCapW: 0, boundW: 0, limitA: 0 }).toEqual({
+      ...none,
+      at: 0,
+      chargerCapW: 0,
+      boundW: 0,
+      limitA: 0,
+    });
+  });
+
+  it("the schedule binds when it is tighter, and a tie is attributed to the schedule", () => {
+    const connector = charging(
+      { currentType: "DC", voltageV: 400, maxChargingPowerKw: 100 },
+      profile(5_000),
+    );
+    connector.setMaxDeliveryPowerW(20_000);
+    expect(connector.operatingPoint().limitedBy).toBe("schedule");
+    expect(connector.operatingPoint().boundW).toBe(5_000);
+    connector.setMaxDeliveryPowerW(5_000);
+    expect(connector.operatingPoint().limitedBy).toBe("schedule");
+  });
+
+  it("a cap is the register bound with no curve, even with no vehicle ceiling", () => {
+    const point = resolveOperatingPoint(
+      bareInputs({ charger: chargerTermOf(7_000) }),
+    );
+    expect(point.accumulationCapW).toBe(7_000);
+    expect(point.acceptedW).toBe(7_000);
+    expect(point.limitedBy).toBe("charger");
+  });
+
+  it("offeredW follows a running transaction not suspended by the EVSE", () => {
+    const vehicle = vehicleTermOf({
+      ...new Connector(1, new Logger(LogLevel.ERROR)).evSettings,
+      maxChargingPowerKw: 22,
+      chargingCurve: undefined,
+    });
+    const offered = (offering: boolean, charging: boolean) =>
+      resolveOperatingPoint(
+        bareInputs({
+          vehicle,
+          charging,
+          fault: { offering, energyOfferSuspended: !charging && offering },
+        }),
+      ).offeredW;
+    expect(offered(true, true)).toBe(22_000); // Charging
+    expect(offered(true, false)).toBe(22_000); // SuspendedEV: offered, not taken
+    expect(offered(false, false)).toBe(0); // SuspendedEVSE, Preparing, Finishing...
+  });
+
+  it("Connector: SuspendedEV offers, SuspendedEVSE and Preparing do not", () => {
+    const connector = charging({ currentType: "DC", maxChargingPowerKw: 50 });
+    expect(connector.operatingPoint().offeredW).toBe(50_000);
+    connector.status = OCPPStatus.SuspendedEV;
+    const suspendedEv = connector.operatingPoint();
+    expect(suspendedEv.offeredW).toBe(50_000);
+    expect(suspendedEv.acceptedW).toBe(0);
+    connector.status = OCPPStatus.SuspendedEVSE;
+    expect(connector.operatingPoint().offeredW).toBe(0);
+    connector.status = OCPPStatus.Preparing;
+    expect(connector.operatingPoint().offeredW).toBe(0);
   });
 });

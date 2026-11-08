@@ -10,6 +10,7 @@
 // On the daemon the handlers receive the value these schemas parsed (#383), so
 // a rule about the params themselves belongs here rather than in a handler.
 
+import { chargerCapabilitiesSchema } from "./chargerCapabilities";
 import {
   DIAGNOSTICS_STATUSES,
   FIRMWARE_STATUSES,
@@ -457,6 +458,11 @@ const cpParamsBaseSchema = z.object({
   labels: labelsSchema.optional(),
   behaviors: behaviorIdsSchema.optional(),
   behaviorParams: behaviorParamsSchema.optional(),
+  chargerCapabilities: chargerCapabilitiesSchema
+    .optional()
+    .describe(
+      "What the charger hardware delivers per connector (#327). The cap narrows the offered and accepted power and the energy register together, whatever the vehicle and the CSMS allow. A connector not listed is uncapped. Omit for no cap; cp.update keeps the current value when omitted",
+    ),
 });
 
 const scenarioTemplateInfoSchema = z.object({

@@ -195,7 +195,10 @@ CREATE TABLE IF NOT EXISTS charge_points (
   transport_options TEXT,
   -- #654: a JSON object of behavior id to params object; NULL (a row older
   -- than the column) is no params, every behavior runs with its defaults.
-  behavior_params TEXT
+  behavior_params TEXT,
+  -- #327: a JSON object of the charger-side delivery caps per connector;
+  -- NULL (a row older than the column) is no cap.
+  charger_capabilities TEXT
 );
 
 -- Per-CP UI / operator state. Currently holds the "desired connected"

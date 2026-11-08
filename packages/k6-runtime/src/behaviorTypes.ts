@@ -235,15 +235,17 @@ export interface ConnectorSnapshot {
   /**
    * The connector's resolved operating point now, read-only (#327). Finite
    * numbers only: a quantity with no known limit never appears as `Infinity`.
-   * `acceptedW` and `offeredW` are 0 unless the connector is `Charging`.
+   * `acceptedW` is 0 unless the connector is `Charging`; `offeredW` is 0 unless a
+   * running transaction is `Charging` or `SuspendedEV` (the EVSE is offering).
    */
   readonly power: {
     readonly acceptedW: number;
     readonly offeredW: number;
     /** State of charge in percent, `null` before the first synced tick. */
     readonly soc: number | null;
-    /** What binds the offer: `schedule`, `vehicle`, `suspended` or `none`. */
-    readonly limitedBy: "schedule" | "vehicle" | "suspended" | "none";
+    /** What binds the offer: `schedule`, `charger`, `vehicle`, `suspended` or `none`. */
+    readonly limitedBy:
+      "schedule" | "charger" | "vehicle" | "suspended" | "none";
   };
 }
 

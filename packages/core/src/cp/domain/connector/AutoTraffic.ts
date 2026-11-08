@@ -49,6 +49,40 @@ export interface AutoTrafficConfig {
    * the same tag first. Absent: a stable hash of the charge point id.
    */
   cpIndex?: number;
+  /**
+   * What decides when a session ends (#327). `"duration"` (the default, and
+   * what an absent field means) draws a length and stops after it, so a
+   * seed recorded before this field existed replays byte for byte.
+   * `"intent"` draws a {@link AutoTrafficIntent} (opening and target SoC)
+   * and stops the session when the vehicle reaches the target;
+   * `minDurationSec`..`maxDurationSec` becomes the ceiling for a session
+   * whose vehicle never gets there.
+   */
+  sessionModel?: AutoTrafficSessionModel;
+  /** `"intent"` only: bounds of the drawn opening SoC in percent
+   *  (default {@link DEFAULT_INTENT_SOC_RANGE}). */
+  initialSocMin?: number;
+  initialSocMax?: number;
+  /** `"intent"` only: bounds of the drawn target SoC in percent. A draw at or
+   *  below the opening SoC is raised to one point above it (capped at 100). */
+  targetSocMin?: number;
+  targetSocMax?: number;
+}
+
+export type AutoTrafficSessionModel = "duration" | "intent";
+
+/** Default bounds of the intent draws, in percent. */
+export const DEFAULT_INTENT_SOC_RANGE = {
+  initialSocMin: 10,
+  initialSocMax: 50,
+  targetSocMin: 70,
+  targetSocMax: 100,
+} as const;
+
+/** What one drawn session asks of the vehicle (`sessionModel: "intent"`). */
+export interface AutoTrafficIntent {
+  initialSoc: number;
+  targetSoc: number;
 }
 
 export const defaultAutoTrafficConfig: AutoTrafficConfig = {
@@ -68,8 +102,11 @@ export interface AutoTrafficStep {
   gapSec: number;
   /** Whether the attempt actually starts a session. */
   start: boolean;
-  /** Session length, meaningful only when `start`. */
+  /** Session length, meaningful only when `start`. Under
+   *  `sessionModel: "intent"` it is the ceiling, not the plan. */
   durationSec: number;
+  /** The session's SoC intent; present only under `sessionModel: "intent"`. */
+  intent?: AutoTrafficIntent;
 }
 
 /**
@@ -221,11 +258,34 @@ export class AutoTrafficPlanner {
       this.config.minDurationSec,
       this.config.maxDurationSec,
     );
+    // The intent is drawn after the duration and before the roll, in a fixed
+    // order and unconditionally, so it too does not depend on which attempts
+    // fired. `"duration"` draws nothing here: its stream is unchanged.
+    const intent =
+      this.config.sessionModel === "intent" ? this.drawIntent() : undefined;
     const roll = draw(this.rng, 1_000_000) / 1_000_000;
     return {
       gapSec,
       start: roll < this.config.probabilityOfStart,
       durationSec,
+      ...(intent ? { intent } : {}),
+    };
+  }
+
+  private drawIntent(): AutoTrafficIntent {
+    const range = { ...DEFAULT_INTENT_SOC_RANGE };
+    const c = this.config;
+    const initialSoc = this.between(
+      c.initialSocMin ?? range.initialSocMin,
+      c.initialSocMax ?? range.initialSocMax,
+    );
+    const drawnTarget = this.between(
+      c.targetSocMin ?? range.targetSocMin,
+      c.targetSocMax ?? range.targetSocMax,
+    );
+    return {
+      initialSoc,
+      targetSoc: Math.max(drawnTarget, Math.min(100, initialSoc + 1)),
     };
   }
 
@@ -294,6 +354,37 @@ export function validateAutoTrafficConfig(
     )
   ) {
     return 'idTagStrategy must be "round-robin", "random" or "connector-affinity"';
+  }
+  if (
+    config.sessionModel !== undefined &&
+    config.sessionModel !== "duration" &&
+    config.sessionModel !== "intent"
+  ) {
+    return 'sessionModel must be "duration" or "intent"';
+  }
+  for (const key of [
+    "initialSocMin",
+    "initialSocMax",
+    "targetSocMin",
+    "targetSocMax",
+  ] as const) {
+    const value = config[key];
+    if (value === undefined) continue;
+    if (!Number.isFinite(value) || value < 0 || value > 100) {
+      return `${key} must be a number between 0 and 100`;
+    }
+  }
+  if (
+    (config.initialSocMin ?? 0) >
+    (config.initialSocMax ?? DEFAULT_INTENT_SOC_RANGE.initialSocMax)
+  ) {
+    return "initialSocMax must be at least initialSocMin";
+  }
+  if (
+    (config.targetSocMin ?? 0) >
+    (config.targetSocMax ?? DEFAULT_INTENT_SOC_RANGE.targetSocMax)
+  ) {
+    return "targetSocMax must be at least targetSocMin";
   }
   if (
     config.cpIndex !== undefined &&

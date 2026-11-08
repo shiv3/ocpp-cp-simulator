@@ -59,6 +59,7 @@ import {
 } from "./ChargingCurve";
 import {
   resolveOperatingPoint,
+  chargerTermOf,
   vehicleTermOf,
   type OperatingPoint,
 } from "./OperatingPoint";
@@ -273,6 +274,9 @@ export class Connector {
   // default onto every connector while a scenario is mid-flight on the
   // daemon). Cleared when the scenario that set it stops/completes.
   private _evSettingsOverridden = false;
+  /** The charger's delivery cap on this connector in watts (#327);
+   *  `undefined` when the hardware declares none. Set once at construction. */
+  private _maxDeliveryPowerW: number | undefined;
   private _chargingProfiles: ActiveChargingProfile[] = [];
 
   /**
@@ -646,8 +650,31 @@ export class Connector {
       schedule: { scheduleLimitW: watts, activePhases },
       vehicle: vehicleTermOf(this._evSettings),
       session: { initialSoc: this.sessionIntent().initialSoc },
-      fault: { energyOfferSuspended: this.energyOfferSuspendedValue },
+      charger: chargerTermOf(this._maxDeliveryPowerW),
+      fault: {
+        // A running transaction in a state where the EVSE energizes the
+        // connector; SuspendedEVSE and everything outside the session offer
+        // nothing (OCPP 1.6 §7.7, §7.31).
+        offering:
+          this.hasRunningTransaction &&
+          (this.status === OCPPStatus.Charging ||
+            this.status === OCPPStatus.SuspendedEV),
+        energyOfferSuspended: this.energyOfferSuspendedValue,
+      },
     });
+  }
+
+  /** The hardware's delivery cap on this connector in watts, `undefined`
+   *  when none is declared (#327). */
+  get maxDeliveryPowerW(): number | undefined {
+    return this._maxDeliveryPowerW;
+  }
+
+  /** Declare the charger's delivery cap (watts, or `undefined` for none). The
+   *  hardware does not change at run time: call this when the connector is
+   *  built, before it samples. */
+  setMaxDeliveryPowerW(watts: number | undefined): void {
+    this._maxDeliveryPowerW = watts;
   }
 
   /**
@@ -1529,8 +1556,8 @@ export class Connector {
    * the ChargePoint can end the transaction.
    */
   private checkAutoStop(): void {
-    if (!this.autoConfig.stopAtTargetSoc) return;
     if (!this.transaction) return;
+    if (!this.sessionIntent().stopAtTarget) return;
     if (!this.meterScheduler.isActive()) return;
     const current = this.effectiveSocPercent();
     if (current === null) return;

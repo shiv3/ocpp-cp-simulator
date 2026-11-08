@@ -129,6 +129,7 @@ function setup(ocppVersion: string) {
       messageTimeout: () => 30,
       meterValuesSampledData: () => [],
       txStartedMeasurands: () => [],
+      stopTxnSampledData: () => [],
       offlineQueuingSeverity: () => 5,
       offlineQueueMaxEvents: () => 1000,
     },

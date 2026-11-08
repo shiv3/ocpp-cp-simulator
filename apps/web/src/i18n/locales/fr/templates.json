@@ -68,7 +68,7 @@
   "templates.cert16-tc048-1-reserve-now-faulted.name": "Cert 1.6 Reservation: TC_048_1 Réservation immédiate — Faulted",
   "templates.cert16-tc048-1-reserve-now-faulted.description": "Connecteur passé en Faulted avec l’errorCode InternalError ; le CSMS envoie ReserveNow ; la borne répond avec le statut Faulted via un remplacement de réponse pré-armé ; retour à Available.",
   "templates.cert16-tc048-2-reserve-now-occupied.name": "Cert 1.6 Reservation: TC_048_2 Réservation immédiate — Occupied",
-  "templates.cert16-tc048-2-reserve-now-occupied.description": "Branchement → StatusNotification(Preparing) ; armement d’un remplacement de réponse Occupied ; le CSMS envoie ReserveNow ; la borne répond avec le statut Occupied ; débranchement → StatusNotification(Available).",
+  "templates.cert16-tc048-2-reserve-now-occupied.description": "Branchement → StatusNotification(Preparing) ; le CSMS envoie ReserveNow ; le connecteur est occupé (Preparing, §4.9), la borne répond donc avec le statut Occupied (§5.13) ; débranchement → StatusNotification(Available).",
   "templates.cert16-tc048-3-reserve-now-unavailable.name": "Cert 1.6 Reservation: TC_048_3 Réservation immédiate — Unavailable",
   "templates.cert16-tc048-3-reserve-now-unavailable.description": "Connecteur passé en Unavailable ; armement d’un remplacement de réponse Unavailable ; le CSMS envoie ReserveNow ; la borne répond avec le statut Unavailable ; retour à Available.",
   "templates.cert16-tc048-4-reserve-now-rejected.name": "Cert 1.6 Reservation: TC_048_4 Réservation immédiate — Rejected",

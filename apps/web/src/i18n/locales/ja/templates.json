@@ -68,7 +68,7 @@
   "templates.cert16-tc048-1-reserve-now-faulted.name": "Cert 1.6 Reservation: TC_048_1 今すぐ予約 — Faulted",
   "templates.cert16-tc048-1-reserve-now-faulted.description": "コネクタを errorCode InternalError の Faulted に設定。CSMS が ReserveNow を送信し、CP は事前設定した応答オーバーライドにより Faulted ステータスで応答。その後 Available に戻します。",
   "templates.cert16-tc048-2-reserve-now-occupied.name": "Cert 1.6 Reservation: TC_048_2 今すぐ予約 — Occupied",
-  "templates.cert16-tc048-2-reserve-now-occupied.description": "プラグイン → StatusNotification(Preparing)、Occupied の応答オーバーライドを設定。CSMS が ReserveNow を送信し、CP は Occupied ステータスで応答。プラグアウト → StatusNotification(Available)。",
+  "templates.cert16-tc048-2-reserve-now-occupied.description": "プラグイン → StatusNotification(Preparing)。CSMS が ReserveNow を送信し、コネクタは占有中(Preparing、§4.9)のため CP は Occupied ステータスで応答(§5.13)。プラグアウト → StatusNotification(Available)。",
   "templates.cert16-tc048-3-reserve-now-unavailable.name": "Cert 1.6 Reservation: TC_048_3 今すぐ予約 — Unavailable",
   "templates.cert16-tc048-3-reserve-now-unavailable.description": "コネクタを Unavailable に設定し、Unavailable の応答オーバーライドを設定。CSMS が ReserveNow を送信し、CP は Unavailable ステータスで応答。Available に戻します。",
   "templates.cert16-tc048-4-reserve-now-rejected.name": "Cert 1.6 Reservation: TC_048_4 今すぐ予約 — Rejected",

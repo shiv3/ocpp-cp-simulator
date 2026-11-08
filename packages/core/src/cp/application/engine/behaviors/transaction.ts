@@ -406,6 +406,10 @@ export function stopTransaction(
     connectorId: connector.id,
     write: { kind: "scheduledAvailability", value: null },
   });
+
+  // #597: a Reset OnIdle answered `Scheduled` boots once its last targeted
+  // transaction ends.
+  cp.runPendingResetOnIdle();
 }
 
 export function cleanTransaction(

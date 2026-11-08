@@ -5,7 +5,7 @@ import {
   type Settlement,
 } from "./NetworkSimPipeline";
 import { parseFrameContext } from "./FrameContext";
-import { draw, makeRuleRng } from "./SeededRng";
+import { draw, makeRuleRng } from "../../../shared/SeededRng";
 import { sanitizeForLog } from "./logSanitize";
 import {
   MAX_TIMER_MS,

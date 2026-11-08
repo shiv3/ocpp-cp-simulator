@@ -1,4 +1,4 @@
-import { draw } from "./SeededRng";
+import { draw } from "../../../shared/SeededRng";
 import { NETWORK_SIM_LIMITS, type ResolvedNetworkSimConfig } from "./config";
 import type { FrameContext } from "./FrameContext";
 

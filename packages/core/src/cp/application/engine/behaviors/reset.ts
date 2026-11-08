@@ -21,9 +21,11 @@ interface Reset2Request {
  * Reset.conf is written before any StopTransaction.req.
  *
  * OCPP 2.x (B11, B12): `Rejected` for an unknown EVSE, `Scheduled` for an
- * `OnIdle` reset while a targeted EVSE has a transaction, otherwise `Accepted`;
- * once settled, transactions of the targeted EVSEs are stopped (unless
- * `ImmediateAndResume`) and the station boots again.
+ * `OnIdle` reset while a targeted EVSE has a running transaction (#597: once
+ * settled, the reset is queued and the station boots when the last targeted
+ * transaction ends), otherwise `Accepted`; once settled, transactions of the
+ * targeted EVSEs are stopped (unless `ImmediateAndResume`, which keeps them),
+ * queued OnIdle resets are dropped and the station boots again.
  */
 export function resetBehavior(cp: ChargePoint): Behavior {
   return {
@@ -55,16 +57,22 @@ export function resetBehavior(cp: ChargePoint): Behavior {
           }
           if (
             type === "OnIdle" &&
-            targets.some((connector) => connector.transaction)
+            targets.some((connector) => connector.hasRunningTransaction)
           ) {
-            return { response: { status: "Scheduled" } };
+            return {
+              response: { status: "Scheduled" },
+              after: async () => {
+                cp.scheduleResetOnIdle(evseId);
+              },
+            };
           }
           return {
             response: { status: "Accepted" },
             after: async () => {
               if (type !== "ImmediateAndResume") {
+                cp.cancelPendingResetsOnIdle(evseId);
                 for (const connector of targets) {
-                  if (connector.transaction) {
+                  if (connector.hasRunningTransaction) {
                     cp.stopTransaction(connector.id, "HardReset", {
                       triggerReason: "ResetCommand",
                     });

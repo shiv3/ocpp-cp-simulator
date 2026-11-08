@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { Outbox } from "../Outbox";
-import type { IChargePointMessageHandler } from "../../../infrastructure/transport/IChargePointMessageHandler";
-import { DataTransferHandler } from "../../../infrastructure/transport/handlers";
+import type {
+  DataTransferVendorRegistry,
+  IChargePointMessageHandler,
+} from "../IChargePointMessageHandler";
 import type { BootNotification } from "../../types/OcppTypes";
 import { OCPPStatus } from "../../types/OcppTypes";
 import type { Transaction } from "../../connector/Transaction";
@@ -16,7 +18,10 @@ interface CallRecord {
 
 class FakeMessageHandler implements IChargePointMessageHandler {
   readonly calls: CallRecord[] = [];
-  readonly dataTransferHandler = new DataTransferHandler();
+  readonly dataTransferHandler: DataTransferVendorRegistry = {
+    registerVendor: () => {},
+    unregisterVendor: () => {},
+  };
 
   private record(method: HandlerMethod, args: readonly unknown[]): void {
     this.calls.push({ method, args: [...args] });

@@ -8,7 +8,7 @@ sources:
   - apps/cli/src/server/httpServer.ts
   - packages/core/src/cp/domain/connector/EVSettings.ts
   - packages/core/src/cp/domain/connector/MeterValueBuilder.ts
-  - packages/core/src/cp/infrastructure/transport/network-sim/SeededRng.ts
+  - packages/core/src/cp/shared/SeededRng.ts
   - scripts/bench/README.md
 related:
   - ../concepts/control-plane.md
@@ -16,7 +16,7 @@ related:
   - choosing-an-interface.md
   - ../sources/github-issues.md
   - ../sources/bench-readme.md
-updated: 2026-11-05
+updated: 2026-11-07
 ---
 
 # Fleet, load and observability roadmap
@@ -313,7 +313,7 @@ AutoTrafficConfig {
 ```
 
 Reuse `deriveSeed32` / the PRNG in
-`packages/core/src/cp/infrastructure/transport/network-sim/SeededRng.ts` — the same mechanism
+`packages/core/src/cp/shared/SeededRng.ts` — the same mechanism
 that already makes [network simulation](../concepts/network-simulation.md)
 replayable — deriving each connector's stream from `seed:cpId:connectorId` so
 CPs do not correlate.

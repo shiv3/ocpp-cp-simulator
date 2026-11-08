@@ -91,7 +91,7 @@ import {
   type NotifyEventReport,
 } from "./v201/notifyEventV201";
 import { isQueuedOffline } from "../../domain/monitoring/monitoringCtrlrKeys";
-import type { IChargePointMessageHandler } from "./IChargePointMessageHandler";
+import type { IChargePointMessageHandler } from "../../domain/transport/IChargePointMessageHandler";
 import { DataTransferHandler } from "./handlers";
 import { patchTransaction } from "./handlers/patchTransaction";
 import {

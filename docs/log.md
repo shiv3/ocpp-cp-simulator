@@ -2355,3 +2355,12 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - [Charger engine design](analyses/charger-engine.md#status-review-fixes-2-cli-daemon-persistence-security-k6): checked-before-written selections and restore that never stops the daemon, opt-in `behavior.reload`, same-origin CORS with `--allow-behavior-code`, all-or-nothing reload, `onResume` after boot, k6 host parity, source-check limits; new "Review" section and re-run verification table.
 - [Control plane](concepts/control-plane.md#behaviors), [State persistence](concepts/state-persistence.md), [Access control](concepts/access-control.md#cors), [CLI](entities/cli.md), [Daemon](entities/daemon.md): `--allow-behavior-reload`, restore and selection rules, resume timing, CORS row.
+
+## [2026-11-07] ingest | SeededRng and the message-handler port leave infrastructure (#572, #574)
+
+- `SeededRng` (the seeded PRNG behind network simulation, the idTag pool, background traffic and supervision URL rotation) moves to `packages/core/src/cp/shared/SeededRng.ts`; the `network-sim` barrel no longer re-exports it. [Fleet, load and observability roadmap](analyses/fleet-load-and-observability-roadmap.md) points at the new path.
+- The outbound port `IChargePointMessageHandler` moves to `packages/core/src/cp/domain/transport/`, beside `Outbox`. `getDataTransferHandler()` now returns the domain interface `DataTransferVendorRegistry` (`registerVendor` / `unregisterVendor`) instead of the infrastructure `DataTransferHandler`, and `DataTransferResponder` moves to `domain/types/DataTransfer.ts`. No behaviour change. [GitHub issues](sources/github-issues.md): #572, #574.
+
+## [2026-11-07] fix | OCPP 2.x Reset OnIdle follow-ups (#635)
+
+- Reset OnIdle now checks for running transactions rather than retained stopped transaction objects, rechecks immediately after scheduling, and is reevaluated when a connector is removed. Scoped Immediate resets cancel only the pending reset in their scope; other EVSE resets remain queued. An Inoperative connector stays Unavailable after the accepted reboot. [OCPP versions and transports](concepts/ocpp-versions-and-transports.md).

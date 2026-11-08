@@ -160,5 +160,12 @@
   "scenarios.editor.afterStep": "此步骤之后",
   "scenarios.editor.endOfScenario": "场景结束",
   "scenarios.editor.loopBackTo": "回到步骤 {{n}} · {{title}}",
-  "scenarios.editor.outlineOnlyNote": "此场景的形状步骤编辑器无法绘制(第二个分支,或无法到达的步骤)。步骤按执行顺序列出;可以编辑每个步骤的设置,但不能修改连接方式。"
+  "scenarios.editor.outlineOnlyNote": "此场景的形状步骤编辑器无法绘制(第二个分支,或无法到达的步骤)。步骤按执行顺序列出;可以编辑每个步骤的设置,但不能修改连接方式。",
+  "scenarios.editor.issue.missingStart": "此场景没有 Start 节点,无法运行。",
+  "scenarios.editor.issue.multipleStart": "存在多个 Start 节点,只运行第一个。",
+  "scenarios.editor.issue.edgeIntoStart": "有一条边指回 Start,不会被执行。",
+  "scenarios.editor.issue.edgeOutOfEnd": "有一条边从 End 节点引出,不会被执行。",
+  "scenarios.editor.issue.extraOutgoing": "步骤 {{n}}({{title}})有多个后续步骤,但只有 Start 能并行分支:运行时只会执行第一个。",
+  "scenarios.editor.issue.danglingEdge": "有一条边指向不存在的步骤,该分支到此结束。",
+  "scenarios.editor.issue.unreachable": "步骤 {{n}}({{title}})无法从 Start 到达,永远不会运行。"
 }

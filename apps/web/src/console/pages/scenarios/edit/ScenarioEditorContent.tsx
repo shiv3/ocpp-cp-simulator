@@ -39,6 +39,7 @@ import StepsGraphView from "../run/StepsGraphView";
 import StepsView from "../run/StepsView";
 import { nodeTitle } from "../run/stepVisuals";
 import ScenarioMetaBar from "./ScenarioMetaBar";
+import GraphIssues from "./GraphIssues";
 import StepInspector from "./StepInspector";
 import UnsupportedOutline from "./UnsupportedOutline";
 
@@ -574,6 +575,8 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
           ]}
         />
       )}
+
+      <GraphIssues scenario={scenario} layout={layout} />
 
       {pendingDelete && (
         <InlineConfirm

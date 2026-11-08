@@ -53,5 +53,6 @@
   "scenarioNodes.transaction.start": "Démarrer",
   "scenarioNodes.transaction.stop": "Arrêter",
   "scenarioNodes.transaction.tag": "Badge : {{value}}",
-  "scenarioNodes.callResponse.noAnswer": "pas de réponse"
+  "scenarioNodes.callResponse.noAnswer": "pas de réponse",
+  "scenarioNodes.useBehavior.disabled": "Désactivé pour cette exécution"
 }

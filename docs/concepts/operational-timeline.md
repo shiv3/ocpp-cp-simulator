@@ -21,6 +21,7 @@ related:
   - charging-sessions.md
   - local-authorization.md
   - ocpp-versions-and-transports.md
+  - power-loss.md
 updated: 2026-11-08
 ---
 
@@ -86,13 +87,15 @@ charge point in Local mode keeps it.
 | `data`        | object               | Kind-specific, machine-readable fields (table below).                      |
 
 `timeline.get` answers `{ version, entries, total }`. The format version is
-**`1.4`**, following the [trace format](trace-format.md#versioning) rules: an
+**`1.6`**, following the [trace format](trace-format.md#versioning) rules: an
 additive change (a new kind, a new `data` field) bumps the minor version, and
 consumers must ignore kinds and fields they do not know. `1.1` added the three
 `charging_profile_*` kinds (#469). `1.2` added `transaction_message_rejected` and
 `transaction_message_discarded` (#490). `1.3` added their `action` and `reason`
-fields, and made `errorCode` conditional (#527, #529). `1.4` added
-`reconnected_without_boot` (#702).
+fields, and made `errorCode` conditional (#527, #529). `1.4` added `power_lost` and
+`power_restored` (#455).
+`1.5` added `gave_up` (#609).
+`1.6` added `reconnected_without_boot` (#702).
 
 ## Kinds
 
@@ -108,6 +111,8 @@ Names reuse the [CLI event](../entities/cli.md#events) names where both exist.
 | `status_change`                 | CP        | `from`, `to`                                                         | The charge point status changes; repeats of the same status are skipped.                                                                                                                                    |
 | `connector_status`              | connector | `from`, `to`                                                         | A connector status changes; repeats are skipped.                                                                                                                                                            |
 | `network_fault_injected`        | CP        | `ruleId`, `ruleType`, `reconnectDelayMs`                             | A `manual-disconnect` or `periodic-disconnect` rule fires, before the socket closes. Opens an incident.                                                                                                     |
+| `power_lost`                    | CP        | `transactions`                                                       | (#455) `power.loss` cuts the power; the `disconnected` entry follows. `transactions` is how many were running.                                                                                              |
+| `power_restored`                | CP        | `outageMs`, `recovery` (`resume`, `end`, `none`), `transactions`     | (#455) Power returns; the station boots next. See [Power loss](power-loss.md).                                                                                                                              |
 | `recovery_completed`            | CP        | `durationMs`, `ruleId`, `restored`, `unrestored` (when not restored) | The open incident's recovery condition holds, or its settle window runs out. Closes it.                                                                                                                     |
 | `transaction_started`           | connector | `tagId`, `transactionId` (2.x only)                                  | A transaction starts. OCPP 2.x carries the CP-minted id; 1.6 has no id yet.                                                                                                                                 |
 | `transaction_id_assigned`       | connector | `transactionId`                                                      | (1.6) StartTransaction.conf assigns the id, whatever its value.                                                                                                                                             |
@@ -123,6 +128,7 @@ Names reuse the [CLI event](../entities/cli.md#events) names where both exist.
 | `charging_profile_applied`      | either    | profile fields, `source`, `replaced`                                 | A SetChargingProfile is accepted; an update of the same id is one entry with `replaced: true`; a 1.6 profile that displaced others in its slot (same `stackLevel` and purpose) lists them in `replacedIds`. |
 | `charging_profile_cleared`      | either    | `connectorId`, `reason`, `profiles`                                  | At least one profile is removed from one scope (see [Smart-charging profiles](#smart-charging-profiles)).                                                                                                   |
 | `charging_profile_expired`      | either    | profile fields                                                       | A profile's `validTo` passes while it is still installed.                                                                                                                                                   |
+| `gave_up`                       | CP        | `target` (`reconnect` or `boot_notification`), `attempts`            | The reconnect policy's `maxAttempts` or the `bootRetryLimit` is reached and the charge point stops retrying (#609).                                                                                         |
 
 `transaction_started` and `transaction_id_assigned` never record the 1.6
 placeholder transaction id (`0` until StartTransaction.conf):
@@ -229,9 +235,10 @@ A disconnect during the incident resets conditions 1 and 2, and the 60 s
 window with them. A fault firing while an incident is still open starts a new
 incident; the replaced one never gets a `recovery_completed`.
 
-**Scenario runs.** Run ids are minted by the daemon service, so scenario
-entries and run attribution exist in the daemon only; Local mode records no
-`scenario_*` entries and no `runId`. Every `scenario_*` entry carries
+**Scenario runs.** Run ids are minted by the runtime (#394: the daemon
+service and the browser's `ScenarioManager`). The daemon records every
+`scenario_*` entry; Local mode records run attribution and `scenario_finished`
+only, not `scenario_started`, `scenario_wait_changed` or `scenario_error`. Every `scenario_*` entry carries
 `scenarioId` in `data`; `scenario_finished` is recorded once per run, when its
 report is computed, so a stopped run reads `stopped: true` rather than as a
 completed one. Between a run's `scenario_started` and its

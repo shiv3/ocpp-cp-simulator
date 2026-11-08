@@ -105,5 +105,19 @@
   "common.catalog.notConfiguredLocal": "Saisissez d’abord l’URL d’Open EV Directory.",
   "common.catalog.notConfiguredRemote": "L’import de véhicules est désactivé sur le démon (--oed-base-url none ou OED_BASE_URL=none).",
   "common.payloadCondition": "condition sur le payload",
-  "common.dialog.close": "Fermer"
+  "common.dialog.close": "Fermer",
+  "common.daemon.select": "Démon",
+  "common.daemon.origin": "Ce serveur ({{url}})",
+  "common.daemon.switching": "Changement en cours…",
+  "common.daemon.switchFailed": "Impossible de passer à {{url}} ; la console reste sur le démon précédent.",
+  "common.daemon.invalid": "Saisissez une adresse http(s) sans identifiants.",
+  "common.daemon.duplicate": "Cette adresse est déjà enregistrée.",
+  "common.daemon.full": "La liste des démons enregistrés est pleine.",
+  "common.daemon.addressLabel": "Adresse du démon",
+  "common.daemon.nameLabel": "Nom",
+  "common.daemon.namePlaceholder": "Nom (facultatif)",
+  "common.daemon.saveAndSwitch": "Enregistrer et basculer",
+  "common.daemon.cancel": "Annuler",
+  "common.daemon.add": "Ajouter un démon",
+  "common.daemon.forget": "Oublier"
 }

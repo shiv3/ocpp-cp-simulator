@@ -1,3 +1,5 @@
+import { appendFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { buildCsms } from "./buildCsms";
 import { FrameLog } from "./frameLog";
 
@@ -14,10 +16,50 @@ export interface CommandResponse {
   error?: string;
 }
 
+export interface BehaviorConfig {
+  /** BootNotification statuses to answer in order; the last repeats. */
+  boot?: ("Accepted" | "Pending" | "Rejected")[];
+  bootIntervalSeconds?: number;
+  mode?: "accept-all" | "whitelist" | "blacklist" | "rate-limit" | "offline";
+  idTags?: string[];
+  rateMax?: number;
+  rateWindowMs?: number;
+}
+
+export interface SequenceRequest {
+  steps: { delayMs?: number; command: Record<string, unknown> }[];
+  periodMs?: number;
+  repeat?: number;
+}
+
+export interface SequenceRun {
+  id: number;
+  running: boolean;
+  results: {
+    round: number;
+    step: number;
+    ok: boolean;
+    result?: unknown;
+    error?: string;
+  }[];
+}
+
 export interface CsmsHandle {
   ocppUrl: string;
   frames: FrameLog;
   command(body: Record<string, unknown>): Promise<CommandResponse>;
+  /** Switch the fixture's behavior: boot answers, authorization mode,
+   *  offline (`POST /behavior`, see e2e/README.md). Rejects on a 4xx. */
+  setBehavior(config: BehaviorConfig): Promise<CommandResponse>;
+  /** Restore the defaults: Accepted to everything, online. */
+  resetBehavior(): Promise<CommandResponse>;
+  /** Run CSMS commands in order, with delays or periodically
+   *  (`POST /sequence`). Resolves with the run id. */
+  startSequence(request: SequenceRequest): Promise<number>;
+  /** Results of every sequence run so far. */
+  sequences(): Promise<SequenceRun[]>;
+  /** Stop every running sequence. */
+  stopSequences(): Promise<void>;
   stop(): Promise<void>;
 }
 
@@ -29,6 +71,13 @@ const COMMAND_TIMEOUT_MS = 8_000;
 const STOP_TIMEOUT_MS = 3_000;
 const MAX_DIAGNOSTIC_LINES = 200;
 
+/** When set, every fixture process also writes what it records to this
+ *  directory: `<name>.ndjson` (the frames, in the order the CSMS received
+ *  them) and `<name>.stderr.log`. The scheduled CI run sets it and uploads the
+ *  directory when the suite fails (#624). */
+const TRACE_DIR = process.env.E2E_TRACE_DIR;
+let traceCount = 0;
+
 let buildPromise: Promise<string> | undefined;
 const liveHandles = new Set<CsmsHandle>();
 
@@ -38,6 +87,17 @@ const sleep = (ms: number) =>
 process.once("SIGINT", () => {
   void stopAllCsms().finally(() => process.exit(130));
 });
+
+function openTrace(token: CsmsToken) {
+  if (!TRACE_DIR) return undefined;
+  mkdirSync(TRACE_DIR, { recursive: true });
+  traceCount += 1;
+  const base = join(TRACE_DIR, `csms-${token}-${process.pid}-${traceCount}`);
+  return {
+    frame: (line: string) => appendFileSync(`${base}.ndjson`, `${line}\n`),
+    stderr: (line: string) => appendFileSync(`${base}.stderr.log`, `${line}\n`),
+  };
+}
 
 export function csmsToken(simVersion: string): CsmsToken {
   switch (simVersion) {
@@ -56,6 +116,7 @@ export async function startCsms(simVersion: string): Promise<CsmsHandle> {
   buildPromise ??= buildCsms();
   const binPath = await buildPromise;
   const frames = new FrameLog();
+  const trace = openTrace(csmsToken(simVersion));
   const stderrLines: string[] = [];
   const stdoutBeforePorts: string[] = [];
   const proc = Bun.spawn([binPath, "--version", csmsToken(simVersion)], {
@@ -94,6 +155,7 @@ export async function startCsms(simVersion: string): Promise<CsmsHandle> {
       return;
     }
 
+    trace?.frame(line);
     frames.push(line);
   })
     .then(() => {
@@ -112,6 +174,7 @@ export async function startCsms(simVersion: string): Promise<CsmsHandle> {
     });
 
   const stderrTask = readLines(proc.stderr, (line) => {
+    trace?.stderr(line);
     pushDiagnostic(stderrLines, line);
   }).catch((error: unknown) => {
     pushDiagnostic(
@@ -123,7 +186,12 @@ export async function startCsms(simVersion: string): Promise<CsmsHandle> {
   const handle: CsmsHandle = {
     ocppUrl: "",
     frames,
-    command: async () => ({ ok: false, error: "CSMS is not ready" }),
+    command: notReady,
+    setBehavior: notReady,
+    resetBehavior: notReady,
+    startSequence: rejectNotReady,
+    sequences: rejectNotReady,
+    stopSequences: rejectNotReady,
     stop: stopProcess,
   };
   let stopPromise: Promise<void> | undefined;
@@ -158,6 +226,24 @@ export async function startCsms(simVersion: string): Promise<CsmsHandle> {
     );
     handle.ocppUrl = `ws://127.0.0.1:${ports.ocpp}/ocpp/`;
     handle.command = (body) => command(ports.http, body);
+    handle.setBehavior = (config) =>
+      control(ports.http, "POST", "/behavior", config);
+    handle.resetBehavior = () => control(ports.http, "DELETE", "/behavior");
+    handle.startSequence = async (request) => {
+      const response = await control(ports.http, "POST", "/sequence", request);
+      const id = (response.result as { id?: unknown } | undefined)?.id;
+      if (!response.ok || typeof id !== "number") {
+        throw new Error(response.error ?? "sequence was not started");
+      }
+      return id;
+    };
+    handle.sequences = async () => {
+      const response = await control(ports.http, "GET", "/sequence");
+      return (response.result ?? []) as SequenceRun[];
+    };
+    handle.stopSequences = async () => {
+      await control(ports.http, "DELETE", "/sequence");
+    };
     await waitForHealthz(ports.http, stderrLines);
     return handle;
   } catch (error) {
@@ -166,8 +252,42 @@ export async function startCsms(simVersion: string): Promise<CsmsHandle> {
   }
 }
 
+const notReady = async (): Promise<CommandResponse> => ({
+  ok: false,
+  error: "CSMS is not ready",
+});
+
+const rejectNotReady = async (): Promise<never> => {
+  throw new Error("CSMS is not ready");
+};
+
 export async function stopAllCsms(): Promise<void> {
   await Promise.all([...liveHandles].map((handle) => handle.stop()));
+}
+
+/** A call to the fixture's control endpoints. A non-2xx answer throws: a
+ *  rejected config is a bug in the test, not an outcome to assert on. */
+async function control(
+  httpPort: number,
+  method: "GET" | "POST" | "DELETE",
+  path: string,
+  body?: unknown,
+): Promise<CommandResponse> {
+  const response = await fetch(`http://127.0.0.1:${httpPort}${path}`, {
+    method,
+    headers: { "content-type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+    signal: AbortSignal.timeout(COMMAND_TIMEOUT_MS),
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`${method} ${path} -> ${response.status}: ${text}`);
+  }
+  const parsed: unknown = JSON.parse(text);
+  if (!isCommandResponse(parsed)) {
+    throw new Error(`Unexpected ${path} response: ${text}`);
+  }
+  return parsed;
 }
 
 async function command(

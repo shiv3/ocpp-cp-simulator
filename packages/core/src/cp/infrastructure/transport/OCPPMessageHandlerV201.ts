@@ -1209,6 +1209,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       connector.id,
       status,
       stopOnInvalid,
+      request.eventType !== "Started",
     );
   }
 
@@ -1960,10 +1961,12 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         options.measurands ??
         this._chargePoint.configuration.meterValuesSampledData();
       const context = options.context ?? "Sample.Periodic";
+      const built = this.buildSamples(connector, measurands, context);
+      // The sender is the tick owner: announce a schedule crossing after the
+      // read, so this sample describes the state before the status flip (#327).
+      connector.announceScheduleCrossingNow();
       const sampledValue = this.withSignedEnergy(
-        this.toV201SampledValues(
-          this.buildSamples(connector, measurands, context),
-        ),
+        this.toV201SampledValues(built),
         connectorId,
         transaction.tagId,
         {
@@ -2145,6 +2148,9 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       overrides.measurands ??
       this._chargePoint.configuration.meterValuesSampledData();
     const sampledValues = this.buildSamples(connector, measurands, context);
+    // The sender is the tick owner: announce a schedule crossing after the
+    // read, so this sample describes the state before the status flip (#327).
+    connector.announceScheduleCrossingNow();
     const timestamp = overrides.timestamp ?? new Date(this.clock.now());
     let sampledValue = this.toV201SampledValues(sampledValues) as [
       V201MeterValuesSampledValue,

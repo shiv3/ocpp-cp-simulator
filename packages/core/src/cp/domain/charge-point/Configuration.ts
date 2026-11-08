@@ -2,6 +2,10 @@ import type { ChargePoint } from "./ChargePoint";
 import { OcppFeatureProfile } from "../types/OcppTypes";
 import { isOcpp2Version } from "../types/OcppVersion";
 import { MAX_TIMER_MS } from "../../shared/timers";
+import {
+  DEFAULT_RECONNECT_POLICY,
+  retryBackOffDefaults,
+} from "../../shared/ReconnectPolicy";
 import { SIGNED_METER_MODES } from "../connector/SignedMeterData";
 import {
   MAX_MONITOR_SEVERITY,
@@ -493,6 +497,33 @@ export const ConfigurationKeys = {
       readonly: false,
       type: "string",
     } as StringConfigurationKey,
+    // #609: OCPP 2.0.1 / 2.1 OCPPCommCtrlr RetryBackOff* (Part 4 §5.4; variables in the Part 2 Appendices), 2.x
+    // only. Seconds to wait before the first reconnect, the random extra
+    // wait [0, RandomRange], and how many times the wait doubles.
+    RetryBackOffWaitMinimum: {
+      name: "RetryBackOffWaitMinimum",
+      required: false,
+      readonly: false,
+      type: "integer",
+      min: 1,
+      max: Math.floor(MAX_TIMER_MS / 1000),
+    } as IntegerConfigurationKey,
+    RetryBackOffRandomRange: {
+      name: "RetryBackOffRandomRange",
+      required: false,
+      readonly: false,
+      type: "integer",
+      min: 0,
+      max: Math.floor(MAX_TIMER_MS / 1000),
+    } as IntegerConfigurationKey,
+    RetryBackOffRepeatTimes: {
+      name: "RetryBackOffRepeatTimes",
+      required: false,
+      readonly: false,
+      type: "integer",
+      min: 0,
+      max: 30,
+    } as IntegerConfigurationKey,
     // #538: OCPP 2.0.1 / 2.1 MonitoringCtrlr.OfflineQueuingSeverity (Part 2
     // §2.11.7 / 2.1 §2.13.7, ReadWrite): while offline, NotifyEvents of
     // monitors at or below this severity are queued (N07.FR.04, N08.FR.03).
@@ -644,6 +675,11 @@ export const defaultConfiguration: (cp: ChargePoint) => Configuration = (
     value: string,
   ): StringConfigurationValue => ({ key, value });
 
+  // A stand-in without a policy (a test double) gets the built-in one.
+  const retryBackOff = retryBackOffDefaults(
+    cp.reconnectPolicy ?? DEFAULT_RECONNECT_POLICY,
+  );
+
   return [
     // ── Core profile ────────────────────────────────────────────────────
     boolVal(ConfigurationKeys.Core.AllowOfflineTxForUnknownId, false),
@@ -763,6 +799,24 @@ export const defaultConfiguration: (cp: ChargePoint) => Configuration = (
           intVal(ConfigurationKeys.Custom.OfflineThreshold, 60),
           boolVal(ConfigurationKeys.Custom.BootOnReconnect, false),
           strVal(ConfigurationKeys.Custom.MasterPassGroupId, ""),
+        ]
+      : []),
+    // #609: 2.x only (OCPPCommCtrlr.RetryBackOff*); the defaults give the
+    // reconnect schedule the configured policy gives (1 s doubling to 30 s).
+    ...(isOcpp2Version(cp.ocppVersion)
+      ? [
+          intVal(
+            ConfigurationKeys.Custom.RetryBackOffWaitMinimum,
+            retryBackOff.waitMinimumSeconds,
+          ),
+          intVal(
+            ConfigurationKeys.Custom.RetryBackOffRandomRange,
+            retryBackOff.randomRangeSeconds,
+          ),
+          intVal(
+            ConfigurationKeys.Custom.RetryBackOffRepeatTimes,
+            retryBackOff.repeatTimes,
+          ),
         ]
       : []),
     // #538: 2.x only (MonitoringCtrlr.OfflineQueuingSeverity); 0 queues

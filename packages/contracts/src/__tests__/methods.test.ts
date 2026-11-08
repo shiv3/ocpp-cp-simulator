@@ -84,7 +84,17 @@ describe("method table coverage (Step 3c)", () => {
     for (const id of EXPLICIT_METHODS) {
       expect(METHODS[id]).toBeDefined();
     }
-    expect(EXPLICIT_METHODS).toHaveLength(50);
+  });
+
+  // Structural invariants instead of a pinned length: adding a method must
+  // not require bumping a number in this file.
+  it("lists each explicit op once, and none of them is a jsonMode id", () => {
+    expect(new Set(EXPLICIT_METHODS).size).toBe(EXPLICIT_METHODS.length);
+    expect(new Set(JSONMODE_COMMAND_IDS).size).toBe(
+      JSONMODE_COMMAND_IDS.length,
+    );
+    const jsonMode = new Set<string>(JSONMODE_COMMAND_IDS);
+    expect(EXPLICIT_METHODS.filter((id) => jsonMode.has(id))).toEqual([]);
   });
 
   it("contains exactly the jsonMode ids + the explicit ops (no drift)", () => {
@@ -491,5 +501,80 @@ describe("behavior assignment", () => {
           .success,
       ).toBe(false);
     }
+  });
+});
+
+describe("fleet templates (#445)", () => {
+  const member = { cpId: "A1", blueprintId: "ac-22kw" };
+  const template = (members: unknown[], extra: object = {}) => ({
+    id: "t",
+    name: "T",
+    groups: [{ name: "g", members }],
+    ...extra,
+  });
+  const ok = (value: unknown) =>
+    METHODS["fleet.template.save"].params.safeParse({ template: value })
+      .success;
+
+  it("accepts a single id or a numbered range, never both or neither", () => {
+    expect(ok(template([member]))).toBe(true);
+    expect(
+      ok(template([{ idPattern: "A{n:03}", count: 3, blueprintId: "b" }])),
+    ).toBe(true);
+    expect(ok(template([{ ...member, idPattern: "A{n}", count: 1 }]))).toBe(
+      false,
+    );
+    expect(ok(template([{ blueprintId: "b" }]))).toBe(false);
+    expect(ok(template([{ idPattern: "A{n}", blueprintId: "b" }]))).toBe(false);
+    expect(ok(template([{ idPattern: "A", count: 2, blueprintId: "b" }]))).toBe(
+      false,
+    );
+    expect(ok(template([{ ...member, startIndex: 3 }]))).toBe(false);
+  });
+
+  it("needs a blueprint on every member", () => {
+    expect(ok(template([{ cpId: "A1" }]))).toBe(false);
+  });
+
+  it("takes the blueprint's parameter block as overrides, and labels", () => {
+    expect(
+      ok(
+        template([
+          {
+            ...member,
+            overrides: { vendor: "V", connectors: 2, autoConnect: true },
+            labels: { role: "x" },
+          },
+        ]),
+      ),
+    ).toBe(true);
+    expect(ok(template([{ ...member, labels: { "bad key": "x" } }]))).toBe(
+      false,
+    );
+  });
+
+  it("refuses repeated group names and more charge points than the cap", () => {
+    expect(
+      ok({
+        id: "t",
+        name: "T",
+        groups: [
+          { name: "g", members: [member] },
+          { name: "g", members: [member] },
+        ],
+      }),
+    ).toBe(false);
+    const big = Array.from({ length: 6 }, (_, i) => ({
+      idPattern: `S${i}-{n}`,
+      count: 200,
+      blueprintId: "b",
+    }));
+    expect(ok(template(big))).toBe(false);
+    expect(ok(template(big.slice(0, 5)))).toBe(true);
+  });
+
+  it("requires at least one group and one member", () => {
+    expect(ok({ id: "t", name: "T", groups: [] })).toBe(false);
+    expect(ok(template([]))).toBe(false);
   });
 });

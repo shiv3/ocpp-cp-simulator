@@ -107,6 +107,10 @@ export const handleTriggerMessageV201 = (
   // SignV2G20Certificate before this runs) and keeps answering
   // NotImplemented for SignCombinedCertificate.
   const requested: string = req.requestedMessage;
+  // #618: a target the capability profile leaves out is not implemented.
+  if (ctx.chargePoint?.isTriggerTargetSupported?.(requested) === false) {
+    return notImplemented;
+  }
   if (
     requested === "SignV2G20Certificate" ||
     requested === "SignCombinedCertificate"

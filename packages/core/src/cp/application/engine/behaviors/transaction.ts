@@ -405,7 +405,7 @@ export function stopTransaction(
 
   connector.stopAutoMeterValue();
   connector.patchTransaction({
-    stopTime: nowDate(cp),
+    stopTime: options.stoppedAt ?? nowDate(cp),
     meterStop: connector.meterValue,
     ...(reason ? { stopReason: reason } : {}),
     ...(options.triggerReason

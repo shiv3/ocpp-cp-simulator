@@ -940,6 +940,9 @@ export class OCPPMessageHandler {
       overrides.measurands ??
       this._chargePoint.configuration.meterValuesSampledData();
     const sampledValue = buildSampledValues(connector, measurands, context);
+    // The sender is the tick owner: announce a schedule crossing after the
+    // read, so this sample describes the state before the status flip (#327).
+    connector.announceScheduleCrossingNow();
     const timestamp = overrides.timestamp ?? new Date(this.clock.now());
     // #315: during a transaction, also send the energy register signed.
     // Clock-aligned samples are not signed (no aligned/fiscal records yet).
@@ -1288,6 +1291,43 @@ export class OCPPMessageHandler {
     this.pumpSerialQueue();
   }
 
+  /**
+   * §3.7 / errata 3.36: put the transaction-related CALL that was written but
+   * is not answered yet on the offline queue, so it is delivered after the
+   * next boot instead of being discarded when the socket closes. Called by a
+   * graceful daemon shutdown that gave up waiting for the CSMS; a close in
+   * general keeps its discard behavior (a Reset closes right after the stop
+   * and its answer is still on the way). A resend after the CSMS did process
+   * the original is the at-least-once delivery the queue implies. One whose
+   * watchdog already expired was given up, and one with a waiting caller
+   * is that caller's. Returns whether a CALL was queued.
+   */
+  public queueUnansweredTransactionCall(): boolean {
+    const inFlight = this._serialInFlight;
+    if (!inFlight || inFlight.phase !== "written") return false;
+    const request = this._requests.get(inFlight.id);
+    if (!request || request.timedOut || !isTransactionRelated(request.action)) {
+      return false;
+    }
+    this.clock.clearTimeout(inFlight.timer);
+    this._serialInFlight = null;
+    this._requests.remove(request.id);
+    this.salvageOrDiscard(
+      {
+        action: request.action,
+        id: request.id,
+        payload: request.payload as OcppMessageRequestPayload,
+        connectorId: request.connectorId ?? undefined,
+        attempt: request.attempt,
+      },
+      "no answer before shutdown",
+    );
+    // No pump: the socket is closing, so the next queued CALL must stay
+    // unsent. Writing it here would make it the written in-flight CALL, which
+    // onWebSocketClosed discards; left in the queue it is salvaged there.
+    return true;
+  }
+
   /** Called by the ChargePoint after the WebSocket has closed (during teardown,
    *  after the pipeline drain in Task 7 ordering). Cancels the in-flight timer,
    *  salvages unsent queued CALLs, and clears the queue. The written-but-unanswered
@@ -1299,7 +1339,8 @@ export class OCPPMessageHandler {
       if (this._serialInFlight.phase === "written") {
         this.clock.clearTimeout(this._serialInFlight.timer);
       }
-      // The written-but-unanswered in-flight CALL keeps existing discard behavior (pre-existing limitation).
+      // The written-but-unanswered in-flight CALL keeps existing discard behavior (pre-existing limitation);
+      // a daemon shutdown queues it first through queueUnansweredTransactionCall.
       this._serialInFlight = null;
     }
     // No answer can reach a waiter over a closed socket; say so now rather

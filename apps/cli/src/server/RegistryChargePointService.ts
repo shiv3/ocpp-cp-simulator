@@ -1,3 +1,4 @@
+import { isSoapVersion } from "@ocpp-cp-sim/core/cp/domain/types/OcppVersion";
 import * as fs from "fs";
 import type {
   AuthorizationCacheSeedEntry,
@@ -56,6 +57,11 @@ import type {
 } from "@ocpp-cp-sim/core/cp/domain/persistence/ChargingSessionRepository";
 import type { Database } from "@ocpp-cp-sim/core/cp/domain/persistence/Database";
 import type { ScenarioRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/ScenarioRepository";
+import {
+  PowerStateError,
+  type PowerLossOptions,
+  type PowerRestoreOptions,
+} from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
 import { clearStartupProvenance } from "./startupScenarioRows";
 import { resetSimulatorState } from "@ocpp-cp-sim/core/cp/domain/persistence/resetState";
 import type {
@@ -98,6 +104,7 @@ import { scenarioTemplates } from "@ocpp-cp-sim/core/utils/scenarioTemplates";
 import type { CLIChargePointService, CLIEvent } from "../service";
 import type { ChargePointInitOptions, ChargePointStatus } from "../types";
 import type { Labels } from "@ocpp-cp-sim/contracts/labels";
+import type { JsonObject } from "@ocpp-cp-sim/contracts/behavior";
 import type {
   CPRegistry,
   RegistryMembershipChange,
@@ -154,12 +161,14 @@ export class RegistryChargePointService implements ChargePointService {
   }
 
   async createChargePoint(params: CreateChargePointParams): Promise<void> {
+    refuseProfileOnSoap(params);
     this.registry.create(toInitOptions(params));
   }
 
   async updateChargePoint(params: CreateChargePointParams): Promise<void> {
     const existing = this.registry.get(params.cpId);
     if (!existing) throw new Error(`cpId not found: ${params.cpId}`);
+    refuseProfileOnSoap(params, existing.getInit().ocppVersion);
     this.registry.update(toInitOptions(params, existing.getInit()));
   }
 
@@ -1028,6 +1037,36 @@ export class RegistryChargePointService implements ChargePointService {
     return manager.triggerDisconnect(cpId, ruleId);
   }
 
+  async powerLoss(
+    cpId: string,
+    options?: PowerLossOptions,
+  ): Promise<
+    { ok: true; transactions: number } | { ok: false; error: string }
+  > {
+    const service = this.registry.get(cpId);
+    if (!service) return { ok: false, error: "cp_not_found" };
+    try {
+      const record = service.powerLoss(options);
+      return { ok: true, transactions: record.transactions.length };
+    } catch (err) {
+      if (err instanceof PowerStateError) return { ok: false, error: err.code };
+      throw err;
+    }
+  }
+
+  async powerRestore(cpId: string, options?: PowerRestoreOptions) {
+    const service = this.registry.get(cpId);
+    if (!service) return { ok: false as const, error: "cp_not_found" };
+    try {
+      return { ok: true as const, ...service.powerRestore(options) };
+    } catch (err) {
+      if (err instanceof PowerStateError) {
+        return { ok: false as const, error: err.code };
+      }
+      throw err;
+    }
+  }
+
   private listChargePointSnapshots(selector?: Labels): ChargePointSnapshot[] {
     return this.registry
       .selectByLabels(selector)
@@ -1061,6 +1100,8 @@ function toInitOptions(
     // still failing over to the stale pool, and still persisting it.
     supervisionUrls: params.supervisionUrls,
     urlDistribution: params.urlDistribution,
+    // #609: an update that omits `transport` keeps the current settings.
+    transport: params.transport ?? existing?.transport,
     // Same rule as the URLs above: `cp.update` fully specifies the pool, so
     // there is no `existing` fallback — an update that drops `idTagPool`
     // means the charge point no longer has one.
@@ -1090,6 +1131,7 @@ function toInitOptions(
     txUpdatedMeterValues:
       params.txUpdatedMeterValues ?? existing?.txUpdatedMeterValues,
     inboundValidation: params.inboundValidation ?? existing?.inboundValidation,
+    capabilityProfile: params.capabilityProfile ?? existing?.capabilityProfile,
     tls: params.tls ?? existing?.tls,
     tlsCaPath: params.tlsCaPath ?? existing?.tlsCaPath,
     tlsCertPath: params.tlsCertPath ?? existing?.tlsCertPath,
@@ -1100,6 +1142,11 @@ function toInitOptions(
     // that keeps the current labels when an update omits them.
     labels: params.labels,
     ...(params.behaviors === undefined ? {} : { behaviors: params.behaviors }),
+    ...(params.behaviorParams === undefined
+      ? {}
+      : {
+          behaviorParams: params.behaviorParams as Record<string, JsonObject>,
+        }),
   };
 }
 
@@ -1154,6 +1201,7 @@ function toChargePointSnapshot(status: ChargePointStatus): ChargePointSnapshot {
           cpoName: status.config.cpoName,
           txUpdatedMeterValues: status.config.txUpdatedMeterValues,
           inboundValidation: status.config.inboundValidation,
+          capabilityProfile: status.config.capabilityProfile,
           tlsCaPath: status.config.tlsCaPath,
           tlsCertPath: status.config.tlsCertPath,
           tlsKeyPath: status.config.tlsKeyPath,
@@ -1162,6 +1210,9 @@ function toChargePointSnapshot(status: ChargePointStatus): ChargePointSnapshot {
           ...(status.config.behaviors === undefined
             ? {}
             : { behaviors: status.config.behaviors }),
+          ...(status.config.behaviorParams === undefined
+            ? {}
+            : { behaviorParams: status.config.behaviorParams }),
         }
       : undefined,
   };
@@ -1361,5 +1412,19 @@ function toChargePointEvent(evt: CLIEvent): ChargePointEvent | null {
       };
     default:
       return null;
+  }
+}
+
+/** #618: OCPP-S (SOAP) dispatch bypasses the inbound gate, so a capability
+ *  profile would be accepted and then ignored; refuse it instead. */
+function refuseProfileOnSoap(
+  params: CreateChargePointParams,
+  existingVersion?: string,
+): void {
+  const version = params.ocppVersion ?? existingVersion ?? "OCPP-1.6J";
+  if (params.capabilityProfile && isSoapVersion(version)) {
+    throw new Error(
+      "capabilityProfile is not supported for the OCPP SOAP versions: their calls do not pass the inbound gate",
+    );
   }
 }

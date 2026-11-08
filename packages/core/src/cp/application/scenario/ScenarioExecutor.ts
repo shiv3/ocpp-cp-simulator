@@ -38,6 +38,7 @@ import type {
 } from "./ScenarioTypes";
 import { ScenarioNodeType } from "./ScenarioTypes";
 import { resolveFromExchange } from "./resolveFrom";
+import { jsonProblem } from "../behavior/paramsSchema";
 import { DEFAULT_ID_TAG } from "../../domain/auth/IdTagPool";
 import { deriveExpectation } from "./ScenarioExpectations";
 import {
@@ -1907,8 +1908,39 @@ export class ScenarioExecutor {
     if (!this.callbacks.onUseBehavior) {
       throw new Error("useBehavior: this station cannot select behaviors");
     }
-    this.callbacks.onUseBehavior(data.behaviorId, nodeId);
-    this.callbacks.log?.(`Using behavior ${data.behaviorId}`, "info");
+    const mode = data.mode ?? "use";
+    if (mode !== "use" && mode !== "disable") {
+      throw new Error(
+        `useBehavior: mode must be "use" or "disable", got ${JSON.stringify(mode)}`,
+      );
+    }
+    const params = data.params;
+    if (params !== undefined) {
+      const bad = jsonProblem(params, "params");
+      if (bad || typeof params !== "object" || Array.isArray(params)) {
+        throw new Error(
+          `useBehavior ${data.behaviorId}: params must be a JSON object${bad ? ` (${bad})` : ""}`,
+        );
+      }
+      if (mode === "disable" && Object.keys(params).length > 0) {
+        throw new Error(
+          `useBehavior ${data.behaviorId}: mode "disable" takes no params`,
+        );
+      }
+    }
+    this.callbacks.onUseBehavior(data.behaviorId, nodeId, {
+      mode,
+      ...(params === undefined ? {} : { params }),
+    });
+    this.callbacks.log?.(
+      mode === "disable"
+        ? `Disabling behavior ${data.behaviorId} for this run`
+        : `Using behavior ${data.behaviorId}` +
+            (params && Object.keys(params).length > 0
+              ? ` with params ${JSON.stringify(params)}`
+              : ""),
+      "info",
+    );
   }
 
   /** Issue #240: park until the WebSocket reaches data.event. */

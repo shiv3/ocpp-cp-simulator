@@ -171,6 +171,10 @@ export class Outbox implements IChargePointMessageHandler {
     return this.handler.getDataTransferHandler();
   }
 
+  queueUnansweredTransactionCall(): boolean {
+    return this.handler.queueUnansweredTransactionCall?.() ?? false;
+  }
+
   hasTransactionMessagesInFlight(): boolean {
     return this.handler.hasTransactionMessagesInFlight?.() ?? false;
   }

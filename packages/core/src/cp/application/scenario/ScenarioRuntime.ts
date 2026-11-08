@@ -1,3 +1,4 @@
+import type { JsonObject } from "@ocpp-cp-sim/contracts/behavior";
 import { cancellablePromise, type CancellableWait } from "./cancellable";
 import { csmsActionMatches } from "../../domain/types/csmsActionNames";
 import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
@@ -857,14 +858,23 @@ export const createScenarioExecutorCallbacks = (
       }
       return cancellablePromise(waitForCsmsCall(chargePoint, action, payload));
     },
-    onUseBehavior: (behaviorId, nodeId) => {
+    onUseBehavior: (behaviorId, nodeId, options) => {
+      const disable = options?.mode === "disable";
       const owner: RuleOwner = {
         kind: "scenario",
-        scenarioId: `use:${behaviorId}`,
+        scenarioId: `${disable ? "disable" : "use"}:${behaviorId}`,
         connectorId: connector.id,
         nodeId,
       };
-      chargePoint.engine.activateBehavior(behaviorId, owner);
+      if (disable) {
+        chargePoint.engine.disableBehavior(behaviorId, owner);
+      } else {
+        chargePoint.engine.activateBehavior(
+          behaviorId,
+          owner,
+          options?.params as JsonObject | undefined,
+        );
+      }
       armedOwners.set(`${behaviorId}:${connector.id}:${nodeId}`, owner);
     },
     onRunEnded: () => {

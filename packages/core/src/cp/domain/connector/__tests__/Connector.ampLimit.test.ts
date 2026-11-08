@@ -8,9 +8,22 @@ import {
   ChargingRateUnitType,
   OCPPStatus,
 } from "../../types/OcppTypes";
-import { buildSampledValues } from "../MeterValueBuilder";
+import { buildSampledValues as buildSamples } from "../MeterValueBuilder";
 import type { Transaction } from "../Transaction";
 import { ChargingProfileStore } from "../../charge-point/ChargingProfileStore";
+
+/**
+ * What a MeterValues sender does: read the samples (pure), then announce a
+ * schedule crossing as the tick owner (#327). The announcement used to be a
+ * side effect of the read.
+ */
+function buildSampledValues(
+  ...args: Parameters<typeof buildSamples>
+): ReturnType<typeof buildSamples> {
+  const samples = buildSamples(...args);
+  args[0].announceScheduleCrossingNow();
+  return samples;
+}
 
 function makeConnector(): Connector {
   return new Connector(1, new Logger(LogLevel.ERROR));

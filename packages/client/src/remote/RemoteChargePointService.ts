@@ -7,6 +7,10 @@ import {
   type VehicleCatalog,
   type VehicleCatalogErrorKind,
 } from "@ocpp-cp-sim/core/cp/domain/vehicle/VehicleCatalog";
+import type {
+  PowerLossOptions,
+  PowerRestoreOptions,
+} from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
 import type { VehicleProfile } from "@ocpp-cp-sim/core/cp/domain/vehicle/VehicleProfile";
 import { io, type Socket } from "socket.io-client";
 import type {
@@ -267,12 +271,16 @@ function toSnapshotConfig(config: WireConfig): ChargePointSnapshot["config"] {
     cpoName: config.cpoName,
     txUpdatedMeterValues: config.txUpdatedMeterValues,
     inboundValidation: config.inboundValidation,
+    capabilityProfile: config.capabilityProfile,
     tlsCaPath: config.tlsCaPath,
     tlsCertPath: config.tlsCertPath,
     tlsKeyPath: config.tlsKeyPath,
     bootNotification: config.bootNotification ?? null,
     labels: config.labels,
     ...(config.behaviors === undefined ? {} : { behaviors: config.behaviors }),
+    ...(config.behaviorParams === undefined
+      ? {}
+      : { behaviorParams: config.behaviorParams }),
   };
 }
 
@@ -1920,6 +1928,33 @@ export class RemoteChargePointService implements ChargePointService {
       cpId,
       ruleId,
     })) as unknown as { ok: true } | { ok: false; error: string };
+  }
+
+  async powerLoss(
+    cpId: string,
+    options?: PowerLossOptions,
+  ): Promise<
+    { ok: true; transactions: number } | { ok: false; error: string }
+  > {
+    return (await this.rpc("power.loss", {
+      cpId,
+      ...options,
+    })) as unknown as
+      { ok: true; transactions: number } | { ok: false; error: string };
+  }
+
+  async powerRestore(cpId: string, options?: PowerRestoreOptions) {
+    return (await this.rpc("power.restore", {
+      cpId,
+      ...options,
+    })) as unknown as
+      | {
+          ok: true;
+          outageMs: number;
+          recovery: "resume" | "end" | "none";
+          transactions: number;
+        }
+      | { ok: false; error: string };
   }
 
   /**

@@ -53,5 +53,6 @@
   "scenarioNodes.transaction.start": "開始",
   "scenarioNodes.transaction.stop": "停止",
   "scenarioNodes.transaction.tag": "タグ: {{value}}",
-  "scenarioNodes.callResponse.noAnswer": "応答なし"
+  "scenarioNodes.callResponse.noAnswer": "応答なし",
+  "scenarioNodes.useBehavior.disabled": "この実行中は無効"
 }

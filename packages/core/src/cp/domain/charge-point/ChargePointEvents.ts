@@ -82,6 +82,10 @@ export interface ChargePointEvents {
   /** Emitted each time the transport schedules a reconnect after an
    *  unrequested close; `delayMs` is the wait before the next attempt. */
   reconnecting: { attempt: number; delayMs: number };
+  /** #609: the charge point stopped retrying — the reconnect policy's
+   *  `maxAttempts`, or its `bootRetryLimit` for BootNotification retries,
+   *  was reached. `attempts` counts the attempts made. */
+  gaveUp: { target: "reconnect" | "boot_notification"; attempts: number };
   /** Emitted when a network-sim disconnect rule fires, before the socket is
    *  closed, so the `disconnected` that follows can be attributed to it
    *  (#448). */
@@ -116,11 +120,14 @@ export interface ChargePointEvents {
   // Smart-charging events (#469)
   /** A profile was installed on a connector or, with `connectorId` 0, on the
    *  station store. `replaced` is true when it updated a profile with the
-   *  same id in that scope. */
+   *  same id in that scope; `replacedIds` lists the ids of other profiles in
+   *  that scope it displaced because they had the same stackLevel and purpose
+   *  (1.6 SetChargingProfile, #594). */
   chargingProfileApplied: {
     connectorId: number;
     profile: ActiveChargingProfile;
     replaced: boolean;
+    replacedIds: number[];
     source: ChargingProfileSource;
   };
   /** At least one profile was removed from one scope. Never emitted for a
@@ -171,6 +178,16 @@ export interface ChargePointEvents {
     transactionId: number;
     reason?: string;
   };
+  /** The station lost power (#455): the socket is gone and nothing is sent
+   *  until power is restored. `transactions` is how many were running. */
+  powerLost: { transactions: number };
+  /** Power came back (#455) after `outageMs`; the station boots again.
+   *  `recovery` is what it decided for the interrupted transactions. */
+  powerRestored: {
+    outageMs: number;
+    recovery: "resume" | "end" | "none";
+    transactions: number;
+  };
   /** Emitted by AuthorizeResultHandler whenever an Authorize.conf arrives,
    *  tagId-correlated via the original Authorize.req payload (issue #181).
    *  `ChargePoint.authorizeAndWait` listens for this to resolve the
@@ -197,6 +214,10 @@ export interface ChargePointEvents {
     connectorId: number;
     status: string;
     stopped: boolean;
+    /** OCPP 2.x: the refusal answered a TransactionEvent after `Started`
+     *  (an `Updated` carrying the idToken), not the start. Absent
+     *  otherwise (#603). */
+    midSession?: true;
   };
   /** A transmission of a transaction-related message failed. OCPP 2.0.1 /
    *  2.1 TransactionEvent (E13.FR.02): the CSMS answered it with a CALLERROR

@@ -24,6 +24,10 @@ import type {
   FirmwareStatus,
   UploadLogStatus,
 } from "@ocpp-cp-sim/core/cp/domain/types/FirmwareLogStatus";
+import type {
+  PowerLossOptions,
+  PowerRestoreOptions,
+} from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
 import type { AutoMeterValueConfig } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
 import type { ActiveChargingProfile } from "@ocpp-cp-sim/core/cp/domain/connector/Connector";
 import type {
@@ -66,6 +70,7 @@ import type {
   OcppSecurityProfile,
   OcppTlsOptions,
 } from "@ocpp-cp-sim/core/cp/infrastructure/transport/wsUrlWithBasic";
+import type { TransportConfig } from "@ocpp-cp-sim/core/cp/infrastructure/transport/TransportConfig";
 import type { UrlDistribution } from "@ocpp-cp-sim/core/cp/infrastructure/transport/SupervisionUrlPool";
 import type { IdTagDistribution } from "@ocpp-cp-sim/core/cp/domain/auth/IdTagPool";
 import type { Labels } from "@ocpp-cp-sim/contracts/labels";
@@ -139,6 +144,13 @@ export interface ChargePointSnapshot {
     cpoName?: string;
     /** #347: periodic samples ride TransactionEvent(Updated) on OCPP 2.x. */
     txUpdatedMeterValues?: boolean;
+    /** #593: OCPP 1.6J inbound CALL validation mode. */
+    inboundValidation?: "off" | "warn" | "enforce";
+    /** #618: static capability profile. */
+    capabilityProfile?: {
+      disabledActions?: readonly string[];
+      triggerMessageTargets?: readonly string[];
+    };
     tlsCaPath?: string;
     tlsCertPath?: string;
     tlsKeyPath?: string;
@@ -155,6 +167,8 @@ export interface ChargePointSnapshot {
     labels?: Labels;
     /** Ids of the loaded behaviors it runs; absent: every loaded behavior. */
     behaviors?: readonly string[];
+    /** Params the selection sets on behaviors (#654), by behavior id. */
+    behaviorParams?: BehaviorParamsByIdWire;
   };
 }
 
@@ -168,6 +182,9 @@ export interface CreateChargePointParams {
    */
   supervisionUrls?: readonly string[];
   urlDistribution?: UrlDistribution;
+  /** Transport settings (#609): reconnect policy and BootNotification retry
+   *  limit. Omitted fields keep the built-in behaviour. */
+  transport?: TransportConfig;
   /**
    * Resolved idTags (#299). Declared here because the facade is where the
    * previous pool feature was silently dropped: `parseCreateBody` produced the
@@ -194,6 +211,14 @@ export interface CreateChargePointParams {
   /** #347: periodic samples ride TransactionEvent(Updated) on OCPP 2.x.
    *  Omitted on an update keeps the current value. */
   txUpdatedMeterValues?: boolean;
+  /** #593: OCPP 1.6J inbound CALL validation (off | warn | enforce).
+   *  Omitted on an update keeps the current value. */
+  inboundValidation?: "off" | "warn" | "enforce";
+  /** #618: static capability profile (omitted on an update keeps it). */
+  capabilityProfile?: {
+    disabledActions?: readonly string[];
+    triggerMessageTargets?: readonly string[];
+  };
   tls?: OcppTlsOptions;
   tlsCaPath?: string;
   tlsCertPath?: string;
@@ -212,7 +237,14 @@ export interface CreateChargePointParams {
   labels?: Labels;
   /** Ids of the loaded behaviors to run; absent: all (on update: keep the current). */
   behaviors?: readonly string[];
+  /** Params for the behaviors, by id (#654); JSON only. On update, omitted keeps the current ones. */
+  behaviorParams?: BehaviorParamsByIdWire;
 }
+
+/** Behavior id to the JSON object of its params. */
+export type BehaviorParamsByIdWire = Readonly<
+  Record<string, Readonly<Record<string, unknown>>>
+>;
 
 export type ChargePointEvent =
   | { type: "status"; status: OCPPStatus }
@@ -512,6 +544,25 @@ export interface ChargePointService {
     cpId: string,
     ruleId: string,
   ): Promise<{ ok: true } | { ok: false; error: string }>;
+
+  /** #455: the station loses power (socket gone, transactions kept). */
+  powerLoss(
+    cpId: string,
+    options?: PowerLossOptions,
+  ): Promise<{ ok: true; transactions: number } | { ok: false; error: string }>;
+  /** #455: power returns; the station boots and recovers its transactions. */
+  powerRestore(
+    cpId: string,
+    options?: PowerRestoreOptions,
+  ): Promise<
+    | {
+        ok: true;
+        outageMs: number;
+        recovery: "resume" | "end" | "none";
+        transactions: number;
+      }
+    | { ok: false; error: string }
+  >;
 
   // Lifecycle
   connect(id: string): Promise<void>;

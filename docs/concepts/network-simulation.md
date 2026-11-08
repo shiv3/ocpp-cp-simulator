@@ -12,7 +12,8 @@ related:
   - state-persistence.md
   - scenario-format.md
   - operational-timeline.md
-updated: 2026-11-05
+  - power-loss.md
+updated: 2026-11-08
 ---
 
 # Network simulation
@@ -154,6 +155,14 @@ not recorded.
   moment the frame is **physically written** to the socket (after all latency
   delays). A 30-second heartbeat interval becomes (30s + applied latency), so
   do not set heartbeat intervals below 60s when injecting significant latency.
+
+## Network loss is not power loss
+
+A network fault keeps the station running: transactions go on, meter values
+queue and replay. A station that loses _power_ vanishes without a clean stop and
+recovers its transactions after the reboot; see
+[Power loss and transaction recovery](power-loss.md) (#455) for that primitive
+and what it sends in 1.6 and 2.x.
 
 ## Interaction with scenarios
 

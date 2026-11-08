@@ -123,6 +123,9 @@ export interface IChargePointMessageHandler {
    *  on 2.x, the only version that reconnects for a renewed client
    *  certificate; absent means none. */
   hasTransactionMessagesInFlight?(): boolean;
+  /** Queue the transaction-related CALL written but not answered (1.6; the
+   *  2.x handler queues it on close anyway). Absent means none. */
+  queueUnansweredTransactionCall?(): boolean;
   onWebSocketClosed(): void;
   flushPendingQueue(): void;
 }

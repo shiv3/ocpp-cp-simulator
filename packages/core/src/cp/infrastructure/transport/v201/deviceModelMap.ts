@@ -12,6 +12,10 @@ export const V201_VARIABLE_TO_V16_KEY: ReadonlyMap<string, string> = new Map([
   ["OCPPCommCtrlr/HeartbeatInterval", "HeartbeatInterval"],
   ["OCPPCommCtrlr/WebSocketPingInterval", "WebSocketPingInterval"],
   ["OCPPCommCtrlr/ResetRetries", "ResetRetries"],
+  // #609: Part 4 §5.4 reconnect back-off (variables: Part 2 Appendices, OCPPCommCtrlr).
+  ["OCPPCommCtrlr/RetryBackOffWaitMinimum", "RetryBackOffWaitMinimum"],
+  ["OCPPCommCtrlr/RetryBackOffRandomRange", "RetryBackOffRandomRange"],
+  ["OCPPCommCtrlr/RetryBackOffRepeatTimes", "RetryBackOffRepeatTimes"],
   // #490: OCPP 2.0.1 §2.1.10/2.1.11, 2.1 §2.1.12 — variableInstance
   // "TransactionEvent" ("MessageAttemptsTransactionEvent" is only the
   // section title).

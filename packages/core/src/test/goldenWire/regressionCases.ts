@@ -1631,3 +1631,40 @@ both("close-during-reset", async (r) => {
   await wait(1500);
   await settle(r);
 });
+
+// #455 power loss: the socket vanishes with the transaction still running;
+// after the power returns the station boots, then resumes (the default) or
+// reports the transaction ended with reason PowerLoss (1.6 StopTransaction;
+// 2.x E17.FR.21 Ended + AbnormalCondition), stamped with the loss.
+both("power-loss-resume", async (r) => {
+  await charging(r);
+  r.cp.powerLoss();
+  await wait(300);
+  r.cp.restorePower({ transactions: "resume" });
+  await r.csms.waitForCall("BootNotification", { nth: 2, timeoutMs: 30000 });
+  await settle(r);
+});
+both("power-loss-end", async (r) => {
+  await charging(r);
+  r.cp.powerLoss();
+  await wait(300);
+  r.cp.restorePower({ transactions: "end" });
+  await r.csms.waitForCall("BootNotification", { nth: 2, timeoutMs: 30000 });
+  await settle(r);
+});
+// Messages queued before the loss go first, then the recovery.
+both("power-loss-queued-then-end", async (r) => {
+  await charging(r);
+  r.cp.disconnect();
+  await wait(200);
+  r.cp.setMeterValue(1, 500);
+  // 1.x: MeterValues; 2.x: TransactionEvent(Updated), queued as offline.
+  r.cp.txUpdatedMeterValues = true;
+  r.cp.sendScheduledMeterValue(1);
+  await wait(100);
+  r.cp.powerLoss();
+  await wait(300);
+  r.cp.restorePower({ transactions: "end" });
+  await r.csms.waitForCall("BootNotification", { nth: 2, timeoutMs: 30000 });
+  await settle(r);
+});

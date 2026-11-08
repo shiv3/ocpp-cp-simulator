@@ -1,10 +1,42 @@
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import type { Behavior, BehaviorParams } from "@ocpp-cp-sim/contracts/behavior";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { isOcpp2Version } from "../../../domain/types/OcppVersion";
 import { LogType } from "../../../shared/Logger";
 
-/** Time between two statuses of the simulated update. */
-const STEP_MS = 2000;
+/**
+ * The knobs of the 1.6 simulated update (docs/entities/default-behaviors.md).
+ * The defaults are what the behavior did before it had params, so with nothing
+ * selected the wire is unchanged.
+ */
+const PARAMS: BehaviorParams = {
+  schema: {
+    type: "object",
+    properties: {
+      stepMs: {
+        type: "integer",
+        minimum: 0,
+        maximum: 3_600_000,
+        title: "Step (ms)",
+        description: "Time between two statuses of the update",
+      },
+      failAt: {
+        type: "string",
+        enum: ["none", "DownloadFailed", "InstallationFailed"],
+        title: "Fail at",
+        description:
+          "End every update with this failure instead of Installed. The one-shot SimulatedFirmwareUpdateFailure configuration key does the same for one update",
+      },
+      startAt: {
+        type: "string",
+        enum: ["retrieveDate", "now"],
+        title: "Start at",
+        description:
+          "Wait for the request's retrieveDate, or start as soon as the answer settled. now is deliberately not conformant: it retrieves before retrieveDate (OCPP 1.6 §5.16, §6.55 / errata 3.63); use it to test CSMS handling",
+      },
+    },
+  },
+  defaults: { stepMs: 2000, failAt: "none", startAt: "retrieveDate" },
+};
 
 interface UpdateFirmwareRequest {
   location?: string;
@@ -30,11 +62,15 @@ interface UpdateFirmwareRequest {
  * OCPP 2.x (L01): the request is accepted and its `requestId` remembered for
  * the FirmwareStatusNotification reports the control plane drives; the station
  * reports nothing on its own. A user behavior can opt in to a train.
+ *
+ * Params (1.6 only): `stepMs`, `failAt`, `startAt`. `failAt` set to a failure
+ * wins over the one-shot configuration key, which is still read and cleared.
  */
 export function firmwareBehavior(cp: ChargePoint): Behavior {
   return {
     api: 1,
     id: "default.firmware",
+    params: PARAMS,
     onCall: {
       UpdateFirmware: {
         mode: "replace",
@@ -63,9 +99,11 @@ export function firmwareBehavior(cp: ChargePoint): Behavior {
             LogType.OCPP,
           );
 
-          const startsAt = Number.isNaN(retrieveDate.getTime())
-            ? ctx.now()
-            : retrieveDate.getTime();
+          const stepMs = ctx.params.stepMs as number;
+          const startsAt =
+            Number.isNaN(retrieveDate.getTime()) || ctx.params.startAt === "now"
+              ? ctx.now()
+              : retrieveDate.getTime();
           return {
             response: {},
             after: async () => {
@@ -78,12 +116,14 @@ export function firmwareBehavior(cp: ChargePoint): Behavior {
               }
               ctx.state.inFlight = true;
               try {
-                const failureMode = cp.configuration.getString(
+                const configured = cp.configuration.getString(
                   "SimulatedFirmwareUpdateFailure",
                 );
+                const failureMode =
+                  ctx.params.failAt === "none" ? configured : ctx.params.failAt;
                 // One-shot: the next UpdateFirmware runs the happy path
                 // unless the key is armed again.
-                if (failureMode) {
+                if (configured) {
                   cp.configuration.applyChange(
                     "SimulatedFirmwareUpdateFailure",
                     "",
@@ -111,7 +151,7 @@ export function firmwareBehavior(cp: ChargePoint): Behavior {
                     return;
                   }
                   ctx.notify.firmwareStatus(step);
-                  await ctx.sleep(STEP_MS);
+                  await ctx.sleep(stepMs);
                 }
               } finally {
                 ctx.state.inFlight = false;

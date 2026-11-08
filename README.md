@@ -102,4 +102,4 @@ Also browsable at https://deepwiki.com/shiv3/ocpp-cp-simulator.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md): the checks to run before pushing, the wiki update rule, and how issues and pull requests are labelled and assigned to milestones.
+See [CONTRIBUTING.md](CONTRIBUTING.md): the checks to run before pushing, the wiki update rule, the contribution terms, and how issues and pull requests are labelled and assigned to milestones. Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md).

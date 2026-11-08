@@ -1,3 +1,4 @@
+import DaemonSwitcher from "./components/DaemonSwitcher";
 import { useTranslation } from "react-i18next";
 import React, { useId, useState } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
@@ -254,6 +255,7 @@ const AppShell: React.FC = () => {
                 {serverUrl}
               </div>
             )}
+            {!collapsed && <DaemonSwitcher />}
           </div>
         </aside>
 

@@ -336,6 +336,15 @@ export class ConfigurationStore {
     return this.values.delete(name);
   }
 
+  /**
+   * Whether `SupportedFeatureProfiles` lists `SmartCharging` (#594); true when
+   * the key is absent.
+   */
+  smartChargingSupported(): boolean {
+    const profiles = this.getArray("SupportedFeatureProfiles");
+    return profiles === undefined || profiles.includes("SmartCharging");
+  }
+
   /** Canonical key `LocalAuthListEnabled`; default `true`. */
   localAuthListEnabled(): boolean {
     return this.getBoolean("LocalAuthListEnabled") ?? true;
@@ -359,6 +368,22 @@ export class ConfigurationStore {
   /** Canonical key `WebSocketPingInterval` (seconds); default `0` = no ping. */
   webSocketPingInterval(): number {
     return this.getInteger("WebSocketPingInterval") ?? 0;
+  }
+
+  /** 2.x `OCPPCommCtrlr.RetryBackOffWaitMinimum` in seconds (#609, Part 4
+   *  §5.4); the default is derived from the reconnect policy, 1 without one. */
+  retryBackOffWaitMinimum(): number {
+    return this.getInteger("RetryBackOffWaitMinimum") ?? 1;
+  }
+
+  /** 2.x `OCPPCommCtrlr.RetryBackOffRandomRange` in seconds (#609). */
+  retryBackOffRandomRange(): number {
+    return this.getInteger("RetryBackOffRandomRange") ?? 0;
+  }
+
+  /** 2.x `OCPPCommCtrlr.RetryBackOffRepeatTimes` (#609). */
+  retryBackOffRepeatTimes(): number {
+    return this.getInteger("RetryBackOffRepeatTimes") ?? 5;
   }
 
   /** Canonical key `CertificateStoreMaxLength`; default `10`. */

@@ -88,7 +88,9 @@ describe("ConfigurationStore security whitepaper keys", () => {
   it("validates reads and ChangeConfiguration mutations", () => {
     const store = storeWithDefaults();
 
-    expect(store.applyChange("SecurityProfile", "2")).toBe("Accepted");
+    // No guard (a transport without the security extension, OCPP-S): the
+    // value is stored and the change needs a reboot, as before #724.
+    expect(store.applyChange("SecurityProfile", "2")).toBe("RebootRequired");
     expect(store.getInteger("SecurityProfile")).toBe(2);
 
     expect(store.applyChange("SecurityProfile", "4")).toBe("Rejected");
@@ -114,8 +116,8 @@ describe("ConfigurationStore security whitepaper keys", () => {
     const store = storeWithDefaults();
     const seen: Array<[number, number]> = [];
     let allow = false;
-    store.setSecurityProfileGuard((current, next) => {
-      seen.push([current, next]);
+    store.setChangeGuard("SecurityProfile", (current, next) => {
+      seen.push([current as number, next as number]);
       return allow;
     });
 
@@ -137,11 +139,24 @@ describe("ConfigurationStore security whitepaper keys", () => {
     ]);
   });
 
+  it("answers Rejected and keeps AuthorizationKey when its guard refuses (#724)", () => {
+    const store = storeWithDefaults();
+    store.applyChange("AuthorizationKey", "00112233445566778899aabbccddeeff");
+    store.setChangeGuard("AuthorizationKey", (_current, next) => next !== "");
+    expect(store.applyChange("AuthorizationKey", "")).toBe("Rejected");
+    expect(store.getString("AuthorizationKey")).toBe(
+      "00112233445566778899aabbccddeeff",
+    );
+    expect(store.applyChange("AuthorizationKey", "ab".repeat(16))).toBe(
+      "Accepted",
+    );
+  });
+
   it("round-trips mutable security keys through persistence", () => {
     const db = new MemoryConfigurationDatabase();
     const first = storeWithDefaults(db);
 
-    expect(first.applyChange("SecurityProfile", "3")).toBe("Accepted");
+    expect(first.applyChange("SecurityProfile", "3")).toBe("RebootRequired");
     expect(first.applyChange("AuthorizationKey", "persisted-secret")).toBe(
       "Accepted",
     );

@@ -126,6 +126,7 @@ import type { ActiveChargingProfile } from "../connector/Connector";
 import { CertificateStore } from "../security/CertificateStore";
 import {
   checkSecurityProfileChange,
+  isValidAuthorizationKey,
   isCertificateCurrentlyValid,
 } from "../security/securityProfileChange";
 import {
@@ -1073,27 +1074,43 @@ export class ChargePoint {
       : { text };
   }
 
-  /** Hook up subsystems that react to live Configuration changes. */
   /**
-   * #724 (1.6 security whitepaper A01.FR.03, A05): the transport sends the
+   * #724 (1.6 security whitepaper A01, A05): the transport sends the
    * stored `AuthorizationKey` and `SecurityProfile` from the next attempt
    * on, and a `SecurityProfile` change is checked against the A05
    * prerequisites. Installed after the constructor applied its own initial
    * values, which are not ChangeConfiguration requests.
    */
   private wireSecurityConfiguration(): void {
-    this._configuration.setSecurityProfileGuard((current, next) => {
+    // §7.2: with profile 1 or 2 the key is the Basic Auth password; one the
+    // transport cannot derive it from (an empty or non-hex value) would stop
+    // every later connection attempt, so it is refused and the old key kept.
+    this._configuration.setChangeGuard("AuthorizationKey", (_current, next) => {
+      const profile = this._configuration.getInteger("SecurityProfile") ?? 0;
+      if (
+        (profile !== 1 && profile !== 2) ||
+        isValidAuthorizationKey(`${next}`)
+      ) {
+        return true;
+      }
+      this._logger.warn(
+        `ChangeConfiguration AuthorizationKey refused: security profile ${profile} needs a key of 16-20 bytes (32-40 hex digits), whitepaper §7.2`,
+        LogType.CONFIGURATION,
+      );
+      return false;
+    });
+    this._configuration.setChangeGuard("SecurityProfile", (current, next) => {
       const now = this.nowDate();
       const verdict = checkSecurityProfileChange({
-        current,
-        next,
+        current: typeof current === "number" ? current : 0,
+        next: typeof next === "number" ? next : 0,
         authorizationKey:
           this._configuration.getString("AuthorizationKey") ?? "",
+        // Only what the TLS connection validates the CSMS with: roots that
+        // InstallCertificate stored do not join its trust, so counting them
+        // would accept an upgrade that cannot connect.
         hasCentralSystemRoot:
-          this._certificateStore
-            .listRootCertificates(["CsmsRootCertificate"])
-            .some((root) => isCertificateCurrentlyValid(root.pem, now)) ||
-          (this._webSocket?.hasConfiguredTrustAnchors() ?? false),
+          this._webSocket?.hasConfiguredTrustAnchors() ?? false,
         hasChargePointCertificate:
           this._certificateStore
             .listSignedChains("ChargingStationCertificate")
@@ -1144,6 +1161,7 @@ export class ChargePoint {
     this.reset();
   }
 
+  /** Hook up subsystems that react to live Configuration changes. */
   private wireConfigurationListeners(): void {
     this._configuration.onChange((key, value) => {
       switch (key) {

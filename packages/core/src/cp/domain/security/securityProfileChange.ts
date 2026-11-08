@@ -22,35 +22,44 @@ export type SecurityProfileChangeVerdict =
   | {
       readonly allowed: false;
       readonly requirement:
-        "A05.FR.01" | "A05.FR.02" | "A05.FR.03" | "A05.FR.04";
+        "A00.FR.005" | "A05.FR.01" | "A05.FR.02" | "A05.FR.03" | "A05.FR.04";
       readonly reason: string;
     };
 
 /**
- * Security whitepaper §7.2: the AuthorizationKey of profiles 1 and 2 is
- * 16 to 20 bytes, written as 32 to 40 hexadecimal digits.
+ * Security whitepaper §7.2: the AuthorizationKey is at least 16 bytes and, in
+ * its hexadecimal form, at most 20 bytes (40 hex digits). The simulator takes
+ * 32 to 40 hex digits.
  */
 export function isValidAuthorizationKey(value: string): boolean {
   return /^(?:[0-9a-fA-F]{2}){16,20}$/.test(value);
 }
 
 /**
- * The checks of whitepaper ed.4 A05 for a ChangeConfiguration of
- * `SecurityProfile`: A05.FR.01 refuses a value lower than the current one
- * (`AllowSecurityProfileDowngrade` is not implemented), and one equal to it
- * above profile 1; A05.FR.02-04 refuse an upgrade whose prerequisites are
- * missing. An equal value of 0 or 1 changes nothing and is allowed. Allowed
- * upgrades are A05.FR.05 and answer `Accepted`.
+ * The checks of whitepaper ed.4 for a ChangeConfiguration of
+ * `SecurityProfile`. A05.FR.01 refuses a value greater than 1 and lower than
+ * or equal to the current one, and A00.FR.005 / §7.8 refuse any other
+ * lowering (only 3 → 2 may be allowed, by `AllowSecurityProfileDowngrade`,
+ * which is not implemented). A value of 0 or 1 equal to the current one is
+ * covered by neither: nothing changes and it is allowed. A05.FR.02-04 refuse an
+ * upgrade whose prerequisites are missing; an allowed upgrade is A05.FR.05.
  */
 export function checkSecurityProfileChange(
   input: SecurityProfileChangeInput,
 ): SecurityProfileChangeVerdict {
   const { current, next } = input;
-  if (next < current || (next === current && next > 1)) {
+  if (next > 1 && next <= current) {
     return {
       allowed: false,
       requirement: "A05.FR.01",
       reason: `security profile ${current} cannot be changed to ${next}: downgrades are not allowed (AllowSecurityProfileDowngrade is not implemented)`,
+    };
+  }
+  if (next < current) {
+    return {
+      allowed: false,
+      requirement: "A00.FR.005",
+      reason: `security profile ${current} cannot be changed to ${next}: lowering the profile to ${next} is never allowed over OCPP`,
     };
   }
   if (next === current) return { allowed: true, upgrade: false };

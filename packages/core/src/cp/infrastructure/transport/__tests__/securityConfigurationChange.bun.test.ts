@@ -122,7 +122,7 @@ describe.skipIf(!canBindBunServe())("1.6 security configuration (#724)", () => {
     stops.push(() => csms.stop());
     const cp = await connectedStation(csms, "CP-724-GUARD", 1);
 
-    // A05.FR.01: a downgrade, and an equal value above 1.
+    // A00.FR.005: lowering the profile.
     expect(
       await changeConfiguration(csms, "c1", "SecurityProfile", "0"),
     ).toEqual({
@@ -164,6 +164,67 @@ describe.skipIf(!canBindBunServe())("1.6 security configuration (#724)", () => {
     ]);
   }, 20_000);
 
+  it("refuses an empty or malformed AuthorizationKey on profile 1 and keeps reconnecting with the old one (A01, whitepaper §7.2)", async () => {
+    const csms = startMockCsms();
+    stops.push(() => csms.stop());
+    const cp = await connectedStation(csms, "CP-724-EMPTY", 1);
+
+    for (const [id, value] of [
+      ["e1", ""],
+      ["e2", "not-hex"],
+      ["e3", "11".repeat(15)],
+    ] as const) {
+      expect(
+        await changeConfiguration(csms, id, "AuthorizationKey", value),
+      ).toEqual({ status: "Rejected" });
+    }
+    expect(cp.configuration.getString("AuthorizationKey")).toBe(OLD_KEY);
+
+    // The link drops and the station reconnects with the key it kept.
+    csms.closeCurrentConnection(1012);
+    await csms.waitForConnection(10_000).catch(() => undefined);
+    await acceptBoot(csms);
+    expect(csms.upgradeAuthorizations).toEqual([
+      basic("CP-724-EMPTY", OLD_KEY),
+      basic("CP-724-EMPTY", OLD_KEY),
+    ]);
+  }, 20_000);
+
+  it("keeps retrying when a credential left unusable stops the connection (reconnect loop survives)", async () => {
+    const csms = startMockCsms();
+    stops.push(() => csms.stop());
+    const cp = await connectedStation(csms, "CP-724-LOOP", 1);
+    // Force the state the guard prevents (a bypassing change), then drop the
+    // link: the attempt that cannot derive the password must not throw.
+    cp.configuration.applyChange("AuthorizationKey", "", { bypassGuard: true });
+    csms.closeCurrentConnection(1012);
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    expect(cp.configuration.getString("AuthorizationKey")).toBe("");
+    // Once a usable key is back the next attempt connects.
+    cp.configuration.applyChange("AuthorizationKey", NEW_KEY);
+    await csms.waitForConnection(10_000).catch(() => undefined);
+    await acceptBoot(csms);
+    expect(csms.upgradeAuthorizations.at(-1)).toBe(
+      basic("CP-724-LOOP", NEW_KEY),
+    );
+  }, 30_000);
+
+  it("does not fall back after the operator disconnects (A05.FR.08 covers the connection after the switch)", async () => {
+    const csms = startMockCsms();
+    stops.push(() => csms.stop());
+    const cp = await connectedStation(csms, "CP-724-MANUAL", 1, {
+      ca: (await localhostCertificate()).cert,
+      serverName: "localhost",
+    });
+    expect(
+      await changeConfiguration(csms, "m1", "SecurityProfile", "2"),
+    ).toEqual({ status: "Accepted" });
+    cp.disconnect();
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(cp.configuration.getInteger("SecurityProfile")).toBe(2);
+    expect(transportProfile(cp)).toBe(2);
+  }, 20_000);
+
   it("falls back to the previous profile when the new connection fails (A05.FR.08)", async () => {
     const { cert } = await localhostCertificate();
     // A plain ws:// CSMS: profile 2 promotes the next attempt to wss://,
@@ -179,9 +240,13 @@ describe.skipIf(!canBindBunServe())("1.6 security configuration (#724)", () => {
       await changeConfiguration(csms, "p1", "SecurityProfile", "2"),
     ).toEqual({ status: "Accepted" });
     expect(cp.configuration.getInteger("SecurityProfile")).toBe(2);
+    // The transport got the new profile (the ws:// CSMS cannot serve it) ...
+    expect(transportProfile(cp)).toBe(2);
 
     await acceptBootAgain(csms);
+    // ... and, once that connection failed, the previous one back.
     expect(cp.configuration.getInteger("SecurityProfile")).toBe(1);
+    expect(transportProfile(cp)).toBe(1);
   }, 30_000);
 
   it("reconnects over wss:// with Basic Auth after an accepted 1 → 2 (A05.FR.05-07)", async () => {
@@ -202,10 +267,19 @@ describe.skipIf(!canBindBunServe())("1.6 security configuration (#724)", () => {
     await acceptBootAgain(csms);
 
     expect(cp.configuration.getInteger("SecurityProfile")).toBe(2);
+    // The first connection was already wss://, so the profile itself is
+    // checked on the transport, not inferred from the URL.
+    expect(transportProfile(cp)).toBe(2);
     expect(csms.upgradeAuthorizations).toHaveLength(2);
     expect(csms.upgradeAuthorizations[1]).toBe(basic("CP-724-WSS", OLD_KEY));
   }, 30_000);
 });
+
+/** The security profile the transport will connect with next. */
+function transportProfile(cp: ChargePoint): number | undefined {
+  return (cp as unknown as { _webSocket: { _securityProfile?: number } })
+    ._webSocket._securityProfile;
+}
 
 /** Accepts the next BootNotification of a new connection. */
 async function acceptBootAgain(csms: MockCsms): Promise<void> {

@@ -1032,6 +1032,34 @@ export class CLIChargePointService {
     this._init = { ...this._init, labels: normalizeLabels(labels) };
   }
 
+  /**
+   * #724: a ChangeConfiguration of `AuthorizationKey` / `SecurityProfile` (and
+   * the A05.FR.08 fallback) is the station's new credential. `getInit()` follows
+   * it, so a `cp.update` that omits the field keeps the changed value, and
+   * `listener` lets the registry write it to the charge point's row: a restart
+   * rebuilds the station from that row. Not for 2.x, which has no such keys.
+   */
+  onSecurityCredentialsChange(
+    listener: (change: {
+      securityProfile?: 0 | 1 | 2 | 3;
+      authorizationKey?: string;
+    }) => void,
+  ): () => void {
+    if (this._init.ocppVersion?.startsWith("OCPP-2")) return () => {};
+    return this._chargePoint.configuration.onChange((key, value) => {
+      if (key === "AuthorizationKey" && typeof value === "string") {
+        this._init = { ...this._init, authorizationKey: value };
+        listener({ authorizationKey: value });
+      } else if (
+        key === "SecurityProfile" &&
+        (value === 0 || value === 1 || value === 2 || value === 3)
+      ) {
+        this._init = { ...this._init, securityProfile: value };
+        listener({ securityProfile: value });
+      }
+    });
+  }
+
   /** Original init the CP was constructed from. Used by socket.io control
    *  flows to surface current config to the web console's edit modal. */
   getInit(): ChargePointInitOptions {

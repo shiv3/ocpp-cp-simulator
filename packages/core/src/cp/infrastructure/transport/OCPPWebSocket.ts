@@ -4,6 +4,7 @@ import { encodeCallFrame } from "./callFrame";
 import { redactSensitiveText } from "../../shared/redaction";
 import {
   isBrowserRuntime,
+  OcppSecurityProfileConfigError,
   openOcppWebSocket,
   probeUpgradeRefusal,
   type OcppSocket,
@@ -219,6 +220,9 @@ export class OCPPWebSocket {
   private _securityProfile?: OcppSecurityProfile;
   private _authorizationKey?: string;
   private _securityProfileFallback: (() => void) | null = null;
+  /** `setSecurityCredentials` ran: a credential that cannot open a
+   *  connection is then reported and retried, not thrown (#724). */
+  private _credentialsChangedAtRuntime = false;
   private _cpoName?: string;
   private _tls?: OcppTlsOptions;
   /**
@@ -334,6 +338,7 @@ export class OCPPWebSocket {
     securityProfile?: OcppSecurityProfile;
     authorizationKey?: string;
   }): void {
+    this._credentialsChangedAtRuntime = true;
     if ("securityProfile" in credentials) {
       this._securityProfile = credentials.securityProfile;
     }
@@ -580,27 +585,49 @@ export class OCPPWebSocket {
       this._url = this._urlPool.next();
     }
 
-    this._ws = openOcppWebSocket({
-      baseUrl: this._url,
-      chargePointId: this._chargePointId,
-      basicAuth: this._basicAuth,
-      extraHeaders: this._extraHeaders,
-      extraSubprotocols: this._extraSubprotocols,
-      ocppVersion: this._ocppVersion,
-      securityProfile: this._securityProfile,
-      authorizationKey: this._authorizationKey,
-      cpoName: this._cpoName,
-      tls: attempt.tls,
-      warn: (message) => this._logger.warn(message, LogType.WEBSOCKET),
-      onConnectOptions: (options) => {
-        this._lastConnectOptions = options;
-        this._refusalStatusReported = false;
-      },
-      onopen: onopenHandler,
-      onmessage: onmessageHandler,
-      onerror: onerrorHandler,
-      onclose: oncloseHandler,
-    });
+    try {
+      this._ws = openOcppWebSocket({
+        baseUrl: this._url,
+        chargePointId: this._chargePointId,
+        basicAuth: this._basicAuth,
+        extraHeaders: this._extraHeaders,
+        extraSubprotocols: this._extraSubprotocols,
+        ocppVersion: this._ocppVersion,
+        securityProfile: this._securityProfile,
+        authorizationKey: this._authorizationKey,
+        cpoName: this._cpoName,
+        tls: attempt.tls,
+        warn: (message) => this._logger.warn(message, LogType.WEBSOCKET),
+        onConnectOptions: (options) => {
+          this._lastConnectOptions = options;
+          this._refusalStatusReported = false;
+        },
+        onopen: onopenHandler,
+        onmessage: onmessageHandler,
+        onerror: onerrorHandler,
+        onclose: oncloseHandler,
+      });
+    } catch (error) {
+      // A credential a ChangeConfiguration left unusable (#724) must not end
+      // the reconnect loop: report it, undo a pending security-profile switch
+      // and try again. A misconfiguration at start-up still throws.
+      if (
+        !(error instanceof OcppSecurityProfileConfigError) ||
+        !this._credentialsChangedAtRuntime
+      ) {
+        throw error;
+      }
+      this._logger.error(
+        `Cannot open the connection: ${error.message}`,
+        LogType.WEBSOCKET,
+      );
+      const fallback = this._securityProfileFallback;
+      this._securityProfileFallback = null;
+      fallback?.();
+      this._ws = null;
+      if (!this._isManualDisconnect && !this._disposed) this.attemptReconnect();
+      return;
+    }
     this._socketToken = socketToken;
   }
 
@@ -614,6 +641,9 @@ export class OCPPWebSocket {
 
     // Set manual disconnect flag to prevent auto-reconnect
     this._isManualDisconnect = true;
+    // A05.FR.08 covers the connection that follows the switch only: an
+    // operator's disconnect ends it.
+    this._securityProfileFallback = null;
 
     // Clear reconnect timer to prevent reconnection attempts
     if (this._reconnectTimer) {
@@ -667,6 +697,7 @@ export class OCPPWebSocket {
     }
 
     this._disposed = true;
+    this._securityProfileFallback = null;
 
     // Shut down controller with reason 'disposed'
     this._controller.shutdownPipelines({ reason: "disposed" });

@@ -25,6 +25,12 @@ import type { Database } from "../persistence/Database";
  * Status returned from a ChangeConfiguration.req attempt. Mirrors
  * OCPP 1.6 §5.3 / §7.22 ConfigurationStatus.
  */
+/** A check of a new value of one key: `false` refuses it. */
+export type ChangeGuard = (
+  current: ConfigurationValue["value"],
+  next: ConfigurationValue["value"],
+) => boolean;
+
 export type ConfigurationChangeStatus =
   "Accepted" | "Rejected" | "RebootRequired" | "NotSupported";
 
@@ -35,6 +41,10 @@ export type ConfigurationChangeStatus =
  */
 const REBOOT_REQUIRED_KEYS = new Set<string>([
   "ChargingScheduleMaxPeriods", // pre-allocated array sizes etc.
+  // A SecurityProfile change needs a reconnect; a charge point with a
+  // transport that applies it installs a guard for it (#724) and answers
+  // `Accepted` instead. One without (OCPP-S) keeps answering RebootRequired.
+  "SecurityProfile",
   // (Extend as additional reboot-sensitive keys are wired in.)
 ]);
 
@@ -69,8 +79,8 @@ export class ConfigurationStore {
   private readonly listeners = new Set<ConfigurationChangeListener>();
   /** Keys published by `defineRuntimeKey` / `defineRuntimeIntegerKey`. */
   private readonly runtimeKeys = new Set<string>();
-  private securityProfileGuard:
-    ((current: number, next: number) => boolean) | null = null;
+  /** Per-key checks run by `applyChange` before a value is stored. */
+  private readonly changeGuards = new Map<string, ChangeGuard>();
 
   constructor(
     private readonly chargePointId: string,
@@ -411,15 +421,15 @@ export class ConfigurationStore {
   }
 
   /**
-   * Installs the A05 check of an OCPP 1.6 `SecurityProfile` change (#724):
+   * Installs a check of a ChangeConfiguration of `name` (#724: the A05 check
+   * of `SecurityProfile`, the §7.2 format of `AuthorizationKey`):
    * `applyChange` answers `Rejected` and keeps the value when the guard
-   * refuses it. The charge point installs it once its own initial values are
-   * applied; `applyChange(..., { bypassGuard: true })` skips it.
+   * refuses it. The charge point installs the guards once its own initial
+   * values are applied; `applyChange(..., { bypassGuard: true })` skips them.
    */
-  setSecurityProfileGuard(
-    guard: ((current: number, next: number) => boolean) | null,
-  ): void {
-    this.securityProfileGuard = guard;
+  setChangeGuard(name: string, guard: ChangeGuard | null): void {
+    if (guard) this.changeGuards.set(name, guard);
+    else this.changeGuards.delete(name);
   }
 
   /**
@@ -440,16 +450,8 @@ export class ConfigurationStore {
     const parsed = parseValue(entry.key, rawValue);
     if (parsed === PARSE_FAILED) return "Rejected";
     if (!isConfigurationValueValid(entry.key, parsed)) return "Rejected";
-    if (
-      name === "SecurityProfile" &&
-      this.securityProfileGuard &&
-      options.bypassGuard !== true &&
-      typeof parsed === "number" &&
-      !this.securityProfileGuard(
-        typeof entry.value === "number" ? entry.value : 0,
-        parsed,
-      )
-    ) {
+    const guard = this.changeGuards.get(name);
+    if (guard && options.bypassGuard !== true && !guard(entry.value, parsed)) {
       return "Rejected";
     }
 
@@ -458,6 +460,9 @@ export class ConfigurationStore {
     this.persistOverride(name, parsed);
     this.emit(name, parsed);
 
+    if (name === "SecurityProfile" && this.changeGuards.has(name)) {
+      return "Accepted";
+    }
     return REBOOT_REQUIRED_KEYS.has(name) ? "RebootRequired" : "Accepted";
   }
 

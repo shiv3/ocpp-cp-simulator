@@ -210,36 +210,58 @@ signature algorithms, hidden `CpoName`) can be armed from a scenario with the
 
 ### Changing `AuthorizationKey` and `SecurityProfile` (1.6)
 
-`ChangeConfiguration` of these two keys reaches the transport (#724):
+`ChangeConfiguration` of these two keys reaches the transport (#724). The
+station side of the 1.6 security whitepaper (edition 4) is A01.FR.01/02 (the
+password lives in `AuthorizationKey`, set by `ChangeConfiguration`) and A05;
+A01.FR.03/04 are the CSMS's rules (after `Accepted` it stops accepting the old
+password, after `Rejected`/`NotSupported` it keeps it).
 
-- **`AuthorizationKey`** (A01.FR.03): after `Accepted` the stored value is what
-  every later connection attempt sends as the Basic Auth password: the next
-  reconnect, a `Reset`, a TriggerMessage-driven reconnect. The station does not
-  reconnect by itself; the CSMS, which no longer accepts the old password,
-  closes the link. A daemon restart re-applies the key the charge point was
-  created with (the registry row), not the changed one.
-- **`SecurityProfile`** (A05.FR.01-05): the value is checked first and
-  answered `Rejected`, leaving the profile unchanged, when
-  - it is lower than the current one, or equal to it above profile 1
+- **`AuthorizationKey`**: after `Accepted` the stored value is what every later
+  connection attempt sends as the Basic Auth password on profiles 1 and 2: the
+  next reconnect, a `Reset`, a TriggerMessage-driven reconnect. The legacy
+  `--basic-auth-*` credentials of profile 0 are not replaced by it. The station
+  does not reconnect by itself; the CSMS, which no longer accepts the old
+  password, closes the link.
+  - While the profile is 1 or 2 a value that is not 16 to 20 bytes written as
+    32 to 40 hex digits (whitepaper §7.2: at least 16 bytes, at most 40 hex
+    digits) is `Rejected` and the old key is kept: the transport cannot derive
+    the password from it, and every later connection attempt would fail. The
+    reconnect loop also survives a key that became unusable some other way: the
+    attempt is logged as an error and retried with backoff.
+  - The key survives a daemon restart: the charge point's registry row is
+    updated with every accepted change (and with the A05.FR.08 fallback), and a
+    restart or `cp.update` that omits the field rebuilds the station from it.
+    A standalone CLI process that is given `--authorization-key` /
+    `--security-profile` on every start takes those flags over the stored value.
+- **`SecurityProfile`**: the value is checked first and answered `Rejected`,
+  leaving the profile unchanged, when
+  - it is greater than 1 and lower than or equal to the current one
     (A05.FR.01; `AllowSecurityProfileDowngrade` is not implemented, so a 3 → 2
     downgrade is refused too);
-  - it is 1 or 2 and the stored `AuthorizationKey` is not 16 to 20 bytes written
-    as 32 to 40 hex digits (A05.FR.02, whitepaper §7.2);
-  - it is 2 or 3 and the station has no currently valid CentralSystemRoot
-    (an installed `CSMSRootCertificate`/`CentralSystemRootCertificate`, or
-    `--tls-ca`) (A05.FR.03);
+  - it is lower than the current one and 0 or 1 (A00.FR.005 and §7.8: the
+    profile is never lowered to 1 or below over OCPP). An unchanged 0 or 1
+    matches neither rule and is `Accepted`;
+  - it is 1 or 2, higher than the current one, and the stored `AuthorizationKey`
+    does not meet §7.2 (A05.FR.02);
+  - it is 2 or 3, higher than the current one, and the station has no
+    CentralSystemRoot its TLS connection validates the CSMS with, which today
+    is `--tls-ca` (A05.FR.03). A root installed with `InstallCertificate` does
+    not join the connection's TLS trust, so it is not counted: the upgrade
+    would be `Accepted` and then fail to connect;
   - it is 3 and the station has no currently valid ChargePointCertificate (a
     stored Charging Station chain, or `--tls-cert`) (A05.FR.04).
 
-  A valid upgrade answers `Accepted` (not `RebootRequired`). Once that answer is
-  written the station disconnects and reconnects with the new profile
-  (A05.FR.06/07, the same teardown as `Reset`). If that connection does not
-  open, the previous profile is put back and the next attempt uses it
-  (A05.FR.08). An unchanged value of 0 or 1 is `Accepted` without a
-  reconnect. The initial profile from `--security-profile` is not a
-  `ChangeConfiguration` and is not checked. Installed `CSMSRootCertificate`s
-  count as a prerequisite but do not join the connection's TLS trust: use
-  `--tls-ca` for that.
+  A valid upgrade answers `Accepted` (A05.FR.05, not `RebootRequired`). Once
+  that answer is written the station disconnects and reconnects with the new
+  profile (A05.FR.06/07, the same teardown as `Reset`, which also drops the
+  reservations and the charging profiles). If that connection does not open,
+  the previous profile is put back and the next attempt uses it (A05.FR.08,
+  a SHOULD); an operator's disconnect, a dispose or a newer switch ends that
+  fallback. The new profile is written to the registry row like the key. The
+  initial profile from `--security-profile` is not a `ChangeConfiguration` and
+  is not checked.
+  A charge point without the WebSocket security extension (OCPP-S SOAP) has no
+  guard and keeps answering `RebootRequired` without reconnecting.
 
 ## Certificate store
 

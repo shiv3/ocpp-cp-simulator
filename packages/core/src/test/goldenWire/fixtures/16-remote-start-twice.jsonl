@@ -13,7 +13,7 @@
 {"d":"CP>","k":"call","id":"id-7","a":"StatusNotification","p":{"connectorId":1,"errorCode":"NoError","status":"Charging"}}
 {"d":"CSMS>","k":"result","id":"id-7","p":{}}
 {"d":"CSMS>","k":"call","id":"id-8","a":"RemoteStartTransaction","p":{"idTag":"TAG-B","connectorId":1}}
-{"d":"CP>","k":"result","id":"id-8","p":{"status":"Accepted"}}
+{"d":"CP>","k":"result","id":"id-8","p":{"status":"Rejected"}}
 {"d":"CSMS>","k":"call","id":"id-9","a":"RemoteStopTransaction","p":{"transactionId":1}}
 {"d":"CP>","k":"call","id":"id-10","a":"StatusNotification","p":{"connectorId":1,"errorCode":"NoError","status":"SuspendedEVSE"}}
 {"d":"CSMS>","k":"result","id":"id-10","p":{}}

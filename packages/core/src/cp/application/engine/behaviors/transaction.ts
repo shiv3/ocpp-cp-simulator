@@ -66,14 +66,18 @@ export function transactionBehavior(cp: ChargePoint): Behavior {
             idTag: string;
             connectorId?: number;
           };
-          const resolved = connectorId || 1;
-          const connector = cp.getConnector(resolved);
-          if (!connector || connector.availability !== "Operative") {
-            return { response: { status: "Rejected" } };
-          }
-          // 1.6 §5.13: a connector-0 reservation of another tag keeps its
-          // connector; one answer per CALL, so refuse before `Accepted`.
-          if (startBlockedByReservation16(cp, resolved, idTag)) {
+          // 1.6 §5.11 (errata 3.32): `Accepted` means a start will be
+          // attempted. A named connector must be able to start; without one
+          // the lowest connector that can start is used.
+          const resolved = connectorId
+            ? remoteStartable(cp, connectorId, idTag)
+              ? connectorId
+              : undefined
+            : [...cp.connectors.keys()]
+                .filter((id) => id > 0)
+                .sort((a, b) => a - b)
+                .find((id) => remoteStartable(cp, id, idTag));
+          if (resolved === undefined) {
             return { response: { status: "Rejected" } };
           }
           // 1.6 §5.11: the transaction starts while the answer is built.
@@ -161,6 +165,29 @@ export function transactionBehavior(cp: ChargePoint): Behavior {
       },
     },
   };
+}
+
+/**
+ * Whether a remote start for `idTag` can be attempted on the connector (1.6
+ * §5.11, errata 3.32): known, Operative, not Faulted, no running transaction,
+ * not reserved for another idTag and not the last connector a connector-0
+ * reservation of another tag keeps (§5.13).
+ */
+function remoteStartable(
+  cp: ChargePoint,
+  connectorId: number,
+  idTag: string,
+): boolean {
+  const connector = cp.getConnector(connectorId);
+  if (!connector || connector.availability !== "Operative") return false;
+  if (connector.status === OCPPStatus.Faulted) return false;
+  if (connector.hasRunningTransaction) return false;
+  // A reservation on this very connector. A connector-0 reservation names no
+  // connector: it keeps one connector free for its owner (the capacity rule,
+  // startBlockedByReservation16).
+  const reservation = cp.reservationManager.reservationOn(connector.id);
+  if (reservation !== undefined && reservation.idTag !== idTag) return false;
+  return !startBlockedByReservation16(cp, connectorId, idTag);
 }
 
 /**

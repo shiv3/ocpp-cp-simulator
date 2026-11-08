@@ -113,6 +113,34 @@ both("remote-start-twice", async (r) => {
   await r.remoteStart("TAG-B");
   await r.remoteStop();
 });
+// 1.6 §5.11 (errata 3.32, #728): Accepted only when a start will be attempted.
+c16(
+  "remote-start-without-connector-picks-free",
+  async (r) => {
+    await charging(r, "A", 1);
+    r.plugIn(2);
+    await settle(r);
+    await r.csms.call("RemoteStartTransaction", { idTag: "B" });
+    await settle(r);
+    r.cp.stopTransaction(1);
+    r.cp.stopTransaction(2);
+    await settle(r);
+  },
+  two,
+);
+c16("remote-start-busy-connector-rejected", async (r) => {
+  await charging(r, "A", 1);
+  await r.csms.call("RemoteStartTransaction", { idTag: "B", connectorId: 1 });
+  await settle(r);
+  r.cp.stopTransaction(1);
+  await settle(r);
+});
+c16("remote-start-faulted-connector-rejected", async (r) => {
+  r.cp.updateConnectorStatus(1, OCPPStatus.Faulted);
+  await settle(r);
+  await r.csms.call("RemoteStartTransaction", { idTag: "B", connectorId: 1 });
+  await settle(r);
+});
 both("remote-start-preparing", async (r) => {
   r.plugIn();
   await settle(r);

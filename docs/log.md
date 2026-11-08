@@ -2424,3 +2424,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - `chargingProfileApplied` carries `replacedIds` (profiles displaced by the same-slot rule); `replaced` now means "same id updated", so the timeline no longer reports an update for a profile it never had, and a displaced profile's expiry timer is cancelled. The TxProfile precondition uses `hasRunningTransaction`. `ClearChargingProfile` and `GetCompositeSchedule` answer `NotSupported` without `SmartCharging` too. The wiki states the 1.6-S behavior (generic SOAP Fault).
 - Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#ocpp-16-setchargingprofile), [Operational timeline](concepts/operational-timeline.md#smart-charging-profiles).
+
+## [2026-11-08] ingest | 2.x SetChargingProfile rejects a TxProfile without its transaction and duplicate TxDefaultProfile stack levels (#705)
+
+- K01.FR.09 / K01.FR.33: a `TxProfile` on an EVSE with no running transaction, or naming another transaction, answers `Rejected` with `reasonCode = TxNotFound`. K01.FR.52 / K01.FR.53: a `TxDefaultProfile` repeating a `stackLevel` across EVSE 0 and a specific EVSE under another `id` answers `Rejected` with `DuplicateProfile`. New page: [Smart charging](concepts/smart-charging.md). New golden case `201-set-charging-profile-preconditions` (the golden rig has no 2.1 version; the 2.1 path is covered by the handler unit test). No existing fixture changes.

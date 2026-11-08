@@ -857,6 +857,65 @@ export const goldenCases: GoldenCase[] = [
     await settle(rig);
   }),
 
+  // 2.0.1 K01.FR.09 / .33 / .52 / .53: a TxProfile needs the EVSE's running
+  // transaction; a TxDefaultProfile cannot repeat a stack level across EVSE 0
+  // and a specific EVSE under another id.
+  c201("set-charging-profile-preconditions", async (rig) => {
+    const profile = (
+      evseId: number,
+      id: number,
+      purpose: string,
+      extra: Record<string, unknown> = {},
+      stackLevel = 1,
+    ) => ({
+      evseId,
+      chargingProfile: {
+        id,
+        stackLevel,
+        chargingProfilePurpose: purpose,
+        chargingProfileKind: "Absolute",
+        ...extra,
+        chargingSchedule: [
+          {
+            id,
+            chargingRateUnit: "W",
+            chargingSchedulePeriod: [{ startPeriod: 0, limit: 7000 }],
+          },
+        ],
+      },
+    });
+    await rig.csms.call(
+      "SetChargingProfile",
+      profile(1, 1, "TxProfile", { transactionId: "no-such-transaction" }),
+    );
+    await charging(rig);
+    await rig.csms.call(
+      "SetChargingProfile",
+      profile(1, 1, "TxProfile", { transactionId: "other-transaction" }),
+    );
+    await rig.csms.call(
+      "SetChargingProfile",
+      profile(1, 2, "TxProfile", { transactionId: rig.transactionId(1) }),
+    );
+    await rig.csms.call(
+      "SetChargingProfile",
+      profile(1, 3, "TxDefaultProfile", {}, 5),
+    );
+    await rig.csms.call(
+      "SetChargingProfile",
+      profile(0, 4, "TxDefaultProfile", {}, 5),
+    );
+    await rig.csms.call(
+      "SetChargingProfile",
+      profile(0, 5, "TxDefaultProfile", {}, 6),
+    );
+    await rig.csms.call(
+      "SetChargingProfile",
+      profile(1, 6, "TxDefaultProfile", {}, 6),
+    );
+    await settle(rig);
+  }),
+
   // --- connection loss ---------------------------------------------------
   ...both("csms-drops-connection", async (rig) => {
     rig.csms.dropConnection();

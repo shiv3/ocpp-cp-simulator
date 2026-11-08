@@ -9,7 +9,7 @@ updated: 2026-11-08
 
 Start at [Overview](overview.md). Conventions for pages are in
 [Conventions](conventions.md); the maintenance schema is
-[`CLAUDE.md`](../CLAUDE.md); recent activity is in [Log](log.md).
+[`CLAUDE.md`](../CLAUDE.md); history is in git (`git log -- docs/`); the old [Log](log.md) is a frozen archive (2026-11-08).
 
 ## Entities (`entities/`)
 
@@ -68,7 +68,7 @@ Start at [Overview](overview.md). Conventions for pages are in
 | [scripts/poc/README.md](sources/socketio-bun-poc.md)                              | The socket.io-on-Bun PoC that gated the control-plane design (8/8 checks PASS)                        |
 | [packages/core/src/utils/scenarios/README.md](sources/cert16-templates-readme.md) | Authoritative cert16 ↔ test-case mapping, side effects, responseOverride matrix, out-of-scope list    |
 | [scripts/bench/README.md](sources/bench-readme.md)                                | Fleet scale benchmark: sweeps N vs. p50/p95 OCPP call latency via cp.create_many + /metrics diffing   |
-| [GitHub issues](sources/github-issues.md)                                         | Index of issue / PR numbers the wiki cites, with the pages that cite them                             |
+| [GitHub issues](sources/github-issues.md)                                         | Archive (frozen 2026-11-08): issue / PR numbers the wiki cited, with the pages that cited them        |
 
 ## Analyses (`analyses/`)
 

@@ -166,6 +166,37 @@ export interface CLIOptions {
    *  Only safe when a trusted proxy sets those headers (the daemon must not be
    *  reachable directly). Set by `--trust-forwarded-headers`. */
   readonly trustForwardedHeaders: boolean;
+  /** `--allowed-host` (repeatable): Host names the daemon answers to besides
+   *  IP literals and `localhost` (#620). Empty = no Host check. */
+  readonly allowedHosts: ReadonlyArray<string>;
+  /** `--trusted-proxy` (repeatable): IPs / CIDRs whose forwarding headers are
+   *  believed (#620). Empty = `--trust-forwarded-headers` believes any peer. */
+  readonly trustedProxies: ReadonlyArray<string>;
+  /** `--require-tls`: refuse non-loopback clients not carried over TLS (#620). */
+  readonly requireTls: boolean;
+  /** `--rate-limit-per-ip`: requests per second per client IP; 0 = off (#620). */
+  readonly rateLimitPerIp: number;
+  /** `--rate-limit-max-ips`: client IPs tracked by the limiter (#620). */
+  readonly rateLimitMaxIps: number;
+  /** `--log-level`: drop console / file lines below this level (#621). */
+  readonly logLevel: "debug" | "info" | "warn" | "error" | null;
+  /** `--log-file`: copy console log lines into this file (#621). */
+  readonly logFile: string | null;
+  /** `--log-max-size`: rotate the log file past this many bytes (#621). */
+  readonly logMaxBytes: number | null;
+  /** `--log-rotate-daily`: rotate the log file when the date changes (#621). */
+  readonly logRotateDaily: boolean;
+  /** `--log-keep`: rotated log files to keep (#621). */
+  readonly logKeep: number;
+  /** `--shutdown-stop-transactions`: stop running transactions on SIGINT /
+   *  SIGTERM and wait for the CSMS to answer (#622). */
+  readonly shutdownStopTransactions: boolean;
+  /** `--shutdown-wait-ms`: longest wait for those answers (#622). */
+  readonly shutdownWaitMs: number;
+  /** `false` after `--no-connect-restored` (#622). */
+  readonly connectRestored: boolean;
+  /** `--cp-bulk-wait-ms`: per-charge-point wait of `cp.bulk` (#622). */
+  readonly cpBulkWaitMs: number;
   /** Absolute or relative path of a directory the daemon serves as static
    *  files (SPA-aware). Null disables static hosting. */
   readonly serveStatic: string | null;

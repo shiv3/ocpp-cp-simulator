@@ -1,26 +1,24 @@
 {"d":"CP>","k":"call","id":"id-1","a":"BootNotification","p":{"reason":"PowerUp","chargingStation":{"model":"Model","vendorName":"Vendor","serialNumber":"123456","firmwareVersion":"1.0"}}}
 {"d":"CSMS>","k":"result","id":"id-1","p":{"status":"Accepted","currentTime":"<ts>","interval":3600}}
-{"d":"CP>","k":"call","id":"id-2","a":"StatusNotification","p":{"timestamp":"<ts>","connectorStatus":"Available","evseId":0,"connectorId":0}}
+{"d":"CP>","k":"call","id":"id-2","a":"StatusNotification","p":{"timestamp":"<ts>","connectorStatus":"Available","evseId":1,"connectorId":1}}
 {"d":"CSMS>","k":"result","id":"id-2","p":{}}
-{"d":"CP>","k":"call","id":"id-3","a":"StatusNotification","p":{"timestamp":"<ts>","connectorStatus":"Available","evseId":1,"connectorId":1}}
-{"d":"CSMS>","k":"result","id":"id-3","p":{}}
-{"d":"CSMS>","k":"call","id":"id-4","a":"RequestStartTransaction","p":{}}
-{"d":"CP>","k":"error","id":"id-4","p":{"code":"OccurrenceConstraintViolation","description":"Invalid RequestStartTransaction payload: must have required property 'remoteStartId'; must have required property 'idToken'","details":{}}}
-{"d":"CSMS>","k":"call","id":"id-5","a":"RequestStartTransaction","p":{"remoteStartId":1,"idToken":{}}}
-{"d":"CP>","k":"error","id":"id-5","p":{"code":"OccurrenceConstraintViolation","description":"Invalid RequestStartTransaction payload: /idToken must have required property 'idToken'; /idToken must have required property 'type'","details":{}}}
-{"d":"CSMS>","k":"call","id":"id-6","a":"RequestStopTransaction","p":{}}
-{"d":"CP>","k":"error","id":"id-6","p":{"code":"OccurrenceConstraintViolation","description":"Invalid RequestStopTransaction payload: must have required property 'transactionId'","details":{}}}
-{"d":"CSMS>","k":"call","id":"id-7","a":"Reset","p":{}}
-{"d":"CP>","k":"error","id":"id-7","p":{"code":"OccurrenceConstraintViolation","description":"Invalid Reset payload: must have required property 'type'","details":{}}}
-{"d":"CSMS>","k":"call","id":"id-8","a":"ChangeAvailability","p":{}}
-{"d":"CP>","k":"error","id":"id-8","p":{"code":"OccurrenceConstraintViolation","description":"Invalid ChangeAvailability payload: must have required property 'operationalStatus'","details":{}}}
-{"d":"CSMS>","k":"call","id":"id-9","a":"UnlockConnector","p":{}}
-{"d":"CP>","k":"error","id":"id-9","p":{"code":"OccurrenceConstraintViolation","description":"Invalid UnlockConnector payload: must have required property 'evseId'; must have required property 'connectorId'","details":{}}}
-{"d":"CSMS>","k":"call","id":"id-10","a":"ReserveNow","p":{}}
-{"d":"CP>","k":"error","id":"id-10","p":{"code":"OccurrenceConstraintViolation","description":"Invalid ReserveNow payload: must have required property 'id'; must have required property 'expiryDateTime'; must have required property 'idToken'","details":{}}}
-{"d":"CSMS>","k":"call","id":"id-11","a":"CancelReservation","p":{}}
-{"d":"CP>","k":"error","id":"id-11","p":{"code":"OccurrenceConstraintViolation","description":"Invalid CancelReservation payload: must have required property 'reservationId'","details":{}}}
-{"d":"CSMS>","k":"call","id":"id-12","a":"GetLog","p":{}}
-{"d":"CP>","k":"error","id":"id-12","p":{"code":"OccurrenceConstraintViolation","description":"Invalid GetLog payload: must have required property 'logType'; must have required property 'requestId'; must have required property 'log'","details":{}}}
-{"d":"CSMS>","k":"call","id":"id-13","a":"UpdateFirmware","p":{}}
-{"d":"CP>","k":"error","id":"id-13","p":{"code":"OccurrenceConstraintViolation","description":"Invalid UpdateFirmware payload: must have required property 'requestId'; must have required property 'firmware'","details":{}}}
+{"d":"CSMS>","k":"call","id":"id-3","a":"RequestStartTransaction","p":{}}
+{"d":"CP>","k":"error","id":"id-3","p":{"code":"OccurrenceConstraintViolation","description":"Invalid RequestStartTransaction payload: must have required property 'remoteStartId'; must have required property 'idToken'","details":{}}}
+{"d":"CSMS>","k":"call","id":"id-4","a":"RequestStartTransaction","p":{"remoteStartId":1,"idToken":{}}}
+{"d":"CP>","k":"error","id":"id-4","p":{"code":"OccurrenceConstraintViolation","description":"Invalid RequestStartTransaction payload: /idToken must have required property 'idToken'; /idToken must have required property 'type'","details":{}}}
+{"d":"CSMS>","k":"call","id":"id-5","a":"RequestStopTransaction","p":{}}
+{"d":"CP>","k":"error","id":"id-5","p":{"code":"OccurrenceConstraintViolation","description":"Invalid RequestStopTransaction payload: must have required property 'transactionId'","details":{}}}
+{"d":"CSMS>","k":"call","id":"id-6","a":"Reset","p":{}}
+{"d":"CP>","k":"error","id":"id-6","p":{"code":"OccurrenceConstraintViolation","description":"Invalid Reset payload: must have required property 'type'","details":{}}}
+{"d":"CSMS>","k":"call","id":"id-7","a":"ChangeAvailability","p":{}}
+{"d":"CP>","k":"error","id":"id-7","p":{"code":"OccurrenceConstraintViolation","description":"Invalid ChangeAvailability payload: must have required property 'operationalStatus'","details":{}}}
+{"d":"CSMS>","k":"call","id":"id-8","a":"UnlockConnector","p":{}}
+{"d":"CP>","k":"error","id":"id-8","p":{"code":"OccurrenceConstraintViolation","description":"Invalid UnlockConnector payload: must have required property 'evseId'; must have required property 'connectorId'","details":{}}}
+{"d":"CSMS>","k":"call","id":"id-9","a":"ReserveNow","p":{}}
+{"d":"CP>","k":"error","id":"id-9","p":{"code":"OccurrenceConstraintViolation","description":"Invalid ReserveNow payload: must have required property 'id'; must have required property 'expiryDateTime'; must have required property 'idToken'","details":{}}}
+{"d":"CSMS>","k":"call","id":"id-10","a":"CancelReservation","p":{}}
+{"d":"CP>","k":"error","id":"id-10","p":{"code":"OccurrenceConstraintViolation","description":"Invalid CancelReservation payload: must have required property 'reservationId'","details":{}}}
+{"d":"CSMS>","k":"call","id":"id-11","a":"GetLog","p":{}}
+{"d":"CP>","k":"error","id":"id-11","p":{"code":"OccurrenceConstraintViolation","description":"Invalid GetLog payload: must have required property 'logType'; must have required property 'requestId'; must have required property 'log'","details":{}}}
+{"d":"CSMS>","k":"call","id":"id-12","a":"UpdateFirmware","p":{}}
+{"d":"CP>","k":"error","id":"id-12","p":{"code":"OccurrenceConstraintViolation","description":"Invalid UpdateFirmware payload: must have required property 'requestId'; must have required property 'firmware'","details":{}}}

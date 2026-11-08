@@ -99,7 +99,6 @@ describe("OCPP 2.0.1 TriggerMessage", () => {
       expect(csms.received.indexOf(statusCall)).toBeGreaterThan(
         csms.received.indexOf(statusResult),
       );
-      await waitForNewCall(csms, "StatusNotification", statusSeen);
 
       const heartbeatSeen = receivedMessageIds(csms);
       csms.send([

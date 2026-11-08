@@ -570,10 +570,11 @@ Instead the station resumes what an accepted boot starts (B04, E11):
   (B04.FR.02): a notification still in flight when the link closed counts as
   not delivered and is sent again. Statuses are compared as the 2.x wire
   carries them (`Preparing` and `Charging` are both `Occupied`). All
-  connectors are reported, and the charge point too
-  when the outage lasted longer than `OCPPCommCtrlr.OfflineThreshold`
-  seconds (B04.FR.01; key `OfflineThreshold`, 2.x only, default `60`, the spec
-  gives none).
+  connectors are reported when the outage lasted longer than
+  `OCPPCommCtrlr.OfflineThreshold` seconds (B04.FR.01; key
+  `OfflineThreshold`, 2.x only, default `60`, the spec gives none). The
+  station scope is never reported on 2.x
+  ([connectors only](#ocpp-2x-statusnotification-reports-connectors-only)).
 - **Reservations** survive the loss with their expiry (a link loss is not a
   reboot, and B01.FR.13 even keeps `Reserved` across a reboot). A `Reset` still
   drops them, as before: persisting a reservation across a reboot is not
@@ -613,6 +614,18 @@ On OCPP 2.0.1 / 2.1 every sample in `MeterValues` and in a `TransactionEvent`'s 
 ## Measurand lists on 2.x
 
 `SampledDataCtrlr.TxUpdatedMeasurands` and `AlignedDataCtrlr.Measurands` are MemberLists over `MeasurandEnumType`. On OCPP 2.0.1 / 2.1 `SetVariables` checks every member against the enum of the station's version (the vendored Part 3 schema): a member outside it (`Temperature` and `RPM` are 1.6 measurands, `Foo` is nothing) answers `attributeStatus: Rejected` with `attributeStatusInfo.reasonCode: InvalidValue` (B05.FR.07) and keeps the previous list. An empty list is valid. The same list still reaches the station by other routes (persisted state, scenarios, `a sample override), so the 2.x handler also drops measurands outside the enum before it builds a sample and logs a warning: a schema-invalid `MeterValues`or`TransactionEvent` `meterValue`is never sent (#714). OCPP 1.6 is unchanged:`ChangeConfiguration`still accepts`Temperature`and`RPM`. Code: `transport/v201/measurandEnum.ts`, `setVariablesV201.ts`.
+
+## OCPP 2.x StatusNotification reports connectors only
+
+B01.FR.05 sends a StatusNotification "for each Connector", and G03 / G04
+Note 2 say the message only supports connector statuses; EVSEs and connectors
+are numbered from 1. The 2.0.1 / 2.1 station therefore sends no
+StatusNotification for the station scope (the OCPP 1.6 `connectorId` 0 main
+controller, formerly `{ evseId: 0, connectorId: 0 }`) after boot, after a
+station-wide ChangeAvailability or for a `TriggerMessage(StatusNotification)`
+without an EVSE (#703). OCPP 1.6 `connectorId: 0` is unchanged. Station
+availability is not reported separately; a `ChargingStation.AvailabilityState`
+NotifyEvent (G04.FR.05, a MAY) is not sent.
 
 ## Clock-aligned meter values (`ClockAlignedDataInterval`)
 

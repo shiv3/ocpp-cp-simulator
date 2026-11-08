@@ -3,7 +3,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   labelKeySchema,
@@ -18,7 +18,17 @@ const repoRoot = resolve(
 // Each call starts a bun process (hundreds of ms, seconds under a loaded full
 // run). Make ONE call per test (#473, #783): a test with several calls spends
 // several start-ups against the default 5 s timeout. Use it.each for cases.
+// A second call fails the test at once, instead of as a timeout on a busy
+// machine.
+let callsThisTest = 0;
+beforeEach(() => {
+  callsThisTest = 0;
+});
+
 function runParseArgs(args: string[]) {
+  if (++callsThisTest > 1) {
+    throw new Error("runParseArgs runs once per test; split the test (#783)");
+  }
   const script = [
     'import { buildBootstrap, parseArgs } from "./apps/cli/src/main.ts";',
     'import { buildOcppWebSocketConnectOptions } from "./packages/core/src/cp/infrastructure/transport/wsUrlWithBasic.ts";',
@@ -278,20 +288,27 @@ describe("parseArgs OCPP 1.6 security flags", () => {
     expect(bad.stderr).toContain("--inbound-validation must be");
   });
 
+  const reservationBase = [
+    "--cp-id",
+    "CP-595",
+    "--ws-url",
+    "ws://csms.example.test/ocpp/",
+  ];
+
   it("--reservation-authorize-id-tag turns the #595 option on for the bootstrap charge point", () => {
-    const base = [
-      "--cp-id",
-      "CP-595",
-      "--ws-url",
-      "ws://csms.example.test/ocpp/",
-    ];
-    const on = runParseArgs([...base, "--reservation-authorize-id-tag"]);
+    const on = runParseArgs([
+      ...reservationBase,
+      "--reservation-authorize-id-tag",
+    ]);
     expect(on.status).toBe(0);
     expect(JSON.parse(on.stdout)).toMatchObject({
       reservationAuthorizeIdTag: true,
       bootstrapReservationAuthorizeIdTag: true,
     });
-    const off = runParseArgs(base);
+  });
+
+  it("--reservation-authorize-id-tag stays off by default (#595)", () => {
+    const off = runParseArgs(reservationBase);
     expect(JSON.parse(off.stdout)).toMatchObject({
       reservationAuthorizeIdTag: null,
       bootstrapReservationAuthorizeIdTag: null,

@@ -30,7 +30,7 @@ related:
   - operational-timeline.md
   - expert-ocpp-calls.md
   - variable-monitoring.md
-updated: 2026-11-07
+updated: 2026-11-08
 ---
 
 # OCPP versions and transports
@@ -254,9 +254,9 @@ is restored (E11 "Connection Loss During Transaction", #528):
   `pending_messages` by charge point id, and `cp.update` can switch
   `ocppVersion` over the same `--state-db`. When a handler starts, its
   queue deletes every row it does not replay, with one `warn` (category
-  `OCPP`) listing them: the 2.x handler anything but `TransactionEvent`
-  and `NotifyEvent`, the 1.6 handler anything but StartTransaction,
-  StopTransaction and MeterValues. Such a row never holds back a new
+  `OCPP`) listing them: the 2.x handler anything but `TransactionEvent`,
+  `NotifyEvent` and `SecurityEventNotification`, the 1.6 handler anything but
+  StartTransaction, StopTransaction and MeterValues. Such a row never holds back a new
   TransactionEvent.
 - **NotifyEvent** (#538): monitor events at or below
   `MonitoringCtrlr.OfflineQueuingSeverity` are queued too (N07.FR.04,
@@ -270,6 +270,13 @@ is restored (E11 "Connection Loss During Transaction", #528):
   the oldest report, never a TransactionEvent, with one `warn` at the
   first drop of an outage and one with the count at the replay.
   See [variable monitoring](variable-monitoring.md#offline-queuing).
+- **SecurityEventNotification** (#552): a critical security event
+  (A04.FR.02, Appendix 1; the list is in
+  [Security profiles](security-profiles.md#ocpp-201-and-21-behaviour)) produced
+  while offline is queued too and replayed in the same pass, in production
+  order, as built: the request carries the time of the event and no `offline`
+  marker. A queued security event never holds a live TransactionEvent back; a
+  refused replay stays at the head. At most 1000 are kept per charge point.
 - **Other 2.x messages are not queued.** StatusNotification, Heartbeat,
   MeterValues, the NotifyEvents above the severity and the rest are
   dropped while offline, as before. `OCPPCommCtrlr.QueueAllMessages` (optional, not implemented) is

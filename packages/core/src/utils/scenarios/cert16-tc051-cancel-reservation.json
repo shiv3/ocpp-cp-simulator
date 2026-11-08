@@ -1,7 +1,7 @@
 {
   "id": "cert16-tc051-cancel-reservation",
   "name": "Cert 1.6 Reservation: TC_051 Cancel Reservation",
-  "description": "Connector Available; CSMS sends ReserveNow (connector transitions Reserved internally); scenario waits for reservation then issues CancelReservation.req; CP core flips Reserved → Available; statusTrigger confirms.",
+  "description": "Connector Available; CSMS sends ReserveNow (connector transitions Reserved internally); scenario waits for the reservation, then for CancelReservation.req from the CSMS; CP core flips Reserved → Available; statusTrigger confirms.",
   "targetType": "connector",
   "targetId": 1,
   "trigger": { "type": "manual" },
@@ -25,7 +25,7 @@
       "type": "csmsCallTrigger",
       "position": { "x": 400, "y": 250 },
       "data": {
-        "label": "Send CancelReservation",
+        "label": "Wait for CancelReservation",
         "action": "CancelReservation",
         "timeout": 0
       }

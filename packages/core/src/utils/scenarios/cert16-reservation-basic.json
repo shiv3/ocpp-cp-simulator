@@ -1,7 +1,7 @@
 {
   "id": "cert16-reservation-basic",
   "name": "Cert 1.6 Core: Reservation (Basic)",
-  "description": "Parks waiting for ReserveNow.req (the CP core emits StatusNotification(Reserved) on Accepted); once the reserved idTag is presented, StatusNotification(Preparing) → StartTransaction.req (carries the reservationId) → StatusNotification(Charging) with bounded MeterValue.req → StopTransaction.req → StatusNotification(Finishing) → StatusNotification(Available).",
+  "description": "Parks waiting for ReserveNow.req (the CP core emits StatusNotification(Reserved) on Accepted); once the reserved idTag is presented, StatusNotification(Preparing) → StartTransaction.req (carries the reservationId) → StatusNotification(Charging) with bounded MeterValues.req → StopTransaction.req → StatusNotification(Finishing) → StatusNotification(Available).",
   "targetType": "connector",
   "targetId": 1,
   "trigger": { "type": "manual" },

@@ -33,7 +33,7 @@ describe("meterValueNodeConfig mapping (scenario MeterValue node ↔ curve modal
   });
 
   describe("applyCurveConfigToMeterNode", () => {
-    it("persists 'Charge until battery full' as stopMode === 'evSettings'", () => {
+    it(`persists "Charge until the EV's target SoC" as stopMode === 'evSettings'`, () => {
       const saved: AutoMeterValueConfig = {
         enabled: true,
         curvePoints: [{ time: 0, value: 0 }],
@@ -83,7 +83,8 @@ describe("meterValueNodeConfig mapping (scenario MeterValue node ↔ curve modal
   });
 
   it("round-trips the checkbox: check → save → reopen shows it checked", () => {
-    // User opens the modal on a manual node and ticks "Charge until battery full".
+    // User opens the modal on a manual node and ticks "Charge until the
+    // EV's target SoC".
     const savedFromModal: AutoMeterValueConfig = {
       ...meterNodeToCurveConfig({ stopMode: "manual" }),
       stopAtTargetSoc: true,

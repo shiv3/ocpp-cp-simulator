@@ -62,6 +62,7 @@ import type {
   OcppTlsOptions,
 } from "../../infrastructure/transport/wsUrlWithBasic";
 import { getProtocolProfile } from "../../infrastructure/transport/profile/profiles";
+import { measurandEnumFor } from "../../infrastructure/transport/v201/measurandEnum";
 import { OCPPSoapHandler } from "../../infrastructure/transport/soap";
 import { Outbox } from "../transport/Outbox";
 import {
@@ -3130,16 +3131,26 @@ export class ChargePoint {
    * history. Formatted now, from the point the sample set of this instant
    * reads, so a later configuration change cannot reformat it (#327 §3.3).
    */
-  private recordTxEndedSample(
+  recordTxEndedSample(
     connector: Connector,
     measurands: string[],
-    context: "Sample.Periodic" | "Sample.Clock",
+    context: "Transaction.Begin" | "Sample.Periodic" | "Sample.Clock",
     timestamp: Date,
   ): void {
     const transaction = connector.transaction;
     if (!transaction || !connector.hasRunningTransaction) return;
-    if (measurands.length === 0) return;
-    const sampledValue = buildSampledValues(connector, measurands, context, {
+    // 2.x: the same MeasurandEnumType filter and unit multiplier as every
+    // other sample of the dialect (#714, #826); a name outside the enum is
+    // never recorded (B05.FR.07 rejects it in SetVariables, but a persisted
+    // or scenario-set list may still carry one).
+    const ocpp2 = isOcpp2Version(this._ocppVersion);
+    const allowed = ocpp2 ? measurandEnumFor(this._ocppVersion) : null;
+    const kept = allowed
+      ? measurands.filter((m) => allowed.has(m))
+      : measurands;
+    if (kept.length === 0) return;
+    const sampledValue = buildSampledValues(connector, kept, context, {
+      unitMultiplier: ocpp2,
       intervalStream:
         context === "Sample.Clock" ? "txEnded-aligned" : "txEnded-sampled",
     });

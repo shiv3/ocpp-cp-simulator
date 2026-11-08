@@ -230,7 +230,12 @@ describe("OCPP 2.x transaction-end meter data (#607)", () => {
       await csms.waitForFrame((f) => callOf("TransactionEvent")(f));
       // A tick before TxEndedInterval has passed records nothing.
       cp.sendScheduledMeterValue(1);
-      expect(cp.getConnector(1)!.transaction!.txEndedSamples).toBeUndefined();
+      // Only the reading taken at the start is in the history yet.
+      expect(
+        cp
+          .getConnector(1)!
+          .transaction!.txEndedSamples!.map((e) => e.sampledValue[0].context),
+      ).toEqual(["Transaction.Begin"]);
       cp.stopTransaction(1);
       await csms.waitForFrame(ended);
 
@@ -340,6 +345,58 @@ describe("OCPP 2.x transaction-end meter data (#607)", () => {
     }
   });
 
+  it("TxEndedInterval = 0: Ended carries the start and the end reading (E06.FR.11)", async () => {
+    const csms = startMockCsms();
+    const stop = answerEverythingElse(csms, []);
+    try {
+      const cp = await start2(csms, "CP607-v2-begin-end");
+      cp.configuration.applyChange(
+        "StopTxnSampledData",
+        `${REGISTER},${POWER}`,
+      );
+      cp.startTransaction("TAG-607", 1);
+      await csms.waitForFrame((f) => callOf("TransactionEvent")(f));
+      cp.stopTransaction(1);
+      await csms.waitForFrame(ended);
+      const [end] = events(csms, "Ended");
+      expect(isValidTransactionEventRequestV201(end)).toBe(true);
+      expect(end.meterValue!.map((m) => m.sampledValue[0].context)).toEqual([
+        "Transaction.Begin",
+        "Transaction.End",
+      ]);
+      cp.disconnect();
+    } finally {
+      stop();
+      await csms.stop();
+    }
+  });
+
+  it("a measurand outside MeasurandEnumType never reaches the history or Ended (#714)", async () => {
+    const csms = startMockCsms();
+    const stop = answerEverythingElse(csms, []);
+    try {
+      const cp = await start2(csms, "CP607-v2-enum");
+      // A persisted or scenario-set list can still carry a 1.6 measurand.
+      cp.configuration.applyChange(
+        "StopTxnSampledData",
+        `${REGISTER},Temperature`,
+      );
+      cp.startTransaction("TAG-607", 1);
+      await csms.waitForFrame((f) => callOf("TransactionEvent")(f));
+      cp.stopTransaction(1);
+      await csms.waitForFrame(ended);
+      const [end] = events(csms, "Ended");
+      expect(isValidTransactionEventRequestV201(end)).toBe(true);
+      expect(
+        end.meterValue!.flatMap((m) => m.sampledValue.map((s) => s.measurand)),
+      ).not.toContain("Temperature");
+      cp.disconnect();
+    } finally {
+      stop();
+      await csms.stop();
+    }
+  });
+
   it("history entries reach Ended in order, before the End reading", async () => {
     const csms = startMockCsms();
     const stop = answerEverythingElse(csms, []);
@@ -367,6 +424,7 @@ describe("OCPP 2.x transaction-end meter data (#607)", () => {
       const [end] = events(csms, "Ended");
       expect(isValidTransactionEventRequestV201(end)).toBe(true);
       expect(end.meterValue!.map((m) => m.sampledValue[0].context)).toEqual([
+        "Transaction.Begin",
         "Sample.Periodic",
         "Sample.Clock",
         "Transaction.End",

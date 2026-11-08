@@ -1781,6 +1781,20 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     this.patchTx(connectorId, transaction, {
       cpLastTransactionEventChargingState: chargingState,
     });
+    // E06.FR.11 / SampledDataCtrlr.TxEndedInterval: the Ended event carries the
+    // values taken at the start as well as at the end, so the start reading of
+    // TxEndedMeasurands joins the history (the 1.6 Transaction.Begin entry).
+    const startConnector = this._chargePoint.getConnector(connectorId);
+    const historyMeasurands =
+      this._chargePoint.configuration.stopTxnSampledData();
+    if (startConnector && historyMeasurands.length > 0) {
+      this._chargePoint.recordTxEndedSample(
+        startConnector,
+        historyMeasurands,
+        "Transaction.Begin",
+        transaction.startTime,
+      );
+    }
     const payload: TransactionEventRequestV201 = {
       eventType: "Started",
       timestamp: transaction.startTime.toISOString(),
@@ -1899,6 +1913,8 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         context,
         undefined,
         point,
+        // The Begin / End readings of the history are one Interval stream.
+        "txEnded-sampled",
       ).filter(
         (sv) =>
           !(
@@ -2163,6 +2179,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     context: ReadingContext,
     mainMeter?: NonNullable<ChargePoint["mainMeter"]>,
     point?: OperatingPoint,
+    intervalStream?: string,
   ): SampledValue[] {
     const allowed = measurandEnumFor(this._chargePoint.ocppVersion);
     const kept = measurands.filter((m) => allowed.has(m));
@@ -2175,7 +2192,10 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       );
     }
     // 2.x carries the unit multiplier (SampledValueType.unitOfMeasure).
-    const options = { unitMultiplier: true };
+    const options = {
+      unitMultiplier: true,
+      ...(intervalStream === undefined ? {} : { intervalStream }),
+    };
     return mainMeter
       ? mainMeter.sampledValues(kept, context, options)
       : buildSampledValues(connector!, kept, context, options, point);

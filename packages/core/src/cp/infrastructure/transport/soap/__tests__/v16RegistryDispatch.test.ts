@@ -443,6 +443,7 @@ describe("dispatchSoapCallViaV16Registry", () => {
     const sent: (number | undefined)[] = [];
     const chargePoint = {
       runTriggered: <T>(fn: () => T): T => fn(),
+      getConnector: () => ({}),
       sendCurrentStatusNotification: (connectorId?: number) =>
         sent.push(connectorId),
     } as unknown as ChargePoint;

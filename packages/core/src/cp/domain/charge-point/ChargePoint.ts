@@ -2888,8 +2888,34 @@ export class ChargePoint {
       );
     const remaining = this._pendingResetsOnIdle.filter(isBusy);
     if (remaining.length === this._pendingResetsOnIdle.length) return;
+    const runnable = this._pendingResetsOnIdle.filter(
+      (pending) => !remaining.includes(pending),
+    );
     this._pendingResetsOnIdle = remaining;
-    this.boot("ScheduledReset");
+    // A station-wide reset reboots everything and subsumes EVSE resets.
+    if (runnable.some((pending) => pending.evseId === undefined)) {
+      this.boot("ScheduledReset");
+      return;
+    }
+    for (const evseId of new Set(runnable.map((pending) => pending.evseId))) {
+      if (evseId !== undefined) this.resetEvse(evseId);
+    }
+  }
+
+  /**
+   * Reset one EVSE (2.x B11.FR.08, B12.FR.12/14): it is reported Unavailable
+   * and returns to the state it had, which stays Unavailable for an
+   * Inoperative EVSE (B11.FR.02) and Reserved for a reserved one (B11.FR.05).
+   * No BootNotification: that belongs to a reset of the whole station
+   * (B11.FR.03/04). The caller has already ended the EVSE's transaction.
+   */
+  resetEvse(evseId: number): void {
+    const connector = this.getConnector(evseId);
+    if (!connector) return;
+    const previous = connector.status;
+    if (previous === OCPPStatus.Unavailable) return;
+    this.updateConnectorStatus(evseId, OCPPStatus.Unavailable);
+    this.updateConnectorStatus(evseId, previous);
   }
 
   /**

@@ -89,7 +89,10 @@ export function resetBehavior(cp: ChargePoint): Behavior {
                   });
                 }
               }
-              cp.boot("RemoteReset");
+              // B11.FR.03/04: the station reboots and cold-boots; with an evseId
+              // (B11.FR.08) only that EVSE is reset.
+              if (evseId === undefined) cp.boot("RemoteReset");
+              else cp.resetEvse(evseId);
             },
           };
         },

@@ -88,6 +88,10 @@ expressible on 2.0.1 at all; it now consults them at the same point the 1.6
 handler does, before payload validation and handler lookup, so policies are
 sticky across reconnects the same way and an override answers once.
 
+## Identity in the connection URL
+
+On OCPP-J (1.6, 2.0.1, 2.1) the connection URL is the configured endpoint, a `/` and the charge point identity. The identity is percent-encoded as one path segment with `encodeURIComponent` (OCPP-J 1.6 §3.1.1, RFC 3986; #742): `CP001` stays `CP001`, `a/b` becomes `a%2Fb`, `a%41` becomes `a%2541`, `RDAM 123` becomes `RDAM%20123`. The builder (`buildOcppWebSocketUrl`) adds the `/` itself, so an endpoint with or without a trailing `/` gives the same URL. The HTTP Basic Auth username stays the unencoded identity ([Security profiles](security-profiles.md)).
+
 ## WebSocket ping (`WebSocketPingInterval`)
 
 An OCPP-J charge point sends a WebSocket ping frame every
@@ -356,8 +360,7 @@ StartTransaction.req carries no transaction id: its events report the
 placeholder `transactionId` `"0"`. Once it is discarded the transaction
 runs on under that placeholder: its MeterValues.req and StopTransaction.req
 carry `transactionId: 0`, as they do while a StartTransaction.conf is still
-pending, and a connector still in `Preparing` goes to `Charging`, as when
-`StopTransactionOnInvalidId` is false. Any other status, such as one a
+pending, and a connector still in `Preparing` goes to `Charging`. Any other status, such as one a
 scenario set meanwhile, is left alone. On 1.x, `ConnectionTimeOut` does not
 apply while the transaction runs, so it never moves a connector waiting in
 `Preparing` for the conf to `Finishing`. On 2.x it maps to
@@ -437,12 +440,81 @@ serial queue. It reaches the persisted offline queue only when the socket
 closes, so a process that ends without closing it, such as a crash, loses
 the resend.
 An [expert call](expert-ocpp-calls.md) is never resent, and a MeterValues.req
-without a `transactionId` is not transaction-related. OCPP-S (1.2 / 1.5 /
-1.6S) does not retry: a SOAP Fault answering these messages is reported as an
-error and the message is not sent again. On 1.6S that deviates from the OCPP-S
-1.6 errata sheet (3.2), which has a Charge Point retry transaction-related
-messages after a Fault
-([#585](https://github.com/shiv3/ocpp-cp-simulator/issues/585)).
+without a `transactionId` is not transaction-related. OCPP-S 1.2 and 1.5 do
+not retry: a SOAP Fault answering these messages is reported as an error and
+the message is not sent again. Only the 1.6 errata sheet was checked, not the
+1.2 and 1.5 specs. OCPP-S 1.6 retries; see the next section.
+
+### Deviation: OCPP-S 1.6 retries after a SOAP Fault
+
+The OCPP-S 1.6 errata sheet (v1.0, 2019-12-04) makes the SOAP Fault the way
+to report a failure to process a message (3.1) and, in 3.2, replaces the
+"SHOULD NOT resend" of its §4 with: "the sender SHOULD NOT resend the same
+message, except transaction-related message, a Charge Point SHALL retry these
+a couple of times". It also has the station send a simple message such as a
+Heartbeat to tell a failure to process from a connection issue, and treats an
+HTTP error status like a Fault. Since
+[#585](https://github.com/shiv3/ocpp-cp-simulator/issues/585) `OCPPSoapHandler`
+does this on 1.6S for StartTransaction.req, StopTransaction.req and a
+MeterValues.req carrying a `transactionId`:
+
+- **A Fault or an HTTP error status** answering one is a failure to process.
+  Before it counts, the station sends a Heartbeat through the request chain.
+  If that Heartbeat is answered, even by a Fault or an HTTP error, the Central
+  System is reachable and the failure counts. If it is not (a network error or
+  a timeout) the failure is a connection issue: the message is dropped with a
+  `warn`, as before, because SOAP has no offline queue. A network error or a
+  timeout of the message itself is a connection issue too and is not retried.
+- **`transactionMessageRejected`** is emitted on every counted failure, with
+  `reason` `callError` and `errorCode` the Fault code (`SOAP Fault Receiver`)
+  or `HTTP <status>`.
+- **The resend** goes through the request chain after
+  `TransactionMessageRetryInterval` seconds times the number of transmissions
+  so far, with a new message id, and ends after `TransactionMessageAttempts`
+  transmissions: `transactionMessageDiscarded` and a `warn`. Both keys are
+  read at each failure, and a resend that finds the attempts limit lowered is
+  discarded.
+- **A StartTransaction.req whose transaction no longer runs** is discarded
+  instead of resent, as on OCPP-J (#527): a conf the station would ignore
+  would leave a transaction open on the Central System. A discarded
+  StartTransaction.req leaves the `0` placeholder and a connector still in
+  `Preparing` goes to `Charging`, as on OCPP-J.
+- **Stop and dispose** (`onWebSocketClosed`) cancel every waiting resend, each
+  with a `warn` and a `transactionMessageDiscarded`: SOAP has no offline queue
+  to salvage it to. A failure whose Heartbeat probe is still in flight at that
+  moment schedules nothing.
+
+The known limitations of the OCPP-J section apply here too (a waiting resend
+does not hold back the next message; a crash loses the resend).
+
+## OCPP-J 1.6 boot gate (§4.2)
+
+Outgoing CALLs follow the status of the last `BootNotification.conf`
+(`BootGate`): `Accepted` lets everything out; before the first answer and while
+`Pending` only `BootNotification` goes out, and while `Rejected` nothing does
+until the retry interval has passed. One exception (#725): §4.2 lets a
+`Pending` station send what the CSMS "instructed ... with a TriggerMessage.req",
+so the CALL that follows an accepted `TriggerMessage` or `ExtendedTriggerMessage`
+(StatusNotification, Heartbeat, MeterValues, the status notifications) passes
+the gate while `Pending`. Anything not triggered (transaction messages, status
+changes, heartbeats) stays suppressed, and a `Rejected` station sends nothing
+even when triggered.
+
+## OCPP-J 1.6 boot gate (§4.2)
+
+Outgoing CALLs follow the status of the last `BootNotification.conf`
+(`BootGate`): `Accepted` lets everything out; before the first answer and while
+`Pending` only `BootNotification` goes out, and while `Rejected` nothing does
+until the retry interval has passed.
+
+Inbound CALLs are gated too (#726). §4.2: "While Rejected, the Charge Point
+SHALL NOT respond to any Central System initiated message", so from a
+`Rejected` answer until the retry interval has passed the station sends no
+CALLRESULT or CALLERROR for a CSMS CALL and runs nothing (a `Reset` does not
+reboot). The CALL is announced, logged (`Boot Rejected (§4.2): ignored …`) and
+shown on the timeline as unanswered. When the retry BootNotification is due the
+station answers again. Pending and Accepted answer as usual. There is no
+opt-out.
 
 ## OCPP 2.x Reset OnIdle
 
@@ -520,7 +592,10 @@ would change the wire for every existing 2.x integration.
 
 A charge point created with `txUpdatedMeterValues: true` (`cp.create`,
 `cp.update`, `cp.create_many`, the MCP `cp_create` tools) or with
-`--tx-updated-meter-values` opts in. It is persisted with `--state-db`.
+`--tx-updated-meter-values` opts in. It is persisted with `--state-db`. The
+[web console](../entities/web-console.md) has a checkbox for it on the Add and
+Edit forms of an OCPP 2.0.1 / 2.1 charge point (#550); in Local mode it is a
+setting of the shared config, so it applies to every browser charge point.
 
 | Scheduler sample, OCPP 2.x | Option off (default) | Option on                                         |
 | -------------------------- | -------------------- | ------------------------------------------------- |
@@ -819,6 +894,10 @@ with protocol `ocpp1.2S`, `ocpp1.5S`, or `ocpp1.6S`, status Accepted).
   and the tradeoff, is in
   [Scenario format → Charging curve](scenario-format.md#charging-curve-v12).
 
+## Temperature unit spelling on OCPP-J 1.6
+
+The `Temperature` measurand carries `unit: "Celcius"` on OCPP-J 1.6 `MeterValues.req` — the spelling of the original JSON schemas, which OCPP-J 1.6 errata (2025-04) §2.1 advises Charge Point implementers to keep, because a Central System validating against the original schema rejects `Celsius` (#745). The vendored schema accepts both. OCPP-S 1.6 (the WSDL says `Celsius`) and OCPP 2.0.1 / 2.1 send `Celsius`. The conversion is `toOcppJ16Wire` in `MeterValueBuilder.ts`, applied only by the 1.6J handler; a future sampled `transactionData` in `StopTransaction.req` must use it too.
+
 ## Inbound CALL validation on OCPP-J 1.6
 
 An inbound CALL on an **OCPP 1.6J** charge point is checked against the vendored 1.6 request schema for its action (#593). The setting `inboundValidation` has three values. Set it with `--inbound-validation <off|warn|enforce>` ([CLI](../entities/cli.md), [daemon](../entities/daemon.md)), the `inboundValidation` field of `cp.create` / `cp.update` ([control plane](control-plane.md#cpcreate-parameters)), or, from library code, the `ChargePoint` transport option and `ChargePoint.setInboundValidation()`. The CLI persists it with `--state-db` ([State persistence](state-persistence.md)); a row from before the column restores as `warn`.
@@ -845,6 +924,14 @@ Validation runs after the [inbound gate](call-precedence.md): an inbound policy,
 **Tracing.** Under `warn` and `enforce` a violation is traced, not only logged: the inbound CALL's [trace record](trace-format.md#validation-violations-meta) carries `meta.validation = { mode, errorCode, description }` (the code is what `enforce` answers, and what `warn` would have). The charge point writes one structured `Inbound validation: {json}` line on the `WebSocket` log channel for it; `--trace-output` and the `logLinesToTrace` adapter turn it into the `meta` field. Under `off` nothing is checked and nothing is traced.
 
 **With SmartCharging not advertised (#594).** `NotImplemented` (no handler) comes before validation, and the `NotSupported` that `SetChargingProfile` answers when `SmartCharging` is missing from `SupportedFeatureProfiles` comes from inside the handler. So on such a station, under `enforce`, an invalid `SetChargingProfile` payload gets the constraint-violation CALLERROR and a valid one gets `NotSupported`.
+
+## OCPP 1.6 SetChargingProfile
+
+`SetChargingProfile.req` on **OCPP 1.6J** (and 1.6-S, through the shared handler; #594):
+
+- **Replacement.** A profile replaces the installed one with the same `chargingProfileId`, or with the same `stackLevel` and `chargingProfilePurpose`, in the same scope (the connector's profiles, or the station store for `connectorId` 0). The `charging_profile_applied` timeline event reports `replaced: true` only when the **same id** was updated; a profile displaced by the same-slot rule is named in `replacedIds` (and in the summary: "… applied …, replacing profile 1"), see [Operational timeline](operational-timeline.md#smart-charging-profiles). OCPP 2.x keeps replacing by id only.
+- **TxProfile preconditions.** A `TxProfile` for a connector without a **running** transaction (one whose `stopTime` is still unset; a closed transaction that is still attached does not count) answers `Rejected`, and so does one whose `transactionId` is not the id of the connector's active transaction. A `TxProfile` without `transactionId` binds to the active transaction. Other purposes need no transaction.
+- **Smart Charging disabled.** When the configuration key `SupportedFeatureProfiles` no longer lists `SmartCharging`, `SetChargingProfile`, `ClearChargingProfile` and `GetCompositeSchedule` are all answered with the CALLERROR `NotSupported` (OCPP-J 1.6 §4.2.3) rather than a `Rejected` / `Unknown` status. On **1.6-S** there is no CALLERROR: the SOAP server turns the same refusal into a generic SOAP Fault, `Dispatch error for SetChargingProfile: SmartCharging is not supported` (likewise for the other two operations). The key is read-only for a CSMS, so this is a station setting; the default list includes `SmartCharging`.
 
 ## Inbound CS→CP request validation
 

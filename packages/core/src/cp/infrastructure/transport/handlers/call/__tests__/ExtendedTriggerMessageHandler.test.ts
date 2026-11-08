@@ -14,6 +14,7 @@ function buildContext() {
     };
 
   const chargePoint = {
+    runTriggered: <T>(fn: () => T): T => fn(),
     sendCurrentStatusNotification: record("sendCurrentStatusNotification"),
     sendHeartbeat: record("sendHeartbeat"),
     sendMeterValue: record("sendMeterValue"),

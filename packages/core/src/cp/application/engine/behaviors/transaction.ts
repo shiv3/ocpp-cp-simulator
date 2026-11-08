@@ -16,6 +16,7 @@ import {
 } from "../../../domain/types/OcppTypes";
 import { isOcpp2Version } from "../../../domain/types/OcppVersion";
 import { LogType } from "../../../shared/Logger";
+import { startBlockedByReservation16 } from "./reservation";
 
 /**
  * What the transaction defaults need from the station beyond its public API.
@@ -65,9 +66,18 @@ export function transactionBehavior(cp: ChargePoint): Behavior {
             idTag: string;
             connectorId?: number;
           };
-          const resolved = connectorId || 1;
-          const connector = cp.getConnector(resolved);
-          if (!connector || connector.availability !== "Operative") {
+          // 1.6 §5.11 (errata 3.32): `Accepted` means a start will be
+          // attempted. A named connector must be able to start; without one
+          // the lowest connector that can start is used.
+          const resolved = connectorId
+            ? remoteStartable(cp, connectorId, idTag)
+              ? connectorId
+              : undefined
+            : [...cp.connectors.keys()]
+                .filter((id) => id > 0)
+                .sort((a, b) => a - b)
+                .find((id) => remoteStartable(cp, id, idTag));
+          if (resolved === undefined) {
             return { response: { status: "Rejected" } };
           }
           // 1.6 §5.11: the transaction starts while the answer is built.
@@ -155,6 +165,29 @@ export function transactionBehavior(cp: ChargePoint): Behavior {
       },
     },
   };
+}
+
+/**
+ * Whether a remote start for `idTag` can be attempted on the connector (1.6
+ * §5.11, errata 3.32): known, Operative, not Faulted, no running transaction,
+ * not reserved for another idTag and not the last connector a connector-0
+ * reservation of another tag keeps (§5.13).
+ */
+function remoteStartable(
+  cp: ChargePoint,
+  connectorId: number,
+  idTag: string,
+): boolean {
+  const connector = cp.getConnector(connectorId);
+  if (!connector || connector.availability !== "Operative") return false;
+  if (connector.status === OCPPStatus.Faulted) return false;
+  if (connector.hasRunningTransaction) return false;
+  // A reservation on this very connector. A connector-0 reservation names no
+  // connector: it keeps one connector free for its owner (the capacity rule,
+  // startBlockedByReservation16).
+  const reservation = cp.reservationManager.reservationOn(connector.id);
+  if (reservation !== undefined && reservation.idTag !== idTag) return false;
+  return !startBlockedByReservation16(cp, connectorId, idTag);
 }
 
 /**
@@ -249,11 +282,23 @@ export async function startTransaction(
     }
   }
 
+  // 1.6 §5.13: a connector-0 reservation of another tag keeps a connector
+  // free for its whole validity. Checked after the Authorize gate, where an
+  // expired reservation is dropped as before; the session does not start and
+  // no StartTransaction.req is sent.
+  if (startBlockedByReservation16(cp, connectorId, tagId)) {
+    logger.warn(
+      `Refusing transaction start for ${tagId} on connector ${connectorId}: it would leave no connector for a connector-0 reservation (OCPP 1.6 §5.13)`,
+      LogType.TRANSACTION,
+    );
+    return { started: false };
+  }
+
   // §5.13: if the connector was Reserved (or the reservation is for
   // connectorId=0 with this idTag), consume that reservation and carry its id
-  // into StartTransaction.req so CSMS can close it out.
-  const reservation =
-    cp.reservationManager.getReservationForConnector(connectorId);
+  // into StartTransaction.req so CSMS can close it out. A connector-0
+  // reservation belongs to its idTag / parentIdTag only (#595).
+  const reservation = cp.reservationManager.reservationFor(connectorId, tagId);
   const reservationId = reservation?.reservationId;
 
   const transaction: Transaction = {

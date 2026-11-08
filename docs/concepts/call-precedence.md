@@ -42,6 +42,10 @@ always, and a scenario never has to be told about a fleet-wide `--behavior` file
 | 5   | Default behavior          | [`default.*`](../entities/default-behaviors.md)                                                               | Always                                         | —                |
 | 6   | Handler without a default | The OCPP handler itself ([actions with no default](../entities/default-behaviors.md#actions-with-no-default)) | Always                                         | —                |
 
+Before step 1, an OCPP 1.6J station whose last BootNotification was answered `Rejected` leaves every
+CALL unanswered and without effect until the retry interval has passed (§4.2, #726; the CALL is still announced,
+logged and visible on the timeline). Pending and Accepted are unchanged.
+
 Steps 1 and 2 are looked up under the action's own name and, on 2.x, its 1.6 alias, and they answer with a
 CALLERROR / silence (1) or `{ status }` (2). Steps 3 and 4 run in `BehaviorRegistry.resolve()`, which the
 gate calls synchronously and before the payload is validated, so a rule can own a malformed CALL. Step 5

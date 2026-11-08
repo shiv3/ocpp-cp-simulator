@@ -305,6 +305,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   private readonly _signBackoff: SignCertificateBackoff;
   private readonly _certificateSigning: V201CertificateSigning = {
     requestSignature: (use) => this.requestSignature(use),
+    requestCombinedSignature: () => this.sendSignCertificate(),
     certificateStored: (use) => {
       if (use === "ChargingStationCertificate") {
         // #564 A02.FR.08: the next connection presents it, whatever becomes
@@ -613,6 +614,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
           logger: this._logger,
           sendCall: (a, p) => this.send(a, this.generateMessageId(), p),
           certificateSigning: this._certificateSigning,
+          bootAccepted: () => this._bootStatus.status === "Accepted",
         };
         const fail = (error: unknown): void => {
           // The exchange refuses an answer on a connection that changed (and

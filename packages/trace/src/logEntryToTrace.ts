@@ -38,6 +38,47 @@ export interface TraceContext {
   chargePointId?: string;
 }
 
+/**
+ * Prefix of the log line the 1.6J charge point writes when an inbound CALL
+ * breaks the request schema (#593): `Inbound validation: {json}`. The JSON
+ * carries `messageId`, `action`, `mode`, `errorCode` and `description`.
+ */
+export const INBOUND_VALIDATION_PREFIX = "Inbound validation: ";
+
+/** What `meta.validation` holds on the trace record of a violating CALL. */
+export interface InboundValidationMeta {
+  mode: string;
+  errorCode: string;
+  description: string;
+}
+
+/** Parse an {@link INBOUND_VALIDATION_PREFIX} line, or `null`. */
+export function parseInboundValidation(
+  message: string,
+): { messageId: string; validation: InboundValidationMeta } | null {
+  if (!message.startsWith(INBOUND_VALIDATION_PREFIX)) return null;
+  try {
+    const j = JSON.parse(message.slice(INBOUND_VALIDATION_PREFIX.length));
+    if (
+      typeof j?.messageId !== "string" ||
+      typeof j.errorCode !== "string" ||
+      typeof j.description !== "string"
+    ) {
+      return null;
+    }
+    return {
+      messageId: j.messageId,
+      validation: {
+        mode: String(j.mode),
+        errorCode: j.errorCode,
+        description: j.description,
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
 const WS_SENT_PREFIX = "Sent: ";
 const WS_RECEIVED_PREFIX = "Received: ";
 
@@ -170,10 +211,28 @@ export function logLinesToTrace(
 ): OcppTraceRecord[] {
   const correlator = new TraceCorrelator();
   const records: OcppTraceRecord[] = [];
+  // Latest inbound CALL record per (cp, messageId), to merge its violation.
+  const inboundCalls = new Map<string, OcppTraceRecord>();
+  const key = (cp: string | undefined, id: string) =>
+    JSON.stringify([cp ?? "", id]);
   for (const line of lines) {
+    const violation = parseInboundValidation(line.message);
+    if (violation) {
+      const call = inboundCalls.get(
+        key(line.cpId ?? context.chargePointId, violation.messageId),
+      );
+      if (call) call.meta = { ...call.meta, validation: violation.validation };
+      continue;
+    }
     const record = logLineToTraceRecord(line, context);
     if (!record) continue;
     records.push(correlator.observe(record));
+    if (record.messageType === "CALL" && record.direction === "csms-to-cp") {
+      inboundCalls.set(
+        key(record.chargePointId, record.messageId ?? ""),
+        record,
+      );
+    }
   }
   return records;
 }

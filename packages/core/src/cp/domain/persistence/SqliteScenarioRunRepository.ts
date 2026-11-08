@@ -1,6 +1,7 @@
 import type { ScenarioRunResult } from "../../application/verification/ScenarioAssertions";
 import type { Database, SqlParam } from "./Database";
 import { parseStoredJson } from "./parseStoredJson";
+import { buildUpsert } from "./upsert";
 import {
   summarizeRun,
   type ScenarioRunPage,
@@ -31,28 +32,23 @@ export class SqliteScenarioRunRepository implements ScenarioRunRepository {
       // Upsert rather than INSERT OR REPLACE: a replace deletes the row and
       // hands it a new `seq`, which would move it to the back of the
       // eviction queue.
-      this.db.run(
-        "INSERT INTO scenario_runs (cp_id, run_id, connector_id, scenario_id, " +
-          "started_at, ended_at, execution_state, verdict, summary_json, report_json) " +
-          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
-          "ON CONFLICT (cp_id, run_id) DO UPDATE SET " +
-          "connector_id = excluded.connector_id, scenario_id = excluded.scenario_id, " +
-          "started_at = excluded.started_at, ended_at = excluded.ended_at, " +
-          "execution_state = excluded.execution_state, verdict = excluded.verdict, " +
-          "summary_json = excluded.summary_json, report_json = excluded.report_json",
+      const { sql, params } = buildUpsert(
+        "scenario_runs",
         [
-          result.cpId,
-          result.runId,
-          result.connectorId,
-          result.scenarioId,
-          result.startedAt,
-          result.endedAt,
-          result.executionState,
-          result.verdict,
-          JSON.stringify(summarizeRun(result)),
-          JSON.stringify(result),
+          ["cp_id", result.cpId],
+          ["run_id", result.runId],
+          ["connector_id", result.connectorId],
+          ["scenario_id", result.scenarioId],
+          ["started_at", result.startedAt],
+          ["ended_at", result.endedAt],
+          ["execution_state", result.executionState],
+          ["verdict", result.verdict],
+          ["summary_json", JSON.stringify(summarizeRun(result))],
+          ["report_json", JSON.stringify(result)],
         ],
+        ["cp_id", "run_id"],
       );
+      this.db.run(sql, params);
       // Everything at or below the charge point's (cap+1)-th newest `seq`.
       this.db.run(
         "DELETE FROM scenario_runs WHERE cp_id = ? AND seq <= (" +

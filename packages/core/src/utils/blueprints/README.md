@@ -13,6 +13,12 @@ load a scenario onto a connector.
 | `dc-150kw`   | DC 150 kW high-power charger  | 2          | Where a charging curve is worth modelling |
 | `dc-350kw`   | DC 350 kW high-power charger  | 4          | Large site, four outlets                  |
 
+Each rating is the **charger-side** cap, `params.chargerCapabilities` (watts per
+connector), and not the vehicle's `evSettings.maxChargingPowerKw` (#327): the
+vehicle is the connector's default EV, and the two compose under
+`min(EV, charger, charging profile)`. A 350 kW unit therefore offers 150 kW to
+the default 150 kW EV until the connector is given a faster one.
+
 **Read-only.** `blueprint.list` returns these alongside stored ones, and
 loading one copies it — the same instance semantics scenario templates use, so
 editing an instantiated charge point never mutates the built-in. Saving a

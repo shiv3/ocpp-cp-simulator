@@ -9,6 +9,7 @@ import type {
 import type { InboundValidationMode } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
 import { CLIChargePointService } from "./service";
 import { transportConfigSchema } from "@ocpp-cp-sim/contracts/transportConfig";
+import { assertWsClientOptions } from "@ocpp-cp-sim/core/cp/shared/WsClientOptions";
 import type { TransportConfig } from "@ocpp-cp-sim/core/cp/infrastructure/transport/TransportConfig";
 import { startRepl } from "./repl";
 import { startJsonMode } from "./jsonMode";
@@ -190,13 +191,36 @@ function requireNumberFlag(
 
 function parseTransportFlags(
   reconnect: Record<string, number | string>,
+  ws: Record<string, number | string | boolean>,
+  ocppVersion: string | undefined,
 ): TransportConfig {
-  const parsed = transportConfigSchema.safeParse({ reconnect });
+  const parsed = transportConfigSchema.safeParse({
+    ...(Object.keys(reconnect).length > 0 ? { reconnect } : {}),
+    ...(Object.keys(ws).length > 0 ? { ws } : {}),
+  });
   if (!parsed.success) {
+    const issue = parsed.error.issues[0];
     process.stderr.write(
-      `Error: invalid reconnect flags: ${parsed.error.issues[0].message}\n`,
+      `Error: invalid transport flags: ${issue.path.join(".")}: ${issue.message}\n`,
     );
     process.exit(1);
+  }
+  if (parsed.data.ws) {
+    if (isSoapVersion(ocppVersion)) {
+      process.stderr.write(
+        "Error: --ws-* flags apply to the OCPP-J WebSocket; the SOAP versions have none\n",
+      );
+      process.exit(1);
+    }
+    // An option this runtime would ignore stops the start, with its name.
+    try {
+      assertWsClientOptions(parsed.data.ws);
+    } catch (err) {
+      process.stderr.write(
+        `Error: ${err instanceof Error ? err.message : String(err)}\n`,
+      );
+      process.exit(1);
+    }
   }
   return parsed.data;
 }
@@ -342,6 +366,8 @@ export function parseArgs(argv: string[]): CLIOptions {
   let inboundValidation: InboundValidationMode | undefined;
   // #609: reconnect flags collect here and are validated as one object below.
   const reconnect: Record<string, number | string> = {};
+  // #611: `--ws-*` flags, validated with the reconnect ones.
+  const wsFlags: Record<string, number | string | boolean> = {};
   let traceOutput: string | null = null;
 
   for (let i = 2; i < argv.length; i++) {
@@ -922,6 +948,30 @@ export function parseArgs(argv: string[]): CLIOptions {
         break;
       case "--reconnect-jitter-ms":
         reconnect.jitterMs = requireNumberFlag(arg, next, { min: 0 });
+        i++;
+        break;
+      case "--ws-handshake-timeout-ms":
+        wsFlags.handshakeTimeoutMs = requireNumberFlag(arg, next, {
+          min: 1,
+        });
+        i++;
+        break;
+      case "--ws-no-compression":
+        wsFlags.perMessageDeflate = false;
+        break;
+      case "--ws-max-payload":
+        wsFlags.maxPayloadBytes = requireNumberFlag(arg, next, {
+          integer: true,
+          min: 1,
+        });
+        i++;
+        break;
+      case "--ws-proxy":
+        wsFlags.proxy = requireFlagValue(arg, next);
+        i++;
+        break;
+      case "--ws-local-address":
+        wsFlags.localAddress = requireFlagValue(arg, next);
         i++;
         break;
       case "--boot-retry-limit":
@@ -1612,8 +1662,8 @@ export function parseArgs(argv: string[]): CLIOptions {
     cpoName,
     ...(txUpdatedMeterValues ? { txUpdatedMeterValues } : {}),
     ...(inboundValidation ? { inboundValidation } : {}),
-    ...(Object.keys(reconnect).length > 0
-      ? { transport: parseTransportFlags(reconnect) }
+    ...(Object.keys(reconnect).length > 0 || Object.keys(wsFlags).length > 0
+      ? { transport: parseTransportFlags(reconnect, wsFlags, ocppVersion) }
       : {}),
     tls,
     tlsCaPath,
@@ -1742,6 +1792,18 @@ Options:
   --reconnect-jitter-ms <ms>
                            Random extra delay in [0, ms] drawn from a stream
                            seeded by the CP id (default 0).
+  --ws-handshake-timeout-ms <ms>
+                           Close a connection attempt that has not opened
+                           within <ms>; the reconnect policy then applies.
+                           All runtimes.
+  --ws-no-compression      Do not offer permessage-deflate. Bun and Node.
+  --ws-max-payload <bytes> Largest incoming message; a bigger one closes the
+                           socket. Node only (Bun ignores it, so the start is
+                           refused).
+  --ws-proxy <url>         HTTP(S) proxy for the WebSocket upgrade (CONNECT).
+                           Bun only.
+  --ws-local-address <ip>  Local address to bind. Node only (Bun ignores it,
+                           so the start is refused).
   --boot-retry-limit <n>   Automatic BootNotification re-sends after a
                            Rejected answer before stopping. -1 = unlimited
                            (default).

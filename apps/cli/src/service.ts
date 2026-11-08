@@ -756,6 +756,7 @@ export class CLIChargePointService {
         ...(init.capabilityProfile
           ? { capabilityProfile: init.capabilityProfile }
           : {}),
+        ...(init.transport?.ws ? { ws: init.transport.ws } : {}),
         ...(init.idTags ? { idTags: init.idTags } : {}),
         ...(init.idTagDistribution
           ? { idTagDistribution: init.idTagDistribution }

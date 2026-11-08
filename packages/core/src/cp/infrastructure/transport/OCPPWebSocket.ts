@@ -45,6 +45,7 @@ import {
   type ResolvedNetworkSimConfig,
   type DisconnectRuleType,
 } from "./network-sim";
+import type { WsClientOptions } from "../../shared/WsClientOptions";
 import {
   DEFAULT_RECONNECT_POLICY,
   nextReconnectDelayMs,
@@ -195,6 +196,9 @@ export class OCPPWebSocket {
   private _reconnectPolicy: ReconnectPolicy = DEFAULT_RECONNECT_POLICY;
   /** Uniform in [0, 1); the charge point's seeded `reconnect` stream. */
   private _reconnectRandom: () => number = Math.random;
+  /** #611: connection options; the runtime support was checked by the owner. */
+  private _wsOptions: WsClientOptions = {};
+  private _handshakeTimer: ReturnType<typeof setTimeout> | null = null;
   /** #609: 2.x `RetryBackOff*` variables; null on 1.6. */
   private _retryBackOff: RetryBackOffVariables | null = null;
   private _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -326,6 +330,20 @@ export class OCPPWebSocket {
   setReconnectPolicy(policy: ReconnectPolicy, random?: () => number): void {
     this._reconnectPolicy = policy;
     if (random) this._reconnectRandom = random;
+  }
+
+  /**
+   * #611: handshake timeout, compression, max payload, proxy, local address.
+   * The caller must have checked them against the runtime
+   * (`assertWsClientOptions`): this does not drop what the runtime would
+   * ignore. Applies from the next connection attempt.
+   */
+  setWsClientOptions(options: WsClientOptions): void {
+    this._wsOptions = options;
+  }
+
+  get wsClientOptions(): WsClientOptions {
+    return this._wsOptions;
   }
 
   get reconnectPolicy(): ReconnectPolicy {
@@ -518,6 +536,7 @@ export class OCPPWebSocket {
     let opened = false;
     const onopenHandler = () => {
       opened = true;
+      this.clearHandshakeTimer();
       this.onClientCertificateOpened(attempt.renewed);
       // A working connection clears the refusal budget, so the next genuine
       // refusal is diagnosed immediately rather than waiting out the window.
@@ -539,6 +558,7 @@ export class OCPPWebSocket {
     // already open, and must still report its own cause (#474).
     const socketToken = this._currentGeneration;
     const oncloseHandler = (ev: CloseEvent) => {
+      this.clearHandshakeTimer();
       const closeCause = this.closeCauseOf(socketToken);
       // Logged for every socket, stale ones included: it is the only line
       // carrying the real close code of a socket a reset superseded, and the
@@ -585,6 +605,9 @@ export class OCPPWebSocket {
       authorizationKey: this._authorizationKey,
       cpoName: this._cpoName,
       tls: attempt.tls,
+      ...(Object.keys(this._wsOptions).length > 0
+        ? { ws: this._wsOptions }
+        : {}),
       warn: (message) => this._logger.warn(message, LogType.WEBSOCKET),
       onConnectOptions: (options) => {
         this._lastConnectOptions = options;
@@ -596,6 +619,34 @@ export class OCPPWebSocket {
       onclose: oncloseHandler,
     });
     this._socketToken = socketToken;
+    this.armHandshakeTimer(this._ws);
+  }
+
+  /** #611: no runtime times the handshake out natively (Bun never does), so
+   *  an attempt that has not opened in time is closed here; it then fails
+   *  like any other connection failure and the reconnect policy takes over. */
+  private armHandshakeTimer(socket: OcppSocket): void {
+    this.clearHandshakeTimer();
+    const timeoutMs = this._wsOptions.handshakeTimeoutMs;
+    if (timeoutMs === undefined) return;
+    this._handshakeTimer = setTimeout(() => {
+      this._handshakeTimer = null;
+      if (this._ws !== socket || socket.readyState !== WebSocket.CONNECTING) {
+        return;
+      }
+      this._logger.warn(
+        `WebSocket handshake timed out after ${timeoutMs} ms (ws.handshakeTimeoutMs)`,
+        LogType.WEBSOCKET,
+      );
+      socket.close();
+    }, timeoutMs);
+  }
+
+  private clearHandshakeTimer(): void {
+    if (this._handshakeTimer) {
+      clearTimeout(this._handshakeTimer);
+      this._handshakeTimer = null;
+    }
   }
 
   public disconnect(): void {
@@ -674,6 +725,7 @@ export class OCPPWebSocket {
       clearTimeout(this._reconnectTimer);
       this._reconnectTimer = null;
     }
+    this.clearHandshakeTimer();
 
     if (this._ws) {
       this._ws.close();

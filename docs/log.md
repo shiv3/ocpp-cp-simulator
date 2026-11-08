@@ -2430,3 +2430,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-08] ingest | SignedUpdateFirmware sends DownloadScheduled and InstallScheduled (#741)
 
 - 1.6 `default.signedFirmware`: a future `retrieveDateTime` is announced with `DownloadScheduled` right after the answer and `Downloading` starts at that time (L01.FR.13); a future `installDateTime` is announced with `InstallScheduled` after `SignatureVerified` and `Installing` follows at that time (L01.FR.16/17). Past or absent times keep the plain train. Page touched: [Default behaviors](entities/default-behaviors.md). Golden: new `16-signed-update-firmware-download-scheduled` and `16-signed-update-firmware-install-scheduled` on a virtual clock; `16-signed-update-firmware` is unchanged.
+
+## [2026-11-08] ingest | GetDiagnostics retries, retryInterval, timeout and time window (#743)
+
+- 1.6 `default.diagnostics`: `retries` (attempts after the first) and `retryInterval` (seconds; 30 when absent) are honored, each attempt times out after 60 s on the station's clock, `Uploading` is sent once and one final `Uploaded` / `UploadFailed` ends the run; without `retries` there is one attempt. `startTime` / `stopTime` limit the uploaded log lines. Page touched: [Default behaviors](entities/default-behaviors.md). Golden: new `16-get-diagnostics-retries` and `16-get-diagnostics-timeout` on a virtual clock; `16-diagnostics-unreachable` and the other diagnostics fixtures are unchanged.

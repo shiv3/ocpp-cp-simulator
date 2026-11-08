@@ -593,12 +593,24 @@ MeterValues.req of a transaction) that follow a message being resent:
   StartTransaction.conf of its transaction if it arrived before the request
   timed out, including a conf answering a request still in flight when the
   transaction stopped (the stop waits behind it in the serial queue); `-1` when
-  the StartTransaction.req was discarded. This also holds for a message
-  salvaged to the offline queue. A message for which nothing is known keeps the
-  id it was built with (`0`): a StartTransaction.req that timed out (1.6 does
-  not resend a timeout, so no outcome is recorded although errata 3.18 asks for
-  `-1` there too), a resend lost when the link closes, and a transaction
-  restored after a restart (#727).
+  the StartTransaction.req was discarded or timed out (1.6 does not resend a
+  timeout, and a conf that still arrives later is applied to the messages sent
+  after it). This also holds for a message salvaged to the offline queue.
+- A transaction records `startUnanswered` from its start until a
+  StartTransaction.conf assigns its id (persisted with the transaction, #727):
+  its `0` is a placeholder, not an id the CSMS issued (errata 3.54: a CSMS may
+  issue `0`, and then the flag is gone). A StopTransaction.req or
+  MeterValues.req built for such a transaction while no StartTransaction.req of
+  it is in flight, queued, waiting out a resend or in the offline queue (it
+  was lost with a restart or a closed link, or it timed out) is built with
+  `-1` (errata 3.18). RemoteStopTransaction naming `0` or `-1` for it is
+  `Rejected`.
+- A stop requested before the StartTransaction.req is queued (a
+  `connectorStatusChange` listener of the `Preparing` status calling
+  `stop_transaction`) waits for it, so on the wire the StartTransaction.req
+  comes first and the StopTransaction.req takes its id (§3.7: transaction
+  messages in chronological order). `-1` is for a Start nobody
+  answered, not for one that has yet to be sent. 2.x is unchanged.
 - A message moved from the serial queue to the hold keeps what the
   behaviors' `beforeSend` made of it (its `wire`), its attempt count and last
   error code: when released it goes back into the serial queue without being
@@ -639,7 +651,8 @@ right after the boot, without waiting out what was left of the retry interval.
 A CALLERROR for a transmission that already timed out (the 30 s §4.1.1
 watchdog) changes nothing: no resend and no event, since the station gave up on
 it and 1.6 does not retry a timeout. Nor does it make the `0` placeholder one
-a RemoteStopTransaction refuses, as above. A CALLRESULT arriving that late
+a RemoteStopTransaction refuses, as above (the timeout itself does, through
+`startUnanswered`: the transaction's messages then carry `-1`). A CALLRESULT arriving that late
 still applies, to the transaction its request started.
 
 Unlike 2.x
@@ -687,7 +700,8 @@ MeterValues.req carrying a `transactionId`:
   instead of resent, as on OCPP-J (#527): a conf the station would ignore
   would leave a transaction open on the Central System. A discarded
   StartTransaction.req leaves the `0` placeholder and a connector still in
-  `Preparing` goes to `Charging`, as on OCPP-J.
+  `Preparing` goes to `Charging`, as on OCPP-J. SOAP does not send `-1` yet:
+  #727 covers OCPP-J.
 - **Stop and dispose** (`onWebSocketClosed`) cancel every waiting resend, each
   with a `warn` and a `transactionMessageDiscarded`: SOAP has no offline queue
   to salvage it to. A failure whose Heartbeat probe is still in flight at that
@@ -782,8 +796,10 @@ earlier "nothing unless an auto-meter is configured"); `0` sends none.
   "periodic or clock-aligned MeterValues.req" included) and delivered in order
   after the reconnect.
 - A transaction whose StartTransaction.req was answered with a CALLERROR
-  (#527) is not sampled: its `0` is a placeholder the CSMS never issued. Until
-  StartTransaction.conf arrives a sample carries the placeholder `0`.
+  (#527) is not sampled: its `0` is a placeholder the CSMS never issued. While a
+  StartTransaction.req of the transaction is still on its way a sample carries
+  the placeholder `0`, which its conf replaces when the sample is sent; once
+  none is (timed out, discarded, lost in a restart) it carries `-1` (#727).
 - Only 1.x: the 2.x sampling below is unchanged.
 
 ## Reconnect without BootNotification (OCPP 2.x, #702)

@@ -1095,7 +1095,11 @@ export class Connector {
     if (!this.txTarget) return;
     this.store.write({
       kind: "transaction.patch",
-      patch: { id: transactionId, startCallError: undefined },
+      patch: {
+        id: transactionId,
+        startCallError: undefined,
+        startUnanswered: undefined,
+      },
     });
     this.eventsEmitter.emit("transactionIdChange", { transactionId });
   }

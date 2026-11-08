@@ -22,7 +22,7 @@ related:
   - local-authorization.md
   - ocpp-versions-and-transports.md
   - power-loss.md
-updated: 2026-11-08
+updated: 2026-11-09
 ---
 
 # Operational timeline
@@ -137,8 +137,8 @@ the CSMS's id. `transaction_message_rejected` and
 `transaction_message_discarded` do record `"0"` for a 1.6 message that
 carries no CSMS id: a StartTransaction.req, and the MeterValues.req and
 StopTransaction.req of a transaction whose start got no conf (once that
-request is discarded these two carry `-1` on the wire, and a later failure of
-one is recorded with `"-1"`, #565). A disconnect
+request is discarded or timed out these two carry `-1` on the wire, and a
+later failure of one is recorded with `"-1"`, #565, #727). A disconnect
 never records a "transaction interrupted" entry: a 1.6 transaction can
 legitimately continue offline.
 

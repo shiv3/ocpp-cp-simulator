@@ -619,7 +619,7 @@ export class OCPPMessageHandler {
       connectorId,
     );
     const payload: StopTransactionRequestV16 = {
-      transactionId: transaction.id,
+      transactionId: this.wireTransactionId(transaction),
       idTag: transaction.tagId,
       meterStop: transaction.meterStop!,
       timestamp: transaction.stopTime!.toISOString(),
@@ -1103,7 +1103,10 @@ export class OCPPMessageHandler {
     }
 
     const payload: MeterValuesRequestV16 = {
-      transactionId,
+      transactionId:
+        transactionId !== undefined && transaction?.id === transactionId
+          ? this.wireTransactionId(transaction)
+          : transactionId,
       connectorId,
       meterValue: [
         {
@@ -1283,6 +1286,49 @@ export class OCPPMessageHandler {
       const oldest = this._startOutcomes.keys().next().value;
       if (oldest !== undefined) this._startOutcomes.delete(oldest);
     }
+  }
+
+  /**
+   * #727, errata 3.18: the id a StopTransaction.req or MeterValues.req of
+   * `transaction` carries. The placeholder `0` stands while a
+   * StartTransaction.req of it is still on its way (the message then takes
+   * the id of its conf when it is sent, `applyStartOutcome`); once none is
+   * (it timed out, was discarded, or was lost in a restart) the station will
+   * not learn an id, and the message carries `-1`.
+   */
+  private wireTransactionId(transaction: Transaction): number {
+    if (
+      transaction.id !== 0 ||
+      !transaction.startUnanswered ||
+      this.isStartLive({
+        idTag: transaction.tagId,
+        startedAt: transaction.startTime.toISOString(),
+      })
+    ) {
+      return transaction.id;
+    }
+    return UNKNOWN_TRANSACTION_ID;
+  }
+
+  /** Whether a StartTransaction.req for `ref` is in flight, queued, waiting
+   *  out a resend interval, held or in the offline queue. */
+  private isStartLive(ref: StartRef): boolean {
+    const is = (action: string, payload: unknown): boolean => {
+      if (action !== OCPPAction.StartTransaction) return false;
+      const start = payload as StartTransactionRequestV16;
+      return start.idTag === ref.idTag && start.timestamp === ref.startedAt;
+    };
+    const inFlight = this._serialInFlight
+      ? this._requests.get(this._serialInFlight.id)
+      : undefined;
+    if (inFlight && is(inFlight.action, inFlight.payload)) return true;
+    const entries = [
+      ...this._serialQueue,
+      ...(this._held ?? []),
+      ...this._transactionMessageRetries.values(),
+    ];
+    if (entries.some((e) => is(e.action, e.payload))) return true;
+    return this._pendingQueue.all().some((m) => is(m.action, m.payload));
   }
 
   /** #565: the waiting resend settled (answered, discarded, timed out or
@@ -1567,6 +1613,15 @@ export class OCPPMessageHandler {
     const request = this._requests.get(messageId);
     if (request) request.timedOut = true;
     this._serialInFlight = null;
+    // #727, errata 3.18: no StartTransaction.conf came within the timeout and
+    // 1.6 does not retry a timeout, so the station gives the id up. The
+    // transaction's messages carry `-1`, unless a late conf still assigns one.
+    if (
+      request?.action === OCPPAction.StartTransaction &&
+      request.attempt !== undefined
+    ) {
+      this.discardedStart(request.payload as StartTransactionRequestV16);
+    }
     // 1.6 does not retry a timeout: a resend that timed out is settled.
     if (request?.attempt !== undefined && request.attempt > 1) {
       this.releaseHold();

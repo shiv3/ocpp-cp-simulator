@@ -1,11 +1,11 @@
 import { describe, expect, it } from "bun:test";
 
 import { CLIChargePointService } from "../service";
-import { BunSqliteDatabase } from "@ocpp-cp-sim/core/cp/domain/persistence/BunSqliteDatabase";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/domain/persistence/BunSqliteDatabase";
 import {
   type ScenarioDefinition,
   ScenarioNodeType,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import { testCpInit } from "./testCpInit";
 
 /**

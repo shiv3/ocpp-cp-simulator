@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { t as tNow } from "../../../i18n";
-import type { ScenarioDefinition } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import type { ScenarioDefinition } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import RunStatePill from "../../components/RunStatePill";
 import { deriveDisplayedSteps } from "../../lib/scenarioSteps";
 import { deriveStepLayout, layoutSteps } from "../../lib/stepLayout";

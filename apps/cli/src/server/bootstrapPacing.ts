@@ -3,7 +3,7 @@ import {
   draw,
   xoshiro128ss,
   cyrb128,
-} from "@ocpp-cp-sim/core/cp/shared/SeededRng";
+} from "@ocpp-cp-simulator/core/cp/shared/SeededRng";
 
 /** Charge points that dial at once when `--bootstrap-concurrency` is absent. */
 export const DEFAULT_BOOTSTRAP_CONCURRENCY = 8;

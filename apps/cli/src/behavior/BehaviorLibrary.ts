@@ -1,13 +1,13 @@
-import { behaviorShapeProblem } from "@ocpp-cp-sim/core/cp/application/engine/behaviorFit";
+import { behaviorShapeProblem } from "@ocpp-cp-simulator/core/cp/application/engine/behaviorFit";
 import { watch, type FSWatcher } from "node:fs";
 import path from "node:path";
 import type {
   Behavior,
   BehaviorParams,
   JsonObject,
-} from "@ocpp-cp-sim/contracts/behavior";
-import { mergeParams } from "@ocpp-cp-sim/core/cp/application/behavior/paramsSchema";
-import { describeDefaultBehaviors } from "@ocpp-cp-sim/core/cp/application/engine/behaviors/index";
+} from "@ocpp-cp-simulator/contracts/behavior";
+import { mergeParams } from "@ocpp-cp-simulator/core/cp/application/behavior/paramsSchema";
+import { describeDefaultBehaviors } from "@ocpp-cp-simulator/core/cp/application/engine/behaviors/index";
 import { readBehaviorFile } from "./readBehaviorFile";
 
 /** A `behaviors` entry that names no loaded behavior. */

@@ -4,7 +4,7 @@ import { Plus, X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import RunStatePill from "../../../components/RunStatePill";
-import type { ScenarioNode } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import type { ScenarioNode } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import { isLiveRunState } from "../../../lib/scenarioRunState";
 import { stepSummary, type StepLane } from "../../../lib/scenarioSteps";
 import {

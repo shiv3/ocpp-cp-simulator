@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next";
 import React, { useEffect, useState } from "react";
 
 import { cn } from "@/lib/utils";
-import type { ScenarioExpectation } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import type { ScenarioExpectation } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import {
   describeExpectation,
   formatElapsed,

@@ -2,11 +2,11 @@ import { describe, expect, it } from "bun:test";
 import {
   isValidNotifyEventRequestV201,
   isValidSetMonitoringBaseResponseV201,
-} from "@ocpp-cp-sim/ocpp/v201/index";
+} from "@ocpp-cp-simulator/ocpp/v201/index";
 import {
   isValidNotifyEventRequestV21,
   isValidSetMonitoringBaseResponseV21,
-} from "@ocpp-cp-sim/ocpp/v21/index";
+} from "@ocpp-cp-simulator/ocpp/v21/index";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
 import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";

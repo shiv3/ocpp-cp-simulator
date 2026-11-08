@@ -1,8 +1,8 @@
 // apps/cli/src/exportK6/__tests__/interpreter.test.ts
 import { describe, expect, it, vi } from "vitest";
-import { runScenario } from "@ocpp-cp-sim/k6-runtime/interpreter";
-import { wire16 } from "@ocpp-cp-sim/k6-runtime/wire/v16";
-import type { ScenarioJson } from "@ocpp-cp-sim/k6-runtime/types";
+import { runScenario } from "@ocpp-cp-simulator/k6-runtime/interpreter";
+import { wire16 } from "@ocpp-cp-simulator/k6-runtime/wire/v16";
+import type { ScenarioJson } from "@ocpp-cp-simulator/k6-runtime/types";
 import { FakeHost } from "./support/fakeHost";
 
 function scenario(

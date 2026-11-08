@@ -5,7 +5,7 @@ import { Handle, Position, type Node } from "@xyflow/react";
 import type {
   BaseNodeData,
   StartNodeData,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 
 interface StartEndNodeProps extends NodeProps<Node<BaseNodeData>> {
   nodeType: "start" | "end";

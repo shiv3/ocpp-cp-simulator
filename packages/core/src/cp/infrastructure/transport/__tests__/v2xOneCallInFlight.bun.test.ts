@@ -1,7 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import { startMockCsms, type MockCsms } from "./mockCsms";
 import { callOf, callsOf, stationFor } from "./stationHarness";
-import type { TransactionEventRequestV201 } from "@ocpp-cp-sim/ocpp/index";
+import type { TransactionEventRequestV201 } from "@ocpp-cp-simulator/ocpp/index";
 
 // OCPP-J 2.0.1 / 2.1 Part 4 §4.1.1 (#708): the station sends the next CALL
 // only after the CALLRESULT / CALLERROR of the previous one or its

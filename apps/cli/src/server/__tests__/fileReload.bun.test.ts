@@ -5,18 +5,18 @@ import * as os from "os";
 import * as path from "path";
 import type { Socket } from "socket.io-client";
 
-import { BunSqliteDatabase } from "@ocpp-cp-sim/core/cp/domain/persistence/BunSqliteDatabase";
-import type { Database } from "@ocpp-cp-sim/core/cp/domain/persistence/Database";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/domain/persistence/BunSqliteDatabase";
+import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
 import {
   startMockCsms,
   type MockCsms,
   type OcppFrame,
-} from "@ocpp-cp-sim/core/cp/infrastructure/transport/__tests__/mockCsms";
-import type { ScenarioDefinition } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+} from "@ocpp-cp-simulator/core/cp/infrastructure/transport/__tests__/mockCsms";
+import type { ScenarioDefinition } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import {
   ARRAY_MAX_ITEMS,
   SCENARIO_ID_MAX,
-} from "@ocpp-cp-sim/contracts/limits";
+} from "@ocpp-cp-simulator/contracts/limits";
 import { rememberWatchedScenarioFile } from "../watchedScenarioFiles";
 import type { WatchFactory } from "../FileWatcher";
 import {

@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createStore } from "jotai";
-import type { ChargePoint } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
+import type { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
 import {
   DefaultBootNotification,
   OCPPStatus,
-} from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+} from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import { LocalChargePointService } from "../LocalChargePointService";
 
 // #448: browser mode reads the charge point's operational timeline directly;

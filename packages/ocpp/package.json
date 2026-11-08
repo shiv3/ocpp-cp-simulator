@@ -1,5 +1,5 @@
 {
-  "name": "@ocpp-cp-sim/ocpp",
+  "name": "@ocpp-cp-simulator/ocpp",
   "version": "0.0.0",
   "private": true,
   "type": "module",

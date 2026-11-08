@@ -2,7 +2,7 @@ import type {
   CallResultHandler,
   HandlerContext,
 } from "../MessageHandlerRegistry";
-import type { BootNotificationResponseV16 } from "@ocpp-cp-sim/ocpp/index";
+import type { BootNotificationResponseV16 } from "@ocpp-cp-simulator/ocpp/index";
 
 /**
  * §4.2 BootNotification.conf handling:

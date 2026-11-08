@@ -3,8 +3,8 @@ import { parseScenarioJSON, withScenarioSchemaVersion } from "../scenarioFile";
 import {
   SCENARIO_SCHEMA_VERSION,
   type ScenarioDefinition,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import { validateScenarioSchema } from "@ocpp-cp-sim/core/scenario/scenarioSchemaValidator";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import { validateScenarioSchema } from "@ocpp-cp-simulator/core/scenario/scenarioSchemaValidator";
 
 describe("parseScenarioJSON", () => {
   const createValidScenario = (

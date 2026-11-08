@@ -18,7 +18,7 @@ import {
   isValidGetInstalledCertificateIdsResponseV21,
   isValidGetVariablesResponseV201,
   isValidGetVariablesResponseV21,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
 import { canBindBunServe } from "../../../../test/bunServe";
 

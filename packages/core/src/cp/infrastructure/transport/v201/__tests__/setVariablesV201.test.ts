@@ -1,4 +1,4 @@
-import type { SetVariablesRequestV201 } from "@ocpp-cp-sim/ocpp/index";
+import type { SetVariablesRequestV201 } from "@ocpp-cp-simulator/ocpp/index";
 import { describe, expect, it } from "vitest";
 import {
   ConfigurationKeys,

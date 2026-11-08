@@ -3,14 +3,14 @@ import {
   LogType,
   type LogEntry,
   type Logger,
-} from "@ocpp-cp-sim/core/cp/shared/Logger";
-import { TraceCorrelator } from "@ocpp-cp-sim/trace/TraceCorrelator";
+} from "@ocpp-cp-simulator/core/cp/shared/Logger";
+import { TraceCorrelator } from "@ocpp-cp-simulator/trace/TraceCorrelator";
 import {
   logLineToTraceRecord,
   type SerializedLogLine,
-} from "@ocpp-cp-sim/trace/logEntryToTrace";
-import type { OcppTraceRecord } from "@ocpp-cp-sim/trace/OcppTraceRecord";
-import { isSoapVersion } from "@ocpp-cp-sim/core/cp/domain/types/OcppVersion";
+} from "@ocpp-cp-simulator/trace/logEntryToTrace";
+import type { OcppTraceRecord } from "@ocpp-cp-simulator/trace/OcppTraceRecord";
+import { isSoapVersion } from "@ocpp-cp-simulator/core/cp/domain/types/OcppVersion";
 import { toTraceOcppVersion } from "../../trace/TraceWriter";
 
 export interface MetricsAttachContext {

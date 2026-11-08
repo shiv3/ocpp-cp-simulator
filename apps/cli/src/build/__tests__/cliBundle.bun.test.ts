@@ -12,7 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { tcpPort } from "@ocpp-cp-sim/core/test/bunServe";
+import { tcpPort } from "@ocpp-cp-simulator/core/test/bunServe";
 
 // The published CLI is one `bun build --target=bun` file, dist-cli/main.js,
 // shipped beside dist/ and nothing else (#578): no src/, no packages/core/schema/, no

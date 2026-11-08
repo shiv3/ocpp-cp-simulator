@@ -8,11 +8,11 @@ import type {
   GetCompositeScheduleResponseV201,
   SetChargingProfileRequestV201,
   SetChargingProfileResponseV201,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import type {
   ChargingProfileType as ReportChargingProfileType,
   ReportChargingProfilesRequestV201,
-} from "@ocpp-cp-sim/ocpp/v201/types/report-charging-profiles-request";
+} from "@ocpp-cp-simulator/ocpp/v201/types/report-charging-profiles-request";
 import type {
   ActiveChargingProfile,
   Connector,

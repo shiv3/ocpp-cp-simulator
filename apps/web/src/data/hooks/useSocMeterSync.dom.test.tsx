@@ -3,9 +3,9 @@ import { act, type JSX } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { defaultEVSettings } from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
+import { defaultEVSettings } from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
 import { useSocMeterSync } from "./useSocMeterSync";
-import { deferred } from "@ocpp-cp-sim/core/test/deferred";
+import { deferred } from "@ocpp-cp-simulator/core/test/deferred";
 
 interface HarnessProps {
   service: {

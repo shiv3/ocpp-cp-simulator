@@ -9,11 +9,11 @@ import {
   renderConsole,
   type FakeChargePointService,
 } from "../../test/harness";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
-import type { ChargingSession } from "@ocpp-cp-sim/core/cp/domain/session/ChargingSession";
-import { chargingSession } from "@ocpp-cp-sim/core/test/chargingSessionFixtures";
-import type { ChargingSessionPage } from "@ocpp-cp-sim/core/cp/domain/persistence/ChargingSessionRepository";
-import type { ChargePointService } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
+import type { ChargingSession } from "@ocpp-cp-simulator/core/cp/domain/session/ChargingSession";
+import { chargingSession } from "@ocpp-cp-simulator/core/test/chargingSessionFixtures";
+import type { ChargingSessionPage } from "@ocpp-cp-simulator/core/cp/domain/persistence/ChargingSessionRepository";
+import type { ChargePointService } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 
 /** #447: the CP page's "Transactions" tab lists the charging sessions. */
 

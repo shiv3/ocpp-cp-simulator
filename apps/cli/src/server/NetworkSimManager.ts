@@ -1,12 +1,12 @@
-import type { Database } from "@ocpp-cp-sim/core/cp/domain/persistence/Database";
+import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
 import type {
   NetworkSimLayerConfig,
   ResolvedNetworkSimConfig,
-} from "@ocpp-cp-sim/core/cp/infrastructure/transport/network-sim/config";
+} from "@ocpp-cp-simulator/core/cp/infrastructure/transport/network-sim/config";
 import {
   validateLayerConfig,
   resolveNetworkSimConfig,
-} from "@ocpp-cp-sim/core/cp/infrastructure/transport/network-sim/config";
+} from "@ocpp-cp-simulator/core/cp/infrastructure/transport/network-sim/config";
 
 export interface NetworkSimManagerDeps {
   listLiveWsCpIds(): string[];

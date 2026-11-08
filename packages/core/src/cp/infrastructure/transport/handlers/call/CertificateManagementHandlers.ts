@@ -8,12 +8,12 @@ import type {
   GetInstalledCertificateIdsResponseV16,
   InstallCertificateRequestV16,
   InstallCertificateResponseV16,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import {
   isValidDeleteCertificateRequestV16,
   isValidGetInstalledCertificateIdsRequestV16,
   isValidInstallCertificateRequestV16,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import {
   isCertificateInBundle,
   type CertificateHashData,

@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
 
-import type { WireSimulatorConfig } from "@ocpp-cp-sim/contracts/index";
-import { DefaultBootNotification } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
-import { getConfigBasicAuthPassword } from "@ocpp-cp-sim/client/configPort";
+import type { WireSimulatorConfig } from "@ocpp-cp-simulator/contracts/index";
+import { DefaultBootNotification } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
+import { getConfigBasicAuthPassword } from "@ocpp-cp-simulator/client/configPort";
 import { useDataContext } from "../providers/DataProvider";
 import {
   LocalChargePointService,
   type LocalChargePointDefinition,
 } from "../local/LocalChargePointService";
-import type { ChargePointSnapshot } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
-import type { RemoteRegistrySubscriptionEvent } from "@ocpp-cp-sim/client/remote/RemoteChargePointService";
+import type { ChargePointSnapshot } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
+import type { RemoteRegistrySubscriptionEvent } from "@ocpp-cp-simulator/client/remote/RemoteChargePointService";
 
 interface UseChargePointsOptions {
   isLoading?: boolean;

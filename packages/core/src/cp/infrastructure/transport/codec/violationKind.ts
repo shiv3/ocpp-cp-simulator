@@ -1,4 +1,4 @@
-import type { ValidationIssue } from "@ocpp-cp-sim/ocpp/validate";
+import type { ValidationIssue } from "@ocpp-cp-simulator/ocpp/validate";
 
 /**
  * The four kinds of payload violation OCPP-J tells apart (1.6 §4.2.3 and

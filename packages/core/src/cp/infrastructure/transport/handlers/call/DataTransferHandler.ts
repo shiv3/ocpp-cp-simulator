@@ -2,7 +2,7 @@ import type { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
 import type {
   DataTransferRequestV16,
   DataTransferResponseV16,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import type { DataTransferResponder } from "../../../../domain/types/DataTransfer";
 import type { DataTransferVendorRegistry } from "../../../../domain/transport/IChargePointMessageHandler";
 import { LogType } from "../../../../shared/Logger";

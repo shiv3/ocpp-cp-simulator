@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { DefaultBootNotification } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import { DefaultBootNotification } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import { LocalChargePointService } from "./LocalChargePointService";
 import type { LocalChargePointDefinition } from "./LocalChargePointService";
 import {
   defaultEVSettings,
   type EVSettings,
-} from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
+} from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
 
 function localDefinition(
   overrides: Partial<LocalChargePointDefinition> = {},

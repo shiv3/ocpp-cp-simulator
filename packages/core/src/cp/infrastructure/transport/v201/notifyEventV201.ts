@@ -2,7 +2,7 @@
 import type {
   NotifyEventRequestV201,
   NotifyEventRequestV21,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import type { MonitoringEvent } from "../../../domain/monitoring/MonitorEvaluation";
 import { MONITORING_ITEMS_PER_PART, splitIntoParts } from "./reportParts";
 import type { MonitoringReportDialect } from "./variableMonitoringV201";

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { actionValidatorV21 } from "@ocpp-cp-sim/ocpp/v21/index";
+import { actionValidatorV21 } from "@ocpp-cp-simulator/ocpp/v21/index";
 import { buildV21InboundRegistry } from "../inboundRegistryV21";
 import type { V201HandlerResult } from "../../v201/inboundRegistryV201";
 

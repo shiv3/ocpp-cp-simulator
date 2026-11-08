@@ -1,4 +1,4 @@
-import type { JsonObject } from "@ocpp-cp-sim/contracts/behavior";
+import type { JsonObject } from "@ocpp-cp-simulator/contracts/behavior";
 import { cancellablePromise, type CancellableWait } from "./cancellable";
 import { csmsActionMatches } from "../../domain/types/csmsActionNames";
 import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
@@ -391,7 +391,7 @@ const waitForCsmsCall = (
 /** The registry's `onBusy` answer for a scenario's `onBusy` spec. */
 const busyAnswerOf = (
   spec: CallResponseSpec | undefined,
-): import("@ocpp-cp-sim/contracts/behavior").CallAnswer | undefined => {
+): import("@ocpp-cp-simulator/contracts/behavior").CallAnswer | undefined => {
   if (!spec) return undefined;
   if (spec.kind === "none") return { noResponse: true };
   if (spec.kind === "error") {

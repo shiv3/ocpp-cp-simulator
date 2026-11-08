@@ -1,4 +1,4 @@
-import { schemas } from "@ocpp-cp-sim/ocpp/index";
+import { schemas } from "@ocpp-cp-simulator/ocpp/index";
 import { parseOcppVersion } from "../../../domain/types/OcppVersion";
 import { defaultPayloadFromSchema } from "./defaultPayload";
 import { requestSchemaKey } from "./requestSchemaKey";

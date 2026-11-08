@@ -2,7 +2,7 @@
 // mode as a child process, with a stub CSMS on a local port, the way
 // open-ocpp-tck runs it (stdin JSON Lines in, stdout lines out).
 import { fileURLToPath } from "node:url";
-import { tcpPort } from "@ocpp-cp-sim/core/test/bunServe";
+import { tcpPort } from "@ocpp-cp-simulator/core/test/bunServe";
 
 const repoRoot = fileURLToPath(new URL("../../../../..", import.meta.url));
 

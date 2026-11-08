@@ -1,7 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import { CLIChargePointService, type CLIEvent } from "../service";
-import type { ChargePoint } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
-import { REDACTED_VALUE } from "@ocpp-cp-sim/core/cp/shared/redaction";
+import type { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
+import { REDACTED_VALUE } from "@ocpp-cp-simulator/core/cp/shared/redaction";
 import { testCpInit } from "./testCpInit";
 
 /**

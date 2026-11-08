@@ -5,11 +5,11 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import Settings from "./Settings";
-import { Connector } from "@ocpp-cp-sim/core/cp/domain/connector/Connector";
-import { buildSampledValues } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueBuilder";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
-import { Logger, LogLevel } from "@ocpp-cp-sim/core/cp/shared/Logger";
-import type { EVSettings } from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
+import { Connector } from "@ocpp-cp-simulator/core/cp/domain/connector/Connector";
+import { buildSampledValues } from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueBuilder";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
+import { Logger, LogLevel } from "@ocpp-cp-simulator/core/cp/shared/Logger";
+import type { EVSettings } from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
 
 /**
  * Regression for #301 finding 3: the v1.2 EV settings fields

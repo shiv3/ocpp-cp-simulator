@@ -1,7 +1,7 @@
 import {
   ScenarioNodeType,
   type ScenarioDefinition,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 
 /**
  * Test fixture: start → park on a `GetConfiguration` csmsCallTrigger (node

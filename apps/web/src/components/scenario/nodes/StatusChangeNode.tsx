@@ -2,8 +2,8 @@ import { useTranslation } from "react-i18next";
 import React, { memo } from "react";
 import type { NodeProps } from "@xyflow/react";
 import { Handle, Position, type Node } from "@xyflow/react";
-import type { StatusChangeNodeData } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import type { StatusChangeNodeData } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 
 const StatusChangeNode: React.FC<NodeProps<Node<StatusChangeNodeData>>> = ({
   data,

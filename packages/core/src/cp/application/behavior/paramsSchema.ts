@@ -3,7 +3,7 @@ import type {
   JsonObject,
   JsonValue,
   ParamsSchema,
-} from "@ocpp-cp-sim/contracts/behavior";
+} from "@ocpp-cp-simulator/contracts/behavior";
 
 /**
  * Validation of behavior params (docs/concepts/charger-engine.md, "Params").

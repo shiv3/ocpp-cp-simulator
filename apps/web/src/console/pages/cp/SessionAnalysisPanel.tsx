@@ -25,9 +25,9 @@ import { useDataContext } from "@/data/providers/DataProvider";
 import {
   logLinesToTrace,
   type SerializedLogLine,
-} from "@ocpp-cp-sim/trace/logEntryToTrace";
-import { ANALYZE_DISCLAIMER } from "@ocpp-cp-sim/trace/analysisDisclaimer";
-import { ensureToolkitBufferShim } from "@ocpp-cp-sim/trace/toolkitBufferShim";
+} from "@ocpp-cp-simulator/trace/logEntryToTrace";
+import { ANALYZE_DISCLAIMER } from "@ocpp-cp-simulator/trace/analysisDisclaimer";
+import { ensureToolkitBufferShim } from "@ocpp-cp-simulator/trace/toolkitBufferShim";
 
 import EmptyState from "../../components/EmptyState";
 

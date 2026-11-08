@@ -8,11 +8,11 @@ import {
   renderConsole,
   type FakeChargePointService,
 } from "../../test/harness";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
-import { LogLevel, LogType } from "@ocpp-cp-sim/core/cp/shared/Logger";
-import type { ChargePointSnapshot } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
-import type { ChargePointEvent } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
-import { activeChargingSession } from "@ocpp-cp-sim/core/test/chargingSessionFixtures";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
+import { LogLevel, LogType } from "@ocpp-cp-simulator/core/cp/shared/Logger";
+import type { ChargePointSnapshot } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
+import type { ChargePointEvent } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
+import { activeChargingSession } from "@ocpp-cp-simulator/core/test/chargingSessionFixtures";
 import { useCpConfigActions } from "../dashboard/useCpConfigActions";
 import type { ChargePointConfig } from "../../../components/chargePointConfig";
 

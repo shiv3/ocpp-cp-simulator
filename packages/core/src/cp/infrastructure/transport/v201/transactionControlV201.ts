@@ -1,7 +1,7 @@
 import type {
   GetTransactionStatusRequestV201,
   GetTransactionStatusResponseV201,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import type {
   V201HandlerResult,
   V201InboundContext,

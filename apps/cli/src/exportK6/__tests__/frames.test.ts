@@ -6,7 +6,7 @@ import {
   encodeCall,
   encodeCallError,
   encodeCallResult,
-} from "@ocpp-cp-sim/k6-runtime/frames";
+} from "@ocpp-cp-simulator/k6-runtime/frames";
 
 describe("frames", () => {
   it("encodes a CALL as [2, id, action, payload]", () => {

@@ -13,7 +13,7 @@ import { useTemplateText } from "@/i18n/templates";
 import {
   scenarioTemplates,
   type ScenarioTemplate,
-} from "@ocpp-cp-sim/core/utils/scenarioTemplates";
+} from "@ocpp-cp-simulator/core/utils/scenarioTemplates";
 
 export interface TemplateBrowserDialogProps {
   open: boolean;

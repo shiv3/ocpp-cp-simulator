@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   GetReportRequestV201,
   NotifyReportRequestV201,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import type { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
 import { makeChargePoint } from "../../../../domain/charge-point/__tests__/chargePointFixtures";
 import type { Logger } from "../../../../shared/Logger";

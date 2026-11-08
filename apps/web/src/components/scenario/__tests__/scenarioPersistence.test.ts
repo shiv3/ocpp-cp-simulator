@@ -3,7 +3,7 @@ import {
   retargetScenarioToConnector,
   saveEditorScenario,
 } from "../scenarioPersistence";
-import type { ScenarioDefinition } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import type { ScenarioDefinition } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 
 const scenario = (id: string): ScenarioDefinition =>
   ({

@@ -186,7 +186,7 @@ import {
   ChargerEngine,
   type LoadBehaviorOptions,
 } from "../../application/engine/ChargerEngine";
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
 
 /** RFC 6455 Normal Closure, and No Status Received (a close without a code). */
 const NORMAL_CLOSE_CODES: ReadonlySet<number> = new Set([1000, 1005]);

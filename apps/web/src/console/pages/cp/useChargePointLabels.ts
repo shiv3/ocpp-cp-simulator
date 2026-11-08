@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { canSubscribeRegistry } from "@/data/hooks/useChargePoints";
-import type { ChargePointSnapshot } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+import type { ChargePointSnapshot } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 import { useDataContext } from "@/data/providers/DataProvider";
-import type { Labels } from "@ocpp-cp-sim/contracts/index";
+import type { Labels } from "@ocpp-cp-simulator/contracts/index";
 
 /**
  * A daemon charge point's current labels (#446): the page's own snapshot,

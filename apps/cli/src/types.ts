@@ -2,14 +2,14 @@ import type { BootstrapPacing } from "./server/bootstrapPacing";
 import type {
   OcppSecurityProfile,
   OcppTlsOptions,
-} from "@ocpp-cp-sim/core/cp/infrastructure/transport/wsUrlWithBasic";
-import type { TransportConfig } from "@ocpp-cp-sim/core/cp/infrastructure/transport/TransportConfig";
-import type { UrlDistribution } from "@ocpp-cp-sim/core/cp/infrastructure/transport/SupervisionUrlPool";
-import type { InboundValidationMode } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
-import type { ChargePointCapabilityProfile } from "@ocpp-cp-sim/core/cp/domain/charge-point/CapabilityProfile";
-import type { IdTagDistribution } from "@ocpp-cp-sim/core/cp/domain/auth/IdTagPool";
-import type { Labels } from "@ocpp-cp-sim/contracts/labels";
-import type { JsonObject } from "@ocpp-cp-sim/contracts/behavior";
+} from "@ocpp-cp-simulator/core/cp/infrastructure/transport/wsUrlWithBasic";
+import type { TransportConfig } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/TransportConfig";
+import type { UrlDistribution } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/SupervisionUrlPool";
+import type { InboundValidationMode } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
+import type { ChargePointCapabilityProfile } from "@ocpp-cp-simulator/core/cp/domain/charge-point/CapabilityProfile";
+import type { IdTagDistribution } from "@ocpp-cp-simulator/core/cp/domain/auth/IdTagPool";
+import type { Labels } from "@ocpp-cp-simulator/contracts/labels";
+import type { JsonObject } from "@ocpp-cp-simulator/contracts/behavior";
 
 export interface SoapTunnelConfig {
   readonly provider: "ngrok";

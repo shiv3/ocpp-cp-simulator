@@ -2,8 +2,8 @@ import { describe, expect, it } from "bun:test";
 import type {
   ResetRequestV201,
   TransactionEventRequestV201,
-} from "@ocpp-cp-sim/ocpp/index";
-import type { ResetRequestV21 } from "@ocpp-cp-sim/ocpp/v21/index";
+} from "@ocpp-cp-simulator/ocpp/index";
+import type { ResetRequestV21 } from "@ocpp-cp-simulator/ocpp/v21/index";
 import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";

@@ -11,7 +11,7 @@
 # installed package catches this and every future instance.
 #
 # Usage:
-#   scripts/verify-cli-tarball.sh [--expect-dist] [path/to/ocpp-cp-simulator-<version>.tgz]
+#   scripts/verify-cli-tarball.sh [--expect-dist] [path/to/ocpsim-<version>.tgz]
 #
 # With no tarball argument it builds the CLI bundle (`bun run build:cli`, the
 # `bin` the tarball ships) and packs one itself (`npm pack --ignore-scripts`,
@@ -106,7 +106,7 @@ bun install -g --backend=copyfile "$TARBALL" > "$SCRATCH/install.log" 2>&1
 
 BIN="$BUN_INSTALL/bin/ocpp-cp-sim"
 [ -x "$BIN" ] || fail "installed bin missing or not executable: $BIN" "$SCRATCH/install.log"
-PKG_DIR="$BUN_INSTALL/install/global/node_modules/ocpp-cp-simulator"
+PKG_DIR="$BUN_INSTALL/install/global/node_modules/ocpsim"
 [ -d "$PKG_DIR" ] || fail "installed package dir missing: $PKG_DIR" "$SCRATCH/install.log"
 # The package is the bundle plus dist/; no source tree (#578). A src/ in the
 # tarball means `files` regressed to shipping sources, and anything that only

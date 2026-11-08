@@ -8,14 +8,14 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
 import {
   UNSUPPORTED_CTX_MEMBERS,
   unmetBy,
-} from "@ocpp-cp-sim/k6-runtime/behaviorHost";
+} from "@ocpp-cp-simulator/k6-runtime/behaviorHost";
 import ts from "typescript";
-import { cannedResponses16 } from "@ocpp-cp-sim/core/cp/application/engine/responseValidation";
-import { behaviorsOfModule } from "@ocpp-cp-sim/core/cp/application/engine/behaviorModule";
+import { cannedResponses16 } from "@ocpp-cp-simulator/core/cp/application/engine/responseValidation";
+import { behaviorsOfModule } from "@ocpp-cp-simulator/core/cp/application/engine/behaviorModule";
 import { bundleBehavior, typecheckBehavior } from "../behavior/bundleBehavior";
 import {
   renderBehaviorEntry,

@@ -24,12 +24,12 @@ import {
   type EVSettings,
   type EVSettingsPatch,
   withoutNulls,
-} from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
+} from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
 import {
   defaultAutoMeterValueConfig,
   type AutoMeterValueConfig,
-} from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
-import type { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+} from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
+import type { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import { useSocMeterSync } from "@/data/hooks/useSocMeterSync";
 import { useVehicleProfiles } from "@/data/hooks/useVehicleProfiles";
 import { useDataContext } from "@/data/providers/DataProvider";

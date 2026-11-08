@@ -3,7 +3,7 @@ import type {
   CancelReservationRequestV201,
   ReserveNowRequestV201,
   TransactionEventRequestV201,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";

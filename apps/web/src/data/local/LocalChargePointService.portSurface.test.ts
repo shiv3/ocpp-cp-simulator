@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ScenarioManager } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioManager";
-import type { ScenarioDefinition } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import type { ChargePoint } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
-import type { EVSettings } from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
-import type { AutoMeterValueConfig } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
-import { OcppCallNoAnswerError } from "@ocpp-cp-sim/core/cp/domain/errors/OcppCallErrors";
-import { DefaultBootNotification } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import type { ScenarioManager } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioManager";
+import type { ScenarioDefinition } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import type { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
+import type { EVSettings } from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
+import type { AutoMeterValueConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
+import { OcppCallNoAnswerError } from "@ocpp-cp-simulator/core/cp/domain/errors/OcppCallErrors";
+import { DefaultBootNotification } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import { LocalChargePointService } from "./LocalChargePointService";
 import type { LocalChargePointDefinition } from "./LocalChargePointService";
 

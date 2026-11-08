@@ -7,10 +7,10 @@ import type { Logger } from "../../../shared/Logger";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { Transaction } from "../../../domain/connector/Transaction";
 import { BunSqliteDatabase } from "../../../domain/persistence/BunSqliteDatabase";
-import { strictValidationErrors } from "@ocpp-cp-sim/ocpp/validate";
-import { v201Schemas } from "@ocpp-cp-sim/ocpp/v201/schemas";
-import { v21Schemas } from "@ocpp-cp-sim/ocpp/v21/schemas";
-import type { TransactionEventRequestV201 } from "@ocpp-cp-sim/ocpp/index";
+import { strictValidationErrors } from "@ocpp-cp-simulator/ocpp/validate";
+import { v201Schemas } from "@ocpp-cp-simulator/ocpp/v201/schemas";
+import { v21Schemas } from "@ocpp-cp-simulator/ocpp/v21/schemas";
+import type { TransactionEventRequestV201 } from "@ocpp-cp-simulator/ocpp/index";
 
 /**
  * #528, OCPP 2.0.1 / 2.1 E11: the TransactionEvents queued while offline

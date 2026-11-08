@@ -1,8 +1,8 @@
 import { describe, it, expect } from "bun:test";
 import { CLIChargePointService, type CLIEvent } from "../service";
-import { BunSqliteDatabase as BunDb } from "@ocpp-cp-sim/core/cp/domain/persistence/BunSqliteDatabase";
-import { InMemoryScenarioRunRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/ScenarioRunRepository";
-import type { ScenarioRunResult } from "@ocpp-cp-sim/core/cp/application/verification/ScenarioAssertions";
+import { BunSqliteDatabase as BunDb } from "@ocpp-cp-simulator/core/cp/domain/persistence/BunSqliteDatabase";
+import { InMemoryScenarioRunRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/ScenarioRunRepository";
+import type { ScenarioRunResult } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioAssertions";
 import { completingScenario } from "./completingScenario";
 import { parkingScenario } from "./parkingScenario";
 import { testCpInit } from "./testCpInit";

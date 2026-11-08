@@ -1,5 +1,5 @@
-import type { JsonObject } from "@ocpp-cp-sim/contracts/behavior";
-import { describeDefaultBehaviors } from "@ocpp-cp-sim/core/cp/application/engine/behaviors/index";
+import type { JsonObject } from "@ocpp-cp-simulator/contracts/behavior";
+import { describeDefaultBehaviors } from "@ocpp-cp-simulator/core/cp/application/engine/behaviors/index";
 import * as fs from "fs";
 import * as path from "path";
 import type { Server as BunServer, WebSocketHandler } from "bun";
@@ -50,38 +50,38 @@ import {
   type SimulatorConfigInput,
   type StatusWire,
   type SubscribeResult,
-} from "@ocpp-cp-sim/contracts/index";
-import type { ScenarioRunPage } from "@ocpp-cp-sim/core/cp/application/verification/ScenarioRunSummary";
-import { TIMELINE_FORMAT_VERSION } from "@ocpp-cp-sim/core/cp/application/services/OperationalTimeline";
+} from "@ocpp-cp-simulator/contracts/index";
+import type { ScenarioRunPage } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunSummary";
+import { TIMELINE_FORMAT_VERSION } from "@ocpp-cp-simulator/core/cp/application/services/OperationalTimeline";
 import type {
   ChargePointSnapshot,
   ConnectorSnapshot,
   CreateChargePointParams,
-} from "@ocpp-cp-sim/client/interfaces/ChargePointService";
-import type { ConnectorSettingsRepository } from "@ocpp-cp-sim/client/interfaces/ConnectorSettingsRepository";
-import type { Database } from "@ocpp-cp-sim/core/cp/domain/persistence/Database";
-import { FleetTemplateRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/FleetTemplateRepository";
-import { getTemplateById } from "@ocpp-cp-sim/core/utils/scenarioTemplates";
-import type { ScenarioRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/ScenarioRepository";
+} from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
+import type { ConnectorSettingsRepository } from "@ocpp-cp-simulator/client/interfaces/ConnectorSettingsRepository";
+import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
+import { FleetTemplateRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/FleetTemplateRepository";
+import { getTemplateById } from "@ocpp-cp-simulator/core/utils/scenarioTemplates";
+import type { ScenarioRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/ScenarioRepository";
 import {
   isScenarioDefinitionShape,
   type ScenarioDefinition,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import { validateScenarioSchema } from "@ocpp-cp-sim/core/scenario/scenarioSchemaValidator";
-import type { AutoMeterValueConfig } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import { validateScenarioSchema } from "@ocpp-cp-simulator/core/scenario/scenarioSchemaValidator";
+import type { AutoMeterValueConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
 import {
   InvalidEvSettingsPatchError,
   type EVSettings,
   type EVSettingsPatch,
-} from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
-import { InvalidAuthorizationCacheSeedError } from "@ocpp-cp-sim/core/cp/domain/auth/AuthorizationCacheSeed";
-import type { HistoryOptions } from "@ocpp-cp-sim/core/cp/application/services/types/StateSnapshot";
+} from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
+import { InvalidAuthorizationCacheSeedError } from "@ocpp-cp-simulator/core/cp/domain/auth/AuthorizationCacheSeed";
+import type { HistoryOptions } from "@ocpp-cp-simulator/core/cp/application/services/types/StateSnapshot";
 import {
   hasStatusNotificationOptions,
   type StatusNotificationOptions,
-} from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
-import { redactSensitiveText } from "@ocpp-cp-sim/core/cp/shared/redaction";
-import { isSoapVersion } from "@ocpp-cp-sim/core/cp/domain/types/OcppVersion";
+} from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
+import { redactSensitiveText } from "@ocpp-cp-simulator/core/cp/shared/redaction";
+import { isSoapVersion } from "@ocpp-cp-simulator/core/cp/domain/types/OcppVersion";
 import { soapCallbackUrlSuffixWarning } from "../soapCallbackUrl";
 import {
   DEFAULT_SOAP_PATH,
@@ -93,22 +93,22 @@ import {
   UnknownBehaviorError,
   BehaviorParamsError,
 } from "../behavior/BehaviorLibrary";
-import { OcppSecurityProfileConfigError } from "@ocpp-cp-sim/core/cp/infrastructure/transport/wsUrlWithBasic";
-import { ScenarioRunStateError } from "@ocpp-cp-sim/core/cp/domain/errors/ScenarioRunStateError";
+import { OcppSecurityProfileConfigError } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/wsUrlWithBasic";
+import { ScenarioRunStateError } from "@ocpp-cp-simulator/core/cp/domain/errors/ScenarioRunStateError";
 import {
   OcppCallNoAnswerError,
   OcppCallRejectedError,
-} from "@ocpp-cp-sim/core/cp/domain/errors/OcppCallErrors";
+} from "@ocpp-cp-simulator/core/cp/domain/errors/OcppCallErrors";
 import {
   validateLayerConfig,
   type NetworkSimLayerConfig,
-} from "@ocpp-cp-sim/core/cp/infrastructure/transport/network-sim/config";
-import type { AutoTrafficConfig } from "@ocpp-cp-sim/core/cp/domain/connector/AutoTraffic";
-import { createScenarioRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/createScenarioRepository";
-import { SqliteConnectorSettingsRepository } from "@ocpp-cp-sim/client/sqlite/SqliteConnectorSettingsRepository";
-import { BlueprintRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/BlueprintRepository";
-import { VehicleProfileRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/VehicleProfileRepository";
-import type { VehicleCatalog } from "@ocpp-cp-sim/core/cp/domain/vehicle/VehicleCatalog";
+} from "@ocpp-cp-simulator/core/cp/infrastructure/transport/network-sim/config";
+import type { AutoTrafficConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/AutoTraffic";
+import { createScenarioRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/createScenarioRepository";
+import { SqliteConnectorSettingsRepository } from "@ocpp-cp-simulator/client/sqlite/SqliteConnectorSettingsRepository";
+import { BlueprintRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/BlueprintRepository";
+import { VehicleProfileRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/VehicleProfileRepository";
+import type { VehicleCatalog } from "@ocpp-cp-simulator/core/cp/domain/vehicle/VehicleCatalog";
 import {
   deleteVehicleProfile,
   getCatalogVariant,
@@ -122,10 +122,10 @@ import {
   builtInBlueprints,
   isBuiltInBlueprint,
   MAX_STORED_BLUEPRINTS,
-} from "@ocpp-cp-sim/core/utils/blueprints/index";
+} from "@ocpp-cp-simulator/core/utils/blueprints/index";
 import type { CPRegistry } from "./CPRegistry";
 import type { EventBus } from "./eventBus";
-import { selectLogWindow } from "@ocpp-cp-sim/core/cp/shared/window";
+import { selectLogWindow } from "@ocpp-cp-simulator/core/cp/shared/window";
 import { getGlobalMetricsRecorder } from "./metrics/MetricsRecorder";
 import {
   parseCreateBody,

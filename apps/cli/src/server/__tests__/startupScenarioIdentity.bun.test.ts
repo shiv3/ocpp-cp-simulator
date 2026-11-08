@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { CLIChargePointService } from "../../service";
-import { BunSqliteDatabase } from "@ocpp-cp-sim/core/cp/domain/persistence/BunSqliteDatabase";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
-import type { ScenarioDefinition } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/domain/persistence/BunSqliteDatabase";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
+import type { ScenarioDefinition } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import {
   installStartupScenario,
   readStartupScenarioFile,
@@ -17,7 +17,7 @@ import {
   startupScenarioOptionConflict,
 } from "../startServer";
 import { scenarioInstanceId } from "../../scenarioInstanceId";
-import { startMockCsms } from "@ocpp-cp-sim/core/cp/infrastructure/transport/__tests__/mockCsms";
+import { startMockCsms } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/__tests__/mockCsms";
 
 /**
  * A startup-generated scenario has a **stable identity** (#314).

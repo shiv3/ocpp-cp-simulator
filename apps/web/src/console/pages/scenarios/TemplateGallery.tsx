@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import {
   scenarioTemplates,
   type ScenarioTemplate,
-} from "@ocpp-cp-sim/core/utils/scenarioTemplates";
+} from "@ocpp-cp-simulator/core/utils/scenarioTemplates";
 import { useTemplateText } from "@/i18n/templates";
 import TemplateBrowserDialog from "./TemplateBrowserDialog";
 

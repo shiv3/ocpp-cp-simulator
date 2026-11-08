@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "ocpp-cp-simulator",
+      "name": "ocpsim",
       "dependencies": {
         "@fontsource/ibm-plex-mono": "^5.3.0",
         "@fontsource/ibm-plex-sans": "^5.3.0",
@@ -90,58 +90,58 @@
       },
     },
     "apps/cli": {
-      "name": "@ocpp-cp-sim/cli",
+      "name": "@ocpp-cp-simulator/cli",
       "version": "0.0.0",
       "dependencies": {
-        "@ocpp-cp-sim/client": "workspace:*",
-        "@ocpp-cp-sim/contracts": "workspace:*",
-        "@ocpp-cp-sim/core": "workspace:*",
-        "@ocpp-cp-sim/k6-runtime": "workspace:*",
-        "@ocpp-cp-sim/ocpp": "workspace:*",
-        "@ocpp-cp-sim/trace": "workspace:*",
+        "@ocpp-cp-simulator/client": "workspace:*",
+        "@ocpp-cp-simulator/contracts": "workspace:*",
+        "@ocpp-cp-simulator/core": "workspace:*",
+        "@ocpp-cp-simulator/k6-runtime": "workspace:*",
+        "@ocpp-cp-simulator/ocpp": "workspace:*",
+        "@ocpp-cp-simulator/trace": "workspace:*",
       },
     },
     "apps/web": {
-      "name": "@ocpp-cp-sim/web",
+      "name": "@ocpp-cp-simulator/web",
       "version": "0.0.0",
       "dependencies": {
-        "@ocpp-cp-sim/client": "workspace:*",
-        "@ocpp-cp-sim/contracts": "workspace:*",
-        "@ocpp-cp-sim/core": "workspace:*",
-        "@ocpp-cp-sim/trace": "workspace:*",
+        "@ocpp-cp-simulator/client": "workspace:*",
+        "@ocpp-cp-simulator/contracts": "workspace:*",
+        "@ocpp-cp-simulator/core": "workspace:*",
+        "@ocpp-cp-simulator/trace": "workspace:*",
       },
     },
     "packages/client": {
-      "name": "@ocpp-cp-sim/client",
+      "name": "@ocpp-cp-simulator/client",
       "version": "0.0.0",
       "dependencies": {
-        "@ocpp-cp-sim/contracts": "workspace:*",
-        "@ocpp-cp-sim/core": "workspace:*",
+        "@ocpp-cp-simulator/contracts": "workspace:*",
+        "@ocpp-cp-simulator/core": "workspace:*",
       },
     },
     "packages/contracts": {
-      "name": "@ocpp-cp-sim/contracts",
+      "name": "@ocpp-cp-simulator/contracts",
       "version": "0.0.0",
     },
     "packages/core": {
-      "name": "@ocpp-cp-sim/core",
+      "name": "@ocpp-cp-simulator/core",
       "version": "0.0.0",
       "dependencies": {
-        "@ocpp-cp-sim/contracts": "workspace:*",
-        "@ocpp-cp-sim/k6-runtime": "workspace:*",
-        "@ocpp-cp-sim/ocpp": "workspace:*",
+        "@ocpp-cp-simulator/contracts": "workspace:*",
+        "@ocpp-cp-simulator/k6-runtime": "workspace:*",
+        "@ocpp-cp-simulator/ocpp": "workspace:*",
       },
     },
     "packages/k6-runtime": {
-      "name": "@ocpp-cp-sim/k6-runtime",
+      "name": "@ocpp-cp-simulator/k6-runtime",
       "version": "0.0.0",
     },
     "packages/ocpp": {
-      "name": "@ocpp-cp-sim/ocpp",
+      "name": "@ocpp-cp-simulator/ocpp",
       "version": "0.0.0",
     },
     "packages/trace": {
-      "name": "@ocpp-cp-sim/trace",
+      "name": "@ocpp-cp-simulator/trace",
       "version": "0.0.0",
     },
   },
@@ -272,21 +272,21 @@
 
     "@nodable/entities": ["@nodable/entities@3.1.0", "", {}, "sha512-LsS/DjHr+uDM647Gru/cA8+J3a3HfhttwCKLyuoyN7yXTFCxKBtSgMQBvrW9yNPa2/zDRUNuGPaH5QUFoa4arQ=="],
 
-    "@ocpp-cp-sim/cli": ["@ocpp-cp-sim/cli@workspace:apps/cli"],
+    "@ocpp-cp-simulator/cli": ["@ocpp-cp-simulator/cli@workspace:apps/cli"],
 
-    "@ocpp-cp-sim/client": ["@ocpp-cp-sim/client@workspace:packages/client"],
+    "@ocpp-cp-simulator/client": ["@ocpp-cp-simulator/client@workspace:packages/client"],
 
-    "@ocpp-cp-sim/contracts": ["@ocpp-cp-sim/contracts@workspace:packages/contracts"],
+    "@ocpp-cp-simulator/contracts": ["@ocpp-cp-simulator/contracts@workspace:packages/contracts"],
 
-    "@ocpp-cp-sim/core": ["@ocpp-cp-sim/core@workspace:packages/core"],
+    "@ocpp-cp-simulator/core": ["@ocpp-cp-simulator/core@workspace:packages/core"],
 
-    "@ocpp-cp-sim/k6-runtime": ["@ocpp-cp-sim/k6-runtime@workspace:packages/k6-runtime"],
+    "@ocpp-cp-simulator/k6-runtime": ["@ocpp-cp-simulator/k6-runtime@workspace:packages/k6-runtime"],
 
-    "@ocpp-cp-sim/ocpp": ["@ocpp-cp-sim/ocpp@workspace:packages/ocpp"],
+    "@ocpp-cp-simulator/ocpp": ["@ocpp-cp-simulator/ocpp@workspace:packages/ocpp"],
 
-    "@ocpp-cp-sim/trace": ["@ocpp-cp-sim/trace@workspace:packages/trace"],
+    "@ocpp-cp-simulator/trace": ["@ocpp-cp-simulator/trace@workspace:packages/trace"],
 
-    "@ocpp-cp-sim/web": ["@ocpp-cp-sim/web@workspace:apps/web"],
+    "@ocpp-cp-simulator/web": ["@ocpp-cp-simulator/web@workspace:apps/web"],
 
     "@ocpp-debugkit/toolkit": ["@ocpp-debugkit/toolkit@0.4.8", "", { "dependencies": { "commander": "^13.0.0", "zod": "^4.4.3" }, "peerDependencies": { "react": "^18.0.0 || ^19.0.0", "react-dom": "^18.0.0 || ^19.0.0" }, "optionalPeers": ["react", "react-dom"], "bin": { "ocpp-debugkit": "dist/cli/index.js" } }, "sha512-EfuJfvWj4kA2XiOZIQ+mJNO4uO42uQ6eZayqpM+iLp1jdY/qlY1U/F5JO8vvEM04TpsAR5d8iai+IrKPSidoAw=="],
 

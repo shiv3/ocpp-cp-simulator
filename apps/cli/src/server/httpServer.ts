@@ -6,29 +6,32 @@ import type { ChargePointInitOptions } from "../types";
 import type { CPRegistry } from "./CPRegistry";
 import type { EventBus } from "./eventBus";
 import type { Lifecycle } from "./lifecycle";
-import type { Database } from "@ocpp-cp-sim/core/cp/domain/persistence/Database";
+import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
 import {
   isOcppVersion,
   isSoapVersion,
-} from "@ocpp-cp-sim/core/cp/domain/types/OcppVersion";
-import { soapFaultResponse } from "@ocpp-cp-sim/core/cp/infrastructure/transport/soap/OCPPSoapServer";
+} from "@ocpp-cp-simulator/core/cp/domain/types/OcppVersion";
+import { soapFaultResponse } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/soap/OCPPSoapServer";
 import {
   DEFAULT_SOAP_PATH,
   SOAP_CHARGE_POINT_SERVICE_ROUTE,
   normalizeSoapPath,
 } from "../soapPath";
-import { transportConfigSchema } from "@ocpp-cp-sim/contracts/transportConfig";
+import { transportConfigSchema } from "@ocpp-cp-simulator/contracts/transportConfig";
 import {
   forwardedHeadersTrusted,
   markForwardedUntrusted,
   type AccessGuard,
 } from "./accessGuard";
-import { RPC_RATE_PER_SEC, INFLIGHT_CAP } from "@ocpp-cp-sim/contracts/limits";
-import { labelsSchema } from "@ocpp-cp-sim/contracts/labels";
+import {
+  RPC_RATE_PER_SEC,
+  INFLIGHT_CAP,
+} from "@ocpp-cp-simulator/contracts/limits";
+import { labelsSchema } from "@ocpp-cp-simulator/contracts/labels";
 import {
   behaviorIdsSchema,
   behaviorParamsSchema,
-} from "@ocpp-cp-sim/contracts/methods";
+} from "@ocpp-cp-simulator/contracts/methods";
 import { appVersion } from "../appVersion";
 import { MAX_ID_TAGS, readIdTagsFile } from "./idTagFile";
 

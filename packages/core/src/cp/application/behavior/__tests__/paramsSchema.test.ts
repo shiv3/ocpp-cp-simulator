@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { BehaviorParams } from "@ocpp-cp-sim/contracts/behavior";
+import type { BehaviorParams } from "@ocpp-cp-simulator/contracts/behavior";
 import {
   freezeParams,
   mergeParams,

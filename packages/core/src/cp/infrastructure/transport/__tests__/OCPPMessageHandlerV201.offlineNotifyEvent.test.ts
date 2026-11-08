@@ -8,9 +8,9 @@ import type { Logger } from "../../../shared/Logger";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { Transaction } from "../../../domain/connector/Transaction";
 import type { MonitoringEvent } from "../../../domain/monitoring/MonitorEvaluation";
-import { strictValidationErrors } from "@ocpp-cp-sim/ocpp/validate";
-import { v201Schemas } from "@ocpp-cp-sim/ocpp/v201/schemas";
-import { v21Schemas } from "@ocpp-cp-sim/ocpp/v21/schemas";
+import { strictValidationErrors } from "@ocpp-cp-simulator/ocpp/validate";
+import { v201Schemas } from "@ocpp-cp-simulator/ocpp/v201/schemas";
+import { v21Schemas } from "@ocpp-cp-simulator/ocpp/v21/schemas";
 
 /**
  * #538, OCPP 2.0.1 / 2.1 N07.FR.04 / N08.FR.03 on the E11 queue (#528):

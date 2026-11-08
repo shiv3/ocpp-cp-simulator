@@ -1,7 +1,10 @@
 import { describe, expect, it } from "bun:test";
 
-import { RPC_ERROR_CODES, RpcFailure } from "@ocpp-cp-sim/contracts/index";
-import { OcppSecurityProfileConfigError } from "@ocpp-cp-sim/core/cp/infrastructure/transport/wsUrlWithBasic";
+import {
+  RPC_ERROR_CODES,
+  RpcFailure,
+} from "@ocpp-cp-simulator/contracts/index";
+import { OcppSecurityProfileConfigError } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/wsUrlWithBasic";
 import { classifyFacadeError } from "../socketServer";
 
 /**

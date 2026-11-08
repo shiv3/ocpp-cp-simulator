@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next";
 import React, { memo } from "react";
 import type { NodeProps } from "@xyflow/react";
 import { Handle, Position, type Node } from "@xyflow/react";
-import type { OcppCallNodeData } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import type { OcppCallNodeData } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 
 /**
  * #389 expert OCPP call: any station-initiated CALL with an authored payload.

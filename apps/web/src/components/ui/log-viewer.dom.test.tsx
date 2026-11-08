@@ -6,7 +6,7 @@ import {
   LogLevel,
   LogType,
   type LogEntry,
-} from "@ocpp-cp-sim/core/cp/shared/Logger";
+} from "@ocpp-cp-simulator/core/cp/shared/Logger";
 
 type ViewerEntry = LogEntry & { cpId?: string };
 

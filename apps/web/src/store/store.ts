@@ -4,8 +4,8 @@ import type {
   BasicAuthSettings,
   Config,
   Experimental,
-} from "@ocpp-cp-sim/client/interfaces/ConfigRepository";
-import type { NetworkSimLayerConfig } from "@ocpp-cp-sim/core/cp/infrastructure/transport/network-sim/config";
+} from "@ocpp-cp-simulator/client/interfaces/ConfigRepository";
+import type { NetworkSimLayerConfig } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/network-sim/config";
 
 // The config shape is owned by the ConfigRepository port (packages/client/src/interfaces),
 // which the daemon-facing client package also uses; re-exported so the many

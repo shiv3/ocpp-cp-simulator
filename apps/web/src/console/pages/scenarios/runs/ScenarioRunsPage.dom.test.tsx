@@ -3,9 +3,9 @@ import { act } from "react";
 import type { Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
-import type { ScenarioRunSummary } from "@ocpp-cp-sim/core/cp/application/verification/ScenarioRunSummary";
-import type { ChargePointSnapshot } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
-import { scenarioRunSummary } from "@ocpp-cp-sim/core/test/scenarioRunFixtures";
+import type { ScenarioRunSummary } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunSummary";
+import type { ChargePointSnapshot } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
+import { scenarioRunSummary } from "@ocpp-cp-simulator/core/test/scenarioRunFixtures";
 import {
   createFakeChargePointService,
   flush,

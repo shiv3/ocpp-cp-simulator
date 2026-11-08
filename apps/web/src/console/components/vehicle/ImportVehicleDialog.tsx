@@ -18,14 +18,14 @@ import type {
   CatalogVariant,
   CatalogVariantSummary,
   VehicleCatalog,
-} from "@ocpp-cp-sim/core/cp/domain/vehicle/VehicleCatalog";
-import { profileFromCatalog } from "@ocpp-cp-sim/core/cp/domain/vehicle/importProfile";
+} from "@ocpp-cp-simulator/core/cp/domain/vehicle/VehicleCatalog";
+import { profileFromCatalog } from "@ocpp-cp-simulator/core/cp/domain/vehicle/importProfile";
 import {
   availableCurrentTypes,
   EDITABLE_SPEC_FIELDS as EDITABLE,
   type EditableSpecField,
   type VehicleProfile,
-} from "@ocpp-cp-sim/core/cp/domain/vehicle/VehicleProfile";
+} from "@ocpp-cp-simulator/core/cp/domain/vehicle/VehicleProfile";
 import { cn } from "@/lib/utils";
 
 import { FILTER_INPUT_CLASS, FILTER_SELECT_CLASS } from "../filterStyles";

@@ -1,7 +1,7 @@
 import { describe, expect, it, spyOn } from "bun:test";
 
 import { CLIChargePointService } from "../service";
-import type { ChargePoint } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
+import type { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
 import { testCpInit } from "./testCpInit";
 
 /**

@@ -3,7 +3,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Plus, PlugZap, SearchX } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import ChargePointConfigModal, {
   defaultChargePointConfig,
 } from "../../components/ChargePointConfigModal";

@@ -1,32 +1,32 @@
 import type {
   AuthorizationCacheSeedEntry,
   AuthorizationCacheView,
-} from "@ocpp-cp-sim/core/cp/domain/auth/AuthorizationCacheSeed";
+} from "@ocpp-cp-simulator/core/cp/domain/auth/AuthorizationCacheSeed";
 import {
   VehicleCatalogError,
   type VehicleCatalog,
   type VehicleCatalogErrorKind,
-} from "@ocpp-cp-sim/core/cp/domain/vehicle/VehicleCatalog";
+} from "@ocpp-cp-simulator/core/cp/domain/vehicle/VehicleCatalog";
 import type {
   PowerLossOptions,
   PowerRestoreOptions,
-} from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
-import type { VehicleProfile } from "@ocpp-cp-sim/core/cp/domain/vehicle/VehicleProfile";
+} from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
+import type { VehicleProfile } from "@ocpp-cp-simulator/core/cp/domain/vehicle/VehicleProfile";
 import { io, type Socket } from "socket.io-client";
 import type {
   DataTransferData,
   DataTransferResult,
-} from "@ocpp-cp-sim/core/cp/domain/types/DataTransfer";
+} from "@ocpp-cp-simulator/core/cp/domain/types/DataTransfer";
 import type {
   OcppCallOutcome,
   OcppCallRequest,
   RawFrameOutcome,
   RawFrameRequest,
-} from "@ocpp-cp-sim/core/cp/domain/types/OcppCall";
+} from "@ocpp-cp-simulator/core/cp/domain/types/OcppCall";
 import type {
   Get15118EVCertificateRequest,
   Get15118EVCertificateResult,
-} from "@ocpp-cp-sim/core/cp/domain/security/get15118EVCertificate";
+} from "@ocpp-cp-simulator/core/cp/domain/security/get15118EVCertificate";
 
 import type {
   ChargePointEvent,
@@ -43,55 +43,55 @@ import type {
   OCPPAvailability,
   OCPPStatus,
   StatusNotificationOptions,
-} from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+} from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import type {
   MeterReadingContext,
   StartTransactionCommandOptions,
   IdTokenTypeName,
   StopTransactionCommandOptions,
   TransactionUpdateOptions,
-} from "@ocpp-cp-sim/core/cp/domain/connector/Transaction";
-import { LogLevel, LogType } from "@ocpp-cp-sim/core/cp/shared/Logger";
+} from "@ocpp-cp-simulator/core/cp/domain/connector/Transaction";
+import { LogLevel, LogType } from "@ocpp-cp-simulator/core/cp/shared/Logger";
 import type {
   EVSettings,
   EVSettingsPatch,
-} from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
-import type { AutoTrafficConfig } from "@ocpp-cp-sim/core/cp/domain/connector/AutoTraffic";
+} from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
+import type { AutoTrafficConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/AutoTraffic";
 import type {
   DiagnosticsStatus,
   FirmwareStatus,
   UploadLogStatus,
-} from "@ocpp-cp-sim/core/cp/domain/types/FirmwareLogStatus";
-import type { AutoMeterValueConfig } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
-import type { ActiveChargingProfile } from "@ocpp-cp-sim/core/cp/domain/connector/Connector";
+} from "@ocpp-cp-simulator/core/cp/domain/types/FirmwareLogStatus";
+import type { AutoMeterValueConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
+import type { ActiveChargingProfile } from "@ocpp-cp-simulator/core/cp/domain/connector/Connector";
 import type {
   ScenarioDefinition,
   ScenarioExecutionContext,
   ScenarioMode,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import type { ScenarioRunResult } from "@ocpp-cp-sim/core/cp/application/verification/ScenarioAssertions";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import type { ScenarioRunResult } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioAssertions";
 import type {
   ScenarioRunPage,
   ScenarioRunQuery,
-} from "@ocpp-cp-sim/core/cp/application/verification/ScenarioRunSummary";
+} from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunSummary";
 import type {
   TimelineEntry,
   TimelinePage,
   TimelineQuery,
-} from "@ocpp-cp-sim/core/cp/application/services/OperationalTimeline";
+} from "@ocpp-cp-simulator/core/cp/application/services/OperationalTimeline";
 import type {
   ChargingSessionPage,
   ChargingSessionQuery,
-} from "@ocpp-cp-sim/core/cp/domain/persistence/ChargingSessionRepository";
-import type { ChargingSession } from "@ocpp-cp-sim/core/cp/domain/session/ChargingSession";
+} from "@ocpp-cp-simulator/core/cp/domain/persistence/ChargingSessionRepository";
+import type { ChargingSession } from "@ocpp-cp-simulator/core/cp/domain/session/ChargingSession";
 import type {
   HistoryOptions,
   StateHistoryEntry,
-} from "@ocpp-cp-sim/core/cp/application/services/types/StateSnapshot";
+} from "@ocpp-cp-simulator/core/cp/application/services/types/StateSnapshot";
 import type {
   NetworkSimLayerConfig,
   ResolvedNetworkSimConfig,
-} from "@ocpp-cp-sim/core/cp/infrastructure/transport/network-sim/config";
+} from "@ocpp-cp-simulator/core/cp/infrastructure/transport/network-sim/config";
 import {
   RPC_TIMEOUT_MS,
   RpcFailure,
@@ -109,7 +109,7 @@ import {
   type StatusWire,
   type SubscribeResult,
   type WireSimulatorConfig,
-} from "@ocpp-cp-sim/contracts/index";
+} from "@ocpp-cp-simulator/contracts/index";
 
 type CpEventEnvelope = Extract<EventEnvelope, { kind: "cp" }>;
 type RegistryEventEnvelope = Extract<EventEnvelope, { kind: "registry" }>;

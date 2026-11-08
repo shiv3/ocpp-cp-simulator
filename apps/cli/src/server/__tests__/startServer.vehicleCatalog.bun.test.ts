@@ -2,8 +2,8 @@
 // Runs under `bun test`: a real daemon against a stub Open EV Directory.
 import { afterEach, describe, expect, it } from "bun:test";
 
-import id7Curves from "@ocpp-cp-sim/core/cp/infrastructure/vehicle-catalog/open-ev-directory/__fixtures__/id7GtxChargingCurves.json";
-import id7Variant from "@ocpp-cp-sim/core/cp/infrastructure/vehicle-catalog/open-ev-directory/__fixtures__/id7GtxVariant.json";
+import id7Curves from "@ocpp-cp-simulator/core/cp/infrastructure/vehicle-catalog/open-ev-directory/__fixtures__/id7GtxChargingCurves.json";
+import id7Variant from "@ocpp-cp-simulator/core/cp/infrastructure/vehicle-catalog/open-ev-directory/__fixtures__/id7GtxVariant.json";
 import { startServer, type RunningServer } from "../startServer";
 import { connectTestClient } from "./socketHarness";
 

@@ -10,15 +10,15 @@ import {
   type FakeChargePointService,
 } from "../../test/harness";
 import { DataContext } from "../../../data/providers/DataProvider";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import type {
   ChargePointService,
   ChargePointSnapshot,
   StoredLogEntry,
-} from "@ocpp-cp-sim/client/interfaces/ChargePointService";
-import { ANALYZE_DISCLAIMER } from "@ocpp-cp-sim/trace/analysisDisclaimer";
+} from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
+import { ANALYZE_DISCLAIMER } from "@ocpp-cp-simulator/trace/analysisDisclaimer";
 import SessionAnalysisPanel from "./SessionAnalysisPanel";
-import { deferred } from "@ocpp-cp-sim/core/test/deferred";
+import { deferred } from "@ocpp-cp-simulator/core/test/deferred";
 
 /** `CpDetailPage` always renders `TransactionsTab` (the default active tab),
  *  whose `useStateHistory` crashes on the harness's auto-stubbed

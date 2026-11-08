@@ -2,13 +2,13 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import type { Socket } from "socket.io-client";
 
-import { BunSqliteDatabase } from "@ocpp-cp-sim/core/cp/domain/persistence/BunSqliteDatabase";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/domain/persistence/BunSqliteDatabase";
 import {
   connectTestClient,
   startTestServer,
   type TestServer,
 } from "./socketHarness";
-import { startMockCsms } from "@ocpp-cp-sim/core/cp/infrastructure/transport/__tests__/mockCsms";
+import { startMockCsms } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/__tests__/mockCsms";
 
 /**
  * Clearing the connect-trigger arm on disconnect has to reach the DB, not just

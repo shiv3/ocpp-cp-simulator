@@ -14,7 +14,7 @@
  * name but no id, which could be neither run nor removed.
  */
 
-import { SCENARIO_ID_MAX } from "@ocpp-cp-sim/contracts/limits";
+import { SCENARIO_ID_MAX } from "@ocpp-cp-simulator/contracts/limits";
 
 /** Fields the schema marks required, in the order they are reported. */
 const REQUIRED_FIELDS = ["id", "name", "targetType", "nodes", "edges"] as const;

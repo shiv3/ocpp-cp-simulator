@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Socket } from "socket.io-client";
 
-import { BunSqliteDatabase } from "@ocpp-cp-sim/core/cp/domain/persistence/BunSqliteDatabase";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/domain/persistence/BunSqliteDatabase";
 import { connectTestClient, startTestServer } from "./socketHarness";
 
 // Reproduction harness for #101: upload a scenario in remote mode (the daemon's

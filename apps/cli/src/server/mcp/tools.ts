@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { LogType } from "@ocpp-cp-sim/core/cp/shared/Logger";
+import { LogType } from "@ocpp-cp-simulator/core/cp/shared/Logger";
 import type { McpServer, ToolCallResult } from "mcp-lite";
 import {
   blueprintSchema,
@@ -17,7 +17,7 @@ import {
   METHODS,
   RpcFailure,
   scenarioWaitExtensionSecondsSchema,
-} from "@ocpp-cp-sim/contracts/index";
+} from "@ocpp-cp-simulator/contracts/index";
 import { errorCodeFrom, rpcFailureMessage, runRpc } from "../socketServer";
 import {
   ID_TOKEN_TYPE_VALUES,
@@ -25,7 +25,7 @@ import {
   STOP_REASONS,
   TRANSACTION_CHARGING_STATES,
   TRANSACTION_EVENT_TRIGGER_REASONS,
-} from "@ocpp-cp-sim/core/cp/domain/connector/Transaction";
+} from "@ocpp-cp-simulator/core/cp/domain/connector/Transaction";
 import type { RuntimeSocketIoDeps } from "../socketServer";
 
 function successResult(data: unknown): ToolCallResult {

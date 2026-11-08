@@ -6,7 +6,7 @@ import { idTokenKey } from "./idTokenKey";
 import {
   AUTHORIZATION_CACHE_SEED_MAX,
   AUTHORIZATION_STATUSES,
-} from "@ocpp-cp-sim/contracts/authorization";
+} from "@ocpp-cp-simulator/contracts/authorization";
 import { OCPP_2_0_1, OCPP_2_1 } from "../types/OcppVersion";
 
 /**

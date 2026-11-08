@@ -15,14 +15,14 @@ import {
   toLibraryScenario,
 } from "../lib/scenarioLibrary";
 import { useScenarioLibrary } from "../lib/useScenarioLibrary";
-import type { ScenarioDefinition } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import type { ScenarioDefinition } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import { useChargePoints } from "../../data/hooks/useChargePoints";
 import { useConfig } from "../../data/hooks/useConfig";
 import {
   exportScenarioToJSON,
   importScenarioFromJSON,
 } from "../../utils/scenarioFile";
-import type { ScenarioTemplate } from "@ocpp-cp-sim/core/utils/scenarioTemplates";
+import type { ScenarioTemplate } from "@ocpp-cp-simulator/core/utils/scenarioTemplates";
 import { cn } from "@/lib/utils";
 import { useDataContext } from "@/data/providers/DataProvider";
 import EmptyState from "../components/EmptyState";

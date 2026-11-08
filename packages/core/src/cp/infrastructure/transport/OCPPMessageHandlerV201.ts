@@ -33,7 +33,7 @@ import type {
   SecurityEventNotificationRequestV201,
   SignCertificateRequestV201,
   SignCertificateResponseV201,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import type { OCPPWebSocket } from "./OCPPWebSocket";
 import type { ProtocolCodec } from "./profile/ProtocolProfile";
 import { CallWaiters } from "./CallWaiters";

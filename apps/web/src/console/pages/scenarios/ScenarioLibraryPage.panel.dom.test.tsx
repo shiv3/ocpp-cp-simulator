@@ -10,9 +10,9 @@ import {
 } from "../../test/harness";
 import { forkScenario } from "../../test/scenarioFixtures";
 import { LIBRARY_SCOPE } from "../../lib/scenarioLibrary";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
-import type { ChargePointSnapshot } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
-import type { ScenarioExecutionContext } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
+import type { ChargePointSnapshot } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
+import type { ScenarioExecutionContext } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 
 function snapshot(id: string): ChargePointSnapshot {
   return {

@@ -28,10 +28,10 @@ import "@xyflow/react/dist/style.css";
 import type {
   ScenarioDefinition,
   ScenarioNode,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import { ScenarioNodeType } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
-import type { AutoMeterValueConfig } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import { ScenarioNodeType } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
+import type { AutoMeterValueConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
 import {
   meterNodeToCurveConfig,
   applyCurveConfigToMeterNode,

@@ -1,7 +1,7 @@
 import React from "react";
 
 import { cn } from "@/lib/utils";
-import type { ScenarioNode } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import type { ScenarioNode } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import { tileFor } from "./stepVisuals";
 
 /** The type tile: a 28px square in the step category's colour. */

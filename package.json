@@ -1,5 +1,5 @@
 {
-  "name": "ocpp-cp-simulator",
+  "name": "ocpsim",
   "description": "OCPP 1.6 / 2.0.1 / 2.1 charge point simulator: CLI daemon with a Socket.IO control plane, JSON-Lines mode, MCP endpoint, scenario engine and a bundled web console (runs on Bun)",
   "license": "Apache-2.0",
   "repository": {
@@ -29,6 +29,7 @@
     "apps/*"
   ],
   "bin": {
+    "ocpsim": "dist-cli/main.js",
     "ocpp-cp-sim": "dist-cli/main.js"
   },
   "files": [

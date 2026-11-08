@@ -5,7 +5,7 @@ import type { ProtocolCodec } from "../profile/ProtocolProfile";
 import type { OCPPWebSocket } from "../OCPPWebSocket";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { GenerationToken, Settlement } from "../network-sim";
-import type { MeterValuesRequestV16 } from "@ocpp-cp-sim/ocpp/index";
+import type { MeterValuesRequestV16 } from "@ocpp-cp-simulator/ocpp/index";
 import { stubOperatingPoint } from "../../../domain/connector/__tests__/operatingPointStub";
 
 /**

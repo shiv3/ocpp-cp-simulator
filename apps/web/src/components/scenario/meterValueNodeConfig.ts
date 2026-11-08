@@ -1,7 +1,7 @@
 import type {
   AutoMeterValueConfig,
   CurvePoint,
-} from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
+} from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
 
 /** Loosely-typed bag matching the ScenarioEditor node form state. */
 export type MeterNodeFormData = Record<string, unknown>;

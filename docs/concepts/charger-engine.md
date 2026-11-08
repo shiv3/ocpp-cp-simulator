@@ -42,7 +42,7 @@ the [CLI](../entities/cli.md#behavior-code---behavior-and-behavior-build) page.
 
 ## Stability
 
-**`api: 1` is a preview.** The behavior contract (`@ocpp-cp-sim/contracts/behavior`, `Behavior.api: 1`) is
+**`api: 1` is a preview.** The behavior contract (`@ocpp-cp-simulator/contracts/behavior`, `Behavior.api: 1`) is
 usable and tested, but it is not final until the charger-engine work is on `main` and has been used outside
 this repository. Until then a breaking change to it bumps `api` (a behavior with another `api` is refused at
 load), and the change is called out in the PR description and commit message of that change. The word _experimental_ below marks the members most
@@ -169,7 +169,7 @@ the gate. See [OCPP versions and transports](ocpp-versions-and-transports.md#soa
 
 ### Behavior API
 
-Types only, in `packages/contracts/src/behavior.ts` (import `@ocpp-cp-sim/contracts/behavior`; it is not
+Types only, in `packages/contracts/src/behavior.ts` (import `@ocpp-cp-simulator/contracts/behavior`; it is not
 re-exported from the package index, whose names would collide). `api: 1` is a [preview](#stability).
 
 ```ts
@@ -252,7 +252,7 @@ connection of a CALL's handler) does nothing: the members above that act throw `
 engine swallows. `ctx.state` of an unloaded behavior is a loose object, not the engine's entry.
 
 Behavior modules import types only. They must not use module-scope mutable state, `Date`, `Math.random` or
-timers (one module instance serves every station); the ESLint config `@ocpp-cp-sim/contracts/eslint-behavior`
+timers (one module instance serves every station); the ESLint config `@ocpp-cp-simulator/contracts/eslint-behavior`
 reports these. The API must work on k6: no `AbortController`, `URL`, `structuredClone`, `queueMicrotask`,
 `performance`, async generators or `for await`; `ocpp-cp-sim behavior build` checks this.
 

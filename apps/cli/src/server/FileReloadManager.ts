@@ -1,11 +1,11 @@
 import * as fs from "fs";
 import * as path from "path";
 
-import type { ScenarioDefinition } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import { validateScenarioSchema } from "@ocpp-cp-sim/core/scenario/scenarioSchemaValidator";
-import { assertLoadableScenario } from "@ocpp-cp-sim/core/scenario/loadableScenario";
+import type { ScenarioDefinition } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import { validateScenarioSchema } from "@ocpp-cp-simulator/core/scenario/scenarioSchemaValidator";
+import { assertLoadableScenario } from "@ocpp-cp-simulator/core/scenario/loadableScenario";
 import type { CPRegistry } from "./CPRegistry";
-import type { Database } from "@ocpp-cp-sim/core/cp/domain/persistence/Database";
+import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
 import { FileWatcher } from "./FileWatcher";
 import {
   forgetWatchedConnectorScenarioFiles,
@@ -19,7 +19,7 @@ import {
   ARRAY_MAX_ITEMS,
   SCENARIO_MAX_BYTES,
   STR_64K_MAX,
-} from "@ocpp-cp-sim/contracts/limits";
+} from "@ocpp-cp-simulator/contracts/limits";
 
 /** What kind of file was reloaded. */
 export type FileReloadTarget = "id-tags" | "scenario";

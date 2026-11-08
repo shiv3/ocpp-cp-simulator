@@ -95,7 +95,7 @@ ocpp-cp-sim --daemon
 > the repository variable `NPM_PUBLISH=true` — the first version is published
 > by hand from the release asset, the trusted publisher is then registered on
 > npmjs.com, and the variable is set. Until that first publish has happened
-> this page does not advertise `npm install -g ocpp-cp-simulator`, for the
+> this page does not advertise `npm install -g ocpsim`, for the
 > reason #321 gives: a documented install command must resolve. The package
 > needs Bun at run time whichever way it is installed — the bin is
 > `dist-cli/main.js`, a `bun build --target=bun` bundle under a `bun`
@@ -736,7 +736,7 @@ ocpp-cp-sim behavior build examples/behaviors/flaky-firmware.ts --out dist/flaky
   `await using`, in the file or in anything it imports: k6 hangs silently on them. The syntax check runs
   before the type check, because the ES2017 library turns the same constructs into confusing "cannot find
   name" errors.
-- The ESLint config `@ocpp-cp-sim/contracts/eslint-behavior` (`packages/contracts/eslint/behavior.js`, a flat
+- The ESLint config `@ocpp-cp-simulator/contracts/eslint-behavior` (`packages/contracts/eslint/behavior.js`, a flat
   config array) reports `Date`, `performance`, `Math.random`, `crypto.randomUUID`, timers, module-scope `let` /
   `var`, module-scope empty arrays / objects and `new Map` / `Set`, and the three syntaxes above. Spread it
   after your own TypeScript parser setup.

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import {
   ScenarioNodeType,
   type ScenarioNodeData,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import {
   NODE_FORM_REGISTRY,
   meterValueFormToNodeData,

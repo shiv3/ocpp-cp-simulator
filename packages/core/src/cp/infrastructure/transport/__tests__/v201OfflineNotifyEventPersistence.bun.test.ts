@@ -6,9 +6,9 @@ import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { Transaction } from "../../../domain/connector/Transaction";
 import type { MonitoringEvent } from "../../../domain/monitoring/MonitorEvaluation";
 import { BunSqliteDatabase } from "../../../domain/persistence/BunSqliteDatabase";
-import { strictValidationErrors } from "@ocpp-cp-sim/ocpp/validate";
-import { v201Schemas } from "@ocpp-cp-sim/ocpp/v201/schemas";
-import { v21Schemas } from "@ocpp-cp-sim/ocpp/v21/schemas";
+import { strictValidationErrors } from "@ocpp-cp-simulator/ocpp/validate";
+import { v201Schemas } from "@ocpp-cp-simulator/ocpp/v201/schemas";
+import { v21Schemas } from "@ocpp-cp-simulator/ocpp/v21/schemas";
 
 /**
  * #538, N07.FR.04 with --state-db: a NotifyEvent queued while offline is a

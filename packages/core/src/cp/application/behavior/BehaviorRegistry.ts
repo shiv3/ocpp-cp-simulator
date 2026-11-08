@@ -1,4 +1,7 @@
-import type { CallAnswer, CallBehavior } from "@ocpp-cp-sim/contracts/behavior";
+import type {
+  CallAnswer,
+  CallBehavior,
+} from "@ocpp-cp-simulator/contracts/behavior";
 import { behaviorActionMatches } from "../../domain/types/csmsActionNames";
 import { deepPartialMatch } from "../../../scenario/deepPartialMatch";
 

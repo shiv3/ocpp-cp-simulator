@@ -7,7 +7,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import type {
   Behavior,
   BehaviorContext,
-} from "@ocpp-cp-sim/contracts/behavior";
+} from "@ocpp-cp-simulator/contracts/behavior";
 import { runBehavior, type BehaviorRun } from "./runBehavior";
 import { answerTo, definition, startScenario, type Step } from "./runScenario";
 

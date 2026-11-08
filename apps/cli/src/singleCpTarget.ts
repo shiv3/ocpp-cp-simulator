@@ -2,65 +2,65 @@ import * as fs from "fs";
 import type {
   DataTransferData,
   DataTransferResult,
-} from "@ocpp-cp-sim/core/cp/domain/types/DataTransfer";
+} from "@ocpp-cp-simulator/core/cp/domain/types/DataTransfer";
 import type {
   OcppCallOutcome,
   OcppCallRequest,
   RawFrameOutcome,
   RawFrameRequest,
-} from "@ocpp-cp-sim/core/cp/domain/types/OcppCall";
+} from "@ocpp-cp-simulator/core/cp/domain/types/OcppCall";
 import type {
   Get15118EVCertificateRequest,
   Get15118EVCertificateResult,
-} from "@ocpp-cp-sim/core/cp/domain/security/get15118EVCertificate";
+} from "@ocpp-cp-simulator/core/cp/domain/security/get15118EVCertificate";
 import type {
   DiagnosticsStatus,
   FirmwareStatus,
   UploadLogStatus,
-} from "@ocpp-cp-sim/core/cp/domain/types/FirmwareLogStatus";
+} from "@ocpp-cp-simulator/core/cp/domain/types/FirmwareLogStatus";
 
 import type {
   AuthorizationCacheSeedEntry,
   AuthorizationCacheView,
-} from "@ocpp-cp-sim/core/cp/domain/auth/AuthorizationCacheSeed";
+} from "@ocpp-cp-simulator/core/cp/domain/auth/AuthorizationCacheSeed";
 import type { CLIChargePointService } from "./service";
 import {
   defaultAutoTrafficConfig,
   type AutoTrafficConfig,
-} from "@ocpp-cp-sim/core/cp/domain/connector/AutoTraffic";
+} from "@ocpp-cp-simulator/core/cp/domain/connector/AutoTraffic";
 import type {
   ChargePointService,
   ChargePointSnapshot,
   ScenarioTemplateInfo,
-} from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+} from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 import type { ChargePointStatus } from "./types";
 import type {
   EVSettings,
   EVSettingsPatch,
-} from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
-import type { AutoMeterValueConfig } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
-import type { ActiveChargingProfile } from "@ocpp-cp-sim/core/cp/domain/connector/Connector";
+} from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
+import type { AutoMeterValueConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
+import type { ActiveChargingProfile } from "@ocpp-cp-simulator/core/cp/domain/connector/Connector";
 import type {
   ScenarioDefinition,
   ScenarioExecutionContext,
   ScenarioMode,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import type { ScenarioRunResult } from "@ocpp-cp-sim/core/cp/application/verification/ScenarioAssertions";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import type { ScenarioRunResult } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioAssertions";
 import type {
   HistoryOptions,
   StateHistoryEntry,
-} from "@ocpp-cp-sim/core/cp/application/services/types/StateSnapshot";
+} from "@ocpp-cp-simulator/core/cp/application/services/types/StateSnapshot";
 import type {
   OCPPStatus,
   StatusNotificationOptions,
-} from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+} from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import type {
   MeterReadingContext,
   StartTransactionCommandOptions,
   IdTokenTypeName,
   StopTransactionCommandOptions,
   TransactionUpdateOptions,
-} from "@ocpp-cp-sim/core/cp/domain/connector/Transaction";
+} from "@ocpp-cp-simulator/core/cp/domain/connector/Transaction";
 
 export interface FacadeSingleCpTarget {
   readonly chargePointService: ChargePointService;

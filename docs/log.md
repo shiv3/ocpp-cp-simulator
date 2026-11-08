@@ -2180,7 +2180,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-05] restructure | The repository is a Bun workspace (#578)
 
 - `src/`, `vendor/ocpp-schemas/` and `schema/` moved with `git mv` into `packages/{ocpp,contracts,trace,k6-runtime,core,client}` and `apps/{cli,web}`, as assigned by `PACKAGE_MAP`; the mechanical part (moves, import specifiers, every path named in docs, config, scripts and comments) is produced by `scripts/workspaces-move.ts`, so it can be regenerated on a newer `main`. Behaviour is unchanged. The older entries in this log keep the paths they were written with.
-- [Overview](overview.md#source-layout-and-package-boundaries): the package map is now the layout, with the `exports` convention, the `workspace:*` rule and the `tsc -b` projects. `scripts/check-package-boundaries.ts` additionally checks that cross-package imports are `@ocpp-cp-sim/…` specifiers and that each `package.json` declares exactly the workspace dependencies its imports need.
+- [Overview](overview.md#source-layout-and-package-boundaries): the package map is now the layout, with the `exports` convention, the `workspace:*` rule and the `tsc -b` projects. `scripts/check-package-boundaries.ts` additionally checks that cross-package imports are `@ocpp-cp-simulator/…` specifiers and that each `package.json` declares exactly the workspace dependencies its imports need.
 - [Testing strategy](analyses/testing-strategy.md#type-checking): one composite tsconfig per package; `typecheck` is `tsc -b` because `--noEmit` is rejected for project references.
 - [CLI](entities/cli.md), [Docker image](entities/docker-image.md): the image now runs the `dist-cli/main.js` bundle with no `node_modules`; the tarball check also refuses workspace members and `workspace:` ranges and installs with npm.
 - Two files the single-project setup had hidden were placed correctly in `PACKAGE_MAP`: `k6-types.d.ts` belongs to `k6-runtime`, `domSmoke.dom.test.tsx` to `apps/web`.
@@ -2306,7 +2306,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 ## [2026-11-07] ingest | Behavior types, BehaviorRegistry and ChargerEngine (charger engine stage B)
 
-- `@ocpp-cp-sim/contracts/behavior` holds the behavior API types; `BehaviorRegistry` now selects between code behaviors and scenario rules (exact connector, oldest registration, `onBusy`, release by owner); `ChargerEngine` and `ChargerState` own the event queue, the `ctx` implementation and the behaviors loaded with `cp.loadBehavior()`. `runBehavior()` drives them on a `VirtualClock`. [Charger engine design](concepts/charger-engine.md#behavior-api) records the decisions, [Testing strategy](analyses/testing-strategy.md#behavior-tests) the harness.
+- `@ocpp-cp-simulator/contracts/behavior` holds the behavior API types; `BehaviorRegistry` now selects between code behaviors and scenario rules (exact connector, oldest registration, `onBusy`, release by owner); `ChargerEngine` and `ChargerState` own the event queue, the `ctx` implementation and the behaviors loaded with `cp.loadBehavior()`. `runBehavior()` drives them on a `VirtualClock`. [Charger engine design](concepts/charger-engine.md#behavior-api) records the decisions, [Testing strategy](analyses/testing-strategy.md#behavior-tests) the harness.
 
 ## [2026-11-07] ingest | Default behaviors move into the engine (charger engine stage B)
 
@@ -2340,7 +2340,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 ## [2026-11-07] ingest | Loading behavior code (charger engine stage D1)
 
-- `--behavior` / `--allow-behavior-code` on the CLI and daemon, `behavior build`, the `@ocpp-cp-sim/contracts/eslint-behavior` config and `examples/behaviors/flaky-firmware.ts`; `engine_state` (schema 23) persists behavior `ctx.state` and the notification statuses and `engine.resume()` runs after the session reconcile; `runBehavior` talks to the fake CSMS over an in-memory socket by default. [Charger engine design](analyses/charger-engine-migration.md), [CLI](entities/cli.md#behavior-code---behavior-and-behavior-build), [Daemon](entities/daemon.md), [State persistence](concepts/state-persistence.md), [Testing strategy](analyses/testing-strategy.md#behavior-tests).
+- `--behavior` / `--allow-behavior-code` on the CLI and daemon, `behavior build`, the `@ocpp-cp-simulator/contracts/eslint-behavior` config and `examples/behaviors/flaky-firmware.ts`; `engine_state` (schema 23) persists behavior `ctx.state` and the notification statuses and `engine.resume()` runs after the session reconcile; `runBehavior` talks to the fake CSMS over an in-memory socket by default. [Charger engine design](analyses/charger-engine-migration.md), [CLI](entities/cli.md#behavior-code---behavior-and-behavior-build), [Daemon](entities/daemon.md), [State persistence](concepts/state-persistence.md), [Testing strategy](analyses/testing-strategy.md#behavior-tests).
 
 ## [2026-11-07] ingest | k6, browser and scale verification (charger engine stage D2)
 

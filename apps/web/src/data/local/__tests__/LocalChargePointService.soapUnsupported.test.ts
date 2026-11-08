@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { DefaultBootNotification } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import { DefaultBootNotification } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import { LocalChargePointService } from "../LocalChargePointService";
 
 describe("LocalChargePointService SOAP support", () => {

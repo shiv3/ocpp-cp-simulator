@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ChargePoint } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
-import type { WireSimulatorConfig } from "@ocpp-cp-sim/contracts/events";
+import type { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
+import type { WireSimulatorConfig } from "@ocpp-cp-simulator/contracts/events";
 import type { LocalChargePointService } from "../local/LocalChargePointService";
 
 /**

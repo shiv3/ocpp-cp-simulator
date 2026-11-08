@@ -296,7 +296,10 @@ describe.skipIf(!canBindBunServe())(
           const sign = await csms.waitForCall("SignCertificate");
           await sent;
           const { csr } = sign.payload as { csr: string };
-          expect(Object.keys(sign.payload as object)).toEqual(["csr"]);
+          // #720 A02.FR.24: 2.1 adds a requestId, 2.0.1 has none.
+          expect(Object.keys(sign.payload as object)).toEqual(
+            version === "OCPP-2.1" ? ["csr", "requestId"] : ["csr"],
+          );
           expect(
             cp.certificateStore.pendingCsr("ChargingStationCertificate"),
           ).toBe(csr);
@@ -425,7 +428,12 @@ describe.skipIf(!canBindBunServe())(
           const sent = cp.sendSignCertificate(pem);
           const sign = await csms.waitForCall("SignCertificate");
           await sent;
-          expect(sign.payload).toEqual({ csr: pem });
+          expect(sign.payload).toEqual({
+            csr: pem,
+            ...(version === "OCPP-2.1"
+              ? { requestId: expect.any(Number) }
+              : {}),
+          });
           expect(
             cp.certificateStore.pendingCsr("ChargingStationCertificate"),
           ).toBe(pem);

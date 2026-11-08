@@ -1,4 +1,4 @@
-// The fleet of the V1 determinism check (docs/analyses/charger-engine.md): N
+// The fleet of the V1 determinism check (docs/concepts/charger-engine.md): N
 // simulated chargers run behavior-shaped async loops on a VirtualClock and the
 // ordered effects are recorded. Shared by the Bun test and by the browser
 // check (scripts/verify/browser), which hashes the same effects to show that

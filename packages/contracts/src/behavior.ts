@@ -1,5 +1,5 @@
 /**
- * The behavior API (docs/analyses/charger-engine.md, "Behavior API"): types
+ * The behavior API (docs/concepts/charger-engine.md, "Behavior API"): types
  * only. A behavior is a plain TypeScript module that imports these types and
  * nothing else; it must not use module-scope mutable state, `Date`,
  * `Math.random` or timers, because every wait and every draw goes through
@@ -12,7 +12,7 @@
 
 /** What a behavior needs from the station that runs it. */
 export type BehaviorCapability =
-  "ocpp1.6" | "ocpp2.x" | "physical" | "virtual-time" | "raw-frames";
+  "ocpp1.6" | "ocpp2.x" | "physical" | "raw-frames";
 
 /** JSON-serializable data, the only kind of user state the engine holds. */
 export type JsonValue =

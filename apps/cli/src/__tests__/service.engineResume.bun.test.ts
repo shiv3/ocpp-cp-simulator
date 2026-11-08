@@ -6,7 +6,7 @@ import { runMigrations } from "@ocpp-cp-sim/core/cp/domain/persistence/schema";
 import type { Connector } from "@ocpp-cp-sim/core/cp/domain/connector/Connector";
 import type { ChargePointInitOptions } from "../types";
 
-// Persistence stores engine state (docs/analyses/charger-engine.md): the
+// Persistence stores engine state (docs/concepts/charger-engine.md): the
 // connector_runtime row is the connector's record in the charger engine's
 // state, and after a restore the loaded behaviors get `onResume`.
 const INIT: ChargePointInitOptions = {

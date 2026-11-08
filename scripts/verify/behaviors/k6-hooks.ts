@@ -1,7 +1,7 @@
 // Checks, on a real k6, the parts of the behavior API stage E added that the
 // k6 host provides: event hooks (connected, callResult, callReceived),
 // beforeSend (a rewrite and a drop) and ctx.accepted. Used by the stage E
-// verification in docs/analyses/charger-engine.md:
+// verification in docs/concepts/charger-engine.md:
 //
 //   bun apps/cli/src/main.ts export-k6 --behavior scripts/verify/behaviors/k6-hooks.ts -o /tmp/k6hooks
 //   bun scripts/verify/fakeCsms16.ts --port 9100 --log /tmp/frames.jsonl --update-firmware &

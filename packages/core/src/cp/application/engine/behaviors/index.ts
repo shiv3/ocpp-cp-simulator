@@ -31,3 +31,27 @@ export function registerDefaultBehaviors(
   engine.registerDefault(unlockBehavior(cp));
   engine.registerDefault(transactionBehavior(cp));
 }
+
+/**
+ * The default behaviors and the actions each answers, from the behaviors
+ * themselves (nothing runs): what `behavior.list` reports and what
+ * `docs/entities/default-behaviors.md` tabulates.
+ */
+export function describeDefaultBehaviors(): Array<{
+  id: string;
+  actions: string[];
+}> {
+  // The handlers close over the station and touch it only when a CALL comes.
+  const none = undefined as unknown as ChargePoint;
+  return [
+    firmwareBehavior(none),
+    signedFirmwareBehavior(none),
+    diagnosticsBehavior(none),
+    logsBehavior(none),
+    resetBehavior(none),
+    availabilityBehavior(none),
+    reservationBehavior(none),
+    unlockBehavior(none),
+    transactionBehavior(none),
+  ].map((b) => ({ id: b.id, actions: Object.keys(b.onCall ?? {}) }));
+}

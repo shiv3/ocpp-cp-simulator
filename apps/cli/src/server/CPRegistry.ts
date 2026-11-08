@@ -3,7 +3,10 @@ import * as fs from "fs";
 import { CLIChargePointService } from "../service";
 import type { SessionSettledInfo } from "../service";
 import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
-import { behaviorFitProblem } from "@ocpp-cp-sim/core/cp/application/engine/behaviorFit";
+import {
+  behaviorFitProblem,
+  behaviorShapeProblem,
+} from "@ocpp-cp-sim/core/cp/application/engine/behaviorFit";
 import {
   BehaviorLibrary,
   BehaviorNotLoadableError,
@@ -395,6 +398,19 @@ export class CPRegistry {
         // One row that cannot be rebuilt is not the daemon's end: the others
         // come back, and this one stays in the table for a start that can.
         this.storedSelection.delete(row.cp_id);
+        // A step after `instantiate` failed: the service is registered but was
+        // never wired. Take it out, or it sits in list() and never connects.
+        const partial = this.services.get(row.cp_id);
+        if (partial) {
+          this.unsubscribes.get(row.cp_id)?.();
+          this.unsubscribes.delete(row.cp_id);
+          this.services.delete(row.cp_id);
+          try {
+            partial.cleanup(true);
+          } catch {
+            // The restore of this row is being given up anyway.
+          }
+        }
         console.warn(
           `[CPRegistry] Skipping restore of charge point "${row.cp_id}": ${
             error instanceof Error ? error.message : String(error)
@@ -596,7 +612,6 @@ export class CPRegistry {
     for (const behavior of behaviors) {
       const problem = behaviorFitProblem(behavior, {
         ocppVersion: ocppVersion ?? "OCPP-1.6J",
-        virtualTime: false,
       });
       if (problem) throw new BehaviorNotLoadableError(problem);
     }
@@ -672,6 +687,8 @@ export class CPRegistry {
       throw new Error(`cpId already exists: ${init.cpId}`);
     }
     const preparedInit = this.prepareInit(init);
+    // A removed station's stored selection does not follow its id.
+    this.storedSelection.delete(init.cpId);
     this.persistCreate(preparedInit);
     let svc: CLIChargePointService;
     try {
@@ -733,6 +750,11 @@ export class CPRegistry {
       : existing.engineStateSnapshot();
     const previousInit = existing.getInit();
     const previousColumn = this.storedSelection.get(init.cpId);
+    // Find out before the old station is closed: a selection this engine
+    // refuses must leave the station connected and as it was.
+    existing.assertBehaviorsLoadable(
+      this.library.select(preparedInit.behaviors),
+    );
     existing.cleanup();
     this.unsubscribes.get(init.cpId)?.();
     this.unsubscribes.delete(init.cpId);
@@ -748,8 +770,27 @@ export class CPRegistry {
     } catch (error) {
       // The new configuration cannot run: put the old station back, row and
       // service, rather than leave the id gone.
-      this.persistCreate(previousInit, previousColumn);
-      this.instantiate(previousInit, { engineState });
+      // The SOAP callback URL the daemon derived is not the operator's: it
+      // goes back to the row as absent, like on any other write (#183).
+      const stored = previousInit.soapCallbackUrlDerived
+        ? {
+            ...previousInit,
+            soapCallbackUrl: undefined,
+            soapCallbackUrlDerived: undefined,
+          }
+        : previousInit;
+      this.persistCreate(stored, previousColumn);
+      const back = this.instantiate(previousInit, { engineState });
+      // Everything the success path restores: the old station comes back whole.
+      this.networkSimManager?.onCpCreated(previousInit.cpId);
+      back.restoreScenariosFromDatabase();
+      for (const { connectorId, definition } of scenarioSnapshot) {
+        try {
+          back.loadScenario(connectorId, definition);
+        } catch {
+          // It loaded before; the original error is the one to report.
+        }
+      }
       throw error;
     }
     if (!keepStored) this.storedSelection.delete(init.cpId);
@@ -1087,6 +1128,7 @@ export class CPRegistry {
     this.unsubscribes.get(cpId)?.();
     this.unsubscribes.delete(cpId);
     this.services.delete(cpId);
+    this.storedSelection.delete(cpId);
     if (opts.notify !== false) {
       this.notifyRegistryMembership({ change: "removed", cpId, service: svc });
     }
@@ -1190,7 +1232,10 @@ function restoreBehaviors(
   const fits = (id: string): string | null => {
     const behavior = library.get(id);
     if (!behavior) return "is not loaded in this run";
-    return behaviorFitProblem(behavior, { ocppVersion, virtualTime: false });
+    return (
+      behaviorShapeProblem(behavior) ??
+      behaviorFitProblem(behavior, { ocppVersion })
+    );
   };
   const parsed = safeJsonParse<unknown>(row.behaviors);
   if (

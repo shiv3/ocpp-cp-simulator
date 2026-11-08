@@ -287,7 +287,7 @@ Waits are timers of the host, never k6 \`sleep()\`.
 
 Refused at export: \`mode: "extend"\`, \`ctx.defaultBehavior\`, \`ctx.connector\`, the physical
 verbs (\`plugIn\`, \`unplug\`, \`authorize\`, \`startCharging\`, \`stopCharging\`,
-\`setConnectorStatus\`) and the capabilities \`physical\`, \`virtual-time\`, \`ocpp2.x\`.
+\`setConnectorStatus\`) and the capabilities \`physical\` and \`ocpp2.x\`.
 Responses are not checked against the OCPP schema. CALLs no rule claims are
 answered by the same auto-responder as in a scenario export.
 `;

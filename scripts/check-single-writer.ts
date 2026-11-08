@@ -1,6 +1,6 @@
 // scripts/check-single-writer.ts
 //
-// One writer for connector state (docs/analyses/charger-engine.md, "Charger
+// One writer for connector state (docs/concepts/charger-engine.md, "Charger
 // engine"). The status, availability, scheduled availability and error fields
 // of a connector are a record in the charger engine's state, and the engine
 // is the only code that changes it. `Connector` keeps its setters so that
@@ -390,7 +390,7 @@ function main(argv: string[]): number {
   }
   console.error(formatReport(report));
   console.error(
-    "\nConnector state is written by the charger engine only: call ChargePoint.updateConnectorStatus or dispatch an engine event; see docs/analyses/charger-engine.md.",
+    "\nConnector state is written by the charger engine only: call ChargePoint.updateConnectorStatus or dispatch an engine event; see docs/concepts/charger-engine.md.",
   );
   return 1;
 }

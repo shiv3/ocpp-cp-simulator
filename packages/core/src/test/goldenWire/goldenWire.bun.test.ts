@@ -1,4 +1,4 @@
-// The golden wire test (docs/analyses/charger-engine.md, rule 4): real
+// The golden wire test (docs/concepts/charger-engine.md, rule 4): real
 // ChargePoint instances against an in-process fake CSMS, on OCPP 1.6 and
 // 2.0.1, with the ordered OCPP frames compared with committed fixtures. With
 // nothing configured, the bytes on the wire and their order must not change.

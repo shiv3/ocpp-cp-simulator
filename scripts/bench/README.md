@@ -1244,7 +1244,7 @@ a spare machine and a CSMS.
 Not the daemon benchmark above: this one needs no daemon and no CSMS. It runs N
 simulated chargers in **one Bun process on a `VirtualClock`** and reports heap
 and RSS per charger and the real time one virtual hour takes
-([charger engine design → Verification results](../../docs/analyses/charger-engine.md#verification-results)).
+([charger engine migration → Verification results](../../docs/analyses/charger-engine-migration.md#verification-results)).
 
 ```sh
 bun scripts/bench/engineScale.ts --suite                 # the table, one process per row

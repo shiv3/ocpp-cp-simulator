@@ -1,5 +1,5 @@
 // The k6 host of the behavior API, on a fake charge point and real (short)
-// timers. The k6 side is exercised by the real-k6 run in docs/analyses/charger-engine.md.
+// timers. The k6 side is exercised by the real-k6 run in docs/concepts/charger-engine.md.
 import { describe, expect, it } from "vitest";
 import { RngStreams } from "@ocpp-cp-sim/core/cp/shared/rng";
 import {
@@ -257,8 +257,11 @@ describe("BehaviorHost ctx", () => {
             ctx.notify.logStatus("Uploaded", { requestId: 3 });
             ctx.raw("[2]");
             ctx.state.n = 1;
-            // The k6 host still accepts an assignment the contract now forbids.
-            (ctx as { state: unknown }).state = { m: 2 };
+            // Like the simulator, the k6 host has a getter only: assigning
+            // `ctx.state` throws, the object stays the one behaviors share.
+            expect(() => {
+              (ctx as { state: unknown }).state = { m: 2 };
+            }).toThrow(TypeError);
             ctx.log("hi");
             expect(ctx.charger).toMatchObject({
               id: "CP-1",
@@ -267,7 +270,7 @@ describe("BehaviorHost ctx", () => {
             });
             expect(() => ctx.plugIn(1)).toThrow(/not supported by the k6 host/);
             expect(() => ctx.connector(1)).toThrow(/ctx\.connector/);
-            expect(ctx.state).toEqual({ m: 2 });
+            expect(ctx.state).toEqual({ n: 1 });
           },
         },
       ],
@@ -309,11 +312,10 @@ describe("unmetBy", () => {
     const problems = unmetBy({
       api: 1,
       id: "x",
-      requires: ["physical", "virtual-time", "ocpp2.x"],
+      requires: ["physical", "ocpp2.x"],
       onCall: { Reset: { mode: "extend", handle: () => ({ response: {} }) } },
     });
-    expect(problems).toHaveLength(4);
-    expect(problems.join("\n")).toContain('"virtual-time"');
+    expect(problems).toHaveLength(3);
     expect(problems.join("\n")).toContain('mode "extend"');
   });
 

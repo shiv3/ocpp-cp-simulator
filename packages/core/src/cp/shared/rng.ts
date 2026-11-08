@@ -1,5 +1,5 @@
 /**
- * Seeded random streams (docs/analyses/charger-engine.md).
+ * Seeded random streams (docs/concepts/charger-engine.md).
  *
  * `RngStreams(seed)` hands out one stream per (charger id, stream name),
  * derived from `hash(seed, chargerId, streamName)`. A stream depends on those

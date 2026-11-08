@@ -1,7 +1,7 @@
 // scripts/check-direct-time.ts
 //
 // Direct reads of the clock and of randomness in packages/core/src/cp/domain
-// and packages/core/src/cp/application (docs/analyses/charger-engine.md,
+// and packages/core/src/cp/application (docs/concepts/charger-engine.md,
 // "Clock and random"). Everything there reads time and arms timers through the
 // injected SimClock and draws random numbers from the injected RngStreams, so
 // a run can be replayed. This check lists what is left and fails when
@@ -480,7 +480,7 @@ function main(argv: string[]): number {
   }
   console.error(formatReport(report));
   console.error(
-    "\nUse the injected clock (this.clock / ctx) and random streams instead; see docs/analyses/charger-engine.md.",
+    "\nUse the injected clock (this.clock / ctx) and random streams instead; see docs/concepts/charger-engine.md.",
   );
   return 1;
 }

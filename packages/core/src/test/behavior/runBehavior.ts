@@ -1,4 +1,4 @@
-// The behavior test harness (docs/analyses/charger-engine.md, "Loading code"):
+// The behavior test harness (docs/concepts/charger-engine.md, "Loading code"):
 // a real ChargePoint on a VirtualClock with seeded streams, wired to the fake
 // CSMS of the golden wire test, with behaviors loaded. Runs under `bun test`
 // only (the fake CSMS uses Bun.serve).
@@ -92,7 +92,7 @@ export async function runBehavior(
   // A real hop first: with no traffic in flight the fake CSMS reports quiet at
   // once, and the work that follows a virtual timer (scenario nodes, behavior
   // continuations) still needs its turn.
-  const settle = async (): Promise<void> => {
+  const settleOnce = async (): Promise<void> => {
     if (csms.memory) {
       await csms.settle();
       await drainMicrotasks();
@@ -102,7 +102,18 @@ export async function runBehavior(
     await csms.settle(quietMs);
     await drainMicrotasks();
   };
-  await settle();
+  // A behavior that keeps something in `ctx.state` that cannot be stored fails
+  // the test here; the daemon only warns and keeps the last storable value.
+  const settle = async (): Promise<void> => {
+    await settleOnce();
+    cp.engine.assertStorableState();
+  };
+  try {
+    await settle();
+  } catch (error) {
+    await rig.dispose();
+    throw error;
+  }
 
   const frames = (): readonly WireFrame[] => csms.frames.slice(origin);
   return {

@@ -1,4 +1,4 @@
-// Stage D2, item 3 (docs/analyses/charger-engine.md, "Verification results"):
+// Stage D2, item 3 (docs/analyses/charger-engine-migration.md, "Verification results"):
 // how many simulated chargers fit in one Bun process on a VirtualClock?
 //
 //   bun scripts/bench/engineScale.ts --mode bare --n 10000 --hours 1

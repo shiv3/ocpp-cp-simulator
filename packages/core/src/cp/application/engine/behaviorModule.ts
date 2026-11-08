@@ -1,4 +1,5 @@
 import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import { behaviorShapeProblem } from "./behaviorFit";
 
 /**
  * Turn the default export of a loaded behavior module into behaviors: one
@@ -21,6 +22,10 @@ export function behaviorsOfModule(label: string, mod: unknown): Behavior[] {
           ` or an array of them (item ${i})`,
       );
     }
+    // What every engine refuses is refused here, once, so that a file with
+    // such a behavior is left out as a whole instead of failing station by station.
+    const problem = behaviorShapeProblem(b as Behavior);
+    if (problem) throw new Error(`${label}: ${problem}`);
     return b as Behavior;
   });
 }

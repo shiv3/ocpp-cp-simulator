@@ -556,6 +556,11 @@ export const behaviorListResultSchema = z.object({
   ),
   /** Whether `--watch-behaviors` is on. */
   watching: z.boolean(),
+  /**
+   * The built-in behaviors every station has, and the CSMS actions each
+   * answers: the actions `mode: "extend"` is possible for.
+   */
+  defaults: ARRAY_1000(z.object({ id: STR_256, actions: ARRAY_1000(STR_256) })),
 });
 
 /**

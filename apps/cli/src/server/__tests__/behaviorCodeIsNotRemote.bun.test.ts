@@ -10,7 +10,7 @@ import {
 
 /**
  * Behavior code is loaded from the operator's own command line and nowhere
- * else (docs/analyses/charger-engine.md, "Loading code"). Socket.IO, MCP and
+ * else (docs/concepts/charger-engine.md, "Loading code"). Socket.IO, MCP and
  * OCPP carry data: a scenario that arrives over `load_scenario` with fields
  * that look like code is stored, or refused, and never run as code.
  */

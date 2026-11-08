@@ -2,7 +2,7 @@ import type { Transaction } from "./Transaction";
 
 /**
  * A {@link Transaction} as the charger engine keeps it
- * (docs/analyses/charger-engine.md, "Charger engine"): plain JSON. The two
+ * (docs/concepts/charger-engine.md, "Charger engine"): plain JSON. The two
  * instants are ISO strings, and a field that is not set is absent (never
  * `undefined`). `Connector.transaction` is a live view over it that hands
  * code the `Transaction` shape, with `Date`s, it always had.

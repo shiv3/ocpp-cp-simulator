@@ -3219,6 +3219,17 @@ export class CLIChargePointService {
   }
 
   /**
+   * Throws if this station could not load one of `wanted` (the checks a load
+   * runs), changing nothing. For a caller that is about to rebuild the station
+   * and must find out before it closes the old one.
+   */
+  assertBehaviorsLoadable(wanted: readonly Behavior[]): void {
+    for (const behavior of wanted) {
+      this._chargePoint.engine.assertLoadable(behavior);
+    }
+  }
+
+  /**
    * Make `wanted` the set of code behaviors running here (a run-time
    * selection): the ones loaded and not wanted are unloaded, the wanted ones
    * not loaded yet are loaded after those already running. `selection` is

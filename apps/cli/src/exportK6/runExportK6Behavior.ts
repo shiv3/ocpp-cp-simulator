@@ -1,6 +1,6 @@
 // apps/cli/src/exportK6/runExportK6Behavior.ts
 // `export-k6 --behavior <file>`: a k6 load test whose virtual charge points run
-// built behavior bundles (docs/analyses/charger-engine.md, "Loading code").
+// built behavior bundles (docs/concepts/charger-engine.md, "Loading code").
 // The bundle is imported statically by the generated entry script; nothing is
 // loaded by name at run time. OCPP 1.6J only.
 import * as fs from "node:fs";

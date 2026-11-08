@@ -1,4 +1,4 @@
-// Golden wire test (docs/analyses/charger-engine.md, Stage A): an in-process
+// Golden wire test (docs/concepts/charger-engine.md, Stage A): an in-process
 // fake CSMS that records every OCPP-J frame in arrival order and answers the
 // charge point's calls from a small, deterministic script. Runs under `bun
 // test` only (Bun.serve).

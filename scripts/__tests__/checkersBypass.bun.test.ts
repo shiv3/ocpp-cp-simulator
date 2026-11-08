@@ -1,6 +1,6 @@
 // The cheap bypass forms the two checks must see. What they cannot see (an
 // alias passed through a function or property, a connector reached under
-// another name through a parameter) is listed in docs/analyses/charger-engine.md,
+// another name through a parameter) is listed in docs/concepts/charger-engine.md,
 // "Review".
 import { describe, expect, it } from "bun:test";
 import { scanSource as time } from "../check-direct-time";

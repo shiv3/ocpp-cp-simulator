@@ -1,5 +1,5 @@
 // packages/k6-runtime/src/behaviorHost.ts
-// The k6 host of the behavior API (docs/analyses/charger-engine.md, "Loading
+// The k6 host of the behavior API (docs/concepts/charger-engine.md, "Loading
 // code"): implements `BehaviorContext` over the OCPP 1.6J charge point of this
 // runtime, which is the same `ScenarioHost` the scenario interpreter drives.
 //
@@ -12,7 +12,7 @@
 //   - Not supported, and refused at export: mode "extend" / `defaultBehavior`
 //     (the k6 auto-responder has no follow-up effects to extend), the physical
 //     verbs and `connector()` (there is no connector model), and the
-//     capabilities `physical`, `virtual-time` and `ocpp2.x`.
+//     capabilities `physical` and `ocpp2.x`.
 //     The members still exist and throw a clear error, for code the static
 //     check could not see (an aliased context).
 //   - Responses are not checked against the OCPP schema (`skipValidation` has
@@ -653,10 +653,6 @@ export class BehaviorHost {
       },
       get state(): Record<string, JsonValue> {
         return userState;
-      },
-      set state(value: Record<string, JsonValue>) {
-        for (const key of Object.keys(userState)) delete userState[key];
-        Object.assign(userState, value);
       },
       async send(action, payload, opts) {
         if (host.isStopping) throw new BehaviorStopped();

@@ -8,7 +8,7 @@
 
 /** What a behavior needs from the station that runs it. */
 export type BehaviorCapability =
-  "ocpp1.6" | "ocpp2.x" | "physical" | "virtual-time" | "raw-frames";
+  "ocpp1.6" | "ocpp2.x" | "physical" | "raw-frames";
 
 /** JSON-serializable data, the only kind of user state the engine holds. */
 export type JsonValue =

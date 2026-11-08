@@ -104,6 +104,73 @@ describe("BehaviorRegistry", () => {
     expect(registry.resolve(call(), new FakeExchange()).kind).toBe("taken");
   });
 
+  describe("precedence: a running scenario wins over code behaviors", () => {
+    const pick = (registry: BehaviorRegistry, c: BehaviorCall): string[] => {
+      const taken: string[] = [];
+      const ex = new FakeExchange(c.action);
+      const r = registry.resolve(c, ex);
+      if (r.kind === "taken")
+        taken.push(
+          r.rule.owner.kind === "code"
+            ? `code:${r.rule.owner.behaviorId}`
+            : `scenario:${r.rule.owner.scenarioId}`,
+        );
+      return taken;
+    };
+    it("a scenario armed after a code behavior wins a CALL that names no connector", () => {
+      const registry = new BehaviorRegistry();
+      registry.register(rule(code("vendor")));
+      registry.register(rule(scenario("run")));
+      expect(pick(registry, call())).toEqual(["scenario:run"]);
+    });
+    it("a scenario rule for another connector still wins over code", () => {
+      const registry = new BehaviorRegistry();
+      registry.register(rule(code("vendor")));
+      registry.register(rule(scenario("run", 2), { connectorId: 2 }));
+      expect(pick(registry, call({ connectorId: 1 }))).toEqual([
+        "scenario:run",
+      ]);
+    });
+    it("among scenario rules the exact connector wins, then the newest run", () => {
+      const registry = new BehaviorRegistry();
+      registry.register(rule(scenario("old", 1), { connectorId: 1 }));
+      registry.register(rule(scenario("new", 1, "n2"), { connectorId: 1 }));
+      registry.register(rule(scenario("other", 2, "n3"), { connectorId: 2 }));
+      expect(pick(registry, call({ connectorId: 1 }))).toEqual([
+        "scenario:new",
+      ]);
+      const again = new BehaviorRegistry();
+      again.register(rule(scenario("a", 1)));
+      again.register(rule(scenario("b", 1, "n2")));
+      expect(pick(again, call())).toEqual(["scenario:b"]);
+    });
+    it("among code rules the one loaded first wins", () => {
+      const registry = new BehaviorRegistry();
+      registry.register(rule(code("first")));
+      registry.register(rule(code("second")));
+      expect(pick(registry, call())).toEqual(["code:first"]);
+    });
+    it("code takes the CALL once the scenario's rule is released, and the default when no rule is left", () => {
+      const registry = new BehaviorRegistry();
+      registry.register(rule(code("vendor")));
+      registry.register(rule(scenario("run")));
+      registry.release((o) => o.kind === "scenario");
+      expect(pick(registry, call())).toEqual(["code:vendor"]);
+      registry.release((o) => o.kind === "code");
+      expect(registry.resolve(call(), new FakeExchange()).kind).toBe("default");
+    });
+    it("a busy scenario rule answers onBusy; the CALL does not fall through to code", () => {
+      const registry = new BehaviorRegistry();
+      const codeTaken: Array<[BehaviorCall, HeldExchange]> = [];
+      registry.register(rule(code("vendor"), {}, codeTaken));
+      registry.register(rule(scenario("run")));
+      registry.resolve(call(), new FakeExchange());
+      const second = new FakeExchange("UpdateFirmware", "m2");
+      expect(registry.resolve(call(), second).kind).toBe("busy");
+      expect(codeTaken).toHaveLength(0);
+    });
+  });
+
   it("translates action names on 2.x only", () => {
     const v16 = new BehaviorRegistry({ ocppVersion: () => "OCPP-1.6J" });
     v16.register(rule(code("a"), { action: "SignedUpdateFirmware" }));

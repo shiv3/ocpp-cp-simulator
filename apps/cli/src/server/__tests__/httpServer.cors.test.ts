@@ -156,3 +156,53 @@ describe("httpServer same-origin CORS behind a reverse proxy", () => {
     expect(res.status).toBe(403);
   });
 });
+
+// DNS rebinding: a page on evil.example whose name now points at the daemon
+// sends Origin == Host == evil.example:port, which "same origin" accepts.
+describe("same-origin with a Host guard (behavior code is allowed)", () => {
+  const policy: CorsPolicy = {
+    kind: "same-origin",
+    allowedHosts: ["127.0.0.1"],
+  };
+  const get = (host: string, origin: string): Promise<Response> =>
+    run(
+      makeHandlers(policy),
+      new Request(`http://${host}/v1/healthz`, { headers: { origin } }),
+    );
+
+  it("refuses a rebound DNS name whose Origin equals its Host", async () => {
+    expect(
+      (await get("evil.example:9700", "http://evil.example:9700")).status,
+    ).toBe(403);
+  });
+  it("still accepts an IP literal, localhost and the named bind host", async () => {
+    expect((await get("127.0.0.1:9700", "http://127.0.0.1:9700")).status).toBe(
+      200,
+    );
+    expect((await get("localhost:9700", "http://localhost:9700")).status).toBe(
+      200,
+    );
+    expect((await get("[::1]:9700", "http://[::1]:9700")).status).toBe(200);
+    expect(
+      (await get("192.168.1.5:9700", "http://192.168.1.5:9700")).status,
+    ).toBe(200);
+  });
+  it("accepts a name that was passed as the bind host", async () => {
+    const res = await run(
+      makeHandlers({ kind: "same-origin", allowedHosts: ["sim.lan"] }),
+      new Request("http://sim.lan:9700/v1/healthz", {
+        headers: { origin: "http://sim.lan:9700" },
+      }),
+    );
+    expect(res.status).toBe(200);
+  });
+  it("without the guard a rebound name is accepted (the old behavior, no code to run)", async () => {
+    const res = await run(
+      makeHandlers({ kind: "same-origin" }),
+      new Request("http://evil.example:9700/v1/healthz", {
+        headers: { origin: "http://evil.example:9700" },
+      }),
+    );
+    expect(res.status).toBe(200);
+  });
+});

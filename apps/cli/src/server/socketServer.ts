@@ -1,3 +1,4 @@
+import { describeDefaultBehaviors } from "@ocpp-cp-sim/core/cp/application/engine/behaviors/index";
 import * as fs from "fs";
 import * as path from "path";
 import type { Server as BunServer, WebSocketHandler } from "bun";
@@ -546,6 +547,7 @@ export async function dispatchRpcCore(
       return {
         behaviors: deps.registry.library.describe(),
         watching: deps.registry.library.watching,
+        defaults: describeDefaultBehaviors(),
       };
     case "behavior.reload":
       return reloadBehaviors(deps);

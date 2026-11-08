@@ -11,7 +11,7 @@ import {
 
 /**
  * What the charger engine owns about one connector
- * (docs/analyses/charger-engine.md, "Charger engine"): status, availability
+ * (docs/concepts/charger-engine.md, "Charger engine"): status, availability
  * (with the change that waits for the running transaction) and the error
  * fields a StatusNotification carries. Plain JSON, no behavior.
  */

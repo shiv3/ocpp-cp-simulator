@@ -33,7 +33,7 @@ export interface TransactionPorts {
 }
 
 /**
- * The default behavior of a transaction (docs/analyses/charger-engine.md,
+ * The default behavior of a transaction (docs/concepts/charger-engine.md,
  * "Charger engine"): starting and stopping one, and the four remote
  * actions of both OCPP versions, written once. The adapters only translate.
  *

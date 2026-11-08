@@ -1550,12 +1550,14 @@ HTTP endpoints (see docs/entities/daemon.md):
  *     stderr. The daemon is exposed on the LAN; defaulting to open
  *     CORS would let any page in the operator's browser call it.
  */
-function resolveCorsPolicy(
-  options: CLIOptions,
-):
+function resolveCorsPolicy(options: CLIOptions):
   | { kind: "any" }
   | { kind: "allowlist"; origins: string[] }
-  | { kind: "same-origin"; trustForwardedHeaders: boolean } {
+  | {
+      kind: "same-origin";
+      trustForwardedHeaders: boolean;
+      allowedHosts?: string[];
+    } {
   if (options.corsOrigins.length > 0) {
     if (options.corsOrigins.length === 1 && options.corsOrigins[0] === "*") {
       return { kind: "any" };
@@ -1566,13 +1568,18 @@ function resolveCorsPolicy(
   if (options.allowBehaviorCode) {
     process.stderr.write(
       "[server] --allow-behavior-code: applying same-origin-only CORS, so a " +
-        "page from another origin cannot call /socket.io or /mcp. A web " +
+        "page from another origin cannot call /socket.io or /mcp, and a Host " +
+        "that is not an IP address, localhost or the bind address is refused " +
+        "(DNS rebinding). A web " +
         "console served from another origin needs `--cors-origin <origin>`; " +
         '`--cors-origin "*"` opens it again.\n',
     );
     return {
       kind: "same-origin",
       trustForwardedHeaders: options.trustForwardedHeaders,
+      // Against DNS rebinding: the Host must be an IP literal, localhost or
+      // the name the daemon was told to bind to.
+      allowedHosts: [host],
     };
   }
   if (isLoopbackHost(host)) return { kind: "any" };

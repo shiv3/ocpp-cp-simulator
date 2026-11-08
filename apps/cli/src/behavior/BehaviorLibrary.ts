@@ -1,3 +1,4 @@
+import { behaviorShapeProblem } from "@ocpp-cp-sim/core/cp/application/engine/behaviorFit";
 import { watch, type FSWatcher } from "node:fs";
 import path from "node:path";
 import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
@@ -114,6 +115,8 @@ export class BehaviorLibrary {
   }
 
   private add(behavior: Behavior, file: string | null): void {
+    const problem = behaviorShapeProblem(behavior);
+    if (problem) throw new Error(problem);
     if (this.entries.has(behavior.id)) {
       throw new Error(`Behavior id "${behavior.id}" is loaded twice`);
     }

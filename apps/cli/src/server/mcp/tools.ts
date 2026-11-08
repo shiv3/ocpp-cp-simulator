@@ -168,7 +168,7 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
 
   mcp.tool("behavior_list", {
     description:
-      "List the behaviors the daemon loaded at start (--behavior) with the file each came from, and whether --watch-behaviors is on.",
+      "List the behaviors the daemon loaded at start (--behavior) with the file each came from, whether --watch-behaviors is on, and the built-in default behaviors with the CSMS actions each answers (the actions that mode extend works for).",
     inputSchema: z.object({}).strict(),
     handler: async () => {
       try {

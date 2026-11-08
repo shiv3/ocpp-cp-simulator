@@ -1,4 +1,4 @@
-// Verification V1 of docs/analyses/charger-engine.md: async functions on a
+// Verification V1 of docs/concepts/charger-engine.md: async functions on a
 // VirtualClock are deterministic on Bun. 1,000 simulated chargers run
 // behavior-shaped async loops (sleeps, random waits, racing timeouts,
 // periodic timers, deep promise chains); the ordered effects of the whole

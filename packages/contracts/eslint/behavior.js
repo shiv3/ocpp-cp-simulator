@@ -1,4 +1,4 @@
-// ESLint flat config for behavior code (docs/analyses/charger-engine.md,
+// ESLint flat config for behavior code (docs/concepts/charger-engine.md,
 // "Behavior API"). A behavior must be a pure function of its `ctx`, because
 // the same code runs on the real clock, on a VirtualClock in tests and on k6.
 // Every wait goes through `ctx.sleep`, every draw through `ctx.random`, every

@@ -1,3 +1,4 @@
+import { isIP } from "node:net";
 import type { Server } from "bun";
 import * as path from "path";
 import type { CLIChargePointService } from "../service";
@@ -119,7 +120,18 @@ export type CorsPolicy =
    * trusted proxy sets those headers — if the daemon is reachable directly,
    * a client can spoof them to forge an allowed origin.
    */
-  | { kind: "same-origin"; trustForwardedHeaders?: boolean };
+  | {
+      kind: "same-origin";
+      trustForwardedHeaders?: boolean;
+      /**
+       * DNS-rebinding guard (set while the daemon runs behavior code): the
+       * request's own Host must be an IP literal, `localhost`, or one of
+       * these names. A page on `evil.example` that rebinds its name to the
+       * daemon has Origin == Host == `evil.example:port`, so equality of the
+       * two proves nothing; the name itself is what has to be known.
+       */
+      allowedHosts?: ReadonlyArray<string>;
+    };
 
 function pickAllowedOrigin(req: Request, policy: CorsPolicy): string | null {
   if (policy.kind === "any") return "*";
@@ -129,9 +141,7 @@ function pickAllowedOrigin(req: Request, policy: CorsPolicy): string | null {
     return policy.origins.includes(origin) ? origin : null;
   }
   // same-origin: echo back Origin iff it matches the request's host.
-  return isSameOriginRequest(req, origin, policy.trustForwardedHeaders === true)
-    ? origin
-    : null;
+  return isSameOriginRequest(req, origin, policy) ? origin : null;
 }
 
 /**
@@ -147,12 +157,16 @@ function pickAllowedOrigin(req: Request, policy: CorsPolicy): string | null {
 function isSameOriginRequest(
   req: Request,
   origin: string,
-  trustForwarded: boolean,
+  policy: Extract<CorsPolicy, { kind: "same-origin" }>,
 ): boolean {
+  const trustForwarded = policy.trustForwardedHeaders === true;
   try {
     const originUrl = new URL(origin);
     const reqUrl = new URL(req.url);
-    if (originsEqual(originUrl, reqUrl)) return true;
+    if (originsEqual(originUrl, reqUrl)) {
+      if (!policy.allowedHosts) return true;
+      if (isKnownHost(reqUrl.hostname, policy.allowedHosts)) return true;
+    }
     if (trustForwarded) {
       const forwarded = forwardedOrigin(req);
       if (forwarded && originsEqual(originUrl, new URL(forwarded))) return true;
@@ -161,6 +175,17 @@ function isSameOriginRequest(
   } catch {
     return false;
   }
+}
+
+/** An IP literal, `localhost` or an allowed name: not a name an attacker can rebind. */
+function isKnownHost(
+  hostname: string,
+  allowed: ReadonlyArray<string>,
+): boolean {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (isIP(host) !== 0) return true;
+  if (host === "localhost" || host.endsWith(".localhost")) return true;
+  return allowed.some((name) => name.toLowerCase() === host);
 }
 
 function originsEqual(a: URL, b: URL): boolean {
@@ -202,11 +227,7 @@ function isOriginAllowed(req: Request, policy: CorsPolicy): boolean {
   if (policy.kind === "allowlist") return policy.origins.includes(origin);
   // same-origin: only the simulator's own served origin can call the daemon
   // (optionally including the proxy-reported public origin).
-  return isSameOriginRequest(
-    req,
-    origin,
-    policy.trustForwardedHeaders === true,
-  );
+  return isSameOriginRequest(req, origin, policy);
 }
 
 function applyCors(res: Response, req: Request, policy: CorsPolicy): Response {

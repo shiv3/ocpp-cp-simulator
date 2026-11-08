@@ -1,5 +1,5 @@
 /**
- * The simulated charger's view of time (docs/analyses/charger-engine.md).
+ * The simulated charger's view of time (docs/concepts/charger-engine.md).
  *
  * Everything under `domain/` and `application/` reads the time and arms its
  * timers through a {@link SimClock}, so one switch decides whether a run uses

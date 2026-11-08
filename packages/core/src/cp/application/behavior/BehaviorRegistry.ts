@@ -4,7 +4,7 @@ import { deepPartialMatch } from "../../../scenario/deepPartialMatch";
 
 /**
  * The rules that may take an inbound CSMS CALL over from the default path
- * (docs/analyses/charger-engine.md, "BehaviorRegistry"). One per charge point.
+ * (docs/concepts/charger-engine.md, "BehaviorRegistry"). One per charge point.
  *
  * Two providers register here: code behaviors (`{ kind: "code" }`, alive as
  * long as the behavior is loaded) and scenario rules (`{ kind: "scenario" }`,
@@ -205,9 +205,10 @@ export class BehaviorRegistry {
    * own a malformed CALL.
    *
    * Selection: among the rules that name the action (translated on 2.x) and
-   * whose `match` fits the payload, the ones for exactly the CALL's connector
-   * win over the others, then the oldest registration; a warning names the
-   * losers. A CALL that names no connector matches every rule alike.
+   * whose `match` fits the payload, scenario rules win over code rules; within
+   * a kind the ones for exactly the CALL's connector win over the others, then
+   * the newest scenario rule or the code rule loaded first. A warning names
+   * the losers. A CALL that names no connector matches every rule alike.
    */
   resolve(call: BehaviorCall, exchange?: HeldExchange): BehaviorResolution {
     if (this.entries.length === 0) return DEFAULT_RESOLUTION;
@@ -222,12 +223,21 @@ export class BehaviorRegistry {
     });
     if (candidates.length === 0) return DEFAULT_RESOLUTION;
 
+    // A running scenario wins over code behaviors (docs/concepts/call-precedence.md):
+    // first the kind, then the rules for exactly the CALL's connector, then
+    // the newest scenario rule or the code rule loaded first.
+    const tier = (entry: Entry): number =>
+      entry.rule.owner.kind === "scenario" ? 0 : 1;
     const exact = (entry: Entry): number =>
       call.connectorId !== undefined &&
       entry.rule.connectorId === call.connectorId
         ? 0
         : 1;
-    candidates.sort((a, b) => exact(a) - exact(b) || a.seq - b.seq);
+    const age = (a: Entry, b: Entry): number =>
+      a.rule.owner.kind === "scenario" ? b.seq - a.seq : a.seq - b.seq;
+    candidates.sort(
+      (a, b) => tier(a) - tier(b) || exact(a) - exact(b) || age(a, b),
+    );
     const [chosen, ...losers] = candidates;
     if (losers.length > 0) {
       this.options.warn?.(

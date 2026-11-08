@@ -1,6 +1,6 @@
 // Scenario schema 1.5 (#566): csmsCallTrigger behavior "replace", callResponse,
 // $from, useBehavior, and the rows of the runtime contract table in
-// docs/analyses/charger-engine.md.
+// docs/concepts/charger-engine.md.
 import { afterEach, describe, expect, test } from "bun:test";
 import { runBehavior, type BehaviorRun } from "./runBehavior";
 import { answerTo, definition, startScenario, type Step } from "./runScenario";

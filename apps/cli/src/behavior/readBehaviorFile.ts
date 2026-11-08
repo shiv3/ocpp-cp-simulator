@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
 import { behaviorsOfModule } from "@ocpp-cp-sim/core/cp/application/engine/behaviorModule";
 import { bundleBehavior } from "./bundleBehavior";
+import { missingCapabilityProblem } from "./ctxUse";
 
 export interface BehaviorFileContents {
   /** Empty when `unchanged`: the module was not run. */
@@ -55,7 +56,11 @@ export async function readBehaviorFile(
       options.timeoutMs ?? 10_000,
       `Cannot load behavior ${file}: its top level did not finish in time (a top-level await that never settles?)`,
     );
-    return { behaviors: behaviorsOfModule(file, mod), hash };
+    const behaviors = behaviorsOfModule(file, mod);
+    // Refused here instead of at the first call that would fail.
+    const missing = missingCapabilityProblem(file, bundled.code, behaviors);
+    if (missing) throw new Error(`Cannot load behavior ${missing}`);
+    return { behaviors, hash };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

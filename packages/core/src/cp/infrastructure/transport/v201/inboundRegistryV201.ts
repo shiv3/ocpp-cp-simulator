@@ -184,10 +184,18 @@ export interface V201CertificateSigning {
    */
   requestSignature(use: SignedCertificateUse): Promise<void>;
   /**
+   * A chain for `use` was just stored, before its CALLRESULT is written
+   * (#564): a security-profile-3 station hands a new Charging Station
+   * certificate to the transport as the next connection's TLS client
+   * certificate now, so it is used even when the answer is dropped before it
+   * is written (a manual disconnect while network simulation holds it).
+   */
+  certificateStored(use: SignedCertificateUse): void;
+  /**
    * A chain for `use` was installed, the only thing that ends its CSR's
    * resend back-off (a rejected chain leaves it running, #537): for a V2G
    * certificate the station asks the CSMS for the OCSP status of the certificate and its sub-CAs
-   * (M06.FR.07); a security-profile-3 station switches to a new Charging
+   * (M06.FR.07); a security-profile-3 station reconnects with a new Charging
    * Station certificate as its TLS client certificate (A02.FR.08).
    */
   certificateInstalled(use: SignedCertificateUse): void;

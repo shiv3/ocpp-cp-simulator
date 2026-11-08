@@ -870,10 +870,16 @@ export class CPRegistry {
     const unsubSettled = svc.onSessionSettled((info) =>
       this.notifySessionSettled(init.cpId, info),
     );
+    // #724: the credentials the CSMS changed with ChangeConfiguration are the
+    // row's too, so a restart does not bring the creation-time ones back.
+    const unsubCredentials = svc.onSecurityCredentialsChange((change) =>
+      this.persistSecurityCredentials(init.cpId, change),
+    );
     this.services.set(init.cpId, svc);
     this.unsubscribes.set(init.cpId, () => {
       unsub();
       unsubSettled();
+      unsubCredentials();
     });
     if (engineState) svc.restoreEngineState(engineState);
     try {
@@ -892,6 +898,25 @@ export class CPRegistry {
     // create(), update() and restoreFromDatabase() all land here.
     this.notifyInitChange();
     return svc;
+  }
+
+  private persistSecurityCredentials(
+    cpId: string,
+    change: { securityProfile?: number; authorizationKey?: string },
+  ): void {
+    if (!this.database) return;
+    if (change.authorizationKey !== undefined) {
+      this.database.run(
+        "UPDATE charge_points SET authorization_key = ? WHERE cp_id = ?",
+        [change.authorizationKey, cpId],
+      );
+    }
+    if (change.securityProfile !== undefined) {
+      this.database.run(
+        "UPDATE charge_points SET security_profile = ? WHERE cp_id = ?",
+        [change.securityProfile, cpId],
+      );
+    }
   }
 
   /**

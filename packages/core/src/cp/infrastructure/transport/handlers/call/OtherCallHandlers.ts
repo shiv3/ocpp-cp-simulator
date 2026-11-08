@@ -32,7 +32,9 @@ export class ChangeConfigurationHandler implements CallHandler<
   handle(
     payload: ChangeConfigurationRequestV16,
     context: HandlerContext,
-  ): ChangeConfigurationResponseV16 {
+  ): ChangeConfigurationResponseV16 | HandlerOutcome {
+    const previousProfile =
+      context.chargePoint.configuration.getInteger("SecurityProfile") ?? 0;
     const status = context.chargePoint.configuration.applyChange(
       payload.key,
       payload.value,
@@ -46,6 +48,22 @@ export class ChangeConfigurationHandler implements CallHandler<
       `ChangeConfiguration ${payload.key}='${loggedValue}' → ${status}`,
       LogType.CONFIGURATION,
     );
+    // #724 A05.FR.05-07: an accepted SecurityProfile upgrade is answered
+    // first, then the station disconnects and reconnects with it.
+    if (
+      payload.key === "SecurityProfile" &&
+      status === "Accepted" &&
+      (context.chargePoint.configuration.getInteger("SecurityProfile") ?? 0) >
+        previousProfile
+    ) {
+      const outcome: HandlerOutcome = {
+        kind: "handler-outcome",
+        payload: { status },
+        afterResponseSettled: () =>
+          context.chargePoint.switchSecurityProfile(previousProfile),
+      };
+      return outcome;
+    }
     return { status };
   }
 }

@@ -81,6 +81,7 @@ import { clockOf, unrefTimerHandle } from "../../shared/clock";
 import type { SimClock, TimerHandle } from "../../shared/clock";
 import { systemRngStreams } from "../../shared/rng";
 import type { Rng } from "../../shared/rng";
+import type { OperatingPoint } from "../../domain/connector/OperatingPoint";
 import type { TransactionLifecycleEvent } from "../../domain/transport/TransactionLifecycleEvent";
 import type { MonitoringEvent } from "../../domain/monitoring/MonitorEvaluation";
 import { OCPP_2_1 } from "../../domain/types/OcppVersion";
@@ -1324,6 +1325,12 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
                 context: "Transaction.Begin",
                 unitOfMeasure: { unit: "kWh" },
               },
+              // #607: SampledDataCtrlr.TxStartedMeasurands, beside the register.
+              ...this.txBoundarySamples(
+                connectorId,
+                this._chargePoint.configuration.txStartedMeasurands(),
+                "Transaction.Begin",
+              ),
             ],
             connectorId,
             transaction.tagId,
@@ -1385,9 +1392,41 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     this.sendTransactionEventCall(connectorId, payload);
   }
 
+  /**
+   * #607: the configured measurands of a transaction boundary, formatted by
+   * the one builder. `point` is the operating point captured at the stop
+   * instant (Transaction.End); the register is left out because the caller
+   * sends it, in kWh, beside these.
+   */
+  private txBoundarySamples(
+    connectorId: number,
+    measurands: string[],
+    context: "Transaction.Begin" | "Transaction.End",
+    point?: OperatingPoint,
+  ): V201MeterValuesSampledValue[] {
+    const connector = this._chargePoint.getConnector(connectorId);
+    if (!connector || measurands.length === 0) return [];
+    return this.toV201SampledValues(
+      buildSampledValues(
+        connector,
+        measurands,
+        context,
+        { unitMultiplier: true },
+        point,
+      ).filter(
+        (sv) =>
+          !(
+            sv.measurand === "Energy.Active.Import.Register" &&
+            sv.phase === undefined
+          ),
+      ),
+    );
+  }
+
   private sendStopTransaction(
     transaction: Transaction,
     connectorId: number,
+    endPoint?: OperatingPoint,
   ): void {
     const transactionId =
       transaction.cpTransactionId ?? this.rng("transaction-id").uuid();
@@ -1416,7 +1455,15 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       evse: v201TransactionEvse(connectorId),
       meterValue:
         transaction.meterStop !== null
-          ? [
+          ? ([
+              // #607: the history, then the end reading.
+              ...(transaction.txEndedSamples ?? []).map((entry) => ({
+                timestamp: entry.timestamp,
+                sampledValue: this.toV201SampledValues(entry.sampledValue) as [
+                  V201MeterValuesSampledValue,
+                  ...V201MeterValuesSampledValue[],
+                ],
+              })),
               {
                 timestamp,
                 sampledValue: this.withSignedEnergy(
@@ -1427,6 +1474,12 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
                       context: "Transaction.End",
                       unitOfMeasure: { unit: "kWh" },
                     },
+                    ...this.txBoundarySamples(
+                      connectorId,
+                      this._chargePoint.configuration.stopTxnSampledData(),
+                      "Transaction.End",
+                      endPoint,
+                    ),
                   ],
                   connectorId,
                   transaction.tagId,
@@ -1438,7 +1491,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
                   "Transaction.End",
                 ),
               },
-            ]
+            ] as unknown as TransactionEventRequestV201["meterValue"])
           : undefined,
     };
     this.sendTransactionEventCall(connectorId, payload);
@@ -1447,7 +1500,12 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   public sendTransactionEvent(event: TransactionLifecycleEvent): void {
     if (event.phase === "started")
       this.sendStartTransaction(event.transaction, event.connectorId);
-    else this.sendStopTransaction(event.transaction, event.connectorId);
+    else
+      this.sendStopTransaction(
+        event.transaction,
+        event.connectorId,
+        event.endPoint,
+      );
   }
 
   /**

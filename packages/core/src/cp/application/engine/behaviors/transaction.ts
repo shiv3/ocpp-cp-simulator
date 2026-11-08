@@ -15,6 +15,7 @@ import {
   OCPPStatus,
 } from "../../../domain/types/OcppTypes";
 import { isOcpp2Version } from "../../../domain/types/OcppVersion";
+import type { TransactionLifecycleEvent } from "../../../domain/transport/TransactionLifecycleEvent";
 import { LogType } from "../../../shared/Logger";
 
 /**
@@ -23,11 +24,7 @@ import { LogType } from "../../../shared/Logger";
  */
 export interface TransactionPorts {
   /** Hand a transaction phase to the protocol encoder. */
-  sendTransactionEvent(event: {
-    phase: "started" | "ended";
-    transaction: Transaction;
-    connectorId: number;
-  }): void;
+  sendTransactionEvent(event: TransactionLifecycleEvent): void;
   /** (Re)start the ConnectionTimeOut of a connector that is in Preparing. */
   startConnectionTimeout(connectorId: number): void;
 }
@@ -348,6 +345,9 @@ export function stopTransaction(
     return;
   }
 
+  // #607: the Transaction.End sample describes the last charging instant;
+  // power reads 0 once the status below leaves Charging.
+  const endPoint = connector.operatingPoint();
   connector.stopAutoMeterValue();
   connector.patchTransaction({
     stopTime: options.stoppedAt ?? nowDate(cp),
@@ -363,6 +363,7 @@ export function stopTransaction(
     phase: "ended",
     transaction,
     connectorId: connector.id,
+    endPoint,
   });
 
   cp.events.emit("transactionStopped", {

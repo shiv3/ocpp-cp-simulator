@@ -45,6 +45,9 @@ class MockChargePoint {
   configuration = {
     transactionMessageAttempts: () => 3,
     meterValuesSampledData: () => ["Current.Import"],
+    stopTxnSampledData: () => [],
+    stopTxnAlignedData: () => [],
+    txStartedMeasurands: () => [],
   };
   notifyOutgoingCall(): void {}
   notifyIncomingCall(): void {}

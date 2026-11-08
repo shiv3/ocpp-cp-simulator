@@ -146,6 +146,9 @@ function setup(
       messageTimeout: vi.fn(() => config.timeout ?? 30),
       stopTransactionOnInvalidId: vi.fn(() => true),
       meterValuesSampledData: vi.fn(() => []),
+      stopTxnSampledData: vi.fn(() => []),
+      stopTxnAlignedData: vi.fn(() => []),
+      txStartedMeasurands: vi.fn(() => []),
     },
   };
   const handler = new OCPPMessageHandlerV201(

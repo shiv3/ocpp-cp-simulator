@@ -1,5 +1,6 @@
 import type { Connector } from "./Connector";
 import { convertUnit, type SampledValueOverride } from "./MeterRealism";
+import type { OperatingPoint } from "./OperatingPoint";
 
 /** Subset of ReadingContext values we actually use (§7.35). */
 export type ReadingContext =
@@ -18,6 +19,10 @@ export type ReadingContext =
 export interface MeterSampleOverrides {
   measurands?: string[];
   timestamp?: Date;
+  /** An operating point captured earlier, formatted instead of resolving
+   *  anew: a `Transaction.End` sample describes the last charging instant,
+   *  not a connector that has already left `Charging` (#607, #327). */
+  point?: OperatingPoint;
 }
 
 /** SampledValue shape per OCPP 1.6 §7.43. */
@@ -66,6 +71,7 @@ export function buildSampledValues(
   measurands: string[],
   context: ReadingContext,
   options: SampleBuildOptions = {},
+  capturedPoint?: OperatingPoint,
 ): SampledValue[] {
   const samples: SampledValue[] = [];
   const meterWh = connector.meterValue;
@@ -82,7 +88,7 @@ export function buildSampledValues(
   // describe one instant and the energy register reads the same record. The
   // read is pure: the code that sends the sample set announces a schedule
   // crossing first (`Connector.announceScheduleCrossingNow`).
-  const point = connector.operatingPoint();
+  const point = capturedPoint ?? connector.operatingPoint();
   const {
     soc,
     acceptedW: powerW,

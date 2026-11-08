@@ -119,24 +119,38 @@ describe("SignedUpdateFirmwareHandler", () => {
     expect(sent[0]).toEqual({ status: "Downloading", requestId: 1 });
   });
 
-  it("ignores a second request while a train is running and stops on disconnect", async () => {
+  it("cancels the running train for a second request and answers AcceptedCanceled (L01.FR.26), and stops on disconnect", async () => {
     const { ctx, sent } = buildContext();
     const handler = new SignedUpdateFirmwareHandler();
-    for (let i = 0; i < 2; i++) {
+    const answers: unknown[] = [];
+    for (const requestId of [5, 6]) {
       const res = handler.handle(
         firmwarePayload({
+          requestId,
           retrieveDateTime: new Date(Date.now() - 1000).toISOString(),
         }),
         ctx,
       );
       if (!isHandlerOutcome(res)) throw new Error("expected an outcome");
+      answers.push(res.payload);
       res.afterResponseSettled();
       await vi.advanceTimersByTimeAsync(0);
     }
-    expect(sent).toEqual([{ status: "Downloading", requestId: 5 }]);
+    expect(answers).toEqual([
+      { status: "Accepted" },
+      { status: "AcceptedCanceled" },
+    ]);
+    // The first train's Downloading, then the second one's.
+    expect(sent).toEqual([
+      { status: "Downloading", requestId: 5 },
+      { status: "Downloading", requestId: 6 },
+    ]);
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(sent.filter((n) => n.requestId === 5)).toHaveLength(1);
     ctx.chargePoint.disconnect();
+    const count = sent.length;
     await vi.advanceTimersByTimeAsync(20_000);
-    expect(sent).toHaveLength(1);
+    expect(sent).toHaveLength(count);
   });
 });
 

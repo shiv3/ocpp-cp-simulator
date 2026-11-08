@@ -144,7 +144,11 @@ const ConfigurationKeysTab: React.FC<ConfigurationKeysTabProps> = ({
                       <Button
                         type="button"
                         size="sm"
-                        disabled={draft === undefined}
+                        // An empty draft of an integer key would be stored as 0.
+                        disabled={
+                          draft === undefined ||
+                          (info.type === "integer" && draft.trim() === "")
+                        }
                         onClick={() => void save(info.key)}
                       >
                         {t("cp.configKeys.save")}

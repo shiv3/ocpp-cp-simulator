@@ -139,7 +139,7 @@
   "cp.controls.removeFailed": "コネクターを削除できませんでした: {{message}}",
   "cp.socMeterSync.readFailed": "同期設定を読み込めませんでした({{error}}):同期をオンにするまで、SoC の設定はメーターを変更しません。",
   "cp.socMeterSync.applyFailed": "同期をコネクターに適用できませんでした:{{error}}",
-  "cp.section.configuration": "設定",
+  "cp.section.configuration": "設定キー",
   "cp.configKeys.unsupported": "この接続では設定キーを利用できません",
   "cp.configKeys.loadFailed": "設定キーを読み込めませんでした",
   "cp.configKeys.empty": "この充電ポイントには設定キーがありません",

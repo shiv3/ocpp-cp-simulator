@@ -9,6 +9,7 @@ import {
   readConfigurationKeys,
   writeConfigurationKey,
 } from "../configurationAccess";
+import type { Logger } from "../../../shared/Logger";
 import { DEVICE_MODEL } from "../../device-model/DeviceModelRegistry";
 
 const cpShape = {
@@ -52,6 +53,38 @@ describe("configuration key access (#612)", () => {
       const { keys } = readConfigurationKeys(s, false, ["AuthorizationKey"]);
       expect(keys[0]?.value).toBe("");
       expect(JSON.stringify(keys)).not.toContain("s3cret");
+    });
+
+    it("marks the write-only AuthorizationKey so a client can hide it", () => {
+      const { keys } = readConfigurationKeys(store(), false, [
+        "AuthorizationKey",
+        "HeartbeatInterval",
+      ]);
+      expect(keys.map((k) => k.mutability)).toEqual(["WriteOnly", undefined]);
+    });
+
+    it("refuses a value longer than a CiString500, leaving the key unchanged", () => {
+      const s = store();
+      const before = s.get("MeterValuesSampledData")?.value;
+      const long = Array(60).fill("Energy.Active.Import.Register").join(",");
+      expect(long.length).toBeGreaterThan(500);
+      expect(() =>
+        writeConfigurationKey(s, false, "MeterValuesSampledData", long),
+      ).toThrow(ConfigurationWriteRejectedError);
+      expect(s.get("MeterValuesSampledData")?.value).toEqual(before);
+    });
+
+    it("logs an operator write and hides a write-only value", () => {
+      const lines: string[] = [];
+      const logger = {
+        info: (m: string) => lines.push(m),
+      } as unknown as Logger;
+      const s = store();
+      writeConfigurationKey(s, false, "HeartbeatInterval", "42", logger);
+      writeConfigurationKey(s, false, "AuthorizationKey", "s3cret", logger);
+      expect(lines[0]).toContain("HeartbeatInterval='42'");
+      expect(lines[1]).toContain("AuthorizationKey=");
+      expect(lines.join("\n")).not.toContain("s3cret");
     });
 
     it("writes a writable key through the store", () => {
@@ -99,7 +132,10 @@ describe("configuration key access (#612)", () => {
 
   describe("OCPP 2.x", () => {
     it("lists only registered keys, with their Device Model name", () => {
-      const { keys } = readConfigurationKeys(store(), true);
+      const { keys, unknown } = readConfigurationKeys(store(), true);
+      // Store keys outside the Device Model (GetConfigurationMaxKeys, ...) are
+      // left out of a full read, not reported as unknown names.
+      expect(unknown).toEqual([]);
       expect(keys.length).toBeGreaterThan(0);
       for (const k of keys) {
         const def = DEVICE_MODEL.byValueKey(k.key);

@@ -970,6 +970,7 @@ export class LocalChargePointService implements ChargePointService {
       isOcpp2Version(cp.ocppVersion),
       key,
       value,
+      cp.logger,
     );
   }
 

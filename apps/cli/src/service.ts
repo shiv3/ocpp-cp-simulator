@@ -1438,6 +1438,7 @@ export class CLIChargePointService {
       isOcpp2Version(this._chargePoint.ocppVersion),
       key,
       value,
+      this._chargePoint.logger,
     );
   }
 

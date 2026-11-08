@@ -2397,3 +2397,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - New control-plane methods `cp.config_keys.get` / `cp.config_keys.set`, MCP tools `get_config_keys` / `set_config_key` and the console's Configuration tab. 2.x goes through the Device Model registry (mutability), 1.6 through the store's read-only flag; an unknown key is `not_found`, a read-only key or a refused value `invalid_params` (no new error code).
 - [Control plane](concepts/control-plane.md#configuration-keys-612): two method rows and the new section. [MCP endpoint](entities/mcp-endpoint.md): two tool rows, 37 curated tools. [Device Model registry](entities/device-model.md): consumer row. [Web console](entities/web-console.md#configuration-tab): tab list and section. [Index](index.md) and [Driving from an AI agent](analyses/driving-from-an-ai-agent.md): tool count.
+
+## [2026-11-08] lint | Configuration keys control review fixes (#612)
+
+- `cp.config_keys.get` without `keys` on 2.x no longer reports the unregistered store keys as `unknown`. A write longer than 500 (1.6) / 1000 (2.x) characters is refused with `invalid_params`, and an operator write is logged on the `Configuration` channel (write-only values redacted). `AuthorizationKey` carries `mutability: WriteOnly` on 1.6 so the console shows its placeholder; an integer key cannot be saved from an empty field; the ja label of the CP page tab is `設定キー`. Updated [Control plane](concepts/control-plane.md#configuration-keys-612).

@@ -10,6 +10,8 @@
 // entry is not part of the station's Device Model: it is neither listed nor
 // writable (#569: acceptance implies implemented behavior).
 import { DEVICE_MODEL } from "../device-model/DeviceModelRegistry";
+import { LogType, type Logger } from "../../shared/Logger";
+import { REDACTED_VALUE } from "../../shared/redaction";
 import {
   isWriteOnlyConfigurationKey,
   type ConfigurationStore,
@@ -29,14 +31,26 @@ export interface ConfigurationKeyInfo {
   readonly component?: string;
   readonly variable?: string;
   readonly instance?: string;
+  /** Always set on 2.x; on 1.6 only `WriteOnly` (`AuthorizationKey`). */
   readonly mutability?: ConfigurationKeyMutability;
 }
+
+/**
+ * Longest value a write accepts: a 1.6 `KeyValue.value` is a CiString500
+ * (OCPP 1.6 ed2 §7.29) and a 2.x `attributeValue` a string of 1000, so a
+ * longer value would stay stored but break the next GetConfiguration /
+ * GetVariables answer.
+ */
+export const MAX_CONFIGURATION_VALUE_LENGTH = { v16: 500, v2: 1000 } as const;
 
 export type ConfigurationSetStatus = "Accepted" | "RebootRequired";
 
 export interface ConfigurationKeyList {
   readonly keys: readonly ConfigurationKeyInfo[];
-  /** Requested names the charge point has no such key for. */
+  /**
+   * Requested names the charge point has no such key for (and, on 2.x, no
+   * Device Model variable). Empty when no name was requested.
+   */
   readonly unknown: readonly string[];
 }
 
@@ -48,7 +62,7 @@ export class UnknownConfigurationKeyError extends Error {
   }
 }
 
-/** The key exists but its value cannot be written, or the value is refused. */
+/** The key exists but its value cannot be written, or the value is refused (including a value over the length limit). */
 export class ConfigurationWriteRejectedError extends Error {
   constructor(
     readonly key: string,
@@ -79,7 +93,13 @@ function describe(
     type: entry.key.type,
     readonly: entry.key.readonly,
   } as const;
-  if (!is2x) return base;
+  // The 1.6 flag set has no write-only; the store's rule (`AuthorizationKey`)
+  // is reported the way 2.x does so a client can hide the value.
+  if (!is2x) {
+    return isWriteOnlyConfigurationKey(entry.key)
+      ? { ...base, mutability: "WriteOnly" }
+      : base;
+  }
   const def = DEVICE_MODEL.byValueKey(entry.key.name);
   if (!def) return null;
   return {
@@ -105,7 +125,9 @@ export function readConfigurationKeys(
   for (const entry of known) {
     const info = describe(entry, is2x);
     if (info) infos.push(info);
-    else missing.push(entry.key.name);
+    // A key outside the Device Model is "unknown" only when it was asked for;
+    // a full read lists what is registered and nothing else.
+    else if (keys.length > 0) missing.push(entry.key.name);
   }
   infos.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
   return { keys: infos, unknown: missing };
@@ -121,6 +143,7 @@ export function writeConfigurationKey(
   is2x: boolean,
   key: string,
   value: string,
+  logger?: Logger,
 ): ConfigurationSetStatus {
   const entry = store.get(key);
   if (!entry) throw new UnknownConfigurationKeyError(key);
@@ -129,7 +152,21 @@ export function writeConfigurationKey(
   if (info.readonly || info.mutability === "ReadOnly") {
     throw new ConfigurationWriteRejectedError(key, "read_only");
   }
+  const limit = is2x
+    ? MAX_CONFIGURATION_VALUE_LENGTH.v2
+    : MAX_CONFIGURATION_VALUE_LENGTH.v16;
+  if (value.length > limit) {
+    throw new ConfigurationWriteRejectedError(key, "invalid_value");
+  }
   const status = store.applyChange(key, value);
+  // The CSMS-driven writes are logged; so is this one, or a changed
+  // HeartbeatInterval could not be explained from the log.
+  logger?.info(
+    `Operator set ${key}='${
+      store.isWriteOnly(key) ? REDACTED_VALUE : value
+    }' → ${status}`,
+    LogType.CONFIGURATION,
+  );
   if (status === "Accepted" || status === "RebootRequired") return status;
   throw new ConfigurationWriteRejectedError(
     key,

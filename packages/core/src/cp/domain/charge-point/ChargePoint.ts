@@ -113,7 +113,9 @@ import type {
   TransactionStoppedReason,
   TransactionUpdateOptions,
 } from "../connector/Transaction";
+import { TX_ENDED_SAMPLES_MAX } from "../connector/Transaction";
 import {
+  buildSampledValues,
   reportedActivePowerW,
   type ReadingContext,
 } from "../connector/MeterValueBuilder";
@@ -458,6 +460,9 @@ export class ChargePoint {
   private readonly _outbox: Outbox;
   private readonly _heartbeat: HeartbeatService;
   private readonly _clockAligned: ClockAlignedMeterScheduler;
+  /** #607: the 2.x `AlignedDataCtrlr.TxEndedInterval` grid, apart from the
+   *  `Interval` one: it samples the transaction-end history, sends nothing. */
+  private readonly _txEndedAligned: ClockAlignedMeterScheduler;
   private readonly _stateManager: StateManager;
   private readonly _timeline: OperationalTimeline;
   private readonly _timelineProjector: OperationalTimelineProjector;
@@ -775,6 +780,14 @@ export class ChargePoint {
       (boundary) => this.emitClockAlignedSamples(boundary),
       this._clock,
     );
+    this._txEndedAligned = new ClockAlignedMeterScheduler(
+      (boundary) =>
+        this.recordAlignedTxEndedSamples(
+          this._configuration.stopTxnAlignedData(),
+          boundary,
+        ),
+      this._clock,
+    );
 
     // #299: a charge point that draws from a pool when a call names no tag.
     // An explicit tagId always wins, so this only ever fills a gap.
@@ -875,7 +888,12 @@ export class ChargePoint {
     this._clockAligned.setIntervalSeconds(
       this._configuration.clockAlignedDataInterval(),
     );
-    if (isOcpp2Version(this._ocppVersion)) this.applyRetryBackOff();
+    if (isOcpp2Version(this._ocppVersion)) {
+      this.applyRetryBackOff();
+      this._txEndedAligned.setIntervalSeconds(
+        this._configuration.alignedDataTxEndedInterval(),
+      );
+    }
     // A value persisted with --state-db is in force from the first open.
     this._webSocket?.setPingInterval(
       this._configuration.webSocketPingInterval(),
@@ -1299,6 +1317,12 @@ export class ChargePoint {
             }`,
             LogType.CONFIGURATION,
           );
+          break;
+        case "AlignedDataTxEndedInterval":
+          // #607: the grid of the 2.x transaction-end history.
+          if (typeof value === "number") {
+            this._txEndedAligned.setIntervalSeconds(value);
+          }
           break;
         default:
           break;
@@ -2562,6 +2586,7 @@ export class ChargePoint {
     } else {
       this.stopHeartbeat();
       this._clockAligned.disable();
+      this._txEndedAligned.disable();
       // B02.FR.02: no NotifyEvent until the boot is Accepted.
       this._monitorEvaluation?.setReporting(false);
     }
@@ -2604,6 +2629,7 @@ export class ChargePoint {
     }
 
     this._clockAligned.enable();
+    this._txEndedAligned.enable();
     // #455: after the status fan-out and the flush of the queue (both
     // already scheduled), so the recovery's messages come last.
     queueMicrotask(() => this.runPowerRecovery());
@@ -2621,11 +2647,26 @@ export class ChargePoint {
    * transaction's id rides along once the CSMS has assigned one.
    */
   private emitClockAlignedSamples(boundaryMs: number): void {
+    // 1.6 samples the transaction-end history on the same grid
+    // (`StopTxnAlignedData`, 1.6 §3.16.2); 2.x has a
+    // grid of its own (`_txEndedAligned`).
+    if (!isOcpp2Version(this._ocppVersion)) {
+      this.recordAlignedTxEndedSamples(
+        this._configuration.stopTxnAlignedData(),
+        boundaryMs,
+      );
+    }
     // Empty by default; the interval change already logged that it is.
     const measurands = this._configuration.meterValuesAlignedData();
     if (measurands.length === 0) return;
     const timestamp = new Date(boundaryMs);
+    // 2.x AlignedDataCtrlr.SendDuringIdle: a connector in a transaction gets
+    // no clock-aligned MeterValues (#607).
+    const idleOnly =
+      isOcpp2Version(this._ocppVersion) &&
+      this._configuration.alignedDataSendDuringIdle();
     this._connectors.forEach((connector) => {
+      if (idleOnly && connector.hasRunningTransaction) return;
       if (
         this.sendSampleInTransactionEvent(connector, {
           triggerReason: "MeterValueClock",
@@ -2645,6 +2686,79 @@ export class ChargePoint {
         timestamp,
       });
     });
+  }
+
+  /**
+   * #607: append one formatted sample to the connector's transaction-end
+   * history. Formatted now, from the point the sample set of this instant
+   * reads, so a later configuration change cannot reformat it (#327 §3.3).
+   */
+  private recordTxEndedSample(
+    connector: Connector,
+    measurands: string[],
+    context: "Sample.Periodic" | "Sample.Clock",
+    timestamp: Date,
+  ): void {
+    const transaction = connector.transaction;
+    if (!transaction || !connector.hasRunningTransaction) return;
+    if (measurands.length === 0) return;
+    const sampledValue = buildSampledValues(connector, measurands, context);
+    if (sampledValue.length === 0) return;
+    const history = transaction.txEndedSamples ?? [];
+    const next = [
+      ...history,
+      { timestamp: timestamp.toISOString(), sampledValue },
+    ].slice(-TX_ENDED_SAMPLES_MAX);
+    connector.patchTransaction({ txEndedSamples: next });
+  }
+
+  /**
+   * The scheduler-tick sample of the history (`StopTxnSampledData`). 1.6
+   * samples at every tick, the cadence of the MeterValues it accompanies
+   * (1.6 §3.16.1). 2.x samples when `TxEndedInterval`
+   * seconds have passed since the previous one (or the start), judged at the
+   * tick, so the interval cannot be finer than the tick.
+   */
+  private recordSampledTxEndedSample(connector: Connector): void {
+    const transaction = connector.transaction;
+    if (!transaction || !connector.hasRunningTransaction) return;
+    const measurands = this._configuration.stopTxnSampledData();
+    if (measurands.length === 0) return;
+    const now = this._clock.now();
+    if (isOcpp2Version(this._ocppVersion)) {
+      const intervalMs = this._configuration.txEndedInterval() * 1000;
+      if (intervalMs <= 0) return;
+      const history = transaction.txEndedSamples ?? [];
+      const last = [...history]
+        .reverse()
+        .find((e) => e.sampledValue[0]?.context === "Sample.Periodic");
+      const lastMs = last
+        ? Date.parse(last.timestamp)
+        : transaction.startTime.getTime();
+      if (now - lastMs < intervalMs) return;
+    }
+    this.recordTxEndedSample(
+      connector,
+      measurands,
+      "Sample.Periodic",
+      new Date(now),
+    );
+  }
+
+  private recordAlignedTxEndedSamples(
+    measurands: string[],
+    boundaryMs: number,
+  ): void {
+    if (measurands.length === 0) return;
+    const timestamp = new Date(boundaryMs);
+    this._connectors.forEach((connector) =>
+      this.recordTxEndedSample(
+        connector,
+        measurands,
+        "Sample.Clock",
+        timestamp,
+      ),
+    );
   }
 
   /** A station without power starts, stops and boots nothing (#798). */
@@ -2706,6 +2820,7 @@ export class ChargePoint {
     this.status = OCPPStatus.Unavailable;
     this._heartbeat.cleanup();
     this._clockAligned.disable();
+    this._txEndedAligned.disable();
     // Offline: events at or below OfflineQueuingSeverity are queued
     // (N07.FR.04, N08.FR.03) until the next boot is Accepted (#538).
     this._monitorEvaluation?.setOffline();
@@ -3247,6 +3362,7 @@ export class ChargePoint {
    */
   sendScheduledMeterValue(connectorId: number): void {
     const connector = this.getConnector(connectorId);
+    if (connector) this.recordSampledTxEndedSample(connector);
     if (
       this._txUpdatedMeterValues &&
       connector &&

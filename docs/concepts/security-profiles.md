@@ -526,7 +526,7 @@ CALLERROR.
   answer (A02.FR.07). The Certificate Properties and the operator hierarchy
   that A02.FR.06 also names are not checked (a leaf with the right key that
   lies outside the hierarchy is `Accepted`, which 2.0.1 Part 6 TC_A_14_CS
-  would expect `Rejected`; tracked in the follow-up of #587), and only the
+  would expect `Rejected`; tracked in #847), and only the
   leaf's period is, not that of the chain's other members. A closed connection only holds the wait: after the next accepted boot it goes on with what it had left and
   the same resend count, so a sequence that reached
   `CertSigningRepeatTimes` or ended does not start over on a reconnect. A

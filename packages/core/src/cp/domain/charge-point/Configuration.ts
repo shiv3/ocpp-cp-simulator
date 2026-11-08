@@ -463,6 +463,15 @@ export const ConfigurationKeys = {
       type: "integer",
       min: 1,
     } as IntegerConfigurationKey,
+    // #598: OCPP 2.0.1 / 2.1 AuthCtrlr.MasterPassGroupId (Part 2 §2.3): tokens
+    // of this group can stop transactions but cannot start one. "" (default)
+    // = no master pass. 2.x only.
+    MasterPassGroupId: {
+      name: "MasterPassGroupId",
+      required: false,
+      readonly: false,
+      type: "string",
+    } as StringConfigurationKey,
     // #538: OCPP 2.0.1 / 2.1 MonitoringCtrlr.OfflineQueuingSeverity (Part 2
     // §2.11.7 / 2.1 §2.13.7, ReadWrite): while offline, NotifyEvents of
     // monitors at or below this severity are queued (N07.FR.04, N08.FR.03).
@@ -714,6 +723,10 @@ export const defaultConfiguration: (cp: ChargePoint) => Configuration = (
     // 1.6 serial queue's CALL timeout.
     ...(isOcpp2Version(cp.ocppVersion)
       ? [intVal(ConfigurationKeys.Custom.MessageTimeout, 30)]
+      : []),
+    // #598: 2.x only (AuthCtrlr.MasterPassGroupId); "" = no master pass.
+    ...(isOcpp2Version(cp.ocppVersion)
+      ? [strVal(ConfigurationKeys.Custom.MasterPassGroupId, "")]
       : []),
     // #538: 2.x only (MonitoringCtrlr.OfflineQueuingSeverity); 0 queues
     // only Emergency events while offline.

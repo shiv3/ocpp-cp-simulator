@@ -9,7 +9,7 @@
 {"d":"CP>","k":"call","id":"id-5","a":"StatusNotification","p":{"timestamp":"<ts>","connectorStatus":"Unavailable","evseId":1,"connectorId":1}}
 {"d":"CSMS>","k":"result","id":"id-5","p":{}}
 {"d":"CSMS>","k":"call","id":"id-6","a":"RequestStartTransaction","p":{"idToken":{"idToken":"TAG-A","type":"ISO14443"},"remoteStartId":1,"evseId":1}}
-{"d":"CP>","k":"result","id":"id-6","p":{"status":"Rejected"}}
+{"d":"CP>","k":"result","id":"id-6","p":{"status":"Rejected","statusInfo":{"reasonCode":"Unavailable","additionalInfo":"EVSE 1 is inoperative"}}}
 {"d":"CSMS>","k":"call","id":"id-7","a":"ChangeAvailability","p":{"operationalStatus":"Operative","evse":{"id":1}}}
 {"d":"CP>","k":"result","id":"id-7","p":{"status":"Accepted"}}
 {"d":"CP>","k":"call","id":"id-8","a":"StatusNotification","p":{"timestamp":"<ts>","connectorStatus":"Available","evseId":1,"connectorId":1}}

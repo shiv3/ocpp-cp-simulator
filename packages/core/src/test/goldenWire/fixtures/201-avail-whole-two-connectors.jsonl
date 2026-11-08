@@ -33,7 +33,7 @@
 {"d":"CSMS>","k":"result","id":"id-17","p":{}}
 {"d":"CP>","k":"call","id":"id-18","a":"StatusNotification","p":{"timestamp":"<ts>","connectorStatus":"Unavailable","evseId":1,"connectorId":1}}
 {"d":"CSMS>","k":"result","id":"id-18","p":{}}
-{"d":"CP>","k":"result","id":"id-14","p":{"status":"Rejected"}}
+{"d":"CP>","k":"result","id":"id-14","p":{"status":"Rejected","statusInfo":{"reasonCode":"Unavailable","additionalInfo":"EVSE 1 is inoperative"}}}
 {"d":"CSMS>","k":"call","id":"id-19","a":"ChangeAvailability","p":{"operationalStatus":"Operative"}}
 {"d":"CP>","k":"call","id":"id-20","a":"TransactionEvent","p":{"eventType":"Ended","timestamp":"<ts>","triggerReason":"StopAuthorized","seqNo":1,"transactionInfo":{"transactionId":"<uuid-2>","stoppedReason":"Local"},"idToken":{"idToken":"B","type":"ISO14443"},"evse":{"id":2,"connectorId":1},"meterValue":[{"timestamp":"<ts>","sampledValue":[{"value":0,"measurand":"Energy.Active.Import.Register","context":"Transaction.End","unitOfMeasure":{"unit":"kWh"}}]}]}}
 {"d":"CSMS>","k":"result","id":"id-20","p":{"idTokenInfo":{"status":"Accepted"}}}

@@ -16,6 +16,7 @@ import {
 } from "../../../domain/types/OcppTypes";
 import { isOcpp2Version } from "../../../domain/types/OcppVersion";
 import { LogType } from "../../../shared/Logger";
+import { decideRemoteStart } from "./remoteStartValidation";
 
 /**
  * What the transaction defaults need from the station beyond its public API.
@@ -110,11 +111,9 @@ export function transactionBehavior(cp: ChargePoint): Behavior {
             remoteStartId: number;
             idToken: { idToken: string };
           };
-          const connectorId = req.evseId ?? 1;
-          const connector = cp.getConnector(connectorId);
-          if (!connector || connector.availability !== "Operative") {
-            return { response: { status: "Rejected" } };
-          }
+          const decision = decideRemoteStart(cp, req);
+          if (!decision.ok) return { response: decision.rejection };
+          const connectorId = decision.connectorId;
           return {
             response: { status: "Accepted" },
             after: async () => {

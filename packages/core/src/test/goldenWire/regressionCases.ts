@@ -1302,6 +1302,62 @@ both("remote-start-inoperative", async (r) => {
   await r.remoteStart("X", 1);
   await settle(r);
 });
+// #598: RequestStartTransaction validation and the reason codes of a rejection.
+c201("remote-start-invalid-profile", async (r) => {
+  const schedule = [
+    {
+      id: 1,
+      chargingRateUnit: "W",
+      chargingSchedulePeriod: [{ startPeriod: 0, limit: 7000 }],
+    },
+  ];
+  const profile = {
+    id: 1,
+    stackLevel: 0,
+    chargingProfileKind: "Absolute",
+    chargingSchedule: schedule,
+  };
+  const idToken = { idToken: "TAG-A", type: "Central" };
+  await r.csms.call("RequestStartTransaction", {
+    remoteStartId: 1,
+    idToken,
+    chargingProfile: { ...profile, chargingProfilePurpose: "TxDefaultProfile" },
+  });
+  await r.csms.call("RequestStartTransaction", {
+    remoteStartId: 2,
+    idToken,
+    chargingProfile: {
+      ...profile,
+      chargingProfilePurpose: "TxProfile",
+      transactionId: "tx-1",
+    },
+  });
+  await settle(r);
+});
+c201("remote-start-master-pass", async (r) => {
+  r.cp.configuration.setRuntimeValue("MasterPassGroupId", "MASTER");
+  await r.csms.call("RequestStartTransaction", {
+    remoteStartId: 1,
+    idToken: { idToken: "TAG-A", type: "Central" },
+    groupIdToken: { idToken: "MASTER", type: "Central" },
+  });
+  await settle(r);
+});
+c201("remote-start-unknown-evse", async (r) => {
+  await r.csms.call("RequestStartTransaction", {
+    remoteStartId: 1,
+    idToken: { idToken: "TAG-A", type: "Central" },
+    evseId: 9,
+  });
+  await settle(r);
+});
+c201("remote-start-any-evse", async (r) => {
+  const idToken = { idToken: "TAG-A", type: "Central" };
+  await r.csms.call("RequestStartTransaction", { remoteStartId: 1, idToken });
+  await settle(r);
+  await r.csms.call("RequestStartTransaction", { remoteStartId: 2, idToken });
+  await settle(r);
+});
 c201("reset-unknown-evse", async (r) => {
   await r.csms.call("Reset", { type: "Immediate", evseId: 9 });
   await settle(r);

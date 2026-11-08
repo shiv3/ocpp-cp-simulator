@@ -439,6 +439,12 @@ ends. A station-wide reset waits for all connectors, while an EVSE-scoped reset
 waits only for that EVSE. Multiple scoped resets remain independent, and an
 Immediate reset supersedes only pending resets in the scope it resets.
 
+An EVSE-scoped reset (`evseId`, B11.FR.08) does not reboot the station: it ends
+that EVSE's transaction, reports the EVSE `Unavailable` and then in the state it
+had (`Reserved` and an Inoperative `Unavailable` are kept, B11.FR.02/05), and
+sends no BootNotification. That holds for an OnIdle reset that ran later too
+(#699). Only a reset without `evseId` reboots and cold-boots (B11.FR.03/04).
+
 The decision uses whether a transaction is actually running, not whether a
 stopped transaction object is still attached to the connector. The queue is
 also rechecked after adding a scheduled reset and after connector removal, so a

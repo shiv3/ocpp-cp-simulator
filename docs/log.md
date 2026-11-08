@@ -2414,3 +2414,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - A `warn` / `enforce` violation is traced: the inbound CALL's record carries `meta.validation = { mode, errorCode, description }` (a structured `Inbound validation:` line on the `WebSocket` log channel, merged by `logLinesToTrace` and held back by the live `--trace-output` writer for one tick). `inboundValidation` is settable: `--inbound-validation`, `cp.create` / `cp.update` (contracts, HTTP, MCP), persisted in `charge_points.inbound_validation` (schema v25). The wiki states the order with the #594 `NotSupported`.
 - Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#inbound-call-validation-on-ocpp-j-16), [Trace format](concepts/trace-format.md#validation-violations-meta), [CLI](entities/cli.md), [Daemon](entities/daemon.md), [Control plane](concepts/control-plane.md), [State persistence](concepts/state-persistence.md).
+
+## [2026-11-08] ingest | 2.x Reset with evseId resets only that EVSE (#699)
+
+- B11.FR.08 / B12.FR.12/14 (errata 2026-09 §2.5): an accepted `Reset` with `evseId` (Immediate, or OnIdle that ran later) ends that EVSE's transaction and cycles only that EVSE (`Unavailable`, then its previous state: `ChargePoint.resetEvse`); no BootNotification and no re-report of the station or the other EVSEs. A station-wide reset is unchanged. Golden `201-reset-evse` re-recorded.
+- Pages: [Default behaviors](entities/default-behaviors.md), [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#ocpp-2x-reset-onidle).

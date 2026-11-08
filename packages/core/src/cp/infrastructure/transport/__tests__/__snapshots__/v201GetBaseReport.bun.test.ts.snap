@@ -380,6 +380,25 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
         },
         {
           "component": {
+            "name": "ReservationCtrlr",
+          },
+          "variable": {
+            "name": "NonEvseSpecific",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "false",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "boolean",
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
             "name": "AuthCacheCtrlr",
           },
           "variable": {

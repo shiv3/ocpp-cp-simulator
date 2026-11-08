@@ -124,6 +124,12 @@ export interface IChargePointMessageHandler {
       | { status: "Pending" }
       | { status: "Rejected"; retryAfter: Date },
   ): void;
+  /**
+   * OCPP-J 1.6 §4.2: run `fn`, whose CALLs answer an accepted TriggerMessage,
+   * so they pass the boot gate while it is Pending. Absent where the transport
+   * has no such gate.
+   */
+  runTriggered?<T>(fn: () => T): T;
   getDataTransferHandler(): DataTransferVendorRegistry;
   /** #537: whether a transaction message awaits its write, its answer or
    *  a resend, which the CSMS may still settle before a close. Implemented

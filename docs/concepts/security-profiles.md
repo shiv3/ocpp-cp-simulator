@@ -290,10 +290,20 @@ chain is reported as its leaf, with the sub-CAs as `childCertificateHashData`
   certificate of a `wss://` connection that verifies the server. Over
   `ws://`, without `--tls-ca` (the runtime's trust store validates) or with
   verification off, no root is in use. 2.x has no such rule.
-- `CertificateSigned` stores a well-formed chain that passes the certificate
-  quirks without checking it against the pending CSR, and leaves that CSR
-  pending. The chain replaces the previous one, so a persisted store keeps
-  one chain; no 1.6 message reads it back.
+- `CertificateSigned` checks the chain first (A02.FR.06, #732): every
+  certificate is inside its validity period, each is signed by the next, when
+  `CentralSystemRootCertificate`s are installed the top certificate is one of
+  them or is signed by one, and, when a CSR is pending, the leaf carries its
+  public key (a CSR given to `sign_certificate` is pending too). The
+  Certificate Properties (key usage and the like) are not inspected. A chain
+  that fails any check, does not parse, or fails the signature-algorithm
+  quirk is answered `Rejected`, discarded (the stored chain is kept), and
+  followed by a `SecurityEventNotification` of type
+  `InvalidChargePointCertificate` once the answer is written (A02.FR.07). A
+  valid chain is `Accepted` with no event, leaves the CSR pending, and
+  replaces the previous chain, so a persisted store keeps one chain; no 1.6
+  message reads it back. A chain pushed with no CSR pending skips only the
+  key comparison.
 - The 1.6 dispatcher starts each CALL without waiting for the previous
   one, so the answer of an async handler (`InstallCertificate`,
   `CertificateSigned`) can follow the answer to a later CALL. The store
@@ -612,8 +622,7 @@ connected.
 - The key is memory-only, so a restart or a `cp.update` presents
   `--tls-cert` / `--tls-key` again although the state database still
   holds the renewed chain.
-- 1.6 does not switch: its `CertificateSigned` stores the chain without
-  matching it to a CSR.
+- 1.6 does not switch.
 
 In ISO 15118 the V2G (SECC) certificate is the station's TLS server
 certificate towards the EV, and A00.FR.428 lets the Charging Station

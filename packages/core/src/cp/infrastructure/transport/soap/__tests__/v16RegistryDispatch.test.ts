@@ -442,6 +442,7 @@ describe("dispatchSoapCallViaV16Registry", () => {
   it("unwraps a HandlerOutcome instead of serializing the wrapper", async () => {
     const sent: (number | undefined)[] = [];
     const chargePoint = {
+      runTriggered: <T>(fn: () => T): T => fn(),
       sendCurrentStatusNotification: (connectorId?: number) =>
         sent.push(connectorId),
     } as unknown as ChargePoint;

@@ -27,6 +27,19 @@ describe("LanguageToggle", () => {
     expect(t("common.theme.dark")).toBe("ダーク");
   });
 
+  it("offers French in the picker", async () => {
+    const user = userEvent.setup();
+    render(<LanguageToggle />);
+    await user.click(screen.getByRole("button", { name: "Change language" }));
+    await user.click(await screen.findByRole("menuitem", { name: /Français/ }));
+    expect(
+      await screen.findByRole("button", { name: "Changer de langue" }),
+    ).toBeTruthy();
+    expect(getLocale()).toBe("fr");
+    expect(window.localStorage.getItem(LOCALE_STORAGE_KEY)).toBe("fr");
+    expect(document.documentElement.lang).toBe("fr");
+  });
+
   it("renders singular and plural forms per language", async () => {
     await setLocale("ja");
     expect(t("settings.page.tagsActive", { count: 1 })).toBe(

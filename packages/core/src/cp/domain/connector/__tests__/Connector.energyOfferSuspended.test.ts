@@ -114,7 +114,7 @@ describe("Connector energy held after a non-Accepted id (E05.FR.02/03)", () => {
     expect(connector.holdEnergyForInvalidId(250)).toBe(false);
     vi.advanceTimersByTime(10_000);
 
-    expect(connector.meterValue).toBe(400);
+    expect(connector.meterValue).toBe(350);
     expect(exhausted).toHaveBeenCalledTimes(1);
     expect(connector.energyHeld).toBe(true);
   });

@@ -2415,10 +2415,37 @@ other. Reworded on all three pages to say what is and is not watched (the
 - A `warn` / `enforce` violation is traced: the inbound CALL's record carries `meta.validation = { mode, errorCode, description }` (a structured `Inbound validation:` line on the `WebSocket` log channel, merged by `logLinesToTrace` and held back by the live `--trace-output` writer for one tick). `inboundValidation` is settable: `--inbound-validation`, `cp.create` / `cp.update` (contracts, HTTP, MCP), persisted in `charge_points.inbound_validation` (schema v25). The wiki states the order with the #594 `NotSupported`.
 - Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#inbound-call-validation-on-ocpp-j-16), [Trace format](concepts/trace-format.md#validation-violations-meta), [CLI](entities/cli.md), [Daemon](entities/daemon.md), [Control plane](concepts/control-plane.md), [State persistence](concepts/state-persistence.md).
 
+## [2026-11-08] ingest | OCPP 1.6 SetChargingProfile replacement and TxProfile preconditions (#594)
+
+- `SetChargingProfile` on 1.6 replaces by `chargingProfileId` or by `stackLevel` + purpose (2.x unchanged), rejects a TxProfile without an active transaction or with another `transactionId`, and answers CALLERROR `NotSupported` when `SupportedFeatureProfiles` lacks `SmartCharging`. Handlers can now answer a CALLERROR by throwing `HandlerCallError`. No golden fixture changed.
+- Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#ocpp-16-setchargingprofile), [GitHub issues](sources/github-issues.md).
+
+## [2026-11-08] ingest | SetChargingProfile review fixes: displaced profiles, NotSupported scope, running transaction (#594 review)
+
+- `chargingProfileApplied` carries `replacedIds` (profiles displaced by the same-slot rule); `replaced` now means "same id updated", so the timeline no longer reports an update for a profile it never had, and a displaced profile's expiry timer is cancelled. The TxProfile precondition uses `hasRunningTransaction`. `ClearChargingProfile` and `GetCompositeSchedule` answer `NotSupported` without `SmartCharging` too. The wiki states the 1.6-S behavior (generic SOAP Fault).
+- Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#ocpp-16-setchargingprofile), [Operational timeline](concepts/operational-timeline.md#smart-charging-profiles).
+
+## [2026-11-08] ingest | OCPP-S 1.6 retries transaction-related messages after a SOAP Fault (#585)
+
+- [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#deviation-ocpp-s-16-retries-after-a-soap-fault): the "OCPP-S does not retry" sentence now covers 1.2 and 1.5 only; new section on the 1.6S deviation (errata 3.2): Heartbeat probe, `TransactionMessageAttempts` / `TransactionMessageRetryInterval`, `transactionMessageRejected` / `transactionMessageDiscarded`, discard of an outlived StartTransaction, cancel on stop and dispose. 1.2 and 1.5 were not checked against their specs.
+- [GitHub issues](sources/github-issues.md): #585.
+
+## [2026-11-08] fix | OCPP-S 1.6 transaction retry review follow-ups (#585)
+
+- [Charging sessions](concepts/charging-sessions.md): the "CALLERROR is not a failed start" paragraph names the OCPP-S 1.6 SOAP Fault / HTTP error case. A stop no longer moves a waiting `StartTransaction` connector to `Charging`; a Fault landing after a stop sends no Heartbeat; a resend due while the boot gate is closed is discarded with a notice. [GitHub issues](sources/github-issues.md): `updated:` bumped.
+
+## [2026-11-08] ingest | Run a scenario template on a label selector (#486)
+
+- New `cp.scenario.run { labels, connector, templateId, evSettings?, strict?, once? }` and MCP `cp_scenario_run`: `run_scenario_template` on every charge point a label selector matches, with `cp.bulk`'s selector rules, fan-out and partial-success result (`started` carries each `scenarioId`). A method of its own (decision D07), not a `cp.bulk` action. Pages: [Socket.IO control plane](concepts/control-plane.md#charge-point-labels), [MCP endpoint](entities/mcp-endpoint.md).
+
 ## [2026-11-08] ingest | 2.x StopTxOnInvalidId=false suspends the energy delivery (#696)
 
 - A non-Accepted TransactionEvent.conf `idTokenInfo` with `TxCtrlr/StopTxOnInvalidId` false keeps the transaction open but stops the energy delivery (E05.FR.02, C15.FR.06): connector `SuspendedEVSE`, register frozen, one `TransactionEvent(Updated, ChargingStateChanged, SuspendedEVSE)`. `TxCtrlr/MaxEnergyOnInvalidId` (new 2.x name for the 1.6 key) delivers that many Wh first (E05.FR.03). The default (`true`) is unchanged.
 - Pages: [Charging sessions](concepts/charging-sessions.md), [Operational timeline](concepts/operational-timeline.md), [GitHub issues](sources/github-issues.md)
+
+## [2026-11-08] fix | StopTxOnInvalidId review follow-ups (#696)
+
+- [Charging sessions](concepts/charging-sessions.md): the hold also applies to a `SuspendedEV` connector, a later `Charging` request is reported as `SuspendedEVSE`, the `MaxEnergyOnInvalidId` register stops exactly at the allowance, the hold is not persisted, and the feature is 2.x only (1.6 is #736). GetBaseReport lists `TxCtrlr.MaxEnergyOnInvalidId` with `unit: Wh` (snapshot updated).
 
 ## [2026-11-08] ingest | 1.6 StopTransactionOnInvalidId=false suspends the energy delivery (#736)
 

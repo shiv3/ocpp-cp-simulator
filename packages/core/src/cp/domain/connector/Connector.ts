@@ -61,6 +61,7 @@ import {
 import {
   partitionProfiles,
   upsertProfile,
+  type ApplyChargingProfileOptions,
   type ChargingProfileStore,
   type ProfileRemoveCriteria,
 } from "../charge-point/ChargingProfileStore";
@@ -145,8 +146,8 @@ export interface ConnectorEvents {
    *  accordingly. `watts` is the new effective cap. */
   scheduleLimitChange: { paused: boolean; watts: number };
   /** The `MaxEnergyOnInvalidId` allowance of a transaction whose id was not
-   *  accepted is used up: the energy hold has just started (E05.FR.02,
-   *  1.6 errata 3.17). The ChargePoint moves the connector to
+   *  accepted is used up: the energy hold has just started (E05.FR.02;
+   *  2.x only, 1.6 errata 3.17 is #736). The ChargePoint moves the connector to
    *  SuspendedEVSE. */
   invalidIdEnergyExhausted: Record<string, never>;
 }
@@ -251,7 +252,8 @@ export class Connector {
   /**
    * The CSMS did not accept the id of the running transaction and
    * `StopTransactionOnInvalidId` is false: the station keeps the transaction
-   * but stops the energy delivery (1.6 errata 3.17, 2.0.1 E05.FR.02). While
+   * but stops the energy delivery (2.0.1 E05.FR.02; 2.x only, 1.6 errata 3.17
+   * is #736). While
    * held, the meter cap is zero and the energy register does not rise; the
    * scheduler keeps ticking. Unlike {@link energyOfferSuspendedValue} it
    * survives status changes (SuspendedEVSE). Cleared when a transaction
@@ -389,7 +391,17 @@ export class Connector {
       connectorId,
       {
         getCurrentValue: () => this.meterValueWh,
-        updateValue: (value) => this.applyMeterValue(value),
+        updateValue: (value) => {
+          // MaxEnergyOnInvalidId (E05.FR.03): the register stops at the
+          // allowance, not one tick past it.
+          const hold = this.invalidIdHoldAtWh;
+          this.applyMeterValue(
+            hold !== null && !this.energyHeldForInvalidId
+              ? Math.min(value, hold)
+              : value,
+          );
+          this.invalidIdAllowanceUsedUp();
+        },
         onSend: (id) => {
           if (this.onMeterSend) {
             this.onMeterSend(id);
@@ -1214,10 +1226,14 @@ export class Connector {
    * Add or update a charging profile. If a profile with the same ID exists, it is replaced.
    * @returns Whether a profile with the same ID was replaced
    */
-  addChargingProfile(profile: ActiveChargingProfile): boolean {
+  addChargingProfile(
+    profile: ActiveChargingProfile,
+    options: ApplyChargingProfileOptions = {},
+  ): boolean {
     const { profiles, replaced } = upsertProfile(
       this._chargingProfiles,
       profile,
+      options,
     );
     this._chargingProfiles = profiles;
     this.emitProfileChanges();

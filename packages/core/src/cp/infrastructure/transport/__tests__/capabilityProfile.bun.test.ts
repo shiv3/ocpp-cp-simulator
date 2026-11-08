@@ -118,6 +118,44 @@ describe.skipIf(!canBindBunServe())("capability profile (#618)", () => {
     }
   });
 
+  it("1.6J: a code behavior cannot accept a TriggerMessage target the profile leaves out", async () => {
+    const { csms, cp, done } = await station("OCPP-1.6J", "CP-CAP-B", {
+      triggerMessageTargets: ["Heartbeat"],
+    });
+    try {
+      cp.loadBehavior({
+        api: 1,
+        id: "accept-all-triggers",
+        onCall: {
+          TriggerMessage: {
+            mode: "replace",
+            handle: () => ({ response: { status: "Accepted" } }),
+          },
+        },
+      });
+      csms.send([
+        2,
+        "b-1",
+        "TriggerMessage",
+        { requestedMessage: "MeterValues", connectorId: 1 },
+      ]);
+      expect((await csms.waitForFrame(replyTo("b-1")))[2]).toEqual({
+        status: "NotImplemented",
+      });
+      csms.send([
+        2,
+        "b-2",
+        "TriggerMessage",
+        { requestedMessage: "Heartbeat" },
+      ]);
+      expect((await csms.waitForFrame(replyTo("b-2")))[2]).toEqual({
+        status: "Accepted",
+      });
+    } finally {
+      await done();
+    }
+  });
+
   it("1.6J: disabling TriggerMessage leaves ExtendedTriggerMessage alone", async () => {
     const { csms, done } = await station("OCPP-1.6J", "CP-CAP-4", {
       disabledActions: ["TriggerMessage"],

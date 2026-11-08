@@ -75,7 +75,7 @@ The profile is step 2b: below the sticky policy and the one-shot override, so **
 (a policy refuses with its own error code, an override answers its status), and above scenario rules, code
 behaviors and handlers, which never see a disabled CALL. The `incomingCallReceived` event still fires. The
 profile is static: a scenario cannot change it. It is not consulted for OCPP-S 1.6 (SOAP), which does not pass
-through the gate either. No profile is the behavior before #618. It persists with `--state-db`
+through the gate either, so `cp.create` / `cp.update` refuse a profile for an OCPP SOAP version instead of ignoring it. `triggerMessageTargets` is checked in the gate too, not in the handlers, so a scenario rule or a code behavior cannot accept a target the profile excludes (a one-shot override or a policy still wins). The profile does not change what the station reports: a 1.6 station with `ReserveNow` disabled still lists `Reservation` in `GetConfiguration` `SupportedFeatureProfiles`. No profile is the behavior before #618. It persists with `--state-db`
 (`charge_points.capability_profile`).
 
 Test: `packages/core/src/cp/infrastructure/transport/__tests__/capabilityProfile.bun.test.ts`.

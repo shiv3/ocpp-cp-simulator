@@ -57,7 +57,9 @@ export class TriggerMessageHandler implements CallHandler<
 
     // #618: a target the capability profile leaves out is not implemented.
     if (
-      !context.chargePoint.isTriggerTargetSupported(payload.requestedMessage)
+      context.chargePoint.isTriggerTargetSupported?.(
+        payload.requestedMessage,
+      ) === false
     ) {
       return { status: "NotImplemented" };
     }

@@ -108,7 +108,7 @@ export const handleTriggerMessageV201 = (
   // NotImplemented for SignCombinedCertificate.
   const requested: string = req.requestedMessage;
   // #618: a target the capability profile leaves out is not implemented.
-  if (!ctx.chargePoint.isTriggerTargetSupported(requested)) {
+  if (ctx.chargePoint?.isTriggerTargetSupported?.(requested) === false) {
     return notImplemented;
   }
   if (

@@ -87,6 +87,63 @@ describe("capabilityProfile over the control plane (#618)", () => {
     }
   });
 
+  it("cp.update changes it, and {} clears it", async () => {
+    const server = await startTestServer();
+    servers.push(server);
+    const socket = await connectTestClient(server);
+    try {
+      await emitRpc(socket, {
+        method: "cp.create",
+        params: { cpId: "CP618-upd", ...BASE, capabilityProfile: PROFILE },
+      });
+      const changed = await emitRpc(socket, {
+        method: "cp.update",
+        params: {
+          cpId: "CP618-upd",
+          ...BASE,
+          capabilityProfile: { disabledActions: ["Reset"] },
+        },
+      });
+      expect(changed.ok).toBe(true);
+      const changedCp = chargePointOf(server.registry.get("CP618-upd"));
+      expect(changedCp.isActionDisabled("Reset")).toBe(true);
+      expect(changedCp.isActionDisabled("ReserveNow")).toBe(false);
+
+      const cleared = await emitRpc(socket, {
+        method: "cp.update",
+        params: { cpId: "CP618-upd", ...BASE, capabilityProfile: {} },
+      });
+      expect(cleared.ok).toBe(true);
+      const clearedCp = chargePointOf(server.registry.get("CP618-upd"));
+      expect(clearedCp.isActionDisabled("Reset")).toBe(false);
+      expect(clearedCp.isTriggerTargetSupported("MeterValues")).toBe(true);
+    } finally {
+      socket.disconnect();
+    }
+  });
+
+  it("refuses a profile on an OCPP SOAP charge point", async () => {
+    const server = await startTestServer();
+    servers.push(server);
+    const socket = await connectTestClient(server);
+    try {
+      const refused = await emitRpc(socket, {
+        method: "cp.create",
+        params: {
+          cpId: "CP618-soap",
+          ...BASE,
+          ocppVersion: "OCPP-1.6S",
+          soapCallbackUrl: "http://127.0.0.1:1/cb",
+          capabilityProfile: PROFILE,
+        },
+      });
+      expect(refused.ok).toBe(false);
+      expect(server.registry.get("CP618-soap")).toBeUndefined();
+    } finally {
+      socket.disconnect();
+    }
+  });
+
   it("a charge point without it disables nothing, and a malformed one is refused", async () => {
     const server = await startTestServer();
     servers.push(server);

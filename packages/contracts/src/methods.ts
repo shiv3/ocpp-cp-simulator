@@ -388,7 +388,7 @@ const cpParamsBaseSchema = z.object({
     .strict()
     .optional()
     .describe(
-      "Static capability profile (#618): declare the charge point as lacking features. A scenario inbound policy or response override keeps precedence. Omit for current behavior",
+      "Static capability profile (#618): declare the charge point as lacking features. A scenario inbound policy or response override keeps precedence. Not accepted for the OCPP SOAP versions (their calls bypass the inbound gate). Omit for current behavior",
     ),
   tlsCaPath: STR_64K.optional().describe(
     "Path to a PEM CA bundle verifying the CSMS certificate. Omit to use the system trust store; passing one REPLACES the default roots",

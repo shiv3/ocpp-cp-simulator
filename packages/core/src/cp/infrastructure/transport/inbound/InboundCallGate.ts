@@ -13,7 +13,8 @@ import type { CallExchange } from "./CallExchange";
  * 2. `inboundPolicy` (sticky): reply with a CALLERROR, or stay silent
  * 3. `responseOverride` (one-shot): reply `{ status }`
  * 3b. the static capability profile (#618): reply CALLERROR `NotImplemented`
- *    for a disabled action
+ *    for a disabled action, and `{ status: "NotImplemented" }` to a
+ *    TriggerMessage / ExtendedTriggerMessage whose target it leaves out
  * 4. `BehaviorRegistry.resolve()`, synchronous
  * 5. otherwise: the default path, which the caller runs
  *
@@ -47,6 +48,9 @@ export interface InboundCallGatePorts {
   takeOverride(action: string): { status: string } | "unhonoured" | null;
   /** Step 3b: does the station's capability profile disable `action`? */
   isDisabled?(action: string): boolean;
+  /** Step 3b: may TriggerMessage / ExtendedTriggerMessage request `target`
+   *  under the capability profile? */
+  isTriggerTargetSupported?(target: string): boolean;
 }
 
 export interface InboundCallGateOptions {
@@ -136,6 +140,25 @@ export class InboundCallGate {
       return { kind: "settled" };
     }
 
+    if (isTriggerAction(action) && ports.isTriggerTargetSupported) {
+      const target = (payload as { requestedMessage?: unknown } | null)
+        ?.requestedMessage;
+      if (
+        typeof target === "string" &&
+        !ports.isTriggerTargetSupported(target)
+      ) {
+        // #618: the profile leaves this target out. Checked here, not in the
+        // handlers, so a scenario rule or a code behavior cannot answer
+        // Accepted for it. `NotImplemented` is the CALLRESULT status of
+        // TriggerMessage and ExtendedTriggerMessage in every version.
+        this.options.warn(
+          `${this.prefix}Capability profile: ${action} for ${target} is not implemented, replied NotImplemented`,
+        );
+        exchange.reply({ status: "NotImplemented" });
+        return { kind: "settled" };
+      }
+    }
+
     const connectorId = connectorIdOf(payload);
     const resolution = this.registry.resolve(
       {
@@ -150,6 +173,10 @@ export class InboundCallGate {
     }
     return { kind: "default" };
   }
+}
+
+function isTriggerAction(action: string): boolean {
+  return action === "TriggerMessage" || action === "ExtendedTriggerMessage";
 }
 
 function connectorIdOf(payload: unknown): number | undefined {
@@ -180,9 +207,12 @@ export function ports16(chargePoint: {
   getInboundCallPolicy(action: string): InboundCallPolicy | undefined;
   consumeResponseOverride(action: string): string | null;
   isActionDisabled?(action: string): boolean;
+  isTriggerTargetSupported?(target: string): boolean;
 }): InboundCallGatePorts {
   return {
     isDisabled: (action) => chargePoint.isActionDisabled?.(action) ?? false,
+    isTriggerTargetSupported: (target) =>
+      chargePoint.isTriggerTargetSupported?.(target) ?? true,
     notifyReceived: (action, payload, messageId) =>
       chargePoint.notifyIncomingCall(action, payload, messageId),
     policyFor: (action) => chargePoint.getInboundCallPolicy(action),
@@ -210,11 +240,14 @@ export function portsAliased(
     consumeResponseOverride(action: string): string | null;
     clearResponseOverride(action: string): void;
     isActionDisabled?(action: string): boolean;
+    isTriggerTargetSupported?(target: string): boolean;
   },
   statusless: ReadonlySet<string>,
 ): InboundCallGatePorts {
   return {
     isDisabled: (action) => chargePoint.isActionDisabled?.(action) ?? false,
+    isTriggerTargetSupported: (target) =>
+      chargePoint.isTriggerTargetSupported?.(target) ?? true,
     notifyReceived: (action, payload, messageId) =>
       chargePoint.notifyIncomingCall(action, payload, messageId),
     policyFor: (action) => {

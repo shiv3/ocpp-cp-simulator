@@ -97,6 +97,10 @@ way you rebuild the answer by hand (for `Accepted` / `Rejected`, `ctx.accepted(a
 | Firmware publishing          | —                                                                                            | `PublishFirmware`, `UnpublishFirmware`                                                                                                                                                                  |
 | Vendor                       | `DataTransfer`                                                                               | `DataTransfer`                                                                                                                                                                                          |
 
+On 2.1 the station has no local cost calculation, so `SetDefaultTariff` (I07.FR.01) and
+`ChangeTransactionTariff` (I11.FR.01) are answered with the CALLERROR `NotSupported`, not a `Rejected`
+status (that is for an invalid tariff, I07.FR.05); `GetTariffs` and `ClearTariffs` answer `NoTariff`.
+
 An action in neither table is not implemented by the station and gets a CALLERROR `NotImplemented`; a rule
 can still own it (`replace`).
 

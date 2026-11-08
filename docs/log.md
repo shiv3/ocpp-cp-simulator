@@ -2461,7 +2461,3 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - `entities/daemon.md`, `entities/cli.md`: `--bootstrap-concurrency` (default 8, the previous fixed value), `--start-delay`, `--start-jitter`, `--start-seed`; all four need a server mode and `--cp-id`, and a bad number exits 1. Review fixes: a charge point deleted or updated while it waits is skipped, the flags are refused next to a client mode, and the schedule is bounded by the 2^31-1 ms timer limit; `daemon.md` states the requirements and that `--state-db` restores are not paced.
 - `index.md`: no change (no page added).
-
-## [2026-11-08] ingest | 1.6 charging profiles keep startSchedule and duration (#723)
-
-- `SetChargingProfile` stores `chargingSchedule.startSchedule`, `duration` and `minChargingRate`. Absolute and Recurring schedules count from `startSchedule` (else `validFrom`, else the transaction start), a schedule ends at its `duration` (per cycle for Recurring) so the next lower `stackLevel` applies (errata 3.43), and a Recurring schedule ignores periods past its cycle (errata 3.44). `GetCompositeSchedule` follows the same anchor and end. New page: [Smart charging](concepts/smart-charging.md); [Charging sessions](concepts/charging-sessions.md) links it. New golden case `16-smart-charging-start-schedule`; no existing fixture changes.

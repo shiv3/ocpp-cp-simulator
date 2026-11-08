@@ -53,6 +53,8 @@ export interface CLIOptions {
    * `--cp-id CP --cp-count 3` yields CP001..CP003.
    */
   readonly cpIdPattern: string | null;
+  /** `--fleet-template <file>`, repeatable (#445). */
+  readonly fleetTemplateFiles: readonly string[];
   /** Startup pacing flags (#610); absent: the defaults (8 at once, no delay). */
   readonly bootstrapPacing?: BootstrapPacing;
   /**

@@ -57,6 +57,7 @@ function runParseArgs(args: string[]) {
     "  watch: options.watch,",
     "  oedBaseUrl: options.oedBaseUrl,",
     "  oedApiKeyFile: options.oedApiKeyFile,",
+    "  fleetTemplateFiles: options.fleetTemplateFiles,",
     "  bootstrapPacing: options.bootstrapPacing ?? null,",
     "  labels: options.labels ?? null,",
     "  bootstrapLabels: buildBootstrap(options)?.labels ?? null,",
@@ -1211,6 +1212,47 @@ describe("parseArgs --label (#472)", () => {
       );
     },
   );
+});
+
+describe("parseArgs --fleet-template (#445)", () => {
+  const DAEMON = ["--daemon"];
+
+  it("collects every repeated --fleet-template", () => {
+    const result = runParseArgs([
+      ...DAEMON,
+      "--fleet-template",
+      "a.json",
+      "--fleet-template",
+      "b.json",
+    ]);
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout).fleetTemplateFiles).toEqual([
+      "a.json",
+      "b.json",
+    ]);
+  });
+
+  it("is empty by default", () => {
+    expect(JSON.parse(runParseArgs(DAEMON).stdout).fleetTemplateFiles).toEqual(
+      [],
+    );
+  });
+
+  it("is refused without a path and outside a server mode", () => {
+    const noPath = runParseArgs([...DAEMON, "--fleet-template"]);
+    expect(noPath.status).toBe(1);
+    expect(noPath.stderr).toContain("--fleet-template needs a file path");
+    const standalone = runParseArgs([
+      "--cp-id",
+      "CP",
+      "--ws-url",
+      "ws://csms.example.test/ocpp/",
+      "--fleet-template",
+      "a.json",
+    ]);
+    expect(standalone.status).toBe(1);
+    expect(standalone.stderr).toContain("--fleet-template needs a server mode");
+  });
 });
 
 describe("daemon operations flags (#620, #621, #622)", () => {

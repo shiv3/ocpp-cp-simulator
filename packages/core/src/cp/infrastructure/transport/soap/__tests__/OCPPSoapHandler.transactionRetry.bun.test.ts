@@ -408,7 +408,7 @@ describe("OCPP-S 1.6 transaction message retry (#585, errata 3.2)", () => {
     const { clock, connector, handler, discarded } = setup();
     start(handler, connector.transaction!);
     await settle();
-    handler.setBootStatus({ status: "Rejected" });
+    handler.setBootStatus({ status: "Pending" });
     await clock.advanceBy(60_000);
     await settle();
     expect(csms.count("StartTransaction")).toBe(1);

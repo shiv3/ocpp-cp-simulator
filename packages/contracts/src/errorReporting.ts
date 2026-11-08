@@ -49,7 +49,7 @@ export function restrictedDataCollection() {
   };
 }
 
-/** Request headers that carry credentials, compared lower-cased. */
+/** Headers that carry credentials, compared lower-cased. */
 const CREDENTIAL_HEADERS = new Set([
   "authorization",
   "proxy-authorization",
@@ -58,22 +58,30 @@ const CREDENTIAL_HEADERS = new Set([
 ]);
 
 /**
+ * Drop every member named after a credential header, at any depth: the
+ * request's headers, but also a header map logged into a breadcrumb's
+ * `data.arguments`.
+ */
+function dropCredentialHeaders(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(dropCredentialHeaders);
+  if (!isPlainObject(value)) return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([name]) => !CREDENTIAL_HEADERS.has(name.toLowerCase()))
+      .map(([name, nested]) => [name, dropCredentialHeaders(nested)]),
+  );
+}
+
+/**
  * Run an event or a breadcrumb through the redaction the trace and log
  * writers use (CSMS `user:pass@` URLs, bearer tokens, OCPP secrets such as
- * `AuthorizationKey`), then drop the request's cookies and credential
- * headers, which that redaction does not name.
+ * `AuthorizationKey`), then drop the request's cookies and every member
+ * named after a credential header, which that redaction does not name.
  */
 export function scrubErrorReport<T>(report: T): T {
-  const scrubbed = redactSensitiveValue(report);
+  const scrubbed = dropCredentialHeaders(redactSensitiveValue(report));
   if (!isPlainObject(scrubbed) || !isPlainObject(scrubbed.request))
     return scrubbed as T;
   const { cookies: _cookies, ...request } = scrubbed.request;
-  if (isPlainObject(request.headers)) {
-    request.headers = Object.fromEntries(
-      Object.entries(request.headers).filter(
-        ([name]) => !CREDENTIAL_HEADERS.has(name.toLowerCase()),
-      ),
-    );
-  }
   return { ...scrubbed, request } as T;
 }

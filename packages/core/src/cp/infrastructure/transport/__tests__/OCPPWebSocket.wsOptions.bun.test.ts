@@ -16,6 +16,28 @@ afterEach(() => {
   for (const fn of cleanups.splice(0)) fn();
 });
 
+/**
+ * A `net` server whose sockets cannot kill the test run. The Bun client ends a
+ * connection with a reset (a closed WebSocket, a handshake timeout, dispose),
+ * and a server-side socket without an 'error' listener turns that ECONNRESET
+ * into an unhandled error that fails whichever test is running at the time
+ * (#825). Every accepted socket gets a listener and is destroyed on cleanup.
+ */
+function netServer(onConnection: (socket: net.Socket) => void): net.Server {
+  const sockets = new Set<net.Socket>();
+  const server = net.createServer((socket) => {
+    sockets.add(socket);
+    socket.on("error", () => {});
+    socket.on("close", () => sockets.delete(socket));
+    onConnection(socket);
+  });
+  cleanups.push(() => {
+    for (const socket of sockets) socket.destroy();
+    server.close();
+  });
+  return server;
+}
+
 function until<T>(fn: () => T | undefined, ms = 4000): Promise<T> {
   return new Promise((resolve, reject) => {
     const t0 = Date.now();
@@ -87,7 +109,7 @@ describe("Bun WebSocket client options (#611 PoC, Bun 1.3.14)", () => {
   it("sends the upgrade through an HTTP proxy with CONNECT", async () => {
     const csms = startCsms();
     const lines: string[] = [];
-    const proxy = net.createServer((client) => {
+    const proxy = netServer((client) => {
       client.once("data", (data) => {
         const text = data.toString();
         lines.push(text.split("\r\n")[0]);
@@ -99,10 +121,11 @@ describe("Bun WebSocket client options (#611 PoC, Bun 1.3.14)", () => {
           client.pipe(upstream);
         });
         upstream.on("error", () => client.destroy());
+        client.on("close", () => upstream.destroy());
+        cleanups.push(() => upstream.destroy());
       });
     });
     await new Promise<void>((r) => proxy.listen(0, "127.0.0.1", r));
-    cleanups.push(() => proxy.close());
     const port = (proxy.address() as net.AddressInfo).port;
 
     const ws = client(csms.url, { proxy: `http://127.0.0.1:${port}` });
@@ -112,9 +135,8 @@ describe("Bun WebSocket client options (#611 PoC, Bun 1.3.14)", () => {
   });
 
   it("times a silent handshake out itself and schedules a reconnect", async () => {
-    const silent = net.createServer(() => {});
+    const silent = netServer(() => {});
     await new Promise<void>((r) => silent.listen(0, "127.0.0.1", r));
-    cleanups.push(() => silent.close());
     const port = (silent.address() as net.AddressInfo).port;
 
     const ws = client(`ws://127.0.0.1:${port}`, { handshakeTimeoutMs: 300 });

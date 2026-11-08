@@ -1,6 +1,11 @@
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { OCPP_2_1 } from "../../../domain/types/OcppVersion";
 
-/** `IdTokenEnumType` of OCPP 2.0.1 Part 2 §3.43 (2.1 keeps the same values). */
+/** `IdTokenEnumType` of OCPP 2.0.1 Part 2 §3.43. On 2.1 `IdTokenType.type` is
+ *  a free string of at most 20 characters whose standard values
+ *  (`IdTokenEnumStringType`, 2.1 Appendices ch. 7.1) add `DirectPayment`,
+ *  `EVCCID` and `VIN`: the type is extensible there, so 2.1 is not checked
+ *  against a list. */
 const ID_TOKEN_TYPES: ReadonlySet<string> = new Set([
   "Central",
   "eMAID",
@@ -12,12 +17,14 @@ const ID_TOKEN_TYPES: ReadonlySet<string> = new Set([
   "NoAuthorization",
 ]);
 
-/** `IdToken.idToken` and `AdditionalInfo.additionalIdToken` are
- *  `identifierString` with maxLength 36 (Part 2 §2.28 / §3.43 / §2.1). */
-const ID_TOKEN_MAX_LENGTH = 36;
+/** `IdToken.idToken` is `identifierString` with maxLength 36 on 2.0.1 and 255
+ *  on 2.1 (the JSON schemas of the two editions); `type` is at most 20
+ *  characters on 2.1. */
+const ID_TOKEN_MAX_LENGTH = { v201: 36, v21: 255 } as const;
+const ID_TOKEN_TYPE_MAX_LENGTH_V21 = 20;
 
 /** A rejection of RequestStartTransaction with the `statusInfo.reasonCode`
- *  that explains it (Part 2 Appendix 5.2 reason codes; `reasonCode` is a
+ *  that explains it (Part 2 Appendices ch. 5 "Reason Codes"; `reasonCode` is a
  *  free string of at most 20 characters). */
 export interface RemoteStartRejection {
   status: "Rejected";
@@ -59,17 +66,34 @@ function reject(
 function checkIdToken(
   token: IdTokenLike | undefined,
   name: string,
+  v21: boolean,
 ): RemoteStartDecision | null {
-  if (!token || typeof token.idToken !== "string" || token.idToken === "") {
+  if (!token || typeof token.idToken !== "string") {
+    return reject("InvalidIdToken", `${name}.idToken is missing`);
+  }
+  if (typeof token.type !== "string" || token.type === "") {
+    return reject("InvalidIdToken", `${name}.type is missing`);
+  }
+  // NoAuthorization: "IdToken field SHALL be left empty" (IdTokenEnumType /
+  // IdTokenEnumStringType); every other type needs a value.
+  if (token.idToken === "" && token.type !== "NoAuthorization") {
     return reject("InvalidIdToken", `${name}.idToken is empty`);
   }
-  if (token.idToken.length > ID_TOKEN_MAX_LENGTH) {
+  const max = v21 ? ID_TOKEN_MAX_LENGTH.v21 : ID_TOKEN_MAX_LENGTH.v201;
+  if (token.idToken.length > max) {
     return reject(
       "InvalidIdToken",
-      `${name}.idToken is longer than ${ID_TOKEN_MAX_LENGTH} characters`,
+      `${name}.idToken is longer than ${max} characters`,
     );
   }
-  if (typeof token.type !== "string" || !ID_TOKEN_TYPES.has(token.type)) {
+  if (v21) {
+    if (token.type.length > ID_TOKEN_TYPE_MAX_LENGTH_V21) {
+      return reject(
+        "InvalidIdToken",
+        `${name}.type is longer than ${ID_TOKEN_TYPE_MAX_LENGTH_V21} characters`,
+      );
+    }
+  } else if (!ID_TOKEN_TYPES.has(token.type)) {
     return reject("InvalidIdToken", `${name}.type is not an IdTokenEnumType`);
   }
   return null;
@@ -79,37 +103,45 @@ function checkIdToken(
  * Validates a 2.x RequestStartTransaction.req and picks the connector (EVSE)
  * the transaction starts on.
  *
- * - F01.FR.11 / F01.FR.12: a `chargingProfile` SHALL be a `TxProfile` and
- *   SHALL NOT carry a `transactionId` (the transaction does not exist yet).
- * - `AuthCtrlr.MasterPassGroupId`: tokens of that group can stop
- *   transactions but cannot start one, so an `idToken` or `groupIdToken`
- *   equal to it is rejected. The variable is read from the station
- *   configuration key `MasterPassGroupId`; unset means no master pass.
- * - `evseId` is optional (Part 2 §2.12.1); without it the first Operative
- *   connector without a running transaction that is not Reserved is used.
+ * - F01.FR.09 / F01.FR.11 / F01.FR.26: a `chargingProfile` SHALL be a
+ *   `TxProfile` and SHALL NOT carry a `transactionId`; the rejection carries
+ *   `InvalidProfile`.
+ * - C16.FR.03 / C12.FR.09: an IdToken whose group id is
+ *   `AuthCtrlr.MasterPassGroupId` SHALL NOT start a transaction. Only the
+ *   request's `groupIdToken` is compared (station configuration key
+ *   `MasterPassGroupId`; unset means no master pass). A plain `idToken`
+ *   equal to the group id is not a master pass.
+ * - F01.FR.21 / F01.FR.22: an EVSE reserved for another idToken and another
+ *   group is rejected; one reserved for this idToken or group is accepted.
+ * - F01.FR.23: an EVSE that is Unavailable or Faulted is rejected.
+ * - `evseId` is optional (F01.FR.06; F01.FR.07 lets the station reject
+ *   without it); without it the station picks an EVSE reserved for this
+ *   idToken or group first, then an Available / Preparing one.
+ *
+ * Reason codes are Appendix ch. 5 codes only. Where the Appendix has none
+ * (an inoperative EVSE, no free EVSE) the code is `Unspecified` and
+ * `additionalInfo` says what happened.
  */
 export function decideRemoteStart(
   cp: ChargePoint,
   request: RequestStartLike,
 ): RemoteStartDecision {
+  const v21 = cp.ocppVersion === OCPP_2_1;
   const bad =
-    checkIdToken(request.idToken, "idToken") ??
+    checkIdToken(request.idToken, "idToken", v21) ??
     (request.groupIdToken
-      ? checkIdToken(request.groupIdToken, "groupIdToken")
+      ? checkIdToken(request.groupIdToken, "groupIdToken", v21)
       : null);
   if (bad) return bad;
 
   const masterPass = cp.configuration.getString("MasterPassGroupId");
-  if (masterPass) {
-    if (
-      request.idToken?.idToken === masterPass ||
-      request.groupIdToken?.idToken === masterPass
-    ) {
-      return reject(
-        "MasterPassNotAllowed",
-        "A master pass token cannot start a transaction",
-      );
-    }
+  if (masterPass && request.groupIdToken?.idToken === masterPass) {
+    // C16.FR.03; "Provided idToken is not valid" is the Appendix code for a
+    // token RequestStartTransaction cannot use.
+    return reject(
+      "InvalidIdToken",
+      "A master pass token (group id MasterPassGroupId) cannot start a transaction",
+    );
   }
 
   const profile = request.chargingProfile;
@@ -132,6 +164,20 @@ export function decideRemoteStart(
     const tx = cp.getConnector(id)?.transaction;
     return !!tx && tx.stopTime === null;
   };
+  // A reservation belongs to this request when it was made for this idToken
+  // or for this groupIdToken (F01.FR.21 / F01.FR.22).
+  const reservedForOther = (id: number): boolean => {
+    const reservation = cp.reservationManager.getReservationForConnector(id);
+    if (!reservation) return false;
+    const group = request.groupIdToken?.idToken;
+    return (
+      reservation.idTag !== request.idToken?.idToken &&
+      !(group !== undefined && reservation.parentIdTag === group)
+    );
+  };
+  const reservedForRequest = (id: number): boolean =>
+    cp.reservationManager.getReservationForConnector(id) !== undefined &&
+    !reservedForOther(id);
 
   if (request.evseId !== undefined) {
     const connector =
@@ -140,7 +186,8 @@ export function decideRemoteStart(
       return reject("UnknownEvse", `EVSE ${request.evseId} does not exist`);
     }
     if (connector.availability !== "Operative") {
-      return reject("Unavailable", `EVSE ${request.evseId} is inoperative`);
+      // F01.FR.23: Rejected; the Appendix has no reason code for it.
+      return reject("Unspecified", `EVSE ${request.evseId} is inoperative`);
     }
     if (busy(connector.id)) {
       return reject(
@@ -148,19 +195,24 @@ export function decideRemoteStart(
         `EVSE ${request.evseId} already has a transaction`,
       );
     }
+    if (reservedForOther(connector.id)) {
+      return reject(
+        "Unspecified",
+        `EVSE ${request.evseId} is reserved for another idToken`,
+      );
+    }
     return { ok: true, connectorId: connector.id };
   }
 
-  const free = Array.from(cp.connectors.values())
-    .filter((c) => c.id >= 1)
-    .sort((a, b) => a.id - b.id)
-    .find(
-      (c) =>
-        c.availability === "Operative" &&
-        !busy(c.id) &&
-        ["Available", "Preparing"].includes(c.status),
-    );
-  if (!free)
-    return reject("NoFreeEvse", "No EVSE is free to start a transaction");
+  const candidates = Array.from(cp.connectors.values())
+    .filter((c) => c.id >= 1 && c.availability === "Operative" && !busy(c.id))
+    .sort((a, b) => a.id - b.id);
+  const free =
+    candidates.find(
+      (c) => c.status === "Reserved" && reservedForRequest(c.id),
+    ) ?? candidates.find((c) => ["Available", "Preparing"].includes(c.status));
+  if (!free) {
+    return reject("Unspecified", "No EVSE is free to start a transaction");
+  }
   return { ok: true, connectorId: free.id };
 }

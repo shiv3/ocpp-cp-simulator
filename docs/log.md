@@ -2391,5 +2391,5 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 ## [2026-11-08] ingest | RequestStartTransaction validation and reason codes (#598)
 
-- `entities/default-behaviors.md`: the 2.x `RequestStartTransaction` answer is validated (chargingProfile, idToken, `MasterPassGroupId`, EVSE) and a rejection carries `statusInfo.reasonCode`; without `evseId` a free EVSE is picked.
+- `entities/default-behaviors.md`: the 2.x `RequestStartTransaction` answer is validated (chargingProfile, idToken, `MasterPassGroupId`, EVSE) and a rejection carries `statusInfo.reasonCode`; without `evseId` an EVSE reserved for the token or its group, else a free one, is picked. Review fixes: 2.1 `idToken.type` is not checked against a list (free string up to 20 characters; `idToken` up to 255), a master pass is a `groupIdToken` equal to the group id (C16.FR.03, answered `InvalidIdToken`), reserved EVSEs follow F01.FR.21 / FR.22, and `Unavailable` / `NoFreeEvse` became the Appendix code `Unspecified`.
 - `concepts/local-authorization.md`: `AuthCtrlr.MasterPassGroupId` is now a 2.x store key (`MasterPassGroupId`).

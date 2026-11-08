@@ -67,7 +67,7 @@ async function withStation(
 const token = { idToken: "TAG-1", type: "Central" };
 
 describe.each(VERSIONS)("%s RequestStartTransaction validation", (version) => {
-  it("rejects a chargingProfile that is not a TxProfile (F01.FR.11)", async () => {
+  it("rejects a chargingProfile that is not a TxProfile (F01.FR.09, FR.26)", async () => {
     await withStation(version, async (_c, _cp, ask) => {
       const res = await ask({
         remoteStartId: 1,
@@ -93,7 +93,7 @@ describe.each(VERSIONS)("%s RequestStartTransaction validation", (version) => {
     });
   });
 
-  it("rejects a TxProfile that carries a transactionId (F01.FR.12)", async () => {
+  it("rejects a TxProfile that carries a transactionId (F01.FR.11, FR.26)", async () => {
     await withStation(version, async (_c, _cp, ask) => {
       const res = await ask({
         remoteStartId: 1,
@@ -122,22 +122,19 @@ describe.each(VERSIONS)("%s RequestStartTransaction validation", (version) => {
 
   it("answers a malformed idToken without starting a transaction", async () => {
     await withStation(version, async (csms, _cp, ask) => {
-      // The message schema already refuses an empty or over-long idToken
-      // (CALLERROR); the handler refuses an unknown type that the 2.1
-      // schema, where `type` is a free string, lets through.
+      // The message schema already refuses an over-long idToken or an unknown
+      // 2.0.1 type (CALLERROR); the handler is the second line.
       for (const idToken of [
         { idToken: "", type: "Central" },
-        { idToken: "X".repeat(37), type: "Central" },
-        { idToken: "TAG", type: "NotAType" },
+        // Over the idToken maxLength: 36 on 2.0.1, 255 on 2.1.
+        {
+          idToken: "X".repeat(version === "OCPP-2.1" ? 256 : 37),
+          type: "Central",
+        },
+        ...(version === "OCPP-2.0.1" ? [{ idToken: "TAG", type: "VIN" }] : []),
       ]) {
         const res = await ask({ remoteStartId: 1, idToken });
         expect(res).not.toEqual({ status: "Accepted" });
-        if (version === "OCPP-2.1" && idToken.type === "NotAType") {
-          expect(res).toMatchObject({
-            status: "Rejected",
-            statusInfo: { reasonCode: "InvalidIdToken" },
-          });
-        }
       }
       expect(
         csms.received.some((f) => f[0] === 2 && f[2] === "TransactionEvent"),
@@ -145,7 +142,51 @@ describe.each(VERSIONS)("%s RequestStartTransaction validation", (version) => {
     });
   });
 
-  it("rejects a master pass token as idToken or groupIdToken", async () => {
+  it.skipIf(version !== "OCPP-2.1")(
+    "accepts every 2.1 IdTokenEnumStringType value and a vendor type (2.1 Appendices 7.1)",
+    async () => {
+      await withStation(
+        version,
+        async (_csms, _cp, ask) => {
+          for (const [i, type] of [
+            "DirectPayment",
+            "EVCCID",
+            "VIN",
+            "Central",
+            "MyVendorType",
+          ].entries()) {
+            expect(
+              await ask({
+                remoteStartId: i + 1,
+                idToken: { idToken: `TAG-${i}`, type },
+                evseId: i + 1,
+              }),
+            ).toEqual({ status: "Accepted" });
+          }
+        },
+        5,
+      );
+    },
+  );
+
+  it("accepts an empty idToken only for NoAuthorization", async () => {
+    await withStation(version, async (_csms, _cp, ask) => {
+      expect(
+        await ask({
+          remoteStartId: 1,
+          idToken: { idToken: "", type: "Central" },
+        }),
+      ).toMatchObject({ status: "Rejected" });
+      expect(
+        await ask({
+          remoteStartId: 2,
+          idToken: { idToken: "", type: "NoAuthorization" },
+        }),
+      ).toEqual({ status: "Accepted" });
+    });
+  });
+
+  it("rejects a master pass group token, not a plain idToken that equals the group id (C16.FR.03)", async () => {
     await withStation(version, async (_c, cp, ask) => {
       expect(
         cp.configuration.setRuntimeValue("MasterPassGroupId", "MASTER"),
@@ -158,17 +199,52 @@ describe.each(VERSIONS)("%s RequestStartTransaction validation", (version) => {
         }),
       ).toMatchObject({
         status: "Rejected",
-        statusInfo: { reasonCode: "MasterPassNotAllowed" },
+        statusInfo: { reasonCode: "InvalidIdToken" },
       });
       expect(
         await ask({
           remoteStartId: 2,
           idToken: { idToken: "MASTER", type: "Central" },
         }),
-      ).toMatchObject({
-        status: "Rejected",
-        statusInfo: { reasonCode: "MasterPassNotAllowed" },
-      });
+      ).toEqual({ status: "Accepted" });
+    });
+  });
+
+  it("applies the reservation of an EVSE (F01.FR.21, FR.22)", async () => {
+    await withStation(version, async (csms, _cp, ask) => {
+      csms.send([
+        2,
+        "res-1",
+        "ReserveNow",
+        {
+          id: 5,
+          evseId: 2,
+          expiryDateTime: new Date(Date.now() + 3_600_000).toISOString(),
+          idToken: { idToken: "OWNER", type: "Central" },
+        },
+      ]);
+      await csms.waitForFrame(result("res-1"));
+      await csms.waitForFrame(
+        (f) =>
+          f[0] === 2 &&
+          f[2] === "StatusNotification" &&
+          (f[3] as { connectorStatus?: string }).connectorStatus === "Reserved",
+      );
+      // Another token cannot take the reserved EVSE.
+      expect(
+        await ask({ remoteStartId: 1, idToken: token, evseId: 2 }),
+      ).toMatchObject({ status: "Rejected" });
+      // Without evseId the owner is given the EVSE reserved for them.
+      expect(
+        await ask({
+          remoteStartId: 2,
+          idToken: { idToken: "OWNER", type: "Central" },
+        }),
+      ).toEqual({ status: "Accepted" });
+      const started = await csms.waitForFrame(
+        (f) => f[0] === 2 && f[2] === "TransactionEvent",
+      );
+      expect((started[3] as { evse?: { id: number } }).evse?.id).toBe(2);
     });
   });
 
@@ -213,7 +289,7 @@ describe.each(VERSIONS)("%s RequestStartTransaction validation", (version) => {
       );
       expect(await ask({ remoteStartId: 3, idToken: token })).toMatchObject({
         status: "Rejected",
-        statusInfo: { reasonCode: "NoFreeEvse" },
+        statusInfo: { reasonCode: "Unspecified" },
       });
     });
   });

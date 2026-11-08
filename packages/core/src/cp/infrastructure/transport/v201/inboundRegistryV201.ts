@@ -197,6 +197,9 @@ export interface V201InboundContext {
   readonly chargePoint: ChargePoint;
   readonly logger: Logger;
   readonly sendCall: (action: V201Action, payload: V201RequestPayload) => void;
+  /** E14 (#554): whether TransactionEvents are still to be delivered, for
+   *  one transaction or (no id) overall. Absent in unit-test contexts. */
+  readonly hasTransactionEventsToDeliver?: (transactionId?: string) => boolean;
   /** Absent in contexts built without a message handler (unit tests). */
   readonly certificateSigning?: V201CertificateSigning;
 }

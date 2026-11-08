@@ -20,11 +20,18 @@ import type { TransactionEventRequestV201 } from "@ocpp-cp-sim/ocpp/index";
  */
 
 class FakeSocket {
-  calls: Array<{ action: string; payload: unknown }> = [];
+  calls: Array<{ messageId: string; action: string; payload: unknown }> = [];
+  handler: ((...args: unknown[]) => void) | null = null;
   connected = false;
   /** CALLs `sendAction` refuses next (network-sim refusal, not_accepted). */
   refuseNext = 0;
-  setMessageHandler(): void {}
+  setMessageHandler(handler: (...args: unknown[]) => void): void {
+    this.handler = handler;
+  }
+  /** The CSMS answers the CALL `messageId` with an empty CALLRESULT. */
+  answer(messageId: string): void {
+    this.handler!(3, messageId, "", {});
+  }
   onCloseTransaction(): void {}
   isConnected(): boolean {
     return this.connected;
@@ -33,7 +40,7 @@ class FakeSocket {
     return { gen: 1, closeCause: null };
   }
   sendAction(
-    _messageId: string,
+    messageId: string,
     action: string,
     payload: unknown,
     _gen: unknown,
@@ -43,7 +50,7 @@ class FakeSocket {
       this.refuseNext -= 1;
       return false;
     }
-    this.calls.push({ action, payload });
+    this.calls.push({ messageId, action, payload });
     onSettled?.({ outcome: "written" });
     return true;
   }
@@ -67,6 +74,7 @@ function station(
   db: BunSqliteDatabase,
   ocppVersion: string,
   logger = silentLogger(),
+  maxEvents = 1000,
 ) {
   const socket = new FakeSocket();
   const tx = {
@@ -91,6 +99,7 @@ function station(
       transactionMessageAttempts: () => 3,
       transactionMessageRetryInterval: () => 60,
       messageTimeout: () => 30,
+      offlineQueueMaxEvents: () => maxEvents,
       meterValuesSampledData: () => [],
     },
   };
@@ -152,6 +161,10 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
         for (const payload of replayed) {
           expect(strictValidationErrors(SCHEMAS[version], payload)).toEqual([]);
         }
+        // #554: the rows stay until the CSMS answers.
+        expect(rows(db)).toHaveLength(2);
+        for (const call of after.socket.calls)
+          after.socket.answer(call.messageId);
         expect(rows(db)).toEqual([]);
       } finally {
         // Clear the replays' MessageTimeout timers before the next file.
@@ -218,6 +231,195 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
         expect(after.socket.calls).toEqual([]);
         // Same rows, same order: a reload still replays Started first.
         expect(rows(db)).toEqual(stored);
+      } finally {
+        db.close();
+      }
+    });
+
+    it("keeps a replayed row until the CSMS answers, so a crash replays it again (#554)", async () => {
+      const db = BunSqliteDatabase.open(":memory:");
+      const stations: Array<ReturnType<typeof station>> = [];
+      try {
+        const before = station(db, version);
+        before.handler.sendTransactionEvent({
+          phase: "started",
+          transaction: before.tx,
+          connectorId: 1,
+        });
+        await Promise.resolve();
+
+        // First run: replayed, written, never answered (a crash follows).
+        const first = station(db, version);
+        stations.push(first);
+        first.socket.connected = true;
+        first.handler.flushPendingQueue();
+        expect(first.socket.calls).toHaveLength(1);
+        expect(rows(db)).toHaveLength(1);
+
+        // Second run replays it again, offline=true, and the answer clears it.
+        const second = station(db, version);
+        stations.push(second);
+        second.socket.connected = true;
+        second.handler.flushPendingQueue();
+        expect(second.socket.calls).toHaveLength(1);
+        expect(
+          (second.socket.calls[0].payload as TransactionEventRequestV201)
+            .offline,
+        ).toBe(true);
+        expect(rows(db)).toHaveLength(1);
+        second.socket.answer(second.socket.calls[0].messageId);
+        expect(rows(db)).toEqual([]);
+      } finally {
+        for (const s of stations) s.handler.onWebSocketClosed();
+        db.close();
+      }
+    });
+
+    it("does not queue a replay twice when the socket closes before the answer (#554)", async () => {
+      const db = BunSqliteDatabase.open(":memory:");
+      let run: ReturnType<typeof station> | undefined;
+      try {
+        const before = station(db, version);
+        before.handler.sendTransactionEvent({
+          phase: "started",
+          transaction: before.tx,
+          connectorId: 1,
+        });
+        await Promise.resolve();
+
+        run = station(db, version);
+        run.socket.connected = true;
+        run.handler.flushPendingQueue();
+        run.socket.connected = false;
+        run.handler.onWebSocketClosed();
+        expect(rows(db)).toHaveLength(1);
+
+        // Back online: the same row replays, then the answer clears it.
+        run.socket.connected = true;
+        run.handler.flushPendingQueue();
+        expect(run.socket.calls).toHaveLength(2);
+        run.socket.answer(run.socket.calls[1].messageId);
+        expect(rows(db)).toEqual([]);
+      } finally {
+        run?.handler.onWebSocketClosed();
+        db.close();
+      }
+    });
+
+    it("answers E14 messagesInQueue from the queue, per transaction and overall (#554)", async () => {
+      const db = BunSqliteDatabase.open(":memory:");
+      try {
+        const { socket, tx, handler } = station(db, version);
+        expect(handler.hasTransactionEventsToDeliver()).toBe(false);
+        handler.sendTransactionEvent({
+          phase: "started",
+          transaction: tx,
+          connectorId: 1,
+        });
+        await Promise.resolve();
+        expect(handler.hasTransactionEventsToDeliver()).toBe(true);
+        expect(handler.hasTransactionEventsToDeliver("tx-528")).toBe(true);
+        expect(handler.hasTransactionEventsToDeliver("other")).toBe(false);
+
+        // Replayed but unanswered: still to be delivered.
+        socket.connected = true;
+        handler.flushPendingQueue();
+        expect(handler.hasTransactionEventsToDeliver("tx-528")).toBe(true);
+        socket.answer(socket.calls[0].messageId);
+        expect(handler.hasTransactionEventsToDeliver()).toBe(false);
+      } finally {
+        db.close();
+      }
+    });
+
+    it("drops Updated events from a full queue, meter values first, never Started or Ended (#554)", async () => {
+      const db = BunSqliteDatabase.open(":memory:");
+      let run: ReturnType<typeof station> | undefined;
+      try {
+        const logger = silentLogger();
+        run = station(db, version, logger, 3);
+        const { tx, handler, socket } = run;
+        handler.sendTransactionEvent({
+          phase: "started",
+          transaction: tx,
+          connectorId: 1,
+        });
+        handler.sendTransactionUpdate(1, { triggerReason: "Authorized" });
+        handler.sendTransactionUpdate(1, {
+          triggerReason: "MeterValuePeriodic",
+        });
+        // Full (3). The next Updated pushes the oldest meter-value one out.
+        handler.sendTransactionUpdate(1, { triggerReason: "MeterValueClock" });
+        await Promise.resolve();
+        const queued = rows(db).map((r) => JSON.parse(r.payload));
+        expect(
+          queued.map((p) => [p.eventType, p.triggerReason, p.seqNo]),
+        ).toEqual([
+          ["Started", "Authorized", 0],
+          ["Updated", "Authorized", 1],
+          ["Updated", "MeterValueClock", 3],
+        ]);
+        // An Ended is queued past the limit; no Updated is left but one.
+        handler.sendTransactionEvent({
+          phase: "ended",
+          transaction: tx,
+          connectorId: 1,
+        });
+        await Promise.resolve();
+        const kinds = rows(db).map((r) => JSON.parse(r.payload).eventType);
+        expect(kinds).toContain("Started");
+        expect(kinds).toContain("Ended");
+        expect(kinds.filter((k) => k === "Updated")).toHaveLength(1);
+
+        socket.connected = true;
+        handler.flushPendingQueue();
+        const dropWarnings = logger.warn.mock.calls
+          .map((c) => c[0])
+          .filter((m) => /Dropped \d+ Updated TransactionEvent/.test(m));
+        expect(dropWarnings).toHaveLength(1);
+      } finally {
+        run?.handler.onWebSocketClosed();
+        db.close();
+      }
+    });
+
+    it("drops a new Updated event when the full queue holds nothing droppable (#554)", async () => {
+      const db = BunSqliteDatabase.open(":memory:");
+      try {
+        const { tx, handler } = station(db, version, silentLogger(), 1);
+        handler.sendTransactionEvent({
+          phase: "started",
+          transaction: tx,
+          connectorId: 1,
+        });
+        handler.sendTransactionUpdate(1, {
+          triggerReason: "MeterValuePeriodic",
+        });
+        await Promise.resolve();
+        expect(rows(db).map((r) => JSON.parse(r.payload).eventType)).toEqual([
+          "Started",
+        ]);
+      } finally {
+        db.close();
+      }
+    });
+
+    it("applies no limit when OfflineQueueMaxEvents is 0 (#554)", async () => {
+      const db = BunSqliteDatabase.open(":memory:");
+      try {
+        const { tx, handler } = station(db, version, silentLogger(), 0);
+        handler.sendTransactionEvent({
+          phase: "started",
+          transaction: tx,
+          connectorId: 1,
+        });
+        for (let i = 0; i < 5; i++) {
+          handler.sendTransactionUpdate(1, {
+            triggerReason: "MeterValuePeriodic",
+          });
+        }
+        await Promise.resolve();
+        expect(rows(db)).toHaveLength(6);
       } finally {
         db.close();
       }

@@ -18,7 +18,7 @@ related:
   - ../concepts/operational-timeline.md
   - ../concepts/charging-sessions.md
   - ../concepts/local-authorization.md
-updated: 2026-11-07
+updated: 2026-11-08
 ---
 
 # MCP endpoint (`POST /mcp`)
@@ -58,6 +58,7 @@ The endpoint exposes 35 curated tools wrapping the daemon's
 | `behavior_list`               | `behavior.list`               | — (the library `--behavior` loaded, whether `--watch-behaviors` is on, and the built-in default behaviors with the actions each answers)                                                                                                                                                                                                                                             |
 | `behavior_reload`             | `behavior.reload`             | — (no parameters: re-reads the files given at start; no path or code can be supplied). **Together with `cp_behaviors_set` this gives an AI agent control over which loaded code runs, and over re-reading files on disk: do not connect an agent to a daemon whose behavior directories it can write** ([trust line](../concepts/charger-engine.md#loading-code-and-the-trust-line)) |
 | `cp_bulk`                     | `cp.bulk`                     | `labels`, `action` (`connect` / `disconnect` / `reset`) — every CP carrying every pair; `{}` refused; partial success is the result; schema derived from the method's (#470)                                                                                                                                                                                                         |
+| `cp_scenario_run`             | `cp.scenario.run`             | `labels`, `connector`, `templateId`, `evSettings?`, `strict?`, `once?` — `run_scenario_template` on every CP carrying every pair; `{}` refused; returns `started` with each `scenarioId`; schema derived from the method's (#486)                                                                                                                                                    |
 | `cp_connect`                  | `connect`                     | `cpId`                                                                                                                                                                                                                                                                                                                                                                               |
 | `cp_disconnect`               | `disconnect`                  | `cpId`                                                                                                                                                                                                                                                                                                                                                                               |
 | `cp_status`                   | `status`                      | `cpId`                                                                                                                                                                                                                                                                                                                                                                               |
@@ -84,8 +85,8 @@ The endpoint exposes 35 curated tools wrapping the daemon's
 | `list_charging_sessions`      | `sessions.list`               | `cpId`, `connectorId?`, `outcomes?`, `limit?` (default 50), `offset?`, `order?` — the [charging sessions](../concepts/charging-sessions.md), newest first by default (#447)                                                                                                                                                                                                          |
 
 Most of these tools hand-declare a copy of their method's fields rather than
-deriving it (`cp_create` / `cp_create_many`, `cp_list`, `cp_labels_set` and
-`cp_bulk` are the exception — see
+deriving it (`cp_create` / `cp_create_many`, `cp_list`, `cp_labels_set`,
+`cp_bulk` and `cp_scenario_run` are the exception — see
 [cp.create parameters](../concepts/control-plane.md#cpcreate-parameters)), so
 a field the method later gains, or an optional field the tool over-tightened
 to required, could silently drift out of reach of an MCP agent (#284, #299).

@@ -2433,3 +2433,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-08] fix | OCPP-S 1.6 transaction retry review follow-ups (#585)
 
 - [Charging sessions](concepts/charging-sessions.md): the "CALLERROR is not a failed start" paragraph names the OCPP-S 1.6 SOAP Fault / HTTP error case. A stop no longer moves a waiting `StartTransaction` connector to `Charging`; a Fault landing after a stop sends no Heartbeat; a resend due while the boot gate is closed is discarded with a notice. [GitHub issues](sources/github-issues.md): `updated:` bumped.
+
+## [2026-11-08] ingest | Run a scenario template on a label selector (#486)
+
+- New `cp.scenario.run { labels, connector, templateId, evSettings?, strict?, once? }` and MCP `cp_scenario_run`: `run_scenario_template` on every charge point a label selector matches, with `cp.bulk`'s selector rules, fan-out and partial-success result (`started` carries each `scenarioId`). A method of its own (decision D07), not a `cp.bulk` action. Pages: [Socket.IO control plane](concepts/control-plane.md#charge-point-labels), [MCP endpoint](entities/mcp-endpoint.md).

@@ -84,7 +84,7 @@ describe("method table coverage (Step 3c)", () => {
     for (const id of EXPLICIT_METHODS) {
       expect(METHODS[id]).toBeDefined();
     }
-    expect(EXPLICIT_METHODS).toHaveLength(49);
+    expect(EXPLICIT_METHODS).toHaveLength(50);
   });
 
   it("contains exactly the jsonMode ids + the explicit ops (no drift)", () => {
@@ -330,6 +330,52 @@ describe("cp.bulk (#470)", () => {
         matched: ["A", "B"],
         succeeded: ["A"],
         failed: [{ cpId: "B", reason: "Connection timeout" }],
+      }).success,
+    ).toBe(true);
+  });
+});
+
+describe("cp.scenario.run (#486)", () => {
+  const params = METHODS["cp.scenario.run"].params;
+  const labels = { site: "s1" };
+
+  it("accepts a selector, a connector, a template and the run options", () => {
+    expect(
+      params.safeParse({
+        labels,
+        connector: 1,
+        templateId: "basic-charge",
+        evSettings: { maxPower: 7000 },
+        strict: true,
+        once: true,
+      }).success,
+    ).toBe(true);
+  });
+
+  it("refuses an empty or missing selector", () => {
+    const rest = { connector: 1, templateId: "t" };
+    expect(params.safeParse({ labels: {}, ...rest }).success).toBe(false);
+    expect(params.safeParse(rest).success).toBe(false);
+  });
+
+  it("refuses a missing template or connector, a bad connector and unknown fields", () => {
+    expect(params.safeParse({ labels, connector: 1 }).success).toBe(false);
+    expect(params.safeParse({ labels, templateId: "t" }).success).toBe(false);
+    expect(
+      params.safeParse({ labels, connector: 0, templateId: "t" }).success,
+    ).toBe(false);
+    expect(
+      params.safeParse({ labels, connector: 1, templateId: "t", cpId: "A" })
+        .success,
+    ).toBe(false);
+  });
+
+  it("reports the scenario id of every started run", () => {
+    expect(
+      METHODS["cp.scenario.run"].result.safeParse({
+        matched: ["A", "B"],
+        started: [{ cpId: "A", scenarioId: "s-1" }],
+        failed: [{ cpId: "B", reason: "unknown template" }],
       }).success,
     ).toBe(true);
   });

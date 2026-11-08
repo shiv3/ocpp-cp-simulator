@@ -2400,3 +2400,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-08] ingest | CustomerInformation and NotifyCustomerInformation (#602)
 
 - `concepts/local-authorization.md`: new "CustomerInformation" section (answers, report parts, clear semantics); `entities/default-behaviors.md`: `CustomerInformation` moves to the cache and local list row.
+
+## [2026-11-08] ingest | The image runs JSON mode without `--entrypoint` (#346)
+
+- [Docker image](entities/docker-image.md#running-the-cli): new section. `docker/entrypoint.sh` passes the arguments straight to `dist-cli/main.js` (no daemon flags) when `--json` is among them or the first argument is `cli` / `analyze` / `export-k6` / `behavior`; a flag-first line still starts the daemon, so existing `docker run <image> --cp-id …` commands are unchanged. `/app/src/cli/main.ts` is a shim that runs the bundle, so open-ocpp-tck's `--entrypoint bun … src/cli/main.ts --json` shape survives the bundle-only image (#590). Tests: `dockerEntrypoint.bun.test.ts`, `cliBundle.bun.test.ts`; `ci.yml` `docker-build` runs both shapes. [CLI](entities/cli.md) and [GitHub issues](sources/github-issues.md) point at it.

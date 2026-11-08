@@ -387,6 +387,8 @@ async function certificateSigned(
         `CertificateSigned accepted: stored ${pems.length} certificate(s) as ${use}`,
         LogType.OCPP,
       );
+      // #564: not left to the effect below, which a dropped answer skips.
+      ctx.certificateSigning?.certificateStored(use);
       return {
         response: { status: "Accepted" } satisfies CertificateSignedResponseV21,
         // #537 M06.FR.07: a new V2G certificate's OCSP status is fetched.

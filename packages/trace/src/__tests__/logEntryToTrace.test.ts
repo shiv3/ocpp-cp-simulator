@@ -183,3 +183,40 @@ describe("logLinesToTrace", () => {
     expect(resultB?.action).toBe("Heartbeat");
   });
 });
+
+describe("inbound validation violations (#593)", () => {
+  it("merges the violation into the inbound CALL record's meta", () => {
+    const records = logLinesToTrace([
+      {
+        timestamp: "2026-01-01T00:00:00.000Z",
+        message: 'Received: [2,"v-1","Reset",{"type":"Warm"}]',
+        cpId: "CP1",
+      },
+      {
+        timestamp: "2026-01-01T00:00:00.001Z",
+        message: `Inbound validation: ${JSON.stringify({
+          messageId: "v-1",
+          action: "Reset",
+          mode: "enforce",
+          errorCode: "PropertyConstraintViolation",
+          description: "bad enum",
+        })}`,
+        cpId: "CP1",
+      },
+      {
+        timestamp: "2026-01-01T00:00:00.002Z",
+        message: 'Sent: [4,"v-1","PropertyConstraintViolation","bad enum",{}]',
+        cpId: "CP1",
+      },
+    ]);
+    expect(records).toHaveLength(2);
+    expect(records[0].meta).toEqual({
+      validation: {
+        mode: "enforce",
+        errorCode: "PropertyConstraintViolation",
+        description: "bad enum",
+      },
+    });
+    expect(records[1].meta).toBeUndefined();
+  });
+});

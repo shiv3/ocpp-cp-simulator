@@ -139,6 +139,8 @@ export interface ChargePointSnapshot {
     cpoName?: string;
     /** #347: periodic samples ride TransactionEvent(Updated) on OCPP 2.x. */
     txUpdatedMeterValues?: boolean;
+    /** #593: OCPP 1.6J inbound CALL validation mode. */
+    inboundValidation?: "off" | "warn" | "enforce";
     tlsCaPath?: string;
     tlsCertPath?: string;
     tlsKeyPath?: string;
@@ -194,6 +196,9 @@ export interface CreateChargePointParams {
   /** #347: periodic samples ride TransactionEvent(Updated) on OCPP 2.x.
    *  Omitted on an update keeps the current value. */
   txUpdatedMeterValues?: boolean;
+  /** #593: OCPP 1.6J inbound CALL validation (off | warn | enforce).
+   *  Omitted on an update keeps the current value. */
+  inboundValidation?: "off" | "warn" | "enforce";
   tls?: OcppTlsOptions;
   tlsCaPath?: string;
   tlsCertPath?: string;

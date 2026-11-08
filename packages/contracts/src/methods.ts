@@ -36,6 +36,7 @@ import {
 import { subscribeResultSchema } from "./envelope";
 import { VEHICLE_METHODS, vehicleCatalogInfoSchema } from "./vehicle";
 import { labelsSchema } from "./labels";
+import { transportConfigSchema } from "./transportConfig";
 import {
   METER_READING_CONTEXTS,
   STOP_REASONS,
@@ -351,6 +352,11 @@ const cpParamsBaseSchema = z.object({
   cpoName: STR_64K.optional().describe(
     "CPO name used when generating certificate signing requests",
   ),
+  transport: transportConfigSchema
+    .optional()
+    .describe(
+      "Transport settings of this charge point. transport.reconnect sets the reconnect policy (max attempts, fixed or exponential, base and max delay, jitter) and the BootNotification retry limit; omitted fields keep the built-in behaviour",
+    ),
   txUpdatedMeterValues: z
     .boolean()
     .optional()

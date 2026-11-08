@@ -21,7 +21,7 @@ related:
   - charging-sessions.md
   - local-authorization.md
   - ocpp-versions-and-transports.md
-updated: 2026-11-05
+updated: 2026-11-08
 ---
 
 # Operational timeline
@@ -86,12 +86,12 @@ charge point in Local mode keeps it.
 | `data`        | object               | Kind-specific, machine-readable fields (table below).                      |
 
 `timeline.get` answers `{ version, entries, total }`. The format version is
-**`1.3`**, following the [trace format](trace-format.md#versioning) rules: an
+**`1.4`**, following the [trace format](trace-format.md#versioning) rules: an
 additive change (a new kind, a new `data` field) bumps the minor version, and
 consumers must ignore kinds and fields they do not know. `1.1` added the three
 `charging_profile_*` kinds (#469). `1.2` added `transaction_message_rejected` and
 `transaction_message_discarded` (#490). `1.3` added their `action` and `reason`
-fields, and made `errorCode` conditional (#527, #529).
+fields, and made `errorCode` conditional (#527, #529). `1.4` added `gave_up` (#609).
 
 ## Kinds
 
@@ -102,6 +102,7 @@ Names reuse the [CLI event](../entities/cli.md#events) names where both exist.
 | `connected`                     | CP        | —                                                                    | The socket opens (SOAP: on connect).                                                                                    |
 | `disconnected`                  | CP        | `code`, `reason`                                                     | The socket closes, after the charge point's own teardown.                                                               |
 | `reconnecting`                  | CP        | `attempt`, `delayMs`                                                 | The transport schedules a reconnect after an unrequested close.                                                         |
+| `gave_up`                       | CP        | `target` (`reconnect` or `boot_notification`), `attempts`            | The reconnect policy's `maxAttempts` or the `bootRetryLimit` is reached and the charge point stops retrying (#609).     |
 | `boot_notification`             | CP        | `status`, `interval`                                                 | A BootNotification.conf is processed, whatever its status.                                                              |
 | `status_change`                 | CP        | `from`, `to`                                                         | The charge point status changes; repeats of the same status are skipped.                                                |
 | `connector_status`              | connector | `from`, `to`                                                         | A connector status changes; repeats are skipped.                                                                        |

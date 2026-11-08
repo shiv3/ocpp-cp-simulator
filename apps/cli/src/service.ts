@@ -760,6 +760,9 @@ export class CLIChargePointService {
         ...(init.urlDistribution
           ? { urlDistribution: init.urlDistribution }
           : {}),
+        ...(init.transport?.reconnect
+          ? { reconnect: init.transport.reconnect }
+          : {}),
         ...(init.idTags ? { idTags: init.idTags } : {}),
         ...(init.idTagDistribution
           ? { idTagDistribution: init.idTagDistribution }

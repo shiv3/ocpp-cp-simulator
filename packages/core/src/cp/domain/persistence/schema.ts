@@ -13,7 +13,7 @@
  * persistence layer was localStorage and we explicitly do NOT carry it
  * forward (see plan).
  */
-export const SCHEMA_VERSION = 24;
+export const SCHEMA_VERSION = 25;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -184,7 +184,10 @@ CREATE TABLE IF NOT EXISTS charge_points (
   behaviors      TEXT,
   -- #347: 1 when the scheduler's in-transaction samples ride OCPP 2.x
   -- TransactionEvent(Updated); NULL (a row older than the column) is off.
-  tx_updated_meter_values INTEGER
+  tx_updated_meter_values INTEGER,
+  -- #609: the per-charge-point transport settings (reconnect policy, ...), a
+  -- JSON object. NULL: the built-in behaviour.
+  transport_options TEXT
 );
 
 -- Per-CP UI / operator state. Currently holds the "desired connected"
@@ -736,6 +739,15 @@ export function runMigrations(db: Database): void {
     const cols = db.all<{ name: string }>("PRAGMA table_info(charge_points)");
     if (!new Set(cols.map((c) => c.name)).has("behaviors")) {
       db.exec("ALTER TABLE charge_points ADD COLUMN behaviors TEXT");
+    }
+  }
+
+  // v24 → v25 (#609): `charge_points.transport_options`. Guarded like the v16
+  // column; NULL (every row of an older database) is the built-in behaviour.
+  if (stored < 25) {
+    const cols = db.all<{ name: string }>("PRAGMA table_info(charge_points)");
+    if (!new Set(cols.map((c) => c.name)).has("transport_options")) {
+      db.exec("ALTER TABLE charge_points ADD COLUMN transport_options TEXT");
     }
   }
 

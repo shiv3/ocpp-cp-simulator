@@ -17,6 +17,7 @@ import {
   SOAP_CHARGE_POINT_SERVICE_ROUTE,
   normalizeSoapPath,
 } from "../soapPath";
+import { transportConfigSchema } from "@ocpp-cp-sim/contracts/transportConfig";
 import { RPC_RATE_PER_SEC, INFLIGHT_CAP } from "@ocpp-cp-sim/contracts/limits";
 import { labelsSchema } from "@ocpp-cp-sim/contracts/labels";
 import { behaviorIdsSchema } from "@ocpp-cp-sim/contracts/methods";
@@ -881,6 +882,19 @@ export function parseCreateBody(
     }
     urlDistribution = body.urlDistribution;
   }
+  // #609: refused rather than defaulted, like urlDistribution — a typo in a
+  // reconnect field must not silently leave the default policy in place.
+  let transport: ChargePointInitOptions["transport"];
+  if (Object.prototype.hasOwnProperty.call(body, "transport")) {
+    const parsedTransport = transportConfigSchema.safeParse(body.transport);
+    if (!parsedTransport.success) {
+      const issue = parsedTransport.error.issues[0];
+      throw new Error(
+        `transport is invalid: ${issue.path.join(".") || "(root)"}: ${issue.message}`,
+      );
+    }
+    transport = parsedTransport.data;
+  }
   const centralSystemUrl =
     typeof body.centralSystemUrl === "string" &&
     body.centralSystemUrl.length > 0
@@ -1090,6 +1104,7 @@ export function parseCreateBody(
       ? { supervisionUrls }
       : {}),
     ...(urlDistribution ? { urlDistribution } : {}),
+    ...(transport ? { transport } : {}),
     ...(idTags ? { idTags } : {}),
     ...(idTagFile ? { idTagFile } : {}),
     ...(idTagDistribution ? { idTagDistribution } : {}),

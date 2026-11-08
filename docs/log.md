@@ -2388,3 +2388,10 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-08] ingest | CI runs each suite once, in parallel jobs
 
 - `ci.yml`: the vitest and bun suites ran one after the other in the `test` job and then a second time for coverage, which made the job about 18 minutes. Each now runs once with coverage in its own job (`vitest`, and `bun` in three shards through `scripts/bun-test-shard.sh`); `test` keeps the static checks and the packaging smokes. Every job has a timeout, and a new push to a pull request cancels the previous run. Updated [Testing strategy](analyses/testing-strategy.md).
+
+## [2026-11-08] ingest | Configurable reconnect policy and 2.x `RetryBackOff*` (#609)
+
+- [OCPP versions & transports](concepts/ocpp-versions-and-transports.md#reconnect-policy-and-retrybackoff-609): new section, the canonical table of the reconnect policy (`maxAttempts`, `mode`, `baseDelayMs`, `maxDelayMs`, `jitterMs`, `bootRetryLimit`; defaults are the previous 1 s → 30 s forever), seeded jitter, giving up, and the OCPP 2.0.1 B.1 variables `RetryBackOffWaitMinimum` / `RandomRange` / `RepeatTimes` (decision: wait = minimum × 2^min(N−1, RepeatTimes) + random).
+- [CLI](entities/cli.md) flags `--reconnect-*` and `--boot-retry-limit`; [Daemon](entities/daemon.md) and [Control plane](concepts/control-plane.md) (`cp.create` `transport`) in sync.
+- [State persistence](concepts/state-persistence.md): schema v25 `charge_points.transport_options`.
+- [Operational timeline](concepts/operational-timeline.md): format `1.4`, new kind `gave_up`.

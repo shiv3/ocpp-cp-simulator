@@ -3,6 +3,8 @@ title: OCPP versions and transports
 type: concept
 summary: What the simulator speaks — OCPP-J 1.6J (default), 2.0.1 and 2.1 over WebSocket, and OCPP-S 1.2 / 1.5 / 1.6S over SOAP 1.2 + WS-Addressing — and which surfaces support which.
 sources:
+  - packages/core/src/cp/infrastructure/transport/ReconnectPolicy.ts
+  - "issue #609"
   - packages/ocpp/src/ (generated from packages/ocpp/vendor/ocpp-schemas)
   - packages/ocpp/vendor/ocpp-schemas/NOTICE
   - README.md (SOAP section)
@@ -30,7 +32,7 @@ related:
   - operational-timeline.md
   - expert-ocpp-calls.md
   - variable-monitoring.md
-updated: 2026-11-07
+updated: 2026-11-08
 ---
 
 # OCPP versions and transports
@@ -87,6 +89,59 @@ so no negative (refuse / ignore a CSMS call) or wait-for-call scenario was
 expressible on 2.0.1 at all; it now consults them at the same point the 1.6
 handler does, before payload validation and handler lookup, so policies are
 sticky across reconnects the same way and an override answers once.
+
+## Reconnect policy and `RetryBackOff*` (#609)
+
+When an OCPP-J connection closes without the charge point asking for it, the
+transport waits and reconnects. The wait and the point at which it stops are
+the **reconnect policy**, one object per charge point (`transport.reconnect` on
+`cp.create`, the `--reconnect-*` flags in the [CLI](../entities/cli.md), the
+`charge_points.transport_options` column of the [state database](state-persistence.md)).
+Every field is optional and **the defaults are the schedule before the policy
+existed**: 1 s, doubling to 30 s, forever, no jitter.
+
+| Field            | Default       | Meaning                                                                                                                                                              |
+| ---------------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `maxAttempts`    | `-1`          | Reconnect attempts after a loss before giving up; `-1` unlimited, `0` never reconnects. The count restarts when a connection opens.                                  |
+| `mode`           | `exponential` | `exponential` waits `min(baseDelayMs × 2^(attempt−1), maxDelayMs)`; `fixed` waits `baseDelayMs` every time.                                                          |
+| `baseDelayMs`    | `1000`        | Wait before the first attempt.                                                                                                                                       |
+| `maxDelayMs`     | `30000`       | Cap of the exponential wait; must be ≥ `baseDelayMs`.                                                                                                                |
+| `jitterMs`       | `0`           | A random extra wait in `[0, jitterMs]`, drawn from the charge point's seeded `reconnect` stream: the same seed replays the same waits. No draw happens at `0`.       |
+| `bootRetryLimit` | `-1`          | Automatic BootNotification re-sends after a `Rejected` answer (§4.2) before stopping; `-1` unlimited. An `Accepted` answer restores the budget. Applies to SOAP too. |
+
+An invalid value is refused when the charge point is created (a typo does not
+silently leave the default in place). The delay a network-simulation
+`reconnectDelayMs` reserves still wins when it is longer than the computed wait
+([network simulation](network-simulation.md)).
+
+**Giving up** — `maxAttempts` or `bootRetryLimit` reached — logs a warning, emits
+`gaveUp` and records a `gave_up` entry (`target` `reconnect` or
+`boot_notification`, `attempts`) in the [operational timeline](operational-timeline.md).
+The charge point then stays offline until an explicit `connect`, which starts
+with a fresh budget.
+
+**OCPP 2.0.1 / 2.1 (Part 2, B.1).** A 2.x charge point reads three
+`OCPPCommCtrlr` variables, ReadWrite and persisted like the others, and they
+replace `baseDelayMs`, `jitterMs` and the number of doublings:
+
+| Variable                  | Unit    | Meaning                                                               |
+| ------------------------- | ------- | --------------------------------------------------------------------- |
+| `RetryBackOffWaitMinimum` | seconds | The first wait; at least 1.                                           |
+| `RetryBackOffRandomRange` | seconds | A random extra wait in `[0, RandomRange]` added to every wait.        |
+| `RetryBackOffRepeatTimes` | count   | How many times the wait doubles (0–30); after that it stays constant. |
+
+The wait before attempt N is `RetryBackOffWaitMinimum × 2^min(N−1, RepeatTimes)`
+plus the random extra. Reading B.1 this way is a decision of this simulator: the
+spec describes the doubling and the random range in prose, not as a formula.
+`mode: fixed` never doubles, `maxDelayMs` still caps the doubled part (but never
+below `RetryBackOffWaitMinimum`), and `maxAttempts` still ends the loop. The
+variable defaults are derived from the policy (whole seconds, at least 1 for the
+minimum), so a 2.x charge point with no policy reconnects after 1, 2, 4, 8, 16
+and 30 s, like 1.6; a policy with sub-second values is rounded up in the
+variables. A 1.6 charge point has none of the three keys.
+
+Local mode (the browser) does not take the policy: the reconnect loop of the web
+console's charge points keeps the defaults.
 
 ## WebSocket ping (`WebSocketPingInterval`)
 

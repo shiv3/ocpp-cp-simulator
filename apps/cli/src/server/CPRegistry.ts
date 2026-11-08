@@ -33,6 +33,7 @@ import {
   normalizeLabels,
   type Labels,
 } from "@ocpp-cp-sim/contracts/labels";
+import { transportConfigSchema } from "@ocpp-cp-sim/contracts/transportConfig";
 import type { ScenarioRunRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/ScenarioRunRepository";
 import { createScenarioRunRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/createScenarioRunRepository";
 import type { ChargingSessionRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/ChargingSessionRepository";
@@ -93,6 +94,7 @@ interface ChargePointRow {
   labels: string | null;
   behaviors: string | null;
   tx_updated_meter_values: number | null;
+  transport_options: string | null;
 }
 
 interface CPRegistryOptions {
@@ -244,7 +246,8 @@ export class CPRegistry {
         "central_system_url, soap_callback_url, soap_path, " +
         "security_profile, authorization_key, cpo_name, " +
         "tls_ca_path, tls_cert_path, tls_key_path, " +
-        "basic_auth, boot_notif, created_at, labels, behaviors, tx_updated_meter_values " +
+        "basic_auth, boot_notif, created_at, labels, behaviors, tx_updated_meter_values, " +
+        "transport_options " +
         "FROM charge_points ORDER BY created_at ASC",
     );
     const restored: string[] = [];
@@ -313,6 +316,8 @@ export class CPRegistry {
         ...(row.tx_updated_meter_values === 1
           ? { txUpdatedMeterValues: true }
           : {}),
+        // #609: NULL restores the built-in behaviour.
+        ...restoreTransport(row),
       };
       // #354 follow-up: a SOAP charge point whose callback URL was derived
       // from a base the daemon no longer has — the tunnel was not opened this
@@ -972,8 +977,9 @@ export class CPRegistry {
         "central_system_url, soap_callback_url, soap_path, " +
         "security_profile, authorization_key, cpo_name, " +
         "tls_ca_path, tls_cert_path, tls_key_path, " +
-        "basic_auth, boot_notif, created_at, labels, behaviors, tx_updated_meter_values) " +
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+        "basic_auth, boot_notif, created_at, labels, behaviors, tx_updated_meter_values, " +
+        "transport_options) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
         "ON CONFLICT (cp_id) DO UPDATE SET " +
         "ws_url = excluded.ws_url, " +
         "supervision_urls = excluded.supervision_urls, " +
@@ -996,7 +1002,8 @@ export class CPRegistry {
         "basic_auth = excluded.basic_auth, boot_notif = excluded.boot_notif, " +
         "labels = excluded.labels, " +
         "behaviors = excluded.behaviors, " +
-        "tx_updated_meter_values = excluded.tx_updated_meter_values",
+        "tx_updated_meter_values = excluded.tx_updated_meter_values, " +
+        "transport_options = excluded.transport_options",
       [
         init.cpId,
         init.wsUrl,
@@ -1028,6 +1035,7 @@ export class CPRegistry {
             ? JSON.stringify(init.behaviors)
             : null,
         init.txUpdatedMeterValues ? 1 : null,
+        init.transport ? JSON.stringify(init.transport) : null,
       ],
     );
   }
@@ -1214,6 +1222,26 @@ function restoreLabels(row: ChargePointRow): Labels | undefined {
 }
 
 /**
+ * #609: the stored transport settings, or nothing. A value that is not JSON or
+ * fails the schema is dropped with a warning, so one damaged row does not stop
+ * the restore: the charge point comes back with the built-in behaviour.
+ */
+function restoreTransport(
+  row: ChargePointRow,
+): Pick<ChargePointInitOptions, "transport"> {
+  const raw = safeJsonParse<unknown>(row.transport_options);
+  if (raw === null) return {};
+  const parsed = transportConfigSchema.safeParse(raw);
+  if (!parsed.success) {
+    console.warn(
+      `[CPRegistry] ignoring invalid stored transport options for ${row.cp_id}`,
+    );
+    return {};
+  }
+  return { transport: parsed.data };
+}
+
+/**
  * Read the stored selection back, for a station that speaks `ocppVersion`.
  *
  * What this run cannot honor is left out of memory only: an id the library
@@ -1331,6 +1359,7 @@ function preserveOmittedInit(
     behaviors: next.behaviors ?? existing.behaviors,
     txUpdatedMeterValues:
       next.txUpdatedMeterValues ?? existing.txUpdatedMeterValues,
+    transport: next.transport ?? existing.transport,
   };
 }
 

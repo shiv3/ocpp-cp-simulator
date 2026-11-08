@@ -66,6 +66,7 @@ import type {
   OcppSecurityProfile,
   OcppTlsOptions,
 } from "@ocpp-cp-sim/core/cp/infrastructure/transport/wsUrlWithBasic";
+import type { TransportConfig } from "@ocpp-cp-sim/core/cp/infrastructure/transport/TransportConfig";
 import type { UrlDistribution } from "@ocpp-cp-sim/core/cp/infrastructure/transport/SupervisionUrlPool";
 import type { IdTagDistribution } from "@ocpp-cp-sim/core/cp/domain/auth/IdTagPool";
 import type { Labels } from "@ocpp-cp-sim/contracts/labels";
@@ -168,6 +169,9 @@ export interface CreateChargePointParams {
    */
   supervisionUrls?: readonly string[];
   urlDistribution?: UrlDistribution;
+  /** Transport settings (#609): reconnect policy and BootNotification retry
+   *  limit. Omitted fields keep the built-in behaviour. */
+  transport?: TransportConfig;
   /**
    * Resolved idTags (#299). Declared here because the facade is where the
    * previous pool feature was silently dropped: `parseCreateBody` produced the

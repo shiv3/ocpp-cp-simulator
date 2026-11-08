@@ -59,6 +59,7 @@ function runParseArgs(args: string[]) {
     "  oedApiKeyFile: options.oedApiKeyFile,",
     "  labels: options.labels ?? null,",
     "  bootstrapLabels: buildBootstrap(options)?.labels ?? null,",
+    "  transport: options.transport ?? null,",
     "  txUpdatedMeterValues: options.txUpdatedMeterValues ?? null,",
     "  bootstrapTxUpdatedMeterValues:",
     "    buildBootstrap(options)?.txUpdatedMeterValues ?? null,",
@@ -391,6 +392,59 @@ describe("parseArgs OCPP 1.6 security flags", () => {
     expect(result.status).toBe(0);
     const parsed = JSON.parse(result.stdout);
     expect(parsed.openOptions.headers).toEqual({ "X-Trace": "trace-1" });
+  });
+
+  it("collects the reconnect flags into transport.reconnect (#609)", () => {
+    const base = ["--cp-id", "CP-1", "--ws-url", "ws://127.0.0.1:9000/ocpp"];
+    const none = JSON.parse(runParseArgs(base).stdout);
+    expect(none.transport).toBeNull();
+
+    const result = runParseArgs([
+      ...base,
+      "--reconnect-max-attempts",
+      "5",
+      "--reconnect-mode",
+      "fixed",
+      "--reconnect-base-delay-ms",
+      "250",
+      "--reconnect-max-delay-ms",
+      "2000",
+      "--reconnect-jitter-ms",
+      "50",
+      "--boot-retry-limit",
+      "-1",
+    ]);
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout).transport).toEqual({
+      reconnect: {
+        maxAttempts: 5,
+        mode: "fixed",
+        baseDelayMs: 250,
+        maxDelayMs: 2000,
+        jitterMs: 50,
+        bootRetryLimit: -1,
+      },
+    });
+  });
+
+  it("rejects bad reconnect flag values (#609)", () => {
+    const base = ["--cp-id", "CP-1", "--ws-url", "ws://127.0.0.1:9000/ocpp"];
+    const fail = (flags: string[], message: string) => {
+      const result = runParseArgs([...base, ...flags]);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(message);
+    };
+    fail(["--reconnect-mode", "linear"], "--reconnect-mode must be");
+    fail(
+      ["--reconnect-max-attempts", "-2"],
+      "--reconnect-max-attempts must be",
+    );
+    fail(["--reconnect-max-attempts", "1.5"], "an integer");
+    fail(["--reconnect-jitter-ms", "abc"], "--reconnect-jitter-ms must be");
+    fail(
+      ["--reconnect-base-delay-ms", "5000", "--reconnect-max-delay-ms", "1000"],
+      "maxDelayMs must be >= baseDelayMs",
+    );
   });
 
   it("rejects invalid security profiles", () => {

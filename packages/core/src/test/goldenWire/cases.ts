@@ -1,3 +1,4 @@
+import { SIGNING_CERTIFICATE } from "../../cp/domain/security/__tests__/signingCertificateFixture";
 import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
 import type { WireVersion } from "./FakeCsms";
 import type { Rig, RigOptions } from "./rig";
@@ -14,6 +15,7 @@ export interface GoldenCase {
 }
 
 const PAST = "2020-01-01T00:00:00.000Z";
+
 const FUTURE = "2099-01-01T00:00:00.000Z";
 
 const c16 = (
@@ -459,6 +461,29 @@ export const goldenCases: GoldenCase[] = [
       firmware: {
         location: "https://fw.example.test/signed.bin",
         retrieveDateTime: PAST,
+        signingCertificate: SIGNING_CERTIFICATE,
+        signature: "c2lnbmF0dXJl",
+      },
+    });
+    await rig.csms.waitForFrame(
+      (f) =>
+        f.dir === "CP>" &&
+        f.action === "SecurityEventNotification" &&
+        (f.payload as { type?: string }).type === "FirmwareUpdated",
+      { from, timeoutMs: 30_000 },
+    );
+    await settle(rig);
+  }),
+  // #733 L01.FR.23/24/02: a signing certificate that does not parse is
+  // answered InvalidCertificate, followed by the security event, and no
+  // train runs.
+  c16("signed-update-firmware-invalid-certificate", async (rig) => {
+    const from = rig.csms.mark();
+    await rig.csms.call("SignedUpdateFirmware", {
+      requestId: 12,
+      firmware: {
+        location: "https://fw.example.test/signed.bin",
+        retrieveDateTime: PAST,
         signingCertificate:
           "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----",
         signature: "c2lnbmF0dXJl",
@@ -467,8 +492,9 @@ export const goldenCases: GoldenCase[] = [
     await rig.csms.waitForFrame(
       (f) =>
         f.dir === "CP>" &&
-        f.action === "SignedFirmwareStatusNotification" &&
-        (f.payload as { status?: string }).status === "Installed",
+        f.action === "SecurityEventNotification" &&
+        (f.payload as { type?: string }).type ===
+          "InvalidFirmwareSigningCertificate",
       { from, timeoutMs: 30_000 },
     );
     await settle(rig);
@@ -854,6 +880,50 @@ export const goldenCases: GoldenCase[] = [
       id: 1,
       connectorId: 2,
       stackLevel: 9,
+    });
+    await settle(rig);
+  }),
+  // 1.6 §7.13 startSchedule/duration, errata 3.43: the ended stack-2 profile
+  // yields to stack 0, then an Absolute profile counts from startSchedule.
+  c16("smart-charging-start-schedule", async (rig) => {
+    await charging(rig);
+    const profile = (
+      id: number,
+      stackLevel: number,
+      schedule: Record<string, unknown>,
+    ) =>
+      rig.csms.call("SetChargingProfile", {
+        connectorId: 1,
+        csChargingProfiles: {
+          chargingProfileId: id,
+          stackLevel,
+          chargingProfilePurpose: "TxDefaultProfile",
+          chargingProfileKind: "Absolute",
+          chargingSchedule: { chargingRateUnit: "W", ...schedule },
+        },
+      });
+    await profile(1, 0, {
+      chargingSchedulePeriod: [{ startPeriod: 0, limit: 7000 }],
+    });
+    await profile(2, 2, {
+      startSchedule: "2020-01-01T00:00:00Z",
+      duration: 3600,
+      chargingSchedulePeriod: [{ startPeriod: 0, limit: 3000 }],
+    });
+    await rig.csms.call("GetCompositeSchedule", {
+      connectorId: 1,
+      duration: 600,
+    });
+    await profile(3, 3, {
+      startSchedule: "2020-01-01T00:00:00Z",
+      chargingSchedulePeriod: [
+        { startPeriod: 0, limit: 11000 },
+        { startPeriod: 100_000_000, limit: 2000 },
+      ],
+    });
+    await rig.csms.call("GetCompositeSchedule", {
+      connectorId: 1,
+      duration: 600,
     });
     await settle(rig);
   }),

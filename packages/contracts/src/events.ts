@@ -55,6 +55,7 @@ interface FullCpConfig {
   cpoName?: string;
   txUpdatedMeterValues?: boolean;
   inboundValidation?: "off" | "warn" | "enforce";
+  reservationAuthorizeIdTag?: boolean;
   tlsCaPath?: string;
   tlsCertPath?: string;
   tlsKeyPath?: string;
@@ -90,6 +91,7 @@ export function redactCp(config: FullCpConfig): WireCpConfig {
     cpoName: config.cpoName,
     txUpdatedMeterValues: config.txUpdatedMeterValues,
     inboundValidation: config.inboundValidation,
+    reservationAuthorizeIdTag: config.reservationAuthorizeIdTag,
     tlsCaPath: config.tlsCaPath,
     tlsCertPath: config.tlsCertPath,
     tlsKeyPath: config.tlsKeyPath,
@@ -134,6 +136,7 @@ export const wireCpConfigSchema = z
     cpoName: STR_64K.optional(),
     txUpdatedMeterValues: z.boolean().optional(),
     inboundValidation: z.enum(["off", "warn", "enforce"]).optional(),
+    reservationAuthorizeIdTag: z.boolean().optional(),
     tlsCaPath: STR_64K.optional(),
     tlsCertPath: STR_64K.optional(),
     tlsKeyPath: STR_64K.optional(),
@@ -177,6 +180,9 @@ const simulatorConfigBaseSchema = z
     connectorNumber: z.number().int().min(0),
     tagID: STR_64K,
     ocppVersion: STR_64K,
+    // #550: browser local mode has one shared config, so the per-charge-point
+    // #347 option is shared there too. Absent means off.
+    txUpdatedMeterValues: z.boolean().optional(),
     basicAuthSettings: wireBasicAuthSettingsSchema,
     autoMeterValueSetting: z
       .object({

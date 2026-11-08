@@ -15,7 +15,7 @@ sources:
   - apps/cli/src/behavior/BehaviorLibrary.ts
   - apps/cli/src/exportK6/runExportK6Behavior.ts
   - apps/web/src/components/scenario/ScenarioEditor.tsx
-  - "issues #566, #569, #575, #600, #618"
+  - "issues #566, #569, #575, #600, #618, #654"
 related:
   - call-precedence.md
   - scenario-format.md
@@ -91,7 +91,7 @@ InboundCallGate / CallExchange  ◄──►  OCPP adapters (1.6 JSON, 2.x, SOAP
 ### Where this is going
 
 One engine. The scenario executor is meant to become a client of the same `ctx` (a node is a `ctx` verb:
-see the mapping in [Scenario or behavior?](../analyses/scenario-or-behavior.md#json-node-and-ctx-verb)), so
+see the mapping in [Scenario or behavior?](../analyses/scenario-or-behavior.md#node--ctx-parity)), so
 that JSON and code converge instead of drifting; until then they share the gate, the registry and the
 default behaviors, which is where they meet. The k6 runtime keeps its own host
 (`packages/k6-runtime/src/behaviorHost.ts`) over its client until a measurement shows a reason to unify it;
@@ -260,6 +260,53 @@ Waits (`sleep`, `until`) run on the station's clock. When the behavior is unload
 (for a user behavior's CALL handler and its `after`) the connection closes, a pending wait rejects with
 `BehaviorStopped`.
 
+### Params
+
+**Issue #654.** A behavior declares its knobs as data and reads them from `ctx.params`:
+
+```ts
+const behavior: Behavior = {
+  api: 1,
+  id: "slow-firmware",
+  params: {
+    schema: {
+      type: "object",
+      properties: { stepMs: { type: "integer", minimum: 0 } },
+    },
+    defaults: { stepMs: 2000 },
+  },
+  onCall: {/* … ctx.sleep(ctx.params.stepMs as number) … */},
+};
+```
+
+- **The schema is a closed subset of JSON Schema** (`packages/core/src/cp/application/behavior/paramsSchema.ts`):
+  `type` (`object`, `string`, `number`, `integer`, `boolean`, `array`, `null`), `enum`, `const`, `minimum`,
+  `maximum`, `minLength`, `maxLength`, `properties`, `required`, `additionalProperties` (a boolean), `items`,
+  `minItems`, `maxItems`, and `title` / `description` (labels for the editor). Any other keyword (`pattern`,
+  `$ref`, `oneOf`, …) makes the behavior fail to load, so nobody believes a constraint is enforced when it is not.
+  An object refuses keys that are not in `properties` unless `additionalProperties` is `true` (a typo is an
+  error, not a no-op). The root must have `type: "object"` and `defaults` must fit it.
+- **Merge, then validate, at arm time.** `ctx.params` is the behavior's `defaults`, then the keys the station's
+  selection set, then each running scenario's `useBehavior` params (oldest first), shallow (one level; a key
+  replaces the whole value). The merged object is validated when the behavior is armed: loaded (`cp.create`,
+  `cp.behaviors.set`, `--behavior-params`), selected by a run (`useBehavior`), or re-selected by a reload (a new
+  version whose schema no longer fits the params in force is refused and the old one keeps running). A mismatch
+  throws a message naming the behavior and the path (`Behavior default.firmware: invalid params: params.stepMs:
+expected integer, got "2000" (strings are not converted)`). Nothing is coerced.
+- **JSON only.** Params are checked to be plain JSON (no function, `undefined`, `NaN`, class instance, cycle;
+  nesting up to 8; 16 KiB per behavior; the name `__proto__` is refused). They are values, never a module, a path or
+  a URL, and nothing in the engine evaluates a string. The wire carries them as data like the ids.
+- **Read-only, and fixed per context.** `ctx.params` is a deeply frozen copy made when the context is made: a
+  CALL's handler and its `after` see the params the CALL arrived with; a `main` keeps the ones it started with
+  (changing the params with `cp.behaviors.set` loads the behavior again, so `main` restarts and `ctx.state`
+  stays). A behavior without `params` gets `{}` and refuses params set for it.
+- **Built-ins are selected the same way.** A `default.*` behavior always answers; selecting it (`useBehavior`,
+  `behaviorParams`) only sets its params. [Which ones have knobs](../entities/default-behaviors.md#params).
+- **Disable.** `useBehavior` `mode: "disable"` is a scenario rule per action that answers `ctx.accepted(action)`
+  and does nothing after ([order](call-precedence.md#params-and-disable-in-the-order)).
+- **k6.** The k6 behavior host gives a behavior its declared `defaults` as `ctx.params`; a selector cannot set them
+  there, and `export-k6` refuses a `useBehavior` node.
+
 ### BehaviorRegistry
 
 One per charge point (`application/behavior/`). It holds rules from two providers — code behaviors
@@ -278,7 +325,8 @@ is the reference for fields.
   `skipValidation`. It waits for settlement.
 - `{ "$from": "call.payload.requestId" }` as a whole payload value in `ocppCall` and `callResponse`, resolved
   against the exchange of that branch. A missing path fails the run.
-- `useBehavior` node: selects a behavior already loaded on the station, by id. Data only.
+- `useBehavior` node: selects a behavior already loaded on the station, by id. Data only. Schema 1.6 adds
+  `params` and `mode: "disable"` ([Params](#params)).
 
 The runtime contract (a disconnect before answering, a run that ends unanswered, an answer after a reconnect, a
 send that failed, the time before answering, a `callResponse` without an exchange) is the table in the
@@ -426,19 +474,29 @@ carries on. Delivery is in the table above.
   id: absent runs every loaded behavior, `[]` none. Unknown ids are `invalid_params` naming the loaded ids.
 - The four spellings of "select" are one thing:
 
-  | Where                         | Spelling                                                                        | Scope                          |
-  | ----------------------------- | ------------------------------------------------------------------------------- | ------------------------------ |
-  | Command line                  | `--use-behavior <id>` (repeatable)                                              | The charge points it starts    |
-  | RPC / MCP at creation, update | `behaviors: string[]` on `cp.create`, `cp.create_many`, `cp.update`, blueprints | One charge point, persisted    |
-  | RPC / MCP at run time         | `cp.behaviors.set { cpId, behaviors }` (`null` = all)                           | One charge point, in place     |
-  | Scenario                      | `useBehavior` node                                                              | A run (dormant behaviors only) |
+  | Where                         | Spelling                                                                                             | Scope                       |
+  | ----------------------------- | ---------------------------------------------------------------------------------------------------- | --------------------------- |
+  | Command line                  | `--use-behavior <id>` (repeatable), `--behavior-params <id>=<json>` for params                       | The charge points it starts |
+  | RPC / MCP at creation, update | `behaviors: string[]` and `behaviorParams` on `cp.create`, `cp.create_many`, `cp.update`, blueprints | One charge point, persisted |
+  | RPC / MCP at run time         | `cp.behaviors.set { cpId, behaviors, behaviorParams }` (`null` = all)                                | One charge point, in place  |
+  | Scenario                      | `useBehavior` node, with `params` or `mode`                                                          | A run                       |
 
 - It persists with the charge point (`charge_points.behaviors`; `NULL` = all). A selection is checked before it
   is written; a refused `cp.update` leaves the old station connected and as it was. On restore an id no longer
   loaded, or one the station cannot run, is left out with a warning; any other failure skips that station with a
   warning and keeps its row; an unreadable stored value selects none.
-- `behavior.list` returns the library (id, file), whether `--watch-behaviors` is on, and `defaults`: the built-in
-  behaviors with the actions each answers.
+- `behavior.list` returns the library (id, file, and its params schema and defaults when it declares params),
+  whether `--watch-behaviors` is on, and `defaults`: the built-in behaviors with the actions each answers and
+  their params.
+- **Params travel with the selection.** `behaviorParams` is a map of behavior id to a JSON object, accepted
+  wherever `behaviors` is, stored with the charge point (`charge_points.behavior_params`, schema v25; `NULL` =
+  none) and restored with it. A key is a `default.*` id or one of the selected behaviors; a key that is neither,
+  or a value that does not fit the schema, is `invalid_params` before anything is written. `cp.update` keeps the
+  params when they are omitted and replaces them when given; `cp.behaviors.set` replaces the whole selection, so
+  omitting them there means "no params". On restore, a stored entry the behavior no longer accepts (a reloaded file
+  changed its schema) is left out of memory with a warning and the station comes back with that behavior on its
+  defaults. No path, URL or source text is accepted anywhere in this: the tests in
+  `apps/cli/src/server/__tests__/behaviorParams.bun.test.ts` ("no code over the wire") hold it.
 - **Reload** (`behavior.reload`, `--watch-behaviors`) re-reads the files given at start. It is opt-in
   (`--allow-behavior-reload`, or implied by `--watch-behaviors`). A station takes a whole file or none of it; an
   unchanged bundle is skipped by hash; a file that fails keeps its old version. Reloads run one at a time, each

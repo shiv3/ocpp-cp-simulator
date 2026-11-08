@@ -723,6 +723,20 @@ ocpp-cp-sim --http-port 8080 --allow-behavior-code --watch-behaviors --behavior 
   exit code 1 and `Unknown behavior id "x"; loaded behaviors: a, b`. Charge points created later choose with
   the `behaviors` parameter of `cp.create` / `cp.create_many` / `cp.update` / a blueprint, or `cp.behaviors.set`
   ([Control plane → Behaviors](../concepts/control-plane.md#behaviors)).
+- `--behavior-params <id>=<json file or inline json>` (repeatable, one per id) sets the params of a behavior on
+  the same charge points: `<id>` is a loaded behavior or a built-in `default.*` one. A value that starts with `{`
+  is inline JSON, anything else is the path of a JSON file; it must be an object. It needs `--cp-id`, and a
+  `--behavior` is needed only for a loaded behavior (`default.*` ids need none). The object is checked against
+  the behavior's params schema (`behavior.list`); a value that does not fit, an unknown key, an id the charge
+  point does not run or JSON that is not an object stops the start with exit code 1 and the reason, and nothing
+  is converted. JSON only: a string in it is never evaluated.
+
+  ```shell
+  ocpp-cp-sim --cp-id CP001 --ws-url ws://localhost:9000 \
+    --behavior-params 'default.firmware={"stepMs":500,"failAt":"InstallationFailed"}' \
+    --behavior-params default.reset=./reset-params.json
+  ```
+
 - `--watch-behaviors` re-bundles a behavior file when a file in its directory changes (150 ms debounce) and
   applies the new version without a restart; the daemon method `behavior.reload` does the same on demand
   (only with `--watch-behaviors` or `--allow-behavior-reload`) and accepts no path or code. A file whose bundle did not change is
@@ -1003,6 +1017,7 @@ the OCPP answer are unchanged.
 | `--behavior <file>`                 | No       | -                                       | Load behavior code into the library (every charge point runs all of it unless `--use-behavior` / `behaviors` picks); repeatable. Runs with the process's full authority. A daemon also needs `--allow-behavior-code`. See [Behavior code](#behavior-code---behavior-and-behavior-build).                                                                                                                                                                                                      |
 | `--allow-behavior-code`             | No       | -                                       | A daemon's explicit opt-in to `--behavior`. Refused together with `--unsafe-remote`.                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `--use-behavior <id>`               | No       | all loaded                              | Run only the loaded behavior with this id on the charge points started from `--cp-id`; repeatable. Needs `--behavior` and `--cp-id`. See [Choosing behaviors per charge point](#choosing-behaviors-per-charge-point-and-reloading-them).                                                                                                                                                                                                                                                      |
+| `--behavior-params <id>=<json>`     | No       | -                                       | Params for a loaded or built-in `default.*` behavior on the charge points started from `--cp-id`; inline JSON or a JSON file; repeatable. See [Choosing behaviors](#choosing-behaviors-per-charge-point-and-reloading-them).                                                                                                                                                                                                                                                                  |
 | `--allow-behavior-reload`           | No       | -                                       | Daemon only: answer the `behavior.reload` method without watching (it re-reads the `--behavior` files). Without it or `--watch-behaviors` the method is refused. Needs `--behavior`.                                                                                                                                                                                                                                                                                                          |
 | `--watch-behaviors`                 | No       | -                                       | Reload a `--behavior` file when it (or a file in its directory) changes; in a daemon `behavior.reload` does the same on demand.                                                                                                                                                                                                                                                                                                                                                               |
 | `--unsafe-remote`                   | No       | -                                       | Allow a non-loopback daemon bind without `--web-console-basic-auth-user/pass`. Use only on trusted networks.                                                                                                                                                                                                                                                                                                                                                                                  |

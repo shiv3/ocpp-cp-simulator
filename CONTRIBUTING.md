@@ -8,6 +8,8 @@ Before pushing, run the checks CI runs: `bun run lint`, `bun run check:boundarie
 
 `docs/` is an LLM-maintained wiki. [`CLAUDE.md`](CLAUDE.md) is its schema (layers, layout, ingest / query / lint workflows) and [`docs/conventions.md`](docs/conventions.md) holds the page conventions. When a change alters behaviour, update the affected wiki pages, `docs/index.md` and `docs/log.md` in the same PR.
 
+**Proposing a new scenario node?** The format does sequence, wait, select, loop and read, and nothing that computes. A node must be a parameter of a behavior, a wait, a verb the station already has on `ctx`, or one of the listed decision nodes; anything else is a behavior selected with `useBehavior` and params. The rules and the reasons are in [`docs/concepts/scenario-format.md`](docs/concepts/scenario-format.md#what-the-format-will-not-do).
+
 ## Web console strings
 
 User-visible text in `apps/web` goes through react-i18next, never a string literal: `const { t } = useTranslation(); t("scenarios.count.step", { count })`. Add the key to `apps/web/src/i18n/locales/en/<namespace>.json` and to `ja/` and `zh-CN/` (counted nouns take `_one` / `_other` in English and `_other` in ja / zh-CN; placeholders are `{{name}}`). `bunx vitest run apps/web/src/i18n` fails when a locale misses a key or changes a placeholder, and an unknown key fails `bun run typecheck`. Do not translate OCPP action names, protocol fields, enum values, identifiers or user content. Details: [Web console internationalization](docs/concepts/web-console-i18n.md).

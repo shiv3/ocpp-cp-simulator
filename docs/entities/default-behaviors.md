@@ -1,13 +1,14 @@
 ---
 title: Default behaviors
 type: entity
-summary: What the station does by default for each inbound CSMS action, per OCPP version — the nine built-in behaviors, the follow-up each one runs, what ends it, and the actions that have no default and can only be replaced.
+summary: What the station does by default for each inbound CSMS action, per OCPP version — the nine built-in behaviors, the follow-up each one runs, what ends it, the params five of them take, and the actions that have no default and can only be replaced.
 sources:
   - packages/core/src/cp/application/engine/behaviors/
+  - packages/core/src/cp/application/behavior/paramsSchema.ts
   - packages/core/src/cp/application/engine/behaviors/defaultActions.ts
   - packages/core/src/cp/infrastructure/transport/handlers/buildV16CallHandlerRegistry.ts
   - packages/core/src/cp/infrastructure/transport/v201/inboundRegistryV201.ts
-  - "issue #566"
+  - "issues #566, #654"
 related:
   - ../concepts/charger-engine.md
   - ../concepts/call-precedence.md
@@ -27,7 +28,7 @@ behavior, in
 Read the file to read the behavior; this page is the map.
 
 Ask a running daemon for the list with `behavior.list` (its `defaults` member: each id with the actions it
-answers; MCP `behavior_list`). The same list is the set of actions a code behavior may `extend`.
+answers and, for the ones with knobs, the [params](#params) schema and defaults; MCP `behavior_list`). The same list is the set of actions a code behavior may `extend`.
 
 Why it matters to you: **you override a default with `onCall` mode `replace`** (the default does not run) or
 **`extend`** (your handler wraps it: `ctx.defaultBehavior(req)` returns the default response and registers
@@ -50,6 +51,36 @@ loads. See [Scenario or behavior?](../analyses/scenario-or-behavior.md) for reci
 
 A user behavior may not use an id that starts with `default.` (refused at load). The `ctx.state` of the
 defaults is not persisted; the statuses they report are.
+
+## Params
+
+Five defaults have knobs. A knob is a **param**: JSON, validated against the schema `behavior.list` reports for
+the behavior (its `defaults` member lists them too), refused when it does not fit and never converted. With
+nothing set every param has the value the behavior had before params existed, and the traffic on the wire is
+unchanged (the [golden wire test](../analyses/testing-strategy.md#golden-wire-test) holds that).
+
+Set them where a behavior is selected: a scenario's [`useBehavior`](../concepts/scenario-format.md#usebehavior-params-and-disable-schema-16)
+`params` (for the run), `--behavior-params <id>=<json file or inline json>` on the command line, and
+`behaviorParams` on `cp.create` / `cp.update` / a blueprint or `cp.behaviors.set` (for the station, stored with it). The id is the one in the table above.
+
+| Id                       | Param      | Type and values                                          | Default        | Effect                                                                                                                                                                                                                                                                         |
+| ------------------------ | ---------- | -------------------------------------------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `default.firmware`       | `stepMs`   | integer 0 to 3 600 000                                   | `2000`         | Time between two `FirmwareStatusNotification`s of the 1.6 train. OCPP 2.x has no train.                                                                                                                                                                                        |
+|                          | `failAt`   | `none`, `DownloadFailed`, `InstallationFailed`           | `none`         | End every update with that failure (in place of `Downloaded` / `Installed`). Anything but `none` wins over the one-shot `SimulatedFirmwareUpdateFailure` configuration key, which is still read and cleared; with `none` the key works as before.                              |
+|                          | `startAt`  | `retrieveDate`, `now`                                    | `retrieveDate` | Wait for the request's `retrieveDate`, or start as soon as the answer settled.                                                                                                                                                                                                 |
+| `default.signedFirmware` | `stepMs`   | integer 0 to 3 600 000                                   | `2000`         | Time between two `SignedFirmwareStatusNotification`s.                                                                                                                                                                                                                          |
+| `default.logs`           | `uploadMs` | integer 0 to 3 600 000                                   | `2000`         | 1.6: time between `Uploading` and `Uploaded`. OCPP 2.x has no sequence.                                                                                                                                                                                                        |
+| `default.reset`          | `delayMs`  | integer 0 to 3 600 000                                   | `0`            | Wait this long after the answer settled before the reset takes effect (transactions stopped, then the boot or reconnect). `0` adds no wait at all. A 2.x `OnIdle` reset that is `Scheduled` is not delayed: it already waits for the last transaction.                         |
+| `default.unlock`         | `outcome`  | `configured`, `Unlocked`, `UnlockFailed`, `NotSupported` | `configured`   | The status to answer once the CALL got that far (unknown connector and ongoing transaction answers come first). `configured` answers the connector's own `unlockResponse`, which the `unlockOutcome` scenario node sets. 2.x has no `NotSupported` and answers `UnlockFailed`. |
+
+`default.diagnostics`, `default.availability`, `default.reservation` and `default.transaction` declare no params:
+what they do is the station's semantics (connector state, reservations, the transaction itself), not a knob. To
+change them write a [behavior](../analyses/scenario-or-behavior.md), or switch one off for a run with `useBehavior`
+`mode: "disable"`.
+
+The `unlockOutcome` node stays and is sugar for the common case: it sets the connector's `unlockResponse`
+(persistently, for that connector) and `outcome: "configured"` reads it. A non-`configured` `outcome` is for the
+station or the run and wins over it.
 
 ## Per action and version
 

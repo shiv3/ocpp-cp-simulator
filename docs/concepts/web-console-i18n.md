@@ -34,6 +34,7 @@ the fallback), **Simplified Chinese** (`zh-CN`) and **Japanese** (`ja`).
 - **Typed keys.** `i18n/i18next.d.ts` augments `CustomTypeOptions` with the English resources, so `t("no.such.key")` fails `bun run typecheck`. Plural suffixes are stripped from the key type.
 - **Plurals.** i18next picks `_one` / `_other` from `count` for the active language. English has both; `ja` and `zh-CN` have one plural form and only need `_other`.
 - **Dynamic keys.** Only built-in scenario templates build keys at runtime (`i18n/templates.ts`), with the original text as `defaultValue`.
+- **Strings authored by a behavior.** The `useBehavior` params form (`scenarioEditor.params.*`) translates its own chrome and the titles of the built-in `default.*` params through a fixed table of static keys (`BehaviorParamsForm.tsx`). The `title` and `description` of a params schema a behavior author wrote are shown as written, in the language of the author; so are enum values (they are OCPP status names).
 
 ## Adding or changing a string
 

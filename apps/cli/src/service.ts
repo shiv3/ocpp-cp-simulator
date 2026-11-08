@@ -23,7 +23,13 @@ import type {
   Get15118EVCertificateRequest,
   Get15118EVCertificateResult,
 } from "@ocpp-cp-sim/core/cp/domain/security/get15118EVCertificate";
-import type { AutoMeterValueSetting } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
+import type {
+  AutoMeterValueSetting,
+  PowerLossOptions,
+  PowerLossRecord,
+  PowerRestoreOptions,
+  PowerRestoreResult,
+} from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
 import type {
   BootNotificationResult,
   ChargePointEvents,
@@ -1108,6 +1114,19 @@ export class CLIChargePointService {
     ruleId: string,
   ): { ok: true } | { ok: false; error: string } {
     return this._chargePoint.triggerNetworkSimDisconnect(ruleId);
+  }
+
+  /** #455: whether the station is without power. */
+  get poweredOff(): boolean {
+    return this._chargePoint.poweredOff;
+  }
+
+  powerLoss(options?: PowerLossOptions): PowerLossRecord {
+    return this._chargePoint.powerLoss(options);
+  }
+
+  powerRestore(options?: PowerRestoreOptions): PowerRestoreResult {
+    return this._chargePoint.restorePower(options);
   }
 
   reset(): void {

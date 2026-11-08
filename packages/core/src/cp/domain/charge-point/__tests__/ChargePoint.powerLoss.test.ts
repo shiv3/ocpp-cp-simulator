@@ -35,7 +35,11 @@ async function charging(cp: ChargePoint): Promise<void> {
 }
 
 function accepted(cp: ChargePoint): void {
-  cp.onBootNotificationResult({ status: "Accepted", interval: 60 });
+  cp.onBootNotificationResult({
+    status: "Accepted",
+    interval: 60,
+    currentTime: new Date().toISOString(),
+  });
 }
 
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));

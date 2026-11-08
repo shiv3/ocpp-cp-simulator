@@ -576,6 +576,18 @@ export async function dispatchRpcCore(
       return saveNetworkSimCp(deps, call.params);
     case "network_sim.disconnect.trigger":
       return triggerNetworkSimDisconnect(deps, call.params);
+    case "power.loss": {
+      const { cpId, ...options } = call.params;
+      return runFacadeOperation(() =>
+        deps.chargePointService.powerLoss(cpId, options),
+      );
+    }
+    case "power.restore": {
+      const { cpId, ...options } = call.params;
+      return runFacadeOperation(() =>
+        deps.chargePointService.powerRestore(cpId, options),
+      );
+    }
     case "scenario.templates":
       return deps.chargePointService.getScenarioTemplates();
     case "scenario.runs.list":

@@ -29,7 +29,12 @@ import type {
   Get15118EVCertificateResult,
 } from "@ocpp-cp-sim/core/cp/domain/security/get15118EVCertificate";
 import { RpcFailure } from "@ocpp-cp-sim/contracts/errors";
-import { ChargePoint } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
+import {
+  ChargePoint,
+  PowerStateError,
+  type PowerLossOptions,
+  type PowerRestoreOptions,
+} from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
 import {
   splitStopReason,
   type MeterReadingContext,
@@ -1438,6 +1443,38 @@ export class LocalChargePointService implements ChargePointService {
       return { ok: false, error: "not_connected" };
     }
     return cp.triggerNetworkSimDisconnect(ruleId);
+  }
+
+  async powerLoss(
+    cpId: string,
+    options?: PowerLossOptions,
+  ): Promise<
+    { ok: true; transactions: number } | { ok: false; error: string }
+  > {
+    const cp = this.chargePoints.get(cpId);
+    if (!cp) return { ok: false, error: "cp_not_found" };
+    try {
+      return {
+        ok: true,
+        transactions: cp.powerLoss(options).transactions.length,
+      };
+    } catch (err) {
+      if (err instanceof PowerStateError) return { ok: false, error: err.code };
+      throw err;
+    }
+  }
+
+  async powerRestore(cpId: string, options?: PowerRestoreOptions) {
+    const cp = this.chargePoints.get(cpId);
+    if (!cp) return { ok: false as const, error: "cp_not_found" };
+    try {
+      return { ok: true as const, ...cp.restorePower(options) };
+    } catch (err) {
+      if (err instanceof PowerStateError) {
+        return { ok: false as const, error: err.code };
+      }
+      throw err;
+    }
   }
 
   private getExistingChargePointOrThrow(id: string): ChargePoint {

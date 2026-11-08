@@ -148,6 +148,22 @@ export class OperationalTimelineProjector {
         at: startedAt,
       });
     });
+    on("powerLost", ({ transactions }) => {
+      this.timeline.record({
+        kind: "power_lost",
+        summary: `Power lost (${transactions} transaction${transactions === 1 ? "" : "s"} interrupted)`,
+        data: { transactions },
+      });
+    });
+    on("powerRestored", ({ outageMs, recovery, transactions }) => {
+      this.timeline.record({
+        kind: "power_restored",
+        summary: `Power restored after ${formatSeconds(outageMs)}${
+          recovery === "none" ? "" : `, transactions: ${recovery}`
+        }`,
+        data: { outageMs, recovery, transactions },
+      });
+    });
     on("transactionStarted", ({ connectorId, tagId }) => {
       // The 1.6 id is a placeholder until StartTransaction.conf; it is
       // recorded by `transaction_id_assigned` instead.

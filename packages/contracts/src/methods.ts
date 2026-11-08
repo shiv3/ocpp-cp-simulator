@@ -772,6 +772,27 @@ export const createManyFromBlueprintSchema = createManyToolSchema.refine(
   { message: "either wsUrl or blueprintId is required" },
 );
 
+/** An outage of up to a week. */
+const POWER_OUTAGE_MAX_MS = 7 * 24 * 3600 * 1000;
+
+const powerRecoveryShape = {
+  transactions: z
+    .enum(["resume", "end"])
+    .optional()
+    .describe(
+      "What happens to the interrupted transactions after the reboot. Default: resume (1.x, 2.1), end (2.0.1)",
+    ),
+  txResumptionTimeoutSeconds: z
+    .number()
+    .int()
+    .min(0)
+    .max(86400)
+    .optional()
+    .describe(
+      "OCPP 2.1 TxResumptionTimeout: resume only when the outage lasted at most this long; absent or 0: end (E17.FR.01)",
+    ),
+};
+
 export const METHODS = {
   // -- lifecycle --
   connect: { params: EMPTY, result: ANY },
@@ -1239,6 +1260,30 @@ export const METHODS = {
     result: ANY,
   },
 
+  // #455: a power loss is neither a network loss nor an OCPP Reset. Answers
+  // `{ ok: true, ... }` or `{ ok: false, error }` (`cp_not_found`,
+  // `already_powered_off`, `not_powered_off`).
+  "power.loss": {
+    params: z.object({
+      cpId: STR_64K,
+      restoreAfterMs: z
+        .number()
+        .int()
+        .min(0)
+        .max(POWER_OUTAGE_MAX_MS)
+        .optional()
+        .describe(
+          "Outage length; power returns by itself after it. Absent: off until power.restore",
+        ),
+      ...powerRecoveryShape,
+    }),
+    result: ANY,
+  },
+  "power.restore": {
+    params: z.object({ cpId: STR_64K, ...powerRecoveryShape }),
+    result: ANY,
+  },
+
   // -- explicit non-jsonMode ops (~10) --
   "cp.list": {
     params: cpListParamsSchema,
@@ -1517,6 +1562,8 @@ export const EXPLICIT_METHODS = [
   "network_sim.cp.get",
   "network_sim.cp.save",
   "network_sim.disconnect.trigger",
+  "power.loss",
+  "power.restore",
   "vehicle_profiles.list",
   "vehicle_profiles.save",
   "vehicle_profiles.delete",

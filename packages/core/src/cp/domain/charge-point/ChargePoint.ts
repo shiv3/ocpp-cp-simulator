@@ -248,6 +248,12 @@ export interface PowerRestoreOptions {
   txResumptionTimeoutSeconds?: number;
 }
 
+/** `restoreAfterMs`: power returns by itself after this long (the outage
+ *  duration); without it the station stays off until {@link ChargePoint.restorePower}. */
+export interface PowerLossOptions extends PowerRestoreOptions {
+  restoreAfterMs?: number;
+}
+
 export interface PowerRestoreResult {
   outageMs: number;
   recovery: PowerRecovery | "none";
@@ -394,6 +400,7 @@ export class ChargePoint {
   /** #455: set while the station is without power. */
   private _powerLoss: PowerLossRecord | null = null;
   /** #455: the recovery to run once the next BootNotification is Accepted. */
+  private _powerRestoreTimer: TimerHandle | null = null;
   private _powerRecovery: {
     loss: PowerLossRecord;
     options: PowerRestoreOptions;
@@ -2569,7 +2576,7 @@ export class ChargePoint {
    * transactions first (1.6 §5.14, 2.x B11/B12), a network loss keeps the
    * station running.
    */
-  powerLoss(): PowerLossRecord {
+  powerLoss(options: PowerLossOptions = {}): PowerLossRecord {
     if (this._powerLoss) throw new PowerStateError("already_powered_off");
     const record: PowerLossRecord = {
       at: this._nowDate(),
@@ -2593,6 +2600,13 @@ export class ChargePoint {
     });
     this._webSocket?.disconnect();
     this.teardownAfterClose();
+    const { restoreAfterMs, ...restore } = options;
+    if (restoreAfterMs !== undefined) {
+      this._powerRestoreTimer = this._clock.setTimeout(() => {
+        this._powerRestoreTimer = null;
+        if (this._powerLoss) this.restorePower(restore);
+      }, restoreAfterMs);
+    }
     return record;
   }
 
@@ -2606,6 +2620,10 @@ export class ChargePoint {
   restorePower(options: PowerRestoreOptions = {}): PowerRestoreResult {
     const loss = this._powerLoss;
     if (!loss) throw new PowerStateError("not_powered_off");
+    if (this._powerRestoreTimer !== null) {
+      this._clock.clearTimeout(this._powerRestoreTimer);
+      this._powerRestoreTimer = null;
+    }
     const restoredAt = this._nowDate();
     const outageMs = Math.max(0, restoredAt.getTime() - loss.at.getTime());
     this._powerLoss = null;
@@ -2717,6 +2735,10 @@ export class ChargePoint {
    * then runs final CP-side teardown.
    */
   dispose(): void {
+    if (this._powerRestoreTimer !== null) {
+      this._clock.clearTimeout(this._powerRestoreTimer);
+      this._powerRestoreTimer = null;
+    }
     this.releaseRenewedClientCertificate();
     this._webSocket?.dispose(); // terminal: shuts controller down, clears reservation, closes socket
     this.teardownAfterClose(); // final CP-side teardown

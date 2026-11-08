@@ -608,6 +608,7 @@ export class OCPPMessageHandler {
         connector,
         beginMeasurands,
         "Transaction.Begin",
+        { intervalStream: "txEnded-sampled" },
       );
       if (sampledValue.length > 0) {
         patchTransaction(this._chargePoint, connectorId, transaction, {
@@ -695,7 +696,7 @@ export class OCPPMessageHandler {
             connector,
             endMeasurands,
             "Transaction.End",
-            {},
+            { intervalStream: "txEnded-sampled" },
             endPoint,
           )
         : [];

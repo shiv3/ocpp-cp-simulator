@@ -44,6 +44,15 @@ export interface SampleBuildOptions {
   /** The dialect carries `unitOfMeasure.multiplier` (OCPP 2.x). Without it a
    *  configured multiplier is ignored, never half-applied. */
   unitMultiplier?: boolean;
+  /**
+   * Which Interval stream this sample belongs to (#615). Each stream measures
+   * from its own previous reading, so two readers in one tick do not eat each
+   * other's interval (1.6 §7.31: an interval is per reading interval). The
+   * default is `aligned` for `Sample.Clock` and `sampled` for the rest; the
+   * transaction-end history (#607) names its own (`txEnded-sampled`,
+   * `txEnded-aligned`).
+   */
+  intervalStream?: string;
 }
 
 /**
@@ -139,7 +148,10 @@ export function buildSampledValues(
   const real = realism !== undefined;
   const interval =
     real && measurands.some((m) => m.endsWith(".Interval"))
-      ? connector.takeIntervalEnergyWh()
+      ? connector.takeIntervalEnergyWh(
+          options.intervalStream ??
+            (context === "Sample.Clock" ? "aligned" : "sampled"),
+        )
       : { importWh: 0, exportWh: 0 };
   // Formatting only: every physical quantity below comes from one operating
   // point resolved at one instant (#327), so the samples of a MeterValue

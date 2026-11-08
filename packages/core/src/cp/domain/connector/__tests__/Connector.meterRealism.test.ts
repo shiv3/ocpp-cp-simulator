@@ -196,6 +196,58 @@ describe("ramp-up (#614)", () => {
     expect(connector.meterValue).toBeGreaterThan(100);
   });
 
+  it("keeps the register equal to the integral of the power under a charger cap (#826 review)", () => {
+    vi.useFakeTimers();
+    const connector = chargingConnector(
+      {
+        seed: 9,
+        fluctuation: { powerPct: 4 },
+        rampUp: { shape: "linear", durationSeconds: 30 },
+      },
+      {
+        chargingCurve: [
+          { socPercent: 0, powerFraction: 1 },
+          { socPercent: 100, powerFraction: 1 },
+        ],
+      },
+    );
+    connector.setMaxDeliveryPowerW(11_000);
+    connector.startManualMeterStrategy({
+      kind: "increment",
+      intervalSeconds: 1,
+      incrementValue: 1_000_000,
+    });
+    let integralWh = 0;
+    for (let i = 0; i < 60; i++) {
+      vi.advanceTimersByTime(1_000);
+      const p = Number(
+        sample(buildSampledValues(connector, POWER, "Other"), POWER[0])?.value,
+      );
+      integralWh += p / 3600;
+    }
+    expect(Math.abs(connector.meterValue - integralWh)).toBeLessThan(2);
+    // 30 s of linear ramp deliver half of the 30 s at full power.
+    expect(connector.meterValue).toBeLessThan((11_000 * 45) / 3600 + 5);
+    expect(connector.meterValue).toBeGreaterThan(100);
+  });
+
+  it("scales a configured increment under a charger cap too (#826 review)", () => {
+    vi.useFakeTimers();
+    const connector = chargingConnector({
+      rampUp: { shape: "linear", durationSeconds: 10 },
+    });
+    connector.setMaxDeliveryPowerW(11_000);
+    connector.startManualMeterStrategy({
+      kind: "increment",
+      intervalSeconds: 1,
+      incrementValue: 2,
+    });
+    vi.advanceTimersByTime(20_000);
+    // 2 Wh per tick at full power (the cap allows 3.05 Wh per second); the
+    // first ten ticks ramp 0.1 .. 1.0.
+    expect(connector.meterValue).toBe(Math.round(2 * 5.5 + 2 * 10));
+  });
+
   it("scales a configured increment the same way", () => {
     vi.useFakeTimers();
     const connector = chargingConnector(
@@ -317,6 +369,63 @@ describe("Interval and Export measurands (#615)", () => {
     expect(sample(second, "Energy.Active.Import.Interval")?.value).toBe("240");
     const third = buildSampledValues(connector, all, "Sample.Periodic");
     expect(sample(third, "Energy.Active.Import.Interval")?.value).toBe("0");
+  });
+
+  it("measures each stream from its own previous reading (#826 review)", () => {
+    vi.useFakeTimers();
+    const connector = chargingConnector({});
+    connector.meterValue = 100;
+    const IV = ["Energy.Active.Import.Interval"];
+    const iv = (context: "Sample.Periodic" | "Sample.Clock", stream?: string) =>
+      sample(
+        buildSampledValues(
+          connector,
+          IV,
+          context,
+          stream ? { intervalStream: stream } : {},
+        ),
+        IV[0],
+      )?.value;
+    expect(iv("Sample.Periodic")).toBe("100");
+    expect(iv("Sample.Clock")).toBe("100");
+    expect(iv("Sample.Periodic", "txEnded-sampled")).toBe("100");
+    connector.meterValue = 150;
+    // A second reader in the same tick no longer gets ~0.
+    expect(iv("Sample.Periodic")).toBe("50");
+    expect(iv("Sample.Clock")).toBe("50");
+    expect(iv("Sample.Periodic", "txEnded-sampled")).toBe("50");
+  });
+
+  it("does not integrate the export power over the idle gap between sessions (#826 review)", () => {
+    vi.useFakeTimers();
+    const connector = chargingConnector({ export: { powerW: 5_000 } });
+    const session = () => {
+      connector.startManualMeterStrategy({
+        kind: "increment",
+        intervalSeconds: 1,
+        incrementValue: 10,
+      });
+      vi.advanceTimersByTime(10_000);
+      connector.stopTransaction();
+    };
+    session();
+    const first = connector.exportRegisterWh;
+    expect(first).toBeGreaterThan(0);
+    // An hour idle, then the next session.
+    vi.advanceTimersByTime(3_600_000);
+    connector.beginTransaction({
+      id: 2,
+      connectorId: 1,
+      tagId: "TAG",
+      meterStart: 0,
+      meterStop: null,
+      startTime: new Date(),
+      stopTime: null,
+      meterSent: false,
+    });
+    session();
+    // 5 kW for ~10 s is about 14 Wh; the hour of idle would add 5000.
+    expect(connector.exportRegisterWh - first).toBeLessThan(40);
   });
 
   it("exports while a discharge term is configured, and imports nothing", () => {

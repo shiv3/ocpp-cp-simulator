@@ -330,12 +330,13 @@ export class Connector {
    *  only. */
   private exportWh = 0;
   private exportTickedAt: number | null = null;
-  /** Register values the last Interval sample was measured from (#615). */
-  private intervalBaseline: {
-    key: string;
-    importWh: number;
-    exportWh: number;
-  } | null = null;
+  /** Register values the last Interval sample of each stream was measured
+   *  from (#615): one baseline per stream (sampled, aligned, transaction-end
+   *  history), so two readers never share one. */
+  private intervalBaselines = new Map<
+    string,
+    { key: string; importWh: number; exportWh: number }
+  >();
   private _chargingProfiles: ActiveChargingProfile[] = [];
 
   /**
@@ -815,19 +816,27 @@ export class Connector {
    * or at the export register as it reads then. Called by the
    * sample builder only when an Interval measurand is asked for.
    */
-  takeIntervalEnergyWh(): { importWh: number; exportWh: number } {
+  takeIntervalEnergyWh(stream = "sampled"): {
+    importWh: number;
+    exportWh: number;
+  } {
     const key = String(this.transaction?.startTime?.getTime() ?? "none");
     const importNow = this.meterValueWh;
     const exportNow = this.exportRegisterWh;
+    const previous = this.intervalBaselines.get(stream);
     const start =
-      this.intervalBaseline?.key === key
-        ? this.intervalBaseline
+      previous?.key === key
+        ? previous
         : {
             key,
             importWh: this.transaction?.meterStart ?? importNow,
             exportWh: exportNow,
           };
-    this.intervalBaseline = { key, importWh: importNow, exportWh: exportNow };
+    this.intervalBaselines.set(stream, {
+      key,
+      importWh: importNow,
+      exportWh: exportNow,
+    });
     return {
       importWh: Math.max(0, importNow - start.importWh),
       exportWh: Math.max(0, exportNow - start.exportWh),
@@ -1559,6 +1568,9 @@ export class Connector {
     this.energyHeldForInvalidId = false;
     this.invalidIdHoldAtWh = null;
     this.openSessionSoc(this.txView ?? transaction);
+    // The export integral starts with the session, never at the previous one's
+    // last tick (#826 review).
+    this.exportTickedAt = this.clock.now();
     this.startConfiguredMeterValue();
     this.eventsEmitter.emit("transactionChange", { transaction });
   }
@@ -1657,6 +1669,7 @@ export class Connector {
 
   stopTransaction(): void {
     this.meterScheduler.stop();
+    this.exportTickedAt = null;
     this.store.write({ kind: "transaction.set", transaction: null });
     this.eventsEmitter.emit("transactionChange", { transaction: null });
   }
@@ -1700,6 +1713,7 @@ export class Connector {
   stopAutoMeterValue(): void {
     this.configuredStrategyRunning = false;
     this.meterScheduler.stop();
+    this.exportTickedAt = null;
   }
 
   isAutoMeterValueActive(): boolean {
@@ -1811,6 +1825,7 @@ export class Connector {
     }
 
     this.meterScheduler.stop();
+    this.exportTickedAt = null;
     this.eventsEmitter.emit("autoStopRequested", {
       reason: "targetSocReached",
     });

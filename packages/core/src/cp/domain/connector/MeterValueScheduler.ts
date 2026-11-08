@@ -213,10 +213,10 @@ export class MeterValueScheduler {
       factor === 1 ? strategy.incrementValue : strategy.incrementValue * factor;
     if (cap !== Infinity) {
       const allowedIncrementWh = (cap * strategy.intervalSeconds) / 3600; // P×t → energy (Wh)
-      effectiveIncrement = Math.min(
-        strategy.incrementValue,
-        allowedIncrementWh,
-      );
+      // The ramp / fluctuation factor already scaled `effectiveIncrement`;
+      // the cap only bounds it (#614: the register integrates the reported
+      // power, also under the charger cap).
+      effectiveIncrement = Math.min(effectiveIncrement, allowedIncrementWh);
       if (effectiveIncrement < 0) effectiveIncrement = 0;
     }
 

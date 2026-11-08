@@ -3134,7 +3134,10 @@ export class ChargePoint {
     const transaction = connector.transaction;
     if (!transaction || !connector.hasRunningTransaction) return;
     if (measurands.length === 0) return;
-    const sampledValue = buildSampledValues(connector, measurands, context);
+    const sampledValue = buildSampledValues(connector, measurands, context, {
+      intervalStream:
+        context === "Sample.Clock" ? "txEnded-aligned" : "txEnded-sampled",
+    });
     if (sampledValue.length === 0) return;
     const history = transaction.txEndedSamples ?? [];
     const next = [

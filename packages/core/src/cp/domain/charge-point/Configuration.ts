@@ -463,6 +463,15 @@ export const ConfigurationKeys = {
       type: "integer",
       min: 1,
     } as IntegerConfigurationKey,
+    // #598: OCPP 2.0.1 / 2.1 AuthCtrlr.MasterPassGroupId (Part 2 §2.3): tokens
+    // of this group can stop transactions but cannot start one. "" (default)
+    // = no master pass. 2.x only.
+    MasterPassGroupId: {
+      name: "MasterPassGroupId",
+      required: false,
+      readonly: false,
+      type: "string",
+    } as StringConfigurationKey,
     // #538: OCPP 2.0.1 / 2.1 MonitoringCtrlr.OfflineQueuingSeverity (Part 2
     // §2.11.7 / 2.1 §2.13.7, ReadWrite): while offline, NotifyEvents of
     // monitors at or below this severity are queued (N07.FR.04, N08.FR.03).
@@ -474,6 +483,16 @@ export const ConfigurationKeys = {
       type: "integer",
       min: MIN_MONITOR_SEVERITY,
       max: MAX_MONITOR_SEVERITY,
+    } as IntegerConfigurationKey,
+    // #554: simulator key (no OCPP variable): most TransactionEvents the E11
+    // offline queue holds before it drops Updated ones (E11.FR.04/05). 0 =
+    // no limit. 2.x only.
+    OfflineQueueMaxEvents: {
+      name: "OfflineQueueMaxEvents",
+      required: false,
+      readonly: false,
+      type: "integer",
+      min: 0,
     } as IntegerConfigurationKey,
     // #537: OCPP 2.x `SecurityCtrlr` variables (2.0.1 / 2.1 Part 2
     // referenced components §2.2.4, §2.2.7-§2.2.9). 1.6 has none of them,
@@ -715,10 +734,18 @@ export const defaultConfiguration: (cp: ChargePoint) => Configuration = (
     ...(isOcpp2Version(cp.ocppVersion)
       ? [intVal(ConfigurationKeys.Custom.MessageTimeout, 30)]
       : []),
+    // #598: 2.x only (AuthCtrlr.MasterPassGroupId); "" = no master pass.
+    ...(isOcpp2Version(cp.ocppVersion)
+      ? [strVal(ConfigurationKeys.Custom.MasterPassGroupId, "")]
+      : []),
     // #538: 2.x only (MonitoringCtrlr.OfflineQueuingSeverity); 0 queues
     // only Emergency events while offline.
     ...(isOcpp2Version(cp.ocppVersion)
       ? [intVal(ConfigurationKeys.Custom.OfflineQueuingSeverity, 0)]
+      : []),
+    // #554: 2.x only; the E11 queue holds at most this many TransactionEvents.
+    ...(isOcpp2Version(cp.ocppVersion)
+      ? [intVal(ConfigurationKeys.Custom.OfflineQueueMaxEvents, 1000)]
       : []),
     // #537: 2.x only (SecurityCtrlr). CertificateEntries starts at 0; the
     // charge point sets it from its certificate store once both exist.

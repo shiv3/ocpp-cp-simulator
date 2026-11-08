@@ -19,6 +19,8 @@ const c16 = (name: string, run: Case["run"], options?: Case["options"]) =>
   cases.push({ name: `16-${name}`, version: "1.6", run, options });
 const c201 = (name: string, run: Case["run"], options?: Case["options"]) =>
   cases.push({ name: `201-${name}`, version: "2.0.1", run, options });
+const c21 = (name: string, run: Case["run"], options?: Case["options"]) =>
+  cases.push({ name: `21-${name}`, version: "2.1", run, options });
 const both = (name: string, run: Case["run"], options?: Case["options"]) => {
   c16(name, run, options);
   c201(name, run, options);
@@ -1317,6 +1319,73 @@ both("remote-start-inoperative", async (r) => {
   await r.remoteStart("X", 1);
   await settle(r);
 });
+// #599: the TransactionEvent carries the idToken (type included) of the
+// RequestStartTransaction, F01.FR.04.
+c201("remote-start-central-type", async (r) => {
+  await r.csms.call("RequestStartTransaction", {
+    remoteStartId: 1,
+    idToken: { idToken: "TAG-A", type: "Central" },
+  });
+  await settle(r);
+});
+// #598: RequestStartTransaction validation and the reason codes of a rejection.
+c201("remote-start-invalid-profile", async (r) => {
+  const schedule = [
+    {
+      id: 1,
+      chargingRateUnit: "W",
+      chargingSchedulePeriod: [{ startPeriod: 0, limit: 7000 }],
+    },
+  ];
+  const profile = {
+    id: 1,
+    stackLevel: 0,
+    chargingProfileKind: "Absolute",
+    chargingSchedule: schedule,
+  };
+  const idToken = { idToken: "TAG-A", type: "Central" };
+  await r.csms.call("RequestStartTransaction", {
+    remoteStartId: 1,
+    idToken,
+    chargingProfile: { ...profile, chargingProfilePurpose: "TxDefaultProfile" },
+  });
+  await r.csms.call("RequestStartTransaction", {
+    remoteStartId: 2,
+    idToken,
+    chargingProfile: {
+      ...profile,
+      chargingProfilePurpose: "TxProfile",
+      transactionId: "tx-1",
+    },
+  });
+  await settle(r);
+});
+c201("remote-start-master-pass", async (r) => {
+  r.cp.configuration.setRuntimeValue("MasterPassGroupId", "MASTER");
+  await r.csms.call("RequestStartTransaction", {
+    remoteStartId: 1,
+    idToken: { idToken: "TAG-A", type: "Central" },
+    groupIdToken: { idToken: "MASTER", type: "Central" },
+  });
+  await settle(r);
+});
+c201("remote-start-unknown-evse", async (r) => {
+  await r.csms.call("RequestStartTransaction", {
+    remoteStartId: 1,
+    idToken: { idToken: "TAG-A", type: "Central" },
+    evseId: 9,
+  });
+  await settle(r);
+});
+c201("remote-start-any-evse", async (r) => {
+  // The case is about EVSE selection, so the type is fixed and the recorded
+  // wire does not depend on how the started event reports a request type.
+  const idToken = { idToken: "TAG-A", type: "ISO14443" };
+  await r.csms.call("RequestStartTransaction", { remoteStartId: 1, idToken });
+  await settle(r);
+  await r.csms.call("RequestStartTransaction", { remoteStartId: 2, idToken });
+  await settle(r);
+});
 // #602: CustomerInformation answers and reports through
 // NotifyCustomerInformation.
 c201("customer-information", async (r) => {
@@ -1354,6 +1423,22 @@ c201("reset-unknown-evse", async (r) => {
 c201("reset-immediate-resume-charging", async (r) => {
   await charging(r);
   await r.csms.call("Reset", { type: "ImmediateAndResume", evseId: 1 });
+  await settle(r);
+});
+
+// 2.1 B13.FR.01 / B13.FR.02: no transaction resumption, so ImmediateAndResume
+// is Rejected while a transaction runs and the transaction keeps running; with
+// none it is an Immediate reset.
+c21("reset-immediate-resume-charging", async (r) => {
+  await charging(r);
+  await r.csms.call("Reset", { type: "ImmediateAndResume", evseId: 1 });
+  await settle(r);
+  r.cp.stopTransaction(1);
+  await settle(r);
+});
+c21("reset-immediate-resume-idle", async (r) => {
+  await r.csms.call("Reset", { type: "ImmediateAndResume" });
+  await wait(600);
   await settle(r);
 });
 

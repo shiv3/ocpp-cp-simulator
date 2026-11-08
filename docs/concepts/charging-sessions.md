@@ -279,11 +279,13 @@ WebSocket closes ([#488](https://github.com/shiv3/ocpp-cp-simulator/issues/488))
   ([#528](https://github.com/shiv3/ocpp-cp-simulator/issues/528)). The
   transaction itself survives, and its later events carry the same
   `transactionId`.
+  A replayed row stays in the queue until the CSMS answers, the queue holds
+  at most `OfflineQueueMaxEvents` TransactionEvents (`Updated` events are
+  dropped first when it is full, never `Started` or `Ended`, #554), and
+  `GetTransactionStatus` reports `messagesInQueue` from it (E14).
 
 ## Limits
 
-- 2.x `GetTransactionStatus` still answers `messagesInQueue: false`, even
-  while the E11 queue holds TransactionEvents of the transaction (E14).
 - The E10 resume is not modelled: plugging the cable back in during a
   transaction suspended by an EV-side disconnect sends `Preparing`, not a
   TransactionEvent `Updated` with `triggerReason` `CablePluggedIn` followed by

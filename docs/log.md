@@ -2388,3 +2388,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-08] ingest | CI runs each suite once, in parallel jobs
 
 - `ci.yml`: the vitest and bun suites ran one after the other in the `test` job and then a second time for coverage, which made the job about 18 minutes. Each now runs once with coverage in its own job (`vitest`, and `bun` in three shards through `scripts/bun-test-shard.sh`); `test` keeps the static checks and the packaging smokes. Every job has a timeout, and a new push to a pull request cancels the previous run. Updated [Testing strategy](analyses/testing-strategy.md).
+
+## [2026-11-08] ingest | Configurable daemon startup concurrency and staggering (#610)
+
+- `entities/daemon.md`, `entities/cli.md`: `--bootstrap-concurrency` (default 8, the previous fixed value), `--start-delay`, `--start-jitter`, `--start-seed`; all four need a server mode and `--cp-id`, and a bad number exits 1.
+- `index.md`: no change (no page added).

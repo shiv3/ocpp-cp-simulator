@@ -1,3 +1,4 @@
+import type { BootstrapPacing } from "./server/bootstrapPacing";
 import type {
   OcppSecurityProfile,
   OcppTlsOptions,
@@ -50,6 +51,8 @@ export interface CLIOptions {
    * `--cp-id CP --cp-count 3` yields CP001..CP003.
    */
   readonly cpIdPattern: string | null;
+  /** Startup pacing flags (#610); absent: the defaults (8 at once, no delay). */
+  readonly bootstrapPacing?: BootstrapPacing;
   /**
    * `--label key=value` (#472): labels every bootstrapped charge point is
    * created with. A charge point restored from `--state-db` keeps its own.

@@ -3,7 +3,12 @@ import type {
   StopTransactionRequestV16,
   TransactionEventRequestV201,
 } from "@ocpp-cp-simulator/ocpp/index";
-import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
+import {
+  answerTo,
+  startMockCsms,
+  type MockCsms,
+  type OcppFrame,
+} from "./mockCsms";
 import {
   answerEverythingElse,
   bootedChargePoint,
@@ -455,4 +460,184 @@ describe("TC_003 plug-in-first template over the wire (#453)", () => {
       await csms.stop();
     }
   }, 20_000);
+});
+
+describe("a recorded cable never goes stale (#830 review)", () => {
+  it("1.6: plug in, start, stop (auto-reset), plug in again reports Preparing again", async () => {
+    const csms = startMockCsms();
+    const { cp, stopAnswering } = await v16Station(csms, "CP16-STALE-RESET");
+    try {
+      cp.evPlugIn(1);
+      await startV16(cp, csms);
+      const stopped = csms.received.length - 1;
+      cp.stopTransaction(1);
+      await csms.waitForFrame(
+        (f) => statusOf("Available")(f) && indexAfter(csms, stopped)(f),
+      );
+      expect(cp.getConnector(1)?.evConnection).toBe("disconnected");
+
+      const before = csms.received.length - 1;
+      cp.evPlugIn(1);
+      await csms.waitForFrame(
+        (f) => statusOf("Preparing")(f) && indexAfter(csms, before)(f),
+      );
+      expect(cp.getConnector(1)?.status).toBe(OCPPStatus.Preparing);
+    } finally {
+      stopAnswering();
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
+
+  it("1.6: a cable plugged in while Unavailable shows Preparing once the connector is Operative again", async () => {
+    const csms = startMockCsms();
+    const { cp, stopAnswering } = await v16Station(csms, "CP16-STALE-AVAIL");
+    try {
+      csms.send([
+        2,
+        "ca-in",
+        "ChangeAvailability",
+        { connectorId: 1, type: "Inoperative" },
+      ]);
+      await csms.waitForFrame(statusOf("Unavailable"));
+      cp.evPlugIn(1);
+      expect(cp.getConnector(1)?.status).toBe(OCPPStatus.Unavailable);
+
+      const before = csms.received.length - 1;
+      csms.send([
+        2,
+        "ca-op",
+        "ChangeAvailability",
+        { connectorId: 1, type: "Operative" },
+      ]);
+      await csms.waitForFrame(
+        (f) => statusOf("Preparing")(f) && indexAfter(csms, before)(f),
+      );
+      expect(statusesSince(csms, before)).toEqual(["Preparing"]);
+      expect(cp.getConnector(1)?.evConnection).toBe("connected-ready");
+    } finally {
+      stopAnswering();
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
+
+  it("1.6: a plug-in on an Available connector that still records a cable is reported, not swallowed", async () => {
+    const csms = startMockCsms();
+    const { cp, stopAnswering } = await v16Station(csms, "CP16-STALE-GUARD");
+    try {
+      const connector = cp.getConnector(1)!;
+      connector.markEvPluggedIn(); // a path that freed the connector without the cable
+      expect(connector.status).toBe(OCPPStatus.Available);
+      const before = csms.received.length - 1;
+      cp.evPlugIn(1);
+      await csms.waitForFrame(
+        (f) => statusOf("Preparing")(f) && indexAfter(csms, before)(f),
+      );
+    } finally {
+      stopAnswering();
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
+
+  it("1.6: a reservation that ends with the cable in leaves Preparing, not Available", async () => {
+    const csms = startMockCsms();
+    const { cp, stopAnswering } = await v16Station(csms, "CP16-STALE-RES");
+    try {
+      csms.send([
+        2,
+        "rn",
+        "ReserveNow",
+        {
+          connectorId: 1,
+          expiryDate: new Date(Date.now() + 600_000).toISOString(),
+          idTag: "TAG-453",
+          reservationId: 31,
+        },
+      ]);
+      await csms.waitForFrame(statusOf("Reserved"));
+      cp.evPlugIn(1);
+      expect(cp.getConnector(1)?.status).toBe(OCPPStatus.Reserved);
+
+      const before = csms.received.length - 1;
+      csms.send([2, "cr", "CancelReservation", { reservationId: 31 }]);
+      await csms.waitForFrame(
+        (f) => statusOf("Preparing")(f) && indexAfter(csms, before)(f),
+      );
+      expect(statusesSince(csms, before)).toEqual(["Preparing"]);
+    } finally {
+      stopAnswering();
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
+
+  it("1.6: ReserveNow on a Preparing connector is Occupied (§5.13, §4.9)", async () => {
+    const csms = startMockCsms();
+    const { cp, stopAnswering } = await v16Station(csms, "CP16-RES-PREP");
+    try {
+      cp.evPlugIn(1);
+      await csms.waitForFrame(statusOf("Preparing"));
+      csms.send([
+        2,
+        "rn-prep",
+        "ReserveNow",
+        {
+          connectorId: 1,
+          expiryDate: new Date(Date.now() + 600_000).toISOString(),
+          idTag: "OTHER",
+          reservationId: 32,
+        },
+      ]);
+      const answer = await csms.waitForFrame(answerTo("rn-prep"));
+      expect((answer[2] as { status: string }).status).toBe("Occupied");
+      expect(cp.getConnector(1)?.status).toBe(OCPPStatus.Preparing);
+    } finally {
+      stopAnswering();
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
+
+  it("2.x idToken first: the plug-in is a CablePluggedIn / EVConnected update and stops EVConnectionTimeOut (E03)", async () => {
+    const csms = startMockCsms();
+    const { cp, stopAnswering } = await v201Station(csms, "CP201-IDTOKEN-1ST");
+    try {
+      cp.configuration.applyChange("ConnectionTimeOut", "1");
+      await cp.startTransaction("TAG-453", 1);
+      await csms.waitForFrame(
+        (f) =>
+          callOf("TransactionEvent")(f) &&
+          (f[3] as TransactionEventRequestV201).eventType === "Started",
+      );
+      expect(cp.getConnector(1)?.evConnection).toBe("disconnected");
+
+      cp.evPlugIn(1);
+      const updated = (
+        await csms.waitForFrame(
+          (f) =>
+            callOf("TransactionEvent")(f) &&
+            (f[3] as TransactionEventRequestV201).triggerReason ===
+              "CablePluggedIn",
+        )
+      )[3] as TransactionEventRequestV201;
+      expect(updated.eventType).toBe("Updated");
+      expect(updated.transactionInfo.chargingState).toBe("EVConnected");
+      expect(cp.getConnector(1)?.evConnection).toBe("connected-ready");
+
+      // Outlast the timeout: the transaction must still run.
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
+      await sentinel(cp, csms);
+      expect(
+        transactionEvents(csms).filter((e) => e.eventType === "Ended"),
+      ).toHaveLength(0);
+      expect(cp.getConnector(1)?.hasRunningTransaction).toBe(true);
+      expect(cp.getConnector(1)?.status).toBe(OCPPStatus.Charging);
+    } finally {
+      stopAnswering();
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
 });

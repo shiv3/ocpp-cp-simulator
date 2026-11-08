@@ -1827,7 +1827,7 @@ export class ChargePoint {
     }
     const connector = this.getConnector(connectorId);
     if (connector && connector.status === OCPPStatus.Reserved) {
-      this.updateConnectorStatus(connectorId, OCPPStatus.Available);
+      this.updateConnectorStatus(connectorId, this.statusWhenFree(connectorId));
     }
     syncUnspecifiedReservations(this);
   }
@@ -3971,6 +3971,25 @@ export class ChargePoint {
   }
 
   /**
+   * The status a connector shows when whatever held it (an unavailable
+   * period, a reservation, a firmware hold) ends: `Preparing` (2.x `Occupied`)
+   * while a cable is recorded and no transaction runs (1.6 §4.9; 2.0.1 G01,
+   * H03.FR.10), else `Available`. Without this a plug-in during the hold stayed
+   * recorded while `Available` was shown, and the next plug-in was swallowed
+   * (#830 review).
+   */
+  statusWhenFree(connectorId: number): OCPPStatus {
+    const connector = this.getConnector(connectorId);
+    return connector &&
+      connectorId !== 0 &&
+      !this.poweredOff &&
+      !connector.hasRunningTransaction &&
+      connector.evConnection !== "disconnected"
+      ? OCPPStatus.Preparing
+      : OCPPStatus.Available;
+  }
+
+  /**
    * A cable was plugged into the connector's EV side (#453). Idempotent: a
    * second plug-in changes nothing. An idle `Available` connector reports
    * `Preparing` (1.6 §4.9 transition A2, "insert plug"; 2.x StatusNotification
@@ -3989,8 +4008,38 @@ export class ChargePoint {
       );
       return;
     }
-    if (connector.evConnection !== "disconnected") return;
+    if (connector.evConnection !== "disconnected") {
+      // A cable recorded while the connector shows Available (a path that
+      // freed it without looking at the cable) still reports the plug-in.
+      if (
+        !this.poweredOff &&
+        !connector.hasRunningTransaction &&
+        connector.status === OCPPStatus.Available
+      ) {
+        this.updateConnectorStatus(connectorId, OCPPStatus.Preparing);
+      }
+      return;
+    }
     connector.markEvPluggedIn();
+    if (
+      isOcpp2Version(this._ocppVersion) &&
+      connector.hasRunningTransaction &&
+      !this.poweredOff
+    ) {
+      // E03 (idToken first): the cable arrives after the transaction began.
+      // E03.FR.12 / E02.FR.17: Updated, CablePluggedIn, chargingState
+      // EVConnected; the EVConnectionTimeOut is over (E03.FR.05 applies only
+      // when no EV connects); the energy offer then starts (Charging).
+      this.clearConnectionTimeout(connectorId);
+      this._outbox.sendTransactionUpdate(connectorId, {
+        triggerReason: "CablePluggedIn",
+        chargingState: "EVConnected",
+      });
+      if (connector.status === OCPPStatus.Preparing) {
+        this.updateConnectorStatus(connectorId, OCPPStatus.Charging);
+      }
+      return;
+    }
     if (
       !this.poweredOff &&
       !connector.hasRunningTransaction &&

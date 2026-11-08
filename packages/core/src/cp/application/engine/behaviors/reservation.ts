@@ -141,7 +141,7 @@ export function reservationBehavior(cp: ChargePoint): Behavior {
             if (connector && connector.status === OCPPStatus.Reserved) {
               cp.updateConnectorStatus(
                 reservation.connectorId,
-                OCPPStatus.Available,
+                cp.statusWhenFree(reservation.connectorId),
               );
             }
             syncUnspecifiedReservations(cp);
@@ -168,7 +168,7 @@ function releaseIfUnreserved(cp: ChargePoint, connectorId: number): void {
     connector.status === OCPPStatus.Reserved &&
     !cp.reservationManager.hasReservationOn(connectorId)
   ) {
-    cp.updateConnectorStatus(connectorId, OCPPStatus.Available);
+    cp.updateConnectorStatus(connectorId, cp.statusWhenFree(connectorId));
   }
 }
 

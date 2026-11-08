@@ -451,7 +451,14 @@ export async function startTransaction(
     cp.reservationManager.cancelReservation(reservation.reservationId);
   }
 
+  const cablePluggedBefore = connector.evConnection !== "disconnected";
   connector.beginTransaction(transaction);
+  // 2.x idToken-first (E03): a transaction started before the cable is in does
+  // not put one there. The plug-in that follows is a cable event of its own
+  // (Updated CablePluggedIn / EVConnected) and stops EVConnectionTimeOut.
+  if (isOcpp2Version(cp.ocppVersion) && !cablePluggedBefore) {
+    connector.markEvUnplugged();
+  }
   // From here on the transaction is the connector's live view, so that what
   // the outbox stamps on it (2.x ids, seqNo) lands in the engine state.
   const live = connector.transaction ?? transaction;
@@ -554,6 +561,9 @@ export function stopTransaction(
   cleanTransaction(cp, connector);
   connector.stopTransaction();
   if (connector.autoResetToAvailable) {
+    // The reset models the EV driving away: the cable goes with it, so the
+    // next plug-in reports Preparing again (#830 review).
+    connector.markEvUnplugged();
     cp.updateConnectorStatus(connector.id, OCPPStatus.Available);
   }
 
@@ -569,7 +579,9 @@ export function stopTransaction(
     });
     cp.updateConnectorStatus(
       connector.id,
-      scheduled === "Operative" ? OCPPStatus.Available : OCPPStatus.Unavailable,
+      scheduled === "Operative"
+        ? cp.statusWhenFree(connector.id)
+        : OCPPStatus.Unavailable,
     );
     cp.persistAvailability();
   }

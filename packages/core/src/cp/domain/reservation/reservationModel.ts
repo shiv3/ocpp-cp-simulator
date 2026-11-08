@@ -108,7 +108,8 @@ export function startRefusalByReservation(
  * A specific 2.x EVSE is `Occupied` whenever its status is not Available
  * (H01.FR.11: Reserved or Occupied, which on the wire covers a plugged cable
  * with no transaction too), unless it is Reserved by the very reservation this
- * ReserveNow replaces (H01.FR.02). 1.6 keeps its narrower rule: Charging or a
+ * ReserveNow replaces (H01.FR.02). 1.6 answers Occupied for Preparing,
+ * Charging, SuspendedEV, SuspendedEVSE and Finishing (§5.13, §4.9) or a
  * transaction.
  */
 export function reserveNowRefusal(
@@ -124,6 +125,19 @@ export function reserveNowRefusal(
     if (!connector) return ReservationStatus.Rejected;
     if (connector.status === OCPPStatus.Faulted) {
       return ReservationStatus.Faulted;
+    }
+    // 1.6 §5.13: Occupied when the connector is occupied, which §4.9 defines
+    // as Preparing, Charging, SuspendedEV, SuspendedEVSE or Finishing (the
+    // status table has no Preparing → Reserved transition). A plugged-in
+    // connector is Preparing since #453.
+    if (
+      !isOcpp2Version(cp.ocppVersion) &&
+      (connector.status === OCPPStatus.Preparing ||
+        connector.status === OCPPStatus.SuspendedEV ||
+        connector.status === OCPPStatus.SuspendedEVSE ||
+        connector.status === OCPPStatus.Finishing)
+    ) {
+      return ReservationStatus.Occupied;
     }
     if (connector.status === OCPPStatus.Charging || connector.transaction) {
       return ReservationStatus.Occupied;
@@ -216,7 +230,7 @@ export function syncUnspecifiedReservations(cp: ChargePoint): void {
         connector.status === OCPPStatus.Reserved &&
         !owned.has(id)
       ) {
-        cp.updateConnectorStatus(id, OCPPStatus.Available);
+        cp.updateConnectorStatus(id, cp.statusWhenFree(id));
       }
     }
   } finally {

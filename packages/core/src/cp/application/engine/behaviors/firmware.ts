@@ -164,7 +164,7 @@ function releaseConnectors(cp: ChargePoint, ctx: BehaviorContext): void {
     if (!connector) continue;
     connector.availability = "Operative";
     if (connector.status === OCPPStatus.Unavailable) {
-      cp.updateConnectorStatus(id, OCPPStatus.Available);
+      cp.updateConnectorStatus(id, cp.statusWhenFree(id));
     }
   }
   ctx.state[HELD] = [];

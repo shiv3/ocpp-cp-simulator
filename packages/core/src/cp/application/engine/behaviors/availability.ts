@@ -15,8 +15,14 @@ interface ChangeAvailability2Request {
   evse?: { id: number };
 }
 
-function statusOf(target: OCPPAvailability): OCPPStatus {
-  return target === "Operative" ? OCPPStatus.Available : OCPPStatus.Unavailable;
+function statusOf(
+  cp: ChargePoint,
+  target: OCPPAvailability,
+  connectorId: number,
+): OCPPStatus {
+  return target === "Operative"
+    ? cp.statusWhenFree(connectorId)
+    : OCPPStatus.Unavailable;
 }
 
 /**
@@ -70,11 +76,13 @@ function change16(cp: ChargePoint, req: ChangeAvailability16Request) {
     }
     if (anyScheduled) return { response: { status: "Scheduled" } };
 
-    const cpStatus = statusOf(target);
-    cp.updateConnectorStatus(0, cpStatus);
+    cp.updateConnectorStatus(0, statusOf(cp, target, 0));
     for (const connector of cp.connectors.values()) {
       connector.availability = target;
-      cp.updateConnectorStatus(connector.id, cpStatus);
+      cp.updateConnectorStatus(
+        connector.id,
+        statusOf(cp, target, connector.id),
+      );
     }
     cp.persistAvailability();
     return { response: { status: "Accepted" } };
@@ -91,7 +99,10 @@ function change16(cp: ChargePoint, req: ChangeAvailability16Request) {
     return { response: { status: "Scheduled" } };
   }
   connector.availability = target;
-  cp.updateConnectorStatus(req.connectorId, statusOf(target));
+  cp.updateConnectorStatus(
+    req.connectorId,
+    statusOf(cp, target, req.connectorId),
+  );
   cp.persistAvailability();
   return { response: { status: "Accepted" } };
 }
@@ -99,7 +110,6 @@ function change16(cp: ChargePoint, req: ChangeAvailability16Request) {
 function change2(cp: ChargePoint, req: ChangeAvailability2Request) {
   const target = req.operationalStatus;
   const connectorId = req.evse?.id;
-  const nextStatus = statusOf(target);
 
   if (connectorId === undefined) {
     // G03.FR.03 / G04.FR.04: a request for the state the EVSE is already in is
@@ -118,7 +128,10 @@ function change2(cp: ChargePoint, req: ChangeAvailability2Request) {
           continue;
         }
         connector.availability = target;
-        cp.updateConnectorStatus(connector.id, nextStatus);
+        cp.updateConnectorStatus(
+          connector.id,
+          statusOf(cp, target, connector.id),
+        );
       }
       cp.persistAvailability();
     };
@@ -131,7 +144,7 @@ function change2(cp: ChargePoint, req: ChangeAvailability2Request) {
     return {
       response: { status: "Accepted" },
       after: async () => {
-        cp.updateConnectorStatus(0, nextStatus);
+        cp.updateConnectorStatus(0, statusOf(cp, target, 0));
         apply();
       },
     };
@@ -161,7 +174,7 @@ function change2(cp: ChargePoint, req: ChangeAvailability2Request) {
     response: { status: "Accepted" },
     after: async () => {
       connector.availability = target;
-      cp.updateConnectorStatus(connectorId, nextStatus);
+      cp.updateConnectorStatus(connectorId, statusOf(cp, target, connectorId));
       cp.persistAvailability();
     },
   };

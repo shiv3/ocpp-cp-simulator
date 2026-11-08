@@ -125,6 +125,43 @@ describe("scrubErrorReport", () => {
     });
   });
 
+  it("drops credential headers from header maps anywhere in a breadcrumb or event", () => {
+    const breadcrumb = {
+      category: "console",
+      message: "dial options",
+      data: {
+        arguments: [
+          {
+            url: "ws://csms.example/ocpp/CP01",
+            headers: {
+              authorization: "Basic dXNlcjpwYXNz",
+              "PROXY-AUTHORIZATION": "Basic cHJveHk6cHc=",
+              "Sec-WebSocket-Protocol": "ocpp1.6",
+            },
+          },
+          [{ "Set-Cookie": ["sid=cookie-1", "csrf=cookie-2"] }],
+        ],
+      },
+    };
+
+    expect(scrubErrorReport(breadcrumb)).toEqual({
+      category: "console",
+      message: "dial options",
+      data: {
+        arguments: [
+          {
+            url: "ws://csms.example/ocpp/CP01",
+            headers: { "Sec-WebSocket-Protocol": "ocpp1.6" },
+          },
+          [{}],
+        ],
+      },
+    });
+    expect(
+      scrubErrorReport({ extra: { upgrade: { Cookie: "sid=cookie-3" } } }),
+    ).toEqual({ extra: { upgrade: {} } });
+  });
+
   it("returns a value Sentry can still send for the event fields it keeps", () => {
     const event = {
       event_id: "abc",

@@ -73,8 +73,9 @@ and breadcrumb then goes through `scrubErrorReport` before it leaves:
   query parameters, sensitive members (`password`, `AuthorizationKey`,
   `BasicAuthPassword`, `privateKey`, `simPin`, …) and the 1.6 / 2.x
   configuration entries that carry them;
-- then the request's cookies and its `Authorization`, `Proxy-Authorization`,
-  `Cookie` and `Set-Cookie` headers.
+- then the request's cookies, and every member named `Authorization`,
+  `Proxy-Authorization`, `Cookie` or `Set-Cookie` (any case) at any depth:
+  the request's headers, and a header map logged into a breadcrumb.
 
 The host name (`server_name`) and the stack traces are sent. The data goes only
 to the project behind the DSN the operator configured.

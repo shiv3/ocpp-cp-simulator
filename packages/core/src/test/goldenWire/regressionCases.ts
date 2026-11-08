@@ -1658,7 +1658,9 @@ both("power-loss-queued-then-end", async (r) => {
   r.cp.disconnect();
   await wait(200);
   r.cp.setMeterValue(1, 500);
-  r.cp.sendMeterValue(1);
+  // 1.x: MeterValues; 2.x: TransactionEvent(Updated), queued as offline.
+  r.cp.txUpdatedMeterValues = true;
+  r.cp.sendScheduledMeterValue(1);
   await wait(100);
   r.cp.powerLoss();
   await wait(300);

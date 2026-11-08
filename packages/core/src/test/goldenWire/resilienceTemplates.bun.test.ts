@@ -53,11 +53,23 @@ describe("resilience templates end in a passing verdict (#444)", () => {
     ]);
   });
 
-  for (const id of IDS) {
+  // Version-agnostic templates run on both wires. The two that read 1.6
+  // payloads (status / errorCode / reason) stay 1.6-only.
+  const BOTH = new Set([
+    "resilience-communication-loss-recovery",
+    "resilience-power-loss-recovery",
+  ]);
+  const runs = IDS.flatMap((id) =>
+    (BOTH.has(id) ? (["1.6", "2.0.1"] as const) : (["1.6"] as const)).map(
+      (version) => ({ id, version }),
+    ),
+  );
+
+  for (const { id, version } of runs) {
     test.concurrent(
-      id,
+      `${id} (${version})`,
       async () => {
-        const rig = await Rig.create({ version: "1.6" });
+        const rig = await Rig.create({ version });
         try {
           const first = rig.csms.frames.length;
           await runTemplate(rig, id);
@@ -75,4 +87,25 @@ describe("resilience templates end in a passing verdict (#444)", () => {
       120_000,
     );
   }
+
+  test("communication loss: a drop without a recovery probe fails", () => {
+    // The connection dropped and came back, a BootNotification went out, but
+    // nothing was sent over the recovered link: not a recovery.
+    const frames: Frame[] = [
+      {
+        kind: "call",
+        action: "BootNotification",
+        direction: "sent",
+        uniqueId: "1",
+        payload: {},
+        timestamp: new Date(0).toISOString(),
+        raw: "[]",
+      },
+    ];
+    const results = evaluateAssertions(
+      assertionsOf("resilience-communication-loss-recovery"),
+      frames,
+    );
+    expect(results.map((r) => r.status)).toEqual(["failed"]);
+  });
 });

@@ -262,11 +262,16 @@ export interface PowerRestoreResult {
 
 /** `powerLoss` while off, `powerRestore` while on. */
 export class PowerStateError extends Error {
-  constructor(readonly code: "already_powered_off" | "not_powered_off") {
+  constructor(
+    readonly code:
+      "already_powered_off" | "not_powered_off" | "unsupported_transport",
+  ) {
     super(
       code === "already_powered_off"
         ? "The charge point is already without power"
-        : "The charge point has power",
+        : code === "unsupported_transport"
+          ? "Power loss is not simulated for OCPP-S (SOAP) charge points"
+          : "The charge point has power",
     );
   }
 }
@@ -2577,6 +2582,9 @@ export class ChargePoint {
    * station running.
    */
   powerLoss(options: PowerLossOptions = {}): PowerLossRecord {
+    if (this.isSoapChargePoint()) {
+      throw new PowerStateError("unsupported_transport");
+    }
     if (this._powerLoss) throw new PowerStateError("already_powered_off");
     const record: PowerLossRecord = {
       at: this._nowDate(),

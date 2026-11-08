@@ -37,7 +37,8 @@ of the network-simulation layer and of Reset:
 | `power.loss`    | `{ cpId, restoreAfterMs?, transactions?, txResumptionTimeoutSeconds? }` | `{ ok: true, transactions }` or `{ ok: false, error }`                     |
 | `power.restore` | `{ cpId, transactions?, txResumptionTimeoutSeconds? }`                  | `{ ok: true, outageMs, recovery, transactions }` or `{ ok: false, error }` |
 
-Errors: `cp_not_found`, `already_powered_off`, `not_powered_off`. MCP tools:
+Errors: `cp_not_found`, `already_powered_off`, `not_powered_off`,
+`unsupported_transport` (an OCPP-S / SOAP charge point). MCP tools:
 `power_loss`, `power_restore` ([MCP endpoint](../entities/mcp-endpoint.md)).
 `restoreAfterMs` is the outage duration: power returns by itself (up to one
 week); without it the station stays off until `power.restore`. While off,
@@ -52,11 +53,21 @@ connector's transaction (id, tag, meter, start time), the queue of transaction
 messages that could not be delivered (also persisted with `--state-db`, see
 [State persistence](state-persistence.md)), configuration, the Local
 Authorization List and availability. What a real power cut would erase is
-cleared as for any disconnect: pending in-flight CALLs go to the queue, charging
-profiles are cleared (`ConnectionClosed`; 2.1 E17 does not require `TxProfile`
+cleared as for any disconnect: pending in-flight CALLs go to the queue,
+station-level charging profiles (connectorId 0) are cleared (`ConnectionClosed`;
+connector and transaction profiles survive; 2.1 E17 does not require `TxProfile`
 persistence), and the meter ticker stops. Scenario runs are the simulated
 operator's script and keep running; a `connectionTrigger` wait survives the
 outage by design.
+
+The power state itself (`poweredOff`, the loss record and the recovery still
+waiting for a boot) is **in memory only**. It is not written to `--state-db`, so
+it does not survive a daemon restart: a daemon restarted during an outage comes
+back powered and connects, and a requested `end` recovery that had not run yet
+never runs (on 2.0.1, where `end` is the default, the transaction then stays
+open). Persisting it, and the "persisted restart path" tests, are not done
+yet; #455 stays open for that part. `poweredOff` is not part of the `cp.get`
+snapshot, and `connect` is the one place that refuses while off.
 
 ## After the power returns
 
@@ -90,7 +101,8 @@ boot. A second `power.loss` before then replaces it.
 `SuspendedEVSE`) and `EnergyTransferResumptionRandomRange` (E17.FR.18) are not
 modeled; a resumed transaction returns in the state it had. The 2.x `offline`
 flag on events produced during the outage follows the existing offline queue.
-OCPP-S (SOAP) charge points have no socket to drop: the loss only silences them.
+OCPP-S (SOAP) charge points have no socket to drop: `power.loss` on one is
+refused with `unsupported_transport` and changes nothing.
 
 ## Golden wire cases
 

@@ -50,6 +50,17 @@ describe("ChargePoint power loss (#455)", () => {
     for (const cp of built.splice(0)) cp.dispose();
   });
 
+  it("refuses a power loss on an OCPP-S (SOAP) charge point", () => {
+    const cp = build("OCPP-1.6S");
+    expect(() => cp.powerLoss()).toThrow(PowerStateError);
+    try {
+      cp.powerLoss();
+    } catch (error) {
+      expect((error as PowerStateError).code).toBe("unsupported_transport");
+    }
+    expect(cp.poweredOff).toBe(false);
+  });
+
   it("keeps the transaction and refuses a connect while off", async () => {
     const cp = build("OCPP-1.6J");
     await charging(cp);

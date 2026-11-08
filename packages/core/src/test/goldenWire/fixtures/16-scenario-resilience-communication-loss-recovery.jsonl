@@ -10,3 +10,5 @@
 {"d":"CSMS>","k":"result","id":"id-5","p":{}}
 {"d":"CP>","k":"call","id":"id-6","a":"StatusNotification","p":{"connectorId":1,"errorCode":"NoError","status":"Available"}}
 {"d":"CSMS>","k":"result","id":"id-6","p":{}}
+{"d":"CP>","k":"call","id":"id-7","a":"DataTransfer","p":{"vendorId":"org.ocpp-cp-sim.resilience","messageId":"link-probe","data":"after-reconnect"}}
+{"d":"CSMS>","k":"result","id":"id-7","p":{"status":"Accepted"}}

@@ -105,6 +105,26 @@ describe("initErrorReporting", () => {
     expect(warned).toHaveBeenCalledTimes(1);
     warned.mockRestore();
   });
+
+  it("starts without reporting when the SDK fails to start", async () => {
+    const warned = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    const sentry = fakeSentry();
+    sentry.init.mockImplementation(() => {
+      throw new Error("bad options");
+    });
+    await expect(
+      initErrorReporting(
+        { dsn: DSN, release: "1.0.0" },
+        async () => sentry as never,
+      ),
+    ).resolves.toBe(false);
+    expect(warned).toHaveBeenCalledTimes(1);
+    warned.mockRestore();
+
+    // Off means off: a later fatal exit does not reach the half-started SDK.
+    await reportFatalError(new Error("x"));
+    expect(sentry.captureException).not.toHaveBeenCalled();
+  });
 });
 
 describe("reportFatalError", () => {

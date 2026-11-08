@@ -105,4 +105,19 @@ describe("initErrorReporting", () => {
     ).resolves.toEqual({});
     expect(warned).toHaveBeenCalledTimes(1);
   });
+
+  it("renders without reporting when the SDK fails to start", async () => {
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { sentry } = fakeSentry();
+    sentry.init.mockImplementation(() => {
+      throw new Error("bad options");
+    });
+    await expect(
+      initErrorReporting(
+        { dsn: DSN, release: "1.0.0" },
+        async () => sentry as never,
+      ),
+    ).resolves.toEqual({});
+    expect(warned).toHaveBeenCalledTimes(1);
+  });
 });

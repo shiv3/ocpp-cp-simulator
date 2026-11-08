@@ -525,7 +525,9 @@ function redactVpn(value: unknown): unknown {
   return { ...redacted, key: REDACTED_VALUE };
 }
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
+export function isPlainObject(
+  value: unknown,
+): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 

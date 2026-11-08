@@ -1,4 +1,4 @@
-import { redactSensitiveValue } from "./redaction";
+import { isPlainObject, redactSensitiveValue } from "./redaction";
 
 /**
  * Opt-in error reporting (#794). The web console and the CLI/daemon each wire
@@ -65,9 +65,10 @@ const CREDENTIAL_HEADERS = new Set([
  */
 export function scrubErrorReport<T>(report: T): T {
   const scrubbed = redactSensitiveValue(report);
-  if (!isRecord(scrubbed) || !isRecord(scrubbed.request)) return scrubbed as T;
+  if (!isPlainObject(scrubbed) || !isPlainObject(scrubbed.request))
+    return scrubbed as T;
   const { cookies: _cookies, ...request } = scrubbed.request;
-  if (isRecord(request.headers)) {
+  if (isPlainObject(request.headers)) {
     request.headers = Object.fromEntries(
       Object.entries(request.headers).filter(
         ([name]) => !CREDENTIAL_HEADERS.has(name.toLowerCase()),
@@ -75,8 +76,4 @@ export function scrubErrorReport<T>(report: T): T {
     );
   }
   return { ...scrubbed, request } as T;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
 }

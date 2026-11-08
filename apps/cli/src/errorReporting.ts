@@ -38,27 +38,28 @@ export async function initErrorReporting(
   load: () => Promise<SentryBun> = () => import("@sentry/bun"),
 ): Promise<boolean> {
   if (!config) return false;
-  let Sentry: SentryBun;
   try {
-    Sentry = await load();
+    const Sentry = await load();
+    Sentry.init({
+      ...config,
+      debug: false,
+      dataCollection: restrictedDataCollection(),
+      beforeSend: (event) => scrubErrorReport(event),
+      beforeBreadcrumb: (breadcrumb) => scrubErrorReport(breadcrumb),
+      // Without Sentry an unhandled rejection exits the process; the SDK's
+      // default `warn` mode would keep it running.
+      integrations: [
+        Sentry.onUnhandledRejectionIntegration({ mode: "strict" }),
+      ],
+    });
+    active = Sentry;
+    return true;
   } catch (err) {
     process.stderr.write(
-      `Error reporting disabled: the Sentry SDK did not load (${err instanceof Error ? err.message : err})\n`,
+      `Error reporting disabled: the Sentry SDK did not start (${err instanceof Error ? err.message : err})\n`,
     );
     return false;
   }
-  Sentry.init({
-    ...config,
-    debug: false,
-    dataCollection: restrictedDataCollection(),
-    beforeSend: (event) => scrubErrorReport(event),
-    beforeBreadcrumb: (breadcrumb) => scrubErrorReport(breadcrumb),
-    // Without Sentry an unhandled rejection exits the process; the SDK's
-    // default `warn` mode would keep it running.
-    integrations: [Sentry.onUnhandledRejectionIntegration({ mode: "strict" })],
-  });
-  active = Sentry;
-  return true;
 }
 
 /**

@@ -1934,8 +1934,11 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     requestId?: number,
   ): void {
     const id = this.generateMessageId();
+    // L01: `Idle` (only sent for a TriggerMessage with no update in
+    // progress) names no update, so it carries no requestId (#596).
     const effectiveRequestId =
-      requestId ?? this._chargePoint.lastFirmwareRequestId;
+      requestId ??
+      (status === "Idle" ? undefined : this._chargePoint.lastFirmwareRequestId);
     const payload: FirmwareStatusNotificationRequestV201 = {
       status,
       ...(effectiveRequestId !== undefined
@@ -2047,7 +2050,10 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     requestId?: number,
   ): void {
     const id = this.generateMessageId();
-    const effectiveRequestId = requestId ?? this._chargePoint.lastLogRequestId;
+    // N01: as for FirmwareStatusNotification, `Idle` names no upload (#596).
+    const effectiveRequestId =
+      requestId ??
+      (status === "Idle" ? undefined : this._chargePoint.lastLogRequestId);
     const payload: LogStatusNotificationRequestV201 = {
       status,
       ...(effectiveRequestId !== undefined

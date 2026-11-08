@@ -2388,3 +2388,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-08] ingest | CI runs each suite once, in parallel jobs
 
 - `ci.yml`: the vitest and bun suites ran one after the other in the `test` job and then a second time for coverage, which made the job about 18 minutes. Each now runs once with coverage in its own job (`vitest`, and `bun` in three shards through `scripts/bun-test-shard.sh`); `test` keeps the static checks and the packaging smokes. Every job has a timeout, and a new push to a pull request cancels the previous run. Updated [Testing strategy](analyses/testing-strategy.md).
+
+## [2026-11-08] ingest | 2.x TriggerMessage for TransactionEvent, FirmwareStatusNotification and LogStatusNotification (#596)
+
+- `entities/default-behaviors.md`: the targets of the 2.x `TriggerMessage`, the EVSE handling of `TransactionEvent` and the `Idle` rule (no `requestId`) of the two status messages.

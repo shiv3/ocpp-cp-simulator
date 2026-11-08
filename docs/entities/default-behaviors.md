@@ -97,6 +97,15 @@ way you rebuild the answer by hand (for `Accepted` / `Rejected`, `ctx.accepted(a
 | Firmware publishing          | —                                                                                            | `PublishFirmware`, `UnpublishFirmware`                                                                                                                                                                                         |
 | Vendor                       | `DataTransfer`                                                                               | `DataTransfer`                                                                                                                                                                                                                 |
 
+The 2.x `TriggerMessage` answers `Accepted` and then sends the requested message for `BootNotification`,
+`Heartbeat`, `StatusNotification`, `MeterValues`, the certificate signing requests and, since #596,
+`TransactionEvent` (an `Updated` event with `triggerReason: "Trigger"` for the running transaction of
+`evse.id`, or of every EVSE without one; `Rejected` with reason code `TxNotFound` when none runs),
+`FirmwareStatusNotification` and `LogStatusNotification` (the status in the engine state of
+`default.firmware` / `default.logs` with its `requestId` while an update or upload is in progress, else
+`Idle` without a `requestId`, as L01 and N01 have it; `Installed` and the failed statuses end an update, so
+they read as `Idle`). Every other requested message is `NotImplemented`.
+
 An action in neither table is not implemented by the station and gets a CALLERROR `NotImplemented`; a rule
 can still own it (`replace`).
 

@@ -84,6 +84,35 @@ export function handleUnlockConnectorV201(
   return { response };
 }
 
+/** FirmwareStatusEnumType values of an update that has not ended (L01):
+ *  the others (`Installed`, the failures, `Idle`) leave nothing in progress. */
+const FIRMWARE_IN_PROGRESS: ReadonlySet<string> = new Set([
+  "Downloading",
+  "Downloaded",
+  "DownloadScheduled",
+  "DownloadPaused",
+  "Installing",
+  "InstallScheduled",
+  "InstallRebooting",
+  "SignatureVerified",
+]);
+
+/** UploadLogStatusEnumType values of an upload that has not ended (N01). */
+const LOG_IN_PROGRESS: ReadonlySet<string> = new Set(["Uploading"]);
+
+function reportTriggeredStatus(
+  status: string,
+  requestId: number | null,
+  inProgress: ReadonlySet<string>,
+  send: (status: string, requestId?: number) => void,
+): void {
+  if (inProgress.has(status)) {
+    send(status, requestId ?? undefined);
+  } else {
+    send("Idle");
+  }
+}
+
 export const handleTriggerMessageV201 = (
   payload?: unknown,
   ctx?: V201InboundContext,
@@ -135,6 +164,71 @@ export const handleTriggerMessageV201 = (
           ctx.chargePoint.sendMeterValue(connectorId);
         },
       };
+
+    // #596 F06: an Updated event with triggerReason Trigger for the running
+    // transaction of the requested EVSE, or of every EVSE without one. With
+    // no running transaction there is nothing to report: Rejected.
+    case "TransactionEvent": {
+      const targets = Array.from(ctx.chargePoint.connectors.values())
+        .filter(
+          (c) =>
+            c.hasRunningTransaction &&
+            (connectorId === undefined ||
+              connectorId === 0 ||
+              c.id === connectorId),
+        )
+        .map((c) => c.id);
+      if (targets.length === 0) {
+        return {
+          response: {
+            status: "Rejected",
+            statusInfo: {
+              reasonCode: "TxNotFound",
+              additionalInfo: "No transaction is running on the requested EVSE",
+            },
+          } satisfies TriggerMessageResponseV201,
+        };
+      }
+      return {
+        response: accepted,
+        afterResult: () => {
+          for (const id of targets) {
+            ctx.chargePoint.sendTransactionUpdate(id, {
+              triggerReason: "Trigger",
+            });
+          }
+        },
+      };
+    }
+
+    // #596 L01 / N01: the status the engine holds (`default.firmware`,
+    // `default.logs`), or Idle when no update / upload is in progress. Idle
+    // carries no requestId.
+    case "FirmwareStatusNotification": {
+      const { status, requestId } = ctx.chargePoint.engine.state.firmware;
+      return {
+        response: accepted,
+        afterResult: () =>
+          reportTriggeredStatus(
+            status,
+            requestId,
+            FIRMWARE_IN_PROGRESS,
+            (s, id) =>
+              ctx.chargePoint.sendFirmwareStatusNotification(s as never, id),
+          ),
+      };
+    }
+
+    case "LogStatusNotification": {
+      const { status, requestId } = ctx.chargePoint.engine.state.log;
+      return {
+        response: accepted,
+        afterResult: () =>
+          reportTriggeredStatus(status, requestId, LOG_IN_PROGRESS, (s, id) =>
+            ctx.chargePoint.sendLogStatusNotification(s as never, id),
+          ),
+      };
+    }
 
     // #537 A02: a new key pair and CSR once the answer is written
     // (A02.FR.02, F06.FR.04). SignCombinedCertificate and 2.1's

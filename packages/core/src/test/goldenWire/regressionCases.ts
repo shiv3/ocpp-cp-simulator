@@ -723,6 +723,43 @@ c16("ns-reset-hard-order", async (r) => {
   await wait(1000);
   await settle(r);
 });
+// #596: TriggerMessage for TransactionEvent, FirmwareStatusNotification and
+// LogStatusNotification on 2.x.
+c201("trigger-transaction-event", async (r) => {
+  await r.csms.call("TriggerMessage", { requestedMessage: "TransactionEvent" });
+  await settle(r);
+  await charging(r);
+  await r.csms.call("TriggerMessage", {
+    requestedMessage: "TransactionEvent",
+    evse: { id: 1 },
+  });
+  await r.csms.call("TriggerMessage", {
+    requestedMessage: "TransactionEvent",
+    evse: { id: 2 },
+  });
+  await settle(r);
+});
+c201("trigger-status-idle-after-request", async (r) => {
+  await r.csms.call("UpdateFirmware", {
+    requestId: 11,
+    firmware: {
+      location: "http://x",
+      retrieveDateTime: "2020-01-01T00:00:00.000Z",
+    },
+  });
+  await r.csms.call("GetLog", {
+    requestId: 12,
+    logType: "DiagnosticsLog",
+    log: { remoteLocation: "http://x" },
+  });
+  await r.csms.call("TriggerMessage", {
+    requestedMessage: "FirmwareStatusNotification",
+  });
+  await r.csms.call("TriggerMessage", {
+    requestedMessage: "LogStatusNotification",
+  });
+  await settle(r);
+});
 c16("firmware-trigger-status", async (r) => {
   await r.csms.call("TriggerMessage", {
     requestedMessage: "FirmwareStatusNotification",

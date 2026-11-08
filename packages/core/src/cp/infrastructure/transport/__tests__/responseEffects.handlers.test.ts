@@ -57,6 +57,7 @@ function buildContext() {
 
   const realEngine = new ChargerEngine(chargePoint as unknown as ChargePoint);
   chargePoint.engine = {
+    state: realEngine.state,
     runDefault: (action: string, payload: unknown) => {
       if (action !== "UpdateFirmware" && action !== "SignedUpdateFirmware") {
         return realEngine.runDefault(action, payload);
@@ -363,7 +364,9 @@ describe("responseEffects.handlers", () => {
       expect(isHandlerOutcome(result)).toBe(true);
       if (isHandlerOutcome(result)) {
         result.afterResponseSettled();
-        expect(chargePointCalls.sendLogStatusNotification).toEqual([["Idle"]]);
+        expect(chargePointCalls.sendLogStatusNotification).toEqual([
+          ["Idle", undefined],
+        ]);
       }
     });
 
@@ -379,7 +382,7 @@ describe("responseEffects.handlers", () => {
       if (isHandlerOutcome(result)) {
         result.afterResponseSettled();
         expect(chargePointCalls.sendSignedFirmwareStatusNotification).toEqual([
-          ["Idle"],
+          ["Idle", undefined],
         ]);
       }
     });

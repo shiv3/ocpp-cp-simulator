@@ -16,6 +16,14 @@ import {
 import { REDACTED_VALUE } from "../../../../shared/redaction";
 import { LogType } from "../../../../shared/Logger";
 import { defaultBehavior16 } from "./defaultBehavior";
+import {
+  diagnosticsTriggerStatus,
+  firmwareTriggerStatus,
+} from "./triggerStatus";
+import type {
+  DiagnosticsStatus,
+  FirmwareStatus,
+} from "../../../../domain/types/FirmwareLogStatus";
 
 export class ChangeConfigurationHandler implements CallHandler<
   ChangeConfigurationRequestV16,
@@ -142,25 +150,31 @@ export class TriggerMessageHandler implements CallHandler<
       }
 
       case "DiagnosticsStatusNotification": {
-        // §4.4: when not busy uploading diagnostics, respond Idle.
+        // §4.4: Idle only when not busy uploading diagnostics.
         const response = { status: "Accepted" } as const;
         const outcome: HandlerOutcome = {
           kind: "handler-outcome",
           payload: response,
           afterResponseSettled: () =>
-            context.chargePoint.sendDiagnosticsStatusNotification("Idle"),
+            context.chargePoint.sendDiagnosticsStatusNotification(
+              diagnosticsTriggerStatus(context.chargePoint.engine.state)
+                .status as DiagnosticsStatus,
+            ),
         };
         return outcome;
       }
 
       case "FirmwareStatusNotification": {
-        // §4.5: same shape as DiagnosticsStatus — Idle if not busy.
+        // §4.5: Idle only when not downloading or installing.
         const response = { status: "Accepted" } as const;
         const outcome: HandlerOutcome = {
           kind: "handler-outcome",
           payload: response,
           afterResponseSettled: () =>
-            context.chargePoint.sendFirmwareStatusNotification("Idle"),
+            context.chargePoint.sendFirmwareStatusNotification(
+              firmwareTriggerStatus(context.chargePoint.engine.state)
+                .status as FirmwareStatus,
+            ),
         };
         return outcome;
       }

@@ -5,6 +5,11 @@ import type {
 } from "@ocpp-cp-sim/ocpp/index";
 import type { HandlerOutcome } from "../../network-sim/ResponseEffectQueue";
 import { LogType } from "../../../../shared/Logger";
+import { logTriggerStatus, signedFirmwareTriggerStatus } from "./triggerStatus";
+import type {
+  FirmwareStatus,
+  UploadLogStatus,
+} from "../../../../domain/types/FirmwareLogStatus";
 import { sendWhileTriggered } from "./OtherCallHandlers";
 
 /**
@@ -119,8 +124,15 @@ export class ExtendedTriggerMessageHandler implements CallHandler<
         const outcome: HandlerOutcome = {
           kind: "handler-outcome",
           payload: response,
-          afterResponseSettled: () =>
-            context.chargePoint.sendLogStatusNotification("Idle"),
+          afterResponseSettled: () => {
+            const { status, requestId } = logTriggerStatus(
+              context.chargePoint.engine.state,
+            );
+            context.chargePoint.sendLogStatusNotification(
+              status as UploadLogStatus,
+              requestId,
+            );
+          },
         };
         return outcome;
       }
@@ -130,8 +142,15 @@ export class ExtendedTriggerMessageHandler implements CallHandler<
         const outcome: HandlerOutcome = {
           kind: "handler-outcome",
           payload: response,
-          afterResponseSettled: () =>
-            context.chargePoint.sendSignedFirmwareStatusNotification("Idle"),
+          afterResponseSettled: () => {
+            const { status, requestId } = signedFirmwareTriggerStatus(
+              context.chargePoint.engine.state,
+            );
+            context.chargePoint.sendSignedFirmwareStatusNotification(
+              status as FirmwareStatus,
+              requestId,
+            );
+          },
         };
         return outcome;
       }

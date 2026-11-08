@@ -575,6 +575,72 @@ export const goldenCases: GoldenCase[] = [
     );
     await settle(rig);
   }),
+  // 1.6 section 4.5 and security whitepaper L01.FR.28/29, N01.FR.12: a
+  // triggered status reports the update or upload in progress, Idle otherwise.
+  c16("trigger-status-while-busy", async (rig) => {
+    const sentStatus =
+      (action: string, status: string) =>
+      (f: { dir: string; action?: string; payload?: unknown }) =>
+        f.dir === "CP>" &&
+        f.action === action &&
+        (f.payload as { status?: string }).status === status;
+    let from = rig.csms.mark();
+    await rig.csms.call("SignedUpdateFirmware", {
+      requestId: 12,
+      firmware: {
+        location: "https://fw.example.test/signed.bin",
+        retrieveDateTime: PAST,
+        signingCertificate: SIGNING_CERTIFICATE,
+        signature: "c2lnbmF0dXJl",
+      },
+    });
+    await rig.csms.waitForFrame(
+      sentStatus("SignedFirmwareStatusNotification", "Downloaded"),
+      { from, timeoutMs: 30_000 },
+    );
+    await rig.csms.call("ExtendedTriggerMessage", {
+      requestedMessage: "FirmwareStatusNotification",
+    });
+    await settle(rig);
+    from = rig.csms.mark();
+    await rig.csms.waitForFrame(
+      sentStatus("SignedFirmwareStatusNotification", "Installed"),
+      { from, timeoutMs: 30_000 },
+    );
+    await settle(rig);
+    await rig.csms.call("ExtendedTriggerMessage", {
+      requestedMessage: "FirmwareStatusNotification",
+    });
+    await settle(rig);
+    from = rig.csms.mark();
+    await rig.csms.call("GetLog", {
+      logType: "DiagnosticsLog",
+      requestId: 22,
+      log: { remoteLocation: rig.uploadUrl() },
+    });
+    await rig.csms.waitForFrame(
+      sentStatus("LogStatusNotification", "Uploading"),
+      {
+        from,
+        timeoutMs: 30_000,
+      },
+    );
+    await rig.csms.call("ExtendedTriggerMessage", {
+      requestedMessage: "LogStatusNotification",
+    });
+    await rig.csms.waitForFrame(
+      sentStatus("LogStatusNotification", "Uploaded"),
+      {
+        from,
+        timeoutMs: 30_000,
+      },
+    );
+    await settle(rig);
+    await rig.csms.call("ExtendedTriggerMessage", {
+      requestedMessage: "LogStatusNotification",
+    });
+    await settle(rig);
+  }),
   c16("get-log", async (rig) => {
     const from = rig.csms.mark();
     await rig.csms.call("GetLog", {

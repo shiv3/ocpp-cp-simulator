@@ -65,7 +65,11 @@ if cli_mode "$@"; then
   # directory mounted for `--trace-output` or a 0600 key file belongs to the
   # host user, and `--user` only works when the entrypoint does not need root.
   # The HEALTHCHECK looks for this marker and passes: there is no daemon.
-  touch /tmp/.ocpp-cli-mode 2>/dev/null || true
+  # Only the container's main process (PID 1) writes it: a `docker exec` into
+  # a running daemon must not make the HEALTHCHECK pass for good.
+  if [ "$$" = "1" ]; then
+    touch /tmp/.ocpp-cli-mode 2>/dev/null || true
+  fi
   exec bun dist-cli/main.js "$@"
 fi
 

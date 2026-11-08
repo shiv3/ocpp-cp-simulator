@@ -5,6 +5,7 @@
 import { describe, expect, test } from "bun:test";
 import { goldenCases as handCases } from "./cases";
 import { regressionCases } from "./regressionCases";
+import { virtualClockCases } from "./virtualClockCases";
 import { PINNED_TEMPLATE_IDS, scenarioCases } from "./scenarioCases";
 import { scenarioTemplates } from "../../utils/scenarioTemplates";
 import {
@@ -14,7 +15,12 @@ import {
   recordMissingFixture,
 } from "./golden";
 
-const goldenCases = [...handCases, ...regressionCases, ...scenarioCases];
+const goldenCases = [
+  ...handCases,
+  ...regressionCases,
+  ...scenarioCases,
+  ...virtualClockCases,
+];
 
 describe("golden wire", () => {
   test("case names are unique", () => {

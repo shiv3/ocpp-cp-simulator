@@ -101,6 +101,11 @@ On 2.1 the station has no local cost calculation, so `SetDefaultTariff` (I07.FR.
 `ChangeTransactionTariff` (I11.FR.01) are answered with the CALLERROR `NotSupported`, not a `Rejected`
 status (that is for an invalid tariff, I07.FR.05); `GetTariffs` and `ClearTariffs` answer `NoTariff`.
 
+On 2.1 `UsePriorityCharging` looks the `transactionId` up among the ongoing transactions: no such
+transaction is `Rejected` with `statusInfo.reasonCode` `TxNotFound` (K21.FR.02); an ongoing one with
+`activate = false` is `Accepted` (K21.FR.06); with `activate = true` it is `NoProfile` / `NotFound`, because
+the station never installs a PriorityCharging profile (K21.FR.01).
+
 An action in neither table is not implemented by the station and gets a CALLERROR `NotImplemented`; a rule
 can still own it (`replace`).
 

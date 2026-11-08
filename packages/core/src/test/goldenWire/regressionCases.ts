@@ -1456,6 +1456,19 @@ c21("reset-immediate-resume-idle", async (r) => {
   await wait(600);
   await settle(r);
 });
+// 2.1 K21.FR.01 / FR.02 / FR.06: UsePriorityCharging looks the transaction up;
+// the station never has a PriorityCharging profile.
+c21("use-priority-charging", async (r) => {
+  await charging(r);
+  const transactionId = r.transactionId(1);
+  await r.csms.call("UsePriorityCharging", { transactionId, activate: true });
+  await r.csms.call("UsePriorityCharging", { transactionId, activate: false });
+  await r.csms.call("UsePriorityCharging", {
+    transactionId: "no-such-transaction",
+    activate: true,
+  });
+  await settle(r);
+});
 
 // Timers that set the pace on the wire: boot retry, heartbeat period, reconnect.
 both(

@@ -84,7 +84,7 @@
   "settings.curve.title": "自動MeterValueの設定",
   "settings.curve.enable": "自動MeterValueを有効にする",
   "settings.curve.canvasHint": "クリックで制御点を追加、ドラッグで移動します",
-  "settings.curve.stopAtTarget": "バッテリー満充電まで充電 (EVの目標SoCで停止)",
+  "settings.curve.stopAtTarget": "EVの目標SoCまで充電",
   "settings.curve.stopAtTargetHelp": "グラフの最大時間/最大値は無視されます。EV設定の目標SoCを使用し、到達すると進行中のトランザクションを停止します。",
   "settings.curve.presets": "プリセット",
   "settings.curve.linear": "線形",
@@ -99,7 +99,7 @@
   "settings.page.backToHome": "ホームに戻る",
   "settings.page.tagsSaved": "RFIDタグIDを保存しました。",
   "settings.page.resetUnsupported": "このランタイムは状態のリセットに対応していません",
-  "settings.page.resetConfirm": "シミュレーターのデータをすべてリセットしますか?\n\nシナリオ、設定の上書き、充電プロファイル、可用性フラグ、保留中のメッセージ、ログ、保存済みの車両プロファイルが消去されます。完了後、ページが再読み込みされます。",
+  "settings.page.resetConfirm": "シミュレーターのデータをすべてリセットしますか?\n\nシナリオ、設定の上書き、充電プロファイル、可用性フラグ、保留中のメッセージ、ログ、保存済みの車両プロファイルが消去されます。リモートモードでは、デーモンに登録されたすべての充電器も削除されます。完了後、ページが再読み込みされます。",
   "settings.page.evSaved": "デフォルトのEV設定を保存しました。新しいコネクタはこの値で開始します。",
   "settings.page.evReset": "デフォルトのEV設定を組み込みの既定値にリセットしました。",
   "settings.page.exported": "設定をエクスポートしました。",
@@ -160,5 +160,5 @@
   "settings.page.note1": "個々の充電器の設定はホームページから行えます",
   "settings.page.note2": "各充電器タブの横にある歯車アイコンをクリックして設定を編集します",
   "settings.page.note3": "「+ Add Charge Point」ボタンで新しい充電器を追加します",
-  "settings.page.note4": "このページは設定の一括インポート/エクスポート専用です"
+  "settings.page.note4": "このページには、設定の一括インポート/エクスポートのほか、シミュレーター全体の設定とデータのリセットがあります"
 }

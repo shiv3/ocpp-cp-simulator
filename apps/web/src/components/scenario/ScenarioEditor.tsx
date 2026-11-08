@@ -639,8 +639,8 @@ const ScenarioEditor: React.FC<ScenarioEditorProps> = ({
     );
   };
 
-  // Handle curve modal save. Maps the modal's "Charge until battery full"
-  // checkbox onto the node's stopMode so the executor honors it (issue #95).
+  // Handle curve modal save. Maps the modal's "Charge until the EV's target
+  // SoC" checkbox onto the node's stopMode so the executor honors it (#95).
   const handleCurveModalSave = (config: AutoMeterValueConfig) => {
     setFormData(applyCurveConfigToMeterNode(formData, config));
     setIsCurveModalOpen(false);

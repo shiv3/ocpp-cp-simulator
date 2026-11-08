@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { scenarioTemplates } from "@ocpp-cp-simulator/core/utils/scenarioTemplates";
 import i18n, { LOCALES, DEFAULT_LOCALE, isLocale, t } from "./index";
 import { NAMESPACES } from "./resources";
 
@@ -30,6 +31,13 @@ const bases = (table: Table): Set<string> =>
 const placeholders = (text: string): string[] =>
   [...text.matchAll(/\{\{\s*(\w+)[^}]*\}\}/g)].map((m) => m[1]).sort();
 
+const messageNames = (text: string): string[] =>
+  [
+    ...new Set(
+      [...text.matchAll(/\b[A-Z]\w*\.(?:req|conf)\b/g)].map((m) => m[0]),
+    ),
+  ].sort();
+
 const en = load(DEFAULT_LOCALE);
 const enBases = bases(en);
 const others = LOCALES.filter((l) => l !== DEFAULT_LOCALE);
@@ -52,6 +60,30 @@ describe("locale completeness", () => {
     for (const key of Object.keys(en).filter((k) => k.endsWith("_other"))) {
       expect(en, `${key} needs a _one form`).toHaveProperty(`${base(key)}_one`);
     }
+  });
+
+  it("has no Japanese or Chinese characters in en", () => {
+    const cjk = /[぀-ヿ㐀-鿿＀-￯]/;
+    expect(Object.keys(en).filter((k) => cjk.test(en[k]))).toEqual([]);
+  });
+
+  it("repeats the built-in template's own text in en", () => {
+    // en is the source the other locales translate, so it must say what
+    // the template data says (#807). A template without an entry shows its
+    // own text, so only an entry that exists is compared.
+    const source: Table = {};
+    for (const tpl of scenarioTemplates) {
+      source[`templates.${tpl.id}.name`] = tpl.name;
+      source[`templates.${tpl.id}.description`] = tpl.description;
+    }
+    const entries = Object.entries(en).filter(([k]) =>
+      k.startsWith("templates."),
+    );
+    expect(entries.length).toBeGreaterThan(0);
+    const bad = entries
+      .filter(([k, text]) => source[k] !== text)
+      .map(([k]) => k);
+    expect(bad, "en template text that differs or has no template").toEqual([]);
   });
 
   for (const locale of others) {
@@ -84,6 +116,23 @@ describe("locale completeness", () => {
         return JSON.stringify(forms) !== JSON.stringify(categories);
       });
       expect(bad, `plural forms in ${locale}`).toEqual([]);
+    });
+
+    it(`${locale} names the OCPP messages of each template description`, () => {
+      // Message names are never translated, so a locale must carry the
+      // template's own `X.req` tokens: a wrong name copied from en shows up
+      // here once the template is fixed (#807).
+      const bad = scenarioTemplates
+        .filter((tpl) => {
+          const text = table[`templates.${tpl.id}.description`];
+          return (
+            text !== undefined &&
+            JSON.stringify(messageNames(text)) !==
+              JSON.stringify(messageNames(tpl.description))
+          );
+        })
+        .map((tpl) => tpl.id);
+      expect(bad, `OCPP message names in ${locale}`).toEqual([]);
     });
 
     it(`${locale} has no empty strings`, () => {

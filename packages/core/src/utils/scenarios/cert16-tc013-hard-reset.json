@@ -1,7 +1,7 @@
 {
   "id": "cert16-tc013-hard-reset",
   "name": "Cert 1.6 Core: TC_013 Hard Reset",
-  "description": "Plug-in → StatusNotification(Preparing) → StartTransaction.req → StatusNotification(Charging); unbounded MeterValue.req; operator sends Reset(type=Hard) from CSMS, CP stops transaction with HardReset reason and reboots.",
+  "description": "Plug-in → StatusNotification(Preparing) → StartTransaction.req → StatusNotification(Charging); unbounded MeterValues.req; operator sends Reset(type=Hard) from CSMS, CP stops transaction with HardReset reason and reboots.",
   "targetType": "connector",
   "targetId": 1,
   "trigger": { "type": "manual" },

@@ -84,7 +84,7 @@
   "settings.curve.title": "Configurer les MeterValue automatiques",
   "settings.curve.enable": "Activer les MeterValue automatiques",
   "settings.curve.canvasHint": "Cliquez pour ajouter des points de contrôle, faites-les glisser pour les déplacer",
-  "settings.curve.stopAtTarget": "Charger jusqu’à batterie pleine (arrêt au SoC cible du VE)",
+  "settings.curve.stopAtTarget": "Charger jusqu’au SoC cible du VE",
   "settings.curve.stopAtTargetHelp": "Ignore le temps et la valeur maximum du graphique. Utilise Paramètres VE → SoC cible. Une fois atteint, la transaction en cours est arrêtée.",
   "settings.curve.presets": "Préréglages",
   "settings.curve.linear": "Linéaire",
@@ -99,7 +99,7 @@
   "settings.page.backToHome": "Retour à l’accueil",
   "settings.page.tagsSaved": "Identifiants de badge RFID enregistrés.",
   "settings.page.resetUnsupported": "Ce runtime ne permet pas de réinitialiser l’état",
-  "settings.page.resetConfirm": "Réinitialiser toutes les données du simulateur ?\n\nLes scénarios, surcharges de configuration, profils de charge, indicateurs de disponibilité, messages en attente, journaux et profils de véhicule enregistrés seront effacés. La page sera ensuite rechargée.",
+  "settings.page.resetConfirm": "Réinitialiser toutes les données du simulateur ?\n\nLes scénarios, surcharges de configuration, profils de charge, indicateurs de disponibilité, messages en attente, journaux et profils de véhicule enregistrés seront effacés. En mode distant, toutes les bornes enregistrées sur le démon sont aussi supprimées. La page sera ensuite rechargée.",
   "settings.page.evSaved": "Paramètres VE par défaut enregistrés. Les nouveaux connecteurs démarreront avec ces valeurs.",
   "settings.page.evReset": "Paramètres VE par défaut réinitialisés aux valeurs intégrées.",
   "settings.page.exported": "Configuration exportée avec succès !",
@@ -162,5 +162,5 @@
   "settings.page.note1": "Les paramètres de chaque borne se configurent depuis la page d’accueil",
   "settings.page.note2": "Cliquez sur l’icône d’engrenage à côté de l’onglet de chaque borne pour modifier ses paramètres",
   "settings.page.note3": "Utilisez le bouton « + Ajouter une borne » pour ajouter de nouvelles bornes",
-  "settings.page.note4": "Cette page sert uniquement à l’import/export de configuration en masse"
+  "settings.page.note4": "Outre l’import/export de configuration en masse, cette page regroupe les réglages communs du simulateur et la réinitialisation des données"
 }

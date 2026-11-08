@@ -1,7 +1,7 @@
 {
   "id": "cert16-tc018-unlock-failure",
   "name": "Cert 1.6 Core: TC_018 Unlock Connector (Failure)",
-  "description": "Session running (StartTransaction.req, Charging, MeterValue.req); pre-arms the connector's next UnlockConnector.req response as UnlockFailed so the CSMS can verify the failure path (e.g. stuck lock), then the session ends normally via StopTransaction.req → StatusNotification(Finishing) → StatusNotification(Available).",
+  "description": "Session running (StartTransaction.req, Charging, MeterValues.req); pre-arms the connector's next UnlockConnector.req response as UnlockFailed so the CSMS can verify the failure path (e.g. stuck lock), then the session ends normally via StopTransaction.req → StatusNotification(Finishing) → StatusNotification(Available).",
   "targetType": "connector",
   "targetId": 1,
   "trigger": { "type": "manual" },

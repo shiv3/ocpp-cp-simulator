@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { ActionNameV16 } from "@ocpp-cp-simulator/ocpp/index";
 
 import { scenarioTemplates } from "./scenarioTemplates";
 import {
@@ -107,6 +108,19 @@ describe("scenarioTemplates registry", () => {
     for (const expectedId of EXPECTED_CERT16_IDS) {
       expect(ids).toContain(expectedId);
     }
+  });
+
+  it("names only OCPP 1.6 actions in cert16 descriptions (#807)", () => {
+    const actions = new Set<string>(Object.values(ActionNameV16));
+    const unknown = scenarioTemplates
+      .filter((t) => t.id.startsWith("cert16-"))
+      .flatMap((t) =>
+        [...t.description.matchAll(/\b([A-Z]\w*)\.(?:req|conf)\b/g)]
+          .map((m) => m[1])
+          .filter((action) => !actions.has(action))
+          .map((action) => `${t.id}: ${action}`),
+      );
+    expect(unknown).toEqual([]);
   });
 
   for (const template of scenarioTemplates) {

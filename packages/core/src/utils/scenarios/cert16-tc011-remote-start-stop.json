@@ -1,7 +1,7 @@
 {
   "id": "cert16-tc011-remote-start-stop",
   "name": "Cert 1.6 Core: TC_011 Remote Start + Remote Stop Transaction",
-  "description": "RemoteStartTransaction.req → StatusNotification(Preparing) → StartTransaction.req → StatusNotification(Charging) with running MeterValue.req; on RemoteStopTransaction.req, StopTransaction.req → StatusNotification(Finishing) → StatusNotification(Available).",
+  "description": "RemoteStartTransaction.req → StatusNotification(Preparing) → StartTransaction.req → StatusNotification(Charging) with running MeterValues.req; on RemoteStopTransaction.req, StopTransaction.req → StatusNotification(Finishing) → StatusNotification(Available).",
   "targetType": "connector",
   "targetId": 1,
   "trigger": { "type": "manual" },

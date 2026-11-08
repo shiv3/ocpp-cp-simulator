@@ -604,6 +604,10 @@ OCPP 1.6 has no `reason` field and is unchanged.
 
 On OCPP 2.0.1 / 2.1 every sample in `MeterValues` and in a `TransactionEvent`'s `meterValue` carries `unitOfMeasure.unit`, except `Power.Factor`, which is unitless. Part 2 Appendices ch. 2 makes `Wh` the default of `unit`, so a sample without one reads as watt-hours: a 50 Hz `Frequency` sample used to be read as 50 Wh (#713). The unit comes from the measurand (`unitOfMeasurandV2x` in `MeterValueBuilder.ts`): `Hz` for `Frequency`, `A` for `Current.*`, `W` / `var` for `Power.Active.*` / `Power.Reactive.*`, `Wh` / `varh` / `VAh` for `Energy.Active.*` / `Energy.Reactive.*` / `Energy.Apparent.*`, `V`, `Percent` for `SoC`. The signed energy register reports `kWh`. OCPP 1.6 output is unchanged: 1.6 has no `Hz`, so `Frequency` stays without a unit there (errata 3.86).
 
+## Measurand lists on 2.x
+
+`SampledDataCtrlr.TxUpdatedMeasurands` and `AlignedDataCtrlr.Measurands` are MemberLists over `MeasurandEnumType`. On OCPP 2.0.1 / 2.1 `SetVariables` checks every member against the enum of the station's version (the vendored Part 3 schema): a member outside it (`Temperature` and `RPM` are 1.6 measurands, `Foo` is nothing) answers `attributeStatus: Rejected` with `attributeStatusInfo.reasonCode: InvalidValue` (B05.FR.07) and keeps the previous list. An empty list is valid. The same list still reaches the station by other routes (persisted state, scenarios, `a sample override), so the 2.x handler also drops measurands outside the enum before it builds a sample and logs a warning: a schema-invalid `MeterValues`or`TransactionEvent` `meterValue`is never sent (#714). OCPP 1.6 is unchanged:`ChangeConfiguration`still accepts`Temperature`and`RPM`. Code: `transport/v201/measurandEnum.ts`, `setVariablesV201.ts`.
+
 ## Clock-aligned meter values (`ClockAlignedDataInterval`)
 
 Every `ClockAlignedDataInterval` seconds a charge point sends one

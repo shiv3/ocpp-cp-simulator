@@ -262,6 +262,7 @@ function deviceModelContext(ctx: V201InboundContext): DeviceModelContext {
   return {
     evseExists: (evse) => v201EvseExists(evse, ctx.chargePoint.connectors),
     targets: ctx.chargePoint.deviceModelTargets,
+    ocppVersion: ctx.chargePoint.ocppVersion,
   };
 }
 

@@ -127,11 +127,7 @@ describe("OCPP 2.0.1 transaction control", () => {
       csms.send([2, "rs-201-4", "GetTransactionStatus", {}]);
 
       const statusResult = await csms.waitForFrame(callResultFrame("rs-201-4"));
-      expect(statusResult).toEqual([
-        3,
-        "rs-201-4",
-        { ongoingIndicator: false, messagesInQueue: false },
-      ]);
+      expect(statusResult).toEqual([3, "rs-201-4", { messagesInQueue: false }]);
     } finally {
       cp.disconnect();
       await csms.stop();

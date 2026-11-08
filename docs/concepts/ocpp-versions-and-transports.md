@@ -295,7 +295,10 @@ Limits:
   `seqNo` counter of a transaction restored after the restart are not
   persisted, so its later events do not continue the replayed ones.
 - `GetTransactionStatus` answers `messagesInQueue: false` whatever the
-  queue holds (E14).
+  queue holds (E14). `ongoingIndicator` is only sent for a request with a
+  `transactionId`: `true` while that transaction has not stopped
+  (E14.FR.02), `false` for a stopped or unknown one (E14.FR.01/03); without
+  an id it is omitted (E14.FR.06, #700).
 
 ## Transaction message retries (OCPP-J 1.6)
 

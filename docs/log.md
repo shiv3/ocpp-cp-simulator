@@ -2414,3 +2414,8 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - A `warn` / `enforce` violation is traced: the inbound CALL's record carries `meta.validation = { mode, errorCode, description }` (a structured `Inbound validation:` line on the `WebSocket` log channel, merged by `logLinesToTrace` and held back by the live `--trace-output` writer for one tick). `inboundValidation` is settable: `--inbound-validation`, `cp.create` / `cp.update` (contracts, HTTP, MCP), persisted in `charge_points.inbound_validation` (schema v25). The wiki states the order with the #594 `NotSupported`.
 - Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#inbound-call-validation-on-ocpp-j-16), [Trace format](concepts/trace-format.md#validation-violations-meta), [CLI](entities/cli.md), [Daemon](entities/daemon.md), [Control plane](concepts/control-plane.md), [State persistence](concepts/state-persistence.md).
+
+## [2026-11-08] ingest | GetTransactionStatus ongoingIndicator (#700)
+
+- 2.0.1 / 2.1 `GetTransactionStatus` omits `ongoingIndicator` when the request has no `transactionId` (E14.FR.06) and sets it from running transactions only: a stopped transaction still attached to its connector is `false` (E14.FR.03). `messagesInQueue` is unchanged.
+- Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md), [GitHub issues](sources/github-issues.md)

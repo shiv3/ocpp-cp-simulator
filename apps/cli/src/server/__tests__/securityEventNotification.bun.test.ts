@@ -10,8 +10,9 @@ import { createRuntimeDeps, errorCodeFrom, runRpc } from "../socketServer";
 
 /**
  * #537: `security_event_notification` on a station that is not connected, on
- * the real path from each surface to the message handler. A 2.x CALL is
- * dropped, and every surface says so; 1.6 keeps answering success.
+ * the real path from each surface to the message handler. A 2.x CALL of a
+ * non-critical type is dropped, and every surface says so; a critical type is
+ * queued (#552) and succeeds; 1.6 keeps answering success.
  */
 function daemon(cpId: string, ocppVersion: string) {
   const bus = new EventBus();
@@ -25,8 +26,11 @@ function daemon(cpId: string, ocppVersion: string) {
 
 const REQUEST = {
   method: "security_event_notification",
-  params: { type: "SettingSystemTime" },
+  params: { type: "InvalidMessages" },
 };
+
+// A04.FR.02 (#552): a critical type is queued while offline, so the call succeeds.
+const CRITICAL = { type: "SettingSystemTime" };
 
 describe("security_event_notification on a station that is not connected", () => {
   const cleanups: (() => void)[] = [];
@@ -65,7 +69,7 @@ describe("security_event_notification on a station that is not connected", () =>
             method: "tools/call",
             params: {
               name: "security_event_notification",
-              arguments: { cpId: "CP-SEC-MCP", type: "SettingSystemTime" },
+              arguments: { cpId: "CP-SEC-MCP", type: "InvalidMessages" },
             },
           }),
         }),
@@ -91,9 +95,63 @@ describe("security_event_notification on a station that is not connected", () =>
       await expect(
         handleJsonCommand(service, {
           command: "security_event_notification",
-          params: { type: "SettingSystemTime" },
+          params: { type: "InvalidMessages" },
         }),
       ).rejects.toThrow("not_connected");
+    });
+
+    it("queues a critical type on the control plane and answers success", async () => {
+      const { registry, deps } = daemon("CP-SEC-RPC-Q", version);
+      cleanups.push(() => registry.shutdownAll());
+
+      await runRpc(deps, {
+        cpId: "CP-SEC-RPC-Q",
+        method: "security_event_notification",
+        params: CRITICAL,
+      });
+    });
+
+    it("queues a critical type on the MCP tool and answers success", async () => {
+      const { registry, deps } = daemon("CP-SEC-MCP-Q", version);
+      cleanups.push(() => registry.shutdownAll());
+
+      const response = await createMcpHandler(deps)(
+        new Request("http://localhost/mcp", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json, text/event-stream",
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "tools/call",
+            params: {
+              name: "security_event_notification",
+              arguments: { cpId: "CP-SEC-MCP-Q", ...CRITICAL },
+            },
+          }),
+        }),
+      );
+      const text = await response.text();
+      const data = text.split("\n").find((line) => line.startsWith("data: "));
+      const body = JSON.parse(data!.slice("data: ".length)) as {
+        result: { isError?: boolean };
+      };
+      expect(body.result.isError).toBeFalsy();
+    });
+
+    it("queues a critical type in JSON Lines mode and succeeds", async () => {
+      const service = new CLIChargePointService(
+        testCpInit({ cpId: "CP-SEC-JSON-Q", ocppVersion: version }),
+        null,
+      );
+      cleanups.push(() => service.cleanup());
+
+      await handleJsonCommand(service, {
+        command: "security_event_notification",
+        params: CRITICAL,
+      });
     });
   });
 

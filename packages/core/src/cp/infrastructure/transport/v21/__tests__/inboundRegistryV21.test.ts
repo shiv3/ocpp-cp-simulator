@@ -78,6 +78,13 @@ const SKIPPED_CP_ACTIONS = [
   "VatNumberValidation",
 ] as const;
 
+function callErrorFor(action: string): unknown {
+  const handler = buildV21InboundRegistry().get(action);
+  expect(handler).toBeDefined();
+  return (handler?.handle({}, {} as never) as V201HandlerResult | undefined)
+    ?.callError;
+}
+
 function responseFor(action: string): unknown {
   const handler = buildV21InboundRegistry().get(action);
   expect(handler).toBeDefined();
@@ -109,12 +116,15 @@ describe("buildV21InboundRegistry", () => {
     );
   });
 
+  it("answers SetDefaultTariff and ChangeTransactionTariff with CALLERROR NotSupported (I07.FR.01, I11.FR.01)", () => {
+    for (const action of ["SetDefaultTariff", "ChangeTransactionTariff"]) {
+      expect(callErrorFor(action)).toMatchObject({ code: "NotSupported" });
+    }
+  });
+
   it("returns Tier-3 acknowledgements for v21 CSMS net-new actions", () => {
     expect(responseFor("AFRRSignal")).toEqual({ status: "Rejected" });
     expect(responseFor("AdjustPeriodicEventStream")).toEqual({
-      status: "Rejected",
-    });
-    expect(responseFor("ChangeTransactionTariff")).toEqual({
       status: "Rejected",
     });
     expect(responseFor("ClearDERControl")).toEqual({
@@ -134,7 +144,6 @@ describe("buildV21InboundRegistry", () => {
     expect(responseFor("SetDERControl")).toEqual({
       status: "NotSupported",
     });
-    expect(responseFor("SetDefaultTariff")).toEqual({ status: "Rejected" });
     expect(responseFor("UpdateDynamicSchedule")).toEqual({
       status: "Rejected",
     });

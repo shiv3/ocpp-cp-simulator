@@ -1026,6 +1026,10 @@ export function parseCreateBody(
     }
     inboundValidation = body.inboundValidation;
   }
+  const reservationAuthorizeIdTag =
+    typeof body.reservationAuthorizeIdTag === "boolean"
+      ? body.reservationAuthorizeIdTag
+      : undefined;
   const tlsCaPath =
     typeof body.tlsCaPath === "string" ? body.tlsCaPath : undefined;
   const tlsCertPath =
@@ -1109,6 +1113,9 @@ export function parseCreateBody(
     cpoName,
     ...(txUpdatedMeterValues !== undefined ? { txUpdatedMeterValues } : {}),
     ...(inboundValidation ? { inboundValidation } : {}),
+    ...(reservationAuthorizeIdTag !== undefined
+      ? { reservationAuthorizeIdTag }
+      : {}),
     tls,
     tlsCaPath,
     tlsCertPath,

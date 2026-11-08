@@ -94,6 +94,7 @@ import {
 } from "../../domain/connector/Transaction";
 import {
   buildSampledValues,
+  toOcppJ16Wire,
   type MeterSampleOverrides,
   type ReadingContext,
 } from "../../domain/connector/MeterValueBuilder";
@@ -426,6 +427,7 @@ export class OCPPMessageHandler {
     this._gate = new InboundCallGate({
       ports: ports16(chargePoint),
       registry: chargePoint.behaviors,
+      silenced: () => this._bootGate.isInboundSilenced(),
       info: (message) => this._logger.info(message, LogType.OCPP),
       warn: (message) => this._logger.warn(message, LogType.OCPP),
     });
@@ -494,6 +496,11 @@ export class OCPPMessageHandler {
    * - Rejected: nothing goes out at all until retryAfter elapses.
    * - Idle (pre-handshake): allow BootNotification only.
    */
+  /** §4.2: CALLs made inside `fn` are the answer to a TriggerMessage. */
+  public runTriggered<T>(fn: () => T): T {
+    return this._bootGate.runTriggered(fn);
+  }
+
   private isCallAllowed(action: OCPPAction): boolean {
     return this._bootGate.isCallAllowed(action);
   }
@@ -790,6 +797,12 @@ export class OCPPMessageHandler {
     let payloadCsr: string;
     if (csr) {
       payloadCsr = csr;
+      // #732: a CertificateSigned is matched against it like a generated one
+      // (a CSR that does not parse is only forwarded).
+      this._chargePoint.certificateStore.recordPendingCsr(
+        "ChargingStationCertificate",
+        csr,
+      );
     } else {
       // Log when a non-default key algorithm is used
       if (quirks.csrKeyAlgorithm === "RSA") {
@@ -939,7 +952,9 @@ export class OCPPMessageHandler {
     const measurands =
       overrides.measurands ??
       this._chargePoint.configuration.meterValuesSampledData();
-    const sampledValue = buildSampledValues(connector, measurands, context);
+    const sampledValue = toOcppJ16Wire(
+      buildSampledValues(connector, measurands, context),
+    );
     const timestamp = overrides.timestamp ?? new Date(this.clock.now());
     // #315: during a transaction, also send the energy register signed.
     // Clock-aligned samples are not signed (no aligned/fiscal records yet).

@@ -1,7 +1,7 @@
 ---
 title: "Source: GitHub issues referenced by the wiki"
 type: source
-summary: Index of the issue / PR numbers that wiki pages cite as the origin of a design decision, so "why" questions can be traced back.
+summary: Archive, frozen 2026-11-08. Index of the issue / PR numbers that wiki pages cited as the origin of a design decision; newer provenance is in git.
 sources:
   - https://github.com/shiv3/ocpp-cp-simulator/issues
 related:
@@ -11,7 +11,12 @@ related:
 updated: 2026-11-08
 ---
 
-# Source: GitHub issues referenced by the wiki
+# Source: GitHub issues referenced by the wiki (archive)
+
+> **Archived: no longer updated as of 2026-11-08.** Do not add rows. Pages cite
+> issue numbers inline for provenance; to trace a newer decision use
+> `git log --grep '#N'`, `git log -- docs/`, the PR that closed the issue, or the
+> branch name `<type>/<issue number>-<slug>`.
 
 All under https://github.com/shiv3/ocpp-cp-simulator unless noted.
 
@@ -159,6 +164,4 @@ All under https://github.com/shiv3/ocpp-cp-simulator unless noted.
 | #600                                             | Cited as a source of the [charger engine](../concepts/charger-engine.md) design; the wiki does not record what it asks (read the issue)                                                                                          |
 | #618                                             | Cited as a source of the [charger engine](../concepts/charger-engine.md) design; the wiki does not record what it asks (read the issue)                                                                                          |
 | #635                                             | `Reset` `OnIdle` on 2.x: the pending list lives on `ChargePoint`, the default reset schedules it ([migration](../analyses/charger-engine-migration.md#reset-onidle-after-the-merge-of-main))                                     |
-| #696                                             | 2.x `StopTxOnInvalidId` false: the energy delivery stops (SuspendedEVSE, `MaxEnergyOnInvalidId` allowance), the transaction stays open ([charging sessions](../concepts/charging-sessions.md#rejections-and-failed-starts-447))  |
-| #736                                             | 1.6 `StopTransactionOnInvalidId` false: the connector goes to `SuspendedEVSE` and the register stops; `MaxEnergyOnInvalidId` allowance ([charging sessions](../concepts/charging-sessions.md#rejections-and-failed-starts-447))  |
 | juherr/open-ev-directory#10 / #14                | Open EV Directory: individual API keys, `Authorization: Bearer` (shipped) / self-service key page (open: keys are operator-provisioned)                                                                                          | [Open EV Directory](../entities/open-ev-directory.md)                                                                                                                                                                                                                                                                                                                                |

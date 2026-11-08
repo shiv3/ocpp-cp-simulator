@@ -381,6 +381,30 @@ describe("cp.scenario.run (#486)", () => {
   });
 });
 
+describe("sessions.list fleet-wide (#489)", () => {
+  const params = METHODS["sessions.list"].params;
+
+  it("accepts no cpId, a selector and a start-time range", () => {
+    expect(params.safeParse({}).success).toBe(true);
+    expect(
+      params.safeParse({
+        labels: { site: "s1" },
+        outcomes: ["failed"],
+        startedFrom: "2026-11-08T00:00:00Z",
+        startedTo: "2026-11-08T09:00:00+09:00",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("refuses an empty cpId and an instant without a zone", () => {
+    expect(params.safeParse({ cpId: "" }).success).toBe(false);
+    expect(params.safeParse({ startedFrom: "2026-11-08" }).success).toBe(false);
+    expect(params.safeParse({ startedTo: "2026-11-08T00:00:00" }).success).toBe(
+      false,
+    );
+  });
+});
+
 describe("behavior assignment", () => {
   it.each(["cp.create", "cp.update"] as const)(
     "%s takes behavior ids",

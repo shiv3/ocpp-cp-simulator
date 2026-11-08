@@ -306,12 +306,20 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   private readonly _certificateSigning: V201CertificateSigning = {
     requestSignature: (use) => this.requestSignature(use),
     requestCombinedSignature: () => this.sendSignCertificate(),
+    certificateStored: (use) => {
+      if (use === "ChargingStationCertificate") {
+        // #564 A02.FR.08: the next connection presents it, whatever becomes
+        // of the answer. The reconnect of an open one waits for the answer.
+        void this._chargePoint.adoptRenewedClientCertificate();
+      }
+    },
     certificateInstalled: (use) => {
       this._signBackoff.stop(use);
       if (V2G_CERTIFICATE_USES.includes(use)) {
         this.requestCertificateStatus([use]);
       } else if (use === "ChargingStationCertificate") {
-        // #537 A02.FR.08: switch to it as the TLS client certificate.
+        // #537 A02.FR.08: the answer is written; reconnect with it as the
+        // TLS client certificate.
         void this._chargePoint.useRenewedClientCertificate();
       }
     },

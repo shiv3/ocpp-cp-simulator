@@ -409,16 +409,67 @@ describe.each(VERSIONS)(
     describe("the certificateInstalled notification", () => {
       function signingContext(store: CertificateStore, maxChainSize = 10000) {
         const certificateInstalled = vi.fn();
+        const certificateStored = vi.fn();
         const ctx: V201InboundContext = {
           ...context(store, 10, maxChainSize).ctx,
           certificateSigning: {
             requestSignature: vi.fn(),
             requestCombinedSignature: vi.fn(),
+            certificateStored,
             certificateInstalled,
           },
         };
-        return { ctx, certificateInstalled };
+        return { ctx, certificateInstalled, certificateStored };
       }
+
+      // #564: the chain is handed on when it is stored, not when the answer
+      // is written, which a dropped answer never reaches.
+      it("reports a stored chain before its answer is written, and none that was rejected", async () => {
+        const store = new CertificateStore();
+        const root = await selfSignedRoot("01", "Root");
+        const csr = await store.generateNewCsr("CP", "CPO");
+        const { ctx, certificateStored } = signingContext(store);
+
+        const accepted = await handlers.CertificateSigned(
+          {
+            certificateChain: await leafForCsr("02", csr, root),
+            certificateType: "ChargingStationCertificate",
+          },
+          ctx,
+        );
+
+        expect(accepted.response).toEqual({ status: "Accepted" });
+        expect(certificateStored).toHaveBeenCalledExactlyOnceWith(
+          "ChargingStationCertificate",
+        );
+
+        certificateStored.mockClear();
+        const rejected = await handlers.CertificateSigned(
+          { certificateChain: "not a certificate" },
+          ctx,
+        );
+        expect(rejected.response).toEqual({ status: "Rejected" });
+        expect(certificateStored).not.toHaveBeenCalled();
+      });
+
+      // #553 + #564: a combined certificate (certificateType omitted) is the
+      // Charging Station certificate, so it is handed on like one.
+      it("reports a combined certificate as the Charging Station certificate", async () => {
+        const store = new CertificateStore();
+        const root = await selfSignedRoot("01", "Root");
+        const csr = await store.generateNewCsr("CP", "CPO");
+        const { ctx, certificateStored } = signingContext(store);
+
+        const accepted = await handlers.CertificateSigned(
+          { certificateChain: await leafForCsr("02", csr, root) },
+          ctx,
+        );
+
+        expect(accepted.response).toEqual({ status: "Accepted" });
+        expect(certificateStored).toHaveBeenCalledExactlyOnceWith(
+          "ChargingStationCertificate",
+        );
+      });
 
       it("comes after an Accepted chain's answer, not before", async () => {
         const store = new CertificateStore();

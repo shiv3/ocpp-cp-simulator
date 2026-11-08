@@ -157,6 +157,8 @@ function setup(version: Version) {
     hasResponseOverride: vi.fn(() => false),
     consumeResponseOverride: vi.fn(() => null),
     clearResponseOverride: vi.fn(),
+    adoptRenewedClientCertificate: vi.fn(() => Promise.resolve()),
+    useRenewedClientCertificate: vi.fn(() => Promise.resolve()),
   } as unknown as ChargePoint;
   const logger = {
     info: vi.fn(),

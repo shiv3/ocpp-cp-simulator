@@ -527,6 +527,15 @@ connected.
 - A station that is not connected then (reconnect back-off, a simulated
   outage, a manual disconnect) does not reconnect for it: it presents the
   renewed certificate at its next connection, on that connection's timing.
+- The renewed certificate is handed to the transport as soon as the chain is
+  stored, as the next connection's certificate, before the `CertificateSigned`
+  answer is written (#564). Only the reconnect of an open connection waits for
+  the answer, so the answer goes out on the connection that received the
+  request. An answer that never reaches the wire (network-simulation latency
+  holds it and the operator disconnects) therefore does not lose the switch:
+  the next connect presents the renewed certificate, once. The reconnect is
+  skipped when the open connection already presents it, and handing the same
+  identity over twice changes nothing, so no connect starts another switch.
 - A connected station first waits, up to 60 s, until no `TransactionEvent`
   awaits its write (network-simulation latency can hold it), its answer or
   its resend (`MessageAttemptInterval`, E13). The close would not lose

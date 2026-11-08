@@ -65,6 +65,7 @@ import {
   isOcppVersion,
   SUPPORTED_OCPP_VERSIONS,
 } from "@ocpp-cp-sim/core/cp/domain/types/OcppVersion";
+import { DEFAULT_BOOTSTRAP_PACING } from "./server/bootstrapPacing";
 import { tlsKeyPermissionWarning } from "./tlsKeyPermissions";
 
 /** Result of a `dist/` lookup: where it was found (if at all) and every
@@ -196,6 +197,11 @@ export function parseArgs(argv: string[]): CLIOptions {
   let cpId: string | null = null;
   let cpCount = 1;
   let cpIdPattern: string | null = null;
+  // Fleet startup pacing (#610); `undefined` keeps the built-in default.
+  let bootstrapConcurrency: string | undefined;
+  let startDelay: string | undefined;
+  let startJitter: string | undefined;
+  let startSeed: string | undefined;
   const labelEntries: Array<[string, string]> = [];
   let metrics = false;
   let metricsNoAuth = false;
@@ -312,6 +318,22 @@ export function parseArgs(argv: string[]): CLIOptions {
         break;
       case "--cp-count":
         cpCount = parseInt(next ?? "1", 10);
+        i++;
+        break;
+      case "--bootstrap-concurrency":
+        bootstrapConcurrency = next ?? "";
+        i++;
+        break;
+      case "--start-delay":
+        startDelay = next ?? "";
+        i++;
+        break;
+      case "--start-jitter":
+        startJitter = next ?? "";
+        i++;
+        break;
+      case "--start-seed":
+        startSeed = next ?? "";
         i++;
         break;
       case "--cp-id-pattern":
@@ -1063,6 +1085,79 @@ export function parseArgs(argv: string[]): CLIOptions {
     );
     process.exit(1);
   }
+  // Pacing flags: a malformed number is refused rather than turned into NaN
+  // (which would start the whole fleet at once, silently), and the flags need
+  // a server mode and a bootstrapped fleet or they would be accepted and
+  // ignored (#610).
+  const pacingFlags: Array<[string, string | undefined, number, boolean]> = [
+    ["--bootstrap-concurrency", bootstrapConcurrency, 1, false],
+    ["--start-delay", startDelay, 0, false],
+    ["--start-jitter", startJitter, 0, false],
+    ["--start-seed", startSeed, 0, true],
+  ];
+  const pacingValues: Record<string, number> = {};
+  for (const [flag, raw, min, allowNegative] of pacingFlags) {
+    if (raw === undefined) continue;
+    const value = /^-?\d+$/.test(raw) ? Number(raw) : NaN;
+    if (!Number.isSafeInteger(value) || (!allowNegative && value < min)) {
+      process.stderr.write(
+        `Error: ${flag} must be ${
+          allowNegative
+            ? "an integer"
+            : min === 1
+              ? "a positive integer"
+              : "a non-negative integer (milliseconds)"
+        }\n`,
+      );
+      process.exit(1);
+    }
+    pacingValues[flag] = value;
+    if (isClientMode) {
+      // `--http-port` satisfies the server-mode check below, so without this
+      // `--http-port 9700 --send … --start-delay 10` would be accepted and
+      // ignored, the hole --watch (#314) and --label (#472) already close.
+      process.stderr.write(
+        `Error: ${flag} cannot be combined with a client mode (--send, --stop or --events); it paces the charge points a server starts\n`,
+      );
+      process.exit(1);
+    }
+    if (!isServerMode || !cpId) {
+      process.stderr.write(
+        `Error: ${flag} needs a server mode (--daemon, --http-port or --web-console) and --cp-id\n`,
+      );
+      process.exit(1);
+    }
+  }
+  if (startSeed !== undefined && startJitter === undefined) {
+    process.stderr.write(
+      "Error: --start-seed has no effect without --start-jitter\n",
+    );
+    process.exit(1);
+  }
+  // setTimeout fires after 1 ms when its delay exceeds 2^31-1 ms (about 24.8
+  // days), which would silently collapse the schedule for the later charge
+  // points, so the last scheduled offset must stay below that.
+  const MAX_TIMER_MS = 2 ** 31 - 1;
+  const lastOffsetMs =
+    (Math.max(cpCount, 1) - 1) * (pacingValues["--start-delay"] ?? 0) +
+    (pacingValues["--start-jitter"] ?? 0);
+  if (lastOffsetMs > MAX_TIMER_MS) {
+    process.stderr.write(
+      `Error: (--cp-count - 1) × --start-delay + --start-jitter must not exceed ${MAX_TIMER_MS} ms (about 24.8 days), got ${lastOffsetMs}\n`,
+    );
+    process.exit(1);
+  }
+  const bootstrapPacing =
+    Object.keys(pacingValues).length === 0
+      ? undefined
+      : {
+          concurrency:
+            pacingValues["--bootstrap-concurrency"] ??
+            DEFAULT_BOOTSTRAP_PACING.concurrency,
+          startDelayMs: pacingValues["--start-delay"] ?? 0,
+          startJitterMs: pacingValues["--start-jitter"] ?? 0,
+          startSeed: pacingValues["--start-seed"] ?? 0,
+        };
   if (labels && !isServerMode) {
     // Labels are read by `cp.list` and the console only; the standalone REPL
     // / JSON paths have neither, so the flag would be accepted and ignored.
@@ -1318,6 +1413,7 @@ export function parseArgs(argv: string[]): CLIOptions {
     cpId,
     cpCount,
     cpIdPattern,
+    bootstrapPacing,
     labels,
     metrics,
     metricsNoAuth,
@@ -1453,6 +1549,15 @@ Options:
   --cp-id-pattern <tpl>    Id template used with --cp-count (default:
                            <cp-id>{n:03}). {n} is the index, {n:03} zero-pads
                            it.
+  --bootstrap-concurrency <n>
+                           Server mode: charge points started at once
+                           (default: 8).
+  --start-delay <ms>       Server mode: milliseconds between the scheduled
+                           starts of consecutive charge points (default: 0).
+  --start-jitter <ms>      Server mode: push each start back by a seeded
+                           random 0..ms-1 (default: 0).
+  --start-seed <n>         Server mode: seed of --start-jitter (default: 0); the same seed
+                           gives the same schedule.
   --label <key=value>      Server mode: label every bootstrapped charge point.
                            Repeatable; split on the first '='. Requires
                            --cp-id. A charge point restored from --state-db
@@ -2056,6 +2161,7 @@ async function main(): Promise<void> {
       bootstrap: buildBootstrap(options),
       bootstrapCount: options.cpCount,
       bootstrapIdPattern: options.cpIdPattern ?? undefined,
+      bootstrapPacing: options.bootstrapPacing,
       soapCallbackUrlExplicit: options.soapCallbackUrlExplicit,
       soapPublicBaseUrl: options.soapPublicBaseUrl,
       soapPath: options.soapPath,

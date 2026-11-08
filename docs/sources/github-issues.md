@@ -1,7 +1,7 @@
 ---
 title: "Source: GitHub issues referenced by the wiki"
 type: source
-summary: Index of the issue / PR numbers that wiki pages cite as the origin of a design decision, so "why" questions can be traced back.
+summary: Archive, frozen 2026-11-08. Index of the issue / PR numbers that wiki pages cited as the origin of a design decision; newer provenance is in git.
 sources:
   - https://github.com/shiv3/ocpp-cp-simulator/issues
 related:
@@ -11,7 +11,12 @@ related:
 updated: 2026-11-08
 ---
 
-# Source: GitHub issues referenced by the wiki
+# Source: GitHub issues referenced by the wiki (archive)
+
+> **Archived: no longer updated as of 2026-11-08.** Do not add rows. Pages cite
+> issue numbers inline for provenance; to trace a newer decision use
+> `git log --grep '#N'`, `git log -- docs/`, the PR that closed the issue, or the
+> branch name `<type>/<issue number>-<slug>`.
 
 All under https://github.com/shiv3/ocpp-cp-simulator unless noted.
 
@@ -158,8 +163,5 @@ All under https://github.com/shiv3/ocpp-cp-simulator unless noted.
 | #594                                             | 1.6 SetChargingProfile replaces by `stackLevel` + purpose too; TxProfile needs the active transaction; `NotSupported` without SmartCharging                                                                                      | [OCPP versions & transports](../concepts/ocpp-versions-and-transports.md#ocpp-16-setchargingprofile)                                                                                                                                                                                                                                                                                 |
 | #600                                             | Cited as a source of the [charger engine](../concepts/charger-engine.md) design; the wiki does not record what it asks (read the issue)                                                                                          |
 | #618                                             | Cited as a source of the [charger engine](../concepts/charger-engine.md) design; the wiki does not record what it asks (read the issue)                                                                                          |
-| #620                                             | Host allowlist, trusted proxies, TLS requirement and per-IP rate limit (`--allowed-host`, `--trusted-proxy`, `--require-tls`, `--rate-limit-per-ip`)                                                                             | [Access control](../concepts/access-control.md#hardening-for-shared-environments)                                                                                                                                                                                                                                                                                                    |
-| #621                                             | `--log-level`, `--log-file`, size / daily rotation with a retention count                                                                                                                                                        | [Log format](../concepts/log-format.md#level-and-file-output)                                                                                                                                                                                                                                                                                                                        |
-| #622                                             | `--shutdown-stop-transactions` / `--shutdown-wait-ms`, `--no-connect-restored`, `--cp-bulk-wait-ms`; e2e for StopTransaction on SIGTERM                                                                                          | [Daemon](../entities/daemon.md#shutdown-and-restore)                                                                                                                                                                                                                                                                                                                                 |
 | #635                                             | `Reset` `OnIdle` on 2.x: the pending list lives on `ChargePoint`, the default reset schedules it ([migration](../analyses/charger-engine-migration.md#reset-onidle-after-the-merge-of-main))                                     |
 | juherr/open-ev-directory#10 / #14                | Open EV Directory: individual API keys, `Authorization: Bearer` (shipped) / self-service key page (open: keys are operator-provisioned)                                                                                          | [Open EV Directory](../entities/open-ev-directory.md)                                                                                                                                                                                                                                                                                                                                |

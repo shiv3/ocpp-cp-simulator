@@ -66,6 +66,11 @@ import {
 } from "./startupScenarioRows";
 import { scenarioInstanceId } from "../scenarioInstanceId";
 import { LEGACY_STARTUP_SOURCE_PREFIX } from "@ocpp-cp-sim/core/cp/domain/persistence/legacyStartupInstances";
+import {
+  DEFAULT_BOOTSTRAP_PACING,
+  forEachPaced,
+  type BootstrapPacing,
+} from "./bootstrapPacing";
 import { getTemplateById } from "@ocpp-cp-sim/core/utils/scenarioTemplates";
 import * as path from "path";
 
@@ -103,6 +108,11 @@ export interface ServerOptions {
    */
   readonly bootstrapCount?: number;
   readonly bootstrapIdPattern?: string;
+  /**
+   * How the fleet starts: concurrency, delay between starts and seeded jitter
+   * (#610). Absent: 8 at a time with no delay, as before.
+   */
+  readonly bootstrapPacing?: BootstrapPacing;
   /**
    * SOAP callback inputs, kept unresolved so a fleet can derive one address
    * per charge point. `bootstrap.soapCallbackUrl` is already resolved for the
@@ -845,45 +855,60 @@ export async function startServer(
   // Bounded rather than unbounded: a fleet all dialling at once is a thundering
   // herd at the CSMS, and the point here is only that one slow connect must not
   // block the next.
-  await forEachBounded(
-    started,
-    BOOTSTRAP_CONCURRENCY,
-    async ({ svc, init }) => {
-      // Install BEFORE the dial, start after (#314). The two halves used to be
-      // one call placed after `connect()`, and with a restored `--state-db`
-      // that left the boot gate auto-starting the *previous* boot's copy of
-      // this very scenario: since a generated instance's id is stable, the
-      // load that followed found its own id already active, left the stale
-      // executor running, and never ran the current graph. Installing first
-      // makes what the gate auto-starts the configured definition, and gives
-      // `--watch`'s registration a chance to reconcile the captured copy
-      // against disk while nothing is in flight to defer the result behind.
-      const installed = opts.startupScenario
-        ? installStartupScenario(
-            svc,
-            opts.startupScenario,
-            init.connectors,
-            fileReload,
-            database,
-            // The same object `startupClaimedByCp` was built from: the claim
-            // and the load must describe the same bytes (#314).
-            startupScenarioSource,
-          )
-        : [];
-      if (opts.autoConnect) {
-        serverLog(`Connecting ${init.cpId} to CSMS...`);
-        try {
-          await svc.connect();
-          serverLog(`Connected ${init.cpId}.`);
-        } catch (err) {
-          serverLog(
-            `Connection failed for ${init.cpId}: ${err instanceof Error ? err.message : err}`,
-          );
-        }
+  const pacing = opts.bootstrapPacing ?? DEFAULT_BOOTSTRAP_PACING;
+  if (opts.bootstrapPacing) {
+    serverLog(
+      `Startup pacing: ${pacing.concurrency} at a time, ${pacing.startDelayMs} ms between starts, ` +
+        `jitter 0-${pacing.startJitterMs} ms (seed ${pacing.startSeed}) (#610)`,
+    );
+  }
+  await forEachPaced(started, pacing, async ({ svc, init }) => {
+    // The service captured at registration may be gone by now: the item waited
+    // for a concurrency slot and, with `--start-delay`, for its scheduled
+    // offset (minutes, not milliseconds). A `cp.delete` has already torn it
+    // down, and a `cp.update` registered a replacement under the same id, so
+    // dialling this one would connect a charge point nobody owns or leave two
+    // connections for one cpId (#610).
+    if (registry.get(init.cpId) !== svc) {
+      serverLog(
+        `Skipping startup of ${init.cpId}: it was deleted or replaced before its turn`,
+      );
+      return;
+    }
+    // Install BEFORE the dial, start after (#314). The two halves used to be
+    // one call placed after `connect()`, and with a restored `--state-db`
+    // that left the boot gate auto-starting the *previous* boot's copy of
+    // this very scenario: since a generated instance's id is stable, the
+    // load that followed found its own id already active, left the stale
+    // executor running, and never ran the current graph. Installing first
+    // makes what the gate auto-starts the configured definition, and gives
+    // `--watch`'s registration a chance to reconcile the captured copy
+    // against disk while nothing is in flight to defer the result behind.
+    const installed = opts.startupScenario
+      ? installStartupScenario(
+          svc,
+          opts.startupScenario,
+          init.connectors,
+          fileReload,
+          database,
+          // The same object `startupClaimedByCp` was built from: the claim
+          // and the load must describe the same bytes (#314).
+          startupScenarioSource,
+        )
+      : [];
+    if (opts.autoConnect) {
+      serverLog(`Connecting ${init.cpId} to CSMS...`);
+      try {
+        await svc.connect();
+        serverLog(`Connected ${init.cpId}.`);
+      } catch (err) {
+        serverLog(
+          `Connection failed for ${init.cpId}: ${err instanceof Error ? err.message : err}`,
+        );
       }
-      await startStartupScenario(svc, installed);
-    },
-  );
+    }
+    await startStartupScenario(svc, installed);
+  });
 
   finishWatchSetup(fileReload, serverLog);
   return running;
@@ -945,26 +970,6 @@ function logWatchSummary(
     `Watch: enabled — re-reading ${paths.length} loaded file(s) on change (#314)` +
       (paths.length > 0 ? `: ${paths.join(", ")}` : ""),
   );
-}
-
-/** How many bootstrap charge points connect at once. */
-const BOOTSTRAP_CONCURRENCY = 8;
-
-async function forEachBounded<T>(
-  items: readonly T[],
-  limit: number,
-  run: (item: T) => Promise<void>,
-): Promise<void> {
-  let next = 0;
-  const workers = Array.from(
-    { length: Math.min(limit, items.length) },
-    async () => {
-      for (let i = next++; i < items.length; i = next++) {
-        await run(items[i]!);
-      }
-    },
-  );
-  await Promise.all(workers);
 }
 
 /**

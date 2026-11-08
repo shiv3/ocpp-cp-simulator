@@ -881,7 +881,10 @@ state the last `boot_notification` gave, not fall back to Booting. The
 converse also holds: a second `boot_notification` on the same socket, with no
 `disconnected` / `connected` between, is a real boot — a retry after
 `Rejected` and a CSMS `TriggerMessage` for `BootNotification` both re-send
-`BootNotification.req` on the open socket. Do not infer registration from
+`BootNotification.req` on the open socket. On 2.0.1 / 2.1 a
+`TriggerMessage(BootNotification)` after an `Accepted` boot is answered
+`Rejected` and sends nothing (F06.FR.17, #690); it stays `Accepted` while the
+boot is `Pending`, `Rejected` or not yet answered. Do not infer registration from
 `status_change`: it fires twice per accepted boot and on changes that are not
 boots at all (#395).
 

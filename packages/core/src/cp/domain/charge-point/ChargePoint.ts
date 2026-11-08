@@ -3,6 +3,12 @@ import type {
   FirmwareStatus,
   UploadLogStatus,
 } from "../types/FirmwareLogStatus";
+import {
+  isActionDisabled,
+  isTriggerTargetSupported,
+  type ChargePointCapabilityProfile,
+} from "./CapabilityProfile";
+import { translatesCsmsActionNames } from "../types/csmsActionNames";
 import { EventEmitter } from "../../shared/EventEmitter";
 import { setTimeoutAt } from "../../shared/timers";
 import { realClock } from "../../shared/clock";
@@ -78,7 +84,12 @@ import type {
   BootNotification,
   ChargePointStatus,
 } from "../types/OcppTypes";
-import { isOcpp2Version, isSoapVersion, OCPP_2_1 } from "../types/OcppVersion";
+import {
+  isOcpp2Version,
+  isSoapVersion,
+  OCPP_2_0_1,
+  OCPP_2_1,
+} from "../types/OcppVersion";
 import { DeviceModelTargets } from "./DeviceModelTargets";
 import {
   SOAP_OPERATION_NAMES,
@@ -119,6 +130,7 @@ import {
 import type { LocalOnlyDecision } from "../auth/LocalAuthorizationResolver";
 import {
   ChargingProfileStore,
+  type ApplyChargingProfileOptions,
   type ProfileRemoveCriteria,
 } from "./ChargingProfileStore";
 import type { ActiveChargingProfile } from "../connector/Connector";
@@ -211,6 +223,63 @@ export interface StopTransactionOptions {
   /** OCPP 2.x Ended-event stoppedReason named explicitly (#335); when
    *  absent the encoder derives it from the 1.6 `reason`. */
   stoppedReason?: TransactionStoppedReason;
+  /** The instant the transaction ended when it is not now: the power loss a
+   *  recovery reports after the reboot (#455). */
+  stoppedAt?: Date;
+}
+
+/** What survives a power loss (#455): the instant and the transactions that
+ *  were running, the persisted state a recovery works from. */
+export interface PowerLossRecord {
+  at: Date;
+  transactions: { connectorId: number; transactionId: number }[];
+}
+
+/**
+ * How a restored station treats the transactions the power loss interrupted
+ * (#455).
+ * - `resume` keeps them running (1.6 leaves this to the implementation; 2.1
+ *   E17.FR.10-14 requires it within `TxResumptionTimeout`).
+ * - `end` reports them ended with reason `PowerLoss` (1.6 §7.36 StopTransaction
+ *   reasons; 2.x E17.FR.20-21).
+ */
+export type PowerRecovery = "resume" | "end";
+
+export interface PowerRestoreOptions {
+  /** Default: `resume` on 1.x and 2.1, `end` on 2.0.1 (no `TxResumed`). */
+  transactions?: PowerRecovery;
+  /** OCPP 2.1 `TxCtrlr.TxResumptionTimeout` stand-in: a transaction resumes
+   *  only when the outage lasted at most this many seconds. Absent or 0
+   *  means the station does not resume (E17.FR.01, TC_E_114/115). */
+  txResumptionTimeoutSeconds?: number;
+}
+
+/** `restoreAfterMs`: power returns by itself after this long (the outage
+ *  duration); without it the station stays off until {@link ChargePoint.restorePower}. */
+export interface PowerLossOptions extends PowerRestoreOptions {
+  restoreAfterMs?: number;
+}
+
+export interface PowerRestoreResult {
+  outageMs: number;
+  recovery: PowerRecovery | "none";
+  transactions: number;
+}
+
+/** `powerLoss` while off, `powerRestore` while on. */
+export class PowerStateError extends Error {
+  constructor(
+    readonly code:
+      "already_powered_off" | "not_powered_off" | "unsupported_transport",
+  ) {
+    super(
+      code === "already_powered_off"
+        ? "The charge point is already without power"
+        : code === "unsupported_transport"
+          ? "Power loss is not simulated for OCPP-S (SOAP) charge points"
+          : "The charge point has power",
+    );
+  }
 }
 
 /**
@@ -264,7 +333,19 @@ export interface ChargePointSimulationOptions {
 export type ChargePointResetType = "Hard" | "Soft";
 type ChargePointResetSource = "ocpp-call" | "ocpp15-soap";
 
+/**
+ * What an OCPP 1.6J charge point does with an inbound CALL whose payload
+ * breaks the request schema (#593): `off` skips the check, `warn` logs it and
+ * runs the handler anyway, `enforce` answers a CALLERROR (OCPP-J 1.6 §4.2.3).
+ */
+export type InboundValidationMode = "off" | "warn" | "enforce";
+export const DEFAULT_INBOUND_VALIDATION: InboundValidationMode = "warn";
+
 export interface ChargePointTransportOptions {
+  /** Static capability profile (#618). Absent: nothing is disabled. */
+  readonly capabilityProfile?: ChargePointCapabilityProfile;
+  /** OCPP 1.6J only. Default `warn`. */
+  readonly inboundValidation?: InboundValidationMode;
   readonly centralSystemUrl?: string;
   readonly soapCallbackUrl?: string;
   readonly soapPath?: string;
@@ -319,6 +400,7 @@ export class ChargePoint {
   /** #537: stops following the certificate store (dispose). */
   private _unwatchClientIdentity: (() => void) | null = null;
   private readonly _idTagPool: IdTagPool | null;
+  private _bootAccepted = false;
   private readonly _outbox: Outbox;
   private readonly _heartbeat: HeartbeatService;
   private readonly _clockAligned: ClockAlignedMeterScheduler;
@@ -329,6 +411,15 @@ export class ChargePoint {
   private readonly _reservationManager: ReservationManager;
   /** #597: Reset OnIdle requests answered `Scheduled`, each run once its transactions end. */
   private _pendingResetsOnIdle: { evseId?: number }[] = [];
+  /** #455: set while the station is without power. */
+  private _powerLoss: PowerLossRecord | null = null;
+  /** #455: the recovery to run once the next BootNotification is Accepted. */
+  private _powerRestoreTimer: TimerHandle | null = null;
+  private _powerRecovery: {
+    loss: PowerLossRecord;
+    options: PowerRestoreOptions;
+    restoredAt: Date;
+  } | null = null;
   private readonly _localAuthListManager: LocalAuthListManager;
   private readonly _authorization: StationAuthorization;
   // §3.13.3: profiles installed with connectorId=0 (ChargePointMaxProfile,
@@ -404,6 +495,37 @@ export class ChargePoint {
     manualRuleIds: string[];
   } | null = null;
 
+  private _inboundValidation: InboundValidationMode;
+  private readonly _capabilityProfile: ChargePointCapabilityProfile | undefined;
+
+  /** See {@link ChargePointCapabilityProfile}. */
+  get capabilityProfile(): ChargePointCapabilityProfile | undefined {
+    return this._capabilityProfile;
+  }
+
+  /** Is the inbound `action` disabled by the capability profile (#618)? */
+  isActionDisabled(action: string): boolean {
+    return isActionDisabled(
+      this._capabilityProfile,
+      action,
+      translatesCsmsActionNames(this._ocppVersion),
+    );
+  }
+
+  /** May TriggerMessage request `target` under the capability profile (#618)? */
+  isTriggerTargetSupported(target: string): boolean {
+    return isTriggerTargetSupported(this._capabilityProfile, target);
+  }
+
+  /** See {@link InboundValidationMode}. Read on every inbound CALL. */
+  get inboundValidation(): InboundValidationMode {
+    return this._inboundValidation;
+  }
+
+  setInboundValidation(mode: InboundValidationMode): void {
+    this._inboundValidation = mode;
+  }
+
   constructor(
     private readonly _id: string,
     private readonly _bootNotification: BootNotification,
@@ -437,6 +559,9 @@ export class ChargePoint {
           : new RngStreams(simulation.seed);
     this._autoMeterValueSetting = autoMeterValueSetting;
     this._transportUrl = transportOptions.centralSystemUrl ?? wsUrl;
+    this._inboundValidation =
+      transportOptions.inboundValidation ?? DEFAULT_INBOUND_VALIDATION;
+    this._capabilityProfile = transportOptions.capabilityProfile;
     this._logger.setCpId(this._id);
     this._logRepository = new LogRepository(this._database);
     // #456: installed certificates survive a restart when state persists.
@@ -1183,6 +1308,12 @@ export class ChargePoint {
     return this._status;
   }
 
+  /** Whether the Central System's latest BootNotification answer was
+   *  `Accepted` and the connection has not closed since (#603). */
+  get bootAccepted(): boolean {
+    return this._bootAccepted;
+  }
+
   /** Whether the OCPP WebSocket is currently open OR mid-handshake. Used
    *  by LocalChargePointService.restoreConnections to avoid issuing a
    *  second connect() against a CP whose first socket is still in its
@@ -1249,6 +1380,23 @@ export class ChargePoint {
    */
   nextIdTag(connectorId = 0): string | null {
     return this._idTagPool?.next(connectorId) ?? null;
+  }
+
+  /**
+   * The pool's tags and distribution (#603), for traffic that keeps its own
+   * seeded cursor instead of advancing the one `nextIdTag` shares. `null`
+   * without a pool.
+   */
+  idTagPoolInfo(): {
+    tags: readonly string[];
+    distribution: IdTagDistribution;
+  } | null {
+    return this._idTagPool
+      ? {
+          tags: this._idTagPool.list(),
+          distribution: this._idTagPool.distributionPolicy,
+        }
+      : null;
   }
 
   /**
@@ -1359,6 +1507,13 @@ export class ChargePoint {
     return this._authorization;
   }
 
+  /** Queue the transaction-related CALL written but not answered, so it is
+   *  delivered after the next boot (a graceful shutdown that stopped waiting).
+   *  Returns whether one was queued. */
+  queueUnansweredTransactionCall(): boolean {
+    return this._outbox.queueUnansweredTransactionCall();
+  }
+
   /** Whether the CSMS is reachable now (#452 offline authorization). A SOAP
    *  charge point has no connection state and counts as online, which
    *  keeps its local start flow as it was. */
@@ -1397,7 +1552,9 @@ export class ChargePoint {
 
   /**
    * Install a profile on the station store (`connectorId` 0) or on its
-   * connector, replacing any profile with the same id in that scope, and
+   * connector, replacing any profile with the same id in that scope (and,
+   * with `options.replaceSameSlot`, the one with the same stackLevel and
+   * purpose), and
    * emit `chargingProfileApplied`. Validation is the caller's job.
    *
    * @returns `false`, changing nothing, when the connector does not exist.
@@ -1405,19 +1562,33 @@ export class ChargePoint {
   applyChargingProfile(
     profile: ActiveChargingProfile,
     source: ChargingProfileSource,
+    options: ApplyChargingProfileOptions = {},
   ): boolean {
-    let replaced: boolean;
+    const idsBefore = (list: readonly ActiveChargingProfile[]) =>
+      list.map((p) => p.chargingProfileId);
+    let before: number[];
+    let after: number[];
     if (profile.connectorId === 0) {
-      replaced = this._stationProfiles.add(profile);
+      before = idsBefore(this._stationProfiles.all());
+      this._stationProfiles.add(profile, options);
+      after = idsBefore(this._stationProfiles.all());
     } else {
       const connector = this.getConnector(profile.connectorId);
       if (!connector) return false;
-      replaced = connector.addChargingProfile(profile);
+      before = idsBefore(connector.chargingProfiles);
+      connector.addChargingProfile(profile, options);
+      after = idsBefore(connector.chargingProfiles);
     }
+    const replaced = before.includes(profile.chargingProfileId);
+    // Other profiles the same-slot rule displaced (#594).
+    const replacedIds = before.filter(
+      (id) => id !== profile.chargingProfileId && !after.includes(id),
+    );
     this._events.emit("chargingProfileApplied", {
       connectorId: profile.connectorId,
       profile,
       replaced,
+      replacedIds,
       source,
     });
     return true;
@@ -1581,11 +1752,13 @@ export class ChargePoint {
     connectorId: number,
     status: string,
     stopped: boolean,
+    midSession = false,
   ): void {
     this._events.emit("startTransactionNotAccepted", {
       connectorId,
       status,
       stopped,
+      ...(midSession && { midSession: true as const }),
     });
   }
 
@@ -1792,6 +1965,13 @@ export class ChargePoint {
   }
 
   connect(): void {
+    if (this._powerLoss) {
+      this._logger.warn(
+        "connect() ignored: the charge point has no power (power.restore first)",
+        LogType.WEBSOCKET,
+      );
+      return;
+    }
     if (!this._webSocket) {
       this._logger.info(
         `Connecting via ${this._ocppVersion} SOAP client`,
@@ -2183,6 +2363,7 @@ export class ChargePoint {
 
   /** Boot-notification gate accessors used by BootNotificationResultHandler. */
   markBootAccepted(): void {
+    this._bootAccepted = true;
     this._outbox.setBootStatus({ status: "Accepted" });
     if (
       this._ocppVersion === "OCPP-1.6J" &&
@@ -2199,10 +2380,12 @@ export class ChargePoint {
   }
 
   markBootPending(): void {
+    this._bootAccepted = false;
     this._outbox.setBootStatus({ status: "Pending" });
   }
 
   markBootRejected(retryAfterSeconds: number): void {
+    this._bootAccepted = false;
     this._outbox.setBootStatus({
       status: "Rejected",
       retryAfter: new Date(this._clock.now() + retryAfterSeconds * 1000),
@@ -2308,6 +2491,9 @@ export class ChargePoint {
     }
 
     this._clockAligned.enable();
+    // #455: after the status fan-out and the flush of the queue (both
+    // already scheduled), so the recovery's messages come last.
+    queueMicrotask(() => this.runPowerRecovery());
     // Re-checks the thresholds: what changed while Pending or offline, and
     // a restored trigger already back in range (N07.FR.14).
     this._monitorEvaluation?.setReporting(true);
@@ -2378,6 +2564,7 @@ export class ChargePoint {
    * a dead socket.
    */
   private teardownAfterClose(): void {
+    this._bootAccepted = false;
     // A `triggerOn: "connect"` scenario is armed once per connect, recorded on
     // `Connector.lastAutoStartedScenarioKey` so re-emitting Available doesn't
     // restart something already running. That arm must not survive the socket
@@ -2445,6 +2632,166 @@ export class ChargePoint {
     this.connect();
   }
 
+  /** Whether the station is without power (#455). */
+  get poweredOff(): boolean {
+    return this._powerLoss !== null;
+  }
+
+  /**
+   * Simulate a power loss (#455): the station disappears without a clean
+   * stop. The socket closes at once, nothing is sent until
+   * {@link restorePower}, and no transaction ends. What a real station keeps
+   * in non-volatile storage stays: the transactions (id, meter, tag) and the
+   * queue of transaction messages that could not be delivered. A network
+   * loss, an OCPP Reset and this are different events: a Reset ends the
+   * transactions first (1.6 §5.14, 2.x B11/B12), a network loss keeps the
+   * station running.
+   */
+  powerLoss(options: PowerLossOptions = {}): PowerLossRecord {
+    if (this.isSoapChargePoint()) {
+      throw new PowerStateError("unsupported_transport");
+    }
+    if (this._powerLoss) throw new PowerStateError("already_powered_off");
+    const record: PowerLossRecord = {
+      at: this._nowDate(),
+      transactions: [...this._connectors.values()]
+        .filter((connector) => connector.hasRunningTransaction)
+        .map((connector) => ({
+          connectorId: connector.id,
+          transactionId: connector.transaction?.id ?? 0,
+        })),
+    };
+    this._powerLoss = record;
+    // Power was lost before it was restored: a recovery still waiting for a
+    // boot is moot, the new loss defines it.
+    this._powerRecovery = null;
+    this._logger.warn(
+      `Power loss: ${record.transactions.length} transaction(s) interrupted`,
+      LogType.TRANSACTION,
+    );
+    this._events.emit("powerLost", {
+      transactions: record.transactions.length,
+    });
+    this._webSocket?.disconnect();
+    this.teardownAfterClose();
+    const { restoreAfterMs, ...restore } = options;
+    if (restoreAfterMs !== undefined) {
+      this._powerRestoreTimer = this._clock.setTimeout(() => {
+        this._powerRestoreTimer = null;
+        if (this._powerLoss) this.restorePower(restore);
+      }, restoreAfterMs);
+    }
+    return record;
+  }
+
+  /**
+   * Power returns (#455). The station boots: BootNotification first (1.6
+   * §4.2, 2.x B01.FR.03 "after a reboot (for instance due to ... power
+   * outage)"), nothing else before it is Accepted, then the transaction
+   * messages the outage left queued, then the recovery of the interrupted
+   * transactions (see {@link PowerRestoreOptions}).
+   */
+  restorePower(options: PowerRestoreOptions = {}): PowerRestoreResult {
+    const loss = this._powerLoss;
+    if (!loss) throw new PowerStateError("not_powered_off");
+    if (this._powerRestoreTimer !== null) {
+      this._clock.clearTimeout(this._powerRestoreTimer);
+      this._powerRestoreTimer = null;
+    }
+    const restoredAt = this._nowDate();
+    const outageMs = Math.max(0, restoredAt.getTime() - loss.at.getTime());
+    this._powerLoss = null;
+    const recovery = this.planPowerRecovery(loss, outageMs, options);
+    this._powerRecovery =
+      loss.transactions.length > 0
+        ? { loss, options: { ...options, transactions: recovery }, restoredAt }
+        : null;
+    this._logger.info(
+      `Power restored after ${Math.round(outageMs / 1000)}s`,
+      LogType.TRANSACTION,
+    );
+    this._events.emit("powerRestored", {
+      outageMs,
+      recovery: loss.transactions.length > 0 ? recovery : "none",
+      transactions: loss.transactions.length,
+    });
+    this.connect();
+    return {
+      outageMs,
+      recovery: loss.transactions.length > 0 ? recovery : "none",
+      transactions: loss.transactions.length,
+    };
+  }
+
+  /**
+   * 1.x: the spec leaves it open, so `resume` is the default and `end` is
+   * available. 2.1 E17.FR.10/20: resume only when the outage lasted at most
+   * `TxResumptionTimeout` (> 0), otherwise end. 2.0.1 has no resumption
+   * (no `TxResumed` trigger reason): the default is `end`.
+   */
+  private planPowerRecovery(
+    loss: PowerLossRecord,
+    outageMs: number,
+    options: PowerRestoreOptions,
+  ): PowerRecovery {
+    if (loss.transactions.length === 0) return options.transactions ?? "resume";
+    const wanted =
+      options.transactions ??
+      (this._ocppVersion === OCPP_2_0_1 ? "end" : "resume");
+    if (wanted === "end") return "end";
+    if (this._ocppVersion !== OCPP_2_1) return "resume";
+    const timeout = options.txResumptionTimeoutSeconds ?? 0;
+    return timeout > 0 && outageMs <= timeout * 1000 ? "resume" : "end";
+  }
+
+  /** Run the pending power-loss recovery; the boot is Accepted. */
+  private runPowerRecovery(): void {
+    const pending = this._powerRecovery;
+    if (!pending) return;
+    this._powerRecovery = null;
+    const recovery = pending.options.transactions ?? "resume";
+    const twoX = isOcpp2Version(this._ocppVersion);
+    for (const { connectorId } of pending.loss.transactions) {
+      const connector = this.getConnector(connectorId);
+      if (!connector?.hasRunningTransaction) continue;
+      if (recovery === "end") {
+        // 1.6 reason `PowerLoss`; 2.x E17.FR.21 Ended + AbnormalCondition +
+        // PowerLoss. Stamped with the loss, the moment the station recorded
+        // the shutdown (E17.FR.02).
+        this.stopTransaction(connector, "PowerLoss", {
+          triggerReason: "AbnormalCondition",
+          stoppedReason: "PowerLoss",
+          stoppedAt: pending.loss.at,
+        });
+        continue;
+      }
+      if (!connector.isAutoMeterValueActive()) {
+        connector.startConfiguredMeterValue();
+      }
+      if (this._ocppVersion === OCPP_2_1) {
+        // B13.FR.30, E17.FR.14: Updated + TxResumed with the charging state.
+        const status = connector.status;
+        this._outbox.sendTransactionUpdate(connectorId, {
+          // Not in the 2.0.1 vocabulary the encoder is typed against; 2.1 only.
+          triggerReason: "TxResumed" as TransactionStopTriggerReason,
+          chargingState:
+            status === OCPPStatus.Charging
+              ? "Charging"
+              : status === OCPPStatus.SuspendedEV
+                ? "SuspendedEV"
+                : status === OCPPStatus.SuspendedEVSE
+                  ? "SuspendedEVSE"
+                  : "EVConnected",
+        });
+      } else if (twoX) {
+        this._logger.info(
+          `Transaction on connector ${connectorId} continues; OCPP 2.0.1 has no TxResumed trigger reason`,
+          LogType.TRANSACTION,
+        );
+      }
+    }
+  }
+
   /**
    * Stop variable monitoring for good: its periodic timers, which run
    * offline too (N08.FR.03), and any event still in flight. For an
@@ -2462,6 +2809,10 @@ export class ChargePoint {
    * then runs final CP-side teardown.
    */
   dispose(): void {
+    if (this._powerRestoreTimer !== null) {
+      this._clock.clearTimeout(this._powerRestoreTimer);
+      this._powerRestoreTimer = null;
+    }
     this.releaseRenewedClientCertificate();
     this._webSocket?.dispose(); // terminal: shuts controller down, clears reservation, closes socket
     this.teardownAfterClose(); // final CP-side teardown

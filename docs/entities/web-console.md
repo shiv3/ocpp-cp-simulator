@@ -19,7 +19,7 @@ related:
   - open-ev-directory.md
   - ../concepts/operational-timeline.md
   - ../concepts/charging-sessions.md
-updated: 2026-11-07
+updated: 2026-11-08
 ---
 
 # Web console (browser UI)
@@ -321,7 +321,16 @@ The charge point page (`/cp/:id`) is one column, top to bottom:
   embedded (the URL the charge point dials), with a **Copy** button (**Copied**
   for 1.5 s; it does nothing when the browser has no clipboard API). It is not
   an input: the value is edited in the WebSocket URL and Basic Auth fields
-  only. The Add dialog opens with the Charge Point ID focused. The helpers are in
+  only. The **Send periodic meter values as TransactionEvent (Updated)**
+  checkbox (#550) is the `txUpdatedMeterValues` option
+  ([OCPP versions and transports](../concepts/ocpp-versions-and-transports.md);
+  off by default). It is offered only for OCPP 2.0.1 and 2.1, because 1.x
+  ignores the option, and it follows the version select. In Remote mode the
+  Add and Edit forms send it with `cp.create` / `cp.update` (an Edit that
+  never touched it sends back the value it read). In Local mode the config is
+  shared by every browser charge point, so the option is stored in that shared
+  config like the OCPP version: it applies to all local charge points,
+  including already running ones. The Add dialog opens with the Charge Point ID focused. The helpers are in
   [`chargePointConfig.ts`](../../apps/web/src/components/chargePointConfig.ts).
 - **Charge point (connector 0)**, a card above the connectors (below).
 - **The connectors.** The full page shows **every connector at once**, like the
@@ -1094,7 +1103,8 @@ default. The section shows the frame as sent and the CALLRESULT or CALLERROR, or
 why the call was refused; a SOAP CP gets a notice instead of the form. It
 works in both modes.
 
-The run page's **Run history** lists the daemon's recorded runs of that
+The run page's **Run history** lists the recorded runs (the daemon's, or the
+browser's `scenario_runs` table in Local mode, #394) of that
 scenario on that connector — the latest 20, newest first, with each run's
 result and verdict — plus the run the page is tracking until the daemon records
 it, so the history survives navigating away and back or a daemon restart with
@@ -1113,9 +1123,7 @@ charge point only; a link without `runCp` opens its run only when that id
 names a single one. Both re-list when the daemon
 records a run, and when a charge point is deleted or the simulator reset
 ([Scenario run history](../concepts/control-plane.md#scenario-run-history), #388).
-In Local mode the run page keeps a history of this page view only, and the
-Run History page says it needs the daemon — local run reports are tracked in
-#394.
+Local mode behaves the same, from the browser database.
 
 The console shows the running build as
 `ocpp-cp-simulator · ui vX.Y.Z · daemon vX.Y.Z · GitHub` in a footer under the
@@ -1205,6 +1213,7 @@ current vehicle's fields
 
 ## What the console can do
 
+- Remote mode: save daemon addresses and switch between them from the sidebar ([Local vs Remote mode](../concepts/local-vs-remote-mode.md#switching-daemons-remote-mode), #619).
 - Create charge points and connectors, connect to a CSMS over OCPP-J
   (1.6J / 2.0.1 / 2.1) or — in Local mode, send-only — the SOAP versions
   (see [OCPP versions & transports](../concepts/ocpp-versions-and-transports.md)).

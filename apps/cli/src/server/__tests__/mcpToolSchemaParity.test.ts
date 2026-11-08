@@ -301,12 +301,18 @@ describe("MCP curated tool schema parity (general, #299)", () => {
     { tool: "cp_list", method: "cp.list" },
     { tool: "blueprint_list", method: "blueprint.list" },
     { tool: "blueprint_save", method: "blueprint.save" },
+    { tool: "fleet_template_list", method: "fleet.template.list" },
+    { tool: "fleet_template_get", method: "fleet.template.get" },
+    { tool: "fleet_template_save", method: "fleet.template.save" },
+    { tool: "fleet_template_delete", method: "fleet.template.delete" },
+    { tool: "fleet_create", method: "fleet.create" },
     { tool: "cp_delete", method: "cp.delete" },
     { tool: "cp_labels_set", method: "cp.labels.set" },
     { tool: "cp_behaviors_set", method: "cp.behaviors.set" },
     { tool: "behavior_list", method: "behavior.list" },
     { tool: "behavior_reload", method: "behavior.reload" },
     { tool: "cp_bulk", method: "cp.bulk" },
+    { tool: "cp_scenario_run", method: "cp.scenario.run" },
     { tool: "cp_connect", method: "connect" },
     { tool: "cp_disconnect", method: "disconnect" },
     { tool: "cp_status", method: "status" },
@@ -343,6 +349,8 @@ describe("MCP curated tool schema parity (general, #299)", () => {
       tool: "network_sim_trigger_disconnect",
       method: "network_sim.disconnect.trigger",
     },
+    { tool: "power_loss", method: "power.loss" },
+    { tool: "power_restore", method: "power.restore" },
   ];
 
   for (const { tool, method } of oneToOneCases) {

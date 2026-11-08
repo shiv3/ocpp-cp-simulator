@@ -148,6 +148,22 @@ export class OperationalTimelineProjector {
         at: startedAt,
       });
     });
+    on("powerLost", ({ transactions }) => {
+      this.timeline.record({
+        kind: "power_lost",
+        summary: `Power lost (${transactions} transaction${transactions === 1 ? "" : "s"} interrupted)`,
+        data: { transactions },
+      });
+    });
+    on("powerRestored", ({ outageMs, recovery, transactions }) => {
+      this.timeline.record({
+        kind: "power_restored",
+        summary: `Power restored after ${formatSeconds(outageMs)}${
+          recovery === "none" ? "" : `, transactions: ${recovery}`
+        }`,
+        data: { outageMs, recovery, transactions },
+      });
+    });
     on("transactionStarted", ({ connectorId, tagId }) => {
       // The 1.6 id is a placeholder until StartTransaction.conf; it is
       // recorded by `transaction_id_assigned` instead.
@@ -215,16 +231,25 @@ export class OperationalTimelineProjector {
     });
     on(
       "chargingProfileApplied",
-      ({ connectorId, profile, replaced, source }) => {
+      ({ connectorId, profile, replaced, replacedIds, source }) => {
         const { chargingProfileId: id, validTo } = profile;
+        // A displaced profile never expires on its own any more.
+        for (const replacedId of replacedIds) {
+          this.cancelExpiry(connectorId, replacedId);
+        }
+        const displaced =
+          replacedIds.length > 0
+            ? `, replacing profile ${replacedIds.join(", ")}`
+            : "";
         this.timeline.record({
           kind: "charging_profile_applied",
           ...connectorScope(connectorId),
-          summary: `Charging profile ${id} (${profile.chargingProfilePurpose}, stack level ${profile.stackLevel}) ${replaced ? "updated" : "applied"} ${scopeLabel(connectorId)}`,
+          summary: `Charging profile ${id} (${profile.chargingProfilePurpose}, stack level ${profile.stackLevel}) ${replaced ? "updated" : "applied"} ${scopeLabel(connectorId)}${displaced}`,
           data: {
             ...profileFields(connectorId, profile),
             source,
             replaced,
+            ...(replacedIds.length > 0 && { replacedIds }),
             ...(validTo !== undefined && { validTo }),
           },
         });

@@ -3,8 +3,11 @@ import { LogType } from "@ocpp-cp-sim/core/cp/shared/Logger";
 import type { McpServer, ToolCallResult } from "mcp-lite";
 import {
   blueprintSchema,
+  fleetCreateParamsSchema,
+  fleetTemplateSchema,
   createManyToolSchema,
   cpBulkParamsSchema,
+  cpScenarioRunParamsSchema,
   behaviorReloadParamsSchema,
   cpBehaviorsSetParamsSchema,
   cpLabelsSetParamsSchema,
@@ -260,6 +263,25 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
     },
   });
 
+  // #486: `cp_bulk`'s selector with a scenario template; schema derived from
+  // `cp.scenario.run`'s.
+  mcp.tool("cp_scenario_run", {
+    description:
+      "Run a scenario template on one connector of every charge point carrying all the given label pairs (exact match; at least one pair, {} is refused). Returns the matched ids, the ones that started (with their scenarioId, to follow with scenario_status) and the ones that failed with the reason -- a partial result is normal, not an error. Each charge point is waited for at most 10 s.",
+    inputSchema: cpScenarioRunParamsSchema,
+    handler: async (args) => {
+      try {
+        const result = await runRpc(deps, {
+          method: "cp.scenario.run",
+          params: args,
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
   mcp.tool("blueprint_list", {
     description:
       "List the stored charge point blueprints: named, reusable hardware descriptions that cp_create_many can instantiate by id.",
@@ -283,6 +305,80 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
       try {
         return successResult(
           await runRpc(deps, { method: "blueprint.save", params: args }),
+        );
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("fleet_template_list", {
+    description:
+      "List the fleet templates: reusable descriptions of a whole heterogeneous fleet (blueprint + scenario template + overrides per charge point, grouped by site) that fleet_create instantiates. Includes templates loaded from --fleet-template files.",
+    inputSchema: z.object({}),
+    handler: async (args) => {
+      try {
+        return successResult(
+          await runRpc(deps, { method: "fleet.template.list", params: args }),
+        );
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("fleet_template_get", {
+    description: "Get one fleet template by id.",
+    inputSchema: z.object({ id: z.string().min(1) }),
+    handler: async (args) => {
+      try {
+        return successResult(
+          await runRpc(deps, { method: "fleet.template.get", params: args }),
+        );
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("fleet_template_save", {
+    description:
+      "Create or replace a fleet template. It references blueprints and scenario templates by id and adds per-charge-point overrides; it does not copy their definitions. Unknown references are reported by fleet_create, not here. A template from a --fleet-template file cannot be replaced.",
+    inputSchema: z.object({ template: fleetTemplateSchema }),
+    handler: async (args) => {
+      try {
+        return successResult(
+          await runRpc(deps, { method: "fleet.template.save", params: args }),
+        );
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("fleet_template_delete", {
+    description:
+      "Delete a stored fleet template. Fleets already created from it are not affected.",
+    inputSchema: z.object({ id: z.string().min(1) }),
+    handler: async (args) => {
+      try {
+        return successResult(
+          await runRpc(deps, { method: "fleet.template.delete", params: args }),
+        );
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("fleet_create", {
+    description:
+      "Create every charge point of a fleet template. Charge points are independent of the template afterwards. The template is resolved completely before anything is created (unknown blueprint, scenario template or a repeated id fails the call with nothing created); after that, partial failure is a normal result: created and failed (with the reason) are returned in template order.",
+    inputSchema: fleetCreateParamsSchema,
+    handler: async (args) => {
+      try {
+        return successResult(
+          await runRpc(deps, { method: "fleet.create", params: args }),
         );
       } catch (err) {
         return errorResult(err);
@@ -1015,14 +1111,27 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
   const sessions = METHODS["sessions.list"].params.shape;
   mcp.tool("list_charging_sessions", {
     description:
-      "List a charge point's charging sessions (#447): one normalized record " +
+      "List charging sessions (#447): one charge point's with cpId, or every " +
+      "charge point's when cpId is omitted (#489; labels narrows the fleet " +
+      "to a selector, startedFrom/startedTo bound the start time). One normalized record " +
       "per transaction, the same shape for OCPP 1.6 and 2.x — connector, " +
       "transaction id, idTag, start/end, duration, meter start/stop, energy " +
       "(Wh), stop reason and an outcome (active, completed, interrupted, " +
       "failed). Unknown values are null, never guessed. Newest first; no " +
       "billing or tariff data.",
     inputSchema: z.object({
-      cpId: sessions.cpId.describe("Charge point identifier"),
+      cpId: sessions.cpId.describe(
+        "Charge point identifier; omit to list across the fleet",
+      ),
+      labels: sessions.labels.describe(
+        "Fleet-wide only (not with cpId): the charge points carrying every one of these label pairs (exact match); {} or omitted = all",
+      ),
+      startedFrom: sessions.startedFrom.describe(
+        "Only sessions that started at or after this instant (ISO 8601 with a zone)",
+      ),
+      startedTo: sessions.startedTo.describe(
+        "Only sessions that started before this instant (ISO 8601 with a zone)",
+      ),
       connectorId: sessions.connectorId.describe(
         "Only sessions on this connector",
       ),
@@ -1119,6 +1228,42 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
           },
         });
         return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("power_loss", {
+    description:
+      "Simulate a power loss on a charge point (#455): the socket vanishes with its transactions kept. Give restoreAfterMs for an outage that ends by itself, or call power_restore.",
+    inputSchema: z.object({
+      cpId: z.string().describe("Charge point id"),
+      ...METHODS["power.loss"].params.omit({ cpId: true }).shape,
+    }),
+    handler: async (args) => {
+      try {
+        return successResult(
+          await runRpc(deps, { method: "power.loss", params: args }),
+        );
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("power_restore", {
+    description:
+      "Restore power to a charge point after power_loss: it boots, then resumes or ends the interrupted transactions (1.6 PowerLoss stop; 2.x E17).",
+    inputSchema: z.object({
+      cpId: z.string().describe("Charge point id"),
+      ...METHODS["power.restore"].params.omit({ cpId: true }).shape,
+    }),
+    handler: async (args) => {
+      try {
+        return successResult(
+          await runRpc(deps, { method: "power.restore", params: args }),
+        );
       } catch (err) {
         return errorResult(err);
       }

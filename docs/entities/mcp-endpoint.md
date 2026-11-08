@@ -1,7 +1,7 @@
 ---
 title: MCP endpoint (`POST /mcp`)
 type: entity
-summary: Stateless Model Context Protocol endpoint served by the daemon so MCP clients such as Claude Code can drive the simulator; 36 curated tools + 3 network-sim tools + a generic escape hatch, and the OCPP JSON Schemas as resources.
+summary: Stateless Model Context Protocol endpoint served by the daemon so MCP clients such as Claude Code can drive the simulator; curated tools + network-sim tools + power-loss tools + a generic escape hatch, and the OCPP JSON Schemas as resources.
 sources:
   - apps/cli/src/server/mcp/tools.ts
   - apps/cli/src/server/mcp/schemaResources.ts
@@ -16,6 +16,7 @@ related:
   - daemon.md
   - ../concepts/control-plane.md
   - ../concepts/network-simulation.md
+  - ../concepts/power-loss.md
   - ../analyses/driving-from-an-ai-agent.md
   - ../concepts/expert-ocpp-calls.md
   - ../concepts/vehicle-profiles.md
@@ -48,7 +49,7 @@ claude mcp add --transport http ocpp-sim http://127.0.0.1:9700/mcp \
 
 ## Curated Tools
 
-The endpoint exposes 36 curated tools wrapping the daemon's
+The endpoint exposes the curated tools listed below, wrapping the daemon's
 [RPC methods](../concepts/control-plane.md):
 
 | Tool                          | RPC Method                    | Params                                                                                                                                                                                                                                                                                                                                                                               |
@@ -58,12 +59,18 @@ The endpoint exposes 36 curated tools wrapping the daemon's
 | `cp_create_many`              | `cp.create_many`              | Every `cp.create` parameter except `cpId`, plus `count` / `idPattern?` / `startIndex?` / `blueprintId?` — schema derived the same way ([batch fields](../concepts/control-plane.md#cpcreate_many--the-batch-fields))                                                                                                                                                                 |
 | `blueprint_list`              | `blueprint.list`              | — (built-ins first, then stored)                                                                                                                                                                                                                                                                                                                                                     |
 | `blueprint_save`              | `blueprint.save`              | `blueprint` — schema derived from `blueprintSchema` ([Blueprints](../concepts/control-plane.md#blueprints))                                                                                                                                                                                                                                                                          |
+| `fleet_template_list`         | `fleet.template.list`         | — (file templates and stored ones; [Fleet templates](../concepts/fleet-templates.md))                                                                                                                                                                                                                                                                                                |
+| `fleet_template_get`          | `fleet.template.get`          | `id`                                                                                                                                                                                                                                                                                                                                                                                 |
+| `fleet_template_save`         | `fleet.template.save`         | `template` — schema derived from `fleetTemplateSchema`                                                                                                                                                                                                                                                                                                                               |
+| `fleet_template_delete`       | `fleet.template.delete`       | `id`                                                                                                                                                                                                                                                                                                                                                                                 |
+| `fleet_create`                | `fleet.create`                | `templateId`, `wsUrl?`, `idPrefix?`, `autoConnect?` — creates every charge point of the template; `created` / `failed` in template order                                                                                                                                                                                                                                             |
 | `cp_delete`                   | `cp.delete`                   | `cpId`                                                                                                                                                                                                                                                                                                                                                                               |
 | `cp_labels_set`               | `cp.labels.set`               | `cpId`, `labels` — replaces the CP's labels in place, no reconnect; schema derived from the method's (#446)                                                                                                                                                                                                                                                                          |
 | `cp_behaviors_set`            | `cp.behaviors.set`            | `cpId`, `behaviors` (ids, `[]` or `null`) — choose which loaded behaviors the CP runs, in place; ids only, never code; an unknown id names the loaded ids                                                                                                                                                                                                                            |
 | `behavior_list`               | `behavior.list`               | — (the library `--behavior` loaded, whether `--watch-behaviors` is on, and the built-in default behaviors with the actions each answers)                                                                                                                                                                                                                                             |
 | `behavior_reload`             | `behavior.reload`             | — (no parameters: re-reads the files given at start; no path or code can be supplied). **Together with `cp_behaviors_set` this gives an AI agent control over which loaded code runs, and over re-reading files on disk: do not connect an agent to a daemon whose behavior directories it can write** ([trust line](../concepts/charger-engine.md#loading-code-and-the-trust-line)) |
 | `cp_bulk`                     | `cp.bulk`                     | `labels`, `action` (`connect` / `disconnect` / `reset`) — every CP carrying every pair; `{}` refused; partial success is the result; schema derived from the method's (#470)                                                                                                                                                                                                         |
+| `cp_scenario_run`             | `cp.scenario.run`             | `labels`, `connector`, `templateId`, `evSettings?`, `strict?`, `once?` — `run_scenario_template` on every CP carrying every pair; `{}` refused; returns `started` with each `scenarioId`; schema derived from the method's (#486)                                                                                                                                                    |
 | `cp_connect`                  | `connect`                     | `cpId`                                                                                                                                                                                                                                                                                                                                                                               |
 | `cp_disconnect`               | `disconnect`                  | `cpId`                                                                                                                                                                                                                                                                                                                                                                               |
 | `cp_status`                   | `status`                      | `cpId`                                                                                                                                                                                                                                                                                                                                                                               |
@@ -88,11 +95,11 @@ The endpoint exposes 36 curated tools wrapping the daemon's
 | `get_logs`                    | `logs.get`                    | `cpId`, `limit?`, `offset?`, `order?` — `limit` takes the most recent N ([Log windowing](../concepts/log-format.md#log-windowing))                                                                                                                                                                                                                                                   |
 | `tail_logs`                   | `logs.get`                    | `cpId`, `lines?` (default 50, max 1000), `level?` (this level or more severe), `type?`, `contains?` (case-insensitive) — the end of the log, oldest first, the newest entry last; filters apply before the tail is taken. Use `get_logs` to page further back (#613)                                                                                                                 |
 | `get_timeline`                | `timeline.get`                | `cpId`, `connectorId?`, `runId?`, `incidentId?`, `kinds?`, `limit?`, `offset?`, `order?` — the [operational timeline](../concepts/operational-timeline.md), windowed like `get_logs` (#448)                                                                                                                                                                                          |
-| `list_charging_sessions`      | `sessions.list`               | `cpId`, `connectorId?`, `outcomes?`, `limit?` (default 50), `offset?`, `order?` — the [charging sessions](../concepts/charging-sessions.md), newest first by default (#447)                                                                                                                                                                                                          |
+| `list_charging_sessions`      | `sessions.list`               | `cpId?` (omitted: the whole fleet, #489), `labels?`, `startedFrom?`, `startedTo?`, `connectorId?`, `outcomes?`, `limit?` (default 50), `offset?`, `order?` — the [charging sessions](../concepts/charging-sessions.md), newest first by default (#447)                                                                                                                               |
 
 Most of these tools hand-declare a copy of their method's fields rather than
-deriving it (`cp_create` / `cp_create_many`, `cp_list`, `cp_labels_set` and
-`cp_bulk` are the exception — see
+deriving it (`cp_create` / `cp_create_many`, `cp_list`, `cp_labels_set`,
+`cp_bulk` and `cp_scenario_run` are the exception — see
 [cp.create parameters](../concepts/control-plane.md#cpcreate-parameters)), so
 a field the method later gains, or an optional field the tool over-tightened
 to required, could silently drift out of reach of an MCP agent (#284, #299).
@@ -109,7 +116,7 @@ they can call.
 
 ### Network-simulation tools
 
-Three further tools wrap the [network simulation](../concepts/network-simulation.md)
+Further tools wrap the [network simulation](../concepts/network-simulation.md)
 RPC methods:
 
 | Tool                             | RPC Method(s)                                    | Params                                                                                        |
@@ -117,6 +124,10 @@ RPC methods:
 | `network_sim_get`                | `network_sim.global.get`, `network_sim.cp.get`   | `cpId?` — if omitted, returns global config; if set, returns per-CP config and resolved state |
 | `network_sim_set`                | `network_sim.global.save`, `network_sim.cp.save` | `cpId?`, `config` — if omitted, saves global config; if set, saves per-CP config              |
 | `network_sim_trigger_disconnect` | `network_sim.disconnect.trigger`                 | `cpId`, `ruleId` — triggers a manual-disconnect rule for the CP                               |
+
+Two more tools simulate a [power loss](../concepts/power-loss.md) (#455): `power_loss`
+(`cpId`, `restoreAfterMs?`, `transactions?`, `txResumptionTimeoutSeconds?`) wraps `power.loss`, `power_restore`
+(`cpId`, `transactions?`, `txResumptionTimeoutSeconds?`) wraps `power.restore`.
 
 ## OCPP schema resources
 

@@ -55,6 +55,15 @@ export class TriggerMessageHandler implements CallHandler<
       LogType.OCPP,
     );
 
+    // #618: a target the capability profile leaves out is not implemented.
+    if (
+      context.chargePoint.isTriggerTargetSupported?.(
+        payload.requestedMessage,
+      ) === false
+    ) {
+      return { status: "NotImplemented" };
+    }
+
     // OCPP 1.6J §6.51: the response is sent first (Accepted/Rejected), then
     // the CP fires the requested message after answering. The effect is
     // deferred via HandlerOutcome so the CALLRESULT goes out before the new CALL.

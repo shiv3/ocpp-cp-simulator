@@ -24,6 +24,10 @@ import type {
   FirmwareStatus,
   UploadLogStatus,
 } from "@ocpp-cp-sim/core/cp/domain/types/FirmwareLogStatus";
+import type {
+  PowerLossOptions,
+  PowerRestoreOptions,
+} from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
 import type { AutoMeterValueConfig } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
 import type { ActiveChargingProfile } from "@ocpp-cp-sim/core/cp/domain/connector/Connector";
 import type {
@@ -139,6 +143,13 @@ export interface ChargePointSnapshot {
     cpoName?: string;
     /** #347: periodic samples ride TransactionEvent(Updated) on OCPP 2.x. */
     txUpdatedMeterValues?: boolean;
+    /** #593: OCPP 1.6J inbound CALL validation mode. */
+    inboundValidation?: "off" | "warn" | "enforce";
+    /** #618: static capability profile. */
+    capabilityProfile?: {
+      disabledActions?: readonly string[];
+      triggerMessageTargets?: readonly string[];
+    };
     tlsCaPath?: string;
     tlsCertPath?: string;
     tlsKeyPath?: string;
@@ -194,6 +205,14 @@ export interface CreateChargePointParams {
   /** #347: periodic samples ride TransactionEvent(Updated) on OCPP 2.x.
    *  Omitted on an update keeps the current value. */
   txUpdatedMeterValues?: boolean;
+  /** #593: OCPP 1.6J inbound CALL validation (off | warn | enforce).
+   *  Omitted on an update keeps the current value. */
+  inboundValidation?: "off" | "warn" | "enforce";
+  /** #618: static capability profile (omitted on an update keeps it). */
+  capabilityProfile?: {
+    disabledActions?: readonly string[];
+    triggerMessageTargets?: readonly string[];
+  };
   tls?: OcppTlsOptions;
   tlsCaPath?: string;
   tlsCertPath?: string;
@@ -512,6 +531,25 @@ export interface ChargePointService {
     cpId: string,
     ruleId: string,
   ): Promise<{ ok: true } | { ok: false; error: string }>;
+
+  /** #455: the station loses power (socket gone, transactions kept). */
+  powerLoss(
+    cpId: string,
+    options?: PowerLossOptions,
+  ): Promise<{ ok: true; transactions: number } | { ok: false; error: string }>;
+  /** #455: power returns; the station boots and recovers its transactions. */
+  powerRestore(
+    cpId: string,
+    options?: PowerRestoreOptions,
+  ): Promise<
+    | {
+        ok: true;
+        outageMs: number;
+        recovery: "resume" | "end" | "none";
+        transactions: number;
+      }
+    | { ok: false; error: string }
+  >;
 
   // Lifecycle
   connect(id: string): Promise<void>;

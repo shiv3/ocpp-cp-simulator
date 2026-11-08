@@ -178,8 +178,12 @@ function v201ProfileToDomain(
     chargingProfileKind: kind,
     chargingRateUnit: rateUnit,
     recurrencyKind,
-    validFrom: chargingProfile.validFrom ?? schedule.startSchedule,
+    // Validity window and schedule anchor stay apart (K01.FR.30, K01.FR.36,
+    // K01.FR.37): `validFrom` / `validTo` bound when the profile may apply,
+    // `startSchedule` is where the periods count from.
+    validFrom: chargingProfile.validFrom,
     validTo: chargingProfile.validTo,
+    startSchedule: schedule.startSchedule,
     chargingSchedulePeriods: periods.map((period) => ({
       startPeriod: period.startPeriod,
       limit: period.limit as number,
@@ -196,13 +200,13 @@ function domainProfileToV201(
     stackLevel: profile.stackLevel,
     chargingProfilePurpose: purposeToV201(profile.chargingProfilePurpose),
     chargingProfileKind: profile.chargingProfileKind,
-    recurrencyKind: profile.recurrencyKind,
-    validFrom: profile.validFrom,
-    validTo: profile.validTo,
+    ...(profile.recurrencyKind && { recurrencyKind: profile.recurrencyKind }),
+    ...(profile.validFrom && { validFrom: profile.validFrom }),
+    ...(profile.validTo && { validTo: profile.validTo }),
     chargingSchedule: [
       {
         id: profile.chargingProfileId,
-        startSchedule: profile.validFrom,
+        ...(profile.startSchedule && { startSchedule: profile.startSchedule }),
         chargingRateUnit: profile.chargingRateUnit,
         chargingSchedulePeriod:
           profile.chargingSchedulePeriods as ReportChargingProfileType["chargingSchedule"][number]["chargingSchedulePeriod"],

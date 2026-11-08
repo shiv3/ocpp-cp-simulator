@@ -11,6 +11,7 @@ sources:
   - "issue #705"
   - "issue #706"
   - "issue #735"
+  - "issue #707"
   - "issue #723"
 related:
   - charging-sessions.md
@@ -102,3 +103,16 @@ Every report carries the request's `requestId` (K09.FR.01). When the profiles
 span more than one report, every report but the last has `tbc: true`
 (K09.FR.02); the last one omits `tbc`, and so does the only report of a
 single-group answer.
+
+## Validity window and schedule anchor (2.0.1 and 2.1)
+
+`validFrom` / `validTo` (the validity window) and the schedule's
+`startSchedule` (where the periods count from) are stored and reported as
+separate fields, as sent: K01.FR.36 / K01.FR.37 make the profile valid when
+`validFrom <= now < validTo`, and K01.FR.30 starts imposing a schedule at its
+`startSchedule`. `GetChargingProfiles` reports back exactly what was set, and
+leaves out a field that was not sent (a profile with only `startSchedule` has
+no `validFrom`). The anchor table above applies to 2.x too: an Absolute or
+Recurring schedule counts from `startSchedule`, else `validFrom`, else the
+transaction start. The 2.x `duration` and `minChargingRate` of a schedule are
+not stored yet.

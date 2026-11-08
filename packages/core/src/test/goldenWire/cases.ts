@@ -1022,6 +1022,50 @@ export const goldenCases: GoldenCase[] = [
     { connectors: 2 },
   ),
 
+  // 2.0.1 K01.FR.30 / K01.FR.36: validFrom, validTo and startSchedule are
+  // stored and reported apart; an absent one stays absent.
+  c201("charging-profile-times", async (rig) => {
+    const profile = (
+      id: number,
+      times: Record<string, string>,
+      scheduleTimes: Record<string, string>,
+    ) => ({
+      evseId: 1,
+      chargingProfile: {
+        id,
+        stackLevel: id,
+        chargingProfilePurpose: "TxDefaultProfile",
+        chargingProfileKind: "Absolute",
+        ...times,
+        chargingSchedule: [
+          {
+            id,
+            ...scheduleTimes,
+            chargingRateUnit: "W",
+            chargingSchedulePeriod: [{ startPeriod: 0, limit: 7000 }],
+          },
+        ],
+      },
+    });
+    await rig.csms.call(
+      "SetChargingProfile",
+      profile(
+        1,
+        { validFrom: "2099-01-09T00:00:00Z", validTo: "2099-02-09T00:00:00Z" },
+        { startSchedule: "2099-01-01T00:00:00Z" },
+      ),
+    );
+    await rig.csms.call(
+      "SetChargingProfile",
+      profile(2, {}, { startSchedule: "2099-01-01T00:00:00Z" }),
+    );
+    await rig.csms.call("GetChargingProfiles", {
+      requestId: 1,
+      chargingProfile: {},
+    });
+    await settle(rig);
+  }),
+
   // --- connection loss ---------------------------------------------------
   ...both("csms-drops-connection", async (rig) => {
     rig.csms.dropConnection();

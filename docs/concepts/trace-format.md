@@ -13,7 +13,7 @@ related:
   - log-format.md
   - scenario-format.md
   - ../entities/cli.md
-updated: 2026-11-05
+updated: 2026-11-08
 ---
 
 # OCPP Trace Format (v1.1)
@@ -106,6 +106,16 @@ import { logLinesToTrace } from "../../packages/trace/src/logEntryToTrace";
 
 const records = logLinesToTrace(jsonlLogLines, { ocppVersion: "1.6" });
 ```
+
+### Validation violations (`meta`)
+
+When an OCPP 1.6J charge point finds an inbound CALL's payload schema-invalid (`inboundValidation` `warn` or `enforce`, [Inbound CALL validation](ocpp-versions-and-transports.md#inbound-call-validation-on-ocpp-j-16)), the CALL's record carries
+
+```json
+"meta": { "validation": { "mode": "warn", "errorCode": "PropertyConstraintViolation", "description": "Inbound Reset: …" } }
+```
+
+`errorCode` is the OCPP-J 1.6 code `enforce` answers (and `warn` would have). The key is a producer extension in `meta`, so the schema version does not change; consumers that ignore `meta` see a plain CALL. The charge point logs an `Inbound validation: {json}` line on the `WebSocket` channel right after the CALL's `Received:` line; `logLinesToTrace` merges it into the CALL's record, and the live `--trace-output` writer holds an inbound CALL record back until the next record or the end of the tick so the same `meta` is written with it.
 
 `logLinesToTrace` drops non-wire log lines, emits the verbatim frame text in
 the `raw` field, and back-fills each CALLRESULT/CALLERROR `action` from the

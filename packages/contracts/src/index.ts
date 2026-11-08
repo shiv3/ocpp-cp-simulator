@@ -24,6 +24,8 @@ export {
   behaviorReloadResultSchema,
   cpBulkParamsSchema,
   cpBulkResultSchema,
+  cpScenarioRunParamsSchema,
+  cpScenarioRunResultSchema,
   CP_BULK_ACTIONS,
   createManyParamsSchema,
   expandIdPattern,
@@ -53,6 +55,7 @@ export type {
   FleetGroup,
   FleetMember,
   FleetTemplate,
+  CpScenarioRunResult,
   ServerInfo,
 } from "./methods";
 

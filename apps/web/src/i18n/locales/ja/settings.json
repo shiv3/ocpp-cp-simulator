@@ -56,6 +56,8 @@
   "settings.form.disableLegacyBasic": "従来のBasic認証を無効にする",
   "settings.form.noAuth": "認証は設定されていません。Basic認証を有効にするには、上でセキュリティプロファイルを1に設定してください。",
   "settings.form.authKeyGoverned": "認証は上のセキュリティセクションの認可キーで管理されます (セキュリティプロファイル{{profile}})。",
+  "settings.form.txUpdatedMeterValues": "周期メーター値を TransactionEvent (Updated) で送信する",
+  "settings.form.txUpdatedMeterValuesHint": "OCPP 2.x のトランザクション中は、定期メーター値を MeterValues ではなく TransactionEvent(Updated, MeterValuePeriodic) で送信します。OCPP 1.x では無視されます。",
   "settings.form.enableAutoMeter": "自動メーター値を有効にする",
   "settings.form.intervalSeconds": "間隔 (秒)",
   "settings.form.incrementKwh": "増加量 (kWh)",

@@ -221,6 +221,273 @@ describe("AutoTrafficRunner (#300)", () => {
   });
 });
 
+describe("AutoTrafficRunner idTag, preconditions and counters (#603)", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("presents one idTag per session to Authorize and to the start", async () => {
+    const tags = ["A", "B"];
+    let n = 0;
+    const seen: string[] = [];
+    const h = hooks({
+      idTag: () => tags[n++ % tags.length]!,
+      authorize: async (_id, tag) => {
+        seen.push(`authorize:${tag}`);
+        return true;
+      },
+      startTransaction: async (_id, tag) => {
+        seen.push(`start:${tag}`);
+      },
+    });
+    const runner = new AutoTrafficRunner(
+      { ...CONFIG, requireAuthorize: true },
+      "CP1",
+      1,
+      h,
+    );
+    runner.start();
+    try {
+      await advance(5_000);
+      await advance(10_000 + 5_000);
+      expect(seen).toEqual([
+        "authorize:A",
+        "start:A",
+        "authorize:B",
+        "start:B",
+      ]);
+    } finally {
+      runner.stop();
+    }
+  });
+
+  it("falls back to the fixed idTag without a pool hook", async () => {
+    const seen: string[] = [];
+    const h = hooks({
+      startTransaction: async (_id, tag) => {
+        seen.push(tag);
+      },
+    });
+    const runner = new AutoTrafficRunner(CONFIG, "CP1", 1, h);
+    runner.start();
+    try {
+      await advance(5_000);
+      expect(seen).toEqual(["123456"]);
+    } finally {
+      runner.stop();
+    }
+  });
+
+  it("skips a cycle whose start precondition fails, and counts the run of skips", async () => {
+    let blocker: string | null = "the connector is Charging";
+    const h = hooks({ startBlocker: () => blocker });
+    const runner = new AutoTrafficRunner(CONFIG, "CP1", 1, h);
+    runner.start();
+    try {
+      await advance(5_000);
+      await advance(5_000);
+      await advance(5_000);
+      expect(h.events).toEqual([]);
+      expect(runner.counters.attempted).toBe(3);
+      expect(runner.counters.skipped).toBe(3);
+      expect(runner.counters.consecutiveSkips).toBe(3);
+
+      blocker = null;
+      await advance(5_000);
+      expect(h.events).toEqual(["start"]);
+      expect(runner.counters.consecutiveSkips).toBe(0);
+      expect(runner.counters.skipped).toBe(3);
+    } finally {
+      runner.stop();
+    }
+  });
+
+  it("counts a roll below probabilityOfStart in the run of skips too", async () => {
+    const h = hooks();
+    const runner = new AutoTrafficRunner(
+      { ...CONFIG, probabilityOfStart: 0 },
+      "CP1",
+      1,
+      h,
+    );
+    runner.start();
+    try {
+      await advance(10_000);
+      expect(runner.counters.consecutiveSkips).toBe(2);
+    } finally {
+      runner.stop();
+    }
+  });
+
+  it("counts Authorize, start and stop outcomes apart", async () => {
+    let accept = true;
+    const h = hooks({ authorize: async () => accept });
+    const runner = new AutoTrafficRunner(
+      { ...CONFIG, requireAuthorize: true },
+      "CP1",
+      1,
+      h,
+    );
+    runner.start();
+    try {
+      await advance(5_000);
+      await advance(10_000);
+      expect(runner.counters).toMatchObject({
+        authorizeAccepted: 1,
+        authorizeRejected: 0,
+        startAccepted: 1,
+        stopAccepted: 1,
+        stopRejected: 0,
+      });
+      accept = false;
+      await advance(5_000);
+      expect(runner.counters).toMatchObject({
+        authorizeAccepted: 1,
+        authorizeRejected: 1,
+        startAccepted: 1,
+      });
+    } finally {
+      runner.stop();
+    }
+  });
+
+  it("counts a start the charge point refused, and a stop that failed", async () => {
+    let refuse = true;
+    const h = hooks({
+      startTransaction: async () => (refuse ? false : undefined),
+      stopTransaction: async () => {
+        throw new Error("boom");
+      },
+    });
+    const runner = new AutoTrafficRunner(CONFIG, "CP1", 1, h);
+    runner.start();
+    try {
+      await advance(5_000);
+      expect(runner.counters).toMatchObject({
+        startRejected: 1,
+        startAccepted: 0,
+        started: 0,
+        rejected: 1,
+      });
+      refuse = false;
+      await advance(5_000);
+      await advance(10_000);
+      expect(runner.counters).toMatchObject({
+        startAccepted: 1,
+        stopRejected: 1,
+        stopAccepted: 0,
+      });
+    } finally {
+      runner.stop();
+    }
+  });
+
+  it("moves a start the CSMS refused in its conf from accepted to rejected", async () => {
+    const h = hooks();
+    const runner = new AutoTrafficRunner(CONFIG, "CP1", 1, h);
+    runner.start();
+    try {
+      await advance(5_000);
+      expect(runner.counters.startAccepted).toBe(1);
+      runner.noteStartConfRefused();
+      expect(runner.counters).toMatchObject({
+        startAccepted: 0,
+        startRejected: 1,
+      });
+      // Nothing to correct without an open session.
+      await advance(10_000);
+      runner.noteStartConfRefused();
+      expect(runner.counters.startRejected).toBe(1);
+    } finally {
+      runner.stop();
+    }
+  });
+
+  it("counts a refused start answer once per session", async () => {
+    const h = hooks();
+    const runner = new AutoTrafficRunner(CONFIG, "CP1", 1, h);
+    runner.start();
+    try {
+      await advance(5_000);
+      runner.noteStartConfRefused();
+      runner.noteStartConfRefused();
+      expect(runner.counters).toMatchObject({
+        startAccepted: 0,
+        startRejected: 1,
+      });
+    } finally {
+      runner.stop();
+    }
+  });
+
+  it("logs a skipped cycle once per reason", async () => {
+    const log = vi.fn();
+    let blocker = "the connector is Charging";
+    const h = hooks({ startBlocker: () => blocker, log });
+    const runner = new AutoTrafficRunner(CONFIG, "CP1", 1, h);
+    runner.start();
+    try {
+      await advance(5_000);
+      await advance(5_000);
+      await advance(5_000);
+      const skipLogs = () =>
+        log.mock.calls.filter(([m]) => String(m).includes("cycle skipped"));
+      expect(skipLogs()).toHaveLength(1);
+      blocker = "a transaction is active";
+      await advance(5_000);
+      expect(skipLogs()).toHaveLength(2);
+    } finally {
+      runner.stop();
+    }
+  });
+
+  it("records the first and the latest run", async () => {
+    const h = hooks();
+    const runner = new AutoTrafficRunner(CONFIG, "CP1", 1, h);
+    expect(runner.counters.firstRunAt).toBeNull();
+    runner.start();
+    try {
+      await advance(5_000);
+      const first = runner.counters.firstRunAt;
+      expect(first).not.toBeNull();
+      await advance(15_000);
+      expect(runner.counters.firstRunAt).toBe(first);
+      expect(runner.counters.lastRunAt).toBe(first! + 15_000);
+    } finally {
+      runner.stop();
+    }
+  });
+
+  it("stops at the absolute stop time", async () => {
+    const stopAt = new Date(Date.now() + 12_000).toISOString();
+    const h = hooks();
+    const runner = new AutoTrafficRunner({ ...CONFIG, stopAt }, "CP1", 1, h);
+    runner.start();
+    try {
+      await advance(5_000 + 10_000);
+      const started = runner.counters.started;
+      expect(started).toBe(1);
+      await advance(60_000);
+      expect(runner.counters.started).toBe(started);
+    } finally {
+      runner.stop();
+    }
+  });
+
+  it("is idle after a stop time already in the past", async () => {
+    const h = hooks();
+    const runner = new AutoTrafficRunner(
+      { ...CONFIG, stopAt: new Date(Date.now() - 1000).toISOString() },
+      "CP1",
+      1,
+      h,
+    );
+    runner.start();
+    await advance(60_000);
+    expect(h.events).toEqual([]);
+    expect(runner.counters.attempted).toBe(0);
+  });
+});
+
 describe("stopping ends the session it started (#300)", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());

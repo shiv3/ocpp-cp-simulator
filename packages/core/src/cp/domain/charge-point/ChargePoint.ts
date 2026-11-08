@@ -119,6 +119,7 @@ import {
 import type { LocalOnlyDecision } from "../auth/LocalAuthorizationResolver";
 import {
   ChargingProfileStore,
+  type ApplyChargingProfileOptions,
   type ProfileRemoveCriteria,
 } from "./ChargingProfileStore";
 import type { ActiveChargingProfile } from "../connector/Connector";
@@ -264,7 +265,17 @@ export interface ChargePointSimulationOptions {
 export type ChargePointResetType = "Hard" | "Soft";
 type ChargePointResetSource = "ocpp-call" | "ocpp15-soap";
 
+/**
+ * What an OCPP 1.6J charge point does with an inbound CALL whose payload
+ * breaks the request schema (#593): `off` skips the check, `warn` logs it and
+ * runs the handler anyway, `enforce` answers a CALLERROR (OCPP-J 1.6 §4.2.3).
+ */
+export type InboundValidationMode = "off" | "warn" | "enforce";
+export const DEFAULT_INBOUND_VALIDATION: InboundValidationMode = "warn";
+
 export interface ChargePointTransportOptions {
+  /** OCPP 1.6J only. Default `warn`. */
+  readonly inboundValidation?: InboundValidationMode;
   readonly centralSystemUrl?: string;
   readonly soapCallbackUrl?: string;
   readonly soapPath?: string;
@@ -319,6 +330,7 @@ export class ChargePoint {
   /** #537: stops following the certificate store (dispose). */
   private _unwatchClientIdentity: (() => void) | null = null;
   private readonly _idTagPool: IdTagPool | null;
+  private _bootAccepted = false;
   private readonly _outbox: Outbox;
   private readonly _heartbeat: HeartbeatService;
   private readonly _clockAligned: ClockAlignedMeterScheduler;
@@ -404,6 +416,17 @@ export class ChargePoint {
     manualRuleIds: string[];
   } | null = null;
 
+  private _inboundValidation: InboundValidationMode;
+
+  /** See {@link InboundValidationMode}. Read on every inbound CALL. */
+  get inboundValidation(): InboundValidationMode {
+    return this._inboundValidation;
+  }
+
+  setInboundValidation(mode: InboundValidationMode): void {
+    this._inboundValidation = mode;
+  }
+
   constructor(
     private readonly _id: string,
     private readonly _bootNotification: BootNotification,
@@ -437,6 +460,8 @@ export class ChargePoint {
           : new RngStreams(simulation.seed);
     this._autoMeterValueSetting = autoMeterValueSetting;
     this._transportUrl = transportOptions.centralSystemUrl ?? wsUrl;
+    this._inboundValidation =
+      transportOptions.inboundValidation ?? DEFAULT_INBOUND_VALIDATION;
     this._logger.setCpId(this._id);
     this._logRepository = new LogRepository(this._database);
     // #456: installed certificates survive a restart when state persists.
@@ -1183,6 +1208,12 @@ export class ChargePoint {
     return this._status;
   }
 
+  /** Whether the Central System's latest BootNotification answer was
+   *  `Accepted` and the connection has not closed since (#603). */
+  get bootAccepted(): boolean {
+    return this._bootAccepted;
+  }
+
   /** Whether the OCPP WebSocket is currently open OR mid-handshake. Used
    *  by LocalChargePointService.restoreConnections to avoid issuing a
    *  second connect() against a CP whose first socket is still in its
@@ -1249,6 +1280,23 @@ export class ChargePoint {
    */
   nextIdTag(connectorId = 0): string | null {
     return this._idTagPool?.next(connectorId) ?? null;
+  }
+
+  /**
+   * The pool's tags and distribution (#603), for traffic that keeps its own
+   * seeded cursor instead of advancing the one `nextIdTag` shares. `null`
+   * without a pool.
+   */
+  idTagPoolInfo(): {
+    tags: readonly string[];
+    distribution: IdTagDistribution;
+  } | null {
+    return this._idTagPool
+      ? {
+          tags: this._idTagPool.list(),
+          distribution: this._idTagPool.distributionPolicy,
+        }
+      : null;
   }
 
   /**
@@ -1397,7 +1445,9 @@ export class ChargePoint {
 
   /**
    * Install a profile on the station store (`connectorId` 0) or on its
-   * connector, replacing any profile with the same id in that scope, and
+   * connector, replacing any profile with the same id in that scope (and,
+   * with `options.replaceSameSlot`, the one with the same stackLevel and
+   * purpose), and
    * emit `chargingProfileApplied`. Validation is the caller's job.
    *
    * @returns `false`, changing nothing, when the connector does not exist.
@@ -1405,19 +1455,33 @@ export class ChargePoint {
   applyChargingProfile(
     profile: ActiveChargingProfile,
     source: ChargingProfileSource,
+    options: ApplyChargingProfileOptions = {},
   ): boolean {
-    let replaced: boolean;
+    const idsBefore = (list: readonly ActiveChargingProfile[]) =>
+      list.map((p) => p.chargingProfileId);
+    let before: number[];
+    let after: number[];
     if (profile.connectorId === 0) {
-      replaced = this._stationProfiles.add(profile);
+      before = idsBefore(this._stationProfiles.all());
+      this._stationProfiles.add(profile, options);
+      after = idsBefore(this._stationProfiles.all());
     } else {
       const connector = this.getConnector(profile.connectorId);
       if (!connector) return false;
-      replaced = connector.addChargingProfile(profile);
+      before = idsBefore(connector.chargingProfiles);
+      connector.addChargingProfile(profile, options);
+      after = idsBefore(connector.chargingProfiles);
     }
+    const replaced = before.includes(profile.chargingProfileId);
+    // Other profiles the same-slot rule displaced (#594).
+    const replacedIds = before.filter(
+      (id) => id !== profile.chargingProfileId && !after.includes(id),
+    );
     this._events.emit("chargingProfileApplied", {
       connectorId: profile.connectorId,
       profile,
       replaced,
+      replacedIds,
       source,
     });
     return true;
@@ -1581,11 +1645,13 @@ export class ChargePoint {
     connectorId: number,
     status: string,
     stopped: boolean,
+    midSession = false,
   ): void {
     this._events.emit("startTransactionNotAccepted", {
       connectorId,
       status,
       stopped,
+      ...(midSession && { midSession: true as const }),
     });
   }
 
@@ -2183,6 +2249,7 @@ export class ChargePoint {
 
   /** Boot-notification gate accessors used by BootNotificationResultHandler. */
   markBootAccepted(): void {
+    this._bootAccepted = true;
     this._outbox.setBootStatus({ status: "Accepted" });
     if (
       this._ocppVersion === "OCPP-1.6J" &&
@@ -2199,10 +2266,12 @@ export class ChargePoint {
   }
 
   markBootPending(): void {
+    this._bootAccepted = false;
     this._outbox.setBootStatus({ status: "Pending" });
   }
 
   markBootRejected(retryAfterSeconds: number): void {
+    this._bootAccepted = false;
     this._outbox.setBootStatus({
       status: "Rejected",
       retryAfter: new Date(this._clock.now() + retryAfterSeconds * 1000),
@@ -2378,6 +2447,7 @@ export class ChargePoint {
    * a dead socket.
    */
   private teardownAfterClose(): void {
+    this._bootAccepted = false;
     // A `triggerOn: "connect"` scenario is armed once per connect, recorded on
     // `Connector.lastAutoStartedScenarioKey` so re-emitting Available doesn't
     // restart something already running. That arm must not survive the socket

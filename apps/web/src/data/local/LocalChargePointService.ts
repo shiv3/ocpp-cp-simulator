@@ -44,6 +44,14 @@ import type { ScenarioManager } from "@ocpp-cp-sim/core/cp/application/scenario/
 import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
 import { behaviorsOfModule } from "@ocpp-cp-sim/core/cp/application/engine/behaviorModule";
 import { LocalScenarioRuntime } from "./LocalScenarioRuntime";
+import { ScenarioRunRecorder } from "@ocpp-cp-sim/core/cp/application/verification/ScenarioRunRecorder";
+import type { ScenarioRunRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/ScenarioRunRepository";
+import { createScenarioRunRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/createScenarioRunRepository";
+import type {
+  ScenarioRunPage,
+  ScenarioRunQuery,
+} from "@ocpp-cp-sim/core/cp/application/verification/ScenarioRunSummary";
+import { appVersionString } from "../../lib/appBuildLabel";
 import { SqliteScenarioRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/SqliteScenarioRepository";
 import type {
   BootNotification,
@@ -242,6 +250,8 @@ export class LocalChargePointService implements ChargePointService {
   private readonly vehicleProfiles: VehicleProfileRepository;
   /** #447: the browser's sql.js `charging_sessions` table, or in memory. */
   private readonly chargingSessions: ChargingSessionRepository;
+  /** #394: the browser's sql.js `scenario_runs` table, or in memory. */
+  private readonly scenarioRuns: ScenarioRunRepository;
 
   constructor(
     private readonly database: Database | null = null,
@@ -254,6 +264,7 @@ export class LocalChargePointService implements ChargePointService {
     this.scenarioRepository = new SqliteScenarioRepository(database);
     this.vehicleProfiles = new VehicleProfileRepository(database);
     this.chargingSessions = createChargingSessionRepository(database);
+    this.scenarioRuns = createScenarioRunRepository(database);
 
     // Subscribe to networkSim atom changes for live re-apply
     this.store.sub(networkSimAtom, () => {
@@ -270,8 +281,36 @@ export class LocalChargePointService implements ChargePointService {
     this.attachEventForwarders(chargePoint);
     this.scenarioRuntimes.set(
       chargePoint.id,
-      new LocalScenarioRuntime(chargePoint, this.scenarioRepository, (event) =>
-        this.emit(chargePoint.id, event),
+      new LocalScenarioRuntime(
+        chargePoint,
+        this.scenarioRepository,
+        (event) => this.emit(chargePoint.id, event),
+        new ScenarioRunRecorder({
+          chargePoint,
+          runs: this.scenarioRuns,
+          simulatorVersion: appVersionString,
+          ocppVersion: () => chargePoint.ocppVersion,
+          onRecorded: (result) => {
+            // Persist before announcing: a reload right after must find it.
+            const announce = () =>
+              this.emit(chargePoint.id, {
+                type: "scenario-run-recorded",
+                connectorId: result.connectorId,
+                scenarioId: result.scenarioId,
+                runId: result.runId,
+              });
+            const flushed = this.database?.flush?.();
+            if (!flushed) {
+              announce();
+              return;
+            }
+            void Promise.resolve(flushed)
+              .catch((error) =>
+                console.error("Failed to persist the scenario run", error),
+              )
+              .then(announce);
+          },
+        }),
       ),
     );
   }
@@ -416,6 +455,7 @@ export class LocalChargePointService implements ChargePointService {
     // Also reaches the in-memory stores a service without a database keeps.
     this.vehicleProfiles.clear();
     this.chargingSessions.clear();
+    this.scenarioRuns.clear();
     if (this.database) {
       resetSimulatorState(this.database);
       await this.database.flush?.();
@@ -1208,15 +1248,24 @@ export class LocalChargePointService implements ChargePointService {
   }
 
   async getScenarioReport(
-    _id: string,
+    id: string,
     _connectorId: number,
-    _scenarioId: string,
-    _runId?: string,
+    scenarioId: string,
+    runId?: string,
   ): Promise<ScenarioRunResult | null> {
-    // Local (in-browser) mode runs scenarios via ScenarioManager, which has
-    // no run-report machinery — reports are recorded only by the headless
-    // CLI service. Always null here.
-    return null;
+    // #394: the same lookup as the daemon's (runs are keyed by scenarioId;
+    // no runId means the latest recorded run).
+    const result =
+      runId === undefined
+        ? this.scenarioRuns.latest(id, scenarioId)
+        : this.scenarioRuns.get(id, runId);
+    if (!result || result.scenarioId !== scenarioId) return null;
+    return result;
+  }
+
+  /** #394: the run history, paged like the daemon's `scenario.runs.list`. */
+  async listScenarioRuns(query: ScenarioRunQuery): Promise<ScenarioRunPage> {
+    return this.scenarioRuns.list(query);
   }
 
   async getScenario(
@@ -1450,8 +1499,16 @@ export class LocalChargePointService implements ChargePointService {
     return cp;
   }
 
+  /**
+   * Make the registered charge points match `definitions`. A charge point that
+   * drops out is released (its connections close). Its stored run history
+   * survives unless `options.forget` is set: that is for a removal from the
+   * saved configuration, not for entering Remote mode or an empty config
+   * that has not loaded (#394).
+   */
   async syncLocalChargePoints(
     definitions: LocalChargePointDefinition[],
+    options: { forget?: boolean } = {},
   ): Promise<ChargePoint[]> {
     const seen = new Set<string>();
 
@@ -1465,6 +1522,8 @@ export class LocalChargePointService implements ChargePointService {
         this.registerChargePoint(cp);
       } else {
         cp.autoMeterValueSetting = definition.autoMeterValueSetting;
+        // #550: the console toggles this on a running charge point.
+        cp.txUpdatedMeterValues = definition.txUpdatedMeterValues === true;
         // TODO: handle connector count changes if necessary
       }
 
@@ -1476,6 +1535,9 @@ export class LocalChargePointService implements ChargePointService {
     Array.from(this.chargePoints.keys()).forEach((id) => {
       if (!seen.has(id)) {
         this.unregisterChargePoint(id);
+        // #394: a charge point removed from the configuration takes its run
+        // history with it, as on the daemon. A mere release keeps it.
+        if (options.forget) this.scenarioRuns.deleteForChargePoint(id);
       }
     });
 

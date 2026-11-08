@@ -312,6 +312,7 @@ describe("MCP curated tool schema parity (general, #299)", () => {
     { tool: "behavior_list", method: "behavior.list" },
     { tool: "behavior_reload", method: "behavior.reload" },
     { tool: "cp_bulk", method: "cp.bulk" },
+    { tool: "cp_scenario_run", method: "cp.scenario.run" },
     { tool: "cp_connect", method: "connect" },
     { tool: "cp_disconnect", method: "disconnect" },
     { tool: "cp_status", method: "status" },

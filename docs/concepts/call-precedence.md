@@ -4,6 +4,8 @@ type: concept
 summary: The order in which the five ways to answer a CSMS CALL are tried — inbound policy, response override, a running scenario, a code behavior, the default — and how the scenario parking of RemoteStart / RemoteStop relates to it.
 sources:
   - packages/core/src/cp/infrastructure/transport/inbound/InboundCallGate.ts
+  - packages/core/src/cp/infrastructure/transport/OCPPMessageHandler.ts
+  - "issue #593"
   - packages/core/src/cp/application/behavior/BehaviorRegistry.ts
   - packages/core/src/cp/application/engine/behaviors/transaction.ts
   - packages/core/src/test/behavior/precedence.bun.test.ts
@@ -45,6 +47,11 @@ CALLERROR / silence (1) or `{ status }` (2). Steps 3 and 4 run in `BehaviorRegis
 gate calls synchronously and before the payload is validated, so a rule can own a malformed CALL. Step 5
 is the gate's "default path" for the actions that have a default behavior; step 6 is the same path for the
 rest.
+
+On OCPP 1.6J the payload of a CALL that reaches steps 5 and 6 is then validated per `inboundValidation`
+(`off` / `warn` / `enforce`, default `warn`; see
+[Inbound CALL validation on OCPP-J 1.6](ocpp-versions-and-transports.md#inbound-call-validation-on-ocpp-j-16)).
+Policies and overrides are consulted before validation, as on 2.x, so a policy can answer a malformed CALL.
 
 ### Within a step
 

@@ -6,6 +6,7 @@ import type {
   ChargePointInitOptions,
   SoapTunnelConfig,
 } from "./types";
+import type { InboundValidationMode } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
 import { CLIChargePointService } from "./service";
 import { startRepl } from "./repl";
 import { startJsonMode } from "./jsonMode";
@@ -60,6 +61,7 @@ import {
 } from "@ocpp-cp-sim/core/cp/domain/types/OcppVersion";
 import { loadFleetTemplateFiles } from "./server/fleetTemplateFiles";
 import type { FleetTemplate } from "@ocpp-cp-sim/contracts/index";
+import { DEFAULT_BOOTSTRAP_PACING } from "./server/bootstrapPacing";
 import { tlsKeyPermissionWarning } from "./tlsKeyPermissions";
 
 /** Result of a `dist/` lookup: where it was found (if at all) and every
@@ -192,6 +194,11 @@ export function parseArgs(argv: string[]): CLIOptions {
   let cpCount = 1;
   let cpIdPattern: string | null = null;
   const fleetTemplateFiles: string[] = [];
+  // Fleet startup pacing (#610); `undefined` keeps the built-in default.
+  let bootstrapConcurrency: string | undefined;
+  let startDelay: string | undefined;
+  let startJitter: string | undefined;
+  let startSeed: string | undefined;
   const labelEntries: Array<[string, string]> = [];
   let metrics = false;
   let metricsNoAuth = false;
@@ -272,6 +279,7 @@ export function parseArgs(argv: string[]): CLIOptions {
   let insecureTlsKeyPerms = false;
   let cpoName: string | undefined;
   let txUpdatedMeterValues = false;
+  let inboundValidation: InboundValidationMode | undefined;
   let traceOutput: string | null = null;
 
   for (let i = 2; i < argv.length; i++) {
@@ -301,6 +309,22 @@ export function parseArgs(argv: string[]): CLIOptions {
           process.exit(1);
         }
         fleetTemplateFiles.push(next);
+        i++;
+        break;
+      case "--bootstrap-concurrency":
+        bootstrapConcurrency = next ?? "";
+        i++;
+        break;
+      case "--start-delay":
+        startDelay = next ?? "";
+        i++;
+        break;
+      case "--start-jitter":
+        startJitter = next ?? "";
+        i++;
+        break;
+      case "--start-seed":
+        startSeed = next ?? "";
         i++;
         break;
       case "--cp-id-pattern":
@@ -702,6 +726,18 @@ export function parseArgs(argv: string[]): CLIOptions {
         cpoName = requireFlagValue("--cpo-name", next);
         i++;
         break;
+      case "--inbound-validation": {
+        const value = requireFlagValue("--inbound-validation", next);
+        if (value !== "off" && value !== "warn" && value !== "enforce") {
+          process.stderr.write(
+            "Error: --inbound-validation must be off, warn or enforce\n",
+          );
+          process.exit(1);
+        }
+        inboundValidation = value;
+        i++;
+        break;
+      }
       case "--tx-updated-meter-values":
         txUpdatedMeterValues = true;
         break;
@@ -965,6 +1001,79 @@ export function parseArgs(argv: string[]): CLIOptions {
     );
     process.exit(1);
   }
+  // Pacing flags: a malformed number is refused rather than turned into NaN
+  // (which would start the whole fleet at once, silently), and the flags need
+  // a server mode and a bootstrapped fleet or they would be accepted and
+  // ignored (#610).
+  const pacingFlags: Array<[string, string | undefined, number, boolean]> = [
+    ["--bootstrap-concurrency", bootstrapConcurrency, 1, false],
+    ["--start-delay", startDelay, 0, false],
+    ["--start-jitter", startJitter, 0, false],
+    ["--start-seed", startSeed, 0, true],
+  ];
+  const pacingValues: Record<string, number> = {};
+  for (const [flag, raw, min, allowNegative] of pacingFlags) {
+    if (raw === undefined) continue;
+    const value = /^-?\d+$/.test(raw) ? Number(raw) : NaN;
+    if (!Number.isSafeInteger(value) || (!allowNegative && value < min)) {
+      process.stderr.write(
+        `Error: ${flag} must be ${
+          allowNegative
+            ? "an integer"
+            : min === 1
+              ? "a positive integer"
+              : "a non-negative integer (milliseconds)"
+        }\n`,
+      );
+      process.exit(1);
+    }
+    pacingValues[flag] = value;
+    if (isClientMode) {
+      // `--http-port` satisfies the server-mode check below, so without this
+      // `--http-port 9700 --send … --start-delay 10` would be accepted and
+      // ignored, the hole --watch (#314) and --label (#472) already close.
+      process.stderr.write(
+        `Error: ${flag} cannot be combined with a client mode (--send, --stop or --events); it paces the charge points a server starts\n`,
+      );
+      process.exit(1);
+    }
+    if (!isServerMode || !cpId) {
+      process.stderr.write(
+        `Error: ${flag} needs a server mode (--daemon, --http-port or --web-console) and --cp-id\n`,
+      );
+      process.exit(1);
+    }
+  }
+  if (startSeed !== undefined && startJitter === undefined) {
+    process.stderr.write(
+      "Error: --start-seed has no effect without --start-jitter\n",
+    );
+    process.exit(1);
+  }
+  // setTimeout fires after 1 ms when its delay exceeds 2^31-1 ms (about 24.8
+  // days), which would silently collapse the schedule for the later charge
+  // points, so the last scheduled offset must stay below that.
+  const MAX_TIMER_MS = 2 ** 31 - 1;
+  const lastOffsetMs =
+    (Math.max(cpCount, 1) - 1) * (pacingValues["--start-delay"] ?? 0) +
+    (pacingValues["--start-jitter"] ?? 0);
+  if (lastOffsetMs > MAX_TIMER_MS) {
+    process.stderr.write(
+      `Error: (--cp-count - 1) × --start-delay + --start-jitter must not exceed ${MAX_TIMER_MS} ms (about 24.8 days), got ${lastOffsetMs}\n`,
+    );
+    process.exit(1);
+  }
+  const bootstrapPacing =
+    Object.keys(pacingValues).length === 0
+      ? undefined
+      : {
+          concurrency:
+            pacingValues["--bootstrap-concurrency"] ??
+            DEFAULT_BOOTSTRAP_PACING.concurrency,
+          startDelayMs: pacingValues["--start-delay"] ?? 0,
+          startJitterMs: pacingValues["--start-jitter"] ?? 0,
+          startSeed: pacingValues["--start-seed"] ?? 0,
+        };
   if (labels && !isServerMode) {
     // Labels are read by `cp.list` and the console only; the standalone REPL
     // / JSON paths have neither, so the flag would be accepted and ignored.
@@ -1186,6 +1295,7 @@ export function parseArgs(argv: string[]): CLIOptions {
     cpCount,
     cpIdPattern,
     fleetTemplateFiles,
+    bootstrapPacing,
     labels,
     metrics,
     metricsNoAuth,
@@ -1237,6 +1347,7 @@ export function parseArgs(argv: string[]): CLIOptions {
     authorizationKey,
     cpoName,
     ...(txUpdatedMeterValues ? { txUpdatedMeterValues } : {}),
+    ...(inboundValidation ? { inboundValidation } : {}),
     tls,
     tlsCaPath,
     tlsCertPath,
@@ -1310,6 +1421,15 @@ Options:
                            (one template or an array; repeatable). Read-only;
                            list and instantiate with fleet.template.* /
                            fleet.create.
+  --bootstrap-concurrency <n>
+                           Server mode: charge points started at once
+                           (default: 8).
+  --start-delay <ms>       Server mode: milliseconds between the scheduled
+                           starts of consecutive charge points (default: 0).
+  --start-jitter <ms>      Server mode: push each start back by a seeded
+                           random 0..ms-1 (default: 0).
+  --start-seed <n>         Server mode: seed of --start-jitter (default: 0); the same seed
+                           gives the same schedule.
   --label <key=value>      Server mode: label every bootstrapped charge point.
                            Repeatable; split on the first '='. Requires
                            --cp-id. A charge point restored from --state-db
@@ -1331,6 +1451,11 @@ Options:
                            --insecure-tls-key-perms is passed.
   --insecure-tls-key-perms Allow --tls-key files readable by group/other.
   --cpo-name <name>        CPO name for generated SignCertificate CSRs.
+  --inbound-validation <off|warn|enforce>
+                           OCPP 1.6J: what to do with an inbound CALL whose
+                           payload breaks the request schema. warn (default)
+                           logs and traces the violation and runs the handler;
+                           enforce answers a CALLERROR; off skips the check.
   --tx-updated-meter-values
                            OCPP 2.x: send the periodic meter samples taken
                            during a transaction as TransactionEvent(Updated,
@@ -1651,6 +1776,9 @@ export function buildBootstrap(
     authorizationKey: options.authorizationKey,
     cpoName: options.cpoName,
     ...(options.txUpdatedMeterValues ? { txUpdatedMeterValues: true } : {}),
+    ...(options.inboundValidation
+      ? { inboundValidation: options.inboundValidation }
+      : {}),
     ...((options.useBehaviors?.length ?? 0) > 0
       ? { behaviors: [...options.useBehaviors!] }
       : {}),
@@ -1864,6 +1992,7 @@ async function main(): Promise<void> {
       bootstrap: buildBootstrap(options),
       bootstrapCount: options.cpCount,
       bootstrapIdPattern: options.cpIdPattern ?? undefined,
+      bootstrapPacing: options.bootstrapPacing,
       soapCallbackUrlExplicit: options.soapCallbackUrlExplicit,
       soapPublicBaseUrl: options.soapPublicBaseUrl,
       soapPath: options.soapPath,

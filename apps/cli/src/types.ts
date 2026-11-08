@@ -1,8 +1,10 @@
+import type { BootstrapPacing } from "./server/bootstrapPacing";
 import type {
   OcppSecurityProfile,
   OcppTlsOptions,
 } from "@ocpp-cp-sim/core/cp/infrastructure/transport/wsUrlWithBasic";
 import type { UrlDistribution } from "@ocpp-cp-sim/core/cp/infrastructure/transport/SupervisionUrlPool";
+import type { InboundValidationMode } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
 import type { IdTagDistribution } from "@ocpp-cp-sim/core/cp/domain/auth/IdTagPool";
 import type { Labels } from "@ocpp-cp-sim/contracts/labels";
 
@@ -52,6 +54,8 @@ export interface CLIOptions {
   readonly cpIdPattern: string | null;
   /** `--fleet-template <file>`, repeatable (#445). */
   readonly fleetTemplateFiles: readonly string[];
+  /** Startup pacing flags (#610); absent: the defaults (8 at once, no delay). */
+  readonly bootstrapPacing?: BootstrapPacing;
   /**
    * `--label key=value` (#472): labels every bootstrapped charge point is
    * created with. A charge point restored from `--state-db` keeps its own.
@@ -201,6 +205,8 @@ export interface CLIOptions {
   readonly cpoName?: string;
   /** `--tx-updated-meter-values` (#347). See ChargePointInitOptions. */
   readonly txUpdatedMeterValues?: boolean;
+  /** `--inbound-validation` (#593). See ChargePointInitOptions. */
+  readonly inboundValidation?: InboundValidationMode;
   readonly tls?: OcppTlsOptions;
   readonly tlsCaPath?: string;
   readonly tlsCertPath?: string;
@@ -223,6 +229,8 @@ export interface ChargePointInitOptions {
   /** All supervision URLs, when more than one was given. OCPP-J only. */
   readonly supervisionUrls?: readonly string[];
   readonly urlDistribution?: UrlDistribution;
+  /** OCPP 1.6J inbound CALL payload validation (#593). Default `warn`. */
+  readonly inboundValidation?: InboundValidationMode;
   /**
    * Resolved idTags this charge point draws from when a call names none. The
    * `file` form is resolved at creation, so what is stored and persisted is
@@ -386,6 +394,7 @@ export interface ChargePointStatus {
     readonly securityProfile?: OcppSecurityProfile;
     readonly cpoName?: string;
     readonly txUpdatedMeterValues?: boolean;
+    readonly inboundValidation?: InboundValidationMode;
     readonly tlsCaPath?: string;
     readonly tlsCertPath?: string;
     readonly tlsKeyPath?: string;

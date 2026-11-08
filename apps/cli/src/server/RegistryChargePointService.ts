@@ -622,9 +622,30 @@ export class RegistryChargePointService implements ChargePointService {
 
   async listChargingSessions(
     id: string,
-    query?: Omit<ChargingSessionQuery, "cpId">,
+    query?: Omit<ChargingSessionQuery, "cpId" | "cpIds">,
   ): Promise<ChargingSessionPage> {
     return this.requireService(id).listChargingSessions(query);
+  }
+
+  /**
+   * #489: the sessions of every charge point, or of the ones `labels` selects
+   * (`undefined` and `{}` both mean all, as in `cp.list`). Read straight from
+   * the registry's shared store, so charge points are paged together in one
+   * order: start time, then record order.
+   */
+  async listFleetChargingSessions(
+    query: Omit<ChargingSessionQuery, "cpId" | "cpIds"> & {
+      labels?: Labels;
+    } = {},
+  ): Promise<ChargingSessionPage> {
+    const { labels, ...rest } = query;
+    // Narrowed by label only when a selector was given: listing the whole
+    // store also reaches the sessions of a charge point that is gone.
+    const hasSelector = labels !== undefined && Object.keys(labels).length > 0;
+    return this.registry.chargingSessions.list({
+      ...rest,
+      ...(hasSelector ? { cpIds: this.registry.selectByLabels(labels) } : {}),
+    });
   }
 
   async listScenarioDefinitions(
@@ -1063,6 +1084,7 @@ function toInitOptions(
     cpoName: params.cpoName ?? existing?.cpoName,
     txUpdatedMeterValues:
       params.txUpdatedMeterValues ?? existing?.txUpdatedMeterValues,
+    inboundValidation: params.inboundValidation ?? existing?.inboundValidation,
     tls: params.tls ?? existing?.tls,
     tlsCaPath: params.tlsCaPath ?? existing?.tlsCaPath,
     tlsCertPath: params.tlsCertPath ?? existing?.tlsCertPath,
@@ -1126,6 +1148,7 @@ function toChargePointSnapshot(status: ChargePointStatus): ChargePointSnapshot {
           securityProfile: status.config.securityProfile,
           cpoName: status.config.cpoName,
           txUpdatedMeterValues: status.config.txUpdatedMeterValues,
+          inboundValidation: status.config.inboundValidation,
           tlsCaPath: status.config.tlsCaPath,
           tlsCertPath: status.config.tlsCertPath,
           tlsKeyPath: status.config.tlsKeyPath,

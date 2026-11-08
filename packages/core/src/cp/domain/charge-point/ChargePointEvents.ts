@@ -116,11 +116,14 @@ export interface ChargePointEvents {
   // Smart-charging events (#469)
   /** A profile was installed on a connector or, with `connectorId` 0, on the
    *  station store. `replaced` is true when it updated a profile with the
-   *  same id in that scope. */
+   *  same id in that scope; `replacedIds` lists the ids of other profiles in
+   *  that scope it displaced because they had the same stackLevel and purpose
+   *  (1.6 SetChargingProfile, #594). */
   chargingProfileApplied: {
     connectorId: number;
     profile: ActiveChargingProfile;
     replaced: boolean;
+    replacedIds: number[];
     source: ChargingProfileSource;
   };
   /** At least one profile was removed from one scope. Never emitted for a
@@ -197,6 +200,10 @@ export interface ChargePointEvents {
     connectorId: number;
     status: string;
     stopped: boolean;
+    /** OCPP 2.x: the refusal answered a TransactionEvent after `Started`
+     *  (an `Updated` carrying the idToken), not the start. Absent
+     *  otherwise (#603). */
+    midSession?: true;
   };
   /** A transmission of a transaction-related message failed. OCPP 2.0.1 /
    *  2.1 TransactionEvent (E13.FR.02): the CSMS answered it with a CALLERROR

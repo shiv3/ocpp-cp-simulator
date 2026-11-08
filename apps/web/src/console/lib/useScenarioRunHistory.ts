@@ -14,7 +14,7 @@ export interface UseScenarioRunHistoryResult {
   page: ScenarioRunPage;
   isLoading: boolean;
   error: string | null;
-  /** False in local mode: the browser runtime records no run history. */
+  /** False for a service that cannot list runs. */
   supported: boolean;
   refresh: () => Promise<void>;
 }
@@ -36,7 +36,8 @@ function mayMatch(
 }
 
 /**
- * The daemon's recorded scenario runs matching `query` (#388,
+ * The recorded scenario runs (daemon, or the browser's sql.js database in
+ * Local mode) matching `query` (#388,
  * `scenario.runs.list`). Lists on mount and whenever the query changes, and
  * re-lists (debounced) when one of `watchCpIds` records a run the query can
  * match — the `scenario-run-recorded` event fires after the write, so the
@@ -44,17 +45,17 @@ function mayMatch(
  * the simulator reset, which drop runs. `query = null` lists nothing (the
  * caller's target is not known yet).
  *
- * The history lives in the daemon, not in this hook, so it survives
+ * The history lives in the store, not in this hook, so it survives
  * navigating away and back.
  */
 export function useScenarioRunHistory(
   query: ScenarioRunQuery | null,
   watchCpIds: string[],
 ): UseScenarioRunHistoryResult {
-  const { chargePointService, mode } = useDataContext();
-  const supported =
-    mode === "remote" &&
-    typeof chargePointService.listScenarioRuns === "function";
+  const { chargePointService } = useDataContext();
+  // Both runtimes keep a history (#394): the daemon's, and in Local mode the
+  // browser's sql.js `scenario_runs`. A service without the method has none.
+  const supported = typeof chargePointService.listScenarioRuns === "function";
 
   const [page, setPage] = useState<ScenarioRunPage>(EMPTY_PAGE);
   const [refreshing, setRefreshing] = useState(false);

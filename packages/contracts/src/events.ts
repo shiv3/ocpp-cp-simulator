@@ -131,7 +131,15 @@ export function redactCp(config: FullCpConfig): WireCpConfig {
           connectors: config.chargerCapabilities.connectors.map((c) => ({
             connectorId: c.connectorId,
             maxDeliveryPowerW: c.maxDeliveryPowerW,
+            ...(c.meter ? { meter: structuredClone(c.meter) } : {}),
           })),
+          ...(config.chargerCapabilities.mainMeter
+            ? {
+                mainMeter: structuredClone(
+                  config.chargerCapabilities.mainMeter,
+                ),
+              }
+            : {}),
         }
       : undefined,
   };

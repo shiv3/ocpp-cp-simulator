@@ -40,6 +40,7 @@ export function stubOperatingPoint(
         .initialSoc,
     },
     charger: chargerTermOf(state.maxDeliveryPowerW),
+    meter: {},
     fault: { offering: state.status === "Charging", energyOfferSuspended },
   });
 }

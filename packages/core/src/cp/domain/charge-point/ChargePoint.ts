@@ -1,5 +1,6 @@
 import {
   maxDeliveryPowerWFor,
+  meterRealismFor,
   type ChargerCapabilities,
 } from "./ChargerCapabilities";
 import type {
@@ -26,6 +27,7 @@ import type {
 import type { LogEntry } from "../../shared/Logger";
 import { Logger, LogType } from "../../shared/Logger";
 import { HeartbeatService } from "../../application/services/HeartbeatService";
+import { MainMeter } from "./MainMeter";
 import { ClockAlignedMeterScheduler } from "./ClockAlignedMeterScheduler";
 import { StateManager } from "../../application/services/StateManager";
 import { OperationalTimeline } from "../../application/services/OperationalTimeline";
@@ -407,6 +409,8 @@ export interface ChargePointTransportOptions {
 
 export class ChargePoint {
   private readonly _connectors: Map<number, Connector> = new Map();
+  /** The station main meter on connector 0 / EVSE 0 (#617); opt-in. */
+  private _mainMeter: MainMeter | undefined;
   // cpId is injected later in the constructor body so the Logger can
   // stamp every JSON line with the CP it belongs to (multi-CP daemons).
   private readonly _logger = new Logger();
@@ -656,6 +660,9 @@ export class ChargePoint {
       connector.setMaxDeliveryPowerW(
         maxDeliveryPowerWFor(transportOptions.chargerCapabilities, connectorId),
       );
+      connector.setMeterRealism(
+        meterRealismFor(transportOptions.chargerCapabilities, connectorId),
+      );
       // §5.2: Unavailable set via ChangeAvailability persists across
       // reboots. Restore the persisted value before any event listeners
       // have a chance to react.
@@ -706,6 +713,15 @@ export class ChargePoint {
         }
       });
       this._connectors.set(connectorId, connector);
+    }
+
+    const mainMeterConfig = transportOptions.chargerCapabilities?.mainMeter;
+    if (mainMeterConfig) {
+      this._mainMeter = new MainMeter(
+        mainMeterConfig,
+        () => this._connectors,
+        this._clock,
+      );
     }
 
     if (isSoapVersion(this._ocppVersion)) {
@@ -1458,6 +1474,12 @@ export class ChargePoint {
 
   get connectorNumber(): number {
     return this._connectors.size;
+  }
+
+  /** The station main meter (connector 0 / EVSE 0), `undefined` when the
+   *  station has none (#617). */
+  get mainMeter(): MainMeter | undefined {
+    return this._mainMeter;
   }
 
   get connectors(): Map<number, Connector> {
@@ -2645,6 +2667,12 @@ export class ChargePoint {
         timestamp,
       });
     });
+    if (this._mainMeter) {
+      this._outbox.sendMeterValue(undefined, 0, "Sample.Clock", {
+        measurands,
+        timestamp,
+      });
+    }
   }
 
   /** A station without power starts, stops and boots nothing (#798). */
@@ -3218,6 +3246,10 @@ export class ChargePoint {
   }
 
   sendMeterValue(connectorId: number, context?: ReadingContext): void {
+    if (connectorId === 0 && this._mainMeter) {
+      this._outbox.sendMeterValue(undefined, 0, context);
+      return;
+    }
     const connector = this.getConnector(connectorId);
     if (!connector) {
       this._logger.error(

@@ -28,7 +28,7 @@ fields the schema deliberately does not reject.
   1.1; issue #301 the charging-curve and electrical `evSettings` fields in
   1.2; issue #389 the `ocppCall` node in 1.3; the web console's Library the
   optional `libraryId` in 1.4; issue #566 the `callResponse` and `useBehavior` nodes and
-  `csmsCallTrigger` `behavior` / `onBusy` in 1.5; issue #654 `useBehavior` `params` and `mode` in 1.6 — the version history is the
+  `csmsCallTrigger` `behavior` / `onBusy` in 1.5; issue #654 `useBehavior` `params` and `mode`, then the `notify`, `switch`, `choice` and `setState` nodes, `callResponse` `accepted` / `rejected`, `delay` `until` / `jitterSeconds` and the `$from` roots `charger`, `connector`, `state`, in 1.6 — the version history is the
   [changelog](../concepts/scenario-format.md#changelog)).
 - `evSettings.attribution` (optional array, #458) carries the credit owed for
   data copied from an imported vehicle profile — source, attribution text,

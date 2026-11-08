@@ -77,6 +77,17 @@ describe("ChargingProfileStore", () => {
     ).toBeNull();
   });
 
+  it("treats validTo as exclusive: now == validTo is outside [validFrom, validTo) (K01.FR.37, #707)", () => {
+    const validTo = "2026-08-01T00:00:00.000Z";
+    const store = new ChargingProfileStore();
+    store.add(profile({ chargingProfileId: 1, validTo }));
+    const purpose = ChargingProfilePurposeType.ChargePointMaxProfile;
+    expect(
+      store.getActive(purpose, new Date("2026-07-31T23:59:59.999Z")),
+    ).not.toBeNull();
+    expect(store.getActive(purpose, new Date(validTo))).toBeNull();
+  });
+
   describe("take", () => {
     it("removes by profileId", () => {
       const store = new ChargingProfileStore();

@@ -815,4 +815,29 @@ describe("OCPP 2.0.1 Reset", () => {
       await csms.stop();
     }
   });
+
+  it("rejects v21 ImmediateAndResume with an evseId while another EVSE charges (B13.FR.01/02)", async () => {
+    const { csms, cp } = newChargePoint(
+      "CP21-RESET-RESUME-OTHER-EVSE",
+      "OCPP-2.1",
+      2,
+    );
+
+    try {
+      cp.connect();
+      await bootAccepted(csms);
+      cp.startTransaction("TAG-21", 2);
+      await csms.waitForFrame(transactionEventFrameAfter(csms, -1, "Started"));
+
+      const result = await sendReset(csms, "reset-resume-evse1", {
+        type: "ImmediateAndResume",
+        evseId: 1,
+      });
+      expect(result).toEqual([3, "reset-resume-evse1", { status: "Rejected" }]);
+      expect(cp.getConnector(2)?.hasRunningTransaction).toBe(true);
+    } finally {
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
 });

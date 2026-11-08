@@ -70,6 +70,14 @@ export function unitOfMeasurandV2x(measurand: string): string | undefined {
   if (measurand.startsWith("Power.Active.")) return "W";
   if (measurand.startsWith("Power.Reactive.")) return "var";
   if (measurand.startsWith("Power.Offered")) return "W";
+  // 2.1-only measurands (Appendix ch. 2 / MeasurandEnumType, #766).
+  if (measurand.startsWith("Voltage.")) return "V";
+  if (measurand.startsWith("Power.Import.")) return "W";
+  if (measurand.startsWith("Power.Export.")) return "W";
+  if (measurand.startsWith("Display.RemainingTime")) return "s";
+  if (/^Display\..*SOC$/.test(measurand)) return "Percent";
+  if (measurand.startsWith("EnergyRequest.")) return "Wh";
+  if (measurand === "Display.BatteryEnergyCapacity") return "Wh";
   return undefined;
 }
 

@@ -150,12 +150,22 @@ describe("buildV21InboundRegistry", () => {
   });
 
   describe("UsePriorityCharging (K21)", () => {
-    const answer = (transactionId: string, activate: boolean): unknown => {
+    const answer = (
+      transactionId: string,
+      activate: boolean,
+      stopTime: Date | null = null,
+    ): unknown => {
       const handler = buildV21InboundRegistry().get("UsePriorityCharging");
       const ctx = {
         chargePoint: {
           connectors: new Map([
-            [1, { transaction: { cpTransactionId: "tx-1" } }],
+            [
+              1,
+              {
+                hasRunningTransaction: stopTime === null,
+                transaction: { cpTransactionId: "tx-1", stopTime },
+              },
+            ],
           ]),
         },
       };
@@ -171,6 +181,13 @@ describe("buildV21InboundRegistry", () => {
         statusInfo: { reasonCode: "TxNotFound" },
       });
       expect(answer("tx-9", false)).toEqual({
+        status: "Rejected",
+        statusInfo: { reasonCode: "TxNotFound" },
+      });
+    });
+
+    it("is Rejected / TxNotFound for a transaction that has ended but is still attached (K21.FR.02)", () => {
+      expect(answer("tx-1", true, new Date())).toEqual({
         status: "Rejected",
         statusInfo: { reasonCode: "TxNotFound" },
       });

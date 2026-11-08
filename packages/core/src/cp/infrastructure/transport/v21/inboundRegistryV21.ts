@@ -193,7 +193,9 @@ export function buildV21InboundRegistry(): V201InboundRegistry {
       const { transactionId, activate } =
         payload as UsePriorityChargingRequestV21;
       const ongoing = Array.from(ctx.chargePoint.connectors.values()).some(
-        (connector) => connector.transaction?.cpTransactionId === transactionId,
+        (connector) =>
+          connector.hasRunningTransaction &&
+          connector.transaction?.cpTransactionId === transactionId,
       );
       if (!ongoing) {
         // K21.FR.02

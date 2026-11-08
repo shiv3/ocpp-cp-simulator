@@ -60,10 +60,11 @@ export function resetBehavior(cp: ChargePoint): Behavior {
           // 2.1 B13.FR.01: without transaction resumption support (no
           // TxCtrlr.TxResumptionTimeout, so "0 or non-existent") an
           // ImmediateAndResume reset with ongoing transactions is Rejected;
-          // B13.FR.02 keeps Accepted when none is ongoing.
+          // B13.FR.02 keeps Accepted when none is ongoing on the whole
+          // Charging Station, whatever evseId the request carries.
           if (
             type === "ImmediateAndResume" &&
-            targets.some((connector) => connector.hasRunningTransaction)
+            all.some((connector) => connector.hasRunningTransaction)
           ) {
             return { response: { status: "Rejected" } };
           }

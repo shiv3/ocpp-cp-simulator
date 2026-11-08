@@ -136,6 +136,7 @@ import {
   AuthorizeResultHandler,
   DataTransferHandler,
 } from "./handlers";
+import { HandlerCallError } from "./handlers/HandlerCallError";
 import { inboundV16Violation } from "./codec/validateV16";
 import { CallExchange } from "./inbound/CallExchange";
 import { InboundCallGate, ports16 } from "./inbound/InboundCallGate";
@@ -1506,6 +1507,16 @@ export class OCPPMessageHandler {
         ...(effect ? { effect } : {}),
       });
     } catch (error) {
+      if (error instanceof HandlerCallError) {
+        this._logger.warn(
+          `${action} answered with CALLERROR ${error.errorCode}: ${error.description}`,
+          LogType.OCPP,
+        );
+        if (exchange.state === "open") {
+          exchange.replyError(error.errorCode, error.description);
+        }
+        return;
+      }
       this._logger.error(`Error handling ${action}: ${error}`, LogType.OCPP);
       if (exchange.state === "open") {
         exchange.replyError(OCPPErrorCodeV16.InternalError, String(error));

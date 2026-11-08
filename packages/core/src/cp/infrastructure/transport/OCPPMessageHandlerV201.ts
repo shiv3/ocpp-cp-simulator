@@ -813,7 +813,11 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       if (entry) {
         if (!entry.validate(payload)) {
           // Part 4 §4.3 Table 8: the code names the kind of violation.
-          const violation = inboundV2xViolation(action, payload);
+          const violation = inboundV2xViolation(
+            action,
+            payload,
+            this._chargePoint.ocppVersion,
+          );
           exchange.replyError(violation.errorCode, violation.description);
           return;
         }

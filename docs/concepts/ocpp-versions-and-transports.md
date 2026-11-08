@@ -1047,7 +1047,7 @@ An inbound CALL on a 2.x charge point whose payload fails the request schema of 
 | `TypeConstraintViolation`       | a property has the wrong JSON type                                          |
 | `PropertyConstraintViolation`   | right type, invalid value: enum, range, length, pattern                     |
 
-The description names the action and the failing properties, cut to 255 characters (Part 4 §4.2.3). The check runs after the [inbound gate](call-precedence.md), so an inbound policy, response override or scenario rule still owns a malformed CALL. Both 2.0.1 and 2.1 stations validate against the 2.0.1 request schemas; a 2.1-only action has its own handler and answers its own way. Code: `codec/validateV2x.ts`, `codec/violationKind.ts` (shared with 1.6J).
+The description names the action and the failing properties, cut to 255 characters (Part 4 §4.2.3). The check runs after the [inbound gate](call-precedence.md), so an inbound policy, response override or scenario rule still owns a malformed CALL. The code is classified against the request schema of the station's own version (the 2.1 schema on a 2.1 station, so a 2.1-only action gets the right code too, #750). Code: `codec/validateV2x.ts`, `codec/violationKind.ts` (shared with 1.6J).
 
 ## Inbound CS→CP request validation
 

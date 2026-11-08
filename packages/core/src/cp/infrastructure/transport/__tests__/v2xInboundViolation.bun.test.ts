@@ -48,9 +48,26 @@ const CASES: ReadonlyArray<{
   },
 ];
 
+// 2.1-only actions have no 2.0.1 schema: classifying against it gave every
+// violation FormatViolation (#750).
+const CASES_V21: typeof CASES = [
+  {
+    name: "2.1-only action, missing required property",
+    action: "AFRRSignal",
+    payload: {},
+    code: "OccurrenceConstraintViolation",
+  },
+  {
+    name: "2.1-only action, wrong JSON type",
+    action: "ClearTariffs",
+    payload: { tariffIds: 5 },
+    code: "TypeConstraintViolation",
+  },
+];
+
 for (const version of ["OCPP-2.0.1", "OCPP-2.1"]) {
   describe(`${version} inbound payload violations (#715)`, () => {
-    for (const c of CASES) {
+    for (const c of version === "OCPP-2.1" ? [...CASES, ...CASES_V21] : CASES) {
       it(`${c.name} -> ${c.code}`, async () => {
         const csms = startMockCsms();
         const cp = await bootedChargePoint(csms, "CP715", version);

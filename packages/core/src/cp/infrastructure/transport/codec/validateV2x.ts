@@ -1,6 +1,7 @@
 import { schemas } from "@ocpp-cp-sim/ocpp/index";
 import { strictValidationIssues } from "@ocpp-cp-sim/ocpp/validate";
 import { OCPPErrorCodeV201 } from "@ocpp-cp-sim/ocpp/enums";
+import { OCPP_2_0_1, OCPP_2_1 } from "../../../domain/types/OcppVersion";
 import { requestSchemaKey } from "./requestSchemaKey";
 import { violationKind, type ViolationKind } from "./violationKind";
 
@@ -18,6 +19,7 @@ const CODE_OF_KIND: Record<ViolationKind, OCPPErrorCodeV201> = {
 };
 
 const v201Schemas = schemas.v201 as Record<string, unknown>;
+const v21Schemas = schemas.v21 as Record<string, unknown>;
 
 /**
  * Pick the OCPP-J 2.0.1 / 2.1 Part 4 §4.3 Table 8 error code for a payload the
@@ -27,12 +29,20 @@ const v201Schemas = schemas.v201 as Record<string, unknown>;
  * (enum, range, length, pattern), `FormatViolation` for a payload that is not
  * an object or has an unknown property. Never throws; a payload the schema
  * cannot explain is a `FormatViolation`.
+ *
+ * The payload is classified against the schema of the station's own version
+ * (#750): a 2.1-only action has no 2.0.1 schema, and a shared action's 2.1
+ * schema can differ from the 2.0.1 one.
  */
 export function inboundV2xViolation(
   action: string,
   payload: unknown,
+  ocppVersion: string = OCPP_2_0_1,
 ): InboundV2xViolation {
-  const schema = v201Schemas[requestSchemaKey(action, "V201")];
+  const schema =
+    ocppVersion === OCPP_2_1
+      ? v21Schemas[requestSchemaKey(action, "V21")]
+      : v201Schemas[requestSchemaKey(action, "V201")];
   let issues: ReturnType<typeof strictValidationIssues> = [];
   if (schema) {
     try {

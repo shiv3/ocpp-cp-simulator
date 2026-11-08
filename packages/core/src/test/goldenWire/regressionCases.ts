@@ -1848,8 +1848,22 @@ both("close-during-reset", async (r) => {
 // --- 1.6 security events (#734, whitepaper A04.FR.01/02) -------------------
 // With SecurityProfile >= 1 the station reports its startup and resets.
 const profile1 = (cp: {
-  configuration: { applyChange: (k: string, v: string) => unknown };
-}) => void cp.configuration.applyChange("SecurityProfile", "1");
+  configuration: {
+    applyChange: (
+      k: string,
+      v: string,
+      o?: { bypassGuard?: boolean },
+    ) => unknown;
+  };
+}) => {
+  // Profile 1 needs the AuthorizationKey the transport sends (#724, §7.2).
+  cp.configuration.applyChange(
+    "AuthorizationKey",
+    "00112233445566778899aabbccddeeff",
+  );
+  // The case sets the starting profile; the A05 guard is for CSMS requests.
+  cp.configuration.applyChange("SecurityProfile", "1", { bypassGuard: true });
+};
 const resetCase = (type: "Soft" | "Hard") => async (r: Rig) => {
   await r.csms.call("Reset", { type });
   await r.csms.waitForCall("BootNotification", { nth: 2, timeoutMs: 30000 });

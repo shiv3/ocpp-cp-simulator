@@ -105,5 +105,19 @@
   "common.catalog.notConfiguredLocal": "请先输入 Open EV Directory 的 URL。",
   "common.catalog.notConfiguredRemote": "守护进程已关闭车辆导入（--oed-base-url none 或 OED_BASE_URL=none）。",
   "common.payloadCondition": "负载条件",
-  "common.dialog.close": "关闭"
+  "common.dialog.close": "关闭",
+  "common.daemon.select": "守护进程",
+  "common.daemon.origin": "当前服务器 ({{url}})",
+  "common.daemon.switching": "正在切换…",
+  "common.daemon.switchFailed": "无法切换到 {{url}}，仍停留在之前的守护进程。",
+  "common.daemon.invalid": "请输入不含凭据的 http(s) 地址。",
+  "common.daemon.duplicate": "该地址已保存。",
+  "common.daemon.full": "已保存的守护进程数量已达上限。",
+  "common.daemon.addressLabel": "守护进程地址",
+  "common.daemon.nameLabel": "名称",
+  "common.daemon.namePlaceholder": "名称（可选）",
+  "common.daemon.saveAndSwitch": "保存并切换",
+  "common.daemon.cancel": "取消",
+  "common.daemon.add": "添加守护进程",
+  "common.daemon.forget": "移除"
 }

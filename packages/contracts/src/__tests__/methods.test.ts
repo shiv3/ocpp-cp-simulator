@@ -84,7 +84,17 @@ describe("method table coverage (Step 3c)", () => {
     for (const id of EXPLICIT_METHODS) {
       expect(METHODS[id]).toBeDefined();
     }
-    expect(EXPLICIT_METHODS).toHaveLength(52);
+  });
+
+  // Structural invariants instead of a pinned length: adding a method must
+  // not require bumping a number in this file.
+  it("lists each explicit op once, and none of them is a jsonMode id", () => {
+    expect(new Set(EXPLICIT_METHODS).size).toBe(EXPLICIT_METHODS.length);
+    expect(new Set(JSONMODE_COMMAND_IDS).size).toBe(
+      JSONMODE_COMMAND_IDS.length,
+    );
+    const jsonMode = new Set<string>(JSONMODE_COMMAND_IDS);
+    expect(EXPLICIT_METHODS.filter((id) => jsonMode.has(id))).toEqual([]);
   });
 
   it("contains exactly the jsonMode ids + the explicit ops (no drift)", () => {

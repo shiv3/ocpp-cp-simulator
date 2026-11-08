@@ -27,6 +27,7 @@ related:
   - local-vs-remote-mode.md
   - local-authorization.md
   - power-loss.md
+  - smart-charging.md
 updated: 2026-11-08
 ---
 

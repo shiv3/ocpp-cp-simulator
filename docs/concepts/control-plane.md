@@ -766,6 +766,9 @@ and changes nothing.
 
 ### Scenario run history
 
+(Local mode keeps the same history in the browser's sql.js database, #394;
+see [Local vs Remote mode](local-vs-remote-mode.md).)
+
 Every finished scenario run — natural end, error or operator stop — leaves its
 report (the object [`scenario_report`](#cp-command-methods) returns) in the
 daemon's run history (#388). A run that is still in flight when its scenario
@@ -803,7 +806,7 @@ without a verdict and leaves no report. One history serves the whole daemon:
 - **`stopped`** is `true` when an operator stopped the run; a report recorded
   before the field existed has none, which reads as not stopped.
 
-Local mode records no runs ([Local vs Remote mode](local-vs-remote-mode.md#consequences)).
+Local mode records the same runs in the browser database ([Local vs Remote mode](local-vs-remote-mode.md)).
 
 ### Vehicle profiles and catalog
 
@@ -883,7 +886,10 @@ state the last `boot_notification` gave, not fall back to Booting. The
 converse also holds: a second `boot_notification` on the same socket, with no
 `disconnected` / `connected` between, is a real boot — a retry after
 `Rejected` and a CSMS `TriggerMessage` for `BootNotification` both re-send
-`BootNotification.req` on the open socket. Do not infer registration from
+`BootNotification.req` on the open socket. On 2.0.1 / 2.1 a
+`TriggerMessage(BootNotification)` after an `Accepted` boot is answered
+`Rejected` and sends nothing (F06.FR.17, #690); it stays `Accepted` while the
+boot is `Pending`, `Rejected` or not yet answered. Do not infer registration from
 `status_change`: it fires twice per accepted boot and on changes that are not
 boots at all (#395).
 

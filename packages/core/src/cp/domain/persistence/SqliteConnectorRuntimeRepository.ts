@@ -1,5 +1,6 @@
 import type { Transaction } from "../connector/Transaction";
 import type { Database } from "./Database";
+import { buildUpsert } from "./upsert";
 import type { OCPPAvailability, OCPPStatus } from "../types/OcppTypes";
 import type {
   ConnectorRuntimeRepository,
@@ -60,41 +61,31 @@ export class SqliteConnectorRuntimeRepository implements ConnectorRuntimeReposit
     connectorId: number,
     snapshot: ConnectorRuntimeSnapshot,
   ): void {
-    this.database.run(
-      "INSERT INTO connector_runtime " +
-        "(cp_id, connector_id, status, availability, scheduled_availability, " +
-        " transaction_json, meter_value_wh, soc_percent, " +
-        " soc_awaits_next_transaction, last_auto_started_scenario_key, " +
-        " scenario_position_json, updated_at) " +
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
-        "ON CONFLICT (cp_id, connector_id) DO UPDATE SET " +
-        "  status = excluded.status, " +
-        "  availability = excluded.availability, " +
-        "  scheduled_availability = excluded.scheduled_availability, " +
-        "  transaction_json = excluded.transaction_json, " +
-        "  meter_value_wh = excluded.meter_value_wh, " +
-        "  soc_percent = excluded.soc_percent, " +
-        "  soc_awaits_next_transaction = " +
-        "    excluded.soc_awaits_next_transaction, " +
-        "  last_auto_started_scenario_key = " +
-        "    excluded.last_auto_started_scenario_key, " +
-        "  scenario_position_json = excluded.scenario_position_json, " +
-        "  updated_at = excluded.updated_at",
+    const { sql, params } = buildUpsert(
+      "connector_runtime",
       [
-        cpId,
-        connectorId,
-        snapshot.status,
-        snapshot.availability,
-        snapshot.scheduledAvailability,
-        serializeTransaction(snapshot.transaction),
-        snapshot.meterValueWh,
-        snapshot.socPercent,
-        snapshot.socAwaitsNextTransaction ? 1 : 0,
-        snapshot.lastAutoStartedScenarioKey,
-        serializeScenarioPosition(snapshot.scenarioPosition ?? null),
-        new Date().toISOString(),
+        ["cp_id", cpId],
+        ["connector_id", connectorId],
+        ["status", snapshot.status],
+        ["availability", snapshot.availability],
+        ["scheduled_availability", snapshot.scheduledAvailability],
+        ["transaction_json", serializeTransaction(snapshot.transaction)],
+        ["meter_value_wh", snapshot.meterValueWh],
+        ["soc_percent", snapshot.socPercent],
+        [
+          "soc_awaits_next_transaction",
+          snapshot.socAwaitsNextTransaction ? 1 : 0,
+        ],
+        ["last_auto_started_scenario_key", snapshot.lastAutoStartedScenarioKey],
+        [
+          "scenario_position_json",
+          serializeScenarioPosition(snapshot.scenarioPosition ?? null),
+        ],
+        ["updated_at", new Date().toISOString()],
       ],
+      ["cp_id", "connector_id"],
     );
+    this.database.run(sql, params);
   }
 
   delete(cpId: string, connectorId: number): void {

@@ -1,11 +1,17 @@
 ---
-title: Log
+title: Log (archive)
 type: log
-summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
+summary: Archive, frozen 2026-11-08. Chronological record of wiki operations up to that date; history now lives in git.
 updated: 2026-11-08
 ---
 
-# Log
+# Log (archive)
+
+> **Archived: no longer updated as of 2026-11-08.** Do not append here. Wiki
+> changes are now recorded by git: `git log -- docs/` (add `-p` for diffs),
+> `git log --grep '#N'` for an issue or PR number, the PR that closed the issue,
+> and branch names `<type>/<issue number>-<slug>`. The commit message and PR
+> description say which pages changed and why.
 
 Format: `## [YYYY-MM-DD] <op> | <title>` then bullets of pages touched.
 `grep "^## \[" docs/log.md | tail -5` shows the latest entries.
@@ -2446,12 +2452,12 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - The Add and Edit forms of an OCPP 2.0.1 / 2.1 charge point have a `txUpdatedMeterValues` checkbox (en / ja / zh-CN). Remote mode sends it with `cp.create` / `cp.update`; Local mode stores it in the shared simulator config (new optional `txUpdatedMeterValues` field of the config wire schema, kept by the browser config port), `useChargePoints` passes it to the local charge points and `syncLocalChargePoints` applies a change to running ones. Updated [Web console](entities/web-console.md), [OCPP versions and transports](concepts/ocpp-versions-and-transports.md).
 
-## [2026-11-08] ingest | Power loss simulation and transaction recovery (#455)
+## [2026-11-08] ingest | 2.x TriggerMessage(BootNotification) after an Accepted boot is Rejected (#690)
 
-- New [Power loss and transaction recovery](concepts/power-loss.md): `ChargePoint.powerLoss` / `restorePower`, `power.loss` (`restoreAfterMs?`) and `power.restore` RPC methods and the `power_loss` / `power_restore` MCP tools. The socket vanishes, transactions and the undelivered queue survive; after the Accepted boot the station resumes (1.x default, 2.1 within `txResumptionTimeoutSeconds`, E17.FR.10/14, `TxResumed`) or ends them (1.6 `StopTransaction` `PowerLoss`; 2.x `Ended` + `AbnormalCondition` + `PowerLoss`, E17.FR.20/21; 2.0.1 default). Timeline format 1.4 adds `power_lost` / `power_restored`. Golden cases `power-loss-resume`, `power-loss-end`, `power-loss-queued-then-end`; no existing fixture changed.
-- Pages: [Power loss](concepts/power-loss.md), [Socket.IO control plane](concepts/control-plane.md), [MCP endpoint](entities/mcp-endpoint.md), [Operational timeline](concepts/operational-timeline.md), [Network simulation](concepts/network-simulation.md), [Charging sessions](concepts/charging-sessions.md), [GitHub issues](sources/github-issues.md), [index](index.md).
+- F06.FR.17: on 2.0.1 / 2.1 the answer is `Rejected` and no BootNotification follows when the last BootNotification answer was `Accepted`; Pending, Rejected and unanswered boots still answer `Accepted` and send it. Golden `201-trigger-message-all` re-recorded (id-4).
+- Page: [Control plane](concepts/control-plane.md).
 
-## [2026-11-08] ingest | Built-in resilience scenario templates (#444)
+## [2026-11-08] ingest | Configurable daemon startup concurrency and staggering (#610)
 
-- Six `resilience-*` templates (communication loss, connector fault, EV disconnect, temporary unavailable, authorization rejected, power loss), each with assertions that end in a run verdict, built on the existing scenario engine, network simulation and the #455 power-loss primitive. New golden frames per template and `resilienceTemplates.bun.test.ts` (verdict passes with the injection, fails on an empty run).
-- Pages: [Built-in scenario templates](entities/scenario-templates.md#resilience-templates-resilience-), [GitHub issues](sources/github-issues.md), [index](index.md).
+- `entities/daemon.md`, `entities/cli.md`: `--bootstrap-concurrency` (default 8, the previous fixed value), `--start-delay`, `--start-jitter`, `--start-seed`; all four need a server mode and `--cp-id`, and a bad number exits 1. Review fixes: a charge point deleted or updated while it waits is skipped, the flags are refused next to a client mode, and the schedule is bounded by the 2^31-1 ms timer limit; `daemon.md` states the requirements and that `--state-db` restores are not paced.
+- `index.md`: no change (no page added).

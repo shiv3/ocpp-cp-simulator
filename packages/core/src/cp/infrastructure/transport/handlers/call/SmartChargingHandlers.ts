@@ -309,6 +309,9 @@ export class SetChargingProfileHandler implements CallHandler<
         RecurrencyKindType | undefined,
       validFrom: csChargingProfiles.validFrom,
       validTo: csChargingProfiles.validTo,
+      startSchedule: csChargingProfiles.chargingSchedule.startSchedule,
+      duration: csChargingProfiles.chargingSchedule.duration,
+      minChargingRate: csChargingProfiles.chargingSchedule.minChargingRate,
       chargingSchedulePeriods: periods,
     };
 

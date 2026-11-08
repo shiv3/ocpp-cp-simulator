@@ -24,10 +24,11 @@ schemas, vendored VERBATIM (unmodified) from the public repository:
   https://github.com/mobilityhouse/ocpp  @ commit $REF
 under ocpp/{v16,v201,v21}/schemas/.
 
-OCPP and its schemas are (c) Open Charge Alliance. The OCPP 2.1 schemas are licensed
-Creative Commons Attribution-NoDerivatives 4.0 International (CC BY-ND 4.0). The files
-here are redistributed unmodified, with attribution; they are NOT modified (no patches/
-overrides applied). Generated TypeScript types/validators derived from them live under
-packages/ocpp/src/ and are this project's own work.
+OCPP and its schemas are (c) Open Charge Alliance. The OCPP JSON Schemas (1.6,
+2.0.1 and 2.1) are licensed Creative Commons Attribution-NoDerivatives 4.0
+International (CC BY-ND 4.0): https://creativecommons.org/licenses/by-nd/4.0/
+The files here are redistributed unmodified, with attribution; they are NOT
+modified (no patches/overrides applied). Generated TypeScript types/validators
+derived from them live under packages/ocpp/src/ and are this project's own work.
 EOF
 echo "Wrote $DEST/NOTICE"

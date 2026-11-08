@@ -1,3 +1,4 @@
+import type { FleetTemplateRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/FleetTemplateRepository";
 import type { Server as BunServer } from "bun";
 import { createServer as createNetServer } from "node:net";
 import {
@@ -40,6 +41,8 @@ export interface TestServerOptions {
   readonly insecureTlsKeyPerms?: boolean;
   /** Behaviors loaded as `--behavior` would (the library charge points select from). */
   readonly behaviors?: BehaviorLibrary;
+  /** Fleet templates, e.g. file-provided ones that skip `fleet.template.save`'s checks (#445). */
+  readonly fleetTemplates?: FleetTemplateRepository;
   /**
    * Run this test daemon as if it had been started with `--watch` (#314).
    * `debounceMs` is exposed so a test does not have to sleep for the
@@ -139,6 +142,9 @@ export async function startTestServer(
     connectorSettingsRepository,
     chargePointService,
     fileReload,
+    ...(options.fleetTemplates
+      ? { fleetTemplates: options.fleetTemplates }
+      : {}),
     webConsoleBasicAuth: options.webConsoleBasicAuth ?? null,
     requestShutdown: () => {
       lifecycle?.requestShutdown();

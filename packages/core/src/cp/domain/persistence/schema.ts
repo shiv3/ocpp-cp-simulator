@@ -188,6 +188,8 @@ CREATE TABLE IF NOT EXISTS charge_points (
   -- #593: off | warn | enforce, the OCPP 1.6J inbound CALL validation mode.
   -- NULL (a row older than the column) is the default, warn.
   inbound_validation TEXT,
+  -- #618: JSON static capability profile; NULL is none.
+  capability_profile TEXT,
   -- #654: a JSON object of behavior id to params object; NULL (a row older
   -- than the column) is no params, every behavior runs with its defaults.
   behavior_params TEXT
@@ -212,6 +214,10 @@ CREATE TABLE IF NOT EXISTS blueprints (
   definition  TEXT NOT NULL,
   updated_at  TEXT NOT NULL
 );
+
+-- Heterogeneous fleet templates (#445): blueprint and scenario-template ids
+-- composed into one reusable fleet. Daemon-side only, like \`blueprints\`.
+${FLEET_TEMPLATES_TABLE_SQL}
 
 CREATE TABLE IF NOT EXISTS charge_point_state (
   cp_id             TEXT PRIMARY KEY,
@@ -384,6 +390,7 @@ export const TABLES: readonly TableSpec[] = [
   { name: "logs", perCp: true, resetOnStateReset: true },
   { name: "charge_points", perCp: true, resetOnStateReset: true },
   { name: "blueprints", perCp: false, resetOnStateReset: true },
+  { name: "fleet_templates", perCp: false, resetOnStateReset: true },
   { name: "charge_point_state", perCp: true, resetOnStateReset: true },
   { name: "connector_runtime", perCp: true, resetOnStateReset: true },
   { name: "engine_state", perCp: true, resetOnStateReset: true },
@@ -406,6 +413,7 @@ export function perChargePointTables(): readonly string[] {
 
 import type { Database } from "./Database";
 import { latestVersion, MIGRATIONS, type Migration } from "./migrations";
+import { FLEET_TEMPLATES_TABLE_SQL } from "./migrations/0027-fleet-templates";
 import {
   LEGACY_STARTUP_SOURCE_PREFIX,
   legacyGeneratedBaseId,

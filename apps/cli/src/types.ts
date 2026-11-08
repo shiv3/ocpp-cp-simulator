@@ -5,6 +5,7 @@ import type {
 } from "@ocpp-cp-sim/core/cp/infrastructure/transport/wsUrlWithBasic";
 import type { UrlDistribution } from "@ocpp-cp-sim/core/cp/infrastructure/transport/SupervisionUrlPool";
 import type { InboundValidationMode } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
+import type { ChargePointCapabilityProfile } from "@ocpp-cp-sim/core/cp/domain/charge-point/CapabilityProfile";
 import type { IdTagDistribution } from "@ocpp-cp-sim/core/cp/domain/auth/IdTagPool";
 import type { Labels } from "@ocpp-cp-sim/contracts/labels";
 import type { JsonObject } from "@ocpp-cp-sim/contracts/behavior";
@@ -59,6 +60,8 @@ export interface CLIOptions {
    * `--cp-id CP --cp-count 3` yields CP001..CP003.
    */
   readonly cpIdPattern: string | null;
+  /** `--fleet-template <file>`, repeatable (#445). */
+  readonly fleetTemplateFiles: readonly string[];
   /** Startup pacing flags (#610); absent: the defaults (8 at once, no delay). */
   readonly bootstrapPacing?: BootstrapPacing;
   /**
@@ -243,6 +246,7 @@ export interface CLIOptions {
   readonly txUpdatedMeterValues?: boolean;
   /** `--inbound-validation` (#593). See ChargePointInitOptions. */
   readonly inboundValidation?: InboundValidationMode;
+  readonly capabilityProfile?: ChargePointCapabilityProfile;
   readonly tls?: OcppTlsOptions;
   readonly tlsCaPath?: string;
   readonly tlsCertPath?: string;
@@ -267,6 +271,7 @@ export interface ChargePointInitOptions {
   readonly urlDistribution?: UrlDistribution;
   /** OCPP 1.6J inbound CALL payload validation (#593). Default `warn`. */
   readonly inboundValidation?: InboundValidationMode;
+  readonly capabilityProfile?: ChargePointCapabilityProfile;
   /**
    * Resolved idTags this charge point draws from when a call names none. The
    * `file` form is resolved at creation, so what is stored and persisted is
@@ -437,6 +442,7 @@ export interface ChargePointStatus {
     readonly cpoName?: string;
     readonly txUpdatedMeterValues?: boolean;
     readonly inboundValidation?: InboundValidationMode;
+    readonly capabilityProfile?: ChargePointCapabilityProfile;
     readonly tlsCaPath?: string;
     readonly tlsCertPath?: string;
     readonly tlsKeyPath?: string;

@@ -145,6 +145,11 @@ export interface ChargePointSnapshot {
     txUpdatedMeterValues?: boolean;
     /** #593: OCPP 1.6J inbound CALL validation mode. */
     inboundValidation?: "off" | "warn" | "enforce";
+    /** #618: static capability profile. */
+    capabilityProfile?: {
+      disabledActions?: readonly string[];
+      triggerMessageTargets?: readonly string[];
+    };
     tlsCaPath?: string;
     tlsCertPath?: string;
     tlsKeyPath?: string;
@@ -205,6 +210,11 @@ export interface CreateChargePointParams {
   /** #593: OCPP 1.6J inbound CALL validation (off | warn | enforce).
    *  Omitted on an update keeps the current value. */
   inboundValidation?: "off" | "warn" | "enforce";
+  /** #618: static capability profile (omitted on an update keeps it). */
+  capabilityProfile?: {
+    disabledActions?: readonly string[];
+    triggerMessageTargets?: readonly string[];
+  };
   tls?: OcppTlsOptions;
   tlsCaPath?: string;
   tlsCertPath?: string;

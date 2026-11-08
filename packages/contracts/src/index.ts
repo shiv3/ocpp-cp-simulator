@@ -35,6 +35,11 @@ export {
   hasIdPatternPlaceholder,
   MAX_GENERATED_CP_ID_LENGTH,
   blueprintSchema,
+  FLEET_TEMPLATE_MAX_CPS,
+  fleetCreateParamsSchema,
+  fleetGroupSchema,
+  fleetMemberSchema,
+  fleetTemplateSchema,
   createManyFromBlueprintSchema,
   createManyToolSchema,
   authorizationCacheSeedSchema,
@@ -50,6 +55,9 @@ export {
 export type {
   Blueprint,
   CpBulkResult,
+  FleetGroup,
+  FleetMember,
+  FleetTemplate,
   CpScenarioRunResult,
   ServerInfo,
 } from "./methods";

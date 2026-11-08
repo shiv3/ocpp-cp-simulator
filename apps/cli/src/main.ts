@@ -67,6 +67,8 @@ import {
   isOcppVersion,
   SUPPORTED_OCPP_VERSIONS,
 } from "@ocpp-cp-sim/core/cp/domain/types/OcppVersion";
+import { loadFleetTemplateFiles } from "./server/fleetTemplateFiles";
+import type { FleetTemplate } from "@ocpp-cp-sim/contracts/index";
 import { DEFAULT_BOOTSTRAP_PACING } from "./server/bootstrapPacing";
 import { tlsKeyPermissionWarning } from "./tlsKeyPermissions";
 
@@ -199,6 +201,7 @@ export function parseArgs(argv: string[]): CLIOptions {
   let cpId: string | null = null;
   let cpCount = 1;
   let cpIdPattern: string | null = null;
+  const fleetTemplateFiles: string[] = [];
   // Fleet startup pacing (#610); `undefined` keeps the built-in default.
   let bootstrapConcurrency: string | undefined;
   let startDelay: string | undefined;
@@ -321,6 +324,14 @@ export function parseArgs(argv: string[]): CLIOptions {
         break;
       case "--cp-count":
         cpCount = parseInt(next ?? "1", 10);
+        i++;
+        break;
+      case "--fleet-template":
+        if (!next || next.startsWith("--")) {
+          process.stderr.write("Error: --fleet-template needs a file path\n");
+          process.exit(1);
+        }
+        fleetTemplateFiles.push(next);
         i++;
         break;
       case "--bootstrap-concurrency":
@@ -1098,6 +1109,14 @@ export function parseArgs(argv: string[]): CLIOptions {
     );
     process.exit(1);
   }
+  if (fleetTemplateFiles.length > 0 && !isServerMode) {
+    // Templates are served and instantiated by the daemon; outside a server
+    // mode the flag would be accepted and ignored.
+    process.stderr.write(
+      "Error: --fleet-template needs a server mode (--daemon, --http-port or --web-console)\n",
+    );
+    process.exit(1);
+  }
   // Pacing flags: a malformed number is refused rather than turned into NaN
   // (which would start the whole fleet at once, silently), and the flags need
   // a server mode and a bootstrapped fleet or they would be accepted and
@@ -1447,6 +1466,7 @@ export function parseArgs(argv: string[]): CLIOptions {
     cpId,
     cpCount,
     cpIdPattern,
+    fleetTemplateFiles,
     bootstrapPacing,
     labels,
     metrics,
@@ -1584,6 +1604,10 @@ Options:
   --cp-id-pattern <tpl>    Id template used with --cp-count (default:
                            <cp-id>{n:03}). {n} is the index, {n:03} zero-pads
                            it.
+  --fleet-template <file>  Server mode: load fleet template(s) from a JSON file
+                           (one template or an array; repeatable). Read-only;
+                           list and instantiate with fleet.template.* /
+                           fleet.create.
   --bootstrap-concurrency <n>
                            Server mode: charge points started at once
                            (default: 8).
@@ -2194,7 +2218,17 @@ async function main(): Promise<void> {
       options.behaviorFiles,
       options.useBehaviors,
     );
+    let fleetTemplates: FleetTemplate[] = [];
+    try {
+      fleetTemplates = loadFleetTemplateFiles(options.fleetTemplateFiles);
+    } catch (err) {
+      process.stderr.write(
+        `Error: ${err instanceof Error ? err.message : String(err)}\n`,
+      );
+      process.exit(1);
+    }
     await startServer({
+      fleetTemplates,
       behaviors,
       watchBehaviors: options.watchBehaviors,
       allowBehaviorReload: options.allowBehaviorReload,

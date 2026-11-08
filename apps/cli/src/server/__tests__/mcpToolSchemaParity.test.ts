@@ -301,6 +301,11 @@ describe("MCP curated tool schema parity (general, #299)", () => {
     { tool: "cp_list", method: "cp.list" },
     { tool: "blueprint_list", method: "blueprint.list" },
     { tool: "blueprint_save", method: "blueprint.save" },
+    { tool: "fleet_template_list", method: "fleet.template.list" },
+    { tool: "fleet_template_get", method: "fleet.template.get" },
+    { tool: "fleet_template_save", method: "fleet.template.save" },
+    { tool: "fleet_template_delete", method: "fleet.template.delete" },
+    { tool: "fleet_create", method: "fleet.create" },
     { tool: "cp_delete", method: "cp.delete" },
     { tool: "cp_labels_set", method: "cp.labels.set" },
     { tool: "cp_behaviors_set", method: "cp.behaviors.set" },
@@ -365,6 +370,8 @@ describe("MCP curated tool schema parity (general, #299)", () => {
       "network_sim_get",
       "network_sim_set",
       "control_scenario_wait",
+      // tail_logs adds client-side filters on top of logs.get's cpId.
+      "tail_logs",
       "call_method",
       "list_methods",
     ]);

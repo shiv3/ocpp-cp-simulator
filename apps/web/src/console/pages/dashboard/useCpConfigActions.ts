@@ -250,6 +250,9 @@ export function useCpConfigActions(): UseCpConfigActionsResult {
           ChargePointID: cpConfig.cpId,
           tagID: tagIDs[0] || "123456",
           ocppVersion: cpConfig.ocppVersion,
+          ...(cpConfig.txUpdatedMeterValues !== undefined
+            ? { txUpdatedMeterValues: cpConfig.txUpdatedMeterValues }
+            : {}),
           basicAuthSettings: {
             enabled: cpConfig.basicAuthEnabled,
             username: cpConfig.basicAuthUsername,

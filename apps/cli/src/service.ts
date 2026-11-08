@@ -119,10 +119,7 @@ import type {
 } from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
 import { getDefaultEVSettings } from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
 import type { AutoMeterValueConfig } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
-import type {
-  ActiveChargingProfile,
-  Connector,
-} from "@ocpp-cp-sim/core/cp/domain/connector/Connector";
+import type { ActiveChargingProfile } from "@ocpp-cp-sim/core/cp/domain/connector/Connector";
 import type {
   StateHistoryEntry,
   HistoryOptions,
@@ -137,15 +134,11 @@ import {
   getTemplateById,
 } from "@ocpp-cp-sim/core/utils/scenarioTemplates";
 import { scenarioInstanceId } from "./scenarioInstanceId";
-import { TranscriptBuffer } from "@ocpp-cp-sim/core/cp/application/verification/TranscriptBuffer";
 import {
-  evaluateAssertions,
-  computeVerdictSummary,
-  frameToTranscriptEntry,
-  redactTranscriptEntry,
-  type ScenarioRunResult,
-  type ScenarioStateSnapshot,
-} from "@ocpp-cp-sim/core/cp/application/verification/ScenarioAssertions";
+  ScenarioRunRecorder,
+  makeScenarioRunId,
+} from "@ocpp-cp-sim/core/cp/application/verification/ScenarioRunRecorder";
+import type { ScenarioRunResult } from "@ocpp-cp-sim/core/cp/application/verification/ScenarioAssertions";
 import {
   redactSensitiveText,
   redactSensitiveValue,
@@ -376,29 +369,6 @@ export interface SessionSettledInfo {
 type SessionSettledHandler = (info: SessionSettledInfo) => void;
 
 /**
- * #179: mint a stable, human-legible run id for one scenario execution.
- * `scenarioId#<epochMs>-<rand>` — the scenarioId anchors it to the scenario,
- * the epoch + short random suffix distinguish repeated runs of the same one.
- */
-function makeScenarioRunId(scenarioId: string): string {
-  const rand = Math.random().toString(36).slice(2, 6);
-  return `${scenarioId}#${Date.now()}-${rand}`;
-}
-
-/**
- * #179 Phase 3: snapshot a connector's observable state for a run report's
- * initialState / finalState. Mirrors the fields StateSnapshot already exposes
- * per connector (status / meter / active transaction id).
- */
-function connectorStateSnapshot(connector: Connector): ScenarioStateSnapshot {
-  return {
-    connectorStatus: connector.status,
-    meterValue: connector.meterValue,
-    transactionId: connector.transaction?.id ?? null,
-  };
-}
-
-/**
  * Whether a run that is ending should release the connector's EV settings
  * override.
  *
@@ -530,30 +500,33 @@ export class CLIChargePointService {
   // and lifecycle events can be correlated to a specific run. Keyed like
   // _executors (by scenarioId) and cleared alongside it.
   private readonly _runIdByScenario: Map<string, string> = new Map();
-  // #179 Phase 2b: OCPP wire transcript capture for the currently-executing
-  // scenario, keyed like _executors/_runIdByScenario by scenarioId. Started
-  // alongside the run id in runScenario and stopped (then dropped) once the
-  // run ends, in finalizeScenarioRun.
-  private readonly _transcriptByScenario: Map<string, TranscriptBuffer> =
-    new Map();
-  // #179 Phase 2b/3: wall-clock start time (ISO) + the connector's state
-  // snapshot at that moment, for the currently-executing scenario's run.
-  // Read back by finalizeScenarioRun to build the ScenarioRunResult's
-  // startedAt/initialState fields.
-  private readonly _runStartByScenario: Map<
-    string,
-    { readonly startedAt: string; readonly initialState: ScenarioStateSnapshot }
-  > = new Map();
-  // Per-run strict flag, keyed like _executors/_runIdByScenario by scenarioId.
-  // Stores the per-run strict option if provided, consulted by finalizeScenarioRun.
-  private readonly _strictByScenario: Map<string, boolean> = new Map();
-  // #240: operator actions (extend / retry / continue) taken on the parked
-  // waits of the currently-executing run, keyed like _strictByScenario and
-  // copied into the run report by finalizeScenarioRun.
-  private readonly _interventionsByScenario: Map<
-    string,
-    ScenarioWaitIntervention[]
-  > = new Map();
+  // #394: transcript capture, assertions, verdict and the stored report of
+  // every run, shared with the browser runtime (see ScenarioRunRecorder).
+  private _recorderInstance: ScenarioRunRecorder | undefined;
+  // Built on first use: it needs the charge point, created further down the
+  // constructor than the run history.
+  private get _recorder(): ScenarioRunRecorder {
+    if (!this._recorderInstance) {
+      this._recorderInstance = new ScenarioRunRecorder({
+        chargePoint: this._chargePoint,
+        runs: this._runs,
+        simulatorVersion: appVersion,
+        ocppVersion: () => this._init.ocppVersion ?? "OCPP-1.6J",
+        // The daemon stamps wall-clock times, whatever the charge point's clock.
+        now: () => Date.now(),
+        onRecorded: (result) =>
+          this.emit({
+            event: "scenario_run_recorded",
+            data: {
+              connectorId: result.connectorId,
+              scenarioId: result.scenarioId,
+              runId: result.runId,
+            },
+          }),
+      });
+    }
+    return this._recorderInstance;
+  }
   // #388: finished-run reports. The daemon hands every charge point one
   // shared store (see CPRegistry), bounded per charge point and persisted with
   // --state-db; scenario_report reads it, scenario.runs.list pages through it.
@@ -1712,14 +1685,7 @@ export class CLIChargePointService {
       this._chargePoint.timeline.endRun(connectorId, runId);
     }
     this._runIdByScenario.delete(scenarioId);
-    const transcript = this._transcriptByScenario.get(scenarioId);
-    if (transcript) {
-      transcript.stop();
-      this._transcriptByScenario.delete(scenarioId);
-    }
-    this._runStartByScenario.delete(scenarioId);
-    this._strictByScenario.delete(scenarioId);
-    this._interventionsByScenario.delete(scenarioId);
+    this._recorder.discard(scenarioId);
   }
 
   /**
@@ -1844,31 +1810,13 @@ export class CLIChargePointService {
     // #179: mint a stable run id for this invocation, threaded into every
     // lifecycle event (and echoed on scenario_status) so a headless runner can
     // correlate a specific run.
-    const runId = makeScenarioRunId(scenarioId);
+    const runId = makeScenarioRunId(scenarioId, Date.now(), Math.random());
     this._runIdByScenario.set(scenarioId, runId);
 
-    // Record the per-run strict override; clear any leftover from a prior run
-    // of the same scenario that never reached finalizeScenarioRun.
-    if (options?.strict !== undefined) {
-      this._strictByScenario.set(scenarioId, options.strict);
-    } else {
-      this._strictByScenario.delete(scenarioId);
-    }
-
-    const interventions: ScenarioWaitIntervention[] = [];
-    this._interventionsByScenario.set(scenarioId, interventions);
-
-    // #179 Phase 2b: capture the OCPP wire transcript for this run so its
-    // declared assertions (if any) can be evaluated once it ends.
-    const transcript = new TranscriptBuffer(this._chargePoint.logger);
-    transcript.start();
-    this._transcriptByScenario.set(scenarioId, transcript);
-    // #179 Phase 3: snapshot the connector's state right as the run starts,
-    // for the report's `initialState` field (see finalizeScenarioRun).
-    this._runStartByScenario.set(scenarioId, {
-      startedAt: new Date().toISOString(),
-      initialState: connectorStateSnapshot(connector),
-    });
+    // #179 Phase 2b/3: capture the OCPP wire transcript for this run so its
+    // declared assertions (if any) can be evaluated once it ends, and
+    // snapshot the connector for the report's `initialState`.
+    this._recorder.begin(scenarioId, connector, { strict: options?.strict });
 
     // Set by the onError hook below; read in executor.start().finally() to
     // decide this run's verdict executionState ("error" vs "completed").
@@ -1911,7 +1859,7 @@ export class CLIChargePointService {
           });
         },
         onWaitIntervention: (intervention) => {
-          interventions.push(intervention);
+          this._recorder.recordIntervention(scenarioId, intervention);
           this.emit({
             event: "scenario_wait_changed",
             data: {
@@ -2488,122 +2436,16 @@ export class CLIChargePointService {
     timeout: { nodeId: string; expectation?: unknown } | null,
     stopped = false,
   ): void {
-    this._chargePoint.timeline.endRun(connectorId, runId);
-    const transcript = this._transcriptByScenario.get(scenarioId);
-    if (!transcript) return;
-    transcript.stop();
-    this._transcriptByScenario.delete(scenarioId);
-
-    const endedAt = new Date().toISOString();
-    const start = this._runStartByScenario.get(scenarioId);
-    this._runStartByScenario.delete(scenarioId);
-    const startedAt = start?.startedAt ?? endedAt;
-    const initialState: ScenarioStateSnapshot = start?.initialState ?? {
-      connectorStatus: "Unknown",
-      meterValue: 0,
-      transactionId: null,
-    };
-
-    const definition = this._scenarios.get(scenarioId)?.definition;
-    const assertionSpecs = definition?.assertions ?? [];
-    const assertions = evaluateAssertions(assertionSpecs, transcript.frames);
-
-    // Effective strict: per-run option, then the scenario definition, then off.
-    const perRunStrict = this._strictByScenario.get(scenarioId);
-    this._strictByScenario.delete(scenarioId);
-    const interventions = this._interventionsByScenario.get(scenarioId) ?? [];
-    this._interventionsByScenario.delete(scenarioId);
-    const effectiveStrict =
-      perRunStrict !== undefined
-        ? perRunStrict
-        : (definition?.strictCompatibility ?? false);
-
-    const verdictSummary = computeVerdictSummary(assertions, {
+    this._recorder.finalize({
+      scenarioId,
+      connectorId,
+      runId,
+      definition: this._scenarios.get(scenarioId)?.definition,
       executionState,
       blocked,
-      strict: effectiveStrict,
-    });
-    this._chargePoint.timeline.record({
-      kind: "scenario_finished",
-      connectorId,
-      runId,
-      summary: `Scenario ${scenarioId} ${stopped ? "stopped" : "finished"}: ${verdictSummary.verdict}`,
-      data: {
-        scenarioId,
-        verdict: verdictSummary.verdict,
-        executionState,
-        stopped,
-      },
-    });
-
-    // #179 Phase 3: flatten + redact the captured transcript before it can
-    // reach a client (payloads carry auth material -- redactTranscriptEntry).
-    const transcriptEntries = transcript.frames.map((frame, i) =>
-      redactTranscriptEntry(frameToTranscriptEntry(frame, i)),
-    );
-
-    const connector = this._chargePoint.connectors.get(connectorId);
-    const finalState: ScenarioStateSnapshot = connector
-      ? connectorStateSnapshot(connector)
-      : initialState;
-
-    this.recordRunResult({
-      schemaVersion: 1,
-      runId,
-      scenarioId,
-      scenarioName: definition?.name,
-      cpId: this._chargePoint.id,
-      connectorId,
-      // #179 Phase 3: was a hard-coded "0.0.0", so a report from a GHCR
-      // release looked exactly like one off a dev checkout.
-      simulatorVersion: appVersion(),
-      ocppVersion: this._init.ocppVersion ?? "OCPP-1.6J",
-      startedAt,
-      endedAt,
-      durationMs: Math.max(
-        0,
-        new Date(endedAt).getTime() - new Date(startedAt).getTime(),
-      ),
-      executionState,
-      stopped,
-      verdict: verdictSummary.verdict,
-      conformanceVerdict: verdictSummary.conformanceVerdict,
-      compatibilityVerdict: verdictSummary.compatibilityVerdict,
-      strict: verdictSummary.strict,
-      assertions,
-      transcript: transcriptEntries,
       errors,
       timeout,
-      interventions,
-      initialState,
-      finalState,
-    });
-  }
-
-  /** Stores a run result in the run history (which applies retention), then
-   *  announces it with `scenario_run_recorded` — after the write, so a client
-   *  refreshing on the event reads the run. A failed write never fails the
-   *  run — it already ended, only its report is lost — and is logged on the
-   *  charge point, so it shows in the console and `logs.get` rather than only
-   *  on the daemon's stderr. */
-  private recordRunResult(result: ScenarioRunResult): void {
-    try {
-      this._runs.record(result);
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      this._chargePoint.logger.error(
-        `Scenario run ${result.runId} finished (${result.verdict}) but its report was not recorded: ${reason}`,
-        LogType.SCENARIO,
-      );
-      return;
-    }
-    this.emit({
-      event: "scenario_run_recorded",
-      data: {
-        connectorId: result.connectorId,
-        scenarioId: result.scenarioId,
-        runId: result.runId,
-      },
+      stopped,
     });
   }
 
@@ -2789,11 +2631,7 @@ export class CLIChargePointService {
     // #179 Phase 2b: drop any in-flight transcript subscriptions so a
     // torn-down service doesn't leave stale Logger listeners behind. No
     // verdicts are computed here (the whole service is going away).
-    for (const transcript of this._transcriptByScenario.values()) {
-      transcript.stop();
-    }
-    this._transcriptByScenario.clear();
-    this._runStartByScenario.clear();
+    this._recorder.dispose();
     // The scenario map is gone, so no id can be asked about any more.
     this._lastRunStatusByScenario.clear();
     // Every run this service knew about is over, so no run owns a connector's

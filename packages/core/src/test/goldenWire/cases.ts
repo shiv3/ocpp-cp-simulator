@@ -331,6 +331,11 @@ export const goldenCases: GoldenCase[] = [
     await rig.csms.call("Reset", { type: "Immediate" });
     await waitCall(rig, "BootNotification", 0, 2);
   }),
+  // B01.FR.09: a reset the operator starts on the station is LocalReset.
+  c201("reset-local", async (rig) => {
+    rig.cp.reset();
+    await waitCall(rig, "BootNotification", 0, 2);
+  }),
   c201("reset-immediate-charging", async (rig) => {
     await charging(rig);
     await rig.csms.call("Reset", { type: "Immediate" });

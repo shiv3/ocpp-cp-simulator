@@ -581,6 +581,23 @@ Instead the station resumes what an accepted boot starts (B04, E11):
 such a reconnect, and the [operational timeline](operational-timeline.md)
 records `reconnected_without_boot` (`offlineMs`, `reportedAll`) in its place.
 
+## OCPP 2.x BootNotification reason
+
+`BootNotificationRequest.reason` (B01.FR.09, `BootReasonEnumType`) carries the
+cause of the boot (#691). `ChargePoint.boot(reason)` remembers it until the
+boot is `Accepted`, so a retry after `Rejected` repeats it; an accepted boot
+falls back to `PowerUp`, which is also the reason of a plain (re)connect.
+
+| Cause                                                                         | `reason`         |
+| ----------------------------------------------------------------------------- | ---------------- |
+| First boot, a reconnect that boots, renewed-certificate reconnect (A02.FR.08) | `PowerUp`        |
+| CSMS `Reset` (Immediate, or OnIdle with an idle target)                       | `RemoteReset`    |
+| `Reset` OnIdle that was answered `Scheduled` and ran later                    | `ScheduledReset` |
+| CSMS `TriggerMessage(BootNotification)`                                       | `Triggered`      |
+| Control-plane reset (`cp.reset`, CLI / web console)                           | `LocalReset`     |
+
+OCPP 1.6 has no `reason` field and is unchanged.
+
 ## Clock-aligned meter values (`ClockAlignedDataInterval`)
 
 Every `ClockAlignedDataInterval` seconds a charge point sends one
@@ -975,6 +992,19 @@ Validation runs after the [inbound gate](call-precedence.md): an inbound policy,
 - **Replacement.** A profile replaces the installed one with the same `chargingProfileId`, or with the same `stackLevel` and `chargingProfilePurpose`, in the same scope (the connector's profiles, or the station store for `connectorId` 0). The `charging_profile_applied` timeline event reports `replaced: true` only when the **same id** was updated; a profile displaced by the same-slot rule is named in `replacedIds` (and in the summary: "… applied …, replacing profile 1"), see [Operational timeline](operational-timeline.md#smart-charging-profiles). OCPP 2.x keeps replacing by id only.
 - **TxProfile preconditions.** A `TxProfile` for a connector without a **running** transaction (one whose `stopTime` is still unset; a closed transaction that is still attached does not count) answers `Rejected`, and so does one whose `transactionId` is not the id of the connector's active transaction. A `TxProfile` without `transactionId` binds to the active transaction. Other purposes need no transaction.
 - **Smart Charging disabled.** When the configuration key `SupportedFeatureProfiles` no longer lists `SmartCharging`, `SetChargingProfile`, `ClearChargingProfile` and `GetCompositeSchedule` are all answered with the CALLERROR `NotSupported` (OCPP-J 1.6 §4.2.3) rather than a `Rejected` / `Unknown` status. On **1.6-S** there is no CALLERROR: the SOAP server turns the same refusal into a generic SOAP Fault, `Dispatch error for SetChargingProfile: SmartCharging is not supported` (likewise for the other two operations). The key is read-only for a CSMS, so this is a station setting; the default list includes `SmartCharging`.
+
+## Inbound CALL validation on OCPP 2.0.1 / 2.1
+
+An inbound CALL on a 2.x charge point whose payload fails the request schema of its action is answered with a CALLERROR (always on; the `inboundValidation` setting is 1.6J only). The code follows OCPP-J 2.0.1 / 2.1 Part 4 §4.3 Table 8 (#715), using the same keyword mapping as [1.6J](#inbound-call-validation-on-ocpp-j-16), most structural first:
+
+| Code                            | When                                                                        |
+| ------------------------------- | --------------------------------------------------------------------------- |
+| `FormatViolation`               | the payload is not an object, or has a property the schema does not declare |
+| `OccurrenceConstraintViolation` | a required property is missing, or an array has too few or too many items   |
+| `TypeConstraintViolation`       | a property has the wrong JSON type                                          |
+| `PropertyConstraintViolation`   | right type, invalid value: enum, range, length, pattern                     |
+
+The description names the action and the failing properties, cut to 255 characters (Part 4 §4.2.3). The check runs after the [inbound gate](call-precedence.md), so an inbound policy, response override or scenario rule still owns a malformed CALL. Both 2.0.1 and 2.1 stations validate against the 2.0.1 request schemas; a 2.1-only action has its own handler and answers its own way. Code: `codec/validateV2x.ts`, `codec/violationKind.ts` (shared with 1.6J).
 
 ## Inbound CS→CP request validation
 

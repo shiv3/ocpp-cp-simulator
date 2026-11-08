@@ -11,8 +11,9 @@ export class Outbox implements IChargePointMessageHandler {
     bootPayload: Parameters<
       IChargePointMessageHandler["sendBootNotification"]
     >[0],
+    reason?: Parameters<IChargePointMessageHandler["sendBootNotification"]>[1],
   ): ReturnType<IChargePointMessageHandler["sendBootNotification"]> {
-    return this.handler.sendBootNotification(bootPayload);
+    return this.handler.sendBootNotification(bootPayload, reason);
   }
 
   sendHeartbeat(): ReturnType<IChargePointMessageHandler["sendHeartbeat"]> {

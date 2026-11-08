@@ -346,7 +346,11 @@ CALLERROR.
   older chain of the same use, and the CSR is no longer pending. An absent
   `certificateType` means the Charging Station certificate: per the field
   description, the certificate then serves both the CSMS and the 15118
-  connection, and the simulator has no 15118 stack. In every other case the
+  connection, and the simulator has no 15118 stack. On 2.1 a `requestId`
+  the station never issued is answered `Rejected` first (A02.FR.26,
+  A03.FR.22; #720): nothing is stored, the CSR stays pending, the back-off
+  goes on and no security event is sent; an absent `requestId` is handled as
+  below, the field being optional. In every other case the
   answer is `Rejected`, nothing is stored, and the CSR stays pending. Once
   that answer is written, the station sends a `SecurityEventNotification` of
   type `InvalidChargingStationCertificate` (A02.FR.07). Its `techInfo` gives
@@ -369,8 +373,11 @@ CALLERROR.
   params), or one the
   store generates with the certificate quirks' key algorithm and line endings
   and `CpoName`. That CSR becomes the pending Charging Station certificate
-  CSR. `certificateType` is omitted, and so are the optional 2.1
-  `requestId` and `hashRootCertificate`. A given CSR that does not parse is
+  CSR. `certificateType` is omitted, and so is the optional 2.1
+  `hashRootCertificate`. On 2.1 every SignCertificate carries a `requestId`
+  (A02.FR.24, A03.FR.20; #720), a number the station issues, kept with the
+  request so a back-off resend of the same CSR repeats it; 2.0.1 has no such
+  field and sends none. A given CSR that does not parse is
   still sent, with a WARN log, but no `CertificateSigned` can match it. It is
   sent once and does not become the pending CSR: a CSR already pending keeps
   its back-off and stays the one resent.

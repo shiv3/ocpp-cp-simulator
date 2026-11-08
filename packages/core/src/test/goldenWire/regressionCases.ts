@@ -858,6 +858,21 @@ c201("malformed-calls", async (r) => {
   }
   await settle(r);
 });
+// OCPP-J 2.0.1 / 2.1 Part 4 §4.3 Table 8 (#715): one CALLERROR per kind of
+// violation that malformed-calls (missing properties) does not show.
+c201("violation-codes", async (r) => {
+  for (const [a, p] of [
+    ["ChangeAvailability", { operationalStatus: 5 }],
+    ["ChangeAvailability", { operationalStatus: "Nope" }],
+    ["UnlockConnector", { evseId: 1, connectorId: 1, extra: true }],
+    ["ClearCache", "nope"],
+    ["SetVariables", { setVariableData: [] }],
+  ] as const) {
+    await r.csms.call(a, p, 3000).catch(() => undefined);
+    await wait(30);
+  }
+  await settle(r);
+});
 c16("malformed-calls", async (r) => {
   for (const [a, p] of [
     ["RemoteStartTransaction", {}],
@@ -1441,6 +1456,21 @@ c201("reset-immediate-resume-charging", async (r) => {
   await settle(r);
 });
 
+// 2.1 I07.FR.01 / I11.FR.01: without local cost calculation SetDefaultTariff
+// and ChangeTransactionTariff are an RPC CALLERROR NotSupported, not a status;
+// GetTariffs / ClearTariffs (I09.FR.03, I10.FR.06) stay NoTariff results.
+c21("tariff-without-local-cost-calculation", async (r) => {
+  await charging(r);
+  const tariff = { tariffId: "T-1", currency: "EUR" };
+  await r.csms.call("SetDefaultTariff", { evseId: 1, tariff });
+  await r.csms.call("ChangeTransactionTariff", {
+    tariff,
+    transactionId: r.transactionId(1),
+  });
+  await r.csms.call("GetTariffs", { evseId: 1 });
+  await r.csms.call("ClearTariffs", {});
+  await settle(r);
+});
 // 2.1 B13.FR.01 / B13.FR.02: no transaction resumption, so ImmediateAndResume
 // is Rejected while a transaction runs and the transaction keeps running; with
 // none it is an Immediate reset.
@@ -1454,6 +1484,19 @@ c21("reset-immediate-resume-charging", async (r) => {
 c21("reset-immediate-resume-idle", async (r) => {
   await r.csms.call("Reset", { type: "ImmediateAndResume" });
   await wait(600);
+  await settle(r);
+});
+// 2.1 K21.FR.01 / FR.02 / FR.06: UsePriorityCharging looks the transaction up;
+// the station never has a PriorityCharging profile.
+c21("use-priority-charging", async (r) => {
+  await charging(r);
+  const transactionId = r.transactionId(1);
+  await r.csms.call("UsePriorityCharging", { transactionId, activate: true });
+  await r.csms.call("UsePriorityCharging", { transactionId, activate: false });
+  await r.csms.call("UsePriorityCharging", {
+    transactionId: "no-such-transaction",
+    activate: true,
+  });
   await settle(r);
 });
 

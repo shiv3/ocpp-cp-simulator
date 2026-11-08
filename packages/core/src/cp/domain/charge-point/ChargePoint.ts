@@ -76,6 +76,7 @@ import type {
   OCPPAvailability,
   StatusNotificationOptions,
   BootNotification,
+  BootReason,
   ChargePointStatus,
 } from "../types/OcppTypes";
 import { isOcpp2Version, isSoapVersion, OCPP_2_1 } from "../types/OcppVersion";
@@ -375,6 +376,8 @@ export class ChargePoint {
   private readonly _reservationManager: ReservationManager;
   /** #597: Reset OnIdle requests answered `Scheduled`, each run once its transactions end. */
   private _pendingResetsOnIdle: { evseId?: number }[] = [];
+  /** Reason of the next BootNotification (2.x B01.FR.09); see {@link boot}. */
+  private _bootReason: BootReason = "PowerUp";
   private readonly _localAuthListManager: LocalAuthListManager;
   private readonly _authorization: StationAuthorization;
   // §3.13.3: profiles installed with connectorId=0 (ChargePointMaxProfile,
@@ -2273,6 +2276,7 @@ export class ChargePoint {
 
   /** Boot-notification gate accessors used by BootNotificationResultHandler. */
   markBootAccepted(): void {
+    this._bootReason = "PowerUp";
     this._outbox.setBootStatus({ status: "Accepted" });
     if (
       this._ocppVersion === "OCPP-1.6J" &&
@@ -2568,7 +2572,13 @@ export class ChargePoint {
     return { offlineMs, reportedAll: reportAll };
   }
 
-  boot(): void {
+  /**
+   * Send BootNotification.req. `reason` (2.x B01.FR.09) is remembered until
+   * the boot is Accepted, so the retry after a Rejected answer repeats it;
+   * an Accepted boot falls back to PowerUp, the reason of a plain reconnect.
+   */
+  boot(reason?: BootReason): void {
+    if (reason) this._bootReason = reason;
     // A boot asked for while the socket is down (a Reset, a retry timer) is
     // lost on the wire: the next open must send it (#702).
     if (!this.isOnline()) this._bootOnNextOpen = true;
@@ -2579,7 +2589,7 @@ export class ChargePoint {
     // BootNotification has been Accepted. The connector-level
     // StatusNotification fan-out happens in BootNotificationResultHandler
     // after we get the Accepted response.
-    this._outbox.sendBootNotification(this._bootNotification);
+    this._outbox.sendBootNotification(this._bootNotification, this._bootReason);
     this.error = "";
   }
 
@@ -2685,7 +2695,8 @@ export class ChargePoint {
     this._logRepository.flush();
   }
 
-  reset(): void {
+  reset(reason: BootReason = "LocalReset"): void {
+    this._bootReason = reason;
     if (this._webSocket) {
       // WebSocket CP: use cause-aware internal reset (preserves reconnect reservation)
       this._webSocket.disconnectInternal(); // drains, does NOT set manual, does NOT clear reservation
@@ -2750,9 +2761,9 @@ export class ChargePoint {
     }
     this._logger.info(`Reset chargePoint: ${this._id}`, LogType.OCPP);
     if (type === "Hard") {
-      this.reset();
+      this.reset("RemoteReset");
     } else {
-      this.boot();
+      this.boot("RemoteReset");
     }
   }
 
@@ -2877,7 +2888,7 @@ export class ChargePoint {
     const remaining = this._pendingResetsOnIdle.filter(isBusy);
     if (remaining.length === this._pendingResetsOnIdle.length) return;
     this._pendingResetsOnIdle = remaining;
-    this.boot();
+    this.boot("ScheduledReset");
   }
 
   /**

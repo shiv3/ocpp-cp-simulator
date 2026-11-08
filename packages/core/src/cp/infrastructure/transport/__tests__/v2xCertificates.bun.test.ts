@@ -296,7 +296,10 @@ describe.skipIf(!canBindBunServe())(
           const sign = await csms.waitForCall("SignCertificate");
           await sent;
           const { csr } = sign.payload as { csr: string };
-          expect(Object.keys(sign.payload as object)).toEqual(["csr"]);
+          // #720 A02.FR.24: 2.1 adds a requestId, 2.0.1 has none.
+          expect(Object.keys(sign.payload as object)).toEqual(
+            version === "OCPP-2.1" ? ["csr", "requestId"] : ["csr"],
+          );
           expect(
             cp.certificateStore.pendingCsr("ChargingStationCertificate"),
           ).toBe(csr);
@@ -425,7 +428,12 @@ describe.skipIf(!canBindBunServe())(
           const sent = cp.sendSignCertificate(pem);
           const sign = await csms.waitForCall("SignCertificate");
           await sent;
-          expect(sign.payload).toEqual({ csr: pem });
+          expect(sign.payload).toEqual({
+            csr: pem,
+            ...(version === "OCPP-2.1"
+              ? { requestId: expect.any(Number) }
+              : {}),
+          });
           expect(
             cp.certificateStore.pendingCsr("ChargingStationCertificate"),
           ).toBe(pem);
@@ -478,20 +486,20 @@ describe.skipIf(!canBindBunServe())(
             certificate: root.pem,
           });
           expect(install[0]).toBe(4);
-          expect(install[2]).toBe("FormatViolation");
+          expect(install[2]).toBe("PropertyConstraintViolation");
 
           const query = await call(csms, "GetInstalledCertificateIds", {
             certificateType: ["OEMRootCertificate"],
           });
           expect(query[0]).toBe(4);
-          expect(query[2]).toBe("FormatViolation");
+          expect(query[2]).toBe("PropertyConstraintViolation");
 
           const signed = await call(csms, "CertificateSigned", {
             certificateChain: root.pem,
             certificateType: "V2G20Certificate",
           });
           expect(signed[0]).toBe(4);
-          expect(signed[2]).toBe("FormatViolation");
+          expect(signed[2]).toBe("PropertyConstraintViolation");
         });
       });
 

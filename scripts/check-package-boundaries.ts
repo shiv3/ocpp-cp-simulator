@@ -316,19 +316,6 @@ export const LAYER_EXEMPTIONS: readonly KnownViolation[] = [
     to: `packages/core/src/cp/${t}`,
     why: "ChargePoint still wires the application services itself; clears with the ChargePoint split (#575).",
   })),
-  ...[
-    "infrastructure/transport/OCPPWebSocket.ts",
-    "infrastructure/transport/RawFrameSender.ts",
-    "infrastructure/transport/SupervisionUrlPool.ts",
-    "infrastructure/transport/codec/ocppCallCatalog.ts",
-    "infrastructure/transport/profile/profiles.ts",
-    "infrastructure/transport/soap/dialect.ts",
-    "infrastructure/transport/soap/index.ts",
-  ].map((t) => ({
-    from: "packages/core/src/cp/domain/charge-point/ChargePoint.ts",
-    to: `packages/core/src/cp/${t}`,
-    why: "ChargePoint still builds the transport itself; clears with the ChargePoint split (#575).",
-  })),
 ];
 
 // ---------------------------------------------------------------------------

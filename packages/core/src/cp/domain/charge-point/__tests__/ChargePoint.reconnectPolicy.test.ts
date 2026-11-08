@@ -4,6 +4,12 @@ import { createChargePoint } from "../../../infrastructure/charge-point/createCh
 import { DefaultBootNotification } from "../../types/OcppTypes";
 import { V201_VARIABLE_TO_V16_KEY } from "../../../infrastructure/transport/v201/deviceModelMap";
 import type { ReconnectPolicy } from "../../../shared/ReconnectPolicy";
+import type { OCPPWebSocket } from "../../../infrastructure/transport/OCPPWebSocket";
+
+/** The concrete socket `createChargePoint` builds; the tests reach its
+ *  internals, which the domain port does not expose. */
+const socketOf = (cp: ChargePoint): OCPPWebSocket =>
+  cp["_webSocket"] as OCPPWebSocket;
 
 // #609: the policy reaches the transport, 2.x RetryBackOff* variables are
 // registered, and giving up is an event (and a timeline entry).
@@ -39,7 +45,7 @@ describe("ChargePoint reconnect policy (#609)", () => {
 
   it("hands the policy to the transport", () => {
     const cp = build("OCPP-1.6J", { maxAttempts: 3, mode: "fixed" });
-    expect(cp["_webSocket"]!.reconnectPolicy).toMatchObject({
+    expect(socketOf(cp).reconnectPolicy).toMatchObject({
       maxAttempts: 3,
       mode: "fixed",
       baseDelayMs: 1000,
@@ -85,7 +91,7 @@ describe("ChargePoint reconnect policy (#609)", () => {
       "Accepted",
     );
     cp.configuration.applyChange("RetryBackOffRepeatTimes", "2");
-    expect(cp["_webSocket"]!["_retryBackOff"]).toEqual({
+    expect(socketOf(cp)["_retryBackOff"]).toEqual({
       waitMinimumSeconds: 7,
       randomRangeSeconds: 0,
       repeatTimes: 2,
@@ -102,14 +108,14 @@ describe("ChargePoint reconnect policy (#609)", () => {
     const out: number[] = [];
     cp.events.on("reconnecting", ({ delayMs }) => out.push(delayMs));
     for (let i = 0; i < 3; i++) {
-      cp["_webSocket"]!["_pendingReconnectNotice"] = null;
-      cp["_webSocket"]!["attemptReconnect"]();
-      cp["_webSocket"]!.observers.emit(
+      socketOf(cp)["_pendingReconnectNotice"] = null;
+      socketOf(cp)["attemptReconnect"]();
+      socketOf(cp).observers.emit(
         "reconnectScheduled",
-        cp["_webSocket"]!["_pendingReconnectNotice"]!,
+        socketOf(cp)["_pendingReconnectNotice"]!,
       );
     }
-    cp["_webSocket"]!.dispose();
+    socketOf(cp).dispose();
     return out;
   };
 
@@ -126,14 +132,14 @@ describe("ChargePoint reconnect policy (#609)", () => {
       const out: number[] = [];
       cp.events.on("reconnecting", ({ delayMs }) => out.push(delayMs));
       for (let i = 0; i < 3; i++) {
-        cp["_webSocket"]!["_pendingReconnectNotice"] = null;
-        cp["_webSocket"]!["attemptReconnect"]();
-        cp["_webSocket"]!.observers.emit(
+        socketOf(cp)["_pendingReconnectNotice"] = null;
+        socketOf(cp)["attemptReconnect"]();
+        socketOf(cp).observers.emit(
           "reconnectScheduled",
-          cp["_webSocket"]!["_pendingReconnectNotice"]!,
+          socketOf(cp)["_pendingReconnectNotice"]!,
         );
       }
-      cp["_webSocket"]!.dispose();
+      socketOf(cp).dispose();
       return out;
     };
     const a = delays("s1");
@@ -148,7 +154,7 @@ describe("ChargePoint reconnect policy (#609)", () => {
     const seen: unknown[] = [];
     cp.events.on("gaveUp", (e) => seen.push(e));
 
-    cp["_webSocket"]!.observers.emit("reconnectGaveUp", { attempts: 4 });
+    socketOf(cp).observers.emit("reconnectGaveUp", { attempts: 4 });
 
     expect(seen).toEqual([{ target: "reconnect", attempts: 4 }]);
     const entry = cp.timeline.query().entries.at(-1)!;
@@ -208,7 +214,7 @@ describe("ChargePoint reconnect policy (#609)", () => {
       const cp = build("OCPP-1.6J", { bootRetryLimit: 1 });
       const boot = vi.spyOn(cp, "boot").mockImplementation(() => {});
       let onOpen: (() => void) | undefined;
-      vi.spyOn(cp["_webSocket"]!, "connect").mockImplementation((open) => {
+      vi.spyOn(socketOf(cp), "connect").mockImplementation((open) => {
         onOpen = open ?? undefined;
       });
       const seen: unknown[] = [];

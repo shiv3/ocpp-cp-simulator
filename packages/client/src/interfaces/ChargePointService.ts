@@ -74,7 +74,7 @@ import type {
   OcppTlsOptions,
 } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/wsUrlWithBasic";
 import type { TransportConfig } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/TransportConfig";
-import type { UrlDistribution } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/SupervisionUrlPool";
+import type { UrlDistribution } from "@ocpp-cp-simulator/core/cp/domain/transport/UrlDistribution";
 import type { IdTagDistribution } from "@ocpp-cp-simulator/core/cp/domain/auth/IdTagPool";
 import type { Labels } from "@ocpp-cp-simulator/contracts/labels";
 import type { ReadonlyChargerCapabilities } from "@ocpp-cp-simulator/contracts/chargerCapabilities";

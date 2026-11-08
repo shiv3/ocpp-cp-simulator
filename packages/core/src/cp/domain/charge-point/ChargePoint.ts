@@ -48,10 +48,13 @@ import type {
   AuthorizeSendHooks,
   IChargePointMessageHandler,
 } from "../transport/IChargePointMessageHandler";
-import {
-  OCPPWebSocket,
-  type SocketClose,
-} from "../../infrastructure/transport/OCPPWebSocket";
+import type {
+  ChargePointSocket,
+  SocketClose,
+} from "../transport/ChargePointSocket";
+import type { RawFrameSink } from "../transport/RawFrameSink";
+import type { OcppCallActions } from "../transport/OcppCallActions";
+import type { ChargePointDeps, ChargePointTransport } from "./ChargePointDeps";
 import type {
   CloseCause,
   GenerationToken,
@@ -59,9 +62,7 @@ import type {
 } from "../transport/networkSim";
 import type { OcppSecurityProfile } from "@ocpp-cp-simulator/contracts/securityProfile";
 import type { OcppTlsOptions } from "../transport/ConnectionSecurity";
-import { getProtocolProfile } from "../../infrastructure/transport/profile/profiles";
 import { measurandEnumFor } from "../connector/measurandEnum";
-import { OCPPSoapHandler } from "../../infrastructure/transport/soap";
 import { Outbox } from "../transport/Outbox";
 import {
   cleanTransaction as cleanTransactionDefault,
@@ -69,14 +70,12 @@ import {
   stopTransaction as stopTransactionDefault,
   type TransactionPorts,
 } from "../../application/engine/behaviors/transaction";
-import { getOcppCallCatalog } from "../../infrastructure/transport/codec/ocppCallCatalog";
 import {
   type OcppCallOutcome,
   type OcppCallRequest,
   type RawFrameOutcome,
   type RawFrameRequest,
 } from "../types/OcppCall";
-import { RawFrameSender } from "../../infrastructure/transport/RawFrameSender";
 import { OcppCallRejectedError } from "../errors/OcppCallErrors";
 import {
   relayGet15118EVCertificate,
@@ -100,11 +99,6 @@ import {
   OCPP_2_1,
 } from "../types/OcppVersion";
 import { DeviceModelTargets } from "./DeviceModelTargets";
-import {
-  SOAP_OPERATION_NAMES,
-  soapDialectForVersion,
-  type SoapOperation,
-} from "../../infrastructure/transport/soap/dialect";
 import {
   ChargingProfilePurposeType,
   isChargePointStatus,
@@ -182,10 +176,7 @@ import {
   IdTagPool,
   type IdTagDistribution,
 } from "../auth/IdTagPool";
-import {
-  SupervisionUrlPool,
-  type UrlDistribution,
-} from "../../infrastructure/transport/SupervisionUrlPool";
+import type { UrlDistribution } from "../transport/UrlDistribution";
 import {
   assertWsClientOptions,
   type WsClientOptions,
@@ -217,7 +208,7 @@ export const RENEWED_CERTIFICATE_RECONNECT_MAX_DEFER_MS = 60_000;
 /** How often that wait checks again. */
 const RENEWED_CERTIFICATE_RECONNECT_POLL_MS = 500;
 
-interface BasicAuthSettings {
+export interface BasicAuthSettings {
   username: string;
   password: string;
 }
@@ -444,7 +435,7 @@ export class ChargePoint {
   // stamp every JSON line with the CP it belongs to (multi-CP daemons).
   private readonly _logger = new Logger();
   private readonly _events = new EventEmitter<ChargePointEvents>();
-  private readonly _webSocket: OCPPWebSocket | null;
+  private readonly _webSocket: ChargePointSocket | null;
   private readonly _clock: SimClock;
   /** #609 */
   private readonly _reconnectPolicy: ReconnectPolicy;
@@ -471,7 +462,11 @@ export class ChargePoint {
   /** Owner of the engine-held state and the behaviors (stage B). */
   private readonly _engine = new ChargerEngine(this);
   /** #393: level C expert sends; null on SOAP. */
-  private readonly _rawFrames: RawFrameSender | null;
+  private readonly _rawFrames: RawFrameSink | null;
+  /** #389: null on SOAP. */
+  private readonly _callCatalog: OcppCallActions | null;
+  /** SOAP dialect dispatch check; see {@link ChargePointTransport.receivesCsmsCall}. */
+  private readonly _receivesCsmsCall: ChargePointTransport["receivesCsmsCall"];
   private readonly _messageHandler: IChargePointMessageHandler;
   private readonly _transportUrl: string;
   /** #537: waits for a renewed certificate's notBefore (2.0.1 A02.FR.08),
@@ -688,11 +683,13 @@ export class ChargePoint {
     extraWsSubprotocols: ReadonlyArray<string> = [],
     private readonly _ocppVersion: string = "OCPP-1.6J",
     transportOptions: ChargePointTransportOptions = {},
-    securityProfile?: OcppSecurityProfile,
-    authorizationKey?: string,
-    cpoName?: string,
-    tls?: OcppTlsOptions,
+    securityProfile: OcppSecurityProfile | undefined,
+    authorizationKey: string | undefined,
+    cpoName: string | undefined,
+    tls: OcppTlsOptions | undefined,
     simulation: ChargePointSimulationOptions = {},
+    /** #575: what is built outside the domain; see `createChargePoint`. */
+    deps: ChargePointDeps,
   ) {
     this._clock = simulation.clock ?? realClock;
     this._reconnectPolicy = resolveReconnectPolicy(transportOptions.reconnect);
@@ -832,31 +829,28 @@ export class ChargePoint {
       );
     }
 
-    if (isSoapVersion(this._ocppVersion)) {
-      this._webSocket = null;
-      this._rawFrames = null;
-      const dialect = soapDialectForVersion(this._ocppVersion);
-      this._messageHandler = new OCPPSoapHandler(this, this._logger, {
-        centralSystemUrl: this._transportUrl,
-        soapCallbackUrl: transportOptions.soapCallbackUrl,
-        requestTimeoutMs: transportOptions.soapRequestTimeoutMs,
-        dialect,
-      });
-    } else {
-      this._webSocket = new OCPPWebSocket(
-        wsUrl,
-        this._id,
-        this._logger,
-        basicAuthSettings,
-        extraWsHeaders,
-        extraWsSubprotocols,
-        this._ocppVersion,
-        securityProfile,
-        authorizationKey,
-        cpoName,
-        tls,
-      );
-      this._rawFrames = new RawFrameSender(this._webSocket, () => this._clock);
+    // #575: the factory builds the socket, the raw-frame sender, the
+    // supervision URL pool and the message handler (which reads `this`).
+    const transport = deps.createTransport(this, {
+      logger: this._logger,
+      wsUrl,
+      transportUrl: this._transportUrl,
+      basicAuth: basicAuthSettings,
+      extraWsHeaders,
+      extraWsSubprotocols,
+      ocppVersion: this._ocppVersion,
+      securityProfile,
+      authorizationKey,
+      cpoName,
+      tls,
+      transportOptions,
+    });
+    this._webSocket = transport.socket;
+    this._rawFrames = transport.rawFrames;
+    this._messageHandler = transport.handler;
+    this._callCatalog = transport.callCatalog;
+    this._receivesCsmsCall = (action) => transport.receivesCsmsCall(action);
+    if (this._webSocket) {
       this._webSocket.setWsClientOptions(wsClientOptions);
       // Seeded even without `simulation.seed` (no CLI flag or `cp.create`
       // field sets one): by the charge point id, so the same id draws the
@@ -877,19 +871,6 @@ export class ChargePoint {
       this._webSocket.observers.on("reconnectScheduled", (info) =>
         this._events.emit("reconnecting", info),
       );
-      const supervisionUrls = transportOptions.supervisionUrls;
-      if (supervisionUrls && supervisionUrls.length > 1) {
-        this._webSocket.setSupervisionUrlPool(
-          new SupervisionUrlPool(
-            supervisionUrls,
-            transportOptions.urlDistribution,
-            this._id,
-          ),
-        );
-      }
-      this._messageHandler = getProtocolProfile(
-        this._ocppVersion,
-      ).createMessageHandler(this, this._webSocket, this._logger);
     }
     this._outbox = new Outbox(this._messageHandler);
 
@@ -1682,12 +1663,7 @@ export class ChargePoint {
 
     // SOAP with callback: the action must be dispatchable in this dialect —
     // target "cp" or a bidirectional op — matching OCPPSoapServer dispatch.
-    if (!(SOAP_OPERATION_NAMES as readonly string[]).includes(action)) {
-      return false;
-    }
-    const dialect = soapDialectForVersion(this._ocppVersion);
-    const metadata = dialect.operationMetadata[action as SoapOperation];
-    return metadata?.target === "cp" || metadata?.bidirectional === true;
+    return this._receivesCsmsCall(action) === true;
   }
 
   get connectorNumber(): number {
@@ -1762,7 +1738,7 @@ export class ChargePoint {
   }
 
   /** The PEM bundle that validates the current CSMS connection (#537), as
-   *  {@link OCPPWebSocket.connectionTrustAnchorsPem}; `undefined` on SOAP. */
+   *  {@link ChargePointSocket.connectionTrustAnchorsPem}; `undefined` on SOAP. */
   connectionTrustAnchorsPem(): string | undefined {
     return this._webSocket?.connectionTrustAnchorsPem();
   }
@@ -2581,7 +2557,7 @@ export class ChargePoint {
    * {@link IChargePointMessageHandler.sendOcppCall}.
    */
   async sendOcppCall(request: OcppCallRequest): Promise<OcppCallOutcome> {
-    const catalog = getOcppCallCatalog(this._ocppVersion);
+    const catalog = this._callCatalog;
     if (!catalog) {
       throw new OcppCallRejectedError(
         "unsupported_transport",
@@ -2614,7 +2590,7 @@ export class ChargePoint {
    * Expert raw frame (#393, level C of #389): one text frame written to the
    * WebSocket as given, valid OCPP-J or not, outside the 1.6 serial CALL
    * queue. Replies are correlated best effort and kept from the station's
-   * handlers. See {@link RawFrameSender}.
+   * handlers. See {@link RawFrameSink}.
    */
   sendRawFrame(request: RawFrameRequest): Promise<RawFrameOutcome> {
     if (!this._rawFrames) {

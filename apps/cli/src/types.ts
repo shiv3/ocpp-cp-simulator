@@ -4,7 +4,7 @@ import type {
   OcppTlsOptions,
 } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/wsUrlWithBasic";
 import type { TransportConfig } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/TransportConfig";
-import type { UrlDistribution } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/SupervisionUrlPool";
+import type { UrlDistribution } from "@ocpp-cp-simulator/core/cp/domain/transport/UrlDistribution";
 import type { InboundValidationMode } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
 import type { ChargePointCapabilityProfile } from "@ocpp-cp-simulator/core/cp/domain/charge-point/CapabilityProfile";
 import type { ChargerCapabilities } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargerCapabilities";

@@ -2445,3 +2445,9 @@ other. Reworded on all three pages to say what is and is not watched (the
 - 2.x: a TransactionEvent built while an earlier one is failed and unsettled waits for it (E13.FR.04); an event already written is not recalled.
 - Fixtures: `16-start-callerror-stop-during-retry` and `16-transaction-started-listener-stops` re-recorded; new `16-start-callerror-stop-during-retry-conf`, `16-start-callerror-unlock-during-retry`, `16-start-callerror-meter-and-stop-during-retry`, `16-scenario-stop-during-start-retry`, `201-event-callerror-stop-during-retry`.
 - Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#transaction-message-retries-ocpp-j-16), [Charging sessions](concepts/charging-sessions.md), [Operational timeline](concepts/operational-timeline.md), [GitHub issues](sources/github-issues.md).
+
+## [2026-11-08] fix | Transaction message hold review follow-ups (#565)
+
+- 2.x: a resend dropped before the wire (network-sim `queue_overflow`, a behavior's `beforeSend`) while the earlier transmission only awaits a late answer no longer holds later TransactionEvents back; a close queues the failing event before the held ones are released.
+- 1.6: a message moved from the serial queue to the hold keeps its `wire`, attempt count and last error code and is not intercepted by `beforeSend` a second time; a salvaged message takes the StartTransaction outcome too.
+- Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#transaction-message-retries-ocpp-j-16), [Charging sessions](concepts/charging-sessions.md). The `-1` / conf id still cannot reach a StartTransaction.req that timed out, a resend lost on close or a restart (#727); a `write_failed` salvage on a live link is a known gap in the hold's order.

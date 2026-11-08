@@ -195,8 +195,10 @@ see [variable monitoring](variable-monitoring.md#monitoringctrlr-variables),
 instance the CSMS names, as before.
 
 While a resend is pending (a TransactionEvent failed and is neither settled
-nor discarded: its resend waits out `MessageAttemptInterval`, was written, or
-an earlier transmission can still be answered late), the next
+nor discarded: its resend waits out `MessageAttemptInterval`, or was written
+and has neither been answered nor failed; an earlier transmission that timed
+out and only waits for a late answer holds nothing back, so a resend dropped
+before the wire releases the hold), the next
 TransactionEvent the station builds waits for it, E13.FR.04: "The Charging
 Station SHALL discard the message and continue with the next
 transaction-related message". An `Ended` built during the retry of `Started`
@@ -410,12 +412,20 @@ MeterValues.req of a transaction) that follow a message being resent:
   discarded for that reason any more.
 - A StopTransaction.req or MeterValues.req takes its `transactionId` when
   it is written, not when it is built: the `transactionId` of the
-  StartTransaction.conf of its transaction, whenever that arrived, including
-  a conf answering a request still in flight when the transaction stopped
-  (the stop waits behind it in the serial queue); `-1` when the
-  StartTransaction.req was discarded. A message for which nothing is known
-  (a transaction restored after a restart whose start was answered before)
-  keeps the id it was built with.
+  StartTransaction.conf of its transaction if it arrived before the request
+  timed out, including a conf answering a request still in flight when the
+  transaction stopped (the stop waits behind it in the serial queue); `-1` when
+  the StartTransaction.req was discarded. This also holds for a message
+  salvaged to the offline queue. A message for which nothing is known keeps the
+  id it was built with (`0`): a StartTransaction.req that timed out (1.6 does
+  not resend a timeout, so no outcome is recorded although errata 3.18 asks for
+  `-1` there too), a resend lost when the link closes, and a transaction
+  restored after a restart (#727).
+- A message moved from the serial queue to the hold keeps what the
+  behaviors' `beforeSend` made of it (its `wire`), its attempt count and last
+  error code: when released it goes back into the serial queue without being
+  intercepted again. A message that was held before it ever reached the queue
+  is intercepted once, when it is released.
 - When the WebSocket closes, a resend and the messages held behind it go to
   the offline queue in that order (§3.7: "When offline, the Charge Point MUST
   queue any transaction-related messages"), and the replay after the next
@@ -426,6 +436,10 @@ MeterValues.req of a transaction) that follow a message being resent:
   boot gate.
 - Held messages are kept in memory, like the resend itself: a process that
   ends without closing the socket loses them.
+- Known gap: a resend that fails to be written (`write_failed`) on a live link
+  is salvaged to the offline queue, which is replayed only after the next
+  close and boot; transaction-related messages built meanwhile are not held
+  behind it and go out first.
 
 A resend still waiting when the WebSocket closes goes to the 1.6 offline
 queue (§3.7), ahead of the CALLs still queued and the messages held behind

@@ -318,15 +318,6 @@ function startKey(ref: StartRef): string {
  *  StartTransaction.req was discarded. */
 const UNKNOWN_TRANSACTION_ID = -1;
 
-/** #565: a transaction-related CALL handed over while a resend waits. */
-interface HeldCall {
-  action: OCPPAction;
-  id: string;
-  payload: OcppMessageRequestPayload;
-  connectorId?: number;
-  startRef?: StartRef;
-}
-
 interface SerialEntry {
   action: OCPPAction;
   id: string;
@@ -347,6 +338,10 @@ interface SerialEntry {
   lastErrorCode?: string;
   /** #565: see {@link OCPPRequest.startRef}. */
   startRef?: StartRef;
+  /** #565: the behaviors' beforeSend already ran for this transmission (its
+   *  `wire` is what they made of it). A held entry that was intercepted goes
+   *  back to the serial queue as it is: one transmission, one interception. */
+  intercepted?: boolean;
 }
 
 export class OCPPMessageHandler {
@@ -426,7 +421,7 @@ export class OCPPMessageHandler {
    * `null` when none does. Released when the resend settles, moved to the
    * offline queue behind it when the link closes.
    */
-  private _held: HeldCall[] | null = null;
+  private _held: SerialEntry[] | null = null;
 
   /** #565: what each StartTransaction.req of this process got: the id of its
    *  conf, or `-1` once discarded. Read when a StopTransaction.req or a
@@ -1105,7 +1100,9 @@ export class OCPPMessageHandler {
         id,
         payload,
         ...(connectorId !== undefined && { connectorId }),
+        ...(attempt !== undefined && { attempt }),
         ...(startRef && { startRef }),
+        intercepted,
       });
       this._logger.info(
         `${action} waits behind a transaction message being resent (§3.7); ${this._held.length} held`,
@@ -1117,10 +1114,12 @@ export class OCPPMessageHandler {
     // beforeSend does not see it: it is queued as built and intercepted when
     // it is replayed (once per transmission, like the 2.x handler).
     let wire: OcppMessageRequestPayload | undefined;
+    let interceptedHere = false;
     if (!intercepted && this._webSocket.isConnected()) {
       const decision = this.interceptOutgoing(action, payload, onDropped);
       if (decision === "dropped") return;
       wire = decision;
+      interceptedHere = true;
     }
     const warning = this._codec.outgoingWarning(action, wire ?? payload);
     if (warning) {
@@ -1138,6 +1137,7 @@ export class OCPPMessageHandler {
       onDropped,
       attempt,
       ...(startRef && { startRef }),
+      intercepted: intercepted || interceptedHere,
     });
     this.pumpSerialQueue();
   }
@@ -1149,7 +1149,7 @@ export class OCPPMessageHandler {
    * while the request was in flight or being resent). A discarded request
    * leaves `-1` (1.6 errata 3.18).
    */
-  private applyStartOutcome(entry: SerialEntry | HeldCall): void {
+  private applyStartOutcome(entry: SerialEntry): void {
     if (!entry.startRef) return;
     const key = startKey(entry.startRef);
     const id = this._startOutcomes.get(key);
@@ -1164,10 +1164,9 @@ export class OCPPMessageHandler {
         ...payload,
         transactionId: id,
       } as OcppMessageRequestPayload;
-      const wire = (entry as SerialEntry).wire as
-        { transactionId?: number } | undefined;
+      const wire = entry.wire as { transactionId?: number } | undefined;
       if (wire && wire.transactionId === before) {
-        (entry as SerialEntry).wire = {
+        entry.wire = {
           ...wire,
           transactionId: id,
         } as OcppMessageRequestPayload;
@@ -1203,19 +1202,26 @@ export class OCPPMessageHandler {
       `Releasing ${held.length} transaction message(s) held behind a resend`,
       LogType.TRANSACTION,
     );
-    for (const call of held) {
-      this.applyStartOutcome(call);
+    for (const entry of held) {
+      this.applyStartOutcome(entry);
+      if (entry.intercepted) {
+        // Already seen by beforeSend (and carrying its `wire`, `attempt` and
+        // `lastErrorCode`): back in the queue, not through sendRequest.
+        this._serialQueue.push(entry);
+        continue;
+      }
       this.sendRequest(
-        call.action,
-        call.id,
-        call.payload,
-        call.connectorId,
-        undefined,
-        undefined,
+        entry.action,
+        entry.id,
+        entry.payload,
+        entry.connectorId,
+        entry.onDropped,
+        entry.attempt,
         false,
-        call.startRef,
+        entry.startRef,
       );
     }
+    this.pumpSerialQueue();
   }
 
   /** #565: the resend left for the offline queue; what waits behind it
@@ -1224,20 +1230,7 @@ export class OCPPMessageHandler {
     const held = this._held;
     this._held = null;
     if (!held) return;
-    for (const call of held) {
-      this.applyStartOutcome(call);
-      this.salvageOrDiscard(
-        {
-          action: call.action,
-          id: call.id,
-          payload: call.payload,
-          ...(call.connectorId !== undefined && {
-            connectorId: call.connectorId,
-          }),
-        },
-        reason,
-      );
-    }
+    for (const entry of held) this.salvageOrDiscard(entry, reason);
   }
 
   /**
@@ -1286,6 +1279,9 @@ export class OCPPMessageHandler {
       return;
     }
     if (isTransactionRelated(entry.action)) {
+      // #565: the id its StartTransaction.req got, if the conf (or the
+      // discard) came after the message was built.
+      this.applyStartOutcome(entry);
       this._pendingQueue.enqueue({
         action: entry.action,
         payload: entry.payload,
@@ -2016,17 +2012,7 @@ export class OCPPMessageHandler {
       this._serialQueue = this._serialQueue.filter(
         (entry) => !isRetriedOnCallError(entry),
       );
-      for (const entry of queued) {
-        held.push({
-          action: entry.action,
-          id: entry.id,
-          payload: entry.payload,
-          ...(entry.connectorId !== undefined && {
-            connectorId: entry.connectorId,
-          }),
-          ...(entry.startRef && { startRef: entry.startRef }),
-        });
-      }
+      held.push(...queued);
     }
     const timer = this.clock.setTimeout(() => {
       this._transactionMessageRetries.delete(timer);
@@ -2058,6 +2044,7 @@ export class OCPPMessageHandler {
         ...resend,
         ...(wire !== undefined && { wire }),
         id: this.generateMessageId(),
+        intercepted: this._webSocket.isConnected(),
       });
       this.pumpSerialQueue();
     }, delayMs);

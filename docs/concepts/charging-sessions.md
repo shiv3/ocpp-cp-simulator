@@ -284,11 +284,15 @@ WebSocket closes ([#488](https://github.com/shiv3/ocpp-cp-simulator/issues/488))
   and one that already ended (a 1.6 StopTransaction.req, a 2.x `Ended` event)
   stays ended.
 - On 1.6 a transaction stopped before its StartTransaction.req got a conf
-  stops with the `transactionId` that conf assigns, whenever it arrives: the
+  stops with the `transactionId` that conf assigns when it arrives while the
+  request is resent or in flight (before its 30 s timeout): the
   StopTransaction.req waits behind a StartTransaction.req being resent, or in
-  flight, and is built with the id when it is written. If the request is
-  discarded, it carries `-1` (1.6 errata 3.18). A StartTransaction.req resend
-  is never dropped because its transaction stopped
+  flight, and is built with the id when it is written (also when it is salvaged
+  to the offline queue). If the request is discarded, it carries `-1` (1.6
+  errata 3.18). Still `0`: a StartTransaction.req that timed out (1.6 does not
+  resend a timeout; errata 3.18 asks for `-1` there too), a resend lost when
+  the link closes, and a restart (the outcomes are kept in memory) (#727). A
+  StartTransaction.req resend is never dropped because its transaction stopped
   ([#565](https://github.com/shiv3/ocpp-cp-simulator/issues/565),
   [order of transaction messages](ocpp-versions-and-transports.md#transaction-message-retries-ocpp-j-16)).
 - `sessions.list` takes one charge point; there is no fleet-wide listing yet

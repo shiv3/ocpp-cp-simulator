@@ -35,6 +35,14 @@ interface MeterValueSchedulerCallbacks {
    * domain handles the SuspendedEVSE transition).
    */
   getScheduleLimitWatts?(): number;
+  /**
+   * Multiplier on the energy a tick adds (meter ramp-up and fluctuation,
+   * #614): the power the sample reports and the energy the register adds are
+   * then one quantity. Absent, or exactly 1, leaves a tick untouched.
+   */
+  getDeliveryFactor?(): number;
+  /** Called at the start of every tick, before anything is read. */
+  onTick?(): void;
 }
 
 export class MeterValueScheduler {
@@ -96,6 +104,10 @@ export class MeterValueScheduler {
    */
   private curveOffsetWh = 0;
 
+  /** The curve's value at the previous tick (#614), for scaling one tick's
+   *  energy; null before the first tick. */
+  private lastIdealWh: number | null = null;
+
   constructor(
     private readonly connectorId: number,
     private readonly callbacks: MeterValueSchedulerCallbacks,
@@ -113,6 +125,10 @@ export class MeterValueScheduler {
         ? this.callbacks.getCurrentValue() -
           getMeterValueAtTime(0, strategy.config) * 1000
         : 0;
+    this.lastIdealWh =
+      strategy.kind === "curve"
+        ? this.curveOffsetWh + getMeterValueAtTime(0, strategy.config) * 1000
+        : null;
 
     if (strategy.kind === "curve") {
       const { config } = strategy;
@@ -152,6 +168,7 @@ export class MeterValueScheduler {
   private tickIncrement(
     strategy: Extract<MeterValueStrategy, { kind: "increment" }>,
   ): void {
+    this.callbacks.onTick?.();
     // Check max time
     if (
       strategy.maxTimeSeconds &&
@@ -191,7 +208,9 @@ export class MeterValueScheduler {
     // throttles down to whatever the profile allows right now. limit=0 means
     // paused (we still tick so a later period can resume delivery).
     const cap = this.callbacks.getScheduleLimitWatts?.() ?? Infinity;
-    let effectiveIncrement = strategy.incrementValue;
+    const factor = this.callbacks.getDeliveryFactor?.() ?? 1;
+    let effectiveIncrement =
+      factor === 1 ? strategy.incrementValue : strategy.incrementValue * factor;
     if (cap !== Infinity) {
       const allowedIncrementWh = (cap * strategy.intervalSeconds) / 3600; // P×t → energy (Wh)
       effectiveIncrement = Math.min(
@@ -248,6 +267,7 @@ export class MeterValueScheduler {
     this.startTimestamp = null;
     this.carryWh = 0;
     this.curveOffsetWh = 0;
+    this.lastIdealWh = null;
   }
 
   isActive(): boolean {
@@ -260,6 +280,7 @@ export class MeterValueScheduler {
 
   private tickCurve(config: AutoMeterValueConfig): void {
     if (!this.startTimestamp) return;
+    this.callbacks.onTick?.();
 
     const elapsedMs = this.clock.now() - this.startTimestamp;
     const elapsedSeconds = elapsedMs / 1000;
@@ -271,6 +292,16 @@ export class MeterValueScheduler {
     const idealWh =
       this.curveOffsetWh + getMeterValueAtTime(elapsedSeconds, config) * 1000;
     let rawNext = idealWh;
+    // A ramp or a fluctuation scales the energy of this tick, not the curve's
+    // absolute trajectory: the register then adds the integral of the power
+    // reported (#614). Untouched when the factor is exactly 1.
+    const factor = this.callbacks.getDeliveryFactor?.() ?? 1;
+    if (factor !== 1) {
+      const previousIdeal = this.lastIdealWh ?? idealWh;
+      const delivered = this.callbacks.getCurrentValue() + this.carryWh;
+      rawNext = delivered + Math.max(0, idealWh - previousIdeal) * factor;
+    }
+    this.lastIdealWh = idealWh;
 
     // Apply the OCPP charging profile cap by clamping the per-tick delta. The
     // bezier curve dictates an "ideal" trajectory; if the schedule says we
@@ -287,7 +318,9 @@ export class MeterValueScheduler {
       // freezing the meter under a low cap (#301).
       const delivered = this.callbacks.getCurrentValue() + this.carryWh;
       const maxIncrement = Math.max(0, (cap * intervalSec) / 3600);
-      rawNext = delivered + Math.min(idealWh - delivered, maxIncrement);
+      rawNext =
+        delivered +
+        Math.min((factor !== 1 ? rawNext : idealWh) - delivered, maxIncrement);
       // Guards the *capped* arithmetic only: a cap below the trajectory's
       // slope must not be read as a negative delta. It is deliberately not
       // the curve's monotonicity guarantee — that lives at the boundary, in

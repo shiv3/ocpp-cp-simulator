@@ -1,3 +1,10 @@
+import {
+  mainMeterProblem,
+  meterRealismProblem,
+  type MainMeterConfig,
+  type MeterRealism,
+} from "../connector/MeterRealism";
+
 /**
  * What the charger hardware can deliver (#327): the charger side of
  * "vehicle demand ∩ charger capability ∩ external allocation". Not what the
@@ -11,6 +18,9 @@
 export interface ChargerCapabilities {
   /** Per-connector hardware. A connector not listed is uncapped. */
   readonly connectors: ReadonlyArray<ConnectorCapability>;
+  /** The station's main meter on connector 0 / EVSE 0 (#617). Opt-in: absent
+   *  means the station has none and connector 0 stays unknown. */
+  readonly mainMeter?: MainMeterConfig;
 }
 
 export interface ConnectorCapability {
@@ -20,6 +30,18 @@ export interface ConnectorCapability {
    *  aggregate of a station is deliberately not modelled: there is no power
    *  sharing, so connectors are never clamped to a sum. */
   readonly maxDeliveryPowerW: number;
+  /** Opt-in meter realism of this connector (#614-#616). Absent keeps the
+   *  constant, historical MeterValues. */
+  readonly meter?: MeterRealism;
+}
+
+/** The meter realism of `connectorId`, `undefined` when none. */
+export function meterRealismFor(
+  capabilities: ChargerCapabilities | undefined,
+  connectorId: number,
+): MeterRealism | undefined {
+  return capabilities?.connectors.find((c) => c.connectorId === connectorId)
+    ?.meter;
 }
 
 /** The delivery cap of `connectorId` in watts, `undefined` when none. */
@@ -64,7 +86,10 @@ export function chargerCapabilitiesProblem(value: unknown): string | null {
     if (typeof entry !== "object" || entry === null) {
       return "chargerCapabilities.connectors entries must be objects";
     }
-    const { connectorId, maxDeliveryPowerW } = entry as Record<string, unknown>;
+    const { connectorId, maxDeliveryPowerW, meter } = entry as Record<
+      string,
+      unknown
+    >;
     if (
       typeof connectorId !== "number" ||
       !Number.isInteger(connectorId) ||
@@ -83,6 +108,15 @@ export function chargerCapabilitiesProblem(value: unknown): string | null {
     ) {
       return "chargerCapabilities maxDeliveryPowerW must be a positive number of watts";
     }
+    if (meter !== undefined) {
+      const problem = meterRealismProblem(meter);
+      if (problem) return `chargerCapabilities ${problem}`;
+    }
+  }
+  const mainMeter = (value as { mainMeter?: unknown }).mainMeter;
+  if (mainMeter !== undefined) {
+    const problem = mainMeterProblem(mainMeter);
+    if (problem) return `chargerCapabilities ${problem}`;
   }
   return null;
 }

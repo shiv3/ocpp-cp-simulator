@@ -10,6 +10,7 @@ sources:
   - packages/core/src/scenario/scenarioSchemaValidator.ts
   - packages/core/src/scenario/deepPartialMatch.ts
   - packages/core/src/cp/domain/connector/ChargingCurve.ts
+  - packages/core/src/cp/domain/connector/MeterRealism.ts
   - packages/core/src/cp/domain/connector/MeterValueBuilder.ts
   - packages/core/src/cp/domain/connector/OperatingPoint.ts
   - packages/core/src/cp/domain/connector/SessionIntent.ts
@@ -26,6 +27,7 @@ sources:
   - packages/core/src/cp/application/scenario/ScenarioExecutor.ts
   - apps/web/src/console/lib/scenarioLibrary.ts
 related:
+  - meter-realism.md
   - ../sources/scenario-json-schema.md
   - ../entities/scenario-templates.md
   - ../sources/example-scenarios.md
@@ -704,8 +706,8 @@ the same limit, unit and `numberPhases`, so 6 A / 3 phases followed by
 **One operating point per sample (#327).** `Connector.operatingPoint()` is the
 only resolver: a pure function that reads the schedule limit, active phase
 count, battery acceptance, EVSE offer, line currents, voltage, power factor and
-SoC once, from one instant, out of six named input terms (`at`, `schedule`,
-`vehicle`, `session`, `charger`, `fault`; `OperatingPointInputs`). The energy register
+SoC once, from one instant, out of seven named input terms (`at`, `schedule`,
+`vehicle`, `session`, `charger`, `fault`, `meter`; `OperatingPointInputs`). The energy register
 (`MeterValueScheduler`) accumulates against the point's `accumulationCapW` and
 `MeterValueBuilder` only formats the rest, so the samples of a MeterValue
 describe one instant. The resolution (`OperatingPoint.ts`) imports nothing from
@@ -751,6 +753,13 @@ sharing), so connectors are never clamped to a sum. `GetCompositeSchedule`
 restates the CSMS profiles, not hardware, and is unaffected. When the schedule
 and the cap are equal `limitedBy` names the schedule, the term an operator can
 change at run time.
+
+**Meter realism (#614–#617).** A seventh input, `meter` (`MeterTerm`), carries the
+opt-in [meter realism](meter-realism.md) of the connector: seeded voltage, power
+and current fluctuation, a power ramp-up, independent per-phase quantities and an
+export term are resolved in `resolveOperatingPoint` (new fields `deliveryFactor`,
+`exportW`, `exportCurrentA`, `phaseDetail`), so the builder still only formats.
+`{}` (nothing configured) resolves byte for byte as before.
 
 **`Power.Offered` is gated on the EVSE energizing the connector.** `offeredW` is
 non-zero for a running transaction in `Charging` **or `SuspendedEV`** and 0 in

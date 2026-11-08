@@ -81,7 +81,7 @@ import {
   DEVICE_DATA_CTRLR_KEYS,
   REPORT_MAX_BYTES,
   REPORT_MAX_ITEMS,
-} from "../../../domain/device-model/reportLimits";
+} from "../../../domain/device-model/deviceDataCtrlrKeys";
 import {
   buildCertificateHandlersV2x,
   V201_CERTIFICATE_MAPPING,

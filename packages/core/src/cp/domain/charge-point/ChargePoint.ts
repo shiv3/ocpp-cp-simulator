@@ -142,11 +142,6 @@ import {
   MONITORING_REQUEST_MAX_ITEMS,
 } from "../monitoring/monitoringCtrlrKeys";
 import { DEVICE_MODEL } from "../device-model/DeviceModelRegistry";
-import {
-  DEVICE_DATA_CTRLR_KEYS,
-  REPORT_MAX_BYTES,
-  REPORT_MAX_ITEMS,
-} from "../device-model/reportLimits";
 import { renderConfigValue } from "../../infrastructure/transport/v201/renderConfigValue";
 import { OcmfMeter } from "../connector/SignedMeterData";
 import {
@@ -804,7 +799,6 @@ export class ChargePoint {
       repository.saveActiveBase(this._monitoring.activeMonitoringBase);
     }
     this.publishMonitoringCtrlr();
-    this.publishReportLimits();
     this.publishDeviceModelConstants();
     this.publishRuntimeValues();
     // Registered before the evaluation's own listener, so a new row exists
@@ -860,23 +854,17 @@ export class ChargePoint {
    */
   private publishDeviceModelConstants(): void {
     for (const def of DEVICE_MODEL.variables) {
-      if (def.constant !== true || typeof def.default !== "string") continue;
-      this._configuration.defineRuntimeKey(def.valueKey, def.default);
+      if (def.constant !== true) continue;
+      if (typeof def.default === "string") {
+        this._configuration.defineRuntimeKey(def.valueKey, def.default);
+      } else if (typeof def.default === "number") {
+        this._configuration.defineRuntimeIntegerKey(
+          def.valueKey,
+          def.default,
+          def.min === undefined ? undefined : { min: def.min },
+        );
+      }
     }
-  }
-
-  /** The DeviceDataCtrlr limits that size a NotifyReport part (#605). */
-  private publishReportLimits(): void {
-    this._configuration.defineRuntimeIntegerKey(
-      DEVICE_DATA_CTRLR_KEYS.itemsPerGetReport,
-      REPORT_MAX_ITEMS,
-      { min: 1 },
-    );
-    this._configuration.defineRuntimeIntegerKey(
-      DEVICE_DATA_CTRLR_KEYS.bytesPerGetReport,
-      REPORT_MAX_BYTES,
-      { min: 1 },
-    );
   }
 
   /**

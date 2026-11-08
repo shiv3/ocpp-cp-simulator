@@ -8,7 +8,7 @@ sources:
   - packages/core/src/cp/domain/charge-point/ConfigurationStore.ts
   - packages/core/src/cp/infrastructure/transport/v201/baseReportV201.ts
   - packages/core/src/cp/infrastructure/transport/v201/reportParts.ts
-  - packages/core/src/cp/domain/device-model/reportLimits.ts
+  - packages/core/src/cp/domain/device-model/deviceDataCtrlrKeys.ts
   - "issue #604"
   - "issue #569"
   - "issue #605"
@@ -68,9 +68,22 @@ flag, type, bounds, allowed values, default, 1.6 sharing).
 `TxCtrlr.TxStartPoint` and `TxStopPoint` are registered `ReadOnly`: the
 simulator starts a transaction on authorization and ends it on deauthorization,
 EV disconnect or connection timeout, and their values (`Authorized`,
-`Authorized,EVConnected`) describe that. Making them `ReadWrite` belongs with
+`Authorized,EVConnected`) describe that (`TxStopPoint` reads
+`Authorized,EVConnected` while `StopTxOnEVSideDisconnect` is true, its default,
+because that variable is writable). Making them `ReadWrite` belongs with
 the follow-up that makes transaction timing follow them; writable earlier they
 would accept a value that changes nothing.
+
+`OCPPCommCtrlr.ResetRetries` is `ReadOnly` on 2.x although OCPP 1.6 §9.1 lists
+the key read-write: the simulated reset never fails, so nothing retries, and a
+writable value would change nothing. The 1.6 key stays read-write; on 2.x
+`defaultConfiguration` marks the store key read-only to match.
+
+A `MemberList` variable, like an `OptionList` one, carries a `valuesList`
+(mandatory in `VariableCharacteristicsType` for `OptionList`, `MemberList` and
+`SequenceList`); the registry refuses one without it and refuses it on any other
+type. The measurand variables list the measurands `MeterValueBuilder` models;
+the store does not enforce the list.
 
 ## Components
 
@@ -86,7 +99,7 @@ one of their variables answers `UnknownVariable`, not `UnknownComponent`.
 | ---------------------------------------------------------- | ----------------------------------------- | ---------- | ---------- | ------------------------------------------------------ | ------------------------------------------------- | ----------- |
 | `OCPPCommCtrlr.HeartbeatInterval`                          | `HeartbeatInterval` (1.6)                 | ReadWrite  | integer    | –                                                      | 300                                               | Persistent  |
 | `OCPPCommCtrlr.WebSocketPingInterval`                      | `WebSocketPingInterval` (1.6)             | ReadWrite  | integer    | min 0, max 2147483                                     | 0                                                 | Persistent  |
-| `OCPPCommCtrlr.ResetRetries`                               | `ResetRetries` (1.6)                      | ReadWrite  | integer    | –                                                      | 1                                                 | Persistent  |
+| `OCPPCommCtrlr.ResetRetries`                               | `ResetRetries` (1.6)                      | ReadOnly   | integer    | –                                                      | 1                                                 | Persistent  |
 | `OCPPCommCtrlr.MessageAttempts[TransactionEvent]`          | `TransactionMessageAttempts` (1.6)        | ReadWrite  | integer    | –                                                      | 3                                                 | Persistent  |
 | `OCPPCommCtrlr.MessageAttemptInterval[TransactionEvent]`   | `TransactionMessageRetryInterval` (1.6)   | ReadWrite  | integer    | –                                                      | 60                                                | Persistent  |
 | `OCPPCommCtrlr.MessageTimeout[Default]`                    | `MessageTimeout`                          | ReadOnly   | integer    | min 1                                                  | 30                                                | Persistent  |
@@ -94,10 +107,10 @@ one of their variables answers `UnknownVariable`, not `UnknownComponent`.
 | `DeviceDataCtrlr.BytesPerMessage[GetReport]`               | `BytesPerMessageGetReport`                | ReadOnly   | integer    | min 1                                                  | 65536                                             | Volatile    |
 | `TxCtrlr.EVConnectionTimeOut`                              | `ConnectionTimeOut` (1.6)                 | ReadWrite  | integer    | –                                                      | 60                                                | Persistent  |
 | `SampledDataCtrlr.TxUpdatedInterval`                       | `MeterValueSampleInterval` (1.6)          | ReadWrite  | integer    | –                                                      | 60                                                | Persistent  |
-| `SampledDataCtrlr.TxUpdatedMeasurands`                     | `MeterValuesSampledData` (1.6)            | ReadWrite  | MemberList | –                                                      | Energy.Active.Import.Register,Power.Active.Import | Persistent  |
+| `SampledDataCtrlr.TxUpdatedMeasurands`                     | `MeterValuesSampledData` (1.6)            | ReadWrite  | MemberList | the measurands of `MeterValueBuilder`                  | Energy.Active.Import.Register,Power.Active.Import | Persistent  |
 | `SampledDataCtrlr.SignReadings`                            | `SampledDataSignReadings` (1.6)           | ReadWrite  | boolean    | –                                                      | false                                             | Persistent  |
 | `AlignedDataCtrlr.Interval`                                | `ClockAlignedDataInterval` (1.6)          | ReadWrite  | integer    | min 0, max 86400                                       | 0                                                 | Persistent  |
-| `AlignedDataCtrlr.Measurands`                              | `MeterValuesAlignedData` (1.6)            | ReadWrite  | MemberList | –                                                      | (empty)                                           | Persistent  |
+| `AlignedDataCtrlr.Measurands`                              | `MeterValuesAlignedData` (1.6)            | ReadWrite  | MemberList | the measurands of `MeterValueBuilder`                  | (empty)                                           | Persistent  |
 | `LocalAuthListCtrlr.Enabled`                               | `LocalAuthListEnabled` (1.6)              | ReadWrite  | boolean    | –                                                      | true                                              | Persistent  |
 | `LocalAuthListCtrlr.ItemsPerMessage`                       | `SendLocalListMaxLength` (1.6)            | ReadOnly   | integer    | –                                                      | 100                                               | Persistent  |
 | `AuthCtrlr.AuthorizeRemoteStart`                           | `AuthorizeRemoteTxRequests` (1.6)         | ReadOnly   | boolean    | –                                                      | false                                             | Persistent  |
@@ -108,8 +121,8 @@ one of their variables answers `UnknownVariable`, not `UnknownComponent`.
 | `AuthCacheCtrlr.LifeTime`                                  | `AuthCacheLifeTime`                       | ReadWrite  | integer    | min 0                                                  | 0                                                 | Persistent  |
 | `TxCtrlr.StopTxOnInvalidId`                                | `StopTransactionOnInvalidId` (1.6)        | ReadWrite  | boolean    | –                                                      | true                                              | Persistent  |
 | `TxCtrlr.StopTxOnEVSideDisconnect`                         | `StopTransactionOnEVSideDisconnect` (1.6) | ReadWrite  | boolean    | –                                                      | true                                              | Persistent  |
-| `TxCtrlr.TxStartPoint`                                     | `TxStartPoint`                            | ReadOnly   | MemberList | –                                                      | Authorized                                        | Volatile    |
-| `TxCtrlr.TxStopPoint`                                      | `TxStopPoint`                             | ReadOnly   | MemberList | –                                                      | Authorized,EVConnected                            | Volatile    |
+| `TxCtrlr.TxStartPoint`                                     | `TxStartPoint`                            | ReadOnly   | MemberList | Authorized                                             | Authorized                                        | Volatile    |
+| `TxCtrlr.TxStopPoint`                                      | `TxStopPoint`                             | ReadOnly   | MemberList | Authorized, EVConnected                                | Authorized,EVConnected                            | Volatile    |
 | `MonitoringCtrlr.ItemsPerMessage[SetVariableMonitoring]`   | `ItemsPerMessageSetVariableMonitoring`    | ReadOnly   | integer    | –                                                      | 100                                               | Volatile    |
 | `MonitoringCtrlr.BytesPerMessage[SetVariableMonitoring]`   | `BytesPerMessageSetVariableMonitoring`    | ReadOnly   | integer    | –                                                      | 65536                                             | Volatile    |
 | `MonitoringCtrlr.ItemsPerMessage[ClearVariableMonitoring]` | `ItemsPerMessageClearVariableMonitoring`  | ReadOnly   | integer    | –                                                      | 100                                               | Volatile    |
@@ -153,7 +166,7 @@ has the request's `requestId` (B07.FR.04, B08.FR.04), the first has `seqNo` 0
 and `seqNo` grows by one (B07.FR.10, B08.FR.14), and every part but the last
 has `tbc` true (B08.FR.05). `GetReport` uses the same parts. The two variables
 are `ReadOnly` (the appendix words them as limits on the CSMS's request; the
-simulator reuses them as its part size, so there is one number to read). The
+simulator reuses them as its part size, so there is one number to read; it does not enforce them on an inbound GetBaseReport / GetReport, B08.FR.17). They are registry constants (`constant: true`), published at start-up with the other constants, and `deviceDataCtrlrKeys.ts` names their keys. The
 parts are sent back to back, the way `NotifyMonitoringReport` is.
 
 ## Adding a variable

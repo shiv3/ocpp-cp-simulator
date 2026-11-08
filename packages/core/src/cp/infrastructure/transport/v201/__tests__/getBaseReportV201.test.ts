@@ -4,7 +4,7 @@ import { isValidNotifyReportRequestV201 } from "@ocpp-cp-sim/ocpp/v201/index";
 import type { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
 import { makeChargePoint } from "../../../../domain/charge-point/__tests__/chargePointFixtures";
 import { DEVICE_MODEL } from "../../../../domain/device-model/DeviceModelRegistry";
-import { DEVICE_DATA_CTRLR_KEYS } from "../../../../domain/device-model/reportLimits";
+import { DEVICE_DATA_CTRLR_KEYS } from "../../../../domain/device-model/deviceDataCtrlrKeys";
 import type { Logger } from "../../../../shared/Logger";
 import { handleGetBaseReportV201 } from "../inboundRegistryV201";
 import { splitIntoSizedParts } from "../reportParts";

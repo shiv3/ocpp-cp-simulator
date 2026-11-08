@@ -1,7 +1,7 @@
 ---
 title: "Source: GitHub issues referenced by the wiki"
 type: source
-summary: Index of the issue / PR numbers that wiki pages cite as the origin of a design decision, so "why" questions can be traced back.
+summary: Archive, frozen 2026-11-08. Index of the issue / PR numbers that wiki pages cited as the origin of a design decision; newer provenance is in git.
 sources:
   - https://github.com/shiv3/ocpp-cp-simulator/issues
 related:
@@ -11,7 +11,12 @@ related:
 updated: 2026-11-08
 ---
 
-# Source: GitHub issues referenced by the wiki
+# Source: GitHub issues referenced by the wiki (archive)
+
+> **Archived: no longer updated as of 2026-11-08.** Do not add rows. Pages cite
+> issue numbers inline for provenance; to trace a newer decision use
+> `git log --grep '#N'`, `git log -- docs/`, the PR that closed the issue, or the
+> branch name `<type>/<issue number>-<slug>`.
 
 All under https://github.com/shiv3/ocpp-cp-simulator unless noted.
 
@@ -66,8 +71,6 @@ All under https://github.com/shiv3/ocpp-cp-simulator unless noted.
 | #328                                             | `transaction_started` re-emitted with the CSMS-assigned id, `0` included                                                                                                                                                         | [CLI → events](../entities/cli.md#events)                                                                                                                                                                                                                                                                                                                                            |
 | #322                                             | e2e fixture pins `gocpp v0.1.7` in `go.mod`/`go.sum`; no sibling checkout                                                                                                                                                        | [Source: e2e/README.md](e2e-readme.md), [CSMS peers → gocpp](../entities/csms-peers.md#gocpp)                                                                                                                                                                                                                                                                                        |
 | #323                                             | e2e covers 1.6 `SetChargingProfile` / `ClearChargingProfile` / `GetCompositeSchedule`; composite keeps unit and `numberPhases`                                                                                                   | [Scenario format](../concepts/scenario-format.md#charging-curve-v12), [Source: e2e/README.md](e2e-readme.md)                                                                                                                                                                                                                                                                         |
-| #623                                             | e2e fixture: switchable BootNotification sequence, authorization mode (whitelist, blacklist, rate-limit, offline), command sequences                                                                                             | [Source: e2e/README.md](e2e-readme.md)                                                                                                                                                                                                                                                                                                                                               |
-| #624                                             | `E2E` workflow runs the gocpp suite weekly against the pinned gocpp and keeps traces on failure                                                                                                                                  | [Source: e2e/README.md](e2e-readme.md), [Testing strategy](../analyses/testing-strategy.md)                                                                                                                                                                                                                                                                                          |
 | #326                                             | `TABLES` registry: `state.reset` truncates every table, `cp.delete` cascades to every `cp_id`-keyed one                                                                                                                          | [State persistence](../concepts/state-persistence.md)                                                                                                                                                                                                                                                                                                                                |
 | #348                                             | `data_transfer` CP command: station-initiated `DataTransfer.req`, the CSMS's answer as the result                                                                                                                                | [Control plane](../concepts/control-plane.md#cp-command-methods)                                                                                                                                                                                                                                                                                                                     |
 | #329                                             | `export-k6` shares the simulator's curve interpolator; the documented subset is tested against the schema                                                                                                                        | [CLI](../entities/cli.md#the-subset-field-by-field), [Scenario format](../concepts/scenario-format.md#charging-curve-v12)                                                                                                                                                                                                                                                            |

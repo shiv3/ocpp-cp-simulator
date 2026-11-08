@@ -9,6 +9,7 @@ import type { InboundValidationMode } from "@ocpp-cp-sim/core/cp/domain/charge-p
 import type { ChargePointCapabilityProfile } from "@ocpp-cp-sim/core/cp/domain/charge-point/CapabilityProfile";
 import type { IdTagDistribution } from "@ocpp-cp-sim/core/cp/domain/auth/IdTagPool";
 import type { Labels } from "@ocpp-cp-sim/contracts/labels";
+import type { JsonObject } from "@ocpp-cp-sim/contracts/behavior";
 
 export interface SoapTunnelConfig {
   readonly provider: "ngrok";
@@ -37,6 +38,12 @@ export interface CLIOptions {
    * charge points this process bootstraps run. Empty: all of them.
    */
   readonly useBehaviors?: readonly string[];
+  /**
+   * `--behavior-params <id>=<json file or inline json>`, repeatable: params
+   * for the behaviors (a loaded one or a built-in `default.*`) the charge
+   * points this process bootstraps run. JSON only.
+   */
+  readonly behaviorParams?: Readonly<Record<string, JsonObject>>;
   /** `--watch-behaviors`: reload a behavior file when it changes. */
   readonly watchBehaviors?: boolean;
   /** `--allow-behavior-reload`: the daemon answers the `behavior.reload` method. */
@@ -352,6 +359,12 @@ export interface ChargePointInitOptions {
    * start.
    */
   readonly behaviors?: readonly string[];
+  /**
+   * Params the selection sets on behaviors, by behavior id (a loaded one or a
+   * built-in `default.*`); JSON only, checked against each behavior's params
+   * schema. Absent: every behavior runs with its defaults.
+   */
+  readonly behaviorParams?: Readonly<Record<string, JsonObject>>;
 }
 
 export interface JsonCommand {
@@ -450,5 +463,6 @@ export interface ChargePointStatus {
     } | null;
     readonly labels?: Labels;
     readonly behaviors?: readonly string[];
+    readonly behaviorParams?: Readonly<Record<string, JsonObject>>;
   };
 }

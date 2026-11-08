@@ -112,6 +112,28 @@ answered (or suppressed, or abandoned); a returned `after` runs later and does n
 | a connector-less CALL                                 | As above, with no connector step                                                                                                                       | same                             |
 | scenario rule for connector 2, CALL names connector 1 | Still beats code (kind ranks before connector)                                                                                                         | same                             |
 
+## Params and disable in the order
+
+Schema 1.6 `useBehavior` (#654) fits the order without a new step.
+
+- **`mode: "disable"` is a step 3 rule.** It registers a scenario rule for each action of the behavior that has
+  an `Accepted` answer on the station's version; the rule answers `ctx.accepted(action)` at once and starts
+  nothing. Being a scenario rule it beats the behavior's own rule (step 4 or the default at step 5) and every
+  other code behavior, for exactly the length of the run, and it follows the within-a-step rules like any scenario
+  rule (newest run first, exact connector first; the rule names no connector, so age decides). Policy and
+  override still come before it.
+- **`params` are not a rule.** They change what the winning rule does, not who wins. The behavior that answers
+  reads `ctx.params`: its declared defaults, then the station's selection, then each running scenario's `params`,
+  oldest first so the newest run's key wins. The params are read when the CALL arrives, so a CALL that is being
+  answered, and its follow-up, are not affected by a run that starts or ends later.
+- **A built-in is selected without a rule.** `useBehavior` of a `default.*` id only sets a params layer; the
+  default keeps answering at step 5, as it always did.
+- **Disable answers before inbound validation.** Since #593 the rules answer before the inbound check, so under
+  `inboundValidation: enforce` a malformed CALL to an action a disabled behavior covers gets the disable rule's
+  `Accepted`, not a CALLERROR. Read disable as "answers in place of the behavior", never "answers after validation".
+
+Tests: `packages/core/src/test/behavior/params.bun.test.ts` ("mode disable", "outranks a loaded code behavior").
+
 ## Scenario parking is not a rule
 
 `RemoteStartTransaction` / `RequestStartTransaction` and `RemoteStopTransaction` / `RequestStopTransaction`

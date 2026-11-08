@@ -3,7 +3,7 @@ import * as fs from "fs";
 import type { ChargePointCapabilityProfile } from "@ocpp-cp-sim/core/cp/domain/charge-point/CapabilityProfile";
 import { CLIChargePointService } from "../service";
 import type { SessionSettledInfo } from "../service";
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import type { Behavior, JsonObject } from "@ocpp-cp-sim/contracts/behavior";
 import {
   behaviorFitProblem,
   behaviorShapeProblem,
@@ -95,6 +95,7 @@ interface ChargePointRow {
   created_at: string;
   labels: string | null;
   behaviors: string | null;
+  behavior_params: string | null;
   tx_updated_meter_values: number | null;
   inbound_validation: string | null;
   capability_profile: string | null;
@@ -152,6 +153,12 @@ export class CPRegistry {
    * back, so a run with fewer files does not shrink the stored selection.
    */
   private readonly storedSelection = new Map<string, string | null>();
+  /**
+   * The raw `behavior_params` column of the same rows, kept and written back
+   * under the same rule as {@link storedSelection}: the params of a behavior
+   * this run did not load are not lost with the selection that names it.
+   */
+  private readonly storedParams = new Map<string, string | null>();
 
   constructor(
     private readonly bus: EventBus,
@@ -250,7 +257,7 @@ export class CPRegistry {
         "central_system_url, soap_callback_url, soap_path, " +
         "security_profile, authorization_key, cpo_name, " +
         "tls_ca_path, tls_cert_path, tls_key_path, " +
-        "basic_auth, boot_notif, created_at, labels, behaviors, tx_updated_meter_values, " +
+        "basic_auth, boot_notif, created_at, labels, behaviors, behavior_params, tx_updated_meter_values, " +
         "inbound_validation, capability_profile, transport_options " +
         "FROM charge_points ORDER BY created_at ASC",
     );
@@ -316,6 +323,11 @@ export class CPRegistry {
           ) ?? undefined,
         labels: restoreLabels(row),
         ...restored_behaviors.init,
+        ...restoreBehaviorParams(
+          row,
+          this.library,
+          restored_behaviors.init.behaviors,
+        ),
         // #347: NULL — off, or a row older than the column — restores as off.
         ...(row.tx_updated_meter_values === 1
           ? { txUpdatedMeterValues: true }
@@ -360,6 +372,7 @@ export class CPRegistry {
         const svc = this.instantiate(init, { reconcileSessions: false });
         if (restored_behaviors.column !== undefined) {
           this.storedSelection.set(row.cp_id, restored_behaviors.column);
+          this.storedParams.set(row.cp_id, row.behavior_params ?? null);
         }
         // Restore per-connector runtime state (OCPP status, in-flight
         // transaction, meter, soc) BEFORE wiring the WebSocket so the
@@ -416,6 +429,7 @@ export class CPRegistry {
         // One row that cannot be rebuilt is not the daemon's end: the others
         // come back, and this one stays in the table for a start that can.
         this.storedSelection.delete(row.cp_id);
+        this.storedParams.delete(row.cp_id);
         // A step after `instantiate` failed: the service is registered but was
         // never wired. Take it out, or it sits in list() and never connects.
         const partial = this.services.get(row.cp_id);
@@ -605,19 +619,29 @@ export class CPRegistry {
   setBehaviors(
     cpId: string,
     ids: readonly string[] | undefined,
+    params?: Readonly<Record<string, JsonObject>>,
   ): string[] | null {
     const svc = this.services.get(cpId);
     if (!svc) return null;
     const wanted = this.library.select(ids);
     // Nothing is written until the station has shown it can run the selection:
-    // the version checks first, then the live change, then the row.
+    // the version checks first, then the params, then the live change, then
+    // the row.
     this.checkFit(svc.getInit().ocppVersion, wanted);
-    svc.setBehaviors(wanted, ids);
+    this.library.checkParams(wanted, params);
+    svc.setBehaviors(wanted, ids, params);
     this.database?.run(
-      "UPDATE charge_points SET behaviors = ? WHERE cp_id = ?",
-      [ids ? JSON.stringify(ids) : null, cpId],
+      "UPDATE charge_points SET behaviors = ?, behavior_params = ? WHERE cp_id = ?",
+      [
+        ids ? JSON.stringify(ids) : null,
+        params && Object.keys(params).length > 0
+          ? JSON.stringify(params)
+          : null,
+        cpId,
+      ],
     );
     this.storedSelection.delete(cpId);
+    this.storedParams.delete(cpId);
     this.notifyRegistryMembership({ change: "updated", cpId, service: svc });
     return svc.behaviorIds();
   }
@@ -707,6 +731,7 @@ export class CPRegistry {
     const preparedInit = this.prepareInit(init);
     // A removed station's stored selection does not follow its id.
     this.storedSelection.delete(init.cpId);
+    this.storedParams.delete(init.cpId);
     this.persistCreate(preparedInit);
     let svc: CLIChargePointService;
     try {
@@ -768,6 +793,7 @@ export class CPRegistry {
       : existing.engineStateSnapshot();
     const previousInit = existing.getInit();
     const previousColumn = this.storedSelection.get(init.cpId);
+    const previousParamsColumn = this.storedParams.get(init.cpId);
     // Find out before the old station is closed: a selection this engine
     // refuses must leave the station connected and as it was.
     existing.assertBehaviorsLoadable(
@@ -781,7 +807,15 @@ export class CPRegistry {
     // this run holds fewer behaviors than it lists.
     const keepStored =
       init.behaviors === undefined && previousColumn !== undefined;
-    this.persistCreate(preparedInit, keepStored ? previousColumn : undefined); // ON CONFLICT UPDATE — leaves scenarios intact
+    // The params follow the selection: kept from the row unless the request
+    // names new ones.
+    this.persistCreate(
+      preparedInit,
+      keepStored ? previousColumn : undefined,
+      keepStored && init.behaviorParams === undefined
+        ? previousParamsColumn
+        : undefined,
+    ); // ON CONFLICT UPDATE — leaves scenarios intact
     let svc: CLIChargePointService;
     try {
       svc = this.instantiate(preparedInit, { engineState });
@@ -797,7 +831,7 @@ export class CPRegistry {
             soapCallbackUrlDerived: undefined,
           }
         : previousInit;
-      this.persistCreate(stored, previousColumn);
+      this.persistCreate(stored, previousColumn, previousParamsColumn);
       const back = this.instantiate(previousInit, { engineState });
       // Everything the success path restores: the old station comes back whole.
       this.networkSimManager?.onCpCreated(previousInit.cpId);
@@ -811,7 +845,12 @@ export class CPRegistry {
       }
       throw error;
     }
-    if (!keepStored) this.storedSelection.delete(init.cpId);
+    if (!keepStored) {
+      this.storedSelection.delete(init.cpId);
+      this.storedParams.delete(init.cpId);
+    } else if (init.behaviorParams !== undefined) {
+      this.storedParams.delete(init.cpId);
+    }
     // Attach network simulation config so the re-created CP gets its faults.
     if (this.networkSimManager) {
       this.networkSimManager.onCpCreated(preparedInit.cpId);
@@ -880,7 +919,10 @@ export class CPRegistry {
     });
     if (engineState) svc.restoreEngineState(engineState);
     try {
-      svc.loadBehaviors(this.library.select(init.behaviors));
+      svc.loadBehaviors(
+        this.library.select(init.behaviors),
+        init.behaviorParams,
+      );
     } catch (error) {
       // A station that cannot load its behaviors is not registered: no ghost
       // under the id, nothing for a later `list` or restart to trip over.
@@ -933,7 +975,9 @@ export class CPRegistry {
     // Ids only: an id that names no loaded behavior is refused here, before
     // anything is persisted, with the loaded ids in the message.
     if (init.behaviors !== undefined) this.library.check(init.behaviors);
-    this.checkFit(init.ocppVersion, this.library.select(init.behaviors));
+    const selected = this.library.select(init.behaviors);
+    this.checkFit(init.ocppVersion, selected);
+    this.library.checkParams(selected, init.behaviorParams);
     if (
       (init.securityProfile === 1 || init.securityProfile === 2) &&
       !init.authorizationKey
@@ -975,11 +1019,13 @@ export class CPRegistry {
 
   /**
    * `behaviorsColumn`, when given, is written as the `behaviors` value instead
-   * of the init's own (see {@link storedSelection}).
+   * of the init's own, `paramsColumn` likewise for `behavior_params` (see
+   * {@link storedSelection}).
    */
   private persistCreate(
     init: ChargePointInitOptions,
     behaviorsColumn?: string | null,
+    paramsColumn?: string | null,
   ): void {
     if (!this.database) return;
     const { sql, params } = buildUpsert(
@@ -1021,6 +1067,14 @@ export class CPRegistry {
             ? behaviorsColumn
             : init.behaviors
               ? JSON.stringify(init.behaviors)
+              : null,
+        ],
+        [
+          "behavior_params",
+          paramsColumn !== undefined
+            ? paramsColumn
+            : init.behaviorParams && Object.keys(init.behaviorParams).length > 0
+              ? JSON.stringify(init.behaviorParams)
               : null,
         ],
         ["tx_updated_meter_values", init.txUpdatedMeterValues ? 1 : null],
@@ -1140,6 +1194,7 @@ export class CPRegistry {
     this.unsubscribes.delete(cpId);
     this.services.delete(cpId);
     this.storedSelection.delete(cpId);
+    this.storedParams.delete(cpId);
     if (opts.notify !== false) {
       this.notifyRegistryMembership({ change: "removed", cpId, service: svc });
     }
@@ -1298,6 +1353,48 @@ function restoreBehaviors(
   return { init: { behaviors: kept }, column: row.behaviors };
 }
 
+/**
+ * Read the stored behavior params back. Like the selection, what this run
+ * cannot honor is left out of memory with a warning: an entry for a behavior
+ * the station does not run, or one that no longer fits the schema of the
+ * behavior (a reloaded file changed it). The station comes back with that
+ * behavior on its defaults rather than not at all.
+ */
+function restoreBehaviorParams(
+  row: ChargePointRow,
+  library: BehaviorLibrary,
+  selection: readonly string[] | undefined,
+): { behaviorParams?: Record<string, JsonObject> } {
+  const parsed = safeJsonParse<unknown>(row.behavior_params);
+  if (parsed === null) {
+    if (row.behavior_params) {
+      console.warn(
+        `[CPRegistry] ${row.cp_id}: the stored behavior params cannot be read; every behavior runs with its defaults`,
+      );
+    }
+    return {};
+  }
+  if (typeof parsed !== "object" || Array.isArray(parsed)) {
+    console.warn(
+      `[CPRegistry] ${row.cp_id}: the stored behavior params cannot be read; every behavior runs with its defaults`,
+    );
+    return {};
+  }
+  const kept: Record<string, JsonObject> = {};
+  const running = library.select(selection);
+  for (const [id, set] of Object.entries(parsed as Record<string, unknown>)) {
+    try {
+      library.checkParams(running, { [id]: set as JsonObject });
+      kept[id] = set as JsonObject;
+    } catch (error) {
+      console.warn(
+        `[CPRegistry] ${row.cp_id}: the stored params of ${id} are left out: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  return Object.keys(kept).length > 0 ? { behaviorParams: kept } : {};
+}
+
 function restoreCapabilityProfile(
   raw: string | null,
 ): { capabilityProfile: ChargePointCapabilityProfile } | Record<string, never> {
@@ -1385,6 +1482,7 @@ function preserveOmittedInit(
     tlsKeyPath: next.tlsKeyPath ?? existing.tlsKeyPath,
     labels: next.labels ?? existing.labels,
     behaviors: next.behaviors ?? existing.behaviors,
+    behaviorParams: next.behaviorParams ?? existing.behaviorParams,
     txUpdatedMeterValues:
       next.txUpdatedMeterValues ?? existing.txUpdatedMeterValues,
     inboundValidation: next.inboundValidation ?? existing.inboundValidation,

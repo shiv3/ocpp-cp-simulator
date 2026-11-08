@@ -1,3 +1,4 @@
+import type { JsonObject } from "@ocpp-cp-sim/contracts/behavior";
 import { describeDefaultBehaviors } from "@ocpp-cp-sim/core/cp/application/engine/behaviors/index";
 import * as fs from "fs";
 import * as path from "path";
@@ -90,6 +91,7 @@ import { appVersion } from "../appVersion";
 import {
   BehaviorNotLoadableError,
   UnknownBehaviorError,
+  BehaviorParamsError,
 } from "../behavior/BehaviorLibrary";
 import { OcppSecurityProfileConfigError } from "@ocpp-cp-sim/core/cp/infrastructure/transport/wsUrlWithBasic";
 import { ScenarioRunStateError } from "@ocpp-cp-sim/core/cp/domain/errors/ScenarioRunStateError";
@@ -1474,7 +1476,11 @@ async function setCpBehaviors(
   params: Params<"cp.behaviors.set">,
 ): Promise<{ cpId: string; behaviors: string[] }> {
   const behaviors = await runFacadeOperation(() =>
-    deps.registry.setBehaviors(params.cpId, params.behaviors ?? undefined),
+    deps.registry.setBehaviors(
+      params.cpId,
+      params.behaviors ?? undefined,
+      params.behaviorParams as Record<string, JsonObject> | undefined,
+    ),
   );
   if (behaviors === null) throw new RpcFailure("not_found", "");
   return { cpId: params.cpId, behaviors };
@@ -2853,6 +2859,7 @@ export function classifyFacadeError(err: unknown): RpcFailure | null {
   // the loaded ids.
   if (
     err instanceof UnknownBehaviorError ||
+    err instanceof BehaviorParamsError ||
     err instanceof BehaviorNotLoadableError
   ) {
     return new RpcFailure("invalid_params", err.message);
@@ -3117,7 +3124,9 @@ function mergeUpdateParams(
   preserveWhenMissing(merged, "tlsCertPath", init.tlsCertPath);
   preserveWhenMissing(merged, "tlsKeyPath", init.tlsKeyPath);
   preserveWhenMissing(merged, "tls", init.tls);
-  preserveWhenMissing(merged, "behaviors", init.behaviors);
+  // `behaviors` and `behaviorParams` stay omitted: CPRegistry.update keeps
+  // them (in memory and, for a run that holds fewer behaviors than the row
+  // names, the stored columns as they are).
 
   if (isRecord(merged.basicAuth) && init.basicAuth) {
     const basicAuth = { ...merged.basicAuth };

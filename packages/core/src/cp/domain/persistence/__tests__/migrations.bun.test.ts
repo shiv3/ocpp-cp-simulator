@@ -51,6 +51,7 @@ describe("schema migration guard", () => {
 
 describe("runMigrations with file migrations", () => {
   const addColumn: Migration = {
+    // One past the last registered migration, whatever that is today.
     version: latestVersion(MIGRATIONS) + 1,
     name: "test-column",
     up(db) {

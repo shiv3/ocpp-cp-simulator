@@ -69,6 +69,8 @@ interface FullCpConfig {
   labels?: Labels;
   /** Ids of the loaded behaviors this charge point runs; absent: all of them. */
   behaviors?: readonly string[];
+  /** Params the selection sets on behaviors (#654), by behavior id. */
+  behaviorParams?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
 }
 
 /**
@@ -117,6 +119,7 @@ export function redactCp(config: FullCpConfig): WireCpConfig {
     bootNotification: config.bootNotification ?? null,
     labels: config.labels,
     behaviors: config.behaviors ? [...config.behaviors] : undefined,
+    behaviorParams: config.behaviorParams,
   };
 }
 
@@ -167,6 +170,7 @@ export const wireCpConfigSchema = z
     bootNotification: bootNotificationWireSchema,
     labels: labelsSchema.optional(),
     behaviors: z.array(STR_256).optional(),
+    behaviorParams: z.record(STR_256, boundedObject(16_384)).optional(),
   })
   .strict();
 export type WireCpConfig = z.infer<typeof wireCpConfigSchema>;

@@ -1,7 +1,7 @@
 import type {
   Behavior,
   BehaviorCapability,
-} from "@ocpp-cp-sim/contracts/behavior";
+} from "@ocpp-cp-simulator/contracts/behavior";
 import { isOcpp2Version, isSoapVersion } from "../../domain/types/OcppVersion";
 import { csmsActionAliases } from "../../domain/types/csmsActionNames";
 import { DEFAULT_ACTIONS } from "./behaviors/defaultActions";

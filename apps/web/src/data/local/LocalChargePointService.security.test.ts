@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { DefaultBootNotification } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import { DefaultBootNotification } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import { LocalChargePointService } from "./LocalChargePointService";
 import {
   BROWSER_TLS_UNSUPPORTED_MESSAGE,
   UnsupportedFeatureError,
-} from "@ocpp-cp-sim/client/interfaces/UnsupportedFeatureError";
+} from "@ocpp-cp-simulator/client/interfaces/UnsupportedFeatureError";
 import type { LocalChargePointDefinition } from "./LocalChargePointService";
 
 function localDefinition(

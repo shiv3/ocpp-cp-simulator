@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
 import { runBehavior, type BehaviorRun } from "../behavior/runBehavior";
 import { definition, startScenario } from "../behavior/runScenario";
 import { Connector } from "../../cp/domain/connector/Connector";

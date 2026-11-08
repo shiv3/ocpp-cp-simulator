@@ -1,4 +1,4 @@
-import type { FleetTemplateRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/FleetTemplateRepository";
+import type { FleetTemplateRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/FleetTemplateRepository";
 import type { Server as BunServer } from "bun";
 import { createServer as createNetServer } from "node:net";
 import {
@@ -8,8 +8,8 @@ import {
   type SocketOptions,
 } from "socket.io-client";
 
-import type { Database } from "@ocpp-cp-sim/core/cp/domain/persistence/Database";
-import { SqliteConnectorSettingsRepository } from "@ocpp-cp-sim/client/sqlite/SqliteConnectorSettingsRepository";
+import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
+import { SqliteConnectorSettingsRepository } from "@ocpp-cp-simulator/client/sqlite/SqliteConnectorSettingsRepository";
 import type { BehaviorLibrary } from "../../behavior/BehaviorLibrary";
 import { CPRegistry } from "../CPRegistry";
 import { FileReloadManager } from "../FileReloadManager";
@@ -25,7 +25,7 @@ import {
   SOCKET_IO_PATH,
   type SocketIoAttachment,
 } from "../socketServer";
-import { tcpPort } from "@ocpp-cp-sim/core/test/bunServe";
+import { tcpPort } from "@ocpp-cp-simulator/core/test/bunServe";
 
 export interface TestServerOptions {
   readonly host?: string;

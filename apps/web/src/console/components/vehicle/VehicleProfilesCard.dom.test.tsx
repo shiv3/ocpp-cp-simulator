@@ -15,9 +15,9 @@ import {
   VehicleCatalogError,
   type CatalogVariant,
   type VehicleCatalog,
-} from "@ocpp-cp-sim/core/cp/domain/vehicle/VehicleCatalog";
-import type { VehicleProfile } from "@ocpp-cp-sim/core/cp/domain/vehicle/VehicleProfile";
-import type { ChargePointService } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+} from "@ocpp-cp-simulator/core/cp/domain/vehicle/VehicleCatalog";
+import type { VehicleProfile } from "@ocpp-cp-simulator/core/cp/domain/vehicle/VehicleProfile";
+import type { ChargePointService } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 import { DataContext } from "@/data/providers/DataProvider";
 
 import { createFakeChargePointService } from "../../test/harness";
@@ -471,7 +471,7 @@ describe("VehicleProfilesCard — browser-only mode (#458)", () => {
 describe("VehicleProfilesCard — refresh (#458)", () => {
   async function importedProfile(): Promise<VehicleProfile> {
     const { profileFromCatalog } =
-      await import("@ocpp-cp-sim/core/cp/domain/vehicle/importProfile");
+      await import("@ocpp-cp-simulator/core/cp/domain/vehicle/importProfile");
     const result = profileFromCatalog(
       {
         ...VARIANT,
@@ -525,7 +525,7 @@ describe("VehicleProfilesCard — refresh (#458)", () => {
 
   it("clears the removed flag of a vehicle the catalog has again", async () => {
     const { markRemovedUpstream } =
-      await import("@ocpp-cp-sim/core/cp/domain/vehicle/importProfile");
+      await import("@ocpp-cp-simulator/core/cp/domain/vehicle/importProfile");
     const profile = markRemovedUpstream(await importedProfile(), NOW);
     const sameVariant: CatalogVariant = {
       ...VARIANT,
@@ -756,7 +756,7 @@ describe("VehicleProfilesCard — review findings (#458)", () => {
 
   it("reports a failed save when flagging a vehicle the catalog dropped", async () => {
     const { profileFromCatalog } =
-      await import("@ocpp-cp-sim/core/cp/domain/vehicle/importProfile");
+      await import("@ocpp-cp-simulator/core/cp/domain/vehicle/importProfile");
     const result = profileFromCatalog(
       VARIANT,
       { sourceRecordKey: "gaia:id7", curveId: null },

@@ -1,9 +1,9 @@
 import type React from "react";
 import { useEffect, useMemo } from "react";
 
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import { useChargePointView } from "../../../data/hooks/useChargePointView";
-import type { ChargePointSnapshot } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+import type { ChargePointSnapshot } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 import { useActiveScenarioRuns } from "../../lib/useActiveScenarioRuns";
 import type { CpListRow } from "./cpListFilters";
 

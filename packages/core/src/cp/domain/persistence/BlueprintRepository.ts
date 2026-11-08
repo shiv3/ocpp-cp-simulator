@@ -1,4 +1,7 @@
-import { blueprintSchema, type Blueprint } from "@ocpp-cp-sim/contracts/index";
+import {
+  blueprintSchema,
+  type Blueprint,
+} from "@ocpp-cp-simulator/contracts/index";
 import type { Database } from "./Database";
 
 interface BlueprintRow {

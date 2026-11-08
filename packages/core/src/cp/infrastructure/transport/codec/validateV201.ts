@@ -2,7 +2,7 @@ import {
   actionValidatorV201,
   schemas,
   validationErrors,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import { requestSchemaKey } from "./requestSchemaKey";
 
 export interface V201ValidationResult {

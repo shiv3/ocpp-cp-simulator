@@ -9,14 +9,14 @@ import {
   renderConsole,
   type FakeChargePointService,
 } from "../../test/harness";
-import type { ActiveChargingProfile } from "@ocpp-cp-sim/core/cp/domain/connector/Connector";
+import type { ActiveChargingProfile } from "@ocpp-cp-simulator/core/cp/domain/connector/Connector";
 import {
   ChargingProfileKindType,
   ChargingProfilePurposeType,
   ChargingRateUnitType,
   OCPPStatus,
-} from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
-import type { ChargePointSnapshot } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+} from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
+import type { ChargePointSnapshot } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 
 type ConnectorSnapshot = ChargePointSnapshot["connectors"][number];
 

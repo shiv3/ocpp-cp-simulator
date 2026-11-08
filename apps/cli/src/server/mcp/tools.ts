@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { LogType } from "@ocpp-cp-sim/core/cp/shared/Logger";
+import { LogType } from "@ocpp-cp-simulator/core/cp/shared/Logger";
 import type { McpServer, ToolCallResult } from "mcp-lite";
 import {
   blueprintSchema,
@@ -17,14 +17,15 @@ import {
   METHODS,
   RpcFailure,
   scenarioWaitExtensionSecondsSchema,
-} from "@ocpp-cp-sim/contracts/index";
+} from "@ocpp-cp-simulator/contracts/index";
 import { errorCodeFrom, rpcFailureMessage, runRpc } from "../socketServer";
 import {
+  ID_TOKEN_TYPE_VALUES,
   METER_READING_CONTEXTS,
   STOP_REASONS,
   TRANSACTION_CHARGING_STATES,
   TRANSACTION_EVENT_TRIGGER_REASONS,
-} from "@ocpp-cp-sim/core/cp/domain/connector/Transaction";
+} from "@ocpp-cp-simulator/core/cp/domain/connector/Transaction";
 import type { RuntimeSocketIoDeps } from "../socketServer";
 
 function successResult(data: unknown): ToolCallResult {
@@ -485,6 +486,12 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
         .describe(
           "OCPP 2.x TransactionEvent(Started) chargingState (#335); default Charging. Ignored on OCPP 1.6",
         ),
+      idTokenType: z
+        .enum(ID_TOKEN_TYPE_VALUES)
+        .optional()
+        .describe(
+          "OCPP 2.x IdToken.type of the transaction's Authorize and TransactionEvents (#599); default ISO14443. Ignored on OCPP 1.6",
+        ),
     }),
     handler: async (args) => {
       try {
@@ -496,6 +503,7 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
             tagId: args.tagId,
             triggerReason: args.triggerReason,
             chargingState: args.chargingState,
+            idTokenType: args.idTokenType,
           },
         });
         return successResult(result);
@@ -553,6 +561,12 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
         .describe(
           "RFID tag or user ID to authorize. Omit to draw from the charge point's idTagPool",
         ),
+      idTokenType: z
+        .enum(ID_TOKEN_TYPE_VALUES)
+        .optional()
+        .describe(
+          "OCPP 2.x IdToken.type of the Authorize.req (#599); default ISO14443. Ignored on OCPP 1.6",
+        ),
     }),
     handler: async (args) => {
       try {
@@ -561,6 +575,7 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
           method: "authorize",
           params: {
             tagId: args.tagId,
+            idTokenType: args.idTokenType,
           },
         });
         return successResult(result);
@@ -613,7 +628,7 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
 
   mcp.tool("security_event_notification", {
     description:
-      "Send a SecurityEventNotification (#537): OCPP 1.6 Security Whitepaper, 2.0.1 and 2.1 A04. type is the security event (e.g. FirmwareUpdated, TamperDetectionActivated), techInfo optional free text. SOAP charge points only log it. Success means written, not answered; a 2.x CALL dropped before that answers disconnected.",
+      "Send a SecurityEventNotification (#537): OCPP 1.6 Security Whitepaper, 2.0.1 and 2.1 A04. type is the security event (e.g. FirmwareUpdated, TamperDetectionActivated), techInfo optional free text. SOAP charge points only log it. Success means written, not answered; a 2.x CALL dropped before that answers disconnected, except that a critical event sent while offline is queued (A04.FR.02) and succeeds once queued.",
     // The method's own schema, so the tool advertises what it enforces.
     inputSchema: METHODS.security_event_notification.params.extend({
       cpId: z.string().describe("Charge point identifier"),

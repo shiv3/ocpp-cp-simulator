@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { TransactionEventRequestV201 } from "@ocpp-cp-sim/ocpp/index";
+import type { TransactionEventRequestV201 } from "@ocpp-cp-simulator/ocpp/index";
 import type { ChargePointEvents } from "../../../domain/charge-point/ChargePointEvents";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
 import { bootedChargePoint } from "./stationHarness";

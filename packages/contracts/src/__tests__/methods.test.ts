@@ -195,6 +195,26 @@ describe("connector-0 per-command rule (PB3)", () => {
     ).toBe(false);
   });
 
+  it("start_transaction and authorize accept an IdToken type (#599)", () => {
+    expect(
+      METHODS.start_transaction.params.safeParse({
+        connector: 1,
+        tagId: "T",
+        idTokenType: "KeyCode",
+      }).success,
+    ).toBe(true);
+    expect(
+      METHODS.authorize.params.safeParse({ tagId: "T", idTokenType: "Central" })
+        .success,
+    ).toBe(true);
+    expect(
+      METHODS.start_transaction.params.safeParse({
+        connector: 1,
+        idTokenType: "RFID",
+      }).success,
+    ).toBe(false);
+  });
+
   it("connector commands accept connector >= 1", () => {
     expect(
       METHODS.start_transaction.params.safeParse({ connector: 1, tagId: "T" })

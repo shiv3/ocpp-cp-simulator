@@ -11,7 +11,7 @@ import type {
   ChargePointEvent,
   ChargePointService,
   ChargePointSnapshot,
-} from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+} from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Handler = (...args: any[]) => void;

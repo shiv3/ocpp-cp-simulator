@@ -9,12 +9,12 @@ import {
   renderConsole,
   type FakeChargePointService,
 } from "../../test/harness";
-import type { AutoMeterValueConfig } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import type { AutoMeterValueConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import type {
   ChargePointService,
   ChargePointSnapshot,
-} from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+} from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 import { clearConnectorPowerCache } from "./useConnectorPower";
 
 type ConnectorSnapshot = ChargePointSnapshot["connectors"][number];

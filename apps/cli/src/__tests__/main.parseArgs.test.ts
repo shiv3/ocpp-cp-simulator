@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
   labelKeySchema,
   labelValueSchema,
-} from "@ocpp-cp-sim/contracts/labels";
+} from "@ocpp-cp-simulator/contracts/labels";
 
 const repoRoot = resolve(
   dirname(fileURLToPath(import.meta.url)),

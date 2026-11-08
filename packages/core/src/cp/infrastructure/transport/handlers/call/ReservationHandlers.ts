@@ -4,7 +4,7 @@ import type {
   CancelReservationResponseV16,
   ReserveNowRequestV16,
   ReserveNowResponseV16,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import { defaultBehavior16 } from "./defaultBehavior";
 
 /**

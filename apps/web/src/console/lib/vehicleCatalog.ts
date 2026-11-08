@@ -3,12 +3,12 @@ import { useMemo, useSyncExternalStore } from "react";
 import {
   VehicleCatalogError,
   type VehicleCatalog,
-} from "@ocpp-cp-sim/core/cp/domain/vehicle/VehicleCatalog";
+} from "@ocpp-cp-simulator/core/cp/domain/vehicle/VehicleCatalog";
 import {
   OpenEvDirectoryClient,
   OED_API_KEYS_HELP_URL,
   PUBLIC_OED_BASE_URL,
-} from "@ocpp-cp-sim/core/cp/infrastructure/vehicle-catalog/open-ev-directory/OpenEvDirectoryClient";
+} from "@ocpp-cp-simulator/core/cp/infrastructure/vehicle-catalog/open-ev-directory/OpenEvDirectoryClient";
 import { useServerInfo } from "@/data/hooks/useServerInfo";
 import { useDataContext } from "@/data/providers/DataProvider";
 

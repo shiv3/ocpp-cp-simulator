@@ -1,4 +1,4 @@
-import type { BootNotification } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import type { BootNotification } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 
 export interface Config {
   wsURL: string;

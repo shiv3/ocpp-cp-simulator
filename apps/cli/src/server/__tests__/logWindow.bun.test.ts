@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 
-import { selectLogWindow } from "@ocpp-cp-sim/core/cp/shared/window";
+import { selectLogWindow } from "@ocpp-cp-simulator/core/cp/shared/window";
 
 /**
  * `logs.get {limit}` used to answer with the OLDEST N entries, so on a charge

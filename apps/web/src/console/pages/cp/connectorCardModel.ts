@@ -5,8 +5,8 @@
 import {
   EV_PRESETS,
   type EVSettings,
-} from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+} from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 
 import { t } from "@/i18n";
 import { curveDurationMin, curvePeakKw, type PowerPoint } from "./powerCurve";

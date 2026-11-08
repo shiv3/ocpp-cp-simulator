@@ -1,24 +1,32 @@
 import type { MeterSampleOverrides, SampledValue } from "./MeterValueBuilder";
 import {
+  DEFAULT_ID_TOKEN_TYPE,
+  ID_TOKEN_TYPE_VALUES,
+  ID_TOKEN_TYPE_VALUES_V21_ONLY,
   METER_READING_CONTEXTS,
   STOP_REASONS,
   STOP_TRANSACTION_REASON_VALUES,
   TRANSACTION_CHARGING_STATE_VALUES,
   TRANSACTION_EVENT_TRIGGER_REASON_VALUES,
   TRANSACTION_STOPPED_REASON_VALUES,
+  type IdTokenTypeName,
   type MeterReadingContext,
   type StopReason,
   type StopTransactionReason,
   type TransactionChargingState,
   type TransactionEventTriggerReason,
   type TransactionStoppedReason,
-} from "@ocpp-cp-sim/contracts/transactionVocabulary";
+} from "@ocpp-cp-simulator/contracts/transactionVocabulary";
 
 // The vocabularies are defined in `packages/contracts/src` (#578); these re-exports keep
 // the old import path working.
 export {
+  DEFAULT_ID_TOKEN_TYPE,
+  ID_TOKEN_TYPE_VALUES,
+  ID_TOKEN_TYPE_VALUES_V21_ONLY,
   METER_READING_CONTEXTS,
   STOP_REASONS,
+  type IdTokenTypeName,
   type MeterReadingContext,
   type StopReason,
   type StopTransactionReason,
@@ -138,6 +146,8 @@ export function endedTriggerReason(
 export interface StartTransactionCommandOptions {
   triggerReason?: TransactionEventTriggerReason;
   chargingState?: TransactionChargingState;
+  /** OCPP 2.x `IdToken.type` of the Authorize and TransactionEvent (#599). */
+  idTokenType?: IdTokenTypeName;
 }
 
 /** `stop_transaction` options a control-plane caller may name (#335). */
@@ -226,6 +236,9 @@ export interface Transaction {
   /** OCPP 2.x TransactionEvent chargingState for the Started event (#335).
    *  If absent the encoder sends `Charging`, the historical value. */
   startChargingState?: TransactionChargingState;
+  /** OCPP 2.x `IdToken.type` for the Authorize and the Started / Ended
+   *  TransactionEvent (#599). If absent the encoder sends `ISO14443`. */
+  idTokenType?: IdTokenTypeName;
   /** #315: the OCMF document signed for the begin reading when the
    *  transaction started (only while `SampledDataSignReadings` is on). 1.6
    *  has nowhere to send it at start, so it rides in StopTransaction's

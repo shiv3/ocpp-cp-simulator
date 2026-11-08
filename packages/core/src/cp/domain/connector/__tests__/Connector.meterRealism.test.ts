@@ -15,7 +15,7 @@ import {
   type MeterRealism,
 } from "../MeterRealism";
 import { chargerCapabilitiesProblem } from "../../charge-point/ChargerCapabilities";
-import { chargerCapabilitiesSchema } from "@ocpp-cp-sim/contracts/chargerCapabilities";
+import { chargerCapabilitiesSchema } from "@ocpp-cp-simulator/contracts/chargerCapabilities";
 import { MainMeter } from "../../charge-point/MainMeter";
 import type { Transaction } from "../Transaction";
 import type { EVSettings } from "../EVSettings";

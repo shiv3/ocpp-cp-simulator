@@ -15,18 +15,18 @@
 // `interpreter.ts` has to fail this test, and it only can if the assertion
 // runs the interpreter's real path and reads what went on the wire.
 import { describe, expect, it, vi } from "vitest";
-import { runScenario } from "@ocpp-cp-sim/k6-runtime/interpreter";
-import { wire16 } from "@ocpp-cp-sim/k6-runtime/wire/v16";
-import type { ScenarioJson } from "@ocpp-cp-sim/k6-runtime/types";
+import { runScenario } from "@ocpp-cp-simulator/k6-runtime/interpreter";
+import { wire16 } from "@ocpp-cp-simulator/k6-runtime/wire/v16";
+import type { ScenarioJson } from "@ocpp-cp-simulator/k6-runtime/types";
 import {
   calculateBezierPoint,
   evaluateCurveKwh,
   sortCurvePoints,
-} from "@ocpp-cp-sim/k6-runtime/curve";
+} from "@ocpp-cp-simulator/k6-runtime/curve";
 import {
   getMeterValueAtTime,
   type CurvePoint,
-} from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
+} from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
 import { FakeHost } from "./support/fakeHost";
 
 /** kWh the *simulator* has delivered `elapsedSeconds` into a session: the

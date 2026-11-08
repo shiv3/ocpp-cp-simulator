@@ -1,5 +1,6 @@
 import type { OCPPStatus, OCPPAvailability } from "../types/OcppTypes";
 import type { ActiveChargingProfile } from "../connector/Connector";
+import type { IdTokenTypeName } from "../connector/Transaction";
 
 /** The CSMS's answer to BootNotification.req, as every OCPP version words it. */
 export type RegistrationStatus = "Accepted" | "Pending" | "Rejected";
@@ -78,6 +79,10 @@ export interface ChargePointEvents {
    *  any status transition the answer causes (#395). `connected` only means
    *  the socket opened; this is what says the CSMS registered the station. */
   bootNotificationResult: BootNotificationResult;
+  /** #702: the socket reopened after a connection loss and the station went
+   *  on without a BootNotification (OCPP-J 2.0.1 §5.4). `reportedAll` says
+   *  whether the outage exceeded `OfflineThreshold` (B04.FR.01). */
+  reconnectResumed: { offlineMs: number; reportedAll: boolean };
   disconnected: { code: number; reason: string };
   /** Emitted each time the transport schedules a reconnect after an
    *  unrequested close; `delayMs` is the wait before the next attempt. */
@@ -141,6 +146,8 @@ export interface ChargePointEvents {
     connectorId: number;
     tagId: string;
     remoteStartId?: number;
+    /** 2.x: the `idToken.type` the CSMS sent (#599). */
+    idTokenType?: IdTokenTypeName;
   };
   /** Emitted when CSMS sends RemoteStopTransaction.req while a scenario
    *  has registered as the stop-side handler for this connector. The

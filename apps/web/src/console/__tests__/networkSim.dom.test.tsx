@@ -5,19 +5,19 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { createStore } from "jotai";
 
 import { createFakeChargePointService, renderConsole } from "../test/harness";
-import { LogLevel, LogType } from "@ocpp-cp-sim/core/cp/shared/Logger";
-import { sanitizeForLog } from "@ocpp-cp-sim/core/cp/infrastructure/transport/network-sim/logSanitize";
+import { LogLevel, LogType } from "@ocpp-cp-simulator/core/cp/shared/Logger";
+import { sanitizeForLog } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/network-sim/logSanitize";
 import { networkSimAtom } from "../../store/store";
 import {
   LocalChargePointService,
   type LocalChargePointDefinition,
 } from "../../data/local/LocalChargePointService";
-import type { ChargePointSnapshot } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
-import type { ChargePoint } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
-import { DefaultBootNotification } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
-import type { NetworkSimLayerConfig } from "@ocpp-cp-sim/core/cp/infrastructure/transport/network-sim/config";
+import type { ChargePointSnapshot } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
+import type { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
+import { DefaultBootNotification } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
+import type { NetworkSimLayerConfig } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/network-sim/config";
 import type { FakeChargePointService as FCS } from "../test/harness";
-import type { ChargePointEvent } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+import type { ChargePointEvent } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 
 async function unmount(root: Root): Promise<void> {
   await act(async () => {

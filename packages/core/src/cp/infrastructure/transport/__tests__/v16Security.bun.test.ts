@@ -5,11 +5,11 @@ import * as x509 from "@peculiar/x509";
 import type {
   SecurityEventNotificationRequestV16,
   SignCertificateRequestV16,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import {
   isValidSecurityEventNotificationRequestV16,
   isValidSignCertificateRequestV16,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import { startMockCsms } from "./mockCsms";

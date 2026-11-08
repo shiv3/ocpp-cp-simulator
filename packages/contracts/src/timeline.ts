@@ -4,7 +4,7 @@
 // correlation rules are documented in `docs/concepts/operational-timeline.md`.
 
 /** Bumped by minor for additive changes; consumers ignore unknown kinds. */
-export const TIMELINE_FORMAT_VERSION = "1.5";
+export const TIMELINE_FORMAT_VERSION = "1.6";
 
 export const TIMELINE_KINDS = [
   "connected",
@@ -12,6 +12,7 @@ export const TIMELINE_KINDS = [
   "reconnecting",
   "gave_up",
   "boot_notification",
+  "reconnected_without_boot",
   "status_change",
   "connector_status",
   "network_fault_injected",

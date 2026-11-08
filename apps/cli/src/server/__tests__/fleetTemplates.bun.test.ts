@@ -2,10 +2,10 @@
 import { afterEach, describe, expect, it, spyOn } from "bun:test";
 import type { Socket } from "socket.io-client";
 
-import { BunSqliteDatabase } from "@ocpp-cp-sim/core/cp/domain/persistence/BunSqliteDatabase";
-import type { FleetTemplate } from "@ocpp-cp-sim/contracts/index";
-import { FleetTemplateRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/FleetTemplateRepository";
-import { fleetTemplateSchema } from "@ocpp-cp-sim/contracts/index";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/domain/persistence/BunSqliteDatabase";
+import type { FleetTemplate } from "@ocpp-cp-simulator/contracts/index";
+import { FleetTemplateRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/FleetTemplateRepository";
+import { fleetTemplateSchema } from "@ocpp-cp-simulator/contracts/index";
 import { NetworkSimManager } from "../NetworkSimManager";
 import {
   connectTestClient,

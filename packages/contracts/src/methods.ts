@@ -39,6 +39,7 @@ import { VEHICLE_METHODS, vehicleCatalogInfoSchema } from "./vehicle";
 import { labelsSchema } from "./labels";
 import { transportConfigSchema } from "./transportConfig";
 import {
+  ID_TOKEN_TYPE_VALUES as ID_TOKEN_TYPES,
   METER_READING_CONTEXTS,
   STOP_REASONS,
   TRANSACTION_CHARGING_STATE_VALUES as TRANSACTION_CHARGING_STATES,
@@ -1041,6 +1042,12 @@ export const METHODS = {
         .describe(
           "OCPP 2.x TransactionEvent(Started) chargingState; default Charging",
         ),
+      idTokenType: z
+        .enum(ID_TOKEN_TYPES)
+        .optional()
+        .describe(
+          "OCPP 2.x IdToken.type sent in the Authorize and TransactionEvent of this transaction; default ISO14443 (#599). Ignored on OCPP 1.6",
+        ),
     }),
     result: ANY,
   },
@@ -1092,7 +1099,15 @@ export const METHODS = {
     result: ANY,
   },
   authorize: {
-    params: z.object({ tagId: NON_EMPTY_STR.optional() }),
+    params: z.object({
+      tagId: NON_EMPTY_STR.optional(),
+      idTokenType: z
+        .enum(ID_TOKEN_TYPES)
+        .optional()
+        .describe(
+          "OCPP 2.x IdToken.type of the Authorize.req; default ISO14443 (#599). Ignored on OCPP 1.6",
+        ),
+    }),
     result: ANY,
   },
   // #348: station-initiated DataTransfer.req. The result is the CSMS's

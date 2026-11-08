@@ -42,7 +42,7 @@ jobs:
       # scripts/check-package-boundaries.ts maps every file under packages/ and
       # apps/ to its package and fails on an import the package may not have
       # (type-only imports included), on a cross-package import that is not an
-      # @ocpp-cp-sim/<package> specifier, on a package.json whose workspace:*
+      # @ocpp-cp-simulator/<package> specifier, on a package.json whose workspace:*
       # dependencies differ from what the package imports, or on a UI / Node /
       # Bun-only specifier in a package that must run in both Bun and the
       # browser. #570: it also fails on a cycle of static value imports.

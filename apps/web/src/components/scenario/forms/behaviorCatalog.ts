@@ -1,6 +1,6 @@
 import { createContext, useContext } from "react";
-import type { BehaviorParams } from "@ocpp-cp-sim/contracts/behavior";
-import { describeDefaultBehaviors } from "@ocpp-cp-sim/core/cp/application/engine/behaviors/index";
+import type { BehaviorParams } from "@ocpp-cp-simulator/contracts/behavior";
+import { describeDefaultBehaviors } from "@ocpp-cp-simulator/core/cp/application/engine/behaviors/index";
 
 /** Behavior id to its params declaration (schema and defaults). */
 export type BehaviorParamsCatalog = ReadonlyMap<string, BehaviorParams>;

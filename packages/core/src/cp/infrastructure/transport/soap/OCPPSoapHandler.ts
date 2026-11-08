@@ -22,7 +22,7 @@ import type {
   StatusNotificationResponseV16,
   StopTransactionRequestV16,
   StopTransactionResponseV16,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import {
   type OcppCallOutcome,

@@ -1,7 +1,7 @@
 {
   "id": "cert16-tc014-soft-reset",
   "name": "Cert 1.6 Core: TC_014 Soft Reset",
-  "description": "Plug-in → StatusNotification(Preparing) → StartTransaction.req → StatusNotification(Charging); unbounded MeterValue.req; operator sends Reset(type=Soft) from CSMS, CP stops transaction with SoftReset reason and reboots.",
+  "description": "Plug-in → StatusNotification(Preparing) → StartTransaction.req → StatusNotification(Charging); unbounded MeterValues.req; operator sends Reset(type=Soft) from CSMS, CP stops transaction with SoftReset reason and reboots.",
   "targetType": "connector",
   "targetId": 1,
   "trigger": { "type": "manual" },

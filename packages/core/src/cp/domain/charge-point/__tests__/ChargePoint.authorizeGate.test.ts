@@ -520,7 +520,11 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
 
       await vi.advanceTimersByTimeAsync(2_000);
       const promise = cp.authorizeAndWait("TAG-A", 5000);
-      expect(authorizeSpy).toHaveBeenCalledWith("TAG-A");
+      expect(authorizeSpy).toHaveBeenCalledWith(
+        "TAG-A",
+        undefined,
+        expect.any(Object),
+      );
       cp.notifyAuthorizeResult("TAG-A", "Accepted");
       await expect(promise).resolves.toBe("Accepted");
     });

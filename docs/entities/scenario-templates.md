@@ -12,6 +12,7 @@ related:
   - ../concepts/scenario-format.md
   - ../concepts/power-loss.md
   - ../concepts/network-simulation.md
+  - ../concepts/web-console-i18n.md
   - ../sources/cert16-templates-readme.md
   - ../sources/steve-verify-readme.md
   - cli.md
@@ -34,6 +35,15 @@ example files under `docs/examples/scenarios/` use — wrapped by
 editor-facing `ScenarioTemplate` interface. Because they are plain files, the
 daemon's `--scenario-template-file` can load any of them straight off disk
 without going through the loader.
+
+The web console displays each template's `name` and `description` through its
+locale tables (`templates.<id>.name` / `.description`, see
+[web console internationalization](../concepts/web-console-i18n.md)). The
+English table must repeat the file's text word for word and every locale must
+keep its OCPP message names, so a change to either field goes with a change to
+`apps/web/src/i18n/locales/*/templates.json` in the same commit (#807). A
+template without an entry, such as the `resilience-*` templates today, shows
+the file's own text in every language.
 
 ## Where templates are used
 

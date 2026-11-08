@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
-import type { VehicleProfile } from "@ocpp-cp-sim/core/cp/domain/vehicle/VehicleProfile";
+import type { VehicleProfile } from "@ocpp-cp-simulator/core/cp/domain/vehicle/VehicleProfile";
 import { createFakeChargePointService } from "../../console/test/harness";
 import { DataContext } from "../providers/DataProvider";
 import { useVehicleProfiles, type VehicleProfiles } from "./useVehicleProfiles";

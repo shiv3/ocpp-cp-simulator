@@ -3,8 +3,11 @@
 // the tests (not under runtime/) so it never lands in an export bundle; shared
 // so the cross-runtime agreement test drives the same interpreter path the
 // interpreter tests do rather than a second stand-in (#329).
-import type { ScenarioHost } from "@ocpp-cp-sim/k6-runtime/interpreter";
-import { CallErrorAnswer, type WireCall } from "@ocpp-cp-sim/k6-runtime/types";
+import type { ScenarioHost } from "@ocpp-cp-simulator/k6-runtime/interpreter";
+import {
+  CallErrorAnswer,
+  type WireCall,
+} from "@ocpp-cp-simulator/k6-runtime/types";
 
 export class FakeHost implements ScenarioHost {
   connectorId = 1;

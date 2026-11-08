@@ -7,7 +7,7 @@ import type {
   Behavior,
   BehaviorContext,
   JsonObject,
-} from "@ocpp-cp-sim/contracts/behavior";
+} from "@ocpp-cp-simulator/contracts/behavior";
 import type { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
 import { firmwareBehavior } from "../../cp/application/engine/behaviors/firmware";
 import { logsBehavior } from "../../cp/application/engine/behaviors/logs";

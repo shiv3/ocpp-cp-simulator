@@ -35,10 +35,10 @@ import {
   type StatusTriggerNodeData,
   type TransactionNodeData,
   type UnlockOutcomeNodeData,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 // Type-only: stepLayout imports this module's helpers at runtime.
-import type { StepLayout } from "./stepLayout";
+import type { StepLayout, StepLink } from "./stepLayout";
 
 /**
  * Maps a scenario graph (`nodes`/`edges`) to an ordered, list-editable
@@ -65,7 +65,7 @@ export interface LinearSteps {
   startNode: ScenarioNode | null;
   /**
    * The scenario's END node, or `null` if none exists. `null` can occur
-   * even when `isLinear` is `true`: the v2 graph editor lets a user delete
+   * even when `isLinear` is `true`: a user can delete
    * the END node and persist the result, and a clean START→…→chain with no
    * END is still considered linear so the list editor can open it —
    * `rebuildLinearScenario` self-heals by creating a new END node on save.
@@ -165,7 +165,7 @@ export function deriveDisplayedSteps(
  * Rebuilds a scenario's `nodes`/`edges` from an ordered step list, keeping
  * (or creating, if absent) the START/END nodes, rewriting edges into a
  * single chain start→s1→…→sn→end, and repositioning every node on a
- * vertical grid so the v2 ReactFlow-based graph editor still renders the
+ * vertical grid so the node positions stay sane for the
  * result sanely. Never mutates `def` or any node in `orderedSteps`.
  */
 export function rebuildLinearScenario(
@@ -248,11 +248,12 @@ export function moveStep(
 export type StepLane = "main" | number;
 
 /** The editable shape behind a supported `StepLayout`: the chain, then the
- *  branches of its one fork (null without a fork). An empty branch is an
- *  edge from the fork node straight to END. */
+ *  branches of its one fork (null without a fork), and the loop / join
+ *  links. An empty branch is an edge from the fork node straight to END. */
 interface LaneShape {
   main: ScenarioNode[];
   branches: ScenarioNode[][] | null;
+  links: StepLink[];
 }
 
 function laneShape(layout: StepLayout): LaneShape {
@@ -261,59 +262,106 @@ function laneShape(layout: StepLayout): LaneShape {
     branches: layout.fork
       ? layout.fork.branches.map((branch) => [...branch.steps])
       : null,
+    links: layout.links.map((link) => ({ ...link })),
   };
 }
 
 const BRANCH_SPACING_X = 280;
 
 /**
- * Rebuilds `nodes`/`edges` from a chain plus at most one fork, the shape
- * `deriveStepLayout` reads back: START → main… → fork node (the last main
- * step, else START) → each branch → END. Without branches this is
- * `rebuildLinearScenario`. Branches are laid out side by side under the fork
- * so the graph editor shows them as lanes. Never mutates its inputs.
+ * Rebuilds `nodes`/`edges` from a chain plus at most one fork and its links,
+ * the shape `deriveStepLayout` reads back: START → main… → fork node (the
+ * last main step, else START) → each branch → END. A lane closed by a link
+ * ends there instead of at END; a link always leaves the *last* step of the
+ * lane it was on (so inserting or moving steps keeps a loop closing at the
+ * end), and one whose source or target is gone is dropped. Lanes are laid
+ * out side by side under the fork. Never mutates its inputs.
  */
 function rebuildLaneScenario(
   def: ScenarioDefinition,
   shape: LaneShape,
 ): ScenarioDefinition {
-  const branches = shape.branches;
-  if (!branches || branches.length === 0) {
-    return rebuildLinearScenario(def, shape.main);
-  }
   const startNode =
     findNodeByType(def.nodes, ScenarioNodeType.START) ??
     createDefaultNode(ScenarioNodeType.START);
   const endNode =
     findNodeByType(def.nodes, ScenarioNodeType.END) ??
     createDefaultNode(ScenarioNodeType.END);
+  const branches =
+    shape.branches && shape.branches.length > 0 ? shape.branches : null;
 
   const nodes: ScenarioNode[] = [];
   const place = (node: ScenarioNode, x: number, row: number) =>
     nodes.push({ ...node, position: { x, y: row * 120 } });
   place(startNode, 250, 0);
   shape.main.forEach((node, i) => place(node, 250, i + 1));
-  const firstBranchRow = shape.main.length + 1;
-  branches.forEach((steps, b) => {
-    const x = 250 + (b - (branches.length - 1) / 2) * BRANCH_SPACING_X;
-    steps.forEach((node, i) => place(node, x, firstBranchRow + i));
-  });
-  const longest = Math.max(...branches.map((steps) => steps.length));
-  place(endNode, 250, firstBranchRow + longest);
+  let endRow = shape.main.length + 1;
+  if (branches) {
+    const firstBranchRow = shape.main.length + 1;
+    branches.forEach((steps, b) => {
+      const x = 250 + (b - (branches.length - 1) / 2) * BRANCH_SPACING_X;
+      steps.forEach((node, i) => place(node, x, firstBranchRow + i));
+    });
+    endRow =
+      firstBranchRow + Math.max(...branches.map((steps) => steps.length));
+  }
+  place(endNode, 250, endRow);
+
+  // Each lane: the node it hangs from, and its steps.
+  const forkNode = shape.main[shape.main.length - 1] ?? startNode;
+  const lanes: Array<{ from: ScenarioNode; steps: ScenarioNode[] }> = branches
+    ? branches.map((steps) => ({ from: forkNode, steps }))
+    : [{ from: startNode, steps: shape.main }];
+  const laneOf = new Map<string, ScenarioNode[]>();
+  for (const lane of lanes) {
+    for (const step of lane.steps) laneOf.set(step.id, lane.steps);
+  }
+  // With a fork, the chain before it cannot close with a link.
+  const mainIds = new Set(shape.main.map((n) => n.id));
+  const stepIds = new Set(laneOf.keys());
+  if (branches) for (const id of mainIds) stepIds.add(id);
 
   const edges: Edge[] = [];
-  const link = (source: ScenarioNode, target: ScenarioNode) =>
+  const link = (source: ScenarioNode, target: ScenarioNode, id?: string) =>
     edges.push({
-      id: crypto.randomUUID(),
+      id: id ?? crypto.randomUUID(),
       source: source.id,
       target: target.id,
     });
-  const chain = [startNode, ...shape.main];
-  for (let i = 0; i < chain.length - 1; i++) link(chain[i], chain[i + 1]);
-  const forkNode = chain[chain.length - 1];
-  for (const steps of branches) {
-    const lane = [forkNode, ...steps, endNode];
-    for (let i = 0; i < lane.length - 1; i++) link(lane[i], lane[i + 1]);
+
+  if (branches) {
+    const chain = [startNode, ...shape.main];
+    for (let i = 0; i < chain.length - 1; i++) link(chain[i], chain[i + 1]);
+  }
+  const closed = new Set<ScenarioNode[]>();
+  const seen = new Set<string>();
+  const nodeById = new Map(
+    [...shape.main, ...(branches?.flat() ?? [])].map((n) => [n.id, n]),
+  );
+  for (const l of shape.links) {
+    const steps = laneOf.get(l.source);
+    if (!steps || steps.length === 0 || !stepIds.has(l.target)) continue;
+    const source = steps[steps.length - 1];
+    const key = `${source.id}>${l.target}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    closed.add(steps);
+    link(
+      source,
+      nodeById.get(l.target)!,
+      source.id === l.source ? l.id : undefined,
+    );
+  }
+  for (const lane of lanes) {
+    const chain = branches
+      ? [lane.from, ...lane.steps]
+      : [startNode, ...lane.steps];
+    for (let i = 0; i < chain.length - 1; i++) {
+      // Without a fork the chain's edges are this lane's; with one, each
+      // branch's edges start at the fork node.
+      link(chain[i], chain[i + 1]);
+    }
+    if (!closed.has(lane.steps)) link(chain[chain.length - 1], endNode);
   }
 
   return { ...def, nodes, edges, updatedAt: new Date().toISOString() };
@@ -421,13 +469,66 @@ export function addParallelBranch(
   def: ScenarioDefinition,
   layout: StepLayout,
 ): ScenarioDefinition {
-  if (!layout.supported) return def;
+  if (!canAddBranch(layout)) return def;
   const shape = laneShape(layout);
   const delay = createDefaultNode(ScenarioNodeType.DELAY);
   shape.branches = shape.branches
     ? [...shape.branches, [delay]]
     : [[], [delay]];
   return rebuildLaneScenario(def, shape);
+}
+
+/** Whether "+ branch" can add a lane: a chain closed by a loop link cannot
+ *  fork (the link would then leave the fork node). */
+export function canAddBranch(layout: StepLayout): boolean {
+  if (!layout.supported) return false;
+  if (layout.fork) return true;
+  return !layout.links.some((link) =>
+    layout.main.some((step) => step.id === link.source),
+  );
+}
+
+/**
+ * Closes the lane `nodeId` ends with a loop to `targetId` (a step of the
+ * layout, possibly the step itself), or opens it to END again with `null`.
+ * Only the last step of a lane takes a link; anything else returns `def`.
+ */
+export function setLaneLink(
+  def: ScenarioDefinition,
+  layout: StepLayout,
+  nodeId: string,
+  targetId: string | null,
+): ScenarioDefinition {
+  if (!layout.supported) return def;
+  const found = findStepLane(layout, nodeId);
+  if (!found || found.index !== found.length - 1) return def;
+  const shape = laneShape(layout);
+  const steps = laneSteps(shape, found.lane)!;
+  const laneIds = new Set(steps.map((n) => n.id));
+  shape.links = shape.links.filter((l) => !laneIds.has(l.source));
+  if (targetId !== null) {
+    const all = [
+      ...layout.main,
+      ...(layout.fork?.branches.flatMap((b) => b.steps) ?? []),
+    ];
+    if (!all.some((n) => n.id === targetId)) return def;
+    // A chain with a fork cannot close before it.
+    if (layout.fork && found.lane === "main") return def;
+    shape.links.push({
+      id: crypto.randomUUID(),
+      source: nodeId,
+      target: targetId,
+    });
+  }
+  return rebuildLaneScenario(def, shape);
+}
+
+/** The step a lane's loop link returns to (null: the lane runs to END). */
+export function laneLinkTarget(
+  layout: StepLayout,
+  nodeId: string,
+): string | null {
+  return layout.links.find((l) => l.source === nodeId)?.target ?? null;
 }
 
 export function updateStepData(
@@ -440,10 +541,8 @@ export function updateStepData(
 }
 
 /**
- * Default node data per `ScenarioNodeType`, mirroring the v2 ReactFlow
- * editor's palette (`createNodeByType` in
- * apps/web/src/components/scenario/ScenarioEditor.tsx) for every type that palette
- * offers. RESERVE_NOW / CANCEL_RESERVATION aren't in that palette (its
+ * Default node data per `ScenarioNodeType`, mirroring the palette of
+ * the retired ReactFlow editor for every type it offered. RESERVE_NOW / CANCEL_RESERVATION aren't in that palette (its
  * switch falls through to a generic "Unknown" node for them); their
  * defaults here were derived from `ReserveNowNodeData` /
  * `CancelReservationNodeData`'s field shapes instead. RESERVATION_TRIGGER's

@@ -17,7 +17,7 @@ import {
   catalogModelPageSchema,
   catalogVariantPageSchema,
   catalogVariantSchema,
-} from "@ocpp-cp-sim/contracts/vehicle";
+} from "@ocpp-cp-simulator/contracts/vehicle";
 import { REDACTED_VALUE } from "../../../shared/redaction";
 import {
   makePageSchema,

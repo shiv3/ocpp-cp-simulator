@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { VehicleProfile } from "@ocpp-cp-sim/core/cp/domain/vehicle/VehicleProfile";
-import { memoryDatabase } from "@ocpp-cp-sim/core/test/sqlJsMemoryDatabase";
+import type { VehicleProfile } from "@ocpp-cp-simulator/core/cp/domain/vehicle/VehicleProfile";
+import { memoryDatabase } from "@ocpp-cp-simulator/core/test/sqlJsMemoryDatabase";
 import { LocalChargePointService } from "./LocalChargePointService";
 
 /** The browser's sql.js database, with a `flush` spy for its writes. */

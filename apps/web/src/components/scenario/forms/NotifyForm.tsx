@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { NOTIFY_KINDS } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import { NOTIFY_KINDS } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import { JsonValueField, SelectField, TextField } from "./FormFields";
 import {
   NOTIFY_STATUSES,

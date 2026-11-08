@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import type {
   StopTransactionRequestV16,
   TransactionEventRequestV201,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
 import {
   answerEverythingElse,
@@ -27,6 +27,16 @@ const RECONNECT_TIMEOUT_MS = 10_000;
 
 function closedOnce(cp: ChargePoint): Promise<unknown> {
   return new Promise((resolve) => cp.events.once("disconnected", resolve));
+}
+
+/** The charge point is connected again. OCPP 2.x sends no BootNotification on
+ *  a reconnect after a connection loss (OCPP-J 2.0.1 §5.4, #702). */
+async function waitOnline(cp: ChargePoint): Promise<void> {
+  const deadline = Date.now() + RECONNECT_TIMEOUT_MS;
+  while (!cp.isOnline()) {
+    if (Date.now() > deadline) throw new Error("not reconnected in time");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
 }
 
 /** Answer the BootNotification of the next connection. */
@@ -119,14 +129,8 @@ describe("Transaction across a WebSocket close (#488)", () => {
 
       expect(cp.getConnector(1)?.hasRunningTransaction).toBe(true);
 
-      const beforeReconnect = csms.received.length - 1;
-      await acceptNextBoot(csms);
-      await csms.waitForFrame(
-        (frame) =>
-          callOf("StatusNotification")(frame) &&
-          indexAfter(csms, beforeReconnect)(frame),
-        RECONNECT_TIMEOUT_MS,
-      );
+      await waitOnline(cp);
+      expect(csms.received.filter(callOf("BootNotification"))).toHaveLength(1);
       expect(cp.getConnector(1)?.hasRunningTransaction).toBe(true);
 
       cp.stopTransaction(1);
@@ -149,7 +153,7 @@ describe("Transaction across a WebSocket close (#488)", () => {
   }, 20_000);
 
   for (const version of ["OCPP-2.0.1", "OCPP-2.1"] as const) {
-    it(`${version}: an Ended event produced offline is replayed after Boot Accepted with offline=true (#528)`, async () => {
+    it(`${version}: an Ended event produced offline is replayed after the reconnect with offline=true (#528, #702)`, async () => {
       const csms = startMockCsms();
       const cp = await bootedChargePoint(csms, `CP-528-${version}`, version);
       cp.configuration.applyChange("AuthorizeBeforeLocalStart", "false");
@@ -172,7 +176,7 @@ describe("Transaction across a WebSocket close (#488)", () => {
         const beforeStop = csms.received.length - 1;
         cp.stopTransaction(1);
 
-        await acceptNextBoot(csms);
+        await waitOnline(cp);
         const ended = (
           await csms.waitForFrame(
             (frame) =>

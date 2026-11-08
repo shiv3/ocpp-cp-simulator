@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Socket } from "socket.io-client";
 
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
-import { BunSqliteDatabase } from "@ocpp-cp-sim/core/cp/domain/persistence/BunSqliteDatabase";
+import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/domain/persistence/BunSqliteDatabase";
 import { BehaviorLibrary } from "../../behavior/BehaviorLibrary";
 import {
   connectTestClient,
@@ -288,7 +288,7 @@ describe("behavior.list and behavior.reload", () => {
     dirs.push(dir);
     const file = path.join(dir, "r.ts");
     const source = (status: string): string => `
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
 const b: Behavior = { api: 1, id: "rb", onCall: { Reset: { mode: "replace", handle: () => ({ response: { status: ${JSON.stringify(status)} } }) } } };
 export default b;`;
     writeFileSync(file, source("Accepted"));

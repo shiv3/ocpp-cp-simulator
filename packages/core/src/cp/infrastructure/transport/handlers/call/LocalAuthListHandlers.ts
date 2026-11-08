@@ -4,7 +4,7 @@ import type {
   GetLocalListVersionResponseV16,
   SendLocalListRequestV16,
   SendLocalListResponseV16,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import { LogType } from "../../../../shared/Logger";
 import type { SendLocalListItem } from "../../../../domain/auth/LocalAuthList";
 

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { EVSettings } from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
+import type { EVSettings } from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
 // `parseStoredDefaultEv` is pure, so it is imported once here rather than
 // re-imported per test: a `vi.resetModules()` round trip re-transforms this
 // provider's whole module graph (both charge-point services, the persistence
@@ -73,7 +73,7 @@ describe("parseStoredDefaultEv normalizes the stored charging curve (#301)", () 
     vi.resetModules();
     await import("./DataProvider");
     const { getUserDefaultEVSettings, setUserDefaultEVSettings } =
-      await import("@ocpp-cp-sim/core/cp/domain/connector/EVSettings");
+      await import("@ocpp-cp-simulator/core/cp/domain/connector/EVSettings");
     const seeded = getUserDefaultEVSettings() as EVSettings | null;
     expect(seeded?.chargingCurve).toEqual([]);
     setUserDefaultEVSettings(null);

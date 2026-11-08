@@ -16,7 +16,7 @@ import {
   TIMELINE_DEFAULT_CAPACITY,
   TIMELINE_FORMAT_VERSION,
   TIMELINE_KINDS,
-} from "@ocpp-cp-sim/contracts/timeline";
+} from "@ocpp-cp-simulator/contracts/timeline";
 import { realClock } from "../../shared/clock";
 import type { SimClock } from "../../shared/clock";
 

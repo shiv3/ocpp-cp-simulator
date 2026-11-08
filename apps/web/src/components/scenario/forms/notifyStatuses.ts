@@ -2,8 +2,8 @@ import {
   DIAGNOSTICS_STATUSES,
   FIRMWARE_STATUSES,
   UPLOAD_LOG_STATUSES,
-} from "@ocpp-cp-sim/contracts/firmwareLogStatus";
-import { NOTIFY_KINDS } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+} from "@ocpp-cp-simulator/contracts/firmwareLogStatus";
+import { NOTIFY_KINDS } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import type { MessageKey } from "../../../i18n";
 
 /** The statuses each kind of notification speaks. */

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { handleJsonCommand } from "../jsonMode";
-import type { ChargePointService } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+import type { ChargePointService } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 import type { FacadeSingleCpTarget } from "../singleCpTarget";
 
 const CP_ID = "bootstrap-cp";

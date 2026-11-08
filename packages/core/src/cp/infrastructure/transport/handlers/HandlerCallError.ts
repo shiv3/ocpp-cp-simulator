@@ -1,4 +1,4 @@
-import type { OCPPErrorCodeV16 } from "@ocpp-cp-sim/ocpp/index";
+import type { OCPPErrorCodeV16 } from "@ocpp-cp-simulator/ocpp/index";
 
 /**
  * Thrown by a 1.6J CALL handler to answer with a CALLERROR (OCPP-J 1.6

@@ -9,12 +9,13 @@ name: Release CLI
 # or, from the npm registry, with `npm install -g ocpp-cp-simulator` — the
 # `publish-npm` job below publishes the very tarball the release carries.
 #
+# One tag train: a `v*` tag builds the desktop app (release.yml) AND the CLI
+# (this workflow) for the same release, with the same version. Before that the
+# CLI had its own `cli-v*` train; those releases stay where they are.
+#
 # `cli-latest` is a rolling pre-release this workflow re-points at every CLI
-# release (see the "rolling cli-latest pointer" step). It exists because this
-# repository has two tag trains — `v*` (desktop) and `cli-v*` (CLI) — and
-# GitHub's `releases/latest` resolves across BOTH, so it lands on a desktop
-# release, which carries no `.tgz`, for roughly half of every release cycle
-# (#321). The rolling tag is scoped to the CLI train and so is always right.
+# release (see the "rolling cli-latest pointer" step). It is kept so the install
+# URL documented before the trains were unified (#321) keeps working.
 #
 # The tarball respects the `files` field in package.json, which lists every
 # top-level directory the CLI's import graph reaches plus the freshly-built
@@ -26,11 +27,11 @@ name: Release CLI
 on:
   push:
     tags:
-      - "cli-v*"
+      - "v*"
   workflow_dispatch:
     inputs:
       version:
-        description: "Version (e.g. 0.1.0) — creates tag cli-v<version>"
+        description: "Version (e.g. 0.10.0) — attaches the CLI to the existing release v<version>"
         required: true
         type: string
 
@@ -41,13 +42,13 @@ permissions:
 # concurrency cancels the *pending* run whenever a newer one enters the group,
 # and `cancel-in-progress: false` only protects the run that is already
 # executing — not the queue behind it. With three CLI releases queued, the
-# middle tag would be cancelled and would never publish its own `cli-v*`
+# middle tag would be cancelled and would never publish its own `v*`
 # assets, which ARE the release. Only the pointer-move job below is serialised;
 # see the comment on its `concurrency:` block for why cancelling that one is
 # harmless.
 
 jobs:
-  # Publishes the per-tag `cli-v*` release. Never cancellable, never gated on
+  # Attaches the CLI tarball to the per-tag `v*` release. Never cancellable, never gated on
   # anything else: its assets are the release.
   release:
     runs-on: ubuntu-latest
@@ -72,10 +73,10 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             VERSION="${{ inputs.version }}"
-            TAG="cli-v${VERSION}"
+            TAG="v${VERSION}"
           else
             TAG="${GITHUB_REF#refs/tags/}"
-            VERSION="${TAG#cli-v}"
+            VERSION="${TAG#v}"
           fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
@@ -129,47 +130,28 @@ jobs:
       - name: Verify the tarball installs and runs
         run: ./scripts/verify-cli-tarball.sh --expect-dist "${{ steps.pack.outputs.tarball }}"
 
-      - name: Create / update release
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
-        with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: CLI ${{ steps.version.outputs.tag }}
-          # The repository's "Latest" release belongs to the desktop `v*`
-          # train (docs/entities/cli.md, "Why cli-latest"): a CLI release
-          # published after a desktop one must not take the badge.
-          make_latest: false
-          files: |
-            ${{ steps.pack.outputs.tarball }}
-            ocpp-cp-simulator.tgz
-          generate_release_notes: true
-          body: |
-            Prebuilt CLI bundle including the web console (`dist/`).
-
-            ### Install
-
-            Pin to this release:
-
-            ```sh
-            bun install -g https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.tag }}/${{ steps.pack.outputs.tarball }}
-            ```
-
-            Or always pull the latest CLI release (`cli-latest` is a rolling
-            pointer this workflow re-points at every CLI release; the repo's
-            `releases/latest` cannot be used because it resolves across the
-            desktop `v*` train too — see #321):
-
-            ```sh
-            bun install -g https://github.com/${{ github.repository }}/releases/download/cli-latest/ocpp-cp-simulator.tgz
-            ```
-
-            Then run e.g.
-
-            ```sh
-            ocpp-cp-sim --http-port 5172 \
-                        --cp-id my-cp --connectors 5 \
-                        --web-console \
-                        --ws-url wss://example.com/chargepoint/
-            ```
+      # The release itself (name, notes, "Latest" badge) belongs to the
+      # drafter / desktop workflow: publishing the draft creates the `v*` tag
+      # that started this run. This job only attaches the CLI assets, so it
+      # waits for that release to exist (release.yml's resolve-release creates
+      # it when a tag was pushed directly) instead of creating one itself, which
+      # would race with it.
+      - name: Attach the CLI tarball to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+              break
+            fi
+            [ "$attempt" = 30 ] && { echo "::error::release $TAG never appeared"; exit 1; }
+            echo "release $TAG does not exist yet (attempt $attempt/30); waiting"
+            sleep 10
+          done
+          gh release upload "$TAG" --repo "${{ github.repository }}" --clobber \
+            "${{ steps.pack.outputs.tarball }}" ocpp-cp-simulator.tgz
 
   # Points `cli-latest` at the highest published CLI release, then installs
   # from the URL the documentation advertises.
@@ -204,7 +186,7 @@ jobs:
           node-version: lts/*
 
       # The script decides which release the pointer should serve (the highest
-      # published cli-vX.Y.Z, not necessarily the one that triggered this run)
+      # published vX.Y.Z, not necessarily the one that triggered this run)
       # and downloads that release's own asset, so the bytes the pointer serves
       # are provably the bytes that release published. See its header for the
       # contract and for why every failure mode in it points the safe way.
@@ -249,7 +231,7 @@ jobs:
   #   bytes on npm are the bytes the release published — never a re-pack.
   # - Idempotent: a re-run of a tag whose version is already on npm skips
   #   instead of failing on the registry's 403.
-  # - A SemVer prerelease (`cli-v1.0.0-rc.1`) goes under the `next` dist-tag,
+  # - A SemVer prerelease (`v1.0.0-rc.1`) goes under the `next` dist-tag,
   #   so `npm install ocpp-cp-simulator` never resolves to one — the same
   #   carve-out `cli-latest` makes.
   publish-npm:

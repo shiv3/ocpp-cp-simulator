@@ -1,5 +1,5 @@
 import type { Database } from "../persistence/Database";
-import { AUTHORIZATION_CACHE_SEED_MAX } from "@ocpp-cp-sim/contracts/authorization";
+import { AUTHORIZATION_CACHE_SEED_MAX } from "@ocpp-cp-simulator/contracts/authorization";
 import { idTokenKey } from "./idTokenKey";
 import { effectiveStatus } from "./LocalAuthorizationResolver";
 import { realClock } from "../../shared/clock";

@@ -9,9 +9,9 @@ import {
   flush,
   type FakeChargePointService,
 } from "../../test/harness";
-import { defaultEVSettings } from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
-import type { ChargePointService } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+import { defaultEVSettings } from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
+import type { ChargePointService } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 import ConnectorControls from "./ConnectorControls";
 
 let root: Root | null = null;

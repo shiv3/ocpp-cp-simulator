@@ -87,7 +87,7 @@ ocpp-cp-sim --daemon
 > supported: the web-console `dist/` is built at release time (not committed to
 > git), and bun does not install devDependencies for global packages so it
 > cannot run `vite build` on install. Use the prebuilt tarball URL above.
-> Release tarballs are produced by the `Release CLI` workflow on `cli-v*` tags.
+> Release tarballs are produced by the `Release CLI` workflow on `v*` tags — the same tag that builds the desktop app, so the CLI, the app and the libraries share one version. (Releases up to `cli-v0.4.1` used a separate `cli-v*` train.)
 >
 > **npm registry.** The same workflow's `publish-npm` job publishes that
 > tarball to the npm registry as `ocpp-cp-simulator`, authenticated by
@@ -99,14 +99,14 @@ ocpp-cp-sim --daemon
 > reason #321 gives: a documented install command must resolve. The package
 > needs Bun at run time whichever way it is installed — the bin is
 > `dist-cli/main.js`, a `bun build --target=bun` bundle under a `bun`
-> shebang, and the daemon uses `bun:sqlite` and `Bun.serve`. A SemVer prerelease (`cli-v1.0.0-rc.1`) is published under
+> shebang, and the daemon uses `bun:sqlite` and `Bun.serve`. A SemVer prerelease (`v1.0.0-rc.1`) is published under
 > the `next` dist-tag, never `latest`; a re-run of a tag already on npm skips.
 
 ### Why `cli-latest` and not `releases/latest`
 
 GitHub's own `releases/latest/download/…` is **not usable in this repository**
-and must not be reintroduced (#321). The repo has two independent tag trains —
-`v*` for the [desktop app](desktop-app.md) and `cli-v*` for the CLI — and
+and must not be reintroduced (#321). The repo had two independent tag trains —
+`v*` for the [desktop app](desktop-app.md) and `cli-v*` for the CLI (unified into `v*` after `cli-v0.4.1`) — and
 `releases/latest` resolves across both. Whenever the newest release is a
 desktop one, which is the case for roughly half of any release cycle, the URL
 redirects to a release that carries no `.tgz` and the install command fails
@@ -486,7 +486,7 @@ tests named below fail on an incompatible change:
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
 | JSON Lines commands     | `connect`, `status`, `start_transaction`, `stop_transaction`, `authorize`, `heartbeat`, `send_meter_value`, `transaction_event`, `load_scenario_template`, `get_scenario`, `remove_scenario`, `load_scenario`, `run_scenario`, `run_scenario_template` keep their name and the parameters of the [CP command table](../concepts/control-plane.md#cp-command-methods). The test sends the optional parameters with non-default values (`context: "Sample.Clock"`, `reason: "EVDisconnected"`, 2.0.1 `CablePluggedIn` / `EVConnected` / `EVDeparted`, `once: true`) and reads them back off the wire, because JSON mode ignores keys it does not know | `apps/cli/src/__tests__/tck-contract/tck.jsonLines.golden.bun.test.ts`    |
 | Template-once flow      | On one connector, before `connect`: `load_scenario_template`, `get_scenario`, `remove_scenario`, then `load_scenario` of the same definition with `enabled: false`. The scenario id is kept (`<templateId>-c<connector>`), the disabled copy does not auto-start when the station boots, and `run_scenario` with the original id starts it                                                                                                                                                                                                                                                                                                          | same                                                                      |
-| Parameter shapes        | The keys of each command above and whether each is optional                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | `packages/contracts/src/__tests__/tckContract.methods.test.ts`            |
+| Parameter shapes        | The keys of each command above and whether each is optional. Required keys and existing keys never change; a new key must be optional (`idTokenType` of `authorize` / `start_transaction` is one, #599 / #672). A rename goes through an alias period (rules below)                                                                                                                                                                                                                                                                                                                                                                                 | `packages/contracts/src/__tests__/tckContract.methods.test.ts`            |
 | Response envelope       | `{id, ok: true, data?}` / `{id, ok: false, error}`; `data` is absent, not `null`, for commands without a result; `load_scenario_template` answers `{scenarioId}` (`<templateId>-c<connector>`), `remove_scenario` answers `{removed}`                                                                                                                                                                                                                                                                                                                                                                                                               | same                                                                      |
 | Events                  | `{event, data, timestamp}` on the same stream, e.g. `boot_notification`, `scenario_started`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | same                                                                      |
 | Exit                    | EOF on stdin ends the process with exit code 0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | same                                                                      |
@@ -745,7 +745,7 @@ ocpp-cp-sim behavior build examples/behaviors/flaky-firmware.ts --out dist/flaky
   `await using`, in the file or in anything it imports: k6 hangs silently on them. The syntax check runs
   before the type check, because the ES2017 library turns the same constructs into confusing "cannot find
   name" errors.
-- The ESLint config `@ocpp-cp-sim/contracts/eslint-behavior` (`packages/contracts/eslint/behavior.js`, a flat
+- The ESLint config `@ocpp-cp-simulator/contracts/eslint-behavior` (`packages/contracts/eslint/behavior.js`, a flat
   config array) reports `Date`, `performance`, `Math.random`, `crypto.randomUUID`, timers, module-scope `let` /
   `var`, module-scope empty arrays / objects and `new Map` / `Set`, and the three syntaxes above. Spread it
   after your own TypeScript parser setup.

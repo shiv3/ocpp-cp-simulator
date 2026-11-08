@@ -13,7 +13,7 @@ import { ACTIVE_DAEMON_KEY } from "../savedDaemons";
 
 const connected = new Set<string>();
 
-vi.mock("@ocpp-cp-sim/client/remote/RemoteChargePointService", () => ({
+vi.mock("@ocpp-cp-simulator/client/remote/RemoteChargePointService", () => ({
   RemoteChargePointService: class {
     constructor(private readonly url: string) {}
     getConnectionState() {

@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 
-import type { AutoMeterValueConfig } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
-import type { ActiveChargingProfile } from "@ocpp-cp-sim/core/cp/domain/connector/Connector";
+import type { AutoMeterValueConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
+import type { ActiveChargingProfile } from "@ocpp-cp-simulator/core/cp/domain/connector/Connector";
 import {
   type EVSettings,
   defaultEVSettings,
-} from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
-import type { ScenarioMode } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import type { OCPPAvailability } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
-import type { ChargePointEvent } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+} from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
+import type { ScenarioMode } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import type { OCPPAvailability } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
+import type { ChargePointEvent } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 import { useDataContext } from "../providers/DataProvider";
 
 interface ConnectorViewState {

@@ -1,6 +1,6 @@
 import { meterFromSoc } from "@/data/hooks/useSocMeterSync";
-import type { EVSettings } from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
-import type { ChargePointService } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+import type { EVSettings } from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
+import type { ChargePointService } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 
 /*
  * The connector card's plug in / unplug. A plug-in drives the connector's EV

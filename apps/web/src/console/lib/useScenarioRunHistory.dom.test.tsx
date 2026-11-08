@@ -6,7 +6,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type {
   ScenarioRunPage,
   ScenarioRunQuery,
-} from "@ocpp-cp-sim/core/cp/application/verification/ScenarioRunSummary";
+} from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunSummary";
 import { DataContext } from "../../data/providers/DataProvider";
 import {
   createFakeChargePointService,
@@ -14,7 +14,7 @@ import {
   pushEvent,
   type FakeChargePointService,
 } from "../test/harness";
-import { scenarioRunSummary } from "@ocpp-cp-sim/core/test/scenarioRunFixtures";
+import { scenarioRunSummary } from "@ocpp-cp-simulator/core/test/scenarioRunFixtures";
 import { useScenarioRunHistory } from "./useScenarioRunHistory";
 
 beforeAll(() => {

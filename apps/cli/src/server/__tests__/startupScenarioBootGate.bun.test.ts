@@ -2,7 +2,7 @@ import { describe, it, expect } from "bun:test";
 import {
   startMockCsms,
   type MockCsms,
-} from "@ocpp-cp-sim/core/cp/infrastructure/transport/__tests__/mockCsms";
+} from "@ocpp-cp-simulator/core/cp/infrastructure/transport/__tests__/mockCsms";
 import { CLIChargePointService } from "../../service";
 import { runStartupScenario } from "../startServer";
 import { testCpInit } from "../../__tests__/testCpInit";

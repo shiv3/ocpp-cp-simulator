@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import React, { useMemo } from "react";
 
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import Combobox, { type ComboboxOption } from "../../components/Combobox";
 import { FILTER_SELECT_CLASS } from "../../components/filterStyles";
 import { statusDotClass } from "../../components/statusColor";

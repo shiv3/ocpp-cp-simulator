@@ -6,7 +6,7 @@ import {
   isValidSetVariablesResponseV21,
   type GetVariablesRequestV201,
   type SetVariablesRequestV201,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import type { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
 import { defaultConfiguration } from "../../../../domain/charge-point/Configuration";
 import { ConfigurationStore } from "../../../../domain/charge-point/ConfigurationStore";

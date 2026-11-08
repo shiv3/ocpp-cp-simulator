@@ -1,7 +1,7 @@
 import { useState } from "react";
 
-import type { EVSettings } from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
-import { applyVehicleSettings } from "@ocpp-cp-sim/core/cp/domain/vehicle/VehicleProfile";
+import type { EVSettings } from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
+import { applyVehicleSettings } from "@ocpp-cp-simulator/core/cp/domain/vehicle/VehicleProfile";
 import { useVehicleProfiles } from "../../data/hooks/useVehicleProfiles";
 import {
   readVehicleChoice,

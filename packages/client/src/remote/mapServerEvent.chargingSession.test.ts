@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { activeChargingSession } from "@ocpp-cp-sim/core/test/chargingSessionFixtures";
+import { activeChargingSession } from "@ocpp-cp-simulator/core/test/chargingSessionFixtures";
 import { mapServerEventToChargePointEvent } from "./RemoteChargePointService";
 
 const session = activeChargingSession();

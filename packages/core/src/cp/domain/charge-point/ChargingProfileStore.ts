@@ -121,7 +121,7 @@ export class ChargingProfileStore {
     const candidates = this.profiles.filter((p) => {
       if (p.chargingProfilePurpose !== purpose) return false;
       if (p.validFrom && new Date(p.validFrom) > now) return false;
-      if (p.validTo && new Date(p.validTo) < now) return false;
+      if (p.validTo && new Date(p.validTo) <= now) return false;
       return isScheduleInEffect(p, transactionStart, now);
     });
     if (candidates.length === 0) return null;

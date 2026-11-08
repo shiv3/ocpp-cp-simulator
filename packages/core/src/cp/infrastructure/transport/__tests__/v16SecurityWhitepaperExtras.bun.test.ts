@@ -6,7 +6,7 @@ import type {
   DeleteCertificateResponseV16,
   GetInstalledCertificateIdsResponseV16,
   InstallCertificateResponseV16,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { computeCertificateHashData } from "../../../domain/security/certificateHash";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";

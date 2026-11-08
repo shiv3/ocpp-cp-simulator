@@ -1,4 +1,4 @@
-import type { Blueprint } from "@ocpp-cp-sim/contracts/index";
+import type { Blueprint } from "@ocpp-cp-simulator/contracts/index";
 import { uniformChargerCapabilities } from "../../cp/domain/charge-point/ChargerCapabilities";
 
 /**

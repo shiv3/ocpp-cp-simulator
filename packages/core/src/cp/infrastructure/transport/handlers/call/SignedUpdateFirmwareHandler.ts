@@ -2,7 +2,7 @@ import type { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
 import type {
   SignedUpdateFirmwareRequestV16,
   SignedUpdateFirmwareResponseV16,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import type { HandlerOutcome } from "../../network-sim/ResponseEffectQueue";
 import { defaultBehavior16 } from "./defaultBehavior";
 

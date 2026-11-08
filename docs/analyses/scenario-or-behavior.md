@@ -61,7 +61,7 @@ Each recipe is the smallest thing that works; the file names are in `examples/be
 Behavior:
 
 ```ts
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
 
 export default {
   api: 1,

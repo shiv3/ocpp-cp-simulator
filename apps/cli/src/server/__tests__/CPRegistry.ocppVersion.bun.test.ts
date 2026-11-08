@@ -7,13 +7,13 @@ import { resolve } from "node:path";
 
 import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
-import { BunSqliteDatabase } from "@ocpp-cp-sim/core/cp/domain/persistence/BunSqliteDatabase";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/domain/persistence/BunSqliteDatabase";
 import type {
   Database,
   SqlParam,
   SqlRow,
-} from "@ocpp-cp-sim/core/cp/domain/persistence/Database";
-import { runMigrations } from "@ocpp-cp-sim/core/cp/domain/persistence/schema";
+} from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
+import { runMigrations } from "@ocpp-cp-simulator/core/cp/domain/persistence/schema";
 
 class RawBunDatabaseAdapter implements Database {
   constructor(private readonly db: RawBunDatabase) {}

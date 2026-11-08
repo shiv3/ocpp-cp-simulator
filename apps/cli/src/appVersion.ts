@@ -1,5 +1,5 @@
 import pkg from "../../../package.json";
-import { resolveBuildVersion } from "@ocpp-cp-sim/contracts/buildVersion";
+import { resolveBuildVersion } from "@ocpp-cp-simulator/contracts/buildVersion";
 
 /**
  * The simulator version to report at runtime.

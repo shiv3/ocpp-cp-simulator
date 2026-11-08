@@ -6,7 +6,7 @@ import {
   ScenarioNodeType,
   type ScenarioDefinition,
   type ScenarioNode,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 
 function node(
   id: string,
@@ -178,7 +178,7 @@ describe("deriveStepLayout", () => {
     ]);
   });
 
-  it("a join (two branches reaching one node) is unsupported", () => {
+  it("a join (two branches reaching one node) keeps the second branch's edge as a link", () => {
     const layout = deriveStepLayout(
       def(
         [start(), node("fork"), node("x"), node("y"), node("join"), end()],
@@ -192,18 +192,52 @@ describe("deriveStepLayout", () => {
         ],
       ),
     );
-    expect(layout.supported).toBe(false);
+    expect(layout.supported).toBe(true);
+    expect(layout.links.map((l) => [l.source, l.target])).toEqual([
+      ["y", "join"],
+    ]);
   });
 
-  it("a loop is unsupported, in main or in a branch", () => {
+  it("a loop is a link, in main or in a branch", () => {
+    const inMain = deriveStepLayout(
+      def(
+        [start(), node("a"), node("b")],
+        [
+          ["start", "a"],
+          ["a", "b"],
+          ["b", "a"],
+        ],
+      ),
+    );
+    expect(inMain.supported).toBe(true);
+    expect(ids(inMain.main)).toEqual(["a", "b"]);
+    expect(inMain.links.map((l) => [l.source, l.target])).toEqual([["b", "a"]]);
+
+    const inBranch = deriveStepLayout(
+      def(
+        [start(), node("fork"), node("x"), node("y")],
+        [
+          ["start", "fork"],
+          ["fork", "x"],
+          ["fork", "y"],
+          ["y", "fork"],
+        ],
+      ),
+    );
+    expect(inBranch.supported).toBe(true);
+    expect(inBranch.links.map((l) => [l.source, l.target])).toEqual([
+      ["y", "fork"],
+    ]);
+  });
+
+  it("a loop back into START, or a fork branch starting on a placed step, is unsupported", () => {
     expect(
       deriveStepLayout(
         def(
-          [start(), node("a"), node("b")],
+          [start(), node("a")],
           [
             ["start", "a"],
-            ["a", "b"],
-            ["b", "a"],
+            ["a", "start"],
           ],
         ),
       ).supported,
@@ -211,12 +245,11 @@ describe("deriveStepLayout", () => {
     expect(
       deriveStepLayout(
         def(
-          [start(), node("fork"), node("x"), node("y")],
+          [start(), node("a"), node("b")],
           [
-            ["start", "fork"],
-            ["fork", "x"],
-            ["fork", "y"],
-            ["y", "fork"],
+            ["start", "a"],
+            ["a", "b"],
+            ["a", "start"],
           ],
         ),
       ).supported,

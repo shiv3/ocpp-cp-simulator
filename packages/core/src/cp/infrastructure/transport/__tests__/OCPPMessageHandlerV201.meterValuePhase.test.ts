@@ -3,7 +3,7 @@ import { OCPPMessageHandlerV201 } from "../OCPPMessageHandlerV201";
 import type { OCPPWebSocket } from "../OCPPWebSocket";
 import type { Logger } from "../../../shared/Logger";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
-import type { MeterValuesRequestV201 } from "@ocpp-cp-sim/ocpp/index";
+import type { MeterValuesRequestV201 } from "@ocpp-cp-simulator/ocpp/index";
 import { stubOperatingPoint } from "../../../domain/connector/__tests__/operatingPointStub";
 
 /**
@@ -79,6 +79,7 @@ function createMockChargePoint(connector: unknown): ChargePoint {
       txStartedMeasurands: vi.fn(() => []),
       // #529: a written TransactionEvent arms its MessageTimeout.
       messageTimeout: vi.fn(() => 30),
+      offlineQueueMaxEvents: vi.fn(() => 1000),
     },
   } as unknown as ChargePoint;
 }

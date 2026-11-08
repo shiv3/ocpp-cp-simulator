@@ -227,7 +227,9 @@ describe("Outbox", () => {
     };
 
     outbox.sendBootNotification(bootPayload);
-    expectCall(handler, "sendBootNotification", [bootPayload]);
+    expectCall(handler, "sendBootNotification", [bootPayload, undefined]);
+    outbox.sendBootNotification(bootPayload, "RemoteReset");
+    expectCall(handler, "sendBootNotification", [bootPayload, "RemoteReset"]);
 
     outbox.sendHeartbeat();
     expectCall(handler, "sendHeartbeat", []);

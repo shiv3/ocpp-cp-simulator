@@ -3,10 +3,10 @@ import React, { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { ScenarioRunResult } from "@ocpp-cp-sim/core/cp/application/verification/ScenarioAssertions";
+import type { ScenarioRunResult } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioAssertions";
 import { useDataContext } from "../../../../data/providers/DataProvider";
 import { downloadJson } from "../../../../utils/downloadJson";
-import type { TranscriptEntry } from "@ocpp-cp-sim/core/cp/application/verification/ScenarioAssertions";
+import type { TranscriptEntry } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioAssertions";
 import { formatLogTime } from "../../../lib/useGlobalLogs";
 import { formatDurationMs, VERDICT_STYLES } from "./runFormat";
 

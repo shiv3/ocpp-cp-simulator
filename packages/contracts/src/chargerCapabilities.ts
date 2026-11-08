@@ -22,7 +22,7 @@ const sampledValueOverrideSchema = z
   .strict();
 
 /** Opt-in meter realism of one connector (#614-#616); see
- *  `MeterRealism` in `@ocpp-cp-sim/core`. */
+ *  `MeterRealism` in `@ocpp-cp-simulator/core`. */
 export const meterRealismSchema = z
   .object({
     seed: z.number().int().optional(),

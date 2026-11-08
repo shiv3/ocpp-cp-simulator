@@ -9,8 +9,8 @@ import {
   createManyToolSchema,
   createParamsSchema,
   METHODS,
-} from "@ocpp-cp-sim/contracts/index";
-import type { RpcMethod } from "@ocpp-cp-sim/contracts/index";
+} from "@ocpp-cp-simulator/contracts/index";
+import type { RpcMethod } from "@ocpp-cp-simulator/contracts/index";
 
 /**
  * #284 — the typed tool must not be narrower than the method it wraps.

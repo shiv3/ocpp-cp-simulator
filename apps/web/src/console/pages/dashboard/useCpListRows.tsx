@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useState } from "react";
 
-import type { ChargePointSnapshot } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+import type { ChargePointSnapshot } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 import type { CpListRow } from "./cpListFilters";
 import CpRowReporter from "./CpRowReporter";
 

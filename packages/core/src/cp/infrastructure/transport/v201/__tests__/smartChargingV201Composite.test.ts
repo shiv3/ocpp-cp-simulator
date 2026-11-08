@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { GetCompositeScheduleResponseV201 } from "@ocpp-cp-sim/ocpp/index";
+import type { GetCompositeScheduleResponseV201 } from "@ocpp-cp-simulator/ocpp/index";
 import { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
 import type { ChargingSchedulePeriod } from "../../../../domain/connector/Connector";
 import {

@@ -60,6 +60,21 @@ export interface MockCsmsOptions {
   };
   /** A fixed port, so a test can restart the CSMS where a station looks. */
   readonly port?: number;
+  /**
+   * Answer every 2.x StatusNotification with an empty CALLRESULT (default
+   * true). A 2.x station sends one CALL at a time (OCPP-J §4.1.1, #708), so
+   * an unanswered StatusNotification would hold back the CALL a test waits
+   * for until MessageTimeout. A test that wants to see the station wait
+   * turns this off.
+   */
+  readonly answerStatusNotifications?: boolean;
+  /**
+   * Answer every CALL but BootNotification (default false): `{}`, and an
+   * Accepted idTokenInfo for Authorize. For tests that care about the
+   * traffic and not about when the CSMS answers; a 2.x station waits for
+   * each answer before it sends the next CALL (#708).
+   */
+  readonly answerCalls?: boolean;
 }
 
 export function startMockCsms(options: MockCsmsOptions = {}): MockCsms {
@@ -128,6 +143,35 @@ export function startMockCsms(options: MockCsmsOptions = {}): MockCsms {
           return;
         }
         received.push(frame);
+        if (
+          options.answerStatusNotifications !== false &&
+          frame[0] === 2 &&
+          frame[2] === "StatusNotification" &&
+          typeof (frame[3] as { connectorStatus?: unknown } | undefined)
+            ?.connectorStatus === "string"
+        ) {
+          // 2.x shape (1.6 says `status`).
+          _ws.send(JSON.stringify([3, frame[1], {}]));
+        }
+        if (
+          options.answerCalls === true &&
+          frame[0] === 2 &&
+          frame[2] !== "BootNotification" &&
+          !(
+            options.answerStatusNotifications !== false &&
+            frame[2] === "StatusNotification"
+          )
+        ) {
+          _ws.send(
+            JSON.stringify([
+              3,
+              frame[1],
+              frame[2] === "Authorize"
+                ? { idTokenInfo: { status: "Accepted" } }
+                : {},
+            ]),
+          );
+        }
         for (const w of [...waiters]) {
           if (w.pred(frame)) {
             w.resolve(frame); // resolve() removes the waiter and clears its timer

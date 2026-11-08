@@ -6,7 +6,7 @@ import { RefreshCw } from "lucide-react";
 import type {
   TimelineEntry,
   TimelineKind,
-} from "@ocpp-cp-sim/core/cp/application/services/OperationalTimeline";
+} from "@ocpp-cp-simulator/core/cp/application/services/OperationalTimeline";
 import { cn } from "@/lib/utils";
 
 import EmptyState from "../../components/EmptyState";
@@ -35,6 +35,7 @@ const TONE_BY_KIND: Partial<Record<TimelineKind, Tone>> = {
   connected: "connection",
   reconnecting: "connection",
   boot_notification: "connection",
+  reconnected_without_boot: "connection",
 };
 
 const TONE_CLASS: Record<Tone, string> = {

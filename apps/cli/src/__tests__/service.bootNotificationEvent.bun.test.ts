@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it } from "bun:test";
 
 import { CLIChargePointService, type CLIEvent } from "../service";
-import type { RegistrationStatus } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePointEvents";
+import type { RegistrationStatus } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePointEvents";
 import {
   startMockCsms,
   type MockCsms,
-} from "@ocpp-cp-sim/core/cp/infrastructure/transport/__tests__/mockCsms";
+} from "@ocpp-cp-simulator/core/cp/infrastructure/transport/__tests__/mockCsms";
 import { testCpInit } from "./testCpInit";
 
 /**

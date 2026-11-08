@@ -10,12 +10,12 @@ import {
   useReactFlow,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import StateNode from "./StateNode";
 import StateTransitionTimeline from "./StateTransitionTimeline";
-import type { Connector } from "@ocpp-cp-sim/core/cp/domain/connector/Connector";
-import type { ChargePoint } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
-import type { HistoryOptions } from "@ocpp-cp-sim/core/cp/application/services/types/StateSnapshot";
+import type { Connector } from "@ocpp-cp-simulator/core/cp/domain/connector/Connector";
+import type { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
+import type { HistoryOptions } from "@ocpp-cp-simulator/core/cp/application/services/types/StateSnapshot";
 import { useStateHistory } from "../../data/hooks/useStateHistory";
 
 interface StateTransitionViewerProps {

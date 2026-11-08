@@ -17,6 +17,7 @@ import {
 export const OCPP_VERSION_STRING: Record<WireVersion, string> = {
   "1.6": "OCPP-1.6J",
   "2.0.1": "OCPP-2.0.1",
+  "2.1": "OCPP-2.1",
 };
 
 export interface RigOptions {
@@ -96,6 +97,26 @@ export class Rig {
       { from },
     );
     await this.csms.settle();
+  }
+
+  /**
+   * Wait for the station to be back after a dropped connection (the `nth`
+   * connection of the run). OCPP 1.6 boots again on every connect; 2.x does
+   * not (OCPP-J 2.0.1 §5.4, #702), so the connection itself is what it waits
+   * for there.
+   */
+  async reconnected(nth = 2, timeoutMs = 30_000): Promise<void> {
+    if (this.is16) {
+      await this.csms.waitForCall("BootNotification", { nth, timeoutMs });
+      return;
+    }
+    const deadline = Date.now() + timeoutMs;
+    while (this.csms.openCount < nth) {
+      if (Date.now() > deadline) {
+        throw new Error(`no reconnect #${nth} within ${timeoutMs}ms`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
   }
 
   /** An HTTP endpoint that accepts every upload with 200, for diagnostics/logs. */

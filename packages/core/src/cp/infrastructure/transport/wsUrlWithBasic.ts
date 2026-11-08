@@ -10,7 +10,7 @@ import {
   OCPP_WEBSOCKET_PROTOCOL_201,
   ocppVersionToSubprotocol,
 } from "./profile/subprotocols";
-import type { OcppSecurityProfile } from "@ocpp-cp-sim/contracts/securityProfile";
+import type { OcppSecurityProfile } from "@ocpp-cp-simulator/contracts/securityProfile";
 
 export {
   OCPP_WEBSOCKET_PROTOCOL_16,

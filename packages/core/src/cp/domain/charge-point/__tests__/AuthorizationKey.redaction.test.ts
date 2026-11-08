@@ -4,7 +4,7 @@ import type { HandlerContext } from "../../../infrastructure/transport/handlers/
 import { GetConfigurationHandler } from "../../../infrastructure/transport/handlers/call/GetConfigurationHandler";
 import { ChangeConfigurationHandler } from "../../../infrastructure/transport/handlers/call/OtherCallHandlers";
 import { Logger, LogLevel, LogType } from "../../../shared/Logger";
-import { eventToWire } from "@ocpp-cp-sim/contracts/index";
+import { eventToWire } from "@ocpp-cp-simulator/contracts/index";
 import type { ChargePoint } from "../ChargePoint";
 import { defaultConfiguration } from "../Configuration";
 import { ConfigurationStore } from "../ConfigurationStore";

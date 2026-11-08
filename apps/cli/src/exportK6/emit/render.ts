@@ -4,7 +4,7 @@
 import type {
   ScenarioJson,
   ScenarioNodeJson,
-} from "@ocpp-cp-sim/k6-runtime/types";
+} from "@ocpp-cp-simulator/k6-runtime/types";
 
 // Scenario-derived text (name, id, node labels) is embedded in `//` comments
 // of the generated script. A raw line terminator in any of it would close

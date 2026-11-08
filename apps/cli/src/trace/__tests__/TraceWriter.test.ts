@@ -10,7 +10,7 @@ import {
   vi,
   type MockInstance,
 } from "vitest";
-import { Logger, LogType } from "@ocpp-cp-sim/core/cp/shared/Logger";
+import { Logger, LogType } from "@ocpp-cp-simulator/core/cp/shared/Logger";
 import { TraceWriter } from "../TraceWriter";
 
 function readRecords(filePath: string): unknown[] {

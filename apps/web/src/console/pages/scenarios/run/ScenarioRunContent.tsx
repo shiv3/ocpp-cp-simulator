@@ -5,7 +5,7 @@ import { Maximize2, Settings, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { useDataContext } from "@/data/providers/DataProvider";
-import type { ScenarioDefinition } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import type { ScenarioDefinition } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import EmptyState from "../../../components/EmptyState";
 import RunStatePill from "../../../components/RunStatePill";
 import SegmentedControl from "../../../components/SegmentedControl";

@@ -12,7 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { tcpPort } from "@ocpp-cp-sim/core/test/bunServe";
+import { tcpPort } from "@ocpp-cp-simulator/core/test/bunServe";
 
 // Regression guard for issue #319 — "the bundled daemon exits(1) on spawn".
 //

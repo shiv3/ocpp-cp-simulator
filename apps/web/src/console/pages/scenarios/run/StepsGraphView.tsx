@@ -4,9 +4,13 @@ import { Plus, X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import RunStatePill from "../../../components/RunStatePill";
-import type { ScenarioNode } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import type { ScenarioNode } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import { isLiveRunState } from "../../../lib/scenarioRunState";
-import { stepSummary, type StepLane } from "../../../lib/scenarioSteps";
+import {
+  canAddBranch,
+  stepSummary,
+  type StepLane,
+} from "../../../lib/scenarioSteps";
 import {
   layoutSteps,
   stepIndexOf,
@@ -56,6 +60,18 @@ interface PlacedNode {
   index: number;
 }
 
+/** A loop or join link: from a lane's last card round to an earlier card. */
+interface LinkPath {
+  key: string;
+  d: string;
+  lane: number;
+  from: string;
+  to: string;
+}
+
+/** How far a link's curve swings out right of the cards. */
+const LINK_SWING = 44;
+
 interface GraphPath {
   key: string;
   d: string;
@@ -76,6 +92,7 @@ interface PlusPoint {
 interface GraphGeometry {
   placed: PlacedNode[];
   paths: GraphPath[];
+  links: LinkPath[];
   ends: Array<{ lane: number; y: number }>;
   tags: Array<{ lane: number; name: string; top: number }>;
   startY: number;
@@ -237,8 +254,29 @@ function computeGeometry(
     });
   }
 
+  const links: LinkPath[] = [];
+  let linkRight = 0;
+  for (const link of layout.links) {
+    const from = placed.find((p) => p.step.id === link.source);
+    const to = placed.find((p) => p.step.id === link.target);
+    if (!from || !to) continue;
+    const x1 = laneX(from.lane) + NODE_W / 2;
+    const y1 = from.top + NODE_H / 2;
+    const x2 = laneX(to.lane) + NODE_W / 2;
+    const y2 = to.top + NODE_H / 2;
+    const swing = Math.max(x1, x2) + LINK_SWING;
+    linkRight = Math.max(linkRight, swing);
+    links.push({
+      key: link.id,
+      d: `M ${x1} ${y1} C ${swing} ${y1}, ${swing} ${y2}, ${x2 + 3} ${y2}`,
+      lane: from.lane,
+      from: link.source,
+      to: link.target,
+    });
+  }
+
   const laneCount = Math.max(1, layout.fork?.branches.length ?? 1);
-  let width = X0 + LANE_W * (laneCount - 0.5);
+  let width = Math.max(X0 + LANE_W * (laneCount - 0.5), linkRight + 8);
   // The "+ branch" pill may stand right of the only lane.
   if (editable) width = Math.max(width, branchPill.left + 96);
   const height = Math.max(...ends.map((e) => e.y)) + END_R + 16;
@@ -246,6 +284,7 @@ function computeGeometry(
   return {
     placed,
     paths,
+    links,
     ends,
     tags,
     startY,
@@ -389,6 +428,32 @@ const StepsGraphView: React.FC<StepRunViewProps> = (props) => {
               fill="none"
               strokeWidth={path.done ? 2 : 1.5}
               stroke={path.done ? laneStyle(path.lane).color : TODO_STROKE}
+            />
+          ))}
+          <defs>
+            <marker
+              id="graph-link-arrow"
+              viewBox="0 0 8 8"
+              refX="7"
+              refY="4"
+              markerWidth="7"
+              markerHeight="7"
+              orient="auto"
+            >
+              <path d="M 0 0 L 8 4 L 0 8 z" fill="var(--cx-faint)" />
+            </marker>
+          </defs>
+          {geometry.links.map((link) => (
+            <path
+              key={link.key}
+              d={link.d}
+              data-link-from={link.from}
+              data-link-to={link.to}
+              fill="none"
+              strokeWidth={1.5}
+              strokeDasharray="5 4"
+              stroke={laneStyle(link.lane).color}
+              markerEnd="url(#graph-link-arrow)"
             />
           ))}
           <circle
@@ -580,7 +645,7 @@ const StepsGraphView: React.FC<StepRunViewProps> = (props) => {
           </>
         )}
 
-        {editable && onAddBranch && !drag && (
+        {editable && onAddBranch && canAddBranch(layout) && !drag && (
           <button
             type="button"
             aria-label={t("scenarioRun.addParallelBranch")}

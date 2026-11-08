@@ -9,11 +9,14 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { useTemplateText } from "@/i18n/templates";
+import { outlineScenario } from "../../lib/scenarioOutline";
+import { stepSummary } from "../../lib/scenarioSteps";
+import { nodeTitle } from "./run/stepVisuals";
 
 import {
   scenarioTemplates,
   type ScenarioTemplate,
-} from "@ocpp-cp-sim/core/utils/scenarioTemplates";
+} from "@ocpp-cp-simulator/core/utils/scenarioTemplates";
 
 export interface TemplateBrowserDialogProps {
   open: boolean;
@@ -37,6 +40,54 @@ function filterTemplates(
   );
 }
 
+/** The steps of a template, read-only, with loops and forks spelled out. */
+const TemplateSteps: React.FC<{ template: ScenarioTemplate }> = ({
+  template,
+}) => {
+  const { t } = useTranslation();
+  const steps = outlineScenario(template.createScenario("preview", null));
+  return (
+    <ol
+      aria-label={t("scenarios.templateBrowser.stepsLabel")}
+      className="mt-2 space-y-1 border-t border-cx-border pt-2 text-xs"
+    >
+      {steps.map(({ number, node, jumps, endsHere }) => {
+        const summary = stepSummary(node);
+        const title = nodeTitle(node);
+        const label = String(node.data.label ?? "").trim();
+        return (
+          <li key={node.id} className="flex gap-2">
+            <span className="w-5 shrink-0 text-right tabular-nums text-cx-muted">
+              {number}.
+            </span>
+            <span className="min-w-0 text-cx-fg2">
+              <span className="font-medium text-cx-fg">{title}</span>
+              {label !== "" && label !== title && ` · ${label}`}
+              {summary !== "" && summary !== label && (
+                <span className="text-cx-muted"> {summary}</span>
+              )}
+              {jumps.length > 0 && (
+                <span className="text-cx-blue">
+                  {" "}
+                  {t("scenarios.templateBrowser.goesTo", {
+                    steps: jumps.map((n) => `#${n}`).join(", "),
+                  })}
+                </span>
+              )}
+              {endsHere && (
+                <span className="text-cx-muted">
+                  {" "}
+                  {t("scenarios.templateBrowser.thenEnd")}
+                </span>
+              )}
+            </span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+};
+
 const Body: React.FC<Omit<TemplateBrowserDialogProps, "open">> = ({
   onOpenChange,
   onUseTemplate,
@@ -45,6 +96,13 @@ const Body: React.FC<Omit<TemplateBrowserDialogProps, "open">> = ({
   const [query, setQuery] = useState("");
   const text = useTemplateText();
   const visible = filterTemplates(query, text);
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  const toggle = (id: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
 
   const use = (template: ScenarioTemplate) => {
     onOpenChange(false);
@@ -96,6 +154,19 @@ const Body: React.FC<Omit<TemplateBrowserDialogProps, "open">> = ({
               <p className="mt-1 line-clamp-2 text-xs text-cx-muted">
                 {text.description(template)}
               </p>
+              <button
+                type="button"
+                aria-expanded={expanded.has(template.id)}
+                onClick={() => toggle(template.id)}
+                className="mt-1 text-xs text-cx-blue hover:underline"
+              >
+                {expanded.has(template.id)
+                  ? t("scenarios.templateBrowser.hideSteps")
+                  : t("scenarios.templateBrowser.showSteps")}
+              </button>
+              {expanded.has(template.id) && (
+                <TemplateSteps template={template} />
+              )}
             </div>
             <button
               type="button"

@@ -3,7 +3,7 @@ import type {
   BehaviorContext,
   BehaviorParams,
   JsonValue,
-} from "@ocpp-cp-sim/contracts/behavior";
+} from "@ocpp-cp-simulator/contracts/behavior";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { isOcpp2Version } from "../../../domain/types/OcppVersion";
 import { OCPPStatus } from "../../../domain/types/OcppTypes";

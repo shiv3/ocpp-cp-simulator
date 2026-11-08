@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import {
   AutoTrafficPlanner,
   defaultAutoTrafficConfig,
   type AutoTrafficConfig,
   type AutoTrafficVehicle,
-} from "@ocpp-cp-sim/core/cp/domain/connector/AutoTraffic";
+} from "@ocpp-cp-simulator/core/cp/domain/connector/AutoTraffic";
 import { CLIChargePointService } from "../service";
 import type { ChargePointInitOptions } from "../types";
 

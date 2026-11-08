@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import React from "react";
 
-import type { DcCurvePoint } from "@ocpp-cp-sim/core/cp/domain/vehicle/VehicleProfile";
+import type { DcCurvePoint } from "@ocpp-cp-simulator/core/cp/domain/vehicle/VehicleProfile";
 
 /** A small power-against-SoC drawing of a DC curve, as published. */
 const CurvePreview: React.FC<{

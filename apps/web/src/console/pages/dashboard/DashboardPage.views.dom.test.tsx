@@ -17,8 +17,8 @@ import {
   type FakeChargePointService,
   type ReportedLocation,
 } from "../../test/harness";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
-import type { ChargePointSnapshot } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
+import type { ChargePointSnapshot } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 
 function connector(
   overrides: Partial<ChargePointSnapshot["connectors"][number]> & {

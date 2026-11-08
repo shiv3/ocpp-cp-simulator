@@ -10,7 +10,7 @@
  * Full model and outcome rules: `docs/concepts/charging-sessions.md`.
  */
 
-import { CHARGING_SESSION_OUTCOMES } from "@ocpp-cp-sim/contracts/chargingSession";
+import { CHARGING_SESSION_OUTCOMES } from "@ocpp-cp-simulator/contracts/chargingSession";
 
 // Defined in `packages/contracts/src` (#578); re-exported for the existing import sites.
 export { CHARGING_SESSION_OUTCOMES };

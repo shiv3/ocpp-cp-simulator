@@ -61,8 +61,8 @@ import type {
   TriggerMessageRequestV16,
   UnlockConnectorRequestV16,
   UpdateFirmwareRequestV16,
-} from "@ocpp-cp-sim/ocpp/index";
-import { OCPPErrorCodeV16 } from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
+import { OCPPErrorCodeV16 } from "@ocpp-cp-simulator/ocpp/index";
 import type {
   OcppMessageErrorPayload,
   OcppMessagePayload,

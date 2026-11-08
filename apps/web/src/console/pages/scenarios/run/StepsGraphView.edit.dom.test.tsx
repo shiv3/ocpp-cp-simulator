@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { ScenarioNodeType } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import { ScenarioNodeType } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import { createEmptyScenario, insertStep } from "../../../lib/scenarioSteps";
 import { deriveStepLayout, type StepLayout } from "../../../lib/stepLayout";
 import { forkScenario } from "../../../test/scenarioFixtures";
@@ -111,7 +111,7 @@ describe("StepsGraphView (editable)", () => {
     await render();
     expect(container.querySelectorAll("[data-node-id]")).toHaveLength(5);
     expect(
-      container.querySelectorAll("svg[data-graph-edges] path"),
+      container.querySelectorAll("svg[data-graph-edges] > path"),
     ).toHaveLength(7);
     await click(cardButton("charge"));
     expect(onSelectStep).toHaveBeenCalledWith("charge");

@@ -6,11 +6,11 @@ import type {
   ChargePointInitOptions,
   SoapTunnelConfig,
 } from "./types";
-import type { InboundValidationMode } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
+import type { InboundValidationMode } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
 import { CLIChargePointService } from "./service";
-import { transportConfigSchema } from "@ocpp-cp-sim/contracts/transportConfig";
-import { assertWsClientOptions } from "@ocpp-cp-sim/core/cp/shared/WsClientOptions";
-import type { TransportConfig } from "@ocpp-cp-sim/core/cp/infrastructure/transport/TransportConfig";
+import { transportConfigSchema } from "@ocpp-cp-simulator/contracts/transportConfig";
+import { assertWsClientOptions } from "@ocpp-cp-simulator/core/cp/shared/WsClientOptions";
+import type { TransportConfig } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/TransportConfig";
 import { startRepl } from "./repl";
 import { startJsonMode } from "./jsonMode";
 import { resolveClientLocation } from "./clientLocation";
@@ -25,17 +25,17 @@ import {
   resolveVehicleCatalogConfig,
   type VehicleCatalogConfig,
 } from "./vehicleCatalogConfig";
-import { isSoapVersion } from "@ocpp-cp-sim/core/cp/domain/types/OcppVersion";
-import { hasIdPatternPlaceholder } from "@ocpp-cp-sim/contracts/index";
+import { isSoapVersion } from "@ocpp-cp-simulator/core/cp/domain/types/OcppVersion";
+import { hasIdPatternPlaceholder } from "@ocpp-cp-simulator/contracts/index";
 import {
   labelKeySchema,
   labelsSchema,
   labelValueSchema,
   normalizeLabels,
-} from "@ocpp-cp-sim/contracts/labels";
-import { BunSqliteDatabase } from "@ocpp-cp-sim/core/cp/domain/persistence/BunSqliteDatabase";
-import type { Database } from "@ocpp-cp-sim/core/cp/domain/persistence/Database";
-import { setGlobalLogFormat } from "@ocpp-cp-sim/core/cp/shared/Logger";
+} from "@ocpp-cp-simulator/contracts/labels";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/domain/persistence/BunSqliteDatabase";
+import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
+import { setGlobalLogFormat } from "@ocpp-cp-simulator/core/cp/shared/Logger";
 import { TraceWriter, setGlobalTraceWriter } from "./trace/TraceWriter";
 import { parseAnalyzeArgs } from "./analyze/parseAnalyzeArgs";
 import { runAnalyze } from "./analyze/runAnalyze";
@@ -43,7 +43,7 @@ import { behaviorFlagProblem } from "./behavior/flags";
 import { buildBehaviorFile, parseBehaviorArgs } from "./behavior/buildBehavior";
 import { BehaviorLibrary } from "./behavior/BehaviorLibrary";
 import { collectBehaviorParams } from "./behavior/paramsFlag";
-import type { JsonObject } from "@ocpp-cp-sim/contracts/behavior";
+import type { JsonObject } from "@ocpp-cp-simulator/contracts/behavior";
 import { parseExportK6Args } from "./exportK6/parseExportK6Args";
 import { runExportK6 } from "./exportK6/runExportK6";
 import {
@@ -62,16 +62,16 @@ import {
   parseTrustedProxy,
 } from "./server/accessGuard";
 import { installLogSink, parseLogLevel, parseSize } from "./logSink";
-import { CP_BULK_WAIT_MS } from "@ocpp-cp-sim/contracts/limits";
+import { CP_BULK_WAIT_MS } from "@ocpp-cp-simulator/contracts/limits";
 import type { ClientLocation } from "./client";
 import type { SingleCpRuntimeTarget } from "./singleCpTarget";
-import { SqliteConnectorSettingsRepository } from "@ocpp-cp-sim/client/sqlite/SqliteConnectorSettingsRepository";
+import { SqliteConnectorSettingsRepository } from "@ocpp-cp-simulator/client/sqlite/SqliteConnectorSettingsRepository";
 import {
   isOcppVersion,
   SUPPORTED_OCPP_VERSIONS,
-} from "@ocpp-cp-sim/core/cp/domain/types/OcppVersion";
+} from "@ocpp-cp-simulator/core/cp/domain/types/OcppVersion";
 import { loadFleetTemplateFiles } from "./server/fleetTemplateFiles";
-import type { FleetTemplate } from "@ocpp-cp-sim/contracts/index";
+import type { FleetTemplate } from "@ocpp-cp-simulator/contracts/index";
 import { DEFAULT_BOOTSTRAP_PACING } from "./server/bootstrapPacing";
 import { tlsKeyPermissionWarning } from "./tlsKeyPermissions";
 

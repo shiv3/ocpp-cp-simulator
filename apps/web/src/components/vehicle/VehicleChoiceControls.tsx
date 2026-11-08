@@ -7,7 +7,7 @@ import {
   type EditableSpecField,
   type VehicleCurrentType,
   type VehicleProfile,
-} from "@ocpp-cp-sim/core/cp/domain/vehicle/VehicleProfile";
+} from "@ocpp-cp-simulator/core/cp/domain/vehicle/VehicleProfile";
 import type { VehicleProfilesState } from "../../data/hooks/useVehicleProfiles";
 import { cn } from "../../lib/utils";
 import { t } from "../../i18n";

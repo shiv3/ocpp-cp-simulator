@@ -7,7 +7,7 @@ import {
   startTestServer,
   type TestServer,
 } from "./socketHarness";
-import { startMockCsms } from "@ocpp-cp-sim/core/cp/infrastructure/transport/__tests__/mockCsms";
+import { startMockCsms } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/__tests__/mockCsms";
 
 /**
  * #240 connectionTrigger over a real socket: a run started via run_scenario

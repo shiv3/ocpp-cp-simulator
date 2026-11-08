@@ -1,9 +1,9 @@
 import { describe, expect, it } from "bun:test";
-import { isValidTransactionEventRequestV201 } from "@ocpp-cp-sim/ocpp/v201/index";
+import { isValidTransactionEventRequestV201 } from "@ocpp-cp-simulator/ocpp/v201/index";
 import type {
   StopTransactionRequestV16,
   TransactionEventRequestV201,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
 import {
   answerEverythingElse,

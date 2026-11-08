@@ -11,7 +11,7 @@ import {
   isValidGet15118EVCertificateRequestV21,
   isValidGet15118EVCertificateResponseV201,
   isValidGet15118EVCertificateResponseV21,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
 import { canBindBunServe } from "../../../../test/bunServe";
 

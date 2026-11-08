@@ -1,7 +1,7 @@
 import {
   fleetTemplateSchema,
   type FleetTemplate,
-} from "@ocpp-cp-sim/contracts/index";
+} from "@ocpp-cp-simulator/contracts/index";
 import type { Database } from "./Database";
 
 interface FleetTemplateRow {

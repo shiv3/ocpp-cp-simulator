@@ -235,6 +235,27 @@ export class ConfigurationStore {
     return this.getInteger("MessageTimeout") ?? 30;
   }
 
+  /** 2.x key `OfflineThreshold` (seconds); default `60` (#702). 2.x reads it
+   *  as `OCPPCommCtrlr.OfflineThreshold` (B04.FR.01/02). */
+  offlineThreshold(): number {
+    return this.getInteger("OfflineThreshold") ?? 60;
+  }
+
+  /** 2.x simulator key `BootOnReconnect`; default `false` (#702): whether
+   *  every connect, a reconnect after a connection loss included, sends a
+   *  BootNotification (OCPP-J 2.0.1 §5.4 says SHOULD NOT). */
+  bootOnReconnect(): boolean {
+    return this.getBoolean("BootOnReconnect") ?? false;
+  }
+
+  /** 2.x key `OfflineQueueMaxEvents` (#554): most TransactionEvents the E11
+   *  offline queue holds before it drops `Updated` ones (E11.FR.04/05);
+   *  default `1000`, `0` = no limit. A simulator key: the spec has no
+   *  variable for the size. */
+  offlineQueueMaxEvents(): number {
+    return this.getInteger("OfflineQueueMaxEvents") ?? 1000;
+  }
+
   /** 2.x key `OfflineQueuingSeverity` (0-9); default `0` (#538). 2.x reads
    *  it as `MonitoringCtrlr.OfflineQueuingSeverity`. */
   offlineQueuingSeverity(): number {

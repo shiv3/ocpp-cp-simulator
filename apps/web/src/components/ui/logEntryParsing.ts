@@ -1,4 +1,4 @@
-import type { LogEntry } from "@ocpp-cp-sim/core/cp/shared/Logger";
+import type { LogEntry } from "@ocpp-cp-simulator/core/cp/shared/Logger";
 
 /**
  * Best-effort extraction of the OCPP action name and wire direction from a

@@ -1,10 +1,10 @@
 import * as fs from "fs";
-import { validateLayerConfig } from "@ocpp-cp-sim/core/cp/infrastructure/transport/network-sim/config";
+import { validateLayerConfig } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/network-sim/config";
 import {
   ARRAY_MAX_ITEMS,
   fleetTemplateSchema,
   type FleetTemplate,
-} from "@ocpp-cp-sim/contracts/index";
+} from "@ocpp-cp-simulator/contracts/index";
 
 /**
  * The first member of `template` whose `networkSimulation` is not a valid

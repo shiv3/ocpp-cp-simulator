@@ -10,7 +10,7 @@ import type {
   TriggerMessageRequestV201,
   TriggerMessageResponseV201,
   UnlockConnectorResponseV201,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import type {
   V201HandlerResult,
   V201InboundContext,

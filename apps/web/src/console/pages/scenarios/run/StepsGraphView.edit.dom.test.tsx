@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { ScenarioNodeType } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import { ScenarioNodeType } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import { createEmptyScenario, insertStep } from "../../../lib/scenarioSteps";
 import { deriveStepLayout, type StepLayout } from "../../../lib/stepLayout";
 import { forkScenario } from "../../../test/scenarioFixtures";

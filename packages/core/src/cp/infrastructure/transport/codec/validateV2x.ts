@@ -1,6 +1,6 @@
-import { schemas } from "@ocpp-cp-sim/ocpp/index";
-import { strictValidationIssues } from "@ocpp-cp-sim/ocpp/validate";
-import { OCPPErrorCodeV201 } from "@ocpp-cp-sim/ocpp/enums";
+import { schemas } from "@ocpp-cp-simulator/ocpp/index";
+import { strictValidationIssues } from "@ocpp-cp-simulator/ocpp/validate";
+import { OCPPErrorCodeV201 } from "@ocpp-cp-simulator/ocpp/enums";
 import { OCPP_2_0_1, OCPP_2_1 } from "../../../domain/types/OcppVersion";
 import { requestSchemaKey } from "./requestSchemaKey";
 import { violationKind, type ViolationKind } from "./violationKind";

@@ -16,7 +16,7 @@ import {
   type TransactionChargingState,
   type TransactionEventTriggerReason,
   type TransactionStoppedReason,
-} from "@ocpp-cp-sim/contracts/transactionVocabulary";
+} from "@ocpp-cp-simulator/contracts/transactionVocabulary";
 
 // The vocabularies are defined in `packages/contracts/src` (#578); these re-exports keep
 // the old import path working.

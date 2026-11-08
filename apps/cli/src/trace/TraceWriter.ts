@@ -6,16 +6,19 @@
  */
 
 import * as fs from "fs";
-import { isSoapVersion } from "@ocpp-cp-sim/core/cp/domain/types/OcppVersion";
-import type { Logger } from "@ocpp-cp-sim/core/cp/shared/Logger";
-import { LogLevel, type LogEntry } from "@ocpp-cp-sim/core/cp/shared/Logger";
+import { isSoapVersion } from "@ocpp-cp-simulator/core/cp/domain/types/OcppVersion";
+import type { Logger } from "@ocpp-cp-simulator/core/cp/shared/Logger";
+import {
+  LogLevel,
+  type LogEntry,
+} from "@ocpp-cp-simulator/core/cp/shared/Logger";
 import {
   logLineToTraceRecord,
   parseInboundValidation,
   type SerializedLogLine,
-} from "@ocpp-cp-sim/trace/logEntryToTrace";
-import type { OcppTraceRecord } from "@ocpp-cp-sim/trace/OcppTraceRecord";
-import { TraceCorrelator } from "@ocpp-cp-sim/trace/TraceCorrelator";
+} from "@ocpp-cp-simulator/trace/logEntryToTrace";
+import type { OcppTraceRecord } from "@ocpp-cp-simulator/trace/OcppTraceRecord";
+import { TraceCorrelator } from "@ocpp-cp-simulator/trace/TraceCorrelator";
 
 export interface TraceWriterAttachContext {
   /** Charge point id stamped on every record from this subscription. */

@@ -4,16 +4,16 @@ import {
   ScenarioNodeType,
   type ScenarioDefinition,
   type ScenarioNode,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import type { ChargePoint } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
-import type { Database } from "@ocpp-cp-sim/core/cp/domain/persistence/Database";
-import { MAX_RUNS_PER_CP } from "@ocpp-cp-sim/core/cp/domain/persistence/ScenarioRunRepository";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import type { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
+import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
+import { MAX_RUNS_PER_CP } from "@ocpp-cp-simulator/core/cp/domain/persistence/ScenarioRunRepository";
 import {
   DefaultBootNotification,
   OCPPStatus,
-} from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
-import type { ChargePointEvent } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
-import { memoryDatabase } from "@ocpp-cp-sim/core/test/sqlJsMemoryDatabase";
+} from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
+import type { ChargePointEvent } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
+import { memoryDatabase } from "@ocpp-cp-simulator/core/test/sqlJsMemoryDatabase";
 import { LocalChargePointService } from "./LocalChargePointService";
 
 /**

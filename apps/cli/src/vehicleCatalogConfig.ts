@@ -2,7 +2,7 @@ import {
   KEY_OVER_PLAIN_HTTP_MESSAGE,
   keySafeOver,
   PUBLIC_OED_BASE_URL,
-} from "@ocpp-cp-sim/core/cp/infrastructure/vehicle-catalog/open-ev-directory/OpenEvDirectoryClient";
+} from "@ocpp-cp-simulator/core/cp/infrastructure/vehicle-catalog/open-ev-directory/OpenEvDirectoryClient";
 import { isHttpUrl } from "./soapCallbackUrl";
 
 /**

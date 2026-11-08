@@ -64,7 +64,7 @@ describe("loadFleetTemplateFiles (#445)", () => {
 describe("the shipped example (#445)", () => {
   it("is a valid fleet template that names real scenario templates", async () => {
     const { getTemplateById } =
-      await import("@ocpp-cp-sim/core/utils/scenarioTemplates");
+      await import("@ocpp-cp-simulator/core/utils/scenarioTemplates");
     const [lab] = loadFleetTemplateFiles([
       new URL(
         "../../../../../docs/examples/fleet-templates/operations-lab.json",

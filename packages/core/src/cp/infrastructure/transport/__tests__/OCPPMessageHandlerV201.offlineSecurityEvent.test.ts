@@ -12,9 +12,9 @@ import {
   CRITICAL_SECURITY_EVENT_TYPES,
   isCriticalSecurityEvent,
 } from "../../../domain/security/securityEvents";
-import { strictValidationErrors } from "@ocpp-cp-sim/ocpp/validate";
-import { v201Schemas } from "@ocpp-cp-sim/ocpp/v201/schemas";
-import { v21Schemas } from "@ocpp-cp-sim/ocpp/v21/schemas";
+import { strictValidationErrors } from "@ocpp-cp-simulator/ocpp/validate";
+import { v201Schemas } from "@ocpp-cp-simulator/ocpp/v201/schemas";
+import { v21Schemas } from "@ocpp-cp-simulator/ocpp/v21/schemas";
 
 /**
  * #552, OCPP 2.0.1 / 2.1 A04.FR.02 on the E11 queue (#528): a critical

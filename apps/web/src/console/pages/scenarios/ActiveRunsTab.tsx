@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useDataContext } from "@/data/providers/DataProvider";
 
-import type { ChargePointSnapshot } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+import type { ChargePointSnapshot } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 import Combobox, { type ComboboxOption } from "../../components/Combobox";
 import EmptyState from "../../components/EmptyState";
 import RunStatePill from "../../components/RunStatePill";

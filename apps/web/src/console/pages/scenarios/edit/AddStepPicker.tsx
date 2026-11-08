@@ -4,7 +4,7 @@ import { X } from "lucide-react";
 
 import { NODE_FORM_REGISTRY } from "../../../../components/scenario/forms/nodeFormRegistry";
 import { STEP_CATEGORIES } from "../../../lib/scenarioSteps";
-import type { ScenarioNodeType } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import type { ScenarioNodeType } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 
 export interface AddStepPickerProps {
   onPick: (type: ScenarioNodeType) => void;

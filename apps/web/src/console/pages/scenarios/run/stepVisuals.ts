@@ -14,7 +14,7 @@ import {
 import type {
   ScenarioNode,
   ScenarioNodeType,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import type { LiveRunState } from "../../../lib/scenarioRunState";
 import {
   stepPhase,

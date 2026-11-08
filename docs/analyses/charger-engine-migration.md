@@ -103,7 +103,7 @@ promise is asynchronous. The SOAP handler is untouched. Decisions the design lef
 ### Stage B: behavior API, registry, scenario 1.5, engine
 
 Status (stage B): the types are in `packages/contracts/src/behavior.ts` (import them as
-`@ocpp-cp-sim/contracts/behavior`; they are not re-exported from the package index, whose names would
+`@ocpp-cp-simulator/contracts/behavior`; they are not re-exported from the package index, whose names would
 collide). Decisions the design left open:
 
 - **`CallAnswer`** (what `onBusy` is) is a `CallOutcome` without `after`.
@@ -350,7 +350,7 @@ loading behavior code. Decisions the design left open:
   `Bun.build` with a plugin that lowers every project source with `ts.transpileModule` to ES2017 (Bun itself
   does not lower) and checks the syntax again for `.js` sources. The syntax check goes first because the ES2017
   library reports the same constructs as "cannot find name".
-- **ESLint config.** `@ocpp-cp-sim/contracts/eslint-behavior` (`packages/contracts/eslint/behavior.js`, plain
+- **ESLint config.** `@ocpp-cp-simulator/contracts/eslint-behavior` (`packages/contracts/eslint/behavior.js`, plain
   JavaScript so that a user's config can import it without a TypeScript loader). Syntax rules only: it needs the
   user's parser. Module-scope state is reported as `let` / `var`, `new Map|Set|WeakMap|WeakSet|Array|Object`,
   and an empty `[]` or `{}`; a non-empty constant table is allowed.

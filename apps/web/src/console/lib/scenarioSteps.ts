@@ -31,8 +31,8 @@ import {
   type StatusTriggerNodeData,
   type TransactionNodeData,
   type UnlockOutcomeNodeData,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 // Type-only: stepLayout imports this module's helpers at runtime.
 import type { StepLayout } from "./stepLayout";
 

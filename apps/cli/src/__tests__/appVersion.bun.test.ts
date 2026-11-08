@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 
 import { appVersion } from "../appVersion";
-import { LOCAL_DEV_VERSION } from "@ocpp-cp-sim/contracts/buildVersion";
+import { LOCAL_DEV_VERSION } from "@ocpp-cp-simulator/contracts/buildVersion";
 
 /**
  * GHCR release 0.7.5 reported `simulatorVersion: "0.0.0"` in every

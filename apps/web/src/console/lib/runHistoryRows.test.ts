@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import type { ScenarioRunSummary } from "@ocpp-cp-sim/core/cp/application/verification/ScenarioRunSummary";
-import { scenarioRunSummary } from "@ocpp-cp-sim/core/test/scenarioRunFixtures";
+import type { ScenarioRunSummary } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunSummary";
+import { scenarioRunSummary } from "@ocpp-cp-simulator/core/test/scenarioRunFixtures";
 import { mergeRunHistory, runRowKey, summaryToRow } from "./runHistoryRows";
 import type { ScenarioRunHistoryEntry } from "./useScenarioRun";
 

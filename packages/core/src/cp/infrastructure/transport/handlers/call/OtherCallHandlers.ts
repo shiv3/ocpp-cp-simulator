@@ -8,7 +8,7 @@ import type {
   TriggerMessageResponseV16,
   UnlockConnectorRequestV16,
   UnlockConnectorResponseV16,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import type { HandlerOutcome } from "../../network-sim/ResponseEffectQueue";
 import { REDACTED_VALUE } from "../../../../shared/redaction";
 import { LogType } from "../../../../shared/Logger";

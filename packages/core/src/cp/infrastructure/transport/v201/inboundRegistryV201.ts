@@ -2,7 +2,7 @@ import { stationNow } from "../stationNow";
 import type {
   FirmwareStatusNotificationRequestV201,
   LogStatusNotificationRequestV201,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import type {
   AuthorizeRequestV201,
   BootNotificationRequestV201,
@@ -28,7 +28,7 @@ import type {
   SignCertificateRequestV201,
   StatusNotificationRequestV201,
   TransactionEventRequestV201,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import {
   isValidCancelReservationRequestV201,
   isValidCertificateSignedRequestV201,
@@ -70,8 +70,8 @@ import {
   isValidUnlockConnectorRequestV201,
   isValidUnpublishFirmwareRequestV201,
   isValidUpdateFirmwareRequestV201,
-} from "@ocpp-cp-sim/ocpp/validation/v201/index";
-import type { ReportDataType } from "@ocpp-cp-sim/ocpp/types/v201/notify-report";
+} from "@ocpp-cp-simulator/ocpp/validation/v201/index";
+import type { ReportDataType } from "@ocpp-cp-simulator/ocpp/types/v201/notify-report";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { matchesComponentVariable } from "../../../domain/monitoring/selectMonitors";
 import type { SignedCertificateUse } from "../../../domain/security/certificateUse";

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { createStore } from "jotai";
-import type { ChargePoint } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
-import { DefaultBootNotification } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
-import { resolveNetworkSimConfig } from "@ocpp-cp-sim/core/cp/infrastructure/transport/network-sim/config";
+import type { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
+import { DefaultBootNotification } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
+import { resolveNetworkSimConfig } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/network-sim/config";
 import { LocalChargePointService } from "../local/LocalChargePointService";
 import type { LocalChargePointDefinition } from "../local/LocalChargePointService";
 

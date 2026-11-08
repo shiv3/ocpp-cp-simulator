@@ -1,50 +1,53 @@
 import * as fs from "fs";
 
-import type { ChargePointCapabilityProfile } from "@ocpp-cp-sim/core/cp/domain/charge-point/CapabilityProfile";
+import type { ChargePointCapabilityProfile } from "@ocpp-cp-simulator/core/cp/domain/charge-point/CapabilityProfile";
 import { CLIChargePointService } from "../service";
 import type { SessionSettledInfo } from "../service";
-import type { Behavior, JsonObject } from "@ocpp-cp-sim/contracts/behavior";
+import type {
+  Behavior,
+  JsonObject,
+} from "@ocpp-cp-simulator/contracts/behavior";
 import {
   behaviorFitProblem,
   behaviorShapeProblem,
-} from "@ocpp-cp-sim/core/cp/application/engine/behaviorFit";
+} from "@ocpp-cp-simulator/core/cp/application/engine/behaviorFit";
 import {
   BehaviorLibrary,
   BehaviorNotLoadableError,
   type ReplaceOutcome,
 } from "../behavior/BehaviorLibrary";
 import type { ChargePointInitOptions } from "../types";
-import type { AutoTrafficConfig } from "@ocpp-cp-sim/core/cp/domain/connector/AutoTraffic";
+import type { AutoTrafficConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/AutoTraffic";
 import type { EventBus } from "./eventBus";
-import type { Database } from "@ocpp-cp-sim/core/cp/domain/persistence/Database";
+import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
 import type { NetworkSimManager } from "./NetworkSimManager";
-import { OcppSecurityProfileConfigError } from "@ocpp-cp-sim/core/cp/infrastructure/transport/wsUrlWithBasic";
+import { OcppSecurityProfileConfigError } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/wsUrlWithBasic";
 import type {
   OcppSecurityProfile,
   OcppTlsOptions,
-} from "@ocpp-cp-sim/core/cp/infrastructure/transport/wsUrlWithBasic";
+} from "@ocpp-cp-simulator/core/cp/infrastructure/transport/wsUrlWithBasic";
 import { tlsKeyPermissionWarning } from "../tlsKeyPermissions";
 import { buildSoapCallbackUrl } from "../soapCallbackUrl";
 import { DEFAULT_SOAP_PATH } from "../soapPath";
-import { isSoapVersion } from "@ocpp-cp-sim/core/cp/domain/types/OcppVersion";
-import { perChargePointTables } from "@ocpp-cp-sim/core/cp/domain/persistence/schema";
-import { buildUpsert } from "@ocpp-cp-sim/core/cp/domain/persistence/upsert";
+import { isSoapVersion } from "@ocpp-cp-simulator/core/cp/domain/types/OcppVersion";
+import { perChargePointTables } from "@ocpp-cp-simulator/core/cp/domain/persistence/schema";
+import { buildUpsert } from "@ocpp-cp-simulator/core/cp/domain/persistence/upsert";
 import {
   labelsSchema,
   matchesLabelSelector,
   normalizeLabels,
   type Labels,
-} from "@ocpp-cp-sim/contracts/labels";
-import { transportConfigSchema } from "@ocpp-cp-sim/contracts/transportConfig";
-import type { ScenarioRunRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/ScenarioRunRepository";
-import { createScenarioRunRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/createScenarioRunRepository";
-import type { ChargingSessionRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/ChargingSessionRepository";
-import { createChargingSessionRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/createChargingSessionRepository";
+} from "@ocpp-cp-simulator/contracts/labels";
+import { transportConfigSchema } from "@ocpp-cp-simulator/contracts/transportConfig";
+import type { ScenarioRunRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/ScenarioRunRepository";
+import { createScenarioRunRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/createScenarioRunRepository";
+import type { ChargingSessionRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/ChargingSessionRepository";
+import { createChargingSessionRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/createChargingSessionRepository";
 import {
   InMemoryScenarioRepository,
   type ScenarioRepository,
-} from "@ocpp-cp-sim/core/cp/domain/persistence/ScenarioRepository";
-import { createScenarioRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/createScenarioRepository";
+} from "@ocpp-cp-simulator/core/cp/domain/persistence/ScenarioRepository";
+import { createScenarioRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/createScenarioRepository";
 
 /**
  * `updated`: a registered charge point's config changed — rebuilt by

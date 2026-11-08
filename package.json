@@ -29,6 +29,9 @@
     "apps/*"
   ],
   "bin": {
+    "ocpp-cp-simulator": "dist-cli/main.js",
+    "ocpsim": "dist-cli/main.js",
+    "cp-sim": "dist-cli/main.js",
     "ocpp-cp-sim": "dist-cli/main.js"
   },
   "files": [

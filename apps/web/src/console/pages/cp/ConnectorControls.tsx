@@ -2,12 +2,12 @@ import { useTranslation } from "react-i18next";
 import React, { useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import type { EVSettings } from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
+import type { EVSettings } from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
 import {
   FAULT_ERROR_CODES,
   OCPPStatus,
   type OCPPAvailability,
-} from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+} from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import { useDataContext } from "@/data/providers/DataProvider";
 import { cn } from "@/lib/utils";
 

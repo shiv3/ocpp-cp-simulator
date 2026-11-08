@@ -5,7 +5,7 @@ import {
   renderIdsExample,
   renderReadme,
 } from "../emit/render";
-import type { ScenarioJson } from "@ocpp-cp-sim/k6-runtime/types";
+import type { ScenarioJson } from "@ocpp-cp-simulator/k6-runtime/types";
 
 const LINE_SEPARATOR = "\u2028";
 const PARAGRAPH_SEPARATOR = "\u2029";

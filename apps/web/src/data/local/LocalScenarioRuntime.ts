@@ -1,16 +1,16 @@
 import {
   isAutoStartKeyOf,
   matchAutoStart,
-} from "@ocpp-cp-sim/core/cp/application/scenario/autoStart";
-import { ScenarioManager } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioManager";
-import { createScenarioExecutorCallbacks } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioRuntime";
-import type { ScenarioDefinition } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import type { ChargePoint } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
-import type { Connector } from "@ocpp-cp-sim/core/cp/domain/connector/Connector";
-import type { SqliteScenarioRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/SqliteScenarioRepository";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
-import type { ScenarioRunRecorder } from "@ocpp-cp-sim/core/cp/application/verification/ScenarioRunRecorder";
-import type { ChargePointEvent } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/autoStart";
+import { ScenarioManager } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioManager";
+import { createScenarioExecutorCallbacks } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioRuntime";
+import type { ScenarioDefinition } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import type { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
+import type { Connector } from "@ocpp-cp-simulator/core/cp/domain/connector/Connector";
+import type { SqliteScenarioRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/SqliteScenarioRepository";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
+import type { ScenarioRunRecorder } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunRecorder";
+import type { ChargePointEvent } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 
 type ScenarioDefinitionSource = Pick<
   SqliteScenarioRepository,

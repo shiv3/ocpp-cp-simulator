@@ -29,7 +29,7 @@ npm run dev
 ocpp-cp-sim --ws-url ws://localhost:9000/ocpp --cp-id CP001
 ```
 
-### Install as a global command (`ocpp-cp-sim`)
+### Install as a global command (`ocpp-cp-sim`; `ocpsim` and `cp-sim` are aliases)
 
 ```bash
 # pnpm (recommended)

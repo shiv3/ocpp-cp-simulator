@@ -1,7 +1,7 @@
 import {
   formatVersionLabel,
   resolveBuildVersion,
-} from "@ocpp-cp-sim/contracts/buildVersion";
+} from "@ocpp-cp-simulator/contracts/buildVersion";
 
 /**
  * The web console's own build identifier (classic footer, issue #93; web

@@ -13,10 +13,10 @@ import {
   type FakeChargePointService,
   type ReportedLocation,
 } from "../../test/harness";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
-import { LogLevel, LogType } from "@ocpp-cp-sim/core/cp/shared/Logger";
-import { activeChargingSession } from "@ocpp-cp-sim/core/test/chargingSessionFixtures";
-import type { ChargePointSnapshot } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
+import { LogLevel, LogType } from "@ocpp-cp-simulator/core/cp/shared/Logger";
+import { activeChargingSession } from "@ocpp-cp-simulator/core/test/chargingSessionFixtures";
+import type { ChargePointSnapshot } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 
 function connector(
   overrides: Partial<ChargePointSnapshot["connectors"][number]> & {

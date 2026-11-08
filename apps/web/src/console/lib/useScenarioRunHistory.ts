@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ScenarioRunPage,
   ScenarioRunQuery,
-} from "@ocpp-cp-sim/core/cp/application/verification/ScenarioRunSummary";
+} from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunSummary";
 import { canSubscribeRegistry } from "../../data/hooks/useChargePoints";
 import { useDataContext } from "../../data/providers/DataProvider";
 import { STATUS_REFRESH_DEBOUNCE_MS } from "./scenarioRunState";

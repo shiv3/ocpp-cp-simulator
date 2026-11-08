@@ -1,8 +1,8 @@
 import { t } from "../../i18n";
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 
-import type { VehicleProfile } from "@ocpp-cp-sim/core/cp/domain/vehicle/VehicleProfile";
-import type { ChargePointService } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+import type { VehicleProfile } from "@ocpp-cp-simulator/core/cp/domain/vehicle/VehicleProfile";
+import type { ChargePointService } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 import { useDataContext } from "../providers/DataProvider";
 
 /**

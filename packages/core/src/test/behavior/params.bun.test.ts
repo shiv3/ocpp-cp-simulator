@@ -2,7 +2,7 @@
 // arm-time validation that refuses and never coerces, schema 1.6 useBehavior
 // params / mode, and the params of the built-in defaults.
 import { afterEach, describe, expect, test } from "bun:test";
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
 import { runBehavior, type BehaviorRun } from "./runBehavior";
 import { answerTo, definition, startScenario, type Step } from "./runScenario";
 

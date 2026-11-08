@@ -7,13 +7,13 @@ import { createEmptyScenario, insertStep } from "../../../lib/scenarioSteps";
 import {
   ScenarioNodeType,
   type ScenarioDefinition,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import type { ScenarioRunResult } from "@ocpp-cp-sim/core/cp/application/verification/ScenarioAssertions";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import type { ScenarioRunResult } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioAssertions";
 import {
   summarizeRun,
   type ScenarioRunSummary,
-} from "@ocpp-cp-sim/core/cp/application/verification/ScenarioRunSummary";
-import { scenarioRunResult } from "@ocpp-cp-sim/core/test/scenarioRunFixtures";
+} from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunSummary";
+import { scenarioRunResult } from "@ocpp-cp-simulator/core/test/scenarioRunFixtures";
 import {
   createFakeChargePointService,
   flush,

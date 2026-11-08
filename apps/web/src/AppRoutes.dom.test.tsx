@@ -19,8 +19,8 @@ import {
 import { AppRoutes } from "./App";
 import { createEmptyScenario, insertStep } from "./console/lib/scenarioSteps";
 import { createFakeChargePointService } from "./console/test/harness";
-import { ScenarioNodeType } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import { ScenarioNodeType } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import { DataContext } from "./data/providers/DataProvider";
 
 type Mode = "local" | "remote";

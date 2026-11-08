@@ -6,7 +6,7 @@ import {
   identitiesOfVu,
   parseDurationMs,
   stopAtMs,
-} from "@ocpp-cp-sim/k6-runtime/behaviorRun";
+} from "@ocpp-cp-simulator/k6-runtime/behaviorRun";
 
 vi.mock("k6", () => ({ check: () => true }));
 vi.mock("k6/websockets", () => ({ WebSocket: class {} }));

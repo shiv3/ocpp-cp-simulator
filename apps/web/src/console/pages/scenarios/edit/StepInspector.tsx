@@ -14,11 +14,11 @@ import {
   applyCurveConfigToMeterNode,
   meterNodeToCurveConfig,
 } from "../../../../components/scenario/meterValueNodeConfig";
-import type { AutoMeterValueConfig } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
+import type { AutoMeterValueConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
 import type {
   ScenarioNode,
   ScenarioNodeData,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import EmptyState from "../../../components/EmptyState";
 
 // Lazy + Suspense, matching how the v2 ReactFlow editor

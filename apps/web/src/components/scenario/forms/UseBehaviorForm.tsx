@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import type { JsonObject } from "@ocpp-cp-sim/contracts/behavior";
+import type { JsonObject } from "@ocpp-cp-simulator/contracts/behavior";
 import BehaviorParamsForm from "./BehaviorParamsForm";
 import { useBehaviorParamsCatalog } from "./behaviorCatalog";
 import { JsonTextareaField, SelectField, TextField } from "./FormFields";

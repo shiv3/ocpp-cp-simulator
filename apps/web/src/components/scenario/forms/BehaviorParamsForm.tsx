@@ -4,7 +4,7 @@ import type {
   JsonObject,
   JsonValue,
   ParamsSchema,
-} from "@ocpp-cp-sim/contracts/behavior";
+} from "@ocpp-cp-simulator/contracts/behavior";
 import {
   CheckboxField,
   JsonTextareaField,

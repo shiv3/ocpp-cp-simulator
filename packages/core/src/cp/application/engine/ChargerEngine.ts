@@ -11,7 +11,7 @@ import type {
   JsonValue,
   RandomStream,
   TransactionEvent,
-} from "@ocpp-cp-sim/contracts/behavior";
+} from "@ocpp-cp-simulator/contracts/behavior";
 import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
 import type { Connector } from "../../domain/connector/Connector";
 import type {

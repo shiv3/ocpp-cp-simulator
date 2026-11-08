@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next";
 import React, { memo } from "react";
 import type { NodeProps } from "@xyflow/react";
 import { Handle, Position, type Node } from "@xyflow/react";
-import type { UseBehaviorNodeData } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import type { UseBehaviorNodeData } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 
 /** Schema 1.5 (#566): uses a behavior loaded on the station. */
 const UseBehaviorNode: React.FC<NodeProps<Node<UseBehaviorNodeData>>> = ({

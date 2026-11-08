@@ -6,9 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   SimulatorConfigInput,
   WireSimulatorConfig,
-} from "@ocpp-cp-sim/contracts/index";
-import type { ChargePointService } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
-import { getConfigBasicAuthPassword } from "@ocpp-cp-sim/client/configPort";
+} from "@ocpp-cp-simulator/contracts/index";
+import type { ChargePointService } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
+import { getConfigBasicAuthPassword } from "@ocpp-cp-simulator/client/configPort";
 import { useConfig } from "./useConfig";
 
 type ConfigOnlyService = Pick<

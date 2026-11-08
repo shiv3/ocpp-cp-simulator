@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { DataContext } from "@/data/providers/DataProvider";
-import { getOcppCallCatalog } from "@ocpp-cp-sim/core/cp/infrastructure/transport/codec/ocppCallCatalog";
+import { getOcppCallCatalog } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/codec/ocppCallCatalog";
 import {
   createFakeChargePointService,
   flush,

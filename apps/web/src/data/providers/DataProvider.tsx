@@ -11,12 +11,12 @@ import type { ReactNode } from "react";
 import { Provider as JotaiProvider } from "jotai";
 import { createStore } from "jotai/vanilla";
 
-import type { RuntimeMode } from "@ocpp-cp-sim/client/RuntimeMode";
+import type { RuntimeMode } from "@ocpp-cp-simulator/client/RuntimeMode";
 import { HEALTH_PATH } from "../healthPath";
-import type { ChargePointService } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+import type { ChargePointService } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 import { LocalChargePointService } from "../local/LocalChargePointService";
-import { RemoteChargePointService } from "@ocpp-cp-sim/client/remote/RemoteChargePointService";
-import type { Database } from "@ocpp-cp-sim/core/cp/domain/persistence/Database";
+import { RemoteChargePointService } from "@ocpp-cp-simulator/client/remote/RemoteChargePointService";
+import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
 // SqlJsDatabase intentionally NOT imported eagerly — see the mode-gated
 // dynamic import below. Remote mode never needs it, so we keep the
 // ~650 KB WASM wrapper out of that path entirely.
@@ -24,14 +24,14 @@ import {
   type EVSettings,
   defaultEVSettings,
   setUserDefaultEVSettings,
-} from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
+} from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
 import {
   loadActiveDaemon,
   loadSavedDaemons,
   normalizeDaemonUrl,
   storeActiveDaemon,
 } from "../savedDaemons";
-import { withNormalizedChargingCurve } from "@ocpp-cp-sim/core/cp/domain/connector/ChargingCurve";
+import { withNormalizedChargingCurve } from "@ocpp-cp-simulator/core/cp/domain/connector/ChargingCurve";
 
 const DEFAULT_EV_STORAGE_KEY = "ocpp-cp.default-ev-settings";
 const DEFAULT_SERVER_URL = "http://127.0.0.1:9700";

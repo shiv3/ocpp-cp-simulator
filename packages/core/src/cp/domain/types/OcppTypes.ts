@@ -1,13 +1,13 @@
-import type { OCPPErrorCodeV16 } from "@ocpp-cp-sim/ocpp/index";
+import type { OCPPErrorCodeV16 } from "@ocpp-cp-simulator/ocpp/index";
 import {
   type BootNotificationRequestV16,
   type ReserveNowRequestV16,
   type ReserveNowResponseV16,
   type CancelReservationRequestV16,
   type CancelReservationResponseV16,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import { LogLevel, LogType } from "../../shared/Logger";
-import { OCPPStatus } from "@ocpp-cp-sim/contracts/connectorStatus";
+import { OCPPStatus } from "@ocpp-cp-simulator/contracts/connectorStatus";
 
 // Defined in `packages/contracts/src` (#578); re-exported for the existing import sites.
 export { OCPPStatus };

@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import { parseCreateBody } from "../httpServer";
-import { createParamsSchema } from "@ocpp-cp-sim/contracts/index";
+import { createParamsSchema } from "@ocpp-cp-simulator/contracts/index";
 import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
 import { createRuntimeDeps } from "../socketServer";
-import { BunSqliteDatabase } from "@ocpp-cp-sim/core/cp/domain/persistence/BunSqliteDatabase";
-import { ChargePoint } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
-import { DefaultBootNotification } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
-import { UnsupportedWsOptionError } from "@ocpp-cp-sim/core/cp/shared/WsClientOptions";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/domain/persistence/BunSqliteDatabase";
+import { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
+import { DefaultBootNotification } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
+import { UnsupportedWsOptionError } from "@ocpp-cp-simulator/core/cp/shared/WsClientOptions";
 
 // #611 on Bun: handshakeTimeoutMs, perMessageDeflate and proxy are honoured;
 // maxPayloadBytes and localAddress are not and are refused, never ignored.

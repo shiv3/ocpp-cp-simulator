@@ -1,12 +1,12 @@
 {
-  "name": "@ocpp-cp-sim/web",
+  "name": "@ocpp-cp-simulator/web",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "dependencies": {
-    "@ocpp-cp-sim/client": "workspace:*",
-    "@ocpp-cp-sim/contracts": "workspace:*",
-    "@ocpp-cp-sim/core": "workspace:*",
-    "@ocpp-cp-sim/trace": "workspace:*"
+    "@ocpp-cp-simulator/client": "workspace:*",
+    "@ocpp-cp-simulator/contracts": "workspace:*",
+    "@ocpp-cp-simulator/core": "workspace:*",
+    "@ocpp-cp-simulator/trace": "workspace:*"
   }
 }

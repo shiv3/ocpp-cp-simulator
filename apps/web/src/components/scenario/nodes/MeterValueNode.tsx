@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next";
 import React, { memo, useContext } from "react";
 import type { NodeProps } from "@xyflow/react";
 import { Handle, Position, type Node } from "@xyflow/react";
-import type { MeterValueNodeData } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import type { MeterValueNodeData } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import { LiveMeterReadingContext } from "./liveMeterReading";
 
 type ExtendedMeterValueNodeData = MeterValueNodeData & {

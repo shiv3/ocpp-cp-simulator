@@ -1,7 +1,7 @@
-import type { AutoTrafficConfig } from "@ocpp-cp-sim/core/cp/domain/connector/AutoTraffic";
-import type { AutoMeterValueConfig } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
-import type { ActiveChargingProfile } from "@ocpp-cp-sim/core/cp/domain/connector/Connector";
-import type { OCPPAvailability } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import type { AutoTrafficConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/AutoTraffic";
+import type { AutoMeterValueConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
+import type { ActiveChargingProfile } from "@ocpp-cp-simulator/core/cp/domain/connector/Connector";
+import type { OCPPAvailability } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 
 export interface ConnectorSettingsRepository {
   loadAutoMeterValueConfig(

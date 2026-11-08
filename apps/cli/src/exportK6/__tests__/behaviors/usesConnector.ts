@@ -1,5 +1,5 @@
 // Test input of export-k6 --behavior: a snapshot the k6 host cannot give.
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
 
 export default {
   api: 1,

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "bun:test";
-import type { NotifyReportRequestV201 } from "@ocpp-cp-sim/ocpp/index";
-import type { ReportDataType } from "@ocpp-cp-sim/ocpp/types/v201/notify-report";
-import { isValidNotifyReportRequestV201 } from "@ocpp-cp-sim/ocpp/v201/index";
+import type { NotifyReportRequestV201 } from "@ocpp-cp-simulator/ocpp/index";
+import type { ReportDataType } from "@ocpp-cp-simulator/ocpp/types/v201/notify-report";
+import { isValidNotifyReportRequestV201 } from "@ocpp-cp-simulator/ocpp/v201/index";
 import { startMockCsms, normalizeTranscript } from "./mockCsms";
 import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";

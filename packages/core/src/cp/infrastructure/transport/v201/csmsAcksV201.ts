@@ -11,7 +11,7 @@ import type {
   SetDisplayMessageResponseV201,
   SetNetworkProfileResponseV201,
   UnpublishFirmwareResponseV201,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import type {
   V201HandlerResult,
   V201InboundContext,
@@ -21,8 +21,8 @@ import type {
   SendLocalListItem,
   SendLocalListStatus,
 } from "../../../domain/auth/LocalAuthList";
-import type { AuthorizationStatusEnumType } from "@ocpp-cp-sim/ocpp/v201/types/send-local-list-request";
-import type { SendLocalListStatusEnumType } from "@ocpp-cp-sim/ocpp/v201/types/send-local-list-response";
+import type { AuthorizationStatusEnumType } from "@ocpp-cp-simulator/ocpp/v201/types/send-local-list-request";
+import type { SendLocalListStatusEnumType } from "@ocpp-cp-simulator/ocpp/v201/types/send-local-list-response";
 
 type V201AckHandler = (
   payload: unknown,

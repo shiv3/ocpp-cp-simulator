@@ -4,7 +4,7 @@ import {
   TIMELINE_DEFAULT_CAPACITY,
   type TimelineEntry,
   type TimelinePage,
-} from "@ocpp-cp-sim/core/cp/application/services/OperationalTimeline";
+} from "@ocpp-cp-simulator/core/cp/application/services/OperationalTimeline";
 import { useDataContext } from "../../data/providers/DataProvider";
 
 const EMPTY_PAGE: TimelinePage = { entries: [], total: 0 };

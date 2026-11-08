@@ -2,9 +2,9 @@ import {
   actionValidatorV16,
   schemas,
   validationErrors,
-} from "@ocpp-cp-sim/ocpp/index";
-import { strictValidationIssues } from "@ocpp-cp-sim/ocpp/validate";
-import { OCPPErrorCodeV16 } from "@ocpp-cp-sim/ocpp/enums";
+} from "@ocpp-cp-simulator/ocpp/index";
+import { strictValidationIssues } from "@ocpp-cp-simulator/ocpp/validate";
+import { OCPPErrorCodeV16 } from "@ocpp-cp-simulator/ocpp/enums";
 import { requestSchemaKey } from "./requestSchemaKey";
 import { violationKind, type ViolationKind } from "./violationKind";
 

@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { SelectField, TextField } from "./FormFields";
 import type { NodeFormComponentProps, NodeFormData } from "./types";
-import { CERT_SIGNATURE_ALGORITHMS } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import { CERT_SIGNATURE_ALGORITHMS } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 
 const DEFAULT_MODE = "set";
 // Unset quirks must render as "(none)": defaulting the selects to a real

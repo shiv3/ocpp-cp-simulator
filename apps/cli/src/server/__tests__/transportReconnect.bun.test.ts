@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { parseCreateBody } from "../httpServer";
-import { createParamsSchema } from "@ocpp-cp-sim/contracts/index";
+import { createParamsSchema } from "@ocpp-cp-simulator/contracts/index";
 import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
 import { createRuntimeDeps } from "../socketServer";
-import { BunSqliteDatabase } from "@ocpp-cp-sim/core/cp/domain/persistence/BunSqliteDatabase";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/domain/persistence/BunSqliteDatabase";
 
 // #609: `transport.reconnect` travels cp.create → facade → charge point →
 // registry row → restore, and a typo is refused rather than ignored.

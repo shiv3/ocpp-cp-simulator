@@ -1,4 +1,4 @@
-import type { JsonValue } from "@ocpp-cp-sim/contracts/behavior";
+import type { JsonValue } from "@ocpp-cp-simulator/contracts/behavior";
 import {
   reduceConnectorRecord,
   type ConnectorRecord,

@@ -4,8 +4,8 @@ import type { Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { appBuildLabel } from "@/lib/appBuildLabel";
-import type { ServerInfo } from "@ocpp-cp-sim/contracts/index";
-import type { RemoteConnectionState } from "@ocpp-cp-sim/client/remote/RemoteChargePointService";
+import type { ServerInfo } from "@ocpp-cp-simulator/contracts/index";
+import type { RemoteConnectionState } from "@ocpp-cp-simulator/client/remote/RemoteChargePointService";
 import {
   createFakeChargePointService,
   flush,

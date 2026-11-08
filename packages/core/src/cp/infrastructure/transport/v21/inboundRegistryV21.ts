@@ -29,7 +29,7 @@ import {
   type UpdateDynamicScheduleResponseV21,
   type UsePriorityChargingRequestV21,
   type UsePriorityChargingResponseV21,
-} from "@ocpp-cp-sim/ocpp/v21/index";
+} from "@ocpp-cp-simulator/ocpp/v21/index";
 import {
   buildV201InboundRegistry,
   type V201HandlerResult,

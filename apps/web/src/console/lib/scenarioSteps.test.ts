@@ -17,8 +17,8 @@ import {
   ScenarioNodeType,
   type ScenarioDefinition,
   type ScenarioNode,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import type { Edge } from "@xyflow/react";
 import { NODE_FORM_REGISTRY } from "../../components/scenario/forms/nodeFormRegistry";
 

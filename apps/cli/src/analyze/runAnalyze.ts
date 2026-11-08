@@ -19,7 +19,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { splitTraceJsonl } from "./splitTrace";
 import { fetchStoredLogs } from "../client";
-import { logLinesToTrace } from "@ocpp-cp-sim/trace/logEntryToTrace";
+import { logLinesToTrace } from "@ocpp-cp-simulator/trace/logEntryToTrace";
 import { DEFAULT_HTTP_PORT } from "../server/constants";
 import type { AnalysisResult } from "@ocpp-debugkit/toolkit/reporter";
 
@@ -54,7 +54,7 @@ async function fetchDaemonTraceJsonl(opts: AnalyzeOptions): Promise<string> {
 // 8) -- moved to a browser-safe module (no node imports) so both surfaces
 // use the same verbatim text; re-exported here so existing imports of
 // `ANALYZE_DISCLAIMER` from this module keep working unchanged.
-import { ANALYZE_DISCLAIMER } from "@ocpp-cp-sim/trace/analysisDisclaimer";
+import { ANALYZE_DISCLAIMER } from "@ocpp-cp-simulator/trace/analysisDisclaimer";
 export { ANALYZE_DISCLAIMER };
 
 export interface AnalyzeOptions {

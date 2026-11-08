@@ -1,7 +1,7 @@
 import type {
   SetVariablesRequestV201,
   SetVariablesResponseV201,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import type {
   ConfigurationChangeStatus,
   ConfigurationStore,

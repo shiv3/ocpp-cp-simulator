@@ -7,9 +7,9 @@ import type { ChargePointInitOptions, SoapTunnelConfig } from "../types";
 import {
   matchesLabelSelector,
   type Labels,
-} from "@ocpp-cp-sim/contracts/labels";
-import type { ScenarioDefinition } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import { validateScenarioSchema } from "@ocpp-cp-sim/core/scenario/scenarioSchemaValidator";
+} from "@ocpp-cp-simulator/contracts/labels";
+import type { ScenarioDefinition } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import { validateScenarioSchema } from "@ocpp-cp-simulator/core/scenario/scenarioSchemaValidator";
 import { BehaviorLibrary } from "../behavior/BehaviorLibrary";
 import { CPRegistry } from "./CPRegistry";
 import { NetworkSimManager } from "./NetworkSimManager";
@@ -28,9 +28,9 @@ import {
 } from "./socketServer";
 import { createMcpHandler } from "./mcp/mcpServer";
 import { RegistryChargePointService } from "./RegistryChargePointService";
-import { BunSqliteDatabase } from "@ocpp-cp-sim/core/cp/domain/persistence/BunSqliteDatabase";
-import type { Database } from "@ocpp-cp-sim/core/cp/domain/persistence/Database";
-import { SqliteConnectorSettingsRepository } from "@ocpp-cp-sim/client/sqlite/SqliteConnectorSettingsRepository";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/domain/persistence/BunSqliteDatabase";
+import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
+import { SqliteConnectorSettingsRepository } from "@ocpp-cp-simulator/client/sqlite/SqliteConnectorSettingsRepository";
 import {
   createAccessGuard,
   DEFAULT_RATE_LIMIT_MAX_IPS,
@@ -38,8 +38,8 @@ import {
   type AccessGuardOptions,
 } from "./accessGuard";
 import { stopTransactionsAndWait } from "./gracefulShutdown";
-import { getGlobalLogFormat } from "@ocpp-cp-sim/core/cp/shared/Logger";
-import { expandIdPattern } from "@ocpp-cp-sim/contracts/index";
+import { getGlobalLogFormat } from "@ocpp-cp-simulator/core/cp/shared/Logger";
+import { expandIdPattern } from "@ocpp-cp-simulator/contracts/index";
 import {
   localHostForTunnel,
   soapTunnelStartupLines,
@@ -52,13 +52,13 @@ import {
   setGlobalMetricsRecorder,
 } from "./metrics/MetricsRecorder";
 import { renderMetrics } from "./metrics/render";
-import { VehicleProfileRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/VehicleProfileRepository";
-import { OpenEvDirectoryClient } from "@ocpp-cp-sim/core/cp/infrastructure/vehicle-catalog/open-ev-directory/OpenEvDirectoryClient";
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import { VehicleProfileRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/VehicleProfileRepository";
+import { OpenEvDirectoryClient } from "@ocpp-cp-simulator/core/cp/infrastructure/vehicle-catalog/open-ev-directory/OpenEvDirectoryClient";
+import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
 import type { VehicleCatalogConfig } from "../vehicleCatalogConfig";
-import { FleetTemplateRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/FleetTemplateRepository";
-import type { FleetTemplate } from "@ocpp-cp-sim/contracts/index";
-import { BlueprintRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/BlueprintRepository";
+import { FleetTemplateRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/FleetTemplateRepository";
+import type { FleetTemplate } from "@ocpp-cp-simulator/contracts/index";
+import { BlueprintRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/BlueprintRepository";
 import { FileReloadManager } from "./FileReloadManager";
 import { forgetWatchedScenarioFile } from "./watchedScenarioFiles";
 import {
@@ -67,13 +67,13 @@ import {
   loadWithStartupProvenance,
 } from "./startupScenarioRows";
 import { scenarioInstanceId } from "../scenarioInstanceId";
-import { LEGACY_STARTUP_SOURCE_PREFIX } from "@ocpp-cp-sim/core/cp/domain/persistence/legacyStartupInstances";
+import { LEGACY_STARTUP_SOURCE_PREFIX } from "@ocpp-cp-simulator/core/cp/domain/persistence/legacyStartupInstances";
 import {
   DEFAULT_BOOTSTRAP_PACING,
   forEachPaced,
   type BootstrapPacing,
 } from "./bootstrapPacing";
-import { getTemplateById } from "@ocpp-cp-sim/core/utils/scenarioTemplates";
+import { getTemplateById } from "@ocpp-cp-simulator/core/utils/scenarioTemplates";
 import * as path from "path";
 
 /**

@@ -1,8 +1,8 @@
-import type { ScenarioDefinition } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import type { ChargePointService } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
-import type { RuntimeMode } from "@ocpp-cp-sim/client/RuntimeMode";
+import type { ScenarioDefinition } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import type { ChargePointService } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
+import type { RuntimeMode } from "@ocpp-cp-simulator/client/RuntimeMode";
 import { serializeScenarioGraph } from "./scenarioSerialize";
-import { withNormalizedChargingCurve } from "@ocpp-cp-sim/core/cp/domain/connector/ChargingCurve";
+import { withNormalizedChargingCurve } from "@ocpp-cp-simulator/core/cp/domain/connector/ChargingCurve";
 
 export interface SaveEditorScenarioDeps {
   mode: RuntimeMode;

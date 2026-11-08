@@ -9,14 +9,14 @@ import {
   OCPP16_DIALECT,
   OCPP16_SOAP_NAMESPACES,
   parseSoapEnvelope,
-} from "@ocpp-cp-sim/core/cp/infrastructure/transport/soap/index";
+} from "@ocpp-cp-simulator/core/cp/infrastructure/transport/soap/index";
 import type {
   ParsedSoapEnvelope,
   SoapDialect,
   SoapOperation,
   SoapOperationMetadata,
   SoapPayload,
-} from "@ocpp-cp-sim/core/cp/infrastructure/transport/soap/index";
+} from "@ocpp-cp-simulator/core/cp/infrastructure/transport/soap/index";
 import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
 import { createHttpHandlers } from "../httpServer";

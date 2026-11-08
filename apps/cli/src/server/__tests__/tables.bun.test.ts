@@ -1,14 +1,14 @@
 // Runs under `bun test`: the cleanup-path cases use the `bun:sqlite` built-in.
 import { describe, it, expect } from "bun:test";
 
-import { BunSqliteDatabase } from "@ocpp-cp-sim/core/cp/domain/persistence/BunSqliteDatabase";
-import { resetSimulatorState } from "@ocpp-cp-sim/core/cp/domain/persistence/resetState";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/domain/persistence/BunSqliteDatabase";
+import { resetSimulatorState } from "@ocpp-cp-simulator/core/cp/domain/persistence/resetState";
 import {
   SCHEMA_SQL,
   TABLES,
   perChargePointTables,
   tablesResetOnStateReset,
-} from "@ocpp-cp-sim/core/cp/domain/persistence/schema";
+} from "@ocpp-cp-simulator/core/cp/domain/persistence/schema";
 import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
 

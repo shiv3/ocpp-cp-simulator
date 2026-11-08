@@ -6,7 +6,7 @@ import { RefreshCw } from "lucide-react";
 import type {
   TimelineEntry,
   TimelineKind,
-} from "@ocpp-cp-sim/core/cp/application/services/OperationalTimeline";
+} from "@ocpp-cp-simulator/core/cp/application/services/OperationalTimeline";
 import { cn } from "@/lib/utils";
 
 import EmptyState from "../../components/EmptyState";

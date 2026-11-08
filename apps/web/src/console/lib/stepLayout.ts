@@ -8,7 +8,7 @@ import {
   type ScenarioDefinition,
   type ScenarioNode,
   ScenarioNodeType,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import i18n from "../../i18n";
 import { isLiveRunState } from "./scenarioRunState";
 import { createDefaultNode, deriveLinearSteps } from "./scenarioSteps";

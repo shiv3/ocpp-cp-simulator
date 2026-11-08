@@ -17,7 +17,7 @@
 // WebSocket, which is not included.
 import { heapStats } from "bun:jsc";
 import path from "node:path";
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
 import { ChargePoint } from "../../packages/core/src/cp/domain/charge-point/ChargePoint.ts";
 import {
   VirtualClock,

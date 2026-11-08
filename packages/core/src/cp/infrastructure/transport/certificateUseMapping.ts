@@ -6,7 +6,7 @@ import type {
   InstallCertificateRequestV16,
   InstallCertificateRequestV201,
   InstallCertificateRequestV21,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import type {
   InstalledCertificateQuery,
   RootCertificateUse,

@@ -1,4 +1,4 @@
-import { MAX_SESSIONS_PER_CP } from "@ocpp-cp-sim/contracts/chargingSession";
+import { MAX_SESSIONS_PER_CP } from "@ocpp-cp-simulator/contracts/chargingSession";
 import type {
   ChargingSession,
   ChargingSessionOutcome,

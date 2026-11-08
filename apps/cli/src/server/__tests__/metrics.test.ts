@@ -2,15 +2,15 @@ import { describe, expect, it } from "vitest";
 
 import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
-import { Logger, LogType } from "@ocpp-cp-sim/core/cp/shared/Logger";
+import { Logger, LogType } from "@ocpp-cp-simulator/core/cp/shared/Logger";
 import {
   CALL_DURATION_BUCKETS_SECONDS,
   MetricsRecorder,
   RECONNECT_ATTEMPT_PREFIX,
 } from "../metrics/MetricsRecorder";
 import { renderMetrics } from "../metrics/render";
-import { emptyAutoTrafficCounters } from "@ocpp-cp-sim/core/cp/domain/connector/AutoTraffic";
-import type { OcppTraceRecord } from "@ocpp-cp-sim/trace/OcppTraceRecord";
+import { emptyAutoTrafficCounters } from "@ocpp-cp-simulator/core/cp/domain/connector/AutoTraffic";
+import type { OcppTraceRecord } from "@ocpp-cp-simulator/trace/OcppTraceRecord";
 
 function call(
   action: string,

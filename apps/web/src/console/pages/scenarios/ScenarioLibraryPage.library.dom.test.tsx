@@ -17,15 +17,15 @@ import {
 } from "../../test/scenarioStore";
 import { LIBRARY_SCOPE, libraryCopyId } from "../../lib/scenarioLibrary";
 import { createEmptyScenario, insertStep } from "../../lib/scenarioSteps";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import {
   ScenarioNodeType,
   type ScenarioDefinition,
   type ScenarioExecutionContext,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import type { ChargePointSnapshot } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
-import { scenarioTemplates } from "@ocpp-cp-sim/core/utils/scenarioTemplates";
-import statusTriggeredActions from "@ocpp-cp-sim/core/utils/scenarios/status-triggered-actions.json";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import type { ChargePointSnapshot } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
+import { scenarioTemplates } from "@ocpp-cp-simulator/core/utils/scenarioTemplates";
+import statusTriggeredActions from "@ocpp-cp-simulator/core/utils/scenarios/status-triggered-actions.json";
 
 function connector(id: number): ChargePointSnapshot["connectors"][number] {
   return {

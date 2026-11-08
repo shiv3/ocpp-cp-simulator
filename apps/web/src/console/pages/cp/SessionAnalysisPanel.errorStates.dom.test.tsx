@@ -45,12 +45,12 @@ import {
   renderConsole,
   type FakeChargePointService,
 } from "../../test/harness";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import type {
   ChargePointService,
   ChargePointSnapshot,
   StoredLogEntry,
-} from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+} from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 
 /** See SessionAnalysisPanel.dom.test.tsx for why `getStateHistory` is
  *  stubbed on every service built here. */

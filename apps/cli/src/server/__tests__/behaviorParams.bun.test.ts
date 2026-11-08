@@ -2,8 +2,8 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import type { Socket } from "socket.io-client";
 
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
-import { BunSqliteDatabase } from "@ocpp-cp-sim/core/cp/domain/persistence/BunSqliteDatabase";
+import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/domain/persistence/BunSqliteDatabase";
 import { BehaviorLibrary } from "../../behavior/BehaviorLibrary";
 import {
   connectTestClient,

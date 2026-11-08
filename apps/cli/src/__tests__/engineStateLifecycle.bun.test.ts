@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import type { ChargerEngine } from "@ocpp-cp-sim/core/cp/application/engine/ChargerEngine";
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
-import { BunSqliteDatabase } from "@ocpp-cp-sim/core/cp/domain/persistence/BunSqliteDatabase";
-import { runMigrations } from "@ocpp-cp-sim/core/cp/domain/persistence/schema";
+import type { ChargerEngine } from "@ocpp-cp-simulator/core/cp/application/engine/ChargerEngine";
+import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/domain/persistence/BunSqliteDatabase";
+import { runMigrations } from "@ocpp-cp-simulator/core/cp/domain/persistence/schema";
 import { CLIChargePointService } from "../service";
 import { CPRegistry } from "../server/CPRegistry";
 import { EventBus } from "../server/eventBus";

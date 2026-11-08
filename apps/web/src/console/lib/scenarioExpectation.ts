@@ -1,5 +1,5 @@
 import { t } from "../../i18n";
-import type { ScenarioExpectation } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import type { ScenarioExpectation } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 
 /** `m:ss` for a duration in ms (negative clamps to 0:00). */
 export function formatElapsed(ms: number): string {

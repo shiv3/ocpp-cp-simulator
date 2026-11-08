@@ -4,21 +4,21 @@ import {
   ScenarioNodeType,
   type ScenarioDefinition,
   type ScenarioNode,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import type { ChargePoint } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
-import { buildSampledValues } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueBuilder";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import type { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
+import { buildSampledValues } from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueBuilder";
 import {
   DefaultBootNotification,
   OCPPStatus,
-} from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
-import { profileFromCatalog } from "@ocpp-cp-sim/core/cp/domain/vehicle/importProfile";
+} from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
+import { profileFromCatalog } from "@ocpp-cp-simulator/core/cp/domain/vehicle/importProfile";
 import {
   applyVehicleSettings,
   resolveEvSettings,
-} from "@ocpp-cp-sim/core/cp/domain/vehicle/VehicleProfile";
-import { OpenEvDirectoryClient } from "@ocpp-cp-sim/core/cp/infrastructure/vehicle-catalog/open-ev-directory/OpenEvDirectoryClient";
-import id7Curves from "@ocpp-cp-sim/core/cp/infrastructure/vehicle-catalog/open-ev-directory/__fixtures__/id7GtxChargingCurves.json";
-import id7Variant from "@ocpp-cp-sim/core/cp/infrastructure/vehicle-catalog/open-ev-directory/__fixtures__/id7GtxVariant.json";
+} from "@ocpp-cp-simulator/core/cp/domain/vehicle/VehicleProfile";
+import { OpenEvDirectoryClient } from "@ocpp-cp-simulator/core/cp/infrastructure/vehicle-catalog/open-ev-directory/OpenEvDirectoryClient";
+import id7Curves from "@ocpp-cp-simulator/core/cp/infrastructure/vehicle-catalog/open-ev-directory/__fixtures__/id7GtxChargingCurves.json";
+import id7Variant from "@ocpp-cp-simulator/core/cp/infrastructure/vehicle-catalog/open-ev-directory/__fixtures__/id7GtxVariant.json";
 import { presetForScenario } from "../../components/vehicle/vehicleChoice";
 import { LocalChargePointService } from "./LocalChargePointService";
 

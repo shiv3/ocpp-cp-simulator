@@ -2,7 +2,7 @@
 // Runs under `bun test`: a real daemon, driven over Socket.IO.
 import { afterEach, describe, expect, it } from "bun:test";
 
-import { InvalidAuthorizationCacheSeedError } from "@ocpp-cp-sim/core/cp/domain/auth/AuthorizationCacheSeed";
+import { InvalidAuthorizationCacheSeedError } from "@ocpp-cp-simulator/core/cp/domain/auth/AuthorizationCacheSeed";
 import { classifyFacadeError } from "../socketServer";
 import { startServer, type RunningServer } from "../startServer";
 import { connectTestClient } from "./socketHarness";

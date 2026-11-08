@@ -2,11 +2,11 @@ import { useTranslation } from "react-i18next";
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { Save, X } from "lucide-react";
 import { buildFullOcppUrl } from "../utils/ocppUrl";
-import { BROWSER_TLS_UNSUPPORTED_MESSAGE } from "@ocpp-cp-sim/client/interfaces/UnsupportedFeatureError";
+import { BROWSER_TLS_UNSUPPORTED_MESSAGE } from "@ocpp-cp-simulator/client/interfaces/UnsupportedFeatureError";
 import {
   isOcpp2Version,
   isSoapVersion,
-} from "@ocpp-cp-sim/core/cp/domain/types/OcppVersion";
+} from "@ocpp-cp-simulator/core/cp/domain/types/OcppVersion";
 import {
   adaptCentralSystemUrlScheme,
   adaptOcppUrlSecurity,
@@ -15,7 +15,7 @@ import {
   classifyBasicAuthSource,
   type OcppSecurityProfile,
   type OcppTlsOptions,
-} from "@ocpp-cp-sim/core/cp/infrastructure/transport/wsUrlWithBasic";
+} from "@ocpp-cp-simulator/core/cp/infrastructure/transport/wsUrlWithBasic";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import {

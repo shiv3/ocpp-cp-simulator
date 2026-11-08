@@ -1,54 +1,57 @@
-import type { Behavior, JsonObject } from "@ocpp-cp-sim/contracts/behavior";
-import { describeDefaultBehaviors } from "@ocpp-cp-sim/core/cp/application/engine/behaviors/index";
+import type {
+  Behavior,
+  JsonObject,
+} from "@ocpp-cp-simulator/contracts/behavior";
+import { describeDefaultBehaviors } from "@ocpp-cp-simulator/core/cp/application/engine/behaviors/index";
 import type {
   DiagnosticsStatus,
   FirmwareStatus,
   UploadLogStatus,
-} from "@ocpp-cp-sim/core/cp/domain/types/FirmwareLogStatus";
-import { ChargePoint } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
+} from "@ocpp-cp-simulator/core/cp/domain/types/FirmwareLogStatus";
+import { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
 import type {
   AuthorizationCacheSeedEntry,
   AuthorizationCacheView,
-} from "@ocpp-cp-sim/core/cp/domain/auth/AuthorizationCacheSeed";
+} from "@ocpp-cp-simulator/core/cp/domain/auth/AuthorizationCacheSeed";
 import type {
   DataTransferData,
   DataTransferResult,
-} from "@ocpp-cp-sim/core/cp/domain/types/DataTransfer";
+} from "@ocpp-cp-simulator/core/cp/domain/types/DataTransfer";
 import type {
   OcppCallOutcome,
   OcppCallRequest,
   RawFrameOutcome,
   RawFrameRequest,
-} from "@ocpp-cp-sim/core/cp/domain/types/OcppCall";
+} from "@ocpp-cp-simulator/core/cp/domain/types/OcppCall";
 import type {
   Get15118EVCertificateRequest,
   Get15118EVCertificateResult,
-} from "@ocpp-cp-sim/core/cp/domain/security/get15118EVCertificate";
+} from "@ocpp-cp-simulator/core/cp/domain/security/get15118EVCertificate";
 import type {
   AutoMeterValueSetting,
   PowerLossOptions,
   PowerLossRecord,
   PowerRestoreOptions,
   PowerRestoreResult,
-} from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
+} from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
 import type {
   BootNotificationResult,
   ChargePointEvents,
   IncomingCallCompletion,
-} from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePointEvents";
-import type { Database } from "@ocpp-cp-sim/core/cp/domain/persistence/Database";
+} from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePointEvents";
+import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
 import type {
   BootNotification,
   StatusNotificationOptions,
-} from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+} from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import {
   hasStatusNotificationOptions,
   OCPPStatus,
-} from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
-import { isSoapVersion } from "@ocpp-cp-sim/core/cp/domain/types/OcppVersion";
-import { soapDialectForVersion } from "@ocpp-cp-sim/core/cp/infrastructure/transport/soap/dialect";
-import { OCPPSoapServer } from "@ocpp-cp-sim/core/cp/infrastructure/transport/soap/OCPPSoapServer";
-import type { ResolvedNetworkSimConfig } from "@ocpp-cp-sim/core/cp/infrastructure/transport/network-sim/config";
+} from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
+import { isSoapVersion } from "@ocpp-cp-simulator/core/cp/domain/types/OcppVersion";
+import { soapDialectForVersion } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/soap/dialect";
+import { OCPPSoapServer } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/soap/OCPPSoapServer";
+import type { ResolvedNetworkSimConfig } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/network-sim/config";
 import { getGlobalTraceWriter } from "./trace/TraceWriter";
 import {
   splitStopReason,
@@ -57,9 +60,9 @@ import {
   type IdTokenTypeName,
   type StopTransactionCommandOptions,
   type TransactionUpdateOptions,
-} from "@ocpp-cp-sim/core/cp/domain/connector/Transaction";
-import { LogType } from "@ocpp-cp-sim/core/cp/shared/Logger";
-import { AutoTrafficRunner } from "@ocpp-cp-sim/core/cp/application/services/AutoTrafficRunner";
+} from "@ocpp-cp-simulator/core/cp/domain/connector/Transaction";
+import { LogType } from "@ocpp-cp-simulator/core/cp/shared/Logger";
+import { AutoTrafficRunner } from "@ocpp-cp-simulator/core/cp/application/services/AutoTrafficRunner";
 import {
   AUTO_TRAFFIC_ID_TAG,
   AutoTrafficIdTagPicker,
@@ -68,7 +71,7 @@ import {
   validateAutoTrafficConfig,
   type AutoTrafficConfig,
   type AutoTrafficCounters,
-} from "@ocpp-cp-sim/core/cp/domain/connector/AutoTraffic";
+} from "@ocpp-cp-simulator/core/cp/domain/connector/AutoTraffic";
 import { getGlobalMetricsRecorder } from "./server/metrics/MetricsRecorder";
 import {
   waitForBootAccepted,
@@ -80,12 +83,12 @@ import type {
   ChargePointStatus,
   ConnectorStatus,
 } from "./types";
-import { ScenarioExecutor } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioExecutor";
-import { ScenarioRunStateError } from "@ocpp-cp-sim/core/cp/domain/errors/ScenarioRunStateError";
-import { normalizeLabels } from "@ocpp-cp-sim/contracts/labels";
-import type { ScenarioEvents } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import { createScenarioExecutorCallbacks } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioRuntime";
-import { EventEmitter } from "@ocpp-cp-sim/core/cp/shared/EventEmitter";
+import { ScenarioExecutor } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioExecutor";
+import { ScenarioRunStateError } from "@ocpp-cp-simulator/core/cp/domain/errors/ScenarioRunStateError";
+import { normalizeLabels } from "@ocpp-cp-simulator/contracts/labels";
+import type { ScenarioEvents } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import { createScenarioExecutorCallbacks } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioRuntime";
+import { EventEmitter } from "@ocpp-cp-simulator/core/cp/shared/EventEmitter";
 import type {
   ScenarioDefinition,
   ScenarioExecutionContext,
@@ -93,69 +96,69 @@ import type {
   ScenarioExecutionState,
   ScenarioMode,
   ScenarioWaitIntervention,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import {
   isAutoStartKeyOf,
   matchAutoStart,
-} from "@ocpp-cp-sim/core/cp/application/scenario/autoStart";
-import { legacyGeneratedBaseId } from "@ocpp-cp-sim/core/cp/domain/persistence/legacyStartupInstances";
-import { SqliteScenarioRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/SqliteScenarioRepository";
-import type { ScenarioRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/ScenarioRepository";
-import { SqliteEngineStateRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/EngineStateRepository";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/autoStart";
+import { legacyGeneratedBaseId } from "@ocpp-cp-simulator/core/cp/domain/persistence/legacyStartupInstances";
+import { SqliteScenarioRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/SqliteScenarioRepository";
+import type { ScenarioRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/ScenarioRepository";
+import { SqliteEngineStateRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/EngineStateRepository";
 import {
   parsePersistedEngineState,
   type PersistedEngineState,
-} from "@ocpp-cp-sim/core/cp/application/engine/ChargerState";
-import { SqliteConnectorRuntimeRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/SqliteConnectorRuntimeRepository";
-import type { ScenarioRunRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/ScenarioRunRepository";
-import { createScenarioRunRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/createScenarioRunRepository";
+} from "@ocpp-cp-simulator/core/cp/application/engine/ChargerState";
+import { SqliteConnectorRuntimeRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/SqliteConnectorRuntimeRepository";
+import type { ScenarioRunRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/ScenarioRunRepository";
+import { createScenarioRunRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/createScenarioRunRepository";
 import type {
   ChargingSessionPage,
   ChargingSessionQuery,
   ChargingSessionRepository,
-} from "@ocpp-cp-sim/core/cp/domain/persistence/ChargingSessionRepository";
-import { createChargingSessionRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/createChargingSessionRepository";
-import type { ChargingSession } from "@ocpp-cp-sim/core/cp/domain/session/ChargingSession";
-import { ChargingSessionRecorder } from "@ocpp-cp-sim/core/cp/application/services/ChargingSessionRecorder";
+} from "@ocpp-cp-simulator/core/cp/domain/persistence/ChargingSessionRepository";
+import { createChargingSessionRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/createChargingSessionRepository";
+import type { ChargingSession } from "@ocpp-cp-simulator/core/cp/domain/session/ChargingSession";
+import { ChargingSessionRecorder } from "@ocpp-cp-simulator/core/cp/application/services/ChargingSessionRecorder";
 import {
   NoopConnectorRuntimeRepository,
   type ConnectorRuntimeRepository,
   type ScenarioPositionSnapshot,
-} from "@ocpp-cp-sim/core/cp/domain/persistence/ConnectorRuntimeRepository";
+} from "@ocpp-cp-simulator/core/cp/domain/persistence/ConnectorRuntimeRepository";
 import type {
   EVSettings,
   EVSettingsPatch,
-} from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
-import { getDefaultEVSettings } from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
-import type { AutoMeterValueConfig } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
-import type { ActiveChargingProfile } from "@ocpp-cp-sim/core/cp/domain/connector/Connector";
+} from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
+import { getDefaultEVSettings } from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
+import type { AutoMeterValueConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
+import type { ActiveChargingProfile } from "@ocpp-cp-simulator/core/cp/domain/connector/Connector";
 import type {
   StateHistoryEntry,
   HistoryOptions,
-} from "@ocpp-cp-sim/core/cp/application/services/types/StateSnapshot";
+} from "@ocpp-cp-simulator/core/cp/application/services/types/StateSnapshot";
 import type {
   TimelineEntry,
   TimelinePage,
   TimelineQuery,
-} from "@ocpp-cp-sim/core/cp/application/services/OperationalTimeline";
+} from "@ocpp-cp-simulator/core/cp/application/services/OperationalTimeline";
 import {
   scenarioTemplates,
   getTemplateById,
-} from "@ocpp-cp-sim/core/utils/scenarioTemplates";
+} from "@ocpp-cp-simulator/core/utils/scenarioTemplates";
 import { scenarioInstanceId } from "./scenarioInstanceId";
 import {
   ScenarioRunRecorder,
   makeScenarioRunId,
-} from "@ocpp-cp-sim/core/cp/application/verification/ScenarioRunRecorder";
-import type { ScenarioRunResult } from "@ocpp-cp-sim/core/cp/application/verification/ScenarioAssertions";
+} from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunRecorder";
+import type { ScenarioRunResult } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioAssertions";
 import {
   redactSensitiveText,
   redactSensitiveValue,
-} from "@ocpp-cp-sim/core/cp/shared/redaction";
+} from "@ocpp-cp-simulator/core/cp/shared/redaction";
 import {
   assertLoadableScenario,
   validateLoadableScenario,
-} from "@ocpp-cp-sim/core/scenario/loadableScenario";
+} from "@ocpp-cp-simulator/core/scenario/loadableScenario";
 import { appVersion } from "./appVersion";
 
 export type CLIEvent =

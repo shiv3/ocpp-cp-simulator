@@ -11,13 +11,13 @@ import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
 import { createRegistryEventBridge } from "../registryEvents";
 import { registerSocketHandlers } from "../socketServer";
-import type { ChargePointSnapshot } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+import type { ChargePointSnapshot } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 import {
   ARRAY_MAX_ITEMS,
   STR_64K_MAX,
   type SimulatorConfigInput,
-} from "@ocpp-cp-sim/contracts/index";
-import type { ScenarioDefinition } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+} from "@ocpp-cp-simulator/contracts/index";
+import type { ScenarioDefinition } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 
 type Handler = (...args: unknown[]) => void;
 type RpcAck = { ok: true; result: unknown } | { ok: false; error: unknown };

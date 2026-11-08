@@ -1,4 +1,7 @@
-import type { Behavior, BehaviorParams } from "@ocpp-cp-sim/contracts/behavior";
+import type {
+  Behavior,
+  BehaviorParams,
+} from "@ocpp-cp-simulator/contracts/behavior";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { LogType } from "../../../shared/Logger";
 

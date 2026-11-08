@@ -3,7 +3,7 @@
 // delays of what follows; the default does not run. Both on OCPP 1.6 and
 // 2.0.1, and for a second action to show it is generic.
 import { afterEach, describe, expect, test } from "bun:test";
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
 import type { WireVersion } from "../goldenWire/FakeCsms";
 import { runBehavior, type BehaviorRun } from "./runBehavior";
 import { answerTo, definition, startScenario, type Step } from "./runScenario";

@@ -1,7 +1,7 @@
 import React, { memo } from "react";
 import type { NodeProps } from "@xyflow/react";
 import { Handle, Position, type Node } from "@xyflow/react";
-import type { ConfigSetNodeData } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import type { ConfigSetNodeData } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 
 /**
  * Applies a Configuration key change locally via the ConfigurationStore.

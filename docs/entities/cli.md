@@ -736,7 +736,7 @@ ocpp-cp-sim behavior build examples/behaviors/flaky-firmware.ts --out dist/flaky
   `await using`, in the file or in anything it imports: k6 hangs silently on them. The syntax check runs
   before the type check, because the ES2017 library turns the same constructs into confusing "cannot find
   name" errors.
-- The ESLint config `@ocpp-cp-sim/contracts/eslint-behavior` (`packages/contracts/eslint/behavior.js`, a flat
+- The ESLint config `@ocpp-cp-simulator/contracts/eslint-behavior` (`packages/contracts/eslint/behavior.js`, a flat
   config array) reports `Date`, `performance`, `Math.random`, `crypto.randomUUID`, timers, module-scope `let` /
   `var`, module-scope empty arrays / objects and `new Map` / `Set`, and the three syntaxes above. Spread it
   after your own TypeScript parser setup.

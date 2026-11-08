@@ -15,7 +15,7 @@
 //   bun run check:boundaries --list core     # files mapped to one package
 //
 // Across packages an import must name the package
-// (`@ocpp-cp-sim/core/cp/domain/...`, resolved through the package's
+// (`@ocpp-cp-simulator/core/cp/domain/...`, resolved through the package's
 // `exports`), never a relative path into another package. TypeScript project
 // references forbid cycles at the type level too, so `import type`,
 // `export type ... from` and `import("x").T` count as edges exactly like
@@ -79,9 +79,9 @@ export const PACKAGE_DIRS: Readonly<Record<PackageName, string>> = {
   "apps/web": "apps/web",
 };
 
-/** `@ocpp-cp-sim/<dir name>`: the name a package is imported and declared by. */
+/** `@ocpp-cp-simulator/<dir name>`: the name a package is imported and declared by. */
 export function packageNameOf(pkg: PackageName): string {
-  return `@ocpp-cp-sim/${PACKAGE_DIRS[pkg].split("/")[1]}`;
+  return `@ocpp-cp-simulator/${PACKAGE_DIRS[pkg].split("/")[1]}`;
 }
 
 /**
@@ -642,11 +642,11 @@ export function resolveExport(
   return exportsMap[best.key]!.replace("*", matched);
 }
 
-const PACKAGE_SPECIFIER = /^(@ocpp-cp-sim\/[^/]+)(?:\/(.*))?$/;
+const PACKAGE_SPECIFIER = /^(@ocpp-cp-simulator\/[^/]+)(?:\/(.*))?$/;
 
 export interface Resolution {
   readonly path: string;
-  /** The specifier named a workspace package (`@ocpp-cp-sim/x/...`). */
+  /** The specifier named a workspace package (`@ocpp-cp-simulator/x/...`). */
   readonly viaPackage: boolean;
 }
 
@@ -719,7 +719,7 @@ export interface Edge {
   readonly kind: ImportKind;
   readonly typeOnly: boolean;
   readonly test: boolean;
-  /** Imported through `@ocpp-cp-sim/<package>/...` rather than by path. */
+  /** Imported through `@ocpp-cp-simulator/<package>/...` rather than by path. */
   readonly viaPackage: boolean;
 }
 
@@ -765,7 +765,7 @@ export interface Snapshot {
   readonly others: ReadonlySet<string>;
   /**
    * The workspace manifests (`<dir>/package.json`) by package. When present
-   * they resolve `@ocpp-cp-sim/...` specifiers through their real `exports`
+   * they resolve `@ocpp-cp-simulator/...` specifiers through their real `exports`
    * and are checked against the imports; without them the "./*" convention
    * is assumed and no manifest is checked.
    */
@@ -1099,7 +1099,7 @@ export function checkManifests(
       needed.set(name, (needed.get(name) ?? 0) + 1);
     }
     const declared = Object.entries(manifest.dependencies ?? {}).filter(([n]) =>
-      n.startsWith("@ocpp-cp-sim/"),
+      n.startsWith("@ocpp-cp-simulator/"),
     );
     for (const [name, range] of declared) {
       if (range !== "workspace:*")

@@ -1,4 +1,4 @@
-import type { ScenarioVerdict } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import type { ScenarioVerdict } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 
 /** Verdict pill colours shared by the run history list and the run report. */
 export const VERDICT_STYLES: Record<ScenarioVerdict, string> = {

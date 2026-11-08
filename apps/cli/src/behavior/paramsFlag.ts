@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
-import type { JsonObject } from "@ocpp-cp-sim/contracts/behavior";
-import { jsonProblem } from "@ocpp-cp-sim/core/cp/application/behavior/paramsSchema";
+import type { JsonObject } from "@ocpp-cp-simulator/contracts/behavior";
+import { jsonProblem } from "@ocpp-cp-simulator/core/cp/application/behavior/paramsSchema";
 
 /**
  * `--behavior-params <id>=<json file or inline json>` (repeatable): the params

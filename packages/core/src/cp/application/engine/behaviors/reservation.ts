@@ -56,7 +56,7 @@ interface CancelReservationRequest {
  * and for the whole validity of a connector-0 reservation a session of another
  * tag that would take the last such connector is refused
  * ({@link startBlockedByReservation16}): RemoteStartTransaction answers
- * `Rejected`, a local start does not start (no message is sent).
+ * `Rejected`, a local start does not start (no StartTransaction.req).
  */
 export function reservationBehavior(cp: ChargePoint): Behavior {
   return {

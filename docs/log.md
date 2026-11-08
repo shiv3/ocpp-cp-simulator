@@ -2389,6 +2389,32 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - `ci.yml`: the vitest and bun suites ran one after the other in the `test` job and then a second time for coverage, which made the job about 18 minutes. Each now runs once with coverage in its own job (`vitest`, and `bun` in three shards through `scripts/bun-test-shard.sh`); `test` keeps the static checks and the packaging smokes. Every job has a timeout, and a new push to a pull request cancels the previous run. Updated [Testing strategy](analyses/testing-strategy.md).
 
+## [2026-11-08] ingest | Layer dependency direction in `check:boundaries` (#571)
+
+- [Overview](overview.md): new rule bullet for the `src/cp` layers (`domain` / `application` / `infrastructure` / `shared`) and the shrinking `LAYER_EXEMPTIONS` list (26 entries at introduction: 15 domain → application, 10 domain → infrastructure, 1 application → infrastructure). The check lives in `scripts/check-package-boundaries.ts`, not in ESLint, so it shares the type-only edge handling, the stale-entry failure and the `--json` output with the other rules.
+
+## [2026-11-08] ingest | The renewed client certificate no longer depends on the CertificateSigned answer (#564)
+
+- On 2.0.1 / 2.1 profile 3 the renewed Charging Station certificate is handed to the transport when the chain is stored (`certificateStored`, `ChargePoint.adoptRenewedClientCertificate`), not from the `afterResult` effect; that effect keeps only the reconnect of an open connection, and skips it when the open connection already presents the certificate (`OCPPWebSocket.presentsClientCertificate`). Handing the same identity over twice is a no-op. Page touched: [Security profiles](concepts/security-profiles.md#renewed-client-certificate). Wire behavior is unchanged (golden fixtures untouched).
+
+## [2026-11-08] ingest | CustomerInformation and NotifyCustomerInformation (#602)
+
+- `concepts/local-authorization.md`: new "CustomerInformation" section (answers, report parts, clear semantics); `entities/default-behaviors.md`: `CustomerInformation` moves to the cache and local list row.
+
+## [2026-11-08] ingest | TriggerMessage SignV2G20Certificate and SignCombinedCertificate on 2.1 (#553)
+
+- F06.FR.08: on 2.1 `SignV2G20Certificate` answers `Accepted` and sends a new CSR with `certificateType = V2G20Certificate`; `SignCombinedCertificate` answers `Accepted` and sends one new CSR with `certificateType` omitted (the 2.1 enum: both the 15118 and the CSMS connection), stored as the Charging Station certificate when the chain comes back. 2.0.1 `SignCombinedCertificate` stays `NotImplemented`. Page touched: [Security profiles](concepts/security-profiles.md). No existing wire fixture changes.
+
+## [2026-11-08] ingest | Inbound OCPP 1.6J CALL validation (#593)
+
+- `OCPPMessageHandler.handleCall` validates the payload of a CALL that reached the default handler against the vendored 1.6 request schema (formats checked) and, per `inboundValidation` (`off` / `warn` default / `enforce`), logs it or answers a CALLERROR with the OCPP-J 1.6 §4.2.3 code (`FormationViolation`, `OccurenceConstraintViolation`, `TypeConstraintViolation`, `PropertyConstraintViolation`). Policies, overrides and rules answer first.
+- Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#inbound-call-validation-on-ocpp-j-16), [Who answers an inbound CALL](concepts/call-precedence.md), [GitHub issues](sources/github-issues.md).
+
+## [2026-11-08] ingest | Inbound validation: traced violations and the `inboundValidation` setting (#593 review)
+
+- A `warn` / `enforce` violation is traced: the inbound CALL's record carries `meta.validation = { mode, errorCode, description }` (a structured `Inbound validation:` line on the `WebSocket` log channel, merged by `logLinesToTrace` and held back by the live `--trace-output` writer for one tick). `inboundValidation` is settable: `--inbound-validation`, `cp.create` / `cp.update` (contracts, HTTP, MCP), persisted in `charge_points.inbound_validation` (schema v25). The wiki states the order with the #594 `NotSupported`.
+- Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#inbound-call-validation-on-ocpp-j-16), [Trace format](concepts/trace-format.md#validation-violations-meta), [CLI](entities/cli.md), [Daemon](entities/daemon.md), [Control plane](concepts/control-plane.md), [State persistence](concepts/state-persistence.md).
+
 ## [2026-11-08] ingest | OCPP 1.6 ReserveNow on connector 0 and replacement by reservationId (#595)
 
 - 1.6 `ReserveNow` replaces a held `reservationId` (moving it frees the first connector), accepts `connectorId` 0 only when `ReserveConnectorZeroSupported` is true (any connector, no status change), and authorizes the idTag first when the opt-in `reservationAuthorizeIdTag` is on (default off). 2.x unchanged. Golden: `16-res-remote-start-reserved` re-recorded (the repeated id 9 is now `Accepted`, was `Rejected`); new cases `16-res-connector0-supported`, `16-res-replace-moves-connector`.
@@ -2397,5 +2423,11 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-08] ingest | ReserveNow review fixes: exact lookups, idTag-owned connector-0 reservations, capacity, wiring (#595 review)
 
 - `ReservationManager` gains `reservationOn` / `hasReservationOn` (exact) and `reservationFor(connectorId, idTag)` (a connector-0 reservation only for its `idTag` / `parentIdTag`). A moved reservation now frees the connector it left even while a connector-0 reservation exists; a stranger's session no longer consumes or cancels a connector-0 reservation; several connector-0 reservations may coexist and ReserveNow answers `Occupied` when no connector would be left for one (`free − specific − connector-0 ≥ 1`). New golden case `16-res-connector0-stranger-starts`.
-- `reservationAuthorizeIdTag` is settable: `--reservation-authorize-id-tag`, `cp.create` / `cp.update`, persisted in `charge_points.reservation_authorize_id_tag` (schema v25). The station's own checks run before the Authorize.req. The default-behaviors row now puts the 1.6 rules in the 1.6 column and states what 2.x does.
+- `reservationAuthorizeIdTag` is settable: `--reservation-authorize-id-tag`, `cp.create` / `cp.update`, persisted in `charge_points.reservation_authorize_id_tag` (schema v26). The station's own checks run before the Authorize.req. The default-behaviors row now puts the 1.6 rules in the 1.6 column and states what 2.x does.
 - Pages: [Default behaviors](entities/default-behaviors.md), [CLI](entities/cli.md), [Daemon](entities/daemon.md), [Control plane](concepts/control-plane.md), [State persistence](concepts/state-persistence.md).
+
+## [2026-11-08] ingest | ReserveNow second review: a connector-0 reservation keeps a connector at session start; schema v26 (#595)
+
+- A connector-0 reservation now keeps one connector available for its idTag for its whole validity (1.6 edition 2 §5.13). `startBlockedByReservation16` counts with the same helper as `reserveNowRefusal16`: RemoteStartTransaction answers `Rejected` before `Accepted`; a local start does not start (a warning in the log, no StartTransaction.req; checked after the Authorize gate so an expired reservation is dropped at the same point as before); the owner and its `parentIdTag` are never refused. A second connector-0 ReserveNow by the same idTag stays `Accepted` while a connector remains for each reservation (the reading is stated in the wiki). Golden: `16-res-connector0-keeps-a-connector`.
+- Schema: #593 took v25 (`inbound_validation`), so `charge_points.reservation_authorize_id_tag` is the v25 → v26 step; a database stamped 25 gains the column. `CPRegistry` upsert has 28 placeholders.
+- Pages: [Default behaviors](entities/default-behaviors.md), [State persistence](concepts/state-persistence.md).

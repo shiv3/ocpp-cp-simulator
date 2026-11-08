@@ -1015,6 +1015,17 @@ export function parseCreateBody(
     typeof body.txUpdatedMeterValues === "boolean"
       ? body.txUpdatedMeterValues
       : undefined;
+  let inboundValidation: ChargePointInitOptions["inboundValidation"];
+  if (Object.prototype.hasOwnProperty.call(body, "inboundValidation")) {
+    if (
+      body.inboundValidation !== "off" &&
+      body.inboundValidation !== "warn" &&
+      body.inboundValidation !== "enforce"
+    ) {
+      throw new Error('inboundValidation must be "off", "warn" or "enforce"');
+    }
+    inboundValidation = body.inboundValidation;
+  }
   const reservationAuthorizeIdTag =
     typeof body.reservationAuthorizeIdTag === "boolean"
       ? body.reservationAuthorizeIdTag
@@ -1101,6 +1112,7 @@ export function parseCreateBody(
     authorizationKey,
     cpoName,
     ...(txUpdatedMeterValues !== undefined ? { txUpdatedMeterValues } : {}),
+    ...(inboundValidation ? { inboundValidation } : {}),
     ...(reservationAuthorizeIdTag !== undefined
       ? { reservationAuthorizeIdTag }
       : {}),

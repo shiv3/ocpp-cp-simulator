@@ -2735,6 +2735,7 @@ function mergeUpdateParams(
     "txUpdatedMeterValues",
     init.txUpdatedMeterValues,
   );
+  preserveWhenMissing(merged, "inboundValidation", init.inboundValidation);
   preserveWhenMissing(
     merged,
     "reservationAuthorizeIdTag",

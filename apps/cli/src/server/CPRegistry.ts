@@ -93,6 +93,7 @@ interface ChargePointRow {
   labels: string | null;
   behaviors: string | null;
   tx_updated_meter_values: number | null;
+  inbound_validation: string | null;
   reservation_authorize_id_tag: number | null;
 }
 
@@ -246,6 +247,7 @@ export class CPRegistry {
         "security_profile, authorization_key, cpo_name, " +
         "tls_ca_path, tls_cert_path, tls_key_path, " +
         "basic_auth, boot_notif, created_at, labels, behaviors, tx_updated_meter_values, " +
+        "inbound_validation, " +
         "reservation_authorize_id_tag " +
         "FROM charge_points ORDER BY created_at ASC",
     );
@@ -314,6 +316,13 @@ export class CPRegistry {
         // #347: NULL — off, or a row older than the column — restores as off.
         ...(row.tx_updated_meter_values === 1
           ? { txUpdatedMeterValues: true }
+          : {}),
+        // #593: NULL, or a value this build does not know, restores as the
+        // default (warn).
+        ...(row.inbound_validation === "off" ||
+        row.inbound_validation === "warn" ||
+        row.inbound_validation === "enforce"
+          ? { inboundValidation: row.inbound_validation }
           : {}),
         // #595: NULL — off, or a row older than the column — restores as off.
         ...(row.reservation_authorize_id_tag === 1
@@ -978,8 +987,8 @@ export class CPRegistry {
         "central_system_url, soap_callback_url, soap_path, " +
         "security_profile, authorization_key, cpo_name, " +
         "tls_ca_path, tls_cert_path, tls_key_path, " +
-        "basic_auth, boot_notif, created_at, labels, behaviors, tx_updated_meter_values, reservation_authorize_id_tag) " +
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+        "basic_auth, boot_notif, created_at, labels, behaviors, tx_updated_meter_values, inbound_validation, reservation_authorize_id_tag) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
         "ON CONFLICT (cp_id) DO UPDATE SET " +
         "ws_url = excluded.ws_url, " +
         "supervision_urls = excluded.supervision_urls, " +
@@ -1003,6 +1012,7 @@ export class CPRegistry {
         "labels = excluded.labels, " +
         "behaviors = excluded.behaviors, " +
         "tx_updated_meter_values = excluded.tx_updated_meter_values, " +
+        "inbound_validation = excluded.inbound_validation, " +
         "reservation_authorize_id_tag = excluded.reservation_authorize_id_tag",
       [
         init.cpId,
@@ -1035,6 +1045,7 @@ export class CPRegistry {
             ? JSON.stringify(init.behaviors)
             : null,
         init.txUpdatedMeterValues ? 1 : null,
+        init.inboundValidation ?? null,
         init.reservationAuthorizeIdTag ? 1 : null,
       ],
     );
@@ -1339,6 +1350,7 @@ function preserveOmittedInit(
     behaviors: next.behaviors ?? existing.behaviors,
     txUpdatedMeterValues:
       next.txUpdatedMeterValues ?? existing.txUpdatedMeterValues,
+    inboundValidation: next.inboundValidation ?? existing.inboundValidation,
     reservationAuthorizeIdTag:
       next.reservationAuthorizeIdTag ?? existing.reservationAuthorizeIdTag,
   };

@@ -5,6 +5,7 @@ import type { Socket } from "socket.io-client";
 
 import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
+import { runMigrations } from "@ocpp-cp-sim/core/cp/domain/persistence/schema";
 import { BunSqliteDatabase } from "@ocpp-cp-sim/core/cp/domain/persistence/BunSqliteDatabase";
 import type { ChargePoint } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
 import type { CLIChargePointService } from "../../service";
@@ -173,6 +174,63 @@ describe("reservationAuthorizeIdTag on --state-db (#595)", () => {
       ).toBe(false);
     } finally {
       registry.shutdownAll();
+      db.close();
+    }
+  });
+});
+
+describe("schema v25 → v26 migration (#595)", () => {
+  it("adds reservation_authorize_id_tag to a v25 database that has only #593's inbound_validation", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      // A database a v25 build (#593) left behind: inbound_validation, no
+      // reservation_authorize_id_tag, stamped 25.
+      runMigrations(db);
+      db.exec(
+        "ALTER TABLE charge_points DROP COLUMN reservation_authorize_id_tag",
+      );
+      db.run("UPDATE schema_meta SET value = '25' WHERE key = 'version'");
+      db.run(
+        "INSERT INTO charge_points " +
+          "(cp_id, ws_url, connectors, vendor, model, ocpp_version, " +
+          "basic_auth, boot_notif, created_at, inbound_validation) " +
+          "VALUES ('CP-V25', ?, 1, 'V', 'M', 'OCPP-1.6J', NULL, NULL, ?, 'enforce')",
+        [BASE.wsUrl, new Date().toISOString()],
+      );
+      const names = () =>
+        db
+          .all<{ name: string }>("PRAGMA table_info(charge_points)")
+          .map((c) => c.name);
+      expect(names()).not.toContain("reservation_authorize_id_tag");
+
+      runMigrations(db);
+
+      expect(names()).toContain("reservation_authorize_id_tag");
+      expect(names()).toContain("inbound_validation");
+      expect(
+        db.get<{ value: string }>(
+          "SELECT value FROM schema_meta WHERE key = 'version'",
+        )?.value,
+      ).toBe("26");
+      expect(
+        db.get<{ a: number | null; v: string }>(
+          "SELECT reservation_authorize_id_tag AS a, inbound_validation AS v FROM charge_points WHERE cp_id = 'CP-V25'",
+        ),
+      ).toEqual({ a: null, v: "enforce" });
+
+      // The registry restores and persists it on the migrated database.
+      const registry = new CPRegistry(new EventBus(), db);
+      try {
+        expect(registry.restoreFromDatabase({ connect: false })).toEqual([
+          "CP-V25",
+        ]);
+        expect(registry.get("CP-V25")?.getInit().inboundValidation).toBe(
+          "enforce",
+        );
+      } finally {
+        registry.shutdownAll();
+      }
+    } finally {
       db.close();
     }
   });

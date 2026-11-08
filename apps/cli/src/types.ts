@@ -3,6 +3,7 @@ import type {
   OcppTlsOptions,
 } from "@ocpp-cp-sim/core/cp/infrastructure/transport/wsUrlWithBasic";
 import type { UrlDistribution } from "@ocpp-cp-sim/core/cp/infrastructure/transport/SupervisionUrlPool";
+import type { InboundValidationMode } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
 import type { IdTagDistribution } from "@ocpp-cp-sim/core/cp/domain/auth/IdTagPool";
 import type { Labels } from "@ocpp-cp-sim/contracts/labels";
 
@@ -199,6 +200,8 @@ export interface CLIOptions {
   readonly cpoName?: string;
   /** `--tx-updated-meter-values` (#347). See ChargePointInitOptions. */
   readonly txUpdatedMeterValues?: boolean;
+  /** `--inbound-validation` (#593). See ChargePointInitOptions. */
+  readonly inboundValidation?: InboundValidationMode;
   /** `--reservation-authorize-id-tag` (#595). See ChargePointInitOptions. */
   readonly reservationAuthorizeIdTag?: boolean;
   readonly tls?: OcppTlsOptions;
@@ -223,6 +226,8 @@ export interface ChargePointInitOptions {
   /** All supervision URLs, when more than one was given. OCPP-J only. */
   readonly supervisionUrls?: readonly string[];
   readonly urlDistribution?: UrlDistribution;
+  /** OCPP 1.6J inbound CALL payload validation (#593). Default `warn`. */
+  readonly inboundValidation?: InboundValidationMode;
   /** OCPP 1.6 ReserveNow authorizes the idTag first (#595). Default false. */
   readonly reservationAuthorizeIdTag?: boolean;
   /**
@@ -388,6 +393,7 @@ export interface ChargePointStatus {
     readonly securityProfile?: OcppSecurityProfile;
     readonly cpoName?: string;
     readonly txUpdatedMeterValues?: boolean;
+    readonly inboundValidation?: InboundValidationMode;
     readonly reservationAuthorizeIdTag?: boolean;
     readonly tlsCaPath?: string;
     readonly tlsCertPath?: string;

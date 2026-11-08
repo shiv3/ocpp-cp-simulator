@@ -357,6 +357,12 @@ const cpParamsBaseSchema = z.object({
     .describe(
       "OCPP 2.x only: send the periodic meter samples taken during a transaction as TransactionEvent(Updated, MeterValuePeriodic) instead of MeterValues. Defaults to false",
     ),
+  inboundValidation: z
+    .enum(["off", "warn", "enforce"])
+    .optional()
+    .describe(
+      "OCPP 1.6J only: what to do with an inbound CALL whose payload breaks the request schema. off skips the check, warn (default) logs and traces the violation and runs the handler, enforce answers a CALLERROR (FormationViolation, OccurenceConstraintViolation, PropertyConstraintViolation or TypeConstraintViolation)",
+    ),
   reservationAuthorizeIdTag: z
     .boolean()
     .optional()

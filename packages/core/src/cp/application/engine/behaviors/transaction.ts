@@ -235,17 +235,6 @@ export async function startTransaction(
     return { started: false };
   }
 
-  // 1.6 §5.13: a connector-0 reservation of another tag keeps a connector
-  // free for its whole validity. Checked before the Authorize gate (it only
-  // reads state) and not reported to the CSMS: the session does not start.
-  if (startBlockedByReservation16(cp, connectorId, tagId)) {
-    logger.warn(
-      `Refusing transaction start for ${tagId} on connector ${connectorId}: it would leave no connector for a connector-0 reservation (OCPP 1.6 §5.13)`,
-      LogType.TRANSACTION,
-    );
-    return { started: false };
-  }
-
   // Issue #181: gate LOCAL (non-remote-start) starts on Authorize.conf.
   // "RemoteStart" means either the remote start default (which already
   // applies AuthorizeRemoteTxRequests semantics) or a scenario that captured
@@ -264,6 +253,18 @@ export async function startTransaction(
       cp.events.emit("authorizeDenied", { connectorId, tagId, status });
       return { started: false, denialStatus: status };
     }
+  }
+
+  // 1.6 §5.13: a connector-0 reservation of another tag keeps a connector
+  // free for its whole validity. Checked after the Authorize gate, where an
+  // expired reservation is dropped as before; the session does not start and
+  // no StartTransaction.req is sent.
+  if (startBlockedByReservation16(cp, connectorId, tagId)) {
+    logger.warn(
+      `Refusing transaction start for ${tagId} on connector ${connectorId}: it would leave no connector for a connector-0 reservation (OCPP 1.6 §5.13)`,
+      LogType.TRANSACTION,
+    );
+    return { started: false };
   }
 
   // §5.13: if the connector was Reserved (or the reservation is for

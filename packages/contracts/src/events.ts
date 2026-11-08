@@ -54,6 +54,7 @@ interface FullCpConfig {
   securityProfile?: OcppSecurityProfile;
   cpoName?: string;
   txUpdatedMeterValues?: boolean;
+  inboundValidation?: "off" | "warn" | "enforce";
   reservationAuthorizeIdTag?: boolean;
   tlsCaPath?: string;
   tlsCertPath?: string;
@@ -89,6 +90,7 @@ export function redactCp(config: FullCpConfig): WireCpConfig {
     securityProfile: config.securityProfile,
     cpoName: config.cpoName,
     txUpdatedMeterValues: config.txUpdatedMeterValues,
+    inboundValidation: config.inboundValidation,
     reservationAuthorizeIdTag: config.reservationAuthorizeIdTag,
     tlsCaPath: config.tlsCaPath,
     tlsCertPath: config.tlsCertPath,
@@ -133,6 +135,7 @@ export const wireCpConfigSchema = z
       .optional(),
     cpoName: STR_64K.optional(),
     txUpdatedMeterValues: z.boolean().optional(),
+    inboundValidation: z.enum(["off", "warn", "enforce"]).optional(),
     reservationAuthorizeIdTag: z.boolean().optional(),
     tlsCaPath: STR_64K.optional(),
     tlsCertPath: STR_64K.optional(),

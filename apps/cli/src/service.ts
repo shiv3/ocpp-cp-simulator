@@ -760,6 +760,9 @@ export class CLIChargePointService {
         ...(init.urlDistribution
           ? { urlDistribution: init.urlDistribution }
           : {}),
+        ...(init.inboundValidation
+          ? { inboundValidation: init.inboundValidation }
+          : {}),
         ...(init.reservationAuthorizeIdTag
           ? { reservationAuthorizeIdTag: true }
           : {}),
@@ -861,6 +864,9 @@ export class CLIChargePointService {
         authorizationKey: options.authorizationKey,
         cpoName: options.cpoName,
         ...(options.txUpdatedMeterValues ? { txUpdatedMeterValues: true } : {}),
+        ...(options.inboundValidation
+          ? { inboundValidation: options.inboundValidation }
+          : {}),
         ...(options.reservationAuthorizeIdTag
           ? { reservationAuthorizeIdTag: true }
           : {}),
@@ -1010,6 +1016,7 @@ export class CLIChargePointService {
         securityProfile: this._init.securityProfile,
         cpoName: this._init.cpoName,
         txUpdatedMeterValues: this._init.txUpdatedMeterValues,
+        inboundValidation: this._init.inboundValidation,
         reservationAuthorizeIdTag: this._init.reservationAuthorizeIdTag,
         tlsCaPath: this._init.tlsCaPath,
         tlsCertPath: this._init.tlsCertPath,

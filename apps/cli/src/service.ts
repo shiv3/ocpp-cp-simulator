@@ -985,6 +985,7 @@ export class CLIChargePointService {
         transactionStartTime: tx?.startTime ? tx.startTime.toISOString() : null,
         transactionTagId: tx?.tagId ?? null,
         transactionBatteryCapacityKwh: tx?.batteryCapacityKwh ?? null,
+        evConnection: connector.evConnection,
       });
     });
 
@@ -1211,6 +1212,16 @@ export class CLIChargePointService {
   /** #488: an EV-side disconnect on `connectorId`. */
   evDisconnected(connectorId: number): void {
     this._chargePoint.evDisconnected(connectorId);
+  }
+
+  /** #453: a cable was plugged into the EV side of `connectorId`. */
+  evPlugIn(connectorId: number): void {
+    this._chargePoint.evPlugIn(connectorId);
+  }
+
+  /** #453: the EV on `connectorId` asks for energy or stops asking. */
+  evSetReady(connectorId: number, ready: boolean): void {
+    this._chargePoint.evSetReady(connectorId, ready);
   }
 
   setMeterValue(connectorId: number, value: number): void {

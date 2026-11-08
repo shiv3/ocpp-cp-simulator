@@ -103,6 +103,10 @@ export interface SingleCpCommandOps {
   ): Promise<void>;
   /** #488: an EV-side disconnect on `connectorId`. */
   evDisconnected(connectorId: number): Promise<void>;
+  /** #453: a cable was plugged into the EV side of `connectorId`. */
+  evPlugIn(connectorId: number): Promise<void>;
+  /** #453: the EV asks for energy (`true`) or stops asking (`false`). */
+  evSetReady(connectorId: number, ready: boolean): Promise<void>;
   setMeterValue(connectorId: number, value: number): Promise<void>;
   sendMeterValue(
     connectorId: number,
@@ -294,6 +298,12 @@ function legacyCommandOps(service: CLIChargePointService): SingleCpCommandOps {
     evDisconnected: async (connectorId) => {
       service.evDisconnected(connectorId);
     },
+    evPlugIn: async (connectorId) => {
+      service.evPlugIn(connectorId);
+    },
+    evSetReady: async (connectorId, ready) => {
+      service.evSetReady(connectorId, ready);
+    },
     setMeterValue: async (connectorId, value) => {
       service.setMeterValue(connectorId, value);
     },
@@ -460,6 +470,9 @@ function facadeCommandOps(target: FacadeSingleCpTarget): SingleCpCommandOps {
     sendTransactionUpdate: (connectorId, options) =>
       service.sendTransactionUpdate(cpId, connectorId, options),
     evDisconnected: (connectorId) => service.evDisconnected(cpId, connectorId),
+    evPlugIn: (connectorId) => service.evPlugIn(cpId, connectorId),
+    evSetReady: (connectorId, ready) =>
+      service.evSetReady(cpId, connectorId, ready),
     setMeterValue: (connectorId, value) =>
       service.setMeterValue(cpId, connectorId, value),
     sendMeterValue: (connectorId, context) =>
@@ -610,6 +623,7 @@ function snapshotToCliStatus(snapshot: ChargePointSnapshot): ChargePointStatus {
         : null,
       transactionTagId: connector.transactionTagId,
       transactionBatteryCapacityKwh: connector.transactionBatteryCapacityKwh,
+      evConnection: connector.evConnection,
     })),
     heartbeat: snapshot.heartbeat,
     config: snapshot.config

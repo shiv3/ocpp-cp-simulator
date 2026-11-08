@@ -326,6 +326,10 @@ export const connectorStatusWireSchema = z
     transactionStartTime: z.string().nullable(),
     transactionTagId: z.string().nullable(),
     transactionBatteryCapacityKwh: z.number().nullable(),
+    // #453: absent from a daemon that predates the cable model.
+    evConnection: z
+      .enum(["disconnected", "connected-ready", "connected-not-ready"])
+      .optional(),
   })
   .strict();
 

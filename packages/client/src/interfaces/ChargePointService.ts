@@ -1,3 +1,4 @@
+import type { EvConnectionState } from "@ocpp-cp-sim/core/cp/domain/connector/EvConnection";
 import type { TransportConfigWire } from "@ocpp-cp-sim/contracts/transportConfig";
 import type { StartTransactionOutcome } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
 import type { VehicleCatalog } from "@ocpp-cp-sim/core/cp/domain/vehicle/VehicleCatalog";
@@ -110,6 +111,8 @@ export interface ConnectorSnapshot {
   transactionStartTime: Date | null;
   transactionTagId: string | null;
   transactionBatteryCapacityKwh: number | null;
+  /** The EV and cable state (#453). Absent from a daemon that predates it. */
+  evConnection?: EvConnectionState;
 }
 
 export interface ChargePointSnapshot {
@@ -641,6 +644,13 @@ export interface ChargePointService {
    *  (`EVDisconnected`) or suspends it (SuspendedEV); without one the
    *  connector goes Available. */
   evDisconnected(id: string, connectorId: number): Promise<void>;
+  /** A cable was plugged into the EV side of the connector (#453): an idle
+   *  Available connector reports Preparing; any other state is unchanged. */
+  evPlugIn(id: string, connectorId: number): Promise<void>;
+  /** The EV asks for energy or stops asking (#453). With a running
+   *  transaction "not ready" suspends it (SuspendedEV) and "ready" resumes
+   *  Charging. Rejects when no cable is plugged in. */
+  evSetReady(id: string, connectorId: number, ready: boolean): Promise<void>;
   sendStatusNotification(
     id: string,
     connectorId: number,

@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, { useEffect, useId, useRef, useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 
@@ -81,6 +82,7 @@ function BottomPanel<T extends string>({
   toolbar,
   children,
 }: BottomPanelProps<T>): React.ReactElement {
+  const { t } = useTranslation();
   const baseId = useId();
   const bodyId = `${baseId}-body`;
   const tabId = (value: string) => `${baseId}-tab-${value}`;
@@ -175,7 +177,7 @@ function BottomPanel<T extends string>({
         <div
           role="separator"
           aria-orientation="horizontal"
-          aria-label="Resize panel"
+          aria-label={t("consoleShared.bottomPanel.resize")}
           aria-valuenow={height}
           aria-valuemin={MIN_HEIGHT}
           tabIndex={0}
@@ -248,7 +250,11 @@ function BottomPanel<T extends string>({
           {toolbar}
           <button
             type="button"
-            aria-label={collapsed ? "Expand panel" : "Collapse panel"}
+            aria-label={
+              collapsed
+                ? t("consoleShared.bottomPanel.expand")
+                : t("consoleShared.bottomPanel.collapse")
+            }
             aria-expanded={!collapsed}
             aria-controls={bodyId}
             onClick={() => setCollapsed((value) => !value)}

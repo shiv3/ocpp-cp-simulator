@@ -1,5 +1,7 @@
+import { useTranslation } from "react-i18next";
 import React, { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
+import { t } from "../../i18n";
 import Settings from "../../components/Settings";
 import { useDataContext } from "../../data/providers/DataProvider";
 import { NetworkSimEditor } from "../components/network-sim/NetworkSimEditor";
@@ -7,6 +9,7 @@ import VehicleProfilesCard from "../components/vehicle/VehicleProfilesCard";
 import type { NetworkSimLayerConfig } from "@ocpp-cp-sim/core/cp/infrastructure/transport/network-sim/config";
 
 const SettingsPage: React.FC = () => {
+  const { t: tr } = useTranslation();
   const { chargePointService } = useDataContext();
   const { hash } = useLocation();
   const [networkSimConfig, setNetworkSimConfig] =
@@ -31,7 +34,7 @@ const SettingsPage: React.FC = () => {
           setLoadError(
             error instanceof Error
               ? error.message
-              : "Failed to load network simulation configuration",
+              : t("common.settingsPage.loadFailed"),
           );
           setIsLoadingNetSim(false);
         }
@@ -78,7 +81,7 @@ const SettingsPage: React.FC = () => {
             className="rounded-[10px] border border-cx-border bg-cx-card shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none p-6"
           >
             <h2 className="mb-4 text-lg font-semibold text-cx-fg">
-              Network Simulation
+              {tr("common.settingsPage.networkSimulation")}
             </h2>
             <NetworkSimEditor
               value={networkSimConfig}

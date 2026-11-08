@@ -153,3 +153,6 @@ if (typeof window !== "undefined") {
     Element.prototype.scrollTo = function scrollTo() {};
   }
 }
+
+// English strings for every test, initialised synchronously (bundled).
+await import("../i18n");

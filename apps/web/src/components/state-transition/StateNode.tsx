@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, { memo } from "react";
 import type { NodeProps } from "@xyflow/react";
 import { Handle, Position, type Node } from "@xyflow/react";
@@ -11,6 +12,7 @@ type StateNodeData = {
 };
 
 const StateNode: React.FC<NodeProps<Node<StateNodeData>>> = ({ data }) => {
+  const { t } = useTranslation();
   const { status, label, isCurrent, isOperative } = data;
 
   // Color settings based on state
@@ -71,7 +73,9 @@ const StateNode: React.FC<NodeProps<Node<StateNodeData>>> = ({ data }) => {
           {label}
         </div>
         {isCurrent && (
-          <div className="mt-1 text-xs text-white font-semibold">● Current</div>
+          <div className="mt-1 text-xs text-white font-semibold">
+            {t("stateTransition.node.current")}
+          </div>
         )}
       </div>
 

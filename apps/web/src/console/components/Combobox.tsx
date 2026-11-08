@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 
@@ -39,6 +40,7 @@ const Combobox: React.FC<ComboboxProps> = ({
   "aria-label": ariaLabel,
   className,
 }) => {
+  const { t } = useTranslation();
   const listId = `${useId()}-${id}-listbox`;
   const rootRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
@@ -115,7 +117,7 @@ const Combobox: React.FC<ComboboxProps> = ({
       <button
         type="button"
         tabIndex={-1}
-        aria-label="Show options"
+        aria-label={t("consoleShared.combobox.showOptions")}
         onClick={() => {
           if (open && showAll) {
             setOpen(false);
@@ -137,7 +139,9 @@ const Combobox: React.FC<ComboboxProps> = ({
         >
           {value !== "" && (
             <OptionButton onSelect={() => pick("")}>
-              <span className="text-cx-muted">Clear</span>
+              <span className="text-cx-muted">
+                {t("consoleShared.combobox.clear")}
+              </span>
             </OptionButton>
           )}
           {visible.map((option) => (
@@ -162,7 +166,9 @@ const Combobox: React.FC<ComboboxProps> = ({
             </OptionButton>
           ))}
           {visible.length === 0 && (
-            <div className="px-2 py-1.5 text-cx-faint">No match</div>
+            <div className="px-2 py-1.5 text-cx-faint">
+              {t("consoleShared.combobox.noMatch")}
+            </div>
           )}
         </div>
       )}

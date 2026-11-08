@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, {
   useCallback,
   useEffect,
@@ -50,8 +51,6 @@ type PanelState =
   | { kind: "results"; data: AnalysisData }
   | { kind: "error"; message: string };
 
-const NO_LOGGED_TRAFFIC_MESSAGE = "No logged traffic to analyze yet.";
-
 /**
  * Snapshot-on-click DebugKit analysis (issue #188 PoC items 6-7): clicking
  * "Analyze" snapshots the CP's persisted logs and runs the toolkit pipeline
@@ -71,6 +70,7 @@ const SessionAnalysisPanel: React.FC<SessionAnalysisPanelProps> = ({
   cpId,
   ocppVersion,
 }) => {
+  const { t } = useTranslation();
   const { chargePointService } = useDataContext();
   const [state, setState] = useState<PanelState>({ kind: "idle" });
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
@@ -111,7 +111,7 @@ const SessionAnalysisPanel: React.FC<SessionAnalysisPanelProps> = ({
     try {
       const rows = await chargePointService.listStoredLogs(requestCpId);
       if (rows.length === 0) {
-        commit({ kind: "empty", message: NO_LOGGED_TRAFFIC_MESSAGE });
+        commit({ kind: "empty", message: t("cpPanels.analysis.noTraffic") });
         return;
       }
 
@@ -120,7 +120,7 @@ const SessionAnalysisPanel: React.FC<SessionAnalysisPanelProps> = ({
         chargePointId: requestCpId,
       });
       if (records.length === 0) {
-        commit({ kind: "empty", message: NO_LOGGED_TRAFFIC_MESSAGE });
+        commit({ kind: "empty", message: t("cpPanels.analysis.noTraffic") });
         return;
       }
       const jsonl = records.map((record) => JSON.stringify(record)).join("\n");
@@ -135,7 +135,7 @@ const SessionAnalysisPanel: React.FC<SessionAnalysisPanelProps> = ({
       } catch {
         commit({
           kind: "error",
-          message: "Failed to load analysis toolkit",
+          message: t("cpPanels.analysis.toolkitFailed"),
         });
         return;
       }
@@ -152,16 +152,20 @@ const SessionAnalysisPanel: React.FC<SessionAnalysisPanelProps> = ({
       } catch (err) {
         commit({
           kind: "error",
-          message: `Analysis failed: ${err instanceof Error ? err.message : String(err)}`,
+          message: t("cpPanels.analysis.failed", {
+            error: err instanceof Error ? err.message : String(err),
+          }),
         });
       }
     } catch (err) {
       commit({
         kind: "error",
-        message: `Analysis failed: ${err instanceof Error ? err.message : String(err)}`,
+        message: t("cpPanels.analysis.failed", {
+          error: err instanceof Error ? err.message : String(err),
+        }),
       });
     }
-  }, [chargePointService, cpId, ocppVersion]);
+  }, [chargePointService, cpId, ocppVersion, t]);
 
   const selectedEvent = useMemo(() => {
     if (state.kind !== "results") return null;
@@ -171,7 +175,7 @@ const SessionAnalysisPanel: React.FC<SessionAnalysisPanelProps> = ({
   if (!canAnalyze) {
     return (
       <EmptyState
-        title="Session analysis is not available in this runtime"
+        title={t("cpPanels.analysis.unavailable")}
         hint={ANALYZE_DISCLAIMER}
       />
     );
@@ -181,10 +185,7 @@ const SessionAnalysisPanel: React.FC<SessionAnalysisPanelProps> = ({
     <div className="space-y-4">
       <Card>
         <CardContent className="space-y-3 p-4">
-          <p className="text-sm text-cx-fg2">
-            Snapshot this charge point&apos;s stored logs and run OCPP
-            DebugKit&apos;s failure-pattern analysis in your browser.
-          </p>
+          <p className="text-sm text-cx-fg2">{t("cpPanels.analysis.intro")}</p>
           <p className="text-xs text-cx-muted">{ANALYZE_DISCLAIMER}</p>
           <Button
             type="button"
@@ -192,7 +193,9 @@ const SessionAnalysisPanel: React.FC<SessionAnalysisPanelProps> = ({
             disabled={state.kind === "analyzing"}
             onClick={() => void handleAnalyze()}
           >
-            {state.kind === "analyzing" ? "Analyzing…" : "Analyze"}
+            {state.kind === "analyzing"
+              ? t("cpPanels.analysis.analyzing")
+              : t("cpPanels.analysis.analyze")}
           </Button>
           {state.kind === "error" && (
             <div className="rounded-md border border-cx-rose/40 bg-cx-rose/10 px-3 py-2 text-sm text-cx-rose">
@@ -207,10 +210,21 @@ const SessionAnalysisPanel: React.FC<SessionAnalysisPanelProps> = ({
       {state.kind === "results" && (
         <div className="space-y-4">
           <div className="text-sm text-cx-fg2">
-            {state.data.events.length} events · {state.data.sessions.length}{" "}
-            sessions · {state.data.failures.length} failures
+            {t("cpPanels.analysis.summary", {
+              events: t("cpPanels.analysis.events", {
+                count: state.data.events.length,
+              }),
+              sessions: t("cpPanels.analysis.sessions", {
+                count: state.data.sessions.length,
+              }),
+              failures: t("cpPanels.analysis.failures", {
+                count: state.data.failures.length,
+              }),
+            })}
             {state.data.warnings.length > 0
-              ? ` · ${state.data.warnings.length} parse warnings`
+              ? t("cpPanels.analysis.parseWarnings", {
+                  count: state.data.warnings.length,
+                })
               : ""}
           </div>
 

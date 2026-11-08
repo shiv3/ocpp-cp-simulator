@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import {
@@ -33,6 +34,7 @@ const MeterValueCurveModal: React.FC<MeterValueCurveModalProps> = ({
   onSave,
   initialConfig,
 }) => {
+  const { t } = useTranslation();
   const [config, setConfig] = useState<AutoMeterValueConfig>(initialConfig);
   const [selectedPointIndex, setSelectedPointIndex] = useState<number | null>(
     null,
@@ -69,7 +71,7 @@ const MeterValueCurveModal: React.FC<MeterValueCurveModalProps> = ({
     }
     // drawCanvas is recreated each render; re-running on its identity is unwanted.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config, isOpen, maxTime, maxValue]);
+  }, [config, isOpen, maxTime, maxValue, t]);
 
   const drawCanvas = () => {
     const canvas = canvasRef.current;
@@ -146,7 +148,7 @@ const MeterValueCurveModal: React.FC<MeterValueCurveModalProps> = ({
       ctx.fillText(label, x - 10, PADDING + GRAPH_HEIGHT + 20);
     }
     ctx.fillText(
-      "Time (sec)",
+      t("settings.curve.axisTime"),
       PADDING + GRAPH_WIDTH / 2 - 30,
       CANVAS_HEIGHT - 5,
     );
@@ -160,7 +162,7 @@ const MeterValueCurveModal: React.FC<MeterValueCurveModalProps> = ({
     ctx.save();
     ctx.translate(15, PADDING + GRAPH_HEIGHT / 2);
     ctx.rotate(-Math.PI / 2);
-    ctx.fillText("MeterValue (kWh)", -40, 0);
+    ctx.fillText(t("settings.curve.axisValue"), -40, 0);
     ctx.restore();
   };
 
@@ -296,7 +298,7 @@ const MeterValueCurveModal: React.FC<MeterValueCurveModalProps> = ({
 
   const handleDeletePoint = (index: number) => {
     if (config.curvePoints.length <= 2) {
-      alert("Must have at least 2 control points");
+      alert(t("settings.curve.minPoints"));
       return;
     }
 
@@ -388,10 +390,10 @@ const MeterValueCurveModal: React.FC<MeterValueCurveModalProps> = ({
         >
           <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
             <X className="h-4 w-4" />
-            <span className="sr-only">Close</span>
+            <span className="sr-only">{t("settings.curve.close")}</span>
           </DialogPrimitive.Close>
           <DialogHeader>
-            <DialogTitle>Configure Auto MeterValue</DialogTitle>
+            <DialogTitle>{t("settings.curve.title")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
             {/* Enable/Disable */}
@@ -403,7 +405,7 @@ const MeterValueCurveModal: React.FC<MeterValueCurveModalProps> = ({
                   setConfig({ ...config, enabled: checked as boolean })
                 }
               />
-              <Label htmlFor="autoEnabled">Enable Auto MeterValue</Label>
+              <Label htmlFor="autoEnabled">{t("settings.curve.enable")}</Label>
             </div>
 
             {/* Canvas */}
@@ -420,7 +422,7 @@ const MeterValueCurveModal: React.FC<MeterValueCurveModalProps> = ({
                 style={{ display: "block", margin: "0 auto" }}
               />
               <p className="text-xs text-gray-600 dark:text-gray-400 mt-2 text-center">
-                Click to add control points, drag to move them
+                {t("settings.curve.canvasHint")}
               </p>
             </div>
 
@@ -440,39 +442,38 @@ const MeterValueCurveModal: React.FC<MeterValueCurveModalProps> = ({
               />
               <div className="flex flex-col">
                 <Label htmlFor="stopAtTargetSoc">
-                  Charge until battery full (stop at EV's target SoC)
+                  {t("settings.curve.stopAtTarget")}
                 </Label>
                 <span className="text-xs text-gray-500 dark:text-gray-400">
-                  Ignores the chart's max time/value. Uses EV Settings → Target
-                  SoC. Once reached, the in-flight transaction is stopped.
+                  {t("settings.curve.stopAtTargetHelp")}
                 </span>
               </div>
             </div>
 
             {/* Presets */}
             <div>
-              <Label>Presets</Label>
+              <Label>{t("settings.curve.presets")}</Label>
               <div className="flex gap-2 mt-2">
                 <Button
                   size="sm"
                   variant="secondary"
                   onClick={() => handleLoadPreset("linear")}
                 >
-                  Linear
+                  {t("settings.curve.linear")}
                 </Button>
                 <Button
                   size="sm"
                   variant="secondary"
                   onClick={() => handleLoadPreset("exponential")}
                 >
-                  Exponential
+                  {t("settings.curve.exponential")}
                 </Button>
                 <Button
                   size="sm"
                   variant="secondary"
                   onClick={() => handleLoadPreset("step")}
                 >
-                  Step
+                  {t("settings.curve.step")}
                 </Button>
               </div>
             </div>
@@ -480,7 +481,9 @@ const MeterValueCurveModal: React.FC<MeterValueCurveModalProps> = ({
             {/* Interval Settings */}
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="intervalSeconds">Send Interval (seconds)</Label>
+                <Label htmlFor="intervalSeconds">
+                  {t("settings.curve.sendInterval")}
+                </Label>
                 <Input
                   id="intervalSeconds"
                   type="number"
@@ -506,17 +509,19 @@ const MeterValueCurveModal: React.FC<MeterValueCurveModalProps> = ({
                     })
                   }
                 />
-                <Label htmlFor="autoCalculateInterval">Auto Calculate</Label>
+                <Label htmlFor="autoCalculateInterval">
+                  {t("settings.curve.autoCalculate")}
+                </Label>
               </div>
             </div>
 
             {/* Control Points List */}
             <div>
               <div className="flex items-center justify-between mb-2">
-                <Label>Control Points</Label>
+                <Label>{t("settings.curve.controlPoints")}</Label>
                 <Button size="sm" variant="success" onClick={handleAddPoint}>
                   <Plus className="mr-2 h-4 w-4" />
-                  Add Point
+                  {t("settings.curve.addPoint")}
                 </Button>
               </div>
               <div className="max-h-48 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded p-2 bg-gray-50 dark:bg-gray-800">
@@ -541,7 +546,7 @@ const MeterValueCurveModal: React.FC<MeterValueCurveModalProps> = ({
                           step={0.1}
                         />
                         <span className="text-xs text-gray-600 dark:text-gray-400">
-                          sec
+                          {t("settings.curve.unitSec")}
                         </span>
                       </div>
                       <div>
@@ -580,11 +585,11 @@ const MeterValueCurveModal: React.FC<MeterValueCurveModalProps> = ({
           <DialogFooter>
             <Button variant="secondary" onClick={onClose}>
               <X className="mr-2 h-5 w-5" />
-              Cancel
+              {t("settings.common.cancel")}
             </Button>
             <Button onClick={handleSave}>
               <Save className="mr-2 h-5 w-5" />
-              Save
+              {t("settings.common.save")}
             </Button>
           </DialogFooter>
         </DialogPrimitive.Content>

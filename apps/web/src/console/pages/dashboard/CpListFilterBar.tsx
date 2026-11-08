@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, { useMemo } from "react";
 
 import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
@@ -36,6 +37,7 @@ const CpListFilterBar: React.FC<CpListFilterBarProps> = ({
   rows,
   shown,
 }) => {
+  const { t } = useTranslation();
   const cpOptions = useMemo<ComboboxOption[]>(
     () =>
       rows.map((row) => ({
@@ -96,8 +98,8 @@ const CpListFilterBar: React.FC<CpListFilterBarProps> = ({
     <div className="mb-4 flex flex-wrap items-center gap-2">
       <Combobox
         id="cp-filter-q"
-        aria-label="Charge point"
-        placeholder="Charge point"
+        aria-label={t("dashboard.col.chargePoint")}
+        placeholder={t("dashboard.col.chargePoint")}
         value={filters.q}
         onChange={(q) => onChange({ q })}
         options={cpOptions}
@@ -105,8 +107,8 @@ const CpListFilterBar: React.FC<CpListFilterBarProps> = ({
       />
       <Combobox
         id="cp-filter-conn"
-        aria-label="Connector"
-        placeholder="Connector"
+        aria-label={t("dashboard.filter.connector")}
+        placeholder={t("dashboard.filter.connector")}
         value={filters.conn}
         onChange={(conn) => onChange({ conn: withoutHash(conn) })}
         options={connOptions}
@@ -114,8 +116,8 @@ const CpListFilterBar: React.FC<CpListFilterBarProps> = ({
       />
       <Combobox
         id="cp-filter-tx"
-        aria-label="Transaction"
-        placeholder="Transaction"
+        aria-label={t("dashboard.filter.transaction")}
+        placeholder={t("dashboard.filter.transaction")}
         value={filters.tx}
         onChange={(tx) => onChange({ tx: withoutHash(tx) })}
         options={txOptions}
@@ -123,22 +125,22 @@ const CpListFilterBar: React.FC<CpListFilterBarProps> = ({
       />
       <Combobox
         id="cp-filter-label"
-        aria-label="Label"
-        placeholder="Label: site=s1, env"
+        aria-label={t("dashboard.filter.label")}
+        placeholder={t("dashboard.filter.labelPlaceholder")}
         value={filters.label}
         onChange={(label) => onChange({ label })}
         options={labelOptions}
         className="w-48"
       />
       <select
-        aria-label="Status"
+        aria-label={t("dashboard.col.status")}
         value={filters.status}
         onChange={(event) =>
           onChange({ status: event.target.value as OCPPStatus | "" })
         }
         className={FILTER_SELECT_CLASS}
       >
-        <option value="">Any status</option>
+        <option value="">{t("dashboard.filter.anyStatus")}</option>
         {Object.values(OCPPStatus).map((status) => (
           <option key={status} value={status}>
             {status}
@@ -146,12 +148,12 @@ const CpListFilterBar: React.FC<CpListFilterBarProps> = ({
         ))}
       </select>
       <select
-        aria-label="OCPP version"
+        aria-label={t("dashboard.filter.ocppVersion")}
         value={filters.version}
         onChange={(event) => onChange({ version: event.target.value })}
         className={FILTER_SELECT_CLASS}
       >
-        <option value="">Any version</option>
+        <option value="">{t("dashboard.filter.anyVersion")}</option>
         {versions.map((version) => (
           <option key={version} value={version}>
             {version}
@@ -164,7 +166,7 @@ const CpListFilterBar: React.FC<CpListFilterBarProps> = ({
           checked={filters.connected}
           onChange={(event) => onChange({ connected: event.target.checked })}
         />
-        Connected
+        {t("dashboard.filter.connected")}
       </label>
       <label className={CHECKBOX_LABEL_CLASS}>
         <input
@@ -172,13 +174,18 @@ const CpListFilterBar: React.FC<CpListFilterBarProps> = ({
           checked={filters.scenario}
           onChange={(event) => onChange({ scenario: event.target.checked })}
         />
-        Scenario
+        {t("dashboard.col.scenario")}
       </label>
       <span
         data-testid="cp-list-count"
         className="ml-auto text-xs text-cx-muted"
       >
-        {shown.cps} CPs · {shown.connectors} connectors
+        {t("dashboard.filter.count", {
+          cps: t("dashboard.filter.cps", { count: shown.cps }),
+          connectors: t("dashboard.filter.connectors", {
+            count: shown.connectors,
+          }),
+        })}
       </span>
     </div>
   );

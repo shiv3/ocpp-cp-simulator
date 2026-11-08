@@ -61,9 +61,7 @@ export function useStepEditing(
         "[data-step-id], [data-node-id]",
       ) ?? [],
     ).find((el) => (el.dataset.stepId ?? el.dataset.nodeId) === id);
-    step
-      ?.querySelector<HTMLElement>('button[aria-label^="Select step"]')
-      ?.focus();
+    step?.querySelector<HTMLElement>("button[data-step-select]")?.focus();
   });
 
   const onStepKeyDown = useCallback(

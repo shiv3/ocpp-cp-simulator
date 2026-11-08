@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, { useId, useState } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import {
@@ -11,6 +12,7 @@ import {
   Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { type MessageKey } from "../i18n";
 import { useDataContext } from "../data/providers/DataProvider";
 import { useServerInfo } from "../data/hooks/useServerInfo";
 import {
@@ -19,11 +21,12 @@ import {
   type RemoteHealth,
 } from "../data/hooks/useRemoteHealth";
 import ThemeToggle from "../components/ThemeToggle";
+import LanguageToggle from "../components/LanguageToggle";
 import AppBuildInfo from "../components/AppBuildInfo";
 import { GlobalLogsProvider } from "./lib/GlobalLogsProvider";
 
 interface NavItem {
-  label: string;
+  labelKey: MessageKey;
   to: string;
   icon: React.ComponentType<{ className?: string }>;
   isActive: (pathname: string) => boolean;
@@ -34,13 +37,13 @@ interface NavItem {
 // operator is drilled into a specific CP at `/cp/:cpId`.
 const NAV_ITEMS: NavItem[] = [
   {
-    label: "Charge Points",
+    labelKey: "common.nav.chargePoints",
     to: "/",
     icon: PlugZap,
     isActive: (pathname) => pathname === "/" || pathname.startsWith("/cp/"),
   },
   {
-    label: "Scenarios",
+    labelKey: "common.nav.scenarios",
     to: "/scenarios",
     icon: Play,
     isActive: (pathname) =>
@@ -48,19 +51,19 @@ const NAV_ITEMS: NavItem[] = [
       !pathname.startsWith("/scenarios/runs"),
   },
   {
-    label: "Run History",
+    labelKey: "common.nav.runHistory",
     to: "/scenarios/runs",
     icon: History,
     isActive: (pathname) => pathname.startsWith("/scenarios/runs"),
   },
   {
-    label: "Message Log",
+    labelKey: "common.nav.messageLog",
     to: "/logs",
     icon: ScrollText,
     isActive: (pathname) => pathname.startsWith("/logs"),
   },
   {
-    label: "Settings",
+    labelKey: "common.nav.settings",
     to: "/settings",
     icon: SettingsIcon,
     isActive: (pathname) => pathname.startsWith("/settings"),
@@ -96,6 +99,7 @@ function storeCollapsed(collapsed: boolean): void {
 }
 
 const AppShell: React.FC = () => {
+  const { t } = useTranslation();
   const location = useLocation();
   const { mode, serverUrl } = useDataContext();
   const serverInfo = useServerInfo();
@@ -147,10 +151,18 @@ const AppShell: React.FC = () => {
             )}
             <button
               type="button"
-              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              aria-label={
+                collapsed
+                  ? t("common.sidebar.expand")
+                  : t("common.sidebar.collapse")
+              }
               aria-expanded={!collapsed}
               aria-controls={navId}
-              title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              title={
+                collapsed
+                  ? t("common.sidebar.expand")
+                  : t("common.sidebar.collapse")
+              }
               onClick={toggleCollapsed}
               className="inline-flex h-7 w-7 flex-none items-center justify-center rounded-md text-cx-muted hover:bg-cx-sub hover:text-cx-fg"
             >
@@ -159,11 +171,12 @@ const AppShell: React.FC = () => {
           </div>
 
           <nav id={navId} className="flex-1 space-y-1 px-2">
-            {NAV_ITEMS.map(({ label, to, icon: Icon, isActive }) => {
+            {NAV_ITEMS.map(({ labelKey, to, icon: Icon, isActive }) => {
+              const label = t(labelKey);
               const active = isActive(location.pathname);
               return (
                 <Link
-                  key={label}
+                  key={labelKey}
                   to={to}
                   aria-current={active ? "page" : undefined}
                   aria-label={collapsed ? label : undefined}
@@ -202,8 +215,8 @@ const AppShell: React.FC = () => {
                 data-testid="mode-indicator"
                 title={
                   isRemote
-                    ? `${serverUrl} — ${REMOTE_HEALTH_TEXT[health].reason}`
-                    : "Local mode: the simulator runs in this browser"
+                    ? `${serverUrl} — ${t(REMOTE_HEALTH_TEXT[health].reason)}`
+                    : t("common.mode.localTooltip")
                 }
                 className="inline-flex items-center gap-1.5 text-[11.5px] font-medium text-cx-fg2"
               >
@@ -212,7 +225,7 @@ const AppShell: React.FC = () => {
                 {isRemote ? (
                   <span
                     role="status"
-                    aria-label={REMOTE_HEALTH_TEXT[health].aria}
+                    aria-label={t(REMOTE_HEALTH_TEXT[health].aria)}
                     className={cn(
                       "h-[7px] w-[7px] rounded-full",
                       HEALTH_DOT[health],
@@ -225,10 +238,13 @@ const AppShell: React.FC = () => {
                   />
                 )}
                 <span className={cn(collapsed && "sr-only")}>
-                  {isRemote ? "Remote mode" : "Local mode"}
+                  {isRemote ? t("common.mode.remote") : t("common.mode.local")}
                 </span>
               </span>
-              <ThemeToggle />
+              <div className="flex items-center">
+                <LanguageToggle />
+                <ThemeToggle />
+              </div>
             </div>
             {!collapsed && (
               <div

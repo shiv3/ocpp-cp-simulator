@@ -21,6 +21,8 @@ import {
   type CurvePoint,
 } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
 
+import { t } from "../../../i18n";
+
 /** One vertex of the editor's power curve. */
 export interface PowerPoint {
   /** Minutes from transaction start. */
@@ -303,7 +305,7 @@ export function powerCurvePresets(maxKw: number): PowerCurvePreset[] {
   return [
     {
       id: "constant",
-      label: `Constant ${formatKw(ac)} kW`,
+      label: t("cpPanels.curvePreset.constant", { kw: formatKw(ac) }),
       points: [
         { minute: 0, kw: ac },
         { minute: 60, kw: ac },
@@ -311,7 +313,7 @@ export function powerCurvePresets(maxKw: number): PowerCurvePreset[] {
     },
     {
       id: "ramp",
-      label: "Ramp and hold",
+      label: t("cpPanels.curvePreset.ramp"),
       points: [
         { minute: 0, kw: 0 },
         { minute: 3, kw: ac },
@@ -321,7 +323,7 @@ export function powerCurvePresets(maxKw: number): PowerCurvePreset[] {
     },
     {
       id: "taper",
-      label: "Taper (DC-like)",
+      label: t("cpPanels.curvePreset.taper"),
       points: [
         { minute: 0, kw: r(2 * f) },
         { minute: 4, kw: maxKw },
@@ -342,10 +344,13 @@ export function describePowerCurve(
   points: readonly PowerPoint[],
   stopAtTargetSoc: boolean,
 ): string {
-  if (points.length < 2) return "no curve";
-  return `${curveEnergyKwh(points).toFixed(1)} kWh over ${formatMinutes(
-    curveDurationMin(points),
-  )} min, peak ${curvePeakKw(points).toFixed(1)} kW${
-    stopAtTargetSoc ? ", stop at target SoC" : ""
-  }`;
+  if (points.length < 2) return t("cpPanels.curvePreset.noCurve");
+  const text = t("cpPanels.curvePreset.describe", {
+    energy: curveEnergyKwh(points).toFixed(1),
+    minutes: formatMinutes(curveDurationMin(points)),
+    peak: curvePeakKw(points).toFixed(1),
+  });
+  return stopAtTargetSoc
+    ? t("cpPanels.curvePreset.describeStop", { text })
+    : text;
 }

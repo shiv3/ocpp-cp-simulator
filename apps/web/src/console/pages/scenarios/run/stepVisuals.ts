@@ -23,6 +23,7 @@ import {
 } from "../../../lib/stepLayout";
 import type { ScenarioRunState } from "../../../lib/useScenarioRun";
 import { STEP_CATEGORIES, type StepLane } from "../../../lib/scenarioSteps";
+import { t } from "../../../../i18n";
 
 /** The registry title of a step's type ("Status Change"), as the editor's
  *  step list and the run timeline show it. */
@@ -30,7 +31,7 @@ export function nodeTitle(node: ScenarioNode): string {
   const entry = isScenarioNodeType(node.type)
     ? NODE_FORM_REGISTRY[node.type]
     : undefined;
-  return entry?.title ?? node.type ?? "Step";
+  return entry ? t(entry.title) : (node.type ?? t("scenarioRun.step"));
 }
 
 // One look per palette category of the editor's "add step" picker, so a type

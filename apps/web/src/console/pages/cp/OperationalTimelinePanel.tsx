@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React from "react";
 import { Link } from "react-router-dom";
 import { RefreshCw } from "lucide-react";
@@ -47,6 +48,7 @@ const TimelineRow = React.memo(function TimelineRow({
 }: {
   entry: TimelineEntry;
 }) {
+  const { t } = useTranslation();
   return (
     <tr
       data-testid="timeline-row"
@@ -77,7 +79,7 @@ const TimelineRow = React.memo(function TimelineRow({
             to={buildRunUrl(entry.cpId, entry.runId)}
             className="ml-2 text-xs text-cx-accent hover:underline"
           >
-            View run
+            {t("cpPanels.timeline.viewRun")}
           </Link>
         )}
       </td>
@@ -97,14 +99,15 @@ const TimelineRow = React.memo(function TimelineRow({
 const OperationalTimelinePanel: React.FC<OperationalTimelinePanelProps> = ({
   cpId,
 }) => {
+  const { t } = useTranslation();
   const { page, isLoading, error, supported, refresh } =
     useOperationalTimeline(cpId);
 
   if (!supported) {
     return (
       <EmptyState
-        title="Operational events unavailable"
-        hint="This connection does not expose the operational timeline."
+        title={t("cpPanels.timeline.unavailableTitle")}
+        hint={t("cpPanels.timeline.unavailableHint")}
       />
     );
   }
@@ -112,9 +115,7 @@ const OperationalTimelinePanel: React.FC<OperationalTimelinePanelProps> = ({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-2 text-xs text-cx-muted">
-        <span>
-          {page.total} event{page.total === 1 ? "" : "s"}
-        </span>
+        <span>{t("cpPanels.timeline.event", { count: page.total })}</span>
         <button
           type="button"
           onClick={() => void refresh()}
@@ -122,28 +123,36 @@ const OperationalTimelinePanel: React.FC<OperationalTimelinePanelProps> = ({
           className="inline-flex items-center gap-1 rounded-md border border-cx-border px-2 py-1 text-cx-fg2 hover:bg-cx-sub disabled:opacity-50"
         >
           <RefreshCw className="h-3 w-3" aria-hidden />
-          Refresh
+          {t("cpPanels.timeline.refresh")}
         </button>
       </div>
 
       {error !== null ? (
         <p role="alert" className="text-sm text-cx-rose">
-          Could not read the operational timeline: {error}
+          {t("cpPanels.timeline.readFailed", { error })}
         </p>
       ) : !isLoading && page.entries.length === 0 ? (
         <EmptyState
-          title="No operational events yet"
-          hint="Connect the charge point, start a transaction or inject a network fault to see it recorded here."
+          title={t("cpPanels.timeline.emptyTitle")}
+          hint={t("cpPanels.timeline.emptyHint")}
         />
       ) : (
         <div className="overflow-x-auto rounded-lg border border-cx-border">
           <table className="w-full text-left text-sm">
             <thead className="bg-cx-sub text-xs uppercase tracking-wide text-cx-muted">
               <tr>
-                <th className="px-3 py-2 font-medium">Time</th>
-                <th className="px-3 py-2 font-medium">Event</th>
-                <th className="px-3 py-2 font-medium">Connector</th>
-                <th className="px-3 py-2 font-medium">Details</th>
+                <th className="px-3 py-2 font-medium">
+                  {t("cpPanels.timeline.colTime")}
+                </th>
+                <th className="px-3 py-2 font-medium">
+                  {t("cpPanels.timeline.colEvent")}
+                </th>
+                <th className="px-3 py-2 font-medium">
+                  {t("cpPanels.timeline.colConnector")}
+                </th>
+                <th className="px-3 py-2 font-medium">
+                  {t("cpPanels.timeline.colDetails")}
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-cx-border">

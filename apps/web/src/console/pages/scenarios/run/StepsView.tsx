@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React from "react";
 import { Check, GripVertical, Plus } from "lucide-react";
 
@@ -58,6 +59,7 @@ const StepBox: React.FC<StepBoxProps> = ({
   onSelect,
   editing,
 }) => {
+  const { t } = useTranslation();
   const live = state !== undefined && isLiveRunState(state) ? state : null;
   const body = (
     <>
@@ -76,14 +78,17 @@ const StepBox: React.FC<StepBoxProps> = ({
       {phase === "current" && live && <RunStatePill state={live} />}
       {failed ? (
         <span
-          aria-label="failed"
+          aria-label={t("scenarioRun.phase.failed")}
           className="flex h-4 w-4 items-center justify-center rounded-full bg-cx-rose/14 text-[11px] font-semibold text-cx-rose"
         >
           !
         </span>
       ) : (
         phase === "done" && (
-          <Check aria-label="done" className="h-4 w-4 text-cx-emerald" />
+          <Check
+            aria-label={t("scenarioRun.phase.done")}
+            className="h-4 w-4 text-cx-emerald"
+          />
         )
       )}
     </>
@@ -129,8 +134,8 @@ const StepBox: React.FC<StepBoxProps> = ({
         <button
           type="button"
           tabIndex={-1}
-          aria-label="Drag to reorder"
-          title="Drag to reorder (or Alt+↑/↓ on the step)"
+          aria-label={t("scenarioRun.dragReorder")}
+          title={t("scenarioRun.dragReorderHint")}
           className="absolute inset-y-0 left-0 z-10 flex w-6 cursor-grab touch-none items-center justify-center rounded-l-[10px] text-cx-faint hover:text-cx-fg active:cursor-grabbing"
           {...editing.dragHandlers}
         >
@@ -141,8 +146,14 @@ const StepBox: React.FC<StepBoxProps> = ({
         <button
           type="button"
           aria-pressed={selected}
+          data-step-select
           aria-label={
-            editing ? `Select step ${index}: ${nodeTitle(step)}` : undefined
+            editing
+              ? t("scenarioRun.selectStep", {
+                  n: index ?? "",
+                  title: nodeTitle(step),
+                })
+              : undefined
           }
           onClick={() => onSelect(step.id)}
           onKeyDown={editing?.onKeyDown}
@@ -173,21 +184,24 @@ function measureBoxes(lane: StepLane, root: HTMLElement | null): number[] {
 const InsertZone: React.FC<{ label: string; onOpen: () => void }> = ({
   label,
   onOpen,
-}) => (
-  <li className="group/insert relative h-1.5">
-    <div className="absolute inset-x-0 -top-[5px] z-10 flex h-4 items-center justify-center">
-      <button
-        type="button"
-        aria-label={label}
-        title="Insert a step here"
-        onClick={onOpen}
-        className="flex h-4 w-4 items-center justify-center rounded-full border border-cx-border-strong bg-cx-card text-cx-muted opacity-0 hover:border-cx-accent hover:text-cx-accent focus-visible:opacity-100 group-hover/insert:opacity-100"
-      >
-        <Plus className="h-3 w-3" />
-      </button>
-    </div>
-  </li>
-);
+}) => {
+  const { t } = useTranslation();
+  return (
+    <li className="group/insert relative h-1.5">
+      <div className="absolute inset-x-0 -top-[5px] z-10 flex h-4 items-center justify-center">
+        <button
+          type="button"
+          aria-label={label}
+          title={t("scenarioRun.insertStepHere")}
+          onClick={onOpen}
+          className="flex h-4 w-4 items-center justify-center rounded-full border border-cx-border-strong bg-cx-card text-cx-muted opacity-0 hover:border-cx-accent hover:text-cx-accent focus-visible:opacity-100 group-hover/insert:opacity-100"
+        >
+          <Plus className="h-3 w-3" />
+        </button>
+      </div>
+    </li>
+  );
+};
 
 /**
  * The run's steps as boxes stacked top to bottom: the chain, then — when the
@@ -209,11 +223,12 @@ const StepsView: React.FC<StepRunViewProps> = (props) => {
     onAddBranch,
   } = props;
 
+  const { t } = useTranslation();
   const editing = useStepEditing(props, measureBoxes);
   const { drag } = editing;
 
   if (!editable && layoutSteps(layout).length === 0) {
-    return <p className="text-sm text-cx-muted">This scenario has no steps.</p>;
+    return <p className="text-sm text-cx-muted">{t("scenarioRun.noSteps")}</p>;
   }
 
   const canInsert = editable && onInsertStep !== undefined;
@@ -230,7 +245,7 @@ const StepsView: React.FC<StepRunViewProps> = (props) => {
         onClick={() => editing.openSlot(lane, length)}
         className="mt-1.5 w-full rounded-[10px] border border-dashed border-cx-border-strong py-2 text-[13px] font-medium text-cx-muted hover:text-cx-fg"
       >
-        + Add step
+        {t("scenarioRun.addStepButton")}
       </button>
     );
   };
@@ -296,7 +311,10 @@ const StepsView: React.FC<StepRunViewProps> = (props) => {
                 <li aria-hidden className="h-1.5" />
               ) : (
                 <InsertZone
-                  label={`Insert step between ${stepIndexOf(layout, steps[i - 1].id)} and ${stepIndexOf(layout, step.id)}`}
+                  label={t("scenarioRun.insertBetween", {
+                    from: stepIndexOf(layout, steps[i - 1].id) ?? "",
+                    to: stepIndexOf(layout, step.id) ?? "",
+                  })}
                   onOpen={() => editing.openSlot(lane, i)}
                 />
               ))}
@@ -353,7 +371,7 @@ const StepsView: React.FC<StepRunViewProps> = (props) => {
                 {addSlot(
                   index,
                   branch.steps.length,
-                  `Add step to ${branch.name}`,
+                  t("scenarioRun.addToBranch", { name: branch.name }),
                 )}
               </div>
             );
@@ -366,7 +384,7 @@ const StepsView: React.FC<StepRunViewProps> = (props) => {
           onClick={onAddBranch}
           className="mt-3 text-[13px] font-medium text-cx-accent hover:underline"
         >
-          + Add parallel branch
+          {t("scenarioRun.addParallelBranchButton")}
         </button>
       )}
     </div>

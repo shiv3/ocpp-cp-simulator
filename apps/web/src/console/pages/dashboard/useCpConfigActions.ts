@@ -7,6 +7,7 @@ import {
   defaultAutoMeterValueConfig,
   type AutoMeterValueConfig,
 } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
+import { t } from "../../../i18n";
 import { useChargePoints } from "../../../data/hooks/useChargePoints";
 import { useConfig } from "../../../data/hooks/useConfig";
 import { useDataContext } from "../../../data/providers/DataProvider";
@@ -148,12 +149,12 @@ export function useCpConfigActions(): UseCpConfigActionsResult {
         const params = buildRemoteParams(cpConfig);
         if (isEdit) {
           if (!chargePointService.updateChargePoint) {
-            throw new Error("updateChargePoint not supported in this mode");
+            throw new Error(t("dashboard.actions.updateNotSupported"));
           }
           await chargePointService.updateChargePoint(params);
         } else {
           if (!chargePointService.createChargePoint) {
-            throw new Error("createChargePoint not supported in this mode");
+            throw new Error(t("dashboard.actions.createNotSupported"));
           }
           await chargePointService.createChargePoint({
             ...params,
@@ -166,7 +167,12 @@ export function useCpConfigActions(): UseCpConfigActionsResult {
         const action = isEdit ? "update" : "create";
         console.error(`Failed to ${action} remote CP`, err);
         alert(
-          `Failed to ${action} CP: ${err instanceof Error ? err.message : String(err)}`,
+          t(
+            isEdit
+              ? "dashboard.actions.updateFailed"
+              : "dashboard.actions.createFailed",
+            { error: err instanceof Error ? err.message : String(err) },
+          ),
         );
       }
     },
@@ -217,7 +223,7 @@ export function useCpConfigActions(): UseCpConfigActionsResult {
           existingIds.some((entry) => entry.ChargePointID === cpConfig.cpId)
         ) {
           throw new Error(
-            `A charge point with ID "${cpConfig.cpId}" already exists`,
+            t("dashboard.actions.duplicateId", { id: cpConfig.cpId }),
           );
         }
         const nextIds = isNew
@@ -281,7 +287,9 @@ export function useCpConfigActions(): UseCpConfigActionsResult {
         // be an unhandled rejection with no feedback.
         console.error("Failed to save local CP", err);
         alert(
-          `Failed to save CP: ${err instanceof Error ? err.message : String(err)}`,
+          t("dashboard.actions.saveFailed", {
+            error: err instanceof Error ? err.message : String(err),
+          }),
         );
       }
     },
@@ -315,7 +323,7 @@ export function useCpConfigActions(): UseCpConfigActionsResult {
       if (mode === "remote") {
         try {
           if (!chargePointService.removeChargePoint) {
-            throw new Error("removeChargePoint not supported in this mode");
+            throw new Error(t("dashboard.actions.removeNotSupported"));
           }
           await chargePointService.removeChargePoint(cpId);
           await refresh();
@@ -323,7 +331,9 @@ export function useCpConfigActions(): UseCpConfigActionsResult {
         } catch (err) {
           console.error("Failed to remove remote CP", err);
           alert(
-            `Failed to remove CP: ${err instanceof Error ? err.message : String(err)}`,
+            t("dashboard.actions.removeFailed", {
+              error: err instanceof Error ? err.message : String(err),
+            }),
           );
           return false;
         }
@@ -335,7 +345,7 @@ export function useCpConfigActions(): UseCpConfigActionsResult {
         // empty list would "remove" the last CP and save no configuration
         // at all, deleting every charge point.
         if (!config || !existingIds.some((e) => e.ChargePointID === cpId)) {
-          throw new Error(`Charge point "${cpId}" is not in the configuration`);
+          throw new Error(t("dashboard.actions.notInConfig", { id: cpId }));
         }
         const nextIds = existingIds.filter(
           (entry) => entry.ChargePointID !== cpId,
@@ -360,7 +370,9 @@ export function useCpConfigActions(): UseCpConfigActionsResult {
         // local storage failure doesn't become an unhandled rejection.
         console.error("Failed to remove local CP", err);
         alert(
-          `Failed to remove CP: ${err instanceof Error ? err.message : String(err)}`,
+          t("dashboard.actions.removeFailed", {
+            error: err instanceof Error ? err.message : String(err),
+          }),
         );
         return false;
       }

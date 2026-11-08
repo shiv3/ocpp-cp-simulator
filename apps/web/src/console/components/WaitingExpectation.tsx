@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, { useEffect, useState } from "react";
 
 import { cn } from "@/lib/utils";
@@ -29,6 +30,7 @@ const WaitingExpectation: React.FC<WaitingExpectationProps> = ({
   now,
   className,
 }) => {
+  const { t } = useTranslation();
   const [ownNow, setOwnNow] = useState<number>(Date.now());
   const countdownMoves =
     now === undefined &&
@@ -51,15 +53,19 @@ const WaitingExpectation: React.FC<WaitingExpectationProps> = ({
   return (
     <div className={cn("flex flex-col gap-1", className)}>
       <div>
-        Waiting for{" "}
+        {t("consoleShared.waitingExpectation.waitingFor")}{" "}
         <code className="rounded bg-cx-sub px-1 py-0.5 font-mono text-xs">
           {describeExpectation(expectation)}
         </code>
       </div>
       {remaining !== null ? (
-        <div>Timeout in {formatElapsed(remaining)}</div>
+        <div>
+          {t("consoleShared.waitingExpectation.timeoutIn", {
+            time: formatElapsed(remaining),
+          })}
+        </div>
       ) : (
-        <div>No timeout</div>
+        <div>{t("consoleShared.waitingExpectation.noTimeout")}</div>
       )}
     </div>
   );

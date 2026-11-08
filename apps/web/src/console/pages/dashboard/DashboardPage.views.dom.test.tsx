@@ -329,7 +329,7 @@ describe("DashboardPage views and filters", () => {
       "CP-A#2",
     ]);
     expect(container.querySelector('[data-cp-id="CP-B"]')).toBeNull();
-    expect(counter(container)).toBe("1 CPs · 1 connectors");
+    expect(counter(container)).toBe("1 CP · 1 connector");
   });
 
   it("an empty result shows the no-match state", async () => {
@@ -417,7 +417,7 @@ describe("DashboardPage views and filters", () => {
     expect(input.value).toBe("CP-B");
     expect(headOf(container, "CP-B")).toBeTruthy();
     expect(container.querySelector('[data-cp-id="CP-A"]')).toBeNull();
-    expect(counter(container)).toBe("1 CPs · 1 connectors");
+    expect(counter(container)).toBe("1 CP · 1 connector");
   });
 
   /** Focuses a combobox, types into it and returns what its list offers. */
@@ -488,7 +488,7 @@ describe("DashboardPage views and filters", () => {
     );
     expect(location?.search).toBe("?tx=42");
     expect(input.value).toBe("42");
-    expect(counter(container)).toBe("1 CPs · 1 connectors");
+    expect(counter(container)).toBe("1 CP · 1 connector");
   });
 
   it("?conn= and ?tx= do not touch the panel's ?connector=, and both filters combine", async () => {
@@ -545,7 +545,7 @@ describe("DashboardPage views and filters", () => {
     expect(cells(container).map((c) => c.dataset.connectorCell)).toEqual([
       "CP-A#2",
     ]);
-    expect(counter(container)).toBe("1 CPs · 1 connectors");
+    expect(counter(container)).toBe("1 CP · 1 connector");
   });
 
   it("the Scenario checkbox leaves nothing when no run is active", async () => {

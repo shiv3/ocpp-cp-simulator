@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, { memo } from "react";
 import type { NodeProps } from "@xyflow/react";
 import { Handle, Position, type Node } from "@xyflow/react";
@@ -13,6 +14,7 @@ type ExtendedReservationTriggerNodeData = ReservationTriggerNodeData & {
 const ReservationTriggerNode: React.FC<
   NodeProps<Node<ExtendedReservationTriggerNodeData>>
 > = ({ data, selected }) => {
+  const { t } = useTranslation();
   const progress = data.progress;
   const progressPercent = progress
     ? ((progress.total - progress.remaining) / progress.total) * 100
@@ -29,21 +31,23 @@ const ReservationTriggerNode: React.FC<
       <Handle type="target" position={Position.Top} className="w-3 h-3" />
 
       <div className="text-xs font-semibold text-yellow-700 dark:text-yellow-300 mb-1">
-        Reservation Trigger
+        {t("scenarioNodes.title.reservationTrigger")}
       </div>
       <div className="font-bold text-sm text-primary mb-1">{data.label}</div>
       {data.timeout !== undefined && data.timeout > 0 && (
         <div className="text-xs text-muted">
-          Timeout: {data.timeout}s
+          {t("scenarioNodes.timeout", { seconds: data.timeout })}
           {progress && progress.remaining > 0 && (
             <span className="ml-1 text-yellow-700 dark:text-yellow-300 font-semibold">
-              ({progress.remaining.toFixed(1)}s left)
+              {t("scenarioNodes.secondsLeft", {
+                seconds: progress.remaining.toFixed(1),
+              })}
             </span>
           )}
         </div>
       )}
       {(!data.timeout || data.timeout === 0) && (
-        <div className="text-xs text-muted">No timeout</div>
+        <div className="text-xs text-muted">{t("scenarioNodes.noTimeout")}</div>
       )}
 
       {/* Progress Bar */}

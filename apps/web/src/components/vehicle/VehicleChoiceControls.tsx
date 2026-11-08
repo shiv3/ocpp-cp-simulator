@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, { useMemo } from "react";
 
 import {
@@ -9,9 +10,10 @@ import {
 } from "@ocpp-cp-sim/core/cp/domain/vehicle/VehicleProfile";
 import type { VehicleProfilesState } from "../../data/hooks/useVehicleProfiles";
 import { cn } from "../../lib/utils";
+import { t } from "../../i18n";
 import {
   describeWarning,
-  FIELD_LABELS,
+  fieldLabel,
   isPresetName,
   profileOptionValue,
   type VehicleChoiceNotesState,
@@ -23,19 +25,26 @@ function optionLabel(
   missing: readonly EditableSpecField[],
 ): string {
   if (missing.length > 0) {
-    return `${profile.name} · ${currentType} (missing ${missing
-      .map((f) => FIELD_LABELS[f])
-      .join(", ")})`;
+    return t("common.vehicle.optionMissing", {
+      name: profile.name,
+      type: currentType,
+      fields: missing.map((f) => fieldLabel(f)).join(", "),
+    });
   }
   const specs = effectiveSpecs(profile);
   const parts = [`${profile.name} · ${currentType}`];
   parts.push(`${specs.usableBatteryKwh} kWh`);
   if (currentType === "AC") {
     parts.push(`${specs.acMaxKw} kW`);
-    if (specs.acPhases) parts.push(`${specs.acPhases} ph`);
+    if (specs.acPhases)
+      parts.push(t("common.vehicle.phasesShort", { count: specs.acPhases }));
   } else {
     if (specs.dcMaxKw) parts.push(`${specs.dcMaxKw} kW`);
-    parts.push(profile.dcCurve?.length ? "curve" : "no curve");
+    parts.push(
+      profile.dcCurve?.length
+        ? t("common.vehicle.curve")
+        : t("common.vehicle.noCurve"),
+    );
   }
   return parts.join(" · ");
 }
@@ -44,6 +53,7 @@ function optionLabel(
 export const VehicleProfileOptions: React.FC<{
   state: VehicleProfilesState;
 }> = ({ state }) => {
+  const { t } = useTranslation();
   // Recomputed only when the profiles change, not on every keystroke of the
   // form around the select.
   const options = useMemo(
@@ -59,20 +69,22 @@ export const VehicleProfileOptions: React.FC<{
           };
         }),
       ),
-    [state.profiles],
+    // `t` is not read inside, but a language change must rebuild the labels.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state.profiles, t],
   );
   if (state.error && !state.isKnown) {
     return (
-      <optgroup label="Saved profiles">
+      <optgroup label={t("common.vehicle.savedProfiles")}>
         <option disabled value="">
-          Saved profiles unavailable: {state.error}
+          {t("common.vehicle.savedProfilesUnavailable", { error: state.error })}
         </option>
       </optgroup>
     );
   }
   if (options.length === 0) return null;
   return (
-    <optgroup label="Saved profiles">
+    <optgroup label={t("common.vehicle.savedProfiles")}>
       {options.map((o) => (
         <option key={o.key} value={o.value} disabled={o.disabled}>
           {o.label}
@@ -96,6 +108,7 @@ export const VehicleChoiceNotes: React.FC<{
   notes: VehicleChoiceNotesState | null;
   className?: string;
 }> = ({ notes, className }) => {
+  const { t } = useTranslation();
   if (!notes) return null;
   if (notes.error) {
     return (
@@ -107,7 +120,7 @@ export const VehicleChoiceNotes: React.FC<{
   if (notes.warnings.length === 0) return null;
   return (
     <ul
-      aria-label="Vehicle profile notes"
+      aria-label={t("common.vehicle.notesAria")}
       className={cn(
         "list-disc space-y-0.5 pl-4 text-xs text-cx-amber",
         className,

@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 
@@ -17,6 +18,7 @@ import ScenarioRunContent from "./scenarios/run/ScenarioRunContent";
  * (`state.from`), else the Scenarios page.
  */
 const ScenarioRunPage: React.FC = () => {
+  const { t } = useTranslation();
   const [searchParams] = useSearchParams();
   const location = useLocation();
 
@@ -37,7 +39,7 @@ const ScenarioRunPage: React.FC = () => {
         to={backHref}
         className="mb-3 inline-block text-sm text-cx-accent hover:underline"
       >
-        ← Back
+        {t("scenarios.runPage.back")}
       </Link>
       {/* Keyed: another target starts from a clean run and selection. */}
       <ScenarioRunContent

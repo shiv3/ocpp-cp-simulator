@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import React, { useState } from "react";
 
 import {
   Dialog,
@@ -7,6 +8,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { useTemplateText } from "@/i18n/templates";
 
 import {
   scenarioTemplates,
@@ -20,13 +22,18 @@ export interface TemplateBrowserDialogProps {
 }
 
 /** The templates whose name or description contains `query` (case-insensitive). */
-function filterTemplates(query: string): ScenarioTemplate[] {
+function filterTemplates(
+  query: string,
+  text: ReturnType<typeof useTemplateText>,
+): ScenarioTemplate[] {
   const needle = query.trim().toLowerCase();
   if (needle === "") return scenarioTemplates;
   return scenarioTemplates.filter(
     (template) =>
       template.name.toLowerCase().includes(needle) ||
-      template.description.toLowerCase().includes(needle),
+      template.description.toLowerCase().includes(needle) ||
+      text.name(template).toLowerCase().includes(needle) ||
+      text.description(template).toLowerCase().includes(needle),
   );
 }
 
@@ -34,8 +41,10 @@ const Body: React.FC<Omit<TemplateBrowserDialogProps, "open">> = ({
   onOpenChange,
   onUseTemplate,
 }) => {
+  const { t } = useTranslation();
   const [query, setQuery] = useState("");
-  const visible = useMemo(() => filterTemplates(query), [query]);
+  const text = useTemplateText();
+  const visible = filterTemplates(query, text);
 
   const use = (template: ScenarioTemplate) => {
     onOpenChange(false);
@@ -48,8 +57,8 @@ const Body: React.FC<Omit<TemplateBrowserDialogProps, "open">> = ({
         <Input
           autoFocus
           type="search"
-          aria-label="Search templates"
-          placeholder="Search by name or description"
+          aria-label={t("scenarios.templateBrowser.searchLabel")}
+          placeholder={t("scenarios.templateBrowser.searchPlaceholder")}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
@@ -62,7 +71,10 @@ const Body: React.FC<Omit<TemplateBrowserDialogProps, "open">> = ({
           className="shrink-0 text-xs tabular-nums text-cx-muted"
           aria-live="polite"
         >
-          {visible.length} of {scenarioTemplates.length}
+          {t("scenarios.templateBrowser.countOf", {
+            shown: visible.length,
+            total: scenarioTemplates.length,
+          })}
         </span>
       </div>
       <ul className="-mr-1 max-h-[60vh] space-y-2 overflow-y-auto pr-1">
@@ -75,14 +87,14 @@ const Body: React.FC<Omit<TemplateBrowserDialogProps, "open">> = ({
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-sm font-medium text-cx-fg">
-                  {template.name}
+                  {text.name(template)}
                 </span>
                 <span className="rounded border border-cx-border px-1.5 py-px font-mono text-[11px] text-cx-muted">
                   {template.targetType}
                 </span>
               </div>
               <p className="mt-1 line-clamp-2 text-xs text-cx-muted">
-                {template.description}
+                {text.description(template)}
               </p>
             </div>
             <button
@@ -90,13 +102,13 @@ const Body: React.FC<Omit<TemplateBrowserDialogProps, "open">> = ({
               onClick={() => use(template)}
               className="shrink-0 rounded-md border border-cx-border px-2.5 py-1 text-xs font-medium text-cx-fg2 hover:bg-cx-sub"
             >
-              Use template
+              {t("scenarios.gallery.useTemplate")}
             </button>
           </li>
         ))}
         {visible.length === 0 && (
           <li className="py-6 text-center text-sm text-cx-muted">
-            No template matches “{query.trim()}”.
+            {t("scenarios.templateBrowser.noMatch", { query: query.trim() })}
           </li>
         )}
       </ul>
@@ -112,22 +124,25 @@ const TemplateBrowserDialog: React.FC<TemplateBrowserDialogProps> = ({
   open,
   onOpenChange,
   onUseTemplate,
-}) => (
-  <Dialog open={open} onOpenChange={onOpenChange}>
-    <DialogContent className="flex max-h-[calc(100vh-32px)] w-[min(720px,calc(100vw-32px))] max-w-none flex-col gap-0 overflow-hidden border-cx-border-strong bg-cx-card p-0 text-cx-fg sm:rounded-xl">
-      <div className="border-b border-cx-border py-3 pl-4 pr-12">
-        <DialogTitle className="text-[15px] font-semibold tracking-normal">
-          Scenario templates
-        </DialogTitle>
-        <DialogDescription className="sr-only">
-          Search the built-in scenario templates and create a scenario from one.
-        </DialogDescription>
-      </div>
-      {open && (
-        <Body onOpenChange={onOpenChange} onUseTemplate={onUseTemplate} />
-      )}
-    </DialogContent>
-  </Dialog>
-);
+}) => {
+  const { t } = useTranslation();
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="flex max-h-[calc(100vh-32px)] w-[min(720px,calc(100vw-32px))] max-w-none flex-col gap-0 overflow-hidden border-cx-border-strong bg-cx-card p-0 text-cx-fg sm:rounded-xl">
+        <div className="border-b border-cx-border py-3 pl-4 pr-12">
+          <DialogTitle className="text-[15px] font-semibold tracking-normal">
+            {t("scenarios.templateBrowser.title")}
+          </DialogTitle>
+          <DialogDescription className="sr-only">
+            {t("scenarios.templateBrowser.description")}
+          </DialogDescription>
+        </div>
+        {open && (
+          <Body onOpenChange={onOpenChange} onUseTemplate={onUseTemplate} />
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+};
 
 export default TemplateBrowserDialog;

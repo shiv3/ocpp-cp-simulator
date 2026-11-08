@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, { Suspense, lazy, useState } from "react";
 
 import {
@@ -43,20 +44,24 @@ export interface StepInspectorProps {
  * currently render no fields of their own beyond `NoExtraConfigForm`).
  */
 const StepInspector: React.FC<StepInspectorProps> = ({ node, onChange }) => {
+  const { t } = useTranslation();
   const [isCurveModalOpen, setIsCurveModalOpen] = useState(false);
 
   if (!node) {
     return (
       <EmptyState
-        title="Select a step"
-        hint="Pick a step to edit its configuration."
+        title={t("scenarios.inspector.selectStep")}
+        hint={t("scenarios.inspector.selectStepHint")}
       />
     );
   }
 
   if (!isScenarioNodeType(node.type)) {
     return (
-      <EmptyState title="Unknown step type" hint={String(node.type ?? "")} />
+      <EmptyState
+        title={t("scenarios.inspector.unknownType")}
+        hint={String(node.type ?? "")}
+      />
     );
   }
 
@@ -82,12 +87,12 @@ const StepInspector: React.FC<StepInspectorProps> = ({ node, onChange }) => {
 
       <div className="grid grid-cols-1 gap-3 border-b border-cx-border pb-4 @lg:grid-cols-2">
         <TextField
-          label="Label"
+          label={t("scenarios.inspector.label")}
           value={(formValue.label as string | undefined) ?? ""}
           onChange={(label) => handleFormChange({ ...formValue, label })}
         />
         <TextareaField
-          label="Description"
+          label={t("scenarios.inspector.description")}
           value={(formValue.description as string | undefined) ?? ""}
           onChange={(description) =>
             handleFormChange({ ...formValue, description })

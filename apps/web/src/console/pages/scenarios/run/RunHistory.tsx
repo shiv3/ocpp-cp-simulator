@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React from "react";
 
 import { cn } from "@/lib/utils";
@@ -32,6 +33,7 @@ const RunHistory: React.FC<RunHistoryProps> = ({
   onSelect,
   showTarget = false,
 }) => {
+  const { t } = useTranslation();
   if (rows.length === 0) {
     return <p className="text-sm text-cx-muted">{emptyText}</p>;
   }
@@ -51,7 +53,7 @@ const RunHistory: React.FC<RunHistoryProps> = ({
                     "rounded-full border px-2 py-0.5 text-xs font-semibold",
                     VERDICT_STYLES[row.summary.verdict],
                   )}
-                  title="Verdict"
+                  title={t("scenarioRun.history.verdict")}
                 >
                   {row.summary.verdict}
                 </span>
@@ -59,9 +61,9 @@ const RunHistory: React.FC<RunHistoryProps> = ({
               {row.attached && (
                 <span
                   className="rounded-full border border-cx-border-strong px-2 py-0.5 text-xs text-cx-fg2"
-                  title="Started outside this page"
+                  title={t("scenarioRun.history.startedOutside")}
                 >
-                  attached
+                  {t("scenarioRun.history.attached")}
                 </span>
               )}
               {showTarget && row.summary && (
@@ -78,7 +80,9 @@ const RunHistory: React.FC<RunHistoryProps> = ({
               {row.summary
                 ? formatDurationMs(row.summary.durationMs)
                 : formatDuration(row.startedAt, row.endedAt)}
-              {row.failedNodeId ? ` · node ${row.failedNodeId}` : ""}
+              {row.failedNodeId
+                ? ` · ${t("scenarioRun.history.node", { id: row.failedNodeId })}`
+                : ""}
             </span>
           </>
         );

@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
@@ -31,6 +32,7 @@ const RunHistoryCard: React.FC<RunHistoryCardProps> = ({
   scenarioId,
   runs,
 }) => {
+  const { t } = useTranslation();
   const recorded = useScenarioRunHistory(
     cpId && connectorId != null && scenarioId
       ? { cpId, connectorId, scenarioId, limit: RECORDED_RUNS_LIMIT }
@@ -53,27 +55,29 @@ const RunHistoryCard: React.FC<RunHistoryCardProps> = ({
   return (
     <div className="rounded-[10px] border border-cx-border bg-cx-card p-4 shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none">
       <div className="mb-3 flex items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold text-cx-fg2">Run history</h2>
+        <h2 className="text-sm font-semibold text-cx-fg2">
+          {t("scenarioRun.history.title")}
+        </h2>
         {recorded.supported && (
           <Link
             to={buildRunHistoryUrl(cpId, connectorId, scenarioId)}
             className="text-xs text-cx-accent hover:underline"
           >
-            View all runs
+            {t("scenarioRun.history.viewAll")}
           </Link>
         )}
       </div>
       {recorded.error && (
         <p className="mb-2 text-xs text-cx-rose">
-          Could not load the recorded runs: {recorded.error}
+          {t("scenarioRun.history.loadError", { error: recorded.error })}
         </p>
       )}
       <RunHistory
         rows={historyRows}
         emptyText={
           recorded.supported
-            ? "No runs recorded yet."
-            : "No runs yet this session."
+            ? t("scenarioRun.history.emptyRecorded")
+            : t("scenarioRun.history.emptySession")
         }
         selectedKey={selectedRunId ? runRowKey(cpId, selectedRunId) : null}
         onSelect={(row) =>

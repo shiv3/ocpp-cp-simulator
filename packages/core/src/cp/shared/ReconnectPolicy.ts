@@ -91,7 +91,8 @@ export function validateReconnectPolicy(
   if (!Number.isFinite(policy.maxDelayMs) || policy.maxDelayMs < 0) {
     return "reconnect.maxDelayMs must be a number >= 0";
   }
-  if (policy.maxDelayMs < policy.baseDelayMs) {
+  // `fixed` never reads maxDelayMs, so only the exponential cap must hold it.
+  if (policy.mode === "exponential" && policy.maxDelayMs < policy.baseDelayMs) {
     return "reconnect.maxDelayMs must be >= reconnect.baseDelayMs";
   }
   if (!Number.isFinite(policy.jitterMs) || policy.jitterMs < 0) {
@@ -117,7 +118,9 @@ export function retryBackOffDefaults(
   return {
     waitMinimumSeconds: Math.max(1, Math.ceil(policy.baseDelayMs / 1000)),
     randomRangeSeconds: Math.ceil(policy.jitterMs / 1000),
-    repeatTimes: doublings,
+    // RetryBackOffRepeatTimes is at most 30: GetVariables must not report a
+    // value SetVariables would reject.
+    repeatTimes: Math.min(30, doublings),
   };
 }
 

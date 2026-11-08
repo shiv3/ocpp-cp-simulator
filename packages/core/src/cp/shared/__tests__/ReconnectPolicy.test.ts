@@ -64,6 +64,23 @@ describe("ReconnectPolicy (#609)", () => {
     expect(() => resolveReconnectPolicy({ jitterMs: -1 })).toThrow(/jitterMs/);
   });
 
+  it("fixed mode ignores maxDelayMs, so a long base delay alone is valid", () => {
+    expect(
+      resolveReconnectPolicy({ mode: "fixed", baseDelayMs: 60_000 })
+        .baseDelayMs,
+    ).toBe(60_000);
+  });
+
+  it("derives a RetryBackOffRepeatTimes within the variable's maximum of 30", () => {
+    const vars = retryBackOffDefaults(
+      resolveReconnectPolicy({
+        baseDelayMs: 1,
+        maxDelayMs: 2 ** 40,
+      }),
+    );
+    expect(vars.repeatTimes).toBe(30);
+  });
+
   describe("OCPP 2.x RetryBackOff variables (Part 4 §5.4)", () => {
     it("derives variable defaults that reproduce the default schedule", () => {
       const vars = retryBackOffDefaults(DEFAULT_RECONNECT_POLICY);

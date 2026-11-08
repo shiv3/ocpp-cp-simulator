@@ -119,7 +119,7 @@ silently leave the default in place). The delay a network-simulation
 **Giving up** — `maxAttempts` or `bootRetryLimit` reached — logs a warning, emits
 `gaveUp` and records a `gave_up` entry (`target` `reconnect` or
 `boot_notification`, `attempts`) in the [operational timeline](operational-timeline.md).
-The charge point then stays offline until an explicit `connect`, which starts
+On 2.x this is an opt-in deviation: OCPP 2.0.1 Part 4 §5.4 says the station keeps reconnecting, and the default (`-1`, unlimited) does. The charge point then stays offline until an explicit `connect`, which starts
 with a fresh budget; so does every new connection: the BootNotification budget
 is restored when a socket opens, not only on an `Accepted` answer. The
 `gave_up` entry of a BootNotification follows the `Rejected` answer that caused it.

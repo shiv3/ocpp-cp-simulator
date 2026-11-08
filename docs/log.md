@@ -2450,3 +2450,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - F06.FR.17: on 2.0.1 / 2.1 the answer is `Rejected` and no BootNotification follows when the last BootNotification answer was `Accepted`; Pending, Rejected and unanswered boots still answer `Accepted` and send it. Golden `201-trigger-message-all` re-recorded (id-4).
 - Page: [Control plane](concepts/control-plane.md).
+
+## [2026-11-08] ingest | Migration guard, file-per-migration framework and derived upsert placeholders
+
+- `SCHEMA_VERSION` is derived from `migrations/index.ts` (`MIGRATIONS`, empty today; legacy versions 3..25 stay inline in `runMigrations`), a guard test checks that versions are unique, contiguous and ascending, and the `charge_points`, `connector_runtime` and `scenario_runs` upserts are built from one `[column, value]` list (`buildUpsert`). No schema or SQL behaviour change. Page: [State persistence](concepts/state-persistence.md#migrations).

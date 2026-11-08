@@ -1,6 +1,7 @@
 import React from "react";
 
 import type { DcCurvePoint } from "@ocpp-cp-sim/core/cp/domain/vehicle/VehicleProfile";
+import { useT } from "@/i18n";
 
 /** A small power-against-SoC drawing of a DC curve, as published. */
 const CurvePreview: React.FC<{
@@ -8,6 +9,7 @@ const CurvePreview: React.FC<{
   width?: number;
   height?: number;
 }> = ({ points, width = 120, height = 36 }) => {
+  const t = useT();
   if (points.length === 0) return null;
   const peak = Math.max(...points.map((p) => p.powerKw)) || 1;
   const coords = [...points]
@@ -27,7 +29,7 @@ const CurvePreview: React.FC<{
       height={height}
       viewBox={`0 0 ${width} ${height}`}
       role="img"
-      aria-label="Curve preview"
+      aria-label={t("consoleShared.curvePreview.label")}
       className="shrink-0 rounded border border-cx-border bg-cx-card"
     >
       <polyline

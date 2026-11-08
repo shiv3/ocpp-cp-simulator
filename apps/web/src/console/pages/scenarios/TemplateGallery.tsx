@@ -4,6 +4,8 @@ import {
   scenarioTemplates,
   type ScenarioTemplate,
 } from "@ocpp-cp-sim/core/utils/scenarioTemplates";
+import { useT } from "../../../i18n";
+import { useTemplateText } from "@/i18n/templates";
 import TemplateBrowserDialog from "./TemplateBrowserDialog";
 
 export interface TemplateGalleryProps {
@@ -20,6 +22,8 @@ const VISIBLE_COUNT = 8;
  * {@link TemplateBrowserDialog} is how every template is reached.
  */
 const TemplateGallery: React.FC<TemplateGalleryProps> = ({ onUseTemplate }) => {
+  const t = useT();
+  const text = useTemplateText();
   const visible = scenarioTemplates.slice(0, VISIBLE_COUNT);
   const remaining = scenarioTemplates.length - visible.length;
   const [browsing, setBrowsing] = useState(false);
@@ -27,14 +31,18 @@ const TemplateGallery: React.FC<TemplateGalleryProps> = ({ onUseTemplate }) => {
   return (
     <div className="mb-6">
       <div className="mb-2 flex items-baseline justify-between">
-        <h2 className="text-sm font-semibold text-cx-fg2">Templates</h2>
+        <h2 className="text-sm font-semibold text-cx-fg2">
+          {t("scenarios.gallery.title")}
+        </h2>
         {remaining > 0 && (
           <button
             type="button"
             onClick={() => setBrowsing(true)}
             className="text-xs text-cx-accent hover:underline"
           >
-            Browse all {scenarioTemplates.length} templates
+            {t("scenarios.gallery.browseAll", {
+              count: scenarioTemplates.length,
+            })}
           </button>
         )}
       </div>
@@ -45,17 +53,17 @@ const TemplateGallery: React.FC<TemplateGalleryProps> = ({ onUseTemplate }) => {
             className="w-64 shrink-0 rounded-lg border border-cx-border p-3"
           >
             <div className="text-sm font-medium text-cx-fg">
-              {template.name}
+              {text.name(template)}
             </div>
             <p className="mt-1 line-clamp-2 text-xs text-cx-muted">
-              {template.description}
+              {text.description(template)}
             </p>
             <button
               type="button"
               onClick={() => onUseTemplate(template)}
               className="mt-3 rounded-md border border-cx-border px-2.5 py-1 text-xs font-medium text-cx-fg2 hover:bg-cx-sub"
             >
-              Use template
+              {t("scenarios.gallery.useTemplate")}
             </button>
           </div>
         ))}

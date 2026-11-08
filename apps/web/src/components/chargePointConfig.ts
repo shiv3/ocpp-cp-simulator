@@ -15,6 +15,7 @@ import {
   OCPP_2_1,
   isSoapVersion,
 } from "@ocpp-cp-sim/core/cp/domain/types/OcppVersion";
+import { t } from "../i18n";
 import type {
   OcppSecurityProfile,
   OcppTlsOptions,
@@ -92,22 +93,26 @@ export function labelMapFromRows(
   for (const row of rows) {
     const key = row.key.trim();
     if (!key && !row.value) continue;
-    if (!key) return { error: `Label value “${row.value}” has no key.` };
+    if (!key)
+      return { error: t("settings.labels.errNoKey", { value: row.value }) };
     if (!labelKeySchema.safeParse(key).success) {
       return {
-        error: `Invalid label key “${key}”. ${labelKeySchema.description}.`,
+        error: t("settings.labels.errInvalidKey", {
+          key,
+          reason: labelKeySchema.description ?? "",
+        }),
       };
     }
     if (!labelValueSchema.safeParse(row.value).success) {
-      return { error: `Label “${key}” has a value that is too long.` };
+      return { error: t("settings.labels.errValueTooLong", { key }) };
     }
     if (Object.hasOwn(labels, key)) {
-      return { error: `Label key “${key}” is used twice.` };
+      return { error: t("settings.labels.errDuplicate", { key }) };
     }
     labels[key] = row.value;
   }
   if (Object.keys(labels).length > LABELS_MAX_ENTRIES) {
-    return { error: `At most ${LABELS_MAX_ENTRIES} labels.` };
+    return { error: t("settings.labels.errMax", { max: LABELS_MAX_ENTRIES }) };
   }
   return { labels };
 }
@@ -189,7 +194,9 @@ export function previewDerivedSoapCallbackUrl(
 export function describeSoapPublicBase(
   base: SoapPublicBase | null | undefined,
 ): string {
-  return base?.tunnel ? `${base.tunnel.provider} tunnel` : "SOAP public base";
+  return base?.tunnel
+    ? t("settings.soapBase.tunnel", { provider: base.tunnel.provider })
+    : t("settings.soapBase.publicBase");
 }
 
 /**

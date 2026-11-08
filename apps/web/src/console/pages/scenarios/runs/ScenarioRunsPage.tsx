@@ -8,6 +8,7 @@ import {
   type ScenarioRunQuery,
 } from "@ocpp-cp-sim/core/cp/application/verification/ScenarioRunSummary";
 import { SCENARIO_RUNS_PAGE_DEFAULT } from "@ocpp-cp-sim/contracts/index";
+import { useT } from "../../../../i18n";
 import { useChargePoints } from "../../../../data/hooks/useChargePoints";
 import { useConfig } from "../../../../data/hooks/useConfig";
 import EmptyState from "../../../components/EmptyState";
@@ -55,6 +56,7 @@ function queryFromParams(params: URLSearchParams): ScenarioRunQuery {
  * runs.
  */
 const ScenarioRunsPage: React.FC = () => {
+  const t = useT();
   const [searchParams, setSearchParams] = useSearchParams();
   const { config, isLoading: configLoading } = useConfig();
   const { chargePoints } = useChargePoints(config, {
@@ -147,10 +149,10 @@ const ScenarioRunsPage: React.FC = () => {
   if (!supported) {
     return (
       <div className="p-6">
-        <PageHeader title="Run History" />
+        <PageHeader title={t("scenarios.history.title")} />
         <EmptyState
-          title="Run history needs the simulator daemon"
-          hint="Local mode runs scenarios in the browser and records no run history. Connect the console to a daemon (remote mode) to browse recorded runs."
+          title={t("scenarios.history.needsDaemonTitle")}
+          hint={t("scenarios.history.needsDaemonHint")}
         />
       </div>
     );
@@ -162,8 +164,13 @@ const ScenarioRunsPage: React.FC = () => {
   return (
     <div className="p-6">
       <PageHeader
-        title="Run History"
-        count={`${page.total} run${page.total === 1 ? "" : "s"}`}
+        title={t("scenarios.history.title")}
+        count={t(
+          page.total === 1
+            ? "scenarios.history.countOne"
+            : "scenarios.history.countMany",
+          { count: page.total },
+        )}
         actions={
           <Button
             type="button"
@@ -172,7 +179,7 @@ const ScenarioRunsPage: React.FC = () => {
             disabled={isLoading}
             onClick={() => void refresh()}
           >
-            Refresh
+            {t("scenarios.history.refresh")}
           </Button>
         }
       />
@@ -182,9 +189,9 @@ const ScenarioRunsPage: React.FC = () => {
           value={filters.cpId ?? ""}
           onChange={(e) => setFilter("cp", e.target.value)}
           className={FILTER_SELECT_CLASS}
-          aria-label="Filter by charge point"
+          aria-label={t("scenarios.history.filterCp")}
         >
-          <option value="">All charge points</option>
+          <option value="">{t("scenarios.history.allCps")}</option>
           {chargePoints.map((cp) => (
             <option key={cp.id} value={cp.id}>
               {cp.id}
@@ -196,25 +203,25 @@ const ScenarioRunsPage: React.FC = () => {
           min={1}
           value={filters.connectorId ?? ""}
           onChange={(e) => setFilter("connector", e.target.value)}
-          placeholder="Connector"
-          aria-label="Filter by connector"
+          placeholder={t("scenarios.history.connector")}
+          aria-label={t("scenarios.history.filterConnector")}
           className={`${FILTER_INPUT_CLASS} w-28`}
         />
         <input
           type="text"
           value={filters.scenarioId ?? ""}
           onChange={(e) => setFilter("scenario", e.target.value)}
-          placeholder="Scenario id"
-          aria-label="Filter by scenario id"
+          placeholder={t("scenarios.history.scenarioId")}
+          aria-label={t("scenarios.history.filterScenarioId")}
           className={FILTER_INPUT_CLASS}
         />
         <select
           value={filters.verdict ?? ""}
           onChange={(e) => setFilter("verdict", e.target.value)}
           className={FILTER_SELECT_CLASS}
-          aria-label="Filter by verdict"
+          aria-label={t("scenarios.history.filterVerdict")}
         >
-          <option value="">All verdicts</option>
+          <option value="">{t("scenarios.history.allVerdicts")}</option>
           {SCENARIO_VERDICTS.map((verdict) => (
             <option key={verdict} value={verdict}>
               {verdict}
@@ -225,9 +232,9 @@ const ScenarioRunsPage: React.FC = () => {
           value={filters.executionState ?? ""}
           onChange={(e) => setFilter("state", e.target.value)}
           className={FILTER_SELECT_CLASS}
-          aria-label="Filter by execution state"
+          aria-label={t("scenarios.history.filterState")}
         >
-          <option value="">All execution states</option>
+          <option value="">{t("scenarios.history.allStates")}</option>
           {SCENARIO_RUN_EXECUTION_STATES.map((state) => (
             <option key={state} value={state}>
               {state}
@@ -238,7 +245,7 @@ const ScenarioRunsPage: React.FC = () => {
 
       {error && (
         <p className="mb-4 text-sm text-cx-rose">
-          Could not load the run history: {error}
+          {t("scenarios.history.loadError", { error })}
         </p>
       )}
 
@@ -246,7 +253,7 @@ const ScenarioRunsPage: React.FC = () => {
         <div className="rounded-[10px] border border-cx-border bg-cx-card shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none p-4">
           <RunHistory
             rows={rows}
-            emptyText="No runs match these filters."
+            emptyText={t("scenarios.history.noMatch")}
             showTarget
             selectedKey={
               selected ? runRowKey(selected.cpId, selected.runId) : null
@@ -261,7 +268,11 @@ const ScenarioRunsPage: React.FC = () => {
           />
           <div className="mt-3 flex items-center justify-between gap-2 text-xs text-cx-muted">
             <span>
-              {first}–{last} of {page.total}
+              {t("scenarios.history.range", {
+                first,
+                last,
+                total: page.total,
+              })}
             </span>
             <span className="flex gap-2">
               <Button
@@ -271,7 +282,7 @@ const ScenarioRunsPage: React.FC = () => {
                 disabled={offset === 0}
                 onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
               >
-                Previous
+                {t("scenarios.history.previous")}
               </Button>
               <Button
                 type="button"
@@ -280,7 +291,7 @@ const ScenarioRunsPage: React.FC = () => {
                 disabled={offset + PAGE_SIZE >= page.total}
                 onClick={() => setOffset(offset + PAGE_SIZE)}
               >
-                Next
+                {t("scenarios.history.next")}
               </Button>
             </span>
           </div>
@@ -298,11 +309,11 @@ const ScenarioRunsPage: React.FC = () => {
             <p className="text-sm text-cx-muted">
               {selectedRunId
                 ? isLoading || lookup.isLoading
-                  ? "Loading…"
+                  ? t("scenarios.panel.loading")
                   : ambiguous
-                    ? `Run ${selectedRunId} was recorded on several charge points — select it in the list.`
-                    : `Run ${selectedRunId} is no longer recorded.`
-                : "Select a run to see its report and transcript."}
+                    ? t("scenarios.history.ambiguous", { runId: selectedRunId })
+                    : t("scenarios.history.gone", { runId: selectedRunId })
+                : t("scenarios.history.selectHint")}
             </p>
           )}
         </div>

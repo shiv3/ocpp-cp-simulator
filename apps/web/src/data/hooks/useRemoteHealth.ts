@@ -1,3 +1,4 @@
+import type { MessageKey } from "../../i18n";
 import { useEffect, useState } from "react";
 
 import { useDataContext } from "../providers/DataProvider";
@@ -60,15 +61,19 @@ export function useRemoteHealth(): RemoteHealth {
   return health;
 }
 
-/** Screen-reader label and tooltip reason for each state. */
+/** Screen-reader label and tooltip reason for each state, as message keys:
+ *  translate at render time with `t(REMOTE_HEALTH_TEXT[health].aria)`. */
 export const REMOTE_HEALTH_TEXT: Record<
   RemoteHealth,
-  { aria: string; reason: string }
+  { aria: MessageKey; reason: MessageKey }
 > = {
-  checking: { aria: "Remote connection: checking", reason: "Checking…" },
-  ok: { aria: "Remote connection: connected", reason: "Connected" },
+  checking: {
+    aria: "common.health.checkingAria",
+    reason: "common.health.checkingReason",
+  },
+  ok: { aria: "common.health.okAria", reason: "common.health.okReason" },
   down: {
-    aria: "Remote connection: disconnected",
-    reason: "Cannot reach the daemon",
+    aria: "common.health.downAria",
+    reason: "common.health.downReason",
   },
 };

@@ -1,5 +1,6 @@
 import React from "react";
 
+import { useT } from "../../../i18n";
 import { formatEnergyKwh } from "@/lib/connectorFormat";
 import { cn } from "@/lib/utils";
 import {
@@ -19,18 +20,21 @@ import { cpStatus } from "./cpRowFormat";
 /** The Connectors view: one flat table row per connector of every charge
  *  point shown. A row opens the side panel on that connector. */
 const ConnectorTable: React.FC<{ rows: CpListRow[] }> = ({ rows }) => {
+  const t = useT();
   const { open, close, isOpen } = usePanelParams();
 
   return (
     <Table>
       <TableHeader>
         <TableRow className="hover:bg-transparent">
-          <TableHead>Connector</TableHead>
-          <TableHead>Status</TableHead>
-          <TableHead className="text-right">Meter</TableHead>
-          <TableHead>Tx</TableHead>
-          <TableHead>Scenario</TableHead>
-          <TableHead>Charge point</TableHead>
+          <TableHead>{t("dashboard.col.connector")}</TableHead>
+          <TableHead>{t("dashboard.col.status")}</TableHead>
+          <TableHead className="text-right">
+            {t("dashboard.col.meter")}
+          </TableHead>
+          <TableHead>{t("dashboard.col.tx")}</TableHead>
+          <TableHead>{t("dashboard.col.scenario")}</TableHead>
+          <TableHead>{t("dashboard.col.chargePoint")}</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>

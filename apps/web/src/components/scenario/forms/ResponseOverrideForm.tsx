@@ -4,6 +4,7 @@ import {
   RESPONSE_OVERRIDE_ACTIONS,
   RESPONSE_OVERRIDE_STATUSES,
 } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import { useT } from "../../../i18n";
 
 const DEFAULT_ACTION: (typeof RESPONSE_OVERRIDE_ACTIONS)[number] =
   "RemoteStartTransaction";
@@ -12,6 +13,7 @@ export default function ResponseOverrideForm({
   value,
   onChange,
 }: NodeFormComponentProps<NodeFormData>) {
+  const t = useT();
   const actionOptions = RESPONSE_OVERRIDE_ACTIONS.map((action) => ({
     value: action,
     label: action,
@@ -44,18 +46,18 @@ export default function ResponseOverrideForm({
   return (
     <div className="space-y-3">
       <TextField
-        label="Label"
+        label={t("scenarioEditor.form.label")}
         value={(value.label as string | undefined) ?? ""}
         onChange={(label) => onChange({ ...value, label })}
       />
       <SelectField
-        label="Action"
+        label={t("scenarioEditor.form.action")}
         value={currentAction}
         onChange={handleActionChange}
         options={actionOptions}
       />
       <SelectField
-        label="Status"
+        label={t("scenarioEditor.form.status")}
         value={(value.status as string | undefined) ?? validStatuses[0]}
         onChange={(status) => onChange({ ...value, status })}
         options={statusOptions}

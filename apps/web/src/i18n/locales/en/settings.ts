@@ -1,2 +1,200 @@
-const settings = {} as const;
+const settings = {
+  "settings.common.save": "Save",
+  "settings.common.cancel": "Cancel",
+  "settings.common.copy": "Copy",
+  "settings.common.copied": "Copied",
+  "settings.common.keepCurrent": "Leave blank to keep current",
+  "settings.form.copyFailed": "Copy failed",
+  "settings.form.effectiveCallbackUrl": "Effective callback URL",
+  "settings.form.copySoapCallbackAria": "Copy SOAP callback URL",
+  "settings.form.effectiveWsUrl": "Effective WebSocket URL",
+  "settings.form.copyWsAria": "Copy effective WebSocket URL",
+  "settings.form.effectiveWsUrlHint":
+    "WebSocket URL + Basic Auth below, as the charge point will dial it.",
+  "settings.form.soapHelpLocal":
+    "SOAP ChargePointService callback URL the Central System uses to reach this CP. Required only when using the daemon.",
+  "settings.form.soapHelpDerived":
+    "Leave empty to use the daemon's {source}: {url}",
+  "settings.form.soapHelpRequired":
+    "SOAP ChargePointService callback URL the Central System uses to reach this CP. Required.",
+  "settings.form.errSoapCallbackRequired":
+    "SOAP Callback URL is required in remote mode for SOAP versions.",
+  "settings.form.errProfile3Cert":
+    "Security profile 3 (mutual TLS) requires a client certificate and private key.",
+  "settings.form.derivedNote":
+    "derived from the {source} — the URL may change between daemon runs",
+  "settings.form.section.model": "Model specification",
+  "settings.form.section.connection": "Connection",
+  "settings.form.section.security": "Security",
+  "settings.form.section.labels": "Labels",
+  "settings.form.section.optional": "Optional settings",
+  "settings.form.vendor": "Vendor",
+  "settings.form.model": "Model",
+  "settings.form.firmwareVersion": "Firmware Version",
+  "settings.form.connectorCount": "Number of Connectors",
+  "settings.form.cpId": "Charge Point ID",
+  "settings.form.protocol": "Protocol",
+  "settings.form.version": "Version",
+  "settings.form.centralSystemUrlSoap": "Central System URL (SOAP endpoint)",
+  "settings.form.wsUrl": "WebSocket URL",
+  "settings.form.localSoapNoteTitle": "Browser local mode (send-only):",
+  "settings.form.localSoapNoteBody":
+    "CP→CSMS calls (BootNotification, Authorize, etc.) work, but CSMS-initiated commands (RemoteStart, Reset, …) need the CLI/daemon which hosts the callback endpoint. The CSMS must allow CORS from this origin.",
+  "settings.form.soapCallbackUrl": "SOAP Callback URL",
+  "settings.form.optionalParen": "(optional)",
+  "settings.form.soapPath": "SOAP Path (optional)",
+  "settings.form.securityProfile": "Security Profile",
+  "settings.form.profile0": "0 — No auth, no TLS",
+  "settings.form.profile1": "1 — Basic Auth",
+  "settings.form.profile2": "2 — Basic Auth + TLS (server cert)",
+  "settings.form.profile3": "3 — Mutual TLS (client cert)",
+  "settings.form.authorizationKey": "Authorization Key",
+  "settings.form.caCert": "CA Certificate PEM (optional)",
+  "settings.form.serverName": "Server Name (optional)",
+  "settings.form.verifyServerCert": "Verify server certificate",
+  "settings.form.clientCert": "Client Certificate PEM",
+  "settings.form.privateKey": "Private Key PEM",
+  "settings.form.enableBasicAuth": "Enable Basic Authentication",
+  "settings.form.username": "Username",
+  "settings.form.password": "Password",
+  "settings.form.authMtls":
+    "Authentication is governed by the mutual TLS client certificate and key in the Security section above (security profile 3).",
+  "settings.form.legacyBefore":
+    "Basic Authentication is currently active via the legacy Optional Settings toggle (username:",
+  "settings.form.legacyNone": "(none)",
+  "settings.form.legacyAfter":
+    "). It will keep working unchanged. To manage authentication from the Security section instead, set Security Profile to 1 (Basic Auth) above and provide an Authorization Key — note the wire username becomes the Charge Point ID once you do, which may differ from the legacy username above.",
+  "settings.form.disableLegacyBasic": "Disable legacy Basic Authentication",
+  "settings.form.noAuth":
+    "No authentication configured. Set Security Profile to 1 above to enable Basic Authentication.",
+  "settings.form.authKeyGoverned":
+    "Authentication is governed by the Authorization Key in the Security section above (security profile {profile}).",
+  "settings.form.enableAutoMeter": "Enable Auto Meter Value",
+  "settings.form.intervalSeconds": "Interval (seconds)",
+  "settings.form.incrementKwh": "Increment Value (kWh)",
+  "settings.labels.keyAria": "Label {index} key",
+  "settings.labels.keyPlaceholder": "key, e.g. site",
+  "settings.labels.valueAria": "Label {index} value",
+  "settings.labels.valuePlaceholder": "value",
+  "settings.labels.removeAria": "Remove label {index}",
+  "settings.labels.add": "Add label",
+  "settings.labels.help":
+    "Group charge points by site, tenant, environment… The dashboard filter and the cp.list API select on them.",
+  "settings.labels.errNoKey": "Label value “{value}” has no key.",
+  "settings.labels.errInvalidKey": "Invalid label key “{key}”. {reason}.",
+  "settings.labels.errValueTooLong":
+    "Label “{key}” has a value that is too long.",
+  "settings.labels.errDuplicate": "Label key “{key}” is used twice.",
+  "settings.labels.errMax": "At most {max} labels.",
+  "settings.soapBase.tunnel": "{provider} tunnel",
+  "settings.soapBase.publicBase": "SOAP public base",
+  "settings.modal.addTitle": "Add New Charge Point",
+  "settings.modal.configureTitle": "Configure {cpId}",
+  "settings.curve.axisTime": "Time (sec)",
+  "settings.curve.axisValue": "MeterValue (kWh)",
+  "settings.curve.minPoints": "Must have at least 2 control points",
+  "settings.curve.close": "Close",
+  "settings.curve.title": "Configure Auto MeterValue",
+  "settings.curve.enable": "Enable Auto MeterValue",
+  "settings.curve.canvasHint": "Click to add control points, drag to move them",
+  "settings.curve.stopAtTarget":
+    "Charge until battery full (stop at EV's target SoC)",
+  "settings.curve.stopAtTargetHelp":
+    "Ignores the chart's max time/value. Uses EV Settings → Target SoC. Once reached, the in-flight transaction is stopped.",
+  "settings.curve.presets": "Presets",
+  "settings.curve.linear": "Linear",
+  "settings.curve.exponential": "Exponential",
+  "settings.curve.step": "Step",
+  "settings.curve.sendInterval": "Send Interval (seconds)",
+  "settings.curve.autoCalculate": "Auto Calculate",
+  "settings.curve.controlPoints": "Control Points",
+  "settings.curve.addPoint": "Add Point",
+  "settings.curve.unitSec": "sec",
+  "settings.page.title": "Settings",
+  "settings.page.backToHome": "Back to Home",
+  "settings.page.tagsSaved": "RFID Tag IDs saved.",
+  "settings.page.resetUnsupported": "This runtime does not support state reset",
+  "settings.page.resetConfirm":
+    "Reset all simulator data?\n\nScenarios, configuration overrides, charging profiles, availability flags, pending messages, logs and saved vehicle profiles will be erased. The page will reload afterwards.",
+  "settings.page.evSaved":
+    "Default EV settings saved. New connectors will start with these values.",
+  "settings.page.evReset":
+    "Default EV settings reset to the built-in defaults.",
+  "settings.page.exported": "Configuration exported successfully!",
+  "settings.page.imported": "Configuration imported successfully!",
+  "settings.page.invalidFile":
+    "Invalid JSON file. Please check the file format.",
+  "settings.page.applied": "Configuration applied successfully!",
+  "settings.page.invalidJson": "Invalid JSON. Please check the syntax.",
+  "settings.page.runtimeMode": "Runtime Mode",
+  "settings.page.runtimeModeBefore":
+    "The simulator picks Local or Remote automatically based on where the UI is served from. When opened via",
+  "settings.page.runtimeModeMid":
+    "(or the Docker image) the UI talks to that daemon as Remote; when opened from a static build (GitHub Pages,",
+  "settings.page.runtimeModeAfter":
+    ") it runs the charge points in-browser as Local. No manual toggle.",
+  "settings.page.mode": "Mode:",
+  "settings.page.server": "Server: {url}",
+  "settings.page.resetData": "Reset data",
+  "settings.page.resetDataHelp":
+    "Wipe every persisted simulator record — scenarios, ChangeConfiguration overrides, charging profiles, availability flags, pending transaction messages, any saved logs and the saved vehicle profiles. Schema stays intact; the next load starts from a clean DB. In remote mode this also drops every charge point registered on the daemon.",
+  "settings.page.resetting": "Resetting…",
+  "settings.page.resetAll": "Reset all simulator data",
+  "settings.page.resetFailed": "Reset failed",
+  "settings.page.defaultEv": "Default EV Settings",
+  "settings.page.defaultEvHelp":
+    'These values seed every new connector\'s EV (battery capacity, target SoC, etc.) on this device. Scenarios that leave their "Scenario EV Settings" fields empty fall back to whatever the connector currently holds — which starts from this default.',
+  "settings.page.evPreset": "EV Model preset",
+  "settings.page.battery": "Battery (kWh)",
+  "settings.page.maxPower": "Max Power (kW)",
+  "settings.page.initialSoc": "Initial SoC (%)",
+  "settings.page.targetSoc": "Target SoC (%)",
+  "settings.page.electrical": "Electrical characteristics",
+  "settings.page.currentType": "Current Type",
+  "settings.page.phases": "Phases",
+  "settings.page.phase1": "1 (single-phase)",
+  "settings.page.phase3": "3 (three-phase)",
+  "settings.page.voltage": "Voltage (V)",
+  "settings.page.powerFactor": "Power Factor",
+  "settings.page.chargingCurve": "Charging curve",
+  "settings.page.chargingCurveHelp":
+    "Battery-acceptance fraction of Max Power at each SoC. Empty (no points) means flat acceptance at Max Power for the whole session, matching the pre-curve behaviour.",
+  "settings.page.curveSocAria": "Charging curve point {index} SoC percent",
+  "settings.page.curveSocUnit": "% SoC →",
+  "settings.page.curveFractionAria":
+    "Charging curve point {index} power fraction",
+  "settings.page.curveFractionUnit": "fraction of Max Power",
+  "settings.page.curveRemoveAria": "Remove charging curve point {index}",
+  "settings.page.addPoint": "Add point",
+  "settings.page.resetBuiltIn": "Reset to built-in",
+  "settings.page.overrideActive":
+    "User override is active. New connectors will start from these values.",
+  "settings.page.noOverride":
+    "No override. New connectors start from the built-in Generic EV defaults (75 kWh / 80 % target).",
+  "settings.page.rfid": "RFID Tag IDs",
+  "settings.page.rfidHelp":
+    "Tag profiles shared across every charge point. Pick one from the connector card's TagID dropdown before Start Transaction. Stored globally — not per-CP.",
+  "settings.page.tagIds": "Tag IDs (comma-separated)",
+  "settings.page.tagIdsPlaceholder": "e.g., 123456, ABCDEF, TAG001",
+  "settings.page.noTags": "No tags configured yet.",
+  "settings.page.tagsActive": "{count} tags active.",
+  "settings.page.configMgmt": "Configuration Management",
+  "settings.page.configMgmtHelp":
+    "Export your current configuration to a JSON file or import a previously saved configuration. You can also manually edit the JSON configuration below.",
+  "settings.page.export": "Export Configuration",
+  "settings.page.import": "Import Configuration",
+  "settings.page.configJson": "Configuration JSON",
+  "settings.page.jsonPlaceholder": "Paste your configuration JSON here...",
+  "settings.page.jsonHelp":
+    'Edit the JSON configuration directly and click "Save" to update.',
+  "settings.page.note": "Note",
+  "settings.page.note1":
+    "Individual charge point settings can be configured from the Home page",
+  "settings.page.note2":
+    "Click the gear icon next to each charge point tab to edit its settings",
+  "settings.page.note3":
+    'Use the "+ Add Charge Point" button to add new charge points',
+  "settings.page.note4":
+    "This page is for bulk configuration import/export only",
+} as const;
 export default settings;

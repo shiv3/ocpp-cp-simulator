@@ -8,6 +8,7 @@ import {
   type LabelRow,
 } from "@/components/chargePointConfig";
 import type { Labels } from "@ocpp-cp-sim/contracts/index";
+import { useT } from "@/i18n";
 import { describeError } from "./connectorActions";
 
 export interface CpLabelsCardProps {
@@ -33,6 +34,7 @@ const CpLabelsCard: React.FC<CpLabelsCardProps> = ({
   onSave,
   onDone,
 }) => {
+  const t = useT();
   const [rows, setRows] = useState<LabelRow[]>(() => labelRowsFromMap(labels));
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -52,7 +54,7 @@ const CpLabelsCard: React.FC<CpLabelsCardProps> = ({
     try {
       await onSave(parsed.labels);
     } catch (err) {
-      setError(`Failed to save labels: ${describeError(err)}`);
+      setError(t("cp.labelsCard.saveFailed", { message: describeError(err) }));
       setIsSaving(false);
       return;
     }
@@ -64,7 +66,9 @@ const CpLabelsCard: React.FC<CpLabelsCardProps> = ({
       id={id}
       className="mb-4 rounded-[10px] border border-cx-border bg-cx-card p-4 shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none"
     >
-      <h3 className="mb-2 text-sm font-semibold text-cx-fg">Labels</h3>
+      <h3 className="mb-2 text-sm font-semibold text-cx-fg">
+        {t("cp.labelsCard.title")}
+      </h3>
       <LabelsEditor rows={rows} onChange={handleChange} />
       {error && (
         <p role="alert" className="mt-2 text-xs text-cx-rose">
@@ -79,7 +83,7 @@ const CpLabelsCard: React.FC<CpLabelsCardProps> = ({
           disabled={isSaving}
           onClick={onDone}
         >
-          Cancel
+          {t("cp.labelsCard.cancel")}
         </Button>
         <Button
           type="button"
@@ -87,7 +91,7 @@ const CpLabelsCard: React.FC<CpLabelsCardProps> = ({
           disabled={isSaving}
           onClick={() => void handleSave()}
         >
-          Save labels
+          {t("cp.labelsCard.save")}
         </Button>
       </div>
     </div>

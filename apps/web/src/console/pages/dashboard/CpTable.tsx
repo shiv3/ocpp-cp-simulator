@@ -1,5 +1,6 @@
 import React from "react";
 
+import { useT } from "../../../i18n";
 import { cn } from "@/lib/utils";
 import {
   Table,
@@ -25,19 +26,22 @@ import {
 
 /** The Charge points view: one table row per charge point. */
 const CpTable: React.FC<{ rows: CpListRow[] }> = ({ rows }) => {
+  const t = useT();
   const { open, close, isOpen } = usePanelParams();
 
   return (
     <Table>
       <TableHeader>
         <TableRow className="hover:bg-transparent">
-          <TableHead>Charge point</TableHead>
+          <TableHead>{t("dashboard.col.chargePoint")}</TableHead>
           <TableHead>OCPP</TableHead>
-          <TableHead>Status</TableHead>
-          <TableHead className="text-right">In use</TableHead>
-          <TableHead>Scenario</TableHead>
-          <TableHead>Heartbeat</TableHead>
-          <TableHead>Labels</TableHead>
+          <TableHead>{t("dashboard.col.status")}</TableHead>
+          <TableHead className="text-right">
+            {t("dashboard.col.inUse")}
+          </TableHead>
+          <TableHead>{t("dashboard.col.scenario")}</TableHead>
+          <TableHead>{t("dashboard.col.heartbeat")}</TableHead>
+          <TableHead>{t("dashboard.col.labels")}</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>

@@ -7,6 +7,7 @@ import React, {
 } from "react";
 
 import { cn } from "@/lib/utils";
+import { useT } from "@/i18n";
 
 const STORAGE_KEY = "ocpp-cp.console.panel-width";
 const MIN_WIDTH = 360;
@@ -67,6 +68,7 @@ const SidePanel: React.FC<SidePanelProps> = ({
   padded = true,
   children,
 }) => {
+  const t = useT();
   // null = nothing stored and not resized yet: the CSS default applies.
   const [width, setWidth] = useState<number | null>(readStoredWidth);
   const dragging = useRef(false);
@@ -126,7 +128,7 @@ const SidePanel: React.FC<SidePanelProps> = ({
       <div
         role="separator"
         aria-orientation="vertical"
-        aria-label="Resize side panel"
+        aria-label={t("consoleShared.sidePanel.resize")}
         aria-valuenow={width ?? defaultWidth()}
         aria-valuemin={MIN_WIDTH}
         tabIndex={0}

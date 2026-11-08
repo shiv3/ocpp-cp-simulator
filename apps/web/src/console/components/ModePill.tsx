@@ -1,6 +1,7 @@
 import React from "react";
 
 import { cn } from "@/lib/utils";
+import { useT } from "@/i18n";
 
 export interface ModePillProps {
   mode: "local" | "remote";
@@ -8,6 +9,7 @@ export interface ModePillProps {
 
 /** Local / Remote as a dot plus text, with no fill. */
 const ModePill: React.FC<ModePillProps> = ({ mode }) => {
+  const t = useT();
   const isRemote = mode === "remote";
   return (
     <span className="inline-flex items-center gap-1.5 text-[12.5px] font-medium text-cx-fg2">
@@ -18,7 +20,9 @@ const ModePill: React.FC<ModePillProps> = ({ mode }) => {
           isRemote ? "bg-cx-accent" : "bg-cx-emerald",
         )}
       />
-      {isRemote ? "Remote mode" : "Local mode"}
+      {isRemote
+        ? t("consoleShared.modePill.remote")
+        : t("consoleShared.modePill.local")}
     </span>
   );
 };

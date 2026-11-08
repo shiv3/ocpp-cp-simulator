@@ -1,5 +1,6 @@
 import React, { memo } from "react";
 import type { NodeProps } from "@xyflow/react";
+import { useT } from "../../../i18n";
 import { Handle, Position, type Node } from "@xyflow/react";
 import type { CertQuirksNodeData } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
 
@@ -9,17 +10,21 @@ const CertQuirksNode: React.FC<NodeProps<CertQuirksFlowNode>> = ({
   data,
   selected,
 }) => {
+  const t = useT();
   // Compact summary of mode and key quirks for the node display
   const summary = (() => {
     if (data.mode === "clear") {
-      return "clear all";
+      return t("scenarioNodes.certQuirks.clearAll");
     }
     const parts: string[] = [];
-    if (data.preset) parts.push(`${data.preset} preset`);
+    if (data.preset)
+      parts.push(t("scenarioNodes.certQuirks.preset", { preset: data.preset }));
     if (data.csrKeyAlgorithm) parts.push(`CSR: ${data.csrKeyAlgorithm}`);
     if (data.csrPemLineEndings)
       parts.push(`PEM: ${data.csrPemLineEndings.toUpperCase()}`);
-    return parts.length > 0 ? parts.join(", ") : "set";
+    return parts.length > 0
+      ? parts.join(", ")
+      : t("scenarioNodes.certQuirks.set");
   })();
 
   return (
@@ -30,7 +35,7 @@ const CertQuirksNode: React.FC<NodeProps<CertQuirksFlowNode>> = ({
     >
       <Handle type="target" position={Position.Top} className="w-3 h-3" />
       <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-        Certificate Quirks
+        {t("scenarioNodes.title.certQuirks")}
       </div>
       <div className="text-sm font-bold text-amber-700 dark:text-amber-300">
         {summary}

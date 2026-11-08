@@ -3,6 +3,7 @@ import React, { useState } from "react";
 import { cn } from "@/lib/utils";
 
 import type { BatteryTone } from "./connectorCardModel";
+import { useT } from "../../../i18n";
 
 export interface EvBatteryProps {
   /** Live SoC in %, null when the connector reports none. */
@@ -58,6 +59,7 @@ const EvBattery: React.FC<EvBatteryProps> = ({
   onSocCommit,
   disabled,
 }) => {
+  const t = useT();
   // The dragged value, shown at once and sent on release.
   const [draft, setDraft] = useState<number | null>(null);
   const shown = draft ?? soc;
@@ -74,15 +76,16 @@ const EvBattery: React.FC<EvBatteryProps> = ({
   if (shown == null) {
     detail = (
       <>
-        SoC not reported · <b className="font-medium text-cx-fg2">{evName}</b>,{" "}
-        {capacityKwh} kWh
+        {t("cpPanels.battery.socNotReported")} ·{" "}
+        <b className="font-medium text-cx-fg2">{evName}</b>, {capacityKwh} kWh
       </>
     );
   } else if (shown >= targetSoc) {
     detail = (
       <>
-        Target <b className="font-medium text-cx-fg2">{targetSoc} %</b> reached
-        · {evName}
+        {t("cpPanels.battery.target")}{" "}
+        <b className="font-medium text-cx-fg2">{targetSoc} %</b>{" "}
+        {t("cpPanels.battery.reached")} · {evName}
       </>
     );
   } else {
@@ -92,14 +95,14 @@ const EvBattery: React.FC<EvBatteryProps> = ({
         : null;
     detail = (
       <>
-        Target <b className="font-medium text-cx-fg2">{targetSoc} %</b>
+        {t("cpPanels.battery.target")}{" "}
+        <b className="font-medium text-cx-fg2">{targetSoc} %</b>
         {toGo != null && (
           <>
             {" "}
-            · about{" "}
-            <b className="font-medium text-cx-fg2">
-              {formatDuration(toGo)}
-            </b> at {powerKw.toFixed(1)} kW
+            · {t("cpPanels.battery.about")}{" "}
+            <b className="font-medium text-cx-fg2">{formatDuration(toGo)}</b>{" "}
+            {t("cpPanels.battery.atPower", { power: powerKw.toFixed(1) })}
           </>
         )}{" "}
         · {evName}
@@ -116,8 +119,8 @@ const EvBattery: React.FC<EvBatteryProps> = ({
         step={1}
         value={Math.round(shown ?? 0)}
         disabled={disabled}
-        aria-label="State of charge (drag)"
-        title="Drag to set the SoC"
+        aria-label={t("cpPanels.battery.socAria")}
+        title={t("cpPanels.battery.socTitle")}
         onChange={(e) => setDraft(Number(e.target.value))}
         onPointerUp={commit}
         onKeyUp={commit}

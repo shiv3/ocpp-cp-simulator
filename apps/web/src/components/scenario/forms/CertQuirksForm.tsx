@@ -1,6 +1,7 @@
 import { SelectField, TextField } from "./FormFields";
 import type { NodeFormComponentProps, NodeFormData } from "./types";
 import { CERT_SIGNATURE_ALGORITHMS } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import { useT } from "../../../i18n";
 
 const DEFAULT_MODE = "set";
 // Unset quirks must render as "(none)": defaulting the selects to a real
@@ -12,26 +13,27 @@ export default function CertQuirksForm({
   value,
   onChange,
 }: NodeFormComponentProps<NodeFormData>) {
+  const t = useT();
   const modeOptions = [
-    { value: "set", label: "Set Quirks" },
-    { value: "clear", label: "Clear Quirks" },
+    { value: "set", label: t("scenarioEditor.certQuirks.setQuirks") },
+    { value: "clear", label: t("scenarioEditor.certQuirks.clearQuirks") },
   ];
 
   const presetOptions = [
-    { value: "", label: "(none)" },
-    { value: "octt", label: "OCTT (legacy SHA256withRSA)" },
+    { value: "", label: t("scenarioEditor.form.none") },
+    { value: "octt", label: t("scenarioEditor.certQuirks.octtPreset") },
   ];
 
   const csrKeyOptions = [
-    { value: "", label: "(none)" },
+    { value: "", label: t("scenarioEditor.form.none") },
     { value: "ECDSA", label: "ECDSA" },
     { value: "RSA", label: "RSA" },
   ];
 
   const lineEndingsOptions = [
-    { value: "", label: "(none)" },
-    { value: "lf", label: "LF (Unix)" },
-    { value: "crlf", label: "CRLF (Windows)" },
+    { value: "", label: t("scenarioEditor.form.none") },
+    { value: "lf", label: t("scenarioEditor.certQuirks.lineEndingsLf") },
+    { value: "crlf", label: t("scenarioEditor.certQuirks.lineEndingsCrlf") },
   ];
 
   const algorithmOptions = CERT_SIGNATURE_ALGORITHMS.map((alg) => ({
@@ -105,12 +107,12 @@ export default function CertQuirksForm({
   return (
     <div className="space-y-3">
       <TextField
-        label="Label"
+        label={t("scenarioEditor.form.label")}
         value={(value.label as string | undefined) ?? ""}
         onChange={(label) => onChange({ ...value, label })}
       />
       <SelectField
-        label="Mode"
+        label={t("scenarioEditor.certQuirks.mode")}
         value={currentMode}
         onChange={handleModeChange}
         options={modeOptions}
@@ -118,46 +120,56 @@ export default function CertQuirksForm({
       {currentMode === "set" && (
         <>
           <SelectField
-            label="Preset (optional)"
+            label={t("scenarioEditor.certQuirks.preset")}
             value={currentPreset}
             onChange={handlePresetChange}
             options={presetOptions}
           />
           <SelectField
-            label="CSR Key Algorithm (optional)"
+            label={t("scenarioEditor.certQuirks.csrKeyAlgorithm")}
             value={currentCsrKeyAlgorithm}
             onChange={handleCsrKeyChange}
-            options={[{ value: "", label: "(none)" }, ...csrKeyOptions]}
+            options={[
+              { value: "", label: t("scenarioEditor.form.none") },
+              ...csrKeyOptions,
+            ]}
           />
           <SelectField
-            label="CSR PEM Line Endings (optional)"
+            label={t("scenarioEditor.certQuirks.csrLineEndings")}
             value={currentLineEndings}
             onChange={handleLineEndingsChange}
-            options={[{ value: "", label: "(none)" }, ...lineEndingsOptions]}
+            options={[
+              { value: "", label: t("scenarioEditor.form.none") },
+              ...lineEndingsOptions,
+            ]}
           />
           <div>
             <label className="block text-xs font-semibold text-primary mb-1">
-              Required Signature Algorithms (optional, comma-separated)
+              {t("scenarioEditor.certQuirks.requiredAlgorithms")}
             </label>
             <input
               type="text"
               className="input-base w-full text-xs"
-              placeholder="e.g., RSASSA-PKCS1-v1_5, ECDSA"
+              placeholder={t(
+                "scenarioEditor.certQuirks.requiredAlgorithmsPlaceholder",
+              )}
               value={currentAlgorithms.join(", ")}
               onChange={(e) => handleAlgorithmsChange(e.target.value)}
             />
             <div className="text-xs text-gray-500 mt-1">
-              Valid: {algorithmOptions.map((o) => o.value).join(", ")}
+              {t("scenarioEditor.certQuirks.valid", {
+                values: algorithmOptions.map((o) => o.value).join(", "),
+              })}
             </div>
           </div>
           <div>
             <label className="block text-xs font-semibold text-primary mb-1">
-              Hidden Configuration Keys (optional, comma-separated)
+              {t("scenarioEditor.certQuirks.hiddenKeys")}
             </label>
             <input
               type="text"
               className="input-base w-full text-xs"
-              placeholder="e.g., CpoName, SomeOtherKey"
+              placeholder={t("scenarioEditor.certQuirks.hiddenKeysPlaceholder")}
               value={currentHiddenKeys.join(", ")}
               onChange={(e) => handleHiddenKeysChange(e.target.value)}
             />

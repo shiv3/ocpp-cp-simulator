@@ -8,6 +8,9 @@ import cp from "./cp";
 import dashboard from "./dashboard";
 import scenarios from "./scenarios";
 import templates from "./templates";
+import scenarioRun from "./scenarioRun";
+import cpPanels from "./cpPanels";
+import scenarioNodes from "./scenarioNodes";
 
 const messages: Messages = {
   ...common,
@@ -19,5 +22,8 @@ const messages: Messages = {
   ...dashboard,
   ...scenarios,
   ...templates,
+  ...scenarioRun,
+  ...cpPanels,
+  ...scenarioNodes,
 };
 export default messages;

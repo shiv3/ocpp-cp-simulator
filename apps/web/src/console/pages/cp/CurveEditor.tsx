@@ -4,6 +4,7 @@ import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 import { FILTER_INPUT_CLASS } from "../../components/filterStyles";
+import { useT } from "../../../i18n";
 import { CURVE_VIEW, curveScale } from "./connectorCardModel";
 import {
   curveDurationMin,
@@ -75,6 +76,7 @@ const CurveEditor: React.FC<CurveEditorProps> = ({
   intervalSeconds,
   capacityKwh,
 }) => {
+  const t = useT();
   const svgRef = useRef<SVGSVGElement>(null);
   // While dragging, the axes stay as they were at pointerdown, or the point
   // would run away as the scale follows it.
@@ -155,7 +157,7 @@ const CurveEditor: React.FC<CurveEditorProps> = ({
           data-testid="curve-svg"
           viewBox={`0 0 ${W} ${H}`}
           role="img"
-          aria-label="Power over the session"
+          aria-label={t("cpPanels.curve.powerAria")}
           className="block h-auto w-full touch-none"
           onPointerMove={onPointerMove}
           onPointerUp={endDrag}
@@ -213,7 +215,7 @@ const CurveEditor: React.FC<CurveEditorProps> = ({
             y={cy(capKw) - 5}
             textAnchor="end"
           >
-            EV max {formatNumber(capKw)} kW
+            {t("cpPanels.curve.evMax", { kw: formatNumber(capKw) })}
           </text>
           {area && <path className="fill-cx-accent opacity-[0.12]" d={area} />}
           <path
@@ -255,26 +257,31 @@ const CurveEditor: React.FC<CurveEditorProps> = ({
         className="flex flex-wrap gap-x-[18px] gap-y-2 text-[12.5px] text-cx-muted"
       >
         <span>
-          Duration{" "}
+          {t("cpPanels.curve.duration")}{" "}
           <b className="font-medium text-cx-fg2">
             {formatMinutes(duration)} min
           </b>
         </span>
         <span>
-          Energy over the curve{" "}
+          {t("cpPanels.curve.energy")}{" "}
           <b className="font-medium text-cx-fg2">{energy.toFixed(1)} kWh</b>
           {capacityKwh > 0 &&
-            ` (${Math.round((energy / capacityKwh) * 100)} % of the battery)`}
+            t("cpPanels.curve.percentOfBattery", {
+              percent: Math.round((energy / capacityKwh) * 100),
+            })}
         </span>
         <span>
-          Peak{" "}
+          {t("cpPanels.curve.peak")}{" "}
           <b className="font-medium text-cx-fg2">
             {curvePeakKw(points).toFixed(1)} kW
           </b>
         </span>
         {meterValues > 0 && (
           <span>
-            {meterValues} MeterValues at {intervalSeconds} s
+            {t("cpPanels.curve.meterValues", {
+              count: meterValues,
+              seconds: intervalSeconds,
+            })}
           </span>
         )}
       </div>
@@ -282,7 +289,12 @@ const CurveEditor: React.FC<CurveEditorProps> = ({
       <table className="w-full border-collapse text-[12.5px]">
         <thead>
           <tr>
-            {["Point", "Minute", "kW", ""].map((h, i) => (
+            {[
+              t("cpPanels.curve.colPoint"),
+              t("cpPanels.curve.colMinute"),
+              "kW",
+              "",
+            ].map((h, i) => (
               <th
                 key={i}
                 className="px-2 py-1 text-left text-[11px] font-medium uppercase tracking-[0.06em] text-cx-faint"
@@ -298,7 +310,7 @@ const CurveEditor: React.FC<CurveEditorProps> = ({
               <td className="px-2 py-[3px] font-mono text-cx-muted">{i + 1}</td>
               <td className="px-2 py-[3px]">
                 <NumberCell
-                  label={`Point ${i + 1} minute`}
+                  label={t("cpPanels.curve.pointMinute", { n: i + 1 })}
                   value={p.minute}
                   onCommit={(value) => {
                     const { lo, hi } = bounds(i);
@@ -310,7 +322,7 @@ const CurveEditor: React.FC<CurveEditorProps> = ({
               </td>
               <td className="px-2 py-[3px]">
                 <NumberCell
-                  label={`Point ${i + 1} kW`}
+                  label={t("cpPanels.curve.pointKw", { n: i + 1 })}
                   value={p.kw}
                   onCommit={(value) => {
                     const kw = clamp(roundTo(value, 0.1), 0, capKw);
@@ -323,7 +335,7 @@ const CurveEditor: React.FC<CurveEditorProps> = ({
                 {points.length > 2 && (
                   <button
                     type="button"
-                    aria-label={`Remove point ${i + 1}`}
+                    aria-label={t("cpPanels.curve.removePoint", { n: i + 1 })}
                     onClick={() => onChange(points.filter((_, j) => j !== i))}
                     className="rounded-md p-1 text-cx-faint hover:bg-cx-sub hover:text-cx-rose"
                   >
@@ -340,7 +352,7 @@ const CurveEditor: React.FC<CurveEditorProps> = ({
                 onClick={addPoint}
                 className="text-[12.5px] text-cx-accent hover:underline"
               >
-                + Add point
+                {t("cpPanels.curve.addPoint")}
               </button>
             </td>
           </tr>

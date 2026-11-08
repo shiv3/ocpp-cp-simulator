@@ -1,5 +1,6 @@
 import { CheckboxField, JsonTextareaField, TextField } from "./FormFields";
 import type { NodeFormComponentProps, NodeFormData } from "./types";
+import { useT } from "../../../i18n";
 
 function isJsonObject(value: unknown): boolean {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -12,40 +13,40 @@ export default function OcppCallForm({
   value,
   onChange,
 }: NodeFormComponentProps<NodeFormData>) {
+  const t = useT();
   return (
     <div className="space-y-3">
       <TextField
-        label="Label"
+        label={t("scenarioEditor.form.label")}
         value={(value.label as string | undefined) ?? ""}
         onChange={(label) => onChange({ ...value, label })}
       />
       <TextField
-        label="Action"
+        label={t("scenarioEditor.form.action")}
         value={(value.action as string | undefined) ?? ""}
         onChange={(action) => onChange({ ...value, action })}
-        placeholder="e.g., Heartbeat, StatusNotification, MeterValues"
+        placeholder={t("scenarioEditor.ocppCall.actionPlaceholder")}
       />
       <JsonTextareaField
-        label="Payload (JSON)"
+        label={t("scenarioEditor.form.payloadJson")}
         value={value.payload}
         onChange={(payload) => onChange({ ...value, payload })}
         placeholder="{}"
       />
       {!isJsonObject(value.payload) && (
         <p role="alert" className="text-xs text-red-600 dark:text-red-400">
-          The payload must be a JSON object. It is kept as typed, and the run
-          fails on this step until it is one.
+          {t("scenarioEditor.ocppCall.payloadNotObject")}
         </p>
       )}
       <CheckboxField
         id="ocpp-call-skip-validation"
-        label="Skip schema validation (send an invalid payload on purpose)"
+        label={t("scenarioEditor.ocppCall.skipValidation")}
         checked={value.skipValidation === true}
         onChange={(skipValidation) => onChange({ ...value, skipValidation })}
       />
       <CheckboxField
         id="ocpp-call-apply-response"
-        label="Apply the answer to the station's state"
+        label={t("scenarioEditor.ocppCall.applyResponse")}
         checked={value.applyResponse === true}
         onChange={(applyResponse) => onChange({ ...value, applyResponse })}
       />

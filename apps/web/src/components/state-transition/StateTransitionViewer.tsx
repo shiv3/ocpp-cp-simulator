@@ -10,6 +10,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import { useT } from "../../i18n";
 import StateNode from "./StateNode";
 import StateTransitionTimeline from "./StateTransitionTimeline";
 import type { Connector } from "@ocpp-cp-sim/core/cp/domain/connector/Connector";
@@ -32,6 +33,7 @@ const StateTransitionViewer: React.FC<StateTransitionViewerProps> = ({
   chargePoint,
   className = "",
 }) => {
+  const t = useT();
   const [currentStatus, setCurrentStatus] = useState<OCPPStatus>(
     connector.status as OCPPStatus,
   );
@@ -588,12 +590,12 @@ const StateTransitionViewer: React.FC<StateTransitionViewerProps> = ({
         {/* Legend */}
         <div className="absolute top-4 right-4 bg-white dark:bg-gray-800 p-4 rounded-lg shadow-lg text-sm">
           <h3 className="font-bold mb-2 text-gray-900 dark:text-white">
-            State Transition Diagram
+            {t("stateTransition.viewer.title")}
           </h3>
           <div className="space-y-1 text-gray-700 dark:text-gray-300">
             <div className="flex items-center gap-2">
               <div className="w-4 h-4 bg-blue-500 rounded"></div>
-              <span>Current State</span>
+              <span>{t("stateTransition.viewer.legend.current")}</span>
             </div>
             <div className="flex items-center gap-2">
               <div className="w-4 h-4 bg-green-400 rounded"></div>
@@ -605,11 +607,11 @@ const StateTransitionViewer: React.FC<StateTransitionViewerProps> = ({
             </div>
             <div className="flex items-center gap-2">
               <div className="w-4 h-4 bg-orange-400 rounded"></div>
-              <span>Suspended</span>
+              <span>{t("stateTransition.viewer.legend.suspended")}</span>
             </div>
             <div className="flex items-center gap-2">
               <div className="w-4 h-4 bg-gray-400 rounded"></div>
-              <span>Inoperative</span>
+              <span>{t("stateTransition.viewer.legend.inoperative")}</span>
             </div>
             <div className="flex items-center gap-2">
               <div className="w-4 h-4 bg-red-500 rounded"></div>

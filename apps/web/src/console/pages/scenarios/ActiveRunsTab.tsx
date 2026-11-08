@@ -5,6 +5,7 @@ import { useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useDataContext } from "@/data/providers/DataProvider";
+import { useT } from "../../../i18n";
 
 import type { ChargePointSnapshot } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
 import Combobox, { type ComboboxOption } from "../../components/Combobox";
@@ -60,6 +61,7 @@ const ActiveRunsTab: React.FC<ActiveRunsTabProps> = ({
   isSelected,
   onSelect,
 }) => {
+  const t = useT();
   const { chargePointService } = useDataContext();
   const [params, setParams] = useSearchParams();
   const [now, setNow] = useState<number>(Date.now());
@@ -164,7 +166,7 @@ const ActiveRunsTab: React.FC<ActiveRunsTabProps> = ({
     <div>
       <div
         role="group"
-        aria-label="Run state"
+        aria-label={t("scenarios.activeRuns.runState")}
         className="mb-4 grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(120px,1fr))]"
       >
         {tiles.map(({ state, count }) => (
@@ -179,7 +181,9 @@ const ActiveRunsTab: React.FC<ActiveRunsTabProps> = ({
             {state ? (
               <RunStatePill state={state} />
             ) : (
-              <span className="text-[12.5px] font-medium text-cx-fg2">All</span>
+              <span className="text-[12.5px] font-medium text-cx-fg2">
+                {t("scenarios.activeRuns.all")}
+              </span>
             )}
             <span className="text-2xl font-semibold leading-none tabular-nums text-cx-fg">
               {count}
@@ -191,8 +195,8 @@ const ActiveRunsTab: React.FC<ActiveRunsTabProps> = ({
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <Combobox
           id="active-runs-scenario"
-          aria-label="Scenario"
-          placeholder="Scenario"
+          aria-label={t("scenarios.activeRuns.scenario")}
+          placeholder={t("scenarios.activeRuns.scenario")}
           value={nameFilter}
           onChange={(value) => setParam("q", value)}
           options={scenarioOptions}
@@ -200,8 +204,8 @@ const ActiveRunsTab: React.FC<ActiveRunsTabProps> = ({
         />
         <Combobox
           id="active-runs-cp"
-          aria-label="Charge point"
-          placeholder="Charge point"
+          aria-label={t("scenarios.activeRuns.chargePoint")}
+          placeholder={t("scenarios.activeRuns.chargePoint")}
           value={cpFilter}
           onChange={(value) => setParam("cp", value)}
           options={cpOptions}
@@ -216,19 +220,19 @@ const ActiveRunsTab: React.FC<ActiveRunsTabProps> = ({
       </div>
 
       {isLoading ? (
-        <p className="text-sm text-cx-muted">Loading runs…</p>
+        <p className="text-sm text-cx-muted">
+          {t("scenarios.activeRuns.loading")}
+        </p>
       ) : shown.length === 0 ? (
         <EmptyState
           icon={Activity}
           title={
             runs.length === 0
-              ? "No scenario is running."
-              : "No active run matches the current filters."
+              ? t("scenarios.activeRuns.noneRunning")
+              : t("scenarios.activeRuns.noneMatch")
           }
           hint={
-            runs.length === 0
-              ? "Start one from the Library tab or from a charge point."
-              : undefined
+            runs.length === 0 ? t("scenarios.activeRuns.startHint") : undefined
           }
         />
       ) : (
@@ -304,7 +308,7 @@ const ActiveRunsTab: React.FC<ActiveRunsTabProps> = ({
                           )
                         }
                       >
-                        Skip
+                        {t("scenarios.activeRuns.skip")}
                       </Button>
                     )}
                     {run.state === "stepping" && (
@@ -322,7 +326,7 @@ const ActiveRunsTab: React.FC<ActiveRunsTabProps> = ({
                           )
                         }
                       >
-                        Next
+                        {t("scenarios.activeRuns.next")}
                       </Button>
                     )}
                     <Button
@@ -339,7 +343,7 @@ const ActiveRunsTab: React.FC<ActiveRunsTabProps> = ({
                         )
                       }
                     >
-                      Stop
+                      {t("scenarios.activeRuns.stop")}
                     </Button>
                   </div>
                 </div>

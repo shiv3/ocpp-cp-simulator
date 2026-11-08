@@ -1,5 +1,6 @@
 import React, { memo } from "react";
 import type { NodeProps } from "@xyflow/react";
+import { useT } from "../../../i18n";
 import { Handle, Position, type Node } from "@xyflow/react";
 import type { ResponseOverrideNodeData } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
 
@@ -9,6 +10,7 @@ const ResponseOverrideNode: React.FC<NodeProps<ResponseOverrideFlowNode>> = ({
   data,
   selected,
 }) => {
+  const t = useT();
   return (
     <div
       className={`px-4 py-3 rounded-lg border-2 bg-white dark:bg-gray-800 min-w-[200px] ${
@@ -17,7 +19,7 @@ const ResponseOverrideNode: React.FC<NodeProps<ResponseOverrideFlowNode>> = ({
     >
       <Handle type="target" position={Position.Top} className="w-3 h-3" />
       <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-        Response Override
+        {t("scenarioNodes.title.responseOverride")}
       </div>
       <div className="text-sm font-bold text-amber-700 dark:text-amber-300">
         {data.action} → {data.status}

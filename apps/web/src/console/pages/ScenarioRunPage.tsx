@@ -1,6 +1,7 @@
 import React from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 
+import { useT } from "../../i18n";
 import RunHistoryCard from "./scenarios/run/RunHistoryCard";
 import ScenarioRunContent from "./scenarios/run/ScenarioRunContent";
 
@@ -17,6 +18,7 @@ import ScenarioRunContent from "./scenarios/run/ScenarioRunContent";
  * (`state.from`), else the Scenarios page.
  */
 const ScenarioRunPage: React.FC = () => {
+  const t = useT();
   const [searchParams] = useSearchParams();
   const location = useLocation();
 
@@ -37,7 +39,7 @@ const ScenarioRunPage: React.FC = () => {
         to={backHref}
         className="mb-3 inline-block text-sm text-cx-accent hover:underline"
       >
-        ← Back
+        {t("scenarios.runPage.back")}
       </Link>
       {/* Keyed: another target starts from a clean run and selection. */}
       <ScenarioRunContent

@@ -12,6 +12,7 @@ import { ChevronDown, ChevronUp, Maximize2, Trash2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { t as tNow, useT } from "../../../../i18n";
 import { saveEditorScenario } from "../../../../components/scenario/scenarioPersistence";
 import { serializeScenarioGraph } from "../../../../components/scenario/scenarioSerialize";
 import ScenarioEvSettingsFields from "../../../../components/scenario/ScenarioEvSettingsFields";
@@ -65,8 +66,10 @@ function serializedSnapshot(def: ScenarioDefinition): string {
   });
 }
 
-const plural = (n: number, one: string, many: string) =>
-  `${n} ${n === 1 ? one : many}`;
+const connectorCount = (n: number) =>
+  tNow(n === 1 ? "scenarios.count.connector" : "scenarios.count.connectors", {
+    count: n,
+  });
 
 /** A connector that uses the Library scenario being edited. */
 export interface LibraryEditorUser {
@@ -141,6 +144,7 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
   onClose,
   cancelRef,
 }) => {
+  const t = useT();
   const isPanel = variant === "panel";
   const [searchParams, setSearchParams] = useSearchParams();
   const { mode, chargePointService, defaultEvSettings } = useDataContext();
@@ -317,11 +321,9 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
       runningUsers > 0 &&
       typeof window !== "undefined" &&
       !window.confirm(
-        `A run of this scenario is active on ${plural(
-          runningUsers,
-          "connector",
-          "connectors",
-        )} and will be stopped. Save?`,
+        t("scenarios.page.confirmStopRuns", {
+          connectors: connectorCount(runningUsers),
+        }),
       )
     ) {
       return;
@@ -340,7 +342,7 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
       setOriginal(scenario);
     } catch (err) {
       console.error("Failed to save scenario", err);
-      setSaveError("Failed to save scenario. Please try again.");
+      setSaveError(t("scenarios.editor.saveFailed"));
     } finally {
       setIsSaving(false);
     }
@@ -376,7 +378,7 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
           variant="outline"
           onClick={handleCancel}
         >
-          Cancel
+          {t("scenarios.common.cancel")}
         </Button>
       )}
       {expand && (
@@ -398,8 +400,8 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
           variant="outline"
           size="sm"
           className="px-2"
-          aria-label="Close side panel"
-          title="Close (Esc)"
+          aria-label={t("scenarios.panel.closeAria")}
+          title={t("scenarios.panel.closeTitle")}
           onClick={handleClose}
         >
           <X className="h-3.5 w-3.5" />
@@ -414,19 +416,23 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
       onClick={onBack}
       className="mb-4 inline-block text-sm text-cx-accent hover:underline"
     >
-      ← {backLabel ?? "Back"}
+      ← {backLabel ?? t("scenarios.meta.back")}
     </button>
   ) : (
     <Link
       to={"/scenarios"}
       className="mb-4 inline-block text-sm text-cx-accent hover:underline"
     >
-      ← Back to scenarios
+      ← {t("scenarios.editor.backToScenarios")}
     </Link>
   );
 
   if (isLoading) {
-    return <div className="text-sm text-cx-muted">Loading…</div>;
+    return (
+      <div className="text-sm text-cx-muted">
+        {t("scenarios.editor.loading")}
+      </div>
+    );
   }
 
   if (notFound || !scenario || !layout) {
@@ -438,13 +444,18 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
           backControl
         )}
         <EmptyState
-          title="Scenario not found"
+          title={t("scenarios.panel.notFound")}
           hint={
             library
-              ? `No library scenario "${scenarioId}".`
-              : `No scenario "${scenarioId}" for ${cpId}${
-                  connectorId != null ? ` · connector ${connectorId}` : ""
-                }.`
+              ? t("scenarios.editor.libraryNotFound", { scenarioId })
+              : t("scenarios.editor.notFoundHint", {
+                  scenarioId,
+                  cpId,
+                  connector:
+                    connectorId != null
+                      ? t("scenarios.editor.connectorSuffix", { connectorId })
+                      : "",
+                })
           }
         />
       </div>
@@ -468,17 +479,19 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
         actions={panelActions}
         saveLabel={
           library && users.length > 0
-            ? `Save and apply to ${plural(users.length, "connector", "connectors")}`
-            : "Save"
+            ? t("scenarios.editor.saveAndApply", {
+                connectors: connectorCount(users.length),
+              })
+            : t("scenarios.meta.save")
         }
       />
 
       {confirmLeave && (
         <InlineConfirm
           className="mb-4"
-          message="Discard unsaved changes?"
-          cancelLabel="Keep editing"
-          confirmLabel="Discard"
+          message={t("scenarios.editor.discardMessage")}
+          cancelLabel={t("scenarios.editor.keepEditing")}
+          confirmLabel={t("scenarios.editor.discard")}
           danger
           onCancel={() => setConfirmLeave(null)}
           onConfirm={() => {
@@ -496,10 +509,12 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
           className="mb-4 flex flex-wrap items-center gap-1.5"
         >
           <span className="mr-1 text-[11px] font-medium uppercase tracking-wide text-cx-muted">
-            Used by
+            {t("scenarios.editor.usedBy")}
           </span>
           {users.length === 0 ? (
-            <span className="text-sm text-cx-muted">no connector uses it</span>
+            <span className="text-sm text-cx-muted">
+              {t("scenarios.editor.noConnectorUses")}
+            </span>
           ) : (
             users.map((user) => (
               <Link
@@ -509,18 +524,18 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
                     ? `/cp/${encodeURIComponent(user.cpId)}`
                     : `/cp/${encodeURIComponent(user.cpId)}?connector=${user.connectorId}`
                 }
-                title={user.running ? "running" : undefined}
+                title={user.running ? t("scenarios.editor.running") : undefined}
                 className="inline-flex items-center gap-1.5 rounded-md border border-cx-border bg-cx-card px-2 py-0.5 font-mono text-xs text-cx-fg2 hover:border-cx-border-strong hover:text-cx-fg"
               >
                 {user.running && (
                   <span
-                    aria-label="running"
+                    aria-label={t("scenarios.editor.running")}
                     className="h-[7px] w-[7px] rounded-full bg-cx-blue"
                   />
                 )}
                 {user.cpId}
                 {user.connectorId === null
-                  ? " · charge point"
+                  ? ` · ${t("scenarios.editor.chargePoint")}`
                   : ` #${user.connectorId}`}
               </Link>
             ))
@@ -532,8 +547,8 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
           settings (#424). */}
       <div className="mb-4 space-y-2">
         <input
-          aria-label="Scenario description"
-          placeholder="Description (optional)"
+          aria-label={t("scenarios.editor.descriptionAria")}
+          placeholder={t("scenarios.editor.descriptionPlaceholder")}
           value={scenario.description ?? ""}
           // An erased description is no description, not "".
           onChange={(e) =>
@@ -562,31 +577,32 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
       )}
 
       <SegmentedControl
-        label="Editor view"
+        label={t("scenarios.editor.editorView")}
         className="mb-4"
         value={view}
         onChange={setView}
         options={[
           {
             value: "steps",
-            label: "Steps",
+            label: t("scenarios.editor.viewSteps"),
             disabled: !layout.supported,
             title: layout.supported
               ? undefined
-              : "This scenario has a join, a loop or a second fork: the Steps view cannot show it",
+              : t("scenarios.editor.stepsUnavailable"),
           },
-          { value: "graph", label: "Graph" },
+          { value: "graph", label: t("scenarios.editor.viewGraph") },
         ]}
       />
 
       {pendingDelete && (
         <InlineConfirm
           className="mb-3"
-          message={`Delete step ${stepIndexOf(layout, pendingDelete) ?? ""}: ${
-            pendingNode ? nodeTitle(pendingNode) : ""
-          }?`}
-          cancelLabel="Keep"
-          confirmLabel="Delete"
+          message={t("scenarios.editor.deleteStepConfirm", {
+            n: stepIndexOf(layout, pendingDelete) ?? "",
+            title: pendingNode ? nodeTitle(pendingNode) : "",
+          })}
+          cancelLabel={t("scenarios.editor.keep")}
+          confirmLabel={t("scenarios.editor.delete")}
           danger
           onCancel={() => setPendingDelete(null)}
           onConfirm={() => handleDelete(pendingDelete)}
@@ -597,7 +613,7 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
         <>
           {!layout.supported && (
             <p className="mb-2 text-xs text-cx-muted">
-              This scenario has joins or loops; the full graph editor is used.
+              {t("scenarios.editor.fullGraphNote")}
             </p>
           )}
           <div
@@ -609,7 +625,7 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
             <Suspense
               fallback={
                 <div className="p-4 text-sm text-cx-muted">
-                  Loading graph editor…
+                  {t("scenarios.editor.loadingGraph")}
                 </div>
               }
             >
@@ -672,19 +688,24 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
                       className="min-w-0 flex-1 text-xs text-cx-muted"
                       title={nodeTitle(selectedNode)}
                     >
-                      Step <span className="font-mono">{selectedNumber}</span>
+                      {t("scenarios.editor.step")}{" "}
+                      <span className="font-mono">{selectedNumber}</span>
                       {selectedPlace.lane !== "main" &&
                         ` · ${layout.fork?.branches[selectedPlace.lane]?.name ?? ""}`}
                     </span>
                     <InspectorAction
-                      label={`Move step ${selectedNumber} up`}
+                      label={t("scenarios.editor.moveUp", {
+                        n: selectedNumber,
+                      })}
                       disabled={selectedPlace.index === 0}
                       onClick={() => handleMove(selectedNode.id, -1)}
                     >
                       <ChevronUp className="h-3.5 w-3.5" />
                     </InspectorAction>
                     <InspectorAction
-                      label={`Move step ${selectedNumber} down`}
+                      label={t("scenarios.editor.moveDown", {
+                        n: selectedNumber,
+                      })}
                       disabled={
                         selectedPlace.index === selectedPlace.length - 1
                       }
@@ -693,7 +714,9 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
                       <ChevronDown className="h-3.5 w-3.5" />
                     </InspectorAction>
                     <InspectorAction
-                      label={`Delete step ${selectedNumber}`}
+                      label={t("scenarios.editor.deleteStep", {
+                        n: selectedNumber,
+                      })}
                       danger
                       onClick={() => handleDelete(selectedNode.id)}
                     >
@@ -709,8 +732,8 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
                 </>
               ) : (
                 <EmptyState
-                  title="Select a step"
-                  hint="Pick a step to edit its configuration."
+                  title={t("scenarios.inspector.selectStep")}
+                  hint={t("scenarios.inspector.selectStepHint")}
                 />
               )}
             </div>

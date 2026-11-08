@@ -13,6 +13,7 @@ import {
 } from "../../../lib/stepLayout";
 import { dropNeighbours } from "../../../lib/useLaneDrag";
 import { useStepEditing, type InsertSlot } from "../edit/stepEditing";
+import { t, useT } from "../../../../i18n";
 import StepTile from "./StepTile";
 import {
   CURRENT_CARD,
@@ -133,7 +134,10 @@ function computeGeometry(
     if (prevId) {
       zones.push({
         slot: { lane: "main", index: row },
-        label: `Insert step between ${number(prevId)} and ${number(step.id)}`,
+        label: t("scenarioRun.insertBetween", {
+          from: number(prevId) ?? "",
+          to: number(step.id) ?? "",
+        }),
         x: X0,
         y: (prevBottom + top) / 2,
       });
@@ -159,8 +163,8 @@ function computeGeometry(
     discs.push({
       slot: { lane: "main", index: layout.main.length },
       label: lastMain
-        ? `Add step after step ${number(lastMain.id)}`
-        : "Add step before the branches",
+        ? t("scenarioRun.addAfter", { n: number(lastMain.id) ?? "" })
+        : t("scenarioRun.addBeforeBranches"),
       x: X0,
       y: forkBottom + 16,
     });
@@ -181,7 +185,10 @@ function computeGeometry(
         if (row > 0) {
           zones.push({
             slot: { lane, index: row },
-            label: `Insert step between ${number(branch.steps[row - 1].id)} and ${number(step.id)}`,
+            label: t("scenarioRun.insertBetween", {
+              from: number(branch.steps[row - 1].id) ?? "",
+              to: number(step.id) ?? "",
+            }),
             x: laneX(lane),
             y: (bottom + top) / 2,
           });
@@ -196,8 +203,8 @@ function computeGeometry(
       discs.push({
         slot: { lane, index: branch.steps.length },
         label: last
-          ? `Add step after step ${number(last.id)}`
-          : `Add step to ${branch.name}`,
+          ? t("scenarioRun.addAfter", { n: number(last.id) ?? "" })
+          : t("scenarioRun.addToBranch", { name: branch.name }),
         x: laneX(lane),
         y: capTop + capGap / 2,
       });
@@ -215,8 +222,8 @@ function computeGeometry(
     discs.push({
       slot: { lane: "main", index: layout.main.length },
       label: lastMain
-        ? `Add step after step ${number(lastMain.id)}`
-        : "Add the first step",
+        ? t("scenarioRun.addAfter", { n: number(lastMain.id) ?? "" })
+        : t("scenarioRun.addFirst"),
       x: X0,
       y: prevBottom + capGap / 2,
     });
@@ -262,6 +269,8 @@ function computeGeometry(
  * within its lane, and a focused card takes Alt+ArrowUp/Down and Delete.
  */
 const StepsGraphView: React.FC<StepRunViewProps> = (props) => {
+  // Subscribes to language changes (computeGeometry builds labels with `t`).
+  const t = useT();
   const {
     layout,
     currentNodeId,
@@ -284,7 +293,7 @@ const StepsGraphView: React.FC<StepRunViewProps> = (props) => {
   const { drag } = editing;
 
   if (!editable && layoutSteps(layout).length === 0) {
-    return <p className="text-sm text-cx-muted">This scenario has no steps.</p>;
+    return <p className="text-sm text-cx-muted">{t("scenarioRun.noSteps")}</p>;
   }
 
   const canInsert = editable && onInsertStep !== undefined;
@@ -341,7 +350,9 @@ const StepsGraphView: React.FC<StepRunViewProps> = (props) => {
       <button
         type="button"
         aria-label={point.label}
-        title={hover ? "Insert a step here" : "Add a step"}
+        title={
+          hover ? t("scenarioRun.insertStepHere") : t("scenarioRun.addAStep")
+        }
         onClick={() => editing.openSlot(point.slot.lane, point.slot.index)}
         className={cn(
           "flex h-[18px] w-[18px] items-center justify-center rounded-full border bg-cx-card",
@@ -493,8 +504,12 @@ const StepsGraphView: React.FC<StepRunViewProps> = (props) => {
                 <button
                   type="button"
                   aria-pressed={selected}
-                  aria-label={`Select step ${number}: ${nodeTitle(step)}`}
-                  title="Click to edit · drag to reorder · Alt+↑/↓ to move"
+                  data-step-select
+                  aria-label={t("scenarioRun.selectStep", {
+                    n: number ?? "",
+                    title: nodeTitle(step),
+                  })}
+                  title={t("scenarioRun.clickToEdit")}
                   onClick={() => onSelectStep?.(step.id)}
                   onKeyDown={editing.onStepKeyDown(step.id)}
                   className={cn(
@@ -509,8 +524,10 @@ const StepsGraphView: React.FC<StepRunViewProps> = (props) => {
                 {selected && onDeleteStep && (
                   <button
                     type="button"
-                    aria-label={`Remove step ${number}`}
-                    title="Remove this step"
+                    aria-label={t("scenarioRun.removeStep", {
+                      n: number ?? "",
+                    })}
+                    title={t("scenarioRun.removeThisStep")}
                     // Not the start of a drag.
                     onPointerDown={(event) => event.stopPropagation()}
                     onClick={() => onDeleteStep(step.id, { confirm: false })}
@@ -565,8 +582,8 @@ const StepsGraphView: React.FC<StepRunViewProps> = (props) => {
         {editable && onAddBranch && !drag && (
           <button
             type="button"
-            aria-label="Add a parallel branch"
-            title="Add a parallel branch"
+            aria-label={t("scenarioRun.addParallelBranch")}
+            title={t("scenarioRun.addParallelBranch")}
             onClick={onAddBranch}
             className="absolute z-10 flex h-[22px] items-center rounded-full border border-dashed border-cx-border-strong bg-cx-card px-2 text-xs font-medium text-cx-muted hover:border-cx-accent hover:text-cx-accent"
             style={{
@@ -574,7 +591,7 @@ const StepsGraphView: React.FC<StepRunViewProps> = (props) => {
               top: geometry.branchPill.top,
             }}
           >
-            + branch
+            {t("scenarioRun.branchPill")}
           </button>
         )}
 

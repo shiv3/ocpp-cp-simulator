@@ -7,6 +7,7 @@ import type {
   ScenarioDefinition,
   ScenarioTrigger,
 } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import { useT } from "../../../../i18n";
 import TargetChip from "../../../components/TargetChip";
 import { buildScenarioUrl } from "../../../lib/useAllScenarios";
 
@@ -57,11 +58,12 @@ const ScenarioMetaBar: React.FC<ScenarioMetaBarProps> = ({
   onSave,
   backLabel,
   onBack,
-  saveLabel = "Save",
+  saveLabel,
   showTarget = true,
   variant = "page",
   actions,
 }) => {
+  const t = useT();
   const triggerType = scenario.trigger?.type ?? "manual";
   const toStatus =
     scenario.trigger?.conditions?.toStatus ?? OCPPStatus.Charging;
@@ -89,9 +91,7 @@ const ScenarioMetaBar: React.FC<ScenarioMetaBarProps> = ({
     if (
       dirty &&
       typeof window !== "undefined" &&
-      !window.confirm(
-        "You have unsaved changes. Run the last-saved version anyway?",
-      )
+      !window.confirm(t("scenarios.meta.confirmRunDirty"))
     ) {
       e.preventDefault();
     }
@@ -103,17 +103,17 @@ const ScenarioMetaBar: React.FC<ScenarioMetaBarProps> = ({
       onClick={onBack}
       className="text-sm text-cx-accent hover:underline"
     >
-      ← {backLabel ?? "Back"}
+      ← {backLabel ?? t("scenarios.meta.back")}
     </button>
   ) : (
     <Link to={"/scenarios"} className="text-sm text-cx-accent hover:underline">
-      ← Back
+      ← {t("scenarios.meta.back")}
     </Link>
   );
 
   const nameInput = (
     <input
-      aria-label="Scenario name"
+      aria-label={t("scenarios.meta.scenarioName")}
       value={scenario.name}
       onChange={(e) => onChange({ name: e.target.value })}
       className={
@@ -127,18 +127,20 @@ const ScenarioMetaBar: React.FC<ScenarioMetaBarProps> = ({
   const triggerControls = (
     <>
       <select
-        aria-label="Trigger"
+        aria-label={t("scenarios.meta.trigger")}
         value={triggerType}
         onChange={(e) => handleTriggerTypeChange(e.target.value)}
         className="rounded-md border border-cx-border-strong bg-transparent px-2 py-1.5 text-sm"
       >
-        <option value="manual">Manual</option>
-        <option value="statusChange">On status change</option>
+        <option value="manual">{t("scenarios.meta.triggerManual")}</option>
+        <option value="statusChange">
+          {t("scenarios.meta.triggerStatusChange")}
+        </option>
       </select>
 
       {triggerType === "statusChange" && (
         <select
-          aria-label="Trigger to-status"
+          aria-label={t("scenarios.meta.triggerToStatus")}
           value={toStatus}
           onChange={(e) => handleToStatusChange(e.target.value)}
           className="rounded-md border border-cx-border-strong bg-transparent px-2 py-1.5 text-sm"
@@ -158,7 +160,7 @@ const ScenarioMetaBar: React.FC<ScenarioMetaBarProps> = ({
           onChange={(e) => onChange({ enabled: e.target.checked })}
           className="h-4 w-4 rounded border-cx-border-strong"
         />
-        Enabled
+        {t("scenarios.meta.enabled")}
       </label>
     </>
   );
@@ -168,8 +170,8 @@ const ScenarioMetaBar: React.FC<ScenarioMetaBarProps> = ({
       {dirty && (
         <span
           role="status"
-          aria-label="Unsaved changes"
-          title="Unsaved changes"
+          aria-label={t("scenarios.meta.unsaved")}
+          title={t("scenarios.meta.unsaved")}
           className="h-2 w-2 rounded-full bg-cx-amber"
         />
       )}
@@ -179,7 +181,7 @@ const ScenarioMetaBar: React.FC<ScenarioMetaBarProps> = ({
         onClick={onSave}
         disabled={!dirty || isSaving}
       >
-        {saveLabel}
+        {saveLabel ?? t("scenarios.meta.save")}
       </Button>
     </>
   );
@@ -212,7 +214,7 @@ const ScenarioMetaBar: React.FC<ScenarioMetaBarProps> = ({
         {showTarget && (
           <Button asChild variant="outline" size="sm">
             <Link to={runUrl} onClick={handleRunClick}>
-              ▶ Run
+              {t("scenarios.meta.run")}
             </Link>
           </Button>
         )}

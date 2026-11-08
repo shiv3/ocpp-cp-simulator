@@ -1,4 +1,17 @@
 import type { Messages } from "../../types";
 
-const stateTransition: Messages = {};
+const stateTransition: Messages = {
+  "stateTransition.node.current": "● 現在",
+  "stateTransition.timeline.empty": "状態遷移の履歴はまだありません",
+  "stateTransition.timeline.previous": "前へ",
+  "stateTransition.timeline.pause": "一時停止",
+  "stateTransition.timeline.play": "再生",
+  "stateTransition.timeline.next": "次へ",
+  "stateTransition.timeline.loop": "ループ再生",
+  "stateTransition.timeline.history": "📋 遷移履歴",
+  "stateTransition.viewer.title": "状態遷移図",
+  "stateTransition.viewer.legend.current": "現在の状態",
+  "stateTransition.viewer.legend.suspended": "一時停止中",
+  "stateTransition.viewer.legend.inoperative": "動作不可",
+};
 export default stateTransition;

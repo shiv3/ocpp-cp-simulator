@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useT } from "../../../i18n";
 
 export interface NewScenarioDialogProps {
   isOpen: boolean;
@@ -28,6 +29,7 @@ const NewScenarioDialog: React.FC<NewScenarioDialogProps> = ({
   onClose,
   onConfirm,
 }) => {
+  const t = useT();
   const [name, setName] = useState("");
 
   useEffect(() => {
@@ -43,10 +45,9 @@ const NewScenarioDialog: React.FC<NewScenarioDialogProps> = ({
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>New scenario</DialogTitle>
+          <DialogTitle>{t("scenarios.newDialog.title")}</DialogTitle>
           <DialogDescription>
-            It goes into the Library; connectors pick it on the charge point
-            page.
+            {t("scenarios.newDialog.description")}
           </DialogDescription>
         </DialogHeader>
 
@@ -57,22 +58,24 @@ const NewScenarioDialog: React.FC<NewScenarioDialogProps> = ({
             handleConfirm();
           }}
         >
-          <Label htmlFor="new-scenario-name">Name</Label>
+          <Label htmlFor="new-scenario-name">
+            {t("scenarios.newDialog.name")}
+          </Label>
           <Input
             id="new-scenario-name"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Scenario name"
+            placeholder={t("scenarios.newDialog.namePlaceholder")}
             autoFocus
           />
         </form>
 
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onClose}>
-            Cancel
+            {t("scenarios.common.cancel")}
           </Button>
           <Button type="button" onClick={handleConfirm} disabled={!canConfirm}>
-            Create
+            {t("scenarios.newDialog.create")}
           </Button>
         </DialogFooter>
       </DialogContent>

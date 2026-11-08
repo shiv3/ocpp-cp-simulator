@@ -1,5 +1,6 @@
 import React, { memo } from "react";
 import type { NodeProps } from "@xyflow/react";
+import { useT } from "../../../i18n";
 import { Handle, Position, type Node } from "@xyflow/react";
 import type { InboundPolicyNodeData } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
 
@@ -9,12 +10,15 @@ const InboundPolicyNode: React.FC<NodeProps<InboundPolicyFlowNode>> = ({
   data,
   selected,
 }) => {
+  const t = useT();
   const policyDesc =
     data.policy === "answer"
-      ? "normal"
+      ? t("scenarioNodes.inbound.normal")
       : data.policy === "callerror"
-        ? `error(${data.errorCode ?? "NotImplemented"})`
-        : "ignore";
+        ? t("scenarioNodes.inbound.error", {
+            code: data.errorCode ?? "NotImplemented",
+          })
+        : t("scenarioNodes.inbound.ignore");
 
   return (
     <div
@@ -24,7 +28,7 @@ const InboundPolicyNode: React.FC<NodeProps<InboundPolicyFlowNode>> = ({
     >
       <Handle type="target" position={Position.Top} className="w-3 h-3" />
       <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-        Inbound Policy
+        {t("scenarioNodes.title.inboundPolicy")}
       </div>
       <div className="text-sm font-bold text-purple-700 dark:text-purple-300">
         {data.action} → {policyDesc}

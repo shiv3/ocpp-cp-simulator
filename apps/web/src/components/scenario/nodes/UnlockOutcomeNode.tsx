@@ -1,5 +1,6 @@
 import React, { memo } from "react";
 import type { NodeProps } from "@xyflow/react";
+import { useT } from "../../../i18n";
 import { Handle, Position, type Node } from "@xyflow/react";
 import type { UnlockOutcomeNodeData } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
 
@@ -11,6 +12,7 @@ const UnlockOutcomeNode: React.FC<NodeProps<Node<UnlockOutcomeNodeData>>> = ({
   data,
   selected,
 }) => {
+  const t = useT();
   const tint =
     data.outcome === "Unlocked"
       ? "text-green-700 dark:text-green-300"
@@ -25,7 +27,7 @@ const UnlockOutcomeNode: React.FC<NodeProps<Node<UnlockOutcomeNodeData>>> = ({
     >
       <Handle type="target" position={Position.Top} className="w-3 h-3" />
       <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-        Unlock Outcome (§5.18)
+        {t("scenarioNodes.title.unlockOutcome")}
       </div>
       <div className={`text-sm font-bold ${tint}`}>{data.outcome}</div>
       <Handle type="source" position={Position.Bottom} className="w-3 h-3" />

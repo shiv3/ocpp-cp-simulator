@@ -1,5 +1,6 @@
 import React, { memo } from "react";
 import type { NodeProps } from "@xyflow/react";
+import { useT } from "../../../i18n";
 import { Handle, Position, type Node } from "@xyflow/react";
 import type { StatusTriggerNodeData } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
 
@@ -13,6 +14,7 @@ type ExtendedStatusTriggerNodeData = StatusTriggerNodeData & {
 const StatusTriggerNode: React.FC<
   NodeProps<Node<ExtendedStatusTriggerNodeData>>
 > = ({ data, selected }) => {
+  const t = useT();
   const progress = data.progress;
   const progressPercent = progress
     ? ((progress.total - progress.remaining) / progress.total) * 100
@@ -29,18 +31,21 @@ const StatusTriggerNode: React.FC<
       <Handle type="target" position={Position.Top} className="w-3 h-3" />
 
       <div className="text-xs font-semibold text-orange-700 dark:text-orange-300 mb-1">
-        Status Trigger
+        {t("scenarioNodes.title.statusTrigger")}
       </div>
       <div className="font-bold text-sm text-primary mb-1">{data.label}</div>
       <div className="text-xs text-muted">
-        Wait for: <span className="font-semibold">{data.targetStatus}</span>
+        {t("scenarioNodes.waitFor")}{" "}
+        <span className="font-semibold">{data.targetStatus}</span>
       </div>
       {data.timeout !== undefined && data.timeout > 0 && (
         <div className="text-xs text-muted">
-          Timeout: {data.timeout}s
+          {t("scenarioNodes.timeout", { seconds: data.timeout })}
           {progress && progress.remaining > 0 && (
             <span className="ml-1 text-orange-700 dark:text-orange-300 font-semibold">
-              ({progress.remaining.toFixed(1)}s left)
+              {t("scenarioNodes.secondsLeft", {
+                seconds: progress.remaining.toFixed(1),
+              })}
             </span>
           )}
         </div>

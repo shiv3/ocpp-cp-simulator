@@ -2,6 +2,7 @@ import React from "react";
 
 import { curveDurationMin, curvePeakKw, type PowerPoint } from "./powerCurve";
 import type { PowerSample } from "./useConnectorPower";
+import { useT } from "../../../i18n";
 
 export interface PowerSparklineProps {
   /** Meter readings of the transaction, oldest first. */
@@ -39,9 +40,10 @@ const PowerSparkline: React.FC<PowerSparklineProps> = ({
   powerKw,
   ghost,
 }) => {
+  const t = useT();
   const head = (right: string) => (
     <div className="flex items-baseline justify-between gap-3 text-[11px] uppercase tracking-[0.06em] text-cx-faint">
-      <span>Power this session</span>
+      <span>{t("cpPanels.sparkline.title")}</span>
       <b className="font-mono text-[11.5px] font-medium normal-case tracking-normal text-cx-muted">
         {right}
       </b>
@@ -88,7 +90,7 @@ const PowerSparkline: React.FC<PowerSparklineProps> = ({
         {formatKw(maxKw)} kW
       </text>
       <text className="fill-cx-faint font-mono text-[10.5px]" x={X0} y={H - 2}>
-        start
+        {t("cpPanels.sparkline.start")}
       </text>
     </>
   );
@@ -96,7 +98,7 @@ const PowerSparkline: React.FC<PowerSparklineProps> = ({
   if (samples.length === 0) {
     return (
       <div data-testid="power-sparkline" className="col-span-full">
-        {head("no transaction")}
+        {head(t("cpPanels.sparkline.noTransaction"))}
         <svg
           viewBox={`0 0 ${W} ${H}`}
           aria-hidden
@@ -124,11 +126,16 @@ const PowerSparkline: React.FC<PowerSparklineProps> = ({
 
   return (
     <div data-testid="power-sparkline" className="col-span-full">
-      {head(`${powerKw.toFixed(1)} kW now · max ${formatKw(maxKw)} kW`)}
+      {head(
+        t("cpPanels.sparkline.nowMax", {
+          kw: powerKw.toFixed(1),
+          max: formatKw(maxKw),
+        }),
+      )}
       <svg
         viewBox={`0 0 ${W} ${H}`}
         role="img"
-        aria-label={`Power this session, ${powerKw.toFixed(1)} kW now`}
+        aria-label={t("cpPanels.sparkline.aria", { kw: powerKw.toFixed(1) })}
         className="mt-1 block h-[76px] w-full"
       >
         {axis}
@@ -138,7 +145,7 @@ const PowerSparkline: React.FC<PowerSparklineProps> = ({
           y={H - 2}
           textAnchor={nowX > X1 - 40 ? "end" : "middle"}
         >
-          now
+          {t("cpPanels.sparkline.now")}
         </text>
         {ghostPath && (
           <path

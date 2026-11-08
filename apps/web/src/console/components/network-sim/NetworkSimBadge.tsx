@@ -1,6 +1,7 @@
 import React from "react";
 
 import { cn } from "@/lib/utils";
+import { useT } from "@/i18n";
 
 export interface NetworkSimBadgeProps {
   summary?: { enabled: boolean; manualRuleIds: string[] } | null;
@@ -16,6 +17,7 @@ const NetworkSimBadge: React.FC<NetworkSimBadgeProps> = ({
   summary,
   className,
 }) => {
+  const t = useT();
   // Render nothing if summary is null/undefined or not enabled
   if (!summary || !summary.enabled) {
     return null;
@@ -27,11 +29,11 @@ const NetworkSimBadge: React.FC<NetworkSimBadgeProps> = ({
         "inline-flex items-center gap-1.5 whitespace-nowrap text-[12.5px] font-medium text-cx-fg2",
         className,
       )}
-      title="Network simulation enabled"
-      aria-label="Network simulation enabled"
+      title={t("consoleShared.networkSim.enabled")}
+      aria-label={t("consoleShared.networkSim.enabled")}
     >
       <span aria-hidden className="h-[7px] w-[7px] rounded-full bg-cx-purple" />
-      Net sim
+      {t("consoleShared.networkSim.badge")}
     </span>
   );
 };

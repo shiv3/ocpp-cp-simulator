@@ -1,5 +1,6 @@
 import React from "react";
 import { cn } from "@/lib/utils";
+import { useT } from "../i18n";
 import { appBuildLabel } from "@/lib/appBuildLabel";
 import { formatVersionLabel } from "@ocpp-cp-sim/contracts/buildVersion";
 
@@ -34,6 +35,7 @@ const AppBuildInfo: React.FC<{
   className?: string;
   daemonVersion?: string | null;
 }> = ({ className, daemonVersion }) => {
+  const t = useT();
   const version = appBuildLabel();
 
   return (
@@ -45,12 +47,16 @@ const AppBuildInfo: React.FC<{
     >
       <span className="font-medium">ocpp-cp-simulator</span>
       <span aria-hidden="true">·</span>
-      <span title="Version of this web console">ui {version}</span>
+      <span title={t("common.build.uiTitle")}>
+        {t("common.build.ui", { version })}
+      </span>
       {daemonVersion ? (
         <>
           <span aria-hidden="true">·</span>
-          <span title="Version of the connected daemon">
-            daemon {formatVersionLabel(daemonVersion)}
+          <span title={t("common.build.daemonTitle")}>
+            {t("common.build.daemon", {
+              version: formatVersionLabel(daemonVersion),
+            })}
           </span>
         </>
       ) : null}

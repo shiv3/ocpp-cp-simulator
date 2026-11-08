@@ -1,5 +1,6 @@
 import React, { memo } from "react";
 import type { NodeProps } from "@xyflow/react";
+import { useT } from "../../../i18n";
 import { Handle, Position, type Node } from "@xyflow/react";
 import type { NotificationNodeData } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
 
@@ -7,6 +8,7 @@ const NotificationNode: React.FC<NodeProps<Node<NotificationNodeData>>> = ({
   data,
   selected,
 }) => {
+  const t = useT();
   return (
     <div
       className={`px-4 py-3 rounded-lg border-2 bg-white dark:bg-gray-800 min-w-[180px] ${
@@ -16,7 +18,7 @@ const NotificationNode: React.FC<NodeProps<Node<NotificationNodeData>>> = ({
       <Handle type="target" position={Position.Top} className="w-3 h-3" />
 
       <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-        Notification
+        {t("scenarioNodes.title.notification")}
       </div>
       <div className="flex items-center gap-2">
         <div className="text-2xl">📤</div>
@@ -24,7 +26,9 @@ const NotificationNode: React.FC<NodeProps<Node<NotificationNodeData>>> = ({
           <div className="font-bold text-sm text-primary">
             {data.messageType}
           </div>
-          <div className="text-xs text-muted">Send message</div>
+          <div className="text-xs text-muted">
+            {t("scenarioNodes.meter.sendMessage")}
+          </div>
         </div>
       </div>
       <Handle type="source" position={Position.Bottom} className="w-3 h-3" />

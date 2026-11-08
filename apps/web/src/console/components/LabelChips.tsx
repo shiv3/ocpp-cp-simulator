@@ -2,6 +2,7 @@ import React from "react";
 
 import { cn } from "@/lib/utils";
 import type { Labels } from "@ocpp-cp-sim/contracts/labels";
+import { useT } from "@/i18n";
 
 export interface LabelChipsProps {
   labels?: Labels;
@@ -13,12 +14,13 @@ export interface LabelChipsProps {
  * daemon returned them. Renders nothing when there are none.
  */
 const LabelChips: React.FC<LabelChipsProps> = ({ labels, className }) => {
+  const t = useT();
   const entries = Object.entries(labels ?? {});
   if (entries.length === 0) return null;
   return (
     <span
       className={cn("inline-flex flex-wrap items-center gap-1", className)}
-      aria-label="Labels"
+      aria-label={t("consoleShared.labelChips.label")}
     >
       {entries.map(([key, value]) => (
         <span

@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
 
 import { FILTER_SELECT_CLASS } from "../../components/filterStyles";
+import { useT, type MessageKey } from "../../../i18n";
 
 export interface SessionFlowProps {
   status: OCPPStatus;
@@ -22,11 +23,11 @@ export interface SessionFlowProps {
 type StepId = "plugin" | "start" | "stop" | "unplug";
 type StepState = "done" | "next" | "alt" | "current" | "todo";
 
-const STEPS: ReadonlyArray<{ id: StepId; label: string }> = [
-  { id: "plugin", label: "Plug in" },
-  { id: "start", label: "Start charging" },
-  { id: "stop", label: "Stop charging" },
-  { id: "unplug", label: "Unplug" },
+const STEPS: ReadonlyArray<{ id: StepId; labelKey: MessageKey }> = [
+  { id: "plugin", labelKey: "cpPanels.flow.plugIn" },
+  { id: "start", labelKey: "cpPanels.flow.start" },
+  { id: "stop", labelKey: "cpPanels.flow.stop" },
+  { id: "unplug", labelKey: "cpPanels.flow.unplug" },
 ];
 
 /**
@@ -75,6 +76,7 @@ const SessionFlow: React.FC<SessionFlowProps> = ({
   onStop,
   onUnplug,
 }) => {
+  const t = useT();
   const [tagInput, setTagInput] = useState("");
   const tagId = tagIds.includes(tagInput) ? tagInput : (tagIds[0] ?? "");
 
@@ -103,15 +105,15 @@ const SessionFlow: React.FC<SessionFlowProps> = ({
   return (
     <div
       role="group"
-      aria-label="Charging session"
+      aria-label={t("cpPanels.flow.group")}
       className="mt-3.5 flex flex-wrap items-center gap-y-1 rounded-[9px] bg-cx-sub px-2.5 py-2 @max-[520px]:px-1"
     >
       {STEPS.map((step, index) => {
         const state = stateOf(step.id, index);
         const label =
           state === "current" && transactionId != null && step.id === "stop"
-            ? "Charging (faulted)"
-            : step.label;
+            ? t("cpPanels.flow.chargingFaulted")
+            : t(step.labelKey);
         const blocked = step.id === "start" && !tagId;
         return (
           <React.Fragment key={step.id}>
@@ -161,7 +163,7 @@ const SessionFlow: React.FC<SessionFlowProps> = ({
 
       {!unavailable && !faulted && next === "start" && (
         <label className="ml-auto inline-flex items-center gap-1.5 pl-2 text-xs text-cx-muted @max-[520px]:basis-full @max-[520px]:pl-0 @max-[520px]:pt-1">
-          with tag
+          {t("cpPanels.flow.withTag")}
           <select
             value={tagId}
             onChange={(e) => setTagInput(e.target.value)}
@@ -170,15 +172,15 @@ const SessionFlow: React.FC<SessionFlowProps> = ({
               FILTER_SELECT_CLASS,
               "h-7 min-w-[120px] disabled:opacity-60",
             )}
-            title="RFID tag to authorize the transaction with"
-            aria-label="TagID of the transaction"
+            title={t("cpPanels.flow.tagTitle")}
+            aria-label={t("cpPanels.flow.tagAria")}
           >
             {tagIds.length === 0 ? (
-              <option value="">No TagIDs configured</option>
+              <option value="">{t("cpPanels.flow.noTagIds")}</option>
             ) : (
-              tagIds.map((t) => (
-                <option key={t} value={t}>
-                  {t}
+              tagIds.map((tag) => (
+                <option key={tag} value={tag}>
+                  {tag}
                 </option>
               ))
             )}
@@ -187,13 +189,13 @@ const SessionFlow: React.FC<SessionFlowProps> = ({
       )}
       {!unavailable && transactionId != null && next === "stop" && (
         <span className="ml-auto pl-2 font-mono text-xs text-cx-muted @max-[520px]:basis-full @max-[520px]:pl-0 @max-[520px]:pt-1">
-          Tx #{transactionId}
+          {t("cpPanels.flow.tx", { id: transactionId })}
           {transactionTagId ? ` · ${transactionTagId}` : ""}
         </span>
       )}
       {unavailable && (
         <span className="ml-auto pl-2 text-xs text-cx-muted @max-[520px]:basis-full @max-[520px]:pl-0 @max-[520px]:pt-1">
-          Unavailable: send Available in Controls to plug in
+          {t("cpPanels.flow.unavailable")}
         </span>
       )}
     </div>

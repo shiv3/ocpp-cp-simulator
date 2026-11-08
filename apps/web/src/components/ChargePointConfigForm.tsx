@@ -26,6 +26,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import LabelsEditor from "./LabelsEditor";
+import { useT } from "../i18n";
 import {
   OCPP_PROTOCOLS,
   defaultChargePointConfig,
@@ -112,6 +113,7 @@ const SoapCallbackUrlRow: React.FC<{
   /** Where a derived URL came from; null for an explicit one. */
   note: string | null;
 }> = ({ url, note }) => {
+  const t = useT();
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">(
     "idle",
   );
@@ -129,7 +131,9 @@ const SoapCallbackUrlRow: React.FC<{
   };
   return (
     <div className="col-span-full">
-      <span className={LABEL_CLASS}>Effective callback URL</span>
+      <span className={LABEL_CLASS}>
+        {t("settings.form.effectiveCallbackUrl")}
+      </span>
       <div className="flex items-start gap-2">
         <span className="break-all font-mono text-[13px] text-cx-fg">
           {url}
@@ -140,13 +144,13 @@ const SoapCallbackUrlRow: React.FC<{
           size="sm"
           className="shrink-0"
           onClick={() => void copy()}
-          aria-label="Copy SOAP callback URL"
+          aria-label={t("settings.form.copySoapCallbackAria")}
         >
           {copyState === "copied"
-            ? "Copied"
+            ? t("settings.common.copied")
             : copyState === "failed"
-              ? "Copy failed"
-              : "Copy"}
+              ? t("settings.form.copyFailed")
+              : t("settings.common.copy")}
         </Button>
       </div>
       {note && <p className={HINT_CLASS}>{note}</p>}
@@ -161,6 +165,7 @@ const SoapCallbackUrlRow: React.FC<{
  * (plain-http origins other than localhost) the button does nothing.
  */
 const EffectiveWsUrlRow: React.FC<{ url: string }> = ({ url }) => {
+  const t = useT();
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
@@ -182,7 +187,7 @@ const EffectiveWsUrlRow: React.FC<{ url: string }> = ({ url }) => {
     timer.current = setTimeout(() => setCopied(false), 1500);
   };
   return (
-    <Field id="effectiveWsURL" label="Effective WebSocket URL" wide>
+    <Field id="effectiveWsURL" label={t("settings.form.effectiveWsUrl")} wide>
       <div className="flex items-center gap-2">
         <Input
           id="effectiveWsURL"
@@ -198,14 +203,12 @@ const EffectiveWsUrlRow: React.FC<{ url: string }> = ({ url }) => {
           size="sm"
           className="shrink-0"
           onClick={() => void copy()}
-          aria-label="Copy effective WebSocket URL"
+          aria-label={t("settings.form.copyWsAria")}
         >
-          {copied ? "Copied" : "Copy"}
+          {copied ? t("settings.common.copied") : t("settings.common.copy")}
         </Button>
       </div>
-      <p className={HINT_CLASS}>
-        WebSocket URL + Basic Auth below, as the charge point will dial it.
-      </p>
+      <p className={HINT_CLASS}>{t("settings.form.effectiveWsUrlHint")}</p>
     </Field>
   );
 };
@@ -237,8 +240,9 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
   soapPublicBase = null,
   onSave,
   onCancel,
-  submitLabel = "Save",
+  submitLabel,
 }) => {
+  const t = useT();
   const [config, setConfig] = useState<ChargePointConfig>(
     withoutDerivedSoapCallbackUrl(initialConfig || defaultChargePointConfig),
   );
@@ -270,10 +274,13 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
     mode === "local" || derivedSoapCallbackUrl != null;
   const soapCallbackHelp =
     mode === "local"
-      ? "SOAP ChargePointService callback URL the Central System uses to reach this CP. Required only when using the daemon."
+      ? t("settings.form.soapHelpLocal")
       : derivedSoapCallbackUrl
-        ? `Leave empty to use the daemon's ${describeSoapPublicBase(soapPublicBase)}: ${derivedSoapCallbackUrl}`
-        : "SOAP ChargePointService callback URL the Central System uses to reach this CP. Required.";
+        ? t("settings.form.soapHelpDerived", {
+            source: describeSoapPublicBase(soapPublicBase),
+            url: derivedSoapCallbackUrl,
+          })
+        : t("settings.form.soapHelpRequired");
 
   const handleSave = () => {
     const profile = config.securityProfile ?? 0;
@@ -292,9 +299,7 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
       isSoapVersion(config.ocppVersion) &&
       !config.soapCallbackUrl?.trim()
     ) {
-      setSaveError(
-        "SOAP Callback URL is required in remote mode for SOAP versions.",
-      );
+      setSaveError(t("settings.form.errSoapCallbackRequired"));
       return;
     }
     if (
@@ -303,9 +308,7 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
       isNewChargePoint &&
       !(config.tls?.cert?.trim() && config.tls?.key?.trim())
     ) {
-      setSaveError(
-        "Security profile 3 (mutual TLS) requires a client certificate and private key.",
-      );
+      setSaveError(t("settings.form.errProfile3Cert"));
       return;
     }
     // #471: only the Add form edits labels; an update never sends them
@@ -431,9 +434,9 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
 
   return (
     <div className="space-y-5">
-      <Section title="Model specification">
+      <Section title={t("settings.form.section.model")}>
         <div className={FIELD_GRID_CLASS}>
-          <Field id="chargePointVendor" label="Vendor">
+          <Field id="chargePointVendor" label={t("settings.form.vendor")}>
             <Input
               id="chargePointVendor"
               type="text"
@@ -443,7 +446,7 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
               }
             />
           </Field>
-          <Field id="chargePointModel" label="Model">
+          <Field id="chargePointModel" label={t("settings.form.model")}>
             <Input
               id="chargePointModel"
               type="text"
@@ -451,7 +454,10 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
               onChange={(e) => updateConfig("chargePointModel", e.target.value)}
             />
           </Field>
-          <Field id="firmwareVersion" label="Firmware Version">
+          <Field
+            id="firmwareVersion"
+            label={t("settings.form.firmwareVersion")}
+          >
             <Input
               id="firmwareVersion"
               type="text"
@@ -459,7 +465,7 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
               onChange={(e) => updateConfig("firmwareVersion", e.target.value)}
             />
           </Field>
-          <Field id="connectorNumber" label="Number of Connectors">
+          <Field id="connectorNumber" label={t("settings.form.connectorCount")}>
             <Input
               id="connectorNumber"
               type="number"
@@ -475,9 +481,9 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
         </div>
       </Section>
 
-      <Section title="Connection">
+      <Section title={t("settings.form.section.connection")}>
         <div className={FIELD_GRID_CLASS}>
-          <Field id="cpId" label="Charge Point ID">
+          <Field id="cpId" label={t("settings.form.cpId")}>
             <Input
               id="cpId"
               type="text"
@@ -495,7 +501,7 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
               className="font-mono"
             />
           </Field>
-          <Field id="ocppProtocol" label="Protocol">
+          <Field id="ocppProtocol" label={t("settings.form.protocol")}>
             <Select
               value={protocolOf(config.ocppVersion)}
               onValueChange={changeProtocol}
@@ -512,7 +518,7 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
               </SelectContent>
             </Select>
           </Field>
-          <Field id="ocppVersion" label="Version">
+          <Field id="ocppVersion" label={t("settings.form.version")}>
             <Select
               value={config.ocppVersion}
               onValueChange={changeOcppVersion}
@@ -535,8 +541,8 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
             id="wsURL"
             label={
               isSoapVersion(config.ocppVersion)
-                ? "Central System URL (SOAP endpoint)"
-                : "WebSocket URL"
+                ? t("settings.form.centralSystemUrlSoap")
+                : t("settings.form.wsUrl")
             }
             wide
           >
@@ -556,11 +562,8 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
             <>
               {mode === "local" && (
                 <div className="col-span-full rounded-[7px] border border-cx-border bg-cx-sub p-3 text-xs text-cx-fg2">
-                  <strong>Browser local mode (send-only):</strong> CP→CSMS calls
-                  (BootNotification, Authorize, etc.) work, but CSMS-initiated
-                  commands (RemoteStart, Reset, …) need the CLI/daemon which
-                  hosts the callback endpoint. The CSMS must allow CORS from
-                  this origin.
+                  <strong>{t("settings.form.localSoapNoteTitle")}</strong>{" "}
+                  {t("settings.form.localSoapNoteBody")}
                 </div>
               )}
               <Field
@@ -568,10 +571,10 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
                 wide
                 label={
                   <>
-                    SOAP Callback URL
+                    {t("settings.form.soapCallbackUrl")}
                     {soapCallbackOptional && (
                       <span className="ml-1 normal-case tracking-normal">
-                        (optional)
+                        {t("settings.form.optionalParen")}
                       </span>
                     )}
                   </>
@@ -593,7 +596,7 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
                 />
                 <p className={HINT_CLASS}>{soapCallbackHelp}</p>
               </Field>
-              <Field id="soapPath" label="SOAP Path (optional)">
+              <Field id="soapPath" label={t("settings.form.soapPath")}>
                 <Input
                   id="soapPath"
                   type="text"
@@ -609,7 +612,9 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
                   note={
                     typedSoapCallbackUrl
                       ? null
-                      : `derived from the ${describeSoapPublicBase(soapPublicBase)} — the URL may change between daemon runs`
+                      : t("settings.form.derivedNote", {
+                          source: describeSoapPublicBase(soapPublicBase),
+                        })
                   }
                 />
               )}
@@ -619,9 +624,12 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
       </Section>
 
       {mode === "remote" && !isSoapVersion(config.ocppVersion) && (
-        <Section title="Security">
+        <Section title={t("settings.form.section.security")}>
           <div className={FIELD_GRID_CLASS}>
-            <Field id="securityProfile" label="Security Profile">
+            <Field
+              id="securityProfile"
+              label={t("settings.form.securityProfile")}
+            >
               <Select
                 value={String(securityProfile)}
                 onValueChange={changeSecurityProfile}
@@ -630,19 +638,26 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="0">0 — No auth, no TLS</SelectItem>
-                  <SelectItem value="1">1 — Basic Auth</SelectItem>
+                  <SelectItem value="0">
+                    {t("settings.form.profile0")}
+                  </SelectItem>
+                  <SelectItem value="1">
+                    {t("settings.form.profile1")}
+                  </SelectItem>
                   <SelectItem value="2">
-                    2 — Basic Auth + TLS (server cert)
+                    {t("settings.form.profile2")}
                   </SelectItem>
                   <SelectItem value="3">
-                    3 — Mutual TLS (client cert)
+                    {t("settings.form.profile3")}
                   </SelectItem>
                 </SelectContent>
               </Select>
             </Field>
             {securityProfile >= 1 && securityProfile <= 2 && (
-              <Field id="authorizationKey" label="Authorization Key">
+              <Field
+                id="authorizationKey"
+                label={t("settings.form.authorizationKey")}
+              >
                 <Input
                   id="authorizationKey"
                   type="password"
@@ -651,26 +666,26 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
                     updateConfig("authorizationKey", e.target.value)
                   }
                   placeholder={
-                    isNewChargePoint ? "" : "Leave blank to keep current"
+                    isNewChargePoint ? "" : t("settings.common.keepCurrent")
                   }
                 />
               </Field>
             )}
             {securityProfile >= 2 && (
               <>
-                <Field id="tlsCa" label="CA Certificate PEM (optional)" wide>
+                <Field id="tlsCa" label={t("settings.form.caCert")} wide>
                   <Textarea
                     id="tlsCa"
                     value={config.tls?.ca ?? ""}
                     onChange={(e) => updateTls({ ca: e.target.value })}
                     placeholder={
-                      isNewChargePoint ? "" : "Leave blank to keep current"
+                      isNewChargePoint ? "" : t("settings.common.keepCurrent")
                     }
                     className="font-mono text-xs"
                     rows={4}
                   />
                 </Field>
-                <Field id="tlsServerName" label="Server Name (optional)">
+                <Field id="tlsServerName" label={t("settings.form.serverName")}>
                   <Input
                     id="tlsServerName"
                     type="text"
@@ -690,32 +705,32 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
                     htmlFor="tlsRejectUnauthorized"
                     className="text-[13px] font-normal text-cx-fg2 dark:text-cx-fg2"
                   >
-                    Verify server certificate
+                    {t("settings.form.verifyServerCert")}
                   </Label>
                 </div>
               </>
             )}
             {securityProfile === 3 && (
               <>
-                <Field id="tlsCert" label="Client Certificate PEM">
+                <Field id="tlsCert" label={t("settings.form.clientCert")}>
                   <Textarea
                     id="tlsCert"
                     value={config.tls?.cert ?? ""}
                     onChange={(e) => updateTls({ cert: e.target.value })}
                     placeholder={
-                      isNewChargePoint ? "" : "Leave blank to keep current"
+                      isNewChargePoint ? "" : t("settings.common.keepCurrent")
                     }
                     className="font-mono text-xs"
                     rows={4}
                   />
                 </Field>
-                <Field id="tlsKey" label="Private Key PEM">
+                <Field id="tlsKey" label={t("settings.form.privateKey")}>
                   <Textarea
                     id="tlsKey"
                     value={config.tls?.key ?? ""}
                     onChange={(e) => updateTls({ key: e.target.value })}
                     placeholder={
-                      isNewChargePoint ? "" : "Leave blank to keep current"
+                      isNewChargePoint ? "" : t("settings.common.keepCurrent")
                     }
                     className="font-mono text-xs"
                     rows={4}
@@ -728,12 +743,12 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
       )}
 
       {mode === "remote" && isNewChargePoint && (
-        <Section title="Labels">
+        <Section title={t("settings.form.section.labels")}>
           <LabelsEditor rows={labelRows ?? []} onChange={setLabelRows} />
         </Section>
       )}
 
-      <Section title="Optional settings">
+      <Section title={t("settings.form.section.optional")}>
         {/* Basic Auth — #178 item F: the Security section above (1.6+,
             remote mode) is the single source of truth for Basic Auth.
             This generic toggle is the fallback path retained for
@@ -758,12 +773,15 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
                 htmlFor="basicAuthEnabled"
                 className="text-[13px] font-normal text-cx-fg2 dark:text-cx-fg2"
               >
-                Enable Basic Authentication
+                {t("settings.form.enableBasicAuth")}
               </Label>
             </div>
             {config.basicAuthEnabled && (
               <div className={cn(FIELD_GRID_CLASS, "mt-3")}>
-                <Field id="basicAuthUsername" label="Username">
+                <Field
+                  id="basicAuthUsername"
+                  label={t("settings.form.username")}
+                >
                   <Input
                     id="basicAuthUsername"
                     type="text"
@@ -773,7 +791,10 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
                     }
                   />
                 </Field>
-                <Field id="basicAuthPassword" label="Password">
+                <Field
+                  id="basicAuthPassword"
+                  label={t("settings.form.password")}
+                >
                   <Input
                     id="basicAuthPassword"
                     type="password"
@@ -788,21 +809,17 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
           </div>
         ) : securityProfile === 3 ? (
           <p className={cn(HINT_CLASS, "mb-4")}>
-            Authentication is governed by the mutual TLS client certificate and
-            key in the Security section above (security profile 3).
+            {t("settings.form.authMtls")}
           </p>
         ) : securityProfile === 0 ? (
           basicAuthSource === "legacy" ? (
             <div className="mb-4">
               <p className="mb-2 text-xs text-cx-muted">
-                Basic Authentication is currently active via the legacy Optional
-                Settings toggle (username:{" "}
-                <code>{config.basicAuthUsername || "(none)"}</code>). It will
-                keep working unchanged. To manage authentication from the
-                Security section instead, set Security Profile to 1 (Basic Auth)
-                above and provide an Authorization Key — note the wire username
-                becomes the Charge Point ID once you do, which may differ from
-                the legacy username above.
+                {t("settings.form.legacyBefore")}{" "}
+                <code>
+                  {config.basicAuthUsername || t("settings.form.legacyNone")}
+                </code>
+                {t("settings.form.legacyAfter")}
               </p>
               {/* #178 item F: legacy Basic Auth has no editable control in
                   the Security section, so without this a remote+non-SOAP CP
@@ -815,19 +832,19 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
                 size="sm"
                 onClick={() => updateConfig("basicAuthEnabled", false)}
               >
-                Disable legacy Basic Authentication
+                {t("settings.form.disableLegacyBasic")}
               </Button>
             </div>
           ) : (
             <p className={cn(HINT_CLASS, "mb-4")}>
-              No authentication configured. Set Security Profile to 1 above to
-              enable Basic Authentication.
+              {t("settings.form.noAuth")}
             </p>
           )
         ) : (
           <p className={cn(HINT_CLASS, "mb-4")}>
-            Authentication is governed by the Authorization Key in the Security
-            section above (security profile {securityProfile}).
+            {t("settings.form.authKeyGoverned", {
+              profile: securityProfile,
+            })}
           </p>
         )}
 
@@ -845,12 +862,15 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
               htmlFor="autoMeterValueEnabled"
               className="text-[13px] font-normal text-cx-fg2 dark:text-cx-fg2"
             >
-              Enable Auto Meter Value
+              {t("settings.form.enableAutoMeter")}
             </Label>
           </div>
           {config.autoMeterValueEnabled && (
             <div className={cn(FIELD_GRID_CLASS, "mt-3")}>
-              <Field id="autoMeterValueInterval" label="Interval (seconds)">
+              <Field
+                id="autoMeterValueInterval"
+                label={t("settings.form.intervalSeconds")}
+              >
                 <Input
                   id="autoMeterValueInterval"
                   type="number"
@@ -864,7 +884,10 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
                   }
                 />
               </Field>
-              <Field id="autoMeterValue" label="Increment Value (kWh)">
+              <Field
+                id="autoMeterValue"
+                label={t("settings.form.incrementKwh")}
+              >
                 <Input
                   id="autoMeterValue"
                   type="number"
@@ -888,11 +911,11 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
       <div className="flex justify-end gap-2">
         <Button type="button" variant="outline" onClick={onCancel}>
           <X className="h-4 w-4" />
-          Cancel
+          {t("settings.common.cancel")}
         </Button>
         <Button type="button" onClick={handleSave}>
           <Save className="h-4 w-4" />
-          {submitLabel}
+          {submitLabel ?? t("settings.common.save")}
         </Button>
       </div>
     </div>

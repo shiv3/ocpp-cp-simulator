@@ -23,6 +23,7 @@ import type { ActiveScenarioRun } from "../../lib/useActiveScenarioRuns";
 import { buildScenarioUrl } from "../../lib/useAllScenarios";
 import { useScopeDefinitions } from "../../lib/useScenarioLibrary";
 import { controlScenarioWait } from "../../lib/waitControl";
+import { useT } from "../../../i18n";
 
 export interface ScenarioCardProps {
   cpId: string;
@@ -58,6 +59,7 @@ const LiveRun: React.FC<{
   onStop: () => void;
   scheduleRefresh: () => void;
 }> = ({ cpId, run, now, runLinkState, onStop, scheduleRefresh }) => {
+  const t = useT();
   const { chargePointService } = useDataContext();
   const elapsed = formatElapsed(now - (run.currentNodeStartedAt ?? now));
   const progress =
@@ -77,7 +79,7 @@ const LiveRun: React.FC<{
               run.connectorId
             }&run=${encodeURIComponent(run.scenarioId)}`}
             state={runLinkState}
-            title="Show the run beside the charge point"
+            title={t("cpPanels.scenario.showRunTitle")}
             className="inline-flex items-center gap-0.5 hover:text-cx-accent hover:underline"
           >
             {run.name}
@@ -86,8 +88,11 @@ const LiveRun: React.FC<{
         </h3>
         <RunStatePill state={run.state} />
         <span className="text-[12.5px] text-cx-muted">
-          step {run.executedCount} of {run.nodeCount ?? "?"} ·{" "}
-          {run.currentNodeLabel || run.currentNodeId || "—"} ·{" "}
+          {t("cpPanels.scenario.stepOf", {
+            done: run.executedCount,
+            total: run.nodeCount ?? "?",
+          })}{" "}
+          · {run.currentNodeLabel || run.currentNodeId || "—"} ·{" "}
           <span className="font-mono">{elapsed}</span>
         </span>
         <span className="ml-auto flex items-center gap-2">
@@ -99,7 +104,7 @@ const LiveRun: React.FC<{
             })}
             className={buttonVariants({ variant: "outline", size: "sm" })}
           >
-            Open run
+            {t("cpPanels.scenario.openRun")}
           </Link>
           <Button
             type="button"
@@ -107,14 +112,14 @@ const LiveRun: React.FC<{
             size="sm"
             onClick={onStop}
           >
-            Stop
+            {t("cpPanels.scenario.stop")}
           </Button>
         </span>
       </div>
       <div
         role="progressbar"
         data-testid="scenario-progress"
-        aria-label="Scenario progress"
+        aria-label={t("cpPanels.scenario.progressAria")}
         aria-valuemin={0}
         aria-valuemax={run.nodeCount ?? undefined}
         aria-valuenow={run.executedCount}
@@ -163,6 +168,7 @@ const ScenarioPicker: React.FC<{
   connectorIds: number[];
   onRunStarted: () => void;
 }> = ({ cpId, connectorId, connectorIds, onRunStarted }) => {
+  const t = useT();
   const { chargePointService } = useDataContext();
   const library = useScopeDefinitions(LIBRARY_SCOPE, null);
   const scope = useScopeDefinitions(cpId, connectorId);
@@ -216,9 +222,9 @@ const ScenarioPicker: React.FC<{
         scenario,
       );
       await scope.refresh();
-      showNote("Scenario set");
+      showNote(t("cpPanels.scenario.scenarioSet"));
     } catch (err) {
-      fail("Failed to set the scenario", err);
+      fail(t("cpPanels.scenario.failSet"), err);
     } finally {
       setBusy(false);
     }
@@ -248,7 +254,7 @@ const ScenarioPicker: React.FC<{
       }
       onRunStarted();
     } catch (err) {
-      fail("Failed to run the scenario", err);
+      fail(t("cpPanels.scenario.failRun"), err);
     } finally {
       setBusy(false);
     }
@@ -269,9 +275,16 @@ const ScenarioPicker: React.FC<{
         replaced.length > 0 &&
         typeof window !== "undefined" &&
         !window.confirm(
-          `Use "${assignedScenario.name}" on every connector of ${cpId}? It replaces the scenario of ${
-            replaced.length === 1 ? "connector" : "connectors"
-          } ${replaced.join(", ")}.`,
+          t(
+            replaced.length === 1
+              ? "cpPanels.scenario.confirmOne"
+              : "cpPanels.scenario.confirmMany",
+            {
+              name: assignedScenario.name,
+              cpId,
+              ids: replaced.join(", "),
+            },
+          ),
         )
       ) {
         return;
@@ -283,9 +296,11 @@ const ScenarioPicker: React.FC<{
         ),
       );
       await scope.refresh();
-      showNote(`Scenario set on ${connectorIds.length} connectors`);
+      showNote(
+        t("cpPanels.scenario.scenarioSetAll", { count: connectorIds.length }),
+      );
     } catch (err) {
-      fail("Failed to apply the scenario", err);
+      fail(t("cpPanels.scenario.failApply"), err);
     } finally {
       setBusy(false);
     }
@@ -294,23 +309,25 @@ const ScenarioPicker: React.FC<{
   return (
     <>
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-        <h3 className="font-semibold text-cx-fg">No scenario running</h3>
+        <h3 className="font-semibold text-cx-fg">
+          {t("cpPanels.scenario.noneRunning")}
+        </h3>
         <span className="text-[12.5px] text-cx-muted">
-          Pick one from the Library to run on this connector.
+          {t("cpPanels.scenario.pickHint")}
         </span>
       </div>
       <div className="mt-2.5 flex flex-wrap items-center gap-2">
         <select
-          aria-label={`Scenario for connector ${connectorId}`}
+          aria-label={t("cpPanels.scenario.selectAria", { id: connectorId })}
           value={value}
           disabled={busy || library.isLoading}
           onChange={(e) => void handleChange(e.target.value)}
           className={cn(FILTER_SELECT_CLASS, "min-w-[220px] max-w-full")}
         >
-          <option value="">None</option>
+          <option value="">{t("cpPanels.scenario.none")}</option>
           {unlisted && (
             <option value={UNLISTED} disabled>
-              {unlisted.name} (not in the Library)
+              {t("cpPanels.scenario.notInLibrary", { name: unlisted.name })}
             </option>
           )}
           {library.definitions.map((scenario) => (
@@ -325,14 +342,14 @@ const ScenarioPicker: React.FC<{
           disabled={!current || busy}
           onClick={() => void handleRun()}
         >
-          ▶ Run
+          {t("cpPanels.scenario.run")}
         </Button>
         {current && (
           <Link
             to={editScenarioUrl(cpId, connectorId, current)}
             className={buttonVariants({ variant: "outline", size: "sm" })}
           >
-            Edit in Library
+            {t("cpPanels.scenario.editInLibrary")}
           </Link>
         )}
         {note && (
@@ -345,10 +362,10 @@ const ScenarioPicker: React.FC<{
             type="button"
             disabled={!assignedScenario || busy}
             onClick={() => void handleUseOnAll()}
-            title="Assign this Library scenario to every connector of the charge point"
+            title={t("cpPanels.scenario.useOnAllTitle")}
             className="ml-auto text-[12.5px] text-cx-accent hover:underline disabled:text-cx-faint disabled:no-underline"
           >
-            Use on all {connectorIds.length} connectors
+            {t("cpPanels.scenario.useOnAll", { count: connectorIds.length })}
           </button>
         )}
       </div>
@@ -376,6 +393,7 @@ const ScenarioCard: React.FC<ScenarioCardProps> = ({
   scheduleRefresh,
   runLinkState,
 }) => {
+  const t = useT();
   const { chargePointService } = useDataContext();
   const [now, setNow] = useState<number>(Date.now());
 
@@ -405,7 +423,7 @@ const ScenarioCard: React.FC<ScenarioCardProps> = ({
     <section
       data-testid="scenario-card"
       data-connector-id-ref={connectorId}
-      aria-label={`Scenario on connector ${connectorId}`}
+      aria-label={t("cpPanels.scenario.cardAria", { id: connectorId })}
       className={CARD}
     >
       {runs.length === 0 ? (

@@ -1,4 +1,17 @@
 import type { Messages } from "../../types";
 
-const stateTransition: Messages = {};
+const stateTransition: Messages = {
+  "stateTransition.node.current": "● 当前",
+  "stateTransition.timeline.empty": "暂无状态转换历史",
+  "stateTransition.timeline.previous": "上一个",
+  "stateTransition.timeline.pause": "暂停",
+  "stateTransition.timeline.play": "播放",
+  "stateTransition.timeline.next": "下一个",
+  "stateTransition.timeline.loop": "循环播放",
+  "stateTransition.timeline.history": "📋 转换历史",
+  "stateTransition.viewer.title": "状态转换图",
+  "stateTransition.viewer.legend.current": "当前状态",
+  "stateTransition.viewer.legend.suspended": "已暂停",
+  "stateTransition.viewer.legend.inoperative": "不可运行",
+};
 export default stateTransition;

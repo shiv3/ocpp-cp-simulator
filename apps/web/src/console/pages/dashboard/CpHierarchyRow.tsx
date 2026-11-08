@@ -1,6 +1,7 @@
 import React from "react";
 import { ChevronRight, PlugZap } from "lucide-react";
 
+import { useT } from "../../../i18n";
 import { cn } from "@/lib/utils";
 import ActiveScenarioBadge from "../../components/ActiveScenarioBadge";
 import LabelChips from "../../components/LabelChips";
@@ -35,6 +36,7 @@ const CpHierarchyRow: React.FC<CpHierarchyRowProps> = ({
   collapsed,
   onToggleCollapse,
 }) => {
+  const t = useT();
   const { cp } = row;
   const { open, close, isOpen } = usePanelParams();
   const status = cpStatus(row);
@@ -64,7 +66,12 @@ const CpHierarchyRow: React.FC<CpHierarchyRowProps> = ({
           type="button"
           onClick={onToggleCollapse}
           aria-expanded={!collapsed}
-          aria-label={`${collapsed ? "Expand" : "Collapse"} connectors of ${cp.id}`}
+          aria-label={t(
+            collapsed
+              ? "dashboard.row.expandConnectors"
+              : "dashboard.row.collapseConnectors",
+            { id: cp.id },
+          )}
           className="rounded p-0.5 text-cx-faint hover:bg-cx-sub hover:text-cx-fg2"
         >
           <ChevronRight
@@ -111,7 +118,9 @@ const CpHierarchyRow: React.FC<CpHierarchyRowProps> = ({
             tells the Heartbeat, which the old power button's tooltip carried. */}
         {row.connected && (
           <span className="ml-auto font-mono text-[11.5px] text-cx-muted">
-            heartbeat {formatRelativeTime(lastHeartbeat(row))}
+            {t("dashboard.row.heartbeat", {
+              time: formatRelativeTime(lastHeartbeat(row)),
+            })}
           </span>
         )}
       </div>
@@ -119,7 +128,7 @@ const CpHierarchyRow: React.FC<CpHierarchyRowProps> = ({
       {!collapsed &&
         (row.connectors.length === 0 ? (
           <div className="pb-2 pl-9 pr-3 text-xs text-cx-faint">
-            No connectors
+            {t("dashboard.row.noConnectors")}
           </div>
         ) : (
           <div

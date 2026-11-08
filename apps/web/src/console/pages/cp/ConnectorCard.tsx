@@ -7,6 +7,7 @@ import { useConnectorView } from "@/data/hooks/useConnectorView";
 import { useGlobalTagIds } from "@/data/hooks/useGlobalTagIds";
 import { useDataContext } from "@/data/providers/DataProvider";
 import { cn } from "@/lib/utils";
+import { useT } from "@/i18n";
 
 import StatusPill from "../../components/StatusPill";
 import Switch from "../../components/Switch";
@@ -59,6 +60,7 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({
   selected,
   onSelect,
 }) => {
+  const t = useT();
   const { chargePointService } = useDataContext();
   const { tagIds } = useGlobalTagIds();
   const view = useConnectorView(cpId, connectorId);
@@ -103,7 +105,12 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({
       await action();
     } catch (err) {
       console.error(`${label} failed on ${cpId}/${connectorId}`, err);
-      setStepError(`${label} failed: ${describeError(err)}`);
+      setStepError(
+        t("cp.common.actionFailed", {
+          action: label,
+          message: describeError(err),
+        }),
+      );
     } finally {
       setPending(false);
     }
@@ -127,7 +134,9 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({
         `Failed to switch auto meter values on ${cpId}/${connectorId}`,
         err,
       );
-      setAutoError(`Auto meter values not switched: ${describeError(err)}`);
+      setAutoError(
+        t("cp.connector.autoFailed", { message: describeError(err) }),
+      );
     }
   };
 
@@ -149,7 +158,7 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({
     <section
       data-connector-id={connectorId}
       data-selected={selected === undefined ? undefined : String(selected)}
-      aria-label={`Connector ${connectorId}`}
+      aria-label={t("cp.connector.title", { id: connectorId })}
       onClick={onCardClick}
       className={cn(
         "@container rounded-[10px] border border-cx-border bg-cx-card px-[18px] py-4 shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none",
@@ -158,19 +167,21 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({
     >
       <div
         data-card-header
-        title={onSelect && !selected ? "Select this connector" : undefined}
+        title={
+          onSelect && !selected ? t("cp.connector.selectTitle") : undefined
+        }
         className={cn(
           "flex flex-wrap items-center gap-x-3 gap-y-2",
           onSelect && "cursor-pointer",
         )}
       >
         <b className="text-[15px] font-semibold text-cx-fg">
-          Connector {connectorId}
+          {t("cp.connector.title", { id: connectorId })}
         </b>
         <StatusPill status={view.status} />
         <span
           className="text-[12.5px] text-cx-muted"
-          title="Set by the CSMS with ChangeAvailability"
+          title={t("cp.connector.availabilityTitle")}
           data-testid="availability"
         >
           {view.availability}
@@ -183,7 +194,7 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({
             onClick={() => setConfigTab("ev")}
           >
             <Settings className="h-3.5 w-3.5" />
-            Config
+            {t("cp.connector.config")}
           </Button>
           <Button
             type="button"
@@ -194,7 +205,7 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({
             onClick={() => setControlsOpen((open) => !open)}
             className={cn(controlsOpen && "bg-cx-sub text-cx-fg")}
           >
-            Controls
+            {t("cp.connector.controls")}
             {controlsOpen ? (
               <ChevronUp className="h-3.5 w-3.5" />
             ) : (
@@ -211,22 +222,22 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({
         tagIds={tagIds}
         pending={pending}
         onPlugIn={() =>
-          void step("Plug in", () =>
+          void step(t("cp.connector.plugIn"), () =>
             plugIn(chargePointService, cpId, connectorId),
           )
         }
         onStart={(tagId) =>
-          void step("Start charging", () =>
+          void step(t("cp.connector.startCharging"), () =>
             chargePointService.startTransaction(cpId, connectorId, tagId),
           )
         }
         onStop={() =>
-          void step("Stop charging", () =>
+          void step(t("cp.connector.stopCharging"), () =>
             chargePointService.stopTransaction(cpId, connectorId),
           )
         }
         onUnplug={() =>
-          void step("Unplug", () =>
+          void step(t("cp.connector.unplug"), () =>
             unplug(chargePointService, cpId, connectorId),
           )
         }
@@ -246,32 +257,32 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({
           evName={evDisplayName(ev)}
           tone={tone}
           onSocCommit={(soc) =>
-            void step("Set SoC", () =>
+            void step(t("cp.connector.setSoc"), () =>
               setSocWithSync(chargePointService, cpId, connectorId, soc, ev),
             )
           }
         />
         <dl className="m-0 grid grid-cols-2 gap-x-4 gap-y-3">
           <Figure
-            label="Energy added"
+            label={t("cp.connector.energyAdded")}
             value={`${addedKwh.toFixed(2)} kWh`}
-            note={`of ${capacity} kWh`}
+            note={t("cp.connector.ofCapacity", { capacity })}
             bar={{
               pct: capacity > 0 ? (addedKwh / capacity) * 100 : 0,
               className: BAR_CLASS[tone],
             }}
           />
           <Figure
-            label="Power"
+            label={t("cp.connector.power")}
             value={`${powerKw.toFixed(1)} kW`}
-            note={`max ${formatKw(maxKw)}`}
+            note={t("cp.connector.maxKw", { kw: formatKw(maxKw) })}
             bar={{
               pct: maxKw > 0 ? (powerKw / maxKw) * 100 : 0,
               className: BAR_CLASS[tone],
             }}
           />
           <Figure
-            label="Session"
+            label={t("cp.connector.session")}
             value={
               hasTx && startedAt != null
                 ? formatSessionDuration(now - startedAt)
@@ -284,9 +295,9 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({
             }
           />
           <Figure
-            label="Meter"
+            label={t("cp.connector.meter")}
             value={`${(view.meterValue / 1000).toFixed(2)} kWh`}
-            note="register"
+            note={t("cp.connector.register")}
           />
         </dl>
         <PowerSparkline
@@ -299,15 +310,18 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({
         />
         <div className="col-span-full flex flex-wrap items-center gap-x-3 gap-y-2 text-[12.5px] text-cx-muted">
           <Switch
-            label="Auto meter values"
+            label={t("cp.connector.autoMeterValues")}
             checked={autoConfig?.enabled ?? false}
             onChange={(enabled) => void toggleAuto(enabled)}
           >
-            Auto meter values
+            {t("cp.connector.autoMeterValues")}
           </Switch>
           <span>
-            every {(autoConfig ?? defaultAutoMeterValueConfig).intervalSeconds}{" "}
-            s ·{" "}
+            {t("cp.connector.autoEvery", {
+              seconds: (autoConfig ?? defaultAutoMeterValueConfig)
+                .intervalSeconds,
+            })}{" "}
+            ·{" "}
             {describePowerCurve(
               autoPoints,
               autoConfig?.stopAtTargetSoc ?? false,
@@ -318,7 +332,7 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({
             onClick={() => setConfigTab("auto")}
             className="ml-auto text-[12.5px] text-cx-accent hover:underline"
           >
-            Edit curve…
+            {t("cp.connector.editCurve")}
           </button>
           {autoError && (
             <p role="alert" className="basis-full text-xs text-cx-rose">
@@ -346,7 +360,7 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({
       >
         {hasTx && view.transactionTagId && (
           <span className="font-mono text-xs text-cx-muted">
-            Tag {view.transactionTagId}
+            {t("cp.connector.tag", { id: view.transactionTagId })}
           </span>
         )}
         <ChargingProfilesList

@@ -2,6 +2,8 @@ import React, { useCallback, useMemo, useRef, useState } from "react";
 import { ListTree } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 
+import { t as tNow, useT, type MessageKey } from "../../i18n";
+
 import { Button } from "@/components/ui/button";
 import { createEmptyScenario } from "../lib/scenarioSteps";
 import {
@@ -44,9 +46,9 @@ import ScenarioRunContent from "./scenarios/run/ScenarioRunContent";
 
 type ScenariosTab = "active" | "library";
 
-const TABS: ReadonlyArray<{ value: ScenariosTab; label: string }> = [
-  { value: "active", label: "Active runs" },
-  { value: "library", label: "Library" },
+const TABS: ReadonlyArray<{ value: ScenariosTab; label: MessageKey }> = [
+  { value: "active", label: "scenarios.page.tabActive" },
+  { value: "library", label: "scenarios.page.tabLibrary" },
 ];
 
 /** console.error + a user-visible alert for a failed library action. Matches
@@ -59,8 +61,10 @@ function reportActionError(message: string, err: unknown): void {
   }
 }
 
-const plural = (n: number, one: string, many: string) =>
-  `${n} ${n === 1 ? one : many}`;
+const connectorCount = (n: number) =>
+  tNow(n === 1 ? "scenarios.count.connector" : "scenarios.count.connectors", {
+    count: n,
+  });
 
 const runTarget = (run: ChargePointRun): ScenarioPanelTarget => ({
   kind: "run",
@@ -101,11 +105,14 @@ function describeUsers(row: LibraryRow): string {
 function confirmStoppingRuns(runs: number): boolean {
   if (runs === 0 || typeof window === "undefined") return true;
   return window.confirm(
-    `A run of this scenario is active on ${plural(runs, "connector", "connectors")} and will be stopped. Save?`,
+    tNow("scenarios.page.confirmStopRuns", {
+      connectors: connectorCount(runs),
+    }),
   );
 }
 
 const ScenarioLibraryPage: React.FC = () => {
+  const t = useT();
   const [searchParams, setSearchParams] = useSearchParams();
   const { mode } = useDataContext();
   const { config, isLoading: configLoading } = useConfig();
@@ -217,13 +224,10 @@ const ScenarioLibraryPage: React.FC = () => {
         await saveScenario(scenario);
         openEditor(scenario.id);
       } catch (err) {
-        reportActionError(
-          "Failed to save the scenario. Please try again.",
-          err,
-        );
+        reportActionError(t("scenarios.page.saveFailed"), err);
       }
     },
-    [saveScenario, openEditor],
+    [saveScenario, openEditor, t],
   );
 
   const handleFileInputChange = async (
@@ -258,19 +262,13 @@ const ScenarioLibraryPage: React.FC = () => {
   const handleToggleEnabled = (row: LibraryRow, enabled: boolean) => {
     if (!confirmStoppingRuns(row.runs.length)) return;
     saveScenario({ ...row.scenario, enabled }).catch((err) =>
-      reportActionError(
-        "Failed to update the scenario. Please try again.",
-        err,
-      ),
+      reportActionError(t("scenarios.page.updateFailed"), err),
     );
   };
 
   const handleDuplicate = (row: LibraryRow) => {
     saveScenario(duplicateScenario(row.scenario)).catch((err) =>
-      reportActionError(
-        "Failed to duplicate the scenario. Please try again.",
-        err,
-      ),
+      reportActionError(t("scenarios.page.duplicateFailed"), err),
     );
   };
 
@@ -281,15 +279,15 @@ const ScenarioLibraryPage: React.FC = () => {
   const handleDelete = (row: LibraryRow) => {
     const question =
       row.users.length > 0
-        ? `Delete "${row.scenario.name}"? It is used by ${describeUsers(row)}, which will be left without a scenario.`
-        : `Delete "${row.scenario.name}"?`;
+        ? t("scenarios.page.confirmDeleteUsed", {
+            name: row.scenario.name,
+            users: describeUsers(row),
+          })
+        : t("scenarios.page.confirmDelete", { name: row.scenario.name });
     if (typeof window !== "undefined" && !window.confirm(question)) return;
     if (panel.isOpen(defTarget(row.scenario))) closePanel();
     removeScenario(row.scenario.id).catch((err) =>
-      reportActionError(
-        "Failed to delete the scenario. Please try again.",
-        err,
-      ),
+      reportActionError(t("scenarios.page.deleteFailed"), err),
     );
   };
 
@@ -331,7 +329,7 @@ const ScenarioLibraryPage: React.FC = () => {
 
   const newScenarioButton = (
     <Button type="button" size="sm" onClick={() => setIsNewDialogOpen(true)}>
-      + New scenario
+      {t("scenarios.page.newScenario")}
     </Button>
   );
 
@@ -343,8 +341,8 @@ const ScenarioLibraryPage: React.FC = () => {
         onClick={handleBackgroundClick}
       >
         <PageHeader
-          title="Scenarios"
-          count={`${library.length} total`}
+          title={t("scenarios.page.title")}
+          count={t("scenarios.page.total", { count: library.length })}
           actions={
             <>
               <input
@@ -360,7 +358,7 @@ const ScenarioLibraryPage: React.FC = () => {
                 size="sm"
                 onClick={() => fileInputRef.current?.click()}
               >
-                Import JSON
+                {t("scenarios.page.importJson")}
               </Button>
               {newScenarioButton}
             </>
@@ -369,7 +367,7 @@ const ScenarioLibraryPage: React.FC = () => {
 
         <div
           role="tablist"
-          aria-label="Scenarios"
+          aria-label={t("scenarios.page.title")}
           className="mb-4 flex gap-5 border-b border-cx-border"
         >
           {TABS.map((item) => (
@@ -386,7 +384,7 @@ const ScenarioLibraryPage: React.FC = () => {
                   : "border-transparent text-cx-muted hover:text-cx-fg",
               )}
             >
-              {item.label}
+              {t(item.label)}
             </button>
           ))}
         </div>
@@ -412,7 +410,7 @@ const ScenarioLibraryPage: React.FC = () => {
             connectorId={null}
             scenarioId={editId}
             onBack={closeEditor}
-            backLabel="Library"
+            backLabel={t("scenarios.page.tabLibrary")}
             library={{ users: editUsers, save: saveScenario }}
           />
         ) : (
@@ -421,12 +419,12 @@ const ScenarioLibraryPage: React.FC = () => {
 
             <div className="mb-4 flex flex-wrap items-center gap-3">
               <select
-                aria-label="Used on charge point"
+                aria-label={t("scenarios.page.usedOnCp")}
                 value={cpFilter}
                 onChange={(e) => updateCpFilter(e.target.value)}
                 className="rounded-md border border-cx-border-strong bg-transparent px-2 py-1.5 text-sm"
               >
-                <option value="">All charge points</option>
+                <option value="">{t("scenarios.page.allCps")}</option>
                 {chargePoints.map((cp) => (
                   <option key={cp.id} value={cp.id}>
                     {cp.id}
@@ -440,33 +438,33 @@ const ScenarioLibraryPage: React.FC = () => {
                   onChange={(e) => setEnabledOnly(e.target.checked)}
                   className="h-4 w-4 rounded border-cx-border-strong"
                 />
-                Enabled only
+                {t("scenarios.page.enabledOnly")}
               </label>
             </div>
 
             {error ? (
               <EmptyState
                 icon={ListTree}
-                title="Couldn't load scenarios"
-                hint={`Couldn't load scenarios: ${error}`}
+                title={t("scenarios.page.loadFailedTitle")}
+                hint={t("scenarios.page.loadFailedHint", { error })}
                 action={
                   <Button
                     type="button"
                     size="sm"
                     onClick={() => void refresh()}
                   >
-                    Retry
+                    {t("scenarios.page.retry")}
                   </Button>
                 }
               />
             ) : !isLoading && filteredRows.length === 0 ? (
               <EmptyState
                 icon={ListTree}
-                title="No scenarios"
+                title={t("scenarios.page.noScenarios")}
                 hint={
                   library.length === 0
-                    ? "Create a scenario or use a template to get started."
-                    : "No scenarios match the current filters."
+                    ? t("scenarios.page.emptyCreate")
+                    : t("scenarios.page.emptyFilters")
                 }
                 action={library.length === 0 ? newScenarioButton : undefined}
               />
@@ -495,7 +493,7 @@ const ScenarioLibraryPage: React.FC = () => {
       <SidePanel
         open={panelTarget !== null}
         onClose={handlePanelEscape}
-        label="Scenario"
+        label={t("scenarios.page.panelLabel")}
       >
         {panelTarget?.kind === "run" && (
           // Keyed so a swap starts from a clean run state.

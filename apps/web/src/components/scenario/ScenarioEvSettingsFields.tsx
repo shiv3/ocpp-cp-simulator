@@ -6,6 +6,7 @@ import {
   type EVSettings,
 } from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
 import { cn } from "../../lib/utils";
+import { useT } from "../../i18n";
 import { useVehicleSelect } from "../vehicle/useVehicleSelect";
 import { isPresetName, presetForScenario } from "../vehicle/vehicleChoice";
 import {
@@ -36,6 +37,7 @@ const ScenarioEvSettingsFields: React.FC<ScenarioEvSettingsFieldsProps> = ({
   initiallyExpanded = true,
   className,
 }) => {
+  const t = useT();
   const [expanded, setExpanded] = useState(initiallyExpanded);
   // #458: saved vehicle profiles offered beside the presets. The scenario
   // takes a copy of the values; it does not refer to the profile.
@@ -53,7 +55,7 @@ const ScenarioEvSettingsFields: React.FC<ScenarioEvSettingsFieldsProps> = ({
         onClick={() => setExpanded((v) => !v)}
         className="w-full flex items-center justify-between px-2 py-1.5 text-xs font-semibold text-primary hover:bg-gray-50 dark:hover:bg-gray-800"
       >
-        <span>🚗 Scenario EV Settings</span>
+        <span>{t("scenarioEditor.ev.title")}</span>
         <span className="text-gray-700 dark:text-gray-300">
           {expanded ? "▾" : "▸"}
         </span>
@@ -62,10 +64,10 @@ const ScenarioEvSettingsFields: React.FC<ScenarioEvSettingsFieldsProps> = ({
         <div className="px-2 pb-2 space-y-2">
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-0.5">
-              EV Model preset
+              {t("scenarioEditor.ev.modelPreset")}
             </label>
             <select
-              aria-label="EV Model preset"
+              aria-label={t("scenarioEditor.ev.modelPreset")}
               className="input-base w-full text-xs"
               value={value.modelName ?? ""}
               onChange={(e) => {
@@ -79,8 +81,11 @@ const ScenarioEvSettingsFields: React.FC<ScenarioEvSettingsFieldsProps> = ({
               }}
             >
               <option value="">
-                (use default
-                {defaultEvSettings ? `: ${defaultEvSettings.modelName}` : ""})
+                {t("scenarioEditor.ev.useDefault", {
+                  model: defaultEvSettings
+                    ? `: ${defaultEvSettings.modelName}`
+                    : "",
+                })}
               </option>
               <OwnModelOption modelName={value.modelName} />
               <VehicleProfileOptions state={vehicle.profiles} />
@@ -95,10 +100,10 @@ const ScenarioEvSettingsFields: React.FC<ScenarioEvSettingsFieldsProps> = ({
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-0.5">
-                Battery (kWh)
+                {t("scenarioEditor.ev.battery")}
               </label>
               <input
-                aria-label="Battery (kWh)"
+                aria-label={t("scenarioEditor.ev.battery")}
                 type="number"
                 className="input-base w-full text-xs"
                 placeholder={
@@ -120,10 +125,10 @@ const ScenarioEvSettingsFields: React.FC<ScenarioEvSettingsFieldsProps> = ({
             </div>
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-0.5">
-                Max Power (kW)
+                {t("scenarioEditor.ev.maxPower")}
               </label>
               <input
-                aria-label="Max Power (kW)"
+                aria-label={t("scenarioEditor.ev.maxPower")}
                 type="number"
                 className="input-base w-full text-xs"
                 placeholder={
@@ -145,10 +150,10 @@ const ScenarioEvSettingsFields: React.FC<ScenarioEvSettingsFieldsProps> = ({
             </div>
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-0.5">
-                Initial SoC (%)
+                {t("scenarioEditor.ev.initialSoc")}
               </label>
               <input
-                aria-label="Initial SoC (%)"
+                aria-label={t("scenarioEditor.ev.initialSoc")}
                 type="number"
                 className="input-base w-full text-xs"
                 placeholder={
@@ -171,10 +176,10 @@ const ScenarioEvSettingsFields: React.FC<ScenarioEvSettingsFieldsProps> = ({
             </div>
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-0.5">
-                Target SoC (%)
+                {t("scenarioEditor.ev.targetSoc")}
               </label>
               <input
-                aria-label="Target SoC (%)"
+                aria-label={t("scenarioEditor.ev.targetSoc")}
                 type="number"
                 className="input-base w-full text-xs"
                 placeholder={
@@ -199,10 +204,10 @@ const ScenarioEvSettingsFields: React.FC<ScenarioEvSettingsFieldsProps> = ({
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-0.5">
-                Current Type
+                {t("scenarioEditor.ev.currentType")}
               </label>
               <select
-                aria-label="Current Type"
+                aria-label={t("scenarioEditor.ev.currentType")}
                 className="input-base w-full text-xs"
                 value={value.currentType ?? ""}
                 onChange={(e) => {
@@ -215,11 +220,11 @@ const ScenarioEvSettingsFields: React.FC<ScenarioEvSettingsFieldsProps> = ({
                 }}
               >
                 <option value="">
-                  (use default
-                  {defaultEvSettings
-                    ? `: ${defaultEvSettings.currentType ?? "AC"}`
-                    : ""}
-                  )
+                  {t("scenarioEditor.ev.useDefault", {
+                    model: defaultEvSettings
+                      ? `: ${defaultEvSettings.currentType ?? "AC"}`
+                      : "",
+                  })}
                 </option>
                 <option value="AC">AC</option>
                 <option value="DC">DC</option>
@@ -227,10 +232,10 @@ const ScenarioEvSettingsFields: React.FC<ScenarioEvSettingsFieldsProps> = ({
             </div>
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-0.5">
-                Phases
+                {t("scenarioEditor.ev.phases")}
               </label>
               <select
-                aria-label="Phases"
+                aria-label={t("scenarioEditor.ev.phases")}
                 className="input-base w-full text-xs"
                 value={value.phases !== undefined ? String(value.phases) : ""}
                 disabled={value.currentType === "DC"}
@@ -243,17 +248,19 @@ const ScenarioEvSettingsFields: React.FC<ScenarioEvSettingsFieldsProps> = ({
                   });
                 }}
               >
-                <option value="">(use default)</option>
-                <option value="1">1 (single-phase)</option>
-                <option value="3">3 (three-phase)</option>
+                <option value="">
+                  {t("scenarioEditor.ev.useDefaultPlain")}
+                </option>
+                <option value="1">{t("scenarioEditor.ev.phase1")}</option>
+                <option value="3">{t("scenarioEditor.ev.phase3")}</option>
               </select>
             </div>
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-0.5">
-                Voltage (V)
+                {t("scenarioEditor.ev.voltage")}
               </label>
               <input
-                aria-label="Voltage (V)"
+                aria-label={t("scenarioEditor.ev.voltage")}
                 type="number"
                 className="input-base w-full text-xs"
                 placeholder={
@@ -274,10 +281,10 @@ const ScenarioEvSettingsFields: React.FC<ScenarioEvSettingsFieldsProps> = ({
             </div>
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-0.5">
-                Power Factor
+                {t("scenarioEditor.ev.powerFactor")}
               </label>
               <input
-                aria-label="Power Factor"
+                aria-label={t("scenarioEditor.ev.powerFactor")}
                 type="number"
                 className="input-base w-full text-xs"
                 placeholder={
@@ -311,7 +318,7 @@ const ScenarioEvSettingsFields: React.FC<ScenarioEvSettingsFieldsProps> = ({
           </div>
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-0.5">
-              Charging curve
+              {t("scenarioEditor.ev.chargingCurve")}
             </label>
             <div className="space-y-1">
               {(value.chargingCurve ?? []).map((point, index) => (
@@ -319,7 +326,9 @@ const ScenarioEvSettingsFields: React.FC<ScenarioEvSettingsFieldsProps> = ({
                   <input
                     type="number"
                     className="input-base w-16 text-xs"
-                    aria-label={`Charging curve point ${index + 1} SoC percent`}
+                    aria-label={t("scenarioEditor.ev.curveSoc", {
+                      index: index + 1,
+                    })}
                     value={point.socPercent}
                     min={0}
                     max={100}
@@ -344,7 +353,9 @@ const ScenarioEvSettingsFields: React.FC<ScenarioEvSettingsFieldsProps> = ({
                   <input
                     type="number"
                     className="input-base w-16 text-xs"
-                    aria-label={`Charging curve point ${index + 1} power fraction`}
+                    aria-label={t("scenarioEditor.ev.curveFraction", {
+                      index: index + 1,
+                    })}
                     value={point.powerFraction}
                     min={0}
                     max={1}
@@ -365,11 +376,13 @@ const ScenarioEvSettingsFields: React.FC<ScenarioEvSettingsFieldsProps> = ({
                     }}
                   />
                   <span className="text-xs text-gray-700 dark:text-gray-300">
-                    fraction
+                    {t("scenarioEditor.ev.fraction")}
                   </span>
                   <button
                     type="button"
-                    aria-label={`Remove charging curve point ${index + 1}`}
+                    aria-label={t("scenarioEditor.ev.removePoint", {
+                      index: index + 1,
+                    })}
                     className="text-xs text-gray-700 dark:text-gray-300 hover:text-red-600 px-1"
                     onClick={() => {
                       const curve = (value.chargingCurve ?? []).filter(
@@ -398,22 +411,24 @@ const ScenarioEvSettingsFields: React.FC<ScenarioEvSettingsFieldsProps> = ({
                   })
                 }
               >
-                + Add point
+                {t("scenarioEditor.ev.addPoint")}
               </button>
             </div>
           </div>
           <p className="text-xs text-gray-700 dark:text-gray-300 leading-snug">
-            Empty fields fall back to{" "}
+            {t("scenarioEditor.ev.fallbackPrefix")}{" "}
             {defaultEvSettings ? (
               <>
-                the <strong>Default EV Settings</strong> (
-                {defaultEvSettings.modelName}) configured in Settings.
+                {t("scenarioEditor.ev.fallbackPre")}{" "}
+                <strong>{t("scenarioEditor.ev.fallbackStrong")}</strong>{" "}
+                {t("scenarioEditor.ev.fallbackPost", {
+                  model: defaultEvSettings.modelName,
+                })}
               </>
             ) : (
-              <>the connector's current value (built-in default).</>
+              <>{t("scenarioEditor.ev.fallbackBuiltin")}</>
             )}{" "}
-            The auto-meter "Stop mode" inside MeterValue nodes can derive its
-            stop condition from these settings.
+            {t("scenarioEditor.ev.fallbackNote")}
           </p>
         </div>
       ) : null}

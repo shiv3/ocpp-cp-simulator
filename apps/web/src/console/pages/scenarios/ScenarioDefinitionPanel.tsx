@@ -4,6 +4,7 @@ import { Settings, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { t as tNow, useT } from "../../../i18n";
 import type { ScenarioDefinition } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
 import EmptyState from "../../components/EmptyState";
 import { LIVE_RUN_STATE_STYLES } from "../../lib/scenarioRunState";
@@ -55,8 +56,11 @@ interface UsedByChip {
   run: ChargePointRun | undefined;
 }
 
-const plural = (n: number, one: string, many: string) =>
-  `${n} ${n === 1 ? one : many}`;
+const counted = (
+  n: number,
+  one: "scenarios.count.step" | "scenarios.count.branch",
+  many: "scenarios.count.steps" | "scenarios.count.branches",
+) => tNow(n === 1 ? one : many, { count: n });
 
 /**
  * A Library entry in the Scenarios page's side panel: what the scenario does
@@ -80,6 +84,7 @@ const ScenarioDefinitionPanel: React.FC<ScenarioDefinitionPanelProps> = ({
   saveLibrary,
   cancelEditRef,
 }) => {
+  const t = useT();
   const layout = useMemo(
     () => (scenario ? deriveStepLayout(scenario) : null),
     [scenario],
@@ -91,8 +96,8 @@ const ScenarioDefinitionPanel: React.FC<ScenarioDefinitionPanelProps> = ({
       variant="outline"
       size="sm"
       className="px-2"
-      aria-label="Close side panel"
-      title="Close (Esc)"
+      aria-label={t("scenarios.panel.closeAria")}
+      title={t("scenarios.panel.closeTitle")}
       onClick={onClose}
     >
       <X className="h-3.5 w-3.5" />
@@ -104,11 +109,13 @@ const ScenarioDefinitionPanel: React.FC<ScenarioDefinitionPanelProps> = ({
       <div>
         <div className="mb-2 flex justify-end">{closeButton}</div>
         {isLoading ? (
-          <p className="text-sm text-cx-muted">Loading…</p>
+          <p className="text-sm text-cx-muted">
+            {t("scenarios.panel.loading")}
+          </p>
         ) : (
           <EmptyState
-            title="Scenario not found"
-            hint={`No scenario "${scenarioId}" for ${cpId}.`}
+            title={t("scenarios.panel.notFound")}
+            hint={t("scenarios.panel.notFoundHint", { scenarioId, cpId })}
           />
         )}
       </div>
@@ -137,8 +144,8 @@ const ScenarioDefinitionPanel: React.FC<ScenarioDefinitionPanelProps> = ({
         expand={{
           to: editScenarioUrl(cpId, connectorId, scenario),
           label: target.library
-            ? "Open in the Library editor"
-            : "Open in the editor",
+            ? t("scenarios.panel.openLibraryEditor")
+            : t("scenarios.panel.openEditor"),
         }}
         onClose={onClose}
       />
@@ -178,10 +185,26 @@ const ScenarioDefinitionPanel: React.FC<ScenarioDefinitionPanelProps> = ({
   const branchCount = layout.fork?.branches.length ?? 0;
   const meta = layout.supported
     ? [
-        plural(layoutSteps(layout).length, "step", "steps"),
-        ...(branchCount > 0 ? [plural(branchCount, "branch", "branches")] : []),
+        counted(
+          layoutSteps(layout).length,
+          "scenarios.count.step",
+          "scenarios.count.steps",
+        ),
+        ...(branchCount > 0
+          ? [
+              counted(
+                branchCount,
+                "scenarios.count.branch",
+                "scenarios.count.branches",
+              ),
+            ]
+          : []),
       ].join(" · ")
-    : `${plural(deriveDisplayedSteps(scenario).steps.length, "step", "steps")} · graph`;
+    : `${counted(
+        deriveDisplayedSteps(scenario).steps.length,
+        "scenarios.count.step",
+        "scenarios.count.steps",
+      )} · ${t("scenarios.panel.graph")}`;
 
   return (
     <div>
@@ -192,11 +215,13 @@ const ScenarioDefinitionPanel: React.FC<ScenarioDefinitionPanelProps> = ({
           </h2>
           <div className="mt-0.5 font-mono text-xs text-cx-muted">
             {isLibraryScope(cpId) ? (
-              <span className="font-sans">Library</span>
+              <span className="font-sans">{t("scenarios.panel.library")}</span>
             ) : (
               <>
                 {cpId}
-                {connectorId != null ? ` #${connectorId}` : " · charge point"}
+                {connectorId != null
+                  ? ` #${connectorId}`
+                  : ` · ${t("scenarios.panel.chargePoint")}`}
               </>
             )}
             <span className="font-sans"> · {meta}</span>
@@ -218,13 +243,13 @@ const ScenarioDefinitionPanel: React.FC<ScenarioDefinitionPanelProps> = ({
             onClick={() => onEditingChange(true)}
           >
             <Settings className="h-3.5 w-3.5" />
-            Edit scenario
+            {t("scenarios.panel.editScenario")}
           </Button>
         ) : (
           <Button asChild variant="outline" size="sm">
             <Link to={editScenarioUrl(cpId, connectorId, scenario)}>
               <Settings className="h-3.5 w-3.5" />
-              Edit scenario
+              {t("scenarios.panel.editScenario")}
             </Link>
           </Button>
         )}
@@ -232,13 +257,13 @@ const ScenarioDefinitionPanel: React.FC<ScenarioDefinitionPanelProps> = ({
 
       <div className="mt-4">
         <h3 className="mb-1.5 text-xs font-medium uppercase tracking-wide text-cx-muted">
-          Used by
+          {t("scenarios.panel.usedBy")}
         </h3>
         {usedBy.length === 0 ? (
           <p className="text-sm text-cx-muted">
             {isLibraryScope(cpId)
-              ? "no connector uses it"
-              : "no connector running it"}
+              ? t("scenarios.panel.noConnectorUses")
+              : t("scenarios.panel.noConnectorRunning")}
           </p>
         ) : (
           <div className="flex flex-wrap gap-1.5">
@@ -265,7 +290,7 @@ const ScenarioDefinitionPanel: React.FC<ScenarioDefinitionPanelProps> = ({
                 )}
                 {chip.cpId}
                 {chip.connectorId === null
-                  ? " · charge point"
+                  ? ` · ${t("scenarios.panel.chargePoint")}`
                   : ` #${chip.connectorId}`}
               </Link>
             ))}

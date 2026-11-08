@@ -1,5 +1,7 @@
 import type { Edge } from "@xyflow/react";
 
+import type { MessageKey } from "../../i18n";
+
 import {
   type CancelReservationNodeData,
   type CertQuirksNodeData,
@@ -853,11 +855,14 @@ export function stepSummary(node: ScenarioNode): string {
  * endpoints, not user-insertable steps) appears in exactly one bucket.
  */
 export const STEP_CATEGORIES: ReadonlyArray<{
+  /** Stable English id (also keys the tile styles); show `labelKey`. */
   label: string;
+  labelKey: MessageKey;
   types: ScenarioNodeType[];
 }> = [
   {
     label: "Status",
+    labelKey: "scenarios.category.status",
     types: [
       ScenarioNodeType.STATUS_CHANGE,
       ScenarioNodeType.STATUS_NOTIFICATION,
@@ -865,14 +870,17 @@ export const STEP_CATEGORIES: ReadonlyArray<{
   },
   {
     label: "Transaction",
+    labelKey: "scenarios.category.transaction",
     types: [ScenarioNodeType.TRANSACTION, ScenarioNodeType.UNLOCK_OUTCOME],
   },
   {
     label: "Meter & EV",
+    labelKey: "scenarios.category.meterEv",
     types: [ScenarioNodeType.METER_VALUE, ScenarioNodeType.CONNECTOR_PLUG],
   },
   {
     label: "Wait & Trigger",
+    labelKey: "scenarios.category.waitTrigger",
     types: [
       ScenarioNodeType.DELAY,
       ScenarioNodeType.REMOTE_START_TRIGGER,
@@ -885,6 +893,7 @@ export const STEP_CATEGORIES: ReadonlyArray<{
   },
   {
     label: "Advanced",
+    labelKey: "scenarios.category.advanced",
     types: [
       ScenarioNodeType.RESPONSE_OVERRIDE,
       ScenarioNodeType.INBOUND_POLICY,

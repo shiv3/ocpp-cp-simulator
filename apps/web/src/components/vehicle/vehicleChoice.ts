@@ -1,3 +1,4 @@
+import { t, type MessageKey } from "../../i18n";
 import {
   EV_PRESETS,
   type EVSettings,
@@ -36,12 +37,30 @@ export function isPresetName(name: string | undefined): boolean {
   return name !== undefined && Object.keys(EV_PRESETS).includes(name);
 }
 
-export const FIELD_LABELS: Record<EditableSpecField, string> = {
-  usableBatteryKwh: "usable battery capacity",
-  acMaxKw: "AC maximum power",
-  acPhases: "AC phases",
-  dcMaxKw: "DC maximum power",
+export const FIELD_LABEL_KEYS: Record<EditableSpecField, MessageKey> = {
+  usableBatteryKwh: "common.vehicle.field.usableBatteryKwh",
+  acMaxKw: "common.vehicle.field.acMaxKw",
+  acPhases: "common.vehicle.field.acPhases",
+  dcMaxKw: "common.vehicle.field.dcMaxKw",
 };
+
+/** The field's label in the current language. */
+export function fieldLabel(field: EditableSpecField): string {
+  return t(FIELD_LABEL_KEYS[field]);
+}
+
+/** Same as `fieldLabel`, as an object whose entries are translated when read
+ *  (so `FIELD_LABELS[f]` in a render follows the language). Spreading it at
+ *  module load freezes the language: use `fieldLabel` there instead. */
+export const FIELD_LABELS = Object.defineProperties(
+  {} as Record<EditableSpecField, string>,
+  Object.fromEntries(
+    (Object.keys(FIELD_LABEL_KEYS) as EditableSpecField[]).map((field) => [
+      field,
+      { get: () => fieldLabel(field), enumerable: true },
+    ]),
+  ),
+);
 
 /** Units of the editable specs, for their inputs. */
 export const FIELD_UNITS: Record<EditableSpecField, string> = {
@@ -80,7 +99,7 @@ export function readVehicleChoice(
   if (!profile || (currentType !== "AC" && currentType !== "DC")) {
     return {
       kind: "unusable",
-      message: "This vehicle profile no longer exists.",
+      message: t("common.vehicle.profileGone"),
     };
   }
   const result = resolveEvSettings(profile, currentType);
@@ -89,12 +108,15 @@ export function readVehicleChoice(
       kind: "unusable",
       message:
         result.reason === "missing_fields"
-          ? `${profile.name} cannot be used for ${currentType}: ${result.missing
-              .map((f) => FIELD_LABELS[f])
-              .join(
-                ", ",
-              )} missing. Fill it in under Settings → Vehicle profiles.`
-          : `${profile.name} has a DC curve the simulator cannot use: ${result.detail}.`,
+          ? t("common.vehicle.unusableMissing", {
+              name: profile.name,
+              type: currentType,
+              fields: result.missing.map((f) => fieldLabel(f)).join(", "),
+            })
+          : t("common.vehicle.unusableCurve", {
+              name: profile.name,
+              detail: result.detail,
+            }),
     };
   }
   return {
@@ -108,19 +130,31 @@ export function readVehicleChoice(
 export function describeWarning(warning: ResolveWarning): string {
   switch (warning.code) {
     case "POWER_ABOVE_DC_MAX":
-      return `The curve peaks at ${warning.peakKw} kW, above the declared DC maximum of ${warning.dcMaxKw} kW: the maximum is set to ${warning.peakKw} kW so no point of the curve is lost.`;
+      return t("common.vehicle.warn.powerAboveDcMax", {
+        peakKw: warning.peakKw,
+        dcMaxKw: warning.dcMaxKw,
+      });
     case "CURVE_CAPPED_AT_DC_MAX":
-      return `The curve peaks at ${warning.peakKw} kW, above the ${warning.dcMaxKw} kW DC maximum you set: it is held at ${warning.dcMaxKw} kW.`;
+      return t("common.vehicle.warn.curveCapped", {
+        peakKw: warning.peakKw,
+        dcMaxKw: warning.dcMaxKw,
+      });
     case "CURVE_STARTS_ABOVE_ZERO_SOC":
-      return `The curve starts at ${warning.firstSocPercent} % SoC: below that, its first power is held.`;
+      return t("common.vehicle.warn.curveStartsAboveZero", {
+        soc: warning.firstSocPercent,
+      });
     case "CURVE_ENDS_BELOW_FULL_SOC":
-      return `The curve ends at ${warning.lastSocPercent} % SoC: above that, its last power is held.`;
+      return t("common.vehicle.warn.curveEndsBelowFull", {
+        soc: warning.lastSocPercent,
+      });
     case "NO_DC_CURVE":
-      return "No DC curve: the vehicle charges flat at its maximum power.";
+      return t("common.vehicle.warn.noDcCurve");
     case "UNSUPPORTED_AC_PHASES":
-      return `The source gives ${warning.acPhases} AC phases; the simulator models 1 or 3, so a single phase is used.`;
+      return t("common.vehicle.warn.unsupportedAcPhases", {
+        phases: warning.acPhases,
+      });
     case "AC_PHASES_UNKNOWN":
-      return "The source gives no AC phase count: single phase is assumed.";
+      return t("common.vehicle.warn.acPhasesUnknown");
   }
 }
 

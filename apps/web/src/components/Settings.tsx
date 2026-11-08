@@ -8,6 +8,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useConfig } from "../data/hooks/useConfig";
 import { useGlobalTagIds } from "../data/hooks/useGlobalTagIds";
 import { useDataContext } from "../data/providers/DataProvider";
+import { useT } from "../i18n";
 import { useVehicleSelect } from "./vehicle/useVehicleSelect";
 import { isPresetName, presetForDefaults } from "./vehicle/vehicleChoice";
 import {
@@ -70,6 +71,7 @@ function seedDraftEv(stored: EVSettings | null): EVSettings {
 }
 
 const Settings: React.FC = () => {
+  const t = useT();
   const { config, setConfig: persistConfig, isLoading } = useConfig();
   const {
     mode,
@@ -107,7 +109,7 @@ const Settings: React.FC = () => {
     await persistGlobalTagIds(tags);
     setTagIdsDraft(tags.join(", "));
     setTagIdsDirty(false);
-    setSuccess("RFID Tag IDs saved.");
+    setSuccess(t("settings.page.tagsSaved"));
     setTimeout(() => setSuccess(""), 3000);
   };
   const navigate = useNavigate();
@@ -123,16 +125,10 @@ const Settings: React.FC = () => {
   const handleResetData = useCallback(async () => {
     if (!chargePointService.resetAllState) {
       setResetState("error");
-      setResetError("This runtime does not support state reset");
+      setResetError(t("settings.page.resetUnsupported"));
       return;
     }
-    const proceed = window.confirm(
-      "Reset all simulator data?\n\n" +
-        "Scenarios, configuration overrides, charging profiles, " +
-        "availability flags, pending messages, logs and saved vehicle " +
-        "profiles will be erased. " +
-        "The page will reload afterwards.",
-    );
+    const proceed = window.confirm(t("settings.page.resetConfirm"));
     if (!proceed) return;
     setResetState("running");
     setResetError(null);
@@ -146,7 +142,7 @@ const Settings: React.FC = () => {
       setResetState("error");
       setResetError(err instanceof Error ? err.message : String(err));
     }
-  }, [chargePointService]);
+  }, [chargePointService, t]);
 
   const handleApplyDefaultEv = () => {
     // Normalized here rather than relied on downstream: a fresh Connector
@@ -166,15 +162,13 @@ const Settings: React.FC = () => {
         ...displayedElectricalDefaults(draftEv),
       }),
     );
-    setSuccess(
-      "Default EV settings saved. New connectors will start with these values.",
-    );
+    setSuccess(t("settings.page.evSaved"));
     setTimeout(() => setSuccess(""), 3000);
   };
 
   const handleResetDefaultEv = () => {
     setDefaultEvSettings(null);
-    setSuccess("Default EV settings reset to the built-in defaults.");
+    setSuccess(t("settings.page.evReset"));
     setTimeout(() => setSuccess(""), 3000);
   };
 
@@ -207,7 +201,7 @@ const Settings: React.FC = () => {
     link.download = `ocpp-config-${new Date().toISOString().split("T")[0]}.json`;
     link.click();
     URL.revokeObjectURL(url);
-    setSuccess("Configuration exported successfully!");
+    setSuccess(t("settings.page.exported"));
     setTimeout(() => setSuccess(""), 3000);
   };
 
@@ -222,10 +216,10 @@ const Settings: React.FC = () => {
         updateConfig(json);
         setJsonText(JSON.stringify(json, null, 2));
         setError("");
-        setSuccess("Configuration imported successfully!");
+        setSuccess(t("settings.page.imported"));
         setTimeout(() => setSuccess(""), 3000);
       } catch {
-        setError("Invalid JSON file. Please check the file format.");
+        setError(t("settings.page.invalidFile"));
         setTimeout(() => setError(""), 5000);
       }
     };
@@ -237,10 +231,10 @@ const Settings: React.FC = () => {
       const json = JSON.parse(jsonText);
       updateConfig(json);
       setError("");
-      setSuccess("Configuration applied successfully!");
+      setSuccess(t("settings.page.applied"));
       setTimeout(() => setSuccess(""), 3000);
     } catch {
-      setError("Invalid JSON. Please check the syntax.");
+      setError(t("settings.page.invalidJson"));
       setTimeout(() => setError(""), 5000);
     }
   };
@@ -254,10 +248,10 @@ const Settings: React.FC = () => {
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
-        <h2 className="text-2xl font-bold">Settings</h2>
+        <h2 className="text-2xl font-bold">{t("settings.page.title")}</h2>
         <Button onClick={handleBackToHome} variant="secondary" size="sm">
           <Home className="mr-2 h-4 w-4" />
-          Back to Home
+          {t("settings.page.backToHome")}
         </Button>
       </div>
 
@@ -277,23 +271,22 @@ const Settings: React.FC = () => {
 
       <Card className="mb-6">
         <CardHeader>
-          <CardTitle>Runtime Mode</CardTitle>
+          <CardTitle>{t("settings.page.runtimeMode")}</CardTitle>
           <p className="text-muted-foreground text-sm mt-2">
-            The simulator picks Local or Remote automatically based on where the
-            UI is served from. When opened via{" "}
-            <code>ocpp-cp-sim --web-console</code> (or the Docker image) the UI
-            talks to that daemon as Remote; when opened from a static build
-            (GitHub Pages, <code>bun run dev</code>) it runs the charge points
-            in-browser as Local. No manual toggle.
+            {t("settings.page.runtimeModeBefore")}{" "}
+            <code>ocpp-cp-sim --web-console</code>{" "}
+            {t("settings.page.runtimeModeMid")} <code>bun run dev</code>
+            {t("settings.page.runtimeModeAfter")}
           </p>
         </CardHeader>
         <CardContent className="space-y-2">
           <div className="text-sm">
-            Mode: <span className="font-semibold">{mode}</span>
+            {t("settings.page.mode")}{" "}
+            <span className="font-semibold">{mode}</span>
           </div>
           {mode === "remote" && (
             <div className="text-xs text-muted-foreground font-mono">
-              Server: {serverUrl}
+              {t("settings.page.server", { url: serverUrl })}
             </div>
           )}
         </CardContent>
@@ -301,14 +294,9 @@ const Settings: React.FC = () => {
 
       <Card className="mb-6 border-destructive/40">
         <CardHeader>
-          <CardTitle>Reset data</CardTitle>
+          <CardTitle>{t("settings.page.resetData")}</CardTitle>
           <p className="text-muted-foreground text-sm mt-2">
-            Wipe every persisted simulator record — scenarios,
-            ChangeConfiguration overrides, charging profiles, availability
-            flags, pending transaction messages, any saved logs and the saved
-            vehicle profiles. Schema stays intact; the next load starts from a
-            clean DB. In remote mode this also drops every charge point
-            registered on the daemon.
+            {t("settings.page.resetDataHelp")}
           </p>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -318,13 +306,13 @@ const Settings: React.FC = () => {
             onClick={handleResetData}
           >
             {resetState === "running"
-              ? "Resetting…"
-              : "Reset all simulator data"}
+              ? t("settings.page.resetting")
+              : t("settings.page.resetAll")}
           </Button>
           {resetState === "error" && (
             <Alert variant="destructive">
               <AlertDescription>
-                {resetError ?? "Reset failed"}
+                {resetError ?? t("settings.page.resetFailed")}
               </AlertDescription>
             </Alert>
           )}
@@ -333,12 +321,9 @@ const Settings: React.FC = () => {
 
       <Card className="mb-6">
         <CardHeader>
-          <CardTitle>Default EV Settings</CardTitle>
+          <CardTitle>{t("settings.page.defaultEv")}</CardTitle>
           <p className="text-muted-foreground text-sm mt-2">
-            These values seed every new connector's EV (battery capacity, target
-            SoC, etc.) on this device. Scenarios that leave their "Scenario EV
-            Settings" fields empty fall back to whatever the connector currently
-            holds — which starts from this default.
+            {t("settings.page.defaultEvHelp")}
           </p>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -347,7 +332,7 @@ const Settings: React.FC = () => {
               htmlFor="default-ev-preset"
               className="block text-sm font-semibold mb-2"
             >
-              EV Model preset
+              {t("settings.page.evPreset")}
             </label>
             <select
               id="default-ev-preset"
@@ -376,7 +361,7 @@ const Settings: React.FC = () => {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-semibold mb-1">
-                Battery (kWh)
+                {t("settings.page.battery")}
               </label>
               <input
                 type="number"
@@ -398,7 +383,7 @@ const Settings: React.FC = () => {
             </div>
             <div>
               <label className="block text-xs font-semibold mb-1">
-                Max Power (kW)
+                {t("settings.page.maxPower")}
               </label>
               <input
                 type="number"
@@ -420,7 +405,7 @@ const Settings: React.FC = () => {
             </div>
             <div>
               <label className="block text-xs font-semibold mb-1">
-                Initial SoC (%)
+                {t("settings.page.initialSoc")}
               </label>
               <input
                 type="number"
@@ -441,7 +426,7 @@ const Settings: React.FC = () => {
             </div>
             <div>
               <label className="block text-xs font-semibold mb-1">
-                Target SoC (%)
+                {t("settings.page.targetSoc")}
               </label>
               <input
                 type="number"
@@ -464,7 +449,7 @@ const Settings: React.FC = () => {
 
           <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
             <p className="text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-2">
-              Electrical characteristics
+              {t("settings.page.electrical")}
             </p>
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -472,7 +457,7 @@ const Settings: React.FC = () => {
                   htmlFor="default-ev-current-type"
                   className="block text-xs font-semibold mb-1"
                 >
-                  Current Type
+                  {t("settings.page.currentType")}
                 </label>
                 <select
                   id="default-ev-current-type"
@@ -498,7 +483,7 @@ const Settings: React.FC = () => {
                   htmlFor="default-ev-phases"
                   className="block text-xs font-semibold mb-1"
                 >
-                  Phases
+                  {t("settings.page.phases")}
                 </label>
                 <select
                   id="default-ev-phases"
@@ -512,8 +497,8 @@ const Settings: React.FC = () => {
                   }
                   className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 disabled:opacity-50"
                 >
-                  <option value="1">1 (single-phase)</option>
-                  <option value="3">3 (three-phase)</option>
+                  <option value="1">{t("settings.page.phase1")}</option>
+                  <option value="3">{t("settings.page.phase3")}</option>
                 </select>
               </div>
               <div>
@@ -521,7 +506,7 @@ const Settings: React.FC = () => {
                   htmlFor="default-ev-voltage"
                   className="block text-xs font-semibold mb-1"
                 >
-                  Voltage (V)
+                  {t("settings.page.voltage")}
                 </label>
                 <input
                   id="default-ev-voltage"
@@ -543,7 +528,7 @@ const Settings: React.FC = () => {
                   htmlFor="default-ev-power-factor"
                   className="block text-xs font-semibold mb-1"
                 >
-                  Power Factor
+                  {t("settings.page.powerFactor")}
                 </label>
                 <input
                   id="default-ev-power-factor"
@@ -574,12 +559,10 @@ const Settings: React.FC = () => {
 
           <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
             <p className="text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-1">
-              Charging curve
+              {t("settings.page.chargingCurve")}
             </p>
             <p className="text-muted-foreground text-xs mb-2">
-              Battery-acceptance fraction of Max Power at each SoC. Empty (no
-              points) means flat acceptance at Max Power for the whole session,
-              matching the pre-curve behaviour.
+              {t("settings.page.chargingCurveHelp")}
             </p>
             <div className="space-y-2">
               {(draftEv.chargingCurve ?? []).map((point, index) => (
@@ -589,7 +572,9 @@ const Settings: React.FC = () => {
                     min={0}
                     max={100}
                     step={1}
-                    aria-label={`Charging curve point ${index + 1} SoC percent`}
+                    aria-label={t("settings.page.curveSocAria", {
+                      index: index + 1,
+                    })}
                     value={point.socPercent}
                     onChange={(e) => {
                       const curve = [...(draftEv.chargingCurve ?? [])];
@@ -604,13 +589,17 @@ const Settings: React.FC = () => {
                     }}
                     className="w-24 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
                   />
-                  <span className="text-xs text-muted-foreground">% SoC →</span>
+                  <span className="text-xs text-muted-foreground">
+                    {t("settings.page.curveSocUnit")}
+                  </span>
                   <input
                     type="number"
                     min={0}
                     max={1}
                     step={0.01}
-                    aria-label={`Charging curve point ${index + 1} power fraction`}
+                    aria-label={t("settings.page.curveFractionAria", {
+                      index: index + 1,
+                    })}
                     value={point.powerFraction}
                     onChange={(e) => {
                       const curve = [...(draftEv.chargingCurve ?? [])];
@@ -626,13 +615,15 @@ const Settings: React.FC = () => {
                     className="w-24 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
                   />
                   <span className="text-xs text-muted-foreground">
-                    fraction of Max Power
+                    {t("settings.page.curveFractionUnit")}
                   </span>
                   <Button
                     type="button"
                     variant="secondary"
                     size="sm"
-                    aria-label={`Remove charging curve point ${index + 1}`}
+                    aria-label={t("settings.page.curveRemoveAria", {
+                      index: index + 1,
+                    })}
                     onClick={() => {
                       const curve = (draftEv.chargingCurve ?? []).filter(
                         (_, i) => i !== index,
@@ -662,7 +653,7 @@ const Settings: React.FC = () => {
                 }
               >
                 <Plus className="h-3.5 w-3.5 mr-1" />
-                Add point
+                {t("settings.page.addPoint")}
               </Button>
             </div>
           </div>
@@ -673,7 +664,7 @@ const Settings: React.FC = () => {
               disabled={!evDirty}
               size="sm"
             >
-              Save
+              {t("settings.common.save")}
             </Button>
             <Button
               onClick={handleResetDefaultEv}
@@ -681,24 +672,22 @@ const Settings: React.FC = () => {
               variant="secondary"
               size="sm"
             >
-              Reset to built-in
+              {t("settings.page.resetBuiltIn")}
             </Button>
           </div>
           <p className="text-muted-foreground text-xs">
             {defaultEvSettings
-              ? "User override is active. New connectors will start from these values."
-              : "No override. New connectors start from the built-in Generic EV defaults (75 kWh / 80 % target)."}
+              ? t("settings.page.overrideActive")
+              : t("settings.page.noOverride")}
           </p>
         </CardContent>
       </Card>
 
       <Card className="mb-6">
         <CardHeader>
-          <CardTitle>RFID Tag IDs</CardTitle>
+          <CardTitle>{t("settings.page.rfid")}</CardTitle>
           <p className="text-muted-foreground text-sm mt-2">
-            Tag profiles shared across every charge point. Pick one from the
-            connector card's TagID dropdown before Start Transaction. Stored
-            globally — not per-CP.
+            {t("settings.page.rfidHelp")}
           </p>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -706,7 +695,7 @@ const Settings: React.FC = () => {
             htmlFor="global-tag-ids"
             className="block text-sm font-semibold"
           >
-            Tag IDs (comma-separated)
+            {t("settings.page.tagIds")}
           </label>
           <input
             id="global-tag-ids"
@@ -720,7 +709,7 @@ const Settings: React.FC = () => {
               const tags = parseTagIdsDraft(tagIdsDraft);
               setTagIdsDraft(tags.join(", "));
             }}
-            placeholder="e.g., 123456, ABCDEF, TAG001"
+            placeholder={t("settings.page.tagIdsPlaceholder")}
             className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 font-mono"
           />
           <div className="flex items-center gap-2">
@@ -733,14 +722,14 @@ const Settings: React.FC = () => {
                   globalTagIds.join("|")
               }
             >
-              Save
+              {t("settings.common.save")}
             </Button>
             <span className="text-xs text-muted-foreground">
               {globalTagIds.length === 0
-                ? "No tags configured yet."
-                : `${globalTagIds.length} tag${
-                    globalTagIds.length === 1 ? "" : "s"
-                  } active.`}
+                ? t("settings.page.noTags")
+                : t("settings.page.tagsActive", {
+                    count: globalTagIds.length,
+                  })}
             </span>
           </div>
         </CardContent>
@@ -748,24 +737,22 @@ const Settings: React.FC = () => {
 
       <Card>
         <CardHeader>
-          <CardTitle>Configuration Management</CardTitle>
+          <CardTitle>{t("settings.page.configMgmt")}</CardTitle>
           <p className="text-muted-foreground text-sm mt-2">
-            Export your current configuration to a JSON file or import a
-            previously saved configuration. You can also manually edit the JSON
-            configuration below.
+            {t("settings.page.configMgmtHelp")}
           </p>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="flex gap-4">
             <Button onClick={handleExport} variant="success">
               <Download className="mr-2 h-5 w-5" />
-              Export Configuration
+              {t("settings.page.export")}
             </Button>
 
             <Button asChild>
               <label htmlFor="file-upload" className="cursor-pointer">
                 <Upload className="mr-2 h-5 w-5" />
-                Import Configuration
+                {t("settings.page.import")}
                 <input
                   id="file-upload"
                   type="file"
@@ -779,9 +766,11 @@ const Settings: React.FC = () => {
 
           <div>
             <div className="flex justify-between items-center mb-2">
-              <h4 className="text-lg font-semibold">Configuration JSON</h4>
+              <h4 className="text-lg font-semibold">
+                {t("settings.page.configJson")}
+              </h4>
               <Button onClick={handleApplyJson} size="sm">
-                Save
+                {t("settings.common.save")}
               </Button>
             </div>
             <Textarea
@@ -789,29 +778,23 @@ const Settings: React.FC = () => {
               onChange={(e) => setJsonText(e.target.value)}
               rows={20}
               className="font-mono text-sm"
-              placeholder="Paste your configuration JSON here..."
+              placeholder={t("settings.page.jsonPlaceholder")}
             />
             <p className="text-muted-foreground text-xs mt-2">
-              Edit the JSON configuration directly and click "Save" to update.
+              {t("settings.page.jsonHelp")}
             </p>
           </div>
 
           <Card className="bg-blue-50 dark:bg-blue-950/50">
             <CardContent className="pt-6">
-              <h4 className="text-sm font-semibold mb-2">Note</h4>
+              <h4 className="text-sm font-semibold mb-2">
+                {t("settings.page.note")}
+              </h4>
               <ul className="text-muted-foreground text-sm space-y-1 list-disc list-inside">
-                <li>
-                  Individual charge point settings can be configured from the
-                  Home page
-                </li>
-                <li>
-                  Click the gear icon next to each charge point tab to edit its
-                  settings
-                </li>
-                <li>
-                  Use the "+ Add Charge Point" button to add new charge points
-                </li>
-                <li>This page is for bulk configuration import/export only</li>
+                <li>{t("settings.page.note1")}</li>
+                <li>{t("settings.page.note2")}</li>
+                <li>{t("settings.page.note3")}</li>
+                <li>{t("settings.page.note4")}</li>
               </ul>
             </CardContent>
           </Card>

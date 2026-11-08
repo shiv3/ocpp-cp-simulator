@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useT } from "@/i18n";
 
 export interface ManualDisconnectButtonsProps {
   manualRuleIds: string[];
@@ -21,6 +22,7 @@ const ManualDisconnectButtons: React.FC<ManualDisconnectButtonsProps> = ({
   isConnected,
   onTriggerDisconnect,
 }) => {
+  const t = useT();
   // Track pending state and errors per rule ID
   const [pendingRules, setPendingRules] = useState<Set<string>>(new Set());
   const [ruleErrors, setRuleErrors] = useState<Record<string, string>>({});
@@ -52,7 +54,10 @@ const ManualDisconnectButtons: React.FC<ManualDisconnectButtonsProps> = ({
     } catch (err) {
       setRuleErrors((prev) => ({
         ...prev,
-        [ruleId]: err instanceof Error ? err.message : "Unknown error",
+        [ruleId]:
+          err instanceof Error
+            ? err.message
+            : t("consoleShared.manualDisconnect.unknownError"),
       }));
     } finally {
       setPendingRules((prev) => {
@@ -77,15 +82,17 @@ const ManualDisconnectButtons: React.FC<ManualDisconnectButtonsProps> = ({
               onClick={() => void handleClick(ruleId)}
               title={
                 !isConnected
-                  ? "Charge point is not connected"
+                  ? t("consoleShared.manualDisconnect.notConnected")
                   : isPending
-                    ? "Triggering disconnect..."
+                    ? t("consoleShared.manualDisconnect.triggeringTitle")
                     : undefined
               }
               className="rounded-md border border-cx-amber/40 px-3 py-1.5 text-xs font-medium text-cx-amber hover:bg-cx-amber/10 disabled:opacity-50 disabled:cursor-not-allowed"
               data-testid={`disconnect-btn-${ruleId}`}
             >
-              {isPending ? "Triggering…" : `Force disconnect: ${ruleId}`}
+              {isPending
+                ? t("consoleShared.manualDisconnect.triggering")
+                : t("consoleShared.manualDisconnect.force", { ruleId })}
             </button>
             {error && <div className="mt-1 text-xs text-cx-rose">{error}</div>}
           </div>

@@ -1,3 +1,4 @@
+import { t } from "../../i18n";
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 
 import type { VehicleProfile } from "@ocpp-cp-sim/core/cp/domain/vehicle/VehicleProfile";
@@ -80,7 +81,7 @@ class VehicleProfileStore {
 
   save = async (profile: VehicleProfile): Promise<VehicleProfile> => {
     if (!this.service.saveVehicleProfile) {
-      throw new Error("This console cannot store vehicle profiles");
+      throw new Error(t("common.vehicle.storeUnsupported"));
     }
     const stored = (await this.service.saveVehicleProfile(profile)) ?? profile;
     await this.afterWrite((list) => [
@@ -92,7 +93,7 @@ class VehicleProfileStore {
 
   remove = async (id: string): Promise<void> => {
     if (!this.service.deleteVehicleProfile) {
-      throw new Error("This console cannot store vehicle profiles");
+      throw new Error(t("common.vehicle.storeUnsupported"));
     }
     await this.service.deleteVehicleProfile(id);
     await this.afterWrite((list) => list.filter((p) => p.id !== id));

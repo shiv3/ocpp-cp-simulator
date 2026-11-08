@@ -7,6 +7,9 @@ import cp from "./cp";
 import dashboard from "./dashboard";
 import scenarios from "./scenarios";
 import templates from "./templates";
+import scenarioRun from "./scenarioRun";
+import cpPanels from "./cpPanels";
+import scenarioNodes from "./scenarioNodes";
 
 const en = {
   ...common,
@@ -18,5 +21,8 @@ const en = {
   ...dashboard,
   ...scenarios,
   ...templates,
+  ...scenarioRun,
+  ...cpPanels,
+  ...scenarioNodes,
 } as const;
 export default en;

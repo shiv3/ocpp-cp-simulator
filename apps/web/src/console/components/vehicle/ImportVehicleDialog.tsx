@@ -36,6 +36,7 @@ import {
 } from "../../lib/vehicleCatalog";
 import { describeError } from "../../pages/cp/connectorActions";
 import CurvePreview from "./CurvePreview";
+import { t as translate, useT, type MessageKey, type TFunction } from "@/i18n";
 
 export interface ImportVehicleDialogProps {
   open: boolean;
@@ -47,8 +48,23 @@ export interface ImportVehicleDialogProps {
   now?: () => string;
 }
 
+/** Fills `{name}` slots of a message with elements (a <code> or a link). */
+function fillSlots(
+  text: string,
+  slots: Record<string, React.ReactNode>,
+): React.ReactNode[] {
+  return text.split(/(\{\w+\})/).map((part, index) => {
+    const name = /^\{(\w+)\}$/.exec(part)?.[1];
+    return name !== undefined && name in slots ? (
+      <React.Fragment key={index}>{slots[name]}</React.Fragment>
+    ) : (
+      part
+    );
+  });
+}
+
 const shown = (value: number | null) =>
-  value == null ? "missing" : String(value);
+  value == null ? translate("consoleShared.vehicle.missing") : String(value);
 
 /**
  * Import a vehicle from Open EV Directory into a saved profile (#458).
@@ -58,22 +74,24 @@ const shown = (value: number | null) =>
  * and how much that source says about it, and a value the source does not
  * give stays empty until the user fills it in.
  */
-const ImportVehicleDialog: React.FC<ImportVehicleDialogProps> = (props) => (
-  <Dialog open={props.open} onOpenChange={props.onOpenChange}>
-    <DialogContent className="flex max-h-[calc(100vh-32px)] w-[min(880px,calc(100vw-32px))] max-w-none flex-col gap-0 overflow-hidden border-cx-border-strong bg-cx-card p-0 text-cx-fg sm:rounded-xl">
-      <div className="border-b border-cx-border py-3 pl-4 pr-12">
-        <DialogTitle className="text-[15px] font-semibold tracking-normal">
-          Import a vehicle from Open EV Directory
-        </DialogTitle>
-        <DialogDescription className="mt-0.5 text-[12.5px] text-cx-muted">
-          The profile is saved in the simulator; simulations never call the
-          catalog.
-        </DialogDescription>
-      </div>
-      {props.open && <ImportBody {...props} />}
-    </DialogContent>
-  </Dialog>
-);
+const ImportVehicleDialog: React.FC<ImportVehicleDialogProps> = (props) => {
+  const t = useT();
+  return (
+    <Dialog open={props.open} onOpenChange={props.onOpenChange}>
+      <DialogContent className="flex max-h-[calc(100vh-32px)] w-[min(880px,calc(100vw-32px))] max-w-none flex-col gap-0 overflow-hidden border-cx-border-strong bg-cx-card p-0 text-cx-fg sm:rounded-xl">
+        <div className="border-b border-cx-border py-3 pl-4 pr-12">
+          <DialogTitle className="text-[15px] font-semibold tracking-normal">
+            {t("consoleShared.import.title")}
+          </DialogTitle>
+          <DialogDescription className="mt-0.5 text-[12.5px] text-cx-muted">
+            {t("consoleShared.import.subtitle")}
+          </DialogDescription>
+        </div>
+        {props.open && <ImportBody {...props} />}
+      </DialogContent>
+    </Dialog>
+  );
+};
 
 const ImportBody: React.FC<ImportVehicleDialogProps> = ({
   onOpenChange,
@@ -81,6 +99,7 @@ const ImportBody: React.FC<ImportVehicleDialogProps> = ({
   newId = newVehicleProfileId,
   now = () => new Date().toISOString(),
 }) => {
+  const t = useT();
   const access = useVehicleCatalog();
   const catalog = access.catalog;
   const [error, setError] = useState<string | null>(null);
@@ -172,16 +191,19 @@ const ImportBody: React.FC<ImportVehicleDialogProps> = ({
       <CatalogAccessPanel access={access} />
 
       {catalog && (
-        <section aria-label="Search" className="flex flex-wrap items-end gap-2">
+        <section
+          aria-label={t("consoleShared.import.search")}
+          className="flex flex-wrap items-end gap-2"
+        >
           <label className="flex flex-col gap-1 text-[11px] uppercase tracking-[0.06em] text-cx-faint">
-            Make
+            {t("consoleShared.import.make")}
             <select
-              aria-label="Make"
+              aria-label={t("consoleShared.import.make")}
               value={makeId}
               onChange={(e) => setMakeId(e.target.value)}
               className={cn(FILTER_SELECT_CLASS, "min-w-[180px] normal-case")}
             >
-              <option value="">Any make</option>
+              <option value="">{t("consoleShared.import.anyMake")}</option>
               {(makes ?? []).map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.name}
@@ -190,11 +212,11 @@ const ImportBody: React.FC<ImportVehicleDialogProps> = ({
             </select>
           </label>
           <label className="flex flex-1 flex-col gap-1 text-[11px] uppercase tracking-[0.06em] text-cx-faint">
-            Model
+            {t("consoleShared.import.model")}
             <input
-              aria-label="Model"
+              aria-label={t("consoleShared.import.model")}
               value={query}
-              placeholder="e.g. ID.7"
+              placeholder={t("consoleShared.import.modelPlaceholder")}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") void search();
@@ -207,7 +229,7 @@ const ImportBody: React.FC<ImportVehicleDialogProps> = ({
             onClick={() => void search()}
             disabled={busy || (!makeId && !query.trim())}
           >
-            Search
+            {t("consoleShared.import.search")}
           </Button>
         </section>
       )}
@@ -223,9 +245,9 @@ const ImportBody: React.FC<ImportVehicleDialogProps> = ({
 
       {models && !variant && (
         <PickList
-          label="Models"
+          label={t("consoleShared.import.models")}
           page={models}
-          empty="No model matches."
+          empty={t("consoleShared.import.noModel")}
           onPage={(p) => {
             if (searched) void searchModels({ ...searched, page: p });
           }}
@@ -240,7 +262,12 @@ const ImportBody: React.FC<ImportVehicleDialogProps> = ({
               )}
             >
               {m.makeName} {m.name}{" "}
-              <span className="text-cx-muted">· {m.variantCount} variants</span>
+              <span className="text-cx-muted">
+                ·{" "}
+                {t("consoleShared.import.variantCount", {
+                  count: m.variantCount,
+                })}
+              </span>
             </button>
           )}
         />
@@ -248,9 +275,12 @@ const ImportBody: React.FC<ImportVehicleDialogProps> = ({
 
       {model && variants && !variant && (
         <PickList
-          label={`Variants of ${model.makeName} ${model.name}`}
+          label={t("consoleShared.import.variantsOf", {
+            make: model.makeName,
+            model: model.name,
+          })}
           page={variants}
-          empty="No variant."
+          empty={t("consoleShared.import.noVariant")}
           onPage={(p) => void openModel(model, p)}
           render={(v) => (
             <button
@@ -260,8 +290,17 @@ const ImportBody: React.FC<ImportVehicleDialogProps> = ({
             >
               {v.name}{" "}
               <span className="text-cx-muted">
-                · sources {v.sources.join(", ")} · {v.chargingCurveCount} curve
-                {v.chargingCurveCount === 1 ? "" : "s"}
+                ·{" "}
+                {t("consoleShared.import.sources", {
+                  sources: v.sources.join(", "),
+                })}{" "}
+                ·{" "}
+                {t(
+                  v.chargingCurveCount === 1
+                    ? "consoleShared.import.curveOne"
+                    : "consoleShared.import.curveMany",
+                  { count: v.chargingCurveCount },
+                )}
               </span>
             </button>
           )}
@@ -292,7 +331,11 @@ const ImportBody: React.FC<ImportVehicleDialogProps> = ({
               });
               onOpenChange(false);
             } catch (err) {
-              setError(`The profile was not saved: ${describeError(err)}`);
+              setError(
+                t("consoleShared.import.notSaved", {
+                  error: describeError(err),
+                }),
+              );
             } finally {
               setBusy(false);
             }
@@ -307,6 +350,7 @@ const ImportBody: React.FC<ImportVehicleDialogProps> = ({
 const CatalogAccessPanel: React.FC<{ access: CatalogAccess }> = ({
   access,
 }) => {
+  const t = useT();
   const [keyDraft, setKeyDraft] = useState("");
   if (access.mode === "remote") {
     if (access.configured === false) {
@@ -315,33 +359,32 @@ const CatalogAccessPanel: React.FC<{ access: CatalogAccess }> = ({
           role="status"
           className="rounded-md border border-cx-border bg-cx-sub px-3 py-2"
         >
-          Vehicle import is turned off on the daemon (it was started with{" "}
-          <code>--oed-base-url none</code> or <code>OED_BASE_URL=none</code>).
-          Start it without that setting to import from the public Open EV
-          Directory, or with <code>--oed-base-url</code> naming another
-          instance.
+          {fillSlots(t("consoleShared.import.remoteOff"), {
+            flag: <code>--oed-base-url none</code>,
+            env: <code>OED_BASE_URL=none</code>,
+            flag2: <code>--oed-base-url</code>,
+          })}
         </p>
       );
     }
     return (
       <p className="text-[12.5px] text-cx-muted">
-        Searched through the daemon
         {access.authenticated === false
-          ? ", anonymously (the catalog needs no key)."
-          : ", with its API key; the key never reaches this page."}
+          ? t("consoleShared.import.viaDaemonAnonymous")
+          : t("consoleShared.import.viaDaemonKey")}
       </p>
     );
   }
   return (
     <section
-      aria-label="Open EV Directory access"
+      aria-label={t("consoleShared.import.access")}
       className="flex flex-col gap-2"
     >
       <div className="grid gap-2 sm:grid-cols-2">
         <label className="flex flex-col gap-1 text-[11px] uppercase tracking-[0.06em] text-cx-faint">
-          API URL
+          {t("consoleShared.import.apiUrl")}
           <input
-            aria-label="Open EV Directory URL"
+            aria-label={t("consoleShared.import.urlLabel")}
             defaultValue={access.baseUrl}
             placeholder="https://…"
             onBlur={(e) => access.setBaseUrl(e.target.value)}
@@ -352,14 +395,16 @@ const CatalogAccessPanel: React.FC<{ access: CatalogAccess }> = ({
           />
         </label>
         <label className="flex flex-col gap-1 text-[11px] uppercase tracking-[0.06em] text-cx-faint">
-          Your API key
+          {t("consoleShared.import.yourKey")}
           <span className="flex gap-1.5 normal-case tracking-normal">
             <input
-              aria-label="Open EV Directory API key"
+              aria-label={t("consoleShared.import.keyLabel")}
               type="password"
               autoComplete="off"
               value={keyDraft}
-              placeholder={access.hasKey ? "Set for this tab" : "evd_live_…"}
+              placeholder={
+                access.hasKey ? t("consoleShared.import.keySet") : "evd_live_…"
+              }
               onChange={(e) => setKeyDraft(e.target.value)}
               className={cn(FILTER_INPUT_CLASS, "min-w-0 flex-1")}
             />
@@ -372,7 +417,7 @@ const CatalogAccessPanel: React.FC<{ access: CatalogAccess }> = ({
               }}
               disabled={!keyDraft.trim()}
             >
-              Use
+              {t("consoleShared.import.use")}
             </Button>
             {access.hasKey && (
               <Button
@@ -380,7 +425,7 @@ const CatalogAccessPanel: React.FC<{ access: CatalogAccess }> = ({
                 variant="ghost"
                 onClick={() => access.setApiKey(null)}
               >
-                Forget
+                {t("consoleShared.import.forget")}
               </Button>
             )}
           </span>
@@ -392,20 +437,18 @@ const CatalogAccessPanel: React.FC<{ access: CatalogAccess }> = ({
         </p>
       )}
       <p className="text-xs text-cx-muted">
-        The catalog needs no key. A personal key is optional and not
-        self-service yet: the Open EV Directory operator provisions it (see its{" "}
-        <a
-          href={OED_KEY_HELP_URL}
-          target="_blank"
-          rel="noreferrer"
-          className="text-cx-accent underline"
-        >
-          API keys
-        </a>
-        ). Browser-only mode calls the catalog from this page: a key is kept in
-        this tab's memory only — never stored or exported — and anyone using
-        this browser could read it. If the API does not accept calls from this
-        page, import through the daemon instead.
+        {fillSlots(t("consoleShared.import.keyNote"), {
+          link: (
+            <a
+              href={OED_KEY_HELP_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="text-cx-accent underline"
+            >
+              {t("consoleShared.import.apiKeysLink")}
+            </a>
+          ),
+        })}
       </p>
     </section>
   );
@@ -424,6 +467,7 @@ function PickList<T extends { id: string }>({
   onPage: (page: number) => void;
   render: (item: T) => React.ReactNode;
 }) {
+  const t = useT();
   return (
     <section aria-label={label} className="flex flex-col gap-1">
       <h3 className="text-[11px] uppercase tracking-[0.06em] text-cx-faint">
@@ -446,16 +490,19 @@ function PickList<T extends { id: string }>({
             disabled={page.page === 0}
             onClick={() => onPage(page.page - 1)}
           >
-            Previous
+            {t("consoleShared.import.previous")}
           </Button>
-          Page {page.page + 1} of {page.totalPages}
+          {t("consoleShared.import.pageOf", {
+            page: page.page + 1,
+            total: page.totalPages,
+          })}
           <Button
             size="sm"
             variant="ghost"
             disabled={page.page + 1 >= page.totalPages}
             onClick={() => onPage(page.page + 1)}
           >
-            Next
+            {t("consoleShared.import.next")}
           </Button>
         </div>
       )}
@@ -486,21 +533,22 @@ function filledOverrides(
 
 /** What still stops the import, or null when it can be saved. */
 function blockerOf(
+  t: TFunction,
   recordPicked: boolean,
   curvePicked: boolean,
   draft: VehicleProfile | null,
 ): string | null {
-  if (!recordPicked) return "Choose the source record whose specs to keep.";
-  if (!curvePicked) return "Choose a curve, or no curve.";
+  if (!recordPicked) return t("consoleShared.import.blockRecord");
+  if (!curvePicked) return t("consoleShared.import.blockCurve");
   if (!draft) return null;
-  if (!draft.name) return "Give the profile a name.";
+  if (!draft.name) return t("consoleShared.import.blockName");
   const capacity =
     draft.overrides.usableBatteryKwh ?? draft.specs.usableBatteryKwh;
   if (capacity == null) {
-    return "The source gives no usable battery capacity: fill it in.";
+    return t("consoleShared.import.blockCapacity");
   }
   if (availableCurrentTypes(draft).length === 0) {
-    return "Fill in an AC or a DC maximum power.";
+    return t("consoleShared.import.blockPower");
   }
   return null;
 }
@@ -541,6 +589,7 @@ const VariantForm: React.FC<{
   /** Receives the draft; the caller stamps its id and import time. */
   onSave: (draft: VehicleProfile) => Promise<void>;
 }> = ({ variant, busy, onBack, onCancel, onSave }) => {
+  const t = useT();
   const [recordKey, setRecordKey] = useState<string | null>(null);
   // No curve is preselected, "no curve" included: the user says which.
   const [curveChoice, setCurveChoice] = useState<string | null>(null);
@@ -569,13 +618,16 @@ const VariantForm: React.FC<{
     name: name.trim(),
     overrides: filledOverrides(picked, filled),
   };
-  const blocker = blockerOf(record !== null, curveChoice !== null, draft);
+  const blocker = blockerOf(t, record !== null, curveChoice !== null, draft);
 
   return (
-    <section aria-label="Variant" className="flex flex-col gap-4">
+    <section
+      aria-label={t("consoleShared.import.variant")}
+      className="flex flex-col gap-4"
+    >
       <div className="flex items-center gap-2">
         <Button size="sm" variant="ghost" onClick={onBack}>
-          ← Back
+          {t("consoleShared.import.back")}
         </Button>
         <h3 className="text-[15px] font-semibold">
           {variant.makeName} {variant.name}
@@ -589,11 +641,10 @@ const VariantForm: React.FC<{
 
       <fieldset className="flex flex-col gap-1.5">
         <legend className="mb-1 text-[11px] uppercase tracking-[0.06em] text-cx-faint">
-          Specs — from which source?
+          {t("consoleShared.import.specsSource")}
         </legend>
         <p className="text-xs text-cx-muted">
-          Sources are kept apart and may disagree; the catalog does not pick
-          one, and neither does the simulator.
+          {t("consoleShared.import.specsNote")}
         </p>
         {variant.sourceRecords.map((r) => (
           <label
@@ -603,7 +654,9 @@ const VariantForm: React.FC<{
             <input
               type="radio"
               name="source-record"
-              aria-label={`Specs from ${r.sourceId}`}
+              aria-label={t("consoleShared.import.specsFrom", {
+                source: r.sourceId,
+              })}
               checked={recordKey === r.key}
               onChange={() => setRecordKey(r.key)}
               className="mt-1"
@@ -617,14 +670,17 @@ const VariantForm: React.FC<{
                 </span>
               </span>
               <span className="font-mono text-xs text-cx-fg2">
-                battery {shown(r.specs.usableBatteryKwh)} kWh · AC{" "}
-                {shown(r.specs.acMaxKw)} kW, {shown(r.specs.acPhases)} ph · DC{" "}
-                {shown(r.specs.dcMaxKw)} kW
+                {t("consoleShared.import.recordSpecs", {
+                  battery: shown(r.specs.usableBatteryKwh),
+                  ac: shown(r.specs.acMaxKw),
+                  phases: shown(r.specs.acPhases),
+                  dc: shown(r.specs.dcMaxKw),
+                })}
               </span>
               <span className="text-xs text-cx-faint">
                 {[...r.specs.acConnectors, ...r.specs.dcConnectors].join(
                   ", ",
-                ) || "no connector type"}{" "}
+                ) || t("consoleShared.import.noConnector")}{" "}
                 · {r.license.name}
               </span>
             </span>
@@ -634,7 +690,7 @@ const VariantForm: React.FC<{
 
       <fieldset className="flex flex-col gap-1.5">
         <legend className="mb-1 text-[11px] uppercase tracking-[0.06em] text-cx-faint">
-          DC charging curve
+          {t("consoleShared.import.dcCurve")}
         </legend>
         {variant.curves.map((c) => (
           <CurveOption
@@ -648,13 +704,16 @@ const VariantForm: React.FC<{
           <input
             type="radio"
             name="curve"
-            aria-label="No curve"
+            aria-label={t("consoleShared.import.noCurveLabel")}
             checked={curveChoice === NO_CURVE}
             onChange={() => setCurveChoice(NO_CURVE)}
           />
-          No curve — charge flat at the maximum power
+          {t("consoleShared.import.noCurveOption")}
           {variant.curves.length === 0 && (
-            <span className="text-cx-muted"> (no source publishes one)</span>
+            <span className="text-cx-muted">
+              {" "}
+              {t("consoleShared.import.noSourceCurve")}
+            </span>
           )}
         </label>
       </fieldset>
@@ -662,12 +721,12 @@ const VariantForm: React.FC<{
       {record && (
         <fieldset className="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-x-3.5 gap-y-2.5">
           <legend className="mb-1 text-[11px] uppercase tracking-[0.06em] text-cx-faint">
-            Profile
+            {t("consoleShared.import.profile")}
           </legend>
           <label className="col-span-full flex flex-col gap-1 text-[11px] uppercase tracking-[0.06em] text-cx-faint">
-            Name
+            {t("consoleShared.vehicle.name")}
             <input
-              aria-label="Profile name"
+              aria-label={t("consoleShared.vehicle.profileName")}
               value={name}
               onChange={(e) => setName(e.target.value)}
               className={cn(FILTER_INPUT_CLASS, "normal-case tracking-normal")}
@@ -678,12 +737,16 @@ const VariantForm: React.FC<{
               key={field}
               className="flex flex-col gap-1 text-[11px] uppercase tracking-[0.06em] text-cx-amber"
             >
-              {FIELD_LABELS[field]} — missing
+              {t("consoleShared.import.missingSuffix", {
+                field: FIELD_LABELS[field],
+              })}
               <span className="flex items-center gap-1.5 normal-case tracking-normal">
                 <input
                   type="number"
                   min={0}
-                  aria-label={`Missing ${FIELD_LABELS[field]}`}
+                  aria-label={t("consoleShared.import.missingField", {
+                    field: FIELD_LABELS[field],
+                  })}
                   value={filled[field] ?? ""}
                   onChange={(e) =>
                     setFilled((prev) => ({ ...prev, [field]: e.target.value }))
@@ -704,7 +767,7 @@ const VariantForm: React.FC<{
       {draft?.origin && (
         <div className="rounded-md border border-cx-border bg-cx-sub px-3 py-2 text-xs text-cx-fg2">
           <p className="mb-1 font-medium text-cx-fg">
-            Attribution kept with the profile
+            {t("consoleShared.import.attributionKept")}
           </p>
           {draft.origin.licenses.map((l) => (
             <p key={`${l.sourceId}:${l.id}`}>{l.attribution}</p>
@@ -717,7 +780,7 @@ const VariantForm: React.FC<{
           <span className="mr-auto text-xs text-cx-muted">{blocker}</span>
         )}
         <Button variant="outline" onClick={onCancel}>
-          Cancel
+          {t("consoleShared.import.cancel")}
         </Button>
         <Button
           disabled={busy || blocker !== null || !draft}
@@ -725,18 +788,18 @@ const VariantForm: React.FC<{
             if (draft) void onSave(draft);
           }}
         >
-          Save profile
+          {t("consoleShared.import.saveProfile")}
         </Button>
       </div>
     </section>
   );
 };
 
-const QUALITY_TEXT: Record<CatalogCurve["quality"], string> = {
-  MEASURED: "measured",
-  DERIVED: "derived from measurements",
-  ESTIMATED: "estimated",
-  UNKNOWN: "origin unknown",
+const QUALITY_KEYS: Record<CatalogCurve["quality"], MessageKey> = {
+  MEASURED: "consoleShared.import.quality.MEASURED",
+  DERIVED: "consoleShared.import.quality.DERIVED",
+  ESTIMATED: "consoleShared.import.quality.ESTIMATED",
+  UNKNOWN: "consoleShared.import.quality.UNKNOWN",
 };
 
 const CurveOption: React.FC<{
@@ -744,6 +807,7 @@ const CurveOption: React.FC<{
   checked: boolean;
   onChange: () => void;
 }> = ({ curve, checked, onChange }) => {
+  const t = useT();
   const socs = curve.points.map((p) => p.socPercent);
   const peak = Math.max(0, ...curve.points.map((p) => p.powerKw));
   return (
@@ -751,7 +815,9 @@ const CurveOption: React.FC<{
       <input
         type="radio"
         name="curve"
-        aria-label={`Curve from ${curve.sourceId}`}
+        aria-label={t("consoleShared.import.curveFrom", {
+          source: curve.sourceId,
+        })}
         checked={checked}
         onChange={onChange}
         className="mt-1"
@@ -760,9 +826,17 @@ const CurveOption: React.FC<{
         <span className="font-medium">
           {curve.sourceId}{" "}
           <span className="font-normal text-cx-muted">
-            · {QUALITY_TEXT[curve.quality]} · {curve.points.length} points
+            ·{" "}
+            {t("consoleShared.import.curveSummary", {
+              quality: t(QUALITY_KEYS[curve.quality]),
+              count: curve.points.length,
+            })}
             {socs.length > 0 &&
-              ` · ${Math.min(...socs)}–${Math.max(...socs)} % · peak ${peak} kW`}
+              ` · ${t("consoleShared.import.curveRange", {
+                min: Math.min(...socs),
+                max: Math.max(...socs),
+                peak,
+              })}`}
           </span>
         </span>
         <span className="text-xs text-cx-faint">{curve.qualityBasis}</span>

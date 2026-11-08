@@ -5,6 +5,7 @@ import {
   TextField,
 } from "./FormFields";
 import type { NodeFormComponentProps, NodeFormData } from "./types";
+import { useT } from "../../../i18n";
 
 function toInputNumber(value: unknown): number | "" {
   return typeof value === "number" ? value : "";
@@ -15,6 +16,7 @@ export default function MeterValueForm({
   onChange,
   onOpenMeterCurve,
 }: NodeFormComponentProps<NodeFormData>) {
+  const t = useT();
   const autoIncrement = Boolean(value.autoIncrement);
   const stopMode = (value.stopMode as string | undefined) ?? "manual";
   const curvePointCount = Array.isArray(value.curvePoints)
@@ -24,18 +26,18 @@ export default function MeterValueForm({
   return (
     <div className="space-y-3">
       <TextField
-        label="Label"
+        label={t("scenarioEditor.form.label")}
         value={(value.label as string | undefined) ?? ""}
         onChange={(label) => onChange({ ...value, label })}
       />
       <NumberField
-        label="Initial Value (Wh)"
+        label={t("scenarioEditor.meterValue.initialValue")}
         value={typeof value.value === "number" ? value.value : 0}
         onChange={(nextValue) => onChange({ ...value, value: nextValue ?? 0 })}
       />
       <CheckboxField
         id="sendMessage"
-        label="Send MeterValue Message"
+        label={t("scenarioEditor.meterValue.sendMessage")}
         checked={Boolean(value.sendMessage)}
         onChange={(sendMessage) => onChange({ ...value, sendMessage })}
       />
@@ -43,7 +45,7 @@ export default function MeterValueForm({
         <div className="mb-2">
           <CheckboxField
             id="autoIncrement"
-            label="Auto Increment"
+            label={t("scenarioEditor.meterValue.autoIncrement")}
             checked={autoIncrement}
             onChange={(nextAutoIncrement) =>
               onChange({ ...value, autoIncrement: nextAutoIncrement })
@@ -54,7 +56,7 @@ export default function MeterValueForm({
           <div className="ml-6 space-y-3">
             <div>
               <SelectField
-                label="Stop Mode"
+                label={t("scenarioEditor.meterValue.stopMode")}
                 value={stopMode}
                 onChange={(nextStopMode) =>
                   onChange({ ...value, stopMode: nextStopMode })
@@ -62,20 +64,17 @@ export default function MeterValueForm({
                 options={[
                   {
                     value: "manual",
-                    label: "Manual (use maxTime / maxValue below)",
+                    label: t("scenarioEditor.meterValue.stopModeManual"),
                   },
                   {
                     value: "evSettings",
-                    label: "EV Settings (delivered kWh from EV)",
+                    label: t("scenarioEditor.meterValue.stopModeEv"),
                   },
                 ]}
               />
               {stopMode === "evSettings" ? (
                 <p className="mt-1 text-xs text-gray-700 dark:text-gray-300 leading-snug">
-                  Stops when delivered kWh &gt;= capacity x (target - initial) /
-                  100. Uses the scenario&apos;s EV settings (above) or the
-                  connector&apos;s current EV state if the scenario doesn&apos;t
-                  override.
+                  {t("scenarioEditor.meterValue.evHelp")}
                 </p>
               ) : null}
             </div>
@@ -83,7 +82,7 @@ export default function MeterValueForm({
             {stopMode !== "evSettings" ? (
               <div className="grid grid-cols-2 gap-2">
                 <NumberField
-                  label="Increment Interval (s)"
+                  label={t("scenarioEditor.meterValue.incrementInterval")}
                   value={toInputNumber(value.incrementInterval)}
                   onChange={(incrementInterval) =>
                     onChange({ ...value, incrementInterval })
@@ -92,7 +91,7 @@ export default function MeterValueForm({
                   min={1}
                 />
                 <NumberField
-                  label="Increment Amount (Wh)"
+                  label={t("scenarioEditor.meterValue.incrementAmount")}
                   value={toInputNumber(value.incrementAmount)}
                   onChange={(incrementAmount) =>
                     onChange({ ...value, incrementAmount })
@@ -101,14 +100,14 @@ export default function MeterValueForm({
                   min={1}
                 />
                 <NumberField
-                  label="Max Time (s, 0=inf)"
+                  label={t("scenarioEditor.meterValue.maxTime")}
                   value={toInputNumber(value.maxTime)}
                   onChange={(maxTime) => onChange({ ...value, maxTime })}
                   placeholder="0"
                   min={0}
                 />
                 <NumberField
-                  label="Max Value (Wh, 0=inf)"
+                  label={t("scenarioEditor.meterValue.maxValue")}
                   value={toInputNumber(value.maxValue)}
                   onChange={(maxValue) => onChange({ ...value, maxValue })}
                   placeholder="0"
@@ -122,12 +121,14 @@ export default function MeterValueForm({
                 onClick={onOpenMeterCurve}
                 className="btn-primary text-sm w-full"
               >
-                Configure Auto Increment Curve
+                {t("scenarioEditor.meterValue.configureCurve")}
               </button>
               <p className="text-xs text-muted mt-1">
                 {curvePointCount > 0
-                  ? `Configured with ${curvePointCount} curve points`
-                  : "Optional: configure meter value auto-increment curve"}
+                  ? t("scenarioEditor.meterValue.curveConfigured", {
+                      count: curvePointCount,
+                    })
+                  : t("scenarioEditor.meterValue.curveOptional")}
               </p>
             </div>
           </div>

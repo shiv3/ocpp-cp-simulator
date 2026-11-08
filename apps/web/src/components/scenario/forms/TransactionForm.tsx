@@ -1,31 +1,33 @@
 import { SelectField, TextField } from "./FormFields";
 import type { NodeFormComponentProps, NodeFormData } from "./types";
+import { useT } from "../../../i18n";
 
 export default function TransactionForm({
   value,
   onChange,
 }: NodeFormComponentProps<NodeFormData>) {
+  const t = useT();
   const action = (value.action as string | undefined) ?? "start";
 
   return (
     <div className="space-y-3">
       <TextField
-        label="Label"
+        label={t("scenarioEditor.form.label")}
         value={(value.label as string | undefined) ?? ""}
         onChange={(label) => onChange({ ...value, label })}
       />
       <SelectField
-        label="Action"
+        label={t("scenarioEditor.form.action")}
         value={action}
         onChange={(nextAction) => onChange({ ...value, action: nextAction })}
         options={[
-          { value: "start", label: "Start Transaction" },
-          { value: "stop", label: "Stop Transaction" },
+          { value: "start", label: t("scenarioEditor.transaction.start") },
+          { value: "stop", label: t("scenarioEditor.transaction.stop") },
         ]}
       />
       {action === "start" ? (
         <TextField
-          label="Tag ID"
+          label={t("scenarioEditor.transaction.tagId")}
           value={(value.tagId as string | undefined) ?? ""}
           onChange={(tagId) => onChange({ ...value, tagId })}
           placeholder="RFID123456"

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import type { StateHistoryEntry } from "@ocpp-cp-sim/core/cp/application/services/types/StateSnapshot";
+import { useT } from "../../i18n";
 import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
 
 interface StateTransitionTimelineProps {
@@ -13,6 +14,7 @@ const StateTransitionTimeline: React.FC<StateTransitionTimelineProps> = ({
   onSelectTransition,
   currentIndex,
 }) => {
+  const t = useT();
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [isLooping, setIsLooping] = useState(false);
@@ -104,7 +106,7 @@ const StateTransitionTimeline: React.FC<StateTransitionTimelineProps> = ({
   if (history.length === 0) {
     return (
       <div className="p-4 text-center text-muted">
-        No state transition history yet
+        {t("stateTransition.timeline.empty")}
       </div>
     );
   }
@@ -119,7 +121,7 @@ const StateTransitionTimeline: React.FC<StateTransitionTimelineProps> = ({
             onClick={handlePrevious}
             disabled={currentIndex === 0}
             className="btn-secondary text-xs px-2 py-1 disabled:opacity-30"
-            title="Previous"
+            title={t("stateTransition.timeline.previous")}
           >
             ⏮️
           </button>
@@ -128,7 +130,11 @@ const StateTransitionTimeline: React.FC<StateTransitionTimelineProps> = ({
           <button
             onClick={handlePlayPause}
             className="btn-primary text-xs px-3 py-1"
-            title={isPlaying ? "Pause" : "Play"}
+            title={
+              isPlaying
+                ? t("stateTransition.timeline.pause")
+                : t("stateTransition.timeline.play")
+            }
           >
             {isPlaying ? "⏸️" : "⏯️"}
           </button>
@@ -138,7 +144,7 @@ const StateTransitionTimeline: React.FC<StateTransitionTimelineProps> = ({
             onClick={handleNext}
             disabled={currentIndex === history.length - 1}
             className="btn-secondary text-xs px-2 py-1 disabled:opacity-30"
-            title="Next"
+            title={t("stateTransition.timeline.next")}
           >
             ⏭️
           </button>
@@ -151,7 +157,7 @@ const StateTransitionTimeline: React.FC<StateTransitionTimelineProps> = ({
                 ? "bg-blue-500 text-white"
                 : "bg-gray-200 dark:bg-gray-700 text-primary"
             }`}
-            title="Loop playback"
+            title={t("stateTransition.timeline.loop")}
           >
             🔄
           </button>
@@ -191,7 +197,7 @@ const StateTransitionTimeline: React.FC<StateTransitionTimelineProps> = ({
       {/* History List */}
       <div className="flex-1 overflow-y-auto p-3">
         <h3 className="text-xs font-semibold text-primary mb-2">
-          📋 Transition History
+          {t("stateTransition.timeline.history")}
         </h3>
         <div className="space-y-2">
           {history.map((entry, index) => (

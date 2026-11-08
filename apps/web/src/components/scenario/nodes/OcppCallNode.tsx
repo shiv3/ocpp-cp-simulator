@@ -1,5 +1,6 @@
 import React, { memo } from "react";
 import type { NodeProps } from "@xyflow/react";
+import { useT } from "../../../i18n";
 import { Handle, Position, type Node } from "@xyflow/react";
 import type { OcppCallNodeData } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
 
@@ -10,6 +11,7 @@ const OcppCallNode: React.FC<NodeProps<Node<OcppCallNodeData>>> = ({
   data,
   selected,
 }) => {
+  const t = useT();
   return (
     <div
       className={`px-4 py-3 rounded-lg border-2 bg-white dark:bg-gray-800 min-w-[220px] ${
@@ -18,7 +20,7 @@ const OcppCallNode: React.FC<NodeProps<Node<OcppCallNodeData>>> = ({
     >
       <Handle type="target" position={Position.Top} className="w-3 h-3" />
       <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-        OCPP Call (expert)
+        {t("scenarioNodes.title.ocppCall")}
       </div>
       <div
         className="text-sm font-mono text-primary truncate"
@@ -29,8 +31,8 @@ const OcppCallNode: React.FC<NodeProps<Node<OcppCallNodeData>>> = ({
       {(data.skipValidation || data.applyResponse) && (
         <div className="text-xs text-muted">
           {[
-            data.skipValidation && "unvalidated",
-            data.applyResponse && "applies answer",
+            data.skipValidation && t("scenarioNodes.ocppCall.unvalidated"),
+            data.applyResponse && t("scenarioNodes.ocppCall.appliesAnswer"),
           ]
             .filter(Boolean)
             .join(" · ")}

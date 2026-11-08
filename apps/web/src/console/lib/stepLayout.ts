@@ -9,6 +9,7 @@ import {
   type ScenarioNode,
   ScenarioNodeType,
 } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import { translate } from "../../i18n";
 import { isLiveRunState } from "./scenarioRunState";
 import { createDefaultNode, deriveLinearSteps } from "./scenarioSteps";
 
@@ -44,7 +45,7 @@ function isDefaultLabel(type: string | undefined, label: string): boolean {
   let labels = defaultLabels.get(type);
   if (!labels) {
     labels = new Set([
-      NODE_FORM_REGISTRY[type].title,
+      translate("en", NODE_FORM_REGISTRY[type].title),
       String(createDefaultNode(type).data.label ?? ""),
     ]);
     defaultLabels.set(type, labels);

@@ -1,5 +1,6 @@
 import React, { memo } from "react";
 import type { NodeProps } from "@xyflow/react";
+import { useT } from "../../../i18n";
 import { Handle, Position, type Node } from "@xyflow/react";
 import type { CsmsCallTriggerNodeData } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
 
@@ -16,6 +17,7 @@ const CsmsCallTriggerNode: React.FC<NodeProps<CsmsCallTriggerFlowNode>> = ({
   data,
   selected,
 }) => {
+  const t = useT();
   const progress = data.progress;
   const progressPercent = progress
     ? ((progress.total - progress.remaining) / progress.total) * 100
@@ -32,22 +34,26 @@ const CsmsCallTriggerNode: React.FC<NodeProps<CsmsCallTriggerFlowNode>> = ({
       <Handle type="target" position={Position.Top} className="w-3 h-3" />
 
       <div className="text-xs font-semibold text-purple-700 dark:text-purple-300 mb-1">
-        CSMS Call Trigger
+        {t("scenarioNodes.title.csmsCallTrigger")}
       </div>
       <div className="font-bold text-sm text-primary mb-1">{data.label}</div>
-      <div className="text-xs text-muted mb-1">Waits for: {data.action}</div>
+      <div className="text-xs text-muted mb-1">
+        {t("scenarioNodes.waitsFor", { value: data.action })}
+      </div>
       {data.timeout !== undefined && data.timeout > 0 && (
         <div className="text-xs text-muted">
-          Timeout: {data.timeout}s
+          {t("scenarioNodes.timeout", { seconds: data.timeout })}
           {progress && progress.remaining > 0 && (
             <span className="ml-1 text-purple-700 dark:text-purple-300 font-semibold">
-              ({progress.remaining.toFixed(1)}s left)
+              {t("scenarioNodes.secondsLeft", {
+                seconds: progress.remaining.toFixed(1),
+              })}
             </span>
           )}
         </div>
       )}
       {(!data.timeout || data.timeout === 0) && (
-        <div className="text-xs text-muted">No timeout</div>
+        <div className="text-xs text-muted">{t("scenarioNodes.noTimeout")}</div>
       )}
 
       {progress && progress.remaining > 0 && (

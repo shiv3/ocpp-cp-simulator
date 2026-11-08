@@ -150,4 +150,4 @@ Rules the check enforces:
 | Writing a scenario                   | [Scenario format](concepts/scenario-format.md), [Scenario templates](entities/scenario-templates.md)           |
 | Deploying                            | [Docker image](entities/docker-image.md), [Access control](concepts/access-control.md)                         |
 | Debugging a session                  | [analyze](entities/analyze.md), [Log format](concepts/log-format.md), [Trace format](concepts/trace-format.md) |
-| Maintaining this wiki (human or LLM) | [Conventions](conventions.md), [`CLAUDE.md`](../CLAUDE.md), [Index](index.md), [Log](log.md)                   |
+| Maintaining this wiki (human or LLM) | [Conventions](conventions.md), [`CLAUDE.md`](../CLAUDE.md), [Index](index.md), [Log archive](log.md)           |

@@ -76,6 +76,36 @@ export function startStubCsms(subprotocol = "ocpp1.6"): StubCsms {
   };
 }
 
+/** A CALL payload; tests read nested members of it by path. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type Payload = Record<string, any>;
+
+/** The payloads of every CALL the charge point sent for `action`, in order. */
+export function sentPayloads(csms: StubCsms, action: string): Payload[] {
+  return csms.frames.flatMap((raw) => {
+    const frame = JSON.parse(raw) as unknown[];
+    return frame[0] === 2 && frame[2] === action ? [frame[3] as Payload] : [];
+  });
+}
+
+/** Resolves with the payloads once `n` CALLs of `action` have arrived: a
+ *  response can overtake the frame it caused on its way to the CSMS. */
+export async function waitForPayloads(
+  csms: StubCsms,
+  action: string,
+  n: number,
+  ms = 10_000,
+): Promise<Payload[]> {
+  for (let waited = 0; waited < ms; waited += 25) {
+    const hit = sentPayloads(csms, action);
+    if (hit.length >= n) return hit;
+    await Bun.sleep(25);
+  }
+  throw new Error(
+    `timed out waiting for ${n} ${action} CALL(s); got ${sentPayloads(csms, action).length}`,
+  );
+}
+
 export interface JsonModeSession {
   /** Sends one command and resolves with the response carrying its id. */
   request(

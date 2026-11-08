@@ -4,6 +4,7 @@ import {
   startJsonMode,
   startStubCsms,
   type StubCsms,
+  waitForPayloads,
 } from "./tckHarness";
 
 // GOLDEN TEST FOR AN EXTERNAL CONSUMER (#346 item 1).
@@ -54,7 +55,10 @@ describe("TCK contract: JSON Lines transcript (#346)", () => {
     expect(status.connectors.map((c) => c.id)).toEqual([1, 2]);
     expect(typeof status.status).toBe("string");
 
-    // Commands with only optional extras on top of the TCK's parameters.
+    // Commands with only optional extras on top of the TCK's parameters. The
+    // optional ones are sent with values that are NOT the defaults and read
+    // back off the wire: JSON mode ignores keys it does not know, so a
+    // renamed parameter would otherwise still answer ok (#346).
     expect(await cp.request("authorize", { tagId: "TAG1" })).toEqual({
       id: "t3",
       ok: true,
@@ -63,25 +67,50 @@ describe("TCK contract: JSON Lines transcript (#346)", () => {
     expect(
       await cp.request("start_transaction", { connector: 1, tagId: "TAG1" }),
     ).toEqual({ id: "t5", ok: true });
+    // The TCK's J_xx readings name Sample.Clock (core-201.ts); the default is
+    // Sample.Periodic.
     expect(
       await cp.request("send_meter_value", {
         connector: 1,
-        context: "Sample.Periodic",
+        context: "Sample.Clock",
       }),
     ).toEqual({ id: "t6", ok: true });
+    const meter = await waitForPayloads(csms, "MeterValues", 1);
+    expect(meter[0].connectorId).toBe(1);
     expect(
-      await cp.request("stop_transaction", { connector: 1, reason: "Local" }),
+      meter[0].meterValue[0].sampledValue.map(
+        (v: { context?: string }) => v.context,
+      ),
+    ).toContain("Sample.Clock");
+    // `Local` is the default (and may be omitted on the wire in 1.6).
+    expect(
+      await cp.request("stop_transaction", {
+        connector: 1,
+        reason: "EVDisconnected",
+      }),
     ).toEqual({ id: "t7", ok: true });
+    const stop = await waitForPayloads(csms, "StopTransaction", 1);
+    expect(stop[0].reason).toBe("EVDisconnected");
 
-    // Scenario commands: ids come back as `{scenarioId}`, removal as
-    // `{removed}`, and get_scenario returns the stored definition.
+    // EOF on stdin => exit 0.
+    expect(await cp.end()).toBe(0);
+  }, 60_000);
+
+  it("follows the TCK's template-once flow: disabled copy, same id, run by that id", async () => {
+    // template-once.ts: BEFORE `connect` (a loaded template starts at once on
+    // a station that is already Available), on one connector, with the id the
+    // template minted: load the template, read the instance back, remove it,
+    // load the same definition again with enabled:false so the auto-start
+    // skips it, connect, then run_scenario on the ORIGINAL id.
+    // `<templateId>-c<connector>` (#338) is what it passes around.
+    csms = startStubCsms();
+    cp = startJsonMode(csms.url);
     const loaded = ok(
       await cp.request("load_scenario_template", {
         connector: 1,
         templateId: "cert16-tc001-cold-boot",
       }),
     ).data as { scenarioId: string };
-    // `<templateId>-c<connector>` (#338): the TCK passes it back verbatim.
     expect(loaded.scenarioId).toBe("cert16-tc001-cold-boot-c1");
 
     const scenario = ok(
@@ -103,41 +132,61 @@ describe("TCK contract: JSON Lines transcript (#346)", () => {
       ).data,
     ).toEqual({ removed: true });
 
-    // The TCK's patch flow: take the template's definition, switch it off
-    // with enabled:false (so it does not start by itself) and load it back
-    // as an inline `scenario`; then run_scenario on it.
-    const inlineLoaded = ok(
+    const reloaded = ok(
       await cp.request("load_scenario", {
-        connector: 2,
+        connector: 1,
         scenario: { ...scenario, enabled: false },
       }),
     ).data as { scenarioId: string };
-    expect(typeof inlineLoaded.scenarioId).toBe("string");
+    // The id is kept: the TCK runs the scenario by the id it got from the
+    // template, not by the one load_scenario answers.
+    expect(reloaded.scenarioId).toBe(loaded.scenarioId);
+
+    const boots = () =>
+      cp!.stdout.filter((l) => l.includes('"event":"boot_notification"'))
+        .length;
+    const startedEvents = () =>
+      cp!.stdout.filter((l) => l.includes('"event":"scenario_started"')).length;
+
+    // enabled:false stops the auto-start: the station boots and reaches
+    // Available, and the scenario stays parked until run_scenario.
+    ok(await cp.request("connect"));
+    await cp.waitForLine(() => boots() >= 1);
+    await Bun.sleep(1000);
+    expect(startedEvents()).toBe(0);
+
     expect(
       await cp.request("run_scenario", {
-        connector: 2,
-        scenarioId: inlineLoaded.scenarioId,
+        connector: 1,
+        scenarioId: loaded.scenarioId,
       }),
     ).toMatchObject({ ok: true });
-
-    // run_scenario_template with `once` (#352) returns `{scenarioId}`.
-    const ran = ok(
-      await cp.request("run_scenario_template", {
-        connector: 1,
-        templateId: "cert16-tc001-cold-boot",
-        once: true,
-      }),
-    ).data as { scenarioId: string };
-    expect(typeof ran.scenarioId).toBe("string");
-
-    // Events share the stdout stream: {event, data, timestamp}.
     const started = JSON.parse(
       await cp.waitForLine((l) => l.includes('"event":"scenario_started"')),
     ) as Record<string, unknown>;
     expect(Object.keys(started).sort()).toEqual(["data", "event", "timestamp"]);
     expect(Number.isNaN(Date.parse(String(started.timestamp)))).toBe(false);
 
-    // EOF on stdin => exit 0.
+    // run_scenario_template with `once` (#352) returns `{scenarioId}`, runs
+    // the scenario now and does not re-arm it on the next connect.
+    const before = startedEvents();
+    const ran = ok(
+      await cp.request("run_scenario_template", {
+        connector: 2,
+        templateId: "cert16-tc001-cold-boot",
+        once: true,
+      }),
+    ).data as { scenarioId: string };
+    expect(typeof ran.scenarioId).toBe("string");
+    await cp.waitForLine(() => startedEvents() > before);
+    const afterOnce = startedEvents();
+    const bootsBefore = boots();
+    ok(await cp.request("disconnect"));
+    ok(await cp.request("connect"));
+    await cp.waitForLine(() => boots() > bootsBefore);
+    await Bun.sleep(1000);
+    expect(startedEvents()).toBe(afterOnce);
+
     expect(await cp.end()).toBe(0);
   }, 60_000);
 
@@ -146,37 +195,48 @@ describe("TCK contract: JSON Lines transcript (#346)", () => {
     cp = startJsonMode(csms.url, "OCPP-2.0.1");
     expect(await cp.request("connect")).toEqual({ id: "t1", ok: true });
     await cp.waitForLine((l) => l.includes('"event":"boot_notification"'));
+    // Non-default values, read back off the wire (defaults: Authorized,
+    // Charging, Sample.Periodic, Local, StopAuthorized).
     expect(
       await cp.request("start_transaction", {
         connector: 1,
         tagId: "TAG1",
-        triggerReason: "Authorized",
-        chargingState: "Charging",
+        triggerReason: "CablePluggedIn",
+        chargingState: "EVConnected",
       }),
     ).toEqual({ id: "t2", ok: true });
     expect(
       await cp.request("transaction_event", {
         connector: 1,
-        triggerReason: "MeterValuePeriodic",
+        triggerReason: "MeterValueClock",
         meterValues: true,
-        context: "Sample.Periodic",
+        context: "Sample.Clock",
       }),
     ).toEqual({ id: "t3", ok: true });
     expect(
       await cp.request("stop_transaction", {
         connector: 1,
-        reason: "Local",
-        triggerReason: "StopAuthorized",
+        reason: "EVDisconnected",
+        triggerReason: "EVDeparted",
       }),
     ).toEqual({ id: "t4", ok: true });
-    // The response can overtake the frame on its way to the CSMS: wait for
-    // the third TransactionEvent (start, update, end) instead of counting once.
-    const count = () =>
-      csms!.frames.filter(
-        (f) => (JSON.parse(f) as unknown[])[2] === "TransactionEvent",
-      ).length;
-    for (let i = 0; i < 100 && count() < 3; i++) await Bun.sleep(50);
-    expect(count()).toBe(3);
+    // Start, update, end.
+    const events = await waitForPayloads(csms, "TransactionEvent", 3);
+    expect(events.map((e) => e.eventType)).toEqual([
+      "Started",
+      "Updated",
+      "Ended",
+    ]);
+    expect(events[0].triggerReason).toBe("CablePluggedIn");
+    expect(events[0].transactionInfo.chargingState).toBe("EVConnected");
+    expect(events[1].triggerReason).toBe("MeterValueClock");
+    expect(
+      events[1].meterValue[0].sampledValue.map(
+        (v: { context?: string }) => v.context,
+      ),
+    ).toContain("Sample.Clock");
+    expect(events[2].triggerReason).toBe("EVDeparted");
+    expect(events[2].transactionInfo.stoppedReason).toBe("EVDisconnected");
     expect(await cp.end()).toBe(0);
   }, 30_000);
 

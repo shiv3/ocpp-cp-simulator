@@ -2384,3 +2384,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-08] ingest | Charger engine web strings under the console i18n (#634)
 
 - The `callResponse` and `useBehavior` nodes (node, form, palette item, registry title) and the `csmsCallTrigger` behavior controls (`observe` / `replace`, the `onBusy` group) use `scenarioEditor.*` / `scenarioNodes.*` keys in `en`, `ja` and `zh-CN`; `i18n.test.ts` stays green. Left in English on purpose, as on main: `stepSummary` text, default node labels saved into scenarios, and the protocol terms `CALLRESULT` / `CALLERROR`. See [Web console internationalization](concepts/web-console-i18n.md).
+
+## [2026-11-08] ingest | Redaction values are cut in code, linear under Bun (#567)
+
+- `redactSensitiveText` finds the opener of a quoted or escaped-quote secret assignment with a bounded regex and cuts the value in code (`packages/contracts/src/redaction.ts`), with the same rules as before; the #547 fallback pass is gone because nothing is left to miss. `password="` + 200k `_` went from seconds to milliseconds under Bun; the two Bun-only timing budgets (15 s, 60 s) are back to 2 s, and a timing row for long quoted values was added. Page touched: [Log format](concepts/log-format.md). Wire behavior is unchanged (golden fixtures untouched).

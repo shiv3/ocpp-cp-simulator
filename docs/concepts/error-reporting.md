@@ -182,8 +182,11 @@ imported only when the adapter is selected and has a DSN.
   a `react` context.
 - **Data collection:** the SDK's `dataCollection` option (v11's replacement
   for `sendDefaultPii`) has every optional category off
-  (`restrictedDataCollection`): no user fields, cookies, HTTP headers or
-  bodies, query strings or local variables.
+  (`restrictedDataCollection`), so the SDK does not collect user fields,
+  cookies, HTTP headers or bodies, query strings or local variables on its
+  own. The option governs only that automatic collection: a header or a
+  query string the simulator itself puts in an error message, a log line or
+  a breadcrumb's data is sent unless the scrubbing below recognises it.
 
 ## What is scrubbed
 

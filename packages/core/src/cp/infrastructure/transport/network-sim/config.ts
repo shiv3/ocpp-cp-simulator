@@ -1,7 +1,21 @@
 import { deriveSeed32 } from "../../../shared/SeededRng";
 import { MAX_TIMER_MS } from "../../../shared/timers";
+import type {
+  LatencyRule,
+  ManualDisconnectRule,
+  NetworkSimRule,
+  PeriodicDisconnectRule,
+  ResolvedNetworkSimConfig,
+} from "../../../domain/transport/networkSim";
 
 export { MAX_TIMER_MS };
+export type {
+  LatencyRule,
+  ManualDisconnectRule,
+  NetworkSimRule,
+  PeriodicDisconnectRule,
+  ResolvedNetworkSimConfig,
+};
 
 export const NETWORK_SIM_LIMITS = {
   maxRulesPerLayer: 32,
@@ -19,35 +33,6 @@ export interface NetworkSimLayerConfig {
   enabled?: boolean;
   seed?: number;
   rules: Record<string, NetworkSimRule | null>;
-}
-
-export interface LatencyRule {
-  type: "latency";
-  direction?: "upstream" | "downstream" | "both";
-  match?: { actions: string[] };
-  delayMs: number;
-  jitterMs?: number;
-}
-
-export interface ManualDisconnectRule {
-  type: "manual-disconnect";
-  reconnectDelayMs: number;
-}
-
-export interface PeriodicDisconnectRule {
-  type: "periodic-disconnect";
-  intervalMs: number;
-  intervalJitterMs?: number;
-  reconnectDelayMs: number;
-}
-
-export type NetworkSimRule =
-  LatencyRule | ManualDisconnectRule | PeriodicDisconnectRule;
-
-export interface ResolvedNetworkSimConfig {
-  enabled: boolean;
-  seed: number;
-  rules: Record<string, NetworkSimRule>;
 }
 
 export type ValidationResult =

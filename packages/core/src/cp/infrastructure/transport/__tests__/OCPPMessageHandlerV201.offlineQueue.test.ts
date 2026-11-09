@@ -171,6 +171,9 @@ function setup(ocppVersion: string) {
       offlineQueueMaxEvents: vi.fn(() => 1000),
       stopTransactionOnInvalidId: vi.fn(() => true),
       meterValuesSampledData: vi.fn(() => []),
+      stopTxnSampledData: vi.fn(() => []),
+      stopTxnAlignedData: vi.fn(() => []),
+      txStartedMeasurands: vi.fn(() => []),
     },
   };
   const handler = new OCPPMessageHandlerV201(

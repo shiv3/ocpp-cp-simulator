@@ -1,6 +1,6 @@
 // Runs under `bun test` (bun:sqlite), not vitest.
 import { describe, expect, it } from "bun:test";
-import { BunSqliteDatabase } from "../../persistence/BunSqliteDatabase";
+import { BunSqliteDatabase } from "../../../infrastructure/persistence/BunSqliteDatabase";
 import { AuthorizationCache } from "../AuthorizationCache";
 import { ChargePoint } from "../../charge-point/ChargePoint";
 import { DefaultBootNotification } from "../../types/OcppTypes";

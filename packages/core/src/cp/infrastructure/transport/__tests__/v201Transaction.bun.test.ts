@@ -15,8 +15,8 @@ import {
   OCPPStatus,
 } from "../../../domain/types/OcppTypes";
 import type { Transaction } from "../../../domain/connector/Transaction";
-import { BunSqliteDatabase } from "../../../domain/persistence/BunSqliteDatabase";
-import { SqliteConnectorRuntimeRepository } from "../../../domain/persistence/SqliteConnectorRuntimeRepository";
+import { BunSqliteDatabase } from "../../persistence/BunSqliteDatabase";
+import { SqliteConnectorRuntimeRepository } from "../../persistence/SqliteConnectorRuntimeRepository";
 
 function transactionEventFrame(
   eventType: TransactionEventRequestV201["eventType"],

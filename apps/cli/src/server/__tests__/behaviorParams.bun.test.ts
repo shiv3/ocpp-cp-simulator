@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import type { Socket } from "socket.io-client";
 
 import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
-import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/domain/persistence/BunSqliteDatabase";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/BunSqliteDatabase";
 import { BehaviorLibrary } from "../../behavior/BehaviorLibrary";
 import {
   connectTestClient,
@@ -81,6 +81,11 @@ describe("cp.create / cp.update", () => {
       stepMs: 250,
       failAt: "DownloadFailed",
       startAt: "retrieveDate",
+      train: false,
+      waitForTransactions: false,
+      connectorsUnavailable: false,
+      reboot: "none",
+      jitterMs: 0,
     });
     const list = (await rpc(socket, "cp.list", {})).result as any[];
     expect(list.find((cp) => cp.cpId === "A")).toBeDefined();
@@ -93,6 +98,11 @@ describe("cp.create / cp.update", () => {
       stepMs: 2000,
       failAt: "none",
       startAt: "retrieveDate",
+      train: false,
+      waitForTransactions: false,
+      connectorsUnavailable: false,
+      reboot: "none",
+      jitterMs: 0,
     });
     expect(paramsOf(server, "D", "knob")).toEqual({ count: 1, label: "a" });
   });
@@ -303,11 +313,18 @@ describe("behavior.list", () => {
       stepMs: 2000,
       failAt: "none",
       startAt: "retrieveDate",
+      train: false,
+      waitForTransactions: false,
+      connectorsUnavailable: false,
+      reboot: "none",
+      jitterMs: 0,
     });
     expect(fw.params.schema.properties.failAt.enum).toEqual([
       "none",
       "DownloadFailed",
       "InstallationFailed",
+      "InvalidSignature",
+      "InstallVerificationFailed",
     ]);
     // Behaviors without params list none.
     expect(

@@ -11,10 +11,16 @@ import { resolveDeviceModelVariable } from "./deviceModelMap";
 import { unknownMeasurands } from "./measurandEnum";
 
 /** The configuration keys behind the MemberLists over MeasurandEnumType
- *  (`SampledDataCtrlr.TxUpdatedMeasurands`, `AlignedDataCtrlr.Measurands`). */
+ *  (`SampledDataCtrlr.TxUpdatedMeasurands`, `AlignedDataCtrlr.Measurands`,
+ *  and the three TxStarted / TxEnded lists, #607). */
 const MEASURAND_LIST_KEYS: ReadonlySet<string> = new Set([
   "MeterValuesSampledData",
   "MeterValuesAlignedData",
+  // SampledDataCtrlr.TxStartedMeasurands / TxEndedMeasurands and
+  // AlignedDataCtrlr.TxEndedMeasurands (#607).
+  "TxStartedMeasurands",
+  "StopTxnSampledData",
+  "StopTxnAlignedData",
 ]);
 
 type SetVariableResult = SetVariablesResponseV201["setVariableResult"][number];

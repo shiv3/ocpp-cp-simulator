@@ -1,7 +1,7 @@
 import {
   VehicleProfileLimitError,
   type VehicleProfileRepository,
-} from "@ocpp-cp-simulator/core/cp/domain/persistence/VehicleProfileRepository";
+} from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/VehicleProfileRepository";
 import {
   VehicleCatalogError,
   type VehicleCatalog,

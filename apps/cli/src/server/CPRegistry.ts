@@ -1,6 +1,10 @@
 import * as fs from "fs";
 
 import type { ChargePointCapabilityProfile } from "@ocpp-cp-simulator/core/cp/domain/charge-point/CapabilityProfile";
+import {
+  chargerCapabilitiesProblem,
+  type ChargerCapabilities,
+} from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargerCapabilities";
 import { CLIChargePointService } from "../service";
 import type { SessionSettledInfo } from "../service";
 import type {
@@ -30,8 +34,8 @@ import { tlsKeyPermissionWarning } from "../tlsKeyPermissions";
 import { buildSoapCallbackUrl } from "../soapCallbackUrl";
 import { DEFAULT_SOAP_PATH } from "../soapPath";
 import { isSoapVersion } from "@ocpp-cp-simulator/core/cp/domain/types/OcppVersion";
-import { perChargePointTables } from "@ocpp-cp-simulator/core/cp/domain/persistence/schema";
-import { buildUpsert } from "@ocpp-cp-simulator/core/cp/domain/persistence/upsert";
+import { perChargePointTables } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/schema";
+import { buildUpsert } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/upsert";
 import {
   labelsSchema,
   matchesLabelSelector,
@@ -39,15 +43,15 @@ import {
   type Labels,
 } from "@ocpp-cp-simulator/contracts/labels";
 import { transportConfigSchema } from "@ocpp-cp-simulator/contracts/transportConfig";
-import type { ScenarioRunRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/ScenarioRunRepository";
-import { createScenarioRunRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/createScenarioRunRepository";
+import type { ScenarioRunRepository } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunRepository";
+import { createScenarioRunRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/createScenarioRunRepository";
 import type { ChargingSessionRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/ChargingSessionRepository";
-import { createChargingSessionRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/createChargingSessionRepository";
+import { createChargingSessionRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/createChargingSessionRepository";
 import {
   InMemoryScenarioRepository,
   type ScenarioRepository,
-} from "@ocpp-cp-simulator/core/cp/domain/persistence/ScenarioRepository";
-import { createScenarioRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/createScenarioRepository";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioRepository";
+import { createScenarioRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/createScenarioRepository";
 
 /**
  * `updated`: a registered charge point's config changed — rebuilt by
@@ -103,6 +107,7 @@ interface ChargePointRow {
   inbound_validation: string | null;
   reservation_authorize_id_tag: number | null;
   capability_profile: string | null;
+  charger_capabilities: string | null;
   transport_options: string | null;
 }
 
@@ -262,8 +267,8 @@ export class CPRegistry {
         "security_profile, authorization_key, cpo_name, " +
         "tls_ca_path, tls_cert_path, tls_key_path, " +
         "basic_auth, boot_notif, created_at, labels, behaviors, behavior_params, tx_updated_meter_values, " +
-        "inbound_validation, capability_profile, transport_options, " +
-        "reservation_authorize_id_tag " +
+        "inbound_validation, capability_profile, charger_capabilities, " +
+        "transport_options, reservation_authorize_id_tag " +
         "FROM charge_points ORDER BY created_at ASC",
     );
     const restored: string[] = [];
@@ -352,6 +357,8 @@ export class CPRegistry {
         ...restoreTransport(row),
         // #618: NULL, or JSON this build cannot read, restores as no profile.
         ...restoreCapabilityProfile(row.capability_profile),
+        // #327: NULL, or JSON this build cannot read, restores as no cap.
+        ...restoreChargerCapabilities(row.charger_capabilities),
       };
       // #354 follow-up: a SOAP charge point whose callback URL was derived
       // from a base the daemon no longer has — the tunnel was not opened this
@@ -1120,6 +1127,12 @@ export class CPRegistry {
             : null,
         ],
         [
+          "charger_capabilities",
+          init.chargerCapabilities
+            ? JSON.stringify(init.chargerCapabilities)
+            : null,
+        ],
+        [
           "transport_options",
           init.transport ? JSON.stringify(init.transport) : null,
         ],
@@ -1433,6 +1446,16 @@ function restoreBehaviorParams(
   return Object.keys(kept).length > 0 ? { behaviorParams: kept } : {};
 }
 
+function restoreChargerCapabilities(
+  raw: string | null,
+): { chargerCapabilities: ChargerCapabilities } | Record<string, never> {
+  const parsed = safeJsonParse<unknown>(raw);
+  if (parsed === null || chargerCapabilitiesProblem(parsed) !== null) {
+    return {};
+  }
+  return { chargerCapabilities: parsed as ChargerCapabilities };
+}
+
 function restoreCapabilityProfile(
   raw: string | null,
 ): { capabilityProfile: ChargePointCapabilityProfile } | Record<string, never> {
@@ -1528,6 +1551,8 @@ function preserveOmittedInit(
       next.reservationAuthorizeIdTag ?? existing.reservationAuthorizeIdTag,
     transport: next.transport ?? existing.transport,
     capabilityProfile: next.capabilityProfile ?? existing.capabilityProfile,
+    chargerCapabilities:
+      next.chargerCapabilities ?? existing.chargerCapabilities,
   };
 }
 

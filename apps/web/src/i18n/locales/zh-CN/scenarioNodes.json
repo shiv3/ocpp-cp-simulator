@@ -54,5 +54,11 @@
   "scenarioNodes.transaction.stop": "停止",
   "scenarioNodes.transaction.tag": "标签：{{value}}",
   "scenarioNodes.callResponse.noAnswer": "不应答",
-  "scenarioNodes.useBehavior.disabled": "本次运行中禁用"
+  "scenarioNodes.useBehavior.disabled": "本次运行中禁用",
+  "scenarioNodes.title.notify": "通知",
+  "scenarioNodes.title.switch": "分支 (switch)",
+  "scenarioNodes.title.choice": "抽选 (choice)",
+  "scenarioNodes.title.setState": "设置状态",
+  "scenarioNodes.switch.default": "default",
+  "scenarioNodes.choice.options_other": "{{count}} 个选项"
 }

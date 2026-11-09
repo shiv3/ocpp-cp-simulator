@@ -588,6 +588,43 @@ export const ConfigurationKeys = {
       type: "integer",
       min: 0,
     } as IntegerConfigurationKey,
+    // #607: OCPP 2.x transaction-end metering (Part 2 Appendices, chapter 3).
+    // `SampledDataCtrlr.TxStartedMeasurands` lists the measurands of the
+    // Started event; empty keeps the energy register alone. 2.x only.
+    TxStartedMeasurands: {
+      name: "TxStartedMeasurands",
+      required: false,
+      readonly: false,
+      type: "array",
+    } as ArrayConfigurationKey,
+    // `SampledDataCtrlr.TxEndedInterval` (seconds): how often a sample joins
+    // the history that Ended carries; 0 = none. 2.x only.
+    TxEndedInterval: {
+      name: "TxEndedInterval",
+      required: false,
+      readonly: false,
+      type: "integer",
+      min: 0,
+      max: Math.floor(MAX_TIMER_MS / 1000),
+    } as IntegerConfigurationKey,
+    // `AlignedDataCtrlr.TxEndedInterval` (seconds): the clock-aligned grid of
+    // that history; 0 = none. 2.x only. (1.6 uses ClockAlignedDataInterval.)
+    AlignedDataTxEndedInterval: {
+      name: "AlignedDataTxEndedInterval",
+      required: false,
+      readonly: false,
+      type: "integer",
+      min: 0,
+      max: Math.floor(MAX_TIMER_MS / 1000),
+    } as IntegerConfigurationKey,
+    // `AlignedDataCtrlr.SendDuringIdle`: when true, clock-aligned MeterValues
+    // are sent only for a connector with no transaction. 2.x only.
+    AlignedDataSendDuringIdle: {
+      name: "AlignedDataSendDuringIdle",
+      required: false,
+      readonly: false,
+      type: "boolean",
+    } as BooleanConfigurationKey,
     // #315: sign the energy register in OCMF (German Eichrecht format) and
     // carry it as 1.6 `format: "SignedData"` / 2.x `signedMeterValue`. Off by
     // default; nothing is generated, and no key is made, while false. The
@@ -836,6 +873,16 @@ export const defaultConfiguration: (cp: ChargePoint) => Configuration = (
           intVal(ConfigurationKeys.Custom.MaxCertificateChainSize, 10000),
           intVal(ConfigurationKeys.Custom.CertSigningWaitMinimum, 60),
           intVal(ConfigurationKeys.Custom.CertSigningRepeatTimes, 3),
+        ]
+      : []),
+    // #607: 2.x only (SampledDataCtrlr / AlignedDataCtrlr TxEnded* and
+    // SendDuringIdle); the defaults add nothing to the messages.
+    ...(isOcpp2Version(cp.ocppVersion)
+      ? [
+          arrVal(ConfigurationKeys.Custom.TxStartedMeasurands, []),
+          intVal(ConfigurationKeys.Custom.TxEndedInterval, 0),
+          intVal(ConfigurationKeys.Custom.AlignedDataTxEndedInterval, 0),
+          boolVal(ConfigurationKeys.Custom.AlignedDataSendDuringIdle, false),
         ]
       : []),
     boolVal(ConfigurationKeys.Custom.SampledDataSignReadings, false),

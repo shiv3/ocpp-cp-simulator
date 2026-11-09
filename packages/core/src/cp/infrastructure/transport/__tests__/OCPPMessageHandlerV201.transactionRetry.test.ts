@@ -125,6 +125,9 @@ function setup(config: { attempts?: number; interval?: number } = {}) {
       messageTimeout: vi.fn(() => 30),
       offlineQueueMaxEvents: vi.fn(() => 1000),
       meterValuesSampledData: vi.fn(() => []),
+      stopTxnSampledData: vi.fn(() => []),
+      stopTxnAlignedData: vi.fn(() => []),
+      txStartedMeasurands: vi.fn(() => []),
     },
   };
   const handler = new OCPPMessageHandlerV201(

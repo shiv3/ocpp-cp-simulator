@@ -1,11 +1,14 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { ScenarioManager } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioManager";
 import {
   ScenarioNodeType,
   type ScenarioDefinition,
+  type ScenarioEvents,
   type ScenarioNode,
 } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import type { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
+import type { EventEmitter } from "@ocpp-cp-simulator/core/cp/shared/EventEmitter";
 import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
 import {
   DefaultBootNotification,
@@ -200,7 +203,7 @@ describe("LocalChargePointService scenario runtime (no UI mounted)", () => {
   });
 
   it("loading a scenario keeps the other scenarios loaded on the connector", async () => {
-    const { service, chargePoint } = await setup();
+    const { service } = await setup();
     await service.loadScenario(
       CP_ID,
       1,
@@ -216,7 +219,7 @@ describe("LocalChargePointService scenario runtime (no UI mounted)", () => {
       (s) => s.scenarioId,
     );
     expect(ids.sort()).toEqual(["s-a", "s-b"]);
-    expect(chargePoint.getConnector(1)?.scenarioManager).toBeDefined();
+    expect(service.getScenarioRuntime(CP_ID)?.scenarioManager(1)).toBeDefined();
   });
 
   it("reports operator wait controls as scenario-wait-changed events", async () => {
@@ -423,17 +426,17 @@ describe("LocalChargePointService scenario runtime (no UI mounted)", () => {
   it("stops the runtime when the charge point is removed", async () => {
     const { service, chargePoint } = await setup();
     chargePoint.status = OCPPStatus.Available;
-    const connector = chargePoint.getConnector(1)!;
+    const runtime = service.getScenarioRuntime(CP_ID)!;
     await service.loadScenario(CP_ID, 1, parkingScenario("s-removed"));
     void service.runScenario(CP_ID, 1, "s-removed");
     await settle();
-    const manager = connector.scenarioManager!;
+    const manager = runtime.scenarioManager(1)!;
     expect(manager.getActiveScenarioIds()).toEqual(["s-removed"]);
 
     await service.syncLocalChargePoints([]);
 
     expect(manager.getActiveScenarioIds()).toEqual([]);
-    expect(connector.scenarioManager).toBeUndefined();
+    expect(runtime.scenarioManager(1)).toBeUndefined();
   });
 });
 
@@ -470,5 +473,68 @@ describe("LocalChargePointService EV settings override ownership (#333)", () => 
     await service.applyDefaultEVSettings({ targetSoc: 99 });
 
     expect(connector.evSettings.targetSoc).toBe(99);
+  });
+});
+
+describe("LocalScenarioRuntime connector scenario slot", () => {
+  /** The emitter the runtime handed to `manager` (a private field). */
+  function eventsOf(manager: ScenarioManager): EventEmitter<ScenarioEvents> {
+    return (
+      manager as unknown as { eventEmitter: EventEmitter<ScenarioEvents> }
+    ).eventEmitter;
+  }
+
+  it("replacing a connector's manager destroys the previous one", async () => {
+    const { service } = await setup();
+    const runtime = service.getScenarioRuntime(CP_ID)!;
+    const previous = runtime.scenarioManager(1)!;
+    const destroy = vi.spyOn(previous, "destroy");
+    const next = { destroy: vi.fn() } as unknown as ScenarioManager;
+
+    runtime.setScenarioManager(1, next);
+
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(runtime.scenarioManager(1)).toBe(next);
+  });
+
+  it("removing the connector destroys its manager and drops its scenario listeners", async () => {
+    const { service, chargePoint, events } = await setup();
+    chargePoint.status = OCPPStatus.Available;
+    await service.loadScenario(CP_ID, 1, parkingScenario("s-gone"));
+    void service.runScenario(CP_ID, 1, "s-gone");
+    await settle();
+    const runtime = service.getScenarioRuntime(CP_ID)!;
+    const manager = runtime.scenarioManager(1)!;
+    const destroy = vi.spyOn(manager, "destroy");
+    const scenarioEmitter = eventsOf(manager);
+    expect(scenarioEmitter.listenerCount("execution.started")).toBe(1);
+
+    await service.removeConnector(CP_ID, 1);
+
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(manager.getActiveScenarioIds()).toEqual([]);
+    expect(runtime.scenarioManager(1)).toBeUndefined();
+    // The manager is destroyed before the listeners go: its stop is still
+    // reported, as before the slot moved out of Connector.
+    expect(scenarioEvents(events)).toContain("scenario-completed:s-gone");
+    expect(scenarioEmitter.listenerCount("execution.started")).toBe(0);
+    expect(scenarioEmitter.listenerCount("execution.stopped")).toBe(0);
+  });
+
+  it("disposing the runtime destroys every manager without reporting the stop", async () => {
+    const { service, chargePoint, events } = await setup();
+    chargePoint.status = OCPPStatus.Available;
+    await service.loadScenario(CP_ID, 1, parkingScenario("s-off"));
+    void service.runScenario(CP_ID, 1, "s-off");
+    await settle();
+    const runtime = service.getScenarioRuntime(CP_ID)!;
+    const manager = runtime.scenarioManager(1)!;
+    const destroy = vi.spyOn(manager, "destroy");
+
+    runtime.dispose();
+
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(runtime.scenarioManager(1)).toBeUndefined();
+    expect(scenarioEvents(events)).not.toContain("scenario-completed:s-off");
   });
 });

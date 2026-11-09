@@ -29,6 +29,10 @@ import type {
   OcppCallNodeData,
   CallResponseNodeData,
   UseBehaviorNodeData,
+  NotifyNodeData,
+  SwitchNodeData,
+  ChoiceNodeData,
+  SetStateNodeData,
   ScenarioCallExchange,
   ConnectionTriggerNodeData,
   StartTransactionOptions,
@@ -36,8 +40,13 @@ import type {
   ScenarioExpectation,
   ScenarioWaitIntervention,
 } from "./ScenarioTypes";
-import { ScenarioNodeType } from "./ScenarioTypes";
-import { resolveFromExchange } from "./resolveFrom";
+import { NOTIFY_KINDS, ScenarioNodeType } from "./ScenarioTypes";
+import { isFromReference, resolveFrom, type FromScope } from "./resolveFrom";
+import {
+  DIAGNOSTICS_STATUSES,
+  FIRMWARE_STATUSES,
+  UPLOAD_LOG_STATUSES,
+} from "@ocpp-cp-simulator/contracts/firmwareLogStatus";
 import { jsonProblem } from "../behavior/paramsSchema";
 import { DEFAULT_ID_TAG } from "../../domain/auth/IdTagPool";
 import { deriveExpectation } from "./ScenarioExpectations";
@@ -83,9 +92,46 @@ interface ParkedWait {
 interface Flow {
   exchange: ScenarioCallExchange | null;
   answered: boolean;
+  /**
+   * Set by a `switch` or `choice` node (schema 1.6): the `sourceHandle` of the
+   * one edge the branch goes on along. Read and cleared by the walk.
+   */
+  handle: string | null;
 }
 
-const newFlow = (): Flow => ({ exchange: null, answered: false });
+const newFlow = (): Flow => ({ exchange: null, answered: false, handle: null });
+
+/** JSON equality: same type, same value, objects without regard to key order. */
+function jsonEquals(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (
+    typeof a !== "object" ||
+    typeof b !== "object" ||
+    a === null ||
+    b === null
+  ) {
+    return false;
+  }
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return (
+      a.length === b.length && a.every((item, i) => jsonEquals(item, b[i]))
+    );
+  }
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  const keys = Object.keys(left);
+  return (
+    keys.length === Object.keys(right).length &&
+    keys.every(
+      (key) =>
+        Object.prototype.hasOwnProperty.call(right, key) &&
+        jsonEquals(left[key], right[key]),
+    )
+  );
+}
+
+const STATE_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 const isMeterValueTimeout = (error: unknown): boolean =>
   error instanceof Error &&
@@ -169,6 +215,11 @@ export class ScenarioExecutor {
   private armedCertificateQuirks = false;
   private readonly clock: SimClock;
   private readonly rng: Rng;
+  /** The state of the run (schema 1.6 `setState`); fresh for every start. */
+  private runState: Record<string, unknown> = Object.create(null) as Record<
+    string,
+    unknown
+  >;
 
   constructor(
     scenario: ScenarioDefinition,
@@ -237,6 +288,7 @@ export class ScenarioExecutor {
     this.currentNodeStartedAt = null;
     this.parkedWaits = [];
     this.executedNodes = [];
+    this.runState = Object.create(null) as Record<string, unknown>;
     this.stepResolve = null;
     this.pendingSteps = 0;
     this.armedOverrideActions = [];
@@ -420,6 +472,19 @@ export class ScenarioExecutor {
       .map((edge) => this.scenario.nodes.find((n) => n.id === edge.target))
       .filter((node): node is ScenarioNode => node !== undefined);
 
+    if (
+      resumed &&
+      (originNode.type === ScenarioNodeType.SWITCH ||
+        originNode.type === ScenarioNodeType.CHOICE)
+    ) {
+      // The chosen handle is not persisted: decide again (a choice from its
+      // seeded stream), then go on along that one edge.
+      await this.executeSequentialFlow(originNode, newFlow());
+      this.currentNodeId = null;
+      this.currentNodeStartedAt = null;
+      return;
+    }
+
     if (nextNodes.length === 0) {
       const tag = resumed ? "Resume point" : "Start";
       this.callbacks.log?.(
@@ -506,9 +571,22 @@ export class ScenarioExecutor {
       }
 
       // Find next node
-      const outgoingEdges = this.scenario.edges.filter(
+      let outgoingEdges = this.scenario.edges.filter(
         (e) => e.source === currentNode!.id,
       );
+      // A switch or choice picked one edge by its handle (schema 1.6).
+      const handle = flow.handle;
+      flow.handle = null;
+      if (handle !== null) {
+        outgoingEdges = outgoingEdges.filter((e) => e.sourceHandle === handle);
+        if (outgoingEdges.length === 0) {
+          this.callbacks.log?.(
+            `[${this.scenario.name}] "${currentNode.data?.label || currentNode.id}" chose "${handle}", which has no edge; the branch ends`,
+            "info",
+          );
+          break;
+        }
+      }
       if (outgoingEdges.length === 0) {
         break; // No more nodes to execute
       }
@@ -737,6 +815,22 @@ export class ScenarioExecutor {
         this.executeUseBehavior(node.id, node.data as UseBehaviorNodeData);
         break;
 
+      case ScenarioNodeType.NOTIFY:
+        this.executeNotify(node.data as NotifyNodeData, flow);
+        break;
+
+      case ScenarioNodeType.SWITCH:
+        this.executeSwitch(node.data as SwitchNodeData, flow);
+        break;
+
+      case ScenarioNodeType.CHOICE:
+        this.executeChoice(node.data as ChoiceNodeData, flow);
+        break;
+
+      case ScenarioNodeType.SET_STATE:
+        this.executeSetState(node.data as SetStateNodeData, flow);
+        break;
+
       case ScenarioNodeType.CONNECTION_TRIGGER:
         await this.executeConnectionTrigger(
           node.id,
@@ -956,9 +1050,9 @@ export class ScenarioExecutor {
       return;
     }
     const { action, skipValidation, applyResponse } = data;
-    const payload = resolveFromExchange(
+    const payload = resolveFrom(
       data.payload,
-      flow.exchange,
+      this.fromScope(flow),
       `ocppCall(${action})`,
     ) as Record<string, unknown>;
     const call = this.callbacks.onSendOcppCall({
@@ -1200,7 +1294,38 @@ export class ScenarioExecutor {
     nodeId: string,
     data: DelayNodeData,
   ): Promise<void> {
-    await this.waitWithProgress(nodeId, data.delaySeconds);
+    let seconds = data.delaySeconds;
+    if (data.until !== undefined) {
+      // Schema 1.6 (#654): not before an instant on the station's clock.
+      const at =
+        typeof data.until === "string"
+          ? new Date(data.until).getTime()
+          : Number.NaN;
+      if (Number.isNaN(at)) {
+        throw new Error(
+          `delay: until must be an ISO-8601 date-time, got ${JSON.stringify(data.until)}`,
+        );
+      }
+      seconds = Math.max(seconds, (at - this.clock.now()) / 1000);
+    }
+    if (data.jitterSeconds !== undefined) {
+      const jitter = data.jitterSeconds;
+      if (
+        typeof jitter !== "number" ||
+        !Number.isFinite(jitter) ||
+        jitter < 0
+      ) {
+        throw new Error(
+          `delay: jitterSeconds must be a number of at least 0, got ${JSON.stringify(jitter)}`,
+        );
+      }
+      // Whole milliseconds from the scenario's seeded stream, so one seed
+      // gives one wait. A jitter of 0 draws nothing.
+      if (jitter > 0) {
+        seconds += this.rng.int(0, Math.round(jitter * 1000) + 1) / 1000;
+      }
+    }
+    await this.waitWithProgress(nodeId, seconds);
   }
 
   private async waitWithProgress(
@@ -1870,11 +1995,19 @@ export class ScenarioExecutor {
         `callResponse: the ${exchange.action} CALL of this branch is already answered`,
       );
     }
+    if (
+      (data.kind === "accepted" || data.kind === "rejected") &&
+      (data.payload !== undefined || data.skipValidation)
+    ) {
+      throw new Error(
+        `callResponse: kind "${data.kind}" is the ${exchange.action} answer of the station's OCPP version and takes no payload`,
+      );
+    }
     const payload =
       data.kind === "result"
-        ? (resolveFromExchange(
+        ? (resolveFrom(
             data.payload ?? {},
-            exchange,
+            this.fromScope(flow),
             `callResponse(${exchange.action})`,
           ) as Record<string, unknown>)
         : undefined;
@@ -1939,6 +2072,151 @@ export class ScenarioExecutor {
             (params && Object.keys(params).length > 0
               ? ` with params ${JSON.stringify(params)}`
               : ""),
+      "info",
+    );
+  }
+
+  /** What a `$from` of this branch can read (schema 1.5, 1.6). */
+  private fromScope(flow: Flow): FromScope {
+    return {
+      exchange: flow.exchange,
+      state: this.runState,
+      ...(this.callbacks.onReadStation
+        ? { station: this.callbacks.onReadStation }
+        : {}),
+    };
+  }
+
+  /** Schema 1.6 (#654): `ctx.notify` as a node; does not wait for the CSMS. */
+  private executeNotify(data: NotifyNodeData, flow: Flow): void {
+    if (!this.callbacks.onNotify) {
+      throw new Error("notify: this station cannot send notifications");
+    }
+    if (!(NOTIFY_KINDS as readonly string[]).includes(data.kind)) {
+      throw new Error(
+        `notify: kind must be one of ${NOTIFY_KINDS.join(", ")}, got ${JSON.stringify(data.kind)}`,
+      );
+    }
+    const statuses: readonly string[] =
+      data.kind === "logStatus"
+        ? UPLOAD_LOG_STATUSES
+        : data.kind === "diagnosticsStatus"
+          ? DIAGNOSTICS_STATUSES
+          : FIRMWARE_STATUSES;
+    if (typeof data.status !== "string" || !statuses.includes(data.status)) {
+      throw new Error(
+        `notify: status for ${data.kind} must be one of ${statuses.join(", ")}, got ${JSON.stringify(data.status)}`,
+      );
+    }
+    let requestId: number | undefined;
+    if (data.requestId !== undefined) {
+      const resolved = resolveFrom(
+        data.requestId,
+        this.fromScope(flow),
+        `notify(${data.kind})`,
+      );
+      if (
+        typeof resolved !== "number" ||
+        !Number.isInteger(resolved) ||
+        resolved < 0
+      ) {
+        throw new Error(
+          `notify: requestId must be a whole number of at least 0, got ${JSON.stringify(resolved)}`,
+        );
+      }
+      requestId = resolved;
+    }
+    if (data.kind === "signedFirmwareStatus" && requestId === undefined) {
+      throw new Error("notify: signedFirmwareStatus needs a requestId");
+    }
+    this.callbacks.onNotify(data.kind, data.status, requestId);
+    this.callbacks.log?.(
+      `Notified ${data.kind} ${data.status}` +
+        (requestId === undefined ? "" : ` (requestId ${requestId})`),
+      "info",
+    );
+  }
+
+  /** Schema 1.6 (#654): go on along `case-<n>` of the first equal case, else `default`. */
+  private executeSwitch(data: SwitchNodeData, flow: Flow): void {
+    if (!Array.isArray(data.cases)) {
+      throw new Error("switch: cases must be an array");
+    }
+    data.cases.forEach((value, index) => {
+      const bad = jsonProblem(value, `cases[${index}]`);
+      if (bad || isFromReference(value)) {
+        throw new Error(
+          `switch: cases are JSON constants${bad ? ` (${bad})` : ', a "$from" is not allowed'}`,
+        );
+      }
+    });
+    const value = resolveFrom(data.value, this.fromScope(flow), "switch");
+    const index = data.cases.findIndex((candidate) =>
+      jsonEquals(candidate, value),
+    );
+    flow.handle = index >= 0 ? `case-${index}` : "default";
+    this.callbacks.log?.(
+      `Switch on ${JSON.stringify(value)} → ${flow.handle}`,
+      "info",
+    );
+  }
+
+  /** Schema 1.6 (#654): a seeded, weighted draw; go on along `option-<n>`. */
+  private executeChoice(data: ChoiceNodeData, flow: Flow): void {
+    const options = data.options;
+    if (!Array.isArray(options) || options.length < 2) {
+      throw new Error("choice: options must list at least two options");
+    }
+    const weights = options.map((option, index) => {
+      const weight = option?.weight ?? 1;
+      if (
+        typeof weight !== "number" ||
+        !Number.isFinite(weight) ||
+        weight <= 0
+      ) {
+        throw new Error(
+          `choice: options[${index}].weight must be a number above 0, got ${JSON.stringify(weight)}`,
+        );
+      }
+      return weight;
+    });
+    const total = weights.reduce((sum, weight) => sum + weight, 0);
+    const draw = this.rng.next() * total;
+    let acc = 0;
+    let picked = weights.length - 1;
+    for (let i = 0; i < weights.length; i += 1) {
+      acc += weights[i]!;
+      if (draw < acc) {
+        picked = i;
+        break;
+      }
+    }
+    flow.handle = `option-${picked}`;
+    this.callbacks.log?.(
+      `Choice → ${flow.handle}${options[picked]?.label ? ` (${options[picked]!.label})` : ""}`,
+      "info",
+    );
+  }
+
+  /** Schema 1.6 (#654): store a JSON value in the state of this run. */
+  private executeSetState(data: SetStateNodeData, flow: Flow): void {
+    if (typeof data.key !== "string" || !STATE_KEY.test(data.key)) {
+      throw new Error(
+        `setState: key must be letters, digits and underscores, not starting with a digit, got ${JSON.stringify(data.key)}`,
+      );
+    }
+    const value = resolveFrom(
+      data.value,
+      this.fromScope(flow),
+      `setState(${data.key})`,
+    );
+    const bad = jsonProblem(value, "value");
+    if (bad || value === undefined) {
+      throw new Error(`setState: value must be JSON${bad ? ` (${bad})` : ""}`);
+    }
+    this.runState[data.key] = value;
+    this.callbacks.log?.(
+      `State ${data.key} = ${JSON.stringify(value)}`,
       "info",
     );
   }

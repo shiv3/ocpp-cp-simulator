@@ -11,8 +11,16 @@
 import { z } from "zod";
 import { normalizeKeyName, redactSensitiveValue } from "./redaction";
 import { OBJ_MAX_BYTES, STR_256, STR_64K, boundedObject } from "./limits";
+import {
+  chargerCapabilitiesSchema,
+  type ReadonlyChargerCapabilities,
+} from "./chargerCapabilities";
 import { labelsSchema, type Labels } from "./labels";
 import type { OcppSecurityProfile } from "./securityProfile";
+import {
+  transportConfigSchema,
+  type TransportConfigWire,
+} from "./transportConfig";
 
 // ---------------------------------------------------------------------------
 // Redaction helpers
@@ -28,6 +36,15 @@ export function redactUrl(url: string): string {
   } catch {
     return url.replace(/\/\/[^@/]*@/, "//");
   }
+}
+
+/** The transport settings with the proxy URL's `user:pass@` removed (#684). */
+export function redactTransport(
+  transport: TransportConfigWire,
+): TransportConfigWire {
+  const proxy = transport.ws?.proxy;
+  if (proxy === undefined || !transport.ws) return transport;
+  return { ...transport, ws: { ...transport.ws, proxy: redactUrl(proxy) } };
 }
 
 interface FullBootNotification {
@@ -63,6 +80,8 @@ interface FullCpConfig {
   inboundValidation?: "off" | "warn" | "enforce";
   reservationAuthorizeIdTag?: boolean;
   capabilityProfile?: WireCapabilityProfile;
+  /** Reconnect policy and WebSocket client options (#609, #611). */
+  transport?: TransportConfigWire;
   tlsCaPath?: string;
   tlsCertPath?: string;
   tlsKeyPath?: string;
@@ -72,6 +91,8 @@ interface FullCpConfig {
   behaviors?: readonly string[];
   /** Params the selection sets on behaviors (#654), by behavior id. */
   behaviorParams?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+  /** What the charger hardware delivers per connector (#327). */
+  chargerCapabilities?: ReadonlyChargerCapabilities;
 }
 
 /**
@@ -115,6 +136,9 @@ export function redactCp(config: FullCpConfig): WireCpConfig {
             : {}),
         }
       : undefined,
+    ...(config.transport
+      ? { transport: redactTransport(config.transport) }
+      : {}),
     tlsCaPath: config.tlsCaPath,
     tlsCertPath: config.tlsCertPath,
     tlsKeyPath: config.tlsKeyPath,
@@ -122,6 +146,22 @@ export function redactCp(config: FullCpConfig): WireCpConfig {
     labels: config.labels,
     behaviors: config.behaviors ? [...config.behaviors] : undefined,
     behaviorParams: config.behaviorParams,
+    chargerCapabilities: config.chargerCapabilities
+      ? {
+          connectors: config.chargerCapabilities.connectors.map((c) => ({
+            connectorId: c.connectorId,
+            maxDeliveryPowerW: c.maxDeliveryPowerW,
+            ...(c.meter ? { meter: structuredClone(c.meter) } : {}),
+          })),
+          ...(config.chargerCapabilities.mainMeter
+            ? {
+                mainMeter: structuredClone(
+                  config.chargerCapabilities.mainMeter,
+                ),
+              }
+            : {}),
+        }
+      : undefined,
   };
 }
 
@@ -167,6 +207,7 @@ export const wireCpConfigSchema = z
         triggerMessageTargets: z.array(STR_256).optional(),
       })
       .optional(),
+    transport: transportConfigSchema.optional(),
     tlsCaPath: STR_64K.optional(),
     tlsCertPath: STR_64K.optional(),
     tlsKeyPath: STR_64K.optional(),
@@ -174,6 +215,7 @@ export const wireCpConfigSchema = z
     labels: labelsSchema.optional(),
     behaviors: z.array(STR_256).optional(),
     behaviorParams: z.record(STR_256, boundedObject(16_384)).optional(),
+    chargerCapabilities: chargerCapabilitiesSchema.optional(),
   })
   .strict();
 export type WireCpConfig = z.infer<typeof wireCpConfigSchema>;
@@ -295,6 +337,10 @@ export const connectorStatusWireSchema = z
     transactionStartTime: z.string().nullable(),
     transactionTagId: z.string().nullable(),
     transactionBatteryCapacityKwh: z.number().nullable(),
+    // #453: absent from a daemon that predates the cable model.
+    evConnection: z
+      .enum(["disconnected", "connected-ready", "connected-not-ready"])
+      .optional(),
   })
   .strict();
 

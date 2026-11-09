@@ -1,7 +1,7 @@
 import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
 import type { Connector } from "../../domain/connector/Connector";
 import { LogType } from "../../shared/Logger";
-import type { ScenarioRunRepository } from "../../domain/persistence/ScenarioRunRepository";
+import type { ScenarioRunRepository } from "./ScenarioRunRepository";
 import { clockOf } from "../../shared/clock";
 import { rngOf } from "../../shared/rng";
 import type {

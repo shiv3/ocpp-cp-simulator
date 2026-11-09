@@ -156,11 +156,6 @@
   "scenarios.templateBrowser.noMatch": "Aucun modèle ne correspond à « {{query}} ».",
   "scenarios.templateBrowser.searchLabel": "Rechercher des modèles",
   "scenarios.templateBrowser.searchPlaceholder": "Rechercher par nom ou description",
-  "scenarios.templateBrowser.showSteps": "Voir les étapes",
-  "scenarios.templateBrowser.hideSteps": "Masquer les étapes",
-  "scenarios.templateBrowser.stepsLabel": "Étapes",
-  "scenarios.templateBrowser.goesTo": "→ {{steps}}",
-  "scenarios.templateBrowser.thenEnd": "→ fin",
   "scenarios.templateBrowser.title": "Modèles de scénario",
   "scenarios.category.status": "Statut",
   "scenarios.category.transaction": "Transaction",
@@ -177,5 +172,12 @@
   "scenarios.editor.issue.edgeOutOfEnd": "Un lien part d’un nœud End ; il n’est jamais suivi.",
   "scenarios.editor.issue.extraOutgoing": "L’étape {{n}} ({{title}}) a plusieurs étapes suivantes, mais seul Start lance des branches en parallèle : à l’exécution, seule la première est suivie.",
   "scenarios.editor.issue.danglingEdge": "Un lien pointe vers une étape inexistante ; cette branche s’arrête là.",
-  "scenarios.editor.issue.unreachable": "L’étape {{n}} ({{title}}) n’est pas atteinte depuis Start : elle ne s’exécute jamais."
+  "scenarios.editor.issue.unreachable": "L’étape {{n}} ({{title}}) n’est pas atteinte depuis Start : elle ne s’exécute jamais.",
+  "scenarios.templateBrowser.previewLabel": "Aperçu de {{name}}",
+  "scenarios.templateBrowser.backToList": "← Modèles",
+  "scenarios.templateBrowser.readOnlyNote": "Aperçu en lecture seule : Utiliser le modèle en crée une copie modifiable.",
+  "scenarios.templateBrowser.selectStepHint": "Choisissez une étape pour voir ses réglages.",
+  "scenarios.templateBrowser.listLabel": "Modèles",
+  "scenarios.templateBrowser.previewTemplate": "Aperçu de {{name}}",
+  "scenarios.templateBrowser.nothingToPreview": "Aucun modèle à prévisualiser."
 }

@@ -1,4 +1,4 @@
-import type { MeterSampleOverrides } from "./MeterValueBuilder";
+import type { MeterSampleOverrides, SampledValue } from "./MeterValueBuilder";
 import {
   DEFAULT_ID_TOKEN_TYPE,
   ID_TOKEN_TYPE_VALUES,
@@ -180,6 +180,20 @@ export interface TransactionUpdateOptions extends MeterSampleOverrides {
   skipWithoutMeterValue?: boolean;
 }
 
+/** One formatted meter-value entry of the transaction-end history (#607):
+ *  what the CSMS would have seen at `timestamp`, kept as formatted samples so
+ *  a configuration change later in the session cannot reformat it. */
+export interface TxEndedSample {
+  /** ISO 8601 instant of the sample. */
+  timestamp: string;
+  sampledValue: SampledValue[];
+}
+
+/** Upper bound of {@link Transaction.txEndedSamples}; the oldest entries are
+ *  dropped beyond it so a very long session stays bounded in memory and in
+ *  the persisted transaction. */
+export const TX_ENDED_SAMPLES_MAX = 1000;
+
 export interface Transaction {
   /** CSMS-assigned (OCPP 1.x); `0` until StartTransaction.conf assigns it.
    *  No transaction is `connector.transaction === null`, never a null id. */
@@ -232,6 +246,12 @@ export interface Transaction {
    *  the meter's page numbers in time order. Dropped when a transaction is
    *  restored after a restart: the key that signed it is gone. */
   signedBeginOcmf?: string;
+  /** #607: the history that StopTransaction.transactionData (1.6) or the
+   *  Ended event (2.x) carries beside the begin and end readings: 1.6 also
+   *  holds the `Transaction.Begin` sample taken at start, because only
+   *  StopTransaction can send it. Bounded by {@link TX_ENDED_SAMPLES_MAX}
+   *  and persisted with the transaction (transaction_json). */
+  txEndedSamples?: TxEndedSample[];
   /** OCPP 2.x TransactionEvent triggerReason for the Ended event. If absent,
    *  the encoder defaults to the local StopAuthorized path. */
   stopTriggerReason?: TransactionStopTriggerReason;
@@ -253,4 +273,8 @@ export interface Transaction {
   /** Target SoC of this session (0-100); absent means the connector's EV
    *  settings default applies. Persisted view of `SessionIntent.targetSoc`. */
   targetSoc?: number;
+  /** Stop this session when it reaches {@link targetSoc} (#327). Absent means
+   *  the connector's `autoConfig.stopAtTargetSoc` applies. Written by
+   *  auto-traffic's `sessionModel: "intent"`. */
+  stopAtTarget?: boolean;
 }

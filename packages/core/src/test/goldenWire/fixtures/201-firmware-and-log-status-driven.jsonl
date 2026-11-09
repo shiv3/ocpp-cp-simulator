@@ -12,5 +12,7 @@
 {"d":"CSMS>","k":"result","id":"id-6","p":{}}
 {"d":"CP>","k":"call","id":"id-7","a":"LogStatusNotification","p":{"status":"Uploading","requestId":6}}
 {"d":"CSMS>","k":"result","id":"id-7","p":{}}
-{"d":"CP>","k":"call","id":"id-8","a":"LogStatusNotification","p":{"status":"Uploaded","requestId":6}}
+{"d":"CP>","k":"call","id":"id-8","a":"LogStatusNotification","p":{"status":"Uploading","requestId":6}}
 {"d":"CSMS>","k":"result","id":"id-8","p":{}}
+{"d":"CP>","k":"call","id":"id-9","a":"LogStatusNotification","p":{"status":"Uploaded","requestId":6}}
+{"d":"CSMS>","k":"result","id":"id-9","p":{}}

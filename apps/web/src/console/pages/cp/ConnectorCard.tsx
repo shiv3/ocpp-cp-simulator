@@ -232,9 +232,9 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({
           )
         }
         onStart={(tagId) =>
-          void step(t("cp.connector.startCharging"), () =>
-            chargePointService.startTransaction(cpId, connectorId, tagId),
-          )
+          void step(t("cp.connector.startCharging"), async () => {
+            await chargePointService.startTransaction(cpId, connectorId, tagId);
+          })
         }
         onStop={() =>
           void step(t("cp.connector.stopCharging"), () =>

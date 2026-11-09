@@ -4,5 +4,7 @@
 {"d":"CSMS>","k":"result","id":"id-2","p":{}}
 {"d":"CP>","k":"call","id":"id-3","a":"StatusNotification","p":{"connectorId":1,"errorCode":"NoError","status":"Available"}}
 {"d":"CSMS>","k":"result","id":"id-3","p":{}}
-{"d":"CP>","k":"call","id":"id-4","a":"Authorize","p":{"idTag":"CERT023-BLK"}}
-{"d":"CSMS>","k":"result","id":"id-4","p":{"idTagInfo":{"status":"Blocked"}}}
+{"d":"CP>","k":"call","id":"id-4","a":"StatusNotification","p":{"connectorId":1,"errorCode":"NoError","status":"Preparing"}}
+{"d":"CSMS>","k":"result","id":"id-4","p":{}}
+{"d":"CP>","k":"call","id":"id-5","a":"Authorize","p":{"idTag":"CERT023-BLK"}}
+{"d":"CSMS>","k":"result","id":"id-5","p":{"idTagInfo":{"status":"Blocked"}}}

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "bun:test";
 import { CLIChargePointService, type CLIEvent } from "../service";
-import { BunSqliteDatabase as BunDb } from "@ocpp-cp-simulator/core/cp/domain/persistence/BunSqliteDatabase";
+import { BunSqliteDatabase as BunDb } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/BunSqliteDatabase";
 import { parkingScenario } from "./parkingScenario";
 import { testCpInit } from "./testCpInit";
 

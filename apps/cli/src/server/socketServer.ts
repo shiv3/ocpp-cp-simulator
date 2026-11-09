@@ -60,9 +60,9 @@ import type {
 } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 import type { ConnectorSettingsRepository } from "@ocpp-cp-simulator/client/interfaces/ConnectorSettingsRepository";
 import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
-import { FleetTemplateRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/FleetTemplateRepository";
+import { FleetTemplateRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/FleetTemplateRepository";
 import { getTemplateById } from "@ocpp-cp-simulator/core/utils/scenarioTemplates";
-import type { ScenarioRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/ScenarioRepository";
+import type { ScenarioRepository } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioRepository";
 import {
   isScenarioDefinitionShape,
   type ScenarioDefinition,
@@ -75,7 +75,7 @@ import {
   type EVSettingsPatch,
 } from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
 import { InvalidAuthorizationCacheSeedError } from "@ocpp-cp-simulator/core/cp/domain/auth/AuthorizationCacheSeed";
-import type { HistoryOptions } from "@ocpp-cp-simulator/core/cp/application/services/types/StateSnapshot";
+import type { HistoryOptions } from "@ocpp-cp-simulator/core/cp/application/services/StateSnapshot";
 import {
   hasStatusNotificationOptions,
   type StatusNotificationOptions,
@@ -104,10 +104,10 @@ import {
   type NetworkSimLayerConfig,
 } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/network-sim/config";
 import type { AutoTrafficConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/AutoTraffic";
-import { createScenarioRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/createScenarioRepository";
+import { createScenarioRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/createScenarioRepository";
 import { SqliteConnectorSettingsRepository } from "@ocpp-cp-simulator/client/sqlite/SqliteConnectorSettingsRepository";
-import { BlueprintRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/BlueprintRepository";
-import { VehicleProfileRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/VehicleProfileRepository";
+import { BlueprintRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/BlueprintRepository";
+import { VehicleProfileRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/VehicleProfileRepository";
 import type { VehicleCatalog } from "@ocpp-cp-simulator/core/cp/domain/vehicle/VehicleCatalog";
 import {
   deleteVehicleProfile,
@@ -2352,6 +2352,20 @@ async function dispatchFacadeCpCommand(
       );
       return handled(undefined);
     }
+    case "ev_plug_in": {
+      const { params } = call;
+      await runFacadeOperation(() =>
+        chargePointService.evPlugIn(id, params.connector),
+      );
+      return handled(undefined);
+    }
+    case "ev_ready": {
+      const { params } = call;
+      await runFacadeOperation(() =>
+        chargePointService.evSetReady(id, params.connector, params.ready),
+      );
+      return handled(undefined);
+    }
     case "set_meter_value": {
       const { params } = call;
       await runFacadeOperation(() =>
@@ -3051,6 +3065,7 @@ function connectorSnapshotToWire(
     transactionStartTime: toIsoStringOrNull(connector.transactionStartTime),
     transactionTagId: connector.transactionTagId,
     transactionBatteryCapacityKwh: connector.transactionBatteryCapacityKwh,
+    evConnection: connector.evConnection,
   };
 }
 
@@ -3127,6 +3142,7 @@ function mergeUpdateParams(
     init.reservationAuthorizeIdTag,
   );
   preserveWhenMissing(merged, "capabilityProfile", init.capabilityProfile);
+  preserveWhenMissing(merged, "chargerCapabilities", init.chargerCapabilities);
   preserveWhenMissing(merged, "tlsCaPath", init.tlsCaPath);
   preserveWhenMissing(merged, "tlsCertPath", init.tlsCertPath);
   preserveWhenMissing(merged, "tlsKeyPath", init.tlsKeyPath);

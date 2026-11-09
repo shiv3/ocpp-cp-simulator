@@ -6,7 +6,7 @@ import type { ProtocolCodec } from "../profile/ProtocolProfile";
 import type { Logger } from "../../../shared/Logger";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { Transaction } from "../../../domain/connector/Transaction";
-import { BunSqliteDatabase } from "../../../domain/persistence/BunSqliteDatabase";
+import { BunSqliteDatabase } from "../../persistence/BunSqliteDatabase";
 import { strictValidationErrors } from "@ocpp-cp-simulator/ocpp/validate";
 import { v201Schemas } from "@ocpp-cp-simulator/ocpp/v201/schemas";
 import { v21Schemas } from "@ocpp-cp-simulator/ocpp/v21/schemas";
@@ -111,6 +111,9 @@ function station(
       messageTimeout: () => 30,
       offlineQueueMaxEvents: () => maxEvents,
       meterValuesSampledData: () => [],
+      stopTxnSampledData: () => [],
+      stopTxnAlignedData: () => [],
+      txStartedMeasurands: () => [],
     },
   };
   const handler = new OCPPMessageHandlerV201(
@@ -606,6 +609,9 @@ describe("OCPP 1.6 replay of a persisted 2.x row (#528)", () => {
         configuration: {
           transactionMessageAttempts: () => 3,
           meterValuesSampledData: () => [],
+          stopTxnSampledData: () => [],
+          stopTxnAlignedData: () => [],
+          txStartedMeasurands: () => [],
         },
       };
       const logger = silentLogger();

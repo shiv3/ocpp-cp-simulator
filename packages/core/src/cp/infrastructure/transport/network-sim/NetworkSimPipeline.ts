@@ -1,7 +1,9 @@
+import type { CloseCause } from "../../../domain/transport/networkSim";
+
 export type FrameDropReason =
   "socket_closed" | "disposed" | "write_failed" | "queue_overflow";
 
-export type CloseCause = "network" | "simulated" | "manual" | "internal";
+export type { CloseCause };
 
 export type Settlement =
   | { outcome: "written" }

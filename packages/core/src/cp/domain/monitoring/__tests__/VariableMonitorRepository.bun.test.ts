@@ -1,7 +1,7 @@
 // Runs under `bun test`: the repository is exercised on the `bun:sqlite` built-in.
 import { afterEach, describe, expect, it } from "bun:test";
 
-import { BunSqliteDatabase } from "../../persistence/BunSqliteDatabase";
+import { BunSqliteDatabase } from "../../../infrastructure/persistence/BunSqliteDatabase";
 import { VariableMonitorRepository } from "../VariableMonitorRepository";
 import type { VariableMonitor } from "../VariableMonitor";
 import { ChargePoint } from "../../charge-point/ChargePoint";

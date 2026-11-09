@@ -172,7 +172,7 @@ describe("ConnectorCard: the connector as a charging session", () => {
     expect(batteryRoot.className).toContain("@max-[560px]:items-start");
   });
 
-  it("Plug in on the stepper reports Preparing", async () => {
+  it("Plug in on the stepper drives the EV cable model (#453)", async () => {
     const { root, service } = await renderCard({});
     unmount = () => act(() => root.unmount());
 
@@ -181,11 +181,7 @@ describe("ConnectorCard: the connector as a charging session", () => {
     )!;
     expect(next.textContent).toContain("Plug in");
     await click(next);
-    expect(service.sendStatusNotification).toHaveBeenCalledWith(
-      "CP-1",
-      1,
-      OCPPStatus.Preparing,
-    );
+    expect(service.evPlugIn).toHaveBeenCalledWith("CP-1", 1);
   });
 
   it("Unplug on the stepper is an EV-side disconnect (#488)", async () => {

@@ -96,6 +96,12 @@ Local mode has no switcher and never touches these keys.
   `-wait-changed` events — the same events the daemon pushes, without a
   `runId`. Before #411 that runtime lived in the classic UI's connector card:
   with only the web console open, a Local-mode scenario could not run.
+  The runtime, not the `Connector`, holds each connector's `ScenarioManager`
+  and its event emitter (since
+  [#575](https://github.com/shiv3/ocpp-cp-simulator/issues/575)). Removing a
+  connector destroys its manager and still emits `scenario-completed` for a
+  running scenario (the run is discarded: no run report); unregistering the
+  charge point destroys every manager without emitting it.
   Auto-start follows the daemon's rules
   ([Scenario format → start notes](scenario-format.md#start-notes-triggeron-connect-fires-on-_every_-connect)).
   Only the automatic starts wait for the charge point to be `Available` — a

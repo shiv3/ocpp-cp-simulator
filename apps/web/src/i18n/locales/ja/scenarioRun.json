@@ -115,5 +115,11 @@
   "scenarioRun.zoom.in": "拡大",
   "scenarioRun.zoom.fit": "全体表示",
   "scenarioRun.zoom.fitHint": "グラフ全体が見えるように合わせる",
-  "scenarioRun.zoom.resetHint": "等倍に戻す(Ctrl/Cmd + ホイールでも拡大縮小できます)"
+  "scenarioRun.zoom.resetHint": "等倍に戻す(Ctrl/Cmd + ホイールでも拡大縮小できます)",
+  "scenarioRun.pendingLoop.title": "繰り返し(空)",
+  "scenarioRun.pendingLoop.hint": "ここにステップをドロップするか追加してください。ステップが入るまで保存されません。",
+  "scenarioRun.pendingLoop.remove": "空の繰り返しを削除",
+  "scenarioRun.pendingLoop.unsaved": "空の繰り返しブロックは保存されません。",
+  "scenarioRun.emptyLaneHint": "ここにステップをドロップ",
+  "scenarioRun.dropRefused": "ここにはドロップできません: {{reason}}"
 }

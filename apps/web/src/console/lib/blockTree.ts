@@ -1829,9 +1829,20 @@ export function insertForkBlock(
   if (!canInsertAt(tree, path, index).ok) return def;
   const t = cloneTree(tree);
   const seq = seqAt(t, path)!;
-  const node = createDefaultNode(
+  const made = createDefaultNode(
     kind === "switch" ? ScenarioNodeType.SWITCH : ScenarioNodeType.CHOICE,
   );
+  // A switch starts as an if / else: one case and the default.
+  const node: ScenarioNode =
+    kind === "switch" && Array.isArray((made.data as SwitchNodeData).cases)
+      ? {
+          ...made,
+          data: {
+            ...made.data,
+            cases: (made.data as SwitchNodeData).cases.slice(0, 1),
+          },
+        }
+      : made;
   const at = nodeAtSlot(seq, index);
   const lastExit = seq.exit;
   const fork: ForkBlock = {
@@ -1878,7 +1889,13 @@ export function wrapInLoop(
 ): ScenarioDefinition {
   if (!canWrapInLoop(tree, path, from, to).ok) return def;
   const t = cloneTree(tree);
-  const seq = seqAt(t, path)!;
+  applyWrapInLoop(seqAt(t, path)!, from, to);
+  return rebuildFromTree(def, t);
+}
+
+/** {@link wrapInLoop} on `seq` (of a clone), without the checks. */
+function applyWrapInLoop(seq: Seq, from: number, to: number): void {
+  const path = seq.path;
   const body = seq.blocks.slice(from, to + 1);
   const header = firstNodeOf(body[0]).id;
   const backEdgeId =
@@ -1895,7 +1912,161 @@ export function wrapInLoop(
   };
   seq.blocks.splice(from, to - from + 1, loop);
   seq.exit = { kind: "stop", reason: "blockEnds" };
+  repath(seq);
+}
+
+/**
+ * Whether an empty "Repeat" block can go to slot `index` of the sequence at
+ * `path`: the repeat never ends, so it closes its sequence (nothing may come
+ * after it, and a sequence that falls through to a merge or a loop header
+ * cannot hold it). The check the first step added to it is wrapped by.
+ */
+export function canInsertLoopAt(
+  tree: BlockTree,
+  path: SeqPath,
+  index: number,
+): Capability {
+  const slot = canInsertAt(tree, path, index);
+  if (!slot.ok) return slot;
+  const seq = seqAt(tree, path)!;
+  if (index !== seq.blocks.length || seq.exit.kind === "fallthrough") {
+    return no("scenarios.editor.cannot.loopNotAtEnd");
+  }
+  if (index === 0 && loopOfBody(tree, path)) {
+    return no("scenarios.editor.cannot.loopHeader");
+  }
+  return OK;
+}
+
+/**
+ * The first step of a pending (empty) Repeat block: a new step of `type` at
+ * the end of the sequence at `path`, closed by a back edge to itself. The
+ * empty block is never in the file; this is what makes it real.
+ */
+export function insertStepIntoNewLoop(
+  def: ScenarioDefinition,
+  tree: BlockTree,
+  path: SeqPath,
+  index: number,
+  type: ScenarioNodeType,
+): ScenarioDefinition {
+  if (!canInsertLoopAt(tree, path, index).ok) return def;
+  if (isTerminal(createDefaultNode(type))) return def;
+  const t = cloneTree(tree);
+  const seq = seqAt(t, path)!;
+  insertBlockAt(t, seq, index, {
+    kind: "step",
+    node: createDefaultNode(type),
+    edgeIn: null,
+  });
+  if (!canWrapInLoop(t, path, index, index).ok) return def;
+  applyWrapInLoop(seq, index, index);
   return rebuildFromTree(def, t);
+}
+
+/** Takes the step `nodeId` out of where it is and puts it at slot `index`
+ *  of the sequence at `path` (`loop`: as the first step of a new Repeat
+ *  block there). The tree is a clone; null when refused, with the reason. */
+function simulateMoveTo(
+  tree: BlockTree,
+  nodeId: string,
+  path: SeqPath,
+  index: number,
+  loop: boolean,
+): { t: BlockTree; target: Seq; at: number } | { reason: MessageKey } {
+  const found = locate(tree, nodeId);
+  if (!found) return { reason: "scenarios.editor.cannot.notInTree" };
+  if (found.block.kind !== "step") {
+    return { reason: "scenarios.editor.cannot.notAStep" };
+  }
+  if (isTerminal(found.block.node)) {
+    return { reason: "scenarios.editor.cannot.terminalStep" };
+  }
+  const removal = editCapabilities(tree, { kind: "node", nodeId }).removeStep;
+  if (!removal.ok) return { reason: removal.reason };
+  if (!seqAt(tree, path))
+    return { reason: "scenarios.editor.cannot.notInTree" };
+  const t = cloneTree(tree);
+  const src = locate(t, nodeId)!;
+  const target = seqAt(t, path)!;
+  if (src.seq === target) {
+    const n = target.blocks.length;
+    // The loop closes the sequence: the step itself being last is a wrap.
+    if (!(loop && src.index === n - 1 && index === n)) {
+      if (index === src.index || index === src.index + 1) {
+        return { reason: "scenarios.editor.cannot.samePlace" };
+      }
+    }
+  }
+  if (src.seq === target && loop && src.index === target.blocks.length - 1) {
+    // Wrapping the last step of its own sequence where it stands.
+    const cap = canWrapInLoop(t, path, src.index, src.index);
+    if (!cap.ok) return { reason: cap.reason };
+    applyWrapInLoop(target, src.index, src.index);
+    [t.root, ...t.detached].forEach(repath);
+    return { t, target, at: src.index };
+  }
+  const block = removeStepBlockAt(t, src.seq, src.index, true);
+  [t.root, ...t.detached].forEach(repath);
+  // `index` counts the slots as they were: a step taken out above the slot
+  // moves it up by one.
+  const at = src.seq === target && src.index < index ? index - 1 : index;
+  const slot = loop
+    ? canInsertLoopAt(t, target.path, at)
+    : canInsertAt(t, target.path, at);
+  if (!slot.ok) return { reason: slot.reason };
+  insertBlockAt(t, target, at, {
+    kind: "step",
+    node: block.node,
+    edgeIn: null,
+  });
+  if (loop) {
+    const cap = canWrapInLoop(t, target.path, at, at);
+    if (!cap.ok) return { reason: cap.reason };
+    applyWrapInLoop(target, at, at);
+  }
+  [t.root, ...t.detached].forEach(repath);
+  return { t, target, at };
+}
+
+/**
+ * Whether the step `nodeId` can be dropped at slot `index` of the sequence at
+ * `path` (any sequence: a drag across lanes and into or out of loops is a
+ * remove and an insert). `loop`: into a new Repeat block at that slot.
+ */
+export function canMoveStepTo(
+  tree: BlockTree,
+  nodeId: string,
+  path: SeqPath,
+  index: number,
+  loop = false,
+): Capability {
+  const out = simulateMoveTo(tree, nodeId, path, index, loop);
+  return "reason" in out ? no(out.reason) : OK;
+}
+
+/**
+ * Moves the step `nodeId` to slot `index` of the sequence at `path`, across
+ * sequences if need be. Returns `def` itself when refused (see
+ * {@link canMoveStepTo}) or when the result would not read back as asked.
+ */
+export function moveStepTo(
+  def: ScenarioDefinition,
+  tree: BlockTree,
+  nodeId: string,
+  path: SeqPath,
+  index: number,
+  loop = false,
+): ScenarioDefinition {
+  const out = simulateMoveTo(tree, nodeId, path, index, loop);
+  if ("reason" in out) return def;
+  const next = rebuildFromTree(def, out.t);
+  // Safety net: the file must read back with the step where it was dropped.
+  const back = recognizeBlockTree(next);
+  const place = back.nodePath.get(nodeId);
+  const want = loop ? `${out.target.path}/${out.at}/body` : out.target.path;
+  if (!place || place.path !== want) return def;
+  return next;
 }
 
 /** Whether a run in `seq` (or a lane nested in it) falls through to `id`. */

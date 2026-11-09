@@ -265,5 +265,11 @@
   "scenarios.addStep.structure.loopHelp": "Repeats the steps inside it. In Steps view, drop steps into it; in Graph view, pick the step to go back to.",
   "scenarios.inspector.collapse": "Collapse the step panel",
   "scenarios.inspector.expand": "Expand the step panel",
-  "scenarios.inspector.rail": "Step settings"
+  "scenarios.inspector.rail": "Step settings",
+  "scenarios.editor.cannot.samePlace": "The step is already there.",
+  "scenarios.editor.cannot.moveUnstable": "The steps would not read back as dropped; nothing was changed.",
+  "scenarios.addStep.structure.switch": "Switch (branch on a value)",
+  "scenarios.addStep.structure.switchHelp": "Adds a branch block with a lane per case and a default lane. Drop steps into the lanes; the lanes meet again at the step that follows.",
+  "scenarios.addStep.structure.choice": "Choice (random branch)",
+  "scenarios.addStep.structure.choiceHelp": "Adds a branch block with two weighted options, one picked at random. Drop steps into the lanes; the lanes meet again at the step that follows."
 }

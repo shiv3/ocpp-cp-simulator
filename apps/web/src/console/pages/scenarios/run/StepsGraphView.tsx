@@ -18,8 +18,8 @@ import {
 } from "../../../lib/stepLayout";
 import { dropNeighbours } from "../../../lib/useLaneDrag";
 import { useStepEditing, type InsertSlot } from "../edit/stepEditing";
+import IssueBadge from "../edit/IssueBadge";
 import {
-  IssueBadge,
   SEVERITY,
   useMarkCounts,
   useMarkMessages,

@@ -9,7 +9,7 @@ import SegmentedControl from "../../components/SegmentedControl";
 import { deriveStepLayout, layoutSteps } from "../../lib/stepLayout";
 import StepInspector from "./edit/StepInspector";
 import UnsupportedOutline from "./edit/UnsupportedOutline";
-import { useScenarioIssues } from "./edit/GraphIssues";
+import { useScenarioIssues } from "./edit/issueMarkUi";
 import StepsGraphView from "./run/StepsGraphView";
 import StepsView from "./run/StepsView";
 

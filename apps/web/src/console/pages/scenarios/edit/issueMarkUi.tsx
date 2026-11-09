@@ -2,13 +2,31 @@ import { useTranslation } from "react-i18next";
 import React from "react";
 import { AlertTriangle, Info, XCircle, type LucideIcon } from "lucide-react";
 
-import { cn } from "@/lib/utils";
-import type { DiagnosticSeverity } from "@ocpp-cp-simulator/core/scenario/diagnostic";
+import type {
+  Diagnostic,
+  DiagnosticSeverity,
+} from "@ocpp-cp-simulator/core/scenario/diagnostic";
+import type { ScenarioDefinition } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import { validateScenarioGraph } from "@ocpp-cp-simulator/core/scenario/scenarioGraphValidator";
 import {
   highlightedBy,
+  issueMarks,
   type IssueMark,
   type IssueMarks,
 } from "../../../lib/graphIssueMarks";
+import { outlineScenario } from "../../../lib/scenarioOutline";
+import {
+  drawnEdgeIds,
+  stepIndexOf,
+  type StepLayout,
+} from "../../../lib/stepLayout";
+import { nodeTitle } from "../run/stepVisuals";
+
+/*
+ * The editor's diagnostics in the views: worked out once per change
+ * (`useScenarioIssues`), described as the warning box's lines, and marked
+ * on the steps (`useStepIssues`, `IssueBadge`) and the Graph view's edges.
+ */
 
 /** The editor's diagnostics as a view shows them. */
 export interface ViewIssues {
@@ -102,39 +120,6 @@ export function useMarkMessages(): (mark: IssueMark) => string {
 }
 
 /**
- * The severity badge of a marked step: the worst severity's icon and the
- * number of diagnostics, named by its counts, with the messages as its
- * tooltip.
- */
-export const IssueBadge: React.FC<{
-  mark: IssueMark;
-  className?: string;
-  style?: React.CSSProperties;
-}> = ({ mark, className, style: placement }) => {
-  const counts = useMarkCounts();
-  const messages = useMarkMessages();
-  const style = SEVERITY[mark.severity];
-  const Icon = style.icon;
-  return (
-    <span
-      role="img"
-      data-issue-badge={mark.severity}
-      aria-label={counts(mark)}
-      title={messages(mark)}
-      style={placement}
-      className={cn(
-        "inline-flex h-[18px] items-center gap-0.5 rounded-full border border-current/40 bg-cx-card px-1.5 text-[11px] font-semibold leading-none shadow-[0_1px_2px_rgba(20,20,30,0.08)]",
-        style.text,
-        className,
-      )}
-    >
-      <Icon aria-hidden className="h-3 w-3" strokeWidth={2.25} />
-      {mark.entries.length}
-    </span>
-  );
-};
-
-/**
  * A step's marks in a view: the badge (with an id for the card's
  * `aria-describedby`), its severity classes, whether a warning line points
  * at it, and the hover / focus handlers that point back at the lines.
@@ -178,4 +163,69 @@ export function useStepIssues(issues: ViewIssues | undefined) {
         ),
     };
   };
+}
+
+/**
+ * A diagnostic's line: its message, naming the step by the number its box
+ * shows (the outline's number for a scenario the views cannot draw) and its
+ * title.
+ */
+export function useDescribeIssue(
+  scenario: Pick<ScenarioDefinition, "nodes" | "edges">,
+  layout: StepLayout | null,
+): (issue: Diagnostic) => string {
+  const { t } = useTranslation();
+  return React.useMemo(() => {
+    const outline = layout?.supported ? null : outlineScenario(scenario);
+    return (issue: Diagnostic) => {
+      const node = scenario.nodes.find((n) => n.id === issue.nodeId);
+      const n =
+        (layout?.supported && node ? stepIndexOf(layout, node.id) : null) ??
+        outline?.find((step) => step.node.id === node?.id)?.number ??
+        "";
+      return t(`scenarios.editor.issue.${issue.code}` as never, {
+        n,
+        title: node ? nodeTitle(node) : "",
+        handle: String(issue.data?.handle ?? ""),
+      });
+    };
+  }, [scenario, layout, t]);
+}
+
+const NO_SCENARIO = { nodes: [], edges: [] };
+
+/**
+ * The scenario's wiring diagnostics (`validateScenarioGraph`), worked out
+ * once per change, with their lines and their marks in the view shown: the
+ * Graph view draws edges; the Steps view and the outline do not, so an edge's
+ * diagnostic marks its source step there.
+ */
+export function useScenarioIssues(
+  scenario: Pick<ScenarioDefinition, "nodes" | "edges"> | null,
+  layout: StepLayout | null,
+  view: "graph" | "steps" | "outline",
+): {
+  issues: readonly Diagnostic[];
+  describe: (issue: Diagnostic) => string;
+  marks: IssueMarks;
+} {
+  const def = scenario ?? NO_SCENARIO;
+  const issues = React.useMemo(
+    () => (scenario ? validateScenarioGraph(scenario) : []),
+    [scenario],
+  );
+  const describe = useDescribeIssue(def, layout);
+  const marks = React.useMemo(
+    () =>
+      issueMarks(
+        issues,
+        def,
+        view === "graph" && layout?.supported
+          ? drawnEdgeIds(layout)
+          : new Set<string>(),
+        describe,
+      ),
+    [issues, def, view, layout, describe],
+  );
+  return { issues, describe, marks };
 }

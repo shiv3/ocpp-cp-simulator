@@ -6,7 +6,8 @@ import type { ScenarioDefinition } from "@ocpp-cp-simulator/core/cp/application/
 import { outlineScenario } from "../../../lib/scenarioOutline";
 import { stepSummary } from "../../../lib/scenarioSteps";
 import { nodeTitle } from "../run/stepVisuals";
-import { IssueBadge, useStepIssues, type ViewIssues } from "./issueMarkUi";
+import IssueBadge from "./IssueBadge";
+import { useStepIssues, type ViewIssues } from "./issueMarkUi";
 
 /**
  * The steps of a scenario neither editor view can draw (a second fork, a

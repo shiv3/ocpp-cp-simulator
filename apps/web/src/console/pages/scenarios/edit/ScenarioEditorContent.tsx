@@ -39,8 +39,8 @@ import StepsGraphView from "../run/StepsGraphView";
 import StepsView from "../run/StepsView";
 import { nodeTitle } from "../run/stepVisuals";
 import ScenarioMetaBar from "./ScenarioMetaBar";
-import GraphIssues, { useScenarioIssues } from "./GraphIssues";
-import type { ViewIssues } from "./issueMarkUi";
+import GraphIssues from "./GraphIssues";
+import { useScenarioIssues, type ViewIssues } from "./issueMarkUi";
 import StepInspector from "./StepInspector";
 import UnsupportedOutline from "./UnsupportedOutline";
 

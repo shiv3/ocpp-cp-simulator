@@ -31,7 +31,8 @@ import {
 } from "../../../lib/useLaneDrag";
 import type { ScenarioRunState } from "../../../lib/useScenarioRun";
 import { useStepEditing } from "../edit/stepEditing";
-import { IssueBadge, useStepIssues } from "../edit/issueMarkUi";
+import IssueBadge from "../edit/IssueBadge";
+import { useStepIssues } from "../edit/issueMarkUi";
 import StepTile from "./StepTile";
 import {
   CURRENT_RING,

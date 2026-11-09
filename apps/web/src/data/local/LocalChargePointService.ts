@@ -167,6 +167,7 @@ function toConnectorSnapshot(
     transactionStartTime: tx?.startTime ?? null,
     transactionTagId: tx?.tagId ?? null,
     transactionBatteryCapacityKwh: tx?.batteryCapacityKwh ?? null,
+    evConnection: connector.evConnection,
   };
 }
 
@@ -704,6 +705,18 @@ export class LocalChargePointService implements ChargePointService {
 
   async evDisconnected(id: string, connectorId: number): Promise<void> {
     this.getExistingChargePointOrThrow(id).evDisconnected(connectorId);
+  }
+
+  async evPlugIn(id: string, connectorId: number): Promise<void> {
+    this.getExistingChargePointOrThrow(id).evPlugIn(connectorId);
+  }
+
+  async evSetReady(
+    id: string,
+    connectorId: number,
+    ready: boolean,
+  ): Promise<void> {
+    this.getExistingChargePointOrThrow(id).evSetReady(connectorId, ready);
   }
 
   async sendStatusNotification(

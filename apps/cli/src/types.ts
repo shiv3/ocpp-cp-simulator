@@ -7,6 +7,7 @@ import type { TransportConfig } from "@ocpp-cp-simulator/core/cp/infrastructure/
 import type { UrlDistribution } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/SupervisionUrlPool";
 import type { InboundValidationMode } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
 import type { ChargePointCapabilityProfile } from "@ocpp-cp-simulator/core/cp/domain/charge-point/CapabilityProfile";
+import type { ChargerCapabilities } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargerCapabilities";
 import type { IdTagDistribution } from "@ocpp-cp-simulator/core/cp/domain/auth/IdTagPool";
 import type { Labels } from "@ocpp-cp-simulator/contracts/labels";
 import type { JsonObject } from "@ocpp-cp-simulator/contracts/behavior";
@@ -252,6 +253,8 @@ export interface CLIOptions {
   /** `--reconnect-*` and `--boot-retry-limit` (#609). */
   readonly transport?: TransportConfig;
   readonly capabilityProfile?: ChargePointCapabilityProfile;
+  /** Charger-side delivery caps per connector (#327). */
+  readonly chargerCapabilities?: ChargerCapabilities;
   readonly tls?: OcppTlsOptions;
   readonly tlsCaPath?: string;
   readonly tlsCertPath?: string;
@@ -281,6 +284,8 @@ export interface ChargePointInitOptions {
   /** Transport settings (#609): reconnect policy. Persisted. */
   readonly transport?: TransportConfig;
   readonly capabilityProfile?: ChargePointCapabilityProfile;
+  /** Charger-side delivery caps per connector (#327). Persisted. */
+  readonly chargerCapabilities?: ChargerCapabilities;
   /**
    * Resolved idTags this charge point draws from when a call names none. The
    * `file` form is resolved at creation, so what is stored and persisted is
@@ -409,6 +414,9 @@ export interface ConnectorStatus {
   readonly transactionStartTime: string | null;
   readonly transactionTagId: string | null;
   readonly transactionBatteryCapacityKwh: number | null;
+  /** The EV and cable state (#453). */
+  readonly evConnection?:
+    "disconnected" | "connected-ready" | "connected-not-ready";
 }
 
 export interface ChargePointStatus {
@@ -453,6 +461,8 @@ export interface ChargePointStatus {
     readonly inboundValidation?: InboundValidationMode;
     readonly reservationAuthorizeIdTag?: boolean;
     readonly capabilityProfile?: ChargePointCapabilityProfile;
+    readonly transport?: TransportConfig;
+    readonly chargerCapabilities?: ChargerCapabilities;
     readonly tlsCaPath?: string;
     readonly tlsCertPath?: string;
     readonly tlsKeyPath?: string;

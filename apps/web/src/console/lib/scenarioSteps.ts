@@ -10,7 +10,11 @@ import {
   type ConnectorPlugNodeData,
   type CsmsCallTriggerNodeData,
   type DataTransferNodeData,
+  type ChoiceNodeData,
   type DelayNodeData,
+  type NotifyNodeData,
+  type SetStateNodeData,
+  type SwitchNodeData,
   type InboundPolicyNodeData,
   type MeterValueNodeData,
   type NotificationNodeData,
@@ -158,6 +162,52 @@ export function deriveDisplayedSteps(
 }
 
 /**
+ * The `sourceHandle` each node's one outgoing edge carries, read from `edges`.
+ * A `switch` or `choice` picks its edge by handle (`case-<n>` / `default` /
+ * `option-<n>`, schema 1.6), so a rebuild that dropped them would make the
+ * node end its branch at run time (#822 review). A switch or choice whose
+ * single edge has none gets the first lane it can run: `default` / `option-0`.
+ */
+function handlesBySource(
+  nodes: readonly ScenarioNode[],
+  edges: readonly Edge[],
+): (sourceId: string) => string | undefined {
+  const bySource = new Map<string, string | undefined>();
+  const count = new Map<string, number>();
+  for (const e of edges) {
+    count.set(e.source, (count.get(e.source) ?? 0) + 1);
+    bySource.set(e.source, e.sourceHandle ?? undefined);
+  }
+  const typeById = new Map(nodes.map((n) => [n.id, n.type]));
+  return (sourceId) => {
+    const kept = count.get(sourceId) === 1 ? bySource.get(sourceId) : undefined;
+    if (kept !== undefined) return kept;
+    const type = typeById.get(sourceId);
+    if (type === ScenarioNodeType.SWITCH) return "default";
+    if (type === ScenarioNodeType.CHOICE) return "option-0";
+    return undefined;
+  };
+}
+
+/** The handle of lane `index` leaving a fork node: the one it had, else the
+ *  lane's own on a `switch` (`case-<index>` while cases remain, then `default`)
+ *  or a `choice` (`option-<index>`). */
+function forkHandle(
+  fork: ScenarioNode,
+  index: number,
+  existing: string | undefined,
+): string | undefined {
+  if (existing !== undefined) return existing;
+  if (fork.type === ScenarioNodeType.CHOICE) return `option-${index}`;
+  if (fork.type === ScenarioNodeType.SWITCH) {
+    const cases = (fork.data as { cases?: unknown[] }).cases;
+    const n = Array.isArray(cases) ? cases.length : 0;
+    return index < n ? `case-${index}` : "default";
+  }
+  return undefined;
+}
+
+/**
  * Rebuilds a scenario's `nodes`/`edges` from an ordered step list, keeping
  * (or creating, if absent) the START/END nodes, rewriting edges into a
  * single chain start→s1→…→sn→end, and repositioning every node on a
@@ -180,12 +230,15 @@ export function rebuildLinearScenario(
     position: { x: 250, y: idx * 120 },
   }));
 
+  const handleOf = handlesBySource(def.nodes, def.edges);
   const edges: Edge[] = [];
   for (let i = 0; i < positioned.length - 1; i++) {
+    const sourceHandle = handleOf(positioned[i].id);
     edges.push({
       id: crypto.randomUUID(),
       source: positioned[i].id,
       target: positioned[i + 1].id,
+      ...(sourceHandle === undefined ? {} : { sourceHandle }),
     });
   }
 
@@ -249,6 +302,9 @@ export type StepLane = "main" | number;
 interface LaneShape {
   main: ScenarioNode[];
   branches: ScenarioNode[][] | null;
+  /** The `sourceHandle` of each branch's edge from the fork node, in step
+   *  with `branches` (undefined: none yet). */
+  handles: Array<string | undefined>;
   links: StepLink[];
 }
 
@@ -258,6 +314,9 @@ function laneShape(layout: StepLayout): LaneShape {
     branches: layout.fork
       ? layout.fork.branches.map((branch) => [...branch.steps])
       : null,
+    handles: layout.fork
+      ? layout.fork.branches.map((branch) => branch.handle)
+      : [],
     links: layout.links.map((link) => ({ ...link })),
   };
 }
@@ -318,12 +377,21 @@ function rebuildLaneScenario(
   if (branches) for (const id of mainIds) stepIds.add(id);
 
   const edges: Edge[] = [];
-  const link = (source: ScenarioNode, target: ScenarioNode, id?: string) =>
+  const handleOf = handlesBySource(def.nodes, def.edges);
+  const link = (
+    source: ScenarioNode,
+    target: ScenarioNode,
+    id?: string,
+    handle?: string,
+  ) => {
+    const sourceHandle = handle ?? handleOf(source.id);
     edges.push({
       id: id ?? crypto.randomUUID(),
       source: source.id,
       target: target.id,
+      ...(sourceHandle === undefined ? {} : { sourceHandle }),
     });
+  };
 
   if (branches) {
     const chain = [startNode, ...shape.main];
@@ -348,16 +416,28 @@ function rebuildLaneScenario(
       source.id === l.source ? l.id : undefined,
     );
   }
-  for (const lane of lanes) {
+  for (const [laneIndex, lane] of lanes.entries()) {
     const chain = branches
       ? [lane.from, ...lane.steps]
       : [startNode, ...lane.steps];
+    // The edge that leaves the fork node carries the lane's handle.
+    const handleAt = (i: number): string | undefined =>
+      branches && i === 0
+        ? forkHandle(lane.from, laneIndex, shape.handles[laneIndex])
+        : undefined;
     for (let i = 0; i < chain.length - 1; i++) {
       // Without a fork the chain's edges are this lane's; with one, each
       // branch's edges start at the fork node.
-      link(chain[i], chain[i + 1]);
+      link(chain[i], chain[i + 1], undefined, handleAt(i));
     }
-    if (!closed.has(lane.steps)) link(chain[chain.length - 1], endNode);
+    if (!closed.has(lane.steps)) {
+      link(
+        chain[chain.length - 1],
+        endNode,
+        undefined,
+        handleAt(chain.length - 1),
+      );
+    }
   }
 
   return { ...def, nodes, edges, updatedAt: new Date().toISOString() };
@@ -447,6 +527,7 @@ export function removeLaneStep(
   if (found.lane !== "main" && shape.branches) {
     if (shape.branches[found.lane].length === 0) {
       shape.branches.splice(found.lane, 1);
+      shape.handles.splice(found.lane, 1);
     }
     if (shape.branches.length === 1) {
       shape.main.push(...shape.branches[0]);
@@ -471,6 +552,7 @@ export function addParallelBranch(
   shape.branches = shape.branches
     ? [...shape.branches, [delay]]
     : [[], [delay]];
+  shape.handles = shape.branches.map((_, i) => shape.handles[i]);
   return rebuildLaneScenario(def, shape);
 }
 
@@ -747,6 +829,46 @@ export function createDefaultNode(type: ScenarioNodeType): ScenarioNode {
           behaviorId: "",
         } satisfies UseBehaviorNodeData,
       };
+    case ScenarioNodeType.NOTIFY:
+      return {
+        id,
+        type,
+        position,
+        data: {
+          label: "Notify",
+          kind: "firmwareStatus",
+          status: "Idle",
+        } satisfies NotifyNodeData,
+      };
+    case ScenarioNodeType.SWITCH:
+      return {
+        id,
+        type,
+        position,
+        data: {
+          label: "Switch",
+          value: { $from: "state.mode" },
+          cases: ["a", "b"],
+        } satisfies SwitchNodeData,
+      };
+    case ScenarioNodeType.CHOICE:
+      return {
+        id,
+        type,
+        position,
+        data: { label: "Choice", options: [{}, {}] } satisfies ChoiceNodeData,
+      };
+    case ScenarioNodeType.SET_STATE:
+      return {
+        id,
+        type,
+        position,
+        data: {
+          label: "Set state",
+          key: "mode",
+          value: "a",
+        } satisfies SetStateNodeData,
+      };
     case ScenarioNodeType.CSMS_CALL_TRIGGER:
       return {
         id,
@@ -889,7 +1011,13 @@ export function stepSummary(node: ScenarioNode): string {
     }
     case ScenarioNodeType.DELAY: {
       const d = node.data as DelayNodeData;
-      return `${d.delaySeconds} s`;
+      return [
+        `${d.delaySeconds} s`,
+        d.until ? `until ${d.until}` : "",
+        d.jitterSeconds ? `jitter ≤ ${d.jitterSeconds} s` : "",
+      ]
+        .filter(Boolean)
+        .join(" · ");
     }
     case ScenarioNodeType.REMOTE_START_TRIGGER: {
       const d = node.data as RemoteStartTriggerNodeData;
@@ -973,12 +1101,30 @@ export function stepSummary(node: ScenarioNode): string {
           ? `CALLERROR ${d.errorCode ?? "GenericError"}`
           : d.kind === "none"
             ? "no answer"
-            : "CALLRESULT";
+            : d.kind === "accepted" || d.kind === "rejected"
+              ? d.kind
+              : "CALLRESULT";
       return d.skipValidation ? `${what} (unvalidated)` : what;
     }
     case ScenarioNodeType.USE_BEHAVIOR: {
       const d = node.data as UseBehaviorNodeData;
       return d.behaviorId;
+    }
+    case ScenarioNodeType.NOTIFY: {
+      const d = node.data as NotifyNodeData;
+      return `${d.kind} ${d.status}`;
+    }
+    case ScenarioNodeType.SWITCH: {
+      const d = node.data as SwitchNodeData;
+      return `${JSON.stringify(d.value)} · ${d.cases?.length ?? 0} cases`;
+    }
+    case ScenarioNodeType.CHOICE: {
+      const d = node.data as ChoiceNodeData;
+      return `${d.options?.length ?? 0} options`;
+    }
+    case ScenarioNodeType.SET_STATE: {
+      const d = node.data as SetStateNodeData;
+      return `${d.key} = ${JSON.stringify(d.value)}`;
     }
     default:
       return label;
@@ -1040,6 +1186,10 @@ export const STEP_CATEGORIES: ReadonlyArray<{
       ScenarioNodeType.OCPP_CALL,
       ScenarioNodeType.CALL_RESPONSE,
       ScenarioNodeType.USE_BEHAVIOR,
+      ScenarioNodeType.NOTIFY,
+      ScenarioNodeType.SWITCH,
+      ScenarioNodeType.CHOICE,
+      ScenarioNodeType.SET_STATE,
       ScenarioNodeType.RESERVE_NOW,
       ScenarioNodeType.CANCEL_RESERVATION,
     ],

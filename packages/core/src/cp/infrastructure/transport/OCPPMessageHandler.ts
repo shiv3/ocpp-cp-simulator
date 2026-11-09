@@ -109,6 +109,7 @@ import { clockOf, unrefTimerHandle } from "../../shared/clock";
 import type { SimClock, TimerHandle } from "../../shared/clock";
 import { systemRngStreams } from "../../shared/rng";
 import type { Rng } from "../../shared/rng";
+import type { OperatingPoint } from "../../domain/connector/OperatingPoint";
 import type { TransactionLifecycleEvent } from "../../domain/transport/TransactionLifecycleEvent";
 import type { MonitoringEvent } from "../../domain/monitoring/MonitorEvaluation";
 import type { Logger } from "../../shared/Logger";
@@ -318,14 +319,16 @@ class RequestHistory {
 
 /** A CALL waiting for, or holding, the §4.1.1 serialization slot. */
 /** #565: identifies the StartTransaction.req of a transaction: its `idTag`
- *  and `timestamp` (the same pair `isRunningTransactionStartedBy` matches). */
+ *  and `timestamp` (the pair `isRunningTransactionStartedBy` matches) on its
+ *  connector: the start time is unique per connector only. */
 interface StartRef {
+  connectorId: number;
   idTag: string;
   startedAt: string;
 }
 
 function startKey(ref: StartRef): string {
-  return `${ref.idTag}\u0000${ref.startedAt}`;
+  return `${ref.connectorId}\u0000${ref.idTag}\u0000${ref.startedAt}`;
 }
 
 /** The OCPP 1.6 Part 2 errata (3.18) id for a transaction whose
@@ -596,6 +599,28 @@ export class OCPPMessageHandler {
         signedBeginOcmf: signedBegin.ocmf,
       });
     }
+    // #607: the Transaction.Begin sample of StopTxnSampledData waits on the
+    // transaction like the signed one; StopTransaction is the only message
+    // that can carry it (1.6 §3.16.1).
+    const connector = this._chargePoint.getConnector(connectorId);
+    const beginMeasurands =
+      this._chargePoint.configuration.stopTxnSampledData();
+    if (connector && beginMeasurands.length > 0) {
+      const sampledValue = buildSampledValues(
+        connector,
+        beginMeasurands,
+        "Transaction.Begin",
+        { intervalStream: "txEnded-sampled" },
+      );
+      if (sampledValue.length > 0) {
+        patchTransaction(this._chargePoint, connectorId, transaction, {
+          txEndedSamples: [
+            ...(transaction.txEndedSamples ?? []),
+            { timestamp: transaction.startTime.toISOString(), sampledValue },
+          ],
+        });
+      }
+    }
     this.sendRequest(
       OCPPAction.StartTransaction,
       messageId,
@@ -607,6 +632,7 @@ export class OCPPMessageHandler {
   private sendStopTransaction(
     transaction: Transaction,
     connectorId: number,
+    endPoint?: OperatingPoint,
   ): void {
     const messageId = this.generateMessageId();
     // §4.10: reason MAY be omitted when "Local" (the default), but SHOULD
@@ -617,6 +643,7 @@ export class OCPPMessageHandler {
     const transactionData = this.signedTransactionData(
       transaction,
       connectorId,
+      endPoint,
     );
     const payload: StopTransactionRequestV16 = {
       transactionId: this.wireTransactionId(transaction),
@@ -635,6 +662,7 @@ export class OCPPMessageHandler {
       undefined,
       false,
       {
+        connectorId: transaction.connectorId,
         idTag: transaction.tagId,
         startedAt: transaction.startTime.toISOString(),
       },
@@ -650,6 +678,7 @@ export class OCPPMessageHandler {
   private signedTransactionData(
     transaction: Transaction,
     connectorId: number,
+    endPoint?: OperatingPoint,
   ): StopTransactionRequestV16["transactionData"] {
     if (transaction.meterStop === null || transaction.stopTime === null)
       return undefined;
@@ -658,7 +687,29 @@ export class OCPPMessageHandler {
       energyWh: transaction.meterStop,
       at: transaction.stopTime,
     });
-    if (!end && !transaction.signedBeginOcmf) return undefined;
+    // #607: the history (begin sample, periodic and clock-aligned ones) and
+    // the Transaction.End sample of StopTxnSampledData, formatted from the
+    // point captured at the stop instant (1.6 §3.16.1, §3.16.2).
+    const history = transaction.txEndedSamples ?? [];
+    const endMeasurands = this._chargePoint.configuration.stopTxnSampledData();
+    const connector = this._chargePoint.getConnector(connectorId);
+    const endSample =
+      connector && endMeasurands.length > 0
+        ? buildSampledValues(
+            connector,
+            endMeasurands,
+            "Transaction.End",
+            { intervalStream: "txEnded-sampled" },
+            endPoint,
+          )
+        : [];
+    if (
+      !end &&
+      !transaction.signedBeginOcmf &&
+      history.length === 0 &&
+      endSample.length === 0
+    )
+      return undefined;
     const data = [
       ...(transaction.signedBeginOcmf
         ? [
@@ -670,6 +721,15 @@ export class OCPPMessageHandler {
                   "Transaction.Begin",
                 ),
               ],
+            },
+          ]
+        : []),
+      ...history,
+      ...(endSample.length > 0
+        ? [
+            {
+              timestamp: transaction.stopTime.toISOString(),
+              sampledValue: endSample,
             },
           ]
         : []),
@@ -689,7 +749,12 @@ export class OCPPMessageHandler {
   public sendTransactionEvent(event: TransactionLifecycleEvent): void {
     if (event.phase === "started")
       this.sendStartTransaction(event.transaction, event.connectorId);
-    else this.sendStopTransaction(event.transaction, event.connectorId);
+    else
+      this.sendStopTransaction(
+        event.transaction,
+        event.connectorId,
+        event.endPoint,
+      );
   }
 
   public sendTransactionUpdate(
@@ -1061,8 +1126,13 @@ export class OCPPMessageHandler {
     overrides: MeterSampleOverrides = {},
   ): void {
     const messageId = this.generateMessageId();
-    const connector = this._chargePoint.getConnector(connectorId);
-    if (!connector) {
+    // Connector 0 is the station main meter, when the station has one (#617).
+    const mainMeter =
+      connectorId === 0 ? this._chargePoint.mainMeter : undefined;
+    const connector = mainMeter
+      ? undefined
+      : this._chargePoint.getConnector(connectorId);
+    if (!connector && !mainMeter) {
       this._logger.warn(
         `sendMeterValue: connector ${connectorId} not found`,
         LogType.METER_VALUE,
@@ -1074,16 +1144,20 @@ export class OCPPMessageHandler {
       overrides.measurands ??
       this._chargePoint.configuration.meterValuesSampledData();
     const sampledValue = toOcppJ16Wire(
-      buildSampledValues(connector, measurands, context),
+      mainMeter
+        ? mainMeter.sampledValues(measurands, context)
+        : buildSampledValues(connector!, measurands, context),
     );
+    if (mainMeter && sampledValue.length === 0) return;
     // The sender is the tick owner: announce a schedule crossing after the
     // read, so this sample describes the state before the status flip (#327).
-    connector.announceScheduleCrossingNow();
+    connector?.announceScheduleCrossingNow();
     const timestamp = overrides.timestamp ?? new Date(this.clock.now());
     // #315: during a transaction, also send the energy register signed.
     // Clock-aligned samples are not signed (no aligned/fiscal records yet).
-    const transaction = connector.transaction;
+    const transaction = connector?.transaction;
     if (
+      connector &&
       context !== "Sample.Clock" &&
       transactionId !== undefined &&
       transaction &&
@@ -1130,6 +1204,7 @@ export class OCPPMessageHandler {
       false,
       transactionId !== undefined && transaction
         ? {
+            connectorId: transaction.connectorId,
             idTag: transaction.tagId,
             startedAt: transaction.startTime.toISOString(),
           }
@@ -1273,12 +1348,26 @@ export class OCPPMessageHandler {
     }
   }
 
+  /** Whether a queued, held or waiting CALL takes its id from `ref`'s conf. */
+  private hasMessageWaitingOn(ref: StartRef): boolean {
+    const key = startKey(ref);
+    const waits = (e: { startRef?: StartRef }): boolean =>
+      e.startRef !== undefined && startKey(e.startRef) === key;
+    // A CALL in flight took its id when it was sent: it does not wait.
+    return [
+      ...this._serialQueue,
+      ...(this._held ?? []),
+      ...this._transactionMessageRetries.values(),
+    ].some(waits);
+  }
+
   private recordStartOutcome(
     start: StartTransactionRequestV16,
+    connectorId: number,
     id: number,
   ): void {
     this._startOutcomes.set(
-      startKey({ idTag: start.idTag, startedAt: start.timestamp }),
+      startKey({ connectorId, idTag: start.idTag, startedAt: start.timestamp }),
       id,
     );
     // A Stop removes its entry; this only bounds a station that never stops.
@@ -1301,6 +1390,7 @@ export class OCPPMessageHandler {
       transaction.id !== 0 ||
       !transaction.startUnanswered ||
       this.isStartLive({
+        connectorId: transaction.connectorId,
         idTag: transaction.tagId,
         startedAt: transaction.startTime.toISOString(),
       })
@@ -1313,22 +1403,34 @@ export class OCPPMessageHandler {
   /** Whether a StartTransaction.req for `ref` is in flight, queued, waiting
    *  out a resend interval, held or in the offline queue. */
   private isStartLive(ref: StartRef): boolean {
-    const is = (action: string, payload: unknown): boolean => {
+    const is = (
+      action: string,
+      payload: unknown,
+      connectorId?: number | null,
+    ): boolean => {
       if (action !== OCPPAction.StartTransaction) return false;
       const start = payload as StartTransactionRequestV16;
-      return start.idTag === ref.idTag && start.timestamp === ref.startedAt;
+      return (
+        start.idTag === ref.idTag &&
+        start.timestamp === ref.startedAt &&
+        requestConnectorId({ connectorId, payload }) === ref.connectorId
+      );
     };
     const inFlight = this._serialInFlight
       ? this._requests.get(this._serialInFlight.id)
       : undefined;
-    if (inFlight && is(inFlight.action, inFlight.payload)) return true;
+    if (inFlight && is(inFlight.action, inFlight.payload, inFlight.connectorId))
+      return true;
     const entries = [
       ...this._serialQueue,
       ...(this._held ?? []),
       ...this._transactionMessageRetries.values(),
     ];
-    if (entries.some((e) => is(e.action, e.payload))) return true;
-    return this._pendingQueue.all().some((m) => is(m.action, m.payload));
+    if (entries.some((e) => is(e.action, e.payload, e.connectorId)))
+      return true;
+    return this._pendingQueue
+      .all()
+      .some((m) => is(m.action, m.payload, m.connectorId));
   }
 
   /** #565: the waiting resend settled (answered, discarded, timed out or
@@ -1620,7 +1722,12 @@ export class OCPPMessageHandler {
       request?.action === OCPPAction.StartTransaction &&
       request.attempt !== undefined
     ) {
-      this.discardedStart(request.payload as StartTransactionRequestV16);
+      const start = request.payload as StartTransactionRequestV16;
+      const connectorId = requestConnectorId(request);
+      this.discardedStart(start, connectorId);
+      // Like a discard after a CALLERROR (#527): the transaction goes on
+      // without a StartTransaction.conf.
+      this.proceedWithoutStartConf(connectorId, start);
     }
     // 1.6 does not retry a timeout: a resend that timed out is settled.
     if (request?.attempt !== undefined && request.attempt > 1) {
@@ -1735,6 +1842,7 @@ export class OCPPMessageHandler {
       if (message.action === OCPPAction.StartTransaction) {
         const start = payload as StartTransactionRequestV16;
         startOf.set(requestConnectorId(message), {
+          connectorId: requestConnectorId(message),
           idTag: start.idTag,
           startedAt: start.timestamp,
         });
@@ -1980,11 +2088,24 @@ export class OCPPMessageHandler {
       request.attempt !== undefined
     ) {
       const id = (payload as StartTransactionResponseV16).transactionId;
-      if (typeof id === "number") {
-        this.recordStartOutcome(
-          request.payload as StartTransactionRequestV16,
-          id,
-        );
+      const start = request.payload as StartTransactionRequestV16;
+      const connectorId = requestConnectorId(request);
+      // A conf for a transaction that no longer runs and that no queued
+      // message waits on (its Stop already went out with `-1`) has nothing
+      // left to rewrite: nothing is recorded, so no entry outlives it.
+      if (
+        typeof id === "number" &&
+        (isRunningTransactionStartedBy(
+          this._chargePoint.getConnector(connectorId)?.transaction,
+          start,
+        ) ||
+          this.hasMessageWaitingOn({
+            connectorId,
+            idTag: start.idTag,
+            startedAt: start.timestamp,
+          }))
+      ) {
+        this.recordStartOutcome(start, connectorId, id);
       }
     }
     let handler = this._registry.getCallResultHandler(action);
@@ -2172,7 +2293,10 @@ export class OCPPMessageHandler {
         attempts: attempt,
       });
       if (request.action === OCPPAction.StartTransaction) {
-        this.discardedStart(request.payload as StartTransactionRequestV16);
+        this.discardedStart(
+          request.payload as StartTransactionRequestV16,
+          connectorId,
+        );
       }
       if (startedTransaction) {
         this.proceedWithoutStartConf(
@@ -2258,8 +2382,11 @@ export class OCPPMessageHandler {
    *  transaction that follow carry `-1` (1.6 errata 3.18: "SHALL send any
    *  Transaction related messages for this transaction ... with a
    *  transactionId = -1"). */
-  private discardedStart(start: StartTransactionRequestV16): void {
-    this.recordStartOutcome(start, UNKNOWN_TRANSACTION_ID);
+  private discardedStart(
+    start: StartTransactionRequestV16,
+    connectorId: number,
+  ): void {
+    this.recordStartOutcome(start, connectorId, UNKNOWN_TRANSACTION_ID);
   }
 
   /**
@@ -2301,7 +2428,10 @@ export class OCPPMessageHandler {
       attempts,
     });
     if (entry.action === OCPPAction.StartTransaction) {
-      this.discardedStart(entry.payload as StartTransactionRequestV16);
+      this.discardedStart(
+        entry.payload as StartTransactionRequestV16,
+        connectorId,
+      );
       this.proceedWithoutStartConf(
         connectorId,
         entry.payload as StartTransactionRequestV16,

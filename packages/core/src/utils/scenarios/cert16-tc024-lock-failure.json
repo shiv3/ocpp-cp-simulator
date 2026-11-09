@@ -1,7 +1,7 @@
 {
   "id": "cert16-tc024-lock-failure",
   "name": "Cert 1.6 Core: TC_024 Start Charging Session — Lock Failure",
-  "description": "Plug-in; delay 2s; StatusNotification(Faulted, ConnectorLockFailure, no transaction started); delay 2s; plug-out → StatusNotification(Available).",
+  "description": "Plug-in → StatusNotification(Preparing); delay 2s; StatusNotification(Faulted, ConnectorLockFailure, no transaction started); delay 2s; plug-out → StatusNotification(Available).",
   "targetType": "connector",
   "targetId": 1,
   "trigger": { "type": "manual" },
@@ -19,12 +19,6 @@
       "type": "connectorPlug",
       "position": { "x": 400, "y": 150 },
       "data": { "label": "Plug In", "action": "plugin" }
-    },
-    {
-      "id": "status-preparing",
-      "type": "statusChange",
-      "position": { "x": 400, "y": 250 },
-      "data": { "label": "Set Preparing", "status": "Preparing" }
     },
     {
       "id": "delay-1",
@@ -70,8 +64,7 @@
   ],
   "edges": [
     { "id": "e1", "source": "start-1", "target": "plug-in" },
-    { "id": "e2", "source": "plug-in", "target": "status-preparing" },
-    { "id": "e3", "source": "status-preparing", "target": "delay-1" },
+    { "id": "e2", "source": "plug-in", "target": "delay-1" },
     { "id": "e4", "source": "delay-1", "target": "status-faulted" },
     { "id": "e5", "source": "status-faulted", "target": "delay-2" },
     { "id": "e6", "source": "delay-2", "target": "plug-out" },

@@ -126,7 +126,9 @@ jobs:
           if git diff --unified=0 "$base"...HEAD -- '*.md' \
                | grep -qE '^[+-].*(pnpm|bun|npm) install -g https://' \
              || ! git diff --quiet "$base"...HEAD -- \
+                  .github/workflows/ci.yml \
                   .github/workflows/cli-release.yml \
+                  .github/workflows/install-urls.yml \
                   scripts/roll-cli-latest.sh \
                   scripts/verify-install-urls.sh; then
             ./scripts/verify-install-urls.sh

@@ -3,3 +3,5 @@
 {"d":"CP>","k":"call","id":"id-2","a":"StatusNotification","p":{"timestamp":"<ts>","connectorStatus":"Available","evseId":1,"connectorId":1}}
 {"d":"CSMS>","k":"result","id":"id-2","p":{}}
 {"d":"CSMS>","k":"call","id":"id-3","a":"GetLog","p":{"logType":"SecurityLog","requestId":7,"log":{"remoteLocation":"http://x"}}}
+{"d":"CP>","k":"call","id":"id-4","a":"LogStatusNotification","p":{"status":"Uploaded","requestId":7}}
+{"d":"CSMS>","k":"result","id":"id-4","p":{}}

@@ -552,9 +552,10 @@ ChangeAvailability to `Inoperative` answers `Scheduled`.
 A StartTransaction.conf belongs to the transaction its request started,
 identified by the request's `idTag` and `timestamp`. So that the pair differs
 between two transactions of one tag, a start on a connector gets a `startTime`
-strictly after the previous transaction's there: a stop then a start in the
+different from the previous transaction's there: a stop then a start in the
 same millisecond sends a timestamp 1 ms later than the clock (#586; 1.x only,
-2.x does not match on it). When it answers a resend
+2.x does not match on it). Only that collision bumps the time: a clock stepped
+back is stamped as it reads. When it answers a resend
 after that transaction stopped, or after another one began on the connector,
 it is logged and ignored: neither the transaction id nor the connector
 status changes, and a non-`Accepted` `idTagInfo` stops nothing. It still
@@ -595,7 +596,9 @@ MeterValues.req of a transaction) that follow a message being resent:
   transaction stopped (the stop waits behind it in the serial queue); `-1` when
   the StartTransaction.req was discarded or timed out (1.6 does not resend a
   timeout, and a conf that still arrives later is applied to the messages sent
-  after it). This also holds for a message salvaged to the offline queue.
+  after it). A StartTransaction.req that timed out also lets its transaction
+  go on from `Preparing` to `Charging`, as after a discard. This also holds
+  for a message salvaged to the offline queue.
 - A transaction records `startUnanswered` from its start until a
   StartTransaction.conf assigns its id (persisted with the transaction, #727):
   its `0` is a placeholder, not an id the CSMS issued (errata 3.54: a CSMS may
@@ -603,8 +606,12 @@ MeterValues.req of a transaction) that follow a message being resent:
   MeterValues.req built for such a transaction while no StartTransaction.req of
   it is in flight, queued, waiting out a resend or in the offline queue (it
   was lost with a restart or a closed link, or it timed out) is built with
-  `-1` (errata 3.18). RemoteStopTransaction naming `0` or `-1` for it is
-  `Rejected`.
+  `-1` (errata 3.18). A start is matched by connector, `idTag` and
+  `timestamp`. RemoteStopTransaction naming `0` or `-1` for it is `Rejected`.
+  A transaction persisted by a release before #727 holds `0` without the flag,
+  so after the upgrade its `0` is taken for one the CSMS issued: its
+  StopTransaction.req carries `0` and RemoteStopTransaction naming `0`
+  matches it.
 - A stop requested before the StartTransaction.req is queued (a
   `connectorStatusChange` listener of the `Preparing` status calling
   `stop_transaction`) waits for it, so on the wire the StartTransaction.req
@@ -950,9 +957,14 @@ register and never advances it.
   applies from the first accepted boot.
 - **A boundary is reported once per process**, even when a reconnect, a
   re-boot or an interval change lands on it again.
-- Not implemented: connector 0 / `evseId` 0 (main meter), `StopTxnAlignedData`
-  in `StopTransaction`, `AlignedDataCtrlr.SendDuringIdle` and the `TxEnded*`
-  variables, and per-period aggregation of `*.Interval` measurands.
+- **`AlignedDataCtrlr.SendDuringIdle`** (2.x; configuration key
+  `AlignedDataSendDuringIdle`, default `false`, #607): when `true`, no
+  clock-aligned sample goes out for any EVSE or the main meter while **any**
+  transaction runs on the station (neither `TransactionEvent(Updated)` nor
+  `MeterValues`; J01.FR.20, the variable has no EVSE); with no transaction
+  everything is sampled as before (2.0.1 Part 2 Appendices, AlignedDataCtrlr).
+- Not implemented: connector 0 / `evseId` 0 (main meter) and per-period
+  aggregation of `*.Interval` measurands.
 
 ## Periodic meter values in a 2.x transaction (#347)
 
@@ -985,6 +997,39 @@ The details are in [Control plane → Transaction event parameters](control-plan
 
 Independently of the option, the register reading in `TransactionEvent(Started)`
 and `(Ended)` carries `context` `Transaction.Begin` / `Transaction.End`.
+
+## Transaction-end meter data (#607)
+
+What a billing CSMS reads from the start and end of a transaction. **Every
+list below is empty by default and then the messages are byte-for-byte what
+they were**: 2.x `Started` / `Ended` carry the register alone and 1.6
+`StopTransaction` has no `transactionData` (unless signing adds the OCMF
+entries, #315). All samples are formatted by the one MeterValues builder from
+one operating point per sample, so a sample describes one instant (#327).
+
+| Setting (1.x key / 2.x variable)                                                      | Effect when non-empty                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `StopTxnSampledData` / `SampledDataCtrlr.TxEndedMeasurands`                           | 1.6: `Transaction.Begin` sample at start, `Sample.Periodic` samples on each scheduler tick, `Transaction.End` sample at stop, all in `StopTransaction.transactionData` (1.6 §3.16.1). 2.x: the `Transaction.Begin` reading taken at the start, the periodic samples and the `Transaction.End` sample in `TransactionEvent(Ended).meterValue` (so `TxEndedInterval` `0` gives Begin + End, E06.FR.11). Names outside `MeasurandEnumType` are refused by SetVariables (B05.FR.07) and never recorded. |
+| `StopTxnAlignedData` / `AlignedDataCtrlr.TxEndedMeasurands`                           | `Sample.Clock` samples at clock-aligned boundaries during the transaction (1.6 §3.16.2), same carriers.                                                                                                                                                                                                                                                                                                                                                                                             |
+| `TxStartedMeasurands` / `SampledDataCtrlr.TxStartedMeasurands` (2.x only)             | Extra samples with `Transaction.Begin` in `TransactionEvent(Started).meterValue`, beside the register.                                                                                                                                                                                                                                                                                                                                                                                              |
+| `TxEndedInterval` / `SampledDataCtrlr.TxEndedInterval` (2.x only, seconds)            | Spacing of the periodic samples in `Ended`; `0` (default) keeps none. Judged at the scheduler tick, so it cannot be finer than the tick.                                                                                                                                                                                                                                                                                                                                                            |
+| `AlignedDataTxEndedInterval` / `AlignedDataCtrlr.TxEndedInterval` (2.x only, seconds) | The clock-aligned grid of the `Ended` history; `0` (default) keeps none. 1.6 uses `ClockAlignedDataInterval`.                                                                                                                                                                                                                                                                                                                                                                                       |
+
+- The 1.6 periodic samples are taken at every scheduler tick, the cadence of
+  the MeterValues they accompany; a connector without a running scheduler
+  records none.
+- The 2.x `Started` / `Ended` register stays in kWh and is always sent first;
+  a listed `Energy.Active.Import.Register` is not repeated.
+- **`Transaction.End` is read at the stop instant**, from the operating point
+  captured before the status write that leaves `Charging`, so its power equals
+  the last periodic sample when the stop falls on a tick instead of reading 0
+  from a connector already in `Finishing`.
+- **The history is kept as formatted samples** on the transaction
+  (`txEndedSamples`, at most 1,000, oldest dropped), persisted with the
+  transaction (`transaction_json`, no schema change). A later change of a
+  measurand list cannot reformat what was already taken.
+- Not covered: SOAP (1.2 / 1.5 / 1.6S) keeps its `StopTransaction` without
+  `transactionData` samples.
 
 ## Signed meter values (OCMF, #315)
 

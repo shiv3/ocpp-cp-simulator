@@ -16,6 +16,7 @@ import {
   OCPPStatus,
 } from "../../../domain/types/OcppTypes";
 import { isOcpp2Version } from "../../../domain/types/OcppVersion";
+import type { TransactionLifecycleEvent } from "../../../domain/transport/TransactionLifecycleEvent";
 import { LogType } from "../../../shared/Logger";
 import { startRefusalByReservation } from "../../../domain/reservation/reservationModel";
 import { reservationAdmits } from "../../../domain/reservation/Reservation";
@@ -27,11 +28,7 @@ import { decideRemoteStart } from "./remoteStartValidation";
  */
 export interface TransactionPorts {
   /** Hand a transaction phase to the protocol encoder. */
-  sendTransactionEvent(event: {
-    phase: "started" | "ended";
-    transaction: Transaction;
-    connectorId: number;
-  }): void;
+  sendTransactionEvent(event: TransactionLifecycleEvent): void;
   /** (Re)start the ConnectionTimeOut of a connector that is in Preparing. */
   startConnectionTimeout(connectorId: number): void;
 }
@@ -442,6 +439,12 @@ export async function startTransaction(
     ...(isOcpp2Version(cp.ocppVersion) ? {} : { startUnanswered: true }),
     batteryCapacityKwh,
     initialSoc,
+    ...(options.targetSoc !== undefined
+      ? { targetSoc: options.targetSoc }
+      : {}),
+    ...(options.stopAtTarget !== undefined
+      ? { stopAtTarget: options.stopAtTarget }
+      : {}),
   };
 
   if (initialSoc !== undefined) {
@@ -454,7 +457,14 @@ export async function startTransaction(
     cp.reservationManager.cancelReservation(reservation.reservationId);
   }
 
+  const cablePluggedBefore = connector.evConnection !== "disconnected";
   connector.beginTransaction(transaction);
+  // 2.x idToken-first (E03): a transaction started before the cable is in does
+  // not put one there. The plug-in that follows is a cable event of its own
+  // (Updated CablePluggedIn / EVConnected) and stops EVConnectionTimeOut.
+  if (isOcpp2Version(cp.ocppVersion) && !cablePluggedBefore) {
+    connector.markEvUnplugged();
+  }
   // From here on the transaction is the connector's live view, so that what
   // the outbox stamps on it (2.x ids, seqNo) lands in the engine state.
   const live = connector.transaction ?? transaction;
@@ -470,6 +480,7 @@ export async function startTransaction(
   const deferredStops: Array<() => void> = [];
   const deferStops = !isOcpp2Version(cp.ocppVersion);
   if (deferStops) startsInProgress.set(connector, deferredStops);
+  let queued = false;
   try {
     if (connector.status === OCPPStatus.Preparing) {
       ports.startConnectionTimeout(connectorId);
@@ -481,8 +492,24 @@ export async function startTransaction(
       transaction: live,
       connectorId,
     });
+    queued = true;
   } finally {
     if (deferStops) startsInProgress.delete(connector);
+    // A listener or the send threw: the stops requested meanwhile are not
+    // lost with the exception. They run now, on the transaction as it is
+    // (the original error still propagates).
+    if (!queued) {
+      for (const stop of deferredStops) {
+        try {
+          stop();
+        } catch (error) {
+          cp.logger.error(
+            `Deferred stop of connector ${connectorId} failed: ${String(error)}`,
+            LogType.TRANSACTION,
+          );
+        }
+      }
+    }
   }
 
   cp.events.emit("transactionStarted", {
@@ -537,6 +564,9 @@ export function stopTransaction(
     return;
   }
 
+  // #607: the Transaction.End sample describes the last charging instant;
+  // power reads 0 once the status below leaves Charging.
+  const endPoint = connector.operatingPoint();
   connector.stopAutoMeterValue();
   connector.patchTransaction({
     stopTime: options.stoppedAt ?? nowDate(cp),
@@ -552,6 +582,7 @@ export function stopTransaction(
     phase: "ended",
     transaction,
     connectorId: connector.id,
+    endPoint,
   });
 
   cp.events.emit("transactionStopped", {
@@ -577,6 +608,9 @@ export function stopTransaction(
   cleanTransaction(cp, connector);
   connector.stopTransaction();
   if (connector.autoResetToAvailable) {
+    // The reset models the EV driving away: the cable goes with it, so the
+    // next plug-in reports Preparing again (#830 review).
+    connector.markEvUnplugged();
     cp.updateConnectorStatus(connector.id, OCPPStatus.Available);
   }
 
@@ -592,7 +626,9 @@ export function stopTransaction(
     });
     cp.updateConnectorStatus(
       connector.id,
-      scheduled === "Operative" ? OCPPStatus.Available : OCPPStatus.Unavailable,
+      scheduled === "Operative"
+        ? cp.statusWhenFree(connector.id)
+        : OCPPStatus.Unavailable,
     );
     cp.persistAvailability();
   }

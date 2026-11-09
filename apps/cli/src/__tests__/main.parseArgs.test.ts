@@ -288,7 +288,9 @@ describe("parseArgs OCPP 1.6 security flags", () => {
     expect(bad.stderr).toContain("--inbound-validation must be");
   });
 
-  const reservationBase = [
+  // One runParseArgs per test (#783): an "on" and an "off" case in one test
+  // is the shape that timed out.
+  const RESERVATION_BASE = [
     "--cp-id",
     "CP-595",
     "--ws-url",
@@ -297,7 +299,7 @@ describe("parseArgs OCPP 1.6 security flags", () => {
 
   it("--reservation-authorize-id-tag turns the #595 option on for the bootstrap charge point", () => {
     const on = runParseArgs([
-      ...reservationBase,
+      ...RESERVATION_BASE,
       "--reservation-authorize-id-tag",
     ]);
     expect(on.status).toBe(0);
@@ -308,7 +310,8 @@ describe("parseArgs OCPP 1.6 security flags", () => {
   });
 
   it("--reservation-authorize-id-tag stays off by default (#595)", () => {
-    const off = runParseArgs(reservationBase);
+    const off = runParseArgs(RESERVATION_BASE);
+    expect(off.status).toBe(0);
     expect(JSON.parse(off.stdout)).toMatchObject({
       reservationAuthorizeIdTag: null,
       bootstrapReservationAuthorizeIdTag: null,

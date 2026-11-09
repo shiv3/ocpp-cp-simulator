@@ -181,6 +181,8 @@ export const handleTriggerMessageV201 = (
             ctx.chargePoint.sendMeterValue(id, "Trigger", { measurands });
           if (connectorId === undefined || connectorId === 0) {
             for (const id of ctx.chargePoint.connectors.keys()) send(id);
+            // The station main meter on connector 0 / EVSE 0 (#617), when it has one.
+            if (ctx.chargePoint.mainMeter) send(0);
             return;
           }
           send(connectorId);

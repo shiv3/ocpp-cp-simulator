@@ -4,10 +4,10 @@
 {"d":"CSMS>","k":"result","id":"id-2","p":{}}
 {"d":"CP>","k":"call","id":"id-3","a":"StatusNotification","p":{"connectorId":1,"errorCode":"NoError","status":"Available"}}
 {"d":"CSMS>","k":"result","id":"id-3","p":{}}
-{"d":"CP>","k":"call","id":"id-4","a":"Authorize","p":{"idTag":"CERT057"}}
-{"d":"CSMS>","k":"result","id":"id-4","p":{"idTagInfo":{"status":"Accepted"}}}
-{"d":"CP>","k":"call","id":"id-5","a":"StatusNotification","p":{"connectorId":1,"errorCode":"NoError","status":"Preparing"}}
-{"d":"CSMS>","k":"result","id":"id-5","p":{}}
+{"d":"CP>","k":"call","id":"id-4","a":"StatusNotification","p":{"connectorId":1,"errorCode":"NoError","status":"Preparing"}}
+{"d":"CSMS>","k":"result","id":"id-4","p":{}}
+{"d":"CP>","k":"call","id":"id-5","a":"Authorize","p":{"idTag":"CERT057"}}
+{"d":"CSMS>","k":"result","id":"id-5","p":{"idTagInfo":{"status":"Accepted"}}}
 {"d":"CP>","k":"call","id":"id-6","a":"StartTransaction","p":{"connectorId":1,"idTag":"CERT057","meterStart":0,"timestamp":"<ts>"}}
 {"d":"CSMS>","k":"result","id":"id-6","p":{"transactionId":1,"idTagInfo":{"status":"Accepted"}}}
 {"d":"CP>","k":"call","id":"id-7","a":"StatusNotification","p":{"connectorId":1,"errorCode":"NoError","status":"Charging"}}

@@ -190,11 +190,12 @@ design left open:
   transaction paths are not engine-owned yet.
 - **Moved so far** (each with its old code deleted): `default.firmware` (`UpdateFirmware`: the 1.6 status
   train with the one-shot `SimulatedFirmwareUpdateFailure`, the 2.x acknowledgement that stays
-  ack-only; a user behavior opts in to a 2.x train) and `default.signedFirmware` (`SignedUpdateFirmware` on
+  ack-only unless the `train` param opts in to the 2.x train, #600) and `default.signedFirmware` (`SignedUpdateFirmware` on
   1.6: the signed status train carrying `requestId`), `default.diagnostics` (`GetDiagnostics` on 1.6:
   file name, then `Uploading` and `Uploaded` or `UploadFailed` around a real multipart POST) and
-  `default.logs` (`GetLog`: the 1.6 `Uploading`, two seconds, `Uploaded` sequence; on 2.x ack-only with a
-  file name, a user behavior opts in). The diagnostics behavior imports `infrastructure/file_upload`, the one
+  `default.logs` (`GetLog`: the 1.6 `Uploading`, two seconds, `Uploaded` sequence; on 2.x, since #601, `Uploading` and
+  `Uploaded` after the file name and `AcceptedCanceled` for a replaced upload; `auto: false` is the former
+  ack-only). The diagnostics behavior imports `infrastructure/file_upload`, the one
   place where `application/` reaches into `infrastructure/`; the upload is platform I/O the engine does not
   own, and `default.reset` (`Reset`: the 1.6 `Accepted` and reset after the answer; the 2.x
   `Rejected` / `Scheduled` / `Accepted` rules and the reset after the answer; since the merge of #635 an `OnIdle`

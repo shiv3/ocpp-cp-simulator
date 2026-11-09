@@ -1,3 +1,4 @@
+import type { StartTransactionOutcome } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
 import type {
   Behavior,
   JsonObject,
@@ -66,6 +67,8 @@ import { AutoTrafficRunner } from "@ocpp-cp-simulator/core/cp/application/servic
 import {
   AUTO_TRAFFIC_ID_TAG,
   AutoTrafficIdTagPicker,
+  autoTrafficVehicleLabel,
+  autoTrafficVehiclePatch,
   defaultAutoTrafficConfig,
   emptyAutoTrafficCounters,
   validateAutoTrafficConfig,
@@ -763,6 +766,9 @@ export class CLIChargePointService {
         ...(init.capabilityProfile
           ? { capabilityProfile: init.capabilityProfile }
           : {}),
+        ...(init.chargerCapabilities
+          ? { chargerCapabilities: init.chargerCapabilities }
+          : {}),
         ...(init.transport?.ws ? { ws: init.transport.ws } : {}),
         ...(init.idTags ? { idTags: init.idTags } : {}),
         ...(init.idTagDistribution
@@ -870,6 +876,9 @@ export class CLIChargePointService {
           : {}),
         ...(options.capabilityProfile
           ? { capabilityProfile: options.capabilityProfile }
+          : {}),
+        ...(options.chargerCapabilities
+          ? { chargerCapabilities: options.chargerCapabilities }
           : {}),
         tls: options.tls,
         tlsCaPath: options.tlsCaPath,
@@ -988,6 +997,7 @@ export class CLIChargePointService {
         transactionStartTime: tx?.startTime ? tx.startTime.toISOString() : null,
         transactionTagId: tx?.tagId ?? null,
         transactionBatteryCapacityKwh: tx?.batteryCapacityKwh ?? null,
+        evConnection: connector.evConnection,
       });
     });
 
@@ -1020,6 +1030,8 @@ export class CLIChargePointService {
         inboundValidation: this._init.inboundValidation,
         reservationAuthorizeIdTag: this._init.reservationAuthorizeIdTag,
         capabilityProfile: this._init.capabilityProfile,
+        transport: this._init.transport,
+        chargerCapabilities: this._init.chargerCapabilities,
         tlsCaPath: this._init.tlsCaPath,
         tlsCertPath: this._init.tlsCertPath,
         tlsKeyPath: this._init.tlsKeyPath,
@@ -1208,8 +1220,8 @@ export class CLIChargePointService {
     connectorId: number,
     tagId: string,
     options: StartTransactionCommandOptions = {},
-  ): void {
-    this._chargePoint.startTransaction(
+  ): Promise<StartTransactionOutcome> {
+    return this._chargePoint.startTransaction(
       tagId,
       connectorId,
       undefined,
@@ -1241,6 +1253,16 @@ export class CLIChargePointService {
   /** #488: an EV-side disconnect on `connectorId`. */
   evDisconnected(connectorId: number): void {
     this._chargePoint.evDisconnected(connectorId);
+  }
+
+  /** #453: a cable was plugged into the EV side of `connectorId`. */
+  evPlugIn(connectorId: number): void {
+    this._chargePoint.evPlugIn(connectorId);
+  }
+
+  /** #453: the EV on `connectorId` asks for energy or stops asking. */
+  evSetReady(connectorId: number, ready: boolean): void {
+    this._chargePoint.evSetReady(connectorId, ready);
   }
 
   setMeterValue(connectorId: number, value: number): void {
@@ -1459,10 +1481,34 @@ export class CLIChargePointService {
         const status = await this._chargePoint.authorizeAndWait(idTag);
         return status === "Accepted";
       },
-      startTransaction: async (id, idTag) => {
-        const outcome = await this._chargePoint.startTransaction(idTag, id);
+      // `intent` is set under `sessionModel: "intent"` (#327): the session
+      // opens at the drawn SoC, targets the drawn SoC and stops there.
+      startTransaction: async (id, idTag, intent, vehicle) => {
+        // #627: the drawn vehicle becomes the connector's, before the start,
+        // so the transaction (battery capacity, opening SoC) and every
+        // MeterValues of the session read the vehicle the traffic drew.
+        if (vehicle) {
+          this.requireConnector(id).applyEvSettingsOverride(
+            autoTrafficVehiclePatch(vehicle),
+          );
+          this._chargePoint.logger.info(
+            `[auto-traffic] ${this._init.cpId}/${id} vehicle ${autoTrafficVehicleLabel(vehicle)}`,
+            LogType.TRANSACTION,
+          );
+        }
+        const outcome = await this._chargePoint.startTransaction(
+          idTag,
+          id,
+          undefined,
+          intent?.initialSoc,
+          intent
+            ? { targetSoc: intent.targetSoc, stopAtTarget: true }
+            : undefined,
+        );
         return outcome.started;
       },
+      sessionRunning: (id) =>
+        this._chargePoint.getConnector(id)?.hasRunningTransaction ?? false,
       stopTransaction: async (id) => this.stopTransaction(id),
       poweredOff: () => this._chargePoint.poweredOff,
       // A scenario owns the connector while any executor is running: a run's

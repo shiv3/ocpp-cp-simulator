@@ -204,6 +204,27 @@ describe("runExportK6", () => {
       expect(message).toContain('unsupported node type "useBehavior" (node x)');
     });
 
+    it.each([
+      ["notify", { kind: "firmwareStatus", status: "Installed" }],
+      ["switch", { value: 1, cases: [1] }],
+      ["choice", { options: [{}, {}] }],
+      ["setState", { key: "k", value: 1 }],
+    ])("%s (schema 1.6, #654)", async (type, data) => {
+      const message = await refuse(withNode(type, data));
+      expect(message).toContain(`unsupported node type "${type}" (node x)`);
+      expect(message).toContain("k6 runtime does not have");
+    });
+
+    it.each([{ until: "2030-01-01T00:00:00.000Z" }, { jitterSeconds: 2 }])(
+      "delay with %j (schema 1.6, #654)",
+      async (extra) => {
+        const message = await refuse(
+          withNode("delay", { delaySeconds: 1, ...extra }),
+        );
+        expect(message).toContain("not supported by export-k6 (node x)");
+      },
+    );
+
     it("useBehavior with params or mode disable (schema 1.6)", async () => {
       for (const data of [
         { behaviorId: "default.firmware", params: { stepMs: 500 } },

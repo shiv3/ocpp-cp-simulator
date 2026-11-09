@@ -52,7 +52,11 @@ describe("UseBehaviorForm params (#654)", () => {
     const form = c.querySelector('[data-testid="behavior-params-form"]')!;
     expect(form).not.toBeNull();
     const selects = [...form.querySelectorAll("select")];
-    expect(selects.map((s) => s.value)).toEqual(["none", "retrieveDate"]);
+    expect(selects.map((s) => s.value)).toEqual([
+      "none",
+      "retrieveDate",
+      "none",
+    ]);
     expect(
       form.querySelector<HTMLInputElement>('input[type="number"]')!.value,
     ).toBe("2000");

@@ -265,7 +265,12 @@ The agreed first slice:
   way;
 
 - the built-ins' ratings moved out of `evSettings.maxChargingPowerKw` in the
-  same change as the cap, before the importer commit.
+  same change as the cap, before the importer commit. **Done (#327, PR C):**
+  `chargerCapabilities` is a `cp.create` parameter (so a blueprint's `params`
+  carries it), a `charge_points.charger_capabilities` column (schema v31) and
+  `Connector.maxDeliveryPowerW`; `boundW` is its one reader. The blueprint
+  `schemaVersion` step stays the importer's own preceding change, so an older
+  daemon still strips the field from a blueprint it reads.
 
 Deferred until a reader exists: connector `type`, `currentType`, `phases`,
 voltage / current limits, configuration seeding, feature-profile reporting or

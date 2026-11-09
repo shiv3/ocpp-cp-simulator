@@ -54,5 +54,11 @@
   "scenarioNodes.transaction.stop": "停止",
   "scenarioNodes.transaction.tag": "タグ: {{value}}",
   "scenarioNodes.callResponse.noAnswer": "応答なし",
-  "scenarioNodes.useBehavior.disabled": "この実行中は無効"
+  "scenarioNodes.useBehavior.disabled": "この実行中は無効",
+  "scenarioNodes.title.notify": "通知",
+  "scenarioNodes.title.switch": "分岐 (switch)",
+  "scenarioNodes.title.choice": "抽選 (choice)",
+  "scenarioNodes.title.setState": "状態の設定",
+  "scenarioNodes.switch.default": "default",
+  "scenarioNodes.choice.options_other": "{{count}} 個の選択肢"
 }

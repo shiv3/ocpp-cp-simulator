@@ -209,6 +209,18 @@ function validateExportability(scenario: ScenarioJson): string[] {
       );
     }
   }
+  // Schema 1.8: the k6 interpreter walks ordinary edges only and fails on a
+  // timeout, so a timeout edge would be silently taken as a next step.
+  const rawEdges: unknown[] = Array.isArray(scenario.edges)
+    ? scenario.edges
+    : [];
+  for (const edge of rawEdges) {
+    if (isPlainObject(edge) && edge.kind === "timeout") {
+      problems.push(
+        `timeout edges (schema 1.8) are not supported by export-k6 (edge ${String(edge.id)} from ${String(edge.source)}): the k6 runtime fails the iteration when a wait times out; remove the edge or run the scenario on the simulator`,
+      );
+    }
+  }
   const rawAssertions: unknown[] = Array.isArray(scenario.assertions)
     ? scenario.assertions
     : [];

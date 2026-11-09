@@ -14,6 +14,8 @@ import {
   isTerminal,
   lowerScenario,
   successors,
+  timeoutStep,
+  waitTimeoutSeconds,
   type GraphEdgeLike,
   type GraphNodeLike,
   type ScenarioProgram,
@@ -53,9 +55,100 @@ function edgesThatMayRun(
   return program.outgoing.get(id) ?? [];
 }
 
+/** The edge a wait leaves by when it times out (schema 1.8), when its timeout
+ *  can expire at all; else none. */
+function timeoutEdgeThatMayRun(
+  program: Program,
+  node: GraphNodeLike,
+): GraphEdgeLike | null {
+  if (!waitTimeoutSeconds(node)) return null;
+  return timeoutStep(program, node)?.edge ?? null;
+}
+
+/** `major.minor` of a declared schema version, or null when it is not one. */
+function parseVersion(v: unknown): [number, number] | null {
+  if (typeof v !== "string") return null;
+  const m = /^(\d+)\.(\d+)(?:\..*)?$/.exec(v.trim());
+  return m ? [Number(m[1]), Number(m[2])] : null;
+}
+
+/** `newerConstruct` (info) when the file declares a schema version below
+ *  `since` and uses a construct of it. A file that declares none, or one
+ *  that does not parse, is not reported. */
+function newerConstruct(
+  declared: unknown,
+  since: string,
+  at: { nodeId?: string; edgeId?: string },
+): GraphIssue[] {
+  const have = parseVersion(declared);
+  const need = parseVersion(since)!;
+  if (!have) return [];
+  const older = have[0] < need[0] || (have[0] === need[0] && have[1] < need[1]);
+  return older
+    ? [
+        {
+          code: "newerConstruct",
+          severity: "info",
+          ...at,
+          data: { since, declared },
+        },
+      ]
+    : [];
+}
+
+/** Schema 1.8: what is wrong with the timeout edges of the graph. */
+function checkTimeoutEdges(
+  program: Program,
+  schemaVersion: unknown,
+): GraphIssue[] {
+  const issues: GraphIssue[] = [];
+  let first: string | undefined;
+  for (const [nodeId, edges] of program.timeoutEdges) {
+    const node = program.nodesById.get(nodeId)!;
+    first ??= edges[0]!.id;
+    const seconds = waitTimeoutSeconds(node);
+    if (seconds === null || isTerminal(node)) {
+      for (const edge of edges) {
+        issues.push({
+          code: "timeoutEdgeOnNonWait",
+          nodeId,
+          edgeId: edge.id,
+          severity: "warning",
+        });
+      }
+      continue;
+    }
+    if (seconds === 0) {
+      for (const edge of edges) {
+        issues.push({
+          code: "timeoutEdgeNeverFires",
+          nodeId,
+          edgeId: edge.id,
+          severity: "info",
+        });
+      }
+    }
+    for (const edge of edges.slice(1)) {
+      issues.push({
+        code: "extraTimeoutEdge",
+        nodeId,
+        edgeId: edge.id,
+        severity: "warning",
+      });
+    }
+  }
+  if (first !== undefined) {
+    issues.push(...newerConstruct(schemaVersion, "1.8", { edgeId: first }));
+  }
+  return issues;
+}
+
 export function validateScenarioGraph(def: {
   nodes: readonly GraphNodeLike[];
   edges: readonly GraphEdgeLike[];
+  /** The file's declared version: only for `newerConstruct`. Never changes
+   *  what any other check reports. */
+  schemaVersion?: unknown;
 }): GraphIssue[] {
   const program: Program = lowerScenario(def);
   const { origin, starts, nodesById } = program;
@@ -111,6 +204,8 @@ export function validateScenarioGraph(def: {
     }
   }
 
+  issues.push(...checkTimeoutEdges(program, def.schemaVersion));
+
   // Reachability from the origin only: a second START starts nothing (every
   // edge that may run counts: an ignored branch is reported by
   // `extraOutgoing`, not twice here; a switch / choice's duplicate-handle
@@ -120,7 +215,11 @@ export function validateScenarioGraph(def: {
     const queue = [origin.id];
     while (queue.length > 0) {
       const id = queue.pop()!;
-      for (const edge of edgesThatMayRun(program, id)) {
+      const timeoutEdge = timeoutEdgeThatMayRun(program, nodesById.get(id)!);
+      for (const edge of [
+        ...edgesThatMayRun(program, id),
+        ...(timeoutEdge ? [timeoutEdge] : []),
+      ]) {
         if (!seen.has(edge.target)) {
           seen.add(edge.target);
           queue.push(edge.target);
@@ -156,7 +255,9 @@ export function validateScenarioGraph(def: {
  * branch does not hold. It assumes a replace trigger always takes a CALL
  * over; one that ends without (continued, skipped or stopped) takes
  * nothing over at run time, so a later callResponse can still fail: an
- * accepted false negative of an advisory check.
+ * accepted false negative of an advisory check. A wait whose timeout can
+ * expire also goes on along its timeout edge (schema 1.8) with the state it
+ * was entered with: a timed-out replace trigger took nothing over.
  */
 function checkCalls(origin: GraphNodeLike, program: Program): GraphIssue[] {
   const found = new Map<string, GraphIssue>();
@@ -219,6 +320,10 @@ function checkCalls(origin: GraphNodeLike, program: Program): GraphIssue[] {
       after = null;
     }
     if (effect?.produces) answerAfter = true;
+    // Schema 1.8: on a timeout the wait took nothing over and the branch
+    // goes on along its timeout edge with the CALL it held before.
+    const timeoutEdge = timeoutEdgeThatMayRun(program, node);
+    if (timeoutEdge) enter(timeoutEdge.target, state, answer);
     if (after === null) continue;
     // Re-entering the origin runs it as a step (executeSequentialFlow).
     // A switch or choice may pick any of its handles: follow each.

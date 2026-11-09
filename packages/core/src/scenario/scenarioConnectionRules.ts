@@ -27,6 +27,10 @@
  * wait right after Start or another wait), loops and joins are allowed on
  * purpose, and an edge back into Start is followed like any other.
  *
+ * Schema 1.8: an edge with `kind: "timeout"` is not an ordinary edge. Only a
+ * node whose rule `waits` follows one, and only when its timeout expires
+ * (`timeoutStep` in `scenarioGraph.ts`); every other walk ignores it.
+ *
  * The graph itself (origin, branch ends, the edge taken next) is read
  * through `scenarioGraph.ts`, which the executor uses too; the checks live in
  * `scenarioGraphValidator.ts`. Advisory like the JSON schema: callers report
@@ -86,6 +90,12 @@ export interface ConnectionRule<D = unknown> {
   /** What the node does to its branch's CALL, from its data (which is
    *  unvalidated when the rule is consulted, so possibly partial). */
   call: (data: Partial<D> | undefined) => CallEffect;
+  /**
+   * The node parks on a trigger wait (`runTriggerWait`) bounded by
+   * `data.timeout` seconds, so an edge with `kind: "timeout"` out of it can
+   * run when that timeout expires (schema 1.8). Absent on every other node.
+   */
+  waits?: true;
 }
 
 /** Node data the rules read, per node type; the rest read none. */
@@ -112,6 +122,9 @@ const readsResponse = (value: unknown): ResponseEffect => ({
 });
 /** An ordinary step: runs, then the first edge to an existing node. */
 const step: ConnectionRule = { out: "next", call: noCall };
+/** A trigger wait: a step that parks in `runTriggerWait` until its event or
+ *  its `timeout` (schema 1.8: a timeout edge then runs instead of failing). */
+const wait: ConnectionRule = { out: "next", call: noCall, waits: true };
 
 export const CONNECTION_RULES: ConnectionRuleTable = {
   // executeFlow: the run starts here and every outgoing edge becomes a
@@ -126,12 +139,13 @@ export const CONNECTION_RULES: ConnectionRuleTable = {
   [ScenarioNodeType.NOTIFICATION]: step,
   [ScenarioNodeType.CONNECTOR_PLUG]: step,
   // Waits park until their event (runTriggerWait) and then go on like a step;
-  // the executor needs nothing before or after them.
-  [ScenarioNodeType.REMOTE_START_TRIGGER]: step,
-  [ScenarioNodeType.REMOTE_STOP_TRIGGER]: step,
-  [ScenarioNodeType.STATUS_TRIGGER]: step,
-  [ScenarioNodeType.RESERVATION_TRIGGER]: step,
-  [ScenarioNodeType.CONNECTION_TRIGGER]: step,
+  // the executor needs nothing before or after them. When their timeout
+  // expires they leave by their first timeout edge, if any (schema 1.8).
+  [ScenarioNodeType.REMOTE_START_TRIGGER]: wait,
+  [ScenarioNodeType.REMOTE_STOP_TRIGGER]: wait,
+  [ScenarioNodeType.STATUS_TRIGGER]: wait,
+  [ScenarioNodeType.RESERVATION_TRIGGER]: wait,
+  [ScenarioNodeType.CONNECTION_TRIGGER]: wait,
   [ScenarioNodeType.RESERVE_NOW]: step,
   [ScenarioNodeType.CANCEL_RESERVATION]: step,
   [ScenarioNodeType.STATUS_NOTIFICATION]: step,
@@ -165,10 +179,12 @@ export const CONNECTION_RULES: ConnectionRuleTable = {
     response: (data) => readsResponse(data?.value),
   },
   [ScenarioNodeType.CHOICE]: { out: "select", call: noCall },
-  // executeCsmsCallTrigger: with behavior "replace" sets flow.exchange.
+  // executeCsmsCallTrigger: with behavior "replace" sets flow.exchange. A
+  // wait too: on a timeout nothing is taken over.
   [ScenarioNodeType.CSMS_CALL_TRIGGER]: {
     out: "next",
     call: (data) => (data?.behavior === "replace" ? "takesOver" : "none"),
+    waits: true,
   },
   // executeCallResponse: throws without flow.exchange or once flow.answered.
   // (its payload is resolved through fromScope(flow) too.)
@@ -251,14 +267,29 @@ export type GraphIssueCode =
   /** A case of a switch can never be picked because an earlier one is
    *  identical or matches every present value (schema 1.7). `data.handle` is
    *  the unreachable case, `data.shadowedBy` the earlier one's handle. */
-  | "unreachableCase";
+  | "unreachableCase"
+  /** An edge with `kind: "timeout"` (schema 1.8) out of a node that is not
+   *  a trigger wait (or that ends its branch): it is never followed. */
+  | "timeoutEdgeOnNonWait"
+  /** A timeout edge out of a wait whose `timeout` is 0 or absent: the wait
+   *  never expires, so the edge never runs (info). */
+  | "timeoutEdgeNeverFires"
+  /** A wait has several timeout edges: only the first one to an existing
+   *  node runs; reported on each other one. */
+  | "extraTimeoutEdge"
+  /** The file uses a construct newer than its declared `schemaVersion`
+   *  (`data.since`): it runs, but an older simulator would ignore it (info). */
+  | "newerConstruct";
 
 /** A finding of `validateScenarioGraph` (`scenarioGraphValidator.ts`): a
- *  {@link Diagnostic} narrowed to the graph codes, never `info`. */
+ *  {@link Diagnostic} narrowed to the graph codes. */
 export interface GraphIssue extends Diagnostic<GraphIssueCode> {
-  /** The node the issue is about (all codes but `missingStart` / `danglingEdge`). */
+  /** The node the issue is about (all codes but `missingStart` /
+   *  `danglingEdge` / `newerConstruct`). */
   nodeId?: string;
   edgeId?: string;
-  /** `error`: the scenario cannot run as drawn; `warning`: part of it is ignored. */
-  severity: "error" | "warning";
+  /** `error`: the scenario cannot run as drawn; `warning`: part of it is
+   *  ignored; `info`: advisory only (`timeoutEdgeNeverFires`,
+   *  `newerConstruct`). */
+  severity: "error" | "warning" | "info";
 }

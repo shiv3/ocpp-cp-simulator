@@ -283,5 +283,9 @@
   "scenarios.addStep.structure.choiceHelp": "Ajoute un bloc de branches avec deux options pondérées, l'une tirée au hasard. Déposez des étapes dans les voies ; elles se rejoignent à l'étape suivante.",
   "scenarios.editor.cannot.laneEnds": "Cette voie termine déjà sa branche.",
   "scenarios.editor.cannot.laneTargetNotLater": "Choisissez une étape après cette branche.",
-  "scenarios.editor.rangeHint": "Les étapes en surbrillance sont celles qui seraient répétées."
+  "scenarios.editor.rangeHint": "Les étapes en surbrillance sont celles qui seraient répétées.",
+  "scenarios.editor.issue.timeoutEdgeOnNonWait": "L’étape {{n}} ({{title}}) a une arête de timeout, mais ce n’est pas une attente avec timeout (ou elle termine sa branche) : l’arête n’est jamais suivie.",
+  "scenarios.editor.issue.timeoutEdgeNeverFires": "L’étape {{n}} ({{title}}) a une arête de timeout, mais son timeout vaut 0 ou n’est pas défini : l’attente n’expire jamais, l’arête ne s’exécute donc jamais.",
+  "scenarios.editor.issue.extraTimeoutEdge": "L’étape {{n}} ({{title}}) a plusieurs arêtes de timeout : seule la première s’exécute quand l’attente expire.",
+  "scenarios.editor.issue.newerConstruct": "Ce scénario utilise une fonctionnalité plus récente que la version de schéma qu’il déclare ; il s’exécute ici, mais un simulateur plus ancien l’ignorerait."
 }

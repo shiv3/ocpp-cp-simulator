@@ -269,6 +269,22 @@ describe("runExportK6", () => {
       expect(message).toContain('"$from"');
     });
 
+    it("a timeout edge (schema 1.8), named by id", async () => {
+      const message = await refuse({
+        ...withNode("statusTrigger", {
+          targetStatus: "Charging",
+          timeout: 5,
+        }),
+        edges: [
+          ...VALID.edges,
+          { id: "late", source: "x", target: "c", kind: "timeout" },
+        ],
+      });
+      expect(message).toContain(
+        "timeout edges (schema 1.8) are not supported by export-k6 (edge late from x)",
+      );
+    });
+
     it("still exports csmsCallTrigger with behavior observe", async () => {
       const code = await runExportK6({
         scenarioFile: writeScenario(

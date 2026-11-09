@@ -14,6 +14,11 @@
  * starts nothing (it runs as a step only if an edge reaches it), a switch /
  * choice edge whose handle the node never picks is never followed, and nodes *labelled* "Start" / "End" act as such. Lowering
  * reports those as diagnostics and never rejects the graph.
+ *
+ * Schema 1.8: an edge with `kind: "timeout"` ({@link isTimeoutEdge}) is kept
+ * apart from the ordinary edges. {@link nextStep}, {@link successors} and the
+ * origin's fan-out never see it; only {@link timeoutStep} follows one, out of
+ * a trigger wait whose timeout expired.
  */
 import { ScenarioNodeType } from "../cp/application/scenario/ScenarioTypes";
 import {
@@ -34,7 +39,14 @@ export interface GraphEdgeLike {
   target: string;
   /** The handle a `switch` / `choice` picks (`case-N`, `default`, `option-N`). */
   sourceHandle?: string | null;
+  /** `"timeout"` (schema 1.8): followed only when the source wait times out.
+   *  Absent, or any other value: an ordinary edge. */
+  kind?: unknown;
 }
+
+/** An edge taken only when its source wait times out (schema 1.8). */
+export const isTimeoutEdge = (edge: GraphEdgeLike): boolean =>
+  edge.kind === "timeout";
 
 export interface GraphLike<
   N extends GraphNodeLike = GraphNodeLike,
@@ -63,12 +75,17 @@ export interface ScenarioProgram<
   /** By id; with duplicate ids the first node wins, as the executor's
    *  `nodes.find` does. */
   readonly nodesById: ReadonlyMap<string, N>;
-  /** Every edge by source id, in file order, whether or not its target exists. */
+  /** Every ordinary (not timeout) edge by source id, in file order, whether
+   *  or not its target exists. */
   readonly edgesFrom: ReadonlyMap<string, readonly E[]>;
-  /** By source id, in file order: the edges whose source and target both
-   *  exist. Includes edges out of a terminal node (they are never followed;
-   *  {@link successors} drops them). */
+  /** By source id, in file order: the ordinary edges whose source and target
+   *  both exist. Includes edges out of a terminal node (they are never
+   *  followed; {@link successors} drops them). */
   readonly outgoing: ReadonlyMap<string, readonly E[]>;
+  /** By source id, in file order: the timeout edges (schema 1.8) whose
+   *  source and target both exist, out of any node. Only
+   *  {@link timeoutStep} follows one. */
+  readonly timeoutEdges: ReadonlyMap<string, readonly E[]>;
   /** Where a fresh run starts ({@link resolveOrigin}). */
   readonly origin: N | undefined;
   /** The origin first, then every other node of type `start`. Only the
@@ -128,13 +145,15 @@ export function lowerScenario<N extends GraphNodeLike, E extends GraphEdgeLike>(
 
   const edgesFrom = new Map<string, E[]>();
   const outgoing = new Map<string, E[]>();
+  const timeoutEdges = new Map<string, E[]>();
   const add = (map: Map<string, E[]>, edge: E) => {
     const list = map.get(edge.source);
     if (list) list.push(edge);
     else map.set(edge.source, [edge]);
   };
   for (const edge of def.edges) {
-    add(edgesFrom, edge);
+    const timeout = isTimeoutEdge(edge);
+    if (!timeout) add(edgesFrom, edge);
     const source = nodesById.get(edge.source);
     if (!source || !nodesById.has(edge.target)) {
       diagnostics.push({
@@ -142,6 +161,11 @@ export function lowerScenario<N extends GraphNodeLike, E extends GraphEdgeLike>(
         edgeId: edge.id,
         severity: "warning",
       });
+      continue;
+    }
+    if (timeout) {
+      // Reported by the validator (timeoutEdgeOnNonWait), not as edgeOutOfEnd.
+      add(timeoutEdges, edge);
       continue;
     }
     // The origin's edges are run by executeFlow whatever the origin is.
@@ -162,6 +186,7 @@ export function lowerScenario<N extends GraphNodeLike, E extends GraphEdgeLike>(
     nodesById,
     edgesFrom,
     outgoing,
+    timeoutEdges,
     origin,
     starts,
     diagnostics,
@@ -209,6 +234,35 @@ export function nextStep<N extends GraphNodeLike, E extends GraphEdgeLike>(
     if (target) return { kind: "edge", edge, target };
   }
   return { kind: "missingTargets" };
+}
+
+/**
+ * How long a trigger wait parks before it expires, as the executor reads
+ * `data.timeout` (`runTriggerWait`): seconds above 0, or 0 when it waits
+ * forever (0, absent, negative or not a number). `null` for a node that is
+ * not a trigger wait (its rule has no `waits`).
+ */
+export function waitTimeoutSeconds(node: GraphNodeLike): number | null {
+  if (!connectionRule(node.type).waits) return null;
+  const timeout = (node.data as { timeout?: unknown } | undefined)?.timeout;
+  const seconds = Math.max(0, (timeout as number) || 0);
+  return Number.isNaN(seconds) ? 0 : seconds;
+}
+
+/**
+ * Where a branch goes when `node`'s wait timed out (schema 1.8): along its
+ * first timeout edge to an existing node. `null` when there is none, or when
+ * the node is not a trigger wait or ends its branch; the run then fails with
+ * the timeout, as it always did. Called by the executor only once the wait
+ * really expired, so it does not look at the timeout's length.
+ */
+export function timeoutStep<N extends GraphNodeLike, E extends GraphEdgeLike>(
+  program: ScenarioProgram<N, E>,
+  node: N,
+): { edge: E; target: N } | null {
+  if (!connectionRule(node.type).waits || isTerminal(node)) return null;
+  const edge = program.timeoutEdges.get(node.id)?.[0];
+  return edge ? { edge, target: program.nodesById.get(edge.target)! } : null;
 }
 
 export interface SuccessorOptions {

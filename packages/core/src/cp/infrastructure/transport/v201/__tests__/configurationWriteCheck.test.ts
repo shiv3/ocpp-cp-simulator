@@ -13,7 +13,6 @@ const VERSION = "OCPP-2.0.1";
 
 function store(): ConfigurationStore {
   return new ConfigurationStore(
-    "cp-write-check",
     defaultConfiguration({
       connectorNumber: 1,
       wsUrl: "ws://csms.example/ocpp/",

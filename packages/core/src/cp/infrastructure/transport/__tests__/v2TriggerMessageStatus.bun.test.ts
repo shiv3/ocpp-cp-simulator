@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 
 const VERSIONS = ["OCPP-2.0.1", "OCPP-2.1"] as const;
@@ -38,8 +39,9 @@ async function withStation(
     }>,
   ) => Promise<void>,
 ): Promise<void> {
-  const csms = startMockCsms();
-  const cp = new ChargePoint(
+  // A 2.x station sends one CALL at a time (#708): answer them all.
+  const csms = startMockCsms({ answerCalls: true });
+  const cp = createChargePoint(
     "CP-TRIGGER-596",
     DefaultBootNotification,
     2,

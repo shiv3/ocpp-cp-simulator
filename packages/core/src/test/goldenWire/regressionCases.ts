@@ -1354,6 +1354,9 @@ c201("trigger-transaction-event", async (r) => {
   });
   await settle(r);
 });
+// The firmware report is Idle without the UpdateFirmware requestId (nothing
+// was sent, F06.FR.16); since #601 the accepted GetLog starts the station's
+// own upload, so the log report is Uploading with requestId 12 (F06.FR.14).
 c201("trigger-status-idle-after-request", async (r) => {
   await r.csms.call("UpdateFirmware", {
     requestId: 11,

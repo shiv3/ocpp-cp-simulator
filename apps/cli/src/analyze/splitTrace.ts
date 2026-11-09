@@ -158,8 +158,9 @@ export interface TraceSplit {
   total: number;
 }
 
-/** A group's records as JSONL text for the toolkit: one LF-terminated line
- *  per record, written by the SDK writer (see module docstring). */
+/** Records as JSONL text — a group handed to the toolkit, or the daemon's
+ *  stored logs before they are read back: one LF-terminated line per record,
+ *  written by the SDK writer (see module docstring). */
 export function recordsToJsonl(records: readonly TraceRecord[]): string {
   return records.map((record) => serializeRecord(record)).join("");
 }

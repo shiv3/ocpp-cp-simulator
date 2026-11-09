@@ -271,5 +271,8 @@
   "scenarios.addStep.structure.switch": "Switch (branch on a value)",
   "scenarios.addStep.structure.switchHelp": "Adds a branch block with a lane per case and a default lane. Drop steps into the lanes; the lanes meet again at the step that follows.",
   "scenarios.addStep.structure.choice": "Choice (random branch)",
-  "scenarios.addStep.structure.choiceHelp": "Adds a branch block with two weighted options, one picked at random. Drop steps into the lanes; the lanes meet again at the step that follows."
+  "scenarios.addStep.structure.choiceHelp": "Adds a branch block with two weighted options, one picked at random. Drop steps into the lanes; the lanes meet again at the step that follows.",
+  "scenarios.editor.cannot.laneEnds": "This lane already ends its branch.",
+  "scenarios.editor.cannot.laneTargetNotLater": "Pick a step after this branch.",
+  "scenarios.editor.rangeHint": "The highlighted steps are the ones that would repeat."
 }

@@ -214,6 +214,15 @@ export interface StepTreeViewProps extends RunViewCommonProps {
   /** editable: a step type picked for slot `index` of the sequence at
    *  `path` (its length appends). */
   onInsertStep?: (path: SeqPath, index: number, type: ScenarioNodeType) => void;
+  /** editable (Graph view): make steps `from`..`to` of the sequence at
+   *  `path` a loop (the last goes back to the first). */
+  onWrapInLoopRange?: (path: SeqPath, from: number, to: number) => void;
+  /** editable (Graph view): the lane at `lanePath` (of a switch / choice)
+   *  continues at the later step `target` instead of the fork's merge. */
+  onSetLaneExit?: (lanePath: SeqPath, target: string) => void;
+  /** The steps to outline (the inspector's "Repeat from this step" hover:
+   *  what it would repeat). */
+  highlightIds?: readonly string[];
   /** editable: the first step of an empty Repeat block (UI-only until now)
    *  at slot `index` of the sequence at `path`: the repeat is written
    *  around it. */

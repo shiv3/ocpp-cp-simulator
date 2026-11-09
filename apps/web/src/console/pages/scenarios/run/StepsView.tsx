@@ -106,6 +106,8 @@ interface StepBoxProps {
   as?: "li" | "div";
   /** The box is block `blockIndex` of its lane (what a drag measures). */
   blockIndex?: number;
+  /** Outlined: the step is in the range an inspector action would affect. */
+  ranged?: boolean;
 }
 
 const StepBox: React.FC<StepBoxProps> = ({
@@ -120,6 +122,7 @@ const StepBox: React.FC<StepBoxProps> = ({
   marked,
   as: Tag = "li",
   blockIndex,
+  ranged,
 }) => {
   const { t } = useTranslation();
   const live = state !== undefined && isLiveRunState(state) ? state : null;
@@ -173,8 +176,10 @@ const StepBox: React.FC<StepBoxProps> = ({
       data-step-id={step.id}
       data-block={blockIndex}
       data-phase={failed ? "failed" : phase}
+      data-range-highlight={ranged ? "hint" : undefined}
       className={cn(
         (editing || marked?.mark) && "relative",
+        ranged && "rounded-[10px] ring-2 ring-cx-purple ring-offset-1",
         dragOffset !== null &&
           "z-20 rounded-[10px] shadow-[0_8px_24px_rgba(20,20,30,0.18)]",
       )}
@@ -668,6 +673,7 @@ const StepsView: React.FC<StepTreeViewProps> = (props) => {
         state={state}
         selected={selectedStepId === step.id}
         onSelect={onSelectStep}
+        ranged={props.highlightIds?.includes(step.id)}
         marked={stepIssues(step.id)}
         editing={
           editable

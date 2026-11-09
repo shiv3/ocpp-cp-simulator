@@ -2464,7 +2464,7 @@ export function canMoveStep(
   return canMove(tree, path, from, to);
 }
 
-function canWrapInLoop(
+export function canWrapInLoop(
   tree: BlockTree,
   path: SeqPath,
   from: number,
@@ -2494,6 +2494,76 @@ function canWrapInLoop(
     return no("scenarios.editor.cannot.startNode");
   }
   return OK;
+}
+
+/** Where lane `lanePath` is: its fork (a switch or choice) and the parent
+ *  sequence the fork stands in. */
+function laneParent(
+  tree: BlockTree,
+  lanePath: SeqPath,
+): { parent: Seq; forkIndex: number; fork: ForkBlock; seq: Seq } | null {
+  const m = /^(.*)\/(\d+)\/lanes\/(\d+)$/.exec(lanePath);
+  const seq = seqAt(tree, lanePath);
+  if (!m || !seq) return null;
+  const parent = seqAt(tree, m[1]);
+  const fork = parent?.blocks[Number(m[2])];
+  if (!parent || fork?.kind !== "fork") return null;
+  return { parent, forkIndex: Number(m[2]), fork, seq };
+}
+
+/**
+ * Whether the lane at `lanePath` (of a switch or choice) can end at the
+ * first step of a block `target` further down the fork's own sequence,
+ * skipping what lies between: the lane's last edge goes there. Its default
+ * is the fork's merge (the next block), which is always allowed.
+ */
+export function canSetLaneExit(
+  tree: BlockTree,
+  lanePath: SeqPath,
+  target: string,
+): Capability {
+  const found = laneParent(tree, lanePath);
+  if (!found) return no("scenarios.editor.cannot.notInTree");
+  const { parent, forkIndex, fork, seq } = found;
+  if (fork.forkKind !== "switch" && fork.forkKind !== "choice") {
+    return no("scenarios.editor.cannot.notAFork");
+  }
+  if (seq.exit.kind !== "fallthrough" && seq.exit.kind !== "link") {
+    return no("scenarios.editor.cannot.laneEnds");
+  }
+  const at = parent.blocks.findIndex((b) => firstNodeOf(b).id === target);
+  if (at <= forkIndex) return no("scenarios.editor.cannot.laneTargetNotLater");
+  return OK;
+}
+
+/**
+ * Makes the lane at `lanePath` end at `target` (see {@link canSetLaneExit});
+ * the fork's merge puts it back to the default. Only that lane's last edge
+ * changes. `def` itself when refused or when the file would not read back
+ * with the edge there.
+ */
+export function setLaneExit(
+  def: ScenarioDefinition,
+  tree: BlockTree,
+  lanePath: SeqPath,
+  target: string,
+): ScenarioDefinition {
+  if (!canSetLaneExit(tree, lanePath, target).ok) return def;
+  const t = cloneTree(tree);
+  const { fork, seq } = laneParent(t, lanePath)!;
+  const edgeId =
+    (seq.exit.kind === "fallthrough" || seq.exit.kind === "link"
+      ? seq.exit.edgeId
+      : null) ?? crypto.randomUUID();
+  if (fork.merge?.nodeId === target) {
+    seq.exit = { kind: "fallthrough", to: target, edgeId };
+  } else {
+    seq.exit = { kind: "link", target, edgeId };
+  }
+  const next = rebuildFromTree(def, t);
+  const edge = next.edges.find((e) => e.id === edgeId);
+  if (!edge || edge.target !== target) return def;
+  return next;
 }
 
 /** The ids of the edges a rebuild of `tree` keeps by id (links nothing

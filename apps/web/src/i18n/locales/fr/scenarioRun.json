@@ -123,5 +123,16 @@
   "scenarioRun.pendingLoop.remove": "Supprimer la répétition vide",
   "scenarioRun.pendingLoop.unsaved": "Les blocs de répétition vides ne sont pas enregistrés.",
   "scenarioRun.emptyLaneHint": "Déposez des étapes ici",
-  "scenarioRun.dropRefused": "Impossible de déposer ici : {{reason}}"
+  "scenarioRun.dropRefused": "Impossible de déposer ici : {{reason}}",
+  "scenarioRun.pick.title": "Répéter : choisissez l’étape où revenir",
+  "scenarioRun.pick.titleLane": "Voie {{lane}} : choisissez l’étape où elle continue",
+  "scenarioRun.pick.hint": "Cliquez sur une étape antérieure de cette voie (la boucle répète de là jusqu’au + utilisé), ou Échap pour annuler.",
+  "scenarioRun.pick.hintLane": "Cliquez sur une étape plus loin ; celles entre les deux sont sautées par cette voie. Échap annule.",
+  "scenarioRun.pick.cancel": "Annuler",
+  "scenarioRun.pick.notHere": "Choisissez une étape de la même voie, avant ce point.",
+  "scenarioRun.pick.notLater": "Choisissez une étape après cette branche.",
+  "scenarioRun.pick.noTarget": "Aucune étape antérieure de cette voie où revenir.",
+  "scenarioRun.pick.listLabel": "Étapes possibles",
+  "scenarioRun.pick.target": "Étape {{n}} : {{title}}",
+  "scenarioRun.connectLane": "Relier la voie {{lane}} à une étape plus loin"
 }

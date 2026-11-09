@@ -15,7 +15,9 @@ sources:
   - packages/core/src/cp/infrastructure/transport/OCPPWebSocket.ts (WebSocket ping)
   - packages/core/src/cp/domain/charge-point/ClockAlignedMeterScheduler.ts (clock-aligned metering)
   - packages/core/src/cp/domain/connector/SignedMeterData.ts (OCMF signed meter values)
-  - packages/core/src/cp/infrastructure/transport/OCPPMessageHandlerV201.ts (TransactionEvent retries, E11 offline queue)
+  - packages/core/src/cp/infrastructure/transport/v201/transactionEventDeliveryV201.ts (TransactionEvent retries, E11 offline queue)
+  - packages/core/src/cp/infrastructure/transport/v201/offlineReplayV201.ts (E11 replay after Boot Accepted)
+  - packages/core/src/cp/infrastructure/transport/v201/callPipelineV201.ts (2.x one CALL in flight, issue #708)
   - packages/core/src/cp/domain/transport/PendingMessageQueue.ts
   - packages/core/src/cp/infrastructure/transport/OCPPMessageHandler.ts (1.6 transaction message retries)
   - "OCPP 1.6 Part 2 §3.7.1 (issue #527)"

@@ -24,6 +24,7 @@ sources:
   - packages/core/src/cp/domain/connector/ChargingScheduleResolver.ts
   - packages/core/src/cp/domain/connector/MeterValueScheduler.ts
   - packages/core/src/cp/infrastructure/transport/OCPPMessageHandlerV201.ts
+  - packages/core/src/cp/infrastructure/transport/v201/transactionMessagesV201.ts
   - packages/core/src/cp/infrastructure/transport/soap/OCPPSoapHandler.ts
   - "issues #214, #240, #247, #239, #301, #332, #566, #654"
   - packages/core/src/cp/application/scenario/ScenarioRuntime.ts

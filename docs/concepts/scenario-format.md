@@ -1,7 +1,7 @@
 ---
-title: Scenario file format (v1.9)
+title: Scenario file format (v1.10)
 type: concept
-summary: The node-graph JSON format for scripted charge-point behavior — 32 node types, edges, triggers, EV settings, assertions with a two-axis verdict, `useBehavior` params and disable, the 1.6 decision and notify nodes with the read-only `$from` roots, the 1.8 timeout edges, the 1.9 parallel and join nodes, and the limits of the format — as exported by the editor and accepted by the CLI, daemon and MCP; JSON Schema is the source of truth.
+summary: The node-graph JSON format for scripted charge-point behavior — 32 node types, edges, triggers, EV settings, assertions with a two-axis verdict, `useBehavior` params and disable, the 1.6 decision and notify nodes with the read-only `$from` roots, the 1.8 timeout edges, the 1.9 parallel and join nodes, the 1.10 loop edges, and the limits of the format — as exported by the editor and accepted by the CLI, daemon and MCP; JSON Schema is the source of truth.
 sources:
   - packages/core/schema/scenario.schema.json
   - packages/core/src/cp/application/scenario/ScenarioTypes.ts
@@ -43,7 +43,7 @@ related:
 updated: 2026-11-09
 ---
 
-# Scenario File Format (v1.9)
+# Scenario File Format (v1.10)
 
 A **node-graph JSON file** describing a scripted charge-point behavior: a
 directed graph of typed nodes (status changes, transactions, meter values,
@@ -61,7 +61,7 @@ that schema, not a replacement for it.
 
 ## Status & scope
 
-- **Version `1.9`** (`schemaVersion`). Files stamped `1.0` to `1.8` remain valid — 1.x
+- **Version `1.10`** (`schemaVersion`). Files stamped `1.0` to `1.9` remain valid — 1.x
   is purely additive (see [Versioning](#versioning)).
 - Covers the full 32-node discriminated union the scenario engine supports
   (see [Node types](#node-types) below).
@@ -91,7 +91,7 @@ Mirrors the [OCPP trace format](./trace-format.md#versioning)'s rules:
 
 | Field                   | Type                                                                            | Required | Notes                                                                                                                                                                                                                |
 | ----------------------- | ------------------------------------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schemaVersion`         | string                                                                          | No       | e.g. `"1.9"` (current); `"1.8"`, `"1.7"`, `"1.6"`, `"1.5"`, `"1.4"`, `"1.3"`, `"1.2"`, `"1.1"` and `"1.0"` remain valid — additive. Absent on files predating issue #214 — still valid.                              |
+| `schemaVersion`         | string                                                                          | No       | e.g. `"1.10"` (current); `"1.9"`, `"1.8"`, `"1.7"`, `"1.6"`, `"1.5"`, `"1.4"`, `"1.3"`, `"1.2"`, `"1.1"` and `"1.0"` remain valid — additive. Absent on files predating issue #214 — still valid.                    |
 | `id`                    | string                                                                          | Yes      | Stable scenario identifier.                                                                                                                                                                                          |
 | `templateId`            | string                                                                          | No       | Set automatically when a built-in template is instantiated; absent on hand-authored scenarios. See [Template instances](#template-instances).                                                                        |
 | `libraryId`             | string                                                                          | No       | Set by the web console on a connector's copy of a [Library](../entities/web-console.md#scenario-library) scenario: that scenario's `id` (v1.4). Absent on Library entries and on scenarios loaded by hand.           |
@@ -323,7 +323,7 @@ behavior?](../analyses/scenario-or-behavior.md).
 
 **The scenario editor.** The browser Scenario Editor authors all of schema 1.5 and 1.6 (the 1.6 nodes of [this section](#the-schema-16-nodes) included): a `csmsCallTrigger` form
 with `behavior` (`observe` / `replace`) and `onBusy`, a `callResponse` node and a `useBehavior` node (with its
-mode and a params form), and it exports `schemaVersion: "1.7"`. A `switch` `value`, a `notify` `requestId` and a
+mode and a params form), and it exports `schemaVersion: "1.10"`. A `switch` `value`, a `notify` `requestId` and a
 `setState` `value` are edited as a typed constant or **Read from…** a `$from` root and path (the inspector's value
 field, [web console](../entities/web-console.md#the-switch-and-choice-inspectors)); in an `ocppCall` / `callResponse`
 payload a `$from` is typed in the payload JSON. The `useBehavior` id is free text.
@@ -543,9 +543,10 @@ assertions alone, so a continued run can `PASS`.
 `id`, `source`, `target` are required strings. xyflow adds further UI fields
 (`sourceHandle`, `targetHandle`, `type`, `animated`, ...) which the schema
 allows but does not require. `kind: "timeout"` (schema 1.8) makes the edge a
-[timeout edge](#timeout-edges-schema-18); without `kind`, or with any other
-value, it is an ordinary edge (the schema enumerates `"timeout"` only, so
-another value is a schema warning, never a failure).
+[timeout edge](#timeout-edges-schema-18) and `kind: "loop"` with a `loop` object
+(schema 1.10) a [loop edge](#loop-edges-schema-110); without `kind`, or with any
+other value, it is an ordinary edge (the schema enumerates `"timeout"` and
+`"loop"` only, so another value is a schema warning, never a failure).
 
 ### Connection rules
 
@@ -580,7 +581,11 @@ Every row above counts ordinary edges only: a [timeout edge](#timeout-edges-sche
 schema 1.8) is never a next step, a Start branch or a `switch` / `choice` handle. It runs only out of a node whose
 rule `waits` — the six trigger waits `remoteStartTrigger`, `remoteStopTrigger`, `statusTrigger`,
 `reservationTrigger`, `csmsCallTrigger` and `connectionTrigger`, the nodes that park in `runTriggerWait` — and only
-when that wait's timeout expires (`timeoutStep` in `scenarioGraph.ts`).
+when that wait's timeout expires (`timeoutStep` in `scenarioGraph.ts`). A [loop edge](#loop-edges-schema-110) (`kind: "loop"`, schema 1.10) is
+likewise never a next step, a Start branch or a handle: it is followed out of its source after a round, and only by a
+node whose `out` is `next` (`loopStep` in `scenarioGraph.ts`). A node's ordinary next edge is its first edge that is
+neither a loop nor a timeout edge. The nodes that wait (`pauses` in `CONNECTION_RULES`) are `delay`, `meterValue`,
+`ocppCall` and the six trigger waits; the `busyLoop` check reads that property.
 
 **The CALL a branch holds** (`call`, [schema 1.5](#csmscalltrigger-replace-callresponse-from-and-usebehavior-schema-15)),
 the one place where one node type must come before another on the path:
@@ -666,6 +671,30 @@ and treats every `join` as a merge whose flow is reset (a `join` reached by a
 branch no parallel started keeps its flow at run time: an accepted
 approximation of an advisory check).
 
+and, for [loop edges](#loop-edges-schema-110) (schema 1.10), all advisory:
+
+- `loopEdgeIgnored` (warning, on the edge) — a loop edge out of an End, a `switch` / `choice` or the origin
+  Start: never followed.
+- `extraLoopEdge` (warning, on each but the first) — a node with several loop edges: only the first one to an
+  existing node counts.
+- `invalidLoop` (warning, on the edge, `data.problem`) — the `loop` object is malformed (see the
+  [tolerant contract](#tolerant-contract)): the run fails when the loop's check is reached.
+- `busyLoop` (warning, on the edge) — a loop edge without a `times` bound whose loop body (the header plus every
+  node that reaches the source without passing through the header) has no node that waits. A plain back edge
+  (no `kind`) is never reported.
+- `loopWithoutExit` (info, on the edge) — a bounded loop edge whose source has no ordinary next edge: when a
+  bound fires, the branch ends.
+- `noCallHeld` / `noResponseHeld` (error, on the source with `edgeId` the loop edge) — `until.value` reads
+  `call.…` / `response.…` where the branch holds no CALL / answer after the source ran.
+- `newerConstruct` (info, once, on the first loop edge) — the file declares a `schemaVersion` below `1.10` and
+  uses a loop edge. A file without a `schemaVersion`, or with one that does not parse, is not reported.
+  Versions compare per part as numbers (`1.10` is above `1.9`). It runs the same either way; an older simulator
+  would follow the edge as an ordinary one.
+
+Reachability and the CALL analysis follow the loop edge out of its source, and the source's ordinary edge only
+when the loop is bounded: an unbounded (or malformed) loop never exits, so what only the exit leads to is
+`unreachable`.
+
 Not constrained, because the executor needs nothing there: any step may follow
 any step, including a wait (`*Trigger`) right after Start or after another
 wait; loops and joins are allowed (Stop ends an endless loop); a CALL held
@@ -716,6 +745,14 @@ change the two together.
   trigger wait, out of a wait without a timeout, or after the first one of a
   wait: never followed. A timeout edge to a missing node is skipped like any
   edge. Any other `kind` value: an ordinary edge.
+- Loop edges (schema 1.10): any parseable `loop` loads and starts. A loop edge
+  out of a node that does not leave by `next`, a second loop edge of a node, and a
+  loop edge to a missing node are never followed. A malformed `loop` (not an object;
+  `times` or `forSeconds` not a finite number of at least 0; `until` not an object
+  or `until.cases` not an array; a bad case, as in a `switch`) fails the run only
+  when that loop's check is reached, with a message naming the edge; a loop that is
+  never reached never fails. Unknown keys in `loop` are ignored. An edge with a
+  `loop` but no `kind: "loop"` is an ordinary edge and its `loop` is ignored.
 
 The only graph shape that fails a run is one with nowhere to start: "No start
 node found in scenario".
@@ -1727,6 +1764,57 @@ Silence on purpose is still `callResponse` `kind: "none"` before the join.
 yet: they are kept out of `ScenarioNodeType` (as `ScenarioFlowNodeType`) and
 reach a run through a file.
 
+### Loop edges (schema 1.10)
+
+Today a loop is any edge back to an earlier node, and it repeats forever (Stop ends it). A **loop edge** gives
+that edge an exit, built like conditional branching:
+
+```json
+{
+  "id": "e9",
+  "source": "meter",
+  "target": "meter",
+  "kind": "loop",
+  "loop": {
+    "times": 10,
+    "forSeconds": 7200,
+    "until": {
+      "value": { "$from": "connector.power.soc" },
+      "cases": [{ "$match": { "gte": 80 } }]
+    }
+  }
+}
+```
+
+- **Bounds.** All three are optional and any satisfied bound exits: `times` (rounds), `forSeconds` (seconds of the
+  station clock, the executor's `SimClock`, so a virtual clock in tests) and `until` (a value and cases). No bound,
+  or no `loop` at all, loops forever as a plain back edge does. A plain back edge without `kind` is unchanged in
+  every way.
+- **Do-while.** The loop edge is followed out of its **source** node `S`, only when `S` leaves by `next` (not the
+  Start fan-out, a `switch` / `choice`, an End). The check runs at the end of each round, right after `S` ran:
+  count the round, then exit if `times` rounds are done (`times: 0` behaves like `1`), or `forSeconds` have passed
+  since the loop was entered (`>=`), or `until` matches. A round that crosses the `forSeconds` deadline completes;
+  interrupting a round part-way (a parallel branch and a join with a timer) is future work.
+- **`until` is a `switch`.** `value` and `cases` are read exactly as a `switch`'s: constants by JSON equality,
+  `{ "$match": { … } }` matchers, no `$from` inside a case, the same roots (`call`, `response`, `charger`,
+  `connector`, `state`). A missing value matches only an `{ "$match": { "exists": false } }` case; with no such case
+  it fails the run with the usual `$from` error. `until` is evaluated only when `times` and `forSeconds` did not fire.
+- **Exit.** The run logs (`info`) which bound fired and after how many rounds, drops the loop's state and goes on
+  along `S`'s ordinary next edge (the first edge that is not a loop edge). With none, the branch ends.
+- **Several loop edges** out of one node: the first (file order) to an existing node counts, the rest are ignored.
+- **Counters are per branch.** Rounds and the loop's start time live on the branch (parallel branches in the same
+  loop count separately). They start afresh whenever the branch arrives at the loop's header by anything other than
+  the loop edge itself, an ordinary edge or the branch starting there, so a nested loop restarts when the outer body
+  enters it again; arriving along the loop edge keeps them.
+- **Resume.** A branch that starts or resumes inside a loop body has no counters: they start at 0, and `forSeconds`
+  counts from when that branch's walk began. After a restart a loop therefore runs its full bounds again. Resuming
+  at the loop's source node itself treats that node as done and goes on along its ordinary edges (the loop edge is
+  not followed).
+- **Not for k6.** `export-k6` refuses a scenario with a loop edge, naming it.
+
+The `dataflow-charge-to-soc` template uses one: `meter` loops back to itself with `forSeconds: 7200` and an
+`until` on `connector.power.soc`.
+
 ### What the format will not do
 
 The format does **sequence, wait, select, loop and read**. A node may _read_ a value through `$from` from a
@@ -1754,10 +1842,18 @@ is a behavior.
 **Budget.** Schema 1.6 ships params, `disable` and the nodes of [the section above](#the-schema-16-nodes), and stops: a later version needs a written case that params and those nodes did not
 cover. Schema 1.8 adds [timeout edges](#timeout-edges-schema-18): a wait's other outcome, not a new verb or value. Schema 1.9 adds
 [`parallel` and `join`](#parallel-and-join-schema-19): sequencing, as Start's fan-out already was, with no shared variables or
-event handlers between branches (the run's `setState` state was already shared). The parity of scenario nodes and `ctx` members is kept in
+event handlers between branches (the run's `setState` state was already shared). Schema 1.10 adds
+[loop edges](#loop-edges-schema-110): the exit a loop lacked, not a new verb or value. The parity of scenario nodes and `ctx` members is kept in
 [Scenario or behavior?](../analyses/scenario-or-behavior.md#node--ctx-parity).
 
 ## Changelog
+
+- **v1.10**: An edge may carry `kind: "loop"` with `loop: { times?, forSeconds?, until? }`: it is followed out of
+  its source after each round (do-while) until a bound is satisfied, then the branch goes on along the source's
+  ordinary edge. `until` reads `value` / `cases` exactly like a `switch`. Counters are per branch. The graph
+  validator gains `loopEdgeIgnored`, `extraLoopEdge`, `invalidLoop`, `busyLoop`, `loopWithoutExit` and
+  `newerConstruct`; `export-k6` refuses loop edges. Purely additive — an edge without the field means what it
+  always meant, and `1.7` and older files remain valid. See [the note](#loop-edges-schema-110).
 
 - **v1.9**: Adds the `parallel` and `join` node types (`join` `mode`:
   `"all"` | `"any"`): fork a branch anywhere and meet the branches again, with

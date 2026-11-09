@@ -13,6 +13,9 @@ import {
   edgesByHandle,
   isJoin,
   isTerminal,
+  loopBody,
+  loopBounds,
+  loopStep,
   lowerScenario,
   successors,
   timeoutStep,
@@ -25,6 +28,11 @@ import {
   ScenarioFlowNodeType,
   ScenarioNodeType,
 } from "../cp/application/scenario/ScenarioTypes";
+import {
+  containsCallReference,
+  containsRootReference,
+  isFromReference,
+} from "../cp/application/scenario/resolveFrom";
 import {
   jsonEquals,
   matcherProblem,
@@ -69,6 +77,26 @@ function timeoutEdgeThatMayRun(
   return timeoutStep(program, node)?.edge ?? null;
 }
 
+/** The loop edge a branch may follow after `node` (schema 1.10), and whether
+ *  its bounds can ever fire (an unbounded or malformed loop never exits: the
+ *  node's ordinary next edge then never runs). `null` for no loop. */
+function loopThatMayRun(
+  program: Program,
+  node: GraphNodeLike,
+): { edge: GraphEdgeLike; exits: boolean; until?: unknown } | null {
+  if (node === program.origin) return null;
+  const step = loopStep(program, node);
+  if (!step) return null;
+  const read = loopBounds(step.edge);
+  if ("problem" in read) return { edge: step.edge, exits: false };
+  const { times, forSeconds, until } = read.bounds;
+  return {
+    edge: step.edge,
+    exits: times !== undefined || forSeconds !== undefined || !!until,
+    until: until?.value,
+  };
+}
+
 /** `major.minor` of a declared schema version, or null when it is not one. */
 function parseVersion(v: unknown): [number, number] | null {
   if (typeof v !== "string") return null;
@@ -78,7 +106,8 @@ function parseVersion(v: unknown): [number, number] | null {
 
 /** `newerConstruct` (info) when the file declares a schema version below
  *  `since` and uses a construct of it. A file that declares none, or one
- *  that does not parse, is not reported. */
+ *  that does not parse, is not reported. Compared per part as numbers
+ *  (1.10 is above 1.9). */
 function newerConstruct(
   declared: unknown,
   since: string,
@@ -147,6 +176,93 @@ function checkTimeoutEdges(
   return issues;
 }
 
+/** Schema 1.10: what is wrong with the loop edges of the graph. */
+function checkLoopEdges(
+  program: Program,
+  schemaVersion: unknown,
+): GraphIssue[] {
+  const issues: GraphIssue[] = [];
+  let first: string | undefined;
+  for (const [nodeId, edges] of program.loopEdges) {
+    const node = program.nodesById.get(nodeId)!;
+    first ??= edges[0]!.id;
+    if (node === program.origin || !loopStep(program, node)) {
+      for (const edge of edges) {
+        issues.push({
+          code: "loopEdgeIgnored",
+          nodeId,
+          edgeId: edge.id,
+          severity: "warning",
+        });
+      }
+      continue;
+    }
+    for (const edge of edges.slice(1)) {
+      issues.push({
+        code: "extraLoopEdge",
+        nodeId,
+        edgeId: edge.id,
+        severity: "warning",
+      });
+    }
+    const edge = edges[0]!;
+    const read = loopBounds(edge);
+    let problem = "problem" in read ? read.problem : null;
+    if (!problem && "bounds" in read && read.bounds.until) {
+      for (const [index, spec] of read.bounds.until.cases.entries()) {
+        const bad = isFromReference(spec)
+          ? 'a "$from" is not allowed'
+          : matcherProblem(spec)?.message;
+        if (bad) {
+          problem = `loop.until.cases[${index}]: ${bad}`;
+          break;
+        }
+      }
+    }
+    if (problem) {
+      issues.push({
+        code: "invalidLoop",
+        nodeId,
+        edgeId: edge.id,
+        severity: "warning",
+        data: { problem },
+      });
+      continue;
+    }
+    const bounds = "bounds" in read ? read.bounds : {};
+    const bounded =
+      bounds.times !== undefined ||
+      bounds.forSeconds !== undefined ||
+      bounds.until !== undefined;
+    if (bounds.times === undefined) {
+      const body = loopBody(program, edge);
+      const waits = [...body].some(
+        (id) => connectionRule(program.nodesById.get(id)?.type).pauses,
+      );
+      if (!waits) {
+        issues.push({
+          code: "busyLoop",
+          nodeId,
+          edgeId: edge.id,
+          severity: "warning",
+        });
+      }
+    }
+    if (bounded && (program.outgoing.get(nodeId) ?? []).length === 0) {
+      issues.push({
+        code: "loopWithoutExit",
+        nodeId,
+        edgeId: edge.id,
+        severity: "info",
+      });
+    }
+  }
+  if (first !== undefined) {
+    issues.push(...newerConstruct(schemaVersion, "1.10", { edgeId: first }));
+  }
+  return issues;
+}
+
 export function validateScenarioGraph(def: {
   nodes: readonly GraphNodeLike[];
   edges: readonly GraphEdgeLike[];
@@ -211,6 +327,7 @@ export function validateScenarioGraph(def: {
   }
 
   issues.push(...checkTimeoutEdges(program, def.schemaVersion));
+  issues.push(...checkLoopEdges(program, def.schemaVersion));
 
   // Reachability from the origin only: a second START starts nothing (every
   // edge that may run counts: an ignored branch is reported by
@@ -221,11 +338,17 @@ export function validateScenarioGraph(def: {
     const queue = [origin.id];
     while (queue.length > 0) {
       const id = queue.pop()!;
-      const timeoutEdge = timeoutEdgeThatMayRun(program, nodesById.get(id)!);
-      for (const edge of [
-        ...edgesThatMayRun(program, id),
+      const node = nodesById.get(id)!;
+      const timeoutEdge = timeoutEdgeThatMayRun(program, node);
+      // Schema 1.10: a loop edge may run; the node's ordinary edges only if
+      // the loop can ever exit.
+      const loop = loopThatMayRun(program, node);
+      const edges = [
+        ...(loop && !loop.exits ? [] : edgesThatMayRun(program, id)),
+        ...(loop ? [loop.edge] : []),
         ...(timeoutEdge ? [timeoutEdge] : []),
-      ]) {
+      ];
+      for (const edge of edges) {
         if (!seen.has(edge.target)) {
           seen.add(edge.target);
           queue.push(edge.target);
@@ -356,9 +479,14 @@ function checkJoins(program: Program, reachable: Set<string>): GraphIssue[] {
  */
 function checkCalls(origin: GraphNodeLike, program: Program): GraphIssue[] {
   const found = new Map<string, GraphIssue>();
-  const report = (code: GraphIssueCode, nodeId: string) => {
+  const report = (code: GraphIssueCode, nodeId: string, edgeId?: string) => {
     const severity = code === "callLeftOpen" ? "warning" : "error";
-    found.set(`${code} ${nodeId}`, { code, nodeId, severity });
+    found.set(`${code} ${nodeId} ${edgeId ?? ""}`, {
+      code,
+      nodeId,
+      ...(edgeId === undefined ? {} : { edgeId }),
+      severity,
+    });
   };
 
   // The branch's state at a node: its CALL, and whether it holds an answer
@@ -434,9 +562,29 @@ function checkCalls(origin: GraphNodeLike, program: Program): GraphIssue[] {
     }
     // Re-entering the origin runs it as a step (executeSequentialFlow).
     // A switch or choice may pick any of its handles: follow each.
-    const followed = successors(program, node);
+    let followed = successors(program, node);
+    // Schema 1.10: after the round the loop edge may run (its `until` reads
+    // the state the node left), and the ordinary edges only if it can exit.
+    const loop = loopThatMayRun(program, node);
+    if (loop) {
+      if (!loop.exits) followed = [];
+      if (
+        loop.until !== undefined &&
+        ((containsCallReference(loop.until) && after === "none") ||
+          (containsRootReference(loop.until, "response") && !answerAfter))
+      ) {
+        if (containsCallReference(loop.until) && after === "none") {
+          report("noCallHeld", node.id, loop.edge.id);
+        }
+        if (containsRootReference(loop.until, "response") && !answerAfter) {
+          report("noResponseHeld", node.id, loop.edge.id);
+        }
+        continue;
+      }
+      enter(loop.edge.target, after, answerAfter);
+    }
     for (const edge of followed) enter(edge.target, after, answerAfter);
-    if (followed.length === 0) leftOpen(after);
+    if (followed.length === 0 && (!loop || loop.exits)) leftOpen(after);
   }
 
   return [...found.values()];

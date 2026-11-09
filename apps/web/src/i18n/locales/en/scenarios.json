@@ -282,5 +282,10 @@
   "scenarios.editor.issue.joinWithoutParallel": "Step {{n}} ({{title}}) is a join, but no branch of a parallel reaches it: it only runs as a plain step.",
   "scenarios.editor.issue.parallelWithoutJoin": "Step {{n}} ({{title}}) starts parallel branches that never reach a join: they just end, and nothing runs after it.",
   "scenarios.stepHelp.parallel": "Runs every outgoing edge as its own branch at the same time. Each branch has its own CALL slot and answer; the run's state is shared. Meet the branches again with a Join step.",
-  "scenarios.stepHelp.join": "Where the branches of a Parallel step meet. \"All\" goes on once every branch has arrived or ended; \"Any\" goes on at the first arrival and cancels the others."
+  "scenarios.stepHelp.join": "Where the branches of a Parallel step meet. \"All\" goes on once every branch has arrived or ended; \"Any\" goes on at the first arrival and cancels the others.",
+  "scenarios.editor.issue.loopEdgeIgnored": "Step {{n}} ({{title}}) has a loop edge, but it does not continue along a next edge (it ends its branch, picks an edge by handle, or is Start): the loop edge is never followed.",
+  "scenarios.editor.issue.extraLoopEdge": "Step {{n}} ({{title}}) has several loop edges: only the first one counts.",
+  "scenarios.editor.issue.invalidLoop": "Step {{n}} ({{title}}) has a loop edge with malformed bounds ({{problem}}): the run fails when the loop's check is reached.",
+  "scenarios.editor.issue.busyLoop": "Step {{n}} ({{title}}) loops without a “times” bound, and nothing inside the loop waits (no delay, meter value, OCPP call or trigger wait): it spins without letting time pass.",
+  "scenarios.editor.issue.loopWithoutExit": "Step {{n}} ({{title}}) has a bounded loop edge but no ordinary next edge: when a bound is reached, the branch ends."
 }

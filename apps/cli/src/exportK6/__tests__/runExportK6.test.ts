@@ -294,6 +294,25 @@ describe("runExportK6", () => {
       );
     });
 
+    it("a loop edge (schema 1.10), named by id", async () => {
+      const message = await refuse({
+        ...VALID,
+        edges: [
+          ...VALID.edges,
+          {
+            id: "again",
+            source: "b",
+            target: "b",
+            kind: "loop",
+            loop: { times: 3 },
+          },
+        ],
+      });
+      expect(message).toContain(
+        "loop edges (schema 1.10) are not supported by export-k6 (edge again from b)",
+      );
+    });
+
     it("still exports csmsCallTrigger with behavior observe", async () => {
       const code = await runExportK6({
         scenarioFile: writeScenario(

@@ -1148,3 +1148,294 @@ describe("validateScenarioGraph: parallel and join (schema 1.9)", () => {
     expect(codes({ ...def, schemaVersion: "1.9" })).toEqual([]);
   });
 });
+
+describe("validateScenarioGraph: loop edges (schema 1.10)", () => {
+  const set = (id: string) => node(id, "setState", { key: "k", value: 1 });
+  const loopEdge = (
+    source: string,
+    target: string,
+    loop?: unknown,
+    id = `${source}~${target}`,
+  ) => ({
+    id,
+    source,
+    target,
+    kind: "loop",
+    ...(loop === undefined ? {} : { loop }),
+  });
+  const check = (
+    nodes: ReturnType<typeof node>[],
+    edges: Array<Record<string, unknown> & ReturnType<typeof edge>>,
+    schemaVersion?: unknown,
+  ) => validateScenarioGraph({ nodes, edges, schemaVersion });
+  const summary = (issues: ReturnType<typeof check>) =>
+    issues.map(
+      (i) => `${i.code}:${i.severity}:${i.nodeId ?? ""}:${i.edgeId ?? ""}`,
+    );
+
+  it("accepts a bounded loop with a waiting body and an exit", () => {
+    expect(
+      check(
+        [node("s", "start"), node("w"), node("e", "end")],
+        [edge("s", "w"), edge("w", "e"), loopEdge("w", "w", { times: 3 })],
+        "1.10",
+      ),
+    ).toEqual([]);
+  });
+
+  it("does not look at a plain back edge, whatever it carries", () => {
+    expect(
+      check(
+        [node("s", "start"), set("a"), set("b")],
+        [edge("s", "a"), edge("a", "b"), { ...edge("b", "a"), loop: "x" }],
+      ),
+    ).toEqual([]);
+  });
+
+  it("loopEdgeIgnored: out of an End, a switch / choice and the origin", () => {
+    const issues = check(
+      [
+        node("s", "start"),
+        node("sw", "switch", { value: 1, cases: [] }),
+        node("ch", "choice", { options: [{}, {}] }),
+        node("e", "end"),
+      ],
+      [
+        edge("s", "sw"),
+        edge("sw", "ch", "default"),
+        edge("ch", "e", "option-0"),
+        loopEdge("e", "sw", { times: 2 }, "l-end"),
+        loopEdge("sw", "sw", { times: 2 }, "l-sw"),
+        loopEdge("ch", "sw", { times: 2 }, "l-ch"),
+        loopEdge("s", "sw", { times: 2 }, "l-start"),
+      ],
+    );
+    expect(
+      issues
+        .filter((i) => i.code === "loopEdgeIgnored")
+        .map((i) => [i.edgeId, i.severity])
+        .sort(),
+    ).toEqual([
+      ["l-ch", "warning"],
+      ["l-end", "warning"],
+      ["l-start", "warning"],
+      ["l-sw", "warning"],
+    ]);
+    // An ignored loop edge is not reported as an edge out of END, nor a busy
+    // loop, and does not make anything reachable.
+    expect(issues.map((i) => i.code)).not.toContain("edgeOutOfEnd");
+    expect(issues.map((i) => i.code)).not.toContain("busyLoop");
+  });
+
+  it("extraLoopEdge: the second and later loop edges of a node", () => {
+    const issues = check(
+      [node("s", "start"), node("w"), node("x"), node("e", "end")],
+      [
+        edge("s", "w"),
+        edge("w", "e"),
+        edge("x", "e"),
+        loopEdge("w", "w", { times: 2 }, "l1"),
+        loopEdge("w", "x", { times: 2 }, "l2"),
+        loopEdge("w", "w", { times: 2 }, "l3"),
+      ],
+    );
+    expect(
+      issues.filter((i) => i.code === "extraLoopEdge").map((i) => i.edgeId),
+    ).toEqual(["l2", "l3"]);
+  });
+
+  it("invalidLoop: names what is malformed", () => {
+    const bad = (loop: unknown) =>
+      check(
+        [node("s", "start"), node("w"), node("e", "end")],
+        [edge("s", "w"), edge("w", "e"), loopEdge("w", "w", loop, "l")],
+      ).filter((i) => i.code === "invalidLoop");
+    for (const loop of [
+      "x",
+      null,
+      { times: "3" },
+      { times: -1 },
+      { forSeconds: Number.NaN },
+      { until: 1 },
+      { until: { value: 1 } },
+      { until: { value: 1, cases: [{ $from: "state.y" }] } },
+      { until: { value: 1, cases: [{ $match: { bogus: 1 } }] } },
+    ]) {
+      const issues = bad(loop);
+      expect(issues, JSON.stringify(loop)).toHaveLength(1);
+      expect(issues[0]).toMatchObject({
+        severity: "warning",
+        nodeId: "w",
+        edgeId: "l",
+      });
+      expect(typeof issues[0]!.data?.problem).toBe("string");
+    }
+    expect(bad({ times: 2, extra: true })).toEqual([]);
+  });
+
+  it("busyLoop: no times bound and nothing in the body waits", () => {
+    const body = (ns: ReturnType<typeof node>[], loop: unknown) =>
+      summary(
+        check(
+          [node("s", "start"), ...ns, node("e", "end")],
+          [
+            edge("s", ns[0]!.id),
+            ...ns.slice(1).map((n, i) => edge(ns[i]!.id, n.id)),
+            edge(ns.at(-1)!.id, "e"),
+            loopEdge(ns.at(-1)!.id, ns[0]!.id, loop, "l"),
+          ],
+        ),
+      );
+    const forever = { forSeconds: 60 };
+    expect(body([set("a"), set("b")], forever)).toEqual([
+      "busyLoop:warning:b:l",
+    ]);
+    expect(body([set("a")], undefined)).toEqual(["busyLoop:warning:a:l"]);
+    // A bound by rounds is fine, and so is any node that waits in the body.
+    expect(body([set("a")], { times: 3 })).toEqual([]);
+    for (const type of [
+      "delay",
+      "meterValue",
+      "remoteStartTrigger",
+      "remoteStopTrigger",
+      "statusTrigger",
+      "reservationTrigger",
+      "csmsCallTrigger",
+      "connectionTrigger",
+    ]) {
+      expect(body([set("a"), node("w", type)], forever)).toEqual([]);
+    }
+    expect(
+      body([set("a"), node("w", "ocppCall", { action: "Heartbeat" })], forever),
+    ).toEqual([]);
+    // A waiting node outside the body does not count.
+    const outside = check(
+      [node("s", "start"), node("w"), set("a"), node("e", "end")],
+      [
+        edge("s", "w"),
+        edge("w", "a"),
+        edge("a", "e"),
+        loopEdge("a", "a", { forSeconds: 5 }, "l"),
+      ],
+    );
+    expect(outside.map((i) => i.code)).toEqual(["busyLoop"]);
+  });
+
+  it("loopWithoutExit (info): a bounded loop with no ordinary next edge", () => {
+    const issues = check(
+      [node("s", "start"), node("w")],
+      [edge("s", "w"), loopEdge("w", "w", { times: 2 }, "l")],
+    );
+    expect(summary(issues)).toEqual(["loopWithoutExit:info:w:l"]);
+    // Unbounded: it never exits, so nothing ends the branch.
+    expect(
+      check(
+        [node("s", "start"), node("w")],
+        [edge("s", "w"), loopEdge("w", "w", undefined, "l")],
+      ).map((i) => i.code),
+    ).not.toContain("loopWithoutExit");
+  });
+
+  it("reachability: an unbounded loop never exits; a bounded one does", () => {
+    const nodes = [node("s", "start"), node("w"), node("x"), node("e", "end")];
+    const edges = (loop: unknown) => [
+      edge("s", "w"),
+      edge("w", "x"),
+      edge("x", "e"),
+      loopEdge("w", "w", loop, "l"),
+    ];
+    const unreachable = (loop: unknown) =>
+      check(nodes, edges(loop))
+        .filter((i) => i.code === "unreachable")
+        .map((i) => i.nodeId);
+    expect(unreachable(undefined)).toEqual(["x"]);
+    expect(unreachable({ times: 1 })).toEqual([]);
+    expect(unreachable({ forSeconds: 5 })).toEqual([]);
+    // A malformed loop fails the run: no exit either.
+    expect(unreachable({ times: "1" })).toEqual(["x"]);
+    // The loop edge itself makes its target reachable.
+    expect(
+      check(
+        [node("s", "start"), node("w"), node("h"), node("e", "end")],
+        [
+          edge("s", "w"),
+          edge("h", "w"),
+          edge("w", "e"),
+          loopEdge("w", "h", { times: 2 }),
+        ],
+      )
+        .filter((i) => i.code === "unreachable")
+        .map((i) => i.nodeId),
+    ).toEqual([]);
+  });
+
+  it("noCallHeld / noResponseHeld: an until that reads call / response", () => {
+    const until = (root: string) => ({
+      times: 3,
+      until: { value: { $from: `${root}.payload.x` }, cases: [1] },
+    });
+    const run = (
+      n: ReturnType<typeof node>,
+      loop: unknown,
+      pre: string[] = [],
+    ) =>
+      summary(
+        check(
+          [
+            node("s", "start"),
+            ...pre.map((id) =>
+              node(id, "csmsCallTrigger", {
+                action: "Reset",
+                behavior: "replace",
+              }),
+            ),
+            n,
+            node("e", "end"),
+          ],
+          [
+            edge("s", pre[0] ?? n.id),
+            ...pre.map((id, i) => edge(id, pre[i + 1] ?? n.id)),
+            edge(n.id, "e"),
+            loopEdge(n.id, n.id, loop, "l"),
+          ],
+        ),
+      );
+    expect(run(node("w"), until("call"))).toEqual(["noCallHeld:error:w:l"]);
+    // With a CALL taken over earlier in the branch the read is fine.
+    expect(run(node("w"), until("call"), ["t"])).toEqual([
+      "callLeftOpen:warning:t:",
+    ]);
+    expect(run(node("w"), until("response"))).toEqual([
+      "noResponseHeld:error:w:l",
+    ]);
+    // An ocppCall produces an answer before the check.
+    expect(
+      run(node("c", "ocppCall", { action: "Heartbeat" }), until("response")),
+    ).toEqual([]);
+    // station / state roots need neither.
+    expect(run(node("w"), until("state"))).toEqual([]);
+  });
+
+  it("newerConstruct (info): declared below 1.10, numeric per part", () => {
+    const nodes = [node("s", "start"), node("w"), node("e", "end")];
+    const edges = [
+      edge("s", "w"),
+      edge("w", "e"),
+      loopEdge("w", "w", { times: 2 }, "l"),
+    ];
+    const at = (v: unknown) => summary(check(nodes, edges, v));
+    expect(at("1.9")).toEqual(["newerConstruct:info::l"]);
+    expect(at("1.7")).toEqual(["newerConstruct:info::l"]);
+    expect(at("1.10")).toEqual([]);
+    expect(at("1.11")).toEqual([]);
+    expect(at("2.0")).toEqual([]);
+    expect(at(undefined)).toEqual([]);
+    expect(at("garbage")).toEqual([]);
+    const issue = check(nodes, edges, "1.9").find(
+      (i) => i.code === "newerConstruct",
+    )!;
+    expect(issue.data).toEqual({ since: "1.10", declared: "1.9" });
+    // Never without a loop edge.
+    expect(check(nodes, [edge("s", "w"), edge("w", "e")], "1.0")).toEqual([]);
+  });
+});

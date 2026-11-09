@@ -633,6 +633,33 @@ export type ScenarioNodeData =
 export type ScenarioNode = Node<ScenarioNodeData>;
 
 /**
+ * The bounds of a loop edge (schema 1.10). All optional; the first one that is
+ * satisfied at the end of a round exits the loop, none at all loops forever.
+ */
+export interface LoopBounds {
+  /** Exit after this many rounds (a round is one pass of the source node;
+   *  0 behaves like 1: the check runs after the first pass). */
+  times?: number;
+  /** Exit at the first check at or after this many seconds of the station
+   *  clock since the loop was entered. A round that crosses it completes. */
+  forSeconds?: number;
+  /** Exit when `value` (a `$from` reference or a constant, as `switch.value`)
+   *  matches one of `cases` (JSON constants or `{ "$match": … }`, as
+   *  `switch.cases`). */
+  until?: { value: unknown; cases: unknown[] };
+}
+
+/**
+ * A scenario edge. `kind: "loop"` (schema 1.10) marks a loop edge: followed
+ * out of its source after a round while its `loop` bounds are not satisfied,
+ * and never as an ordinary next step. Any other edge is ordinary.
+ */
+export type ScenarioEdge = Edge & {
+  kind?: "loop";
+  loop?: LoopBounds;
+};
+
+/**
  * Scenario trigger configuration
  */
 export interface ScenarioTrigger {
@@ -652,7 +679,7 @@ export interface ScenarioTrigger {
  * See `packages/core/schema/scenario.schema.json` (Draft 2020-12) and
  * `docs/concepts/scenario-format.md`.
  */
-export const SCENARIO_SCHEMA_VERSION = "1.9";
+export const SCENARIO_SCHEMA_VERSION = "1.10";
 
 /** Where a recorded scenario came from (schema 1.6, #654 step 2). */
 export interface ScenarioRecordedFrom {
@@ -705,7 +732,7 @@ export interface ScenarioDefinition {
   targetType: "chargePoint" | "connector";
   targetId?: number; // Connector ID if targetType is "connector"
   nodes: ScenarioNode[];
-  edges: Edge[];
+  edges: ScenarioEdge[];
   createdAt: string;
   updatedAt: string;
 

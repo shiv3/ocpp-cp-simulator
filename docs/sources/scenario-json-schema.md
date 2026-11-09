@@ -1,7 +1,7 @@
 ---
 title: "Source: packages/core/schema/scenario.schema.json"
 type: source
-summary: The published JSON Schema (Draft 2020-12) for scenario files v1.9 — strict on known fields, permissive on unknown keys, advisory at load time; mirrors `ScenarioTypes.ts`.
+summary: The published JSON Schema (Draft 2020-12) for scenario files v1.10 — strict on known fields, permissive on unknown keys, advisory at load time; mirrors `ScenarioTypes.ts`.
 sources:
   - packages/core/schema/scenario.schema.json
 related:
@@ -23,7 +23,7 @@ fields the schema deliberately does not reject.
 
 **Key facts.**
 
-- Version `1.9` (parallel and `join` nodes; edge `kind: "timeout"` in 1.8; the `$from` root `response`, and `$match` matchers in `switch.cases`: `#/$defs/matcher`,
+- Version `1.10` (edge `kind: "loop"` with a `loop` object `{ times, forSeconds, until }`, `#/$defs/edge`; `until.cases` and `switch.cases` share `#/$defs/switchCase`; parallel and `join` nodes in 1.9; edge `kind: "timeout"` in 1.8; the `$from` root `response`, and `$match` matchers in `switch.cases`: `#/$defs/matcher`,
   applied to a case through an `if`/`then` on objects whose only key is `$match`; issue #214 introduced 1.0; issue #240 added the
   `connectionTrigger` node and the `csmsCallTrigger` `payload` condition in
   1.1; issue #301 the charging-curve and electrical `evSettings` fields in

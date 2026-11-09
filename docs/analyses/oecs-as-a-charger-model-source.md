@@ -14,7 +14,8 @@ related:
   - ../concepts/control-plane.md
   - fleet-load-and-observability-roadmap.md
   - ../sources/github-issues.md
-updated: 2026-11-08
+  - vendor-and-ev-fidelity.md
+updated: 2026-11-09
 ---
 
 # OECS as a charger model source

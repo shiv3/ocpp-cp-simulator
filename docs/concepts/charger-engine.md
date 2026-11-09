@@ -24,6 +24,7 @@ related:
   - ../entities/daemon.md
   - ../analyses/scenario-or-behavior.md
   - ../analyses/charger-engine-migration.md
+  - ../analyses/vendor-and-ev-fidelity.md
   - ../analyses/testing-strategy.md
 updated: 2026-11-09
 ---
@@ -38,7 +39,9 @@ disagree, the code wins and this page is the bug.
 
 Read next: [what the station does by default](../entities/default-behaviors.md), [who answers a
 CALL](call-precedence.md), [Scenario or behavior?](../analyses/scenario-or-behavior.md), and for the flags
-the [CLI](../entities/cli.md#behavior-code---behavior-and-behavior-build) page.
+the [CLI](../entities/cli.md#behavior-code---behavior-and-behavior-build) page. How far behaviors, params and
+blueprints go towards reproducing a specific charger model is assessed in
+[Vendor and EV fidelity](../analyses/vendor-and-ev-fidelity.md).
 
 ## Stability
 

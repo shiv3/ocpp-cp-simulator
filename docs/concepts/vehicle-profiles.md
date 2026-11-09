@@ -25,6 +25,7 @@ related:
   - ../entities/daemon.md
   - ../entities/mcp-endpoint.md
   - ../sources/github-issues.md
+  - ../analyses/vendor-and-ev-fidelity.md
 updated: 2026-11-09
 ---
 

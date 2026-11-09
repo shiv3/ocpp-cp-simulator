@@ -19,6 +19,7 @@ related:
   - open-ev-directory.md
   - ../concepts/operational-timeline.md
   - ../concepts/charging-sessions.md
+  - ../analyses/vendor-and-ev-fidelity.md
 updated: 2026-11-09
 ---
 
@@ -1360,6 +1361,8 @@ applied. A preset picked over a profile's vehicle — in the same edit or after
 a save and a reopen — replaces it, curve included; **Custom** keeps the
 current vehicle's fields
 ([Replacing a vehicle](../concepts/vehicle-profiles.md#replacing-a-vehicle)).
+What a profile does and does not capture of a real vehicle is assessed in
+[Vendor and EV fidelity](../analyses/vendor-and-ev-fidelity.md#where-vehicle-data-comes-from).
 
 ## What the console can do
 

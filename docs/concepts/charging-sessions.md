@@ -30,6 +30,7 @@ related:
   - local-authorization.md
   - power-loss.md
   - smart-charging.md
+  - ../analyses/vendor-and-ev-fidelity.md
 updated: 2026-11-09
 ---
 
@@ -293,6 +294,10 @@ Rules:
   proves one, and never sends a status for it. A reset of an idle plugged-in
   connector keeps `Preparing`.
 - The connector lock and a partial plug are not modelled.
+
+What this model and the EV settings can and cannot reproduce of a specific
+vehicle (pauses, ramps, phases, ISO 15118, V2G) is assessed in
+[Vendor and EV fidelity](../analyses/vendor-and-ev-fidelity.md#ev-fidelity-matrix).
 
 ## EV-side disconnect and connection loss
 

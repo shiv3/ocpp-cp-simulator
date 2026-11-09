@@ -2,7 +2,7 @@
 title: Index
 type: index
 summary: Catalog of every page in the wiki with a one-line summary, by category. Read this first when answering a question.
-updated: 2026-11-08
+updated: 2026-11-09
 ---
 
 # Index
@@ -86,6 +86,7 @@ Start at [Overview](overview.md). Conventions for pages are in
 | [OECS as a charger model source](analyses/oecs-as-a-charger-model-source.md)              | What the OECS charger-spec schema holds, which fields map onto a blueprint, what has nowhere to land, and the decisions an importer (#331) must settle                                                    |
 | [Charger engine migration history](analyses/charger-engine-migration.md)                  | How the charger engine was built, stage by stage: the decisions each stage took, verification numbers, the two reviews and the pinned-hash investigation; the contract is in `concepts/charger-engine.md` |
 | [Scenario or behavior?](analyses/scenario-or-behavior.md)                                 | Choosing between a response override, a schema 1.6 scenario and a TypeScript behavior, with recipes (override, extend, disable) and the node to `ctx` mapping                                             |
+| [Vendor and EV fidelity](analyses/vendor-and-ev-fidelity.md)                              | Whether a specific charger model and a specific EV can be simulated: fidelity matrices, packaging today, prioritized gap backlog                                                                          |
 
 ## Raw assets kept under `docs/`
 

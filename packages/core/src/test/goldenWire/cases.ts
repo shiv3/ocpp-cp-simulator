@@ -1,3 +1,5 @@
+import type { JsonObject } from "@ocpp-cp-simulator/contracts/behavior";
+import type { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
 import { SIGNING_CERTIFICATE } from "../../cp/domain/security/__tests__/signingCertificateFixture";
 import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
 import type { WireVersion } from "./FakeCsms";
@@ -37,6 +39,14 @@ const both = (
 ): GoldenCase[] => [c16(name, run, options), c201(name, run, options)];
 
 const settle = (rig: Rig) => rig.csms.settle();
+
+/** Select `default.firmware` params for the whole case (a code-owned layer). */
+const selectFirmware = (cp: ChargePoint, params: JsonObject): void =>
+  cp.engine.activateBehavior(
+    "default.firmware",
+    { kind: "code", behaviorId: "golden" },
+    params,
+  );
 
 async function charging(rig: Rig, tag = "TAG-1"): Promise<void> {
   rig.plugIn();
@@ -337,6 +347,99 @@ export const goldenCases: GoldenCase[] = [
     rig.cp.stopTransaction(1, "Local");
     await settle(rig);
   }),
+  // #327: a charger cap of 11 kW on a 22 kW three-phase vehicle. Power.Offered
+  // and Power.Active.Import both read the capped value (one operating point),
+  // per phase on three phases; with the vehicle at 22 kW and no cap they
+  // would read 22 kW.
+  // #614-#617: opt-in meter realism and the station main meter. Only the
+  // deterministic parts are pinned (no fluctuation or ramp: those read the
+  // wall clock). Per-phase voltages, independent legs, Interval / Export
+  // samples, unit overrides (kWh, a multiplier on 2.0.1) and a main meter on
+  // connector 0 / EVSE 0 that aggregates the connector.
+  ...both(
+    "meter-realism-values",
+    async (rig) => {
+      await charging(rig);
+      const connector = rig.cp.getConnector(1)!;
+      if (connector.status !== OCPPStatus.Charging) {
+        rig.cp.updateConnectorStatus(1, OCPPStatus.Charging);
+        await settle(rig);
+      }
+      connector.evSettings = {
+        ...connector.evSettings,
+        maxChargingPowerKw: 11,
+        currentType: "AC",
+        phases: 3,
+        voltageV: 230,
+      };
+      rig.cp.configuration.applyChange(
+        "MeterValuesSampledData",
+        "Energy.Active.Import.Register,Energy.Active.Import.Interval,Energy.Active.Export.Register,Power.Active.Import,Power.Active.Export,Voltage,Current.Import",
+      );
+      rig.cp.setMeterValue(1, 1500);
+      rig.cp.sendMeterValue(1);
+      await settle(rig);
+      rig.cp.setMeterValue(1, 4200);
+      rig.cp.sendMeterValue(1);
+      rig.cp.sendMeterValue(0);
+      await settle(rig);
+      rig.cp.stopTransaction(1, "Local");
+      await settle(rig);
+    },
+    {
+      transportOptions: {
+        chargerCapabilities: {
+          connectors: [
+            {
+              connectorId: 1,
+              maxDeliveryPowerW: 22_000,
+              meter: {
+                phases: {},
+                sampledValues: [
+                  {
+                    measurand: "Energy.Active.Import.Register",
+                    set: { unit: "kWh" },
+                  },
+                  {
+                    measurand: "Power.Active.Import",
+                    phase: "L2",
+                    set: { omit: true },
+                  },
+                ],
+              },
+            },
+          ],
+          mainMeter: {},
+        },
+      },
+    },
+  ),
+  ...both("charger-cap-meter-values", async (rig) => {
+    await charging(rig);
+    const connector = rig.cp.getConnector(1)!;
+    // 2.0.1 leaves the connector in Preparing until the EVSE energizes it.
+    if (connector.status !== OCPPStatus.Charging) {
+      rig.cp.updateConnectorStatus(1, OCPPStatus.Charging);
+      await settle(rig);
+    }
+    connector.evSettings = {
+      ...connector.evSettings,
+      maxChargingPowerKw: 22,
+      currentType: "AC",
+      phases: 3,
+      voltageV: 230,
+    };
+    connector.setMaxDeliveryPowerW(11_000);
+    rig.cp.configuration.applyChange(
+      "MeterValuesSampledData",
+      "Energy.Active.Import.Register,Power.Active.Import,Power.Offered,Current.Import",
+    );
+    rig.cp.setMeterValue(1, 1500);
+    rig.cp.sendMeterValue(1);
+    await settle(rig);
+    rig.cp.stopTransaction(1, "Local");
+    await settle(rig);
+  }),
   ...both(
     "start-denied-by-authorize",
     async (rig) => {
@@ -377,6 +480,33 @@ export const goldenCases: GoldenCase[] = [
         transactionId: "no-such-transaction",
       });
     }
+    await settle(rig);
+  }),
+  // #453: the EV and cable model. A plug-in reports Preparing (2.x Occupied)
+  // by itself, readiness suspends and resumes the transaction, an unplug of
+  // an idle connector returns to Available.
+  ...both("ev-cable-plug-unplug-idle", async (rig) => {
+    rig.cp.evPlugIn(1);
+    rig.cp.evPlugIn(1);
+    await settle(rig);
+    rig.cp.evDisconnected(1);
+    await settle(rig);
+  }),
+  ...both("ev-cable-ready-cycle", async (rig) => {
+    rig.cp.evPlugIn(1);
+    await settle(rig);
+    await rig.startLocal("TAG-A", 1);
+    await settle(rig);
+    // 2.x leaves the connector status to the caller once the start is sent.
+    if (!rig.is16) rig.cp.updateConnectorStatus(1, OCPPStatus.Charging);
+    await settle(rig);
+    rig.cp.evSetReady(1, false);
+    await settle(rig);
+    rig.cp.evSetReady(1, true);
+    await settle(rig);
+    rig.cp.stopTransaction(1);
+    await settle(rig);
+    rig.cp.evDisconnected(1);
     await settle(rig);
   }),
   ...both("ev-disconnect-during-transaction", async (rig) => {
@@ -703,11 +833,20 @@ export const goldenCases: GoldenCase[] = [
     await settle(rig);
   }),
   c201("get-log", async (rig) => {
+    const from = rig.csms.mark();
     await rig.csms.call("GetLog", {
       logType: "DiagnosticsLog",
       requestId: 21,
       log: { remoteLocation: rig.uploadUrl() },
     });
+    // The lifecycle's last status (N01.FR.09), not the 250 ms cut-off.
+    await rig.csms.waitForFrame(
+      (f) =>
+        f.dir === "CP>" &&
+        f.action === "LogStatusNotification" &&
+        (f.payload as { status?: string }).status === "Uploaded",
+      { from, timeoutMs: 30_000 },
+    );
     await settle(rig);
   }),
   c201("firmware-and-log-status-driven", async (rig) => {
@@ -727,6 +866,91 @@ export const goldenCases: GoldenCase[] = [
     });
     rig.cp.sendLogStatusNotification("Uploading");
     rig.cp.sendLogStatusNotification("Uploaded");
+    // Outlast the automatic lifecycle (2 s): the driven train is the only one
+    // that ends with Uploaded (N01.FR.09, #822 review).
+    await new Promise((resolve) => setTimeout(resolve, 2_600));
+    await settle(rig);
+  }),
+
+  // --- opt-in lifecycles (#600, #601) ------------------------------------
+  c201(
+    "update-firmware-train",
+    async (rig) => {
+      // train on, a signature present: the whole 2.x train with requestId.
+      await rig.csms.call("UpdateFirmware", {
+        requestId: 9,
+        firmware: {
+          location: "https://fw.example.test/fw.bin",
+          retrieveDateTime: PAST,
+          signingCertificate: SIGNING_CERTIFICATE,
+          signature: "sig",
+        },
+      });
+      await rig.csms.waitForCall("SecurityEventNotification", {
+        timeoutMs: 30_000,
+      });
+      await settle(rig);
+    },
+    { beforeConnect: (cp) => selectFirmware(cp, { train: true, stepMs: 40 }) },
+  ),
+  c201(
+    "update-firmware-train-invalid-signature",
+    async (rig) => {
+      await rig.csms.call("UpdateFirmware", {
+        requestId: 10,
+        firmware: {
+          location: "https://fw.example.test/fw.bin",
+          retrieveDateTime: PAST,
+          signingCertificate: SIGNING_CERTIFICATE,
+          signature: "sig",
+        },
+      });
+      await rig.csms.waitForCall("SecurityEventNotification", {
+        timeoutMs: 30_000,
+      });
+      await settle(rig);
+    },
+    {
+      beforeConnect: (cp) =>
+        selectFirmware(cp, {
+          train: true,
+          stepMs: 40,
+          failAt: "InvalidSignature",
+        }),
+    },
+  ),
+  c16(
+    "update-firmware-reboot-before-installed",
+    async (rig) => {
+      await rig.csms.call("UpdateFirmware", {
+        location: "http://fw.example.test/fw.bin",
+        retrieveDate: PAST,
+      });
+      await rig.csms.waitForFrame(
+        (f) =>
+          f.dir === "CP>" &&
+          f.action === "FirmwareStatusNotification" &&
+          (f.payload as { status?: string }).status === "Installed",
+        { timeoutMs: 30_000 },
+      );
+      await settle(rig);
+    },
+    {
+      beforeConnect: (cp) =>
+        selectFirmware(cp, { reboot: "beforeInstalled", stepMs: 40 }),
+    },
+  ),
+  c201("get-log-replaced", async (rig) => {
+    const getLog = (requestId: number) =>
+      rig.csms.call("GetLog", {
+        logType: "DiagnosticsLog",
+        requestId,
+        log: { remoteLocation: rig.uploadUrl() },
+      });
+    await getLog(31);
+    await new Promise((r) => setTimeout(r, 300));
+    await getLog(32);
+    await new Promise((r) => setTimeout(r, 2600));
     await settle(rig);
   }),
 

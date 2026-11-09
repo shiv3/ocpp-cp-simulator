@@ -111,6 +111,9 @@ function station(
       messageTimeout: () => 30,
       offlineQueueMaxEvents: () => maxEvents,
       meterValuesSampledData: () => [],
+      stopTxnSampledData: () => [],
+      stopTxnAlignedData: () => [],
+      txStartedMeasurands: () => [],
     },
   };
   const handler = new OCPPMessageHandlerV201(
@@ -606,6 +609,9 @@ describe("OCPP 1.6 replay of a persisted 2.x row (#528)", () => {
         configuration: {
           transactionMessageAttempts: () => 3,
           meterValuesSampledData: () => [],
+          stopTxnSampledData: () => [],
+          stopTxnAlignedData: () => [],
+          txStartedMeasurands: () => [],
         },
       };
       const logger = silentLogger();

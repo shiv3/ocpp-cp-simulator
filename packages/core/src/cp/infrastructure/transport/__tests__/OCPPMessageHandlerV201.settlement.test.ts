@@ -147,6 +147,9 @@ const createMockChargePoint = (): ChargePoint => {
     id: "test-cp",
     configuration: {
       meterValuesSampledData: vi.fn(() => []),
+      stopTxnSampledData: vi.fn(() => []),
+      stopTxnAlignedData: vi.fn(() => []),
+      txStartedMeasurands: vi.fn(() => []),
       getString: vi.fn(),
       // #529: a written TransactionEvent arms its MessageTimeout.
       messageTimeout: vi.fn(() => 30),

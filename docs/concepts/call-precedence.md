@@ -68,12 +68,18 @@ blueprint's `params`, so `cp.create_many { blueprintId }` yields the partial sta
 
 - `disabledActions`: CSMS→CP action names. An inbound CALL for one is answered with a CALLERROR
   `NotImplemented` ("This action is not supported"), the same answer an action with no handler gets
-  (OCPP-J 1.6 §4.2.3). On OCPP 2.x an action is matched under its 1.6 spelling too (`RemoteStartTransaction`
-  disables `RequestStartTransaction`); on 1.6 only the exact name counts, so disabling `TriggerMessage` leaves
-  `ExtendedTriggerMessage` working.
+  (OCPP-J 1.6 §4.2.3). On OCPP 2.x an action is matched under its 1.6 spelling too, for the one-to-one pairs only
+  (`RemoteStartTransaction` disables `RequestStartTransaction`; likewise `RemoteStopTransaction`,
+  `ChangeConfiguration` / `GetConfiguration` for `SetVariables` / `GetVariables`). The folded pairs stay apart:
+  `ExtendedTriggerMessage` does not disable the 2.x `TriggerMessage`, nor `SignedUpdateFirmware` `UpdateFirmware`,
+  nor `GetDiagnostics` `GetLog`. On 1.6 only the exact name counts, so disabling `TriggerMessage` leaves
+  `ExtendedTriggerMessage` working. Names are not validated: a name that is not a CSMS→CP action of the
+  version is a no-op.
 - `triggerMessageTargets`: the `requestedMessage` values `TriggerMessage` and `ExtendedTriggerMessage` may
   request; any other value is answered with the status `NotImplemented` (1.6 §5.17, 2.x F06). `[]` supports
-  none; absent leaves every target as it is.
+  none; absent leaves every target as it is. On 2.x the renamed targets match under both spellings
+  (`DiagnosticsStatusNotification` / `LogStatusNotification`, `SignChargePointCertificate` /
+  `SignChargingStationCertificate`); on 1.6 they are distinct targets and match exactly.
 
 The profile is step 2b: below the sticky policy and the one-shot override, so **a scenario keeps precedence**
 (a policy refuses with its own error code, an override answers its status), and above scenario rules, code

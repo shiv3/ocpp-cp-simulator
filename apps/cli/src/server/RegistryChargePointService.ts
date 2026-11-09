@@ -1,3 +1,4 @@
+import type { StartTransactionOutcome } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
 import { isSoapVersion } from "@ocpp-cp-simulator/core/cp/domain/types/OcppVersion";
 import * as fs from "fs";
 import type {
@@ -103,6 +104,7 @@ import { redactSensitiveText } from "@ocpp-cp-simulator/core/cp/shared/redaction
 import { scenarioTemplates } from "@ocpp-cp-simulator/core/utils/scenarioTemplates";
 import type { CLIChargePointService, CLIEvent } from "../service";
 import type { ChargePointInitOptions, ChargePointStatus } from "../types";
+import { redactTransport } from "@ocpp-cp-simulator/contracts/events";
 import type { Labels } from "@ocpp-cp-simulator/contracts/labels";
 import type { JsonObject } from "@ocpp-cp-simulator/contracts/behavior";
 import type {
@@ -371,8 +373,12 @@ export class RegistryChargePointService implements ChargePointService {
     connectorId: number,
     tagId: string,
     options?: StartTransactionCommandOptions,
-  ): Promise<void> {
-    this.requireService(id).startTransaction(connectorId, tagId, options);
+  ): Promise<StartTransactionOutcome> {
+    return this.requireService(id).startTransaction(
+      connectorId,
+      tagId,
+      options,
+    );
   }
 
   async stopTransaction(
@@ -393,6 +399,18 @@ export class RegistryChargePointService implements ChargePointService {
 
   async evDisconnected(id: string, connectorId: number): Promise<void> {
     this.requireService(id).evDisconnected(connectorId);
+  }
+
+  async evPlugIn(id: string, connectorId: number): Promise<void> {
+    this.requireService(id).evPlugIn(connectorId);
+  }
+
+  async evSetReady(
+    id: string,
+    connectorId: number,
+    ready: boolean,
+  ): Promise<void> {
+    this.requireService(id).evSetReady(connectorId, ready);
   }
 
   async sendStatusNotification(
@@ -1134,6 +1152,8 @@ function toInitOptions(
     reservationAuthorizeIdTag:
       params.reservationAuthorizeIdTag ?? existing?.reservationAuthorizeIdTag,
     capabilityProfile: params.capabilityProfile ?? existing?.capabilityProfile,
+    chargerCapabilities:
+      params.chargerCapabilities ?? existing?.chargerCapabilities,
     tls: params.tls ?? existing?.tls,
     tlsCaPath: params.tlsCaPath ?? existing?.tlsCaPath,
     tlsCertPath: params.tlsCertPath ?? existing?.tlsCertPath,
@@ -1205,6 +1225,10 @@ function toChargePointSnapshot(status: ChargePointStatus): ChargePointSnapshot {
           inboundValidation: status.config.inboundValidation,
           reservationAuthorizeIdTag: status.config.reservationAuthorizeIdTag,
           capabilityProfile: status.config.capabilityProfile,
+          ...(status.config.transport === undefined
+            ? {}
+            : { transport: redactTransport(status.config.transport) }),
+          chargerCapabilities: status.config.chargerCapabilities,
           tlsCaPath: status.config.tlsCaPath,
           tlsCertPath: status.config.tlsCertPath,
           tlsKeyPath: status.config.tlsKeyPath,
@@ -1245,6 +1269,7 @@ function toConnectorSnapshot(
       : null,
     transactionTagId: connector.transactionTagId,
     transactionBatteryCapacityKwh: connector.transactionBatteryCapacityKwh,
+    evConnection: connector.evConnection,
   };
 }
 

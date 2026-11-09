@@ -13,7 +13,12 @@ import {
   type CallResponseSpec,
   type OcppCallNodeData,
   type UseBehaviorNodeData,
+  type ChoiceNodeData,
   type DelayNodeData,
+  NOTIFY_KINDS,
+  type NotifyNodeData,
+  type SetStateNodeData,
+  type SwitchNodeData,
   INBOUND_POLICY_ACTIONS,
   INBOUND_POLICY_ERROR_CODES,
   type InboundPolicyNodeData,
@@ -45,7 +50,12 @@ import ConnectionTriggerForm from "./ConnectionTriggerForm";
 import ConnectorPlugForm from "./ConnectorPlugForm";
 import CsmsCallTriggerForm from "./CsmsCallTriggerForm";
 import DataTransferForm from "./DataTransferForm";
+import ChoiceForm from "./ChoiceForm";
 import DelayForm from "./DelayForm";
+import NotifyForm from "./NotifyForm";
+import { NOTIFY_STATUSES } from "./notifyStatuses";
+import SetStateForm from "./SetStateForm";
+import SwitchForm from "./SwitchForm";
 import EndForm from "./EndForm";
 import InboundPolicyForm from "./InboundPolicyForm";
 import MeterValueForm from "./MeterValueForm";
@@ -349,20 +359,35 @@ export function meterValueFormToNodeData(
   }) as MeterValueNodeData;
 }
 
+/** Schema 1.6 (#654): `until` (empty text is absent) and a non-negative
+ *  `jitterSeconds`. */
+function delayExtras(source: Partial<DelayNodeData>) {
+  const jitter = optionalNumber(source.jitterSeconds);
+  return {
+    until:
+      typeof source.until === "string" && source.until !== ""
+        ? source.until
+        : undefined,
+    jitterSeconds: jitter !== undefined && jitter >= 0 ? jitter : undefined,
+  };
+}
+
 function delayNodeDataToForm(nodeData: ScenarioNodeData): NodeFormData {
   return compactDefined({
     ...baseToForm(nodeData),
     delaySeconds: numberValue(
       (nodeData as Partial<DelayNodeData>).delaySeconds,
     ),
+    ...delayExtras(nodeData as Partial<DelayNodeData>),
   });
 }
 
 function delayFormToNodeData(formData: NodeFormData): DelayNodeData {
-  return {
+  return compactDefined({
     ...baseFromForm(formData),
     delaySeconds: numberValue(formData.delaySeconds),
-  };
+    ...delayExtras(formData as Partial<DelayNodeData>),
+  }) as DelayNodeData;
 }
 
 function notificationNodeDataToForm(nodeData: ScenarioNodeData): NodeFormData {
@@ -667,15 +692,31 @@ function ocppCallFormToNodeData(formData: NodeFormData): OcppCallNodeData {
   }) as OcppCallNodeData;
 }
 
-const CALL_RESPONSE_KINDS = new Set<string>(["result", "error", "none"]);
+const CALL_RESPONSE_KINDS = new Set<string>([
+  "result",
+  "error",
+  "none",
+  "accepted",
+  "rejected",
+]);
 
 /** The fields of a CallResponseSpec as the form edits them and as saved. A
  *  payload that is not an object is kept as typed (see ocppCallPayload). */
 function callResponseSpecFields(source: Record<string, unknown>) {
+  const kind = CALL_RESPONSE_KINDS.has(source.kind as string)
+    ? (source.kind as CallResponseSpec["kind"])
+    : "result";
+  // Schema 1.6 (#654): accepted / rejected carry nothing else.
+  if (kind === "accepted" || kind === "rejected") {
+    return {
+      kind,
+      payload: undefined,
+      errorCode: undefined,
+      errorDescription: undefined,
+    };
+  }
   return {
-    kind: CALL_RESPONSE_KINDS.has(source.kind as string)
-      ? (source.kind as CallResponseSpec["kind"])
-      : "result",
+    kind,
     payload:
       source.payload === undefined
         ? undefined
@@ -694,12 +735,20 @@ function asCallResponseSpec(value: unknown): CallResponseSpec | undefined {
   );
 }
 
+function callResponseSkipValidation(
+  source: Record<string, unknown>,
+): boolean | undefined {
+  return source.kind === "accepted" || source.kind === "rejected"
+    ? undefined
+    : optionalBoolean(source.skipValidation);
+}
+
 function callResponseNodeDataToForm(nodeData: ScenarioNodeData): NodeFormData {
   return compactDefined({
     ...baseToForm(nodeData),
     ...callResponseSpecFields(nodeData as Record<string, unknown>),
-    skipValidation: optionalBoolean(
-      (nodeData as Partial<CallResponseNodeData>).skipValidation,
+    skipValidation: callResponseSkipValidation(
+      nodeData as Record<string, unknown>,
     ),
   });
 }
@@ -710,8 +759,119 @@ function callResponseFormToNodeData(
   return compactDefined({
     ...baseFromForm(formData),
     ...callResponseSpecFields(formData),
-    skipValidation: optionalBoolean(formData.skipValidation),
+    skipValidation: callResponseSkipValidation(formData),
   }) as CallResponseNodeData;
+}
+
+const NOTIFY_KINDS_SET = new Set<string>(NOTIFY_KINDS);
+
+function asNotifyKind(value: unknown): NotifyNodeData["kind"] {
+  return NOTIFY_KINDS_SET.has(value as string)
+    ? (value as NotifyNodeData["kind"])
+    : "firmwareStatus";
+}
+
+/** A `{ "$from": "..." }` reference as written, or undefined. */
+function asFromReference(value: unknown): { $from: string } | undefined {
+  return typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    typeof (value as { $from?: unknown }).$from === "string"
+    ? { $from: (value as { $from: string }).$from }
+    : undefined;
+}
+
+function notifyFields(source: Record<string, unknown>) {
+  const kind = asNotifyKind(source.kind);
+  const status =
+    typeof source.status === "string"
+      ? source.status
+      : NOTIFY_STATUSES[kind][0];
+  return compactDefined({
+    kind,
+    status,
+    requestId:
+      optionalNumber(source.requestId) ?? asFromReference(source.requestId),
+  });
+}
+
+function notifyNodeDataToForm(nodeData: ScenarioNodeData): NodeFormData {
+  return {
+    ...baseToForm(nodeData),
+    ...notifyFields(nodeData as Record<string, unknown>),
+  };
+}
+
+function notifyFormToNodeData(formData: NodeFormData): NotifyNodeData {
+  return {
+    ...baseFromForm(formData),
+    ...notifyFields(formData),
+  } as NotifyNodeData;
+}
+
+function switchNodeDataToForm(nodeData: ScenarioNodeData): NodeFormData {
+  const data = nodeData as Partial<SwitchNodeData>;
+  return {
+    ...baseToForm(nodeData),
+    value: data.value ?? null,
+    cases: Array.isArray(data.cases) ? data.cases : [],
+  };
+}
+
+function switchFormToNodeData(formData: NodeFormData): SwitchNodeData {
+  return {
+    ...baseFromForm(formData),
+    value: formData.value ?? null,
+    cases: Array.isArray(formData.cases) ? formData.cases : [],
+  };
+}
+
+/** Keeps the options as authored: a positive finite weight and a label. */
+function choiceOptions(value: unknown): ChoiceNodeData["options"] {
+  if (!Array.isArray(value)) return [];
+  return value.map((option) => {
+    const o = (typeof option === "object" && option !== null ? option : {}) as {
+      weight?: unknown;
+      label?: unknown;
+    };
+    const weight = optionalNumber(o.weight);
+    return compactDefined({
+      weight,
+      label:
+        typeof o.label === "string" && o.label !== "" ? o.label : undefined,
+    });
+  });
+}
+
+function choiceNodeDataToForm(nodeData: ScenarioNodeData): NodeFormData {
+  return {
+    ...baseToForm(nodeData),
+    options: choiceOptions((nodeData as Partial<ChoiceNodeData>).options),
+  };
+}
+
+function choiceFormToNodeData(formData: NodeFormData): ChoiceNodeData {
+  return {
+    ...baseFromForm(formData),
+    options: choiceOptions(formData.options),
+  };
+}
+
+function setStateNodeDataToForm(nodeData: ScenarioNodeData): NodeFormData {
+  const data = nodeData as Partial<SetStateNodeData>;
+  return {
+    ...baseToForm(nodeData),
+    key: stringValue(data.key),
+    value: data.value ?? null,
+  };
+}
+
+function setStateFormToNodeData(formData: NodeFormData): SetStateNodeData {
+  return {
+    ...baseFromForm(formData),
+    key: stringValue(formData.key),
+    value: formData.value ?? null,
+  };
 }
 
 function useBehaviorNodeDataToForm(nodeData: ScenarioNodeData): NodeFormData {
@@ -1095,6 +1255,30 @@ export const NODE_FORM_REGISTRY = {
     Component: UseBehaviorForm,
     nodeDataToForm: useBehaviorNodeDataToForm,
     formToNodeData: useBehaviorFormToNodeData,
+  },
+  [ScenarioNodeType.NOTIFY]: {
+    title: "scenarioEditor.node.notify",
+    Component: NotifyForm,
+    nodeDataToForm: notifyNodeDataToForm,
+    formToNodeData: notifyFormToNodeData,
+  },
+  [ScenarioNodeType.SWITCH]: {
+    title: "scenarioEditor.node.switch",
+    Component: SwitchForm,
+    nodeDataToForm: switchNodeDataToForm,
+    formToNodeData: switchFormToNodeData,
+  },
+  [ScenarioNodeType.CHOICE]: {
+    title: "scenarioEditor.node.choice",
+    Component: ChoiceForm,
+    nodeDataToForm: choiceNodeDataToForm,
+    formToNodeData: choiceFormToNodeData,
+  },
+  [ScenarioNodeType.SET_STATE]: {
+    title: "scenarioEditor.node.setState",
+    Component: SetStateForm,
+    nodeDataToForm: setStateNodeDataToForm,
+    formToNodeData: setStateFormToNodeData,
   },
   [ScenarioNodeType.CONNECTION_TRIGGER]: {
     title: "scenarioEditor.node.connectionTrigger",

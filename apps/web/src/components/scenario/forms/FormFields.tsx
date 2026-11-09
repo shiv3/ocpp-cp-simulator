@@ -1,3 +1,7 @@
+import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import type { MessageKey } from "../../../i18n";
+
 interface TextFieldProps {
   label: string;
   value: string;
@@ -11,6 +15,8 @@ interface NumberFieldProps {
   onChange: (value: number | undefined) => void;
   placeholder?: string;
   min?: number;
+  /** A step (e.g. "any") lets the field hold a fraction. */
+  step?: number | "any";
 }
 
 interface SelectFieldProps {
@@ -64,6 +70,7 @@ export function NumberField({
   onChange,
   placeholder,
   min,
+  step,
 }: NumberFieldProps) {
   return (
     <div>
@@ -78,11 +85,14 @@ export function NumberField({
           onChange(
             event.target.value === ""
               ? undefined
-              : Number.parseInt(event.target.value, 10) || 0,
+              : step === undefined
+                ? Number.parseInt(event.target.value, 10) || 0
+                : Number.parseFloat(event.target.value) || 0,
           )
         }
         placeholder={placeholder}
         min={min}
+        step={step}
       />
     </div>
   );
@@ -199,5 +209,97 @@ export function JsonTextareaField({
       }}
       placeholder={placeholder}
     />
+  );
+}
+
+interface JsonValueFieldProps {
+  label: string;
+  /** The current JSON value; `undefined` is an empty field. */
+  value: unknown;
+  /** Called with each value the text parses to (and `undefined` for empty
+   *  text when `optional`). Text that is not valid keeps the last value. */
+  onChange: (value: unknown) => void;
+  placeholder?: string;
+  optional?: boolean;
+  /** Returns a message key when a parsed value is not acceptable. */
+  validate?: (value: unknown) => MessageKey | null;
+  help?: string;
+  rows?: number;
+}
+
+function jsonText(value: unknown): string {
+  return value === undefined ? "" : JSON.stringify(value, null, 2);
+}
+
+/** Any JSON value (a string needs its quotes) edited as text. Unlike
+ *  JsonTextareaField the text is a local draft, so an unparsable or rejected
+ *  edit is reported next to the field instead of being stored. */
+export function JsonValueField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  optional = false,
+  validate,
+  help,
+  rows = 4,
+}: JsonValueFieldProps) {
+  const { t } = useTranslation();
+  const [draft, setDraft] = useState(() => jsonText(value));
+  const [error, setError] = useState<MessageKey | null>(null);
+
+  // Follow a value changed from outside (undo, another node selected) but not
+  // the echo of the draft itself.
+  useEffect(() => {
+    try {
+      const parsed = draft.trim() === "" ? undefined : JSON.parse(draft);
+      if (JSON.stringify(parsed) === JSON.stringify(value)) return;
+    } catch {
+      // the draft is invalid: the outside value wins only if it differs
+    }
+    setDraft(jsonText(value));
+    setError(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
+  const handle = (text: string) => {
+    setDraft(text);
+    if (text.trim() === "") {
+      if (optional) {
+        setError(null);
+        onChange(undefined);
+      } else {
+        setError("scenarioEditor.json.invalid");
+      }
+      return;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      setError("scenarioEditor.json.invalid");
+      return;
+    }
+    const rejected = validate?.(parsed) ?? null;
+    setError(rejected);
+    if (rejected === null) onChange(parsed);
+  };
+
+  return (
+    <div>
+      <TextareaField
+        label={label}
+        value={draft}
+        onChange={handle}
+        placeholder={placeholder}
+        rows={rows}
+      />
+      {error !== null && (
+        <p role="alert" className="text-xs text-red-600 dark:text-red-400">
+          {t(error)}
+        </p>
+      )}
+      {help && <p className="text-xs text-muted mt-1">{help}</p>}
+    </div>
   );
 }

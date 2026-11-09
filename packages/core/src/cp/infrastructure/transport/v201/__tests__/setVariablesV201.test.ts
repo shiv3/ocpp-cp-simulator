@@ -340,6 +340,10 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
     const lists = [
       ["SampledDataCtrlr", "TxUpdatedMeasurands", "MeterValuesSampledData"],
       ["AlignedDataCtrlr", "Measurands", "MeterValuesAlignedData"],
+      // #607: the transaction-end lists are MemberLists over the same enum.
+      ["SampledDataCtrlr", "TxStartedMeasurands", "TxStartedMeasurands"],
+      ["SampledDataCtrlr", "TxEndedMeasurands", "StopTxnSampledData"],
+      ["AlignedDataCtrlr", "TxEndedMeasurands", "StopTxnAlignedData"],
     ] as const;
 
     const set = (
@@ -371,6 +375,9 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
             value: ["Energy.Active.Import.Register"],
           },
           { key: ConfigurationKeys.Core.MeterValuesAlignedData, value: [] },
+          { key: ConfigurationKeys.Custom.TxStartedMeasurands, value: [] },
+          { key: ConfigurationKeys.Core.StopTxnSampledData, value: [] },
+          { key: ConfigurationKeys.Core.StopTxnAlignedData, value: [] },
         ],
         null,
       );

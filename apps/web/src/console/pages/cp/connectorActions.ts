@@ -1,23 +1,18 @@
 import { meterFromSoc } from "@/data/hooks/useSocMeterSync";
 import type { EVSettings } from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
-import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import type { ChargePointService } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 
 /*
- * The connector card's plug in / unplug. A plug-in sends StatusNotification
- * Preparing, as the exported k6 runtime does for a `connectorPlug` plug-in
- * node; the simulator's own node treats a plug-in as a no-op.
+ * The connector card's plug in / unplug. A plug-in drives the connector's EV
+ * and cable model (#453): an idle Available connector reports Preparing, in
+ * any other state the cable is only recorded.
  */
 export function plugIn(
   service: ChargePointService,
   cpId: string,
   connectorId: number,
 ): Promise<void> {
-  return service.sendStatusNotification(
-    cpId,
-    connectorId,
-    OCPPStatus.Preparing,
-  );
+  return service.evPlugIn(cpId, connectorId);
 }
 
 /**

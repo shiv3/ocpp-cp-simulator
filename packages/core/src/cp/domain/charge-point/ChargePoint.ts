@@ -1,3 +1,8 @@
+import {
+  maxDeliveryPowerWFor,
+  meterRealismFor,
+  type ChargerCapabilities,
+} from "./ChargerCapabilities";
 import type {
   DiagnosticsStatus,
   FirmwareStatus,
@@ -22,6 +27,7 @@ import type {
 import type { LogEntry } from "../../shared/Logger";
 import { Logger, LogType } from "../../shared/Logger";
 import { HeartbeatService } from "../../application/services/HeartbeatService";
+import { MainMeter } from "./MainMeter";
 import { ClockAlignedMeterScheduler } from "./ClockAlignedMeterScheduler";
 import { StateManager } from "../../application/services/StateManager";
 import { OperationalTimeline } from "../../application/services/OperationalTimeline";
@@ -56,6 +62,7 @@ import type {
   OcppTlsOptions,
 } from "../../infrastructure/transport/wsUrlWithBasic";
 import { getProtocolProfile } from "../../infrastructure/transport/profile/profiles";
+import { measurandEnumFor } from "../connector/measurandEnum";
 import { OCPPSoapHandler } from "../../infrastructure/transport/soap";
 import { Outbox } from "../transport/Outbox";
 import {
@@ -114,7 +121,9 @@ import type {
   TransactionStoppedReason,
   TransactionUpdateOptions,
 } from "../connector/Transaction";
+import { TX_ENDED_SAMPLES_MAX } from "../connector/Transaction";
 import {
+  buildSampledValues,
   reportedActivePowerW,
   type MeterSampleOverrides,
   type ReadingContext,
@@ -226,6 +235,12 @@ export interface StartTransactionOptions {
   remoteStartId?: number;
   /** OCPP 2.x Started-event chargingState (#335); `Charging` when absent. */
   chargingState?: TransactionChargingState;
+  /** Target SoC of this session in percent (#327); the writer of
+   *  `Transaction.targetSoc`. Absent: the connector's EV settings default. */
+  targetSoc?: number;
+  /** Stop the session when it reaches the target SoC (#327); absent: the
+   *  connector's `stopAtTargetSoc` setting decides. */
+  stopAtTarget?: boolean;
   /** OCPP 2.x `IdToken.type` of the transaction's Authorize and
    *  TransactionEvents (#599); `ISO14443` when absent. */
   idTokenType?: IdTokenTypeName;
@@ -380,6 +395,9 @@ export type InboundValidationMode = "off" | "warn" | "enforce";
 export const DEFAULT_INBOUND_VALIDATION: InboundValidationMode = "warn";
 
 export interface ChargePointTransportOptions {
+  /** What the charger hardware delivers per connector (#327). Absent:
+   *  no connector is capped. */
+  readonly chargerCapabilities?: ChargerCapabilities;
   /** Static capability profile (#618). Absent: nothing is disabled. */
   readonly capabilityProfile?: ChargePointCapabilityProfile;
   /** OCPP 1.6J only. Default `warn`. */
@@ -422,6 +440,8 @@ export interface ChargePointTransportOptions {
 
 export class ChargePoint {
   private readonly _connectors: Map<number, Connector> = new Map();
+  /** The station main meter on connector 0 / EVSE 0 (#617); opt-in. */
+  private _mainMeter: MainMeter | undefined;
   // cpId is injected later in the constructor body so the Logger can
   // stamp every JSON line with the CP it belongs to (multi-CP daemons).
   private readonly _logger = new Logger();
@@ -473,6 +493,9 @@ export class ChargePoint {
   private readonly _outbox: Outbox;
   private readonly _heartbeat: HeartbeatService;
   private readonly _clockAligned: ClockAlignedMeterScheduler;
+  /** #607: the 2.x `AlignedDataCtrlr.TxEndedInterval` grid, apart from the
+   *  `Interval` one: it samples the transaction-end history, sends nothing. */
+  private readonly _txEndedAligned: ClockAlignedMeterScheduler;
   /** #722: the per-connector `MeterValueSampleInterval` timers of running 1.x
    *  transactions. */
   private readonly _periodicSamplers: Map<number, TimerHandle> = new Map();
@@ -622,7 +645,11 @@ export class ChargePoint {
 
   /** May TriggerMessage request `target` under the capability profile (#618)? */
   isTriggerTargetSupported(target: string): boolean {
-    return isTriggerTargetSupported(this._capabilityProfile, target);
+    return isTriggerTargetSupported(
+      this._capabilityProfile,
+      target,
+      translatesCsmsActionNames(this._ocppVersion),
+    );
   }
 
   /** See {@link InboundValidationMode}. Read on every inbound CALL. */
@@ -720,6 +747,12 @@ export class ChargePoint {
         () => this._stationProfiles,
         this._clock,
       );
+      connector.setMaxDeliveryPowerW(
+        maxDeliveryPowerWFor(transportOptions.chargerCapabilities, connectorId),
+      );
+      connector.setMeterRealism(
+        meterRealismFor(transportOptions.chargerCapabilities, connectorId),
+      );
       // §5.2: Unavailable set via ChangeAvailability persists across
       // reboots. Restore the persisted value before any event listeners
       // have a chance to react.
@@ -792,6 +825,15 @@ export class ChargePoint {
       this._connectors.set(connectorId, connector);
     }
 
+    const mainMeterConfig = transportOptions.chargerCapabilities?.mainMeter;
+    if (mainMeterConfig) {
+      this._mainMeter = new MainMeter(
+        mainMeterConfig,
+        () => this._connectors,
+        this._clock,
+      );
+    }
+
     if (isSoapVersion(this._ocppVersion)) {
       this._webSocket = null;
       this._rawFrames = null;
@@ -857,6 +899,14 @@ export class ChargePoint {
     this._heartbeat.setHeartbeatCallback(() => this._outbox.sendHeartbeat());
     this._clockAligned = new ClockAlignedMeterScheduler(
       (boundary) => this.emitClockAlignedSamples(boundary),
+      this._clock,
+    );
+    this._txEndedAligned = new ClockAlignedMeterScheduler(
+      (boundary) =>
+        this.recordAlignedTxEndedSamples(
+          this._configuration.stopTxnAlignedData(),
+          boundary,
+        ),
       this._clock,
     );
 
@@ -963,7 +1013,12 @@ export class ChargePoint {
     this._clockAligned.setIntervalSeconds(
       this._configuration.clockAlignedDataInterval(),
     );
-    if (isOcpp2Version(this._ocppVersion)) this.applyRetryBackOff();
+    if (isOcpp2Version(this._ocppVersion)) {
+      this.applyRetryBackOff();
+      this._txEndedAligned.setIntervalSeconds(
+        this._configuration.alignedDataTxEndedInterval(),
+      );
+    }
     // A value persisted with --state-db is in force from the first open.
     this._webSocket?.setPingInterval(
       this._configuration.webSocketPingInterval(),
@@ -1475,6 +1530,12 @@ export class ChargePoint {
             LogType.CONFIGURATION,
           );
           break;
+        case "AlignedDataTxEndedInterval":
+          // #607: the grid of the 2.x transaction-end history.
+          if (typeof value === "number") {
+            this._txEndedAligned.setIntervalSeconds(value);
+          }
+          break;
         default:
           break;
       }
@@ -1635,6 +1696,12 @@ export class ChargePoint {
     return this._connectors.size;
   }
 
+  /** The station main meter (connector 0 / EVSE 0), `undefined` when the
+   *  station has none (#617). */
+  get mainMeter(): MainMeter | undefined {
+    return this._mainMeter;
+  }
+
   get connectors(): Map<number, Connector> {
     return new Map(this._connectors);
   }
@@ -1761,7 +1828,7 @@ export class ChargePoint {
     }
     const connector = this.getConnector(connectorId);
     if (connector && connector.status === OCPPStatus.Reserved) {
-      this.updateConnectorStatus(connectorId, OCPPStatus.Available);
+      this.updateConnectorStatus(connectorId, this.statusWhenFree(connectorId));
     }
     syncUnspecifiedReservations(this);
   }
@@ -2757,7 +2824,22 @@ export class ChargePoint {
 
   /** Send LogStatusNotification.req — see OCPPMessageHandler doc. */
   sendLogStatusNotification(status: UploadLogStatus, requestId?: number): void {
+    this._logStatusSeq++;
+    this._lastLogStatusRequestId = requestId ?? this._lastLogRequestId;
     this._outbox.sendLogStatusNotification(status, requestId);
+  }
+
+  /** Counts every LogStatusNotification this station sent, so the automatic
+   *  GetLog lifecycle can tell that something else (the control plane, a
+   *  scenario `notify` node) is driving the status train of its request
+   *  (N01.FR.09: one final status per requestId). */
+  private _logStatusSeq = 0;
+  private _lastLogStatusRequestId: number | undefined;
+  get logStatusSeq(): number {
+    return this._logStatusSeq;
+  }
+  get lastLogStatusRequestId(): number | undefined {
+    return this._lastLogStatusRequestId;
   }
 
   /** `requestId` of the last UpdateFirmware.req this station accepted, so a
@@ -2925,6 +3007,7 @@ export class ChargePoint {
     } else {
       this.stopHeartbeat();
       this._clockAligned.disable();
+      this._txEndedAligned.disable();
       // B02.FR.02: no NotifyEvent until the boot is Accepted.
       this._monitorEvaluation?.setReporting(false);
     }
@@ -2933,7 +3016,13 @@ export class ChargePoint {
   private applyBootAccepted(interval: number): void {
     // Send connector 0 (charge point level) status first
     this.updateConnectorStatus(0, OCPPStatus.Available);
+    // #455: a transaction the power-loss recovery is about to end was already
+    // decided at the loss. Reporting its pre-loss status (Charging) after the
+    // reboot would suggest energy flowed after the restart, so the recovery's
+    // own Finishing / Available is the first thing the CSMS hears (#811).
+    const ending = this.connectorsEndedByPowerRecovery();
     this.connectors.forEach((connector) => {
+      if (ending.has(connector.id)) return;
       // Reset to Available only when this is a fresh post-boot state —
       // i.e. autoReset is enabled AND no transaction is in flight. A
       // connector that was restored from `connector_runtime` with an
@@ -2967,6 +3056,7 @@ export class ChargePoint {
     }
 
     this._clockAligned.enable();
+    this._txEndedAligned.enable();
     // #455: after the status fan-out and the flush of the queue (both
     // already scheduled), so the recovery's messages come last.
     queueMicrotask(() => this.runPowerRecovery());
@@ -2984,10 +3074,30 @@ export class ChargePoint {
    * transaction's id rides along once the CSMS has assigned one.
    */
   private emitClockAlignedSamples(boundaryMs: number): void {
+    // 1.6 samples the transaction-end history on the same grid
+    // (`StopTxnAlignedData`, 1.6 §3.16.2); 2.x has a
+    // grid of its own (`_txEndedAligned`).
+    if (!isOcpp2Version(this._ocppVersion)) {
+      this.recordAlignedTxEndedSamples(
+        this._configuration.stopTxnAlignedData(),
+        boundaryMs,
+      );
+    }
     // Empty by default; the interval change already logged that it is.
     const measurands = this._configuration.meterValuesAlignedData();
     if (measurands.length === 0) return;
     const timestamp = new Date(boundaryMs);
+    // 2.x AlignedDataCtrlr.SendDuringIdle is a station-level variable: while
+    // any transaction runs, no clock-aligned values go out for any EVSE or the
+    // main meter (J01.FR.20; J01.FR.19 is the per-EVSE form the variable does
+    // not have here).
+    if (
+      isOcpp2Version(this._ocppVersion) &&
+      this._configuration.alignedDataSendDuringIdle() &&
+      [...this._connectors.values()].some((c) => c.hasRunningTransaction)
+    ) {
+      return;
+    }
     this._connectors.forEach((connector) => {
       if (
         this.sendSampleInTransactionEvent(connector, {
@@ -3008,6 +3118,98 @@ export class ChargePoint {
         timestamp,
       });
     });
+    if (this._mainMeter) {
+      this._outbox.sendMeterValue(undefined, 0, "Sample.Clock", {
+        measurands,
+        timestamp,
+      });
+    }
+  }
+
+  /**
+   * #607: append one formatted sample to the connector's transaction-end
+   * history. Formatted now, from the point the sample set of this instant
+   * reads, so a later configuration change cannot reformat it (#327 §3.3).
+   */
+  recordTxEndedSample(
+    connector: Connector,
+    measurands: string[],
+    context: "Transaction.Begin" | "Sample.Periodic" | "Sample.Clock",
+    timestamp: Date,
+  ): void {
+    const transaction = connector.transaction;
+    if (!transaction || !connector.hasRunningTransaction) return;
+    // 2.x: the same MeasurandEnumType filter and unit multiplier as every
+    // other sample of the dialect (#714, #826); a name outside the enum is
+    // never recorded (B05.FR.07 rejects it in SetVariables, but a persisted
+    // or scenario-set list may still carry one).
+    const ocpp2 = isOcpp2Version(this._ocppVersion);
+    const allowed = ocpp2 ? measurandEnumFor(this._ocppVersion) : null;
+    const kept = allowed
+      ? measurands.filter((m) => allowed.has(m))
+      : measurands;
+    if (kept.length === 0) return;
+    const sampledValue = buildSampledValues(connector, kept, context, {
+      unitMultiplier: ocpp2,
+      intervalStream:
+        context === "Sample.Clock" ? "txEnded-aligned" : "txEnded-sampled",
+    });
+    if (sampledValue.length === 0) return;
+    const history = transaction.txEndedSamples ?? [];
+    const next = [
+      ...history,
+      { timestamp: timestamp.toISOString(), sampledValue },
+    ].slice(-TX_ENDED_SAMPLES_MAX);
+    connector.patchTransaction({ txEndedSamples: next });
+  }
+
+  /**
+   * The scheduler-tick sample of the history (`StopTxnSampledData`). 1.6
+   * samples at every tick, the cadence of the MeterValues it accompanies
+   * (1.6 §3.16.1). 2.x samples when `TxEndedInterval`
+   * seconds have passed since the previous one (or the start), judged at the
+   * tick, so the interval cannot be finer than the tick.
+   */
+  private recordSampledTxEndedSample(connector: Connector): void {
+    const transaction = connector.transaction;
+    if (!transaction || !connector.hasRunningTransaction) return;
+    const measurands = this._configuration.stopTxnSampledData();
+    if (measurands.length === 0) return;
+    const now = this._clock.now();
+    if (isOcpp2Version(this._ocppVersion)) {
+      const intervalMs = this._configuration.txEndedInterval() * 1000;
+      if (intervalMs <= 0) return;
+      const history = transaction.txEndedSamples ?? [];
+      const last = [...history]
+        .reverse()
+        .find((e) => e.sampledValue[0]?.context === "Sample.Periodic");
+      const lastMs = last
+        ? Date.parse(last.timestamp)
+        : transaction.startTime.getTime();
+      if (now - lastMs < intervalMs) return;
+    }
+    this.recordTxEndedSample(
+      connector,
+      measurands,
+      "Sample.Periodic",
+      new Date(now),
+    );
+  }
+
+  private recordAlignedTxEndedSamples(
+    measurands: string[],
+    boundaryMs: number,
+  ): void {
+    if (measurands.length === 0) return;
+    const timestamp = new Date(boundaryMs);
+    this._connectors.forEach((connector) =>
+      this.recordTxEndedSample(
+        connector,
+        measurands,
+        "Sample.Clock",
+        timestamp,
+      ),
+    );
   }
 
   /**
@@ -3246,6 +3448,7 @@ export class ChargePoint {
     }
     this._heartbeat.cleanup();
     this._clockAligned.disable();
+    this._txEndedAligned.disable();
     // Offline: events at or below OfflineQueuingSeverity are queued
     // (N07.FR.04, N08.FR.03) until the next boot is Accepted (#538).
     this._monitorEvaluation?.setOffline();
@@ -3405,6 +3608,19 @@ export class ChargePoint {
     if (this._ocppVersion !== OCPP_2_1) return "resume";
     const timeout = options.txResumptionTimeoutSeconds ?? 0;
     return timeout > 0 && outageMs <= timeout * 1000 ? "resume" : "end";
+  }
+
+  /** Connectors whose running transaction the pending recovery will end. */
+  private connectorsEndedByPowerRecovery(): ReadonlySet<number> {
+    const pending = this._powerRecovery;
+    const out = new Set<number>();
+    if (!pending || pending.options.transactions !== "end") return out;
+    for (const { connectorId } of pending.loss.transactions) {
+      if (this.getConnector(connectorId)?.hasRunningTransaction) {
+        out.add(connectorId);
+      }
+    }
+    return out;
   }
 
   /** Run the pending power-loss recovery; the boot is Accepted. */
@@ -3703,8 +3919,9 @@ export class ChargePoint {
    *   triggerReason `EVCommunicationLost` (E10); the StatusNotification
    *   that follows is de-duplicated against it. A second unplug while so
    *   suspended sends nothing.
-   * Without a transaction the connector goes Available, as an unplug did
-   * before.
+   * Without a transaction a Preparing, Finishing or Suspended* connector goes
+   * Available (1.6 §4.9 B1); an Unavailable, Faulted or Reserved one keeps its
+   * status. The EV and cable model (#453) records the cable as unplugged.
    */
   evDisconnected(connectorId: number): void {
     const connector = this.getConnector(connectorId);
@@ -3716,8 +3933,19 @@ export class ChargePoint {
       return;
     }
 
+    connector.markEvUnplugged();
     if (!connector.hasRunningTransaction) {
-      this.updateConnectorStatus(connectorId, OCPPStatus.Available);
+      // Only the states that exist because a cable is plugged in fall back
+      // to Available (#453); an unplug does not lift an Unavailable, Faulted
+      // or Reserved connector, nor repeat an Available.
+      if (
+        connector.status === OCPPStatus.Preparing ||
+        connector.status === OCPPStatus.Finishing ||
+        connector.status === OCPPStatus.SuspendedEV ||
+        connector.status === OCPPStatus.SuspendedEVSE
+      ) {
+        this.updateConnectorStatus(connectorId, OCPPStatus.Available);
+      }
       return;
     }
 
@@ -3756,6 +3984,123 @@ export class ChargePoint {
       });
     }
     this.updateConnectorStatus(connectorId, OCPPStatus.SuspendedEV);
+  }
+
+  /**
+   * The status a connector shows when whatever held it (an unavailable
+   * period, a reservation, a firmware hold) ends: `Preparing` (2.x `Occupied`)
+   * while a cable is recorded and no transaction runs (1.6 §4.9; 2.0.1 G01,
+   * H03.FR.10), else `Available`. Without this a plug-in during the hold stayed
+   * recorded while `Available` was shown, and the next plug-in was swallowed
+   * (#830 review).
+   */
+  statusWhenFree(connectorId: number): OCPPStatus {
+    const connector = this.getConnector(connectorId);
+    return connector &&
+      connectorId !== 0 &&
+      !this.poweredOff &&
+      !connector.hasRunningTransaction &&
+      connector.evConnection !== "disconnected"
+      ? OCPPStatus.Preparing
+      : OCPPStatus.Available;
+  }
+
+  /**
+   * A cable was plugged into the connector's EV side (#453). Idempotent: a
+   * second plug-in changes nothing. An idle `Available` connector reports
+   * `Preparing` (1.6 §4.9 transition A2, "insert plug"; 2.x StatusNotification
+   * `Occupied`, the cable plugged in before the driver authorizes), which starts the
+   * ConnectionTimeOut and allows the authorize / start that follows. In any
+   * other state (a running transaction, Unavailable, Faulted, Reserved,
+   * power lost) the cable is recorded and the status stays: the plug-in
+   * does not lift them. Unplug with {@link evDisconnected}.
+   */
+  evPlugIn(connectorId: number): void {
+    const connector = this.getConnector(connectorId);
+    if (!connector || connectorId === 0) {
+      this._logger.error(
+        `Connector ${connectorId} not found`,
+        LogType.TRANSACTION,
+      );
+      return;
+    }
+    if (connector.evConnection !== "disconnected") {
+      // A cable recorded while the connector shows Available (a path that
+      // freed it without looking at the cable) still reports the plug-in.
+      if (
+        !this.poweredOff &&
+        !connector.hasRunningTransaction &&
+        connector.status === OCPPStatus.Available
+      ) {
+        this.updateConnectorStatus(connectorId, OCPPStatus.Preparing);
+      }
+      return;
+    }
+    connector.markEvPluggedIn();
+    if (
+      isOcpp2Version(this._ocppVersion) &&
+      connector.hasRunningTransaction &&
+      !this.poweredOff
+    ) {
+      // E03 (idToken first): the cable arrives after the transaction began.
+      // E03.FR.12 / E02.FR.17: Updated, CablePluggedIn, chargingState
+      // EVConnected; the EVConnectionTimeOut is over (E03.FR.05 applies only
+      // when no EV connects); the energy offer then starts (Charging).
+      this.clearConnectionTimeout(connectorId);
+      this._outbox.sendTransactionUpdate(connectorId, {
+        triggerReason: "CablePluggedIn",
+        chargingState: "EVConnected",
+      });
+      if (connector.status === OCPPStatus.Preparing) {
+        this.updateConnectorStatus(connectorId, OCPPStatus.Charging);
+      }
+      return;
+    }
+    if (
+      !this.poweredOff &&
+      !connector.hasRunningTransaction &&
+      connector.status === OCPPStatus.Available
+    ) {
+      this.updateConnectorStatus(connectorId, OCPPStatus.Preparing);
+    }
+  }
+
+  /**
+   * The EV asks for energy (`ready`) or stops asking (#453). Needs a
+   * plugged-in cable. With a running transaction, "not ready" suspends the
+   * energy offer and reports `SuspendedEV` (1.6 §4.9 C4; 2.x TransactionEvent
+   * Updated, chargingState `SuspendedEV`, triggerReason `ChargingStateChanged`),
+   * and "ready" resumes `Charging` from that (D3). Without a transaction
+   * the readiness is recorded and nothing is sent. Idempotent.
+   */
+  evSetReady(connectorId: number, ready: boolean): void {
+    const connector = this.getConnector(connectorId);
+    if (!connector || connectorId === 0) {
+      this._logger.error(
+        `Connector ${connectorId} not found`,
+        LogType.TRANSACTION,
+      );
+      return;
+    }
+    if (connector.evConnection === "disconnected") {
+      throw new Error(`Connector ${connectorId} has no EV plugged in`);
+    }
+    connector.markEvReady(ready);
+    if (!connector.hasRunningTransaction) return;
+    if (!ready) {
+      if (connector.status !== OCPPStatus.Charging) return;
+      connector.suspendEnergyOffer();
+      // On 2.x the status write carries the TransactionEvent(Updated).
+      this.updateConnectorStatus(connectorId, OCPPStatus.SuspendedEV);
+      return;
+    }
+    if (
+      connector.status !== OCPPStatus.SuspendedEV ||
+      !connector.energyOfferSuspended
+    ) {
+      return;
+    }
+    this.updateConnectorStatus(connectorId, OCPPStatus.Charging);
   }
 
   cleanTransaction(connectorOrId: Connector | number): void {
@@ -3809,6 +4154,10 @@ export class ChargePoint {
     context?: ReadingContext,
     overrides?: MeterSampleOverrides,
   ): void {
+    if (connectorId === 0 && this._mainMeter) {
+      this._outbox.sendMeterValue(undefined, 0, context, overrides);
+      return;
+    }
     const connector = this.getConnector(connectorId);
     if (!connector) {
       this._logger.error(
@@ -3886,6 +4235,7 @@ export class ChargePoint {
    */
   sendScheduledMeterValue(connectorId: number): void {
     const connector = this.getConnector(connectorId);
+    if (connector) this.recordSampledTxEndedSample(connector);
     if (
       this._txUpdatedMeterValues &&
       connector &&

@@ -128,6 +128,8 @@ function setup(ocppVersion: string) {
       transactionMessageRetryInterval: () => 60,
       messageTimeout: () => 30,
       meterValuesSampledData: () => [],
+      txStartedMeasurands: () => [],
+      stopTxnSampledData: () => [],
       offlineQueuingSeverity: () => 5,
       offlineQueueMaxEvents: () => 1000,
     },

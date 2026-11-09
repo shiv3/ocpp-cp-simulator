@@ -99,6 +99,9 @@ export class ExtendedTriggerMessageHandler implements CallHandler<
               for (const id of context.chargePoint.connectors.keys()) {
                 context.chargePoint.sendMeterValue(id);
               }
+              // The station main meter on connector 0 / EVSE 0 (#617), when it has one.
+              if (context.chargePoint.mainMeter)
+                context.chargePoint.sendMeterValue(0);
               return;
             }
             context.chargePoint.sendMeterValue(targetConnectorId);

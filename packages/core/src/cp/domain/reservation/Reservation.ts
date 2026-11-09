@@ -62,9 +62,8 @@ export class ReservationManager {
    * @param options `replaceExisting`: OCPP 1.6 ReserveNow replaces the
    *   reservation that has the same `reservationId` (#595); the other checks
    *   run as if it were already gone, and it is only dropped when the new one
-   *   is accepted. Without it a repeated id is `Rejected`. That is still what
-   *   2.x does, although OCPP 2.0.1 H01.FR.02 also asks for replacement (a
-   *   follow-up, not part of #595).
+   *   is accepted (2.x passes it too, OCPP 2.0.1 H01.FR.02). Without it a
+   *   repeated id is `Rejected`.
    *   `shareAnyConnector`: connector-0 reservations do not exclude each other
    *   (1.6 only needs one connector kept free per reservation); the caller
    *   checks that enough connectors remain.
@@ -205,30 +204,6 @@ export class ReservationManager {
   }
 
   /**
-   * Check if a reservation is valid for a given ID tag
-   * @param reservationId Reservation ID
-   * @param idTag ID tag attempting to use the reservation
-   * @returns true if valid, false otherwise
-   */
-  isValidReservation(reservationId: number, idTag: string): boolean {
-    const reservation = this.reservations.get(reservationId);
-    if (!reservation) {
-      return false;
-    }
-
-    // Check if expired
-    if (reservation.expiryDate.getTime() <= this.clock.now()) {
-      this.logger.warn(
-        `Reservation ${reservationId} has expired`,
-        LogType.GENERAL,
-      );
-      return false;
-    }
-
-    return reservationAdmits(reservation, idTag);
-  }
-
-  /**
    * The reservation made for exactly `connectorId` (connector 0 included), if
    * any. A connector-0 reservation is never returned for another connector.
    */
@@ -328,22 +303,6 @@ export class ReservationManager {
     }
 
     return undefined;
-  }
-
-  /**
-   * The live reservation of a connector (or the connector-0 one), read
-   * without the lazy expiry cleanup of {@link getReservationForConnector}: no
-   * `onExpire` side effect, a lapsed reservation is skipped.
-   */
-  peekReservationForConnector(connectorId: number): Reservation | undefined {
-    const now = this.clock.now();
-    const live = [...this.reservations.values()].filter(
-      (r) => r.expiryDate.getTime() > now,
-    );
-    return (
-      live.find((r) => r.connectorId === connectorId) ??
-      (connectorId !== 0 ? live.find((r) => r.connectorId === 0) : undefined)
-    );
   }
 
   /**
@@ -478,8 +437,11 @@ export class ReservationManager {
   restore(reservations: readonly Reservation[]): Reservation[] {
     const now = this.clock.now();
     const kept = reservations.filter((r) => r.expiryDate.getTime() > now);
+    // `store` arms each one's expiry timer: `dispose()` cleared them when
+    // the link was lost, and without it the 60 s sweep would end a
+    // reservation up to a minute late (#839, H04.FR.01).
     for (const reservation of kept) {
-      this.reservations.set(reservation.reservationId, { ...reservation });
+      this.store({ ...reservation });
     }
     if (!this.cleanupTimer) this.startCleanupTimer();
     return kept;

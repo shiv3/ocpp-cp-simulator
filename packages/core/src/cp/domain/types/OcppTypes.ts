@@ -203,7 +203,12 @@ export type BootNotification = BootNotificationRequestV16;
  * Part 2 section 3.5, B01.FR.09). OCPP 1.6 has no such field and ignores it.
  */
 export type BootReason =
-  "PowerUp" | "RemoteReset" | "ScheduledReset" | "LocalReset" | "Triggered";
+  | "PowerUp"
+  | "RemoteReset"
+  | "ScheduledReset"
+  | "LocalReset"
+  | "Triggered"
+  | "FirmwareUpdate";
 
 export const DefaultBootNotification: BootNotification = {
   chargeBoxSerialNumber: "123456",

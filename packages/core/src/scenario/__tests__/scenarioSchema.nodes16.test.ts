@@ -48,6 +48,7 @@ describe("schema 1.6 nodes", () => {
     ],
     ["callResponse", { kind: "accepted" }],
     ["callResponse", { kind: "rejected" }],
+    ["callResponse", { kind: "result", payload: { status: "Accepted" } }],
   ])("accepts %s %j", (type, data) => {
     expect(validateScenarioSchema(base([node(type, data)])).errors).toEqual([]);
   });
@@ -67,6 +68,10 @@ describe("schema 1.6 nodes", () => {
     ["setState", { key: "k" }],
     ["delay", { delaySeconds: 1, jitterSeconds: -1 }],
     ["callResponse", { kind: "maybe" }],
+    // #846: the executor throws on a payload next to accepted / rejected.
+    ["callResponse", { kind: "accepted", payload: { status: "Accepted" } }],
+    ["callResponse", { kind: "rejected", payload: {} }],
+    ["callResponse", { kind: "accepted", skipValidation: true }],
   ])("rejects %s %j", (type, data) => {
     expect(validateScenarioSchema(base([node(type, data)])).valid).toBe(false);
   });

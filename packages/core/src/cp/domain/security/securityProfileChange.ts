@@ -29,10 +29,16 @@ export type SecurityProfileChangeVerdict =
 /**
  * Security whitepaper §7.2: the AuthorizationKey is at least 16 bytes and, in
  * its hexadecimal form, at most 20 bytes (40 hex digits). The simulator takes
- * 32 to 40 hex digits.
+ * both shapes the connection code derives a Basic password from
+ * (`authorizationKeyToBasicPassword`): 32 to 40 hex digits (16-20 bytes), or
+ * a plain key of 16 to 20 printable ASCII characters (#839; the lengths do not
+ * overlap).
  */
 export function isValidAuthorizationKey(value: string): boolean {
-  return /^(?:[0-9a-fA-F]{2}){16,20}$/.test(value);
+  return (
+    /^(?:[0-9a-fA-F]{2}){16,20}$/.test(value) ||
+    /^[\x21-\x7e]{16,20}$/.test(value)
+  );
 }
 
 /**

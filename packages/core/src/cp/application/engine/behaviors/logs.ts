@@ -74,6 +74,17 @@ export function logsBehavior(cp: ChargePoint): Behavior {
             const replaces =
               auto && previous !== undefined && previous !== null;
             const seqAtRequest = cp.logStatusSeq;
+            // Taken now, with the answer: the old upload stops reporting from
+            // this point, so it cannot send Uploaded after this request was
+            // answered AcceptedCanceled (#846).
+            let generation = 0;
+            if (auto) {
+              generation =
+                (typeof ctx.state.uploadGeneration === "number"
+                  ? ctx.state.uploadGeneration
+                  : 0) + 1;
+              ctx.state.uploadGeneration = generation;
+            }
             return {
               response: {
                 status: replaces ? "AcceptedCanceled" : "Accepted",
@@ -84,11 +95,6 @@ export function logsBehavior(cp: ChargePoint): Behavior {
               },
               after: auto
                 ? async (): Promise<void> => {
-                    const generation =
-                      (typeof ctx.state.uploadGeneration === "number"
-                        ? ctx.state.uploadGeneration
-                        : 0) + 1;
-                    ctx.state.uploadGeneration = generation;
                     const requestId = req.requestId ?? 0;
                     // Another sender of this request's status train (the
                     // control plane, a scenario `notify` node) takes the

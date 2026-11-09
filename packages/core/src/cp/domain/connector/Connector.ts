@@ -752,11 +752,16 @@ export class Connector {
       fault: {
         // A running transaction in a state where the EVSE energizes the
         // connector; SuspendedEVSE and everything outside the session offer
-        // nothing (OCPP 1.6 §7.7, §7.31).
+        // nothing (OCPP 1.6 §7.7, §7.31). A transaction that stays
+        // SuspendedEV after an EV-side disconnect has no EV to offer to
+        // (#846); an EV that is merely not ready (`ev_ready(false)`) is
+        // offered. Charging is not gated: a 2.x start can run Charging before
+        // the cable flag is set.
         offering:
           this.hasRunningTransaction &&
           (this.status === OCPPStatus.Charging ||
-            this.status === OCPPStatus.SuspendedEV),
+            (this.status === OCPPStatus.SuspendedEV &&
+              this.evConnection !== "disconnected")),
         energyOfferSuspended: this.energyOfferSuspendedValue,
         // Resolved after the schedule, as before (#301); E05.FR.02.
         energyHeld: this.invalidIdAllowanceUsedUp(),

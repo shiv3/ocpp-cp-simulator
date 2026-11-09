@@ -319,7 +319,8 @@ Notes:
 
 The image **doesn't** contain Vite / Tauri / dev dependencies, sources or
 `node_modules`: the build stage runs `bun run build` (the web console, `dist/`, with its
-`THIRD-PARTY-LICENSES.txt`, #857)
+`THIRD-PARTY-LICENSES.txt`, #857; these notices cover the **web console only**,
+not the packages inlined in `dist-cli/main.js`)
 and `bun run build:cli` (the CLI and daemon as one bundle,
 `dist-cli/main.js`), and the runtime layer holds only those two, the scenario
 examples and `docker/entrypoint.sh`, which starts `bun dist-cli/main.js`, and the one-file `src/cli/main.ts` shim. That

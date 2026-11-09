@@ -1,4 +1,3 @@
-import { isCriticalSecurityEvent16 } from "../../domain/security/securityEvents16";
 import {
   DATA_TRANSFER_RESPONSE_TIMEOUT_MS,
   type DataTransferData,
@@ -46,7 +45,6 @@ import type {
   ResetRequestV16,
   SendLocalListRequestV16,
   SetChargingProfileRequestV16,
-  SecurityEventNotificationRequestV16,
   SecurityEventNotificationResponseV16,
   SignCertificateRequestV16,
   SignCertificateResponseV16,
@@ -139,6 +137,7 @@ import {
 } from "./v16/outboundRequestsV16";
 import { SerialCallQueueV16 } from "./v16/serialCallQueueV16";
 import { TransactionMessagesV16 } from "./v16/transactionMessagesV16";
+import { SecurityEventQueueV16 } from "./v16/securityEventQueueV16";
 
 type CoreOcppMessagePayloadCall =
   | ChangeAvailabilityRequestV16
@@ -263,6 +262,9 @@ export class OCPPMessageHandler {
   /** StartTransaction / StopTransaction / MeterValues builders. */
   private readonly _transactionMessages: TransactionMessagesV16;
 
+  /** SecurityEventNotification.req and its A04.FR.02 offline queue. */
+  private readonly _securityEvents: SecurityEventQueueV16;
+
   constructor(
     chargePoint: ChargePoint,
     webSocket: OCPPWebSocket,
@@ -303,6 +305,15 @@ export class OCPPMessageHandler {
     this._transactionMessages = new TransactionMessagesV16({
       chargePoint,
       logger,
+      delivery: this._delivery,
+      generateMessageId: () => this.generateMessageId(),
+    });
+    this._securityEvents = new SecurityEventQueueV16({
+      chargePoint,
+      webSocket,
+      logger,
+      bootGate: this._bootGate,
+      pendingQueue: this._pendingQueue,
       delivery: this._delivery,
       generateMessageId: () => this.generateMessageId(),
     });
@@ -551,81 +562,23 @@ export class OCPPMessageHandler {
     return undefined;
   }
 
-  /** OCPP 1.6 Security Whitepaper: CP-initiated security event. */
+  /** OCPP 1.6 Security Whitepaper: CP-initiated security event
+   *  (SecurityEventQueueV16). */
   public sendSecurityEventNotification(
     type: string,
     techInfo?: string,
   ): Promise<void> {
-    const payload = this.securityEventPayload(type, techInfo);
-    // A04.FR.02: a critical event raised while the station cannot send it
-    // (no connection, or the boot not Accepted yet) is queued, with its own
-    // timestamp, and goes out after the next Accepted boot.
-    if (
-      isCriticalSecurityEvent16(type) &&
-      (!this._webSocket.isConnected() ||
-        !this.isCallAllowed(OCPPAction.SecurityEventNotification))
-    ) {
-      this.queueSecurityEventPayload(payload);
-      return Promise.resolve();
-    }
-    this._delivery.sendRequest(
-      OCPPAction.SecurityEventNotification,
-      this.generateMessageId(),
-      payload,
-    );
-    return Promise.resolve();
+    return this._securityEvents.sendSecurityEventNotification(type, techInfo);
   }
 
-  /**
-   * #734: raises a critical security event now but sends it only after the
-   * next Accepted boot (`ResetOrReboot`: the station reports the reset once
-   * it is back). Persisted with the other queued messages.
-   */
+  /** #734: see SecurityEventQueueV16.queueSecurityEventNotification. */
   public queueSecurityEventNotification(type: string, techInfo?: string): void {
-    this.queueSecurityEventPayload(this.securityEventPayload(type, techInfo));
+    this._securityEvents.queueSecurityEventNotification(type, techInfo);
   }
 
-  private securityEventPayload(
-    type: string,
-    techInfo?: string,
-  ): SecurityEventNotificationRequestV16 {
-    return {
-      type,
-      timestamp: new Date(this.clock.now()).toISOString(),
-      ...(techInfo !== undefined ? { techInfo } : {}),
-    };
-  }
-
-  private queueSecurityEventPayload(
-    payload: SecurityEventNotificationRequestV16,
-  ): void {
-    this._pendingQueue.enqueue({
-      action: OCPPAction.SecurityEventNotification,
-      payload,
-    });
-    this._logger.info(
-      `Queued security event ${payload.type} until the next Accepted boot (A04.FR.02); size=${this._pendingQueue.size()}`,
-      LogType.OCPP,
-    );
-  }
-
-  /**
-   * #734: sends the queued security events, oldest first, each with the
-   * timestamp it was raised with. Called when a boot is Accepted, before any
-   * other traffic that follows it.
-   */
+  /** #734: see SecurityEventQueueV16.flushQueuedSecurityEvents. */
   public flushQueuedSecurityEvents(): void {
-    const queued = this._pendingQueue
-      .all()
-      .filter((m) => m.action === OCPPAction.SecurityEventNotification);
-    for (const message of queued) {
-      this._pendingQueue.removeOldest(OCPPAction.SecurityEventNotification);
-      this._delivery.sendRequest(
-        OCPPAction.SecurityEventNotification,
-        this.generateMessageId(),
-        message.payload as OcppMessageRequestPayload,
-      );
-    }
+    this._securityEvents.flushQueuedSecurityEvents();
   }
 
   /** Generate or forward a CSR for the charge point certificate signing flow. */

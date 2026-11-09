@@ -76,7 +76,7 @@ export function renderNotices(
   nodeModules?: string,
 ): string {
   const seen = new Set<string>();
-  const all: NoticeEntry[] = [...dependencies];
+  const all: NoticeEntry[] = Array.from(dependencies);
   for (const d of all) seen.add(d.name);
   for (const name of CSS_AND_FONT_PACKAGES) {
     if (seen.has(name)) continue;

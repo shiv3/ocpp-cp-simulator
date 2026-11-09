@@ -1,3 +1,4 @@
+import type { AuthorizationCacheRepository } from "./AuthorizationCacheRepository";
 import type { ConnectorSettingsRepository } from "./ConnectorSettingsRepository";
 
 /**
@@ -8,6 +9,8 @@ import type { ConnectorSettingsRepository } from "./ConnectorSettingsRepository"
  * that owns the state.
  */
 export interface ChargePointRepositories {
+  /** The Authorization Cache entries (`authorization_cache`). */
+  readonly authorizationCache: AuthorizationCacheRepository;
   /** Per-connector availability (`connector_settings`). */
   readonly connectorSettings: ConnectorSettingsRepository;
 }

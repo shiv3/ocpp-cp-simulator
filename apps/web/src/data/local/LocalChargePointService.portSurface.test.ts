@@ -265,7 +265,7 @@ describe("LocalChargePointService A1.1d port methods", () => {
       executeScenario: vi.fn().mockResolvedValue(undefined),
       destroy: vi.fn(),
     } as unknown as ScenarioManager;
-    connector?.setScenarioManager(manager);
+    service.getScenarioRuntime("CP-PORT")!.setScenarioManager(1, manager);
 
     const result = await service.runScenarioTemplate(
       "CP-PORT",
@@ -291,7 +291,7 @@ describe("LocalChargePointService A1.1d port methods", () => {
       continueWait: vi.fn(),
       destroy: vi.fn(),
     } as unknown as ScenarioManager;
-    setup.chargePoint.getConnector(1)?.setScenarioManager(manager);
+    service.getScenarioRuntime("CP-PORT")!.setScenarioManager(1, manager);
 
     await service.extendScenarioWait("CP-PORT", 1, "s1", 30);
     await service.retryScenarioWait("CP-PORT", 1, "s1");

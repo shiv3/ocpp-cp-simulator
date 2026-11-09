@@ -5,7 +5,7 @@ import { createParamsSchema } from "@ocpp-cp-simulator/contracts/index";
 import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
 import { createRuntimeDeps } from "../socketServer";
-import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/domain/persistence/BunSqliteDatabase";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/BunSqliteDatabase";
 import { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
 import { DefaultBootNotification } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import { UnsupportedWsOptionError } from "@ocpp-cp-simulator/core/cp/shared/WsClientOptions";

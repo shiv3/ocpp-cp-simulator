@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import type {
   HistoryOptions,
   StateHistoryEntry,
-} from "@ocpp-cp-simulator/core/cp/application/services/types/StateSnapshot";
+} from "@ocpp-cp-simulator/core/cp/application/services/StateSnapshot";
 import { useDataContext } from "../providers/DataProvider";
 import type { RemoteConnectionState } from "@ocpp-cp-simulator/client/remote/RemoteChargePointService";
 

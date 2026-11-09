@@ -1,4 +1,4 @@
-import type { FleetTemplateRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/FleetTemplateRepository";
+import type { FleetTemplateRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/FleetTemplateRepository";
 import type { Server as BunServer } from "bun";
 import { createServer as createNetServer } from "node:net";
 import {

@@ -195,7 +195,7 @@ design left open:
   file name, then `Uploading` and `Uploaded` or `UploadFailed` around a real multipart POST) and
   `default.logs` (`GetLog`: the 1.6 `Uploading`, two seconds, `Uploaded` sequence; on 2.x, since #601, `Uploading` and
   `Uploaded` after the file name and `AcceptedCanceled` for a replaced upload; `auto: false` is the former
-  ack-only). The diagnostics behavior imports `infrastructure/file_upload`, the one
+  ack-only). The diagnostics behavior imports `infrastructure/fileUpload`, the one
   place where `application/` reaches into `infrastructure/`; the upload is platform I/O the engine does not
   own, and `default.reset` (`Reset`: the 1.6 `Accepted` and reset after the answer; the 2.x
   `Rejected` / `Scheduled` / `Accepted` rules and the reset after the answer; since the merge of #635 an `OnIdle`

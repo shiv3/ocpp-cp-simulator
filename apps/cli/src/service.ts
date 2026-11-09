@@ -104,23 +104,23 @@ import {
   isAutoStartKeyOf,
   matchAutoStart,
 } from "@ocpp-cp-simulator/core/cp/application/scenario/autoStart";
-import { legacyGeneratedBaseId } from "@ocpp-cp-simulator/core/cp/domain/persistence/legacyStartupInstances";
-import { SqliteScenarioRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/SqliteScenarioRepository";
-import type { ScenarioRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/ScenarioRepository";
-import { SqliteEngineStateRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/EngineStateRepository";
+import { legacyGeneratedBaseId } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/legacyStartupInstances";
+import { SqliteScenarioRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/SqliteScenarioRepository";
+import type { ScenarioRepository } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioRepository";
+import { SqliteEngineStateRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/SqliteEngineStateRepository";
 import {
   parsePersistedEngineState,
   type PersistedEngineState,
 } from "@ocpp-cp-simulator/core/cp/application/engine/ChargerState";
-import { SqliteConnectorRuntimeRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/SqliteConnectorRuntimeRepository";
-import type { ScenarioRunRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/ScenarioRunRepository";
-import { createScenarioRunRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/createScenarioRunRepository";
+import { SqliteConnectorRuntimeRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/SqliteConnectorRuntimeRepository";
+import type { ScenarioRunRepository } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunRepository";
+import { createScenarioRunRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/createScenarioRunRepository";
 import type {
   ChargingSessionPage,
   ChargingSessionQuery,
   ChargingSessionRepository,
 } from "@ocpp-cp-simulator/core/cp/domain/persistence/ChargingSessionRepository";
-import { createChargingSessionRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/createChargingSessionRepository";
+import { createChargingSessionRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/createChargingSessionRepository";
 import type { ChargingSession } from "@ocpp-cp-simulator/core/cp/domain/session/ChargingSession";
 import { ChargingSessionRecorder } from "@ocpp-cp-simulator/core/cp/application/services/ChargingSessionRecorder";
 import {
@@ -138,7 +138,7 @@ import type { ActiveChargingProfile } from "@ocpp-cp-simulator/core/cp/domain/co
 import type {
   StateHistoryEntry,
   HistoryOptions,
-} from "@ocpp-cp-simulator/core/cp/application/services/types/StateSnapshot";
+} from "@ocpp-cp-simulator/core/cp/application/services/StateSnapshot";
 import type {
   TimelineEntry,
   TimelinePage,

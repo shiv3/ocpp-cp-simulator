@@ -8,8 +8,8 @@ import { EventBus } from "../eventBus";
 import {
   runMigrations,
   SCHEMA_VERSION,
-} from "@ocpp-cp-simulator/core/cp/domain/persistence/schema";
-import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/domain/persistence/BunSqliteDatabase";
+} from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/schema";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/BunSqliteDatabase";
 import type { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
 import type { CLIChargePointService } from "../../service";
 import {

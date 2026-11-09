@@ -3,7 +3,7 @@ import { describe, expect, it } from "bun:test";
 import * as x509 from "@peculiar/x509";
 
 import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
-import { BunSqliteDatabase } from "../../../domain/persistence/BunSqliteDatabase";
+import { BunSqliteDatabase } from "../../persistence/BunSqliteDatabase";
 import type { Database } from "../../../domain/persistence/Database";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import { computeCertificateHashData } from "../../../domain/security/certificateHash";

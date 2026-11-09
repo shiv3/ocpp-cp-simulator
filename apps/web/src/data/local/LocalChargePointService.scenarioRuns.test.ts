@@ -7,7 +7,7 @@ import {
 } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import type { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
 import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
-import { MAX_RUNS_PER_CP } from "@ocpp-cp-simulator/core/cp/domain/persistence/ScenarioRunRepository";
+import { MAX_RUNS_PER_CP } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunRepository";
 import {
   DefaultBootNotification,
   OCPPStatus,

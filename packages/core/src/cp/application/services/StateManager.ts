@@ -5,8 +5,8 @@ import { StateHistory } from "./StateHistory";
 import type {
   StateTransitionResult,
   TransitionContext,
-} from "./types/StateTransition";
-import type { HistoryOptions, StateHistoryEntry } from "./types/StateSnapshot";
+} from "./StateTransition";
+import type { HistoryOptions, StateHistoryEntry } from "./StateSnapshot";
 import type { ChargePointStatus } from "../../domain/types/OcppTypes";
 import { LogType } from "../../domain/types/OcppTypes";
 import { realClock } from "../../shared/clock";

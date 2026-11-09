@@ -6,7 +6,7 @@ import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
 import { createRuntimeDeps } from "../socketServer";
 import { SupervisionUrlPool } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/SupervisionUrlPool";
-import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/domain/persistence/BunSqliteDatabase";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/BunSqliteDatabase";
 import { toWireCreateParams } from "@ocpp-cp-simulator/client/remote/RemoteChargePointService";
 
 const OCPP_J = {

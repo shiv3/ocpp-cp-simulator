@@ -102,6 +102,15 @@ jobs:
             type=semver,pattern={{major}}
             type=raw,value=latest,enable={{is_default_branch}}
 
+      # The image's Bun comes from .tool-versions, like setup-bun everywhere
+      # else; the Dockerfile default is only a guarded copy of it.
+      - name: Read the Bun version
+        id: bun-version
+        run: |
+          version="$(awk '$1=="bun"{print $2}' .tool-versions)"
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
       - name: Build & push
         id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -116,6 +125,7 @@ jobs:
           # `<sha7>-dev`. Harmless on a tag build, where the stamped semver wins.
           build-args: |
             APP_COMMIT=${{ github.sha }}
+            BUN_VERSION=${{ steps.bun-version.outputs.version }}
           # Speed up rebuilds by sharing layers across runs. GitHub Actions
           # cache is local to the repo so it's safe to write back.
           cache-from: type=gha

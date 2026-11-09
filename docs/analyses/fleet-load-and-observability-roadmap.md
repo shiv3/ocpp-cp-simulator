@@ -141,7 +141,7 @@ opposite of the implementation.
 **Scope it to OCPP-J, and resolve before persisting.** `wsUrl` is a `string`
 well past the schema: `buildBaseUrl(wsUrl: string, cpId: string)` in
 `apps/cli/src/service.ts`, the `ChargePoint` init options, the status snapshot, and
-`charge_points.ws_url TEXT NOT NULL` in `packages/core/src/cp/domain/persistence/schema.ts`.
+`charge_points.ws_url TEXT NOT NULL` in `packages/core/src/cp/infrastructure/persistence/schema.ts`.
 So:
 
 - The list is an **OCPP-J** concept. SOAP takes `centralSystemUrl` and has no
@@ -188,7 +188,7 @@ A blueprint holds the `cp.create` parameter block plus connector count,
 optional startup scenario template id, and (after 3b) an auto-traffic config.
 
 **Touches.** `packages/contracts/src/methods.ts`, `apps/cli/src/server/socketServer.ts`,
-`packages/core/src/cp/domain/persistence/schema.ts` (new table + migration — see
+`packages/core/src/cp/infrastructure/persistence/schema.ts` (new table + migration — see
 [State persistence](../concepts/state-persistence.md)), and a browser editor
 alongside the scenario editor.
 
@@ -479,7 +479,7 @@ too low for real use.
 plane staying on the main thread and forwarding commands. The hard parts are
 real and should be scoped before any code: `@socket.io/bun-engine` on the main
 thread only, SQLite access from multiple threads
-(`packages/core/src/cp/domain/persistence/BunSqliteDatabase.ts` — one writer, or route all
+(`packages/core/src/cp/infrastructure/persistence/BunSqliteDatabase.ts` — one writer, or route all
 writes through the main thread), and keeping the event stream ordered per CP.
 
 **Decide after 5a.** If the ceiling is comfortably above what CI jobs ask for,

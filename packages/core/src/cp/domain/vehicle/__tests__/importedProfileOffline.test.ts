@@ -4,7 +4,7 @@ import { Connector } from "../../connector/Connector";
 import type { ActiveChargingProfile } from "../../connector/Connector";
 import { buildSampledValues } from "../../connector/MeterValueBuilder";
 import type { Transaction } from "../../connector/Transaction";
-import { VehicleProfileRepository } from "../../persistence/VehicleProfileRepository";
+import { VehicleProfileRepository } from "../../../infrastructure/persistence/VehicleProfileRepository";
 import { Logger, LogLevel } from "../../../shared/Logger";
 import {
   ChargingProfileKindType,

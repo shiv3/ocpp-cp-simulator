@@ -30,7 +30,7 @@ import type {
 import type { EVSettings } from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
 import type { AutoMeterValueConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
 import type { AutoTrafficConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/AutoTraffic";
-import type { HistoryOptions } from "@ocpp-cp-simulator/core/cp/application/services/types/StateSnapshot";
+import type { HistoryOptions } from "@ocpp-cp-simulator/core/cp/application/services/StateSnapshot";
 import {
   ID_TOKEN_TYPE_VALUES,
   METER_READING_CONTEXTS,

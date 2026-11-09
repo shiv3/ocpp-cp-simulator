@@ -34,12 +34,8 @@ import type {
 } from "../types/DataTransfer";
 import type { LogEntry } from "../../shared/Logger";
 import { Logger, LogType } from "../../shared/Logger";
-import { HeartbeatService } from "../../application/services/HeartbeatService";
 import { MainMeter } from "./MainMeter";
 import { ClockAlignedMeterScheduler } from "./ClockAlignedMeterScheduler";
-import { StateManager } from "../../application/services/StateManager";
-import { OperationalTimeline } from "../../application/services/OperationalTimeline";
-import { OperationalTimelineProjector } from "../../application/services/OperationalTimelineProjector";
 import { Connector } from "../connector/Connector";
 import type { ConnectorWrite } from "../connector/ConnectorRecord";
 import type {
@@ -56,10 +52,18 @@ import type {
   AuthorizeSendHooks,
   IChargePointMessageHandler,
 } from "../transport/IChargePointMessageHandler";
-import {
-  OCPPWebSocket,
-  type SocketClose,
-} from "../../infrastructure/transport/OCPPWebSocket";
+import type {
+  ChargePointSocket,
+  SocketClose,
+} from "../transport/ChargePointSocket";
+import type { RawFrameSink } from "../transport/RawFrameSink";
+import type { OcppCallActions } from "../transport/OcppCallActions";
+import type {
+  ChargePointDeps,
+  ChargePointTransactions,
+  ChargePointTransport,
+} from "./ChargePointDeps";
+import type { FileUploader } from "./FileUploader";
 import type {
   CloseCause,
   GenerationToken,
@@ -67,24 +71,14 @@ import type {
 } from "../transport/networkSim";
 import type { OcppSecurityProfile } from "@ocpp-cp-simulator/contracts/securityProfile";
 import type { OcppTlsOptions } from "../transport/ConnectionSecurity";
-import { getProtocolProfile } from "../../infrastructure/transport/profile/profiles";
 import { measurandEnumFor } from "../connector/measurandEnum";
-import { OCPPSoapHandler } from "../../infrastructure/transport/soap";
 import { Outbox } from "../transport/Outbox";
-import {
-  cleanTransaction as cleanTransactionDefault,
-  startTransaction as startTransactionDefault,
-  stopTransaction as stopTransactionDefault,
-  type TransactionPorts,
-} from "../../application/engine/behaviors/transaction";
-import { getOcppCallCatalog } from "../../infrastructure/transport/codec/ocppCallCatalog";
 import {
   type OcppCallOutcome,
   type OcppCallRequest,
   type RawFrameOutcome,
   type RawFrameRequest,
 } from "../types/OcppCall";
-import { RawFrameSender } from "../../infrastructure/transport/RawFrameSender";
 import { OcppCallRejectedError } from "../errors/OcppCallErrors";
 import {
   relayGet15118EVCertificate,
@@ -92,7 +86,7 @@ import {
   type Get15118EVCertificateResult,
 } from "../security/get15118EVCertificate";
 import type { Database } from "../persistence/Database";
-import { LogRepository } from "../persistence/LogRepository";
+import type { LogSink } from "../persistence/LogSink";
 import type {
   ChargePointErrorCode,
   OCPPAvailability,
@@ -108,11 +102,6 @@ import {
   OCPP_2_1,
 } from "../types/OcppVersion";
 import { DeviceModelTargets } from "./DeviceModelTargets";
-import {
-  SOAP_OPERATION_NAMES,
-  soapDialectForVersion,
-  type SoapOperation,
-} from "../../infrastructure/transport/soap/dialect";
 import {
   ChargingProfilePurposeType,
   isChargePointStatus,
@@ -190,10 +179,7 @@ import {
   IdTagPool,
   type IdTagDistribution,
 } from "../auth/IdTagPool";
-import {
-  SupervisionUrlPool,
-  type UrlDistribution,
-} from "../../infrastructure/transport/SupervisionUrlPool";
+import type { UrlDistribution } from "../transport/UrlDistribution";
 import {
   assertWsClientOptions,
   type WsClientOptions,
@@ -202,11 +188,18 @@ import {
   resolveReconnectPolicy,
   type ReconnectPolicy,
 } from "../../shared/ReconnectPolicy";
-import { BehaviorRegistry } from "../../application/behavior/BehaviorRegistry";
-import {
-  ChargerEngine,
-  type LoadBehaviorOptions,
-} from "../../application/engine/ChargerEngine";
+import type { ChargePointBehaviorRegistry } from "../engine/behaviorRules";
+import type {
+  ChargePointEngine,
+  LoadBehaviorOptions,
+  TransactionPorts,
+} from "../engine/ChargePointEngine";
+import type { ChargePointHeartbeat } from "../services/ChargePointHeartbeat";
+import type { ChargePointStateManager } from "../services/ChargePointStateManager";
+import type {
+  ChargePointTimeline,
+  ChargePointTimelineProjector,
+} from "../services/ChargePointTimeline";
 import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
 
 /** RFC 6455 Normal Closure, and No Status Received (a close without a code). */
@@ -225,7 +218,7 @@ export const RENEWED_CERTIFICATE_RECONNECT_MAX_DEFER_MS = 60_000;
 /** How often that wait checks again. */
 const RENEWED_CERTIFICATE_RECONNECT_POLL_MS = 500;
 
-interface BasicAuthSettings {
+export interface BasicAuthSettings {
   username: string;
   password: string;
 }
@@ -452,7 +445,7 @@ export class ChargePoint {
   // stamp every JSON line with the CP it belongs to (multi-CP daemons).
   private readonly _logger = new Logger();
   private readonly _events = new EventEmitter<ChargePointEvents>();
-  private readonly _webSocket: OCPPWebSocket | null;
+  private readonly _webSocket: ChargePointSocket | null;
   private readonly _clock: SimClock;
   /** #609 */
   private readonly _reconnectPolicy: ReconnectPolicy;
@@ -472,14 +465,17 @@ export class ChargePoint {
     return new Date(this._clock.now());
   }
   private readonly _rngSource: RngSource;
-  private readonly _behaviors = new BehaviorRegistry({
-    ocppVersion: () => this._ocppVersion,
-    warn: (message) => this._logger.warn(message, LogType.OCPP),
-  });
+  private readonly _behaviors: ChargePointBehaviorRegistry;
   /** Owner of the engine-held state and the behaviors (stage B). */
-  private readonly _engine = new ChargerEngine(this);
+  private readonly _engine: ChargePointEngine;
+  /** #575: the default transaction behavior, see `deps.transactions`. */
+  private readonly _transactions: ChargePointTransactions;
   /** #393: level C expert sends; null on SOAP. */
-  private readonly _rawFrames: RawFrameSender | null;
+  private readonly _rawFrames: RawFrameSink | null;
+  /** #389: null on SOAP. */
+  private readonly _callCatalog: OcppCallActions | null;
+  /** SOAP dialect dispatch check; see {@link ChargePointTransport.receivesCsmsCall}. */
+  private readonly _receivesCsmsCall: ChargePointTransport["receivesCsmsCall"];
   private readonly _messageHandler: IChargePointMessageHandler;
   private readonly _transportUrl: string;
   /** #537: waits for the transaction messages in flight before reconnecting
@@ -497,7 +493,7 @@ export class ChargePoint {
   private readonly _idTagPool: IdTagPool | null;
   private _bootAccepted = false;
   private readonly _outbox: Outbox;
-  private readonly _heartbeat: HeartbeatService;
+  private readonly _heartbeat: ChargePointHeartbeat;
   private readonly _clockAligned: ClockAlignedMeterScheduler;
   /** #607: the 2.x `AlignedDataCtrlr.TxEndedInterval` grid, apart from the
    *  `Interval` one: it samples the transaction-end history, sends nothing. */
@@ -541,10 +537,11 @@ export class ChargePoint {
    *  charge point). A StatusNotification still in flight when the link closed
    *  is not in it, so a resume sends that one again (B04.FR.02). */
   private _ackedStatus: Map<number, OCPPStatus> = new Map();
-  private readonly _stateManager: StateManager;
-  private readonly _timeline: OperationalTimeline;
-  private readonly _timelineProjector: OperationalTimelineProjector;
-  private readonly _logRepository: LogRepository;
+  private readonly _stateManager: ChargePointStateManager;
+  private readonly _timeline: ChargePointTimeline;
+  private readonly _timelineProjector: ChargePointTimelineProjector;
+  private readonly _logSink: LogSink;
+  private readonly _fileUploader: FileUploader;
   private readonly _reservationManager: ReservationManager;
   /** Parent id / groupIdToken of the tags the CSMS authorized (reservations). */
   private readonly _authorizedParents = new Map<string, string>();
@@ -700,13 +697,23 @@ export class ChargePoint {
     extraWsSubprotocols: ReadonlyArray<string> = [],
     private readonly _ocppVersion: string = "OCPP-1.6J",
     transportOptions: ChargePointTransportOptions = {},
-    securityProfile?: OcppSecurityProfile,
-    authorizationKey?: string,
-    cpoName?: string,
-    tls?: OcppTlsOptions,
+    securityProfile: OcppSecurityProfile | undefined,
+    authorizationKey: string | undefined,
+    cpoName: string | undefined,
+    tls: OcppTlsOptions | undefined,
     simulation: ChargePointSimulationOptions = {},
+    /** #575: what is built outside the domain; see `createChargePoint`. */
+    deps: ChargePointDeps,
   ) {
     this._clock = simulation.clock ?? realClock;
+    // #575: before the connectors are attached and before the transport is
+    // built (the message handlers read `behaviors` when they are built).
+    this._behaviors = deps.createBehaviorRegistry({
+      ocppVersion: () => this._ocppVersion,
+      warn: (message) => this._logger.warn(message, LogType.OCPP),
+    });
+    this._engine = deps.createEngine(this);
+    this._transactions = deps.transactions;
     this._reconnectPolicy = resolveReconnectPolicy(transportOptions.reconnect);
     // Before any state is built: a refused option must not leave a half-made
     // charge point behind.
@@ -725,7 +732,8 @@ export class ChargePoint {
       transportOptions.reservationAuthorizeIdTag ?? false;
     this._capabilityProfile = transportOptions.capabilityProfile;
     this._logger.setCpId(this._id);
-    this._logRepository = new LogRepository(this._database);
+    this._logSink = deps.logSink;
+    this._fileUploader = deps.fileUploader;
     // #456: installed certificates survive a restart when state persists.
     this._certificateStore = new CertificateStore(
       this._id,
@@ -744,10 +752,10 @@ export class ChargePoint {
         type: entry.type,
         message: entry.message,
       });
-      // Buffered SQLite write — LogRepository batches up to 50 entries
-      // before hitting the DB so high-frequency log lines don't thrash
-      // the IndexedDB flush in the browser.
-      this._logRepository.append(this._id, entry);
+      // Buffered write — the default LogRepository batches up to 50
+      // entries before hitting the DB so high-frequency log lines don't
+      // thrash the IndexedDB flush in the browser.
+      this._logSink.append(this._id, entry);
     };
 
     for (let connectorId = 1; connectorId <= connectorCount; connectorId++) {
@@ -874,31 +882,28 @@ export class ChargePoint {
       );
     }
 
-    if (isSoapVersion(this._ocppVersion)) {
-      this._webSocket = null;
-      this._rawFrames = null;
-      const dialect = soapDialectForVersion(this._ocppVersion);
-      this._messageHandler = new OCPPSoapHandler(this, this._logger, {
-        centralSystemUrl: this._transportUrl,
-        soapCallbackUrl: transportOptions.soapCallbackUrl,
-        requestTimeoutMs: transportOptions.soapRequestTimeoutMs,
-        dialect,
-      });
-    } else {
-      this._webSocket = new OCPPWebSocket(
-        wsUrl,
-        this._id,
-        this._logger,
-        basicAuthSettings,
-        extraWsHeaders,
-        extraWsSubprotocols,
-        this._ocppVersion,
-        securityProfile,
-        authorizationKey,
-        cpoName,
-        tls,
-      );
-      this._rawFrames = new RawFrameSender(this._webSocket, () => this._clock);
+    // #575: the factory builds the socket, the raw-frame sender, the
+    // supervision URL pool and the message handler (which reads `this`).
+    const transport = deps.createTransport(this, {
+      logger: this._logger,
+      wsUrl,
+      transportUrl: this._transportUrl,
+      basicAuth: basicAuthSettings,
+      extraWsHeaders,
+      extraWsSubprotocols,
+      ocppVersion: this._ocppVersion,
+      securityProfile,
+      authorizationKey,
+      cpoName,
+      tls,
+      transportOptions,
+    });
+    this._webSocket = transport.socket;
+    this._rawFrames = transport.rawFrames;
+    this._messageHandler = transport.handler;
+    this._callCatalog = transport.callCatalog;
+    this._receivesCsmsCall = (action) => transport.receivesCsmsCall(action);
+    if (this._webSocket) {
       this._webSocket.setWsClientOptions(wsClientOptions);
       // Seeded even without `simulation.seed` (no CLI flag or `cp.create`
       // field sets one): by the charge point id, so the same id draws the
@@ -919,23 +924,10 @@ export class ChargePoint {
       this._webSocket.observers.on("reconnectScheduled", (info) =>
         this._events.emit("reconnecting", info),
       );
-      const supervisionUrls = transportOptions.supervisionUrls;
-      if (supervisionUrls && supervisionUrls.length > 1) {
-        this._webSocket.setSupervisionUrlPool(
-          new SupervisionUrlPool(
-            supervisionUrls,
-            transportOptions.urlDistribution,
-            this._id,
-          ),
-        );
-      }
-      this._messageHandler = getProtocolProfile(
-        this._ocppVersion,
-      ).createMessageHandler(this, this._webSocket, this._logger);
     }
     this._outbox = new Outbox(this._messageHandler);
 
-    this._heartbeat = new HeartbeatService(this._logger, this._clock);
+    this._heartbeat = deps.createHeartbeat(this._logger, this._clock);
     this._heartbeat.setHeartbeatCallback(() => this._outbox.sendHeartbeat());
     this._clockAligned = new ClockAlignedMeterScheduler(
       (boundary) => this.emitClockAlignedSamples(boundary),
@@ -991,23 +983,24 @@ export class ChargePoint {
       clock: this._clock,
     });
 
-    this._stateManager = new StateManager(
-      this._logger,
-      this._events,
-      () => ({ status: this._status, error: this._error }),
-      this._clock,
-      this.rng("state-history"),
-    );
+    this._stateManager = deps.createStateManager({
+      logger: this._logger,
+      events: this._events,
+      chargePoint: () => ({ status: this._status, error: this._error }),
+      clock: this._clock,
+      rng: this.rng("state-history"),
+    });
 
     // #448: subscribed before any connection or status event can fire.
-    this._timeline = new OperationalTimeline(this._id, { clock: this._clock });
-    this._timelineProjector = new OperationalTimelineProjector(
-      this._timeline,
-      this._events,
-      this._connectors,
-      this._clock,
-      this.rng("timeline"),
-    );
+    const timeline = deps.createTimeline({
+      cpId: this._id,
+      events: this._events,
+      connectors: this._connectors,
+      clock: this._clock,
+      rng: this.rng("timeline"),
+    });
+    this._timeline = timeline.timeline;
+    this._timelineProjector = timeline.projector;
 
     // ConfigurationStore is constructed last because it depends on `this`
     // (via the `defaultConfiguration(cp)` factory which reads
@@ -1102,12 +1095,12 @@ export class ChargePoint {
   }
 
   /** Rules that may take an inbound CSMS CALL over from the default path. */
-  get behaviors(): BehaviorRegistry {
+  get behaviors(): ChargePointBehaviorRegistry {
     return this._behaviors;
   }
 
   /** The charger engine: event queue, engine state and behavior runner. */
-  get engine(): ChargerEngine {
+  get engine(): ChargePointEngine {
     return this._engine;
   }
 
@@ -1144,9 +1137,9 @@ export class ChargePoint {
 
   /** Force any buffered log lines to be flushed to the DB. Used before
    *  the Download Logs export so the file includes the last seconds of
-   *  activity the LogRepository hasn't pushed out yet. */
+   *  activity the log sink hasn't pushed out yet. */
   flushLogs(): void {
-    this._logRepository.flush();
+    this._logSink.flush();
   }
 
   /** In-memory log entries the Logger has accumulated this session,
@@ -1781,12 +1774,7 @@ export class ChargePoint {
 
     // SOAP with callback: the action must be dispatchable in this dialect —
     // target "cp" or a bidirectional op — matching OCPPSoapServer dispatch.
-    if (!(SOAP_OPERATION_NAMES as readonly string[]).includes(action)) {
-      return false;
-    }
-    const dialect = soapDialectForVersion(this._ocppVersion);
-    const metadata = dialect.operationMetadata[action as SoapOperation];
-    return metadata?.target === "cp" || metadata?.bidirectional === true;
+    return this._receivesCsmsCall(action) === true;
   }
 
   get connectorNumber(): number {
@@ -1861,7 +1849,7 @@ export class ChargePoint {
   }
 
   /** The PEM bundle that validates the current CSMS connection (#537), as
-   *  {@link OCPPWebSocket.connectionTrustAnchorsPem}; `undefined` on SOAP. */
+   *  {@link ChargePointSocket.connectionTrustAnchorsPem}; `undefined` on SOAP. */
   connectionTrustAnchorsPem(): string | undefined {
     return this._webSocket?.connectionTrustAnchorsPem();
   }
@@ -1887,13 +1875,18 @@ export class ChargePoint {
     return this._events;
   }
 
-  get stateManager(): StateManager {
+  get stateManager(): ChargePointStateManager {
     return this._stateManager;
   }
 
   /** #448: operational timeline of this charge point. */
-  get timeline(): OperationalTimeline {
+  get timeline(): ChargePointTimeline {
     return this._timeline;
+  }
+
+  /** Uploads the GetDiagnostics file (#575: injected through deps). */
+  get fileUploader(): FileUploader {
+    return this._fileUploader;
   }
 
   get logger(): Logger {
@@ -2680,7 +2673,7 @@ export class ChargePoint {
    * {@link IChargePointMessageHandler.sendOcppCall}.
    */
   async sendOcppCall(request: OcppCallRequest): Promise<OcppCallOutcome> {
-    const catalog = getOcppCallCatalog(this._ocppVersion);
+    const catalog = this._callCatalog;
     if (!catalog) {
       throw new OcppCallRejectedError(
         "unsupported_transport",
@@ -2713,7 +2706,7 @@ export class ChargePoint {
    * Expert raw frame (#393, level C of #389): one text frame written to the
    * WebSocket as given, valid OCPP-J or not, outside the 1.6 serial CALL
    * queue. Replies are correlated best effort and kept from the station's
-   * handlers. See {@link RawFrameSender}.
+   * handlers. See {@link RawFrameSink}.
    */
   sendRawFrame(request: RawFrameRequest): Promise<RawFrameOutcome> {
     if (!this._rawFrames) {
@@ -3560,7 +3553,7 @@ export class ChargePoint {
     this._outbox.onWebSocketClosed();
     // Flush any buffered log lines so the operator can still see the
     // last seconds of activity after the CP went down.
-    this._logRepository.flush();
+    this._logSink.flush();
   }
 
   reset(reason: BootReason = "LocalReset"): void {
@@ -3787,12 +3780,12 @@ export class ChargePoint {
     this._localAuthListManager.dispose();
     this._timelineProjector.dispose();
     // The socket's real close event still arrives asynchronously and its
-    // handler logs "WebSocket closed" through this repository. Closing it
+    // handler logs "WebSocket closed" through this log sink. Closing it
     // here (not in teardownAfterClose, which a plain disconnect shares)
     // drops that late line instead of buffering it — otherwise a `cp.delete`
     // that just cascaded to `logs` gets one row back for the deleted id
     // (#326).
-    this._logRepository.close();
+    this._logSink.close();
   }
 
   applyRemoteReset(
@@ -3877,7 +3870,8 @@ export class ChargePoint {
   }
 
   /** Start a transaction on a connector; the default lives in the engine
-   *  (`application/engine/behaviors/transaction.ts`). */
+   *  (`application/engine/behaviors/transaction.ts`), reached through
+   *  `deps.transactions` (#575). */
   startTransaction(
     tagId: string,
     connectorId: number,
@@ -3886,7 +3880,7 @@ export class ChargePoint {
     options: StartTransactionOptions = {},
   ): Promise<StartTransactionOutcome> {
     this.assertPowered();
-    return startTransactionDefault(
+    return this._transactions.start(
       this,
       this.transactionPorts,
       tagId,
@@ -3905,7 +3899,7 @@ export class ChargePoint {
     // The recovery decides how a transaction interrupted by a power loss
     // ends (`runPowerRecovery`); nothing ends it while the station is off.
     this.assertPowered();
-    stopTransactionDefault(
+    this._transactions.stop(
       this,
       this.transactionPorts,
       connectorOrId,
@@ -4187,7 +4181,7 @@ export class ChargePoint {
   }
 
   cleanTransaction(connectorOrId: Connector | number): void {
-    cleanTransactionDefault(this, connectorOrId);
+    this._transactions.clean(this, connectorOrId);
   }
 
   private readonly transactionPorts: TransactionPorts = {
@@ -4216,7 +4210,7 @@ export class ChargePoint {
     if (isHeartbeat) this._heartbeat.markHeartbeatSent();
   }
 
-  get heartbeat(): HeartbeatService {
+  get heartbeat(): ChargePointHeartbeat {
     return this._heartbeat;
   }
 

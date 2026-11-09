@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 
-import { ChargePoint } from "../../charge-point/ChargePoint";
+import type { ChargePoint } from "../../charge-point/ChargePoint";
+import { createChargePoint } from "../../../infrastructure/charge-point/createChargePoint";
 import { BunSqliteDatabase } from "../../../infrastructure/persistence/BunSqliteDatabase";
 import { SqliteConnectorRuntimeRepository } from "../../../infrastructure/persistence/SqliteConnectorRuntimeRepository";
 import { DefaultBootNotification, OCPPStatus } from "../../types/OcppTypes";
@@ -14,7 +15,7 @@ import { Logger, LogLevel } from "../../../shared/Logger";
  * the whole transaction.
  */
 function makeChargePoint(): ChargePoint {
-  return new ChargePoint(
+  return createChargePoint(
     "cp-intent",
     DefaultBootNotification,
     1,

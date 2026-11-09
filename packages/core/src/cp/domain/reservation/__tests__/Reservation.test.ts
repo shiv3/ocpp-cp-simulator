@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ReservationManager, reservationAdmits } from "../Reservation";
 import { Logger } from "../../../shared/Logger";
 import { ReservationStatus, OCPPStatus } from "../../types/OcppTypes";
-import { ChargePoint } from "../../charge-point/ChargePoint";
+import type { ChargePoint } from "../../charge-point/ChargePoint";
+import { createChargePoint } from "../../../infrastructure/charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../types/OcppTypes";
 
 /**
@@ -109,7 +110,7 @@ describe("ChargePoint: connector returns to Available on reservation expiry (#18
   });
 
   function buildCp(): ChargePoint {
-    return new ChargePoint(
+    return createChargePoint(
       "test-cp-reservation-expiry",
       DefaultBootNotification,
       1,

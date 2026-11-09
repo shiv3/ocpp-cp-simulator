@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../../charge-point/createChargePoint";
 import {
   ChargingProfileKindType,
   ChargingProfilePurposeType,
@@ -10,7 +10,7 @@ import type { V201InboundContext } from "../inboundRegistryV201";
 import { handleGetChargingProfilesV201 } from "../smartChargingV201";
 
 function station(version: "OCPP-2.0.1" | "OCPP-2.1", evses = 3) {
-  const chargePoint = new ChargePoint(
+  const chargePoint = createChargePoint(
     "CP-GET-PROFILES",
     DefaultBootNotification,
     evses,

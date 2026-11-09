@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import type { TransactionEventRequestV201 } from "@ocpp-cp-simulator/ocpp/index";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 
 function callResultFrame(messageId: string): (frame: OcppFrame) => boolean {
@@ -46,7 +46,7 @@ async function bootAccepted(csms: MockCsms): Promise<void> {
 describe("OCPP 2.0.1 transaction control", () => {
   it("accepts remote start/stop, stops as Remote, and reports no ongoing transaction after stop", async () => {
     const csms = startMockCsms();
-    const cp = new ChargePoint(
+    const cp = createChargePoint(
       "CP201-TX-CONTROL",
       DefaultBootNotification,
       1,

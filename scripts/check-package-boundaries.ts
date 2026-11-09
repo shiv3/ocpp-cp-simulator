@@ -31,9 +31,9 @@
 // domain may import only domain and shared; application may import domain,
 // application and shared (never infrastructure); infrastructure may import
 // every layer; shared imports only shared. Every layer may use the other
-// workspace packages the package rules above allow. The edges that break this
-// today are listed in LAYER_EXEMPTIONS; an entry that stops matching fails the
-// run, so the list can only shrink. Tests are not checked.
+// workspace packages the package rules above allow. LAYER_EXEMPTIONS lists
+// the edges let through; it is empty since #575, and an entry that stops
+// matching fails the run. Tests are not checked.
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, posix, resolve } from "node:path";
@@ -298,45 +298,13 @@ export function layerOf(file: string): Layer | null {
 }
 
 /**
- * Layer-breaking imports that exist today, one entry per importing file and
+ * Layer-breaking imports let through, one entry per importing file and
  * imported file. Matching violations are printed as warnings and do not fail
- * the run; an entry that matches nothing fails it, so delete each entry in
- * the PR that removes the import. The goal (#577) is an empty list. Tests are
- * not covered by the rule.
+ * the run; an entry that matches nothing fails it. The list is empty since
+ * #575 (#577's goal): a new entry needs a reason in `why` and the issue that
+ * removes it. Tests are not covered by the rule.
  */
-export const LAYER_EXEMPTIONS: readonly KnownViolation[] = [
-  {
-    from: "packages/core/src/cp/application/engine/behaviors/diagnostics.ts",
-    to: "packages/core/src/cp/infrastructure/fileUpload.ts",
-    why: "The diagnostics behavior calls the file-upload client directly; it needs a port in application.",
-  },
-  ...[
-    "application/behavior/BehaviorRegistry.ts",
-    "application/engine/ChargerEngine.ts",
-    "application/engine/behaviors/transaction.ts",
-    "application/services/HeartbeatService.ts",
-    "application/services/OperationalTimeline.ts",
-    "application/services/OperationalTimelineProjector.ts",
-    "application/services/StateManager.ts",
-  ].map((t) => ({
-    from: "packages/core/src/cp/domain/charge-point/ChargePoint.ts",
-    to: `packages/core/src/cp/${t}`,
-    why: "ChargePoint still wires the application services itself; clears with the ChargePoint split (#575).",
-  })),
-  ...[
-    "infrastructure/transport/OCPPWebSocket.ts",
-    "infrastructure/transport/RawFrameSender.ts",
-    "infrastructure/transport/SupervisionUrlPool.ts",
-    "infrastructure/transport/codec/ocppCallCatalog.ts",
-    "infrastructure/transport/profile/profiles.ts",
-    "infrastructure/transport/soap/dialect.ts",
-    "infrastructure/transport/soap/index.ts",
-  ].map((t) => ({
-    from: "packages/core/src/cp/domain/charge-point/ChargePoint.ts",
-    to: `packages/core/src/cp/${t}`,
-    why: "ChargePoint still builds the transport itself; clears with the ChargePoint split (#575).",
-  })),
-];
+export const LAYER_EXEMPTIONS: readonly KnownViolation[] = [];
 
 // ---------------------------------------------------------------------------
 // Machinery

@@ -16,22 +16,11 @@ import {
   OCPPStatus,
 } from "../../../domain/types/OcppTypes";
 import { isOcpp2Version } from "../../../domain/types/OcppVersion";
-import type { TransactionLifecycleEvent } from "../../../domain/transport/TransactionLifecycleEvent";
+import type { TransactionPorts } from "../../../domain/engine/ChargePointEngine";
 import { LogType } from "../../../shared/Logger";
 import { startRefusalByReservation } from "../../../domain/reservation/reservationModel";
 import { reservationAdmits } from "../../../domain/reservation/Reservation";
 import { decideRemoteStart } from "./remoteStartValidation";
-
-/**
- * What the transaction defaults need from the station beyond its public API.
- * `ChargePoint` builds one and hands it to the engine.
- */
-export interface TransactionPorts {
-  /** Hand a transaction phase to the protocol encoder. */
-  sendTransactionEvent(event: TransactionLifecycleEvent): void;
-  /** (Re)start the ConnectionTimeOut of a connector that is in Preparing. */
-  startConnectionTimeout(connectorId: number): void;
-}
 
 /**
  * The default behavior of a transaction (docs/concepts/charger-engine.md,

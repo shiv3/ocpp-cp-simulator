@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../../charge-point/createChargePoint";
 import type { Transaction } from "../../../../domain/connector/Transaction";
 import { DefaultBootNotification } from "../../../../domain/types/OcppTypes";
 import type { V201InboundContext } from "../inboundRegistryV201";
@@ -8,7 +8,7 @@ import { handleSetChargingProfileV201 } from "../smartChargingV201";
 const TX = "tx-uuid-1";
 
 function station(version: "OCPP-2.0.1" | "OCPP-2.1") {
-  const chargePoint = new ChargePoint(
+  const chargePoint = createChargePoint(
     "CP-SET-PROFILE",
     DefaultBootNotification,
     2,

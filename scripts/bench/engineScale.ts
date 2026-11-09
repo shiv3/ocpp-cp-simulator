@@ -18,7 +18,8 @@
 import { heapStats } from "bun:jsc";
 import path from "node:path";
 import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
-import { ChargePoint } from "../../packages/core/src/cp/domain/charge-point/ChargePoint.ts";
+import type { ChargePoint } from "../../packages/core/src/cp/domain/charge-point/ChargePoint.ts";
+import { createChargePoint } from "../../packages/core/src/cp/infrastructure/charge-point/createChargePoint.ts";
 import {
   VirtualClock,
   type SimClock,
@@ -278,7 +279,7 @@ async function withChargePoints(
   const cps: ChargePoint[] = [];
   for (let i = 0; i < n; i++) {
     const id = `CP-${i}`;
-    const cp = new ChargePoint(
+    const cp = createChargePoint(
       id,
       {
         chargePointVendor: "ocpp-cp-simulator",

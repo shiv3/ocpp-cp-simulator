@@ -1,6 +1,6 @@
 import "reflect-metadata";
 import { describe, expect, it } from "bun:test";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import { startMockCsms } from "./mockCsms";
 import { canBindBunServe } from "../../../../test/bunServe";
@@ -37,7 +37,7 @@ describe.skipIf(!canBindBunServe())(
   () => {
     it("callerror policy on GetConfiguration → inbound CALL produces CALLERROR and no CALLRESULT", async () => {
       const csms = startMockCsms();
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "CP016-POLICY-CALLERROR",
         DefaultBootNotification,
         1,
@@ -89,7 +89,7 @@ describe.skipIf(!canBindBunServe())(
 
     it("ignore policy → no frame at all is written in response", async () => {
       const csms = startMockCsms();
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "CP016-POLICY-IGNORE",
         DefaultBootNotification,
         1,
@@ -135,7 +135,7 @@ describe.skipIf(!canBindBunServe())(
 
     it("un-policied actions still answer normally while a policy exists for another action", async () => {
       const csms = startMockCsms();
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "CP016-POLICY-MIXED",
         DefaultBootNotification,
         1,
@@ -177,7 +177,7 @@ describe.skipIf(!canBindBunServe())(
 
     it("clearInboundCallPolicy(action) restores normal CALLRESULT behavior", async () => {
       const csms = startMockCsms();
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "CP016-POLICY-CLEAR-ONE",
         DefaultBootNotification,
         1,
@@ -233,7 +233,7 @@ describe.skipIf(!canBindBunServe())(
 
     it("clearInboundCallPolicy() with no args clears everything", async () => {
       const csms = startMockCsms();
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "CP016-POLICY-CLEAR-ALL",
         DefaultBootNotification,
         1,

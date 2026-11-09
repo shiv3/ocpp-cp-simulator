@@ -1,6 +1,7 @@
 import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
 import { afterEach, describe, expect, test } from "bun:test";
 import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
+import type { ChargerEngine } from "../../cp/application/engine/ChargerEngine";
 import { runBehavior, type BehaviorRun } from "./runBehavior";
 
 let run: BehaviorRun | undefined;
@@ -43,7 +44,7 @@ describe("physical verbs of ctx", () => {
       );
       expect(cp.engine.state.connectors["1"].transaction?.stopTime).toBeNull();
       // The state is plain JSON, with the transaction in it.
-      const snapshot = cp.engine.snapshot();
+      const snapshot = (cp.engine as ChargerEngine).snapshot();
       expect(snapshot.connectors["1"].transaction?.startTime).toMatch(/Z$/);
 
       await run.advanceInSteps(10_000, 500);

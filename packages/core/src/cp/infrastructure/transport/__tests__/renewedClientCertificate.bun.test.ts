@@ -2,7 +2,8 @@ import "reflect-metadata";
 import { afterEach, describe, expect, it } from "bun:test";
 import * as x509 from "@peculiar/x509";
 
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import { startMockCsms, type MockCsms } from "./mockCsms";
 import { canBindBunServe, tcpPort } from "../../../../test/bunServe";
@@ -154,7 +155,7 @@ function csmsOn(port: number, certs: Pki, clientCa: string[]): MockCsms {
 }
 
 function station(version: Version, url: string, certs: Pki): ChargePoint {
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     "CP-RENEW",
     DefaultBootNotification,
     1,

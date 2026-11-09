@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { ScenarioExecutor } from "../ScenarioExecutor";
 import { createScenarioExecutorCallbacks } from "../ScenarioRuntime";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../../infrastructure/charge-point/createChargePoint";
 import {
   DefaultBootNotification,
   OCPPStatus,
@@ -36,7 +37,7 @@ function newChargePoint(id: string): ChargePoint {
   // wsUrl points at an unused local port — no real transport connection is
   // ever attempted in this test, matching the pattern used by
   // ScenarioLifecycle.wave1.test.ts / ScenarioExecutor.nodes.test.ts.
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     id,
     DefaultBootNotification,
     1,

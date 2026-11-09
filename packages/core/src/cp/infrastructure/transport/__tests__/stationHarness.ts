@@ -1,8 +1,9 @@
 import type { ChargePointCapabilityProfile } from "../../../domain/charge-point/CapabilityProfile";
 // Test-only helpers for bun tests that drive a real ChargePoint against the
 // mock CSMS (#348 DataTransfer, #389 expert calls).
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { ChargerCapabilities } from "../../../domain/charge-point/ChargerCapabilities";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import type { Database } from "../../../domain/persistence/Database";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import type { MockCsms, OcppFrame } from "./mockCsms";
@@ -30,7 +31,7 @@ export function stationFor(
   version: string,
   options: StationOptions = {},
 ): ChargePoint {
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     id,
     DefaultBootNotification,
     options.connectors ?? 1,

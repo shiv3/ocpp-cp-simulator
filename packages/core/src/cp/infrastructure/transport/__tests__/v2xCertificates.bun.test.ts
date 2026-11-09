@@ -2,7 +2,8 @@ import "reflect-metadata";
 import { describe, expect, it } from "bun:test";
 import * as x509 from "@peculiar/x509";
 
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import { BunSqliteDatabase } from "../../persistence/BunSqliteDatabase";
 import type { Database } from "../../../domain/persistence/Database";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
@@ -69,7 +70,7 @@ function newChargePoint(
   version: Version,
   database: Database | null = null,
 ): ChargePoint {
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     id,
     DefaultBootNotification,
     1,

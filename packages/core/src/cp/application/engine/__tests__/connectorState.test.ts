@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import type { ChargerEngine } from "../ChargerEngine";
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../../infrastructure/charge-point/createChargePoint";
 import { Logger, LogLevel } from "../../../shared/Logger";
 import { Connector } from "../../../domain/connector/Connector";
 import {
@@ -8,7 +10,7 @@ import {
 } from "../../../domain/types/OcppTypes";
 
 function station(connectors = 2): ChargePoint {
-  return new ChargePoint(
+  return createChargePoint(
     "engine-connector-state",
     DefaultBootNotification,
     connectors,
@@ -48,7 +50,9 @@ describe("connector state in the charger engine", () => {
     // The connector reads the same record back.
     expect(connector.status).toBe(OCPPStatus.Preparing);
     expect(connector.availability).toBe("Inoperative");
-    expect(cp.engine.snapshot().connectors["1"].vendorErrorCode).toBe("V-7");
+    expect(
+      (cp.engine as ChargerEngine).snapshot().connectors["1"].vendorErrorCode,
+    ).toBe("V-7");
   });
 
   it("emits the same events, in the same order, for each kind of write", () => {

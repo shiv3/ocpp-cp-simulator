@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { startMockCsms, type MockCsms } from "./mockCsms";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import {
   ID_TOKEN_TYPE_VALUES,
@@ -30,7 +31,7 @@ async function withStation(
   run: (csms: MockCsms, cp: ChargePoint) => Promise<void>,
 ): Promise<void> {
   const csms = startMockCsms({ answerCalls: true });
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     "CP-IDTOKEN",
     DefaultBootNotification,
     1,

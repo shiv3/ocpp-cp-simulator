@@ -43,7 +43,15 @@ import {
   type ChargerState,
   type PersistedEngineState,
   type EngineEvent,
+  type NotifyKind,
 } from "./ChargerState";
+import type {
+  BeforeSendResult,
+  ChargePointEngine,
+  DefaultResult,
+  EngineObservation,
+  LoadBehaviorOptions,
+} from "../../domain/engine/ChargePointEngine";
 import { registerDefaultBehaviors } from "./behaviors";
 import {
   EMPTY_PARAMS,
@@ -68,32 +76,6 @@ export class BehaviorTimeout extends Error {
     super(`Timed out after ${ms}ms`);
     this.name = "BehaviorTimeout";
   }
-}
-
-export interface LoadBehaviorOptions {
-  /**
-   * Load without serving: no rule is registered, `main` does not start and
-   * no `on` hook or `beforeSend` runs until a scenario selects the behavior
-   * with `useBehavior`. All of it, or none of it: while a run holds the
-   * behavior it is complete; when the last holder lets go it is idle again.
-   */
-  readonly dormant?: boolean;
-  /**
-   * The params the selector set (`--use-behavior` with `--behavior-params`,
-   * `cp.behaviors.set`), merged over the behavior's defaults. Validated before
-   * anything is registered, so a refusal loads nothing.
-   */
-  readonly params?: JsonObject;
-}
-
-/** What a default behavior produced for one CALL, in the shape handlers use. */
-export interface DefaultResult {
-  readonly response: unknown;
-  /** Starts the work that follows the response; run it once the response settled. */
-  readonly effect?: (() => void) & {
-    /** The exchange told the queue to drop the effect: it will never run. */
-    onDropped?: () => void;
-  };
 }
 
 /**
@@ -187,7 +169,7 @@ function describe(error: unknown): string {
  * turn that asked for it; one dispatched while an event is being processed
  * runs right after it.
  */
-export class ChargerEngine {
+export class ChargerEngine implements ChargePointEngine {
   private _state: ChargerState = initialChargerState();
   private readonly queue: EngineEvent[] = [];
   private readonly connectors = new Map<number, Connector>();
@@ -646,24 +628,7 @@ export class ChargerEngine {
    * to the `on` table of every loaded behavior, in load order, after the turn
    * that caused it (see {@link deliverHooks}).
    */
-  observe(
-    event:
-      | { type: "connected" }
-      | { type: "disconnected"; code?: number; reason?: string }
-      | {
-          type: "callResult";
-          action: string;
-          messageId: string;
-          outcome: "result" | "error";
-          payload: unknown;
-        }
-      | {
-          type: "callReceived";
-          action: string;
-          messageId: string;
-          payload: unknown;
-        },
-  ): void {
+  observe(event: EngineObservation): void {
     if (!this.hooked || this.disposed) return;
     switch (event.type) {
       case "connected":
@@ -719,10 +684,7 @@ export class ChargerEngine {
    * returns something that is not an object is logged and skipped; the CALL
    * goes on with the payload as the previous step left it.
    */
-  beforeSend(
-    action: string,
-    payload: unknown,
-  ): { readonly drop: true } | { readonly payload: unknown } {
+  beforeSend(action: string, payload: unknown): BeforeSendResult {
     if (!this.intercepting || this.disposed) return { payload };
     const names = this.outboundNames(action, payload);
     let current = payload;
@@ -1897,11 +1859,7 @@ export class ChargerEngine {
    * node, #654): FirmwareStatusNotification, SignedFirmwareStatusNotification,
    * LogStatusNotification or DiagnosticsStatusNotification.
    */
-  notifyStatus(
-    kind: "firmware" | "signedFirmware" | "log" | "diagnostics",
-    status: string,
-    requestId?: number,
-  ): void {
+  notifyStatus(kind: NotifyKind, status: string, requestId?: number): void {
     this.dispatch({
       type: "notified",
       kind,

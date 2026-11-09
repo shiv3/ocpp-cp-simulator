@@ -8,7 +8,8 @@ import {
   isValidSetMonitoringBaseResponseV21,
 } from "@ocpp-cp-simulator/ocpp/v21/index";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import { BunSqliteDatabase } from "../../persistence/BunSqliteDatabase";
 import type { Database } from "../../../domain/persistence/Database";
@@ -48,7 +49,7 @@ function makeChargePoint(
   version: string,
   database: Database | null = null,
 ): ChargePoint {
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     id,
     DefaultBootNotification,
     1,

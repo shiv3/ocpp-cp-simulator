@@ -53,29 +53,12 @@ import {
   type ReconnectPolicy,
   type RetryBackOffVariables,
 } from "../../shared/ReconnectPolicy";
-import type { NetworkFaultInjected } from "../../domain/charge-point/ChargePointEvents";
+import type {
+  ChargePointSocket,
+  SocketClose,
+  TransportObserverEvents,
+} from "../../domain/transport/ChargePointSocket";
 import { EventEmitter } from "../../shared/EventEmitter";
-
-/** #448: what the transport reports to observers (the charge point). A
- *  throwing listener is caught by the emitter, never by the transport. */
-export interface TransportObserverEvents {
-  /** A network-sim disconnect rule fired; emitted before the close. */
-  simulatedDisconnect: NetworkFaultInjected;
-  /** A reconnect was scheduled; emitted once the close that caused it has
-   *  been handed to the `onclose` callback. */
-  reconnectScheduled: { attempt: number; delayMs: number };
-  /** #609: the reconnect policy's `maxAttempts` was reached; no further
-   *  reconnect is scheduled until the next explicit `connect()`. */
-  reconnectGaveUp: { attempts: number };
-  /** #393: the current generation ended, whatever the cause (a close, a
-   *  disconnect, a reset, a simulated drop), or the transport was disposed.
-   *  Emitted once per generation, before any replacement socket opens. */
-  closed: { cause: CloseCause | "disposed" };
-  /** #537 A02.FR.10: a connection opened with the previous client
-   *  certificate while the renewed one was unconfirmed; the renewed one is
-   *  discarded (A02.FR.29 reports it). */
-  renewedClientCertificateDiscarded: Record<string, never>;
-}
 
 /**
  * #393: sees every well-shaped incoming frame (an array of 3 to 5 elements)
@@ -123,9 +106,6 @@ type MessageHandler = (
   action: OCPPAction,
   payload: OcppMessagePayload,
 ) => void;
-
-/** What the charge point is told about a socket's close. */
-export type SocketClose = Pick<CloseEvent, "code" | "reason">;
 
 /**
  * Whether a connection attempt ended before any peer answered: connection
@@ -181,7 +161,7 @@ class GenerationTokenImpl implements GenerationToken {
   }
 }
 
-export class OCPPWebSocket {
+export class OCPPWebSocket implements ChargePointSocket {
   private _ws: OcppSocket | null = null;
   private _url: string;
   private _basicAuth: { username: string; password: string } | null = null;

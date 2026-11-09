@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import {
   EXI_REQUEST_FIXTURE,
@@ -34,7 +35,7 @@ const VALID = {
 } as const;
 
 function newChargePoint(id: string, url: string, version: string): ChargePoint {
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     id,
     DefaultBootNotification,
     1,

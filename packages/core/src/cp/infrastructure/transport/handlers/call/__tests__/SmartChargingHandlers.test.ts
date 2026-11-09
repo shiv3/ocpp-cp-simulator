@@ -6,7 +6,8 @@ import {
 } from "../SmartChargingHandlers";
 import { isValidGetCompositeScheduleResponseV16 } from "@ocpp-cp-simulator/ocpp/index";
 import type { HandlerContext } from "../../MessageHandlerRegistry";
-import { ChargePoint } from "../../../../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../../../charge-point/createChargePoint";
 import {
   ChargingProfilePurposeType,
   DefaultBootNotification,
@@ -18,7 +19,7 @@ import {
  * the operational timeline (#469).
  */
 function buildContext(opts: { connectorCount?: number } = {}) {
-  const chargePoint = new ChargePoint(
+  const chargePoint = createChargePoint(
     "CP-SMART-16",
     DefaultBootNotification,
     opts.connectorCount ?? 2,

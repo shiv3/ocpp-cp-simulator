@@ -1,4 +1,4 @@
-import type { Database } from "./Database";
+import type { Database } from "../../domain/persistence/Database";
 import type { LogEntry, LogType } from "../../shared/Logger";
 import { LogLevel } from "../../shared/Logger";
 

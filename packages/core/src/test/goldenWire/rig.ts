@@ -1,7 +1,6 @@
-import {
-  ChargePoint,
-  type ChargePointSimulationOptions,
-} from "../../cp/domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
+import { type ChargePointSimulationOptions } from "../../cp/domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../cp/infrastructure/charge-point/createChargePoint";
 import {
   DefaultBootNotification,
   OCPPStatus,
@@ -63,7 +62,7 @@ export class Rig {
       responders: options.responders,
       ...(options.memory ? { memory: true } : {}),
     });
-    const cp = new ChargePoint(
+    const cp = createChargePoint(
       "CP-GOLDEN",
       DefaultBootNotification,
       options.connectors ?? 1,

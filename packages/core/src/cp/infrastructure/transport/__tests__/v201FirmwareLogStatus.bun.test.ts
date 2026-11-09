@@ -1,6 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import {
   selfSignedRoot,
@@ -23,7 +24,7 @@ async function bootedChargePoint(
   id: string,
   version: "OCPP-2.0.1" | "OCPP-2.1" = "OCPP-2.0.1",
 ): Promise<ChargePoint> {
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     id,
     DefaultBootNotification,
     1,

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "bun:test";
 
 import { createScenarioExecutorCallbacks } from "../ScenarioRuntime";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../../infrastructure/charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 
 /**
@@ -13,7 +14,7 @@ import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
  * connector.
  */
 function makeChargePoint(): ChargePoint {
-  return new ChargePoint(
+  return createChargePoint(
     "cp-log-prefix",
     DefaultBootNotification,
     2,

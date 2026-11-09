@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ChargePoint } from "../ChargePoint";
+import type { ChargePoint } from "../ChargePoint";
+import { createChargePoint } from "../../../infrastructure/charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../types/OcppTypes";
 import type { Transaction } from "../../connector/Transaction";
 
@@ -10,7 +11,7 @@ import type { Transaction } from "../../connector/Transaction";
  * "every MeterValueSampleInterval seconds", 0 = none).
  */
 function station(): ChargePoint {
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     "CP-SAMPLER",
     DefaultBootNotification,
     1,

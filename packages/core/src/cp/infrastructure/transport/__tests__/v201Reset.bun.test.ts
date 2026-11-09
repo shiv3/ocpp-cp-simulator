@@ -4,7 +4,8 @@ import type {
   TransactionEventRequestV201,
 } from "@ocpp-cp-simulator/ocpp/index";
 import type { ResetRequestV21 } from "@ocpp-cp-simulator/ocpp/v21/index";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
 
@@ -129,7 +130,7 @@ function newChargePoint(
   cp: ChargePoint;
 } {
   const csms = startMockCsms({ answerCalls: true });
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     id,
     DefaultBootNotification,
     connectorCount,

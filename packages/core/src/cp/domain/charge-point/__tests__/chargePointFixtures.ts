@@ -1,4 +1,5 @@
-import { ChargePoint } from "../ChargePoint";
+import type { ChargePoint } from "../ChargePoint";
+import { createChargePoint } from "../../../infrastructure/charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../types/OcppTypes";
 import type { Database, SqlParam, SqlRow } from "../../persistence/Database";
 
@@ -14,7 +15,7 @@ export function makeChargePoint({
   database?: Database | null;
   connectorCount?: number;
 } = {}): ChargePoint {
-  return new ChargePoint(
+  return createChargePoint(
     id,
     DefaultBootNotification,
     connectorCount,

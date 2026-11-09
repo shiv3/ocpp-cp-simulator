@@ -10,7 +10,7 @@ import {
   isValidSecurityEventNotificationRequestV16,
   isValidSignCertificateRequestV16,
 } from "@ocpp-cp-simulator/ocpp/index";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import { startMockCsms } from "./mockCsms";
 import { canBindBunServe } from "../../../../test/bunServe";
@@ -96,7 +96,7 @@ describe.skipIf(!canBindBunServe())(
   () => {
     it("sends StartupOfTheDevice SecurityEventNotification only after BootNotification Accepted", async () => {
       const csms = startMockCsms();
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "CP016-SEC-BOOT",
         DefaultBootNotification,
         1,
@@ -128,7 +128,7 @@ describe.skipIf(!canBindBunServe())(
 
     it("sendSignCertificate sends a well-formed SignCertificate with a parseable CSR", async () => {
       const csms = startMockCsms();
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "CP016-SEC-CSR",
         DefaultBootNotification,
         1,
@@ -167,7 +167,7 @@ describe.skipIf(!canBindBunServe())(
 
     it("stores CertificateSigned certificate chains and responds Accepted", async () => {
       const csms = startMockCsms();
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "CP016-SEC-CERT",
         DefaultBootNotification,
         1,
@@ -216,7 +216,7 @@ describe.skipIf(!canBindBunServe())(
 
     it("with RSA quirk set: SignCertificate CSR has RSA public key and sha256WithRSAEncryption signature", async () => {
       const csms = startMockCsms();
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "CP016-SEC-CSR-RSA",
         DefaultBootNotification,
         1,
@@ -269,7 +269,7 @@ describe.skipIf(!canBindBunServe())(
 
     it("with CRLF quirk set: SignCertificate CSR PEM has CRLF line endings", async () => {
       const csms = startMockCsms();
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "CP016-SEC-CSR-CRLF",
         DefaultBootNotification,
         1,
@@ -318,7 +318,7 @@ describe.skipIf(!canBindBunServe())(
 
     it("quirks are sticky and survive multiple calls", async () => {
       const csms = startMockCsms();
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "CP016-SEC-CSR-STICKY",
         DefaultBootNotification,
         1,

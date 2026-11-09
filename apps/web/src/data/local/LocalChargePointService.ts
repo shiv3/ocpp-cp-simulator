@@ -35,11 +35,11 @@ import type {
 } from "@ocpp-cp-simulator/core/cp/domain/security/get15118EVCertificate";
 import { RpcFailure } from "@ocpp-cp-simulator/contracts/errors";
 import {
-  ChargePoint,
   PowerStateError,
   type PowerLossOptions,
   type PowerRestoreOptions,
 } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
+import { createChargePoint } from "@ocpp-cp-simulator/core/cp/infrastructure/charge-point/createChargePoint";
 import {
   splitStopReason,
   type MeterReadingContext,
@@ -48,7 +48,10 @@ import {
   type StopTransactionCommandOptions,
   type TransactionUpdateOptions,
 } from "@ocpp-cp-simulator/core/cp/domain/connector/Transaction";
-import type { AutoMeterValueSetting } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
+import type {
+  AutoMeterValueSetting,
+  ChargePoint,
+} from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
 import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
 import { resetSimulatorState } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/resetState";
 import type { ScenarioManager } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioManager";
@@ -121,7 +124,7 @@ import type { ScenarioRunResult } from "@ocpp-cp-simulator/core/cp/application/v
 import type {
   HistoryOptions,
   StateHistoryEntry,
-} from "@ocpp-cp-simulator/core/cp/application/services/StateSnapshot";
+} from "@ocpp-cp-simulator/core/cp/domain/services/StateSnapshot";
 import type {
   TimelinePage,
   TimelineQuery,
@@ -1661,7 +1664,7 @@ export class LocalChargePointService implements ChargePointService {
     definition: LocalChargePointDefinition,
   ): ChargePoint {
     assertBrowserLocalTlsSupported(definition);
-    const chargePoint = new ChargePoint(
+    const chargePoint = createChargePoint(
       definition.id,
       definition.bootNotification,
       definition.connectorNumber,

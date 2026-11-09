@@ -63,16 +63,18 @@ The store follows the layer direction of `packages/core/src/cp/`
 - **Ports, in `domain/persistence/`** — `Database` (the SQL handle that domain
   stores such as `CertificateStore` and `AuthorizationCache` write through),
   `ChargingSessionRepository`, `ConnectorRuntimeRepository` and
-  `EngineStateRepository`. `LogRepository`, a concrete class built by
-  `ChargePoint`, also sits there until
-  [#575](https://github.com/shiv3/ocpp-cp-simulator/issues/575).
+  `EngineStateRepository`, and `LogSink`, where a charge point persists its
+  log entries.
 - **Scenario ports, in `application/`** — `scenario/ScenarioRepository.ts` and
   `verification/ScenarioRunRepository.ts`; no domain code uses them.
 - **SQLite, in `infrastructure/persistence/`** — `BunSqliteDatabase` (the
   daemon's `bun:sqlite` handle), `schema.ts` with `migrations/`, the `Sqlite*`
   repositories and their `create*Repository` factories,
   `BlueprintRepository`, `FleetTemplateRepository`,
-  `VehicleProfileRepository`, `upsert.ts` and `resetState.ts`.
+  `VehicleProfileRepository`, `upsert.ts`, `resetState.ts` and
+  `LogRepository`, the default `LogSink`: `createChargePoint` builds one per
+  charge point over its database
+  ([#575](https://github.com/shiv3/ocpp-cp-simulator/issues/575)).
 
 The browser's `Database` is `SqlJsDatabase`, in `apps/web/src/data/sqlite/`.
 

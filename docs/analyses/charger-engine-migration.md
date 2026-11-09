@@ -20,7 +20,7 @@ related:
   - ../concepts/scenario-format.md
   - ../entities/cli.md
   - ../sources/bench-readme.md
-updated: 2026-11-08
+updated: 2026-11-09
 ---
 
 # Charger engine: migration history
@@ -195,8 +195,9 @@ design left open:
   file name, then `Uploading` and `Uploaded` or `UploadFailed` around a real multipart POST) and
   `default.logs` (`GetLog`: the 1.6 `Uploading`, two seconds, `Uploaded` sequence; on 2.x, since #601, `Uploading` and
   `Uploaded` after the file name and `AcceptedCanceled` for a replaced upload; `auto: false` is the former
-  ack-only). The diagnostics behavior imports `infrastructure/fileUpload`, the one
-  place where `application/` reaches into `infrastructure/`; the upload is platform I/O the engine does not
+  ack-only). The diagnostics behavior uploads through the charge point's injected
+  `fileUploader` (by default `infrastructure/fileUpload`'s `UploadFile`,
+  [#575](https://github.com/shiv3/ocpp-cp-simulator/issues/575)); the upload is platform I/O the engine does not
   own, and `default.reset` (`Reset`: the 1.6 `Accepted` and reset after the answer; the 2.x
   `Rejected` / `Scheduled` / `Accepted` rules and the reset after the answer; since the merge of #635 an `OnIdle`
   reset answered `Scheduled` is queued on the `ChargePoint` once the answer settled and runs when the last
@@ -306,7 +307,8 @@ transactions, persistence and resume. Decisions the design left open:
   its public API), and answers `RemoteStartTransaction`, `RemoteStopTransaction` (1.6) and
   `RequestStartTransaction`, `RequestStopTransaction` (2.x) with the `AuthorizeRemoteTxRequests` and scenario
   delegation behavior of before. The handlers translate. `ChargePoint` hands the module a `TransactionPorts`
-  (`sendTransactionEvent`, `startConnectionTimeout`) for the two things it keeps private. Meter value
+  (`sendTransactionEvent`, `startConnectionTimeout`) for the two things it keeps private; since #575 the type
+  is in `domain/engine/` and `ChargePoint` reaches the module through the `transactions` port of its deps. Meter value
   calculation (`Connector`, `MeterValueBuilder`) and charging profile resolution (`clearChargingProfiles`)
   stay services.
 - **The scenario registry stays.** `_scenarioHandledConnectors`, `_scenarioStopHandledConnectors`,

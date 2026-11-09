@@ -5,6 +5,7 @@ import {
   runBehavior,
   type BehaviorRun,
 } from "../../packages/core/src/test/behavior/runBehavior";
+import type { ChargerEngine } from "../../packages/core/src/cp/application/engine/ChargerEngine";
 import { flakyFirmware } from "./flaky-firmware";
 
 let runs: BehaviorRun[] = [];
@@ -77,7 +78,9 @@ describe("flaky-firmware", () => {
 
   test("keeps its count in ctx.state, which the engine holds", async () => {
     const run = await update("seed-1");
-    expect(run.cp.engine.snapshot().behaviors["flaky-firmware"]).toMatchObject({
+    expect(
+      (run.cp.engine as ChargerEngine).snapshot().behaviors["flaky-firmware"],
+    ).toMatchObject({
       attempts: 1,
     });
   });

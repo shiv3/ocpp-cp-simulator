@@ -6,6 +6,9 @@ sources:
   - packages/core/src/cp/application/engine/ChargerEngine.ts
   - packages/core/src/cp/application/engine/ChargerState.ts
   - packages/core/src/cp/application/behavior/BehaviorRegistry.ts
+  - packages/core/src/cp/domain/engine/ChargerState.ts
+  - packages/core/src/cp/domain/engine/behaviorRules.ts
+  - packages/core/src/cp/domain/engine/ChargePointEngine.ts
   - packages/core/src/cp/infrastructure/transport/inbound/CallExchange.ts
   - packages/core/src/cp/infrastructure/transport/inbound/InboundCallGate.ts
   - packages/core/src/cp/shared/clock.ts
@@ -314,7 +317,9 @@ One per charge point (`application/behavior/`). It holds rules from two provider
 (`{ kind: "code", behaviorId }`) and scenario rules (`{ kind: "scenario", scenarioId, connectorId, nodeId }`)
 — and selects among them as [call precedence](call-precedence.md) says: scenario before code, then the exact
 connector, then the newest scenario / the first-loaded code rule. A rule holds at most one open exchange. Scenario
-rules end with their run (released by owner); code rules last while the behavior is loaded.
+rules end with their run (released by owner); code rules last while the behavior is loaded. The rule types
+(`RuleOwner`, `BehaviorRule`, `BehaviorResolution`, …) are in `domain/engine/behaviorRules.ts`, and `ChargePoint`
+and the inbound gate see the registry through the domain interface `ChargePointBehaviorRegistry` (#575).
 
 ### Scenario schema 1.5
 
@@ -364,7 +369,10 @@ rule is enforced by `scripts/check-single-writer.ts` (in `check:boundaries`); it
 (an alias passed through a function or property, `eval`, a connector reached through a parameter or `this`, the
 import closure outside the scanned directories) are accepted: the golden wire test is what catches the rest.
 
-`ChargePoint` remains the facade with its public API; `Connector` fields are read views of the engine state. The
+`ChargePoint` remains the facade with its public API; `Connector` fields are read views of the engine state.
+`ChargePoint` holds its engine as the domain interface `ChargePointEngine` (`domain/engine/`, where `ChargerState`,
+`EngineEvent` and `PersistedEngineState` are also defined) and builds it through `deps.createEngine`, which the
+composition root binds to `ChargerEngine` (#575). The
 transition table `ALLOWED_CONNECTOR_STATUS_TRANSITIONS` (`domain/connector/ConnectorTransitions.ts`) is
 the 53 transitions of the OCPP 1.6 section 4.9 table (cell codes A2…I8 in the source, checked cell by cell in
 `ConnectorTransitions.test.ts`; B6 comes from errata v3.0, I1–I8 mean a resolved fault returns to the pre-fault

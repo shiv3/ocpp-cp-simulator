@@ -9,7 +9,8 @@ import {
   type MockCsms,
   type OcppFrame,
 } from "./mockCsms";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import {
   DefaultBootNotification,
   OCPPStatus,
@@ -132,7 +133,7 @@ function attachConnectorRuntimePersistence(
 describe("OCPP 2.0.1 transaction events", () => {
   it("sends TransactionEvent and MeterValues with stable transaction id and numeric values", async () => {
     const csms = startMockCsms({ answerCalls: true });
-    const cp = new ChargePoint(
+    const cp = createChargePoint(
       "CP201-TX",
       DefaultBootNotification,
       1,
@@ -248,7 +249,7 @@ describe("OCPP 2.0.1 transaction events", () => {
 
   it("sends TransactionEvent Updated when active chargingState changes", async () => {
     const csms = startMockCsms({ answerCalls: true });
-    const cp = new ChargePoint(
+    const cp = createChargePoint(
       "CP201-TX-CHARGING-STATE",
       DefaultBootNotification,
       1,
@@ -424,7 +425,7 @@ describe("OCPP 2.0.1 transaction events", () => {
 
   it("resets TransactionEvent seqNo for each new transaction", async () => {
     const csms = startMockCsms({ answerCalls: true });
-    const cp = new ChargePoint(
+    const cp = createChargePoint(
       "CP201-TX-SEQ",
       DefaultBootNotification,
       1,
@@ -501,7 +502,7 @@ describe("OCPP 2.0.1 transaction events", () => {
 
   it("keeps persisted transaction id when stopping after handler restart", async () => {
     const csms = startMockCsms({ answerCalls: true });
-    const cp = new ChargePoint(
+    const cp = createChargePoint(
       "CP201-TX-RESTORE",
       DefaultBootNotification,
       1,
@@ -591,7 +592,7 @@ describe("OCPP 2.0.1 transaction events", () => {
     const repo = new SqliteConnectorRuntimeRepository(db);
     const cpId = "CP201-TX-CHARGING-STATE-RESTART";
     const makeCp = () => {
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         cpId,
         DefaultBootNotification,
         1,

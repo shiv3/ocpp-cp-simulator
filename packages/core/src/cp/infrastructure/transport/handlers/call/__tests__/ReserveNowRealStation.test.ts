@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { ReserveNowHandler } from "../ReservationHandlers";
 import type { HandlerContext } from "../../MessageHandlerRegistry";
-import { ChargePoint } from "../../../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../../../charge-point/createChargePoint";
 import {
   DefaultBootNotification,
   OCPPStatus,
@@ -12,7 +12,7 @@ import {
  * by reservationId, and the opt-in idTag authorization, over a real station.
  */
 function setup(options: { authorize?: boolean; connectors?: number } = {}) {
-  const chargePoint = new ChargePoint(
+  const chargePoint = createChargePoint(
     "CP-RES-595",
     DefaultBootNotification,
     options.connectors ?? 2,

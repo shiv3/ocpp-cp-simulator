@@ -4,7 +4,7 @@ import { OCPPMessageHandler } from "../OCPPMessageHandler";
 import type { OCPPWebSocket } from "../OCPPWebSocket";
 import type { ProtocolCodec } from "../profile/ProtocolProfile";
 import { outgoingV16Warning } from "../codec/validateV16";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import {
   DefaultBootNotification,
   OCPPAction,
@@ -28,7 +28,7 @@ type IncomingMessageHandler = (
 const NO_HANDLER = "No handler for action result";
 
 function harness() {
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     "CP-407",
     DefaultBootNotification,
     1,

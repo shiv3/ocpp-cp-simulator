@@ -3,7 +3,7 @@ import type { NotifyReportRequestV201 } from "@ocpp-cp-simulator/ocpp/index";
 import type { ReportDataType } from "@ocpp-cp-simulator/ocpp/types/v201/notify-report";
 import { isValidNotifyReportRequestV201 } from "@ocpp-cp-simulator/ocpp/v201/index";
 import { startMockCsms, normalizeTranscript } from "./mockCsms";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 
 function reportDatum(
@@ -27,7 +27,7 @@ function reportDatum(
 describe("OCPP 2.0.1 GetBaseReport", () => {
   it("answers Accepted and sends one NotifyReport with mapped configuration variables", async () => {
     const csms = startMockCsms();
-    const cp = new ChargePoint(
+    const cp = createChargePoint(
       "CP201-BASE-REPORT",
       DefaultBootNotification,
       1,

@@ -11,7 +11,7 @@
  * rules are documented in `docs/concepts/operational-timeline.md`.
  */
 
-import { selectLogWindow, type LogWindowOptions } from "../../shared/window";
+import { selectLogWindow } from "../../shared/window";
 import {
   TIMELINE_DEFAULT_CAPACITY,
   TIMELINE_FORMAT_VERSION,
@@ -19,53 +19,24 @@ import {
 } from "@ocpp-cp-simulator/contracts/timeline";
 import { realClock } from "../../shared/clock";
 import type { SimClock } from "../../shared/clock";
+import type {
+  ChargePointTimeline,
+  TimelineEntry,
+  TimelinePage,
+  TimelineQuery,
+  TimelineRecord,
+} from "../../domain/services/ChargePointTimeline";
 
 // Defined in `packages/contracts/src` (#578); re-exported for the existing import sites.
 export { TIMELINE_DEFAULT_CAPACITY, TIMELINE_FORMAT_VERSION, TIMELINE_KINDS };
 
-export type TimelineKind = (typeof TIMELINE_KINDS)[number];
-
-export interface TimelineEntry {
-  /** Per-charge-point, strictly increasing; the ordering contract. */
-  readonly seq: number;
-  /** ISO 8601, UTC. Several entries may share a millisecond. */
-  readonly timestamp: string;
-  readonly kind: TimelineKind;
-  readonly cpId: string;
-  readonly connectorId?: number;
-  readonly runId?: string;
-  readonly incidentId?: string;
-  /** Human-readable; not a contract. */
-  readonly summary: string;
-  /** Kind-specific, machine-readable fields. */
-  readonly data: Readonly<Record<string, unknown>>;
-}
-
-export interface TimelineRecord {
-  kind: TimelineKind;
-  summary: string;
-  connectorId?: number;
-  runId?: string;
-  data?: Record<string, unknown>;
-  /** Epoch ms to stamp the entry with, when the caller already read the
-   *  clock for its data (a duration); defaults to `now()`. */
-  at?: number;
-}
-
-/** Exact-match filters, then the `logs.get` window over the matching
- *  entries (`limit` = newest N, `offset` pages back, `order`). */
-export interface TimelineQuery extends LogWindowOptions {
-  connectorId?: number;
-  runId?: string;
-  incidentId?: string;
-  kinds?: TimelineKind[];
-}
-
-export interface TimelinePage {
-  entries: TimelineEntry[];
-  /** Matching entries before windowing. */
-  total: number;
-}
+// Defined in domain (#575); re-exported for the existing import sites.
+export type {
+  TimelineEntry,
+  TimelineKind,
+  TimelinePage,
+  TimelineQuery,
+} from "../../domain/services/ChargePointTimeline";
 
 export interface OperationalTimelineOptions {
   capacity?: number;
@@ -75,7 +46,7 @@ export interface OperationalTimelineOptions {
   clock?: SimClock;
 }
 
-export class OperationalTimeline {
+export class OperationalTimeline implements ChargePointTimeline {
   private readonly entries: TimelineEntry[] = [];
   /** Runs in progress per connector, oldest first. */
   private readonly activeRuns = new Map<number, string[]>();

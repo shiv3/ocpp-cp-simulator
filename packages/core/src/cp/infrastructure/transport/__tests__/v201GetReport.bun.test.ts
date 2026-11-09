@@ -3,7 +3,7 @@ import type {
   GetReportRequestV201,
   NotifyReportRequestV201,
 } from "@ocpp-cp-simulator/ocpp/index";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
 
@@ -75,7 +75,7 @@ function notifyReportPayload(frame: OcppFrame): NotifyReportRequestV201 {
 describe("OCPP 2.0.1 GetReport", () => {
   it("answers over the device-model and filters by componentVariable", async () => {
     const csms = startMockCsms({ answerCalls: true });
-    const cp = new ChargePoint(
+    const cp = createChargePoint(
       "CP201-GET-REPORT",
       DefaultBootNotification,
       1,

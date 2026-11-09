@@ -4,6 +4,7 @@
 // only (the fake CSMS uses Bun.serve).
 import { createHash } from "node:crypto";
 import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
+import type { ChargerEngine } from "../../cp/application/engine/ChargerEngine";
 import type { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
 import { drainMicrotasks, VirtualClock } from "../../cp/shared/clock";
 import type {
@@ -103,7 +104,7 @@ export async function runBehavior(
   // the test here; the daemon only warns and keeps the last storable value.
   const settle = async (): Promise<void> => {
     await settleOnce();
-    cp.engine.assertStorableState();
+    (cp.engine as ChargerEngine).assertStorableState();
   };
   // A failed run returns no `dispose()`, so a boot, a refused behavior or a
   // first settle that throws tears the rig down here: otherwise the station

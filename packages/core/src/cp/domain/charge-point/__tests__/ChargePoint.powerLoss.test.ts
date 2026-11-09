@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChargePoint, PowerStateError } from "../ChargePoint";
+import type { ChargePoint } from "../ChargePoint";
+import { PowerStateError } from "../ChargePoint";
+import { createChargePoint } from "../../../infrastructure/charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../types/OcppTypes";
 import { OCPPStatus } from "../../types/OcppTypes";
 
@@ -12,7 +14,7 @@ import { OCPPStatus } from "../../types/OcppTypes";
 const built: ChargePoint[] = [];
 
 function build(version: string): ChargePoint {
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     "cp-455",
     DefaultBootNotification,
     1,

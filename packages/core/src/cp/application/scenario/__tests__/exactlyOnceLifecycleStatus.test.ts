@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { ScenarioExecutor } from "../ScenarioExecutor";
 import { createScenarioExecutorCallbacks } from "../ScenarioRuntime";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../../infrastructure/charge-point/createChargePoint";
 import {
   DefaultBootNotification,
   OCPPStatus,
@@ -54,7 +55,7 @@ async function waitUntil(predicate: () => boolean, ms = 500): Promise<void> {
 function newChargePoint(id: string): ChargePoint {
   // No real transport connection is ever attempted (unused local port) —
   // matches the pattern used throughout packages/core/src/cp/application/scenario/__tests__.
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     id,
     DefaultBootNotification,
     1,

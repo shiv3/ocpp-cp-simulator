@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../../../infrastructure/charge-point/createChargePoint";
 import {
   DefaultBootNotification,
   OCPPStatus,
@@ -8,7 +9,7 @@ import {
 import { decideRemoteStart } from "../remoteStartValidation";
 
 function station(): ChargePoint {
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     "CP-RS",
     DefaultBootNotification,
     2,

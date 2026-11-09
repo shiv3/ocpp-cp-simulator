@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { createScenarioExecutorCallbacks } from "../ScenarioRuntime";
 import { cancelIfCancellable } from "../cancellable";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../../infrastructure/charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import { RemoteStartTransactionHandler } from "../../../infrastructure/transport/handlers/call/RemoteStartTransactionHandler";
 import { RemoteStopTransactionHandler } from "../../../infrastructure/transport/handlers/call/RemoteStopTransactionHandler";
@@ -27,7 +28,7 @@ import type { HandlerContext } from "../../../infrastructure/transport/handlers/
 function newChargePoint(id: string): ChargePoint {
   // wsUrl points at an unused local port — no real transport connection is
   // ever attempted, matching the pattern used by cert16RemoteStart.test.ts.
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     id,
     DefaultBootNotification,
     1,

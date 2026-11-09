@@ -182,6 +182,10 @@ export type GraphIssueCode =
    *  picks (none, `case-N` beyond its cases, `option-N` beyond its options):
    *  it is never followed. */
   | "unpickableHandle"
+  /** A switch / choice has several edges with one `sourceHandle` it picks:
+   *  only the first (file order) runs, so each later one is never followed.
+   *  Reported per later edge, with `data.handle`. */
+  | "duplicateHandle"
   /** An edge's source or target is not a node of the scenario. */
   | "danglingEdge"
   /** No path from START reaches the node: it never runs. */

@@ -167,6 +167,7 @@
   "scenarios.editor.issue.edgeOutOfEnd": "An edge leaves an End node; it is never followed.",
   "scenarios.editor.issue.extraOutgoing": "Step {{n}} ({{title}}) has several next steps, but only Start runs branches in parallel: at run time only the first one runs.",
   "scenarios.editor.issue.unpickableHandle": "Step {{n}} ({{title}}) has an edge it never takes: its handle is none of the cases or options the step can pick, so the edge is never followed.",
+  "scenarios.editor.issue.duplicateHandle": "Step {{n}} ({{title}}) has several edges with the handle {{handle}}: only the first one runs, so the others are never followed.",
   "scenarios.editor.issue.danglingEdge": "An edge points at a step that does not exist; that branch ends there.",
   "scenarios.editor.issue.unreachable": "Step {{n}} ({{title}}) is not reached from Start, so it never runs.",
   "scenarios.templateBrowser.previewLabel": "Preview of {{name}}",

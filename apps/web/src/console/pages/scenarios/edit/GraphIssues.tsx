@@ -33,6 +33,7 @@ const GraphIssues: React.FC<{
     return t(`scenarios.editor.issue.${issue.code}`, {
       n,
       title: node ? nodeTitle(node) : "",
+      handle: String(issue.data?.handle ?? ""),
     });
   };
 

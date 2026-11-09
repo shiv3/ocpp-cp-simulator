@@ -162,6 +162,7 @@
   "scenarios.editor.issue.edgeOutOfEnd": "End から出るエッジがあります。辿られません。",
   "scenarios.editor.issue.extraOutgoing": "ステップ {{n}}({{title}})の次のステップが複数ありますが、並列に分岐できるのは Start だけです。実行時は最初の1つしか動きません。",
   "scenarios.editor.issue.unpickableHandle": "ステップ {{n}}({{title}})に、選ばれることのないエッジがあります。ハンドルがこのステップの選べるケース/オプションのどれでもないため、辿られません。",
+  "scenarios.editor.issue.duplicateHandle": "ステップ {{n}}({{title}})にハンドル {{handle}} のエッジが複数あります。実行されるのは最初の1つだけで、残りは辿られません。",
   "scenarios.editor.issue.danglingEdge": "存在しないステップを指すエッジがあります。その枝はそこで終わります。",
   "scenarios.editor.issue.unreachable": "ステップ {{n}}({{title}})は Start から到達できないため、実行されません。",
   "scenarios.templateBrowser.previewLabel": "{{name}} のプレビュー",

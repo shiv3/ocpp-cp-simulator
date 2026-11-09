@@ -67,6 +67,8 @@ export function useIndexedLanes<T>({
     return (
       <InlineConfirm
         danger
+        // Narrow beside the steps: the question on its own line.
+        className="[&>span]:basis-full"
         message={t("scenarioEditor.list.removeWithLane", {
           name: `${prefix}-${index}`,
           target: laneText(t, target),

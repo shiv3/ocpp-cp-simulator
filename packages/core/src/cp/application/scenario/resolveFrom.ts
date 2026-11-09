@@ -26,13 +26,15 @@ export function isFromReference(value: unknown): value is { $from: string } {
   );
 }
 
-/** Whether `value` holds a `{ "$from": … }` anywhere {@link resolveFromExchange}
- *  would resolve it, i.e. whether resolving it needs a CALL. */
-export function containsFromReference(value: unknown): boolean {
-  if (isFromReference(value)) return true;
-  if (Array.isArray(value)) return value.some(containsFromReference);
+/** Whether `value` holds a `{ "$from": "call.…" }` anywhere
+ *  {@link resolveFromExchange} would resolve it, i.e. whether resolving it
+ *  needs the CALL the branch took over. The other roots (`charger`,
+ *  `connector`, `state`) read the station or the run and need no CALL. */
+export function containsCallReference(value: unknown): boolean {
+  if (isFromReference(value)) return value.$from.split(".")[0] === "call";
+  if (Array.isArray(value)) return value.some(containsCallReference);
   if (typeof value === "object" && value !== null) {
-    return Object.values(value).some(containsFromReference);
+    return Object.values(value).some(containsCallReference);
   }
   return false;
 }

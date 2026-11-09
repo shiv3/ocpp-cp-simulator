@@ -302,3 +302,71 @@ describe("validateScenarioGraph: the CALL a branch holds", () => {
     ).toEqual(["extraOutgoing", "callLeftOpen"]);
   });
 });
+
+describe("validateScenarioGraph: decision nodes and the roots of $from (schema 1.6)", () => {
+  it("lets a switch or choice leave by several edges: one per handle", () => {
+    const nodes = [
+      node("s", "start"),
+      node("sw", "switch"),
+      node("a"),
+      node("b"),
+      node("e", "end"),
+    ];
+    const edges = [
+      edge("s", "sw"),
+      edge("sw", "a"),
+      edge("sw", "b"),
+      edge("a", "e"),
+      edge("b", "e"),
+    ];
+    expect(codes({ nodes, edges })).toEqual([]);
+    expect(connectionRule("switch").out).toBe("select");
+    expect(connectionRule("choice").out).toBe("select");
+    // A plain step with the same shape still half runs.
+    expect(
+      codes({
+        nodes: nodes.map((n) => (n.id === "sw" ? node("sw") : n)),
+        edges,
+      }),
+    ).toEqual(["extraOutgoing"]);
+  });
+
+  it("follows every edge of a switch when it checks the CALL", () => {
+    const nodes = [
+      node("s", "start"),
+      node("sw", "switch"),
+      node("ok", "callResponse", { kind: "result" }),
+      node("other"),
+    ];
+    // Both handles lead on without a CALL: the callResponse one cannot run.
+    expect(
+      codes({
+        nodes,
+        edges: [edge("s", "sw"), edge("sw", "ok"), edge("sw", "other")],
+      }),
+    ).toEqual(["noCallHeld"]);
+  });
+
+  it("notify and setState are plain steps", () => {
+    expect(connectionRule("notify").out).toBe("next");
+    expect(connectionRule("setState").out).toBe("next");
+    expect(connectionRule("notify").call(undefined)).toBe("none");
+  });
+
+  it("only a $from on the call root needs the CALL", () => {
+    const read = (path: string) =>
+      node("c", "ocppCall", {
+        action: "DataTransfer",
+        payload: { x: { $from: path } },
+      });
+    const run = (path: string) =>
+      codes({
+        nodes: [node("s", "start"), read(path)],
+        edges: [edge("s", "c")],
+      });
+    expect(run("call.payload.requestId")).toEqual(["noCallHeld"]);
+    expect(run("state.attempts")).toEqual([]);
+    expect(run("charger.status")).toEqual([]);
+    expect(run("connector.transactionId")).toEqual([]);
+  });
+});

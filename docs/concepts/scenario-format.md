@@ -460,26 +460,27 @@ console's editor lists the issues above the steps and never blocks Save.
 
 Two kinds of rule are real. **How a node is left** (`out`):
 
-| Node type   | `out`      | What the executor does                                                          |
-| ----------- | ---------- | ------------------------------------------------------------------------------- |
-| `start`     | `parallel` | every outgoing edge becomes a branch, each with its own CALL slot               |
-| `end`       | `none`     | the branch stops; an edge out of it is never followed                           |
-| every other | `next`     | the first edge to an existing node is followed; with more, the rest are ignored |
+| Node type                                               | `out`      | What the executor does                                                                                                                             |
+| ------------------------------------------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `start`                                                 | `parallel` | every outgoing edge becomes a branch, each with its own CALL slot                                                                                  |
+| `end`                                                   | `none`     | the branch stops; an edge out of it is never followed                                                                                              |
+| `switch`, `choice` ([schema 1.6](#the-schema-16-nodes)) | `select`   | the node picks one `sourceHandle` (`case-N` / `default`, `option-N`) and only the edges with it are followed: several outgoing edges are the point |
+| every other                                             | `next`     | the first edge to an existing node is followed; with more, the rest are ignored                                                                    |
 
 **The CALL a branch holds** (`call`, [schema 1.5](#csmscalltrigger-replace-callresponse-from-and-usebehavior-schema-15)),
 the one place where one node type must come before another on the path:
 
-| Node                                       | `call`      | Needs                                                    |
-| ------------------------------------------ | ----------- | -------------------------------------------------------- |
-| `csmsCallTrigger` with `behavior: replace` | `takesOver` | nothing; the branch now holds a new, unanswered CALL     |
-| `callResponse`                             | `answers`   | an unanswered CALL taken over earlier in the branch      |
-| `ocppCall` whose `payload` has a `$from`   | `reads`     | a CALL taken over earlier in the branch, answered or not |
-| everything else                            | `none`      | —                                                        |
+| Node                                                        | `call`      | Needs                                                                                                                                                 |
+| ----------------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `csmsCallTrigger` with `behavior: replace`                  | `takesOver` | nothing; the branch now holds a new, unanswered CALL                                                                                                  |
+| `callResponse`                                              | `answers`   | an unanswered CALL taken over earlier in the branch                                                                                                   |
+| `ocppCall` whose `payload` has a `$from` on the `call` root | `reads`     | a CALL taken over earlier in the branch, answered or not (a `$from` on `charger`, `connector` or `state` reads the station or the run and needs none) |
+| everything else                                             | `none`      | —                                                                                                                                                     |
 
 `validateScenarioGraph` reports `missingStart` (error: the run throws "No
 start node found"), `multipleStart`, `edgeOutOfEnd`, `extraOutgoing` (a fork
 anywhere but Start), `danglingEdge`, `unreachable` (no path from Start), and,
-following the CALL along the edges the executor really takes:
+following the CALL along the edges the executor really takes (all edges of a `select` node):
 
 - `noCallHeld` (error) — a `callResponse`, or an `ocppCall` with `$from`, on a
   path whose branch holds no CALL: right after Start, after an `observe`

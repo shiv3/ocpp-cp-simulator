@@ -34,15 +34,18 @@ import {
   type CsmsCallTriggerNodeData,
   type OcppCallNodeData,
 } from "../cp/application/scenario/ScenarioTypes";
-import { containsFromReference } from "../cp/application/scenario/resolveFrom";
+import { containsCallReference } from "../cp/application/scenario/resolveFrom";
 
 /**
  * How the executor leaves a node once it ran:
  * - `parallel`: every outgoing edge, each as its own branch (Start only);
  * - `next`: the first edge to an existing node, the rest are ignored;
+ * - `select`: the node picked one `sourceHandle` (`switch`: `case-N` /
+ *   `default`; `choice`: `option-N`) and the branch goes on along the edges
+ *   with that handle only, so several outgoing edges are the point;
  * - `none`: the branch ends here.
  */
-export type OutEdges = "parallel" | "next" | "none";
+export type OutEdges = "parallel" | "next" | "select" | "none";
 
 /**
  * What a node does to the CALL its branch holds (schema 1.5, #566):
@@ -107,6 +110,14 @@ export const CONNECTION_RULES: ConnectionRuleTable = {
   [ScenarioNodeType.INBOUND_POLICY]: step,
   [ScenarioNodeType.CERT_QUIRKS]: step,
   [ScenarioNodeType.USE_BEHAVIOR]: step,
+  // Schema 1.6 (#654): fire-and-forget notification, a store into the run's
+  // state; neither touches the branch's CALL.
+  [ScenarioNodeType.NOTIFY]: step,
+  [ScenarioNodeType.SET_STATE]: step,
+  // executeSequentialFlow: flow.handle set by executeSwitch / executeChoice
+  // filters the outgoing edges by sourceHandle.
+  [ScenarioNodeType.SWITCH]: { out: "select", call: noCall },
+  [ScenarioNodeType.CHOICE]: { out: "select", call: noCall },
   // executeCsmsCallTrigger: with behavior "replace" sets flow.exchange.
   [ScenarioNodeType.CSMS_CALL_TRIGGER]: {
     out: "next",
@@ -117,7 +128,7 @@ export const CONNECTION_RULES: ConnectionRuleTable = {
   // executeOcppCall → resolveFromExchange: a $from without a CALL throws.
   [ScenarioNodeType.OCPP_CALL]: {
     out: "next",
-    call: (data) => (containsFromReference(data?.payload) ? "reads" : "none"),
+    call: (data) => (containsCallReference(data?.payload) ? "reads" : "none"),
   },
 };
 
@@ -261,6 +272,7 @@ export function validateScenarioGraph(def: {
   for (const [nodeId, edges] of outgoing) {
     const node = nodesById.get(nodeId)!;
     if (starts.includes(node)) continue; // fans out, or reported as multipleStart
+    if (connectionRule(node.type).out === "select") continue; // one per handle
     if (edges.length > 1) {
       issues.push({ code: "extraOutgoing", nodeId, severity: "warning" });
     }
@@ -355,9 +367,12 @@ function checkCalls(
     }
     if (after === null) continue;
     // Re-entering the origin runs it as a step (executeSequentialFlow).
-    const next = endsBranch(node) ? undefined : outgoing.get(node.id)?.[0];
-    if (next) enter(next.target, after);
-    else leftOpen(after);
+    // A switch or choice may take any of its edges: follow them all.
+    const edges = endsBranch(node) ? [] : (outgoing.get(node.id) ?? []);
+    const followed =
+      connectionRule(node.type).out === "select" ? edges : edges.slice(0, 1);
+    for (const edge of followed) enter(edge.target, after);
+    if (followed.length === 0) leftOpen(after);
   }
 
   return [...found.values()];

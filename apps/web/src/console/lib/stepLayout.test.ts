@@ -256,6 +256,29 @@ describe("deriveStepLayout", () => {
     ).toBe(false);
   });
 
+  it("a scenario whose edges are picked by handle (switch, choice) is unsupported", () => {
+    const layout = deriveStepLayout(
+      def(
+        [start(), node("sw"), node("a"), end()],
+        [
+          ["start", "sw"],
+          ["sw", "a"],
+          ["a", "end"],
+        ],
+      ),
+    );
+    expect(layout.supported).toBe(true);
+    const handled = deriveStepLayout({
+      nodes: [start(), node("sw"), node("a"), end()],
+      edges: [
+        { id: "e1", source: "start", target: "sw" },
+        { id: "e2", source: "sw", target: "a", sourceHandle: "case-0" },
+        { id: "e3", source: "a", target: "end" },
+      ],
+    });
+    expect(handled.supported).toBe(false);
+  });
+
   it("a second fork (nested) is unsupported", () => {
     const layout = deriveStepLayout(
       def(

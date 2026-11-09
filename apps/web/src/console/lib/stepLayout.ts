@@ -89,6 +89,11 @@ export function deriveStepLayout(
     else outgoing.set(edge.source, [edge]);
   }
 
+  // An edge picked by its handle (a switch or choice, schema 1.6) means
+  // something the lanes cannot say: rebuilding the edges would drop the
+  // handle and change which branch runs. Keep such a scenario as it is.
+  if (def.edges.some((edge) => edge.sourceHandle != null)) return UNSUPPORTED;
+
   const start = def.nodes.find((n) => n.type === ScenarioNodeType.START);
   if (!start) return UNSUPPORTED;
 

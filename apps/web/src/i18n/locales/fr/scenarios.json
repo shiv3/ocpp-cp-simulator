@@ -188,7 +188,7 @@
   "scenarios.editor.afterStep": "Après cette étape",
   "scenarios.editor.endOfScenario": "Fin du scénario",
   "scenarios.editor.loopBackTo": "Retour à l’étape {{n}} · {{title}}",
-  "scenarios.editor.outlineOnlyNote": "Ce scénario a une forme que l’éditeur d’étapes ne sait pas dessiner (une seconde bifurcation ou une étape non atteinte). Ses étapes sont listées dans l’ordre d’exécution ; vous pouvez modifier leurs réglages, pas leurs liens.",
+  "scenarios.editor.outlineOnlyNote": "Ce scénario n’a pas de nœud Start : l’éditeur d’étapes ne sait pas le dessiner. Ses étapes sont listées en suivant leurs liens ; vous pouvez modifier leurs réglages, pas leurs liens.",
   "scenarios.editor.issue.missingStart": "Ce scénario n’a pas de nœud Start : il ne peut pas s’exécuter.",
   "scenarios.editor.issue.multipleStart": "Il y a plusieurs nœuds Start : seul le premier lance l’exécution. Un autre Start ne s’exécute comme une étape ordinaire que si un lien y mène.",
   "scenarios.editor.issue.edgeIntoStart": "Un lien revient vers Start. Il est suivi, mais l’exécution continue alors par la première branche de Start seulement ; les branches parallèles ne démarrent qu’au début de l’exécution.",
@@ -221,5 +221,13 @@
   "scenarios.editor.marks.info_one": "{{count}} remarque",
   "scenarios.editor.marks.info_many": "{{count}} remarques",
   "scenarios.editor.marks.info_other": "{{count}} remarques",
-  "scenarios.editor.marks.onEdge": "Sur un lien partant de cette étape : {{message}}"
+  "scenarios.editor.marks.onEdge": "Sur un lien partant de cette étape : {{message}}",
+  "scenarios.editor.addBranch": "Ajouter une branche",
+  "scenarios.editor.wrapInLoop": "Répéter de cette étape à la fin de sa voie",
+  "scenarios.editor.removeLaneConfirm_one": "Supprimer la branche {{lane}} et son étape ({{count}}) ?",
+  "scenarios.editor.removeLaneConfirm_other": "Supprimer la branche {{lane}} et ses {{count}} étapes ?",
+  "scenarios.editor.removeLaneConfirm_many": "Supprimer la branche {{lane}} et ses {{count}} étapes ?",
+  "scenarios.editor.remove": "Supprimer",
+  "scenarios.editor.refused": "Étape {{n}} : {{reason}}",
+  "scenarios.editor.dismiss": "Fermer"
 }

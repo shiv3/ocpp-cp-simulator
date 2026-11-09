@@ -15,11 +15,8 @@ import {
   type IssueMarks,
 } from "../../../lib/graphIssueMarks";
 import { outlineScenario } from "../../../lib/scenarioOutline";
-import {
-  drawnEdgeIds,
-  stepIndexOf,
-  type StepLayout,
-} from "../../../lib/stepLayout";
+import type { BlockTree } from "../../../lib/blockTree";
+import { isDrawableTree, stepNumbers } from "../../../lib/stepTree";
 import { nodeTitle } from "../run/stepVisuals";
 
 /*
@@ -172,15 +169,17 @@ export function useStepIssues(issues: ViewIssues | undefined) {
  */
 export function useDescribeIssue(
   scenario: Pick<ScenarioDefinition, "nodes" | "edges">,
-  layout: StepLayout | null,
+  tree: BlockTree | null,
 ): (issue: Diagnostic) => string {
   const { t } = useTranslation();
   return React.useMemo(() => {
-    const outline = layout?.supported ? null : outlineScenario(scenario);
+    const drawable = tree !== null && isDrawableTree(tree);
+    const numbers = drawable ? stepNumbers(tree) : null;
+    const outline = drawable ? null : outlineScenario(scenario);
     return (issue: Diagnostic) => {
       const node = scenario.nodes.find((n) => n.id === issue.nodeId);
       const n =
-        (layout?.supported && node ? stepIndexOf(layout, node.id) : null) ??
+        (node ? numbers?.get(node.id) : undefined) ??
         outline?.find((step) => step.node.id === node?.id)?.number ??
         "";
       return t(`scenarios.editor.issue.${issue.code}` as never, {
@@ -189,7 +188,7 @@ export function useDescribeIssue(
         handle: String(issue.data?.handle ?? ""),
       });
     };
-  }, [scenario, layout, t]);
+  }, [scenario, tree, t]);
 }
 
 const NO_SCENARIO = { nodes: [], edges: [] };
@@ -202,8 +201,10 @@ const NO_SCENARIO = { nodes: [], edges: [] };
  */
 export function useScenarioIssues(
   scenario: Pick<ScenarioDefinition, "nodes" | "edges"> | null,
-  layout: StepLayout | null,
+  tree: BlockTree | null,
   view: "graph" | "steps" | "outline",
+  /** The edges the Graph view draws (by id); null when it draws none. */
+  graphEdges: ReadonlySet<string> | null = null,
 ): {
   issues: readonly Diagnostic[];
   describe: (issue: Diagnostic) => string;
@@ -214,18 +215,16 @@ export function useScenarioIssues(
     () => (scenario ? validateScenarioGraph(scenario) : []),
     [scenario],
   );
-  const describe = useDescribeIssue(def, layout);
+  const describe = useDescribeIssue(def, tree);
   const marks = React.useMemo(
     () =>
       issueMarks(
         issues,
         def,
-        view === "graph" && layout?.supported
-          ? drawnEdgeIds(layout)
-          : new Set<string>(),
+        view === "graph" && graphEdges ? graphEdges : new Set<string>(),
         describe,
       ),
-    [issues, def, view, layout, describe],
+    [issues, def, view, graphEdges, describe],
   );
   return { issues, describe, marks };
 }

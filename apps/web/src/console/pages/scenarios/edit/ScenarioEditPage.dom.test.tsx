@@ -4,7 +4,7 @@ import type { Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { createEmptyScenario, insertStep } from "../../../lib/scenarioSteps";
-import { deriveStepLayout } from "../../../lib/stepLayout";
+import { recognizeBlockTree } from "../../../lib/blockTree";
 import {
   ScenarioNodeType,
   type DelayNodeData,
@@ -278,8 +278,8 @@ describe("ScenarioEditPage", () => {
     };
 
     await clickText("+ Add parallel branch");
-    // The chain forks at its last step; the new branch holds one Delay,
-    // selected in the inspector.
+    // START fans out: the chain is its first branch, the new branch holds
+    // one Delay, selected in the inspector.
     expect(
       container.querySelector('[data-testid="step-branches"]'),
     ).toBeTruthy();
@@ -303,12 +303,17 @@ describe("ScenarioEditPage", () => {
     await clickText("Save");
     await flush();
     const saved = saveScenarioDefinition.mock.calls[0][2];
-    const layout = deriveStepLayout(saved);
-    expect(layout.supported).toBe(true);
-    expect(layout.main).toHaveLength(2);
+    const fork = recognizeBlockTree(saved).root.blocks[0];
+    expect(fork?.kind === "fork" && fork.forkKind).toBe("start");
     expect(
-      layout.fork?.branches.map((b) => b.steps.map((n) => n.type)),
-    ).toEqual([[], [ScenarioNodeType.DELAY, ScenarioNodeType.METER_VALUE]]);
+      fork?.kind === "fork" &&
+        fork.lanes.map((l) =>
+          l.body.blocks.map((b) => (b.kind === "step" ? b.node.type : b.kind)),
+        ),
+    ).toEqual([
+      [ScenarioNodeType.STATUS_CHANGE, ScenarioNodeType.DELAY],
+      [ScenarioNodeType.DELAY, ScenarioNodeType.METER_VALUE],
+    ]);
   });
 
   it("catches a rejecting save, surfaces an error, and keeps the scenario dirty", async () => {
@@ -556,7 +561,7 @@ describe("ScenarioEditPage", () => {
     expect(container.textContent).not.toContain("+ branch");
   });
 
-  it("shows the loop in the Steps view and lets the last step's After-step select change it", async () => {
+  it("shows the loop in the Steps view; the back edge's After-step select is refused with the reason", async () => {
     const saveScenarioDefinition = vi.fn(
       async (_cp: string, _c: number | null, def: ScenarioDefinition) => def,
     );
@@ -594,12 +599,55 @@ describe("ScenarioEditPage", () => {
     const select = container.querySelector<HTMLSelectElement>(
       'select[aria-label="After this step"]',
     )!;
+    // It goes back to the loop's first step: jumping elsewhere would undo
+    // the loop (editCapabilities: insideLoop).
     expect(select.value).toBe("notification-heartbeat");
+    expect(select.disabled).toBe(true);
+    expect(select.title).toBe(
+      "This step goes back to the start of its loop; jumping elsewhere would undo the loop.",
+    );
+    expect(hasUnsavedChanges(container)).toBe(false);
+  });
+
+  it("the After-step select makes a lane's last step jump, through setLink", async () => {
+    const saveScenarioDefinition = vi.fn(
+      async (_cp: string, _c: number | null, def: ScenarioDefinition) => def,
+    );
+    const linear = linearFixture();
+    const service = createFakeChargePointService({
+      listScenarioDefinitions: vi.fn(async () => [linear]),
+      saveScenarioDefinition,
+    });
+    const { container, root } = await renderConsole(
+      "/scenarios/edit?cp=CP-1&connector=1&id=s1&view=steps",
+      { service },
+    );
+    cleanup = () => unmount(root);
+    await flush();
+    const delay = linear.nodes.find((n) => n.type === ScenarioNodeType.DELAY)!;
+    const status = linear.nodes.find(
+      (n) => n.type === ScenarioNodeType.STATUS_CHANGE,
+    )!;
     await act(async () => {
-      select.value = "";
+      container
+        .querySelector<HTMLButtonElement>(
+          `[data-step-id="${delay.id}"] button[aria-label^="Select step"]`,
+        )!
+        .click();
+    });
+    const select = container.querySelector<HTMLSelectElement>(
+      'select[aria-label="After this step"]',
+    )!;
+    expect(select.disabled).toBe(false);
+    expect(select.value).toBe("");
+    await act(async () => {
+      select.value = status.id;
       select.dispatchEvent(new Event("change", { bubbles: true }));
     });
-    expect(container.querySelector("[data-loop-block]")).toBeNull();
+    // Back to step 1: the two steps now loop.
+    expect(
+      container.querySelector(`[data-loop-block][data-loop-to="${status.id}"]`),
+    ).toBeTruthy();
     expect(hasUnsavedChanges(container)).toBe(true);
   });
 

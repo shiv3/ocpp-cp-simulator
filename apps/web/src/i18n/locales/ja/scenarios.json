@@ -178,7 +178,7 @@
   "scenarios.editor.afterStep": "このステップの後",
   "scenarios.editor.endOfScenario": "シナリオ終了",
   "scenarios.editor.loopBackTo": "ステップ {{n}} · {{title}} に戻る",
-  "scenarios.editor.outlineOnlyNote": "このシナリオは、ステップエディタで描けない形(2 つ目の分岐、またはどこからも到達しないステップ)です。ステップを実行順に並べています。各ステップの設定は編集できますが、つなぎ方は変更できません。",
+  "scenarios.editor.outlineOnlyNote": "このシナリオには Start ノードがないため、ステップエディタで描けません。ステップをエッジをたどる順に並べています。各ステップの設定は編集できますが、つなぎ方は変更できません。",
   "scenarios.editor.issue.missingStart": "Start ノードが無いため、このシナリオは実行できません。",
   "scenarios.editor.issue.multipleStart": "Start ノードが複数あります。実行を開始するのは最初の1つだけです。他の Start は、エッジで到達した場合にだけ通常のステップとして実行されます。",
   "scenarios.editor.issue.edgeIntoStart": "Start に戻るエッジがあります。辿られますが、その後は Start の最初の枝だけが進みます。並列の枝が始まるのは実行開始時だけです。",
@@ -205,5 +205,11 @@
   "scenarios.editor.marks.error_other": "エラー {{count}} 件",
   "scenarios.editor.marks.warning_other": "警告 {{count}} 件",
   "scenarios.editor.marks.info_other": "情報 {{count}} 件",
-  "scenarios.editor.marks.onEdge": "このステップから出るエッジ: {{message}}"
+  "scenarios.editor.marks.onEdge": "このステップから出るエッジ: {{message}}",
+  "scenarios.editor.addBranch": "分岐を追加",
+  "scenarios.editor.wrapInLoop": "このステップからレーンの最後までをくり返す",
+  "scenarios.editor.removeLaneConfirm_other": "分岐 {{lane}} とその {{count}} 個のステップを削除しますか？",
+  "scenarios.editor.remove": "削除",
+  "scenarios.editor.refused": "ステップ {{n}}: {{reason}}",
+  "scenarios.editor.dismiss": "閉じる"
 }

@@ -20,6 +20,7 @@ import type { ScenarioRunState } from "../../../lib/useScenarioRun";
 import { STEP_CATEGORIES, type StepLane } from "../../../lib/scenarioSteps";
 import { t } from "../../../../i18n";
 import type { ViewIssues } from "../edit/issueMarkUi";
+import type { BlockTree, SeqPath } from "../../../lib/blockTree";
 
 /** The registry title of a step's type ("Status Change"), as the editor's
  *  step list and the run timeline show it. */
@@ -103,8 +104,8 @@ export const CURRENT_CARD: Record<LiveRunState, string> = {
   stepping: "border-cx-purple ring-4 ring-cx-purple/15",
 };
 
-export interface StepRunViewProps {
-  layout: StepLayout;
+/** What both run views take, whatever they draw from. */
+export interface RunViewCommonProps {
   /** The run's position. Leave `state` out for a definition with no run (the
    *  Library's panel): the boxes then carry no phase at all. */
   currentNodeId?: string | null;
@@ -113,10 +114,24 @@ export interface StepRunViewProps {
   selectedStepId?: string | null;
   onSelectStep?: (nodeId: string) => void;
   /** The editor's views: each step gets an accessible "Select step" name,
-   *  `+` controls to add or insert a step, a way to add a parallel branch,
-   *  drag to reorder within a lane, and Alt+ArrowUp/Down / Delete on a
-   *  focused step. The run views leave it off. */
+   *  `+` controls to add or insert a step, a way to add a branch, drag to
+   *  reorder within a lane, and Alt+ArrowUp/Down / Delete on a focused
+   *  step. The run views leave it off. */
   editable?: boolean;
+  /** editable: move a step `delta` places within its lane (a drag, or
+   *  Alt+ArrowUp/Down). */
+  onMoveStep?: (nodeId: string, delta: number) => void;
+  /** editable: remove a step; `confirm` when it came from the keyboard, so
+   *  the editor asks first. */
+  onDeleteStep?: (nodeId: string, options: { confirm: boolean }) => void;
+  /** The scenario's diagnostics, marked on the steps (and, in the Graph
+   *  view, on the edges) they are about. */
+  issues?: ViewIssues;
+}
+
+/** The Graph view's props: the one-fork layout (`deriveStepLayout`). */
+export interface StepRunViewProps extends RunViewCommonProps {
+  layout: StepLayout;
   /** editable: a step type picked for `index` of `lane` (the lane's length
    *  appends). */
   onInsertStep?: (
@@ -124,17 +139,21 @@ export interface StepRunViewProps {
     index: number,
     type: ScenarioNodeType,
   ) => void;
-  /** editable: move a step `delta` places within its lane (a drag, or
-   *  Alt+ArrowUp/Down). */
-  onMoveStep?: (nodeId: string, delta: number) => void;
-  /** editable: remove a step; `confirm` when it came from the keyboard, so
-   *  the editor asks first. */
-  onDeleteStep?: (nodeId: string, options: { confirm: boolean }) => void;
   /** editable: add a parallel branch. */
   onAddBranch?: () => void;
-  /** The scenario's diagnostics, marked on the steps (and, in the Graph
-   *  view, on the edges) they are about. */
-  issues?: ViewIssues;
+}
+
+/** The Steps view's props: the block tree (`recognizeBlockTree`). */
+export interface StepTreeViewProps extends RunViewCommonProps {
+  tree: BlockTree;
+  /** editable: a step type picked for slot `index` of the sequence at
+   *  `path` (its length appends). */
+  onInsertStep?: (path: SeqPath, index: number, type: ScenarioNodeType) => void;
+  /** editable: add a branch to the fork (or START / switch / choice) of
+   *  `nodeId`. */
+  onAddLane?: (nodeId: string) => void;
+  /** editable: remove lane `laneIndex` of the fork of `nodeId`. */
+  onRemoveLane?: (nodeId: string, laneIndex: number) => void;
 }
 
 export type BoxPhase = StepPhase | "plain";

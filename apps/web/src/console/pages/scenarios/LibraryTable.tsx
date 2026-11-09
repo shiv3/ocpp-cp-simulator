@@ -21,7 +21,8 @@ import { t as tNow } from "../../../i18n";
 import type { ScenarioDefinition } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import RunStatePill from "../../components/RunStatePill";
 import { deriveDisplayedSteps } from "../../lib/scenarioSteps";
-import { deriveStepLayout, layoutSteps } from "../../lib/stepLayout";
+import { recognizeBlockTree } from "../../lib/blockTree";
+import { isDrawableTree, treeSteps } from "../../lib/stepTree";
 import type { ChargePointRun } from "../../lib/useAllActiveScenarioRuns";
 import type { ScenarioLibraryItem } from "../../lib/useAllScenarios";
 
@@ -52,15 +53,15 @@ const connectorCount = (n: number) =>
 
 const Dash = () => <span className="text-cx-faint">—</span>;
 
-/** "n steps" from the Steps view's layout, or a "graph" chip (with the node
- *  count) for a shape that view cannot draw. */
+/** "n steps" from the Steps view's tree, or a "graph" chip (with the node
+ *  count) for a scenario that view cannot draw (no START). */
 const StepsCell: React.FC<{ scenario: ScenarioDefinition }> = ({
   scenario,
 }) => {
   const { t } = useTranslation();
-  const layout = deriveStepLayout(scenario);
-  if (layout.supported) {
-    return <>{stepCount(layoutSteps(layout).length)}</>;
+  const tree = recognizeBlockTree(scenario);
+  if (isDrawableTree(tree)) {
+    return <>{stepCount(treeSteps(tree).length)}</>;
   }
   return (
     <span className="inline-flex items-center gap-1.5">

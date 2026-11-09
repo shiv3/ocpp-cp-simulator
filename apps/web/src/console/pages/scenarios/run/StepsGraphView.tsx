@@ -100,7 +100,7 @@ interface Point {
 
 /** A `+` of the editor: where a picked step goes, centred at (x, y). */
 interface PlusPoint {
-  slot: InsertSlot;
+  slot: InsertSlot<StepLane>;
   label: string;
   x: number;
   y: number;
@@ -387,7 +387,7 @@ const StepsGraphView: React.FC<StepRunViewProps> = (props) => {
   const { placed, paths, ends, tags, startY } = geometry;
 
   // The grid is the layout: a lane's centres come from the placed cards.
-  const editing = useStepEditing(props, (lane) =>
+  const editing = useStepEditing<StepLane>(props, (lane) =>
     placed.filter((p) => p.stepLane === lane).map((p) => p.top + NODE_H / 2),
   );
   const { drag } = editing;

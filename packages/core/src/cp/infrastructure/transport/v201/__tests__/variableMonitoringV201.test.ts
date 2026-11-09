@@ -46,7 +46,7 @@ function config(): ConfigurationStore {
       value: true,
     },
   ];
-  return new ConfigurationStore("cp-monitoring", entries, null);
+  return new ConfigurationStore(entries, null);
 }
 
 function heartbeat(overrides: Partial<MonitoringData> = {}): MonitoringData {

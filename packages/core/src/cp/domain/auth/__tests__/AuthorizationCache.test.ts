@@ -13,14 +13,14 @@ function clock(start = Date.parse("2026-10-29T12:00:00Z")) {
 
 describe("AuthorizationCache (in memory)", () => {
   it("starts empty", () => {
-    const cache = new AuthorizationCache("CP");
+    const cache = new AuthorizationCache();
     expect(cache.size()).toBe(0);
     expect(cache.get("A")).toBeUndefined();
   });
 
   it("stores an entry with its status, expiry, parent id and timestamps", () => {
     const c = clock();
-    const cache = new AuthorizationCache("CP", null, { now: c.now });
+    const cache = new AuthorizationCache(null, { now: c.now });
     cache.upsert({
       idToken: "A",
       status: "Accepted",
@@ -39,7 +39,7 @@ describe("AuthorizationCache (in memory)", () => {
 
   it("updates an existing entry, keeping its insertion time (§3.5.1, C12.FR.06)", () => {
     const c = clock();
-    const cache = new AuthorizationCache("CP", null, { now: c.now });
+    const cache = new AuthorizationCache(null, { now: c.now });
     cache.upsert({ idToken: "A", status: "Accepted", parentId: "P" });
     const inserted = c.now();
     c.advance(5000);
@@ -54,7 +54,7 @@ describe("AuthorizationCache (in memory)", () => {
   });
 
   it("removes and clears entries", () => {
-    const cache = new AuthorizationCache("CP");
+    const cache = new AuthorizationCache();
     cache.upsert({ idToken: "A", status: "Accepted" });
     cache.upsert({ idToken: "B", status: "Accepted" });
     expect(cache.remove("A")).toBe(true);
@@ -66,7 +66,7 @@ describe("AuthorizationCache (in memory)", () => {
   describe("eviction when full (§3.5.1, C10.FR.07)", () => {
     it("removes NOT-valid entries first, then the oldest valid entries", () => {
       const c = clock();
-      const cache = new AuthorizationCache("CP", null, {
+      const cache = new AuthorizationCache(null, {
         now: c.now,
         maxEntries: 3,
       });
@@ -94,7 +94,7 @@ describe("AuthorizationCache (in memory)", () => {
 
     it("counts an Accepted entry whose expiryDate has passed as NOT-valid", () => {
       const c = clock();
-      const cache = new AuthorizationCache("CP", null, {
+      const cache = new AuthorizationCache(null, {
         now: c.now,
         maxEntries: 2,
       });
@@ -112,7 +112,7 @@ describe("AuthorizationCache (in memory)", () => {
     });
 
     it("does not evict when an existing entry is updated", () => {
-      const cache = new AuthorizationCache("CP", null, { maxEntries: 1 });
+      const cache = new AuthorizationCache(null, { maxEntries: 1 });
       cache.upsert({ idToken: "A", status: "Accepted" });
       cache.upsert({ idToken: "A", status: "Blocked" });
       expect(cache.get("A")?.status).toBe("Blocked");

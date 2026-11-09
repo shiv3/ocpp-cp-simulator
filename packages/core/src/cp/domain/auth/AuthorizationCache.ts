@@ -68,12 +68,10 @@ export class AuthorizationCache {
   private readonly repository: AuthorizationCacheRepository;
 
   /**
-   * `_chargePointId` is kept for the callers' sake: the repository is
-   * already bound to the charge point (#878). `null` keeps the cache in
-   * memory only.
+   * `repository` is bound to the charge point (#878); `null` keeps the
+   * cache in memory only.
    */
   constructor(
-    _chargePointId: string,
     repository: AuthorizationCacheRepository | null = null,
     options: AuthorizationCacheOptions = {},
   ) {

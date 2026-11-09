@@ -18,7 +18,6 @@ function cacheOn(
   options?: AuthorizationCacheOptions,
 ): AuthorizationCache {
   return new AuthorizationCache(
-    cpId,
     new SqliteAuthorizationCacheRepository(cpId, db),
     options,
   );

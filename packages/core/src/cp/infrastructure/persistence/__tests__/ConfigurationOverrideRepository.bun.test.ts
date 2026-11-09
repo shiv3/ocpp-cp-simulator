@@ -64,7 +64,6 @@ describe("ConfigurationStore on SQLite", () => {
 
   function storeOn(db: BunSqliteDatabase): ConfigurationStore {
     return new ConfigurationStore(
-      "CP-A",
       defaultConfiguration(cpShape),
       new SqliteConfigurationOverrideRepository("CP-A", db),
     );

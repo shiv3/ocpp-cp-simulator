@@ -962,13 +962,9 @@ export class ChargePoint {
     // applies at once. `_configuration` is assigned further down; nothing
     // reads the policy before the constructor returns.
     this._authorization = new StationAuthorization({
-      cache: new AuthorizationCache(
-        this._id,
-        this._repositories.authorizationCache,
-        {
-          clock: this._clock,
-        },
-      ),
+      cache: new AuthorizationCache(this._repositories.authorizationCache, {
+        clock: this._clock,
+      }),
       localList: this._localAuthListManager,
       policy: () => ({
         cacheEnabled: this._configuration.authorizationCacheEnabled(),

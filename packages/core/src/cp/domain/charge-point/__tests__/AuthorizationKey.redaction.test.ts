@@ -18,11 +18,7 @@ const cpShape = {
 } as ChargePoint;
 
 function storeWithAuthorizationKey(): ConfigurationStore {
-  const store = new ConfigurationStore(
-    "cp-redact",
-    defaultConfiguration(cpShape),
-    null,
-  );
+  const store = new ConfigurationStore(defaultConfiguration(cpShape), null);
   expect(store.applyChange("AuthorizationKey", SECRET)).toBe("Accepted");
   return store;
 }

@@ -6,11 +6,11 @@ import {
 } from "../ConfigurationStore";
 
 function emptyStore(): ConfigurationStore {
-  return new ConfigurationStore("cp-test", [], null);
+  return new ConfigurationStore([], null);
 }
 
 function storeWith(...entries: ConfigurationValue[]): ConfigurationStore {
-  return new ConfigurationStore("cp-test", entries, null);
+  return new ConfigurationStore(entries, null);
 }
 
 describe("ConfigurationStore semantic accessors", () => {

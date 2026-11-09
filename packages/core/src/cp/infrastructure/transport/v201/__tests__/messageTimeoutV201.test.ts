@@ -23,7 +23,7 @@ function storeFor(ocppVersion: string): ConfigurationStore {
     wsUrl: "ws://csms.example/ocpp/",
     ocppVersion,
   } as ChargePoint;
-  return new ConfigurationStore("cp-529", defaultConfiguration(cp), null);
+  return new ConfigurationStore(defaultConfiguration(cp), null);
 }
 
 const component = { name: "OCPPCommCtrlr" };

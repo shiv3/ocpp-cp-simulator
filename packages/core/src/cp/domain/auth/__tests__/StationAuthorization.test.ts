@@ -20,7 +20,7 @@ function build(overrides: Partial<LocalAuthorizationPolicy> = {}) {
     localListChecksExpiry: true,
     ...overrides,
   };
-  const cache = new AuthorizationCache("CP", null, { now: () => NOW });
+  const cache = new AuthorizationCache(null, { now: () => NOW });
   const localList = new LocalAuthListManager(new Logger());
   const auth = new StationAuthorization({
     cache,

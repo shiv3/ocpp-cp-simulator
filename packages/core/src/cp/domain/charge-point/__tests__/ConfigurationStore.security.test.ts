@@ -16,9 +16,8 @@ const cpShape = {
 
 function storeWithDefaults(
   overrides: ConfigurationOverrideRepository | null = null,
-  cpId = "cp-sec",
 ): ConfigurationStore {
-  return new ConfigurationStore(cpId, defaultConfiguration(cpShape), overrides);
+  return new ConfigurationStore(defaultConfiguration(cpShape), overrides);
 }
 
 function entry(store: ConfigurationStore, key: string) {

@@ -94,7 +94,6 @@ class FakeSocket {
 function setup(entries: Record<string, V201InboundHandler>) {
   const socket = new FakeSocket();
   const configuration = new ConfigurationStore(
-    "cp-test",
     [{ key: ConfigurationKeys.Core.HeartbeatInterval, value: 300 }],
     null,
   );

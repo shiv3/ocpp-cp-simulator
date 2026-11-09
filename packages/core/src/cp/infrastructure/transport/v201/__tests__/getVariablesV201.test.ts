@@ -25,7 +25,7 @@ function storeWithDefaults(): ConfigurationStore {
     },
   ];
 
-  return new ConfigurationStore("cp-test", entries, null);
+  return new ConfigurationStore(entries, null);
 }
 
 describe("handleGetVariablesV201", () => {
@@ -121,7 +121,6 @@ describe("handleGetVariablesV201", () => {
   // "TransactionEvent"; the flat "...TransactionEvent" names never existed.
   it("resolves an instanced variable and echoes the instance back", () => {
     const store = new ConfigurationStore(
-      "cp-test",
       [
         { key: ConfigurationKeys.Core.TransactionMessageAttempts, value: 4 },
         {

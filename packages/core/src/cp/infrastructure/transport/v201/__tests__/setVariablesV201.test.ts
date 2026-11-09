@@ -25,7 +25,7 @@ function storeWithDefaults(): ConfigurationStore {
     },
   ];
 
-  return new ConfigurationStore("cp-test", entries, null);
+  return new ConfigurationStore(entries, null);
 }
 
 describe("handleSetVariablesV201", () => {
@@ -128,7 +128,6 @@ describe("handleSetVariablesV201", () => {
   // whatever instance the CSMS names.
   it("writes instanced variables and keeps instance-less ones instance-agnostic", () => {
     const store = new ConfigurationStore(
-      "cp-test",
       [
         { key: ConfigurationKeys.Core.HeartbeatInterval, value: 300 },
         { key: ConfigurationKeys.Core.TransactionMessageAttempts, value: 3 },
@@ -221,7 +220,6 @@ describe("handleSetVariablesV201", () => {
   // same 1.6 keys ChangeConfiguration writes.
   it("maps AlignedDataCtrlr Interval and Measurands, rejecting a negative interval", () => {
     const store = new ConfigurationStore(
-      "cp-test",
       [
         { key: ConfigurationKeys.Core.ClockAlignedDataInterval, value: 0 },
         { key: ConfigurationKeys.Core.MeterValuesAlignedData, value: [] },
@@ -368,7 +366,6 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
 
     it.each(lists)("%s.%s", (component, variable, key) => {
       const store = new ConfigurationStore(
-        "cp-test",
         [
           {
             key: ConfigurationKeys.Core.MeterValuesSampledData,

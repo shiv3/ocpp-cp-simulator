@@ -87,10 +87,9 @@ export class ConfigurationStore {
 
   private readonly overrides: ConfigurationOverrideRepository;
 
-  /** `_chargePointId` is kept for the callers' sake: the repository is
-   *  already bound to the charge point (#878). */
+  /** `overrides` is bound to the charge point (#878); `null` keeps the
+   *  overrides in memory only. */
   constructor(
-    _chargePointId: string,
     initial: Configuration,
     overrides: ConfigurationOverrideRepository | null = null,
   ) {
@@ -106,7 +105,7 @@ export class ConfigurationStore {
     cp: ChargePoint,
     overrides: ConfigurationOverrideRepository | null = null,
   ): ConfigurationStore {
-    return new ConfigurationStore(cp.id, defaultConfiguration(cp), overrides);
+    return new ConfigurationStore(defaultConfiguration(cp), overrides);
   }
 
   /** All entries the store currently knows about (defaults + overrides). */

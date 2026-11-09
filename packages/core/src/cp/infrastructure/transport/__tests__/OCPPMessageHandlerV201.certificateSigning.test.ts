@@ -142,7 +142,6 @@ type Version = keyof typeof VERSIONS;
 function setup(version: Version) {
   const socket = new FakeSocket();
   const configuration = new ConfigurationStore(
-    "cp-sign",
     defaultConfiguration({
       connectorNumber: 1,
       wsUrl: "ws://csms.example/ocpp/",

@@ -21,7 +21,7 @@ function storeFor(ocppVersion: string): ConfigurationStore {
     wsUrl: "ws://csms.example/ocpp/",
     ocppVersion,
   } as ChargePoint;
-  return new ConfigurationStore("cp-auth", defaultConfiguration(cp), null);
+  return new ConfigurationStore(defaultConfiguration(cp), null);
 }
 
 const MAPPED: ReadonlyArray<[string, string, string, string]> = [

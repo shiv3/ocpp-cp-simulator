@@ -815,6 +815,25 @@ describe("guarantees", () => {
 });
 
 describe("dead edges never shape or change what runs (review of #865)", () => {
+  it("removing a switch whose only lane never runs is refused: its steps would start running", () => {
+    const def = graph(
+      [start(), node("a"), sw("s"), node("d"), end()],
+      [
+        ["start", "a"],
+        ["a", "s"],
+        ["s", "d"], // no handle: d never runs
+        ["d", "end"],
+      ],
+    );
+    const tree = recognizeBlockTree(def);
+    const caps = editCapabilities(tree, { kind: "node", nodeId: "s" });
+    expect(caps.removeStep).toEqual({
+      ok: false,
+      reason: "scenarios.editor.cannot.revivesDeadEdge",
+    });
+    expect(removeStep(def, tree, "s")).toBe(def);
+  });
+
   it("M1: a switch whose only edge it can never pick is a one-lane fork, not a chain", () => {
     const def = graph(
       [start(), sw("s"), node("b"), end()],

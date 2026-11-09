@@ -1197,7 +1197,9 @@ export function rebuildFromTree<D extends Def>(def: D, tree: BlockTree): D {
  * Throws unless every fork's merge is where its sequence goes on after it:
  * the next block, or the node the sequence falls through to. Operations keep
  * the tree consistent without recognizing it again; dev / test check, run
- * by {@link rebuildFromTree}.
+ * by {@link rebuildFromTree} on every write: an inconsistent tree is a bug in
+ * an operation, and refusing to write it beats writing a file whose meaning
+ * changed.
  */
 export function assertMergesConsistent(
   tree: Pick<BlockTree, "root" | "detached">,
@@ -2289,11 +2291,15 @@ export function editCapabilities(
     caps.removeStep =
       block.lanes.length >= 2
         ? no("scenarios.editor.cannot.forkHasLanes")
-        : isLoopHeader
-          ? no("scenarios.editor.cannot.loopHeader")
-          : revivesDeadEdge(tree, (t) => applyRemoveStep(t, nodeId))
-            ? no("scenarios.editor.cannot.revivesDeadEdge")
-            : OK;
+        : block.lanes.length === 1 && !isLive(block.lanes[0]!.condition)
+          ? // Removing the fork would join its never-taken lane to the chain:
+            // steps that never ran would start running.
+            no("scenarios.editor.cannot.revivesDeadEdge")
+          : isLoopHeader
+            ? no("scenarios.editor.cannot.loopHeader")
+            : revivesDeadEdge(tree, (t) => applyRemoveStep(t, nodeId))
+              ? no("scenarios.editor.cannot.revivesDeadEdge")
+              : OK;
     caps.moveUp = no("scenarios.editor.cannot.notAStep");
     caps.moveDown = caps.moveUp;
     caps.setLink = no("scenarios.editor.cannot.forkHasLanes");

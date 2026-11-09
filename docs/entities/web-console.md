@@ -1095,9 +1095,12 @@ from the graph the way the executor reads it (`lowerScenario`,
   lane per handle it can pick, in handle order), and a step with more than
   one edge (only the first runs). A second edge on one handle, an edge with
   a handle the node never picks, and a step's later edges are lanes too,
-  marked _ignored_ / _unpickable_, so no edge disappears. Lanes meet again
-  at the fork's immediate post-dominator (its _merge_), and the sequence
-  goes on there.
+  marked _ignored_ / _unpickable_, so no edge disappears; a `switch` /
+  `choice` whose only edge it never takes is a one-lane fork, not a chain.
+  Lanes meet again at the fork's immediate post-dominator (its _merge_),
+  and the sequence goes on there. Loops and merges are worked out on the
+  edges that run only, so a never-taken edge cannot make a loop or hide a
+  merge.
 - **Loops**: a back edge whose target dominates its source (a reducible
   loop) makes a loop block; its first exit (file order) is where the
   sequence goes on. Any other back edge (an irreducible loop) stays a link.
@@ -1128,7 +1131,13 @@ The tree's operations (`insertStep`, `moveStep`, `removeStep`, `addLane`,
 `removeLane`, `insertForkBlock`, `wrapInLoop`, `setLink`, `setLaneHandle`,
 `setLaneCondition`) are pure functions of the definition and the tree, and
 `editCapabilities` tells which apply to a selection, with the reason
-(`scenarios.editor.cannot.*`) when one does not. The views do not use them
+(`scenarios.editor.cannot.*`) when one does not. An edit that would make a
+never-taken edge run — removing a lane, a step or a one-lane `switch` while
+an ignored or unpickable edge waits behind it, or changing a running lane's
+handle — is refused (`revivesDeadEdge`); remove the dead edge first.
+Removing the first lane of a step's extra edges is allowed with a note
+(`note.promotesNextEdge`): the next edge then runs, which is what removing
+the first one means. The views do not use them
 yet: `deriveStepLayout` is an adapter that projects the tree to the views'
 chain-plus-one-fork layout (and gives up, as before, on anything else) — the
 same layout as before for every shipped template; the one difference is a

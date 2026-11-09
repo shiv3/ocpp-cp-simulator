@@ -5,6 +5,7 @@ summary: Per-charge-point, in-memory projection of domain events (connection, in
 sources:
   - packages/core/src/cp/application/services/OperationalTimeline.ts
   - packages/core/src/cp/application/services/OperationalTimelineProjector.ts
+  - packages/core/src/cp/domain/services/ChargePointTimeline.ts
   - apps/cli/src/service.ts (recordScenarioOnTimeline)
   - packages/contracts/src/methods.ts (timeline.get)
   - packages/core/src/cp/domain/charge-point/ChargePoint.ts (applyChargingProfile, clearChargingProfiles)

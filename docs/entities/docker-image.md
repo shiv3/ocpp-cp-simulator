@@ -373,21 +373,25 @@ build args and the container env (see [`docker-compose.yml`](../../docker-compos
 
 ## Error reporting
 
-Opt-in Sentry reporting ([#794](https://github.com/shiv3/ocpp-cp-simulator/issues/794)) is off in the published images. The daemon
-reads its DSN at run time, the console's is baked in at build time:
+Opt-in error reporting ([#794](https://github.com/shiv3/ocpp-cp-simulator/issues/794)) is off in the published images. The daemon
+reads its adapter and the adapter's settings at run time, the console's are
+baked in at build time. With the built-in Sentry adapter:
 
 ```sh
 # Daemon only: any image.
-docker run --rm -p 9700:9700 -e SENTRY_DSN=https://…@….ingest.sentry.io/… \
+docker run --rm -p 9700:9700 -e OCPP_SIM_ERROR_REPORTER=sentry \
+  -e SENTRY_DSN=https://…@….ingest.sentry.io/… \
   ghcr.io/shiv3/ocpp-cp-simulator:latest --cp-id CP001 --ws-url wss://…
 
-# Console too: build the image with the console's DSN.
-docker build --build-arg VITE_SENTRY_DSN=https://…@….ingest.sentry.io/… \
+# Console too: build the image with the console's adapter and DSN.
+docker build --build-arg VITE_ERROR_REPORTER=sentry \
+  --build-arg VITE_SENTRY_DSN=https://…@….ingest.sentry.io/… \
   -t ocpp-cp-sim:reporting .
 ```
 
 `SENTRY_ENVIRONMENT` / `VITE_SENTRY_ENVIRONMENT` name the environment. What
-is sent and scrubbed: [Error reporting](../concepts/error-reporting.md).
+is sent and scrubbed, and how to plug in another adapter:
+[Error reporting](../concepts/error-reporting.md).
 
 ## Behind a reverse proxy
 

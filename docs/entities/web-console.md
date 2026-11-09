@@ -1513,9 +1513,10 @@ The build inlines `VITE_HEALTH_PATH` (default `/v1/healthz`) as the Remote-mode
 probe path; it must match the daemon's `--health-path` when that is changed
 (see [Daemon → Health](daemon.md#health)).
 
-`VITE_SENTRY_DSN` (and optionally `VITE_SENTRY_ENVIRONMENT`), set when the
-bundle is built, turns on opt-in Sentry error reporting in the console ([#794](https://github.com/shiv3/ocpp-cp-simulator/issues/794)).
-Without it the console reports nothing and never downloads the SDK chunk; see
+`VITE_ERROR_REPORTER=sentry` with `VITE_SENTRY_DSN` (and optionally
+`VITE_SENTRY_ENVIRONMENT`), set when the bundle is built, turns on opt-in
+error reporting in the console ([#794](https://github.com/shiv3/ocpp-cp-simulator/issues/794)). Without it the console reports nothing
+and never downloads an adapter chunk; see
 [Error reporting](../concepts/error-reporting.md).
 
 ### Prerequisites

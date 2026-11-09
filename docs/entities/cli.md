@@ -1186,7 +1186,9 @@ comes from `--oed-api-key-file`, else `OED_API_KEY_FILE`, else `OED_API_KEY`;
 the rules and failure cases are in
 [Open EV Directory → Configuration](open-ev-directory.md#configuration).
 
-Environment variables (every mode, [#794](https://github.com/shiv3/ocpp-cp-simulator/issues/794)): `SENTRY_DSN` turns on opt-in Sentry
-error reporting, `SENTRY_ENVIRONMENT` names the environment. Unset, nothing is
-sent and the SDK is not loaded; see
+Environment variables (every mode, [#794](https://github.com/shiv3/ocpp-cp-simulator/issues/794)): `OCPP_SIM_ERROR_REPORTER` turns on
+opt-in error reporting and selects the adapter, a built-in name (`sentry`) or
+a module specifier exporting `createErrorReporter`. The Sentry adapter also
+needs `SENTRY_DSN` (`SENTRY_ENVIRONMENT` names the environment). Unset,
+nothing is sent and no adapter is loaded; see
 [Error reporting](../concepts/error-reporting.md).

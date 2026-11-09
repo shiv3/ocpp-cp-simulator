@@ -210,6 +210,7 @@
   "scenarioEditor.switch.defaultHint": "どのケースにも一致しないとき",
   "scenarioEditor.switch.duplicateCase": "{{first}} と同じ値です。一致するのは最初のケースだけなので、このレーンは実行されません。",
   "scenarioEditor.switch.caseFrom": "ケースは定数です。ここに $from があると実行は失敗します。",
+  "scenarioEditor.switch.matchCase": "$match 条件です(ここでは読み取り専用)。JSON ファイルで編集してください。他のケースは通常どおり動作します。",
   "scenarioEditor.choice.tooFew": "選択肢が 2 つ未満です。実行はこのステップで失敗します。",
   "scenarioEditor.choice.share": "抽選の {{percent}}%",
   "scenarioEditor.value.constant": "定数",

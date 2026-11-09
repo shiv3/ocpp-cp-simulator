@@ -414,6 +414,62 @@ so a scenario can branch on what the CSMS said:
   "data": { "value": { "$from": "response.payload.idTagInfo.status" }, "cases": ["Accepted", "Blocked"] } }
 ```
 
+### `switch` `$match` cases (schema 1.7)
+
+A `switch` case is normally a JSON constant compared by JSON equality. Schema 1.7 lets a case also be a
+**matcher**: an object whose **only key is `"$match"`**. An object with other keys beside `$match` is still a
+constant, so a 1.6 file means what it meant.
+
+```json
+{ "$match": { "in": ["Blocked", "Invalid", "Expired"] } }
+{ "$match": { "gte": 20, "lt": 80 } }
+{ "$match": { "exists": false } }
+{ "$match": { "not": { "equals": "Charging" } } }
+```
+
+| Operator                           | Matches when the value…                                                                   |
+| ---------------------------------- | ----------------------------------------------------------------------------------------- |
+| `equals`                           | is JSON-equal to the argument (strict: `"30"` is not `30`)                                |
+| `in`                               | is JSON-equal to one item of the array argument                                           |
+| `gt` `gte` `lt` `lte`              | orders that way against the argument (a number or a string), see below                    |
+| `exists`                           | is present (`true`, `null` counts) or missing (`false`)                                   |
+| `startsWith` `endsWith` `includes` | is a string with that prefix, suffix or substring                                         |
+| `not`                              | does not match the operators in its body (the same operators, one level: no nested `not`) |
+
+- Several operators in one `$match` are **ANDed**. For OR put cases side by side, or use `in`. There is no
+  `anyOf`, `allOf` or regular expression: a prefix test covers vendor keys and error codes.
+- **Ordering**: two numbers compare numerically, two strings lexicographically (so ISO-8601 instants order
+  correctly), and a string that is a canonical decimal number (`/^-?(0|[1-9]\d*)(\.\d+)?$/`) compares as that
+  number, because OCPP carries Configuration and sampled values as strings. Any other pairing simply does not
+  match. `equals`, `in` and bare constants never convert.
+- **A missing value.** Everywhere else a `$from` that names nothing fails the run. In a `switch` `value` it
+  instead goes to the first case that is exactly `{ "$match": { "exists": false } }`; with no such case the run
+  fails as before (a root with nothing to read, such as `response` before any `ocppCall`, still fails). No other
+  case matches a missing value.
+- **Tolerant contract.** An unknown operator, an argument of the wrong type, an empty `$match` or a nested `not`
+  never stops a file from loading; the `switch` that reaches it fails the run (`switch: cases[1]: $match: "in"
+takes an array, got …`). `validateScenarioGraph` warns first: `unknownMatcher`, `badMatcherArgument`, and
+  `unreachableCase` (a case identical to an earlier one, or after a matcher that matches every present value,
+  `exists: true` or `not: { exists: false }`).
+- A matcher answers yes or no; it never produces a value, so it stays inside [what the format will not
+  do](#what-the-format-will-not-do). The editor shows a `$match` case as a short read-only chip (`in
+Blocked|Invalid|Expired`, `≥ 80`, `missing`) and keeps it unchanged when you edit the rest; edit the operators in
+  the JSON file for now. `export-k6` already refuses a `switch`, so matchers need no extra rule.
+
+```json
+{
+  "id": "sw",
+  "type": "switch",
+  "data": {
+    "value": { "$from": "response.payload.idTagInfo.status" },
+    "cases": [
+      "Accepted",
+      { "$match": { "in": ["Blocked", "Invalid", "Expired"] } }
+    ]
+  }
+}
+```
+
 ### `ocppCall` notes
 
 **Issue #389**: `ocppCall` sends an [expert OCPP call](expert-ocpp-calls.md) —
@@ -554,6 +610,8 @@ counts, so a node only a `duplicateHandle` edge leads to is unreachable), and, f
   branch can end with, or drop by taking over another CALL, unanswered. The
   station then answers `InternalError` only when the run ends; silence on
   purpose is `callResponse` with `kind: "none"`.
+- `unknownMatcher`, `badMatcherArgument`, `unreachableCase` (warnings, on a `switch`, with `data.handle` naming
+  the `case-<n>`; not path-dependent) — see [`$match` cases](#switch-match-cases-schema-17).
 - `edgeIntoStart` (warning) — an edge back into a Start that fans out. It is
   followed, but Start then runs as a step: the run goes on along its first
   edge only. Into a Start with one edge it is an ordinary loop.
@@ -1442,7 +1500,7 @@ optional: a 1.5 file means what it meant. In the order the issue lists them:
 | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `callResponse` `kind: "accepted"` / `"rejected"` | Answers the CALL the branch took over with `ctx.accepted(action)` / `ctx.rejected(action)`: the valid `Accepted` / `Rejected` answer of that action on the station's OCPP version (`{}` for 1.6 `UpdateFirmware`, `{ "status": "Accepted" }` on 2.x). No `payload` (the run fails if one is given). `onBusy` takes the same kinds. The 1.6 spelling of an action works on a 2.x station.                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `notify`                                         | `kind` `firmwareStatus`, `signedFirmwareStatus`, `logStatus` or `diagnosticsStatus`, a `status` from that notification's vocabulary and an optional `requestId` (`signedFirmwareStatus` needs one). Sends the notification and goes on at once: it does not wait for the CSMS, unlike `ocppCall`. A status outside the vocabulary fails the run.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `switch`                                         | `value` (a constant or a `$from`) is compared with each of `cases` (JSON constants, no `$from`) by **JSON equality**: the same type and value, object keys in any order, never a conversion (`1` is not `"1"`). The branch goes on along the edge whose `sourceHandle` is `case-<n>` for the first equal case, else `default`. A chosen handle with no edge ends the branch, with an info line in the log.                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `switch`                                         | `value` (a constant or a `$from`) is compared with each of `cases` (JSON constants, no `$from`; since 1.7 also [`$match` matchers](#switch-match-cases-schema-17)) by **JSON equality**: the same type and value, object keys in any order, never a conversion (`1` is not `"1"`). The branch goes on along the edge whose `sourceHandle` is `case-<n>` for the first equal case, else `default`. A chosen handle with no edge ends the branch, with an info line in the log.                                                                                                                                                                                                                                                                                                                                                               |
 | `$from` roots `charger`, `connector`, `state`    | Besides `call` ([above](#csmscalltrigger-replace-callresponse-from-and-usebehavior-schema-15)): `charger.id`, `.ocppVersion`, `.status`, `.connectorIds` as `ctx.charger` reports them; `connector.id`, `.status`, `.availability`, `.transactionId`, `.idTag`, `.power.acceptedW` / `.offeredW` / `.soc` / `.limitedBy` as `ctx.connector(id)` reports them, for the connector the scenario is bound to; `state.<key>[.<key>…]` for what `setState` stored. All read-only, whole values only. A path that names nothing, or a `connector` root in a station-level scenario, fails the run. A `$from` works in `ocppCall` and `callResponse` payloads, in `notify` `requestId`, in a `switch` `value` and in a `setState` `value`. On the `call` root each of them needs a CALL held by the branch ([connection rules](#connection-rules)). |
 | `delay` `until`, `jitterSeconds`                 | See [below](#delay-until-and-seeded-jitter).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `choice`                                         | A seeded, weighted pick among `options` (at least two; `weight` above 0, default 1). The branch goes on along the edge whose `sourceHandle` is `option-<n>`. The draw comes from the scenario's seeded stream, so the same seed gives the same pick; a missing edge ends the branch.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
@@ -1512,7 +1570,8 @@ is longer, so `delaySeconds` stays the required floor (use `0`) and an instant t
 ### What the format will not do
 
 The format does **sequence, wait, select, loop and read**. A node may _read_ a value through `$from` from a
-whitelisted root and _compare it for equality_; it never derives a value. A request that needs one of the
+whitelisted root and _compare it_ (JSON equality, or a [`$match`](#switch-match-cases-schema-17) yes/no test); it
+never derives a value. A request that needs one of the
 things below is answered with "write a behavior and select it with `useBehavior` and `params`":
 
 | The format will not…                                              | Because                                                                                               |
@@ -1538,6 +1597,12 @@ cover. The parity of scenario nodes and `ctx` members is kept in
 
 ## Changelog
 
+- **v1.7 (`$match`)**: A `switch` case may be `{ "$match": { … } }` (operators `equals`, `in`, `gt`, `gte`, `lt`,
+  `lte`, `exists`, `startsWith`, `endsWith`, `includes`, `not`; ANDed), and a `switch` `value` whose `$from` names
+  nothing goes to a `{ "$match": { "exists": false } }` case. Adds the advisory `unknownMatcher`,
+  `badMatcherArgument` and `unreachableCase` diagnostics. Purely additive. **One reading changes**: an object
+  constant whose only key is `$match` was a plain constant in 1.6 and is now a matcher. See
+  [the note](#switch-match-cases-schema-17).
 - **v1.7 (response)**: Adds the `$from` root `response` — the answer (`kind`, `action`, `messageId`, `payload`,
   `errorCode`, `errorDescription`, `errorDetails`) to the latest `ocppCall` of the branch — and the advisory
   `noResponseHeld` graph diagnostic. Purely additive — `1.6` and older files remain valid. See

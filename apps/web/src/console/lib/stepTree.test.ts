@@ -29,6 +29,22 @@ describe("stepTree", () => {
     expect(formatValue(undefined)).toBe("?");
   });
 
+  it("writes a $match case on a lane chip as a short text (schema 1.7)", () => {
+    expect(
+      conditionText({
+        kind: "case",
+        index: 1,
+        value: { $match: { in: ["Blocked", "Invalid", "Expired"] } },
+      }),
+    ).toBe("case-1 → in Blocked|Invalid|Expired");
+    expect(formatValue({ $match: { gte: 80 } })).toBe("≥ 80");
+    expect(formatValue({ $match: { exists: false } })).toBe("missing");
+    // An object with other keys beside $match is a plain constant.
+    expect(formatValue({ $match: { gte: 80 }, x: 1 })).toBe(
+      '{"$match":{"gte":80},"x":1}',
+    );
+  });
+
   it("numbers steps in pre-order, detached last, START left out", () => {
     const numbers = stepNumbers(recognizeBlockTree(ifElseReconverges()));
     expect([...numbers]).toEqual([

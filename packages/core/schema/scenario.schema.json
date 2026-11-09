@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/shiv3/ocpp-cp-simulator/schema/scenario.schema.json",
   "title": "ScenarioDefinition (scenario schema v1.7)",
-  "$comment": "Scenario file format v1.7 ($from root \"response\" added in v1.7; useBehavior params and mode disable added by issue #654; csmsCallTrigger behavior / onBusy, callResponse and useBehavior nodes and the $from payload reference added by issue #566; issue #214; connectionTrigger node and csmsCallTrigger payload condition added by issue #240; evSettings charging curve and electrical fields added by issue #301; ocppCall node added by issue #389; libraryId added by the web console Library). Mirrors packages/core/src/cp/application/scenario/ScenarioTypes.ts. See docs/concepts/scenario-format.md for the field overview and versioning rules. This is a first published contract: it is STRICT on known fields (types, required-ness, closed-vocabulary enums) but PERMISSIVE on unknown keys at every object level (additionalProperties: true) — real editor exports carry xyflow UI fields (width/height/selected/style/...) that this schema deliberately does not reject. Validation against this schema is advisory only in this version: the simulator warns on a mismatch but never refuses to load a file.",
+  "$comment": "Scenario file format v1.7 ($from root \"response\" and $match switch cases added in v1.7; useBehavior params and mode disable added by issue #654; csmsCallTrigger behavior / onBusy, callResponse and useBehavior nodes and the $from payload reference added by issue #566; issue #214; connectionTrigger node and csmsCallTrigger payload condition added by issue #240; evSettings charging curve and electrical fields added by issue #301; ocppCall node added by issue #389; libraryId added by the web console Library). Mirrors packages/core/src/cp/application/scenario/ScenarioTypes.ts. See docs/concepts/scenario-format.md for the field overview and versioning rules. This is a first published contract: it is STRICT on known fields (types, required-ness, closed-vocabulary enums) but PERMISSIVE on unknown keys at every object level (additionalProperties: true) — real editor exports carry xyflow UI fields (width/height/selected/style/...) that this schema deliberately does not reject. Validation against this schema is advisory only in this version: the simulator warns on a mismatch but never refuses to load a file.",
   "type": "object",
   "additionalProperties": true,
   "required": ["id", "name", "targetType", "nodes", "edges"],
@@ -288,6 +288,48 @@
         "type": { "type": "string" },
         "animated": { "type": "boolean" }
       }
+    },
+    "matcher": {
+      "$comment": "v1.7. A switch case that matches by operators instead of JSON equality: { \"$match\": { \"in\": [\"Blocked\", \"Invalid\"] } }. The operators are ANDed. gt/gte/lt/lte compare numbers numerically, strings lexicographically, and a canonical decimal string as a number; other pairings do not match. equals/in are strict JSON equality. not takes a body of the same operators without another not. An unknown operator or a wrongly typed argument fails the run when the switch runs.",
+      "type": "object",
+      "required": ["$match"],
+      "properties": {
+        "$match": {
+          "type": "object",
+          "minProperties": 1,
+          "properties": {
+            "equals": {},
+            "in": { "type": "array" },
+            "gt": { "type": ["number", "string"] },
+            "gte": { "type": ["number", "string"] },
+            "lt": { "type": ["number", "string"] },
+            "lte": { "type": ["number", "string"] },
+            "exists": { "type": "boolean" },
+            "startsWith": { "type": "string" },
+            "endsWith": { "type": "string" },
+            "includes": { "type": "string" },
+            "not": {
+              "type": "object",
+              "minProperties": 1,
+              "properties": {
+                "equals": {},
+                "in": { "type": "array" },
+                "gt": { "type": ["number", "string"] },
+                "gte": { "type": ["number", "string"] },
+                "lt": { "type": ["number", "string"] },
+                "lte": { "type": ["number", "string"] },
+                "exists": { "type": "boolean" },
+                "startsWith": { "type": "string" },
+                "endsWith": { "type": "string" },
+                "includes": { "type": "string" }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
     },
     "fromReference": {
       "$comment": "v1.5 (#566), roots v1.6 (#654), response v1.7. A whole value read from a root: call (the CALL of the branch), response (the answer to the latest ocppCall of the branch: kind \"result\" | \"error\", action, messageId, payload, errorCode, errorDescription, errorDetails), charger, connector or state (what setState stored). Read-only; a path that names nothing fails the run.",
@@ -834,11 +876,21 @@
           "then": {
             "properties": {
               "data": {
-                "$comment": "v1.6 (#654). The run goes on along the edge whose sourceHandle is case-<n> for the first case equal to value, else along `default`; a branch with no such edge ends. Equality is JSON equality and never converts types. cases are constants (no $from).",
+                "$comment": "v1.6 (#654). The run goes on along the edge whose sourceHandle is case-<n> for the first case equal to value, else along `default`; a branch with no such edge ends. Equality is JSON equality and never converts types. cases are constants (no $from). v1.7: a case that is an object whose only key is \"$match\" is a matcher instead of a constant (see #/$defs/matcher); a value whose $from names nothing goes to the first { \"$match\": { \"exists\": false } } case, else fails the run.",
                 "required": ["value", "cases"],
                 "properties": {
                   "value": {},
-                  "cases": { "type": "array" }
+                  "cases": {
+                    "type": "array",
+                    "items": {
+                      "if": {
+                        "type": "object",
+                        "required": ["$match"],
+                        "maxProperties": 1
+                      },
+                      "then": { "$ref": "#/$defs/matcher" }
+                    }
+                  }
                 }
               }
             }

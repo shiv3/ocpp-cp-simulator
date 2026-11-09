@@ -1,3 +1,4 @@
+import { MISSING } from "../../../scenario/valueMatch";
 import type { ScenarioCallExchange } from "./ScenarioTypes";
 
 /**
@@ -108,6 +109,22 @@ export function resolveFrom(
   return value;
 }
 
+/**
+ * {@link resolveFrom} for the value of a `switch` (schema 1.7): a whole `$from`
+ * whose path names nothing yields {@link MISSING} instead of throwing, so a
+ * `{ "$match": { "exists": false } }` case can pick it up. A root with nothing
+ * to read (no answer, no CALL, no connector) still throws.
+ */
+export function resolveFromOrMissing(
+  value: unknown,
+  scope: FromScope,
+  where: string,
+): unknown {
+  return isFromReference(value)
+    ? readPath(value.$from, scope, where, true)
+    : resolveFrom(value, scope, where);
+}
+
 /** {@link resolveFrom} over the root `call` alone (schema 1.5). */
 export function resolveFromExchange(
   value: unknown,
@@ -119,7 +136,12 @@ export function resolveFromExchange(
 
 const ROOTS = '"call.", "response.", "charger.", "connector." or "state."';
 
-function readPath(path: string, scope: FromScope, where: string): unknown {
+function readPath(
+  path: string,
+  scope: FromScope,
+  where: string,
+  orMissing = false,
+): unknown {
   const [root, ...rest] = path.split(".");
   if (
     (root !== "call" &&
@@ -175,11 +197,13 @@ function readPath(path: string, scope: FromScope, where: string): unknown {
       current === null ||
       !Object.prototype.hasOwnProperty.call(current, key)
     ) {
+      if (orMissing) return MISSING;
       throw new Error(`${where}: $from "${path}" names nothing in ${owner}`);
     }
     current = (current as Record<string, unknown>)[key];
   }
   if (current === undefined) {
+    if (orMissing) return MISSING;
     throw new Error(`${where}: $from "${path}" names nothing in ${owner}`);
   }
   return current;

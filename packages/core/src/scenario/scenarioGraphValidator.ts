@@ -19,6 +19,11 @@ import {
   type ScenarioProgram,
 } from "./scenarioGraph";
 import { ScenarioNodeType } from "../cp/application/scenario/ScenarioTypes";
+import {
+  jsonEquals,
+  matcherProblem,
+  matchesEveryPresentValue,
+} from "./valueMatch";
 
 /** A branch's CALL: none yet, answered, or open (held since `open:<trigger id>`). */
 type CallState = "none" | "answered" | `open:${string}`;
@@ -138,6 +143,7 @@ export function validateScenarioGraph(def: {
     }
     issues.push(...checkCalls(origin, program));
   }
+  issues.push(...checkSwitchCases(def.nodes));
 
   return issues;
 }
@@ -223,3 +229,56 @@ function checkCalls(origin: GraphNodeLike, program: Program): GraphIssue[] {
 
   return [...found.values()];
 }
+
+/**
+ * The `$match` cases of every switch (schema 1.7): an operator the executor
+ * does not know, an argument of the wrong type, and a case that an earlier one
+ * makes unreachable (an identical one, or one that matches every present
+ * value). Per case, not per path; conservative on purpose. A missing value is
+ * picked up by a `{ "exists": false }` case only, so that one is never
+ * reported as shadowed by an always-true matcher.
+ */
+function checkSwitchCases(nodes: readonly GraphNodeLike[]): GraphIssue[] {
+  const issues: GraphIssue[] = [];
+  for (const node of nodes) {
+    if (node.type !== ScenarioNodeType.SWITCH) continue;
+    const cases = (node.data as { cases?: unknown } | undefined)?.cases;
+    if (!Array.isArray(cases)) continue;
+    let allPresent: number | null = null;
+    cases.forEach((spec: unknown, index: number) => {
+      const handle = `case-${index}`;
+      const problem = matcherProblem(spec);
+      if (problem) {
+        issues.push({
+          code: problem.kind,
+          nodeId: node.id,
+          severity: "warning",
+          data: { handle, operator: problem.operator },
+        });
+        return;
+      }
+      const same = cases.findIndex((c, i) => i < index && jsonEquals(c, spec));
+      const shadow =
+        same >= 0
+          ? same
+          : allPresent !== null && !isMissingOnly(spec)
+            ? allPresent
+            : null;
+      if (shadow !== null) {
+        issues.push({
+          code: "unreachableCase",
+          nodeId: node.id,
+          severity: "warning",
+          data: { handle, shadowedBy: `case-${shadow}` },
+        });
+      }
+      if (allPresent === null && matchesEveryPresentValue(spec)) {
+        allPresent = index;
+      }
+    });
+  }
+  return issues;
+}
+
+const isMissingOnly = (spec: unknown): boolean =>
+  jsonEquals(spec, { $match: { exists: false } });

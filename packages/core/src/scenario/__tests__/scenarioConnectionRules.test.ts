@@ -702,3 +702,94 @@ describe("a $from on the response root", () => {
     ).toEqual(["noCallHeld", "noResponseHeld"]);
   });
 });
+
+// Schema 1.7: $match cases of a switch.
+describe("switch $match case diagnostics", () => {
+  const withCases = (cases: unknown[]) =>
+    validateScenarioGraph({
+      nodes: [
+        node("s", "start"),
+        node("sw", "switch", { value: 1, cases }),
+        ...cases.map((_, i) => node(`t${i}`)),
+      ],
+      edges: [
+        edge("s", "sw"),
+        ...cases.map((_, i) => edge("sw", `t${i}`, `case-${i}`)),
+      ],
+    });
+
+  it("is quiet for well-formed matchers", () => {
+    expect(
+      withCases([
+        "Accepted",
+        { $match: { in: ["Blocked", "Invalid"] } },
+        { $match: { gte: 20, lt: 80 } },
+        { $match: { not: { equals: "Charging" } } },
+        { $match: { exists: false } },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("warns on an unknown operator with the case's handle", () => {
+    expect(withCases(["a", { $match: { regex: "x" } }])).toEqual([
+      {
+        code: "unknownMatcher",
+        nodeId: "sw",
+        severity: "warning",
+        data: { handle: "case-1", operator: "regex" },
+      },
+    ]);
+  });
+
+  it("warns on a badly typed argument, an empty $match and a nested not", () => {
+    const found = withCases([
+      { $match: { in: "Blocked" } },
+      { $match: {} },
+      { $match: { not: { not: { equals: 1 } } } },
+    ]);
+    expect(found.map((i) => [i.code, i.data])).toEqual([
+      ["badMatcherArgument", { handle: "case-0", operator: "in" }],
+      ["badMatcherArgument", { handle: "case-1", operator: "" }],
+      ["badMatcherArgument", { handle: "case-2", operator: "not" }],
+    ]);
+  });
+
+  it("leaves a $match beside other keys alone: it is a constant", () => {
+    expect(withCases([{ $match: { regex: "x" }, other: 1 }])).toEqual([]);
+  });
+
+  it("warns on a case identical to an earlier one", () => {
+    expect(
+      withCases([{ $match: { gte: 80 } }, "x", { $match: { gte: 80 } }]),
+    ).toEqual([
+      {
+        code: "unreachableCase",
+        nodeId: "sw",
+        severity: "warning",
+        data: { handle: "case-2", shadowedBy: "case-0" },
+      },
+    ]);
+  });
+
+  it("warns on every case after an always-true matcher, except a missing-only one", () => {
+    const found = withCases([
+      { $match: { exists: true } },
+      "x",
+      { $match: { gte: 1 } },
+      { $match: { exists: false } },
+    ]);
+    expect(found.map((i) => [i.code, i.data?.handle])).toEqual([
+      ["unreachableCase", "case-1"],
+      ["unreachableCase", "case-2"],
+    ]);
+    expect(
+      withCases([{ $match: { not: { exists: false } } }, "x"]).map(
+        (i) => i.code,
+      ),
+    ).toEqual(["unreachableCase"]);
+  });
+
+  it("does not call a narrowing matcher always-true", () => {
+    expect(withCases([{ $match: { exists: true, gte: 1 } }, "x"])).toEqual([]);
+  });
+});

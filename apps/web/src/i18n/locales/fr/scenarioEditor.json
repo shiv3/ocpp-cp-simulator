@@ -212,6 +212,7 @@
   "scenarioEditor.switch.defaultHint": "quand aucun cas ne correspond",
   "scenarioEditor.switch.duplicateCase": "Même valeur que {{first}} : seul le premier peut correspondre, cette voie ne s'exécute jamais.",
   "scenarioEditor.switch.caseFrom": "Un cas est une constante : un $from ici fait échouer l'exécution.",
+  "scenarioEditor.switch.matchCase": "Condition $match (lecture seule ici) : modifiez-la dans le fichier JSON. Les autres cas continuent de fonctionner.",
   "scenarioEditor.choice.tooFew": "Moins de deux options : l'exécution échoue à cette étape.",
   "scenarioEditor.choice.share": "{{percent}} % du tirage",
   "scenarioEditor.value.constant": "Constante",

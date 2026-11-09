@@ -179,7 +179,11 @@ const TemplatePreview: React.FC<{
             {selected ? (
               // The editor's forms, disabled as a whole.
               <fieldset disabled className="min-w-0 disabled:opacity-90">
-                <StepInspector node={selected} onChange={noop} />
+                <StepInspector
+                  node={selected}
+                  onChange={noop}
+                  scenario={scenario}
+                />
               </fieldset>
             ) : (
               <EmptyState

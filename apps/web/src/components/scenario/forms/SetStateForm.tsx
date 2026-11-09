@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
-import { JsonValueField, TextField } from "./FormFields";
+import { TextField } from "./FormFields";
+import { ScenarioValueField } from "./ScenarioValueField";
 import type { NodeFormComponentProps, NodeFormData } from "./types";
 
 export const STATE_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -9,6 +10,7 @@ export const STATE_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 export default function SetStateForm({
   value,
   onChange,
+  context,
 }: NodeFormComponentProps<NodeFormData>) {
   const { t } = useTranslation();
   const key = typeof value.key === "string" ? value.key : "";
@@ -32,14 +34,16 @@ export default function SetStateForm({
           </p>
         )}
       </div>
-      <JsonValueField
-        label={t("scenarioEditor.setState.value")}
-        value={value.value}
-        onChange={(next) => onChange({ ...value, value: next })}
-        placeholder='0 or {"$from": "call.payload.requestId"}'
-        help={t("scenarioEditor.setState.valueHelp")}
-        rows={3}
-      />
+      <div className="@lg:col-span-2">
+        <ScenarioValueField
+          testId="set-state-value"
+          label={t("scenarioEditor.setState.value")}
+          value={value.value}
+          stateKeys={context?.stateKeys}
+          onChange={(next) => onChange({ ...value, value: next })}
+          help={t("scenarioEditor.setState.valueHelp")}
+        />
+      </div>
     </div>
   );
 }

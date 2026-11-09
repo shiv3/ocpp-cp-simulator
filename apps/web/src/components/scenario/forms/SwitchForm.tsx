@@ -1,14 +1,44 @@
 import { useTranslation } from "react-i18next";
-import { JsonValueField, TextField } from "./FormFields";
+import { TextField } from "./FormFields";
+import { ScenarioValueField } from "./ScenarioValueField";
+import { LaneLine, RowActions } from "./SelectLanes";
+import { useIndexedLanes } from "./useIndexedLanes";
+import { jsonEqual } from "./scenarioValue";
 import type { NodeFormComponentProps, NodeFormData } from "./types";
 
+function isFromObject(value: unknown): boolean {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    "$from" in value
+  );
+}
+
 /** Schema 1.6 (#654): goes on along `case-<n>` for the first case equal to
- *  the value, else along `default`. */
+ *  the value, else along `default`. The cases are a list of JSON constants,
+ *  each beside the lane it leads to; reordering or removing a case moves
+ *  the lanes with their cases (`context.onReindex`). */
 export default function SwitchForm({
   value,
   onChange,
+  context,
 }: NodeFormComponentProps<NodeFormData>) {
   const { t } = useTranslation();
+  const cases: unknown[] = Array.isArray(value.cases) ? value.cases : [];
+  const lanes = useIndexedLanes({
+    items: cases,
+    prefix: "case",
+    context,
+    store: (next) => ({ ...value, cases: next }),
+    onChange,
+  });
+  const setCase = (index: number, next: unknown) =>
+    onChange({
+      ...value,
+      cases: cases.map((c, i) => (i === index ? next : c)),
+    });
+
   return (
     <div className="space-y-3">
       <TextField
@@ -16,26 +46,96 @@ export default function SwitchForm({
         value={(value.label as string | undefined) ?? ""}
         onChange={(label) => onChange({ ...value, label })}
       />
-      <JsonValueField
-        label={t("scenarioEditor.switch.value")}
-        value={value.value}
-        onChange={(next) => onChange({ ...value, value: next })}
-        placeholder='{"$from": "state.mode"}'
-        help={t("scenarioEditor.switch.valueHelp", {
-          example: '{"$from": "state.mode"}',
-        })}
-        rows={2}
-      />
-      <JsonValueField
-        label={t("scenarioEditor.switch.cases")}
-        value={value.cases}
-        validate={(next) =>
-          Array.isArray(next) ? null : "scenarioEditor.switch.casesNotArray"
-        }
-        onChange={(cases) => onChange({ ...value, cases })}
-        placeholder='["a", 1, true]'
-        help={t("scenarioEditor.switch.casesHelp")}
-      />
+      <div className="@lg:col-span-2">
+        <ScenarioValueField
+          testId="switch-value"
+          label={t("scenarioEditor.switch.value")}
+          value={value.value}
+          onChange={(next) => onChange({ ...value, value: next })}
+          stateKeys={context?.stateKeys}
+          defaultFrom={
+            context?.stateKeys?.[0]
+              ? { root: "state", path: context.stateKeys[0] }
+              : { root: "connector", path: "status" }
+          }
+          help={t("scenarioEditor.switch.valueHelp")}
+        />
+      </div>
+      <div className="space-y-2 @lg:col-span-2">
+        <div className="text-xs font-semibold text-primary">
+          {t("scenarioEditor.switch.cases")}
+        </div>
+        <ol className="space-y-2">
+          {cases.map((item, index) => {
+            const name = `case-${index}`;
+            const first = cases.findIndex((c) => jsonEqual(c, item));
+            return (
+              <li
+                key={index}
+                data-testid={`switch-case-${index}`}
+                className="space-y-1.5 rounded border border-gray-300 p-2 dark:border-gray-600"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-xs text-secondary">
+                    {name}
+                  </span>
+                  <span className="flex-1" />
+                  <RowActions
+                    index={index}
+                    count={cases.length}
+                    name={name}
+                    onMove={(to) => lanes.move(index, to)}
+                    onRemove={() => lanes.remove(index)}
+                  />
+                </div>
+                <ScenarioValueField
+                  hideLabel
+                  label={t("scenarioEditor.switch.caseValue", { name })}
+                  value={item}
+                  allowFrom={false}
+                  onChange={(next) => setCase(index, next)}
+                />
+                <LaneLine context={context} handle={name} />
+                {first !== index && (
+                  <p className="text-xs text-amber-700 dark:text-amber-400">
+                    {t("scenarioEditor.switch.duplicateCase", {
+                      first: `case-${first}`,
+                    })}
+                  </p>
+                )}
+                {isFromObject(item) && (
+                  <p className="text-xs text-amber-700 dark:text-amber-400">
+                    {t("scenarioEditor.switch.caseFrom")}
+                  </p>
+                )}
+                {lanes.confirm(index)}
+              </li>
+            );
+          })}
+          <li
+            data-testid="switch-default"
+            className="space-y-1.5 rounded border border-dashed border-gray-300 p-2 dark:border-gray-600"
+          >
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-xs text-secondary">default</span>
+              <span className="text-xs text-muted">
+                {t("scenarioEditor.switch.defaultHint")}
+              </span>
+            </div>
+            <LaneLine context={context} handle="default" />
+          </li>
+        </ol>
+        <button
+          type="button"
+          className="btn-secondary px-2 py-1 text-xs"
+          onClick={() => onChange({ ...value, cases: [...cases, ""] })}
+        >
+          {t("scenarioEditor.switch.addCase")}
+        </button>
+        <p className="text-xs text-muted">
+          {t("scenarioEditor.switch.casesHelp")}
+        </p>
+      </div>
     </div>
   );
 }

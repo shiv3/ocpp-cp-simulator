@@ -103,6 +103,8 @@
   "templates.multi-status-monitor.description": "Monitor multiple statuses in parallel and execute different actions",
   "templates.remote-start-auto-meter.name": "Remote Start + Auto MeterValue",
   "templates.remote-start-auto-meter.description": "Wait RemoteStartTransaction → Start charging → AutoMeterValue",
+  "templates.remote-start-timeout-fallback.name": "Remote Start with Timeout Fallback",
+  "templates.remote-start-timeout-fallback.description": "Wait up to 30 s for a RemoteStartTransaction. If it arrives, start the transaction and send bounded MeterValues. If the wait times out, follow the timeout edge: set the connector back to Available (StatusNotification) and end instead of failing the run.",
   "templates.smart-charging.name": "Smart Charging (Auto MeterValue)",
   "templates.smart-charging.description": "Auto-increment MeterValue when Charging, stop when Finishing",
   "templates.status-triggered-actions.name": "Status-Triggered Auto Actions",

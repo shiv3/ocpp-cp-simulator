@@ -257,9 +257,9 @@ describe("withScenarioSchemaVersion", () => {
 
   it("keeps a newer schemaVersion and raises an older one", () => {
     expect(
-      withScenarioSchemaVersion(createValidScenario({ schemaVersion: "1.7" }))
+      withScenarioSchemaVersion(createValidScenario({ schemaVersion: "1.9" }))
         .schemaVersion,
-    ).toBe("1.7");
+    ).toBe("1.9");
     expect(
       withScenarioSchemaVersion(createValidScenario({ schemaVersion: "2.0" }))
         .schemaVersion,
@@ -272,13 +272,15 @@ describe("withScenarioSchemaVersion", () => {
     }
   });
 
-  it("is at the current v1.7 schema version", () => {
+  it("is at the current v1.8 schema version", () => {
     // Each additive schema version bumps the stamp: the v1.2 evSettings
     // fields (#301) once shipped with the stamp left at "1.1", and a browser
     // export could not be told apart from one written before them. v1.3
     // adds the ocppCall node type (#389), v1.4 the optional libraryId, v1.5 the
-    // callResponse and useBehavior nodes and csmsCallTrigger behavior (#566).
-    expect(SCENARIO_SCHEMA_VERSION).toBe("1.7");
+    // callResponse and useBehavior nodes and csmsCallTrigger behavior (#566),
+    // v1.6 useBehavior params and the decision nodes (#654), v1.7 the `$from`
+    // root "response" and `$match` switch cases, v1.8 timeout edges.
+    expect(SCENARIO_SCHEMA_VERSION).toBe("1.8");
   });
 
   it("produces a scenario that still validates against packages/core/schema/scenario.schema.json", () => {

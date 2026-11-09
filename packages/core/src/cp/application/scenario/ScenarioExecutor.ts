@@ -82,6 +82,7 @@ import {
   nextStep,
   resolveOrigin,
   successors,
+  timeoutStep,
   type ScenarioProgram,
 } from "../../../scenario/scenarioGraph";
 import { connectionRule } from "../../../scenario/scenarioConnectionRules";
@@ -124,6 +125,12 @@ interface Flow {
    * one edge the branch goes on along. Read and cleared by the walk.
    */
   handle: string | null;
+  /**
+   * Set by a trigger wait whose timeout expired and that has a timeout edge
+   * (schema 1.8): the node the branch goes on to instead of failing. Read
+   * and cleared by the walk.
+   */
+  timeoutTarget: ScenarioNode | null;
 }
 
 const newFlow = (): Flow => ({
@@ -131,6 +138,7 @@ const newFlow = (): Flow => ({
   answered: false,
   response: null,
   handle: null,
+  timeoutTarget: null,
 });
 
 const STATE_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -465,7 +473,18 @@ export class ScenarioExecutor {
       if (!originNode) {
         throw new Error("No start node found in scenario");
       }
-      await this.executeSingleNode(originNode, newFlow());
+      const originFlow = newFlow();
+      await this.executeSingleNode(originNode, originFlow);
+      if (originFlow.timeoutTarget) {
+        // Schema 1.8: an origin that is a timed-out wait (a legacy wait
+        // labelled "Start") leaves by its timeout edge alone.
+        const target = originFlow.timeoutTarget;
+        originFlow.timeoutTarget = null;
+        await this.executeSequentialFlow(target, originFlow);
+        this.currentNodeId = null;
+        this.currentNodeStartedAt = null;
+        return;
+      }
     }
 
     // Walk outgoing edges from the origin node (whether Start or resume).
@@ -582,6 +601,15 @@ export class ScenarioExecutor {
       await this.waitIfPaused();
       if (this.aborted || getScenarioStateName(this.service) === "idle") {
         break;
+      }
+
+      // Schema 1.8: a wait that timed out goes on along its timeout edge.
+      const timedOutTo = flow.timeoutTarget;
+      flow.timeoutTarget = null;
+      if (timedOutTo) {
+        flow.handle = null;
+        currentNode = timedOutTo;
+        continue;
       }
 
       // Check if this is the end node
@@ -732,6 +760,7 @@ export class ScenarioExecutor {
         await this.executeRemoteStartTrigger(
           node.id,
           node.data as RemoteStartTriggerNodeData,
+          flow,
         );
         break;
 
@@ -739,6 +768,7 @@ export class ScenarioExecutor {
         await this.executeRemoteStopTrigger(
           node.id,
           node.data as RemoteStopTriggerNodeData,
+          flow,
         );
         break;
 
@@ -746,6 +776,7 @@ export class ScenarioExecutor {
         await this.executeStatusTrigger(
           node.id,
           node.data as StatusTriggerNodeData,
+          flow,
         );
         break;
 
@@ -763,6 +794,7 @@ export class ScenarioExecutor {
         await this.executeReservationTrigger(
           node.id,
           node.data as ReservationTriggerNodeData,
+          flow,
         );
         break;
 
@@ -838,6 +870,7 @@ export class ScenarioExecutor {
         await this.executeConnectionTrigger(
           node.id,
           node.data as ConnectionTriggerNodeData,
+          flow,
         );
         break;
 
@@ -1434,6 +1467,7 @@ export class ScenarioExecutor {
   private async executeRemoteStartTrigger(
     nodeId: string,
     data: RemoteStartTriggerNodeData,
+    flow: Flow,
   ): Promise<void> {
     const waitForRemoteStart = this.callbacks.onWaitForRemoteStart;
     if (!waitForRemoteStart) return;
@@ -1441,6 +1475,7 @@ export class ScenarioExecutor {
     const answer = (
       await this.runTriggerWait(
         nodeId,
+        flow,
         data.timeout,
         (seconds) => `Timeout waiting for remote start (${seconds}s)`,
         () => waitForRemoteStart(),
@@ -1480,6 +1515,7 @@ export class ScenarioExecutor {
   private async executeRemoteStopTrigger(
     nodeId: string,
     data: RemoteStopTriggerNodeData,
+    flow: Flow,
   ): Promise<void> {
     const waitForRemoteStop = this.callbacks.onWaitForRemoteStop;
     if (!waitForRemoteStop) return;
@@ -1490,6 +1526,7 @@ export class ScenarioExecutor {
     // nothing, so that node falls back to its own stopReason.
     const result = await this.runTriggerWait(
       nodeId,
+      flow,
       data.timeout,
       (seconds) => `Timeout waiting for remote stop (${seconds}s)`,
       () => waitForRemoteStop(),
@@ -1507,12 +1544,14 @@ export class ScenarioExecutor {
   private async executeStatusTrigger(
     nodeId: string,
     data: StatusTriggerNodeData,
+    flow: Flow,
   ): Promise<void> {
     const waitForStatus = this.callbacks.onWaitForStatus;
     if (!waitForStatus) return;
 
     await this.runTriggerWait(
       nodeId,
+      flow,
       data.timeout,
       (seconds) =>
         `Timeout waiting for status: ${data.targetStatus} (${seconds}s)`,
@@ -1554,12 +1593,14 @@ export class ScenarioExecutor {
   private async executeReservationTrigger(
     nodeId: string,
     data: ReservationTriggerNodeData,
+    flow: Flow,
   ): Promise<void> {
     const waitForReservation = this.callbacks.onWaitForReservation;
     if (!waitForReservation) return;
 
     await this.runTriggerWait(
       nodeId,
+      flow,
       data.timeout,
       (seconds) => `Timeout waiting for reservation (${seconds}s)`,
       () => waitForReservation(),
@@ -1848,9 +1889,15 @@ export class ScenarioExecutor {
    * the awaited answer, or null when there is none (continued, force-skipped
    * or stopped). Timeout-bearing waits also surface 100ms remaining-time
    * progress events.
+   *
+   * When the timeout expires the run fails with the timeout error, unless
+   * the node has a timeout edge (schema 1.8, `timeoutStep`): then the wait
+   * resolves with null like a continued one (nothing is captured) and
+   * `flow.timeoutTarget` sends the branch along that edge.
    */
   private async runTriggerWait<T>(
     nodeId: string,
+    flow: Flow,
     timeoutSeconds: number | undefined,
     timeoutMessage: (seconds: number) => string,
     startWait: () => Promise<T>,
@@ -1860,6 +1907,9 @@ export class ScenarioExecutor {
     const expectation = node
       ? deriveExpectation(node, this.scenario.targetId)
       : null;
+    const program = this.program();
+    const programNode = program.nodesById.get(nodeId);
+    const onTimeout = programNode ? timeoutStep(program, programNode) : null;
 
     for (;;) {
       const startedAt = this.clock.now();
@@ -1875,7 +1925,8 @@ export class ScenarioExecutor {
       // Only this attempt's own answer is returned: a withdrawn attempt that
       // answers late (e.g. with a stale RemoteStart tag) never reaches the run.
       let answer = null as { value: T } | null;
-      let outcome: WaitSignal | "settled";
+      let timeoutError: unknown = null;
+      let outcome: WaitSignal | "settled" | "timedOut";
       try {
         waitPromise = startWait();
         outcome = await Promise.race([
@@ -1884,7 +1935,13 @@ export class ScenarioExecutor {
               answer = { value };
             }),
           ).then(() => "settled" as const),
-          control.expired,
+          // Without a timeout edge the expiry rejects and fails the run.
+          onTimeout
+            ? control.expired.catch((error: unknown) => {
+                timeoutError = error;
+                return "timedOut" as const;
+              })
+            : control.expired,
           control.signal,
         ]);
       } finally {
@@ -1896,6 +1953,22 @@ export class ScenarioExecutor {
       }
 
       if (outcome === "settled") return answer;
+      if (outcome === "timedOut" && onTimeout && !this.aborted) {
+        const reason =
+          timeoutError instanceof Error
+            ? timeoutError.message
+            : String(timeoutError);
+        this.callbacks.log?.(
+          `[${this.scenario.name}] ${reason}; "${
+            node?.data?.label || nodeId
+          }" goes on along its timeout edge to "${
+            onTimeout.target.data?.label || onTimeout.target.id
+          }"`,
+          "info",
+        );
+        flow.timeoutTarget = onTimeout.target;
+        return null;
+      }
       if (outcome === "continue" || this.aborted) return null;
     }
   }
@@ -1958,6 +2031,7 @@ export class ScenarioExecutor {
     const replace = data.behavior === "replace";
     const result = await this.runTriggerWait(
       nodeId,
+      flow,
       data.timeout,
       (seconds) =>
         `Timeout waiting for CSMS call ${data.action}${
@@ -2254,11 +2328,13 @@ export class ScenarioExecutor {
   private async executeConnectionTrigger(
     nodeId: string,
     data: ConnectionTriggerNodeData,
+    flow: Flow,
   ): Promise<void> {
     const waitForConnection = this.callbacks.onWaitForConnection;
     if (!waitForConnection) return;
     const result = await this.runTriggerWait(
       nodeId,
+      flow,
       data.timeout,
       (seconds) => `Timeout waiting for ${data.event} (${seconds}s)`,
       () => waitForConnection(data.event),

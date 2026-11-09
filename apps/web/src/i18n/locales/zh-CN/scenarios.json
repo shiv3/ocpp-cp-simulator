@@ -265,5 +265,9 @@
   "scenarios.addStep.structure.choiceHelp": "添加一个带两个加权选项的分支块,随机选其一。把步骤拖入通道;各通道在后续步骤处重新汇合。",
   "scenarios.editor.cannot.laneEnds": "此分支已经在这里结束。",
   "scenarios.editor.cannot.laneTargetNotLater": "请选择此分支点之后的步骤。",
-  "scenarios.editor.rangeHint": "高亮的步骤就是会被重复的步骤。"
+  "scenarios.editor.rangeHint": "高亮的步骤就是会被重复的步骤。",
+  "scenarios.editor.issue.timeoutEdgeOnNonWait": "步骤 {{n}}({{title}})有一条超时边,但它不是带超时的等待(或会结束其分支):这条边永远不会被走到。",
+  "scenarios.editor.issue.timeoutEdgeNeverFires": "步骤 {{n}}({{title}})有一条超时边,但其超时为 0 或未设置:等待永远不会超时,这条边永远不会运行。",
+  "scenarios.editor.issue.extraTimeoutEdge": "步骤 {{n}}({{title}})有多条超时边:等待超时时只运行第一条。",
+  "scenarios.editor.issue.newerConstruct": "此场景使用了比其声明的架构版本更新的功能;在这里可以运行,但较旧的模拟器会忽略该功能。"
 }

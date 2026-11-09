@@ -103,6 +103,8 @@
   "templates.multi-status-monitor.description": "複数のステータスを並列で監視し、それぞれ異なるアクションを実行します",
   "templates.remote-start-auto-meter.name": "リモート開始 + AutoMeterValue",
   "templates.remote-start-auto-meter.description": "RemoteStartTransaction を待機 → 充電開始 → AutoMeterValue",
+  "templates.remote-start-timeout-fallback.name": "リモート開始 + タイムアウト時のフォールバック",
+  "templates.remote-start-timeout-fallback.description": "RemoteStartTransaction を最大 30 秒待機し、タイムアウト時は timeout エッジで Available に戻します",
   "templates.smart-charging.name": "スマート充電 (AutoMeterValue)",
   "templates.smart-charging.description": "Charging の間は MeterValue を自動で加算し、Finishing で停止します",
   "templates.status-triggered-actions.name": "ステータス連動の自動アクション",

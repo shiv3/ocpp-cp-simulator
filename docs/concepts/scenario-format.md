@@ -1,7 +1,7 @@
 ---
-title: Scenario file format (v1.6)
+title: Scenario file format (v1.8)
 type: concept
-summary: The node-graph JSON format for scripted charge-point behavior — 30 node types, edges, triggers, EV settings, assertions with a two-axis verdict, `useBehavior` params and disable, the 1.6 decision and notify nodes with the read-only `$from` roots, and the limits of the format — as exported by the editor and accepted by the CLI, daemon and MCP; JSON Schema is the source of truth.
+summary: The node-graph JSON format for scripted charge-point behavior — 30 node types, edges, triggers, EV settings, assertions with a two-axis verdict, `useBehavior` params and disable, the 1.6 decision and notify nodes with the read-only `$from` roots, the 1.8 timeout edges, and the limits of the format — as exported by the editor and accepted by the CLI, daemon and MCP; JSON Schema is the source of truth.
 sources:
   - packages/core/schema/scenario.schema.json
   - packages/core/src/cp/application/scenario/ScenarioTypes.ts
@@ -43,7 +43,7 @@ related:
 updated: 2026-11-09
 ---
 
-# Scenario File Format (v1.7)
+# Scenario File Format (v1.8)
 
 A **node-graph JSON file** describing a scripted charge-point behavior: a
 directed graph of typed nodes (status changes, transactions, meter values,
@@ -61,7 +61,7 @@ that schema, not a replacement for it.
 
 ## Status & scope
 
-- **Version `1.7`** (`schemaVersion`). Files stamped `1.0` to `1.6` remain valid — 1.x
+- **Version `1.8`** (`schemaVersion`). Files stamped `1.0` to `1.7` remain valid — 1.x
   is purely additive (see [Versioning](#versioning)).
 - Covers the full 30-node discriminated union the scenario engine supports
   (see [Node types](#node-types) below).
@@ -91,7 +91,7 @@ Mirrors the [OCPP trace format](./trace-format.md#versioning)'s rules:
 
 | Field                   | Type                                                                            | Required | Notes                                                                                                                                                                                                                |
 | ----------------------- | ------------------------------------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schemaVersion`         | string                                                                          | No       | e.g. `"1.7"` (current); `"1.6"`, `"1.5"`, `"1.4"`, `"1.3"`, `"1.2"`, `"1.1"` and `"1.0"` remain valid — additive. Absent on files predating issue #214 — still valid.                                                |
+| `schemaVersion`         | string                                                                          | No       | e.g. `"1.8"` (current); `"1.7"`, `"1.6"`, `"1.5"`, `"1.4"`, `"1.3"`, `"1.2"`, `"1.1"` and `"1.0"` remain valid — additive. Absent on files predating issue #214 — still valid.                                       |
 | `id`                    | string                                                                          | Yes      | Stable scenario identifier.                                                                                                                                                                                          |
 | `templateId`            | string                                                                          | No       | Set automatically when a built-in template is instantiated; absent on hand-authored scenarios. See [Template instances](#template-instances).                                                                        |
 | `libraryId`             | string                                                                          | No       | Set by the web console on a connector's copy of a [Library](../entities/web-console.md#scenario-library) scenario: that scenario's `id` (v1.4). Absent on Library entries and on scenarios loaded by hand.           |
@@ -520,7 +520,11 @@ any station-initiated CALL of the station's OCPP-J version (`action`), with
 
 The executor owns the timeout of these nodes; `scenario_status` reports it as
 `waitDeadlineAt` (epoch ms). A timeout still fails the run — nothing here
-changes what an unattended run does. The auto-meter wait and `delay` are not
+changes what an unattended run does — unless the node has a
+[timeout edge](#timeout-edges-schema-18) (schema 1.8), which the run then
+follows. The controls keep their meaning with one: Continue goes on along the
+ordinary edge, an extended or retried wait takes the timeout edge only when
+its new deadline passes. The auto-meter wait and `delay` are not
 trigger waits and take no controls. With parallel branches the controls act on the most recently armed wait still parked; once it settles, the previous one is reachable again. While a wait is parked, `scenario_status` describes that one wait: `currentNodeId`, `currentNodeStartedAt` (restarted by a retry), `expectation` and `waitDeadlineAt` all belong to it, and so does the `timeout` a stop mid-wait records in the report.
 
 Every control is recorded in the run report's `interventions` array, in
@@ -536,7 +540,10 @@ assertions alone, so a continued run can `PASS`.
 
 `id`, `source`, `target` are required strings. xyflow adds further UI fields
 (`sourceHandle`, `targetHandle`, `type`, `animated`, ...) which the schema
-allows but does not require.
+allows but does not require. `kind: "timeout"` (schema 1.8) makes the edge a
+[timeout edge](#timeout-edges-schema-18); without `kind`, or with any other
+value, it is an ordinary edge (the schema enumerates `"timeout"` only, so
+another value is a schema warning, never a failure).
 
 ### Connection rules
 
@@ -564,6 +571,12 @@ Two kinds of rule are real. **How a node is left** (`out`):
 | `end`                                                   | `none`     | the branch stops; an edge out of it is never followed                                                                                              |
 | `switch`, `choice` ([schema 1.6](#the-schema-16-nodes)) | `select`   | the node picks one `sourceHandle` (`case-N` / `default`, `option-N`) and only the edges with it are followed: several outgoing edges are the point |
 | every other                                             | `next`     | the first edge to an existing node is followed; with more, the rest are ignored                                                                    |
+
+Every row above counts ordinary edges only: a [timeout edge](#timeout-edges-schema-18) (`kind: "timeout"`,
+schema 1.8) is never a next step, a Start branch or a `switch` / `choice` handle. It runs only out of a node whose
+rule `waits` — the six trigger waits `remoteStartTrigger`, `remoteStopTrigger`, `statusTrigger`,
+`reservationTrigger`, `csmsCallTrigger` and `connectionTrigger`, the nodes that park in `runTriggerWait` — and only
+when that wait's timeout expires (`timeoutStep` in `scenarioGraph.ts`).
 
 **The CALL a branch holds** (`call`, [schema 1.5](#csmscalltrigger-replace-callresponse-from-and-usebehavior-schema-15)),
 the one place where one node type must come before another on the path:
@@ -617,6 +630,23 @@ counts, so a node only a `duplicateHandle` edge leads to is unreachable), and, f
   followed, but Start then runs as a step: the run goes on along its first
   edge only. Into a Start with one edge it is an ordinary loop.
 
+and, for [timeout edges](#timeout-edges-schema-18) (schema 1.8):
+
+- `timeoutEdgeOnNonWait` (warning, on the edge) — a timeout edge out of a node
+  that is not a trigger wait, or out of one labelled "End": never followed.
+- `timeoutEdgeNeverFires` (info, on the edge) — a timeout edge out of a wait
+  whose `timeout` is `0` or absent: the wait never expires, so the edge never
+  runs.
+- `extraTimeoutEdge` (warning, on each but the first) — a wait with several
+  timeout edges: only the first one to an existing node runs.
+- `newerConstruct` (info, once, on the first timeout edge) — the file declares
+  a `schemaVersion` below `1.8` and uses a timeout edge. A file without a
+  `schemaVersion`, or with one that does not parse, is not reported. It runs
+  the same either way; an older simulator would treat the edge as ordinary.
+
+Reachability and the CALL analysis follow the timeout edge of a wait whose
+timeout can expire, with the CALL state the wait was entered with.
+
 Not constrained, because the executor needs nothing there: any step may follow
 any step, including a wait (`*Trigger`) right after Start or after another
 wait; loops and joins are allowed (Stop ends an endless loop); a CALL held
@@ -663,6 +693,10 @@ change the two together.
   `start` / `end`.
 - A `switch` or `choice` whose picked handle has no edge: the branch ends with
   an `info` log ("… chose "…", which has no edge; the branch ends").
+- An edge with `kind: "timeout"` (schema 1.8) out of a node that is not a
+  trigger wait, out of a wait without a timeout, or after the first one of a
+  wait: never followed. A timeout edge to a missing node is skipped like any
+  edge. Any other `kind` value: an ordinary edge.
 
 The only graph shape that fails a run is one with nowhere to start: "No start
 node found in scenario".
@@ -1568,6 +1602,53 @@ is longer, so `delaySeconds` stays the required floor (use `0`) and an instant t
 `jitterSeconds`, in whole milliseconds, from the scenario's seeded stream: the same seed gives the same wait, and
 `0` draws nothing. `export-k6` refuses both (the k6 runtime waits for `delaySeconds` only).
 
+### Timeout edges (schema 1.8)
+
+A wait that times out fails the run; a **timeout edge** says where to go
+instead. It is an edge with `kind: "timeout"`:
+
+```json
+{
+  "id": "e-late",
+  "source": "wait-charging",
+  "target": "log-late",
+  "kind": "timeout"
+}
+```
+
+- **Where it runs.** Out of the six trigger waits (`remoteStartTrigger`,
+  `remoteStopTrigger`, `statusTrigger`, `reservationTrigger`,
+  `csmsCallTrigger`, `connectionTrigger`) — `waits` in `CONNECTION_RULES` —
+  when the node's `timeout` (seconds, above 0) expires. The run logs
+  `<timeout message>; "<node>" goes on along its timeout edge to "<target>"`
+  (`info`) and the branch goes on along the **first** timeout edge to an
+  existing node, file order. The branch keeps its run: the run does not fail.
+- **Without one** the wait fails the run with its timeout message, exactly as
+  before 1.8.
+- **Never a next step.** Successor selection — a step's first edge, Start's
+  fan-out (and resuming from a node), a `switch` / `choice` handle — ignores
+  timeout edges entirely, whatever their file order or `sourceHandle`. A wait
+  whose event arrives leaves by its first ordinary edge; with none its branch
+  ends.
+- **Nothing is captured.** A timed-out wait captures nothing, as a continued
+  one: after a `remoteStartTrigger` the next Start Transaction uses its own
+  `tagId`; after a `remoteStopTrigger` the Stop Transaction its own
+  `stopReason`. A timed-out `csmsCallTrigger` with `behavior: "replace"` took
+  **no CALL over**: along the timeout edge the branch holds the CALL it held
+  before the wait (none, if it held none), so a `callResponse` there needs a
+  CALL from earlier in the branch.
+- **Operator controls** keep their meaning (see
+  [Controls on a parked wait](#controls-on-a-parked-wait)): Extend and Retry
+  move the deadline, and the timeout edge runs when the new deadline passes;
+  Continue and a step-mode skip go on along the ordinary edge; Stop stops.
+- **Older files.** No semantics depends on `schemaVersion`: an edge without
+  `kind: "timeout"` is ordinary in every version, and a timeout edge works in
+  a file of any declared version (the validator says `newerConstruct`).
+  `export-k6` refuses a scenario with a timeout edge, naming it.
+
+The `delay` node and the auto-meter wait of a `meterValue` are not trigger
+waits and take no timeout edge.
+
 ### What the format will not do
 
 The format does **sequence, wait, select, loop and read**. A node may _read_ a value through `$from` from a
@@ -1592,12 +1673,19 @@ listed decision nodes (an equality `switch`, a seeded `choice`, `setState`: sche
 a `default` branch of its own it is a `switch` in disguise; if it needs two values it is a function. Otherwise it
 is a behavior.
 
-**Budget.** Schema 1.6 ships params, `disable` and the nodes of [the section above](#the-schema-16-nodes), and stops: a 1.7 needs a written case that params and those nodes did not
-cover. The parity of scenario nodes and `ctx` members is kept in
+**Budget.** Schema 1.6 ships params, `disable` and the nodes of [the section above](#the-schema-16-nodes), and stops: a later version needs a written case that params and those nodes did not
+cover. Schema 1.8 adds [timeout edges](#timeout-edges-schema-18): a wait's other outcome, not a new verb or value. The parity of scenario nodes and `ctx` members is kept in
 [Scenario or behavior?](../analyses/scenario-or-behavior.md#node--ctx-parity).
 
 ## Changelog
 
+- **v1.8**: An edge may carry `kind: "timeout"`: out of a trigger wait it runs
+  when the wait's timeout expires, instead of failing the run; ordinary
+  successor selection ignores it. The graph validator gains
+  `timeoutEdgeOnNonWait`, `timeoutEdgeNeverFires`, `extraTimeoutEdge` and
+  `newerConstruct`. Purely additive — an edge without the field means what it
+  always meant, and `1.6` and older files remain valid. See
+  [the note](#timeout-edges-schema-18).
 - **v1.7 (`$match`)**: A `switch` case may be `{ "$match": { … } }` (operators `equals`, `in`, `gt`, `gte`, `lt`,
   `lte`, `exists`, `startsWith`, `endsWith`, `includes`, `not`; ANDed), and a `switch` `value` whose `$from` names
   nothing goes to a `{ "$match": { "exists": false } }` case. Adds the advisory `unknownMatcher`,
@@ -1607,8 +1695,7 @@ cover. The parity of scenario nodes and `ctx` members is kept in
 - **v1.7 (response)**: Adds the `$from` root `response` — the answer (`kind`, `action`, `messageId`, `payload`,
   `errorCode`, `errorDescription`, `errorDetails`) to the latest `ocppCall` of the branch — and the advisory
   `noResponseHeld` graph diagnostic. Purely additive — `1.6` and older files remain valid. See
-  [the note](#from-root-response-schema-17). (Version number: 1.7 was free on `main` when this landed; if the
-  timeout-edge change takes 1.7 first, this is renumbered.)
+  [the note](#from-root-response-schema-17).
 
 - **v1.6 (recordedFrom)**: Issue #654, step 2. Adds the optional top-level `recordedFrom` (`behaviorId`, `commit`, `seed`, `version`) that
   a scenario recorded from a behavior run carries. Shipped within 1.6, purely additive — informational, ignored by the runtime.

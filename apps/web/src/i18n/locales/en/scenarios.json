@@ -274,5 +274,9 @@
   "scenarios.addStep.structure.choiceHelp": "Adds a branch block with two weighted options, one picked at random. Drop steps into the lanes; the lanes meet again at the step that follows.",
   "scenarios.editor.cannot.laneEnds": "This lane already ends its branch.",
   "scenarios.editor.cannot.laneTargetNotLater": "Pick a step after this branch.",
-  "scenarios.editor.rangeHint": "The highlighted steps are the ones that would repeat."
+  "scenarios.editor.rangeHint": "The highlighted steps are the ones that would repeat.",
+  "scenarios.editor.issue.timeoutEdgeOnNonWait": "Step {{n}} ({{title}}) has a timeout edge, but it is not a wait with a timeout (or it ends its branch): the edge is never followed.",
+  "scenarios.editor.issue.timeoutEdgeNeverFires": "Step {{n}} ({{title}}) has a timeout edge, but its timeout is 0 or not set: the wait never times out, so the edge never runs.",
+  "scenarios.editor.issue.extraTimeoutEdge": "Step {{n}} ({{title}}) has several timeout edges: only the first one runs when the wait times out.",
+  "scenarios.editor.issue.newerConstruct": "This scenario uses a feature newer than the schema version it declares; it runs here, but an older simulator would ignore that feature."
 }

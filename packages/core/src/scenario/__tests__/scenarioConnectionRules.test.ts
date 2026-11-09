@@ -793,3 +793,205 @@ describe("switch $match case diagnostics", () => {
     expect(withCases([{ $match: { exists: true, gte: 1 } }, "x"])).toEqual([]);
   });
 });
+
+describe("validateScenarioGraph: timeout edges (schema 1.8)", () => {
+  const timeout = (source: string, target: string) => ({
+    ...edge(source, target),
+    id: `${source}~>${target}`,
+    kind: "timeout",
+  });
+  const wait = (id: string, seconds?: number) =>
+    node(id, "statusTrigger", {
+      targetStatus: "Charging",
+      ...(seconds === undefined ? {} : { timeout: seconds }),
+    });
+
+  it("marks the six trigger waits, and only them", () => {
+    const waits = Object.values(ScenarioNodeType).filter(
+      (type) => connectionRule(type).waits,
+    );
+    expect(waits.sort()).toEqual(
+      [
+        "connectionTrigger",
+        "csmsCallTrigger",
+        "remoteStartTrigger",
+        "remoteStopTrigger",
+        "reservationTrigger",
+        "statusTrigger",
+      ].sort(),
+    );
+  });
+
+  it("a timeout edge out of a wait that can expire is clean, and reaches its target", () => {
+    expect(
+      validateScenarioGraph({
+        nodes: [node("s", "start"), wait("w", 5), node("late")],
+        edges: [edge("s", "w"), timeout("w", "late")],
+      }),
+    ).toEqual([]);
+    // It does not count as a second ordinary edge (no extraOutgoing).
+    expect(
+      codes({
+        nodes: [node("s", "start"), wait("w", 5), node("a"), node("late")],
+        edges: [edge("s", "w"), edge("w", "a"), timeout("w", "late")],
+      }),
+    ).toEqual([]);
+  });
+
+  it("timeoutEdgeOnNonWait: out of a step, out of Start, out of a wait labelled End", () => {
+    expect(
+      validateScenarioGraph({
+        nodes: [node("s", "start"), node("d"), node("late")],
+        edges: [edge("s", "d"), timeout("d", "late")],
+      }),
+    ).toEqual([
+      {
+        code: "timeoutEdgeOnNonWait",
+        nodeId: "d",
+        edgeId: "d~>late",
+        severity: "warning",
+      },
+      // Never followed, so its target is unreachable.
+      { code: "unreachable", nodeId: "late", severity: "warning" },
+    ]);
+    expect(
+      codes({
+        nodes: [node("s", "start"), node("a")],
+        edges: [edge("s", "a"), timeout("s", "a")],
+      }),
+    ).toEqual(["timeoutEdgeOnNonWait"]);
+    expect(
+      codes({
+        nodes: [
+          node("s", "start"),
+          node("w", "statusTrigger", { label: "End", timeout: 5 }),
+          node("late"),
+        ],
+        edges: [edge("s", "w"), timeout("w", "late")],
+      }),
+    ).toEqual(["timeoutEdgeOnNonWait", "unreachable"]);
+  });
+
+  it("timeoutEdgeNeverFires (info): a wait without a timeout never expires", () => {
+    for (const seconds of [undefined, 0]) {
+      expect(
+        validateScenarioGraph({
+          nodes: [node("s", "start"), wait("w", seconds), node("late")],
+          edges: [edge("s", "w"), timeout("w", "late")],
+        }),
+      ).toEqual([
+        {
+          code: "timeoutEdgeNeverFires",
+          nodeId: "w",
+          edgeId: "w~>late",
+          severity: "info",
+        },
+        { code: "unreachable", nodeId: "late", severity: "warning" },
+      ]);
+    }
+  });
+
+  it("extraTimeoutEdge: only the first one runs", () => {
+    expect(
+      validateScenarioGraph({
+        nodes: [node("s", "start"), wait("w", 5), node("a"), node("b")],
+        edges: [edge("s", "w"), timeout("w", "a"), timeout("w", "b")],
+      }),
+    ).toEqual([
+      {
+        code: "extraTimeoutEdge",
+        nodeId: "w",
+        edgeId: "w~>b",
+        severity: "warning",
+      },
+      { code: "unreachable", nodeId: "b", severity: "warning" },
+    ]);
+  });
+
+  it("newerConstruct (info) when the file declares a version below 1.8", () => {
+    const def = {
+      nodes: [node("s", "start"), wait("w", 5), node("late")],
+      edges: [edge("s", "w"), timeout("w", "late")],
+    };
+    expect(validateScenarioGraph({ ...def, schemaVersion: "1.6" })).toEqual([
+      {
+        code: "newerConstruct",
+        edgeId: "w~>late",
+        severity: "info",
+        data: { since: "1.8", declared: "1.6" },
+      },
+    ]);
+    for (const schemaVersion of ["1.8", "1.10", "2.0", undefined, "x"]) {
+      expect(codes({ ...def, schemaVersion }), String(schemaVersion)).toEqual(
+        [],
+      );
+    }
+    // Without a timeout edge the version is never looked at.
+    expect(
+      codes({
+        nodes: [node("s", "start"), node("a")],
+        edges: [edge("s", "a")],
+        schemaVersion: "1.0",
+      }),
+    ).toEqual([]);
+  });
+
+  it("an edge with another kind is an ordinary edge", () => {
+    expect(
+      codes({
+        nodes: [node("s", "start"), node("a"), node("b")],
+        edges: [edge("s", "a"), { ...edge("a", "b"), kind: "other" }],
+      }),
+    ).toEqual([]);
+  });
+
+  it("the CALL analysis leaves a timed-out replace trigger with the state before it", () => {
+    const replace = node("t", "csmsCallTrigger", {
+      action: "Reset",
+      behavior: "replace",
+      timeout: 5,
+    });
+    const respond = node("r", "callResponse", { kind: "result" });
+    // After a timeout nothing was taken over: the callResponse may run
+    // without a CALL.
+    expect(
+      codes({
+        nodes: [node("s", "start"), replace, respond],
+        edges: [edge("s", "t"), edge("t", "r"), timeout("t", "r")],
+      }),
+    ).toEqual(["noCallHeld"]);
+    // Without a timeout the edge never runs, and the path is clean.
+    expect(
+      codes({
+        nodes: [
+          node("s", "start"),
+          { ...replace, data: { action: "Reset", behavior: "replace" } },
+          respond,
+        ],
+        edges: [edge("s", "t"), edge("t", "r"), timeout("t", "r")],
+      }),
+    ).toEqual(["timeoutEdgeNeverFires"]);
+    // A CALL held before a wait is still held on its timeout path.
+    expect(
+      codes({
+        nodes: [
+          node("s", "start"),
+          {
+            ...replace,
+            id: "t0",
+            data: { action: "Reset", behavior: "replace" },
+          },
+          wait("w", 5),
+          respond,
+          node("other"),
+        ],
+        edges: [
+          edge("s", "t0"),
+          edge("t0", "w"),
+          edge("w", "other"),
+          timeout("w", "r"),
+        ],
+      }),
+    ).toEqual(["callLeftOpen"]);
+  });
+});

@@ -6,6 +6,7 @@ import smartChargingJson from "./scenarios/smart-charging.json";
 import multiStatusMonitorJson from "./scenarios/multi-status-monitor.json";
 import statusTriggeredActionsJson from "./scenarios/status-triggered-actions.json";
 import remoteStartAutoMeterJson from "./scenarios/remote-start-auto-meter.json";
+import remoteStartTimeoutFallbackJson from "./scenarios/remote-start-timeout-fallback.json";
 
 // OCPP 1.6 Core certification scenarios (issue #110, first slice). TC
 // numbers follow the issue's own numbering, not an external test suite.
@@ -166,6 +167,7 @@ export const scenarioTemplates: ScenarioTemplate[] = [
   templateFromJson(multiStatusMonitorJson as ScenarioDefinition),
   templateFromJson(statusTriggeredActionsJson as ScenarioDefinition),
   templateFromJson(remoteStartAutoMeterJson as ScenarioDefinition),
+  templateFromJson(remoteStartTimeoutFallbackJson as ScenarioDefinition),
 
   // OCPP 1.6 Core certification scenarios (issue #110, first slice) —
   // grouped together so they surface as a block in the template picker.

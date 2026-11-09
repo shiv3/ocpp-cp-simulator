@@ -14,7 +14,9 @@ import WaitingExpectation from "../../../components/WaitingExpectation";
 import { formatElapsed } from "../../../lib/scenarioExpectation";
 import { isLiveRunState } from "../../../lib/scenarioRunState";
 import { deriveDisplayedSteps } from "../../../lib/scenarioSteps";
-import { deriveStepLayout, layoutSteps } from "../../../lib/stepLayout";
+import { recognizeBlockTree } from "../../../lib/blockTree";
+import { deriveStepLayout } from "../../../lib/stepLayout";
+import { isDrawableTree, treeSteps } from "../../../lib/stepTree";
 import {
   editScenarioUrl,
   scenarioEditTarget,
@@ -220,18 +222,25 @@ const ScenarioRunContent: React.FC<ScenarioRunContentProps> = ({
     return () => clearInterval(timer);
   }, [isRunning]);
 
+  const tree = useMemo(
+    () => (scenario ? recognizeBlockTree(scenario) : null),
+    [scenario],
+  );
+  // The Graph view still draws the one-fork layout; a shape it cannot draw
+  // is shown as steps.
   const layout = useMemo(
     () => (scenario ? deriveStepLayout(scenario) : null),
     [scenario],
   );
-  // The count follows what the body draws: the layout's steps, or the flat
+  const drawable = tree !== null && isDrawableTree(tree);
+  // The count follows what the body draws: the tree's steps, or the flat
   // list RunTimeline falls back to.
   const steps = useMemo(() => {
-    if (!scenario || !layout) return [];
-    return layout.supported
-      ? layoutSteps(layout)
+    if (!scenario || !tree) return [];
+    return isDrawableTree(tree)
+      ? treeSteps(tree)
       : deriveDisplayedSteps(scenario).steps;
-  }, [scenario, layout]);
+  }, [scenario, tree]);
   const executedCount = steps.filter((s) =>
     executedNodeIds.includes(s.id),
   ).length;
@@ -285,7 +294,7 @@ const ScenarioRunContent: React.FC<ScenarioRunContentProps> = ({
     );
   }
 
-  if (!scenario || !layout) {
+  if (!scenario || !layout || !tree) {
     return (
       <div>
         {closeButton && (
@@ -455,7 +464,7 @@ const ScenarioRunContent: React.FC<ScenarioRunContentProps> = ({
             </Link>
           </Button>
         )}
-        {!isPanel && layout.supported && (
+        {!isPanel && drawable && (
           <SegmentedControl
             label={t("scenarioRun.run.view")}
             options={VIEW_OPTIONS.map((o) => ({
@@ -514,14 +523,14 @@ const ScenarioRunContent: React.FC<ScenarioRunContentProps> = ({
             : "mt-4 rounded-[10px] border border-cx-border bg-cx-card p-4 shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none"
         }
       >
-        {!layout.supported ? (
+        {!drawable ? (
           <RunTimeline
             scenario={scenario}
             currentNodeId={currentNodeId}
             executedNodeIds={executedNodeIds}
             state={state}
           />
-        ) : view === "graph" ? (
+        ) : view === "graph" && layout.supported ? (
           <StepsGraphView
             layout={layout}
             currentNodeId={currentNodeId}
@@ -529,12 +538,19 @@ const ScenarioRunContent: React.FC<ScenarioRunContentProps> = ({
             state={state}
           />
         ) : (
-          <StepsView
-            layout={layout}
-            currentNodeId={currentNodeId}
-            executedNodeIds={executedNodeIds}
-            state={state}
-          />
+          <>
+            {view === "graph" && (
+              <p className="mb-2 text-xs text-cx-muted">
+                {t("scenarioRun.tree.graphFallback")}
+              </p>
+            )}
+            <StepsView
+              tree={tree}
+              currentNodeId={currentNodeId}
+              executedNodeIds={executedNodeIds}
+              state={state}
+            />
+          </>
         )}
       </div>
 

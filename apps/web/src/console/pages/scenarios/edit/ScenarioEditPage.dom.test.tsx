@@ -4,7 +4,8 @@ import type { Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { createEmptyScenario, insertStep } from "../../../lib/scenarioSteps";
-import { deriveStepLayout } from "../../../lib/stepLayout";
+import { recognizeBlockTree } from "../../../lib/blockTree";
+import { switchInLane } from "../../../test/treeFixtures";
 import {
   ScenarioNodeType,
   type DelayNodeData,
@@ -278,8 +279,8 @@ describe("ScenarioEditPage", () => {
     };
 
     await clickText("+ Add parallel branch");
-    // The chain forks at its last step; the new branch holds one Delay,
-    // selected in the inspector.
+    // START fans out: the chain is its first branch, the new branch holds
+    // one Delay, selected in the inspector.
     expect(
       container.querySelector('[data-testid="step-branches"]'),
     ).toBeTruthy();
@@ -303,12 +304,17 @@ describe("ScenarioEditPage", () => {
     await clickText("Save");
     await flush();
     const saved = saveScenarioDefinition.mock.calls[0][2];
-    const layout = deriveStepLayout(saved);
-    expect(layout.supported).toBe(true);
-    expect(layout.main).toHaveLength(2);
+    const fork = recognizeBlockTree(saved).root.blocks[0];
+    expect(fork?.kind === "fork" && fork.forkKind).toBe("start");
     expect(
-      layout.fork?.branches.map((b) => b.steps.map((n) => n.type)),
-    ).toEqual([[], [ScenarioNodeType.DELAY, ScenarioNodeType.METER_VALUE]]);
+      fork?.kind === "fork" &&
+        fork.lanes.map((l) =>
+          l.body.blocks.map((b) => (b.kind === "step" ? b.node.type : b.kind)),
+        ),
+    ).toEqual([
+      [ScenarioNodeType.STATUS_CHANGE, ScenarioNodeType.DELAY],
+      [ScenarioNodeType.DELAY, ScenarioNodeType.METER_VALUE],
+    ]);
   });
 
   it("catches a rejecting save, surfaces an error, and keeps the scenario dirty", async () => {
@@ -556,7 +562,7 @@ describe("ScenarioEditPage", () => {
     expect(container.textContent).not.toContain("+ branch");
   });
 
-  it("shows the loop in the Steps view and lets the last step's After-step select change it", async () => {
+  it("shows the loop in the Steps view; the back edge's After-step select is refused, pointing to Stop repeating", async () => {
     const saveScenarioDefinition = vi.fn(
       async (_cp: string, _c: number | null, def: ScenarioDefinition) => def,
     );
@@ -594,12 +600,117 @@ describe("ScenarioEditPage", () => {
     const select = container.querySelector<HTMLSelectElement>(
       'select[aria-label="After this step"]',
     )!;
+    // It goes back to the loop's first step: jumping elsewhere would undo
+    // the loop (editCapabilities: insideLoop).
     expect(select.value).toBe("notification-heartbeat");
+    expect(select.disabled).toBe(true);
+    expect(select.title).toBe(
+      "This step goes back to the start of its loop. To end the loop, use “Stop repeating” first.",
+    );
+    expect(hasUnsavedChanges(container)).toBe(false);
+
+    // The inspector's "Stop repeating": the loop goes, the step runs on to
+    // END through the same edge, and can jump again.
     await act(async () => {
-      select.value = "";
-      select.dispatchEvent(new Event("change", { bubbles: true }));
+      container
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label="Stop repeating"]',
+        )!
+        .click();
     });
     expect(container.querySelector("[data-loop-block]")).toBeNull();
+    const after = container.querySelector<HTMLSelectElement>(
+      'select[aria-label="After this step"]',
+    )!;
+    expect(after.disabled).toBe(false);
+    expect(after.value).toBe("");
+    await act(async () => {
+      Array.from(container.querySelectorAll("button"))
+        .find((b) => b.textContent?.trim() === "Save")!
+        .click();
+    });
+    await flush();
+    const saved = saveScenarioDefinition.mock.calls[0][2];
+    expect(saved.edges.find((e) => e.id === "e-delay-notify")).toMatchObject({
+      source: "delay-10s",
+      target: "end-1",
+    });
+    expect(saved.edges.map((e) => e.id)).toEqual(
+      loopFixture.edges.map((e) => e.id),
+    );
+  });
+
+  it("the After-step select says 'Go to' for a step ahead and 'Loop back to' only for one that comes back", async () => {
+    const fixture = switchInLane();
+    const service = createFakeChargePointService({
+      listScenarioDefinitions: vi.fn(async () => [fixture]),
+    });
+    const { container, root } = await renderConsole(
+      `/scenarios/edit?cp=CP-1&connector=1&id=${fixture.id}&view=steps`,
+      { service },
+    );
+    cleanup = () => unmount(root);
+    await flush();
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>(
+          '[data-step-id="b"] button[aria-label^="Select step"]',
+        )!
+        .click();
+    });
+    const options = Array.from(
+      container.querySelectorAll<HTMLOptionElement>(
+        'select[aria-label="After this step"] option',
+      ),
+    );
+    const text = (id: string) =>
+      options.find((o) => o.value === id)?.textContent ?? "";
+    // route reaches b: back; a (the other lane) does not: ahead.
+    expect(text("route")).toMatch(/^Loop back to step 1/);
+    expect(text("b")).toMatch(/^Loop back to step/);
+    expect(text("a")).toMatch(/^Go to step 2/);
+    expect(text("x")).toMatch(/^Go to step/);
+  });
+
+  it("the After-step select makes a lane's last step jump, through setLink", async () => {
+    const saveScenarioDefinition = vi.fn(
+      async (_cp: string, _c: number | null, def: ScenarioDefinition) => def,
+    );
+    const linear = linearFixture();
+    const service = createFakeChargePointService({
+      listScenarioDefinitions: vi.fn(async () => [linear]),
+      saveScenarioDefinition,
+    });
+    const { container, root } = await renderConsole(
+      "/scenarios/edit?cp=CP-1&connector=1&id=s1&view=steps",
+      { service },
+    );
+    cleanup = () => unmount(root);
+    await flush();
+    const delay = linear.nodes.find((n) => n.type === ScenarioNodeType.DELAY)!;
+    const status = linear.nodes.find(
+      (n) => n.type === ScenarioNodeType.STATUS_CHANGE,
+    )!;
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>(
+          `[data-step-id="${delay.id}"] button[aria-label^="Select step"]`,
+        )!
+        .click();
+    });
+    const select = container.querySelector<HTMLSelectElement>(
+      'select[aria-label="After this step"]',
+    )!;
+    expect(select.disabled).toBe(false);
+    expect(select.value).toBe("");
+    await act(async () => {
+      select.value = status.id;
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    // Back to step 1: the two steps now loop.
+    expect(
+      container.querySelector(`[data-loop-block][data-loop-to="${status.id}"]`),
+    ).toBeTruthy();
     expect(hasUnsavedChanges(container)).toBe(true);
   });
 

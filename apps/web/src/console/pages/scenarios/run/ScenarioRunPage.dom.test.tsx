@@ -459,19 +459,44 @@ describe("ScenarioRunPage", () => {
     );
   });
 
-  it("falls back to the flat timeline for a scenario it cannot lay out", async () => {
+  it("draws a shape the Graph view cannot lay out as steps (the block tree)", async () => {
     let def = linearFixture();
     const [a, b] = def.nodes.filter(
       (n) =>
         n.type !== ScenarioNodeType.START && n.type !== ScenarioNodeType.END,
     );
-    // b → a: a loop.
+    // A branch point with a loop: b → a beside b → END.
     def = {
       ...def,
       edges: [...def.edges, { id: "loop", source: b.id, target: a.id }],
     };
     const service = createFakeChargePointService({
       listScenarioDefinitions: vi.fn(async () => [def]),
+    });
+    const { container, root } = await renderConsole(
+      "/scenarios/run?cp=CP-1&connector=1&id=s1",
+      { service },
+    );
+    cleanup = () => unmount(root);
+    await flush();
+
+    expect(container.textContent).not.toContain("order approximate");
+    expect(container.textContent).toContain(
+      "The Graph view cannot draw this shape yet",
+    );
+    expect(container.querySelectorAll("[data-step-id]")).toHaveLength(2);
+  });
+
+  it("falls back to the flat timeline for a scenario without a START", async () => {
+    const def = linearFixture();
+    const start = def.nodes.find((n) => n.type === ScenarioNodeType.START)!;
+    const noStart = {
+      ...def,
+      nodes: def.nodes.filter((n) => n !== start),
+      edges: def.edges.filter((e) => e.source !== start.id),
+    };
+    const service = createFakeChargePointService({
+      listScenarioDefinitions: vi.fn(async () => [noStart]),
     });
     const { container, root } = await renderConsole(
       "/scenarios/run?cp=CP-1&connector=1&id=s1",

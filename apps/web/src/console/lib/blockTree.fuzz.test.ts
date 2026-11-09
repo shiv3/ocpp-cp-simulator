@@ -24,6 +24,7 @@ import {
   removeStep,
   setLaneHandle,
   setLink,
+  unwrapLoop,
   wrapInLoop,
 } from "./blockTree";
 import { deriveStepLayout } from "./stepLayout";
@@ -328,6 +329,17 @@ describe("block tree fuzz (xorshift, 2–12 nodes)", () => {
             );
             expect(out.nodes).toEqual(def.nodes);
           }
+          if (caps.unwrapLoop.ok) {
+            const out = run(`unwrapLoop ${nodeId}`, () =>
+              unwrapLoop(def, tree, nodeId),
+            );
+            // Back edges are only retargeted; an END may be added.
+            expect(out.nodes.slice(0, def.nodes.length)).toEqual(def.nodes);
+            expect(
+              out.edges.map((e) => e.id),
+              label("unwrapLoop"),
+            ).toEqual(def.edges.map((e) => e.id));
+          }
           const fork = forkOf(tree, nodeId);
           if (fork) {
             const laneIndex = Math.floor(rand() * fork.lanes.length);
@@ -377,6 +389,7 @@ describe("block tree fuzz (xorshift, 2–12 nodes)", () => {
       "addLane",
       "setLink",
       "wrapInLoop",
+      "unwrapLoop",
       "removeLane",
       "setLaneHandle",
     ]) {

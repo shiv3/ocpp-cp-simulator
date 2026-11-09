@@ -2,15 +2,13 @@ import type { Logger } from "../../shared/Logger";
 import { EventEmitter } from "../../shared/EventEmitter";
 import { realClock } from "../../shared/clock";
 import type { SimClock, TimerHandle } from "../../shared/clock";
+import type {
+  ChargePointHeartbeat,
+  HeartbeatServiceEvents,
+} from "../../domain/services/ChargePointHeartbeat";
 
-export interface HeartbeatServiceEvents {
-  /** Fired whenever the public state of the heartbeat changes (interval
-   *  set/cleared, heartbeat sent, etc.) so UI can render up-to-date info. */
-  stateChange: {
-    intervalSeconds: number;
-    lastSentAt: Date | null;
-  };
-}
+// Defined in domain (#575); re-exported for the existing import sites.
+export type { HeartbeatServiceEvents } from "../../domain/services/ChargePointHeartbeat";
 
 /**
  * OCPP 1.6 §4.6 Heartbeat.
@@ -28,7 +26,7 @@ export interface HeartbeatServiceEvents {
  * and therefore re-calls {@link notifyOutgoingCall}, chaining the next
  * timeout. `intervalSeconds = 0` disables the heartbeat entirely.
  */
-export class HeartbeatService {
+export class HeartbeatService implements ChargePointHeartbeat {
   private readonly _events = new EventEmitter<HeartbeatServiceEvents>();
   private _logger: Logger;
   private _timer: TimerHandle | null = null;

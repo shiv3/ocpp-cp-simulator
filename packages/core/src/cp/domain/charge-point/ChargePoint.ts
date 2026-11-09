@@ -1016,7 +1016,7 @@ export class ChargePoint {
     // so changes via ChangeConfiguration.req take effect immediately.
     this._configuration = ConfigurationStore.forChargePoint(
       this,
-      this._database,
+      this._repositories.configuration,
     );
     if (securityProfile !== undefined) {
       this._configuration.applyChange(

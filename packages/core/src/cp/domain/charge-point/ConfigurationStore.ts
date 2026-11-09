@@ -19,7 +19,10 @@ import {
   isSignedMeterMode,
   type SignedMeterMode,
 } from "../connector/SignedMeterData";
-import type { Database } from "../persistence/Database";
+import {
+  NoopConfigurationOverrideRepository,
+  type ConfigurationOverrideRepository,
+} from "../persistence/ConfigurationOverrideRepository";
 
 /**
  * Status returned from a ChangeConfiguration.req attempt. Mirrors
@@ -62,17 +65,17 @@ export type ConfigurationChangeListener = (
 
 /**
  * In-memory keyed store for OCPP standard Configuration Keys, with
- * SQLite persistence (via the injected {@link Database}) and listener
- * fan-out. Replaces the previous stateless `defaultConfiguration`
+ * persistence (via the injected {@link ConfigurationOverrideRepository})
+ * and listener fan-out. Replaces the previous stateless `defaultConfiguration`
  * function.
  *
  * Lookup is by canonical key name (e.g. `"HeartbeatInterval"`); the store
  * knows the type and `readonly` flag from the original `ConfigurationKey`
  * definitions in `ConfigurationKeys`.
  *
- * Overrides written via {@link applyChange} land in the `configuration`
- * table (`cp_id`, `key`, `value`). When `database` is null (legacy / test
- * path) the store stays in-memory only.
+ * Overrides written via {@link applyChange} are saved JSON-encoded through
+ * the repository (the `configuration` table with `--state-db`). When it is
+ * null (legacy / test path) the store stays in-memory only.
  */
 export class ConfigurationStore {
   private readonly values = new Map<string, ConfigurationValue>();
@@ -82,11 +85,16 @@ export class ConfigurationStore {
   /** Per-key checks run by `applyChange` before a value is stored. */
   private readonly changeGuards = new Map<string, ChangeGuard>();
 
+  private readonly overrides: ConfigurationOverrideRepository;
+
+  /** `_chargePointId` is kept for the callers' sake: the repository is
+   *  already bound to the charge point (#878). */
   constructor(
-    private readonly chargePointId: string,
+    _chargePointId: string,
     initial: Configuration,
-    private readonly database: Database | null = null,
+    overrides: ConfigurationOverrideRepository | null = null,
   ) {
+    this.overrides = overrides ?? new NoopConfigurationOverrideRepository();
     for (const entry of initial) {
       this.values.set(entry.key.name, entry);
     }
@@ -96,9 +104,9 @@ export class ConfigurationStore {
   /** Build a store from the canonical defaults plus any persisted overrides. */
   static forChargePoint(
     cp: ChargePoint,
-    database: Database | null = null,
+    overrides: ConfigurationOverrideRepository | null = null,
   ): ConfigurationStore {
-    return new ConfigurationStore(cp.id, defaultConfiguration(cp), database);
+    return new ConfigurationStore(cp.id, defaultConfiguration(cp), overrides);
   }
 
   /** All entries the store currently knows about (defaults + overrides). */
@@ -606,28 +614,18 @@ export class ConfigurationStore {
       ...(bounds.max !== undefined && { max: bounds.max }),
     };
     this.values.set(name, { key, value });
-    if (this.database) {
-      try {
-        const row = this.database.get<{ value: string }>(
-          "SELECT value FROM configuration WHERE cp_id = ? AND key = ?",
-          [this.chargePointId, name],
-        );
-        if (row) this.applyStoredOverride(name, row.value);
-      } catch (err) {
-        console.error("Failed to load config override:", err);
-      }
+    try {
+      const stored = this.overrides.get(name);
+      if (stored !== null) this.applyStoredOverride(name, stored);
+    } catch (err) {
+      console.error("Failed to load config override:", err);
     }
     return true;
   }
 
   private loadOverrides(): void {
-    if (!this.database) return;
     try {
-      const rows = this.database.all<{ key: string; value: string }>(
-        "SELECT key, value FROM configuration WHERE cp_id = ?",
-        [this.chargePointId],
-      );
-      for (const { key: name, value: raw } of rows) {
+      for (const { key: name, value: raw } of this.overrides.loadAll()) {
         this.applyStoredOverride(name, raw);
       }
     } catch (err) {
@@ -636,13 +634,8 @@ export class ConfigurationStore {
   }
 
   private persistOverride(name: string, value: ConfigurationValueType): void {
-    if (!this.database) return;
     try {
-      this.database.run(
-        "INSERT INTO configuration (cp_id, key, value) VALUES (?, ?, ?) " +
-          "ON CONFLICT (cp_id, key) DO UPDATE SET value = excluded.value",
-        [this.chargePointId, name, JSON.stringify(value)],
-      );
+      this.overrides.save(name, JSON.stringify(value));
     } catch (err) {
       console.error("Failed to persist config override:", err);
     }

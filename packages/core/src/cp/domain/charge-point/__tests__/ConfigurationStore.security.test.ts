@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import type { Database, SqlParam, SqlRow } from "../../persistence/Database";
+import type {
+  ConfigurationOverrideRepository,
+  StoredConfigurationOverride,
+} from "../../persistence/ConfigurationOverrideRepository";
 import type { ChargePoint } from "../ChargePoint";
 import { defaultConfiguration } from "../Configuration";
 import { ConfigurationStore } from "../ConfigurationStore";
@@ -12,10 +15,10 @@ const cpShape = {
 } as ChargePoint;
 
 function storeWithDefaults(
-  database: Database | null = null,
+  overrides: ConfigurationOverrideRepository | null = null,
   cpId = "cp-sec",
 ): ConfigurationStore {
-  return new ConfigurationStore(cpId, defaultConfiguration(cpShape), database);
+  return new ConfigurationStore(cpId, defaultConfiguration(cpShape), overrides);
 }
 
 function entry(store: ConfigurationStore, key: string) {
@@ -24,35 +27,21 @@ function entry(store: ConfigurationStore, key: string) {
   return found;
 }
 
-class MemoryConfigurationDatabase implements Database {
+/** One charge point's overrides, kept across the stores built on it. */
+class MemoryConfigurationOverrides implements ConfigurationOverrideRepository {
   private readonly rows = new Map<string, string>();
 
-  exec(): void {}
-
-  run(_sql: string, params: SqlParam[] = []): void {
-    const [cpId, key, value] = params;
-    if (typeof cpId !== "string" || typeof key !== "string") return;
-    this.rows.set(`${cpId}:${key}`, String(value));
+  loadAll(): StoredConfigurationOverride[] {
+    return Array.from(this.rows, ([key, value]) => ({ key, value }));
   }
 
-  all<T = SqlRow>(_sql: string, params: SqlParam[] = []): T[] {
-    const [cpId] = params;
-    if (typeof cpId !== "string") return [];
-
-    const prefix = `${cpId}:`;
-    return Array.from(this.rows.entries())
-      .filter(([compoundKey]) => compoundKey.startsWith(prefix))
-      .map(([compoundKey, value]) => ({
-        key: compoundKey.slice(prefix.length),
-        value,
-      })) as T[];
+  get(key: string): string | null {
+    return this.rows.get(key) ?? null;
   }
 
-  get<T = SqlRow>(): T | null {
-    return null;
+  save(key: string, value: string): void {
+    this.rows.set(key, value);
   }
-
-  close(): void {}
 }
 
 describe("ConfigurationStore security whitepaper keys", () => {
@@ -153,7 +142,7 @@ describe("ConfigurationStore security whitepaper keys", () => {
   });
 
   it("round-trips mutable security keys through persistence", () => {
-    const db = new MemoryConfigurationDatabase();
+    const db = new MemoryConfigurationOverrides();
     const first = storeWithDefaults(db);
 
     expect(first.applyChange("SecurityProfile", "3")).toBe("RebootRequired");

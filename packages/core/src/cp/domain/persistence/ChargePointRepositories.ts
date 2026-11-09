@@ -1,4 +1,5 @@
 import type { AuthorizationCacheRepository } from "./AuthorizationCacheRepository";
+import type { ConfigurationOverrideRepository } from "./ConfigurationOverrideRepository";
 import type { ConnectorSettingsRepository } from "./ConnectorSettingsRepository";
 
 /**
@@ -11,6 +12,8 @@ import type { ConnectorSettingsRepository } from "./ConnectorSettingsRepository"
 export interface ChargePointRepositories {
   /** The Authorization Cache entries (`authorization_cache`). */
   readonly authorizationCache: AuthorizationCacheRepository;
+  /** The configuration overrides (`configuration`). */
+  readonly configuration: ConfigurationOverrideRepository;
   /** Per-connector availability (`connector_settings`). */
   readonly connectorSettings: ConnectorSettingsRepository;
 }

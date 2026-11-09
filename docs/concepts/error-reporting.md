@@ -198,7 +198,11 @@ function describe(value: unknown): string {
 ```
 
 The `import type` is erased, so the module does not need the simulator's
-packages at run time. An adapter must never write to stdout (JSON Lines mode
+packages at run time. It type-checks only inside a checkout of this
+repository: `@ocpp-cp-simulator/contracts` is not published, and the npm
+package ships no type declarations. An adapter kept elsewhere declares the
+`ErrorReporter` and `ErrorReporterInit` shapes itself (copied from
+`packages/contracts/src/errorReporting.ts`) or drops the annotations. An adapter must never write to stdout (JSON Lines mode
 owns it) and must leave unhandled rejections and uncaught exceptions to the
 core (turn off the SDK's own global handlers).
 

@@ -6,10 +6,19 @@ import type { NodeFormComponentProps, NodeFormData } from "./types";
 
 type Option = { weight?: number; label?: string };
 
-/** The weight the executor draws with (absent: 1), or null when it fails
- *  the run (not a number above 0). */
-function effectiveWeight(option: Option): number | null {
-  const weight = option.weight ?? 1;
+/** An option as the file may hold it: an object, or anything else (null, a
+ *  number), which the executor reads as an option without fields. */
+type Entry = Option | null | undefined | string | number | boolean | unknown[];
+
+function isOption(entry: Entry): entry is Option {
+  return typeof entry === "object" && entry !== null && !Array.isArray(entry);
+}
+
+/** The weight the executor draws with (`option?.weight ?? 1`: absent, or
+ *  an entry that is not an object, is 1), or null when it fails the run
+ *  (not a number above 0). */
+function effectiveWeight(entry: Entry): number | null {
+  const weight = isOption(entry) ? (entry.weight ?? 1) : 1;
   return typeof weight === "number" && Number.isFinite(weight) && weight > 0
     ? weight
     : null;
@@ -26,8 +35,8 @@ export default function ChoiceForm({
 }: NodeFormComponentProps<NodeFormData>) {
   const { t } = useTranslation();
   const id = useId();
-  const options: Option[] = Array.isArray(value.options)
-    ? (value.options as Option[])
+  const options: Entry[] = Array.isArray(value.options)
+    ? (value.options as Entry[])
     : [];
   const lanes = useIndexedLanes({
     items: options,
@@ -39,7 +48,9 @@ export default function ChoiceForm({
   const update = (index: number, patch: Option) =>
     onChange({
       ...value,
-      options: options.map((o, i) => (i === index ? { ...o, ...patch } : o)),
+      options: options.map((o, i) =>
+        i === index ? { ...(isOption(o) ? o : {}), ...patch } : o,
+      ),
     });
   const weights = options.map(effectiveWeight);
   const total = weights.reduce<number>((sum, w) => sum + (w ?? 0), 0);
@@ -59,8 +70,10 @@ export default function ChoiceForm({
           </p>
         )}
         <ol className="space-y-2">
-          {options.map((option, index) => {
+          {options.map((entry, index) => {
             const name = `option-${index}`;
+            const invalid = !isOption(entry);
+            const option: Option = isOption(entry) ? entry : {};
             const weight = weights[index];
             const share =
               weight !== null && weight !== undefined && total > 0
@@ -76,23 +89,29 @@ export default function ChoiceForm({
                   <span className="shrink-0 font-mono text-xs text-secondary">
                     {name}
                   </span>
-                  <input
-                    type="text"
-                    aria-label={t("scenarioEditor.choice.optionLabelOf", {
-                      name,
-                    })}
-                    placeholder={t("scenarioEditor.choice.optionLabel")}
-                    className="input-base min-w-0 flex-1 text-sm"
-                    value={option.label ?? ""}
-                    onChange={(event) =>
-                      update(index, {
-                        label:
-                          event.target.value === ""
-                            ? undefined
-                            : event.target.value,
-                      })
-                    }
-                  />
+                  {invalid ? (
+                    <span className="min-w-0 flex-1 truncate font-mono text-xs text-amber-700 dark:text-amber-400">
+                      {JSON.stringify(entry) ?? "undefined"}
+                    </span>
+                  ) : (
+                    <input
+                      type="text"
+                      aria-label={t("scenarioEditor.choice.optionLabelOf", {
+                        name,
+                      })}
+                      placeholder={t("scenarioEditor.choice.optionLabel")}
+                      className="input-base min-w-0 flex-1 text-sm"
+                      value={option.label ?? ""}
+                      onChange={(event) =>
+                        update(index, {
+                          label:
+                            event.target.value === ""
+                              ? undefined
+                              : event.target.value,
+                        })
+                      }
+                    />
+                  )}
                   <RowActions
                     index={index}
                     count={options.length}
@@ -101,6 +120,26 @@ export default function ChoiceForm({
                     onRemove={() => lanes.remove(index)}
                   />
                 </div>
+                {invalid && (
+                  <div className="space-y-1">
+                    <p
+                      role="alert"
+                      className="text-xs text-amber-700 dark:text-amber-400"
+                    >
+                      {t("scenarioEditor.choice.optionNotObject", {
+                        name,
+                        value: JSON.stringify(entry) ?? "undefined",
+                      })}
+                    </p>
+                    <button
+                      type="button"
+                      className="btn-secondary px-2 py-1 text-xs"
+                      onClick={() => update(index, {})}
+                    >
+                      {t("scenarioEditor.choice.replaceOption")}
+                    </button>
+                  </div>
+                )}
                 <div className="flex items-center gap-2">
                   <label
                     htmlFor={`${id}-weight-${index}`}
@@ -110,6 +149,7 @@ export default function ChoiceForm({
                   </label>
                   <input
                     id={`${id}-weight-${index}`}
+                    disabled={invalid}
                     type="number"
                     className="input-base w-20 shrink-0 text-sm"
                     value={option.weight ?? ""}
@@ -158,10 +198,11 @@ export default function ChoiceForm({
             );
           })}
         </ol>
+        {lanes.addConfirm()}
         <button
           type="button"
           className="btn-secondary px-2 py-1 text-xs"
-          onClick={() => onChange({ ...value, options: [...options, {}] })}
+          onClick={() => lanes.add({})}
         >
           {t("scenarioEditor.choice.add")}
         </button>

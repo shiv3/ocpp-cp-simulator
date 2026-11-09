@@ -47,6 +47,7 @@ export default function NotifyForm({
         optional
         types={["number"]}
         integer
+        min={0}
         stateKeys={context?.stateKeys}
         defaultFrom={{ root: "call", path: "payload.requestId" }}
         onChange={(requestId) => onChange({ ...value, requestId })}

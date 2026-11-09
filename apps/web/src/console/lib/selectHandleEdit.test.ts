@@ -7,6 +7,7 @@ import {
   ScenarioNodeType,
 } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import {
+  appendItem,
   moveItem,
   removeItem,
 } from "../../components/scenario/forms/scenarioValue";
@@ -248,5 +249,74 @@ describe("applyChoiceOptionEdit", () => {
     const after = applyChoiceOptionEdit(def, "pick", next, mapping);
     expect(lanePicks(after, "pick")).toEqual({ one: "one", three: "three" });
     expect(handleIssues(after)).toEqual([]);
+  });
+});
+
+describe("adding an item over a handle the file left an edge on (L1)", () => {
+  /** cases a / b, and a leftover edge on case-2 (unpickable so far). */
+  function withDeadEdge(): ScenarioDefinition {
+    const def = switchScenario();
+    (def.nodes[1]!.data as { cases: unknown[] }).cases = ["a", "b"];
+    def.edges.push({
+      id: "e-dead",
+      source: "route",
+      target: "stepD",
+      sourceHandle: "case-2",
+    });
+    return def;
+  }
+
+  it("kept: the edge stays and the new case picks it", () => {
+    const def = withDeadEdge();
+    const { next, mapping } = appendItem(["a", "b"] as unknown[], "");
+    expect(edgesRemovedBy(def, "route", "case", mapping)).toEqual([]);
+    const after = applySwitchCaseEdit(def, "route", next, mapping);
+    expect(after.edges).toEqual(def.edges);
+    expect((after.nodes[1]!.data as { cases: unknown[] }).cases).toEqual([
+      "a",
+      "b",
+      "",
+    ]);
+  });
+
+  it("detached: that edge alone goes, every other edge stays", () => {
+    const def = withDeadEdge();
+    def.edges.push({
+      id: "e-dead-2",
+      source: "route",
+      target: "end",
+      sourceHandle: "case-2",
+    });
+    const { next, mapping } = appendItem(["a", "b"] as unknown[], "", true);
+    expect(edgesRemovedBy(def, "route", "case", mapping)).toEqual([
+      "e-dead",
+      "e-dead-2",
+    ]);
+    const after = applySwitchCaseEdit(def, "route", next, mapping);
+    expect(after.edges.map((e) => e.id)).toEqual(
+      def.edges
+        .map((e) => e.id)
+        .filter((id) => id !== "e-dead" && id !== "e-dead-2"),
+    );
+    expect(after.edges.filter((e) => e.source === "route")).toEqual(
+      def.edges.filter(
+        (e) => e.source === "route" && !e.id.startsWith("e-dead"),
+      ),
+    );
+  });
+
+  it("works the same for a choice's options", () => {
+    const def = choiceScenario();
+    def.edges.push({
+      id: "e-dead",
+      source: "pick",
+      target: "end",
+      sourceHandle: "option-3",
+    });
+    const opts = (def.nodes[1]!.data as { options: object[] }).options;
+    const { next, mapping } = appendItem(opts, {}, true);
+    const after = applyChoiceOptionEdit(def, "pick", next, mapping);
+    expect(after.edges.map((e) => e.id)).not.toContain("e-dead");
+    expect(after.edges).toHaveLength(def.edges.length - 1);
   });
 });

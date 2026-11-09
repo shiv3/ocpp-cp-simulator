@@ -16,9 +16,14 @@ export interface NodeFormContext {
   /** Where the lane on `handle` (`case-<n>`, `default`, `option-<n>`) leads:
    *  the first edge out of the step with that handle; null: none yet. */
   laneTarget?: (handle: string) => LaneTarget | null;
+  /** How many edges leave the step on `handle` (only the first runs; a
+   *  removal takes them all). */
+  laneEdgeCount?: (handle: string) => number;
   /** Stores `next` and moves the step's `case-<n>` / `option-<n>` edges
    *  with their items (`mapping`: old index → new index, null: removed,
-   *  whose edges go too), in one change. Absent: a plain `onChange`. */
+   *  whose edges go too; an index past the old list names a handle with
+   *  no item, null drops its edges), in one change. Absent: a plain
+   *  `onChange`. */
   onReindex?: (next: NodeFormData, mapping: IndexMapping) => void;
 }
 

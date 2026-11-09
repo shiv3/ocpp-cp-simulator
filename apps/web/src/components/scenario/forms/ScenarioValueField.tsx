@@ -28,6 +28,9 @@ export interface ScenarioValueFieldProps {
   types?: readonly ConstantType[];
   /** A number must be whole (a request id). */
   integer?: boolean;
+  /** The least number allowed (a request id: 0). A `$from` is not
+   *  checked: the run checks what it reads. */
+  min?: number;
   /** The value may be absent: "Not set" is offered. */
   optional?: boolean;
   /** The keys setState steps store, offered under `state`. */
@@ -78,6 +81,7 @@ export function ScenarioValueField({
   allowFrom = true,
   types = CONSTANT_TYPES,
   integer = false,
+  min,
   optional = false,
   stateKeys = [],
   defaultFrom = { root: "connector", path: "status" },
@@ -129,9 +133,10 @@ export function ScenarioValueField({
   const pickType = (next: TypeChoice) => {
     setPinJson(next === "json");
     if (next === "unset") return emit(undefined);
-    let converted = convertConstant(value, next);
-    if (next === "number" && integer && typeof converted === "number") {
-      converted = Math.trunc(converted);
+    const converted = convertConstant(value, next);
+    if (next === "number" && typeof converted === "number") {
+      const whole = integer ? Math.trunc(converted) : converted;
+      return emit(min !== undefined && whole < min ? min : whole);
     }
     emit(converted);
   };
@@ -225,6 +230,7 @@ export function ScenarioValueField({
             type={typeChoice}
             value={value}
             integer={integer}
+            min={min}
             ariaLabel={inputLabel ?? label}
             onChange={(next) => {
               // What is typed as JSON stays JSON, even "text" or 1.
@@ -310,12 +316,14 @@ function ConstantInput({
   type,
   value,
   integer,
+  min,
   ariaLabel,
   onChange,
 }: {
   type: TypeChoice;
   value: unknown;
   integer: boolean;
+  min: number | undefined;
   ariaLabel: string;
   onChange: (value: unknown) => void;
 }) {
@@ -359,6 +367,12 @@ function ConstantInput({
             if (integer && !Number.isInteger(n)) {
               return { error: "scenarioEditor.value.integerInvalid" };
             }
+            if (min !== undefined && n < min) {
+              return {
+                error: "scenarioEditor.value.belowMin",
+                params: { min },
+              };
+            }
             return { value: n };
           }}
           onChange={onChange}
@@ -385,10 +399,17 @@ function ConstantInput({
   }
 }
 
-type Parsed = { value: unknown } | { error: MessageKey };
+function problemOf(parsed: Parsed): ParseError | null {
+  return "error" in parsed ? parsed : null;
+}
+
+type ParseError = { error: MessageKey; params?: { min: number } };
+type Parsed = { value: unknown } | ParseError;
 
 /** Text kept as a local draft: what does not parse is reported beside the
- *  field and the last valid value stays stored. */
+ *  field and the last valid value stays stored. A stored value that does
+ *  not pass (a negative request id in the file) shows as it is, with the
+ *  same report, and stays until edited. */
 function DraftInput({
   ariaLabel,
   value,
@@ -408,14 +429,16 @@ function DraftInput({
 }) {
   const { t } = useTranslation();
   const [draft, setDraft] = useState(() => format(value));
-  const [error, setError] = useState<MessageKey | null>(null);
+  const [error, setError] = useState<ParseError | null>(() =>
+    problemOf(parse(format(value))),
+  );
 
   // Follow a value changed from outside, not the echo of the draft.
   useEffect(() => {
     const parsed = parse(draft);
     if ("value" in parsed && same(parsed.value, value)) return;
     setDraft(format(value));
-    setError(null);
+    setError(problemOf(parse(format(value))));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
 
@@ -423,7 +446,7 @@ function DraftInput({
     setDraft(text);
     const parsed = parse(text);
     if ("error" in parsed) {
-      setError(parsed.error);
+      setError(parsed);
       return;
     }
     setError(null);
@@ -453,7 +476,7 @@ function DraftInput({
       )}
       {error !== null && (
         <p role="alert" className="text-xs text-red-600 dark:text-red-400">
-          {t(error)}
+          {t(error.error, error.params ?? {})}
         </p>
       )}
     </div>

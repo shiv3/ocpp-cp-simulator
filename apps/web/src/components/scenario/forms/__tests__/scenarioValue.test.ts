@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { ScenarioNodeType } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import {
+  appendItem,
   collectStateKeys,
   convertConstant,
   fromValue,
@@ -124,5 +125,55 @@ describe("list edits", () => {
   it("compares as JSON (key order does not matter, types do)", () => {
     expect(jsonEqual({ a: 1, b: [2] }, { b: [2], a: 1 })).toBe(true);
     expect(jsonEqual(1, "1")).toBe(false);
+  });
+});
+
+describe("pathAdvice: the structure resolveFrom walks (L4)", () => {
+  it.each([
+    ["charger", "connectorIds"],
+    ["charger", "connectorIds.0"],
+    ["charger", "connectorIds.12"],
+    ["connector", "power"],
+    ["connector", "power.acceptedW"],
+    ["connector", "power.limitedBy"],
+    ["call", "payload"],
+    ["call", "payload.items.0.id"],
+    ["call", "messageId"],
+  ] as const)("is quiet on %s.%s", (root, path) => {
+    expect(pathAdvice(root, path, [])).toBeNull();
+  });
+
+  it.each([
+    ["charger", "connectorIds.x"],
+    ["charger", "connectorIds.01"],
+    ["charger", "connectorIds.0.id"],
+    ["charger", "status.code"],
+    ["connector", "power.watts"],
+    ["connector", "powerX"],
+    ["connector", "toString"],
+    ["call", "action.name"],
+    ["call", "payloads"],
+  ] as const)("flags %s.%s as unknown", (root, path) => {
+    expect(pathAdvice(root, path, [])).toBe("unknownField");
+  });
+
+  it("flags an empty step as incomplete", () => {
+    expect(pathAdvice("connector", "power..soc", [])).toBe("incomplete");
+    expect(pathAdvice("charger", ".id", [])).toBe("incomplete");
+  });
+});
+
+describe("appendItem (L1)", () => {
+  it("keeps every index and, kept, leaves the new handle alone", () => {
+    expect(appendItem(["a", "b"], "")).toEqual({
+      next: ["a", "b", ""],
+      mapping: [0, 1],
+    });
+  });
+  it("with detach, names the new index as removed", () => {
+    expect(appendItem(["a", "b"], "", true)).toEqual({
+      next: ["a", "b", ""],
+      mapping: [0, 1, null],
+    });
   });
 });

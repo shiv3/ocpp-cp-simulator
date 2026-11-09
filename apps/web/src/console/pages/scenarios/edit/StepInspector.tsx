@@ -69,6 +69,10 @@ function formContext(
         ? "option"
         : null;
   if (prefix === null) return context;
+  context.laneEdgeCount = (handle) =>
+    scenario.edges.filter(
+      (e) => e.source === node.id && e.sourceHandle === handle,
+    ).length;
   let layout: ReturnType<typeof deriveStepLayout> | null = null;
   context.laneTarget = (handle): LaneTarget | null => {
     // The executor follows the first edge on a handle.

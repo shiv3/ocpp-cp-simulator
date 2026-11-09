@@ -323,6 +323,23 @@ describe("NODE_FORM_REGISTRY", () => {
     }
   });
 
+  it("keeps malformed switch cases and non-object options as authored", () => {
+    const sw = NODE_FORM_REGISTRY[ScenarioNodeType.SWITCH];
+    const cases = { a: 1 };
+    const swData = sw.formToNodeData(
+      sw.nodeDataToForm({ label: "S", value: 1, cases } as never),
+    ) as unknown as { cases: unknown };
+    expect(swData.cases).toEqual(cases);
+    const ch = NODE_FORM_REGISTRY[ScenarioNodeType.CHOICE];
+    const chData = ch.formToNodeData(
+      ch.nodeDataToForm({
+        label: "C",
+        options: [null, { weight: 2 }],
+      } as never),
+    ) as unknown as { options: unknown[] };
+    expect(chData.options).toEqual([null, { weight: 2 }]);
+  });
+
   it("keeps the delay extensions out of a plain delay (#654)", () => {
     const entry = NODE_FORM_REGISTRY[ScenarioNodeType.DELAY];
     const plain = entry.formToNodeData({

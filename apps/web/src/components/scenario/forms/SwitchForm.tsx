@@ -24,7 +24,10 @@ export default function SwitchForm({
   context,
 }: NodeFormComponentProps<NodeFormData>) {
   const { t } = useTranslation();
-  const cases: unknown[] = Array.isArray(value.cases) ? value.cases : [];
+  // Cases that are not a list (or missing) fail the run; they stay as the
+  // file has them until the user replaces them.
+  const casesIsList = Array.isArray(value.cases);
+  const cases: unknown[] = casesIsList ? (value.cases as unknown[]) : [];
   const lanes = useIndexedLanes({
     items: cases,
     prefix: "case",
@@ -59,6 +62,31 @@ export default function SwitchForm({
         <div className="text-xs font-semibold text-primary">
           {t("scenarioEditor.switch.cases")}
         </div>
+        {!casesIsList && (
+          <div
+            data-testid="switch-cases-not-array"
+            className="space-y-1.5 rounded border border-amber-400 p-2"
+          >
+            <p
+              role="alert"
+              className="text-xs text-amber-700 dark:text-amber-400"
+            >
+              {t("scenarioEditor.switch.casesNotArray")}
+            </p>
+            <pre className="overflow-x-auto font-mono text-xs text-secondary">
+              {value.cases === undefined
+                ? t("scenarioEditor.switch.casesMissing")
+                : JSON.stringify(value.cases)}
+            </pre>
+            <button
+              type="button"
+              className="btn-secondary px-2 py-1 text-xs"
+              onClick={() => onChange({ ...value, cases: [] })}
+            >
+              {t("scenarioEditor.switch.replaceCases")}
+            </button>
+          </div>
+        )}
         <ol className="space-y-2">
           {cases.map((item, index) => {
             const name = `case-${index}`;
@@ -119,13 +147,16 @@ export default function SwitchForm({
             <LaneLine context={context} handle="default" />
           </li>
         </ol>
-        <button
-          type="button"
-          className="btn-secondary px-2 py-1 text-xs"
-          onClick={() => onChange({ ...value, cases: [...cases, ""] })}
-        >
-          {t("scenarioEditor.switch.addCase")}
-        </button>
+        {lanes.addConfirm()}
+        {casesIsList && (
+          <button
+            type="button"
+            className="btn-secondary px-2 py-1 text-xs"
+            onClick={() => lanes.add("")}
+          >
+            {t("scenarioEditor.switch.addCase")}
+          </button>
+        )}
         <p className="text-xs text-muted">
           {t("scenarioEditor.switch.casesHelp")}
         </p>

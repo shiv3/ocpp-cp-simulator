@@ -206,4 +206,37 @@ describe("ScenarioValueField", () => {
     ).not.toContain("Read from…");
     expect(typeSelect().value).toBe("json");
   });
+
+  it("with min 0, rejects a negative number but keeps $from (L3)", async () => {
+    await render(5, {
+      optional: true,
+      types: ["number"],
+      integer: true,
+      min: 0,
+    });
+    await type(byLabel<HTMLInputElement>("Value"), "-1");
+    expect(values).toEqual([]);
+    expect(document.body.textContent).toMatch(/Must be at least 0/);
+    await type(byLabel<HTMLInputElement>("Value"), "0");
+    expect(values.at(-1)).toBe(0);
+    await click("Read from…");
+    expect(values.at(-1)).toEqual({ $from: "connector.status" });
+  });
+
+  it("shows a stored negative as it is, with the notice (L3)", async () => {
+    await render(-3, { types: ["number"], integer: true, min: 0 });
+    expect(byLabel<HTMLInputElement>("Value").value).toBe("-3");
+    expect(document.body.textContent).toMatch(/Must be at least 0/);
+    expect(values).toEqual([]);
+  });
+
+  it("is quiet on a deep known path, notes an unknown one softly (L4)", async () => {
+    await render({ $from: "charger.connectorIds.0" });
+    expect(document.body.textContent).not.toMatch(/known/);
+    await type(byLabel<HTMLInputElement>("Path of Value"), "power");
+    expect(document.body.textContent).toMatch(/it may still resolve/);
+    await select(byLabel<HTMLSelectElement>("Root of Value"), "connector");
+    await type(byLabel<HTMLInputElement>("Path of Value"), "power");
+    expect(document.body.textContent).not.toMatch(/it may still resolve/);
+  });
 });

@@ -244,6 +244,182 @@ describe("StepInspector: choice", () => {
   });
 });
 
+const routeData = () =>
+  current!.nodes.find((n) => n.id === "route")!.data as unknown as {
+    cases?: unknown;
+    options?: unknown[];
+  };
+
+/** cases a / b, plus a leftover edge on case-2 (never picked so far). */
+function switchWithDeadEdge(): ScenarioDefinition {
+  const def = switchScenario();
+  def.edges.push({
+    id: "e-dead",
+    source: "route",
+    target: "stepB",
+    sourceHandle: "case-2",
+  });
+  return def;
+}
+
+describe("StepInspector: adding over a leftover edge (L1)", () => {
+  it("asks before reviving it, and Cancel adds nothing", async () => {
+    await render(<Editor initial={switchWithDeadEdge()} />);
+    const before = current!;
+    await clickText("Add case");
+    const question = document.body.querySelector('[role="alertdialog"]');
+    expect(question?.textContent).toMatch(
+      /case-2 already has an edge in the file, to (Step \d+ · )?stepB:/,
+    );
+    expect(current).toBe(before);
+    await clickText("Cancel");
+    expect(document.body.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(current).toBe(before);
+  });
+
+  it("keeps the edge: the new case runs it", async () => {
+    await render(<Editor initial={switchWithDeadEdge()} />);
+    await clickText("Add case");
+    await clickText("Add, keep the edge");
+    expect(routeData().cases).toEqual(["a", "b", ""]);
+    expect(current!.edges.map((e) => e.id)).toContain("e-dead");
+    expect(lane("case-2")).toMatch(/stepB/);
+  });
+
+  it("detaches the edge: only that edge goes", async () => {
+    await render(<Editor initial={switchWithDeadEdge()} />);
+    const edges = current!.edges;
+    await clickText("Add case");
+    await clickText("Add, detach the edge");
+    expect(routeData().cases).toEqual(["a", "b", ""]);
+    expect(current!.edges).toEqual(edges.filter((e) => e.id !== "e-dead"));
+    expect(lane("case-2")).toMatch(/no step yet/);
+  });
+
+  const choiceWithDeadEdge = () => {
+    const def = choiceScenario();
+    def.edges.push({
+      id: "e-dead",
+      source: "route",
+      target: "end",
+      sourceHandle: "option-2",
+    });
+    return def;
+  };
+
+  it("asks the same for a choice option: detach", async () => {
+    await render(<Editor initial={choiceWithDeadEdge()} />);
+    await clickText("Add option");
+    expect(
+      document.body.querySelector('[role="alertdialog"]')?.textContent,
+    ).toMatch(/option-2 already has an edge in the file, to End of scenario/);
+    await clickText("Add, detach the edge");
+    expect(routeData().options).toHaveLength(3);
+    expect(current!.edges.map((e) => e.id)).not.toContain("e-dead");
+  });
+
+  it("asks the same for a choice option: keep", async () => {
+    await render(<Editor initial={choiceWithDeadEdge()} />);
+    await clickText("Add option");
+    await clickText("Add, keep the edge");
+    expect(routeData().options).toHaveLength(3);
+    expect(current!.edges.map((e) => e.id)).toContain("e-dead");
+    expect(lane("option-2")).toMatch(/End of scenario/);
+  });
+});
+
+describe("StepInspector: removal names every edge (L2)", () => {
+  it("counts the edges a removal takes", async () => {
+    const def = switchScenario();
+    def.edges.push({
+      id: "e-a2",
+      source: "route",
+      target: "end",
+      sourceHandle: "case-0",
+    });
+    await render(<Editor initial={def} />);
+    await clickLabel("Remove case-0");
+    expect(
+      document.body.querySelector('[role="alertdialog"]')?.textContent,
+    ).toMatch(
+      /case-0 has 2 edges \(only the first, to Step \d+ · stepA, runs\)/,
+    );
+    await clickText("Remove with its 2 edges");
+    expect(current!.edges.map((e) => e.id)).not.toContain("e-a");
+    expect(current!.edges.map((e) => e.id)).not.toContain("e-a2");
+  });
+});
+
+describe("StepInspector: malformed lists stay as the file has them", () => {
+  it("cases that are not a list: notice, untouched, replaced on request (L5)", async () => {
+    const def = switchScenario();
+    (def.nodes[1]!.data as unknown as { cases: unknown }).cases = {
+      a: 1,
+    };
+    await render(<Editor initial={def} />);
+    const notice = document.body.querySelector(
+      '[data-testid="switch-cases-not-array"]',
+    );
+    expect(notice?.textContent).toMatch(/not a list/);
+    expect(notice?.textContent).toMatch(/\{"a":1\}/);
+    expect(
+      Array.from(document.body.querySelectorAll("button")).map((b) =>
+        b.textContent?.trim(),
+      ),
+    ).not.toContain("Add case");
+
+    // Another edit on the step leaves the cases as they are.
+    const valueText = document.body.querySelector<HTMLInputElement>(
+      '[aria-label="Path of Value"]',
+    )!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value",
+      )!.set!.call(valueText, "other");
+      valueText.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(routeData().cases).toEqual({ a: 1 });
+
+    await clickText("Replace with an empty list");
+    expect(routeData().cases).toEqual([]);
+    expect(
+      document.body.querySelector('[data-testid="switch-cases-not-array"]'),
+    ).toBeNull();
+  });
+
+  it("a null option: an invalid row drawn with weight 1, no crash (L6)", async () => {
+    const def = choiceScenario();
+    (def.nodes[1]!.data as unknown as { options: unknown[] }).options = [
+      null,
+      { weight: 3 },
+    ];
+    await render(<Editor initial={def} />);
+    const row = document.body.querySelector('[data-testid="choice-option-0"]');
+    expect(row?.textContent).toMatch(/option-0 is null, not an option/);
+    expect(
+      document.body.querySelector('[data-testid="choice-share-0"]')
+        ?.textContent,
+    ).toBe("25%");
+
+    // Editing another option keeps the null entry as it is.
+    const label = document.body.querySelector<HTMLInputElement>(
+      '[aria-label="Label of option-1"]',
+    )!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value",
+      )!.set!.call(label, "y");
+      label.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(routeData().options).toEqual([null, { weight: 3, label: "y" }]);
+
+    await clickText("Replace with an empty option");
+    expect(routeData().options).toEqual([{}, { weight: 3, label: "y" }]);
+  });
+});
+
 describe("StepInspector: read-only", () => {
   it("renders the switch inspector disabled, with its lanes", async () => {
     const def = switchScenario();

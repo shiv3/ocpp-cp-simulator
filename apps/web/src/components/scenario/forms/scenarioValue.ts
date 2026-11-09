@@ -154,27 +154,75 @@ export function pathSuggestions(
 
 export type PathAdvice = "incomplete" | "unknownField" | "unknownStateKey";
 
+/** What a station root reports, as resolveFrom.ts walks it: a leaf (a
+ *  string, a number or null), a list read by index, or an object of named
+ *  fields. Any prefix names something (`connector.power` is the object). */
+type FieldShape = "leaf" | "list" | { readonly [key: string]: FieldShape };
+
+const STATION_FIELDS: Record<"charger" | "connector", FieldShape> = {
+  charger: {
+    id: "leaf",
+    ocppVersion: "leaf",
+    status: "leaf",
+    connectorIds: "list",
+  },
+  connector: {
+    id: "leaf",
+    status: "leaf",
+    availability: "leaf",
+    transactionId: "leaf",
+    idTag: "leaf",
+    power: {
+      acceptedW: "leaf",
+      offeredW: "leaf",
+      soc: "leaf",
+      limitedBy: "leaf",
+    },
+  },
+};
+
+/** Whether `segments` walk `shape` to something: a field of an object, an
+ *  index (`0`, `12`) of a list. */
+function walksTo(shape: FieldShape, segments: readonly string[]): boolean {
+  let current = shape;
+  for (const segment of segments) {
+    if (current === "leaf") return false;
+    if (current === "list") {
+      if (!/^(0|[1-9][0-9]*)$/.test(segment)) return false;
+      current = "leaf";
+      continue;
+    }
+    if (!Object.prototype.hasOwnProperty.call(current, segment)) return false;
+    current = current[segment]!;
+  }
+  return true;
+}
+
 /** An advisory note on a path (the run decides; a path that names nothing
- *  fails it): empty or ending in a dot, a field the root does not report, a
- *  state key no setState step stores. */
+ *  fails it): empty, ending in a dot or with an empty step, a field the
+ *  root is not known to report, a state key no setState step stores.
+ *  `call.payload.…` and what is under a state key are free: the CALL and
+ *  the stored value decide. */
 export function pathAdvice(
   root: FromRoot,
   path: string,
   stateKeys: readonly string[],
 ): PathAdvice | null {
-  if (path === "" || path.endsWith(".")) return "incomplete";
+  const segments = path.split(".");
+  if (segments.some((segment) => segment === "")) return "incomplete";
   if (root === "call") {
-    return path === "action" ||
-      path === "messageId" ||
-      path === "payload" ||
-      path.startsWith("payload.")
+    const [first] = segments;
+    return (first === "action" || first === "messageId") &&
+      segments.length === 1
       ? null
-      : "unknownField";
+      : first === "payload"
+        ? null
+        : "unknownField";
   }
   if (root === "state") {
-    return stateKeys.includes(path.split(".")[0]!) ? null : "unknownStateKey";
+    return stateKeys.includes(segments[0]!) ? null : "unknownStateKey";
   }
-  return FROM_PATHS[root].includes(path) ? null : "unknownField";
+  return walksTo(STATION_FIELDS[root], segments) ? null : "unknownField";
 }
 
 /** JSON equality, as the executor compares a switch's cases: same type,
@@ -225,5 +273,21 @@ export function removeItem<T>(
   return {
     next: list.filter((_, i) => i !== index),
     mapping: list.map((_, i) => (i === index ? null : i < index ? i : i - 1)),
+  };
+}
+
+/** `list` with `item` appended. Every old item stays where it is; with
+ *  `detach`, the mapping also names the new item's index (past the old
+ *  list) as removed, so the edges a file left on that handle go instead of
+ *  starting to run for the new item. */
+export function appendItem<T>(
+  list: readonly T[],
+  item: T,
+  detach = false,
+): { next: T[]; mapping: IndexMapping } {
+  const kept = list.map((_, i) => i);
+  return {
+    next: [...list, item],
+    mapping: detach ? [...kept, null] : kept,
   };
 }

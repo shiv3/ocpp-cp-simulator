@@ -1182,9 +1182,16 @@ n · title**, **End of scenario**, or _no step yet_), with up / down / remove, *
 **default** row with its lane. A **choice** lists its options with a weight, a bar and a percentage of the total
 weight, an optional label and its lane. Reordering or removing an item moves the lanes' edges with their items in
 the same change ([scenario format](../concepts/scenario-format.md#the-schema-16-nodes)); removing one whose lane leads
-somewhere asks first in the page, and on yes removes that lane's edge only. A duplicated case value (only the first
-can match), fewer than two options and a weight that is not above 0 are warned beside the list; none blocks Save.
-In the template preview the same inspector is read-only.
+somewhere asks first in the page, naming how many edges the lane holds, and on yes removes that lane's edges only.
+Adding an item whose handle already holds an edge in the file (left past the list, never picked so far) asks before
+adding, naming where it leads: keep that edge (the new item runs it), detach it (that handle's edges only), or cancel.
+A duplicated case value (only the first can match), fewer than two options and a weight that is not above 0 are
+warned beside the list; none blocks Save. Malformed lists stay as the file has them: `cases` that are not a list are
+shown with a notice and change only on **Replace with an empty list**; an option that is not an object (`null`) is
+shown as an invalid row drawn with weight 1, as the executor reads it, until **Replace with an empty option**. A
+`notify` `requestId` constant must be a whole number of at least 0; a `$from` path is checked against the fields
+each root reports, by structure (`charger.connectorIds.0`, `connector.power`), and an unknown one is only noted. In
+the template preview the same inspector is read-only.
 
 #### Editing in the side panel
 

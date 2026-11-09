@@ -1036,6 +1036,19 @@ scenario** everywhere edits the Library entry when the scenario is a Library
 scenario or a copy of one (`libraryId`). All use the same content
 ([`ScenarioEditorContent`](../../apps/web/src/console/pages/scenarios/edit/ScenarioEditorContent.tsx)):
 
+**Graph canvas and side panel** (editor and template preview alike). The
+Graph view is its own scroll container (both axes, at most 75% of the window
+high), so a wide graph (a switch with many lanes, e.g. template
+`dataflow-authorize-branch-16`) never draws under the right-hand step panel;
+it opens scrolled to the trunk. Its toolbar has **−**, **+**, **Fit** (the whole
+graph visible, never above 100%) and **100%**; Ctrl/⌘ + wheel zooms (25%–200%).
+The zoom (a number or `fit`) is remembered in `localStorage`
+(`ocpp-cp.console.graph.zoom`, one value for every Graph view). The step panel
+folds into a thin rail with the round button on its edge (`aria-expanded`),
+remembered per view (`ocpp-cp.console.scenario.inspector.collapsed`,
+`ocpp-cp.console.template.inspector.collapsed`); selecting a step expands it.
+Both stores are best effort: blocked storage only means nothing is remembered.
+
 - **Steps** — the run views' Steps view of the block tree, with its
   controls. Every structural edit goes through the tree's operations
   ([below](#editor-model-block-tree)), and every control is enabled from

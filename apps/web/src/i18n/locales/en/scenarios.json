@@ -262,5 +262,8 @@
   "scenarios.stepHelp.inboundPolicy": "Sets a lasting rule for an incoming CSMS call: answer with a CALLERROR, or ignore it. It survives reconnects until an Answer rule or the end of the run clears it.",
   "scenarios.stepHelp.certQuirks": "Sets or clears certificate quirks, e.g. the OCTT preset (RSA CSR, CRLF PEM, one signature algorithm), to check a CSMS against strict certification tools.",
   "scenarios.addStep.structure.loop": "Repeat",
-  "scenarios.addStep.structure.loopHelp": "Repeats the steps inside it. In Steps view, drop steps into it; in Graph view, pick the step to go back to."
+  "scenarios.addStep.structure.loopHelp": "Repeats the steps inside it. In Steps view, drop steps into it; in Graph view, pick the step to go back to.",
+  "scenarios.inspector.collapse": "Collapse the step panel",
+  "scenarios.inspector.expand": "Expand the step panel",
+  "scenarios.inspector.rail": "Step settings"
 }

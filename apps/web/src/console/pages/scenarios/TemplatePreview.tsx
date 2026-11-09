@@ -1,5 +1,9 @@
 import { useTranslation } from "react-i18next";
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+
+import { cn } from "@/lib/utils";
+import CollapsibleSide from "../../components/CollapsibleSide";
+import { sidePanelGrid, useCollapsedPanel } from "../../lib/collapsedPanel";
 
 import { useTemplateText } from "@/i18n/templates";
 import type { ScenarioTemplate } from "@ocpp-cp-simulator/core/utils/scenarioTemplates";
@@ -14,6 +18,8 @@ import UnsupportedOutline from "./edit/UnsupportedOutline";
 import { useScenarioIssues } from "./edit/issueMarkUi";
 import StepsGraphView from "./run/StepsGraphView";
 import StepsView from "./run/StepsView";
+
+const PREVIEW_COLLAPSED_KEY = "ocpp-cp.console.template.inspector.collapsed";
 
 type PreviewView = "steps" | "graph";
 
@@ -46,6 +52,12 @@ const TemplatePreview: React.FC<{
   const drawable = isDrawableTree(tree);
   const [view, setView] = useState<PreviewView>("graph");
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
+  const panel = useCollapsedPanel(PREVIEW_COLLAPSED_KEY);
+  // Picking a step opens the panel it is shown in.
+  useEffect(() => {
+    if (selectedStepId !== null) panel.setCollapsed(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedStepId]);
   const graphEdges = useMemo(() => graphEdgeIds(tree), [tree]);
   // Read-only: no warning box, only the marks (a shipped template should
   // have none).
@@ -151,7 +163,12 @@ const TemplatePreview: React.FC<{
       {/* The editor's grid: views, then the inspector beside them when the
           preview is wide enough (a container query), else under them. */}
       <div className="@container mt-3">
-        <div className="grid grid-cols-1 items-start gap-4 @[720px]:grid-cols-[minmax(0,1fr)_minmax(260px,340px)]">
+        <div
+          className={cn(
+            "grid grid-cols-1 items-start gap-4",
+            sidePanelGrid(panel.collapsed, "720"),
+          )}
+        >
           <div className="min-w-0">
             {!drawable ? (
               <UnsupportedOutline
@@ -177,9 +194,12 @@ const TemplatePreview: React.FC<{
               />
             )}
           </div>
-          <div
-            data-testid="template-step-detail"
-            className="min-w-0 rounded-[10px] border border-cx-border bg-cx-card p-4"
+          <CollapsibleSide
+            testId="template-step-detail"
+            collapsed={panel.collapsed}
+            onCollapsedChange={panel.setCollapsed}
+            label={t("scenarios.inspector.rail")}
+            contentClassName="p-4"
           >
             {selected ? (
               // The editor's forms, disabled as a whole.
@@ -196,7 +216,7 @@ const TemplatePreview: React.FC<{
                 hint={t("scenarios.templateBrowser.selectStepHint")}
               />
             )}
-          </div>
+          </CollapsibleSide>
         </div>
       </div>
     </section>

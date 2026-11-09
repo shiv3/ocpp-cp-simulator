@@ -110,5 +110,11 @@
   "scenarioRun.tree.continuesAt": "Continues at step {{n}}",
   "scenarioRun.tree.continuesAtEnd": "Continues to the end",
   "scenarioRun.tree.unreached": "Steps nothing reaches",
-  "scenarioRun.tree.unreachedHint": "No edge from Start leads here: these steps never run."
+  "scenarioRun.tree.unreachedHint": "No edge from Start leads here: these steps never run.",
+  "scenarioRun.zoom.label": "Graph zoom",
+  "scenarioRun.zoom.out": "Zoom out",
+  "scenarioRun.zoom.in": "Zoom in",
+  "scenarioRun.zoom.fit": "Fit",
+  "scenarioRun.zoom.fitHint": "Fit the whole graph in view",
+  "scenarioRun.zoom.resetHint": "Actual size (Ctrl/Cmd + wheel also zooms)"
 }

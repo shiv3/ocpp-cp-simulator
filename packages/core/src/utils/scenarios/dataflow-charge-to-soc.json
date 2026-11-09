@@ -1,0 +1,178 @@
+{
+  "id": "dataflow-charge-to-soc",
+  "name": "Data flow: Charge in a loop until the SoC reaches 80%",
+  "description": "Starts a session on a 60 kWh EV at 70% and charges in a loop: each pass meters 7 s (2.5 kWh, about 4 points of SoC), then a switch reads connector.power.soc. A $match gte 80 leaves the loop and stops the transaction; the default edge goes back to the meter node (a real loop back edge). Shows $from root connector with a numeric $match. Plug in, run, and watch the SoC rise pass by pass.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": {
+    "type": "manual"
+  },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "evSettings": {
+    "modelName": "Reference EV",
+    "batteryCapacityKwh": 60,
+    "maxChargingPowerKw": 11,
+    "initialSoc": 70,
+    "targetSoc": 80
+  },
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": {
+        "x": 400,
+        "y": 50
+      },
+      "data": {
+        "label": "Start",
+        "triggerOn": "connect"
+      }
+    },
+    {
+      "id": "plug-in",
+      "type": "connectorPlug",
+      "position": {
+        "x": 400,
+        "y": 150
+      },
+      "data": {
+        "label": "Plug In",
+        "action": "plugin"
+      }
+    },
+    {
+      "id": "tx-start",
+      "type": "transaction",
+      "position": {
+        "x": 400,
+        "y": 250
+      },
+      "data": {
+        "label": "Start Transaction",
+        "action": "start",
+        "tagId": "DEMO-TAG-1",
+        "batteryCapacityKwh": 60,
+        "initialSoc": 70
+      }
+    },
+    {
+      "id": "meter",
+      "type": "meterValue",
+      "position": {
+        "x": 400,
+        "y": 370
+      },
+      "data": {
+        "label": "Charge 7 s (+2.5 kWh)",
+        "value": 0,
+        "sendMessage": true,
+        "autoIncrement": true,
+        "incrementInterval": 5,
+        "incrementAmount": 2500,
+        "stopMode": "manual",
+        "maxTime": 7
+      }
+    },
+    {
+      "id": "check",
+      "type": "switch",
+      "position": {
+        "x": 400,
+        "y": 490
+      },
+      "data": {
+        "label": "SoC >= 80?",
+        "value": {
+          "$from": "connector.power.soc"
+        },
+        "cases": [
+          {
+            "$match": {
+              "gte": 80
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "tx-stop",
+      "type": "transaction",
+      "position": {
+        "x": 700,
+        "y": 610
+      },
+      "data": {
+        "label": "Stop Transaction",
+        "action": "stop"
+      }
+    },
+    {
+      "id": "plug-out",
+      "type": "connectorPlug",
+      "position": {
+        "x": 700,
+        "y": 710
+      },
+      "data": {
+        "label": "Plug Out",
+        "action": "plugout"
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": {
+        "x": 700,
+        "y": 810
+      },
+      "data": {
+        "label": "End"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "start-1",
+      "target": "plug-in"
+    },
+    {
+      "id": "e2",
+      "source": "plug-in",
+      "target": "tx-start"
+    },
+    {
+      "id": "e3",
+      "source": "tx-start",
+      "target": "meter"
+    },
+    {
+      "id": "e4",
+      "source": "meter",
+      "target": "check"
+    },
+    {
+      "id": "e5",
+      "source": "check",
+      "target": "tx-stop",
+      "sourceHandle": "case-0"
+    },
+    {
+      "id": "e6",
+      "source": "check",
+      "target": "meter",
+      "sourceHandle": "default"
+    },
+    {
+      "id": "e7",
+      "source": "tx-stop",
+      "target": "plug-out"
+    },
+    {
+      "id": "e8",
+      "source": "plug-out",
+      "target": "end-1"
+    }
+  ]
+}

@@ -85,6 +85,16 @@ import resilienceTemporaryUnavailableRecoveryJson from "./scenarios/resilience-t
 import resilienceAuthorizationRejectedJson from "./scenarios/resilience-authorization-rejected.json";
 import resiliencePowerLossRecoveryJson from "./scenarios/resilience-power-loss-recovery.json";
 
+// Data-flow showcase templates (schema 1.7): branch on the answer to an
+// ocppCall (`$from` root `response`), `$match` switch cases, a loop that
+// exits on the connector's SoC, and a replaced CSMS call.
+import dataflowAuthorizeBranch16Json from "./scenarios/dataflow-authorize-branch-16.json";
+import dataflowAuthorizeBranch201Json from "./scenarios/dataflow-authorize-branch-201.json";
+import dataflowRemoteStartReauthorize16Json from "./scenarios/dataflow-remote-start-reauthorize-16.json";
+import dataflowRemoteStartReauthorize201Json from "./scenarios/dataflow-remote-start-reauthorize-201.json";
+import dataflowCallErrorHandlingJson from "./scenarios/dataflow-call-error-handling.json";
+import dataflowChargeToSocJson from "./scenarios/dataflow-charge-to-soc.json";
+
 export interface ScenarioTemplate {
   id: string;
   name: string;
@@ -260,6 +270,14 @@ export const scenarioTemplates: ScenarioTemplate[] = [
   ),
   templateFromJson(resilienceAuthorizationRejectedJson as ScenarioDefinition),
   templateFromJson(resiliencePowerLossRecoveryJson as ScenarioDefinition),
+
+  // Data-flow showcase templates (schema 1.7).
+  templateFromJson(dataflowAuthorizeBranch16Json as ScenarioDefinition),
+  templateFromJson(dataflowAuthorizeBranch201Json as ScenarioDefinition),
+  templateFromJson(dataflowRemoteStartReauthorize16Json as ScenarioDefinition),
+  templateFromJson(dataflowRemoteStartReauthorize201Json as ScenarioDefinition),
+  templateFromJson(dataflowCallErrorHandlingJson as ScenarioDefinition),
+  templateFromJson(dataflowChargeToSocJson as ScenarioDefinition),
 ];
 
 export function getTemplateById(

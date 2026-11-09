@@ -44,15 +44,18 @@ async function charging(r: Rig, tag = "TAG-1", c = 1) {
   r.cp.updateConnectorStatus(c, OCPPStatus.Charging);
   await settle(r);
 }
+// These two return the CSMS call so a case awaits the station's answer: the
+// next step then never starts before the previous exchange is on the wire,
+// however slow the machine (#848).
 const changeAvail = (r: Rig, type: "Operative" | "Inoperative", id?: number) =>
-  void (r.is16
+  r.is16
     ? r.csms.call("ChangeAvailability", { connectorId: id ?? 0, type })
     : r.csms.call("ChangeAvailability", {
         operationalStatus: type,
         ...(id === undefined ? {} : { evse: { id } }),
-      }));
+      });
 const reserve = (r: Rig, id: number, c: number, tag: string, expiry: string) =>
-  void (r.is16
+  r.is16
     ? r.csms.call("ReserveNow", {
         connectorId: c,
         expiryDate: expiry,
@@ -65,7 +68,7 @@ const reserve = (r: Rig, id: number, c: number, tag: string, expiry: string) =>
         ...(c === 0 ? {} : { evseId: c }),
         expiryDateTime: expiry,
         idToken: { idToken: tag, type: "ISO14443" },
-      }));
+      });
 const FUT = "2099-01-01T00:00:00.000Z";
 const two = { connectors: 2 };
 
@@ -1667,9 +1670,9 @@ const strict = (
   });
 const FAR_PAST = "2020-01-01T00:00:00.000Z";
 const stationAvail = (r: Rig, type: "Operative" | "Inoperative") =>
-  void (r.is16
+  r.is16
     ? r.csms.call("ChangeAvailability", { connectorId: 0, type })
-    : r.csms.call("ChangeAvailability", { operationalStatus: type }));
+    : r.csms.call("ChangeAvailability", { operationalStatus: type });
 const statusOf = (f: { payload: unknown }) =>
   (f.payload as { status?: string }).status;
 

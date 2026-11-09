@@ -24,6 +24,29 @@
       "type": "string",
       "description": "The web console Library scenario this per-connector copy was made from (v1.4). Set when a connector is assigned a library scenario; absent on library entries and on scenarios loaded by hand."
     },
+    "recordedFrom": {
+      "type": "object",
+      "description": "Set on a scenario made by recording a behavior run (v1.6, issue #654 step 2); informational, the runtime ignores it. Marks the scenario as a recording, never the default behavior it came from.",
+      "required": ["behaviorId", "commit", "seed", "version"],
+      "properties": {
+        "behaviorId": {
+          "type": "string",
+          "description": "The behavior that ran, e.g. default.firmware."
+        },
+        "commit": {
+          "type": "string",
+          "description": "The build that ran it: git commit when known, else the version label."
+        },
+        "seed": {
+          "type": ["string", "number"],
+          "description": "The seed of the run; the same seed records the same scenario."
+        },
+        "version": {
+          "type": "string",
+          "description": "The simulator version that recorded it."
+        }
+      }
+    },
     "name": { "type": "string" },
     "description": { "type": "string" },
     "targetType": { "type": "string", "enum": ["chargePoint", "connector"] },
@@ -142,6 +165,52 @@
           "exclusiveMinimum": 0,
           "maximum": 1
         },
+        "vehicleBehavior": {
+          "description": "What the vehicle wants and when (issue #835): a preset id or a policy, with an optional intent. Absent keeps the historical behavior (the vehicle asks for all it can take from the plug-in on). See docs/concepts/vehicle-behavior.md.",
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "preset": {
+              "type": "string",
+              "enum": [
+                "immediate",
+                "target-soc",
+                "delayed-15min",
+                "overnight",
+                "ev-pause-resume",
+                "demand-dip"
+              ]
+            },
+            "policy": {
+              "type": "object",
+              "additionalProperties": true,
+              "required": ["type"],
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "immediate",
+                    "delayed",
+                    "target-soc",
+                    "scheduled-window",
+                    "manual-suspend",
+                    "demand-steps"
+                  ]
+                }
+              }
+            },
+            "intent": {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "targetSoc": { "type": "number", "minimum": 0, "maximum": 100 },
+                "requestedEnergyWh": { "type": "number", "minimum": 0 },
+                "departureAt": { "type": "number", "minimum": 0 }
+              }
+            },
+            "stopWhenDone": { "type": "boolean" }
+          }
+        },
         "attribution": {
           "description": "Credit owed for third-party data copied into these settings (issue #458): set when an imported vehicle profile is applied, one entry per source license, so the credit travels with the copied values. Informational: it changes nothing at run time. A preset clears it. When an entry has shareAlike, the copied data is shared under that license.",
           "type": "array",
@@ -241,7 +310,23 @@
         "errorCode": { "type": "string" },
         "errorDescription": { "type": "string" }
       },
-      "required": ["kind"]
+      "required": ["kind"],
+      "allOf": [
+        {
+          "$comment": "#846: the executor throws on a payload (or skipValidation) next to accepted / rejected.",
+          "if": {
+            "properties": { "kind": { "enum": ["accepted", "rejected"] } }
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["payload"] },
+                { "required": ["skipValidation"] }
+              ]
+            }
+          }
+        }
+      ]
     },
     "baseNodeData": {
       "type": "object",

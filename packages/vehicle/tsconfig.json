@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "../../node_modules/.tmp/tsconfig.vehicle.tsbuildinfo",
+    "outDir": "../../node_modules/.tmp/out/vehicle",
+    "types": ["bun-types"]
+  },
+  "include": ["src"]
+}

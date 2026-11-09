@@ -625,6 +625,18 @@ export interface ScenarioTrigger {
  */
 export const SCENARIO_SCHEMA_VERSION = "1.6";
 
+/** Where a recorded scenario came from (schema 1.6, #654 step 2). */
+export interface ScenarioRecordedFrom {
+  /** The id of the behavior that ran, e.g. `default.firmware`. */
+  behaviorId: string;
+  /** The build that ran it: git commit when known, else the version label. */
+  commit: string;
+  /** The seed of the run: the same seed records the same scenario. */
+  seed: string | number;
+  /** The simulator version that recorded it. */
+  version: string;
+}
+
 /**
  * Scenario definition
  */
@@ -653,6 +665,12 @@ export interface ScenarioDefinition {
    * hand (CLI, MCP, a JSON import onto a connector).
    */
   libraryId?: string;
+  /**
+   * Set on a scenario made by recording a behavior run (schema 1.6, #654
+   * step 2), so it is never mistaken for the default behavior it came from.
+   * Informational: the runtime ignores it.
+   */
+  recordedFrom?: ScenarioRecordedFrom;
   name: string;
   description?: string;
   targetType: "chargePoint" | "connector";

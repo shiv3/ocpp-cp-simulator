@@ -77,6 +77,11 @@ import type { TransportConfig } from "@ocpp-cp-simulator/core/cp/infrastructure/
 import type { UrlDistribution } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/SupervisionUrlPool";
 import type { IdTagDistribution } from "@ocpp-cp-simulator/core/cp/domain/auth/IdTagPool";
 import type { Labels } from "@ocpp-cp-simulator/contracts/labels";
+import type {
+  FleetCreateParams,
+  FleetCreateResult,
+  FleetTemplate,
+} from "@ocpp-cp-simulator/contracts/methods";
 import type { ReadonlyChargerCapabilities } from "@ocpp-cp-simulator/contracts/chargerCapabilities";
 import type {
   NetworkSimLayerConfig,
@@ -482,6 +487,17 @@ export interface ChargePointService {
    *  rejects with `UnsupportedFeatureError`. */
   setChargePointLabels?(cpId: string, labels: Labels): Promise<void>;
   removeChargePoint?(id: string): Promise<void>;
+  /** #445: fleet templates (`fleet.template.*`, `fleet.create`). Remote only:
+   *  the daemon stores them and creates the charge points; the local service
+   *  rejects with `UnsupportedFeatureError`. */
+  listFleetTemplates?(): Promise<FleetTemplate[]>;
+  getFleetTemplate?(id: string): Promise<FleetTemplate>;
+  /** Stores (or replaces) a stored template; resolves to its id. A template
+   *  that came from a `--fleet-template` file is refused by the daemon. */
+  saveFleetTemplate?(template: FleetTemplate): Promise<string>;
+  deleteFleetTemplate?(id: string): Promise<void>;
+  /** Instantiates a template. Partial success is the result, not an error. */
+  createFleet?(params: FleetCreateParams): Promise<FleetCreateResult>;
   ping?(): Promise<{ ok: boolean; cps: number }>;
   /** Daemon-wide facts (`server.info`): version and the SOAP public base a
    *  charge point created without a callback URL derives one from (#183).

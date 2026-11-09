@@ -4,6 +4,7 @@ import React, { useId, useState } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import {
   History,
+  Layers,
   PanelLeftClose,
   PanelLeftOpen,
   Play,
@@ -56,6 +57,12 @@ const NAV_ITEMS: NavItem[] = [
     to: "/scenarios/runs",
     icon: History,
     isActive: (pathname) => pathname.startsWith("/scenarios/runs"),
+  },
+  {
+    labelKey: "common.nav.fleets",
+    to: "/fleets",
+    icon: Layers,
+    isActive: (pathname) => pathname.startsWith("/fleets"),
   },
   {
     labelKey: "common.nav.messageLog",

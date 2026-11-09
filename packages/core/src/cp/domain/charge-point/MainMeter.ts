@@ -39,8 +39,11 @@ export const MAIN_METER_MEASURANDS: readonly string[] = [
  * import when the station draws from the grid, export when V2X feeds it.
  * Runtime state only, like the connector registers it follows.
  *
- * {@link gridFlowW} is the one place a conversion efficiency (#608) would
- * enter; there is none yet, so the grid sees what the connectors report.
+ * The grid sees what the connectors deliver plus their conversion loss
+ * (#608): a DC connector with a `dcEfficiency` draws `delivered / efficiency`
+ * from the grid, in power (`OperatingPoint.inputW`) and in energy alike. This
+ * is the only meter on the AC input side; a connector's own samples describe
+ * the vehicle side.
  */
 export class MainMeter {
   private importWh = 0;
@@ -87,17 +90,16 @@ export class MainMeter {
       const imp = c.meterValue;
       const exp = c.exportRegisterWh;
       // A register set backwards by hand moves nothing.
-      moved += Math.max(0, imp - was.imp) - Math.max(0, exp - was.exp);
+      // The grid supplies more than the connector delivers by its conversion
+      // loss (#608); a V2X export is not converted by this model.
+      moved +=
+        Math.max(0, imp - was.imp) / c.conversionEfficiency -
+        Math.max(0, exp - was.exp);
       this.seen.set(id, { imp, exp });
     }
-    const net = this.gridFlowW(moved);
+    const net = moved;
     if (net >= 0) this.importWh += net;
     else this.exportWh -= net;
-  }
-
-  /** Grid-side value of a flow measured at the connectors. */
-  private gridFlowW(connectorSide: number): number {
-    return connectorSide;
   }
 
   /** Net power drawn from the grid in watts: positive imports. */
@@ -105,9 +107,9 @@ export class MainMeter {
     let net = this.baseLoadW;
     for (const c of this.connectors().values()) {
       const point = c.operatingPoint();
-      net += point.acceptedW - point.exportW;
+      net += point.inputW - point.exportW;
     }
-    return this.gridFlowW(net);
+    return net;
   }
 
   /** The samples of one MeterValues for connector 0 / EVSE 0. */

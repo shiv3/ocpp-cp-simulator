@@ -73,7 +73,9 @@ function isReply(value: unknown): value is CsmsReply {
   return keys.length === 1 && (keys[0] === "result" || keys[0] === "error");
 }
 
-/** Deterministic id for the next CSMS-initiated CALL: `csms-1`, `csms-2`, ... */
+/** A 20 ms settle tick that took longer than this marks a starved process. */
+const STARVED_TICK_MS = 60;
+
 export class FakeCsms {
   readonly frames: WireFrame[] = [];
   private readonly token = crypto.randomUUID();
@@ -89,6 +91,7 @@ export class FakeCsms {
   private readonly connectionWaiters = new Set<() => void>();
   private readonly callCounts = new Map<string, number>();
   private readonly pending = new Map<string, (frame: WireFrame) => void>();
+  /** Deterministic id for the next CSMS-initiated CALL: `csms-1`, `csms-2`, ... */
   private nextCallId = 0;
   private transactionCounter = 0;
   private lastFrameAt = Date.now();
@@ -188,8 +191,12 @@ export class FakeCsms {
     return this.socket !== null;
   }
 
+  /** Called with every frame as it is recorded (the behavior recorder timestamps them). */
+  onFrame: ((frame: WireFrame) => void) | null = null;
+
   private record(frame: WireFrame): void {
     this.frames.push(frame);
+    this.onFrame?.(frame);
     this.lastFrameAt = Date.now();
     for (const waiter of [...this.waiters]) {
       if (waiter.pred(frame)) {
@@ -369,16 +376,19 @@ export class FakeCsms {
         pred,
         resolve,
         reject,
-        timer: setTimeout(() => {
-          this.waiters.delete(waiter);
-          reject(
-            new Error(
-              `fake CSMS: timed out waiting for a frame (have ${this.frames
-                .map((f) => `${f.dir}${f.action ?? f.kind}`)
-                .join(", ")})`,
-            ),
-          );
-        }, options.timeoutMs ?? 15_000),
+        timer: setTimeout(
+          () => {
+            this.waiters.delete(waiter);
+            reject(
+              new Error(
+                `fake CSMS: timed out waiting for a frame (have ${this.frames
+                  .map((f) => `${f.dir}${f.action ?? f.kind}`)
+                  .join(", ")})`,
+              ),
+            );
+          },
+          this.budget(options.timeoutMs ?? 15_000),
+        ),
       };
       this.waiters.add(waiter);
     });
@@ -410,6 +420,19 @@ export class FakeCsms {
     this.lastFrameAt = Date.now();
   }
 
+  /**
+   * One deadline (epoch ms) for a whole case, set by the runner below the test
+   * timeout. Every wait and settle shares it, so a case that never settles
+   * fails with its own message, not as a bare test timeout (#848).
+   */
+  caseDeadline: number | undefined;
+
+  /** `ms`, cut down to what is left of the case deadline. */
+  budget(ms: number): number {
+    if (this.caseDeadline === undefined) return ms;
+    return Math.max(0, Math.min(ms, this.caseDeadline - Date.now()));
+  }
+
   /** Number of frames recorded so far; use as the `from` of a later wait. */
   mark(): number {
     return this.frames.length;
@@ -420,12 +443,22 @@ export class FakeCsms {
    * a cascade of follow-up traffic to end before the next step; it never
    * decides the order of frames, only when the next step starts.
    */
-  async settle(quietMs = 250, maxMs = 20_000): Promise<void> {
+  async settle(quietMs = 250, maxMs = 60_000): Promise<void> {
     if (this.memory) return this.settleMemory();
-    const deadline = Date.now() + maxMs;
+    const deadline = Date.now() + this.budget(maxMs);
     while (Date.now() < deadline) {
-      if (Date.now() - this.lastFrameAt >= quietMs) return;
+      const tickStart = Date.now();
+      // A quiet window only means "nothing more is coming" while the event
+      // loop (and with it the station) gets CPU. A tick that overshoots its
+      // 20 ms by 3x says the process was starved, so the silence proves
+      // nothing: restart the window (#848). A CALL still without its answer
+      // keeps the window open as well.
+      if (this.pending.size === 0 && tickStart - this.lastFrameAt >= quietMs) {
+        return;
+      }
       await new Promise((resolve) => setTimeout(resolve, 20));
+      if (Date.now() - tickStart > STARVED_TICK_MS)
+        this.lastFrameAt = Date.now();
     }
     throw new Error("fake CSMS: traffic never settled");
   }

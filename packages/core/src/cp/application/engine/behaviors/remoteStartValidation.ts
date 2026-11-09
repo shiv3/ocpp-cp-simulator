@@ -219,8 +219,12 @@ export function decideRemoteStart(
     ) ??
     // F01 is "Cable Plugin First" (F01.FR.20): the EVSE where the cable is
     // plugged in comes before one that is merely free.
-    candidates.find((c) => c.status === "Preparing") ??
-    candidates.find((c) => c.status === "Available");
+    // Neither is taken from another idToken's reservation (#839): the start
+    // would be Accepted and then refused on that connector.
+    candidates.find(
+      (c) => c.status === "Preparing" && !reservedForOther(c.id),
+    ) ??
+    candidates.find((c) => c.status === "Available" && !reservedForOther(c.id));
   if (!free) {
     return reject("Unspecified", "No EVSE is free to start a transaction");
   }

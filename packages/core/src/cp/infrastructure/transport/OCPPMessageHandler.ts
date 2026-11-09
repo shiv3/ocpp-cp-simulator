@@ -690,17 +690,24 @@ export class OCPPMessageHandler {
     // #607: the history (begin sample, periodic and clock-aligned ones) and
     // the Transaction.End sample of StopTxnSampledData, formatted from the
     // point captured at the stop instant (1.6 §3.16.1, §3.16.2).
-    const history = transaction.txEndedSamples ?? [];
+    // The same wire spelling as MeterValues (#846): a Temperature sample
+    // says `Celcius` here too (1.6 errata 2025-04 §2.1).
+    const history = (transaction.txEndedSamples ?? []).map((entry) => ({
+      ...entry,
+      sampledValue: toOcppJ16Wire(entry.sampledValue),
+    }));
     const endMeasurands = this._chargePoint.configuration.stopTxnSampledData();
     const connector = this._chargePoint.getConnector(connectorId);
     const endSample =
       connector && endMeasurands.length > 0
-        ? buildSampledValues(
-            connector,
-            endMeasurands,
-            "Transaction.End",
-            { intervalStream: "txEnded-sampled" },
-            endPoint,
+        ? toOcppJ16Wire(
+            buildSampledValues(
+              connector,
+              endMeasurands,
+              "Transaction.End",
+              { intervalStream: "txEnded-sampled" },
+              endPoint,
+            ),
           )
         : [];
     if (
@@ -2166,8 +2173,15 @@ export class OCPPMessageHandler {
       });
     }
 
-    // #565: a resend answered; what waited behind it goes on.
-    if (request.attempt !== undefined && request.attempt > 1) {
+    // #565: a resend answered; what waited behind it goes on. Not for one
+    // that already timed out (#839): its timeout released its hold, and the
+    // hold now standing belongs to a newer resend, which must keep it
+    // (§3.7: the messages stay in chronological order).
+    if (
+      request.attempt !== undefined &&
+      request.attempt > 1 &&
+      !request.timedOut
+    ) {
       this.releaseHold();
     }
     this._requests.remove(messageId);
@@ -2386,6 +2400,19 @@ export class OCPPMessageHandler {
     start: StartTransactionRequestV16,
     connectorId: number,
   ): void {
+    // Recorded only for a queued, held or waiting message that takes its id
+    // from this Start (#847): a message built after the discard already
+    // carries `-1` (`wireTransactionId`) and has no `startRef`, so nothing
+    // would ever consume the entry.
+    if (
+      !this.hasMessageWaitingOn({
+        connectorId,
+        idTag: start.idTag,
+        startedAt: start.timestamp,
+      })
+    ) {
+      return;
+    }
     this.recordStartOutcome(start, connectorId, UNKNOWN_TRANSACTION_ID);
   }
 

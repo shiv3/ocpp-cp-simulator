@@ -510,6 +510,55 @@ describe.each(VERSIONS)(
         );
       });
 
+      // #587 A02.FR.06/07/20 (TC_A_14_CS): a leaf outside the operator
+      // hierarchy, or with wrong Certificate Properties, is Rejected with the
+      // event and ends the resends like an expired one.
+      it.each([
+        ["outside the CSMS root hierarchy", undefined, "does not lead to"],
+        [
+          "with a URL as commonName",
+          "CN=wss://csms.example.com,O=Example",
+          "A00.FR.511",
+        ],
+      ])(
+        "rejects a leaf %s, with the security event and no further resends",
+        async (_label, subject, expectedReason) => {
+          const store = new CertificateStore();
+          const root = await selfSignedRoot("01", "Root");
+          await store.installRootCertificate("CsmsRootCertificate", root.pem, {
+            maxEntries: 10,
+          });
+          const csr = await store.generateNewCsr("CP", "CPO");
+          const issuer = subject
+            ? root
+            : await selfSignedRoot("09", "Invalid Signing CA");
+          const { ctx, certificateRejected, certificateInstalled } =
+            signingContext(store);
+
+          const result = await handlers.CertificateSigned(
+            {
+              certificateChain: await leafForCsr("02", csr, issuer, {
+                subject,
+              }),
+              certificateType: "ChargingStationCertificate",
+            },
+            ctx,
+          );
+          expect(result.response).toEqual({ status: "Rejected" });
+          expect(certificateRejected).toHaveBeenCalledTimes(1);
+          expect(certificateInstalled).not.toHaveBeenCalled();
+          expect(store.listSignedChains()).toEqual([]);
+          await result.afterResult?.();
+          expect(ctx.sendCall).toHaveBeenCalledWith(
+            "SecurityEventNotification",
+            expect.objectContaining({
+              type: "InvalidChargingStationCertificate",
+              techInfo: expect.stringContaining(expectedReason),
+            }),
+          );
+        },
+      );
+
       // #564: the chain is handed on when it is stored, not when the answer
       // is written, which a dropped answer never reaches.
       it("reports a stored chain before its answer is written, and none that was rejected", async () => {

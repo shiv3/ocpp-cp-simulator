@@ -871,6 +871,40 @@ describe("charger capabilities schema, v31 (#327)", () => {
   });
 });
 
+describe("charger capabilities schema, v31 on a pre-merge v30 database (#846)", () => {
+  it("adds reservation_authorize_id_tag to a database an earlier build stamped 30 for charger_capabilities", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      // The unreleased build: v30 = charger_capabilities, no reservation column.
+      db.exec(
+        "ALTER TABLE charge_points DROP COLUMN reservation_authorize_id_tag",
+      );
+      db.exec("ALTER TABLE charge_points DROP COLUMN charger_capabilities");
+      db.exec("ALTER TABLE charge_points ADD COLUMN charger_capabilities TEXT");
+      db.run(
+        "INSERT INTO charge_points (cp_id, ws_url, connectors, vendor, model, created_at, charger_capabilities) " +
+          "VALUES ('CP1', 'ws://h', 1, 'v', 'm', '2026-11-08T00:00:00Z', '{\"1\":11000}')",
+      );
+      db.run("UPDATE schema_meta SET value = '30' WHERE key = 'version'");
+
+      runMigrations(db);
+
+      const row = db.get<{
+        charger_capabilities: string | null;
+        reservation_authorize_id_tag: number | null;
+      }>(
+        "SELECT charger_capabilities, reservation_authorize_id_tag FROM charge_points",
+      );
+      expect(row).toEqual({
+        charger_capabilities: '{"1":11000}',
+        reservation_authorize_id_tag: null,
+      });
+    } finally {
+      db.close();
+    }
+  });
+});
+
 describe("charging sessions schema, v17 (#447)", () => {
   it("creates charging_sessions on a database stamped 16", () => {
     const db = BunSqliteDatabase.open(":memory:");

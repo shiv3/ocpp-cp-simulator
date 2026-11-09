@@ -7,6 +7,7 @@ sources:
   - index.html
   - vite.config.ts
 related:
+  - ../concepts/fleet-templates.md
   - web-console-tour.md
   - desktop-app.md
   - daemon.md
@@ -91,8 +92,10 @@ The browser app serves one web console:
   [Scenario editor](#scenario-editor-steps-and-graph)) and a read-only run
   page (`/scenarios/run`, see
   [Scenario runs](#scenario-runs-panel-and-page)), a cross-CP **Run history**
-  (`/scenarios/runs`, #388), a global **Message log** (`/logs`), and
-  **Settings** (`/settings`, where global
+  (`/scenarios/runs`, #388), a global **Message log** (`/logs`),
+  **Fleet templates** (`/fleets`, remote mode: list, view, save, delete and
+  create a fleet from a [fleet template](../concepts/fleet-templates.md#web-console), #445),
+  and **Settings** (`/settings`, where global
   [network simulation](../concepts/network-simulation.md), the
   [**Vehicle profiles**](#settings-page) card and the **Reset all
   simulator data** button live; the Settings cards and the Network Simulation
@@ -1480,8 +1483,16 @@ Rules:
 - Licenses: EVIcons is
   [MIT, © 2026 Landolsi Digital](https://github.com/evicons/evicons/blob/main/LICENSE)
   and Lucide is [ISC](https://github.com/lucide-icons/lucide/blob/main/LICENSE).
-  Both ask that the notice travel with copies of the code; the built console
-  does not carry the notices of its bundled dependencies yet (#857).
+  Both ask that the notice travel with copies of the code, so `vite build`
+  (the `rollup-plugin-license` entry of
+  [`vite.config.ts`](../../vite.config.ts)) writes
+  `dist/THIRD-PARTY-LICENSES.txt`: every bundled package with name, version,
+  SPDX id, repository and license text (a package that ships no license file
+  gets its SPDX id and author instead). It lives in `dist/`, so the npm
+  tarball (`files`), the [Docker image](docker-image.md) (`COPY dist`) and the
+  [desktop app](desktop-app.md) (`frontendDist` and the `web-console/`
+  resource) carry it with no extra step; `scripts/verify-cli-tarball.sh` fails
+  a tarball whose `dist/` lacks it (#857).
 - The package is pinned exactly in `package.json` (`0.8.0`, as `@noble/curves`
   is): it is young, so bump it on purpose.
 

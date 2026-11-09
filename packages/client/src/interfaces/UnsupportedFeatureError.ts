@@ -2,7 +2,8 @@ export type UnsupportedFeatureCode =
   | "browser_tls_unsupported"
   | "browser_scenario_file_unsupported"
   | "browser_auto_traffic_unsupported"
-  | "browser_labels_unsupported";
+  | "browser_labels_unsupported"
+  | "browser_fleet_templates_unsupported";
 
 export class UnsupportedFeatureError extends Error {
   readonly code: UnsupportedFeatureCode;
@@ -25,3 +26,7 @@ export const BROWSER_AUTO_TRAFFIC_UNSUPPORTED_MESSAGE =
 
 export const BROWSER_LABELS_UNSUPPORTED_MESSAGE =
   "Charge point labels are daemon-only; local charge points have none.";
+
+/** Fleet templates (#445) are stored by the daemon; the browser simulator has none. */
+export const BROWSER_FLEET_TEMPLATES_UNSUPPORTED_MESSAGE =
+  "Fleet templates need the daemon: they are stored there and create charge points through it. Connect the console to a daemon to use them.";

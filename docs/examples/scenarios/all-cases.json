@@ -276,7 +276,7 @@
       "position": { "x": 400, "y": 1980 },
       "data": {
         "label": "connectorPlug plugout",
-        "description": "Models the cable being unplugged. NOTE: this node is a no-op in the daemon/CLI runtime (it emits no OCPP traffic and changes no state) — included for node-type completeness.",
+        "description": "Models the cable being unplugged on the EV side (the same operation as ev_disconnected): with a running transaction StopTransactionOnEVSideDisconnect stops or suspends it, otherwise an idle Preparing or Finishing connector goes Available.",
         "action": "plugout"
       }
     },

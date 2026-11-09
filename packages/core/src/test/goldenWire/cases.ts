@@ -440,6 +440,101 @@ export const goldenCases: GoldenCase[] = [
     rig.cp.stopTransaction(1, "Local");
     await settle(rig);
   }),
+  // #835: the vehicle's demand is a term of the operating point. An 11 kW
+  // vehicle that cut its own demand to 3.7 kW is delivered 3.7 kW while the
+  // offer stays the EVSE's: Power.Active.Import and Current.Import follow the
+  // demand, Power.Offered does not.
+  ...both("vehicle-demand-meter-values", async (rig) => {
+    await charging(rig);
+    const connector = rig.cp.getConnector(1)!;
+    if (connector.status !== OCPPStatus.Charging) {
+      rig.cp.updateConnectorStatus(1, OCPPStatus.Charging);
+      await settle(rig);
+    }
+    connector.evSettings = {
+      ...connector.evSettings,
+      maxChargingPowerKw: 11,
+      currentType: "AC",
+      phases: 3,
+      voltageV: 230,
+      vehicleBehavior: {
+        policy: {
+          type: "demand-steps",
+          steps: [{ afterMs: 0, maxPowerW: 3_700 }],
+        },
+      },
+    };
+    rig.cp.configuration.applyChange(
+      "MeterValuesSampledData",
+      "Energy.Active.Import.Register,Power.Active.Import,Power.Offered,Current.Import",
+    );
+    rig.cp.setMeterValue(1, 1500);
+    rig.cp.sendMeterValue(1);
+    await settle(rig);
+    rig.cp.stopTransaction(1, "Local");
+    await settle(rig);
+  }),
+  // #835: a vehicle that has not started asking for energy is SuspendedEV
+  // with the transaction running (1.6 §4.9 C4; 2.0.1 chargingState
+  // SuspendedEV), through the readiness operation of #453.
+  ...both("vehicle-delayed-suspended-ev", async (rig) => {
+    rig.cp.getConnector(1)!.applyEvSettingsOverride({
+      vehicleBehavior: { policy: { type: "delayed", delayMs: 3_600_000 } },
+    });
+    // The vehicle's clock starts at the plug-in; 2.0.1 does not imply a cable
+    // for a transaction that starts first (E03).
+    rig.cp.evPlugIn(1);
+    await settle(rig);
+    await rig.startLocal("TAG-1");
+    // 2.0.1 leaves the connector in Preparing until the EVSE energizes it.
+    if (rig.cp.getConnector(1)!.status === OCPPStatus.Preparing) {
+      rig.cp.updateConnectorStatus(1, OCPPStatus.Charging);
+    }
+    // The vehicle reacts to the status change after the event, on the next
+    // turn of the clock; 2.0.1 sends nothing for Preparing to Charging, so
+    // there is no traffic for `settle` to wait for.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await settle(rig);
+    rig.cp.stopTransaction(1, "Local");
+    await settle(rig);
+  }),
+  // #608: a station budget shared between connectors narrows the offer; one
+  // connector holds the whole budget.
+  ...both(
+    "power-sharing-meter-values",
+    async (rig) => {
+      await charging(rig);
+      const connector = rig.cp.getConnector(1)!;
+      if (connector.status !== OCPPStatus.Charging) {
+        rig.cp.updateConnectorStatus(1, OCPPStatus.Charging);
+        await settle(rig);
+      }
+      connector.evSettings = {
+        ...connector.evSettings,
+        maxChargingPowerKw: 22,
+        currentType: "AC",
+        phases: 3,
+        voltageV: 230,
+      };
+      rig.cp.configuration.applyChange(
+        "MeterValuesSampledData",
+        "Energy.Active.Import.Register,Power.Active.Import,Power.Offered,Current.Import",
+      );
+      rig.cp.setMeterValue(1, 1500);
+      rig.cp.sendMeterValue(1);
+      await settle(rig);
+      rig.cp.stopTransaction(1, "Local");
+      await settle(rig);
+    },
+    {
+      transportOptions: {
+        chargerCapabilities: {
+          connectors: [{ connectorId: 1, maxDeliveryPowerW: 22_000 }],
+          powerSharing: { totalPowerW: 5_500, strategy: "active" },
+        },
+      },
+    },
+  ),
   ...both(
     "start-denied-by-authorize",
     async (rig) => {

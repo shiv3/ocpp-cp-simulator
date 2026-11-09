@@ -64,6 +64,7 @@ COPY packages/ocpp/package.json ./packages/ocpp/package.json
 COPY packages/contracts/package.json ./packages/contracts/package.json
 COPY packages/trace/package.json ./packages/trace/package.json
 COPY packages/k6-runtime/package.json ./packages/k6-runtime/package.json
+COPY packages/vehicle/package.json ./packages/vehicle/package.json
 COPY packages/core/package.json ./packages/core/package.json
 COPY packages/client/package.json ./packages/client/package.json
 COPY apps/cli/package.json ./apps/cli/package.json
@@ -104,6 +105,8 @@ COPY scripts/bench/tsconfig.json ./scripts/bench/tsconfig.json
 # Same for scripts/tsconfig.json (#578, the package-boundary checker's
 # project): referenced from the root tsconfig.json, so it must be present.
 COPY scripts/tsconfig.json ./scripts/tsconfig.json
+# vite.config.ts imports the third-party notices renderer (#857).
+COPY scripts/licenseNotices.ts ./scripts/licenseNotices.ts
 COPY tailwind.config.js postcss.config.js ./
 COPY public ./public
 COPY packages ./packages

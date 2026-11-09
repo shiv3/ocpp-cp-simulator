@@ -114,6 +114,34 @@ describe("OCPP 1.6 transaction-end meter data (#607)", () => {
     }
   });
 
+  // #846: transactionData is spelled for the OCPP-J 1.6 wire like MeterValues.
+  it("Temperature in transactionData carries the errata spelling Celcius", async () => {
+    const csms = startMockCsms();
+    const stop = answerEverythingElse(csms, ["StartTransaction"]);
+    try {
+      const cp = await charging16(csms, "CP846-celcius");
+      cp.configuration.applyChange(
+        "StopTxnSampledData",
+        `${REGISTER},Temperature`,
+      );
+      await startAndCharge16(csms, cp);
+      cp.sendScheduledMeterValue(1);
+      cp.stopTransaction(1);
+      await csms.waitForCall("StopTransaction");
+
+      const units = stopTx16(csms)
+        .transactionData!.flatMap((d) => d.sampledValue)
+        .filter((s) => s.measurand === "Temperature")
+        .map((s) => s.unit);
+      expect(units.length).toBeGreaterThan(0);
+      expect(new Set(units)).toEqual(new Set(["Celcius"]));
+      cp.disconnect();
+    } finally {
+      stop();
+      await csms.stop();
+    }
+  });
+
   it("StopTxnAlignedData: one Sample.Clock entry per boundary, at the boundary instant", async () => {
     const csms = startMockCsms();
     const stop = answerEverythingElse(csms, ["StartTransaction"]);

@@ -41,7 +41,12 @@ import type {
   ScenarioWaitIntervention,
 } from "./ScenarioTypes";
 import { NOTIFY_KINDS, ScenarioNodeType } from "./ScenarioTypes";
-import { isFromReference, resolveFrom, type FromScope } from "./resolveFrom";
+import {
+  isFromReference,
+  resolveFrom,
+  type FromScope,
+  type ScenarioOcppResponse,
+} from "./resolveFrom";
 import {
   DIAGNOSTICS_STATUSES,
   FIRMWARE_STATUSES,
@@ -104,13 +109,23 @@ interface Flow {
   exchange: ScenarioCallExchange | null;
   answered: boolean;
   /**
+   * The answer to the latest `ocppCall` of this branch (schema 1.7), for the
+   * root `response`. Latest wins; a branch from Start begins without one.
+   */
+  response: ScenarioOcppResponse | null;
+  /**
    * Set by a `switch` or `choice` node (schema 1.6): the `sourceHandle` of the
    * one edge the branch goes on along. Read and cleared by the walk.
    */
   handle: string | null;
 }
 
-const newFlow = (): Flow => ({ exchange: null, answered: false, handle: null });
+const newFlow = (): Flow => ({
+  exchange: null,
+  answered: false,
+  response: null,
+  handle: null,
+});
 
 /** JSON equality: same type, same value, objects without regard to key order. */
 function jsonEquals(a: unknown, b: unknown): boolean {
@@ -1084,6 +1099,22 @@ export class ScenarioExecutor {
       call.catch(() => undefined);
       return;
     }
+    flow.response =
+      outcome.kind === "callResult"
+        ? {
+            kind: "result",
+            action,
+            messageId: outcome.messageId,
+            payload: outcome.payload,
+          }
+        : {
+            kind: "error",
+            action,
+            messageId: outcome.messageId,
+            errorCode: outcome.errorCode,
+            errorDescription: outcome.errorDescription,
+            errorDetails: outcome.errorDetails,
+          };
     if (outcome.kind === "callResult") {
       this.callbacks.log?.(
         `OCPP call ${data.action} → CALLRESULT ${JSON.stringify(outcome.payload)}`,
@@ -2092,6 +2123,7 @@ export class ScenarioExecutor {
   private fromScope(flow: Flow): FromScope {
     return {
       exchange: flow.exchange,
+      response: flow.response,
       state: this.runState,
       ...(this.callbacks.onReadStation
         ? { station: this.callbacks.onReadStation }

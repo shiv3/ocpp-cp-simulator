@@ -41,7 +41,10 @@ import {
   type SetStateNodeData,
   type SwitchNodeData,
 } from "../cp/application/scenario/ScenarioTypes";
-import { containsCallReference } from "../cp/application/scenario/resolveFrom";
+import {
+  containsCallReference,
+  containsRootReference,
+} from "../cp/application/scenario/resolveFrom";
 import type { Diagnostic } from "./diagnostic";
 
 /**
@@ -64,8 +67,22 @@ export type OutEdges = "parallel" | "next" | "select" | "none";
  */
 export type CallEffect = "takesOver" | "answers" | "reads" | "none";
 
+/**
+ * What a node does to the answer its branch holds (`response`, schema 1.7):
+ * `reads` is a `$from: "response.…"` that fails without an answer from an
+ * earlier `ocppCall` in the branch; `produces` is an `ocppCall` that leaves
+ * its answer (latest wins). A node can do both: its payload is resolved
+ * before the call is sent.
+ */
+export interface ResponseEffect {
+  reads: boolean;
+  produces: boolean;
+}
+
 export interface ConnectionRule<D = unknown> {
   out: OutEdges;
+  /** What the node does to its branch's `response`, when it does anything. */
+  response?: (data: Partial<D> | undefined) => ResponseEffect;
   /** What the node does to its branch's CALL, from its data (which is
    *  unvalidated when the rule is consulted, so possibly partial). */
   call: (data: Partial<D> | undefined) => CallEffect;
@@ -89,6 +106,10 @@ export type ConnectionRuleTable = {
 };
 
 const noCall = (): CallEffect => "none";
+const readsResponse = (value: unknown): ResponseEffect => ({
+  reads: containsRootReference(value, "response"),
+  produces: false,
+});
 /** An ordinary step: runs, then the first edge to an existing node. */
 const step: ConnectionRule = { out: "next", call: noCall };
 
@@ -128,10 +149,12 @@ export const CONNECTION_RULES: ConnectionRuleTable = {
   [ScenarioNodeType.NOTIFY]: {
     out: "next",
     call: (data) => (containsCallReference(data?.requestId) ? "reads" : "none"),
+    response: (data) => readsResponse(data?.requestId),
   },
   [ScenarioNodeType.SET_STATE]: {
     out: "next",
     call: (data) => (containsCallReference(data?.value) ? "reads" : "none"),
+    response: (data) => readsResponse(data?.value),
   },
   // executeSequentialFlow: flow.handle set by executeSwitch / executeChoice
   // filters the outgoing edges by sourceHandle. executeSwitch resolves
@@ -139,6 +162,7 @@ export const CONNECTION_RULES: ConnectionRuleTable = {
   [ScenarioNodeType.SWITCH]: {
     out: "select",
     call: (data) => (containsCallReference(data?.value) ? "reads" : "none"),
+    response: (data) => readsResponse(data?.value),
   },
   [ScenarioNodeType.CHOICE]: { out: "select", call: noCall },
   // executeCsmsCallTrigger: with behavior "replace" sets flow.exchange.
@@ -147,11 +171,22 @@ export const CONNECTION_RULES: ConnectionRuleTable = {
     call: (data) => (data?.behavior === "replace" ? "takesOver" : "none"),
   },
   // executeCallResponse: throws without flow.exchange or once flow.answered.
-  [ScenarioNodeType.CALL_RESPONSE]: { out: "next", call: () => "answers" },
-  // executeOcppCall → resolveFromExchange: a $from without a CALL throws.
+  // (its payload is resolved through fromScope(flow) too.)
+  [ScenarioNodeType.CALL_RESPONSE]: {
+    out: "next",
+    call: () => "answers",
+    response: (data) => readsResponse(data?.payload),
+  },
+  // executeOcppCall → resolveFrom: a $from without a CALL (or, schema 1.7,
+  // without an earlier answer) throws. The answer it gets replaces the
+  // branch's `response`.
   [ScenarioNodeType.OCPP_CALL]: {
     out: "next",
     call: (data) => (containsCallReference(data?.payload) ? "reads" : "none"),
+    response: (data) => ({
+      reads: containsRootReference(data?.payload, "response"),
+      produces: true,
+    }),
   },
 };
 
@@ -201,7 +236,10 @@ export type GraphIssueCode =
   /** A replace `csmsCallTrigger` whose CALL can still be open when its branch
    *  ends or takes over another CALL: the station answers it `InternalError`
    *  only when the run ends. Reported on the trigger. */
-  | "callLeftOpen";
+  | "callLeftOpen"
+  /** A node with a `$from: "response.…"` is reached on a path whose branch
+   *  holds no answer from an earlier `ocppCall` (schema 1.7): the run fails there. */
+  | "noResponseHeld";
 
 /** A finding of `validateScenarioGraph` (`scenarioGraphValidator.ts`): a
  *  {@link Diagnostic} narrowed to the graph codes, never `info`. */

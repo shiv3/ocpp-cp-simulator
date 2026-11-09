@@ -159,14 +159,18 @@ function checkCalls(origin: GraphNodeLike, program: Program): GraphIssue[] {
     found.set(`${code} ${nodeId}`, { code, nodeId, severity });
   };
 
-  const statesAt = new Map<string, Set<CallState>>();
-  const queue: Array<[string, CallState]> = [];
-  const enter = (nodeId: string, state: CallState) => {
-    const seen = statesAt.get(nodeId) ?? new Set<CallState>();
-    if (seen.has(state)) return;
-    seen.add(state);
+  // The branch's state at a node: its CALL, and whether it holds an answer
+  // to an ocppCall (`response`, schema 1.7). Both reset at each branch from
+  // the origin (newFlow()).
+  const statesAt = new Map<string, Set<string>>();
+  const queue: Array<[string, CallState, boolean]> = [];
+  const enter = (nodeId: string, state: CallState, answer: boolean) => {
+    const key = `${answer ? "r" : "-"}${state}`;
+    const seen = statesAt.get(nodeId) ?? new Set<string>();
+    if (seen.has(key)) return;
+    seen.add(key);
     statesAt.set(nodeId, seen);
-    queue.push([nodeId, state]);
+    queue.push([nodeId, state, answer]);
   };
   const leftOpen = (state: CallState) => {
     if (state.startsWith("open:")) report("callLeftOpen", state.slice(5));
@@ -174,14 +178,17 @@ function checkCalls(origin: GraphNodeLike, program: Program): GraphIssue[] {
 
   // Each branch from the origin starts with a fresh CALL slot (newFlow()).
   for (const edge of successors(program, origin, { asOrigin: true })) {
-    enter(edge.target, "none");
+    enter(edge.target, "none", false);
   }
 
   while (queue.length > 0) {
-    const [nodeId, state] = queue.pop()!;
+    const [nodeId, state, answer] = queue.pop()!;
     const node = program.nodesById.get(nodeId)!;
+    const rule = connectionRule(node.type);
     let after: CallState | null = state;
-    switch (connectionRule(node.type).call(node.data as never)) {
+    let answerAfter = answer;
+    const effect = rule.response?.(node.data as never);
+    switch (rule.call(node.data as never)) {
       case "takesOver":
         leftOpen(state);
         after = `open:${node.id}`;
@@ -201,11 +208,16 @@ function checkCalls(origin: GraphNodeLike, program: Program): GraphIssue[] {
       case "none":
         break;
     }
+    if (effect?.reads && !answer) {
+      report("noResponseHeld", node.id);
+      after = null;
+    }
+    if (effect?.produces) answerAfter = true;
     if (after === null) continue;
     // Re-entering the origin runs it as a step (executeSequentialFlow).
     // A switch or choice may pick any of its handles: follow each.
     const followed = successors(program, node);
-    for (const edge of followed) enter(edge.target, after);
+    for (const edge of followed) enter(edge.target, after, answerAfter);
     if (followed.length === 0) leftOpen(after);
   }
 

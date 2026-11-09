@@ -198,6 +198,7 @@
   "scenarios.templateBrowser.previewTemplate": "{{name}} をプレビュー",
   "scenarios.templateBrowser.nothingToPreview": "プレビューするテンプレートがありません。",
   "scenarios.editor.issue.noCallHeld": "ステップ {{n}}({{title}})は、同じ枝で先に引き取った CSMS コール(behavior が「replace」の CSMS Call Trigger)が必要ですが、それが無い経路があります。その経路では実行が失敗します。",
+  "scenarios.editor.issue.noResponseHeld": "ステップ {{n}}({{title}})は OCPP コールへの応答(response…)を読みますが、同じ枝でそれより前に OCPP Call ステップが無い経路があります。その経路では実行が失敗します。",
   "scenarios.editor.issue.callAlreadyAnswered": "ステップ {{n}}({{title}})は、その枝がすでに応答した CSMS コールに再度応答する経路があります。その経路では実行が失敗します。",
   "scenarios.editor.issue.callLeftOpen": "ステップ {{n}}({{title}})が引き取った CSMS コールに、その枝で応答しないまま終わる経路があります。ステーションは実行終了時にようやく InternalError で応答します。Call Response を追加してください(意図的に黙るなら kind「none」)。",
   "scenarios.editor.issueShowStep": "このステップを選択して表示",

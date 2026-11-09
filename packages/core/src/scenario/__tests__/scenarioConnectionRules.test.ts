@@ -604,3 +604,101 @@ describe("validateScenarioGraph: decision nodes and the roots of $from (schema 1
     });
   });
 });
+
+// Schema 1.7: the answer to an ocppCall that a branch holds (`response`).
+describe("a $from on the response root", () => {
+  const call = (id: string, payload?: unknown) =>
+    node(id, "ocppCall", { action: "Authorize", payload });
+  const sw = (id: string) =>
+    node(id, "switch", {
+      value: { $from: "response.kind" },
+      cases: ["result"],
+    });
+  const noHeld = { code: "noResponseHeld", nodeId: "sw", severity: "error" };
+
+  it("is flagged right after START and when no ocppCall precedes it", () => {
+    expect(issuesAfterStart(sw("n"))).toEqual([{ ...noHeld, nodeId: "n" }]);
+    expect(
+      validateScenarioGraph({
+        nodes: [node("s", "start"), node("d"), sw("sw")],
+        edges: [edge("s", "d"), edge("d", "sw")],
+      }),
+    ).toEqual([noHeld]);
+  });
+
+  it("is fine after an ocppCall in the same branch, whatever the switch picks", () => {
+    expect(
+      validateScenarioGraph({
+        nodes: [node("s", "start"), call("c"), sw("sw"), node("a"), node("b")],
+        edges: [
+          edge("s", "c"),
+          edge("c", "sw"),
+          edge("sw", "a", "case-0"),
+          edge("sw", "b", "default"),
+        ],
+      }),
+    ).toEqual([]);
+  });
+
+  it("is flagged when only one path through a join has an ocppCall", () => {
+    expect(
+      validateScenarioGraph({
+        nodes: [node("s", "start"), call("c"), node("d"), sw("sw")],
+        edges: [
+          edge("s", "c"),
+          edge("s", "d"),
+          edge("c", "sw"),
+          edge("d", "sw"),
+        ],
+      }).map((i) => i.code),
+    ).toEqual(["noResponseHeld"]);
+  });
+
+  it("an ocppCall payload reads the answer of an earlier call, not its own", () => {
+    const reads = call("c2", {
+      id: { $from: "response.payload.transactionId" },
+    });
+    expect(
+      validateScenarioGraph({
+        nodes: [node("s", "start"), reads],
+        edges: [edge("s", "c2")],
+      }).map((i) => i.code),
+    ).toEqual(["noResponseHeld"]);
+    expect(
+      validateScenarioGraph({
+        nodes: [node("s", "start"), call("c1"), reads],
+        edges: [edge("s", "c1"), edge("c1", "c2")],
+      }),
+    ).toEqual([]);
+  });
+
+  it("reports setState / notify / callResponse readers and ignores other roots", () => {
+    expect(
+      connectionRule("setState").response?.({
+        key: "k",
+        value: { $from: "response.payload.x" },
+      } as never),
+    ).toEqual({ reads: true, produces: false });
+    expect(
+      connectionRule("setState").response?.({
+        key: "k",
+        value: { $from: "state.x" },
+      } as never),
+    ).toEqual({ reads: false, produces: false });
+    expect(connectionRule("delay").response).toBeUndefined();
+  });
+
+  it("a node reading both roots gets both diagnostics", () => {
+    expect(
+      issuesAfterStart(
+        node("n", "setState", {
+          key: "k",
+          value: {
+            a: { $from: "call.payload.x" },
+            b: { $from: "response.kind" },
+          },
+        }),
+      ).map((i) => i.code),
+    ).toEqual(["noCallHeld", "noResponseHeld"]);
+  });
+});

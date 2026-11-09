@@ -15,7 +15,7 @@ import { initErrorReporting } from "./lib/errorReporting";
 
 // Wait for the saved language (English is bundled, so this is immediate for
 // the default) so the first paint is already translated, and for the opt-in
-// error reporting (#794; immediate without a VITE_SENTRY_DSN).
+// error reporting (#794; immediate without a VITE_ERROR_REPORTER).
 void Promise.all([
   i18nReady.catch(() => undefined), // a failed chunk load falls back to English
   initErrorReporting(), // never rejects: a failure leaves reporting off

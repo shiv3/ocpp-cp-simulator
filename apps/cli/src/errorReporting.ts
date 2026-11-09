@@ -75,11 +75,22 @@ function safeCapture(error: unknown, context: ErrorReportContext): void {
   }
 }
 
+/**
+ * Wait for the adapter's flush, but never past the core's own deadline: an
+ * adapter whose flush ignores its timeout or never settles must not hold the
+ * exit back.
+ */
 async function safeFlush(): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, FATAL_FLUSH_TIMEOUT_MS);
+  });
   try {
-    await active?.flush(FATAL_FLUSH_TIMEOUT_MS);
+    await Promise.race([active?.flush(FATAL_FLUSH_TIMEOUT_MS), deadline]);
   } catch {
     // Same: an exit goes ahead whatever the adapter does.
+  } finally {
+    clearTimeout(timer);
   }
 }
 

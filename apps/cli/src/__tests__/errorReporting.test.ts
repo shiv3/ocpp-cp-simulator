@@ -266,6 +266,31 @@ describe("reportFatalError", () => {
     );
     await expect(reportFatalError(new Error("x"))).resolves.toBeUndefined();
   });
+
+  it("resolves after 2 s even when the adapter's flush never settles", async () => {
+    vi.useFakeTimers();
+    try {
+      const reporter = recordingReporter();
+      reporter.flush.mockReturnValue(new Promise<boolean>(() => {}));
+      const { module } = fakeAdapter(reporter);
+      await initErrorReporting(
+        { OCPP_SIM_ERROR_REPORTER: "sentry" },
+        {
+          builtins: { sentry: async () => module },
+          process: fakeProcess().proc,
+        },
+      );
+      let settled = false;
+      void reportFatalError(new Error("x")).then(() => (settled = true));
+
+      await vi.advanceTimersByTimeAsync(1999);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(settled).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("process handlers", () => {
@@ -322,5 +347,22 @@ describe("process handlers", () => {
     expect(reporter.captureException).toHaveBeenCalledTimes(1);
     expect(proc.exit).toHaveBeenCalledTimes(1);
     expect(stderr.join("")).toContain("second");
+  });
+
+  it("exit 1 after 2 s even when the adapter's flush never settles", async () => {
+    vi.useFakeTimers();
+    try {
+      const { reporter, emit, proc } = await activate();
+      reporter.flush.mockReturnValue(new Promise<boolean>(() => {}));
+
+      emit("uncaughtException", new Error("boom"));
+
+      await vi.advanceTimersByTimeAsync(1999);
+      expect(proc.exit).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(proc.exit).toHaveBeenCalledWith(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

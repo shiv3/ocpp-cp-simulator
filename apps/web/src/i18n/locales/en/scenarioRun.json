@@ -116,5 +116,11 @@
   "scenarioRun.zoom.in": "Zoom in",
   "scenarioRun.zoom.fit": "Fit",
   "scenarioRun.zoom.fitHint": "Fit the whole graph in view",
-  "scenarioRun.zoom.resetHint": "Actual size (Ctrl/Cmd + wheel also zooms)"
+  "scenarioRun.zoom.resetHint": "Actual size (Ctrl/Cmd + wheel also zooms)",
+  "scenarioRun.pendingLoop.title": "Repeat (empty)",
+  "scenarioRun.pendingLoop.hint": "Drop steps here or add one. Nothing is saved until it holds a step.",
+  "scenarioRun.pendingLoop.remove": "Remove the empty repeat",
+  "scenarioRun.pendingLoop.unsaved": "Empty repeat blocks are not saved.",
+  "scenarioRun.emptyLaneHint": "Drop steps here",
+  "scenarioRun.dropRefused": "Cannot drop here: {{reason}}"
 }

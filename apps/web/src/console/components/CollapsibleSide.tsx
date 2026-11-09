@@ -55,8 +55,10 @@ const CollapsibleSide: React.FC<{
         )}
         onClick={() => onCollapsedChange(!collapsed)}
         className={cn(
-          "absolute z-10 flex h-6 w-6 items-center justify-center rounded-full border border-cx-border-strong bg-cx-card text-cx-muted hover:border-cx-accent hover:text-cx-accent",
-          collapsed ? "left-1/2 top-2 -translate-x-1/2" : "-left-3 top-3",
+          "z-10 flex h-6 w-6 items-center justify-center rounded-full border border-cx-border-strong bg-cx-card text-cx-muted hover:border-cx-accent hover:text-cx-accent",
+          // Folded: the button and the label are stacked in the rail's own
+          // flow, so the sideways label cannot run under the button.
+          collapsed ? "relative mx-auto mt-2" : "absolute -left-3 top-3",
         )}
       >
         {collapsed ? (
@@ -68,7 +70,7 @@ const CollapsibleSide: React.FC<{
       {collapsed && (
         <span
           aria-hidden
-          className="absolute inset-x-0 top-10 flex justify-center text-xs text-cx-faint [writing-mode:vertical-rl]"
+          className="mt-3 flex justify-center pb-3 text-xs text-cx-faint [writing-mode:vertical-rl]"
         >
           {label}
         </span>

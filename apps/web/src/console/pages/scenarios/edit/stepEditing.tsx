@@ -8,7 +8,7 @@ import {
   type LaneKey,
 } from "../../../lib/useLaneDrag";
 import type { RunViewCommonProps } from "../run/stepVisuals";
-import AddStepPicker from "./AddStepPicker";
+import AddStepPicker, { type StructureKind } from "./AddStepPicker";
 
 /** Where a picked step goes: `index` of `lane`. */
 export interface InsertSlot<L extends LaneKey = LaneKey> {
@@ -21,6 +21,12 @@ type EditCallbacks<L extends LaneKey> = Pick<
   "onMoveStep" | "onDeleteStep"
 > & {
   onInsertStep?: (lane: L, index: number, type: ScenarioNodeType) => void;
+  /** Wired to offer Repeat / Switch / Choice in the picker. */
+  structure?: {
+    pick: (slot: InsertSlot<L>, kind: StructureKind) => void;
+    /** The structures that cannot go to `slot`, with the reason. */
+    refusals?: (slot: InsertSlot<L>) => Partial<Record<StructureKind, string>>;
+  };
 };
 
 /**
@@ -46,7 +52,7 @@ export function useStepEditing<L extends LaneKey>(
   /** Put on the views' root: the keyboard's refocus looks inside it. */
   rootRef: React.RefObject<HTMLDivElement | null>;
 } {
-  const { onInsertStep, onMoveStep, onDeleteStep } = callbacks;
+  const { onInsertStep, onMoveStep, onDeleteStep, structure } = callbacks;
   const [slot, setSlot] = useState<InsertSlot<L> | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const refocusId = useRef<string | null>(null);
@@ -93,6 +99,15 @@ export function useStepEditing<L extends LaneKey>(
         onInsertStep?.(slot.lane, slot.index, type);
         setSlot(null);
       }}
+      onPickStructure={
+        structure
+          ? (kind) => {
+              structure.pick(slot, kind);
+              setSlot(null);
+            }
+          : undefined
+      }
+      structureRefusals={structure?.refusals?.(slot)}
       onClose={() => setSlot(null)}
     />
   ) : null;

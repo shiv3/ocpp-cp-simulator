@@ -274,5 +274,11 @@
   "scenarios.addStep.structure.loopHelp": "Répète les étapes qu'il contient. Dans la vue Étapes, déposez-y des étapes ; dans la vue Graphe, choisissez l'étape de retour.",
   "scenarios.inspector.collapse": "Replier le panneau d'étape",
   "scenarios.inspector.expand": "Déplier le panneau d'étape",
-  "scenarios.inspector.rail": "Réglages de l'étape"
+  "scenarios.inspector.rail": "Réglages de l'étape",
+  "scenarios.editor.cannot.samePlace": "L'étape est déjà là.",
+  "scenarios.editor.cannot.moveUnstable": "Les étapes ne se reliraient pas comme déposées ; rien n'a été modifié.",
+  "scenarios.addStep.structure.switch": "Switch (branche selon une valeur)",
+  "scenarios.addStep.structure.switchHelp": "Ajoute un bloc de branches avec une voie par cas et une voie par défaut. Déposez des étapes dans les voies ; elles se rejoignent à l'étape suivante.",
+  "scenarios.addStep.structure.choice": "Choix (branche aléatoire)",
+  "scenarios.addStep.structure.choiceHelp": "Ajoute un bloc de branches avec deux options pondérées, l'une tirée au hasard. Déposez des étapes dans les voies ; elles se rejoignent à l'étape suivante."
 }

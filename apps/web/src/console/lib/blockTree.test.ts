@@ -627,7 +627,6 @@ describe("operations", () => {
           merge: "b",
           lanes: [
             { when: "case", blocks: [], exit: "→b" },
-            { when: "case", blocks: [], exit: "→b" },
             { when: "default", blocks: [], exit: "→b" },
           ],
         },

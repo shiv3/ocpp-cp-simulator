@@ -115,5 +115,11 @@
   "scenarioRun.zoom.in": "放大",
   "scenarioRun.zoom.fit": "适应",
   "scenarioRun.zoom.fitHint": "显示整个图",
-  "scenarioRun.zoom.resetHint": "实际大小(Ctrl/Cmd + 滚轮也可缩放)"
+  "scenarioRun.zoom.resetHint": "实际大小(Ctrl/Cmd + 滚轮也可缩放)",
+  "scenarioRun.pendingLoop.title": "重复(空)",
+  "scenarioRun.pendingLoop.hint": "把步骤拖到此处或添加一个。在包含步骤之前不会保存。",
+  "scenarioRun.pendingLoop.remove": "删除空的重复",
+  "scenarioRun.pendingLoop.unsaved": "空的重复块不会被保存。",
+  "scenarioRun.emptyLaneHint": "把步骤拖到此处",
+  "scenarioRun.dropRefused": "无法放在此处:{{reason}}"
 }

@@ -39,6 +39,9 @@ import {
   editCapabilities,
   insertForkBlock,
   insertStep,
+  insertStepIntoNewLoop,
+  canMoveStepTo,
+  moveStepTo,
   moveStep,
   recognizeBlockTree,
   removeLane,
@@ -388,6 +391,29 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
       kind
         ? insertForkBlock(scenario, tree, path, index, kind)
         : insertStep(scenario, tree, path, index, type),
+    );
+  };
+
+  /** The first step of an empty Repeat block: the repeat is written around it. */
+  const handleInsertStepIntoLoop = (
+    path: SeqPath,
+    index: number,
+    type: ScenarioNodeType,
+  ) => {
+    if (!scenario || !tree) return;
+    applyAndSelectNew(insertStepIntoNewLoop(scenario, tree, path, index, type));
+  };
+
+  /** A step dropped in another sequence, or into a new Repeat block. */
+  const handleMoveStepTo = (
+    nodeId: string,
+    path: SeqPath,
+    index: number,
+    loop: boolean,
+  ) => {
+    if (!scenario || !tree) return;
+    unlessRefused(nodeId, canMoveStepTo(tree, nodeId, path, index, loop), () =>
+      setScenario(moveStepTo(scenario, tree, nodeId, path, index, loop)),
     );
   };
 
@@ -907,6 +933,8 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
                   selectedStepId={selectedStepId}
                   onSelectStep={setSelectedStepId}
                   onInsertStep={handleInsertStep}
+                  onInsertStepIntoLoop={handleInsertStepIntoLoop}
+                  onMoveStepTo={handleMoveStepTo}
                   onMoveStep={handleMove}
                   onDeleteStep={handleDeleteRequest}
                   onAddLane={handleAddLane}

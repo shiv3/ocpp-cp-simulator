@@ -25,6 +25,8 @@ import {
   type ScenarioNode,
 } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import {
+  canInsertLoopAt,
+  canMoveStepTo,
   editCapabilities,
   firstNodeOf,
   type Block,
@@ -34,10 +36,15 @@ import {
   type Lane,
   type Seq,
   type SeqPath,
+  seqAt,
   treeNodes,
 } from "../../../lib/blockTree";
 import { isLiveRunState } from "../../../lib/scenarioRunState";
-import { WAIT_STEP_TYPES, stepSummary } from "../../../lib/scenarioSteps";
+import {
+  STRUCTURE_TYPE,
+  WAIT_STEP_TYPES,
+  stepSummary,
+} from "../../../lib/scenarioSteps";
 import {
   conditionText,
   forkSummary,
@@ -48,12 +55,15 @@ import {
   treeSteps,
 } from "../../../lib/stepTree";
 import {
+  dropIndex,
   dropNeighbours,
   type LaneDragHandlers,
 } from "../../../lib/useLaneDrag";
+import { useTreeDrag, type TreeDropTarget } from "../../../lib/useTreeDrag";
 import type { ScenarioRunState } from "../../../lib/useScenarioRun";
 import { useStepEditing } from "../edit/stepEditing";
 import IssueBadge from "../edit/IssueBadge";
+import AddStepPicker, { type StructureKind } from "../edit/AddStepPicker";
 import { useStepIssues } from "../edit/issueMarkUi";
 import StepTile from "./StepTile";
 import {
@@ -454,6 +464,9 @@ const StepsView: React.FC<StepTreeViewProps> = (props) => {
     onSelectStep,
     editable = false,
     onInsertStep,
+    onInsertStepIntoLoop,
+    onMoveStepTo,
+    onMoveStep,
     onAddLane,
     onRemoveLane,
     onUnwrapLoop,
@@ -462,8 +475,146 @@ const StepsView: React.FC<StepTreeViewProps> = (props) => {
 
   const { t } = useTranslation();
   const stepIssues = useStepIssues(issues);
-  const editing = useStepEditing<SeqPath>(props, measureBlocks);
-  const { drag } = editing;
+  /** An empty Repeat block the user asked for (UI only: the file has no
+   *  such thing until a step is in it) and its open picker. */
+  const [pendingLoop, setPendingLoop] = React.useState<{
+    path: SeqPath;
+    index: number;
+  } | null>(null);
+  const [pendingPicker, setPendingPicker] = React.useState(false);
+  /** Why the last drop (or the one being aimed) is refused. */
+  const [dropNotice, setDropNotice] = React.useState<string | null>(null);
+
+  const pendingValid =
+    pendingLoop !== null &&
+    (() => {
+      const seq = seqAt(tree, pendingLoop.path);
+      return (
+        seq !== null &&
+        pendingLoop.index === seq.blocks.length &&
+        canInsertLoopAt(tree, pendingLoop.path, pendingLoop.index).ok
+      );
+    })();
+  const pending = pendingValid ? pendingLoop : null;
+
+  const structureRefusals = (slot: { lane: SeqPath; index: number }) => {
+    const refusals: Partial<Record<StructureKind, string>> = {};
+    const loopCap = canInsertLoopAt(tree, slot.lane, slot.index);
+    if (!loopCap.ok) refusals.loop = t(loopCap.reason);
+    return refusals;
+  };
+  const editing = useStepEditing<SeqPath>(
+    {
+      ...props,
+      structure: {
+        pick: (slot, kind) => {
+          if (kind === "loop") {
+            setDropNotice(null);
+            setPendingPicker(false);
+            setPendingLoop({ path: slot.lane, index: slot.index });
+          } else {
+            const type = STRUCTURE_TYPE[kind];
+            if (type) onInsertStep?.(slot.lane, slot.index, type);
+          }
+        },
+        refusals: structureRefusals,
+      },
+    },
+    measureBlocks,
+  );
+
+  /** What a drop at (`x`, `y`) would hit: a pending Repeat block, an empty
+   *  lane, or a slot of the sequence under the pointer (else the step's
+   *  own). Reads the layout the browser made. */
+  const locate = (
+    item: { id: string; path: SeqPath; index: number },
+    x: number,
+    y: number,
+    offset: number,
+  ): TreeDropTarget | null => {
+    const root = editing.rootRef.current;
+    const inside = (el: Element, pad: number) => {
+      const r = el.getBoundingClientRect();
+      return (
+        r.width > 0 &&
+        x >= r.left - pad &&
+        x <= r.right + pad &&
+        y >= r.top - pad &&
+        y <= r.bottom + pad
+      );
+    };
+    const zone = Array.from(
+      root?.querySelectorAll<HTMLElement>("[data-drop-pending]") ?? [],
+    ).find((el) => inside(el, 0));
+    if (zone?.dataset.dropPending && pending) {
+      return { path: pending.path, index: pending.index, loop: true };
+    }
+    const hits = [
+      ...Array.from(
+        root?.querySelectorAll<HTMLElement>("[data-lane-list]") ?? [],
+      ).map((el) => ({ el, path: el.dataset.laneList ?? "" })),
+      ...Array.from(
+        root?.querySelectorAll<HTMLElement>("[data-drop-empty]") ?? [],
+      ).map((el) => ({ el, path: el.dataset.dropEmpty ?? "" })),
+    ].filter(({ el }) => inside(el, 14));
+    // The innermost one: the last in document order.
+    const hit = hits[hits.length - 1];
+    const path = hit?.path ?? item.path;
+    const centres = measureBlocks(path, root);
+    if (path === item.path) {
+      return {
+        path,
+        index: dropIndex(centres, item.index, offset),
+        loop: false,
+      };
+    }
+    return {
+      path,
+      index: centres.filter((c) => c < y).length,
+      loop: false,
+    };
+  };
+
+  const dragState = useTreeDrag({
+    locate,
+    onDrop: (item, target) => {
+      if (!target.loop && target.path === item.path) {
+        if (target.index !== item.index)
+          onMoveStep?.(item.id, target.index - item.index);
+        setDropNotice(null);
+        return;
+      }
+      const cap = canMoveStepTo(
+        tree,
+        item.id,
+        target.path,
+        target.index,
+        target.loop,
+      );
+      if (!cap.ok) {
+        setDropNotice(t("scenarioRun.dropRefused", { reason: t(cap.reason) }));
+        return;
+      }
+      setDropNotice(null);
+      onMoveStepTo?.(item.id, target.path, target.index, target.loop);
+    },
+  });
+  const drag = dragState.drag;
+  /** The cross-sequence landing (or a Repeat block): not a same-lane move. */
+  const crossTarget =
+    drag?.target && (drag.target.loop || drag.target.path !== drag.path)
+      ? drag.target
+      : null;
+  const crossCap =
+    crossTarget && drag
+      ? canMoveStepTo(
+          tree,
+          drag.id,
+          crossTarget.path,
+          crossTarget.index,
+          crossTarget.loop,
+        )
+      : null;
   const steps = React.useMemo(() => treeSteps(tree), [tree]);
   const numbers = React.useMemo(() => stepNumbers(tree), [tree]);
   const number = (id: string) => numbers.get(id) ?? null;
@@ -490,9 +641,18 @@ const StepsView: React.FC<StepTreeViewProps> = (props) => {
   ) => {
     ctx.inLoop?.push(step.id);
     let dropLine: StepBoxEditing["dropLine"] = null;
-    if (drag && drag.lane === seq.path && drag.to !== drag.from) {
+    if (
+      drag &&
+      !crossTarget &&
+      drag.path === seq.path &&
+      drag.target &&
+      drag.target.index !== drag.index
+    ) {
       const ids = seq.blocks.map((b) => firstNodeOf(b).id);
-      const { above, below } = dropNeighbours(ids, drag);
+      const { above, below } = dropNeighbours(ids, {
+        id: drag.id,
+        to: drag.target.index,
+      });
       if (below === step.id) dropLine = "above";
       else if (below === null && above === step.id) dropLine = "below";
     }
@@ -515,9 +675,9 @@ const StepsView: React.FC<StepTreeViewProps> = (props) => {
                 // A branch point stays where it is: no grab handle.
                 dragHandlers: head
                   ? undefined
-                  : editing.dragHandlers({
+                  : dragState.handlers({
                       id: step.id,
-                      lane: seq.path,
+                      path: seq.path,
                       index,
                     }),
                 onKeyDown: editing.onStepKeyDown(step.id),
@@ -626,31 +786,148 @@ const StepsView: React.FC<StepTreeViewProps> = (props) => {
     );
   };
 
+  /** The line where a cross-sequence drop would land (rose: refused). */
+  const crossLine = (seq: Seq, i: number) =>
+    crossTarget &&
+    !crossTarget.loop &&
+    crossTarget.path === seq.path &&
+    crossTarget.index === i ? (
+      <li
+        key={`drop-${i}`}
+        aria-hidden
+        data-drop-indicator=""
+        data-drop-refused={crossCap && !crossCap.ok ? "" : undefined}
+        className={cn(
+          "pointer-events-none h-0.5 rounded-full",
+          crossCap && !crossCap.ok ? "bg-cx-rose" : "bg-cx-accent",
+        )}
+      />
+    ) : null;
+
+  /** The empty Repeat block the user asked for: a C-shaped frame to drop
+   *  steps into or add the first step to. Never in the file. */
+  const renderPending = (seq: Seq) => {
+    if (!pending || pending.path !== seq.path) return null;
+    const hot = crossTarget?.loop === true;
+    return (
+      <div
+        data-pending-loop=""
+        data-drop-pending={seq.path}
+        aria-label={t("scenarioRun.pendingLoop.title")}
+        className="mt-1.5 min-w-0"
+      >
+        <div className="flex min-h-7 items-center gap-1.5 rounded-t-[12px] rounded-br-[12px] bg-cx-purple/12 px-2.5 py-1 text-xs">
+          <Repeat className="h-3.5 w-3.5 shrink-0 text-cx-purple" aria-hidden />
+          <span className="flex-1 whitespace-nowrap font-semibold text-cx-purple">
+            {t("scenarioRun.pendingLoop.title")}
+          </span>
+          <button
+            type="button"
+            aria-label={t("scenarioRun.pendingLoop.remove")}
+            title={t("scenarioRun.pendingLoop.remove")}
+            onClick={() => {
+              setPendingLoop(null);
+              setPendingPicker(false);
+            }}
+            className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-cx-faint hover:bg-cx-rose/10 hover:text-cx-rose"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+        <div
+          className={cn(
+            "ml-3 border-l-[10px] border-cx-purple/12 py-2 pl-2",
+            hot && "border-cx-accent/40",
+          )}
+        >
+          <div
+            className={cn(
+              "rounded-[10px] border border-dashed px-3 py-3 text-xs text-cx-muted",
+              hot
+                ? crossCap && !crossCap.ok
+                  ? "border-cx-rose bg-cx-rose/10"
+                  : "border-cx-accent bg-cx-accent/10"
+                : "border-cx-border-strong",
+            )}
+          >
+            <p>{t("scenarioRun.pendingLoop.hint")}</p>
+            <p className="mt-1 text-cx-faint">
+              {t("scenarioRun.pendingLoop.unsaved")}
+            </p>
+          </div>
+          {pendingPicker ? (
+            <div className="mt-1.5">
+              <AddStepPicker
+                onPick={(type) => {
+                  onInsertStepIntoLoop?.(seq.path, pending.index, type);
+                  setPendingPicker(false);
+                  setPendingLoop(null);
+                }}
+                onClose={() => setPendingPicker(false)}
+              />
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setPendingPicker(true)}
+              className="mt-1.5 w-full rounded-[10px] border border-dashed border-cx-border-strong py-2 text-[13px] font-medium text-cx-muted hover:text-cx-fg"
+            >
+              {t("scenarioRun.addStepButton")}
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   const renderSeq = (
     seq: Seq,
     ctx: SeqContext,
     laneLabel?: string,
-  ): React.ReactNode => (
-    <>
-      <ol
-        data-lane-list={seq.path}
-        className={canInsert ? undefined : "space-y-1.5"}
-      >
-        {seq.blocks.map((block, i) => (
-          <React.Fragment key={blockKey(block)}>
-            {(i > 0 || seq.path !== "root") && gap(seq, i)}
-            {block.kind === "step"
-              ? renderBox(block.node, seq, i, ctx)
-              : block.kind === "loop"
-                ? renderLoop(block, i, ctx)
-                : renderFork(block, seq, i, ctx)}
-          </React.Fragment>
-        ))}
-      </ol>
-      {exitNote(seq)}
-      {addSlot(seq, laneLabel)}
-    </>
-  );
+  ): React.ReactNode => {
+    const empty = seq.blocks.length === 0 && seq.path !== "root";
+    const emptyHot =
+      crossTarget && !crossTarget.loop && crossTarget.path === seq.path;
+    return (
+      <>
+        <ol
+          data-lane-list={seq.path}
+          className={canInsert ? undefined : "space-y-1.5"}
+        >
+          {seq.blocks.map((block, i) => (
+            <React.Fragment key={blockKey(block)}>
+              {crossLine(seq, i)}
+              {(i > 0 || seq.path !== "root") && gap(seq, i)}
+              {block.kind === "step"
+                ? renderBox(block.node, seq, i, ctx)
+                : block.kind === "loop"
+                  ? renderLoop(block, i, ctx)
+                  : renderFork(block, seq, i, ctx)}
+            </React.Fragment>
+          ))}
+          {crossLine(seq, seq.blocks.length)}
+        </ol>
+        {empty && editable && (
+          <p
+            data-drop-empty={seq.path}
+            className={cn(
+              "rounded-[10px] border border-dashed px-3 py-2 text-xs",
+              emptyHot
+                ? crossCap && !crossCap.ok
+                  ? "border-cx-rose bg-cx-rose/10 text-cx-rose"
+                  : "border-cx-accent bg-cx-accent/10 text-cx-fg2"
+                : "border-cx-border-strong text-cx-muted",
+            )}
+          >
+            {t("scenarioRun.emptyLaneHint")}
+          </p>
+        )}
+        {renderPending(seq)}
+        {exitNote(seq)}
+        {pending?.path === seq.path ? null : addSlot(seq, laneLabel)}
+      </>
+    );
+  };
 
   const renderLoop = (
     loop: Extract<Block, { kind: "loop" }>,
@@ -945,6 +1222,17 @@ const StepsView: React.FC<StepTreeViewProps> = (props) => {
 
   return (
     <div ref={editing.rootRef} className="overflow-x-auto">
+      {(dropNotice || (crossCap && !crossCap.ok)) && (
+        <p
+          role="status"
+          data-drop-refusal=""
+          className="mb-2 rounded-md bg-cx-rose/10 px-2.5 py-1.5 text-xs text-cx-rose"
+        >
+          {crossCap && !crossCap.ok
+            ? t("scenarioRun.dropRefused", { reason: t(crossCap.reason) })
+            : dropNotice}
+        </p>
+      )}
       {renderSeq(tree.root, rootCtx)}
       {originCap && origin && (
         <button

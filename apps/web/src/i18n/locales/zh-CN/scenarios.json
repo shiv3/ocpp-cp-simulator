@@ -256,5 +256,11 @@
   "scenarios.addStep.structure.loopHelp": "重复其中的步骤。在步骤视图中把步骤拖入其中;在图视图中选择要返回的步骤。",
   "scenarios.inspector.collapse": "折叠步骤面板",
   "scenarios.inspector.expand": "展开步骤面板",
-  "scenarios.inspector.rail": "步骤设置"
+  "scenarios.inspector.rail": "步骤设置",
+  "scenarios.editor.cannot.samePlace": "该步骤已在此位置。",
+  "scenarios.editor.cannot.moveUnstable": "放置后无法按原样读回,未做任何更改。",
+  "scenarios.addStep.structure.switch": "开关(按值分支)",
+  "scenarios.addStep.structure.switchHelp": "添加一个分支块,每个 case 一个通道,外加默认通道。把步骤拖入通道;各通道在后续步骤处重新汇合。",
+  "scenarios.addStep.structure.choice": "选择(随机分支)",
+  "scenarios.addStep.structure.choiceHelp": "添加一个带两个加权选项的分支块,随机选其一。把步骤拖入通道;各通道在后续步骤处重新汇合。"
 }

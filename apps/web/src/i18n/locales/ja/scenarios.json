@@ -256,5 +256,11 @@
   "scenarios.addStep.structure.loopHelp": "中のステップを繰り返します。ステップ表示ではステップをドロップして入れ、グラフ表示では戻り先のステップを選びます。",
   "scenarios.inspector.collapse": "ステップパネルを折りたたむ",
   "scenarios.inspector.expand": "ステップパネルを開く",
-  "scenarios.inspector.rail": "ステップの設定"
+  "scenarios.inspector.rail": "ステップの設定",
+  "scenarios.editor.cannot.samePlace": "ステップは既にその位置にあります。",
+  "scenarios.editor.cannot.moveUnstable": "ドロップした通りには読み戻せないため、何も変更していません。",
+  "scenarios.addStep.structure.switch": "スイッチ(値で分岐)",
+  "scenarios.addStep.structure.switchHelp": "ケースごとのレーンとデフォルトレーンを持つ分岐ブロックを追加します。レーンにステップをドロップします。レーンは後続のステップで再び合流します。",
+  "scenarios.addStep.structure.choice": "選択(ランダム分岐)",
+  "scenarios.addStep.structure.choiceHelp": "重み付きの2つの選択肢からランダムに1つ選ぶ分岐ブロックを追加します。レーンにステップをドロップします。レーンは後続のステップで再び合流します。"
 }

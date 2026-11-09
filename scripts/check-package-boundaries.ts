@@ -321,24 +321,13 @@ export const LAYER_EXEMPTIONS: readonly KnownViolation[] = [
     "infrastructure/transport/RawFrameSender.ts",
     "infrastructure/transport/SupervisionUrlPool.ts",
     "infrastructure/transport/codec/ocppCallCatalog.ts",
-    "infrastructure/transport/network-sim/index.ts",
     "infrastructure/transport/profile/profiles.ts",
     "infrastructure/transport/soap/dialect.ts",
     "infrastructure/transport/soap/index.ts",
-    "infrastructure/transport/v201/renderConfigValue.ts",
-    "infrastructure/transport/wsUrlWithBasic.ts",
   ].map((t) => ({
     from: "packages/core/src/cp/domain/charge-point/ChargePoint.ts",
     to: `packages/core/src/cp/${t}`,
     why: "ChargePoint still builds the transport itself; clears with the ChargePoint split (#575).",
-  })),
-  ...[
-    "application/scenario/ScenarioManager.ts",
-    "application/scenario/ScenarioTypes.ts",
-  ].map((t) => ({
-    from: "packages/core/src/cp/domain/connector/Connector.ts",
-    to: `packages/core/src/cp/${t}`,
-    why: "Connector holds the scenario manager and its types; clears with the ChargePoint / Connector split (#575).",
   })),
 ];
 

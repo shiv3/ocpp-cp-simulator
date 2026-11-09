@@ -19,11 +19,7 @@ import type {
   RecurrencyKindType,
 } from "../types/OcppTypes";
 import { OCPPStatus, ChargingProfilePurposeType } from "../types/OcppTypes";
-import type { ScenarioManager } from "../../application/scenario/ScenarioManager";
-import type {
-  ScenarioMode,
-  ScenarioEvents,
-} from "../../application/scenario/ScenarioTypes";
+import type { ScenarioMode } from "@ocpp-cp-simulator/contracts/scenario";
 import type { Transaction } from "./Transaction";
 import {
   applyPatchToTransaction,
@@ -176,6 +172,9 @@ export interface ConnectorEvents {
    *  2.x only, 1.6 errata 3.17 is #736). The ChargePoint moves the connector to
    *  SuspendedEVSE. */
   invalidIdEnergyExhausted: Record<string, never>;
+  /** `dispose()` is tearing the connector down (the ChargePoint removed it).
+   *  Emitted once, before every listener is dropped. */
+  disposed: Record<string, never>;
 }
 
 interface IncrementStrategyConfig {
@@ -188,7 +187,6 @@ interface IncrementStrategyConfig {
  */
 export class Connector {
   private readonly eventsEmitter = new EventEmitter<ConnectorEvents>();
-  private readonly scenarioEventsEmitter = new EventEmitter<ScenarioEvents>();
   private readonly meterScheduler: MeterValueScheduler;
 
   // Status, availability (§5.2: a ChangeAvailability during a transaction is
@@ -311,7 +309,6 @@ export class Connector {
   private configuredStrategyRunning = false;
 
   private modeValue: ScenarioMode = "manual";
-  private _scenarioManager?: ScenarioManager;
   private _autoResetToAvailable = true;
   private _evSettings: EVSettings = getDefaultEVSettings();
   // True while an explicit/scenario override is active (#105): a running
@@ -883,10 +880,6 @@ export class Connector {
 
   get events(): EventEmitter<ConnectorEvents> {
     return this.eventsEmitter;
-  }
-
-  get scenarioEvents(): EventEmitter<ScenarioEvents> {
-    return this.scenarioEventsEmitter;
   }
 
   get status(): OCPPStatus {
@@ -1720,32 +1713,16 @@ export class Connector {
     return this.meterScheduler.isActive();
   }
 
-  setScenarioManager(manager: ScenarioManager): void {
-    if (this._scenarioManager) {
-      this._scenarioManager.destroy();
-    }
-    this._scenarioManager = manager;
-  }
-
-  get scenarioManager(): ScenarioManager | undefined {
-    return this._scenarioManager;
-  }
-
-  /** Destroys and detaches the scenario manager, if any. */
-  clearScenarioManager(): void {
-    this._scenarioManager?.destroy();
-    this._scenarioManager = undefined;
-  }
-
   cleanup(): void {
     this.meterScheduler.cleanup();
   }
 
   dispose(): void {
     this.cleanup();
-    this.clearScenarioManager();
+    // Before the listeners go, so a subscriber can still tear down what it
+    // keeps for this connector (a scenario runtime destroys its manager).
+    this.eventsEmitter.emit("disposed", {});
     this.eventsEmitter.removeAllListeners();
-    this.scenarioEventsEmitter.removeAllListeners();
     this.onMeterSend = null;
     // Intentionally do NOT clear the transaction / `socPercent` in either
     // runtime cleanup or full dispose. Disconnect/reconnect paths rely on those

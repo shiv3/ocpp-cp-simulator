@@ -56,11 +56,9 @@ import type {
   CloseCause,
   GenerationToken,
   ResolvedNetworkSimConfig,
-} from "../../infrastructure/transport/network-sim";
-import type {
-  OcppSecurityProfile,
-  OcppTlsOptions,
-} from "../../infrastructure/transport/wsUrlWithBasic";
+} from "../transport/networkSim";
+import type { OcppSecurityProfile } from "@ocpp-cp-simulator/contracts/securityProfile";
+import type { OcppTlsOptions } from "../transport/ConnectionSecurity";
 import { getProtocolProfile } from "../../infrastructure/transport/profile/profiles";
 import { measurandEnumFor } from "../connector/measurandEnum";
 import { OCPPSoapHandler } from "../../infrastructure/transport/soap";
@@ -177,7 +175,7 @@ import {
   MONITORING_REQUEST_MAX_BYTES,
   MONITORING_REQUEST_MAX_ITEMS,
 } from "../monitoring/monitoringCtrlrKeys";
-import { renderConfigValue } from "../../infrastructure/transport/v201/renderConfigValue";
+import { renderConfigValue } from "./renderConfigValue";
 import { OcmfMeter } from "../connector/SignedMeterData";
 import {
   DEFAULT_ID_TAG,

@@ -4,7 +4,11 @@ import {
 } from "@ocpp-cp-simulator/core/cp/application/scenario/autoStart";
 import { ScenarioManager } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioManager";
 import { createScenarioExecutorCallbacks } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioRuntime";
-import type { ScenarioDefinition } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import type {
+  ScenarioDefinition,
+  ScenarioEvents,
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import { EventEmitter } from "@ocpp-cp-simulator/core/cp/shared/EventEmitter";
 import type { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
 import type { Connector } from "@ocpp-cp-simulator/core/cp/domain/connector/Connector";
 import type { SqliteScenarioRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/SqliteScenarioRepository";
@@ -42,6 +46,11 @@ function scopedToConnector(
 export class LocalScenarioRuntime {
   private readonly unsubscribes: Array<() => void> = [];
   private disposed = false;
+  /** Per connector id: its manager and the emitter the manager reports on. */
+  private readonly slots = new Map<
+    number,
+    { manager: ScenarioManager; events: EventEmitter<ScenarioEvents> }
+  >();
 
   constructor(
     private readonly chargePoint: ChargePoint,
@@ -69,23 +78,53 @@ export class LocalScenarioRuntime {
   dispose(): void {
     this.disposed = true;
     this.unsubscribes.splice(0).forEach((unsubscribe) => unsubscribe());
-    this.chargePoint.connectors.forEach((connector) =>
-      connector.clearScenarioManager(),
-    );
+    [...this.slots.keys()].forEach((connectorId) => this.release(connectorId));
+  }
+
+  /** The scenario manager of connector `connectorId`, while it is attached. */
+  scenarioManager(connectorId: number): ScenarioManager | undefined {
+    return this.slots.get(connectorId)?.manager;
+  }
+
+  /** Replaces the connector's manager; the previous one is destroyed. */
+  setScenarioManager(connectorId: number, manager: ScenarioManager): void {
+    const slot = this.slots.get(connectorId);
+    if (!slot) {
+      this.slots.set(connectorId, {
+        manager,
+        events: new EventEmitter<ScenarioEvents>(),
+      });
+      return;
+    }
+    slot.manager.destroy();
+    slot.manager = manager;
+  }
+
+  /** Destroys the connector's manager, then drops its event listeners. */
+  private release(connectorId: number): void {
+    const slot = this.slots.get(connectorId);
+    if (!slot) return;
+    slot.manager.destroy();
+    slot.events.removeAllListeners();
+    this.slots.delete(connectorId);
   }
 
   private attach(connector: Connector): void {
     const { chargePoint } = this;
+    const events = new EventEmitter<ScenarioEvents>();
     const manager = new ScenarioManager(
       connector,
       chargePoint,
       () => createScenarioExecutorCallbacks({ chargePoint, connector }),
-      connector.scenarioEvents,
+      events,
       this.recorder,
     );
-    connector.setScenarioManager(manager);
+    this.slots.set(connector.id, { manager, events });
+    this.unsubscribes.push(
+      connector.events.on("disposed", () => this.release(connector.id)),
+    );
 
-    this.forwardScenarioEvents(connector);
+    this.forwardScenarioEvents(connector, events);
 
     let persistedIds = new Set<string>();
     const reload = () => {
@@ -132,7 +171,7 @@ export class LocalScenarioRuntime {
     trigger: "connect" | "status",
   ): void {
     if (this.chargePoint.status !== OCPPStatus.Available) return;
-    const manager = connector.scenarioManager;
+    const manager = this.scenarioManager(connector.id);
     if (!manager) return;
 
     for (const definition of manager.getScenarios()) {
@@ -159,12 +198,14 @@ export class LocalScenarioRuntime {
     }
   }
 
-  private forwardScenarioEvents(connector: Connector): void {
-    const events = connector.scenarioEvents;
+  private forwardScenarioEvents(
+    connector: Connector,
+    events: EventEmitter<ScenarioEvents>,
+  ): void {
     const connectorId = connector.id;
     // #394: the run id the manager minted, on every lifecycle event.
     const runIdOf = (scenarioId: string) => ({
-      runId: connector.scenarioManager?.getRunId(scenarioId),
+      runId: this.scenarioManager(connectorId)?.getRunId(scenarioId),
     });
     this.unsubscribes.push(
       events.on("execution.started", ({ scenarioId }) =>

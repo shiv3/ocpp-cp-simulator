@@ -11,6 +11,7 @@ import {
   ocppVersionToSubprotocol,
 } from "./profile/subprotocols";
 import type { OcppSecurityProfile } from "@ocpp-cp-simulator/contracts/securityProfile";
+import type { OcppTlsOptions } from "../../domain/transport/ConnectionSecurity";
 
 export {
   OCPP_WEBSOCKET_PROTOCOL_16,
@@ -20,15 +21,7 @@ export {
 
 export const OCPP_BROWSER_WS_SECRET_QUERY_PARAM = "ocpp_ws_secret";
 
-export type { OcppSecurityProfile };
-
-export interface OcppTlsOptions {
-  readonly ca?: string;
-  readonly cert?: string;
-  readonly key?: string;
-  readonly rejectUnauthorized?: boolean;
-  readonly serverName?: string;
-}
+export type { OcppSecurityProfile, OcppTlsOptions };
 
 export interface BasicAuthSettings {
   username: string;

@@ -974,10 +974,10 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
                       {loop.loopEdge ? (
                         <LoopBoundsSummary
                           loop={loop}
-                          className="truncate font-semibold text-cx-purple"
+                          className="min-w-0 truncate font-semibold text-cx-purple"
                         />
                       ) : (
-                        <span className="font-semibold text-cx-purple">
+                        <span className="min-w-0 truncate font-semibold text-cx-purple">
                           {t(
                             canExit
                               ? "scenarioRun.loopRepeat"
@@ -986,7 +986,7 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
                         </span>
                       )}
                       {waits && (
-                        <span className="truncate text-cx-muted">
+                        <span className="min-w-0 shrink-[1000] truncate text-cx-muted">
                           · {t("scenarioRun.loopWaitsAt", { n: loop.from })}
                         </span>
                       )}

@@ -26,6 +26,11 @@ services:
         # No BUN_VERSION here on purpose: compose cannot read .tool-versions,
         # and an empty value would override the Dockerfile default, which
         # is pinned to it (and guarded by a test).
+      # @open-ocpp-trace/* comes from GitHub Packages, which asks for a token
+      # even for a public package: export GITHUB_TOKEN (any token with
+      # `read:packages`, e.g. `GITHUB_TOKEN=$(gh auth token)`) before building.
+      secrets:
+        - github_token
     image: ocpp-cp-sim
     container_name: ocpp-cp-sim
     restart: unless-stopped
@@ -94,3 +99,7 @@ services:
       timeout: 3s
       start_period: 5s
       retries: 3
+
+secrets:
+  github_token:
+    environment: GITHUB_TOKEN

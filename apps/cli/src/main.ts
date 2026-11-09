@@ -2262,7 +2262,8 @@ function createStandaloneChargePointRuntime(
 }
 
 async function main(): Promise<void> {
-  // Opt-in (#794): a no-op without SENTRY_DSN. First, so every mode reports.
+  // Opt-in (#794): a no-op without OCPP_SIM_ERROR_REPORTER. First, so every
+  // mode reports.
   await initErrorReporting();
 
   // `analyze` is a subcommand, not a flag combination: it never bootstraps a

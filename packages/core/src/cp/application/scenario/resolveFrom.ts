@@ -7,10 +7,28 @@ import type { ScenarioCallExchange } from "./ScenarioTypes";
 export interface FromScope {
   /** The CALL the branch took over, for the root `call` (schema 1.5). */
   readonly exchange: ScenarioCallExchange | null;
+  /** The latest answer to an `ocppCall` in this branch, for the root
+   *  `response` (schema 1.7); absent or `null` when the branch has none. */
+  readonly response?: ScenarioOcppResponse | null;
   /** The state of the run, for the root `state` (schema 1.6, `setState`). */
   readonly state: Readonly<Record<string, unknown>>;
   /** The station, for the roots `charger` and `connector` (schema 1.6). */
   readonly station?: (root: "charger" | "connector") => unknown;
+}
+
+/**
+ * What the root `response` reads (schema 1.7): the answer to the latest
+ * `ocppCall` of the branch. `payload` is set for `kind: "result"` only;
+ * `errorCode`, `errorDescription` and `errorDetails` for `kind: "error"` only.
+ */
+export interface ScenarioOcppResponse {
+  kind: "result" | "error";
+  action: string;
+  messageId?: string;
+  payload?: unknown;
+  errorCode?: string;
+  errorDescription?: string;
+  errorDetails?: unknown;
 }
 
 /** A whole value that reads from a root: `{ "$from": "call.payload.requestId" }`. */
@@ -24,6 +42,17 @@ export function isFromReference(value: unknown): value is { $from: string } {
     keys[0] === "$from" &&
     typeof (value as { $from: unknown }).$from === "string"
   );
+}
+
+/** Whether `value` holds a `{ "$from": "<root>.…" }` anywhere. */
+export function containsRootReference(value: unknown, root: string): boolean {
+  if (isFromReference(value)) return value.$from.split(".")[0] === root;
+  if (Array.isArray(value))
+    return value.some((v) => containsRootReference(v, root));
+  if (typeof value === "object" && value !== null) {
+    return Object.values(value).some((v) => containsRootReference(v, root));
+  }
+  return false;
 }
 
 /** Whether `value` holds a `{ "$from": "call.…" }` anywhere
@@ -41,9 +70,13 @@ export function containsCallReference(value: unknown): boolean {
 
 /**
  * Replace every `{ "$from": "<path>" }` that stands for a whole value in
- * `value` with what the path names (schema 1.5, #566; roots 1.6, #654). A path
- * starts at one of four roots:
+ * `value` with what the path names (schema 1.5, #566; roots 1.6, #654; 1.7). A
+ * path starts at one of five roots:
  *
+ * - `response`: `response.kind` (`"result"` / `"error"`), `.action`,
+ *   `.messageId`, `.payload.<key>…` (result) or `.errorCode`,
+ *   `.errorDescription`, `.errorDetails` (error) of the latest `ocppCall`
+ *   answered in this branch;
  * - `call`: `call.action`, `call.messageId`, `call.payload.<key>[.<key>…]` of
  *   the CALL the branch took over (array items by index:
  *   `call.payload.items.0.id`);
@@ -84,12 +117,13 @@ export function resolveFromExchange(
   return resolveFrom(value, { exchange, state: {} }, where);
 }
 
-const ROOTS = '"call.", "charger.", "connector." or "state."';
+const ROOTS = '"call.", "response.", "charger.", "connector." or "state."';
 
 function readPath(path: string, scope: FromScope, where: string): unknown {
   const [root, ...rest] = path.split(".");
   if (
     (root !== "call" &&
+      root !== "response" &&
       root !== "charger" &&
       root !== "connector" &&
       root !== "state") ||
@@ -114,6 +148,15 @@ function readPath(path: string, scope: FromScope, where: string): unknown {
       payload: exchange.payload,
     };
     owner = `the ${exchange.action} CALL`;
+  } else if (root === "response") {
+    const response = scope.response;
+    if (!response) {
+      throw new Error(
+        `${where}: $from "${path}" needs the answer to an ocppCall earlier in this branch`,
+      );
+    }
+    current = response;
+    owner = `the ${response.action} answer`;
   } else if (root === "state") {
     current = scope.state;
     owner = "the state of this run";

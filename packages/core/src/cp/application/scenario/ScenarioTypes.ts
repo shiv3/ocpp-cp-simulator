@@ -623,7 +623,7 @@ export interface ScenarioTrigger {
  * See `packages/core/schema/scenario.schema.json` (Draft 2020-12) and
  * `docs/concepts/scenario-format.md`.
  */
-export const SCENARIO_SCHEMA_VERSION = "1.6";
+export const SCENARIO_SCHEMA_VERSION = "1.7";
 
 /** Where a recorded scenario came from (schema 1.6, #654 step 2). */
 export interface ScenarioRecordedFrom {

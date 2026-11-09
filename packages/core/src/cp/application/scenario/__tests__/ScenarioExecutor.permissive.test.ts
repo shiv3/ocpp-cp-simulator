@@ -384,4 +384,26 @@ describe("ScenarioExecutor tolerant contract", () => {
       "No start node found in scenario",
     ]);
   });
+
+  it("loads and runs a file that reads $from response, and fails only at the read", async () => {
+    // A 1.6-stamped file with a response read: still loaded and started; the
+    // run fails at the node when the branch holds no answer.
+    const r = await run(
+      graph(
+        [
+          start(),
+          node("sw", ScenarioNodeType.SWITCH, {
+            label: "sw",
+            value: { $from: "response.kind" },
+            cases: ["result"],
+          }),
+        ],
+        [["start", "sw"]],
+      ),
+    );
+    expect(r.executed).toEqual(["start", "sw"]);
+    expect(r.errors.map((e) => e.message)).toEqual([
+      'switch: $from "response.kind" needs the answer to an ocppCall earlier in this branch',
+    ]);
+  });
 });

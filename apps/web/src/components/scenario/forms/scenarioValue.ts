@@ -8,7 +8,13 @@
 import type { ScenarioNode } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import { ScenarioNodeType } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 
-export const FROM_ROOTS = ["call", "charger", "connector", "state"] as const;
+export const FROM_ROOTS = [
+  "call",
+  "response",
+  "charger",
+  "connector",
+  "state",
+] as const;
 export type FromRoot = (typeof FROM_ROOTS)[number];
 
 /** The paths each fixed root reports (resolveFrom.ts). `call.payload.` is
@@ -18,6 +24,17 @@ export const FROM_PATHS: Record<
   readonly string[]
 > = {
   call: ["payload.", "action", "messageId"],
+  // The answer to the latest ocppCall of the branch (schema 1.7). The payload
+  // fields depend on the action; contextual suggestions are a later step.
+  response: [
+    "kind",
+    "action",
+    "messageId",
+    "payload.",
+    "errorCode",
+    "errorDescription",
+    "errorDetails",
+  ],
   charger: ["id", "ocppVersion", "status", "connectorIds"],
   connector: [
     "id",
@@ -216,6 +233,18 @@ export function pathAdvice(
       segments.length === 1
       ? null
       : first === "payload"
+        ? null
+        : "unknownField";
+  }
+  if (root === "response") {
+    const [first] = segments;
+    return ["kind", "action", "messageId"].includes(first!) &&
+      segments.length === 1
+      ? null
+      : first === "payload" ||
+          first === "errorCode" ||
+          first === "errorDescription" ||
+          first === "errorDetails"
         ? null
         : "unknownField";
   }

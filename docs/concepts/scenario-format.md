@@ -43,7 +43,7 @@ related:
 updated: 2026-11-09
 ---
 
-# Scenario File Format (v1.6)
+# Scenario File Format (v1.7)
 
 A **node-graph JSON file** describing a scripted charge-point behavior: a
 directed graph of typed nodes (status changes, transactions, meter values,
@@ -61,7 +61,7 @@ that schema, not a replacement for it.
 
 ## Status & scope
 
-- **Version `1.6`** (`schemaVersion`). Files stamped `1.0` to `1.5` remain valid — 1.x
+- **Version `1.7`** (`schemaVersion`). Files stamped `1.0` to `1.6` remain valid — 1.x
   is purely additive (see [Versioning](#versioning)).
 - Covers the full 30-node discriminated union the scenario engine supports
   (see [Node types](#node-types) below).
@@ -91,7 +91,7 @@ Mirrors the [OCPP trace format](./trace-format.md#versioning)'s rules:
 
 | Field                   | Type                                                                            | Required | Notes                                                                                                                                                                                                                |
 | ----------------------- | ------------------------------------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schemaVersion`         | string                                                                          | No       | e.g. `"1.6"` (current); `"1.5"`, `"1.4"`, `"1.3"`, `"1.2"`, `"1.1"` and `"1.0"` remain valid — additive. Absent on files predating issue #214 — still valid.                                                         |
+| `schemaVersion`         | string                                                                          | No       | e.g. `"1.7"` (current); `"1.6"`, `"1.5"`, `"1.4"`, `"1.3"`, `"1.2"`, `"1.1"` and `"1.0"` remain valid — additive. Absent on files predating issue #214 — still valid.                                                |
 | `id`                    | string                                                                          | Yes      | Stable scenario identifier.                                                                                                                                                                                          |
 | `templateId`            | string                                                                          | No       | Set automatically when a built-in template is instantiated; absent on hand-authored scenarios. See [Template instances](#template-instances).                                                                        |
 | `libraryId`             | string                                                                          | No       | Set by the web console on a connector's copy of a [Library](../entities/web-console.md#scenario-library) scenario: that scenario's `id` (v1.4). Absent on Library entries and on scenarios loaded by hand.           |
@@ -321,7 +321,7 @@ behavior?](../analyses/scenario-or-behavior.md).
 
 **The scenario editor.** The browser Scenario Editor authors all of schema 1.5 and 1.6 (the 1.6 nodes of [this section](#the-schema-16-nodes) included): a `csmsCallTrigger` form
 with `behavior` (`observe` / `replace`) and `onBusy`, a `callResponse` node and a `useBehavior` node (with its
-mode and a params form), and it exports `schemaVersion: "1.6"`. A `switch` `value`, a `notify` `requestId` and a
+mode and a params form), and it exports `schemaVersion: "1.7"`. A `switch` `value`, a `notify` `requestId` and a
 `setState` `value` are edited as a typed constant or **Read from…** a `$from` root and path (the inspector's value
 field, [web console](../entities/web-console.md#the-switch-and-choice-inspectors)); in an `ocppCall` / `callResponse`
 payload a `$from` is typed in the payload JSON. The `useBehavior` id is free text.
@@ -385,6 +385,34 @@ point's WebSocket reaches `event` (`"connected"` or `"disconnected"`).
 - This node only _observes_ the connection state — it never causes a
   disconnect itself. Simulating network drops is out of scope here (see
   issue #239) — that is what [Network simulation](network-simulation.md) does.
+
+### `$from` root `response` (schema 1.7)
+
+`{ "$from": "response.payload.idTagInfo.status" }` reads the answer to the **latest `ocppCall` of the branch**,
+so a scenario can branch on what the CSMS said:
+
+| Path                                                       | Value                                                                |
+| ---------------------------------------------------------- | -------------------------------------------------------------------- |
+| `response.kind`                                            | `"result"` (CALLRESULT) or `"error"` (CALLERROR)                     |
+| `response.action`, `response.messageId`                    | the action of the call and the id of its frame                       |
+| `response.payload.<key>[.<key>…]`                          | the CALLRESULT payload (`kind: "result"` only; array items by index) |
+| `response.errorCode`, `.errorDescription`, `.errorDetails` | the CALLERROR fields (`kind: "error"` only)                          |
+
+- It is **branch-scoped, latest wins**, like `call`: a second `ocppCall` replaces it, parallel branches from Start
+  each hold their own, and a branch that has had no answer yet fails the run when it reads one
+  (`$from "response.kind" needs the answer to an ocppCall earlier in this branch`). Carry a value across a join or
+  past the next call with `setState`.
+- A path that names nothing fails the run, as on every root: `response.payload.…` on a CALLERROR, or
+  `response.errorCode` on a CALLRESULT. Switch on `response.kind` first.
+- It is read-only and whole-value, like all roots; nothing is derived. A call that fails the run (refused, no
+  answer within 25 s) leaves no answer. A run resumed with `resumeFromNodeId` starts without one.
+- The answer is the call's own, whether or not `applyResponse` let it change the station.
+
+```json
+{ "id": "auth", "type": "ocppCall", "data": { "action": "Authorize", "payload": { "idTag": "TAG-1" } } },
+{ "id": "sw", "type": "switch",
+  "data": { "value": { "$from": "response.payload.idTagInfo.status" }, "cases": ["Accepted", "Blocked"] } }
+```
 
 ### `ocppCall` notes
 
@@ -489,6 +517,14 @@ the one place where one node type must come before another on the path:
 | `callResponse`                                                                                              | `answers`   | an unanswered CALL taken over earlier in the branch                                                                                                   |
 | a `$from` on the `call` root in `ocppCall` `payload`, `switch` / `setState` `value` or `notify` `requestId` | `reads`     | a CALL taken over earlier in the branch, answered or not (a `$from` on `charger`, `connector` or `state` reads the station or the run and needs none) |
 | everything else                                                                                             | `none`      | —                                                                                                                                                     |
+
+**The answer a branch holds** (`response`, [schema 1.7](#from-root-response-schema-17)) is tracked the same way,
+independently of the CALL: an `ocppCall` _produces_ it (the latest answer replaces the earlier one), and a
+`$from: "response.…"` in `ocppCall` `payload`, `callResponse` `payload`, `switch` / `setState` `value` or `notify`
+`requestId` _reads_ it and fails the run on a path where no `ocppCall` came before in the branch. A branch from
+Start begins without an answer; a path that reaches the node from another branch (a join) does not carry the
+other branch's answer. `validateScenarioGraph` reports the read as `noResponseHeld` (error), advisory like the
+others.
 
 `validateScenarioGraph` reports `missingStart` (error: the run throws "No
 start node found"), `multipleStart` (a Start other than the one the run starts
@@ -1501,6 +1537,12 @@ cover. The parity of scenario nodes and `ctx` members is kept in
 [Scenario or behavior?](../analyses/scenario-or-behavior.md#node--ctx-parity).
 
 ## Changelog
+
+- **v1.7 (response)**: Adds the `$from` root `response` — the answer (`kind`, `action`, `messageId`, `payload`,
+  `errorCode`, `errorDescription`, `errorDetails`) to the latest `ocppCall` of the branch — and the advisory
+  `noResponseHeld` graph diagnostic. Purely additive — `1.6` and older files remain valid. See
+  [the note](#from-root-response-schema-17). (Version number: 1.7 was free on `main` when this landed; if the
+  timeout-edge change takes 1.7 first, this is renumbered.)
 
 - **v1.6 (recordedFrom)**: Issue #654, step 2. Adds the optional top-level `recordedFrom` (`behaviorId`, `commit`, `seed`, `version`) that
   a scenario recorded from a behavior run carries. Shipped within 1.6, purely additive — informational, ignored by the runtime.

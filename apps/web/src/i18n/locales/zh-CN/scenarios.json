@@ -198,6 +198,7 @@
   "scenarios.templateBrowser.previewTemplate": "预览 {{name}}",
   "scenarios.templateBrowser.nothingToPreview": "没有可预览的模板。",
   "scenarios.editor.issue.noCallHeld": "步骤 {{n}}({{title}})需要本分支接管的 CSMS 调用(同一分支中更早的 behavior 为“replace”的 CSMS Call Trigger),但有路径上没有:运行会在此失败。",
+  "scenarios.editor.issue.noResponseHeld": "步骤 {{n}}({{title}})读取 OCPP 调用的响应(response…),但有路径上同一分支更早处没有 OCPP Call 步骤:运行会在此失败。",
   "scenarios.editor.issue.callAlreadyAnswered": "步骤 {{n}}({{title}})在某条路径上应答了本分支已应答过的 CSMS 调用:运行会在此失败。",
   "scenarios.editor.issue.callLeftOpen": "步骤 {{n}}({{title}})接管的 CSMS 调用可能在本分支中一直未应答;站点只会在运行结束时以 InternalError 应答。请添加 Call Response(有意保持沉默时使用 kind“none”)。",
   "scenarios.editor.issueShowStep": "选中并显示此步骤",

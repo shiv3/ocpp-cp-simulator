@@ -379,7 +379,7 @@ describe("$from roots", () => {
     );
     await run.settle();
     expect(scenario.error()).toMatch(
-      /must start with "call\.", "charger\.", "connector\." or "state\."/,
+      /must start with "call\.", "response\.", "charger\.", "connector\." or "state\."/,
     );
   });
 

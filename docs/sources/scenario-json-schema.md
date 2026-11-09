@@ -1,7 +1,7 @@
 ---
 title: "Source: packages/core/schema/scenario.schema.json"
 type: source
-summary: The published JSON Schema (Draft 2020-12) for scenario files v1.6 — strict on known fields, permissive on unknown keys, advisory at load time; mirrors `ScenarioTypes.ts`.
+summary: The published JSON Schema (Draft 2020-12) for scenario files v1.7 — strict on known fields, permissive on unknown keys, advisory at load time; mirrors `ScenarioTypes.ts`.
 sources:
   - packages/core/schema/scenario.schema.json
 related:
@@ -23,7 +23,7 @@ fields the schema deliberately does not reject.
 
 **Key facts.**
 
-- Version `1.6` (issue #214 introduced 1.0; issue #240 added the
+- Version `1.7` (the `$from` root `response`; issue #214 introduced 1.0; issue #240 added the
   `connectionTrigger` node and the `csmsCallTrigger` `payload` condition in
   1.1; issue #301 the charging-curve and electrical `evSettings` fields in
   1.2; issue #389 the `ocppCall` node in 1.3; the web console's Library the

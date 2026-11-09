@@ -203,6 +203,7 @@
   "scenarios.templateBrowser.previewTemplate": "Preview {{name}}",
   "scenarios.templateBrowser.nothingToPreview": "No template to preview.",
   "scenarios.editor.issue.noCallHeld": "Step {{n}} ({{title}}) needs a CSMS call its branch took over (a CSMS Call Trigger with behavior “replace” earlier in the same branch), but on some path there is none: the run fails there.",
+  "scenarios.editor.issue.noResponseHeld": "Step {{n}} ({{title}}) reads the answer to an OCPP call (response…), but on some path no OCPP Call step comes before it in the same branch: the run fails there.",
   "scenarios.editor.issue.callAlreadyAnswered": "Step {{n}} ({{title}}) answers a CSMS call that its branch has already answered on some path: the run fails there.",
   "scenarios.editor.issue.callLeftOpen": "Step {{n}} ({{title}}) takes over a CSMS call that its branch can leave unanswered; the station answers it InternalError only when the run ends. Add a Call Response (kind “none” to stay silent on purpose).",
   "scenarios.editor.issueShowStep": "Select this step and show it",

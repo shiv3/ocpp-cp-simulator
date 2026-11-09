@@ -255,6 +255,11 @@ every outgoing event and breadcrumb through it (Sentry's `beforeSend` /
   turn the variable into `"[Object]"` and keep its value, so the name the
   redaction decides on is gone.
 
+The scrubber works on a copy: a reference back to one of its own ancestors
+becomes `"[Circular]"`, and past `SCRUB_MAX_OBJECTS` (10 000 objects, arrays
+included, counted once per path) the rest of the report becomes
+`"[Truncated]"`.
+
 The scrubbing recognises these names and forms only. A credential that is
 neither, such as `Authorization: Basic …` quoted inside an error message or a
 bare password in free text, is sent as it is.

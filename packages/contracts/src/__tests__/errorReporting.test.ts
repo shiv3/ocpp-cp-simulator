@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveErrorReporterName, scrubErrorReport } from "../errorReporting";
+import {
+  resolveErrorReporterName,
+  SCRUB_MAX_OBJECTS,
+  scrubErrorReport,
+} from "../errorReporting";
 import { REDACTED_VALUE } from "../redaction";
 
 describe("resolveErrorReporterName", () => {
@@ -153,6 +157,34 @@ describe("scrubErrorReport", () => {
         second: [{ url: `ws://cp:${REDACTED_VALUE}@csms.example/ocpp` }],
       },
     });
+  });
+
+  it("bounds the copy of objects shared along many paths", () => {
+    // Each level references the one below twice: 2^18 paths to the bottom,
+    // which an unbounded copy would walk synchronously.
+    let level: Record<string, unknown> = { password: "pw" };
+    for (let i = 0; i < 18; i++) level = { left: level, right: level };
+
+    const scrubbed = JSON.stringify(scrubErrorReport({ data: level }));
+
+    expect(scrubbed).toContain('"[Truncated]"');
+    expect(scrubbed).not.toContain('"pw"');
+    expect(scrubbed.split("{").length - 1).toBeLessThanOrEqual(
+      SCRUB_MAX_OBJECTS,
+    );
+  });
+
+  it("copies up to SCRUB_MAX_OBJECTS objects and truncates past them", () => {
+    // The report, its `items` array and the items are all objects.
+    const report = (items: number) => ({
+      items: Array.from({ length: items }, (_, id) => ({ id })),
+    });
+    const fits = report(SCRUB_MAX_OBJECTS - 2);
+    expect(scrubErrorReport(fits)).toEqual(fits);
+
+    const over = scrubErrorReport(report(SCRUB_MAX_OBJECTS - 1));
+    expect(over.items.at(-2)).toEqual({ id: SCRUB_MAX_OBJECTS - 3 });
+    expect(over.items.at(-1)).toBe("[Truncated]");
   });
 
   // Sentry normalizes `extra` / `contexts` to `normalizeDepth` before

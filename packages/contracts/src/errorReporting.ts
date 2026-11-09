@@ -82,22 +82,35 @@ function dropCredentialHeaders(value: unknown): unknown {
 }
 
 /**
+ * How many objects (arrays included) the scrubber copies from one report.
+ * Past it, the rest is replaced with `"[Truncated]"`.
+ */
+export const SCRUB_MAX_OBJECTS = 10_000;
+
+/**
  * Replace a reference back to one of its own ancestors with `"[Circular]"`.
  * Sentry normalizes an event before `beforeSend`, but hands
  * `beforeBreadcrumb` the raw console arguments, which may be cyclic. Only
  * the current path counts, so an object shared by two siblings is kept (and
- * redacted) in both places.
+ * redacted) in both places. The copy stops at {@link SCRUB_MAX_OBJECTS}: an
+ * object shared along many paths would otherwise be copied once per path.
  */
-function breakCycles(value: unknown, ancestors = new Set<object>()): unknown {
+function breakCycles(
+  value: unknown,
+  ancestors = new Set<object>(),
+  budget = { left: SCRUB_MAX_OBJECTS },
+): unknown {
   if (!value || typeof value !== "object") return value;
   if (ancestors.has(value)) return "[Circular]";
+  if (budget.left <= 0) return "[Truncated]";
+  budget.left -= 1;
   ancestors.add(value);
   const copy = Array.isArray(value)
-    ? value.map((item) => breakCycles(item, ancestors))
+    ? value.map((item) => breakCycles(item, ancestors, budget))
     : Object.fromEntries(
         Object.entries(value).map(([name, nested]) => [
           name,
-          breakCycles(nested, ancestors),
+          breakCycles(nested, ancestors, budget),
         ]),
       );
   ancestors.delete(value);

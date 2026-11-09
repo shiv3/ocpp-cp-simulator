@@ -171,6 +171,16 @@ describe("splitTraceRecords: reading the JSONL stream (#886)", () => {
     expect(split.excluded).toEqual({ ...NO_EXCLUSIONS, invalidRecord: 1 });
     expect(split.total).toBe(2);
   });
+
+  it("skips space/tab-only lines as blank, but counts an NBSP-only line as unparseable", async () => {
+    const split = await splitTraceRecords([
+      [heartbeat, " \t", " "].join("\n") + "\n",
+    ]);
+
+    expect(split.byChargePoint.get("CP-A")).toEqual([JSON.parse(heartbeat)]);
+    expect(split.excluded).toEqual({ ...NO_EXCLUSIONS, unparseableLine: 1 });
+    expect(split.total).toBe(2);
+  });
 });
 
 describe("splitTraceRecords", () => {

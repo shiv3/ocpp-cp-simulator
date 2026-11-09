@@ -230,8 +230,10 @@ counted and skipped — it never aborts the run:
 - a line that is JSON but not a valid trace record is an **invalid record**:
   a value that is not an object (counted as unparseable before #886), a
   missing or malformed envelope field (`timestamp`, `messageType`, …), a
-  `schemaVersion` of another major version, a line over the reader's 1 MiB
-  limit, or a line that is not valid UTF-8.
+  `schemaVersion` of another major version, a line over 256 MiB (the
+  SDK reader's 1 MiB default is raised, since the trace writer has no line
+  limit and a large frame appears twice, in `payload` and `raw`), or a line
+  that is not valid UTF-8.
 
 The reader checks the record envelope only, never `payload` or `raw`, so a
 trace of deliberately invalid OCPP (#393, #593) is analyzed. Each group is

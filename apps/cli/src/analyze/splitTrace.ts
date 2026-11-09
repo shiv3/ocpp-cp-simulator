@@ -38,7 +38,7 @@
  * - not valid JSON -> `unparseableLine`;
  * - JSON that is not a valid trace record (a missing or malformed envelope
  *   field, a `schemaVersion` of another major version, or a JSON value that
- *   is not an object at all), a line over the reader's 1 MiB limit, or a
+ *   is not an object at all), a line over `MAX_TRACE_LINE_BYTES`, or a
  *   line that is not valid UTF-8 -> `invalidRecord`. Before #886 a JSON
  *   array or scalar line counted as `unparseableLine`;
  * - a valid record over SOAP or of a non-1.6 `ocppVersion` -> `soap` /
@@ -148,8 +148,8 @@ export interface TraceSplit {
     unsupportedOcppVersion: number;
     /** Lines that are not valid JSON. */
     unparseableLine: number;
-    /** Lines that are JSON but not a valid trace record, longer than the
-     *  reader's 1 MiB limit, or not valid UTF-8 (#886). */
+    /** Lines that are JSON but not a valid trace record, longer than
+     *  `MAX_TRACE_LINE_BYTES`, or not valid UTF-8 (#886). */
     invalidRecord: number;
   };
   /** Count of non-blank lines examined (kept + excluded); blank lines are
@@ -317,9 +317,17 @@ function groupRecordsByConnector(
  * per connector with `splitBy: "connector"`. Never throws on a bad line:
  * see the module docstring for which exclusion counter each one lands in.
  */
+/** Longest JSONL line `analyze` reads. The trace writer has no line limit
+ *  and a record carries its frame twice (`payload` and the escaped `raw`), so
+ *  the reader's 1 MiB default would drop a large SendLocalList or DataTransfer
+ *  this simulator traced itself. 256 MiB covers two copies of a frame at the
+ *  WebSocket client's 100 MiB `maxPayload`. */
+export const MAX_TRACE_LINE_BYTES = 256 * 1024 * 1024;
+
 export async function splitTraceRecords(
   source: ChunkSource,
   splitBy: TraceSplitMode = "charge-point",
+  maxLineBytes: number = MAX_TRACE_LINE_BYTES,
 ): Promise<TraceSplit> {
   const byChargePointRecords = new Map<string, TraceRecord[]>();
   const unattributed: TraceRecord[] = [];
@@ -331,7 +339,7 @@ export async function splitTraceRecords(
   };
   let total = 0;
 
-  for await (const result of readRecords(source, { onError: "yield" })) {
+  for await (const result of readRecords(source, { onError: "yield", maxLineBytes })) {
     total++;
 
     if (!result.ok) {

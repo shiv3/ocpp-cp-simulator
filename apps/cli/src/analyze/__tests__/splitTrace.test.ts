@@ -123,16 +123,34 @@ describe("splitTraceRecords: reading the JSONL stream (#886)", () => {
     expect(split.total).toBe(2);
   });
 
-  it("counts a line over 1 MiB as an invalid record and keeps reading after it", async () => {
+  it("keeps a record over the SDK reader's 1 MiB default: the writer has no line limit", async () => {
     const huge = JSON.stringify({
       ...JSON.parse(heartbeat),
       messageId: "huge",
-      payload: { blob: "x".repeat(1024 * 1024) },
+      payload: { blob: "x".repeat(2 * 1024 * 1024) },
     });
 
     const split = await splitTraceRecords([
       [huge, heartbeat].join("\n") + "\n",
     ]);
+
+    expect(split.byChargePoint.get("CP-A")).toHaveLength(2);
+    expect(split.excluded).toEqual(NO_EXCLUSIONS);
+    expect(split.total).toBe(2);
+  });
+
+  it("counts a line over the line limit as an invalid record and keeps reading after it", async () => {
+    const huge = JSON.stringify({
+      ...JSON.parse(heartbeat),
+      messageId: "huge",
+      payload: { blob: "x".repeat(4096) },
+    });
+
+    const split = await splitTraceRecords(
+      [[huge, heartbeat].join("\n") + "\n"],
+      "charge-point",
+      1024,
+    );
 
     expect(split.byChargePoint.get("CP-A")).toEqual([JSON.parse(heartbeat)]);
     expect(split.excluded).toEqual({ ...NO_EXCLUSIONS, invalidRecord: 1 });

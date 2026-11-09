@@ -86,7 +86,8 @@ COPY apps/web/package.json ./apps/web/package.json
 #   docker build --secret id=github_token,env=GITHUB_TOKEN .
 # A secret mount never lands in a layer or in the image history.
 RUN --mount=type=secret,id=github_token \
-    export GITHUB_TOKEN="$(cat /run/secrets/github_token 2>/dev/null)"; \
+    [ -s /run/secrets/github_token ] || { echo "missing the github_token build secret (a token with read:packages): docker build --secret id=github_token,env=GITHUB_TOKEN ."; exit 1; }; \
+    export GITHUB_TOKEN="$(cat /run/secrets/github_token)"; \
     for attempt in 1 2 3; do \
       bun install --frozen-lockfile --ignore-scripts && break; \
       [ "$attempt" = 3 ] && { echo "bun install failed 3 times; giving up"; exit 1; }; \

@@ -113,7 +113,13 @@ export default defineConfig({
     // bun:sqlite is a runtime built-in that vite can't resolve. Tests
     // ending in `.bun.test.ts` run under `bun test` instead (see the
     // `test:bun` npm script); skip them here.
-    exclude: ["**/node_modules/**", "**/dist/**", "**/*.bun.test.ts"],
+    exclude: [
+      "**/node_modules/**",
+      "**/dist/**",
+      "**/*.bun.test.ts",
+      // standalone Bun reproductions (#833), run by hand with `bun test`
+      "repro/**",
+    ],
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov"],

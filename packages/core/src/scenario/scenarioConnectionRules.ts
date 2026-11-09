@@ -239,7 +239,19 @@ export type GraphIssueCode =
   | "callLeftOpen"
   /** A node with a `$from: "response.…"` is reached on a path whose branch
    *  holds no answer from an earlier `ocppCall` (schema 1.7): the run fails there. */
-  | "noResponseHeld";
+  | "noResponseHeld"
+  /** A `$match` case of a switch uses an operator the executor does not know
+   *  (schema 1.7): the switch fails the run when its node runs. `data.handle`
+   *  is the case's handle, `data.operator` the operator. */
+  | "unknownMatcher"
+  /** A `$match` case of a switch has an argument of the wrong type, no
+   *  operator, or a nested `not` (schema 1.7): the switch fails the run when
+   *  its node runs. `data.handle`, `data.operator`. */
+  | "badMatcherArgument"
+  /** A case of a switch can never be picked because an earlier one is
+   *  identical or matches every present value (schema 1.7). `data.handle` is
+   *  the unreachable case, `data.shadowedBy` the earlier one's handle. */
+  | "unreachableCase";
 
 /** A finding of `validateScenarioGraph` (`scenarioGraphValidator.ts`): a
  *  {@link Diagnostic} narrowed to the graph codes, never `info`. */

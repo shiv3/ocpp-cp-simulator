@@ -44,6 +44,7 @@ import { NOTIFY_KINDS, ScenarioNodeType } from "./ScenarioTypes";
 import {
   isFromReference,
   resolveFrom,
+  resolveFromOrMissing,
   type FromScope,
   type ScenarioOcppResponse,
 } from "./resolveFrom";
@@ -53,6 +54,11 @@ import {
   UPLOAD_LOG_STATUSES,
 } from "@ocpp-cp-simulator/contracts/firmwareLogStatus";
 import { jsonProblem } from "../behavior/paramsSchema";
+import {
+  MISSING,
+  matchCase,
+  matcherProblem,
+} from "../../../scenario/valueMatch";
 import { DEFAULT_ID_TAG } from "../../domain/auth/IdTagPool";
 import { deriveExpectation } from "./ScenarioExpectations";
 import {
@@ -126,36 +132,6 @@ const newFlow = (): Flow => ({
   response: null,
   handle: null,
 });
-
-/** JSON equality: same type, same value, objects without regard to key order. */
-function jsonEquals(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-  if (
-    typeof a !== "object" ||
-    typeof b !== "object" ||
-    a === null ||
-    b === null
-  ) {
-    return false;
-  }
-  if (Array.isArray(a) !== Array.isArray(b)) return false;
-  if (Array.isArray(a) && Array.isArray(b)) {
-    return (
-      a.length === b.length && a.every((item, i) => jsonEquals(item, b[i]))
-    );
-  }
-  const left = a as Record<string, unknown>;
-  const right = b as Record<string, unknown>;
-  const keys = Object.keys(left);
-  return (
-    keys.length === Object.keys(right).length &&
-    keys.every(
-      (key) =>
-        Object.prototype.hasOwnProperty.call(right, key) &&
-        jsonEquals(left[key], right[key]),
-    )
-  );
-}
 
 const STATE_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -2193,14 +2169,23 @@ export class ScenarioExecutor {
           `switch: cases are JSON constants${bad ? ` (${bad})` : ', a "$from" is not allowed'}`,
         );
       }
+      const problem = matcherProblem(value);
+      if (problem) {
+        throw new Error(`switch: cases[${index}]: ${problem.message}`);
+      }
     });
-    const value = resolveFrom(data.value, this.fromScope(flow), "switch");
+    const scope = this.fromScope(flow);
+    const value = resolveFromOrMissing(data.value, scope, "switch");
     const index = data.cases.findIndex((candidate) =>
-      jsonEquals(candidate, value),
+      matchCase(value, candidate),
     );
+    if (value === MISSING && index < 0) {
+      // No `exists: false` case: fail as before, with the usual message.
+      resolveFrom(data.value, scope, "switch");
+    }
     flow.handle = index >= 0 ? `case-${index}` : "default";
     this.callbacks.log?.(
-      `Switch on ${JSON.stringify(value)} → ${flow.handle}`,
+      `Switch on ${value === MISSING ? "(missing)" : JSON.stringify(value)} → ${flow.handle}`,
       "info",
     );
   }

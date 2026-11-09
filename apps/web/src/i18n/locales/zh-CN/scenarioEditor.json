@@ -210,6 +210,7 @@
   "scenarioEditor.switch.defaultHint": "没有条件匹配时",
   "scenarioEditor.switch.duplicateCase": "与 {{first}} 的值相同: 只有第一个能匹配,此通道永远不会运行。",
   "scenarioEditor.switch.caseFrom": "分支条件是常量: 此处的 $from 会使运行失败。",
+  "scenarioEditor.switch.matchCase": "$match 条件(此处只读): 请在 JSON 文件中编辑。其他分支条件不受影响。",
   "scenarioEditor.choice.tooFew": "选项少于两个: 运行会在此步骤失败。",
   "scenarioEditor.choice.share": "抽选的 {{percent}}%",
   "scenarioEditor.value.constant": "常量",

@@ -11,6 +11,11 @@ import {
   type SwitchNodeData,
 } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 
+import {
+  describeMatcher,
+  isMatcher,
+} from "@ocpp-cp-simulator/core/scenario/valueMatch";
+
 import { t } from "../../i18n";
 import {
   treeNodes,
@@ -89,8 +94,10 @@ export function isDeadLane(lane: Pick<Lane, "condition">): boolean {
   );
 }
 
-/** A switch value as it reads on a chip: `$from: call.idTag`, `"a"`, `3`. */
+/** A switch value as it reads on a chip: `$from: call.idTag`, `"a"`, `3`;
+ *  a `$match` case as `in Blocked|Invalid`, `≥ 80`, `missing`. */
 export function formatValue(value: unknown): string {
+  if (isMatcher(value)) return describeMatcher(value);
   if (value && typeof value === "object" && "$from" in value) {
     return `$from: ${String((value as { $from: unknown }).$from)}`;
   }

@@ -1,4 +1,8 @@
 import { useTranslation } from "react-i18next";
+import {
+  describeMatcher,
+  isMatcher,
+} from "@ocpp-cp-simulator/core/scenario/valueMatch";
 import { ScenarioValueField } from "./ScenarioValueField";
 import { LaneLine, RowActions } from "./SelectLanes";
 import { useIndexedLanes } from "./useIndexedLanes";
@@ -110,13 +114,32 @@ export default function SwitchForm({
                     onRemove={() => lanes.remove(index)}
                   />
                 </div>
-                <ScenarioValueField
-                  hideLabel
-                  label={t("scenarioEditor.switch.caseValue", { name })}
-                  value={item}
-                  allowFrom={false}
-                  onChange={(next) => setCase(index, next)}
-                />
+                {isMatcher(item) ? (
+                  // Schema 1.7: a "$match" case is shown, not edited here, so
+                  // it round-trips unchanged; the Match editor is a later step.
+                  <div
+                    data-testid={`switch-case-match-${index}`}
+                    className="space-y-1"
+                  >
+                    <code
+                      title={JSON.stringify(item)}
+                      className="inline-block rounded bg-gray-100 px-2 py-0.5 font-mono text-xs dark:bg-gray-800"
+                    >
+                      {describeMatcher(item)}
+                    </code>
+                    <p className="text-xs text-muted">
+                      {t("scenarioEditor.switch.matchCase")}
+                    </p>
+                  </div>
+                ) : (
+                  <ScenarioValueField
+                    hideLabel
+                    label={t("scenarioEditor.switch.caseValue", { name })}
+                    value={item}
+                    allowFrom={false}
+                    onChange={(next) => setCase(index, next)}
+                  />
+                )}
                 <LaneLine context={context} handle={name} />
                 {first !== index && (
                   <p className="text-xs text-amber-700 dark:text-amber-400">

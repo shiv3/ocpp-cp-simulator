@@ -211,6 +211,7 @@
   "scenarioEditor.switch.defaultHint": "when no case matches",
   "scenarioEditor.switch.duplicateCase": "Same value as {{first}}: only the first can match, so this lane never runs.",
   "scenarioEditor.switch.caseFrom": "A case is a constant: a $from here fails the run.",
+  "scenarioEditor.switch.matchCase": "Match condition (read-only here): the JSON file edits it. Cases beside it keep working.",
   "scenarioEditor.choice.tooFew": "Fewer than two options: the run fails at this step.",
   "scenarioEditor.choice.share": "{{percent}}% of the draw",
   "scenarioEditor.value.constant": "Constant",

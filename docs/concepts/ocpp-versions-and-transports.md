@@ -11,6 +11,7 @@ sources:
   - packages/ocpp/vendor/ocpp-schemas/NOTICE
   - README.md (SOAP section)
   - packages/core/src/cp/infrastructure/transport/soap/soapCallbackUrl.ts
+  - packages/core/src/cp/infrastructure/transport/soap/soapRequestQueue.ts (SOAP transaction message retries)
   - apps/cli/src/soapTunnel.ts
   - packages/core/src/cp/infrastructure/transport/OCPPWebSocket.ts (WebSocket ping)
   - packages/core/src/cp/domain/charge-point/ClockAlignedMeterScheduler.ts (clock-aligned metering)
@@ -18,7 +19,7 @@ sources:
   - packages/core/src/cp/infrastructure/transport/OCPPMessageHandlerV201.ts (TransactionEvent retries, E11 offline queue)
   - packages/core/src/cp/domain/transport/PendingMessageQueue.ts
   - packages/core/src/cp/infrastructure/persistence/SqlitePendingMessageRepository.ts (`pending_messages` table, issue #878)
-  - packages/core/src/cp/infrastructure/transport/OCPPMessageHandler.ts (1.6 transaction message retries)
+  - packages/core/src/cp/infrastructure/transport/v16/serialCallQueueV16.ts (1.6 transaction message retries)
   - "OCPP 1.6 Part 2 §3.7.1 (issue #527)"
   - apps/cli/src/server/CPRegistry.ts (SOAP public base derivation)
   - docs/examples/scenarios/all-cases.json
@@ -684,7 +685,9 @@ message, except transaction-related message, a Charge Point SHALL retry these
 a couple of times". It also has the station send a simple message such as a
 Heartbeat to tell a failure to process from a connection issue, and treats an
 HTTP error status like a Fault. Since
-[#585](https://github.com/shiv3/ocpp-cp-simulator/issues/585) `OCPPSoapHandler`
+[#585](https://github.com/shiv3/ocpp-cp-simulator/issues/585) the SOAP client
+(`OCPPSoapHandler`, whose request chain lives in
+[`soapRequestQueue.ts`](../../packages/core/src/cp/infrastructure/transport/soap/soapRequestQueue.ts))
 does this on 1.6S for StartTransaction.req, StopTransaction.req and a
 MeterValues.req carrying a `transactionId`:
 

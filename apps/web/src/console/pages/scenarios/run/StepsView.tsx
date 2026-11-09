@@ -1,13 +1,22 @@
 import { useTranslation } from "react-i18next";
 import React from "react";
-import { Check, GripVertical, Plus, Repeat } from "lucide-react";
+import {
+  Check,
+  CornerDownRight,
+  CornerLeftUp,
+  GripVertical,
+  Plus,
+  Repeat,
+} from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import RunStatePill from "../../../components/RunStatePill";
 import type { ScenarioNode } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import { isLiveRunState } from "../../../lib/scenarioRunState";
 import {
+  STEP_CATEGORIES,
   canAddBranch,
+  findStepLane,
   laneLinkTarget,
   stepSummary,
   type StepLane,
@@ -173,16 +182,93 @@ const StepBox: React.FC<StepBoxProps> = ({
   );
 };
 
-/** The drag reads the boxes where the browser put them. */
+/** The drag reads the boxes where the browser put them: every box of the
+ *  lane in document order, those inside a loop block included. */
 function measureBoxes(lane: StepLane, root: HTMLElement | null): number[] {
   const list = root?.querySelector(`[data-lane-list="${lane}"]`);
-  return Array.from(list?.children ?? [])
-    .filter((el) => el.hasAttribute("data-step-id"))
-    .map((el) => {
+  return Array.from(list?.querySelectorAll("[data-step-id]") ?? []).map(
+    (el) => {
       const rect = el.getBoundingClientRect();
       return rect.top + rect.height / 2;
-    });
+    },
+  );
 }
+
+/** Steps that wait (a delay or a trigger): a loop starting at one waits
+ *  there first on every round. */
+const WAIT_TYPES: ReadonlySet<string> = new Set(
+  STEP_CATEGORIES.find((c) => c.label === "Wait & Trigger")?.types ?? [],
+);
+
+/**
+ * A loop drawn as Scratch draws "forever": a C-shaped block whose top arm
+ * says it repeats, whose left spine holds the repeated steps (`children`,
+ * a list of boxes), and whose bottom arm says where the run goes back to.
+ * The back edge is unconditional, so the loop repeats until the run ends.
+ * The arms and the spine are tints over whatever is behind them, so the
+ * block reads the same on a page, a card or a panel, in either theme.
+ */
+const LoopBlock: React.FC<{
+  /** The step the loop goes back to (its first step). */
+  target: string;
+  /** Box numbers of the first and last repeated step. */
+  from: number;
+  to: number;
+  /** The first repeated step waits (a delay or a trigger). */
+  waitsFirst: boolean;
+  /** A step inside is the run's current step. */
+  active: boolean;
+  /** Under the repeated steps, inside the block (the lane's "+ Add step"). */
+  footer?: React.ReactNode;
+  children: React.ReactNode;
+}> = ({ target, from, to, waitsFirst, active, footer, children }) => {
+  const { t } = useTranslation();
+  const tint = active ? "bg-cx-purple/20" : "bg-cx-purple/12";
+  return (
+    <li
+      data-loop-block=""
+      data-loop-to={target}
+      aria-label={t("scenarioRun.loopSteps", { from, to })}
+      className="min-w-0"
+    >
+      <div
+        className={cn(
+          "flex min-h-7 flex-wrap items-center gap-x-1.5 rounded-t-[12px] rounded-br-[12px] px-2.5 py-1 text-xs",
+          tint,
+        )}
+      >
+        <span className="inline-flex items-center gap-1.5 whitespace-nowrap font-semibold text-cx-purple">
+          <Repeat className="h-3.5 w-3.5 shrink-0" aria-hidden />
+          {t("scenarioRun.loopForever")}
+        </span>
+        {waitsFirst && (
+          <span className="text-cx-muted">
+            · {t("scenarioRun.loopWaitsAt", { n: from })}
+          </span>
+        )}
+      </div>
+      <div className="flex">
+        <div aria-hidden className={cn("w-3 shrink-0", tint)} />
+        <div className="min-w-0 flex-1 py-1.5 pl-1.5">
+          {children}
+          {footer}
+        </div>
+      </div>
+      <div
+        className={cn(
+          "flex min-h-6 items-center gap-1.5 rounded-b-[12px] rounded-tr-[12px] px-2.5 py-1 text-xs text-cx-fg2",
+          tint,
+        )}
+      >
+        <CornerLeftUp
+          className="h-3.5 w-3.5 shrink-0 text-cx-purple"
+          aria-hidden
+        />
+        {t("scenarioRun.loopBackArm", { n: from })}
+      </div>
+    </li>
+  );
+};
 
 /** The hover zone between two boxes of a lane: a small `+` that opens the
  *  step picker for that place (as the old step list's insert slot). */
@@ -295,68 +381,125 @@ const StepsView: React.FC<StepRunViewProps> = (props) => {
     );
   };
 
-  /** "Back to step N" under a lane a loop link closes. */
-  const loopNote = (steps: ScenarioNode[]) => {
-    const last = steps[steps.length - 1];
-    const target = last ? laneLinkTarget(layout, last.id) : null;
-    if (target === null) return null;
+  /** The way out of a lane closed by a link to another lane: back into the
+   *  chain before the fork, or on into an earlier branch (a join). */
+  const linkNote = (target: string) => {
+    const n = stepIndexOf(layout, target) ?? "";
+    const back = findStepLane(layout, target)?.lane === "main";
+    const Icon = back ? Repeat : CornerDownRight;
     return (
       <p
-        data-loop-to={target}
+        data-link-to={target}
         className="mt-1.5 flex items-center gap-1.5 text-xs text-cx-muted"
       >
-        <Repeat className="h-3.5 w-3.5" aria-hidden />
-        {t("scenarioRun.loopBack", { n: stepIndexOf(layout, target) ?? "" })}
+        <Icon className="h-3.5 w-3.5" aria-hidden />
+        {back
+          ? t("scenarioRun.loopBack", { n })
+          : t("scenarioRun.joinTo", { n })}
       </p>
     );
   };
 
-  const renderLane = (steps: ScenarioNode[], lane: StepLane) => (
-    <>
-      {renderLaneBoxes(steps, lane)}
-      {loopNote(steps)}
-    </>
-  );
-
-  const renderLaneBoxes = (steps: ScenarioNode[], lane: StepLane) => {
-    const ids = steps.map((s) => s.id);
-    if (!canInsert) {
+  /**
+   * A lane and how it ends. A link back into the same lane is a loop: the
+   * steps from its target to the lane's end sit inside a C-shaped block (a
+   * Scratch "forever"), the steps before it above the block. A link into
+   * another lane is a one-line note under the lane. `addButton` is the
+   * lane's "+ Add step": it appends inside the loop (the loop always closes
+   * at the lane's last step), so it goes inside the block.
+   */
+  const renderLane = (
+    steps: ScenarioNode[],
+    lane: StepLane,
+    addButton: React.ReactNode = null,
+  ) => {
+    const last = steps[steps.length - 1];
+    const target = last ? laneLinkTarget(layout, last.id) : null;
+    const loopStart =
+      target === null ? -1 : steps.findIndex((s) => s.id === target);
+    if (target === null || loopStart === -1) {
       return (
-        <ol data-lane-list={lane} className="space-y-1.5">
-          {steps.map((step, i) => renderBox(step, lane, i, ids))}
-        </ol>
+        <>
+          <ol
+            data-lane-list={lane}
+            className={canInsert ? undefined : "space-y-1.5"}
+          >
+            {renderRange(steps, lane, 0, steps.length)}
+          </ol>
+          {target !== null && linkNote(target)}
+          {addButton}
+        </>
       );
     }
-    // The gaps between boxes are the insert zones (or the open picker).
     return (
-      <ol data-lane-list={lane}>
-        {steps.map((step, i) => (
-          <React.Fragment key={step.id}>
-            {i > 0 &&
-              (editing.isSlotOpen(lane, i) ? (
-                <li className="py-1.5">{editing.picker}</li>
-              ) : drag ? (
-                <li aria-hidden className="h-1.5" />
-              ) : (
-                <InsertZone
-                  label={t("scenarioRun.insertBetween", {
-                    from: stepIndexOf(layout, steps[i - 1].id) ?? "",
-                    to: stepIndexOf(layout, step.id) ?? "",
-                  })}
-                  onOpen={() => editing.openSlot(lane, i)}
-                />
-              ))}
-            {renderBox(step, lane, i, ids)}
-          </React.Fragment>
-        ))}
+      <ol
+        data-lane-list={lane}
+        className={canInsert ? undefined : "space-y-1.5"}
+      >
+        {renderRange(steps, lane, 0, loopStart)}
+        {loopStart > 0 && canInsert && gap(steps, lane, loopStart)}
+        <LoopBlock
+          target={target}
+          from={stepIndexOf(layout, steps[loopStart].id) ?? 0}
+          to={stepIndexOf(layout, last.id) ?? 0}
+          waitsFirst={WAIT_TYPES.has(steps[loopStart].type ?? "")}
+          active={steps
+            .slice(loopStart)
+            .some((s) => boxPhase(s.id, props) === "current")}
+          footer={addButton}
+        >
+          <ol className={canInsert ? undefined : "space-y-1.5"}>
+            {renderRange(steps, lane, loopStart, steps.length)}
+          </ol>
+        </LoopBlock>
       </ol>
     );
   };
 
+  /** The gap before box `i` of a lane: the insert zone, or the open picker. */
+  const gap = (steps: ScenarioNode[], lane: StepLane, i: number) =>
+    editing.isSlotOpen(lane, i) ? (
+      <li key={`gap-${i}`} className="py-1.5">
+        {editing.picker}
+      </li>
+    ) : drag ? (
+      <li key={`gap-${i}`} aria-hidden className="h-1.5" />
+    ) : (
+      <InsertZone
+        key={`gap-${i}`}
+        label={t("scenarioRun.insertBetween", {
+          from: stepIndexOf(layout, steps[i - 1].id) ?? "",
+          to: stepIndexOf(layout, steps[i].id) ?? "",
+        })}
+        onOpen={() => editing.openSlot(lane, i)}
+      />
+    );
+
+  /** Boxes `from` (inclusive) to `to` (exclusive) of a lane, with the gaps
+   *  between them when the editor can insert. */
+  const renderRange = (
+    steps: ScenarioNode[],
+    lane: StepLane,
+    from: number,
+    to: number,
+  ) => {
+    const ids = steps.map((s) => s.id);
+    return steps.slice(from, to).map((step, k) => {
+      const i = from + k;
+      return (
+        <React.Fragment key={step.id}>
+          {canInsert && i > from && gap(steps, lane, i)}
+          {renderBox(step, lane, i, ids)}
+        </React.Fragment>
+      );
+    });
+  };
+
   return (
     <div ref={editing.rootRef}>
-      {layout.main.length > 0 && renderLane(layout.main, "main")}
-      {addSlot("main", layout.main.length)}
+      {layout.main.length > 0
+        ? renderLane(layout.main, "main", addSlot("main", layout.main.length))
+        : addSlot("main", 0)}
       {layout.fork && (
         <div
           data-testid="step-branches"
@@ -395,11 +538,14 @@ const StepsView: React.FC<StepRunViewProps> = (props) => {
                       : `${done}/${branch.steps.length}`}
                   </span>
                 </div>
-                {renderLane(branch.steps, index)}
-                {addSlot(
+                {renderLane(
+                  branch.steps,
                   index,
-                  branch.steps.length,
-                  t("scenarioRun.addToBranch", { name: branch.name }),
+                  addSlot(
+                    index,
+                    branch.steps.length,
+                    t("scenarioRun.addToBranch", { name: branch.name }),
+                  ),
                 )}
               </div>
             );

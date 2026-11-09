@@ -224,8 +224,9 @@ describe("ScenarioRunPage", () => {
     expect(container.textContent).toContain("run-42");
     expect(container.textContent).not.toContain("no longer active");
 
-    // Timeline is positioned on the runtime's current node.
-    const phases = Array.from(container.querySelectorAll("[data-step-id]")).map(
+    // The graph (the default view) is positioned on the runtime's current
+    // node.
+    const phases = Array.from(container.querySelectorAll("[data-node-id]")).map(
       (el) => el.getAttribute("data-phase"),
     );
     expect(phases).toEqual(["done", "current"]);
@@ -381,7 +382,7 @@ describe("ScenarioRunPage", () => {
     expect(container.textContent).toContain("← Back");
   });
 
-  it("is read-only: no message log, a Steps | Graph switch in ?view=, and the run history", async () => {
+  it("is read-only: no message log, a Graph | Steps switch in ?view=, and the run history", async () => {
     const fixture = linearFixture();
     const service = createFakeChargePointService({
       listScenarioDefinitions: vi.fn(async () => [fixture]),
@@ -419,19 +420,23 @@ describe("ScenarioRunPage", () => {
       "/scenarios/edit?cp=CP-1&connector=1&id=s1",
     );
 
-    // Steps by default; Graph draws the cards and writes ?view=graph.
+    // Graph by default (the first option); Steps draws the boxes and writes
+    // ?view=steps.
     const view = container.querySelector('[role="group"][aria-label="View"]')!;
     expect(view).toBeTruthy();
-    expect(container.querySelectorAll("[data-step-id]")).toHaveLength(2);
-    const graph = Array.from(view.querySelectorAll("button")).find(
-      (b) => b.textContent === "Graph",
-    )!;
-    await act(async () => graph.click());
-    await flush();
-    expect(new URLSearchParams(location!.search).get("view")).toBe("graph");
-    expect(location!.type).toBe("REPLACE");
+    expect(
+      Array.from(view.querySelectorAll("button")).map((b) => b.textContent),
+    ).toEqual(["Graph", "Steps"]);
     expect(container.querySelectorAll("[data-node-id]")).toHaveLength(2);
-    expect(container.querySelectorAll("[data-step-id]")).toHaveLength(0);
+    const steps = Array.from(view.querySelectorAll("button")).find(
+      (b) => b.textContent === "Steps",
+    )!;
+    await act(async () => steps.click());
+    await flush();
+    expect(new URLSearchParams(location!.search).get("view")).toBe("steps");
+    expect(location!.type).toBe("REPLACE");
+    expect(container.querySelectorAll("[data-step-id]")).toHaveLength(2);
+    expect(container.querySelectorAll("[data-node-id]")).toHaveLength(0);
   });
 
   it("Edit scenario of a Library copy opens the Library editor", async () => {

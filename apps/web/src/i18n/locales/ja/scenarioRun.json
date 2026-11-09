@@ -75,5 +75,10 @@
   "scenarioRun.run.gone": "実行 {{runId}} は既にアクティブではありません",
   "scenarioRun.run.showingCurrent": " — 現在の実行 {{runId}} を表示しています。",
   "scenarioRun.run.cpScopeNote": "これは充電器スコープのシナリオです。トリガーが発火するとコネクタごとに自動実行され、ここから手動で開始することはできません。このコンソールでは開始が無効です。",
-  "scenarioRun.loopBack": "その後ステップ {{n}} に戻る"
+  "scenarioRun.loopBack": "その後ステップ {{n}} に戻る",
+  "scenarioRun.joinTo": "その後ステップ {{n}} に進む",
+  "scenarioRun.loopForever": "ずっと繰り返す",
+  "scenarioRun.loopWaitsAt": "毎回まずステップ {{n}} で待つ",
+  "scenarioRun.loopBackArm": "ステップ {{n}} に戻る",
+  "scenarioRun.loopSteps": "繰り返すステップ {{from}}〜{{to}}"
 }

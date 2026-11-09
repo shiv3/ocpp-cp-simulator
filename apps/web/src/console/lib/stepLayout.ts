@@ -10,6 +10,7 @@ import {
   ScenarioNodeType,
 } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import i18n from "../../i18n";
+import { recognizeBlockTree } from "./blockTree";
 import { isLiveRunState } from "./scenarioRunState";
 import { createDefaultNode } from "./scenarioSteps";
 
@@ -91,18 +92,38 @@ function branchName(first: ScenarioNode | undefined, index: number): string {
   return `Branch ${String.fromCharCode(65 + (index % 26))}`;
 }
 
+/**
+ * The run views' layout, projected from the block tree
+ * (`recognizeBlockTree`): supported when the tree is a chain plus at most
+ * one fork (and links), with nothing detached. The projection walks the
+ * edges the tree structures (drawn edges and links), never an edge the tree
+ * keeps aside: a step that ends its branch but has edges (a legacy "End"
+ * label) is unsupported. The result is the layout the views have always
+ * read.
+ */
 export function deriveStepLayout(
   def: Pick<ScenarioDefinition, "nodes" | "edges">,
 ): StepLayout {
+  const tree = recognizeBlockTree(def);
+  const start = tree.origin;
+  if (!start || start.type !== ScenarioNodeType.START) return UNSUPPORTED;
+  if (tree.detached.length > 0) return UNSUPPORTED;
+  const structural = new Set<string>(tree.drawnEdges.keys());
+  const placed = new Set<string>([start.id, ...tree.nodePath.keys()]);
+  for (const link of tree.links) {
+    if (link.role === "outOfEnd") {
+      // Out of END: never walked. Out of a placed step that ends its
+      // branch: the old layout walked on along it; not projectable.
+      if (placed.has(link.edge.source)) return UNSUPPORTED;
+    } else structural.add(link.edge.id);
+  }
   const outgoing = new Map<string, Edge[]>();
   for (const edge of def.edges) {
+    if (!structural.has(edge.id)) continue;
     const list = outgoing.get(edge.source);
     if (list) list.push(edge);
     else outgoing.set(edge.source, [edge]);
   }
-
-  const start = def.nodes.find((n) => n.type === ScenarioNodeType.START);
-  if (!start) return UNSUPPORTED;
 
   const nodesById = new Map(def.nodes.map((n) => [n.id, n]));
   const visited = new Set<string>([start.id]);

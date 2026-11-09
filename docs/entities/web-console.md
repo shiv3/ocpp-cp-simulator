@@ -1081,6 +1081,60 @@ edits rebuild the graph's edges and positions
 ([`scenarioSteps.ts`](../../apps/web/src/console/lib/scenarioSteps.ts),
 `insertLaneStep` / `moveLaneStep` / `removeLaneStep` / `addParallelBranch`).
 
+#### Editor model (block tree)
+
+Underneath both views sits one model of the graph, the **block tree**
+([`blockTree.ts`](../../apps/web/src/console/lib/blockTree.ts),
+`recognizeBlockTree`): nested sequences of steps, forks and loops, recovered
+from the graph the way the executor reads it (`lowerScenario`,
+`nextStep`, `pickableHandles`; see
+[connection rules](../concepts/scenario-format.md#connection-rules)).
+"Structure what can be structured; every other edge stays visible as a link."
+
+- **Forks**: START with several edges (all run), a `switch` / `choice` (one
+  lane per handle it can pick, in handle order), and a step with more than
+  one edge (only the first runs). A second edge on one handle, an edge with
+  a handle the node never picks, and a step's later edges are lanes too,
+  marked _ignored_ / _unpickable_, so no edge disappears. Lanes meet again
+  at the fork's immediate post-dominator (its _merge_), and the sequence
+  goes on there.
+- **Loops**: a back edge whose target dominates its source (a reducible
+  loop) makes a loop block; its first exit (file order) is where the
+  sequence goes on. Any other back edge (an irreducible loop) stays a link.
+- **Links**: an edge into a step placed elsewhere (join), a back edge that
+  is not a loop, an edge into START, an edge to a missing node, an edge out
+  of END. **Detached**: steps no path from START reaches.
+- Every node other than END is placed exactly once and every edge is drawn
+  once or kept once as a link (`assertTreeCovers`). Recognition never throws
+  and depends only on file order, never on sorted ids.
+
+Writing a tree back (`rebuildFromTree`) never changes what the file means:
+
+- an edge is reused by (source, target, handle), else retargeted from an
+  unused edge with the same (source, handle) — inserting a step turns `s→t`
+  into `s→n` with the same id, handle and unknown fields — else made new;
+- reused edges keep their index in `edges` (a new edge takes the slot of the
+  edge it replaces, else goes last), and `assertFirstEdgeWins` checks that
+  every edge drawn as running is still the one the executor takes (first
+  edge to an existing node; first edge per handle), so reordering can never
+  revive a dead edge;
+- links are written back untouched; existing node positions never move (a
+  new node goes just below its predecessor);
+- a round trip without edits returns the file unchanged except `updatedAt`
+  (checked on every shipped template and docs example, and on seeded random
+  graphs).
+
+The tree's operations (`insertStep`, `moveStep`, `removeStep`, `addLane`,
+`removeLane`, `insertForkBlock`, `wrapInLoop`, `setLink`, `setLaneHandle`,
+`setLaneCondition`) are pure functions of the definition and the tree, and
+`editCapabilities` tells which apply to a selection, with the reason
+(`scenarios.editor.cannot.*`) when one does not. The views do not use them
+yet: `deriveStepLayout` is an adapter that projects the tree to the views'
+chain-plus-one-fork layout (and gives up, as before, on anything else) — the
+same layout as before for every shipped template; the one difference is a
+step labelled "End" that has edges, which the executor ends the branch at
+and the old layout walked past.
+
 Both views edit the same definition: unsaved changes survive a switch, and
 nothing is written until **Save**. The per-connector editor's Save saves this
 scenario only (the connector's other scenarios are kept); the Library editor's

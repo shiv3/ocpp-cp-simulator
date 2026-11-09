@@ -12,6 +12,7 @@ import { UploadFile } from "../../../infrastructure/fileUpload";
 import { DefaultBootNotification } from "../../types/OcppTypes";
 import type { LogSink } from "../../persistence/LogSink";
 import { LogLevel } from "../../../shared/Logger";
+import { Outbox } from "../../transport/Outbox";
 
 /**
  * #575: the charge point builds its transport through
@@ -299,9 +300,14 @@ describe("ChargePoint service factories (#575)", () => {
     const heartbeat = spies.createHeartbeat.mock.results[0]!.value;
     expect(cp.heartbeat).toBe(heartbeat);
     expect(heartbeat.setHeartbeatCallback).toHaveBeenCalledTimes(1);
-    expect(heartbeat.setHeartbeatCallback).toHaveBeenCalledWith(
-      expect.any(Function),
-    );
+    const callback = vi.mocked(heartbeat.setHeartbeatCallback).mock
+      .calls[0]![0];
+    const sendHeartbeat = vi
+      .spyOn(Outbox.prototype, "sendHeartbeat")
+      .mockResolvedValue(undefined as never);
+    callback();
+    expect(sendHeartbeat).toHaveBeenCalledTimes(1);
+    sendHeartbeat.mockRestore();
     cp.disconnect();
   });
 
@@ -348,10 +354,7 @@ describe("ChargePoint service factories (#575)", () => {
       clean: vi.fn(),
     };
     const { cp } = build("OCPP-1.6J", undefined, {}, { transactions });
-    const ports = {
-      sendTransactionEvent: expect.any(Function),
-      startConnectionTimeout: expect.any(Function),
-    };
+    const ports = cp["transactionPorts"];
     await expect(cp.startTransaction("TAG", 1)).resolves.toBe(outcome);
     expect(transactions.start).toHaveBeenCalledWith(
       cp,
@@ -364,8 +367,17 @@ describe("ChargePoint service factories (#575)", () => {
     );
     cp.stopTransaction(1, "Local");
     expect(transactions.stop).toHaveBeenCalledWith(cp, ports, 1, "Local", {});
+    expect(transactions.start.mock.calls[0]![1]).toBe(ports);
+    expect(transactions.stop.mock.calls[0]![1]).toBe(ports);
     cp.cleanTransaction(1);
     expect(transactions.clean).toHaveBeenCalledWith(cp, 1);
+    const sendTransactionEvent = vi
+      .spyOn(Outbox.prototype, "sendTransactionEvent")
+      .mockResolvedValue(undefined as never);
+    const event = {} as Parameters<Outbox["sendTransactionEvent"]>[0];
+    ports.sendTransactionEvent(event);
+    expect(sendTransactionEvent).toHaveBeenCalledWith(event);
+    sendTransactionEvent.mockRestore();
     cp.disconnect();
   });
 });

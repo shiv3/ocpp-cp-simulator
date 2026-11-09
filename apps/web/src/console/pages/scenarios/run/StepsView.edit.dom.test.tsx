@@ -3,14 +3,24 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { ScenarioNodeType } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import {
+  type ScenarioDefinition,
+  ScenarioNodeType,
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import statusTriggeredActions from "@ocpp-cp-simulator/core/utils/scenarios/status-triggered-actions.json";
 import { findStepLane } from "../../../lib/scenarioSteps";
 import { deriveStepLayout } from "../../../lib/stepLayout";
 import { forkScenario } from "../../../test/scenarioFixtures";
 import StepsView from "./StepsView";
 
 // forkScenario: main [plug 1, status 2], branches [[charge 3, meter 4], [wait 5]].
-const layout = deriveStepLayout(forkScenario());
+const forkLayout = deriveStepLayout(forkScenario());
+// status-triggered-actions: main [trigger 1, heartbeat 2, delay 3], the
+// last two in a loop (delay → heartbeat).
+const loopLayout = deriveStepLayout(
+  statusTriggeredActions as unknown as ScenarioDefinition,
+);
+let layout = forkLayout;
 
 let root: Root | null = null;
 let container: HTMLElement;
@@ -19,7 +29,8 @@ const onMoveStep = vi.fn();
 const onSelectStep = vi.fn();
 const onDeleteStep = vi.fn();
 
-async function render() {
+async function render(which = forkLayout) {
+  layout = which;
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -212,5 +223,82 @@ describe("StepsView (editable)", () => {
       );
     });
     expect(onMoveStep).toHaveBeenCalledTimes(1);
+  });
+
+  describe("inside a loop block", () => {
+    const block = () => container.querySelector("[data-loop-block]")!;
+
+    it("inserts inside the block, at its edge outside it, and appends inside it", async () => {
+      await render(loopLayout);
+      // Between the two looped steps: inside the block.
+      const inside = byLabel("Insert step between 2 and 3");
+      expect(block().contains(inside)).toBe(true);
+      await click(inside);
+      expect(
+        block().querySelector('input[aria-label="Search step types"]'),
+      ).toBeTruthy();
+      await pick("Delay");
+      expect(onInsertStep).toHaveBeenLastCalledWith(
+        "main",
+        2,
+        ScenarioNodeType.DELAY,
+      );
+      // Before the loop's first step: above the block, so the new step runs
+      // once (the loop still goes back to step 2's node).
+      const edge = byLabel("Insert step between 1 and 2");
+      expect(edge).toBeTruthy();
+      expect(block().contains(edge)).toBe(false);
+      await click(edge);
+      await pick("Delay");
+      expect(onInsertStep).toHaveBeenLastCalledWith(
+        "main",
+        1,
+        ScenarioNodeType.DELAY,
+      );
+      // "+ Add step" appends to the lane, which the loop closes: inside.
+      const add = Array.from(block().querySelectorAll("button")).find(
+        (b) => b.textContent === "+ Add step",
+      );
+      await click(add ?? null);
+      await pick("Delay");
+      expect(onInsertStep).toHaveBeenLastCalledWith(
+        "main",
+        3,
+        ScenarioNodeType.DELAY,
+      );
+    });
+
+    it("drags a looped box within the lane, into and out of the block", async () => {
+      await render(loopLayout);
+      expect(block().contains(handleOf("delay-10s"))).toBe(true);
+      // Delay (index 2, centre 142) up past the trigger (centre 26).
+      pointer("pointerdown", handleOf("delay-10s"), 142);
+      pointer("pointermove", handleOf("delay-10s"), 10);
+      expect(container.querySelector("[data-drop-indicator]")).toBeTruthy();
+      pointer("pointerup", handleOf("delay-10s"), 10);
+      expect(onMoveStep).toHaveBeenLastCalledWith("delay-10s", -2);
+      // The trigger (outside) down into the block.
+      pointer("pointerdown", handleOf("trigger-available"), 26);
+      pointer("pointermove", handleOf("trigger-available"), 100);
+      pointer("pointerup", handleOf("trigger-available"), 100);
+      expect(onMoveStep).toHaveBeenLastCalledWith("trigger-available", 1);
+    });
+
+    it("keeps Alt+Arrow on a looped box", async () => {
+      await render(loopLayout);
+      const delay = byLabel("Select step 3: Delay")!;
+      expect(block().contains(delay)).toBe(true);
+      act(() => {
+        delay.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "ArrowUp",
+            altKey: true,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      });
+      expect(onMoveStep).toHaveBeenCalledWith("delay-10s", -1);
+    });
   });
 });

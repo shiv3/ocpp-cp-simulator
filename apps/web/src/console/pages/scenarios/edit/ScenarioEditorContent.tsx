@@ -116,7 +116,7 @@ export interface ScenarioEditorContentProps {
  *   the rest of the visit once opened, so an edit that makes the scenario
  *   drawable does not swap editors mid-edit.
  * The content owns the definition, the dirty state and Save in both views;
- * the view is kept in the URL (`view=steps|graph`). Used by the
+ * the view is kept in the URL (`view=steps|graph`); Graph is the default. Used by the
  * per-connector editor page, inline by the Library tab, and in the
  * Scenarios page's and the charge point page's side panels (`variant`).
  */
@@ -138,7 +138,7 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
   const [searchParams, setSearchParams] = useSearchParams();
   const { mode, chargePointService, defaultEvSettings } = useDataContext();
   const requestedView: EditorView =
-    searchParams.get("view") === "graph" ? "graph" : "steps";
+    searchParams.get("view") === "steps" ? "steps" : "graph";
 
   const [original, setOriginal] = useState<ScenarioDefinition | null>(null);
   const [scenario, setScenario] = useState<ScenarioDefinition | null>(null);
@@ -570,8 +570,8 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
           value={view}
           onChange={setView}
           options={[
-            { value: "steps", label: t("scenarios.editor.viewSteps") },
             { value: "graph", label: t("scenarios.editor.viewGraph") },
+            { value: "steps", label: t("scenarios.editor.viewSteps") },
           ]}
         />
       )}

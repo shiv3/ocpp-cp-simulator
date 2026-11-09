@@ -124,8 +124,8 @@ const TemplatePreview: React.FC<{
             value={view}
             onChange={setView}
             options={[
-              { value: "steps", label: t("scenarios.editor.viewSteps") },
               { value: "graph", label: t("scenarios.editor.viewGraph") },
+              { value: "steps", label: t("scenarios.editor.viewSteps") },
             ]}
           />
         )}

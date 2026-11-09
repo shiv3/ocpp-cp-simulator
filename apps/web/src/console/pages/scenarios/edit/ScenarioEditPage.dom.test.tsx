@@ -261,7 +261,7 @@ describe("ScenarioEditPage", () => {
     });
 
     const { container, root } = await renderConsole(
-      "/scenarios/edit?cp=CP-1&connector=1&id=s1",
+      "/scenarios/edit?cp=CP-1&connector=1&id=s1&view=steps",
       { service },
     );
     cleanup = () => unmount(root);
@@ -566,16 +566,22 @@ describe("ScenarioEditPage", () => {
     });
 
     const { container, root } = await renderConsole(
-      "/scenarios/edit?cp=CP-1&connector=1&id=status-triggered-actions",
+      "/scenarios/edit?cp=CP-1&connector=1&id=status-triggered-actions&view=steps",
       { service },
     );
     cleanup = () => unmount(root);
     await flush();
 
+    // The looped steps sit in a loop block that goes back to step 2.
+    const block = container.querySelector(
+      '[data-loop-block][data-loop-to="notification-heartbeat"]',
+    );
+    expect(block?.textContent).toContain("Back to step 2");
     expect(
-      container.querySelector('[data-loop-to="notification-heartbeat"]')
-        ?.textContent,
-    ).toContain("step 2");
+      Array.from(block?.querySelectorAll("[data-step-id]") ?? []).map((el) =>
+        el.getAttribute("data-step-id"),
+      ),
+    ).toEqual(["notification-heartbeat", "delay-10s"]);
 
     // Select the Delay step (last of the chain) and open the loop.
     await act(async () => {
@@ -593,7 +599,7 @@ describe("ScenarioEditPage", () => {
       select.value = "";
       select.dispatchEvent(new Event("change", { bubbles: true }));
     });
-    expect(container.querySelector("[data-loop-to]")).toBeNull();
+    expect(container.querySelector("[data-loop-block]")).toBeNull();
     expect(hasUnsavedChanges(container)).toBe(true);
   });
 
@@ -648,34 +654,44 @@ describe("ScenarioEditPage", () => {
     ).toBeNull();
   });
 
-  it("opens a linear scenario in the step list, and in the graph with view=graph", async () => {
+  it("opens a scenario in the graph by default, and in the step list with view=steps", async () => {
     const fixture = linearFixture();
     const service = createFakeChargePointService({
       listScenarioDefinitions: vi.fn(async () => [fixture]),
     });
 
-    const steps = await renderConsole(
+    const graph = await renderConsole(
       "/scenarios/edit?cp=CP-1&connector=1&id=s1",
       { service },
     );
-    await flush();
-    expect(steps.container.textContent).toContain("+ Add step");
-    expect(steps.container.querySelector(".react-flow__node")).toBeNull();
-    expect(
-      viewToggle(steps.container, "Steps").getAttribute("aria-pressed"),
-    ).toBe("true");
-    await unmount(steps.root);
-
-    const graph = await renderConsole(
-      "/scenarios/edit?cp=CP-1&connector=1&id=s1&view=graph",
-      { service },
-    );
-    cleanup = () => unmount(graph.root);
     await flush();
     // The card graph, not ReactFlow.
     expect(graph.container.querySelectorAll("[data-node-id]")).toHaveLength(2);
     expect(graph.container.querySelector(".react-flow__node")).toBeNull();
     expect(graph.container.textContent).not.toContain("+ Add step");
+    expect(
+      viewToggle(graph.container, "Graph").getAttribute("aria-pressed"),
+    ).toBe("true");
+    // Graph is the first option of the toggle.
+    const options = Array.from(
+      viewToggle(graph.container, "Graph").parentElement!.querySelectorAll(
+        "button",
+      ),
+    ).map((b) => b.textContent);
+    expect(options).toEqual(["Graph", "Steps"]);
+    await unmount(graph.root);
+
+    const steps = await renderConsole(
+      "/scenarios/edit?cp=CP-1&connector=1&id=s1&view=steps",
+      { service },
+    );
+    cleanup = () => unmount(steps.root);
+    await flush();
+    expect(steps.container.textContent).toContain("+ Add step");
+    expect(steps.container.querySelector("[data-node-id]")).toBeNull();
+    expect(
+      viewToggle(steps.container, "Steps").getAttribute("aria-pressed"),
+    ).toBe("true");
   });
 
   it("switching views keeps unsaved graph edits", async () => {
@@ -685,7 +701,7 @@ describe("ScenarioEditPage", () => {
     });
 
     const { container, root } = await renderConsole(
-      "/scenarios/edit?cp=CP-1&connector=1&id=s1",
+      "/scenarios/edit?cp=CP-1&connector=1&id=s1&view=steps",
       { service },
     );
     cleanup = () => unmount(root);
@@ -727,7 +743,7 @@ describe("ScenarioEditPage", () => {
       listScenarioDefinitions: vi.fn(async () => [linearFixture()]),
     });
     const { container, root } = await renderConsole(
-      "/scenarios/edit?cp=CP-1&connector=1&id=s1",
+      "/scenarios/edit?cp=CP-1&connector=1&id=s1&view=steps",
       { service },
     );
     cleanup = () => unmount(root);

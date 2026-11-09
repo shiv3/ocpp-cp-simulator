@@ -887,7 +887,7 @@ back to the first one still listed when the search hides it. On the right, the
 selected template as the scenario editor would show it, read-only
 ([`TemplatePreview.tsx`](../../apps/web/src/console/pages/scenarios/TemplatePreview.tsx)):
 its name, description, step and branch count and trigger, a primary **Use
-template**, the **Steps / Graph** views (Graph first; loops drawn as in the
+template**, the **Graph / Steps** views (Graph first and by default; loops drawn as in the
 editor; no `+` controls), and, for a step picked there, the editor's inspector
 with every field disabled. A shape the views cannot draw is listed as an
 outline. In a narrow dialog the two sides take turns: a row opens the preview,
@@ -930,7 +930,7 @@ A scenario run shows in two places with the same content: the **run panel**
 (beside the Scenarios page's Active runs, or beside the full charge point page
 at `/cp/<id>?connector=<n>&run=<scenarioId>`, whose **Close** removes `run`
 and replaces the history entry) and the read-only **run page**
-(`/scenarios/run?cp=…&connector=…&id=…[&run=<runId>][&view=graph]`). Both
+(`/scenarios/run?cp=…&connector=…&id=…[&run=<runId>][&view=steps]`). Both
 show the scenario name, `<charge point> #<connector>`, the run state,
 `k / N · <elapsed>` and a progress bar, **Start** or **Stop**, the wait
 controls while the run is parked, and **Edit scenario**: in the panel it
@@ -948,8 +948,9 @@ scenario** opens it there (or in the Library, for a copy).
 
 The run page has no message log (the charge point page and the Message log
 page hold the traffic); its **Run history** stays under the steps, full width.
-It also has a **Steps | Graph** switch, kept in `?view=` (replacing the
-history entry; Steps is the default). The panel always shows Steps.
+It also has a **Graph | Steps** switch, kept in `?view=` (replacing the
+history entry; Graph is the default, `?view=steps` opens Steps). The panel
+always shows Steps.
 
 - **Steps** — one box per step, top to bottom, numbered: the step type's tile
   (its category's [icon](#icons) and colour), its title and summary, the state pill on the current step and a check on a
@@ -958,23 +959,35 @@ history entry; Steps is the default). The panel always shows Steps.
   each under a lane tag (`A`, `B`, … in the lane colour, the branch name —
   the first step's label, unless it is the type's default, else
   `Branch A`, … — and `done/total`). The executor starts every branch at
-  once after the fork node.
+  once after the fork node. A lane whose last step loops back to an earlier
+  step of the **same** lane is drawn like Scratch's "forever" block: the
+  steps from the loop's target to the lane's end sit inside a C-shaped block
+  (tinted purple) whose top arm reads **Repeat forever** — plus "each round
+  waits at step N first" when the loop starts at a Delay or a trigger — and
+  whose bottom arm reads **Back to step N**; the steps before the target stay
+  above the block. The back edge is unconditional, so the loop runs until the
+  run ends. A lane that ends in a link to another lane gets a one-line note
+  instead: **Then back to step N** into the chain before the fork, **Then on
+  to step N** into an earlier branch (a join). Only a lane's last step takes a
+  link, so a lane holds at most one loop block.
 - **Graph** — the same order drawn as connected cards: the chain in one lane,
   each branch curving into a lane of its own below the fork node; a travelled
   path takes its lane's colour. It is drawn by the console itself, not the
   editor's graph library.
 
 Both views draw a chain, then at most one fork whose branches each run to
-their end (END, a step with no next step, or an edge to a missing node). A
-scenario with a join (two branches reaching one step), a loop, a second fork,
-or a step no path reaches is shown as a flat list in definition order instead,
-marked "order approximate". The layout is a pure function,
+their end (END, a step with no next step, or an edge to a missing node),
+plus the loops and joins that leave a lane's last step (`StepLink`). A
+scenario with a second fork, or a step no path reaches, is shown as a flat
+list in definition order instead, marked "order approximate". The layout is a pure function,
 [`deriveStepLayout`](../../apps/web/src/console/lib/stepLayout.ts).
 
 ### Scenario editor: steps and graph
 
-The editor shows one scenario in two views, switched by the **Steps | Graph**
-toggle and kept in the URL (`&view=steps|graph`). It opens inline on the
+The editor shows one scenario in two views, switched by the **Graph | Steps**
+toggle and kept in the URL (`&view=steps|graph`). Graph is the main view: it
+is the default and the toggle's first option, and `&view=steps` opens Steps
+(the template preview opens on Graph too). It opens inline on the
 Library tab for a [Library scenario](#scenario-library)
 (`/scenarios?tab=library&edit=<id>`, header `← Library`, **Save and apply to
 <n> connectors**, **Used by** chips), as the per-connector editor
@@ -1006,8 +1019,12 @@ scenario or a copy of one (`libraryId`). All use the same content
   of a `switch` / `choice` an edge runs: existing edges keep their
   `sourceHandle` (or its absence), and only a new branch gets the first free
   handle the node can pick, or none when every one is taken (see
-  [the schema 1.6 nodes](../concepts/scenario-format.md#the-schema-16-nodes)). Steps is the default for any
-  scenario this view can draw.
+  [the schema 1.6 nodes](../concepts/scenario-format.md#the-schema-16-nodes)). A loop within a lane is the
+  run views' C-shaped loop block (above): its boxes keep the drag, keys and
+  `+` gaps of any box, the `+` between the last step above the block and the
+  block inserts above it (the new step runs once), and the lane's **+ Add
+  step** sits inside the block (an appended step joins the loop, which always
+  closes at the lane's last step).
 - **Graph** — the same layout drawn as on the [run page](#scenario-runs-panel-and-page):
   connected cards, the chain in lane 0 and each branch curving into a lane of
   its own. A click selects a card for the inspector (the selected card gets a
@@ -1022,8 +1039,8 @@ scenario or a copy of one (`libraryId`). All use the same content
   so it still selects; **Escape** cancels), and a focused card takes
   **Alt+↑ / Alt+↓** and **Delete** the same way. A loop or a join is drawn too: the edge that jumps back to (or joins) a card
   already placed leaves the _last_ card of its lane as a dashed curve with an
-  arrowhead (`StepLink`, `deriveStepLayout().links`), and the Steps view says
-  "Then back to step N" under the lane. The inspector of a lane's last card has an
+  arrowhead (`StepLink`, `deriveStepLayout().links`), and the Steps view
+  encloses a loop in a loop block (or notes a link to another lane under it). The inspector of a lane's last card has an
   **After this step** select — _End of scenario_ or _Loop back to step N_ — that
   sets or clears the link (`setLaneLink`); a link keeps leaving the lane's last
   card through inserts, moves and deletes, and is dropped when its target is
@@ -1072,7 +1089,7 @@ connectors** for a Library scenario with users), **Cancel**, the expand button
 (**Open in the Library editor**, or **Open in the editor** for a definition
 that is not a Library copy: the editor page on the same scenario) and close;
 the trigger and **Enabled** sit under it, then **Used by**, the description
-and EV settings, the **Steps | Graph** switch, and the steps or the graph
+and EV settings, the **Graph | Steps** switch (Graph first and by default), and the graph or the steps
 with the inspector under them — or beside them, sticky, once the panel is
 dragged wider than about 860 px of editor. **Cancel** returns to the read view; with unsaved
 changes it first asks in the panel (**Discard unsaved changes?** —

@@ -256,7 +256,8 @@ describe("Scenarios page — side panel", () => {
       panel.querySelector('[role="group"][aria-label="Editor view"]'),
     ).toBeTruthy();
     expect(panel.querySelector('[data-testid="library-used-by"]')).toBeTruthy();
-    expect(panel.querySelectorAll("[data-step-id]")).toHaveLength(5);
+    // The graph is the editor's default view, in the panel too.
+    expect(panel.querySelectorAll("[data-node-id]")).toHaveLength(5);
     // The expand button opens the Library editor page on the same scenario.
     expect(
       panel

@@ -197,6 +197,11 @@ export interface RunViewCommonProps {
   state?: ScenarioRunState;
   selectedStepId?: string | null;
   onSelectStep?: (nodeId: string) => void;
+  /** A switch / choice lane's tag is a button: it selects the branch point
+   *  and asks for that lane's row (`handle`: `case-<n>`, `default`,
+   *  `option-<n>`) to be opened in the inspector. Absent: the tag is plain
+   *  text. */
+  onSelectLane?: (forkId: string, handle: string) => void;
   /** The editor's views: each step gets an accessible "Select step" name,
    *  `+` controls to add or insert a step, a way to add a branch, drag to
    *  reorder within a lane, and Alt+ArrowUp/Down / Delete on a focused

@@ -74,6 +74,10 @@ import {
   type EVSettings,
   type EVSettingsPatch,
 } from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
+import {
+  ConfigurationWriteRejectedError,
+  UnknownConfigurationKeyError,
+} from "@ocpp-cp-simulator/core/cp/domain/charge-point/configurationAccess";
 import { InvalidAuthorizationCacheSeedError } from "@ocpp-cp-simulator/core/cp/domain/auth/AuthorizationCacheSeed";
 import type { HistoryOptions } from "@ocpp-cp-simulator/core/cp/domain/services/StateSnapshot";
 import {
@@ -624,6 +628,10 @@ export async function dispatchRpcCore(
       return getTimeline(deps, call.params);
     case "sessions.list":
       return listChargingSessions(deps, call.params);
+    case "cp.config_keys.get":
+      return getConfigKeys(deps, call.params);
+    case "cp.config_keys.set":
+      return setConfigKey(deps, call.params);
     case "scenario.definitions.list":
       return listScenarioDefinitions(deps, call.params);
     case "scenario.definitions.save":
@@ -1725,6 +1733,29 @@ async function listChargingSessions(
   return runFacadeOperation(() =>
     deps.chargePointService.listFleetChargingSessions({ ...page, labels }),
   );
+}
+
+/** #612: an unknown cpId is `not_found`, like `sessions.list`. */
+async function getConfigKeys(
+  deps: RuntimeSocketIoDeps,
+  { cpId, keys }: Params<"cp.config_keys.get">,
+): Promise<Result<"cp.config_keys.get">> {
+  const list = await runFacadeOperation(() =>
+    deps.chargePointService.getConfigurationKeys(cpId, keys),
+  );
+  return { keys: [...list.keys], unknown: [...list.unknown] };
+}
+
+/** #612: unknown key → `not_found`; read-only key or refused value →
+ *  `invalid_params` (see {@link classifyFacadeError}). */
+async function setConfigKey(
+  deps: RuntimeSocketIoDeps,
+  { cpId, key, value }: Params<"cp.config_keys.set">,
+): Promise<Result<"cp.config_keys.set">> {
+  const status = await runFacadeOperation(() =>
+    deps.chargePointService.setConfigurationKey(cpId, key, value),
+  );
+  return { key, status };
 }
 
 async function listScenarioDefinitions(
@@ -2882,6 +2913,14 @@ export function classifyFacadeError(err: unknown): RpcFailure | null {
   }
   // #458: a set_ev_settings patch that would remove a required field.
   if (err instanceof InvalidEvSettingsPatchError) {
+    return new RpcFailure("invalid_params", err.message);
+  }
+  // #612: a configuration key the charge point does not have, and one it
+  // has but will not take (read-only, or a value outside its type / bounds).
+  if (err instanceof UnknownConfigurationKeyError) {
+    return new RpcFailure("not_found", err.message);
+  }
+  if (err instanceof ConfigurationWriteRejectedError) {
     return new RpcFailure("invalid_params", err.message);
   }
   // #452: a cache seed refused before anything was written.

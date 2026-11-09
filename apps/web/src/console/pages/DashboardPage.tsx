@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Plus, SearchX } from "lucide-react";
+import { ArrowLeft, Plus, SearchX } from "lucide-react";
 import { ChargingStation } from "@evicons/react";
 
 import { Button } from "@/components/ui/button";
@@ -17,9 +17,11 @@ import PageHeader from "../components/PageHeader";
 import SidePanel from "../components/SidePanel";
 import { useNow } from "../lib/useNow";
 import { usePanelParams } from "../lib/usePanelParams";
+import { useRunPanelParams } from "../lib/useRunPanelParams";
 import BulkActionsMenu from "./dashboard/BulkActionsMenu";
 import ConnectorTable from "./dashboard/ConnectorTable";
 import CpDetailContent from "./cp/CpDetailContent";
+import ScenarioRunContent from "./scenarios/run/ScenarioRunContent";
 import CpHierarchyRow from "./dashboard/CpHierarchyRow";
 import CpListFilterBar from "./dashboard/CpListFilterBar";
 import CpTable from "./dashboard/CpTable";
@@ -28,6 +30,9 @@ import ViewSwitch from "./dashboard/ViewSwitch";
 import { useCpConfigActions } from "./dashboard/useCpConfigActions";
 import { useCpListParams } from "./dashboard/useCpListParams";
 import { useCpListRows } from "./dashboard/useCpListRows";
+
+/** The scenario view's Graph / Steps parameter; `view` is the list's own. */
+const PANEL_VIEW_PARAM = "pview";
 
 const DashboardPage: React.FC = () => {
   const { t } = useTranslation();
@@ -70,6 +75,14 @@ const DashboardPage: React.FC = () => {
 
   const panel = usePanelParams();
   const { cpId: panelCpId, open: openPanel, close: closePanel } = panel;
+  // A connector's scenario opened from the panel's scenario card replaces the
+  // panel's body (no second panel): `?cp=X&connector=N&run=<id>[&edit=1]`.
+  // Back to the charge point drops `run` / `edit` and keeps `cp`/`connector`.
+  const runPanel = useRunPanelParams(PANEL_VIEW_PARAM);
+  const showRun =
+    panelCpId !== null &&
+    panel.connectorId !== null &&
+    runPanel.scenarioId !== null;
   const listRef = useRef<HTMLDivElement>(null);
   // `?cp=` on arrival (a reload, or Back from the full page): bring that
   // charge point into view once, when the list has it. Later clicks are on
@@ -210,12 +223,46 @@ const DashboardPage: React.FC = () => {
 
       <SidePanel
         open={panelCpId !== null}
-        onClose={closePanel}
-        label={t("dashboard.page.panelLabel")}
-        // The content owns scrolling: its bottom panel stays docked.
-        padded={false}
+        // Esc in a scenario view goes back to the charge point (in its editor:
+        // the editor's Cancel); another Esc closes the panel.
+        onClose={showRun ? runPanel.handleEscape : closePanel}
+        label={
+          showRun
+            ? t("dashboard.detail.scenarioRunLabel")
+            : t("dashboard.page.panelLabel")
+        }
+        // The charge point content owns scrolling: its bottom panel stays
+        // docked. The scenario view scrolls as a whole.
+        padded={showRun}
+        wide={showRun}
       >
-        {panelCpId !== null && (
+        {showRun && panelCpId !== null && panel.connectorId !== null && (
+          <>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="mb-3"
+              onClick={runPanel.close}
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              {t("scenarioRun.run.backToCp", { cpId: panelCpId })}
+            </Button>
+            <ScenarioRunContent
+              key={`${panelCpId}\n${panel.connectorId}\n${runPanel.scenarioId}`}
+              cpId={panelCpId}
+              connectorId={panel.connectorId}
+              scenarioId={runPanel.scenarioId ?? ""}
+              variant="panel"
+              onClose={closePanel}
+              editing={runPanel.editing}
+              onEditingChange={runPanel.setEditing}
+              cancelEditRef={runPanel.cancelEditRef}
+              viewParam={PANEL_VIEW_PARAM}
+            />
+          </>
+        )}
+        {!showRun && panelCpId !== null && (
           // Keyed so a swap starts from a clean state (tab, dialogs, snapshot),
           // and remounted when the list first names the charge point: on a
           // reload in Local mode the panel mounts before the charge point is
@@ -227,6 +274,7 @@ const DashboardPage: React.FC = () => {
             variant="panel"
             selectedConnectorId={panel.connectorId}
             onSelectConnector={(id) => openPanel(panelCpId, id)}
+            onOpenScenario={runPanel.open}
           />
         )}
       </SidePanel>

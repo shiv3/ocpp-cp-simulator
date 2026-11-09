@@ -138,5 +138,19 @@
   "cp.controls.confirmRemove": "{{cpId}} からコネクター {{id}} を削除しますか? 削除は保存されず、充電器を作り直すとコネクターは元に戻ります。",
   "cp.controls.removeFailed": "コネクターを削除できませんでした: {{message}}",
   "cp.socMeterSync.readFailed": "同期設定を読み込めませんでした({{error}}):同期をオンにするまで、SoC の設定はメーターを変更しません。",
-  "cp.socMeterSync.applyFailed": "同期をコネクターに適用できませんでした:{{error}}"
+  "cp.socMeterSync.applyFailed": "同期をコネクターに適用できませんでした:{{error}}",
+  "cp.section.configuration": "設定キー",
+  "cp.configKeys.unsupported": "この接続では設定キーを利用できません",
+  "cp.configKeys.loadFailed": "設定キーを読み込めませんでした",
+  "cp.configKeys.empty": "この充電ポイントには設定キーがありません",
+  "cp.configKeys.key": "キー",
+  "cp.configKeys.value": "値",
+  "cp.configKeys.access": "アクセス",
+  "cp.configKeys.valueOf": "{{key}} の値",
+  "cp.configKeys.writeOnly": "書き込み専用。値は表示されません",
+  "cp.configKeys.save": "保存",
+  "cp.configKeys.saved": "保存しました",
+  "cp.configKeys.rebootRequired": "保存しました。再起動後に有効になります",
+  "cp.configKeys.readOnly": "読み取り専用",
+  "cp.configKeys.readWrite": "読み書き可"
 }

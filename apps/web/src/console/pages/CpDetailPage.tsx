@@ -1,14 +1,12 @@
 import { useTranslation } from "react-i18next";
-import React, { useCallback, useRef } from "react";
+import React, { useCallback } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 
 import { useChargePoints } from "../../data/hooks/useChargePoints";
 import { useConfig } from "../../data/hooks/useConfig";
 import SidePanel from "../components/SidePanel";
-import {
-  isPanelEditing,
-  withPanelEditing,
-} from "../lib/useScenarioPanelParams";
+import { withPanelEditing } from "../lib/useScenarioPanelParams";
+import { useRunPanelParams } from "../lib/useRunPanelParams";
 import CpDetailContent from "./cp/CpDetailContent";
 import ScenarioRunContent from "./scenarios/run/ScenarioRunContent";
 
@@ -27,8 +25,15 @@ const CpDetailPage: React.FC = () => {
   const raw = searchParams.get("connector");
   const selectedConnectorId =
     raw !== null && /^\d+$/.test(raw) ? Number(raw) : null;
-  const runScenarioId = searchParams.get("run") || null;
-  const editing = runScenarioId !== null && isPanelEditing(searchParams);
+  const {
+    scenarioId: runScenarioId,
+    editing,
+    open: openRun,
+    close: closeRun,
+    setEditing,
+    cancelEditRef,
+    handleEscape: handlePanelEscape,
+  } = useRunPanelParams();
   // The body reads its snapshot once on mount. On a reload in Local mode the
   // page mounts before the charge point is created, so remount the body when
   // the list first names the charge point (tests render without a registry
@@ -52,30 +57,6 @@ const CpDetailPage: React.FC = () => {
     [searchParams, setSearchParams, raw],
   );
 
-  const closeRun = useCallback(() => {
-    const next = withPanelEditing(searchParams, false);
-    next.delete("run");
-    setSearchParams(next, { replace: true });
-  }, [searchParams, setSearchParams]);
-
-  const setEditing = useCallback(
-    (value: boolean) => {
-      setSearchParams(withPanelEditing(searchParams, value), {
-        replace: true,
-      });
-    },
-    [searchParams, setSearchParams],
-  );
-
-  // Esc on the editing run panel is the editor's Cancel (asks when dirty),
-  // not a close that would drop the unsaved edits.
-  const cancelEditRef = useRef<(() => void) | null>(null);
-  const handlePanelEscape = () => {
-    if (!editing) closeRun();
-    else if (cancelEditRef.current) cancelEditRef.current();
-    else setEditing(false);
-  };
-
   return (
     <>
       <CpDetailContent
@@ -84,11 +65,13 @@ const CpDetailPage: React.FC = () => {
         variant="page"
         selectedConnectorId={selectedConnectorId}
         onSelectConnector={onSelectConnector}
+        onOpenScenario={openRun}
       />
       <SidePanel
         open={runScenarioId !== null}
         onClose={handlePanelEscape}
         label={t("dashboard.detail.scenarioRunLabel")}
+        wide
       >
         {runScenarioId !== null && (
           // Keyed so another run starts from a clean state.

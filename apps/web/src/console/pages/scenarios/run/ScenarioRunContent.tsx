@@ -29,6 +29,7 @@ import {
 import ScenarioEditorContent, {
   type ScenarioEditorContentProps,
 } from "../edit/ScenarioEditorContent";
+import RunHistoryCard from "./RunHistoryCard";
 import RunTimeline from "./RunTimeline";
 import StepsGraphView from "./StepsGraphView";
 import StepsView from "./StepsView";
@@ -149,6 +150,10 @@ export interface ScenarioRunContentProps {
   onEditingChange?: (editing: boolean) => void;
   /** panel: filled with the editor's Cancel while editing (the host's Esc). */
   cancelEditRef?: React.RefObject<(() => void) | null>;
+  /** The search parameter holding Graph / Steps (and the editor's view).
+   *  Default `view`; the Charge Points list passes another, as `view` is the
+   *  list's own. */
+  viewParam?: string;
 }
 
 /**
@@ -175,6 +180,7 @@ const ScenarioRunContent: React.FC<ScenarioRunContentProps> = ({
   editing: editingProp = false,
   onEditingChange,
   cancelEditRef,
+  viewParam = "view",
 }) => {
   const { t } = useTranslation();
   const isPanel = variant === "panel";
@@ -243,12 +249,14 @@ const ScenarioRunContent: React.FC<ScenarioRunContentProps> = ({
   const elapsed =
     isRunning && startedAt != null ? formatElapsed(now - startedAt) : null;
 
+  // Graph unless `?view=steps` — in the panel too (its editor, which keeps
+  // its own `view`, is a separate mode and clears the parameter).
   const view: RunView =
-    isPanel || searchParams.get("view") === "steps" ? "steps" : "graph";
+    searchParams.get(viewParam) === "steps" ? "steps" : "graph";
   const setView = (next: RunView) => {
     const params = new URLSearchParams(searchParams);
-    if (next === "steps") params.set("view", "steps");
-    else params.delete("view");
+    if (next === "steps") params.set(viewParam, "steps");
+    else params.delete(viewParam);
     // A view switch is not a navigation worth a history entry.
     setSearchParams(params, { replace: true });
   };
@@ -324,6 +332,7 @@ const ScenarioRunContent: React.FC<ScenarioRunContentProps> = ({
           : t("scenarioRun.run.openEditor"),
       },
       onClose,
+      viewParam,
     };
     return target.library ? (
       <LibraryPanelEditor key={target.scenarioId} {...editorProps} />
@@ -355,6 +364,12 @@ const ScenarioRunContent: React.FC<ScenarioRunContentProps> = ({
         </div>
         {isPanel && (
           <div className="flex shrink-0 items-center gap-2">
+            <Link
+              to={editScenarioUrl(cpId, scopeConnectorId, scenario)}
+              className="text-xs text-cx-accent hover:underline"
+            >
+              {t("scenarioRun.run.openInLibrary")}
+            </Link>
             <Button
               asChild
               variant="outline"
@@ -457,7 +472,7 @@ const ScenarioRunContent: React.FC<ScenarioRunContentProps> = ({
             </Link>
           </Button>
         )}
-        {!isPanel && drawable && (
+        {drawable && (
           <SegmentedControl
             label={t("scenarioRun.run.view")}
             options={VIEW_OPTIONS.map((o) => ({
@@ -540,7 +555,21 @@ const ScenarioRunContent: React.FC<ScenarioRunContentProps> = ({
         )}
       </div>
 
-      {footer && <div className="mt-4">{footer(run)}</div>}
+      {footer ? (
+        <div className="mt-4">{footer(run)}</div>
+      ) : (
+        // The panel's last run(s): the recorded outcome, or "no runs yet".
+        isPanel && (
+          <div className="mt-4">
+            <RunHistoryCard
+              cpId={cpId}
+              connectorId={connectorId}
+              scenarioId={scenarioId}
+              runs={run.runs}
+            />
+          </div>
+        )
+      )}
     </div>
   );
 };

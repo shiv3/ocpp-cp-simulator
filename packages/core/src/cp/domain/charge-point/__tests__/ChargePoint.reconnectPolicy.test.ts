@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChargePoint } from "../ChargePoint";
 import { createChargePoint } from "../../../infrastructure/charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../types/OcppTypes";
-import { V201_VARIABLE_TO_V16_KEY } from "../../../infrastructure/transport/v201/deviceModelMap";
+import { DEVICE_MODEL } from "../../device-model/DeviceModelRegistry";
 import type { ReconnectPolicy } from "../../../shared/ReconnectPolicy";
 import type { OCPPWebSocket } from "../../../infrastructure/transport/OCPPWebSocket";
 
@@ -64,7 +64,7 @@ describe("ChargePoint reconnect policy (#609)", () => {
       "RetryBackOffRandomRange",
       "RetryBackOffRepeatTimes",
     ]) {
-      expect(V201_VARIABLE_TO_V16_KEY.get(`OCPPCommCtrlr/${name}`)).toBe(name);
+      expect(DEVICE_MODEL.find("OCPPCommCtrlr", name)?.valueKey).toBe(name);
     }
     const v2 = build("OCPP-2.0.1");
     expect(v2.configuration.retryBackOffWaitMinimum()).toBe(1);

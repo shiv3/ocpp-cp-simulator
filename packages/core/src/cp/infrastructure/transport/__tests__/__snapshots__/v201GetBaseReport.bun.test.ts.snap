@@ -58,76 +58,13 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           },
           "variableAttribute": [
             {
-              "mutability": "ReadWrite",
+              "mutability": "ReadOnly",
               "type": "Actual",
               "value": "1",
             },
           ],
           "variableCharacteristics": {
             "dataType": "integer",
-            "supportsMonitoring": true,
-          },
-        },
-        {
-          "component": {
-            "name": "OCPPCommCtrlr",
-          },
-          "variable": {
-            "name": "RetryBackOffWaitMinimum",
-          },
-          "variableAttribute": [
-            {
-              "mutability": "ReadWrite",
-              "type": "Actual",
-              "value": "1",
-            },
-          ],
-          "variableCharacteristics": {
-            "dataType": "integer",
-            "maxLimit": 2147483,
-            "minLimit": 1,
-            "supportsMonitoring": true,
-          },
-        },
-        {
-          "component": {
-            "name": "OCPPCommCtrlr",
-          },
-          "variable": {
-            "name": "RetryBackOffRandomRange",
-          },
-          "variableAttribute": [
-            {
-              "mutability": "ReadWrite",
-              "type": "Actual",
-              "value": "0",
-            },
-          ],
-          "variableCharacteristics": {
-            "dataType": "integer",
-            "maxLimit": 2147483,
-            "minLimit": 0,
-            "supportsMonitoring": true,
-          },
-        },
-        {
-          "component": {
-            "name": "OCPPCommCtrlr",
-          },
-          "variable": {
-            "name": "RetryBackOffRepeatTimes",
-          },
-          "variableAttribute": [
-            {
-              "mutability": "ReadWrite",
-              "type": "Actual",
-              "value": "5",
-            },
-          ],
-          "variableCharacteristics": {
-            "dataType": "integer",
-            "maxLimit": 30,
-            "minLimit": 0,
             "supportsMonitoring": true,
           },
         },
@@ -214,6 +151,69 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
         },
         {
           "component": {
+            "name": "OCPPCommCtrlr",
+          },
+          "variable": {
+            "name": "RetryBackOffWaitMinimum",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "1",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "maxLimit": 2147483,
+            "minLimit": 1,
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "OCPPCommCtrlr",
+          },
+          "variable": {
+            "name": "RetryBackOffRandomRange",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "0",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "maxLimit": 2147483,
+            "minLimit": 0,
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "OCPPCommCtrlr",
+          },
+          "variable": {
+            "name": "RetryBackOffRepeatTimes",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "5",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "maxLimit": 30,
+            "minLimit": 0,
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
             "name": "TxCtrlr",
           },
           "variable": {
@@ -267,6 +267,7 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           "variableCharacteristics": {
             "dataType": "MemberList",
             "supportsMonitoring": true,
+            "valuesList": "Energy.Active.Import.Register,Energy.Active.Import.Interval,Energy.Active.Export.Register,Energy.Active.Export.Interval,Energy.Reactive.Import.Register,Energy.Reactive.Import.Interval,Energy.Reactive.Export.Register,Energy.Reactive.Export.Interval,Voltage,Current.Import,Current.Export,Current.Offered,Power.Active.Import,Power.Active.Export,Power.Reactive.Import,Power.Reactive.Export,Power.Offered,Power.Factor,SoC,Frequency",
           },
         },
         {
@@ -305,6 +306,7 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           "variableCharacteristics": {
             "dataType": "MemberList",
             "supportsMonitoring": true,
+            "valuesList": "Energy.Active.Import.Register,Energy.Active.Import.Interval,Energy.Active.Export.Register,Energy.Active.Export.Interval,Energy.Reactive.Import.Register,Energy.Reactive.Import.Interval,Energy.Reactive.Export.Register,Energy.Reactive.Export.Interval,Voltage,Current.Import,Current.Export,Current.Offered,Power.Active.Import,Power.Active.Export,Power.Reactive.Import,Power.Reactive.Export,Power.Offered,Power.Factor,SoC,Frequency",
           },
         },
         {
@@ -324,6 +326,7 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           "variableCharacteristics": {
             "dataType": "MemberList",
             "supportsMonitoring": true,
+            "valuesList": "Energy.Active.Import.Register,Energy.Active.Import.Interval,Energy.Active.Export.Register,Energy.Active.Export.Interval,Energy.Reactive.Import.Register,Energy.Reactive.Import.Interval,Energy.Reactive.Export.Register,Energy.Reactive.Export.Interval,Voltage,Current.Import,Current.Export,Current.Offered,Power.Active.Import,Power.Active.Export,Power.Reactive.Import,Power.Reactive.Export,Power.Offered,Power.Factor,SoC,Frequency",
           },
         },
         {
@@ -364,6 +367,7 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           "variableCharacteristics": {
             "dataType": "MemberList",
             "supportsMonitoring": true,
+            "valuesList": "Energy.Active.Import.Register,Energy.Active.Import.Interval,Energy.Active.Export.Register,Energy.Active.Export.Interval,Energy.Reactive.Import.Register,Energy.Reactive.Import.Interval,Energy.Reactive.Export.Register,Energy.Reactive.Export.Interval,Voltage,Current.Import,Current.Export,Current.Offered,Power.Active.Import,Power.Active.Export,Power.Reactive.Import,Power.Reactive.Export,Power.Offered,Power.Factor,SoC,Frequency",
           },
         },
         {
@@ -444,6 +448,7 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           "variableCharacteristics": {
             "dataType": "MemberList",
             "supportsMonitoring": true,
+            "valuesList": "Energy.Active.Import.Register,Energy.Active.Import.Interval,Energy.Active.Export.Register,Energy.Active.Export.Interval,Energy.Reactive.Import.Register,Energy.Reactive.Import.Interval,Energy.Reactive.Export.Register,Energy.Reactive.Export.Interval,Voltage,Current.Import,Current.Export,Current.Offered,Power.Active.Import,Power.Active.Export,Power.Reactive.Import,Power.Reactive.Export,Power.Offered,Power.Factor,SoC,Frequency",
           },
         },
         {
@@ -600,25 +605,6 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
         },
         {
           "component": {
-            "name": "ReservationCtrlr",
-          },
-          "variable": {
-            "name": "NonEvseSpecific",
-          },
-          "variableAttribute": [
-            {
-              "mutability": "ReadOnly",
-              "type": "Actual",
-              "value": "false",
-            },
-          ],
-          "variableCharacteristics": {
-            "dataType": "boolean",
-            "supportsMonitoring": true,
-          },
-        },
-        {
-          "component": {
             "name": "AuthCacheCtrlr",
           },
           "variable": {
@@ -678,6 +664,25 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
         },
         {
           "component": {
+            "name": "ReservationCtrlr",
+          },
+          "variable": {
+            "name": "NonEvseSpecific",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "false",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "boolean",
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
             "name": "TxCtrlr",
           },
           "variable": {
@@ -692,6 +697,168 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           ],
           "variableCharacteristics": {
             "dataType": "boolean",
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "TxCtrlr",
+          },
+          "variable": {
+            "name": "TxStartPoint",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "Authorized",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "MemberList",
+            "supportsMonitoring": true,
+            "valuesList": "Authorized",
+          },
+        },
+        {
+          "component": {
+            "name": "TxCtrlr",
+          },
+          "variable": {
+            "name": "TxStopPoint",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "Authorized,EVConnected",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "MemberList",
+            "supportsMonitoring": true,
+            "valuesList": "Authorized,EVConnected",
+          },
+        },
+        {
+          "component": {
+            "name": "DeviceDataCtrlr",
+          },
+          "variable": {
+            "instance": "GetReport",
+            "name": "ItemsPerMessage",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "100",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "minLimit": 1,
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "DeviceDataCtrlr",
+          },
+          "variable": {
+            "instance": "GetReport",
+            "name": "BytesPerMessage",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "65536",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "minLimit": 1,
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "DeviceDataCtrlr",
+          },
+          "variable": {
+            "instance": "GetVariables",
+            "name": "ItemsPerMessage",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "100",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "DeviceDataCtrlr",
+          },
+          "variable": {
+            "instance": "GetVariables",
+            "name": "BytesPerMessage",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "65536",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "DeviceDataCtrlr",
+          },
+          "variable": {
+            "instance": "SetVariables",
+            "name": "ItemsPerMessage",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "100",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "DeviceDataCtrlr",
+          },
+          "variable": {
+            "instance": "SetVariables",
+            "name": "BytesPerMessage",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "65536",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
             "supportsMonitoring": true,
           },
         },

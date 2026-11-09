@@ -16,6 +16,8 @@ const MIN_PAGE_WIDTH = 320;
 const KEY_STEP = 32;
 /** Used until the operator resizes; follows the viewport like the CSS says. */
 const DEFAULT_WIDTH_CSS = "min(680px, 48vw)";
+/** The wide variant (a scenario's graph): room for the drawing and inspector. */
+const WIDE_WIDTH_CSS = "min(960px, 70vw)";
 
 function clampWidth(width: number): number {
   // innerWidth is 0 in jsdom: there is no viewport to leave room in.
@@ -26,8 +28,10 @@ function clampWidth(width: number): number {
   return Math.round(Math.min(Math.max(width, MIN_WIDTH), max));
 }
 
-function defaultWidth(): number {
-  return clampWidth(Math.min(680, window.innerWidth * 0.48));
+function defaultWidth(wide = false): number {
+  return wide
+    ? clampWidth(Math.min(960, window.innerWidth * 0.7))
+    : clampWidth(Math.min(680, window.innerWidth * 0.48));
 }
 
 function readStoredWidth(): number | null {
@@ -51,6 +55,9 @@ export interface SidePanelProps {
    * bottom panel under a scrolling upper part).
    */
   padded?: boolean;
+  /** Opens at `min(960px, 70vw)` instead of `min(680px, 48vw)` (a width the
+   *  operator dragged to still wins). */
+  wide?: boolean;
   children: React.ReactNode;
 }
 
@@ -66,6 +73,7 @@ const SidePanel: React.FC<SidePanelProps> = ({
   onClose,
   label,
   padded = true,
+  wide = false,
   children,
 }) => {
   const { t } = useTranslation();
@@ -73,7 +81,8 @@ const SidePanel: React.FC<SidePanelProps> = ({
   const [width, setWidth] = useState<number | null>(readStoredWidth);
   const dragging = useRef(false);
 
-  const widthCss = width === null ? DEFAULT_WIDTH_CSS : `${width}px`;
+  const widthCss =
+    width === null ? (wide ? WIDE_WIDTH_CSS : DEFAULT_WIDTH_CSS) : `${width}px`;
 
   // The page's own margin (apps/web/src/index.css) reads the width from the root, as
   // the panel and the page are siblings in the DOM.
@@ -112,9 +121,9 @@ const SidePanel: React.FC<SidePanelProps> = ({
       if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
       event.preventDefault();
       const delta = event.key === "ArrowLeft" ? KEY_STEP : -KEY_STEP;
-      setWidth(clampWidth((width ?? defaultWidth()) + delta));
+      setWidth(clampWidth((width ?? defaultWidth(wide)) + delta));
     },
-    [width],
+    [width, wide],
   );
 
   if (!open) return null;
@@ -129,7 +138,7 @@ const SidePanel: React.FC<SidePanelProps> = ({
         role="separator"
         aria-orientation="vertical"
         aria-label={t("consoleShared.sidePanel.resize")}
-        aria-valuenow={width ?? defaultWidth()}
+        aria-valuenow={width ?? defaultWidth(wide)}
         aria-valuemin={MIN_WIDTH}
         tabIndex={0}
         onKeyDown={onHandleKeyDown}

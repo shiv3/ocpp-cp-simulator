@@ -382,6 +382,26 @@ c16(
   },
   { memory: true, simulation: { clock: periodicOfflineClock, seed: "g722" } },
 );
+// #847: Rig.reconnected() across a reconnect of the in-memory transport
+// (FakeCsms.attachMemoryClient sets lastFrameAt like the WebSocket `open`
+// path): the second boot and the samples that follow are on the wire.
+const memoryReconnectClock = new VirtualClock();
+c16(
+  "memory-transport-reconnect",
+  async (r) => {
+    r.plugIn();
+    await settle(r);
+    await r.cp.startTransaction("TAG-A", 1);
+    await settle(r);
+    r.csms.dropConnection();
+    await r.reconnected();
+    await settle(r);
+    await periodic(r, memoryReconnectClock, 65);
+    r.cp.stopTransaction(1);
+    await settle(r);
+  },
+  { memory: true, simulation: { clock: memoryReconnectClock, seed: "g847" } },
+);
 // A transaction restored after a restart is sampled again, from the restart.
 const periodicRestartClock = new VirtualClock();
 const periodicRestartNextClock = new VirtualClock();

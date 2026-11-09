@@ -19,6 +19,7 @@ import {
 } from "@ocpp-cp-simulator/trace/logEntryToTrace";
 import type { TraceRecord } from "@open-ocpp-trace/core";
 import { TraceCorrelator } from "@ocpp-cp-simulator/trace/TraceCorrelator";
+import { serializeRecord } from "@open-ocpp-trace/jsonl/writer";
 
 export interface TraceWriterAttachContext {
   /** Charge point id stamped on every record from this subscription. */
@@ -66,8 +67,12 @@ export class TraceWriter {
     const transport = isSoapVersion(ctx.ocppVersion) ? "soap" : "json";
     const ocppVersion = toTraceOcppVersion(ctx.ocppVersion);
 
+    // serializeRecord checks the envelope only, never payload or raw, so
+    // invalid OCPP (#393 fault injection, #593 schema violations) is still
+    // traced (#886). A record it rejects is warned about and skipped below,
+    // like an I/O failure.
     const write = (record: TraceRecord) =>
-      fs.appendFileSync(this.filePath, JSON.stringify(record) + "\n");
+      fs.appendFileSync(this.filePath, serializeRecord(record));
 
     // An inbound CALL is logged before its handler runs, so a schema
     // violation (#593) is only known a moment later. Hold the CALL record back

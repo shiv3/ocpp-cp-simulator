@@ -20,6 +20,7 @@ import * as path from "path";
 import { splitTraceJsonl } from "./splitTrace";
 import { fetchStoredLogs } from "../client";
 import { logLinesToTrace } from "@ocpp-cp-simulator/trace/logEntryToTrace";
+import { serializeRecord } from "@open-ocpp-trace/jsonl/writer";
 import { DEFAULT_HTTP_PORT } from "../server/constants";
 import type { AnalysisResult } from "@ocpp-debugkit/toolkit/reporter";
 
@@ -47,7 +48,8 @@ async function fetchDaemonTraceJsonl(opts: AnalyzeOptions): Promise<string> {
     opts.cpId as string,
   );
   const records = logLinesToTrace(lines, { chargePointId: opts.cpId });
-  return records.map((r) => JSON.stringify(r)).join("\n");
+  // serializeRecord ends every line with LF (#886), so the text ends with one.
+  return records.map((r) => serializeRecord(r)).join("");
 }
 
 // Shared with the web console's Session Analysis tab (issue #188 PoC item

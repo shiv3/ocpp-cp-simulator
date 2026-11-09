@@ -21,7 +21,7 @@ related:
   - ../concepts/charger-engine.md
   - charger-engine-migration.md
   - ../entities/docker-image.md
-updated: 2026-11-08
+updated: 2026-11-09
 ---
 
 # Testing strategy
@@ -229,6 +229,14 @@ in both directions in arrival order, normalizes it, and compares it with a commi
     message id that is not UUID-shaped is marked `(raw)`. The fixtures of the first set are not strict.
 - **Frames the fake CSMS cannot parse** (not JSON, not an array, an unknown message type) are recorded as
   `raw` frames, not dropped, so a station that emits one fails the case.
+- **Isolation and deadlines**: each fake CSMS (and the rig's upload sink) listens on `127.0.0.1`, the
+  address the station dials, never on the wildcard address: on macOS a socket another process binds to
+  `127.0.0.1` on the same port would otherwise take every connection, and the station would be refused
+  (`Expected 101 status code`) until the case timed out (#848, #874; `LOOPBACK` in
+  `packages/core/src/test/bunServe.ts`, pinned by `FakeCsms.loopback.bun.test.ts`). A per-server token in
+  the URL path keeps a station left over from an earlier case out. `Rig.create({ deadlineMs })` gives the
+  whole case one budget, boot included, under the test timeout; a boot or reconnect wait that runs out
+  reports the frames seen and the station's socket events (refusals, scheduled reconnects).
 - **Cases**: three sets, 335 in all (103 scripted + 54 templates + 178 regression = 335 fixtures; the suite
   reports 338 tests, the 335 cases plus 3 harness checks). `cases.ts` holds 103 scripted cases over both versions (boot
   including Pending and Rejected, status walk, authorize, local and remote start / stop, meter values, EV

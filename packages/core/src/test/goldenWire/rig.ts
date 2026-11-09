@@ -5,7 +5,7 @@ import {
   DefaultBootNotification,
   OCPPStatus,
 } from "../../cp/domain/types/OcppTypes";
-import { tcpPort } from "../bunServe";
+import { LOOPBACK, tcpPort } from "../bunServe";
 import {
   FakeCsms,
   type CsmsResponder,
@@ -35,6 +35,12 @@ export interface RigOptions {
   readonly memory?: boolean;
   /** How long traffic must be quiet before a step counts as settled. */
   readonly quietMs?: number;
+  /**
+   * The budget of the whole case from creation, boot included: every wait
+   * and settle stops there with its own message. Keep it under the test
+   * timeout, else a stuck case only reports "test timed out" (#874).
+   */
+  readonly deadlineMs?: number;
 }
 
 /**
@@ -49,6 +55,8 @@ const BOOT_BUDGET_MS = 60_000;
 /** A real ChargePoint wired to a fake CSMS, one per golden case. */
 export class Rig {
   private sink: ReturnType<typeof Bun.serve> | null = null;
+  /** Connection events of the station, timed from creation (diagnostics). */
+  private readonly socketEvents: string[] = [];
 
   private constructor(
     readonly cp: ChargePoint,
@@ -62,6 +70,9 @@ export class Rig {
       responders: options.responders,
       ...(options.memory ? { memory: true } : {}),
     });
+    if (options.deadlineMs !== undefined) {
+      csms.caseDeadline = Date.now() + options.deadlineMs;
+    }
     const cp = createChargePoint(
       "CP-GOLDEN",
       DefaultBootNotification,
@@ -81,8 +92,18 @@ export class Rig {
       options.simulation ?? {},
     );
     cp.logger.setEnabledTypes();
-    cp.events.on("error", () => undefined);
     const rig = new Rig(cp, csms, options.version);
+    const started = Date.now();
+    const note = (what: string) =>
+      rig.socketEvents.push(`+${Date.now() - started}ms ${what}`);
+    cp.events.on("error", ({ error }) => note(`error ${error}`));
+    cp.events.on("connected", () => note("connected"));
+    cp.events.on("disconnected", () => note("disconnected"));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- private transport state, diagnostics only
+    (cp as any)._webSocket?.observers.on(
+      "reconnectScheduled",
+      ({ delayMs }: { delayMs: number }) => note(`reconnect in ${delayMs}ms`),
+    );
     options.beforeConnect?.(cp);
     if (!options.noConnect) await rig.connectAndBoot();
     return rig;
@@ -100,11 +121,33 @@ export class Rig {
   async connectAndBoot(): Promise<void> {
     const from = this.csms.mark();
     this.cp.connect();
-    await this.csms.waitForFrame(
-      (f) => f.dir === "CP>" && f.action === "BootNotification",
-      { from, timeoutMs: BOOT_BUDGET_MS },
+    await this.withStation(
+      this.csms.waitForFrame(
+        (f) => f.dir === "CP>" && f.action === "BootNotification",
+        { from, timeoutMs: BOOT_BUDGET_MS },
+      ),
     );
     await this.csms.settle();
+  }
+
+  /** A failed connection wait also says what the station's socket did. */
+  private withStation<T>(wait: Promise<T>): Promise<T> {
+    return wait.catch((error: Error) => {
+      throw new Error(`${error.message}; station: ${this.socketSummary()}`);
+    });
+  }
+
+  /** The station side of the connection, for the message of a failed wait. */
+  private socketSummary(): string {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- private transport state, diagnostics only
+    const ws = (this.cp as any)._webSocket;
+    if (!ws) return "no socket";
+    return JSON.stringify({
+      readyState: ws._ws?.readyState ?? null,
+      attempts: ws._reconnectAttempts,
+      reconnectArmed: ws._reconnectTimer !== null,
+      events: this.socketEvents,
+    });
   }
 
   /**
@@ -113,7 +156,11 @@ export class Rig {
    * not (OCPP-J 2.0.1 §5.4, #702), so the connection itself is what it waits
    * for there.
    */
-  async reconnected(nth = 2, timeoutMs = 30_000): Promise<void> {
+  reconnected(nth = 2, timeoutMs = 30_000): Promise<void> {
+    return this.withStation(this.waitReconnected(nth, timeoutMs));
+  }
+
+  private async waitReconnected(nth: number, timeoutMs: number): Promise<void> {
     if (this.is16) {
       await this.csms.waitForCall("BootNotification", { nth, timeoutMs });
       return;
@@ -142,9 +189,10 @@ export class Rig {
   uploadUrl(): string {
     this.sink ??= Bun.serve({
       port: 0,
+      hostname: LOOPBACK,
       fetch: () => new Response("ok", { status: 200 }),
     });
-    return `http://127.0.0.1:${tcpPort(this.sink)}/upload`;
+    return `http://${LOOPBACK}:${tcpPort(this.sink)}/upload`;
   }
 
   plugIn(connectorId = 1): void {

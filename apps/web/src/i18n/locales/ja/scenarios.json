@@ -269,5 +269,7 @@
   "scenarios.editor.issue.timeoutEdgeOnNonWait": "ステップ {{n}}({{title}})にタイムアウト辺がありますが、タイムアウト付きの待機ではない(または枝を終える)ため、この辺はたどられません。",
   "scenarios.editor.issue.timeoutEdgeNeverFires": "ステップ {{n}}({{title}})にタイムアウト辺がありますが、タイムアウトが 0 か未設定です。待機がタイムアウトしないため、この辺は実行されません。",
   "scenarios.editor.issue.extraTimeoutEdge": "ステップ {{n}}({{title}})にタイムアウト辺が複数あります。待機がタイムアウトしたときに実行されるのは最初の1本だけです。",
-  "scenarios.editor.issue.newerConstruct": "このシナリオは宣言しているスキーマバージョンより新しい機能を使っています。ここでは動きますが、古いシミュレーターはその機能を無視します。"
+  "scenarios.editor.issue.newerConstruct": "このシナリオは宣言しているスキーマバージョンより新しい機能を使っています。ここでは動きますが、古いシミュレーターはその機能を無視します。",
+  "scenarios.editor.issue.joinWithoutParallel": "ステップ {{n}}({{title}})は合流ですが、並列のどの枝からも到達しません。通常のステップとしてだけ実行されます。",
+  "scenarios.editor.issue.parallelWithoutJoin": "ステップ {{n}}({{title}})が始める並列の枝はどれも合流に到達しません。枝はそのまま終わり、その後には何も実行されません。"
 }

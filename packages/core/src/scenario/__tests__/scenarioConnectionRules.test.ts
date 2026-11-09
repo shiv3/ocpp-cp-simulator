@@ -995,3 +995,156 @@ describe("validateScenarioGraph: timeout edges (schema 1.8)", () => {
     ).toEqual(["callLeftOpen"]);
   });
 });
+
+describe("validateScenarioGraph: parallel and join (schema 1.9)", () => {
+  const replace = (id: string) =>
+    node(id, "csmsCallTrigger", { action: "Reset", behavior: "replace" });
+  const respond = (id: string) => node(id, "callResponse", { kind: "result" });
+
+  it("a parallel forks; a join leaves by its first edge", () => {
+    expect(connectionRule("parallel").out).toBe("fork");
+    expect(connectionRule("join").out).toBe("next");
+  });
+
+  it("a parallel whose branches meet at a join is clean, with no extraOutgoing", () => {
+    expect(
+      validateScenarioGraph({
+        nodes: [
+          node("s", "start"),
+          node("p", "parallel"),
+          node("a"),
+          node("b"),
+          node("j", "join"),
+          node("after"),
+        ],
+        edges: [
+          edge("s", "p"),
+          edge("p", "a"),
+          edge("p", "b"),
+          edge("a", "j"),
+          edge("b", "j"),
+          edge("j", "after"),
+        ],
+      }),
+    ).toEqual([]);
+  });
+
+  it("nested parallels meet at their own joins", () => {
+    expect(
+      codes({
+        nodes: [
+          node("s", "start"),
+          node("p1", "parallel"),
+          node("p2", "parallel"),
+          node("a"),
+          node("b"),
+          node("j2", "join"),
+          node("c"),
+          node("j1", "join"),
+        ],
+        edges: [
+          edge("s", "p1"),
+          edge("p1", "p2"),
+          edge("p1", "c"),
+          edge("p2", "a"),
+          edge("p2", "b"),
+          edge("a", "j2"),
+          edge("b", "j2"),
+          edge("j2", "j1"),
+          edge("c", "j1"),
+        ],
+      }),
+    ).toEqual([]);
+  });
+
+  it("joinWithoutParallel (warning) and parallelWithoutJoin (info)", () => {
+    expect(
+      validateScenarioGraph({
+        nodes: [node("s", "start"), node("a"), node("j", "join")],
+        edges: [edge("s", "a"), edge("a", "j")],
+      }),
+    ).toEqual([
+      { code: "joinWithoutParallel", nodeId: "j", severity: "warning" },
+    ]);
+    expect(
+      validateScenarioGraph({
+        nodes: [
+          node("s", "start"),
+          node("p", "parallel"),
+          node("a"),
+          node("b"),
+        ],
+        edges: [edge("s", "p"), edge("p", "a"), edge("p", "b")],
+      }),
+    ).toEqual([{ code: "parallelWithoutJoin", nodeId: "p", severity: "info" }]);
+  });
+
+  it("a join resets the CALL: callLeftOpen for one still open on arrival, noCallHeld after it", () => {
+    expect(
+      validateScenarioGraph({
+        nodes: [
+          node("s", "start"),
+          node("p", "parallel"),
+          replace("t"),
+          node("j", "join"),
+          respond("r"),
+        ],
+        edges: [edge("s", "p"), edge("p", "t"), edge("t", "j"), edge("j", "r")],
+      }),
+    ).toEqual([
+      { code: "callLeftOpen", nodeId: "t", severity: "warning" },
+      { code: "noCallHeld", nodeId: "r", severity: "error" },
+    ]);
+  });
+
+  it("each branch of a parallel starts with a fresh CALL slot; the CALL held at the fork is dropped", () => {
+    expect(
+      codes({
+        nodes: [
+          node("s", "start"),
+          replace("t"),
+          node("p", "parallel"),
+          respond("r"),
+          node("j", "join"),
+        ],
+        edges: [edge("s", "t"), edge("t", "p"), edge("p", "r"), edge("r", "j")],
+      }).sort(),
+    ).toEqual(["callLeftOpen", "noCallHeld"]);
+  });
+
+  it("reaches the nodes after a join", () => {
+    expect(
+      codes({
+        nodes: [
+          node("s", "start"),
+          node("p", "parallel"),
+          node("a"),
+          node("j", "join", { mode: "any" }),
+          node("after"),
+        ],
+        edges: [
+          edge("s", "p"),
+          edge("p", "a"),
+          edge("a", "j"),
+          edge("j", "after"),
+        ],
+      }),
+    ).toEqual([]);
+  });
+
+  it("newerConstruct (info) for a parallel or join in a file below 1.9", () => {
+    const def = {
+      nodes: [node("s", "start"), node("p", "parallel"), node("j", "join")],
+      edges: [edge("s", "p"), edge("p", "j")],
+    };
+    expect(validateScenarioGraph({ ...def, schemaVersion: "1.8" })).toEqual([
+      {
+        code: "newerConstruct",
+        nodeId: "p",
+        severity: "info",
+        data: { since: "1.9", declared: "1.8" },
+      },
+    ]);
+    expect(codes({ ...def, schemaVersion: "1.9" })).toEqual([]);
+  });
+});

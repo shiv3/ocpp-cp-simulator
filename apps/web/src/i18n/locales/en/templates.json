@@ -105,6 +105,8 @@
   "templates.remote-start-auto-meter.description": "Wait RemoteStartTransaction → Start charging → AutoMeterValue",
   "templates.remote-start-timeout-fallback.name": "Remote Start with Timeout Fallback",
   "templates.remote-start-timeout-fallback.description": "Wait up to 30 s for a RemoteStartTransaction. If it arrives, start the transaction and send bounded MeterValues. If the wait times out, follow the timeout edge: set the connector back to Available (StatusNotification) and end instead of failing the run.",
+  "templates.parallel-heartbeat-session.name": "Heartbeat in Parallel with a Remote-Started Session",
+  "templates.parallel-heartbeat-session.description": "A parallel node fans out into two branches: one sends three Heartbeats 5 s apart, the other waits for RemoteStartTransaction, starts the transaction and sends bounded MeterValues. A join (mode all) waits for both branches, then the run ends.",
   "templates.smart-charging.name": "Smart Charging (Auto MeterValue)",
   "templates.smart-charging.description": "Auto-increment MeterValue when Charging, stop when Finishing",
   "templates.status-triggered-actions.name": "Status-Triggered Auto Actions",

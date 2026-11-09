@@ -105,6 +105,8 @@
   "templates.remote-start-auto-meter.description": "等待 RemoteStartTransaction → 开始充电 → AutoMeterValue",
   "templates.remote-start-timeout-fallback.name": "远程启动 + 超时回退",
   "templates.remote-start-timeout-fallback.description": "最多等待 30 秒的 RemoteStartTransaction;超时则沿 timeout 边回到 Available",
+  "templates.parallel-heartbeat-session.name": "与远程启动会话并行的 Heartbeat",
+  "templates.parallel-heartbeat-session.description": "parallel 分成两条分支:间隔 5 秒的 3 次 Heartbeat,以及 RemoteStartTransaction 之后的会话;join(all)等待两者",
   "templates.smart-charging.name": "智能充电(AutoMeterValue)",
   "templates.smart-charging.description": "处于 Charging 时自动递增 MeterValue,到 Finishing 时停止",
   "templates.status-triggered-actions.name": "状态触发的自动动作",

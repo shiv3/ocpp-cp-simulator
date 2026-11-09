@@ -287,5 +287,7 @@
   "scenarios.editor.issue.timeoutEdgeOnNonWait": "L’étape {{n}} ({{title}}) a une arête de timeout, mais ce n’est pas une attente avec timeout (ou elle termine sa branche) : l’arête n’est jamais suivie.",
   "scenarios.editor.issue.timeoutEdgeNeverFires": "L’étape {{n}} ({{title}}) a une arête de timeout, mais son timeout vaut 0 ou n’est pas défini : l’attente n’expire jamais, l’arête ne s’exécute donc jamais.",
   "scenarios.editor.issue.extraTimeoutEdge": "L’étape {{n}} ({{title}}) a plusieurs arêtes de timeout : seule la première s’exécute quand l’attente expire.",
-  "scenarios.editor.issue.newerConstruct": "Ce scénario utilise une fonctionnalité plus récente que la version de schéma qu’il déclare ; il s’exécute ici, mais un simulateur plus ancien l’ignorerait."
+  "scenarios.editor.issue.newerConstruct": "Ce scénario utilise une fonctionnalité plus récente que la version de schéma qu’il déclare ; il s’exécute ici, mais un simulateur plus ancien l’ignorerait.",
+  "scenarios.editor.issue.joinWithoutParallel": "L’étape {{n}} ({{title}}) est une jonction, mais aucune branche d’un parallèle ne l’atteint : elle ne s’exécute que comme une étape ordinaire.",
+  "scenarios.editor.issue.parallelWithoutJoin": "L’étape {{n}} ({{title}}) lance des branches parallèles qui n’atteignent aucune jonction : elles se terminent simplement et rien ne s’exécute après."
 }

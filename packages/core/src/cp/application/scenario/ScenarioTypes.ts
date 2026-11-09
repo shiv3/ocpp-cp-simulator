@@ -111,6 +111,22 @@ export enum ScenarioNodeType {
 }
 
 /**
+ * Schema 1.9 flow-control nodes: fork a branch into parallel branches and
+ * meet them again. Kept apart from {@link ScenarioNodeType}, which lists the
+ * steps the console editor offers (its palettes and forms are keyed by it);
+ * the executor, the graph rules and the schema know both.
+ */
+export enum ScenarioFlowNodeType {
+  /** Run every outgoing ordinary edge as its own branch. */
+  PARALLEL = "parallel",
+  /** Where the branches of a `parallel` meet; `mode` "all" (default) or "any". */
+  JOIN = "join",
+}
+
+/** A node type the executor runs: a step or a flow-control node. */
+export type AnyScenarioNodeType = ScenarioNodeType | ScenarioFlowNodeType;
+
+/**
  * Base node data
  */
 export type BaseNodeData = {
@@ -360,6 +376,18 @@ export type SetStateNodeData = BaseNodeData & {
   value: unknown;
 };
 
+/** Parallel Node Data (schema 1.9): a label only. */
+export type ParallelNodeData = BaseNodeData;
+
+/**
+ * Join Node Data (schema 1.9). `all` (the default; any other value too):
+ * go on once every branch of the parallel execution arrived or ended;
+ * `any`: go on at the first arrival and cancel the other branches.
+ */
+export type JoinNodeData = BaseNodeData & {
+  mode?: "all" | "any";
+};
+
 /** Use Behavior Node Data (schema 1.5, #566; `params` and `mode` 1.6, #654):
  *  data only, the id of a behavior (loaded on the station, or a built-in
  *  `default.*`). Fails the run if none has that id.
@@ -594,6 +622,7 @@ export type ScenarioNodeData =
   | SwitchNodeData
   | ChoiceNodeData
   | SetStateNodeData
+  | JoinNodeData
   | StartNodeData
   | ConnectionTriggerNodeData
   | BaseNodeData;
@@ -623,7 +652,7 @@ export interface ScenarioTrigger {
  * See `packages/core/schema/scenario.schema.json` (Draft 2020-12) and
  * `docs/concepts/scenario-format.md`.
  */
-export const SCENARIO_SCHEMA_VERSION = "1.8";
+export const SCENARIO_SCHEMA_VERSION = "1.9";
 
 /** Where a recorded scenario came from (schema 1.6, #654 step 2). */
 export interface ScenarioRecordedFrom {

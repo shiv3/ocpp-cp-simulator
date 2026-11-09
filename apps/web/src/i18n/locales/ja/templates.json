@@ -105,6 +105,8 @@
   "templates.remote-start-auto-meter.description": "RemoteStartTransaction を待機 → 充電開始 → AutoMeterValue",
   "templates.remote-start-timeout-fallback.name": "リモート開始 + タイムアウト時のフォールバック",
   "templates.remote-start-timeout-fallback.description": "RemoteStartTransaction を最大 30 秒待機し、タイムアウト時は timeout エッジで Available に戻します",
+  "templates.parallel-heartbeat-session.name": "リモート開始セッションと並列の Heartbeat",
+  "templates.parallel-heartbeat-session.description": "parallel で 2 つの枝に分岐: 5 秒間隔の Heartbeat 3 回と、RemoteStartTransaction 後のセッション。join (all) が両方を待ちます",
   "templates.smart-charging.name": "スマート充電 (AutoMeterValue)",
   "templates.smart-charging.description": "Charging の間は MeterValue を自動で加算し、Finishing で停止します",
   "templates.status-triggered-actions.name": "ステータス連動の自動アクション",

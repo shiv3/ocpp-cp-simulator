@@ -312,10 +312,13 @@ function structuralOut(program: Program, node: ScenarioNode): NodeOut {
       forkKind: node.type === ScenarioNodeType.CHOICE ? "choice" : "switch",
     };
   }
-  // Extension point: a parallel node other than START (feat/scenario-
-  // parallel-join) runs every edge. A START that is not the origin runs as a
-  // step, so today this never matches.
-  if (out === "parallel" && node.type !== ScenarioNodeType.START) {
+  // A `parallel` node (schema 1.9, `out: "fork"`) runs every ordinary edge,
+  // each as its own branch, like the origin. A START that is not the origin
+  // runs as a step, so `out === "parallel"` never matches here.
+  if (
+    out === "fork" ||
+    (out === "parallel" && node.type !== ScenarioNodeType.START)
+  ) {
     return {
       lanes: existing.map((edge) => ({ edge, condition: { kind: "all" } })),
       forkKind: "parallel",
@@ -945,10 +948,12 @@ export function assertFirstEdgeWins(
   for (const s of structural) {
     const node = program.nodesById.get(s.source);
     if (!node || node === program.origin) continue;
+    // A `parallel` node (schema 1.9) runs every ordinary edge: there is no
+    // single edge it takes.
+    if (connectionRule(node.type).out === "fork") continue;
     // A timeout lane must be the edge the timeout outcome takes; a chain
     // edge is checked with the wait's timeout edges left out (they are not
-    // in `edgesFrom`). TODO(parallel): a parallel node's lanes all run (no
-    // check).
+    // in `edgesFrom`).
     if (s.kind === "timeout") {
       if (timeoutStep(program, node)?.edge.id === s.edgeId) continue;
       throw new Error(

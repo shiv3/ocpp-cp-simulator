@@ -7,11 +7,12 @@
  *
  * Two kinds of rule are real:
  *
- * - **How a node is left** (`out`). Only the node a run starts from runs
- *   several outgoing edges in parallel (`executeFlow` →
- *   `executeParallelBranches`). From any other node `executeSequentialFlow`
- *   follows the first edge that points at an existing node and ignores the
- *   rest. A node of type `end` (or, legacy, any node labelled "End") stops
+ * - **How a node is left** (`out`). Only the node a run starts from, and a
+ *   `parallel` (schema 1.9), run several outgoing edges in parallel
+ *   (`executeFlow` → `executeParallelBranches`; `runParallel`). From any
+ *   other node `executeSequentialFlow` follows the first edge that points at
+ *   an existing node and ignores the rest (a switch / choice: of its picked
+ *   handle). A node of type `end` (or, legacy, any node labelled "End") stops
  *   its branch: nothing after it runs.
  * - **The CALL a branch holds** (`call`, schema 1.5). A `csmsCallTrigger`
  *   with `behavior: "replace"` hands its branch a CALL; a `callResponse`
@@ -37,7 +38,9 @@
  * the issues and keep loading the scenario.
  */
 import {
+  ScenarioFlowNodeType,
   ScenarioNodeType,
+  type AnyScenarioNodeType,
   type CallResponseNodeData,
   type CsmsCallTriggerNodeData,
   type NotifyNodeData,
@@ -54,13 +57,16 @@ import type { Diagnostic } from "./diagnostic";
 /**
  * How the executor leaves a node once it ran:
  * - `parallel`: every outgoing edge, each as its own branch (Start only);
+ * - `fork`: every outgoing ordinary edge, each as its own branch with a
+ *   fresh CALL slot, whose arrivals at a `join` the node's branch awaits
+ *   (`parallel`, schema 1.9);
  * - `next`: the first edge to an existing node, the rest are ignored;
  * - `select`: the node picked one `sourceHandle` (`switch`: `case-N` /
  *   `default`; `choice`: `option-N`) and the branch goes on along the edges
  *   with that handle only, so several outgoing edges are the point;
  * - `none`: the branch ends here.
  */
-export type OutEdges = "parallel" | "next" | "select" | "none";
+export type OutEdges = "parallel" | "fork" | "next" | "select" | "none";
 
 /**
  * What a node does to the CALL its branch holds (schema 1.5, #566):
@@ -108,9 +114,10 @@ interface RuleData {
   [ScenarioNodeType.NOTIFY]: NotifyNodeData;
 }
 
-/** One rule for every node type: leaving a type out does not compile. */
+/** One rule for every node type, flow-control ones included: leaving a type
+ *  out does not compile. */
 export type ConnectionRuleTable = {
-  readonly [K in ScenarioNodeType]: ConnectionRule<
+  readonly [K in AnyScenarioNodeType]: ConnectionRule<
     K extends keyof RuleData ? RuleData[K] : unknown
   >;
 };
@@ -204,6 +211,14 @@ export const CONNECTION_RULES: ConnectionRuleTable = {
       produces: true,
     }),
   },
+  // Schema 1.9: executeSequentialFlow forks every outgoing ordinary edge into
+  // a branch with a fresh flow, waits for them at a join, and goes on after
+  // the join with a fresh flow.
+  [ScenarioFlowNodeType.PARALLEL]: { out: "fork", call: noCall },
+  // A branch started by a parallel ends at a join (registering its arrival);
+  // the join then runs once and leaves by its first edge. Reached by any
+  // other branch it is a plain step.
+  [ScenarioFlowNodeType.JOIN]: { out: "next", call: noCall },
 };
 
 /** The rule of a node type; an unknown type is an ordinary step (the executor
@@ -279,7 +294,13 @@ export type GraphIssueCode =
   | "extraTimeoutEdge"
   /** The file uses a construct newer than its declared `schemaVersion`
    *  (`data.since`): it runs, but an older simulator would ignore it (info). */
-  | "newerConstruct";
+  | "newerConstruct"
+  /** A `join` that no branch of a `parallel` reaches: it only ever runs as
+   *  a plain step (schema 1.9). */
+  | "joinWithoutParallel"
+  /** A `parallel` none of whose branches reaches a `join`: the branches just
+   *  end, and nothing runs after the parallel (info, schema 1.9). */
+  | "parallelWithoutJoin";
 
 /** A finding of `validateScenarioGraph` (`scenarioGraphValidator.ts`): a
  *  {@link Diagnostic} narrowed to the graph codes. */

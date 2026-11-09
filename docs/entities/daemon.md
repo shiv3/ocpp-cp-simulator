@@ -21,7 +21,7 @@ related:
   - open-ev-directory.md
   - ../concepts/vehicle-profiles.md
   - ../concepts/charger-engine.md
-updated: 2026-11-08
+updated: 2026-11-09
 ---
 
 # Daemon (server mode)
@@ -258,7 +258,7 @@ CALLERROR arrives, so a CSMS that never answers contributes **no observation at
 all** — a saturated CSMS would otherwise report zero slow calls and zero
 errors, the opposite of the truth. Exactly one thing increments it: the
 **OCPP-1.6J per-CALL watchdog** (`SERIAL_CALL_TIMEOUT_MS`, 30s, in
-`packages/core/src/cp/infrastructure/transport/OCPPMessageHandler.ts`) firing, matched off
+`packages/core/src/cp/infrastructure/transport/v16/serialCallQueueV16.ts`) firing, matched off
 the log line it writes. It is therefore a protocol fact — the transport
 abandoned this CALL — and **never** a fact about the daemon's own bookkeeping.
 

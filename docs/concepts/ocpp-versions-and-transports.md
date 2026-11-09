@@ -17,7 +17,7 @@ sources:
   - packages/core/src/cp/domain/connector/SignedMeterData.ts (OCMF signed meter values)
   - packages/core/src/cp/infrastructure/transport/OCPPMessageHandlerV201.ts (TransactionEvent retries, E11 offline queue)
   - packages/core/src/cp/domain/transport/PendingMessageQueue.ts
-  - packages/core/src/cp/infrastructure/transport/OCPPMessageHandler.ts (1.6 transaction message retries)
+  - packages/core/src/cp/infrastructure/transport/v16/serialCallQueueV16.ts (1.6 transaction message retries)
   - "OCPP 1.6 Part 2 §3.7.1 (issue #527)"
   - apps/cli/src/server/CPRegistry.ts (SOAP public base derivation)
   - docs/examples/scenarios/all-cases.json

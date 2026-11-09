@@ -224,10 +224,11 @@ describe("StepsGraphView (editable block tree)", () => {
       '[data-testid="unwrap-loop"]',
     )!;
     expect(button.textContent).toContain("Stop repeating");
-    // Next to the loop's label; no stray text around it.
-    expect(
-      button.parentElement?.querySelector("[data-loop-block]"),
-    ).toBeTruthy();
+    // On the row under the loop's label (same left edge); no stray text.
+    const label = container.querySelector<HTMLElement>("[data-loop-block]")!;
+    const rowOf = (el: Element) =>
+      (el.closest(".absolute") as HTMLElement).style;
+    expect(rowOf(button).left).toBe(rowOf(label).left);
     expect(container.textContent).not.toContain("//");
     expect(button.disabled).toBe(false);
     await click(button);

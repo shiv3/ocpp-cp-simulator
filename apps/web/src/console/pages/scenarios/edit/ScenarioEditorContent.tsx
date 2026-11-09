@@ -72,6 +72,7 @@ import ScenarioMetaBar from "./ScenarioMetaBar";
 import GraphIssues from "./GraphIssues";
 import { useScenarioIssues, type ViewIssues } from "./issueMarkUi";
 import StepInspector from "./StepInspector";
+import { requiredSchemaVersion } from "@ocpp-cp-simulator/core/scenario/scenarioGraphValidator";
 import UnsupportedOutline from "./UnsupportedOutline";
 
 const INSPECTOR_COLLAPSED_KEY = "ocpp-cp.console.scenario.inspector.collapsed";
@@ -349,6 +350,18 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
     (caps.setLink.ok ||
       caps.setLink.reason === "scenarios.editor.cannot.insideLoop");
 
+  /** Applies an edit; an edit that adds a construct newer than the declared
+   *  schema version raises the declaration to the version that introduced it
+   *  (never lowers it), so the editor's own change is not flagged as newer. */
+  const setEdited = (next: ScenarioDefinition) => {
+    const version = requiredSchemaVersion(next);
+    setScenario(
+      version !== next.schemaVersion
+        ? { ...next, schemaVersion: version as string }
+        : next,
+    );
+  };
+
   const handleMetaChange = (patch: Partial<ScenarioDefinition>) => {
     setScenario((prev) => (prev ? { ...prev, ...patch } : prev));
   };
@@ -358,7 +371,7 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
   const applyAndSelectNew = (next: ScenarioDefinition) => {
     if (!scenario) return;
     const before = new Set(scenario.nodes.map((n) => n.id));
-    setScenario(next);
+    setEdited(next);
     setSelectedStepId(next.nodes.find((n) => !before.has(n.id))?.id ?? null);
   };
 
@@ -428,7 +441,7 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
     const cap = canWrapInLoop(tree, path, from, to);
     const first = seqAt(tree, path)?.blocks[from];
     unlessRefused(first ? firstNodeOf(first).id : "", cap, () =>
-      setScenario(wrapInLoop(scenario, tree, path, from, to)),
+      setEdited(wrapInLoop(scenario, tree, path, from, to)),
     );
   };
 
@@ -436,7 +449,7 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
   const handleSetLaneExit = (lanePath: SeqPath, target: string) => {
     if (!scenario || !tree) return;
     unlessRefused(target, canSetLaneExit(tree, lanePath, target), () =>
-      setScenario(setLaneExit(scenario, tree, lanePath, target)),
+      setEdited(setLaneExit(scenario, tree, lanePath, target)),
     );
   };
 
@@ -459,7 +472,7 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
   ) => {
     if (!scenario || !tree) return;
     unlessRefused(nodeId, canMoveStepTo(tree, nodeId, path, index, loop), () =>
-      setScenario(moveStepTo(scenario, tree, nodeId, path, index, loop)),
+      setEdited(moveStepTo(scenario, tree, nodeId, path, index, loop)),
     );
   };
 
@@ -473,7 +486,7 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
       nodeId,
       canMoveStep(tree, place.path, place.index, place.index + delta),
       () =>
-        setScenario(
+        setEdited(
           moveStep(
             scenario,
             tree,
@@ -493,7 +506,7 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
   const handleDelete = (nodeId: string) => {
     if (!scenario || !tree) return;
     unlessRefused(nodeId, removeCap(nodeId), () => {
-      setScenario(removeStep(scenario, tree, nodeId));
+      setEdited(removeStep(scenario, tree, nodeId));
       setSelectedStepId((sel) => (sel === nodeId ? null : sel));
     });
     setPendingDelete(null);
@@ -525,7 +538,7 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
     unlessRefused(
       nodeId,
       editCapabilities(tree, { kind: "lane", nodeId, laneIndex }).removeLane,
-      () => setScenario(removeLane(scenario, tree, nodeId, laneIndex)),
+      () => setEdited(removeLane(scenario, tree, nodeId, laneIndex)),
     );
   };
 
@@ -553,7 +566,7 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
       nodeId,
       editCapabilities(tree, { kind: "node", nodeId }).wrapInLoop,
       () =>
-        setScenario(
+        setEdited(
           wrapInLoop(
             scenario,
             tree,
@@ -579,7 +592,7 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
                 headerId,
                 canSetLoopBounds(tree, headerId, bounds),
                 () =>
-                  setScenario(setLoopBounds(scenario, tree, headerId, bounds)),
+                  setEdited(setLoopBounds(scenario, tree, headerId, bounds)),
               ),
             stateKeys: collectStateKeys(scenario.nodes),
           }
@@ -593,18 +606,18 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
     unlessRefused(
       nodeId,
       editCapabilities(tree, { kind: "node", nodeId }).unwrapLoop,
-      () => setScenario(unwrapLoop(scenario, tree, nodeId)),
+      () => setEdited(unwrapLoop(scenario, tree, nodeId)),
     );
   };
 
   const handleStepDataChange = (nodeId: string, data: ScenarioNodeData) => {
     if (!scenario) return;
-    setScenario(updateStepData(scenario, nodeId, data));
+    setEdited(updateStepData(scenario, nodeId, data));
   };
 
   const handleLink = (nodeId: string, targetId: string | null) => {
     if (!scenario || !tree) return;
-    setScenario(setLink(scenario, tree, nodeId, targetId));
+    setEdited(setLink(scenario, tree, nodeId, targetId));
   };
 
   const setView = (view: EditorView) => {

@@ -91,7 +91,7 @@ async function trace(
     {
       rng: {
         next: () => [0.1, 0.9, 0.5][draws++ % 3]!,
-        int: (min) => min,
+        int: (min: number) => min,
         pick: <T>(items: readonly T[]) => items[0]!,
       } as never,
     },

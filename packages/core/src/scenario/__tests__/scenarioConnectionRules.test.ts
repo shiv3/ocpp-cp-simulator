@@ -8,10 +8,10 @@ import { scenarioTemplates } from "../../utils/scenarioTemplates";
 import {
   CONNECTION_RULES,
   connectionRule,
-  validateScenarioGraph,
   type ConnectionRule,
   type ConnectionRuleTable,
 } from "../scenarioConnectionRules";
+import { validateScenarioGraph } from "../scenarioGraphValidator";
 
 const node = (id: string, type = "delay", data?: Record<string, unknown>) => ({
   id,

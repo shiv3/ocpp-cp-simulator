@@ -2659,12 +2659,10 @@
     "unreachable warning n5 "
   ],
   "fuzz-dup:0": [
-    "edgeOutOfEnd warning n0 e0",
-    "edgeOutOfEnd warning n0 e1",
     "edgeOutOfEnd warning n2 e2",
     "edgeOutOfEnd warning n2 e3",
-    "edgeOutOfEnd warning n0 e4",
-    "unreachable warning n3 "
+    "edgeIntoStart warning n0 e3",
+    "edgeIntoStart warning n0 e5"
   ],
   "fuzz-dup:1": [
     "multipleStart warning n1 ",
@@ -2672,7 +2670,11 @@
     "danglingEdge warning  e6",
     "danglingEdge warning  e7",
     "edgeOutOfEnd warning n4 e8",
-    "extraOutgoing warning n0 ",
+    "edgeIntoStart warning n0 e0",
+    "edgeIntoStart warning n0 e1",
+    "edgeIntoStart warning n0 e5",
+    "edgeIntoStart warning n0 e8",
+    "edgeIntoStart warning n0 e12",
     "noCallHeld error n2 "
   ],
   "fuzz-dup:2": [
@@ -2682,14 +2684,7 @@
     "unreachable warning n2 ",
     "unreachable warning n3 "
   ],
-  "fuzz-dup:3": [
-    "edgeOutOfEnd warning n3 e1",
-    "edgeOutOfEnd warning n3 e2",
-    "edgeOutOfEnd warning n3 e3",
-    "edgeOutOfEnd warning n3 e9",
-    "unreachable warning n1 ",
-    "unreachable warning n2 "
-  ],
+  "fuzz-dup:3": ["extraOutgoing warning n3 ", "unreachable warning n1 "],
   "fuzz-dup:4": [
     "multipleStart warning n1 ",
     "danglingEdge warning  e4",
@@ -2699,8 +2694,9 @@
   ],
   "fuzz-dup:5": [
     "danglingEdge warning  e5",
-    "extraOutgoing warning n5 ",
-    "extraOutgoing warning n0 "
+    "edgeIntoStart warning n0 e6",
+    "edgeIntoStart warning n0 e7",
+    "extraOutgoing warning n5 "
   ],
   "fuzz-dup:6": [
     "edgeOutOfEnd warning n3 e0",
@@ -2716,10 +2712,10 @@
     "edgeOutOfEnd warning n2 e2",
     "edgeOutOfEnd warning n2 e3",
     "danglingEdge warning  e4",
-    "extraOutgoing warning n0 ",
+    "edgeIntoStart warning n0 e3",
+    "edgeIntoStart warning n0 e8",
     "extraOutgoing warning n1 ",
-    "callLeftOpen warning n1 ",
-    "noCallHeld error n0 "
+    "callLeftOpen warning n1 "
   ],
   "fuzz-dup:9": [
     "multipleStart warning n1 ",
@@ -2730,11 +2726,10 @@
     "unreachable warning n7 "
   ],
   "fuzz-dup:10": [
-    "edgeOutOfEnd warning n0 e0",
-    "edgeOutOfEnd warning n0 e3",
-    "edgeOutOfEnd warning n0 e5",
+    "edgeIntoStart warning n0 e0",
+    "edgeIntoStart warning n0 e3",
+    "edgeIntoStart warning n0 e4",
     "unreachable warning n2 ",
-    "unreachable warning n3 ",
     "unreachable warning n5 "
   ],
   "fuzz-dup:11": ["noCallHeld error n1 "],
@@ -2744,9 +2739,9 @@
     "edgeOutOfEnd warning n4 e7",
     "danglingEdge warning  e8",
     "edgeOutOfEnd warning n4 e13",
+    "edgeIntoStart warning n0 e11",
     "extraOutgoing warning n2 ",
     "extraOutgoing warning n5 ",
-    "extraOutgoing warning n0 ",
     "unreachable warning n7 "
   ],
   "fuzz-dup:14": ["unreachable warning n1 "],
@@ -2754,15 +2749,12 @@
   "fuzz-dup:16": [
     "danglingEdge warning  e0",
     "danglingEdge warning  e1",
-    "edgeOutOfEnd warning n1 e2",
     "danglingEdge warning  e3",
-    "edgeOutOfEnd warning n1 e4",
     "danglingEdge warning  e5",
     "danglingEdge warning  e8",
     "edgeIntoStart warning n0 e4",
     "unreachable warning n3 ",
-    "unreachable warning n4 ",
-    "unreachable warning n6 "
+    "unreachable warning n4 "
   ],
   "fuzz-dup:17": [
     "multipleStart warning n4 ",
@@ -2793,7 +2785,12 @@
     "unreachable warning n4 ",
     "unreachable warning n5 "
   ],
-  "fuzz-dup:21": ["danglingEdge warning  e0", "extraOutgoing warning n0 "],
+  "fuzz-dup:21": [
+    "danglingEdge warning  e0",
+    "edgeIntoStart warning n0 e1",
+    "edgeIntoStart warning n0 e2",
+    "edgeIntoStart warning n0 e3"
+  ],
   "fuzz-dup:22": [
     "danglingEdge warning  e3",
     "danglingEdge warning  e6",
@@ -2807,17 +2804,11 @@
     "unreachable warning n6 "
   ],
   "fuzz-dup:23": [
-    "edgeOutOfEnd warning n0 e0",
     "danglingEdge warning  e2",
     "unreachable warning n1 ",
     "unreachable warning n3 "
   ],
-  "fuzz-dup:24": [
-    "missingStart error  ",
-    "edgeOutOfEnd warning n0 e0",
-    "edgeOutOfEnd warning n0 e1",
-    "edgeOutOfEnd warning n0 e2"
-  ],
+  "fuzz-dup:24": ["missingStart error  ", "extraOutgoing warning n0 "],
   "fuzz-dup:25": ["missingStart error  "],
   "fuzz-dup:26": [
     "danglingEdge warning  e0",
@@ -2859,20 +2850,14 @@
     "unreachable warning n4 ",
     "unreachable warning n5 "
   ],
-  "fuzz-dup:31": [
-    "edgeOutOfEnd warning n0 e0",
-    "edgeOutOfEnd warning n0 e1",
-    "edgeOutOfEnd warning n0 e2",
-    "unreachable warning n2 ",
-    "unreachable warning n2 "
-  ],
+  "fuzz-dup:31": ["edgeIntoStart warning n0 e3"],
   "fuzz-dup:32": [
     "danglingEdge warning  e5",
     "edgeIntoStart warning n0 e6",
     "extraOutgoing warning n1 "
   ],
   "fuzz-dup:33": [
-    "extraOutgoing warning n0 ",
+    "edgeIntoStart warning n0 e2",
     "unreachable warning n2 ",
     "unreachable warning n4 ",
     "unreachable warning n6 "
@@ -2907,6 +2892,7 @@
     "danglingEdge warning  e3",
     "edgeIntoStart warning n5 e2",
     "edgeIntoStart warning n5 e7",
+    "extraOutgoing warning n1 ",
     "unreachable warning n3 ",
     "noCallHeld error n2 "
   ],
@@ -2924,15 +2910,21 @@
     "unreachable warning n4 ",
     "unreachable warning n3 "
   ],
-  "fuzz-dup:41": ["unreachable warning n4 "],
+  "fuzz-dup:41": ["unreachable warning n4 ", "callLeftOpen warning n1 "],
   "fuzz-dup:42": ["missingStart error  "],
   "fuzz-dup:43": [
     "missingStart error  ",
     "edgeOutOfEnd warning n4 e2",
     "danglingEdge warning  e3",
-    "danglingEdge warning  e5"
+    "danglingEdge warning  e5",
+    "extraOutgoing warning n0 "
   ],
-  "fuzz-dup:44": ["extraOutgoing warning n2 "],
+  "fuzz-dup:44": [
+    "edgeIntoStart warning n0 e0",
+    "edgeIntoStart warning n0 e1",
+    "edgeIntoStart warning n0 e4",
+    "extraOutgoing warning n2 "
+  ],
   "fuzz-dup:45": [
     "extraOutgoing warning n1 ",
     "unreachable warning n1 ",
@@ -2979,7 +2971,9 @@
   "fuzz-dup:55": ["unreachable warning n1 "],
   "fuzz-dup:56": [
     "danglingEdge warning  e7",
-    "extraOutgoing warning n0 ",
+    "edgeIntoStart warning n0 e1",
+    "edgeIntoStart warning n0 e2",
+    "edgeIntoStart warning n0 e4",
     "extraOutgoing warning n3 ",
     "noCallHeld error n2 "
   ],
@@ -3039,9 +3033,13 @@
     "noCallHeld error n1 "
   ],
   "fuzz-dup:70": [
+    "edgeOutOfEnd warning n1 e4",
+    "edgeOutOfEnd warning n1 e5",
+    "edgeOutOfEnd warning n1 e7",
+    "edgeOutOfEnd warning n1 e8",
+    "edgeOutOfEnd warning n1 e9",
     "danglingEdge warning  e12",
     "extraOutgoing warning n2 ",
-    "extraOutgoing warning n1 ",
     "unreachable warning n2 ",
     "unreachable warning n3 ",
     "unreachable warning n4 ",
@@ -3053,8 +3051,8 @@
     "multipleStart warning n4 ",
     "danglingEdge warning  e1",
     "edgeOutOfEnd warning n4 e2",
-    "edgeOutOfEnd warning n0 e3",
-    "edgeOutOfEnd warning n0 e4",
+    "edgeIntoStart warning n0 e3",
+    "edgeIntoStart warning n0 e4",
     "unreachable warning n2 ",
     "unreachable warning n3 "
   ],
@@ -3100,6 +3098,7 @@
     "edgeOutOfEnd warning n4 e6",
     "edgeOutOfEnd warning n1 e8",
     "danglingEdge warning  e9",
+    "extraOutgoing warning n3 ",
     "unreachable warning n1 ",
     "unreachable warning n2 ",
     "unreachable warning n3 ",
@@ -3135,13 +3134,7 @@
     "danglingEdge warning  e8",
     "edgeOutOfEnd warning n4 e9"
   ],
-  "fuzz-dup:86": [
-    "missingStart error  ",
-    "edgeOutOfEnd warning n0 e0",
-    "edgeOutOfEnd warning n0 e1",
-    "edgeOutOfEnd warning n0 e2",
-    "edgeOutOfEnd warning n1 e3"
-  ],
+  "fuzz-dup:86": ["missingStart error  ", "edgeOutOfEnd warning n1 e3"],
   "fuzz-dup:87": [
     "multipleStart warning n4 ",
     "unreachable warning n3 ",
@@ -3199,7 +3192,8 @@
     "danglingEdge warning  e0",
     "danglingEdge warning  e3",
     "danglingEdge warning  e5",
-    "extraOutgoing warning n0 ",
+    "edgeIntoStart warning n0 e2",
+    "edgeIntoStart warning n0 e8",
     "extraOutgoing warning n6 ",
     "unreachable warning n3 ",
     "unreachable warning n5 ",
@@ -3207,12 +3201,9 @@
   ],
   "fuzz-dup:97": ["edgeOutOfEnd warning n1 e0", "unreachable warning n2 "],
   "fuzz-dup:98": [
-    "edgeOutOfEnd warning n4 e4",
     "edgeOutOfEnd warning n7 e5",
     "edgeOutOfEnd warning n1 e6",
-    "edgeOutOfEnd warning n4 e7",
     "danglingEdge warning  e9",
-    "edgeOutOfEnd warning n4 e10",
     "extraOutgoing warning n3 ",
     "unreachable warning n2 ",
     "unreachable warning n3 ",

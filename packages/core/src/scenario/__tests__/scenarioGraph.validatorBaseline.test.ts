@@ -6,6 +6,12 @@
  * every `docs/examples/scenarios/*.json`, and a seeded corpus of messy graphs
  * (`graphFuzz.ts`).
  *
+ * One deliberate exception, re-recorded with the change: graphs with two
+ * nodes of the same id (`fuzz-dup:*`, 24 of 100 changed). The old validator
+ * resolved such an id to the *last* node; the executor (`nodes.find`) and so
+ * the lowered program resolve it to the *first*. Every other entry is
+ * byte-identical to the recording from #829.
+ *
  * Re-record (`RECORD_BASELINE=1`) only from code whose diagnostics are meant
  * to stay; a diff here is a behaviour change of the validator.
  */
@@ -15,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { scenarioTemplates } from "../../utils/scenarioTemplates";
-import { validateScenarioGraph } from "../scenarioConnectionRules";
+import { validateScenarioGraph } from "../scenarioGraphValidator";
 import { fuzzGraphs, type FuzzOptions } from "./graphFuzz";
 
 const BASELINE = fileURLToPath(

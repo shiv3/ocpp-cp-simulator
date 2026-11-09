@@ -74,6 +74,9 @@ function isReply(value: unknown): value is CsmsReply {
 }
 
 /** Deterministic id for the next CSMS-initiated CALL: `csms-1`, `csms-2`, ... */
+/** A 20 ms settle tick that took longer than this marks a starved process. */
+const STARVED_TICK_MS = 60;
+
 export class FakeCsms {
   readonly frames: WireFrame[] = [];
   private readonly token = crypto.randomUUID();
@@ -424,12 +427,22 @@ export class FakeCsms {
    * a cascade of follow-up traffic to end before the next step; it never
    * decides the order of frames, only when the next step starts.
    */
-  async settle(quietMs = 250, maxMs = 20_000): Promise<void> {
+  async settle(quietMs = 250, maxMs = 60_000): Promise<void> {
     if (this.memory) return this.settleMemory();
     const deadline = Date.now() + maxMs;
     while (Date.now() < deadline) {
-      if (Date.now() - this.lastFrameAt >= quietMs) return;
+      const tickStart = Date.now();
+      // A quiet window only means "nothing more is coming" while the event
+      // loop (and with it the station) gets CPU. A tick that overshoots its
+      // 20 ms by 3x says the process was starved, so the silence proves
+      // nothing: restart the window (#848). A CALL still without its answer
+      // keeps the window open as well.
+      if (this.pending.size === 0 && tickStart - this.lastFrameAt >= quietMs) {
+        return;
+      }
       await new Promise((resolve) => setTimeout(resolve, 20));
+      if (Date.now() - tickStart > STARVED_TICK_MS)
+        this.lastFrameAt = Date.now();
     }
     throw new Error("fake CSMS: traffic never settled");
   }

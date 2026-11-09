@@ -19,7 +19,7 @@ related:
   - ../concepts/access-control.md
   - ../sources/reverse-proxy-sso-example.md
   - ../analyses/testing-strategy.md
-updated: 2026-11-08
+updated: 2026-11-09
 ---
 
 # Docker image
@@ -318,7 +318,8 @@ Notes:
   `http://localhost:9700/` while the daemon listens on 8080 internally.
 
 The image **doesn't** contain Vite / Tauri / dev dependencies, sources or
-`node_modules`: the build stage runs `bun run build` (the web console, `dist/`)
+`node_modules`: the build stage runs `bun run build` (the web console, `dist/`, with its
+`THIRD-PARTY-LICENSES.txt`, #857)
 and `bun run build:cli` (the CLI and daemon as one bundle,
 `dist-cli/main.js`), and the runtime layer holds only those two, the scenario
 examples and `docker/entrypoint.sh`, which starts `bun dist-cli/main.js`, and the one-file `src/cli/main.ts` shim. That

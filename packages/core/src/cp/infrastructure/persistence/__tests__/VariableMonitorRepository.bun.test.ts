@@ -1,11 +1,12 @@
 // Runs under `bun test`: the repository is exercised on the `bun:sqlite` built-in.
 import { afterEach, describe, expect, it } from "bun:test";
 
-import { BunSqliteDatabase } from "../../../infrastructure/persistence/BunSqliteDatabase";
-import { VariableMonitorRepository } from "../VariableMonitorRepository";
-import type { VariableMonitor } from "../VariableMonitor";
-import { createChargePoint } from "../../../infrastructure/charge-point/createChargePoint";
-import { DefaultBootNotification } from "../../types/OcppTypes";
+import { BunSqliteDatabase } from "../BunSqliteDatabase";
+import { SqliteVariableMonitorRepository } from "../SqliteVariableMonitorRepository";
+import { NoopVariableMonitorRepository } from "../../../domain/persistence/VariableMonitorRepository";
+import type { VariableMonitor } from "../../../domain/monitoring/VariableMonitor";
+import { createChargePoint } from "../../charge-point/createChargePoint";
+import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 
 /** #457: the `variable_monitors` table behind N07.FR.13 / FR.14. */
 
@@ -35,9 +36,9 @@ function monitor(overrides: Partial<VariableMonitor> = {}): VariableMonitor {
   };
 }
 
-describe("VariableMonitorRepository", () => {
+describe("SqliteVariableMonitorRepository", () => {
   it("round-trips monitors by id with their triggered flag", () => {
-    const repo = new VariableMonitorRepository("CP-A", openDb());
+    const repo = new SqliteVariableMonitorRepository("CP-A", openDb());
     repo.save(monitor({ id: 2, type: "Delta", value: 5 }));
     repo.save(monitor());
     repo.setTriggered(1, true);
@@ -52,7 +53,7 @@ describe("VariableMonitorRepository", () => {
   });
 
   it("keeps the triggered flag when a monitor is saved again (replace by id)", () => {
-    const repo = new VariableMonitorRepository("CP-A", openDb());
+    const repo = new SqliteVariableMonitorRepository("CP-A", openDb());
     repo.save(monitor());
     repo.setTriggered(1, true);
     repo.save(monitor({ value: 700 }));
@@ -64,8 +65,8 @@ describe("VariableMonitorRepository", () => {
 
   it("keeps two charge points apart", () => {
     const db = openDb();
-    const a = new VariableMonitorRepository("CP-A", db);
-    const b = new VariableMonitorRepository("CP-B", db);
+    const a = new SqliteVariableMonitorRepository("CP-A", db);
+    const b = new SqliteVariableMonitorRepository("CP-B", db);
     a.save(monitor());
     b.save(monitor());
     b.save(monitor({ id: 2 }));
@@ -83,7 +84,7 @@ describe("VariableMonitorRepository", () => {
   it.each(["Delta", "Periodic", "PeriodicClockAligned"] as const)(
     "restores a %s monitor (#538)",
     (type) => {
-      const repo = new VariableMonitorRepository("CP-A", openDb());
+      const repo = new SqliteVariableMonitorRepository("CP-A", openDb());
       repo.save(monitor({ type, value: 900 }));
       expect(repo.load()).toEqual([
         { monitor: monitor({ type, value: 900 }), triggered: false },
@@ -105,12 +106,12 @@ describe("VariableMonitorRepository", () => {
         [id, raw],
       );
     }
-    const repo = new VariableMonitorRepository("CP-A", db);
+    const repo = new SqliteVariableMonitorRepository("CP-A", db);
     expect(repo.load().map((p) => p.monitor.id)).toEqual([5]);
   });
 
   it("does nothing without a database", () => {
-    const repo = new VariableMonitorRepository("CP-A", null);
+    const repo = new NoopVariableMonitorRepository();
     repo.save(monitor());
     repo.setTriggered(1, true);
     repo.delete(1);
@@ -121,7 +122,7 @@ describe("VariableMonitorRepository", () => {
 
   it("stores the monitoring base per charge point, apart from the monitors (#538)", () => {
     const db = openDb();
-    const repo = new VariableMonitorRepository("CP-A", db);
+    const repo = new SqliteVariableMonitorRepository("CP-A", db);
     expect(repo.loadActiveBase()).toBeUndefined();
 
     repo.save(monitor());
@@ -131,7 +132,7 @@ describe("VariableMonitorRepository", () => {
     expect(repo.loadActiveBase()).toBe("HardWiredOnly");
     expect(repo.load().map((p) => p.monitor.id)).toEqual([1]);
     expect(
-      new VariableMonitorRepository("CP-B", db).loadActiveBase(),
+      new SqliteVariableMonitorRepository("CP-B", db).loadActiveBase(),
     ).toBeUndefined();
   });
 
@@ -142,7 +143,7 @@ describe("VariableMonitorRepository", () => {
       [JSON.stringify({ activeMonitoringBase: "Everything" })],
     );
     expect(
-      new VariableMonitorRepository("CP-A", db).loadActiveBase(),
+      new SqliteVariableMonitorRepository("CP-A", db).loadActiveBase(),
     ).toBeUndefined();
   });
 });
@@ -183,7 +184,7 @@ describe("ChargePoint variable-monitor persistence", () => {
     });
 
     expect(
-      new VariableMonitorRepository("CP-PERSIST", db)
+      new SqliteVariableMonitorRepository("CP-PERSIST", db)
         .load()
         .filter((p) => p.monitor.origin === "CustomMonitor")
         .map((p) => [p.monitor.id, p.triggered]),

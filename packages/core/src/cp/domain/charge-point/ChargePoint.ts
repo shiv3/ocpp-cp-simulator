@@ -162,7 +162,6 @@ import {
 import { DEFAULT_MONITOR_CATALOG } from "../monitoring/monitorCatalog";
 import { MonitorEvaluation } from "../monitoring/MonitorEvaluation";
 import type { MonitoredReading } from "../monitoring/evaluateMonitor";
-import { VariableMonitorRepository } from "../monitoring/VariableMonitorRepository";
 import {
   MAX_MONITOR_SEVERITY,
   MIN_MONITOR_SEVERITY,
@@ -689,9 +688,9 @@ export class ChargePoint {
     wsUrl: string,
     basicAuthSettings: BasicAuthSettings | null,
     autoMeterValueSetting: AutoMeterValueSetting | null,
-    /** SQLite-backed persistence for ConfigurationStore, PendingMessageQueue,
-     *  CertificateStore and per-connector availability. `null` keeps everything in-memory —
-     *  used by the daemon's `:memory:` mode and by tests. */
+    /** SQLite-backed persistence for PendingMessageQueue and CertificateStore
+     *  (the other stores go through `deps.repositories`, #878). `null` keeps
+     *  them in-memory — used by the daemon's `:memory:` mode and by tests. */
     private readonly _database: Database | null = null,
     /** Extra HTTP headers and Sec-WebSocket-Protocol tokens emitted on
      *  every WS upgrade. Wired through to OCPPWebSocket so reconnects
@@ -1152,7 +1151,7 @@ export class ChargePoint {
    * off and `applyBootAccepted` turns it on.
    */
   private wireVariableMonitoring(): void {
-    const repository = new VariableMonitorRepository(this._id, this._database);
+    const repository = this._repositories.variableMonitors;
     const persisted = repository.load();
     const storedBase = repository.loadActiveBase();
     // #538: the hardwired monitors, the persisted ones, and on a station

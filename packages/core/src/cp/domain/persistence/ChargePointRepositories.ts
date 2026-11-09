@@ -1,6 +1,7 @@
 import type { AuthorizationCacheRepository } from "./AuthorizationCacheRepository";
 import type { ConfigurationOverrideRepository } from "./ConfigurationOverrideRepository";
 import type { ConnectorSettingsRepository } from "./ConnectorSettingsRepository";
+import type { VariableMonitorRepository } from "./VariableMonitorRepository";
 
 /**
  * The stores one charge point persists its own state through (#878), each
@@ -16,4 +17,6 @@ export interface ChargePointRepositories {
   readonly configuration: ConfigurationOverrideRepository;
   /** Per-connector availability (`connector_settings`). */
   readonly connectorSettings: ConnectorSettingsRepository;
+  /** The OCPP 2.x variable monitors (`variable_monitors`). */
+  readonly variableMonitors: VariableMonitorRepository;
 }

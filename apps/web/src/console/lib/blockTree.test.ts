@@ -13,6 +13,7 @@ import {
   type Seq,
   addLane,
   assertFirstEdgeWins,
+  assertMergesConsistent,
   assertTreeCovers,
   editCapabilities,
   insertForkBlock,
@@ -33,7 +34,9 @@ import {
   choice,
   end,
   graph,
+  liveEdgeIds,
   node,
+  semanticDrift,
   semantics,
   shippedScenarios,
   start,
@@ -808,5 +811,408 @@ describe("guarantees", () => {
     );
     expect(out.nodes.slice(0, 3)).toEqual(def.nodes);
     expect(out.nodes[3].position).toEqual({ x: 40, y: 420 });
+  });
+});
+
+describe("dead edges never shape or change what runs (review of #865)", () => {
+  it("M1: a switch whose only edge it can never pick is a one-lane fork, not a chain", () => {
+    const def = graph(
+      [start(), sw("s"), node("b"), end()],
+      [
+        ["start", "s"],
+        ["s", "b"], // no handle: the switch never takes it
+        ["b", "end"],
+      ],
+    );
+    const tree = recognizeBlockTree(def);
+    assertTreeCovers(def, tree);
+    expect(shape(tree.root)).toEqual({
+      blocks: [
+        {
+          fork: "s",
+          kind: "switch",
+          merge: null,
+          lanes: [{ when: "unpickable", blocks: ["b"], exit: "end" }],
+        },
+      ],
+      exit: "stop blockEnds",
+    });
+    sameExceptUpdatedAt(roundTrip(def), def);
+    // The run views' adapter still draws what it drew.
+    expect(deriveStepLayout(def)).toEqual({
+      ...legacyDeriveStepLayout(def),
+      edgeInto: { s: "start->s", b: "s->b" },
+      endEdgeId: "b->end",
+    });
+  });
+
+  it("M2: removing the running lane of a handle another edge also has is refused", () => {
+    const def = graph(
+      [start(), sw("s", ["x"]), node("p"), node("q"), end()],
+      [
+        ["start", "s"],
+        ["s", "p", "case-0"],
+        ["s", "q", "case-0"], // never runs: case-0 takes s->p
+        ["s", "end", "default"],
+        ["p", "end"],
+        ["q", "end"],
+      ],
+    );
+    const tree = recognizeBlockTree(def);
+    const lane0 = editCapabilities(tree, {
+      kind: "lane",
+      nodeId: "s",
+      laneIndex: 0,
+    });
+    expect(lane0.removeLane).toEqual({
+      ok: false,
+      reason: "scenarios.editor.cannot.revivesDeadEdge",
+    });
+    expect(removeLane(def, tree, "s", 0)).toBe(def);
+    // Moving the running lane to another handle would revive s->q as well.
+    expect(lane0.setLaneHandle).toEqual({
+      ok: false,
+      reason: "scenarios.editor.cannot.revivesDeadEdge",
+    });
+    expect(setLaneHandle(def, tree, "s", 0, "case-1")).toBe(def);
+    // The dead lane itself can go, and nothing else changes.
+    const fork = tree.root.blocks[0] as ForkBlock;
+    expect(fork.lanes[2].condition.kind).toBe("ignored");
+    const out = removeLane(def, tree, "s", 2);
+    expect(out.edges.map((e) => e.id)).not.toContain("s->q");
+    expect(semanticDrift(def, out)).toEqual([]);
+    // Then the running lane can go too.
+    const t2 = recognizeBlockTree(out);
+    const without = removeLane(out, t2, "s", 0);
+    expect(semantics(without).s).toMatchObject({
+      handles: [
+        ["case-0", "noEdgeForHandle"],
+        ["default", "s->end>end"],
+      ],
+    });
+  });
+
+  it("M2: removing a step's first edge runs its next one, and the capability says so", () => {
+    const def = graph(
+      [start(), node("a"), node("b"), node("c"), end()],
+      [
+        ["start", "a"],
+        ["a", "b"],
+        ["a", "c"], // never runs: a takes a->b
+        ["b", "end"],
+        ["c", "end"],
+      ],
+    );
+    const tree = recognizeBlockTree(def);
+    expect(
+      editCapabilities(tree, { kind: "lane", nodeId: "a", laneIndex: 0 })
+        .removeLane,
+    ).toEqual({ ok: true, note: "scenarios.editor.note.promotesNextEdge" });
+    const out = removeLane(def, tree, "a", 0);
+    expect(semantics(out).a).toMatchObject({ next: "a->c>c" });
+    // Removing b sends a->b on to END: fine. Without an edge after b,
+    // removing it would drop a->b and run a->c without being asked to.
+    expect(
+      editCapabilities(tree, { kind: "node", nodeId: "b" }).removeStep,
+    ).toEqual({ ok: true });
+    const lonely = graph(
+      [start(), node("a"), node("b"), node("c"), end()],
+      [
+        ["start", "a"],
+        ["a", "b"],
+        ["a", "c"],
+        ["c", "end"],
+      ],
+    );
+    const t2 = recognizeBlockTree(lonely);
+    expect(
+      editCapabilities(t2, { kind: "node", nodeId: "b" }).removeStep,
+    ).toEqual({ ok: false, reason: "scenarios.editor.cannot.revivesDeadEdge" });
+    expect(removeStep(lonely, t2, "b")).toBe(lonely);
+  });
+
+  it("M3: a dead edge back to a step makes no loop", () => {
+    const def = graph(
+      [start(), node("x"), node("a"), node("b"), end()],
+      [
+        ["start", "x"],
+        ["x", "a"],
+        ["a", "b"],
+        ["a", "x"], // never runs: a takes a->b
+        ["b", "end"],
+      ],
+    );
+    const tree = recognizeBlockTree(def);
+    assertTreeCovers(def, tree);
+    expect(shape(tree.root)).toEqual({
+      blocks: [
+        "x",
+        {
+          fork: "a",
+          kind: "extra",
+          merge: "b",
+          lanes: [
+            { when: "first", blocks: [], exit: "→b" },
+            { when: "ignored", blocks: [], exit: "link x" },
+          ],
+        },
+        "b",
+      ],
+      exit: "end",
+    });
+    expect(tree.links.map((l) => [l.edge.id, l.role])).toEqual([
+      ["a->x", "dead"],
+    ]);
+    sameExceptUpdatedAt(roundTrip(def), def);
+  });
+
+  it("M3: a dead lane to END keeps the switch's merge", () => {
+    const def = graph(
+      [
+        start(),
+        sw("s", ["x"]),
+        node("p"),
+        node("r"),
+        node("q"),
+        node("m"),
+        end(),
+      ],
+      [
+        ["start", "s"],
+        ["s", "p", "case-0"],
+        ["s", "r", "default"],
+        ["s", "q", "case-0"], // never runs
+        ["p", "m"],
+        ["r", "m"],
+        ["q", "end"],
+        ["m", "end"],
+      ],
+    );
+    const tree = recognizeBlockTree(def);
+    assertTreeCovers(def, tree);
+    expect(shape(tree.root)).toEqual({
+      blocks: [
+        {
+          fork: "s",
+          kind: "switch",
+          merge: "m",
+          lanes: [
+            { when: "case", blocks: ["p"], exit: "→m" },
+            { when: "default", blocks: ["r"], exit: "→m" },
+            { when: "ignored", blocks: ["q"], exit: "end" },
+          ],
+        },
+        "m",
+      ],
+      exit: "end",
+    });
+    expect(tree.links).toEqual([]);
+    sameExceptUpdatedAt(roundTrip(def), def);
+  });
+
+  it("M3: a node a run reaches is placed where it runs, not in a dead lane met first", () => {
+    const def = graph(
+      [start(), node("a"), node("b"), node("c"), end()],
+      [
+        ["start", "a"],
+        ["a", "b"],
+        ["a", "c"], // never runs
+        ["b", "c"],
+        ["c", "end"],
+      ],
+    );
+    const tree = recognizeBlockTree(def);
+    assertTreeCovers(def, tree);
+    expect(shape(tree.root)).toEqual({
+      blocks: [
+        {
+          fork: "a",
+          kind: "extra",
+          merge: "b",
+          lanes: [
+            { when: "first", blocks: [], exit: "→b" },
+            { when: "ignored", blocks: [], exit: "link c" },
+          ],
+        },
+        "b",
+        "c",
+      ],
+      exit: "end",
+    });
+    sameExceptUpdatedAt(roundTrip(def), def);
+  });
+
+  it("M4: a second loop exit nothing else reaches is walked on in the lane that leaves the loop", () => {
+    const def = graph(
+      [start(), node("h"), sw("s"), node("x"), node("y"), node("z"), end()],
+      [
+        ["start", "h"],
+        ["h", "s"],
+        ["s", "x", "case-0"],
+        ["s", "y", "case-1"],
+        ["s", "z", "default"],
+        ["x", "h"],
+        ["y", "end"],
+        ["z", "end"],
+      ],
+    );
+    const tree = recognizeBlockTree(def);
+    assertTreeCovers(def, tree);
+    const loop = tree.root.blocks[0] as LoopBlock;
+    const fork = loop.body.blocks[1] as ForkBlock;
+    // Only the case-0 lane goes back to the header. The first exit (y)
+    // continues after the loop; z, the second, sits in its lane inside the
+    // loop body, and the views must draw that lane as leaving the loop.
+    expect(fork.lanes.map((l) => shape(l.body))).toEqual([
+      { blocks: ["x"], exit: "→h" },
+      { blocks: [], exit: "→y" },
+      { blocks: ["z"], exit: "end" },
+    ]);
+    expect((shape(tree.root) as { blocks: unknown[] }).blocks).toEqual([
+      expect.objectContaining({ loop: "h" }),
+      "y",
+    ]);
+  });
+
+  it("L1: a switch whose every handle has a lane takes no other", () => {
+    const def = graph(
+      [start(), sw("s", ["x"]), node("p"), node("q"), end()],
+      [
+        ["start", "s"],
+        ["s", "p", "case-0"],
+        ["s", "q", "default"],
+        ["p", "end"],
+        ["q", "end"],
+      ],
+    );
+    const tree = recognizeBlockTree(def);
+    expect(
+      editCapabilities(tree, { kind: "node", nodeId: "s" }).addLane,
+    ).toEqual({ ok: false, reason: "scenarios.editor.cannot.noFreeHandle" });
+    expect(addLane(def, tree, "s")).toBe(def);
+    // A choice still a chain with fewer than two options picks nothing.
+    const lone = graph(
+      [start(), choice("c", 1), node("a"), end()],
+      [
+        ["start", "c"],
+        ["c", "a", "option-0"],
+        ["a", "end"],
+      ],
+    );
+    expect(
+      editCapabilities(recognizeBlockTree(lone), { kind: "node", nodeId: "c" })
+        .addLane,
+    ).toEqual({ ok: false, reason: "scenarios.editor.cannot.noFreeHandle" });
+  });
+
+  it("L2: no lane end may jump away from its loop's header, however deep", () => {
+    const def = graph(
+      [start(), node("h"), sw("s", ["a", "b"]), node("x"), node("y"), end()],
+      [
+        ["start", "h"],
+        ["h", "s"],
+        ["s", "x", "case-0"],
+        ["s", "y", "case-1"],
+        ["s", "end", "default"],
+        ["x", "h"],
+        ["y", "end"],
+      ],
+    );
+    const tree = recognizeBlockTree(def);
+    expect(
+      editCapabilities(tree, { kind: "node", nodeId: "x" }).setLink,
+    ).toEqual({ ok: false, reason: "scenarios.editor.cannot.insideLoop" });
+    expect(setLink(def, tree, "x", "y")).toBe(def);
+    // A lane that leaves the loop may jump.
+    expect(
+      editCapabilities(tree, { kind: "node", nodeId: "y" }).setLink,
+    ).toEqual({ ok: true });
+    const single = graph(
+      [start(), node("h")],
+      [
+        ["start", "h"],
+        ["h", "h"],
+      ],
+    );
+    expect(
+      editCapabilities(recognizeBlockTree(single), {
+        kind: "node",
+        nodeId: "h",
+      }).setLink,
+    ).toEqual({ ok: false, reason: "scenarios.editor.cannot.insideLoop" });
+  });
+
+  it("L3: a step inserted between a fork and its merge becomes the merge", () => {
+    const def = graph(
+      [start(), sw("s"), node("a"), node("b"), node("m"), end()],
+      [
+        ["start", "s"],
+        ["s", "a", "case-0"],
+        ["s", "b", "default"],
+        ["a", "m"],
+        ["b", "m"],
+        ["m", "end"],
+      ],
+    );
+    const out = insertStep(
+      def,
+      recognizeBlockTree(def),
+      "root",
+      1,
+      ScenarioNodeType.DELAY,
+    );
+    const added = out.nodes[out.nodes.length - 1].id;
+    expect(out.edges.slice(0, 6)).toEqual([
+      def.edges[0],
+      def.edges[1],
+      def.edges[2],
+      { ...def.edges[3], target: added },
+      { ...def.edges[4], target: added },
+      def.edges[5],
+    ]);
+    expect(out.edges[6]).toMatchObject({ source: added, target: "m" });
+    const tree = recognizeBlockTree(out);
+    expect((tree.root.blocks[0] as ForkBlock).merge?.nodeId).toBe(added);
+    // rebuildFromTree checks every fork's merge against the tree it is given.
+    const broken = recognizeBlockTree(def);
+    (broken.root.blocks[0] as ForkBlock).merge = { kind: "node", nodeId: "a" };
+    expect(() => assertMergesConsistent(broken)).toThrow(/merges at a/);
+  });
+
+  it("L4: no-op moves and links return the definition itself", () => {
+    const def = graph(
+      [start(), node("a"), node("b"), end()],
+      [
+        ["start", "a"],
+        ["a", "b"],
+        ["b", "end"],
+      ],
+    );
+    const tree = recognizeBlockTree(def);
+    expect(moveStep(def, tree, "root", 1, 1)).toBe(def);
+    expect(setLink(def, tree, "b", null)).toBe(def);
+    const linked = setLink(def, tree, "b", "a");
+    expect(setLink(linked, recognizeBlockTree(linked), "b", "a")).toBe(linked);
+  });
+
+  it("L5: a switch still a chain is checked through its handle", () => {
+    const def = graph(
+      [start(), sw("s"), node("a"), node("b"), end()],
+      [
+        ["start", "s"],
+        ["s", "b"], // first edge, but no handle: never taken
+        ["s", "a", "case-0"],
+        ["a", "end"],
+      ],
+    );
+    expect(() =>
+      assertFirstEdgeWins(def, [
+        { edgeId: "s->a", source: "s", handle: "case-0" },
+      ]),
+    ).not.toThrow();
+    expect(() =>
+      assertFirstEdgeWins(def, [{ edgeId: "s->a", source: "s", handle: null }]),
+    ).toThrow(/first edge wins/);
+    expect(liveEdgeIds(def).has("s->b")).toBe(false);
   });
 });

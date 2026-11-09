@@ -36,9 +36,32 @@
  *   Here a link only when the target is already placed; a target nothing has
  *   placed yet is walked on in the lane that leaves the loop. Otherwise the
  *   common "a fork, one lane loops back to it" leaves its other lanes
- *   detached.
- * - A lane edge that never runs (ignored / unpickable) into a placed step is
- *   a link with role `dead`.
+ *   detached. So a loop body (`LoopBlock.body`) can hold steps that are not
+ *   in the loop: the Steps and Graph views (step B / C) must draw a lane
+ *   whose sequence does not end by falling through to the loop's header
+ *   (an `end`, `stop`, `link`, or a fallthrough to another node) as leaving
+ *   the loop at the fork it starts from: its steps run once, after the loop
+ *   is left, and are drawn outside the loop's tinted area / C-block, with
+ *   the lane's edge crossing the loop's boundary. Only lanes (and their
+ *   nested lanes) that fall through to the header are repeated.
+ * - Dead lanes (ignored / unpickable: edges the executor never takes) do
+ *   not shape the tree. Back edges, loops, merges and a loop's exits are
+ *   computed on the lanes that run, so a dead edge back to a step never
+ *   makes a loop and a dead edge to END never takes a merge away. Dead lanes
+ *   are walked after every live one (a node a run reaches is placed where
+ *   it runs): one into a node drawn elsewhere (a merge and a loop header
+ *   included) is a link with role `dead`; one into a node nothing else
+ *   reaches places that node in the lane.
+ * - A switch / choice whose only edge never runs (no handle, or one it
+ *   cannot pick) is a one-lane fork, not a chain: a chain would draw a step
+ *   that never runs as the next one.
+ * - `Capability` `{ ok: true, note }`: an operation that applies and does
+ *   something worth saying (removing a step's first edge runs its next one).
+ * - Operations never make an edge that never ran start running (or stop a
+ *   running edge) beyond what they are asked to do: an operation that would
+ *   (removing the running lane of a handle another edge also has, removing
+ *   a step whose edge in is a step's first of several) is refused with
+ *   `revivesDeadEdge`.
  */
 import type { Edge } from "@xyflow/react";
 
@@ -280,6 +303,15 @@ function structuralOut(program: Program, node: ScenarioNode): NodeOut {
   }
   // `next` (and unknown types): the first edge to an existing node runs; the
   // others never do but stay lanes so no edge disappears.
+  // TODO(timeout lanes, schema 1.7): leave a wait's `kind: "timeout"` edges
+  // out of this chain (and out of `nextStep` here): they are the timeout
+  // fork's own lanes (`timeoutLanes` above), never an "extra" fork's.
+  // TODO(parallel): a parallel node's lanes are matched above; none of its
+  // edges may reach this branch.
+  // TODO(bounded loops, schema 1.7): on a latch with a `kind: "loop"` edge
+  // and an ordinary exit edge, the loop edge is the back-edge lane and the
+  // exit the step's chain edge (first-edge-wins among non-loop, non-timeout
+  // edges), not an "extra" fork of two lanes.
   const step = nextStep(program, node, null);
   if (step.kind !== "edge") return { lanes: [], forkKind: "extra" };
   return {
@@ -360,6 +392,8 @@ function immediateDominators(
 }
 
 const ENTRY = "\u0000entry";
+/** A lane body's exit until its (deferred) walk replaces the body. */
+const PENDING: SeqExit = { kind: "stop", reason: "noEdge" };
 const EXIT = "\u0000exit";
 const LATCH = "\u0000latch:";
 
@@ -381,8 +415,14 @@ export function recognizeBlockTree(def: Def): BlockTree {
     const target = nodesById.get(edge.target);
     return !!target && target !== origin && !isEndSink(target, origin);
   };
+  /** The lanes that run. Structure (back edges, loops, merges, loop exits)
+   *  is computed on these only: an edge that never runs must not make a
+   *  loop that never loops or take a fork's merge away. Dead lanes are
+   *  walked after every live one and drawn wherever they lead. */
+  const liveLanes = (id: string): LaneEdge[] =>
+    (outs.get(id)?.lanes ?? []).filter((l) => isLive(l.condition));
   const laneTargets = (id: string): string[] =>
-    (outs.get(id)?.lanes ?? [])
+    liveLanes(id)
       .filter((l) => walkable(l.edge))
       .map((l) => l.edge.target);
 
@@ -403,7 +443,7 @@ export function recognizeBlockTree(def: Def): BlockTree {
       treeRoots.push(root);
       state.set(root, 1);
       const stack: Array<{ v: string; lanes: LaneEdge[]; i: number }> = [
-        { v: root, lanes: outs.get(root)?.lanes ?? [], i: 0 },
+        { v: root, lanes: liveLanes(root), i: 0 },
       ];
       while (stack.length > 0) {
         const top = stack[stack.length - 1];
@@ -414,11 +454,7 @@ export function recognizeBlockTree(def: Def): BlockTree {
           if (s === 1) backEdges.add(edge);
           else if (s === undefined) {
             state.set(edge.target, 1);
-            stack.push({
-              v: edge.target,
-              lanes: outs.get(edge.target)?.lanes ?? [],
-              i: 0,
-            });
+            stack.push({ v: edge.target, lanes: liveLanes(edge.target), i: 0 });
           }
         } else {
           state.set(top.v, 2);
@@ -484,7 +520,7 @@ export function recognizeBlockTree(def: Def): BlockTree {
   for (const node of firstNodes) {
     if (isEndSink(node, origin)) continue;
     const succ: string[] = [];
-    for (const { edge } of outs.get(node.id)?.lanes ?? []) {
+    for (const { edge } of liveLanes(node.id)) {
       if (loopBackEdges.has(edge)) succ.push(LATCH + edge.target);
       else if (backEdges.has(edge) || !walkable(edge)) succ.push(EXIT);
       else succ.push(edge.target);
@@ -533,6 +569,11 @@ export function recognizeBlockTree(def: Def): BlockTree {
   }
 
   type Entry = { edge: Edge } | { node: string };
+  /** Dead lanes still to walk, in the order they were met. */
+  const deadLanes: Array<() => void> = [];
+  const walkDeadLanes = () => {
+    for (let walk = deadLanes.shift(); walk; walk = deadLanes.shift()) walk();
+  };
 
   const walkSeq = (
     path: SeqPath,
@@ -558,6 +599,13 @@ export function recognizeBlockTree(def: Def): BlockTree {
           draw(edge);
           return done({ kind: "end", edgeId: edge.id });
         }
+        const condition = laneOf.get(edge);
+        const dead = condition !== undefined && !isLive(condition);
+        // A lane that never runs into a node drawn elsewhere (a merge, a
+        // loop header included) is a link, never drawn as if it ran there.
+        if (dead && id !== header && (placed.has(id) || stop.has(id))) {
+          return linkExit("dead");
+        }
         if (stop.has(id) && id !== header) {
           draw(edge);
           return done({ kind: "fallthrough", to: id, edgeId: edge.id });
@@ -566,8 +614,6 @@ export function recognizeBlockTree(def: Def): BlockTree {
         // than the one the loop continues at) is walked on in the lane: it
         // runs only through it.
         if (placed.has(id)) {
-          const condition = laneOf.get(edge);
-          if (condition && !isLive(condition)) return linkExit("dead");
           return linkExit(backEdges.has(edge) ? "back" : "join");
         }
       }
@@ -582,7 +628,8 @@ export function recognizeBlockTree(def: Def): BlockTree {
         let firstExit: string | null = null;
         for (const e of def.edges) {
           if (!loop.body.has(e.source) || !outside(e.target)) continue;
-          if (!laneOf.has(e) || !walkable(e)) continue;
+          const condition = laneOf.get(e);
+          if (!condition || !isLive(condition) || !walkable(e)) continue;
           const t = e.target;
           if (
             stop.has(t) ||
@@ -626,7 +673,12 @@ export function recognizeBlockTree(def: Def): BlockTree {
       header = null;
       const out = outs.get(id)!;
       const isOrigin = node === origin;
-      if (out.lanes.length >= 2) {
+      // A fork: two or more lanes, or one that never runs (a switch /
+      // choice whose only edge has no handle it can pick).
+      if (
+        out.lanes.length >= 2 ||
+        (out.lanes.length === 1 && !isLive(out.lanes[0].condition))
+      ) {
         nodePath.set(id, { path, index });
         let merge = ipdom(id);
         if (
@@ -648,18 +700,27 @@ export function recognizeBlockTree(def: Def): BlockTree {
         };
         blocks.push(fork);
         out.lanes.forEach((lane, j) => {
-          fork.lanes.push({
+          const lanePath = `${path}/${index}/lanes/${j}`;
+          const entry: Lane = {
             edgeId: lane.edge.id,
             handle: handleOf(lane.edge),
             condition: lane.condition,
-            body: walkSeq(
-              `${path}/${index}/lanes/${j}`,
+            body: { path: lanePath, blocks: [], exit: PENDING },
+          };
+          fork.lanes.push(entry);
+          const walk = () => {
+            entry.body = walkSeq(
+              lanePath,
               { edge: lane.edge },
               laneStop,
               region,
               null,
-            ),
-          });
+            );
+          };
+          // A dead lane waits until every live lane is walked: a node a run
+          // reaches is placed where it runs, not in a lane that never does.
+          if (isLive(lane.condition)) walk();
+          else deadLanes.push(walk);
         });
         if (merge === null) return done({ kind: "stop", reason: "blockEnds" });
         if (stop.has(merge)) {
@@ -696,6 +757,7 @@ export function recognizeBlockTree(def: Def): BlockTree {
   const root: Seq = origin
     ? walkSeq("root", { node: origin.id }, empty, null, null)
     : { path: "root", blocks: [], exit: { kind: "stop", reason: "noEdge" } };
+  walkDeadLanes();
   const detached: Seq[] = [];
   for (const node of firstNodes) {
     if (node === origin || isEndSink(node, origin) || placed.has(node.id)) {
@@ -710,6 +772,7 @@ export function recognizeBlockTree(def: Def): BlockTree {
         null,
       ),
     );
+    walkDeadLanes();
   }
   // Links in file order.
   const edgeIndex = new Map(def.edges.map((e, i) => [e, i]));
@@ -840,7 +903,8 @@ export interface StructuralEdge {
 /**
  * Throws when an edge the editor draws as running is not the one the
  * executor takes: for a chain edge the first edge (to an existing node) of
- * its source, for a lane the first edge with its handle. Reordering edges
+ * its source, for a lane (and for the one edge of a switch / choice that is
+ * still a chain) the first edge with its handle. Reordering edges
  * would otherwise revive dead ones.
  */
 export function assertFirstEdgeWins(
@@ -851,6 +915,9 @@ export function assertFirstEdgeWins(
   for (const s of structural) {
     const node = program.nodesById.get(s.source);
     if (!node || node === program.origin) continue;
+    // TODO(timeout lanes / parallel): a chain edge must be the first edge
+    // with the wait's timeout edges left out, and a timeout lane the edge the
+    // timeout outcome takes; a parallel node's lanes all run (no check).
     const step = nextStep(program, node, s.handle);
     if (step.kind === "edge" && step.edge.id === s.edgeId) continue;
     throw new Error(
@@ -861,37 +928,13 @@ export function assertFirstEdgeWins(
   }
 }
 
-const NODE_SPACING_Y = 120;
-
-/**
- * Writes `tree` (recognized from `def`, possibly edited) back into a
- * definition. Nodes keep their order and positions (a new node is placed
- * just below its predecessor and appended); edges keep their id, fields and
- * index when reused, links are written back untouched. Never mutates its
- * inputs. A no-op round trip returns `def` with only `updatedAt` changed.
- */
-export function rebuildFromTree<D extends Def>(def: D, tree: BlockTree): D {
+/** The edges `tree` needs, in emit order: chain and lane edges, exits;
+ *  `endTarget` names the END an exit to END goes to. */
+function requiredEdges(
+  tree: BlockTree,
+  endTarget: (exit: { edgeId: string | null }) => string,
+): Req[] {
   const origin = tree.origin;
-  const oldById = new Map<string, ScenarioNode>();
-  for (const n of def.nodes) if (!oldById.has(n.id)) oldById.set(n.id, n);
-  const placedNodes = treeNodes(tree);
-  const inTree = new Map(placedNodes.map((n) => [n.id, n]));
-  const isSink = (n: ScenarioNode) =>
-    n.id !== origin?.id && n.type === ScenarioNodeType.END;
-
-  // END for a new exit: the first END in the file, else a new one.
-  let newEnd: ScenarioNode | null = null;
-  const firstEnd = def.nodes.find(isSink);
-  const endTarget = (exit: { edgeId: string | null }): string => {
-    const old = def.edges.find((e) => e.id === exit.edgeId);
-    const oldTarget = old ? oldById.get(old.target) : undefined;
-    if (oldTarget && isSink(oldTarget)) return oldTarget.id;
-    if (firstEnd) return firstEnd.id;
-    newEnd ??= createDefaultNode(ScenarioNodeType.END);
-    return newEnd.id;
-  };
-
-  // --- Required edges -------------------------------------------------------
   const reqs: Req[] = [];
   interface Pending {
     source: string;
@@ -952,6 +995,41 @@ export function rebuildFromTree<D extends Def>(def: D, tree: BlockTree): D {
       : null;
   emitSeq(tree.root, rootEntry);
   for (const seq of tree.detached) emitSeq(seq, null);
+  return reqs;
+}
+
+const NODE_SPACING_Y = 120;
+
+/**
+ * Writes `tree` (recognized from `def`, possibly edited) back into a
+ * definition. Nodes keep their order and positions (a new node is placed
+ * just below its predecessor and appended); edges keep their id, fields and
+ * index when reused, links are written back untouched. Never mutates its
+ * inputs. A no-op round trip returns `def` with only `updatedAt` changed.
+ */
+export function rebuildFromTree<D extends Def>(def: D, tree: BlockTree): D {
+  assertMergesConsistent(tree);
+  const origin = tree.origin;
+  const oldById = new Map<string, ScenarioNode>();
+  for (const n of def.nodes) if (!oldById.has(n.id)) oldById.set(n.id, n);
+  const placedNodes = treeNodes(tree);
+  const inTree = new Map(placedNodes.map((n) => [n.id, n]));
+  const isSink = (n: ScenarioNode) =>
+    n.id !== origin?.id && n.type === ScenarioNodeType.END;
+
+  // END for a new exit: the first END in the file, else a new one.
+  let newEnd: ScenarioNode | null = null;
+  const firstEnd = def.nodes.find(isSink);
+  const endTarget = (exit: { edgeId: string | null }): string => {
+    const old = def.edges.find((e) => e.id === exit.edgeId);
+    const oldTarget = old ? oldById.get(old.target) : undefined;
+    if (oldTarget && isSink(oldTarget)) return oldTarget.id;
+    if (firstEnd) return firstEnd.id;
+    newEnd ??= createDefaultNode(ScenarioNodeType.END);
+    return newEnd.id;
+  };
+
+  const reqs = requiredEdges(tree, endTarget);
 
   // --- Nodes ----------------------------------------------------------------
   const keptIds = new Set<string>(inTree.keys());
@@ -1098,17 +1176,43 @@ export function rebuildFromTree<D extends Def>(def: D, tree: BlockTree): D {
       ? assigned[hit.index]!
       : fresh.find((f) => f.req === r)!.edge;
     const node = inTree.get(req.source);
-    const chain =
-      req.handle === undefined ||
-      (node !== undefined && connectionRule(node.type).out !== "select");
+    // A switch / choice runs an edge through its handle, chain or lane: check
+    // the edge it takes for that handle. Any other node: its first edge.
+    // TODO(timeout lanes): a wait's timeout edge is not its chain edge; check
+    // the event lane with the timeout edges left out, the timeout lane on its
+    // own (nextStep with the timeout outcome).
+    const select =
+      node !== undefined && connectionRule(node.type).out === "select";
     structural.push({
       edgeId: edge.id,
       source: req.source,
-      handle: chain ? null : handleOf(edge),
+      handle: select ? handleOf(edge) : null,
     });
   });
   assertFirstEdgeWins(result, structural);
   return result;
+}
+
+/**
+ * Throws unless every fork's merge is where its sequence goes on after it:
+ * the next block, or the node the sequence falls through to. Operations keep
+ * the tree consistent without recognizing it again; dev / test check, run
+ * by {@link rebuildFromTree}.
+ */
+export function assertMergesConsistent(
+  tree: Pick<BlockTree, "root" | "detached">,
+): void {
+  for (const seq of allSeqs(tree)) {
+    seq.blocks.forEach((block, i) => {
+      if (block.kind !== "fork" || block.merge === null) return;
+      const next = nodeAtSlot(seq, i + 1);
+      if (next !== block.merge.nodeId) {
+        throw new Error(
+          `fork ${block.node.id} merges at ${block.merge.nodeId}, but ${seq.path} goes on at ${next}`,
+        );
+      }
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1276,10 +1380,12 @@ function insertBlockAt(
   const at = nodeAtSlot(seq, index);
   const id = block.node.id;
   if (index > 0 && at !== null) {
-    redirectFallthroughs(innerSeqs(seq.blocks[index - 1]), at, (old) => ({
-      ...old,
-      to: id,
-    }));
+    const prev = seq.blocks[index - 1];
+    redirectFallthroughs(innerSeqs(prev), at, (old) => ({ ...old, to: id }));
+    // Between a fork and its merge: the lanes now meet at the new block.
+    if (prev.kind === "fork" && prev.merge?.nodeId === at) {
+      prev.merge = { ...prev.merge, nodeId: id };
+    }
   }
   if (index === 0) {
     // A new first step of a loop is its new header: the back edges and
@@ -1437,6 +1543,12 @@ export function removeStep(
     return def;
   }
   const t = cloneTree(tree);
+  applyRemoveStep(t, nodeId);
+  return rebuildFromTree(def, t);
+}
+
+/** {@link removeStep} on `t` (a clone), without the checks. */
+function applyRemoveStep(t: BlockTree, nodeId: string): void {
   const found = locate(t, nodeId)!;
   if (found.block.kind === "fork") {
     // One lane (or none): the lane's steps take the fork's place, then the
@@ -1462,7 +1574,6 @@ export function removeStep(
     }
   }
   removeStepBlockAt(t, found.seq, found.index);
-  return rebuildFromTree(def, t);
 }
 
 /** Moves the step at `from` of the sequence at `path` to slot `to` (an
@@ -1474,7 +1585,7 @@ export function moveStep(
   from: number,
   to: number,
 ): ScenarioDefinition {
-  if (from === to) return rebuildFromTree(def, tree);
+  if (from === to) return def;
   if (!canMove(tree, path, from, to).ok) return def;
   const t = cloneTree(tree);
   const seq = seqAt(t, path)!;
@@ -1663,7 +1774,10 @@ export function addLane(
 }
 
 /** Removes lane `laneIndex` of the fork of `nodeId` and every step in it.
- *  The last lane cannot go. */
+ *  The last lane cannot go, nor a running lane whose removal would let an
+ *  edge that never ran run (another edge with its handle). Removing the
+ *  first edge of a step with more runs its next one: that is allowed, and
+ *  the capability carries a note saying so. */
 export function removeLane(
   def: ScenarioDefinition,
   tree: BlockTree,
@@ -1676,6 +1790,12 @@ export function removeLane(
     return def;
   }
   const t = cloneTree(tree);
+  applyRemoveLane(t, nodeId, laneIndex);
+  return rebuildFromTree(def, t);
+}
+
+/** {@link removeLane} on `t` (a clone), without the checks. */
+function applyRemoveLane(t: BlockTree, nodeId: string, laneIndex: number) {
   const found = locate(t, nodeId)!;
   const fork = found.block as ForkBlock;
   const [lane] = fork.lanes.splice(laneIndex, 1);
@@ -1688,7 +1808,6 @@ export function removeLane(
       s.exit = { kind: "stop", reason: "noEdge" };
     }
   }
-  return rebuildFromTree(def, t);
 }
 
 /**
@@ -1804,8 +1923,11 @@ export function setLink(
       : current.kind === "fallthrough"
         ? current.to
         : null;
-  if (current.kind !== "end" && target === currentTarget && target !== null) {
-    return rebuildFromTree(def, t);
+  if (
+    (current.kind === "end" && target === null) ||
+    (current.kind !== "end" && target !== null && target === currentTarget)
+  ) {
+    return def; // Already there.
   }
   const edgeId = current.kind !== "stop" ? (current.edgeId ?? null) : null;
   seq.exit =
@@ -1817,7 +1939,8 @@ export function setLink(
 
 /** Sets the `sourceHandle` of lane `laneIndex` of the fork of `nodeId`. A
  *  handle another lane already has is refused (`def` unchanged): only the
- *  first of the two would run. */
+ *  first of the two would run. So is moving a running lane off a handle
+ *  another (ignored) lane has: that one would start running. */
 export function setLaneHandle(
   def: ScenarioDefinition,
   tree: BlockTree,
@@ -1825,12 +1948,19 @@ export function setLaneHandle(
   laneIndex: number,
   handle: string | null,
 ): ScenarioDefinition {
+  if (
+    !editCapabilities(tree, { kind: "lane", nodeId, laneIndex }).setLaneHandle
+      .ok
+  ) {
+    return def;
+  }
   const t = cloneTree(tree);
   const found = locate(t, nodeId);
   if (found?.block.kind !== "fork") return def;
   const fork = found.block;
   const lane = fork.lanes[laneIndex];
   if (!lane || fork.forkKind === "start") return def;
+  if (lane.handle === handle) return def; // Already there.
   // Two lanes with one handle: only the first in file order would run.
   if (
     handle !== null &&
@@ -1885,7 +2015,10 @@ export function setLaneCondition(
 // ---------------------------------------------------------------------------
 // Capabilities
 
-export type Capability = { ok: true } | { ok: false; reason: MessageKey };
+/** `note`: the operation applies, and does something the user should be
+ *  told about (shown with the button). */
+export type Capability =
+  { ok: true; note?: MessageKey } | { ok: false; reason: MessageKey };
 
 const OK: Capability = { ok: true };
 const no = (reason: MessageKey): Capability => ({ ok: false, reason });
@@ -2007,6 +2140,90 @@ function canWrapInLoop(
   return OK;
 }
 
+/** The ids of the edges a rebuild of `tree` keeps by id (links nothing
+ *  structures aside: a rebuild writes them back as they are). */
+function structureEdgeIds(tree: BlockTree): Set<string> {
+  const ids = new Set<string>();
+  for (const req of requiredEdges(tree, () => "")) {
+    if (req.preferId !== null) ids.add(req.preferId);
+  }
+  return ids;
+}
+
+/** Whether taking edge `edgeId` out makes another edge of its source run:
+ *  the edge is a running lane and a lane the executor skips today (a step's
+ *  next edge, a switch / choice's next edge with the same handle) would take
+ *  its place. */
+function promotesOnRemoval(tree: BlockTree, edgeId: string): boolean {
+  for (const seq of allSeqs(tree)) {
+    for (const b of seq.blocks) {
+      if (b.kind !== "fork") continue;
+      const lane = b.lanes.find((l) => l.edgeId === edgeId);
+      if (!lane) continue;
+      if (!isLive(lane.condition)) return false;
+      // TODO(timeout lanes / parallel): a wait's event and timeout lanes
+      // and a parallel node's lanes all run; removing one promotes nothing.
+      if (
+        b.forkKind !== "extra" &&
+        b.forkKind !== "switch" &&
+        b.forkKind !== "choice"
+      ) {
+        return false;
+      }
+      return b.lanes.some(
+        (l) =>
+          l !== lane &&
+          l.condition.kind === "ignored" &&
+          (b.forkKind === "extra" || l.handle === lane.handle),
+      );
+    }
+  }
+  return false;
+}
+
+/** Whether `edit` (applied to a clone of `tree`) drops an edge whose loss
+ *  makes an edge that never ran start running: an edit never changes what
+ *  runs beyond what it was asked to. `allowed`: the edge whose removal is
+ *  the edit's own meaning. */
+function revivesDeadEdge(
+  tree: BlockTree,
+  edit: (t: BlockTree) => void,
+  allowed: string | null = null,
+): boolean {
+  const before = structureEdgeIds(tree);
+  const t = cloneTree(tree);
+  edit(t);
+  const after = structureEdgeIds(t);
+  for (const id of before) {
+    if (after.has(id) || id === allowed) continue;
+    if (promotesOnRemoval(tree, id)) return true;
+  }
+  return false;
+}
+
+/** The loops whose bodies contain the sequence at `path`, innermost last. */
+function enclosingLoops(tree: BlockTree, path: SeqPath): LoopBlock[] {
+  const loops: LoopBlock[] = [];
+  const re = /\/\d+\/body(?=\/|$)/g;
+  for (let m = re.exec(path); m; m = re.exec(path)) {
+    const loop = loopOfBody(tree, path.slice(0, m.index + m[0].length));
+    if (loop) loops.push(loop);
+  }
+  return loops;
+}
+
+/** Whether the last step of `seq` goes back to the header of a loop around
+ *  it: its edge is that loop's back edge, and moving it would undo the loop. */
+function endsInBackEdge(tree: BlockTree, seq: Seq): boolean {
+  const exit = seq.exit;
+  if (exit.kind !== "fallthrough") return false;
+  return enclosingLoops(tree, seq.path).some(
+    (loop) =>
+      loop.headerId === exit.to ||
+      (!!exit.edgeId && loop.backEdgeIds.includes(exit.edgeId)),
+  );
+}
+
 /** Which operations apply to `selection`, with the reason when one does
  *  not. Buttons are disabled with the reason as their title. */
 export function editCapabilities(
@@ -2043,10 +2260,15 @@ export function editCapabilities(
     caps.addLane = OK;
     if (selection.kind === "lane") {
       const fork = tree.root.blocks[0];
+      const laneIndex = selection.laneIndex;
       caps.removeLane =
         fork?.kind === "fork" && fork.node.id === nodeId
-          ? fork.lanes.length > 1 && fork.lanes[selection.laneIndex]
-            ? OK
+          ? fork.lanes.length > 1 && fork.lanes[laneIndex]
+            ? revivesDeadEdge(tree, (t) =>
+                applyRemoveLane(t, nodeId, laneIndex),
+              )
+              ? no("scenarios.editor.cannot.revivesDeadEdge")
+              : OK
             : no("scenarios.editor.cannot.lastLane")
           : no("scenarios.editor.cannot.notAFork");
       caps.setLaneHandle = no("scenarios.editor.cannot.noCondition");
@@ -2069,32 +2291,47 @@ export function editCapabilities(
         ? no("scenarios.editor.cannot.forkHasLanes")
         : isLoopHeader
           ? no("scenarios.editor.cannot.loopHeader")
-          : OK;
+          : revivesDeadEdge(tree, (t) => applyRemoveStep(t, nodeId))
+            ? no("scenarios.editor.cannot.revivesDeadEdge")
+            : OK;
     caps.moveUp = no("scenarios.editor.cannot.notAStep");
     caps.moveDown = caps.moveUp;
     caps.setLink = no("scenarios.editor.cannot.forkHasLanes");
     caps.addLane =
-      block.forkKind === "switch" ||
-      block.forkKind === "choice" ||
       block.forkKind === "parallel"
         ? OK
-        : no("scenarios.editor.cannot.cannotFork");
+        : block.forkKind === "switch" || block.forkKind === "choice"
+          ? // A new lane needs a handle no lane has yet, or it never runs.
+            newLaneHandle(block.node, block.lanes) !== null
+            ? OK
+            : no("scenarios.editor.cannot.noFreeHandle")
+          : no("scenarios.editor.cannot.cannotFork");
   } else {
-    caps.removeStep = OK;
+    caps.removeStep = revivesDeadEdge(tree, (t) => applyRemoveStep(t, nodeId))
+      ? no("scenarios.editor.cannot.revivesDeadEdge")
+      : OK;
     caps.moveUp = canMove(tree, seq.path, index, index - 1);
     caps.moveDown = canMove(tree, seq.path, index, index + 1);
     caps.setLink = isTerminal(block.node)
       ? no("scenarios.editor.cannot.terminalStep")
       : index !== seq.blocks.length - 1
         ? no("scenarios.editor.cannot.notLastStep")
-        : isLoopHeader || loopOfBody(tree, seq.path)
+        : endsInBackEdge(tree, seq)
           ? no("scenarios.editor.cannot.insideLoop")
           : OK;
     const out = connectionRule(block.node.type).out;
+    // A switch / choice still a chain: its one edge (if any) runs, so it
+    // has a handle it can pick; another lane needs a second one.
+    const hasEdge =
+      index < seq.blocks.length - 1 ||
+      (seq.exit.kind !== "stop" && !!seq.exit.edgeId);
+    const handles = pickableHandles(block.node) ?? [];
     caps.addLane =
-      out === "select" && !isTerminal(block.node)
-        ? OK
-        : no("scenarios.editor.cannot.cannotFork");
+      out !== "select" || isTerminal(block.node)
+        ? no("scenarios.editor.cannot.cannotFork")
+        : handles.length > (hasEdge ? 1 : 0)
+          ? OK
+          : no("scenarios.editor.cannot.noFreeHandle");
   }
   caps.wrapInLoop = canWrapInLoop(tree, seq.path, index, seq.blocks.length - 1);
   if (selection.kind === "lane") {
@@ -2105,15 +2342,39 @@ export function editCapabilities(
       caps.setLaneHandle = caps.removeLane;
       caps.setLaneCondition = caps.removeLane;
     } else {
+      const fork = block as ForkBlock;
+      const laneIndex = selection.laneIndex;
+      // Removing a step's first edge: its next edge runs instead. That is
+      // what removing the edge means (the executor takes the first edge to
+      // an existing node), so it is allowed, and said.
+      const promotes =
+        fork.forkKind === "extra" && promotesOnRemoval(tree, lane.edgeId);
       caps.removeLane =
-        (block as ForkBlock).lanes.length > 1
-          ? OK
-          : no("scenarios.editor.cannot.lastLane");
+        fork.lanes.length <= 1
+          ? no("scenarios.editor.cannot.lastLane")
+          : revivesDeadEdge(
+                tree,
+                (t) => applyRemoveLane(t, nodeId, laneIndex),
+                promotes ? lane.edgeId : null,
+              )
+            ? no("scenarios.editor.cannot.revivesDeadEdge")
+            : promotes
+              ? { ok: true, note: "scenarios.editor.note.promotesNextEdge" }
+              : OK;
+      // A running lane's handle moving away would let the next edge with
+      // its old handle (an ignored lane) run.
+      const shadows = fork.lanes.some(
+        (l) =>
+          l !== lane &&
+          l.condition.kind === "ignored" &&
+          l.handle === lane.handle,
+      );
       caps.setLaneHandle =
-        (block as ForkBlock).forkKind === "switch" ||
-        (block as ForkBlock).forkKind === "choice"
-          ? OK
-          : no("scenarios.editor.cannot.noCondition");
+        fork.forkKind !== "switch" && fork.forkKind !== "choice"
+          ? no("scenarios.editor.cannot.noCondition")
+          : isLive(lane.condition) && shadows
+            ? no("scenarios.editor.cannot.revivesDeadEdge")
+            : OK;
       caps.setLaneCondition =
         lane.condition.kind === "case" || lane.condition.kind === "option"
           ? OK

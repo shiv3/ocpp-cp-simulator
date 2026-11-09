@@ -125,6 +125,75 @@ export function semantics(def: Pick<ScenarioDefinition, "nodes" | "edges">) {
   return out;
 }
 
+/** Which edges the executor follows (as the origin: all of them), by id. */
+export function liveEdgeIds(
+  def: Pick<ScenarioDefinition, "nodes" | "edges">,
+): Set<string> {
+  const program = lowerScenario<ScenarioNode, Edge>(def);
+  const live = new Set<string>();
+  for (const n of program.nodesById.values()) {
+    const followed =
+      n === program.origin
+        ? successors(program, n, { asOrigin: true })
+        : successors(program, n);
+    for (const e of followed) live.add(e.id);
+  }
+  return live;
+}
+
+/**
+ * What an edit changed beyond what it touched, as messages (empty: nothing).
+ * - A node whose outgoing edges (id, target, handle, in file order) are the
+ *   same before and after must run the same (`semantics`).
+ * - An edge the edit kept as it was (same id, source, target, handle) must
+ *   keep running, or keep never running: an edit must not revive a dead
+ *   edge or kill a live one it did not touch. `promoted` names the edges an
+ *   edit may make run on purpose (removing a step's first edge runs its
+ *   next one).
+ */
+export function semanticDrift(
+  before: Pick<ScenarioDefinition, "nodes" | "edges">,
+  after: Pick<ScenarioDefinition, "nodes" | "edges">,
+  promoted: ReadonlySet<string> = new Set(),
+): string[] {
+  const problems: string[] = [];
+  const outOf = (def: typeof before, id: string) =>
+    JSON.stringify(
+      def.edges
+        .filter((e) => e.source === id)
+        .map((e) => [e.id, e.target, e.sourceHandle ?? null]),
+    );
+  const semBefore = semantics(before);
+  const semAfter = semantics(after);
+  for (const id of Object.keys(semBefore)) {
+    if (!(id in semAfter) || outOf(before, id) !== outOf(after, id)) continue;
+    if (JSON.stringify(semBefore[id]) !== JSON.stringify(semAfter[id])) {
+      problems.push(`untouched node ${id} runs differently`);
+    }
+  }
+  const liveBefore = liveEdgeIds(before);
+  const liveAfter = liveEdgeIds(after);
+  const afterById = new Map(after.edges.map((e) => [e.id, e]));
+  for (const e of before.edges) {
+    const now = afterById.get(e.id);
+    if (
+      !now ||
+      now.source !== e.source ||
+      now.target !== e.target ||
+      (now.sourceHandle ?? null) !== (e.sourceHandle ?? null) ||
+      promoted.has(e.id)
+    ) {
+      continue;
+    }
+    if (liveBefore.has(e.id) !== liveAfter.has(e.id)) {
+      problems.push(
+        `untouched edge ${e.id} ${liveBefore.has(e.id) ? "stops" : "starts"} running`,
+      );
+    }
+  }
+  return problems;
+}
+
 /** xorshift32: a small seeded generator, so a failing case can be replayed. */
 export function xorshift(seed: number): () => number {
   let x = seed | 0 || 1;

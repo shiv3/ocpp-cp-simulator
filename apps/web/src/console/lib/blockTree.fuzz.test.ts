@@ -31,6 +31,7 @@ import { legacyDeriveStepLayout } from "./__fixtures__/legacyStepLayout";
 import {
   randomLayoutScenario,
   randomScenario,
+  semanticDrift,
   semantics,
   xorshift,
 } from "./__fixtures__/blockTreeKit";
@@ -164,7 +165,11 @@ describe("block tree fuzz (xorshift, 2–12 nodes)", () => {
         const seqs = allSeqs(tree);
         const placed = [...tree.nodePath.keys()];
         const label = (op: string) => `seed ${seed} ${op}`;
-        const run = (op: string, f: () => ScenarioDefinition) => {
+        const run = (
+          op: string,
+          f: () => ScenarioDefinition,
+          promoted?: ReadonlySet<string>,
+        ) => {
           let out: ScenarioDefinition;
           try {
             out = f();
@@ -174,6 +179,8 @@ describe("block tree fuzz (xorshift, 2–12 nodes)", () => {
             });
           }
           checkResult(out, label(op));
+          // Nothing the operation did not touch runs differently.
+          expect(semanticDrift(def, out, promoted), label(op)).toEqual([]);
           applied++;
           const name = op.split(" ")[0];
           byOp.set(name, (byOp.get(name) ?? 0) + 1);
@@ -330,8 +337,17 @@ describe("block tree fuzz (xorshift, 2–12 nodes)", () => {
               laneIndex,
             });
             if (lane.removeLane.ok) {
-              run(`removeLane ${nodeId}/${laneIndex}`, () =>
-                removeLane(def, tree, nodeId, laneIndex),
+              // Removing a step's first edge runs its next one: the
+              // capability says so.
+              const promoted =
+                lane.removeLane.note ===
+                "scenarios.editor.note.promotesNextEdge"
+                  ? new Set(fork.lanes.map((l) => l.edgeId))
+                  : undefined;
+              run(
+                `removeLane ${nodeId}/${laneIndex}`,
+                () => removeLane(def, tree, nodeId, laneIndex),
+                promoted,
               );
             }
             if (lane.setLaneHandle.ok) {

@@ -28,6 +28,7 @@ import {
 import {
   conditionText,
   isDeadLane,
+  laneHandle,
   lanesLeavingLoop,
   stepNumbers,
 } from "./stepTree";
@@ -49,6 +50,24 @@ const EDIT_CAP_GAP = 46;
 /** A fork card's bottom to its lane tags' top. */
 const FORK_DROP = 46;
 export const TAG_H = 22;
+/** The widest a lane tag grows for a long condition; past it the text is
+ *  cut (the full text is the tag's tooltip). */
+export const TAG_MAX_W = 380;
+/** Room a tag has beside its text: the lane letter, the step count and the
+ *  remove button, plus padding. */
+const TAG_CHROME = 76;
+/** Monospace 11px glyph advance. */
+const TAG_CHAR_W = 6.6;
+/** The width a lane tag needs to show `text` whole, from the card's width
+ *  up to `TAG_MAX_W`. */
+export function tagWidth(text: string): number {
+  return Math.min(
+    TAG_MAX_W,
+    Math.max(NODE_W, Math.ceil(text.length * TAG_CHAR_W) + TAG_CHROME),
+  );
+}
+/** A lane's side margin around its tag. */
+const TAG_MARGIN = 16;
 /** Lowest lane's bottom to the merge point, and the merge point to the
  *  next card. */
 const MERGE_DROP = 26;
@@ -131,6 +150,9 @@ export interface GraphTag {
   key: string;
   forkId: string;
   laneIndex: number;
+  /** The fork's handle the lane leaves on (`case-<n>`, `default`,
+   *  `option-<n>`), null for a lane with no row in the inspector. */
+  handle: string | null;
   /** Centre x, top y, width. */
   x: number;
   y: number;
@@ -292,6 +314,12 @@ export function layoutTreeGraph(
     bodyW +
     LOOP_RIGHT +
     (editable && hasFork(loop.body) ? PILL_ROOM : 0);
+  /** A lane is as wide as what it holds, or its tag. */
+  const laneWidth = (fork: ForkBlock, lane: Lane, ctx: Ctx) =>
+    Math.max(
+      measureSeq(lane.body, inner(ctx)).w,
+      tagWidth(conditionText(lane.condition, fork)) + TAG_MARGIN,
+    );
   const measureBlock = (block: Block, ctx: Ctx): { w: number; out: number } => {
     if (block.kind === "step") return { w: LANE_W, out: 0 };
     if (block.kind === "loop") {
@@ -314,7 +342,7 @@ export function layoutTreeGraph(
     let w = 0;
     let out = 0;
     block.lanes.forEach((lane, i) => {
-      const lw = measureSeq(lane.body, inner(ctx)).w;
+      const lw = laneWidth(block, lane, ctx);
       if (leaving.has(i)) out += lw;
       else w += lw;
     });
@@ -603,9 +631,7 @@ export function layoutTreeGraph(
     const leaving = ctx.outsideX !== null ? leavesLoop : new Set<number>();
     const tagTop = (isStart ? from.y : y + NODE_H) + FORK_DROP;
     const bodyTop = tagTop + TAG_H + GAP;
-    const laneWidths = fork.lanes.map(
-      (lane) => measureSeq(lane.body, inner(ctx)).w,
-    );
+    const laneWidths = fork.lanes.map((lane) => laneWidth(fork, lane, ctx));
     const staying = laneWidths.reduce(
       (sum, w, i) => (leaving.has(i) ? sum : sum + w),
       0,
@@ -708,7 +734,8 @@ export function layoutTreeGraph(
       laneIndex: i,
       x: lx,
       y: tagTop,
-      w: Math.min(NODE_W, lw - 16),
+      w: Math.min(tagWidth(text), lw - TAG_MARGIN),
+      handle: laneHandle(lane.condition),
       text,
       dead: isDeadLane(lane),
       leaves,

@@ -35,6 +35,7 @@ import {
   type ForkBlock,
   type ForkKind,
   type Lane,
+  type LaneCondition,
   type LoopBlock as LoopBlockModel,
   newLoopIsBounded,
   type Seq,
@@ -54,6 +55,7 @@ import {
   conditionText,
   forkSummary,
   isDeadLane,
+  laneHandle,
   lanesLeavingLoop,
   linkOf,
   stepNumbers,
@@ -531,6 +533,7 @@ const StepsView: React.FC<StepTreeViewProps> = (props) => {
     state,
     selectedStepId,
     onSelectStep,
+    onSelectLane,
     editable = false,
     onInsertStep,
     onInsertStepIntoLoop,
@@ -1097,33 +1100,63 @@ const StepsView: React.FC<StepTreeViewProps> = (props) => {
               n: number(fork.node.id) ?? "",
             })}
           </span>
-          {laneChip(laneIndex, chip)}
+          {laneChip(laneIndex, chip, {
+            forkId: fork.node.id,
+            condition: lane.condition,
+          })}
         </div>
         {renderSeq(lane.body, ctx, chip)}
       </li>
     );
   };
 
-  const laneChip = (laneIndex: number, chip: string) => (
-    <>
-      <span
-        aria-hidden
-        className={cn(
-          "flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[11px] font-semibold",
-          laneStyle(laneIndex).letter,
+  const laneChip = (
+    laneIndex: number,
+    chip: string,
+    open?: { forkId: string; condition: LaneCondition },
+  ) => {
+    const handle = open ? laneHandle(open.condition) : null;
+    const label =
+      onSelectLane && open && handle !== null
+        ? t("scenarioRun.tree.openLane", {
+            name: handle,
+            n: number(open.forkId) ?? "",
+          })
+        : null;
+    return (
+      <>
+        <span
+          aria-hidden
+          className={cn(
+            "flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[11px] font-semibold",
+            laneStyle(laneIndex).letter,
+          )}
+        >
+          {laneLetter(laneIndex)}
+        </span>
+        {label !== null && open && handle !== null ? (
+          <button
+            type="button"
+            data-lane-condition=""
+            title={chip}
+            aria-label={label}
+            onClick={() => onSelectLane?.(open.forkId, handle)}
+            className="min-w-0 max-w-full break-all rounded-md bg-cx-sub px-1.5 py-0.5 text-left font-mono text-[11px] text-cx-fg2 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden hover:text-cx-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-cx-accent"
+          >
+            {chip}
+          </button>
+        ) : (
+          <span
+            data-lane-condition=""
+            title={chip}
+            className="min-w-0 max-w-full break-all rounded-md bg-cx-sub px-1.5 py-0.5 font-mono text-[11px] text-cx-fg2 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden"
+          >
+            {chip}
+          </span>
         )}
-      >
-        {laneLetter(laneIndex)}
-      </span>
-      <span
-        data-lane-condition=""
-        title={chip}
-        className="min-w-0 truncate rounded-md bg-cx-sub px-1.5 py-0.5 font-mono text-[11px] text-cx-fg2"
-      >
-        {chip}
-      </span>
-    </>
-  );
+      </>
+    );
+  };
 
   const renderFork = (
     fork: ForkBlock,
@@ -1243,7 +1276,10 @@ const StepsView: React.FC<StepTreeViewProps> = (props) => {
           data-testid="lane-tag"
           className="mb-2 flex min-w-[230px] items-center gap-2"
         >
-          {laneChip(li, chip)}
+          {laneChip(li, chip, {
+            forkId: fork.node.id,
+            condition: lane.condition,
+          })}
           <span className="flex-1" />
           <span className="font-mono text-xs text-cx-muted">
             {state === undefined

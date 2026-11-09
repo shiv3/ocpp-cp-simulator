@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 import { cn } from "@/lib/utils";
 import CollapsibleSide from "../../components/CollapsibleSide";
@@ -51,7 +51,25 @@ const TemplatePreview: React.FC<{
   const tree = useMemo(() => recognizeBlockTree(scenario), [scenario]);
   const drawable = isDrawableTree(tree);
   const [view, setView] = useState<PreviewView>("graph");
-  const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
+  const [selectedStepId, setSelectedStep] = useState<string | null>(null);
+  /** A lane tag was clicked: its switch / choice is selected and the
+   *  inspector opens that lane's row. */
+  const [laneFocus, setLaneFocus] = useState<{
+    nodeId: string;
+    handle: string;
+    nonce: number;
+  } | null>(null);
+  const setSelectedStepId = useCallback(
+    (next: string | null | ((prev: string | null) => string | null)) => {
+      setLaneFocus(null);
+      setSelectedStep(next);
+    },
+    [],
+  );
+  const openLane = (nodeId: string, handle: string) => {
+    setSelectedStep(nodeId);
+    setLaneFocus((prev) => ({ nodeId, handle, nonce: (prev?.nonce ?? 0) + 1 }));
+  };
   const panel = useCollapsedPanel(PREVIEW_COLLAPSED_KEY);
   // Picking a step opens the panel it is shown in.
   useEffect(() => {
@@ -183,6 +201,7 @@ const TemplatePreview: React.FC<{
                 tree={tree}
                 selectedStepId={selectedStepId}
                 onSelectStep={setSelectedStepId}
+                onSelectLane={openLane}
                 issues={issues}
               />
             ) : (
@@ -190,6 +209,7 @@ const TemplatePreview: React.FC<{
                 tree={tree}
                 selectedStepId={selectedStepId}
                 onSelectStep={setSelectedStepId}
+                onSelectLane={openLane}
                 issues={issues}
               />
             )}
@@ -205,6 +225,7 @@ const TemplatePreview: React.FC<{
               // The editor's forms, disabled as a whole.
               <fieldset disabled className="min-w-0 disabled:opacity-90">
                 <StepInspector
+                  focusLane={laneFocus}
                   node={selected}
                   onChange={noop}
                   scenario={scenario}

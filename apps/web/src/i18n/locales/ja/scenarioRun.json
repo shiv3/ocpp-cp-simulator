@@ -118,6 +118,7 @@
   "scenarioRun.tree.afterLeaving": "ステップ {{n}} でループを抜けた後",
   "scenarioRun.tree.addLaneTo": "ステップ {{n}} に分岐を追加",
   "scenarioRun.tree.removeLane": "分岐 {{lane}} を削除",
+  "scenarioRun.tree.openLane": "ステップ {{n}} の {{name}} を編集",
   "scenarioRun.tree.deadLane": "この分岐は実行されません",
   "scenarioRun.tree.leavesLoop": "ループを抜ける (下に表示)",
   "scenarioRun.tree.join": "合流 · {{mode}}",

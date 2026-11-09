@@ -43,6 +43,7 @@ export const SCANNED_DIRS = [
 export const SCANNED_FILES = [
   "packages/core/src/cp/infrastructure/transport/OCPPMessageHandler.ts",
   "packages/core/src/cp/infrastructure/transport/OCPPMessageHandlerV201.ts",
+  "packages/core/src/cp/infrastructure/transport/v16/serialCallQueueV16.ts",
   "packages/core/src/cp/infrastructure/transport/CallWaiters.ts",
   "packages/core/src/cp/infrastructure/transport/ExpertCalls.ts",
   "packages/core/src/cp/infrastructure/transport/RawFrameSender.ts",

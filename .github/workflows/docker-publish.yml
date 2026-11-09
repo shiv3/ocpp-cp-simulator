@@ -126,6 +126,9 @@ jobs:
           build-args: |
             APP_COMMIT=${{ github.sha }}
             BUN_VERSION=${{ steps.bun-version.outputs.version }}
+          # @open-ocpp-trace/* is on GitHub Packages (Dockerfile, bunfig.toml).
+          secrets: |
+            github_token=${{ github.token }}
           # Speed up rebuilds by sharing layers across runs. GitHub Actions
           # cache is local to the repo so it's safe to write back.
           cache-from: type=gha

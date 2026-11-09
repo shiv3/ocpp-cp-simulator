@@ -4,3 +4,12 @@
 # hides transitive packages such as bun-types from the TypeScript projects
 # and the tools that look them up beside the root.
 linker = "hoisted"
+
+# The trace format SDK (@open-ocpp-trace/core, @open-ocpp-trace/jsonl, #886) is
+# published on GitHub Packages only, which asks for a token even to install a
+# public package. Any token with `read:packages` works:
+#   GITHUB_TOKEN=$(gh auth token) bun install
+# CI passes the workflow's own token; the Docker build receives it as the
+# `github_token` build secret.
+[install.scopes]
+"@open-ocpp-trace" = { url = "https://npm.pkg.github.com/", token = "$GITHUB_TOKEN" }

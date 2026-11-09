@@ -53,6 +53,8 @@
       },
       "devDependencies": {
         "@eslint/js": "^10.0.1",
+        "@open-ocpp-trace/core": "0.1.0",
+        "@open-ocpp-trace/jsonl": "0.1.0",
         "@tailwindcss/postcss": "^4.3.4",
         "@tauri-apps/cli": "^2.12.4",
         "@testing-library/jest-dom": "^7.0.1",
@@ -308,6 +310,10 @@
     "@oozcitak/url": ["@oozcitak/url@3.0.0", "", { "dependencies": { "@oozcitak/infra": "^2.0.2", "@oozcitak/util": "^10.0.0" } }, "sha512-ZKfET8Ak1wsLAiLWNfFkZc/BraDccuTJKR6svTYc7sVjbR+Iu0vtXdiDMY4o6jaFl5TW2TlS7jbLl4VovtAJWQ=="],
 
     "@oozcitak/util": ["@oozcitak/util@10.0.0", "", {}, "sha512-hAX0pT/73190NLqBPPWSdBVGtbY6VOhWYK3qqHqtXQ1gK7kS2yz4+ivsN07hpJ6I3aeMtKP6J6npsEKOAzuTLA=="],
+
+    "@open-ocpp-trace/core": ["@open-ocpp-trace/core@0.1.0", "https://npm.pkg.github.com/download/@open-ocpp-trace/core/0.1.0/cad243682df917fdea1fcf29884f7947c2f02c35", {}, "sha512-US6bZlqZepowCAdf6XuuEoXeI1MKBkxxaPXqbkYh+xlRBkz+unBl15gEW5mbYEmh3AXUIqh6ROzwgm9DnknWiw=="],
+
+    "@open-ocpp-trace/jsonl": ["@open-ocpp-trace/jsonl@0.1.0", "https://npm.pkg.github.com/download/@open-ocpp-trace/jsonl/0.1.0/3a89a30b2490f6a70e14bc5a12428d18b13ef0f7", { "dependencies": { "@open-ocpp-trace/core": "0.1.0" } }, "sha512-d2s/ZGevHcpNRZCMAYbXVWnm7NtunzjgHvLT0Ljv1SD6j7E9/H3xwJcDDm966vYfAXP0fVNw+Ikiavljc+NmrA=="],
 
     "@oxc-project/types": ["@oxc-project/types@0.155.0", "", {}, "sha512-SeE8JPwW1xs1tHeNycjUtUBdhorRa8o4jlvjwk49R7/Z291i+4DQa7JJIgOm/TaYQZx+QrPQbVJ/9c8dMIZN8Q=="],
 

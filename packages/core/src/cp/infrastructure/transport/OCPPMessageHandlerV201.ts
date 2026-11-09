@@ -68,8 +68,7 @@ import type {
 } from "../../domain/connector/MeterValueBuilder";
 import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
 import { toV2ConnectorStatus } from "../../domain/charge-point/runtimeValueKeys";
-import { MAX_TIMER_MS } from "../../shared/timers";
-import { clockOf, unrefTimerHandle } from "../../shared/clock";
+import { clockOf } from "../../shared/clock";
 import type { SimClock, TimerHandle } from "../../shared/clock";
 import { systemRngStreams } from "../../shared/rng";
 import type { Rng } from "../../shared/rng";
@@ -87,9 +86,9 @@ import { CertificateSigningV201 } from "./v201/certificateSigningV201";
 import {
   TransactionEventDeliveryV201,
   type TransactionEventDelivery,
-  type TransactionEventMessage,
 } from "./v201/transactionEventDeliveryV201";
 import { EventQueuesV201 } from "./v201/eventQueuesV201";
+import { CallPipelineV201, type PendingRequest } from "./v201/callPipelineV201";
 import {
   OfflineReplayV201,
   QUEUED_ON_OCPP2,
@@ -136,37 +135,6 @@ function ocppStatusToTransactionChargingState(
   }
 }
 
-/** A written CP→CSMS CALL awaiting its answer. */
-interface PendingRequest {
-  action: V201Action;
-  payload: V201RequestPayload;
-  /** Set on the TransactionEvents this handler builds (#490). */
-  transactionEvent?: TransactionEventDelivery;
-  /** Its `MessageTimeout` timer (#529), armed when the CALL is written;
-   *  cleared on answer and WebSocket close. */
-  timeout?: TimerHandle;
-}
-
-/** A CALL waiting for, or holding, the §4.1.1 slot (#708). */
-interface CallJob {
-  readonly action: V201Action;
-  readonly messageId: string;
-  /** What is written (the behaviors' beforeSend applied). */
-  readonly payload: V201RequestPayload;
-  /** The CALL as built: answers are matched with it. */
-  readonly built: V201RequestPayload;
-  readonly onDropped?: (reason: string) => void;
-  readonly transactionEvent?: TransactionEventDelivery;
-  readonly onWritten?: () => void;
-}
-
-/** The CALL holding the slot: handed to the socket, or written. */
-type CallSlot =
-  | { phase: "queued"; id: string }
-  // `timer` is absent for a TransactionEvent: its own MessageTimeout timer
-  // (armTransactionEventTimeout) frees the slot.
-  | { phase: "written"; id: string; timer?: TimerHandle };
-
 export {
   MAX_QUEUED_NOTIFY_EVENTS,
   MAX_QUEUED_SECURITY_EVENTS,
@@ -188,11 +156,8 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
    *  idToken has to come from the original Authorize.req. Entries are
    *  removed once the matching CALLRESULT/CALLERROR arrives. */
   private readonly _pendingRequests = new Map<string, PendingRequest>();
-  /** OCPP-J 2.0.1 / 2.1 Part 4 §4.1.1 (#708): CALLs wait here for the one in
-   *  flight; `_callSlot` holds the slot from the hand-over to the socket until
-   *  the CALLRESULT / CALLERROR, the `MessageTimeout` or a close. */
-  private _callQueue: CallJob[] = [];
-  private _callSlot: CallSlot | null = null;
+  /** The §4.1.1 one-CALL-in-flight pipeline of CP→CSMS CALLs (#877). */
+  private readonly _calls: CallPipelineV201;
   /** Written CALLs whose loss a close must make good until the answer comes
    *  (#664): a critical SecurityEventNotification (A04.FR.02) and the queued
    *  rows of the E11 table (security events, NotifyEvent parts) that stay in
@@ -234,7 +199,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   // A CALL waits for the one in flight (#708): when its caller gave up it is
   // taken back out of the queue.
   private readonly _expertCalls = new ExpertCalls(
-    (id) => this.withdrawQueued(id),
+    (id) => this._calls.withdrawQueued(id),
     () => this.clock,
   );
   // Response effect queue for deferred handler side effects
@@ -326,8 +291,21 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       generateMessageId: () => this.generateMessageId(),
       send: (action, messageId, payload, onDropped, transactionEvent) =>
         this.send(action, messageId, payload, onDropped, transactionEvent),
-      releaseCall: (messageId, pump) => this.releaseCall(messageId, pump),
-      pumpCalls: () => this.pumpCalls(),
+      releaseCall: (messageId, pump) =>
+        this._calls.releaseCall(messageId, pump),
+      pumpCalls: () => this._calls.pumpCalls(),
+    });
+
+    this._calls = new CallPipelineV201({
+      chargePoint,
+      logger,
+      webSocket,
+      codec,
+      pendingRequests: this._pendingRequests,
+      transactionEvents: this._transactionEvents,
+      markOutageOver: () => {
+        this._outageHandled = false;
+      },
     });
 
     // Initialize response effect queue with deps
@@ -435,236 +413,20 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     action: V201Action,
     messageId: string,
     payload: V201RequestPayload,
-    /** Told when the CALL never reached the wire (#348 waiters). */
     onDropped?: (reason: string) => void,
     transactionEvent?: TransactionEventDelivery,
     onWritten?: () => void,
-    /** The behaviors' beforeSend already ran (the expert path). */
     intercepted = false,
   ): void {
-    if (!this._webSocket.isConnected()) {
-      this._logger.warn(
-        `[v2.0.1] Not connected, dropping ${action}`,
-        LogType.WEBSOCKET,
-      );
-      onDropped?.("not_connected");
-      return;
-    }
-    // The CALL as built: answers are matched with it, not with the copy a
-    // behavior's beforeSend rewrote (the same rule as on 1.6).
-    const built = payload;
-    if (!intercepted) {
-      const decision = behaviorTapOf(this._chargePoint).beforeSend(
-        action,
-        payload,
-      );
-      if ("drop" in decision) {
-        this._logger.warn(
-          `[v2.0.1] Dropping ${action}: a behavior's beforeSend dropped it`,
-          LogType.OCPP,
-        );
-        onDropped?.("dropped_by_behavior");
-        // A dropped Heartbeat is a Heartbeat the CSMS never answered: the
-        // idle timer still goes on, or the periodic Heartbeat would stop for good.
-        if (action === "Heartbeat") this._chargePoint.notifyOutgoingCall(false);
-        return;
-      }
-      payload = decision.payload as V201RequestPayload;
-    }
-    const warning = this._codec?.outgoingWarning(action, payload);
-    if (warning) {
-      this._logger.warn(warning, LogType.OCPP);
-    }
-    // §4.1.1 (#708): one CALL in flight. The job waits for the slot; the
-    // answer, the timeout or a close releases it.
-    this._callQueue.push({
+    this._calls.send(
       action,
       messageId,
       payload,
-      built,
       onDropped,
       transactionEvent,
       onWritten,
-    });
-    this.pumpCalls();
-  }
-
-  /**
-   * Hand the next eligible CALL to the socket unless one is in flight (queued
-   * with the socket or written). Re-entrant safe: the slot is taken before the
-   * socket sees the CALL, and a settlement that fires synchronously finds it.
-   */
-  private pumpCalls(): void {
-    while (this._callSlot === null && this._callQueue.length > 0) {
-      if (!this._webSocket.isConnected()) return;
-      const index = this.nextEligibleCall();
-      if (index === -1) return;
-      const [job] = this._callQueue.splice(index, 1);
-      if (job === undefined) return;
-      this.transmitCall(job);
-    }
-  }
-
-  /**
-   * The first CALL that may go out now. Non-TransactionEvent CALLs go in
-   * queue order. E13.FR.03/04 deliver transaction-related messages one after
-   * the other ("continue with the next transaction-related message"): a
-   * TransactionEvent waits while an older message is waiting out its
-   * `MessageAttemptInterval`, has a transmission queued or still awaits
-   * its answer, so a resent
-   * `Started` is not overtaken by `Ended`. A message settled or discarded
-   * while its CALL waited is never written.
-   */
-  private nextEligibleCall(): number {
-    for (let i = 0; i < this._callQueue.length; i++) {
-      const delivery = this._callQueue[i]!.transactionEvent;
-      if (delivery === undefined) return i;
-      if (delivery.message.done) return i; // dropped by transmitCall
-      if (!this.hasOlderUndeliveredEvent(delivery.message)) return i;
-    }
-    return -1;
-  }
-
-  private hasOlderUndeliveredEvent(message: TransactionEventMessage): boolean {
-    for (const older of this._transactionEvents.active) {
-      if (older === message) return false;
-      if (older.resend !== undefined) return true;
-      for (const id of older.inFlight) {
-        // A transmission that already timed out only waits for a late answer:
-        // when its resend was dropped (a network-sim `queue_overflow`, a
-        // behavior's `beforeSend`) no further attempt is scheduled, and
-        // holding the later events for it would never end (#565). One still
-        // travelling through the network-sim has no pending entry yet.
-        const attempt =
-          this._pendingRequests.get(id)?.transactionEvent?.attempt;
-        if (attempt === undefined || attempt > older.failed) return true;
-      }
-      if (
-        this._callQueue.some((job) => job.transactionEvent?.message === older)
-      ) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  private transmitCall(job: CallJob): void {
-    const { action, messageId, payload, built, transactionEvent } = job;
-    if (transactionEvent?.message.done) {
-      // Settled or discarded while it waited: nothing to send. The
-      // transmission was forgotten with the message.
-      return;
-    }
-    this._callSlot = { phase: "queued", id: messageId };
-    const gen = this._webSocket.currentGeneration();
-    const accepted = this._webSocket.sendAction(
-      messageId,
-      action,
-      payload,
-      gen,
-      (settlement) => {
-        if (settlement.outcome === "written") {
-          this._outageHandled = false;
-          // A transmission written after its message was settled or
-          // discarded is not tracked: nothing would ever remove it.
-          if (transactionEvent?.message.done) {
-            this._chargePoint.notifyOutgoingCall(false);
-            this.releaseCall(messageId);
-            return;
-          }
-          this._pendingRequests.set(messageId, {
-            action,
-            payload: built,
-            ...(transactionEvent
-              ? {
-                  transactionEvent,
-                  timeout: this._transactionEvents.armTransactionEventTimeout(
-                    transactionEvent,
-                    messageId,
-                  ),
-                }
-              : {}),
-          });
-          this.armCallTimeout(messageId, transactionEvent !== undefined);
-          this._chargePoint.notifyOutgoingCall(action === "Heartbeat");
-          job.onWritten?.();
-        } else {
-          // On drop outcomes (socket_closed, disposed, write_failed,
-          // queue_overflow): no retry here. The caller is told; a
-          // TransactionEvent's delivery queues it when offline (#528, E11),
-          // any other CALL is lost.
-          const closing =
-            settlement.outcome === "socket_closed" ||
-            settlement.outcome === "disposed";
-          this.releaseCall(messageId, false);
-          job.onDropped?.(settlement.outcome);
-          // A close hands the rest of the queue to onWebSocketClosed.
-          if (!closing) this.pumpCalls();
-        }
-      },
+      intercepted,
     );
-    if (!accepted) {
-      this.releaseCall(messageId, false);
-      job.onDropped?.("not_accepted");
-      this.pumpCalls();
-      // send-false: the CALL was never accepted; preserve current behavior
-      // (likely just a warn/log already in place from isConnected check above)
-      this._logger.debug(
-        `[v2.0.1] sendAction returned false for ${action}`,
-        LogType.WEBSOCKET,
-      );
-    }
-  }
-
-  /** Arm the slot's timeout once the CALL is written: after `MessageTimeout`
-   *  seconds the CALL counts as timed out (Part 4 §4.1.1) and the next one
-   *  may go. Its pending entry stays, so a late answer is still recognised. */
-  private armCallTimeout(messageId: string, ownTimer: boolean): void {
-    const cur = this._callSlot;
-    if (!cur || cur.id !== messageId) return;
-    if (ownTimer) {
-      this._callSlot = { phase: "written", id: messageId };
-      return;
-    }
-    const configuration = this._chargePoint.configuration;
-    const seconds =
-      typeof configuration.messageTimeout === "function"
-        ? configuration.messageTimeout()
-        : 30;
-    const timer = this.clock.setTimeout(
-      () => {
-        const slot = this._callSlot;
-        if (!slot || slot.id !== messageId) return;
-        this._logger.warn(
-          `[v2.0.1] CALL ${messageId} got no answer within ${seconds}s; releasing the slot`,
-          LogType.OCPP,
-        );
-        this._callSlot = null;
-        this.pumpCalls();
-      },
-      Math.min(Math.max(1, seconds) * 1000, MAX_TIMER_MS),
-    );
-    unrefTimerHandle(timer);
-    this._callSlot = { phase: "written", id: messageId, timer };
-  }
-
-  /** Free the slot `messageId` holds (answer, drop or timeout) and, unless
-   *  `pump` is false, send the next CALL. */
-  private releaseCall(messageId: string, pump = true): void {
-    const cur = this._callSlot;
-    if (!cur || cur.id !== messageId) return;
-    if (cur.phase === "written") this.clearTimer(cur.timer);
-    this._callSlot = null;
-    if (pump) this.pumpCalls();
-  }
-
-  /** Take a CALL back out of the queue if it has not been handed to the
-   *  socket (#389: its caller was told "no answer"). */
-  private withdrawQueued(messageId: string): boolean {
-    const index = this._callQueue.findIndex((j) => j.messageId === messageId);
-    if (index === -1) return false;
-    this._callQueue.splice(index, 1);
-    return true;
   }
 
   private handleIncomingMessage(
@@ -786,14 +548,14 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       } finally {
         this.settleDelivery(messageId);
         // The answer frees the §4.1.1 slot (#708), whatever handling it did.
-        this.releaseCall(messageId);
+        this._calls.releaseCall(messageId);
       }
     } else if (messageType === OCPPMessageType.CALLERROR) {
       try {
         this.handleCallError(messageId, payload);
       } finally {
         this.settleDelivery(messageId);
-        this.releaseCall(messageId);
+        this._calls.releaseCall(messageId);
       }
     }
   }
@@ -1333,14 +1095,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     // #708: the CALLs still waiting for the §4.1.1 slot never reached the
     // wire. A TransactionEvent among them is one of the active messages
     // queued below; the others are told, as the socket tells a CALL it drops.
-    const waiting = this._callQueue;
-    this._callQueue = [];
-    const slot = this._callSlot;
-    this._callSlot = null;
-    if (slot?.phase === "written") this.clearTimer(slot.timer);
-    for (const job of waiting) {
-      if (job.transactionEvent === undefined) job.onDropped?.("socket_closed");
-    }
+    this._calls.closeQueue();
     // #664: written but unanswered critical events and queued rows go back to
     // the E11 table (a row never left it; a live event is queued now).
     const unanswered = [...this._unansweredDeliveries.values()];

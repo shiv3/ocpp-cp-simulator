@@ -48,6 +48,7 @@ export const SCANNED_FILES = [
   "packages/core/src/cp/infrastructure/transport/v201/transactionEventDeliveryV201.ts",
   "packages/core/src/cp/infrastructure/transport/v201/offlineReplayV201.ts",
   "packages/core/src/cp/infrastructure/transport/v201/eventQueuesV201.ts",
+  "packages/core/src/cp/infrastructure/transport/v201/callPipelineV201.ts",
   "packages/core/src/cp/infrastructure/transport/CallWaiters.ts",
   "packages/core/src/cp/infrastructure/transport/ExpertCalls.ts",
   "packages/core/src/cp/infrastructure/transport/RawFrameSender.ts",

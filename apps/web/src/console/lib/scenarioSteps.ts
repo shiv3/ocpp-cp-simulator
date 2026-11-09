@@ -257,21 +257,24 @@ function edgeReuser(edges: readonly Edge[]) {
         sourceHandle === undefined
           ? 0
           : list.findIndex((e) => handleOf(e) === sourceHandle);
-      const [existing] = list.splice(Math.max(match, 0), 1);
-      if (!usedIds.has(existing.id)) {
-        usedIds.add(existing.id);
-        // A lane asks for the handle its own edge had, and the pair's edge
-        // with that handle is taken first (two empty lanes both run to
-        // END), so this is a guard: the lane's handle wins.
-        if (sourceHandle === undefined || handleOf(existing) === sourceHandle) {
-          return existing;
-        }
-        if (sourceHandle === null) {
-          const { sourceHandle: _dropped, ...rest } = existing;
-          return rest;
-        }
-        return { ...existing, sourceHandle };
+      const [taken] = list.splice(Math.max(match, 0), 1);
+      // Two edges of different pairs may share an id: keep the later one's
+      // content (unknown fields included) and give it a fresh id.
+      const existing = usedIds.has(taken.id)
+        ? { ...taken, id: crypto.randomUUID() }
+        : taken;
+      usedIds.add(existing.id);
+      // A lane asks for the handle its own edge had, and the pair's edge
+      // with that handle is taken first (two empty lanes both run to END),
+      // so this is a guard: the lane's handle wins.
+      if (sourceHandle === undefined || handleOf(existing) === sourceHandle) {
+        return existing;
       }
+      if (sourceHandle === null) {
+        const { sourceHandle: _dropped, ...rest } = existing;
+        return rest;
+      }
+      return { ...existing, sourceHandle };
     }
     const fresh =
       id !== undefined && !usedIds.has(id) ? id : crypto.randomUUID();

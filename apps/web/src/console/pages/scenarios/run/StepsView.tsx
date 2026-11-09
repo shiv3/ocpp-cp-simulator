@@ -773,7 +773,9 @@ const StepsView: React.FC<StepTreeViewProps> = (props) => {
           </div>
           <div
             data-testid="step-branches"
-            className="grid auto-cols-[minmax(230px,1fr)] grid-flow-col gap-3"
+            // Lanes grow to what they hold (a nested branch point is
+            // wider than one lane); the view scrolls sideways when wide.
+            className="flex gap-3"
           >
             {fork.lanes.map((lane, li) =>
               renderLane(fork, lane, li, leaving.has(li), ctx),
@@ -823,12 +825,17 @@ const StepsView: React.FC<StepTreeViewProps> = (props) => {
         data-leaves-loop={leaves ? "" : undefined}
         title={dead ? t("scenarioRun.tree.deadLane") : undefined}
         className={cn(
-          "min-w-0",
+          // No min-width of its own: a lane is at least as wide as what it
+          // holds (its tag is 230px).
+          "flex-1 basis-0",
           dead &&
             "rounded-[10px] border border-dashed border-cx-border-strong p-1.5 opacity-60",
         )}
       >
-        <div data-testid="lane-tag" className="mb-2 flex items-center gap-2">
+        <div
+          data-testid="lane-tag"
+          className="mb-2 flex min-w-[230px] items-center gap-2"
+        >
           {laneChip(li, chip)}
           <span className="flex-1" />
           <span className="font-mono text-xs text-cx-muted">

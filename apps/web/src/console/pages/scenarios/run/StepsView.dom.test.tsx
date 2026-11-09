@@ -113,7 +113,7 @@ describe("StepsView (block tree)", () => {
     const outer = container.querySelector('[data-fork="route"]')!;
     expect(
       outer.querySelector('[data-testid="fork-header"]')?.textContent,
-    ).toBe("Switch on $from: call.idTag");
+    ).toBe('Switch on "Accepted"');
     const lane0 = outer.querySelector('[data-lane="0"]')!;
     const inner = lane0.querySelector('[data-fork="inner"]')!;
     expect(inner).toBeTruthy();

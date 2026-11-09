@@ -63,7 +63,7 @@ export const switchInLane = () =>
     "switch-in-lane",
     [
       START(),
-      sw("route", ["Accepted"], { $from: "call.idTag" }),
+      sw("route", ["Accepted"], "Accepted"),
       n("a"),
       sw("inner", ["Charging"]),
       n("x"),

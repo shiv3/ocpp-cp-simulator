@@ -91,6 +91,7 @@ import {
 } from "./v201/transactionEventDeliveryV201";
 import { EventQueuesV201 } from "./v201/eventQueuesV201";
 import {
+  OfflineReplayV201,
   QUEUED_ON_OCPP2,
   type V201QueuedAction,
 } from "./v201/offlineReplayV201";
@@ -103,10 +104,7 @@ import {
   type V201RequestPayload,
 } from "./v201/inboundRegistryV201";
 import { ResponseEffectQueue, type GenerationToken } from "./network-sim";
-import {
-  PendingMessageQueue,
-  type PendingMessage,
-} from "../../domain/transport/PendingMessageQueue";
+import { PendingMessageQueue } from "../../domain/transport/PendingMessageQueue";
 import { CallExchange } from "./inbound/CallExchange";
 import { InboundCallGate, portsAliased } from "./inbound/InboundCallGate";
 
@@ -220,6 +218,8 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   private readonly _transactionEvents: TransactionEventDeliveryV201;
   /** SecurityEventNotification and NotifyEvent queues (#877). */
   private readonly _eventQueues: EventQueuesV201;
+  /** The E11 replay after Boot Accepted (#877). */
+  private readonly _offlineReplay: OfflineReplayV201;
   /** Control-plane `data_transfer` callers waiting for the CSMS's answer
    *  (#348), keyed by CALL id — see the 1.6 handler's twin. */
   private readonly _dataTransferWaiters = new CallWaiters<DataTransferResult>(
@@ -343,6 +343,17 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       logPrefix: "[v2.0.1] ",
       info: (message) => this._logger.info(message, LogType.OCPP),
       warn: (message) => this._logger.warn(message, LogType.OCPP),
+    });
+
+    this._offlineReplay = new OfflineReplayV201({
+      logger,
+      webSocket,
+      pendingQueue: this._pendingQueue,
+      transactionEvents: this._transactionEvents,
+      eventQueues: this._eventQueues,
+      markOutageOver: () => {
+        this._outageHandled = false;
+      },
     });
 
     // Register close-transaction callback for effect flushing
@@ -1349,62 +1360,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     this._certificates.onConnectionClosed();
   }
 
-  /**
-   * #528, OCPP 2.0.1 / 2.1 E11.FR.02: once BootNotification is Accepted,
-   * send the queued TransactionEvents in order, each with `offline = true`
-   * (E11.FR.07: a queued message is set Offline). The seqNo is the one the
-   * event was built with. Each replay is a fresh E13 delivery: its
-   * transmission and failure counts restart at zero, as a 1.6 replay goes
-   * through `sendRequest` anew. A row stays in the queue until the CSMS answers
-   * it or E13 discards it (#554); a close before the answer puts the same
-   * row back in its old position. A
-   * replay the socket refuses while it stays open (`not_accepted`, a
-   * network-sim overflow) stays at the head and the replay stops there, so
-   * the order holds; it waits for the next Boot Accepted. E13 owns the
-   * attempt counting, so the queue's own limit is off. Queued NotifyEvents
-   * (#538, N07.FR.04) replay in the same pass, in the order they were
-   * queued among the TransactionEvents.
-   */
   public flushPendingQueue(): void {
-    if (!this._webSocket.isConnected()) return;
-    // The connection is live: a replay dropped from here on waits for the
-    // next close to be queued again, so this loop never feeds itself.
-    this._outageHandled = false;
-    this._transactionEvents.reportOutageDrops();
-    this._eventQueues.reportOutageDrops();
-    let replayed = 0;
-    this._pendingQueue.replay((queued, rowId) => {
-      if (!this._webSocket.isConnected()) return false;
-      if (this.replayQueued(queued, rowId) === "held") return false;
-      replayed += 1;
-      return true;
-    });
-    this._transactionEvents.refreshAwaitingReplay();
-    if (replayed > 0) {
-      this._logger.info(
-        `[v2.0.1] Replayed ${replayed} queued message(s); ${this._pendingQueue.size()} left`,
-        LogType.OCPP,
-      );
-    }
-  }
-
-  /** Send one queued message again. Each queued action gets its own case. */
-  private replayQueued(
-    queued: PendingMessage<V201QueuedAction>,
-    rowId: string,
-  ): "replayed" | "held" {
-    switch (queued.action) {
-      case "TransactionEvent": {
-        return this._transactionEvents.replay(queued, rowId);
-      }
-      case "NotifyEvent": {
-        // A NotifyEvent has no E13 delivery: its row leaves once answered.
-        return this._eventQueues.replayNotifyEvent(queued, rowId);
-      }
-      case "SecurityEventNotification": {
-        // Like a NotifyEvent, its row leaves once answered (#552, #554, #664).
-        return this._eventQueues.replaySecurityEvent(queued, rowId);
-      }
-    }
+    this._offlineReplay.flushPendingQueue();
   }
 }

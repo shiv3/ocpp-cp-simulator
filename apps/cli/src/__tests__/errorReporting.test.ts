@@ -48,6 +48,16 @@ function fakeAdapter(reporter: ErrorReporter | null = recordingReporter()) {
   return { module: { createErrorReporter }, createErrorReporter };
 }
 
+/**
+ * Move fake time on, then let the promise chains it released run. Sync
+ * `advanceTimersByTime`: `bun test` also runs this file (CI), and Bun's `vi`
+ * has no `advanceTimersByTimeAsync`.
+ */
+async function advance(ms: number): Promise<void> {
+  vi.advanceTimersByTime(ms);
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+}
+
 function recordingReporter() {
   return {
     captureException: vi.fn(),
@@ -283,9 +293,9 @@ describe("reportFatalError", () => {
       let settled = false;
       void reportFatalError(new Error("x")).then(() => (settled = true));
 
-      await vi.advanceTimersByTimeAsync(1999);
+      await advance(1999);
       expect(settled).toBe(false);
-      await vi.advanceTimersByTimeAsync(1);
+      await advance(1);
       expect(settled).toBe(true);
     } finally {
       vi.useRealTimers();
@@ -357,9 +367,9 @@ describe("process handlers", () => {
 
       emit("uncaughtException", new Error("boom"));
 
-      await vi.advanceTimersByTimeAsync(1999);
+      await advance(1999);
       expect(proc.exit).not.toHaveBeenCalled();
-      await vi.advanceTimersByTimeAsync(1);
+      await advance(1);
       expect(proc.exit).toHaveBeenCalledWith(1);
     } finally {
       vi.useRealTimers();

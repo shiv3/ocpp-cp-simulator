@@ -1,5 +1,11 @@
 import { useTranslation } from "react-i18next";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import CollapsibleSide from "../../../components/CollapsibleSide";
 import { sidePanelGrid, useCollapsedPanel } from "../../../lib/collapsedPanel";
@@ -176,7 +182,25 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
   const [scenario, setScenario] = useState<ScenarioDefinition | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
-  const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
+  const [selectedStepId, setSelectedStep] = useState<string | null>(null);
+  /** A lane tag was clicked: its switch / choice is selected and the
+   *  inspector opens that lane's row. */
+  const [laneFocus, setLaneFocus] = useState<{
+    nodeId: string;
+    handle: string;
+    nonce: number;
+  } | null>(null);
+  const setSelectedStepId = useCallback(
+    (next: string | null | ((prev: string | null) => string | null)) => {
+      setLaneFocus(null);
+      setSelectedStep(next);
+    },
+    [],
+  );
+  const openLane = (nodeId: string, handle: string) => {
+    setSelectedStep(nodeId);
+    setLaneFocus((prev) => ({ nodeId, handle, nonce: (prev?.nonce ?? 0) + 1 }));
+  };
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   /** A step the keyboard asked to delete, waiting for the in-page answer. */
@@ -225,7 +249,7 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [chargePointService, cpId, connectorId, scenarioId]);
+  }, [chargePointService, cpId, connectorId, scenarioId, setSelectedStepId]);
 
   // The editing model: every structural edit goes through the tree.
   const tree = useMemo(
@@ -998,6 +1022,7 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
                   editable
                   selectedStepId={selectedStepId}
                   onSelectStep={setSelectedStepId}
+                  onSelectLane={openLane}
                   onInsertStep={handleInsertStep}
                   onWrapInLoopRange={handleWrapInLoopRange}
                   onSetLaneExit={handleSetLaneExit}
@@ -1016,6 +1041,7 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
                   editable
                   selectedStepId={selectedStepId}
                   onSelectStep={setSelectedStepId}
+                  onSelectLane={openLane}
                   onInsertStep={handleInsertStep}
                   onInsertStepIntoLoop={handleInsertStepIntoLoop}
                   onMoveStepTo={handleMoveStepTo}
@@ -1159,6 +1185,7 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
                     </label>
                   )}
                   <StepInspector
+                    focusLane={laneFocus}
                     node={selectedNode}
                     onChange={(data) =>
                       handleStepDataChange(selectedNode.id, data)

@@ -122,6 +122,7 @@
   "scenarioRun.tree.afterLeaving": "Après la sortie de la boucle à l'étape {{n}}",
   "scenarioRun.tree.addLaneTo": "Ajouter une branche à l'étape {{n}}",
   "scenarioRun.tree.removeLane": "Supprimer la branche {{lane}}",
+  "scenarioRun.tree.openLane": "Modifier {{name}} de l’étape {{n}}",
   "scenarioRun.tree.deadLane": "Cette branche ne s'exécute jamais",
   "scenarioRun.tree.leavesLoop": "Sort de la boucle (ci-dessous)",
   "scenarioRun.tree.join": "jonction · {{mode}}",

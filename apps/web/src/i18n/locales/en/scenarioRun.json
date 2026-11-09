@@ -120,6 +120,7 @@
   "scenarioRun.tree.afterLeaving": "After leaving the loop at step {{n}}",
   "scenarioRun.tree.addLaneTo": "Add a branch to step {{n}}",
   "scenarioRun.tree.removeLane": "Remove branch {{lane}}",
+  "scenarioRun.tree.openLane": "Edit {{name}} of step {{n}}",
   "scenarioRun.tree.deadLane": "This branch never runs",
   "scenarioRun.tree.leavesLoop": "Leaves the loop (below)",
   "scenarioRun.tree.join": "join · {{mode}}",

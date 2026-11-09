@@ -52,6 +52,9 @@ export interface StepInspectorProps {
   /** The number each step's box shows (the tree's pre-order numbers, as
    *  the editor has them); absent: worked out from `scenario`. */
   stepNumbers?: ReadonlyMap<string, number>;
+  /** Open this lane's row of the selected switch / choice (a lane tag was
+   *  clicked); `nodeId` names the step it was asked for. */
+  focusLane?: { nodeId: string; handle: string; nonce: number } | null;
 }
 
 /** What the step's form may know of the scenario around it. */
@@ -126,6 +129,7 @@ const StepInspector: React.FC<StepInspectorProps> = ({
   scenario,
   onScenarioChange,
   stepNumbers,
+  focusLane,
 }) => {
   const { t } = useTranslation();
   const [isCurveModalOpen, setIsCurveModalOpen] = useState(false);
@@ -156,7 +160,7 @@ const StepInspector: React.FC<StepInspectorProps> = ({
     onChange(entry.formToNodeData(next));
   };
 
-  const context = formContext(
+  const baseContext = formContext(
     t,
     scenario,
     node,
@@ -164,6 +168,13 @@ const StepInspector: React.FC<StepInspectorProps> = ({
     onScenarioChange,
     stepNumbers,
   );
+  const context: NodeFormContext | undefined =
+    focusLane && focusLane.nodeId === node.id
+      ? {
+          ...baseContext,
+          focusLane: { handle: focusLane.handle, nonce: focusLane.nonce },
+        }
+      : baseContext;
 
   const handleCurveSave = (config: AutoMeterValueConfig) => {
     handleFormChange(applyCurveConfigToMeterNode(formValue, config));

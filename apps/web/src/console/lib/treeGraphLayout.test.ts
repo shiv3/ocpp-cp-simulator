@@ -8,6 +8,7 @@ import {
   NODE_H,
   NODE_W,
   TAG_H,
+  TAG_MAX_W,
   graphEdgeIds,
   layoutTreeGraph,
   type TreeGraphGeometry,
@@ -417,5 +418,49 @@ describe("layoutTreeGraph", () => {
     expect(g.zones.map((z) => `${z.slot.lane}@${z.slot.index}`)).toEqual(
       expect.arrayContaining(["root/0/lanes/0@1", "root/0/lanes/0@0"]),
     );
+  });
+});
+
+describe("long lane conditions", () => {
+  const LONG = "in UnknownVendorWithAVeryLongName|AnotherLongVendorName";
+  const def = graph(
+    [start(), sw("s", ["Accepted", LONG]), end("e1"), end("e2"), end("e3")],
+    [
+      ["start", "s"],
+      ["s", "e1", "case-0"],
+      ["s", "e2", "case-1"],
+      ["s", "e3", "default"],
+    ],
+  );
+
+  it("widens the tag (up to TAG_MAX_W) and its lane to fit the text", () => {
+    const g = layout(def);
+    const tags = [...g.tags].sort((a, b) => a.x - b.x);
+    expect(tags.map((t) => t.text)).toContain(`case-1 → "${LONG}"`);
+    const long = tags.find((t) => t.laneIndex === 1)!;
+    const short = tags.find((t) => t.laneIndex === 0)!;
+    expect(short.w).toBe(NODE_W);
+    expect(long.w).toBeGreaterThan(NODE_W);
+    expect(long.w).toBeLessThanOrEqual(TAG_MAX_W);
+    // No two tags overlap.
+    for (let i = 1; i < tags.length; i++) {
+      expect(tags[i - 1].x + tags[i - 1].w / 2).toBeLessThanOrEqual(
+        tags[i].x - tags[i].w / 2,
+      );
+    }
+  });
+
+  it("a very long text stops at TAG_MAX_W", () => {
+    const g = layout(
+      graph(
+        [start(), sw("s", ["x".repeat(300)]), end("e1"), end("e2")],
+        [
+          ["start", "s"],
+          ["s", "e1", "case-0"],
+          ["s", "e2", "default"],
+        ],
+      ),
+    );
+    expect(Math.max(...g.tags.map((t) => t.w))).toBe(TAG_MAX_W);
   });
 });

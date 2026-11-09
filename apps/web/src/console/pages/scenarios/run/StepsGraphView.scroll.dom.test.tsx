@@ -94,9 +94,10 @@ describe("StepsGraphView: zoom", () => {
     await press(c.querySelector("button[aria-label='Zoom out']"));
     expect(level(c)).toBe("80%");
     expect(window.localStorage.getItem(ZOOM_KEY)).toBe("0.8");
+    // (A long lane condition widens its lane so the tag reads whole.)
     const canvas = c.querySelector<HTMLElement>("[data-testid=graph-scroll]")!;
     expect(canvas.firstElementChild!.getAttribute("style")).toContain(
-      "width: 845px",
+      "width: 894px",
     );
     await press(c.querySelector("button[aria-label='Zoom in']"));
     await press(c.querySelector("button[aria-label='Zoom in']"));

@@ -118,6 +118,7 @@
   "scenarioRun.tree.afterLeaving": "在步骤 {{n}} 离开循环之后",
   "scenarioRun.tree.addLaneTo": "为步骤 {{n}} 添加分支",
   "scenarioRun.tree.removeLane": "删除分支 {{lane}}",
+  "scenarioRun.tree.openLane": "编辑步骤 {{n}} 的 {{name}}",
   "scenarioRun.tree.deadLane": "此分支永远不会运行",
   "scenarioRun.tree.leavesLoop": "离开循环 (见下方)",
   "scenarioRun.tree.join": "汇合 · {{mode}}",

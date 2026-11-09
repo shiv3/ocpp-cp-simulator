@@ -232,7 +232,10 @@ function edgeReuser(edges: readonly Edge[]) {
     const existing = pool.get(`${source}\u0000${target}`)?.shift();
     if (existing && !usedIds.has(existing.id)) {
       usedIds.add(existing.id);
-      return existing.sourceHandle == null && sourceHandle !== undefined
+      // The rebuild decides which lane a switch / choice edge runs: its
+      // handle wins over the one the reused edge had.
+      return sourceHandle !== undefined &&
+        existing.sourceHandle !== sourceHandle
         ? { ...existing, sourceHandle }
         : existing;
     }

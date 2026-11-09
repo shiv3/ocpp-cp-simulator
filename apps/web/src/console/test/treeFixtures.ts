@@ -224,12 +224,113 @@ export const deadLanes = () =>
     ],
   );
 
+/** START → first → head → pick (switch ["more", "stop"])
+ *    ┬ case-0 → again → head (loops)
+ *    ├ case-1 → out → END (the loop's way on, after it)
+ *    └ default → bye → END (a second way out: its lane leaves the loop) */
+export const loopWithTwoExits = () =>
+  def(
+    "loop-two-exits",
+    [
+      START(),
+      n("first"),
+      n("head"),
+      sw("pick", ["more", "stop"]),
+      n("again"),
+      n("out"),
+      n("bye"),
+      END(),
+    ],
+    [
+      ["start", "first"],
+      ["first", "head"],
+      ["head", "pick"],
+      ["pick", "again", "case-0"],
+      ["pick", "out", "case-1"],
+      ["pick", "bye", "default"],
+      ["again", "head"],
+      ["out", "end"],
+      ["bye", "end"],
+    ],
+  );
+
+/** START ┬ x1 → x2 → END
+ *        └ y1 → f (switch) ┬ case-0 → a1 → x1 (a join into the lane on
+ *                          │   the left: a jump)
+ *                          └ default → END */
+export const joinIntoLeftLane = () =>
+  def(
+    "join-left",
+    [START(), n("x1"), n("x2"), n("y1"), sw("f", ["m"]), n("a1"), END()],
+    [
+      ["start", "x1"],
+      ["start", "y1"],
+      ["x1", "x2"],
+      ["x2", "end"],
+      ["y1", "f"],
+      ["f", "a1", "case-0"],
+      ["a1", "x1"],
+      ["f", "end", "default"],
+    ],
+  );
+
+/** START ┬ p → END
+ *        └ q → START (an edge back into a START that fans out) */
+export const intoStartFanOut = () =>
+  def(
+    "into-start",
+    [START(), n("p"), n("q"), END()],
+    [
+      ["start", "p"],
+      ["start", "q"],
+      ["p", "end"],
+      ["q", "start"],
+    ],
+  );
+
+/** START → head → f1 (switch ["m", "n"])
+ *    ┬ default → out → END (the loop's way on)
+ *    ├ case-0 → head (loops)
+ *    └ case-1 → f2 (switch) ┬ case-0 → x → head (loops)
+ *                           └ default → bye → END (leaves the loop, two
+ *                             forks deep) */
+export const deepLeavingLane = () =>
+  def(
+    "deep-leaving",
+    [
+      START(),
+      n("head"),
+      sw("f1", ["m", "n"]),
+      sw("f2", ["m"]),
+      n("x"),
+      n("bye"),
+      n("out"),
+      END(),
+    ],
+    [
+      ["start", "head"],
+      ["head", "f1"],
+      ["f1", "out", "default"],
+      ["f1", "head", "case-0"],
+      ["f1", "f2", "case-1"],
+      ["f2", "x", "case-0"],
+      ["x", "head"],
+      ["f2", "bye", "default"],
+      ["bye", "end"],
+      ["out", "end"],
+    ],
+  );
+
 export const NESTED_FIXTURES = {
   switchInLane,
   ifElseReconverges,
   loopWithSwitch,
+  loopWithTwoExits,
   startFanOutWithLoop,
   withDetached,
   forkInLoop,
   deadLanes,
+  joinIntoLeftLane,
+  intoStartFanOut,
+  deepLeavingLane,
 };

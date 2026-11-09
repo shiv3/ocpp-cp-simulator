@@ -554,12 +554,21 @@ describe("ScenarioEditPage", () => {
     expect(container.querySelector(".react-flow__node")).toBeNull();
     expect(viewToggle(container, "Steps").disabled).toBe(false);
     expect(container.querySelectorAll("[data-node-id]")).toHaveLength(3);
-    const loop = container.querySelector(
-      'path[data-link-from="delay-10s"][data-link-to="notification-heartbeat"]',
-    );
-    expect(loop, "the loop-back arrow").not.toBeNull();
-    // A chain closed by a loop cannot fork.
-    expect(container.textContent).not.toContain("+ branch");
+    // The loop: a tinted rectangle and a solid arc back to its first step.
+    expect(
+      container.querySelector('[data-graph-loop="notification-heartbeat"]'),
+    ).not.toBeNull();
+    expect(
+      container
+        .querySelector('path[data-loop-arc="notification-heartbeat"]')
+        ?.getAttribute("data-edge-id"),
+    ).toBe("e-delay-notify");
+    // START can still fan out (the chain becomes its first lane).
+    expect(
+      container.querySelector<HTMLButtonElement>(
+        'button[aria-label="Add a parallel branch"]',
+      )?.disabled,
+    ).toBe(false);
   });
 
   it("shows the loop in the Steps view; the back edge's After-step select is refused, pointing to Stop repeating", async () => {

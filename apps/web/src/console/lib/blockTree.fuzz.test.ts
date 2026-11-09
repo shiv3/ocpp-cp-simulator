@@ -339,6 +339,36 @@ describe("block tree fuzz (xorshift, 2–12 nodes)", () => {
               out.edges.map((e) => e.id),
               label("unwrapLoop"),
             ).toEqual(def.edges.map((e) => e.id));
+            // Only the edges that closed one cycle move, all to one place; nothing
+            // else about an edge changes; exactly one loop is gone.
+            const changed = out.edges.filter((e, i) => e !== def.edges[i]);
+            const olds = new Set<string>();
+            const news = new Set<string>();
+            out.edges.forEach((e, i) => {
+              const o = def.edges[i];
+              if (e === o) return;
+              expect(e, label("unwrapLoop")).toEqual({
+                ...o,
+                target: e.target,
+              });
+              olds.add(o.target);
+              news.add(e.target);
+            });
+            // (A loop without a live back edge moves none.)
+            expect(olds.size, label("unwrapLoop")).toBe(changed.length ? 1 : 0);
+            expect(news.size, label("unwrapLoop")).toBe(changed.length ? 1 : 0);
+            const loopCount = (t: BlockTree) =>
+              allSeqs(t).reduce(
+                (n, sq) =>
+                  n + sq.blocks.filter((b) => b.kind === "loop").length,
+                0,
+              );
+            if (changed.length) {
+              expect(
+                loopCount(recognizeBlockTree(out)),
+                label("unwrapLoop"),
+              ).toBe(loopCount(tree) - 1);
+            }
           }
           const fork = forkOf(tree, nodeId);
           if (fork) {

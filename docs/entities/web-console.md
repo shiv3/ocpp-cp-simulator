@@ -982,18 +982,40 @@ run`, `runs`, `ignored`, `unpickable: case-7`) and the lane's step count
   to step N** (a back edge that is not a loop) or **Then on to step N** (a
   join). Steps nothing reaches are listed last under **Steps nothing
   reaches**.
-- **Graph** — the same order drawn as connected cards: the chain in one lane,
-  each branch curving into a lane of its own below the fork node; a travelled
-  path takes its lane's colour. It is drawn by the console itself, not the
-  editor's graph library.
+- **Graph** — the same block tree drawn as connected cards, laid out
+  recursively ([`treeGraphLayout.ts`](../../apps/web/src/console/lib/treeGraphLayout.ts)):
+  a START dot, then a column of cards; under a branch point its lanes stand
+  side by side, each as wide as what it holds (a nested branch point widens
+  its lane), each under a lane tag (letter, condition chip, step count; dead
+  lanes dashed and muted). The branch point's curve ends at the top of the
+  tag and the lane goes on from its bottom, so no curve crosses a tag's
+  text. Lanes that meet again run into a merge point below the lowest lane,
+  and the sequence goes on under it; a lane end is an END ring. A loop is a
+  tinted rounded rectangle behind its body, labelled **Repeat forever** /
+  **Repeat** (and "each round waits at step N first"), with a solid purple
+  return arc from each way back, down the rectangle's left side into the
+  loop's first card; a lane that leaves the loop stands right of the
+  rectangle, its curve crossing the rectangle's edge; every lane that
+  leaves the loop, at any depth, has its tag marked with a leave icon. A
+  jump (a link: a back edge that is no loop, a join) is a dashed orthogonal
+  line with an arrowhead: out of the source card's side, up or down a
+  channel (beside everything between the two rows, or the corridor between
+  two columns), across the gap row above the target and down into the
+  target's top corner; of the channels, the shortest that crosses no card
+  or lane tag and keeps clear of END rings, `+` discs and merge points
+  wins, each further jump in a channel one step aside. When every plain
+  route crosses a card, routes that leave along the source's own gap row, or
+  enter along another free row above the target, are tried too; when none is
+  clean (none of 30000 random layouts needed it), the jump is drawn as a dashed
+  curve beside everything instead, and may cross cards. An edge back into a
+  START that fans out is not drawn (START has no card). Steps nothing reaches
+  stand in a column on the right under **Steps nothing reaches**. A
+  travelled path takes its lane's colour; the canvas scrolls sideways when
+  wider than its column. It is drawn by the console itself (SVG and placed
+  cards), not a graph library.
 
-The Steps view draws any scenario with a START. The Graph view still draws
-only a chain, then at most one fork whose branches each run to their end,
-plus the loops and joins that leave a lane's last step
-([`deriveStepLayout`](../../apps/web/src/console/lib/stepLayout.ts)); for
-any other shape it shows the Steps view with the note "The Graph view cannot
-draw this shape yet". A scenario without a START is shown as a flat list in
-definition order instead, marked "order approximate".
+Both views draw any scenario with a START. A scenario without one is shown
+as a flat list in definition order instead, marked "order approximate".
 
 ### Scenario editor: steps and graph
 
@@ -1058,25 +1080,22 @@ scenario or a copy of one (`libraryId`). All use the same content
   target changes. Lanes that already left the loop stay as they are. Edits never change which lane
   of a `switch` / `choice` an edge runs (see
   [the schema 1.6 nodes](../concepts/scenario-format.md#the-schema-16-nodes)).
-- **Graph** — the same layout drawn as on the [run page](#scenario-runs-panel-and-page):
-  connected cards, the chain in lane 0 and each branch curving into a lane of
-  its own. A click selects a card for the inspector (the selected card gets a
-  small ✕ that removes it); a `+` disc on the path after the last card of the
-  chain and of each branch (**Add step after step n**; on an empty branch
-  **Add step to <branch>**) and a `+` shown on
-  hover between two cards of a lane (**Insert step between n and n+1**) open
-  the step picker at that place; **+ branch** beside the fork node (beside
-  the chain's last card when there is no fork yet) adds a parallel branch.
-  A card drags up or down within its lane like a Steps box (the card follows
-  the pointer over a drop line; a press that moves less than 6 px is a click,
-  so it still selects; **Escape** cancels), and a focused card takes
-  **Alt+↑ / Alt+↓** and **Delete** the same way. A loop or a join is drawn too: the edge that jumps back to (or joins) a card
-  already placed leaves the _last_ card of its lane as a dashed curve with an
-  arrowhead (`StepLink`, `deriveStepLayout().links`). The inspector's
-  **After this step** select (above) sets or clears such a link; a link is
-  dropped when its target's lane is removed. A shape this layout cannot
-  draw is shown in the Steps view (with a note) until the Graph view draws
-  the block tree. Above the steps, a warning box lists wiring the executor would only half run (`validateScenarioGraph`, see [connection rules](../concepts/scenario-format.md#connection-rules)): a fork after a step, a step nothing reaches, a `switch` / `choice` edge it never takes (no handle it can pick, or a second edge on one handle), an edge to a missing node, a Call Response its branch holds no CALL for, a `replace` trigger whose CALL is never answered. It never blocks Save.
+- **Graph** — the same tree drawn as on the [run page](#scenario-runs-panel-and-page),
+  with the same edits as the Steps view, all through the tree's operations
+  and enabled from `editCapabilities`. A click selects a card for the
+  inspector (the selected card gets a small ✕ that removes it); a `+` disc
+  at the end of each sequence (**Add step after step n**; on an empty lane
+  **Add step to <condition>**) and a `+` shown on hover in the gap before a
+  block (**Insert step between n and n+1**, **Insert step before step n**)
+  open the step picker at that place; **+ branch** beside each branch
+  point's card (beside the START dot for START, which fans out a chain)
+  adds a lane, disabled with the reason when refused (inside a loop the
+  rectangle is wide enough to hold it); a lane tag's ✕ removes the lane;
+  **Stop repeating** at the right of a loop's label unwraps the loop. A card drags up or down within its sequence like a
+  Steps box (the card follows the pointer over a drop line; a press that
+  moves less than 6 px is a click, so it still selects; **Escape**
+  cancels); a branch point's card does not drag. A focused card takes
+  **Alt+↑ / Alt+↓** and **Delete** the same way. Above the steps, a warning box lists wiring the executor would only half run (`validateScenarioGraph`, see [connection rules](../concepts/scenario-format.md#connection-rules)): a fork after a step, a step nothing reaches, a `switch` / `choice` edge it never takes (no handle it can pick, or a second edge on one handle), an edge to a missing node, a Call Response its branch holds no CALL for, a `replace` trigger whose CALL is never answered. It never blocks Save.
   The editor works the diagnostics out once per change and marks each one
   where it applies ([`graphIssueMarks.ts`](../../apps/web/src/console/lib/graphIssueMarks.ts)):
   - a step it names gets a severity badge (icon and count; rose for an
@@ -1085,7 +1104,8 @@ scenario or a copy of one (`libraryId`). All use the same content
     of outline rows. The badge's tooltip and the card's accessible description
     list the messages.
   - in the Graph view, an edge it names that the view draws (the edge into a
-    card, a fork edge, the edge into END, a loop or join link) is stroked in
+    card, a lane's edge, the edge into END or a merge point, a loop's return
+    arc, a jump) is stroked in
     the severity colour, with a marker at its midpoint and `data-issue` set
     to the codes on the path. A dashed link stays dashed.
   - an edge the view does not draw (a dangling edge, or any edge in the
@@ -1108,12 +1128,8 @@ scenario or a copy of one (`libraryId`). All use the same content
 
 The two views share the drag
 ([`useLaneDrag`](../../apps/web/src/console/lib/useLaneDrag.ts), pointer events, no
-drag-and-drop library) and the insert picker, so they behave the same. The
-Steps view's edits and the inspector's go through the block tree; the Graph
-view's inserts, moves and **+ branch** still use its one-fork lanes
-([`scenarioSteps.ts`](../../apps/web/src/console/lib/scenarioSteps.ts),
-`insertLaneStep` / `moveLaneStep` / `addParallelBranch`) until it draws the
-tree.
+drag-and-drop library), the insert picker and the tree's operations, so
+they behave the same.
 
 #### Editor model (block tree)
 
@@ -1174,8 +1190,8 @@ Removing the first lane of a step's extra edges is allowed with a note
 the first one means. The Steps view and the inspector use them (above);
 what the views read off the tree (numbering, condition chips, lanes that
 leave a loop) is in [`stepTree.ts`](../../apps/web/src/console/lib/stepTree.ts).
-The Graph view still reads `deriveStepLayout`, an adapter that projects the
-tree to a chain-plus-one-fork layout (and gives up on anything else).
+`deriveStepLayout` (the old chain-plus-one-fork projection) no longer draws
+any view.
 
 Both views edit the same definition: unsaved changes survive a switch, and
 nothing is written until **Save**. The per-connector editor's Save saves this

@@ -109,6 +109,5 @@
   "scenarioRun.tree.continuesAt": "继续到步骤 {{n}}",
   "scenarioRun.tree.continuesAtEnd": "继续到结束",
   "scenarioRun.tree.unreached": "无法到达的步骤",
-  "scenarioRun.tree.unreachedHint": "没有从 Start 通向这里的边：这些步骤永远不会运行。",
-  "scenarioRun.tree.graphFallback": "图视图暂时无法绘制此结构，因此以步骤显示。"
+  "scenarioRun.tree.unreachedHint": "没有从 Start 通向这里的边：这些步骤永远不会运行。"
 }

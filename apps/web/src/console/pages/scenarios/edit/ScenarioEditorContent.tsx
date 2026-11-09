@@ -28,13 +28,7 @@ import { useDataContext } from "../../../../data/providers/DataProvider";
 import EmptyState from "../../../components/EmptyState";
 import InlineConfirm from "../../../components/InlineConfirm";
 import SegmentedControl from "../../../components/SegmentedControl";
-import {
-  addParallelBranch,
-  insertLaneStep,
-  moveLaneStep,
-  updateStepData,
-  type StepLane,
-} from "../../../lib/scenarioSteps";
+import { updateStepData } from "../../../lib/scenarioSteps";
 import {
   addLane,
   canMoveStep,
@@ -53,8 +47,8 @@ import {
   type Capability,
   type SeqPath,
 } from "../../../lib/blockTree";
-import { deriveStepLayout, drawnEdgeIds } from "../../../lib/stepLayout";
 import { isDrawableTree, stepNumbers, treeSteps } from "../../../lib/stepTree";
+import { graphEdgeIds } from "../../../lib/treeGraphLayout";
 import StepsGraphView from "../run/StepsGraphView";
 import StepsView from "../run/StepsView";
 import { laneLetter, nodeTitle } from "../run/stepVisuals";
@@ -124,18 +118,16 @@ export interface ScenarioEditorContentProps {
 }
 
 /**
- * Scenario editor with two views of the same definition:
- * - **Steps**: the step boxes of `StepsView` (a chain, then at most one fork
- *   of branches) with "+ Add step" under the chain and each branch, a `+`
- *   between two boxes, drag to reorder within a lane and "+ Add parallel
- *   branch"; a click selects a step for the inspector, whose header moves it
- *   within its lane or deletes it;
- * - **Graph**: the same layout as connected cards (`StepsGraphView`, as on
- *   the run page) with `+` discs, "+ branch" and drag. A shape
- *   `deriveStepLayout` cannot draw (a join, a loop, a second fork) opens the
- *   ReactFlow `ScenarioEditor` instead — the only view for it, and kept for
- *   the rest of the visit once opened, so an edit that makes the scenario
- *   drawable does not swap editors mid-edit.
+ * Scenario editor with two views of the same definition, both drawing its
+ * block tree (`recognizeBlockTree`):
+ * - **Steps**: the step boxes of `StepsView`, nested;
+ * - **Graph**: the same tree as connected cards (`StepsGraphView`, as on
+ *   the run page).
+ * Both take the same edits, all through the tree's operations and enabled
+ * from `editCapabilities`: insert at a slot (a switch / choice with its
+ * lanes), drag or Alt+Arrow within a sequence, delete, add / remove a
+ * branch; the inspector adds wrap-in-loop and the After-step jump. A
+ * scenario without a START is listed as an outline.
  * The content owns the definition, the dirty state and Save in both views;
  * the view is kept in the URL (`view=steps|graph`); Graph is the default. Used by the
  * per-connector editor page, inline by the Library tab, and in the
@@ -221,12 +213,6 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
     () => (scenario ? recognizeBlockTree(scenario) : null),
     [scenario],
   );
-  // The Graph view still draws the one-fork layout (until it draws the
-  // tree); a shape it cannot draw is shown in the Steps view.
-  const layout = useMemo(
-    () => (scenario ? deriveStepLayout(scenario) : null),
-    [scenario],
-  );
   const numbers = useMemo(
     () => (tree ? stepNumbers(tree) : new Map<string, number>()),
     [tree],
@@ -236,10 +222,10 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
   // outline, its steps editable, their wiring not.
   const drawable = tree === null || isDrawableTree(tree);
   const view: EditorView = requestedView;
-  const graphShown = view === "graph" && layout !== null && layout.supported;
+  const graphShown = view === "graph";
   const graphEdges = useMemo(
-    () => (graphShown && layout ? drawnEdgeIds(layout) : null),
-    [graphShown, layout],
+    () => (graphShown && tree ? graphEdgeIds(tree) : null),
+    [graphShown, tree],
   );
 
   // The wiring's diagnostics, once per change, marked in the view shown.
@@ -391,26 +377,6 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
         ? insertForkBlock(scenario, tree, path, index, kind)
         : insertStep(scenario, tree, path, index, type),
     );
-  };
-
-  /** The Graph view's insert (its one-fork lanes). */
-  const handleGraphInsert = (
-    lane: StepLane,
-    index: number,
-    type: ScenarioNodeType,
-  ) => {
-    if (!scenario || !layout) return;
-    applyAndSelectNew(insertLaneStep(scenario, layout, lane, index, type));
-  };
-
-  const handleGraphAddBranch = () => {
-    if (!scenario || !layout) return;
-    applyAndSelectNew(addParallelBranch(scenario, layout));
-  };
-
-  const handleGraphMove = (nodeId: string, delta: number) => {
-    if (!scenario || !layout) return;
-    setScenario(moveLaneStep(scenario, layout, nodeId, delta));
   };
 
   /** Moves a step `delta` places within its sequence. */
@@ -672,7 +638,7 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
     );
   }
 
-  if (notFound || !scenario || !layout) {
+  if (notFound || !scenario || !tree) {
     return (
       <div>
         {isPanel ? (
@@ -905,41 +871,34 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
                   onSelectStep={setSelectedStepId}
                   issues={viewIssues}
                 />
-              ) : graphShown ? (
+              ) : !tree ? null : graphShown ? (
                 <StepsGraphView
-                  layout={layout}
+                  tree={tree}
                   editable
                   selectedStepId={selectedStepId}
                   onSelectStep={setSelectedStepId}
-                  onInsertStep={handleGraphInsert}
-                  onMoveStep={handleGraphMove}
+                  onInsertStep={handleInsertStep}
+                  onMoveStep={handleMove}
                   onDeleteStep={handleDeleteRequest}
-                  onAddBranch={handleGraphAddBranch}
+                  onAddLane={handleAddLane}
+                  onRemoveLane={handleRemoveLane}
+                  onUnwrapLoop={handleUnwrapLoop}
                   issues={viewIssues}
                 />
               ) : (
-                tree && (
-                  <>
-                    {view === "graph" && (
-                      <p className="mb-2 text-xs text-cx-muted">
-                        {t("scenarioRun.tree.graphFallback")}
-                      </p>
-                    )}
-                    <StepsView
-                      tree={tree}
-                      editable
-                      selectedStepId={selectedStepId}
-                      onSelectStep={setSelectedStepId}
-                      onInsertStep={handleInsertStep}
-                      onMoveStep={handleMove}
-                      onDeleteStep={handleDeleteRequest}
-                      onAddLane={handleAddLane}
-                      onRemoveLane={handleRemoveLane}
-                      onUnwrapLoop={handleUnwrapLoop}
-                      issues={viewIssues}
-                    />
-                  </>
-                )
+                <StepsView
+                  tree={tree}
+                  editable
+                  selectedStepId={selectedStepId}
+                  onSelectStep={setSelectedStepId}
+                  onInsertStep={handleInsertStep}
+                  onMoveStep={handleMove}
+                  onDeleteStep={handleDeleteRequest}
+                  onAddLane={handleAddLane}
+                  onRemoveLane={handleRemoveLane}
+                  onUnwrapLoop={handleUnwrapLoop}
+                  issues={viewIssues}
+                />
               )}
             </div>
             <div

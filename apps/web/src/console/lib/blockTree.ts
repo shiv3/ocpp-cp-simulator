@@ -1911,9 +1911,16 @@ function laneLeavesLoop(
   fork: ForkBlock,
   laneIndex: number,
   headerId: string,
+  inner: ReadonlySet<string> = new Set(),
 ): boolean {
   if (fork.merge !== null) return false;
-  const leaving = fork.lanes.map((l) => !seqFallsThroughTo(l.body, headerId));
+  // Falling through to the candidate header, or to a loop header passed on
+  // the way down, repeats: the lane stays in the loop.
+  const leaving = fork.lanes.map(
+    (l) =>
+      !seqFallsThroughTo(l.body, headerId) &&
+      ![...inner].some((h) => seqFallsThroughTo(l.body, h)),
+  );
   // Every lane leaving: the fork as a whole is the loop's way out.
   return leaving[laneIndex] === true && leaving.some((x) => !x);
 }
@@ -1940,14 +1947,16 @@ function repeatingLoopAt(
     const parts = path.slice(c.end).split("/").slice(1);
     let seq: Seq = loop.body;
     let repeats = true;
+    const inner = new Set<string>();
     for (let k = 0; k < parts.length && repeats;) {
       const block: Block | undefined = seq.blocks[Number(parts[k])];
       if (parts[k + 1] === "body" && block?.kind === "loop") {
+        inner.add(block.headerId);
         seq = block.body;
         k += 2;
       } else if (parts[k + 1] === "lanes" && block?.kind === "fork") {
         const j = Number(parts[k + 2]);
-        if (laneLeavesLoop(block, j, loop.headerId)) repeats = false;
+        if (laneLeavesLoop(block, j, loop.headerId, inner)) repeats = false;
         else seq = block.lanes[j].body;
         k += 3;
       } else repeats = false;
@@ -2035,7 +2044,7 @@ function applyUnwrapLoop(t: BlockTree, nodeId: string): void {
     if (after.kind === "end" || after.reason === "blockEnds") {
       return { kind: "end", edgeId };
     }
-    return { kind: "stop", reason: "noEdge" };
+    throw new Error("unwrapLoop: the sequence around the loop has no ending");
   };
   const body = loop.body;
   redirectFallthroughs([body], loop.headerId, goOn);

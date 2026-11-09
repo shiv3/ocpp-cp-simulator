@@ -459,7 +459,7 @@ describe("ScenarioRunPage", () => {
     );
   });
 
-  it("draws a shape the Graph view cannot lay out as steps (the block tree)", async () => {
+  it("draws any shape with a START as the block tree (here a loop beside an end)", async () => {
     let def = linearFixture();
     const [a, b] = def.nodes.filter(
       (n) =>
@@ -481,10 +481,8 @@ describe("ScenarioRunPage", () => {
     await flush();
 
     expect(container.textContent).not.toContain("order approximate");
-    expect(container.textContent).toContain(
-      "The Graph view cannot draw this shape yet",
-    );
-    expect(container.querySelectorAll("[data-step-id]")).toHaveLength(2);
+    // The Graph view (the default) draws it: two cards, the jump back.
+    expect(container.querySelectorAll("[data-node-id]")).toHaveLength(2);
   });
 
   it("falls back to the flat timeline for a scenario without a START", async () => {

@@ -16,6 +16,15 @@ export type RootErrorHooks = Pick<
 type ReporterModule = { createErrorReporter: ErrorReporterFactory };
 
 /**
+ * How long the first paint waits for a selected adapter (#794). Past it the
+ * console renders and the adapter keeps loading in the background.
+ */
+export const ERROR_REPORTER_WAIT_MS = 300;
+
+/** How many errors raised while the adapter loads are kept for it. */
+export const ERROR_REPORTER_BUFFER_SIZE = 20;
+
+/**
  * The console's adapters, by the name `VITE_ERROR_REPORTER` selects them
  * with. Each is a lazy chunk, so the default build (no selector) never
  * downloads a vendor SDK. The console cannot load an arbitrary module: a new
@@ -88,7 +97,11 @@ export function rootErrorHooks(reporter: ErrorReporter): RootErrorHooks {
  *
  * Never rejects: an unknown name, or an adapter that fails to load or start,
  * leaves reporting off with one warning rather than the console blank.
- * Resolves to the `createRoot` error hooks ({} while reporting is off).
+ * Resolves to the `createRoot` error hooks ({} while reporting is off), at
+ * the latest after `ERROR_REPORTER_WAIT_MS`: an optional adapter must not
+ * keep the first paint blank. Past the bound the hooks log at once and hand
+ * errors to the adapter once it has loaded, the first
+ * `ERROR_REPORTER_BUFFER_SIZE` raised meanwhile included.
  */
 export async function initErrorReporting(
   env: Record<string, unknown> = import.meta.env,
@@ -105,6 +118,61 @@ export async function initErrorReporting(
     );
     return {};
   }
+  const started = startReporter(name, load, env);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const bound = new Promise<"timeout">((resolve) => {
+    timer = setTimeout(() => resolve("timeout"), ERROR_REPORTER_WAIT_MS);
+  });
+  const first = await Promise.race([started, bound]);
+  clearTimeout(timer);
+  if (first === "timeout") return rootErrorHooks(lateReporter(started));
+  return first ? rootErrorHooks(first) : {};
+}
+
+/**
+ * A reporter that keeps the first errors until the adapter has loaded, hands
+ * them over then, and forwards directly from there on. If the adapter never
+ * starts, the kept errors are dropped (they were logged when raised).
+ */
+function lateReporter(started: Promise<ErrorReporter | null>): ErrorReporter {
+  let ready: ErrorReporter | null | undefined;
+  let pending: Parameters<ErrorReporter["captureException"]>[] = [];
+  void started.then((reporter) => {
+    ready = reporter;
+    const kept = pending;
+    pending = [];
+    if (!reporter) return;
+    for (const args of kept) {
+      try {
+        reporter.captureException(...args);
+      } catch {
+        // A broken adapter must not take the console down with it.
+      }
+    }
+  });
+  return {
+    captureException: (...args) => {
+      if (ready) ready.captureException(...args);
+      else if (
+        ready === undefined &&
+        pending.length < ERROR_REPORTER_BUFFER_SIZE
+      )
+        pending.push(args);
+    },
+    flush: (timeoutMs) =>
+      ready ? ready.flush(timeoutMs) : Promise.resolve(false),
+  };
+}
+
+/**
+ * Loads and starts the named adapter. Never rejects: resolves to `null`,
+ * with one warning, when reporting stays off.
+ */
+async function startReporter(
+  name: string,
+  load: () => Promise<ReporterModule>,
+  env: Record<string, unknown>,
+): Promise<ErrorReporter | null> {
   let reporter: ErrorReporter | null;
   try {
     const { createErrorReporter } = await load();
@@ -115,13 +183,13 @@ export async function initErrorReporting(
     });
   } catch (err) {
     console.warn(`Error reporting disabled: ${name} did not start`, err);
-    return {};
+    return null;
   }
   if (!reporter) {
     console.warn(
       `Error reporting disabled: ${name} selected but ${NOT_CONFIGURED[name] ?? "not configured"}`,
     );
-    return {};
+    return null;
   }
-  return rootErrorHooks(reporter);
+  return reporter;
 }

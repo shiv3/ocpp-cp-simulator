@@ -59,6 +59,15 @@ reporting off: the CLI writes one `Error reporting disabled: …` line to
 stderr (never stdout) and carries on, the console logs one warning and
 renders.
 
+The console's first paint waits for a selected adapter for at most
+`ERROR_REPORTER_WAIT_MS` (300 ms) in `apps/web/src/lib/errorReporting.ts`:
+an optional reporter must not keep the console blank. Past that bound the
+console renders and the adapter keeps loading in the background. Errors
+raised meanwhile are logged at once and handed to the adapter once it has
+started (the first `ERROR_REPORTER_BUFFER_SIZE`, 20, are kept; later ones
+are only logged); if it never starts, they stay logged only. Bounding the
+wait for the saved language's chunk (`i18nReady`) is left to a follow-up.
+
 The console's variables are **inlined by Vite at build time**. Variables
 given to a daemon at run time do not reach the console that daemon serves:
 the bundle has to be built with `VITE_ERROR_REPORTER` and the adapter's own
@@ -100,7 +109,9 @@ adapter is plugged in:
 - **Web console** (`apps/web/src/lib/errorReporting.ts`): it builds the three
   React root error hooks (`onUncaughtError`, `onCaughtError`,
   `onRecoverableError`), which capture with the matching mechanism and the
-  component stack and still log to the browser console.
+  component stack and still log to the browser console. When the adapter
+  loads after the first-paint bound, the hooks forward to it from then on
+  and hand it the errors kept while it loaded.
 
 ### Writing a CLI adapter
 

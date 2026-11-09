@@ -5,7 +5,13 @@ import type {
   ErrorReporterInit,
 } from "@ocpp-cp-simulator/contracts/errorReporting";
 import { REDACTED_VALUE } from "@ocpp-cp-simulator/contracts/redaction";
-import { initErrorReporting, rootErrorHooks } from "./errorReporting";
+import {
+  ERROR_REPORTER_BUFFER_SIZE,
+  ERROR_REPORTER_WAIT_MS,
+  initErrorReporting,
+  type RootErrorHooks,
+  rootErrorHooks,
+} from "./errorReporting";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -140,4 +146,154 @@ describe("rootErrorHooks", () => {
     });
     expect(logged).toHaveBeenCalledWith(err);
   });
+});
+
+describe("initErrorReporting bounded wait", () => {
+  const env = { VITE_ERROR_REPORTER: "sentry" };
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** An adapter whose chunk resolves only when the test says so. */
+  function lateBuiltins() {
+    let settle!: (module: {
+      createErrorReporter: () => Promise<ErrorReporter | null>;
+    }) => void;
+    let fail!: (err: unknown) => void;
+    const chunk = new Promise<{
+      createErrorReporter: () => Promise<ErrorReporter | null>;
+    }>((resolve, reject) => {
+      settle = resolve;
+      fail = reject;
+    });
+    return {
+      builtins: { sentry: () => chunk },
+      loaded: (reporter: ErrorReporter | null) =>
+        settle({ createErrorReporter: async () => reporter }),
+      failed: (err: unknown) => fail(err),
+    };
+  }
+
+  /** Starts the init under fake timers and lets the bound elapse. */
+  async function startPastTheBound(
+    builtins: ReturnType<typeof lateBuiltins>["builtins"],
+  ) {
+    vi.useFakeTimers();
+    let hooks: RootErrorHooks | undefined;
+    void initErrorReporting(env, builtins).then((h) => {
+      hooks = h;
+    });
+    await vi.advanceTimersByTimeAsync(ERROR_REPORTER_WAIT_MS);
+    return hooks;
+  }
+
+  it("does not resolve before the bound while the adapter is loading", async () => {
+    vi.useFakeTimers();
+    let settled = false;
+    void initErrorReporting(env, lateBuiltins().builtins).then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(ERROR_REPORTER_WAIT_MS - 1);
+    expect(settled).toBe(false);
+  });
+
+  it("resolves to the root hooks once the bound elapses, even if the adapter never loads", async () => {
+    const hooks = await startPastTheBound(lateBuiltins().builtins);
+    expect(Object.keys(hooks ?? {}).sort()).toEqual([
+      "onCaughtError",
+      "onRecoverableError",
+      "onUncaughtError",
+    ]);
+  });
+
+  it("logs at once and forwards errors raised before a late adapter loads", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const late = lateBuiltins();
+    const hooks = await startPastTheBound(late.builtins);
+    const info = { componentStack: "\n    at Broken" };
+    const early = new Error("early");
+    hooks!.onCaughtError?.(early, info);
+    expect(logged).toHaveBeenCalledTimes(1);
+
+    const reporter = recordingReporter();
+    late.loaded(reporter);
+    await vi.runAllTimersAsync();
+    expect(reporter.captureException.mock.calls).toEqual([
+      [early, { mechanism: "react.caught", handled: true, ...info }],
+    ]);
+
+    const after = new Error("after");
+    hooks!.onRecoverableError?.(after, {});
+    expect(reporter.captureException).toHaveBeenLastCalledWith(after, {
+      mechanism: "react.recoverable",
+      handled: true,
+    });
+    // Each error is logged once, when it is raised, never again on replay.
+    expect(logged).toHaveBeenCalledTimes(2);
+  });
+
+  it("survives a reporter that throws on the replayed errors", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const late = lateBuiltins();
+    const hooks = await startPastTheBound(late.builtins);
+    hooks!.onRecoverableError?.(new Error("a"), {});
+    hooks!.onRecoverableError?.(new Error("b"), {});
+
+    const reporter = recordingReporter();
+    reporter.captureException.mockImplementation(() => {
+      throw new Error("adapter bug");
+    });
+    late.loaded(reporter);
+    await vi.runAllTimersAsync();
+    expect(reporter.captureException).toHaveBeenCalledTimes(2);
+  });
+
+  it("caps the errors kept while the adapter is loading", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const late = lateBuiltins();
+    const hooks = await startPastTheBound(late.builtins);
+    for (let i = 0; i < ERROR_REPORTER_BUFFER_SIZE + 5; i++) {
+      hooks!.onRecoverableError?.(new Error(String(i)), {});
+    }
+
+    const reporter = recordingReporter();
+    late.loaded(reporter);
+    await vi.runAllTimersAsync();
+    expect(reporter.captureException).toHaveBeenCalledTimes(
+      ERROR_REPORTER_BUFFER_SIZE,
+    );
+    // The first errors are the ones kept: they usually explain the rest.
+    expect(reporter.captureException.mock.calls[0]![0]).toEqual(new Error("0"));
+  });
+
+  it.each([
+    [
+      "is not configured",
+      (late: ReturnType<typeof lateBuiltins>) => late.loaded(null),
+    ],
+    [
+      "fails to load",
+      (late: ReturnType<typeof lateBuiltins>) =>
+        late.failed(new Error("chunk")),
+    ],
+  ])(
+    "only logs, with one warning, when a late adapter %s",
+    async (_label, finish) => {
+      const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+      const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const late = lateBuiltins();
+      const hooks = await startPastTheBound(late.builtins);
+      const early = new Error("early");
+      hooks!.onUncaughtError?.(early, { componentStack: "" });
+
+      finish(late);
+      await vi.runAllTimersAsync();
+      expect(warned).toHaveBeenCalledTimes(1);
+
+      hooks!.onUncaughtError?.(new Error("after"), { componentStack: "" });
+      expect(logged).toHaveBeenCalledTimes(2);
+      expect(logged).toHaveBeenNthCalledWith(1, early);
+    },
+  );
 });

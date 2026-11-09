@@ -200,6 +200,23 @@ describe("withScenarioSchemaVersion", () => {
     expect(scenario.schemaVersion).toBeUndefined();
   });
 
+  it("keeps a newer schemaVersion and raises an older one", () => {
+    expect(
+      withScenarioSchemaVersion(createValidScenario({ schemaVersion: "1.7" }))
+        .schemaVersion,
+    ).toBe("1.7");
+    expect(
+      withScenarioSchemaVersion(createValidScenario({ schemaVersion: "2.0" }))
+        .schemaVersion,
+    ).toBe("2.0");
+    for (const old of ["1.0", "1.5", SCENARIO_SCHEMA_VERSION, "garbage"]) {
+      expect(
+        withScenarioSchemaVersion(createValidScenario({ schemaVersion: old }))
+          .schemaVersion,
+      ).toBe(SCENARIO_SCHEMA_VERSION);
+    }
+  });
+
   it("is at the current v1.5 schema version", () => {
     // Each additive schema version bumps the stamp: the v1.2 evSettings
     // fields (#301) once shipped with the stamp left at "1.1", and a browser

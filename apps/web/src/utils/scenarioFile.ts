@@ -11,13 +11,31 @@ import { validateScenarioSchema } from "@ocpp-cp-simulator/core/scenario/scenari
  * to/from a `<a download>` Blob and a user-picked `File`.
  */
 
+/** `major.minor` of a schema version string, or `null` when it is not one. */
+function parseSchemaVersion(v: unknown): [number, number] | null {
+  if (typeof v !== "string") return null;
+  const m = /^(\d+)\.(\d+)(?:\..*)?$/.exec(v.trim());
+  return m ? [Number(m[1]), Number(m[2])] : null;
+}
+
+/** True when `v` is a schema version newer than {@link SCENARIO_SCHEMA_VERSION}. */
+function isNewerThanEditor(v: unknown): boolean {
+  const have = parseSchemaVersion(v);
+  const mine = parseSchemaVersion(SCENARIO_SCHEMA_VERSION)!;
+  return (
+    !!have && (have[0] > mine[0] || (have[0] === mine[0] && have[1] > mine[1]))
+  );
+}
+
 /** Stamp the current {@link SCENARIO_SCHEMA_VERSION} onto a scenario without
- *  mutating the input (issue #214). Exported separately from
+ *  mutating the input (issue #214). A file that already declares a newer
+ *  version keeps it: the editor never downgrades what it may not understand. Exported separately from
  *  {@link exportScenarioToJSON} so the stamping behavior is unit-testable
  *  without a DOM (Blob/download) environment. */
 export function withScenarioSchemaVersion(
   scenario: ScenarioDefinition,
 ): ScenarioDefinition {
+  if (isNewerThanEditor(scenario.schemaVersion)) return { ...scenario };
   return { ...scenario, schemaVersion: SCENARIO_SCHEMA_VERSION };
 }
 

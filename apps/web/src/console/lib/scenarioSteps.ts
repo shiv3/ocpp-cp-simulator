@@ -208,6 +208,47 @@ function forkHandle(
 }
 
 /**
+ * Hands back the input's edges for the pairs a rebuild draws again, so an
+ * edge keeps its id and every field the editor does not understand (`type`,
+ * `sourceHandle`, future fields). Several edges between one pair are handed
+ * out in file order. `make` creates an edge for a pair the input did not
+ * have; `id` is kept when still free, otherwise a fresh one is made.
+ */
+function edgeReuser(edges: readonly Edge[]) {
+  const pool = new Map<string, Edge[]>();
+  for (const e of edges) {
+    const key = `${e.source}\u0000${e.target}`;
+    const list = pool.get(key);
+    if (list) list.push(e);
+    else pool.set(key, [e]);
+  }
+  const usedIds = new Set<string>();
+  return (
+    source: string,
+    target: string,
+    sourceHandle: string | undefined,
+    id?: string,
+  ): Edge => {
+    const existing = pool.get(`${source}\u0000${target}`)?.shift();
+    if (existing && !usedIds.has(existing.id)) {
+      usedIds.add(existing.id);
+      return existing.sourceHandle == null && sourceHandle !== undefined
+        ? { ...existing, sourceHandle }
+        : existing;
+    }
+    const fresh =
+      id !== undefined && !usedIds.has(id) ? id : crypto.randomUUID();
+    usedIds.add(fresh);
+    return {
+      id: fresh,
+      source,
+      target,
+      ...(sourceHandle === undefined ? {} : { sourceHandle }),
+    };
+  };
+}
+
+/**
  * Rebuilds a scenario's `nodes`/`edges` from an ordered step list, keeping
  * (or creating, if absent) the START/END nodes, rewriting edges into a
  * single chain start→s1→…→sn→end, and repositioning every node on a
@@ -231,15 +272,16 @@ export function rebuildLinearScenario(
   }));
 
   const handleOf = handlesBySource(def.nodes, def.edges);
+  const edgeFor = edgeReuser(def.edges);
   const edges: Edge[] = [];
   for (let i = 0; i < positioned.length - 1; i++) {
-    const sourceHandle = handleOf(positioned[i].id);
-    edges.push({
-      id: crypto.randomUUID(),
-      source: positioned[i].id,
-      target: positioned[i + 1].id,
-      ...(sourceHandle === undefined ? {} : { sourceHandle }),
-    });
+    edges.push(
+      edgeFor(
+        positioned[i].id,
+        positioned[i + 1].id,
+        handleOf(positioned[i].id),
+      ),
+    );
   }
 
   return {
@@ -378,6 +420,7 @@ function rebuildLaneScenario(
 
   const edges: Edge[] = [];
   const handleOf = handlesBySource(def.nodes, def.edges);
+  const edgeFor = edgeReuser(def.edges);
   const link = (
     source: ScenarioNode,
     target: ScenarioNode,
@@ -385,12 +428,7 @@ function rebuildLaneScenario(
     handle?: string,
   ) => {
     const sourceHandle = handle ?? handleOf(source.id);
-    edges.push({
-      id: id ?? crypto.randomUUID(),
-      source: source.id,
-      target: target.id,
-      ...(sourceHandle === undefined ? {} : { sourceHandle }),
-    });
+    edges.push(edgeFor(source.id, target.id, sourceHandle, id));
   };
 
   if (branches) {

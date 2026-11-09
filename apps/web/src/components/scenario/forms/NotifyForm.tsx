@@ -1,11 +1,8 @@
 import { useTranslation } from "react-i18next";
 import { NOTIFY_KINDS } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
-import { JsonValueField, SelectField, TextField } from "./FormFields";
-import {
-  NOTIFY_STATUSES,
-  notifyKind,
-  validateRequestId,
-} from "./notifyStatuses";
+import { SelectField } from "./FormFields";
+import { ScenarioValueField } from "./ScenarioValueField";
+import { NOTIFY_STATUSES, notifyKind } from "./notifyStatuses";
 import type { NodeFormComponentProps, NodeFormData } from "./types";
 
 /** Schema 1.6 (#654): sends a firmware / log / diagnostics status
@@ -13,6 +10,7 @@ import type { NodeFormComponentProps, NodeFormData } from "./types";
 export default function NotifyForm({
   value,
   onChange,
+  context,
 }: NodeFormComponentProps<NodeFormData>) {
   const { t } = useTranslation();
   const kind = notifyKind(value.kind);
@@ -20,11 +18,6 @@ export default function NotifyForm({
   const status = typeof value.status === "string" ? value.status : "";
   return (
     <div className="space-y-3">
-      <TextField
-        label={t("scenarioEditor.form.label")}
-        value={(value.label as string | undefined) ?? ""}
-        onChange={(label) => onChange({ ...value, label })}
-      />
       <SelectField
         label={t("scenarioEditor.notify.kind")}
         value={kind}
@@ -47,19 +40,22 @@ export default function NotifyForm({
         onChange={(next) => onChange({ ...value, status: next })}
         options={statuses.map((s) => ({ value: s, label: s }))}
       />
-      <JsonValueField
+      <ScenarioValueField
+        testId="notify-request-id"
         label={t("scenarioEditor.notify.requestId")}
         value={value.requestId}
         optional
-        validate={validateRequestId}
+        types={["number"]}
+        integer
+        min={0}
+        stateKeys={context?.stateKeys}
+        defaultFrom={{ root: "call", path: "payload.requestId" }}
         onChange={(requestId) => onChange({ ...value, requestId })}
-        placeholder='123 or {"$from": "call.payload.requestId"}'
         help={
           kind === "signedFirmwareStatus"
             ? t("scenarioEditor.notify.requestIdRequired")
             : t("scenarioEditor.notify.requestIdHelp")
         }
-        rows={2}
       />
     </div>
   );

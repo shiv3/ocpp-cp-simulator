@@ -766,6 +766,8 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
                     onChange={(data) =>
                       handleStepDataChange(selectedNode.id, data)
                     }
+                    scenario={scenario}
+                    onScenarioChange={setScenario}
                   />
                 </>
               ) : (

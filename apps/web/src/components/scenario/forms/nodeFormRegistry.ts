@@ -814,7 +814,9 @@ function switchNodeDataToForm(nodeData: ScenarioNodeData): NodeFormData {
   return {
     ...baseToForm(nodeData),
     value: data.value ?? null,
-    cases: Array.isArray(data.cases) ? data.cases : [],
+    // As the file has them, a list or not: the form says when they are
+    // not and changes them only on the user's word.
+    cases: data.cases,
   };
 }
 
@@ -822,15 +824,24 @@ function switchFormToNodeData(formData: NodeFormData): SwitchNodeData {
   return {
     ...baseFromForm(formData),
     value: formData.value ?? null,
-    cases: Array.isArray(formData.cases) ? formData.cases : [],
+    cases: formData.cases as unknown[],
   };
 }
 
-/** Keeps the options as authored: a positive finite weight and a label. */
+/** Keeps the options as authored: a finite weight and a label. An entry
+ *  that is not an object (null, a number) stays as it is: the executor
+ *  draws it with weight 1, and the form shows it as such. */
 function choiceOptions(value: unknown): ChoiceNodeData["options"] {
   if (!Array.isArray(value)) return [];
   return value.map((option) => {
-    const o = (typeof option === "object" && option !== null ? option : {}) as {
+    if (
+      typeof option !== "object" ||
+      option === null ||
+      Array.isArray(option)
+    ) {
+      return option as ChoiceNodeData["options"][number];
+    }
+    const o = option as {
       weight?: unknown;
       label?: unknown;
     };

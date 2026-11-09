@@ -85,6 +85,46 @@ export function handleUnlockConnectorV201(
   return { response };
 }
 
+/** L01.FR.25 / L01.FR.26 (and L02.FR.16 / FR.17): a TriggerMessage for
+ *  FirmwareStatusNotification answers the last sent status, except `Installed`
+ *  which is answered with `Idle`; with nothing sent yet (F06.FR.16) it is
+ *  `Idle`. A report with a requestId is mandatory unless the message was
+ *  triggered AND no update is ongoing, which is what `Idle` says. */
+const FIRMWARE_ENDED_AS_IDLE: ReadonlySet<string> = new Set([
+  "Installed",
+  "Idle",
+]);
+
+/** UploadLogStatusEnumType values of an upload that has not ended (F06.FR.14;
+ *  F06.FR.15: not uploading is `Idle`, which N01.FR.13 lets go without a
+ *  requestId when triggered). */
+const LOG_IN_PROGRESS: ReadonlySet<string> = new Set(["Uploading"]);
+
+/** The `chargingState` a triggered TransactionEvent reports for a connector
+ *  status; any other status of a running transaction is `EVConnected`. */
+const TRIGGER_CHARGING_STATE: Record<
+  string,
+  "Charging" | "SuspendedEV" | "SuspendedEVSE"
+> = {
+  Charging: "Charging",
+  SuspendedEV: "SuspendedEV",
+  SuspendedEVSE: "SuspendedEVSE",
+};
+
+function reportTriggeredStatus(
+  status: string,
+  requestId: number | null,
+  idle: { has(status: string): boolean },
+  send: (status: string, requestId?: number) => void,
+  idleWhenIn = true,
+): void {
+  if (idle.has(status) === idleWhenIn) {
+    send("Idle");
+  } else {
+    send(status, requestId ?? undefined);
+  }
+}
+
 export const handleTriggerMessageV201 = (
   payload?: unknown,
   ctx?: V201InboundContext,
@@ -188,6 +228,82 @@ export const handleTriggerMessageV201 = (
           send(connectorId);
         },
       };
+
+    // #596 F06: an Updated event with triggerReason Trigger for the running
+    // transaction of the requested EVSE, or of every EVSE without one. With
+    // no running transaction there is nothing to report: Rejected.
+    case "TransactionEvent": {
+      const targets = Array.from(ctx.chargePoint.connectors.values())
+        .filter(
+          (c) =>
+            c.hasRunningTransaction &&
+            (connectorId === undefined ||
+              connectorId === 0 ||
+              c.id === connectorId),
+        )
+        .map((c) => ({ id: c.id, status: String(c.status) }));
+      if (targets.length === 0) {
+        return {
+          response: {
+            status: "Rejected",
+            statusInfo: {
+              reasonCode: "TxNotFound",
+              additionalInfo: "No transaction is running on the requested EVSE",
+            },
+          } satisfies TriggerMessageResponseV201,
+        };
+      }
+      return {
+        response: accepted,
+        afterResult: () => {
+          // F06.FR.07: triggerReason Trigger, transactionInfo with at least
+          // the chargingState, and the most recent meter sample.
+          for (const { id, status } of targets) {
+            ctx.chargePoint.sendTransactionUpdate(id, {
+              triggerReason: "Trigger",
+              chargingState: TRIGGER_CHARGING_STATE[status] ?? "EVConnected",
+              meterValues: true,
+              context: "Trigger",
+            });
+          }
+        },
+      };
+    }
+
+    // #596 L01.FR.25/26, F06.FR.14-16: the last status the station sent for
+    // the update / the upload (the engine holds it however it was sent), Idle
+    // when none, after `Installed` or, for a log, when not uploading. Idle
+    // carries no requestId.
+    case "FirmwareStatusNotification": {
+      const { status, requestId } = ctx.chargePoint.engine.state.firmware;
+      return {
+        response: accepted,
+        afterResult: () =>
+          reportTriggeredStatus(
+            status,
+            requestId,
+            FIRMWARE_ENDED_AS_IDLE,
+            (s, id) =>
+              ctx.chargePoint.sendFirmwareStatusNotification(s as never, id),
+          ),
+      };
+    }
+
+    case "LogStatusNotification": {
+      const { status, requestId } = ctx.chargePoint.engine.state.log;
+      return {
+        response: accepted,
+        afterResult: () =>
+          reportTriggeredStatus(
+            status,
+            requestId,
+            LOG_IN_PROGRESS,
+            (s, id) =>
+              ctx.chargePoint.sendLogStatusNotification(s as never, id),
+            false,
+          ),
+      };
+    }
 
     // #537 A02: a new key pair and CSR once the answer is written
     // (A02.FR.02, F06.FR.04). SignV2G20Certificate and SignCombinedCertificate

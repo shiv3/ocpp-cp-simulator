@@ -148,11 +148,8 @@ describe("Charge point page — scenario run panel", () => {
     expect(panel).toBeTruthy();
     expect(panel.querySelector("h2")?.textContent).toBe("Fork demo");
     expect(panel.textContent).toContain("CP-A #1");
-    expect(
-      panel
-        .querySelector('[data-step-id="status"]')
-        ?.getAttribute("data-phase"),
-    ).toBe("current");
+    // The Graph is the default view; the current step is marked.
+    expect(panel.querySelector('[data-phase="current"]')).toBeTruthy();
 
     const expand = panel.querySelector<HTMLAnchorElement>(
       'a[aria-label="Open the run as a full page"]',
@@ -171,19 +168,18 @@ describe("Charge point page — scenario run panel", () => {
     expect(back?.getAttribute("href")).toBe("/cp/CP-A?connector=1&run=s1");
   });
 
-  it("the scenario card's run name links to the run panel", async () => {
+  it("the scenario card's run name opens the run panel", async () => {
     const { container } = await renderPage("/cp/CP-A?connector=1");
     expect(document.querySelector(PANEL)).toBeNull();
-    const link = Array.from(
-      container.querySelectorAll<HTMLAnchorElement>(
-        '[data-testid="scenario-run"] a',
+    const name = Array.from(
+      container.querySelectorAll<HTMLButtonElement>(
+        '[data-testid="scenario-run"] button',
       ),
-    ).find((a) => a.textContent?.includes("Fork demo"))!;
-    expect(link.getAttribute("href")).toBe("/cp/CP-A?connector=1&run=s1");
+    ).find((b) => b.textContent?.includes("Fork demo"))!;
 
-    await act(async () => link.click());
-    await flush(10);
+    await clickEl(name);
     expect(document.querySelector(PANEL)).toBeTruthy();
+    expect(location?.search).toBe("?connector=1&run=s1");
   });
 
   it("closing the panel removes ?run= and keeps the connector", async () => {
@@ -198,20 +194,33 @@ describe("Charge point page — scenario run panel", () => {
     expect(document.querySelector(PANEL)).toBeNull();
   });
 
-  it("from the list's charge point panel, the run link opens the full page", async () => {
+  it("from the list's charge point panel, the run name replaces the panel body", async () => {
     const { container } = await renderPage("/?cp=CP-A&connector=1");
-    const link = Array.from(
-      container.ownerDocument.querySelectorAll<HTMLAnchorElement>(
-        '[data-testid="scenario-run"] a',
+    const name = Array.from(
+      container.ownerDocument.querySelectorAll<HTMLButtonElement>(
+        '[data-testid="scenario-run"] button',
       ),
-    ).find((a) => a.textContent?.includes("Fork demo"))!;
-    expect(link).toBeTruthy();
-    await act(async () => link.click());
-    await flush(10);
-    expect(location?.pathname).toBe("/cp/CP-A");
-    expect(location?.search).toBe("?connector=1&run=s1");
-    expect(document.querySelector(PANEL)).toBeTruthy();
+    ).find((b) => b.textContent?.includes("Fork demo"))!;
+    expect(name).toBeTruthy();
+    await clickEl(name);
+    expect(location?.pathname).toBe("/");
+    expect(location?.search).toBe("?cp=CP-A&connector=1&run=s1");
+    // One panel: the run view in place of the charge point.
+    expect(document.querySelectorAll(PANEL).length).toBe(1);
+    expect(
+      document
+        .querySelector(PANEL)
+        ?.querySelector('[data-testid="scenario-card"]'),
+    ).toBeNull();
+    expect(
+      document.querySelector(PANEL)?.querySelector("h2")?.textContent,
+    ).toBe("Fork demo");
+    // Back to the charge point drops the run and keeps cp / connector.
+    await clickEl(buttonIn(document.querySelector(PANEL)!, "Back to CP-A"));
+    expect(location?.search).toBe("?cp=CP-A&connector=1");
+    expect(document.querySelector(PANEL)).toBeNull();
   });
+
   it("Edit scenario in the run panel edits the Library entry of a copy (&edit=1)", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     const { service } = await renderPage("/cp/CP-A?connector=1&run=s1", {

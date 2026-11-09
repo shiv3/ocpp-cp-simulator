@@ -122,10 +122,9 @@ describe("ScenarioCard: the scenario on a connector", () => {
     const card = container.querySelector<HTMLElement>(
       '[data-testid="scenario-card"]',
     )!;
-    expect(card.querySelector("h3")?.textContent).toBe("No scenario running");
-    expect(card.textContent).toContain(
-      "Pick one from the Library to run on this connector.",
-    );
+    // The assigned scenario's name heads the card (it opens the side panel).
+    expect(card.querySelector("h3")?.textContent).toBe("Charge flow");
+    expect(card.textContent).toContain("Not running");
     const run = button(card, "▶ Run")!;
     // The primary button style, not an outline.
     expect(run.className).toContain("bg-cx-primary");
@@ -273,13 +272,19 @@ describe("ScenarioCard: the scenario on a connector", () => {
     }
   });
 
-  it("Edit in Library opens the scenario in the Library editor", async () => {
+  it("Open and Edit open the side panel on the assigned scenario, not the Library", async () => {
     const { container } = await renderCp();
-    const gear = Array.from(container.querySelectorAll("a")).find(
-      (a) => a.textContent?.trim() === "Edit in Library",
-    );
-    expect(gear?.getAttribute("href")).toBe(
-      "/scenarios?tab=library&edit=lib-a",
-    );
+    const card = container.querySelector<HTMLElement>(
+      '[data-testid="scenario-card"]',
+    )!;
+    expect(button(card, "Edit in Library")).toBeUndefined();
+    expect(button(card, "Open")).toBeTruthy();
+    await act(async () => button(card, "Edit")!.click());
+    await flush(10);
+    const panel = document.querySelector('aside[aria-label="Scenario run"]');
+    expect(panel).toBeTruthy();
+    expect(
+      panel!.querySelector('input[aria-label="Scenario name"]'),
+    ).toBeTruthy();
   });
 });

@@ -140,6 +140,8 @@ export interface ScenarioEditorContentProps {
   /** panel: filled with this editor's Cancel (asks first when there are
    *  unsaved changes), for the host to route the side panel's Esc to. */
   cancelRef?: React.RefObject<(() => void) | null>;
+  /** The search parameter holding the editor's Graph / Steps view. */
+  viewParam?: string;
 }
 
 /**
@@ -170,13 +172,14 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
   expand,
   onClose,
   cancelRef,
+  viewParam = "view",
 }) => {
   const { t } = useTranslation();
   const isPanel = variant === "panel";
   const [searchParams, setSearchParams] = useSearchParams();
   const { mode, chargePointService, defaultEvSettings } = useDataContext();
   const requestedView: EditorView =
-    searchParams.get("view") === "steps" ? "steps" : "graph";
+    searchParams.get(viewParam) === "steps" ? "steps" : "graph";
 
   const [original, setOriginal] = useState<ScenarioDefinition | null>(null);
   const [scenario, setScenario] = useState<ScenarioDefinition | null>(null);
@@ -648,7 +651,7 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev);
-        next.set("view", view);
+        next.set(viewParam, view);
         return next;
       },
       { replace: true },

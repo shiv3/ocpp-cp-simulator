@@ -69,6 +69,8 @@
   "scenarioRun.run.openLibraryEditor": "Ouvrir dans l’éditeur de la Bibliothèque",
   "scenarioRun.run.openEditor": "Ouvrir dans l’éditeur",
   "scenarioRun.run.openFullPage": "Ouvrir l’exécution en pleine page",
+  "scenarioRun.run.openInLibrary": "Ouvrir dans la Bibliothèque",
+  "scenarioRun.run.backToCp": "Retour à {{cpId}}",
   "scenarioRun.run.runtimeRunId": "ID d’exécution runtime",
   "scenarioRun.run.stepsExecuted": "Étapes exécutées",
   "scenarioRun.run.stop": "Arrêter",

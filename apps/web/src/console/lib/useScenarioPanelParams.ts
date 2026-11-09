@@ -66,13 +66,14 @@ export interface ScenarioPanelParams {
 export function withPanelEditing(
   params: URLSearchParams,
   editing: boolean,
+  viewParam = "view",
 ): URLSearchParams {
   const next = new URLSearchParams(params);
   if (editing) {
     next.set("edit", "1");
   } else {
     next.delete("edit");
-    next.delete("view");
+    next.delete(viewParam);
   }
   return next;
 }

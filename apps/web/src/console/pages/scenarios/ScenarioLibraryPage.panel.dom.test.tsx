@@ -164,7 +164,9 @@ describe("Scenarios page — side panel", () => {
     expect(
       container.querySelector(RUN_ROW)?.getAttribute("data-selected"),
     ).toBe("true");
-    // The panel draws the run's steps.
+    // The panel draws the run as the Graph (the default); Steps is one click away.
+    expect(panel.querySelectorAll("[data-phase]").length).toBeGreaterThan(0);
+    await click(panel.querySelector('button[data-view="steps"]')!);
     expect(panel.querySelectorAll("[data-step-id]")).toHaveLength(5);
     // Clicking the open row again closes it.
     await click(container.querySelector(`${RUN_ROW} .truncate`)!);

@@ -67,6 +67,8 @@
   "scenarioRun.run.openLibraryEditor": "在库编辑器中打开",
   "scenarioRun.run.openEditor": "在编辑器中打开",
   "scenarioRun.run.openFullPage": "在整页中打开此运行",
+  "scenarioRun.run.openInLibrary": "在库中打开",
+  "scenarioRun.run.backToCp": "返回 {{cpId}}",
   "scenarioRun.run.runtimeRunId": "运行时运行 ID",
   "scenarioRun.run.stepsExecuted": "已执行步骤",
   "scenarioRun.run.stop": "停止",

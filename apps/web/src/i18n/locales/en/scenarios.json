@@ -151,11 +151,6 @@
   "scenarios.templateBrowser.noMatch": "No template matches “{{query}}”.",
   "scenarios.templateBrowser.searchLabel": "Search templates",
   "scenarios.templateBrowser.searchPlaceholder": "Search by name or description",
-  "scenarios.templateBrowser.showSteps": "Show steps",
-  "scenarios.templateBrowser.hideSteps": "Hide steps",
-  "scenarios.templateBrowser.stepsLabel": "Steps",
-  "scenarios.templateBrowser.goesTo": "→ {{steps}}",
-  "scenarios.templateBrowser.thenEnd": "→ end",
   "scenarios.templateBrowser.title": "Scenario templates",
   "scenarios.category.status": "Status",
   "scenarios.category.transaction": "Transaction",
@@ -172,5 +167,12 @@
   "scenarios.editor.issue.edgeOutOfEnd": "An edge leaves an End node; it is never followed.",
   "scenarios.editor.issue.extraOutgoing": "Step {{n}} ({{title}}) has several next steps, but only Start runs branches in parallel: at run time only the first one runs.",
   "scenarios.editor.issue.danglingEdge": "An edge points at a step that does not exist; that branch ends there.",
-  "scenarios.editor.issue.unreachable": "Step {{n}} ({{title}}) is not reached from Start, so it never runs."
+  "scenarios.editor.issue.unreachable": "Step {{n}} ({{title}}) is not reached from Start, so it never runs.",
+  "scenarios.templateBrowser.previewLabel": "Preview of {{name}}",
+  "scenarios.templateBrowser.backToList": "← Templates",
+  "scenarios.templateBrowser.readOnlyNote": "Read-only preview: Use template makes a copy you can edit.",
+  "scenarios.templateBrowser.selectStepHint": "Pick a step to see its settings.",
+  "scenarios.templateBrowser.listLabel": "Templates",
+  "scenarios.templateBrowser.previewTemplate": "Preview {{name}}",
+  "scenarios.templateBrowser.nothingToPreview": "No template to preview."
 }

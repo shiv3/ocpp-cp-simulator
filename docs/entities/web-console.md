@@ -876,17 +876,25 @@ them (their other definitions stay), then the Library scenario.
 **Template browser.** The gallery only shows eight cards, so **Browse all N
 templates** (N is every built-in template, 40+ with the `cert16-*` suites)
 opens a dialog, **Scenario templates**
-([`TemplateBrowserDialog.tsx`](../../apps/web/src/console/pages/scenarios/TemplateBrowserDialog.tsx)):
-a search box (focused on open; matches the name or the description,
-case-insensitive), the count `N of M`, and a scrollable list with one row per
-template: name, target type chip (`chargePoint` / `connector`), the description
-(two lines) and **Use template**. **Use template** creates the Library scenario
-exactly like the gallery's button and closes the dialog; **Enter** in the search
-uses the first template still listed. The search starts empty each time the
-dialog opens. (This dialog is the only way to a template beyond the first eight.)
-**Show steps** under a row's description opens a read-only outline of the
-template — its steps in running order, with where a loop or fork jumps to
-(`outlineScenario`) — so a template can be read before it is used.
+([`TemplateBrowserDialog.tsx`](../../apps/web/src/console/pages/scenarios/TemplateBrowserDialog.tsx)),
+split in two. On the left: a search box (focused on open; matches the name or
+the description, case-insensitive), the count `N of M`, and a scrollable list
+with one row per template: name, target type chip (`chargePoint` /
+`connector`), the description (two lines) and **Use template**. A click on a
+row selects it; **↑ / ↓** in the search move the selection and **Enter** uses
+the selected template. The selection starts on the first template, and falls
+back to the first one still listed when the search hides it. On the right, the
+selected template as the scenario editor would show it, read-only
+([`TemplatePreview.tsx`](../../apps/web/src/console/pages/scenarios/TemplatePreview.tsx)):
+its name, description, step and branch count and trigger, a primary **Use
+template**, the **Steps / Graph** views (Graph first; loops drawn as in the
+editor; no `+` controls), and, for a step picked there, the editor's inspector
+with every field disabled. A shape the views cannot draw is listed as an
+outline. In a narrow dialog the two sides take turns: a row opens the preview,
+**← Templates** goes back. **Use template** creates the Library scenario exactly
+like the gallery's button and closes the dialog. The search starts empty each
+time the dialog opens. (This dialog is the only way to a template beyond the
+first eight.)
 
 **The editor.** `?edit=<id>` opens the [editor](#scenario-editor-steps-and-graph)
 in place of the table, with the header `← Library`, the name, the trigger, the

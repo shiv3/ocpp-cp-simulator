@@ -17,13 +17,16 @@ const UnsupportedOutline: React.FC<{
   scenario: Pick<ScenarioDefinition, "nodes" | "edges">;
   selectedStepId: string | null;
   onSelectStep: (id: string) => void;
-}> = ({ scenario, selectedStepId, onSelectStep }) => {
+  /** The line above the list; the editor's (steps editable, wiring not) by
+   *  default, `null` for none. */
+  note?: string | null;
+}> = ({ scenario, selectedStepId, onSelectStep, note }) => {
   const { t } = useTranslation();
   const steps = outlineScenario(scenario);
   return (
     <div data-testid="outline-only">
       <p className="mb-2 text-xs text-cx-muted">
-        {t("scenarios.editor.outlineOnlyNote")}
+        {note === undefined ? t("scenarios.editor.outlineOnlyNote") : note}
       </p>
       <ol className="space-y-1.5">
         {steps.map(({ number, node, jumps, endsHere }) => (

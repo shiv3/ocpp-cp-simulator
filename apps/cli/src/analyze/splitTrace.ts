@@ -1,7 +1,7 @@
 /**
  * Pre-processing layer for `analyze` (issue #188 Track 3): splits a v1.1
- * trace JSONL file into one JSONL blob per charge point, and optionally
- * further into one blob per connector.
+ * trace JSONL file into one record group per charge point, and optionally
+ * further into one group per connector.
  *
  * Exists to compensate for a real limitation of the OCPP DebugKit toolkit
  * (probed against the real 0.4.2 install, not inferred): its analysis
@@ -20,9 +20,39 @@
  * frames, producing meaningless results. We filter those out ourselves and
  * surface the counts so the operator knows what was skipped.
  *
- * Deliberately has no dependency on the toolkit (or anything else) so it is
- * cheap to unit test in isolation and cannot be affected by how the toolkit
- * is imported/loaded elsewhere in the analyze code path.
+ * Deliberately has no dependency on the toolkit so it is cheap to unit test
+ * in isolation and cannot be affected by how the toolkit is imported/loaded
+ * elsewhere in the analyze code path.
+ *
+ * ---------------------------------------------------------------------------
+ * Reading the trace (issue #886)
+ * ---------------------------------------------------------------------------
+ *
+ * Lines are read with the Open OCPP Trace SDK reader (`readRecords` in
+ * `onError: "yield"` mode, so one bad line never stops the run). It takes a
+ * stream of text or byte chunks, decodes UTF-8 (also across chunk
+ * boundaries), drops a BOM at the start of the stream, accepts LF and CRLF,
+ * and skips blank lines (only spaces, tabs and CRs). Every non-blank line
+ * counts towards `total` and ends up either kept or in exactly one
+ * exclusion counter:
+ * - not valid JSON -> `unparseableLine`;
+ * - JSON that is not a valid trace record (a missing or malformed envelope
+ *   field, a `schemaVersion` of another major version, or a JSON value that
+ *   is not an object at all), a line over the reader's 1 MiB limit, or a
+ *   line that is not valid UTF-8 -> `invalidRecord`. Before #886 a JSON
+ *   array or scalar line counted as `unparseableLine`;
+ * - a valid record over SOAP or of a non-1.6 `ocppVersion` -> `soap` /
+ *   `unsupportedOcppVersion` (rules unchanged, now on typed records).
+ * The SDK checks the envelope only, never `payload` or `raw`, so a trace of
+ * deliberately invalid OCPP (fault injection, #393 / #593) still reads.
+ *
+ * Groups hold the parsed `TraceRecord`s, not the original line text.
+ * `recordsToJsonl` re-serializes a group with the SDK writer for the
+ * toolkit's `parseOpenOcppTrace` (which takes a JSONL string): one
+ * LF-terminated line per record, semantically equal to the input line --
+ * same keys in the same order, same values, `raw` byte for byte -- but not
+ * byte-identical to it (insignificant whitespace and escapes are
+ * normalized by `JSON.stringify`).
  *
  * ---------------------------------------------------------------------------
  * Optional connector splitting (`splitBy: "connector"`, issue #188 usability
@@ -96,23 +126,31 @@
  * to keep working on these longer ids.
  */
 
+import type { TraceRecord } from "@open-ocpp-trace/core";
+import { readRecords, type ChunkSource } from "@open-ocpp-trace/jsonl/reader";
+import { serializeRecord } from "@open-ocpp-trace/jsonl/writer";
+
 export type TraceSplitMode = "charge-point" | "connector";
 
 export interface TraceSplit {
-  /** Group id -> that group's records re-serialized as JSONL text.
+  /** Group id -> that group's records, in stream order.
    *  `splitBy: "charge-point"` (default): keyed by chargePointId.
    *  `splitBy: "connector"`: keyed by `<chargePointId>-connector<N>`, or
    *  the plain chargePointId for a CP with no connector-scoped records
    *  (see module docstring). */
-  byChargePoint: Map<string, string>;
-  /** Records with no chargePointId, as JSONL text ("" if none). Never
-   *  connector-split, regardless of `splitBy`: with no chargePointId there
-   *  is no meaningful transactionId/connectorId correlation scope either. */
-  unattributed: string;
+  byChargePoint: Map<string, TraceRecord[]>;
+  /** Records with no chargePointId ([] if none). Never connector-split,
+   *  regardless of `splitBy`: with no chargePointId there is no meaningful
+   *  transactionId/connectorId correlation scope either. */
+  unattributed: TraceRecord[];
   excluded: {
     soap: number;
     unsupportedOcppVersion: number;
+    /** Lines that are not valid JSON. */
     unparseableLine: number;
+    /** Lines that are JSON but not a valid trace record, longer than the
+     *  reader's 1 MiB limit, or not valid UTF-8 (#886). */
+    invalidRecord: number;
   };
   /** Count of non-blank lines examined (kept + excluded); blank lines are
    *  not records and are silently ignored, matching JSONL convention for a
@@ -120,9 +158,10 @@ export interface TraceSplit {
   total: number;
 }
 
-interface ParsedRecord {
-  line: string;
-  record: Record<string, unknown>;
+/** A group's records as JSONL text for the toolkit: one LF-terminated line
+ *  per record, written by the SDK writer (see module docstring). */
+export function recordsToJsonl(records: readonly TraceRecord[]): string {
+  return records.map((record) => serializeRecord(record)).join("");
 }
 
 /** CALL actions that carry their connector directly in `payload.connectorId`. */
@@ -174,17 +213,16 @@ type ConnectorResolution = number | "station";
  * naturally inherits the answered CALL's resolution.
  */
 function resolveConnectorsByMessageId(
-  records: ParsedRecord[],
+  records: readonly TraceRecord[],
 ): Map<string, ConnectorResolution> {
   // Pass 1: StartTransaction CALL messageId -> connectorId (only when it
   // resolves to an actual connector; an unresolvable/station-level
   // StartTransaction can't anchor any StopTransaction correlation either).
   const startTxMessageIdToConnector = new Map<string, number>();
-  for (const { record } of records) {
+  for (const record of records) {
     if (record.messageType !== "CALL" || record.action !== "StartTransaction")
       continue;
-    const messageId =
-      typeof record.messageId === "string" ? record.messageId : undefined;
+    const { messageId } = record;
     if (messageId === undefined) continue;
     const connectorId = positiveConnectorId(getPayloadObject(record.payload));
     if (connectorId !== undefined)
@@ -195,10 +233,9 @@ function resolveConnectorsByMessageId(
   // each StartTransaction CALL found above (the transactionId only appears
   // in the response, never the request).
   const txIdToConnector = new Map<number, number>();
-  for (const { record } of records) {
+  for (const record of records) {
     if (record.messageType !== "CALLRESULT") continue;
-    const messageId =
-      typeof record.messageId === "string" ? record.messageId : undefined;
+    const { messageId } = record;
     if (messageId === undefined) continue;
     const connectorId = startTxMessageIdToConnector.get(messageId);
     if (connectorId === undefined) continue;
@@ -210,14 +247,11 @@ function resolveConnectorsByMessageId(
 
   // Pass 3: every connector-scoped CALL's own messageId -> resolution.
   const messageIdToConnector = new Map<string, ConnectorResolution>();
-  for (const { record } of records) {
+  for (const record of records) {
     if (record.messageType !== "CALL") continue;
-    const messageId =
-      typeof record.messageId === "string" ? record.messageId : undefined;
+    // A CALL record always carries its action (the SDK reader validated it).
+    const { messageId, action } = record;
     if (messageId === undefined) continue;
-    const action =
-      typeof record.action === "string" ? record.action : undefined;
-    if (action === undefined) continue;
 
     if (action === "StartTransaction") {
       messageIdToConnector.set(
@@ -245,27 +279,23 @@ function resolveConnectorsByMessageId(
 
 /**
  * Splits one charge point's already-filtered records into per-connector
- * JSONL blobs, keyed by connector number, plus a station-level lines list
+ * record lists, keyed by connector number, with the station-level records
  * replicated into each. Returns `null` when no record resolves to an actual
  * connector (the all-station-level fallback case, see module docstring) so
  * the caller can fall back to a single plain-chargePointId group instead of
  * silently discarding every record.
  */
 function groupRecordsByConnector(
-  records: ParsedRecord[],
-): { connectorId: number; lines: string[] }[] | null {
+  records: readonly TraceRecord[],
+): { connectorId: number; records: TraceRecord[] }[] | null {
   const messageIdToConnector = resolveConnectorsByMessageId(records);
 
-  const resolutionOf = (
-    record: Record<string, unknown>,
-  ): ConnectorResolution => {
-    const messageId =
-      typeof record.messageId === "string" ? record.messageId : undefined;
-    if (messageId === undefined) return "station";
-    return messageIdToConnector.get(messageId) ?? "station";
-  };
+  const resolutionOf = ({ messageId }: TraceRecord): ConnectorResolution =>
+    messageId === undefined
+      ? "station"
+      : (messageIdToConnector.get(messageId) ?? "station");
 
-  const resolutions = records.map(({ record }) => resolutionOf(record));
+  const resolutions = records.map(resolutionOf);
   const connectorIds = Array.from(
     new Set(resolutions.filter((r): r is number => typeof r === "number")),
   ).sort((a, b) => a - b);
@@ -274,101 +304,93 @@ function groupRecordsByConnector(
 
   return connectorIds.map((connectorId) => ({
     connectorId,
-    lines: records
-      .filter((_, i) => {
-        const r = resolutions[i];
-        return r === connectorId || r === "station";
-      })
-      .map(({ line }) => line),
+    records: records.filter((_, i) => {
+      const r = resolutions[i];
+      return r === connectorId || r === "station";
+    }),
   }));
 }
 
-export function splitTraceJsonl(
-  jsonlText: string,
+/**
+ * Reads a trace JSONL stream (text or byte chunks; pass `[text]` or
+ * `[buffer]` for a whole file) and splits its records per charge point, or
+ * per connector with `splitBy: "connector"`. Never throws on a bad line:
+ * see the module docstring for which exclusion counter each one lands in.
+ */
+export async function splitTraceRecords(
+  source: ChunkSource,
   splitBy: TraceSplitMode = "charge-point",
-): TraceSplit {
-  const byChargePointRecords = new Map<string, ParsedRecord[]>();
-  const unattributedLines: string[] = [];
-  const excluded = { soap: 0, unsupportedOcppVersion: 0, unparseableLine: 0 };
+): Promise<TraceSplit> {
+  const byChargePointRecords = new Map<string, TraceRecord[]>();
+  const unattributed: TraceRecord[] = [];
+  const excluded = {
+    soap: 0,
+    unsupportedOcppVersion: 0,
+    unparseableLine: 0,
+    invalidRecord: 0,
+  };
   let total = 0;
 
-  for (const line of jsonlText.split("\n")) {
-    if (line.trim() === "") continue;
+  for await (const result of readRecords(source, { onError: "yield" })) {
     total++;
 
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(line);
-    } catch {
-      excluded.unparseableLine++;
+    if (!result.ok) {
+      if (result.error.kind === "json") {
+        excluded.unparseableLine++;
+      } else {
+        // "validation", "line-too-long" or "encoding".
+        excluded.invalidRecord++;
+      }
       continue;
     }
-    if (
-      typeof parsed !== "object" ||
-      parsed === null ||
-      Array.isArray(parsed)
-    ) {
-      excluded.unparseableLine++;
-      continue;
-    }
-    const record = parsed as Record<string, unknown>;
+    const { record } = result;
 
     if (record.transport === "soap") {
       excluded.soap++;
       continue;
     }
     if (
-      typeof record.ocppVersion === "string" &&
+      record.ocppVersion !== undefined &&
       !record.ocppVersion.startsWith("1.6")
     ) {
       excluded.unsupportedOcppVersion++;
       continue;
     }
 
-    const cpId =
-      typeof record.chargePointId === "string" && record.chargePointId
-        ? record.chargePointId
-        : undefined;
+    const cpId = record.chargePointId || undefined;
     if (cpId === undefined) {
-      unattributedLines.push(line);
+      unattributed.push(record);
       continue;
     }
     const bucket = byChargePointRecords.get(cpId);
-    const parsedRecord: ParsedRecord = { line, record };
     if (bucket) {
-      bucket.push(parsedRecord);
+      bucket.push(record);
     } else {
-      byChargePointRecords.set(cpId, [parsedRecord]);
+      byChargePointRecords.set(cpId, [record]);
     }
   }
 
-  const byChargePoint = new Map<string, string>();
+  const byChargePoint = new Map<string, TraceRecord[]>();
   for (const [cpId, records] of byChargePointRecords) {
     if (splitBy === "connector") {
       const groups = groupRecordsByConnector(records);
       if (groups === null) {
         // No connector-scoped record for this CP at all -- fall back to a
         // single group under its plain chargePointId (module docstring).
-        byChargePoint.set(
-          cpId,
-          records.map(({ line }) => line + "\n").join(""),
-        );
+        byChargePoint.set(cpId, records);
         continue;
       }
-      for (const { connectorId, lines } of groups) {
-        byChargePoint.set(
-          `${cpId}-connector${connectorId}`,
-          lines.map((l) => l + "\n").join(""),
-        );
+      for (const { connectorId, records: connectorRecords } of groups) {
+        byChargePoint.set(`${cpId}-connector${connectorId}`, connectorRecords);
       }
     } else {
-      byChargePoint.set(cpId, records.map(({ line }) => line + "\n").join(""));
+      byChargePoint.set(cpId, records);
     }
   }
 
   return {
     byChargePoint,
-    unattributed: unattributedLines.map((l) => l + "\n").join(""),
+    unattributed,
     excluded,
     total,
   };

@@ -16,7 +16,7 @@ related:
   - choosing-an-interface.md
   - ../sources/github-issues.md
   - ../sources/bench-readme.md
-updated: 2026-11-08
+updated: 2026-11-09
 ---
 
 # Fleet, load and observability roadmap
@@ -238,8 +238,9 @@ that is unbounded by construction once phase 1 lands. Per-CP numbers stay in
 `cp.list` and the event stream.
 
 **Latency source.** Both message handlers already track in-flight CALLs —
-`_requests` / `_serialInFlight` in
-`packages/core/src/cp/infrastructure/transport/OCPPMessageHandler.ts` and `_pendingRequests`
+`_requests` in
+`packages/core/src/cp/infrastructure/transport/OCPPMessageHandler.ts` (its
+`_serialInFlight` slot in `transport/v16/serialCallQueueV16.ts`) and `_pendingRequests`
 in `OCPPMessageHandlerV201.ts`. Observe the histogram where those entries are
 resolved. The [trace record](../concepts/trace-format.md) carries no duration
 field, so this is a separate tap, not a trace consumer.

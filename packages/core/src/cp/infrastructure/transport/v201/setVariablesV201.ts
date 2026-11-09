@@ -2,13 +2,23 @@ import type {
   SetVariablesRequestV201,
   SetVariablesResponseV201,
 } from "@ocpp-cp-simulator/ocpp/index";
-import type {
-  ConfigurationChangeStatus,
-  ConfigurationStore,
-} from "../../../domain/charge-point/ConfigurationStore";
+import type { ConfigurationStore } from "../../../domain/charge-point/ConfigurationStore";
 import type { DeviceModelContext } from "./getVariablesV201";
 import { resolveDeviceModelVariable } from "./deviceModelMap";
+import {
+  checkRange,
+  checkVariableValue,
+  parseDecimal,
+  REASON,
+  statusInfo,
+  type VariableStatusInfo,
+} from "./variableStatusInfo";
+import { variablesRequestLimitViolation } from "./variablesRequestLimits";
 import { unknownMeasurands } from "./measurandEnum";
+import {
+  DEVICE_MODEL,
+  type DeviceModelVariableDef,
+} from "../../../domain/device-model/DeviceModelRegistry";
 
 /** The configuration keys behind the MemberLists over MeasurandEnumType
  *  (`SampledDataCtrlr.TxUpdatedMeasurands`, `AlignedDataCtrlr.Measurands`,
@@ -23,110 +33,160 @@ const MEASURAND_LIST_KEYS: ReadonlySet<string> = new Set([
   "StopTxnAlignedData",
 ]);
 
-type SetVariableResult = SetVariablesResponseV201["setVariableResult"][number];
+/**
+ * Why `value` is not one `def` can hold, or `undefined` when it is: a
+ * MemberList member outside the version's MeasurandEnumType (B05.FR.07,
+ * #714; checked first so the reason names the members), then the type,
+ * limits and OptionList (B05.FR.07/08).
+ */
+export function variableValueRejection(
+  def: DeviceModelVariableDef,
+  v16Key: string,
+  value: string,
+  ocppVersion: string | undefined,
+): VariableStatusInfo | undefined {
+  if (ocppVersion !== undefined && MEASURAND_LIST_KEYS.has(v16Key)) {
+    const members = value
+      .split(",")
+      .map((m) => m.trim())
+      .filter((m) => m !== "");
+    const unknown = unknownMeasurands(members, ocppVersion);
+    if (unknown.length > 0) {
+      return statusInfo(
+        REASON.invalidValue,
+        `Not a MeasurandEnumType value: ${unknown.join(", ")}`.slice(0, 512),
+      );
+    }
+  }
+  return checkVariableValue(def, value);
+}
 
-/** A plain decimal number: optional minus sign, digits, optional fraction. */
-const DECIMAL = /^-?\d+(\.\d+)?$/;
+/**
+ * The SetVariables value checks for an operator's write of a 2.x
+ * configuration key (`cp.config_keys.set`, #612), so the control plane
+ * cannot store what a CSMS would be refused. `true` when `value` is
+ * acceptable; a key outside the Device Model is left to the store.
+ */
+export function configurationWriteCheckV201(
+  ocppVersion: string,
+): (key: string, value: string) => boolean {
+  return (key, value) => {
+    const def = DEVICE_MODEL.byValueKey(key);
+    return (
+      def === undefined ||
+      variableValueRejection(def, key, value, ocppVersion) === undefined
+    );
+  };
+}
+
+type SetVariableResult = SetVariablesResponseV201["setVariableResult"][number];
 
 export function handleSetVariablesV201(
   req: SetVariablesRequestV201,
   store: ConfigurationStore,
   context: DeviceModelContext = {},
 ): SetVariablesResponseV201 {
+  // B05.FR.11: over the advertised limits, every element is Rejected with
+  // the reason (B05.FR.01: one result per element).
+  const violation = variablesRequestLimitViolation(
+    "SetVariables",
+    req,
+    req.setVariableData.length,
+    store,
+  );
   const results = req.setVariableData.map((data): SetVariableResult => {
+    const echo = { component: data.component, variable: data.variable };
+    const rejected = (info: VariableStatusInfo): SetVariableResult => ({
+      attributeStatus: "Rejected",
+      attributeStatusInfo: info,
+      ...echo,
+    });
+    if (violation !== undefined) return rejected(violation);
     const resolved = resolveDeviceModelVariable(
       data.component,
       data.variable,
       context.evseExists,
     );
     if (resolved.status !== "Found") {
-      return {
-        attributeStatus: resolved.status,
-        component: data.component,
-        variable: data.variable,
-      };
+      return { attributeStatus: resolved.status, ...echo };
     }
     const v16Key = resolved.valueKey;
+    const def = resolved.variable;
+    const type = data.attributeType;
 
     if (
-      data.attributeType === "Target" &&
+      (type === "Target" || type === "MinSet" || type === "MaxSet") &&
       context.targets?.supports(v16Key) === true
     ) {
-      // #538: a decimal target; anything else (hex, exponent, padding) is
-      // badly formatted (B05.FR.07).
-      const target = DECIMAL.test(data.attributeValue)
-        ? Number(data.attributeValue)
-        : NaN;
-      if (!Number.isFinite(target)) {
-        return {
-          attributeStatus: "Rejected",
-          component: data.component,
-          variable: data.variable,
-        };
+      // #538: a decimal; anything else (hex, exponent, padding) is badly
+      // formatted (B05.FR.07).
+      const value = parseDecimal(data.attributeValue);
+      if (value === undefined) {
+        return rejected(statusInfo(REASON.invalidValue, "expected a decimal"));
       }
-      context.targets.set(v16Key, target);
-      return {
-        attributeStatus: "Accepted",
-        attributeType: "Target", // B05.FR.03
-        component: data.component,
-        variable: data.variable,
-      };
+      // B05.FR.08: outside the variable's own limits.
+      const outside = checkRange(def, value);
+      if (outside !== undefined) return rejected(outside);
+      // MinSet / MaxSet bound the Target (Part 1 §4): the Target stays in
+      // [MinSet, MaxSet], and MinSet never passes MaxSet.
+      const { targets } = context;
+      const low =
+        type === "MinSet" ? undefined : targets.getLimit(v16Key, "MinSet");
+      const high =
+        type === "MaxSet" ? undefined : targets.getLimit(v16Key, "MaxSet");
+      if (type === "MaxSet" || type === "Target") {
+        if (low !== undefined && value < low) {
+          return rejected(
+            statusInfo(REASON.valueOutOfRange, `below the MinSet ${low}`),
+          );
+        }
+      }
+      if (type === "MinSet" || type === "Target") {
+        if (high !== undefined && value > high) {
+          return rejected(
+            statusInfo(REASON.valueOutOfRange, `above the MaxSet ${high}`),
+          );
+        }
+      }
+      if (type === "Target") targets.set(v16Key, value);
+      else targets.setLimit(v16Key, type, value);
+      return { attributeStatus: "Accepted", attributeType: type, ...echo }; // B05.FR.03
     }
-    if (data.attributeType !== undefined && data.attributeType !== "Actual") {
-      return {
-        attributeStatus: "NotSupportedAttributeType",
-        component: data.component,
-        variable: data.variable,
-      };
+    if (type !== undefined && type !== "Actual") {
+      return { attributeStatus: "NotSupportedAttributeType", ...echo };
     }
 
-    // B05.FR.07: a MemberList value "incorrectly formatted for the given
-    // Variable" is Rejected - here a member outside MeasurandEnumType
-    // (Temperature and RPM are 1.6 measurands). The previous list is kept.
-    if (context.ocppVersion !== undefined && MEASURAND_LIST_KEYS.has(v16Key)) {
-      const members = data.attributeValue
-        .split(",")
-        .map((m) => m.trim())
-        .filter((m) => m !== "");
-      const unknown = unknownMeasurands(members, context.ocppVersion);
-      if (unknown.length > 0) {
-        return {
-          attributeStatus: "Rejected",
-          attributeStatusInfo: {
-            reasonCode: "InvalidValue",
-            additionalInfo:
-              `Not a MeasurandEnumType value: ${unknown.join(", ")}`.slice(
-                0,
-                512,
-              ),
-          },
-          component: data.component,
-          variable: data.variable,
-        };
-      }
-    }
-
-    const attributeStatus = mapChangeStatus(
-      store.applyChange(v16Key, data.attributeValue),
+    // B05.FR.07, FR.08 first: a badly formatted or out-of-range value is
+    // reported as such even for a ReadOnly variable (FR.09 applies only when
+    // FR.04-FR.08 do not).
+    const badValue = variableValueRejection(
+      def,
+      v16Key,
+      data.attributeValue,
+      context.ocppVersion,
     );
-
-    if (
-      attributeStatus === "Accepted" ||
-      attributeStatus === "RebootRequired"
-    ) {
-      return {
-        attributeStatus,
-        attributeType: "Actual",
-        component: data.component,
-        variable: data.variable,
-      };
+    if (badValue !== undefined) return rejected(badValue);
+    if (def.mutability === "ReadOnly") {
+      return rejected(statusInfo(REASON.readOnly)); // B05.FR.09
     }
 
-    return {
-      attributeStatus,
-      component: data.component,
-      variable: data.variable,
-    };
+    const change = store.applyChange(v16Key, data.attributeValue);
+    switch (change) {
+      case "Accepted":
+      case "RebootRequired":
+        return { attributeStatus: change, attributeType: "Actual", ...echo };
+      case "NotSupported":
+        return rejected(
+          statusInfo(
+            REASON.missingDevModelInfo,
+            "the station holds no value for this variable",
+          ),
+        );
+      case "Rejected":
+        // The store refused what the registry checks passed (for example a
+        // member of a MemberList it does not know).
+        return rejected(statusInfo(REASON.invalidValue));
+    }
   });
 
   const first = results[0];
@@ -137,18 +197,4 @@ export function handleSetVariablesV201(
   return {
     setVariableResult: results as [SetVariableResult, ...SetVariableResult[]],
   };
-}
-
-function mapChangeStatus(
-  status: ConfigurationChangeStatus,
-): SetVariableResult["attributeStatus"] {
-  switch (status) {
-    case "Accepted":
-      return "Accepted";
-    case "RebootRequired":
-      return "RebootRequired";
-    case "Rejected":
-    case "NotSupported":
-      return "Rejected";
-  }
 }

@@ -7,6 +7,7 @@ sources:
   - apps/cli/src/main.ts
   - scripts/bench/README.md
 related:
+  - ../concepts/error-reporting.md
   - cli.md
   - web-console.md
   - docker-image.md
@@ -21,7 +22,7 @@ related:
   - open-ev-directory.md
   - ../concepts/vehicle-profiles.md
   - ../concepts/charger-engine.md
-updated: 2026-11-08
+updated: 2026-11-09
 ---
 
 # Daemon (server mode)
@@ -258,7 +259,7 @@ CALLERROR arrives, so a CSMS that never answers contributes **no observation at
 all** — a saturated CSMS would otherwise report zero slow calls and zero
 errors, the opposite of the truth. Exactly one thing increments it: the
 **OCPP-1.6J per-CALL watchdog** (`SERIAL_CALL_TIMEOUT_MS`, 30s, in
-`packages/core/src/cp/infrastructure/transport/OCPPMessageHandler.ts`) firing, matched off
+`packages/core/src/cp/infrastructure/transport/v16/serialCallQueueV16.ts`) firing, matched off
 the log line it writes. It is therefore a protocol fact — the transport
 abandoned this CALL — and **never** a fact about the daemon's own bookkeeping.
 
@@ -359,6 +360,19 @@ says only whether one is set.
 **Restore.** With `--state-db` every stored charge point is rebuilt at start and dialled (after the watches are back, see [File hot-reload](#file-hot-reload)). `--no-connect-restored` rebuilds them and leaves them disconnected until `cp.connect` or `cp.bulk { action: "connect" }`; a charge point named by `--cp-id` is still connected by the bootstrap.
 
 **Waits.** `cp.bulk` (including `reset`) and `cp.scenario.run` wait for each charge point at most 10 s; `--cp-bulk-wait-ms` changes that ([Control plane](../concepts/control-plane.md#charge-point-labels)). A Reset itself needs no wait of the daemon's own: the station answers, stops its transactions and reconnects.
+
+## Error reporting
+
+`OCPP_SIM_ERROR_REPORTER` in the daemon's environment turns on opt-in error
+reporting ([#794](https://github.com/shiv3/ocpp-cp-simulator/issues/794)): `sentry` (with `SENTRY_DSN`, optionally
+`SENTRY_ENVIRONMENT`) or a module specifier for another adapter. Uncaught
+exceptions, unhandled rejections and fatal exits are reported, with the
+credentials the redaction recognises scrubbed (an unlabelled one in an error
+message is not); an unhandled rejection still exits the daemon with code 1.
+A second uncaught exception or unhandled rejection raised while the first
+one is being flushed is printed to stderr but not reported.
+It does not reach the console the daemon serves, whose adapter is fixed when
+the UI is built (`VITE_ERROR_REPORTER`). Details: [Error reporting](../concepts/error-reporting.md).
 
 ## Docker
 

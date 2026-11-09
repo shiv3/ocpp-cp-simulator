@@ -8,6 +8,7 @@ sources:
   - packages/core/src/cp/shared/Logger.ts
   - packages/contracts/src/redaction.ts
 related:
+  - error-reporting.md
   - ../entities/daemon.md
   - ../entities/docker-image.md
   - state-persistence.md

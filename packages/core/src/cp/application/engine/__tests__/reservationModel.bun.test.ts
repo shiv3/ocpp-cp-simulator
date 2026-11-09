@@ -1,19 +1,28 @@
 // The reservation model of OCPP 2.0.1 and 2.1 (H01-H04, #709-#712) on the
 // wire, against the fake CSMS of the golden wire test. The golden fixtures pin
 // the 2.0.1 transcripts; this file runs the same rules on both 2.x versions.
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { Rig } from "../../../../test/goldenWire/rig";
 import type { WireFrame } from "../../../../test/goldenWire/FakeCsms";
 import { OCPPStatus } from "../../../domain/types/OcppTypes";
 
 const FUT = "2099-01-01T00:00:00.000Z";
+// A case lives on real sockets: under load it outlasts bun's 5 s default. The
+// rig's own deadline comes first, so a stuck case says which frame it waited
+// for instead of a bare "test timed out" (#874).
+const CASE_DEADLINE_MS = 20_000;
+setDefaultTimeout(30_000);
 const rigs: Rig[] = [];
 afterEach(async () => {
   await Promise.all(rigs.splice(0).map((r) => r.dispose()));
 });
 
 async function rigFor(version: "2.0.1" | "2.1", connectors = 2) {
-  const rig = await Rig.create({ version, connectors });
+  const rig = await Rig.create({
+    version,
+    connectors,
+    deadlineMs: CASE_DEADLINE_MS,
+  });
   rigs.push(rig);
   await rig.csms.settle();
   return rig;
@@ -189,7 +198,11 @@ describe.each(["2.0.1", "2.1"] as const)("OCPP %s reservations", (version) => {
 
 describe("OCPP 1.6 sends no ReservationStatusUpdate", () => {
   test("a reservation that ends by a fault is silent on the wire", async () => {
-    const r = await Rig.create({ version: "1.6", connectors: 1 });
+    const r = await Rig.create({
+      version: "1.6",
+      connectors: 1,
+      deadlineMs: CASE_DEADLINE_MS,
+    });
     rigs.push(r);
     await r.csms.settle();
     await r.csms.call("ReserveNow", {

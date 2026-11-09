@@ -172,6 +172,7 @@ import {
   MONITORING_REQUEST_MAX_BYTES,
   MONITORING_REQUEST_MAX_ITEMS,
 } from "../monitoring/monitoringCtrlrKeys";
+import { DEVICE_MODEL } from "../device-model/DeviceModelRegistry";
 import { renderConfigValue } from "./renderConfigValue";
 import { OcmfMeter } from "../connector/SignedMeterData";
 import {
@@ -1177,6 +1178,7 @@ export class ChargePoint {
       repository.saveActiveBase(this._monitoring.activeMonitoringBase);
     }
     this.publishMonitoringCtrlr();
+    this.publishDeviceModelConstants();
     this.publishRuntimeValues();
     // Registered before the evaluation's own listener, so a new row exists
     // when its triggered flag is first written.
@@ -1223,6 +1225,25 @@ export class ChargePoint {
     this._monitorEvaluation = evaluation;
     this._configuration.onChange((key) => evaluation.valueChanged(key));
     this._deviceModelTargets.onChange((key) => evaluation.valueChanged(key));
+  }
+
+  /**
+   * The registry's constants (#604), such as `TxCtrlr.TxStartPoint`, as
+   * read-only runtime keys, so reads, reports and monitors see them.
+   */
+  private publishDeviceModelConstants(): void {
+    for (const def of DEVICE_MODEL.variables) {
+      if (def.constant !== true) continue;
+      if (typeof def.default === "string") {
+        this._configuration.defineRuntimeKey(def.valueKey, def.default);
+      } else if (typeof def.default === "number") {
+        this._configuration.defineRuntimeIntegerKey(
+          def.valueKey,
+          def.default,
+          def.min === undefined ? undefined : { min: def.min },
+        );
+      }
+    }
   }
 
   /**
@@ -2895,6 +2916,19 @@ export class ChargePoint {
     requestId?: number,
   ): void {
     this._outbox.sendFirmwareStatusNotification(status, requestId);
+    // Whichever route sent it (control plane, scenario, behavior), the engine
+    // holds what was last reported, so a TriggerMessage answers it (#596).
+    // The 2.x handler names the last accepted request when none is given,
+    // except for Idle.
+    const reported =
+      requestId ??
+      (status === "Idle" ? undefined : this._lastFirmwareRequestId);
+    this.engine.dispatch({
+      type: "reported",
+      kind: "firmware",
+      status,
+      ...(reported !== undefined ? { requestId: reported } : {}),
+    });
   }
 
   /** Send LogStatusNotification.req — see OCPPMessageHandler doc. */
@@ -2902,6 +2936,14 @@ export class ChargePoint {
     this._logStatusSeq++;
     this._lastLogStatusRequestId = requestId ?? this._lastLogRequestId;
     this._outbox.sendLogStatusNotification(status, requestId);
+    const reported =
+      requestId ?? (status === "Idle" ? undefined : this._lastLogRequestId);
+    this.engine.dispatch({
+      type: "reported",
+      kind: "log",
+      status,
+      ...(reported !== undefined ? { requestId: reported } : {}),
+    });
   }
 
   /** Counts every LogStatusNotification this station sent, so the automatic

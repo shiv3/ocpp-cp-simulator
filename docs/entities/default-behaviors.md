@@ -173,6 +173,19 @@ way you rebuild the answer by hand (for `Accepted` / `Rejected`, `ctx.accepted(a
 | Firmware publishing          | —                                                                                            | `PublishFirmware`, `UnpublishFirmware`                                                                                                                                                                  |
 | Vendor                       | `DataTransfer`                                                                               | `DataTransfer`                                                                                                                                                                                          |
 
+The 2.x `TriggerMessage` answers `Accepted` and then sends the requested message for `BootNotification`,
+`Heartbeat`, `StatusNotification`, `MeterValues`, the certificate signing requests and, since #596,
+`TransactionEvent` (an `Updated` event with `triggerReason: "Trigger"`, the connector's current
+`chargingState` and a meter sample with context `Trigger` (F06.FR.07), for the running transaction of
+`evse.id`, or of every EVSE without one; `Rejected` with reason code `TxNotFound` when none runs),
+`FirmwareStatusNotification` and `LogStatusNotification` (the last status the station sent, which the
+engine holds in `default.firmware` / `default.logs` whether a behavior, a scenario or the
+`firmware_status_notification` / `log_status_notification` control-plane command sent it, with its
+`requestId`; L01.FR.26. `Idle` without a `requestId` when nothing was sent (F06.FR.16) or the last
+firmware status was `Installed` (L01.FR.25); a failed status such as `DownloadFailed` is repeated. A log is
+`Uploading` while uploading and `Idle` otherwise (F06.FR.14 / FR.15); `requestId` is optional for `Idle`
+when triggered, FirmwareStatusNotification and N01.FR.13). Every other requested message is `NotImplemented`.
+
 On 2.1 the station has no local cost calculation, so `SetDefaultTariff` (I07.FR.01) and
 `ChangeTransactionTariff` (I11.FR.01) are answered with the CALLERROR `NotSupported`, not a `Rejected`
 status (that is for an invalid tariff, I07.FR.05); `GetTariffs` and `ClearTariffs` answer `NoTariff`.

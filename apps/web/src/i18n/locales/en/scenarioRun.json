@@ -122,5 +122,16 @@
   "scenarioRun.pendingLoop.remove": "Remove the empty repeat",
   "scenarioRun.pendingLoop.unsaved": "Empty repeat blocks are not saved.",
   "scenarioRun.emptyLaneHint": "Drop steps here",
-  "scenarioRun.dropRefused": "Cannot drop here: {{reason}}"
+  "scenarioRun.dropRefused": "Cannot drop here: {{reason}}",
+  "scenarioRun.pick.title": "Repeat: pick the step to go back to",
+  "scenarioRun.pick.titleLane": "Lane {{lane}}: pick the step it continues at",
+  "scenarioRun.pick.hint": "Click an earlier step of this lane (the loop repeats from there to the + you used), or press Esc to cancel.",
+  "scenarioRun.pick.hintLane": "Click a later step; the steps in between are skipped by this lane. Esc cancels.",
+  "scenarioRun.pick.cancel": "Cancel",
+  "scenarioRun.pick.notHere": "Pick a step of the same lane, before this point.",
+  "scenarioRun.pick.notLater": "Pick a step after this branch.",
+  "scenarioRun.pick.noTarget": "There is no earlier step in this lane to go back to.",
+  "scenarioRun.pick.listLabel": "Steps you can pick",
+  "scenarioRun.pick.target": "Step {{n}}: {{title}}",
+  "scenarioRun.connectLane": "Connect lane {{lane}} to a later step"
 }

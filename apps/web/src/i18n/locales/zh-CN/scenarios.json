@@ -262,5 +262,8 @@
   "scenarios.addStep.structure.switch": "开关(按值分支)",
   "scenarios.addStep.structure.switchHelp": "添加一个分支块,每个 case 一个通道,外加默认通道。把步骤拖入通道;各通道在后续步骤处重新汇合。",
   "scenarios.addStep.structure.choice": "选择(随机分支)",
-  "scenarios.addStep.structure.choiceHelp": "添加一个带两个加权选项的分支块,随机选其一。把步骤拖入通道;各通道在后续步骤处重新汇合。"
+  "scenarios.addStep.structure.choiceHelp": "添加一个带两个加权选项的分支块,随机选其一。把步骤拖入通道;各通道在后续步骤处重新汇合。",
+  "scenarios.editor.cannot.laneEnds": "此分支已经在这里结束。",
+  "scenarios.editor.cannot.laneTargetNotLater": "请选择此分支点之后的步骤。",
+  "scenarios.editor.rangeHint": "高亮的步骤就是会被重复的步骤。"
 }

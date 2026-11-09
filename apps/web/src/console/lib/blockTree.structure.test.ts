@@ -10,6 +10,8 @@ import {
   assertTreeCovers,
   canInsertLoopAt,
   canMoveStepTo,
+  canSetLaneExit,
+  setLaneExit,
   insertForkBlock,
   insertStepIntoNewLoop,
   moveStepTo,
@@ -269,5 +271,89 @@ describe("cross-sequence moves over random scenarios", () => {
       }
     }
     expect(moved).toBeGreaterThan(100);
+  });
+});
+
+describe("a lane continues at a later step", () => {
+  const c = () =>
+    graph(
+      [start(), node("a"), node("b"), node("c"), end()],
+      [
+        ["start", "a"],
+        ["a", "b"],
+        ["b", "c"],
+        ["c", "end"],
+      ],
+    );
+  const forked = () => {
+    const def = c();
+    return insertForkBlock(def, recognizeBlockTree(def), "root", 1, "switch");
+  };
+
+  it("changes only that lane's edge, and the file reads back", () => {
+    const def = forked();
+    const tree = recognizeBlockTree(def);
+    const lane = "root/1/lanes/0";
+    expect(canSetLaneExit(tree, lane, "c").ok).toBe(true);
+    const out = setLaneExit(def, tree, lane, "c");
+    expect(out).not.toBe(def);
+    const sw = def.nodes.find((n) => n.type === ScenarioNodeType.SWITCH)!;
+    const was = def.edges.filter((e) => e.source === sw.id);
+    const now = out.edges.filter((e) => e.source === sw.id);
+    expect(now.map((e) => [e.sourceHandle, e.target])).toEqual([
+      ["case-0", "c"],
+      ["default", "b"],
+    ]);
+    // The lane kept its edge (same id); everything else is untouched.
+    expect(now[0].id).toBe(was[0].id);
+    expect(out.edges.filter((e) => e.source !== sw.id)).toEqual(
+      def.edges.filter((e) => e.source !== sw.id),
+    );
+    const back = recognizeBlockTree(out);
+    assertTreeCovers(out, back);
+    expect(
+      validateScenarioGraph(out).filter((d) => d.severity === "error"),
+    ).toEqual([]);
+  });
+
+  it("the steps the lane skips stay with the other lanes, as the file says", () => {
+    const def = forked();
+    const out = setLaneExit(
+      def,
+      recognizeBlockTree(def),
+      "root/1/lanes/0",
+      "c",
+    );
+    const back = recognizeBlockTree(out);
+    // The lanes now meet at c; b is run only by the lane that did not skip it.
+    expect(back.nodePath.get("b")?.path).toBe("root/1/lanes/1");
+    // The same fork's merge, picked on the unchanged file, is the default.
+    const same = setLaneExit(
+      def,
+      recognizeBlockTree(def),
+      "root/1/lanes/0",
+      "b",
+    );
+    expect(
+      same.edges
+        .filter(
+          (e) =>
+            e.source ===
+            out.edges.find(
+              (x) => x.target === "c" && x.sourceHandle === "case-0",
+            )!.source,
+        )
+        .map((e) => e.target),
+    ).toEqual(["b", "b"]);
+  });
+
+  it("refuses a step before the fork, with a reason", () => {
+    const def = forked();
+    const tree = recognizeBlockTree(def);
+    expect(canSetLaneExit(tree, "root/1/lanes/0", "a")).toEqual({
+      ok: false,
+      reason: "scenarios.editor.cannot.laneTargetNotLater",
+    });
+    expect(setLaneExit(def, tree, "root/1/lanes/0", "a")).toBe(def);
   });
 });

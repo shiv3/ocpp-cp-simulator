@@ -280,5 +280,8 @@
   "scenarios.addStep.structure.switch": "Switch (branche selon une valeur)",
   "scenarios.addStep.structure.switchHelp": "Ajoute un bloc de branches avec une voie par cas et une voie par défaut. Déposez des étapes dans les voies ; elles se rejoignent à l'étape suivante.",
   "scenarios.addStep.structure.choice": "Choix (branche aléatoire)",
-  "scenarios.addStep.structure.choiceHelp": "Ajoute un bloc de branches avec deux options pondérées, l'une tirée au hasard. Déposez des étapes dans les voies ; elles se rejoignent à l'étape suivante."
+  "scenarios.addStep.structure.choiceHelp": "Ajoute un bloc de branches avec deux options pondérées, l'une tirée au hasard. Déposez des étapes dans les voies ; elles se rejoignent à l'étape suivante.",
+  "scenarios.editor.cannot.laneEnds": "Cette voie termine déjà sa branche.",
+  "scenarios.editor.cannot.laneTargetNotLater": "Choisissez une étape après cette branche.",
+  "scenarios.editor.rangeHint": "Les étapes en surbrillance sont celles qui seraient répétées."
 }

@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import React from "react";
 import {
+  CornerRightDown,
   LogOut,
   Maximize2,
   Minus,
@@ -13,14 +14,21 @@ import {
 import { cn } from "@/lib/utils";
 import RunStatePill from "../../../components/RunStatePill";
 import {
+  canSetLaneExit,
+  canWrapInLoop,
   editCapabilities,
   firstNodeOf,
   seqAt,
+  treeNodes,
   type Capability,
   type SeqPath,
 } from "../../../lib/blockTree";
 import { isLiveRunState } from "../../../lib/scenarioRunState";
-import { WAIT_STEP_TYPES, stepSummary } from "../../../lib/scenarioSteps";
+import {
+  STRUCTURE_TYPE,
+  WAIT_STEP_TYPES,
+  stepSummary,
+} from "../../../lib/scenarioSteps";
 import { stepNumbers } from "../../../lib/stepTree";
 import {
   ZOOM_STEP,
@@ -67,6 +75,45 @@ const PICKER_W = 520;
 const PICKER_H = 330;
 const WAIT_TYPES: ReadonlySet<string> = new Set(WAIT_STEP_TYPES);
 
+/** Picking a target on the canvas: after Repeat from a `+` (the loop goes
+ *  back to an earlier step of the lane) or a lane's connect arrow (the lane
+ *  continues at a later step). `origin`: where the arrow starts. */
+type Pick =
+  | { kind: "loop"; path: SeqPath; index: number; origin: Point }
+  | {
+      kind: "lane";
+      path: SeqPath;
+      /** Lane letter, for the words. */
+      lane: string;
+      origin: Point;
+    };
+
+interface Point {
+  x: number;
+  y: number;
+}
+
+/** What clicking a step would do while picking: `cap` says whether, `ids`
+ *  are the steps the result affects (the range to highlight). */
+interface PickTarget {
+  cap: Capability;
+  ids: string[];
+  /** Loop: the numbers of the first and last step the loop would repeat. */
+  from?: number;
+  to?: number;
+}
+
+const idsOf = (blocks: ReadonlyArray<import("../../../lib/blockTree").Block>) =>
+  treeNodes({
+    root: {
+      path: "",
+      blocks: [...blocks],
+      exit: { kind: "stop", reason: "noEdge" },
+    },
+    detached: [],
+    origin: null,
+  }).map((n) => n.id);
+
 /**
  * The block tree (`recognizeBlockTree`) drawn as connected cards, laid out
  * recursively (`layoutTreeGraph`): a branch point's lanes stand side by
@@ -95,6 +142,9 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
     onSelectStep,
     editable = false,
     onInsertStep,
+    onWrapInLoopRange,
+    onSetLaneExit,
+    highlightIds,
     onDeleteStep,
     onAddLane,
     onRemoveLane,
@@ -180,10 +230,207 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
 
   // The layout is the geometry: a sequence's block centres come from it
   // (on screen: scaled by the zoom, as the pointer is).
-  const editing = useStepEditing<SeqPath>(props, (lane) =>
-    (geometry.centres.get(lane) ?? []).map((c) => c * zoom),
+  const [pick, setPick] = React.useState<Pick | null>(null);
+  const [hoverId, setHoverId] = React.useState<string | null>(null);
+  const [cursor, setCursor] = React.useState<Point | null>(null);
+  const [pickNotice, setPickNotice] = React.useState<string | null>(null);
+
+  /** What each step of the lane would do as the target of the pick. */
+  const loopTargets = (path: SeqPath, index: number) => {
+    const out = new Map<string, PickTarget>();
+    const lane = seqAt(tree, path);
+    if (!lane) return out;
+    for (let from = 0; from < Math.min(index, lane.blocks.length); from++) {
+      out.set(firstNodeOf(lane.blocks[from]).id, {
+        cap: canWrapInLoop(tree, path, from, index - 1),
+        ids: idsOf(lane.blocks.slice(from, index)),
+      });
+    }
+    return out;
+  };
+  const laneTargets = (path: SeqPath) => {
+    const out = new Map<string, PickTarget>();
+    const m = /^(.*)\/(\d+)\/lanes\/\d+$/.exec(path);
+    const parent = m ? seqAt(tree, m[1]) : null;
+    if (!m || !parent) return out;
+    for (let j = Number(m[2]) + 1; j < parent.blocks.length; j++) {
+      const id = firstNodeOf(parent.blocks[j]).id;
+      out.set(id, {
+        cap: canSetLaneExit(tree, path, id),
+        // The steps the lane would skip, and the one it continues at.
+        ids: idsOf(parent.blocks.slice(Number(m[2]) + 1, j + 1)),
+      });
+    }
+    return out;
+  };
+  const pickTargets = React.useMemo(
+    () =>
+      pick === null
+        ? null
+        : pick.kind === "loop"
+          ? loopTargets(pick.path, pick.index)
+          : laneTargets(pick.path),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [pick, tree],
+  );
+
+  const plusOf = (slot: { lane: SeqPath; index: number }) =>
+    [...geometry.discs, ...geometry.zones].find(
+      (p) => p.slot.lane === slot.lane && p.slot.index === slot.index,
+    );
+  const editing = useStepEditing<SeqPath>(
+    {
+      ...props,
+      structure: onWrapInLoopRange
+        ? {
+            pick: (slot, kind) => {
+              if (kind === "loop") {
+                const at = plusOf(slot);
+                setPickNotice(null);
+                setHoverId(null);
+                setCursor(null);
+                setPick({
+                  kind: "loop",
+                  path: slot.lane,
+                  index: slot.index,
+                  origin: { x: at?.x ?? 0, y: at?.y ?? 0 },
+                });
+              } else {
+                const type = STRUCTURE_TYPE[kind];
+                if (type) onInsertStep?.(slot.lane, slot.index, type);
+              }
+            },
+            refusals: (slot) => {
+              const targets = loopTargets(slot.lane, slot.index);
+              const all = [...targets.values()];
+              if (all.some((x) => x.cap.ok)) return {};
+              const first = all.find((x) => !x.cap.ok)?.cap;
+              return {
+                loop: t(
+                  first && !first.ok
+                    ? first.reason
+                    : "scenarioRun.pick.noTarget",
+                ),
+              };
+            },
+          }
+        : undefined,
+    },
+    (lane) => (geometry.centres.get(lane) ?? []).map((c) => c * zoom),
   );
   const { drag } = editing;
+
+  /** Each lane of a switch / choice that can continue at a later step: the
+   *  connect arrow stands beside its `+` at the lane's end. */
+  const laneConnects = React.useMemo(() => {
+    if (!editable) return [];
+    const out: { path: SeqPath; lane: string; x: number; y: number }[] = [];
+    for (const tag of geometry.tags) {
+      const fork = tree.nodePath.get(tag.forkId);
+      const parent = fork ? seqAt(tree, fork.path) : null;
+      const block = parent?.blocks[fork?.index ?? -1];
+      if (!parent || block?.kind !== "fork" || !fork) continue;
+      if (block.forkKind !== "switch" && block.forkKind !== "choice") continue;
+      const lane = block.lanes[tag.laneIndex];
+      if (!lane) continue;
+      const disc = geometry.discs.find(
+        (d) =>
+          d.slot.lane === lane.body.path &&
+          d.slot.index === lane.body.blocks.length,
+      );
+      if (!disc) continue;
+      const later = parent.blocks.slice(fork.index + 1);
+      if (
+        !later.some(
+          (b) => canSetLaneExit(tree, lane.body.path, firstNodeOf(b).id).ok,
+        )
+      ) {
+        continue;
+      }
+      out.push({
+        path: lane.body.path,
+        lane: laneLetter(tag.laneIndex),
+        x: disc.x + 14,
+        y: disc.y - 9,
+      });
+    }
+    return out;
+  }, [tree, editable, geometry]);
+
+  const cancelPick = React.useCallback(() => {
+    setPick(null);
+    setHoverId(null);
+    setPickNotice(null);
+  }, []);
+  React.useEffect(() => {
+    if (pick === null) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      // Before the side panel's own Esc and a picker's.
+      event.preventDefault();
+      event.stopPropagation();
+      cancelPick();
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [pick, cancelPick]);
+  // The tree changed under the pick (an edit elsewhere): it no longer applies.
+  React.useEffect(() => {
+    setPick(null);
+  }, [tree]);
+
+  /** Click on a step while picking. */
+  const commitPick = (id: string) => {
+    const target = pickTargets?.get(id);
+    if (!pick || !target) {
+      setPickNotice(
+        t(
+          pick?.kind === "lane"
+            ? "scenarioRun.pick.notLater"
+            : "scenarioRun.pick.notHere",
+        ),
+      );
+      return;
+    }
+    if (!target.cap.ok) {
+      setPickNotice(t(target.cap.reason));
+      return;
+    }
+    if (pick.kind === "loop") {
+      const lane = seqAt(tree, pick.path);
+      const from =
+        lane?.blocks.findIndex((b) => firstNodeOf(b).id === id) ?? -1;
+      if (from >= 0) onWrapInLoopRange?.(pick.path, from, pick.index - 1);
+    } else {
+      onSetLaneExit?.(pick.path, id);
+    }
+    cancelPick();
+  };
+
+  /** Canvas coordinates of a pointer event (the canvas is scaled by `zoom`
+   *  and may be scrolled: its own rect accounts for both). */
+  const canvasPoint = (event: React.PointerEvent): Point => {
+    const rect = editing.rootRef.current?.getBoundingClientRect();
+    return rect
+      ? {
+          x: (event.clientX - rect.left) / zoom,
+          y: (event.clientY - rect.top) / zoom,
+        }
+      : { x: 0, y: 0 };
+  };
+
+  /** The box around the cards of `ids`, padded. */
+  const rangeBox = (ids: readonly string[] | undefined) => {
+    const set = new Set(ids ?? []);
+    const hit = cards.filter((c) => set.has(c.node.id));
+    if (hit.length === 0) return null;
+    const pad = 10;
+    const x0 = Math.min(...hit.map((c) => c.x - NODE_W / 2)) - pad;
+    const x1 = Math.max(...hit.map((c) => c.x + NODE_W / 2)) + pad;
+    const y0 = Math.min(...hit.map((c) => c.y)) - pad;
+    const y1 = Math.max(...hit.map((c) => c.y + NODE_H)) + pad;
+    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  };
 
   // A graph wider than its column opens on its trunk, the column everything
   // hangs from, instead of the left edge where the trunk may be cut off; the
@@ -371,6 +618,74 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
           100%
         </button>
       </div>
+      {pick && pickTargets && (
+        <div
+          role="group"
+          data-pick-panel=""
+          aria-label={t(
+            pick.kind === "loop"
+              ? "scenarioRun.pick.title"
+              : "scenarioRun.pick.titleLane",
+            { lane: pick.kind === "lane" ? pick.lane : "" },
+          )}
+          className="mb-1.5 rounded-[10px] border border-cx-accent/40 bg-cx-accent/5 px-3 py-2 text-xs"
+        >
+          <div className="flex items-center gap-2">
+            <span className="flex-1 font-medium text-cx-fg">
+              {t(
+                pick.kind === "loop"
+                  ? "scenarioRun.pick.title"
+                  : "scenarioRun.pick.titleLane",
+                { lane: pick.kind === "lane" ? pick.lane : "" },
+              )}
+            </span>
+            <button
+              type="button"
+              onClick={cancelPick}
+              className="rounded border border-cx-border-strong px-2 py-0.5 text-cx-fg2 hover:bg-cx-sub"
+            >
+              {t("scenarioRun.pick.cancel")}
+            </button>
+          </div>
+          <p className="mt-0.5 text-cx-muted">
+            {pickNotice ??
+              t(
+                pick.kind === "loop"
+                  ? "scenarioRun.pick.hint"
+                  : "scenarioRun.pick.hintLane",
+              )}
+          </p>
+          <ul
+            aria-label={t("scenarioRun.pick.listLabel")}
+            className="mt-1.5 flex flex-wrap gap-1.5"
+          >
+            {[...pickTargets.entries()].map(([id, target]) => {
+              const step = cards.find((c) => c.node.id === id)?.node;
+              if (!step) return null;
+              return (
+                <li key={id}>
+                  <button
+                    type="button"
+                    data-pick-target={id}
+                    disabled={!target.cap.ok}
+                    title={target.cap.ok ? undefined : t(target.cap.reason)}
+                    onClick={() => commitPick(id)}
+                    onFocus={() => setHoverId(id)}
+                    onMouseEnter={() => setHoverId(id)}
+                    onBlur={() => setHoverId((h) => (h === id ? null : h))}
+                    className="rounded-md border border-cx-border-strong bg-cx-card px-2 py-1 text-cx-fg2 hover:border-cx-accent focus-visible:border-cx-accent disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {t("scenarioRun.pick.target", {
+                      n: numbers.get(id) ?? "",
+                      title: nodeTitle(step),
+                    })}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
       {/* The scroll container is the canvas: it never draws under the side
           panel, and scrolls both ways. */}
       <div
@@ -387,7 +702,21 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
         >
           <div
             ref={editing.rootRef}
-            className="relative"
+            onPointerMove={
+              pickTargets ? (e) => setCursor(canvasPoint(e)) : undefined
+            }
+            // Empty canvas while picking: cancel (a step click commits).
+            onClick={
+              pickTargets
+                ? (e) => {
+                    if (!(e.target as HTMLElement).closest("[data-node-id]")) {
+                      cancelPick();
+                    }
+                  }
+                : undefined
+            }
+            data-picking={pick?.kind}
+            className={cn("relative", pickTargets && "cursor-crosshair")}
             style={{
               width: canvasW,
               height,
@@ -519,6 +848,77 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
                 />
               ))}
             </svg>
+
+            {(() => {
+              // The steps the pointer is over while picking, or the ones the
+              // inspector's "Repeat from this step" would repeat.
+              const hovered = hoverId ? pickTargets?.get(hoverId) : undefined;
+              const ids = hovered?.cap.ok ? hovered.ids : highlightIds;
+              const box = rangeBox(ids);
+              if (!box) return null;
+              return (
+                <div
+                  aria-hidden
+                  data-range-highlight={hovered?.cap.ok ? "pick" : "hint"}
+                  className="pointer-events-none absolute z-[1] rounded-2xl border-2 border-dashed border-cx-purple bg-cx-purple/10"
+                  style={{
+                    left: box.x,
+                    top: box.y,
+                    width: box.w,
+                    height: box.h,
+                  }}
+                />
+              );
+            })()}
+            {pick && (
+              <svg
+                aria-hidden
+                width={width}
+                height={height}
+                data-pick-arrow=""
+                className="pointer-events-none absolute inset-0 z-30"
+              >
+                <defs>
+                  <marker
+                    id="graph-pick-arrow"
+                    viewBox="0 0 8 8"
+                    refX="7"
+                    refY="4"
+                    markerWidth="7"
+                    markerHeight="7"
+                    orient="auto"
+                  >
+                    <path d="M 0 0 L 8 4 L 0 8 z" fill="var(--cx-accent)" />
+                  </marker>
+                </defs>
+                {(() => {
+                  const hot = hoverId
+                    ? cards.find(
+                        (c) =>
+                          c.node.id === hoverId &&
+                          pickTargets?.get(hoverId)?.cap.ok,
+                      )
+                    : undefined;
+                  // Snapped to the card's side while it is a valid target,
+                  // else to the pointer.
+                  const end = hot
+                    ? { x: hot.x - NODE_W / 2, y: hot.y + NODE_H / 2 }
+                    : (cursor ?? pick.origin);
+                  const { origin } = pick;
+                  const dx = Math.max(40, Math.abs(end.x - origin.x) / 2 + 30);
+                  return (
+                    <path
+                      d={`M ${origin.x} ${origin.y} C ${origin.x - dx} ${origin.y}, ${end.x - dx} ${end.y}, ${end.x} ${end.y}`}
+                      fill="none"
+                      stroke="var(--cx-accent)"
+                      strokeWidth={2}
+                      strokeDasharray={hot ? undefined : "6 4"}
+                      markerEnd="url(#graph-pick-arrow)"
+                    />
+                  );
+                })()}
+              </svg>
+            )}
 
             {geometry.loops.map((loop) => {
               const canExit = loop.canExit;
@@ -782,15 +1182,48 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
 
               if (editable) {
                 const dragged = drag?.id === step.id;
+                const pickTarget = pickTargets?.get(step.id);
+                const pickState = !pickTargets
+                  ? undefined
+                  : pickTarget?.cap.ok
+                    ? "valid"
+                    : "invalid";
+                const pickReason = !pickTargets
+                  ? undefined
+                  : pickTarget
+                    ? pickTarget.cap.ok
+                      ? undefined
+                      : t(pickTarget.cap.reason)
+                    : t(
+                        pick?.kind === "lane"
+                          ? "scenarioRun.pick.notLater"
+                          : "scenarioRun.pick.notHere",
+                      );
                 return (
                   <div
                     key={step.id}
                     data-node-id={step.id}
                     data-phase={failed ? "failed" : phase}
+                    data-pick={pickState}
+                    title={pickReason}
+                    onPointerEnter={
+                      pickTargets ? () => setHoverId(step.id) : undefined
+                    }
+                    onPointerLeave={
+                      pickTargets
+                        ? () => setHoverId((h) => (h === step.id ? null : h))
+                        : undefined
+                    }
                     className={cn(
                       "absolute select-none",
                       dragged &&
                         "z-20 rounded-xl shadow-[0_8px_24px_rgba(20,20,30,0.18)]",
+                      pickState === "invalid" && "opacity-35",
+                      pickState === "valid" &&
+                        "z-10 rounded-xl ring-2 ring-cx-accent/50",
+                      pickState === "valid" &&
+                        hoverId === step.id &&
+                        "ring-4 ring-cx-accent",
                     )}
                     style={{
                       ...place,
@@ -798,8 +1231,9 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
                         ? { transform: `translateY(${drag.offset / zoom}px)` }
                         : {}),
                     }}
-                    // A branch point stays where it is.
-                    {...(isFork
+                    // A branch point stays where it is; nothing drags while
+                    // a target is being picked.
+                    {...(isFork || pickTargets
                       ? {}
                       : editing.dragHandlers({
                           id: step.id,
@@ -816,7 +1250,11 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
                         title: nodeTitle(step),
                       })}
                       title={t("scenarioRun.clickToEdit")}
-                      onClick={() => onSelectStep?.(step.id)}
+                      onClick={() =>
+                        pickTargets
+                          ? commitPick(step.id)
+                          : onSelectStep?.(step.id)
+                      }
                       onKeyDown={editing.onStepKeyDown(step.id)}
                       {...marked.cardProps}
                       className={cn(
@@ -832,7 +1270,7 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
                     >
                       {body}
                     </button>
-                    {selected && onDeleteStep && (
+                    {selected && onDeleteStep && !pickTargets && (
                       <button
                         type="button"
                         aria-label={t("scenarioRun.removeStep", { n: number })}
@@ -888,7 +1326,7 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
               />
             )}
 
-            {canInsert && !drag && (
+            {canInsert && !drag && !pick && (
               <>
                 {geometry.zones.map((zone) => plusButton(zone, true))}
                 {geometry.discs.map((disc) => plusButton(disc, false))}
@@ -898,6 +1336,7 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
             {editable &&
               onAddLane &&
               !drag &&
+              !pick &&
               geometry.pills.map((pill) => {
                 const cap = caps?.addLane.get(pill.nodeId);
                 if (!cap) return null;
@@ -916,6 +1355,35 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
                   </button>
                 );
               })}
+
+            {editable &&
+              onSetLaneExit &&
+              !drag &&
+              !pick &&
+              laneConnects.map((c) => (
+                <button
+                  key={`connect:${c.path}`}
+                  type="button"
+                  data-lane-connect={c.path}
+                  aria-label={t("scenarioRun.connectLane", { lane: c.lane })}
+                  title={t("scenarioRun.connectLane", { lane: c.lane })}
+                  onClick={() => {
+                    setPickNotice(null);
+                    setHoverId(null);
+                    setCursor(null);
+                    setPick({
+                      kind: "lane",
+                      path: c.path,
+                      lane: c.lane,
+                      origin: { x: c.x + 9, y: c.y + 9 },
+                    });
+                  }}
+                  className="absolute z-10 flex h-[18px] w-[18px] items-center justify-center rounded-full border border-cx-border-strong bg-cx-card text-cx-muted hover:border-cx-accent hover:text-cx-accent"
+                  style={{ left: c.x, top: c.y }}
+                >
+                  <CornerRightDown className="h-3 w-3" />
+                </button>
+              ))}
 
             {openPlus && (
               <div

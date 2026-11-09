@@ -40,6 +40,9 @@ import {
   insertForkBlock,
   insertStep,
   insertStepIntoNewLoop,
+  setLaneExit,
+  canSetLaneExit,
+  canWrapInLoop,
   canMoveStepTo,
   moveStepTo,
   moveStep,
@@ -47,6 +50,7 @@ import {
   removeLane,
   removeStep,
   seqAt,
+  firstNodeOf,
   setLink,
   treeNodes,
   unwrapLoop,
@@ -391,6 +395,43 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
       kind
         ? insertForkBlock(scenario, tree, path, index, kind)
         : insertStep(scenario, tree, path, index, type),
+    );
+  };
+
+  /** The steps the inspector's "Repeat from this step" would repeat, shown
+   *  in both views while the pointer or focus is on that button. */
+  const [rangeHint, setRangeHint] = useState<readonly string[] | null>(null);
+  const showRangeOf = (nodeId: string | null) => {
+    const place = nodeId && tree ? tree.nodePath.get(nodeId) : undefined;
+    const seq = place && tree ? seqAt(tree, place.path) : null;
+    if (!place || !seq) {
+      setRangeHint(null);
+      return;
+    }
+    setRangeHint(
+      treeNodes({
+        root: { ...seq, blocks: seq.blocks.slice(place.index) },
+        detached: [],
+        origin: null,
+      }).map((n) => n.id),
+    );
+  };
+
+  /** Graph view: steps `from`..`to` of the sequence at `path` become a loop. */
+  const handleWrapInLoopRange = (path: SeqPath, from: number, to: number) => {
+    if (!scenario || !tree) return;
+    const cap = canWrapInLoop(tree, path, from, to);
+    const first = seqAt(tree, path)?.blocks[from];
+    unlessRefused(first ? firstNodeOf(first).id : "", cap, () =>
+      setScenario(wrapInLoop(scenario, tree, path, from, to)),
+    );
+  };
+
+  /** Graph view: a lane continues at a later step. */
+  const handleSetLaneExit = (lanePath: SeqPath, target: string) => {
+    if (!scenario || !tree) return;
+    unlessRefused(target, canSetLaneExit(tree, lanePath, target), () =>
+      setScenario(setLaneExit(scenario, tree, lanePath, target)),
     );
   };
 
@@ -919,6 +960,9 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
                   selectedStepId={selectedStepId}
                   onSelectStep={setSelectedStepId}
                   onInsertStep={handleInsertStep}
+                  onWrapInLoopRange={handleWrapInLoopRange}
+                  onSetLaneExit={handleSetLaneExit}
+                  highlightIds={rangeHint ?? undefined}
                   onMoveStep={handleMove}
                   onDeleteStep={handleDeleteRequest}
                   onAddLane={handleAddLane}
@@ -935,6 +979,7 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
                   onInsertStep={handleInsertStep}
                   onInsertStepIntoLoop={handleInsertStepIntoLoop}
                   onMoveStepTo={handleMoveStepTo}
+                  highlightIds={rangeHint ?? undefined}
                   onMoveStep={handleMove}
                   onDeleteStep={handleDeleteRequest}
                   onAddLane={handleAddLane}
@@ -984,6 +1029,9 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
                           label={t("scenarios.editor.wrapInLoop")}
                           cap={caps.wrapInLoop}
                           onClick={() => handleWrapInLoop(selectedNode.id)}
+                          onHint={(on) =>
+                            showRangeOf(on ? selectedNode.id : null)
+                          }
                         >
                           <Repeat className="h-3.5 w-3.5" />
                         </InspectorAction>
@@ -1100,8 +1148,10 @@ const InspectorAction: React.FC<{
   cap: Capability;
   danger?: boolean;
   onClick: () => void;
+  /** Pointer or focus on / off the button (what it would affect is shown). */
+  onHint?: (on: boolean) => void;
   children: React.ReactNode;
-}> = ({ label, cap, danger, onClick, children }) => (
+}> = ({ label, cap, danger, onClick, onHint, children }) => (
   <button
     type="button"
     aria-label={label}
@@ -1114,6 +1164,10 @@ const InspectorAction: React.FC<{
     }
     disabled={!cap.ok}
     onClick={onClick}
+    onPointerEnter={onHint && (() => onHint(true))}
+    onPointerLeave={onHint && (() => onHint(false))}
+    onFocus={onHint && (() => onHint(true))}
+    onBlur={onHint && (() => onHint(false))}
     className={cn(
       "rounded p-1 text-cx-faint disabled:opacity-30",
       danger ? "hover:bg-cx-rose/10 hover:text-cx-rose" : "hover:bg-cx-sub",

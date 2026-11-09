@@ -1,12 +1,208 @@
 import { describe, expect, it } from "vitest";
-import { splitTraceJsonl } from "../splitTrace";
+import { assertRecord } from "@open-ocpp-trace/core";
+import {
+  recordsToJsonl,
+  splitTraceRecords,
+  type TraceSplit,
+  type TraceSplitMode,
+} from "../splitTrace";
+
+/** Envelope fields the Open OCPP Trace format requires (#886). A fixture
+ *  that only cares about routing gets them by default; `assertRecord`
+ *  makes an incomplete fixture fail where it is built instead of reading
+ *  as an `invalidRecord` exclusion. */
+const ENVELOPE_DEFAULTS = {
+  schemaVersion: "1.1",
+  timestamp: "2026-01-01T00:00:00.000Z",
+  transport: "json",
+  direction: "cp-to-csms",
+};
 
 function line(rec: Record<string, unknown>): string {
-  return JSON.stringify(rec);
+  return JSON.stringify(assertRecord({ ...ENVELOPE_DEFAULTS, ...rec }));
 }
 
-describe("splitTraceJsonl", () => {
-  it("groups records by chargePointId, preserving line order within a group", () => {
+/** The split with each group re-serialized as JSONL text, so routing
+ *  assertions read the same lines the toolkit is handed. */
+interface TextSplit extends Omit<TraceSplit, "byChargePoint" | "unattributed"> {
+  byChargePoint: Map<string, string>;
+  unattributed: string;
+}
+
+async function splitText(
+  text: string,
+  splitBy?: TraceSplitMode,
+): Promise<TextSplit> {
+  const split = await splitTraceRecords([text], splitBy);
+  return {
+    ...split,
+    byChargePoint: new Map(
+      Array.from(split.byChargePoint, ([id, records]) => [
+        id,
+        recordsToJsonl(records),
+      ]),
+    ),
+    unattributed: recordsToJsonl(split.unattributed),
+  };
+}
+
+const NO_EXCLUSIONS = {
+  soap: 0,
+  unsupportedOcppVersion: 0,
+  unparseableLine: 0,
+  invalidRecord: 0,
+};
+
+describe("splitTraceRecords: reading the JSONL stream (#886)", () => {
+  const heartbeat = line({
+    ocppVersion: "1.6",
+    chargePointId: "CP-A",
+    messageType: "CALL",
+    messageId: "1",
+    action: "Heartbeat",
+    payload: {},
+  });
+
+  it("keeps a record that follows a UTF-8 BOM at the start of the stream", async () => {
+    const bytes = Buffer.concat([
+      Buffer.from([0xef, 0xbb, 0xbf]),
+      Buffer.from(heartbeat + "\n", "utf8"),
+    ]);
+
+    const split = await splitTraceRecords([bytes]);
+
+    expect(split.byChargePoint.get("CP-A")).toEqual([JSON.parse(heartbeat)]);
+    expect(split.excluded).toEqual(NO_EXCLUSIONS);
+    expect(split.total).toBe(1);
+  });
+
+  it("keeps records separated by CRLF line endings", async () => {
+    const second = line({
+      ocppVersion: "1.6",
+      chargePointId: "CP-A",
+      direction: "csms-to-cp",
+      messageType: "CALLRESULT",
+      messageId: "1",
+      payload: { currentTime: "2026-01-01T00:00:01.000Z" },
+    });
+
+    const split = await splitTraceRecords([
+      Buffer.from(`${heartbeat}\r\n${second}\r\n`, "utf8"),
+    ]);
+
+    expect(split.byChargePoint.get("CP-A")).toEqual([
+      JSON.parse(heartbeat),
+      JSON.parse(second),
+    ]);
+    expect(split.excluded).toEqual(NO_EXCLUSIONS);
+    expect(split.total).toBe(2);
+  });
+
+  it("counts a JSON record missing its timestamp as an invalid record", async () => {
+    const { timestamp: _omitted, ...noTimestamp } = JSON.parse(heartbeat);
+
+    const split = await splitTraceRecords([
+      [heartbeat, JSON.stringify(noTimestamp)].join("\n") + "\n",
+    ]);
+
+    expect(split.byChargePoint.get("CP-A")).toEqual([JSON.parse(heartbeat)]);
+    expect(split.excluded).toEqual({ ...NO_EXCLUSIONS, invalidRecord: 1 });
+    expect(split.total).toBe(2);
+  });
+
+  it("counts a record of an unsupported schema major version as an invalid record", async () => {
+    const v2 = JSON.stringify({
+      ...JSON.parse(heartbeat),
+      schemaVersion: "2.0",
+    });
+
+    const split = await splitTraceRecords([[heartbeat, v2].join("\n") + "\n"]);
+
+    expect(split.byChargePoint.get("CP-A")).toEqual([JSON.parse(heartbeat)]);
+    expect(split.excluded).toEqual({ ...NO_EXCLUSIONS, invalidRecord: 1 });
+    expect(split.total).toBe(2);
+  });
+
+  it("keeps a record over the SDK reader's 1 MiB default: the writer has no line limit", async () => {
+    const huge = JSON.stringify({
+      ...JSON.parse(heartbeat),
+      messageId: "huge",
+      payload: { blob: "x".repeat(2 * 1024 * 1024) },
+    });
+
+    const split = await splitTraceRecords([
+      [huge, heartbeat].join("\n") + "\n",
+    ]);
+
+    expect(split.byChargePoint.get("CP-A")).toHaveLength(2);
+    expect(split.excluded).toEqual(NO_EXCLUSIONS);
+    expect(split.total).toBe(2);
+  });
+
+  it("counts a line over the line limit as an invalid record and keeps reading after it", async () => {
+    const huge = JSON.stringify({
+      ...JSON.parse(heartbeat),
+      messageId: "huge",
+      payload: { blob: "x".repeat(4096) },
+    });
+
+    const split = await splitTraceRecords(
+      [[huge, heartbeat].join("\n") + "\n"],
+      "charge-point",
+      1024,
+    );
+
+    expect(split.byChargePoint.get("CP-A")).toEqual([JSON.parse(heartbeat)]);
+    expect(split.excluded).toEqual({ ...NO_EXCLUSIONS, invalidRecord: 1 });
+    expect(split.total).toBe(2);
+  });
+
+  it("counts a line that is not valid UTF-8 as an invalid record", async () => {
+    const bytes = Buffer.concat([
+      Buffer.from([0x7b, 0xff, 0x7d, 0x0a]),
+      Buffer.from(heartbeat + "\n", "utf8"),
+    ]);
+
+    const split = await splitTraceRecords([bytes]);
+
+    expect(split.byChargePoint.get("CP-A")).toEqual([JSON.parse(heartbeat)]);
+    expect(split.excluded).toEqual({ ...NO_EXCLUSIONS, invalidRecord: 1 });
+    expect(split.total).toBe(2);
+  });
+
+  it("counts a line that is not JSON as an unparseable line", async () => {
+    const split = await splitTraceRecords([
+      [heartbeat, "this is not json"].join("\n") + "\n",
+    ]);
+
+    expect(split.byChargePoint.get("CP-A")).toEqual([JSON.parse(heartbeat)]);
+    expect(split.excluded).toEqual({ ...NO_EXCLUSIONS, unparseableLine: 1 });
+    expect(split.total).toBe(2);
+  });
+
+  it("counts a JSON array line as an invalid record, not an unparseable line", async () => {
+    const split = await splitTraceRecords([
+      [heartbeat, "[1,2,3]"].join("\n") + "\n",
+    ]);
+
+    expect(split.byChargePoint.get("CP-A")).toEqual([JSON.parse(heartbeat)]);
+    expect(split.excluded).toEqual({ ...NO_EXCLUSIONS, invalidRecord: 1 });
+    expect(split.total).toBe(2);
+  });
+
+  it("skips space/tab-only lines as blank, but counts an NBSP-only line as unparseable", async () => {
+    const split = await splitTraceRecords([
+      [heartbeat, " \t", " "].join("\n") + "\n",
+    ]);
+
+    expect(split.byChargePoint.get("CP-A")).toEqual([JSON.parse(heartbeat)]);
+    expect(split.excluded).toEqual({ ...NO_EXCLUSIONS, unparseableLine: 1 });
+    expect(split.total).toBe(2);
+  });
+});
+
+describe("splitTraceRecords", () => {
+  it("groups records by chargePointId, preserving line order within a group", async () => {
     const a1 = line({
       schemaVersion: "1.1",
       timestamp: "2026-01-01T00:00:00.000Z",
@@ -40,21 +236,17 @@ describe("splitTraceJsonl", () => {
       messageId: "1",
     });
 
-    const split = splitTraceJsonl([a1, b1, a2].join("\n") + "\n");
+    const split = await splitText([a1, b1, a2].join("\n") + "\n");
 
     expect(Array.from(split.byChargePoint.keys())).toEqual(["CP-A", "CP-B"]);
     expect(split.byChargePoint.get("CP-A")).toBe(a1 + "\n" + a2 + "\n");
     expect(split.byChargePoint.get("CP-B")).toBe(b1 + "\n");
     expect(split.unattributed).toBe("");
-    expect(split.excluded).toEqual({
-      soap: 0,
-      unsupportedOcppVersion: 0,
-      unparseableLine: 0,
-    });
+    expect(split.excluded).toEqual(NO_EXCLUSIONS);
     expect(split.total).toBe(3);
   });
 
-  it("excludes soap-transport records and counts them", () => {
+  it("excludes soap-transport records and counts them", async () => {
     const kept = line({
       ocppVersion: "1.6",
       transport: "json",
@@ -72,14 +264,14 @@ describe("splitTraceJsonl", () => {
       action: "Heartbeat",
     });
 
-    const split = splitTraceJsonl([kept, soap].join("\n") + "\n");
+    const split = await splitText([kept, soap].join("\n") + "\n");
 
     expect(split.byChargePoint.get("CP-A")).toBe(kept + "\n");
     expect(split.excluded.soap).toBe(1);
     expect(split.total).toBe(2);
   });
 
-  it("excludes records whose ocppVersion does not start with 1.6, but keeps records with no ocppVersion at all", () => {
+  it("excludes records whose ocppVersion does not start with 1.6, but keeps records with no ocppVersion at all", async () => {
     const v16 = line({
       ocppVersion: "1.6",
       transport: "json",
@@ -112,7 +304,7 @@ describe("splitTraceJsonl", () => {
       action: "Heartbeat",
     });
 
-    const split = splitTraceJsonl(
+    const split = await splitText(
       [v16, v201, v21, noVersion].join("\n") + "\n",
     );
 
@@ -121,7 +313,7 @@ describe("splitTraceJsonl", () => {
     expect(split.total).toBe(4);
   });
 
-  it("counts unparseable lines and skips them without throwing", () => {
+  it("counts unparseable lines and skips them without throwing", async () => {
     const good = line({
       ocppVersion: "1.6",
       transport: "json",
@@ -131,16 +323,19 @@ describe("splitTraceJsonl", () => {
       action: "Heartbeat",
     });
     const notJson = "this is not json";
-    const jsonArray = "[1,2,3]"; // valid JSON, but not an object -> unparseable
+    // Valid JSON, but not an object: since #886 the SDK reader reports it
+    // as a validation error, so it counts as an invalid record.
+    const jsonArray = "[1,2,3]";
 
-    const split = splitTraceJsonl([good, notJson, jsonArray].join("\n") + "\n");
+    const split = await splitText([good, notJson, jsonArray].join("\n") + "\n");
 
     expect(split.byChargePoint.get("CP-A")).toBe(good + "\n");
-    expect(split.excluded.unparseableLine).toBe(2);
+    expect(split.excluded.unparseableLine).toBe(1);
+    expect(split.excluded.invalidRecord).toBe(1);
     expect(split.total).toBe(3);
   });
 
-  it("buckets records with no chargePointId into `unattributed`", () => {
+  it("buckets records with no chargePointId into `unattributed`", async () => {
     const withCp = line({
       ocppVersion: "1.6",
       transport: "json",
@@ -157,38 +352,39 @@ describe("splitTraceJsonl", () => {
       action: "Heartbeat",
     });
 
-    const split = splitTraceJsonl([withCp, withoutCp].join("\n") + "\n");
+    const split = await splitText([withCp, withoutCp].join("\n") + "\n");
 
     expect(split.byChargePoint.get("CP-A")).toBe(withCp + "\n");
     expect(split.unattributed).toBe(withoutCp + "\n");
     expect(split.total).toBe(2);
   });
 
-  it("returns empty structures for empty input", () => {
-    const split = splitTraceJsonl("");
+  it("returns empty structures for empty input", async () => {
+    const split = await splitText("");
 
     expect(split.byChargePoint.size).toBe(0);
     expect(split.unattributed).toBe("");
-    expect(split.excluded).toEqual({
-      soap: 0,
-      unsupportedOcppVersion: 0,
-      unparseableLine: 0,
-    });
+    expect(split.excluded).toEqual(NO_EXCLUSIONS);
     expect(split.total).toBe(0);
   });
 
-  it("preserves the original raw line text verbatim (byte fidelity), not a re-stringified copy", () => {
-    // Deliberately odd formatting (extra whitespace, key order) that
-    // JSON.stringify would normalize away if we round-tripped through parse.
+  it("holds the parsed records, re-serialized semantically equal but not byte-identical to the input line (#886)", async () => {
+    // Deliberately odd formatting (extra whitespace) that serializeRecord
+    // normalizes away; key order and every value, `raw` included, survive.
     const raw =
-      '{"ocppVersion":  "1.6", "transport": "json", "chargePointId":"CP-A", "messageType":"CALL", "messageId":"1",   "action": "Heartbeat"}';
+      '{"schemaVersion": "1.1", "timestamp":"2026-01-01T00:00:00.000Z", "ocppVersion":  "1.6", "transport": "json", "chargePointId":"CP-A", "direction": "cp-to-csms", "messageType":"CALL", "messageId":"1",   "action": "Heartbeat", "raw": "[2, \\"1\\", \\"Heartbeat\\", {}]"}';
 
-    const split = splitTraceJsonl(raw + "\n");
+    const records = await splitTraceRecords([raw + "\n"]);
+    const text = await splitText(raw + "\n");
 
-    expect(split.byChargePoint.get("CP-A")).toBe(raw + "\n");
+    expect(records.byChargePoint.get("CP-A")).toEqual([JSON.parse(raw)]);
+    expect(text.byChargePoint.get("CP-A")).toBe(
+      JSON.stringify(JSON.parse(raw)) + "\n",
+    );
+    expect(text.byChargePoint.get("CP-A")).not.toBe(raw + "\n");
   });
 
-  it("defaults to splitBy 'charge-point' -- an explicit 'charge-point' produces byte-identical output to the implicit default", () => {
+  it("defaults to splitBy 'charge-point' -- an explicit 'charge-point' produces byte-identical output to the implicit default", async () => {
     const a1 = line({
       ocppVersion: "1.6",
       transport: "json",
@@ -199,8 +395,8 @@ describe("splitTraceJsonl", () => {
     });
     const jsonl = a1 + "\n";
 
-    const implicit = splitTraceJsonl(jsonl);
-    const explicit = splitTraceJsonl(jsonl, "charge-point");
+    const implicit = await splitText(jsonl);
+    const explicit = await splitText(jsonl, "charge-point");
 
     expect(explicit.byChargePoint.get("CP-A")).toBe(
       implicit.byChargePoint.get("CP-A"),
@@ -211,7 +407,7 @@ describe("splitTraceJsonl", () => {
   });
 });
 
-describe("splitTraceJsonl (splitBy: 'connector')", () => {
+describe("splitTraceRecords (splitBy: 'connector')", () => {
   /** Builds one CP-A connector-scoped session (Start/MeterValues/Stop) whose
    *  StartTransaction messageId, transactionId and connectorId are all
    *  distinct per call, so cross-connector mixups would be caught. */
@@ -279,13 +475,13 @@ describe("splitTraceJsonl (splitBy: 'connector')", () => {
     ];
   }
 
-  it("groups a station's own-connectorId-carrying records (StatusNotification/MeterValues/StartTransaction) by connectorId, keyed '<cpId>-connector<N>'", () => {
+  it("groups a station's own-connectorId-carrying records (StatusNotification/MeterValues/StartTransaction) by connectorId, keyed '<cpId>-connector<N>'", async () => {
     const lines = [
       ...session(1, "s1", 1001, "e1"),
       ...session(2, "s2", 2002, "e2"),
     ];
 
-    const split = splitTraceJsonl(lines.join("\n") + "\n", "connector");
+    const split = await splitText(lines.join("\n") + "\n", "connector");
 
     expect(Array.from(split.byChargePoint.keys())).toEqual([
       "CP-A-connector1",
@@ -304,13 +500,13 @@ describe("splitTraceJsonl (splitBy: 'connector')", () => {
     expect(conn2).not.toContain('"messageId":"s1"');
   });
 
-  it("resolves StopTransaction's connector via StartTransaction messageId -> CALLRESULT transactionId -> StartTransaction connectorId correlation (StopTransaction itself carries only transactionId)", () => {
+  it("resolves StopTransaction's connector via StartTransaction messageId -> CALLRESULT transactionId -> StartTransaction connectorId correlation (StopTransaction itself carries only transactionId)", async () => {
     const lines = [
       ...session(1, "s1", 1001, "e1"),
       ...session(2, "s2", 2002, "e2"),
     ];
 
-    const split = splitTraceJsonl(lines.join("\n") + "\n", "connector");
+    const split = await splitText(lines.join("\n") + "\n", "connector");
 
     const conn1 = split.byChargePoint.get("CP-A-connector1") ?? "";
     const conn2 = split.byChargePoint.get("CP-A-connector2") ?? "";
@@ -322,13 +518,13 @@ describe("splitTraceJsonl (splitBy: 'connector')", () => {
     expect(conn2).not.toContain('"messageId":"e1"');
   });
 
-  it("routes a CALLRESULT to the same connector group as the CALL it answers (inherits by messageId), instead of treating every response as station-level", () => {
+  it("routes a CALLRESULT to the same connector group as the CALL it answers (inherits by messageId), instead of treating every response as station-level", async () => {
     const lines = [
       ...session(1, "s1", 1001, "e1"),
       ...session(2, "s2", 2002, "e2"),
     ];
 
-    const split = splitTraceJsonl(lines.join("\n") + "\n", "connector");
+    const split = await splitText(lines.join("\n") + "\n", "connector");
 
     const conn1 = split.byChargePoint.get("CP-A-connector1") ?? "";
     const conn2 = split.byChargePoint.get("CP-A-connector2") ?? "";
@@ -342,7 +538,7 @@ describe("splitTraceJsonl (splitBy: 'connector')", () => {
     expect(conn2).not.toContain('"messageType":"CALLRESULT","messageId":"s1"');
   });
 
-  it("replicates station-level records (no connector at all, e.g. BootNotification/Heartbeat) into every connector group", () => {
+  it("replicates station-level records (no connector at all, e.g. BootNotification/Heartbeat) into every connector group", async () => {
     const boot = line({
       ocppVersion: "1.6",
       transport: "json",
@@ -359,7 +555,7 @@ describe("splitTraceJsonl (splitBy: 'connector')", () => {
       ...session(2, "s2", 2002, "e2"),
     ];
 
-    const split = splitTraceJsonl(lines.join("\n") + "\n", "connector");
+    const split = await splitText(lines.join("\n") + "\n", "connector");
 
     expect(split.byChargePoint.get("CP-A-connector1")).toContain(
       '"messageId":"boot"',
@@ -369,7 +565,7 @@ describe("splitTraceJsonl (splitBy: 'connector')", () => {
     );
   });
 
-  it("treats connectorId: 0 as station-level (not connector 1), replicated into every connector group", () => {
+  it("treats connectorId: 0 as station-level (not connector 1), replicated into every connector group", async () => {
     const stationStatus = line({
       ocppVersion: "1.6",
       transport: "json",
@@ -387,7 +583,7 @@ describe("splitTraceJsonl (splitBy: 'connector')", () => {
       ...session(2, "s2", 2002, "e2"),
     ];
 
-    const split = splitTraceJsonl(lines.join("\n") + "\n", "connector");
+    const split = await splitText(lines.join("\n") + "\n", "connector");
 
     expect(split.byChargePoint.get("CP-A-connector1")).toContain(
       '"messageId":"st0"',
@@ -397,7 +593,7 @@ describe("splitTraceJsonl (splitBy: 'connector')", () => {
     );
   });
 
-  it("falls back to one plain-cpId group (not connector-suffixed) when a charge point has no connector-scoped records at all, so nothing is silently dropped", () => {
+  it("falls back to one plain-cpId group (not connector-suffixed) when a charge point has no connector-scoped records at all, so nothing is silently dropped", async () => {
     const lines = [
       line({
         ocppVersion: "1.6",
@@ -411,13 +607,13 @@ describe("splitTraceJsonl (splitBy: 'connector')", () => {
       }),
     ];
 
-    const split = splitTraceJsonl(lines.join("\n") + "\n", "connector");
+    const split = await splitText(lines.join("\n") + "\n", "connector");
 
     expect(Array.from(split.byChargePoint.keys())).toEqual(["CP-B"]);
     expect(split.byChargePoint.get("CP-B")).toContain('"action":"Heartbeat"');
   });
 
-  it("keeps the split independent per charge point: CP-A's connector groups don't see CP-B's records", () => {
+  it("keeps the split independent per charge point: CP-A's connector groups don't see CP-B's records", async () => {
     const cpBLine = line({
       ocppVersion: "1.6",
       transport: "json",
@@ -431,7 +627,7 @@ describe("splitTraceJsonl (splitBy: 'connector')", () => {
     });
     const lines = [...session(1, "s1", 1001, "e1"), cpBLine];
 
-    const split = splitTraceJsonl(lines.join("\n") + "\n", "connector");
+    const split = await splitText(lines.join("\n") + "\n", "connector");
 
     expect(Array.from(split.byChargePoint.keys())).toEqual([
       "CP-A-connector1",

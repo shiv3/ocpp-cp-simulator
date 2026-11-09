@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { OCPP_TRACE_SCHEMA_VERSION } from "../OcppTraceRecord";
+import { SCHEMA_VERSION } from "@open-ocpp-trace/core";
 import {
   logLineToTraceRecord,
   logLinesToTrace,
@@ -30,7 +30,7 @@ describe("logLineToTraceRecord", () => {
     );
 
     expect(record).toEqual({
-      schemaVersion: OCPP_TRACE_SCHEMA_VERSION,
+      schemaVersion: SCHEMA_VERSION,
       timestamp: "2026-07-14T02:00:00.000Z",
       transport: "json",
       ocppVersion: "1.6",
@@ -93,7 +93,7 @@ describe("logLineToTraceRecord", () => {
 
 describe("trace format v1.1", () => {
   it("stamps records with schemaVersion 1.1", () => {
-    expect(OCPP_TRACE_SCHEMA_VERSION).toBe("1.1");
+    expect(SCHEMA_VERSION).toBe("1.1");
   });
 
   it("carries the verbatim frame text in raw, preserving spacing and key order", () => {
@@ -218,5 +218,28 @@ describe("inbound validation violations (#593)", () => {
       },
     });
     expect(records[1].meta).toBeUndefined();
+  });
+});
+
+// Key order is visible in every JSONL line the trace writers produce, so the
+// move to the SDK's discriminated TraceRecord (#886) must not reorder it.
+describe("record key order", () => {
+  const ctx = { ocppVersion: "1.6" };
+  it.each([
+    [
+      'Sent: [2,"k-1","Heartbeat",{}]',
+      "schemaVersion timestamp transport direction messageType ocppVersion chargePointId messageId action payload raw",
+    ],
+    [
+      'Received: [3,"k-1",{}]',
+      "schemaVersion timestamp transport direction messageType ocppVersion chargePointId messageId payload raw",
+    ],
+    [
+      'Received: [4,"k-1","NotImplemented","",{}]',
+      "schemaVersion timestamp transport direction messageType ocppVersion chargePointId messageId error raw",
+    ],
+  ])("%s", (message, keys) => {
+    const record = logLineToTraceRecord(line(message, { cpId: "CP1" }), ctx);
+    expect(Object.keys(record ?? {}).join(" ")).toBe(keys);
   });
 });

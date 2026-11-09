@@ -81,7 +81,14 @@ COPY apps/web/package.json ./apps/web/package.json
 # a half-extracted entry is not reused. A genuine failure (a lockfile that
 # does not match, a package that does not exist) still fails, three times
 # and roughly 20 seconds slower.
-RUN for attempt in 1 2 3; do \
+# @open-ocpp-trace/* comes from GitHub Packages, which asks for a token even
+# for a public package (bunfig.toml): pass one as the `github_token` secret,
+#   docker build --secret id=github_token,env=GITHUB_TOKEN .
+# A secret mount never lands in a layer or in the image history.
+RUN --mount=type=secret,id=github_token \
+    [ -s /run/secrets/github_token ] || { echo "missing the github_token build secret (a token with read:packages): docker build --secret id=github_token,env=GITHUB_TOKEN ."; exit 1; }; \
+    export GITHUB_TOKEN="$(cat /run/secrets/github_token)"; \
+    for attempt in 1 2 3; do \
       bun install --frozen-lockfile --ignore-scripts && break; \
       [ "$attempt" = 3 ] && { echo "bun install failed 3 times; giving up"; exit 1; }; \
       echo "bun install failed (attempt $attempt/3); retrying"; \

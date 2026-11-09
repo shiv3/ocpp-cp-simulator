@@ -1,8 +1,9 @@
 /**
  * Adapt this simulator's JSONL log lines into the shared, versioned OCPP trace
  * format (issue #188). Neutral by design: it maps *from* the simulator's own
- * text log *to* the tool-independent {@link OcppTraceRecord}, so the format
- * stays decoupled from the simulator's internals.
+ * text log *to* the tool-independent Open OCPP Trace {@link TraceRecord}
+ * (`@open-ocpp-trace/core`, #886), so the format stays decoupled from the
+ * simulator's internals.
  *
  * Only OCPP-J (JSON/WebSocket) wire frames are recognized in this first
  * iteration; SOAP transport is a documented follow-up. Non-wire log lines
@@ -10,13 +11,12 @@
  */
 
 import {
-  OCPP_TRACE_SCHEMA_VERSION,
-  type OcppTraceRecord,
-  type TraceDirection,
+  SCHEMA_VERSION,
+  type Direction,
   type TraceError,
-  type TraceMessageType,
-  type TraceTransport,
-} from "./OcppTraceRecord";
+  type TraceRecord,
+  type Transport,
+} from "@open-ocpp-trace/core";
 import { TraceCorrelator } from "./TraceCorrelator";
 
 /** A serialized simulator log line (`--log-format json`, `logs.get`, or the
@@ -33,7 +33,7 @@ export interface TraceContext {
   /** OCPP protocol version to stamp on records, e.g. "1.6". */
   ocppVersion?: string;
   /** Transport override; defaults to "json" (OCPP-J / WebSocket). */
-  transport?: TraceTransport;
+  transport?: Transport;
   /** Charge-point id fallback when a log line carries no `cpId`. */
   chargePointId?: string;
 }
@@ -86,19 +86,35 @@ const OCPPJ_CALL = 2;
 const OCPPJ_CALLRESULT = 3;
 const OCPPJ_CALLERROR = 4;
 
-interface ParsedFrame {
-  direction: TraceDirection;
-  messageType: TraceMessageType;
-  messageId?: string;
-  action?: string;
-  payload?: unknown;
-  error?: TraceError;
-  raw: string;
-}
+/** One parsed OCPP-J frame, discriminated like {@link TraceRecord}: a CALL
+ *  always has its action, only a CALLERROR has an error. */
+type ParsedFrame =
+  | {
+      direction: Direction;
+      messageType: "CALL";
+      messageId: string;
+      action: string;
+      payload?: unknown;
+      raw: string;
+    }
+  | {
+      direction: Direction;
+      messageType: "CALLRESULT";
+      messageId: string;
+      payload?: unknown;
+      raw: string;
+    }
+  | {
+      direction: Direction;
+      messageType: "CALLERROR";
+      messageId: string;
+      error: TraceError;
+      raw: string;
+    };
 
 function parseOcppJArray(
   json: string,
-  direction: TraceDirection,
+  direction: Direction,
 ): ParsedFrame | null {
   let parsed: unknown;
   try {
@@ -163,24 +179,47 @@ function toRecord(
   line: SerializedLogLine,
   frame: ParsedFrame,
   context: TraceContext,
-): OcppTraceRecord {
-  const record: OcppTraceRecord = {
-    schemaVersion: OCPP_TRACE_SCHEMA_VERSION,
+): TraceRecord {
+  // Key order is part of the output (JSONL lines, byte-compared fixtures):
+  // schemaVersion, timestamp, transport, direction, messageType, ocppVersion?,
+  // chargePointId?, messageId, action?, payload?, error?, raw. Re-spreading
+  // `messageType` in each branch keeps its position from `head`.
+  const ocppVersion = context.ocppVersion;
+  const chargePointId = line.cpId ?? context.chargePointId;
+  const head = {
+    schemaVersion: SCHEMA_VERSION,
     timestamp: line.timestamp,
     transport: context.transport ?? "json",
     direction: frame.direction,
     messageType: frame.messageType,
+    ...(ocppVersion ? { ocppVersion } : {}),
+    ...(chargePointId ? { chargePointId } : {}),
+    messageId: frame.messageId,
   };
-  const ocppVersion = context.ocppVersion;
-  if (ocppVersion) record.ocppVersion = ocppVersion;
-  const chargePointId = line.cpId ?? context.chargePointId;
-  if (chargePointId) record.chargePointId = chargePointId;
-  if (frame.messageId !== undefined) record.messageId = frame.messageId;
-  if (frame.action !== undefined) record.action = frame.action;
-  if (frame.payload !== undefined) record.payload = frame.payload;
-  if (frame.error !== undefined) record.error = frame.error;
-  record.raw = frame.raw;
-  return record;
+  switch (frame.messageType) {
+    case "CALL":
+      return {
+        ...head,
+        messageType: "CALL",
+        action: frame.action,
+        ...(frame.payload !== undefined ? { payload: frame.payload } : {}),
+        raw: frame.raw,
+      };
+    case "CALLRESULT":
+      return {
+        ...head,
+        messageType: "CALLRESULT",
+        ...(frame.payload !== undefined ? { payload: frame.payload } : {}),
+        raw: frame.raw,
+      };
+    case "CALLERROR":
+      return {
+        ...head,
+        messageType: "CALLERROR",
+        error: frame.error,
+        raw: frame.raw,
+      };
+  }
 }
 
 /**
@@ -191,7 +230,7 @@ function toRecord(
 export function logLineToTraceRecord(
   line: SerializedLogLine,
   context: TraceContext = {},
-): OcppTraceRecord | null {
+): TraceRecord | null {
   const frame = parseWireFrame(line.message);
   if (!frame) return null;
   return toRecord(line, frame, context);
@@ -208,11 +247,11 @@ export function logLineToTraceRecord(
 export function logLinesToTrace(
   lines: readonly SerializedLogLine[],
   context: TraceContext = {},
-): OcppTraceRecord[] {
+): TraceRecord[] {
   const correlator = new TraceCorrelator();
-  const records: OcppTraceRecord[] = [];
+  const records: TraceRecord[] = [];
   // Latest inbound CALL record per (cp, messageId), to merge its violation.
-  const inboundCalls = new Map<string, OcppTraceRecord>();
+  const inboundCalls = new Map<string, TraceRecord>();
   const key = (cp: string | undefined, id: string) =>
     JSON.stringify([cp ?? "", id]);
   for (const line of lines) {

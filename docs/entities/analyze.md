@@ -7,12 +7,13 @@ sources:
   - apps/cli/src/analyze/__tests__/
   - packages/trace/src/logEntryToTrace.ts
   - "issue #188"
+  - "issue #886"
 related:
   - cli.md
   - ocpp-debugkit.md
   - ../concepts/trace-format.md
   - ../concepts/log-format.md
-updated: 2026-11-05
+updated: 2026-11-09
 ---
 
 # `analyze` subcommand
@@ -213,12 +214,33 @@ trace format's own default). Non-zero exclusion counts are printed to
 stderr, e.g.:
 
 ```
-excluded: 2 soap record(s), 1 non-1.6 record(s), 0 unparseable line(s)
+excluded: 2 soap record(s), 1 non-1.6 record(s), 0 unparseable line(s), 0 invalid record(s)
 ```
 
-A line that fails to parse as JSON, or parses to something other than a JSON
-object, is counted as an unparseable line and skipped — it never aborts the
-run.
+The trace is read with the
+[Open OCPP Trace SDK](../concepts/trace-format.md#reference-implementation)
+reader (#886), which decodes UTF-8, drops a BOM at the start of the input
+and accepts LF and CRLF line endings. A blank line (only spaces, tabs and
+CRs) is skipped without being counted. Any other line that cannot be kept is
+counted and skipped — it never aborts the run:
+
+- a line that is not valid JSON is an **unparseable line**, including a line
+  of other whitespace only (NBSP, form feed, `\v`), which was skipped as
+  blank before #886;
+- a line that is JSON but not a valid trace record is an **invalid record**:
+  a value that is not an object (counted as unparseable before #886), a
+  missing or malformed envelope field (`timestamp`, `messageType`, …), a
+  `schemaVersion` of another major version, a line over 256 MiB (the
+  SDK reader's 1 MiB default is raised, since the trace writer has no line
+  limit and a large frame appears twice, in `payload` and `raw`), or a line
+  that is not valid UTF-8.
+
+The reader checks the record envelope only, never `payload` or `raw`, so a
+trace of deliberately invalid OCPP (#393, #593) is analyzed. Each group is
+handed to the toolkit re-serialized by the SDK writer: semantically equal to
+the input lines (same keys in the same order, same values, `raw` byte for
+byte) but not byte-identical, since insignificant whitespace and escapes are
+normalized.
 
 ## Disclaimer
 

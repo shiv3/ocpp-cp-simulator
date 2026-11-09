@@ -14,6 +14,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 concurrency:
   group: e2e
@@ -45,6 +46,9 @@ jobs:
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+        env:
+          # @open-ocpp-trace/* is on GitHub Packages (bunfig.toml).
+          GITHUB_TOKEN: ${{ github.token }}
 
       # The fixture is an independent Go program with its own checks.
       - name: Fixture lint and unit tests

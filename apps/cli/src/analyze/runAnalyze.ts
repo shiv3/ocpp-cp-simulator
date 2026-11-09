@@ -17,11 +17,13 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { splitTraceJsonl } from "./splitTrace";
+import { recordsToJsonl, splitTraceRecords } from "./splitTrace";
 import { fetchStoredLogs } from "../client";
 import { logLinesToTrace } from "@ocpp-cp-simulator/trace/logEntryToTrace";
+import { serializeRecord } from "@open-ocpp-trace/jsonl/writer";
 import { DEFAULT_HTTP_PORT } from "../server/constants";
 import type { AnalysisResult } from "@ocpp-debugkit/toolkit/reporter";
+import type { TraceRecord } from "@open-ocpp-trace/core";
 
 /** Same default the other client modes (--send/--stop/--events) resolve to. */
 const DEFAULT_DAEMON_URL = `http://127.0.0.1:${DEFAULT_HTTP_PORT}`;
@@ -47,7 +49,8 @@ async function fetchDaemonTraceJsonl(opts: AnalyzeOptions): Promise<string> {
     opts.cpId as string,
   );
   const records = logLinesToTrace(lines, { chargePointId: opts.cpId });
-  return records.map((r) => JSON.stringify(r)).join("\n");
+  // serializeRecord ends every line with LF (#886), so the text ends with one.
+  return records.map((r) => serializeRecord(r)).join("");
 }
 
 // Shared with the web console's Session Analysis tab (issue #188 PoC item
@@ -170,22 +173,15 @@ export function injectHtmlDisclaimer(html: string): string {
  *  states one agrees (records with no `ocppVersion` field don't count
  *  against uniformity) -- otherwise the field is left undefined rather than
  *  guessing. */
-function detectUniformOcppVersion(jsonlText: string): string | undefined {
+function detectUniformOcppVersion(
+  records: readonly TraceRecord[],
+): string | undefined {
   let version: string | undefined;
-  for (const line of jsonlText.split("\n")) {
-    if (!line.trim()) continue;
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    if (typeof parsed !== "object" || parsed === null) continue;
-    const value = (parsed as Record<string, unknown>).ocppVersion;
-    if (typeof value !== "string") continue;
+  for (const { ocppVersion } of records) {
+    if (ocppVersion === undefined) continue;
     if (version === undefined) {
-      version = value;
-    } else if (version !== value) {
+      version = ocppVersion;
+    } else if (version !== ocppVersion) {
       return undefined;
     }
   }
@@ -194,7 +190,7 @@ function detectUniformOcppVersion(jsonlText: string): string | undefined {
 
 interface Group {
   id: string;
-  jsonl: string;
+  records: TraceRecord[];
 }
 
 /** What the report's `metadata.source` should say about where the trace
@@ -209,8 +205,11 @@ export function describeTraceSource(opts: AnalyzeOptions): string {
 }
 
 export async function runAnalyze(opts: AnalyzeOptions): Promise<number> {
-  let text: string;
+  // One chunk for the SDK reader (#886): the daemon's JSONL text, or the
+  // file's raw bytes so the reader decodes UTF-8 and handles a BOM and CRLF.
+  let source: [string] | [Buffer];
   if (opts.fromDaemon) {
+    let text: string;
     try {
       text = await fetchDaemonTraceJsonl(opts);
     } catch (err) {
@@ -228,9 +227,10 @@ export async function runAnalyze(opts: AnalyzeOptions): Promise<number> {
       );
       return 1;
     }
+    source = [text];
   } else {
     try {
-      text = fs.readFileSync(opts.file as string, "utf8");
+      source = [fs.readFileSync(opts.file as string)];
     } catch (err) {
       process.stderr.write(
         `Error: cannot read trace file: ${
@@ -241,13 +241,13 @@ export async function runAnalyze(opts: AnalyzeOptions): Promise<number> {
     }
   }
 
-  const split = splitTraceJsonl(text, opts.splitBy ?? "charge-point");
+  const split = await splitTraceRecords(source, opts.splitBy ?? "charge-point");
 
   const groups: Group[] = [];
-  for (const [cpId, jsonl] of split.byChargePoint)
-    groups.push({ id: cpId, jsonl });
-  if (split.unattributed) {
-    groups.push({ id: UNATTRIBUTED_GROUP_LABEL, jsonl: split.unattributed });
+  for (const [cpId, records] of split.byChargePoint)
+    groups.push({ id: cpId, records });
+  if (split.unattributed.length > 0) {
+    groups.push({ id: UNATTRIBUTED_GROUP_LABEL, records: split.unattributed });
   }
 
   if (groups.length === 0) {
@@ -311,7 +311,9 @@ export async function runAnalyze(opts: AnalyzeOptions): Promise<number> {
     // shared exit-code flag.
     let content: string;
     try {
-      const { events, warnings } = parseOpenOcppTrace(group.jsonl);
+      const { events, warnings } = parseOpenOcppTrace(
+        recordsToJsonl(group.records),
+      );
       const sessions = buildSessionTimeline(events);
       const failures = detectFailures(events, sessions);
       const summaries = summarizeSessions(sessions, failures);
@@ -324,7 +326,7 @@ export async function runAnalyze(opts: AnalyzeOptions): Promise<number> {
         metadata: {
           stationId: group.id,
           source: describeTraceSource(opts),
-          ocppVersion: detectUniformOcppVersion(group.jsonl),
+          ocppVersion: detectUniformOcppVersion(group.records),
         },
       };
 
@@ -386,10 +388,16 @@ export async function runAnalyze(opts: AnalyzeOptions): Promise<number> {
   for (const line of stderrSummaryLines) {
     process.stderr.write(`${line}\n`);
   }
-  const { soap, unsupportedOcppVersion, unparseableLine } = split.excluded;
-  if (soap > 0 || unsupportedOcppVersion > 0 || unparseableLine > 0) {
+  const { soap, unsupportedOcppVersion, unparseableLine, invalidRecord } =
+    split.excluded;
+  if (
+    soap > 0 ||
+    unsupportedOcppVersion > 0 ||
+    unparseableLine > 0 ||
+    invalidRecord > 0
+  ) {
     process.stderr.write(
-      `excluded: ${soap} soap record(s), ${unsupportedOcppVersion} non-1.6 record(s), ${unparseableLine} unparseable line(s)\n`,
+      `excluded: ${soap} soap record(s), ${unsupportedOcppVersion} non-1.6 record(s), ${unparseableLine} unparseable line(s), ${invalidRecord} invalid record(s)\n`,
     );
   }
   process.stderr.write(`${ANALYZE_DISCLAIMER}\n`);

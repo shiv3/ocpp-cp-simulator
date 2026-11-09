@@ -9,7 +9,9 @@ sources:
   - .github/workflows/ci.yml
   - .tool-versions
   - docker/
+  - bunfig.toml
   - "issue #346"
+  - "issue #886"
 related:
   - cli.md
   - daemon.md
@@ -84,7 +86,8 @@ image must pass the build arg: a runtime `-e APP_COMMIT=…` alone changes the
 daemon but not the UI bundle, which is fixed at build time.
 
 ```sh
-docker build --build-arg APP_COMMIT=$(git rev-parse HEAD) -t ocpp-cp-sim .
+docker build --secret id=github_token,env=GITHUB_TOKEN \
+  --build-arg APP_COMMIT=$(git rev-parse HEAD) -t ocpp-cp-sim .
 ```
 
 A tag build ends by asking the registry for every tag it just pushed and
@@ -162,7 +165,9 @@ and the `state.reset` RPC used by the Reset action.
 persistent volume + sensible defaults:
 
 ```sh
-# Bring it up (binds ./.state on the host)
+# Bring it up (binds ./.state on the host); the build needs GITHUB_TOKEN,
+# see Building locally
+export GITHUB_TOKEN=$(gh auth token)
 docker compose up --build
 
 # Override CP / CSMS / port via env
@@ -336,10 +341,20 @@ OCPP validators and schemas.
 ## Building locally
 
 ```sh
-docker build -t ocpp-cp-sim:dev .
+export GITHUB_TOKEN=$(gh auth token)   # any token with read:packages
+docker build --secret id=github_token,env=GITHUB_TOKEN -t ocpp-cp-sim:dev .
 docker run --rm -p 9700:9700 -v "$PWD/.state:/data" ocpp-cp-sim:dev \
   --cp-id CP001 --ws-url wss://example.invalid/chargepoint/
 ```
+
+The build's `bun install` fetches the
+[Open OCPP Trace SDK](../concepts/trace-format.md#reference-implementation)
+(`@open-ocpp-trace/*`) from GitHub Packages, which asks for a token even for
+a public package (#886). Pass any token with `read:packages` as the
+`github_token` build secret, as above: the Dockerfile mounts it for that one
+`RUN` step only, so it never lands in a layer or in the image history.
+`docker compose up --build` forwards the `GITHUB_TOKEN` environment variable
+as the same secret. Pulling the published image needs no token.
 
 The build is fully self-contained (no host node_modules required); first build
 ≈ 60 s, subsequent rebuilds hit the Bun install cache for ≈ 10 s.
@@ -355,7 +370,7 @@ probe) and at runtime (forwarded to the daemon's `--health-path`):
 
 ```sh
 # 1) Build with the custom path baked into the UI bundle.
-docker build \
+docker build --secret id=github_token,env=GITHUB_TOKEN \
   --build-arg HEALTH_PATH=/internal/healthz \
   -t ocpp-cp-sim:custom-health .
 

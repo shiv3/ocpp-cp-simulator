@@ -66,6 +66,7 @@ jobs:
     needs: resolve-release
     permissions:
       contents: write
+      packages: read
     strategy:
       fail-fast: false
       matrix:
@@ -138,6 +139,9 @@ jobs:
 
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
+        env:
+          # @open-ocpp-trace/* is on GitHub Packages (bunfig.toml).
+          GITHUB_TOKEN: ${{ github.token }}
 
       - name: Build CLI sidecar (Bun --compile → src-tauri/binaries/)
         # The Tauri build step below picks up the sidecar via

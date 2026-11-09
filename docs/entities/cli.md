@@ -21,6 +21,7 @@ sources:
   - packages/core/src/utils/tckContract.templateIds.test.ts
   - packages/contracts/src/__tests__/tckContract.methods.test.ts
   - "issue #346"
+  - "issue #886"
   - apps/cli/src/behavior/
   - packages/contracts/eslint/behavior.js
   - examples/behaviors/
@@ -76,6 +77,8 @@ installed:
 bun install -g https://github.com/shiv3/ocpp-cp-simulator/releases/download/cli-latest/ocpp-cp-simulator.tgz
 
 # From a local checkout (dev) — the bin is the built bundle, so build it first
+# (the install needs a read:packages token, see CONTRIBUTING.md#setup)
+GITHUB_TOKEN=$(gh auth token) bun install
 bun run build:cli
 bun link
 bun link ocpp-cp-simulator    # in any consumer project
@@ -361,7 +364,11 @@ from an embedded copy (`apps/cli/src/exportK6/runtimeSources.ts`, generated from
 `runtime/` by `bun run gen:k6-runtime`; a stale copy fails
 `runtimeManifest.test.ts`). Nothing in the package depends on the source
 layout, which is what let the sources move into `packages/` and `apps/`
-(#578) without the published CLI noticing.
+(#578) without the published CLI noticing. The same holds for the
+[Open OCPP Trace SDK](../concepts/trace-format.md#reference-implementation)
+(#886): `@open-ocpp-trace/*` are root `devDependencies`, inlined into
+`dist-cli/main.js` and `dist/`, so the published manifest does not depend on
+them and installing the package needs no GitHub Packages token.
 
 Until 2026-11-04 the tarball shipped the sources instead, and `files` listed
 every `src/` directory the CLI imported. Between 2026-07-01 and 2026-09-12

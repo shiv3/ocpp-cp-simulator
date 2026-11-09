@@ -135,17 +135,26 @@ export async function createErrorReporter({
   const endpoint = env.MY_TRACKER_URL;
   if (typeof endpoint !== "string" || !endpoint) return null; // not configured
   const pending = new Set<Promise<unknown>>();
+  let failed = false; // a report was refused or lost since the last flush
   return {
     captureException(error, context) {
       const report = scrub({
         release,
         ...context,
-        message: error instanceof Error ? error.stack : String(error),
+        message: error instanceof Error ? error.stack : describe(error),
       });
       const sent = fetch(endpoint, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(report),
-      }).catch(() => undefined);
+      }).then(
+        (response) => {
+          if (!response.ok) failed = true;
+        },
+        () => {
+          failed = true;
+        },
+      );
       pending.add(sent);
       void sent.finally(() => pending.delete(sent));
     },
@@ -153,9 +162,24 @@ export async function createErrorReporter({
       const timeout = new Promise<false>((resolve) =>
         setTimeout(resolve, timeoutMs, false),
       );
-      return Promise.race([Promise.all(pending).then(() => true), timeout]);
+      const settled = Promise.all(pending).then(() => {
+        const ok = !failed;
+        failed = false;
+        return ok;
+      });
+      return Promise.race([settled, timeout]);
     },
   };
+}
+
+// A rejection reason may be anything, Object.create(null) included, whose
+// String() throws.
+function describe(value: unknown): string {
+  try {
+    return String(value);
+  } catch {
+    return Object.prototype.toString.call(value);
+  }
 }
 ```
 

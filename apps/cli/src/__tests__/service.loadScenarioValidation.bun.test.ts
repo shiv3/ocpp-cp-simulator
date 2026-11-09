@@ -102,15 +102,23 @@ describe("loadScenario rejects definitions missing required fields", () => {
     expect(service.listScenarios(1)).toEqual([]);
   });
 
-  it("fills in a bad targetType, rejects a non-array nodes/edges", () => {
+  it("rejects a bad targetType or name and a non-array nodes/edges", () => {
     const service = newService();
+    // Present but wrong: refused with the daemon's old messages, never
+    // turned into "connector" / the id.
     const badTarget = validScenario() as unknown as Record<string, unknown>;
     badTarget.targetType = "station";
-    badTarget.id = "bad-target";
-    expect(
+    expect(() =>
       service.loadScenario(1, badTarget as unknown as ScenarioDefinition),
-    ).toBe("bad-target");
-    expect(service.getScenario(1, "bad-target")?.targetType).toBe("connector");
+    ).toThrow(
+      'scenario "targetType" must be one of "chargePoint" | "connector"',
+    );
+
+    const badName = validScenario() as unknown as Record<string, unknown>;
+    badName.name = 42;
+    expect(() =>
+      service.loadScenario(1, badName as unknown as ScenarioDefinition),
+    ).toThrow('scenario "name" must be a string');
 
     const badNodes = validScenario() as unknown as Record<string, unknown>;
     badNodes.nodes = { 0: "not-an-array" };
@@ -118,9 +126,7 @@ describe("loadScenario rejects definitions missing required fields", () => {
       service.loadScenario(1, badNodes as unknown as ScenarioDefinition),
     ).toThrow("nodes");
 
-    expect(service.listScenarios(1).map((s) => s.scenarioId)).toEqual([
-      "bad-target",
-    ]);
+    expect(service.listScenarios(1)).toEqual([]);
   });
 
   it("rejects a non-object payload without throwing a TypeError", () => {

@@ -883,10 +883,14 @@ export class FileReloadManager {
     // session settled, with nothing left to re-apply because the baseline said
     // the charge points already held those bytes. Rejected here instead: an
     // unloadable file never becomes a held reload (#314). Since the browser
-    // and the daemon share one gate, a missing `name` / `targetType` no longer
-    // makes a file unloadable: the gate fills it in (loadScenario reports it).
+    // and the daemon share one gate, a *missing* `name` / `targetType` no
+    // longer makes a file unloadable: the gate fills it in, and says so here
+    // (the normalised copy is what reaches loadScenario, which then has
+    // nothing left to report). A present but wrong one is still refused.
     const finalize = (definition: ScenarioDefinition): ScenarioDefinition =>
-      assertLoadableScenario(definition);
+      assertLoadableScenario(definition, (message) =>
+        this.log(`[watch] ${entry.absolutePath}: ${message}`),
+      );
     if (entry.prepare) return finalize({ ...prepared, id: entry.scenarioId });
     // Pinned to the target the live definition carries — what the load
     // installed — rather than normalised to `entry.connectorId`, so a scenario

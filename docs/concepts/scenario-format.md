@@ -488,9 +488,18 @@ the one place where one node type must come before another on the path:
 | everything else                                                                                             | `none`      | —                                                                                                                                                     |
 
 `validateScenarioGraph` reports `missingStart` (error: the run throws "No
-start node found"), `multipleStart`, `edgeOutOfEnd`, `extraOutgoing` (a fork
-anywhere but Start), `danglingEdge`, `unreachable` (no path from Start), and,
-following the CALL along the edges the executor really takes (all edges of a `select` node):
+start node found"), `multipleStart` (a Start other than the one the run starts
+from: it starts nothing, and runs as an ordinary step, first edge only, only
+if an edge reaches it), `edgeOutOfEnd`, `extraOutgoing` (a fork anywhere but
+the Start the run starts from, and but a `select` node), `unpickableHandle` (an
+edge out of a `switch` / `choice` whose `sourceHandle` the node never picks:
+none, `case-N` beyond its cases, `option-N` beyond its options; the executor
+always sets a handle and keeps only the edges with it, so such an edge never
+runs), `danglingEdge`, `unreachable` (no path from the Start the run starts
+from), and, following the CALL along the edges the executor really takes (of a
+`select` node, the first edge of each handle it can pick: `case-0` …
+`case-<n-1>` and `default` for a switch with `n` cases, `option-0` …
+`option-<n-1>` for a choice with `n` options):
 
 - `noCallHeld` (error) — a `callResponse`, or a `$from` on the `call` root
   (`ocppCall` `payload`, `switch` / `setState` `value`, `notify` `requestId`), on a
@@ -540,7 +549,14 @@ change the two together.
 - An edge out of `end`: never followed.
 - An edge back into `start`: followed, and `start` runs again as a step (on
   along its first edge only).
-- A second `start`: ignored; the run starts from the first.
+- A second `start`: starts nothing; the run starts from the first. Reached by
+  an edge, it runs as an ordinary step (on along its first edge only).
+- A `switch` / `choice` edge without a `sourceHandle`, or with one the node
+  never picks (`case-N` beyond its cases, `option-N` beyond its options): never
+  followed.
+- Resuming (`resumeFromNodeId`) from an ordinary node runs every outgoing edge
+  of it, each as its own branch; resuming from a `switch` / `choice` runs the
+  node again (the picked handle is not persisted).
 - A node labelled "Start" (when it comes first) or "End", of any type: acts as
   `start` / `end`.
 - A `switch` or `choice` whose picked handle has no edge: the branch ends with
@@ -612,10 +628,15 @@ The hard gate is smaller and shared by the browser import
 `checkLoadableScenario` in
 [`loadableScenario.ts`](../../packages/core/src/scenario/loadableScenario.ts)
 rejects only a value that is not an object or lacks a non-empty string `id` or
-`nodes` / `edges` arrays. A missing or non-string `name` becomes the `id`, a
-missing or unknown `targetType` becomes `"connector"`, each logged; the daemon
-also refuses an `id` it cannot address (blank once trimmed, or too long), which
-the browser only warns about. The `load_scenario` method's inline `scenario`
+`nodes` / `edges` arrays. Only a _missing_ value is filled in: a `name` that is
+absent or `null` becomes the `id`, a `targetType` that is absent or `null`
+becomes `"connector"`, each logged as an `info` diagnostic (by the daemon's
+`--watch` reload too). A value that is present but wrong is never replaced:
+a non-string `name`, a `targetType` other than `"chargePoint"` /
+`"connector"`, and an `id` the daemon cannot address (blank once trimmed, or
+too long) are refused by the daemon with the messages it always gave
+(`scenario "targetType" must be one of "chargePoint" | "connector"`, …) and
+loaded as written by the browser, with a warning. The `load_scenario` method's inline `scenario`
 object is still checked by its wire schema, which requires `name` and
 `targetType`.
 

@@ -37,7 +37,32 @@ describe("checkLoadableScenario", () => {
     expect(check.definition).toBe(def);
   });
 
-  it("fills in a missing or wrong name and targetType, reported as info", () => {
+  it("fills in a missing name and targetType, reported as info", () => {
+    const def = { id: "s1", nodes: [], edges: [] };
+    const check = checkLoadableScenario(def);
+    expect(check.errors).toEqual([]);
+    expect(check.definition).toEqual({
+      ...def,
+      name: "s1",
+      targetType: "connector",
+    });
+    expect(check.diagnostics).toEqual([
+      { code: "defaultName", severity: "info", data: { was: undefined } },
+      {
+        code: "defaultTargetType",
+        severity: "info",
+        data: { was: undefined },
+      },
+    ]);
+    // The input is not mutated.
+    expect(def).not.toHaveProperty("name");
+    expect(
+      checkLoadableScenario({ ...def, name: null, targetType: null })
+        .definition,
+    ).toMatchObject({ name: "s1", targetType: "connector" });
+  });
+
+  it("keeps a present but wrong name and targetType as written, with a warning", () => {
     const def = {
       id: "s1",
       name: 42,
@@ -47,20 +72,24 @@ describe("checkLoadableScenario", () => {
     };
     const check = checkLoadableScenario(def);
     expect(check.errors).toEqual([]);
-    expect(check.definition).toMatchObject({
-      id: "s1",
-      name: "s1",
-      targetType: "connector",
-    });
+    // Never silently turned into "connector" / the id.
+    expect(check.definition).toBe(def);
     expect(check.diagnostics).toEqual([
-      { code: "defaultName", severity: "info", data: { was: 42 } },
-      { code: "defaultTargetType", severity: "info", data: { was: "station" } },
+      {
+        code: "invalidName",
+        severity: "warning",
+        data: { message: 'scenario "name" must be a string', was: 42 },
+      },
+      {
+        code: "invalidTargetType",
+        severity: "warning",
+        data: {
+          message:
+            'scenario "targetType" must be one of "chargePoint" | "connector"',
+          was: "station",
+        },
+      },
     ]);
-    // The input is not mutated.
-    expect(def.name).toBe(42);
-    expect(
-      checkLoadableScenario({ id: "s1", nodes: [], edges: [] }).definition,
-    ).toMatchObject({ name: "s1", targetType: "connector" });
   });
 
   it("rejects what nothing can load", () => {
@@ -130,15 +159,38 @@ describe("validateLoadableScenario / assertLoadableScenario (the daemon's gate)"
     );
   });
 
-  it("describes a wrong value it replaced", () => {
+  it("still refuses a present but wrong name or targetType, with its old messages", () => {
+    const advisories: string[] = [];
+    expect(() =>
+      assertLoadableScenario(
+        { ...complete(), name: 42, targetType: "station" },
+        (m) => advisories.push(m),
+      ),
+    ).toThrow(
+      'Invalid scenario: scenario "name" must be a string; scenario "targetType" must be one of "chargePoint" | "connector"',
+    );
+    expect(advisories).toEqual([]);
+    // Reported with the other problems, in the daemon's old order.
+    expect(
+      validateLoadableScenario({ id: "", targetType: "station", nodes: {} })
+        .errors,
+    ).toEqual([
+      'scenario is missing required field "edges"',
+      'scenario "id" must be a non-empty string',
+      'scenario "targetType" must be one of "chargePoint" | "connector"',
+      'scenario "nodes" must be an array',
+    ]);
+  });
+
+  it("describes a null it replaced", () => {
     const advisories: string[] = [];
     assertLoadableScenario(
-      { ...complete(), name: 42, targetType: "station" },
+      { ...complete(), name: null, targetType: null },
       (m) => advisories.push(m),
     );
     expect(advisories).toEqual([
-      'scenario "name" 42 is not a string; using the id',
-      'scenario "targetType" "station" is not one of "chargePoint" | "connector"; using "connector"',
+      'scenario "name" is null; using the id',
+      'scenario "targetType" is null; using "connector"',
     ]);
   });
 

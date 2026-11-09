@@ -11,7 +11,8 @@
  * docs/concepts/scenario-format.md): an unknown node type is a plain step,
  * an edge to a missing node is skipped, an edge out of END is never
  * followed, an edge back into START runs it again as a step, a second START
- * is ignored, and nodes *labelled* "Start" / "End" act as such. Lowering
+ * starts nothing (it runs as a step only if an edge reaches it), a switch /
+ * choice edge whose handle the node never picks is never followed, and nodes *labelled* "Start" / "End" act as such. Lowering
  * reports those as diagnostics and never rejects the graph.
  */
 import { ScenarioNodeType } from "../cp/application/scenario/ScenarioTypes";
@@ -70,7 +71,9 @@ export interface ScenarioProgram<
   readonly outgoing: ReadonlyMap<string, readonly E[]>;
   /** Where a fresh run starts ({@link resolveOrigin}). */
   readonly origin: N | undefined;
-  /** The origin first, then every other node of type `start` (ignored). */
+  /** The origin first, then every other node of type `start`. Only the
+   *  origin starts a run; another START runs as an ordinary step, and only
+   *  when an edge reaches it. */
   readonly starts: readonly N[];
   readonly diagnostics: readonly LoweringDiagnostic[];
 }
@@ -225,8 +228,8 @@ export interface SuccessorOptions {
  * The edges the executor follows out of `node`:
  * - as the origin (`asOrigin`): all of them, in parallel;
  * - from a terminal node: none;
- * - from a switch / choice with no `handle` given: every edge to an existing
- *   node, since each handle may be picked;
+ * - from a switch / choice with no `handle` given: for every handle it can
+ *   pick ({@link pickableHandles}), the one edge {@link nextStep} takes;
  * - otherwise: the one edge {@link nextStep} takes, if any.
  */
 export function successors<N extends GraphNodeLike, E extends GraphEdgeLike>(
@@ -236,26 +239,87 @@ export function successors<N extends GraphNodeLike, E extends GraphEdgeLike>(
 ): readonly E[] {
   if (opts.asOrigin) return program.outgoing.get(node.id) ?? [];
   if (opts.handle === undefined && connectionRule(node.type).out === "select") {
-    return isTerminal(node) ? [] : (program.outgoing.get(node.id) ?? []);
+    if (isTerminal(node)) return [];
+    const followed: E[] = [];
+    for (const handle of pickableHandles(node) ?? []) {
+      const step = nextStep(program, node, handle);
+      if (step.kind === "edge") followed.push(step.edge);
+    }
+    return followed;
   }
   const step = nextStep(program, node, opts.handle ?? null);
   return step.kind === "edge" ? [step.edge] : [];
 }
 
 /**
- * A switch / choice's edges to existing nodes grouped by `sourceHandle`
- * (`null` for an edge without one), in file order: what each pick runs.
+ * The `sourceHandle`s a switch / choice can pick, derived from its data as
+ * the executor does (`executeSwitch` / `executeChoice` always set
+ * `flow.handle`, and `nextStep` then keeps only the edges with that handle):
+ *
+ * - `switch`: `case-0` … `case-<n-1>` for its `n` cases, then `default`;
+ * - `choice`: `option-0` … `option-<n-1>` for its `n` options.
+ *
+ * Empty when the node fails the run before it picks (`cases` not an array;
+ * fewer than two options, or a weight that is not a number above 0). A
+ * switch case that is not a JSON constant also fails the run; that is left
+ * to the schema. `null` for a node that does not pick a handle.
+ */
+export function pickableHandles(node: GraphNodeLike): readonly string[] | null {
+  const data = node.data as Record<string, unknown> | undefined;
+  if (node.type === ScenarioNodeType.SWITCH) {
+    const cases = data?.cases;
+    if (!Array.isArray(cases)) return [];
+    return [...cases.map((_, i) => `case-${i}`), "default"];
+  }
+  if (node.type === ScenarioNodeType.CHOICE) {
+    const options = data?.options;
+    if (!Array.isArray(options) || options.length < 2) return [];
+    const weighted = options.every((option: unknown) => {
+      const weight =
+        (option as { weight?: unknown } | null | undefined)?.weight ?? 1;
+      return (
+        typeof weight === "number" && Number.isFinite(weight) && weight > 0
+      );
+    });
+    return weighted ? options.map((_, i) => `option-${i}`) : [];
+  }
+  return null;
+}
+
+export interface HandleEdges<E> {
+  /** Per handle the node can pick, in {@link pickableHandles} order: its
+   *  edges to existing nodes, in file order (the first one runs). A handle
+   *  without an edge is absent: picking it ends the branch. */
+  readonly pickable: ReadonlyMap<string, readonly E[]>;
+  /** Edges to existing nodes whose handle the node never picks (none at
+   *  all, `case-N` beyond the cases, `option-N` beyond the options, a
+   *  handle of the other node type): never followed. */
+  readonly unpickable: readonly E[];
+}
+
+/**
+ * A switch / choice's edges to existing nodes, split by whether the node can
+ * pick their `sourceHandle` ({@link pickableHandles}). For any other node
+ * every edge is `unpickable`.
  */
 export function edgesByHandle<N extends GraphNodeLike, E extends GraphEdgeLike>(
   program: ScenarioProgram<N, E>,
   node: N,
-): ReadonlyMap<string | null, readonly E[]> {
-  const groups = new Map<string | null, E[]>();
+): HandleEdges<E> {
+  const handles = pickableHandles(node) ?? [];
+  const pickable = new Map<string, E[]>();
+  const unpickable: E[] = [];
+  for (const handle of handles) pickable.set(handle, []);
   for (const edge of program.outgoing.get(node.id) ?? []) {
-    const key = edge.sourceHandle ?? null;
-    const list = groups.get(key);
+    const list =
+      typeof edge.sourceHandle === "string"
+        ? pickable.get(edge.sourceHandle)
+        : undefined;
     if (list) list.push(edge);
-    else groups.set(key, [edge]);
+    else unpickable.push(edge);
   }
-  return groups;
+  for (const handle of handles) {
+    if (pickable.get(handle)!.length === 0) pickable.delete(handle);
+  }
+  return { pickable, unpickable };
 }

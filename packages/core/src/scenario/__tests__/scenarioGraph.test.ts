@@ -5,15 +5,21 @@ import {
   isTerminal,
   lowerScenario,
   nextStep,
+  pickableHandles,
   resolveOrigin,
   successors,
   type GraphEdgeLike,
 } from "../scenarioGraph";
 
-const node = (id: string, type = "delay", label?: string) => ({
+const node = (
+  id: string,
+  type = "delay",
+  label?: string | Record<string, unknown>,
+) => ({
   id,
   type,
-  data: label === undefined ? {} : { label },
+  data:
+    label === undefined ? {} : typeof label === "string" ? { label } : label,
 });
 const edge = (
   source: string,
@@ -77,13 +83,35 @@ describe("lowerScenario", () => {
   });
 });
 
+describe("pickableHandles", () => {
+  it("derives the handles from the node data as the executor does", () => {
+    expect(pickableHandles(node("sw", "switch", { cases: [1, 2] }))).toEqual([
+      "case-0",
+      "case-1",
+      "default",
+    ]);
+    expect(pickableHandles(node("sw", "switch", { cases: [] }))).toEqual([
+      "default",
+    ]);
+    expect(pickableHandles(node("sw", "switch"))).toEqual([]);
+    expect(
+      pickableHandles(node("c", "choice", { options: [{}, { weight: 3 }] })),
+    ).toEqual(["option-0", "option-1"]);
+    expect(pickableHandles(node("c", "choice", { options: [{}] }))).toEqual([]);
+    expect(
+      pickableHandles(node("c", "choice", { options: [{}, { weight: 0 }] })),
+    ).toEqual([]);
+    expect(pickableHandles(node("d"))).toBeNull();
+  });
+});
+
 describe("nextStep / successors", () => {
   const program = lowerScenario({
     nodes: [
       node("s", "start"),
       node("a"),
       node("b"),
-      node("sw", "switch"),
+      node("sw", "switch", { cases: [0, 1] }),
       node("e", "end"),
       node("lost"),
     ],
@@ -97,6 +125,8 @@ describe("nextStep / successors", () => {
       edge("sw", "a", "case-0"),
       edge("sw", "b", "default"),
       edge("sw", "e", "default"),
+      edge("sw", "b"),
+      edge("sw", "a", "option-0"),
       edge("e", "a"),
       edge("lost", "gone"),
     ],
@@ -135,16 +165,19 @@ describe("nextStep / successors", () => {
       kind: "noEdgeForHandle",
       handle: "case-1",
     });
+    // For analysis: the edge nextStep takes for each handle the switch can
+    // pick (case-0, case-1, default); case-1 has none, the edge without a
+    // handle and the one with option-0 are never taken.
     expect(ids(successors(program, at("sw")))).toEqual([
       "sw>a:case-0",
       "sw>b:default",
-      "sw>e:default",
     ]);
-    const groups = edgesByHandle(program, at("sw"));
-    expect([...groups.keys()]).toEqual(["case-0", "default"]);
-    expect(ids(groups.get("default")!)).toEqual([
+    const { pickable, unpickable } = edgesByHandle(program, at("sw"));
+    expect([...pickable.keys()]).toEqual(["case-0", "default"]);
+    expect(ids(pickable.get("default")!)).toEqual([
       "sw>b:default",
       "sw>e:default",
     ]);
+    expect(ids(unpickable)).toEqual(["sw>b", "sw>a:option-0"]);
   });
 });

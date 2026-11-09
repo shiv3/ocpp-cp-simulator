@@ -133,6 +133,30 @@ describe("parseScenarioJSON", () => {
     }
   });
 
+  it("keeps a present but unknown targetType / non-string name as written, with a warning", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const result = parseScenarioJSON(
+        JSON.stringify({
+          ...createValidScenario(),
+          name: 42,
+          targetType: "station",
+        }),
+      );
+      expect(result.targetType).toBe("station");
+      expect(result.name).toBe(42);
+      const messages = warn.mock.calls.map(([m]) => String(m));
+      expect(messages).toContain(
+        '[scenarioFile] Imported scenario "test-scenario": scenario "targetType" must be one of "chargePoint" | "connector"',
+      );
+      expect(messages).toContain(
+        '[scenarioFile] Imported scenario "test-scenario": scenario "name" must be a string',
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("still loads an id the daemon would refuse, with a warning", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {

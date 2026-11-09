@@ -148,6 +148,10 @@
     "edgeOutOfEnd warning n2 e0",
     "danglingEdge warning  e1",
     "edgeOutOfEnd warning n1 e8",
+    "unpickableHandle warning n6 e3",
+    "unpickableHandle warning n6 e4",
+    "unpickableHandle warning n6 e7",
+    "unpickableHandle warning n6 e10",
     "extraOutgoing warning n3 "
   ],
   "fuzz:4": [
@@ -161,6 +165,8 @@
     "extraOutgoing warning n1 ",
     "extraOutgoing warning n3 ",
     "extraOutgoing warning n2 ",
+    "unpickableHandle warning n6 e6",
+    "unpickableHandle warning n6 e9",
     "extraOutgoing warning n5 ",
     "unreachable warning n5 ",
     "unreachable warning n6 ",
@@ -188,15 +194,21 @@
     "unreachable warning n4 ",
     "unreachable warning n5 "
   ],
-  "fuzz:12": ["unreachable warning n1 "],
+  "fuzz:12": [
+    "unpickableHandle warning n1 e1",
+    "unpickableHandle warning n1 e2",
+    "unreachable warning n1 "
+  ],
   "fuzz:13": [
     "multipleStart warning n4 ",
     "edgeOutOfEnd warning n6 e4",
-    "danglingEdge warning  e7"
+    "danglingEdge warning  e7",
+    "extraOutgoing warning n4 "
   ],
   "fuzz:14": [
     "edgeOutOfEnd warning n5 e1",
     "danglingEdge warning  e4",
+    "unpickableHandle warning n6 e0",
     "extraOutgoing warning n3 ",
     "unreachable warning n1 ",
     "unreachable warning n2 ",
@@ -236,7 +248,9 @@
   "fuzz:20": [
     "missingStart error  ",
     "edgeOutOfEnd warning n0 e1",
-    "edgeOutOfEnd warning n0 e2"
+    "edgeOutOfEnd warning n0 e2",
+    "unpickableHandle warning n1 e0",
+    "unpickableHandle warning n1 e3"
   ],
   "fuzz:21": [
     "danglingEdge warning  e0",
@@ -256,6 +270,7 @@
     "edgeOutOfEnd warning n6 e3",
     "danglingEdge warning  e4",
     "edgeOutOfEnd warning n6 e7",
+    "unpickableHandle warning n1 e2",
     "extraOutgoing warning n2 ",
     "unreachable warning n1 ",
     "unreachable warning n2 ",
@@ -268,6 +283,7 @@
     "edgeOutOfEnd warning n3 e4",
     "edgeOutOfEnd warning n3 e5",
     "edgeOutOfEnd warning n5 e7",
+    "unpickableHandle warning n2 e2",
     "unreachable warning n1 ",
     "unreachable warning n2 ",
     "unreachable warning n3 ",
@@ -337,6 +353,8 @@
   ],
   "fuzz:34": [
     "danglingEdge warning  e3",
+    "unpickableHandle warning n5 e0",
+    "unpickableHandle warning n1 e6",
     "unreachable warning n1 ",
     "unreachable warning n2 ",
     "unreachable warning n3 ",
@@ -350,9 +368,12 @@
     "multipleStart warning n4 ",
     "danglingEdge warning  e2",
     "danglingEdge warning  e3",
-    "danglingEdge warning  e4"
+    "danglingEdge warning  e4",
+    "extraOutgoing warning n4 ",
+    "unreachable warning n1 "
   ],
   "fuzz:36": [
+    "unpickableHandle warning n2 e0",
     "unreachable warning n1 ",
     "unreachable warning n2 ",
     "unreachable warning n3 ",
@@ -362,9 +383,13 @@
   "fuzz:37": [
     "missingStart error  ",
     "danglingEdge warning  e0",
-    "danglingEdge warning  e4"
+    "danglingEdge warning  e4",
+    "unpickableHandle warning n0 e2"
   ],
   "fuzz:38": [
+    "unpickableHandle warning n4 e1",
+    "unpickableHandle warning n4 e2",
+    "unpickableHandle warning n1 e3",
     "unreachable warning n1 ",
     "unreachable warning n2 ",
     "unreachable warning n3 ",
@@ -400,6 +425,7 @@
   ],
   "fuzz:42": [
     "danglingEdge warning  e6",
+    "unpickableHandle warning n2 e8",
     "extraOutgoing warning n1 ",
     "extraOutgoing warning n4 ",
     "unreachable warning n1 ",
@@ -426,7 +452,12 @@
     "multipleStart warning n2 ",
     "unreachable warning n3 "
   ],
-  "fuzz:47": ["missingStart error  ", "danglingEdge warning  e2"],
+  "fuzz:47": [
+    "missingStart error  ",
+    "danglingEdge warning  e2",
+    "unpickableHandle warning n2 e0",
+    "unpickableHandle warning n0 e3"
+  ],
   "fuzz:48": [
     "edgeOutOfEnd warning n5 e8",
     "edgeOutOfEnd warning n5 e9",
@@ -488,6 +519,9 @@
   ],
   "fuzz:55": [
     "multipleStart warning n1 ",
+    "unpickableHandle warning n3 e1",
+    "unpickableHandle warning n3 e3",
+    "unpickableHandle warning n3 e5",
     "extraOutgoing warning n2 ",
     "unreachable warning n2 ",
     "unreachable warning n3 "
@@ -500,6 +534,10 @@
     "edgeOutOfEnd warning n6 e4",
     "danglingEdge warning  e9",
     "extraOutgoing warning n4 ",
+    "unpickableHandle warning n3 e3",
+    "unpickableHandle warning n1 e5",
+    "unpickableHandle warning n1 e6",
+    "unpickableHandle warning n5 e7",
     "unreachable warning n1 ",
     "unreachable warning n2 ",
     "unreachable warning n3 ",
@@ -512,6 +550,8 @@
   "fuzz:60": [
     "danglingEdge warning  e5",
     "edgeOutOfEnd warning n7 e8",
+    "unpickableHandle warning n3 e2",
+    "unpickableHandle warning n2 e3",
     "extraOutgoing warning n4 ",
     "extraOutgoing warning n5 ",
     "extraOutgoing warning n6 ",
@@ -535,6 +575,7 @@
     "danglingEdge warning  e4",
     "extraOutgoing warning n1 ",
     "extraOutgoing warning n3 ",
+    "unpickableHandle warning n6 e10",
     "unreachable warning n1 ",
     "unreachable warning n2 ",
     "unreachable warning n3 ",
@@ -602,7 +643,7 @@
     "edgeOutOfEnd warning n3 e5",
     "unreachable warning n2 "
   ],
-  "fuzz:73": ["unreachable warning n1 "],
+  "fuzz:73": ["unpickableHandle warning n1 e1", "unreachable warning n1 "],
   "fuzz:74": [
     "unreachable warning n1 ",
     "unreachable warning n2 ",
@@ -613,7 +654,11 @@
   ],
   "fuzz:75": ["edgeIntoStart warning n0 e2"],
   "fuzz:76": ["unreachable warning n2 ", "unreachable warning n3 "],
-  "fuzz:77": ["multipleStart warning n2 ", "danglingEdge warning  e1"],
+  "fuzz:77": [
+    "multipleStart warning n2 ",
+    "danglingEdge warning  e1",
+    "extraOutgoing warning n2 "
+  ],
   "fuzz:78": ["edgeOutOfEnd warning n1 e0", "edgeOutOfEnd warning n1 e2"],
   "fuzz:79": ["unreachable warning n1 ", "unreachable warning n2 "],
   "fuzz:80": [
@@ -640,6 +685,7 @@
     "edgeIntoStart warning n0 e3",
     "edgeIntoStart warning n0 e4",
     "edgeIntoStart warning n0 e8",
+    "unpickableHandle warning n2 e4",
     "unreachable warning n2 ",
     "unreachable warning n3 ",
     "noCallHeld error n1 "
@@ -647,6 +693,7 @@
   "fuzz:82": ["danglingEdge warning  e1", "unreachable warning n1 "],
   "fuzz:83": [],
   "fuzz:84": [
+    "unpickableHandle warning n1 e0",
     "unreachable warning n1 ",
     "unreachable warning n2 ",
     "unreachable warning n3 ",
@@ -661,6 +708,9 @@
   ],
   "fuzz:88": [
     "multipleStart warning n5 ",
+    "extraOutgoing warning n5 ",
+    "unpickableHandle warning n2 e1",
+    "unpickableHandle warning n2 e4",
     "extraOutgoing warning n1 ",
     "unreachable warning n1 ",
     "unreachable warning n2 "
@@ -676,6 +726,7 @@
   "fuzz:92": [
     "danglingEdge warning  e2",
     "danglingEdge warning  e4",
+    "unpickableHandle warning n1 e0",
     "extraOutgoing warning n3 ",
     "unreachable warning n1 ",
     "unreachable warning n2 ",
@@ -697,6 +748,7 @@
   "fuzz:96": [
     "edgeOutOfEnd warning n2 e3",
     "edgeIntoStart warning n0 e0",
+    "unpickableHandle warning n1 e1",
     "unreachable warning n1 ",
     "unreachable warning n3 ",
     "unreachable warning n4 "
@@ -750,7 +802,11 @@
     "danglingEdge warning  e6",
     "danglingEdge warning  e13",
     "extraOutgoing warning n6 ",
-    "extraOutgoing warning n4 "
+    "extraOutgoing warning n4 ",
+    "extraOutgoing warning n5 ",
+    "unreachable warning n0 ",
+    "unreachable warning n4 ",
+    "unreachable warning n6 "
   ],
   "fuzz:106": [
     "edgeOutOfEnd warning n3 e4",
@@ -781,6 +837,7 @@
   "fuzz:109": [
     "danglingEdge warning  e1",
     "extraOutgoing warning n0 ",
+    "unpickableHandle warning n1 e4",
     "unreachable warning n0 "
   ],
   "fuzz:110": [
@@ -804,6 +861,7 @@
     "extraOutgoing warning n2 "
   ],
   "fuzz:112": [
+    "unpickableHandle warning n6 e0",
     "unreachable warning n1 ",
     "unreachable warning n5 ",
     "unreachable warning n6 ",
@@ -823,6 +881,9 @@
     "danglingEdge warning  e11",
     "danglingEdge warning  e12",
     "extraOutgoing warning n3 ",
+    "unpickableHandle warning n1 e1",
+    "unpickableHandle warning n1 e5",
+    "unpickableHandle warning n1 e6",
     "extraOutgoing warning n4 ",
     "unreachable warning n1 ",
     "unreachable warning n2 ",
@@ -847,6 +908,7 @@
   "fuzz:118": [
     "danglingEdge warning  e4",
     "extraOutgoing warning n5 ",
+    "unpickableHandle warning n4 e6",
     "unreachable warning n3 ",
     "unreachable warning n4 "
   ],
@@ -854,6 +916,7 @@
     "missingStart error  ",
     "edgeOutOfEnd warning n3 e1",
     "edgeOutOfEnd warning n3 e3",
+    "unpickableHandle warning n0 e0",
     "extraOutgoing warning n1 "
   ],
   "fuzz:120": ["unreachable warning n1 ", "unreachable warning n2 "],
@@ -867,10 +930,14 @@
     "edgeOutOfEnd warning n6 e0",
     "edgeOutOfEnd warning n6 e4",
     "danglingEdge warning  e6",
+    "extraOutgoing warning n1 ",
     "extraOutgoing warning n3 ",
     "extraOutgoing warning n5 ",
+    "unpickableHandle warning n2 e8",
     "unreachable warning n2 ",
-    "unreachable warning n3 "
+    "unreachable warning n3 ",
+    "unreachable warning n4 ",
+    "unreachable warning n5 "
   ],
   "fuzz:123": [
     "multipleStart warning n5 ",
@@ -889,12 +956,15 @@
   ],
   "fuzz:125": [
     "missingStart error  ",
+    "unpickableHandle warning n2 e1",
     "extraOutgoing warning n6 ",
     "extraOutgoing warning n0 "
   ],
   "fuzz:126": [
     "multipleStart warning n4 ",
     "extraOutgoing warning n1 ",
+    "extraOutgoing warning n4 ",
+    "unpickableHandle warning n6 e2",
     "extraOutgoing warning n5 ",
     "extraOutgoing warning n2 ",
     "unreachable warning n1 ",
@@ -909,14 +979,21 @@
     "danglingEdge warning  e1",
     "edgeOutOfEnd warning n1 e2",
     "edgeOutOfEnd warning n4 e4",
-    "edgeOutOfEnd warning n4 e5"
+    "edgeOutOfEnd warning n4 e5",
+    "unpickableHandle warning n0 e3"
   ],
   "fuzz:129": [
     "multipleStart warning n5 ",
     "extraOutgoing warning n4 ",
     "extraOutgoing warning n7 ",
     "extraOutgoing warning n6 ",
+    "unpickableHandle warning n3 e4",
+    "unpickableHandle warning n3 e13",
+    "unpickableHandle warning n1 e5",
     "unreachable warning n1 ",
+    "unreachable warning n2 ",
+    "unreachable warning n4 ",
+    "unreachable warning n6 ",
     "noCallHeld error n7 "
   ],
   "fuzz:130": [
@@ -937,16 +1014,20 @@
     "edgeOutOfEnd warning n4 e3",
     "edgeOutOfEnd warning n1 e4",
     "edgeOutOfEnd warning n1 e5",
+    "unpickableHandle warning n2 e0",
+    "unpickableHandle warning n2 e2",
     "unreachable warning n2 ",
     "unreachable warning n3 ",
     "unreachable warning n4 "
   ],
   "fuzz:132": [
     "edgeOutOfEnd warning n1 e1",
+    "unpickableHandle warning n4 e0",
+    "unpickableHandle warning n3 e4",
     "unreachable warning n1 ",
     "unreachable warning n2 ",
     "unreachable warning n3 ",
-    "noCallHeld error n5 "
+    "unreachable warning n5 "
   ],
   "fuzz:133": [
     "unreachable warning n2 ",
@@ -991,6 +1072,7 @@
   ],
   "fuzz:139": [
     "multipleStart warning n3 ",
+    "unreachable warning n1 ",
     "unreachable warning n2 ",
     "unreachable warning n4 "
   ],
@@ -1040,9 +1122,10 @@
     "unreachable warning n2 "
   ],
   "fuzz:148": ["unreachable warning n1 ", "unreachable warning n2 "],
-  "fuzz:149": ["missingStart error  "],
+  "fuzz:149": ["missingStart error  ", "unpickableHandle warning n2 e0"],
   "fuzz:150": [
     "multipleStart warning n3 ",
+    "extraOutgoing warning n3 ",
     "extraOutgoing warning n2 ",
     "extraOutgoing warning n1 "
   ],
@@ -1067,6 +1150,14 @@
     "danglingEdge warning  e14",
     "edgeOutOfEnd warning n2 e15",
     "extraOutgoing warning n6 ",
+    "unpickableHandle warning n7 e4",
+    "unpickableHandle warning n5 e5",
+    "unpickableHandle warning n5 e7",
+    "unpickableHandle warning n5 e8",
+    "unpickableHandle warning n5 e10",
+    "unpickableHandle warning n4 e9",
+    "unpickableHandle warning n4 e12",
+    "unpickableHandle warning n4 e13",
     "unreachable warning n0 ",
     "unreachable warning n1 ",
     "unreachable warning n4 ",
@@ -1082,7 +1173,11 @@
     "unreachable warning n4 ",
     "noCallHeld error n3 "
   ],
-  "fuzz:155": ["missingStart error  ", "extraOutgoing warning n1 "],
+  "fuzz:155": [
+    "missingStart error  ",
+    "unpickableHandle warning n2 e1",
+    "extraOutgoing warning n1 "
+  ],
   "fuzz:156": [
     "unreachable warning n0 ",
     "unreachable warning n1 ",
@@ -1121,6 +1216,7 @@
     "danglingEdge warning  e10",
     "edgeIntoStart warning n0 e2",
     "edgeIntoStart warning n0 e6",
+    "unpickableHandle warning n3 e0",
     "extraOutgoing warning n1 ",
     "extraOutgoing warning n6 ",
     "unreachable warning n1 ",
@@ -1133,6 +1229,7 @@
     "multipleStart warning n1 ",
     "edgeOutOfEnd warning n2 e6",
     "extraOutgoing warning n3 ",
+    "extraOutgoing warning n1 ",
     "unreachable warning n4 "
   ],
   "fuzz:164": [
@@ -1141,6 +1238,8 @@
     "danglingEdge warning  e3",
     "danglingEdge warning  e5",
     "extraOutgoing warning n6 ",
+    "unpickableHandle warning n7 e8",
+    "unpickableHandle warning n7 e9",
     "unreachable warning n1 ",
     "unreachable warning n2 ",
     "unreachable warning n4 ",
@@ -1160,6 +1259,7 @@
   "fuzz:167": ["unreachable warning n2 ", "noCallHeld error n1 "],
   "fuzz:168": [
     "edgeOutOfEnd warning n3 e1",
+    "unpickableHandle warning n2 e2",
     "unreachable warning n1 ",
     "unreachable warning n2 ",
     "unreachable warning n4 ",
@@ -1175,7 +1275,8 @@
   "fuzz:170": [
     "edgeOutOfEnd warning n4 e0",
     "extraOutgoing warning n3 ",
-    "extraOutgoing warning n2 "
+    "extraOutgoing warning n2 ",
+    "unpickableHandle warning n1 e8"
   ],
   "fuzz:171": [
     "edgeOutOfEnd warning n3 e0",
@@ -1237,6 +1338,7 @@
   "fuzz:179": [
     "edgeIntoStart warning n0 e0",
     "edgeIntoStart warning n0 e8",
+    "unpickableHandle warning n2 e7",
     "extraOutgoing warning n4 ",
     "unreachable warning n1 ",
     "unreachable warning n4 ",
@@ -1273,8 +1375,13 @@
   ],
   "fuzz:186": [
     "edgeOutOfEnd warning n2 e4",
-    "unreachable warning n4 ",
-    "callLeftOpen warning n2 "
+    "unpickableHandle warning n1 e1",
+    "unpickableHandle warning n1 e5",
+    "unpickableHandle warning n1 e6",
+    "unpickableHandle warning n1 e7",
+    "unreachable warning n2 ",
+    "unreachable warning n3 ",
+    "unreachable warning n4 "
   ],
   "fuzz:187": [
     "edgeIntoStart warning n0 e5",
@@ -1288,11 +1395,18 @@
     "noCallHeld error n2 "
   ],
   "fuzz:188": ["unreachable warning n2 "],
-  "fuzz:189": ["edgeIntoStart warning n0 e0", "edgeIntoStart warning n0 e2"],
+  "fuzz:189": [
+    "edgeIntoStart warning n0 e0",
+    "edgeIntoStart warning n0 e2",
+    "unpickableHandle warning n1 e1"
+  ],
   "fuzz:190": [],
   "fuzz:191": [
     "multipleStart warning n3 ",
+    "extraOutgoing warning n3 ",
     "unreachable warning n1 ",
+    "unreachable warning n2 ",
+    "unreachable warning n4 ",
     "unreachable warning n5 "
   ],
   "fuzz:192": [
@@ -1363,6 +1477,7 @@
     "danglingEdge warning  e0",
     "danglingEdge warning  e6",
     "extraOutgoing warning n3 ",
+    "unpickableHandle warning n4 e2",
     "unreachable warning n1 ",
     "unreachable warning n2 ",
     "unreachable warning n4 ",
@@ -1402,7 +1517,11 @@
     "unreachable warning n2 ",
     "unreachable warning n3 "
   ],
-  "fuzz:204": ["missingStart error  "],
+  "fuzz:204": [
+    "missingStart error  ",
+    "unpickableHandle warning n1 e0",
+    "unpickableHandle warning n1 e2"
+  ],
   "fuzz:205": [
     "multipleStart warning n5 ",
     "danglingEdge warning  e1",
@@ -1425,6 +1544,9 @@
     "edgeOutOfEnd warning n2 e5",
     "edgeIntoStart warning n0 e4",
     "edgeIntoStart warning n0 e5",
+    "unpickableHandle warning n5 e1",
+    "unpickableHandle warning n5 e3",
+    "unpickableHandle warning n6 e6",
     "unreachable warning n2 ",
     "unreachable warning n3 ",
     "unreachable warning n5 ",
@@ -1435,11 +1557,14 @@
     "danglingEdge warning  e5",
     "edgeIntoStart warning n0 e3",
     "edgeIntoStart warning n0 e7",
+    "extraOutgoing warning n1 ",
     "unreachable warning n2 ",
-    "unreachable warning n3 "
+    "unreachable warning n3 ",
+    "unreachable warning n5 "
   ],
   "fuzz:209": [
     "danglingEdge warning  e0",
+    "unpickableHandle warning n5 e1",
     "unreachable warning n1 ",
     "unreachable warning n2 ",
     "unreachable warning n3 ",
@@ -1457,6 +1582,8 @@
   ],
   "fuzz:211": [
     "edgeOutOfEnd warning n4 e6",
+    "unpickableHandle warning n1 e0",
+    "unpickableHandle warning n1 e1",
     "extraOutgoing warning n2 ",
     "unreachable warning n1 ",
     "unreachable warning n2 ",
@@ -1486,14 +1613,15 @@
   "fuzz:215": [
     "multipleStart warning n2 ",
     "edgeIntoStart warning n0 e3",
-    "edgeIntoStart warning n0 e5"
+    "edgeIntoStart warning n0 e5",
+    "extraOutgoing warning n2 "
   ],
   "fuzz:216": [
     "unreachable warning n1 ",
     "unreachable warning n2 ",
     "unreachable warning n3 "
   ],
-  "fuzz:217": ["missingStart error  "],
+  "fuzz:217": ["missingStart error  ", "unpickableHandle warning n1 e0"],
   "fuzz:218": ["missingStart error  "],
   "fuzz:219": [
     "danglingEdge warning  e3",
@@ -1501,12 +1629,17 @@
     "edgeIntoStart warning n0 e1"
   ],
   "fuzz:220": [
+    "unpickableHandle warning n1 e0",
     "unreachable warning n1 ",
     "unreachable warning n2 ",
     "unreachable warning n3 ",
     "unreachable warning n4 "
   ],
-  "fuzz:221": ["missingStart error  ", "edgeOutOfEnd warning n4 e0"],
+  "fuzz:221": [
+    "missingStart error  ",
+    "edgeOutOfEnd warning n4 e0",
+    "unpickableHandle warning n2 e1"
+  ],
   "fuzz:222": [
     "extraOutgoing warning n1 ",
     "unreachable warning n1 ",
@@ -1544,20 +1677,31 @@
   ],
   "fuzz:229": [
     "danglingEdge warning  e4",
+    "unpickableHandle warning n5 e1",
+    "unpickableHandle warning n5 e2",
     "unreachable warning n1 ",
     "unreachable warning n4 ",
     "unreachable warning n5 ",
     "callLeftOpen warning n6 "
   ],
-  "fuzz:230": ["unreachable warning n1 ", "unreachable warning n3 "],
+  "fuzz:230": [
+    "unpickableHandle warning n1 e0",
+    "unreachable warning n1 ",
+    "unreachable warning n3 "
+  ],
   "fuzz:231": [
     "missingStart error  ",
     "danglingEdge warning  e0",
-    "danglingEdge warning  e6"
+    "danglingEdge warning  e6",
+    "unpickableHandle warning n2 e1",
+    "unpickableHandle warning n2 e3",
+    "unpickableHandle warning n2 e5"
   ],
   "fuzz:232": [
     "edgeOutOfEnd warning n2 e0",
     "danglingEdge warning  e1",
+    "unpickableHandle warning n1 e2",
+    "unpickableHandle warning n1 e3",
     "unreachable warning n1 "
   ],
   "fuzz:233": [
@@ -1581,6 +1725,7 @@
     "danglingEdge warning  e1",
     "danglingEdge warning  e11",
     "extraOutgoing warning n7 ",
+    "unpickableHandle warning n4 e9",
     "extraOutgoing warning n5 ",
     "unreachable warning n2 ",
     "unreachable warning n4 ",
@@ -1595,6 +1740,8 @@
     "danglingEdge warning  e2",
     "danglingEdge warning  e6",
     "extraOutgoing warning n2 ",
+    "unpickableHandle warning n3 e1",
+    "unpickableHandle warning n3 e3",
     "unreachable warning n1 ",
     "unreachable warning n2 ",
     "unreachable warning n3 "
@@ -1615,6 +1762,7 @@
     "edgeIntoStart warning n0 e1",
     "edgeIntoStart warning n0 e2",
     "edgeIntoStart warning n0 e9",
+    "unpickableHandle warning n2 e1",
     "unreachable warning n2 ",
     "unreachable warning n3 ",
     "unreachable warning n4 ",
@@ -1632,6 +1780,9 @@
   ],
   "fuzz:244": [
     "danglingEdge warning  e2",
+    "unpickableHandle warning n3 e1",
+    "unpickableHandle warning n3 e4",
+    "unpickableHandle warning n3 e5",
     "unreachable warning n2 ",
     "unreachable warning n3 "
   ],
@@ -1663,7 +1814,12 @@
   ],
   "fuzz:249": ["extraOutgoing warning n2 ", "callLeftOpen warning n0 "],
   "fuzz:250": ["unreachable warning n1 "],
-  "fuzz:251": ["multipleStart warning n2 ", "danglingEdge warning  e3"],
+  "fuzz:251": [
+    "multipleStart warning n2 ",
+    "danglingEdge warning  e3",
+    "extraOutgoing warning n2 ",
+    "unreachable warning n1 "
+  ],
   "fuzz:252": [
     "edgeOutOfEnd warning n4 e0",
     "edgeOutOfEnd warning n4 e1",
@@ -1695,6 +1851,7 @@
     "edgeOutOfEnd warning n2 e8",
     "edgeIntoStart warning n0 e2",
     "edgeIntoStart warning n0 e4",
+    "unpickableHandle warning n1 e4",
     "extraOutgoing warning n4 ",
     "unreachable warning n1 ",
     "unreachable warning n4 "
@@ -1761,6 +1918,8 @@
   ],
   "fuzz:263": [
     "danglingEdge warning  e1",
+    "unpickableHandle warning n3 e5",
+    "unpickableHandle warning n3 e7",
     "extraOutgoing warning n2 ",
     "extraOutgoing warning n1 ",
     "unreachable warning n1 ",
@@ -1786,6 +1945,8 @@
     "edgeIntoStart warning n0 e8",
     "extraOutgoing warning n2 ",
     "extraOutgoing warning n5 ",
+    "unpickableHandle warning n6 e6",
+    "unpickableHandle warning n6 e10",
     "unreachable warning n2 ",
     "unreachable warning n5 ",
     "unreachable warning n6 "
@@ -1805,12 +1966,15 @@
     "edgeIntoStart warning n0 e5",
     "edgeIntoStart warning n0 e6",
     "extraOutgoing warning n4 ",
+    "unpickableHandle warning n1 e4",
     "unreachable warning n4 ",
     "callLeftOpen warning n3 "
   ],
   "fuzz:268": [
     "extraOutgoing warning n1 ",
     "extraOutgoing warning n4 ",
+    "unpickableHandle warning n2 e5",
+    "unpickableHandle warning n5 e8",
     "unreachable warning n2 ",
     "unreachable warning n3 ",
     "noCallHeld error n4 "
@@ -1819,6 +1983,7 @@
     "edgeOutOfEnd warning n3 e1",
     "danglingEdge warning  e5",
     "edgeIntoStart warning n0 e4",
+    "unpickableHandle warning n2 e0",
     "extraOutgoing warning n1 ",
     "unreachable warning n1 "
   ],
@@ -1826,6 +1991,7 @@
     "edgeIntoStart warning n0 e1",
     "edgeIntoStart warning n0 e2",
     "edgeIntoStart warning n0 e3",
+    "unpickableHandle warning n2 e1",
     "unreachable warning n2 ",
     "noCallHeld error n1 "
   ],
@@ -1847,6 +2013,9 @@
     "edgeOutOfEnd warning n2 e2",
     "edgeOutOfEnd warning n4 e5",
     "extraOutgoing warning n1 ",
+    "unpickableHandle warning n7 e6",
+    "unpickableHandle warning n7 e7",
+    "unpickableHandle warning n7 e9",
     "extraOutgoing warning n5 ",
     "unreachable warning n1 ",
     "unreachable warning n5 ",
@@ -1855,7 +2024,9 @@
   "fuzz:274": [
     "danglingEdge warning  e2",
     "danglingEdge warning  e6",
+    "unpickableHandle warning n1 e1",
     "extraOutgoing warning n3 ",
+    "unreachable warning n2 ",
     "unreachable warning n3 ",
     "unreachable warning n4 ",
     "unreachable warning n5 ",
@@ -1874,6 +2045,7 @@
   "fuzz:276": ["unreachable warning n1 "],
   "fuzz:277": [
     "multipleStart warning n1 ",
+    "unpickableHandle warning n4 e3",
     "extraOutgoing warning n3 ",
     "unreachable warning n3 ",
     "unreachable warning n4 "
@@ -1921,7 +2093,7 @@
     "edgeOutOfEnd warning n1 e0",
     "danglingEdge warning  e2"
   ],
-  "fuzz:287": ["multipleStart warning n1 "],
+  "fuzz:287": ["multipleStart warning n1 ", "extraOutgoing warning n1 "],
   "fuzz:288": [
     "edgeIntoStart warning n0 e0",
     "extraOutgoing warning n1 ",
@@ -1931,10 +2103,15 @@
   "fuzz:290": [
     "missingStart error  ",
     "edgeOutOfEnd warning n3 e1",
+    "unpickableHandle warning n5 e0",
+    "unpickableHandle warning n5 e4",
     "extraOutgoing warning n2 ",
-    "extraOutgoing warning n6 "
+    "extraOutgoing warning n6 ",
+    "unpickableHandle warning n0 e8"
   ],
   "fuzz:291": [
+    "unpickableHandle warning n3 e0",
+    "unpickableHandle warning n3 e5",
     "unreachable warning n1 ",
     "unreachable warning n2 ",
     "unreachable warning n3 "
@@ -1981,8 +2158,12 @@
   "fuzz:299": [
     "danglingEdge warning  e4",
     "danglingEdge warning  e10",
+    "unpickableHandle warning n6 e0",
+    "unpickableHandle warning n6 e5",
     "extraOutgoing warning n4 ",
     "extraOutgoing warning n5 ",
+    "unpickableHandle warning n2 e7",
+    "unpickableHandle warning n2 e12",
     "unreachable warning n1 ",
     "unreachable warning n2 ",
     "unreachable warning n3 ",
@@ -1991,11 +2172,16 @@
     "unreachable warning n6 ",
     "unreachable warning n7 "
   ],
-  "fuzz:300": ["unreachable warning n0 ", "unreachable warning n2 "],
+  "fuzz:300": [
+    "unpickableHandle warning n2 e0",
+    "unreachable warning n0 ",
+    "unreachable warning n2 "
+  ],
   "fuzz:301": [
     "multipleStart warning n1 ",
     "edgeOutOfEnd warning n3 e2",
     "danglingEdge warning  e3",
+    "extraOutgoing warning n1 ",
     "unreachable warning n3 ",
     "unreachable warning n5 ",
     "callLeftOpen warning n4 "
@@ -2003,6 +2189,8 @@
   "fuzz:302": [
     "danglingEdge warning  e2",
     "danglingEdge warning  e5",
+    "unpickableHandle warning n1 e0",
+    "unpickableHandle warning n1 e3",
     "unreachable warning n1 ",
     "unreachable warning n2 "
   ],
@@ -2022,6 +2210,8 @@
   "fuzz:304": ["missingStart error  "],
   "fuzz:305": [
     "extraOutgoing warning n3 ",
+    "unpickableHandle warning n4 e1",
+    "unpickableHandle warning n4 e3",
     "unreachable warning n1 ",
     "unreachable warning n2 ",
     "unreachable warning n3 ",
@@ -2042,6 +2232,8 @@
     "danglingEdge warning  e0",
     "danglingEdge warning  e3",
     "edgeOutOfEnd warning n5 e13",
+    "extraOutgoing warning n1 ",
+    "extraOutgoing warning n6 ",
     "extraOutgoing warning n3 "
   ],
   "fuzz:308": [
@@ -2052,7 +2244,9 @@
     "danglingEdge warning  e9",
     "edgeOutOfEnd warning n5 e11",
     "extraOutgoing warning n1 ",
+    "unpickableHandle warning n6 e10",
     "unreachable warning n1 ",
+    "unreachable warning n4 ",
     "unreachable warning n6 ",
     "unreachable warning n7 ",
     "callLeftOpen warning n2 "
@@ -2082,6 +2276,8 @@
     "multipleStart warning n2 ",
     "multipleStart warning n3 ",
     "danglingEdge warning  e3",
+    "unpickableHandle warning n4 e0",
+    "unpickableHandle warning n4 e1",
     "unreachable warning n1 ",
     "unreachable warning n4 "
   ],
@@ -2104,6 +2300,8 @@
     "danglingEdge warning  e2",
     "edgeIntoStart warning n0 e0",
     "edgeIntoStart warning n0 e3",
+    "unpickableHandle warning n3 e1",
+    "unpickableHandle warning n3 e5",
     "unreachable warning n2 ",
     "noCallHeld error n1 "
   ],
@@ -2142,6 +2340,7 @@
   "fuzz:321": [
     "multipleStart warning n6 ",
     "danglingEdge warning  e4",
+    "unpickableHandle warning n7 e2",
     "unreachable warning n1 ",
     "unreachable warning n3 ",
     "unreachable warning n4 "
@@ -2166,28 +2365,39 @@
     "edgeIntoStart warning n0 e6",
     "extraOutgoing warning n7 ",
     "extraOutgoing warning n2 ",
+    "unpickableHandle warning n4 e5",
     "unreachable warning n2 ",
     "unreachable warning n6 ",
     "unreachable warning n7 ",
-    "noCallHeld error n1 ",
-    "callAlreadyAnswered error n1 "
+    "noCallHeld error n1 "
   ],
   "fuzz:326": [
     "danglingEdge warning  e0",
     "edgeOutOfEnd warning n3 e3",
     "edgeOutOfEnd warning n3 e5",
     "danglingEdge warning  e7",
+    "unpickableHandle warning n4 e1",
+    "unpickableHandle warning n4 e2",
     "unreachable warning n1 ",
     "unreachable warning n4 "
   ],
-  "fuzz:327": ["missingStart error  ", "extraOutgoing warning n0 "],
+  "fuzz:327": [
+    "missingStart error  ",
+    "extraOutgoing warning n0 ",
+    "unpickableHandle warning n3 e6"
+  ],
   "fuzz:328": [
     "multipleStart warning n1 ",
     "multipleStart warning n3 ",
     "danglingEdge warning  e3",
     "danglingEdge warning  e7",
     "edgeIntoStart warning n0 e9",
+    "unpickableHandle warning n7 e0",
+    "unpickableHandle warning n7 e6",
+    "unpickableHandle warning n7 e9",
+    "unpickableHandle warning n6 e4",
     "unreachable warning n2 ",
+    "unreachable warning n5 ",
     "unreachable warning n6 "
   ],
   "fuzz:329": [
@@ -2233,7 +2443,8 @@
     "danglingEdge warning  e0",
     "edgeOutOfEnd warning n2 e5",
     "extraOutgoing warning n0 ",
-    "extraOutgoing warning n3 "
+    "extraOutgoing warning n3 ",
+    "unpickableHandle warning n4 e6"
   ],
   "fuzz:336": [
     "danglingEdge warning  e1",
@@ -2254,10 +2465,14 @@
   ],
   "fuzz:338": [
     "multipleStart warning n6 ",
+    "unpickableHandle warning n4 e0",
     "extraOutgoing warning n2 ",
+    "unpickableHandle warning n3 e3",
+    "extraOutgoing warning n6 ",
     "extraOutgoing warning n7 ",
     "unreachable warning n2 ",
-    "unreachable warning n3 "
+    "unreachable warning n3 ",
+    "unreachable warning n5 "
   ],
   "fuzz:339": ["unreachable warning n1 ", "unreachable warning n2 "],
   "fuzz:340": [
@@ -2275,7 +2490,8 @@
     "multipleStart warning n2 ",
     "edgeIntoStart warning n1 e0",
     "edgeIntoStart warning n1 e4",
-    "edgeIntoStart warning n1 e5"
+    "edgeIntoStart warning n1 e5",
+    "extraOutgoing warning n2 "
   ],
   "fuzz:342": [
     "edgeOutOfEnd warning n5 e1",
@@ -2284,6 +2500,7 @@
     "edgeOutOfEnd warning n5 e6",
     "edgeOutOfEnd warning n4 e7",
     "extraOutgoing warning n3 ",
+    "unpickableHandle warning n1 e4",
     "unreachable warning n1 ",
     "unreachable warning n3 ",
     "unreachable warning n4 "
@@ -2303,7 +2520,11 @@
     "edgeIntoStart warning n0 e3",
     "unreachable warning n2 "
   ],
-  "fuzz:345": ["unreachable warning n1 ", "unreachable warning n3 "],
+  "fuzz:345": [
+    "unpickableHandle warning n1 e1",
+    "unreachable warning n1 ",
+    "unreachable warning n3 "
+  ],
   "fuzz:346": [
     "multipleStart warning n5 ",
     "danglingEdge warning  e2",
@@ -2329,6 +2550,9 @@
     "danglingEdge warning  e2",
     "danglingEdge warning  e5",
     "extraOutgoing warning n4 ",
+    "unpickableHandle warning n6 e4",
+    "unpickableHandle warning n6 e6",
+    "unpickableHandle warning n6 e10",
     "extraOutgoing warning n3 ",
     "unreachable warning n1 ",
     "unreachable warning n2 ",
@@ -2341,6 +2565,8 @@
     "danglingEdge warning  e1",
     "danglingEdge warning  e2",
     "danglingEdge warning  e5",
+    "unpickableHandle warning n1 e0",
+    "unpickableHandle warning n1 e3",
     "unreachable warning n0 ",
     "unreachable warning n1 ",
     "unreachable warning n2 "
@@ -2380,7 +2606,10 @@
   "fuzz:358": [
     "missingStart error  ",
     "danglingEdge warning  e1",
-    "danglingEdge warning  e3"
+    "danglingEdge warning  e3",
+    "unpickableHandle warning n6 e0",
+    "unpickableHandle warning n6 e2",
+    "unpickableHandle warning n6 e6"
   ],
   "fuzz:359": [
     "unreachable warning n1 ",
@@ -2421,7 +2650,11 @@
     "unreachable warning n6 "
   ],
   "fuzz:366": ["danglingEdge warning  e0", "unreachable warning n1 "],
-  "fuzz:367": ["unreachable warning n1 "],
+  "fuzz:367": [
+    "unpickableHandle warning n1 e0",
+    "unpickableHandle warning n1 e1",
+    "unreachable warning n1 "
+  ],
   "fuzz:368": [
     "extraOutgoing warning n3 ",
     "unreachable warning n1 ",
@@ -2441,17 +2674,23 @@
     "danglingEdge warning  e4",
     "danglingEdge warning  e5",
     "danglingEdge warning  e6",
+    "unpickableHandle warning n1 e1",
+    "unpickableHandle warning n1 e3",
     "unreachable warning n1 "
   ],
   "fuzz:371": [
     "multipleStart warning n1 ",
     "extraOutgoing warning n4 ",
-    "unreachable warning n3 "
+    "extraOutgoing warning n1 ",
+    "unreachable warning n2 ",
+    "unreachable warning n3 ",
+    "unreachable warning n4 "
   ],
   "fuzz:372": [
     "multipleStart warning n2 ",
     "edgeOutOfEnd warning n3 e5",
-    "extraOutgoing warning n1 "
+    "extraOutgoing warning n1 ",
+    "unreachable warning n1 "
   ],
   "fuzz:373": [
     "danglingEdge warning  e2",
@@ -2520,6 +2759,7 @@
     "edgeOutOfEnd warning n4 e1",
     "edgeOutOfEnd warning n4 e2",
     "edgeOutOfEnd warning n7 e3",
+    "unpickableHandle warning n3 e0",
     "extraOutgoing warning n5 ",
     "unreachable warning n1 ",
     "unreachable warning n2 ",
@@ -2533,9 +2773,9 @@
     "extraOutgoing warning n2 "
   ],
   "fuzz:382": [
+    "unpickableHandle warning n2 e0",
     "extraOutgoing warning n3 ",
-    "noCallHeld error n1 ",
-    "noCallHeld error n3 "
+    "noCallHeld error n1 "
   ],
   "fuzz:383": [
     "edgeIntoStart warning n0 e0",
@@ -2557,6 +2797,7 @@
     "extraOutgoing warning n2 ",
     "extraOutgoing warning n5 ",
     "extraOutgoing warning n4 ",
+    "unpickableHandle warning n3 e11",
     "unreachable warning n3 ",
     "unreachable warning n5 "
   ],
@@ -2591,6 +2832,8 @@
   "fuzz:390": [
     "danglingEdge warning  e3",
     "edgeOutOfEnd warning n3 e5",
+    "unpickableHandle warning n1 e4",
+    "unreachable warning n2 ",
     "unreachable warning n4 "
   ],
   "fuzz:391": [
@@ -2602,6 +2845,8 @@
     "edgeIntoStart warning n0 e7",
     "edgeIntoStart warning n0 e9",
     "extraOutgoing warning n2 ",
+    "unpickableHandle warning n5 e3",
+    "unpickableHandle warning n5 e7",
     "unreachable warning n1 ",
     "unreachable warning n2 ",
     "unreachable warning n6 ",
@@ -2675,33 +2920,55 @@
     "edgeIntoStart warning n0 e5",
     "edgeIntoStart warning n0 e8",
     "edgeIntoStart warning n0 e12",
+    "extraOutgoing warning n1 ",
+    "unpickableHandle warning n5 e2",
+    "unpickableHandle warning n5 e3",
+    "unpickableHandle warning n5 e11",
+    "unpickableHandle warning n5 e13",
     "noCallHeld error n2 "
   ],
   "fuzz-dup:2": [
     "danglingEdge warning  e2",
     "extraOutgoing warning n3 ",
+    "unpickableHandle warning n1 e1",
+    "unpickableHandle warning n1 e4",
+    "unpickableHandle warning n1 e5",
+    "unpickableHandle warning n1 e6",
     "unreachable warning n1 ",
     "unreachable warning n2 ",
     "unreachable warning n3 "
   ],
-  "fuzz-dup:3": ["extraOutgoing warning n3 ", "unreachable warning n1 "],
+  "fuzz-dup:3": [
+    "unpickableHandle warning n1 e0",
+    "unpickableHandle warning n1 e5",
+    "unpickableHandle warning n1 e6",
+    "unpickableHandle warning n1 e8",
+    "extraOutgoing warning n3 ",
+    "unreachable warning n1 "
+  ],
   "fuzz-dup:4": [
     "multipleStart warning n1 ",
     "danglingEdge warning  e4",
     "edgeIntoStart warning n0 e2",
     "extraOutgoing warning n2 ",
+    "unpickableHandle warning n1 e2",
     "noCallHeld error n4 "
   ],
   "fuzz-dup:5": [
     "danglingEdge warning  e5",
     "edgeIntoStart warning n0 e6",
     "edgeIntoStart warning n0 e7",
-    "extraOutgoing warning n5 "
+    "unpickableHandle warning n1 e9",
+    "extraOutgoing warning n5 ",
+    "unpickableHandle warning n2 e6"
   ],
   "fuzz-dup:6": [
     "edgeOutOfEnd warning n3 e0",
     "edgeOutOfEnd warning n3 e1",
     "edgeOutOfEnd warning n3 e4",
+    "unpickableHandle warning n1 e3",
+    "unpickableHandle warning n1 e5",
+    "unpickableHandle warning n1 e6",
     "unreachable warning n1 ",
     "unreachable warning n2 ",
     "unreachable warning n1 "
@@ -2721,14 +2988,19 @@
     "multipleStart warning n1 ",
     "danglingEdge warning  e2",
     "danglingEdge warning  e5",
+    "unpickableHandle warning n3 e0",
     "unreachable warning n2 ",
+    "unreachable warning n3 ",
     "unreachable warning n4 ",
+    "unreachable warning n5 ",
     "unreachable warning n7 "
   ],
   "fuzz-dup:10": [
     "edgeIntoStart warning n0 e0",
     "edgeIntoStart warning n0 e3",
     "edgeIntoStart warning n0 e4",
+    "unpickableHandle warning n2 e1",
+    "unpickableHandle warning n2 e2",
     "unreachable warning n2 ",
     "unreachable warning n5 "
   ],
@@ -2741,7 +3013,10 @@
     "edgeOutOfEnd warning n4 e13",
     "edgeIntoStart warning n0 e11",
     "extraOutgoing warning n2 ",
+    "extraOutgoing warning n3 ",
     "extraOutgoing warning n5 ",
+    "unreachable warning n5 ",
+    "unreachable warning n5 ",
     "unreachable warning n7 "
   ],
   "fuzz-dup:14": ["unreachable warning n1 "],
@@ -2753,8 +3028,12 @@
     "danglingEdge warning  e5",
     "danglingEdge warning  e8",
     "edgeIntoStart warning n0 e4",
+    "unpickableHandle warning n1 e2",
+    "unpickableHandle warning n1 e4",
+    "unpickableHandle warning n3 e11",
     "unreachable warning n3 ",
-    "unreachable warning n4 "
+    "unreachable warning n4 ",
+    "unreachable warning n6 "
   ],
   "fuzz-dup:17": [
     "multipleStart warning n4 ",
@@ -2828,6 +3107,7 @@
   "fuzz-dup:29": [
     "edgeOutOfEnd warning n3 e0",
     "edgeOutOfEnd warning n3 e2",
+    "unpickableHandle warning n4 e5",
     "unreachable warning n1 ",
     "unreachable warning n2 ",
     "unreachable warning n3 ",
@@ -2911,7 +3191,7 @@
     "unreachable warning n3 "
   ],
   "fuzz-dup:41": ["unreachable warning n4 ", "callLeftOpen warning n1 "],
-  "fuzz-dup:42": ["missingStart error  "],
+  "fuzz-dup:42": ["missingStart error  ", "unpickableHandle warning n0 e0"],
   "fuzz-dup:43": [
     "missingStart error  ",
     "edgeOutOfEnd warning n4 e2",
@@ -2926,18 +3206,22 @@
     "extraOutgoing warning n2 "
   ],
   "fuzz-dup:45": [
+    "unpickableHandle warning n3 e1",
+    "unpickableHandle warning n3 e4",
+    "unpickableHandle warning n3 e5",
     "extraOutgoing warning n1 ",
     "unreachable warning n1 ",
     "unreachable warning n2 ",
     "unreachable warning n3 "
   ],
   "fuzz-dup:46": ["missingStart error  ", "extraOutgoing warning n1 "],
-  "fuzz-dup:47": ["unreachable warning n1 "],
+  "fuzz-dup:47": ["unpickableHandle warning n1 e2", "unreachable warning n1 "],
   "fuzz-dup:48": [
     "danglingEdge warning  e7",
     "extraOutgoing warning n4 ",
     "extraOutgoing warning n2 ",
     "extraOutgoing warning n1 ",
+    "unpickableHandle warning n5 e13",
     "unreachable warning n5 ",
     "unreachable warning n6 "
   ],
@@ -2961,7 +3245,11 @@
     "noCallHeld error n4 "
   ],
   "fuzz-dup:52": ["edgeOutOfEnd warning n3 e3", "danglingEdge warning  e4"],
-  "fuzz-dup:53": ["unreachable warning n1 ", "unreachable warning n2 "],
+  "fuzz-dup:53": [
+    "unpickableHandle warning n2 e0",
+    "unreachable warning n1 ",
+    "unreachable warning n2 "
+  ],
   "fuzz-dup:54": [
     "unreachable warning n1 ",
     "unreachable warning n2 ",
@@ -3011,9 +3299,13 @@
     "unreachable warning n1 ",
     "unreachable warning n2 "
   ],
-  "fuzz-dup:62": ["unreachable warning n1 "],
+  "fuzz-dup:62": ["unpickableHandle warning n1 e0", "unreachable warning n1 "],
   "fuzz-dup:63": ["missingStart error  "],
-  "fuzz-dup:64": ["danglingEdge warning  e0", "unreachable warning n1 "],
+  "fuzz-dup:64": [
+    "danglingEdge warning  e0",
+    "unpickableHandle warning n1 e2",
+    "unreachable warning n1 "
+  ],
   "fuzz-dup:65": ["unreachable warning n1 "],
   "fuzz-dup:66": [
     "edgeIntoStart warning n0 e0",
@@ -3025,12 +3317,15 @@
     "missingStart error  ",
     "edgeOutOfEnd warning n6 e0",
     "danglingEdge warning  e2",
-    "edgeOutOfEnd warning n6 e3"
+    "edgeOutOfEnd warning n6 e3",
+    "unpickableHandle warning n3 e1"
   ],
   "fuzz-dup:69": [
     "edgeOutOfEnd warning n4 e0",
+    "unpickableHandle warning n3 e3",
+    "unreachable warning n1 ",
     "unreachable warning n2 ",
-    "noCallHeld error n1 "
+    "unreachable warning n4 "
   ],
   "fuzz-dup:70": [
     "edgeOutOfEnd warning n1 e4",
@@ -3040,6 +3335,8 @@
     "edgeOutOfEnd warning n1 e9",
     "danglingEdge warning  e12",
     "extraOutgoing warning n2 ",
+    "unpickableHandle warning n5 e6",
+    "unpickableHandle warning n5 e10",
     "unreachable warning n2 ",
     "unreachable warning n3 ",
     "unreachable warning n4 ",
@@ -3066,7 +3363,11 @@
     "unreachable warning n2 ",
     "unreachable warning n4 "
   ],
-  "fuzz-dup:74": ["missingStart error  ", "extraOutgoing warning n3 "],
+  "fuzz-dup:74": [
+    "missingStart error  ",
+    "unpickableHandle warning n0 e0",
+    "extraOutgoing warning n3 "
+  ],
   "fuzz-dup:75": ["unreachable warning n1 ", "unreachable warning n2 "],
   "fuzz-dup:76": [
     "edgeOutOfEnd warning n4 e0",
@@ -3081,6 +3382,7 @@
   ],
   "fuzz-dup:77": [
     "extraOutgoing warning n2 ",
+    "unpickableHandle warning n3 e5",
     "unreachable warning n2 ",
     "unreachable warning n3 ",
     "callLeftOpen warning n1 "
@@ -3134,7 +3436,12 @@
     "danglingEdge warning  e8",
     "edgeOutOfEnd warning n4 e9"
   ],
-  "fuzz-dup:86": ["missingStart error  ", "edgeOutOfEnd warning n1 e3"],
+  "fuzz-dup:86": [
+    "missingStart error  ",
+    "edgeOutOfEnd warning n1 e3",
+    "unpickableHandle warning n0 e1",
+    "unpickableHandle warning n0 e2"
+  ],
   "fuzz-dup:87": [
     "multipleStart warning n4 ",
     "unreachable warning n3 ",
@@ -3180,10 +3487,15 @@
     "edgeIntoStart warning n0 e2",
     "unreachable warning n2 "
   ],
-  "fuzz-dup:94": ["multipleStart warning n1 ", "danglingEdge warning  e0"],
+  "fuzz-dup:94": [
+    "multipleStart warning n1 ",
+    "danglingEdge warning  e0",
+    "extraOutgoing warning n1 "
+  ],
   "fuzz-dup:95": [
     "edgeOutOfEnd warning n6 e0",
     "edgeOutOfEnd warning n1 e4",
+    "unpickableHandle warning n3 e2",
     "unreachable warning n2 ",
     "unreachable warning n3 ",
     "unreachable warning n4 "
@@ -3205,6 +3517,8 @@
     "edgeOutOfEnd warning n1 e6",
     "danglingEdge warning  e9",
     "extraOutgoing warning n3 ",
+    "unpickableHandle warning n4 e4",
+    "unpickableHandle warning n4 e7",
     "unreachable warning n2 ",
     "unreachable warning n3 ",
     "unreachable warning n4 ",
@@ -3214,8 +3528,11 @@
   ],
   "fuzz-dup:99": [
     "missingStart error  ",
+    "unpickableHandle warning n4 e6",
+    "unpickableHandle warning n4 e10",
     "extraOutgoing warning n2 ",
     "extraOutgoing warning n0 ",
     "extraOutgoing warning n3 "
-  ]
+  ],
+  "fixed:callAlreadyAnswered": ["callAlreadyAnswered error r2 "]
 }

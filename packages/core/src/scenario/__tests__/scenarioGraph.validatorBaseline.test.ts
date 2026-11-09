@@ -9,8 +9,20 @@
  * One deliberate exception, re-recorded with the change: graphs with two
  * nodes of the same id (`fuzz-dup:*`, 24 of 100 changed). The old validator
  * resolved such an id to the *last* node; the executor (`nodes.find`) and so
- * the lowered program resolve it to the *first*. Every other entry is
- * byte-identical to the recording from #829.
+ * the lowered program resolve it to the *first*.
+ *
+ * Two later deliberate changes of the validator (review of #854), re-recorded
+ * with them; every other entry is byte-identical to the recording from #829:
+ *
+ * - Switch / choice edges (125 entries): the validator follows only edges
+ *   whose `sourceHandle` the node can pick (`pickableHandles`), as the
+ *   executor does. +219 `unpickableHandle` (new code), +14 `unreachable`
+ *   (nodes reached only through such edges), and 5 CALL findings gone that
+ *   only an edge the executor never takes led to (3 `noCallHeld`, 1
+ *   `callAlreadyAnswered`, 1 `callLeftOpen`).
+ * - A second START (26 entries): reachability is seeded from the origin
+ *   only, and a non-origin START with several edges is `extraOutgoing`
+ *   (+17 `unreachable`, +23 `extraOutgoing`).
  *
  * Re-record (`RECORD_BASELINE=1`) only from code whose diagnostics are meant
  * to stay; a diff here is a behaviour change of the validator.
@@ -98,6 +110,29 @@ function corpus(): Array<[string, GraphDef]> {
   fuzzGraphs(100, 830, { ...fuzzOptions, duplicateIds: true }).forEach((g, i) =>
     entries.push([`fuzz-dup:${i}`, g]),
   );
+  // Hand-written graphs for codes the seeded corpus no longer reaches (added
+  // with the review of #854: its only `callAlreadyAnswered` came through a
+  // switch edge the executor never takes).
+  entries.push([
+    "fixed:callAlreadyAnswered",
+    {
+      nodes: [
+        { id: "s", type: "start" },
+        {
+          id: "t",
+          type: "csmsCallTrigger",
+          data: { action: "Reset", behavior: "replace" },
+        },
+        { id: "r1", type: "callResponse", data: { kind: "result" } },
+        { id: "r2", type: "callResponse", data: { kind: "result" } },
+      ],
+      edges: [
+        { id: "e0", source: "s", target: "t" },
+        { id: "e1", source: "t", target: "r1" },
+        { id: "e2", source: "r1", target: "r2" },
+      ],
+    },
+  ]);
   return entries;
 }
 
@@ -152,6 +187,7 @@ describe("validateScenarioGraph baseline (recorded before the lowered program)",
         "missingStart",
         "multipleStart",
         "noCallHeld",
+        "unpickableHandle",
         "unreachable",
       ].sort(),
     );

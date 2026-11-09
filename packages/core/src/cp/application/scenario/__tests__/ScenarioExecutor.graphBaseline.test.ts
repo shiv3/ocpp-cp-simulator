@@ -7,7 +7,11 @@
  * fresh run and a resumed run, each traced as the nodes it executed, every
  * `log` callback, every `console.warn` and the error it ended with. Only a
  * hash and the length of each trace are stored; the coverage test below
- * checks that the corpus reaches every path the change touched.
+ * checks that the corpus reaches every path the change touched. The full
+ * traces of the first {@link READABLE_GRAPHS} graphs are also kept, in
+ * `__fixtures__/executorGraphTraces.readable.json`, so that a change of walk
+ * shows up as a diff a reviewer can read; each one hashes to its entry in the
+ * baseline, so they are the traces recorded before the change too.
  *
  * Re-record (`RECORD_BASELINE=1`) only from code whose walk is meant to stay.
  */
@@ -28,6 +32,11 @@ import {
 const BASELINE = fileURLToPath(
   new URL("./__fixtures__/executorGraphTraces.baseline.json", import.meta.url),
 );
+const READABLE = fileURLToPath(
+  new URL("./__fixtures__/executorGraphTraces.readable.json", import.meta.url),
+);
+/** How many graphs (fresh and resumed run each) keep their full trace. */
+const READABLE_GRAPHS = 20;
 
 /** Node types that finish at once without callbacks or timers. */
 const fuzzOptions: FuzzOptions = {
@@ -140,14 +149,32 @@ describe("ScenarioExecutor walk baseline (recorded before the lowered program)",
     const actual = Object.fromEntries(
       Object.entries(traces).map(([key, lines]) => [key, digest(lines)]),
     );
+    const readable = Object.fromEntries(
+      Object.entries(traces).filter(
+        ([key]) => Number(key.split(":")[0]) < READABLE_GRAPHS,
+      ),
+    );
     if (process.env.RECORD_BASELINE === "1") {
       writeFileSync(BASELINE, `${JSON.stringify(actual, null, 1)}\n`);
+      writeFileSync(READABLE, `${JSON.stringify(readable, null, 1)}\n`);
     }
     const baseline = JSON.parse(readFileSync(BASELINE, "utf-8")) as Record<
       string,
       string
     >;
     expect(Object.keys(actual)).toEqual(Object.keys(baseline));
+    // The readable traces first: their diff says what changed.
+    const recorded = JSON.parse(readFileSync(READABLE, "utf-8")) as Record<
+      string,
+      string[]
+    >;
+    expect(Object.keys(readable)).toEqual(Object.keys(recorded));
+    for (const [key, lines] of Object.entries(recorded)) {
+      expect(digest(lines), `${key} (readable vs baseline)`).toBe(
+        baseline[key],
+      );
+      expect(readable[key], key).toEqual(lines);
+    }
     for (const key of Object.keys(baseline)) {
       expect(actual[key], key).toBe(baseline[key]);
     }

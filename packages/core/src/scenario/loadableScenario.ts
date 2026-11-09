@@ -18,11 +18,14 @@
  * The browser and the daemon used to gate differently: the browser asked for
  * `id`, `nodes` and `edges` only, the daemon also for a string `name` and a
  * valid `targetType`. Unified without rejecting anything either side
- * accepted: a missing or non-string `name` becomes the `id`, a missing or
- * unknown `targetType` becomes `"connector"`, each reported as an `info`
- * diagnostic on a normalised copy. An `id` the daemon cannot address (blank
- * once trimmed, or longer than `SCENARIO_ID_MAX`) is a `warning` the browser
- * reports and the daemon still refuses, as it always did.
+ * accepted: a *missing* (undefined or null) `name` becomes the `id`, a
+ * missing `targetType` becomes `"connector"`, each reported as an `info`
+ * diagnostic on a normalised copy. A value that is present but wrong is
+ * never replaced: a non-string `name`, an unknown `targetType`, or an `id`
+ * the daemon cannot address (blank once trimmed, or longer than
+ * `SCENARIO_ID_MAX`) is a `warning` the browser reports and keeps as
+ * written, and that the daemon still refuses with the message it always
+ * gave.
  */
 
 import { SCENARIO_ID_MAX } from "@ocpp-cp-simulator/contracts/limits";
@@ -35,18 +38,33 @@ const REQUIRED_FIELDS = ["id", "nodes", "edges"] as const;
 
 const TARGET_TYPES = ["chargePoint", "connector"] as const;
 
-/** What a load fills in when the file leaves it out or gets it wrong. */
+/** What a load fills in when the file leaves `targetType` out. */
 export const DEFAULT_TARGET_TYPE =
   "connector" satisfies ScenarioDefinition["targetType"];
 
 export type LoadDiagnosticCode =
-  /** `name` missing or not a string: the `id` is used (`data.was`). */
+  /** `name` missing (undefined or null): the `id` is used (`data.was`). */
   | "defaultName"
-  /** `targetType` missing or unknown: `"connector"` is used (`data.was`). */
+  /** `targetType` missing (undefined or null): `"connector"` is used
+   *  (`data.was`). */
   | "defaultTargetType"
+  /** `name` present but not a string (`data.message`): kept as written; the
+   *  daemon refuses it. */
+  | "invalidName"
+  /** `targetType` present but not `"chargePoint"` / `"connector"`
+   *  (`data.message`): kept as written; the daemon refuses it. */
+  | "invalidTargetType"
   /** The `id` cannot be addressed over the control plane (blank once
    *  trimmed, or too long; `data.message`): the daemon refuses it. */
   | "idNotAddressable";
+
+/** The `warning`s the browser loads as written and the daemon refuses, in
+ *  the order the daemon always reported them. */
+const DAEMON_REFUSES: readonly LoadDiagnosticCode[] = [
+  "idNotAddressable",
+  "invalidName",
+  "invalidTargetType",
+];
 
 export type LoadDiagnostic = Diagnostic<LoadDiagnosticCode>;
 
@@ -119,11 +137,35 @@ export function checkLoadableScenario(value: unknown): LoadableScenarioCheck {
     }
   }
 
+  const nameMissing = def.name === undefined || def.name === null;
+  if (!nameMissing && typeof def.name !== "string") {
+    diagnostics.push({
+      code: "invalidName",
+      severity: "warning",
+      data: { message: 'scenario "name" must be a string', was: def.name },
+    });
+  }
+  const targetTypeMissing =
+    def.targetType === undefined || def.targetType === null;
+  if (
+    !targetTypeMissing &&
+    !TARGET_TYPES.includes(def.targetType as (typeof TARGET_TYPES)[number])
+  ) {
+    diagnostics.push({
+      code: "invalidTargetType",
+      severity: "warning",
+      data: {
+        message: `scenario "targetType" must be one of ${TARGET_TYPES.map((t) => `"${t}"`).join(" | ")}`,
+        was: def.targetType,
+      },
+    });
+  }
+
   if (errors.length > 0) return { definition: null, errors, diagnostics };
 
   const normalised: Record<string, unknown> = { ...def };
   let changed = false;
-  if (typeof def.name !== "string") {
+  if (nameMissing) {
     diagnostics.push({
       code: "defaultName",
       severity: "info",
@@ -132,7 +174,7 @@ export function checkLoadableScenario(value: unknown): LoadableScenarioCheck {
     normalised.name = def.id;
     changed = true;
   }
-  if (!TARGET_TYPES.includes(def.targetType as (typeof TARGET_TYPES)[number])) {
+  if (targetTypeMissing) {
     diagnostics.push({
       code: "defaultTargetType",
       severity: "info",
@@ -156,11 +198,13 @@ export function describeLoadDiagnostic(diagnostic: LoadDiagnostic): string {
     case "defaultName":
       return was === undefined
         ? 'scenario has no "name"; using the id'
-        : `scenario "name" ${JSON.stringify(was)} is not a string; using the id`;
+        : `scenario "name" is ${JSON.stringify(was)}; using the id`;
     case "defaultTargetType":
       return was === undefined
         ? `scenario has no "targetType"; using "${DEFAULT_TARGET_TYPE}"`
-        : `scenario "targetType" ${JSON.stringify(was)} is not one of ${TARGET_TYPES.map((t) => `"${t}"`).join(" | ")}; using "${DEFAULT_TARGET_TYPE}"`;
+        : `scenario "targetType" is ${JSON.stringify(was)}; using "${DEFAULT_TARGET_TYPE}"`;
+    case "invalidName":
+    case "invalidTargetType":
     case "idNotAddressable":
       return String(diagnostic.data?.message);
   }
@@ -172,23 +216,25 @@ export interface LoadableScenarioResult {
   errors: string[];
   /** The normalised definition when valid. */
   definition: ScenarioDefinition | null;
-  /** The advisory findings (filled-in defaults). */
+  /** The advisory findings (filled-in defaults); what the daemon refuses
+   *  is in `errors` instead. */
   diagnostics: LoadDiagnostic[];
 }
 
 /**
  * The daemon's gate: {@link checkLoadableScenario}, plus an `id` the control
- * plane can address. Never throws.
+ * plane can address, a string `name` and a known `targetType` when they are
+ * given. Never throws.
  */
 export function validateLoadableScenario(
   value: unknown,
 ): LoadableScenarioResult {
   const check = checkLoadableScenario(value);
-  const unaddressable = check.diagnostics.filter(
-    (d) => d.code === "idNotAddressable",
+  const refused = DAEMON_REFUSES.flatMap((code) =>
+    check.diagnostics.filter((d) => d.code === code),
   );
   // In the order the daemon always reported them: missing fields, the id,
-  // then nodes / edges that are not arrays.
+  // the name, the target type, then nodes / edges that are not arrays.
   const missing = check.errors.filter((e) =>
     e.startsWith("scenario is missing"),
   );
@@ -199,7 +245,7 @@ export function validateLoadableScenario(
   const errors = [
     ...missing,
     ...idErrors,
-    ...unaddressable.map(describeLoadDiagnostic),
+    ...refused.map(describeLoadDiagnostic),
     ...rest,
   ];
   const valid = errors.length === 0;
@@ -207,7 +253,9 @@ export function validateLoadableScenario(
     valid,
     errors,
     definition: valid ? check.definition : null,
-    diagnostics: check.diagnostics.filter((d) => d.code !== "idNotAddressable"),
+    diagnostics: check.diagnostics.filter(
+      (d) => !DAEMON_REFUSES.includes(d.code),
+    ),
   };
 }
 

@@ -166,15 +166,22 @@ export function connectionRule(type: string | undefined): ConnectionRule {
 export type GraphIssueCode =
   /** No START node: the executor throws "No start node found". */
   | "missingStart"
-  /** More than one START: only the first is run. */
+  /** A START other than the origin (the first node of type `start` or
+   *  labelled "Start"): it never starts a run, and runs as an ordinary step
+   *  (first edge only) only if an edge reaches it. */
   | "multipleStart"
   /** An edge leads back into a START that fans out: it is followed, but the
    *  branch goes on along START's first edge only, not every branch. */
   | "edgeIntoStart"
   /** An edge leaves END: it is never followed. */
   | "edgeOutOfEnd"
-  /** A node other than START has several outgoing edges: only the first runs. */
+  /** A node other than the origin and a switch / choice has several outgoing
+   *  edges: only the first runs. */
   | "extraOutgoing"
+  /** An edge out of a switch / choice whose `sourceHandle` the node never
+   *  picks (none, `case-N` beyond its cases, `option-N` beyond its options):
+   *  it is never followed. */
+  | "unpickableHandle"
   /** An edge's source or target is not a node of the scenario. */
   | "danglingEdge"
   /** No path from START reaches the node: it never runs. */

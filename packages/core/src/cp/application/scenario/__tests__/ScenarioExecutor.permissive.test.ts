@@ -47,7 +47,11 @@ interface Run {
 /** Run to completion, or stop once `maxNodes` nodes executed (loops). */
 async function run(
   scenario: ScenarioDefinition,
-  { maxNodes = 50, draw = 0.5 }: { maxNodes?: number; draw?: number } = {},
+  {
+    maxNodes = 50,
+    draw = 0.5,
+    resumeFrom,
+  }: { maxNodes?: number; draw?: number; resumeFrom?: string } = {},
 ): Promise<Run> {
   const result: Run = { executed: [], logs: [], warnings: [], errors: [] };
   vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) => {
@@ -64,7 +68,9 @@ async function run(
   const executor = new ScenarioExecutor(scenario, callbacks, undefined, {
     rng: { next: () => draw } as never,
   });
-  await executor.start();
+  await executor.start(
+    resumeFrom === undefined ? undefined : { resumeFromNodeId: resumeFrom },
+  );
   return result;
 }
 
@@ -264,6 +270,110 @@ describe("ScenarioExecutor tolerant contract", () => {
     expect(r.logs).toContain(
       '[permissive] "ch" chose "option-1", which has no edge; the branch ends',
     );
+    expect(completed(r)).toBe(true);
+  });
+
+  it("never follows a switch / choice edge whose handle the node does not pick", async () => {
+    // executeSwitch always sets a handle (case-N or default), so an edge
+    // without one, or with a case the switch does not have, never runs.
+    const r = await run(
+      graph(
+        [
+          start(),
+          node("sw", ScenarioNodeType.SWITCH, {
+            label: "sw",
+            value: 0,
+            cases: [0],
+          }),
+          step("bare"),
+          step("beyond"),
+          step("zero"),
+        ],
+        [
+          ["start", "sw"],
+          ["sw", "bare"],
+          ["sw", "beyond", "case-1"],
+          ["sw", "zero", "case-0"],
+        ],
+      ),
+    );
+    expect(r.executed).toEqual(["start", "sw", "zero"]);
+    expect(completed(r)).toBe(true);
+  });
+
+  it("resuming from an ordinary node runs all its outgoing edges in parallel", async () => {
+    // executeFlow treats the resume point as the origin: every edge to an
+    // existing node becomes a branch, not only the first one.
+    const r = await run(
+      graph(
+        [start(), step("a"), step("b"), step("c")],
+        [
+          ["start", "a"],
+          ["a", "b"],
+          ["a", "c"],
+        ],
+      ),
+      { resumeFrom: "a" },
+    );
+    expect([...r.executed].sort()).toEqual(["b", "c"]);
+    expect(completed(r)).toBe(true);
+  });
+
+  it("resuming from a switch / choice runs the node again", async () => {
+    // The picked handle is not persisted: the node decides again, then goes
+    // on along that one edge.
+    const r = await run(
+      graph(
+        [
+          start(),
+          node("sw", ScenarioNodeType.SWITCH, {
+            label: "sw",
+            value: 0,
+            cases: [0],
+          }),
+          step("zero"),
+          step("other"),
+        ],
+        [
+          ["start", "sw"],
+          ["sw", "zero", "case-0"],
+          ["sw", "other", "default"],
+        ],
+      ),
+      { resumeFrom: "sw" },
+    );
+    expect(r.executed).toEqual(["sw", "zero"]);
+    expect(r.logs).toContain("Switch on 0 → case-0");
+    expect(completed(r)).toBe(true);
+  });
+
+  it("never mutates the definition's node and edge arrays (the program cache relies on it)", async () => {
+    // ScenarioExecutor.program() caches the lowered graph by the identity of
+    // `nodes` / `edges`; an in-place change would go unseen. Frozen here, so
+    // a write by the executor throws and fails the run.
+    const def = graph(
+      [
+        start(),
+        node("sw", ScenarioNodeType.SWITCH, {
+          label: "sw",
+          value: 0,
+          cases: [0],
+        }),
+        step("a"),
+        end(),
+      ],
+      [
+        ["start", "sw"],
+        ["sw", "a", "case-0"],
+        ["a", "end"],
+      ],
+    );
+    Object.freeze(def.nodes);
+    Object.freeze(def.edges);
+    def.nodes.forEach((n) => Object.freeze(n));
+    def.edges.forEach((e) => Object.freeze(e));
+    const r = await run(def);
+    expect(r.executed).toEqual(["start", "sw", "a", "end"]);
     expect(completed(r)).toBe(true);
   });
 

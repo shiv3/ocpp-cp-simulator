@@ -67,7 +67,8 @@ export function exportScenarioToJSON(scenario: ScenarioDefinition): void {
  *  and `edges` to be arrays (truthiness alone would accept `nodes: {}` etc.).
  *  The gate is the daemon's (`checkLoadableScenario`): a missing `name` /
  *  `targetType` is filled in (the id, "connector") and logged with
- *  `console.warn`, and so is an id the daemon could not address.
+ *  `console.warn`; a present but wrong `name` / `targetType`, and an id the
+ *  daemon could not address, are kept as written and logged the same way.
  *
  *  Issue #214: additionally runs the imported value through the published
  *  `packages/core/schema/scenario.schema.json` and, on a mismatch, logs a `console.warn`

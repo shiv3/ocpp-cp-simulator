@@ -182,9 +182,14 @@ bucket with the same numbers).
 > schema is advisory — a mismatch is logged, not rejected — with one exception:
 > `id`, `nodes` and `edges` are a hard gate, because the runtime keys on them.
 > Without `id` a definition used to load "successfully" and then be neither
-> runnable nor removable. A file without `name` / `targetType` loads with the
-> id and `"connector"` filled in (logged), as the web console's import does;
-> the inline `scenario` object still needs both, by its wire schema. See
+> runnable nor removable. A file _without_ `name` / `targetType` (absent or
+> `null`) loads with the id and `"connector"` filled in (logged, `--watch`
+> reloads included), as the web console's import does. One that has them but
+> wrong — a non-string `name`, a `targetType` other than `"chargePoint"` /
+> `"connector"` — is still refused, with the daemon's old message
+> (`scenario "targetType" must be one of …`); the browser loads it as written,
+> with a warning. The inline `scenario` object still needs both, by its wire
+> schema. See
 > [Validating a scenario file](scenario-format.md#validating-a-scenario-file).
 
 > The exact zod schema of every method is retrievable at runtime through the MCP `list_methods`

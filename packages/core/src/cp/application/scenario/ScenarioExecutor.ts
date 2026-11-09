@@ -521,7 +521,19 @@ export class ScenarioExecutor {
     this.currentNodeStartedAt = null;
   }
 
-  /** The lowered scenario, rebuilt only when `nodes` or `edges` is replaced. */
+  /**
+   * The lowered scenario, rebuilt only when `nodes` or `edges` is replaced.
+   *
+   * Invariant: while a run is live, `scenario.nodes` / `scenario.edges` (and
+   * the node and edge objects in them) are replaced, never mutated in place.
+   * The cache is keyed on the two arrays' identity, so an in-place push,
+   * splice or edit of an edge would not be seen: `executeFlow` (origin and
+   * resume point) and `executeSequentialFlow` (`nextStep` after every node)
+   * would keep walking the graph as it was lowered. Neither the executor nor
+   * its callers write to them (the console editor and a `--watch` reload
+   * build new arrays); the permissive test "never mutates the definition's
+   * node and edge arrays" freezes them to keep the executor honest.
+   */
   private program(): ScenarioProgram<ScenarioNode, ScenarioEdge> {
     const { nodes, edges } = this.scenario;
     if (

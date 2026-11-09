@@ -82,7 +82,9 @@ describe("CpDetailContent: the connector grid on the full page", () => {
     expect(grid!.querySelectorAll("[data-connector-id]")).toHaveLength(7);
     // jsdom does not lay out: assert the rule, not the geometry.
     const columns = grid!.style.gridAutoColumns;
-    expect(columns).toContain("/ 4");
+    // A quarter of the row minus the gaps: jsdom 31 serializes the calc()
+    // simplified ("25% - …"), earlier versions as written ("/ 4").
+    expect(columns).toMatch(/\/ 4|25% - /);
     expect(columns).toContain("400px");
     expect(grid!.style.gridTemplateColumns).toBe("");
     expect(grid!.className).toContain("overflow-x-auto");

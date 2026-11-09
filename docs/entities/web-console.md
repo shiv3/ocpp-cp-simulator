@@ -20,7 +20,7 @@ related:
   - open-ev-directory.md
   - ../concepts/operational-timeline.md
   - ../concepts/charging-sessions.md
-updated: 2026-11-09
+updated: 2026-11-10
 ---
 
 # Web console (browser UI)
@@ -603,18 +603,18 @@ Under each connector card, its **scenario card**
 scenario run executing or parked on that connector, else its
 [Library](#scenario-library) scenario:
 
-- **A run is live**: its name as the title, a link (`›`) to
-  `/cp/<id>?connector=<n>&run=<scenarioId>` (the full charge point page with the
-  [run panel](#scenario-runs-panel-and-page) beside it; from the list's side
-  panel it switches to the full page), its state, `step k of N · <current
+- **A run is live**: its name as the title, a button (`›`) that opens the
+  scenario in the [run panel](#scenario-runs-panel-and-page) (see
+  [below](#opening-the-scenario-in-the-side-panel)), its state, `step k of N · <current
 step> · <elapsed>`, **Open run** (straight to the
   [run page](#scenario-runs-panel-and-page)) and **Stop**; a 3 px progress bar
   under it; while the run waits, what it waits for with the wait controls (see
   [Scenario editor](#scenario-editor-steps-and-graph)). The runs are read once
   for the whole page and filtered by connector. The
   [Scenarios page](#scenarios-page) lists the runs of every charge point.
-- **No run**: **No scenario running** — _Pick one from the Library to run on
-  this connector._ — then a select (`aria-label="Scenario for connector <n>"`)
+- **No run**: the assigned scenario's name as the title (a button that opens
+  the panel) with _Not running_ — or **No scenario running** and _Pick one from
+  the Library to run on this connector._ when none is assigned — then a select (`aria-label="Scenario for connector <n>"`)
   of the Library scenarios, **None** first, showing the one the connector's
   copy came from (its `libraryId`). Changing it assigns at once: the
   connector's persisted definition set becomes exactly one copy of that
@@ -622,13 +622,38 @@ step> · <elapsed>`, **Open run** (straight to the
   connector holding a definition that is not a Library copy shows it as a
   disabled `<name> (not in the Library)` entry. **▶ Run** (primary; disabled
   with **None**) starts the connector's copy (`runScenario`); should the
-  runtime answer "not found", the copy is loaded into it and run again. **Edit
-  in Library** opens the scenario in the Library editor
-  (`/scenarios?tab=library&edit=<libraryId>`; for a definition that is not a
-  copy, the per-connector editor). **Use on all N connectors** (on a charge
+  runtime answer "not found", the copy is loaded into it and run again. **Open**
+  and **Edit** open the assigned scenario in the run panel, read-only or
+  already in its editor (replacing the former **Edit in Library** link, which
+  stays only where no panel is available). **Use on all N connectors** (on a charge
   point with more than one) assigns the same Library scenario to every
   connector, after a confirmation naming the connectors whose different
   scenario it replaces. A failed call is shown under the card.
+
+##### Opening the scenario in the side panel
+
+The scenario's name, **Open** and **Edit** (and a live run's name) put the
+scenario in the URL, not in component state, so the view is shareable:
+`?connector=<n>&run=<scenarioId>[&edit=1]`, where `scenarioId` is the
+connector's definition (the Library copy). Opening from a closed panel pushes
+one history entry; swapping, **Edit**/leave-editor and closing replace it.
+Changing the connector drops `run` and `edit`.
+
+- **Charge point page** (`/cp/<id>`): the [run panel](#scenario-runs-panel-and-page)
+  opens beside the page, `min(960px, 70vw)` wide.
+- **Charge Points list** (`/?cp=<id>&connector=<n>`): there is **no second
+  panel**; the scenario view **replaces the charge point's content in the
+  same side panel** (`?cp=…&connector=…&run=…[&edit=1]`, the list's own
+  `view` and filters untouched; its Graph / Steps choice is kept in
+  `?pview=`, as `view` is the list's). **← Back to <id>** (or Esc, see
+  below) returns to the charge point; the close button closes the whole
+  panel.
+- **Esc**: in the editor it is the editor's Cancel (asks when there are
+  unsaved changes); in the read view it closes the run panel (page) or goes
+  back to the charge point (list); another Esc closes the list's panel.
+- The connector table and cells of the Charge Points list only select a
+  connector (opening the panel on the charge point); the scenario entry point
+  is its scenario card.
 
 #### Message log tab
 
@@ -943,9 +968,11 @@ Library and its users.
 ### Scenario runs: panel and page
 
 A scenario run shows in two places with the same content: the **run panel**
-(beside the Scenarios page's Active runs, or beside the full charge point page
+(beside the Scenarios page's Active runs, beside the full charge point page
 at `/cp/<id>?connector=<n>&run=<scenarioId>`, whose **Close** removes `run`
-and replaces the history entry) and the read-only **run page**
+and replaces the history entry, or in place of the Charge Points list panel's
+charge point; it opens for a scenario that is **not running** too, see
+[Opening the scenario in the side panel](#opening-the-scenario-in-the-side-panel)) and the read-only **run page**
 (`/scenarios/run?cp=…&connector=…&id=…[&run=<runId>][&view=steps]`). Both
 show the scenario name, `<charge point> #<connector>`, the run state,
 `k / N · <elapsed>` and a progress bar, **Start** or **Stop**, the wait
@@ -965,8 +992,14 @@ scenario** opens it there (or in the Library, for a copy).
 The run page has no message log (the charge point page and the Message log
 page hold the traffic); its **Run history** stays under the steps, full width.
 It also has a **Graph | Steps** switch, kept in `?view=` (replacing the
-history entry; Graph is the default, `?view=steps` opens Steps). The panel
-always shows Steps.
+history entry; Graph is the default, `?view=steps` opens Steps). The panel has
+the same switch (Graph by default, fitted to the panel; `?view=steps`, on the
+Charge Points list `?pview=steps`), and under the steps its own **Run
+history** — the connector's recorded runs, or _No runs yet_ — so the last
+outcome shows without a live run. The panel is resizable (drag its left edge
+or use ←/→); it opens at `min(960px, 70vw)` for a scenario, a width the
+operator chose wins. A small **Open in Library** link in its header goes to
+the Library editor.
 
 - **Steps** — the [block tree](#editor-model-block-tree) drawn top to
   bottom, one box per step, numbered in tree order (a branch point, then

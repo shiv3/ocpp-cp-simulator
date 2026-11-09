@@ -68,6 +68,8 @@
   "scenarioRun.run.openLibraryEditor": "Open in the Library editor",
   "scenarioRun.run.openEditor": "Open in the editor",
   "scenarioRun.run.openFullPage": "Open the run as a full page",
+  "scenarioRun.run.openInLibrary": "Open in Library",
+  "scenarioRun.run.backToCp": "Back to {{cpId}}",
   "scenarioRun.run.runtimeRunId": "Runtime run id",
   "scenarioRun.run.stepsExecuted": "Steps executed",
   "scenarioRun.run.stop": "Stop",

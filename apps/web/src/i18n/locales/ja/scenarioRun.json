@@ -67,6 +67,8 @@
   "scenarioRun.run.openLibraryEditor": "ライブラリエディタで開く",
   "scenarioRun.run.openEditor": "エディタで開く",
   "scenarioRun.run.openFullPage": "実行を全画面ページで開く",
+  "scenarioRun.run.openInLibrary": "ライブラリで開く",
+  "scenarioRun.run.backToCp": "{{cpId}} に戻る",
   "scenarioRun.run.runtimeRunId": "ランタイムの実行 ID",
   "scenarioRun.run.stepsExecuted": "実行済みステップ",
   "scenarioRun.run.stop": "停止",

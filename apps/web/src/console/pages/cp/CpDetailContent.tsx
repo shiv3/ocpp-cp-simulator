@@ -222,6 +222,13 @@ export interface CpDetailContentProps {
   /** The connector in the URL (`?connector=`); the first one when absent. */
   selectedConnectorId: number | null;
   onSelectConnector: (id: number) => void;
+  /** Opens a connector's scenario in the run panel (`edit`: its editor).
+   *  Without it the scenario card links to the full pages instead. */
+  onOpenScenario?: (
+    connectorId: number,
+    scenarioId: string,
+    edit?: boolean,
+  ) => void;
 }
 
 const CpDetailContent: React.FC<CpDetailContentProps> = ({
@@ -229,6 +236,7 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
   variant,
   selectedConnectorId,
   onSelectConnector,
+  onOpenScenario,
 }) => {
   const { t } = useTranslation();
   const isPanel = variant === "panel";
@@ -786,6 +794,11 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
                       // From the list's panel the link goes to the full page,
                       // whose Back returns to the list.
                       runLinkState={{ from: "/" }}
+                      onOpenScenario={
+                        onOpenScenario &&
+                        ((id, edit) =>
+                          onOpenScenario(activeConnectorId, id, edit))
+                      }
                     />
                   </div>
                 )}
@@ -834,6 +847,10 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
                         // On the full page the link only adds `?run=`, so the
                         // page keeps the Back it already had.
                         runLinkState={location.state}
+                        onOpenScenario={
+                          onOpenScenario &&
+                          ((id, edit) => onOpenScenario(connector.id, id, edit))
+                        }
                       />
                     </div>
                   ))}

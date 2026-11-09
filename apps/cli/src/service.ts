@@ -56,6 +56,7 @@ import {
   type ConfigurationKeyList,
   type ConfigurationSetStatus,
 } from "@ocpp-cp-simulator/core/cp/domain/charge-point/configurationAccess";
+import { configurationWriteCheckV201 } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/v201/setVariablesV201";
 import {
   isOcpp2Version,
   isSoapVersion,
@@ -1633,6 +1634,9 @@ export class CLIChargePointService {
       key,
       value,
       this._chargePoint.logger,
+      isOcpp2Version(this._chargePoint.ocppVersion)
+        ? configurationWriteCheckV201(this._chargePoint.ocppVersion)
+        : undefined,
     );
   }
 

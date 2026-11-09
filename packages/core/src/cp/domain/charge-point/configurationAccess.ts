@@ -137,6 +137,8 @@ export function readConfigurationKeys(
  * Write one key. Throws {@link UnknownConfigurationKeyError} for a key the
  * charge point does not have, {@link ConfigurationWriteRejectedError} for a
  * read-only key or a value the key refuses (type, bounds, allowed values).
+ * On 2.x the caller passes `accepts`, the SetVariables value checks
+ * (`configurationWriteCheckV201`), which the store alone does not run.
  */
 export function writeConfigurationKey(
   store: ConfigurationStore,
@@ -144,6 +146,7 @@ export function writeConfigurationKey(
   key: string,
   value: string,
   logger?: Logger,
+  accepts?: (key: string, value: string) => boolean,
 ): ConfigurationSetStatus {
   const entry = store.get(key);
   if (!entry) throw new UnknownConfigurationKeyError(key);
@@ -155,7 +158,7 @@ export function writeConfigurationKey(
   const limit = is2x
     ? MAX_CONFIGURATION_VALUE_LENGTH.v2
     : MAX_CONFIGURATION_VALUE_LENGTH.v16;
-  if (value.length > limit) {
+  if (value.length > limit || (accepts && !accepts(key, value))) {
     throw new ConfigurationWriteRejectedError(key, "invalid_value");
   }
   const status = store.applyChange(key, value);

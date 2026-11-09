@@ -15,6 +15,10 @@ import {
 } from "./variableStatusInfo";
 import { variablesRequestLimitViolation } from "./variablesRequestLimits";
 import { unknownMeasurands } from "./measurandEnum";
+import {
+  DEVICE_MODEL,
+  type DeviceModelVariableDef,
+} from "../../../domain/device-model/DeviceModelRegistry";
 
 /** The configuration keys behind the MemberLists over MeasurandEnumType
  *  (`SampledDataCtrlr.TxUpdatedMeasurands`, `AlignedDataCtrlr.Measurands`,
@@ -28,6 +32,52 @@ const MEASURAND_LIST_KEYS: ReadonlySet<string> = new Set([
   "StopTxnSampledData",
   "StopTxnAlignedData",
 ]);
+
+/**
+ * Why `value` is not one `def` can hold, or `undefined` when it is: a
+ * MemberList member outside the version's MeasurandEnumType (B05.FR.07,
+ * #714; checked first so the reason names the members), then the type,
+ * limits and OptionList (B05.FR.07/08).
+ */
+export function variableValueRejection(
+  def: DeviceModelVariableDef,
+  v16Key: string,
+  value: string,
+  ocppVersion: string | undefined,
+): VariableStatusInfo | undefined {
+  if (ocppVersion !== undefined && MEASURAND_LIST_KEYS.has(v16Key)) {
+    const members = value
+      .split(",")
+      .map((m) => m.trim())
+      .filter((m) => m !== "");
+    const unknown = unknownMeasurands(members, ocppVersion);
+    if (unknown.length > 0) {
+      return statusInfo(
+        REASON.invalidValue,
+        `Not a MeasurandEnumType value: ${unknown.join(", ")}`.slice(0, 512),
+      );
+    }
+  }
+  return checkVariableValue(def, value);
+}
+
+/**
+ * The SetVariables value checks for an operator's write of a 2.x
+ * configuration key (`cp.config_keys.set`, #612), so the control plane
+ * cannot store what a CSMS would be refused. `true` when `value` is
+ * acceptable; a key outside the Device Model is left to the store.
+ */
+export function configurationWriteCheckV201(
+  ocppVersion: string,
+): (key: string, value: string) => boolean {
+  return (key, value) => {
+    const def = DEVICE_MODEL.byValueKey(key);
+    return (
+      def === undefined ||
+      variableValueRejection(def, key, value, ocppVersion) === undefined
+    );
+  };
+}
 
 type SetVariableResult = SetVariablesResponseV201["setVariableResult"][number];
 
@@ -106,33 +156,15 @@ export function handleSetVariablesV201(
       return { attributeStatus: "NotSupportedAttributeType", ...echo };
     }
 
-    // B05.FR.07 (#714): a MemberList value "incorrectly formatted for the
-    // given Variable" is Rejected - here a member outside the version's
-    // MeasurandEnumType (Temperature and RPM are 1.6 measurands). The
-    // previous list is kept. Checked first so the reason names the members.
-    if (context.ocppVersion !== undefined && MEASURAND_LIST_KEYS.has(v16Key)) {
-      const members = data.attributeValue
-        .split(",")
-        .map((m) => m.trim())
-        .filter((m) => m !== "");
-      const unknown = unknownMeasurands(members, context.ocppVersion);
-      if (unknown.length > 0) {
-        return rejected(
-          statusInfo(
-            REASON.invalidValue,
-            `Not a MeasurandEnumType value: ${unknown.join(", ")}`.slice(
-              0,
-              512,
-            ),
-          ),
-        );
-      }
-    }
-
     // B05.FR.07, FR.08 first: a badly formatted or out-of-range value is
     // reported as such even for a ReadOnly variable (FR.09 applies only when
     // FR.04-FR.08 do not).
-    const badValue = checkVariableValue(def, data.attributeValue);
+    const badValue = variableValueRejection(
+      def,
+      v16Key,
+      data.attributeValue,
+      context.ocppVersion,
+    );
     if (badValue !== undefined) return rejected(badValue);
     if (def.mutability === "ReadOnly") {
       return rejected(statusInfo(REASON.readOnly)); // B05.FR.09

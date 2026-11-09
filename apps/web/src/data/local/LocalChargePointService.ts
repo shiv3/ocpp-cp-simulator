@@ -4,6 +4,7 @@ import {
   type ConfigurationKeyList,
   type ConfigurationSetStatus,
 } from "@ocpp-cp-simulator/core/cp/domain/charge-point/configurationAccess";
+import { configurationWriteCheckV201 } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/v201/setVariablesV201";
 import { isOcpp2Version } from "@ocpp-cp-simulator/core/cp/domain/types/OcppVersion";
 import { VehicleProfileRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/VehicleProfileRepository";
 import type {
@@ -1078,6 +1079,9 @@ export class LocalChargePointService implements ChargePointService {
       key,
       value,
       cp.logger,
+      isOcpp2Version(cp.ocppVersion)
+        ? configurationWriteCheckV201(cp.ocppVersion)
+        : undefined,
     );
   }
 

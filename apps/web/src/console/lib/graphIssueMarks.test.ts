@@ -157,3 +157,39 @@ describe("issueMarks", () => {
     expect(worstSeverity([])).toBe("info");
   });
 });
+
+describe("issueMarks: edges the view does not draw", () => {
+  it("marks the forking step for a fork edge to a missing node, in the Graph view", () => {
+    const base = forkScenario();
+    const def = {
+      ...base,
+      edges: [
+        ...base.edges,
+        { id: "gone", source: "status", target: "nowhere" },
+      ],
+    };
+    expect(drawnEdgeIds(deriveStepLayout(def)).has("gone")).toBe(false);
+    const marks = marksOf(def, "graph");
+    expect(codes(marks, "nodes", "status")).toContain("danglingEdge");
+    expect(marks.nodes.get("status")?.entries[0]?.viaEdge).toBe(true);
+  });
+
+  it("marks START for an edge from START to a missing node", () => {
+    const base = forkScenario();
+    const start = base.nodes.find((n) => n.type === "start")!;
+    const def = {
+      ...base,
+      edges: [
+        ...base.edges,
+        { id: "gone", source: start.id, target: "nowhere" },
+      ],
+    };
+    const marks = marksOf(def, "steps");
+    expect(codes(marks, "nodes", start.id)).toContain("danglingEdge");
+  });
+
+  it("counts every severity on one node and shows the worst", () => {
+    expect(worstSeverity(["info", "warning", "error"])).toBe("error");
+    expect(worstSeverity(["info", "warning"])).toBe("warning");
+  });
+});

@@ -78,8 +78,8 @@ const UnsupportedOutline: React.FC<{
                     className="shrink-0 self-center"
                   />
                 )}
-                {marked.description}
               </button>
+              {marked.description}
             </li>
           );
         })}

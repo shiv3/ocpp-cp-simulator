@@ -124,7 +124,13 @@ export function issueMarks(
     if (edge && drawnEdges.has(edge.id)) {
       add(edges, edge.id, entry(false));
       target.edgeIds.push(edge.id);
-    } else if (edge && edge.source !== issue.nodeId && isStep(edge.source)) {
+    } else if (
+      edge &&
+      edge.source !== issue.nodeId &&
+      nodesById.has(edge.source)
+    ) {
+      // An edge the view does not draw marks the node it leaves: a step, or
+      // START / END (their marks sit by the start dot and the end ring).
       add(nodes, edge.source, entry(true));
       target.nodeIds.push(edge.source);
     }

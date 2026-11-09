@@ -196,8 +196,10 @@ export function deriveStepLayout(
 export function drawnEdgeIds(layout: StepLayout): Set<string> {
   const ids = new Set<string>(Object.values(layout.edgeInto ?? {}));
   if (layout.endEdgeId) ids.add(layout.endEdgeId);
+  // A branch's fork edge is drawn as the edge into its first step (in
+  // `edgeInto`) or, for an empty branch, as its edge to END (`endEdgeId`);
+  // a fork edge to a missing node is not drawn at all.
   for (const branch of layout.fork?.branches ?? []) {
-    if (branch.edgeId) ids.add(branch.edgeId);
     if (branch.endEdgeId) ids.add(branch.endEdgeId);
   }
   for (const link of layout.links) ids.add(link.id);

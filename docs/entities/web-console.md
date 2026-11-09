@@ -1293,6 +1293,13 @@ Rules:
   `ComponentType<{ className?: string; strokeWidth?: number }>`.
 - Import icons by name from the package root; the package has no side
   effects, so the bundle keeps only the icons used.
+- Licenses: EVIcons is
+  [MIT, © 2026 Landolsi Digital](https://github.com/evicons/evicons/blob/main/LICENSE)
+  and Lucide is [ISC](https://github.com/lucide-icons/lucide/blob/main/LICENSE).
+  Both ask that the notice travel with copies of the code; the built console
+  does not carry the notices of its bundled dependencies yet (#857).
+- The package is pinned exactly in `package.json` (`0.8.0`, as `@noble/curves`
+  is): it is young, so bump it on purpose.
 
 ## Development
 

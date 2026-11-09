@@ -20,6 +20,7 @@ sources:
   - packages/core/src/cp/infrastructure/transport/v201/offlineReplayV201.ts (E11 replay after Boot Accepted)
   - packages/core/src/cp/infrastructure/transport/v201/callPipelineV201.ts (2.x one CALL in flight, issue #708)
   - packages/core/src/cp/domain/transport/PendingMessageQueue.ts
+  - packages/core/src/cp/infrastructure/persistence/SqlitePendingMessageRepository.ts (`pending_messages` table, issue #878)
   - packages/core/src/cp/infrastructure/transport/v16/serialCallQueueV16.ts (1.6 transaction message retries)
   - "OCPP 1.6 Part 2 §3.7.1 (issue #527)"
   - apps/cli/src/server/CPRegistry.ts (SOAP public base derivation)

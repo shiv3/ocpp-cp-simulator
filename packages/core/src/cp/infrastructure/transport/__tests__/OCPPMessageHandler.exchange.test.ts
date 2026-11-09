@@ -63,7 +63,6 @@ function setup() {
   const completions: unknown[] = [];
   const chargePoint = {
     id: "cp-ex",
-    database: null,
     configuration: {
       transactionMessageAttempts: () => 3,
       meterValuesSampledData: () => [],

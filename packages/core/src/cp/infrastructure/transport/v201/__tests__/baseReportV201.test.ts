@@ -8,7 +8,7 @@ import { buildBaseReportData } from "../baseReportV201";
 /** #538: the per-EVSE runtime values and the 2.1 Target of EVSE.Power. */
 
 function store(): ConfigurationStore {
-  const configuration = new ConfigurationStore("cp-report", [], null);
+  const configuration = new ConfigurationStore([], null);
   configuration.defineRuntimeIntegerKey("EVSEPower1", 7400);
   configuration.defineRuntimeIntegerKey("EVSEPower2", 0);
   return configuration;

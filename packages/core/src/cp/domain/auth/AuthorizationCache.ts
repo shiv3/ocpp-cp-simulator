@@ -1,4 +1,7 @@
-import type { Database } from "../persistence/Database";
+import {
+  NoopAuthorizationCacheRepository,
+  type AuthorizationCacheRepository,
+} from "../persistence/AuthorizationCacheRepository";
 import { AUTHORIZATION_CACHE_SEED_MAX } from "@ocpp-cp-simulator/contracts/authorization";
 import { idTokenKey } from "./idTokenKey";
 import { effectiveStatus } from "./LocalAuthorizationResolver";
@@ -39,15 +42,6 @@ export interface AuthorizationCacheOptions {
 export const DEFAULT_AUTHORIZATION_CACHE_MAX_ENTRIES =
   AUTHORIZATION_CACHE_SEED_MAX;
 
-interface CacheRow {
-  id_token: string;
-  status: string;
-  expires_at: string | null;
-  parent_id: string | null;
-  inserted_at: string;
-  updated_at: string;
-}
-
 /**
  * The charge point's Authorization Cache (issue #452; OCPP 1.6 Part 2
  * §3.5.1, 2.0.1 Part 2 C10): the latest identifier information received
@@ -57,7 +51,7 @@ interface CacheRow {
  * `AuthorizationCacheEnabled` switch, the local-list exclusion of §3.5.3)
  * is decided by {@link StationAuthorization}.
  *
- * Persisted to the `authorization_cache` table when a {@link Database} is
+ * Persisted through an {@link AuthorizationCacheRepository} when one is
  * given — "Cache values SHOULD be persisted across reboots, resets and
  * power outages" (1.6 §3.5.1 with errata 3.4, C10.FR.02) — and in memory
  * otherwise, like {@link PendingMessageQueue}: loaded in the constructor,
@@ -71,12 +65,17 @@ export class AuthorizationCache {
   private readonly entries = new Map<string, AuthorizationCacheEntry>();
   private readonly maxEntries: number;
   private readonly now: () => number;
+  private readonly repository: AuthorizationCacheRepository;
 
+  /**
+   * `repository` is bound to the charge point (#878); `null` keeps the
+   * cache in memory only.
+   */
   constructor(
-    private readonly chargePointId: string,
-    private readonly database: Database | null = null,
+    repository: AuthorizationCacheRepository | null = null,
     options: AuthorizationCacheOptions = {},
   ) {
+    this.repository = repository ?? new NoopAuthorizationCacheRepository();
     this.maxEntries = Math.max(
       1,
       options.maxEntries ?? DEFAULT_AUTHORIZATION_CACHE_MAX_ENTRIES,
@@ -143,11 +142,8 @@ export class AuthorizationCache {
    *  cleared (the in-memory copy is cleared either way). */
   clear(): boolean {
     this.entries.clear();
-    if (!this.database) return true;
     try {
-      this.database.run("DELETE FROM authorization_cache WHERE cp_id = ?", [
-        this.chargePointId,
-      ]);
+      this.repository.clear();
       return true;
     } catch (err) {
       console.error("Failed to clear the authorization cache:", err);
@@ -180,25 +176,9 @@ export class AuthorizationCache {
   // ── persistence helpers ────────────────────────────────────────────────
 
   private load(): void {
-    if (!this.database) return;
     try {
-      const rows = this.database.all<CacheRow>(
-        "SELECT id_token, status, expires_at, parent_id, inserted_at, updated_at " +
-          "FROM authorization_cache WHERE cp_id = ?",
-        [this.chargePointId],
-      );
       const shadowed: string[] = [];
-      for (const row of rows) {
-        const expiresAt =
-          row.expires_at !== null ? Date.parse(row.expires_at) : NaN;
-        const entry: AuthorizationCacheEntry = {
-          idToken: row.id_token,
-          status: row.status,
-          ...(Number.isFinite(expiresAt) ? { expiresAt } : {}),
-          ...(row.parent_id !== null ? { parentId: row.parent_id } : {}),
-          insertedAt: Date.parse(row.inserted_at) || 0,
-          updatedAt: Date.parse(row.updated_at) || 0,
-        };
+      for (const entry of this.repository.loadAll()) {
         // Rows spelt differently are one identifier: the newest wins and
         // the others are dropped, so the table holds one row per key.
         const key = idTokenKey(entry.idToken);
@@ -217,39 +197,16 @@ export class AuthorizationCache {
   }
 
   private writeRow(entry: AuthorizationCacheEntry): void {
-    if (!this.database) return;
     try {
-      this.database.run(
-        "INSERT INTO authorization_cache " +
-          "(cp_id, id_token, status, expires_at, parent_id, inserted_at, updated_at) " +
-          "VALUES (?, ?, ?, ?, ?, ?, ?) " +
-          "ON CONFLICT (cp_id, id_token) DO UPDATE SET " +
-          "status = excluded.status, expires_at = excluded.expires_at, " +
-          "parent_id = excluded.parent_id, updated_at = excluded.updated_at",
-        [
-          this.chargePointId,
-          entry.idToken,
-          entry.status,
-          entry.expiresAt !== undefined
-            ? new Date(entry.expiresAt).toISOString()
-            : null,
-          entry.parentId ?? null,
-          new Date(entry.insertedAt).toISOString(),
-          new Date(entry.updatedAt).toISOString(),
-        ],
-      );
+      this.repository.upsert(entry);
     } catch (err) {
       console.error("Failed to persist an authorization cache entry:", err);
     }
   }
 
   private deleteRow(idToken: string): void {
-    if (!this.database) return;
     try {
-      this.database.run(
-        "DELETE FROM authorization_cache WHERE cp_id = ? AND id_token = ?",
-        [this.chargePointId, idToken],
-      );
+      this.repository.delete(idToken);
     } catch (err) {
       console.error("Failed to delete an authorization cache entry:", err);
     }

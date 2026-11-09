@@ -10,7 +10,7 @@ import { Logger } from "../../../../../shared/Logger";
 import { CertificateStore } from "../../../../../domain/security/CertificateStore";
 import { computeCertificateHashData } from "../../../../../domain/security/certificateHash";
 import { withTrailingDerBytes } from "../../../../../domain/security/__tests__/certificateFixtures";
-import type { Database } from "../../../../../domain/persistence/Database";
+import type { CertificateRepository } from "../../../../../domain/persistence/CertificateRepository";
 import { rootUseFromV16, rootUseToV16 } from "../../../certificateUseMapping";
 import type { HandlerContext } from "../../MessageHandlerRegistry";
 import type { ChargePoint } from "../../../../../domain/charge-point/ChargePoint";
@@ -505,18 +505,17 @@ describe("1.6 certificate handlers ordering and failures (#456 review)", () => {
   });
 
   it("answers Failed when the certificate cannot be persisted (whitepaper M05.FR.04)", async () => {
-    const database: Database = {
-      exec() {},
-      run(sql: string) {
-        if (sql.startsWith("INSERT")) throw new Error("disk I/O error");
+    const repository: CertificateRepository = {
+      loadAll: () => [],
+      insert() {
+        throw new Error("disk I/O error");
       },
-      all: <T>() => [] as T[],
-      get: () => null,
-      close() {},
+      delete() {},
+      clear() {},
     };
     const { ctx, certificateStore } = buildContext(
       10,
-      new CertificateStore("CP-CERT-TEST", database),
+      new CertificateStore(repository),
     );
     const pem = await selfSignedRootCert("01", "Unsaved");
 

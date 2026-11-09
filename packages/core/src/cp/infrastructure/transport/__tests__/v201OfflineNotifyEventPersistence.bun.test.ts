@@ -6,6 +6,7 @@ import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { Transaction } from "../../../domain/connector/Transaction";
 import type { MonitoringEvent } from "../../../domain/monitoring/MonitorEvaluation";
 import { BunSqliteDatabase } from "../../persistence/BunSqliteDatabase";
+import { SqlitePendingMessageRepository } from "../../persistence/SqlitePendingMessageRepository";
 import { strictValidationErrors } from "@ocpp-cp-simulator/ocpp/validate";
 import { v201Schemas } from "@ocpp-cp-simulator/ocpp/v201/schemas";
 import { v21Schemas } from "@ocpp-cp-simulator/ocpp/v21/schemas";
@@ -86,7 +87,7 @@ function station(db: BunSqliteDatabase, ocppVersion: string) {
   const connector = { id: 1, transaction: tx, markTransactionChanged() {} };
   const cp = {
     id: "CP-538",
-    database: db,
+    pendingMessages: new SqlitePendingMessageRepository("CP-538", db),
     ocppVersion,
     connectors: new Map([[1, connector]]),
     getConnector: () => connector,

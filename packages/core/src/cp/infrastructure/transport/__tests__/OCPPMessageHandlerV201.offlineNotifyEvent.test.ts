@@ -135,7 +135,6 @@ function setup(ocppVersion: string, offlineQueuingSeverity = 5) {
   const connector = { id: 1, transaction: tx, markTransactionChanged() {} };
   const cp = {
     id: `CP-538-${ocppVersion}`,
-    database: null,
     ocppVersion,
     connectors: new Map([[1, connector]]),
     getConnector: () => connector,

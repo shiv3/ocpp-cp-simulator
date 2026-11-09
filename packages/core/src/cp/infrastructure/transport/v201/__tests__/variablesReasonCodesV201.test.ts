@@ -20,11 +20,7 @@ function newStore(): ConfigurationStore {
     wsUrl: "ws://csms.example/ocpp/",
     ocppVersion: "OCPP-2.0.1",
   } as ChargePoint;
-  const store = new ConfigurationStore(
-    "cp-606",
-    defaultConfiguration(cp),
-    null,
-  );
+  const store = new ConfigurationStore(defaultConfiguration(cp), null);
   for (const key of [
     "ItemsPerMessageGetVariables",
     "ItemsPerMessageSetVariables",
@@ -228,7 +224,7 @@ describe("SetVariables / GetVariables size limits", () => {
       wsUrl: "ws://x/",
       ocppVersion: "OCPP-2.0.1",
     } as ChargePoint;
-    const store = new ConfigurationStore("c", defaultConfiguration(cp), null);
+    const store = new ConfigurationStore(defaultConfiguration(cp), null);
     const req: GetVariablesRequestV201 = {
       getVariableData: Array.from(
         { length: 100 },
@@ -248,7 +244,7 @@ describe("GetVariables reason codes", () => {
       wsUrl: "ws://x/",
       ocppVersion: "OCPP-2.0.1",
     } as ChargePoint;
-    const store = new ConfigurationStore("c", defaultConfiguration(cp), null);
+    const store = new ConfigurationStore(defaultConfiguration(cp), null);
     // ActiveMonitoringLevel is published at runtime; a bare store has none.
     const r = handleGetVariablesV201(
       {

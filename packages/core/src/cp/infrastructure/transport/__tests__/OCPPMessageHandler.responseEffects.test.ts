@@ -14,7 +14,6 @@ import { OCPPAction, OCPPMessageType } from "../../../domain/types/OcppTypes";
 // Mock ChargePoint and minimal dependencies
 const mockChargePoint = {
   id: "test-cp",
-  database: null,
   notifyIncomingCall: vi.fn(),
   notifyIncomingCallCompleted: vi.fn(),
   consumeResponseOverride: vi.fn(() => null),

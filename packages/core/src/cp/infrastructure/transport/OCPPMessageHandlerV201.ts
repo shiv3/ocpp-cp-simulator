@@ -236,8 +236,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         this._transactionEvents.sendTransactionEventCall(connectorId, payload),
     });
     this._pendingQueue = new PendingMessageQueue(
-      chargePoint.id,
-      chargePoint.database ?? null,
+      chargePoint.pendingMessages,
       QUEUED_ON_OCPP2,
       chargePoint.clock,
     );

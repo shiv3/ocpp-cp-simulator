@@ -1,7 +1,11 @@
 import "reflect-metadata";
 import * as x509 from "@peculiar/x509";
 
-import type { Database } from "../persistence/Database";
+import {
+  NoopCertificateRepository,
+  type CertificateRepository,
+  type StoredCertificate,
+} from "../persistence/CertificateRepository";
 import {
   bytesEqual,
   certificateHashDataEquals,
@@ -144,23 +148,16 @@ type Entry =
   | { kind: "root"; seq: number; value: InstalledRootCertificate }
   | { kind: "chain"; seq: number; value: StoredCertificateChain };
 
-interface CertificateRow {
-  seq: number;
-  kind: string;
-  certificate_use: string;
-  body: string;
-  installed_at: string;
-}
-
 /**
  * The station's certificate state (OCPP 1.6 Security Whitepaper, 2.0.1 and
  * 2.1 use cases A02/A03 and M03-M05), in version-neutral terms. Transport
  * adapters map the wire enums onto {@link RootCertificateUse} /
  * {@link SignedCertificateUse} and the outcomes onto their own statuses.
  *
- * Installed roots and signed chains are backed by the `certificates` table
- * when a {@link Database} is given (state persistence, #456) and kept in
- * memory otherwise. Pending CSRs are memory-only: the key pair behind a CSR
+ * Installed roots and signed chains are stored through a
+ * {@link CertificateRepository} (state persistence, #456, #878): the
+ * `certificates` table when the charge point has a database, nothing (kept
+ * in memory) otherwise. Pending CSRs are memory-only: the key pair behind a CSR
  * does not survive a restart, and A02.FR.17 has the station send a new CSR
  * when no CertificateSigned arrives for the previous one.
  *
@@ -194,8 +191,7 @@ export class CertificateStore {
   }[] = [];
 
   constructor(
-    private readonly chargePointId: string = "",
-    private readonly database: Database | null = null,
+    private readonly repository: CertificateRepository = new NoopCertificateRepository(),
     private readonly clock: SimClock = realClock,
   ) {
     this.load();
@@ -645,11 +641,7 @@ export class CertificateStore {
     this.#chainKeys.clear();
     this.#ocspResponses = [];
     this.#entries = [];
-    this.runSafely("clear certificates", () =>
-      this.database?.run("DELETE FROM certificates WHERE cp_id = ?", [
-        this.chargePointId,
-      ]),
-    );
+    this.runSafely("clear certificates", () => this.repository.clear());
     this.notifyChanged();
   }
 
@@ -723,7 +715,7 @@ export class CertificateStore {
     this.notifyChanged();
   }
 
-  /** INSERTs `entry`; `false` (logged) when the database refuses it. */
+  /** Stores `entry`; `false` (logged) when the repository refuses it. */
   private persist(entry: Entry): boolean {
     const [body, installedAt] =
       entry.kind === "root"
@@ -736,18 +728,13 @@ export class CertificateStore {
             entry.value.storedAt,
           ];
     return this.runSafely("persist certificate", () =>
-      this.database?.run(
-        "INSERT INTO certificates (cp_id, seq, kind, certificate_use, body, installed_at) " +
-          "VALUES (?, ?, ?, ?, ?, ?)",
-        [
-          this.chargePointId,
-          entry.seq,
-          entry.kind,
-          entry.value.use,
-          JSON.stringify(body),
-          installedAt,
-        ],
-      ),
+      this.repository.insert({
+        seq: entry.seq,
+        kind: entry.kind,
+        use: entry.value.use,
+        body: JSON.stringify(body),
+        installedAt,
+      }),
     );
   }
 
@@ -766,22 +753,14 @@ export class CertificateStore {
       if (pruneOcsp) this.pruneOcspResponses();
     }
     this.runSafely("delete certificate", () =>
-      this.database?.run(
-        "DELETE FROM certificates WHERE cp_id = ? AND seq = ?",
-        [this.chargePointId, entry.seq],
-      ),
+      this.repository.delete(entry.seq),
     );
   }
 
   private load(): void {
-    if (!this.database) return;
-    let rows: CertificateRow[];
+    let rows: StoredCertificate[];
     try {
-      rows = this.database.all<CertificateRow>(
-        "SELECT seq, kind, certificate_use, body, installed_at FROM certificates " +
-          "WHERE cp_id = ? ORDER BY seq ASC",
-        [this.chargePointId],
-      );
+      rows = this.repository.loadAll();
     } catch (err) {
       console.error("Failed to load installed certificates:", err);
       return;
@@ -794,7 +773,7 @@ export class CertificateStore {
     }
   }
 
-  /** Runs a database write; `false` (logged) when it throws. */
+  /** Runs a repository write; `false` (logged) when it throws. */
   private runSafely(what: string, fn: () => void): boolean {
     try {
       fn();
@@ -832,7 +811,7 @@ function subjectOf(pem: string): string | undefined {
   }
 }
 
-function rowToEntry(row: CertificateRow): Entry | null {
+function rowToEntry(row: StoredCertificate): Entry | null {
   let body: Record<string, unknown>;
   try {
     const parsed: unknown = JSON.parse(row.body);
@@ -841,20 +820,20 @@ function rowToEntry(row: CertificateRow): Entry | null {
   } catch {
     return null;
   }
-  if (row.kind === "root" && isRootCertificateUse(row.certificate_use)) {
+  if (row.kind === "root" && isRootCertificateUse(row.use)) {
     if (typeof body.pem !== "string" || !isHashData(body.hashData)) return null;
     return {
       kind: "root",
       seq: row.seq,
       value: {
-        use: row.certificate_use,
+        use: row.use,
         pem: body.pem,
         hashData: normalizeHashData(body.hashData),
-        installedAt: row.installed_at,
+        installedAt: row.installedAt,
       },
     };
   }
-  if (row.kind === "chain" && isSignedCertificateUse(row.certificate_use)) {
+  if (row.kind === "chain" && isSignedCertificateUse(row.use)) {
     const { pems, hashData } = body;
     if (
       !Array.isArray(pems) ||
@@ -870,10 +849,10 @@ function rowToEntry(row: CertificateRow): Entry | null {
       kind: "chain",
       seq: row.seq,
       value: {
-        use: row.certificate_use,
+        use: row.use,
         pems: pems as string[],
         hashData: (hashData as CertificateHashData[]).map(normalizeHashData),
-        storedAt: row.installed_at,
+        storedAt: row.installedAt,
       },
     };
   }

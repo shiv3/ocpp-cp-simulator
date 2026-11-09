@@ -185,7 +185,10 @@ bullet above, not repeated here.
   behavior registry, the heartbeat, the state manager and the timeline, and
   the `transactions` port bound to `default.transaction`
   (`DEFAULT_SERVICES` in `createDefaultServices.ts`), a `LogRepository` over
-  the charge point's database (a no-op one without a database), and
+  the charge point's database (a no-op one without a database), the
+  charge point's repositories (`createChargePointRepositories`: SQLite over
+  its database, no-ops without one,
+  [#878](https://github.com/shiv3/ocpp-cp-simulator/issues/878)), and
   `UploadFile` for GetDiagnostics.
 - `cp/shared/` — dependency-free utilities: clock, RNG, timers, logger,
   event emitter, reconnect policy, redaction.

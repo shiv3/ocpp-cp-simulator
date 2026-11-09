@@ -7,6 +7,7 @@ import type { Logger } from "../../../shared/Logger";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { Transaction } from "../../../domain/connector/Transaction";
 import { BunSqliteDatabase } from "../../persistence/BunSqliteDatabase";
+import { SqlitePendingMessageRepository } from "../../persistence/SqlitePendingMessageRepository";
 import { strictValidationErrors } from "@ocpp-cp-simulator/ocpp/validate";
 import { v201Schemas } from "@ocpp-cp-simulator/ocpp/v201/schemas";
 import { v21Schemas } from "@ocpp-cp-simulator/ocpp/v21/schemas";
@@ -99,7 +100,7 @@ function station(
   const connector = { id: 1, transaction: tx, markTransactionChanged() {} };
   const cp = {
     id: "CP-528",
-    database: db,
+    pendingMessages: new SqlitePendingMessageRepository("CP-528", db),
     ocppVersion,
     connectors: new Map([[1, connector]]),
     getConnector: () => connector,
@@ -604,7 +605,7 @@ describe("OCPP 1.6 replay of a persisted 2.x row (#528)", () => {
       };
       const cp = {
         id: "CP-528",
-        database: db,
+        pendingMessages: new SqlitePendingMessageRepository("CP-528", db),
         notifyOutgoingCall() {},
         configuration: {
           transactionMessageAttempts: () => 3,

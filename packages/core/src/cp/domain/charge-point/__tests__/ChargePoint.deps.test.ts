@@ -8,9 +8,12 @@ import type {
 import { DEFAULT_SERVICES } from "../../../infrastructure/charge-point/createDefaultServices";
 import { createDefaultTransport } from "../../../infrastructure/charge-point/createDefaultTransport";
 import { LogRepository } from "../../../infrastructure/persistence/LogRepository";
+import { createChargePointRepositories } from "../../../infrastructure/persistence/createChargePointRepositories";
 import { UploadFile } from "../../../infrastructure/fileUpload";
 import { DefaultBootNotification } from "../../types/OcppTypes";
 import type { LogSink } from "../../persistence/LogSink";
+import { NoopCertificateRepository } from "../../persistence/CertificateRepository";
+import { NoopPendingMessageRepository } from "../../persistence/PendingMessageRepository";
 import { LogLevel } from "../../../shared/Logger";
 import { Outbox } from "../../transport/Outbox";
 
@@ -22,7 +25,7 @@ import { Outbox } from "../../transport/Outbox";
 function build(
   ocppVersion: string,
   wrap: (transport: ChargePointTransport) => ChargePointTransport = (t) => t,
-  transportOptions: ConstructorParameters<typeof ChargePoint>[10] = {},
+  transportOptions: ConstructorParameters<typeof ChargePoint>[9] = {},
   overrides: Partial<Omit<ChargePointDeps, "createTransport">> = {},
 ): {
   cp: ChargePoint;
@@ -34,6 +37,7 @@ function build(
   const deps: ChargePointDeps = {
     ...DEFAULT_SERVICES,
     logSink: new LogRepository(null),
+    repositories: createChargePointRepositories("cp-deps", null),
     fileUploader: UploadFile,
     ...overrides,
     createTransport: (cp, ctx) => {
@@ -48,7 +52,6 @@ function build(
     1,
     "ws://localhost:9/ocpp",
     { username: "u", password: "p" },
-    null,
     null,
     { "X-Extra": "1" },
     ["ocpp1.6"],
@@ -198,6 +201,68 @@ describe("ChargePoint deps.logSink and deps.fileUploader (#575)", () => {
     const fileUploader = vi.fn();
     const { cp } = build("OCPP-1.6J", undefined, {}, { fileUploader });
     expect(cp.fileUploader).toBe(fileUploader);
+    cp.disconnect();
+  });
+});
+
+describe("ChargePoint deps.repositories (#878)", () => {
+  it("restores and persists availability through the injected connector settings", () => {
+    const saved: Array<[number, string]> = [];
+    const repositories = {
+      ...createChargePointRepositories("cp-deps", null),
+      connectorSettings: {
+        loadAvailability: (connectorId: number) =>
+          connectorId === 0 ? ("Inoperative" as const) : null,
+        saveAvailability: (connectorId: number, availability: string) => {
+          saved.push([connectorId, availability]);
+        },
+      },
+    };
+    const { cp } = build("OCPP-1.6J", undefined, {}, { repositories });
+    expect(cp.status).toBe("Unavailable");
+    cp.persistAvailability();
+    expect(saved).toEqual([
+      [0, "Inoperative"],
+      [1, "Operative"],
+    ]);
+    cp.disconnect();
+  });
+
+  it("builds its certificate store on the injected certificate repository", () => {
+    const certificates = new NoopCertificateRepository();
+    const clear = vi.spyOn(certificates, "clear");
+    const { cp } = build(
+      "OCPP-1.6J",
+      undefined,
+      {},
+      {
+        repositories: {
+          ...createChargePointRepositories("cp-deps", null),
+          certificates,
+        },
+      },
+    );
+    cp.certificateStore.clearAll();
+    expect(clear).toHaveBeenCalledOnce();
+    cp.disconnect();
+  });
+
+  it("hands the injected pending-message repository to its message handler", () => {
+    const pendingMessages = new NoopPendingMessageRepository();
+    const loadAll = vi.spyOn(pendingMessages, "loadAll");
+    const { cp } = build(
+      "OCPP-1.6J",
+      undefined,
+      {},
+      {
+        repositories: {
+          ...createChargePointRepositories("cp-deps", null),
+          pendingMessages,
+        },
+      },
+    );
+    expect(cp.pendingMessages).toBe(pendingMessages);
+    expect(loadAll).toHaveBeenCalledOnce();
     cp.disconnect();
   });
 });

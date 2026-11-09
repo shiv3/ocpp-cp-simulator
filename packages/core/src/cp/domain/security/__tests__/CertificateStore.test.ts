@@ -1,7 +1,10 @@
 import "reflect-metadata";
 import { describe, expect, it, vi } from "vitest";
 
-import type { Database } from "../../persistence/Database";
+import type {
+  CertificateRepository,
+  StoredCertificate,
+} from "../../persistence/CertificateRepository";
 import { CertificateStore } from "../CertificateStore";
 import { computeCertificateHashData } from "../certificateHash";
 import { generateCsr } from "../csr";
@@ -516,18 +519,18 @@ describe("CertificateStore pending CSR and signed chains (A02 / A03)", () => {
 });
 
 /** A database whose INSERTs fail while `failInserts` is set. */
-function flakyInsertDatabase(): Database & { failInserts: boolean } {
+/** A repository whose inserts throw while `failInserts` is set. */
+function flakyInsertRepository(): CertificateRepository & {
+  failInserts: boolean;
+} {
   return {
     failInserts: true,
-    exec() {},
-    run(sql: string) {
-      if (this.failInserts && sql.startsWith("INSERT")) {
-        throw new Error("disk I/O error");
-      }
+    loadAll: () => [],
+    insert() {
+      if (this.failInserts) throw new Error("disk I/O error");
     },
-    all: <T>() => [] as T[],
-    get: () => null,
-    close() {},
+    delete() {},
+    clear() {},
   };
 }
 
@@ -645,8 +648,8 @@ describe("CertificateStore reinstall (M05.FR.17, 2.x)", () => {
 
 describe("CertificateStore persistence failures (#456 review)", () => {
   it("answers PersistFailed and keeps nothing when the INSERT fails", async () => {
-    const db = flakyInsertDatabase();
-    const store = new CertificateStore("CP-1", db);
+    const repository = flakyInsertRepository();
+    const store = new CertificateStore(repository);
     const root = await selfSignedRoot("01", "Root");
 
     expect(
@@ -658,9 +661,9 @@ describe("CertificateStore persistence failures (#456 review)", () => {
   });
 
   it("keeps the old certificate when a replacing INSERT fails", async () => {
-    const db = flakyInsertDatabase();
-    db.failInserts = false;
-    const store = new CertificateStore("CP-1", db);
+    const repository = flakyInsertRepository();
+    repository.failInserts = false;
+    const store = new CertificateStore(repository);
     const root = await selfSignedRoot("01", "Root");
     const options = { maxEntries: 10, replaceDuplicate: true };
     await store.installRootCertificate(
@@ -668,7 +671,7 @@ describe("CertificateStore persistence failures (#456 review)", () => {
       root.pem,
       options,
     );
-    db.failInserts = true;
+    repository.failInserts = true;
 
     expect(
       await store.installRootCertificate(
@@ -683,14 +686,13 @@ describe("CertificateStore persistence failures (#456 review)", () => {
   });
 });
 
-/** A database that restores `rows` and accepts every write. */
-function restoringDatabase(rows: unknown[]): Database {
+/** A repository that restores `rows` and accepts every write. */
+function restoringRepository(rows: StoredCertificate[]): CertificateRepository {
   return {
-    exec() {},
-    run() {},
-    all: <T>() => rows as T[],
-    get: () => null,
-    close() {},
+    loadAll: () => rows,
+    insert() {},
+    delete() {},
+    clear() {},
   };
 }
 
@@ -700,17 +702,16 @@ describe("CertificateStore with a root persisted before @peculiar/x509 3", () =>
   async function storeWithTrailingByteRoot() {
     const stale = await selfSignedRoot("01", "Stale Root");
     const store = new CertificateStore(
-      "CP-1",
-      restoringDatabase([
+      restoringRepository([
         {
           seq: 1,
           kind: "root",
-          certificate_use: "CsmsRootCertificate",
+          use: "CsmsRootCertificate",
           body: JSON.stringify({
             pem: withTrailingDerBytes(stale.pem),
             hashData: await computeCertificateHashData(stale.pem),
           }),
-          installed_at: "2026-10-01T00:00:00.000Z",
+          installedAt: "2026-10-01T00:00:00.000Z",
         },
       ]),
     );

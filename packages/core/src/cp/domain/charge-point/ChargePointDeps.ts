@@ -12,6 +12,7 @@ import type {
   ChargePointEngine,
   TransactionPorts,
 } from "../engine/ChargePointEngine";
+import type { ChargePointRepositories } from "../persistence/ChargePointRepositories";
 import type { LogSink } from "../persistence/LogSink";
 import type { ChargePointHeartbeat } from "../services/ChargePointHeartbeat";
 import type { ChargePointStateManager } from "../services/ChargePointStateManager";
@@ -132,7 +133,7 @@ export interface ChargePointDeps extends ChargePointServiceFactories {
   /**
    * Builds the transport. Called once, from inside the constructor, after
    * the connectors exist and before the configuration store is built: the
-   * message handlers read the charge point (`clock`, `id`, `database`,
+   * message handlers read the charge point (`clock`, `id`, `pendingMessages`,
    * `behaviors`) when they are constructed. The charge point then sets the
    * reconnect policy, the WS client options and its observers on the socket.
    */
@@ -142,6 +143,11 @@ export interface ChargePointDeps extends ChargePointServiceFactories {
    * flushed on `flushLogs` and on a transport close, closed on `dispose`.
    */
   logSink: LogSink;
+  /**
+   * The stores this charge point persists its own state through (#878),
+   * bound to its id; read once, from inside the constructor.
+   */
+  repositories: ChargePointRepositories;
   /** Uploads the GetDiagnostics file (read when an upload starts). */
   fileUploader: FileUploader;
 }

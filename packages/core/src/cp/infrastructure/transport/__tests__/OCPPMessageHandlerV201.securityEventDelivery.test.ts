@@ -73,7 +73,6 @@ function setup(ocppVersion: string) {
   const socket = new FakeSocket();
   const cp = {
     id: `CP-664-${ocppVersion}`,
-    database: null,
     ocppVersion,
     connectors: new Map(),
     getConnector: () => undefined,

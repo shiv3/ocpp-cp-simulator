@@ -1,10 +1,17 @@
-import type { Database, SqlParam } from "../persistence/Database";
-import { isOneOf } from "../types/FirmwareLogStatus";
-import { MONITORING_BASES, type MonitoringBase } from "./MonitoringStore";
+import type { Database, SqlParam } from "../../domain/persistence/Database";
+import type {
+  PersistedMonitor,
+  VariableMonitorRepository,
+} from "../../domain/persistence/VariableMonitorRepository";
+import { isOneOf } from "../../domain/types/FirmwareLogStatus";
+import {
+  MONITORING_BASES,
+  type MonitoringBase,
+} from "../../domain/monitoring/MonitoringStore";
 import {
   SUPPORTED_MONITOR_TYPES,
   type VariableMonitor,
-} from "./VariableMonitor";
+} from "../../domain/monitoring/VariableMonitor";
 
 /**
  * The row holding the charge point's monitoring base (#538). Monitor ids
@@ -13,29 +20,23 @@ import {
  */
 const BASE_ROW_ID = 0;
 
-export interface PersistedMonitor {
-  readonly monitor: VariableMonitor;
-  /** Threshold monitors: the value was beyond the threshold (N07.FR.14). */
-  readonly triggered: boolean;
-}
-
 /**
  * Installed variable monitors of one charge point in the
  * `variable_monitors` table, so they survive a restart (N07.FR.13). The
  * monitor is stored as JSON, like the other domain DTO columns. The row
  * with id 0 holds the monitoring base last set (#538), which also tells a
  * station whose preconfigured monitors were deleted from one that never
- * stored them. Without a {@link Database} every call is a no-op.
+ * stored them. A failure is logged, never thrown (#878: the domain port's
+ * contract).
  */
-export class VariableMonitorRepository {
+export class SqliteVariableMonitorRepository implements VariableMonitorRepository {
   constructor(
     private readonly chargePointId: string,
-    private readonly database: Database | null = null,
+    private readonly database: Database,
   ) {}
 
   /** Persisted monitors by increasing id; unreadable rows are skipped. */
   load(): PersistedMonitor[] {
-    if (!this.database) return [];
     try {
       const rows = this.database.all<{ monitor: string; triggered: number }>(
         "SELECT monitor, triggered FROM variable_monitors " +
@@ -66,7 +67,6 @@ export class VariableMonitorRepository {
 
   /** The monitoring base last stored; `undefined` when none (or unreadable). */
   loadActiveBase(): MonitoringBase | undefined {
-    if (!this.database) return undefined;
     try {
       const row = this.database.get<{ monitor: string }>(
         "SELECT monitor FROM variable_monitors WHERE cp_id = ? AND monitor_id = ?",
@@ -112,7 +112,6 @@ export class VariableMonitorRepository {
   }
 
   private run(sql: string, params: SqlParam[]): void {
-    if (!this.database) return;
     try {
       this.database.run(sql, params);
     } catch (err) {

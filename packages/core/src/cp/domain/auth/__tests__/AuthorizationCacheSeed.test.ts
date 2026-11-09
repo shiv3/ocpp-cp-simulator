@@ -13,7 +13,7 @@ import { Logger } from "../../../shared/Logger";
 const NOW = Date.parse("2026-10-29T12:00:00Z");
 
 function build(cacheEnabled = false, maxIdTokenLength = 20) {
-  const cache = new AuthorizationCache("CP", null, { now: () => NOW });
+  const cache = new AuthorizationCache(null, { now: () => NOW });
   const auth = new StationAuthorization({
     cache,
     localList: new LocalAuthListManager(new Logger()),

@@ -1,5 +1,8 @@
 import type { OCPPAction } from "../types/OcppTypes";
-import type { Database } from "../persistence/Database";
+import {
+  NoopPendingMessageRepository,
+  type PendingMessageRepository,
+} from "../persistence/PendingMessageRepository";
 import { realClock } from "../../shared/clock";
 import type { SimClock } from "../../shared/clock";
 
@@ -65,9 +68,9 @@ interface PendingRow<A extends string> extends PendingMessage<A> {
  * here. Heartbeats, StatusNotifications, etc. are informational and are
  * fine to drop while offline.
  *
- * Backed by the SQLite `pending_messages` table when a {@link Database}
- * is provided; falls back to an in-memory queue otherwise (tests / future
- * memory-only daemon mode).
+ * Stored through a {@link PendingMessageRepository} (#878): the SQLite
+ * `pending_messages` table when the charge point has a database, nothing
+ * otherwise (an in-memory queue: tests, `:memory:` daemon mode).
  */
 export class PendingMessageQueue<A extends string = OCPPAction> {
   private items: PendingRow<A>[] = [];
@@ -85,8 +88,7 @@ export class PendingMessageQueue<A extends string = OCPPAction> {
   private readonly queuedActions: ReadonlySet<string>;
 
   constructor(
-    private readonly chargePointId: string,
-    private readonly database: Database | null,
+    private readonly repository: PendingMessageRepository = new NoopPendingMessageRepository(),
     queuedActions: ReadonlySet<A>,
     private readonly clock: SimClock = realClock,
   ) {
@@ -260,50 +262,29 @@ export class PendingMessageQueue<A extends string = OCPPAction> {
   clear(): void {
     this.items = [];
     this.delivering.clear();
-    if (this.database) {
-      this.database.run("DELETE FROM pending_messages WHERE cp_id = ?", [
-        this.chargePointId,
-      ]);
-    }
+    this.repository.clear();
   }
 
   // ── persistence helpers ────────────────────────────────────────────────
 
   private load(): void {
-    if (!this.database) {
-      // In-memory-only mode: nothing persisted, so both counters start fresh.
-      this.nextSeq = 1;
-      this.nextIdSuffix = 0;
-      return;
-    }
     try {
-      const rows = this.database.all<{
-        message_id: string;
-        action: string;
-        connector_id: number | null;
-        payload: string;
-        attempts: number;
-        created_at: string;
-        seq: number | null;
-      }>(
-        "SELECT message_id, action, connector_id, payload, attempts, created_at, seq " +
-          "FROM pending_messages WHERE cp_id = ? ORDER BY seq ASC, created_at ASC",
-        [this.chargePointId],
-      );
+      // Nothing stored (no database): both counters start at their floor.
+      const rows = this.repository.loadAll();
       this.items = [];
       for (const r of rows) {
         const action = r.action;
         if (!this.isQueued(action)) {
           this.droppedOnLoad.push(action);
-          this.deleteRow(r.message_id);
+          this.deleteRow(r.messageId);
           continue;
         }
         this.items.push({
-          messageId: r.message_id,
+          messageId: r.messageId,
           action,
           payload: safeParse(r.payload),
-          connectorId: r.connector_id ?? undefined,
-          queuedAt: Date.parse(r.created_at) || this.clock.now(),
+          connectorId: r.connectorId ?? undefined,
+          queuedAt: Date.parse(r.createdAt) || this.clock.now(),
           attempts: r.attempts,
           seq: r.seq ?? 0,
         });
@@ -327,47 +308,32 @@ export class PendingMessageQueue<A extends string = OCPPAction> {
   }
 
   private insertRow(row: PendingRow<A>): void {
-    if (!this.database) return;
     try {
-      this.database.run(
-        "INSERT INTO pending_messages " +
-          "(cp_id, message_id, action, connector_id, payload, attempts, created_at, seq) " +
-          "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        [
-          this.chargePointId,
-          row.messageId,
-          row.action,
-          row.connectorId ?? null,
-          JSON.stringify(row.payload),
-          row.attempts,
-          new Date(row.queuedAt).toISOString(),
-          row.seq,
-        ],
-      );
+      this.repository.insert({
+        messageId: row.messageId,
+        action: row.action,
+        connectorId: row.connectorId ?? null,
+        payload: JSON.stringify(row.payload),
+        attempts: row.attempts,
+        createdAt: new Date(row.queuedAt).toISOString(),
+        seq: row.seq,
+      });
     } catch (err) {
       console.error("Failed to enqueue pending message:", err);
     }
   }
 
   private deleteRow(messageId: string): void {
-    if (!this.database) return;
     try {
-      this.database.run(
-        "DELETE FROM pending_messages WHERE cp_id = ? AND message_id = ?",
-        [this.chargePointId, messageId],
-      );
+      this.repository.delete(messageId);
     } catch (err) {
       console.error("Failed to delete pending message:", err);
     }
   }
 
   private updateAttempts(messageId: string, attempts: number): void {
-    if (!this.database) return;
     try {
-      this.database.run(
-        "UPDATE pending_messages SET attempts = ? WHERE cp_id = ? AND message_id = ?",
-        [attempts, this.chargePointId, messageId],
-      );
+      this.repository.updateAttempts(messageId, attempts);
     } catch (err) {
       console.error("Failed to update pending message attempts:", err);
     }

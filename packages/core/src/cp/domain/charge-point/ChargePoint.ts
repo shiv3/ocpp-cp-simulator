@@ -85,8 +85,9 @@ import {
   type Get15118EVCertificateRequest,
   type Get15118EVCertificateResult,
 } from "../security/get15118EVCertificate";
-import type { Database } from "../persistence/Database";
+import type { ChargePointRepositories } from "../persistence/ChargePointRepositories";
 import type { LogSink } from "../persistence/LogSink";
+import type { PendingMessageRepository } from "../persistence/PendingMessageRepository";
 import type {
   ChargePointErrorCode,
   OCPPAvailability,
@@ -161,7 +162,6 @@ import {
 import { DEFAULT_MONITOR_CATALOG } from "../monitoring/monitorCatalog";
 import { MonitorEvaluation } from "../monitoring/MonitorEvaluation";
 import type { MonitoredReading } from "../monitoring/evaluateMonitor";
-import { VariableMonitorRepository } from "../monitoring/VariableMonitorRepository";
 import {
   MAX_MONITOR_SEVERITY,
   MIN_MONITOR_SEVERITY,
@@ -542,6 +542,8 @@ export class ChargePoint {
   private readonly _timeline: ChargePointTimeline;
   private readonly _timelineProjector: ChargePointTimelineProjector;
   private readonly _logSink: LogSink;
+  /** #878: the stores this charge point persists its own state through. */
+  private readonly _repositories: ChargePointRepositories;
   private readonly _fileUploader: FileUploader;
   private readonly _reservationManager: ReservationManager;
   /** Parent id / groupIdToken of the tags the CSMS authorized (reservations). */
@@ -687,10 +689,6 @@ export class ChargePoint {
     wsUrl: string,
     basicAuthSettings: BasicAuthSettings | null,
     autoMeterValueSetting: AutoMeterValueSetting | null,
-    /** SQLite-backed persistence for ConfigurationStore, PendingMessageQueue,
-     *  CertificateStore and per-connector availability. `null` keeps everything in-memory —
-     *  used by the daemon's `:memory:` mode and by tests. */
-    private readonly _database: Database | null = null,
     /** Extra HTTP headers and Sec-WebSocket-Protocol tokens emitted on
      *  every WS upgrade. Wired through to OCPPWebSocket so reconnects
      *  pick the same values up. CLI-only (DOM WebSocket ignores headers). */
@@ -734,11 +732,11 @@ export class ChargePoint {
     this._capabilityProfile = transportOptions.capabilityProfile;
     this._logger.setCpId(this._id);
     this._logSink = deps.logSink;
+    this._repositories = deps.repositories;
     this._fileUploader = deps.fileUploader;
     // #456: installed certificates survive a restart when state persists.
     this._certificateStore = new CertificateStore(
-      this._id,
-      this._database,
+      this._repositories.certificates,
       this._clock,
     );
     // §4.9 S3: track whether this SOAP CP can receive CSMS-initiated calls
@@ -965,7 +963,7 @@ export class ChargePoint {
     // applies at once. `_configuration` is assigned further down; nothing
     // reads the policy before the constructor returns.
     this._authorization = new StationAuthorization({
-      cache: new AuthorizationCache(this._id, this._database, {
+      cache: new AuthorizationCache(this._repositories.authorizationCache, {
         clock: this._clock,
       }),
       localList: this._localAuthListManager,
@@ -1009,7 +1007,7 @@ export class ChargePoint {
     // so changes via ChangeConfiguration.req take effect immediately.
     this._configuration = ConfigurationStore.forChargePoint(
       this,
-      this._database,
+      this._repositories.configuration,
     );
     if (securityProfile !== undefined) {
       this._configuration.applyChange(
@@ -1063,30 +1061,16 @@ export class ChargePoint {
   /** Read a persisted Operative/Inoperative flag from the DB for the given
    *  connector (`0` = CP-level). Returns `null` if no override is stored. */
   private loadAvailability(connectorId: number): OCPPAvailability | null {
-    if (!this._database) return null;
-    const row = this._database.get<{ availability: string | null }>(
-      "SELECT availability FROM connector_settings WHERE cp_id = ? AND connector_id = ?",
-      [this._id, connectorId],
-    );
-    if (
-      row?.availability === "Operative" ||
-      row?.availability === "Inoperative"
-    ) {
-      return row.availability;
-    }
-    return null;
+    return this._repositories.connectorSettings.loadAvailability(connectorId);
   }
 
   private saveAvailability(
     connectorId: number,
     availability: OCPPAvailability,
   ): void {
-    if (!this._database) return;
-    this._database.run(
-      "INSERT INTO connector_settings (cp_id, connector_id, availability) " +
-        "VALUES (?, ?, ?) " +
-        "ON CONFLICT (cp_id, connector_id) DO UPDATE SET availability = excluded.availability",
-      [this._id, connectorId, availability],
+    this._repositories.connectorSettings.saveAvailability(
+      connectorId,
+      availability,
     );
   }
 
@@ -1130,10 +1114,10 @@ export class ChargePoint {
     return new Date(this._clock.now());
   }
 
-  /** Exposed so OCPPMessageHandler (PendingMessageQueue) can share the
-   *  same Database instance. `null` means the CP is running in-memory. */
-  get database(): Database | null {
-    return this._database;
+  /** Where the message handler's PendingMessageQueue stores its rows
+   *  (#878): a no-op repository when the CP runs in memory. */
+  get pendingMessages(): PendingMessageRepository {
+    return this._repositories.pendingMessages;
   }
 
   /** Force any buffered log lines to be flushed to the DB. Used before
@@ -1159,7 +1143,7 @@ export class ChargePoint {
    * off and `applyBootAccepted` turns it on.
    */
   private wireVariableMonitoring(): void {
-    const repository = new VariableMonitorRepository(this._id, this._database);
+    const repository = this._repositories.variableMonitors;
     const persisted = repository.load();
     const storedBase = repository.loadActiveBase();
     // #538: the hardwired monitors, the persisted ones, and on a station

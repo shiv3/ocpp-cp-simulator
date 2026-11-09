@@ -15,6 +15,8 @@ sources:
   - packages/core/src/cp/domain/monitoring/monitorCatalog.ts
   - packages/core/src/cp/domain/monitoring/monitoringCtrlrKeys.ts
   - packages/core/src/cp/infrastructure/persistence/schema.ts
+  - packages/core/src/cp/domain/persistence/VariableMonitorRepository.ts (port, issue #878)
+  - packages/core/src/cp/infrastructure/persistence/SqliteVariableMonitorRepository.ts (`variable_monitors` table)
   - packages/core/src/cp/infrastructure/transport/v201/deviceModelMap.ts
   - packages/core/src/cp/infrastructure/transport/v201/baseReportV201.ts
   - packages/core/src/cp/infrastructure/transport/v21/inboundRegistryV21.ts
@@ -25,7 +27,7 @@ sources:
 related:
   - ocpp-versions-and-transports.md
   - state-persistence.md
-updated: 2026-11-08
+updated: 2026-11-09
 ---
 
 # OCPP 2.x variable monitoring

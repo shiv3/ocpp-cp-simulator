@@ -1,11 +1,27 @@
 // Runs under `bun test` (bun:sqlite), not vitest.
 import { describe, expect, it } from "bun:test";
-import { BunSqliteDatabase } from "../../../infrastructure/persistence/BunSqliteDatabase";
-import { AuthorizationCache } from "../AuthorizationCache";
-import type { ChargePoint } from "../../charge-point/ChargePoint";
-import { createChargePoint } from "../../../infrastructure/charge-point/createChargePoint";
-import { DefaultBootNotification } from "../../types/OcppTypes";
-import type { Database } from "../../persistence/Database";
+import { BunSqliteDatabase } from "../BunSqliteDatabase";
+import { SqliteAuthorizationCacheRepository } from "../SqliteAuthorizationCacheRepository";
+import {
+  AuthorizationCache,
+  type AuthorizationCacheOptions,
+} from "../../../domain/auth/AuthorizationCache";
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
+import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
+import type { Database } from "../../../domain/persistence/Database";
+
+/** The cache of `cpId`, on its rows of `db`'s `authorization_cache`. */
+function cacheOn(
+  db: Database,
+  cpId: string,
+  options?: AuthorizationCacheOptions,
+): AuthorizationCache {
+  return new AuthorizationCache(
+    new SqliteAuthorizationCacheRepository(cpId, db),
+    options,
+  );
+}
 
 function chargePointOn(db: Database): ChargePoint {
   return createChargePoint(
@@ -25,11 +41,83 @@ function chargePointOn(db: Database): ChargePoint {
 
 const T0 = Date.parse("2026-10-29T12:00:00Z");
 
+describe("SqliteAuthorizationCacheRepository (#878)", () => {
+  it("round-trips entries per charge point, optional fields included", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      const repo = new SqliteAuthorizationCacheRepository("CP1", db);
+      expect(repo.loadAll()).toEqual([]);
+      repo.upsert({
+        idToken: "A",
+        status: "Accepted",
+        expiresAt: T0 + 3_600_000,
+        parentId: "PARENT",
+        insertedAt: T0,
+        updatedAt: T0,
+      });
+      repo.upsert({
+        idToken: "B",
+        status: "Blocked",
+        insertedAt: T0,
+        updatedAt: T0,
+      });
+      // An update keeps the stored insertion time.
+      repo.upsert({
+        idToken: "B",
+        status: "Invalid",
+        insertedAt: T0 + 5,
+        updatedAt: T0 + 10,
+      });
+      new SqliteAuthorizationCacheRepository("CP2", db).upsert({
+        idToken: "C",
+        status: "Accepted",
+        insertedAt: T0,
+        updatedAt: T0,
+      });
+
+      const byToken = (a: { idToken: string }, b: { idToken: string }) =>
+        a.idToken.localeCompare(b.idToken);
+      expect(
+        new SqliteAuthorizationCacheRepository("CP1", db)
+          .loadAll()
+          .sort(byToken),
+      ).toEqual([
+        {
+          idToken: "A",
+          status: "Accepted",
+          expiresAt: T0 + 3_600_000,
+          parentId: "PARENT",
+          insertedAt: T0,
+          updatedAt: T0,
+        },
+        {
+          idToken: "B",
+          status: "Invalid",
+          insertedAt: T0,
+          updatedAt: T0 + 10,
+        },
+      ]);
+
+      repo.delete("A");
+      expect(repo.loadAll().map((e) => e.idToken)).toEqual(["B"]);
+      repo.clear();
+      expect(repo.loadAll()).toEqual([]);
+      expect(
+        new SqliteAuthorizationCacheRepository("CP2", db)
+          .loadAll()
+          .map((e) => e.idToken),
+      ).toEqual(["C"]);
+    } finally {
+      db.close();
+    }
+  });
+});
+
 describe("AuthorizationCache persistence (1.6 §3.5.1, errata 3.4, C10.FR.02)", () => {
   it("survives a restart: a new cache on the same database sees the entries", () => {
     const db = BunSqliteDatabase.open(":memory:");
     try {
-      const first = new AuthorizationCache("CP1", db, { now: () => T0 });
+      const first = cacheOn(db, "CP1", { now: () => T0 });
       first.upsert({
         idToken: "A",
         status: "Accepted",
@@ -38,7 +126,7 @@ describe("AuthorizationCache persistence (1.6 §3.5.1, errata 3.4, C10.FR.02)", 
       });
       first.upsert({ idToken: "B", status: "Blocked" });
 
-      const restarted = new AuthorizationCache("CP1", db, {
+      const restarted = cacheOn(db, "CP1", {
         now: () => T0 + 1,
       });
       expect(restarted.get("A")).toEqual({
@@ -63,21 +151,21 @@ describe("AuthorizationCache persistence (1.6 §3.5.1, errata 3.4, C10.FR.02)", 
   it("persists updates, removals and clear, scoped to its charge point", () => {
     const db = BunSqliteDatabase.open(":memory:");
     try {
-      const cp1 = new AuthorizationCache("CP1", db, { now: () => T0 });
-      const cp2 = new AuthorizationCache("CP2", db, { now: () => T0 });
+      const cp1 = cacheOn(db, "CP1", { now: () => T0 });
+      const cp2 = cacheOn(db, "CP2", { now: () => T0 });
       cp1.upsert({ idToken: "A", status: "Accepted" });
       cp1.upsert({ idToken: "B", status: "Accepted" });
       cp2.upsert({ idToken: "A", status: "Accepted" });
 
       cp1.upsert({ idToken: "A", status: "Invalid" });
       cp1.remove("B");
-      expect(new AuthorizationCache("CP1", db).all()).toEqual([
+      expect(cacheOn(db, "CP1").all()).toEqual([
         expect.objectContaining({ idToken: "A", status: "Invalid" }),
       ]);
 
       cp1.clear();
-      expect(new AuthorizationCache("CP1", db).size()).toBe(0);
-      expect(new AuthorizationCache("CP2", db).size()).toBe(1);
+      expect(cacheOn(db, "CP1").size()).toBe(0);
+      expect(cacheOn(db, "CP2").size()).toBe(1);
     } finally {
       db.close();
     }
@@ -87,7 +175,7 @@ describe("AuthorizationCache persistence (1.6 §3.5.1, errata 3.4, C10.FR.02)", 
     const db = BunSqliteDatabase.open(":memory:");
     try {
       let now = T0;
-      const cache = new AuthorizationCache("CP1", db, {
+      const cache = cacheOn(db, "CP1", {
         now: () => now,
         maxEntries: 1,
       });
@@ -95,7 +183,7 @@ describe("AuthorizationCache persistence (1.6 §3.5.1, errata 3.4, C10.FR.02)", 
       now += 1;
       cache.upsert({ idToken: "B", status: "Accepted" });
       expect(
-        new AuthorizationCache("CP1", db, { maxEntries: 1 })
+        cacheOn(db, "CP1", { maxEntries: 1 })
           .all()
           .map((e) => e.idToken),
       ).toEqual(["B"]);
@@ -115,7 +203,7 @@ describe("AuthorizationCache — case-insensitive identifiers (#452)", () => {
   it("an update under another spelling replaces the row", () => {
     const db = BunSqliteDatabase.open(":memory:");
     try {
-      const cache = new AuthorizationCache("CP1", db, { now: () => T0 });
+      const cache = cacheOn(db, "CP1", { now: () => T0 });
       cache.upsert({ idToken: "ABC", status: "Accepted" });
       cache.upsert({ idToken: "abc", status: "Blocked" });
       expect(rows(db)).toEqual([{ id_token: "abc", status: "Blocked" }]);
@@ -146,7 +234,7 @@ describe("AuthorizationCache — case-insensitive identifiers (#452)", () => {
       insert("abc", "Blocked", T0 + 1000);
       insert("Abc", "Invalid", T0 + 500);
 
-      const cache = new AuthorizationCache("CP1", db, { now: () => T0 + 2000 });
+      const cache = cacheOn(db, "CP1", { now: () => T0 + 2000 });
       expect(cache.size()).toBe(1);
       expect(cache.get("ABC")).toMatchObject({
         idToken: "abc",

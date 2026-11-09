@@ -233,7 +233,6 @@ describe("OCMF carriers (#315)", () => {
 describe("signed meter configuration keys (#315)", () => {
   const store = () =>
     new ConfigurationStore(
-      "CP-TEST",
       defaultConfiguration({
         connectorNumber: 1,
         wsUrl: "ws://localhost",

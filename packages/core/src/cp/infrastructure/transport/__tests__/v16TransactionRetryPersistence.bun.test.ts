@@ -7,6 +7,7 @@ import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { ChargePointEvents } from "../../../domain/charge-point/ChargePointEvents";
 import type { Transaction } from "../../../domain/connector/Transaction";
 import { BunSqliteDatabase } from "../../persistence/BunSqliteDatabase";
+import { SqlitePendingMessageRepository } from "../../persistence/SqlitePendingMessageRepository";
 import { SqliteConnectorRuntimeRepository } from "../../persistence/SqliteConnectorRuntimeRepository";
 import { Connector } from "../../../domain/connector/Connector";
 import { Logger, LogLevel } from "../../../shared/Logger";
@@ -92,7 +93,7 @@ function station(
   const discarded: Array<ChargePointEvents["transactionMessageDiscarded"]> = [];
   const cp = {
     id: "CP-527",
-    database: db,
+    pendingMessages: new SqlitePendingMessageRepository("CP-527", db),
     connectors: new Map([[connectorId, connector]]),
     getConnector: (id: number) => (id === connectorId ? connector : undefined),
     notifyOutgoingCall() {},

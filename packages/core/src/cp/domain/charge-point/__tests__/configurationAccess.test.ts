@@ -19,7 +19,7 @@ const cpShape = {
 } as ChargePoint;
 
 function store(): ConfigurationStore {
-  return new ConfigurationStore("cp-access", defaultConfiguration(cpShape));
+  return new ConfigurationStore(defaultConfiguration(cpShape));
 }
 
 describe("configuration key access (#612)", () => {

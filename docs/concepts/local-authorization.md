@@ -5,6 +5,7 @@ summary: How a charge point decides a local transaction start — Local Authoriz
 sources:
   - packages/core/src/cp/domain/auth/LocalAuthorizationResolver.ts
   - packages/core/src/cp/domain/auth/AuthorizationCache.ts
+  - packages/core/src/cp/infrastructure/persistence/SqliteAuthorizationCacheRepository.ts (`authorization_cache` table, issue #878)
   - packages/core/src/cp/domain/auth/StationAuthorization.ts
   - packages/core/src/cp/domain/auth/LocalAuthList.ts
   - packages/core/src/cp/domain/charge-point/ChargePoint.ts (authorizeAndWait, startTransaction)
@@ -26,7 +27,7 @@ related:
   - control-plane.md
   - ../entities/mcp-endpoint.md
   - operational-timeline.md
-updated: 2026-11-08
+updated: 2026-11-09
 ---
 
 # Local authorization

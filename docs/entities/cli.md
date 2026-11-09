@@ -78,7 +78,7 @@ bun install -g https://github.com/shiv3/ocpp-cp-simulator/releases/download/cli-
 
 # From a local checkout (dev) — the bin is the built bundle, so build it first
 # (the install needs a read:packages token, see CONTRIBUTING.md#setup)
-GITHUB_TOKEN=$(gh auth token) bun install
+GITHUB_TOKEN=${GITHUB_TOKEN:-$(gh auth token)} bun install
 bun run build:cli
 bun link
 bun link ocpp-cp-simulator    # in any consumer project

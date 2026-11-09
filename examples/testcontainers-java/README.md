@@ -37,7 +37,7 @@ deterministically satisfied. To exercise a real certification flow, point
   ```bash
   # from the repository root; the build needs a token with read:packages
   # (docs/entities/docker-image.md#building-locally)
-  export GITHUB_TOKEN=$(gh auth token)
+  export GITHUB_TOKEN=${GITHUB_TOKEN:-$(gh auth token)}
   docker build --secret id=github_token,env=GITHUB_TOKEN -t ocpp-cp-simulator:local .
   ```
 

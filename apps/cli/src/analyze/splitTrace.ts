@@ -158,8 +158,9 @@ export interface TraceSplit {
   total: number;
 }
 
-/** A group's records as JSONL text for the toolkit: one LF-terminated line
- *  per record, written by the SDK writer (see module docstring). */
+/** Records as JSONL text — a group handed to the toolkit, or the daemon's
+ *  stored logs before they are read back: one LF-terminated line per record,
+ *  written by the SDK writer (see module docstring). */
 export function recordsToJsonl(records: readonly TraceRecord[]): string {
   return records.map((record) => serializeRecord(record)).join("");
 }
@@ -311,12 +312,6 @@ function groupRecordsByConnector(
   }));
 }
 
-/**
- * Reads a trace JSONL stream (text or byte chunks; pass `[text]` or
- * `[buffer]` for a whole file) and splits its records per charge point, or
- * per connector with `splitBy: "connector"`. Never throws on a bad line:
- * see the module docstring for which exclusion counter each one lands in.
- */
 /** Longest JSONL line `analyze` reads. The trace writer has no line limit
  *  and a record carries its frame twice (`payload` and the escaped `raw`), so
  *  the reader's 1 MiB default would drop a large SendLocalList or DataTransfer
@@ -324,6 +319,12 @@ function groupRecordsByConnector(
  *  WebSocket client's 100 MiB `maxPayload`. */
 export const MAX_TRACE_LINE_BYTES = 256 * 1024 * 1024;
 
+/**
+ * Reads a trace JSONL stream (text or byte chunks; pass `[text]` or
+ * `[buffer]` for a whole file) and splits its records per charge point, or
+ * per connector with `splitBy: "connector"`. Never throws on a bad line:
+ * see the module docstring for which exclusion counter each one lands in.
+ */
 export async function splitTraceRecords(
   source: ChunkSource,
   splitBy: TraceSplitMode = "charge-point",

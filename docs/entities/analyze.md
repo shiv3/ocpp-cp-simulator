@@ -217,6 +217,10 @@ stderr, e.g.:
 excluded: 2 soap record(s), 1 non-1.6 record(s), 0 unparseable line(s), 0 invalid record(s)
 ```
 
+The counts are printed even when every line was excluded: `analyze` then
+prints them before `Error: no analyzable records found …` and exits 1, so
+the error says why nothing was left.
+
 The trace is read with the
 [Open OCPP Trace SDK](../concepts/trace-format.md#reference-implementation)
 reader (#886), which decodes UTF-8, drops a BOM at the start of the input

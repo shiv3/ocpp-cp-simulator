@@ -8,7 +8,7 @@ linker = "hoisted"
 # The trace format SDK (@open-ocpp-trace/core, @open-ocpp-trace/jsonl, #886) is
 # published on GitHub Packages only, which asks for a token even to install a
 # public package. Any token with `read:packages` works:
-#   GITHUB_TOKEN=$(gh auth token) bun install
+#   GITHUB_TOKEN=${GITHUB_TOKEN:-$(gh auth token)} bun install
 # CI passes the workflow's own token; the Docker build receives it as the
 # `github_token` build secret.
 [install.scopes]

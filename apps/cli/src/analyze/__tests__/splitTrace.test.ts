@@ -76,6 +76,33 @@ describe("splitTraceRecords: reading the JSONL stream (#886)", () => {
     expect(split.total).toBe(1);
   });
 
+  it("keeps a record whose BOM and non-ASCII character are split across chunks", async () => {
+    const cafe = line({
+      ocppVersion: "1.6",
+      chargePointId: "CP-A",
+      messageType: "CALL",
+      messageId: "1",
+      action: "DataTransfer",
+      payload: { vendorId: "Café" },
+    });
+    const bytes = Buffer.concat([
+      Buffer.from([0xef, 0xbb, 0xbf]),
+      Buffer.from(cafe + "\n", "utf8"),
+    ]);
+    // "é" is 0xc3 0xa9: cut between those two bytes.
+    const accent = bytes.indexOf(0xc3);
+
+    const split = await splitTraceRecords([
+      bytes.subarray(0, 1),
+      bytes.subarray(1, accent + 1),
+      bytes.subarray(accent + 1),
+    ]);
+
+    expect(split.byChargePoint.get("CP-A")).toEqual([JSON.parse(cafe)]);
+    expect(split.excluded).toEqual(NO_EXCLUSIONS);
+    expect(split.total).toBe(1);
+  });
+
   it("keeps records separated by CRLF line endings", async () => {
     const second = line({
       ocppVersion: "1.6",

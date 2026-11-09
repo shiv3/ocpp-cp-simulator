@@ -85,6 +85,9 @@ daemon, which runs from the CLI bundle without `.git`. A deployment that builds 
 image must pass the build arg: a runtime `-e APP_COMMIT=…` alone changes the
 daemon but not the UI bundle, which is fixed at build time.
 
+The build needs `GITHUB_TOKEN` set to a token with `read:packages`; see
+[Building locally](#building-locally).
+
 ```sh
 docker build --secret id=github_token,env=GITHUB_TOKEN \
   --build-arg APP_COMMIT=$(git rev-parse HEAD) -t ocpp-cp-sim .
@@ -167,7 +170,7 @@ persistent volume + sensible defaults:
 ```sh
 # Bring it up (binds ./.state on the host); the build needs GITHUB_TOKEN,
 # see Building locally
-export GITHUB_TOKEN=$(gh auth token)
+export GITHUB_TOKEN=${GITHUB_TOKEN:-$(gh auth token)}
 docker compose up --build
 
 # Override CP / CSMS / port via env
@@ -341,7 +344,7 @@ OCPP validators and schemas.
 ## Building locally
 
 ```sh
-export GITHUB_TOKEN=$(gh auth token)   # any token with read:packages
+export GITHUB_TOKEN=${GITHUB_TOKEN:-$(gh auth token)}   # any token with read:packages
 docker build --secret id=github_token,env=GITHUB_TOKEN -t ocpp-cp-sim:dev .
 docker run --rm -p 9700:9700 -v "$PWD/.state:/data" ocpp-cp-sim:dev \
   --cp-id CP001 --ws-url wss://example.invalid/chargepoint/

@@ -1,195 +1,229 @@
+import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { restrictedDataCollection } from "@ocpp-cp-simulator/contracts/sentryOptions";
+import type {
+  ErrorReporter,
+  ErrorReporterInit,
+} from "@ocpp-cp-simulator/contracts/errorReporting";
 import { REDACTED_VALUE } from "@ocpp-cp-simulator/contracts/redaction";
 import {
+  type ErrorReportingProcess,
   initErrorReporting,
-  readErrorReportingConfig,
   reportFatalError,
   resetErrorReportingForTests,
 } from "../errorReporting";
-
-const DSN = "https://public@o1.ingest.sentry.io/2";
+import type { RecordedReports } from "./fixtures/recordingErrorReporter";
 
 afterEach(() => {
   resetErrorReportingForTests();
+  delete (globalThis as { __recordedReports?: RecordedReports })
+    .__recordedReports;
 });
 
-/** A stand-in for `@sentry/bun`, recording what the CLI asks of it. */
-function fakeSentry() {
+type Listener = (error: unknown) => void;
+
+/** A stand-in for `process`: records listeners, stderr and the exit code. */
+function fakeProcess() {
+  const listeners = new Map<string, Listener[]>();
+  const stderr: string[] = [];
+  let resolveExit: (code: number) => void = () => {};
+  const exited = new Promise<number>((resolve) => (resolveExit = resolve));
+  const proc: ErrorReportingProcess = {
+    on: (event, listener) => {
+      listeners.set(event, [...(listeners.get(event) ?? []), listener]);
+    },
+    exit: vi.fn((code: number) => resolveExit(code)),
+    stderr: { write: (text: string) => stderr.push(text) },
+  };
+  const emit = (event: string, error: unknown) =>
+    (listeners.get(event) ?? []).forEach((listener) => listener(error));
+  return { proc, listeners, stderr, exited, emit };
+}
+
+/** An adapter module recording what the core asks of it. */
+function fakeAdapter(reporter: ErrorReporter | null = recordingReporter()) {
+  const createErrorReporter = vi.fn(
+    async (_init: ErrorReporterInit) => reporter,
+  );
+  return { module: { createErrorReporter }, createErrorReporter };
+}
+
+function recordingReporter() {
   return {
-    init: vi.fn(),
     captureException: vi.fn(),
-    flush: vi.fn(async () => true),
-    onUnhandledRejectionIntegration: vi.fn((options: unknown) => ({
-      name: "OnUnhandledRejection",
-      options,
-    })),
-    bunServerIntegration: vi.fn((options: unknown) => ({
-      name: "BunServer",
-      options,
-    })),
-    bunHttpServerIntegration: vi.fn((options: unknown) => ({
-      name: "BunHttpServer",
-      options,
-    })),
-    httpIntegration: vi.fn((options: unknown) => ({ name: "Http", options })),
+    flush: vi.fn(async (_timeoutMs: number) => true),
   };
 }
 
-type Integration = { name: string; options?: unknown };
+describe("initErrorReporting: selection", () => {
+  it.each([
+    ["unset", {}],
+    ["blank", { OCPP_SIM_ERROR_REPORTER: "  " }],
+  ])(
+    "loads nothing and installs nothing when the selector is %s",
+    async (_label, env) => {
+      const builtin = vi.fn();
+      const importModule = vi.fn();
+      const { proc, listeners, stderr } = fakeProcess();
+      await expect(
+        initErrorReporting(env, {
+          builtins: { sentry: builtin },
+          importModule,
+          process: proc,
+        }),
+      ).resolves.toBe(false);
+      expect(builtin).not.toHaveBeenCalled();
+      expect(importModule).not.toHaveBeenCalled();
+      expect(listeners.size).toBe(0);
+      expect(stderr).toEqual([]);
+    },
+  );
 
-/**
- * The integrations the SDK ends up with for these `init` options, as
- * `getIntegrationsToSetup` in `@sentry/core` resolves them: an array
- * overrides the defaults of the same name, a function replaces them.
- */
-function resolveIntegrations(
-  options: { integrations?: unknown },
-  defaults: Integration[],
-): Integration[] {
-  const { integrations } = options;
-  if (typeof integrations === "function")
-    return (integrations as (d: Integration[]) => Integration[])(defaults);
-  const added = (integrations as Integration[] | undefined) ?? [];
-  const overridden = new Set(added.map(({ name }) => name));
-  return [...defaults.filter(({ name }) => !overridden.has(name)), ...added];
-}
+  it("loads a built-in adapter by name, with the release, env and scrubber", async () => {
+    const { module, createErrorReporter } = fakeAdapter();
+    const importModule = vi.fn();
+    const { proc } = fakeProcess();
+    const env = { OCPP_SIM_ERROR_REPORTER: " sentry ", APP_VERSION: "9.9.9" };
+    await expect(
+      initErrorReporting(env, {
+        builtins: { sentry: async () => module },
+        importModule,
+        process: proc,
+      }),
+    ).resolves.toBe(true);
+    expect(importModule).not.toHaveBeenCalled();
 
-/** `@sentry/bun`'s defaults that matter here, as the SDK builds them. */
-const BUN_DEFAULTS: Integration[] = [
-  { name: "Console" },
-  { name: "Http" },
-  { name: "OnUncaughtException" },
-  { name: "OnUnhandledRejection" },
-  { name: "ProcessSession" },
-  { name: "BunServer" },
-  { name: "BunHttpServer" },
-];
-
-describe("readErrorReportingConfig", () => {
-  it("is off without SENTRY_DSN", () => {
-    expect(readErrorReportingConfig({})).toBeNull();
-    expect(readErrorReportingConfig({ SENTRY_DSN: "" })).toBeNull();
+    const init = createErrorReporter.mock.calls[0]![0];
+    expect(init.release).toBe("9.9.9");
+    expect(init.env).toBe(env);
+    expect(
+      JSON.stringify(init.scrub({ url: "ws://cp:secret@csms.example/ocpp" })),
+    ).not.toContain("secret");
+    expect(init.scrub({ message: "Bearer tok-123" }).message).toContain(
+      REDACTED_VALUE,
+    );
   });
 
-  it("reads SENTRY_DSN and SENTRY_ENVIRONMENT, released as appVersion()", () => {
-    const config = readErrorReportingConfig({
-      SENTRY_DSN: DSN,
-      SENTRY_ENVIRONMENT: "ci",
-      APP_VERSION: "9.9.9",
-    });
-    expect(config).toEqual({ dsn: DSN, environment: "ci", release: "9.9.9" });
-  });
-});
-
-describe("initErrorReporting", () => {
-  it("never loads the SDK without a DSN", async () => {
-    const load = vi.fn();
-    await expect(initErrorReporting(null, load)).resolves.toBe(false);
-    expect(load).not.toHaveBeenCalled();
-  });
-
-  it("initialises the SDK with data collection off, no tracing and a scrubber", async () => {
-    const sentry = fakeSentry();
+  it("imports a relative module specifier from the working directory", async () => {
+    const { proc } = fakeProcess();
     await expect(
       initErrorReporting(
-        { dsn: DSN, release: "1.0.0" },
-        async () => sentry as never,
+        { OCPP_SIM_ERROR_REPORTER: "./fixtures/recordingErrorReporter.ts" },
+        { builtins: {}, cwd: import.meta.dirname, process: proc },
       ),
     ).resolves.toBe(true);
 
-    const options = sentry.init.mock.calls[0]![0];
-    expect(options).toMatchObject({
-      dsn: DSN,
-      release: "1.0.0",
-      dataCollection: restrictedDataCollection(),
-    });
-    expect(options).not.toHaveProperty("tracesSampleRate");
-    // Never write to stdout: JSON Lines mode owns it.
-    expect(options.debug).toBe(false);
-
-    const event = options.beforeSend({
-      exception: { values: [{ value: "ws://cp:secret@csms.example/ocpp" }] },
-    });
-    expect(JSON.stringify(event)).not.toContain("secret");
-    expect(
-      options.beforeBreadcrumb({ message: "Bearer tok-123" }).message,
-    ).toContain(REDACTED_VALUE);
+    await reportFatalError(new Error("boom"));
+    const record = (globalThis as { __recordedReports?: RecordedReports })
+      .__recordedReports;
+    expect(record?.inits).toHaveLength(1);
+    expect(record?.captured).toEqual([
+      {
+        error: new Error("boom"),
+        context: { mechanism: "fatal", handled: false },
+      },
+    ]);
   });
 
-  it("keeps the exit-on-unhandled-rejection the CLI has without Sentry", async () => {
-    const sentry = fakeSentry();
-    await initErrorReporting(
-      { dsn: DSN, release: "1.0.0" },
-      async () => sentry as never,
+  it("imports an absolute module specifier", async () => {
+    const { proc } = fakeProcess();
+    const specifier = path.join(
+      import.meta.dirname,
+      "fixtures/recordingErrorReporter.ts",
     );
-
-    // The SDK's default `warn` mode would keep a broken process running.
-    expect(
-      resolveIntegrations(sentry.init.mock.calls[0]![0], BUN_DEFAULTS).filter(
-        ({ name }) => name === "OnUnhandledRejection",
-      ),
-    ).toEqual([{ name: "OnUnhandledRejection", options: { mode: "strict" } }]);
-    expect(sentry.onUnhandledRejectionIntegration).toHaveBeenCalledWith({
-      mode: "strict",
-    });
-  });
-
-  it("sends no session reports (errors only)", async () => {
-    const sentry = fakeSentry();
-    await initErrorReporting(
-      { dsn: DSN, release: "1.0.0" },
-      async () => sentry as never,
-    );
-
-    const resolved = resolveIntegrations(
-      sentry.init.mock.calls[0]![0],
-      BUN_DEFAULTS,
-    );
-    // ProcessSession reports the process as a session; the HTTP servers
-    // (the daemon's Bun.serve listeners) aggregate one per request.
-    expect(resolved.map(({ name }) => name).sort()).toEqual(
-      BUN_DEFAULTS.map(({ name }) => name)
-        .filter((name) => name !== "ProcessSession")
-        .sort(),
-    );
-    for (const name of ["BunServer", "BunHttpServer", "Http"]) {
-      expect(resolved.filter((i) => i.name === name)).toEqual([
-        { name, options: { sessions: false } },
-      ]);
-    }
-  });
-
-  it("starts without reporting when the SDK fails to load", async () => {
-    const warned = vi.spyOn(process.stderr, "write").mockReturnValue(true);
-    await expect(
-      initErrorReporting({ dsn: DSN, release: "1.0.0" }, () =>
-        Promise.reject(new Error("missing module")),
-      ),
-    ).resolves.toBe(false);
-    expect(warned).toHaveBeenCalledTimes(1);
-    warned.mockRestore();
-  });
-
-  it("starts without reporting when the SDK fails to start", async () => {
-    const warned = vi.spyOn(process.stderr, "write").mockReturnValue(true);
-    const sentry = fakeSentry();
-    sentry.init.mockImplementation(() => {
-      throw new Error("bad options");
-    });
     await expect(
       initErrorReporting(
-        { dsn: DSN, release: "1.0.0" },
-        async () => sentry as never,
+        { OCPP_SIM_ERROR_REPORTER: specifier },
+        { builtins: {}, cwd: "/nonexistent", process: proc },
+      ),
+    ).resolves.toBe(true);
+  });
+
+  it("imports any other value as a package name", async () => {
+    const { module } = fakeAdapter();
+    const importModule = vi.fn(async () => module);
+    const { proc } = fakeProcess();
+    await expect(
+      initErrorReporting(
+        { OCPP_SIM_ERROR_REPORTER: "@acme/ocpp-sim-reporter" },
+        { builtins: {}, importModule, process: proc },
+      ),
+    ).resolves.toBe(true);
+    expect(importModule).toHaveBeenCalledWith("@acme/ocpp-sim-reporter");
+  });
+});
+
+describe("initErrorReporting: reporting stays off", () => {
+  async function initWith(
+    load: () => Promise<unknown>,
+    name = "@acme/reporter",
+  ) {
+    const fake = fakeProcess();
+    const on = await initErrorReporting(
+      { OCPP_SIM_ERROR_REPORTER: name },
+      { builtins: { sentry: load }, importModule: load, process: fake.proc },
+    );
+    return { on, ...fake };
+  }
+
+  it("when the module cannot be loaded", async () => {
+    const { on, stderr, listeners } = await initWith(() =>
+      Promise.reject(new Error("Cannot find package '@acme/reporter'")),
+    );
+    expect(on).toBe(false);
+    expect(stderr).toEqual([
+      "Error reporting disabled: cannot load @acme/reporter (Cannot find package '@acme/reporter')\n",
+    ]);
+    expect(listeners.size).toBe(0);
+  });
+
+  it("when a relative module does not exist", async () => {
+    const { proc, stderr } = fakeProcess();
+    await expect(
+      initErrorReporting(
+        { OCPP_SIM_ERROR_REPORTER: "./fixtures/missing.ts" },
+        { builtins: {}, cwd: import.meta.dirname, process: proc },
       ),
     ).resolves.toBe(false);
-    expect(warned).toHaveBeenCalledTimes(1);
-    warned.mockRestore();
+    expect(stderr).toHaveLength(1);
+    expect(stderr[0]).toMatch(/^Error reporting disabled: cannot load /);
+  });
 
-    // Off means off: a later fatal exit does not reach the half-started SDK.
-    await reportFatalError(new Error("x"));
-    expect(sentry.captureException).not.toHaveBeenCalled();
+  it("when the module does not export createErrorReporter", async () => {
+    const { on, stderr } = await initWith(async () => ({ default: {} }));
+    expect(on).toBe(false);
+    expect(stderr).toEqual([
+      "Error reporting disabled: @acme/reporter does not export createErrorReporter\n",
+    ]);
+  });
+
+  it("when the factory rejects", async () => {
+    const { on, stderr, listeners } = await initWith(async () => ({
+      createErrorReporter: () => Promise.reject(new Error("bad options")),
+    }));
+    expect(on).toBe(false);
+    expect(stderr).toEqual([
+      "Error reporting disabled: @acme/reporter did not start (bad options)\n",
+    ]);
+    expect(listeners.size).toBe(0);
+
+    // Off means off: a later fatal exit reaches no adapter.
+    await expect(reportFatalError(new Error("x"))).resolves.toBeUndefined();
+  });
+
+  it("when the factory resolves null (selected but not configured)", async () => {
+    const { module } = fakeAdapter(null);
+    const sentry = await initWith(async () => module, "sentry");
+    expect(sentry.on).toBe(false);
+    expect(sentry.stderr).toEqual([
+      "Error reporting disabled: sentry selected but SENTRY_DSN is not set\n",
+    ]);
+    expect(sentry.listeners.size).toBe(0);
+
+    const other = await initWith(async () => module);
+    expect(other.stderr).toEqual([
+      "Error reporting disabled: @acme/reporter selected but not configured\n",
+    ]);
   });
 });
 
@@ -199,19 +233,94 @@ describe("reportFatalError", () => {
   });
 
   it("captures the error and flushes before the caller exits", async () => {
-    const sentry = fakeSentry();
+    const reporter = recordingReporter();
+    const { module } = fakeAdapter(reporter);
     await initErrorReporting(
-      { dsn: DSN, release: "1.0.0" },
-      async () => sentry as never,
+      { OCPP_SIM_ERROR_REPORTER: "sentry" },
+      { builtins: { sentry: async () => module }, process: fakeProcess().proc },
     );
     const err = new Error("fatal");
 
     await reportFatalError(err);
 
-    expect(sentry.captureException).toHaveBeenCalledWith(err);
-    expect(sentry.flush).toHaveBeenCalledTimes(1);
-    expect(sentry.flush.mock.invocationCallOrder[0]!).toBeGreaterThan(
-      sentry.captureException.mock.invocationCallOrder[0]!,
+    expect(reporter.captureException).toHaveBeenCalledWith(err, {
+      mechanism: "fatal",
+      handled: false,
+    });
+    expect(reporter.flush).toHaveBeenCalledWith(2000);
+    expect(reporter.flush.mock.invocationCallOrder[0]!).toBeGreaterThan(
+      reporter.captureException.mock.invocationCallOrder[0]!,
     );
+  });
+
+  it("still resolves when the adapter throws or its flush rejects", async () => {
+    const reporter = recordingReporter();
+    reporter.captureException.mockImplementation(() => {
+      throw new Error("adapter bug");
+    });
+    reporter.flush.mockRejectedValue(new Error("network"));
+    const { module } = fakeAdapter(reporter);
+    await initErrorReporting(
+      { OCPP_SIM_ERROR_REPORTER: "sentry" },
+      { builtins: { sentry: async () => module }, process: fakeProcess().proc },
+    );
+    await expect(reportFatalError(new Error("x"))).resolves.toBeUndefined();
+  });
+});
+
+describe("process handlers", () => {
+  async function activate() {
+    const reporter = recordingReporter();
+    const { module } = fakeAdapter(reporter);
+    const fake = fakeProcess();
+    await initErrorReporting(
+      { OCPP_SIM_ERROR_REPORTER: "sentry" },
+      { builtins: { sentry: async () => module }, process: fake.proc },
+    );
+    return { reporter, ...fake };
+  }
+
+  it("are installed only while a reporter is active", async () => {
+    const { listeners } = await activate();
+    expect([...listeners.keys()].sort()).toEqual([
+      "uncaughtException",
+      "unhandledRejection",
+    ]);
+    expect(listeners.get("unhandledRejection")).toHaveLength(1);
+  });
+
+  it.each(["unhandledRejection", "uncaughtException"])(
+    "%s: captures, flushes, prints to stderr and exits 1",
+    async (event) => {
+      const { reporter, emit, exited, stderr, proc } = await activate();
+      const err = new Error(`${event} boom`);
+
+      emit(event, err);
+
+      await expect(exited).resolves.toBe(1);
+      expect(reporter.captureException).toHaveBeenCalledWith(err, {
+        mechanism: event,
+        handled: false,
+      });
+      expect(reporter.flush).toHaveBeenCalledWith(2000);
+      expect(proc.exit).toHaveBeenCalledTimes(1);
+      expect(
+        (proc.exit as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]!,
+      ).toBeGreaterThan(reporter.flush.mock.invocationCallOrder[0]!);
+      expect(stderr.join("")).toContain(`${event} boom`);
+    },
+  );
+
+  it("exit 1 even when the flush rejects, and report a second failure only once", async () => {
+    const { reporter, emit, exited, stderr, proc } = await activate();
+    reporter.flush.mockRejectedValue(new Error("network"));
+
+    emit("unhandledRejection", "first");
+    emit("uncaughtException", new Error("second"));
+
+    await expect(exited).resolves.toBe(1);
+    expect(reporter.captureException).toHaveBeenCalledTimes(1);
+    expect(proc.exit).toHaveBeenCalledTimes(1);
+    expect(stderr.join("")).toContain("second");
   });
 });

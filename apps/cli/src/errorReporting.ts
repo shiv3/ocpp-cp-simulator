@@ -14,6 +14,13 @@ import { appVersion } from "./appVersion";
 const FATAL_FLUSH_TIMEOUT_MS = 2000;
 
 /**
+ * How long the CLI waits for the selected adapter to load and start before
+ * it runs without reporting: an optional reporter must not hold the command
+ * back.
+ */
+export const ERROR_REPORTER_START_TIMEOUT_MS = 2000;
+
+/**
  * The adapters shipped with the CLI, by the name `OCPP_SIM_ERROR_REPORTER`
  * selects them with. Each is a lazy import, so an unselected one (and its
  * vendor SDK) is never loaded. Any other value is a module specifier.
@@ -135,8 +142,10 @@ function installProcessHandlers(proc: ErrorReportingProcess): void {
  * ({@link BUILTIN_REPORTERS}) or a module specifier whose module exports
  * `createErrorReporter` (an `ErrorReporterFactory`). Unset or blank, nothing
  * is loaded and no process handler is installed. An adapter that cannot be
- * loaded or started leaves reporting off with one line on stderr, never
- * stdout (JSON Lines mode owns it). Resolves to whether reporting is on.
+ * loaded or started, or does not start within
+ * {@link ERROR_REPORTER_START_TIMEOUT_MS}, leaves reporting off with one line
+ * on stderr, never stdout (JSON Lines mode owns it); an adapter that starts
+ * after that bound is dropped. Resolves to whether reporting is on.
  */
 export async function initErrorReporting(
   env: NodeJS.ProcessEnv = process.env,
@@ -145,12 +154,42 @@ export async function initErrorReporting(
   const name = resolveErrorReporterName(env.OCPP_SIM_ERROR_REPORTER);
   if (!name) return false;
   const proc = deps.process ?? process;
-  const builtins = deps.builtins ?? BUILTIN_REPORTERS;
-  const disabled = (reason: string): false => {
-    proc.stderr.write(`Error reporting disabled: ${reason}\n`);
-    return false;
-  };
 
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<StartOutcome>((resolve) => {
+    timer = setTimeout(
+      resolve,
+      ERROR_REPORTER_START_TIMEOUT_MS,
+      `${name} did not start within ${ERROR_REPORTER_START_TIMEOUT_MS} ms`,
+    );
+  });
+  let outcome: StartOutcome;
+  try {
+    // startReporter never rejects, so the losing side settles quietly.
+    outcome = await Promise.race([startReporter(name, env, deps), deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (typeof outcome === "string") {
+    proc.stderr.write(`Error reporting disabled: ${outcome}\n`);
+    return false;
+  }
+  active = outcome;
+  installProcessHandlers(proc);
+  return true;
+}
+
+/** A started reporter, or why reporting stays off. */
+type StartOutcome = ErrorReporter | string;
+
+/** Load the selected adapter and run its factory. Never rejects. */
+async function startReporter(
+  name: string,
+  env: NodeJS.ProcessEnv,
+  deps: ErrorReportingDeps,
+): Promise<StartOutcome> {
+  const builtins = deps.builtins ?? BUILTIN_REPORTERS;
   let loaded: unknown;
   try {
     const builtin = Object.hasOwn(builtins, name) ? builtins[name] : undefined;
@@ -160,7 +199,7 @@ export async function initErrorReporting(
           ? deps.importModule(name)
           : importSpecifier(name, deps.cwd ?? process.cwd()));
   } catch (err) {
-    return disabled(`cannot load ${name} (${errorMessage(err)})`);
+    return `cannot load ${name} (${errorMessage(err)})`;
   }
 
   const factory =
@@ -168,7 +207,7 @@ export async function initErrorReporting(
       ? (loaded as { createErrorReporter?: unknown }).createErrorReporter
       : undefined;
   if (typeof factory !== "function")
-    return disabled(`${name} does not export createErrorReporter`);
+    return `${name} does not export createErrorReporter`;
 
   let reporter: ErrorReporter | null;
   try {
@@ -178,16 +217,12 @@ export async function initErrorReporting(
       scrub: scrubErrorReport,
     })) as ErrorReporter | null;
   } catch (err) {
-    return disabled(`${name} did not start (${errorMessage(err)})`);
+    return `${name} did not start (${errorMessage(err)})`;
   }
-  if (!reporter)
-    return disabled(
-      `${name} selected but ${NOT_CONFIGURED[name] ?? "not configured"}`,
-    );
-
-  active = reporter;
-  installProcessHandlers(proc);
-  return true;
+  return (
+    reporter ??
+    `${name} selected but ${NOT_CONFIGURED[name] ?? "not configured"}`
+  );
 }
 
 /**

@@ -59,6 +59,13 @@ reporting off: the CLI writes one `Error reporting disabled: …` line to
 stderr (never stdout) and carries on, the console logs one warning and
 renders.
 
+The CLI waits for a selected adapter to load and start for at most
+`ERROR_REPORTER_START_TIMEOUT_MS` (2000 ms) in
+`apps/cli/src/errorReporting.ts`, then runs the command without reporting:
+one `Error reporting disabled: <name> did not start within 2000 ms` line on
+stderr, no process handler installed, and an adapter that starts or fails
+later is dropped without a second line.
+
 The console's first paint waits for a selected adapter for at most
 `ERROR_REPORTER_WAIT_MS` (300 ms) in `apps/web/src/lib/errorReporting.ts`:
 an optional reporter must not keep the console blank. Past that bound the

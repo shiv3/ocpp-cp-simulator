@@ -237,6 +237,97 @@ describe("initErrorReporting: reporting stays off", () => {
   });
 });
 
+describe("initErrorReporting: start-up bound", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Start init with a factory whose promise the test settles. */
+  function startWith(factoryResult: Promise<ErrorReporter | null>) {
+    const fake = fakeProcess();
+    const state: { on?: boolean } = {};
+    void initErrorReporting(
+      { OCPP_SIM_ERROR_REPORTER: "sentry" },
+      {
+        builtins: {
+          sentry: async () => ({ createErrorReporter: () => factoryResult }),
+        },
+        process: fake.proc,
+      },
+    ).then((on) => (state.on = on));
+    return { state, ...fake };
+  }
+
+  const timedOut =
+    "Error reporting disabled: sentry did not start within 2000 ms\n";
+
+  it("gives up after 2 s on an adapter that never starts", async () => {
+    vi.useFakeTimers();
+    const { state, stderr, listeners } = startWith(new Promise(() => {}));
+
+    await advance(1999);
+    expect(state.on).toBeUndefined();
+    await advance(1);
+    expect(state.on).toBe(false);
+    expect(stderr).toEqual([timedOut]);
+    expect(listeners.size).toBe(0);
+  });
+
+  it("drops an adapter that starts after the bound", async () => {
+    vi.useFakeTimers();
+    let resolveFactory: (reporter: ErrorReporter) => void = () => {};
+    const reporter = recordingReporter();
+    const { state, stderr, listeners } = startWith(
+      new Promise((resolve) => (resolveFactory = resolve)),
+    );
+
+    await advance(2000);
+    resolveFactory(reporter);
+    await advance(0);
+
+    expect(state.on).toBe(false);
+    expect(listeners.size).toBe(0);
+    await reportFatalError(new Error("late"));
+    expect(reporter.captureException).not.toHaveBeenCalled();
+    expect(reporter.flush).not.toHaveBeenCalled();
+    expect(stderr).toEqual([timedOut]);
+  });
+
+  it("writes nothing more when the adapter fails after the bound", async () => {
+    vi.useFakeTimers();
+    let rejectFactory: (err: Error) => void = () => {};
+    const { state, stderr } = startWith(
+      new Promise((_resolve, reject) => (rejectFactory = reject)),
+    );
+
+    await advance(2000);
+    rejectFactory(new Error("late failure"));
+    await advance(0);
+
+    expect(state.on).toBe(false);
+    expect(stderr).toEqual([timedOut]);
+  });
+
+  it("leaves no timer behind when the adapter starts in time", async () => {
+    vi.useFakeTimers();
+    const { state, listeners } = startWith(
+      Promise.resolve(recordingReporter()),
+    );
+
+    await advance(0);
+
+    expect(state.on).toBe(true);
+    expect(listeners.size).toBe(2);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("starts no timer when nothing is selected", async () => {
+    vi.useFakeTimers();
+    await expect(initErrorReporting({}, {})).resolves.toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
 describe("reportFatalError", () => {
   it("does nothing while reporting is off", async () => {
     await expect(reportFatalError(new Error("x"))).resolves.toBeUndefined();

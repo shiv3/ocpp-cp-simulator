@@ -99,6 +99,7 @@
   "scenarioRun.tree.fork.timeout": "Waits: the event, or the timeout",
   "scenarioRun.tree.fork.extra": "Only the first runs",
   "scenarioRun.tree.insertAtTop": "Insert step before step {{n}}",
+  "scenarioRun.tree.toStart": "Then back to START",
   "scenarioRun.tree.addAfterBlock": "Add step after the block of step {{n}}",
   "scenarioRun.tree.afterLeaving": "After leaving the loop at step {{n}}",
   "scenarioRun.tree.addLaneTo": "Add a branch to step {{n}}",

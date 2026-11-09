@@ -25,6 +25,7 @@ const onSelectStep = vi.fn();
 const onDeleteStep = vi.fn();
 const onAddLane = vi.fn();
 const onRemoveLane = vi.fn();
+const onUnwrapLoop = vi.fn();
 
 async function render(def: ScenarioDefinition) {
   container = document.createElement("div");
@@ -42,6 +43,7 @@ async function render(def: ScenarioDefinition) {
         onDeleteStep={onDeleteStep}
         onAddLane={onAddLane}
         onRemoveLane={onRemoveLane}
+        onUnwrapLoop={onUnwrapLoop}
       />,
     );
   });
@@ -189,6 +191,31 @@ describe("StepsView (editable block tree)", () => {
       1,
       ScenarioNodeType.DELAY,
     );
+  });
+
+  it("a jump back into START says so in words, not a number", async () => {
+    const start = recognizeBlockTree(startFanOutWithLoop()).origin!;
+    await render({
+      ...startFanOutWithLoop(),
+      edges: [
+        ...startFanOutWithLoop().edges.filter((e) => e.source !== "c1"),
+        { id: "c1->start", source: "c1", target: start.id },
+      ],
+    });
+    const note = container.querySelector('[data-link-to="start"]');
+    expect(note?.textContent).toBe("Then back to START");
+  });
+
+  it("'Stop repeating' on the loop's top arm unwraps that loop", async () => {
+    await render(startFanOutWithLoop());
+    const block = container.querySelector("[data-loop-block]")!;
+    const button = block.querySelector<HTMLButtonElement>(
+      '[data-testid="unwrap-loop"]',
+    )!;
+    expect(button.textContent).toContain("Stop repeating");
+    expect(button.disabled).toBe(false);
+    await click(button);
+    expect(onUnwrapLoop).toHaveBeenCalledWith("l0a");
   });
 
   it("drags a box within its sequence, with a drop indicator; nested too", async () => {

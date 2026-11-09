@@ -11,6 +11,7 @@ import {
   LogOut,
   Plus,
   Repeat,
+  RepeatOff,
   Shuffle,
   Split,
   Timer,
@@ -282,6 +283,8 @@ const LoopBlock: React.FC<{
   active: boolean;
   /** The loop is block `blockIndex` of its lane (what a drag measures). */
   blockIndex?: number;
+  /** editable: the "Stop repeating" button and whether it applies. */
+  unwrap?: { cap: Capability; onClick: () => void };
   children: React.ReactNode;
 }> = ({
   target,
@@ -291,6 +294,7 @@ const LoopBlock: React.FC<{
   canExit,
   active,
   blockIndex,
+  unwrap,
   children,
 }) => {
   const { t } = useTranslation();
@@ -326,6 +330,23 @@ const LoopBlock: React.FC<{
           <span className="text-cx-muted">
             · {t("scenarioRun.loopWaitsAt", { n: from })}
           </span>
+        )}
+        {unwrap && (
+          <button
+            type="button"
+            data-testid="unwrap-loop"
+            title={
+              unwrap.cap.ok
+                ? t("scenarios.editor.unwrapLoopHint")
+                : t(unwrap.cap.reason)
+            }
+            disabled={!unwrap.cap.ok}
+            onClick={unwrap.onClick}
+            className="ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium text-cx-purple hover:bg-cx-purple/15 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <RepeatOff className="h-3.5 w-3.5" aria-hidden />
+            {t("scenarios.editor.unwrapLoop")}
+          </button>
         )}
       </div>
       <div className="flex">
@@ -435,6 +456,7 @@ const StepsView: React.FC<StepTreeViewProps> = (props) => {
     onInsertStep,
     onAddLane,
     onRemoveLane,
+    onUnwrapLoop,
     issues,
   } = props;
 
@@ -585,7 +607,7 @@ const StepsView: React.FC<StepTreeViewProps> = (props) => {
     const exit = seq.exit;
     if (exit.kind !== "link") return null;
     const role = linkOf(tree, exit.edgeId)?.role;
-    const n = number(exit.target) ?? "START";
+    const n = number(exit.target);
     const back = role === "back";
     const Icon = back ? Repeat : CornerDownRight;
     return (
@@ -595,9 +617,11 @@ const StepsView: React.FC<StepTreeViewProps> = (props) => {
         className="mt-1.5 flex items-center gap-1.5 text-xs text-cx-muted"
       >
         <Icon className="h-3.5 w-3.5" aria-hidden />
-        {back
-          ? t("scenarioRun.loopBack", { n })
-          : t("scenarioRun.joinTo", { n })}
+        {n === null
+          ? t("scenarioRun.tree.toStart")
+          : back
+            ? t("scenarioRun.loopBack", { n })
+            : t("scenarioRun.joinTo", { n })}
       </p>
     );
   };
@@ -658,6 +682,17 @@ const StepsView: React.FC<StepTreeViewProps> = (props) => {
             inside.some((id) => EXIT_TYPES.has(typeOf(id)))
           }
           active={inside.some((id) => boxPhase(id, props) === "current")}
+          unwrap={
+            editable && onUnwrapLoop
+              ? {
+                  cap: editCapabilities(tree, {
+                    kind: "node",
+                    nodeId: loop.headerId,
+                  }).unwrapLoop,
+                  onClick: () => onUnwrapLoop(loop.headerId),
+                }
+              : undefined
+          }
         >
           {body}
         </LoopBlock>

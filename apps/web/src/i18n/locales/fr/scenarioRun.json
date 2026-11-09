@@ -100,6 +100,7 @@
   "scenarioRun.tree.fork.timeout": "Attend : l'événement ou le délai",
   "scenarioRun.tree.fork.extra": "Seule la première s'exécute",
   "scenarioRun.tree.insertAtTop": "Insérer une étape avant l'étape {{n}}",
+  "scenarioRun.tree.toStart": "Puis retour à START",
   "scenarioRun.tree.addAfterBlock": "Ajouter une étape après le bloc de l'étape {{n}}",
   "scenarioRun.tree.afterLeaving": "Après la sortie de la boucle à l'étape {{n}}",
   "scenarioRun.tree.addLaneTo": "Ajouter une branche à l'étape {{n}}",

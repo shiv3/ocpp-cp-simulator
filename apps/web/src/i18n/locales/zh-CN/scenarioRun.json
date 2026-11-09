@@ -98,6 +98,7 @@
   "scenarioRun.tree.fork.timeout": "等待: 事件或超时",
   "scenarioRun.tree.fork.extra": "只运行第一条",
   "scenarioRun.tree.insertAtTop": "在步骤 {{n}} 之前插入步骤",
+  "scenarioRun.tree.toStart": "然后回到 START",
   "scenarioRun.tree.addAfterBlock": "在步骤 {{n}} 的块之后添加步骤",
   "scenarioRun.tree.afterLeaving": "在步骤 {{n}} 离开循环之后",
   "scenarioRun.tree.addLaneTo": "为步骤 {{n}} 添加分支",

@@ -17,7 +17,8 @@ import type {
 } from "../../../../components/scenario/forms/types";
 import { collectStateKeys } from "../../../../components/scenario/forms/scenarioValue";
 import { applySelectHandleEdit } from "../../../lib/selectHandleEdit";
-import { deriveStepLayout, stepIndexOf } from "../../../lib/stepLayout";
+import { recognizeBlockTree } from "../../../lib/blockTree";
+import { stepNumbers as treeStepNumbers } from "../../../lib/stepTree";
 import { nodeTitle } from "../run/stepVisuals";
 import {
   applyCurveConfigToMeterNode,
@@ -48,6 +49,9 @@ export interface StepInspectorProps {
   /** A change to more than the step's data (a switch case reordered moves
    *  its lane's edge too). Absent: such edits change the data alone. */
   onScenarioChange?: (next: ScenarioDefinition) => void;
+  /** The number each step's box shows (the tree's pre-order numbers, as
+   *  the editor has them); absent: worked out from `scenario`. */
+  stepNumbers?: ReadonlyMap<string, number>;
 }
 
 /** What the step's form may know of the scenario around it. */
@@ -57,6 +61,7 @@ function formContext(
   node: ScenarioNode,
   toNodeData: (form: NodeFormData) => ScenarioNodeData,
   onScenarioChange: StepInspectorProps["onScenarioChange"],
+  stepNumbers: StepInspectorProps["stepNumbers"],
 ): NodeFormContext | undefined {
   if (!scenario) return undefined;
   const context: NodeFormContext = {
@@ -73,7 +78,7 @@ function formContext(
     scenario.edges.filter(
       (e) => e.source === node.id && e.sourceHandle === handle,
     ).length;
-  let layout: ReturnType<typeof deriveStepLayout> | null = null;
+  let numbers = stepNumbers ?? null;
   context.laneTarget = (handle): LaneTarget | null => {
     // The executor follows the first edge on a handle.
     const edge = scenario.edges.find(
@@ -83,8 +88,8 @@ function formContext(
     const target = scenario.nodes.find((n) => n.id === edge.target);
     if (!target) return { kind: "step", text: edge.target };
     if (target.type === ScenarioNodeType.END) return { kind: "end" };
-    layout ??= deriveStepLayout(scenario);
-    const n = layout.supported ? stepIndexOf(layout, target.id) : null;
+    numbers ??= treeStepNumbers(recognizeBlockTree(scenario));
+    const n = numbers.get(target.id) ?? null;
     const label = String(target.data.label ?? "").trim();
     const title = label === "" ? nodeTitle(target) : label;
     return {
@@ -120,6 +125,7 @@ const StepInspector: React.FC<StepInspectorProps> = ({
   onChange,
   scenario,
   onScenarioChange,
+  stepNumbers,
 }) => {
   const { t } = useTranslation();
   const [isCurveModalOpen, setIsCurveModalOpen] = useState(false);
@@ -156,6 +162,7 @@ const StepInspector: React.FC<StepInspectorProps> = ({
     node,
     entry.formToNodeData,
     onScenarioChange,
+    stepNumbers,
   );
 
   const handleCurveSave = (config: AutoMeterValueConfig) => {

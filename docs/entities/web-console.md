@@ -1020,10 +1020,13 @@ scenario or a copy of one (`libraryId`). All use the same content
   point's box too): its form opens in the inspector (beside the steps,
   sticky, when the editor is wider than about 860 px; under them when it is
   narrower), whose header holds **Add a branch** (a `switch` / `choice`),
-  **Repeat from this step to the end of its lane** (`wrapInLoop`), move up /
+  **Repeat from this step to the end of its lane** (`wrapInLoop`), **Stop
+  repeating** (`unwrapLoop`, shown for a step a loop repeats), move up /
   down **within its sequence** and delete. Hovering the gap before a block
   shows a small `+` (**Insert step between n and n+1**, or **Insert step
-  before step n** at the top of a lane) that opens the step picker there;
+  before step n** at the top of a lane) that opens the step picker there
+  (known limitation: the root sequence has no `+` before step 1; insert
+  after it and move the new step up);
   **+ Add step** at the end of each sequence appends (it is left out under a
   block every path of which ends on its own, and disabled with the reason
   where nothing runs). Picking **Switch** or **Choice** inserts a branch
@@ -1031,7 +1034,8 @@ scenario or a copy of one (`libraryId`). All use the same content
   that followed (`insertForkBlock`). Each step box has a grab handle
   (**Drag to reorder**): dragging shows a drop line, a release moves the
   step within its sequence (a branch point or a loop is one block and stays
-  where it is; a branch point's box has no handle), **Escape** cancels; a
+  where it is; a branch point's box has no handle; a refused drop says why,
+  as a refused key does), **Escape** cancels; a
   focused box takes **Alt+↑ / Alt+↓** and **Delete** (asked first, in the
   page). Each branch point's header has **+ branch** (`addLane`: START, a
   `switch` / `choice` with a case or option no lane has yet — refused with
@@ -1042,9 +1046,16 @@ scenario or a copy of one (`libraryId`). All use the same content
   would let an ignored edge with its handle run). Under a chain from START,
   **+ Add parallel branch** makes START fan out: the chain becomes its first
   lane, the new lane holds one Delay. The inspector of a sequence's last
-  step has the **After this step** select (_End of scenario_ or _Loop back
-  to step N_, `setLink`); on the step that closes a loop it is disabled
-  ("jumping elsewhere would undo the loop"). Edits never change which lane
+  step has the **After this step** select (_End of scenario_, _Go to step
+  N_, or _Loop back to step N_ for a step a run comes back from, `setLink`);
+  on the step that closes a loop it is disabled and points to **Stop
+  repeating**. **Stop repeating** (on the loop block's top arm and in the
+  inspector) takes the innermost loop around the step away: its steps run
+  once, and every edge that went back to the loop's first step (the closing
+  step's, and each lane's that came back) goes on where the loop went on —
+  the block after the loop, else where its sequence went (END for a loop
+  that ended its lane). Those edges keep their id and fields; only their
+  target changes. Lanes that already left the loop stay as they are. Edits never change which lane
   of a `switch` / `choice` an edge runs (see
   [the schema 1.6 nodes](../concepts/scenario-format.md#the-schema-16-nodes)).
 - **Graph** — the same layout drawn as on the [run page](#scenario-runs-panel-and-page):
@@ -1151,7 +1162,7 @@ Writing a tree back (`rebuildFromTree`) never changes what the file means:
   graphs).
 
 The tree's operations (`insertStep`, `moveStep`, `removeStep`, `addLane`,
-`removeLane`, `insertForkBlock`, `wrapInLoop`, `setLink`, `setLaneHandle`,
+`removeLane`, `insertForkBlock`, `wrapInLoop`, `unwrapLoop`, `setLink`, `setLaneHandle`,
 `setLaneCondition`) are pure functions of the definition and the tree, and
 `editCapabilities` tells which apply to a selection, with the reason
 (`scenarios.editor.cannot.*`) when one does not. An edit that would make a

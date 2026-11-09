@@ -154,6 +154,9 @@ export interface StepTreeViewProps extends RunViewCommonProps {
   onAddLane?: (nodeId: string) => void;
   /** editable: remove lane `laneIndex` of the fork of `nodeId`. */
   onRemoveLane?: (nodeId: string, laneIndex: number) => void;
+  /** editable: "Stop repeating": remove the innermost loop around
+   *  `nodeId` (its steps then run once). */
+  onUnwrapLoop?: (nodeId: string) => void;
 }
 
 export type BoxPhase = StepPhase | "plain";

@@ -1898,6 +1898,167 @@ export function wrapInLoop(
   return rebuildFromTree(def, t);
 }
 
+/** Whether a run in `seq` (or a lane nested in it) falls through to `id`. */
+function seqFallsThroughTo(seq: Seq, id: string): boolean {
+  if (seq.exit.kind === "fallthrough" && seq.exit.to === id) return true;
+  return seq.blocks.some((b) => fallsThroughTo(b, id));
+}
+
+/** Whether lane `laneIndex` of `fork` (inside the loop whose header is
+ *  `headerId`) leaves the loop: the views draw it outside (see
+ *  `lanesLeavingLoop` in stepTree.ts, which this mirrors). */
+function laneLeavesLoop(
+  fork: ForkBlock,
+  laneIndex: number,
+  headerId: string,
+): boolean {
+  if (fork.merge !== null) return false;
+  const leaving = fork.lanes.map((l) => !seqFallsThroughTo(l.body, headerId));
+  // Every lane leaving: the fork as a whole is the loop's way out.
+  return leaving[laneIndex] === true && leaving.some((x) => !x);
+}
+
+/**
+ * The innermost loop that repeats the sequence at `path`: a loop whose body
+ * holds it, unless the way down from the body passes a lane that leaves the
+ * loop (that lane runs once, after the loop). With the sequence the loop is
+ * a block of and its index there.
+ */
+function repeatingLoopAt(
+  tree: BlockTree,
+  path: SeqPath,
+): { parent: Seq; index: number; loop: LoopBlock } | null {
+  const re = /\/(\d+)\/body(?=\/|$)/g;
+  const found: Array<{ at: number; end: number; index: number }> = [];
+  for (let m = re.exec(path); m; m = re.exec(path)) {
+    found.push({ at: m.index, end: m.index + m[0].length, index: +m[1] });
+  }
+  for (const c of found.reverse()) {
+    const parent = seqAt(tree, path.slice(0, c.at));
+    const loop = parent?.blocks[c.index];
+    if (!parent || loop?.kind !== "loop") continue;
+    const parts = path.slice(c.end).split("/").slice(1);
+    let seq: Seq = loop.body;
+    let repeats = true;
+    for (let k = 0; k < parts.length && repeats;) {
+      const block: Block | undefined = seq.blocks[Number(parts[k])];
+      if (parts[k + 1] === "body" && block?.kind === "loop") {
+        seq = block.body;
+        k += 2;
+      } else if (parts[k + 1] === "lanes" && block?.kind === "fork") {
+        const j = Number(parts[k + 2]);
+        if (laneLeavesLoop(block, j, loop.headerId)) repeats = false;
+        else seq = block.lanes[j].body;
+        k += 3;
+      } else repeats = false;
+    }
+    if (repeats) return { parent, index: c.index, loop };
+  }
+  return null;
+}
+
+/** The loop {@link unwrapLoop} takes away for a selected node: the
+ *  innermost one that repeats it (a loop header: its own loop). */
+function loopToUnwrap(
+  tree: BlockTree,
+  nodeId: string,
+): { parent: Seq; index: number; loop: LoopBlock } | null {
+  const found = locate(tree, nodeId);
+  return found ? repeatingLoopAt(tree, found.seq.path) : null;
+}
+
+/** Rewrites the paths of the sequences nested in `seq` after its blocks
+ *  moved. */
+function repath(seq: Seq): void {
+  seq.blocks.forEach((b, i) => {
+    if (b.kind === "loop") {
+      b.body.path = `${seq.path}/${i}/body`;
+      repath(b.body);
+    } else if (b.kind === "fork") {
+      b.lanes.forEach((lane, j) => {
+        lane.body.path = `${seq.path}/${i}/lanes/${j}`;
+        repath(lane.body);
+      });
+    }
+  });
+}
+
+/** Sets the edge a block is entered by (a loop: its first block's). */
+function setEdgeIn(block: Block, edgeId: string): void {
+  if (block.kind === "loop") {
+    const first = block.body.blocks[0];
+    if (first) setEdgeIn(first, edgeId);
+  } else block.edgeIn = edgeId;
+}
+
+/**
+ * "Stop repeating": takes away the innermost loop that repeats `nodeId`.
+ * Its body's blocks take the loop's place; every back edge (a sequence of
+ * the body, at any depth, that falls through to the header) goes on where
+ * the loop went on instead: the next block of the sequence around the loop,
+ * else that sequence's own ending (a loop that ended its sequence runs to
+ * END). A back edge keeps its id and fields; only its target changes. Lanes
+ * that already left the loop stay as they are.
+ */
+export function unwrapLoop(
+  def: ScenarioDefinition,
+  tree: BlockTree,
+  nodeId: string,
+): ScenarioDefinition {
+  if (!editCapabilities(tree, { kind: "node", nodeId }).unwrapLoop.ok) {
+    return def;
+  }
+  const t = cloneTree(tree);
+  applyUnwrapLoop(t, nodeId);
+  return rebuildFromTree(def, t);
+}
+
+/** {@link unwrapLoop} on `t` (a clone), without the checks. */
+function applyUnwrapLoop(t: BlockTree, nodeId: string): void {
+  const { parent, index, loop } = loopToUnwrap(t, nodeId)!;
+  const next = parent.blocks[index + 1];
+  const after = parent.exit;
+  const goOn = (old: { edgeId?: string | null }): SeqExit => {
+    const edgeId = old.edgeId ?? null;
+    if (next) return { kind: "fallthrough", to: firstNodeOf(next).id, edgeId };
+    if (after.kind === "fallthrough") {
+      return { kind: "fallthrough", to: after.to, edgeId };
+    }
+    if (after.kind === "link") {
+      return {
+        kind: "link",
+        target: after.target,
+        edgeId: edgeId ?? crypto.randomUUID(),
+      };
+    }
+    // A loop that ended its sequence (nothing left it): the run ends.
+    if (after.kind === "end" || after.reason === "blockEnds") {
+      return { kind: "end", edgeId };
+    }
+    return { kind: "stop", reason: "noEdge" };
+  };
+  const body = loop.body;
+  redirectFallthroughs([body], loop.headerId, goOn);
+  parent.blocks.splice(index, 1, ...body.blocks);
+  const last = body.blocks[body.blocks.length - 1];
+  if (next) {
+    // The body's own last edge (a back edge) now enters the next block.
+    if (
+      body.exit.kind === "fallthrough" &&
+      body.exit.edgeId &&
+      last?.kind === "step"
+    ) {
+      setEdgeIn(next, body.exit.edgeId);
+    }
+  } else {
+    parent.exit =
+      last?.kind === "fork" && last.merge === null
+        ? { kind: "stop", reason: "blockEnds" }
+        : body.exit;
+  }
+  repath(parent);
+}
+
 /**
  * Makes the step `nodeId` (the last block of its sequence) jump to
  * `target`, a placed step other than START, or run to END with `null`.
@@ -2039,6 +2200,8 @@ export interface EditCapabilities {
   addLane: Capability;
   removeLane: Capability;
   wrapInLoop: Capability;
+  /** "Stop repeating": the innermost loop that repeats the selection. */
+  unwrapLoop: Capability;
   setLink: Capability;
   setLaneHandle: Capability;
   setLaneCondition: Capability;
@@ -2108,6 +2271,17 @@ function canMove(
     return no("scenarios.editor.cannot.loopHeader");
   }
   return OK;
+}
+
+/** Whether the step at `from` of the sequence at `path` can move to slot
+ *  `to` (a drag over several places; one place: `moveUp` / `moveDown`). */
+export function canMoveStep(
+  tree: BlockTree,
+  path: SeqPath,
+  from: number,
+  to: number,
+): Capability {
+  return canMove(tree, path, from, to);
 }
 
 function canWrapInLoop(
@@ -2242,6 +2416,7 @@ export function editCapabilities(
     addLane: notHere,
     removeLane: notHere,
     wrapInLoop: notHere,
+    unwrapLoop: notHere,
     setLink: notHere,
     setLaneHandle: notHere,
     setLaneCondition: notHere,
@@ -2259,6 +2434,7 @@ export function editCapabilities(
     caps.moveDown = startNo;
     caps.setLink = startNo;
     caps.wrapInLoop = startNo;
+    caps.unwrapLoop = no("scenarios.editor.cannot.notInLoop");
     caps.addLane = OK;
     if (selection.kind === "lane") {
       const fork = tree.root.blocks[0];
@@ -2340,6 +2516,11 @@ export function editCapabilities(
           : no("scenarios.editor.cannot.noFreeHandle");
   }
   caps.wrapInLoop = canWrapInLoop(tree, seq.path, index, seq.blocks.length - 1);
+  caps.unwrapLoop = !repeatingLoopAt(tree, seq.path)
+    ? no("scenarios.editor.cannot.notInLoop")
+    : revivesDeadEdge(tree, (t) => applyUnwrapLoop(t, nodeId))
+      ? no("scenarios.editor.cannot.revivesDeadEdge")
+      : OK;
   if (selection.kind === "lane") {
     const lane =
       block.kind === "fork" ? block.lanes[selection.laneIndex] : undefined;

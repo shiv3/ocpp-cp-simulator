@@ -98,6 +98,7 @@
   "scenarioRun.tree.fork.timeout": "待機: イベントかタイムアウト",
   "scenarioRun.tree.fork.extra": "最初のものだけ実行",
   "scenarioRun.tree.insertAtTop": "ステップ {{n}} の前にステップを挿入",
+  "scenarioRun.tree.toStart": "その後 START に戻る",
   "scenarioRun.tree.addAfterBlock": "ステップ {{n}} のブロックの後にステップを追加",
   "scenarioRun.tree.afterLeaving": "ステップ {{n}} でループを抜けた後",
   "scenarioRun.tree.addLaneTo": "ステップ {{n}} に分岐を追加",

@@ -7,6 +7,7 @@ import {
   GitBranch,
   Maximize2,
   Repeat,
+  RepeatOff,
   Trash2,
   X,
 } from "lucide-react";
@@ -36,6 +37,7 @@ import {
 } from "../../../lib/scenarioSteps";
 import {
   addLane,
+  canMoveStep,
   editCapabilities,
   insertForkBlock,
   insertStep,
@@ -46,6 +48,7 @@ import {
   seqAt,
   setLink,
   treeNodes,
+  unwrapLoop,
   wrapInLoop,
   type Capability,
   type SeqPath,
@@ -54,7 +57,7 @@ import { deriveStepLayout, drawnEdgeIds } from "../../../lib/stepLayout";
 import { isDrawableTree, stepNumbers, treeSteps } from "../../../lib/stepTree";
 import StepsGraphView from "../run/StepsGraphView";
 import StepsView from "../run/StepsView";
-import { nodeTitle } from "../run/stepVisuals";
+import { laneLetter, nodeTitle } from "../run/stepVisuals";
 import ScenarioMetaBar from "./ScenarioMetaBar";
 import GraphIssues from "./GraphIssues";
 import { useScenarioIssues, type ViewIssues } from "./issueMarkUi";
@@ -309,6 +312,26 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
     if (exit?.kind === "fallthrough") return exit.to;
     return "";
   })();
+  /** The steps a run can go from to the selected one: a jump there goes
+   *  back ("Loop back to step n"); any other target is "Go to step n". */
+  const reachesSelected = useMemo(() => {
+    const out = new Set<string>();
+    if (!scenario || !selectedNode) return out;
+    const into = new Map<string, string[]>();
+    for (const e of scenario.edges) {
+      const list = into.get(e.target);
+      if (list) list.push(e.source);
+      else into.set(e.target, [e.source]);
+    }
+    const work = [selectedNode.id];
+    while (work.length > 0) {
+      const id = work.pop()!;
+      if (out.has(id)) continue;
+      out.add(id);
+      work.push(...(into.get(id) ?? []));
+    }
+    return out;
+  }, [scenario, selectedNode]);
   // The jump select: on the last step of a sequence; a refusal other than
   // "not the last step" is shown with its reason.
   const showLink =
@@ -395,26 +418,20 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
     if (!scenario || !tree) return;
     const place = tree.nodePath.get(nodeId);
     if (!place) return;
-    if (Math.abs(delta) === 1) {
-      const nodeCaps = editCapabilities(tree, { kind: "node", nodeId });
-      unlessRefused(
-        nodeId,
-        delta < 0 ? nodeCaps.moveUp : nodeCaps.moveDown,
-        () =>
-          setScenario(
-            moveStep(
-              scenario,
-              tree,
-              place.path,
-              place.index,
-              place.index + delta,
-            ),
+    // Keys and drags alike: a refused move says why.
+    unlessRefused(
+      nodeId,
+      canMoveStep(tree, place.path, place.index, place.index + delta),
+      () =>
+        setScenario(
+          moveStep(
+            scenario,
+            tree,
+            place.path,
+            place.index,
+            place.index + delta,
           ),
-      );
-      return;
-    }
-    setScenario(
-      moveStep(scenario, tree, place.path, place.index, place.index + delta),
+        ),
     );
   };
 
@@ -495,6 +512,17 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
             seq.blocks.length - 1,
           ),
         ),
+    );
+  };
+
+  /** "Stop repeating": the innermost loop around `nodeId` goes; its steps
+   *  run once and go on where the loop went on. */
+  const handleUnwrapLoop = (nodeId: string) => {
+    if (!scenario || !tree) return;
+    unlessRefused(
+      nodeId,
+      editCapabilities(tree, { kind: "node", nodeId }).unwrapLoop,
+      () => setScenario(unwrapLoop(scenario, tree, nodeId)),
     );
   };
 
@@ -830,7 +858,7 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
         <InlineConfirm
           className="mb-3"
           message={t("scenarios.editor.removeLaneConfirm", {
-            lane: String.fromCharCode(65 + (pendingLane.laneIndex % 26)),
+            lane: laneLetter(pendingLane.laneIndex),
             count: pendingLane.count,
           })}
           cancelLabel={t("scenarios.editor.keep")}
@@ -907,6 +935,7 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
                       onDeleteStep={handleDeleteRequest}
                       onAddLane={handleAddLane}
                       onRemoveLane={handleRemoveLane}
+                      onUnwrapLoop={handleUnwrapLoop}
                       issues={viewIssues}
                     />
                   </>
@@ -955,6 +984,17 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
                         >
                           <Repeat className="h-3.5 w-3.5" />
                         </InspectorAction>
+                        {(caps.unwrapLoop.ok ||
+                          caps.unwrapLoop.reason !==
+                            "scenarios.editor.cannot.notInLoop") && (
+                          <InspectorAction
+                            label={t("scenarios.editor.unwrapLoop")}
+                            cap={caps.unwrapLoop}
+                            onClick={() => handleUnwrapLoop(selectedNode.id)}
+                          >
+                            <RepeatOff className="h-3.5 w-3.5" />
+                          </InspectorAction>
+                        )}
                         <InspectorAction
                           label={t("scenarios.editor.moveUp", {
                             n: selectedNumber,
@@ -1009,10 +1049,15 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
                         </option>
                         {allSteps.map((step) => (
                           <option key={step.id} value={step.id}>
-                            {t("scenarios.editor.loopBackTo", {
-                              n: numberOf(step.id),
-                              title: nodeTitle(step),
-                            })}
+                            {t(
+                              reachesSelected.has(step.id)
+                                ? "scenarios.editor.loopBackTo"
+                                : "scenarios.editor.goToStep",
+                              {
+                                n: numberOf(step.id),
+                                title: nodeTitle(step),
+                              },
+                            )}
                           </option>
                         ))}
                       </select>
@@ -1028,6 +1073,7 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
                     }
                     scenario={scenario}
                     onScenarioChange={setScenario}
+                    stepNumbers={numbers}
                   />
                 </>
               ) : (

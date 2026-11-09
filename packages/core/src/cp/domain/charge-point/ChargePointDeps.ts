@@ -12,6 +12,7 @@ import type {
   ChargePointEngine,
   TransactionPorts,
 } from "../engine/ChargePointEngine";
+import type { ChargePointRepositories } from "../persistence/ChargePointRepositories";
 import type { LogSink } from "../persistence/LogSink";
 import type { ChargePointHeartbeat } from "../services/ChargePointHeartbeat";
 import type { ChargePointStateManager } from "../services/ChargePointStateManager";
@@ -142,6 +143,11 @@ export interface ChargePointDeps extends ChargePointServiceFactories {
    * flushed on `flushLogs` and on a transport close, closed on `dispose`.
    */
   logSink: LogSink;
+  /**
+   * The stores this charge point persists its own state through (#878),
+   * bound to its id; read once, from inside the constructor.
+   */
+  repositories: ChargePointRepositories;
   /** Uploads the GetDiagnostics file (read when an upload starts). */
   fileUploader: FileUploader;
 }

@@ -12,15 +12,17 @@ import type { BootNotification } from "../../domain/types/OcppTypes";
 import type { OcppTlsOptions } from "../../domain/transport/ConnectionSecurity";
 import { UploadFile } from "../fileUpload";
 import { LogRepository } from "../persistence/LogRepository";
+import { createChargePointRepositories } from "../persistence/createChargePointRepositories";
 import { DEFAULT_SERVICES } from "./createDefaultServices";
 import { createDefaultTransport } from "./createDefaultTransport";
 
 /**
  * The production dependencies shared by every charge point (#575). The log
- * sink is per charge point (it buffers and is closed on `dispose`), so
- * `createChargePoint` builds it from its `database` argument.
+ * sink (it buffers and is closed on `dispose`) and the repositories (#878)
+ * are per charge point, so `createChargePoint` builds them from its `database`
+ * argument.
  */
-const DEFAULT_DEPS: Omit<ChargePointDeps, "logSink"> = {
+const DEFAULT_DEPS: Omit<ChargePointDeps, "logSink" | "repositories"> = {
   ...DEFAULT_SERVICES,
   createTransport: createDefaultTransport,
   fileUploader: UploadFile,
@@ -69,7 +71,11 @@ export function createChargePoint(
     cpoName,
     tls,
     simulation,
-    // `database = null` keeps the repository a no-op (remote-mode browser).
-    { ...DEFAULT_DEPS, logSink: new LogRepository(database) },
+    // `database = null` keeps the repositories no-ops (remote-mode browser).
+    {
+      ...DEFAULT_DEPS,
+      logSink: new LogRepository(database),
+      repositories: createChargePointRepositories(id, database),
+    },
   );
 }

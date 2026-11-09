@@ -8,6 +8,7 @@ import type {
 import { DEFAULT_SERVICES } from "../../../infrastructure/charge-point/createDefaultServices";
 import { createDefaultTransport } from "../../../infrastructure/charge-point/createDefaultTransport";
 import { LogRepository } from "../../../infrastructure/persistence/LogRepository";
+import { createChargePointRepositories } from "../../../infrastructure/persistence/createChargePointRepositories";
 import { UploadFile } from "../../../infrastructure/fileUpload";
 import { DefaultBootNotification } from "../../types/OcppTypes";
 import type { LogSink } from "../../persistence/LogSink";
@@ -34,6 +35,7 @@ function build(
   const deps: ChargePointDeps = {
     ...DEFAULT_SERVICES,
     logSink: new LogRepository(null),
+    repositories: createChargePointRepositories("cp-deps", null),
     fileUploader: UploadFile,
     ...overrides,
     createTransport: (cp, ctx) => {
@@ -198,6 +200,30 @@ describe("ChargePoint deps.logSink and deps.fileUploader (#575)", () => {
     const fileUploader = vi.fn();
     const { cp } = build("OCPP-1.6J", undefined, {}, { fileUploader });
     expect(cp.fileUploader).toBe(fileUploader);
+    cp.disconnect();
+  });
+});
+
+describe("ChargePoint deps.repositories (#878)", () => {
+  it("restores and persists availability through the injected connector settings", () => {
+    const saved: Array<[number, string]> = [];
+    const repositories = {
+      ...createChargePointRepositories("cp-deps", null),
+      connectorSettings: {
+        loadAvailability: (connectorId: number) =>
+          connectorId === 0 ? ("Inoperative" as const) : null,
+        saveAvailability: (connectorId: number, availability: string) => {
+          saved.push([connectorId, availability]);
+        },
+      },
+    };
+    const { cp } = build("OCPP-1.6J", undefined, {}, { repositories });
+    expect(cp.status).toBe("Unavailable");
+    cp.persistAvailability();
+    expect(saved).toEqual([
+      [0, "Inoperative"],
+      [1, "Operative"],
+    ]);
     cp.disconnect();
   });
 });

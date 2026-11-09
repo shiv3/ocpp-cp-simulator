@@ -85,6 +85,7 @@ import {
   type Get15118EVCertificateRequest,
   type Get15118EVCertificateResult,
 } from "../security/get15118EVCertificate";
+import type { ChargePointRepositories } from "../persistence/ChargePointRepositories";
 import type { Database } from "../persistence/Database";
 import type { LogSink } from "../persistence/LogSink";
 import type {
@@ -541,6 +542,8 @@ export class ChargePoint {
   private readonly _timeline: ChargePointTimeline;
   private readonly _timelineProjector: ChargePointTimelineProjector;
   private readonly _logSink: LogSink;
+  /** #878: the stores this charge point persists its own state through. */
+  private readonly _repositories: ChargePointRepositories;
   private readonly _fileUploader: FileUploader;
   private readonly _reservationManager: ReservationManager;
   /** Parent id / groupIdToken of the tags the CSMS authorized (reservations). */
@@ -733,6 +736,7 @@ export class ChargePoint {
     this._capabilityProfile = transportOptions.capabilityProfile;
     this._logger.setCpId(this._id);
     this._logSink = deps.logSink;
+    this._repositories = deps.repositories;
     this._fileUploader = deps.fileUploader;
     // #456: installed certificates survive a restart when state persists.
     this._certificateStore = new CertificateStore(
@@ -1062,30 +1066,16 @@ export class ChargePoint {
   /** Read a persisted Operative/Inoperative flag from the DB for the given
    *  connector (`0` = CP-level). Returns `null` if no override is stored. */
   private loadAvailability(connectorId: number): OCPPAvailability | null {
-    if (!this._database) return null;
-    const row = this._database.get<{ availability: string | null }>(
-      "SELECT availability FROM connector_settings WHERE cp_id = ? AND connector_id = ?",
-      [this._id, connectorId],
-    );
-    if (
-      row?.availability === "Operative" ||
-      row?.availability === "Inoperative"
-    ) {
-      return row.availability;
-    }
-    return null;
+    return this._repositories.connectorSettings.loadAvailability(connectorId);
   }
 
   private saveAvailability(
     connectorId: number,
     availability: OCPPAvailability,
   ): void {
-    if (!this._database) return;
-    this._database.run(
-      "INSERT INTO connector_settings (cp_id, connector_id, availability) " +
-        "VALUES (?, ?, ?) " +
-        "ON CONFLICT (cp_id, connector_id) DO UPDATE SET availability = excluded.availability",
-      [this._id, connectorId, availability],
+    this._repositories.connectorSettings.saveAvailability(
+      connectorId,
+      availability,
     );
   }
 

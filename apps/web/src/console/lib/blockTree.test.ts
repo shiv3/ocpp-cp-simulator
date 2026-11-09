@@ -782,6 +782,43 @@ describe("unwrapLoop (Stop repeating)", () => {
     });
   };
 
+  it("a lane that loops back to an inner header is not 'leaving' the outer loop", () => {
+    // O{h1; I{h2; f{case-0 -> h2 | case-1 -> c | default -> d -> END}}; c -> h1}
+    // d runs once, after both loops: it is in neither.
+    const def = graph(
+      [
+        start(),
+        node("h1"),
+        node("h2"),
+        sw("f", ["m", "n"]),
+        node("c"),
+        node("d"),
+        end(),
+      ],
+      [
+        ["start", "h1"],
+        ["h1", "h2"],
+        ["h2", "f"],
+        ["f", "h2", "case-0"],
+        ["f", "c", "case-1"],
+        ["f", "d", "default"],
+        ["d", "end"],
+        ["c", "h1"],
+      ],
+    );
+    const tree = recognizeBlockTree(def);
+    expect(
+      editCapabilities(tree, { kind: "node", nodeId: "d" }).unwrapLoop,
+    ).toEqual({ ok: false, reason: "scenarios.editor.cannot.notInLoop" });
+    // The loops themselves still unwrap.
+    expect(
+      editCapabilities(tree, { kind: "node", nodeId: "h2" }).unwrapLoop.ok,
+    ).toBe(true);
+    expect(
+      editCapabilities(tree, { kind: "node", nodeId: "c" }).unwrapLoop.ok,
+    ).toBe(true);
+  });
+
   it("a loop that ends its lane runs on to END; the back edge keeps its id", () => {
     const def = graph(
       [start(), node("a"), node("b"), end()],

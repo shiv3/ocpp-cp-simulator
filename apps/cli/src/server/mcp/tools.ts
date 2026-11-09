@@ -791,7 +791,7 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
 
   mcp.tool("ev_disconnected", {
     description:
-      "Unplug the cable on the EV side of a connector. With a running transaction, StopTransactionOnEVSideDisconnect stops it (EVDisconnected) or suspends it (SuspendedEV); without one the connector goes Available",
+      "Unplug the cable on the EV side of a connector. With a running transaction, StopTransactionOnEVSideDisconnect stops it (EVDisconnected) or suspends it (SuspendedEV); without one a Preparing, Finishing or suspended connector goes Available (a Reserved, Faulted or Unavailable one keeps its status)",
     inputSchema: z.object({
       cpId: z.string().describe("Charge point identifier"),
       connector: METHODS.ev_disconnected.params.shape.connector.describe(

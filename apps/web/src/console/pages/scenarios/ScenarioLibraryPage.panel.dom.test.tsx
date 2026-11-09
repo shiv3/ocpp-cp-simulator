@@ -189,7 +189,9 @@ describe("Scenarios page — side panel", () => {
     const panel = document.querySelector(PANEL)!;
     expect(panel.querySelector("h2")?.textContent).toBe("Fork demo");
     expect(panel.textContent).toContain("Library");
-    expect(panel.textContent).toContain("5 steps · 2 branches");
+    // Status Change has two edges, but only its first runs: no branches.
+    expect(panel.textContent).toContain("Library · 5 steps");
+    expect(panel.textContent).not.toContain("branches");
     expect(panel.textContent).toContain("Used by");
     // The assigned connector, marked with its live run.
     const chip = Array.from(panel.querySelectorAll("a")).find(

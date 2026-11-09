@@ -80,7 +80,13 @@ export class StartTransactionResultHandler implements CallResultHandler<StartTra
         // is a genuine round trip and consistently arrives after). Only
         // re-drive here — and emit a second StatusNotification.req — if
         // that hasn't already happened.
-        if (connector.status !== OCPPStatus.Charging) {
+        // An EV that already said it is not ready (#453, or a vehicle
+        // behavior, #835) stays SuspendedEV: the CSMS accepting the
+        // transaction does not make the vehicle ask for energy.
+        const evHoldsOffer =
+          connector.status === OCPPStatus.SuspendedEV &&
+          connector.energyOfferSuspended;
+        if (connector.status !== OCPPStatus.Charging && !evHoldsOffer) {
           context.logger.info(
             `StartTransaction accepted for connector ${this.connectorId}, transitioning to Charging`,
             LogType.TRANSACTION,

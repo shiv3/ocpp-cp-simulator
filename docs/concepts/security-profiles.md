@@ -222,9 +222,11 @@ password, after `Rejected`/`NotSupported` it keeps it).
   `--basic-auth-*` credentials of profile 0 are not replaced by it. The station
   does not reconnect by itself; the CSMS, which no longer accepts the old
   password, closes the link.
-  - While the profile is 1 or 2 a value that is not 16 to 20 bytes written as
-    32 to 40 hex digits (whitepaper §7.2: at least 16 bytes, at most 40 hex
-    digits) is `Rejected` and the old key is kept: the transport cannot derive
+  - While the profile is 1 or 2 a value that is neither 16 to 20 bytes
+    written as 32 to 40 hex digits nor a plain key of 16 to 20 printable
+    characters (whitepaper §7.2: at least 16 bytes, at most 40 hex digits;
+    the connection code takes both shapes, #839) is `Rejected` and the old
+    key is kept: the transport cannot derive
     the password from it, and every later connection attempt would fail. The
     reconnect loop also survives a key that became unusable some other way: the
     attempt is logged as an error and retried with backoff.
@@ -393,7 +395,12 @@ on 1.6, unlike 2.x). The station treats them as follows (#734):
   boot answered to a `TriggerMessage` are not startups and send none.
 - Both automatic events keep the `SecurityProfile >= 1` gate: a profile-0
   station sends neither. This is a decision, not a requirement of the
-  whitepaper; the gate predates #734 and was kept.
+  whitepaper; the gate predates #734 and was kept. The other critical events
+  have no such gate: `FirmwareUpdated` (#776) and
+  `InvalidChargePointCertificate` (#769) are sent at profile 0 too (#839).
+- Known gap (A01.FR.11, #839): a change of `AuthorizationKey` is not recorded
+  in the Security log (`ReconfigurationOfSecurityParameters`, without the key
+  per A01.FR.12).
 
 ### OCPP 2.0.1 and 2.1 behaviour
 
@@ -435,8 +442,9 @@ CALLERROR.
   which M04.FR.08 allows.
 - `CertificateSigned` splits `certificateChain` into PEM certificates, leaf
   first. It answers `Accepted` only when a CSR is pending for the chain's use and the
-  leaf carries that CSR's public key and the current date is within the leaf's
-  validity period (A02.FR.06, #587; below). The chain then replaces any
+  leaf carries that CSR's public key and the A02.FR.06 checks pass (validity
+  of every chain member, Certificate Properties, operator hierarchy; #587,
+  below). The chain then replaces any
   older chain of the same use, and the CSR is no longer pending. An absent
   `certificateType` means the Charging Station certificate: per the field
   description, the certificate then serves both the CSMS and the 15118
@@ -517,22 +525,38 @@ CALLERROR.
   sequence by itself: `Accepted`, or `Rejected` because the leaf is not
   valid (A02.FR.07, A02.FR.20, #587), after which no `SignCertificate` goes
   out until the CSMS sends a `TriggerMessage`.
-  **Validity (A02.FR.06, #587).** The key is checked first. A leaf whose
-  `notAfter` has passed, or whose `notBefore` is still ahead, is `Rejected`
-  on 2.0.1 and 2.1 alike: A02.FR.06 asks for the current date to be within
-  the certificate's validity period (the 2.0.1 ed4 and 2.1 ed2 texts are
-  identical), so the certificate is discarded, nothing is stored or switched
-  to, and an `InvalidChargingStationCertificate` security event follows the
-  answer (A02.FR.07). The Certificate Properties and the operator hierarchy
-  that A02.FR.06 also names are not checked (a leaf with the right key that
-  lies outside the hierarchy is `Accepted`, which 2.0.1 Part 6 TC_A_14_CS
-  would expect `Rejected`; tracked in #847), and only the
-  leaf's period is, not that of the chain's other members. A closed connection only holds the wait: after the next accepted boot it goes on with what it had left and
+  **A02.FR.06 checks (#587, #847).** The key is checked first, then in
+  this order:
+  1. _Validity of every chain member._ A leaf or sub-CA whose `notAfter` has
+     passed, or whose `notBefore` is still ahead, is `Rejected` on 2.0.1 and
+     2.1 alike (the A02.FR.06 texts are identical). The current date is
+     the station's clock.
+  2. _Certificate Properties of the leaf_ (A00.FR.501-511, the SHALL rules):
+     an RSA key of at least 2048 bits or an elliptic curve of at least 224
+     bits (A00.FR.502/503), a serial number (A00.FR.508), an `O` RDN
+     (A00.FR.509), and for the Charging Station certificate a `CN` that is
+     not a URL or an IP address (A00.FR.511). The SHOULD rules (signature
+     algorithm, hash, Key Usage; A00.FR.505/506/512) are not checked.
+  3. _Hierarchy_ (Certificate Hierarchy, A00.FR.6xx): each member must be
+     signed by the next, and the last must be an installed root or signed by
+     one. The roots are the installed `CSMSRootCertificate` entries for the
+     Charging Station certificate and the `V2GRootCertificate` entries for a
+     V2G certificate. A station with no root of that kind installed cannot
+     tell which hierarchy it belongs to, so only the links inside the chain
+     are checked then (decision recorded in #847; an installed root the
+     parser cannot read is ignored).
+
+  Any failure discards the certificate, stores and switches to nothing, and
+  an `InvalidChargingStationCertificate` security event follows the answer,
+  with the reason in `techInfo` (A02.FR.07). This is what 2.0.1 Part 6
+  TC_A_14_CS (`invalid_signingCertificate`) expects. Because the leaf's key
+  matched, the failure also ends the `SignCertificate` resends (A02.FR.20).
   the same resend count, so a sequence that reached
   `CertSigningRepeatTimes` or ended does not start over on a reconnect. A
   request the close left unanswered was never accepted and starts no wait.
   `sign_certificate` gets the same back-off, except for a given CSR that
   does not parse.
+
 - **`GetCertificateStatus`** (M06, #537). The station asks the CSMS for the
   OCSP status of its V2G certificates (`V2GCertificate`, 2.1
   `V2G20Certificate`): after an accepted V2G `CertificateSigned`, for the
@@ -649,10 +673,10 @@ connected.
   previous certificate with its key although the renewal already replaced
   that certificate's chain in the store. The spec imposes it.
 - `CertificateSigned` refuses a certificate whose `notBefore` is ahead
-  (A02.FR.06, above), so the switch is never deferred to a later
-  `notBefore` through that message; the timer that would wait for one is a
-  guard only. A manual disconnect does not cancel
-  that wait. A `cp.delete` does, and so does a `cp.update`, which replaces
+  (A02.FR.06, above), so a stored identity is valid when it is handed over
+  and the station does not wait for a `notBefore` (the timer that did was
+  removed, #847). A `cp.delete` cancels the wait for transaction messages
+  in flight before the reconnect, and so does a `cp.update`, which replaces
   the charge point: the replacement holds no key, and presents
   `--tls-cert`, as after a restart. A second `CertificateSigned`
   while the first is still being read supersedes it.

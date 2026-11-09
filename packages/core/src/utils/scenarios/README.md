@@ -96,6 +96,6 @@ The following test cases are not covered by scenarios:
 
 - **TC_007** (Cached Authorization) — no template yet. Since #452 the CP has a real Authorization Cache and consults it, with the Local Authorization List, on a local start (`AuthorizationCacheEnabled`, `LocalPreAuthorize`, `LocalAuthorizeOffline`, `AllowOfflineTxForUnknownId`; see `docs/concepts/local-authorization.md`), so the case is drivable; the template itself is not written.
 - **TC_032, TC_037, TC_039** (Offline Power Failure, Offline Transactions) — No offline transaction queue or transaction replication in the scenario engine.
-- **TC_047** (Reservation Expiry) — CP expires reservations passively on TTL; transition is internal, not observable as a status change.
-- **TC_049** (Charge-Point-Wide Reservation) — CP has no connector 0; ReserveNow(connectorId=0) is rejected by core; no distinct behavior to verify.
+- **TC_047** (Reservation Expiry) — no template yet. The expiry is observable since #739: the connector goes back to Available (StatusNotification, and ReservationStatusUpdate(Expired) on 2.x) at the `expiryDate`, so the case is drivable.
+- **TC_049** (Charge-Point-Wide Reservation) — no template yet. `ReserveNow(connectorId=0)` is supported (#595): it keeps one connector free per reservation, so the case is drivable.
 - **TC_073–TC_088** (Security, Certificates, Key Provisioning) — TLS/PKI infrastructure and security setup are outside the requested feature profiles.

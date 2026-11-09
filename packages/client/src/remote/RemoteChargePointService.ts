@@ -11,6 +11,11 @@ import type {
   PowerLossOptions,
   PowerRestoreOptions,
 } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
+import type {
+  FleetCreateParams,
+  FleetCreateResult,
+  FleetTemplate,
+} from "@ocpp-cp-simulator/contracts/methods";
 import type { VehicleProfile } from "@ocpp-cp-simulator/core/cp/domain/vehicle/VehicleProfile";
 import { io, type Socket } from "socket.io-client";
 import type {
@@ -1772,6 +1777,27 @@ export class RemoteChargePointService implements ChargePointService {
 
   async setChargePointLabels(cpId: string, labels: Labels): Promise<void> {
     await this.rpc("cp.labels.set", { cpId, labels });
+  }
+
+  async listFleetTemplates(): Promise<FleetTemplate[]> {
+    return this.rpc("fleet.template.list", {});
+  }
+
+  async getFleetTemplate(id: string): Promise<FleetTemplate> {
+    return this.rpc("fleet.template.get", { id });
+  }
+
+  async saveFleetTemplate(template: FleetTemplate): Promise<string> {
+    const saved = await this.rpc("fleet.template.save", { template });
+    return saved.id;
+  }
+
+  async deleteFleetTemplate(id: string): Promise<void> {
+    await this.rpc("fleet.template.delete", { id });
+  }
+
+  async createFleet(params: FleetCreateParams): Promise<FleetCreateResult> {
+    return this.rpc("fleet.create", params);
   }
 
   async removeChargePoint(id: string): Promise<void> {

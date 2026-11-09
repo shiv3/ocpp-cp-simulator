@@ -44,15 +44,18 @@ async function charging(r: Rig, tag = "TAG-1", c = 1) {
   r.cp.updateConnectorStatus(c, OCPPStatus.Charging);
   await settle(r);
 }
+// These two return the CSMS call so a case awaits the station's answer: the
+// next step then never starts before the previous exchange is on the wire,
+// however slow the machine (#848).
 const changeAvail = (r: Rig, type: "Operative" | "Inoperative", id?: number) =>
-  void (r.is16
+  r.is16
     ? r.csms.call("ChangeAvailability", { connectorId: id ?? 0, type })
     : r.csms.call("ChangeAvailability", {
         operationalStatus: type,
         ...(id === undefined ? {} : { evse: { id } }),
-      }));
+      });
 const reserve = (r: Rig, id: number, c: number, tag: string, expiry: string) =>
-  void (r.is16
+  r.is16
     ? r.csms.call("ReserveNow", {
         connectorId: c,
         expiryDate: expiry,
@@ -65,7 +68,7 @@ const reserve = (r: Rig, id: number, c: number, tag: string, expiry: string) =>
         ...(c === 0 ? {} : { evseId: c }),
         expiryDateTime: expiry,
         idToken: { idToken: tag, type: "ISO14443" },
-      }));
+      });
 const FUT = "2099-01-01T00:00:00.000Z";
 const two = { connectors: 2 };
 
@@ -382,6 +385,26 @@ c16(
   },
   { memory: true, simulation: { clock: periodicOfflineClock, seed: "g722" } },
 );
+// #847: Rig.reconnected() across a reconnect of the in-memory transport
+// (FakeCsms.attachMemoryClient sets lastFrameAt like the WebSocket `open`
+// path): the second boot and the samples that follow are on the wire.
+const memoryReconnectClock = new VirtualClock();
+c16(
+  "memory-transport-reconnect",
+  async (r) => {
+    r.plugIn();
+    await settle(r);
+    await r.cp.startTransaction("TAG-A", 1);
+    await settle(r);
+    r.csms.dropConnection();
+    await r.reconnected();
+    await settle(r);
+    await periodic(r, memoryReconnectClock, 65);
+    r.cp.stopTransaction(1);
+    await settle(r);
+  },
+  { memory: true, simulation: { clock: memoryReconnectClock, seed: "g847" } },
+);
 // A transaction restored after a restart is sampled again, from the restart.
 const periodicRestartClock = new VirtualClock();
 const periodicRestartNextClock = new VirtualClock();
@@ -431,8 +454,8 @@ c16(
     simulation: { clock: periodicStartErrorClock, seed: "g722" },
   },
 );
-// The interval is read when the transaction starts: a ChangeConfiguration
-// from the CSMS mid-transaction applies to the next one.
+// A ChangeConfiguration of the interval mid-transaction re-arms the sampler
+// at once (#839; before, it applied to the next transaction).
 const periodicChangeClock = new VirtualClock();
 c16(
   "meter-periodic-change-configuration",
@@ -456,6 +479,28 @@ c16(
     await settle(r);
   },
   { memory: true, simulation: { clock: periodicChangeClock, seed: "g722" } },
+);
+// #839, 1.6 §9.1.19: an interval of 0 means no sampled data is sent; setting
+// it mid-transaction stops the running sampler.
+const periodicZeroClock = new VirtualClock();
+c16(
+  "meter-periodic-change-to-zero",
+  async (r) => {
+    r.plugIn();
+    await settle(r);
+    await r.cp.startTransaction("TAG-A", 1);
+    await settle(r);
+    await periodic(r, periodicZeroClock, 65);
+    await r.csms.call("ChangeConfiguration", {
+      key: "MeterValueSampleInterval",
+      value: "0",
+    });
+    await settle(r);
+    await periodic(r, periodicZeroClock, 130);
+    r.cp.stopTransaction(1);
+    await settle(r);
+  },
+  { memory: true, simulation: { clock: periodicZeroClock, seed: "g722" } },
 );
 // A scenario's own meter strategy (an auto-increment node) keeps its own
 // interval next to the station's sampler: both send.
@@ -1667,9 +1712,9 @@ const strict = (
   });
 const FAR_PAST = "2020-01-01T00:00:00.000Z";
 const stationAvail = (r: Rig, type: "Operative" | "Inoperative") =>
-  void (r.is16
+  r.is16
     ? r.csms.call("ChangeAvailability", { connectorId: 0, type })
-    : r.csms.call("ChangeAvailability", { operationalStatus: type }));
+    : r.csms.call("ChangeAvailability", { operationalStatus: type });
 const statusOf = (f: { payload: unknown }) =>
   (f.payload as { status?: string }).status;
 

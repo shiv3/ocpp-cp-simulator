@@ -26,8 +26,10 @@ import {
   setLaneCondition,
   setLaneHandle,
   setLink,
+  unwrapLoop,
   wrapInLoop,
 } from "./blockTree";
+import { validateScenarioGraph } from "@ocpp-cp-simulator/core/scenario/scenarioGraphValidator";
 import { deriveStepLayout } from "./stepLayout";
 import { legacyDeriveStepLayout } from "./__fixtures__/legacyStepLayout";
 import {
@@ -750,6 +752,266 @@ describe("operations", () => {
       ["b->c", "c"],
       ["c->h", "b"],
     ]);
+  });
+});
+
+describe("unwrapLoop (Stop repeating)", () => {
+  /** The result covers, passes the validator, round-trips, and nothing the
+   *  edit did not touch runs differently. */
+  const checked = (def: ScenarioDefinition, out: ScenarioDefinition) => {
+    const tree = recognizeBlockTree(out);
+    assertTreeCovers(out, tree);
+    validateScenarioGraph(out);
+    sameExceptUpdatedAt(roundTrip(out), out);
+    expect(semanticDrift(def, out)).toEqual([]);
+    // Nodes stay; a file without END gets one for a loop that ran to END.
+    expect(out.nodes.slice(0, def.nodes.length)).toEqual(def.nodes);
+    for (const n of out.nodes.slice(def.nodes.length)) {
+      expect(n.type).toBe(ScenarioNodeType.END);
+    }
+    return tree;
+  };
+  /** Edges whose target changed: `[id, new target]`; every other edge is
+   *  the same object. */
+  const retargeted = (def: ScenarioDefinition, out: ScenarioDefinition) => {
+    expect(out.edges.map((e) => e.id)).toEqual(def.edges.map((e) => e.id));
+    return out.edges.flatMap((e, i) => {
+      if (e === def.edges[i]) return [];
+      expect(e).toEqual({ ...def.edges[i], target: e.target });
+      return [[e.id, e.target]];
+    });
+  };
+
+  it("a lane that loops back to an inner header is not 'leaving' the outer loop", () => {
+    // O{h1; I{h2; f{case-0 -> h2 | case-1 -> c | default -> d -> END}}; c -> h1}
+    // d runs once, after both loops: it is in neither.
+    const def = graph(
+      [
+        start(),
+        node("h1"),
+        node("h2"),
+        sw("f", ["m", "n"]),
+        node("c"),
+        node("d"),
+        end(),
+      ],
+      [
+        ["start", "h1"],
+        ["h1", "h2"],
+        ["h2", "f"],
+        ["f", "h2", "case-0"],
+        ["f", "c", "case-1"],
+        ["f", "d", "default"],
+        ["d", "end"],
+        ["c", "h1"],
+      ],
+    );
+    const tree = recognizeBlockTree(def);
+    expect(
+      editCapabilities(tree, { kind: "node", nodeId: "d" }).unwrapLoop,
+    ).toEqual({ ok: false, reason: "scenarios.editor.cannot.notInLoop" });
+    // The loops themselves still unwrap.
+    expect(
+      editCapabilities(tree, { kind: "node", nodeId: "h2" }).unwrapLoop.ok,
+    ).toBe(true);
+    expect(
+      editCapabilities(tree, { kind: "node", nodeId: "c" }).unwrapLoop.ok,
+    ).toBe(true);
+  });
+
+  it("a loop that ends its lane runs on to END; the back edge keeps its id", () => {
+    const def = graph(
+      [start(), node("a"), node("b"), end()],
+      [
+        ["start", "a"],
+        ["a", "b"],
+        ["b", "a"],
+      ],
+    );
+    const tree = recognizeBlockTree(def);
+    expect(
+      editCapabilities(tree, { kind: "node", nodeId: "b" }).unwrapLoop,
+    ).toEqual({ ok: true });
+    const out = unwrapLoop(def, tree, "b");
+    expect(shape(checked(def, out).root)).toEqual({
+      blocks: ["a", "b"],
+      exit: "end",
+    });
+    expect(retargeted(def, out)).toEqual([["b->a", "end"]]);
+  });
+
+  it("a loop with a way out: the back edge goes where the loop went on", () => {
+    const def = graph(
+      [start(), node("x"), node("h"), sw("s", ["m"]), node("y"), end()],
+      [
+        ["start", "x"],
+        ["x", "h"],
+        ["h", "s"],
+        ["s", "h", "case-0"],
+        ["s", "y", "default"],
+        ["y", "end"],
+      ],
+    );
+    const tree = recognizeBlockTree(def);
+    expect((shape(tree.root) as { blocks: unknown[] }).blocks).toMatchObject([
+      "x",
+      { loop: "h" },
+      "y",
+    ]);
+    const out = unwrapLoop(def, tree, "h");
+    expect(shape(checked(def, out).root)).toMatchObject({
+      blocks: ["x", "h", { fork: "s", merge: "y" }, "y"],
+      exit: "end",
+    });
+    expect(retargeted(def, out)).toEqual([["s->h", "y"]]);
+  });
+
+  it("every back edge of a switch whose lanes return to the header moves", () => {
+    const def = graph(
+      [start(), node("h"), sw("s"), node("p"), node("q"), end()],
+      [
+        ["start", "h"],
+        ["h", "s"],
+        ["s", "p", "case-0"],
+        ["s", "q", "case-1"],
+        ["s", "h", "default"],
+        ["p", "h"],
+        ["q", "h"],
+      ],
+    );
+    const tree = recognizeBlockTree(def);
+    expect(tree.root.blocks[0]).toMatchObject({ kind: "loop" });
+    const out = unwrapLoop(def, tree, "p");
+    const after = checked(def, out);
+    expect(shape(after.root)).toMatchObject({
+      blocks: ["h", { fork: "s", merge: null }],
+    });
+    expect(retargeted(def, out)).toEqual([
+      ["s->h", "end"],
+      ["p->h", "end"],
+      ["q->h", "end"],
+    ]);
+    // The default lane keeps its handle.
+    expect(out.edges[4].sourceHandle).toBe("default");
+  });
+
+  it("nested loops: the innermost one around the selection goes", () => {
+    const def = graph(
+      [start(), node("h1"), node("h2"), node("b"), sw("s", ["m"]), node("c")],
+      [
+        ["start", "h1"],
+        ["h1", "h2"],
+        ["h2", "b"],
+        ["b", "s"],
+        ["s", "h2", "case-0"],
+        ["s", "c", "default"],
+        ["c", "h1"],
+      ],
+    );
+    const tree = recognizeBlockTree(def);
+    const inner = unwrapLoop(def, tree, "b");
+    const innerTree = checked(def, inner);
+    expect(allLoops(innerTree).map((l) => l.headerId)).toEqual(["h1"]);
+    expect(retargeted(def, inner)).toEqual([["s->h2", "c"]]);
+    // The outer loop's own header: the outer loop goes, the inner stays.
+    const outer = unwrapLoop(def, tree, "h1");
+    const outerTree = checked(def, outer);
+    expect(allLoops(outerTree).map((l) => l.headerId)).toEqual(["h2"]);
+    expect(outer.nodes.filter((n) => n.type === ScenarioNodeType.END)).toEqual([
+      expect.objectContaining({ type: ScenarioNodeType.END }),
+    ]);
+    expect(retargeted(def, outer)).toEqual([
+      ["c->h1", outer.nodes[outer.nodes.length - 1].id],
+    ]);
+  });
+
+  it("a lane that already left the loop stays, and is not in the loop", () => {
+    // loop { head; f1 [case-0 → head | case-1 → f2 [case-0 → x → head |
+    // default → bye → END] | default → out] } → out → END: `out` is where
+    // the loop goes on, `bye` leaves it two forks deep.
+    const def = graph(
+      [
+        start(),
+        node("head"),
+        sw("f1", ["m", "n"]),
+        sw("f2", ["m"]),
+        node("x"),
+        node("bye"),
+        node("out"),
+        end(),
+      ],
+      [
+        ["start", "head"],
+        ["head", "f1"],
+        ["f1", "out", "default"],
+        ["f1", "head", "case-0"],
+        ["f1", "f2", "case-1"],
+        ["f2", "x", "case-0"],
+        ["x", "head"],
+        ["f2", "bye", "default"],
+        ["bye", "end"],
+        ["out", "end"],
+      ],
+    );
+    const tree = recognizeBlockTree(def);
+    expect((shape(tree.root) as { blocks: unknown[] }).blocks).toMatchObject([
+      { loop: "head" },
+      "out",
+    ]);
+    expect(
+      editCapabilities(tree, { kind: "node", nodeId: "bye" }).unwrapLoop,
+    ).toEqual({ ok: false, reason: "scenarios.editor.cannot.notInLoop" });
+    expect(unwrapLoop(def, tree, "bye")).toBe(def);
+    const out = unwrapLoop(def, tree, "x");
+    checked(def, out);
+    expect(retargeted(def, out)).toEqual([
+      ["f1->head", "out"],
+      ["x->head", "out"],
+    ]);
+  });
+
+  it("is refused outside a loop; the closing step's jump points to it", () => {
+    const def = graph(
+      [start(), node("a"), node("b"), node("c"), end()],
+      [
+        ["start", "a"],
+        ["a", "b"],
+        ["b", "c"],
+        ["c", "b"],
+      ],
+    );
+    const tree = recognizeBlockTree(def);
+    expect(
+      editCapabilities(tree, { kind: "node", nodeId: "a" }).unwrapLoop,
+    ).toEqual({ ok: false, reason: "scenarios.editor.cannot.notInLoop" });
+    expect(
+      editCapabilities(tree, { kind: "node", nodeId: "start" }).unwrapLoop.ok,
+    ).toBe(false);
+    expect(
+      editCapabilities(tree, { kind: "node", nodeId: "c" }).setLink,
+    ).toEqual({ ok: false, reason: "scenarios.editor.cannot.insideLoop" });
+    const out = unwrapLoop(def, tree, "c");
+    checked(def, out);
+    expect(retargeted(def, out)).toEqual([["c->b", "end"]]);
+    // Then the closing step can jump.
+    expect(
+      editCapabilities(recognizeBlockTree(out), { kind: "node", nodeId: "c" })
+        .setLink.ok,
+    ).toBe(true);
+  });
+
+  it("the shipped scenarios' loops all unwrap cleanly", () => {
+    let count = 0;
+    for (const [name, def] of shipped) {
+      const tree = recognizeBlockTree(def);
+      for (const loop of allLoops(tree)) {
+        const out = unwrapLoop(def, tree, loop.headerId);
+        expect(out, name).not.toBe(def);
+        checked(def, out);
+        count++;
+      }
+    }
+    expect(count).toBeGreaterThan(0);
   });
 });
 

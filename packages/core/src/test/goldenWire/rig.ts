@@ -37,6 +37,15 @@ export interface RigOptions {
   readonly quietMs?: number;
 }
 
+/**
+ * How long a case waits for the first BootNotification. The file runs ~340
+ * cases at once on real sockets, so on a loaded machine the handshake of one
+ * case can queue behind the others for longer than the 15 s default of a frame
+ * wait. The budget stays under the 90 s test timeout so a real hang still
+ * fails with the frames seen (#848).
+ */
+const BOOT_BUDGET_MS = 60_000;
+
 /** A real ChargePoint wired to a fake CSMS, one per golden case. */
 export class Rig {
   private sink: ReturnType<typeof Bun.serve> | null = null;
@@ -93,7 +102,7 @@ export class Rig {
     this.cp.connect();
     await this.csms.waitForFrame(
       (f) => f.dir === "CP>" && f.action === "BootNotification",
-      { from },
+      { from, timeoutMs: BOOT_BUDGET_MS },
     );
     await this.csms.settle();
   }

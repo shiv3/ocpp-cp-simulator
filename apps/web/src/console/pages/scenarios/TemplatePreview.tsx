@@ -6,7 +6,9 @@ import type { ScenarioTemplate } from "@ocpp-cp-simulator/core/utils/scenarioTem
 import { ScenarioNodeType } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import EmptyState from "../../components/EmptyState";
 import SegmentedControl from "../../components/SegmentedControl";
-import { deriveStepLayout, layoutSteps } from "../../lib/stepLayout";
+import { recognizeBlockTree } from "../../lib/blockTree";
+import { graphEdgeIds } from "../../lib/treeGraphLayout";
+import { branchCount, isDrawableTree, treeSteps } from "../../lib/stepTree";
 import StepInspector from "./edit/StepInspector";
 import UnsupportedOutline from "./edit/UnsupportedOutline";
 import { useScenarioIssues } from "./edit/issueMarkUi";
@@ -40,15 +42,18 @@ const TemplatePreview: React.FC<{
   const { t } = useTranslation();
   const text = useTemplateText();
   const scenario = useMemo(() => previewScenario(template), [template]);
-  const layout = useMemo(() => deriveStepLayout(scenario), [scenario]);
+  const tree = useMemo(() => recognizeBlockTree(scenario), [scenario]);
+  const drawable = isDrawableTree(tree);
   const [view, setView] = useState<PreviewView>("graph");
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
+  const graphEdges = useMemo(() => graphEdgeIds(tree), [tree]);
   // Read-only: no warning box, only the marks (a shipped template should
   // have none).
   const { marks } = useScenarioIssues(
     scenario,
-    layout,
-    layout.supported ? view : "outline",
+    tree,
+    !drawable ? "outline" : view,
+    graphEdges,
   );
   const issues = useMemo(() => ({ marks }), [marks]);
 
@@ -59,13 +64,13 @@ const TemplatePreview: React.FC<{
         n.type !== ScenarioNodeType.START &&
         n.type !== ScenarioNodeType.END,
     ) ?? null;
-  const stepCount = layout.supported
-    ? layoutSteps(layout).length
+  const stepCount = drawable
+    ? treeSteps(tree).length
     : scenario.nodes.filter(
         (n) =>
           n.type !== ScenarioNodeType.START && n.type !== ScenarioNodeType.END,
       ).length;
-  const branches = layout.fork?.branches.length ?? 0;
+  const branches = branchCount(tree);
   const trigger = scenario.trigger;
 
   return (
@@ -127,7 +132,7 @@ const TemplatePreview: React.FC<{
       </header>
 
       <div className="mt-3 flex flex-wrap items-center gap-3">
-        {layout.supported && (
+        {drawable && (
           <SegmentedControl
             label={t("scenarios.editor.editorView")}
             value={view}
@@ -148,7 +153,7 @@ const TemplatePreview: React.FC<{
       <div className="@container mt-3">
         <div className="grid grid-cols-1 items-start gap-4 @[720px]:grid-cols-[minmax(0,1fr)_minmax(260px,340px)]">
           <div className="min-w-0">
-            {!layout.supported ? (
+            {!drawable ? (
               <UnsupportedOutline
                 scenario={scenario}
                 selectedStepId={selectedStepId}
@@ -158,14 +163,14 @@ const TemplatePreview: React.FC<{
               />
             ) : view === "graph" ? (
               <StepsGraphView
-                layout={layout}
+                tree={tree}
                 selectedStepId={selectedStepId}
                 onSelectStep={setSelectedStepId}
                 issues={issues}
               />
             ) : (
               <StepsView
-                layout={layout}
+                tree={tree}
                 selectedStepId={selectedStepId}
                 onSelectStep={setSelectedStepId}
                 issues={issues}

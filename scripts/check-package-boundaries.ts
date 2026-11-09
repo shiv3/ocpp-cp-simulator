@@ -49,6 +49,7 @@ export const PACKAGE_NAMES = [
   "contracts",
   "trace",
   "k6-runtime",
+  "vehicle",
   "core",
   "client",
   "apps/cli",
@@ -72,6 +73,7 @@ export const PACKAGE_DIRS: Readonly<Record<PackageName, string>> = {
   ocpp: "packages/ocpp",
   contracts: "packages/contracts",
   trace: "packages/trace",
+  vehicle: "packages/vehicle",
   "k6-runtime": "packages/k6-runtime",
   core: "packages/core",
   client: "packages/client",
@@ -96,6 +98,8 @@ export function packageNameOf(pkg: PackageName): string {
  *   schemas.
  * - packages/contracts: the wire/RPC vocabulary shared by daemon and clients.
  * - packages/trace: the trace format reader/writer.
+ * - packages/vehicle: the vehicle behavior domain (#835): what the vehicle
+ *   wants and when. Imports nothing, so it can leave the repository unchanged.
  * - packages/k6-runtime: dependency-free files copied verbatim into an
  *   export; runtimeManifest.test.ts enforces that they import nothing outside
  *   themselves.
@@ -113,6 +117,7 @@ export const PACKAGE_MAP: readonly MapEntry[] = [
   { match: "packages/contracts/", pkg: "contracts" },
   { match: "packages/trace/", pkg: "trace" },
   { match: "packages/k6-runtime/", pkg: "k6-runtime" },
+  { match: "packages/vehicle/", pkg: "vehicle" },
   { match: "packages/core/", pkg: "core" },
   { match: "packages/client/", pkg: "client" },
   { match: "apps/cli/", pkg: "apps/cli" },
@@ -127,7 +132,8 @@ export const ALLOWED_DEPENDENCIES: Readonly<
   contracts: [],
   trace: [],
   "k6-runtime": [],
-  core: ["ocpp", "contracts", "trace", "k6-runtime"],
+  vehicle: [],
+  core: ["ocpp", "contracts", "trace", "k6-runtime", "vehicle"],
   client: ["core", "contracts", "ocpp", "trace"],
   "apps/cli": ["ocpp", "contracts", "trace", "k6-runtime", "core", "client"],
   "apps/web": ["ocpp", "contracts", "trace", "k6-runtime", "core", "client"],
@@ -143,6 +149,7 @@ export const PORTABLE_PACKAGES: ReadonlySet<PackageName> = new Set([
   "contracts",
   "trace",
   "k6-runtime",
+  "vehicle",
   "core",
   "client",
 ]);

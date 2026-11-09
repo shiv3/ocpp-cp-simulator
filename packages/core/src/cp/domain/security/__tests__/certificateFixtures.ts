@@ -51,6 +51,8 @@ export interface IssuedOptions {
   /** Validity period, in ms from now (default -60 s to +1 day). */
   notBeforeOffsetMs?: number;
   notAfterOffsetMs?: number;
+  /** Subject of a leaf, instead of the CSR's (#587 Certificate Properties). */
+  subject?: string;
 }
 
 function aiaExtensions({ ocspUrl }: IssuedOptions): x509.Extension[] {
@@ -75,7 +77,7 @@ export async function subCa(
     serialNumber,
     subject: name,
     issuer: issuer.name,
-    ...validity(),
+    ...validity(options),
     signingAlgorithm: EC_ALG,
     publicKey: keys.publicKey,
     signingKey: issuer.keys.privateKey,
@@ -109,7 +111,7 @@ export async function leafForCsr(
   const csr = new x509.Pkcs10CertificateRequest(csrPem);
   const cert = await x509.X509CertificateGenerator.create({
     serialNumber,
-    subject: csr.subject,
+    subject: options.subject ?? csr.subject,
     issuer: issuer.name,
     ...validity(options),
     ...(options.notBefore ? { notBefore: options.notBefore } : {}),

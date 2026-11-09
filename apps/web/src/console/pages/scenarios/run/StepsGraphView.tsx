@@ -1,23 +1,31 @@
 import { useTranslation } from "react-i18next";
 import React from "react";
-import { Plus, X } from "lucide-react";
+import { LogOut, Plus, Repeat, RepeatOff, X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import RunStatePill from "../../../components/RunStatePill";
-import type { ScenarioNode } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import {
+  editCapabilities,
+  firstNodeOf,
+  seqAt,
+  type Capability,
+  type SeqPath,
+} from "../../../lib/blockTree";
 import { isLiveRunState } from "../../../lib/scenarioRunState";
+import { WAIT_STEP_TYPES, stepSummary } from "../../../lib/scenarioSteps";
+import { stepNumbers } from "../../../lib/stepTree";
 import {
-  canAddBranch,
-  stepSummary,
-  type StepLane,
-} from "../../../lib/scenarioSteps";
-import {
-  layoutSteps,
-  stepIndexOf,
-  type StepLayout,
-} from "../../../lib/stepLayout";
+  END_R,
+  GAP,
+  NODE_H,
+  NODE_W,
+  START_R,
+  TAG_H,
+  layoutTreeGraph,
+  type GraphPlus,
+} from "../../../lib/treeGraphLayout";
 import { dropNeighbours } from "../../../lib/useLaneDrag";
-import { useStepEditing, type InsertSlot } from "../edit/stepEditing";
+import { useStepEditing } from "../edit/stepEditing";
 import IssueBadge from "../edit/IssueBadge";
 import {
   SEVERITY,
@@ -26,7 +34,6 @@ import {
   useStepIssues,
 } from "../edit/issueMarkUi";
 import { highlightedBy, type IssueMark } from "../../../lib/graphIssueMarks";
-import { t } from "../../../../i18n";
 import StepTile from "./StepTile";
 import {
   CURRENT_CARD,
@@ -35,326 +42,38 @@ import {
   laneStyle,
   nodeTitle,
   type BoxPhase,
-  type StepRunViewProps,
+  type StepTreeViewProps,
 } from "./stepVisuals";
 
-// The mock's grid: lane 0's centre at X0, the first card's top at Y0.
-const LANE_W = 262;
-const ROW_H = 76;
-const X0 = 134;
-const Y0 = 62;
-const NODE_W = 228;
-const NODE_H = 52;
-/** How far below the fork node a branch's first card starts. */
-const BRANCH_DROP = 1.9 * ROW_H;
-const START_R = 5;
-const END_R = 6;
-/** Gap between a card and the start dot / end ring. */
-const CAP_GAP = 22;
-/** The editor's gap before an end ring: room for the `+` disc on the path. */
-const EDIT_CAP_GAP = 46;
 const TODO_STROKE = "var(--cx-border-strong)";
+const LOOP_STROKE = "var(--cx-purple)";
 /** The step picker opened from a `+` (and the room it needs below). */
 const PICKER_W = 260;
 const PICKER_H = 330;
-
-interface PlacedNode {
-  step: ScenarioNode;
-  /** The drawing lane (a branch's index; the chain is lane 0). */
-  lane: number;
-  top: number;
-  /** The editing lane (the chain is "main") and the index in it. */
-  stepLane: StepLane;
-  index: number;
-}
-
-/** A loop or join link: from a lane's last card round to an earlier card. */
-interface LinkPath {
-  key: string;
-  d: string;
-  lane: number;
-  from: string;
-  to: string;
-  mid: Point;
-}
-
-/** How far a link's curve swings out right of the cards. */
-const LINK_SWING = 44;
-
-interface GraphPath {
-  key: string;
-  d: string;
-  lane: number;
-  /** The target node's id, or `end`. */
-  to: string;
-  done: boolean;
-  /** The scenario edge drawn, when there is one. */
-  edgeId?: string;
-  mid: Point;
-}
-
-interface Point {
-  x: number;
-  y: number;
-}
-
-/** A `+` of the editor: where a picked step goes, centred at (x, y). */
-interface PlusPoint {
-  slot: InsertSlot;
-  label: string;
-  x: number;
-  y: number;
-}
-
-interface GraphGeometry {
-  placed: PlacedNode[];
-  paths: GraphPath[];
-  links: LinkPath[];
-  ends: Array<{ lane: number; y: number }>;
-  tags: Array<{ lane: number; name: string; top: number }>;
-  startY: number;
-  /** The `+` discs after a lane's last card (or on an empty lane). */
-  discs: PlusPoint[];
-  /** The `+` on hover between two cards of a lane. */
-  zones: PlusPoint[];
-  /** Where "+ branch" sits: beside the fork node, else the last chain card. */
-  branchPill: { left: number; top: number };
-  width: number;
-  height: number;
-}
-
-const laneX = (lane: number) => X0 + lane * LANE_W;
-
-/** Straight within a lane; a cubic curve when it moves into another lane.
- *  Both are symmetric, so the middle of the path is the middle point. */
-function connect(
-  x1: number,
-  y1: number,
-  x2: number,
-  y2: number,
-): { d: string; mid: Point } {
-  const mid = { x: (x1 + x2) / 2, y: (y1 + y2) / 2 };
-  if (x1 === x2) return { d: `M ${x1} ${y1} L ${x2} ${y2}`, mid };
-  return {
-    d: `M ${x1} ${y1} C ${x1} ${mid.y}, ${x2} ${mid.y}, ${x2} ${y2}`,
-    mid,
-  };
-}
-
-/** The point of a cubic Bézier at t = 0.5. */
-const cubicMid = (p0: Point, p1: Point, p2: Point, p3: Point): Point => ({
-  x: (p0.x + 3 * p1.x + 3 * p2.x + p3.x) / 8,
-  y: (p0.y + 3 * p1.y + 3 * p2.y + p3.y) / 8,
-});
-
-/** Places every card, path, cap and (for the editor) `+` on the grid. */
-function computeGeometry(
-  layout: StepLayout,
-  phaseOf: (id: string) => BoxPhase,
-  editable: boolean,
-): GraphGeometry {
-  const capGap = editable ? EDIT_CAP_GAP : CAP_GAP;
-  const travelled = (id: string) => {
-    const phase = phaseOf(id);
-    return phase === "done" || phase === "current";
-  };
-  const number = (id: string) => stepIndexOf(layout, id);
-
-  const placed: PlacedNode[] = [];
-  const paths: GraphPath[] = [];
-  const ends: Array<{ lane: number; y: number }> = [];
-  const tags: Array<{ lane: number; name: string; top: number }> = [];
-  const discs: PlusPoint[] = [];
-  const zones: PlusPoint[] = [];
-  const startY = Y0 - CAP_GAP - START_R;
-
-  // The chain: start dot, then lane 0 top to bottom.
-  let prevBottom = startY + START_R;
-  let prevId: string | null = null;
-  layout.main.forEach((step, row) => {
-    const top = Y0 + row * ROW_H;
-    placed.push({ step, lane: 0, top, stepLane: "main", index: row });
-    paths.push({
-      key: `${prevId ?? "start"}->${step.id}`,
-      ...connect(X0, prevBottom, X0, top),
-      lane: 0,
-      to: step.id,
-      done: travelled(step.id),
-      edgeId: layout.edgeInto?.[step.id],
-    });
-    if (prevId) {
-      zones.push({
-        slot: { lane: "main", index: row },
-        label: t("scenarioRun.insertBetween", {
-          from: number(prevId) ?? "",
-          to: number(step.id) ?? "",
-        }),
-        x: X0,
-        y: (prevBottom + top) / 2,
-      });
-    }
-    prevBottom = top + NODE_H;
-    prevId = step.id;
-  });
-
-  const lastMain = layout.main[layout.main.length - 1];
-  // The fork node (or, without a fork, the last chain card); START when the
-  // chain is empty.
-  const anchorTop = lastMain
-    ? Y0 + (layout.main.length - 1) * ROW_H
-    : Y0 - ROW_H;
-  const branchPill = lastMain
-    ? { left: X0 + NODE_W / 2 + 10, top: anchorTop + NODE_H / 2 - 11 }
-    : { left: X0 + 14, top: startY - 11 };
-
-  if (layout.fork) {
-    const forkBottom = prevBottom;
-    const firstTop = anchorTop + BRANCH_DROP;
-    // The chain's own `+`: just under the fork node, before the paths split.
-    discs.push({
-      slot: { lane: "main", index: layout.main.length },
-      label: lastMain
-        ? t("scenarioRun.addAfter", { n: number(lastMain.id) ?? "" })
-        : t("scenarioRun.addBeforeBranches"),
-      x: X0,
-      y: forkBottom + 16,
-    });
-    layout.fork.branches.forEach((branch, lane) => {
-      tags.push({ lane, name: branch.name, top: firstTop - 26 });
-      let bottom = forkBottom;
-      let fromX = X0;
-      branch.steps.forEach((step, row) => {
-        const top = firstTop + row * ROW_H;
-        placed.push({ step, lane, top, stepLane: lane, index: row });
-        paths.push({
-          key: `${row === 0 ? (prevId ?? "start") : branch.steps[row - 1].id}->${step.id}`,
-          ...connect(fromX, bottom, laneX(lane), top),
-          lane,
-          to: step.id,
-          done: travelled(step.id),
-          edgeId: layout.edgeInto?.[step.id],
-        });
-        if (row > 0) {
-          zones.push({
-            slot: { lane, index: row },
-            label: t("scenarioRun.insertBetween", {
-              from: number(branch.steps[row - 1].id) ?? "",
-              to: number(step.id) ?? "",
-            }),
-            x: laneX(lane),
-            y: (bottom + top) / 2,
-          });
-        }
-        bottom = top + NODE_H;
-        fromX = laneX(lane);
-      });
-      const last = branch.steps[branch.steps.length - 1];
-      const capTop = last ? bottom : firstTop;
-      const endY = capTop + capGap + END_R;
-      ends.push({ lane, y: endY });
-      discs.push({
-        slot: { lane, index: branch.steps.length },
-        label: last
-          ? t("scenarioRun.addAfter", { n: number(last.id) ?? "" })
-          : t("scenarioRun.addToBranch", { name: branch.name }),
-        x: laneX(lane),
-        y: capTop + capGap / 2,
-      });
-      paths.push({
-        key: `${last?.id ?? prevId ?? "start"}->end-${lane}`,
-        ...connect(fromX, bottom, laneX(lane), endY - END_R),
-        lane,
-        to: "end",
-        done: last ? phaseOf(last.id) === "done" : false,
-        edgeId: branch.endEdgeId,
-      });
-    });
-  } else {
-    const endY = prevBottom + capGap + END_R;
-    ends.push({ lane: 0, y: endY });
-    discs.push({
-      slot: { lane: "main", index: layout.main.length },
-      label: lastMain
-        ? t("scenarioRun.addAfter", { n: number(lastMain.id) ?? "" })
-        : t("scenarioRun.addFirst"),
-      x: X0,
-      y: prevBottom + capGap / 2,
-    });
-    paths.push({
-      key: `${lastMain?.id ?? "start"}->end`,
-      ...connect(X0, prevBottom, X0, endY - END_R),
-      lane: 0,
-      to: "end",
-      done: lastMain ? phaseOf(lastMain.id) === "done" : false,
-      edgeId: layout.endEdgeId,
-    });
-  }
-
-  const links: LinkPath[] = [];
-  let linkRight = 0;
-  for (const link of layout.links) {
-    const from = placed.find((p) => p.step.id === link.source);
-    const to = placed.find((p) => p.step.id === link.target);
-    if (!from || !to) continue;
-    const x1 = laneX(from.lane) + NODE_W / 2;
-    const y1 = from.top + NODE_H / 2;
-    const x2 = laneX(to.lane) + NODE_W / 2;
-    const y2 = to.top + NODE_H / 2;
-    const swing = Math.max(x1, x2) + LINK_SWING;
-    linkRight = Math.max(linkRight, swing);
-    links.push({
-      key: link.id,
-      d: `M ${x1} ${y1} C ${swing} ${y1}, ${swing} ${y2}, ${x2 + 3} ${y2}`,
-      lane: from.lane,
-      from: link.source,
-      to: link.target,
-      mid: cubicMid(
-        { x: x1, y: y1 },
-        { x: swing, y: y1 },
-        { x: swing, y: y2 },
-        { x: x2 + 3, y: y2 },
-      ),
-    });
-  }
-
-  const laneCount = Math.max(1, layout.fork?.branches.length ?? 1);
-  let width = Math.max(X0 + LANE_W * (laneCount - 0.5), linkRight + 8);
-  // The "+ branch" pill may stand right of the only lane.
-  if (editable) width = Math.max(width, branchPill.left + 96);
-  const height = Math.max(...ends.map((e) => e.y)) + END_R + 16;
-
-  return {
-    placed,
-    paths,
-    links,
-    ends,
-    tags,
-    startY,
-    discs,
-    zones,
-    branchPill,
-    width,
-    height,
-  };
-}
+const WAIT_TYPES: ReadonlySet<string> = new Set(WAIT_STEP_TYPES);
 
 /**
- * The run's steps drawn as connected cards on a fixed grid: the chain in
- * lane 0, a fork's branches curving into lanes of their own below it (the
- * first branch continues lane 0). Self-contained SVG + absolutely placed
- * cards — no graph library, the layout is the pure `deriveStepLayout`.
+ * The block tree (`recognizeBlockTree`) drawn as connected cards, laid out
+ * recursively (`layoutTreeGraph`): a branch point's lanes stand side by
+ * side under it, each under a lane tag (letter and condition chip) its
+ * curve ends at, and meet again at a merge point below the lowest lane; a
+ * loop is a tinted rectangle behind its body with a solid return arc; a
+ * jump is a dashed curve; steps nothing reaches stand on the right. Plain
+ * SVG and absolutely placed cards, no graph library. It scrolls sideways
+ * when wider than its column.
  *
  * `editable` makes it the editor's Graph view: a click selects a card (the
- * selected one gets a ✕), a `+` disc after the last card of the chain and of
- * each branch and a `+` on hover between two cards open the step picker,
- * "+ branch" by the fork adds a parallel branch, a card drags up or down
- * within its lane, and a focused card takes Alt+ArrowUp/Down and Delete.
+ * selected one gets a ✕), a `+` disc at the end of each sequence and a `+`
+ * on hover between two blocks open the step picker, "+ branch" by a branch
+ * point (or START) adds a lane, a lane tag's ✕ removes it, a card drags up
+ * or down within its sequence, and a focused card takes Alt+ArrowUp/Down
+ * and Delete. Every control is enabled from `editCapabilities`.
  */
-const StepsGraphView: React.FC<StepRunViewProps> = (props) => {
-  // Subscribes to language changes (computeGeometry builds labels with `t`).
+const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
+  // Subscribes to language changes (the layout builds labels with `t`).
   const { t } = useTranslation();
   const {
-    layout,
+    tree,
     currentNodeId,
     state,
     selectedStepId,
@@ -362,8 +81,11 @@ const StepsGraphView: React.FC<StepRunViewProps> = (props) => {
     editable = false,
     onInsertStep,
     onDeleteStep,
-    onAddBranch,
+    onAddLane,
+    onRemoveLane,
+    onUnwrapLoop,
     issues,
+    executedNodeIds,
   } = props;
   const stepIssues = useStepIssues(issues);
   const markCounts = useMarkCounts();
@@ -382,20 +104,65 @@ const StepsGraphView: React.FC<StepRunViewProps> = (props) => {
       strokeWidth: highlight?.edgeIds.includes(edgeId) ? 3 : 2,
     };
   };
-  const phaseOf = (id: string): BoxPhase => boxPhase(id, props);
-  const geometry = computeGeometry(layout, phaseOf, editable);
-  const { placed, paths, ends, tags, startY } = geometry;
+  const phaseOf = (id: string): BoxPhase =>
+    boxPhase(id, { currentNodeId, executedNodeIds, state });
+  // Laid out once per tree / run state, not on every pointer move of a drag.
+  const geometry = React.useMemo(
+    () =>
+      layoutTreeGraph(tree, {
+        editable,
+        phaseOf: (id) =>
+          boxPhase(id, { currentNodeId, executedNodeIds, state }),
+      }),
+    [tree, editable, currentNodeId, executedNodeIds, state],
+  );
+  const numbers = React.useMemo(() => stepNumbers(tree), [tree]);
+  /** The capabilities the tags, pills and loops show, once per tree. */
+  const caps = React.useMemo(() => {
+    if (!editable) return null;
+    const lane = new Map<string, Capability>();
+    for (const tag of geometry.tags) {
+      lane.set(
+        tag.key,
+        editCapabilities(tree, {
+          kind: "lane",
+          nodeId: tag.forkId,
+          laneIndex: tag.laneIndex,
+        }).removeLane,
+      );
+    }
+    const addLane = new Map<string, Capability>();
+    for (const pill of geometry.pills) {
+      addLane.set(
+        pill.nodeId,
+        editCapabilities(tree, { kind: "node", nodeId: pill.nodeId }).addLane,
+      );
+    }
+    const unwrap = new Map<string, Capability>();
+    for (const loop of geometry.loops) {
+      unwrap.set(
+        loop.headerId,
+        editCapabilities(tree, { kind: "node", nodeId: loop.headerId })
+          .unwrapLoop,
+      );
+    }
+    return { lane, addLane, unwrap };
+  }, [tree, editable, geometry]);
+  const { cards, paths, ends } = geometry;
 
-  // The grid is the layout: a lane's centres come from the placed cards.
-  const editing = useStepEditing(props, (lane) =>
-    placed.filter((p) => p.stepLane === lane).map((p) => p.top + NODE_H / 2),
+  // The layout is the geometry: a sequence's block centres come from it.
+  const editing = useStepEditing<SeqPath>(
+    props,
+    (lane) => geometry.centres.get(lane) ?? [],
   );
   const { drag } = editing;
 
-  if (!editable && layoutSteps(layout).length === 0) {
+  if (!editable && cards.length === 0) {
     return <p className="text-sm text-cx-muted">{t("scenarioRun.noSteps")}</p>;
   }
 
+  const capTitle = (cap: Capability, label: string) =>
+    !cap.ok ? t(cap.reason) : cap.note ? `${label} — ${t(cap.note)}` : label;
   const canInsert = editable && onInsertStep !== undefined;
   const openPlus = canInsert
     ? [...geometry.discs, ...geometry.zones].find((p) =>
@@ -409,29 +176,41 @@ const StepsGraphView: React.FC<StepRunViewProps> = (props) => {
     : geometry.height;
   const live = state !== undefined && isLiveRunState(state) ? state : null;
 
-  // The drop line: between the two cards the dragged one would land between.
+  // The drop line: between the two blocks the dragged card would land
+  // between.
   let dropLine: { left: number; top: number } | null = null;
-  if (drag && drag.to !== drag.from) {
-    const lanePlaced = placed.filter((p) => p.stepLane === drag.lane);
-    const { above, below } = dropNeighbours(
-      lanePlaced.map((p) => p.step.id),
-      drag,
-    );
-    const half = (ROW_H - NODE_H) / 2;
-    const at = lanePlaced.find((p) => p.step.id === (below ?? above));
-    if (at) {
+  // Neighbours by block (a loop has no card of its own in its sequence),
+  // as the drag's indices count them.
+  const seq =
+    drag && drag.to !== drag.from ? seqAt(tree, String(drag.lane)) : null;
+  if (drag && seq) {
+    const ids = seq.blocks.map((b) => firstNodeOf(b).id);
+    const { above, below } = dropNeighbours(ids, drag);
+    const column = cards.find((c) => c.seqPath === drag.lane);
+    /** Block `id`'s top and bottom: its card, or its loop's rectangle. */
+    const extent = (id: string) => {
+      const block = seq.blocks[ids.indexOf(id)];
+      const loop =
+        block?.kind === "loop"
+          ? geometry.loops.find((l) => l.headerId === block.headerId)
+          : undefined;
+      if (loop) return { top: loop.rect.y, bottom: loop.rect.y + loop.rect.h };
+      const card = cards.find((c) => c.node.id === id);
+      return card ? { top: card.y, bottom: card.y + NODE_H } : null;
+    };
+    const at = extent(below ?? above ?? "");
+    if (column && at) {
       dropLine = {
-        left: laneX(at.lane) - NODE_W / 2,
-        top: below ? at.top - half - 1 : at.top + NODE_H + half - 1,
+        left: column.x - NODE_W / 2,
+        top: below ? at.top - GAP / 2 - 1 : at.bottom + GAP / 2 - 1,
       };
     }
   }
 
-  const plusButton = (point: PlusPoint, hover: boolean) => (
+  const plusButton = (point: GraphPlus, hover: boolean) => (
     <div
-      key={`${point.slot.lane}:${point.slot.index}`}
-      // A hover zone covers the gap between the two cards; a disc stands on
-      // its own.
+      key={`${hover ? "zone" : "disc"}:${point.slot.lane}:${point.slot.index}`}
+      // A hover zone covers the gap above a block; a disc stands on its own.
       className={cn(
         "absolute z-10 flex items-center justify-center",
         hover && "group/insert",
@@ -440,9 +219,9 @@ const StepsGraphView: React.FC<StepRunViewProps> = (props) => {
         hover
           ? {
               left: point.x - NODE_W / 2,
-              top: point.y - (ROW_H - NODE_H) / 2,
+              top: point.y - GAP / 2,
               width: NODE_W,
-              height: ROW_H - NODE_H,
+              height: GAP,
             }
           : { left: point.x - 9, top: point.y - 9, width: 18, height: 18 }
       }
@@ -466,6 +245,8 @@ const StepsGraphView: React.FC<StepRunViewProps> = (props) => {
     </div>
   );
 
+  const allPaths = [...paths, ...geometry.loops.flatMap((loop) => loop.arcs)];
+
   return (
     <div className="overflow-x-auto">
       <div
@@ -480,18 +261,6 @@ const StepsGraphView: React.FC<StepRunViewProps> = (props) => {
           data-graph-edges=""
           className="pointer-events-none absolute inset-0"
         >
-          {paths.map((path) => (
-            <path
-              key={path.key}
-              d={path.d}
-              data-to={path.to}
-              data-edge-id={path.edgeId}
-              fill="none"
-              strokeWidth={path.done ? 2 : 1.5}
-              stroke={path.done ? laneStyle(path.lane).color : TODO_STROKE}
-              {...edgeIssueProps(path.edgeId)}
-            />
-          ))}
           <defs>
             <marker
               id="graph-link-arrow"
@@ -504,34 +273,101 @@ const StepsGraphView: React.FC<StepRunViewProps> = (props) => {
             >
               <path d="M 0 0 L 8 4 L 0 8 z" fill="var(--cx-faint)" />
             </marker>
+            <marker
+              id="graph-loop-arrow"
+              viewBox="0 0 8 8"
+              refX="7"
+              refY="4"
+              markerWidth="7"
+              markerHeight="7"
+              orient="auto"
+            >
+              <path d="M 0 0 L 8 4 L 0 8 z" fill={LOOP_STROKE} />
+            </marker>
           </defs>
+          {geometry.loops.map((loop) => (
+            <rect
+              key={`rect:${loop.key}`}
+              data-graph-loop={loop.headerId}
+              x={loop.rect.x}
+              y={loop.rect.y}
+              width={loop.rect.w}
+              height={loop.rect.h}
+              rx={14}
+              fill={LOOP_STROKE}
+              fillOpacity={
+                loop.ids.some((id) => phaseOf(id) === "current") ? 0.16 : 0.09
+              }
+            />
+          ))}
+          {paths.map((path) => (
+            <path
+              key={path.key}
+              d={path.d}
+              data-to={path.to}
+              data-edge-id={path.edgeId}
+              fill="none"
+              strokeWidth={path.done ? 2 : 1.5}
+              stroke={path.done ? laneStyle(path.lane).color : TODO_STROKE}
+              {...edgeIssueProps(path.edgeId)}
+            />
+          ))}
+          {geometry.loops.flatMap((loop) =>
+            loop.arcs.map((arc) => (
+              <path
+                key={arc.key}
+                d={arc.d}
+                data-loop-arc={loop.headerId}
+                data-edge-id={arc.edgeId}
+                fill="none"
+                strokeWidth={arc.done ? 2 : 1.75}
+                stroke={LOOP_STROKE}
+                markerEnd="url(#graph-loop-arrow)"
+                {...edgeIssueProps(arc.edgeId)}
+              />
+            )),
+          )}
           {geometry.links.map((link) => (
             <path
               key={link.key}
               d={link.d}
               data-link-from={link.from}
               data-link-to={link.to}
+              data-link-role={link.role}
               fill="none"
               strokeWidth={1.5}
               strokeDasharray="5 4"
               stroke={laneStyle(link.lane).color}
+              strokeOpacity={link.role === "dead" ? 0.45 : 1}
               markerEnd="url(#graph-link-arrow)"
-              data-edge-id={link.key}
-              {...edgeIssueProps(link.key)}
+              data-edge-id={link.edgeId}
+              {...edgeIssueProps(link.edgeId)}
             />
           ))}
-          <circle
-            data-graph-start=""
-            cx={X0}
-            cy={startY}
-            r={START_R}
-            fill="var(--cx-faint)"
-          />
+          {geometry.merges.map((m) => (
+            <circle
+              key={`merge:${m.x}:${m.y}`}
+              data-graph-merge=""
+              cx={m.x}
+              cy={m.y}
+              r={3.5}
+              fill="var(--cx-faint)"
+            />
+          ))}
+          {geometry.start && (
+            <circle
+              data-graph-start=""
+              cx={geometry.start.x}
+              cy={geometry.start.y}
+              r={START_R}
+              fill="var(--cx-faint)"
+            />
+          )}
           {ends.map((end) => (
             <circle
-              key={end.lane}
+              key={`end:${end.x}:${end.y}`}
               data-graph-end=""
-              cx={laneX(end.lane)}
+              cx={end.x}
               cy={end.y}
               r={END_R}
               fill="var(--cx-card)"
@@ -541,14 +377,79 @@ const StepsGraphView: React.FC<StepRunViewProps> = (props) => {
           ))}
         </svg>
 
-        {[
-          ...paths.map((p) => ({ key: p.key, edgeId: p.edgeId, mid: p.mid })),
-          ...geometry.links.map((l) => ({
-            key: l.key,
-            edgeId: l.key,
-            mid: l.mid,
-          })),
-        ].map(({ key, edgeId, mid }) => {
+        {geometry.loops.map((loop) => {
+          const canExit = loop.canExit;
+          const header = cards.find((c) => c.node.id === loop.headerId);
+          const waits = WAIT_TYPES.has(header?.node.type ?? "");
+          const unwrapCap =
+            onUnwrapLoop && !drag ? caps?.unwrap.get(loop.headerId) : undefined;
+          return (
+            // The loop's label, then "Stop repeating" right after it (the
+            // label truncates first), all inside the rectangle. The label
+            // leaves room after it for a future bound ("×N", "until …").
+            <div
+              key={`label:${loop.key}`}
+              className="absolute flex items-center gap-2 whitespace-nowrap text-xs"
+              style={{
+                left: loop.label.x,
+                top: loop.label.y - 1,
+                maxWidth: loop.rect.x + loop.rect.w - loop.label.x - 6,
+              }}
+            >
+              <div
+                data-loop-block=""
+                data-loop-to={loop.headerId}
+                aria-label={t("scenarioRun.loopSteps", {
+                  from: loop.from,
+                  to: loop.to,
+                })}
+                title={t(
+                  canExit
+                    ? "scenarioRun.loopUntilExit"
+                    : "scenarioRun.loopUntilRunStops",
+                )}
+                className="flex min-w-0 items-center gap-1.5 overflow-hidden"
+              >
+                <Repeat
+                  className="h-3.5 w-3.5 shrink-0 text-cx-purple"
+                  aria-hidden
+                />
+                <span className="font-semibold text-cx-purple">
+                  {t(
+                    canExit
+                      ? "scenarioRun.loopRepeat"
+                      : "scenarioRun.loopForever",
+                  )}
+                </span>
+                {waits && (
+                  <span className="truncate text-cx-muted">
+                    · {t("scenarioRun.loopWaitsAt", { n: loop.from })}
+                  </span>
+                )}
+              </div>
+              {unwrapCap && (
+                <button
+                  type="button"
+                  data-testid="unwrap-loop"
+                  data-loop={loop.headerId}
+                  title={
+                    unwrapCap.ok
+                      ? t("scenarios.editor.unwrapLoopHint")
+                      : t(unwrapCap.reason)
+                  }
+                  disabled={!unwrapCap.ok}
+                  onClick={() => onUnwrapLoop?.(loop.headerId)}
+                  className="z-10 flex h-[18px] shrink-0 items-center gap-1 rounded border border-cx-purple/40 px-1.5 font-medium text-cx-purple hover:bg-cx-purple/15 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <RepeatOff className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                  {t("scenarios.editor.unwrapLoop")}
+                </button>
+              )}
+            </div>
+          );
+        })}
+
+        {allPaths.map(({ key, edgeId, mid }) => {
           const mark = edgeMark(edgeId);
           return mark ? (
             <EdgeIssueMarker
@@ -561,50 +462,125 @@ const StepsGraphView: React.FC<StepRunViewProps> = (props) => {
             />
           ) : null;
         })}
-        {issues?.marks.start && (
+        {geometry.links.map((link) => {
+          const mark = edgeMark(link.edgeId);
+          return mark ? (
+            <EdgeIssueMarker
+              key={`issue:${link.key}`}
+              mark={mark}
+              x={link.mid.x}
+              y={link.mid.y}
+              label={markCounts(mark)}
+              title={markMessages(mark)}
+            />
+          ) : null;
+        })}
+        {issues?.marks.start && geometry.start && (
           <IssueBadge
             mark={issues.marks.start}
             className="absolute z-10"
-            style={{ left: X0 + START_R + 6, top: startY - 9 }}
+            style={{
+              left: geometry.start.x + START_R + 6,
+              top: geometry.start.y - 9,
+            }}
           />
         )}
         {issues?.marks.end &&
           ends.map((end) => (
             <IssueBadge
-              key={`end-issue:${end.lane}`}
+              key={`end-issue:${end.x}:${end.y}`}
               mark={issues.marks.end!}
               className="absolute z-10"
-              style={{ left: laneX(end.lane) + END_R + 6, top: end.y - 9 }}
+              style={{ left: end.x + END_R + 6, top: end.y - 9 }}
             />
           ))}
 
-        {tags.map((tag) => (
+        {geometry.detached && (
           <div
-            key={tag.lane}
-            data-testid="lane-tag"
-            className="absolute flex items-center gap-2"
-            style={{
-              left: laneX(tag.lane) - NODE_W / 2,
-              top: tag.top,
-              width: NODE_W,
-            }}
+            data-testid="detached-steps"
+            className="absolute whitespace-nowrap text-xs font-semibold uppercase tracking-wide text-cx-muted"
+            style={{ left: geometry.detached.x, top: geometry.detached.y }}
+            title={t("scenarioRun.tree.unreachedHint")}
           >
-            <span
-              aria-hidden
-              className={cn(
-                "flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[11px] font-semibold",
-                laneStyle(tag.lane).letter,
-              )}
-            >
-              {laneLetter(tag.lane)}
-            </span>
-            <span className="truncate text-xs font-medium text-cx-fg2">
-              {tag.name}
-            </span>
+            {t("scenarioRun.tree.unreached")}
           </div>
-        ))}
+        )}
 
-        {placed.map(({ step, lane, top, stepLane, index }) => {
+        {geometry.tags.map((tag) => {
+          const removeCap =
+            editable && onRemoveLane ? (caps?.lane.get(tag.key) ?? null) : null;
+          const removeLabel = t("scenarioRun.tree.removeLane", {
+            lane: laneLetter(tag.laneIndex),
+          });
+          return (
+            <div
+              key={tag.key}
+              data-testid="lane-tag"
+              data-lane={tag.laneIndex}
+              data-fork={tag.forkId}
+              data-dead-lane={tag.dead ? "" : undefined}
+              data-leaves-loop={tag.leaves ? "" : undefined}
+              title={
+                tag.dead
+                  ? t("scenarioRun.tree.deadLane")
+                  : tag.leaves
+                    ? t("scenarioRun.tree.leavesLoop")
+                    : undefined
+              }
+              className={cn(
+                "absolute z-[5] flex items-center gap-1.5 rounded-full border bg-cx-card px-1 text-xs",
+                tag.dead
+                  ? "border-dashed border-cx-border-strong opacity-60"
+                  : "border-cx-border",
+              )}
+              style={{
+                left: tag.x - tag.w / 2,
+                top: tag.y,
+                width: tag.w,
+                height: TAG_H,
+              }}
+            >
+              <span
+                aria-hidden
+                className={cn(
+                  "flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold",
+                  laneStyle(tag.laneIndex).letter,
+                )}
+              >
+                {laneLetter(tag.laneIndex)}
+              </span>
+              <span
+                data-lane-condition=""
+                className="min-w-0 flex-1 truncate font-mono text-[11px] text-cx-fg2"
+              >
+                {tag.text}
+              </span>
+              {tag.leaves && (
+                <LogOut
+                  className="h-3 w-3 shrink-0 text-cx-purple"
+                  aria-hidden
+                />
+              )}
+              <span className="shrink-0 font-mono text-[10px] text-cx-muted">
+                {tag.count}
+              </span>
+              {removeCap && !drag && (
+                <button
+                  type="button"
+                  aria-label={removeLabel}
+                  title={capTitle(removeCap, removeLabel)}
+                  disabled={!removeCap.ok}
+                  onClick={() => onRemoveLane?.(tag.forkId, tag.laneIndex)}
+                  className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-cx-faint hover:bg-cx-rose/10 hover:text-cx-rose disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-cx-faint"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+          );
+        })}
+
+        {cards.map(({ node: step, x, y, lane, seqPath, index, isFork }) => {
           const phase = phaseOf(step.id);
           const failed = state === "error" && step.id === currentNodeId;
           const selected = selectedStepId === step.id;
@@ -621,8 +597,8 @@ const StepsGraphView: React.FC<StepRunViewProps> = (props) => {
             selected && "outline outline-2 outline-cx-accent",
           );
           const place: React.CSSProperties = {
-            left: laneX(lane) - NODE_W / 2,
-            top,
+            left: x - NODE_W / 2,
+            top: y,
             width: NODE_W,
             height: NODE_H,
           };
@@ -631,8 +607,12 @@ const StepsGraphView: React.FC<StepRunViewProps> = (props) => {
             phase === "done" && !failed
               ? { borderColor: laneStyle(lane).color }
               : {};
+          const number = numbers.get(step.id) ?? "";
           const body = (
             <>
+              <span className="w-[14px] shrink-0 text-right font-mono text-[10px] text-cx-faint">
+                {number}
+              </span>
               <StepTile node={step} />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[13px] font-medium text-cx-fg">
@@ -654,7 +634,6 @@ const StepsGraphView: React.FC<StepRunViewProps> = (props) => {
           );
 
           if (editable) {
-            const number = stepIndexOf(layout, step.id);
             const dragged = drag?.id === step.id;
             return (
               <div
@@ -672,18 +651,21 @@ const StepsGraphView: React.FC<StepRunViewProps> = (props) => {
                     ? { transform: `translateY(${drag.offset}px)` }
                     : {}),
                 }}
-                {...editing.dragHandlers({
-                  id: step.id,
-                  lane: stepLane,
-                  index,
-                })}
+                // A branch point stays where it is.
+                {...(isFork
+                  ? {}
+                  : editing.dragHandlers({
+                      id: step.id,
+                      lane: seqPath,
+                      index,
+                    }))}
               >
                 <button
                   type="button"
                   aria-pressed={selected}
                   data-step-select
                   aria-label={t("scenarioRun.selectStep", {
-                    n: number ?? "",
+                    n: number,
                     title: nodeTitle(step),
                   })}
                   title={t("scenarioRun.clickToEdit")}
@@ -693,7 +675,11 @@ const StepsGraphView: React.FC<StepRunViewProps> = (props) => {
                   className={cn(
                     className,
                     "relative h-full w-full",
-                    dragged ? "cursor-grabbing" : "cursor-grab",
+                    isFork
+                      ? "cursor-pointer"
+                      : dragged
+                        ? "cursor-grabbing"
+                        : "cursor-grab",
                   )}
                   style={doneBorder}
                 >
@@ -702,9 +688,7 @@ const StepsGraphView: React.FC<StepRunViewProps> = (props) => {
                 {selected && onDeleteStep && (
                   <button
                     type="button"
-                    aria-label={t("scenarioRun.removeStep", {
-                      n: number ?? "",
-                    })}
+                    aria-label={t("scenarioRun.removeStep", { n: number })}
                     title={t("scenarioRun.removeThisStep")}
                     // Not the start of a drag.
                     onPointerDown={(event) => event.stopPropagation()}
@@ -758,21 +742,27 @@ const StepsGraphView: React.FC<StepRunViewProps> = (props) => {
           </>
         )}
 
-        {editable && onAddBranch && canAddBranch(layout) && !drag && (
-          <button
-            type="button"
-            aria-label={t("scenarioRun.addParallelBranch")}
-            title={t("scenarioRun.addParallelBranch")}
-            onClick={onAddBranch}
-            className="absolute z-10 flex h-[22px] items-center rounded-full border border-dashed border-cx-border-strong bg-cx-card px-2 text-xs font-medium text-cx-muted hover:border-cx-accent hover:text-cx-accent"
-            style={{
-              left: geometry.branchPill.left,
-              top: geometry.branchPill.top,
-            }}
-          >
-            {t("scenarioRun.branchPill")}
-          </button>
-        )}
+        {editable &&
+          onAddLane &&
+          !drag &&
+          geometry.pills.map((pill) => {
+            const cap = caps?.addLane.get(pill.nodeId);
+            if (!cap) return null;
+            return (
+              <button
+                key={`pill:${pill.nodeId}`}
+                type="button"
+                aria-label={pill.label}
+                title={capTitle(cap, pill.label)}
+                disabled={!cap.ok}
+                onClick={() => onAddLane(pill.nodeId)}
+                className="absolute z-10 flex h-[22px] items-center rounded-full border border-dashed border-cx-border-strong bg-cx-card px-2 text-xs font-medium text-cx-muted hover:border-cx-accent hover:text-cx-accent disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-cx-border-strong disabled:hover:text-cx-muted"
+                style={{ left: pill.x, top: pill.y }}
+              >
+                {t("scenarioRun.branchPill")}
+              </button>
+            );
+          })}
 
         {openPlus && (
           <div

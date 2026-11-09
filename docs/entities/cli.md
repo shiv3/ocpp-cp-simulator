@@ -965,19 +965,20 @@ Responses are not checked against the OCPP schema (`skipValidation` has nothing 
 is answered by the same auto-responder as in a scenario export. Environment variables are in the generated README.
 Measured results: [Charger engine migration → Verification results](../analyses/charger-engine-migration.md#verification-results).
 
-| `evSettings` field   | Honoured                                                       |
-| -------------------- | -------------------------------------------------------------- |
-| `batteryCapacityKwh` | Yes — denominator of the target-SoC stop condition             |
-| `initialSoc`         | Yes — opening SoC of the target-SoC stop condition             |
-| `targetSoc`          | Yes — the target-SoC stop condition's threshold                |
-| `maxChargingPowerKw` | Yes — default rate when the meterValue node sets no `outputKw` |
-| `modelName`          | No — cosmetic; nothing on the wire carries it                  |
-| `chargingCurve`      | No — the rate is the scenario's own increment or time curve    |
-| `currentType`        | No — one measurand only, `Energy.Active.Import.Register`       |
-| `phases`             | No — no per-phase samples                                      |
-| `voltageV`           | No — no voltage or current samples                             |
-| `powerFactor`        | No — no reactive-power model                                   |
-| `attribution`        | No — informational credit for imported data (#458)             |
+| `evSettings` field   | Honoured                                                               |
+| -------------------- | ---------------------------------------------------------------------- |
+| `batteryCapacityKwh` | Yes — denominator of the target-SoC stop condition                     |
+| `initialSoc`         | Yes — opening SoC of the target-SoC stop condition                     |
+| `targetSoc`          | Yes — the target-SoC stop condition's threshold                        |
+| `maxChargingPowerKw` | Yes — default rate when the meterValue node sets no `outputKw`         |
+| `modelName`          | No — cosmetic; nothing on the wire carries it                          |
+| `chargingCurve`      | No — the rate is the scenario's own increment or time curve            |
+| `currentType`        | No — one measurand only, `Energy.Active.Import.Register`               |
+| `phases`             | No — no per-phase samples                                              |
+| `voltageV`           | No — no voltage or current samples                                     |
+| `powerFactor`        | No — no reactive-power model                                           |
+| `vehicleBehavior`    | No — no vehicle model; the rate is the scenario's own increment (#835) |
+| `attribution`        | No — informational credit for imported data (#458)                     |
 
 ## Events
 

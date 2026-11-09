@@ -63,13 +63,14 @@ describe("CertificateStore persistence", () => {
     await store.installRootCertificate("CsmsRootCertificate", b.pem, {
       maxEntries: 10,
     });
+    // The remaining root (b) is the hierarchy the chains must lead to (#587).
     store.deleteRootCertificate(store.listRootCertificates()[0].hashData);
     const firstCsr = await store.generateNewCsr("CP-1", "Example CPO");
     await store.applySignedChain("ChargingStationCertificate", [
-      await leafForCsr("03", firstCsr, a),
+      await leafForCsr("03", firstCsr, b),
     ]);
     const secondCsr = await store.generateNewCsr("CP-1", "Example CPO");
-    const secondLeaf = await leafForCsr("04", secondCsr, a);
+    const secondLeaf = await leafForCsr("04", secondCsr, b);
     await store.applySignedChain("ChargingStationCertificate", [secondLeaf]);
 
     const reopened = new CertificateStore("CP-1", db);

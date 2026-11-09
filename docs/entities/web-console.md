@@ -7,6 +7,7 @@ sources:
   - index.html
   - vite.config.ts
 related:
+  - ../concepts/fleet-templates.md
   - web-console-tour.md
   - desktop-app.md
   - daemon.md
@@ -91,8 +92,10 @@ The browser app serves one web console:
   [Scenario editor](#scenario-editor-steps-and-graph)) and a read-only run
   page (`/scenarios/run`, see
   [Scenario runs](#scenario-runs-panel-and-page)), a cross-CP **Run history**
-  (`/scenarios/runs`, #388), a global **Message log** (`/logs`), and
-  **Settings** (`/settings`, where global
+  (`/scenarios/runs`, #388), a global **Message log** (`/logs`),
+  **Fleet templates** (`/fleets`, remote mode: list, view, save, delete and
+  create a fleet from a [fleet template](../concepts/fleet-templates.md#web-console), #445),
+  and **Settings** (`/settings`, where global
   [network simulation](../concepts/network-simulation.md), the
   [**Vehicle profiles**](#settings-page) card and the **Reset all
   simulator data** button live; the Settings cards and the Network Simulation
@@ -824,7 +827,8 @@ controls (**Skip**, **Next**, **Stop**, **Edit**, the enabled box, the
 (`data-selected="true"`).
 
 The **definition panel** shows the scenario's name, `Library`, its step count
-(and branch count), **Edit scenario** (the panel's
+(and branch count: the lanes that run, of every branch point that picks or
+fans out), **Edit scenario** (the panel's
 [edit mode](#editing-in-the-side-panel)), **Used by** — the
 connectors assigned a copy of it, as chips linking to
 `/cp/<id>?connector=<n>`, a running one marked with its run state's dot, or "no
@@ -857,14 +861,14 @@ exact id: the scenarios some connector of that charge point uses; the charge
 point page's **Scenarios** menu item opens it with this set) and **Enabled
 only**, then one row per Library scenario:
 
-| Column   | Shows                                                                                                                |
-| -------- | -------------------------------------------------------------------------------------------------------------------- |
-| Scenario | The name, the description under it (muted).                                                                          |
-| Steps    | The step count of the Steps view's layout; a scenario that view cannot draw shows its node count and a `graph` chip. |
-| Used by  | `<n> connectors` (the connectors holding a copy; the tooltip names them), or —.                                      |
-| Running  | One state pill per live run of a copy, or —.                                                                         |
-| Enabled  | A checkbox; a change saves the Library scenario and re-pushes it to its users.                                       |
-| Edit     | **Edit** (the inline editor) and the `…` menu: **Duplicate**, **Export JSON**, **Delete**.                           |
+| Column   | Shows                                                                                                              |
+| -------- | ------------------------------------------------------------------------------------------------------------------ |
+| Scenario | The name, the description under it (muted).                                                                        |
+| Steps    | The step count of the Steps view's block tree; a scenario without a START shows its node count and a `graph` chip. |
+| Used by  | `<n> connectors` (the connectors holding a copy; the tooltip names them), or —.                                    |
+| Running  | One state pill per live run of a copy, or —.                                                                       |
+| Enabled  | A checkbox; a change saves the Library scenario and re-pushes it to its users.                                     |
+| Edit     | **Edit** (the inline editor) and the `…` menu: **Duplicate**, **Export JSON**, **Delete**.                         |
 
 **+ New scenario** asks for a name only and **Use template** and **Import JSON**
 ask nothing: each creates a Library scenario (a template instance or an
@@ -952,35 +956,69 @@ It also has a **Graph | Steps** switch, kept in `?view=` (replacing the
 history entry; Graph is the default, `?view=steps` opens Steps). The panel
 always shows Steps.
 
-- **Steps** — one box per step, top to bottom, numbered: the step type's tile
-  (its category's [icon](#icons) and colour), its title and summary, the state pill on the current step and a check on a
-  done one; steps not reached yet are dimmed. When the scenario forks, the
-  steps after the fork node stand in side-by-side columns, one per branch,
-  each under a lane tag (`A`, `B`, … in the lane colour, the branch name —
-  the first step's label, unless it is the type's default, else
-  `Branch A`, … — and `done/total`). The executor starts every branch at
-  once after the fork node. A lane whose last step loops back to an earlier
-  step of the **same** lane is drawn like Scratch's "forever" block: the
-  steps from the loop's target to the lane's end sit inside a C-shaped block
-  (tinted purple) whose top arm reads **Repeat forever** — plus "each round
-  waits at step N first" when the loop starts at a Delay or a trigger — and
-  whose bottom arm reads **Back to step N**; the steps before the target stay
-  above the block. The back edge is unconditional, so the loop runs until the
-  run ends. A lane that ends in a link to another lane gets a one-line note
-  instead: **Then back to step N** into the chain before the fork, **Then on
-  to step N** into an earlier branch (a join). Only a lane's last step takes a
-  link, so a lane holds at most one loop block.
-- **Graph** — the same order drawn as connected cards: the chain in one lane,
-  each branch curving into a lane of its own below the fork node; a travelled
-  path takes its lane's colour. It is drawn by the console itself, not the
-  editor's graph library.
+- **Steps** — the [block tree](#editor-model-block-tree) drawn top to
+  bottom, one box per step, numbered in tree order (a branch point, then
+  each of its lanes, then what follows): the step type's tile (its
+  category's [icon](#icons) and colour), its title and summary, the state
+  pill on the current step and a check on a done one; steps not reached yet
+  are dimmed. A **branch point** — a START with several edges, a `switch`, a
+  `choice`, a step with more edges than its first — is its box (none for
+  START) over a framed block: a header saying how it picks (**Switch on
+  `<value>`**, **Choice: one option at random, by weight**, **Start: all
+  run**, **Only the first runs**), then its lanes side by side, each under a
+  lane tag: the lane letter (`A`, `B`, … in the lane colour), the condition
+  chip (`case-0 → "Accepted"`, `default`, `option-1 · 30% · "slow"`, `all
+run`, `runs`, `ignored`, `unpickable: case-7`) and the lane's step count
+  (`done/total` during a run). A lane the executor never takes (_ignored_,
+  _unpickable_) is dashed and muted. A lane holds its own steps, branch
+  points and loops, to any depth. Where the lanes meet again the block ends
+  with **Continues at step N** and the sequence goes on below it. A
+  **loop** is drawn like Scratch's "forever" block: its steps sit inside a
+  C-shaped block (tinted purple) whose top arm reads **Repeat forever** — or
+  **Repeat** when a `switch` / `choice` inside may leave it — plus "each
+  round waits at step N first" when the loop starts at a Delay or a trigger,
+  and whose bottom arm reads **Back to step N**. A lane of a branch point
+  inside the loop that never comes back to the loop's first step leaves the
+  loop: its tag in the block says **Leaves the loop (below)**, and its steps
+  follow the block under **After leaving the loop at step N** (they run once).
+  A sequence that ends in a jump elsewhere gets a one-line note: **Then back
+  to step N** (a back edge that is not a loop) or **Then on to step N** (a
+  join). Steps nothing reaches are listed last under **Steps nothing
+  reaches**.
+- **Graph** — the same block tree drawn as connected cards, laid out
+  recursively ([`treeGraphLayout.ts`](../../apps/web/src/console/lib/treeGraphLayout.ts)):
+  a START dot, then a column of cards; under a branch point its lanes stand
+  side by side, each as wide as what it holds (a nested branch point widens
+  its lane), each under a lane tag (letter, condition chip, step count; dead
+  lanes dashed and muted). The branch point's curve ends at the top of the
+  tag and the lane goes on from its bottom, so no curve crosses a tag's
+  text. Lanes that meet again run into a merge point below the lowest lane,
+  and the sequence goes on under it; a lane end is an END ring. A loop is a
+  tinted rounded rectangle behind its body, labelled **Repeat forever** /
+  **Repeat** (and "each round waits at step N first"), with a solid purple
+  return arc from each way back, down the rectangle's left side into the
+  loop's first card; a lane that leaves the loop stands right of the
+  rectangle, its curve crossing the rectangle's edge; every lane that
+  leaves the loop, at any depth, has its tag marked with a leave icon. A
+  jump (a link: a back edge that is no loop, a join) is a dashed orthogonal
+  line with an arrowhead: out of the source card's side, up or down a
+  channel (beside everything between the two rows, or the corridor between
+  two columns), across the gap row above the target and down into the
+  target's top corner; of the channels, the shortest that crosses no card
+  or lane tag and keeps clear of END rings, `+` discs and merge points
+  wins, each further jump in a channel one step aside. When every plain
+  route crosses a card, routes that leave along the source's own gap row, or
+  enter along another free row above the target, are tried too; when none is
+  clean (none of 30000 random layouts needed it), the jump is drawn as a dashed
+  curve beside everything instead, and may cross cards. An edge back into a
+  START that fans out is not drawn (START has no card). Steps nothing reaches
+  stand in a column on the right under **Steps nothing reaches**. A
+  travelled path takes its lane's colour; the canvas scrolls sideways when
+  wider than its column. It is drawn by the console itself (SVG and placed
+  cards), not a graph library.
 
-Both views draw a chain, then at most one fork whose branches each run to
-their end (END, a step with no next step, or an edge to a missing node),
-plus the loops and joins that leave a lane's last step (`StepLink`). A
-scenario with a second fork, or a step no path reaches, is shown as a flat
-list in definition order instead, marked "order approximate". The layout is a pure function,
-[`deriveStepLayout`](../../apps/web/src/console/lib/stepLayout.ts).
+Both views draw any scenario with a START. A scenario without one is shown
+as a flat list in definition order instead, marked "order approximate".
 
 ### Scenario editor: steps and graph
 
@@ -998,53 +1036,69 @@ scenario** everywhere edits the Library entry when the scenario is a Library
 scenario or a copy of one (`libraryId`). All use the same content
 ([`ScenarioEditorContent`](../../apps/web/src/console/pages/scenarios/edit/ScenarioEditorContent.tsx)):
 
-- **Steps** — the step boxes of the run views' Steps view: the chain, then at
-  most one fork with its branches side by side. A click selects a step: its
-  form opens in the inspector (beside the steps, sticky, when the editor is
-  wider than about 860 px; under them when it is narrower), whose header moves the step up or down **within its
-  lane** (the chain or its branch — a move never crosses lanes) and deletes
-  it. Hovering the gap between two boxes of a lane shows a small `+`
-  (**Insert step between n and n+1**) that opens the step picker there (as the
-  old step list did); **+ Add step** under the chain and under each branch
-  appends a step (inserting at the end of the chain of a forked scenario makes
-  the new step the fork node). Each box has a grab handle (**Drag to
-  reorder**) on its left: dragging it up or down shows a drop line where the
-  box will land, a release moves it there (only within its lane), and
-  **Escape** cancels; a focused box takes **Alt+↑ / Alt+↓** to move one place
-  and **Delete** to remove it (asked first, in the page). **+ Add parallel
-  branch** adds a branch holding one Delay step — to a chain, it creates the
-  fork at the chain's last step (its first branch is the chain's own, empty,
-  continuation to END). Deleting a branch's last step drops the branch, and a
-  single remaining branch folds into the chain. Edits never change which lane
-  of a `switch` / `choice` an edge runs: existing edges keep their
-  `sourceHandle` (or its absence), and only a new branch gets the first free
-  handle the node can pick, or none when every one is taken (see
-  [the schema 1.6 nodes](../concepts/scenario-format.md#the-schema-16-nodes)). A loop within a lane is the
-  run views' C-shaped loop block (above): its boxes keep the drag, keys and
-  `+` gaps of any box, the `+` between the last step above the block and the
-  block inserts above it (the new step runs once), and the lane's **+ Add
-  step** sits inside the block (an appended step joins the loop, which always
-  closes at the lane's last step).
-- **Graph** — the same layout drawn as on the [run page](#scenario-runs-panel-and-page):
-  connected cards, the chain in lane 0 and each branch curving into a lane of
-  its own. A click selects a card for the inspector (the selected card gets a
-  small ✕ that removes it); a `+` disc on the path after the last card of the
-  chain and of each branch (**Add step after step n**; on an empty branch
-  **Add step to <branch>**) and a `+` shown on
-  hover between two cards of a lane (**Insert step between n and n+1**) open
-  the step picker at that place; **+ branch** beside the fork node (beside
-  the chain's last card when there is no fork yet) adds a parallel branch.
-  A card drags up or down within its lane like a Steps box (the card follows
-  the pointer over a drop line; a press that moves less than 6 px is a click,
-  so it still selects; **Escape** cancels), and a focused card takes
-  **Alt+↑ / Alt+↓** and **Delete** the same way. A loop or a join is drawn too: the edge that jumps back to (or joins) a card
-  already placed leaves the _last_ card of its lane as a dashed curve with an
-  arrowhead (`StepLink`, `deriveStepLayout().links`), and the Steps view
-  encloses a loop in a loop block (or notes a link to another lane under it). The inspector of a lane's last card has an
-  **After this step** select — _End of scenario_ or _Loop back to step N_ — that
-  sets or clears the link (`setLaneLink`); a link keeps leaving the lane's last
-  card through inserts, moves and deletes, and is dropped when its target is
-  deleted. A chain closed by a loop takes no **+ branch**. Above the steps, a warning box lists wiring the executor would only half run (`validateScenarioGraph`, see [connection rules](../concepts/scenario-format.md#connection-rules)): a fork after a step, a step nothing reaches, a `switch` / `choice` edge it never takes (no handle it can pick, or a second edge on one handle), an edge to a missing node, a Call Response its branch holds no CALL for, a `replace` trigger whose CALL is never answered. It never blocks Save.
+- **Steps** — the run views' Steps view of the block tree, with its
+  controls. Every structural edit goes through the tree's operations
+  ([below](#editor-model-block-tree)), and every control is enabled from
+  `editCapabilities`: a control that does not apply is disabled with the
+  reason as its tooltip, and a refused keyboard edit (Alt+↑ / Alt+↓, Delete)
+  says why in a line above the steps. A click selects a step (a branch
+  point's box too): its form opens in the inspector (beside the steps,
+  sticky, when the editor is wider than about 860 px; under them when it is
+  narrower), whose header holds **Add a branch** (a `switch` / `choice`),
+  **Repeat from this step to the end of its lane** (`wrapInLoop`), **Stop
+  repeating** (`unwrapLoop`, shown for a step a loop repeats), move up /
+  down **within its sequence** and delete. Hovering the gap before a block
+  shows a small `+` (**Insert step between n and n+1**, or **Insert step
+  before step n** at the top of a lane) that opens the step picker there
+  (known limitation: the root sequence has no `+` before step 1; insert
+  after it and move the new step up);
+  **+ Add step** at the end of each sequence appends (it is left out under a
+  block every path of which ends on its own, and disabled with the reason
+  where nothing runs). Picking **Switch** or **Choice** inserts a branch
+  point with one empty lane per case / option, meeting again at the block
+  that followed (`insertForkBlock`). Each step box has a grab handle
+  (**Drag to reorder**): dragging shows a drop line, a release moves the
+  step within its sequence (a branch point or a loop is one block and stays
+  where it is; a branch point's box has no handle; a refused drop says why,
+  as a refused key does), **Escape** cancels; a
+  focused box takes **Alt+↑ / Alt+↓** and **Delete** (asked first, in the
+  page). Each branch point's header has **+ branch** (`addLane`: START, a
+  `switch` / `choice` with a case or option no lane has yet — refused with
+  "Every case or option already has a branch" otherwise, and on a step's
+  extra edges, "Only START, a switch or a choice can take another branch");
+  each lane tag has a remove button (`removeLane`, asked first when the lane
+  has steps; refused for the last lane and for a running lane whose removal
+  would let an ignored edge with its handle run). Under a chain from START,
+  **+ Add parallel branch** makes START fan out: the chain becomes its first
+  lane, the new lane holds one Delay. The inspector of a sequence's last
+  step has the **After this step** select (_End of scenario_, _Go to step
+  N_, or _Loop back to step N_ for a step a run comes back from, `setLink`);
+  on the step that closes a loop it is disabled and points to **Stop
+  repeating**. **Stop repeating** (on the loop block's top arm and in the
+  inspector) takes the innermost loop around the step away: its steps run
+  once, and every edge that went back to the loop's first step (the closing
+  step's, and each lane's that came back) goes on where the loop went on —
+  the block after the loop, else where its sequence went (END for a loop
+  that ended its lane). Those edges keep their id and fields; only their
+  target changes. Lanes that already left the loop stay as they are. Edits never change which lane
+  of a `switch` / `choice` an edge runs (see
+  [the schema 1.6 nodes](../concepts/scenario-format.md#the-schema-16-nodes)).
+- **Graph** — the same tree drawn as on the [run page](#scenario-runs-panel-and-page),
+  with the same edits as the Steps view, all through the tree's operations
+  and enabled from `editCapabilities`. A click selects a card for the
+  inspector (the selected card gets a small ✕ that removes it); a `+` disc
+  at the end of each sequence (**Add step after step n**; on an empty lane
+  **Add step to <condition>**) and a `+` shown on hover in the gap before a
+  block (**Insert step between n and n+1**, **Insert step before step n**)
+  open the step picker at that place; **+ branch** beside each branch
+  point's card (beside the START dot for START, which fans out a chain)
+  adds a lane, disabled with the reason when refused (inside a loop the
+  rectangle is wide enough to hold it); a lane tag's ✕ removes the lane;
+  **Stop repeating** at the right of a loop's label unwraps the loop. A card drags up or down within its sequence like a
+  Steps box (the card follows the pointer over a drop line; a press that
+  moves less than 6 px is a click, so it still selects; **Escape**
+  cancels); a branch point's card does not drag. A focused card takes
+  **Alt+↑ / Alt+↓** and **Delete** the same way. Above the steps, a warning box lists wiring the executor would only half run (`validateScenarioGraph`, see [connection rules](../concepts/scenario-format.md#connection-rules)): a fork after a step, a step nothing reaches, a `switch` / `choice` edge it never takes (no handle it can pick, or a second edge on one handle), an edge to a missing node, a Call Response its branch holds no CALL for, a `replace` trigger whose CALL is never answered. It never blocks Save.
   The editor works the diagnostics out once per change and marks each one
   where it applies ([`graphIssueMarks.ts`](../../apps/web/src/console/lib/graphIssueMarks.ts)):
   - a step it names gets a severity badge (icon and count; rose for an
@@ -1053,7 +1107,8 @@ scenario or a copy of one (`libraryId`). All use the same content
     of outline rows. The badge's tooltip and the card's accessible description
     list the messages.
   - in the Graph view, an edge it names that the view draws (the edge into a
-    card, a fork edge, the edge into END, a loop or join link) is stroked in
+    card, a lane's edge, the edge into END or a merge point, a loop's return
+    arc, a jump) is stroked in
     the severity colour, with a marker at its midpoint and `data-issue` set
     to the codes on the path. A dashed link stays dashed.
   - an edge the view does not draw (a dangling edge, or any edge in the
@@ -1068,18 +1123,16 @@ scenario or a copy of one (`libraryId`). All use the same content
   view. Hovering or focusing a line highlights its card or edge. Hovering or
   focusing a marked card tints its lines. The run page and the Library's
   read view have no box and no marks. The template preview shows the marks
-  without the box (no shipped template has any). A scenario with a
-  second fork, or a node no path reaches, cannot be drawn: it is shown as an
-  outline list (steps in running order with where each jumps to) whose steps
-  can be selected and edited, but not re-wired. There is no ReactFlow editor
+  without the box (no shipped template has any). A scenario without a START
+  cannot be drawn: it is shown as an outline list (steps in order, following
+  their edges, with where each jumps to) whose steps can be selected and
+  edited, but not re-wired. There is no ReactFlow editor
   any more (retired in the round that added loops).
 
 The two views share the drag
 ([`useLaneDrag`](../../apps/web/src/console/lib/useLaneDrag.ts), pointer events, no
-drag-and-drop library) and the insert picker, so they behave the same. The
-edits rebuild the graph's edges and positions
-([`scenarioSteps.ts`](../../apps/web/src/console/lib/scenarioSteps.ts),
-`insertLaneStep` / `moveLaneStep` / `removeLaneStep` / `addParallelBranch`).
+drag-and-drop library), the insert picker and the tree's operations, so
+they behave the same.
 
 #### Editor model (block tree)
 
@@ -1128,7 +1181,7 @@ Writing a tree back (`rebuildFromTree`) never changes what the file means:
   graphs).
 
 The tree's operations (`insertStep`, `moveStep`, `removeStep`, `addLane`,
-`removeLane`, `insertForkBlock`, `wrapInLoop`, `setLink`, `setLaneHandle`,
+`removeLane`, `insertForkBlock`, `wrapInLoop`, `unwrapLoop`, `setLink`, `setLaneHandle`,
 `setLaneCondition`) are pure functions of the definition and the tree, and
 `editCapabilities` tells which apply to a selection, with the reason
 (`scenarios.editor.cannot.*`) when one does not. An edit that would make a
@@ -1137,12 +1190,11 @@ an ignored or unpickable edge waits behind it, or changing a running lane's
 handle — is refused (`revivesDeadEdge`); remove the dead edge first.
 Removing the first lane of a step's extra edges is allowed with a note
 (`note.promotesNextEdge`): the next edge then runs, which is what removing
-the first one means. The views do not use them
-yet: `deriveStepLayout` is an adapter that projects the tree to the views'
-chain-plus-one-fork layout (and gives up, as before, on anything else) — the
-same layout as before for every shipped template; the one difference is a
-step labelled "End" that has edges, which the executor ends the branch at
-and the old layout walked past.
+the first one means. The Steps view and the inspector use them (above);
+what the views read off the tree (numbering, condition chips, lanes that
+leave a loop) is in [`stepTree.ts`](../../apps/web/src/console/lib/stepTree.ts).
+`deriveStepLayout` (the old chain-plus-one-fork projection) no longer draws
+any view.
 
 Both views edit the same definition: unsaved changes survive a switch, and
 nothing is written until **Save**. The per-connector editor's Save saves this
@@ -1431,8 +1483,16 @@ Rules:
 - Licenses: EVIcons is
   [MIT, © 2026 Landolsi Digital](https://github.com/evicons/evicons/blob/main/LICENSE)
   and Lucide is [ISC](https://github.com/lucide-icons/lucide/blob/main/LICENSE).
-  Both ask that the notice travel with copies of the code; the built console
-  does not carry the notices of its bundled dependencies yet (#857).
+  Both ask that the notice travel with copies of the code, so `vite build`
+  (the `rollup-plugin-license` entry of
+  [`vite.config.ts`](../../vite.config.ts)) writes
+  `dist/THIRD-PARTY-LICENSES.txt`: every bundled package with name, version,
+  SPDX id, repository and license text (a package that ships no license file
+  gets its SPDX id and author instead). It lives in `dist/`, so the npm
+  tarball (`files`), the [Docker image](docker-image.md) (`COPY dist`) and the
+  [desktop app](desktop-app.md) (`frontendDist` and the `web-console/`
+  resource) carry it with no extra step; `scripts/verify-cli-tarball.sh` fails
+  a tarball whose `dist/` lacks it (#857).
 - The package is pinned exactly in `package.json` (`0.8.0`, as `@noble/curves`
   is): it is young, so bump it on purpose.
 

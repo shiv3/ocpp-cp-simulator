@@ -4,6 +4,11 @@ import {
   type MainMeterConfig,
   type MeterRealism,
 } from "../connector/MeterRealism";
+import {
+  dcEfficiencyProblem,
+  powerSharingProblem,
+  type PowerSharingConfig,
+} from "./PowerSharing";
 
 /**
  * What the charger hardware can deliver (#327): the charger side of
@@ -21,15 +26,22 @@ export interface ChargerCapabilities {
   /** The station's main meter on connector 0 / EVSE 0 (#617). Opt-in: absent
    *  means the station has none and connector 0 stays unknown. */
   readonly mainMeter?: MainMeterConfig;
+  /** The station's power budget and how it is divided between connectors
+   *  (#608). Opt-in: absent means connectors are never clamped to a sum. */
+  readonly powerSharing?: PowerSharingConfig;
 }
 
 export interface ConnectorCapability {
   /** 1-based connector id, as on the wire. */
   readonly connectorId: number;
   /** The most the hardware delivers on this connector, in watts (> 0). The
-   *  aggregate of a station is deliberately not modelled: there is no power
-   *  sharing, so connectors are never clamped to a sum. */
+   *  station's aggregate is `powerSharing` (#608); without it connectors are
+   *  never clamped to a sum. */
   readonly maxDeliveryPowerW: number;
+  /** DC conversion efficiency in (0, 1] (#608): the fraction of the AC input
+   *  that reaches a DC vehicle. The grid-side meter reads the input; absent
+   *  means lossless. */
+  readonly dcEfficiency?: number;
   /** Opt-in meter realism of this connector (#614-#616). Absent keeps the
    *  constant, historical MeterValues. */
   readonly meter?: MeterRealism;
@@ -42,6 +54,15 @@ export function meterRealismFor(
 ): MeterRealism | undefined {
   return capabilities?.connectors.find((c) => c.connectorId === connectorId)
     ?.meter;
+}
+
+/** The DC conversion efficiency of `connectorId`, `undefined` when none. */
+export function dcEfficiencyFor(
+  capabilities: ChargerCapabilities | undefined,
+  connectorId: number,
+): number | undefined {
+  return capabilities?.connectors.find((c) => c.connectorId === connectorId)
+    ?.dcEfficiency;
 }
 
 /** The delivery cap of `connectorId` in watts, `undefined` when none. */
@@ -86,10 +107,8 @@ export function chargerCapabilitiesProblem(value: unknown): string | null {
     if (typeof entry !== "object" || entry === null) {
       return "chargerCapabilities.connectors entries must be objects";
     }
-    const { connectorId, maxDeliveryPowerW, meter } = entry as Record<
-      string,
-      unknown
-    >;
+    const { connectorId, maxDeliveryPowerW, meter, dcEfficiency } =
+      entry as Record<string, unknown>;
     if (
       typeof connectorId !== "number" ||
       !Number.isInteger(connectorId) ||
@@ -108,10 +127,19 @@ export function chargerCapabilitiesProblem(value: unknown): string | null {
     ) {
       return "chargerCapabilities maxDeliveryPowerW must be a positive number of watts";
     }
+    if (dcEfficiency !== undefined) {
+      const problem = dcEfficiencyProblem(dcEfficiency);
+      if (problem) return `chargerCapabilities ${problem}`;
+    }
     if (meter !== undefined) {
       const problem = meterRealismProblem(meter);
       if (problem) return `chargerCapabilities ${problem}`;
     }
+  }
+  const powerSharing = (value as { powerSharing?: unknown }).powerSharing;
+  if (powerSharing !== undefined) {
+    const problem = powerSharingProblem(powerSharing);
+    if (problem) return `chargerCapabilities ${problem}`;
   }
   const mainMeter = (value as { mainMeter?: unknown }).mainMeter;
   if (mainMeter !== undefined) {

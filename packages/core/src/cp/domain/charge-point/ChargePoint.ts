@@ -1,4 +1,12 @@
+import { VehicleBehaviorDriver } from "./VehicleBehaviorDriver";
 import {
+  connectorShareW,
+  stationBudgetW,
+  type PowerSharingConfig,
+  type ShareParticipant,
+} from "./PowerSharing";
+import {
+  dcEfficiencyFor,
   maxDeliveryPowerWFor,
   meterRealismFor,
   type ChargerCapabilities,
@@ -470,8 +478,8 @@ export class ChargePoint {
   private readonly _receivesCsmsCall: ChargePointTransport["receivesCsmsCall"];
   private readonly _messageHandler: IChargePointMessageHandler;
   private readonly _transportUrl: string;
-  /** #537: waits for a renewed certificate's notBefore (2.0.1 A02.FR.08),
-   *  then for the transaction messages in flight before reconnecting. */
+  /** #537: waits for the transaction messages in flight before reconnecting
+   *  with a renewed certificate (A02.FR.08). */
   private _cancelClientCertificateSwitchTimer: (() => void) | null = null;
   /** #537: bumped by every switch request and every cancel, so a request
    *  still reading the store when a newer one (or a cancel) arrives does
@@ -493,6 +501,10 @@ export class ChargePoint {
   /** #722: the per-connector `MeterValueSampleInterval` timers of running 1.x
    *  transactions. */
   private readonly _periodicSamplers: Map<number, TimerHandle> = new Map();
+  /** Applies each connector's vehicle behavior to the station (#835). */
+  private _powerSharing: PowerSharingConfig | undefined;
+  private readonly _vehicleDrivers: Map<number, VehicleBehaviorDriver> =
+    new Map();
   /** #702: the next socket open is a (re)start of the link — the first
    *  connect, an operator `connect()`, a Reset — and sends a
    *  BootNotification. Only the transport's automatic reconnect after a
@@ -759,6 +771,9 @@ export class ChargePoint {
       connector.setMeterRealism(
         meterRealismFor(transportOptions.chargerCapabilities, connectorId),
       );
+      connector.setDcEfficiency(
+        dcEfficiencyFor(transportOptions.chargerCapabilities, connectorId),
+      );
       // §5.2: Unavailable set via ChangeAvailability persists across
       // reboots. Restore the persisted value before any event listeners
       // have a chance to react.
@@ -829,6 +844,33 @@ export class ChargePoint {
         this.reportEnergyHeld(connector);
       });
       this._connectors.set(connectorId, connector);
+      this._vehicleDrivers.set(
+        connectorId,
+        new VehicleBehaviorDriver(
+          connector,
+          this._clock,
+          {
+            setReady: (id, ready) => {
+              if (this._powerLoss) return;
+              if (this.getConnector(id)?.evConnection === "disconnected") {
+                return;
+              }
+              this.evSetReady(id, ready);
+            },
+            requestStop: (id) => {
+              if (this._powerLoss) return;
+              this._logger.info(
+                `Connector ${id} vehicle asked to end the session`,
+                LogType.TRANSACTION,
+              );
+              this.stopTransaction(connector, undefined, {
+                triggerReason: "EnergyLimitReached",
+              });
+            },
+          },
+          connectorId,
+        ),
+      );
     }
 
     const mainMeterConfig = transportOptions.chargerCapabilities?.mainMeter;
@@ -981,6 +1023,7 @@ export class ChargePoint {
       this._configuration.applyChange("CpoName", cpoName);
     }
     this.wireConfigurationListeners();
+    this.wirePowerSharing(transportOptions.chargerCapabilities?.powerSharing);
     if (!isOcpp2Version(this._ocppVersion) && this._webSocket) {
       this.wireSecurityConfiguration();
     }
@@ -1387,7 +1430,7 @@ export class ChargePoint {
    */
   private wireSecurityConfiguration(): void {
     // §7.2: with profile 1 or 2 the key is the Basic Auth password; one the
-    // transport cannot derive it from (an empty or non-hex value) would stop
+    // transport cannot derive it from (an empty value or one of another length) would stop
     // every later connection attempt, so it is refused and the old key kept.
     this._configuration.setChangeGuard("AuthorizationKey", (_current, next) => {
       const profile = this._configuration.getInteger("SecurityProfile") ?? 0;
@@ -1398,7 +1441,7 @@ export class ChargePoint {
         return true;
       }
       this._logger.warn(
-        `ChangeConfiguration AuthorizationKey refused: security profile ${profile} needs a key of 16-20 bytes (32-40 hex digits), whitepaper §7.2`,
+        `ChangeConfiguration AuthorizationKey refused: security profile ${profile} needs a key of 16-20 bytes (32-40 hex digits, or 16-20 plain characters), whitepaper §7.2`,
         LogType.CONFIGURATION,
       );
       return false;
@@ -1465,6 +1508,61 @@ export class ChargePoint {
     this.reset();
   }
 
+  /**
+   * Let the connectors share the station's power budget (#608). The share is
+   * read at every operating point resolve from the connectors' transactions
+   * at that instant, so a transaction that starts or stops moves it with no
+   * bookkeeping. A declared current limit key becomes a writable configuration
+   * key; it is read here at resolve time too, so `ChangeConfiguration`
+   * changes the budget at once.
+   */
+  private wirePowerSharing(config: PowerSharingConfig | undefined): void {
+    if (!config) return;
+    this._powerSharing = config;
+    const limit = config.currentLimit;
+    if (limit) {
+      const declared = this._configuration.defineWritableIntegerKey(
+        limit.key,
+        Math.round(limit.valueA),
+        { min: 1 },
+      );
+      if (!declared) {
+        this._logger.warn(
+          `powerSharing.currentLimit.key ${limit.key} is already a configuration key; the declared limit is ignored`,
+          LogType.CONFIGURATION,
+        );
+      }
+    }
+    const strategy = config.strategy ?? "equal";
+    for (const [connectorId, connector] of this._connectors) {
+      connector.setStationShareProvider(() => {
+        const participants: ShareParticipant[] = [];
+        for (const [id, c] of this._connectors) {
+          participants.push({
+            connectorId: id,
+            capW: c.maxDeliveryPowerW ?? Infinity,
+            active: c.hasRunningTransaction,
+          });
+        }
+        return connectorShareW(
+          this.stationPowerBudgetW(),
+          strategy,
+          participants,
+          connectorId,
+        );
+      });
+    }
+  }
+
+  /** The station's power budget in watts now, `Infinity` without sharing. */
+  stationPowerBudgetW(): number {
+    const limit = this._powerSharing?.currentLimit;
+    return stationBudgetW(
+      this._powerSharing,
+      limit ? this._configuration.getInteger(limit.key) : undefined,
+    );
+  }
+
   /** Hook up subsystems that react to live Configuration changes. */
   /** #609: hand the 2.x `RetryBackOff*` variables to the transport. */
   private applyRetryBackOff(): void {
@@ -1486,14 +1584,15 @@ export class ChargePoint {
           }
           break;
         case "MeterValueSampleInterval":
-          // §9.1.19: takes effect on the *next* transaction. The periodic
-          // sampler of a running transaction keeps its cadence; the new
-          // value is read when a fresh transaction starts
-          // (startPeriodicSampling, #722).
+          // §3.16.1 / §9.1.19 ask for a sample "every MeterValueSampleInterval
+          // seconds" and, at 0, for none: the samplers of the running
+          // transactions are re-armed with the new value (#839, #722). 2.x
+          // does not run them.
           this._logger.info(
-            `MeterValueSampleInterval=${String(value)} (applies to next transaction)`,
+            `MeterValueSampleInterval=${String(value)}`,
             LogType.CONFIGURATION,
           );
+          this.rearmPeriodicSampling();
           break;
         case "WebSocketPingInterval":
           // #406: re-arms the ping timer at once on an open socket.
@@ -2692,24 +2791,9 @@ export class ChargePoint {
       webSocket.clearRenewedClientCertificate();
       return;
     }
-    const wait = identity.notBefore.getTime() - this._clock.now();
-    if (wait > 0) {
-      this._logger.info(
-        `Renewed Charging Station certificate valid from ${identity.notBefore.toISOString()}; switching then (A02.FR.08)`,
-        LogType.WEBSOCKET,
-      );
-      // Unref'd: a wait of days must not keep the process alive. When it
-      // passes, an open connection reconnects whichever call set it.
-      this._cancelClientCertificateSwitchTimer = setTimeoutAt(
-        identity.notBefore.getTime(),
-        () => {
-          if (request !== this._clientCertificateSwitchSeq) return;
-          void this.useRenewedClientCertificate();
-        },
-        { clock: this._clock, unref: true },
-      );
-      return;
-    }
+    // No wait for `notBefore` (A02.FR.08): CertificateSigned refuses a leaf
+    // that is not valid yet (A02.FR.06/07, #587), so a stored identity is
+    // valid when it is handed over.
     webSocket.useRenewedClientCertificate(identity);
     if (!reconnect) return;
     // A station that is not connected (back-off, simulated outage, manual
@@ -2765,7 +2849,7 @@ export class ChargePoint {
 
   /**
    * #537: ends the renewed certificate switch for good on an instance being
-   * replaced (`cp.update`) or disposed: cancels the notBefore or in-flight
+   * replaced (`cp.update`) or disposed: cancels the in-flight
    * wait, stops following the store, and drops every in-memory key — the
    * transport's renewed identities and the store's private keys. The
    * stored chains stay; the replacement presents the configured
@@ -3375,8 +3459,7 @@ export class ChargePoint {
         : `Disconnecting ${this._ocppVersion} SOAP client`,
       this._webSocket ? LogType.WEBSOCKET : LogType.OCPP,
     );
-    // A renewed certificate's notBefore wait survives a manual disconnect:
-    // once valid, it is presented at the next connect() (#537).
+    // A renewed certificate is presented at the next connect() (#537).
     this._webSocket?.disconnect(); // drains network-sim pipelines synchronously (spec 2.6 step 1)
     this.teardownAfterClose(); // handler teardown incl. serializer _serialQueue salvage (step 2)
   }
@@ -3679,6 +3762,8 @@ export class ChargePoint {
    * then runs final CP-side teardown.
    */
   dispose(): void {
+    for (const driver of this._vehicleDrivers.values()) driver.dispose();
+    this._vehicleDrivers.clear();
     if (this._powerRestoreTimer !== null) {
       this._clock.clearTimeout(this._powerRestoreTimer);
       this._powerRestoreTimer = null;
@@ -4175,12 +4260,12 @@ export class ChargePoint {
    * there is one sample per tick, not two schedules. 1.x only (SOAP
    * included): on 2.x the existing sampling is unchanged.
    *
-   * The spec does not say when the interval is read; the simulator reads it
-   * when the sampler starts (the transaction's start, or its restore after a
-   * restart), so a ChangeConfiguration applies to the next transaction.
-   * Called again for the same running transaction (the `transactionChange`
-   * that persists a `startCallError` or an id), it keeps the timer and so the
-   * phase.
+   * The interval is read when the sampler starts (the transaction's start,
+   * or its restore after a restart) and again when a ChangeConfiguration of
+   * `MeterValueSampleInterval` re-arms the running samplers (#839); at 0
+   * none runs. Called again for the same running transaction (the
+   * `transactionChange` that persists a `startCallError` or an id), it keeps
+   * the timer and so the phase.
    */
   private startPeriodicSampling(connector: Connector): void {
     if (isOcpp2Version(this._ocppVersion)) return;
@@ -4189,7 +4274,12 @@ export class ChargePoint {
     const seconds = this._configuration.meterValueSampleInterval();
     if (seconds <= 0) return;
     const timer = this._clock.setInterval(() => {
-      if (!connector.hasRunningTransaction) {
+      // A connector removed (or replaced under the same id) while its timer
+      // ran is not sampled any more (#839).
+      if (
+        !connector.hasRunningTransaction ||
+        this._connectors.get(connector.id) !== connector
+      ) {
         this.stopPeriodicSampling(connector.id);
         return;
       }
@@ -4204,6 +4294,18 @@ export class ChargePoint {
       this.sendScheduledMeterValue(connector.id);
     }, seconds * 1000);
     this._periodicSamplers.set(connector.id, timer);
+  }
+
+  /** #839: a new `MeterValueSampleInterval` starts the cadence over on every
+   *  running transaction; 0 leaves them without a sampler. */
+  private rearmPeriodicSampling(): void {
+    for (const connectorId of [...this._periodicSamplers.keys()]) {
+      this.stopPeriodicSampling(connectorId);
+    }
+    for (const connector of this._connectors.values()) {
+      if (connector.hasRunningTransaction)
+        this.startPeriodicSampling(connector);
+    }
   }
 
   private stopPeriodicSampling(connectorId: number): void {
@@ -4294,6 +4396,12 @@ export class ChargePoint {
     if (!connector) return false;
 
     this.clearChargingProfiles(connectorId, {}, "ConnectorRemoved");
+    this.stopPeriodicSampling(connectorId);
+    // The driver's own 1 s timer outlives Connector.dispose() and would keep
+    // calling evSetReady / stopTransaction on a connector the station no longer
+    // has (#864 review).
+    this._vehicleDrivers.get(connectorId)?.dispose();
+    this._vehicleDrivers.delete(connectorId);
     connector.dispose();
     this._engine.detachConnector(connectorId);
     const removed = this._connectors.delete(connectorId);

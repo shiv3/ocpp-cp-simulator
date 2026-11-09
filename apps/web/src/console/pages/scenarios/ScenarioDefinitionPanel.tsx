@@ -18,7 +18,8 @@ import {
   scenarioEditTarget,
   usedBy as usedByOf,
 } from "../../lib/scenarioLibrary";
-import { deriveStepLayout, layoutSteps } from "../../lib/stepLayout";
+import { recognizeBlockTree } from "../../lib/blockTree";
+import { branchCount, isDrawableTree, treeSteps } from "../../lib/stepTree";
 import type { ChargePointRun } from "../../lib/useAllActiveScenarioRuns";
 import type { ScenarioLibraryItem } from "../../lib/useAllScenarios";
 import ScenarioEditorContent from "./edit/ScenarioEditorContent";
@@ -85,8 +86,8 @@ const ScenarioDefinitionPanel: React.FC<ScenarioDefinitionPanelProps> = ({
   cancelEditRef,
 }) => {
   const { t } = useTranslation();
-  const layout = useMemo(
-    () => (scenario ? deriveStepLayout(scenario) : null),
+  const tree = useMemo(
+    () => (scenario ? recognizeBlockTree(scenario) : null),
     [scenario],
   );
 
@@ -104,7 +105,7 @@ const ScenarioDefinitionPanel: React.FC<ScenarioDefinitionPanelProps> = ({
     </Button>
   );
 
-  if (!scenario || !layout) {
+  if (!scenario || !tree) {
     return (
       <div>
         <div className="mb-2 flex justify-end">{closeButton}</div>
@@ -182,13 +183,11 @@ const ScenarioDefinitionPanel: React.FC<ScenarioDefinitionPanelProps> = ({
         run,
       }));
   }
-  const branchCount = layout.fork?.branches.length ?? 0;
-  const meta = layout.supported
+  const branches = branchCount(tree);
+  const meta = isDrawableTree(tree)
     ? [
-        counted(layoutSteps(layout).length, "scenarios.count.step"),
-        ...(branchCount > 0
-          ? [counted(branchCount, "scenarios.count.branch")]
-          : []),
+        counted(treeSteps(tree).length, "scenarios.count.step"),
+        ...(branches > 0 ? [counted(branches, "scenarios.count.branch")] : []),
       ].join(" · ")
     : `${counted(
         deriveDisplayedSteps(scenario).steps.length,
@@ -288,8 +287,8 @@ const ScenarioDefinitionPanel: React.FC<ScenarioDefinitionPanelProps> = ({
       </div>
 
       <div className="mt-5">
-        {layout.supported ? (
-          <StepsView layout={layout} />
+        {isDrawableTree(tree) ? (
+          <StepsView tree={tree} />
         ) : (
           <RunTimeline
             scenario={scenario}

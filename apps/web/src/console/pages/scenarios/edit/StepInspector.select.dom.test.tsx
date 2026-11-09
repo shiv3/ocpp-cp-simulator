@@ -10,6 +10,7 @@ import {
   ScenarioNodeType,
 } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import { updateStepData } from "../../../lib/scenarioSteps";
+import { switchInLane } from "../../../test/treeFixtures";
 import StepInspector from "./StepInspector";
 
 let root: Root | null = null;
@@ -436,5 +437,33 @@ describe("StepInspector: read-only", () => {
     expect(
       document.body.querySelector('[data-testid="switch-case-0"]'),
     ).not.toBeNull();
+  });
+});
+
+describe("StepInspector: lane targets are numbered as the boxes are", () => {
+  it("numbers a nested switch's lane targets in tree pre-order", async () => {
+    // route 1, a 2, inner 3, x 4, y 5, b 6: a shape the one-fork layout
+    // never numbered.
+    const def = switchInLane();
+    const inner = def.nodes.find((n) => n.id === "inner")!;
+    await render(
+      <StepInspector node={inner} onChange={() => {}} scenario={def} />,
+    );
+    expect(lane("case-0")).toMatch(/Step 4 · /);
+    expect(lane("default")).toMatch(/Step 5 · /);
+  });
+
+  it("uses the numbers the editor passes", async () => {
+    const def = switchInLane();
+    const inner = def.nodes.find((n) => n.id === "inner")!;
+    await render(
+      <StepInspector
+        node={inner}
+        onChange={() => {}}
+        scenario={def}
+        stepNumbers={new Map([["x", 9]])}
+      />,
+    );
+    expect(lane("case-0")).toMatch(/Step 9 · /);
   });
 });

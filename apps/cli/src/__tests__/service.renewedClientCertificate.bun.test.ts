@@ -10,8 +10,8 @@ import { testCpInit } from "./testCpInit";
 
 /**
  * #537: `CPRegistry.update` (cp.update) cleans the service up with
- * `permanent = false`, then replaces it. A manual disconnect keeps the
- * renewed certificate wait, so this cleanup must end it itself: the
+ * `permanent = false`, then replaces it. The
+ * cleanup must end the instance's renewed-certificate state itself: the
  * discarded instance keeps no timer, no store listener and no key.
  */
 describe("CLIChargePointService.cleanup() and the renewed client certificate", () => {
@@ -35,15 +35,14 @@ describe("CLIChargePointService.cleanup() and the renewed client certificate", (
     ]);
     const identity = await store.tlsClientIdentity();
     expect(identity).toBeDefined();
-    const read = spyOn(store, "tlsClientIdentity").mockResolvedValue({
-      ...identity!,
-      notBefore: new Date(Date.now() + 60_000),
-    });
+    const read = spyOn(store, "tlsClientIdentity").mockResolvedValue(identity!);
     await cp.useRenewedClientCertificate();
     const timer = () =>
       (cp as unknown as { _cancelClientCertificateSwitchTimer: unknown })
         ._cancelClientCertificateSwitchTimer;
-    expect(timer()).not.toBeNull();
+    // No notBefore wait exists any more (#587: CertificateSigned refuses a
+    // leaf that is not valid yet).
+    expect(timer()).toBeNull();
 
     svc.cleanup();
 

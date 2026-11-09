@@ -711,6 +711,12 @@ configuration no longer in force is removed at boot — see
 (#301). Every field is optional and absence keeps the pre-1.2 behaviour: flat
 acceptance at `maxChargingPowerKw`, 230 V, single phase.
 
+`evSettings.vehicleBehavior` (#835) is the one field that is not electrical: a
+preset id or a policy that says when the vehicle asks for energy ([Vehicle
+behavior](vehicle-behavior.md)). A scenario that sets it selects a reusable
+behavior instead of reproducing every pause and resume with `statusChange`
+nodes; absent keeps the historical behavior.
+
 | Field           | Meaning                                                                            |
 | --------------- | ---------------------------------------------------------------------------------- |
 | `chargingCurve` | `{ socPercent, powerFraction }[]` — piecewise-linear power acceptance against SoC. |
@@ -885,11 +891,23 @@ register, `Power.Active.Import`, `Power.Offered` and `Current.Import` together
 and none of them can contradict another. A connector the capability does not
 list has no cap and resolves byte for byte as before. It is not the vehicle's
 `maxChargingPowerKw` (what the EV accepts) and not a charging profile (what the
-CSMS allows); the aggregate of a station is not modelled (there is no power
-sharing), so connectors are never clamped to a sum. `GetCompositeSchedule`
+CSMS allows); the aggregate of a station is modelled only when
+`chargerCapabilities.powerSharing` asks for it ([Power sharing](power-sharing.md),
+#608): the connector's share is a `stationShareW` term that narrows the cap, so
+without it connectors are never clamped to a sum. `GetCompositeSchedule`
 restates the CSMS profiles, not hardware, and is unaffected. When the schedule
 and the cap are equal `limitedBy` names the schedule, the term an operator can
 change at run time.
+
+**The vehicle's demand (#835).** A `demand` input (`DemandTerm.requestedW`)
+carries what the [vehicle behavior](vehicle-behavior.md) asks for now. It caps the
+acceptance after the curve (`acceptedW`, both `accumulationCapW` branches and the
+rounding ceiling) and nothing else: the offer, the schedule limit and the charger
+cap are not moved by it, so a demand can lower delivered power but never raise
+it. No `demand` (no behavior set) resolves byte for byte as before; a demand of
+0 accepts nothing and keeps the offer. The point also carries `demandW`,
+`conversionEfficiency` and `inputW` (the AC input power, `acceptedW / efficiency`
+for a DC vehicle with a configured efficiency).
 
 **Meter realism (#614–#617).** A seventh input, `meter` (`MeterTerm`), carries the
 opt-in [meter realism](meter-realism.md) of the connector: seeded voltage, power

@@ -69,10 +69,43 @@ export const mainMeterSchema = z
   })
   .strict();
 
+/** How the station divides one power budget between its connectors (#608). */
+export const powerSharingSchema = z
+  .object({
+    totalPowerW: z
+      .number()
+      .positive()
+      .finite()
+      .optional()
+      .describe("The station's total power in watts"),
+    strategy: z
+      .enum(["equal", "active"])
+      .optional()
+      .describe(
+        "equal: split between all connectors; active: between the connectors with a running transaction (default equal)",
+      ),
+    currentLimit: z
+      .object({
+        key: z.string().min(1).max(50),
+        valueA: z.number().positive().finite(),
+        voltageV: z.number().positive().finite().optional(),
+        phases: z.union([z.literal(1), z.literal(3)]).optional(),
+      })
+      .strict()
+      .optional()
+      .describe(
+        "A non-standard configuration key carrying the station current limit in amperes; ChangeConfiguration on it changes the budget",
+      ),
+  })
+  .strict()
+  .refine((v) => v.totalPowerW !== undefined || v.currentLimit !== undefined, {
+    message: "powerSharing needs totalPowerW or currentLimit",
+  });
+
 /**
  * What the charger hardware delivers (#327): the charger side of "vehicle
  * demand ∩ charger capability ∩ CSMS allocation". Per connector, in watts;
- * the station aggregate is deliberately not modelled (no power sharing).
+ * the station aggregate is `powerSharing` (#608), absent by default.
  */
 export const chargerCapabilitiesSchema = z
   .object({
@@ -90,6 +123,14 @@ export const chargerCapabilitiesSchema = z
               .positive()
               .finite()
               .describe("Most the hardware delivers on this connector, watts"),
+            dcEfficiency: z
+              .number()
+              .gt(0)
+              .max(1)
+              .optional()
+              .describe(
+                "DC conversion efficiency; the grid-side meter reads the input",
+              ),
             meter: meterRealismSchema.optional(),
           })
           .strict(),
@@ -100,6 +141,7 @@ export const chargerCapabilitiesSchema = z
         { message: "a connectorId appears twice" },
       ),
     mainMeter: mainMeterSchema.optional(),
+    powerSharing: powerSharingSchema.optional(),
   })
   .strict();
 
@@ -110,7 +152,9 @@ export interface ReadonlyChargerCapabilities {
   readonly connectors: ReadonlyArray<{
     readonly connectorId: number;
     readonly maxDeliveryPowerW: number;
+    readonly dcEfficiency?: number;
     readonly meter?: z.infer<typeof meterRealismSchema>;
   }>;
   readonly mainMeter?: z.infer<typeof mainMeterSchema>;
+  readonly powerSharing?: z.infer<typeof powerSharingSchema>;
 }

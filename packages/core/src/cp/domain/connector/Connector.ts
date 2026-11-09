@@ -56,10 +56,20 @@ import {
 import {
   resolveOperatingPoint,
   chargerTermOf,
+  conversionEfficiencyOf,
   vehicleTermOf,
   type OperatingPoint,
 } from "./OperatingPoint";
 import { evConnectionOf, type EvConnectionState } from "./EvConnection";
+import {
+  evaluateVehicleBehavior,
+  startVehicleSession,
+} from "@ocpp-cp-simulator/vehicle/evaluate";
+import type {
+  VehicleBehaviorSpec,
+  VehicleSnapshot,
+} from "@ocpp-cp-simulator/vehicle/contracts";
+import { resolveVehicleBehaviorConfig } from "@ocpp-cp-simulator/vehicle/config";
 import type { MeterRealism } from "./MeterRealism";
 import { resolveSessionIntent, type SessionIntent } from "./SessionIntent";
 import {
@@ -320,6 +330,13 @@ export class Connector {
   /** The charger's delivery cap on this connector in watts (#327);
    *  `undefined` when the hardware declares none. Set once at construction. */
   private _maxDeliveryPowerW: number | undefined;
+  /** This connector's share of the station's power budget in watts, read at
+   *  every resolve (#608); `undefined` when the station does not share. */
+  private stationShareProvider: (() => number) | undefined;
+  private _dcEfficiency: number | undefined;
+  /** When the vehicle on the cable connected (epoch ms); the origin of its
+   *  behavior's clock (#835). `null` with no cable. */
+  private vehicleConnectedAt: number | null = null;
   /** Opt-in meter realism (#614-#616); `undefined` keeps the constant,
    *  historical output. Set once at construction, like the delivery cap. */
   private _meterRealism: MeterRealism | undefined;
@@ -742,7 +759,11 @@ export class Connector {
       schedule: { scheduleLimitW: watts, activePhases },
       vehicle: vehicleTermOf(this._evSettings),
       session: { initialSoc: this.sessionIntent().initialSoc },
-      charger: chargerTermOf(this._maxDeliveryPowerW),
+      charger: chargerTermOf(this._maxDeliveryPowerW, {
+        stationShareW: this.stationShareProvider?.(),
+        conversionEfficiency: this._dcEfficiency,
+      }),
+      demand: this.vehicleDemandTerm(now.getTime()),
       meter: {
         realism: this._meterRealism,
         sessionStartedAt: this.hasRunningTransaction
@@ -780,6 +801,104 @@ export class Connector {
    *  built, before it samples. */
   setMaxDeliveryPowerW(watts: number | undefined): void {
     this._maxDeliveryPowerW = watts;
+  }
+
+  /** Let the station divide its power (#608): `provider` returns this
+   *  connector's share in watts and is read at every resolve, so a transaction
+   *  that starts or stops elsewhere moves it at once. */
+  setStationShareProvider(provider: (() => number) | undefined): void {
+    this.stationShareProvider = provider;
+  }
+
+  /** The conversion efficiency in force on this connector (#608): 1 unless a
+   *  DC vehicle is on a charger with a configured efficiency. */
+  get conversionEfficiency(): number {
+    return conversionEfficiencyOf(
+      this._evSettings.currentType,
+      this._dcEfficiency,
+    );
+  }
+
+  /** Declare the DC conversion efficiency in (0, 1] (#608). */
+  setDcEfficiency(efficiency: number | undefined): void {
+    this._dcEfficiency = efficiency;
+  }
+
+  /** The behavior the vehicle follows, resolved from its EV settings
+   *  (`vehicleBehavior`), `null` when none is set (#835). */
+  get vehicleBehavior(): VehicleBehaviorSpec | null {
+    return resolveVehicleBehaviorConfig(this._evSettings.vehicleBehavior);
+  }
+
+  /** Stamp the instant the vehicle connected, if a cable is on and nothing
+   *  was stamped yet: a vehicle that was there before its behavior was set
+   *  keeps its plug-in time (#835). */
+  ensureVehicleSession(): void {
+    if (this.evCableConnected && this.vehicleConnectedAt === null) {
+      this.vehicleConnectedAt = this.clock.now();
+    }
+  }
+
+  /**
+   * What the vehicle wants now, separately from what the connector delivers
+   * (#835): its phase, its demand and the state of its objective. `null`
+   * without a behavior or a cable. Pure: the same connector state at the same
+   * instant gives the same snapshot.
+   */
+  vehicleSnapshot(): VehicleSnapshot | null {
+    return this.vehicleSnapshotAt(this.clock.now());
+  }
+
+  private vehicleSnapshotAt(now: number): VehicleSnapshot | null {
+    const spec = this.vehicleBehavior;
+    if (!spec || !this.evCableConnected) return null;
+    const intent = this.sessionIntent();
+    const settings = this._evSettings;
+    const transaction = this.transaction;
+    const delivered =
+      transaction && this.hasRunningTransaction
+        ? Math.max(0, this.meterValueWh - (transaction.meterStart ?? 0))
+        : 0;
+    return evaluateVehicleBehavior(
+      {
+        ...spec,
+        intent: {
+          ...(intent.targetSoc !== undefined && {
+            targetSoc: intent.targetSoc,
+          }),
+          ...(intent.requestedWh !== undefined && {
+            requestedEnergyWh: intent.requestedWh,
+          }),
+          ...(intent.departureAt !== undefined && {
+            departureAt: intent.departureAt,
+          }),
+          ...spec.intent,
+        },
+      },
+      {
+        ...(settings.maxChargingPowerKw > 0 && {
+          maxPowerW: settings.maxChargingPowerKw * 1000,
+        }),
+        ...(settings.batteryCapacityKwh > 0 && {
+          batteryCapacityWh: settings.batteryCapacityKwh * 1000,
+        }),
+      },
+      startVehicleSession(this.vehicleConnectedAt ?? now),
+      { soc: this.effectiveSocPercent(), deliveredWh: delivered },
+      now,
+    );
+  }
+
+  /** The demand term of the resolution: absent without a behavior (the
+   *  vehicle asks for all it can take), else what the vehicle asks for now. */
+  private vehicleDemandTerm(now: number): { requestedW: number } | undefined {
+    const snapshot = this.vehicleSnapshotAt(now);
+    if (!snapshot) return undefined;
+    return {
+      requestedW: snapshot.demand.readyToCharge
+        ? snapshot.demand.requestedPowerW
+        : 0,
+    };
   }
 
   /** The opt-in meter realism of this connector, `undefined` when none. */
@@ -1172,12 +1291,14 @@ export class Connector {
   markEvPluggedIn(): void {
     this.evCableConnected = true;
     this.evReadyValue = true;
+    this.vehicleConnectedAt = this.clock.now();
   }
 
   /** Record the cable as unplugged. */
   markEvUnplugged(): void {
     this.evCableConnected = false;
     this.evReadyValue = true;
+    this.vehicleConnectedAt = null;
   }
 
   /** Record the EV as ready or not ready for energy; needs a plugged-in cable. */
@@ -1585,6 +1706,7 @@ export class Connector {
     // A transaction means an EV on the cable (#453): a start without a prior
     // plug-in, and a restored transaction, imply one.
     this.evCableConnected = true;
+    this.ensureVehicleSession();
     this.evReadyValue = true;
     this.energyHeldForInvalidId = false;
     this.invalidIdHoldAtWh = null;

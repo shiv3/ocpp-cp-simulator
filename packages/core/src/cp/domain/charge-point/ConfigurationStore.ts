@@ -556,6 +556,70 @@ export class ConfigurationStore {
 
   // ── persistence ─────────────────────────────────────────────────────────
 
+  /** Put one stored override back, if its key is known and writable and the
+   *  value still fits it. */
+  private applyStoredOverride(name: string, raw: string): void {
+    const entry = this.values.get(name);
+    // Silently skip overrides for keys the current defaults don't know
+    // about (e.g. obsolete keys from an older simulator version) and
+    // readonly keys — both indicate operator error rather than a real
+    // override.
+    if (!entry || entry.key.readonly) return;
+    let value: unknown;
+    try {
+      value = JSON.parse(raw);
+    } catch {
+      return;
+    }
+    if (
+      !isValueAssignable(entry.key, value) ||
+      !isConfigurationValueValid(entry.key, value)
+    ) {
+      return;
+    }
+    this.values.set(name, {
+      key: entry.key,
+      value,
+    } as ConfigurationValue);
+  }
+
+  /**
+   * Declare a writable, persisted integer key the station owns beyond the
+   * standard list, such as a vendor current limit (#608). `ChangeConfiguration`
+   * answers `Accepted` for it (OCPP 1.6 §5.3: an unknown key is
+   * `NotSupported`), and a value changed earlier is read back from the
+   * database. Never shadows a key that already exists; returns whether the
+   * key was declared.
+   */
+  defineWritableIntegerKey(
+    name: string,
+    value: number,
+    bounds: { readonly min?: number; readonly max?: number } = {},
+  ): boolean {
+    if (this.values.has(name)) return false;
+    const key: IntegerConfigurationKey = {
+      name,
+      required: false,
+      readonly: false,
+      type: "integer",
+      ...(bounds.min !== undefined && { min: bounds.min }),
+      ...(bounds.max !== undefined && { max: bounds.max }),
+    };
+    this.values.set(name, { key, value });
+    if (this.database) {
+      try {
+        const row = this.database.get<{ value: string }>(
+          "SELECT value FROM configuration WHERE cp_id = ? AND key = ?",
+          [this.chargePointId, name],
+        );
+        if (row) this.applyStoredOverride(name, row.value);
+      } catch (err) {
+        console.error("Failed to load config override:", err);
+      }
+    }
+    return true;
+  }
+
   private loadOverrides(): void {
     if (!this.database) return;
     try {
@@ -564,28 +628,7 @@ export class ConfigurationStore {
         [this.chargePointId],
       );
       for (const { key: name, value: raw } of rows) {
-        const entry = this.values.get(name);
-        // Silently skip overrides for keys the current defaults don't know
-        // about (e.g. obsolete keys from an older simulator version) and
-        // readonly keys — both indicate operator error rather than a real
-        // override.
-        if (!entry || entry.key.readonly) continue;
-        let value: unknown;
-        try {
-          value = JSON.parse(raw);
-        } catch {
-          continue;
-        }
-        if (
-          !isValueAssignable(entry.key, value) ||
-          !isConfigurationValueValid(entry.key, value)
-        ) {
-          continue;
-        }
-        this.values.set(name, {
-          key: entry.key,
-          value,
-        } as ConfigurationValue);
+        this.applyStoredOverride(name, raw);
       }
     } catch (err) {
       console.error("Failed to load config overrides:", err);

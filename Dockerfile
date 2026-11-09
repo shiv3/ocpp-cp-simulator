@@ -105,6 +105,8 @@ COPY scripts/bench/tsconfig.json ./scripts/bench/tsconfig.json
 # Same for scripts/tsconfig.json (#578, the package-boundary checker's
 # project): referenced from the root tsconfig.json, so it must be present.
 COPY scripts/tsconfig.json ./scripts/tsconfig.json
+# vite.config.ts imports the third-party notices renderer (#857).
+COPY scripts/licenseNotices.ts ./scripts/licenseNotices.ts
 COPY tailwind.config.js postcss.config.js ./
 COPY public ./public
 COPY packages ./packages

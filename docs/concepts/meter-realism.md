@@ -95,8 +95,9 @@ what the connector registers moved since the previous read plus the base load
 over the elapsed time (a register set backwards moves nothing); net flow decides
 import or export. They are runtime state, not persisted. It is sent with
 `sendMeterValue(0)`, a TriggerMessage for MeterValues with no connector or
-connector 0, and with every clock-aligned sample. Conversion efficiency (#608) is
-not available yet; `MainMeter.gridFlowW` is the single place it would enter.
+connector 0, and with every clock-aligned sample. A DC connector's conversion
+efficiency (#608) enters here: the main meter reads each connector's AC input,
+`delivered / efficiency` ([Power sharing](power-sharing.md#dc-conversion-efficiency)).
 
 ## Limits
 

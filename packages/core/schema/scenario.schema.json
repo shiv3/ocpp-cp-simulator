@@ -142,6 +142,52 @@
           "exclusiveMinimum": 0,
           "maximum": 1
         },
+        "vehicleBehavior": {
+          "description": "What the vehicle wants and when (issue #835): a preset id or a policy, with an optional intent. Absent keeps the historical behavior (the vehicle asks for all it can take from the plug-in on). See docs/concepts/vehicle-behavior.md.",
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "preset": {
+              "type": "string",
+              "enum": [
+                "immediate",
+                "target-soc",
+                "delayed-15min",
+                "overnight",
+                "ev-pause-resume",
+                "demand-dip"
+              ]
+            },
+            "policy": {
+              "type": "object",
+              "additionalProperties": true,
+              "required": ["type"],
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "immediate",
+                    "delayed",
+                    "target-soc",
+                    "scheduled-window",
+                    "manual-suspend",
+                    "demand-steps"
+                  ]
+                }
+              }
+            },
+            "intent": {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "targetSoc": { "type": "number", "minimum": 0, "maximum": 100 },
+                "requestedEnergyWh": { "type": "number", "minimum": 0 },
+                "departureAt": { "type": "number", "minimum": 0 }
+              }
+            },
+            "stopWhenDone": { "type": "boolean" }
+          }
+        },
         "attribution": {
           "description": "Credit owed for third-party data copied into these settings (issue #458): set when an imported vehicle profile is applied, one entry per source license, so the credit travels with the copied values. Informational: it changes nothing at run time. A preset clears it. When an entry has shareAlike, the copied data is shared under that license.",
           "type": "array",

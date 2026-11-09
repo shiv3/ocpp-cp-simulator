@@ -2,7 +2,7 @@
 title: Index
 type: index
 summary: Catalog of every page in the wiki with a one-line summary, by category. Read this first when answering a question.
-updated: 2026-11-08
+updated: 2026-11-09
 ---
 
 # Index
@@ -56,6 +56,8 @@ Start at [Overview](overview.md). Conventions for pages are in
 | [Fleet templates](concepts/fleet-templates.md)                           | One persisted definition of a heterogeneous fleet (blueprint, scenario, EV, network simulation, labels per charge point), `--fleet-template` files, `fleet.create`                                                                                                    |
 | [Local vs Remote mode](concepts/local-vs-remote-mode.md)                 | How the browser picks in-tab vs daemon operation via the health probe, and what differs                                                                                                                                                                               |
 | [File hot-reload (`--watch`)](concepts/file-hot-reload.md)               | Why each `--watch` reload rule is shaped as it is, and how a watched file's origin survives a restart — the contract itself is on the daemon page                                                                                                                     |
+| [Vehicle behavior](concepts/vehicle-behavior.md)                         | What a vehicle wants and when: the protocol-independent `packages/vehicle` domain, policies and presets, demand in the operating point, EV readiness, extraction path                                                                                                 |
+| [Power sharing and DC conversion efficiency](concepts/power-sharing.md)  | Station power budget split between connectors (equal / active), the vendor current limit key, DC conversion efficiency on the AC input side                                                                                                                           |
 | [Vehicle profiles](concepts/vehicle-profiles.md)                         | Saved vehicles imported from Open EV Directory; resolution to EV settings, refresh, storage, offline copy, open points                                                                                                                                                |
 
 ## Sources (`sources/`)

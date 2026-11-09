@@ -1296,8 +1296,16 @@ Rules:
 - Licenses: EVIcons is
   [MIT, © 2026 Landolsi Digital](https://github.com/evicons/evicons/blob/main/LICENSE)
   and Lucide is [ISC](https://github.com/lucide-icons/lucide/blob/main/LICENSE).
-  Both ask that the notice travel with copies of the code; the built console
-  does not carry the notices of its bundled dependencies yet (#857).
+  Both ask that the notice travel with copies of the code, so `vite build`
+  (the `rollup-plugin-license` entry of
+  [`vite.config.ts`](../../vite.config.ts)) writes
+  `dist/THIRD-PARTY-LICENSES.txt`: every bundled package with name, version,
+  SPDX id, repository and license text (a package that ships no license file
+  gets its SPDX id and author instead). It lives in `dist/`, so the npm
+  tarball (`files`), the [Docker image](docker-image.md) (`COPY dist`) and the
+  [desktop app](desktop-app.md) (`frontendDist` and the `web-console/`
+  resource) carry it with no extra step; `scripts/verify-cli-tarball.sh` fails
+  a tarball whose `dist/` lacks it (#857).
 - The package is pinned exactly in `package.json` (`0.8.0`, as `@noble/curves`
   is): it is young, so bump it on purpose.
 

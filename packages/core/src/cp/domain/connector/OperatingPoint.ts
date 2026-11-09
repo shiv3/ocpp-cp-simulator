@@ -91,6 +91,18 @@ export interface OperatingPoint {
    * the energy it adds is the integral of the power that is reported.
    */
   deliveryFactor: number;
+  /** What the vehicle asks for in watts (its behavior, #835); `Infinity` when
+   *  it asks for no less than it can take. A term of the acceptance next to
+   *  the vehicle ceiling and the curve, never of the offer: it cannot raise
+   *  what the CSMS or the charger allow. */
+  demandW: number;
+  /** Fraction of the AC input that reaches the vehicle (#608); 1 unless a DC
+   *  conversion efficiency is configured for a DC connector. */
+  conversionEfficiency: number;
+  /** AC input power for {@link acceptedW}: `acceptedW / conversionEfficiency`
+   *  (#608). What a grid-side meter sees; the connector's own samples keep
+   *  reporting the vehicle side. */
+  inputW: number;
   /** Power the connector exports (V2X, #615) in watts; 0 unless a discharge
    *  term is configured and the connector is `Charging`. */
   exportW: number;
@@ -164,13 +176,45 @@ export interface SessionTerm {
 export interface ChargerTerm {
   /** Delivery cap in watts, `Infinity` when none is declared. */
   maxDeliveryW: number;
+  /**
+   * This connector's share of the station's power budget in watts (#608),
+   * `Infinity` or absent when the station does not share power. The station
+   * term of the resolution: the cap that applies is the lower of this and
+   * {@link maxDeliveryW}.
+   */
+  stationShareW?: number;
+  /** DC conversion efficiency in (0, 1] (#608), absent or 1 for none. Applied
+   *  only to a DC vehicle. */
+  conversionEfficiency?: number;
+}
+
+/** What the vehicle asks for now (see `@ocpp-cp-simulator/vehicle`). */
+export interface DemandTerm {
+  /** Requested power in watts; 0 while the vehicle is not ready. */
+  requestedW: number;
+}
+
+/** The efficiency that applies: only a DC vehicle on a charger with a
+ *  configured efficiency below 1 loses anything in conversion (#608). */
+export function conversionEfficiencyOf(
+  currentType: EVSettings["currentType"],
+  efficiency: number | undefined,
+): number {
+  return currentType === "DC" &&
+    efficiency !== undefined &&
+    efficiency > 0 &&
+    efficiency < 1
+    ? efficiency
+    : 1;
 }
 
 /** The charger term for a declared cap in watts (`undefined`: none). */
 export function chargerTermOf(
   maxDeliveryPowerW: number | undefined,
+  station: Pick<ChargerTerm, "stationShareW" | "conversionEfficiency"> = {},
 ): ChargerTerm {
   return {
+    ...station,
     maxDeliveryW:
       maxDeliveryPowerW !== undefined &&
       Number.isFinite(maxDeliveryPowerW) &&
@@ -215,6 +259,9 @@ export interface OperatingPointInputs {
   fault: FaultTerm;
   /** `{}` for a connector without meter realism. */
   meter: MeterTerm;
+  /** The vehicle's demand (#835); absent for a vehicle without a behavior,
+   *  which asks for all it can take. */
+  demand?: DemandTerm;
 }
 
 /** The vehicle term for the connector's resolved EV settings (`undefined`:
@@ -235,7 +282,13 @@ export function resolveOperatingPoint(
 ): OperatingPoint {
   const { at, schedule, vehicle, session, charger, fault, meter } = inputs;
   const { scheduleLimitW, activePhases } = schedule;
-  const chargerCapW = charger.maxDeliveryW;
+  // The hardware's cap on this connector and its share of the station's
+  // budget (#608) are one cap: the lower of the two.
+  const chargerCapW = Math.min(
+    charger.maxDeliveryW,
+    charger.stationShareW ?? Infinity,
+  );
+  const demandW = inputs.demand?.requestedW ?? Infinity;
   // The one narrowing of the CSMS allocation by the hardware: every term
   // below (acceptance, offer, register bound, report bound) reads it, so a
   // cap cannot bind one and not another.
@@ -271,19 +324,33 @@ export function resolveOperatingPoint(
     undefined,
   );
 
+  // The vehicle's demand caps what the battery takes. It is applied after
+  // the curve, not in place of the ceiling: the curve is a fraction of the
+  // ceiling, and a reduced demand is not a smaller battery (#835). With
+  // nothing else known the resolver reports 0, which must not hide a finite
+  // demand.
+  const withDemand = (watts: number, nothingKnown: boolean): number =>
+    demandW === Infinity
+      ? watts
+      : nothingKnown
+        ? demandW
+        : Math.min(watts, demandW);
   const baseAcceptedW =
     inputs.charging && !exporting
-      ? effectiveChargingPowerW({
-          evMaxW,
-          curve,
-          socPercent: curveSoc,
-          scheduleLimitWatts: boundW,
-        })
+      ? withDemand(
+          effectiveChargingPowerW({
+            evMaxW,
+            curve,
+            socPercent: curveSoc,
+            scheduleLimitWatts: boundW,
+          }),
+          !Number.isFinite(evMaxW) && !Number.isFinite(boundW),
+        )
       : 0;
   // Ramp and fluctuation never carry the report past the bound (the CSMS
   // allocation narrowed by the hardware) or the vehicle's own ceiling, so a
   // fluctuating load at full power dips below it and never rises above.
-  const ceilingW = Math.min(boundW, evMaxW);
+  const ceilingW = Math.min(boundW, evMaxW, demandW);
   const acceptedW =
     deliveryFactor === 1
       ? baseAcceptedW
@@ -313,12 +380,20 @@ export function resolveOperatingPoint(
       scheduleLimitWatts: boundW,
     });
   }
+  if (accumulationCapW > 0 && demandW !== Infinity) {
+    accumulationCapW = Math.min(accumulationCapW, demandW);
+  }
   if (deliveryFactor !== 1 && Number.isFinite(accumulationCapW)) {
     accumulationCapW = Math.min(accumulationCapW * deliveryFactor, ceilingW);
   }
 
   // Jitter of the current as a meter reads it, on top of the load (#614).
   const currentFactor = draw(3, realism?.fluctuation?.currentPct);
+
+  const conversionEfficiency = conversionEfficiencyOf(
+    vehicle.electrical.currentType,
+    charger.conversionEfficiency,
+  );
 
   return {
     at,
@@ -336,6 +411,9 @@ export function resolveOperatingPoint(
     powerFactor: effectivePowerFactor(electrical),
     soc: inputs.soc,
     deliveryFactor,
+    demandW,
+    conversionEfficiency,
+    inputW: acceptedW / conversionEfficiency,
     exportW,
     exportCurrentA: currentAmpsFor(exportW, electrical, activePhases),
     phaseDetail: phaseDetailOf(
@@ -351,13 +429,16 @@ export function resolveOperatingPoint(
       fault.energyOfferSuspended,
       scheduleLimitW,
       chargerCapW,
-      effectiveChargingPowerW({
-        evMaxW,
-        curve,
-        socPercent: curveSoc,
-        scheduleLimitWatts: Infinity,
-      }),
-      evMaxW,
+      withDemand(
+        effectiveChargingPowerW({
+          evMaxW,
+          curve,
+          socPercent: curveSoc,
+          scheduleLimitWatts: Infinity,
+        }),
+        !Number.isFinite(evMaxW),
+      ),
+      Math.min(evMaxW, demandW),
     ),
   };
 }

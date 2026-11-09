@@ -1,4 +1,12 @@
+import { VehicleBehaviorDriver } from "./VehicleBehaviorDriver";
 import {
+  connectorShareW,
+  stationBudgetW,
+  type PowerSharingConfig,
+  type ShareParticipant,
+} from "./PowerSharing";
+import {
+  dcEfficiencyFor,
   maxDeliveryPowerWFor,
   meterRealismFor,
   type ChargerCapabilities,
@@ -497,6 +505,10 @@ export class ChargePoint {
   /** #722: the per-connector `MeterValueSampleInterval` timers of running 1.x
    *  transactions. */
   private readonly _periodicSamplers: Map<number, TimerHandle> = new Map();
+  /** Applies each connector's vehicle behavior to the station (#835). */
+  private _powerSharing: PowerSharingConfig | undefined;
+  private readonly _vehicleDrivers: Map<number, VehicleBehaviorDriver> =
+    new Map();
   /** #702: the next socket open is a (re)start of the link — the first
    *  connect, an operator `connect()`, a Reset — and sends a
    *  BootNotification. Only the transport's automatic reconnect after a
@@ -751,6 +763,9 @@ export class ChargePoint {
       connector.setMeterRealism(
         meterRealismFor(transportOptions.chargerCapabilities, connectorId),
       );
+      connector.setDcEfficiency(
+        dcEfficiencyFor(transportOptions.chargerCapabilities, connectorId),
+      );
       // §5.2: Unavailable set via ChangeAvailability persists across
       // reboots. Restore the persisted value before any event listeners
       // have a chance to react.
@@ -821,6 +836,33 @@ export class ChargePoint {
         this.reportEnergyHeld(connector);
       });
       this._connectors.set(connectorId, connector);
+      this._vehicleDrivers.set(
+        connectorId,
+        new VehicleBehaviorDriver(
+          connector,
+          this._clock,
+          {
+            setReady: (id, ready) => {
+              if (this._powerLoss) return;
+              if (this.getConnector(id)?.evConnection === "disconnected") {
+                return;
+              }
+              this.evSetReady(id, ready);
+            },
+            requestStop: (id) => {
+              if (this._powerLoss) return;
+              this._logger.info(
+                `Connector ${id} vehicle asked to end the session`,
+                LogType.TRANSACTION,
+              );
+              this.stopTransaction(connector, undefined, {
+                triggerReason: "EnergyLimitReached",
+              });
+            },
+          },
+          connectorId,
+        ),
+      );
     }
 
     const mainMeterConfig = transportOptions.chargerCapabilities?.mainMeter;
@@ -988,6 +1030,7 @@ export class ChargePoint {
       this._configuration.applyChange("CpoName", cpoName);
     }
     this.wireConfigurationListeners();
+    this.wirePowerSharing(transportOptions.chargerCapabilities?.powerSharing);
     if (!isOcpp2Version(this._ocppVersion) && this._webSocket) {
       this.wireSecurityConfiguration();
     }
@@ -1470,6 +1513,61 @@ export class ChargePoint {
       LogType.CONFIGURATION,
     );
     this.reset();
+  }
+
+  /**
+   * Let the connectors share the station's power budget (#608). The share is
+   * read at every operating point resolve from the connectors' transactions
+   * at that instant, so a transaction that starts or stops moves it with no
+   * bookkeeping. A declared current limit key becomes a writable configuration
+   * key; it is read here at resolve time too, so `ChangeConfiguration`
+   * changes the budget at once.
+   */
+  private wirePowerSharing(config: PowerSharingConfig | undefined): void {
+    if (!config) return;
+    this._powerSharing = config;
+    const limit = config.currentLimit;
+    if (limit) {
+      const declared = this._configuration.defineWritableIntegerKey(
+        limit.key,
+        Math.round(limit.valueA),
+        { min: 1 },
+      );
+      if (!declared) {
+        this._logger.warn(
+          `powerSharing.currentLimit.key ${limit.key} is already a configuration key; the declared limit is ignored`,
+          LogType.CONFIGURATION,
+        );
+      }
+    }
+    const strategy = config.strategy ?? "equal";
+    for (const [connectorId, connector] of this._connectors) {
+      connector.setStationShareProvider(() => {
+        const participants: ShareParticipant[] = [];
+        for (const [id, c] of this._connectors) {
+          participants.push({
+            connectorId: id,
+            capW: c.maxDeliveryPowerW ?? Infinity,
+            active: c.hasRunningTransaction,
+          });
+        }
+        return connectorShareW(
+          this.stationPowerBudgetW(),
+          strategy,
+          participants,
+          connectorId,
+        );
+      });
+    }
+  }
+
+  /** The station's power budget in watts now, `Infinity` without sharing. */
+  stationPowerBudgetW(): number {
+    const limit = this._powerSharing?.currentLimit;
+    return stationBudgetW(
+      this._powerSharing,
+      limit ? this._configuration.getInteger(limit.key) : undefined,
+    );
   }
 
   /** Hook up subsystems that react to live Configuration changes. */
@@ -3686,6 +3784,8 @@ export class ChargePoint {
    * then runs final CP-side teardown.
    */
   dispose(): void {
+    for (const driver of this._vehicleDrivers.values()) driver.dispose();
+    this._vehicleDrivers.clear();
     if (this._powerRestoreTimer !== null) {
       this._clock.clearTimeout(this._powerRestoreTimer);
       this._powerRestoreTimer = null;

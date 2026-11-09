@@ -2,8 +2,8 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import type { Socket } from "socket.io-client";
 
-import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/domain/persistence/BunSqliteDatabase";
-import { BlueprintRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/BlueprintRepository";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/BunSqliteDatabase";
+import { BlueprintRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/BlueprintRepository";
 import {
   builtInBlueprints,
   MAX_STORED_BLUEPRINTS,

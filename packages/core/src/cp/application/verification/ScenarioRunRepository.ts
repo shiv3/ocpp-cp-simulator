@@ -1,10 +1,10 @@
-import type { ScenarioRunResult } from "../../application/verification/ScenarioAssertions";
+import type { ScenarioRunResult } from "./ScenarioAssertions";
 import {
   matchesRunQuery,
   summarizeRun,
   type ScenarioRunPage,
   type ScenarioRunQuery,
-} from "../../application/verification/ScenarioRunSummary";
+} from "./ScenarioRunSummary";
 
 /**
  * Scenario run history (#388): the finished-run reports `scenario_report`

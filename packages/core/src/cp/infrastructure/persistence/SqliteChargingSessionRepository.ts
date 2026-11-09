@@ -1,12 +1,12 @@
-import type { Database, SqlParam } from "./Database";
-import type { ChargingSession } from "../session/ChargingSession";
+import type { Database, SqlParam } from "../../domain/persistence/Database";
+import type { ChargingSession } from "../../domain/session/ChargingSession";
 import { parseStoredJson } from "./parseStoredJson";
 import {
   MAX_SESSIONS_PER_CP,
   type ChargingSessionPage,
   type ChargingSessionQuery,
   type ChargingSessionRepository,
-} from "./ChargingSessionRepository";
+} from "../../domain/persistence/ChargingSessionRepository";
 
 /**
  * `charging_sessions`-backed session history (#447), for a daemon started

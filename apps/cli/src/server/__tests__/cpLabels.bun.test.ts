@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import type { Socket } from "socket.io-client";
 
 import { LABELS_MAX_ENTRIES } from "@ocpp-cp-simulator/contracts/index";
-import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/domain/persistence/BunSqliteDatabase";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/BunSqliteDatabase";
 import {
   connectTestClient,
   startTestServer,

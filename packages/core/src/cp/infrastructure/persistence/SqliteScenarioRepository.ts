@@ -1,6 +1,6 @@
 import type { ScenarioDefinition } from "../../application/scenario/ScenarioTypes";
-import type { Database } from "./Database";
-import type { ScenarioRepository } from "./ScenarioRepository";
+import type { Database } from "../../domain/persistence/Database";
+import type { ScenarioRepository } from "../../application/scenario/ScenarioRepository";
 
 /**
  * SQLite-backed scenario repository. Persists definitions verbatim as a

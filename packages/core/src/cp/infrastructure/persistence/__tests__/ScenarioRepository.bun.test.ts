@@ -6,7 +6,7 @@ import { BunSqliteDatabase } from "../BunSqliteDatabase";
 import {
   InMemoryScenarioRepository,
   type ScenarioRepository,
-} from "../ScenarioRepository";
+} from "../../../application/scenario/ScenarioRepository";
 import { SqliteScenarioRepository } from "../SqliteScenarioRepository";
 
 /**

@@ -6,7 +6,7 @@ sources:
   - packages/core/src/cp/domain/session/ChargingSession.ts
   - packages/core/src/cp/application/services/ChargingSessionRecorder.ts
   - packages/core/src/cp/domain/persistence/ChargingSessionRepository.ts
-  - packages/core/src/cp/domain/persistence/SqliteChargingSessionRepository.ts
+  - packages/core/src/cp/infrastructure/persistence/SqliteChargingSessionRepository.ts
   - packages/contracts/src/methods.ts (sessions.list)
   - "issue #447"
   - "issue #491"

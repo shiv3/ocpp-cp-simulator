@@ -13,7 +13,7 @@ import type {
   SqlParam,
   SqlRow,
 } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
-import { SqliteScenarioRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/SqliteScenarioRepository";
+import { SqliteScenarioRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/SqliteScenarioRepository";
 import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import type { SimulatorConfigInput } from "@ocpp-cp-simulator/contracts/index";
 import { SqliteConnectorSettingsRepository } from "@ocpp-cp-simulator/client/sqlite/SqliteConnectorSettingsRepository";

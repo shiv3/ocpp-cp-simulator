@@ -1,8 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { afterEach, describe, expect, it } from "bun:test";
 import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
-import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/domain/persistence/BunSqliteDatabase";
-import { runMigrations } from "@ocpp-cp-simulator/core/cp/domain/persistence/schema";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/BunSqliteDatabase";
+import { runMigrations } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/schema";
 import { CLIChargePointService } from "../../service";
 import { CPRegistry } from "../../server/CPRegistry";
 import { EventBus } from "../../server/eventBus";

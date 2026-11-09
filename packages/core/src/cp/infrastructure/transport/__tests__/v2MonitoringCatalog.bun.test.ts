@@ -17,7 +17,7 @@ import {
 } from "@ocpp-cp-simulator/ocpp/v21/index";
 import { answerTo, startMockCsms, type MockCsms } from "./mockCsms";
 import { bootedChargePoint, callOf, stationFor } from "./stationHarness";
-import { BunSqliteDatabase } from "../../../domain/persistence/BunSqliteDatabase";
+import { BunSqliteDatabase } from "../../persistence/BunSqliteDatabase";
 import { DEFAULT_MONITOR_CATALOG } from "../../../domain/monitoring/monitorCatalog";
 
 /**

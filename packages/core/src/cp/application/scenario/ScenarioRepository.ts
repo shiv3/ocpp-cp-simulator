@@ -1,4 +1,4 @@
-import type { ScenarioDefinition } from "../../application/scenario/ScenarioTypes";
+import type { ScenarioDefinition } from "./ScenarioTypes";
 
 export interface ScenarioRepository {
   load(

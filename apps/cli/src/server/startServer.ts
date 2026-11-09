@@ -28,7 +28,7 @@ import {
 } from "./socketServer";
 import { createMcpHandler } from "./mcp/mcpServer";
 import { RegistryChargePointService } from "./RegistryChargePointService";
-import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/domain/persistence/BunSqliteDatabase";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/BunSqliteDatabase";
 import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
 import { SqliteConnectorSettingsRepository } from "@ocpp-cp-simulator/client/sqlite/SqliteConnectorSettingsRepository";
 import {
@@ -52,13 +52,13 @@ import {
   setGlobalMetricsRecorder,
 } from "./metrics/MetricsRecorder";
 import { renderMetrics } from "./metrics/render";
-import { VehicleProfileRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/VehicleProfileRepository";
+import { VehicleProfileRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/VehicleProfileRepository";
 import { OpenEvDirectoryClient } from "@ocpp-cp-simulator/core/cp/infrastructure/vehicle-catalog/open-ev-directory/OpenEvDirectoryClient";
 import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
 import type { VehicleCatalogConfig } from "../vehicleCatalogConfig";
-import { FleetTemplateRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/FleetTemplateRepository";
+import { FleetTemplateRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/FleetTemplateRepository";
 import type { FleetTemplate } from "@ocpp-cp-simulator/contracts/index";
-import { BlueprintRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/BlueprintRepository";
+import { BlueprintRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/BlueprintRepository";
 import { FileReloadManager } from "./FileReloadManager";
 import { forgetWatchedScenarioFile } from "./watchedScenarioFiles";
 import {
@@ -67,7 +67,7 @@ import {
   loadWithStartupProvenance,
 } from "./startupScenarioRows";
 import { scenarioInstanceId } from "../scenarioInstanceId";
-import { LEGACY_STARTUP_SOURCE_PREFIX } from "@ocpp-cp-simulator/core/cp/domain/persistence/legacyStartupInstances";
+import { LEGACY_STARTUP_SOURCE_PREFIX } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/legacyStartupInstances";
 import {
   DEFAULT_BOOTSTRAP_PACING,
   forEachPaced,

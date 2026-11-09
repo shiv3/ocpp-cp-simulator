@@ -1,8 +1,8 @@
-import type { Database } from "./Database";
+import type { Database } from "../../domain/persistence/Database";
 import {
   InMemoryScenarioRepository,
   type ScenarioRepository,
-} from "./ScenarioRepository";
+} from "../../application/scenario/ScenarioRepository";
 import { SqliteScenarioRepository } from "./SqliteScenarioRepository";
 
 /** A daemon's scenario definitions (#495): the `scenarios` table on

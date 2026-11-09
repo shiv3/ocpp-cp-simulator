@@ -2,7 +2,7 @@
 import "reflect-metadata";
 import { describe, expect, it } from "bun:test";
 
-import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/domain/persistence/BunSqliteDatabase";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/BunSqliteDatabase";
 import type { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
 
 import { CPRegistry } from "../CPRegistry";

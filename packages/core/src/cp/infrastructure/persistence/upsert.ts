@@ -1,4 +1,4 @@
-import type { SqlParam } from "./Database";
+import type { SqlParam } from "../../domain/persistence/Database";
 
 /**
  * Build `INSERT ... ON CONFLICT (...) DO UPDATE` from one list of

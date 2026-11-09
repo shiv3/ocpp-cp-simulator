@@ -1,4 +1,4 @@
-import type { Database } from "../Database";
+import type { Database } from "../../../domain/persistence/Database";
 import { capabilityProfile } from "./0026-capability-profile";
 import { migration0027FleetTemplates } from "./0027-fleet-templates";
 import { transportOptions } from "./0028-transport-options";

@@ -3,7 +3,7 @@ import "reflect-metadata";
 import { describe, expect, it } from "bun:test";
 
 import { ChargePoint } from "../../charge-point/ChargePoint";
-import { BunSqliteDatabase } from "../../persistence/BunSqliteDatabase";
+import { BunSqliteDatabase } from "../../../infrastructure/persistence/BunSqliteDatabase";
 import { DefaultBootNotification } from "../../types/OcppTypes";
 import { CertificateStore } from "../CertificateStore";
 import { leafForCsr, selfSignedRoot } from "./certificateFixtures";

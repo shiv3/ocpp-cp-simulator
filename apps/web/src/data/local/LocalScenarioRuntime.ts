@@ -7,7 +7,7 @@ import { createScenarioExecutorCallbacks } from "@ocpp-cp-simulator/core/cp/appl
 import type { ScenarioDefinition } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import type { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
 import type { Connector } from "@ocpp-cp-simulator/core/cp/domain/connector/Connector";
-import type { SqliteScenarioRepository } from "@ocpp-cp-simulator/core/cp/domain/persistence/SqliteScenarioRepository";
+import type { SqliteScenarioRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/SqliteScenarioRepository";
 import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import type { ScenarioRunRecorder } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunRecorder";
 import type { ChargePointEvent } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";

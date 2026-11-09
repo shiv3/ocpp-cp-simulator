@@ -2,7 +2,7 @@ import {
   blueprintSchema,
   type Blueprint,
 } from "@ocpp-cp-simulator/contracts/index";
-import type { Database } from "./Database";
+import type { Database } from "../../domain/persistence/Database";
 
 interface BlueprintRow {
   id: string;

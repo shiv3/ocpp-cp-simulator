@@ -420,7 +420,7 @@ export function perChargePointTables(): readonly string[] {
   return TABLES.filter((t) => t.perCp).map((t) => t.name);
 }
 
-import type { Database } from "./Database";
+import type { Database } from "../../domain/persistence/Database";
 import { latestVersion, MIGRATIONS, type Migration } from "./migrations";
 import { FLEET_TEMPLATES_TABLE_SQL } from "./migrations/0027-fleet-templates";
 import {

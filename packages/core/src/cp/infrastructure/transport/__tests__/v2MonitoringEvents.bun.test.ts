@@ -10,7 +10,7 @@ import {
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
 import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
-import { BunSqliteDatabase } from "../../../domain/persistence/BunSqliteDatabase";
+import { BunSqliteDatabase } from "../../persistence/BunSqliteDatabase";
 import type { Database } from "../../../domain/persistence/Database";
 
 /**

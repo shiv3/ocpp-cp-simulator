@@ -6,7 +6,7 @@ sources:
   - packages/core/src/cp/domain/vehicle/VehicleProfile.ts
   - packages/core/src/cp/domain/vehicle/importProfile.ts
   - packages/core/src/cp/domain/vehicle/VehicleCatalog.ts
-  - packages/core/src/cp/domain/persistence/VehicleProfileRepository.ts
+  - packages/core/src/cp/infrastructure/persistence/VehicleProfileRepository.ts
   - packages/contracts/src/vehicle.ts
   - packages/contracts/src/vehicleProfile.ts
   - apps/web/src/components/vehicle/vehicleChoice.ts

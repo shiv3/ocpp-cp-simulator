@@ -1,7 +1,7 @@
 // Runs under `bun test`: the daemon's `bun:sqlite` database.
 import { describe, expect, it } from "bun:test";
 
-import type { VehicleProfile } from "../../vehicle/VehicleProfile";
+import type { VehicleProfile } from "../../../domain/vehicle/VehicleProfile";
 import { BunSqliteDatabase } from "../BunSqliteDatabase";
 import { resetSimulatorState } from "../resetState";
 import { MAX_VEHICLE_PROFILES } from "@ocpp-cp-simulator/contracts/vehicle";

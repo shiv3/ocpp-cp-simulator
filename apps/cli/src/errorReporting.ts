@@ -1,9 +1,9 @@
+import { scrubErrorReport } from "@ocpp-cp-simulator/contracts/errorReporting";
 import {
-  type ErrorReportingConfig,
-  resolveErrorReportingConfig,
+  type SentryConfig as ErrorReportingConfig,
+  resolveSentryConfig as resolveErrorReportingConfig,
   restrictedDataCollection,
-  scrubErrorReport,
-} from "@ocpp-cp-simulator/contracts/errorReporting";
+} from "@ocpp-cp-simulator/contracts/sentryOptions";
 import { appVersion } from "./appVersion";
 
 type SentryBun = typeof import("@sentry/bun");

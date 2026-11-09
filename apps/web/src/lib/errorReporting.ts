@@ -1,12 +1,12 @@
 import type { RootOptions } from "react-dom/client";
 
 import { resolveBuildVersion } from "@ocpp-cp-simulator/contracts/buildVersion";
+import { scrubErrorReport } from "@ocpp-cp-simulator/contracts/errorReporting";
 import {
-  type ErrorReportingConfig,
-  resolveErrorReportingConfig,
+  type SentryConfig as ErrorReportingConfig,
+  resolveSentryConfig as resolveErrorReportingConfig,
   restrictedDataCollection,
-  scrubErrorReport,
-} from "@ocpp-cp-simulator/contracts/errorReporting";
+} from "@ocpp-cp-simulator/contracts/sentryOptions";
 
 type SentryReact = typeof import("@sentry/react");
 

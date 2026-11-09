@@ -19,6 +19,7 @@ declare module "i18next" {
       "scenarioRun",
       "cpPanels",
       "scenarioNodes",
+      "fleets",
     ];
     keySeparator: false;
     nsSeparator: false;

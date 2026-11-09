@@ -129,14 +129,14 @@ describe("OCPP 2.0.1 TriggerMessage", () => {
       const unsupportedStartIndex = csms.received.length;
       csms.send([
         2,
-        "tm-firmware-status",
+        "tm-unsupported",
         "TriggerMessage",
-        { requestedMessage: "FirmwareStatusNotification" },
+        { requestedMessage: "PublishFirmwareStatusNotification" },
       ]);
 
       expect(
-        await csms.waitForFrame(callResultFrame("tm-firmware-status")),
-      ).toEqual([3, "tm-firmware-status", { status: "NotImplemented" }]);
+        await csms.waitForFrame(callResultFrame("tm-unsupported")),
+      ).toEqual([3, "tm-unsupported", { status: "NotImplemented" }]);
       await expectNoNewCallAfter(csms, unsupportedStartIndex);
     } finally {
       cp.disconnect();

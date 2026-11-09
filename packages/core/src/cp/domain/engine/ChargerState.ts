@@ -50,6 +50,15 @@ export type NotifyKind = "firmware" | "signedFirmware" | "log" | "diagnostics";
 /** Everything that changes the engine goes through one of these. */
 export type EngineEvent =
   | {
+      /** A firmware / log status report the station sent by any route (the
+       *  `firmware_status_notification` control-plane command, a scenario, a
+       *  behavior): only the state follows, nothing is sent (#596). */
+      readonly type: "reported";
+      readonly kind: "firmware" | "log";
+      readonly status: string;
+      readonly requestId?: number;
+    }
+  | {
       readonly type: "notified";
       readonly kind: NotifyKind;
       readonly status: string;

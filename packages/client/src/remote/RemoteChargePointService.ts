@@ -2,6 +2,10 @@ import type {
   AuthorizationCacheSeedEntry,
   AuthorizationCacheView,
 } from "@ocpp-cp-simulator/core/cp/domain/auth/AuthorizationCacheSeed";
+import type {
+  ConfigurationKeyList,
+  ConfigurationSetStatus,
+} from "@ocpp-cp-simulator/core/cp/domain/charge-point/configurationAccess";
 import {
   VehicleCatalogError,
   type VehicleCatalog,
@@ -1878,6 +1882,21 @@ export class RemoteChargePointService implements ChargePointService {
     query: Omit<ChargingSessionQuery, "cpId"> = {},
   ): Promise<ChargingSessionPage> {
     return this.rpc("sessions.list", { cpId, ...query });
+  }
+
+  async getConfigurationKeys(
+    cpId: string,
+    keys: readonly string[] = [],
+  ): Promise<ConfigurationKeyList> {
+    return this.rpc("cp.config_keys.get", { cpId, keys: [...keys] });
+  }
+
+  async setConfigurationKey(
+    cpId: string,
+    key: string,
+    value: string,
+  ): Promise<ConfigurationSetStatus> {
+    return (await this.rpc("cp.config_keys.set", { cpId, key, value })).status;
   }
 
   async loadConfig(): Promise<WireSimulatorConfig | null> {

@@ -116,6 +116,21 @@ const chargingSessionSchema = z.object({
   authorizationStatus: z.string().nullable(),
   outcome: z.enum(CHARGING_SESSION_OUTCOMES),
 });
+/** #612: what `cp.config_keys.set` answers when the write took. */
+export const CONFIG_KEY_SET_STATUSES = ["Accepted", "RebootRequired"] as const;
+/** #612: one configuration key of a running charge point. */
+const configKeyInfoSchema = z.object({
+  key: STR_256,
+  /** Empty for a write-only key (AuthorizationKey is never returned). */
+  value: STR_64K,
+  type: z.enum(["string", "integer", "boolean", "array"]),
+  readonly: z.boolean(),
+  /** 2.x only: the Device Model name and mutability behind the key. */
+  component: STR_256.optional(),
+  variable: STR_256.optional(),
+  instance: STR_256.optional(),
+  mutability: z.enum(["ReadOnly", "ReadWrite", "WriteOnly"]).optional(),
+});
 /** #448: one operational-timeline entry. `data` is kind-specific. */
 const timelineEntrySchema = z.object({
   seq: z.number().int().positive(),
@@ -1722,6 +1737,33 @@ export const METHODS = {
       total: z.number().int().min(0),
     }),
   },
+  // #612: a running charge point's OCPP configuration keys (1.6 keys; for 2.x
+  // the keys the Device Model registry registers). `cp.config_keys.set` fails
+  // with `not_found` for a key the charge point does not have and
+  // `invalid_params` for a read-only key or a value the key refuses.
+  "cp.config_keys.get": {
+    params: z.object({
+      cpId: NON_EMPTY_STR,
+      /** Key names; absent or empty lists every key. */
+      keys: z.array(STR_256.min(1)).max(1000).optional(),
+    }),
+    result: z.object({
+      keys: z.array(configKeyInfoSchema).max(5000),
+      unknown: z.array(STR_256).max(1000),
+    }),
+  },
+  "cp.config_keys.set": {
+    params: z.object({
+      cpId: NON_EMPTY_STR,
+      key: STR_256.min(1),
+      /** The value as ChangeConfiguration carries it; a list is comma-separated. */
+      value: STR_64K,
+    }),
+    result: z.object({
+      key: STR_256,
+      status: z.enum(CONFIG_KEY_SET_STATUSES),
+    }),
+  },
   "scenario.definitions.list": {
     params: z.object({ cpId: STR_64K, connectorId: CONN_DEF }),
     result: ARRAY_1000(SCENARIO_OBJ()),
@@ -1829,6 +1871,8 @@ export const EXPLICIT_METHODS = [
   "scenario.runs.list",
   "timeline.get",
   "sessions.list",
+  "cp.config_keys.get",
+  "cp.config_keys.set",
   "scenario.definitions.list",
   "scenario.definitions.save",
   "scenario.definitions.replace",

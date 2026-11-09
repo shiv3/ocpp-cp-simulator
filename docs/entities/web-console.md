@@ -372,7 +372,7 @@ The charge point page (`/cp/:id`) is one column, top to bottom:
   does not scroll, and the panel stays put. Its **header bar** holds an
   underline tab strip (`role="tablist"`, _Charge point sections_): **Message
   log** (the default), **Transactions**, **Operational events**, **Session
-  analysis**, **Diagnostics**, **Expert** and **Network simulation** (only when the
+  analysis**, **Diagnostics**, **Configuration**, **Expert** and **Network simulation** (only when the
   charge point has network simulation, that is, its snapshot's `networkSim`
   is not `null`); the arrow keys, Home and End move along it, and the strip
   scrolls sideways when it does not fit. At the right end of the bar sit the
@@ -719,6 +719,18 @@ in place, a new one is added at the top. It has no paging and no **Refresh**
 button. A failed read — against a daemon older than #447, for one — shows the
 error instead of an empty table. Before #447 the tab listed the
 transaction-type entries of the charge point's state history.
+
+#### Configuration tab
+
+The bottom panel's **Configuration** tab (`?tab=configuration`, #612) lists the
+charge point's OCPP configuration keys (`cp.config_keys.get` in Remote mode, the
+in-browser charge point in Local mode): **Key** (a 2.x station also shows the
+Device Model `Component.Variable[instance]`), **Value** and **Access**. A
+writable key has an input and a **Save** button; a read-only key shows its value
+only. A refusal (read-only key, value outside the key's type or bounds) appears
+under that row; `RebootRequired` says the value takes effect after a reboot. A
+write-only value is never shown. Strings are in the `cp.configKeys.*` keys of
+all three locales.
 
 #### Operational events tab
 

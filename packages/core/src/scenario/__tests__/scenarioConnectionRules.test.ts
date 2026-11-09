@@ -25,6 +25,12 @@ const edge = (source: string, target: string) => ({
 });
 const codes = (def: Parameters<typeof validateScenarioGraph>[0]) =>
   validateScenarioGraph(def).map((i) => i.code);
+/** The issues of `START → n` (n a node with id "n"). */
+const issuesAfterStart = (n: ReturnType<typeof node>) =>
+  validateScenarioGraph({
+    nodes: [node("s", "start"), n],
+    edges: [edge("s", "n")],
+  });
 
 // Compile-time guard: the table must name every node type. If a new
 // ScenarioNodeType is added without a rule, `tsc -b` fails on
@@ -368,5 +374,54 @@ describe("validateScenarioGraph: decision nodes and the roots of $from (schema 1
     expect(run("state.attempts")).toEqual([]);
     expect(run("charger.status")).toEqual([]);
     expect(run("connector.transactionId")).toEqual([]);
+  });
+
+  // executeSwitch / executeSetState / executeNotify resolve these fields
+  // through fromScope(flow) like ocppCall's payload: a call.* path throws
+  // without a CALL.
+  describe.each([
+    ["switch", (from: unknown) => ({ value: from, cases: [1] })],
+    ["setState", (from: unknown) => ({ key: "k", value: from })],
+    [
+      "notify",
+      (from: unknown) => ({
+        kind: "firmwareStatus",
+        status: "Installed",
+        requestId: from,
+      }),
+    ],
+  ] as const)("a $from in %s", (type, dataOf) => {
+    const reader = (path: string) => node("n", type, dataOf({ $from: path }));
+
+    it("needs a CALL on the call root", () => {
+      expect(
+        connectionRule(type).call(dataOf({ $from: "call.messageId" })),
+      ).toBe("reads");
+      expect(issuesAfterStart(reader("call.payload.requestId"))).toEqual([
+        { code: "noCallHeld", nodeId: "n", severity: "error" },
+      ]);
+    });
+
+    it("needs none on the state and charger roots", () => {
+      expect(issuesAfterStart(reader("state.x"))).toEqual([]);
+      expect(issuesAfterStart(reader("charger.status"))).toEqual([]);
+    });
+
+    it("is fine after a replace trigger", () => {
+      expect(
+        validateScenarioGraph({
+          nodes: [
+            node("s", "start"),
+            node("t", "csmsCallTrigger", {
+              action: "Reset",
+              behavior: "replace",
+            }),
+            reader("call.payload.requestId"),
+            node("r", "callResponse", { kind: "result" }),
+          ],
+          edges: [edge("s", "t"), edge("t", "n"), edge("n", "r")],
+        }),
+      ).toEqual([]);
+    });
   });
 });

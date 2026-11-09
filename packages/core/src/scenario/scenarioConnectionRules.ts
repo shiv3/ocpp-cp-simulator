@@ -16,8 +16,10 @@
  * - **The CALL a branch holds** (`call`, schema 1.5). A `csmsCallTrigger`
  *   with `behavior: "replace"` hands its branch a CALL; a `callResponse`
  *   answers it and throws when its branch holds none or already answered
- *   it; a `$from` in an `ocppCall` payload throws when its branch holds no
- *   CALL. A CALL still open when its branch ends is answered `InternalError`
+ *   it; a `$from: "call.…"` throws when its branch holds no CALL, wherever
+ *   the executor resolves one (`ocppCall.payload`, `switch.value`,
+ *   `setState.value`, `notify.requestId`; a `callResponse` payload needs
+ *   the CALL anyway). A CALL still open when its branch ends is answered `InternalError`
  *   only when the run ends. These depend on what came earlier on the path,
  *   so they are the one place where node type A must precede node type B.
  *
@@ -32,7 +34,10 @@ import {
   ScenarioNodeType,
   type CallResponseNodeData,
   type CsmsCallTriggerNodeData,
+  type NotifyNodeData,
   type OcppCallNodeData,
+  type SetStateNodeData,
+  type SwitchNodeData,
 } from "../cp/application/scenario/ScenarioTypes";
 import { containsCallReference } from "../cp/application/scenario/resolveFrom";
 
@@ -68,6 +73,9 @@ interface RuleData {
   [ScenarioNodeType.CSMS_CALL_TRIGGER]: CsmsCallTriggerNodeData;
   [ScenarioNodeType.CALL_RESPONSE]: CallResponseNodeData;
   [ScenarioNodeType.OCPP_CALL]: OcppCallNodeData;
+  [ScenarioNodeType.SWITCH]: SwitchNodeData;
+  [ScenarioNodeType.SET_STATE]: SetStateNodeData;
+  [ScenarioNodeType.NOTIFY]: NotifyNodeData;
 }
 
 /** One rule for every node type: leaving a type out does not compile. */
@@ -111,12 +119,24 @@ export const CONNECTION_RULES: ConnectionRuleTable = {
   [ScenarioNodeType.CERT_QUIRKS]: step,
   [ScenarioNodeType.USE_BEHAVIOR]: step,
   // Schema 1.6 (#654): fire-and-forget notification, a store into the run's
-  // state; neither touches the branch's CALL.
-  [ScenarioNodeType.NOTIFY]: step,
-  [ScenarioNodeType.SET_STATE]: step,
+  // state. Neither changes the branch's CALL, but executeNotify resolves
+  // `requestId` and executeSetState `value` through fromScope(flow): a
+  // `$from: "call.…"` there throws without a CALL.
+  [ScenarioNodeType.NOTIFY]: {
+    out: "next",
+    call: (data) => (containsCallReference(data?.requestId) ? "reads" : "none"),
+  },
+  [ScenarioNodeType.SET_STATE]: {
+    out: "next",
+    call: (data) => (containsCallReference(data?.value) ? "reads" : "none"),
+  },
   // executeSequentialFlow: flow.handle set by executeSwitch / executeChoice
-  // filters the outgoing edges by sourceHandle.
-  [ScenarioNodeType.SWITCH]: { out: "select", call: noCall },
+  // filters the outgoing edges by sourceHandle. executeSwitch resolves
+  // `value` through fromScope(flow), like setState.
+  [ScenarioNodeType.SWITCH]: {
+    out: "select",
+    call: (data) => (containsCallReference(data?.value) ? "reads" : "none"),
+  },
   [ScenarioNodeType.CHOICE]: { out: "select", call: noCall },
   // executeCsmsCallTrigger: with behavior "replace" sets flow.exchange.
   [ScenarioNodeType.CSMS_CALL_TRIGGER]: {
@@ -156,7 +176,8 @@ export type GraphIssueCode =
   | "danglingEdge"
   /** No path from START reaches the node: it never runs. */
   | "unreachable"
-  /** A `callResponse`, or an `ocppCall` with `$from`, is reached on a path
+  /** A `callResponse`, or a node with a `$from: "call.…"` (`ocppCall.payload`,
+   *  `switch.value`, `setState.value`, `notify.requestId`), is reached on a path
    *  whose branch holds no CALL taken over by a replace `csmsCallTrigger`:
    *  the run fails there. */
   | "noCallHeld"

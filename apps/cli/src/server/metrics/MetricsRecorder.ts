@@ -9,7 +9,7 @@ import {
   logLineToTraceRecord,
   type SerializedLogLine,
 } from "@ocpp-cp-simulator/trace/logEntryToTrace";
-import type { OcppTraceRecord } from "@ocpp-cp-simulator/trace/OcppTraceRecord";
+import type { TraceRecord } from "@open-ocpp-trace/core";
 import { isSoapVersion } from "@ocpp-cp-simulator/core/cp/domain/types/OcppVersion";
 import { toTraceOcppVersion } from "../../trace/TraceWriter";
 
@@ -257,7 +257,7 @@ export class MetricsRecorder {
    * overwrite the first, and the first answer would then be timed against the
    * wrong action and consume the entry the second answer needed.
    */
-  observe(record: OcppTraceRecord, cpId = record.chargePointId ?? ""): void {
+  observe(record: TraceRecord, cpId = record.chargePointId ?? ""): void {
     const action = this.actionLabel(record.action);
     bump(this.messages, `${action} ${record.direction}`);
 

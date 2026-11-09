@@ -1,17 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { OCPP_TRACE_SCHEMA_VERSION } from "../OcppTraceRecord";
-import type { OcppTraceRecord } from "../OcppTraceRecord";
+import { SCHEMA_VERSION } from "@open-ocpp-trace/core";
+import type { TraceRecord } from "@open-ocpp-trace/core";
 import { MAX_PENDING_CORRELATIONS, TraceCorrelator } from "../TraceCorrelator";
 
-function record(overrides: Partial<OcppTraceRecord> = {}): OcppTraceRecord {
+// The correlator only reads messageId / chargePointId / action, so the
+// fixtures leave out what the discriminated union requires per type (a
+// CALL's action, a CALLERROR's error) when a test is about its absence.
+function record(overrides: Partial<TraceRecord> = {}): TraceRecord {
   return {
-    schemaVersion: OCPP_TRACE_SCHEMA_VERSION,
+    schemaVersion: SCHEMA_VERSION,
     timestamp: "2026-07-14T02:00:00.000Z",
     transport: "json",
     direction: "cp-to-csms",
     messageType: "CALL",
     ...overrides,
-  };
+  } as TraceRecord;
 }
 
 describe("TraceCorrelator", () => {

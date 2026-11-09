@@ -1,7 +1,7 @@
 /**
  * Live producer for the OCPP trace format (issue #188 / `--trace-output`):
  * subscribes to a charge point's Logger and appends every OCPP-J wire frame
- * as a JSONL {@link OcppTraceRecord}, so a trace file grows in real time
+ * as a JSONL {@link TraceRecord}, so a trace file grows in real time
  * during a run rather than requiring a post-hoc log export + convert step.
  */
 
@@ -17,7 +17,7 @@ import {
   parseInboundValidation,
   type SerializedLogLine,
 } from "@ocpp-cp-simulator/trace/logEntryToTrace";
-import type { OcppTraceRecord } from "@ocpp-cp-simulator/trace/OcppTraceRecord";
+import type { TraceRecord } from "@open-ocpp-trace/core";
 import { TraceCorrelator } from "@ocpp-cp-simulator/trace/TraceCorrelator";
 
 export interface TraceWriterAttachContext {
@@ -66,14 +66,14 @@ export class TraceWriter {
     const transport = isSoapVersion(ctx.ocppVersion) ? "soap" : "json";
     const ocppVersion = toTraceOcppVersion(ctx.ocppVersion);
 
-    const write = (record: OcppTraceRecord) =>
+    const write = (record: TraceRecord) =>
       fs.appendFileSync(this.filePath, JSON.stringify(record) + "\n");
 
     // An inbound CALL is logged before its handler runs, so a schema
     // violation (#593) is only known a moment later. Hold the CALL record back
     // until the next record or the end of the current tick, then write it with
     // `meta.validation` if the charge point reported one.
-    let pending: OcppTraceRecord | null = null;
+    let pending: TraceRecord | null = null;
     const flush = () => {
       if (!pending) return;
       const record = pending;

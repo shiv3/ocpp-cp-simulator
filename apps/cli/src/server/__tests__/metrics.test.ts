@@ -10,13 +10,13 @@ import {
 } from "../metrics/MetricsRecorder";
 import { renderMetrics } from "../metrics/render";
 import { emptyAutoTrafficCounters } from "@ocpp-cp-simulator/core/cp/domain/connector/AutoTraffic";
-import type { OcppTraceRecord } from "@ocpp-cp-simulator/trace/OcppTraceRecord";
+import type { TraceRecord } from "@open-ocpp-trace/core";
 
 function call(
   action: string,
   messageId: string,
   timestamp: string,
-): OcppTraceRecord {
+): TraceRecord {
   return {
     schemaVersion: "1.1",
     timestamp,
@@ -28,7 +28,7 @@ function call(
   };
 }
 
-function result(messageId: string, timestamp: string): OcppTraceRecord {
+function result(messageId: string, timestamp: string): TraceRecord {
   return {
     schemaVersion: "1.1",
     timestamp,
@@ -95,6 +95,7 @@ describe("MetricsRecorder (#298)", () => {
       messageType: "CALLERROR",
       messageId: "1",
       action: "DataTransfer",
+      error: { code: "NotImplemented" },
     });
 
     expect(recorder.callErrors.get("DataTransfer")).toBe(1);

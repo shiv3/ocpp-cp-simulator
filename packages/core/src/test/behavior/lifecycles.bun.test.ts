@@ -403,6 +403,26 @@ describe("reboot after the update (#600)", () => {
     expect(run.callsOf("BootNotification")).toHaveLength(1);
   });
 
+  // L01.FR.33 (#846): activating the firmware waits for the transactions to
+  // end even when waitForTransactions only governs the install start.
+  test("2.x reboot waits for a running transaction although waitForTransactions is off", async () => {
+    run = await runBehavior({
+      version: "2.0.1",
+      connectors: 2,
+      behaviors: [session(8000)],
+    });
+    select(run, { train: true, stepMs: 100, reboot: "afterInstalled" });
+    await run.advance(2000);
+    expect(run.cp.getConnector(1)?.transaction).toBeTruthy();
+    await run.call("UpdateFirmware", fw2(33));
+    await run.advance(3000);
+    expect(statuses(run).at(-1)).toBe("Installed");
+    expect(run.callsOf("BootNotification")).toHaveLength(0);
+
+    await run.advance(8000); // the session ends at about 9.5 s
+    expect(run.callsOf("BootNotification")).toHaveLength(1);
+  });
+
   // B01.FR.09 (#846): the reboot after a firmware update says so.
   test("2.x reboots after a firmware update with BootNotification reason FirmwareUpdate", async () => {
     run = await runBehavior({ version: "2.0.1" });

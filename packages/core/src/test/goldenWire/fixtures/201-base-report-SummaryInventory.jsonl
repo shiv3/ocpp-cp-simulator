@@ -1,10 +1,8 @@
 {"d":"CP>","k":"call","id":"id-1","a":"BootNotification","p":{"reason":"PowerUp","chargingStation":{"model":"Model","vendorName":"Vendor","serialNumber":"123456","firmwareVersion":"1.0"}}}
 {"d":"CSMS>","k":"result","id":"id-1","p":{"status":"Accepted","currentTime":"<ts>","interval":3600}}
-{"d":"CP>","k":"call","id":"id-2","a":"StatusNotification","p":{"timestamp":"<ts>","connectorStatus":"Available","evseId":0,"connectorId":0}}
+{"d":"CP>","k":"call","id":"id-2","a":"StatusNotification","p":{"timestamp":"<ts>","connectorStatus":"Available","evseId":1,"connectorId":1}}
 {"d":"CSMS>","k":"result","id":"id-2","p":{}}
-{"d":"CP>","k":"call","id":"id-3","a":"StatusNotification","p":{"timestamp":"<ts>","connectorStatus":"Available","evseId":1,"connectorId":1}}
-{"d":"CSMS>","k":"result","id":"id-3","p":{}}
-{"d":"CSMS>","k":"call","id":"id-4","a":"GetBaseReport","p":{"requestId":1,"reportBase":"SummaryInventory"}}
-{"d":"CP>","k":"result","id":"id-4","p":{"status":"Accepted"}}
-{"d":"CP>","k":"call","id":"id-5","a":"NotifyReport","p":{"requestId":1,"generatedAt":"<ts>","seqNo":0,"tbc":false,"reportData":[{"component":{"name":"ChargingStation"},"variable":{"name":"AvailabilityState"},"variableAttribute":[{"type":"Actual","value":"Available","mutability":"ReadOnly"}],"variableCharacteristics":{"dataType":"OptionList","valuesList":"Available,Occupied,Reserved,Unavailable,Faulted","supportsMonitoring":true}},{"component":{"name":"EVSE","evse":{"id":1}},"variable":{"name":"AvailabilityState"},"variableAttribute":[{"type":"Actual","value":"Available","mutability":"ReadOnly"}],"variableCharacteristics":{"dataType":"OptionList","valuesList":"Available,Occupied,Reserved,Unavailable,Faulted","supportsMonitoring":true}}]}}
-{"d":"CSMS>","k":"result","id":"id-5","p":{}}
+{"d":"CSMS>","k":"call","id":"id-3","a":"GetBaseReport","p":{"requestId":1,"reportBase":"SummaryInventory"}}
+{"d":"CP>","k":"result","id":"id-3","p":{"status":"Accepted"}}
+{"d":"CP>","k":"call","id":"id-4","a":"NotifyReport","p":{"requestId":1,"generatedAt":"<ts>","seqNo":0,"tbc":false,"reportData":[{"component":{"name":"ChargingStation"},"variable":{"name":"AvailabilityState"},"variableAttribute":[{"type":"Actual","value":"Available","mutability":"ReadOnly"}],"variableCharacteristics":{"dataType":"OptionList","valuesList":"Available,Occupied,Reserved,Unavailable,Faulted","supportsMonitoring":true}},{"component":{"name":"EVSE","evse":{"id":1}},"variable":{"name":"AvailabilityState"},"variableAttribute":[{"type":"Actual","value":"Available","mutability":"ReadOnly"}],"variableCharacteristics":{"dataType":"OptionList","valuesList":"Available,Occupied,Reserved,Unavailable,Faulted","supportsMonitoring":true}}]}}
+{"d":"CSMS>","k":"result","id":"id-4","p":{}}

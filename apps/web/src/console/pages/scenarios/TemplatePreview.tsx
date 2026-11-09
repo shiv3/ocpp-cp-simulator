@@ -9,6 +9,7 @@ import SegmentedControl from "../../components/SegmentedControl";
 import { deriveStepLayout, layoutSteps } from "../../lib/stepLayout";
 import StepInspector from "./edit/StepInspector";
 import UnsupportedOutline from "./edit/UnsupportedOutline";
+import { useScenarioIssues } from "./edit/issueMarkUi";
 import StepsGraphView from "./run/StepsGraphView";
 import StepsView from "./run/StepsView";
 
@@ -42,6 +43,14 @@ const TemplatePreview: React.FC<{
   const layout = useMemo(() => deriveStepLayout(scenario), [scenario]);
   const [view, setView] = useState<PreviewView>("graph");
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
+  // Read-only: no warning box, only the marks (a shipped template should
+  // have none).
+  const { marks } = useScenarioIssues(
+    scenario,
+    layout,
+    layout.supported ? view : "outline",
+  );
+  const issues = useMemo(() => ({ marks }), [marks]);
 
   const selected =
     scenario.nodes.find(
@@ -124,8 +133,8 @@ const TemplatePreview: React.FC<{
             value={view}
             onChange={setView}
             options={[
-              { value: "steps", label: t("scenarios.editor.viewSteps") },
               { value: "graph", label: t("scenarios.editor.viewGraph") },
+              { value: "steps", label: t("scenarios.editor.viewSteps") },
             ]}
           />
         )}
@@ -145,18 +154,21 @@ const TemplatePreview: React.FC<{
                 selectedStepId={selectedStepId}
                 onSelectStep={setSelectedStepId}
                 note={null}
+                issues={issues}
               />
             ) : view === "graph" ? (
               <StepsGraphView
                 layout={layout}
                 selectedStepId={selectedStepId}
                 onSelectStep={setSelectedStepId}
+                issues={issues}
               />
             ) : (
               <StepsView
                 layout={layout}
                 selectedStepId={selectedStepId}
                 onSelectStep={setSelectedStepId}
+                issues={issues}
               />
             )}
           </div>

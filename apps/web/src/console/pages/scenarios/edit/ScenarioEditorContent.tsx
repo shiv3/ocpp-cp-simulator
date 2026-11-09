@@ -40,6 +40,7 @@ import StepsView from "../run/StepsView";
 import { nodeTitle } from "../run/stepVisuals";
 import ScenarioMetaBar from "./ScenarioMetaBar";
 import GraphIssues from "./GraphIssues";
+import { useScenarioIssues, type ViewIssues } from "./issueMarkUi";
 import StepInspector from "./StepInspector";
 import UnsupportedOutline from "./UnsupportedOutline";
 
@@ -116,7 +117,7 @@ export interface ScenarioEditorContentProps {
  *   the rest of the visit once opened, so an edit that makes the scenario
  *   drawable does not swap editors mid-edit.
  * The content owns the definition, the dirty state and Save in both views;
- * the view is kept in the URL (`view=steps|graph`). Used by the
+ * the view is kept in the URL (`view=steps|graph`); Graph is the default. Used by the
  * per-connector editor page, inline by the Library tab, and in the
  * Scenarios page's and the charge point page's side panels (`variant`).
  */
@@ -138,7 +139,7 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
   const [searchParams, setSearchParams] = useSearchParams();
   const { mode, chargePointService, defaultEvSettings } = useDataContext();
   const requestedView: EditorView =
-    searchParams.get("view") === "graph" ? "graph" : "steps";
+    searchParams.get("view") === "steps" ? "steps" : "graph";
 
   const [original, setOriginal] = useState<ScenarioDefinition | null>(null);
   const [scenario, setScenario] = useState<ScenarioDefinition | null>(null);
@@ -196,6 +197,35 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
   // is listed as an outline: its steps stay editable, their wiring does not.
   const drawable = layout === null || layout.supported;
   const view: EditorView = requestedView;
+
+  // The wiring's diagnostics, once per change, marked in the view shown.
+  const {
+    issues,
+    describe: describeIssue,
+    marks,
+  } = useScenarioIssues(scenario, layout, drawable ? view : "outline");
+  /** A warning line pointed at (hover / focus), and a marked step pointed at. */
+  const [hoveredIssue, setHoveredIssue] = useState<number | null>(null);
+  const [hoveredStep, setHoveredStep] = useState<string | null>(null);
+  const viewIssues: ViewIssues = {
+    marks,
+    highlight: hoveredIssue,
+    onHoverStep: setHoveredStep,
+  };
+  const stepsRef = useRef<HTMLDivElement>(null);
+  /** A warning line's step: select it (the inspector opens) and bring it
+   *  into view. */
+  const showIssueStep = (stepId: string) => {
+    setSelectedStepId(stepId);
+    const el = stepsRef.current?.querySelector(
+      `[data-node-id="${CSS.escape(stepId)}"], [data-step-id="${CSS.escape(stepId)}"]`,
+    );
+    el?.scrollIntoView?.({
+      block: "nearest",
+      inline: "nearest",
+      behavior: "smooth",
+    });
+  };
 
   const dirty = useMemo(() => {
     if (!scenario || !original) return false;
@@ -570,13 +600,20 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
           value={view}
           onChange={setView}
           options={[
-            { value: "steps", label: t("scenarios.editor.viewSteps") },
             { value: "graph", label: t("scenarios.editor.viewGraph") },
+            { value: "steps", label: t("scenarios.editor.viewSteps") },
           ]}
         />
       )}
 
-      <GraphIssues scenario={scenario} layout={layout} />
+      <GraphIssues
+        issues={issues}
+        describe={describeIssue}
+        marks={marks}
+        hoveredStepId={hoveredStep}
+        onHoverIssue={setHoveredIssue}
+        onSelectStep={showIssueStep}
+      />
 
       {pendingDelete && (
         <InlineConfirm
@@ -604,12 +641,13 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
             className="grid grid-cols-1 items-start gap-4 @[860px]:grid-cols-[minmax(0,1fr)_minmax(300px,380px)]"
           >
             {/* min-w-0: the graph scrolls sideways inside its own column. */}
-            <div className="min-w-0">
+            <div ref={stepsRef} className="min-w-0">
               {!drawable ? (
                 <UnsupportedOutline
                   scenario={scenario}
                   selectedStepId={selectedStepId}
                   onSelectStep={setSelectedStepId}
+                  issues={viewIssues}
                 />
               ) : view === "graph" ? (
                 <StepsGraphView
@@ -621,6 +659,7 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
                   onMoveStep={handleMove}
                   onDeleteStep={handleDeleteRequest}
                   onAddBranch={handleAddBranch}
+                  issues={viewIssues}
                 />
               ) : (
                 <StepsView
@@ -632,6 +671,7 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
                   onMoveStep={handleMove}
                   onDeleteStep={handleDeleteRequest}
                   onAddBranch={handleAddBranch}
+                  issues={viewIssues}
                 />
               )}
             </div>

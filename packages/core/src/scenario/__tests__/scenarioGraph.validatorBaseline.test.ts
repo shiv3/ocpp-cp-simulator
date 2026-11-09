@@ -11,8 +11,9 @@
  * resolved such an id to the *last* node; the executor (`nodes.find`) and so
  * the lowered program resolve it to the *first*.
  *
- * Two later deliberate changes of the validator (review of #854), re-recorded
- * with them; every other entry is byte-identical to the recording from #829:
+ * Later deliberate changes of the validator, re-recorded with them; every
+ * other entry is byte-identical to the recording from #829. Two from the
+ * review of #854:
  *
  * - Switch / choice edges (125 entries): the validator follows only edges
  *   whose `sourceHandle` the node can pick (`pickableHandles`), as the
@@ -22,7 +23,19 @@
  *   `callAlreadyAnswered`, 1 `callLeftOpen`).
  * - A second START (26 entries): reachability is seeded from the origin
  *   only, and a non-origin START with several edges is `extraOutgoing`
- *   (+17 `unreachable`, +23 `extraOutgoing`).
+ *   (+18 `unreachable`, +23 `extraOutgoing`).
+ *
+ * Together the two add 32 `unreachable` (1082 → 1114): 14 from the handle
+ * rule, 18 from seeding the origin only once that rule is in.
+ *
+ * And one from the follow-up review of #854:
+ *
+ * - Several edges on one handle of a switch / choice (8 entries: `fuzz:42`,
+ *   `fuzz:179`, `fuzz:217`, `fuzz:291`, `fuzz:306`, `fuzz:328`,
+ *   `fuzz-dup:5`, `fuzz-dup:70`): every edge after the first one of a
+ *   handle is `duplicateHandle` (+8, new code) and no longer counts for
+ *   reachability, as the executor never takes it (the CALL check already
+ *   followed only the first). No `unreachable` of the corpus changed with it.
  *
  * Re-record (`RECORD_BASELINE=1`) only from code whose diagnostics are meant
  * to stay; a diff here is a behaviour change of the validator.
@@ -181,6 +194,7 @@ describe("validateScenarioGraph baseline (recorded before the lowered program)",
         "callAlreadyAnswered",
         "callLeftOpen",
         "danglingEdge",
+        "duplicateHandle",
         "edgeIntoStart",
         "edgeOutOfEnd",
         "extraOutgoing",

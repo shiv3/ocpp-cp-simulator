@@ -187,4 +187,24 @@ describe("nodes keep unknown fields through a rebuild", () => {
     check(moveLaneStep(def, layout, "charge", 1));
     check(removeLaneStep(def, layout, "wait"));
   });
+
+  it("keeps the content of an edge whose id another pair already uses", () => {
+    const base = forkScenario();
+    const def: ScenarioDefinition = {
+      ...base,
+      nodes: base.nodes.filter((n) => ["start", "plug", "end"].includes(n.id)),
+      edges: [
+        { id: "e", source: "start", target: "plug", type: "x" },
+        { id: "e", source: "plug", target: "end", type: "y" },
+      ],
+    };
+    const plug = def.nodes.find((n) => n.id === "plug")!;
+    const out = rebuildLinearScenario(def, [plug]);
+    const first = pair(out, "start", "plug")!;
+    const second = pair(out, "plug", "end")!;
+    expect(first).toMatchObject({ id: "e", type: "x" });
+    expect(second.type).toBe("y");
+    expect(second.id).not.toBe("e");
+    expect(new Set(out.edges.map((e) => e.id)).size).toBe(out.edges.length);
+  });
 });

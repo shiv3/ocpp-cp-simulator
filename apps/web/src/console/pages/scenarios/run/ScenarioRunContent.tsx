@@ -36,8 +36,8 @@ import { type MessageKey } from "../../../../i18n";
 type RunView = "steps" | "graph";
 
 const VIEW_OPTIONS: ReadonlyArray<{ value: RunView; label: MessageKey }> = [
-  { value: "steps", label: "scenarioRun.run.viewSteps" },
   { value: "graph", label: "scenarioRun.run.viewGraph" },
+  { value: "steps", label: "scenarioRun.run.viewSteps" },
 ];
 
 interface LoadedDefinition {
@@ -242,10 +242,10 @@ const ScenarioRunContent: React.FC<ScenarioRunContentProps> = ({
     isRunning && startedAt != null ? formatElapsed(now - startedAt) : null;
 
   const view: RunView =
-    !isPanel && searchParams.get("view") === "graph" ? "graph" : "steps";
+    isPanel || searchParams.get("view") === "steps" ? "steps" : "graph";
   const setView = (next: RunView) => {
     const params = new URLSearchParams(searchParams);
-    if (next === "graph") params.set("view", "graph");
+    if (next === "steps") params.set("view", "steps");
     else params.delete("view");
     // A view switch is not a navigation worth a history entry.
     setSearchParams(params, { replace: true });

@@ -75,5 +75,13 @@
   "scenarioRun.run.gone": "运行 {{runId}} 已不再活动",
   "scenarioRun.run.showingCurrent": " — 正在显示当前运行 {{runId}}。",
   "scenarioRun.run.cpScopeNote": "这是充电桩范围的场景 — 触发器触发时会按连接器自动运行,不能在此手动启动。此控制台中已禁用启动。",
-  "scenarioRun.loopBack": "然后回到步骤 {{n}}"
+  "scenarioRun.loopBack": "然后回到步骤 {{n}}",
+  "scenarioRun.joinTo": "然后进入步骤 {{n}}",
+  "scenarioRun.loopForever": "一直重复",
+  "scenarioRun.loopWaitsAt": "每轮先在步骤 {{n}} 等待",
+  "scenarioRun.loopBackArm": "回到步骤 {{n}}",
+  "scenarioRun.loopSteps": "重复的步骤 {{from}} 到 {{to}}",
+  "scenarioRun.loopRepeat": "重复",
+  "scenarioRun.loopUntilExit": "重复，直到其中的 switch / choice 选择退出，或运行停止",
+  "scenarioRun.loopUntilRunStops": "重复，直到运行停止"
 }

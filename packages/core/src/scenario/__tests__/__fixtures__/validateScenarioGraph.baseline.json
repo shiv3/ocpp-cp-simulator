@@ -425,6 +425,7 @@
   ],
   "fuzz:42": [
     "danglingEdge warning  e6",
+    "duplicateHandle warning n2 e3",
     "unpickableHandle warning n2 e8",
     "extraOutgoing warning n1 ",
     "extraOutgoing warning n4 ",
@@ -1338,6 +1339,7 @@
   "fuzz:179": [
     "edgeIntoStart warning n0 e0",
     "edgeIntoStart warning n0 e8",
+    "duplicateHandle warning n2 e8",
     "unpickableHandle warning n2 e7",
     "extraOutgoing warning n4 ",
     "unreachable warning n1 ",
@@ -1621,7 +1623,11 @@
     "unreachable warning n2 ",
     "unreachable warning n3 "
   ],
-  "fuzz:217": ["missingStart error  ", "unpickableHandle warning n1 e0"],
+  "fuzz:217": [
+    "missingStart error  ",
+    "unpickableHandle warning n1 e0",
+    "duplicateHandle warning n0 e2"
+  ],
   "fuzz:218": ["missingStart error  "],
   "fuzz:219": [
     "danglingEdge warning  e3",
@@ -2110,6 +2116,7 @@
     "unpickableHandle warning n0 e8"
   ],
   "fuzz:291": [
+    "duplicateHandle warning n3 e4",
     "unpickableHandle warning n3 e0",
     "unpickableHandle warning n3 e5",
     "unreachable warning n1 ",
@@ -2220,6 +2227,7 @@
   "fuzz:306": [
     "danglingEdge warning  e11",
     "edgeIntoStart warning n0 e3",
+    "duplicateHandle warning n2 e10",
     "extraOutgoing warning n4 ",
     "extraOutgoing warning n1 ",
     "callLeftOpen warning n3 ",
@@ -2395,6 +2403,7 @@
     "unpickableHandle warning n7 e0",
     "unpickableHandle warning n7 e6",
     "unpickableHandle warning n7 e9",
+    "duplicateHandle warning n6 e10",
     "unpickableHandle warning n6 e4",
     "unreachable warning n2 ",
     "unreachable warning n5 ",
@@ -2958,6 +2967,7 @@
     "danglingEdge warning  e5",
     "edgeIntoStart warning n0 e6",
     "edgeIntoStart warning n0 e7",
+    "duplicateHandle warning n1 e7",
     "unpickableHandle warning n1 e9",
     "extraOutgoing warning n5 ",
     "unpickableHandle warning n2 e6"
@@ -3335,6 +3345,7 @@
     "edgeOutOfEnd warning n1 e9",
     "danglingEdge warning  e12",
     "extraOutgoing warning n2 ",
+    "duplicateHandle warning n5 e11",
     "unpickableHandle warning n5 e6",
     "unpickableHandle warning n5 e10",
     "unreachable warning n2 ",

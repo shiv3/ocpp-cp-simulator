@@ -932,6 +932,15 @@ export const fleetCreateParamsSchema = z.object({
       "Connect each charge point once its EV settings, scenario and network simulation are in place; a line's overrides.autoConnect wins. Default false",
     ),
 });
+export type FleetCreateParams = z.infer<typeof fleetCreateParamsSchema>;
+
+/** `fleet.create` result: partial success is the result, like `cp.create_many`. */
+export const fleetCreateResultSchema = z.object({
+  templateId: STR_256,
+  created: ARRAY_1000(STR_64K),
+  failed: ARRAY_1000(z.object({ cpId: STR_64K, reason: STR_64K })),
+});
+export type FleetCreateResult = z.infer<typeof fleetCreateResultSchema>;
 
 export const serverInfoSchema = z.object({
   version: z.string(),
@@ -1584,11 +1593,7 @@ export const METHODS = {
   // Partial success is the result, like `cp.create_many`.
   "fleet.create": {
     params: fleetCreateParamsSchema,
-    result: z.object({
-      templateId: STR_256,
-      created: ARRAY_1000(STR_64K),
-      failed: ARRAY_1000(z.object({ cpId: STR_64K, reason: STR_64K })),
-    }),
+    result: fleetCreateResultSchema,
   },
   "cp.update": { params: updateParamsSchema, result: ANY },
   "cp.delete": { params: z.object({ cpId: NON_EMPTY_STR }), result: ANY },

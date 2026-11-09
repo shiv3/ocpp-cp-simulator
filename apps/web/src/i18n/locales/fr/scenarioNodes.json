@@ -62,5 +62,7 @@
   "scenarioNodes.switch.default": "default",
   "scenarioNodes.choice.options_one": "{{count}} option",
   "scenarioNodes.choice.options_other": "{{count}} options",
-  "scenarioNodes.choice.options_many": "{{count}} options"
+  "scenarioNodes.choice.options_many": "{{count}} options",
+  "scenarioNodes.title.parallel": "Parallèle",
+  "scenarioNodes.title.join": "Jonction"
 }

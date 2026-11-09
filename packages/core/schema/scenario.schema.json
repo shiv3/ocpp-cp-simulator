@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/shiv3/ocpp-cp-simulator/schema/scenario.schema.json",
-  "title": "ScenarioDefinition (scenario schema v1.8)",
-  "$comment": "Scenario file format v1.8 (edge kind \"timeout\" added in v1.8; $from root \"response\" and $match switch cases added in v1.7; useBehavior params and mode disable added by issue #654; csmsCallTrigger behavior / onBusy, callResponse and useBehavior nodes and the $from payload reference added by issue #566; issue #214; connectionTrigger node and csmsCallTrigger payload condition added by issue #240; evSettings charging curve and electrical fields added by issue #301; ocppCall node added by issue #389; libraryId added by the web console Library). Mirrors packages/core/src/cp/application/scenario/ScenarioTypes.ts. See docs/concepts/scenario-format.md for the field overview and versioning rules. This is a first published contract: it is STRICT on known fields (types, required-ness, closed-vocabulary enums) but PERMISSIVE on unknown keys at every object level (additionalProperties: true) — real editor exports carry xyflow UI fields (width/height/selected/style/...) that this schema deliberately does not reject. Validation against this schema is advisory only in this version: the simulator warns on a mismatch but never refuses to load a file.",
+  "title": "ScenarioDefinition (scenario schema v1.9)",
+  "$comment": "Scenario file format v1.9 (parallel and join nodes added in v1.9; edge kind \"timeout\" added in v1.8; $from root \"response\" and $match switch cases added in v1.7; useBehavior params and mode disable added by issue #654; csmsCallTrigger behavior / onBusy, callResponse and useBehavior nodes and the $from payload reference added by issue #566; issue #214; connectionTrigger node and csmsCallTrigger payload condition added by issue #240; evSettings charging curve and electrical fields added by issue #301; ocppCall node added by issue #389; libraryId added by the web console Library). Mirrors packages/core/src/cp/application/scenario/ScenarioTypes.ts. See docs/concepts/scenario-format.md for the field overview and versioning rules. This is a first published contract: it is STRICT on known fields (types, required-ness, closed-vocabulary enums) but PERMISSIVE on unknown keys at every object level (additionalProperties: true) — real editor exports carry xyflow UI fields (width/height/selected/style/...) that this schema deliberately does not reject. Validation against this schema is advisory only in this version: the simulator warns on a mismatch but never refuses to load a file.",
   "type": "object",
   "additionalProperties": true,
   "required": ["id", "name", "targetType", "nodes", "edges"],
@@ -421,7 +421,9 @@
             "notify",
             "switch",
             "choice",
-            "setState"
+            "setState",
+            "parallel",
+            "join"
           ]
         },
         "position": { "$ref": "#/$defs/position" },
@@ -938,6 +940,27 @@
                   },
                   "value": {}
                 }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "parallel" } } },
+          "then": {
+            "properties": {
+              "data": {
+                "$comment": "v1.9. Runs every outgoing ordinary edge as its own branch, each with a fresh CALL slot, and waits until those branches meet at a join; the run goes on after the join with a fresh flow. Data: label only."
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "join" } } },
+          "then": {
+            "properties": {
+              "data": {
+                "$comment": "v1.9. Where the branches of a parallel meet. mode all (default): go on once every branch arrived or ended; any: go on at the first arrival and cancel the other branches. Reached by a branch no parallel started, it is a plain step.",
+                "properties": { "mode": { "enum": ["all", "any"] } }
               }
             }
           }

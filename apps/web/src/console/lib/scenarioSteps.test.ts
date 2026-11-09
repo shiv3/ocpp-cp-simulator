@@ -14,6 +14,7 @@ import {
 } from "./scenarioSteps";
 import {
   isScenarioDefinitionShape,
+  ScenarioFlowNodeType,
   ScenarioNodeType,
   type ScenarioDefinition,
   type ScenarioNode,
@@ -635,10 +636,13 @@ describe("stepSummary", () => {
 // --- STEP_CATEGORIES ----------------------------------------------------
 
 describe("STEP_CATEGORIES", () => {
-  it("includes every ScenarioNodeType except START/END exactly once", () => {
-    const allTypes = Object.values(ScenarioNodeType).filter(
-      (t) => t !== ScenarioNodeType.START && t !== ScenarioNodeType.END,
-    );
+  it("includes every ScenarioNodeType and ScenarioFlowNodeType except START/END exactly once", () => {
+    const allTypes = [
+      ...Object.values(ScenarioNodeType).filter(
+        (t) => t !== ScenarioNodeType.START && t !== ScenarioNodeType.END,
+      ),
+      ...Object.values(ScenarioFlowNodeType),
+    ];
     const counts = new Map<string, number>();
     for (const category of STEP_CATEGORIES) {
       for (const type of category.types) {

@@ -20,7 +20,10 @@
  * origin's fan-out never see it; only {@link timeoutStep} follows one, out of
  * a trigger wait whose timeout expired.
  */
-import { ScenarioNodeType } from "../cp/application/scenario/ScenarioTypes";
+import {
+  ScenarioFlowNodeType,
+  ScenarioNodeType,
+} from "../cp/application/scenario/ScenarioTypes";
 import {
   connectionRule,
   type GraphIssue,
@@ -47,6 +50,14 @@ export interface GraphEdgeLike {
 /** An edge taken only when its source wait times out (schema 1.8). */
 export const isTimeoutEdge = (edge: GraphEdgeLike): boolean =>
   edge.kind === "timeout";
+
+/** A `join` (schema 1.9): where the branches of a `parallel` meet. */
+export const isJoin = (node: GraphNodeLike): boolean =>
+  node.type === ScenarioFlowNodeType.JOIN;
+
+/** How a `join` goes on: `any` only when it says so, else `all`. */
+export const joinMode = (node: GraphNodeLike): "all" | "any" =>
+  (node.data as { mode?: unknown } | undefined)?.mode === "any" ? "any" : "all";
 
 export interface GraphLike<
   N extends GraphNodeLike = GraphNodeLike,
@@ -282,6 +293,8 @@ export interface SuccessorOptions {
  * The edges the executor follows out of `node`:
  * - as the origin (`asOrigin`): all of them, in parallel;
  * - from a terminal node: none;
+ * - from a `parallel` (`out: "fork"`, schema 1.9): all of them, each as its
+ *   own branch;
  * - from a switch / choice with no `handle` given: for every handle it can
  *   pick ({@link pickableHandles}), the one edge {@link nextStep} takes;
  * - otherwise: the one edge {@link nextStep} takes, if any.
@@ -292,6 +305,9 @@ export function successors<N extends GraphNodeLike, E extends GraphEdgeLike>(
   opts: SuccessorOptions = {},
 ): readonly E[] {
   if (opts.asOrigin) return program.outgoing.get(node.id) ?? [];
+  if (connectionRule(node.type).out === "fork") {
+    return isTerminal(node) ? [] : (program.outgoing.get(node.id) ?? []);
+  }
   if (opts.handle === undefined && connectionRule(node.type).out === "select") {
     if (isTerminal(node)) return [];
     const followed: E[] = [];

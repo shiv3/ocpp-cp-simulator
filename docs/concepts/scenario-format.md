@@ -1,7 +1,7 @@
 ---
-title: Scenario file format (v1.8)
+title: Scenario file format (v1.9)
 type: concept
-summary: The node-graph JSON format for scripted charge-point behavior — 30 node types, edges, triggers, EV settings, assertions with a two-axis verdict, `useBehavior` params and disable, the 1.6 decision and notify nodes with the read-only `$from` roots, the 1.8 timeout edges, and the limits of the format — as exported by the editor and accepted by the CLI, daemon and MCP; JSON Schema is the source of truth.
+summary: The node-graph JSON format for scripted charge-point behavior — 32 node types, edges, triggers, EV settings, assertions with a two-axis verdict, `useBehavior` params and disable, the 1.6 decision and notify nodes with the read-only `$from` roots, the 1.8 timeout edges, the 1.9 parallel and join nodes, and the limits of the format — as exported by the editor and accepted by the CLI, daemon and MCP; JSON Schema is the source of truth.
 sources:
   - packages/core/schema/scenario.schema.json
   - packages/core/src/cp/application/scenario/ScenarioTypes.ts
@@ -43,7 +43,7 @@ related:
 updated: 2026-11-09
 ---
 
-# Scenario File Format (v1.8)
+# Scenario File Format (v1.9)
 
 A **node-graph JSON file** describing a scripted charge-point behavior: a
 directed graph of typed nodes (status changes, transactions, meter values,
@@ -61,9 +61,9 @@ that schema, not a replacement for it.
 
 ## Status & scope
 
-- **Version `1.8`** (`schemaVersion`). Files stamped `1.0` to `1.7` remain valid — 1.x
+- **Version `1.9`** (`schemaVersion`). Files stamped `1.0` to `1.8` remain valid — 1.x
   is purely additive (see [Versioning](#versioning)).
-- Covers the full 30-node discriminated union the scenario engine supports
+- Covers the full 32-node discriminated union the scenario engine supports
   (see [Node types](#node-types) below).
 - **Validation against this schema is advisory in this version**: the
   simulator warns (`console.warn` in the browser, stderr / server log on the
@@ -91,7 +91,7 @@ Mirrors the [OCPP trace format](./trace-format.md#versioning)'s rules:
 
 | Field                   | Type                                                                            | Required | Notes                                                                                                                                                                                                                |
 | ----------------------- | ------------------------------------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schemaVersion`         | string                                                                          | No       | e.g. `"1.8"` (current); `"1.7"`, `"1.6"`, `"1.5"`, `"1.4"`, `"1.3"`, `"1.2"`, `"1.1"` and `"1.0"` remain valid — additive. Absent on files predating issue #214 — still valid.                                       |
+| `schemaVersion`         | string                                                                          | No       | e.g. `"1.9"` (current); `"1.8"`, `"1.7"`, `"1.6"`, `"1.5"`, `"1.4"`, `"1.3"`, `"1.2"`, `"1.1"` and `"1.0"` remain valid — additive. Absent on files predating issue #214 — still valid.                              |
 | `id`                    | string                                                                          | Yes      | Stable scenario identifier.                                                                                                                                                                                          |
 | `templateId`            | string                                                                          | No       | Set automatically when a built-in template is instantiated; absent on hand-authored scenarios. See [Template instances](#template-instances).                                                                        |
 | `libraryId`             | string                                                                          | No       | Set by the web console on a connector's copy of a [Library](../entities/web-console.md#scenario-library) scenario: that scenario's `id` (v1.4). Absent on Library entries and on scenarios loaded by hand.           |
@@ -122,7 +122,7 @@ Mirrors the [OCPP trace format](./trace-format.md#versioning)'s rules:
 ```
 
 Every node has `id` (string), `type` (the discriminator — a closed
-enum of the 30 values below), `position` (`{ x: number, y: number }`), and
+enum of the 32 values below), `position` (`{ x: number, y: number }`), and
 `data` (an object requiring at least `label: string`; the rest of `data`'s
 shape depends on `type`).
 
@@ -160,6 +160,8 @@ shape depends on `type`).
 | `switch`             | `value`, `cases`                                                             | Edges leave by `sourceHandle` `case-<n>` or `default`. 1.6. See [note](#the-schema-16-nodes).                                                                                                                      |
 | `choice`             | `options`                                                                    | Each option `weight`, `label`; edges leave by `sourceHandle` `option-<n>`. 1.6. See [note](#the-schema-16-nodes).                                                                                                  |
 | `setState`           | `key`, `value`                                                               | 1.6. See [note](#the-schema-16-nodes).                                                                                                                                                                             |
+| `parallel`           | —                                                                            | Runs every outgoing edge as its own branch. 1.9. See [note](#parallel-and-join-schema-19).                                                                                                                         |
+| `join`               | —                                                                            | `mode` (`"all"` (default) \| `"any"`). 1.9. See [note](#parallel-and-join-schema-19).                                                                                                                              |
 
 `status` / `targetStatus` fields use the `OCPPStatus` enum: `Available`,
 `Preparing`, `Charging`, `SuspendedEVSE`, `SuspendedEV`, `Finishing`,
@@ -568,6 +570,8 @@ Two kinds of rule are real. **How a node is left** (`out`):
 | Node type                                               | `out`      | What the executor does                                                                                                                             |
 | ------------------------------------------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `start`                                                 | `parallel` | every outgoing edge becomes a branch, each with its own CALL slot                                                                                  |
+| `parallel` ([schema 1.9](#parallel-and-join-schema-19)) | `fork`     | every outgoing edge becomes a branch with its own CALL slot; the node's branch waits for them at a `join` and goes on from it                      |
+| `join` ([schema 1.9](#parallel-and-join-schema-19))     | `next`     | a branch a `parallel` started ends here; once the branches meet, the join runs once and the first edge is followed (else a plain step)             |
 | `end`                                                   | `none`     | the branch stops; an edge out of it is never followed                                                                                              |
 | `switch`, `choice` ([schema 1.6](#the-schema-16-nodes)) | `select`   | the node picks one `sourceHandle` (`case-N` / `default`, `option-N`) and only the edges with it are followed: several outgoing edges are the point |
 | every other                                             | `next`     | the first edge to an existing node is followed; with more, the rest are ignored                                                                    |
@@ -646,6 +650,21 @@ and, for [timeout edges](#timeout-edges-schema-18) (schema 1.8):
 
 Reachability and the CALL analysis follow the timeout edge of a wait whose
 timeout can expire, with the CALL state the wait was entered with.
+
+and, for [`parallel` and `join`](#parallel-and-join-schema-19) (schema 1.9):
+
+- `joinWithoutParallel` (warning) — a reachable `join` that no branch of a
+  `parallel` meets at: it only ever runs as a plain step.
+- `parallelWithoutJoin` (info) — a reachable `parallel` none of whose branches
+  reaches a `join`: they just end, and nothing runs after the parallel.
+- `newerConstruct` (info, once, on the first such node) — a `parallel` or
+  `join` in a file that declares a `schemaVersion` below `1.9`.
+
+The CALL analysis starts each branch of a `parallel` with no CALL, reports
+`callLeftOpen` for a CALL open at the `parallel` or on arrival at a `join`,
+and treats every `join` as a merge whose flow is reset (a `join` reached by a
+branch no parallel started keeps its flow at run time: an accepted
+approximation of an advisory check).
 
 Not constrained, because the executor needs nothing there: any step may follow
 any step, including a wait (`*Trigger`) right after Start or after another
@@ -1649,6 +1668,65 @@ instead. It is an edge with `kind: "timeout"`:
 The `delay` node and the auto-meter wait of a `meterValue` are not trigger
 waits and take no timeout edge.
 
+### Parallel and join (schema 1.9)
+
+Start already runs its edges as parallel branches; schema 1.9 forks anywhere
+and meets the branches again. Two node types, data `label` only plus a join's
+`mode`:
+
+```json
+{ "id": "fork", "type": "parallel", "position": { "x": 0, "y": 0 }, "data": { "label": "Fork" } },
+{ "id": "meet", "type": "join", "position": { "x": 0, "y": 0 }, "data": { "label": "Meet", "mode": "any" } }
+```
+
+- **`parallel`** runs every outgoing ordinary edge to an existing node as its
+  own branch, each with a fresh flow (its own CALL slot), and its own branch
+  waits. A CALL the forking branch still holds unanswered is answered
+  `InternalError` there: the flow after the join is fresh. With no outgoing
+  edge, or labelled "End", nothing is forked and its branch ends.
+- **Pairing.** Each branch knows the innermost `parallel` execution that
+  started it. A branch that reaches a `join` **arrives**: its open CALL, if
+  any, is answered `InternalError` at once, and the branch ends there (it does
+  not run the join). The first arrival names the join (and its mode) for that
+  execution; an arrival at another join counts as an arrival. Nested
+  `parallel` / `join` pairs work: the inner join goes on in the outer branch,
+  which can then arrive at the outer join.
+- **`mode: "all"`** (the default, and any value other than `"any"`): once
+  every branch of the execution has arrived or ended without arriving (an
+  `end`, a dead end, a cancelled branch), the forking branch goes on **once**
+  from the join — the join runs as a step and its first ordinary edge is
+  followed — with a fresh flow. If no branch arrived, nothing goes on: the
+  forking branch ends (logged).
+- **`mode: "any"`**: the first arrival goes on at once (once), and every other
+  branch of the execution is **cancelled** immediately: its parked trigger
+  wait is withdrawn, its `delay` / sleeps resolve (a cancelled delay keeps
+  nothing alive), it runs no further node, its open CALL is answered
+  `InternalError` at once, and it logs that it was cancelled. Cancelling a
+  branch cancels the branches of any `parallel` inside it.
+- **Failure.** A branch that fails fails the run, as a Start branch does; its
+  siblings are cancelled. An error of a branch that was already cancelled is
+  logged (`warn`), not raised.
+- **A join no parallel started** (on a path from Start, or after a resume) is
+  a plain step: logged (`info`), then on along its first edge with the
+  branch's flow.
+- **Stop, pause, step** keep their meaning: stop ends every branch at once,
+  pause and step hold each branch at its next node. With several live
+  branches `scenario_status` reports the node the latest one entered (or the
+  latest parked wait), as for Start's branches.
+- **Resume** (`resumeFromNodeId`): from a node inside a branch, that branch
+  runs alone and the join it reaches is a plain step; from a `parallel` the
+  node runs again (it has no effect of its own) and its branches meet as in a
+  fresh run; from a `join` its edges run as from any resume point.
+
+The InternalError a cancelled or arriving branch sends is a CALLERROR with
+`errorCode: "InternalError"` and `errorDescription` "The scenario cancelled
+the branch / reached a join / forked the branch at a parallel before it
+answered this call" — the error a run end sends for a CALL still open.
+Silence on purpose is still `callResponse` `kind: "none"` before the join.
+`export-k6` refuses both node types. The console editor does not offer them
+yet: they are kept out of `ScenarioNodeType` (as `ScenarioFlowNodeType`) and
+reach a run through a file.
+
 ### What the format will not do
 
 The format does **sequence, wait, select, loop and read**. A node may _read_ a value through `$from` from a
@@ -1674,10 +1752,19 @@ a `default` branch of its own it is a `switch` in disguise; if it needs two valu
 is a behavior.
 
 **Budget.** Schema 1.6 ships params, `disable` and the nodes of [the section above](#the-schema-16-nodes), and stops: a later version needs a written case that params and those nodes did not
-cover. Schema 1.8 adds [timeout edges](#timeout-edges-schema-18): a wait's other outcome, not a new verb or value. The parity of scenario nodes and `ctx` members is kept in
+cover. Schema 1.8 adds [timeout edges](#timeout-edges-schema-18): a wait's other outcome, not a new verb or value. Schema 1.9 adds
+[`parallel` and `join`](#parallel-and-join-schema-19): sequencing, as Start's fan-out already was, with no shared variables or
+event handlers between branches (the run's `setState` state was already shared). The parity of scenario nodes and `ctx` members is kept in
 [Scenario or behavior?](../analyses/scenario-or-behavior.md#node--ctx-parity).
 
 ## Changelog
+
+- **v1.9**: Adds the `parallel` and `join` node types (`join` `mode`:
+  `"all"` | `"any"`): fork a branch anywhere and meet the branches again, with
+  branch-scoped cancellation for `any`. The graph validator gains
+  `joinWithoutParallel` and `parallelWithoutJoin`, and `newerConstruct` covers
+  them. Purely additive — no existing node fans out differently, and `1.8` and
+  older files remain valid. See [the note](#parallel-and-join-schema-19).
 
 - **v1.8**: An edge may carry `kind: "timeout"`: out of a trigger wait it runs
   when the wait's timeout expires, instead of failing the run; ordinary

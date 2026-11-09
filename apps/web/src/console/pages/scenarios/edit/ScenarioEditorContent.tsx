@@ -25,6 +25,7 @@ import ScenarioEvSettingsFields from "../../../../components/scenario/ScenarioEv
 import { compactScenarioEvSettings } from "../../../../components/scenario/compactScenarioEvSettings";
 import {
   ScenarioNodeType,
+  type AnyScenarioNodeType,
   type ScenarioDefinition,
   type ScenarioNodeData,
 } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
@@ -382,7 +383,7 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
   const handleInsertStep = (
     path: SeqPath,
     index: number,
-    type: ScenarioNodeType,
+    type: AnyScenarioNodeType,
   ) => {
     if (!scenario || !tree) return;
     const kind =
@@ -439,7 +440,7 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
   const handleInsertStepIntoLoop = (
     path: SeqPath,
     index: number,
-    type: ScenarioNodeType,
+    type: AnyScenarioNodeType,
   ) => {
     if (!scenario || !tree) return;
     applyAndSelectNew(insertStepIntoNewLoop(scenario, tree, path, index, type));

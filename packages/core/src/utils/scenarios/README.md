@@ -73,9 +73,10 @@ The `dataflow-*` templates are not certification cases. They show what a scenari
 
 ## Non-certification templates using newer scenario features
 
-| Scenario ID                   | Feature                    | Description                                                                                                                                                                     |
-| ----------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| remote-start-timeout-fallback | Timeout edges (schema 1.8) | Waits 30 s for RemoteStartTransaction. On timeout, the `kind: "timeout"` edge sets the connector back to Available (StatusNotification) and ends the run instead of failing it. |
+| Scenario ID                   | Feature                      | Description                                                                                                                                                                     |
+| ----------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| remote-start-timeout-fallback | Timeout edges (schema 1.8)   | Waits 30 s for RemoteStartTransaction. On timeout, the `kind: "timeout"` edge sets the connector back to Available (StatusNotification) and ends the run instead of failing it. |
+| parallel-heartbeat-session    | Parallel / join (schema 1.9) | A `parallel` node runs a three-Heartbeat branch next to a RemoteStartTransaction session; a `join` (mode all) waits for both, then the run ends.                                |
 
 ## Numbering Note
 

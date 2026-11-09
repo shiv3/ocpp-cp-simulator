@@ -922,13 +922,15 @@ detail — the table above is where those differences live.
 | `switch`             | No       |
 | `choice`             | No       |
 | `setState`           | No       |
+| `parallel`           | No       |
+| `join`               | No       |
 
 A scenario containing a node type marked "No" is refused by `export-k6` with
 the offending type named, rather than exported and silently skipped. The schema 1.5 additions
 ([Scenario format](../concepts/scenario-format.md#csmscalltrigger-replace-callresponse-from-and-usebehavior-schema-15))
 are refused with their own reason: `callResponse` and `useBehavior` (they need a station behavior
 engine the k6 runtime does not have), a `csmsCallTrigger` with `behavior: "replace"` (or an `onBusy`),
-and an `ocppCall` whose payload holds `{"$from": …}`. The schema 1.6 additions ([#654](https://github.com/shiv3/ocpp-cp-simulator/issues/654)) are refused too: the `notify`, `switch`, `choice` and `setState` nodes, and a `delay` with `until` or `jitterSeconds` (the k6 runtime waits for `delaySeconds` only). A [timeout edge](../concepts/scenario-format.md#timeout-edges-schema-18) (schema 1.8, an edge with `kind: "timeout"`) is refused naming the edge and its source: the k6 runtime fails the iteration when a wait times out. The k6 runtime always lets the station answer a
+and an `ocppCall` whose payload holds `{"$from": …}`. The schema 1.6 additions ([#654](https://github.com/shiv3/ocpp-cp-simulator/issues/654)) are refused too: the `notify`, `switch`, `choice` and `setState` nodes, and a `delay` with `until` or `jitterSeconds` (the k6 runtime waits for `delaySeconds` only). The schema 1.9 [`parallel` and `join`](../concepts/scenario-format.md#parallel-and-join-schema-19) nodes are refused (the k6 interpreter has no branch-scoped cancellation). A [timeout edge](../concepts/scenario-format.md#timeout-edges-schema-18) (schema 1.8, an edge with `kind: "timeout"`) is refused naming the edge and its source: the k6 runtime fails the iteration when a wait times out. The k6 runtime always lets the station answer a
 CALL, so none of them is ever exported as the observing node it resembles.
 
 #### Behaviors: `export-k6 --behavior`

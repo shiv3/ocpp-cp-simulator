@@ -60,5 +60,7 @@
   "scenarioNodes.title.choice": "抽选 (choice)",
   "scenarioNodes.title.setState": "设置状态",
   "scenarioNodes.switch.default": "default",
-  "scenarioNodes.choice.options_other": "{{count}} 个选项"
+  "scenarioNodes.choice.options_other": "{{count}} 个选项",
+  "scenarioNodes.title.parallel": "并行",
+  "scenarioNodes.title.join": "汇合"
 }

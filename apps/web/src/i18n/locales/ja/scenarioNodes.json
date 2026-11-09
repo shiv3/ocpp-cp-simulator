@@ -60,5 +60,7 @@
   "scenarioNodes.title.choice": "抽選 (choice)",
   "scenarioNodes.title.setState": "状態の設定",
   "scenarioNodes.switch.default": "default",
-  "scenarioNodes.choice.options_other": "{{count}} 個の選択肢"
+  "scenarioNodes.choice.options_other": "{{count}} 個の選択肢",
+  "scenarioNodes.title.parallel": "並列",
+  "scenarioNodes.title.join": "合流"
 }

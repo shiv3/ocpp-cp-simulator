@@ -3,7 +3,10 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { ScenarioNodeType } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import {
+  ScenarioFlowNodeType,
+  ScenarioNodeType,
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import { setLocale, t } from "../../../../i18n";
 import { STEP_CATEGORIES, STEP_HELP } from "../../../lib/scenarioSteps";
 import AddStepPicker from "./AddStepPicker";
@@ -91,6 +94,8 @@ describe("AddStepPicker", () => {
       ScenarioNodeType.SWITCH,
       ScenarioNodeType.CHOICE,
       ScenarioNodeType.SET_STATE,
+      ScenarioFlowNodeType.PARALLEL,
+      ScenarioFlowNodeType.JOIN,
     ]);
   });
 
@@ -110,6 +115,22 @@ describe("AddStepPicker", () => {
     expect(help().textContent).toContain("Switch");
     expect(option("switch").getAttribute("aria-describedby")).toBe(help().id);
     expect(option("choice").getAttribute("aria-describedby")).toBeNull();
+  });
+
+  it("lists parallel and join under Flow control and describes them", async () => {
+    await render();
+    for (const type of [
+      ScenarioFlowNodeType.PARALLEL,
+      ScenarioFlowNodeType.JOIN,
+    ]) {
+      await act(async () => {
+        option(type).dispatchEvent(
+          new MouseEvent("mouseover", { bubbles: true }),
+        );
+      });
+      expect(help().textContent).toContain(t(STEP_HELP[type]));
+      expect(option(type).querySelector("svg")).not.toBeNull();
+    }
   });
 
   it("describes the focused type and moves with ArrowDown / ArrowUp", async () => {

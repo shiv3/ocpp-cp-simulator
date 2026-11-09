@@ -278,5 +278,9 @@
   "scenarios.editor.issue.timeoutEdgeOnNonWait": "Step {{n}} ({{title}}) has a timeout edge, but it is not a wait with a timeout (or it ends its branch): the edge is never followed.",
   "scenarios.editor.issue.timeoutEdgeNeverFires": "Step {{n}} ({{title}}) has a timeout edge, but its timeout is 0 or not set: the wait never times out, so the edge never runs.",
   "scenarios.editor.issue.extraTimeoutEdge": "Step {{n}} ({{title}}) has several timeout edges: only the first one runs when the wait times out.",
-  "scenarios.editor.issue.newerConstruct": "This scenario uses a feature newer than the schema version it declares; it runs here, but an older simulator would ignore that feature."
+  "scenarios.editor.issue.newerConstruct": "This scenario uses a feature newer than the schema version it declares; it runs here, but an older simulator would ignore that feature.",
+  "scenarios.editor.issue.joinWithoutParallel": "Step {{n}} ({{title}}) is a join, but no branch of a parallel reaches it: it only runs as a plain step.",
+  "scenarios.editor.issue.parallelWithoutJoin": "Step {{n}} ({{title}}) starts parallel branches that never reach a join: they just end, and nothing runs after it.",
+  "scenarios.stepHelp.parallel": "Runs every outgoing edge as its own branch at the same time. Each branch has its own CALL slot and answer; the run's state is shared. Meet the branches again with a Join step.",
+  "scenarios.stepHelp.join": "Where the branches of a Parallel step meet. \"All\" goes on once every branch has arrived or ended; \"Any\" goes on at the first arrival and cancels the others."
 }

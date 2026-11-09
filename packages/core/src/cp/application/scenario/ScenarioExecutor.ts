@@ -40,7 +40,11 @@ import type {
   ScenarioExpectation,
   ScenarioWaitIntervention,
 } from "./ScenarioTypes";
-import { NOTIFY_KINDS, ScenarioNodeType } from "./ScenarioTypes";
+import {
+  NOTIFY_KINDS,
+  ScenarioFlowNodeType,
+  ScenarioNodeType,
+} from "./ScenarioTypes";
 import {
   isFromReference,
   resolveFrom,
@@ -69,6 +73,7 @@ import {
 } from "../state/machines/ScenarioStateMachine";
 import { interpret } from "robot3";
 import { cancelIfCancellable } from "./cancellable";
+import { BranchScope, ParallelRegion } from "./branchScope";
 import { WaitControl, type WaitSignal } from "./WaitControl";
 import { ScenarioRunStateError } from "../../domain/errors/ScenarioRunStateError";
 import type { EventEmitter } from "../../shared/EventEmitter";
@@ -79,6 +84,8 @@ import type { Rng } from "../../shared/rng";
 import {
   isTerminal,
   lowerScenario,
+  isJoin,
+  joinMode,
   nextStep,
   resolveOrigin,
   successors,
@@ -131,14 +138,21 @@ interface Flow {
    * and cleared by the walk.
    */
   timeoutTarget: ScenarioNode | null;
+  /**
+   * The branch's cancellation scope (schema 1.9): the run's root scope, or
+   * the scope of a branch a `parallel` started. Every wait of the branch
+   * races `scope.ended`.
+   */
+  scope: BranchScope;
 }
 
-const newFlow = (): Flow => ({
+const newFlow = (scope: BranchScope): Flow => ({
   exchange: null,
   answered: false,
   response: null,
   handle: null,
   timeoutTarget: null,
+  scope,
 });
 
 const STATE_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -192,6 +206,8 @@ export class ScenarioExecutor {
   private aborted = false;
   private abortResolve: (() => void) | null = null;
   private abortPromise: Promise<void> = Promise.resolve();
+  /** The run's cancellation scope; it ends with `abortPromise` (schema 1.9). */
+  private rootScope: BranchScope = BranchScope.root(this.abortPromise);
   private remoteStartTagId: string | null = null;
   private remoteStartOptions: StartTransactionOptions | null = null;
   // Reason captured from the most recent RemoteStopTrigger node, forwarded
@@ -309,6 +325,7 @@ export class ScenarioExecutor {
     this.abortPromise = new Promise<void>((resolve) => {
       this.abortResolve = resolve;
     });
+    this.rootScope = BranchScope.root(this.abortPromise);
     // Dispatch START event to transition to running state
     this.service.send({ type: "START", mode });
     this.notifyStateChange();
@@ -473,7 +490,7 @@ export class ScenarioExecutor {
       if (!originNode) {
         throw new Error("No start node found in scenario");
       }
-      const originFlow = newFlow();
+      const originFlow = newFlow(this.rootScope);
       await this.executeSingleNode(originNode, originFlow);
       if (originFlow.timeoutTarget) {
         // Schema 1.8: an origin that is a timed-out wait (a legacy wait
@@ -492,10 +509,13 @@ export class ScenarioExecutor {
       (edge) => program.nodesById.get(edge.target)!,
     );
 
-    if (resumed && connectionRule(originNode.type).out === "select") {
+    const originOut = connectionRule(originNode.type).out;
+    if (resumed && (originOut === "select" || originOut === "fork")) {
       // The chosen handle is not persisted: decide again (a choice from its
-      // seeded stream), then go on along that one edge.
-      await this.executeSequentialFlow(originNode, newFlow());
+      // seeded stream), then go on along that one edge. A parallel (schema
+      // 1.9) runs again: it has no effect of its own, and its branches then
+      // meet at their join as in a fresh run.
+      await this.executeSequentialFlow(originNode, newFlow(this.rootScope));
       this.currentNodeId = null;
       this.currentNodeStartedAt = null;
       return;
@@ -516,7 +536,7 @@ export class ScenarioExecutor {
         `[${this.scenario.name}] Executing single branch`,
         "debug",
       );
-      await this.executeSequentialFlow(nextNodes[0]!, newFlow());
+      await this.executeSequentialFlow(nextNodes[0]!, newFlow(this.rootScope));
     } else {
       // Multiple branches - execute in parallel
       this.callbacks.log?.(
@@ -568,7 +588,7 @@ export class ScenarioExecutor {
         `[${this.scenario.name}] Starting branch ${index + 1} from node: ${node.data?.label || node.id}`,
         "debug",
       );
-      return this.executeSequentialFlow(node, newFlow());
+      return this.executeSequentialFlow(node, newFlow(this.rootScope));
     });
 
     // Wait for all branches to complete
@@ -584,24 +604,44 @@ export class ScenarioExecutor {
    */
   private async executeSequentialFlow(
     startNode: ScenarioNode,
-    flow: Flow,
+    branchFlow: Flow,
   ): Promise<void> {
     let currentNode = startNode;
+    let flow = branchFlow;
+    // Schema 1.9: the join this branch goes on from after its parallel's
+    // branches met there; it runs as a step, not as an arrival.
+    let continuingJoin: ScenarioNode | null = null;
 
     while (
       currentNode &&
       !this.aborted &&
       getScenarioStateName(this.service) !== "idle"
     ) {
+      if (flow.scope.cancelled) break;
+      if (isJoin(currentNode) && currentNode !== continuingJoin) {
+        const region = flow.scope.region;
+        if (region) {
+          // Schema 1.9: a branch a parallel started ends at a join.
+          this.arriveAtJoin(currentNode, flow, region);
+          return;
+        }
+        this.callbacks.log?.(
+          `[${this.scenario.name}] Join "${currentNode.data?.label || currentNode.id}" reached by a branch no parallel started; it runs as a plain step`,
+          "info",
+        );
+      }
+      continuingJoin = null;
+
       // Execute the current node
       await this.executeSingleNode(currentNode, flow);
 
       // If the node finished while paused, do not make the next node visible
       // until the run has been resumed. Stop/abort can also land while parked.
-      await this.waitIfPaused();
+      await this.waitIfPaused(flow.scope);
       if (this.aborted || getScenarioStateName(this.service) === "idle") {
         break;
       }
+      if (flow.scope.cancelled) break;
 
       // Schema 1.8: a wait that timed out goes on along its timeout edge.
       const timedOutTo = flow.timeoutTarget;
@@ -615,6 +655,17 @@ export class ScenarioExecutor {
       // Check if this is the end node
       if (isTerminal(currentNode)) {
         break;
+      }
+
+      // Schema 1.9: a parallel forks; this branch waits for its branches to
+      // meet at a join and goes on from there with a fresh flow.
+      if (connectionRule(currentNode.type).out === "fork") {
+        const join = await this.runParallel(currentNode, flow);
+        if (!join) break;
+        flow = newFlow(flow.scope);
+        currentNode = join;
+        continuingJoin = join;
+        continue;
       }
 
       // Find next node. A switch or choice picked one edge by its handle
@@ -641,6 +692,128 @@ export class ScenarioExecutor {
 
       currentNode = step.target;
     }
+
+    if (flow.scope.cancelled && !this.aborted) {
+      this.callbacks.log?.(
+        `[${this.scenario.name}] Branch at "${currentNode.data?.label || currentNode.id}" cancelled: another branch reached an "any" join first, or a sibling failed`,
+        "info",
+      );
+      this.dropOpenCall(flow, "cancelled the branch");
+    }
+  }
+
+  /**
+   * Schema 1.9: answer the CALL a branch still holds unanswered with
+   * `InternalError` now, because its flow is dropped (the branch was
+   * cancelled, reached a join, or forked at a parallel). Does not wait for
+   * the answer to settle.
+   */
+  private dropOpenCall(flow: Flow, why: string): void {
+    const exchange = flow.exchange;
+    if (!exchange || flow.answered) return;
+    flow.answered = true;
+    this.callbacks.log?.(
+      `${exchange.action}: the scenario ${why} before it answered this call; answering InternalError`,
+      "warn",
+    );
+    try {
+      void exchange
+        .answer({
+          kind: "error",
+          errorCode: "InternalError",
+          errorDescription: `The scenario ${why} before it answered this call`,
+        })
+        .catch(() => undefined);
+    } catch {
+      // An answer that cannot be sent is the runtime's to report.
+    }
+  }
+
+  /** Schema 1.9: a branch of `region` reached `join`; the branch ends here. */
+  private arriveAtJoin(
+    join: ScenarioNode,
+    flow: Flow,
+    region: ParallelRegion,
+  ): void {
+    const mode = joinMode(join);
+    this.callbacks.log?.(
+      `[${this.scenario.name}] A branch of "${region.parallelNodeId}" reached join "${join.data?.label || join.id}" (${mode})`,
+      "debug",
+    );
+    this.dropOpenCall(flow, "reached a join");
+    region.arrive(join, mode);
+  }
+
+  /**
+   * Schema 1.9: run every outgoing ordinary edge of `node` (a `parallel`) as
+   * its own branch, each with a fresh flow and a child scope, and wait until
+   * they meet. Resolves with the join to go on from, or null when no branch
+   * reached one (or this branch was cancelled, or the run stopped). A branch
+   * that fails cancels its siblings and fails the run.
+   */
+  private async runParallel(
+    node: ScenarioNode,
+    flow: Flow,
+  ): Promise<ScenarioNode | null> {
+    const program = this.program();
+    const targets = successors(program, node).map((edge) =>
+      program.nodesById.get(edge.target)!,
+    );
+    const label = node.data?.label || node.id;
+    // The flow after the join is fresh: the CALL held here is dropped.
+    this.dropOpenCall(flow, "forked the branch at a parallel");
+    const region = new ParallelRegion(node.id);
+    this.callbacks.log?.(
+      `[${this.scenario.name}] "${label}" starts ${targets.length} parallel branches`,
+      "info",
+    );
+    for (const target of targets) {
+      const scope = flow.scope.child(region);
+      region.addBranch(scope);
+      this.executeSequentialFlow(target, newFlow(scope)).then(
+        () => {
+          scope.release();
+          region.branchEnded();
+        },
+        (error: unknown) => {
+          scope.release();
+          if (region.isSettled) {
+            this.callbacks.log?.(
+              `[${this.scenario.name}] A cancelled branch of "${label}" failed: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+              "warn",
+            );
+          }
+          region.fail(error);
+        },
+      );
+    }
+    region.empty();
+
+    const outcome = await Promise.race([
+      region.settled,
+      flow.scope.ended.then(() => null),
+    ]);
+    // Whatever settled it, nothing of this execution runs on: an `any` join
+    // cancels the other branches, a failure its siblings, a stop everything.
+    for (const branch of region.branches) branch.cancel();
+    if (outcome === null || this.aborted) return null;
+    if (outcome.kind === "failed") throw outcome.error;
+    if (outcome.kind === "noJoin") {
+      this.callbacks.log?.(
+        `[${this.scenario.name}] No branch of "${label}" reached a join; the branch ends`,
+        "info",
+      );
+      return null;
+    }
+    this.callbacks.log?.(
+      `[${this.scenario.name}] The branches of "${label}" met at "${
+        (outcome.join as ScenarioNode).data?.label || outcome.join.id
+      }" (${joinMode(outcome.join)})`,
+      "info",
+    );
+    return outcome.join as ScenarioNode;
   }
 
   /**
@@ -651,15 +824,19 @@ export class ScenarioExecutor {
     flow: Flow,
   ): Promise<void> {
     // A stop() may have landed while the previous node was awaiting; never
-    // start another node once aborted.
-    if (this.aborted) {
+    // start another node once aborted (or once the branch was cancelled).
+    if (this.aborted || flow.scope.cancelled) {
       return;
     }
 
     // Do not make the node visible while paused. This protects the boundary
     // after an in-flight wait resolves under pause.
-    await this.waitIfPaused();
-    if (this.aborted || getScenarioStateName(this.service) === "idle") {
+    await this.waitIfPaused(flow.scope);
+    if (
+      this.aborted ||
+      flow.scope.cancelled ||
+      getScenarioStateName(this.service) === "idle"
+    ) {
       return;
     }
 
@@ -667,8 +844,12 @@ export class ScenarioExecutor {
     // exactly one more node.
     const stateName = getScenarioStateName(this.service);
     if (stateName === "stepping") {
-      await this.waitForStep();
-      if (this.aborted || getScenarioStateName(this.service) === "idle") {
+      await this.waitForStep(flow.scope);
+      if (
+        this.aborted ||
+        flow.scope.cancelled ||
+        getScenarioStateName(this.service) === "idle"
+      ) {
         return;
       }
     }
@@ -741,11 +922,19 @@ export class ScenarioExecutor {
         break;
 
       case ScenarioNodeType.METER_VALUE:
-        await this.executeMeterValue(node.id, node.data as MeterValueNodeData);
+        await this.executeMeterValue(
+          node.id,
+          node.data as MeterValueNodeData,
+          flow.scope,
+        );
         break;
 
       case ScenarioNodeType.DELAY:
-        await this.executeDelay(node.id, node.data as DelayNodeData);
+        await this.executeDelay(
+          node.id,
+          node.data as DelayNodeData,
+          flow.scope,
+        );
         break;
 
       case ScenarioNodeType.NOTIFICATION:
@@ -872,6 +1061,11 @@ export class ScenarioExecutor {
           node.data as ConnectionTriggerNodeData,
           flow,
         );
+        break;
+
+      // Schema 1.9: control flow only; the walk forks and meets.
+      case ScenarioFlowNodeType.PARALLEL:
+      case ScenarioFlowNodeType.JOIN:
         break;
 
       default:
@@ -1102,7 +1296,7 @@ export class ScenarioExecutor {
     // reported as a run error after `execution.stopped`.
     const outcome = await Promise.race([
       call,
-      this.abortPromise.then(() => null),
+      flow.scope.ended.then(() => null),
     ]);
     if (outcome === null) {
       call.catch(() => undefined);
@@ -1214,6 +1408,7 @@ export class ScenarioExecutor {
   private async executeMeterValue(
     nodeId: string,
     data: MeterValueNodeData,
+    scope: BranchScope,
   ): Promise<void> {
     const meterCallbacks = this.callbacks as MeterValueCallbacks;
     const currentBeforeSeed = this.callbacks.onGetMeterValue?.();
@@ -1315,8 +1510,9 @@ export class ScenarioExecutor {
               resolvedMaxTime,
             ) ??
               (resolvedMaxTime && resolvedMaxTime > 0
-                ? this.sleep(resolvedMaxTime * 1000)
+                ? this.sleep(resolvedMaxTime * 1000, scope)
                 : Promise.resolve()),
+            scope,
           );
         } catch (error) {
           if (!resolvedMaxTime || !isMeterValueTimeout(error)) {
@@ -1325,7 +1521,7 @@ export class ScenarioExecutor {
         }
         this.callbacks.onStopAutoMeterValue?.();
       } else if (resolvedMaxTime && resolvedMaxTime > 0) {
-        await this.waitWithProgress(nodeId, resolvedMaxTime);
+        await this.waitWithProgress(nodeId, resolvedMaxTime, scope);
         this.callbacks.onStopAutoMeterValue?.();
       }
     }
@@ -1345,6 +1541,7 @@ export class ScenarioExecutor {
   private async executeDelay(
     nodeId: string,
     data: DelayNodeData,
+    scope: BranchScope,
   ): Promise<void> {
     let seconds = data.delaySeconds;
     if (data.until !== undefined) {
@@ -1377,16 +1574,18 @@ export class ScenarioExecutor {
         seconds += this.rng.int(0, Math.round(jitter * 1000) + 1) / 1000;
       }
     }
-    await this.waitWithProgress(nodeId, seconds);
+    await this.waitWithProgress(nodeId, seconds, scope);
   }
 
   private async waitWithProgress(
     nodeId: string,
     totalSeconds: number,
+    scope: BranchScope,
   ): Promise<void> {
     if (this.callbacks.onDelay) {
       await this.waitWithOptionalForceSkip(
         this.callbacks.onDelay(totalSeconds),
+        scope,
       );
       return;
     }
@@ -1418,7 +1617,10 @@ export class ScenarioExecutor {
     }, updateInterval);
 
     try {
-      await this.waitWithOptionalForceSkip(this.sleep(totalSeconds * 1000));
+      await this.waitWithOptionalForceSkip(
+        this.sleep(totalSeconds * 1000, scope),
+        scope,
+      );
     } finally {
       this.clock.clearInterval(progressInterval);
 
@@ -1481,6 +1683,8 @@ export class ScenarioExecutor {
         () => waitForRemoteStart(),
       )
     )?.value;
+    // A cancelled branch (schema 1.9) leaves the run's capture alone.
+    if (flow.scope.cancelled) return;
     // A wait continued past (#240) captures nothing, so the next Transaction
     // node falls back to its own tag.
     if (answer === undefined) {
@@ -1531,6 +1735,7 @@ export class ScenarioExecutor {
       (seconds) => `Timeout waiting for remote stop (${seconds}s)`,
       () => waitForRemoteStop(),
     );
+    if (flow.scope.cancelled) return;
     this.remoteStopReason = result?.value?.reason ?? null;
     this.remoteStopOptions = result
       ? { triggerReason: result.value?.triggerReason ?? "RemoteStop" }
@@ -1803,16 +2008,19 @@ export class ScenarioExecutor {
   /**
    * Wait if execution is paused
    */
-  private async waitIfPaused(): Promise<void> {
-    while (getScenarioStateName(this.service) === "paused") {
-      await this.sleep(100);
+  private async waitIfPaused(scope: BranchScope): Promise<void> {
+    while (
+      getScenarioStateName(this.service) === "paused" &&
+      !scope.cancelled
+    ) {
+      await this.sleep(100, scope);
     }
   }
 
   /**
    * Wait for step command
    */
-  private async waitForStep(): Promise<void> {
+  private async waitForStep(scope: BranchScope): Promise<void> {
     const stateName = getScenarioStateName(this.service);
     if (stateName !== "stepping") return;
 
@@ -1829,7 +2037,7 @@ export class ScenarioExecutor {
     });
 
     try {
-      await Promise.race([stepPromise, this.abortPromise]);
+      await Promise.race([stepPromise, scope.ended]);
     } finally {
       if (this.stepResolve === localResolve) {
         this.stepResolve = null;
@@ -1839,10 +2047,11 @@ export class ScenarioExecutor {
 
   private async waitWithOptionalForceSkip(
     waitPromise: Promise<unknown>,
+    scope: BranchScope,
   ): Promise<void> {
     const stateName = getScenarioStateName(this.service);
     if (stateName !== "stepping") {
-      await Promise.race([waitPromise, this.abortPromise]);
+      await Promise.race([waitPromise, scope.ended]);
       return;
     }
 
@@ -1853,7 +2062,7 @@ export class ScenarioExecutor {
     this.forceSkipResolve = localResolve;
 
     try {
-      await Promise.race([waitPromise, forcePromise, this.abortPromise]);
+      await Promise.race([waitPromise, forcePromise, scope.ended]);
     } finally {
       if (this.forceSkipResolve === localResolve) {
         this.forceSkipResolve = null;
@@ -1871,13 +2080,13 @@ export class ScenarioExecutor {
   /**
    * Sleep utility
    */
-  private sleep(ms: number): Promise<void> {
-    if (this.aborted) {
+  private sleep(ms: number, scope: BranchScope): Promise<void> {
+    if (this.aborted || scope.cancelled) {
       return Promise.resolve();
     }
     return Promise.race([
       new Promise<void>((resolve) => this.clock.setTimeout(resolve, ms)),
-      this.abortPromise,
+      scope.ended,
     ]);
   }
 
@@ -1934,6 +2143,7 @@ export class ScenarioExecutor {
             waitPromise.then((value) => {
               answer = { value };
             }),
+            flow.scope,
           ).then(() => "settled" as const),
           // Without a timeout edge the expiry rejects and fails the run.
           onTimeout
@@ -1952,6 +2162,8 @@ export class ScenarioExecutor {
         this.notifyStateChange();
       }
 
+      // A cancelled branch (schema 1.9) captures nothing.
+      if (flow.scope.cancelled) return null;
       if (outcome === "settled") return answer;
       if (outcome === "timedOut" && onTimeout && !this.aborted) {
         const reason =
@@ -2114,9 +2326,14 @@ export class ScenarioExecutor {
           : { errorDescription: data.errorDescription }),
         ...(data.skipValidation ? { skipValidation: true } : {}),
       }),
-      this.abortPromise.then(() => null),
+      flow.scope.ended.then(() => null),
     ]);
-    if (settled === null) return;
+    if (settled === null) {
+      // Cancelled mid-answer (schema 1.9): the answer is on its way, never
+      // answer the CALL again.
+      if (flow.scope.cancelled) flow.answered = true;
+      return;
+    }
     flow.answered = true;
     if (!settled.delivered) {
       throw new Error(

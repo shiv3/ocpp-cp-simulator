@@ -11,6 +11,7 @@ import {
 } from "./scenarioConnectionRules";
 import {
   edgesByHandle,
+  isJoin,
   isTerminal,
   lowerScenario,
   successors,
@@ -20,7 +21,10 @@ import {
   type GraphNodeLike,
   type ScenarioProgram,
 } from "./scenarioGraph";
-import { ScenarioNodeType } from "../cp/application/scenario/ScenarioTypes";
+import {
+  ScenarioFlowNodeType,
+  ScenarioNodeType,
+} from "../cp/application/scenario/ScenarioTypes";
 import {
   jsonEquals,
   matcherProblem,
@@ -199,6 +203,8 @@ export function validateScenarioGraph(def: {
       }
       continue;
     }
+    // A parallel (schema 1.9) runs every edge as its own branch.
+    if (connectionRule(node.type).out === "fork") continue;
     if (edgesThatMayRun(program, nodeId).length > 1) {
       issues.push({ code: "extraOutgoing", nodeId, severity: "warning" });
     }
@@ -240,10 +246,99 @@ export function validateScenarioGraph(def: {
         });
       }
     }
+    issues.push(...checkJoins(program, seen));
     issues.push(...checkCalls(origin, program));
   }
   issues.push(...checkSwitchCases(def.nodes));
 
+  const flowNode = def.nodes.find(
+    (n) =>
+      n.type === ScenarioFlowNodeType.PARALLEL ||
+      n.type === ScenarioFlowNodeType.JOIN,
+  );
+  if (flowNode) {
+    issues.push(
+      ...newerConstruct(def.schemaVersion, "1.9", { nodeId: flowNode.id }),
+    );
+  }
+
+  return issues;
+}
+
+/** Every edge out of `node` a branch may take, its timeout edge included. */
+function stepsOut(program: Program, node: GraphNodeLike): GraphEdgeLike[] {
+  const timeoutEdge = timeoutEdgeThatMayRun(program, node);
+  return [
+    ...edgesThatMayRun(program, node.id),
+    ...(timeoutEdge ? [timeoutEdge] : []),
+  ];
+}
+
+/**
+ * Schema 1.9: which `join` the branches of each `parallel` can meet at.
+ * From each reachable parallel, walk its branches: a nested parallel opens a
+ * level and the join that closes it goes on in the outer branch; a join at
+ * the parallel's own level is where its branches meet. A parallel whose
+ * branches meet at no join is `parallelWithoutJoin` (info); a reachable join
+ * no parallel's branches meet at is `joinWithoutParallel` (warning).
+ */
+function checkJoins(program: Program, reachable: Set<string>): GraphIssue[] {
+  const issues: GraphIssue[] = [];
+  const met = new Set<string>();
+  const maxDepth = program.nodes.length;
+  for (const parallel of program.nodes) {
+    if (
+      parallel.type !== ScenarioFlowNodeType.PARALLEL ||
+      !reachable.has(parallel.id) ||
+      program.nodesById.get(parallel.id) !== parallel
+    ) {
+      continue;
+    }
+    let meets = false;
+    const seen = new Set<string>();
+    const queue: Array<[string, number]> = [];
+    const visit = (id: string, depth: number) => {
+      const key = `${depth} ${id}`;
+      if (depth > maxDepth || seen.has(key)) return;
+      seen.add(key);
+      queue.push([id, depth]);
+    };
+    for (const edge of successors(program, parallel)) visit(edge.target, 0);
+    while (queue.length > 0) {
+      const [id, depth] = queue.pop()!;
+      const node = program.nodesById.get(id)!;
+      if (isJoin(node)) {
+        if (depth === 0) {
+          meets = true;
+          met.add(id);
+          continue;
+        }
+        for (const edge of stepsOut(program, node))
+          visit(edge.target, depth - 1);
+        continue;
+      }
+      const inner = connectionRule(node.type).out === "fork" ? 1 : 0;
+      for (const edge of stepsOut(program, node)) {
+        visit(edge.target, depth + inner);
+      }
+    }
+    if (!meets) {
+      issues.push({
+        code: "parallelWithoutJoin",
+        nodeId: parallel.id,
+        severity: "info",
+      });
+    }
+  }
+  for (const node of program.nodes) {
+    if (isJoin(node) && reachable.has(node.id) && !met.has(node.id)) {
+      issues.push({
+        code: "joinWithoutParallel",
+        nodeId: node.id,
+        severity: "warning",
+      });
+    }
+  }
   return issues;
 }
 
@@ -292,8 +387,11 @@ function checkCalls(origin: GraphNodeLike, program: Program): GraphIssue[] {
     const [nodeId, state, answer] = queue.pop()!;
     const node = program.nodesById.get(nodeId)!;
     const rule = connectionRule(node.type);
-    let after: CallState | null = state;
-    let answerAfter = answer;
+    // Schema 1.9: a branch ends at a join, its open CALL answered there; the
+    // flow after the join is fresh (no CALL, no answer held).
+    if (isJoin(node)) leftOpen(state);
+    let after: CallState | null = isJoin(node) ? "none" : state;
+    let answerAfter = isJoin(node) ? false : answer;
     const effect = rule.response?.(node.data as never);
     switch (rule.call(node.data as never)) {
       case "takesOver":
@@ -325,6 +423,15 @@ function checkCalls(origin: GraphNodeLike, program: Program): GraphIssue[] {
     const timeoutEdge = timeoutEdgeThatMayRun(program, node);
     if (timeoutEdge) enter(timeoutEdge.target, state, answer);
     if (after === null) continue;
+    if (connectionRule(node.type).out === "fork") {
+      // Schema 1.9: the parallel's branch drops its flow (an open CALL is
+      // answered there); each new branch starts with a fresh one.
+      leftOpen(after);
+      for (const edge of successors(program, node)) {
+        enter(edge.target, "none", false);
+      }
+      continue;
+    }
     // Re-entering the origin runs it as a step (executeSequentialFlow).
     // A switch or choice may pick any of its handles: follow each.
     const followed = successors(program, node);

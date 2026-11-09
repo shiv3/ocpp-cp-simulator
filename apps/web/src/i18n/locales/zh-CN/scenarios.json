@@ -269,5 +269,9 @@
   "scenarios.editor.issue.timeoutEdgeOnNonWait": "步骤 {{n}}({{title}})有一条超时边,但它不是带超时的等待(或会结束其分支):这条边永远不会被走到。",
   "scenarios.editor.issue.timeoutEdgeNeverFires": "步骤 {{n}}({{title}})有一条超时边,但其超时为 0 或未设置:等待永远不会超时,这条边永远不会运行。",
   "scenarios.editor.issue.extraTimeoutEdge": "步骤 {{n}}({{title}})有多条超时边:等待超时时只运行第一条。",
-  "scenarios.editor.issue.newerConstruct": "此场景使用了比其声明的架构版本更新的功能;在这里可以运行,但较旧的模拟器会忽略该功能。"
+  "scenarios.editor.issue.newerConstruct": "此场景使用了比其声明的架构版本更新的功能;在这里可以运行,但较旧的模拟器会忽略该功能。",
+  "scenarios.editor.issue.joinWithoutParallel": "步骤 {{n}}({{title}})是汇合节点,但没有任何并行分支到达它:它只作为普通步骤运行。",
+  "scenarios.editor.issue.parallelWithoutJoin": "步骤 {{n}}({{title}})启动的并行分支都不会到达汇合节点:分支直接结束,之后不会运行任何步骤。",
+  "scenarios.stepHelp.parallel": "把每条出边作为各自独立的分支同时执行。每个分支有自己的 CALL 和应答;运行状态(state)是共享的。用“汇合”步骤把分支重新合到一起。",
+  "scenarios.stepHelp.join": "并行步骤的各分支在此汇合。“全部”在每个分支都到达或结束后继续;“任一”在第一个分支到达时继续,并取消其余分支。"
 }

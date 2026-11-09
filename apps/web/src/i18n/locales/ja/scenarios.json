@@ -269,5 +269,9 @@
   "scenarios.editor.issue.timeoutEdgeOnNonWait": "ステップ {{n}}({{title}})にタイムアウト辺がありますが、タイムアウト付きの待機ではない(または枝を終える)ため、この辺はたどられません。",
   "scenarios.editor.issue.timeoutEdgeNeverFires": "ステップ {{n}}({{title}})にタイムアウト辺がありますが、タイムアウトが 0 か未設定です。待機がタイムアウトしないため、この辺は実行されません。",
   "scenarios.editor.issue.extraTimeoutEdge": "ステップ {{n}}({{title}})にタイムアウト辺が複数あります。待機がタイムアウトしたときに実行されるのは最初の1本だけです。",
-  "scenarios.editor.issue.newerConstruct": "このシナリオは宣言しているスキーマバージョンより新しい機能を使っています。ここでは動きますが、古いシミュレーターはその機能を無視します。"
+  "scenarios.editor.issue.newerConstruct": "このシナリオは宣言しているスキーマバージョンより新しい機能を使っています。ここでは動きますが、古いシミュレーターはその機能を無視します。",
+  "scenarios.editor.issue.joinWithoutParallel": "ステップ {{n}}({{title}})は合流ですが、並列のどの枝からも到達しません。通常のステップとしてだけ実行されます。",
+  "scenarios.editor.issue.parallelWithoutJoin": "ステップ {{n}}({{title}})が始める並列の枝はどれも合流に到達しません。枝はそのまま終わり、その後には何も実行されません。",
+  "scenarios.stepHelp.parallel": "出ているすべてのエッジを、それぞれ別の分岐として同時に実行します。分岐ごとに CALL とその応答を別々に持ち、実行の状態(state)は共有します。分岐は「合流」ステップで再び合わせます。",
+  "scenarios.stepHelp.join": "「並列」ステップの分岐が合わさる場所です。「すべて」は全分岐が到達または終了したら先へ進み、「いずれか」は最初に到達した時点で進み、他の分岐を中止します。"
 }

@@ -250,6 +250,9 @@ const REFUSED_BEHAVIOR_NODES: Readonly<Record<string, string>> = {
     ": a seeded choice (schema 1.6) needs the station's seeded streams, which the k6 runtime does not have",
   setState:
     ": the state of a run (schema 1.6) is read through $from, which the k6 runtime does not have",
+  parallel:
+    ": forking a branch and meeting it at a join (schema 1.9) needs branch-scoped cancellation, which the k6 interpreter (one walk per virtual user) does not have",
+  join: ": a join (schema 1.9) meets the branches of a parallel, which export-k6 does not support",
   useBehavior:
     ': selecting a behavior, setting its params (schema 1.6) or disabling it (mode "disable") needs a station behavior engine, which the k6 runtime does not have; a k6 behavior runs with its declared defaults',
 };

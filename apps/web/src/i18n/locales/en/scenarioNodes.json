@@ -61,5 +61,7 @@
   "scenarioNodes.title.setState": "Set State",
   "scenarioNodes.switch.default": "default",
   "scenarioNodes.choice.options_one": "{{count}} option",
-  "scenarioNodes.choice.options_other": "{{count}} options"
+  "scenarioNodes.choice.options_other": "{{count}} options",
+  "scenarioNodes.title.parallel": "Parallel",
+  "scenarioNodes.title.join": "Join"
 }

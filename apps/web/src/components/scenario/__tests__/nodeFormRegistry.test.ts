@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import {
+  ScenarioFlowNodeType,
   ScenarioNodeType,
   type ScenarioNodeData,
 } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
@@ -37,9 +38,12 @@ function expectUnknownFieldsDropped(
 }
 
 describe("NODE_FORM_REGISTRY", () => {
-  it("has an entry for every ScenarioNodeType", () => {
+  it("has an entry for every ScenarioNodeType and ScenarioFlowNodeType", () => {
     expect(Object.keys(NODE_FORM_REGISTRY).sort()).toEqual(
-      Object.values(ScenarioNodeType).sort(),
+      [
+        ...Object.values(ScenarioNodeType),
+        ...Object.values(ScenarioFlowNodeType),
+      ].sort(),
     );
   });
 

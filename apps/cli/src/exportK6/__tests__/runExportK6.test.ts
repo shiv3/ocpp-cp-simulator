@@ -269,6 +269,15 @@ describe("runExportK6", () => {
       expect(message).toContain('"$from"');
     });
 
+    it.each([
+      ["parallel", {}],
+      ["join", { mode: "any" }],
+    ])("%s (schema 1.9)", async (type, data) => {
+      const message = await refuse(withNode(type, data));
+      expect(message).toContain(`unsupported node type "${type}" (node x)`);
+      expect(message).toContain("schema 1.9");
+    });
+
     it("a timeout edge (schema 1.8), named by id", async () => {
       const message = await refuse({
         ...withNode("statusTrigger", {

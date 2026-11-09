@@ -75,10 +75,13 @@ import {
 import { connectionRule } from "@ocpp-cp-simulator/core/scenario/scenarioConnectionRules";
 import {
   isTerminal,
+  isTimeoutEdge,
   lowerScenario,
   nextStep,
   pickableHandles,
   type ScenarioProgram,
+  timeoutStep,
+  waitTimeoutSeconds,
 } from "@ocpp-cp-simulator/core/scenario/scenarioGraph";
 
 import type { MessageKey } from "../../i18n";
@@ -245,13 +248,30 @@ function conditionOf(node: ScenarioNode, handle: string): LaneCondition {
 }
 
 /**
- * Extension point (schema 1.7, feat/scenario-timeout-edges): a wait's
- * `[event, timeout]` lanes. Nothing has timeout edges yet, so `null`; once
- * the core marks them, return the event edge and the timeout edge here and
- * the node becomes a "timeout" fork.
+ * A trigger wait with a live timeout edge (schema 1.8) is a "timeout" fork:
+ * the event lane (the wait's first ordinary edge) and the timeout lane (its
+ * first timeout edge, taken only when `data.timeout` seconds pass). `null`
+ * when the wait has no timeout that can expire, no timeout edge to an
+ * existing node, or no event edge: its timeout edges are `timeoutDead`
+ * links (the executor never takes them, or the wait has no other way on).
  */
-function timeoutLanes(_program: Program, _node: ScenarioNode): null {
-  return null;
+function timeoutLanes(program: Program, node: ScenarioNode): NodeOut | null {
+  const seconds = waitTimeoutSeconds(node);
+  if (seconds === null || seconds <= 0) return null;
+  const timeout = timeoutStep(program, node);
+  if (!timeout) return null;
+  const event = nextStep(program, node, null);
+  if (event.kind !== "edge") return null;
+  return {
+    lanes: [
+      { edge: event.edge, condition: { kind: "event" } },
+      { edge: timeout.edge, condition: { kind: "timeout", seconds } },
+      ...(program.outgoing.get(node.id) ?? [])
+        .filter((e) => e !== event.edge)
+        .map((edge) => ({ edge, condition: { kind: "ignored" } as const })),
+    ],
+    forkKind: "timeout",
+  };
 }
 
 function structuralOut(program: Program, node: ScenarioNode): NodeOut {
@@ -303,9 +323,9 @@ function structuralOut(program: Program, node: ScenarioNode): NodeOut {
   }
   // `next` (and unknown types): the first edge to an existing node runs; the
   // others never do but stay lanes so no edge disappears.
-  // TODO(timeout lanes, schema 1.7): leave a wait's `kind: "timeout"` edges
-  // out of this chain (and out of `nextStep` here): they are the timeout
-  // fork's own lanes (`timeoutLanes` above), never an "extra" fork's.
+  // A wait's `kind: "timeout"` edges are not in `program.outgoing`: they are
+  // the timeout fork's own lanes (`timeoutLanes` above) or `timeoutDead`
+  // links, never an "extra" fork's.
   // TODO(parallel): a parallel node's lanes are matched above; none of its
   // edges may reach this branch.
   // TODO(bounded loops, schema 1.7): on a latch with a `kind: "loop"` edge
@@ -566,6 +586,14 @@ export function recognizeBlockTree(def: Def): BlockTree {
   const laneOf = new Map<Edge, LaneCondition>();
   for (const out of outs.values()) {
     for (const lane of out.lanes) laneOf.set(lane.edge, lane.condition);
+  }
+  // Timeout edges the executor never takes (no timeout to expire, not the
+  // wait's first, no event edge, or out of a node that does not wait).
+  for (const edges of program.timeoutEdges.values()) {
+    for (const edge of edges) {
+      if (laneOf.has(edge) || links.some((l) => l.edge === edge)) continue;
+      links.push({ edge, role: "timeoutDead" });
+    }
   }
 
   type Entry = { edge: Edge } | { node: string };
@@ -898,6 +926,8 @@ export interface StructuralEdge {
   /** The handle the node picks for it; null for a chain edge (the first
    *  edge to an existing node). */
   handle: string | null;
+  /** `"timeout"`: the edge the wait's timeout outcome takes. */
+  kind?: "timeout";
 }
 
 /**
@@ -915,9 +945,16 @@ export function assertFirstEdgeWins(
   for (const s of structural) {
     const node = program.nodesById.get(s.source);
     if (!node || node === program.origin) continue;
-    // TODO(timeout lanes / parallel): a chain edge must be the first edge
-    // with the wait's timeout edges left out, and a timeout lane the edge the
-    // timeout outcome takes; a parallel node's lanes all run (no check).
+    // A timeout lane must be the edge the timeout outcome takes; a chain
+    // edge is checked with the wait's timeout edges left out (they are not
+    // in `edgesFrom`). TODO(parallel): a parallel node's lanes all run (no
+    // check).
+    if (s.kind === "timeout") {
+      if (timeoutStep(program, node)?.edge.id === s.edgeId) continue;
+      throw new Error(
+        `first edge wins: ${s.source} (timeout) does not take ${s.edgeId}`,
+      );
+    }
     const step = nextStep(program, node, s.handle);
     if (step.kind === "edge" && step.edge.id === s.edgeId) continue;
     throw new Error(
@@ -941,6 +978,7 @@ function requiredEdges(
     handle: string | null | undefined;
     preferId: string | null;
     live: boolean;
+    kind?: "timeout";
   }
   const need = (p: Pending, target: string, fallbackId: string | null) =>
     reqs.push({
@@ -949,6 +987,7 @@ function requiredEdges(
       handle: p.handle,
       preferId: p.preferId ?? fallbackId,
       live: p.live,
+      ...(p.kind ? { kind: p.kind } : {}),
     });
   const emitSeq = (seq: Seq, entry: Pending | null): void => {
     let pending: Pending | null = entry;
@@ -976,6 +1015,9 @@ function requiredEdges(
           handle: lane.handle,
           preferId: lane.edgeId,
           live: block.node.id !== origin?.id && isLive(lane.condition),
+          ...(lane.condition.kind === "timeout"
+            ? { kind: "timeout" as const }
+            : {}),
         });
       }
       pending = null;
@@ -1096,12 +1138,25 @@ export function rebuildFromTree<D extends Def>(def: D, tree: BlockTree): D {
   };
   const handleFits = (req: Req, e: Edge) =>
     req.handle === undefined || handleOf(e) === req.handle;
-  pass((req, e) => e.id === req.preferId && e.source === req.source);
+  // A timeout lane reuses only a timeout edge, every other lane only an
+  // ordinary one.
+  const kindFits = (req: Req, e: Edge) =>
+    (req.kind === "timeout") === isTimeoutEdge(e);
   pass(
     (req, e) =>
-      e.source === req.source && e.target === req.target && handleFits(req, e),
+      e.id === req.preferId && e.source === req.source && kindFits(req, e),
   );
-  pass((req, e) => e.source === req.source && handleFits(req, e));
+  pass(
+    (req, e) =>
+      e.source === req.source &&
+      e.target === req.target &&
+      handleFits(req, e) &&
+      kindFits(req, e),
+  );
+  pass(
+    (req, e) =>
+      e.source === req.source && handleFits(req, e) && kindFits(req, e),
+  );
 
   const outIds = new Set<string>();
   reqs.forEach((req, r) => {
@@ -1178,15 +1233,13 @@ export function rebuildFromTree<D extends Def>(def: D, tree: BlockTree): D {
     const node = inTree.get(req.source);
     // A switch / choice runs an edge through its handle, chain or lane: check
     // the edge it takes for that handle. Any other node: its first edge.
-    // TODO(timeout lanes): a wait's timeout edge is not its chain edge; check
-    // the event lane with the timeout edges left out, the timeout lane on its
-    // own (nextStep with the timeout outcome).
     const select =
       node !== undefined && connectionRule(node.type).out === "select";
     structural.push({
       edgeId: edge.id,
       source: req.source,
       handle: select ? handleOf(edge) : null,
+      ...(req.kind ? { kind: req.kind } : {}),
     });
   });
   assertFirstEdgeWins(result, structural);

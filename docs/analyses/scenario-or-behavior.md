@@ -6,6 +6,8 @@ sources:
   - packages/contracts/src/behavior.ts
   - packages/core/src/cp/application/engine/behaviors/
   - packages/core/src/test/behavior/precedence.bun.test.ts
+  - packages/core/src/test/behavior/recordBehavior.ts
+  - scripts/record-behavior.ts
   - examples/behaviors/
   - "issue #566"
 related:
@@ -14,7 +16,7 @@ related:
   - ../concepts/scenario-format.md
   - ../entities/default-behaviors.md
   - ../entities/cli.md
-updated: 2026-11-08
+updated: 2026-11-09
 ---
 
 # Scenario or behavior?
@@ -191,6 +193,55 @@ already serving), then add a `useBehavior` node with its id. While the run is al
 
 `runBehavior()` drives it on a virtual clock against an in-memory fake CSMS and a state that cannot be stored fails
 the test (`packages/core/src/test/behavior/runBehavior.ts`, [testing strategy](testing-strategy.md#behavior-tests)).
+
+### Record a run as a scenario
+
+To see what a behavior does as data (to read it, to edit it, to give a CSMS team a file), run it on the virtual
+clock and keep the trace (#654, step 2). This is **not** a conversion of the behavior to JSON: a recording is what
+_one_ run did, so a branch the run did not take, a draw of another seed and a decision on connector state are not in
+it. Converting behaviors was rejected on #654; a recording never replaces `useBehavior`.
+
+```sh
+bun scripts/record-behavior.ts default.firmware --action UpdateFirmware \
+  --payload '{"location":"http://fw.example/f.bin","retrieveDate":"2020-01-01T00:00:00Z"}' \
+  --params '{"stepMs":5000,"failAt":"InstallationFailed"}' --seed demo \
+  --out recorded.json --diagram recorded.mmd
+```
+
+`<behavior>` is a built-in `default.*` id or the path of a behavior module. The run uses a real station, the seeded
+streams and the fake CSMS of the behavior tests (`recordBehavior()` in
+`packages/core/src/test/behavior/recordBehavior.ts`), so it takes no real time and the same seed records the same
+file. What the station put on the wire after the CALL, and when, becomes nodes:
+
+| Effect of the run                                           | Node                                                                                                  |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| the CSMS CALL that triggers the behavior                    | `csmsCallTrigger`, `behavior: "replace"`                                                              |
+| the station's answer                                        | `callResponse` `accepted` / `rejected` when it is the canned answer, else `result` / `error` / `none` |
+| time between two effects (`ctx.sleep`, seeded jitter drawn) | `delay`, in seconds, at the resolution of the clock step (250 ms by default)                          |
+| Firmware / SignedFirmware / Log / Diagnostics status        | `notify`; a `requestId` equal to the CALL's becomes `{ "$from": "call.payload.requestId" }`           |
+| any other station-initiated CALL                            | `ocppCall`                                                                                            |
+
+`Heartbeat` is station upkeep and is left out. A CALL sent before the answer settled cannot be expressed (the
+scenario holds the CALL until `callResponse`) and is reported on stderr as `not recorded`, never invented.
+
+The output carries `recordedFrom: { behaviorId, commit, seed, version }` (schema 1.6, informational: the runtime
+ignores it), so a recording is never mistaken for the default it came from. The diagram is Mermaid source, for
+example the recording above (OCPP 1.6 §4.5 UpdateFirmware, §6.19 FirmwareStatusNotification):
+
+```mermaid
+sequenceDiagram
+  participant CSMS
+  participant CP as Charge point
+  CSMS->>CP: UpdateFirmware
+  CP->>CSMS: UpdateFirmware.conf {}
+  CP->>CSMS: FirmwareStatusNotification Downloading
+  Note over CP: 5 s
+  CP->>CSMS: FirmwareStatusNotification Downloaded
+  Note over CP: 5 s
+  CP->>CSMS: FirmwareStatusNotification Installing
+  Note over CP: 5 s
+  CP->>CSMS: FirmwareStatusNotification InstallationFailed
+```
 
 ## Node ↔ ctx parity
 

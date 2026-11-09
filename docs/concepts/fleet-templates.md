@@ -6,6 +6,8 @@ sources:
   - packages/contracts/src/methods.ts (fleetTemplateSchema, fleetCreateParamsSchema)
   - apps/cli/src/server/socketServer.ts (planFleet, createFleet)
   - apps/cli/src/server/fleetTemplateFiles.ts
+  - apps/web/src/console/pages/FleetTemplatesPage.tsx
+  - apps/web/src/console/pages/FleetTemplatesPage.dom.test.tsx
   - packages/core/src/cp/infrastructure/persistence/FleetTemplateRepository.ts
   - apps/cli/src/server/__tests__/fleetTemplates.bun.test.ts
   - docs/examples/fleet-templates/operations-lab.json
@@ -18,8 +20,9 @@ related:
   - ../entities/scenario-templates.md
   - ../entities/daemon.md
   - ../entities/mcp-endpoint.md
+  - ../entities/web-console.md
   - ../analyses/fleet-load-and-observability-roadmap.md
-updated: 2026-11-08
+updated: 2026-11-09
 ---
 
 # Fleet templates
@@ -104,7 +107,33 @@ still satisfy the [label limits](control-plane.md#charge-point-labels).
 
 MCP tools: `fleet_template_list`, `fleet_template_get`, `fleet_template_save`,
 `fleet_template_delete`, `fleet_create` ([MCP endpoint](../entities/mcp-endpoint.md)).
-The web console has no fleet-template screen yet; it is split out of #445.
+The web console has a screen for them, **Fleet templates** (`/fleets`, remote mode; see
+[below](#web-console)).
+
+## Web console
+
+The **Fleet templates** page (`/fleets`, sidebar entry between Run History and Message Log;
+`apps/web/src/console/pages/FleetTemplatesPage.tsx`, #445) is a client of the five methods above:
+
+- **List.** One row per template (file and stored ones alike): name, id, group and charge point counts
+  (`fleet.template.list`).
+- **View.** Expands a template (`fleet.template.get`) into its groups and member lines: target (`cpId`, or
+  `idPattern × count`), blueprint id, scenario template id, and which of EV settings, network simulation
+  and field overrides the line sets, with its labels. Blueprints and scenarios are shown by id only.
+- **New / Edit.** A JSON editor holding exactly what a `--fleet-template` file holds. The text is checked
+  with `fleetTemplateSchema` before anything is sent; what the daemon still refuses (the id of a file
+  template, which cannot be replaced) is shown under the editor and nothing is closed. Saving under an
+  existing stored id replaces it (`fleet.template.save`).
+- **Delete.** Asks inline first (`fleet.template.delete`); a file template answers the daemon's refusal.
+- **Create fleet.** A dialog with the optional `wsUrl`, `idPrefix` and `autoConnect` of `fleet.create`.
+  Partial success is the result: the dialog lists the created ids, then each failed charge point with its
+  reason, in the template's order. A call that fails as a whole (`not_found`, `invalid_params`, `timeout`)
+  is shown as an error and the dialog stays open; after a `timeout`, check `cp.list` before retrying (see
+  [Instantiation](#instantiation)).
+
+In Local mode the page only says that templates need a daemon; `LocalChargePointService` refuses the
+five calls with `UnsupportedFeatureError` (`browser_fleet_templates_unsupported`). The strings are in
+the `fleets` namespace of all four locales ([web console i18n](web-console-i18n.md)).
 
 ## Instantiation
 

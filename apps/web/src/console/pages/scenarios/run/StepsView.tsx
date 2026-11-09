@@ -31,6 +31,8 @@ import {
 } from "../../../lib/useLaneDrag";
 import type { ScenarioRunState } from "../../../lib/useScenarioRun";
 import { useStepEditing } from "../edit/stepEditing";
+import IssueBadge from "../edit/IssueBadge";
+import { useStepIssues } from "../edit/issueMarkUi";
 import StepTile from "./StepTile";
 import {
   CURRENT_RING,
@@ -64,6 +66,8 @@ interface StepBoxProps {
   onSelect?: (nodeId: string) => void;
   /** The editor: an accessible name per box, the grab handle and keys. */
   editing?: StepBoxEditing;
+  /** The step's diagnostics (`useStepIssues`). */
+  marked?: ReturnType<ReturnType<typeof useStepIssues>>;
 }
 
 const StepBox: React.FC<StepBoxProps> = ({
@@ -75,6 +79,7 @@ const StepBox: React.FC<StepBoxProps> = ({
   selected,
   onSelect,
   editing,
+  marked,
 }) => {
   const { t } = useTranslation();
   const live = state !== undefined && isLiveRunState(state) ? state : null;
@@ -108,6 +113,7 @@ const StepBox: React.FC<StepBoxProps> = ({
           />
         )
       )}
+      {marked?.description}
     </>
   );
   const className = cn(
@@ -116,6 +122,8 @@ const StepBox: React.FC<StepBoxProps> = ({
     phase === "todo" && "opacity-55",
     phase === "current" && live && CURRENT_RING[live],
     failed && "ring-2 ring-cx-rose",
+    marked?.style?.inset,
+    marked?.highlighted && marked.style?.glow,
     selected && "outline outline-2 outline-cx-accent",
   );
   const dragOffset = editing?.dragOffset ?? null;
@@ -125,7 +133,7 @@ const StepBox: React.FC<StepBoxProps> = ({
       data-step-id={step.id}
       data-phase={failed ? "failed" : phase}
       className={cn(
-        editing && "relative",
+        (editing || marked?.mark) && "relative",
         dragOffset !== null &&
           "z-20 rounded-[10px] shadow-[0_8px_24px_rgba(20,20,30,0.18)]",
       )}
@@ -159,6 +167,12 @@ const StepBox: React.FC<StepBoxProps> = ({
           <GripVertical className="h-3.5 w-3.5" />
         </button>
       )}
+      {marked?.mark && (
+        <IssueBadge
+          mark={marked.mark}
+          className="absolute -top-2.5 right-8 z-10"
+        />
+      )}
       {onSelect ? (
         <button
           type="button"
@@ -175,11 +189,14 @@ const StepBox: React.FC<StepBoxProps> = ({
           onClick={() => onSelect(step.id)}
           onKeyDown={editing?.onKeyDown}
           className={className}
+          {...marked?.cardProps}
         >
           {body}
         </button>
       ) : (
-        <div className={className}>{body}</div>
+        <div className={className} {...marked?.cardProps}>
+          {body}
+        </div>
       )}
     </li>
   );
@@ -337,9 +354,11 @@ const StepsView: React.FC<StepRunViewProps> = (props) => {
     editable = false,
     onInsertStep,
     onAddBranch,
+    issues,
   } = props;
 
   const { t } = useTranslation();
+  const stepIssues = useStepIssues(issues);
   const editing = useStepEditing(props, measureBoxes);
   const { drag } = editing;
 
@@ -388,6 +407,7 @@ const StepsView: React.FC<StepRunViewProps> = (props) => {
         state={state}
         selected={selectedStepId === step.id}
         onSelect={onSelectStep}
+        marked={stepIssues(step.id)}
         editing={
           editable
             ? {

@@ -174,5 +174,13 @@
   "scenarios.templateBrowser.nothingToPreview": "没有可预览的模板。",
   "scenarios.editor.issue.noCallHeld": "步骤 {{n}}({{title}})需要本分支接管的 CSMS 调用(同一分支中更早的 behavior 为“replace”的 CSMS Call Trigger),但有路径上没有:运行会在此失败。",
   "scenarios.editor.issue.callAlreadyAnswered": "步骤 {{n}}({{title}})在某条路径上应答了本分支已应答过的 CSMS 调用:运行会在此失败。",
-  "scenarios.editor.issue.callLeftOpen": "步骤 {{n}}({{title}})接管的 CSMS 调用可能在本分支中一直未应答;站点只会在运行结束时以 InternalError 应答。请添加 Call Response(有意保持沉默时使用 kind“none”)。"
+  "scenarios.editor.issue.callLeftOpen": "步骤 {{n}}({{title}})接管的 CSMS 调用可能在本分支中一直未应答;站点只会在运行结束时以 InternalError 应答。请添加 Call Response(有意保持沉默时使用 kind“none”)。",
+  "scenarios.editor.issueShowStep": "选中并显示此步骤",
+  "scenarios.editor.severity.error": "错误",
+  "scenarios.editor.severity.warning": "警告",
+  "scenarios.editor.severity.info": "提示",
+  "scenarios.editor.marks.error_other": "{{count}} 个错误",
+  "scenarios.editor.marks.warning_other": "{{count}} 个警告",
+  "scenarios.editor.marks.info_other": "{{count}} 个提示",
+  "scenarios.editor.marks.onEdge": "此步骤引出的边:{{message}}"
 }

@@ -1394,7 +1394,7 @@ export class ChargePoint {
    */
   private wireSecurityConfiguration(): void {
     // §7.2: with profile 1 or 2 the key is the Basic Auth password; one the
-    // transport cannot derive it from (an empty or non-hex value) would stop
+    // transport cannot derive it from (an empty value or one of another length) would stop
     // every later connection attempt, so it is refused and the old key kept.
     this._configuration.setChangeGuard("AuthorizationKey", (_current, next) => {
       const profile = this._configuration.getInteger("SecurityProfile") ?? 0;
@@ -1405,7 +1405,7 @@ export class ChargePoint {
         return true;
       }
       this._logger.warn(
-        `ChangeConfiguration AuthorizationKey refused: security profile ${profile} needs a key of 16-20 bytes (32-40 hex digits), whitepaper §7.2`,
+        `ChangeConfiguration AuthorizationKey refused: security profile ${profile} needs a key of 16-20 bytes (32-40 hex digits, or 16-20 plain characters), whitepaper §7.2`,
         LogType.CONFIGURATION,
       );
       return false;

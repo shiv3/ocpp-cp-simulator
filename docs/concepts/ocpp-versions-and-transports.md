@@ -704,18 +704,22 @@ MeterValues.req carrying a `transactionId`:
   read at each failure, and a resend that finds the attempts limit lowered is
   discarded.
 - **A StartTransaction.req whose transaction no longer runs** is discarded
-  instead of resent, as on OCPP-J (#527): a conf the station would ignore
-  would leave a transaction open on the Central System. A discarded
+  instead of resent (SOAP-only behaviour; OCPP-J resends it and sends the
+  Stop behind it, #565): a conf the station would ignore would leave a
+  transaction open on the Central System. A discarded
   StartTransaction.req leaves the `0` placeholder and a connector still in
-  `Preparing` goes to `Charging`, as on OCPP-J. SOAP does not send `-1` yet:
-  #727 covers OCPP-J.
+  `Preparing` goes to `Charging`. SOAP does not send `-1` yet: #727 covers
+  OCPP-J.
 - **Stop and dispose** (`onWebSocketClosed`) cancel every waiting resend, each
   with a `warn` and a `transactionMessageDiscarded`: SOAP has no offline queue
   to salvage it to. A failure whose Heartbeat probe is still in flight at that
   moment schedules nothing.
 
-The known limitations of the OCPP-J section apply here too (a waiting resend
-does not hold back the next message; a crash loses the resend).
+Two limits are SOAP-only (#839): a waiting resend does **not** hold back the
+next transaction message (OCPP-J does since #565, §3.7 chronological order),
+and a crash loses the resend. The boot gate's triggered-message exception
+(#725, below) is OCPP-J only: SOAP has no `runTriggered`, so a message
+triggered while a 1.6S boot is `Pending` is dropped.
 
 ## OCPP-J 1.6 boot gate (§4.2)
 

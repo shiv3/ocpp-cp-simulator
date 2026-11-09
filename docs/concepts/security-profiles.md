@@ -222,9 +222,11 @@ password, after `Rejected`/`NotSupported` it keeps it).
   `--basic-auth-*` credentials of profile 0 are not replaced by it. The station
   does not reconnect by itself; the CSMS, which no longer accepts the old
   password, closes the link.
-  - While the profile is 1 or 2 a value that is not 16 to 20 bytes written as
-    32 to 40 hex digits (whitepaper §7.2: at least 16 bytes, at most 40 hex
-    digits) is `Rejected` and the old key is kept: the transport cannot derive
+  - While the profile is 1 or 2 a value that is neither 16 to 20 bytes
+    written as 32 to 40 hex digits nor a plain key of 16 to 20 printable
+    characters (whitepaper §7.2: at least 16 bytes, at most 40 hex digits;
+    the connection code takes both shapes, #839) is `Rejected` and the old
+    key is kept: the transport cannot derive
     the password from it, and every later connection attempt would fail. The
     reconnect loop also survives a key that became unusable some other way: the
     attempt is logged as an error and retried with backoff.
@@ -393,7 +395,12 @@ on 1.6, unlike 2.x). The station treats them as follows (#734):
   boot answered to a `TriggerMessage` are not startups and send none.
 - Both automatic events keep the `SecurityProfile >= 1` gate: a profile-0
   station sends neither. This is a decision, not a requirement of the
-  whitepaper; the gate predates #734 and was kept.
+  whitepaper; the gate predates #734 and was kept. The other critical events
+  have no such gate: `FirmwareUpdated` (#776) and
+  `InvalidChargePointCertificate` (#769) are sent at profile 0 too (#839).
+- Known gap (A01.FR.11, #839): a change of `AuthorizationKey` is not recorded
+  in the Security log (`ReconfigurationOfSecurityParameters`, without the key
+  per A01.FR.12).
 
 ### OCPP 2.0.1 and 2.1 behaviour
 

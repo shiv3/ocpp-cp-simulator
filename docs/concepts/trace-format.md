@@ -3,17 +3,18 @@ title: OCPP trace format (v1.1)
 type: concept
 summary: Implementation-independent JSON/JSONL record for one OCPP message exchange — the contract between traffic producers (this simulator, via `--trace-output` or the log adapter) and analyzers (OCPP DebugKit).
 sources:
-  - packages/trace/src/OcppTraceRecord.ts
   - packages/trace/src/logEntryToTrace.ts
   - apps/cli/src/trace/TraceWriter.ts
+  - package.json (@open-ocpp-trace/core, @open-ocpp-trace/jsonl)
   - "issue #188"
+  - "issue #886"
 related:
   - ../entities/analyze.md
   - ../entities/ocpp-debugkit.md
   - log-format.md
   - scenario-format.md
   - ../entities/cli.md
-updated: 2026-11-08
+updated: 2026-11-09
 ---
 
 # OCPP Trace Format (v1.1)
@@ -38,6 +39,32 @@ integration that was originally deferred).
   is a documented follow-up (the format already carries a `transport` field).
 - The format is usable without this simulator or DebugKit; it is a plain JSON
   object per exchange (JSONL for a stream).
+
+## Reference implementation
+
+This page is the format's prose specification. The reference
+implementation of its record model, JSONL reader and JSONL writer is the
+[Open OCPP Trace SDK](https://github.com/open-ocpp-trace/sdk), whose README
+links back here as the normative description of v1.1. Since
+[#886](https://github.com/shiv3/ocpp-cp-simulator/issues/886) the simulator
+uses it instead of its own copy:
+
+- `@open-ocpp-trace/core` — the `TraceRecord` model (a union discriminated
+  by `messageType`) and `SCHEMA_VERSION` (`"1.1"`), which every record the
+  simulator produces carries;
+- `@open-ocpp-trace/jsonl` — `serializeRecord` (writer) and `readRecords`
+  (reader).
+
+Both are pinned to exact versions (`0.1.0`) in the root `devDependencies`
+and installed from GitHub Packages, which asks for a token even for a public
+package (`bunfig.toml`; see [CONTRIBUTING.md](../../CONTRIBUTING.md)).
+The CLI bundle and the web console inline them, so the published
+`ocpp-cp-simulator` package does not depend on them.
+
+What stays in this repository is simulator-specific: the log adapter
+(`logEntryToTrace`, `TraceCorrelator`, [below](#producing-records)), the
+`--trace-output` writer, and `analyze`'s per charge point / per connector
+split and DebugKit glue ([analyze](../entities/analyze.md)).
 
 ## Versioning
 
@@ -120,9 +147,19 @@ When an OCPP 1.6J charge point finds an inbound CALL's payload schema-invalid (`
 `logLinesToTrace` drops non-wire log lines, emits the verbatim frame text in
 the `raw` field, and back-fills each CALLRESULT/CALLERROR `action` from the
 CALL that established its `messageId`. `logLineToTraceRecord` converts a single
-line (returning `null` for non-wire lines). The type lives in
-`packages/trace/src/OcppTraceRecord.ts` and `OCPP_TRACE_SCHEMA_VERSION` is the current
-version string.
+line (returning `null` for non-wire lines). The record type is the SDK's
+`TraceRecord` and the version string is its `SCHEMA_VERSION`
+([Reference implementation](#reference-implementation)); the in-repo
+`OcppTraceRecord.ts` and `OCPP_TRACE_SCHEMA_VERSION` are gone (#886).
+
+The `--trace-output` writer, `analyze --from-daemon` and the web console's
+Session analysis panel write each record with the SDK's `serializeRecord`,
+one LF-terminated JSON line per record. It checks the record envelope only,
+never `payload` or `raw`, so deliberately invalid OCPP is still traced as
+sent: malformed OCPP-J frames from fault injection (#393) keep a
+byte-identical `raw`, and an inbound CALL whose payload breaks the schema
+keeps its `meta.validation` (#593). The `--trace-output` writer warns about
+a record the SDK rejects and skips it, as it does on an I/O failure.
 
 ## JSON Schema
 

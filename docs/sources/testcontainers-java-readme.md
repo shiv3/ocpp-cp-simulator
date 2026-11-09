@@ -11,7 +11,7 @@ related:
   - ../entities/docker-image.md
   - ../concepts/scenario-format.md
   - ../analyses/testing-strategy.md
-updated: 2026-11-05
+updated: 2026-11-09
 ---
 
 # Source: `examples/testcontainers-java/README.md`
@@ -37,7 +37,9 @@ flow, point `wsUrl` at the CSMS-under-test and `run_scenario_template` a
 `TC_xxx` template.
 
 **Run.** JDK 17+, Maven 3.9+, a Docker daemon, and the image
-(`docker build -t ocpp-cp-simulator:local .` or
+(`docker build --secret id=github_token,env=GITHUB_TOKEN -t ocpp-cp-simulator:local .`,
+which needs a `read:packages` token since #886, see
+[Docker image → Building locally](../entities/docker-image.md#building-locally), or
 `OCPP_SIM_IMAGE=ghcr.io/shiv3/ocpp-cp-simulator:latest`); then `mvn verify`
 from `examples/testcontainers-java/`.
 

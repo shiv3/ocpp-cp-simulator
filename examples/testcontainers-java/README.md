@@ -35,8 +35,10 @@ deterministically satisfied. To exercise a real certification flow, point
 - The simulator image available locally:
 
   ```bash
-  # from the repository root
-  docker build -t ocpp-cp-simulator:local .
+  # from the repository root; the build needs a token with read:packages
+  # (docs/entities/docker-image.md#building-locally)
+  export GITHUB_TOKEN=$(gh auth token)
+  docker build --secret id=github_token,env=GITHUB_TOKEN -t ocpp-cp-simulator:local .
   ```
 
 ## Run

@@ -1,5 +1,9 @@
 # Contributing
 
+## Setup
+
+Installing from source needs a GitHub token with `read:packages`: the [Open OCPP Trace SDK](docs/concepts/trace-format.md#reference-implementation) (`@open-ocpp-trace/*`) comes from GitHub Packages, which asks for one even for a public package (`bunfig.toml`, #886). With the GitHub CLI: `GITHUB_TOKEN=$(gh auth token) bun install`. CI passes the workflow's own token; building the Docker image from source needs the same token as a build secret ([Docker image → Building locally](docs/entities/docker-image.md#building-locally)). Installing the released CLI (tarball or npm) needs none.
+
 ## Checks
 
 Before pushing, run the checks CI runs: `bun run lint`, `bun run check:boundaries`, `bun run format:check`, `bun run typecheck` and `bun run test` ([Testing strategy](docs/analyses/testing-strategy.md)). Type errors fail the build.

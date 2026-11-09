@@ -158,6 +158,26 @@ describe("lane edits keep what the file said about an edge", () => {
     expect(out.edges.filter((e) => e.source === "start")).toHaveLength(1);
     expect(pair(out, "start", "plug")).toMatchObject({ id: "d1", type: "a" });
   });
+
+  it("keeps the content of an edge whose id another pair already uses", () => {
+    const base = forkScenario();
+    const def: ScenarioDefinition = {
+      ...base,
+      nodes: base.nodes.filter((n) => ["start", "plug", "end"].includes(n.id)),
+      edges: [
+        { id: "e", source: "start", target: "plug", type: "x" },
+        { id: "e", source: "plug", target: "end", type: "y" },
+      ],
+    };
+    const plug = def.nodes.find((n) => n.id === "plug")!;
+    const out = rebuildLinearScenario(def, [plug]);
+    const first = pair(out, "start", "plug")!;
+    const second = pair(out, "plug", "end")!;
+    expect(first).toMatchObject({ id: "e", type: "x" });
+    expect(second.type).toBe("y");
+    expect(second.id).not.toBe("e");
+    expect(new Set(out.edges.map((e) => e.id)).size).toBe(out.edges.length);
+  });
 });
 
 describe("nodes keep unknown fields through a rebuild", () => {

@@ -230,14 +230,18 @@ function edgeReuser(edges: readonly Edge[]) {
     id?: string,
   ): Edge => {
     const existing = pool.get(`${source}\u0000${target}`)?.shift();
-    if (existing && !usedIds.has(existing.id)) {
-      usedIds.add(existing.id);
+    if (existing) {
+      // Two edges of different pairs may share an id: keep the content of the
+      // later one and give it a fresh id instead of dropping its fields.
+      const reused = usedIds.has(existing.id)
+        ? { ...existing, id: crypto.randomUUID() }
+        : existing;
+      usedIds.add(reused.id);
       // The rebuild decides which lane a switch / choice edge runs: its
       // handle wins over the one the reused edge had.
-      return sourceHandle !== undefined &&
-        existing.sourceHandle !== sourceHandle
-        ? { ...existing, sourceHandle }
-        : existing;
+      return sourceHandle !== undefined && reused.sourceHandle !== sourceHandle
+        ? { ...reused, sourceHandle }
+        : reused;
     }
     const fresh =
       id !== undefined && !usedIds.has(id) ? id : crypto.randomUUID();

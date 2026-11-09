@@ -20,6 +20,7 @@ related:
   - ../entities/csms-peers.md
   - ../concepts/charger-engine.md
   - charger-engine-migration.md
+  - ../entities/docker-image.md
 updated: 2026-11-08
 ---
 
@@ -74,7 +75,10 @@ pull request cancels the run for the previous push.
 
 `test`, `test:bun`, `test:coverage:bun` and the shard script run `bun test
 --isolate`, so each file gets a fresh global and module registry and cannot
-inherit what an earlier file left behind (#803). Without it, on Bun 1.4.x,
+inherit the in-process state an earlier file left behind (#803). The isolation
+stops there: files share one process, so files on disk, bound ports, child
+processes and other external state carry over, and each test must still clean
+up what it creates. Without it, on Bun 1.4.x,
 every test ending on a rejected `expect(...).rejects` that runs after
 `goldenWire.bun.test.ts` (340 `test.concurrent` cases) in the same process
 stalls the event loop for seconds: `E11 1.6 GetConfiguration` in
@@ -86,9 +90,16 @@ mechanism inside Bun is not established: the same cases run outside
 land in different shards. `test:bun:cli` deliberately runs **without**
 `--isolate` (see below).
 
-The Bun version comes from `.tool-versions` (`bun 1.4.3`). mise reads it, and
-so does `oven-sh/setup-bun` in every workflow through `bun-version-file`, so
-local runs, CI and the release builds use the same Bun. Before #803 CI pinned
+The Bun version comes from `.tool-versions` (`bun 1.4.3`). `oven-sh/setup-bun`
+reads it in every workflow through `bun-version-file`, so CI and the release
+builds use the same Bun. Locally, `bun` is 1.4.3 only when a version manager
+that reads `.tool-versions` (mise, asdf) is active; otherwise install 1.4.3
+and check `bun --version` before comparing a local run with CI. The Docker
+image follows the same pin: the `Dockerfile` builds on
+`oven/bun:${BUN_VERSION}-alpine`, the workflows that build it pass
+`BUN_VERSION` read from `.tool-versions`, and the `ARG` default is a copy
+that `scripts/__tests__/bunVersionPin.bun.test.ts` keeps equal to it (see
+[Docker image](../entities/docker-image.md)). Before #803 CI pinned
 1.3.14 in `.bun-version`, which mise ignores, and the release workflows built
 with `latest`. 1.4.3 is pinned, not the newer 1.4.4: its WebSocket client
 breaks seven tests that pass on 1.4.3, and the files fail on their own as

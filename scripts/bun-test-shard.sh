@@ -3,8 +3,10 @@
 # `test:bun` suite. The suite is every tracked *.bun.test.ts(x) file (what
 # `bun test bun.test` matches); files are sorted and dealt round-robin, so a
 # shard is the same set on every run and a new file lands in one shard only.
-# --isolate, as in `test:bun`: each file gets a fresh global, so what one file
-# leaves behind cannot slow down or break the next (#803).
+# --isolate, as in `test:bun`: each file gets a fresh global and module
+# registry, so the in-process state one file leaves behind cannot slow down or
+# break the next (#803). Files on disk, ports and child processes are not
+# isolated; tests still clean those up.
 set -euo pipefail
 index="${1:?usage: bun-test-shard.sh INDEX COUNT [ARGS...]}"
 count="${2:?usage: bun-test-shard.sh INDEX COUNT [ARGS...]}"

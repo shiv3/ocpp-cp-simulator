@@ -7,6 +7,7 @@ sources:
   - docker-compose.yml
   - .github/workflows/docker-publish.yml
   - .github/workflows/ci.yml
+  - .tool-versions
   - docker/
   - "issue #346"
 related:
@@ -17,6 +18,7 @@ related:
   - ../concepts/log-format.md
   - ../concepts/access-control.md
   - ../sources/reverse-proxy-sso-example.md
+  - ../analyses/testing-strategy.md
 updated: 2026-11-08
 ---
 
@@ -277,13 +279,24 @@ both shapes against the built image.
 
 | Aspect            | Value                                                                                                                   |
 | ----------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| Base              | `oven/bun:1-alpine` (multi-stage build)                                                                                 |
+| Base              | `oven/bun:${BUN_VERSION}-alpine`, `BUN_VERSION` pinned to the bun of `.tool-versions` (multi-stage build)               |
 | Default user      | `bun` (non-root)                                                                                                        |
 | Exposed port      | `9700`                                                                                                                  |
 | Volumes           | `/data` (state DB)                                                                                                      |
 | Healthcheck       | `GET $HEALTH_PATH` every 30s (default `/v1/healthz`; override via build-arg + env)                                      |
 | Control plane     | Socket.IO at `/socket.io/`; REST control endpoints and the Unix-domain socket are removed                               |
 | Bundled scenarios | `/app/docs/examples/scenarios/` (point `--scenario-template-file` at one of these or mount your own under `/scenarios`) |
+
+Unless overridden, the image runs the Bun that CI tests on, not the latest
+1.x: the
+`BUN_VERSION` build arg defaults to the version on the `bun` line of
+`.tool-versions` (1.4.3), the `docker-build` job in `ci.yml` and
+`docker-publish.yml` both pass the value read from that file, and
+`scripts/__tests__/bunVersionPin.bun.test.ts` fails when the `Dockerfile`
+default drifts from it. `docker-compose.yml` passes no `BUN_VERSION`, so a
+compose build uses the pinned default. `--build-arg BUN_VERSION=<x.y.z>`
+still overrides it; Bun 1.4.4 breaks the WebSocket client (see
+[Testing strategy](../analyses/testing-strategy.md)).
 
 Unless it is running the CLI (see [Running the CLI](#running-the-cli)), the
 entrypoint starts the daemon with

@@ -130,7 +130,7 @@ default stays as before.
 
 `ChargePoint` takes an optional `{ clock, seed }`; the clock is read-only after construction. All `domain/` and
 `application/` code uses it, and so do the two JSON message handlers with the waiters and senders they own
-(`CallWaiters`, `ExpertCalls`, `RawFrameSender`): their timestamps, the 30 s CALL timeout, the
+(`CallWaiters`, `ExpertCalls`, `RawFrameSender`, the 1.6 collaborators under `transport/v16/`): their timestamps, the 30 s CALL timeout, the
 `TransactionEvent` resend and timeout timers, the 2.x `GetCompositeSchedule` anchor and the generated-at
 stamps of reports (`ChargePoint.nowDate()`), and their message and transaction ids (streams `message-id` and
 `transaction-id`). `scripts/check-direct-time.ts` (in `check:boundaries`) lists direct `Date.now`, `new Date()`,

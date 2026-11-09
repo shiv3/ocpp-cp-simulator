@@ -117,6 +117,10 @@ describe("isValidAuthorizationKey (§7.2)", () => {
     expect(isValidAuthorizationKey("ab".repeat(15))).toBe(false);
     expect(isValidAuthorizationKey("ab".repeat(21))).toBe(false);
     expect(isValidAuthorizationKey("zz".repeat(16))).toBe(false);
+    // The plain 16-20 character form the connection code also accepts (#839).
+    expect(isValidAuthorizationKey("correct-horse-1234")).toBe(true);
+    expect(isValidAuthorizationKey("short-key")).toBe(false);
+    expect(isValidAuthorizationKey("has space in key!!!")).toBe(false);
   });
 });
 

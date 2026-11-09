@@ -7,6 +7,7 @@ import ScenarioLibraryPage from "./pages/ScenarioLibraryPage";
 import ScenarioEditPage from "./pages/ScenarioEditPage";
 import ScenarioRunPage from "./pages/ScenarioRunPage";
 import ScenarioRunsPage from "./pages/scenarios/runs/ScenarioRunsPage";
+import FleetTemplatesPage from "./pages/FleetTemplatesPage";
 import LogsPage from "./pages/LogsPage";
 import SettingsPage from "./pages/SettingsPage";
 import NotFoundPage from "./pages/NotFoundPage";
@@ -25,6 +26,7 @@ export const ConsoleRoutes: React.FC = () => (
       <Route path="/scenarios/edit" element={<ScenarioEditPage />} />
       <Route path="/scenarios/run" element={<ScenarioRunPage />} />
       <Route path="/scenarios/runs" element={<ScenarioRunsPage />} />
+      <Route path="/fleets" element={<FleetTemplatesPage />} />
       <Route path="/logs" element={<LogsPage />} />
       <Route path="/settings" element={<SettingsPage />} />
       <Route path="*" element={<NotFoundPage />} />

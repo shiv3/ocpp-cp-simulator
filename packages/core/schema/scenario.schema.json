@@ -24,6 +24,29 @@
       "type": "string",
       "description": "The web console Library scenario this per-connector copy was made from (v1.4). Set when a connector is assigned a library scenario; absent on library entries and on scenarios loaded by hand."
     },
+    "recordedFrom": {
+      "type": "object",
+      "description": "Set on a scenario made by recording a behavior run (v1.6, issue #654 step 2); informational, the runtime ignores it. Marks the scenario as a recording, never the default behavior it came from.",
+      "required": ["behaviorId", "commit", "seed", "version"],
+      "properties": {
+        "behaviorId": {
+          "type": "string",
+          "description": "The behavior that ran, e.g. default.firmware."
+        },
+        "commit": {
+          "type": "string",
+          "description": "The build that ran it: git commit when known, else the version label."
+        },
+        "seed": {
+          "type": ["string", "number"],
+          "description": "The seed of the run; the same seed records the same scenario."
+        },
+        "version": {
+          "type": "string",
+          "description": "The simulator version that recorded it."
+        }
+      }
+    },
     "name": { "type": "string" },
     "description": { "type": "string" },
     "targetType": { "type": "string", "enum": ["chargePoint", "connector"] },
@@ -287,7 +310,23 @@
         "errorCode": { "type": "string" },
         "errorDescription": { "type": "string" }
       },
-      "required": ["kind"]
+      "required": ["kind"],
+      "allOf": [
+        {
+          "$comment": "#846: the executor throws on a payload (or skipValidation) next to accepted / rejected.",
+          "if": {
+            "properties": { "kind": { "enum": ["accepted", "rejected"] } }
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["payload"] },
+                { "required": ["skipValidation"] }
+              ]
+            }
+          }
+        }
+      ]
     },
     "baseNodeData": {
       "type": "object",

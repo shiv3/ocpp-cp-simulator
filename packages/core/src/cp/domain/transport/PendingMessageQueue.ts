@@ -60,9 +60,10 @@ interface PendingRow<A extends string> extends PendingMessage<A> {
  * intervals." Queue contents persist across reboots so a power outage
  * during an active transaction doesn't lose StartTransaction.req.
  *
- * On 1.6 only StartTransaction / StopTransaction / MeterValues(with
- * transactionId) belong here. Heartbeats, StatusNotifications, etc. are
- * informational and are fine to drop while offline.
+ * On 1.6 StartTransaction / StopTransaction / MeterValues(with
+ * transactionId) and a critical SecurityEventNotification (#793) belong
+ * here. Heartbeats, StatusNotifications, etc. are informational and are
+ * fine to drop while offline.
  *
  * Backed by the SQLite `pending_messages` table when a {@link Database}
  * is provided; falls back to an in-memory queue otherwise (tests / future

@@ -15,6 +15,7 @@ import templates from "./locales/en/templates.json";
 import scenarioRun from "./locales/en/scenarioRun.json";
 import cpPanels from "./locales/en/cpPanels.json";
 import scenarioNodes from "./locales/en/scenarioNodes.json";
+import fleets from "./locales/en/fleets.json";
 
 /** Namespaces, in lookup order. `common` is the default one; the others are
  * fallback namespaces so `t("scenarios.count.step")` needs no `ns:` prefix. */
@@ -31,6 +32,7 @@ export const NAMESPACES = [
   "scenarioRun",
   "cpPanels",
   "scenarioNodes",
+  "fleets",
 ] as const;
 
 export const enResources = {
@@ -46,4 +48,5 @@ export const enResources = {
   scenarioRun,
   cpPanels,
   scenarioNodes,
+  fleets,
 } as const;

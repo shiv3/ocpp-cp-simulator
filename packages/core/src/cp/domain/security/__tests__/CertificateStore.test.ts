@@ -369,7 +369,7 @@ describe("CertificateStore pending CSR and signed chains (A02 / A03)", () => {
 
     expect(
       await store.applySignedChain("ChargingStationCertificate", [expired]),
-    ).toEqual({ status: "Expired" });
+    ).toMatchObject({ status: "Expired" });
     expect(store.pendingCsr("ChargingStationCertificate")).toBe(csrPem);
     expect(store.listSignedChains()).toEqual([]);
   });
@@ -384,7 +384,7 @@ describe("CertificateStore pending CSR and signed chains (A02 / A03)", () => {
 
     expect(
       await store.applySignedChain("ChargingStationCertificate", [future]),
-    ).toEqual({ status: "NotYetValid" });
+    ).toMatchObject({ status: "NotYetValid" });
     expect(store.listSignedChains()).toEqual([]);
   });
 

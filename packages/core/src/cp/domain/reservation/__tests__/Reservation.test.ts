@@ -201,6 +201,27 @@ describe("ReservationManager expiry timer", () => {
     mgr.dispose();
   });
 
+  // #839: after a link loss `dispose()` cleared the timers; `restore` arms
+  // them again, so expiry is at the expiry time and not at the 60 s sweep.
+  it("a restored reservation expires at its expiry time", () => {
+    const onExpire = vi.fn();
+    const mgr = new ReservationManager(new Logger(), onExpire);
+    reserve(mgr, 1, "2026-07-13T00:00:07Z");
+    const saved = mgr.getAllReservations();
+    mgr.dispose();
+
+    const after = new ReservationManager(new Logger(), onExpire);
+    expect(after.restore(saved)).toHaveLength(1);
+    vi.advanceTimersByTime(6_999);
+    expect(onExpire).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(onExpire).toHaveBeenCalledExactlyOnceWith(
+      1,
+      expect.objectContaining({ reservationId: 1 }),
+    );
+    after.dispose();
+  });
+
   it("sends nothing at T when the reservation was cancelled or used before", () => {
     const onExpire = vi.fn();
     const mgr = new ReservationManager(new Logger(), onExpire);

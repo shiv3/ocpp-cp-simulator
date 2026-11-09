@@ -704,18 +704,22 @@ MeterValues.req carrying a `transactionId`:
   read at each failure, and a resend that finds the attempts limit lowered is
   discarded.
 - **A StartTransaction.req whose transaction no longer runs** is discarded
-  instead of resent, as on OCPP-J (#527): a conf the station would ignore
-  would leave a transaction open on the Central System. A discarded
+  instead of resent (SOAP-only behaviour; OCPP-J resends it and sends the
+  Stop behind it, #565): a conf the station would ignore would leave a
+  transaction open on the Central System. A discarded
   StartTransaction.req leaves the `0` placeholder and a connector still in
-  `Preparing` goes to `Charging`, as on OCPP-J. SOAP does not send `-1` yet:
-  #727 covers OCPP-J.
+  `Preparing` goes to `Charging`. SOAP does not send `-1` yet: #727 covers
+  OCPP-J.
 - **Stop and dispose** (`onWebSocketClosed`) cancel every waiting resend, each
   with a `warn` and a `transactionMessageDiscarded`: SOAP has no offline queue
   to salvage it to. A failure whose Heartbeat probe is still in flight at that
   moment schedules nothing.
 
-The known limitations of the OCPP-J section apply here too (a waiting resend
-does not hold back the next message; a crash loses the resend).
+Two limits are SOAP-only (#839): a waiting resend does **not** hold back the
+next transaction message (OCPP-J does since #565, §3.7 chronological order),
+and a crash loses the resend. The boot gate's triggered-message exception
+(#725, below) is OCPP-J only: SOAP has no `runTriggered`, so a message
+triggered while a 1.6S boot is `Pending` is dropped.
 
 ## OCPP-J 1.6 boot gate (§4.2)
 
@@ -788,9 +792,12 @@ default 1.6 transaction now sends one sample a minute (a wire change from the
 earlier "nothing unless an auto-meter is configured"); `0` sends none.
 
 - The value is read when the transaction starts, or when it is restored after
-  a daemon restart; a `ChangeConfiguration` applies to the next transaction.
-  That is the simulator's choice: the specification does not say when the
-  interval is read.
+  a daemon restart, and again when a `ChangeConfiguration` of the key arrives
+  mid-transaction (#839): the running samplers start over with the new
+  interval (a new phase), and `0` stops them. A connector removed meanwhile
+  loses its sampler. The specification does not say when the interval is
+  read; "every `MeterValueSampleInterval` seconds" is why a change applies at
+  once.
 - It does not matter what drives the register. A configured auto-meter curve
   or increment fallback only moves the register at its own interval (the
   curve's `intervalSeconds`); the sample goes out on the
@@ -803,7 +810,7 @@ earlier "nothing unless an auto-meter is configured"); `0` sends none.
   "periodic or clock-aligned MeterValues.req" included) and delivered in order
   after the reconnect.
 - A transaction whose StartTransaction.req was answered with a CALLERROR
-  (#527) is not sampled: its `0` is a placeholder the CSMS never issued. While a
+  (#527) is sampled too (errata 3.15 asks for every interval). While a
   StartTransaction.req of the transaction is still on its way a sample carries
   the placeholder `0`, which its conf replaces when the sample is sent; once
   none is (timed out, discarded, lost in a restart) it carries `-1` (#727).

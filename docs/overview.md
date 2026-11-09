@@ -138,7 +138,7 @@ Rules the check enforces:
 - Each `package.json` is private, named after its directory, and declares exactly the `workspace:*` dependencies its imports need — no more, no less. The root `package.json` must not use `workspace:` anywhere, or the published tarball would not install outside the repository.
 - `ocpp`, `contracts`, `trace`, `k6-runtime`, `core` and `client` must run in both Bun and the browser, so their non-test files may not import `react*`, `jotai`, `zustand`, `@xyflow/*`, `@radix-ui/*`, Vite-only specifiers (`?url`, `?raw`, `virtual:`), `bun:*` or Node built-ins, except for the files on the commented allow-list in the script (today only `packages/core/src/cp/infrastructure/persistence/BunSqliteDatabase.ts`, the daemon's `bun:sqlite` store). Type-only imports of such packages are erased and not flagged.
 - A file under `packages/` or `apps/` that matches no `PACKAGE_MAP` entry fails the check, so a new workspace directory has to be registered on purpose. Known exceptions go in the script's `KNOWN_VIOLATIONS` / `TEST_ALLOW_LIST`, each with a reason; a stale entry also fails.
-- Inside `packages/core/src/cp/` the layers have a direction ([#571](sources/github-issues.md)): `domain/` imports only `domain/` and `shared/`; `application/` imports `domain/`, `application/` and `shared/`, never `infrastructure/`; `infrastructure/` may import every layer; `shared/` imports only `shared/`. `domain/` and `shared/` also may not import core code outside `src/cp` or anything under `apps/`; other workspace packages stay governed by the table above. Type-only imports count, test files are not checked. The imports that break the rule today are the `LAYER_EXEMPTIONS` list in the script (7 entries: the `ChargePoint` imports of `application/` that the follow-up [#575](sources/github-issues.md) clears); a new violation fails, and so does an entry that no longer matches, so the list only shrinks. The goal of the epic ([#577](sources/github-issues.md)) is an empty list.
+- Inside `packages/core/src/cp/` the layers have a direction ([#571](sources/github-issues.md)): `domain/` imports only `domain/` and `shared/`; `application/` imports `domain/`, `application/` and `shared/`, never `infrastructure/`; `infrastructure/` may import every layer; `shared/` imports only `shared/`. `domain/` and `shared/` also may not import core code outside `src/cp` or anything under `apps/`; other workspace packages stay governed by the table above. Type-only imports count, test files are not checked. The script's `LAYER_EXEMPTIONS` list is empty since [#575](https://github.com/shiv3/ocpp-cp-simulator/issues/575) moved `ChargePoint`'s last imports of `application/` behind domain interfaces, which meets the goal of the epic [#577](https://github.com/shiv3/ocpp-cp-simulator/issues/577); the list is kept, so a new violation fails, and so would an entry that no longer matches.
 - A file under `packages/` or `apps/`, test files included, may not reach itself through static value imports, in one package or across several; there is no allow-list for this rule. `import`, a side-effect import, `export … from` (`export *` included, even of a types-only module) and `require` count; `import type`, `export type … from`, `import("x").T` and a dynamic `import()` do not ([#570](sources/github-issues.md)). The ESLint rule `@typescript-eslint/consistent-type-imports` makes an import used only as a type say so, or it would count here. `scripts/` and `e2e/` are not scanned.
 
 ### What goes where in `packages/core/src`
@@ -153,11 +153,21 @@ bullet above, not repeated here.
   needs, such as the repository interfaces and `LogSink` under
   `domain/persistence/`, the transport ports under `domain/transport/`
   (`ChargePointSocket`, `RawFrameSink`, `OcppCallActions`) and
-  `ChargePointDeps`, what a charge point is built with.
+  `ChargePointDeps`, what a charge point is built with. `domain/engine/` holds
+  the engine and behavior vocabulary (`ChargerState`, `EngineEvent`,
+  `PersistedEngineState`, the behavior rules) and the interfaces
+  `ChargePoint` sees its engine and behavior registry through
+  (`ChargePointEngine`, `ChargePointBehaviorRegistry`); `domain/services/`
+  holds the interfaces of its heartbeat, state manager and operational
+  timeline (`ChargePointHeartbeat`, `ChargePointStateManager`,
+  `ChargePointTimeline`) and the state-history types (`StateSnapshot`,
+  `StateTransition`, `ValidationResult`).
 - `cp/application/` — the use cases that drive the domain: the charger engine
-  and its behaviors, services (state history, heartbeat), the scenario engine
-  (`application/scenario/`) and run verification, and the ports they own,
-  such as `ScenarioRepository` and `ScenarioRunRepository`.
+  and its behaviors, services (state history, heartbeat, operational
+  timeline), the scenario engine (`application/scenario/`) and run
+  verification, and the ports they own, such as `ScenarioRepository` and
+  `ScenarioRunRepository`. The engine, the behavior registry and the services
+  implement the `domain/engine/` and `domain/services/` interfaces.
 - `cp/infrastructure/` — adapters to the outside: WebSocket and SOAP
   transports, the SQLite stores, schema and migrations
   (`infrastructure/persistence/`, since
@@ -170,10 +180,12 @@ bullet above, not repeated here.
   through it (only `ChargePoint.deps.test.ts` calls the
   constructor with their own deps), and it
   passes the `ChargePoint` constructor its `ChargePointDeps` — the transport
-  factory (`createDefaultTransport`), a `LogRepository` over the charge
-  point's database (a no-op one without a database), and `UploadFile` for
-  GetDiagnostics. The files that still break the direction are listed in
-  `LAYER_EXEMPTIONS`.
+  factory (`createDefaultTransport.ts`), the factories of the engine, the
+  behavior registry, the heartbeat, the state manager and the timeline, and
+  the `transactions` port bound to `default.transaction`
+  (`DEFAULT_SERVICES` in `createDefaultServices.ts`), a `LogRepository` over
+  the charge point's database (a no-op one without a database), and
+  `UploadFile` for GetDiagnostics.
 - `cp/shared/` — dependency-free utilities: clock, RNG, timers, logger,
   event emitter, reconnect policy, redaction.
 

@@ -1,4 +1,4 @@
-import type { BehaviorRegistry } from "../../../application/behavior/BehaviorRegistry";
+import type { ChargePointBehaviorRegistry } from "../../../domain/engine/behaviorRules";
 import { BehaviorRegistry as DefaultBehaviorRegistry } from "../../../application/behavior/BehaviorRegistry";
 import type { InboundCallPolicy } from "../../../domain/charge-point/ChargePoint";
 import { csmsActionAliases } from "../../../domain/types/csmsActionNames";
@@ -56,7 +56,7 @@ export interface InboundCallGatePorts {
 export interface InboundCallGateOptions {
   readonly ports: InboundCallGatePorts;
   /** Step 4. A registry that diverts nothing by default. */
-  readonly registry?: BehaviorRegistry;
+  readonly registry?: ChargePointBehaviorRegistry;
   /**
    * Checked after the CALL was announced: true leaves it unanswered and with
    * no effect (1.6 §4.2, while BootNotification is Rejected).
@@ -69,7 +69,7 @@ export interface InboundCallGateOptions {
 }
 
 export class InboundCallGate {
-  private readonly registry: BehaviorRegistry;
+  private readonly registry: ChargePointBehaviorRegistry;
   private readonly prefix: string;
   private readonly open = new Set<CallExchange>();
 

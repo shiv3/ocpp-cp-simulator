@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import React, { useState, useEffect, useCallback } from "react";
-import type { StateHistoryEntry } from "@ocpp-cp-simulator/core/cp/application/services/StateSnapshot";
+import type { StateHistoryEntry } from "@ocpp-cp-simulator/core/cp/domain/services/StateSnapshot";
 import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 
 interface StateTransitionTimelineProps {

@@ -6,6 +6,7 @@ import type {
 } from "../../domain/connector/Connector";
 import { setTimeoutAt } from "../../shared/timers";
 import type { OperationalTimeline } from "./OperationalTimeline";
+import type { ChargePointTimelineProjector } from "../../domain/services/ChargePointTimeline";
 import { realClock } from "../../shared/clock";
 import type { SimClock, TimerHandle } from "../../shared/clock";
 import { systemRngStreams } from "../../shared/rng";
@@ -50,7 +51,7 @@ interface Incident {
  * records `charging_profile_expired` when it passes. Clearing (removing its
  * connector included) or replacing the profile cancels the timer.
  */
-export class OperationalTimelineProjector {
+export class OperationalTimelineProjector implements ChargePointTimelineProjector {
   private readonly unsubscribes: Array<() => void> = [];
   private incident: Incident | null = null;
   private settleTimer: TimerHandle | null = null;

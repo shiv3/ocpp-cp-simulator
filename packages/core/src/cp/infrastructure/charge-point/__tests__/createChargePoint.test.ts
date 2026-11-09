@@ -1,4 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { BehaviorRegistry } from "../../../application/behavior/BehaviorRegistry";
+import { ChargerEngine } from "../../../application/engine/ChargerEngine";
+import { HeartbeatService } from "../../../application/services/HeartbeatService";
+import { OperationalTimeline } from "../../../application/services/OperationalTimeline";
+import { StateManager } from "../../../application/services/StateManager";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import { UploadFile } from "../../fileUpload";
 import { LogRepository } from "../../persistence/LogRepository";
@@ -46,6 +51,25 @@ describe("createChargePoint default deps (#575)", () => {
   it("uploads diagnostics with UploadFile", () => {
     const cp = build("cp-upload");
     expect(cp.fileUploader).toBe(UploadFile);
+    cp.dispose();
+  });
+});
+
+describe("createChargePoint default services (#575)", () => {
+  it("builds the application services behind the domain getters", () => {
+    const cp = createChargePoint(
+      "cp-services",
+      DefaultBootNotification,
+      1,
+      "ws://localhost:9/ocpp",
+      null,
+      null,
+    );
+    expect(cp.behaviors).toBeInstanceOf(BehaviorRegistry);
+    expect(cp.engine).toBeInstanceOf(ChargerEngine);
+    expect(cp.heartbeat).toBeInstanceOf(HeartbeatService);
+    expect(cp.stateManager).toBeInstanceOf(StateManager);
+    expect(cp.timeline).toBeInstanceOf(OperationalTimeline);
     cp.dispose();
   });
 });

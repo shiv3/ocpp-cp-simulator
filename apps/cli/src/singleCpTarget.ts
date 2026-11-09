@@ -50,7 +50,7 @@ import type { ScenarioRunResult } from "@ocpp-cp-simulator/core/cp/application/v
 import type {
   HistoryOptions,
   StateHistoryEntry,
-} from "@ocpp-cp-simulator/core/cp/application/services/StateSnapshot";
+} from "@ocpp-cp-simulator/core/cp/domain/services/StateSnapshot";
 import type {
   OCPPStatus,
   StatusNotificationOptions,

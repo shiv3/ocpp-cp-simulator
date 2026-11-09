@@ -5,8 +5,12 @@ import { StateHistory } from "./StateHistory";
 import type {
   StateTransitionResult,
   TransitionContext,
-} from "./StateTransition";
-import type { HistoryOptions, StateHistoryEntry } from "./StateSnapshot";
+} from "../../domain/services/StateTransition";
+import type {
+  HistoryOptions,
+  StateHistoryEntry,
+} from "../../domain/services/StateSnapshot";
+import type { ChargePointStateManager } from "../../domain/services/ChargePointStateManager";
 import type { ChargePointStatus } from "../../domain/types/OcppTypes";
 import { LogType } from "../../domain/types/OcppTypes";
 import { realClock } from "../../shared/clock";
@@ -27,7 +31,7 @@ interface ChargePointGetter {
  * turns those events, and the charge point's own status changes, into history
  * entries. It holds no state machine and changes no state.
  */
-export class StateManager {
+export class StateManager implements ChargePointStateManager {
   public readonly history: StateHistory;
 
   constructor(

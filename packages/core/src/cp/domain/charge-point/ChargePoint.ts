@@ -26,12 +26,8 @@ import type {
 } from "../types/DataTransfer";
 import type { LogEntry } from "../../shared/Logger";
 import { Logger, LogType } from "../../shared/Logger";
-import { HeartbeatService } from "../../application/services/HeartbeatService";
 import { MainMeter } from "./MainMeter";
 import { ClockAlignedMeterScheduler } from "./ClockAlignedMeterScheduler";
-import { StateManager } from "../../application/services/StateManager";
-import { OperationalTimeline } from "../../application/services/OperationalTimeline";
-import { OperationalTimelineProjector } from "../../application/services/OperationalTimelineProjector";
 import { Connector } from "../connector/Connector";
 import type { ConnectorWrite } from "../connector/ConnectorRecord";
 import type {
@@ -54,7 +50,11 @@ import type {
 } from "../transport/ChargePointSocket";
 import type { RawFrameSink } from "../transport/RawFrameSink";
 import type { OcppCallActions } from "../transport/OcppCallActions";
-import type { ChargePointDeps, ChargePointTransport } from "./ChargePointDeps";
+import type {
+  ChargePointDeps,
+  ChargePointTransactions,
+  ChargePointTransport,
+} from "./ChargePointDeps";
 import type { FileUploader } from "./FileUploader";
 import type {
   CloseCause,
@@ -65,12 +65,6 @@ import type { OcppSecurityProfile } from "@ocpp-cp-simulator/contracts/securityP
 import type { OcppTlsOptions } from "../transport/ConnectionSecurity";
 import { measurandEnumFor } from "../connector/measurandEnum";
 import { Outbox } from "../transport/Outbox";
-import {
-  cleanTransaction as cleanTransactionDefault,
-  startTransaction as startTransactionDefault,
-  stopTransaction as stopTransactionDefault,
-  type TransactionPorts,
-} from "../../application/engine/behaviors/transaction";
 import {
   type OcppCallOutcome,
   type OcppCallRequest,
@@ -186,11 +180,18 @@ import {
   resolveReconnectPolicy,
   type ReconnectPolicy,
 } from "../../shared/ReconnectPolicy";
-import { BehaviorRegistry } from "../../application/behavior/BehaviorRegistry";
-import {
-  ChargerEngine,
-  type LoadBehaviorOptions,
-} from "../../application/engine/ChargerEngine";
+import type { ChargePointBehaviorRegistry } from "../engine/behaviorRules";
+import type {
+  ChargePointEngine,
+  LoadBehaviorOptions,
+  TransactionPorts,
+} from "../engine/ChargePointEngine";
+import type { ChargePointHeartbeat } from "../services/ChargePointHeartbeat";
+import type { ChargePointStateManager } from "../services/ChargePointStateManager";
+import type {
+  ChargePointTimeline,
+  ChargePointTimelineProjector,
+} from "../services/ChargePointTimeline";
 import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
 
 /** RFC 6455 Normal Closure, and No Status Received (a close without a code). */
@@ -456,12 +457,11 @@ export class ChargePoint {
     return new Date(this._clock.now());
   }
   private readonly _rngSource: RngSource;
-  private readonly _behaviors = new BehaviorRegistry({
-    ocppVersion: () => this._ocppVersion,
-    warn: (message) => this._logger.warn(message, LogType.OCPP),
-  });
+  private readonly _behaviors: ChargePointBehaviorRegistry;
   /** Owner of the engine-held state and the behaviors (stage B). */
-  private readonly _engine = new ChargerEngine(this);
+  private readonly _engine: ChargePointEngine;
+  /** #575: the default transaction behavior, see `deps.transactions`. */
+  private readonly _transactions: ChargePointTransactions;
   /** #393: level C expert sends; null on SOAP. */
   private readonly _rawFrames: RawFrameSink | null;
   /** #389: null on SOAP. */
@@ -485,7 +485,7 @@ export class ChargePoint {
   private readonly _idTagPool: IdTagPool | null;
   private _bootAccepted = false;
   private readonly _outbox: Outbox;
-  private readonly _heartbeat: HeartbeatService;
+  private readonly _heartbeat: ChargePointHeartbeat;
   private readonly _clockAligned: ClockAlignedMeterScheduler;
   /** #607: the 2.x `AlignedDataCtrlr.TxEndedInterval` grid, apart from the
    *  `Interval` one: it samples the transaction-end history, sends nothing. */
@@ -525,9 +525,9 @@ export class ChargePoint {
    *  charge point). A StatusNotification still in flight when the link closed
    *  is not in it, so a resume sends that one again (B04.FR.02). */
   private _ackedStatus: Map<number, OCPPStatus> = new Map();
-  private readonly _stateManager: StateManager;
-  private readonly _timeline: OperationalTimeline;
-  private readonly _timelineProjector: OperationalTimelineProjector;
+  private readonly _stateManager: ChargePointStateManager;
+  private readonly _timeline: ChargePointTimeline;
+  private readonly _timelineProjector: ChargePointTimelineProjector;
   private readonly _logSink: LogSink;
   private readonly _fileUploader: FileUploader;
   private readonly _reservationManager: ReservationManager;
@@ -694,6 +694,14 @@ export class ChargePoint {
     deps: ChargePointDeps,
   ) {
     this._clock = simulation.clock ?? realClock;
+    // #575: before the connectors are attached and before the transport is
+    // built (the message handlers read `behaviors` when they are built).
+    this._behaviors = deps.createBehaviorRegistry({
+      ocppVersion: () => this._ocppVersion,
+      warn: (message) => this._logger.warn(message, LogType.OCPP),
+    });
+    this._engine = deps.createEngine(this);
+    this._transactions = deps.transactions;
     this._reconnectPolicy = resolveReconnectPolicy(transportOptions.reconnect);
     // Before any state is built: a refused option must not leave a half-made
     // charge point behind.
@@ -877,7 +885,7 @@ export class ChargePoint {
     }
     this._outbox = new Outbox(this._messageHandler);
 
-    this._heartbeat = new HeartbeatService(this._logger, this._clock);
+    this._heartbeat = deps.createHeartbeat(this._logger, this._clock);
     this._heartbeat.setHeartbeatCallback(() => this._outbox.sendHeartbeat());
     this._clockAligned = new ClockAlignedMeterScheduler(
       (boundary) => this.emitClockAlignedSamples(boundary),
@@ -933,23 +941,24 @@ export class ChargePoint {
       clock: this._clock,
     });
 
-    this._stateManager = new StateManager(
-      this._logger,
-      this._events,
-      () => ({ status: this._status, error: this._error }),
-      this._clock,
-      this.rng("state-history"),
-    );
+    this._stateManager = deps.createStateManager({
+      logger: this._logger,
+      events: this._events,
+      chargePoint: () => ({ status: this._status, error: this._error }),
+      clock: this._clock,
+      rng: this.rng("state-history"),
+    });
 
     // #448: subscribed before any connection or status event can fire.
-    this._timeline = new OperationalTimeline(this._id, { clock: this._clock });
-    this._timelineProjector = new OperationalTimelineProjector(
-      this._timeline,
-      this._events,
-      this._connectors,
-      this._clock,
-      this.rng("timeline"),
-    );
+    const timeline = deps.createTimeline({
+      cpId: this._id,
+      events: this._events,
+      connectors: this._connectors,
+      clock: this._clock,
+      rng: this.rng("timeline"),
+    });
+    this._timeline = timeline.timeline;
+    this._timelineProjector = timeline.projector;
 
     // ConfigurationStore is constructed last because it depends on `this`
     // (via the `defaultConfiguration(cp)` factory which reads
@@ -1043,12 +1052,12 @@ export class ChargePoint {
   }
 
   /** Rules that may take an inbound CSMS CALL over from the default path. */
-  get behaviors(): BehaviorRegistry {
+  get behaviors(): ChargePointBehaviorRegistry {
     return this._behaviors;
   }
 
   /** The charger engine: event queue, engine state and behavior runner. */
-  get engine(): ChargerEngine {
+  get engine(): ChargePointEngine {
     return this._engine;
   }
 
@@ -1767,12 +1776,12 @@ export class ChargePoint {
     return this._events;
   }
 
-  get stateManager(): StateManager {
+  get stateManager(): ChargePointStateManager {
     return this._stateManager;
   }
 
   /** #448: operational timeline of this charge point. */
-  get timeline(): OperationalTimeline {
+  get timeline(): ChargePointTimeline {
     return this._timeline;
   }
 
@@ -3776,7 +3785,8 @@ export class ChargePoint {
   }
 
   /** Start a transaction on a connector; the default lives in the engine
-   *  (`application/engine/behaviors/transaction.ts`). */
+   *  (`application/engine/behaviors/transaction.ts`), reached through
+   *  `deps.transactions` (#575). */
   startTransaction(
     tagId: string,
     connectorId: number,
@@ -3785,7 +3795,7 @@ export class ChargePoint {
     options: StartTransactionOptions = {},
   ): Promise<StartTransactionOutcome> {
     this.assertPowered();
-    return startTransactionDefault(
+    return this._transactions.start(
       this,
       this.transactionPorts,
       tagId,
@@ -3804,7 +3814,7 @@ export class ChargePoint {
     // The recovery decides how a transaction interrupted by a power loss
     // ends (`runPowerRecovery`); nothing ends it while the station is off.
     this.assertPowered();
-    stopTransactionDefault(
+    this._transactions.stop(
       this,
       this.transactionPorts,
       connectorOrId,
@@ -4086,7 +4096,7 @@ export class ChargePoint {
   }
 
   cleanTransaction(connectorOrId: Connector | number): void {
-    cleanTransactionDefault(this, connectorOrId);
+    this._transactions.clean(this, connectorOrId);
   }
 
   private readonly transactionPorts: TransactionPorts = {
@@ -4115,7 +4125,7 @@ export class ChargePoint {
     if (isHeartbeat) this._heartbeat.markHeartbeatSent();
   }
 
-  get heartbeat(): HeartbeatService {
+  get heartbeat(): ChargePointHeartbeat {
     return this._heartbeat;
   }
 

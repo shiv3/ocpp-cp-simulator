@@ -5,11 +5,14 @@ import type {
   ChargePointTransport,
   TransportContext,
 } from "../ChargePointDeps";
+import { DEFAULT_SERVICES } from "../../../infrastructure/charge-point/createDefaultServices";
 import { createDefaultTransport } from "../../../infrastructure/charge-point/createDefaultTransport";
 import { LogRepository } from "../../../infrastructure/persistence/LogRepository";
 import { UploadFile } from "../../../infrastructure/fileUpload";
 import { DefaultBootNotification } from "../../types/OcppTypes";
 import type { LogSink } from "../../persistence/LogSink";
+import { LogLevel } from "../../../shared/Logger";
+import { Outbox } from "../../transport/Outbox";
 
 /**
  * #575: the charge point builds its transport through
@@ -29,13 +32,15 @@ function build(
   const calls: { cp: ChargePoint; ctx: TransportContext }[] = [];
   let built: ChargePointTransport | undefined;
   const deps: ChargePointDeps = {
+    ...DEFAULT_SERVICES,
+    logSink: new LogRepository(null),
+    fileUploader: UploadFile,
+    ...overrides,
     createTransport: (cp, ctx) => {
       calls.push({ cp, ctx });
       built = wrap(createDefaultTransport(cp, ctx));
       return built;
     },
-    logSink: overrides.logSink ?? new LogRepository(null),
-    fileUploader: overrides.fileUploader ?? UploadFile,
   };
   const cp = new ChargePoint(
     "cp-deps",
@@ -193,6 +198,186 @@ describe("ChargePoint deps.logSink and deps.fileUploader (#575)", () => {
     const fileUploader = vi.fn();
     const { cp } = build("OCPP-1.6J", undefined, {}, { fileUploader });
     expect(cp.fileUploader).toBe(fileUploader);
+    cp.disconnect();
+  });
+});
+
+describe("ChargePoint service factories (#575)", () => {
+  type Factories = Omit<
+    ChargePointDeps,
+    "createTransport" | "logSink" | "fileUploader"
+  >;
+
+  /** The default factories wrapped so each call is recorded in `order`. */
+  function traced(order: string[]) {
+    const spies = {
+      createBehaviorRegistry: vi.fn<Factories["createBehaviorRegistry"]>(
+        (options) => {
+          order.push("registry");
+          return DEFAULT_SERVICES.createBehaviorRegistry(options);
+        },
+      ),
+      createEngine: vi.fn<Factories["createEngine"]>((cp) => {
+        order.push("engine");
+        return DEFAULT_SERVICES.createEngine(cp);
+      }),
+      createHeartbeat: vi.fn<Factories["createHeartbeat"]>((logger, clock) => {
+        order.push("heartbeat");
+        const heartbeat = DEFAULT_SERVICES.createHeartbeat(logger, clock);
+        vi.spyOn(heartbeat, "setHeartbeatCallback");
+        return heartbeat;
+      }),
+      createStateManager: vi.fn<Factories["createStateManager"]>((ctx) => {
+        order.push("stateManager");
+        return DEFAULT_SERVICES.createStateManager(ctx);
+      }),
+      createTimeline: vi.fn<Factories["createTimeline"]>((ctx) => {
+        order.push("timeline");
+        const built = DEFAULT_SERVICES.createTimeline(ctx);
+        vi.spyOn(built.projector, "dispose");
+        return built;
+      }),
+    };
+    return spies;
+  }
+
+  function buildTraced() {
+    const order: string[] = [];
+    const spies = traced(order);
+    const rng = vi.spyOn(ChargePoint.prototype, "rng");
+    const { cp } = build(
+      "OCPP-1.6J",
+      (t) => {
+        order.push("transport");
+        return t;
+      },
+      {},
+      spies,
+    );
+    const rngOf = (name: string) =>
+      rng.mock.results[rng.mock.calls.findIndex(([n]) => n === name)]?.value;
+    const streams = {
+      stateHistory: rngOf("state-history"),
+      timeline: rngOf("timeline"),
+    };
+    rng.mockRestore();
+    return { cp, order, spies, streams };
+  }
+
+  it("builds the registry, then the engine, before the transport", () => {
+    const { cp, order, spies } = buildTraced();
+    expect(order.slice(0, 3)).toEqual(["registry", "engine", "transport"]);
+    expect(spies.createBehaviorRegistry).toHaveBeenCalledTimes(1);
+    expect(spies.createEngine).toHaveBeenCalledTimes(1);
+    expect(spies.createEngine).toHaveBeenCalledWith(cp);
+    expect(cp.behaviors).toBe(
+      spies.createBehaviorRegistry.mock.results[0]!.value,
+    );
+    expect(cp.engine).toBe(spies.createEngine.mock.results[0]!.value);
+    cp.disconnect();
+  });
+
+  it("gives the registry the station's OCPP version and logger", () => {
+    const { cp, spies } = buildTraced();
+    const options = spies.createBehaviorRegistry.mock.calls[0]![0];
+    expect(options.ocppVersion?.()).toBe("OCPP-1.6J");
+    const logs: { level: LogLevel; message: string }[] = [];
+    cp.events.on("log", ({ level, message }) => logs.push({ level, message }));
+    options.warn?.("registry says");
+    expect(logs).toContainEqual({
+      level: LogLevel.WARN,
+      message: "registry says",
+    });
+    cp.disconnect();
+  });
+
+  it("builds the heartbeat after the transport and installs its callback", () => {
+    const { cp, order, spies } = buildTraced();
+    expect(order.indexOf("heartbeat")).toBeGreaterThan(
+      order.indexOf("transport"),
+    );
+    expect(spies.createHeartbeat).toHaveBeenCalledWith(cp.logger, cp.clock);
+    const heartbeat = spies.createHeartbeat.mock.results[0]!.value;
+    expect(cp.heartbeat).toBe(heartbeat);
+    expect(heartbeat.setHeartbeatCallback).toHaveBeenCalledTimes(1);
+    const callback = vi.mocked(heartbeat.setHeartbeatCallback).mock
+      .calls[0]![0];
+    const sendHeartbeat = vi
+      .spyOn(Outbox.prototype, "sendHeartbeat")
+      .mockResolvedValue(undefined as never);
+    callback();
+    expect(sendHeartbeat).toHaveBeenCalledTimes(1);
+    sendHeartbeat.mockRestore();
+    cp.disconnect();
+  });
+
+  it("builds the state manager over the station's state and stream", () => {
+    const { cp, order, spies, streams } = buildTraced();
+    expect(order.indexOf("stateManager")).toBeGreaterThan(
+      order.indexOf("heartbeat"),
+    );
+    const ctx = spies.createStateManager.mock.calls[0]![0];
+    expect(ctx.logger).toBe(cp.logger);
+    expect(ctx.events).toBe(cp.events);
+    expect(ctx.clock).toBe(cp.clock);
+    expect(ctx.rng).toBe(streams.stateHistory);
+    expect(ctx.chargePoint()).toEqual({ status: cp.status, error: cp.error });
+    expect(cp.stateManager).toBe(
+      spies.createStateManager.mock.results[0]!.value,
+    );
+    cp.disconnect();
+  });
+
+  it("builds the timeline and its projector, and disposes the projector", () => {
+    const { cp, order, spies, streams } = buildTraced();
+    expect(order.indexOf("timeline")).toBeGreaterThan(
+      order.indexOf("stateManager"),
+    );
+    const ctx = spies.createTimeline.mock.calls[0]![0];
+    expect(ctx.cpId).toBe("cp-deps");
+    expect(ctx.events).toBe(cp.events);
+    expect(ctx.clock).toBe(cp.clock);
+    expect(ctx.rng).toBe(streams.timeline);
+    expect(ctx.connectors.get(1)).toBe(cp.getConnector(1));
+    const built = spies.createTimeline.mock.results[0]!.value;
+    expect(cp.timeline).toBe(built.timeline);
+    expect(built.projector.dispose).not.toHaveBeenCalled();
+    cp.dispose();
+    expect(built.projector.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs the transaction methods through deps.transactions", async () => {
+    const outcome = { started: false };
+    const transactions = {
+      start: vi.fn().mockResolvedValue(outcome),
+      stop: vi.fn(),
+      clean: vi.fn(),
+    };
+    const { cp } = build("OCPP-1.6J", undefined, {}, { transactions });
+    const ports = cp["transactionPorts"];
+    await expect(cp.startTransaction("TAG", 1)).resolves.toBe(outcome);
+    expect(transactions.start).toHaveBeenCalledWith(
+      cp,
+      ports,
+      "TAG",
+      1,
+      undefined,
+      undefined,
+      {},
+    );
+    cp.stopTransaction(1, "Local");
+    expect(transactions.stop).toHaveBeenCalledWith(cp, ports, 1, "Local", {});
+    expect(transactions.start.mock.calls[0]![1]).toBe(ports);
+    expect(transactions.stop.mock.calls[0]![1]).toBe(ports);
+    cp.cleanTransaction(1);
+    expect(transactions.clean).toHaveBeenCalledWith(cp, 1);
+    const sendTransactionEvent = vi
+      .spyOn(Outbox.prototype, "sendTransactionEvent")
+      .mockResolvedValue(undefined as never);
+    const event = {} as Parameters<Outbox["sendTransactionEvent"]>[0];
+    ports.sendTransactionEvent(event);
+    expect(sendTransactionEvent).toHaveBeenCalledWith(event);
+    sendTransactionEvent.mockRestore();
     cp.disconnect();
   });
 });

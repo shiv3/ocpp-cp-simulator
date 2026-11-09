@@ -307,7 +307,8 @@ transactions, persistence and resume. Decisions the design left open:
   its public API), and answers `RemoteStartTransaction`, `RemoteStopTransaction` (1.6) and
   `RequestStartTransaction`, `RequestStopTransaction` (2.x) with the `AuthorizeRemoteTxRequests` and scenario
   delegation behavior of before. The handlers translate. `ChargePoint` hands the module a `TransactionPorts`
-  (`sendTransactionEvent`, `startConnectionTimeout`) for the two things it keeps private. Meter value
+  (`sendTransactionEvent`, `startConnectionTimeout`) for the two things it keeps private; since #575 the type
+  is in `domain/engine/` and `ChargePoint` reaches the module through the `transactions` port of its deps. Meter value
   calculation (`Connector`, `MeterValueBuilder`) and charging profile resolution (`clearChargingProfiles`)
   stay services.
 - **The scenario registry stays.** `_scenarioHandledConnectors`, `_scenarioStopHandledConnectors`,

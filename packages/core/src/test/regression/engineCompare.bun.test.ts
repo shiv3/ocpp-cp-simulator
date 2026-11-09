@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
+import type { ChargerEngine } from "../../cp/application/engine/ChargerEngine";
 import { runBehavior, type BehaviorRun } from "../behavior/runBehavior";
 
 const runs: BehaviorRun[] = [];
@@ -25,7 +26,9 @@ describe("core half of the k6 comparison", () => {
     const run = await runBehavior({ version: "1.6", behaviors: [b] });
     runs.push(run);
     expect(error).toBeInstanceOf(TypeError);
-    expect(run.cp.engine.snapshot().behaviors["b"]).toEqual({ a: 1 });
+    expect((run.cp.engine as ChargerEngine).snapshot().behaviors["b"]).toEqual({
+      a: 1,
+    });
   });
   test("(reference) core: ctx.random(name) continues; undefined handler => CALLERROR, rule free", async () => {
     const got: number[] = [];

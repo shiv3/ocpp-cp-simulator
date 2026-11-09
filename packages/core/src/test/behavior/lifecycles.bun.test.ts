@@ -403,6 +403,16 @@ describe("reboot after the update (#600)", () => {
     expect(run.callsOf("BootNotification")).toHaveLength(1);
   });
 
+  // B01.FR.09 (#846): the reboot after a firmware update says so.
+  test("2.x reboots after a firmware update with BootNotification reason FirmwareUpdate", async () => {
+    run = await runBehavior({ version: "2.0.1" });
+    select(run, { train: true, stepMs: 100, reboot: "afterInstalled" });
+    await run.call("UpdateFirmware", fw2(32));
+    await run.advance(2000);
+    const boots = run.callsOf("BootNotification");
+    expect(boots.at(-1)?.payload).toMatchObject({ reason: "FirmwareUpdate" });
+  });
+
   test("afterInstalled: Installed, then BootNotification (L01.FR.32 b)", async () => {
     run = await runBehavior({ version: "2.0.1" });
     select(run, { train: true, stepMs: 100, reboot: "afterInstalled" });

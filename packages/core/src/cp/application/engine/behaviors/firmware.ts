@@ -399,7 +399,7 @@ export function firmwareBehavior(cp: ChargePoint): Behavior {
                 }
                 if (ctx.params.reboot === "afterInstalled") {
                   releaseConnectors(cp, ctx);
-                  cp.boot();
+                  cp.boot("FirmwareUpdate");
                 }
               } finally {
                 ctx.state.inFlight = false;
@@ -432,7 +432,7 @@ async function rebootAndWait(
     });
   });
   try {
-    cp.boot();
+    cp.boot("FirmwareUpdate"); // 2.x B01.FR.09
     await ctx.until(accepted, { ms: BOOT_WAIT_MS });
     // The boot gate opens right after the event; let it.
     await ctx.sleep(0);
@@ -572,7 +572,7 @@ async function train2(
       await stepPause(ctx);
       if (cancelled()) return;
       releaseConnectors(cp, ctx);
-      cp.boot(); // L01.FR.32 b
+      cp.boot("FirmwareUpdate"); // L01.FR.32 b, B01.FR.09
     }
   } finally {
     if (ctx.state.generation === generation) {

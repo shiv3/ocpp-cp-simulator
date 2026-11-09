@@ -22,7 +22,7 @@ related:
   - ../concepts/local-authorization.md
   - default-behaviors.md
   - ../sources/github-issues.md
-updated: 2026-11-08
+updated: 2026-11-10
 ---
 
 # Device Model registry
@@ -88,13 +88,16 @@ writable value would change nothing. The 1.6 key stays read-write; on 2.x
 A `MemberList` variable, like an `OptionList` one, carries a `valuesList`
 (mandatory in `VariableCharacteristicsType` for `OptionList`, `MemberList` and
 `SequenceList`); the registry refuses one without it and refuses it on any other
-type. The measurand variables list the measurands `MeterValueBuilder` models;
-the store does not enforce the list.
+type. The measurand variables list the measurands `MeterValueBuilder` models
+that are in the 2.x `MeasurandEnumType` (not `Temperature` or `RPM`, 1.6
+measurands); the store does not enforce the list. `SetVariables` first checks a
+measurand list against the station version's `MeasurandEnumType` and answers
+`Rejected` / `InvalidValue` naming the unknown members (B05.FR.07, #714).
 
 ## Components
 
 `OCPPCommCtrlr`, `TxCtrlr`, `SampledDataCtrlr`, `AlignedDataCtrlr`, `DeviceDataCtrlr`,
-`LocalAuthListCtrlr`, `AuthCtrlr`, `AuthCacheCtrlr`, `MonitoringCtrlr`,
+`LocalAuthListCtrlr`, `AuthCtrlr`, `AuthCacheCtrlr`, `ReservationCtrlr`, `MonitoringCtrlr`,
 `ChargingStation`, `SecurityCtrlr`, and the EVSE-scoped `EVSE` and `Connector`
 (which need `component.evse`). `ClockCtrlr`, `TariffCostCtrlr` and `ISO15118Ctrlr` exist with no variable yet: a request for
 one of their variables answers `UnknownVariable`, not `UnknownComponent`.
@@ -109,23 +112,36 @@ one of their variables answers `UnknownVariable`, not `UnknownComponent`.
 | `OCPPCommCtrlr.MessageAttempts[TransactionEvent]`          | `TransactionMessageAttempts` (1.6)        | ReadWrite  | integer    | –                                                      | 3                                                 | Persistent  |
 | `OCPPCommCtrlr.MessageAttemptInterval[TransactionEvent]`   | `TransactionMessageRetryInterval` (1.6)   | ReadWrite  | integer    | –                                                      | 60                                                | Persistent  |
 | `OCPPCommCtrlr.MessageTimeout[Default]`                    | `MessageTimeout`                          | ReadOnly   | integer    | min 1                                                  | 30                                                | Persistent  |
+| `OCPPCommCtrlr.OfflineThreshold`                           | `OfflineThreshold`                        | ReadWrite  | integer    | min 0                                                  | 60                                                | Persistent  |
+| `OCPPCommCtrlr.RetryBackOffWaitMinimum`                    | `RetryBackOffWaitMinimum`                 | ReadWrite  | integer    | min 1, max 2147483                                     | 1                                                 | Persistent  |
+| `OCPPCommCtrlr.RetryBackOffRandomRange`                    | `RetryBackOffRandomRange`                 | ReadWrite  | integer    | min 0, max 2147483                                     | 0                                                 | Persistent  |
+| `OCPPCommCtrlr.RetryBackOffRepeatTimes`                    | `RetryBackOffRepeatTimes`                 | ReadWrite  | integer    | min 0, max 30                                          | 5                                                 | Persistent  |
 | `DeviceDataCtrlr.ItemsPerMessage[GetReport]`               | `ItemsPerMessageGetReport`                | ReadOnly   | integer    | min 1                                                  | 100                                               | Volatile    |
 | `DeviceDataCtrlr.BytesPerMessage[GetReport]`               | `BytesPerMessageGetReport`                | ReadOnly   | integer    | min 1                                                  | 65536                                             | Volatile    |
 | `TxCtrlr.EVConnectionTimeOut`                              | `ConnectionTimeOut` (1.6)                 | ReadWrite  | integer    | –                                                      | 60                                                | Persistent  |
 | `SampledDataCtrlr.TxUpdatedInterval`                       | `MeterValueSampleInterval` (1.6)          | ReadWrite  | integer    | –                                                      | 60                                                | Persistent  |
 | `SampledDataCtrlr.TxUpdatedMeasurands`                     | `MeterValuesSampledData` (1.6)            | ReadWrite  | MemberList | the measurands of `MeterValueBuilder`                  | Energy.Active.Import.Register,Power.Active.Import | Persistent  |
 | `SampledDataCtrlr.SignReadings`                            | `SampledDataSignReadings` (1.6)           | ReadWrite  | boolean    | –                                                      | false                                             | Persistent  |
+| `SampledDataCtrlr.TxStartedMeasurands`                     | `TxStartedMeasurands`                     | ReadWrite  | MemberList | the measurands of `MeterValueBuilder`                  | (empty)                                           | Persistent  |
+| `SampledDataCtrlr.TxEndedMeasurands`                       | `StopTxnSampledData` (1.6)                | ReadWrite  | MemberList | the measurands of `MeterValueBuilder`                  | (empty)                                           | Persistent  |
+| `SampledDataCtrlr.TxEndedInterval`                         | `TxEndedInterval`                         | ReadWrite  | integer    | min 0, max 2147483                                     | 0                                                 | Persistent  |
 | `AlignedDataCtrlr.Interval`                                | `ClockAlignedDataInterval` (1.6)          | ReadWrite  | integer    | min 0, max 86400                                       | 0                                                 | Persistent  |
 | `AlignedDataCtrlr.Measurands`                              | `MeterValuesAlignedData` (1.6)            | ReadWrite  | MemberList | the measurands of `MeterValueBuilder`                  | (empty)                                           | Persistent  |
+| `AlignedDataCtrlr.TxEndedMeasurands`                       | `StopTxnAlignedData` (1.6)                | ReadWrite  | MemberList | the measurands of `MeterValueBuilder`                  | (empty)                                           | Persistent  |
+| `AlignedDataCtrlr.TxEndedInterval`                         | `AlignedDataTxEndedInterval`              | ReadWrite  | integer    | min 0, max 2147483                                     | 0                                                 | Persistent  |
+| `AlignedDataCtrlr.SendDuringIdle`                          | `AlignedDataSendDuringIdle`               | ReadWrite  | boolean    | –                                                      | false                                             | Persistent  |
 | `LocalAuthListCtrlr.Enabled`                               | `LocalAuthListEnabled` (1.6)              | ReadWrite  | boolean    | –                                                      | true                                              | Persistent  |
 | `LocalAuthListCtrlr.ItemsPerMessage`                       | `SendLocalListMaxLength` (1.6)            | ReadOnly   | integer    | –                                                      | 100                                               | Persistent  |
 | `AuthCtrlr.AuthorizeRemoteStart`                           | `AuthorizeRemoteTxRequests` (1.6)         | ReadOnly   | boolean    | –                                                      | false                                             | Persistent  |
 | `AuthCtrlr.LocalPreAuthorize`                              | `LocalPreAuthorize` (1.6)                 | ReadWrite  | boolean    | –                                                      | false                                             | Persistent  |
 | `AuthCtrlr.LocalAuthorizeOffline`                          | `LocalAuthorizeOffline` (1.6)             | ReadWrite  | boolean    | –                                                      | true                                              | Persistent  |
 | `AuthCtrlr.OfflineTxForUnknownIdEnabled`                   | `AllowOfflineTxForUnknownId` (1.6)        | ReadWrite  | boolean    | –                                                      | false                                             | Persistent  |
+| `AuthCtrlr.MasterPassGroupId`                              | `MasterPassGroupId`                       | ReadWrite  | string     | –                                                      | (empty)                                           | Persistent  |
 | `AuthCacheCtrlr.Enabled`                                   | `AuthorizationCacheEnabled` (1.6)         | ReadWrite  | boolean    | –                                                      | false                                             | Persistent  |
 | `AuthCacheCtrlr.LifeTime`                                  | `AuthCacheLifeTime`                       | ReadWrite  | integer    | min 0                                                  | 0                                                 | Persistent  |
 | `TxCtrlr.StopTxOnInvalidId`                                | `StopTransactionOnInvalidId` (1.6)        | ReadWrite  | boolean    | –                                                      | true                                              | Persistent  |
+| `TxCtrlr.MaxEnergyOnInvalidId`                             | `MaxEnergyOnInvalidId` (1.6)              | ReadWrite  | integer    | unit Wh                                                | 0                                                 | Persistent  |
+| `ReservationCtrlr.NonEvseSpecific`                         | `ReserveConnectorZeroSupported` (1.6)     | ReadOnly   | boolean    | –                                                      | false                                             | Persistent  |
 | `TxCtrlr.StopTxOnEVSideDisconnect`                         | `StopTransactionOnEVSideDisconnect` (1.6) | ReadWrite  | boolean    | –                                                      | true                                              | Persistent  |
 | `TxCtrlr.TxStartPoint`                                     | `TxStartPoint`                            | ReadOnly   | MemberList | Authorized                                             | Authorized                                        | Volatile    |
 | `TxCtrlr.TxStopPoint`                                      | `TxStopPoint`                             | ReadOnly   | MemberList | Authorized, EVConnected                                | Authorized,EVConnected                            | Volatile    |

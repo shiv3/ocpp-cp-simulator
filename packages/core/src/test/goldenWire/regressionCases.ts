@@ -451,8 +451,8 @@ c16(
     simulation: { clock: periodicStartErrorClock, seed: "g722" },
   },
 );
-// The interval is read when the transaction starts: a ChangeConfiguration
-// from the CSMS mid-transaction applies to the next one.
+// A ChangeConfiguration of the interval mid-transaction re-arms the sampler
+// at once (#839; before, it applied to the next transaction).
 const periodicChangeClock = new VirtualClock();
 c16(
   "meter-periodic-change-configuration",
@@ -476,6 +476,28 @@ c16(
     await settle(r);
   },
   { memory: true, simulation: { clock: periodicChangeClock, seed: "g722" } },
+);
+// #839, 1.6 §9.1.19: an interval of 0 means no sampled data is sent; setting
+// it mid-transaction stops the running sampler.
+const periodicZeroClock = new VirtualClock();
+c16(
+  "meter-periodic-change-to-zero",
+  async (r) => {
+    r.plugIn();
+    await settle(r);
+    await r.cp.startTransaction("TAG-A", 1);
+    await settle(r);
+    await periodic(r, periodicZeroClock, 65);
+    await r.csms.call("ChangeConfiguration", {
+      key: "MeterValueSampleInterval",
+      value: "0",
+    });
+    await settle(r);
+    await periodic(r, periodicZeroClock, 130);
+    r.cp.stopTransaction(1);
+    await settle(r);
+  },
+  { memory: true, simulation: { clock: periodicZeroClock, seed: "g722" } },
 );
 // A scenario's own meter strategy (an auto-increment node) keeps its own
 // interval next to the station's sampler: both send.

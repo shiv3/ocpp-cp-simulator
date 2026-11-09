@@ -788,9 +788,12 @@ default 1.6 transaction now sends one sample a minute (a wire change from the
 earlier "nothing unless an auto-meter is configured"); `0` sends none.
 
 - The value is read when the transaction starts, or when it is restored after
-  a daemon restart; a `ChangeConfiguration` applies to the next transaction.
-  That is the simulator's choice: the specification does not say when the
-  interval is read.
+  a daemon restart, and again when a `ChangeConfiguration` of the key arrives
+  mid-transaction (#839): the running samplers start over with the new
+  interval (a new phase), and `0` stops them. A connector removed meanwhile
+  loses its sampler. The specification does not say when the interval is
+  read; "every `MeterValueSampleInterval` seconds" is why a change applies at
+  once.
 - It does not matter what drives the register. A configured auto-meter curve
   or increment fallback only moves the register at its own interval (the
   curve's `intervalSeconds`); the sample goes out on the
@@ -803,7 +806,7 @@ earlier "nothing unless an auto-meter is configured"); `0` sends none.
   "periodic or clock-aligned MeterValues.req" included) and delivered in order
   after the reconnect.
 - A transaction whose StartTransaction.req was answered with a CALLERROR
-  (#527) is not sampled: its `0` is a placeholder the CSMS never issued. While a
+  (#527) is sampled too (errata 3.15 asks for every interval). While a
   StartTransaction.req of the transaction is still on its way a sample carries
   the placeholder `0`, which its conf replaces when the sample is sent; once
   none is (timed out, discarded, lost in a restart) it carries `-1` (#727).

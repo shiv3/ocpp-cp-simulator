@@ -2166,8 +2166,15 @@ export class OCPPMessageHandler {
       });
     }
 
-    // #565: a resend answered; what waited behind it goes on.
-    if (request.attempt !== undefined && request.attempt > 1) {
+    // #565: a resend answered; what waited behind it goes on. Not for one
+    // that already timed out (#839): its timeout released its hold, and the
+    // hold now standing belongs to a newer resend, which must keep it
+    // (§3.7: the messages stay in chronological order).
+    if (
+      request.attempt !== undefined &&
+      request.attempt > 1 &&
+      !request.timedOut
+    ) {
       this.releaseHold();
     }
     this._requests.remove(messageId);

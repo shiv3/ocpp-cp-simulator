@@ -1493,14 +1493,15 @@ export class ChargePoint {
           }
           break;
         case "MeterValueSampleInterval":
-          // §9.1.19: takes effect on the *next* transaction. The periodic
-          // sampler of a running transaction keeps its cadence; the new
-          // value is read when a fresh transaction starts
-          // (startPeriodicSampling, #722).
+          // §3.16.1 / §9.1.19 ask for a sample "every MeterValueSampleInterval
+          // seconds" and, at 0, for none: the samplers of the running
+          // transactions are re-armed with the new value (#839, #722). 2.x
+          // does not run them.
           this._logger.info(
-            `MeterValueSampleInterval=${String(value)} (applies to next transaction)`,
+            `MeterValueSampleInterval=${String(value)}`,
             LogType.CONFIGURATION,
           );
+          this.rearmPeriodicSampling();
           break;
         case "WebSocketPingInterval":
           // #406: re-arms the ping timer at once on an open socket.
@@ -4165,12 +4166,12 @@ export class ChargePoint {
    * there is one sample per tick, not two schedules. 1.x only (SOAP
    * included): on 2.x the existing sampling is unchanged.
    *
-   * The spec does not say when the interval is read; the simulator reads it
-   * when the sampler starts (the transaction's start, or its restore after a
-   * restart), so a ChangeConfiguration applies to the next transaction.
-   * Called again for the same running transaction (the `transactionChange`
-   * that persists a `startCallError` or an id), it keeps the timer and so the
-   * phase.
+   * The interval is read when the sampler starts (the transaction's start,
+   * or its restore after a restart) and again when a ChangeConfiguration of
+   * `MeterValueSampleInterval` re-arms the running samplers (#839); at 0
+   * none runs. Called again for the same running transaction (the
+   * `transactionChange` that persists a `startCallError` or an id), it keeps
+   * the timer and so the phase.
    */
   private startPeriodicSampling(connector: Connector): void {
     if (isOcpp2Version(this._ocppVersion)) return;
@@ -4179,7 +4180,12 @@ export class ChargePoint {
     const seconds = this._configuration.meterValueSampleInterval();
     if (seconds <= 0) return;
     const timer = this._clock.setInterval(() => {
-      if (!connector.hasRunningTransaction) {
+      // A connector removed (or replaced under the same id) while its timer
+      // ran is not sampled any more (#839).
+      if (
+        !connector.hasRunningTransaction ||
+        this._connectors.get(connector.id) !== connector
+      ) {
         this.stopPeriodicSampling(connector.id);
         return;
       }
@@ -4194,6 +4200,18 @@ export class ChargePoint {
       this.sendScheduledMeterValue(connector.id);
     }, seconds * 1000);
     this._periodicSamplers.set(connector.id, timer);
+  }
+
+  /** #839: a new `MeterValueSampleInterval` starts the cadence over on every
+   *  running transaction; 0 leaves them without a sampler. */
+  private rearmPeriodicSampling(): void {
+    for (const connectorId of [...this._periodicSamplers.keys()]) {
+      this.stopPeriodicSampling(connectorId);
+    }
+    for (const connector of this._connectors.values()) {
+      if (connector.hasRunningTransaction)
+        this.startPeriodicSampling(connector);
+    }
   }
 
   private stopPeriodicSampling(connectorId: number): void {
@@ -4284,6 +4302,7 @@ export class ChargePoint {
     if (!connector) return false;
 
     this.clearChargingProfiles(connectorId, {}, "ConnectorRemoved");
+    this.stopPeriodicSampling(connectorId);
     connector.dispose();
     this._engine.detachConnector(connectorId);
     const removed = this._connectors.delete(connectorId);

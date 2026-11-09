@@ -591,6 +591,39 @@ describe("OCPP 1.6 transaction message CALLERROR retry (#527, §3.7.1)", () => {
       expect(station.discarded).toEqual([]);
     });
 
+    // #839: the timeout of the Start resend released its hold; a conf that
+    // comes late must not release the hold of a newer resend.
+    it("a late answer to a timed-out resend leaves a newer resend's hold alone", async () => {
+      const station = retrying();
+      const { socket, handler } = station;
+
+      // The Start's resend (attempt 2) goes out after the interval and times
+      // out: 1.6 does not retry a timeout, so its hold is released.
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(socket.of("StartTransaction")).toHaveLength(2);
+      const lateStart = socket.last();
+      await vi.advanceTimersByTimeAsync(30_000);
+
+      // A newer chain: a Stop answered with CALLERROR holds what follows.
+      stop(station);
+      expect(socket.of("StopTransaction")).toHaveLength(1);
+      socket.callError(socket.last().id);
+      handler.sendTransactionEvent({
+        phase: "started",
+        transaction: transaction({ connectorId: 1, id: 0, tagId: "TAG-NEXT" }),
+        connectorId: 1,
+      });
+      expect(socket.of("StartTransaction")).toHaveLength(2);
+
+      socket.callResult(lateStart.id, {
+        transactionId: 99,
+        idTagInfo: { status: "Accepted" },
+      });
+
+      // The new Start still waits behind the Stop's resend.
+      expect(socket.of("StartTransaction")).toHaveLength(2);
+    });
+
     it("does not hold a CALL that is not transaction-related", async () => {
       const station = retrying();
       stop(station);

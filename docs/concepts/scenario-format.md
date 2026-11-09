@@ -1306,7 +1306,7 @@ optional: a 1.5 file means what it meant. In the order the issue lists them:
 }
 ```
 
-The console's list editor keeps every `sourceHandle` when it rebuilds the edges after an insert, move or removal. A
+The console's list editor reuses an input edge (id and every field, including `sourceHandle`, `type` and fields it does not know) for each source/target pair it draws again when it rebuilds the edges after an insert, move or removal; only a new pair gets a new id. Saving never lowers a newer `schemaVersion` than the editor's. A
 `switch` or `choice` placed there gets `default` / `option-0` on its one edge, and a new lane of one gets the next free
 `case-<n>` (then `default`) or `option-<n>`; without a handle the node would end its branch (#822 review).
 

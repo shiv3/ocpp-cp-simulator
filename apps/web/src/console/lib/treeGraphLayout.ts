@@ -59,6 +59,8 @@ const LOOP_LEFT = 30;
 const LOOP_RIGHT = 10;
 const LOOP_TOP = 14;
 const LOOP_BOTTOM = 46;
+/** Extra band in the editor: the loop's buttons get a row under its label. */
+const LOOP_BUTTON_ROW = 22;
 /** The arc's turn below the body. */
 const LOOP_TURN = 20;
 /** Lanes that leave a loop stand this far right of its rectangle. */
@@ -806,7 +808,8 @@ export function layoutTreeGraph(
       ...inside.map((c) => c.y + NODE_H),
       ...back.map((b) => b.y),
     );
-    const rectBottom = innerBottom + LOOP_BOTTOM;
+    const rectBottom =
+      innerBottom + LOOP_BOTTOM + (editable ? LOOP_BUTTON_ROW : 0);
     const header = cards.find((c) => c.node.id === loop.headerId);
     const channelX = rectLeft + 14;
     const arcs: GraphPath[] = back.map((b, k) => {
@@ -844,7 +847,10 @@ export function layoutTreeGraph(
       headerId: loop.headerId,
       rect: { x: rectLeft, y, w: rectW, h: rectBottom - y },
       arcs,
-      label: { x: rectLeft + LOOP_LEFT, y: rectBottom - 22 },
+      label: {
+        x: rectLeft + LOOP_LEFT,
+        y: rectBottom - 22 - (editable ? LOOP_BUTTON_ROW : 0),
+      },
       from,
       to: Math.max(from, ...repeated),
       canExit:

@@ -224,3 +224,16 @@ describe("Graph view: a loop frame's bounds", () => {
     expect(q('[data-testid="loop-bounds-panel"]')).toBeNull();
   });
 });
+
+describe("Graph view: the loop frame's label row", () => {
+  it("keeps the summary on its own row, apart from the buttons, with the full text on hover", async () => {
+    await render(selfLoop(), true);
+    const label = q('[data-testid="loop-summary"]')!;
+    expect(label.textContent).toBe("Repeat 2 times");
+    expect(label.getAttribute("title")).toBe("Repeat 2 times");
+    const button = q('[data-testid="edit-loop-bounds"]')!;
+    const row = (el: Element) => (el.closest(".absolute") as HTMLElement).style;
+    expect(row(button).top).not.toBe(row(label).top);
+    expect(row(button).left).toBe(row(label).left);
+  });
+});

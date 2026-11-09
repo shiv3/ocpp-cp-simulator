@@ -642,3 +642,29 @@ function checkSwitchCases(nodes: readonly GraphNodeLike[]): GraphIssue[] {
 
 const isMissingOnly = (spec: unknown): boolean =>
   jsonEquals(spec, { $match: { exists: false } });
+
+/** The schema version a scenario's edited graph needs: when `def` declares a
+ *  version below the one that introduced a construct it uses (timeout edge
+ *  1.8, parallel / join 1.9, loop edge 1.10), the highest such version;
+ *  otherwise the declared one, unchanged. Never lowers a version, and leaves a
+ *  scenario that declares none (or an unparseable one) alone. Metadata only:
+ *  it does not change what the scenario does. */
+export function requiredSchemaVersion(def: {
+  nodes: readonly GraphNodeLike[];
+  edges: readonly GraphEdgeLike[];
+  schemaVersion?: unknown;
+}): unknown {
+  let best: [number, number] | null = null;
+  let bestText: string | null = null;
+  for (const issue of validateScenarioGraph(def)) {
+    if (issue.code !== "newerConstruct") continue;
+    const since = (issue.data as { since?: string } | undefined)?.since;
+    const v = parseVersion(since);
+    if (!v || !since) continue;
+    if (!best || v[0] > best[0] || (v[0] === best[0] && v[1] > best[1])) {
+      best = v;
+      bestText = since;
+    }
+  }
+  return bestText ?? def.schemaVersion;
+}

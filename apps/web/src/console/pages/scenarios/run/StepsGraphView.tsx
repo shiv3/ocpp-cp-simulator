@@ -75,6 +75,11 @@ const LOOP_STROKE = "var(--cx-purple)";
 /** The step picker opened from a `+` (and the room it needs below). */
 const PICKER_W = 520;
 const PICKER_H = 330;
+/** Room the bounds editor needs below its loop before it opens upward. */
+const BOUNDS_PANEL_H = 300;
+/** Scrolls a freshly opened bounds editor into view in the canvas. */
+const revealBounds = (el: HTMLElement | null) =>
+  el?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
 const WAIT_TYPES: ReadonlySet<string> = new Set(WAIT_STEP_TYPES);
 
 /** Picking a target on the canvas: after Repeat from a `+` (the loop goes
@@ -986,6 +991,11 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
                         </span>
                       )}
                     </div>
+                  </div>
+                  <div
+                    className="absolute flex items-center gap-2 whitespace-nowrap text-xs"
+                    style={{ left: loop.label.x, top: loop.label.y + 21 }}
+                  >
                     {loopBounds && !drag && (
                       <button
                         type="button"
@@ -1029,8 +1039,17 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
                   </div>
                   {boundsOpen && loopBounds && (
                     <div
+                      ref={revealBounds}
                       className="absolute z-20 w-[340px]"
-                      style={{ left: loop.label.x, top: loop.label.y + 22 }}
+                      style={
+                        // Near the canvas bottom: open upward, over the loop.
+                        loop.label.y + 22 + BOUNDS_PANEL_H > height
+                          ? {
+                              left: loop.label.x,
+                              bottom: Math.max(0, height - loop.label.y + 4),
+                            }
+                          : { left: loop.label.x, top: loop.label.y + 44 }
+                      }
                     >
                       <LoopBoundsPanel
                         loop={loop}

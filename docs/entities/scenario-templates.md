@@ -127,6 +127,15 @@ relying on a pre-registered tag per outcome. Each template is run by
 with several answers, asserting the branch taken, and is validated with
 `validateScenarioGraph` (no findings).
 
+## `remote-start-timeout-fallback` (timeout edge, schema 1.8)
+
+Waits 30 s for a `RemoteStartTransaction`. On the answer it starts a session with
+automatic meter values; if the wait times out, its `kind: "timeout"` edge sets the
+connector back to Available and ends instead of failing the run. Not a certification
+case. Its golden frames pin the event path; the timeout path is covered by
+`ScenarioExecutor.timeoutEdges.test.ts`
+(see [Scenario format](../concepts/scenario-format.md)).
+
 ## Resilience templates (`resilience-*`)
 
 Six assertion-driven scenarios for operational failures and their recovery

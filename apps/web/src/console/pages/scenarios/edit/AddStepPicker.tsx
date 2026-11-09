@@ -5,20 +5,50 @@ import { X } from "lucide-react";
 import { NODE_FORM_REGISTRY } from "../../../../components/scenario/forms/nodeFormRegistry";
 import { cn } from "@/lib/utils";
 import { STEP_CATEGORIES, STEP_HELP } from "../../../lib/scenarioSteps";
-import { tileForType } from "../run/stepVisuals";
+import { tileForStructure, tileForType } from "../run/stepVisuals";
+import type { MessageKey } from "../../../../i18n";
 import type { ScenarioNodeType } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+
+/**
+ * Structures are entries that are not a node type: picking one inserts a block
+ * (a loop today; "switch" / "choice" branch blocks are meant to join later).
+ * An entry is listed only when the host passes `onPickStructure`.
+ */
+export type StructureKind = "loop";
+
+const STRUCTURE_ENTRIES: ReadonlyArray<{
+  kind: StructureKind;
+  /** The STEP_CATEGORIES label it is listed under. */
+  category: string;
+  titleKey: MessageKey;
+  helpKey: MessageKey;
+}> = [
+  {
+    kind: "loop",
+    category: "Flow control",
+    titleKey: "scenarios.addStep.structure.loop",
+    helpKey: "scenarios.addStep.structure.loopHelp",
+  },
+];
+
+/** Ids of structure entries share the type ids' `active` state under this prefix. */
+const STRUCTURE_PREFIX = "structure:";
 
 export interface AddStepPickerProps {
   onPick: (type: ScenarioNodeType) => void;
+  /** Wired by the host to offer structure entries (Repeat). Omit to hide them. */
+  onPickStructure?: (kind: StructureKind) => void;
   onClose: () => void;
 }
 
 /** The type's icon in its category colour (same as the step cards'). */
-const TypeTile: React.FC<{ type: ScenarioNodeType; size: "sm" | "md" }> = ({
+const TypeTile: React.FC<{ type: string; size: "sm" | "md" }> = ({
   type,
   size,
 }) => {
-  const { icon: Icon, className } = tileForType(type);
+  const { icon: Icon, className } = type.startsWith(STRUCTURE_PREFIX)
+    ? tileForStructure(type.slice(STRUCTURE_PREFIX.length))
+    : tileForType(type);
   return (
     <span
       aria-hidden
@@ -45,35 +75,64 @@ const TypeTile: React.FC<{ type: ScenarioNodeType; size: "sm" | "md" }> = ({
  * focus (ArrowUp/ArrowDown move between types) is described in a pane on the
  * right; below a container width of 28rem the pane stacks under the list.
  */
-const AddStepPicker: React.FC<AddStepPickerProps> = ({ onPick, onClose }) => {
+const AddStepPicker: React.FC<AddStepPickerProps> = ({
+  onPick,
+  onPickStructure,
+  onClose,
+}) => {
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
-  const [active, setActive] = useState<ScenarioNodeType | null>(null);
+  const [active, setActive] = useState<string | null>(null);
   const helpId = useId();
   const listRef = useRef<HTMLDivElement>(null);
 
   const sections = useMemo(() => {
     const q = query.trim().toLowerCase();
+    const matches = (title: string, help: string) =>
+      title.toLowerCase().includes(q) || help.toLowerCase().includes(q);
     return STEP_CATEGORIES.map((category) => ({
       label: category.label,
       labelKey: category.labelKey,
-      types: category.types.filter(
-        (type) =>
-          t(NODE_FORM_REGISTRY[type].title).toLowerCase().includes(q) ||
-          t(STEP_HELP[type as keyof typeof STEP_HELP])
-            .toLowerCase()
-            .includes(q),
-      ),
-    })).filter((category) => category.types.length > 0);
-  }, [query, t]);
+      entries: [
+        ...category.types
+          .filter((type) =>
+            matches(
+              t(NODE_FORM_REGISTRY[type].title),
+              t(STEP_HELP[type as keyof typeof STEP_HELP]),
+            ),
+          )
+          .map((type) => ({
+            id: type as string,
+            type: type as ScenarioNodeType | null,
+            structure: null as StructureKind | null,
+            title: t(NODE_FORM_REGISTRY[type].title),
+            help: t(STEP_HELP[type as keyof typeof STEP_HELP]),
+          })),
+        ...(onPickStructure ? STRUCTURE_ENTRIES : [])
+          .filter(
+            (e) =>
+              e.category === category.label &&
+              matches(t(e.titleKey), t(e.helpKey)),
+          )
+          .map((e) => ({
+            id: STRUCTURE_PREFIX + e.kind,
+            type: null as ScenarioNodeType | null,
+            structure: e.kind as StructureKind | null,
+            title: t(e.titleKey),
+            help: t(e.helpKey),
+          })),
+      ],
+    })).filter((category) => category.entries.length > 0);
+  }, [query, t, onPickStructure]);
 
-  const shown =
-    active && sections.some((s) => s.types.includes(active)) ? active : null;
+  const shownEntry = active
+    ? sections.flatMap((s) => s.entries).find((e) => e.id === active)
+    : undefined;
 
   const items = () =>
     Array.from(
       listRef.current?.querySelectorAll<HTMLButtonElement>(
-        "button[data-step-type]",
+        "button[data-step-option]",
       ) ?? [],
     );
 
@@ -98,7 +157,7 @@ const AddStepPicker: React.FC<AddStepPickerProps> = ({ onPick, onClose }) => {
     }
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
     const target = e.target as HTMLElement;
-    const onItem = target.hasAttribute("data-step-type");
+    const onItem = target.hasAttribute("data-step-option");
     if (!onItem && target.tagName !== "INPUT") return;
     e.preventDefault();
     move(onItem ? target : null, e.key === "ArrowDown" ? 1 : -1);
@@ -145,24 +204,34 @@ const AddStepPicker: React.FC<AddStepPickerProps> = ({ onPick, onClose }) => {
               <div className="px-1 text-xs font-semibold uppercase tracking-wide text-cx-faint">
                 {t(category.labelKey)}
               </div>
-              {category.types.map((type) => (
+              {category.entries.map((entry) => (
                 <button
-                  key={type}
+                  key={entry.id}
                   type="button"
-                  data-step-type={type}
-                  aria-describedby={shown === type ? helpId : undefined}
-                  onClick={() => onPick(type)}
-                  onMouseEnter={() => setActive(type)}
-                  onFocus={() => setActive(type)}
+                  data-step-option=""
+                  data-step-type={entry.type ?? undefined}
+                  data-step-structure={entry.structure ?? undefined}
+                  aria-describedby={
+                    shownEntry
+                      ? shownEntry.id === entry.id
+                        ? helpId
+                        : undefined
+                      : undefined
+                  }
+                  onClick={() =>
+                    entry.type
+                      ? onPick(entry.type)
+                      : entry.structure && onPickStructure?.(entry.structure)
+                  }
+                  onMouseEnter={() => setActive(entry.id)}
+                  onFocus={() => setActive(entry.id)}
                   className={cn(
                     "flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-sm text-cx-fg2 hover:bg-cx-sub focus-visible:bg-cx-sub",
-                    shown === type && "bg-cx-sub",
+                    shownEntry?.id === entry.id && "bg-cx-sub",
                   )}
                 >
-                  <TypeTile type={type} size="sm" />
-                  <span className="min-w-0 flex-1 truncate">
-                    {t(NODE_FORM_REGISTRY[type].title)}
-                  </span>
+                  <TypeTile type={entry.id} size="sm" />
+                  <span className="min-w-0 flex-1 truncate">{entry.title}</span>
                 </button>
               ))}
             </div>
@@ -173,14 +242,14 @@ const AddStepPicker: React.FC<AddStepPickerProps> = ({ onPick, onClose }) => {
           data-testid="step-picker-help"
           className="max-h-64 shrink-0 overflow-y-auto rounded-md border border-cx-border bg-cx-sub/50 p-3 text-sm @md:w-60"
         >
-          {shown ? (
+          {shownEntry ? (
             <>
               <div className="mb-1.5 flex items-center gap-2 font-medium text-cx-fg">
-                <TypeTile type={shown} size="md" />
-                <span>{t(NODE_FORM_REGISTRY[shown].title)}</span>
+                <TypeTile type={shownEntry.id} size="md" />
+                <span>{shownEntry.title}</span>
               </div>
               <p className="text-xs leading-relaxed text-cx-muted">
-                {t(STEP_HELP[shown as keyof typeof STEP_HELP])}
+                {shownEntry.help}
               </p>
             </>
           ) : (

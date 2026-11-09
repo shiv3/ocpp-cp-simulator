@@ -18,6 +18,7 @@ import {
   PhoneIncoming,
   Puzzle,
   Replace,
+  Repeat,
   Reply,
   SendHorizontal,
   ShieldBan,
@@ -119,6 +120,17 @@ export function tileForType(type: string | undefined): {
     className:
       CATEGORY_CLASS[category?.label ?? "Station quirks & config"] ??
       CATEGORY_CLASS["Station quirks & config"],
+  };
+}
+
+/** Tile of a picker structure entry (not a node type): "loop" is Flow control. */
+export function tileForStructure(kind: string): {
+  icon: TileIcon;
+  className: string;
+} {
+  return {
+    icon: kind === "loop" ? Repeat : CircleDot,
+    className: CATEGORY_CLASS["Flow control"],
   };
 }
 

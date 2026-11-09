@@ -13,12 +13,16 @@ let container: HTMLElement;
 const onPick = vi.fn();
 const onClose = vi.fn();
 
-async function render() {
+async function render(
+  props: Partial<React.ComponentProps<typeof AddStepPicker>> = {},
+) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
   await act(async () => {
-    root!.render(<AddStepPicker onPick={onPick} onClose={onClose} />);
+    root!.render(
+      <AddStepPicker onPick={onPick} onClose={onClose} {...props} />,
+    );
   });
 }
 
@@ -112,7 +116,7 @@ describe("AddStepPicker", () => {
     await render();
     await key(search(), "ArrowDown");
     const first = container.querySelector<HTMLButtonElement>(
-      "button[data-step-type]",
+      "button[data-step-option]",
     )!;
     expect(document.activeElement).toBe(first);
     expect(help().textContent).toContain(
@@ -147,6 +151,31 @@ describe("AddStepPicker", () => {
       }
     }
     await setLocale("en");
+  });
+
+  it("hides the Repeat entry unless a structure handler is wired", async () => {
+    await render();
+    expect(container.querySelector("[data-step-structure]")).toBeNull();
+    expect(container.textContent).not.toContain("Repeat");
+  });
+
+  it("lists Repeat under Flow control and describes / picks it when wired", async () => {
+    const onPickStructure = vi.fn();
+    await render({ onPickStructure });
+    const repeat = container.querySelector<HTMLButtonElement>(
+      'button[data-step-structure="loop"]',
+    )!;
+    expect(repeat.closest("div")!.parentElement!.textContent).toContain(
+      "Flow control",
+    );
+    await act(async () => repeat.focus());
+    expect(help().textContent).toContain("Repeats the steps inside it");
+    expect(repeat.getAttribute("aria-describedby")).toBe(help().id);
+    await type("repeat");
+    expect(container.querySelector("[data-step-structure]")).toBeTruthy();
+    await act(async () => repeat.click());
+    expect(onPickStructure).toHaveBeenCalledWith("loop");
+    expect(onPick).not.toHaveBeenCalled();
   });
 
   it("still picks a type and closes on Escape", async () => {

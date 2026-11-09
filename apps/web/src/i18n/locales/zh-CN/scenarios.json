@@ -251,5 +251,7 @@
   "scenarios.stepHelp.useBehavior": "在本次运行中调整或关闭内置或已加载的充电桩行为（固件更新、日志、重置等），可带参数，无需重新实现。",
   "scenarios.stepHelp.responseOverride": "为指定动作的下一次 CSMS 来电预设一次性应答，例如拒绝下一次远程启动。该次来电之后即失效。",
   "scenarios.stepHelp.inboundPolicy": "为 CSMS 来电设置持续规则：用 CALLERROR 应答，或直接忽略。重连后仍有效，直到被“应答”规则取代或运行结束。",
-  "scenarios.stepHelp.certQuirks": "设置或清除证书特性，例如 OCTT 预设（RSA CSR、CRLF PEM、单一签名算法），用于检验 CSMS 在严格认证工具下的表现。"
+  "scenarios.stepHelp.certQuirks": "设置或清除证书特性，例如 OCTT 预设（RSA CSR、CRLF PEM、单一签名算法），用于检验 CSMS 在严格认证工具下的表现。",
+  "scenarios.addStep.structure.loop": "重复",
+  "scenarios.addStep.structure.loopHelp": "重复其中的步骤。在步骤视图中把步骤拖入其中;在图视图中选择要返回的步骤。"
 }

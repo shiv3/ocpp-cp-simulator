@@ -260,5 +260,7 @@
   "scenarios.stepHelp.useBehavior": "Tunes or switches off a built-in or loaded station behavior (firmware update, logs, reset …) for this run, with optional parameters, instead of reimplementing it.",
   "scenarios.stepHelp.responseOverride": "Arms a one-shot answer for the next incoming CSMS call of a chosen action, e.g. reject the next remote start. It is used up by that call.",
   "scenarios.stepHelp.inboundPolicy": "Sets a lasting rule for an incoming CSMS call: answer with a CALLERROR, or ignore it. It survives reconnects until an Answer rule or the end of the run clears it.",
-  "scenarios.stepHelp.certQuirks": "Sets or clears certificate quirks, e.g. the OCTT preset (RSA CSR, CRLF PEM, one signature algorithm), to check a CSMS against strict certification tools."
+  "scenarios.stepHelp.certQuirks": "Sets or clears certificate quirks, e.g. the OCTT preset (RSA CSR, CRLF PEM, one signature algorithm), to check a CSMS against strict certification tools.",
+  "scenarios.addStep.structure.loop": "Repeat",
+  "scenarios.addStep.structure.loopHelp": "Repeats the steps inside it. In Steps view, drop steps into it; in Graph view, pick the step to go back to."
 }

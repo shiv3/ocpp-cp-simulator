@@ -269,5 +269,7 @@
   "scenarios.stepHelp.useBehavior": "Règle ou désactive un comportement de borne intégré ou chargé (mise à jour du firmware, journaux, réinitialisation …) pour cette exécution, avec des paramètres facultatifs, sans le réimplémenter.",
   "scenarios.stepHelp.responseOverride": "Arme une réponse unique pour le prochain appel entrant du CSMS d’une action choisie, p. ex. refuser le prochain démarrage à distance. Elle est consommée par cet appel.",
   "scenarios.stepHelp.inboundPolicy": "Définit une règle durable pour un appel entrant du CSMS : répondre par un CALLERROR, ou l’ignorer. Elle survit aux reconnexions jusqu’à une règle Répondre ou la fin de l’exécution.",
-  "scenarios.stepHelp.certQuirks": "Définit ou efface des particularités de certificat, p. ex. le préréglage OCTT (CSR RSA, PEM en CRLF, un seul algorithme de signature), pour tester un CSMS face à des outils de certification stricts."
+  "scenarios.stepHelp.certQuirks": "Définit ou efface des particularités de certificat, p. ex. le préréglage OCTT (CSR RSA, PEM en CRLF, un seul algorithme de signature), pour tester un CSMS face à des outils de certification stricts.",
+  "scenarios.addStep.structure.loop": "Répéter",
+  "scenarios.addStep.structure.loopHelp": "Répète les étapes qu'il contient. Dans la vue Étapes, déposez-y des étapes ; dans la vue Graphe, choisissez l'étape de retour."
 }

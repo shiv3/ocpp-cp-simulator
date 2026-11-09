@@ -234,8 +234,14 @@ describe("layoutTreeGraph", () => {
     const g = layout(def);
     expect(g.links.map((l) => [l.edgeId, l.role])).toEqual([["b->x", "join"]]);
     const xs = samples(g.links[0].d).map((p) => p.x);
-    const rightmost = Math.max(...g.cards.map((c) => c.x + NODE_W / 2));
-    expect(Math.max(...xs)).toBeGreaterThan(rightmost - NODE_W / 2);
+    // Orthogonal, into x's top, and on the canvas.
+    const pts = g.links[0].points;
+    for (let k = 1; k < pts.length; k++) {
+      expect(pts[k].x === pts[k - 1].x || pts[k].y === pts[k - 1].y).toBe(true);
+    }
+    const x = g.cards.find((c) => c.node.id === "x")!;
+    expect(pts[pts.length - 1].y).toBe(x.y);
+    expect(Math.min(...xs)).toBeGreaterThan(0);
     expect(g.width).toBeGreaterThan(Math.max(...xs));
   });
 
@@ -262,7 +268,15 @@ describe("layoutTreeGraph", () => {
     const boxes = [...cardRects(g), ...tagRects(g)];
     for (const p of samples(link.d)) {
       for (const box of boxes) expect(inside(p, box), box.name).toBe(false);
+      // Nor through an END ring or a + disc.
+      for (const e of [...g.ends, ...g.discs]) {
+        expect(Math.hypot(p.x - e.x, p.y - e.y)).toBeGreaterThan(8);
+      }
     }
+    // It takes the corridor between the two lanes, not a detour round the
+    // right of the canvas.
+    const a1 = g.cards.find((c) => c.node.id === "a1")!;
+    expect(Math.max(...pts.map((p) => p.x))).toBeLessThanOrEqual(a1.x);
   });
 
   it("an edge back into a START that fans out is not counted as drawn", () => {

@@ -50,9 +50,6 @@ const LOOP_STROKE = "var(--cx-purple)";
 /** The step picker opened from a `+` (and the room it needs below). */
 const PICKER_W = 260;
 const PICKER_H = 330;
-/** Room the loop label leaves for "Stop repeating" at the rectangle's
- *  right (the editor). */
-const UNWRAP_ROOM = 128;
 const WAIT_TYPES: ReadonlySet<string> = new Set(WAIT_STEP_TYPES);
 
 /**
@@ -387,9 +384,18 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
           const unwrapCap =
             onUnwrapLoop && !drag ? caps?.unwrap.get(loop.headerId) : undefined;
           return (
-            <React.Fragment key={`label:${loop.key}`}>
-              // The label leaves room after it for a future bound // ("×N",
-              "until …", "for 2h").
+            // The loop's label, then "Stop repeating" right after it (the
+            // label truncates first), all inside the rectangle. The label
+            // leaves room after it for a future bound ("×N", "until …").
+            <div
+              key={`label:${loop.key}`}
+              className="absolute flex items-center gap-2 whitespace-nowrap text-xs"
+              style={{
+                left: loop.label.x,
+                top: loop.label.y - 1,
+                maxWidth: loop.rect.x + loop.rect.w - loop.label.x - 6,
+              }}
+            >
               <div
                 data-loop-block=""
                 data-loop-to={loop.headerId}
@@ -402,20 +408,12 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
                     ? "scenarioRun.loopUntilExit"
                     : "scenarioRun.loopUntilRunStops",
                 )}
-                className="absolute flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-xs"
-                style={{
-                  left: loop.label.x,
-                  top: loop.label.y,
-                  // Inside the rectangle (and clear of "Stop repeating").
-                  maxWidth:
-                    loop.rect.x +
-                    loop.rect.w -
-                    loop.label.x -
-                    6 -
-                    (unwrapCap ? UNWRAP_ROOM : 0),
-                }}
+                className="flex min-w-0 items-center gap-1.5 overflow-hidden"
               >
-                <Repeat className="h-3.5 w-3.5 text-cx-purple" aria-hidden />
+                <Repeat
+                  className="h-3.5 w-3.5 shrink-0 text-cx-purple"
+                  aria-hidden
+                />
                 <span className="font-semibold text-cx-purple">
                   {t(
                     canExit
@@ -441,20 +439,13 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
                   }
                   disabled={!unwrapCap.ok}
                   onClick={() => onUnwrapLoop?.(loop.headerId)}
-                  className="absolute z-10 flex h-[18px] -translate-x-full items-center gap-1 whitespace-nowrap rounded px-1.5 text-xs font-medium text-cx-purple hover:bg-cx-purple/15 disabled:cursor-not-allowed disabled:opacity-40"
-                  style={{
-                    left: loop.rect.x + loop.rect.w - 8,
-                    top: loop.label.y - 1,
-                    maxWidth: UNWRAP_ROOM - 4,
-                  }}
+                  className="z-10 flex h-[18px] shrink-0 items-center gap-1 rounded border border-cx-purple/40 px-1.5 font-medium text-cx-purple hover:bg-cx-purple/15 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   <RepeatOff className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                  <span className="truncate">
-                    {t("scenarios.editor.unwrapLoop")}
-                  </span>
+                  {t("scenarios.editor.unwrapLoop")}
                 </button>
               )}
-            </React.Fragment>
+            </div>
           );
         })}
 

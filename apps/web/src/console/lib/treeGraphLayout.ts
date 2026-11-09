@@ -911,18 +911,28 @@ export function layoutTreeGraph(
   }
 
   // Jumps: dashed orthogonal routes. Out of the source card's side (an
-  // empty lane: its tag), along a channel beside every card and tag between
-  // the two rows, across the gap row above the target and down into its top
-  // corner; the side (right or left) whose route crosses nothing and is
+  // empty lane: its tag), along a vertical channel (beside everything
+  // between the two rows, or in the corridor between two columns), across
+  // the gap row above the target and down into its top corner on the
+  // channel's side. Of the channels tried, the one that crosses no card or
+  // tag, keeps clear of END rings, `+` discs, merge points and pills, and is
   // shortest wins. Channels are stepped so two jumps never share a line.
   const links: GraphLink[] = [];
   const cardOf = new Map(cards.map((c) => [c.node.id, c]));
-  const obstacles = [
+  interface Box {
+    l: number;
+    r: number;
+    t: number;
+    b: number;
+    id?: string;
+  }
+  const hard: Box[] = [
     ...cards.map((c) => ({
       l: c.x - NODE_W / 2,
       r: c.x + NODE_W / 2,
       t: c.y,
       b: c.y + NODE_H,
+      id: c.node.id,
     })),
     ...tags.map((tg) => ({
       l: tg.x - tg.w / 2,
@@ -931,18 +941,38 @@ export function layoutTreeGraph(
       b: tg.y + TAG_H,
     })),
   ];
-  /** Obstacles a polyline's segments cross (touching an edge is not). */
-  const crossings = (pts: Point[]): number => {
+  const around = (p: Point, r: number): Box => ({
+    l: p.x - r,
+    r: p.x + r,
+    t: p.y - r,
+    b: p.y + r,
+  });
+  const soft: Box[] = [
+    ...ends.map((e) => around(e, END_R + 2)),
+    ...discs.map((d) => around(d, 11)),
+    ...merges.map((m) => around(m, 5)),
+    ...(startDot ? [around(startDot, START_R + 2)] : []),
+    ...pills.map((pl) => ({ l: pl.x, r: pl.x + 72, t: pl.y, b: pl.y + 22 })),
+  ];
+  /** Boxes a polyline's segments cross (touching an edge is not), each
+   *  grown by `pad` (never the jump's own source and target cards). */
+  const crossings = (
+    pts: Point[],
+    boxes: readonly Box[],
+    pad = 0,
+    skip: ReadonlySet<string> = new Set(),
+  ): number => {
     let n = 0;
     for (let k = 1; k < pts.length; k++) {
       const p = pts[k - 1];
       const q = pts[k];
-      for (const o of obstacles) {
+      for (const o of boxes) {
+        const g = o.id !== undefined && skip.has(o.id) ? 0 : pad;
         if (
-          Math.max(p.x, q.x) > o.l + 1 &&
-          Math.min(p.x, q.x) < o.r - 1 &&
-          Math.max(p.y, q.y) > o.t + 1 &&
-          Math.min(p.y, q.y) < o.b - 1
+          Math.max(p.x, q.x) > o.l - g + 1 &&
+          Math.min(p.x, q.x) < o.r + g - 1 &&
+          Math.max(p.y, q.y) > o.t - g + 1 &&
+          Math.min(p.y, q.y) < o.b + g - 1
         ) {
           n++;
         }
@@ -966,43 +996,50 @@ export function layoutTreeGraph(
     const start = linkStarts.get(edge.id);
     if (!to || (!fromCard && !start)) continue;
     const gapY = to.y - GAP / 2;
-    const route = (side: 1 | -1) => {
-      const a = fromCard
-        ? { x: fromCard.x + (side * NODE_W) / 2, y: fromCard.y + NODE_H / 2 }
-        : { x: start!.x, y: start!.y + 6 };
-      const tx = to.x + side * (NODE_W / 2 - LINK_INSET);
-      const y1 = Math.min(a.y, gapY);
-      const y2 = Math.max(a.y, gapY);
-      const passed = obstacles.filter((o) => o.b >= y1 && o.t <= y2);
-      let swing =
-        side === 1
-          ? Math.max(a.x, tx, ...passed.map((o) => o.r)) + LINK_SWING
-          : Math.min(a.x, tx, ...passed.map((o) => o.l)) - LINK_SWING;
+    const srcX = fromCard ? fromCard.x : start!.x;
+    const srcY = fromCard ? fromCard.y + NODE_H / 2 : start!.y + 6;
+    const y1 = Math.min(srcY, gapY);
+    const y2 = Math.max(srcY, gapY);
+    const ends2 = new Set([edge.source, edge.target]);
+    const route = (channel: number) => {
+      let swing = channel;
       for (const sw of swings) {
         if (
           sw.top <= y2 &&
           sw.bottom >= y1 &&
           Math.abs(sw.x - swing) < LINK_STEP
         ) {
-          swing = sw.x + side * LINK_STEP;
+          swing = sw.x + (swing >= srcX ? LINK_STEP : -LINK_STEP);
         }
       }
+      const out = swing >= srcX ? 1 : -1;
+      const a = fromCard
+        ? { x: srcX + (out * NODE_W) / 2, y: srcY }
+        : { x: srcX, y: srcY };
+      const tx = to.x + (swing >= to.x ? 1 : -1) * (NODE_W / 2 - LINK_INSET);
       const pts = dedupe([
         a,
-        { x: swing, y: a.y },
+        { x: swing, y: srcY },
         { x: swing, y: gapY },
         { x: tx, y: gapY },
         { x: tx, y: to.y },
       ]);
-      return { pts, swing, y1, y2, side };
+      const score =
+        crossings(pts, hard) * 1e6 +
+        crossings(pts, soft) * 1e4 +
+        crossings(pts, hard, 6, ends2) * 1e3 +
+        length(pts);
+      return { pts, swing, score };
     };
-    const options = [route(1), route(-1)].filter(
-      (o) => o.side === 1 || o.swing >= 4,
-    );
-    const score = (o: (typeof options)[number]) =>
-      crossings(o.pts) * 1e6 + length(o.pts);
-    const best = options.reduce((m, o) => (score(o) < score(m) ? o : m));
-    swings.push({ top: best.y1, bottom: best.y2, x: best.swing });
+    const passed = hard.filter((o) => o.b >= y1 && o.t <= y2);
+    const channels = new Set<number>([
+      Math.max(srcX + NODE_W / 2, to.x, ...passed.map((o) => o.r)) + LINK_SWING,
+      Math.min(srcX - NODE_W / 2, to.x, ...passed.map((o) => o.l)) - LINK_SWING,
+      ...passed.flatMap((o) => [o.r + 12, o.l - 12]),
+    ]);
+    const options = [...channels].map(route).filter((o) => o.swing >= 4);
+    const best = options.reduce((m, o) => (o.score < m.score ? o : m));
+    swings.push({ top: y1, bottom: y2, x: best.swing });
     right = Math.max(right, best.swing + 8);
     links.push({
       key: edge.id,
@@ -1013,7 +1050,7 @@ export function layoutTreeGraph(
       to: edge.target,
       role: link.role,
       lane: fromCard?.lane ?? 0,
-      mid: { x: best.swing, y: (best.y1 + best.y2) / 2 },
+      mid: { x: best.swing, y: (y1 + y2) / 2 },
     });
   }
 

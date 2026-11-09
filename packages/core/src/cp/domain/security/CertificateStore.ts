@@ -18,6 +18,7 @@ import {
   type RootCertificateUse,
   type SignedCertificateUse,
 } from "./certificateUse";
+import { checkSignedChain } from "./signedChainChecks";
 import { generateCsr, type CsrGenerationOptions } from "./csr";
 import { realClock } from "../../shared/clock";
 import type { SimClock } from "../../shared/clock";
@@ -96,11 +97,17 @@ export type ApplySignedChainOutcome =
   | { status: "Malformed" }
   | { status: "NoPendingCsr" }
   | { status: "PublicKeyMismatch" }
-  /** The leaf's `notAfter` has passed (A02.FR.06, #587). */
-  | { status: "Expired" }
-  /** The leaf's `notBefore` is in the future (2.0.1 and 2.1 A02.FR.06,
-   *  #587). */
-  | { status: "NotYetValid" };
+  /** A chain member's `notAfter` has passed (A02.FR.06, #587); `reason`
+   *  names the member. */
+  | { status: "Expired"; reason: string }
+  /** A chain member's `notBefore` is in the future (2.0.1 and 2.1
+   *  A02.FR.06, #587). */
+  | { status: "NotYetValid"; reason: string }
+  /** The key or subject breaks the Certificate Properties (A02.FR.06,
+   *  A00.FR.501-511, #587). */
+  | { status: "InvalidProperties"; reason: string }
+  /** The chain is not part of the operator hierarchy (A02.FR.06, #587). */
+  | { status: "OutsideHierarchy"; reason: string };
 
 /**
  * Safe snapshot of the store. Holds public material only (certificates and
@@ -339,12 +346,22 @@ export class CertificateStore {
     }
     // Checked after the key, so a chain answering a superseded CSR is told
     // apart from an invalid answer to this one (#587).
-    const leaf = new x509.X509Certificate(chain.pems[0]);
-    const now = this.clock.now();
-    if (now >= leaf.notAfter.getTime()) return { status: "Expired" };
-    if (now < leaf.notBefore.getTime()) {
-      return { status: "NotYetValid" };
-    }
+    const failure = await checkSignedChain({
+      use,
+      chain: chain.pems.map((pem) => new x509.X509Certificate(pem)),
+      anchors: this.listRootCertificates([hierarchyRootUse(use)]).flatMap(
+        (root) => {
+          try {
+            return [new x509.X509Certificate(root.pem)];
+          } catch {
+            // A root stored by an older build that the parser refuses now.
+            return [];
+          }
+        },
+      ),
+      now: this.clock.now(),
+    });
+    if (failure) return failure;
 
     // Bound before the change is announced, so a listener reading
     // tlsClientIdentity() sees the new chain with its key. The leaf is
@@ -800,6 +817,13 @@ function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
  * root never issues a chain member, and DeleteCertificate still removes it by
  * its stored hash data.
  */
+/** The trust anchor of the hierarchy a signed certificate belongs to. */
+function hierarchyRootUse(use: SignedCertificateUse): RootCertificateUse {
+  return use === "ChargingStationCertificate"
+    ? "CsmsRootCertificate"
+    : "V2GRootCertificate";
+}
+
 function subjectOf(pem: string): string | undefined {
   try {
     return new x509.X509Certificate(pem).subject;

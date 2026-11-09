@@ -474,8 +474,8 @@ export class ChargePoint {
   private readonly _rawFrames: RawFrameSender | null;
   private readonly _messageHandler: IChargePointMessageHandler;
   private readonly _transportUrl: string;
-  /** #537: waits for a renewed certificate's notBefore (2.0.1 A02.FR.08),
-   *  then for the transaction messages in flight before reconnecting. */
+  /** #537: waits for the transaction messages in flight before reconnecting
+   *  with a renewed certificate (A02.FR.08). */
   private _cancelClientCertificateSwitchTimer: (() => void) | null = null;
   /** #537: bumped by every switch request and every cancel, so a request
    *  still reading the store when a newer one (or a cancel) arrives does
@@ -2699,24 +2699,9 @@ export class ChargePoint {
       webSocket.clearRenewedClientCertificate();
       return;
     }
-    const wait = identity.notBefore.getTime() - this._clock.now();
-    if (wait > 0) {
-      this._logger.info(
-        `Renewed Charging Station certificate valid from ${identity.notBefore.toISOString()}; switching then (A02.FR.08)`,
-        LogType.WEBSOCKET,
-      );
-      // Unref'd: a wait of days must not keep the process alive. When it
-      // passes, an open connection reconnects whichever call set it.
-      this._cancelClientCertificateSwitchTimer = setTimeoutAt(
-        identity.notBefore.getTime(),
-        () => {
-          if (request !== this._clientCertificateSwitchSeq) return;
-          void this.useRenewedClientCertificate();
-        },
-        { clock: this._clock, unref: true },
-      );
-      return;
-    }
+    // No wait for `notBefore` (A02.FR.08): CertificateSigned refuses a leaf
+    // that is not valid yet (A02.FR.06/07, #587), so a stored identity is
+    // valid when it is handed over.
     webSocket.useRenewedClientCertificate(identity);
     if (!reconnect) return;
     // A station that is not connected (back-off, simulated outage, manual
@@ -2772,7 +2757,7 @@ export class ChargePoint {
 
   /**
    * #537: ends the renewed certificate switch for good on an instance being
-   * replaced (`cp.update`) or disposed: cancels the notBefore or in-flight
+   * replaced (`cp.update`) or disposed: cancels the in-flight
    * wait, stops following the store, and drops every in-memory key — the
    * transport's renewed identities and the store's private keys. The
    * stored chains stay; the replacement presents the configured
@@ -3382,8 +3367,7 @@ export class ChargePoint {
         : `Disconnecting ${this._ocppVersion} SOAP client`,
       this._webSocket ? LogType.WEBSOCKET : LogType.OCPP,
     );
-    // A renewed certificate's notBefore wait survives a manual disconnect:
-    // once valid, it is presented at the next connect() (#537).
+    // A renewed certificate is presented at the next connect() (#537).
     this._webSocket?.disconnect(); // drains network-sim pipelines synchronously (spec 2.6 step 1)
     this.teardownAfterClose(); // handler teardown incl. serializer _serialQueue salvage (step 2)
   }

@@ -433,8 +433,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     this._codec = codec;
     this._inbound = inboundRegistry ?? buildV201InboundRegistry();
     this._pendingQueue = new PendingMessageQueue(
-      chargePoint.id,
-      chargePoint.database ?? null,
+      chargePoint.pendingMessages,
       QUEUED_ON_OCPP2,
       chargePoint.clock,
     );

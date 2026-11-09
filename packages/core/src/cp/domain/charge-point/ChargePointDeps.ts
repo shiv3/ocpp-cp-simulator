@@ -133,7 +133,7 @@ export interface ChargePointDeps extends ChargePointServiceFactories {
   /**
    * Builds the transport. Called once, from inside the constructor, after
    * the connectors exist and before the configuration store is built: the
-   * message handlers read the charge point (`clock`, `id`, `database`,
+   * message handlers read the charge point (`clock`, `id`, `pendingMessages`,
    * `behaviors`) when they are constructed. The charge point then sets the
    * reconnect policy, the WS client options and its observers on the socket.
    */

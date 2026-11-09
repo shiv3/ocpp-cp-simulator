@@ -47,7 +47,6 @@ function setup() {
   const socket = new FakeSocket();
   const chargePoint = {
     id: "CP",
-    database: null,
     connectors: new Map(),
     configuration: { transactionMessageAttempts: () => 3 },
     notifyOutgoingCall: vi.fn(),

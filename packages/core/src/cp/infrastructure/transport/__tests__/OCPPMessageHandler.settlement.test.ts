@@ -111,7 +111,6 @@ class FakeSocket implements Partial<OCPPWebSocket> {
  */
 class MockChargePoint {
   id = "TEST-CP";
-  database: unknown = null;
 
   configuration = {
     transactionMessageAttempts: () => 3,

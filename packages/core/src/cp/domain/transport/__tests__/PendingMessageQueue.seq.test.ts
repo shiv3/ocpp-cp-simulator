@@ -3,174 +3,55 @@ import {
   PendingMessageQueue,
   type PendingMessage,
 } from "../PendingMessageQueue";
-import type { Database } from "../../persistence/Database";
+import {
+  NoopPendingMessageRepository,
+  type PendingMessageRepository,
+  type StoredPendingMessage,
+} from "../../persistence/PendingMessageRepository";
 import { OCPPAction } from "../../types/OcppTypes";
 
 /**
- * Mock in-memory Database implementation for vitest testing.
- * Implements a minimal SQL subset sufficient for PendingMessageQueue.
+ * In-memory {@link PendingMessageRepository} for one charge point: rows as
+ * stored, loaded in the SQLite repository's order (seq ascending, a null
+ * seq first, then created_at). The SQL itself is covered by
+ * `infrastructure/persistence/__tests__/PendingMessageRepository.bun.test.ts`.
  */
-class MockSqliteDatabase implements Database {
-  private tables: Map<string, Map<string, Record<string, unknown>>> = new Map();
-  private indices: Map<string, string[]> = new Map();
+class InMemoryPendingMessageRepository implements PendingMessageRepository {
+  /** The stored rows, in insertion order. */
+  readonly rows: StoredPendingMessage[] = [];
 
-  constructor() {
-    this.initializeTables();
+  loadAll(): StoredPendingMessage[] {
+    return [...this.rows]
+      .sort(
+        (a, b) =>
+          (a.seq ?? Number.NEGATIVE_INFINITY) -
+            (b.seq ?? Number.NEGATIVE_INFINITY) ||
+          a.createdAt.localeCompare(b.createdAt),
+      )
+      .map((row) => ({ ...row }));
   }
 
-  private initializeTables(): void {
-    // Create schema_meta table
-    this.tables.set("schema_meta", new Map());
-    // Create pending_messages table
-    this.tables.set("pending_messages", new Map());
-  }
-
-  exec(sql: string): void {
-    // Handle schema creation DDL
-    if (sql.includes("CREATE INDEX IF NOT EXISTS pending_by_cp_seq")) {
-      this.indices.set("pending_by_cp_seq", []);
+  insert(message: StoredPendingMessage): void {
+    // (cp_id, message_id) is the table's primary key.
+    if (this.rows.some((row) => row.messageId === message.messageId)) {
+      throw new Error("UNIQUE constraint failed: pending_messages.message_id");
     }
+    this.rows.push({ ...message });
   }
 
-  run(sql: string, params: unknown[] = []): void {
-    if (sql.includes("INSERT INTO schema_meta")) {
-      const table = this.tables.get("schema_meta")!;
-      table.set(params[0] as string, { value: params[1] });
-    } else if (sql.includes("INSERT INTO pending_messages")) {
-      const table = this.tables.get("pending_messages")!;
-      const [
-        cp_id,
-        message_id,
-        action,
-        connector_id,
-        payload,
-        attempts,
-        created_at,
-        seq,
-      ] = params;
-      const key = `${cp_id}|${message_id}`;
-      table.set(key, {
-        cp_id,
-        message_id,
-        action,
-        connector_id,
-        payload,
-        attempts,
-        created_at,
-        seq,
-      });
-    } else if (sql.includes("UPDATE pending_messages SET attempts")) {
-      const [attempts, cp_id, message_id] = params;
-      const table = this.tables.get("pending_messages")!;
-      const key = `${cp_id}|${message_id}`;
-      const row = table.get(key);
-      if (row) {
-        table.set(key, { ...row, attempts });
-      }
-    } else if (sql.includes("UPDATE pending_messages SET seq = rowid")) {
-      // Backfill seq from rowid during migration
-      const table = this.tables.get("pending_messages")!;
-      let rowid = 1;
-      for (const [, row] of table.entries()) {
-        if (row.seq === null || row.seq === undefined) {
-          row.seq = rowid;
-        }
-        rowid++;
-      }
-    } else if (sql.includes("DELETE FROM pending_messages")) {
-      const table = this.tables.get("pending_messages")!;
-      if (sql.includes("WHERE cp_id = ? AND message_id = ?")) {
-        const [cp_id, message_id] = params;
-        const key = `${cp_id}|${message_id}`;
-        table.delete(key);
-      } else if (sql.includes("WHERE cp_id = ?")) {
-        const [cp_id] = params;
-        for (const key of table.keys()) {
-          if (key.startsWith(`${cp_id}|`)) {
-            table.delete(key);
-          }
-        }
-      }
-    }
+  delete(messageId: string): void {
+    const index = this.rows.findIndex((row) => row.messageId === messageId);
+    if (index >= 0) this.rows.splice(index, 1);
   }
 
-  all<T = Record<string, unknown>>(sql: string, params: unknown[] = []): T[] {
-    if (sql.includes("PRAGMA table_info")) {
-      // Support for migration column checks
-      const tableName = sql.match(/PRAGMA table_info\((\w+)\)/)?.[1];
-      if (tableName === "pending_messages") {
-        return [
-          { name: "cp_id" },
-          { name: "message_id" },
-          { name: "action" },
-          { name: "connector_id" },
-          { name: "payload" },
-          { name: "attempts" },
-          { name: "created_at" },
-          { name: "seq" },
-        ] as T[];
-      }
-    } else if (sql.includes("SELECT name FROM sqlite_master")) {
-      // Support for index checks
-      const indices = [
-        { name: "pending_by_cp_seq" },
-        { name: "pending_by_cp" },
-      ];
-      return indices as T[];
-    } else if (
-      sql.includes(
-        "SELECT message_id, action, connector_id, payload, attempts, created_at, seq",
-      ) &&
-      sql.includes("FROM pending_messages")
-    ) {
-      const table = this.tables.get("pending_messages")!;
-      const [cp_id] = params;
-      const rows: T[] = [];
-      for (const row of table.values()) {
-        if ((row as Record<string, unknown>).cp_id === cp_id) {
-          // Return in seq order
-          rows.push(row as T);
-        }
-      }
-      // Sort by seq to match ORDER BY seq ASC
-      rows.sort((a, b) => {
-        const seqA = (a as Record<string, unknown>).seq as number;
-        const seqB = (b as Record<string, unknown>).seq as number;
-        return (seqA || 0) - (seqB || 0);
-      });
-      return rows;
-    }
-    return [] as T[];
+  updateAttempts(messageId: string, attempts: number): void {
+    const index = this.rows.findIndex((row) => row.messageId === messageId);
+    if (index >= 0) this.rows[index] = { ...this.rows[index], attempts };
   }
 
-  get<T = Record<string, unknown>>(
-    sql: string,
-    params: unknown[] = [],
-  ): T | null {
-    if (sql.includes("SELECT value FROM schema_meta")) {
-      const table = this.tables.get("schema_meta")!;
-      const row = table.get(params[0] as string);
-      return (row as T) || null;
-    }
-    return null;
+  clear(): void {
+    this.rows.length = 0;
   }
-
-  close(): void {
-    this.tables.clear();
-  }
-}
-
-/** Raw persisted rows for a cp, in seq order — bypasses the queue's own
- *  mapping so tests can assert on `seq` / `message_id` directly. */
-function readRows(
-  db: Database,
-  cpId: string,
-): { message_id: string; action: string; seq: number }[] {
-  return db.all<{ message_id: string; action: string; seq: number }>(
-    "SELECT message_id, action, connector_id, payload, attempts, created_at, seq " +
-      "FROM pending_messages WHERE cp_id = ? ORDER BY seq ASC, created_at ASC",
-    [cpId],
-  );
 }
 
 /** The 1.6 handler's queued actions. */
@@ -183,7 +64,10 @@ const QUEUED: ReadonlySet<OCPPAction> = new Set([
 describe("PendingMessageQueue with seq", () => {
   describe("in-memory mode (no database)", () => {
     it("enqueues and dequeues with seq assignment", () => {
-      const queue = new PendingMessageQueue("cp-test", null, QUEUED);
+      const queue = new PendingMessageQueue(
+        new NoopPendingMessageRepository(),
+        QUEUED,
+      );
       queue.enqueue({
         action: OCPPAction.StartTransaction,
         payload: { foo: "bar" },
@@ -202,7 +86,10 @@ describe("PendingMessageQueue with seq", () => {
     });
 
     it("maintains FIFO order for same-millisecond bursts", () => {
-      const queue = new PendingMessageQueue("cp-test", null, QUEUED);
+      const queue = new PendingMessageQueue(
+        new NoopPendingMessageRepository(),
+        QUEUED,
+      );
       const now = 1700000000000;
       vi.setSystemTime(new Date(now));
 
@@ -231,7 +118,10 @@ describe("PendingMessageQueue with seq", () => {
     });
 
     it("continues seq counter across multiple enqueue calls", () => {
-      const queue = new PendingMessageQueue("cp-test", null, QUEUED);
+      const queue = new PendingMessageQueue(
+        new NoopPendingMessageRepository(),
+        QUEUED,
+      );
       queue.enqueue({
         action: OCPPAction.StartTransaction,
         payload: {},
@@ -248,7 +138,10 @@ describe("PendingMessageQueue with seq", () => {
     });
 
     it("dequeues in FIFO order", () => {
-      const queue = new PendingMessageQueue("cp-test", null, QUEUED);
+      const queue = new PendingMessageQueue(
+        new NoopPendingMessageRepository(),
+        QUEUED,
+      );
       queue.enqueue({
         action: OCPPAction.StartTransaction,
         payload: { order: 1 },
@@ -271,19 +164,14 @@ describe("PendingMessageQueue with seq", () => {
   });
 
   describe("database-backed mode", () => {
-    let db: MockSqliteDatabase;
+    let repo: InMemoryPendingMessageRepository;
 
     beforeEach(() => {
-      db = new MockSqliteDatabase();
-      // Simulate running migrations to set up schema
-      db.run("INSERT INTO schema_meta (key, value) VALUES ('version', ?)", [
-        "version",
-        "6",
-      ]);
+      repo = new InMemoryPendingMessageRepository();
     });
 
     it("persists and loads messages with seq", () => {
-      const queue1 = new PendingMessageQueue("cp-db-test", db, QUEUED);
+      const queue1 = new PendingMessageQueue(repo, QUEUED);
       queue1.enqueue({
         action: OCPPAction.StartTransaction,
         payload: { tx: 123 },
@@ -296,7 +184,7 @@ describe("PendingMessageQueue with seq", () => {
       });
 
       // Create a new queue instance and load from DB
-      const queue2 = new PendingMessageQueue("cp-db-test", db, QUEUED);
+      const queue2 = new PendingMessageQueue(repo, QUEUED);
       expect(queue2.size()).toBe(2);
       const all = queue2.all();
       expect(all[0].action).toBe(OCPPAction.StartTransaction);
@@ -304,7 +192,7 @@ describe("PendingMessageQueue with seq", () => {
     });
 
     it("removeOldest drops the oldest row of one action only, persisted (#538)", () => {
-      const queue1 = new PendingMessageQueue("cp-db-test", db, QUEUED);
+      const queue1 = new PendingMessageQueue(repo, QUEUED);
       for (const [action, n] of [
         [OCPPAction.StartTransaction, 1],
         [OCPPAction.MeterValues, 2],
@@ -316,13 +204,13 @@ describe("PendingMessageQueue with seq", () => {
       expect(queue1.removeOldest(OCPPAction.MeterValues)).toBe(true);
       expect(queue1.removeOldest(OCPPAction.StopTransaction)).toBe(false);
 
-      const queue2 = new PendingMessageQueue("cp-db-test", db, QUEUED);
+      const queue2 = new PendingMessageQueue(repo, QUEUED);
       expect(queue2.all().map((m) => m.payload)).toEqual([{ n: 1 }, { n: 3 }]);
       expect(queue2.countOf(OCPPAction.MeterValues)).toBe(1);
     });
 
     it("removeOldest with a predicate drops the oldest matching row only (#538)", () => {
-      const queue1 = new PendingMessageQueue("cp-db-test", db, QUEUED);
+      const queue1 = new PendingMessageQueue(repo, QUEUED);
       for (const n of [1, 2, 3, 4]) {
         queue1.enqueue({ action: OCPPAction.MeterValues, payload: { n } });
       }
@@ -335,7 +223,7 @@ describe("PendingMessageQueue with seq", () => {
         ),
       ).toBe(false);
 
-      const queue2 = new PendingMessageQueue("cp-db-test", db, QUEUED);
+      const queue2 = new PendingMessageQueue(repo, QUEUED);
       expect(queue2.all().map((m) => m.payload)).toEqual([
         { n: 1 },
         { n: 3 },
@@ -344,7 +232,7 @@ describe("PendingMessageQueue with seq", () => {
     });
 
     it("orders by seq on reload", () => {
-      const queue1 = new PendingMessageQueue("cp-db-test", db, QUEUED);
+      const queue1 = new PendingMessageQueue(repo, QUEUED);
       const now = 1700000000000;
       vi.setSystemTime(new Date(now));
 
@@ -364,7 +252,7 @@ describe("PendingMessageQueue with seq", () => {
       vi.useRealTimers();
 
       // Reload and verify order is preserved
-      const queue2 = new PendingMessageQueue("cp-db-test", db, QUEUED);
+      const queue2 = new PendingMessageQueue(repo, QUEUED);
       const all = queue2.all();
       expect(
         all.map((m) => (m.payload as Record<string, unknown>).order),
@@ -372,7 +260,7 @@ describe("PendingMessageQueue with seq", () => {
     });
 
     it("allocator restarts with seq continuing above MAX", () => {
-      const queue1 = new PendingMessageQueue("cp-db-test", db, QUEUED);
+      const queue1 = new PendingMessageQueue(repo, QUEUED);
       queue1.enqueue({
         action: OCPPAction.StartTransaction,
         payload: { batch: 1 },
@@ -383,7 +271,7 @@ describe("PendingMessageQueue with seq", () => {
       });
 
       // Simulate restart: new queue loads from DB
-      const queue2 = new PendingMessageQueue("cp-db-test", db, QUEUED);
+      const queue2 = new PendingMessageQueue(repo, QUEUED);
       expect(queue2.size()).toBe(2);
 
       // Enqueue a new message; it should get seq >= 3
@@ -393,24 +281,24 @@ describe("PendingMessageQueue with seq", () => {
       });
 
       // Verify order: original 2 messages, then the new one
-      const queue3 = new PendingMessageQueue("cp-db-test", db, QUEUED);
+      const queue3 = new PendingMessageQueue(repo, QUEUED);
       expect(queue3.size()).toBe(3);
       const all = queue3.all();
       expect(all[2].action).toBe(OCPPAction.StopTransaction);
     });
 
     it("advances seq by exactly 1 per enqueue", () => {
-      const queue = new PendingMessageQueue("cp-db-test", db, QUEUED);
+      const queue = new PendingMessageQueue(repo, QUEUED);
       queue.enqueue({ action: OCPPAction.StartTransaction, payload: {} });
       queue.enqueue({ action: OCPPAction.MeterValues, payload: {} });
       queue.enqueue({ action: OCPPAction.StopTransaction, payload: {} });
 
-      const seqs = readRows(db, "cp-db-test").map((r) => r.seq);
+      const seqs = repo.rows.map((r) => r.seq);
       expect(seqs).toEqual([1, 2, 3]);
     });
 
     it("does not leak persistence columns through the public shape", () => {
-      const queue = new PendingMessageQueue("cp-db-test", db, QUEUED);
+      const queue = new PendingMessageQueue(repo, QUEUED);
       queue.enqueue({ action: OCPPAction.StartTransaction, payload: {} });
 
       const flushed: PendingMessage[] = [];
@@ -419,7 +307,7 @@ describe("PendingMessageQueue with seq", () => {
         return true;
       }, 3);
 
-      const queue2 = new PendingMessageQueue("cp-db-test", db, QUEUED);
+      const queue2 = new PendingMessageQueue(repo, QUEUED);
       queue2.enqueue({ action: OCPPAction.MeterValues, payload: {} });
       const seen = [...queue2.all(), queue2.dequeue()!, ...flushed];
 
@@ -436,22 +324,22 @@ describe("PendingMessageQueue with seq", () => {
       // Two queue instances for the same cp, opened while the clock is
       // frozen: the second one loads the first one's rows and must not mint
       // an id that collides with them ((cp_id, message_id) is the PK).
-      const queue1 = new PendingMessageQueue("cp-db-test", db, QUEUED);
+      const queue1 = new PendingMessageQueue(repo, QUEUED);
       queue1.enqueue({ action: OCPPAction.StartTransaction, payload: {} });
       queue1.enqueue({ action: OCPPAction.MeterValues, payload: {} });
 
-      const queue2 = new PendingMessageQueue("cp-db-test", db, QUEUED);
+      const queue2 = new PendingMessageQueue(repo, QUEUED);
       queue2.enqueue({ action: OCPPAction.StopTransaction, payload: {} });
 
       vi.useRealTimers();
 
-      const ids = readRows(db, "cp-db-test").map((r) => r.message_id);
+      const ids = repo.rows.map((r) => r.messageId);
       expect(ids).toHaveLength(3);
       expect(new Set(ids).size).toBe(3);
     });
 
     it("flush() removes delivered messages and retries failed ones", () => {
-      const queue = new PendingMessageQueue("cp-db-test", db, QUEUED);
+      const queue = new PendingMessageQueue(repo, QUEUED);
       queue.enqueue({
         action: OCPPAction.StartTransaction,
         payload: {},
@@ -481,7 +369,7 @@ describe("PendingMessageQueue with seq", () => {
     });
 
     it("clear() removes all messages for this CP", () => {
-      const queue = new PendingMessageQueue("cp-db-test", db, QUEUED);
+      const queue = new PendingMessageQueue(repo, QUEUED);
       queue.enqueue({ action: OCPPAction.StartTransaction, payload: {} });
       queue.enqueue({ action: OCPPAction.MeterValues, payload: {} });
 
@@ -489,28 +377,32 @@ describe("PendingMessageQueue with seq", () => {
       expect(queue.size()).toBe(0);
 
       // Verify it's gone from DB too
-      const queue2 = new PendingMessageQueue("cp-db-test", db, QUEUED);
+      const queue2 = new PendingMessageQueue(repo, QUEUED);
       expect(queue2.size()).toBe(0);
     });
 
     it("different CPs maintain separate seq counters", () => {
-      const queueA = new PendingMessageQueue("cp-a", db, QUEUED);
+      // One repository per charge point, as ChargePoint builds them; the
+      // per-cp_id SQL is covered by the SQLite repository's bun test.
+      const repoA = new InMemoryPendingMessageRepository();
+      const repoB = new InMemoryPendingMessageRepository();
+      const queueA = new PendingMessageQueue(repoA, QUEUED);
       queueA.enqueue({
         action: OCPPAction.StartTransaction,
         payload: { cp: "a" },
       });
       queueA.enqueue({ action: OCPPAction.MeterValues, payload: { cp: "a" } });
 
-      const queueB = new PendingMessageQueue("cp-b", db, QUEUED);
+      const queueB = new PendingMessageQueue(repoB, QUEUED);
       queueB.enqueue({
         action: OCPPAction.StartTransaction,
         payload: { cp: "b" },
       });
 
-      const queueA2 = new PendingMessageQueue("cp-a", db, QUEUED);
+      const queueA2 = new PendingMessageQueue(repoA, QUEUED);
       expect(queueA2.size()).toBe(2);
 
-      const queueB2 = new PendingMessageQueue("cp-b", db, QUEUED);
+      const queueB2 = new PendingMessageQueue(repoB, QUEUED);
       expect(queueB2.size()).toBe(1);
 
       // Verify order within each CP
@@ -522,21 +414,15 @@ describe("PendingMessageQueue with seq", () => {
 
     it("deletes on load the rows of actions it does not queue (#528)", () => {
       // The table is shared by the 1.6 and 2.x handlers of one charge point.
-      const v2 = new PendingMessageQueue(
-        "cp-db-test",
-        db,
-        new Set(["TransactionEvent"]),
-      );
+      const v2 = new PendingMessageQueue(repo, new Set(["TransactionEvent"]));
       v2.enqueue({ action: "TransactionEvent", payload: { seqNo: 0 } });
-      const before = new PendingMessageQueue("cp-db-test", db, QUEUED);
+      const before = new PendingMessageQueue(repo, QUEUED);
       before.enqueue({ action: OCPPAction.MeterValues, payload: {} });
       // Deleted from the table at once, not only skipped.
-      expect(readRows(db, "cp-db-test").map((r) => r.action)).toEqual([
-        OCPPAction.MeterValues,
-      ]);
+      expect(repo.rows.map((r) => r.action)).toEqual([OCPPAction.MeterValues]);
       expect(before.droppedOnLoad).toEqual(["TransactionEvent"]);
 
-      const reloaded = new PendingMessageQueue("cp-db-test", db, QUEUED);
+      const reloaded = new PendingMessageQueue(repo, QUEUED);
       expect(reloaded.droppedOnLoad).toEqual([]);
       expect(reloaded.all().map((m) => m.action)).toEqual([
         OCPPAction.MeterValues,
@@ -544,91 +430,12 @@ describe("PendingMessageQueue with seq", () => {
     });
   });
 
-  describe("legacy/migration scenarios", () => {
-    it("handles pre-migration rows with identical created_at", () => {
-      // Simulate a pre-migration DB with duplicate timestamps
-      const db = new MockSqliteDatabase();
-      const now = new Date("2026-07-24T12:00:00.000Z").toISOString();
-
-      // Insert rows with identical created_at but different seq values after backfill
-      db.run(
-        "INSERT INTO pending_messages (cp_id, message_id, action, connector_id, payload, attempts, created_at, seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        [
-          "cp-legacy",
-          "msg-1",
-          OCPPAction.StartTransaction,
-          1,
-          '{"tx":1}',
-          0,
-          now,
-          null,
-        ],
-      );
-      db.run(
-        "INSERT INTO pending_messages (cp_id, message_id, action, connector_id, payload, attempts, created_at, seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        [
-          "cp-legacy",
-          "msg-2",
-          OCPPAction.MeterValues,
-          1,
-          '{"tx":1,"meterValue":100}',
-          0,
-          now,
-          null,
-        ],
-      );
-      db.run(
-        "INSERT INTO pending_messages (cp_id, message_id, action, connector_id, payload, attempts, created_at, seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        [
-          "cp-legacy",
-          "msg-3",
-          OCPPAction.StopTransaction,
-          1,
-          '{"tx":1}',
-          0,
-          now,
-          null,
-        ],
-      );
-
-      // Simulate migration: backfill seq from rowid
-      db.run("UPDATE pending_messages SET seq = rowid WHERE seq IS NULL", []);
-
-      // Load and verify order is preserved
-      const queue = new PendingMessageQueue("cp-legacy", db, QUEUED);
-      const all = queue.all();
-
-      expect(all.length).toBe(3);
-      expect(all[0].action).toBe(OCPPAction.StartTransaction);
-      expect(all[1].action).toBe(OCPPAction.MeterValues);
-      expect(all[2].action).toBe(OCPPAction.StopTransaction);
-    });
-
-    it("fresh DB has seq column in schema", () => {
-      const db = new MockSqliteDatabase();
-      const rows = db.all<{ name: string }>(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'pending_messages'",
-      );
-      // In mock, table exists; in real DB, schema creation would add seq column
-      expect(rows.length).toBeGreaterThanOrEqual(0);
-    });
-
-    it("index pending_by_cp_seq exists after migration", () => {
-      const db = new MockSqliteDatabase();
-      db.exec(
-        "CREATE INDEX IF NOT EXISTS pending_by_cp_seq ON pending_messages (cp_id, seq)",
-      );
-
-      const indices = db.all<{ name: string }>(
-        "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'pending_by_cp_seq'",
-      );
-      expect(indices.length).toBeGreaterThanOrEqual(0);
-    });
-  });
-
   describe("StartTransaction/StopTransaction ordering", () => {
     it("maintains Start before Stop when enqueued in same millisecond", () => {
-      const queue = new PendingMessageQueue("cp-tx-order", null, QUEUED);
+      const queue = new PendingMessageQueue(
+        new NoopPendingMessageRepository(),
+        QUEUED,
+      );
       const now = 1700000000000;
       vi.setSystemTime(new Date(now));
 
@@ -652,8 +459,8 @@ describe("PendingMessageQueue with seq", () => {
     });
 
     it("Start-Stop order preserved across restart", () => {
-      const db = new MockSqliteDatabase();
-      const queue1 = new PendingMessageQueue("cp-tx-persist", db, QUEUED);
+      const repo = new InMemoryPendingMessageRepository();
+      const queue1 = new PendingMessageQueue(repo, QUEUED);
       const now = 1700000000000;
       vi.setSystemTime(new Date(now));
 
@@ -671,7 +478,7 @@ describe("PendingMessageQueue with seq", () => {
       vi.useRealTimers();
 
       // Reload from DB
-      const queue2 = new PendingMessageQueue("cp-tx-persist", db, QUEUED);
+      const queue2 = new PendingMessageQueue(repo, QUEUED);
       const all = queue2.all();
       expect(all[0].action).toBe(OCPPAction.StartTransaction);
       expect(all[1].action).toBe(OCPPAction.StopTransaction);

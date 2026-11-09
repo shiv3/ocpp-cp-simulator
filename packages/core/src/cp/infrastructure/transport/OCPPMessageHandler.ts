@@ -457,8 +457,7 @@ export class OCPPMessageHandler {
     this._codec = codec;
     this._bootGate = new BootGate(chargePoint.clock);
     this._pendingQueue = new PendingMessageQueue(
-      chargePoint.id,
-      chargePoint.database,
+      chargePoint.pendingMessages,
       new Set([...QUEUED_ON_OCPP16, OCPPAction.SecurityEventNotification]),
       chargePoint.clock,
     );

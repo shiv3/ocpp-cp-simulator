@@ -34,7 +34,8 @@ const DEFAULT_DEPS: Omit<ChargePointDeps, "logSink" | "repositories"> = {
  * dependencies are injected in one spot (#575). Only `ChargePoint.deps.test.ts`
  * calls the constructor directly, to inject test doubles. The parameters are
  * the constructor's, in the same order and with the same defaults, without the
- * final `deps`.
+ * final `deps`, plus `database`: the state database the log sink and the
+ * repositories are built on (#878), `null` for in-memory state.
  */
 export function createChargePoint(
   id: string,
@@ -61,7 +62,6 @@ export function createChargePoint(
     wsUrl,
     basicAuthSettings,
     autoMeterValueSetting,
-    database,
     extraWsHeaders,
     extraWsSubprotocols,
     ocppVersion,

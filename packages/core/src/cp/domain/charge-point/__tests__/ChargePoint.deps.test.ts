@@ -12,6 +12,8 @@ import { createChargePointRepositories } from "../../../infrastructure/persisten
 import { UploadFile } from "../../../infrastructure/fileUpload";
 import { DefaultBootNotification } from "../../types/OcppTypes";
 import type { LogSink } from "../../persistence/LogSink";
+import { NoopCertificateRepository } from "../../persistence/CertificateRepository";
+import { NoopPendingMessageRepository } from "../../persistence/PendingMessageRepository";
 import { LogLevel } from "../../../shared/Logger";
 import { Outbox } from "../../transport/Outbox";
 
@@ -23,7 +25,7 @@ import { Outbox } from "../../transport/Outbox";
 function build(
   ocppVersion: string,
   wrap: (transport: ChargePointTransport) => ChargePointTransport = (t) => t,
-  transportOptions: ConstructorParameters<typeof ChargePoint>[10] = {},
+  transportOptions: ConstructorParameters<typeof ChargePoint>[9] = {},
   overrides: Partial<Omit<ChargePointDeps, "createTransport">> = {},
 ): {
   cp: ChargePoint;
@@ -50,7 +52,6 @@ function build(
     1,
     "ws://localhost:9/ocpp",
     { username: "u", password: "p" },
-    null,
     null,
     { "X-Extra": "1" },
     ["ocpp1.6"],
@@ -224,6 +225,44 @@ describe("ChargePoint deps.repositories (#878)", () => {
       [0, "Inoperative"],
       [1, "Operative"],
     ]);
+    cp.disconnect();
+  });
+
+  it("builds its certificate store on the injected certificate repository", () => {
+    const certificates = new NoopCertificateRepository();
+    const clear = vi.spyOn(certificates, "clear");
+    const { cp } = build(
+      "OCPP-1.6J",
+      undefined,
+      {},
+      {
+        repositories: {
+          ...createChargePointRepositories("cp-deps", null),
+          certificates,
+        },
+      },
+    );
+    cp.certificateStore.clearAll();
+    expect(clear).toHaveBeenCalledOnce();
+    cp.disconnect();
+  });
+
+  it("hands the injected pending-message repository to its message handler", () => {
+    const pendingMessages = new NoopPendingMessageRepository();
+    const loadAll = vi.spyOn(pendingMessages, "loadAll");
+    const { cp } = build(
+      "OCPP-1.6J",
+      undefined,
+      {},
+      {
+        repositories: {
+          ...createChargePointRepositories("cp-deps", null),
+          pendingMessages,
+        },
+      },
+    );
+    expect(cp.pendingMessages).toBe(pendingMessages);
+    expect(loadAll).toHaveBeenCalledOnce();
     cp.disconnect();
   });
 });

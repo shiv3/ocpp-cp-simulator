@@ -147,7 +147,6 @@ function setup(ocppVersion: string) {
   const discarded: Array<ChargePointEvents["transactionMessageDiscarded"]> = [];
   const cp = {
     id: `CP-528-${ocppVersion}`,
-    database: null,
     ocppVersion,
     connectors: new Map([[1, connector]]),
     getConnector: vi.fn(() => connector),

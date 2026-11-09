@@ -11,7 +11,7 @@ import {
   isValidSecurityEventNotificationRequestV21,
 } from "@ocpp-cp-simulator/ocpp/index";
 import type { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
-import type { Database } from "../../../../domain/persistence/Database";
+import type { CertificateRepository } from "../../../../domain/persistence/CertificateRepository";
 import { computeCertificateHashData } from "../../../../domain/security/certificateHash";
 import { CertificateStore } from "../../../../domain/security/CertificateStore";
 import { generateCsr } from "../../../../domain/security/csr";
@@ -278,16 +278,15 @@ describe.each(VERSIONS)(
     });
 
     it("answers Failed when the certificate cannot be persisted (M05.FR.03)", async () => {
-      const database: Database = {
-        exec() {},
-        run(sql: string) {
-          if (sql.startsWith("INSERT")) throw new Error("disk I/O error");
+      const repository: CertificateRepository = {
+        loadAll: () => [],
+        insert() {
+          throw new Error("disk I/O error");
         },
-        all: <T>() => [] as T[],
-        get: () => null,
-        close() {},
+        delete() {},
+        clear() {},
       };
-      const store = new CertificateStore("CP", database);
+      const store = new CertificateStore(repository);
       const root = await selfSignedRoot("01", "Root");
 
       const { response } = await handlers.InstallCertificate(

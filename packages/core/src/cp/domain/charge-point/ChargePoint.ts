@@ -86,8 +86,8 @@ import {
   type Get15118EVCertificateResult,
 } from "../security/get15118EVCertificate";
 import type { ChargePointRepositories } from "../persistence/ChargePointRepositories";
-import type { Database } from "../persistence/Database";
 import type { LogSink } from "../persistence/LogSink";
+import type { PendingMessageRepository } from "../persistence/PendingMessageRepository";
 import type {
   ChargePointErrorCode,
   OCPPAvailability,
@@ -688,10 +688,6 @@ export class ChargePoint {
     wsUrl: string,
     basicAuthSettings: BasicAuthSettings | null,
     autoMeterValueSetting: AutoMeterValueSetting | null,
-    /** SQLite-backed persistence for PendingMessageQueue and CertificateStore
-     *  (the other stores go through `deps.repositories`, #878). `null` keeps
-     *  them in-memory — used by the daemon's `:memory:` mode and by tests. */
-    private readonly _database: Database | null = null,
     /** Extra HTTP headers and Sec-WebSocket-Protocol tokens emitted on
      *  every WS upgrade. Wired through to OCPPWebSocket so reconnects
      *  pick the same values up. CLI-only (DOM WebSocket ignores headers). */
@@ -739,8 +735,7 @@ export class ChargePoint {
     this._fileUploader = deps.fileUploader;
     // #456: installed certificates survive a restart when state persists.
     this._certificateStore = new CertificateStore(
-      this._id,
-      this._database,
+      this._repositories.certificates,
       this._clock,
     );
     // §4.9 S3: track whether this SOAP CP can receive CSMS-initiated calls
@@ -1122,10 +1117,10 @@ export class ChargePoint {
     return new Date(this._clock.now());
   }
 
-  /** Exposed so OCPPMessageHandler (PendingMessageQueue) can share the
-   *  same Database instance. `null` means the CP is running in-memory. */
-  get database(): Database | null {
-    return this._database;
+  /** Where the message handler's PendingMessageQueue stores its rows
+   *  (#878): a no-op repository when the CP runs in memory. */
+  get pendingMessages(): PendingMessageRepository {
+    return this._repositories.pendingMessages;
   }
 
   /** Force any buffered log lines to be flushed to the DB. Used before

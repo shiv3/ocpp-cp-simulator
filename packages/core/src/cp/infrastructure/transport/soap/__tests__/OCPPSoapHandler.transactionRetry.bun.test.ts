@@ -147,7 +147,6 @@ function setup(
   const chargePoint = {
     id: "CP-585",
     clock,
-    database: null,
     connectors: new Map([[1, connector]]),
     getConnector: () => connector,
     notifyOutgoingCall: () => undefined,

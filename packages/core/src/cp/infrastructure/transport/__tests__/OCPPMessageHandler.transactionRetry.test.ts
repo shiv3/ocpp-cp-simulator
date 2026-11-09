@@ -108,7 +108,6 @@ function setup(config: { attempts?: number; interval?: number } = {}) {
   const discarded: Array<ChargePointEvents["transactionMessageDiscarded"]> = [];
   const chargePoint = {
     id: "CP-527",
-    database: null,
     connectors: new Map([
       [1, connector],
       [2, connector2],

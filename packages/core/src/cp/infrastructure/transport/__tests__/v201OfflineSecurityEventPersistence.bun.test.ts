@@ -4,6 +4,7 @@ import type { OCPPWebSocket } from "../OCPPWebSocket";
 import type { Logger } from "../../../shared/Logger";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { BunSqliteDatabase } from "../../persistence/BunSqliteDatabase";
+import { SqlitePendingMessageRepository } from "../../persistence/SqlitePendingMessageRepository";
 import { strictValidationErrors } from "@ocpp-cp-simulator/ocpp/validate";
 import { v201Schemas } from "@ocpp-cp-simulator/ocpp/v201/schemas";
 import { v21Schemas } from "@ocpp-cp-simulator/ocpp/v21/schemas";
@@ -54,7 +55,7 @@ function station(db: BunSqliteDatabase, ocppVersion: string) {
   const socket = new FakeSocket();
   const cp = {
     id: "CP-552",
-    database: db,
+    pendingMessages: new SqlitePendingMessageRepository("CP-552", db),
     ocppVersion,
     connectors: new Map(),
     getConnector: () => undefined,

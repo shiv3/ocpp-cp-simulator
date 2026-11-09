@@ -173,15 +173,21 @@ export async function createErrorReporter({
       void sent.finally(() => pending.delete(sent));
     },
     async flush(timeoutMs) {
-      const timeout = new Promise<false>((resolve) =>
-        setTimeout(resolve, timeoutMs, false),
-      );
-      const settled = Promise.all(pending).then(() => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<false>((resolve) => {
+        timer = setTimeout(resolve, timeoutMs, false);
+      });
+      try {
+        const settled = Promise.all(pending).then(() => true);
+        if (!(await Promise.race([settled, timeout]))) return false;
+        // Cleared only when this flush reports it: a failure that lands
+        // after a timed-out flush is reported by the next one.
         const ok = !failed;
         failed = false;
         return ok;
-      });
-      return Promise.race([settled, timeout]);
+      } finally {
+        clearTimeout(timer);
+      }
     },
   };
 }
@@ -192,7 +198,11 @@ function describe(value: unknown): string {
   try {
     return String(value);
   } catch {
-    return Object.prototype.toString.call(value);
+    try {
+      return Object.prototype.toString.call(value);
+    } catch {
+      return "[unprintable value]"; // e.g. a throwing Symbol.toStringTag
+    }
   }
 }
 ```

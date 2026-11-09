@@ -37,6 +37,7 @@ import {
   type UnlockOutcomeNodeData,
 } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
+import { pickableHandles } from "@ocpp-cp-simulator/core/scenario/scenarioGraph";
 // Type-only: stepLayout imports this module's helpers at runtime.
 import type { StepLayout, StepLink } from "./stepLayout";
 
@@ -161,83 +162,116 @@ export function deriveDisplayedSteps(
   return { steps, isLinear: linear.isLinear };
 }
 
+/** An edge's `sourceHandle`, `null` when it has none. */
+const handleOf = (edge: Edge): string | null =>
+  typeof edge.sourceHandle === "string" ? edge.sourceHandle : null;
+
 /**
- * The `sourceHandle` each node's one outgoing edge carries, read from `edges`.
- * A `switch` or `choice` picks its edge by handle (`case-<n>` / `default` /
- * `option-<n>`, schema 1.6), so a rebuild that dropped them would make the
- * node end its branch at run time (#822 review). A switch or choice whose
- * single edge has none gets the first lane it can run: `default` / `option-0`.
+ * The `sourceHandle` (`null`: none) for a chain edge the input did not have
+ * out of a node, read from `edges`. A `switch` or `choice` picks its edge by
+ * handle (`case-<n>` / `default` / `option-<n>`, schema 1.6), so a rebuild
+ * that dropped them would make the node end its branch at run time (#822
+ * review). A node with exactly one edge in the input hands its handle, or
+ * the lack of one, to the edge that replaces it: the file's meaning is kept,
+ * a dead edge stays dead. Only a node with no single edge to inherit from (a
+ * step just placed) gets one: `default` on a switch, `option-0` on a choice.
  */
-function handlesBySource(
+function chainHandles(
+  /** The rebuild's nodes: a step just placed is among them. */
   nodes: readonly ScenarioNode[],
   edges: readonly Edge[],
-): (sourceId: string) => string | undefined {
-  const bySource = new Map<string, string | undefined>();
+): (sourceId: string) => string | null {
+  const bySource = new Map<string, string | null>();
   const count = new Map<string, number>();
   for (const e of edges) {
     count.set(e.source, (count.get(e.source) ?? 0) + 1);
-    bySource.set(e.source, e.sourceHandle ?? undefined);
+    bySource.set(e.source, handleOf(e));
   }
   const typeById = new Map(nodes.map((n) => [n.id, n.type]));
   return (sourceId) => {
-    const kept = count.get(sourceId) === 1 ? bySource.get(sourceId) : undefined;
-    if (kept !== undefined) return kept;
+    if (count.get(sourceId) === 1) return bySource.get(sourceId)!;
     const type = typeById.get(sourceId);
     if (type === ScenarioNodeType.SWITCH) return "default";
     if (type === ScenarioNodeType.CHOICE) return "option-0";
-    return undefined;
+    return null;
   };
 }
 
-/** The handle of lane `index` leaving a fork node: the one it had, else the
- *  lane's own on a `switch` (`case-<index>` while cases remain, then `default`)
- *  or a `choice` (`option-<index>`). */
-function forkHandle(
+/**
+ * The handle of every lane leaving `fork`, in lane order. A lane that
+ * existed keeps the handle its edge had, or none (`null`), whatever its
+ * index: the editor never changes what a file says. Only a new lane
+ * (`undefined`) gets one: the first handle the node can pick
+ * (`pickableHandles`: `case-<i>` then `default` on a switch, `option-<i>` on
+ * a choice) that no other lane uses, else none, never a duplicate (the
+ * validator then reports `unpickableHandle`).
+ */
+function forkHandles(
   fork: ScenarioNode,
-  index: number,
-  existing: string | undefined,
-): string | undefined {
-  if (existing !== undefined) return existing;
-  if (fork.type === ScenarioNodeType.CHOICE) return `option-${index}`;
-  if (fork.type === ScenarioNodeType.SWITCH) {
-    const cases = (fork.data as { cases?: unknown[] }).cases;
-    const n = Array.isArray(cases) ? cases.length : 0;
-    return index < n ? `case-${index}` : "default";
-  }
-  return undefined;
+  handles: ReadonlyArray<string | null | undefined>,
+): Array<string | null> {
+  const pickable = pickableHandles(fork) ?? [];
+  const used = new Set(
+    handles.filter((h): h is string => typeof h === "string"),
+  );
+  return handles.map((handle) => {
+    if (handle !== undefined) return handle;
+    const free = pickable.find((h) => !used.has(h));
+    if (free === undefined) return null;
+    used.add(free);
+    return free;
+  });
 }
 
 /**
  * Hands back the input's edges for the pairs a rebuild draws again, so an
  * edge keeps its id and every field the editor does not understand (`type`,
  * `sourceHandle`, future fields). Several edges between one pair are handed
- * out in file order. `make` creates an edge for a pair the input did not
- * have; `id` is kept when still free, otherwise a fresh one is made.
+ * out in file order, the one already carrying the requested handle first.
+ * `take`'s `sourceHandle`: a string or `null` (none) is what the edge must
+ * carry; `undefined` keeps a reused edge's own and gives a new one none. A
+ * pair the input did not have gets a new edge; `id` is kept when still free,
+ * otherwise a fresh one is made.
  */
 function edgeReuser(edges: readonly Edge[]) {
   const pool = new Map<string, Edge[]>();
+  const keyOf = (source: string, target: string) => `${source}\u0000${target}`;
   for (const e of edges) {
-    const key = `${e.source}\u0000${e.target}`;
+    const key = keyOf(e.source, e.target);
     const list = pool.get(key);
     if (list) list.push(e);
     else pool.set(key, [e]);
   }
   const usedIds = new Set<string>();
-  return (
+  const has = (source: string, target: string): boolean =>
+    (pool.get(keyOf(source, target))?.length ?? 0) > 0;
+  const take = (
     source: string,
     target: string,
-    sourceHandle: string | undefined,
+    sourceHandle: string | null | undefined,
     id?: string,
   ): Edge => {
-    const existing = pool.get(`${source}\u0000${target}`)?.shift();
-    if (existing && !usedIds.has(existing.id)) {
-      usedIds.add(existing.id);
-      // The rebuild decides which lane a switch / choice edge runs: its
-      // handle wins over the one the reused edge had.
-      return sourceHandle !== undefined &&
-        existing.sourceHandle !== sourceHandle
-        ? { ...existing, sourceHandle }
-        : existing;
+    const list = pool.get(keyOf(source, target));
+    if (list && list.length > 0) {
+      const match =
+        sourceHandle === undefined
+          ? 0
+          : list.findIndex((e) => handleOf(e) === sourceHandle);
+      const [existing] = list.splice(Math.max(match, 0), 1);
+      if (!usedIds.has(existing.id)) {
+        usedIds.add(existing.id);
+        // A lane asks for the handle its own edge had, and the pair's edge
+        // with that handle is taken first (two empty lanes both run to
+        // END), so this is a guard: the lane's handle wins.
+        if (sourceHandle === undefined || handleOf(existing) === sourceHandle) {
+          return existing;
+        }
+        if (sourceHandle === null) {
+          const { sourceHandle: _dropped, ...rest } = existing;
+          return rest;
+        }
+        return { ...existing, sourceHandle };
+      }
     }
     const fresh =
       id !== undefined && !usedIds.has(id) ? id : crypto.randomUUID();
@@ -246,9 +280,10 @@ function edgeReuser(edges: readonly Edge[]) {
       id: fresh,
       source,
       target,
-      ...(sourceHandle === undefined ? {} : { sourceHandle }),
+      ...(typeof sourceHandle === "string" ? { sourceHandle } : {}),
     };
   };
+  return { has, take };
 }
 
 /**
@@ -274,17 +309,17 @@ export function rebuildLinearScenario(
     position: { x: 250, y: idx * 120 },
   }));
 
-  const handleOf = handlesBySource(def.nodes, def.edges);
+  const chainHandle = chainHandles(positioned, def.edges);
   const edgeFor = edgeReuser(def.edges);
   const edges: Edge[] = [];
   for (let i = 0; i < positioned.length - 1; i++) {
-    edges.push(
-      edgeFor(
-        positioned[i].id,
-        positioned[i + 1].id,
-        handleOf(positioned[i].id),
-      ),
-    );
+    const source = positioned[i].id;
+    const target = positioned[i + 1].id;
+    // An edge drawn again keeps its own handle (or none).
+    const handle = edgeFor.has(source, target)
+      ? undefined
+      : chainHandle(source);
+    edges.push(edgeFor.take(source, target, handle));
   }
 
   return {
@@ -348,8 +383,9 @@ interface LaneShape {
   main: ScenarioNode[];
   branches: ScenarioNode[][] | null;
   /** The `sourceHandle` of each branch's edge from the fork node, in step
-   *  with `branches` (undefined: none yet). */
-  handles: Array<string | undefined>;
+   *  with `branches`: a string, `null` for an edge that has none (kept so),
+   *  `undefined` for a lane the user just added (`forkHandles` picks one). */
+  handles: Array<string | null | undefined>;
   links: StepLink[];
 }
 
@@ -422,16 +458,22 @@ function rebuildLaneScenario(
   if (branches) for (const id of mainIds) stepIds.add(id);
 
   const edges: Edge[] = [];
-  const handleOf = handlesBySource(def.nodes, def.edges);
+  const chainHandle = chainHandles(nodes, def.edges);
   const edgeFor = edgeReuser(def.edges);
+  const laneHandles = branches ? forkHandles(forkNode, shape.handles) : [];
+  /** `handle`: a fork edge's lane handle. Any other edge drawn again keeps
+   *  its own; a new one inherits per `chainHandles`. */
   const link = (
     source: ScenarioNode,
     target: ScenarioNode,
     id?: string,
-    handle?: string,
+    handle?: string | null,
   ) => {
-    const sourceHandle = handle ?? handleOf(source.id);
-    edges.push(edgeFor(source.id, target.id, sourceHandle, id));
+    const sourceHandle =
+      handle !== undefined || edgeFor.has(source.id, target.id)
+        ? handle
+        : chainHandle(source.id);
+    edges.push(edgeFor.take(source.id, target.id, sourceHandle, id));
   };
 
   if (branches) {
@@ -462,10 +504,8 @@ function rebuildLaneScenario(
       ? [lane.from, ...lane.steps]
       : [startNode, ...lane.steps];
     // The edge that leaves the fork node carries the lane's handle.
-    const handleAt = (i: number): string | undefined =>
-      branches && i === 0
-        ? forkHandle(lane.from, laneIndex, shape.handles[laneIndex])
-        : undefined;
+    const handleAt = (i: number): string | null | undefined =>
+      branches && i === 0 ? laneHandles[laneIndex] : undefined;
     for (let i = 0; i < chain.length - 1; i++) {
       // Without a fork the chain's edges are this lane's; with one, each
       // branch's edges start at the fork node.
@@ -590,10 +630,22 @@ export function addParallelBranch(
   if (!canAddBranch(layout)) return def;
   const shape = laneShape(layout);
   const delay = createDefaultNode(ScenarioNodeType.DELAY);
-  shape.branches = shape.branches
-    ? [...shape.branches, [delay]]
-    : [[], [delay]];
-  shape.handles = shape.branches.map((_, i) => shape.handles[i]);
+  if (shape.branches) {
+    shape.branches = [...shape.branches, [delay]];
+    shape.handles = [...shape.handles, undefined];
+  } else {
+    // The chain's own continuation becomes the first lane: it keeps the
+    // handle (or none) of the edge it already had; only the new lane gets one.
+    const forkId =
+      shape.main[shape.main.length - 1]?.id ??
+      findNodeByType(def.nodes, ScenarioNodeType.START)?.id;
+    const out = def.edges.filter((e) => e.source === forkId);
+    shape.branches = [[], [delay]];
+    shape.handles = [
+      out.length === 1 ? handleOf(out[0]) : undefined,
+      undefined,
+    ];
+  }
   return rebuildLaneScenario(def, shape);
 }
 

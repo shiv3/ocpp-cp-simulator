@@ -4,7 +4,7 @@ import {
   REDACTED_VALUE,
   redactSensitiveText,
   redactSensitiveValue,
-} from "./redaction";
+} from "../redaction";
 
 describe("redaction", () => {
   it("redacts OCPP ChangeConfiguration key/value text", () => {

@@ -141,6 +141,38 @@ Rules the check enforces:
 - Inside `packages/core/src/cp/` the layers have a direction ([#571](sources/github-issues.md)): `domain/` imports only `domain/` and `shared/`; `application/` imports `domain/`, `application/` and `shared/`, never `infrastructure/`; `infrastructure/` may import every layer; `shared/` imports only `shared/`. `domain/` and `shared/` also may not import core code outside `src/cp` or anything under `apps/`; other workspace packages stay governed by the table above. Type-only imports count, test files are not checked. The imports that break the rule today are the `LAYER_EXEMPTIONS` list in the script (26 entries, each with the follow-up that clears it: [#573](sources/github-issues.md), [#575](sources/github-issues.md)); a new violation fails, and so does an entry that no longer matches, so the list only shrinks. The goal of the epic ([#577](sources/github-issues.md)) is an empty list.
 - A file under `packages/` or `apps/`, test files included, may not reach itself through static value imports, in one package or across several; there is no allow-list for this rule. `import`, a side-effect import, `export … from` (`export *` included, even of a types-only module) and `require` count; `import type`, `export type … from`, `import("x").T` and a dynamic `import()` do not ([#570](sources/github-issues.md)). The ESLint rule `@typescript-eslint/consistent-type-imports` makes an import used only as a type say so, or it would count here. `scripts/` and `e2e/` are not scanned.
 
+### What goes where in `packages/core/src`
+
+The conventions come from
+[#576](https://github.com/shiv3/ocpp-cp-simulator/issues/576). The charge point
+lives in `cp/`, split in four layers; their import direction is the layer
+bullet above, not repeated here.
+
+- `cp/domain/` — the charge point's state and invariants (charge point,
+  connector, session, reservation, security, topology, …) and the ports it
+  needs, such as the repository interfaces under `domain/persistence/`.
+- `cp/application/` — the use cases that drive the domain: the charger engine
+  and its behaviors, services (state history, heartbeat), the scenario engine
+  (`application/scenario/`) and run verification, and the ports they own.
+- `cp/infrastructure/` — adapters to the outside: WebSocket and SOAP
+  transports, SQLite, HTTP (`fileUpload.ts`), the vehicle catalog. The SQLite
+  stores still sit in `domain/persistence/` until
+  [#573](https://github.com/shiv3/ocpp-cp-simulator/issues/573), and the files
+  that break the direction today are listed in `LAYER_EXEMPTIONS`.
+- `cp/shared/` — dependency-free utilities: clock, RNG, timers, logger,
+  event emitter, reconnect policy, redaction.
+
+Outside `cp/`: `scenario/` holds the scenario-format helpers (schema
+validation, loading, connection rules, partial matching), `utils/` the built-in
+scenario templates and blueprints, `types/` ambient declarations
+(`webcrypto-globals.d.ts`), and `test/` the shared test helpers, behavior
+suites, golden-wire rig and regression tests.
+
+Tests go in a `__tests__/` folder beside the code they cover (outside `cp/`,
+`src/test/` and the two template tests in `utils/` are the exceptions). A
+`*.bun.test.ts` file runs under `bun test`; any other `*.test.ts(x)` runs
+under vitest, which excludes the Bun files.
+
 ## Where to read next
 
 | If you are…                          | Start with                                                                                                     |

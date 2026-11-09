@@ -1,4 +1,4 @@
-import type { OCPPAvailability } from "../../../domain/types/OcppTypes";
+import type { OCPPAvailability } from "../../domain/types/OcppTypes";
 
 /**
  * Validation level

@@ -87,7 +87,7 @@ import type { ChargingSession } from "@ocpp-cp-simulator/core/cp/domain/session/
 import type {
   HistoryOptions,
   StateHistoryEntry,
-} from "@ocpp-cp-simulator/core/cp/application/services/types/StateSnapshot";
+} from "@ocpp-cp-simulator/core/cp/application/services/StateSnapshot";
 import type {
   NetworkSimLayerConfig,
   ResolvedNetworkSimConfig,

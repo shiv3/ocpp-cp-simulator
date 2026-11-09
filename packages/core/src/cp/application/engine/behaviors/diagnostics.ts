@@ -1,6 +1,6 @@
 import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
-import { UploadFile } from "../../../infrastructure/file_upload";
+import { UploadFile } from "../../../infrastructure/fileUpload";
 import { LogType } from "../../../shared/Logger";
 
 /** How long one upload attempt may take before it counts as failed. */

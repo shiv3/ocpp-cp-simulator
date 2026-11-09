@@ -2,7 +2,7 @@ import "reflect-metadata";
 import { describe, expect, it } from "bun:test";
 import * as x509 from "@peculiar/x509";
 
-import { CertificateStore } from "./CertificateStore";
+import { CertificateStore } from "../CertificateStore";
 
 x509.cryptoProvider.set(globalThis.crypto as Crypto);
 

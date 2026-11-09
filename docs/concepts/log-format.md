@@ -163,7 +163,7 @@ above (PEM, delimiter-checked quote on a later line, first unescaped quote,
 end of line), failing closed. A 200k-character value takes milliseconds on both
 runtimes, and the timing rows in the redaction tests have the same 2 s budget
 under both. The redaction tests run under both vitest and `bun test`
-(`packages/core/src/cp/shared/redaction.bun.test.ts`).
+(`packages/core/src/cp/shared/__tests__/redaction.bun.test.ts`).
 
 ## WebSocket close lines
 

@@ -2,8 +2,8 @@ import type {
   ChargePointStatus,
   OCPPAvailability,
   OCPPStatus,
-} from "../../../domain/types/OcppTypes";
-import type { Transaction } from "../../../domain/connector/Transaction";
+} from "../../domain/types/OcppTypes";
+import type { Transaction } from "../../domain/connector/Transaction";
 
 /**
  * State transition result

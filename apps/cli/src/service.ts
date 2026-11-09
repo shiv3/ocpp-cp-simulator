@@ -138,7 +138,7 @@ import type { ActiveChargingProfile } from "@ocpp-cp-simulator/core/cp/domain/co
 import type {
   StateHistoryEntry,
   HistoryOptions,
-} from "@ocpp-cp-simulator/core/cp/application/services/types/StateSnapshot";
+} from "@ocpp-cp-simulator/core/cp/application/services/StateSnapshot";
 import type {
   TimelineEntry,
   TimelinePage,

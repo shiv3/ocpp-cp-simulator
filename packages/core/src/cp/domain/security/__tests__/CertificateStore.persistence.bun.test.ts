@@ -2,11 +2,11 @@
 import "reflect-metadata";
 import { describe, expect, it } from "bun:test";
 
-import { ChargePoint } from "../charge-point/ChargePoint";
-import { BunSqliteDatabase } from "../persistence/BunSqliteDatabase";
-import { DefaultBootNotification } from "../types/OcppTypes";
-import { CertificateStore } from "./CertificateStore";
-import { leafForCsr, selfSignedRoot } from "./__tests__/certificateFixtures";
+import { ChargePoint } from "../../charge-point/ChargePoint";
+import { BunSqliteDatabase } from "../../persistence/BunSqliteDatabase";
+import { DefaultBootNotification } from "../../types/OcppTypes";
+import { CertificateStore } from "../CertificateStore";
+import { leafForCsr, selfSignedRoot } from "./certificateFixtures";
 
 /**
  * #456: installed certificates survive a daemon restart when state

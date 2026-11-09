@@ -1,7 +1,7 @@
 import { afterEach, describe, it } from "vitest";
 import { WebSocketServer } from "ws";
 import type { AddressInfo } from "node:net";
-import { openOcppWebSocket } from "./wsUrlWithBasic";
+import { openOcppWebSocket } from "../wsUrlWithBasic";
 
 // #406: the socket openOcppWebSocket hands back must be able to send a real
 // ping frame. Under Node (vitest) that is the `ws`-backed wrapper.

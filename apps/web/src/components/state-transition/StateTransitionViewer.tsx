@@ -15,7 +15,7 @@ import StateNode from "./StateNode";
 import StateTransitionTimeline from "./StateTransitionTimeline";
 import type { Connector } from "@ocpp-cp-simulator/core/cp/domain/connector/Connector";
 import type { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
-import type { HistoryOptions } from "@ocpp-cp-simulator/core/cp/application/services/types/StateSnapshot";
+import type { HistoryOptions } from "@ocpp-cp-simulator/core/cp/application/services/StateSnapshot";
 import { useStateHistory } from "../../data/hooks/useStateHistory";
 
 interface StateTransitionViewerProps {

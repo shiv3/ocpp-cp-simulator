@@ -24,6 +24,7 @@ sources:
   - packages/core/src/cp/domain/connector/ChargingScheduleResolver.ts
   - packages/core/src/cp/domain/connector/MeterValueScheduler.ts
   - packages/core/src/cp/infrastructure/transport/OCPPMessageHandlerV201.ts
+  - packages/core/src/cp/infrastructure/transport/v201/transactionMessagesV201.ts
   - packages/core/src/cp/infrastructure/transport/soap/OCPPSoapHandler.ts
   - packages/core/src/cp/infrastructure/transport/soap/soapConverters.ts (OCPP 1.5 meter sample mapping)
   - packages/core/src/cp/infrastructure/transport/soap/soapWireProfiles.ts

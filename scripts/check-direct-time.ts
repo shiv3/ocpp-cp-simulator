@@ -43,6 +43,12 @@ export const SCANNED_DIRS = [
 export const SCANNED_FILES = [
   "packages/core/src/cp/infrastructure/transport/OCPPMessageHandler.ts",
   "packages/core/src/cp/infrastructure/transport/OCPPMessageHandlerV201.ts",
+  "packages/core/src/cp/infrastructure/transport/v201/transactionMessagesV201.ts",
+  "packages/core/src/cp/infrastructure/transport/v201/certificateSigningV201.ts",
+  "packages/core/src/cp/infrastructure/transport/v201/transactionEventDeliveryV201.ts",
+  "packages/core/src/cp/infrastructure/transport/v201/offlineReplayV201.ts",
+  "packages/core/src/cp/infrastructure/transport/v201/eventQueuesV201.ts",
+  "packages/core/src/cp/infrastructure/transport/v201/callPipelineV201.ts",
   "packages/core/src/cp/infrastructure/transport/v16/serialCallQueueV16.ts",
   "packages/core/src/cp/infrastructure/transport/v16/transactionMessagesV16.ts",
   "packages/core/src/cp/infrastructure/transport/v16/securityEventQueueV16.ts",

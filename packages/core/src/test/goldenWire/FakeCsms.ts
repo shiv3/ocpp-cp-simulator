@@ -3,7 +3,7 @@
 // charge point's calls from a small, deterministic script. Runs under `bun
 // test` only (Bun.serve).
 import type { ServerWebSocket } from "bun";
-import { tcpPort } from "../bunServe";
+import { LOOPBACK, tcpPort } from "../bunServe";
 import { drainMicrotasks } from "../../cp/shared/clock";
 import {
   installMemoryTransport,
@@ -120,6 +120,7 @@ export class FakeCsms {
     }
     this.server = Bun.serve({
       port: 0,
+      hostname: LOOPBACK,
       fetch: (req, srv) => {
         // A station left over from an earlier case can still be retrying a
         // port that this server was given later; only this server's own token
@@ -156,7 +157,7 @@ export class FakeCsms {
         },
       },
     });
-    this.url = `ws://127.0.0.1:${tcpPort(this.server)}/${this.token}/`;
+    this.url = `ws://${LOOPBACK}:${tcpPort(this.server)}/${this.token}/`;
   }
 
   /** In-memory transport: the station's socket opened. */
@@ -189,6 +190,11 @@ export class FakeCsms {
 
   get connected(): boolean {
     return this.socket !== null;
+  }
+
+  /** Where the connection stands, for the message of a failed wait. */
+  private connectionSummary(): string {
+    return `upgrades ${this.requestPaths.length}, opens ${this.opens}, closes ${this.closes}, connected ${this.connected}`;
   }
 
   /** Called with every frame as it is recorded (the behavior recorder timestamps them). */
@@ -383,7 +389,7 @@ export class FakeCsms {
               new Error(
                 `fake CSMS: timed out waiting for a frame (have ${this.frames
                   .map((f) => `${f.dir}${f.action ?? f.kind}`)
-                  .join(", ")})`,
+                  .join(", ")}; ${this.connectionSummary()})`,
               ),
             );
           },

@@ -1,5 +1,9 @@
 import { useTranslation } from "react-i18next";
 import React, { useEffect, useMemo, useRef, useState } from "react";
+
+import CollapsibleSide from "../../../components/CollapsibleSide";
+import { sidePanelGrid, useCollapsedPanel } from "../../../lib/collapsedPanel";
+
 import { Link, useSearchParams } from "react-router-dom";
 import {
   ChevronDown,
@@ -57,6 +61,8 @@ import GraphIssues from "./GraphIssues";
 import { useScenarioIssues, type ViewIssues } from "./issueMarkUi";
 import StepInspector from "./StepInspector";
 import UnsupportedOutline from "./UnsupportedOutline";
+
+const INSPECTOR_COLLAPSED_KEY = "ocpp-cp.console.scenario.inspector.collapsed";
 
 type EditorView = "steps" | "graph";
 
@@ -240,6 +246,12 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
     graphEdges,
   );
   /** A warning line pointed at (hover / focus), and a marked step pointed at. */
+  const panel = useCollapsedPanel(INSPECTOR_COLLAPSED_KEY);
+  // Picking a step opens the panel it is edited in.
+  useEffect(() => {
+    if (selectedStepId !== null) panel.setCollapsed(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedStepId]);
   const [hoveredIssue, setHoveredIssue] = useState<number | null>(null);
   const [hoveredStep, setHoveredStep] = useState<string | null>(null);
   const viewIssues: ViewIssues = {
@@ -860,7 +872,10 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
         <div data-testid="editor-body" className="@container">
           <div
             data-testid="editor-grid"
-            className="grid grid-cols-1 items-start gap-4 @[860px]:grid-cols-[minmax(0,1fr)_minmax(300px,380px)]"
+            className={cn(
+              "grid grid-cols-1 items-start gap-4",
+              sidePanelGrid(panel.collapsed, "860"),
+            )}
           >
             {/* min-w-0: the graph scrolls sideways inside its own column. */}
             <div ref={stepsRef} className="min-w-0">
@@ -901,11 +916,12 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
                 />
               )}
             </div>
-            <div
-              className={cn(
-                "min-w-0 rounded-[10px] border border-cx-border bg-cx-card p-4 shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none",
-                "@[860px]:sticky @[860px]:top-4",
-              )}
+            <CollapsibleSide
+              collapsed={panel.collapsed}
+              onCollapsedChange={panel.setCollapsed}
+              label={t("scenarios.inspector.rail")}
+              className="@[860px]:sticky @[860px]:top-4"
+              contentClassName="p-4"
             >
               {selectedNode ? (
                 <>
@@ -1041,7 +1057,7 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
                   hint={t("scenarios.inspector.selectStepHint")}
                 />
               )}
-            </div>
+            </CollapsibleSide>
           </div>
         </div>
       }

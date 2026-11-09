@@ -253,5 +253,8 @@
   "scenarios.stepHelp.inboundPolicy": "为 CSMS 来电设置持续规则：用 CALLERROR 应答，或直接忽略。重连后仍有效，直到被“应答”规则取代或运行结束。",
   "scenarios.stepHelp.certQuirks": "设置或清除证书特性，例如 OCTT 预设（RSA CSR、CRLF PEM、单一签名算法），用于检验 CSMS 在严格认证工具下的表现。",
   "scenarios.addStep.structure.loop": "重复",
-  "scenarios.addStep.structure.loopHelp": "重复其中的步骤。在步骤视图中把步骤拖入其中;在图视图中选择要返回的步骤。"
+  "scenarios.addStep.structure.loopHelp": "重复其中的步骤。在步骤视图中把步骤拖入其中;在图视图中选择要返回的步骤。",
+  "scenarios.inspector.collapse": "折叠步骤面板",
+  "scenarios.inspector.expand": "展开步骤面板",
+  "scenarios.inspector.rail": "步骤设置"
 }

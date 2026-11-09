@@ -1068,6 +1068,15 @@ export function createEmptyScenario(
   return rebuildLinearScenario(bare, []);
 }
 
+/** A switch value on a card: a `$from` reference reads `$from path`, a
+ *  constant as its JSON. */
+export function summarizeValue(value: unknown): string {
+  if (value && typeof value === "object" && "$from" in value) {
+    return `$from ${String((value as { $from: unknown }).$from)}`;
+  }
+  return JSON.stringify(value) ?? "";
+}
+
 /**
  * One-line human summary of a step node's configuration, for a list-based
  * editor row. Falls back to the node's label for types without a bespoke
@@ -1212,7 +1221,7 @@ export function stepSummary(node: ScenarioNode): string {
     }
     case ScenarioNodeType.SWITCH: {
       const d = node.data as SwitchNodeData;
-      return `${JSON.stringify(d.value)} · ${d.cases?.length ?? 0} cases`;
+      return `${summarizeValue(d.value)} · ${d.cases?.length ?? 0} cases`;
     }
     case ScenarioNodeType.CHOICE: {
       const d = node.data as ChoiceNodeData;

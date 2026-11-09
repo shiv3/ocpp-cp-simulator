@@ -253,5 +253,8 @@
   "scenarios.stepHelp.inboundPolicy": "CSMS のコールに対する持続的なルールを設定します（CALLERROR で応答、または無視）。再接続後も有効で、「応答」ルールで上書きするか、実行が終わるまで続きます。",
   "scenarios.stepHelp.certQuirks": "証明書まわりの癖を設定または解除します（例: OCTT プリセット = RSA の CSR、CRLF の PEM、署名アルゴリズム 1 種類）。厳格な認証ツールに対する CSMS の挙動を確認するために使います。",
   "scenarios.addStep.structure.loop": "繰り返し",
-  "scenarios.addStep.structure.loopHelp": "中のステップを繰り返します。ステップ表示ではステップをドロップして入れ、グラフ表示では戻り先のステップを選びます。"
+  "scenarios.addStep.structure.loopHelp": "中のステップを繰り返します。ステップ表示ではステップをドロップして入れ、グラフ表示では戻り先のステップを選びます。",
+  "scenarios.inspector.collapse": "ステップパネルを折りたたむ",
+  "scenarios.inspector.expand": "ステップパネルを開く",
+  "scenarios.inspector.rail": "ステップの設定"
 }

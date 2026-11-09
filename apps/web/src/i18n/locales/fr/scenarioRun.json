@@ -111,5 +111,11 @@
   "scenarioRun.tree.continuesAt": "Continue à l'étape {{n}}",
   "scenarioRun.tree.continuesAtEnd": "Continue jusqu'à la fin",
   "scenarioRun.tree.unreached": "Étapes que rien n'atteint",
-  "scenarioRun.tree.unreachedHint": "Aucune liaison depuis Start ne mène ici : ces étapes ne s'exécutent jamais."
+  "scenarioRun.tree.unreachedHint": "Aucune liaison depuis Start ne mène ici : ces étapes ne s'exécutent jamais.",
+  "scenarioRun.zoom.label": "Zoom du graphe",
+  "scenarioRun.zoom.out": "Dézoomer",
+  "scenarioRun.zoom.in": "Zoomer",
+  "scenarioRun.zoom.fit": "Ajuster",
+  "scenarioRun.zoom.fitHint": "Afficher tout le graphe",
+  "scenarioRun.zoom.resetHint": "Taille réelle (Ctrl/Cmd + molette zoome aussi)"
 }

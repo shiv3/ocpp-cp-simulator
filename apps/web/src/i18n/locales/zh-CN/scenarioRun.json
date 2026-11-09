@@ -109,5 +109,11 @@
   "scenarioRun.tree.continuesAt": "继续到步骤 {{n}}",
   "scenarioRun.tree.continuesAtEnd": "继续到结束",
   "scenarioRun.tree.unreached": "无法到达的步骤",
-  "scenarioRun.tree.unreachedHint": "没有从 Start 通向这里的边：这些步骤永远不会运行。"
+  "scenarioRun.tree.unreachedHint": "没有从 Start 通向这里的边：这些步骤永远不会运行。",
+  "scenarioRun.zoom.label": "图缩放",
+  "scenarioRun.zoom.out": "缩小",
+  "scenarioRun.zoom.in": "放大",
+  "scenarioRun.zoom.fit": "适应",
+  "scenarioRun.zoom.fitHint": "显示整个图",
+  "scenarioRun.zoom.resetHint": "实际大小(Ctrl/Cmd + 滚轮也可缩放)"
 }

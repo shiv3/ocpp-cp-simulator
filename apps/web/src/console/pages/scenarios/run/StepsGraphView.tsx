@@ -1,6 +1,14 @@
 import { useTranslation } from "react-i18next";
 import React from "react";
-import { LogOut, Plus, Repeat, RepeatOff, X } from "lucide-react";
+import {
+  LogOut,
+  Maximize2,
+  Minus,
+  Plus,
+  Repeat,
+  RepeatOff,
+  X,
+} from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import RunStatePill from "../../../components/RunStatePill";
@@ -14,6 +22,13 @@ import {
 import { isLiveRunState } from "../../../lib/scenarioRunState";
 import { WAIT_STEP_TYPES, stepSummary } from "../../../lib/scenarioSteps";
 import { stepNumbers } from "../../../lib/stepTree";
+import {
+  ZOOM_STEP,
+  clampZoom,
+  fitZoom,
+  useElementSize,
+  useStoredZoom,
+} from "../../../lib/graphZoom";
 import {
   END_R,
   GAP,
@@ -150,12 +165,62 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
   }, [tree, editable, geometry]);
   const { cards, paths, ends } = geometry;
 
-  // The layout is the geometry: a sequence's block centres come from it.
-  const editing = useStepEditing<SeqPath>(
-    props,
-    (lane) => geometry.centres.get(lane) ?? [],
+  // The canvas: its own scroll container, zoomed by `zoom` (a stored mode:
+  // "fit" shows the whole graph).
+  const scroller = React.useRef<HTMLDivElement>(null);
+  const noCards = cards.length === 0;
+  const viewport = useElementSize(scroller, noCards);
+  const { mode: zoomMode, setMode: setZoomMode } = useStoredZoom();
+  const maxViewH =
+    typeof window === "undefined" ? 0 : Math.floor(window.innerHeight * 0.75);
+  const zoom =
+    zoomMode === "fit"
+      ? fitZoom(geometry.width, geometry.height, viewport.w, maxViewH)
+      : zoomMode;
+
+  // The layout is the geometry: a sequence's block centres come from it
+  // (on screen: scaled by the zoom, as the pointer is).
+  const editing = useStepEditing<SeqPath>(props, (lane) =>
+    (geometry.centres.get(lane) ?? []).map((c) => c * zoom),
   );
   const { drag } = editing;
+
+  // A graph wider than its column opens on its trunk, the column everything
+  // hangs from, instead of the left edge where the trunk may be cut off; the
+  // lanes either side are a scroll away.
+  const trunkX = cards[0]?.x ?? null;
+  React.useLayoutEffect(() => {
+    const el = scroller.current;
+    if (!el || trunkX === null || el.clientWidth === 0) return;
+    if (el.scrollLeft === 0 && el.scrollWidth > el.clientWidth) {
+      el.scrollLeft = Math.max(0, trunkX * zoom - el.clientWidth / 2);
+    }
+    // Once per tree: a zoom change keeps where the reader is.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trunkX, viewport.w > 0]);
+
+  // Ctrl / Cmd + wheel zooms (a plain wheel scrolls). A native listener: the
+  // browser's own page zoom has to be prevented, which React's passive
+  // wheel handler cannot.
+  const zoomRef = React.useRef(zoom);
+  zoomRef.current = zoom;
+  React.useEffect(() => {
+    const el = scroller.current;
+    if (!el) return undefined;
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      setZoomMode(
+        clampZoom(
+          event.deltaY < 0
+            ? zoomRef.current * ZOOM_STEP
+            : zoomRef.current / ZOOM_STEP,
+        ),
+      );
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [setZoomMode, noCards]);
 
   if (!editable && cards.length === 0) {
     return <p className="text-sm text-cx-muted">{t("scenarioRun.noSteps")}</p>;
@@ -247,538 +312,628 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
 
   const allPaths = [...paths, ...geometry.loops.flatMap((loop) => loop.arcs)];
 
+  const canvasW = Math.max(width, openPlus ? PICKER_W + 8 : 0);
+  const zoomLabel = `${Math.round(zoom * 100)}%`;
+  const zoomButton =
+    "flex h-6 min-w-6 items-center justify-center rounded px-1.5 text-xs text-cx-fg2 hover:bg-cx-sub disabled:cursor-not-allowed disabled:opacity-40";
+
   return (
-    <div className="overflow-x-auto">
+    <div data-graph-canvas="">
       <div
-        ref={editing.rootRef}
-        className="relative"
-        style={{ width: Math.max(width, openPlus ? PICKER_W + 8 : 0), height }}
+        role="toolbar"
+        aria-label={t("scenarioRun.zoom.label")}
+        className="mb-1.5 flex items-center justify-end gap-0.5"
       >
-        <svg
-          aria-hidden
-          width={width}
-          height={height}
-          data-graph-edges=""
-          className="pointer-events-none absolute inset-0"
+        <button
+          type="button"
+          aria-label={t("scenarioRun.zoom.out")}
+          title={t("scenarioRun.zoom.out")}
+          disabled={zoom <= 0.25}
+          onClick={() => setZoomMode(clampZoom(zoom / ZOOM_STEP))}
+          className={zoomButton}
         >
-          <defs>
-            <marker
-              id="graph-link-arrow"
-              viewBox="0 0 8 8"
-              refX="7"
-              refY="4"
-              markerWidth="7"
-              markerHeight="7"
-              orient="auto"
-            >
-              <path d="M 0 0 L 8 4 L 0 8 z" fill="var(--cx-faint)" />
-            </marker>
-            <marker
-              id="graph-loop-arrow"
-              viewBox="0 0 8 8"
-              refX="7"
-              refY="4"
-              markerWidth="7"
-              markerHeight="7"
-              orient="auto"
-            >
-              <path d="M 0 0 L 8 4 L 0 8 z" fill={LOOP_STROKE} />
-            </marker>
-          </defs>
-          {geometry.loops.map((loop) => (
-            <rect
-              key={`rect:${loop.key}`}
-              data-graph-loop={loop.headerId}
-              x={loop.rect.x}
-              y={loop.rect.y}
-              width={loop.rect.w}
-              height={loop.rect.h}
-              rx={14}
-              fill={LOOP_STROKE}
-              fillOpacity={
-                loop.ids.some((id) => phaseOf(id) === "current") ? 0.16 : 0.09
-              }
-            />
-          ))}
-          {paths.map((path) => (
-            <path
-              key={path.key}
-              d={path.d}
-              data-to={path.to}
-              data-edge-id={path.edgeId}
-              fill="none"
-              strokeWidth={path.done ? 2 : 1.5}
-              stroke={path.done ? laneStyle(path.lane).color : TODO_STROKE}
-              {...edgeIssueProps(path.edgeId)}
-            />
-          ))}
-          {geometry.loops.flatMap((loop) =>
-            loop.arcs.map((arc) => (
-              <path
-                key={arc.key}
-                d={arc.d}
-                data-loop-arc={loop.headerId}
-                data-edge-id={arc.edgeId}
-                fill="none"
-                strokeWidth={arc.done ? 2 : 1.75}
-                stroke={LOOP_STROKE}
-                markerEnd="url(#graph-loop-arrow)"
-                {...edgeIssueProps(arc.edgeId)}
-              />
-            )),
-          )}
-          {geometry.links.map((link) => (
-            <path
-              key={link.key}
-              d={link.d}
-              data-link-from={link.from}
-              data-link-to={link.to}
-              data-link-role={link.role}
-              fill="none"
-              strokeWidth={1.5}
-              strokeDasharray="5 4"
-              stroke={laneStyle(link.lane).color}
-              strokeOpacity={link.role === "dead" ? 0.45 : 1}
-              markerEnd="url(#graph-link-arrow)"
-              data-edge-id={link.edgeId}
-              {...edgeIssueProps(link.edgeId)}
-            />
-          ))}
-          {geometry.merges.map((m) => (
-            <circle
-              key={`merge:${m.x}:${m.y}`}
-              data-graph-merge=""
-              cx={m.x}
-              cy={m.y}
-              r={3.5}
-              fill="var(--cx-faint)"
-            />
-          ))}
-          {geometry.start && (
-            <circle
-              data-graph-start=""
-              cx={geometry.start.x}
-              cy={geometry.start.y}
-              r={START_R}
-              fill="var(--cx-faint)"
-            />
-          )}
-          {ends.map((end) => (
-            <circle
-              key={`end:${end.x}:${end.y}`}
-              data-graph-end=""
-              cx={end.x}
-              cy={end.y}
-              r={END_R}
-              fill="var(--cx-card)"
-              stroke="var(--cx-faint)"
-              strokeWidth={2}
-            />
-          ))}
-        </svg>
-
-        {geometry.loops.map((loop) => {
-          const canExit = loop.canExit;
-          const header = cards.find((c) => c.node.id === loop.headerId);
-          const waits = WAIT_TYPES.has(header?.node.type ?? "");
-          const unwrapCap =
-            onUnwrapLoop && !drag ? caps?.unwrap.get(loop.headerId) : undefined;
-          return (
-            // The loop's label, then "Stop repeating" right after it (the
-            // label truncates first), all inside the rectangle. The label
-            // leaves room after it for a future bound ("×N", "until …").
-            <div
-              key={`label:${loop.key}`}
-              className="absolute flex items-center gap-2 whitespace-nowrap text-xs"
-              style={{
-                left: loop.label.x,
-                top: loop.label.y - 1,
-                maxWidth: loop.rect.x + loop.rect.w - loop.label.x - 6,
-              }}
-            >
-              <div
-                data-loop-block=""
-                data-loop-to={loop.headerId}
-                aria-label={t("scenarioRun.loopSteps", {
-                  from: loop.from,
-                  to: loop.to,
-                })}
-                title={t(
-                  canExit
-                    ? "scenarioRun.loopUntilExit"
-                    : "scenarioRun.loopUntilRunStops",
-                )}
-                className="flex min-w-0 items-center gap-1.5 overflow-hidden"
-              >
-                <Repeat
-                  className="h-3.5 w-3.5 shrink-0 text-cx-purple"
-                  aria-hidden
-                />
-                <span className="font-semibold text-cx-purple">
-                  {t(
-                    canExit
-                      ? "scenarioRun.loopRepeat"
-                      : "scenarioRun.loopForever",
-                  )}
-                </span>
-                {waits && (
-                  <span className="truncate text-cx-muted">
-                    · {t("scenarioRun.loopWaitsAt", { n: loop.from })}
-                  </span>
-                )}
-              </div>
-              {unwrapCap && (
-                <button
-                  type="button"
-                  data-testid="unwrap-loop"
-                  data-loop={loop.headerId}
-                  title={
-                    unwrapCap.ok
-                      ? t("scenarios.editor.unwrapLoopHint")
-                      : t(unwrapCap.reason)
-                  }
-                  disabled={!unwrapCap.ok}
-                  onClick={() => onUnwrapLoop?.(loop.headerId)}
-                  className="z-10 flex h-[18px] shrink-0 items-center gap-1 rounded border border-cx-purple/40 px-1.5 font-medium text-cx-purple hover:bg-cx-purple/15 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  <RepeatOff className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                  {t("scenarios.editor.unwrapLoop")}
-                </button>
-              )}
-            </div>
-          );
-        })}
-
-        {allPaths.map(({ key, edgeId, mid }) => {
-          const mark = edgeMark(edgeId);
-          return mark ? (
-            <EdgeIssueMarker
-              key={`issue:${key}`}
-              mark={mark}
-              x={mid.x}
-              y={mid.y}
-              label={markCounts(mark)}
-              title={markMessages(mark)}
-            />
-          ) : null;
-        })}
-        {geometry.links.map((link) => {
-          const mark = edgeMark(link.edgeId);
-          return mark ? (
-            <EdgeIssueMarker
-              key={`issue:${link.key}`}
-              mark={mark}
-              x={link.mid.x}
-              y={link.mid.y}
-              label={markCounts(mark)}
-              title={markMessages(mark)}
-            />
-          ) : null;
-        })}
-        {issues?.marks.start && geometry.start && (
-          <IssueBadge
-            mark={issues.marks.start}
-            className="absolute z-10"
-            style={{
-              left: geometry.start.x + START_R + 6,
-              top: geometry.start.y - 9,
-            }}
-          />
-        )}
-        {issues?.marks.end &&
-          ends.map((end) => (
-            <IssueBadge
-              key={`end-issue:${end.x}:${end.y}`}
-              mark={issues.marks.end!}
-              className="absolute z-10"
-              style={{ left: end.x + END_R + 6, top: end.y - 9 }}
-            />
-          ))}
-
-        {geometry.detached && (
+          <Minus className="h-3.5 w-3.5" aria-hidden />
+        </button>
+        <span
+          data-testid="graph-zoom-level"
+          aria-live="polite"
+          className="w-10 text-center font-mono text-[11px] text-cx-muted"
+        >
+          {zoomLabel}
+        </span>
+        <button
+          type="button"
+          aria-label={t("scenarioRun.zoom.in")}
+          title={t("scenarioRun.zoom.in")}
+          disabled={zoom >= 2}
+          onClick={() => setZoomMode(clampZoom(zoom * ZOOM_STEP))}
+          className={zoomButton}
+        >
+          <Plus className="h-3.5 w-3.5" aria-hidden />
+        </button>
+        <button
+          type="button"
+          aria-pressed={zoomMode === "fit"}
+          title={t("scenarioRun.zoom.fitHint")}
+          onClick={() => setZoomMode("fit")}
+          className={cn(zoomButton, zoomMode === "fit" && "bg-cx-sub")}
+        >
+          <Maximize2 className="mr-1 h-3 w-3" aria-hidden />
+          {t("scenarioRun.zoom.fit")}
+        </button>
+        <button
+          type="button"
+          aria-pressed={zoomMode === 1}
+          title={t("scenarioRun.zoom.resetHint")}
+          onClick={() => setZoomMode(1)}
+          className={cn(zoomButton, zoomMode === 1 && "bg-cx-sub")}
+        >
+          100%
+        </button>
+      </div>
+      {/* The scroll container is the canvas: it never draws under the side
+          panel, and scrolls both ways. */}
+      <div
+        ref={scroller}
+        data-testid="graph-scroll"
+        className="overflow-auto rounded-[10px]"
+        style={{ maxHeight: "75vh" }}
+      >
+        <div
+          style={{
+            width: Math.ceil(canvasW * zoom),
+            height: Math.ceil(height * zoom),
+          }}
+        >
           <div
-            data-testid="detached-steps"
-            className="absolute whitespace-nowrap text-xs font-semibold uppercase tracking-wide text-cx-muted"
-            style={{ left: geometry.detached.x, top: geometry.detached.y }}
-            title={t("scenarioRun.tree.unreachedHint")}
+            ref={editing.rootRef}
+            className="relative"
+            style={{
+              width: canvasW,
+              height,
+              transform: zoom === 1 ? undefined : `scale(${zoom})`,
+              transformOrigin: "0 0",
+            }}
           >
-            {t("scenarioRun.tree.unreached")}
-          </div>
-        )}
-
-        {geometry.tags.map((tag) => {
-          const removeCap =
-            editable && onRemoveLane ? (caps?.lane.get(tag.key) ?? null) : null;
-          const removeLabel = t("scenarioRun.tree.removeLane", {
-            lane: laneLetter(tag.laneIndex),
-          });
-          return (
-            <div
-              key={tag.key}
-              data-testid="lane-tag"
-              data-lane={tag.laneIndex}
-              data-fork={tag.forkId}
-              data-dead-lane={tag.dead ? "" : undefined}
-              data-leaves-loop={tag.leaves ? "" : undefined}
-              title={
-                tag.dead
-                  ? t("scenarioRun.tree.deadLane")
-                  : tag.leaves
-                    ? t("scenarioRun.tree.leavesLoop")
-                    : undefined
-              }
-              className={cn(
-                "absolute z-[5] flex items-center gap-1.5 rounded-full border bg-cx-card px-1 text-xs",
-                tag.dead
-                  ? "border-dashed border-cx-border-strong opacity-60"
-                  : "border-cx-border",
-              )}
-              style={{
-                left: tag.x - tag.w / 2,
-                top: tag.y,
-                width: tag.w,
-                height: TAG_H,
-              }}
+            <svg
+              aria-hidden
+              width={width}
+              height={height}
+              data-graph-edges=""
+              className="pointer-events-none absolute inset-0"
             >
-              <span
-                aria-hidden
-                className={cn(
-                  "flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold",
-                  laneStyle(tag.laneIndex).letter,
-                )}
-              >
-                {laneLetter(tag.laneIndex)}
-              </span>
-              <span
-                data-lane-condition=""
-                className="min-w-0 flex-1 truncate font-mono text-[11px] text-cx-fg2"
-              >
-                {tag.text}
-              </span>
-              {tag.leaves && (
-                <LogOut
-                  className="h-3 w-3 shrink-0 text-cx-purple"
-                  aria-hidden
-                />
-              )}
-              <span className="shrink-0 font-mono text-[10px] text-cx-muted">
-                {tag.count}
-              </span>
-              {removeCap && !drag && (
-                <button
-                  type="button"
-                  aria-label={removeLabel}
-                  title={capTitle(removeCap, removeLabel)}
-                  disabled={!removeCap.ok}
-                  onClick={() => onRemoveLane?.(tag.forkId, tag.laneIndex)}
-                  className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-cx-faint hover:bg-cx-rose/10 hover:text-cx-rose disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-cx-faint"
+              <defs>
+                <marker
+                  id="graph-link-arrow"
+                  viewBox="0 0 8 8"
+                  refX="7"
+                  refY="4"
+                  markerWidth="7"
+                  markerHeight="7"
+                  orient="auto"
                 >
-                  <X className="h-3 w-3" />
-                </button>
+                  <path d="M 0 0 L 8 4 L 0 8 z" fill="var(--cx-faint)" />
+                </marker>
+                <marker
+                  id="graph-loop-arrow"
+                  viewBox="0 0 8 8"
+                  refX="7"
+                  refY="4"
+                  markerWidth="7"
+                  markerHeight="7"
+                  orient="auto"
+                >
+                  <path d="M 0 0 L 8 4 L 0 8 z" fill={LOOP_STROKE} />
+                </marker>
+              </defs>
+              {geometry.loops.map((loop) => (
+                <rect
+                  key={`rect:${loop.key}`}
+                  data-graph-loop={loop.headerId}
+                  x={loop.rect.x}
+                  y={loop.rect.y}
+                  width={loop.rect.w}
+                  height={loop.rect.h}
+                  rx={14}
+                  fill={LOOP_STROKE}
+                  fillOpacity={
+                    loop.ids.some((id) => phaseOf(id) === "current")
+                      ? 0.16
+                      : 0.09
+                  }
+                />
+              ))}
+              {paths.map((path) => (
+                <path
+                  key={path.key}
+                  d={path.d}
+                  data-to={path.to}
+                  data-edge-id={path.edgeId}
+                  fill="none"
+                  strokeWidth={path.done ? 2 : 1.5}
+                  stroke={path.done ? laneStyle(path.lane).color : TODO_STROKE}
+                  {...edgeIssueProps(path.edgeId)}
+                />
+              ))}
+              {geometry.loops.flatMap((loop) =>
+                loop.arcs.map((arc) => (
+                  <path
+                    key={arc.key}
+                    d={arc.d}
+                    data-loop-arc={loop.headerId}
+                    data-edge-id={arc.edgeId}
+                    fill="none"
+                    strokeWidth={arc.done ? 2 : 1.75}
+                    stroke={LOOP_STROKE}
+                    markerEnd="url(#graph-loop-arrow)"
+                    {...edgeIssueProps(arc.edgeId)}
+                  />
+                )),
               )}
-            </div>
-          );
-        })}
-
-        {cards.map(({ node: step, x, y, lane, seqPath, index, isFork }) => {
-          const phase = phaseOf(step.id);
-          const failed = state === "error" && step.id === currentNodeId;
-          const selected = selectedStepId === step.id;
-          const marked = stepIssues(step.id);
-          const className = cn(
-            "flex items-center gap-2 rounded-xl border-[1.5px] bg-cx-card px-2.5 text-left",
-            phase === "current" && live
-              ? CURRENT_CARD[live]
-              : failed
-                ? "border-cx-rose ring-4 ring-cx-rose/15"
-                : phase !== "done" &&
-                  (marked.style ? marked.style.border : "border-cx-border"),
-            marked.highlighted && marked.style?.glow,
-            selected && "outline outline-2 outline-cx-accent",
-          );
-          const place: React.CSSProperties = {
-            left: x - NODE_W / 2,
-            top: y,
-            width: NODE_W,
-            height: NODE_H,
-          };
-          // Done cards take their lane's colour (inline: any lane index).
-          const doneBorder: React.CSSProperties =
-            phase === "done" && !failed
-              ? { borderColor: laneStyle(lane).color }
-              : {};
-          const number = numbers.get(step.id) ?? "";
-          const body = (
-            <>
-              <span className="w-[14px] shrink-0 text-right font-mono text-[10px] text-cx-faint">
-                {number}
-              </span>
-              <StepTile node={step} />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[13px] font-medium text-cx-fg">
-                  {nodeTitle(step)}
-                </span>
-                <span className="block truncate text-xs text-cx-muted">
-                  {stepSummary(step)}
-                </span>
-              </span>
-              {phase === "current" && live && <RunStatePill state={live} />}
-              {marked.mark && (
-                <IssueBadge
-                  mark={marked.mark}
-                  className="absolute -top-2.5 right-8"
+              {geometry.links.map((link) => (
+                <path
+                  key={link.key}
+                  d={link.d}
+                  data-link-from={link.from}
+                  data-link-to={link.to}
+                  data-link-role={link.role}
+                  fill="none"
+                  strokeWidth={1.5}
+                  strokeDasharray="5 4"
+                  stroke={laneStyle(link.lane).color}
+                  strokeOpacity={link.role === "dead" ? 0.45 : 1}
+                  markerEnd="url(#graph-link-arrow)"
+                  data-edge-id={link.edgeId}
+                  {...edgeIssueProps(link.edgeId)}
+                />
+              ))}
+              {geometry.merges.map((m) => (
+                <circle
+                  key={`merge:${m.x}:${m.y}`}
+                  data-graph-merge=""
+                  cx={m.x}
+                  cy={m.y}
+                  r={3.5}
+                  fill="var(--cx-faint)"
+                />
+              ))}
+              {geometry.start && (
+                <circle
+                  data-graph-start=""
+                  cx={geometry.start.x}
+                  cy={geometry.start.y}
+                  r={START_R}
+                  fill="var(--cx-faint)"
                 />
               )}
-              {marked.description}
-            </>
-          );
+              {ends.map((end) => (
+                <circle
+                  key={`end:${end.x}:${end.y}`}
+                  data-graph-end=""
+                  cx={end.x}
+                  cy={end.y}
+                  r={END_R}
+                  fill="var(--cx-card)"
+                  stroke="var(--cx-faint)"
+                  strokeWidth={2}
+                />
+              ))}
+            </svg>
 
-          if (editable) {
-            const dragged = drag?.id === step.id;
-            return (
-              <div
-                key={step.id}
-                data-node-id={step.id}
-                data-phase={failed ? "failed" : phase}
-                className={cn(
-                  "absolute select-none",
-                  dragged &&
-                    "z-20 rounded-xl shadow-[0_8px_24px_rgba(20,20,30,0.18)]",
-                )}
+            {geometry.loops.map((loop) => {
+              const canExit = loop.canExit;
+              const header = cards.find((c) => c.node.id === loop.headerId);
+              const waits = WAIT_TYPES.has(header?.node.type ?? "");
+              const unwrapCap =
+                onUnwrapLoop && !drag
+                  ? caps?.unwrap.get(loop.headerId)
+                  : undefined;
+              return (
+                // The loop's label, then "Stop repeating" right after it (the
+                // label truncates first), all inside the rectangle. The label
+                // leaves room after it for a future bound ("×N", "until …").
+                <div
+                  key={`label:${loop.key}`}
+                  className="absolute flex items-center gap-2 whitespace-nowrap text-xs"
+                  style={{
+                    left: loop.label.x,
+                    top: loop.label.y - 1,
+                    maxWidth: loop.rect.x + loop.rect.w - loop.label.x - 6,
+                  }}
+                >
+                  <div
+                    data-loop-block=""
+                    data-loop-to={loop.headerId}
+                    aria-label={t("scenarioRun.loopSteps", {
+                      from: loop.from,
+                      to: loop.to,
+                    })}
+                    title={t(
+                      canExit
+                        ? "scenarioRun.loopUntilExit"
+                        : "scenarioRun.loopUntilRunStops",
+                    )}
+                    className="flex min-w-0 items-center gap-1.5 overflow-hidden"
+                  >
+                    <Repeat
+                      className="h-3.5 w-3.5 shrink-0 text-cx-purple"
+                      aria-hidden
+                    />
+                    <span className="font-semibold text-cx-purple">
+                      {t(
+                        canExit
+                          ? "scenarioRun.loopRepeat"
+                          : "scenarioRun.loopForever",
+                      )}
+                    </span>
+                    {waits && (
+                      <span className="truncate text-cx-muted">
+                        · {t("scenarioRun.loopWaitsAt", { n: loop.from })}
+                      </span>
+                    )}
+                  </div>
+                  {unwrapCap && (
+                    <button
+                      type="button"
+                      data-testid="unwrap-loop"
+                      data-loop={loop.headerId}
+                      title={
+                        unwrapCap.ok
+                          ? t("scenarios.editor.unwrapLoopHint")
+                          : t(unwrapCap.reason)
+                      }
+                      disabled={!unwrapCap.ok}
+                      onClick={() => onUnwrapLoop?.(loop.headerId)}
+                      className="z-10 flex h-[18px] shrink-0 items-center gap-1 rounded border border-cx-purple/40 px-1.5 font-medium text-cx-purple hover:bg-cx-purple/15 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <RepeatOff className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                      {t("scenarios.editor.unwrapLoop")}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+
+            {allPaths.map(({ key, edgeId, mid }) => {
+              const mark = edgeMark(edgeId);
+              return mark ? (
+                <EdgeIssueMarker
+                  key={`issue:${key}`}
+                  mark={mark}
+                  x={mid.x}
+                  y={mid.y}
+                  label={markCounts(mark)}
+                  title={markMessages(mark)}
+                />
+              ) : null;
+            })}
+            {geometry.links.map((link) => {
+              const mark = edgeMark(link.edgeId);
+              return mark ? (
+                <EdgeIssueMarker
+                  key={`issue:${link.key}`}
+                  mark={mark}
+                  x={link.mid.x}
+                  y={link.mid.y}
+                  label={markCounts(mark)}
+                  title={markMessages(mark)}
+                />
+              ) : null;
+            })}
+            {issues?.marks.start && geometry.start && (
+              <IssueBadge
+                mark={issues.marks.start}
+                className="absolute z-10"
                 style={{
-                  ...place,
-                  ...(dragged
-                    ? { transform: `translateY(${drag.offset}px)` }
-                    : {}),
+                  left: geometry.start.x + START_R + 6,
+                  top: geometry.start.y - 9,
                 }}
-                // A branch point stays where it is.
-                {...(isFork
-                  ? {}
-                  : editing.dragHandlers({
-                      id: step.id,
-                      lane: seqPath,
-                      index,
-                    }))}
+              />
+            )}
+            {issues?.marks.end &&
+              ends.map((end) => (
+                <IssueBadge
+                  key={`end-issue:${end.x}:${end.y}`}
+                  mark={issues.marks.end!}
+                  className="absolute z-10"
+                  style={{ left: end.x + END_R + 6, top: end.y - 9 }}
+                />
+              ))}
+
+            {geometry.detached && (
+              <div
+                data-testid="detached-steps"
+                className="absolute whitespace-nowrap text-xs font-semibold uppercase tracking-wide text-cx-muted"
+                style={{ left: geometry.detached.x, top: geometry.detached.y }}
+                title={t("scenarioRun.tree.unreachedHint")}
               >
+                {t("scenarioRun.tree.unreached")}
+              </div>
+            )}
+
+            {geometry.tags.map((tag) => {
+              const removeCap =
+                editable && onRemoveLane
+                  ? (caps?.lane.get(tag.key) ?? null)
+                  : null;
+              const removeLabel = t("scenarioRun.tree.removeLane", {
+                lane: laneLetter(tag.laneIndex),
+              });
+              return (
+                <div
+                  key={tag.key}
+                  data-testid="lane-tag"
+                  data-lane={tag.laneIndex}
+                  data-fork={tag.forkId}
+                  data-dead-lane={tag.dead ? "" : undefined}
+                  data-leaves-loop={tag.leaves ? "" : undefined}
+                  title={
+                    tag.dead
+                      ? t("scenarioRun.tree.deadLane")
+                      : tag.leaves
+                        ? t("scenarioRun.tree.leavesLoop")
+                        : undefined
+                  }
+                  className={cn(
+                    "absolute z-[5] flex items-center gap-1.5 rounded-full border bg-cx-card px-1 text-xs",
+                    tag.dead
+                      ? "border-dashed border-cx-border-strong opacity-60"
+                      : "border-cx-border",
+                  )}
+                  style={{
+                    left: tag.x - tag.w / 2,
+                    top: tag.y,
+                    width: tag.w,
+                    height: TAG_H,
+                  }}
+                >
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold",
+                      laneStyle(tag.laneIndex).letter,
+                    )}
+                  >
+                    {laneLetter(tag.laneIndex)}
+                  </span>
+                  <span
+                    data-lane-condition=""
+                    className="min-w-0 flex-1 truncate font-mono text-[11px] text-cx-fg2"
+                  >
+                    {tag.text}
+                  </span>
+                  {tag.leaves && (
+                    <LogOut
+                      className="h-3 w-3 shrink-0 text-cx-purple"
+                      aria-hidden
+                    />
+                  )}
+                  <span className="shrink-0 font-mono text-[10px] text-cx-muted">
+                    {tag.count}
+                  </span>
+                  {removeCap && !drag && (
+                    <button
+                      type="button"
+                      aria-label={removeLabel}
+                      title={capTitle(removeCap, removeLabel)}
+                      disabled={!removeCap.ok}
+                      onClick={() => onRemoveLane?.(tag.forkId, tag.laneIndex)}
+                      className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-cx-faint hover:bg-cx-rose/10 hover:text-cx-rose disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-cx-faint"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+
+            {cards.map(({ node: step, x, y, lane, seqPath, index, isFork }) => {
+              const phase = phaseOf(step.id);
+              const failed = state === "error" && step.id === currentNodeId;
+              const selected = selectedStepId === step.id;
+              const marked = stepIssues(step.id);
+              const className = cn(
+                "flex items-center gap-2 rounded-xl border-[1.5px] bg-cx-card px-2.5 text-left",
+                phase === "current" && live
+                  ? CURRENT_CARD[live]
+                  : failed
+                    ? "border-cx-rose ring-4 ring-cx-rose/15"
+                    : phase !== "done" &&
+                      (marked.style ? marked.style.border : "border-cx-border"),
+                marked.highlighted && marked.style?.glow,
+                selected && "outline outline-2 outline-cx-accent",
+              );
+              const place: React.CSSProperties = {
+                left: x - NODE_W / 2,
+                top: y,
+                width: NODE_W,
+                height: NODE_H,
+              };
+              // Done cards take their lane's colour (inline: any lane index).
+              const doneBorder: React.CSSProperties =
+                phase === "done" && !failed
+                  ? { borderColor: laneStyle(lane).color }
+                  : {};
+              const number = numbers.get(step.id) ?? "";
+              const body = (
+                <>
+                  <span className="w-[14px] shrink-0 text-right font-mono text-[10px] text-cx-faint">
+                    {number}
+                  </span>
+                  <StepTile node={step} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13px] font-medium text-cx-fg">
+                      {nodeTitle(step)}
+                    </span>
+                    <span className="block truncate text-xs text-cx-muted">
+                      {stepSummary(step)}
+                    </span>
+                  </span>
+                  {phase === "current" && live && <RunStatePill state={live} />}
+                  {marked.mark && (
+                    <IssueBadge
+                      mark={marked.mark}
+                      className="absolute -top-2.5 right-8"
+                    />
+                  )}
+                  {marked.description}
+                </>
+              );
+
+              if (editable) {
+                const dragged = drag?.id === step.id;
+                return (
+                  <div
+                    key={step.id}
+                    data-node-id={step.id}
+                    data-phase={failed ? "failed" : phase}
+                    className={cn(
+                      "absolute select-none",
+                      dragged &&
+                        "z-20 rounded-xl shadow-[0_8px_24px_rgba(20,20,30,0.18)]",
+                    )}
+                    style={{
+                      ...place,
+                      ...(dragged
+                        ? { transform: `translateY(${drag.offset / zoom}px)` }
+                        : {}),
+                    }}
+                    // A branch point stays where it is.
+                    {...(isFork
+                      ? {}
+                      : editing.dragHandlers({
+                          id: step.id,
+                          lane: seqPath,
+                          index,
+                        }))}
+                  >
+                    <button
+                      type="button"
+                      aria-pressed={selected}
+                      data-step-select
+                      aria-label={t("scenarioRun.selectStep", {
+                        n: number,
+                        title: nodeTitle(step),
+                      })}
+                      title={t("scenarioRun.clickToEdit")}
+                      onClick={() => onSelectStep?.(step.id)}
+                      onKeyDown={editing.onStepKeyDown(step.id)}
+                      {...marked.cardProps}
+                      className={cn(
+                        className,
+                        "relative h-full w-full",
+                        isFork
+                          ? "cursor-pointer"
+                          : dragged
+                            ? "cursor-grabbing"
+                            : "cursor-grab",
+                      )}
+                      style={doneBorder}
+                    >
+                      {body}
+                    </button>
+                    {selected && onDeleteStep && (
+                      <button
+                        type="button"
+                        aria-label={t("scenarioRun.removeStep", { n: number })}
+                        title={t("scenarioRun.removeThisStep")}
+                        // Not the start of a drag.
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onClick={() =>
+                          onDeleteStep(step.id, { confirm: false })
+                        }
+                        className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full border border-cx-border-strong bg-cx-card text-cx-muted hover:border-cx-rose hover:text-cx-rose"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+                );
+              }
+
+              const shared = {
+                "data-node-id": step.id,
+                "data-phase": failed ? "failed" : phase,
+                className: cn("absolute", className),
+                style: { ...place, ...doneBorder },
+                ...marked.cardProps,
+              };
+              return onSelectStep ? (
                 <button
+                  key={step.id}
                   type="button"
                   aria-pressed={selected}
-                  data-step-select
-                  aria-label={t("scenarioRun.selectStep", {
-                    n: number,
-                    title: nodeTitle(step),
-                  })}
-                  title={t("scenarioRun.clickToEdit")}
-                  onClick={() => onSelectStep?.(step.id)}
-                  onKeyDown={editing.onStepKeyDown(step.id)}
-                  {...marked.cardProps}
-                  className={cn(
-                    className,
-                    "relative h-full w-full",
-                    isFork
-                      ? "cursor-pointer"
-                      : dragged
-                        ? "cursor-grabbing"
-                        : "cursor-grab",
-                  )}
-                  style={doneBorder}
+                  onClick={() => onSelectStep(step.id)}
+                  {...shared}
                 >
                   {body}
                 </button>
-                {selected && onDeleteStep && (
+              ) : (
+                <div key={step.id} {...shared}>
+                  {body}
+                </div>
+              );
+            })}
+
+            {dropLine && (
+              <div
+                aria-hidden
+                data-drop-indicator=""
+                className="pointer-events-none absolute z-30 h-0.5 rounded-full bg-cx-accent"
+                style={{
+                  left: dropLine.left,
+                  top: dropLine.top,
+                  width: NODE_W,
+                }}
+              />
+            )}
+
+            {canInsert && !drag && (
+              <>
+                {geometry.zones.map((zone) => plusButton(zone, true))}
+                {geometry.discs.map((disc) => plusButton(disc, false))}
+              </>
+            )}
+
+            {editable &&
+              onAddLane &&
+              !drag &&
+              geometry.pills.map((pill) => {
+                const cap = caps?.addLane.get(pill.nodeId);
+                if (!cap) return null;
+                return (
                   <button
+                    key={`pill:${pill.nodeId}`}
                     type="button"
-                    aria-label={t("scenarioRun.removeStep", { n: number })}
-                    title={t("scenarioRun.removeThisStep")}
-                    // Not the start of a drag.
-                    onPointerDown={(event) => event.stopPropagation()}
-                    onClick={() => onDeleteStep(step.id, { confirm: false })}
-                    className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full border border-cx-border-strong bg-cx-card text-cx-muted hover:border-cx-rose hover:text-cx-rose"
+                    aria-label={pill.label}
+                    title={capTitle(cap, pill.label)}
+                    disabled={!cap.ok}
+                    onClick={() => onAddLane(pill.nodeId)}
+                    className="absolute z-10 flex h-[22px] items-center rounded-full border border-dashed border-cx-border-strong bg-cx-card px-2 text-xs font-medium text-cx-muted hover:border-cx-accent hover:text-cx-accent disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-cx-border-strong disabled:hover:text-cx-muted"
+                    style={{ left: pill.x, top: pill.y }}
                   >
-                    <X className="h-3 w-3" />
+                    {t("scenarioRun.branchPill")}
                   </button>
-                )}
-              </div>
-            );
-          }
+                );
+              })}
 
-          const shared = {
-            "data-node-id": step.id,
-            "data-phase": failed ? "failed" : phase,
-            className: cn("absolute", className),
-            style: { ...place, ...doneBorder },
-            ...marked.cardProps,
-          };
-          return onSelectStep ? (
-            <button
-              key={step.id}
-              type="button"
-              aria-pressed={selected}
-              onClick={() => onSelectStep(step.id)}
-              {...shared}
-            >
-              {body}
-            </button>
-          ) : (
-            <div key={step.id} {...shared}>
-              {body}
-            </div>
-          );
-        })}
-
-        {dropLine && (
-          <div
-            aria-hidden
-            data-drop-indicator=""
-            className="pointer-events-none absolute z-30 h-0.5 rounded-full bg-cx-accent"
-            style={{ left: dropLine.left, top: dropLine.top, width: NODE_W }}
-          />
-        )}
-
-        {canInsert && !drag && (
-          <>
-            {geometry.zones.map((zone) => plusButton(zone, true))}
-            {geometry.discs.map((disc) => plusButton(disc, false))}
-          </>
-        )}
-
-        {editable &&
-          onAddLane &&
-          !drag &&
-          geometry.pills.map((pill) => {
-            const cap = caps?.addLane.get(pill.nodeId);
-            if (!cap) return null;
-            return (
-              <button
-                key={`pill:${pill.nodeId}`}
-                type="button"
-                aria-label={pill.label}
-                title={capTitle(cap, pill.label)}
-                disabled={!cap.ok}
-                onClick={() => onAddLane(pill.nodeId)}
-                className="absolute z-10 flex h-[22px] items-center rounded-full border border-dashed border-cx-border-strong bg-cx-card px-2 text-xs font-medium text-cx-muted hover:border-cx-accent hover:text-cx-accent disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-cx-border-strong disabled:hover:text-cx-muted"
-                style={{ left: pill.x, top: pill.y }}
+            {openPlus && (
+              <div
+                className="absolute z-40"
+                style={{
+                  left: Math.max(
+                    4,
+                    Math.min(openPlus.x - PICKER_W / 2, width - PICKER_W - 4),
+                  ),
+                  top: pickerTop,
+                  width: PICKER_W,
+                }}
               >
-                {t("scenarioRun.branchPill")}
-              </button>
-            );
-          })}
-
-        {openPlus && (
-          <div
-            className="absolute z-40"
-            style={{
-              left: Math.max(
-                4,
-                Math.min(openPlus.x - PICKER_W / 2, width - PICKER_W - 4),
-              ),
-              top: pickerTop,
-              width: PICKER_W,
-            }}
-          >
-            {editing.picker}
+                {editing.picker}
+              </div>
+            )}
           </div>
-        )}
+        </div>
       </div>
     </div>
   );

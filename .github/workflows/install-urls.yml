@@ -1,0 +1,22 @@
+name: Install URLs
+
+# #808: the pull-request CI fetches the documented install URLs only when a
+# pull request touches them or the release plumbing. This daily run is what
+# notices a broken rolling `cli-latest` pointer in between.
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  install-urls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Documented install URLs resolve
+        run: ./scripts/verify-install-urls.sh

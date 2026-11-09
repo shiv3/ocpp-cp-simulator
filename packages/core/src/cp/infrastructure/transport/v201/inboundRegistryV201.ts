@@ -221,6 +221,12 @@ export interface V201CertificateSigning {
    * Station certificate as its TLS client certificate (A02.FR.08).
    */
   certificateInstalled(use: SignedCertificateUse): void;
+  /**
+   * A chain for `use` answered the pending CSR (its leaf carries the CSR's
+   * key) but is not valid and was Rejected: the SignCertificate resends
+   * stop until the CSMS triggers a new one (A02.FR.20, #587).
+   */
+  certificateRejected(use: SignedCertificateUse): void;
 }
 
 export interface V201InboundContext {

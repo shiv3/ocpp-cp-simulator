@@ -16,7 +16,7 @@ related:
   - ../sources/cert16-templates-readme.md
   - ../sources/steve-verify-readme.md
   - cli.md
-updated: 2026-11-08
+updated: 2026-11-09
 ---
 
 # Built-in scenario templates
@@ -42,8 +42,9 @@ locale tables (`templates.<id>.name` / `.description`, see
 English table must repeat the file's text word for word and every locale must
 keep its OCPP message names, so a change to either field goes with a change to
 `apps/web/src/i18n/locales/*/templates.json` in the same commit (#807). A
-template without an entry, such as the `resilience-*` templates today, shows
-the file's own text in every language.
+template may have no entry: no test requires one, and the console then shows
+the file's own text in every language. The `resilience-*` templates got their
+entries in #817.
 
 ## Where templates are used
 

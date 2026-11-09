@@ -333,7 +333,10 @@ describe("OCPP 1.6 transaction message retries across a restart (#527)", () => {
 describe("OCPP 1.6 startCallError across a restart (#527)", () => {
   /** A real connector, saved and restored through `connector_runtime`, then
    *  asked to stop the transaction with the `0` id. */
-  function remoteStopAfterRestart(startCallError: boolean) {
+  function remoteStopAfterRestart(
+    startCallError: boolean,
+    startUnanswered = false,
+  ) {
     const db = BunSqliteDatabase.open(":memory:");
     try {
       const repo = new SqliteConnectorRuntimeRepository(db);
@@ -341,6 +344,7 @@ describe("OCPP 1.6 startCallError across a restart (#527)", () => {
       const before = new Connector(1, logger);
       before.beginTransaction(runningTransaction());
       if (startCallError) before.markStartCallError();
+      if (startUnanswered) before.patchTransaction({ startUnanswered: true });
       repo.save("CP-527", 1, {
         ...before.snapshotRuntime(),
         scenarioPosition: null,
@@ -365,6 +369,10 @@ describe("OCPP 1.6 startCallError across a restart (#527)", () => {
 
   it("a restored `0` the CSMS failed to process is not one a RemoteStopTransaction can name", () => {
     expect(remoteStopAfterRestart(true)).toEqual({ status: "Rejected" });
+  });
+
+  it("a restored `0` whose StartTransaction.req never got an answer is not one either (#727)", () => {
+    expect(remoteStopAfterRestart(false, true)).toEqual({ status: "Rejected" });
   });
 
   it("a restored `0` with no CALLERROR behind it still matches", () => {

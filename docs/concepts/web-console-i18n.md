@@ -9,7 +9,7 @@ related:
   - ../entities/web-console.md
   - local-vs-remote-mode.md
   - ../entities/scenario-templates.md
-updated: 2026-11-08
+updated: 2026-11-09
 ---
 
 # Web console internationalization
@@ -44,7 +44,7 @@ the default and the fallback), **Simplified Chinese** (`zh-CN`), **Japanese**
 2. For a counted noun, pass `count` and add both forms in English: `"x.items_one": "{{count}} item"` and `"x.items_other": "{{count}} items"`. Call `t("x.items", { count })`; never choose between two keys with `n === 1`. When one sentence has several counts, translate each count with its own plural key and pass the results as plain parameters.
 3. Add the same key to `locales/ja/<namespace>.json`, `locales/zh-CN/<namespace>.json` and `locales/fr/<namespace>.json` (plurals: `_other` only in `ja` / `zh-CN`; `_one`, `_many`, `_other` in `fr`).
 4. Use it: `const { t } = useTranslation(); t("ns.area.name", { id })`. In module-level constants store the key and call `t` at render time.
-5. Run `bunx vitest run apps/web/src/i18n`. `i18n.test.ts` fails when a locale lacks a key present in `en` (plural-aware), has an unknown key, an empty string, different `{{placeholders}}`, or plural forms other than the CLDR categories of its language. It also fails when an `en` string contains Japanese or Chinese characters, when an `en` `templates.*` entry differs from the built-in template's `name` / `description` or names no template (`packages/core/src/utils/scenarios/*.json`), or when a locale's template description, where one exists, names other OCPP messages (`X.req` / `X.conf` tokens) than the template's own (#807). A template without an entry shows its own text in every language. Changing a template's text therefore means changing `en` in the same commit and the other locales with it.
+5. Run `bunx vitest run apps/web/src/i18n`. `i18n.test.ts` fails when a locale lacks a key present in `en` (plural-aware), has an unknown key, an empty string, different `{{placeholders}}`, or plural forms other than the CLDR categories of its language. It also fails when an `en` string contains Japanese or Chinese characters, when an `en` `templates.*` entry differs from the built-in template's `name` / `description` or names no template (`packages/core/src/utils/scenarios/*.json`), or when a locale's template description, where one exists, names other OCPP messages (`X.req` / `X.conf` tokens) than the template's own (#807). It fails as well when a built-in template has no `en` name and description (#817), so a new template cannot ship untranslated; the per-locale key-completeness tests then require the entry in `ja`, `zh-CN` and `fr`. (Without an entry a template would show its own text in every language.) Changing a template's text therefore means changing `en` in the same commit and the other locales with it.
 
 ## Adding a language
 

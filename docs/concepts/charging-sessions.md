@@ -381,10 +381,16 @@ WebSocket closes ([#488](https://github.com/shiv3/ocpp-cp-simulator/issues/488))
   StopTransaction.req waits behind a StartTransaction.req being resent, or in
   flight, and is built with the id when it is written (also when it is salvaged
   to the offline queue). If the request is discarded, it carries `-1` (1.6
-  errata 3.18). Still `0`: a StartTransaction.req that timed out (1.6 does not
-  resend a timeout; errata 3.18 asks for `-1` there too), a resend lost when
-  the link closes, and a restart (the outcomes are kept in memory) (#727). A
-  StartTransaction.req resend is never dropped because its transaction stopped
+  errata 3.18). So does a transaction whose StartTransaction.req timed out
+  (the 30 s watchdog; 1.6 does not resend a timeout), and one restored after a
+  restart or a resend lost when the link closed, with its StartTransaction.req
+  neither queued nor in flight (#727): the transaction records that no conf
+  assigned its id (`startUnanswered`, persisted with it) and its messages carry
+  `-1` from then on. A conf that still arrives late gives the later messages
+  its id. A stop requested while the connector goes to `Preparing` (a
+  `connectorStatusChange` listener) waits until the StartTransaction.req is
+  queued, so the StopTransaction.req follows it with its conf's id (§3.7,
+  chronological delivery). A StartTransaction.req resend is never dropped because its transaction stopped
   ([#565](https://github.com/shiv3/ocpp-cp-simulator/issues/565),
   [order of transaction messages](ocpp-versions-and-transports.md#transaction-message-retries-ocpp-j-16)).
 - The fleet-wide listing (#489) is a control-plane and MCP feature only: the

@@ -435,7 +435,8 @@ CALLERROR.
   which M04.FR.08 allows.
 - `CertificateSigned` splits `certificateChain` into PEM certificates, leaf
   first. It answers `Accepted` only when a CSR is pending for the chain's use and the
-  leaf carries that CSR's public key (A02.FR.06). The chain then replaces any
+  leaf carries that CSR's public key and the current date is within the leaf's
+  validity period (A02.FR.06, #587; below). The chain then replaces any
   older chain of the same use, and the CSR is no longer pending. An absent
   `certificateType` means the Charging Station certificate: per the field
   description, the certificate then serves both the CSMS and the 15118
@@ -507,16 +508,26 @@ CALLERROR.
   out. One sequence runs per
   certificate use. It ends on an `Accepted` `CertificateSigned` for that use
   and on a non-`Accepted` answer to the current `SignCertificate` request.
-  A chain rejected for any reason (over `MaxCertificateChainSize`,
+  A chain rejected for most reasons (over `MaxCertificateChainSize`,
   malformed, a public-key mismatch, no pending CSR, an unsupported
   `certificateType`) leaves it running, still bounded by
   `CertSigningRepeatTimes`; a chain answering a CSR a newer one replaced is
-  such a mismatch. This is the simulator's reading (#537): A02.FR.17 asks
-  about a `CertificateSigned` "for this CSR", and the station has no
-  A02.FR.06 period or hierarchy check, so a chain whose leaf matches the
-  CSR's key is `Accepted` and no rejection can be tied to this CSR as an
-  invalid answer. A02.FR.20, which ends the resends on an invalid answer,
-  has no case to apply to yet. A closed connection only holds the wait: after the next accepted boot it goes on with what it had left and
+  such a mismatch. A02.FR.17 asks about a `CertificateSigned` "for this
+  CSR", so only a chain whose leaf matches the pending CSR's key can end the
+  sequence by itself: `Accepted`, or `Rejected` because the leaf is not
+  valid (A02.FR.07, A02.FR.20, #587), after which no `SignCertificate` goes
+  out until the CSMS sends a `TriggerMessage`.
+  **Validity (A02.FR.06, #587).** The key is checked first. A leaf whose
+  `notAfter` has passed, or whose `notBefore` is still ahead, is `Rejected`
+  on 2.0.1 and 2.1 alike: A02.FR.06 asks for the current date to be within
+  the certificate's validity period (the 2.0.1 ed4 and 2.1 ed2 texts are
+  identical), so the certificate is discarded, nothing is stored or switched
+  to, and an `InvalidChargingStationCertificate` security event follows the
+  answer (A02.FR.07). The Certificate Properties and the operator hierarchy
+  that A02.FR.06 also names are not checked (a leaf with the right key that
+  lies outside the hierarchy is `Accepted`, which 2.0.1 Part 6 TC_A_14_CS
+  would expect `Rejected`; tracked in #847), and only the
+  leaf's period is, not that of the chain's other members. A closed connection only holds the wait: after the next accepted boot it goes on with what it had left and
   the same resend count, so a sequence that reached
   `CertSigningRepeatTimes` or ended does not start over on a reconnect. A
   request the close left unanswered was never accepted and starts no wait.
@@ -637,9 +648,10 @@ connected.
   The A02.FR.28 fallback below is the one exception: it presents the
   previous certificate with its key although the renewal already replaced
   that certificate's chain in the store. The spec imposes it.
-- 2.0.1 asks the station to switch once the certificate's `notBefore` has
-  passed; the simulator waits for it on 2.1 too, so a certificate not yet
-  valid is switched to at that time. A manual disconnect does not cancel
+- `CertificateSigned` refuses a certificate whose `notBefore` is ahead
+  (A02.FR.06, above), so the switch is never deferred to a later
+  `notBefore` through that message; the timer that would wait for one is a
+  guard only. A manual disconnect does not cancel
   that wait. A `cp.delete` does, and so does a `cp.update`, which replaces
   the charge point: the replacement holds no key, and presents
   `--tls-cert`, as after a restart. A second `CertificateSigned`
@@ -762,7 +774,7 @@ ids are the 2.0.1 and 2.1 Part 2 ones unless marked.
 | `V2G20Certificate` chains under `V2GCertificateChain`                 | Implemented on 2.1                                             | M03.FR.05                                    |
 | TriggerMessage `SignChargingStationCertificate`, `SignV2GCertificate` | Implemented                                                    | F06.FR.04, A02.FR.02/03/13                   |
 | TriggerMessage `SignV2G20Certificate`, `SignCombinedCertificate`      | Implemented on 2.1                                             | F06.FR.08 (#553)                             |
-| Resend SignCertificate with back-off                                  | Implemented                                                    | A02.FR.17-19; A02.FR.20 has no case yet      |
+| Resend SignCertificate with back-off                                  | Implemented                                                    | A02.FR.17-20                                 |
 | 2.x `security_event_notification`                                     | Implemented                                                    | A04.FR.01                                    |
 | Queue critical SecurityEventNotification while offline                | Implemented on 1.6 (#734) and 2.x (critical events only, #552) | A04.FR.02, Part 2 Appendices ch. 1           |
 | `SecurityCtrlr.CertificateEntries`                                    | Implemented                                                    | variable; the limit of M05.FR.06             |

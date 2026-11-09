@@ -88,6 +88,20 @@ describe("locale completeness", () => {
     expect(bad, "en template text that differs or has no template").toEqual([]);
   });
 
+  it("has a name and a description in en for every built-in template", () => {
+    // A template without an entry shows its English text in every locale, so
+    // a new template cannot ship untranslated unnoticed (#817). The locale
+    // tests below then require the entry in ja, zh-CN and fr.
+    const missing = scenarioTemplates
+      .filter(
+        (tpl) =>
+          !(`templates.${tpl.id}.name` in en) ||
+          !(`templates.${tpl.id}.description` in en),
+      )
+      .map((tpl) => tpl.id);
+    expect(missing, "templates without a name and description").toEqual([]);
+  });
+
   for (const locale of others) {
     const table = load(locale);
 

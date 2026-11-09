@@ -13,11 +13,11 @@ export interface TestAuthority {
   keys: CryptoKeyPair;
 }
 
-function validity() {
+function validity(options: IssuedOptions = {}) {
   const now = Date.now();
   return {
-    notBefore: new Date(now - 60_000),
-    notAfter: new Date(now + 86_400_000),
+    notBefore: new Date(now + (options.notBeforeOffsetMs ?? -60_000)),
+    notAfter: new Date(now + (options.notAfterOffsetMs ?? 86_400_000)),
   };
 }
 
@@ -48,6 +48,9 @@ export interface IssuedOptions {
   /** OCSP responder URL put in an Authority Information Access extension
    *  (#537, M06). */
   ocspUrl?: string;
+  /** Validity period, in ms from now (default -60 s to +1 day). */
+  notBeforeOffsetMs?: number;
+  notAfterOffsetMs?: number;
 }
 
 function aiaExtensions({ ocspUrl }: IssuedOptions): x509.Extension[] {
@@ -108,7 +111,7 @@ export async function leafForCsr(
     serialNumber,
     subject: csr.subject,
     issuer: issuer.name,
-    ...validity(),
+    ...validity(options),
     ...(options.notBefore ? { notBefore: options.notBefore } : {}),
     ...(options.notAfter ? { notAfter: options.notAfter } : {}),
     signingAlgorithm: EC_ALG,

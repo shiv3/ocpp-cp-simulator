@@ -1246,7 +1246,11 @@ export class Connector {
     if (!this.txTarget) return;
     this.store.write({
       kind: "transaction.patch",
-      patch: { id: transactionId, startCallError: undefined },
+      patch: {
+        id: transactionId,
+        startCallError: undefined,
+        startUnanswered: undefined,
+      },
     });
     this.eventsEmitter.emit("transactionIdChange", { transactionId });
   }
@@ -1533,7 +1537,26 @@ export class Connector {
     this.onMeterSend = callback;
   }
 
+  /** `startTime` of the last transaction begun here, in ms (#586). */
+  private lastStartMs = -Infinity;
+
+  /**
+   * OCPP 1.x: the start time of a new transaction, which is `now` unless it
+   * equals the previous transaction's on this connector to the millisecond.
+   * A StartTransaction.req is matched to its transaction by `idTag` and
+   * `timestamp`, so a stop then a start by the same tag within one
+   * millisecond must not produce the same pair (#586); the wire timestamp is
+   * 1 ms later in that one case. Only an actual collision bumps it: a clock
+   * stepped back keeps stamping the clock's time.
+   */
+  nextStartTime(now: Date): Date {
+    return now.getTime() === this.lastStartMs
+      ? new Date(now.getTime() + 1)
+      : now;
+  }
+
   beginTransaction(transaction: Transaction): void {
+    this.lastStartMs = transaction.startTime.getTime();
     this.store.write({
       kind: "transaction.set",
       transaction: recordOfTransaction(transaction),

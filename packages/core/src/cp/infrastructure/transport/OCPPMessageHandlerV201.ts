@@ -397,6 +397,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
         void this._chargePoint.adoptRenewedClientCertificate();
       }
     },
+    certificateRejected: (use) => this._signBackoff.stop(use),
     certificateInstalled: (use) => {
       this._signBackoff.stop(use);
       if (V2G_CERTIFICATE_USES.includes(use)) {

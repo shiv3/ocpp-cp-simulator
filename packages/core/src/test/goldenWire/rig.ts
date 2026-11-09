@@ -117,6 +117,17 @@ export class Rig {
       }
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
+    // The server sees the upgrade before the station sees its socket open. The
+    // station's resume (status reports, #702) only follows then, so wait for
+    // it to be done with the boot step, else a loaded runner lets `settle`
+    // return before the first frame of the new connection (#824).
+    while (!this.cp.bootAccepted) {
+      if (Date.now() > deadline) {
+        throw new Error(`reconnect #${nth} not resumed within ${timeoutMs}ms`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    this.csms.noteActivity();
   }
 
   /** An HTTP endpoint that accepts every upload with 200, for diagnostics/logs. */

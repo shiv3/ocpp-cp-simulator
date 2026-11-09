@@ -95,7 +95,12 @@ export type ApplySignedChainOutcome =
   | { status: "Accepted"; chain: StoredCertificateChain }
   | { status: "Malformed" }
   | { status: "NoPendingCsr" }
-  | { status: "PublicKeyMismatch" };
+  | { status: "PublicKeyMismatch" }
+  /** The leaf's `notAfter` has passed (A02.FR.06, #587). */
+  | { status: "Expired" }
+  /** The leaf's `notBefore` is in the future (2.0.1 and 2.1 A02.FR.06,
+   *  #587). */
+  | { status: "NotYetValid" };
 
 /**
  * Safe snapshot of the store. Holds public material only (certificates and
@@ -297,8 +302,10 @@ export class CertificateStore {
 
   /**
    * OCPP 2.x CertificateSigned: accepts the chain only when a CSR is pending
-   * for `use` and the leaf carries that CSR's public key (A02.FR.06; a
-   * chain that fails is not valid for this station, A02.FR.07). On success
+   * for `use`, the leaf carries that CSR's public key and the current date is
+   * within its validity period: not before `notBefore` and not after
+   * `notAfter` (2.0.1 and 2.1 A02.FR.06, #587; a chain that fails is not
+   * valid for this station, A02.FR.07). On success
    * the chain replaces any older chain of the same use (A02.FR.09/10: the
    * newest certificate is the one used) and the CSR is no longer pending.
    * On failure nothing changes, the CSR stays pending.
@@ -329,6 +336,14 @@ export class CertificateStore {
     if (!pending) return { status: "NoPendingCsr" };
     if (!bytesEqual(pending.publicKey, leafKey)) {
       return { status: "PublicKeyMismatch" };
+    }
+    // Checked after the key, so a chain answering a superseded CSR is told
+    // apart from an invalid answer to this one (#587).
+    const leaf = new x509.X509Certificate(chain.pems[0]);
+    const now = this.clock.now();
+    if (now >= leaf.notAfter.getTime()) return { status: "Expired" };
+    if (now < leaf.notBefore.getTime()) {
+      return { status: "NotYetValid" };
     }
 
     // Bound before the change is announced, so a listener reading

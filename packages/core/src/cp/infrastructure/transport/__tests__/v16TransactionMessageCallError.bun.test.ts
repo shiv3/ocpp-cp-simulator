@@ -204,6 +204,105 @@ describe("OCPP 1.6 transaction message CALLERROR (#527, §3.7.1)", () => {
     }
   });
 
+  it("a MeterValues.req after a discard carries -1, and RemoteStopTransaction naming -1 is Rejected (#727)", async () => {
+    const s = await station("CP16-727-METER", ["StartTransaction"]);
+    try {
+      s.cp.configuration.applyChange("TransactionMessageAttempts", "1");
+      void s.cp.startTransaction("TAG-727", 1);
+      callError(s.csms, await nthCall(s.csms, "StartTransaction", 1));
+      await until(() => s.discarded.length === 1, "the discard");
+
+      s.cp.sendMeterValue(1);
+      const meter = await nthCall(s.csms, "MeterValues", 1);
+      s.csms.send([
+        2,
+        "remote-stop-727",
+        "RemoteStopTransaction",
+        { transactionId: -1 },
+      ]);
+      const answer = await s.csms.waitForFrame(answerTo("remote-stop-727"));
+
+      expect((meter[3] as { transactionId: number }).transactionId).toBe(-1);
+      expect(answer[2]).toEqual({ status: "Rejected" });
+    } finally {
+      await s.stop();
+    }
+  });
+
+  it("RemoteStopTransaction naming the 0 of a StartTransaction.req nobody answered is Rejected (#727)", async () => {
+    const s = await station("CP16-727-UNANSWERED", ["StartTransaction"]);
+    try {
+      void s.cp.startTransaction("TAG-727", 1);
+      await nthCall(s.csms, "StartTransaction", 1);
+
+      s.csms.send([
+        2,
+        "remote-stop-727b",
+        "RemoteStopTransaction",
+        { transactionId: 0 },
+      ]);
+      const answer = await s.csms.waitForFrame(answerTo("remote-stop-727b"));
+
+      expect(answer[2]).toEqual({ status: "Rejected" });
+    } finally {
+      await s.stop();
+    }
+  });
+
+  it("a stop requested while the connector goes to Preparing follows the StartTransaction.req and takes its id (§3.7, #727)", async () => {
+    const s = await station("CP16-727-PREPARING", ["StartTransaction"]);
+    try {
+      let done = false;
+      s.cp.events.on("connectorStatusChange", (e) => {
+        if (e.status === OCPPStatus.Preparing && !done) {
+          done = true;
+          s.cp.stopTransaction(1, "Other");
+        }
+      });
+      void s.cp.startTransaction("TAG-727", 1);
+      const start = await nthCall(s.csms, "StartTransaction", 1);
+      s.csms.replyCallResult(start[1] as string, {
+        transactionId: 727,
+        idTagInfo: { status: "Accepted" },
+      });
+      const stop = await nthCall(s.csms, "StopTransaction", 1);
+
+      expect((stop[3] as { transactionId: number }).transactionId).toBe(727);
+      expect(s.stops).toHaveLength(1);
+    } finally {
+      await s.stop();
+    }
+  });
+
+  it("a stop requested while the connector goes to Preparing is not lost when queueing the StartTransaction.req throws (#727)", async () => {
+    const s = await station("CP16-727-THROW", ["StartTransaction"]);
+    try {
+      let done = false;
+      s.cp.events.on("connectorStatusChange", (e) => {
+        if (e.status === OCPPStatus.Preparing && !done) {
+          done = true;
+          s.cp.stopTransaction(1, "Other");
+        }
+      });
+      const outbox = (
+        s.cp as unknown as {
+          _outbox: { sendTransactionEvent: (event: unknown) => void };
+        }
+      )._outbox;
+      const original = outbox.sendTransactionEvent.bind(outbox);
+      outbox.sendTransactionEvent = () => {
+        outbox.sendTransactionEvent = original;
+        throw new Error("send failure");
+      };
+      await s.cp.startTransaction("TAG-727", 1).catch(() => undefined);
+      expect(done).toBe(true);
+      // The requested stop ran although the start was interrupted.
+      expect(s.cp.getConnector(1)?.hasRunningTransaction).toBe(false);
+    } finally {
+      await s.stop();
+    }
+  });
+
   it("RemoteStopTransaction for an id 0 the CSMS assigned stops the transaction (#328)", async () => {
     const s = await station("CP16-527-REMOTESTOP-ZERO", ["StartTransaction"]);
     try {

@@ -415,6 +415,34 @@ describe("runAnalyze (integration, real @ocpp-debugkit/toolkit)", () => {
     );
   });
 
+  it("reports the exclusion counts before failing on a trace with nothing left to analyze", async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "analyze-all-excluded-"));
+    const tracePath = path.join(dir, "trace.jsonl");
+
+    const lines = [
+      // No timestamp: JSON, but not a valid trace record.
+      rec("CP001", {
+        direction: "cp-to-csms",
+        messageType: "CALL",
+        messageId: "1",
+        action: "Heartbeat",
+        payload: {},
+      }),
+      "this is not json",
+    ];
+    fs.writeFileSync(tracePath, lines.join("\n") + "\n");
+
+    const { result: code, stderr } = await withCapturedIo(() =>
+      runAnalyze({ file: tracePath }),
+    );
+
+    expect(code).toBe(1);
+    expect(stderr).toContain(
+      "excluded: 0 soap record(s), 0 non-1.6 record(s), 1 unparseable line(s), 1 invalid record(s)",
+    );
+    expect(stderr).toContain("Error: no analyzable records found");
+  });
+
   it("returns exit code 1 and an error on stderr when the trace file is missing", async () => {
     const { result: code, stderr } = await withCapturedIo(() =>
       runAnalyze({ file: "/nonexistent/does-not-exist.jsonl" }),

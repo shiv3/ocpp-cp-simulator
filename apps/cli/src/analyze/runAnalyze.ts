@@ -17,7 +17,11 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { recordsToJsonl, splitTraceRecords } from "./splitTrace";
+import {
+  recordsToJsonl,
+  splitTraceRecords,
+  type TraceSplit,
+} from "./splitTrace";
 import { fetchStoredLogs } from "../client";
 import { logLinesToTrace } from "@ocpp-cp-simulator/trace/logEntryToTrace";
 import { DEFAULT_HTTP_PORT } from "../server/constants";
@@ -191,6 +195,23 @@ interface Group {
   records: TraceRecord[];
 }
 
+/** Prints the non-zero exclusion counts on stderr; prints nothing when no
+ *  line was excluded. */
+function writeExclusionSummary(excluded: TraceSplit["excluded"]): void {
+  const { soap, unsupportedOcppVersion, unparseableLine, invalidRecord } =
+    excluded;
+  if (
+    soap > 0 ||
+    unsupportedOcppVersion > 0 ||
+    unparseableLine > 0 ||
+    invalidRecord > 0
+  ) {
+    process.stderr.write(
+      `excluded: ${soap} soap record(s), ${unsupportedOcppVersion} non-1.6 record(s), ${unparseableLine} unparseable line(s), ${invalidRecord} invalid record(s)\n`,
+    );
+  }
+}
+
 /** What the report's `metadata.source` should say about where the trace
  *  came from. A daemon-sourced run has no file to name, and "which daemon,
  *  which charge point" is what makes the report reproducible. */
@@ -249,6 +270,7 @@ export async function runAnalyze(opts: AnalyzeOptions): Promise<number> {
   }
 
   if (groups.length === 0) {
+    writeExclusionSummary(split.excluded);
     process.stderr.write(
       "Error: no analyzable records found in trace file " +
         "(all records were excluded or unparseable)\n",
@@ -386,18 +408,7 @@ export async function runAnalyze(opts: AnalyzeOptions): Promise<number> {
   for (const line of stderrSummaryLines) {
     process.stderr.write(`${line}\n`);
   }
-  const { soap, unsupportedOcppVersion, unparseableLine, invalidRecord } =
-    split.excluded;
-  if (
-    soap > 0 ||
-    unsupportedOcppVersion > 0 ||
-    unparseableLine > 0 ||
-    invalidRecord > 0
-  ) {
-    process.stderr.write(
-      `excluded: ${soap} soap record(s), ${unsupportedOcppVersion} non-1.6 record(s), ${unparseableLine} unparseable line(s), ${invalidRecord} invalid record(s)\n`,
-    );
-  }
+  writeExclusionSummary(split.excluded);
   process.stderr.write(`${ANALYZE_DISCLAIMER}\n`);
 
   return hadError ? 1 : 0;

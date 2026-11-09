@@ -27,9 +27,11 @@ type Program = ScenarioProgram<GraphNodeLike, GraphEdgeLike>;
 
 /**
  * Every edge out of `id` that may run: all of the origin's, none of a
- * terminal node's, of a switch / choice those with a handle it can pick, all
- * of anyone else's (an ignored second edge is reported as `extraOutgoing`,
- * and still counts for reachability).
+ * terminal node's, of a switch / choice the first edge of every handle it
+ * can pick (as {@link successors}: a later edge on the same handle never
+ * runs and is reported as `duplicateHandle`), all of anyone else's (an
+ * ignored second edge is reported as `extraOutgoing`, and still counts for
+ * reachability).
  */
 function edgesThatMayRun(
   program: Program,
@@ -39,7 +41,9 @@ function edgesThatMayRun(
   if (!node || node === program.origin) return program.outgoing.get(id) ?? [];
   if (isTerminal(node)) return [];
   if (connectionRule(node.type).out === "select") {
-    return [...edgesByHandle(program, node).pickable.values()].flat();
+    return [...edgesByHandle(program, node).pickable.values()].map(
+      (edges) => edges[0],
+    );
   }
   return program.outgoing.get(id) ?? [];
 }
@@ -73,8 +77,21 @@ export function validateScenarioGraph(def: {
     if (node === origin || isTerminal(node)) continue;
     if (connectionRule(node.type).out === "select") {
       // Several edges are the point (one per handle); an edge with a handle
-      // the node never picks never runs.
-      for (const edge of edgesByHandle(program, node).unpickable) {
+      // the node never picks never runs, nor does any edge after the first
+      // one of a handle.
+      const { pickable, unpickable } = edgesByHandle(program, node);
+      for (const [handle, edges] of pickable) {
+        for (const edge of edges.slice(1)) {
+          issues.push({
+            code: "duplicateHandle",
+            nodeId,
+            edgeId: edge.id,
+            severity: "warning",
+            data: { handle },
+          });
+        }
+      }
+      for (const edge of unpickable) {
         issues.push({
           code: "unpickableHandle",
           nodeId,
@@ -91,7 +108,8 @@ export function validateScenarioGraph(def: {
 
   // Reachability from the origin only: a second START starts nothing (every
   // edge that may run counts: an ignored branch is reported by
-  // `extraOutgoing`, not twice here).
+  // `extraOutgoing`, not twice here; a switch / choice's duplicate-handle
+  // edge never runs, so what only it leads to is unreachable too).
   if (origin) {
     const seen = new Set<string>([origin.id]);
     const queue = [origin.id];
@@ -130,7 +148,7 @@ export function validateScenarioGraph(def: {
  * node, of a switch / choice the first one of every handle it can pick) until
  * no state changes, and report the paths on which a node needs a CALL its
  * branch does not hold. It assumes a replace trigger always takes a CALL
- * over; one that ends without (continued, skipped, timed out, stopped) takes
+ * over; one that ends without (continued, skipped or stopped) takes
  * nothing over at run time, so a later callResponse can still fail: an
  * accepted false negative of an advisory check.
  */

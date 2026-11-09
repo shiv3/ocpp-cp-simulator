@@ -172,6 +172,7 @@
   "scenarios.editor.issue.edgeOutOfEnd": "Un lien part d’un nœud End ; il n’est jamais suivi.",
   "scenarios.editor.issue.extraOutgoing": "L’étape {{n}} ({{title}}) a plusieurs étapes suivantes, mais seul Start lance des branches en parallèle : à l’exécution, seule la première est suivie.",
   "scenarios.editor.issue.unpickableHandle": "L’étape {{n}} ({{title}}) a un lien qu’elle ne prend jamais : sa poignée ne correspond à aucun cas ni option qu’elle peut choisir, il n’est donc jamais suivi.",
+  "scenarios.editor.issue.duplicateHandle": "L’étape {{n}} ({{title}}) a plusieurs liens avec la poignée {{handle}} : seul le premier est suivi, les autres ne le sont jamais.",
   "scenarios.editor.issue.danglingEdge": "Un lien pointe vers une étape inexistante ; cette branche s’arrête là.",
   "scenarios.editor.issue.unreachable": "L’étape {{n}} ({{title}}) n’est pas atteinte depuis Start : elle ne s’exécute jamais.",
   "scenarios.templateBrowser.previewLabel": "Aperçu de {{name}}",

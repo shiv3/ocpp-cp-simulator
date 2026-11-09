@@ -162,6 +162,7 @@
   "scenarios.editor.issue.edgeOutOfEnd": "有一条边从 End 节点引出,不会被执行。",
   "scenarios.editor.issue.extraOutgoing": "步骤 {{n}}({{title}})有多个后续步骤,但只有 Start 能并行分支:运行时只会执行第一个。",
   "scenarios.editor.issue.unpickableHandle": "步骤 {{n}}({{title}})有一条永远不会走的边:它的句柄不是该步骤可选的任何 case 或 option,因此不会被执行。",
+  "scenarios.editor.issue.duplicateHandle": "步骤 {{n}}({{title}})有多条句柄为 {{handle}} 的边:只会执行第一条,其余的永远不会被执行。",
   "scenarios.editor.issue.danglingEdge": "有一条边指向不存在的步骤,该分支到此结束。",
   "scenarios.editor.issue.unreachable": "步骤 {{n}}({{title}})无法从 Start 到达,永远不会运行。",
   "scenarios.templateBrowser.previewLabel": "{{name}} 的预览",

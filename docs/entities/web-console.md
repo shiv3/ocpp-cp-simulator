@@ -1002,7 +1002,11 @@ scenario or a copy of one (`libraryId`). All use the same content
   branch** adds a branch holding one Delay step — to a chain, it creates the
   fork at the chain's last step (its first branch is the chain's own, empty,
   continuation to END). Deleting a branch's last step drops the branch, and a
-  single remaining branch folds into the chain. Steps is the default for any
+  single remaining branch folds into the chain. Edits never change which lane
+  of a `switch` / `choice` an edge runs: existing edges keep their
+  `sourceHandle` (or its absence), and only a new branch gets the first free
+  handle the node can pick, or none when every one is taken (see
+  [the schema 1.6 nodes](../concepts/scenario-format.md#the-schema-16-nodes)). Steps is the default for any
   scenario this view can draw.
 - **Graph** — the same layout drawn as on the [run page](#scenario-runs-panel-and-page):
   connected cards, the chain in lane 0 and each branch curving into a lane of
@@ -1023,7 +1027,7 @@ scenario or a copy of one (`libraryId`). All use the same content
   **After this step** select — _End of scenario_ or _Loop back to step N_ — that
   sets or clears the link (`setLaneLink`); a link keeps leaving the lane's last
   card through inserts, moves and deletes, and is dropped when its target is
-  deleted. A chain closed by a loop takes no **+ branch**. Above the steps, a warning box lists wiring the executor would only half run (`validateScenarioGraph`, see [connection rules](../concepts/scenario-format.md#connection-rules)): a fork after a step, a step nothing reaches, an edge to a missing node, a Call Response its branch holds no CALL for, a `replace` trigger whose CALL is never answered. It never blocks Save. A scenario with a
+  deleted. A chain closed by a loop takes no **+ branch**. Above the steps, a warning box lists wiring the executor would only half run (`validateScenarioGraph`, see [connection rules](../concepts/scenario-format.md#connection-rules)): a fork after a step, a step nothing reaches, a `switch` / `choice` edge it never takes (no handle it can pick, or a second edge on one handle), an edge to a missing node, a Call Response its branch holds no CALL for, a `replace` trigger whose CALL is never answered. It never blocks Save. A scenario with a
   second fork, or a node no path reaches, cannot be drawn: it is shown as an
   outline list (steps in running order with where each jumps to) whose steps
   can be selected and edited, but not re-wired. There is no ReactFlow editor

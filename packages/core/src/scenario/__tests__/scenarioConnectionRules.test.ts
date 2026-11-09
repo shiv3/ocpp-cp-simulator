@@ -486,7 +486,48 @@ describe("validateScenarioGraph: decision nodes and the roots of $from (schema 1
           edge("sw", "r", "default"),
         ],
       }),
-    ).toEqual([]);
+      // No CALL issue: `r` is behind the second `default` edge, never taken.
+      // That edge is reported, and `r` (reached only through it) is too.
+    ).toEqual(["duplicateHandle", "unreachable"]);
+  });
+
+  it("reports every later edge of a handle and follows only the first", () => {
+    const issues = validateScenarioGraph({
+      nodes: [
+        node("s", "start"),
+        node("sw", "switch", { value: 0, cases: [0] }),
+        node("a"),
+        node("b"),
+        node("c"),
+        node("d"),
+      ],
+      edges: [
+        edge("s", "sw"),
+        edge("sw", "a", "case-0"),
+        edge("sw", "b", "case-0"),
+        edge("sw", "c", "default"),
+        edge("sw", "d", "case-0"),
+        // c → b: b is still reachable, but not through sw's second case-0.
+        edge("c", "b"),
+      ],
+    });
+    expect(issues).toEqual([
+      {
+        code: "duplicateHandle",
+        nodeId: "sw",
+        edgeId: "sw>b:case-0",
+        severity: "warning",
+        data: { handle: "case-0" },
+      },
+      {
+        code: "duplicateHandle",
+        nodeId: "sw",
+        edgeId: "sw>d:case-0",
+        severity: "warning",
+        data: { handle: "case-0" },
+      },
+      { code: "unreachable", nodeId: "d", severity: "warning" },
+    ]);
   });
 
   it("notify and setState are plain steps", () => {

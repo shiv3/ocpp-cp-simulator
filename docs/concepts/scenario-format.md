@@ -495,8 +495,12 @@ the Start the run starts from, and but a `select` node), `unpickableHandle` (an
 edge out of a `switch` / `choice` whose `sourceHandle` the node never picks:
 none, `case-N` beyond its cases, `option-N` beyond its options; the executor
 always sets a handle and keeps only the edges with it, so such an edge never
-runs), `danglingEdge`, `unreachable` (no path from the Start the run starts
-from), and, following the CALL along the edges the executor really takes (of a
+runs), `duplicateHandle` (a later edge out of a `switch` / `choice` on a
+handle an earlier edge already has, with `data.handle`: the executor takes
+the first edge of the picked handle in file order, so the later ones never
+run), `danglingEdge`, `unreachable` (no path from the Start the run starts
+from; of a `select` node only the first edge of each handle it can pick
+counts, so a node only a `duplicateHandle` edge leads to is unreachable), and, following the CALL along the edges the executor really takes (of a
 `select` node, the first edge of each handle it can pick: `case-0` …
 `case-<n-1>` and `default` for a switch with `n` cases, `option-0` …
 `option-<n-1>` for a choice with `n` options):
@@ -1418,9 +1422,21 @@ optional: a 1.5 file means what it meant. In the order the issue lists them:
 }
 ```
 
-The console's list editor reuses an input edge (id and every field, including `sourceHandle`, `type` and fields it does not know) for each source/target pair it draws again when it rebuilds the edges after an insert, move or removal; only a new pair gets a new id. Saving never lowers a newer `schemaVersion` than the editor's. A
-`switch` or `choice` placed there gets `default` / `option-0` on its one edge, and a new lane of one gets the next free
-`case-<n>` (then `default`) or `option-<n>`; without a handle the node would end its branch (#822 review).
+The console's list editor reuses an input edge (id and every field, including `sourceHandle`, `type` and fields it does not know) for each source/target pair it draws again when it rebuilds the edges after an insert, move or removal; only a new pair gets a new id. Saving never lowers a newer `schemaVersion` than the editor's.
+
+The editor never changes which edge a `switch` / `choice` runs. Every edge that existed keeps its `sourceHandle`, or
+its lack of one: a lane whose fork edge has no handle (never taken; `unpickableHandle`) stays without one, a lane
+keeps `case-1` when the lane before it is removed, and an edge that replaces another out of the same node (a step
+inserted right after the node, first in its lane or in a chain) takes over that edge's handle, or none. Only an edge
+the user adds gets a handle chosen for it:
+
+- a new lane (**+ Add parallel branch**): the first handle the node can pick that no other edge out of it has
+  (`case-0` … `case-<n-1>`, then `default` for a switch with `n` cases; `option-0` … `option-<n-1>` for a choice);
+  when every one is taken it gets none rather than a duplicate, and the check reports `unpickableHandle`. Turning a
+  chain into a fork keeps the chain's own continuation as the first lane, with the handle it had;
+- the one edge of a `switch` / `choice` just placed in a chain: `default` / `option-0`.
+
+Without a handle the node would end its branch (#822 review).
 
 #### `delay` `until` and seeded jitter
 

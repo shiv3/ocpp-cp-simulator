@@ -138,5 +138,19 @@
   "cp.controls.confirmRemove": "Retirer le connecteur {{id}} de {{cpId}} ? Le retrait n’est pas enregistré : le connecteur revient lorsque la borne est recréée.",
   "cp.controls.removeFailed": "Connecteur non retiré : {{message}}",
   "cp.socMeterSync.readFailed": "Préférence de synchronisation non lue ({{error}}) : Définir le SoC ne touche pas au compteur tant que vous n’activez pas la synchronisation.",
-  "cp.socMeterSync.applyFailed": "Synchronisation non appliquée au connecteur : {{error}}"
+  "cp.socMeterSync.applyFailed": "Synchronisation non appliquée au connecteur : {{error}}",
+  "cp.section.configuration": "Configuration",
+  "cp.configKeys.unsupported": "Les clés de configuration ne sont pas disponibles pour cette connexion",
+  "cp.configKeys.loadFailed": "Impossible de lire les clés de configuration",
+  "cp.configKeys.empty": "Cette borne n’a aucune clé de configuration",
+  "cp.configKeys.key": "Clé",
+  "cp.configKeys.value": "Valeur",
+  "cp.configKeys.access": "Accès",
+  "cp.configKeys.valueOf": "Valeur de {{key}}",
+  "cp.configKeys.writeOnly": "écriture seule ; la valeur n’est jamais affichée",
+  "cp.configKeys.save": "Enregistrer",
+  "cp.configKeys.saved": "Enregistré",
+  "cp.configKeys.rebootRequired": "Enregistré ; prend effet après un redémarrage",
+  "cp.configKeys.readOnly": "Lecture seule",
+  "cp.configKeys.readWrite": "Lecture-écriture"
 }

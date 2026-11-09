@@ -36,7 +36,6 @@ export type {
   TimelineKind,
   TimelinePage,
   TimelineQuery,
-  TimelineRecord,
 } from "../../domain/services/ChargePointTimeline";
 
 export interface OperationalTimelineOptions {

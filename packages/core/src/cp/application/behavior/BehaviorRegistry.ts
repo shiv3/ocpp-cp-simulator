@@ -4,6 +4,7 @@ import { deepPartialMatch } from "../../../scenario/deepPartialMatch";
 import type {
   BehaviorCall,
   BehaviorResolution,
+  BehaviorRegistryOptions,
   BehaviorRule,
   ChargePointBehaviorRegistry,
   HeldExchange,
@@ -14,11 +15,8 @@ import type {
 // existing import sites.
 export type {
   BehaviorCall,
-  BehaviorResolution,
   BehaviorRule,
-  HeldAnswerOptions,
   HeldExchange,
-  HeldSettlement,
   RuleOwner,
 } from "../../domain/engine/behaviorRules";
 
@@ -33,12 +31,6 @@ export type {
  * registered a rule decides what to do with a CALL the rule takes
  * ({@link BehaviorRule.take}).
  */
-
-export interface BehaviorRegistryOptions {
-  /** The station's OCPP version; action names translate on 2.x only. */
-  readonly ocppVersion?: () => string;
-  warn?(message: string): void;
-}
 
 const DEFAULT_RESOLUTION: BehaviorResolution = { kind: "default" };
 

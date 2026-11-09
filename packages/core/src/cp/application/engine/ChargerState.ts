@@ -14,7 +14,6 @@ export type {
   EngineEvent,
   NotifyKind,
   PersistedEngineState,
-  StatusRecord,
 } from "../../domain/engine/ChargerState";
 
 export function initialChargerState(): ChargerState {

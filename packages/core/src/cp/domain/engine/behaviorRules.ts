@@ -99,6 +99,13 @@ export type BehaviorResolution =
   /** The rule that applies already holds an open exchange: `onBusy` was sent. */
   | { readonly kind: "busy"; readonly rule: BehaviorRule };
 
+/** What a behavior registry reads from its charge point. */
+export interface BehaviorRegistryOptions {
+  /** The station's OCPP version; action names translate on 2.x only. */
+  readonly ocppVersion?: () => string;
+  warn?(message: string): void;
+}
+
 /**
  * The charge point's behavior registry as the station, the engine and the
  * inbound gate use it. `BehaviorRegistry` (application) implements it.

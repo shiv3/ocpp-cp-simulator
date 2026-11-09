@@ -12,6 +12,7 @@ import type { BootNotification } from "../../domain/types/OcppTypes";
 import type { OcppTlsOptions } from "../../domain/transport/ConnectionSecurity";
 import { UploadFile } from "../fileUpload";
 import { LogRepository } from "../persistence/LogRepository";
+import { DEFAULT_SERVICES } from "./createDefaultServices";
 import { createDefaultTransport } from "./createDefaultTransport";
 
 /**
@@ -20,6 +21,7 @@ import { createDefaultTransport } from "./createDefaultTransport";
  * `createChargePoint` builds it from its `database` argument.
  */
 const DEFAULT_DEPS: Omit<ChargePointDeps, "logSink"> = {
+  ...DEFAULT_SERVICES,
   createTransport: createDefaultTransport,
   fileUploader: UploadFile,
 };

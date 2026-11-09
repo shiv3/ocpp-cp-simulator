@@ -7,9 +7,6 @@ import type {
   HeartbeatServiceEvents,
 } from "../../domain/services/ChargePointHeartbeat";
 
-// Defined in domain (#575); re-exported for the existing import sites.
-export type { HeartbeatServiceEvents } from "../../domain/services/ChargePointHeartbeat";
-
 /**
  * OCPP 1.6 §4.6 Heartbeat.
  *

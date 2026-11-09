@@ -52,12 +52,6 @@ import type {
   EngineObservation,
   LoadBehaviorOptions,
 } from "../../domain/engine/ChargePointEngine";
-
-// Defined in domain (#575); re-exported for the existing import sites.
-export type {
-  DefaultResult,
-  LoadBehaviorOptions,
-} from "../../domain/engine/ChargePointEngine";
 import { registerDefaultBehaviors } from "./behaviors";
 import {
   EMPTY_PARAMS,

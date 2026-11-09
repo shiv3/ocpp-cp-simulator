@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
-import type { OperationalTimeline } from "../../../application/services/OperationalTimeline";
+import type { ChargePointTimeline } from "../../../domain/services/ChargePointTimeline";
 import { resolveNetworkSimConfig } from "../network-sim";
 import { startMockCsms, type MockCsms } from "./mockCsms";
 import { canBindBunServe } from "../../../../test/bunServe";
@@ -39,7 +39,7 @@ function autoAnswer(csms: MockCsms): () => void {
 }
 
 async function until(
-  timeline: OperationalTimeline,
+  timeline: ChargePointTimeline,
   predicate: () => boolean,
   timeoutMs = 10_000,
 ): Promise<void> {

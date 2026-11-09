@@ -22,9 +22,6 @@ import { startRefusalByReservation } from "../../../domain/reservation/reservati
 import { reservationAdmits } from "../../../domain/reservation/Reservation";
 import { decideRemoteStart } from "./remoteStartValidation";
 
-// Defined in domain (#575); re-exported for the existing import site.
-export type { TransactionPorts } from "../../../domain/engine/ChargePointEngine";
-
 /**
  * The default behavior of a transaction (docs/concepts/charger-engine.md,
  * "Charger engine"): starting and stopping one, and the four remote

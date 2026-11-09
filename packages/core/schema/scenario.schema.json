@@ -241,7 +241,23 @@
         "errorCode": { "type": "string" },
         "errorDescription": { "type": "string" }
       },
-      "required": ["kind"]
+      "required": ["kind"],
+      "allOf": [
+        {
+          "$comment": "#846: the executor throws on a payload (or skipValidation) next to accepted / rejected.",
+          "if": {
+            "properties": { "kind": { "enum": ["accepted", "rejected"] } }
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["payload"] },
+                { "required": ["skipValidation"] }
+              ]
+            }
+          }
+        }
+      ]
     },
     "baseNodeData": {
       "type": "object",

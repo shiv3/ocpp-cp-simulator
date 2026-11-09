@@ -7,7 +7,7 @@ import { ScenarioNodeType } from "@ocpp-cp-simulator/core/cp/application/scenari
 import EmptyState from "../../components/EmptyState";
 import SegmentedControl from "../../components/SegmentedControl";
 import { recognizeBlockTree } from "../../lib/blockTree";
-import { deriveStepLayout, drawnEdgeIds } from "../../lib/stepLayout";
+import { graphEdgeIds } from "../../lib/treeGraphLayout";
 import { branchCount, isDrawableTree, treeSteps } from "../../lib/stepTree";
 import StepInspector from "./edit/StepInspector";
 import UnsupportedOutline from "./edit/UnsupportedOutline";
@@ -44,25 +44,15 @@ const TemplatePreview: React.FC<{
   const scenario = useMemo(() => previewScenario(template), [template]);
   const tree = useMemo(() => recognizeBlockTree(scenario), [scenario]);
   const drawable = isDrawableTree(tree);
-  // The Graph view still draws the one-fork layout; a shape it cannot draw
-  // is shown as steps.
-  const layout = useMemo(() => deriveStepLayout(scenario), [scenario]);
   const [view, setView] = useState<PreviewView>("graph");
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
-  const graphEdges = useMemo(
-    () => (layout.supported ? drawnEdgeIds(layout) : null),
-    [layout],
-  );
+  const graphEdges = useMemo(() => graphEdgeIds(tree), [tree]);
   // Read-only: no warning box, only the marks (a shipped template should
   // have none).
   const { marks } = useScenarioIssues(
     scenario,
     tree,
-    !drawable
-      ? "outline"
-      : view === "graph" && layout.supported
-        ? "graph"
-        : "steps",
+    !drawable ? "outline" : view,
     graphEdges,
   );
   const issues = useMemo(() => ({ marks }), [marks]);
@@ -171,27 +161,20 @@ const TemplatePreview: React.FC<{
                 note={null}
                 issues={issues}
               />
-            ) : view === "graph" && layout.supported ? (
+            ) : view === "graph" ? (
               <StepsGraphView
-                layout={layout}
+                tree={tree}
                 selectedStepId={selectedStepId}
                 onSelectStep={setSelectedStepId}
                 issues={issues}
               />
             ) : (
-              <>
-                {view === "graph" && (
-                  <p className="mb-2 text-xs text-cx-muted">
-                    {t("scenarioRun.tree.graphFallback")}
-                  </p>
-                )}
-                <StepsView
-                  tree={tree}
-                  selectedStepId={selectedStepId}
-                  onSelectStep={setSelectedStepId}
-                  issues={issues}
-                />
-              </>
+              <StepsView
+                tree={tree}
+                selectedStepId={selectedStepId}
+                onSelectStep={setSelectedStepId}
+                issues={issues}
+              />
             )}
           </div>
           <div

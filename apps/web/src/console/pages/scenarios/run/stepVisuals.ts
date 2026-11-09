@@ -11,13 +11,9 @@ import type {
   ScenarioNodeType,
 } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import type { LiveRunState } from "../../../lib/scenarioRunState";
-import {
-  stepPhase,
-  type StepLayout,
-  type StepPhase,
-} from "../../../lib/stepLayout";
+import { stepPhase, type StepPhase } from "../../../lib/stepLayout";
 import type { ScenarioRunState } from "../../../lib/useScenarioRun";
-import { STEP_CATEGORIES, type StepLane } from "../../../lib/scenarioSteps";
+import { STEP_CATEGORIES } from "../../../lib/scenarioSteps";
 import { t } from "../../../../i18n";
 import type { ViewIssues } from "../edit/issueMarkUi";
 import type { BlockTree, SeqPath } from "../../../lib/blockTree";
@@ -129,21 +125,7 @@ export interface RunViewCommonProps {
   issues?: ViewIssues;
 }
 
-/** The Graph view's props: the one-fork layout (`deriveStepLayout`). */
-export interface StepRunViewProps extends RunViewCommonProps {
-  layout: StepLayout;
-  /** editable: a step type picked for `index` of `lane` (the lane's length
-   *  appends). */
-  onInsertStep?: (
-    lane: StepLane,
-    index: number,
-    type: ScenarioNodeType,
-  ) => void;
-  /** editable: add a parallel branch. */
-  onAddBranch?: () => void;
-}
-
-/** The Steps view's props: the block tree (`recognizeBlockTree`). */
+/** Both views' props: the block tree (`recognizeBlockTree`). */
 export interface StepTreeViewProps extends RunViewCommonProps {
   tree: BlockTree;
   /** editable: a step type picked for slot `index` of the sequence at
@@ -164,7 +146,10 @@ export type BoxPhase = StepPhase | "plain";
 /** Phase of one step under the view's props ("plain" without a run). */
 export function boxPhase(
   nodeId: string,
-  props: Pick<StepRunViewProps, "currentNodeId" | "executedNodeIds" | "state">,
+  props: Pick<
+    RunViewCommonProps,
+    "currentNodeId" | "executedNodeIds" | "state"
+  >,
 ): BoxPhase {
   if (props.state === undefined) return "plain";
   return stepPhase(

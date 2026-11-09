@@ -109,6 +109,5 @@
   "scenarioRun.tree.continuesAt": "ステップ {{n}} に続く",
   "scenarioRun.tree.continuesAtEnd": "終了へ続く",
   "scenarioRun.tree.unreached": "どこからも到達しないステップ",
-  "scenarioRun.tree.unreachedHint": "Start からここに至るエッジがないため、これらのステップは実行されません。",
-  "scenarioRun.tree.graphFallback": "グラフビューはまだこの形を描けないため、ステップとして表示しています。"
+  "scenarioRun.tree.unreachedHint": "Start からここに至るエッジがないため、これらのステップは実行されません。"
 }

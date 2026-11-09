@@ -278,9 +278,7 @@ describe("TemplateBrowserDialog preview", () => {
 
     // The Graph view by default, with the loop back drawn.
     expect(
-      view.querySelector(
-        'path[data-link-from="delay-10s"][data-link-to="notification-heartbeat"]',
-      ),
+      view.querySelector('path[data-loop-arc="notification-heartbeat"]'),
     ).not.toBeNull();
     // Read-only: no "+" to add a step.
     expect(view.querySelector('button[aria-label^="Add step"]')).toBeNull();

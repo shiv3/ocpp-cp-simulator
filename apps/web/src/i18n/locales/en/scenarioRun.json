@@ -110,6 +110,5 @@
   "scenarioRun.tree.continuesAt": "Continues at step {{n}}",
   "scenarioRun.tree.continuesAtEnd": "Continues to the end",
   "scenarioRun.tree.unreached": "Steps nothing reaches",
-  "scenarioRun.tree.unreachedHint": "No edge from Start leads here: these steps never run.",
-  "scenarioRun.tree.graphFallback": "The Graph view cannot draw this shape yet, so it is shown as steps."
+  "scenarioRun.tree.unreachedHint": "No edge from Start leads here: these steps never run."
 }

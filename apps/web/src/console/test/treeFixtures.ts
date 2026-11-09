@@ -224,10 +224,41 @@ export const deadLanes = () =>
     ],
   );
 
+/** START → first → head → pick (switch ["more", "stop"])
+ *    ┬ case-0 → again → head (loops)
+ *    ├ case-1 → out → END (the loop's way on, after it)
+ *    └ default → bye → END (a second way out: its lane leaves the loop) */
+export const loopWithTwoExits = () =>
+  def(
+    "loop-two-exits",
+    [
+      START(),
+      n("first"),
+      n("head"),
+      sw("pick", ["more", "stop"]),
+      n("again"),
+      n("out"),
+      n("bye"),
+      END(),
+    ],
+    [
+      ["start", "first"],
+      ["first", "head"],
+      ["head", "pick"],
+      ["pick", "again", "case-0"],
+      ["pick", "out", "case-1"],
+      ["pick", "bye", "default"],
+      ["again", "head"],
+      ["out", "end"],
+      ["bye", "end"],
+    ],
+  );
+
 export const NESTED_FIXTURES = {
   switchInLane,
   ifElseReconverges,
   loopWithSwitch,
+  loopWithTwoExits,
   startFanOutWithLoop,
   withDetached,
   forkInLoop,

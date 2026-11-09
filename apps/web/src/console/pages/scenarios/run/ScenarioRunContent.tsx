@@ -15,7 +15,6 @@ import { formatElapsed } from "../../../lib/scenarioExpectation";
 import { isLiveRunState } from "../../../lib/scenarioRunState";
 import { deriveDisplayedSteps } from "../../../lib/scenarioSteps";
 import { recognizeBlockTree } from "../../../lib/blockTree";
-import { deriveStepLayout } from "../../../lib/stepLayout";
 import { isDrawableTree, treeSteps } from "../../../lib/stepTree";
 import {
   editScenarioUrl,
@@ -156,8 +155,8 @@ export interface ScenarioRunContentProps {
  * One scenario run: name and target, state, progress, Start / Stop, the wait
  * controls while parked, **Edit scenario** (in the panel: the editor in place
  * of the run, `editing`), then the steps (`StepsView`, or
- * the Graph drawing on the page; `RunTimeline`'s flat list for a shape the
- * layout cannot draw). The run comes from `useScenarioRun`, which attaches
+ * the Graph drawing on the page; `RunTimeline`'s flat list for a scenario
+ * without a START). The run comes from `useScenarioRun`, which attaches
  * to a run already live in the runtime (#366) — opening this never starts
  * one.
  *
@@ -226,12 +225,6 @@ const ScenarioRunContent: React.FC<ScenarioRunContentProps> = ({
     () => (scenario ? recognizeBlockTree(scenario) : null),
     [scenario],
   );
-  // The Graph view still draws the one-fork layout; a shape it cannot draw
-  // is shown as steps.
-  const layout = useMemo(
-    () => (scenario ? deriveStepLayout(scenario) : null),
-    [scenario],
-  );
   const drawable = tree !== null && isDrawableTree(tree);
   // The count follows what the body draws: the tree's steps, or the flat
   // list RunTimeline falls back to.
@@ -294,7 +287,7 @@ const ScenarioRunContent: React.FC<ScenarioRunContentProps> = ({
     );
   }
 
-  if (!scenario || !layout || !tree) {
+  if (!scenario || !tree) {
     return (
       <div>
         {closeButton && (
@@ -530,27 +523,20 @@ const ScenarioRunContent: React.FC<ScenarioRunContentProps> = ({
             executedNodeIds={executedNodeIds}
             state={state}
           />
-        ) : view === "graph" && layout.supported ? (
+        ) : view === "graph" ? (
           <StepsGraphView
-            layout={layout}
+            tree={tree}
             currentNodeId={currentNodeId}
             executedNodeIds={executedNodeIds}
             state={state}
           />
         ) : (
-          <>
-            {view === "graph" && (
-              <p className="mb-2 text-xs text-cx-muted">
-                {t("scenarioRun.tree.graphFallback")}
-              </p>
-            )}
-            <StepsView
-              tree={tree}
-              currentNodeId={currentNodeId}
-              executedNodeIds={executedNodeIds}
-              state={state}
-            />
-          </>
+          <StepsView
+            tree={tree}
+            currentNodeId={currentNodeId}
+            executedNodeIds={executedNodeIds}
+            state={state}
+          />
         )}
       </div>
 

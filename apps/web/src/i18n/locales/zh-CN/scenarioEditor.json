@@ -197,10 +197,10 @@
   "scenarioEditor.switch.casesHelp": "运行沿第一个等于该值的 case-<n> 继续,否则沿 default。按 JSON 相等比较: 1 不等于 \"1\"。",
   "scenarioEditor.choice.options": "选项",
   "scenarioEditor.choice.optionLabel": "标签 (可选)",
-  "scenarioEditor.choice.weight": "权重 (大于 0,默认 1)",
+  "scenarioEditor.choice.weight": "权重",
   "scenarioEditor.choice.weightInvalid": "权重必须大于 0。",
   "scenarioEditor.choice.add": "添加选项",
-  "scenarioEditor.choice.help": "至少两个选项。按带种子的权重抽选其一,运行沿 option-<n> 继续。相同种子得到相同结果。",
+  "scenarioEditor.choice.help": "至少两个选项。按带种子的权重抽选其一 (权重须大于 0,留空即 1),运行沿 option-<n> 继续。相同种子得到相同结果。",
   "scenarioEditor.setState.key": "键",
   "scenarioEditor.setState.keyInvalid": "键必须以字母或下划线开头,且只能包含字母、数字和下划线。",
   "scenarioEditor.setState.value": "值",
@@ -237,5 +237,6 @@
   "scenarioEditor.list.remove": "删除 {{name}}",
   "scenarioEditor.list.removeWithLane": "{{name}} 通向 {{target}}。删除它以及该通道的连线吗? 通道中的步骤会保留。",
   "scenarioEditor.list.removeWithLaneConfirm": "连同连线删除",
-  "scenarioEditor.list.keep": "保留"
+  "scenarioEditor.list.keep": "保留",
+  "scenarioEditor.choice.optionLabelOf": "{{name}} 的标签"
 }

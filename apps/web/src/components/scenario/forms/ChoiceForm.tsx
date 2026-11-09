@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { NumberField, TextField } from "./FormFields";
+import { useId } from "react";
 import { LaneLine, RowActions } from "./SelectLanes";
 import { useIndexedLanes } from "./useIndexedLanes";
 import type { NodeFormComponentProps, NodeFormData } from "./types";
@@ -25,6 +25,7 @@ export default function ChoiceForm({
   context,
 }: NodeFormComponentProps<NodeFormData>) {
   const { t } = useTranslation();
+  const id = useId();
   const options: Option[] = Array.isArray(value.options)
     ? (value.options as Option[])
     : [];
@@ -45,11 +46,6 @@ export default function ChoiceForm({
 
   return (
     <div className="space-y-3">
-      <TextField
-        label={t("scenarioEditor.form.label")}
-        value={(value.label as string | undefined) ?? ""}
-        onChange={(label) => onChange({ ...value, label })}
-      />
       <div className="space-y-2 @lg:col-span-2">
         <div className="text-xs font-semibold text-primary">
           {t("scenarioEditor.choice.options")}
@@ -77,10 +73,26 @@ export default function ChoiceForm({
                 className="space-y-1.5 rounded border border-gray-300 p-2 dark:border-gray-600"
               >
                 <div className="flex items-center gap-2">
-                  <span className="font-mono text-xs text-secondary">
+                  <span className="shrink-0 font-mono text-xs text-secondary">
                     {name}
                   </span>
-                  <span className="flex-1" />
+                  <input
+                    type="text"
+                    aria-label={t("scenarioEditor.choice.optionLabelOf", {
+                      name,
+                    })}
+                    placeholder={t("scenarioEditor.choice.optionLabel")}
+                    className="input-base min-w-0 flex-1 text-sm"
+                    value={option.label ?? ""}
+                    onChange={(event) =>
+                      update(index, {
+                        label:
+                          event.target.value === ""
+                            ? undefined
+                            : event.target.value,
+                      })
+                    }
+                  />
                   <RowActions
                     index={index}
                     count={options.length}
@@ -89,26 +101,32 @@ export default function ChoiceForm({
                     onRemove={() => lanes.remove(index)}
                   />
                 </div>
-                <TextField
-                  label={t("scenarioEditor.choice.optionLabel")}
-                  value={option.label ?? ""}
-                  onChange={(label) =>
-                    update(index, { label: label === "" ? undefined : label })
-                  }
-                />
-                <div className="flex items-end gap-2">
-                  <div className="w-24 shrink-0">
-                    <NumberField
-                      label={t("scenarioEditor.choice.weight")}
-                      value={option.weight ?? ""}
-                      onChange={(w) => update(index, { weight: w })}
-                      placeholder="1"
-                      min={0}
-                      step="any"
-                    />
-                  </div>
+                <div className="flex items-center gap-2">
+                  <label
+                    htmlFor={`${id}-weight-${index}`}
+                    className="shrink-0 text-xs font-semibold text-primary"
+                  >
+                    {t("scenarioEditor.choice.weight")}
+                  </label>
+                  <input
+                    id={`${id}-weight-${index}`}
+                    type="number"
+                    className="input-base w-20 shrink-0 text-sm"
+                    value={option.weight ?? ""}
+                    placeholder="1"
+                    min={0}
+                    step="any"
+                    onChange={(event) =>
+                      update(index, {
+                        weight:
+                          event.target.value === ""
+                            ? undefined
+                            : Number.parseFloat(event.target.value) || 0,
+                      })
+                    }
+                  />
                   <div
-                    className="mb-2 h-2 min-w-0 flex-1 overflow-hidden rounded bg-gray-200 dark:bg-gray-700"
+                    className="h-2 min-w-0 flex-1 overflow-hidden rounded bg-gray-200 dark:bg-gray-700"
                     role="img"
                     aria-label={t("scenarioEditor.choice.share", {
                       percent: Math.round(share * 100),
@@ -121,7 +139,7 @@ export default function ChoiceForm({
                   </div>
                   <span
                     data-testid={`choice-share-${index}`}
-                    className="mb-1 w-10 shrink-0 text-right font-mono text-xs text-secondary"
+                    className="w-10 shrink-0 text-right font-mono text-xs text-secondary"
                   >
                     {Math.round(share * 100)}%
                   </span>

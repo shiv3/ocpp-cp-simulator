@@ -197,10 +197,10 @@
   "scenarioEditor.switch.casesHelp": "値と等しい最初のケースの case-<n> へ、無ければ default へ進みます。比較は JSON の等価で、1 と \"1\" は異なります。",
   "scenarioEditor.choice.options": "選択肢",
   "scenarioEditor.choice.optionLabel": "ラベル (任意)",
-  "scenarioEditor.choice.weight": "重み (0 より大きい値、既定 1)",
+  "scenarioEditor.choice.weight": "重み",
   "scenarioEditor.choice.weightInvalid": "重みは 0 より大きい必要があります。",
   "scenarioEditor.choice.add": "選択肢を追加",
-  "scenarioEditor.choice.help": "2 つ以上の選択肢が必要です。シード付きの重み付き抽選で 1 つを選び、option-<n> へ進みます。同じシードなら同じ結果になります。",
+  "scenarioEditor.choice.help": "2 つ以上の選択肢が必要です。シード付きの重み付き抽選で 1 つを選び (重みは 0 より大きく、空なら 1)、option-<n> へ進みます。同じシードなら同じ結果になります。",
   "scenarioEditor.setState.key": "キー",
   "scenarioEditor.setState.keyInvalid": "キーは英字またはアンダースコアで始まり、英数字とアンダースコアのみを含む必要があります。",
   "scenarioEditor.setState.value": "値",
@@ -237,5 +237,6 @@
   "scenarioEditor.list.remove": "{{name}} を削除",
   "scenarioEditor.list.removeWithLane": "{{name}} は {{target}} へ進みます。削除してそのレーンのエッジも外しますか? レーンのステップは残ります。",
   "scenarioEditor.list.removeWithLaneConfirm": "エッジごと削除",
-  "scenarioEditor.list.keep": "残す"
+  "scenarioEditor.list.keep": "残す",
+  "scenarioEditor.choice.optionLabelOf": "{{name}} のラベル"
 }

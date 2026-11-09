@@ -1,5 +1,4 @@
 import { useTranslation } from "react-i18next";
-import { TextField } from "./FormFields";
 import { ScenarioValueField } from "./ScenarioValueField";
 import { LaneLine, RowActions } from "./SelectLanes";
 import { useIndexedLanes } from "./useIndexedLanes";
@@ -41,11 +40,6 @@ export default function SwitchForm({
 
   return (
     <div className="space-y-3">
-      <TextField
-        label={t("scenarioEditor.form.label")}
-        value={(value.label as string | undefined) ?? ""}
-        onChange={(label) => onChange({ ...value, label })}
-      />
       <div className="@lg:col-span-2">
         <ScenarioValueField
           testId="switch-value"

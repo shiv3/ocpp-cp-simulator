@@ -320,8 +320,10 @@ behavior?](../analyses/scenario-or-behavior.md).
 
 **The scenario editor.** The browser Scenario Editor authors all of schema 1.5 and 1.6 (the 1.6 nodes of [this section](#the-schema-16-nodes) included): a `csmsCallTrigger` form
 with `behavior` (`observe` / `replace`) and `onBusy`, a `callResponse` node and a `useBehavior` node (with its
-mode and a params form), and it exports `schemaVersion: "1.6"`. There is no dedicated control for `$from` (type
-it in the payload JSON) and the `useBehavior` id is free text.
+mode and a params form), and it exports `schemaVersion: "1.6"`. A `switch` `value`, a `notify` `requestId` and a
+`setState` `value` are edited as a typed constant or **Read from…** a `$from` root and path (the inspector's value
+field, [web console](../entities/web-console.md#the-switch-and-choice-inspectors)); in an `ocppCall` / `callResponse`
+payload a `$from` is typed in the payload JSON. The `useBehavior` id is free text.
 
 ```json
 {
@@ -1435,6 +1437,12 @@ the user adds gets a handle chosen for it:
   when every one is taken it gets none rather than a duplicate, and the check reports `unpickableHandle`. Turning a
   chain into a fork keeps the chain's own continuation as the first lane, with the handle it had;
 - the one edge of a `switch` / `choice` just placed in a chain: `default` / `option-0`.
+
+Editing a switch's cases or a choice's options as a list in the inspector is the one edit that rewrites handles,
+because the user asked for it: reordering or removing an item renumbers `case-<n>` / `option-<n>`, so each edge on
+an item moves with it in the same change (same id, place and fields; a `default` edge, an edge without a handle and
+one on an index past the list are left alone). Removing an item whose lane leads somewhere asks first and then
+removes that lane's edge only; its steps stay.
 
 Without a handle the node would end its branch (#822 review).
 

@@ -199,10 +199,10 @@
   "scenarioEditor.switch.casesHelp": "L'exécution suit case-<n> pour le premier cas égal à la valeur, sinon default. L'égalité est celle de JSON : 1 n'est pas \"1\".",
   "scenarioEditor.choice.options": "Options",
   "scenarioEditor.choice.optionLabel": "Libellé (facultatif)",
-  "scenarioEditor.choice.weight": "Poids (supérieur à 0, 1 par défaut)",
+  "scenarioEditor.choice.weight": "Poids",
   "scenarioEditor.choice.weightInvalid": "Le poids doit être supérieur à 0.",
   "scenarioEditor.choice.add": "Ajouter une option",
-  "scenarioEditor.choice.help": "Au moins deux options. Un tirage pondéré à graine en choisit une ; l'exécution suit option-<n>. La même graine donne le même tirage.",
+  "scenarioEditor.choice.help": "Au moins deux options. Un tirage pondéré à graine en choisit une (un poids doit être supérieur à 0 ; vide vaut 1) ; l'exécution suit option-<n>. La même graine donne le même tirage.",
   "scenarioEditor.setState.key": "Clé",
   "scenarioEditor.setState.keyInvalid": "La clé doit commencer par une lettre ou un tiret bas et ne contenir que des lettres, chiffres et tirets bas.",
   "scenarioEditor.setState.value": "Valeur",
@@ -239,5 +239,6 @@
   "scenarioEditor.list.remove": "Supprimer {{name}}",
   "scenarioEditor.list.removeWithLane": "{{name}} mène à {{target}}. Le supprimer avec le lien de cette voie ? Les étapes de la voie restent.",
   "scenarioEditor.list.removeWithLaneConfirm": "Supprimer avec son lien",
-  "scenarioEditor.list.keep": "Garder"
+  "scenarioEditor.list.keep": "Garder",
+  "scenarioEditor.choice.optionLabelOf": "Libellé de {{name}}"
 }

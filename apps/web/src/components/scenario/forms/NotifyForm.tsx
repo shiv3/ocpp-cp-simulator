@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { NOTIFY_KINDS } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
-import { SelectField, TextField } from "./FormFields";
+import { SelectField } from "./FormFields";
 import { ScenarioValueField } from "./ScenarioValueField";
 import { NOTIFY_STATUSES, notifyKind } from "./notifyStatuses";
 import type { NodeFormComponentProps, NodeFormData } from "./types";
@@ -18,11 +18,6 @@ export default function NotifyForm({
   const status = typeof value.status === "string" ? value.status : "";
   return (
     <div className="space-y-3">
-      <TextField
-        label={t("scenarioEditor.form.label")}
-        value={(value.label as string | undefined) ?? ""}
-        onChange={(label) => onChange({ ...value, label })}
-      />
       <SelectField
         label={t("scenarioEditor.notify.kind")}
         value={kind}

@@ -198,10 +198,10 @@
   "scenarioEditor.switch.casesHelp": "The run goes on along case-<n> for the first case equal to the value, else along default. Equality is JSON equality: 1 is not \"1\".",
   "scenarioEditor.choice.options": "Options",
   "scenarioEditor.choice.optionLabel": "Label (optional)",
-  "scenarioEditor.choice.weight": "Weight (above 0, default 1)",
+  "scenarioEditor.choice.weight": "Weight",
   "scenarioEditor.choice.weightInvalid": "The weight must be above 0.",
   "scenarioEditor.choice.add": "Add option",
-  "scenarioEditor.choice.help": "At least two options. A seeded, weighted draw picks one; the run goes on along option-<n>. The same seed gives the same draw.",
+  "scenarioEditor.choice.help": "At least two options. A seeded, weighted draw picks one (a weight must be above 0; empty means 1); the run goes on along option-<n>. The same seed gives the same draw.",
   "scenarioEditor.setState.key": "Key",
   "scenarioEditor.setState.keyInvalid": "The key must start with a letter or underscore and contain only letters, digits and underscores.",
   "scenarioEditor.setState.value": "Value",
@@ -238,5 +238,6 @@
   "scenarioEditor.list.remove": "Remove {{name}}",
   "scenarioEditor.list.removeWithLane": "{{name}} leads to {{target}}. Remove it and that lane's edge? The lane's steps stay.",
   "scenarioEditor.list.removeWithLaneConfirm": "Remove with its edge",
-  "scenarioEditor.list.keep": "Keep"
+  "scenarioEditor.list.keep": "Keep",
+  "scenarioEditor.choice.optionLabelOf": "Label of {{name}}"
 }

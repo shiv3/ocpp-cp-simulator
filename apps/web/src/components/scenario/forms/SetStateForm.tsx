@@ -16,11 +16,6 @@ export default function SetStateForm({
   const key = typeof value.key === "string" ? value.key : "";
   return (
     <div className="space-y-3">
-      <TextField
-        label={t("scenarioEditor.form.label")}
-        value={(value.label as string | undefined) ?? ""}
-        onChange={(label) => onChange({ ...value, label })}
-      />
       <div>
         <TextField
           label={t("scenarioEditor.setState.key")}

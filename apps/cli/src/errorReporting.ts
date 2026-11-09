@@ -95,6 +95,18 @@ async function safeFlush(): Promise<void> {
 }
 
 /**
+ * The error as the runtime would print it. A custom inspection hook may
+ * throw: the report and the exit must still go ahead.
+ */
+function describeForStderr(error: unknown): string {
+  try {
+    return inspect(error);
+  } catch {
+    return "[error that cannot be inspected]";
+  }
+}
+
+/**
  * While a reporter is active, the core takes over what the runtime does with
  * an unhandled rejection or an uncaught exception: report it, wait for the
  * report to leave (up to 2 s), print it to stderr as the runtime would and
@@ -105,7 +117,7 @@ function installProcessHandlers(proc: ErrorReportingProcess): void {
   const fail =
     (mechanism: "unhandledRejection" | "uncaughtException") =>
     (error: unknown): void => {
-      proc.stderr.write(`${inspect(error)}\n`);
+      proc.stderr.write(`${describeForStderr(error)}\n`);
       // A second failure while the first one is being flushed: printed, but
       // the exit is already on its way.
       if (fatalInProgress) return;

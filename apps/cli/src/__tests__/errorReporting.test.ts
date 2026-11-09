@@ -359,6 +359,33 @@ describe("process handlers", () => {
     expect(stderr.join("")).toContain("second");
   });
 
+  it("still reports and exits 1 when inspecting the error throws", async () => {
+    const { reporter, emit, exited, stderr } = await activate();
+    const throwingInspect = (): never => {
+      throw new Error("inspect hook bug");
+    };
+    const first = {
+      [Symbol.for("nodejs.util.inspect.custom")]: throwingInspect,
+    };
+    const second = {
+      [Symbol.for("nodejs.util.inspect.custom")]: throwingInspect,
+    };
+
+    emit("unhandledRejection", first);
+    emit("uncaughtException", second);
+
+    await expect(exited).resolves.toBe(1);
+    expect(reporter.captureException).toHaveBeenCalledWith(first, {
+      mechanism: "unhandledRejection",
+      handled: false,
+    });
+    expect(reporter.flush).toHaveBeenCalledWith(2000);
+    expect(stderr).toEqual([
+      "[error that cannot be inspected]\n",
+      "[error that cannot be inspected]\n",
+    ]);
+  });
+
   it("exit 1 after 2 s even when the adapter's flush never settles", async () => {
     vi.useFakeTimers();
     try {

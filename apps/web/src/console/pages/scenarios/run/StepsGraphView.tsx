@@ -341,8 +341,13 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
                   ? "scenarioRun.loopUntilExit"
                   : "scenarioRun.loopUntilRunStops",
               )}
-              className="absolute flex items-center gap-1.5 whitespace-nowrap text-xs"
-              style={{ left: loop.label.x, top: loop.label.y }}
+              className="absolute flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-xs"
+              style={{
+                left: loop.label.x,
+                top: loop.label.y,
+                // Inside the rectangle.
+                maxWidth: loop.rect.x + loop.rect.w - loop.label.x - 6,
+              }}
             >
               <Repeat className="h-3.5 w-3.5 text-cx-purple" aria-hidden />
               <span className="font-semibold text-cx-purple">
@@ -353,7 +358,7 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
                 )}
               </span>
               {waits && (
-                <span className="text-cx-muted">
+                <span className="truncate text-cx-muted">
                   · {t("scenarioRun.loopWaitsAt", { n: loop.from })}
                 </span>
               )}

@@ -17,10 +17,8 @@ import type {
   HeartbeatRequestV16,
   HeartbeatResponseV16,
   MeterValuesResponseV16,
-  StartTransactionRequestV16,
   StartTransactionResponseV16,
   StatusNotificationResponseV16,
-  StopTransactionRequestV16,
   StopTransactionResponseV16,
 } from "@ocpp-cp-simulator/ocpp/index";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
@@ -32,7 +30,6 @@ import { OcppCallRejectedError } from "../../../domain/errors/OcppCallErrors";
 import type {
   MeterSampleOverrides,
   ReadingContext,
-  SampledValue,
 } from "../../../domain/connector/MeterValueBuilder";
 import { buildSampledValues } from "../../../domain/connector/MeterValueBuilder";
 import type {
@@ -57,10 +54,6 @@ import {
   BootGate,
   type BootGateStatus,
 } from "../../../application/state/machines/BootGate";
-import {
-  projectStatusForVersion,
-  projectErrorCodeForVersion,
-} from "../../../domain/types/statusProjection";
 import type { Logger } from "../../../shared/Logger";
 import { LogType } from "../../../shared/Logger";
 import type { IChargePointMessageHandler } from "../../../domain/transport/IChargePointMessageHandler";
@@ -84,16 +77,28 @@ import {
   type ParsedSoapEnvelope,
   type SoapOperation,
   type SoapParsedPayload,
-  type SoapParsedValue,
   type SoapPayload,
 } from "./soapEnvelope";
 import type { SoapDialect } from "./dialect";
 import { OCPP15_DIALECT } from "./dialect";
+import { OCPP_1_2, OCPP_1_6_SOAP } from "../../../domain/types/OcppVersion";
 import {
-  OCPP_1_2,
-  OCPP_1_5,
-  OCPP_1_6_SOAP,
-} from "../../../domain/types/OcppVersion";
+  idTagInfoFromPayload,
+  numericValue,
+  recordValue,
+  soapPayload,
+  textValue,
+} from "./soapConverters";
+import {
+  OCPP12_WIRE_PROFILE,
+  OCPP15_WIRE_PROFILE,
+  OCPP16_WIRE_PROFILE,
+  type ClientWireProfile,
+} from "./soapWireProfiles";
+import type {
+  Ocpp15StopTransactionRequest,
+  Ocpp16StopTransactionRequest,
+} from "./soapWireTypes";
 
 export interface OCPPSoapHandlerOptions {
   readonly centralSystemUrl: string;
@@ -101,256 +106,6 @@ export interface OCPPSoapHandlerOptions {
   readonly requestTimeoutMs?: number;
   readonly dialect?: SoapDialect;
 }
-
-type IdTagInfoStatus =
-  "Accepted" | "Blocked" | "Expired" | "Invalid" | "ConcurrentTx";
-
-type IdTagInfo = {
-  expiryDate?: string;
-  parentIdTag?: string;
-  status: IdTagInfoStatus;
-};
-
-type Ocpp15StopTransactionRequest = Omit<StopTransactionRequestV16, "reason">;
-
-type Ocpp15ChargePointStatus =
-  "Available" | "Occupied" | "Faulted" | "Unavailable" | "Reserved";
-
-type Ocpp15ChargePointErrorCode =
-  | "ConnectorLockFailure"
-  | "HighTemperature"
-  | "Mode3Error"
-  | "NoError"
-  | "PowerMeterFailure"
-  | "PowerSwitchFailure"
-  | "ReaderFailure"
-  | "ResetFailure"
-  | "GroundFailure"
-  | "OverCurrentFailure"
-  | "UnderVoltage"
-  | "WeakSignal"
-  | "OtherError";
-
-type Ocpp15ReadingContext =
-  | "Interruption.Begin"
-  | "Interruption.End"
-  | "Sample.Clock"
-  | "Sample.Periodic"
-  | "Transaction.Begin"
-  | "Transaction.End";
-
-type Ocpp15Measurand =
-  | "Energy.Active.Export.Register"
-  | "Energy.Active.Import.Register"
-  | "Energy.Reactive.Export.Register"
-  | "Energy.Reactive.Import.Register"
-  | "Energy.Active.Export.Interval"
-  | "Energy.Active.Import.Interval"
-  | "Energy.Reactive.Export.Interval"
-  | "Energy.Reactive.Import.Interval"
-  | "Power.Active.Export"
-  | "Power.Active.Import"
-  | "Power.Reactive.Export"
-  | "Power.Reactive.Import"
-  | "Current.Export"
-  | "Current.Import"
-  | "Voltage"
-  | "Temperature";
-
-type Ocpp15UnitOfMeasure =
-  | "Wh"
-  | "kWh"
-  | "varh"
-  | "kvarh"
-  | "W"
-  | "kW"
-  | "var"
-  | "kvar"
-  | "Amp"
-  | "Volt"
-  | "Celsius";
-
-type Ocpp15Location = "Inlet" | "Outlet" | "Body";
-
-type Ocpp15StatusNotificationRequest = {
-  connectorId: number;
-  status: Ocpp15ChargePointStatus;
-  errorCode: Ocpp15ChargePointErrorCode;
-  info?: string;
-  timestamp?: string;
-  vendorId?: string;
-  vendorErrorCode?: string;
-};
-
-type Ocpp12ChargePointStatus =
-  "Available" | "Occupied" | "Faulted" | "Unavailable";
-
-type Ocpp12ChargePointErrorCode =
-  | "ConnectorLockFailure"
-  | "HighTemperature"
-  | "Mode3Error"
-  | "NoError"
-  | "PowerMeterFailure"
-  | "PowerSwitchFailure"
-  | "ReaderFailure"
-  | "ResetFailure";
-
-type Ocpp12StatusNotificationRequest = {
-  connectorId: number;
-  status: Ocpp12ChargePointStatus;
-  errorCode: Ocpp12ChargePointErrorCode;
-};
-
-type Ocpp12MeterSample = string;
-
-type Ocpp12MeterValuesRequest = {
-  connectorId: number;
-  values: {
-    timestamp: string;
-    value: Ocpp12MeterSample;
-  }[];
-};
-
-type Ocpp12StartTransactionRequest = {
-  connectorId: number;
-  idTag: string;
-  timestamp: string;
-  meterStart: number;
-};
-
-/**
- * Internal seam for version-specific wire-payload construction. Allows different
- * SOAP dialects (1.2, 1.5, 1.6-SOAP later) to shape payloads differently without
- * duplicating the core request/response handling.
- */
-interface ClientWireProfile {
-  toStatusNotificationRequest(
-    connectorId: number,
-    status: OCPPStatus,
-    opts?: {
-      errorCode?: ChargePointErrorCode;
-      info?: string;
-      vendorErrorCode?: string;
-      vendorId?: string;
-      timestamp?: Date;
-    },
-  ): SoapPayload;
-
-  /**
-   * Build the MeterValues request for this dialect, or `null` when the dialect
-   * supports none of the configured measurands and the request would therefore
-   * carry no samples at all. OCPP requires at least one, so the caller skips
-   * the send rather than putting an empty request on the wire (#301).
-   */
-  toMeterValuesRequest(
-    connectorId: number,
-    transactionId: number | undefined,
-    sampledValues: SampledValue[],
-    timestamp: Date,
-  ): SoapPayload | null;
-
-  toStartTransactionRequest(
-    transaction: Transaction,
-    connectorId: number,
-  ): SoapPayload;
-}
-
-type Ocpp15MeterSample = {
-  "#text": string;
-  "@_context"?: Ocpp15ReadingContext;
-  "@_format"?: "Raw" | "SignedData";
-  "@_measurand"?: Ocpp15Measurand;
-  "@_location"?: Ocpp15Location;
-  "@_unit"?: Ocpp15UnitOfMeasure;
-};
-
-type Ocpp15MeterValuesRequest = {
-  connectorId: number;
-  transactionId?: number;
-  values: {
-    timestamp: string;
-    value: Ocpp15MeterSample[];
-  }[];
-};
-
-// 1.6 SOAP enums: passthrough, no collapsing
-type Ocpp16ChargePointStatus =
-  | "Available"
-  | "Preparing"
-  | "Charging"
-  | "SuspendedEV"
-  | "SuspendedEVSE"
-  | "Finishing"
-  | "Reserved"
-  | "Unavailable"
-  | "Faulted";
-
-type Ocpp16ChargePointErrorCode =
-  | "ConnectorLockFailure"
-  | "EVCommunicationError"
-  | "GroundFailure"
-  | "HighTemperature"
-  | "InternalError"
-  | "LocalListConflict"
-  | "NoError"
-  | "OtherError"
-  | "OverCurrentFailure"
-  | "OverVoltage"
-  | "PowerMeterFailure"
-  | "PowerSwitchFailure"
-  | "ReaderFailure"
-  | "ResetFailure"
-  | "UnderVoltage"
-  | "WeakSignal";
-
-type Ocpp16StatusNotificationRequest = {
-  connectorId: number;
-  status: Ocpp16ChargePointStatus;
-  errorCode: Ocpp16ChargePointErrorCode;
-  info?: string;
-  timestamp?: string;
-  vendorId?: string;
-  vendorErrorCode?: string;
-};
-
-// 1.6 SOAP SampledValue: child elements, not attributes
-type Ocpp16SampledValue = {
-  value: string;
-  context?: string;
-  format?: "Raw" | "SignedData";
-  measurand?: string;
-  phase?: string;
-  location?: string;
-  unit?: string;
-};
-
-type Ocpp16MeterValue = {
-  timestamp: string;
-  sampledValue: Ocpp16SampledValue[];
-};
-
-type Ocpp16MeterValuesRequest = {
-  connectorId: number;
-  transactionId?: number;
-  meterValue?: Ocpp16MeterValue[];
-};
-
-type Ocpp16StartTransactionRequest = {
-  connectorId: number;
-  idTag: string;
-  timestamp: string;
-  meterStart: number;
-  reservationId?: number;
-};
-
-type Ocpp16StopTransactionRequest = {
-  transactionId: number;
-  idTag?: string;
-  timestamp: string;
-  meterStop: number;
-  reason?: string;
-  transactionData?: Ocpp16MeterValue[];
-};
 
 const OPERATION_ACTION: Record<SoapOperation, OCPPAction | null> = {
   Authorize: OCPPAction.Authorize,
@@ -396,52 +151,6 @@ function truncateForLog(text: string): string {
     : text;
 }
 
-function textValue(value: SoapParsedValue | undefined): string | undefined {
-  if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean") {
-    return String(value);
-  }
-  return undefined;
-}
-
-function numericValue(value: SoapParsedValue | undefined): number | undefined {
-  const text = textValue(value);
-  if (text === undefined || text.trim() === "") return undefined;
-  const parsed = Number(text);
-  return Number.isFinite(parsed) ? parsed : undefined;
-}
-
-function recordValue(
-  value: SoapParsedValue | undefined,
-): Record<string, SoapParsedValue> | undefined {
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    return value;
-  }
-  return undefined;
-}
-
-function idTagInfoFromPayload(value: SoapParsedValue | undefined): IdTagInfo {
-  const record = recordValue(value);
-  const rawStatus = textValue(record?.status);
-  const status: IdTagInfoStatus =
-    rawStatus === "Accepted" ||
-    rawStatus === "Blocked" ||
-    rawStatus === "Expired" ||
-    rawStatus === "Invalid" ||
-    rawStatus === "ConcurrentTx"
-      ? rawStatus
-      : "Invalid";
-  return {
-    status,
-    ...(textValue(record?.expiryDate)
-      ? { expiryDate: textValue(record?.expiryDate) }
-      : {}),
-    ...(textValue(record?.parentIdTag)
-      ? { parentIdTag: textValue(record?.parentIdTag) }
-      : {}),
-  };
-}
-
 /** What a failed exchange reports as `errorCode`: the SOAP Fault code, or the
  *  HTTP status. */
 function faultCode(error: SoapFaultError | SoapHttpStatusError): string {
@@ -449,304 +158,6 @@ function faultCode(error: SoapFaultError | SoapHttpStatusError): string {
     ? `SOAP Fault ${error.fault.code.replace(/^.*:/, "")}`
     : `HTTP ${error.status}`;
 }
-
-function soapPayload(payload: object): SoapPayload {
-  return payload as unknown as SoapPayload;
-}
-
-function toOcpp15ReadingContext(
-  context: string | undefined,
-): Ocpp15ReadingContext | undefined {
-  switch (context) {
-    case "Interruption.Begin":
-    case "Interruption.End":
-    case "Sample.Clock":
-    case "Sample.Periodic":
-    case "Transaction.Begin":
-    case "Transaction.End":
-      return context;
-    case "Trigger":
-    case "Other":
-    default:
-      return undefined;
-  }
-}
-
-function toOcpp15Measurand(
-  measurand: string | undefined,
-): Ocpp15Measurand | null | undefined {
-  switch (measurand) {
-    case undefined:
-      return undefined;
-    case "Energy.Active.Export.Register":
-    case "Energy.Active.Import.Register":
-    case "Energy.Reactive.Export.Register":
-    case "Energy.Reactive.Import.Register":
-    case "Energy.Active.Export.Interval":
-    case "Energy.Active.Import.Interval":
-    case "Energy.Reactive.Export.Interval":
-    case "Energy.Reactive.Import.Interval":
-    case "Power.Active.Export":
-    case "Power.Active.Import":
-    case "Power.Reactive.Export":
-    case "Power.Reactive.Import":
-    case "Current.Export":
-    case "Current.Import":
-    case "Voltage":
-    case "Temperature":
-      return measurand;
-    default:
-      // OCPP 1.5 has no Power.Offered, Current.Offered, Power.Factor, SoC,
-      // Frequency, RPM, phase-aware, or custom measurand equivalent; drop the
-      // sample instead of mislabeling it.
-      //
-      // The two Offered measurands used to be aliased onto
-      // Power.Active.Import / Current.Import, which was harmless only while
-      // Offered and Import always carried the same number. #301 makes them
-      // differ (Offered is the EVSE's offer, Import is what the curve says
-      // the battery accepts), so a connector sampling both would have put two
-      // identically labelled samples with contradictory values into one
-      // MeterValue. Dropping the unsupported sample is the lesser loss: a 1.5
-      // CSMS sees fewer measurands, never two answers to the same question.
-      return null;
-  }
-}
-
-function toOcpp15UnitOfMeasure(
-  unit: string | undefined,
-): Ocpp15UnitOfMeasure | undefined {
-  switch (unit) {
-    case "Wh":
-    case "kWh":
-    case "varh":
-    case "kvarh":
-    case "W":
-    case "kW":
-    case "var":
-    case "kvar":
-    case "Celsius":
-      return unit;
-    case "A":
-      return "Amp";
-    case "V":
-      return "Volt";
-    case "Celcius":
-      return "Celsius";
-    default:
-      return undefined;
-  }
-}
-
-function toOcpp15Location(
-  location: string | undefined,
-): Ocpp15Location | undefined {
-  switch (location) {
-    case "Inlet":
-    case "Outlet":
-    case "Body":
-      return location;
-    default:
-      return undefined;
-  }
-}
-
-function toOcpp15MeterSample(sample: SampledValue): Ocpp15MeterSample | null {
-  // OCPP 1.5's SampledValue has no phase attribute (no Errata-3-era additions
-  // like 1.6/2.0.1 have). Emitting the L1/L2/L3 samples anyway would produce
-  // duplicates indistinguishable from the aggregate — same measurand,
-  // context, unit and value shape, just missing the one field that told them
-  // apart — so drop the per-phase extras rather than confuse a CSMS with
-  // four identical-looking Current.Import/Power.Active.Import samples
-  // (#301). The aggregate sample (no `phase`) still goes through.
-  if (sample.phase) return null;
-  const measurand = toOcpp15Measurand(sample.measurand);
-  if (measurand === null) return null;
-  const context = toOcpp15ReadingContext(sample.context);
-  const location = toOcpp15Location(sample.location);
-  const unit = toOcpp15UnitOfMeasure(sample.unit);
-
-  return {
-    "#text": sample.value,
-    ...(context ? { "@_context": context } : {}),
-    ...(sample.format ? { "@_format": sample.format } : {}),
-    ...(measurand ? { "@_measurand": measurand } : {}),
-    ...(location ? { "@_location": location } : {}),
-    ...(unit ? { "@_unit": unit } : {}),
-  };
-}
-
-function toOcpp16SampledValue(sample: SampledValue): Ocpp16SampledValue {
-  // 1.6 SOAP: SampledValue is a complex type with child elements, all optional except value.
-  // Passthrough all fields without mapping or dropping.
-  return {
-    value: sample.value,
-    ...(sample.context ? { context: sample.context } : {}),
-    ...(sample.format ? { format: sample.format } : {}),
-    ...(sample.measurand ? { measurand: sample.measurand } : {}),
-    ...(sample.phase ? { phase: sample.phase } : {}),
-    ...(sample.location ? { location: sample.location } : {}),
-    ...(sample.unit ? { unit: sample.unit } : {}),
-  };
-}
-
-const OCPP15_WIRE_PROFILE: ClientWireProfile = {
-  toStatusNotificationRequest(connectorId, status, opts) {
-    const payload: Ocpp15StatusNotificationRequest = {
-      connectorId,
-      status: projectStatusForVersion(
-        OCPP_1_5,
-        status,
-      ) as Ocpp15ChargePointStatus,
-      errorCode: projectErrorCodeForVersion(
-        OCPP_1_5,
-        opts?.errorCode ?? "NoError",
-      ) as Ocpp15ChargePointErrorCode,
-      ...(opts?.info ? { info: opts.info } : {}),
-      ...(opts?.timestamp ? { timestamp: opts.timestamp.toISOString() } : {}),
-      ...(opts?.vendorId ? { vendorId: opts.vendorId } : {}),
-      ...(opts?.vendorErrorCode
-        ? { vendorErrorCode: opts.vendorErrorCode }
-        : {}),
-    };
-    return soapPayload(payload);
-  },
-
-  toMeterValuesRequest(connectorId, transactionId, sampledValues, timestamp) {
-    const value = sampledValues
-      .map(toOcpp15MeterSample)
-      .filter((sample): sample is Ocpp15MeterSample => sample !== null);
-    // Every configured measurand was one 1.5 does not define — a connector
-    // sampling only `Power.Offered` / `Current.Offered` is the reachable case
-    // (#301). A 1.5 MeterValues.req must carry at least one value, so an empty
-    // one would be rejected by a conforming CSMS; the caller skips the send.
-    if (value.length === 0) return null;
-    const payload: Ocpp15MeterValuesRequest = {
-      connectorId,
-      ...(transactionId !== undefined ? { transactionId } : {}),
-      values: [{ timestamp: timestamp.toISOString(), value }],
-    };
-    return soapPayload(payload);
-  },
-
-  toStartTransactionRequest(transaction, connectorId) {
-    const payload: StartTransactionRequestV16 = {
-      connectorId,
-      idTag: transaction.tagId,
-      timestamp: transaction.startTime.toISOString(),
-      meterStart: transaction.meterStart,
-      ...(transaction.reservationId !== undefined
-        ? { reservationId: transaction.reservationId }
-        : {}),
-    };
-    return soapPayload(payload);
-  },
-};
-
-const OCPP12_WIRE_PROFILE: ClientWireProfile = {
-  toStatusNotificationRequest(connectorId, status, opts) {
-    // OCPP 1.2: exactly 3 fields (connectorId, status, errorCode).
-    // Per XSD verification: info/timestamp/vendorId/vendorErrorCode do NOT exist in 1.2.
-    const payload: Ocpp12StatusNotificationRequest = {
-      connectorId,
-      status: projectStatusForVersion(
-        OCPP_1_2,
-        status,
-      ) as Ocpp12ChargePointStatus,
-      errorCode: projectErrorCodeForVersion(
-        OCPP_1_2,
-        opts?.errorCode ?? "NoError",
-      ) as Ocpp12ChargePointErrorCode,
-    };
-    return soapPayload(payload);
-  },
-
-  toMeterValuesRequest(connectorId, _transactionId, sampledValues, timestamp) {
-    // OCPP 1.2: flat shape. values[] of {timestamp, value:int} (Wh implied, no transactionId).
-    // Per wire-facts: Energy.Active.Import.Register sample only; pick the Wh value.
-    const wattHourValue = sampledValues.find(
-      (sv) => sv.measurand === "Energy.Active.Import.Register" && sv.value,
-    );
-    const payload: Ocpp12MeterValuesRequest = {
-      connectorId,
-      values: [
-        {
-          timestamp: timestamp.toISOString(),
-          value: wattHourValue?.value ?? "0",
-        },
-      ],
-    };
-    return soapPayload(payload);
-  },
-
-  toStartTransactionRequest(transaction, connectorId) {
-    // OCPP 1.2: connectorId, idTag, timestamp, meterStart (NO reservationId).
-    const payload: Ocpp12StartTransactionRequest = {
-      connectorId,
-      idTag: transaction.tagId,
-      timestamp: transaction.startTime.toISOString(),
-      meterStart: transaction.meterStart,
-    };
-    return soapPayload(payload);
-  },
-};
-
-const OCPP16_WIRE_PROFILE: ClientWireProfile = {
-  toStatusNotificationRequest(connectorId, status, opts) {
-    // OCPP 1.6 SOAP: full shape with passthrough enums (no collapsing).
-    // 1.6 enums are identical to 1.6J: Preparing stays Preparing, EVCommunicationError stays.
-    // Field order: connectorId, status, errorCode, info?, timestamp?, vendorId?, vendorErrorCode?
-    const payload: Ocpp16StatusNotificationRequest = {
-      connectorId,
-      status: projectStatusForVersion(
-        OCPP_1_6_SOAP,
-        status,
-      ) as Ocpp16ChargePointStatus,
-      errorCode: projectErrorCodeForVersion(
-        OCPP_1_6_SOAP,
-        opts?.errorCode ?? "NoError",
-      ) as Ocpp16ChargePointErrorCode,
-      ...(opts?.info ? { info: opts.info } : {}),
-      ...(opts?.timestamp ? { timestamp: opts.timestamp.toISOString() } : {}),
-      ...(opts?.vendorId ? { vendorId: opts.vendorId } : {}),
-      ...(opts?.vendorErrorCode
-        ? { vendorErrorCode: opts.vendorErrorCode }
-        : {}),
-    };
-    return soapPayload(payload);
-  },
-
-  toMeterValuesRequest(connectorId, transactionId, sampledValues, timestamp) {
-    // OCPP 1.6 SOAP: meterValue[] with sampledValue[] as child elements (not attributes).
-    // Field order: connectorId, transactionId?, meterValue[]
-    // Within meterValue: timestamp, sampledValue[]
-    // Within sampledValue: value, context?, format?, measurand?, phase?, location?, unit?
-    const payload: Ocpp16MeterValuesRequest = {
-      connectorId,
-      ...(transactionId !== undefined ? { transactionId } : {}),
-      meterValue: [
-        {
-          timestamp: timestamp.toISOString(),
-          sampledValue: sampledValues.map(toOcpp16SampledValue),
-        },
-      ],
-    };
-    return soapPayload(payload);
-  },
-
-  toStartTransactionRequest(transaction, connectorId) {
-    // OCPP 1.6: connectorId, idTag, timestamp, meterStart, reservationId?
-    const payload: Ocpp16StartTransactionRequest = {
-      connectorId,
-      idTag: transaction.tagId,
-      timestamp: transaction.startTime.toISOString(),
-      meterStart: transaction.meterStart,
-      ...(transaction.reservationId !== undefined
-        ? { reservationId: transaction.reservationId }
-        : {}),
-    };
-    return soapPayload(payload);
-  },
-};
 
 /**
  * An HTTP error status that carried no SOAP Fault. OCPP-S 1.6 errata 3.2

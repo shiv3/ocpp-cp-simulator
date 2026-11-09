@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import React from "react";
-import { ChevronRight, PlugZap } from "lucide-react";
+import { ChevronRight } from "lucide-react";
+import { ChargingStation } from "@evicons/react";
 
 import { cn } from "@/lib/utils";
 import ActiveScenarioBadge from "../../components/ActiveScenarioBadge";
@@ -81,7 +82,10 @@ const CpHierarchyRow: React.FC<CpHierarchyRowProps> = ({
             )}
           />
         </button>
-        <PlugZap className={cn("h-4 w-4 shrink-0", statusTextClass(status))} />
+        <ChargingStation
+          strokeWidth={2}
+          className={cn("h-4 w-4 shrink-0", statusTextClass(status))}
+        />
         {/* A button, so the panel opens from the keyboard too. */}
         <button
           type="button"

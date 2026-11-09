@@ -6,12 +6,12 @@ import {
   History,
   PanelLeftClose,
   PanelLeftOpen,
-  PlugZap,
   Play,
   ScrollText,
   Settings as SettingsIcon,
   Zap,
 } from "lucide-react";
+import { ChargingStation } from "@evicons/react";
 import { cn } from "@/lib/utils";
 import { type MessageKey } from "../i18n";
 import { useDataContext } from "../data/providers/DataProvider";
@@ -29,7 +29,7 @@ import { GlobalLogsProvider } from "./lib/GlobalLogsProvider";
 interface NavItem {
   labelKey: MessageKey;
   to: string;
-  icon: React.ComponentType<{ className?: string }>;
+  icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
   isActive: (pathname: string) => boolean;
 }
 
@@ -40,7 +40,7 @@ const NAV_ITEMS: NavItem[] = [
   {
     labelKey: "common.nav.chargePoints",
     to: "/",
-    icon: PlugZap,
+    icon: ChargingStation,
     isActive: (pathname) => pathname === "/" || pathname.startsWith("/cp/"),
   },
   {
@@ -189,6 +189,7 @@ const AppShell: React.FC = () => {
                   )}
                 >
                   <Icon
+                    strokeWidth={2}
                     className={cn(
                       "h-4 w-4 shrink-0",
                       active && "text-cx-accent",

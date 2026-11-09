@@ -230,6 +230,23 @@ describe("DashboardPage views and filters", () => {
     expect(headOf(container, "CP-C").textContent).toContain("Disconnected");
   });
 
+  it("each row head shows a decorative charging-station icon in the status color, beside the status text", async () => {
+    const { container } = await mount("/");
+    const icon = headOf(container, "CP-A").querySelector(
+      "svg.evicon-charging-station",
+    )!;
+    expect(icon).toBeTruthy();
+    expect(icon.getAttribute("aria-hidden")).toBe("true");
+    expect(icon.getAttribute("class")).toContain("text-cx-emerald");
+    // The color is not the only carrier: the status is also written out.
+    expect(headOf(container, "CP-A").textContent).toContain("Available");
+    expect(
+      headOf(container, "CP-C")
+        .querySelector("svg.evicon-charging-station")!
+        .getAttribute("class"),
+    ).toContain("text-cx-gray");
+  });
+
   it("?view=cp shows a table with the In use column", async () => {
     const { container } = await mount("/?view=cp");
 

@@ -129,6 +129,11 @@ describe("ConnectorCard: the connector as a charging session", () => {
     unmount = () => act(() => root.unmount());
 
     expect(card().textContent).toContain("Connector 1");
+    // A generic plug: nothing in the snapshot tells the connector standard.
+    const header = card().querySelector("[data-card-header]")!;
+    const plug = header.firstElementChild!;
+    expect(plug.matches("svg.evicon-charging-plug")).toBe(true);
+    expect(plug.getAttribute("aria-hidden")).toBe("true");
     expect(card().textContent).toContain("Available");
     expect(
       card().querySelector('[data-testid="availability"]')?.textContent,

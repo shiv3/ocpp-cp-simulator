@@ -158,8 +158,8 @@ view is the default and leaves the parameter out.
 
 In the Hierarchy view a row's head holds, left to right: a **twist** button
 (`Collapse connectors of <id>` / `Expand …`, `aria-expanded`) that folds the
-connector grid away (kept on the page, not in the URL), a plug icon colored by
-status, the id, the OCPP version as small muted text, the status (dot and text), the
+connector grid away (kept on the page, not in the URL), a charging-station
+[icon](#icons) colored by status, the id, the OCPP version as small muted text, the status (dot and text), the
 **Scenario** badge (amber **Waiting: …** while a run is parked), the **Net
 sim** badge, the [labels](../concepts/control-plane.md#charge-point-labels) as
 `key=value` chips, one small dot per connector (tooltip `#<n> <Status>`), and at the
@@ -449,7 +449,7 @@ A connector card is the connector as a charging session
 ([`ConnectorCard.tsx`](../../apps/web/src/console/pages/cp/ConnectorCard.tsx)), top to
 bottom:
 
-- **Header**: `Connector <n>`, its status, its availability (`Operative` /
+- **Header**: a generic plug [icon](#icons), `Connector <n>`, its status, its availability (`Operative` /
   `Inoperative`, set by ChangeAvailability, #422), then **⚙ Config** (the
   [Config dialog](#config-dialog)) and **Controls ▾** (`aria-expanded`,
   `aria-controls`), which unfolds the [simulator controls](#simulator-controls)
@@ -951,8 +951,8 @@ page hold the traffic); its **Run history** stays under the steps, full width.
 It also has a **Steps | Graph** switch, kept in `?view=` (replacing the
 history entry; Steps is the default). The panel always shows Steps.
 
-- **Steps** — one box per step, top to bottom, numbered: the step type's tile,
-  its title and summary, the state pill on the current step and a check on a
+- **Steps** — one box per step, top to bottom, numbered: the step type's tile
+  (its category's [icon](#icons) and colour), its title and summary, the state pill on the current step and a check on a
   done one; steps not reached yet are dimmed. When the scenario forks, the
   steps after the fork node stand in side-by-side columns, one per branch,
   each under a lane tag (`A`, `B`, … in the lane colour, the branch name —
@@ -1253,6 +1253,53 @@ ngrok` / `--soap-public-base-url`), the SOAP callback URL is optional in the
 - Persist everything (charge points, scenarios, configuration overrides,
   logs) — sql.js + IndexedDB in Local mode, the daemon's SQLite in Remote
   mode ([State persistence](../concepts/state-persistence.md)).
+
+## Icons
+
+The console draws its icons from two libraries (#823):
+
+- [Lucide](https://lucide.dev) (`lucide-react`) for generic UI: navigation
+  chrome, actions, menus, dialogs and controls.
+- [EVIcons](https://evicons.dev/icons) (`@evicons/react`) for EV-charging
+  concepts, where an icon names a domain entity:
+
+| Where                                                 | EVIcons icon      | Stands for                  |
+| ----------------------------------------------------- | ----------------- | --------------------------- |
+| Sidebar **Charge Points** link, dashboard empty state | `ChargingStation` | the charge points           |
+| Dashboard Hierarchy row head, colored by status       | `ChargingStation` | the charge point            |
+| [Connector card](#connector-card) header              | `ChargingPlug`    | a connector                 |
+| Step tile, **Transaction** category                   | `ChargingBolt`    | Transaction, Unlock Outcome |
+| Step tile, **Meter & EV** category                    | `CarPlugged`      | Meter Value, Connector Plug |
+
+Rules:
+
+- An EVIcons icon is used only where its documented meaning matches what is
+  shown. `ChargingPlug` is the generic plug ("no specific connector type");
+  `ChargingSocket` ("no tethered cable") and the connector-standard icons
+  (`PlugType2`, `PlugCcs2`, …) are not used: OCPP data does not tell the
+  physical connector, and the console never infers it from a connector id or
+  status. A category tile names every step type of its category, so it takes
+  a general icon: `ChargingBolt` ("charging or electricity in general") for
+  Transaction, which also holds Unlock Outcome, rather than `ChargingSession`
+  ("a live session").
+- Domain icons are decorative (`aria-hidden`) and sit beside a text label.
+  One exception: in the collapsed sidebar the **Charge Points** icon stands
+  alone, and the link keeps its label as accessible name and tooltip. A status
+  color on an icon repeats the status written next to it.
+- Icons draw in `currentColor`, so they follow the light and dark themes.
+- EVIcons draws a 1.5 stroke by default, Lucide 2: pass `strokeWidth={2}`
+  where an EVIcons icon sits among Lucide ones. A component that takes either
+  kind types its icon prop as
+  `ComponentType<{ className?: string; strokeWidth?: number }>`.
+- Import icons by name from the package root; the package has no side
+  effects, so the bundle keeps only the icons used.
+- Licenses: EVIcons is
+  [MIT, © 2026 Landolsi Digital](https://github.com/evicons/evicons/blob/main/LICENSE)
+  and Lucide is [ISC](https://github.com/lucide-icons/lucide/blob/main/LICENSE).
+  Both ask that the notice travel with copies of the code; the built console
+  does not carry the notices of its bundled dependencies yet (#857).
+- The package is pinned exactly in `package.json` (`0.8.0`, as `@noble/curves`
+  is): it is young, so bump it on purpose.
 
 ## Development
 

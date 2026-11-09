@@ -25,6 +25,8 @@ sources:
   - packages/core/src/cp/domain/connector/MeterValueScheduler.ts
   - packages/core/src/cp/infrastructure/transport/OCPPMessageHandlerV201.ts
   - packages/core/src/cp/infrastructure/transport/soap/OCPPSoapHandler.ts
+  - packages/core/src/cp/infrastructure/transport/soap/soapConverters.ts (OCPP 1.5 meter sample mapping)
+  - packages/core/src/cp/infrastructure/transport/soap/soapWireProfiles.ts
   - "issues #214, #240, #247, #239, #301, #332, #566, #654"
   - packages/core/src/cp/application/scenario/ScenarioRuntime.ts
   - packages/core/src/cp/application/scenario/resolveFrom.ts

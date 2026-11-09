@@ -690,17 +690,24 @@ export class OCPPMessageHandler {
     // #607: the history (begin sample, periodic and clock-aligned ones) and
     // the Transaction.End sample of StopTxnSampledData, formatted from the
     // point captured at the stop instant (1.6 §3.16.1, §3.16.2).
-    const history = transaction.txEndedSamples ?? [];
+    // The same wire spelling as MeterValues (#846): a Temperature sample
+    // says `Celcius` here too (1.6 errata 2025-04 §2.1).
+    const history = (transaction.txEndedSamples ?? []).map((entry) => ({
+      ...entry,
+      sampledValue: toOcppJ16Wire(entry.sampledValue),
+    }));
     const endMeasurands = this._chargePoint.configuration.stopTxnSampledData();
     const connector = this._chargePoint.getConnector(connectorId);
     const endSample =
       connector && endMeasurands.length > 0
-        ? buildSampledValues(
-            connector,
-            endMeasurands,
-            "Transaction.End",
-            { intervalStream: "txEnded-sampled" },
-            endPoint,
+        ? toOcppJ16Wire(
+            buildSampledValues(
+              connector,
+              endMeasurands,
+              "Transaction.End",
+              { intervalStream: "txEnded-sampled" },
+              endPoint,
+            ),
           )
         : [];
     if (

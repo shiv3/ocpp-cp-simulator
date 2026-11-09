@@ -18,8 +18,9 @@ export function plugIn(
 /**
  * An EV-side disconnect (#488): the station decides what it means. With a
  * running transaction StopTransactionOnEVSideDisconnect stops it
- * (`EVDisconnected`) or suspends it (SuspendedEV); without one the connector
- * goes Available, as this button did before.
+ * (`EVDisconnected`) or suspends it (SuspendedEV); without one a Preparing,
+ * Finishing or suspended connector goes Available, and a Reserved, Faulted or
+ * Unavailable one keeps its status.
  */
 export function unplug(
   service: ChargePointService,

@@ -1811,6 +1811,11 @@ that edge an exit, built like conditional branching:
   at the loop's source node itself treats that node as done and goes on along its ordinary edges (the loop edge is
   not followed).
 - **Not for k6.** `export-k6` refuses a scenario with a loop edge, naming it.
+- **In the editor.** The web console's Steps and Graph views draw a loop edge as a Repeat block whose header
+  says its bounds ("Repeat 10 times / for 2 h / until … (whichever first)") and edits them inline, `until`
+  with the switch step's value field and case list; a Repeat added in the middle of a lane is a loop edge with
+  `times: 3`, and its last bound cannot be removed while steps follow it. See
+  [web console: scenario editor](../entities/web-console.md#scenario-editor-steps-and-graph).
 
 The `dataflow-charge-to-soc` template uses one: `meter` loops back to itself with `forSeconds: 7200` and an
 `until` on `connector.power.soc`.

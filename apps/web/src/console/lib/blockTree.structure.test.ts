@@ -15,6 +15,7 @@ import {
   insertForkBlock,
   insertStepIntoNewLoop,
   moveStepTo,
+  newLoopIsBounded,
   recognizeBlockTree,
   seqAt,
   allSeqs,
@@ -56,18 +57,32 @@ const ifElse = () =>
   );
 
 describe("a pending Repeat block (UI-only until it holds a step)", () => {
-  it("is allowed only where the repeat can close its sequence", () => {
+  it("is allowed at the end of a lane and, bounded, in the middle", () => {
     const def = chain();
     const tree = recognizeBlockTree(def);
     expect(canInsertLoopAt(tree, "root", 2).ok).toBe(true);
-    const mid = canInsertLoopAt(tree, "root", 1);
-    expect(mid).toEqual({
-      ok: false,
-      reason: "scenarios.editor.cannot.loopNotAtEnd",
-    });
-    // A lane that falls through to a merge cannot hold a forever loop.
+    expect(newLoopIsBounded(tree, "root", 2)).toBe(false);
+    // In the middle the repeat gets the default bound (times: 3).
+    expect(canInsertLoopAt(tree, "root", 1).ok).toBe(true);
+    expect(newLoopIsBounded(tree, "root", 1)).toBe(true);
+    // A lane that falls through to a merge: bounded too.
     const t2 = recognizeBlockTree(ifElse());
-    expect(canInsertLoopAt(t2, "root/0/lanes/0", 1).ok).toBe(false);
+    expect(canInsertLoopAt(t2, "root/0/lanes/0", 1).ok).toBe(true);
+    expect(newLoopIsBounded(t2, "root/0/lanes/0", 1)).toBe(true);
+    // Never as a loop's first block (two loops on one header).
+    const looped = recognizeBlockTree(
+      graph(
+        [start(), node("a"), end()],
+        [
+          ["start", "a"],
+          ["a", "a"],
+        ],
+      ),
+    );
+    expect(canInsertLoopAt(looped, "root/0/body", 0)).toEqual({
+      ok: false,
+      reason: "scenarios.editor.cannot.loopHeader",
+    });
   });
 
   it("the first step written makes it real: one back edge, nothing else", () => {
@@ -102,8 +117,9 @@ describe("a pending Repeat block (UI-only until it holds a step)", () => {
   it("a refused slot leaves the file as it was", () => {
     const def = chain();
     const tree = recognizeBlockTree(def);
+    // Mid-lane, a switch cannot be the step the bounds are checked after.
     expect(
-      insertStepIntoNewLoop(def, tree, "root", 1, ScenarioNodeType.DELAY),
+      insertStepIntoNewLoop(def, tree, "root", 1, ScenarioNodeType.SWITCH),
     ).toBe(def);
   });
 

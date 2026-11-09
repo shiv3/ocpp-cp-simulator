@@ -62,6 +62,19 @@
  *   (removing the running lane of a handle another edge also has, removing
  *   a step whose edge in is a step's first of several) is refused with
  *   `revivesDeadEdge`.
+ * - Loop edges (schema 1.10, `kind: "loop"`): a loop edge `S → H` that
+ *   the tree can structure is a {@link LoopBlock} with `loopEdge` set (a
+ *   "bounded" loop, whatever its bounds): `H` is its header, the body ends
+ *   at `S` (its latch, the one place that falls through to the header) and
+ *   `S`'s ordinary next edge is where the loop's sequence goes on. The latch
+ *   is not stored: it is whichever step falls through to the header, so
+ *   inserting, removing or moving the body's last step moves the loop edge
+ *   with it (its id, `loop` and unknown fields stay). A loop edge the tree
+ *   cannot structure (out of a fork, a second one into a header that has
+ *   other back edges, an irreducible one) stays a `loopEdge` link, written
+ *   back untouched. Operations never leave a bounded loop without exactly
+ *   one latch that is a step leaving by "next": such an edit is refused with
+ *   `breaksLoopBounds`.
  */
 import type { Edge } from "@xyflow/react";
 
@@ -75,11 +88,15 @@ import {
 } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import { connectionRule } from "@ocpp-cp-simulator/core/scenario/scenarioConnectionRules";
 import {
+  isLoopEdge,
   isTerminal,
   isTimeoutEdge,
+  loopBounds,
+  loopStep,
   lowerScenario,
   nextStep,
   pickableHandles,
+  type ReadLoopBounds,
   type ScenarioProgram,
   timeoutStep,
   waitTimeoutSeconds,
@@ -173,6 +190,44 @@ export interface LoopBlock {
   headerId: string;
   body: Seq;
   backEdgeIds: string[];
+  /** A loop drawn by a loop edge (schema 1.10): its id and `loop` bounds as
+   *  the file has them. Null: a plain back edge (repeats until the run
+   *  stops). */
+  loopEdge: LoopEdgeRef | null;
+}
+
+/** The loop edge of a bounded {@link LoopBlock}. */
+export interface LoopEdgeRef {
+  edgeId: string;
+  /** The edge's `loop`, unvalidated; undefined: none (loops forever). */
+  loop: unknown;
+}
+
+/** The bounds of a loop as the editor shows them: `null` when the loop
+ *  repeats forever (a plain back edge, or a loop edge without bounds),
+ *  `{ problem }` when its `loop` is malformed. */
+export function loopBlockBounds(
+  loop: Pick<LoopBlock, "loopEdge">,
+): ReadLoopBounds | null | { problem: string } {
+  if (!loop.loopEdge) return null;
+  const read = loopBounds({
+    id: loop.loopEdge.edgeId,
+    source: "",
+    target: "",
+    loop: loop.loopEdge.loop,
+  });
+  if ("problem" in read) return read;
+  return hasBounds(read.bounds) ? read.bounds : null;
+}
+
+/** Whether `bounds` has at least one bound (else the loop never exits). */
+export function hasBounds(bounds: ReadLoopBounds | null | undefined): boolean {
+  return (
+    !!bounds &&
+    (bounds.times !== undefined ||
+      bounds.forSeconds !== undefined ||
+      bounds.until !== undefined)
+  );
 }
 
 export interface LinkEdge {
@@ -449,96 +504,154 @@ export function recognizeBlockTree(def: Def): BlockTree {
    *  walked after every live one and drawn wherever they lead. */
   const liveLanes = (id: string): LaneEdge[] =>
     (outs.get(id)?.lanes ?? []).filter((l) => isLive(l.condition));
-  const laneTargets = (id: string): string[] =>
-    liveLanes(id)
-      .filter((l) => walkable(l.edge))
-      .map((l) => l.edge.target);
-
-  // --- DFS forest: back edges ---------------------------------------------
-  const roots: string[] = [];
-  if (origin) roots.push(origin.id);
+  // --- Loop edges (schema 1.10) -------------------------------------------
+  // The loop edge each step may follow (`loopStep`): a candidate latch. A
+  // step with several ordinary edges (an "extra" fork) is not one.
+  const candidates = new Map<string, Edge>();
   for (const node of firstNodes) {
-    if (node !== origin && !isEndSink(node, origin)) roots.push(node.id);
-  }
-  const backEdges = new Set<Edge>();
-  /** The nodes a DFS tree starts at: the origin, then each node no earlier
-   *  tree reaches (file order). */
-  const treeRoots: string[] = [];
-  {
-    const state = new Map<string, 1 | 2>(); // 1: on stack, 2: done
-    for (const root of roots) {
-      if (state.has(root)) continue;
-      treeRoots.push(root);
-      state.set(root, 1);
-      const stack: Array<{ v: string; lanes: LaneEdge[]; i: number }> = [
-        { v: root, lanes: liveLanes(root), i: 0 },
-      ];
-      while (stack.length > 0) {
-        const top = stack[stack.length - 1];
-        if (top.i < top.lanes.length) {
-          const edge = top.lanes[top.i++].edge;
-          if (!walkable(edge)) continue;
-          const s = state.get(edge.target);
-          if (s === 1) backEdges.add(edge);
-          else if (s === undefined) {
-            state.set(edge.target, 1);
-            stack.push({ v: edge.target, lanes: liveLanes(edge.target), i: 0 });
-          }
-        } else {
-          state.set(top.v, 2);
-          stack.pop();
-        }
-      }
-    }
+    const step = loopStep(program, node);
+    if (!step || !walkable(step.edge)) continue;
+    if ((outs.get(node.id)?.lanes.length ?? 0) > 1) continue;
+    candidates.set(node.id, step.edge);
   }
 
-  // --- Dominators: reducible loops ----------------------------------------
-  const idom = immediateDominators(ENTRY, (v) =>
-    v === ENTRY ? treeRoots : laneTargets(v),
-  );
-  const dominates = (a: string, b: string): boolean => {
-    for (let v: string | undefined = b; v !== undefined;) {
-      if (v === a) return true;
-      const up = idom.get(v);
-      if (up === undefined || up === v) return false;
-      v = up;
-    }
-    return false;
-  };
   interface LoopInfo {
     body: Set<string>;
     backEdges: Edge[];
   }
-  const loops = new Map<string, LoopInfo>();
-  const loopBackEdges = new Set<Edge>();
-  const preds = new Map<string, string[]>();
-  for (const node of firstNodes) {
-    for (const t of laneTargets(node.id)) {
-      const list = preds.get(t);
-      if (list) list.push(node.id);
-      else preds.set(t, [node.id]);
+  /** Back edges, dominators and natural loops over the lanes that run plus
+   *  the `accepted` loop edges (by source). */
+  const findLoops = (accepted: ReadonlyMap<string, Edge>) => {
+    const lanesOf = (id: string): LaneEdge[] => {
+      const lanes = liveLanes(id);
+      const loopEdge = accepted.get(id);
+      return loopEdge
+        ? [...lanes, { edge: loopEdge, condition: { kind: "first" } }]
+        : lanes;
+    };
+    const targetsOf = (id: string): string[] =>
+      lanesOf(id)
+        .filter((l) => walkable(l.edge))
+        .map((l) => l.edge.target);
+
+    // DFS forest: back edges.
+    const roots: string[] = [];
+    if (origin) roots.push(origin.id);
+    for (const node of firstNodes) {
+      if (node !== origin && !isEndSink(node, origin)) roots.push(node.id);
     }
+    const backEdges = new Set<Edge>();
+    /** The nodes a DFS tree starts at: the origin, then each node no
+     *  earlier tree reaches (file order). */
+    const treeRoots: string[] = [];
+    {
+      const state = new Map<string, 1 | 2>(); // 1: on stack, 2: done
+      for (const root of roots) {
+        if (state.has(root)) continue;
+        treeRoots.push(root);
+        state.set(root, 1);
+        const stack: Array<{ v: string; lanes: LaneEdge[]; i: number }> = [
+          { v: root, lanes: lanesOf(root), i: 0 },
+        ];
+        while (stack.length > 0) {
+          const top = stack[stack.length - 1];
+          if (top.i < top.lanes.length) {
+            const edge = top.lanes[top.i++].edge;
+            if (!walkable(edge)) continue;
+            const st = state.get(edge.target);
+            if (st === 1) backEdges.add(edge);
+            else if (st === undefined) {
+              state.set(edge.target, 1);
+              stack.push({
+                v: edge.target,
+                lanes: lanesOf(edge.target),
+                i: 0,
+              });
+            }
+          } else {
+            state.set(top.v, 2);
+            stack.pop();
+          }
+        }
+      }
+    }
+
+    // Dominators: reducible loops.
+    const idom = immediateDominators(ENTRY, (v) =>
+      v === ENTRY ? treeRoots : targetsOf(v),
+    );
+    const dominates = (x: string, y: string): boolean => {
+      for (let v: string | undefined = y; v !== undefined;) {
+        if (v === x) return true;
+        const up = idom.get(v);
+        if (up === undefined || up === v) return false;
+        v = up;
+      }
+      return false;
+    };
+    const loops = new Map<string, LoopInfo>();
+    const loopBackEdges = new Set<Edge>();
+    const preds = new Map<string, string[]>();
+    for (const node of firstNodes) {
+      for (const t of targetsOf(node.id)) {
+        const list = preds.get(t);
+        if (list) list.push(node.id);
+        else preds.set(t, [node.id]);
+      }
+    }
+    // File order, so a header's back edges are listed as the file has them.
+    for (const edge of def.edges) {
+      if (!backEdges.has(edge) || !dominates(edge.target, edge.source)) {
+        continue;
+      }
+      loopBackEdges.add(edge);
+      const header = edge.target;
+      let info = loops.get(header);
+      if (!info) {
+        info = { body: new Set([header]), backEdges: [] };
+        loops.set(header, info);
+      }
+      info.backEdges.push(edge);
+      // The natural loop: everything that reaches the latch without the
+      // header.
+      const work = [edge.source];
+      while (work.length > 0) {
+        const v = work.pop()!;
+        if (info.body.has(v)) continue;
+        info.body.add(v);
+        for (const p of preds.get(v) ?? []) work.push(p);
+      }
+    }
+    return { backEdges, loops, loopBackEdges };
+  };
+
+  // A loop edge is structured when it is the one back edge of a natural
+  // loop and its source's ordinary next edge (the way out) leaves that loop.
+  // The others stay links; without them the loops are found again.
+  let accepted = new Map(candidates);
+  let found = findLoops(accepted);
+  for (;;) {
+    const kept = new Map<string, Edge>();
+    for (const [source, edge] of accepted) {
+      const info = found.loops.get(edge.target);
+      const exit = liveLanes(source)[0]?.edge;
+      if (
+        found.loopBackEdges.has(edge) &&
+        info?.backEdges.length === 1 &&
+        !(exit && walkable(exit) && info.body.has(exit.target))
+      ) {
+        kept.set(source, edge);
+      }
+    }
+    if (kept.size === accepted.size) break;
+    accepted = kept;
+    found = findLoops(accepted);
   }
-  // File order, so a header's back edges are listed as the file has them.
-  for (const edge of def.edges) {
-    if (!backEdges.has(edge) || !dominates(edge.target, edge.source)) continue;
-    loopBackEdges.add(edge);
-    const header = edge.target;
-    let info = loops.get(header);
-    if (!info) {
-      info = { body: new Set([header]), backEdges: [] };
-      loops.set(header, info);
-    }
-    info.backEdges.push(edge);
-    // The natural loop: everything that reaches the latch without the header.
-    const work = [edge.source];
-    while (work.length > 0) {
-      const v = work.pop()!;
-      if (info.body.has(v)) continue;
-      info.body.add(v);
-      for (const p of preds.get(v) ?? []) work.push(p);
-    }
-  }
+  const { backEdges, loops, loopBackEdges } = found;
+  /** The structured loop edges, by source and by header. */
+  const latchOf = accepted;
+  const boundedAt = new Map<string, Edge>();
+  for (const edge of accepted.values()) boundedAt.set(edge.target, edge);
 
   // --- Post-dominators on the forward graph -------------------------------
   // Back edges removed: a loop's back edge goes to its header's latch, any
@@ -556,7 +669,11 @@ export function recognizeBlockTree(def: Def): BlockTree {
     if (succ.length === 0) succ.push(EXIT);
     forward.set(node.id, succ);
   }
-  for (const header of loops.keys()) forward.set(LATCH + header, [EXIT]);
+  // A bounded loop's way back is its loop edge, not a lane: it has no latch
+  // node, and its source goes on along its ordinary edge.
+  for (const header of loops.keys()) {
+    if (!boundedAt.has(header)) forward.set(LATCH + header, [EXIT]);
+  }
   const reversePreds = new Map<string, string[]>();
   for (const [v, succ] of forward) {
     for (const w of succ) {
@@ -583,11 +700,17 @@ export function recognizeBlockTree(def: Def): BlockTree {
     drawnEdges.set(edge.id, { source: edge.source, target: edge.target });
 
   // Links no walk follows: dangling edges, edges out of an END.
+  // Loop edges (schema 1.10) the tree does not structure are kept as they
+  // are.
+  const structuredLoopEdges = new Set(latchOf.values());
   for (const edge of def.edges) {
     const source = nodesById.get(edge.source);
     const target = nodesById.get(edge.target);
     if (!source || !target) links.push({ edge, role: "dangling" });
-    else if (source !== origin && isTerminal(source)) {
+    else if (isLoopEdge(edge)) {
+      if (!structuredLoopEdges.has(edge))
+        links.push({ edge, role: "loopEdge" });
+    } else if (source !== origin && isTerminal(source)) {
       links.push({ edge, role: "outOfEnd" });
     }
   }
@@ -602,11 +725,6 @@ export function recognizeBlockTree(def: Def): BlockTree {
       if (laneOf.has(edge) || links.some((l) => l.edge === edge)) continue;
       links.push({ edge, role: "timeoutDead" });
     }
-  }
-
-  // Loop edges (schema 1.10) are in no lane: kept as they are.
-  for (const edges of program.loopEdges.values()) {
-    for (const edge of edges) links.push({ edge, role: "loopEdge" });
   }
 
   type Entry = { edge: Edge } | { node: string };
@@ -663,6 +781,50 @@ export function recognizeBlockTree(def: Def): BlockTree {
 
       // A loop header seen for the first time: the loop is one block.
       const loop = loops.get(id);
+      const bounded = boundedAt.get(id);
+      if (loop && bounded && !inLoop.has(id)) {
+        // A bounded loop (a loop edge): the body runs to the loop edge's
+        // source, which goes on along its ordinary edge once a bound fires.
+        inLoop.add(id);
+        const bodyStop = new Set(stop);
+        bodyStop.add(id);
+        const body = walkSeq(
+          `${path}/${index}/body`,
+          edge ? { edge } : { node: id },
+          bodyStop,
+          loop.body,
+          id,
+        );
+        if (!drawnEdges.has(bounded.id)) {
+          // Defensive: the walk never reached the latch. Keep the edge.
+          links.push({ edge: bounded, role: "loopEdge" });
+        }
+        blocks.push({
+          kind: "loop",
+          headerId: id,
+          body,
+          backEdgeIds: [bounded.id],
+          loopEdge: {
+            edgeId: bounded.id,
+            loop: (bounded as Edge & { loop?: unknown }).loop,
+          },
+        });
+        const exitEdge = outs.get(bounded.source)?.lanes[0]?.edge;
+        if (!exitEdge) {
+          const dangling = (program.edgesFrom.get(bounded.source) ?? []).find(
+            (e) => !nodesById.has(e.target),
+          );
+          return done(
+            dangling
+              ? { kind: "stop", reason: "dangling", edgeId: dangling.id }
+              : { kind: "stop", reason: "noEdge" },
+          );
+        }
+        edge = exitEdge;
+        id = exitEdge.target;
+        header = null;
+        continue;
+      }
       if (loop && !inLoop.has(id)) {
         inLoop.add(id);
         const outside = (t: string) => !loop.body.has(t);
@@ -696,6 +858,7 @@ export function recognizeBlockTree(def: Def): BlockTree {
           headerId: id,
           body,
           backEdgeIds: loop.backEdges.map((e) => e.id),
+          loopEdge: null,
         });
         if (firstExit === null) {
           return done({ kind: "stop", reason: "blockEnds" });
@@ -776,6 +939,16 @@ export function recognizeBlockTree(def: Def): BlockTree {
         blocks.push({ kind: "step", node, edgeIn: edge?.id ?? null });
         if (isTerminal(node)) {
           return done({ kind: "stop", reason: "terminalStep" });
+        }
+        // The latch of a bounded loop: back to its header by the loop edge.
+        const latch = latchOf.get(id);
+        if (latch && stop.has(latch.target) && inLoop.has(latch.target)) {
+          draw(latch);
+          return done({
+            kind: "fallthrough",
+            to: latch.target,
+            edgeId: latch.id,
+          });
         }
       }
       if (out.lanes.length === 1) {
@@ -980,11 +1153,29 @@ export function assertFirstEdgeWins(
   }
 }
 
+/** The loop edge a bounded loop needs: from its latch to its header. */
+interface LoopReq {
+  source: string;
+  target: string;
+  edgeId: string;
+  loop: unknown;
+}
+
+/** What {@link requiredEdges} found besides the ordinary edges. */
+interface LoopEdges {
+  reqs: LoopReq[];
+  /** Bounded loops that do not have exactly one latch leaving by "next",
+   *  by header id. */
+  problems: string[];
+}
+
 /** The edges `tree` needs, in emit order: chain and lane edges, exits;
- *  `endTarget` names the END an exit to END goes to. */
+ *  `endTarget` names the END an exit to END goes to. The loop edges of
+ *  bounded loops go to `loops` when given. */
 function requiredEdges(
   tree: BlockTree,
   endTarget: (exit: { edgeId: string | null }) => string,
+  loops: LoopEdges = { reqs: [], problems: [] },
 ): Req[] {
   const origin = tree.origin;
   const reqs: Req[] = [];
@@ -994,7 +1185,16 @@ function requiredEdges(
     preferId: string | null;
     live: boolean;
     kind?: "timeout";
+    /** The step it leaves (a chain edge). */
+    node?: ScenarioNode;
   }
+  /** The bounded loops around, innermost last, with the ways back to their
+   *  header met so far. */
+  const bounded: Array<{
+    loop: LoopBlock;
+    latches: Array<{ pending: Pending; edgeId: string | null }>;
+  }> = [];
+  const latchSources = new Set<string>();
   const need = (p: Pending, target: string, fallbackId: string | null) =>
     reqs.push({
       source: p.source,
@@ -1008,8 +1208,55 @@ function requiredEdges(
     let pending: Pending | null = entry;
     for (const block of seq.blocks) {
       if (block.kind === "loop") {
+        if (!block.loopEdge) {
+          emitSeq(block.body, pending);
+          pending = null;
+          continue;
+        }
+        const ctx = {
+          loop: block,
+          latches: [] as Array<{ pending: Pending; edgeId: string | null }>,
+        };
+        bounded.push(ctx);
         emitSeq(block.body, pending);
-        pending = null;
+        bounded.pop();
+        // The way back drawn with the loop edge is the latch; any other way
+        // back to the header (a lane that never runs, drawn falling through)
+        // is an ordinary edge. Without one, a single way back is the latch.
+        const loopEdgeId = block.loopEdge.edgeId;
+        const own = ctx.latches.filter((l) => l.edgeId === loopEdgeId);
+        const chosen =
+          own.length === 1
+            ? own[0]
+            : own.length === 0 && ctx.latches.length === 1
+              ? ctx.latches[0]
+              : undefined;
+        for (const l of ctx.latches) {
+          if (l !== chosen) need(l.pending, block.headerId, l.edgeId);
+        }
+        const latch = chosen?.pending;
+        const node = latch?.node;
+        if (
+          !latch ||
+          !node ||
+          latch.handle !== undefined ||
+          connectionRule(node.type).out !== "next" ||
+          isTerminal(node) ||
+          latchSources.has(node.id)
+        ) {
+          loops.problems.push(block.headerId);
+          pending = null;
+          continue;
+        }
+        latchSources.add(node.id);
+        loops.reqs.push({
+          source: node.id,
+          target: block.headerId,
+          edgeId: block.loopEdge.edgeId,
+          loop: block.loopEdge.loop,
+        });
+        // Once a bound fires the latch goes on along its ordinary edge.
+        pending = { ...latch, preferId: null, live: true };
         continue;
       }
       if (pending) need(pending, block.node.id, block.edgeIn);
@@ -1021,6 +1268,7 @@ function requiredEdges(
               handle: undefined,
               preferId: null,
               live: true,
+              node: block.node,
             };
         continue;
       }
@@ -1042,7 +1290,12 @@ function requiredEdges(
     if (exit.kind === "end") need(pending, endTarget(exit), exit.edgeId);
     else if (exit.kind === "link") need(pending, exit.target, exit.edgeId);
     else if (exit.kind === "fallthrough") {
-      need(pending, exit.to, exit.edgeId ?? null);
+      // Back to the header of a bounded loop around: its loop edge.
+      const ctx = [...bounded]
+        .reverse()
+        .find((b) => b.loop.headerId === exit.to);
+      if (ctx) ctx.latches.push({ pending, edgeId: exit.edgeId ?? null });
+      else need(pending, exit.to, exit.edgeId ?? null);
     }
   };
   const rootFork = tree.root.blocks[0];
@@ -1086,7 +1339,13 @@ export function rebuildFromTree<D extends Def>(def: D, tree: BlockTree): D {
     return newEnd.id;
   };
 
-  const reqs = requiredEdges(tree, endTarget);
+  const loopEdges: LoopEdges = { reqs: [], problems: [] };
+  const reqs = requiredEdges(tree, endTarget, loopEdges);
+  if (loopEdges.problems.length > 0) {
+    throw new Error(
+      `bounded loop at ${loopEdges.problems[0]}: no single latch leaving by "next"`,
+    );
+  }
 
   // --- Nodes ----------------------------------------------------------------
   const keptIds = new Set<string>(inTree.keys());
@@ -1145,10 +1404,43 @@ export function rebuildFromTree<D extends Def>(def: D, tree: BlockTree): D {
     used[i] = true;
     reqEdge[r] = { index: i };
   };
+  // Loop edges of bounded loops: by id. A plain back edge whose loop got
+  // bounds becomes the loop edge (kind and `loop` set, the rest kept).
+  const freshLoops: Edge[] = [];
+  for (const lr of loopEdges.reqs) {
+    const i = old.findIndex((e, k) => !used[k] && e.id === lr.edgeId);
+    if (i === -1) {
+      freshLoops.push({
+        id: lr.edgeId,
+        source: lr.source,
+        target: lr.target,
+        kind: "loop",
+        ...(lr.loop !== undefined ? { loop: lr.loop } : {}),
+      } as Edge);
+      continue;
+    }
+    used[i] = true;
+    const e = old[i] as Edge & { kind?: unknown; loop?: unknown };
+    let next: Edge & { kind?: unknown; loop?: unknown } = e;
+    if (e.source !== lr.source || e.target !== lr.target) {
+      next = { ...next, source: lr.source, target: lr.target };
+    }
+    if (e.kind !== "loop") next = { ...next, kind: "loop" };
+    if (e.loop !== lr.loop) {
+      if (lr.loop === undefined) {
+        const { loop: _dropped, ...rest } = next;
+        next = rest;
+      } else next = { ...next, loop: lr.loop };
+    }
+    assigned[i] = next;
+  }
+  // An ordinary edge is never matched to a loop edge (nor the other way).
   const pass = (match: (req: Req, e: Edge) => boolean) => {
     reqs.forEach((req, r) => {
       if (reqEdge[r]) return;
-      const i = old.findIndex((e, k) => !used[k] && match(req, e));
+      const i = old.findIndex(
+        (e, k) => !used[k] && !isLoopEdge(e) && match(req, e),
+      );
       if (i !== -1) take(r, i);
     });
   };
@@ -1190,7 +1482,12 @@ export function rebuildFromTree<D extends Def>(def: D, tree: BlockTree): D {
     assigned[hit.index] = next;
   });
   for (const e of assigned) if (e) outIds.add(e.id);
+  for (const e of freshLoops) outIds.add(e.id);
   const oldIds = new Set(old.map((e) => e.id));
+  /** Ids of loop edges no loop keeps: never reused by an ordinary edge. */
+  const droppedLoopIds = new Set(
+    old.filter((e, k) => !used[k] && isLoopEdge(e)).map((e) => e.id),
+  );
   const fresh: Array<{ edge: Edge; slot: number | null; req: number }> = [];
   const typeOf = (id: string) => inTree.get(id)?.type ?? oldById.get(id)?.type;
   reqs.forEach((req, r) => {
@@ -1198,6 +1495,7 @@ export function rebuildFromTree<D extends Def>(def: D, tree: BlockTree): D {
     const id =
       req.preferId !== null &&
       !outIds.has(req.preferId) &&
+      !droppedLoopIds.has(req.preferId) &&
       (!oldIds.has(req.preferId) ||
         old.every((e, k) => e.id !== req.preferId || !used[k]))
         ? req.preferId
@@ -1221,7 +1519,9 @@ export function rebuildFromTree<D extends Def>(def: D, tree: BlockTree): D {
       ...(req.kind ? { kind: req.kind } : {}),
     } as Edge;
     // A new edge takes the slot of the old edge it replaces (same id).
-    const slot = old.findIndex((e, k) => e.id === req.preferId && !used[k]);
+    const slot = droppedLoopIds.has(req.preferId ?? "")
+      ? -1
+      : old.findIndex((e, k) => e.id === req.preferId && !used[k]);
     fresh.push({ edge, slot: slot === -1 ? null : slot, req: r });
   });
   const edges: Edge[] = [];
@@ -1230,6 +1530,7 @@ export function rebuildFromTree<D extends Def>(def: D, tree: BlockTree): D {
     for (const f of fresh) if (f.slot === i) edges.push(f.edge);
   });
   for (const f of fresh) if (f.slot === null) edges.push(f.edge);
+  edges.push(...freshLoops);
 
   const result = {
     ...def,
@@ -1259,7 +1560,49 @@ export function rebuildFromTree<D extends Def>(def: D, tree: BlockTree): D {
     });
   });
   assertFirstEdgeWins(result, structural);
+  assertLoopEdgesFollowed(result, loopEdges.reqs);
   return result;
+}
+
+/** A bounded loop's latch already has an earlier loop edge (one the tree
+ *  keeps as a link): the executor would follow that one. */
+class LoopEdgeNotFollowed extends Error {}
+
+/** Throws unless each bounded loop's edge is the one its latch follows
+ *  (`loopStep`: the first loop edge to an existing node). */
+function assertLoopEdgesFollowed(def: Def, reqs: readonly LoopReq[]): void {
+  if (reqs.length === 0) return;
+  const program = lowerScenario<ScenarioNode, Edge>(def);
+  for (const r of reqs) {
+    const node = program.nodesById.get(r.source);
+    const step = node ? loopStep(program, node) : null;
+    if (step?.edge.id !== r.edgeId) {
+      throw new LoopEdgeNotFollowed(
+        `loop edge ${r.edgeId}: ${r.source} follows ${step?.edge.id ?? "none"}`,
+      );
+    }
+  }
+}
+
+/** The header of a bounded loop in `tree` that does not have exactly one
+ *  latch (a step leaving by "next"), or null when every one has. */
+export function boundedLoopProblem(tree: BlockTree): string | null {
+  const loops: LoopEdges = { reqs: [], problems: [] };
+  requiredEdges(tree, () => "", loops);
+  return loops.problems[0] ?? null;
+}
+
+/** Rebuilds `t` (an edited clone), or returns `def` unchanged when the edit
+ *  left a bounded loop without its single latch. */
+function commit<D extends Def>(def: D, t: BlockTree): D {
+  if (boundedLoopProblem(t) !== null) return def;
+  try {
+    return rebuildFromTree(def, t);
+  } catch (error) {
+    // The latch has another loop edge first: refused, not a bug.
+    if (error instanceof LoopEdgeNotFollowed) return def;
+    throw error;
+  }
 }
 
 /**
@@ -1436,6 +1779,8 @@ function slotReachable(seq: Seq, index: number): boolean {
   if (index === 0) return true;
   const prev = seq.blocks[index - 1];
   if (prev.kind === "step") return !isTerminal(prev.node);
+  // A bounded loop goes on after its last round.
+  if (prev.kind === "loop" && prev.loopEdge) return true;
   const at = nodeAtSlot(seq, index);
   return at !== null && fallsThroughTo(prev, at);
 }
@@ -1478,7 +1823,9 @@ function insertBlockAt(
     next.edgeIn = null;
   } else if (!next && seq.exit.kind !== "stop" && seq.blocks.length > 0) {
     const prev = seq.blocks[index - 1];
-    if (prev.kind === "step") {
+    // A step, or a bounded loop (its latch's edge on): that edge now enters
+    // the new block.
+    if (prev.kind === "step" || (prev.kind === "loop" && prev.loopEdge)) {
       block.edgeIn = seq.exit.edgeId ?? null;
       if (seq.exit.kind === "link") {
         seq.exit = { ...seq.exit, edgeId: crypto.randomUUID() };
@@ -1504,7 +1851,7 @@ export function insertStep(
     node: createDefaultNode(type),
     edgeIn: null,
   });
-  return rebuildFromTree(def, t);
+  return commit(def, t);
 }
 
 /** Where a run goes after the step at `index` of `seq` once that step
@@ -1615,7 +1962,7 @@ export function removeStep(
   }
   const t = cloneTree(tree);
   applyRemoveStep(t, nodeId);
-  return rebuildFromTree(def, t);
+  return commit(def, t);
 }
 
 /** {@link removeStep} on `t` (a clone), without the checks. */
@@ -1659,10 +2006,15 @@ export function moveStep(
   if (from === to) return def;
   if (!canMove(tree, path, from, to).ok) return def;
   const t = cloneTree(tree);
+  applyMoveStep(t, path, from, to);
+  return commit(def, t);
+}
+
+/** {@link moveStep} on `t` (a clone), without the checks. */
+function applyMoveStep(t: BlockTree, path: SeqPath, from: number, to: number) {
   const seq = seqAt(t, path)!;
   const block = removeStepBlockAt(t, seq, from, true);
   insertBlockAt(t, seq, to, { kind: "step", node: block.node, edgeIn: null });
-  return rebuildFromTree(def, t);
 }
 
 function newLaneHandle(fork: ScenarioNode, lanes: readonly Lane[]) {
@@ -1767,7 +2119,7 @@ export function addLane(
       ],
       exit: { kind: "stop", reason: "blockEnds" },
     };
-    return rebuildFromTree(def, t);
+    return commit(def, t);
   }
   if (!found) return def;
   const { seq, index } = found;
@@ -1841,7 +2193,7 @@ export function addLane(
       exit,
     },
   });
-  return rebuildFromTree(def, t);
+  return commit(def, t);
 }
 
 /** Removes lane `laneIndex` of the fork of `nodeId` and every step in it.
@@ -1862,7 +2214,7 @@ export function removeLane(
   }
   const t = cloneTree(tree);
   applyRemoveLane(t, nodeId, laneIndex);
-  return rebuildFromTree(def, t);
+  return commit(def, t);
 }
 
 /** {@link removeLane} on `t` (a clone), without the checks. */
@@ -1941,13 +2293,17 @@ export function insertForkBlock(
   });
   insertBlockAt(t, seq, index, fork);
   if (at === null) seq.exit = { kind: "stop", reason: "blockEnds" };
-  return rebuildFromTree(def, t);
+  return commit(def, t);
 }
 
 /**
  * Makes blocks `from`..`to` of the sequence at `path` a loop: the last of
- * them (a step) goes back to the first. Only at the end of a sequence (the
- * steps after it would never run), and not around an existing loop header.
+ * them (a step) goes back to the first. At the end of a sequence that ends
+ * (END, a jump, nothing) the loop is a plain back edge and repeats until the
+ * run stops, as before. Anywhere else (steps follow, or the sequence goes on
+ * to a merge) it is a loop edge with {@link DEFAULT_LOOP_BOUNDS}, so what
+ * follows still runs; its last step must then leave by "next". Never around
+ * an existing loop header.
  */
 export function wrapInLoop(
   def: ScenarioDefinition,
@@ -1959,7 +2315,16 @@ export function wrapInLoop(
   if (!canWrapInLoop(tree, path, from, to).ok) return def;
   const t = cloneTree(tree);
   applyWrapInLoop(seqAt(t, path)!, from, to);
-  return rebuildFromTree(def, t);
+  return commit(def, t);
+}
+
+/** The bounds a loop made in the middle of a sequence starts with. */
+export const DEFAULT_LOOP_BOUNDS: Readonly<{ times: number }> = { times: 3 };
+
+/** Whether a loop of blocks `from`..`to` of `seq` would have something
+ *  after it (a block, or a fallthrough to a merge): it then needs bounds. */
+function loopNeedsBounds(seq: Seq, to: number): boolean {
+  return to < seq.blocks.length - 1 || seq.exit.kind === "fallthrough";
 }
 
 /** {@link wrapInLoop} on `seq` (of a clone), without the checks. */
@@ -1967,6 +2332,23 @@ function applyWrapInLoop(seq: Seq, from: number, to: number): void {
   const path = seq.path;
   const body = seq.blocks.slice(from, to + 1);
   const header = firstNodeOf(body[0]).id;
+  if (loopNeedsBounds(seq, to)) {
+    // A loop edge: the last step keeps its ordinary edge to what follows.
+    const edgeId = crypto.randomUUID();
+    seq.blocks.splice(from, to - from + 1, {
+      kind: "loop",
+      headerId: header,
+      body: {
+        path: `${path}/${from}/body`,
+        blocks: body,
+        exit: { kind: "fallthrough", to: header, edgeId },
+      },
+      backEdgeIds: [edgeId],
+      loopEdge: { edgeId, loop: { ...DEFAULT_LOOP_BOUNDS } },
+    });
+    repath(seq);
+    return;
+  }
   const backEdgeId =
     seq.exit.kind === "stop" ? crypto.randomUUID() : (seq.exit.edgeId ?? null);
   const loop: LoopBlock = {
@@ -1978,6 +2360,7 @@ function applyWrapInLoop(seq: Seq, from: number, to: number): void {
       exit: { kind: "fallthrough", to: header, edgeId: backEdgeId },
     },
     backEdgeIds: backEdgeId ? [backEdgeId] : [],
+    loopEdge: null,
   };
   seq.blocks.splice(from, to - from + 1, loop);
   seq.exit = { kind: "stop", reason: "blockEnds" };
@@ -1986,9 +2369,11 @@ function applyWrapInLoop(seq: Seq, from: number, to: number): void {
 
 /**
  * Whether an empty "Repeat" block can go to slot `index` of the sequence at
- * `path`: the repeat never ends, so it closes its sequence (nothing may come
- * after it, and a sequence that falls through to a merge or a loop header
- * cannot hold it). The check the first step added to it is wrapped by.
+ * `path`. At the end of a sequence that ends it repeats forever; anywhere
+ * else (steps after it, or a fallthrough to a merge) it starts with
+ * {@link DEFAULT_LOOP_BOUNDS} so what follows still runs (see
+ * {@link wrapInLoop}). Not as the first block of a loop (two loops would
+ * share a header). The check the first step added to it is wrapped by.
  */
 export function canInsertLoopAt(
   tree: BlockTree,
@@ -1997,14 +2382,24 @@ export function canInsertLoopAt(
 ): Capability {
   const slot = canInsertAt(tree, path, index);
   if (!slot.ok) return slot;
-  const seq = seqAt(tree, path)!;
-  if (index !== seq.blocks.length || seq.exit.kind === "fallthrough") {
-    return no("scenarios.editor.cannot.loopNotAtEnd");
-  }
   if (index === 0 && loopOfBody(tree, path)) {
     return no("scenarios.editor.cannot.loopHeader");
   }
   return OK;
+}
+
+/** Whether the Repeat block at slot `index` of the sequence at `path` gets
+ *  bounds ({@link DEFAULT_LOOP_BOUNDS}): something follows it. Its first
+ *  step must then leave by "next" (not a switch or choice). */
+export function newLoopIsBounded(
+  tree: BlockTree,
+  path: SeqPath,
+  index: number,
+): boolean {
+  const seq = seqAt(tree, path);
+  return (
+    !!seq && (index < seq.blocks.length || seq.exit.kind === "fallthrough")
+  );
 }
 
 /**
@@ -2030,7 +2425,7 @@ export function insertStepIntoNewLoop(
   });
   if (!canWrapInLoop(t, path, index, index).ok) return def;
   applyWrapInLoop(seq, index, index);
-  return rebuildFromTree(def, t);
+  return commit(def, t);
 }
 
 /** Takes the step `nodeId` out of where it is and puts it at slot `index`
@@ -2095,6 +2490,9 @@ function simulateMoveTo(
     applyWrapInLoop(target, at, at);
   }
   [t.root, ...t.detached].forEach(repath);
+  if (boundedLoopProblem(t) !== null) {
+    return { reason: "scenarios.editor.cannot.breaksLoopBounds" };
+  }
   return { t, target, at };
 }
 
@@ -2129,7 +2527,7 @@ export function moveStepTo(
 ): ScenarioDefinition {
   const out = simulateMoveTo(tree, nodeId, path, index, loop);
   if ("reason" in out) return def;
-  const next = rebuildFromTree(def, out.t);
+  const next = commit(def, out.t);
   // Safety net: the file must read back with the step where it was dropped.
   const back = recognizeBlockTree(next);
   const place = back.nodePath.get(nodeId);
@@ -2232,6 +2630,13 @@ function repath(seq: Seq): void {
   });
 }
 
+/** The edge a block is entered by (a loop: its first block's). */
+function edgeInOf(block: Block): string | null {
+  if (block.kind !== "loop") return block.edgeIn;
+  const first = block.body.blocks[0];
+  return first ? edgeInOf(first) : null;
+}
+
 /** Sets the edge a block is entered by (a loop: its first block's). */
 function setEdgeIn(block: Block, edgeId: string): void {
   if (block.kind === "loop") {
@@ -2259,7 +2664,7 @@ export function unwrapLoop(
   }
   const t = cloneTree(tree);
   applyUnwrapLoop(t, nodeId);
-  return rebuildFromTree(def, t);
+  return commit(def, t);
 }
 
 /** {@link unwrapLoop} on `t` (a clone), without the checks. */
@@ -2267,8 +2672,20 @@ function applyUnwrapLoop(t: BlockTree, nodeId: string): void {
   const { parent, index, loop } = loopToUnwrap(t, nodeId)!;
   const next = parent.blocks[index + 1];
   const after = parent.exit;
+  // A bounded loop's latch goes on along its ordinary edge (the edge into
+  // what follows the loop), not along its loop edge, which goes.
+  const exitEdgeId = !loop.loopEdge
+    ? null
+    : next
+      ? edgeInOf(next)
+      : after.kind !== "stop"
+        ? (after.edgeId ?? null)
+        : null;
   const goOn = (old: { edgeId?: string | null }): SeqExit => {
-    const edgeId = old.edgeId ?? null;
+    const edgeId =
+      loop.loopEdge && old.edgeId === loop.loopEdge.edgeId
+        ? exitEdgeId
+        : (old.edgeId ?? null);
     if (next) return { kind: "fallthrough", to: firstNodeOf(next).id, edgeId };
     if (after.kind === "fallthrough") {
       return { kind: "fallthrough", to: after.to, edgeId };
@@ -2284,6 +2701,8 @@ function applyUnwrapLoop(t: BlockTree, nodeId: string): void {
     if (after.kind === "end" || after.reason === "blockEnds") {
       return { kind: "end", edgeId };
     }
+    // A bounded loop whose last step had no edge on: its branch ends.
+    if (loop.loopEdge) return { kind: "stop", reason: "noEdge" };
     throw new Error("unwrapLoop: the sequence around the loop has no ending");
   };
   const body = loop.body;
@@ -2346,7 +2765,7 @@ export function setLink(
     target === null
       ? { kind: "end", edgeId }
       : { kind: "link", target, edgeId: edgeId ?? crypto.randomUUID() };
-  return rebuildFromTree(def, t);
+  return commit(def, t);
 }
 
 /** Sets the `sourceHandle` of lane `laneIndex` of the fork of `nodeId`. A
@@ -2387,7 +2806,7 @@ export function setLaneHandle(
     handle,
     fork.lanes.filter((l) => l !== lane),
   );
-  return rebuildFromTree(def, t);
+  return commit(def, t);
 }
 
 /**
@@ -2543,9 +2962,6 @@ export function canWrapInLoop(
   if (!seq || from < 0 || to < from || to >= seq.blocks.length) {
     return no("scenarios.editor.cannot.notInTree");
   }
-  if (to !== seq.blocks.length - 1 || seq.exit.kind === "fallthrough") {
-    return no("scenarios.editor.cannot.loopNotAtEnd");
-  }
   const first = seq.blocks[from];
   const last = seq.blocks[to];
   if (first.kind === "loop" || (from === 0 && loopOfBody(tree, path))) {
@@ -2562,7 +2978,155 @@ export function canWrapInLoop(
   ) {
     return no("scenarios.editor.cannot.startNode");
   }
+  if (loopNeedsBounds(seq, to)) {
+    // A bounded loop is checked after its last step, which then goes on
+    // along its ordinary edge: a switch / choice cannot.
+    if (connectionRule(last.node.type).out !== "next") {
+      return no("scenarios.editor.cannot.loopNeedsNextStep");
+    }
+    if (
+      breaksLoopBounds(tree, (t) => applyWrapInLoop(seqAt(t, path)!, from, to))
+    ) {
+      return no("scenarios.editor.cannot.breaksLoopBounds");
+    }
+  }
   return OK;
+}
+
+/** Whether `edit` (applied to a clone of `tree`) leaves a bounded loop
+ *  without its single latch. */
+function breaksLoopBounds(
+  tree: BlockTree,
+  edit: (t: BlockTree) => void,
+): boolean {
+  const t = cloneTree(tree);
+  edit(t);
+  return boundedLoopProblem(t) !== null;
+}
+
+/** Where the loop whose header is `headerId` stands: its sequence and index. */
+function locateLoop(
+  tree: BlockTree,
+  headerId: string,
+): { seq: Seq; index: number; loop: LoopBlock } | null {
+  for (const seq of allSeqs(tree)) {
+    const index = seq.blocks.findIndex(
+      (b) => b.kind === "loop" && b.headerId === headerId,
+    );
+    if (index !== -1) {
+      return { seq, index, loop: seq.blocks[index] as LoopBlock };
+    }
+  }
+  return null;
+}
+
+/** What a loop's bounds are set to: any subset; none at all repeats until
+ *  the run stops. */
+export interface LoopBoundsInput {
+  times?: number;
+  forSeconds?: number;
+  until?: { value: unknown; cases: unknown[] };
+}
+
+/**
+ * Whether the loop whose header is `headerId` can take `bounds`. A loop
+ * with something after it (a block, or a fallthrough to a merge) must keep
+ * at least one bound (`unboundedMidLane`): without one the steps after it
+ * would never run. A plain loop (a back edge) gets bounds by turning its one
+ * back edge into a loop edge; with several back edges it cannot
+ * (`loopSeveralBackEdges`), nor when its back edge leaves a switch / choice.
+ */
+export function canSetLoopBounds(
+  tree: BlockTree,
+  headerId: string,
+  bounds: LoopBoundsInput | null,
+): Capability {
+  const found = locateLoop(tree, headerId);
+  if (!found) return no("scenarios.editor.cannot.notInLoop");
+  const { seq, index, loop } = found;
+  const bounded = hasBounds(bounds);
+  const after =
+    index < seq.blocks.length - 1 ||
+    seq.exit.kind === "fallthrough" ||
+    seq.exit.kind === "link";
+  if (!bounded && after) return no("scenarios.editor.cannot.unboundedMidLane");
+  if (loop.loopEdge || !bounded) return OK;
+  if (loop.backEdgeIds.length !== 1) {
+    return no("scenarios.editor.cannot.loopSeveralBackEdges");
+  }
+  if (breaksLoopBounds(tree, (t) => boundPlainLoop(t, headerId, bounds!))) {
+    return no("scenarios.editor.cannot.loopNeedsNextStep");
+  }
+  return OK;
+}
+
+/** Gives the plain loop `headerId` of `t` (a clone) a loop edge: its back
+ *  edge, with `bounds`. */
+function boundPlainLoop(
+  t: BlockTree,
+  headerId: string,
+  bounds: LoopBoundsInput,
+): void {
+  const { seq, index, loop } = locateLoop(t, headerId)!;
+  loop.loopEdge = { edgeId: loop.backEdgeIds[0], loop: bounds };
+  // Nothing ended the sequence after the loop but the loop itself: now its
+  // last step's branch ends when a bound fires.
+  if (
+    index === seq.blocks.length - 1 &&
+    seq.exit.kind === "stop" &&
+    seq.exit.reason === "blockEnds"
+  ) {
+    seq.exit = { kind: "stop", reason: "noEdge" };
+  }
+}
+
+/** `bounds` as a loop edge's `loop`: only the bounds given; undefined when
+ *  there is none. */
+function loopField(
+  bounds: LoopBoundsInput | null,
+): LoopBoundsInput | undefined {
+  if (!bounds || !hasBounds(bounds)) return undefined;
+  return {
+    ...(bounds.times !== undefined ? { times: bounds.times } : {}),
+    ...(bounds.forSeconds !== undefined
+      ? { forSeconds: bounds.forSeconds }
+      : {}),
+    ...(bounds.until !== undefined ? { until: bounds.until } : {}),
+  };
+}
+
+/**
+ * Sets the bounds of the loop whose header is `headerId` (see
+ * {@link canSetLoopBounds}). A loop edge keeps its id, kind and unknown
+ * fields; only `loop` changes (removed when there are no bounds). A plain
+ * loop's back edge becomes a loop edge. Unknown keys of the old `loop` are
+ * dropped: the editor writes what it shows. `def` unchanged when refused.
+ */
+export function setLoopBounds(
+  def: ScenarioDefinition,
+  tree: BlockTree,
+  headerId: string,
+  bounds: LoopBoundsInput | null,
+): ScenarioDefinition {
+  if (!canSetLoopBounds(tree, headerId, bounds).ok) return def;
+  const found = locateLoop(tree, headerId)!;
+  const loop = loopField(bounds);
+  if (found.loop.loopEdge) {
+    const edgeId = found.loop.loopEdge.edgeId;
+    return {
+      ...def,
+      edges: def.edges.map((e) => {
+        if (e.id !== edgeId) return e;
+        const { loop: _old, ...rest } = e as Edge & { loop?: unknown };
+        return (loop ? { ...rest, loop } : rest) as typeof e;
+      }),
+      updatedAt: new Date().toISOString(),
+    };
+  }
+  if (!loop) return def; // A plain loop already repeats forever.
+  const t = cloneTree(tree);
+  boundPlainLoop(t, headerId, loop);
+  return commit(def, t);
 }
 
 /** Where lane `lanePath` is: its fork (a switch or choice) and the parent
@@ -2629,7 +3193,7 @@ export function setLaneExit(
   } else {
     seq.exit = { kind: "link", target, edgeId };
   }
-  const next = rebuildFromTree(def, t);
+  const next = commit(def, t);
   const edge = next.edges.find((e) => e.id === edgeId);
   if (!edge || edge.target !== target) return def;
   return next;
@@ -2743,6 +3307,23 @@ export function editCapabilities(
   if (selection.kind === "slot") {
     caps.insertStep = canInsertAt(tree, selection.path, selection.index);
     caps.insertForkBlock = caps.insertStep;
+    // A switch / choice as the last block of a bounded loop: its lanes would
+    // each go back to the header, and a loop edge leaves a step only.
+    if (
+      caps.insertForkBlock.ok &&
+      breaksLoopBounds(tree, (t) =>
+        insertBlockAt(t, seqAt(t, selection.path)!, selection.index, {
+          kind: "fork",
+          forkKind: "switch",
+          node: createDefaultNode(ScenarioNodeType.SWITCH),
+          edgeIn: null,
+          lanes: [],
+          merge: null,
+        }),
+      )
+    ) {
+      caps.insertForkBlock = no("scenarios.editor.cannot.breaksLoopBounds");
+    }
     return caps;
   }
   const nodeId = selection.nodeId;
@@ -2810,9 +3391,20 @@ export function editCapabilities(
   } else {
     caps.removeStep = revivesDeadEdge(tree, (t) => applyRemoveStep(t, nodeId))
       ? no("scenarios.editor.cannot.revivesDeadEdge")
-      : OK;
-    caps.moveUp = canMove(tree, seq.path, index, index - 1);
-    caps.moveDown = canMove(tree, seq.path, index, index + 1);
+      : breaksLoopBounds(tree, (t) => applyRemoveStep(t, nodeId))
+        ? no("scenarios.editor.cannot.breaksLoopBounds")
+        : OK;
+    const moveCap = (to: number): Capability => {
+      const cap = canMove(tree, seq.path, index, to);
+      if (!cap.ok) return cap;
+      return breaksLoopBounds(tree, (t) =>
+        applyMoveStep(t, seq.path, index, to),
+      )
+        ? no("scenarios.editor.cannot.breaksLoopBounds")
+        : cap;
+    };
+    caps.moveUp = moveCap(index - 1);
+    caps.moveDown = moveCap(index + 1);
     caps.setLink = isTerminal(block.node)
       ? no("scenarios.editor.cannot.terminalStep")
       : index !== seq.blocks.length - 1
@@ -2858,15 +3450,17 @@ export function editCapabilities(
       caps.removeLane =
         fork.lanes.length <= 1
           ? no("scenarios.editor.cannot.lastLane")
-          : revivesDeadEdge(
-                tree,
-                (t) => applyRemoveLane(t, nodeId, laneIndex),
-                promotes ? lane.edgeId : null,
-              )
-            ? no("scenarios.editor.cannot.revivesDeadEdge")
-            : promotes
-              ? { ok: true, note: "scenarios.editor.note.promotesNextEdge" }
-              : OK;
+          : breaksLoopBounds(tree, (t) => applyRemoveLane(t, nodeId, laneIndex))
+            ? no("scenarios.editor.cannot.breaksLoopBounds")
+            : revivesDeadEdge(
+                  tree,
+                  (t) => applyRemoveLane(t, nodeId, laneIndex),
+                  promotes ? lane.edgeId : null,
+                )
+              ? no("scenarios.editor.cannot.revivesDeadEdge")
+              : promotes
+                ? { ok: true, note: "scenarios.editor.note.promotesNextEdge" }
+                : OK;
       // A running lane's handle moving away would let the next edge with
       // its old handle (an ignored lane) run.
       const shadows = fork.lanes.some(

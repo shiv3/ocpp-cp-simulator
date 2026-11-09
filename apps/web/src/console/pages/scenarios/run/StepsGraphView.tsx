@@ -8,6 +8,7 @@ import {
   Plus,
   Repeat,
   RepeatOff,
+  SlidersHorizontal,
   X,
 } from "lucide-react";
 
@@ -30,6 +31,7 @@ import {
   stepSummary,
 } from "../../../lib/scenarioSteps";
 import { stepNumbers } from "../../../lib/stepTree";
+import { LoopBoundsPanel, LoopBoundsSummary } from "./loopBoundsUi";
 import {
   ZOOM_STEP,
   clampZoom,
@@ -149,6 +151,7 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
     onAddLane,
     onRemoveLane,
     onUnwrapLoop,
+    loopBounds,
     issues,
     executedNodeIds,
   } = props;
@@ -234,6 +237,8 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
   const [hoverId, setHoverId] = React.useState<string | null>(null);
   const [cursor, setCursor] = React.useState<Point | null>(null);
   const [pickNotice, setPickNotice] = React.useState<string | null>(null);
+  /** The loop whose bounds editor is open (its header id). */
+  const [openBounds, setOpenBounds] = React.useState<string | null>(null);
 
   /** What each step of the lane would do as the target of the pick. */
   const loopTargets = (path: SeqPath, index: number) => {
@@ -922,75 +927,119 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
 
             {geometry.loops.map((loop) => {
               const canExit = loop.canExit;
+              const boundsOpen = openBounds === loop.headerId;
               const header = cards.find((c) => c.node.id === loop.headerId);
               const waits = WAIT_TYPES.has(header?.node.type ?? "");
               const unwrapCap =
                 onUnwrapLoop && !drag
                   ? caps?.unwrap.get(loop.headerId)
                   : undefined;
+              // The loop's label (its bounds, for a loop edge), then "Bounds"
+              // and "Stop repeating" right after it (the label truncates
+              // first), all inside the rectangle; the bounds editor opens
+              // below it.
               return (
-                // The loop's label, then "Stop repeating" right after it (the
-                // label truncates first), all inside the rectangle. The label
-                // leaves room after it for a future bound ("×N", "until …").
-                <div
-                  key={`label:${loop.key}`}
-                  className="absolute flex items-center gap-2 whitespace-nowrap text-xs"
-                  style={{
-                    left: loop.label.x,
-                    top: loop.label.y - 1,
-                    maxWidth: loop.rect.x + loop.rect.w - loop.label.x - 6,
-                  }}
-                >
+                <React.Fragment key={`label:${loop.key}`}>
                   <div
-                    data-loop-block=""
-                    data-loop-to={loop.headerId}
-                    aria-label={t("scenarioRun.loopSteps", {
-                      from: loop.from,
-                      to: loop.to,
-                    })}
-                    title={t(
-                      canExit
-                        ? "scenarioRun.loopUntilExit"
-                        : "scenarioRun.loopUntilRunStops",
-                    )}
-                    className="flex min-w-0 items-center gap-1.5 overflow-hidden"
+                    className="absolute flex items-center gap-2 whitespace-nowrap text-xs"
+                    style={{
+                      left: loop.label.x,
+                      top: loop.label.y - 1,
+                      maxWidth: loop.rect.x + loop.rect.w - loop.label.x - 6,
+                    }}
                   >
-                    <Repeat
-                      className="h-3.5 w-3.5 shrink-0 text-cx-purple"
-                      aria-hidden
-                    />
-                    <span className="font-semibold text-cx-purple">
-                      {t(
+                    <div
+                      data-loop-block=""
+                      data-loop-to={loop.headerId}
+                      aria-label={t("scenarioRun.loopSteps", {
+                        from: loop.from,
+                        to: loop.to,
+                      })}
+                      title={t(
                         canExit
-                          ? "scenarioRun.loopRepeat"
-                          : "scenarioRun.loopForever",
+                          ? "scenarioRun.loopUntilExit"
+                          : "scenarioRun.loopUntilRunStops",
                       )}
-                    </span>
-                    {waits && (
-                      <span className="truncate text-cx-muted">
-                        · {t("scenarioRun.loopWaitsAt", { n: loop.from })}
-                      </span>
+                      className="flex min-w-0 items-center gap-1.5 overflow-hidden"
+                    >
+                      <Repeat
+                        className="h-3.5 w-3.5 shrink-0 text-cx-purple"
+                        aria-hidden
+                      />
+                      {loop.loopEdge ? (
+                        <LoopBoundsSummary
+                          loop={loop}
+                          className="truncate font-semibold text-cx-purple"
+                        />
+                      ) : (
+                        <span className="font-semibold text-cx-purple">
+                          {t(
+                            canExit
+                              ? "scenarioRun.loopRepeat"
+                              : "scenarioRun.loopForever",
+                          )}
+                        </span>
+                      )}
+                      {waits && (
+                        <span className="truncate text-cx-muted">
+                          · {t("scenarioRun.loopWaitsAt", { n: loop.from })}
+                        </span>
+                      )}
+                    </div>
+                    {loopBounds && !drag && (
+                      <button
+                        type="button"
+                        data-testid="edit-loop-bounds"
+                        data-loop={loop.headerId}
+                        aria-expanded={boundsOpen}
+                        title={t("scenarioRun.loopBounds.editHint")}
+                        onClick={() =>
+                          setOpenBounds(boundsOpen ? null : loop.headerId)
+                        }
+                        className="z-10 flex h-[18px] shrink-0 items-center gap-1 rounded border border-cx-purple/40 px-1.5 font-medium text-cx-purple hover:bg-cx-purple/15"
+                      >
+                        <SlidersHorizontal
+                          className="h-3.5 w-3.5 shrink-0"
+                          aria-hidden
+                        />
+                        {t("scenarioRun.loopBounds.edit")}
+                      </button>
+                    )}
+                    {unwrapCap && (
+                      <button
+                        type="button"
+                        data-testid="unwrap-loop"
+                        data-loop={loop.headerId}
+                        title={
+                          unwrapCap.ok
+                            ? t("scenarios.editor.unwrapLoopHint")
+                            : t(unwrapCap.reason)
+                        }
+                        disabled={!unwrapCap.ok}
+                        onClick={() => onUnwrapLoop?.(loop.headerId)}
+                        className="z-10 flex h-[18px] shrink-0 items-center gap-1 rounded border border-cx-purple/40 px-1.5 font-medium text-cx-purple hover:bg-cx-purple/15 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        <RepeatOff
+                          className="h-3.5 w-3.5 shrink-0"
+                          aria-hidden
+                        />
+                        {t("scenarios.editor.unwrapLoop")}
+                      </button>
                     )}
                   </div>
-                  {unwrapCap && (
-                    <button
-                      type="button"
-                      data-testid="unwrap-loop"
-                      data-loop={loop.headerId}
-                      title={
-                        unwrapCap.ok
-                          ? t("scenarios.editor.unwrapLoopHint")
-                          : t(unwrapCap.reason)
-                      }
-                      disabled={!unwrapCap.ok}
-                      onClick={() => onUnwrapLoop?.(loop.headerId)}
-                      className="z-10 flex h-[18px] shrink-0 items-center gap-1 rounded border border-cx-purple/40 px-1.5 font-medium text-cx-purple hover:bg-cx-purple/15 disabled:cursor-not-allowed disabled:opacity-40"
+                  {boundsOpen && loopBounds && (
+                    <div
+                      className="absolute z-20 w-[340px]"
+                      style={{ left: loop.label.x, top: loop.label.y + 22 }}
                     >
-                      <RepeatOff className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                      {t("scenarios.editor.unwrapLoop")}
-                    </button>
+                      <LoopBoundsPanel
+                        loop={loop}
+                        editing={loopBounds}
+                        onClose={() => setOpenBounds(null)}
+                      />
+                    </div>
                   )}
-                </div>
+                </React.Fragment>
               );
             })}
 

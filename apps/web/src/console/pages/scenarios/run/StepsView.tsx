@@ -13,6 +13,7 @@ import {
   Repeat,
   RepeatOff,
   Shuffle,
+  SlidersHorizontal,
   Split,
   Timer,
   X,
@@ -34,11 +35,15 @@ import {
   type ForkBlock,
   type ForkKind,
   type Lane,
+  type LoopBlock as LoopBlockModel,
+  newLoopIsBounded,
   type Seq,
   type SeqPath,
   seqAt,
   treeNodes,
 } from "../../../lib/blockTree";
+import { connectionRule } from "@ocpp-cp-simulator/core/scenario/scenarioConnectionRules";
+import type { MessageKey } from "../../../../i18n";
 import { isLiveRunState } from "../../../lib/scenarioRunState";
 import {
   STRUCTURE_TYPE,
@@ -66,6 +71,11 @@ import IssueBadge from "../edit/IssueBadge";
 import AddStepPicker, { type StructureKind } from "../edit/AddStepPicker";
 import { useStepIssues } from "../edit/issueMarkUi";
 import StepTile from "./StepTile";
+import {
+  LoopBoundsPanel,
+  LoopBoundsSummary,
+  type LoopBoundsEditing,
+} from "./loopBoundsUi";
 import {
   CURRENT_RING,
   boxPhase,
@@ -263,6 +273,22 @@ function measureBlocks(path: SeqPath, root: HTMLElement | null): number[] {
     });
 }
 
+/** The step types a Repeat block made in the middle of a lane cannot start
+ *  with: its bounds are checked after the step, which must then go on (not a
+ *  switch / choice, not an End). By type, with the reason. */
+function midLaneLoopRefusals(
+  t: (key: MessageKey) => string,
+): Partial<Record<string, string>> {
+  const out: Partial<Record<string, string>> = {};
+  for (const type of Object.values(ScenarioNodeType)) {
+    const rule = connectionRule(type);
+    if (rule.out !== "next" || type === ScenarioNodeType.END) {
+      out[type] = t("scenarios.editor.cannot.loopNeedsNextStep");
+    }
+  }
+  return out;
+}
+
 /** Steps that wait (a delay or a trigger): a loop starting at one waits
  *  there first on every round. */
 const WAIT_TYPES: ReadonlySet<string> = new Set(WAIT_STEP_TYPES);
@@ -280,11 +306,15 @@ const EXIT_TYPES: ReadonlySet<string> = new Set([
  * a list of boxes), and whose bottom arm says where the run goes back to.
  * The back edge is unconditional, so the loop repeats until the run ends,
  * unless a switch or choice inside picks a handle with no edge (`canExit`):
- * then the top arm says "Repeat", not "Repeat forever".
+ * then the top arm says "Repeat", not "Repeat forever". A loop edge
+ * (schema 1.10) says its bounds instead: "Repeat 3 times / for 2 h / until
+ * … (whichever first)"; the editor's "Bounds" button edits them inline.
  * The arms and the spine are tints over whatever is behind them, so the
  * block reads the same on a page, a card or a panel, in either theme.
  */
 const LoopBlock: React.FC<{
+  /** The loop (its bounds, when it has a loop edge). */
+  loop: LoopBlockModel;
   /** The step the loop goes back to (its first step). */
   target: string;
   /** Box numbers of the first and last repeated step. */
@@ -300,8 +330,11 @@ const LoopBlock: React.FC<{
   blockIndex?: number;
   /** editable: the "Stop repeating" button and whether it applies. */
   unwrap?: { cap: Capability; onClick: () => void };
+  /** editable: the "Bounds" button and its inline editor. */
+  bounds?: LoopBoundsEditing;
   children: React.ReactNode;
 }> = ({
+  loop,
   target,
   from,
   to,
@@ -310,10 +343,12 @@ const LoopBlock: React.FC<{
   active,
   blockIndex,
   unwrap,
+  bounds,
   children,
 }) => {
   const { t } = useTranslation();
   const labelId = React.useId();
+  const [editingBounds, setEditingBounds] = React.useState(false);
   const tint = active ? "bg-cx-purple/20" : "bg-cx-purple/12";
   return (
     <li
@@ -339,12 +374,29 @@ const LoopBlock: React.FC<{
           className="inline-flex items-center gap-1.5 whitespace-nowrap font-semibold text-cx-purple"
         >
           <Repeat className="h-3.5 w-3.5 shrink-0" aria-hidden />
-          {t(canExit ? "scenarioRun.loopRepeat" : "scenarioRun.loopForever")}
+          {loop.loopEdge ? (
+            <LoopBoundsSummary loop={loop} className="whitespace-normal" />
+          ) : (
+            t(canExit ? "scenarioRun.loopRepeat" : "scenarioRun.loopForever")
+          )}
         </span>
         {waitsFirst && (
           <span className="text-cx-muted">
             · {t("scenarioRun.loopWaitsAt", { n: from })}
           </span>
+        )}
+        {bounds && (
+          <button
+            type="button"
+            data-testid="edit-loop-bounds"
+            aria-expanded={editingBounds}
+            title={t("scenarioRun.loopBounds.editHint")}
+            onClick={() => setEditingBounds((open) => !open)}
+            className="ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium text-cx-purple hover:bg-cx-purple/15"
+          >
+            <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden />
+            {t("scenarioRun.loopBounds.edit")}
+          </button>
         )}
         {unwrap && (
           <button
@@ -357,13 +409,25 @@ const LoopBlock: React.FC<{
             }
             disabled={!unwrap.cap.ok}
             onClick={unwrap.onClick}
-            className="ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium text-cx-purple hover:bg-cx-purple/15 disabled:cursor-not-allowed disabled:opacity-40"
+            className={cn(
+              !bounds && "ml-auto",
+              "inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium text-cx-purple hover:bg-cx-purple/15 disabled:cursor-not-allowed disabled:opacity-40",
+            )}
           >
             <RepeatOff className="h-3.5 w-3.5" aria-hidden />
             {t("scenarios.editor.unwrapLoop")}
           </button>
         )}
       </div>
+      {bounds && editingBounds && (
+        <div className={cn("px-2.5 pb-2", tint)}>
+          <LoopBoundsPanel
+            loop={loop}
+            editing={bounds}
+            onClose={() => setEditingBounds(false)}
+          />
+        </div>
+      )}
       <div className="flex">
         <div aria-hidden className={cn("w-3 shrink-0", tint)} />
         <div
@@ -496,7 +560,7 @@ const StepsView: React.FC<StepTreeViewProps> = (props) => {
       const seq = seqAt(tree, pendingLoop.path);
       return (
         seq !== null &&
-        pendingLoop.index === seq.blocks.length &&
+        pendingLoop.index <= seq.blocks.length &&
         canInsertLoopAt(tree, pendingLoop.path, pendingLoop.index).ok
       );
     })();
@@ -812,77 +876,97 @@ const StepsView: React.FC<StepTreeViewProps> = (props) => {
 
   /** The empty Repeat block the user asked for: a C-shaped frame to drop
    *  steps into or add the first step to. Never in the file. */
-  const renderPending = (seq: Seq) => {
-    if (!pending || pending.path !== seq.path) return null;
+  const renderPending = (seq: Seq, index: number) => {
+    if (!pending || pending.path !== seq.path || pending.index !== index) {
+      return null;
+    }
     const hot = crossTarget?.loop === true;
+    // In the middle of a lane the repeat gets a bound (times: 3), and its
+    // step must go on after it: no switch / choice / End.
+    const bounded = newLoopIsBounded(tree, seq.path, index);
+    const typeRefusals = bounded ? midLaneLoopRefusals(t) : undefined;
     return (
-      <div
-        data-pending-loop=""
-        data-drop-pending={seq.path}
-        aria-label={t("scenarioRun.pendingLoop.title")}
-        className="mt-1.5 min-w-0"
-      >
-        <div className="flex min-h-7 items-center gap-1.5 rounded-t-[12px] rounded-br-[12px] bg-cx-purple/12 px-2.5 py-1 text-xs">
-          <Repeat className="h-3.5 w-3.5 shrink-0 text-cx-purple" aria-hidden />
-          <span className="flex-1 whitespace-nowrap font-semibold text-cx-purple">
-            {t("scenarioRun.pendingLoop.title")}
-          </span>
-          <button
-            type="button"
-            aria-label={t("scenarioRun.pendingLoop.remove")}
-            title={t("scenarioRun.pendingLoop.remove")}
-            onClick={() => {
-              setPendingLoop(null);
-              setPendingPicker(false);
-            }}
-            className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-cx-faint hover:bg-cx-rose/10 hover:text-cx-rose"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
+      <li key="pending-loop" data-pending-slot={index} className="list-none">
         <div
-          className={cn(
-            "ml-3 border-l-[10px] border-cx-purple/12 py-2 pl-2",
-            hot && "border-cx-accent/40",
-          )}
+          data-pending-loop=""
+          data-drop-pending={seq.path}
+          aria-label={t("scenarioRun.pendingLoop.title")}
+          className="mt-1.5 min-w-0"
         >
-          <div
-            className={cn(
-              "rounded-[10px] border border-dashed px-3 py-3 text-xs text-cx-muted",
-              hot
-                ? crossCap && !crossCap.ok
-                  ? "border-cx-rose bg-cx-rose/10"
-                  : "border-cx-accent bg-cx-accent/10"
-                : "border-cx-border-strong",
-            )}
-          >
-            <p>{t("scenarioRun.pendingLoop.hint")}</p>
-            <p className="mt-1 text-cx-faint">
-              {t("scenarioRun.pendingLoop.unsaved")}
-            </p>
-          </div>
-          {pendingPicker ? (
-            <div className="mt-1.5">
-              <AddStepPicker
-                onPick={(type) => {
-                  onInsertStepIntoLoop?.(seq.path, pending.index, type);
-                  setPendingPicker(false);
-                  setPendingLoop(null);
-                }}
-                onClose={() => setPendingPicker(false)}
-              />
-            </div>
-          ) : (
+          <div className="flex min-h-7 items-center gap-1.5 rounded-t-[12px] rounded-br-[12px] bg-cx-purple/12 px-2.5 py-1 text-xs">
+            <Repeat
+              className="h-3.5 w-3.5 shrink-0 text-cx-purple"
+              aria-hidden
+            />
+            <span className="flex-1 whitespace-nowrap font-semibold text-cx-purple">
+              {t("scenarioRun.pendingLoop.title")}
+            </span>
             <button
               type="button"
-              onClick={() => setPendingPicker(true)}
-              className="mt-1.5 w-full rounded-[10px] border border-dashed border-cx-border-strong py-2 text-[13px] font-medium text-cx-muted hover:text-cx-fg"
+              aria-label={t("scenarioRun.pendingLoop.remove")}
+              title={t("scenarioRun.pendingLoop.remove")}
+              onClick={() => {
+                setPendingLoop(null);
+                setPendingPicker(false);
+              }}
+              className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-cx-faint hover:bg-cx-rose/10 hover:text-cx-rose"
             >
-              {t("scenarioRun.addStepButton")}
+              <X className="h-3.5 w-3.5" />
             </button>
-          )}
+          </div>
+          <div
+            className={cn(
+              "ml-3 border-l-[10px] border-cx-purple/12 py-2 pl-2",
+              hot && "border-cx-accent/40",
+            )}
+          >
+            <div
+              className={cn(
+                "rounded-[10px] border border-dashed px-3 py-3 text-xs text-cx-muted",
+                hot
+                  ? crossCap && !crossCap.ok
+                    ? "border-cx-rose bg-cx-rose/10"
+                    : "border-cx-accent bg-cx-accent/10"
+                  : "border-cx-border-strong",
+              )}
+            >
+              <p>{t("scenarioRun.pendingLoop.hint")}</p>
+              <p className="mt-1 text-cx-faint">
+                {t("scenarioRun.pendingLoop.unsaved")}
+              </p>
+            </div>
+            {pendingPicker ? (
+              <div className="mt-1.5">
+                <AddStepPicker
+                  typeRefusals={typeRefusals}
+                  onPick={(type) => {
+                    onInsertStepIntoLoop?.(seq.path, pending.index, type);
+                    setPendingPicker(false);
+                    setPendingLoop(null);
+                  }}
+                  onClose={() => setPendingPicker(false)}
+                />
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setPendingPicker(true)}
+                className="mt-1.5 w-full rounded-[10px] border border-dashed border-cx-border-strong py-2 text-[13px] font-medium text-cx-muted hover:text-cx-fg"
+              >
+                {t("scenarioRun.addStepButton")}
+              </button>
+            )}
+            {bounded && (
+              <p
+                data-testid="pending-loop-bounded"
+                className="mt-1.5 text-xs text-cx-muted"
+              >
+                {t("scenarioRun.pendingLoop.bounded")}
+              </p>
+            )}
+          </div>
         </div>
-      </div>
+      </li>
     );
   };
 
@@ -902,6 +986,7 @@ const StepsView: React.FC<StepTreeViewProps> = (props) => {
         >
           {seq.blocks.map((block, i) => (
             <React.Fragment key={blockKey(block)}>
+              {renderPending(seq, i)}
               {crossLine(seq, i)}
               {(i > 0 || seq.path !== "root") && gap(seq, i)}
               {block.kind === "step"
@@ -912,6 +997,7 @@ const StepsView: React.FC<StepTreeViewProps> = (props) => {
             </React.Fragment>
           ))}
           {crossLine(seq, seq.blocks.length)}
+          {renderPending(seq, seq.blocks.length)}
         </ol>
         {empty && editable && (
           <p
@@ -928,9 +1014,10 @@ const StepsView: React.FC<StepTreeViewProps> = (props) => {
             {t("scenarioRun.emptyLaneHint")}
           </p>
         )}
-        {renderPending(seq)}
         {exitNote(seq)}
-        {pending?.path === seq.path ? null : addSlot(seq, laneLabel)}
+        {pending?.path === seq.path && pending.index === seq.blocks.length
+          ? null
+          : addSlot(seq, laneLabel)}
       </>
     );
   };
@@ -955,6 +1042,8 @@ const StepsView: React.FC<StepTreeViewProps> = (props) => {
     return (
       <>
         <LoopBlock
+          loop={loop}
+          bounds={editable ? props.loopBounds : undefined}
           blockIndex={i}
           target={loop.headerId}
           from={from}

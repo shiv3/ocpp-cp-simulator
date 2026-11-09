@@ -9,6 +9,7 @@ import {
   type ScenarioNode,
   ScenarioNodeType,
 } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import { isLoopEdge } from "@ocpp-cp-simulator/core/scenario/scenarioGraph";
 import i18n from "../../i18n";
 import { recognizeBlockTree } from "./blockTree";
 import { isLiveRunState } from "./scenarioRunState";
@@ -104,6 +105,9 @@ function branchName(first: ScenarioNode | undefined, index: number): string {
 export function deriveStepLayout(
   def: Pick<ScenarioDefinition, "nodes" | "edges">,
 ): StepLayout {
+  // A loop edge (schema 1.10) is not an edge of the chain or the fork,
+  // structured or not: this layout cannot show its bounds.
+  if (def.edges.some(isLoopEdge)) return UNSUPPORTED;
   const tree = recognizeBlockTree(def);
   const start = tree.origin;
   if (!start || start.type !== ScenarioNodeType.START) return UNSUPPORTED;
@@ -111,9 +115,6 @@ export function deriveStepLayout(
   const structural = new Set<string>(tree.drawnEdges.keys());
   const placed = new Set<string>([start.id, ...tree.nodePath.keys()]);
   for (const link of tree.links) {
-    // A loop edge (schema 1.10) is not an edge of the chain or the fork:
-    // the run views cannot show its bounds.
-    if (link.role === "loopEdge") return UNSUPPORTED;
     if (link.role === "outOfEnd") {
       // Out of END: never walked. Out of a placed step that ends its
       // branch: the old layout walked on along it; not projectable.

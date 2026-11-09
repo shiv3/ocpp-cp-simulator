@@ -199,6 +199,46 @@ describe("AddStepPicker", () => {
     expect(onPick).not.toHaveBeenCalled();
   });
 
+  it("a refused entry stays focusable; hover or focus shows why in the help pane, and picking it does nothing", async () => {
+    const onPickStructure = vi.fn();
+    await render({
+      onPickStructure,
+      structureRefusals: { loop: "No step before this slot." },
+      typeRefusals: { [ScenarioNodeType.DELAY]: "Not a delay here." },
+    });
+    const repeat = container.querySelector<HTMLButtonElement>(
+      'button[data-step-structure="loop"]',
+    )!;
+    expect(repeat.disabled).toBe(false);
+    expect(repeat.getAttribute("aria-disabled")).toBe("true");
+    expect(repeat.title).toBe("No step before this slot.");
+    await act(async () => {
+      repeat.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    });
+    expect(help().textContent).toContain("Repeats the steps inside it");
+    expect(
+      container.querySelector('[data-testid="step-picker-refusal"]')
+        ?.textContent,
+    ).toBe("No step before this slot.");
+    await act(async () => repeat.click());
+    expect(onPickStructure).not.toHaveBeenCalled();
+
+    // A refused step type, reached with the keyboard.
+    await act(async () => option(ScenarioNodeType.DELAY).focus());
+    expect(
+      container.querySelector('[data-testid="step-picker-refusal"]')
+        ?.textContent,
+    ).toBe("Not a delay here.");
+    await act(async () => option(ScenarioNodeType.DELAY).click());
+    expect(onPick).not.toHaveBeenCalled();
+
+    // An entry that is not refused shows no reason.
+    await act(async () => option(ScenarioNodeType.NOTIFICATION).focus());
+    expect(
+      container.querySelector('[data-testid="step-picker-refusal"]'),
+    ).toBeNull();
+  });
+
   it("still picks a type and closes on Escape", async () => {
     await render();
     await act(async () => option("delay").click());

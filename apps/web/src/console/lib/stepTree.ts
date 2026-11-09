@@ -18,12 +18,15 @@ import {
 
 import { t } from "../../i18n";
 import {
+  loopBlockBounds,
   treeNodes,
   type BlockTree,
   type ForkBlock,
   type Lane,
   type LaneCondition,
   type LinkEdge,
+  type LoopBlock,
+  type LoopBoundsInput,
   type Seq,
 } from "./blockTree";
 
@@ -193,4 +196,107 @@ export function branchCount(tree: BlockTree): number {
   visit(tree.root);
   tree.detached.forEach(visit);
   return count;
+}
+
+/** A number of seconds as `2 h`, `1 h 30 min`, `45 s`. */
+export function formatDuration(seconds: number): string {
+  const total = Math.max(0, Math.round(seconds));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const sec = total % 60;
+  const parts = [
+    h > 0 ? t("scenarioRun.duration.h", { n: h }) : null,
+    m > 0 ? t("scenarioRun.duration.m", { n: m }) : null,
+    sec > 0 || total === 0 ? t("scenarioRun.duration.s", { n: sec }) : null,
+  ];
+  return parts.filter((p) => p !== null).join(" ");
+}
+
+/** What a loop's header says, piece by piece (the views draw the `until`
+ *  cases as chips). */
+export type LoopSummary =
+  | { kind: "forever" }
+  | { kind: "invalid"; problem: string }
+  | {
+      kind: "bounded";
+      /** "3 times", "for 2 h": the bounds other than `until`, in order. */
+      parts: string[];
+      until: { value: string; cases: string[] } | null;
+      /** More than one bound: the first one met exits. */
+      several: boolean;
+    };
+
+/** The summary of `loop`'s bounds: "Repeat 3 times / for 2 h / until
+ *  <value> is <cases> (whichever first)", or "Repeat forever". */
+export function loopSummary(loop: Pick<LoopBlock, "loopEdge">): LoopSummary {
+  const bounds = loopBlockBounds(loop);
+  if (bounds === null) return { kind: "forever" };
+  if ("problem" in bounds) return { kind: "invalid", problem: bounds.problem };
+  const parts: string[] = [];
+  if (bounds.times !== undefined) {
+    parts.push(t("scenarioRun.loopBounds.times", { count: bounds.times }));
+  }
+  if (bounds.forSeconds !== undefined) {
+    parts.push(
+      t("scenarioRun.loopBounds.for", {
+        duration: formatDuration(bounds.forSeconds),
+      }),
+    );
+  }
+  const until = bounds.until
+    ? {
+        value: formatValue(bounds.until.value),
+        cases: bounds.until.cases.map(formatValue),
+      }
+    : null;
+  return {
+    kind: "bounded",
+    parts,
+    until,
+    several: parts.length + (until ? 1 : 0) > 1,
+  };
+}
+
+/** {@link loopSummary} as one line of text (a title, an aria label). */
+export function loopSummaryText(loop: Pick<LoopBlock, "loopEdge">): string {
+  const s = loopSummary(loop);
+  if (s.kind === "forever") return t("scenarioRun.loopForever");
+  if (s.kind === "invalid") {
+    return t("scenarioRun.loopBounds.invalid", { problem: s.problem });
+  }
+  const pieces = [...s.parts];
+  if (s.until) {
+    pieces.push(
+      t("scenarioRun.loopBounds.until", {
+        value: s.until.value,
+        cases: s.until.cases.join(t("scenarioRun.loopBounds.casesOr")),
+      }),
+    );
+  }
+  const text = t("scenarioRun.loopBounds.repeat", {
+    bounds: pieces.join(t("scenarioRun.loopBounds.separator")),
+  });
+  return s.several
+    ? `${text} ${t("scenarioRun.loopBounds.whicheverFirst")}`
+    : text;
+}
+
+/** The loop's bounds as the editor's form edits them (malformed ones:
+ *  none). */
+export function loopBoundsInput(
+  loop: Pick<LoopBlock, "loopEdge">,
+): LoopBoundsInput {
+  const bounds = loopBlockBounds(loop);
+  if (bounds === null || "problem" in bounds) return {};
+  return {
+    ...(bounds.times !== undefined ? { times: bounds.times } : {}),
+    ...(bounds.forSeconds !== undefined
+      ? { forSeconds: bounds.forSeconds }
+      : {}),
+    ...(bounds.until
+      ? {
+          until: { value: bounds.until.value, cases: [...bounds.until.cases] },
+        }
+      : {}),
+  };
 }

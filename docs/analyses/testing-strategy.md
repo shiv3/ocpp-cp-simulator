@@ -194,6 +194,9 @@ already covers all 7) and so would not have caught either defect.
 | [Testcontainers (Java)](../sources/testcontainers-java-readme.md)                            | no (proto)  | A CSMS project can embed the Docker image and assert a scenario verdict; the same RPC sequence is guarded in CI by `harnessScenarioVerdict.bun.test.ts`                                   |
 | Scenario assertions ([Scenario format](../concepts/scenario-format.md#assertions--verdicts)) | at run time | Declarative pass/fail over the OCPP transcript of any scenario run, with conformance vs compatibility axes                                                                                |
 
+How far scenarios reach into the OCA Charging Station test cases (424 for OCPP 2.0.1) is counted in
+[OCPP scenario coverage](ocpp-scenario-coverage.md).
+
 The `analyze` test matrix (`apps/cli/src/analyze/__tests__/`) is the gate that
 must be re-verified whenever the pinned DebugKit version changes
 ([OCPP DebugKit](../entities/ocpp-debugkit.md)).

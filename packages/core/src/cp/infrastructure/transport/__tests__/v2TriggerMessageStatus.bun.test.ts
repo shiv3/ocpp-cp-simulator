@@ -39,7 +39,8 @@ async function withStation(
     }>,
   ) => Promise<void>,
 ): Promise<void> {
-  const csms = startMockCsms();
+  // A 2.x station sends one CALL at a time (#708): answer every CALL.
+  const csms = startMockCsms({ answerCalls: true });
   const cp = createChargePoint(
     "CP-TRIGGER-596",
     DefaultBootNotification,

@@ -6,6 +6,8 @@ import {
   DEVICE_DATA_CTRLR_KEYS,
   REPORT_MAX_BYTES,
   REPORT_MAX_ITEMS,
+  VARIABLES_REQUEST_MAX_BYTES,
+  VARIABLES_REQUEST_MAX_ITEMS,
 } from "./deviceDataCtrlrKeys";
 import {
   MONITORING_CTRLR_KEYS,
@@ -236,12 +238,11 @@ const COMPONENTS: readonly DeviceModelComponentDef[] = [
     evseScoped: true,
     summary: "The one connector of an EVSE.",
   },
+  { name: "DeviceDataCtrlr", summary: "Device model reporting." },
   // Components the station has but that publish no variable yet: a request
   // for one of their variables is UnknownVariable, not UnknownComponent.
-  // Variables are added with the behavior that backs them (#605, #606, #607,
-  // #612).
+  // Variables are added with the behavior that backs them (#605, #607, #612).
   { name: "ClockCtrlr", summary: "Station clock." },
-  { name: "DeviceDataCtrlr", summary: "Device model reporting." },
   { name: "TariffCostCtrlr", summary: "Tariff and cost." },
   { name: "ISO15118Ctrlr", summary: "ISO 15118 communication." },
 ];
@@ -541,6 +542,37 @@ const VARIABLES: readonly DeviceModelVariableDef[] = [
       constant: true,
     },
   ),
+  // #606: the request limits GetVariables / SetVariables enforce
+  // (B05.FR.11, B06.FR.05); constants of the simulated station.
+  ...(
+    [
+      ["GetVariables", "itemsPerGetVariables", "bytesPerGetVariables"],
+      ["SetVariables", "itemsPerSetVariables", "bytesPerSetVariables"],
+    ] as const
+  ).flatMap(([message, items, bytes]) => [
+    runtime(
+      "DeviceDataCtrlr",
+      "ItemsPerMessage",
+      DEVICE_DATA_CTRLR_KEYS[items],
+      {
+        instance: message,
+        dataType: "integer",
+        default: VARIABLES_REQUEST_MAX_ITEMS,
+        constant: true,
+      },
+    ),
+    runtime(
+      "DeviceDataCtrlr",
+      "BytesPerMessage",
+      DEVICE_DATA_CTRLR_KEYS[bytes],
+      {
+        instance: message,
+        dataType: "integer",
+        default: VARIABLES_REQUEST_MAX_BYTES,
+        constant: true,
+      },
+    ),
+  ]),
   // #538: MonitoringCtrlr (2.0.1 Part 2 §2.11.3-§2.11.9, 2.1 §2.13.3-§2.13.9).
   runtime(
     "MonitoringCtrlr",

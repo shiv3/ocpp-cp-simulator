@@ -998,11 +998,12 @@ run`, `runs`, `ignored`, `unpickable: case-7`) and the lane's step count
   rectangle, its curve crossing the rectangle's edge; every lane that
   leaves the loop, at any depth, has its tag marked with a leave icon. A
   jump (a link: a back edge that is no loop, a join) is a dashed orthogonal
-  line with an arrowhead: out of the source card's side, along a channel
-  beside every card and lane tag it passes, across the gap row above the
-  target and down into the target's top corner (right or left side,
-  whichever crosses no card or tag and is shorter), each further jump one
-  step further out; it never crosses a card or a tag. An edge back into a
+  line with an arrowhead: out of the source card's side, up or down a
+  channel (beside everything between the two rows, or the corridor between
+  two columns), across the gap row above the target and down into the
+  target's top corner; of the channels, the shortest that crosses no card
+  or lane tag and keeps clear of END rings, `+` discs and merge points
+  wins, each further jump in a channel one step aside. An edge back into a
   START that fans out is not drawn (START has no card). Steps nothing reaches
   stand in a column on the right under **Steps nothing reaches**. A
   travelled path takes its lane's colour; the canvas scrolls sideways when

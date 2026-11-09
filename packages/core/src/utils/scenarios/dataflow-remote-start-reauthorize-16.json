@@ -1,0 +1,247 @@
+{
+  "id": "dataflow-remote-start-reauthorize-16",
+  "name": "Data flow: Remote start, re-authorize the tag (OCPP 1.6)",
+  "description": "Owns the CSMS's RemoteStartTransaction (csmsCallTrigger replace), answers it Accepted with a callResponse, then sends Authorize with the tag read from the CALL ($from call.payload.idTag) and branches on response.payload.idTagInfo.status. Accepted starts a short session; anything else unplugs without charging. Plug in first; the CSMS sends RemoteStartTransaction (timeout 5 min). The session itself starts with the station's own idTag. OCPP 1.6 payloads.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": {
+    "type": "manual"
+  },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "evSettings": {
+    "modelName": "Reference EV",
+    "batteryCapacityKwh": 60,
+    "maxChargingPowerKw": 11,
+    "initialSoc": 20,
+    "targetSoc": 80
+  },
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": {
+        "x": 400,
+        "y": 50
+      },
+      "data": {
+        "label": "Start",
+        "triggerOn": "connect"
+      }
+    },
+    {
+      "id": "plug-in",
+      "type": "connectorPlug",
+      "position": {
+        "x": 400,
+        "y": 150
+      },
+      "data": {
+        "label": "Plug In",
+        "action": "plugin"
+      }
+    },
+    {
+      "id": "wait",
+      "type": "csmsCallTrigger",
+      "position": {
+        "x": 400,
+        "y": 250
+      },
+      "data": {
+        "label": "Own the RemoteStartTransaction",
+        "action": "RemoteStartTransaction",
+        "behavior": "replace",
+        "timeout": 300
+      }
+    },
+    {
+      "id": "answer",
+      "type": "callResponse",
+      "position": {
+        "x": 400,
+        "y": 350
+      },
+      "data": {
+        "label": "Answer Accepted",
+        "kind": "result",
+        "payload": {
+          "status": "Accepted"
+        }
+      }
+    },
+    {
+      "id": "authorize",
+      "type": "ocppCall",
+      "position": {
+        "x": 400,
+        "y": 450
+      },
+      "data": {
+        "label": "Authorize the remote tag",
+        "action": "Authorize",
+        "payload": {
+          "idTag": {
+            "$from": "call.payload.idTag"
+          }
+        }
+      }
+    },
+    {
+      "id": "branch",
+      "type": "switch",
+      "position": {
+        "x": 400,
+        "y": 570
+      },
+      "data": {
+        "label": "Authorize status?",
+        "value": {
+          "$from": "response.payload.idTagInfo.status"
+        },
+        "cases": ["Accepted"]
+      }
+    },
+    {
+      "id": "tx-start",
+      "type": "transaction",
+      "position": {
+        "x": 150,
+        "y": 700
+      },
+      "data": {
+        "label": "Start Transaction",
+        "action": "start"
+      }
+    },
+    {
+      "id": "meter",
+      "type": "meterValue",
+      "position": {
+        "x": 150,
+        "y": 800
+      },
+      "data": {
+        "label": "Meter 5 s",
+        "value": 0,
+        "sendMessage": true,
+        "autoIncrement": true,
+        "incrementInterval": 2,
+        "incrementAmount": 500,
+        "stopMode": "manual",
+        "maxTime": 5
+      }
+    },
+    {
+      "id": "tx-stop",
+      "type": "transaction",
+      "position": {
+        "x": 150,
+        "y": 900
+      },
+      "data": {
+        "label": "Stop Transaction",
+        "action": "stop"
+      }
+    },
+    {
+      "id": "denied",
+      "type": "delay",
+      "position": {
+        "x": 650,
+        "y": 700
+      },
+      "data": {
+        "label": "Not authorized: wait 2 s",
+        "delaySeconds": 2
+      }
+    },
+    {
+      "id": "plug-out",
+      "type": "connectorPlug",
+      "position": {
+        "x": 400,
+        "y": 1020
+      },
+      "data": {
+        "label": "Plug Out",
+        "action": "plugout"
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": {
+        "x": 400,
+        "y": 1120
+      },
+      "data": {
+        "label": "End"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "start-1",
+      "target": "plug-in"
+    },
+    {
+      "id": "e2",
+      "source": "plug-in",
+      "target": "wait"
+    },
+    {
+      "id": "e3",
+      "source": "wait",
+      "target": "answer"
+    },
+    {
+      "id": "e4",
+      "source": "answer",
+      "target": "authorize"
+    },
+    {
+      "id": "e5",
+      "source": "authorize",
+      "target": "branch"
+    },
+    {
+      "id": "e6",
+      "source": "branch",
+      "target": "tx-start",
+      "sourceHandle": "case-0"
+    },
+    {
+      "id": "e7",
+      "source": "branch",
+      "target": "denied",
+      "sourceHandle": "default"
+    },
+    {
+      "id": "e8",
+      "source": "tx-start",
+      "target": "meter"
+    },
+    {
+      "id": "e9",
+      "source": "meter",
+      "target": "tx-stop"
+    },
+    {
+      "id": "e10",
+      "source": "tx-stop",
+      "target": "plug-out"
+    },
+    {
+      "id": "e11",
+      "source": "denied",
+      "target": "plug-out"
+    },
+    {
+      "id": "e12",
+      "source": "plug-out",
+      "target": "end-1"
+    }
+  ]
+}

@@ -141,6 +141,11 @@ function callPayload(
     GetConfiguration: {},
     ChangeConfiguration: { key: "MeterValueSampleInterval", value: "30" },
     RemoteStartTransaction: { idTag: "CSMS-RS", connectorId: 1 },
+    RequestStartTransaction: {
+      idToken: { idToken: "CSMS-RS", type: "ISO14443" },
+      remoteStartId: 1,
+      evseId: 1,
+    },
     RemoteStopTransaction: { transactionId: rig.transactionId(1) },
     GetLocalListVersion: {},
     SendLocalList: {
@@ -275,13 +280,25 @@ export const SIDE_STEPS: Readonly<Record<string, (rig: Rig) => Promise<void>>> =
     },
   };
 
-export async function runTemplate(rig: Rig, templateId: string): Promise<void> {
+export interface RunTemplateOptions {
+  /** Change the instantiated definition before it runs (shorter waits). */
+  readonly edit?: (def: ScenarioDefinition) => void;
+  /** Receives the id of every node the executor runs, in order, repeats included. */
+  readonly visited?: string[];
+}
+
+export async function runTemplate(
+  rig: Rig,
+  templateId: string,
+  opts: RunTemplateOptions = {},
+): Promise<void> {
   const template = scenarioTemplates.find((t) => t.id === templateId);
   if (!template) throw new Error(`unknown template ${templateId}`);
   const cp = rig.cp;
   const connector = cp.getConnector(1);
   if (!connector) throw new Error("connector 1 missing");
   const def: ScenarioDefinition = template.createScenario(cp.id, 1);
+  opts.edit?.(def);
   const callbacks = createScenarioExecutorCallbacks({
     chargePoint: cp,
     connector,
@@ -316,6 +333,7 @@ export async function runTemplate(rig: Rig, templateId: string): Promise<void> {
   const seen = new Set<string>();
   events.on("node.execute", (data) => {
     const { nodeId } = data as { nodeId?: string };
+    if (nodeId) opts.visited?.push(nodeId);
     const node = (def.nodes as unknown as NodeLike[]).find(
       (n) => n.id === nodeId,
     );
@@ -416,6 +434,12 @@ export const PINNED_TEMPLATE_IDS: readonly string[] = [
   "remote-start-auto-meter",
   "smart-charging",
   "status-triggered-actions",
+  "dataflow-authorize-branch-16",
+  "dataflow-authorize-branch-201",
+  "dataflow-call-error-handling",
+  "dataflow-charge-to-soc",
+  "dataflow-remote-start-reauthorize-16",
+  "dataflow-remote-start-reauthorize-201",
 ];
 
 /**
@@ -518,8 +542,9 @@ async function runStopDuringStartRetry(rig: Rig): Promise<void> {
 
 export const scenarioCases: GoldenCase[] = [
   ...scenarioTemplates.map((t): GoldenCase => ({
-    name: `16-scenario-${t.id}`,
-    version: "1.6",
+    // The `-201` data-flow templates carry 2.0.1 payloads.
+    name: `${t.id.endsWith("-201") ? "201" : "16"}-scenario-${t.id}`,
+    version: t.id.endsWith("-201") ? "2.0.1" : "1.6",
     run: (rig) => runTemplate(rig, t.id),
   })),
   {

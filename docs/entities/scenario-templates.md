@@ -1,7 +1,7 @@
 ---
 title: Built-in scenario templates
 type: entity
-summary: The scenario JSON files shipped inside the package — six general-purpose flows, six `resilience-*` failure / recovery scenarios, the 47 `cert16-*` OCPP 1.6 certification test-case templates and the OCTT strictness probe — and how template instances behave.
+summary: The scenario JSON files shipped inside the package — six general-purpose flows, six `dataflow-*` showcases of the schema 1.7 data-flow features, six `resilience-*` failure / recovery scenarios, the 47 `cert16-*` OCPP 1.6 certification test-case templates and the OCTT strictness probe — and how template instances behave.
 sources:
   - packages/core/src/utils/scenarioTemplates.ts
   - packages/core/src/utils/scenarios/*.json
@@ -103,6 +103,29 @@ legal in OCPP 1.6 but known to break OCTT certification runs — see
 
 The [steve-verify](../sources/steve-verify-readme.md) harness drives all 47
 `cert16-*` templates against a real SteVe CSMS.
+
+## Data-flow templates (`dataflow-*`)
+
+Six templates that show off what a scenario can read and branch on (schema 1.7):
+the `$from` roots `response`, `call` and `connector`, and `switch` cases written as
+`$match` matchers. They need no certification setup; the CSMS only has to answer the way
+the case being demonstrated needs. The `-16` / `-201` pairs differ only in the payload
+shape (OCPP 1.6 `idTag` / `idTagInfo` against 2.0.1 `idToken` / `idTokenInfo`).
+
+| Template id                                     | Shows                                                                                                                                                                                                                                                          |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dataflow-authorize-branch-16` / `-201`         | `ocppCall` Authorize, then a `switch` on `response.payload.idTagInfo.status` (`idTokenInfo` on 2.0.1): Accepted starts a session, `$match in` Blocked / Invalid / Expired, ConcurrentTx, and `default`.                                                        |
+| `dataflow-call-error-handling`                  | `ocppCall` DataTransfer, then `response.kind`; on a result `response.payload.status`, on a CALLERROR `response.errorCode` with `$match` `in` / `endsWith` / `startsWith`. Each outcome reports itself with its own DataTransfer `messageId`. Version-agnostic. |
+| `dataflow-charge-to-soc`                        | A real loop: meter for 7 s, then a `switch` on `connector.power.soc` with `$match gte 80` leaves the loop; `default` is the back edge.                                                                                                                         |
+| `dataflow-remote-start-reauthorize-16` / `-201` | `csmsCallTrigger` with `behavior: "replace"`, a `callResponse` Accepted, then Authorize with the tag read from the CALL (`$from call.payload.idTag`) and a `switch` on the answer.                                                                             |
+
+The `cert16-tc023-*` templates are untouched: their ids are part of the TCK contract and
+their golden frames pin them. `dataflow-authorize-branch-*` covers the same ground (one
+Authorize, a different answer each time) in one file and reads the answer instead of
+relying on a pre-registered tag per outcome. Each template is run by
+`packages/core/src/test/goldenWire/dataflowTemplates.bun.test.ts` against the fake CSMS
+with several answers, asserting the branch taken, and is validated with
+`validateScenarioGraph` (no findings).
 
 ## Resilience templates (`resilience-*`)
 

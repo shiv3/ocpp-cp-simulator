@@ -60,6 +60,17 @@ These built-in JSON templates implement the Charge Point side of OCPP 1.6 certif
 | cert16-tc023-2-authorize-expired                    | TC_023.2 | Authorize Outcome (Expired)               | Core          | Ensure idTag CERT023-EXP is registered with an expiry_date in the past. Plug in. Verify the CP sends Authorize.req, receives idTagInfo.status Expired, and does NOT send StartTransaction.req. Plug out.                                       |
 | cert16-tc023-3-authorize-blocked                    | TC_023.3 | Authorize Outcome (Blocked)               | Core          | Ensure idTag CERT023-BLK is registered as blocked. Plug in. Verify the CP sends Authorize.req, receives idTagInfo.status Blocked, and does NOT send StartTransaction.req. Plug out.                                                            |
 
+## Data-Flow Templates
+
+The `dataflow-*` templates are not certification cases. They show what a scenario can read and branch on (schema 1.7): `$from` roots `response`, `call` and `connector`, and `$match` cases of a `switch`.
+
+| Scenario ID                                                                  | What it shows                                                                                                                                            |
+| ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| dataflow-authorize-branch-16 / dataflow-authorize-branch-201                 | Authorize, then branch on the idTagInfo / idTokenInfo status: Accepted starts a session; Blocked, Invalid, Expired (`$match in`); ConcurrentTx; default. |
+| dataflow-call-error-handling                                                 | DataTransfer probe; branch on `response.kind`, then on the status of a result or the `errorCode` of a CALLERROR (`in`, `endsWith`, `startsWith`).        |
+| dataflow-charge-to-soc                                                       | Loop that meters until `connector.power.soc` is at least 80 (`$match gte`).                                                                              |
+| dataflow-remote-start-reauthorize-16 / dataflow-remote-start-reauthorize-201 | Own the CSMS's remote start (`replace`), answer Accepted, Authorize the tag read from the CALL, branch on the answer.                                    |
+
 ## Numbering Note
 
 Scenario identifiers follow the OCPP Certification Test Cases (OCPPSC) specification test-case numbering: TC_001, TC_003, TC_004, etc. The unlock scenarios TC_017 (Unlock Connector — Occupied, Succeeds) and TC_018 (Unlock Connector — Failure) predate the formal OCPPSC mapping; TC_017 ≈ "unlock with active session" and TC_018 ≈ "unlock failure / stuck lock".

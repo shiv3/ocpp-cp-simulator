@@ -78,6 +78,29 @@ function dropCredentialHeaders(value: unknown): unknown {
 }
 
 /**
+ * Replace a reference back to one of its own ancestors with `"[Circular]"`.
+ * Sentry normalizes an event before `beforeSend`, but hands
+ * `beforeBreadcrumb` the raw console arguments, which may be cyclic. Only
+ * the current path counts, so an object shared by two siblings is kept (and
+ * redacted) in both places.
+ */
+function breakCycles(value: unknown, ancestors = new Set<object>()): unknown {
+  if (!value || typeof value !== "object") return value;
+  if (ancestors.has(value)) return "[Circular]";
+  ancestors.add(value);
+  const copy = Array.isArray(value)
+    ? value.map((item) => breakCycles(item, ancestors))
+    : Object.fromEntries(
+        Object.entries(value).map(([name, nested]) => [
+          name,
+          breakCycles(nested, ancestors),
+        ]),
+      );
+  ancestors.delete(value);
+  return copy;
+}
+
+/**
  * The scrubber every adapter receives as {@link ErrorReporterInit.scrub}.
  * Run an event or a breadcrumb through the redaction the trace and log
  * writers use (CSMS `user:pass@` URLs, bearer tokens, OCPP secrets such as
@@ -85,7 +108,9 @@ function dropCredentialHeaders(value: unknown): unknown {
  * named after a credential header, which that redaction does not name.
  */
 export function scrubErrorReport<T>(report: T): T {
-  const scrubbed = dropCredentialHeaders(redactSensitiveValue(report));
+  const scrubbed = dropCredentialHeaders(
+    redactSensitiveValue(breakCycles(report)),
+  );
   if (!isPlainObject(scrubbed) || !isPlainObject(scrubbed.request))
     return scrubbed as T;
   const { cookies: _cookies, ...request } = scrubbed.request;

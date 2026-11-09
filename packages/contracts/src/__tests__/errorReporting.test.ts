@@ -118,4 +118,40 @@ describe("scrubErrorReport", () => {
     };
     expect(scrubErrorReport(event)).toEqual(event);
   });
+
+  it("scrubs a breadcrumb whose console arguments are cyclic", () => {
+    // Sentry hands beforeBreadcrumb the raw console arguments (events are
+    // normalized first, breadcrumbs are not): a throw drops the breadcrumb.
+    const station: Record<string, unknown> = {
+      id: "CP01",
+      password: "secret-1",
+      headers: { Authorization: "Basic abc" },
+    };
+    station.self = station;
+    const scrubbed = scrubErrorReport({
+      category: "console",
+      data: { arguments: [station, [station]] },
+    });
+    expect(scrubbed).toEqual({
+      category: "console",
+      data: {
+        arguments: [
+          { id: "CP01", headers: {}, self: "[Circular]" },
+          [{ id: "CP01", headers: {}, self: "[Circular]" }],
+        ],
+      },
+    });
+  });
+
+  it("scrubs every copy of an object shared by sibling members", () => {
+    const shared = { url: "ws://cp:pw@csms.example/ocpp", password: "pw" };
+    expect(
+      scrubErrorReport({ data: { first: shared, second: [shared] } }),
+    ).toEqual({
+      data: {
+        first: { url: `ws://cp:${REDACTED_VALUE}@csms.example/ocpp` },
+        second: [{ url: `ws://cp:${REDACTED_VALUE}@csms.example/ocpp` }],
+      },
+    });
+  });
 });

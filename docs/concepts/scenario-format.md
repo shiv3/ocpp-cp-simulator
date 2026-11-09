@@ -1695,7 +1695,7 @@ cover. Schema 1.8 adds [timeout edges](#timeout-edges-schema-18): a wait's other
 - **v1.7 (response)**: Adds the `$from` root `response` — the answer (`kind`, `action`, `messageId`, `payload`,
   `errorCode`, `errorDescription`, `errorDetails`) to the latest `ocppCall` of the branch — and the advisory
   `noResponseHeld` graph diagnostic. Purely additive — `1.6` and older files remain valid. See
-  [the note](#from-root-response-schema-17). 
+  [the note](#from-root-response-schema-17).
 
 - **v1.6 (recordedFrom)**: Issue #654, step 2. Adds the optional top-level `recordedFrom` (`behaviorId`, `commit`, `seed`, `version`) that
   a scenario recorded from a behavior run carries. Shipped within 1.6, purely additive — informational, ignored by the runtime.

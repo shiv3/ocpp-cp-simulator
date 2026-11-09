@@ -237,8 +237,16 @@ describe("StepsGraphView: Repeat picks its target on the canvas", () => {
     ).find((b) => b.getAttribute("aria-label")?.includes("case"));
     await click(plus ?? null);
     const loop = structure("loop")!;
-    expect(loop.disabled).toBe(true);
+    expect(loop.getAttribute("aria-disabled")).toBe("true");
     expect(loop.title).toMatch(/no earlier step/i);
+    // The reason is in the help pane too, on hover.
+    await act(async () => {
+      loop.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    });
+    expect(
+      container.querySelector('[data-testid="step-picker-refusal"]')
+        ?.textContent,
+    ).toMatch(/no earlier step/i);
   });
 });
 

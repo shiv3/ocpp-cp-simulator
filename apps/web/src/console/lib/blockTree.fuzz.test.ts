@@ -62,9 +62,13 @@ function checkResult(def: ScenarioDefinition, label: string): void {
   } catch (error) {
     throw new Error(`${label}: ${(error as Error).message}`, { cause: error });
   }
-  expect(withoutUpdatedAt(rebuildFromTree(def, tree)), label).toEqual(
-    withoutUpdatedAt(def),
-  );
+  let rebuilt: ScenarioDefinition;
+  try {
+    rebuilt = rebuildFromTree(def, tree);
+  } catch (error) {
+    throw new Error(`${label}: ${(error as Error).message}`, { cause: error });
+  }
+  expect(withoutUpdatedAt(rebuilt), label).toEqual(withoutUpdatedAt(def));
 }
 
 describe("block tree fuzz (xorshift, 2–12 nodes)", () => {
@@ -468,3 +472,122 @@ function forkOf(tree: BlockTree, nodeId: string): ForkBlock | null {
   }
   return null;
 }
+
+describe("block tree fuzz with loop edges (schema 1.10)", () => {
+  /** `caseOf(seed)` with one or two loop edges between random nodes. */
+  const withLoopEdges = (seed: number): ScenarioDefinition => {
+    const def = caseOf(seed);
+    const rand = xorshift(seed * 104729 + 7);
+    const ids = def.nodes.map((n) => n.id);
+    const edges: Edge[] = [...def.edges];
+    const n = 1 + Math.floor(rand() * 2);
+    for (let k = 0; k < n && ids.length > 0; k++) {
+      const source = ids[Math.floor(rand() * ids.length)];
+      // Mostly back to an earlier node (a loop the tree can structure).
+      const target = ids[Math.floor(rand() * (ids.indexOf(source) + 1))];
+      edges.splice(Math.floor(rand() * (edges.length + 1)), 0, {
+        id: `loop${k}`,
+        source,
+        target,
+        kind: "loop",
+        loop: { times: 1 + k, note: seed },
+      } as Edge);
+    }
+    return { ...def, edges };
+  };
+  const loopEdgesOf = (def: ScenarioDefinition) =>
+    def.edges.filter((e) => (e as { kind?: unknown }).kind === "loop");
+
+  it(`recognizes, covers and round-trips byte-equal (${CASES} seeds)`, () => {
+    let structured = 0;
+    for (let seed = 1; seed <= CASES; seed++) {
+      const def = withLoopEdges(seed);
+      checkResult(def, `seed ${seed}`);
+      const rebuilt = rebuildFromTree(def, recognizeBlockTree(def));
+      expect(JSON.stringify(rebuilt.edges), `seed ${seed}`).toBe(
+        JSON.stringify(def.edges),
+      );
+      structured += allSeqs(recognizeBlockTree(def))
+        .flatMap((s) => s.blocks)
+        .filter((b) => b.kind === "loop" && b.loopEdge !== null).length;
+    }
+    expect(structured).toBeGreaterThan(CASES / 10);
+  });
+
+  const loopChunks = Array.from({ length: OP_CASES / 150 }, (_, i) => [
+    i * 150 + 1,
+    (i + 1) * 150,
+  ]);
+  it.each(loopChunks)(
+    "operations keep every loop edge they do not remove (seeds %i–%i)",
+    (first, last) => {
+      for (let seed = first; seed <= last; seed++) {
+        const def = withLoopEdges(seed);
+        const tree = recognizeBlockTree(def);
+        const rand = xorshift(seed * 31 + 3);
+        const placed = [...tree.nodePath.keys()];
+        const check = (op: string, out: ScenarioDefinition) => {
+          const label = `seed ${seed} ${op}`;
+          checkResult(out, label);
+          for (const e of loopEdgesOf(out)) {
+            const old = def.edges.find((o) => o.id === e.id);
+            if (!old) continue; // a new loop edge (a mid-lane wrap)
+            const { source: _s, target: _t, ...fields } = old;
+            const { source: _s2, target: _t2, ...now } = e;
+            expect(now, label).toEqual(fields);
+          }
+        };
+        for (const seq of allSeqs(tree)) {
+          const index = Math.floor(rand() * (seq.blocks.length + 1));
+          const caps = editCapabilities(tree, {
+            kind: "slot",
+            path: seq.path,
+            index,
+          });
+          if (caps.insertStep.ok) {
+            check(
+              `insertStep ${seq.path}@${index}`,
+              insertStep(def, tree, seq.path, index, ScenarioNodeType.DELAY),
+            );
+          }
+          if (caps.insertForkBlock.ok) {
+            check(
+              `insertForkBlock ${seq.path}@${index}`,
+              insertForkBlock(def, tree, seq.path, index, "switch"),
+            );
+          }
+        }
+        for (let k = 0; k < 3; k++) {
+          const nodeId = placed[Math.floor(rand() * placed.length)];
+          if (!nodeId) break;
+          const caps = editCapabilities(tree, { kind: "node", nodeId });
+          const at = tree.nodePath.get(nodeId)!;
+          if (caps.removeStep.ok) {
+            check(`removeStep ${nodeId}`, removeStep(def, tree, nodeId));
+          }
+          if (caps.moveUp.ok) {
+            check(
+              `moveUp ${nodeId}`,
+              moveStep(def, tree, at.path, at.index, at.index - 1),
+            );
+          }
+          if (caps.moveDown.ok) {
+            check(
+              `moveDown ${nodeId}`,
+              moveStep(def, tree, at.path, at.index, at.index + 1),
+            );
+          }
+          if (caps.wrapInLoop.ok) {
+            check(
+              `wrapInLoop ${nodeId}`,
+              wrapInLoop(def, tree, at.path, at.index, at.index),
+            );
+          }
+          if (caps.unwrapLoop.ok) {
+            check(`unwrapLoop ${nodeId}`, unwrapLoop(def, tree, nodeId));
+          }
+        }
+      }
+    },
+  );
+});

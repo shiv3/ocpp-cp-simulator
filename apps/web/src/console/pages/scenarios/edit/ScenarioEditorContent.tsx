@@ -43,6 +43,7 @@ import {
   insertStepIntoNewLoop,
   setLaneExit,
   canSetLaneExit,
+  canSetLoopBounds,
   canWrapInLoop,
   canMoveStepTo,
   moveStepTo,
@@ -54,11 +55,14 @@ import {
   firstNodeOf,
   setLink,
   treeNodes,
+  setLoopBounds,
   unwrapLoop,
   wrapInLoop,
   type Capability,
   type SeqPath,
 } from "../../../lib/blockTree";
+import { collectStateKeys } from "../../../../components/scenario/forms/scenarioValue";
+import type { LoopBoundsEditing } from "../run/loopBoundsUi";
 import { isDrawableTree, stepNumbers, treeSteps } from "../../../lib/stepTree";
 import { graphEdgeIds } from "../../../lib/treeGraphLayout";
 import StepsGraphView from "../run/StepsGraphView";
@@ -563,6 +567,27 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
 
   /** "Stop repeating": the innermost loop around `nodeId` goes; its steps
    *  run once and go on where the loop went on. */
+  /** Both views: the bounds of the loop whose first step is `headerId`. */
+  const loopBoundsEditing = useMemo<LoopBoundsEditing | undefined>(
+    () =>
+      scenario && tree
+        ? {
+            canSet: (headerId, bounds) =>
+              canSetLoopBounds(tree, headerId, bounds),
+            onSet: (headerId, bounds) =>
+              unlessRefused(
+                headerId,
+                canSetLoopBounds(tree, headerId, bounds),
+                () =>
+                  setScenario(setLoopBounds(scenario, tree, headerId, bounds)),
+              ),
+            stateKeys: collectStateKeys(scenario.nodes),
+          }
+        : undefined,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [scenario, tree],
+  );
+
   const handleUnwrapLoop = (nodeId: string) => {
     if (!scenario || !tree) return;
     unlessRefused(
@@ -969,6 +994,7 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
                   onAddLane={handleAddLane}
                   onRemoveLane={handleRemoveLane}
                   onUnwrapLoop={handleUnwrapLoop}
+                  loopBounds={loopBoundsEditing}
                   issues={viewIssues}
                 />
               ) : (
@@ -986,6 +1012,7 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
                   onAddLane={handleAddLane}
                   onRemoveLane={handleRemoveLane}
                   onUnwrapLoop={handleUnwrapLoop}
+                  loopBounds={loopBoundsEditing}
                   issues={viewIssues}
                 />
               )}

@@ -55,8 +55,11 @@ export interface AddStepPickerProps {
   /** Wired by the host to offer structure entries (Repeat). Omit to hide them. */
   onPickStructure?: (kind: StructureKind) => void;
   /** A structure that cannot go to this slot: listed but disabled, with the
-   *  (translated) reason as its title. */
+   *  (translated) reason as its title and in the help pane. */
   structureRefusals?: Partial<Record<StructureKind, string>>;
+  /** Step types that cannot go here (by type), likewise disabled with the
+   *  (translated) reason. */
+  typeRefusals?: Partial<Record<string, string>>;
   onClose: () => void;
 }
 
@@ -93,11 +96,16 @@ const TypeTile: React.FC<{ type: string; size: "sm" | "md" }> = ({
  * each type's title and description. The type under the pointer or keyboard
  * focus (ArrowUp/ArrowDown move between types) is described in a pane on the
  * right; below a container width of 28rem the pane stacks under the list.
+ * An entry that cannot go here stays listed and focusable but is marked
+ * `aria-disabled` (a disabled button gets neither hover nor focus, so its
+ * reason could not be shown): picking it does nothing, and the help pane
+ * says why it is refused.
  */
 const AddStepPicker: React.FC<AddStepPickerProps> = ({
   onPick,
   onPickStructure,
   structureRefusals,
+  typeRefusals,
   onClose,
 }) => {
   const { t } = useTranslation();
@@ -151,8 +159,15 @@ const AddStepPicker: React.FC<AddStepPickerProps> = ({
     })).filter((category) => category.entries.length > 0);
   }, [query, t, onPickStructure]);
 
-  const refusalOf = (kind: StructureKind | null) =>
-    kind ? structureRefusals?.[kind] : undefined;
+  const refusalOf = (entry: {
+    type: AnyScenarioNodeType | null;
+    structure: StructureKind | null;
+  }) =>
+    entry.structure
+      ? structureRefusals?.[entry.structure]
+      : entry.type
+        ? typeRefusals?.[entry.type]
+        : undefined;
 
   const shownEntry = active
     ? sections.flatMap((s) => s.entries).find((e) => e.id === active)
@@ -247,17 +262,20 @@ const AddStepPicker: React.FC<AddStepPickerProps> = ({
                         : undefined
                       : undefined
                   }
-                  disabled={refusalOf(entry.structure) !== undefined}
-                  title={refusalOf(entry.structure)}
-                  onClick={() =>
-                    entry.type
-                      ? onPick(entry.type)
-                      : entry.structure && onPickStructure?.(entry.structure)
+                  aria-disabled={
+                    refusalOf(entry) !== undefined ? true : undefined
                   }
+                  title={refusalOf(entry)}
+                  onClick={() => {
+                    if (refusalOf(entry) !== undefined) return;
+                    if (entry.type) onPick(entry.type);
+                    else if (entry.structure)
+                      onPickStructure?.(entry.structure);
+                  }}
                   onMouseEnter={() => setActive(entry.id)}
                   onFocus={() => setActive(entry.id)}
                   className={cn(
-                    "flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-sm text-cx-fg2 hover:bg-cx-sub focus-visible:bg-cx-sub disabled:cursor-not-allowed disabled:opacity-50",
+                    "flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-sm text-cx-fg2 hover:bg-cx-sub focus-visible:bg-cx-sub aria-disabled:cursor-not-allowed aria-disabled:opacity-50",
                     shownEntry?.id === entry.id && "bg-cx-sub",
                   )}
                 >
@@ -282,6 +300,15 @@ const AddStepPicker: React.FC<AddStepPickerProps> = ({
               <p className="text-xs leading-relaxed text-cx-muted">
                 {shownEntry.help}
               </p>
+              {refusalOf(shownEntry) !== undefined && (
+                <p
+                  data-testid="step-picker-refusal"
+                  role="note"
+                  className="mt-2 rounded border border-amber-400/60 bg-amber-50 px-2 py-1 text-xs leading-relaxed text-amber-800 dark:bg-amber-950/40 dark:text-amber-300"
+                >
+                  {refusalOf(shownEntry)}
+                </p>
+              )}
             </>
           ) : (
             <p className="text-xs leading-relaxed text-cx-faint">

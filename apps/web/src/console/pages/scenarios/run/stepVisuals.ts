@@ -47,6 +47,7 @@ import { STEP_CATEGORIES } from "../../../lib/scenarioSteps";
 import { t } from "../../../../i18n";
 import type { ViewIssues } from "../edit/issueMarkUi";
 import type { BlockTree, SeqPath } from "../../../lib/blockTree";
+import type { LoopBoundsEditing } from "./loopBoundsUi";
 
 /** The registry title of a step's type ("Status Change"), as the editor's
  *  step list and the run timeline show it. */
@@ -255,6 +256,9 @@ export interface StepTreeViewProps extends RunViewCommonProps {
   /** editable: "Stop repeating": remove the innermost loop around
    *  `nodeId` (its steps then run once). */
   onUnwrapLoop?: (nodeId: string) => void;
+  /** editable: edit the bounds of the loop whose first step is `headerId`
+   *  (schema 1.10 loop edges): the header's "Bounds" button. */
+  loopBounds?: LoopBoundsEditing;
 }
 
 export type BoxPhase = StepPhase | "plain";

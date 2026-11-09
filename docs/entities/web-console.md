@@ -977,7 +977,16 @@ run`, `runs`, `ignored`, `unpickable: case-7`) and the lane's step count
   C-shaped block (tinted purple) whose top arm reads **Repeat forever** — or
   **Repeat** when a `switch` / `choice` inside may leave it — plus "each
   round waits at step N first" when the loop starts at a Delay or a trigger,
-  and whose bottom arm reads **Back to step N**. A lane of a branch point
+  and whose bottom arm reads **Back to step N**. A loop drawn by a
+  [loop edge](../concepts/scenario-format.md#loop-edges-schema-110)
+  (schema 1.10) says its bounds on the top arm instead, in the order
+  `times`, `forSeconds`, `until`: **Repeat 3 times / for 2 h / until
+  `$from: connector.power.soc` is `≥ 80` (whichever first)** — the `until`
+  cases as chips (a `$match` case described as in a switch's lane chip),
+  _(whichever first)_ only with two bounds or more — or **Repeat forever**
+  when the loop edge has none; a malformed `loop` reads **Repeat (bounds
+  unreadable: …)**. A bounded loop can stand anywhere in a lane: the steps
+  after its block run once a bound fires. A lane of a branch point
   inside the loop that never comes back to the loop's first step leaves the
   loop: its tag in the block says **Leaves the loop (below)**, and its steps
   follow the block under **After leaving the loop at step N** (they run once).
@@ -995,11 +1004,15 @@ run`, `runs`, `ignored`, `unpickable: case-7`) and the lane's step count
   text. Lanes that meet again run into a merge point below the lowest lane,
   and the sequence goes on under it; a lane end is an END ring. A loop is a
   tinted rounded rectangle behind its body, labelled **Repeat forever** /
-  **Repeat** (and "each round waits at step N first"), with a solid purple
+  **Repeat** (and "each round waits at step N first"), or with a loop edge
+  its bounds as in the Steps view (the label truncates; the full text is its
+  tooltip), with a solid purple
   return arc from each way back, down the rectangle's left side into the
   loop's first card; a lane that leaves the loop stands right of the
   rectangle, its curve crossing the rectangle's edge; every lane that
   leaves the loop, at any depth, has its tag marked with a leave icon. A
+  bounded loop goes on from the bottom of its rectangle to the block after
+  it. A
   jump (a link: a back edge that is no loop, a join) is a dashed orthogonal
   line with an arrowhead: out of the source card's side, up or down a
   channel (beside everything between the two rows, or the corridor between
@@ -1071,9 +1084,21 @@ Both stores are best effort: blocked storage only means nothing is remembered.
   Transaction & reservation, Meter & EV, Wait & Trigger, Flow control, OCPP
   messages, Station quirks & config), each with the same icon as its step
   card; hovering or focusing (ArrowUp / ArrowDown) a type describes it in a
-  pane beside the list, and the search matches titles and descriptions. A
-  **Repeat** entry under Flow control appears only where the host passes
-  `onPickStructure` (not wired yet). Picking **Switch** or **Choice** inserts a branch
+  pane beside the list, and the search matches titles and descriptions. An
+  entry that cannot go to that place stays listed but is marked disabled
+  (`aria-disabled`, still hoverable and focusable): picking it does nothing,
+  and the pane shows why under its description (also its tooltip). Under
+  Flow control, **Repeat** (where the view passes `onPickStructure`: both
+  views of the editor) opens an empty Repeat block at that place (UI only;
+  nothing is saved until a step is in it). At the end of a lane that ends
+  (END, a jump, nothing) the repeat is a plain back edge and repeats until
+  the run stops, as before. Anywhere else — steps follow it, or the lane
+  goes on to a merge — it is written as a loop edge with the default bound
+  `times: 3` so the steps after it stay reachable, the block says so, and
+  its step picker refuses Switch, Choice and End (a bounded loop is checked
+  after its last step, which must go on: `cannot.loopNeedsNextStep`). It is
+  refused only as a loop's first block (`cannot.loopHeader`) and where no
+  step can go. Picking **Switch** or **Choice** inserts a branch
   point with one empty lane per case / option, meeting again at the block
   that followed (`insertForkBlock`). Each step box has a grab handle
   (**Drag to reorder**): dragging shows a drop line, a release moves the
@@ -1093,7 +1118,25 @@ Both stores are best effort: blocked storage only means nothing is remembered.
   step has the **After this step** select (_End of scenario_, _Go to step
   N_, or _Loop back to step N_ for a step a run comes back from, `setLink`);
   on the step that closes a loop it is disabled and points to **Stop
-  repeating**. **Stop repeating** (on the loop block's top arm and in the
+  repeating**. **Bounds** (on every loop block's top arm, and beside a Graph
+  loop's label, where it opens the editor below the label) edits when the
+  loop ends, built like a switch: **A number of rounds** (`times`), **A
+  duration** (hours, minutes, seconds → `forSeconds`) and **Until a value
+  matches** — the switch step's own value field and case list
+  ([`switchCases.tsx`](../../apps/web/src/components/scenario/forms/switchCases.tsx),
+  shared with `SwitchForm`: a `$from` or a constant, cases as constants,
+  `$match` cases shown as chips, the duplicate and `$from`-in-a-case
+  warnings) (`setLoopBounds`). Each change is written at once to the loop
+  edge's `loop` (the edge keeps its id, `kind` and unknown fields; the
+  editor writes only the bounds it shows, so unknown keys inside `loop`
+  go). Bounds on a plain loop turn its one back edge into a loop edge
+  (refused with several back edges, `cannot.loopSeveralBackEdges`, or when it
+  leaves a `switch` / `choice`); the branch then ends when a bound fires,
+  and steps can be added after the loop. A loop with steps after it (or a
+  lane going on to a merge) cannot lose its last bound: that checkbox is
+  disabled with "Steps follow this repeat: keep at least one bound"
+  (`cannot.unboundedMidLane`). At the end of a lane the bounds can all go;
+  `loop` is then removed and the loop edge repeats forever. **Stop repeating** (on the loop block's top arm and in the
   inspector) takes the innermost loop around the step away: its steps run
   once, and every edge that went back to the loop's first step (the closing
   step's, and each lane's that came back) goes on where the loop went on —
@@ -1176,6 +1219,15 @@ from the graph the way the executor reads it (`lowerScenario`,
 - **Loops**: a back edge whose target dominates its source (a reducible
   loop) makes a loop block; its first exit (file order) is where the
   sequence goes on. Any other back edge (an irreducible loop) stays a link.
+- **Loop edges** (schema 1.10, `kind: "loop"`): the loop edge a step follows
+  (`loopStep`) out of `S` back to `H` makes a **bounded** loop block
+  (`LoopBlock.loopEdge`: its id and `loop`) when it is the only back edge of
+  `H`'s natural loop and `S`'s ordinary next edge leaves that loop: the
+  body runs from `H` to `S` (its _latch_), and the sequence goes on along
+  `S`'s ordinary edge — mid-lane, unlike a plain loop. A loop edge out of a
+  fork (a `switch` / `choice`, a step with extra edges), into a header that
+  has other back edges, or that is not a reducible back edge stays a link
+  (role `loopEdge`, written back untouched).
 - **Links**: an edge into a step placed elsewhere (join), a back edge that
   is not a loop, an edge into START, an edge to a missing node, an edge out
   of END. **Detached**: steps no path from START reaches.
@@ -1197,11 +1249,17 @@ Writing a tree back (`rebuildFromTree`) never changes what the file means:
   new node goes just below its predecessor);
 - a round trip without edits returns the file unchanged except `updatedAt`
   (checked on every shipped template and docs example, and on seeded random
-  graphs).
+  graphs, also with random loop edges);
+- a bounded loop's edge is matched by id only and never to an ordinary edge
+  (nor the other way); it goes from whichever step is the body's latch
+  now, so inserting, removing or moving the last step of the body moves the
+  loop edge with it, its id, `kind`, `loop` and unknown fields kept. A loop
+  edge no loop keeps any more (its loop was unwrapped, or emptied) goes, and
+  its id is never reused for an ordinary edge.
 
 The tree's operations (`insertStep`, `moveStep`, `removeStep`, `addLane`,
 `removeLane`, `insertForkBlock`, `wrapInLoop`, `unwrapLoop`, `setLink`, `setLaneHandle`,
-`setLaneCondition`) are pure functions of the definition and the tree, and
+`setLaneCondition`, `setLoopBounds`) are pure functions of the definition and the tree, and
 `editCapabilities` tells which apply to a selection, with the reason
 (`scenarios.editor.cannot.*`) when one does not. An edit that would make a
 never-taken edge run — removing a lane, a step or a one-lane `switch` while
@@ -1209,11 +1267,18 @@ an ignored or unpickable edge waits behind it, or changing a running lane's
 handle — is refused (`revivesDeadEdge`); remove the dead edge first.
 Removing the first lane of a step's extra edges is allowed with a note
 (`note.promotesNextEdge`): the next edge then runs, which is what removing
-the first one means. The Steps view and the inspector use them (above);
+the first one means. A bounded loop must keep exactly one latch, a step
+that leaves by "next" (and follows no earlier loop edge): an edit that
+would end its body with a `switch` / `choice` (inserting one last, moving a
+chain switch last, removing the latch after a branch point) is refused with
+`cannot.breaksLoopBounds`. `wrapInLoop` makes a bounded loop (`times: 3`)
+when something follows the wrapped blocks and a plain back edge otherwise;
+`unwrapLoop` on a bounded loop drops its loop edge and the latch goes on
+along its ordinary edge. The Steps view and the inspector use them (above);
 what the views read off the tree (numbering, condition chips, lanes that
 leave a loop) is in [`stepTree.ts`](../../apps/web/src/console/lib/stepTree.ts).
 `deriveStepLayout` (the old chain-plus-one-fork projection) no longer draws
-any view.
+any view; it calls a file with any loop edge unsupported.
 
 Both views edit the same definition: unsaved changes survive a switch, and
 nothing is written until **Save**. The per-connector editor's Save saves this

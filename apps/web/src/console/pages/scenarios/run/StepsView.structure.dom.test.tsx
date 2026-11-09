@@ -198,7 +198,7 @@ describe("StepsView: structure entries and cross-lane drags", () => {
     expect(onMoveStep).not.toHaveBeenCalled();
   });
 
-  it("Repeat is listed but refused where it cannot close the lane, with the reason", async () => {
+  it("Repeat in the middle of a lane: a bounded pending block there; its picker refuses a switch, saying why", async () => {
     await render(chain());
     await click(
       container.querySelector(
@@ -206,8 +206,42 @@ describe("StepsView: structure entries and cross-lane drags", () => {
       ),
     );
     const loop = structure("loop")!;
-    expect(loop.disabled).toBe(true);
-    expect(loop.title).toContain("must close at the end");
+    expect(loop.getAttribute("aria-disabled")).toBeNull();
+    await click(loop);
+    const pending = container.querySelector("[data-pending-slot]");
+    expect(pending?.getAttribute("data-pending-slot")).toBe("1");
+    expect(
+      container.querySelector('[data-testid="pending-loop-bounded"]'),
+    ).toBeTruthy();
+    // The pending block stands between steps 1 and 2.
+    const order = Array.from(
+      container.querySelectorAll("[data-step-id], [data-pending-slot]"),
+    ).map((el) => el.getAttribute("data-step-id") ?? "pending");
+    expect(order).toEqual(["a", "pending", "b"]);
+    await click(
+      Array.from(pending!.querySelectorAll("button")).find(
+        (b) => b.textContent?.trim() === "+ Add step",
+      ) ?? null,
+    );
+    const sw = container.querySelector<HTMLButtonElement>(
+      'button[data-step-type="switch"]',
+    )!;
+    expect(sw.getAttribute("aria-disabled")).toBe("true");
+    await act(async () => {
+      sw.focus();
+    });
+    expect(
+      container.querySelector('[data-testid="step-picker-refusal"]')
+        ?.textContent,
+    ).toMatch(/switch or a choice/);
+    await click(sw);
+    expect(onInsertStepIntoLoop).not.toHaveBeenCalled();
+    await click(container.querySelector('button[data-step-type="delay"]'));
+    expect(onInsertStepIntoLoop).toHaveBeenLastCalledWith(
+      "root",
+      1,
+      ScenarioNodeType.DELAY,
+    );
   });
 
   it("Switch and Choice are structure entries, not plain steps", async () => {

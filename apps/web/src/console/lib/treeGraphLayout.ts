@@ -21,6 +21,7 @@ import {
   type Lane,
   type LinkEdge,
   type LoopBlock,
+  loopBlockBounds,
   type Seq,
   type SeqPath,
 } from "./blockTree";
@@ -151,8 +152,11 @@ export interface GraphLoop {
   /** The repeated steps' numbers. */
   from: number;
   to: number;
-  /** A switch / choice inside, or a lane that leaves: not "forever". */
+  /** A switch / choice inside, a lane that leaves, or bounds: not
+   *  "forever". */
   canExit: boolean;
+  /** The loop's loop edge (schema 1.10), null for a plain back edge. */
+  loopEdge: LoopBlock["loopEdge"];
   ids: string[];
 }
 
@@ -843,15 +847,34 @@ export function layoutTreeGraph(
       label: { x: rectLeft + LOOP_LEFT, y: rectBottom - 22 },
       from,
       to: Math.max(from, ...repeated),
-      canExit: onward.length > 0 || inside.some((c) => c.isFork),
+      canExit:
+        onward.length > 0 ||
+        inside.some((c) => c.isFork) ||
+        loopBlockBounds(loop) !== null,
+      loopEdge: loop.loopEdge,
       ids,
     });
     const centre = (header?.y ?? y) + NODE_H / 2;
+    // A bounded loop goes on from its rectangle's bottom (its latch's
+    // ordinary edge, once a bound fires).
+    const latch = loop.loopEdge ? back[0]?.from : undefined;
+    const open: Open[] =
+      latch !== undefined
+        ? [
+            {
+              x: header?.x ?? rectLeft + rectW / 2,
+              y: rectBottom,
+              edgeId: null,
+              from: latch,
+              lane: ctx.lane,
+            },
+          ]
+        : [];
     // The loop's way on: ends that leave it go to what follows.
     return {
       bottom: Math.max(rectBottom, r.bottom),
       centre,
-      open: [],
+      open,
       exits: onward.map((o) => ({ ...o })),
     };
   };

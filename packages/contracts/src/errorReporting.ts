@@ -83,7 +83,7 @@ function dropCredentialHeaders(value: unknown): unknown {
 
 /**
  * How many objects (arrays included) the scrubber copies from one report.
- * Past it, the rest is replaced with `"[Truncated]"`.
+ * Past it, every further object or array is replaced with `"[Truncated]"`.
  */
 export const SCRUB_MAX_OBJECTS = 10_000;
 

@@ -273,7 +273,7 @@ every outgoing event and breadcrumb through it (Sentry's `beforeSend` /
 
 The scrubber works on a copy: a reference back to one of its own ancestors
 becomes `"[Circular]"`, and past `SCRUB_MAX_OBJECTS` (10 000 objects, arrays
-included, counted once per path) the rest of the report becomes
+included, counted once per path) every further object or array becomes
 `"[Truncated]"`.
 
 The scrubbing recognises these names and forms only. A credential that is

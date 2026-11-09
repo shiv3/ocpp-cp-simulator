@@ -154,4 +154,52 @@ describe("scrubErrorReport", () => {
       },
     });
   });
+
+  // Sentry normalizes `extra` / `contexts` to `normalizeDepth` before
+  // `beforeSend`: an object past that depth becomes "[Object]", a primitive
+  // beside it stays, so the variable's name is gone but its value is not.
+  it.each([
+    ["normalized away by depth", "[Object]"],
+    ["normalized away as a cycle", "[Circular ~]"],
+    ["cut by the scrubber's own cycle break", "[Circular]"],
+    ["missing its name", {}],
+  ])(
+    "redacts attributeValue when the variable beside it is %s",
+    (_, variable) => {
+      expect(
+        scrubErrorReport({
+          extra: {
+            payload: {
+              setVariableData: [
+                { component: "[Object]", variable, attributeValue: "s3cret" },
+              ],
+            },
+          },
+        }),
+      ).toEqual({
+        extra: {
+          payload: {
+            setVariableData: [
+              {
+                component: "[Object]",
+                variable,
+                attributeValue: REDACTED_VALUE,
+              },
+            ],
+          },
+        },
+      });
+    },
+  );
+
+  it("keeps the attributeValue of a variable whose name is not a secret", () => {
+    const entry = {
+      component: { name: "OCPPCommCtrlr" },
+      variable: { name: "HeartbeatInterval" },
+      attributeValue: "60",
+    };
+    expect(scrubErrorReport({ extra: { entry } })).toEqual({
+      extra: { entry },
+    });
+  });
 });

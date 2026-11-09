@@ -1,4 +1,8 @@
-import { isPlainObject, redactSensitiveValue } from "./redaction";
+import {
+  isPlainObject,
+  REDACTED_VALUE,
+  redactSensitiveValue,
+} from "./redaction";
 
 /**
  * Opt-in error reporting (#794), vendor-neutral. The CLI/daemon and the web
@@ -101,15 +105,41 @@ function breakCycles(value: unknown, ancestors = new Set<object>()): unknown {
 }
 
 /**
+ * Redact the `attributeValue` of a 2.0.1 `{ variable, attributeValue }` entry
+ * whose `variable` no longer names itself. The redaction decides on
+ * `variable.name`, but Sentry normalizes `extra` / `contexts` to
+ * `normalizeDepth` before `beforeSend`: an object past that depth becomes
+ * `"[Object]"` (a cycle `"[Circular ~]"`) while the primitive beside it is
+ * kept. Without a name to clear it, the value is treated as a secret.
+ */
+function redactUnnamedVariableValues(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactUnnamedVariableValues);
+  if (!isPlainObject(value)) return value;
+  const unnamed =
+    "variable" in value &&
+    "attributeValue" in value &&
+    !(isPlainObject(value.variable) && typeof value.variable.name === "string");
+  return Object.fromEntries(
+    Object.entries(value).map(([name, nested]) => [
+      name,
+      unnamed && name === "attributeValue"
+        ? REDACTED_VALUE
+        : redactUnnamedVariableValues(nested),
+    ]),
+  );
+}
+
+/**
  * The scrubber every adapter receives as {@link ErrorReporterInit.scrub}.
  * Run an event or a breadcrumb through the redaction the trace and log
  * writers use (CSMS `user:pass@` URLs, bearer tokens, OCPP secrets such as
  * `AuthorizationKey`), then drop the request's cookies and every member
- * named after a credential header, which that redaction does not name.
+ * named after a credential header, which that redaction does not name, and
+ * redact the value of a variable whose name was normalized away.
  */
 export function scrubErrorReport<T>(report: T): T {
-  const scrubbed = dropCredentialHeaders(
-    redactSensitiveValue(breakCycles(report)),
+  const scrubbed = redactUnnamedVariableValues(
+    dropCredentialHeaders(redactSensitiveValue(breakCycles(report))),
   );
   if (!isPlainObject(scrubbed) || !isPlainObject(scrubbed.request))
     return scrubbed as T;

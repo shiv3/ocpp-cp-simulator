@@ -64,6 +64,7 @@ COPY packages/ocpp/package.json ./packages/ocpp/package.json
 COPY packages/contracts/package.json ./packages/contracts/package.json
 COPY packages/trace/package.json ./packages/trace/package.json
 COPY packages/k6-runtime/package.json ./packages/k6-runtime/package.json
+COPY packages/vehicle/package.json ./packages/vehicle/package.json
 COPY packages/core/package.json ./packages/core/package.json
 COPY packages/client/package.json ./packages/client/package.json
 COPY apps/cli/package.json ./apps/cli/package.json

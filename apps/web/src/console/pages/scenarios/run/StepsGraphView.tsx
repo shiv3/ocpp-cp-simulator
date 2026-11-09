@@ -157,6 +157,19 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
   );
   const { drag } = editing;
 
+  // A graph wider than its column (a switch with many lanes) opens on its
+  // trunk, the column everything hangs from, instead of the left edge where
+  // the trunk may be cut off; the lanes either side are a scroll away.
+  const scroller = React.useRef<HTMLDivElement>(null);
+  const trunkX = cards[0]?.x ?? null;
+  React.useLayoutEffect(() => {
+    const el = scroller.current;
+    if (!el || trunkX === null || el.clientWidth === 0) return;
+    if (el.scrollLeft === 0 && el.scrollWidth > el.clientWidth) {
+      el.scrollLeft = Math.max(0, trunkX - el.clientWidth / 2);
+    }
+  }, [trunkX]);
+
   if (!editable && cards.length === 0) {
     return <p className="text-sm text-cx-muted">{t("scenarioRun.noSteps")}</p>;
   }
@@ -248,7 +261,7 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
   const allPaths = [...paths, ...geometry.loops.flatMap((loop) => loop.arcs)];
 
   return (
-    <div className="overflow-x-auto">
+    <div ref={scroller} className="overflow-x-auto">
       <div
         ref={editing.rootRef}
         className="relative"

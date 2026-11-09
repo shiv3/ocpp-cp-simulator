@@ -7,7 +7,10 @@ import { cn } from "@/lib/utils";
 import { STEP_CATEGORIES, STEP_HELP } from "../../../lib/scenarioSteps";
 import { tileForStructure, tileForType } from "../run/stepVisuals";
 import type { MessageKey } from "../../../../i18n";
-import { ScenarioNodeType } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import {
+  ScenarioNodeType,
+  type AnyScenarioNodeType,
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 
 /**
  * Structures are entries that are not a node type: picking one inserts a block
@@ -48,7 +51,7 @@ const STRUCTURE_ENTRIES: ReadonlyArray<{
 const STRUCTURE_PREFIX = "structure:";
 
 export interface AddStepPickerProps {
-  onPick: (type: ScenarioNodeType) => void;
+  onPick: (type: AnyScenarioNodeType) => void;
   /** Wired by the host to offer structure entries (Repeat). Omit to hide them. */
   onPickStructure?: (kind: StructureKind) => void;
   /** A structure that cannot go to this slot: listed but disabled, with the
@@ -126,7 +129,7 @@ const AddStepPicker: React.FC<AddStepPickerProps> = ({
           )
           .map((type) => ({
             id: type as string,
-            type: type as ScenarioNodeType | null,
+            type: type as AnyScenarioNodeType | null,
             structure: null as StructureKind | null,
             title: t(NODE_FORM_REGISTRY[type].title),
             help: t(STEP_HELP[type as keyof typeof STEP_HELP]),
@@ -139,7 +142,7 @@ const AddStepPicker: React.FC<AddStepPickerProps> = ({
           )
           .map((e) => ({
             id: STRUCTURE_PREFIX + e.kind,
-            type: null as ScenarioNodeType | null,
+            type: null as AnyScenarioNodeType | null,
             structure: e.kind as StructureKind | null,
             title: t(e.titleKey),
             help: t(e.helpKey),

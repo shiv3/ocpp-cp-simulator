@@ -253,5 +253,12 @@
   "scenarioEditor.list.reviveDetachMany": "追加して {{count}} 本のエッジを外す",
   "scenarioEditor.list.cancel": "キャンセル",
   "scenarioEditor.choice.optionNotObject": "{{name}} は {{value}} で、オプションではありません。実行時は重み 1 で抽選されます。置き換えるまでファイルの値のまま保持されます。",
-  "scenarioEditor.choice.replaceOption": "空のオプションに置き換える"
+  "scenarioEditor.choice.replaceOption": "空のオプションに置き換える",
+  "scenarioEditor.node.parallel": "並列",
+  "scenarioEditor.node.join": "合流",
+  "scenarioEditor.palette.parallel": "並列",
+  "scenarioEditor.palette.join": "合流",
+  "scenarioEditor.join.mode": "続行する条件",
+  "scenarioEditor.join.modeAll": "すべての分岐が到達または終了したとき",
+  "scenarioEditor.join.modeAny": "最初の分岐が到達したとき(他の分岐は中止)"
 }

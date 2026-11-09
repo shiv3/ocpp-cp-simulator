@@ -70,6 +70,7 @@ import {
   type ScenarioDefinition,
   type ScenarioNode,
   ScenarioNodeType,
+  type AnyScenarioNodeType,
   type SwitchNodeData,
 } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import { connectionRule } from "@ocpp-cp-simulator/core/scenario/scenarioConnectionRules";
@@ -1483,7 +1484,7 @@ export function insertStep(
   tree: BlockTree,
   path: SeqPath,
   index: number,
-  type: ScenarioNodeType,
+  type: AnyScenarioNodeType,
 ): ScenarioDefinition {
   if (!canInsertAt(tree, path, index).ok) return def;
   const t = cloneTree(tree);
@@ -2006,7 +2007,7 @@ export function insertStepIntoNewLoop(
   tree: BlockTree,
   path: SeqPath,
   index: number,
-  type: ScenarioNodeType,
+  type: AnyScenarioNodeType,
 ): ScenarioDefinition {
   if (!canInsertLoopAt(tree, path, index).ok) return def;
   if (isTerminal(createDefaultNode(type))) return def;

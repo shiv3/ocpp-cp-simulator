@@ -4,11 +4,15 @@ import { ActionNameV16 } from "@ocpp-cp-simulator/ocpp/index";
 import { scenarioTemplates } from "./scenarioTemplates";
 import {
   isScenarioDefinitionShape,
+  ScenarioFlowNodeType,
   ScenarioNodeType,
   type ScenarioDefinition,
 } from "../cp/application/scenario/ScenarioTypes";
 
-const KNOWN_NODE_TYPES = new Set<string>(Object.values(ScenarioNodeType));
+const KNOWN_NODE_TYPES = new Set<string>([
+  ...Object.values(ScenarioNodeType),
+  ...Object.values(ScenarioFlowNodeType),
+]);
 
 /**
  * Every OCPP 1.6 Core certification scenario the brief for issue #110's

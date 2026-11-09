@@ -441,6 +441,7 @@ export const PINNED_TEMPLATE_IDS: readonly string[] = [
   "dataflow-remote-start-reauthorize-16",
   "dataflow-remote-start-reauthorize-201",
   "remote-start-timeout-fallback",
+  "parallel-heartbeat-session",
 ];
 
 /**

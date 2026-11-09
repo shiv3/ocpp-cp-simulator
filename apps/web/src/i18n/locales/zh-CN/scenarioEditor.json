@@ -253,5 +253,12 @@
   "scenarioEditor.list.reviveDetachMany": "添加并断开 {{count}} 条连线",
   "scenarioEditor.list.cancel": "取消",
   "scenarioEditor.choice.optionNotObject": "{{name}} 是 {{value}}, 不是选项: 运行时按权重 1 抽取。在你替换之前保持文件中的原值。",
-  "scenarioEditor.choice.replaceOption": "替换为空选项"
+  "scenarioEditor.choice.replaceOption": "替换为空选项",
+  "scenarioEditor.node.parallel": "并行",
+  "scenarioEditor.node.join": "汇合",
+  "scenarioEditor.palette.parallel": "并行",
+  "scenarioEditor.palette.join": "汇合",
+  "scenarioEditor.join.mode": "继续条件",
+  "scenarioEditor.join.modeAll": "所有分支都已到达或结束",
+  "scenarioEditor.join.modeAny": "第一个分支到达(取消其余分支)"
 }

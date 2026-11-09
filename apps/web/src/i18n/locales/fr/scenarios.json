@@ -289,5 +289,7 @@
   "scenarios.editor.issue.extraTimeoutEdge": "L’étape {{n}} ({{title}}) a plusieurs arêtes de timeout : seule la première s’exécute quand l’attente expire.",
   "scenarios.editor.issue.newerConstruct": "Ce scénario utilise une fonctionnalité plus récente que la version de schéma qu’il déclare ; il s’exécute ici, mais un simulateur plus ancien l’ignorerait.",
   "scenarios.editor.issue.joinWithoutParallel": "L’étape {{n}} ({{title}}) est une jonction, mais aucune branche d’un parallèle ne l’atteint : elle ne s’exécute que comme une étape ordinaire.",
-  "scenarios.editor.issue.parallelWithoutJoin": "L’étape {{n}} ({{title}}) lance des branches parallèles qui n’atteignent aucune jonction : elles se terminent simplement et rien ne s’exécute après."
+  "scenarios.editor.issue.parallelWithoutJoin": "L’étape {{n}} ({{title}}) lance des branches parallèles qui n’atteignent aucune jonction : elles se terminent simplement et rien ne s’exécute après.",
+  "scenarios.stepHelp.parallel": "Exécute chaque arête sortante comme une branche distincte, en même temps. Chaque branche a son propre CALL et sa propre réponse ; l'état de l'exécution est partagé. Réunissez les branches avec une étape Jonction.",
+  "scenarios.stepHelp.join": "Point de rencontre des branches d'une étape Parallèle. « Toutes » continue quand chaque branche est arrivée ou terminée ; « Une » continue dès la première arrivée et annule les autres."
 }

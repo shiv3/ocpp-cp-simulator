@@ -12,6 +12,8 @@ import {
   Eye,
   FileKey,
   Gauge,
+  GitFork,
+  GitMerge,
   LockOpen,
   Megaphone,
   MessageSquare,
@@ -36,7 +38,7 @@ import {
 } from "../../../../components/scenario/forms/nodeFormRegistry";
 import type {
   ScenarioNode,
-  ScenarioNodeType,
+  AnyScenarioNodeType,
 } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import type { LiveRunState } from "../../../lib/scenarioRunState";
 import { stepPhase, type StepPhase } from "../../../lib/stepLayout";
@@ -94,6 +96,8 @@ const TYPE_ICON: Partial<Record<string, TileIcon>> = {
   switch: Split,
   choice: Dices,
   setState: Variable,
+  parallel: GitFork,
+  join: GitMerge,
   ocppCall: SendHorizontal,
   callResponse: Reply,
   notification: MessageSquare,
@@ -213,7 +217,11 @@ export interface StepTreeViewProps extends RunViewCommonProps {
   tree: BlockTree;
   /** editable: a step type picked for slot `index` of the sequence at
    *  `path` (its length appends). */
-  onInsertStep?: (path: SeqPath, index: number, type: ScenarioNodeType) => void;
+  onInsertStep?: (
+    path: SeqPath,
+    index: number,
+    type: AnyScenarioNodeType,
+  ) => void;
   /** editable (Graph view): make steps `from`..`to` of the sequence at
    *  `path` a loop (the last goes back to the first). */
   onWrapInLoopRange?: (path: SeqPath, from: number, to: number) => void;
@@ -229,7 +237,7 @@ export interface StepTreeViewProps extends RunViewCommonProps {
   onInsertStepIntoLoop?: (
     path: SeqPath,
     index: number,
-    type: ScenarioNodeType,
+    type: AnyScenarioNodeType,
   ) => void;
   /** editable: step `nodeId` dropped in another sequence (or into a new
    *  Repeat block, `loop`) at slot `index` of the sequence at `path`. */

@@ -26,7 +26,10 @@ import {
   type ReservationTriggerNodeData,
   type ReserveNowNodeData,
   type ResponseOverrideNodeData,
+  type AnyScenarioNodeType,
+  type JoinNodeData,
   type ScenarioDefinition,
+  ScenarioFlowNodeType,
   type ScenarioNode,
   type ScenarioNodeData,
   ScenarioNodeType,
@@ -336,7 +339,7 @@ export function rebuildLinearScenario(
 export function insertStep(
   def: ScenarioDefinition,
   index: number,
-  type: ScenarioNodeType,
+  type: AnyScenarioNodeType,
 ): ScenarioDefinition {
   const linear = deriveLinearSteps(def);
   if (!linear.isLinear) return def;
@@ -724,7 +727,7 @@ export function updateStepData(
  * already used by the cert16 reservation templates
  * (packages/core/src/utils/scenarios/cert16-reservation-basic.json).
  */
-export function createDefaultNode(type: ScenarioNodeType): ScenarioNode {
+export function createDefaultNode(type: AnyScenarioNodeType): ScenarioNode {
   const id = crypto.randomUUID();
   const position = { x: 0, y: 0 };
 
@@ -964,6 +967,15 @@ export function createDefaultNode(type: ScenarioNodeType): ScenarioNode {
           key: "mode",
           value: "a",
         } satisfies SetStateNodeData,
+      };
+    case ScenarioFlowNodeType.PARALLEL:
+      return { id, type, position, data: { label: "Parallel" } };
+    case ScenarioFlowNodeType.JOIN:
+      return {
+        id,
+        type,
+        position,
+        data: { label: "Join", mode: "all" } satisfies JoinNodeData,
       };
     case ScenarioNodeType.CSMS_CALL_TRIGGER:
       return {
@@ -1256,7 +1268,7 @@ export const STEP_CATEGORIES: ReadonlyArray<{
   /** Stable English id (also keys the tile styles); show `labelKey`. */
   label: string;
   labelKey: MessageKey;
-  types: ScenarioNodeType[];
+  types: AnyScenarioNodeType[];
 }> = [
   {
     label: "Status",
@@ -1286,15 +1298,17 @@ export const STEP_CATEGORIES: ReadonlyArray<{
     types: WAIT_STEP_TYPES,
   },
   {
-    // Branching and run-state steps. `parallel` / `join` (feat/scenario-
-    // parallel-join) slot in here. Loops are not nodes: they are back edges
-    // the block tree draws (`wrapInLoop`), so they are not offered here.
+    // Branching and run-state steps, and `parallel` / `join` (schema 1.9).
+    // Loops are not nodes: they are back edges the block tree draws
+    // (`wrapInLoop`), so they are not offered here.
     label: "Flow control",
     labelKey: "scenarios.category.flowControl",
     types: [
       ScenarioNodeType.SWITCH,
       ScenarioNodeType.CHOICE,
       ScenarioNodeType.SET_STATE,
+      ScenarioFlowNodeType.PARALLEL,
+      ScenarioFlowNodeType.JOIN,
     ],
   },
   {
@@ -1326,7 +1340,8 @@ export const STEP_CATEGORIES: ReadonlyArray<{
  *  in the "add a step" picker's description pane. */
 export const STEP_HELP: Readonly<
   Record<
-    Exclude<ScenarioNodeType, ScenarioNodeType.START | ScenarioNodeType.END>,
+    | Exclude<ScenarioNodeType, ScenarioNodeType.START | ScenarioNodeType.END>
+    | ScenarioFlowNodeType,
     MessageKey
   >
 > = {
@@ -1350,6 +1365,8 @@ export const STEP_HELP: Readonly<
   [ScenarioNodeType.SWITCH]: "scenarios.stepHelp.switch",
   [ScenarioNodeType.CHOICE]: "scenarios.stepHelp.choice",
   [ScenarioNodeType.SET_STATE]: "scenarios.stepHelp.setState",
+  [ScenarioFlowNodeType.PARALLEL]: "scenarios.stepHelp.parallel",
+  [ScenarioFlowNodeType.JOIN]: "scenarios.stepHelp.join",
   [ScenarioNodeType.OCPP_CALL]: "scenarios.stepHelp.ocppCall",
   [ScenarioNodeType.CALL_RESPONSE]: "scenarios.stepHelp.callResponse",
   [ScenarioNodeType.NOTIFICATION]: "scenarios.stepHelp.notification",

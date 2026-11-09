@@ -136,6 +136,14 @@ case. Its golden frames pin the event path; the timeout path is covered by
 `ScenarioExecutor.timeoutEdges.test.ts`
 (see [Scenario format](../concepts/scenario-format.md)).
 
+## `parallel-heartbeat-session` (parallel / join, schema 1.9)
+
+A `parallel` node runs a three-Heartbeat branch next to a `RemoteStartTransaction` session
+(start, meter values); a `join` with `mode: "all"` waits for both branches, then the run
+ends. Not a certification case. Its golden frames pin one run (the fake CSMS answers the
+heartbeats and sends the remote start); see
+[Scenario format](../concepts/scenario-format.md) for `parallel` / `join`.
+
 ## Resilience templates (`resilience-*`)
 
 Six assertion-driven scenarios for operational failures and their recovery

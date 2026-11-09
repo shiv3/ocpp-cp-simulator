@@ -254,5 +254,12 @@
   "scenarioEditor.list.reviveDetachMany": "Add, detach the {{count}} edges",
   "scenarioEditor.list.cancel": "Cancel",
   "scenarioEditor.choice.optionNotObject": "{{name}} is {{value}}, not an option: the run draws it with weight 1. It stays as the file has it until you replace it.",
-  "scenarioEditor.choice.replaceOption": "Replace with an empty option"
+  "scenarioEditor.choice.replaceOption": "Replace with an empty option",
+  "scenarioEditor.node.parallel": "Parallel",
+  "scenarioEditor.node.join": "Join",
+  "scenarioEditor.palette.parallel": "Parallel",
+  "scenarioEditor.palette.join": "Join",
+  "scenarioEditor.join.mode": "Continue when",
+  "scenarioEditor.join.modeAll": "Every branch arrived or ended",
+  "scenarioEditor.join.modeAny": "The first branch arrives (cancels the others)"
 }

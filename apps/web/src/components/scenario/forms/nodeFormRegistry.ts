@@ -3,6 +3,7 @@ import {
   type CancelReservationNodeData,
   CERT_SIGNATURE_ALGORITHMS,
   type CertQuirksNodeData,
+  type AnyScenarioNodeType,
   type ConfigSetNodeData,
   type ConnectionTriggerNodeData,
   type ConnectorPlugNodeData,
@@ -15,6 +16,8 @@ import {
   type UseBehaviorNodeData,
   type ChoiceNodeData,
   type DelayNodeData,
+  type JoinNodeData,
+  ScenarioFlowNodeType,
   NOTIFY_KINDS,
   type NotifyNodeData,
   type SetStateNodeData,
@@ -57,6 +60,7 @@ import { NOTIFY_STATUSES } from "./notifyStatuses";
 import SetStateForm from "./SetStateForm";
 import SwitchForm from "./SwitchForm";
 import EndForm from "./EndForm";
+import JoinForm from "./JoinForm";
 import InboundPolicyForm from "./InboundPolicyForm";
 import MeterValueForm from "./MeterValueForm";
 import NotificationForm from "./NotificationForm";
@@ -573,6 +577,21 @@ function endNodeDataToForm(nodeData: ScenarioNodeData): NodeFormData {
 
 function endFormToNodeData(formData: NodeFormData): BaseNodeData {
   return baseFromForm(formData);
+}
+
+function joinNodeDataToForm(nodeData: ScenarioNodeData): NodeFormData {
+  const data = nodeData as Partial<JoinNodeData>;
+  return compactDefined({
+    ...baseToForm(nodeData),
+    mode: data.mode === "any" ? "any" : "all",
+  });
+}
+
+function joinFormToNodeData(formData: NodeFormData): JoinNodeData {
+  return compactDefined({
+    ...baseFromForm(formData),
+    mode: formData.mode === "any" ? ("any" as const) : undefined,
+  }) as JoinNodeData;
 }
 
 function statusNotificationNodeDataToForm(
@@ -1297,9 +1316,23 @@ export const NODE_FORM_REGISTRY = {
     nodeDataToForm: connectionTriggerNodeDataToForm,
     formToNodeData: connectionTriggerFormToNodeData,
   },
-} satisfies Record<ScenarioNodeType, NodeFormEntry>;
+  [ScenarioFlowNodeType.PARALLEL]: {
+    title: "scenarioEditor.node.parallel",
+    Component: EndForm,
+    nodeDataToForm: endNodeDataToForm,
+    formToNodeData: endFormToNodeData,
+  },
+  [ScenarioFlowNodeType.JOIN]: {
+    title: "scenarioEditor.node.join",
+    Component: JoinForm,
+    nodeDataToForm: joinNodeDataToForm,
+    formToNodeData: joinFormToNodeData,
+  },
+} satisfies Record<AnyScenarioNodeType, NodeFormEntry>;
 
-export function isScenarioNodeType(value: unknown): value is ScenarioNodeType {
+export function isScenarioNodeType(
+  value: unknown,
+): value is AnyScenarioNodeType {
   return (
     typeof value === "string" &&
     Object.prototype.hasOwnProperty.call(NODE_FORM_REGISTRY, value)

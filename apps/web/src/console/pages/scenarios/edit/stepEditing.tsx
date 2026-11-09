@@ -1,7 +1,7 @@
 import type React from "react";
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 
-import type { ScenarioNodeType } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import type { AnyScenarioNodeType } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import {
   useLaneDrag,
   type LaneDrag,
@@ -20,7 +20,7 @@ type EditCallbacks<L extends LaneKey> = Pick<
   RunViewCommonProps,
   "onMoveStep" | "onDeleteStep"
 > & {
-  onInsertStep?: (lane: L, index: number, type: ScenarioNodeType) => void;
+  onInsertStep?: (lane: L, index: number, type: AnyScenarioNodeType) => void;
   /** Wired to offer Repeat / Switch / Choice in the picker. */
   structure?: {
     pick: (slot: InsertSlot<L>, kind: StructureKind) => void;

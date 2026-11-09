@@ -255,5 +255,12 @@
   "scenarioEditor.list.reviveDetachMany": "Ajouter, détacher les {{count}} liens",
   "scenarioEditor.list.cancel": "Annuler",
   "scenarioEditor.choice.optionNotObject": "{{name}} vaut {{value}}, ce n'est pas une option : l'exécution le tire avec un poids de 1. Il reste tel que le fichier le contient jusqu'à ce que vous le remplaciez.",
-  "scenarioEditor.choice.replaceOption": "Remplacer par une option vide"
+  "scenarioEditor.choice.replaceOption": "Remplacer par une option vide",
+  "scenarioEditor.node.parallel": "Parallèle",
+  "scenarioEditor.node.join": "Jonction",
+  "scenarioEditor.palette.parallel": "Parallèle",
+  "scenarioEditor.palette.join": "Jonction",
+  "scenarioEditor.join.mode": "Continuer quand",
+  "scenarioEditor.join.modeAll": "Toutes les branches sont arrivées ou terminées",
+  "scenarioEditor.join.modeAny": "La première branche arrive (annule les autres)"
 }

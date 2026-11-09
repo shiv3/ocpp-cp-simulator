@@ -1,7 +1,13 @@
-import { behaviorShapeProblem } from "@ocpp-cp-sim/core/cp/application/engine/behaviorFit";
+import { behaviorShapeProblem } from "@ocpp-cp-simulator/core/cp/application/engine/behaviorFit";
 import { watch, type FSWatcher } from "node:fs";
 import path from "node:path";
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import type {
+  Behavior,
+  BehaviorParams,
+  JsonObject,
+} from "@ocpp-cp-simulator/contracts/behavior";
+import { mergeParams } from "@ocpp-cp-simulator/core/cp/application/behavior/paramsSchema";
+import { describeDefaultBehaviors } from "@ocpp-cp-simulator/core/cp/application/engine/behaviors/index";
 import { readBehaviorFile } from "./readBehaviorFile";
 
 /** A `behaviors` entry that names no loaded behavior. */
@@ -18,6 +24,14 @@ export class UnknownBehaviorError extends Error {
       }`,
     );
     this.name = "UnknownBehaviorError";
+  }
+}
+
+/** Params that name no selected behavior, or do not fit its params schema. */
+export class BehaviorParamsError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BehaviorParamsError";
   }
 }
 
@@ -142,8 +156,54 @@ export class BehaviorLibrary {
     return this.files;
   }
 
-  describe(): Array<{ id: string; file: string | null }> {
-    return [...this.entries].map(([id, e]) => ({ id, file: e.file }));
+  describe(): Array<{
+    id: string;
+    file: string | null;
+    params?: BehaviorParams;
+  }> {
+    return [...this.entries].map(([id, e]) => ({
+      id,
+      file: e.file,
+      ...(e.behavior.params ? { params: e.behavior.params } : {}),
+    }));
+  }
+
+  /**
+   * Check, before anything is applied, that each key of `params` names a
+   * built-in `default.*` behavior or one of `selected`, and that its params fit
+   * the behavior's schema (refused, never coerced). Throws
+   * {@link BehaviorParamsError}.
+   */
+  checkParams(
+    selected: readonly Behavior[],
+    params: Readonly<Record<string, JsonObject>> | undefined,
+  ): void {
+    if (!params) return;
+    const defaults = new Map(
+      describeDefaultBehaviors().map((d) => [d.id, d.params]),
+    );
+    for (const [id, set] of Object.entries(params)) {
+      let declared: BehaviorParams | undefined;
+      if (defaults.has(id)) {
+        declared = defaults.get(id);
+      } else {
+        const behavior = selected.find((b) => b.id === id);
+        if (!behavior) {
+          throw new BehaviorParamsError(
+            `behaviorParams names ${JSON.stringify(id)}, which this charge point does not run; ` +
+              `selected: ${selected.map((b) => b.id).join(", ") || "none"}; built-in: ${[...defaults.keys()].join(", ")}`,
+          );
+        }
+        declared = behavior.params;
+      }
+      try {
+        mergeParams(id, declared, [set]);
+      } catch (error) {
+        throw new BehaviorParamsError(
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    }
   }
 
   /** Every loaded behavior, in load order. */

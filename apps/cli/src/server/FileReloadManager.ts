@@ -1,11 +1,14 @@
 import * as fs from "fs";
 import * as path from "path";
 
-import type { ScenarioDefinition } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import { validateScenarioSchema } from "@ocpp-cp-sim/core/scenario/scenarioSchemaValidator";
-import { assertLoadableScenario } from "@ocpp-cp-sim/core/scenario/loadableScenario";
+import type { ScenarioDefinition } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import { validateScenarioSchema } from "@ocpp-cp-simulator/core/scenario/scenarioSchemaValidator";
+import {
+  assertLoadableScenario,
+  checkLoadableScenario,
+} from "@ocpp-cp-simulator/core/scenario/loadableScenario";
 import type { CPRegistry } from "./CPRegistry";
-import type { Database } from "@ocpp-cp-sim/core/cp/domain/persistence/Database";
+import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
 import { FileWatcher } from "./FileWatcher";
 import {
   forgetWatchedConnectorScenarioFiles,
@@ -19,7 +22,7 @@ import {
   ARRAY_MAX_ITEMS,
   SCENARIO_MAX_BYTES,
   STR_64K_MAX,
-} from "@ocpp-cp-sim/contracts/limits";
+} from "@ocpp-cp-simulator/contracts/limits";
 
 /** What kind of file was reloaded. */
 export type FileReloadTarget = "id-tags" | "scenario";
@@ -879,11 +882,15 @@ export class FileReloadManager {
     // cached as the baseline — and `loadScenario` then rejected it once the
     // session settled, with nothing left to re-apply because the baseline said
     // the charge points already held those bytes. Rejected here instead: an
-    // unloadable file never becomes a held reload (#314).
-    const finalize = (definition: ScenarioDefinition): ScenarioDefinition => {
-      assertLoadableScenario(definition);
-      return definition;
-    };
+    // unloadable file never becomes a held reload (#314). Since the browser
+    // and the daemon share one gate, a *missing* `name` / `targetType` no
+    // longer makes a file unloadable: the gate fills it in, and says so here
+    // (the normalised copy is what reaches loadScenario, which then has
+    // nothing left to report). A present but wrong one is still refused.
+    const finalize = (definition: ScenarioDefinition): ScenarioDefinition =>
+      assertLoadableScenario(definition, (message) =>
+        this.log(`[watch] ${entry.absolutePath}: ${message}`),
+      );
     if (entry.prepare) return finalize({ ...prepared, id: entry.scenarioId });
     // Pinned to the target the live definition carries — what the load
     // installed — rather than normalised to `entry.connectorId`, so a scenario
@@ -1441,15 +1448,8 @@ function readTextOrEmpty(filePath: string): string {
   }
 }
 
+/** The structural half of the load gate (`checkLoadableScenario`): an object
+ *  with a non-empty string `id` and `nodes` / `edges` arrays. */
 function isScenarioShape(value: unknown): value is ScenarioDefinition {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return false;
-  }
-  const candidate = value as Partial<ScenarioDefinition>;
-  return (
-    typeof candidate.id === "string" &&
-    candidate.id.length > 0 &&
-    Array.isArray(candidate.nodes) &&
-    Array.isArray(candidate.edges)
-  );
+  return checkLoadableScenario(value).errors.length === 0;
 }

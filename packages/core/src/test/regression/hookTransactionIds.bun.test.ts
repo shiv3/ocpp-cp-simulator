@@ -1,7 +1,7 @@
 // Hook and ctx payloads of transactions (new in the branch; nothing to compare
 // with on the base commit). Each test fails on 30b57145.
 import { expect, test } from "bun:test";
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
 import { runBehavior } from "../behavior/runBehavior";
 
 const watcher = (on: Behavior["on"]): Behavior => ({ api: 1, id: "watch", on });

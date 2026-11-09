@@ -19,9 +19,20 @@
 # PRs land the same morning, and the breaking change gets read no more closely
 # for having its own branch. Read the group PR's changelog table instead.
 version: 2
+# @open-ocpp-trace/* is on GitHub Packages (bunfig.toml, #886), which wants a
+# token even for a public package. Dependabot does not get the workflow
+# token, so the repository's Dependabot secret DEPENDABOT_PACKAGES_TOKEN
+# holds a token with read:packages.
+registries:
+  github-packages:
+    type: npm-registry
+    url: https://npm.pkg.github.com
+    token: ${{secrets.DEPENDABOT_PACKAGES_TOKEN}}
 updates:
   - package-ecosystem: "bun"
     directory: "/"
+    registries:
+      - github-packages
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 10
@@ -34,6 +45,11 @@ updates:
       - dependency-name: "typescript"
         update-types:
           - "version-update:semver-major"
+      # Dependabot resolves a scoped package's registry from .npmrc, not
+      # bunfig.toml, so it looks up @open-ocpp-trace/* on npmjs and gets a
+      # 404 that marks every weekly bun run failed. The registry above still
+      # lets it install the lockfile; bump the SDK by hand (#886).
+      - dependency-name: "@open-ocpp-trace/*"
     groups:
       js-dependencies:
         patterns:

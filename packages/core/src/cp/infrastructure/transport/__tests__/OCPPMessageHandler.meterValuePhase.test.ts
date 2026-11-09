@@ -5,7 +5,8 @@ import type { ProtocolCodec } from "../profile/ProtocolProfile";
 import type { OCPPWebSocket } from "../OCPPWebSocket";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { GenerationToken, Settlement } from "../network-sim";
-import type { MeterValuesRequestV16 } from "@ocpp-cp-sim/ocpp/index";
+import type { MeterValuesRequestV16 } from "@ocpp-cp-simulator/ocpp/index";
+import { stubOperatingPoint } from "../../../domain/connector/__tests__/operatingPointStub";
 
 /**
  * Regression for #301 finding 1 on OCPP 1.6-J: `sendMeterValue` casts the
@@ -44,6 +45,9 @@ class MockChargePoint {
   configuration = {
     transactionMessageAttempts: () => 3,
     meterValuesSampledData: () => ["Current.Import"],
+    stopTxnSampledData: () => [],
+    stopTxnAlignedData: () => [],
+    txStartedMeasurands: () => [],
   };
   notifyOutgoingCall(): void {}
   notifyIncomingCall(): void {}
@@ -70,7 +74,10 @@ class MockChargePoint {
       // Three phases in use: no profile restricts them (#301).
       activePhaseCount: () => 3,
       // One resolve, one instant (#301).
-      scheduleConstraints: () => ({ watts: Infinity, activePhases: 3 }),
+      announceScheduleCrossingNow() {},
+      operatingPoint() {
+        return stubOperatingPoint(this, Infinity, 3);
+      },
     };
   }
   cleanTransaction(): void {}

@@ -1,21 +1,33 @@
 import type React from "react";
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 
-import type { StepLane } from "../../../lib/scenarioSteps";
-import { useLaneDrag, type LaneDrag } from "../../../lib/useLaneDrag";
-import type { StepRunViewProps } from "../run/stepVisuals";
-import AddStepPicker from "./AddStepPicker";
+import type { AnyScenarioNodeType } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import {
+  useLaneDrag,
+  type LaneDrag,
+  type LaneKey,
+} from "../../../lib/useLaneDrag";
+import type { RunViewCommonProps } from "../run/stepVisuals";
+import AddStepPicker, { type StructureKind } from "./AddStepPicker";
 
 /** Where a picked step goes: `index` of `lane`. */
-export interface InsertSlot {
-  lane: StepLane;
+export interface InsertSlot<L extends LaneKey = LaneKey> {
+  lane: L;
   index: number;
 }
 
-type EditCallbacks = Pick<
-  StepRunViewProps,
-  "onInsertStep" | "onMoveStep" | "onDeleteStep"
->;
+type EditCallbacks<L extends LaneKey> = Pick<
+  RunViewCommonProps,
+  "onMoveStep" | "onDeleteStep"
+> & {
+  onInsertStep?: (lane: L, index: number, type: AnyScenarioNodeType) => void;
+  /** Wired to offer Repeat / Switch / Choice in the picker. */
+  structure?: {
+    pick: (slot: InsertSlot<L>, kind: StructureKind) => void;
+    /** The structures that cannot go to `slot`, with the reason. */
+    refusals?: (slot: InsertSlot<L>) => Partial<Record<StructureKind, string>>;
+  };
+};
 
 /**
  * The editing wiring the Steps and Graph views share, so both behave the
@@ -25,13 +37,13 @@ type EditCallbacks = Pick<
  * asks to remove it). `measure` gives the drag the lane's step centres, given
  * the view's root (`rootRef`).
  */
-export function useStepEditing(
-  callbacks: EditCallbacks,
-  measure: (lane: StepLane, root: HTMLElement | null) => number[],
+export function useStepEditing<L extends LaneKey>(
+  callbacks: EditCallbacks<L>,
+  measure: (lane: L, root: HTMLElement | null) => number[],
 ): {
-  slot: InsertSlot | null;
-  isSlotOpen: (lane: StepLane, index: number) => boolean;
-  openSlot: (lane: StepLane, index: number) => void;
+  slot: InsertSlot<L> | null;
+  isSlotOpen: (lane: L, index: number) => boolean;
+  openSlot: (lane: L, index: number) => void;
   /** The step picker for the open slot (render it where the slot is). */
   picker: React.ReactNode;
   drag: LaneDrag | null;
@@ -40,13 +52,13 @@ export function useStepEditing(
   /** Put on the views' root: the keyboard's refocus looks inside it. */
   rootRef: React.RefObject<HTMLDivElement | null>;
 } {
-  const { onInsertStep, onMoveStep, onDeleteStep } = callbacks;
-  const [slot, setSlot] = useState<InsertSlot | null>(null);
+  const { onInsertStep, onMoveStep, onDeleteStep, structure } = callbacks;
+  const [slot, setSlot] = useState<InsertSlot<L> | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const refocusId = useRef<string | null>(null);
 
   const { drag, handlers: dragHandlers } = useLaneDrag({
-    measure: (lane) => measure(lane, rootRef.current),
+    measure: (lane) => measure(lane as L, rootRef.current),
     onDrop: (id, _lane, from, to) => onMoveStep?.(id, to - from),
   });
 
@@ -87,6 +99,15 @@ export function useStepEditing(
         onInsertStep?.(slot.lane, slot.index, type);
         setSlot(null);
       }}
+      onPickStructure={
+        structure
+          ? (kind) => {
+              structure.pick(slot, kind);
+              setSlot(null);
+            }
+          : undefined
+      }
+      structureRefusals={structure?.refusals?.(slot)}
       onClose={() => setSlot(null)}
     />
   ) : null;

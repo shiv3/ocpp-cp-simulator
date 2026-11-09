@@ -11,13 +11,13 @@ import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
 import { createRegistryEventBridge } from "../registryEvents";
 import { registerSocketHandlers } from "../socketServer";
-import type { ChargePointSnapshot } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+import type { ChargePointSnapshot } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 import {
   ARRAY_MAX_ITEMS,
   STR_64K_MAX,
   type SimulatorConfigInput,
-} from "@ocpp-cp-sim/contracts/index";
-import type { ScenarioDefinition } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+} from "@ocpp-cp-simulator/contracts/index";
+import type { ScenarioDefinition } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 
 type Handler = (...args: unknown[]) => void;
 type RpcAck = { ok: true; result: unknown } | { ok: false; error: unknown };
@@ -660,6 +660,66 @@ describe("socket.io rpc dispatch", () => {
     expect(result.failed).toHaveLength(1);
     expect(result.failed[0].cpId).toBe("GONE");
     expect(result.failed[0].reason).not.toBe("");
+  });
+
+  it("cp.scenario.run starts the template on each match and reports scenario ids (#486)", async () => {
+    const facade = {
+      selectChargePointIds: vi.fn(() => ["A", "B", "GONE"]),
+      runScenarioTemplate: vi.fn(async (cpId: string) => {
+        if (cpId === "GONE") throw new Error(`cpId not found: ${cpId}`);
+        return { scenarioId: `sc-${cpId}` };
+      }),
+    };
+    const socket = connectFacade(facade);
+
+    const ack = await socket.emitRpc({
+      method: "cp.scenario.run",
+      params: {
+        labels: { site: "s1" },
+        connector: 2,
+        templateId: "basic-charge",
+        once: true,
+      },
+    });
+
+    expect(ack.ok).toBe(true);
+    if (!ack.ok) return;
+    const result = ack.result as {
+      matched: string[];
+      started: Array<{ cpId: string; scenarioId: string }>;
+      failed: Array<{ cpId: string; reason: string }>;
+    };
+    expect(facade.selectChargePointIds).toHaveBeenCalledWith({ site: "s1" });
+    expect(facade.runScenarioTemplate).toHaveBeenCalledWith(
+      "A",
+      "basic-charge",
+      expect.objectContaining({ connectorId: 2, once: true }),
+    );
+    expect(result.matched).toEqual(["A", "B", "GONE"]);
+    expect(result.started).toEqual([
+      { cpId: "A", scenarioId: "sc-A" },
+      { cpId: "B", scenarioId: "sc-B" },
+    ]);
+    expect(result.failed).toHaveLength(1);
+    expect(result.failed[0].cpId).toBe("GONE");
+  });
+
+  it("cp.scenario.run refuses a match past the result cap before acting (#486)", async () => {
+    const facade = {
+      selectChargePointIds: vi.fn(() =>
+        Array.from({ length: ARRAY_MAX_ITEMS + 1 }, (_, i) => `CP${i}`),
+      ),
+      runScenarioTemplate: vi.fn(),
+    };
+    const socket = connectFacade(facade);
+
+    const ack = await socket.emitRpc({
+      method: "cp.scenario.run",
+      params: { labels: { site: "s1" }, connector: 1, templateId: "t" },
+    });
+
+    expect(ack).toMatchObject({ ok: false, error: { code: "invalid_params" } });
+    expect(facade.runScenarioTemplate).not.toHaveBeenCalled();
   });
 
   it("data_transfer refuses a string past the cap with invalid_params (#382)", async () => {

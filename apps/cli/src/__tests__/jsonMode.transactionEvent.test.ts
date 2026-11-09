@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { handleJsonCommand } from "../jsonMode";
-import type { ChargePointService } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+import type { ChargePointService } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 import type { FacadeSingleCpTarget } from "../singleCpTarget";
 
 const CP_ID = "bootstrap-cp";
@@ -109,5 +109,30 @@ describe("JSON-Lines transaction parameters (#335)", () => {
       params: { connector: 1, context: "Trigger" },
     });
     expect(sendMeterValue).toHaveBeenCalledWith(CP_ID, 1, "Trigger");
+  });
+});
+
+// #813: the reply is written once the start has an outcome.
+describe("JSON-Lines start_transaction outcome (#813)", () => {
+  it("resolves only after the start settled and returns its outcome", async () => {
+    let settle: (v: { started: boolean; denialStatus?: string }) => void = () =>
+      undefined;
+    const startTransaction = vi.fn().mockReturnValue(
+      new Promise((resolve) => {
+        settle = resolve;
+      }),
+    );
+    let done = false;
+    const pending = handleJsonCommand(facadeTarget({ startTransaction }), {
+      command: "start_transaction",
+      params: { connector: 1, tagId: "TAG" },
+    }).then((r) => {
+      done = true;
+      return r;
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(done).toBe(false);
+    settle({ started: false, denialStatus: "Invalid" });
+    expect(await pending).toEqual({ started: false, denialStatus: "Invalid" });
   });
 });

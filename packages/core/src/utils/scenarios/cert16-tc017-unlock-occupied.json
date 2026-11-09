@@ -1,7 +1,7 @@
 {
   "id": "cert16-tc017-unlock-occupied",
   "name": "Cert 1.6 Core: TC_017 Unlock Connector (Occupied, Succeeds)",
-  "description": "Session running (StartTransaction.req, Charging, MeterValue.req); pre-arms the connector's next UnlockConnector.req response as Unlocked so the CSMS can verify a successful remote unlock while occupied, then StopTransaction.req → StatusNotification(Finishing) → StatusNotification(Available).",
+  "description": "Session running (StartTransaction.req, Charging, MeterValues.req); pre-arms the connector's next UnlockConnector.req response as Unlocked so the CSMS can verify a successful remote unlock while occupied, then StopTransaction.req → StatusNotification(Finishing) → StatusNotification(Available).",
   "targetType": "connector",
   "targetId": 1,
   "trigger": { "type": "manual" },

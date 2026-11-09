@@ -3,7 +3,7 @@ import type { ChargePointInitOptions } from "../../types";
 import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
 import { NetworkSimManager } from "../NetworkSimManager";
-import type { ResolvedNetworkSimConfig } from "@ocpp-cp-sim/core/cp/infrastructure/transport/network-sim/config";
+import type { ResolvedNetworkSimConfig } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/network-sim/config";
 
 const registries: CPRegistry[] = [];
 

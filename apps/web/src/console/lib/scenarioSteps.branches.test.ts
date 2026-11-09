@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   ScenarioNodeType,
   type ScenarioDefinition,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import { forkScenario } from "../test/scenarioFixtures";
 import {
   addParallelBranch,
@@ -13,6 +13,7 @@ import {
   insertStep,
   moveLaneStep,
   removeLaneStep,
+  setLaneLink,
 } from "./scenarioSteps";
 import { deriveStepLayout, type StepLayout } from "./stepLayout";
 
@@ -30,6 +31,33 @@ function lanes(def: ScenarioDefinition): {
       ? layout.fork.branches.map((b) => b.steps.map((n) => n.id))
       : null,
   };
+}
+
+/** start → a → b, b looping back to a (no edge to END). */
+function linearLoop(): ScenarioDefinition {
+  const base = forkScenario();
+  const step = (id: string) => ({
+    id,
+    type: ScenarioNodeType.DELAY,
+    position: { x: 0, y: 0 },
+    data: { label: id, delaySeconds: 1 },
+  });
+  const find = (type: ScenarioNodeType) =>
+    base.nodes.find((n) => n.type === type)!;
+  return {
+    ...base,
+    nodes: [
+      { ...find(ScenarioNodeType.START), id: "start" },
+      step("a"),
+      step("b"),
+      { ...find(ScenarioNodeType.END), id: "end" },
+    ],
+    edges: [
+      { id: "e1", source: "start", target: "a" },
+      { id: "e2", source: "a", target: "b" },
+      { id: "e3", source: "b", target: "a" },
+    ],
+  } as ScenarioDefinition;
 }
 
 // forkScenario: main [plug, status], branches [[charge, meter], [wait]].
@@ -173,19 +201,71 @@ describe("branch-aware step editing", () => {
 
   it("leaves an unsupported layout unchanged", () => {
     const def = forkScenario();
-    // A join: both branches reach `meter`.
+    // An orphan step nothing leads to.
     const joined = {
       ...def,
-      edges: [
-        ...def.edges,
-        { id: "wait->meter", source: "wait", target: "meter" },
+      nodes: [
+        ...def.nodes,
+        {
+          id: "orphan",
+          type: ScenarioNodeType.DELAY,
+          position: { x: 0, y: 0 },
+          data: { label: "x" },
+        },
       ],
-    };
+    } as typeof def;
     const layout = deriveStepLayout(joined);
     expect(layout.supported).toBe(false);
     expect(
       insertLaneStep(joined, layout, "main", 0, ScenarioNodeType.DELAY),
     ).toBe(joined);
     expect(addParallelBranch(joined, layout)).toBe(joined);
+  });
+
+  it("keeps a loop closing at the end of its lane through inserts and rewrites", () => {
+    const chain = linearLoop();
+    const layout = deriveStepLayout(chain);
+    expect(layout.links).toHaveLength(1);
+    const inserted = insertLaneStep(
+      chain,
+      layout,
+      "main",
+      2,
+      ScenarioNodeType.DELAY,
+    );
+    const after = deriveStepLayout(inserted);
+    expect(after.supported).toBe(true);
+    expect(after.main).toHaveLength(3);
+    // The loop now leaves the new last step, still back to `a`.
+    expect(after.links.map((l) => [l.source, l.target])).toEqual([
+      [after.main[2].id, "a"],
+    ]);
+  });
+
+  it("setLaneLink closes a lane with a loop and opens it again", () => {
+    const chain = {
+      ...linearLoop(),
+      edges: linearLoop().edges.filter(
+        (e) => e.target !== "a" || e.source === "start",
+      ),
+    };
+    const layout = deriveStepLayout(chain);
+    expect(layout.links).toHaveLength(0);
+    const looped = setLaneLink(chain, layout, "b", "a");
+    expect(
+      deriveStepLayout(looped).links.map((l) => [l.source, l.target]),
+    ).toEqual([["b", "a"]]);
+    // No edge to END any more: the loop closes the lane.
+    expect(looped.edges.some((e) => e.target === "end")).toBe(false);
+    const opened = setLaneLink(looped, deriveStepLayout(looped), "b", null);
+    expect(deriveStepLayout(opened).links).toHaveLength(0);
+    expect(opened.edges.some((e) => e.target === "end")).toBe(true);
+    // Only a lane's last step takes a link.
+    expect(setLaneLink(chain, layout, "a", "b")).toBe(chain);
+  });
+
+  it("refuses a parallel branch on a chain closed by a loop", () => {
+    const chain = linearLoop();
+    expect(addParallelBranch(chain, deriveStepLayout(chain))).toBe(chain);
   });
 });

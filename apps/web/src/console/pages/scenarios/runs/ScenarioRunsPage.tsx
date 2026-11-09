@@ -7,8 +7,8 @@ import {
   SCENARIO_RUN_EXECUTION_STATES,
   SCENARIO_VERDICTS,
   type ScenarioRunQuery,
-} from "@ocpp-cp-sim/core/cp/application/verification/ScenarioRunSummary";
-import { SCENARIO_RUNS_PAGE_DEFAULT } from "@ocpp-cp-sim/contracts/index";
+} from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunSummary";
+import { SCENARIO_RUNS_PAGE_DEFAULT } from "@ocpp-cp-simulator/contracts/index";
 import { useChargePoints } from "../../../../data/hooks/useChargePoints";
 import { useConfig } from "../../../../data/hooks/useConfig";
 import EmptyState from "../../../components/EmptyState";
@@ -151,8 +151,8 @@ const ScenarioRunsPage: React.FC = () => {
       <div className="p-6">
         <PageHeader title={t("scenarios.history.title")} />
         <EmptyState
-          title={t("scenarios.history.needsDaemonTitle")}
-          hint={t("scenarios.history.needsDaemonHint")}
+          title={t("scenarios.history.unavailableTitle")}
+          hint={t("scenarios.history.unavailableHint")}
         />
       </div>
     );

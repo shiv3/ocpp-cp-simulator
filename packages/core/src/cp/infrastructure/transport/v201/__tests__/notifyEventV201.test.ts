@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { isValidNotifyEventRequestV201 } from "@ocpp-cp-sim/ocpp/v201/index";
-import { isValidNotifyEventRequestV21 } from "@ocpp-cp-sim/ocpp/v21/index";
+import { isValidNotifyEventRequestV201 } from "@ocpp-cp-simulator/ocpp/v201/index";
+import { isValidNotifyEventRequestV21 } from "@ocpp-cp-simulator/ocpp/v21/index";
 import type { MonitoringEvent } from "../../../../domain/monitoring/MonitorEvaluation";
 import type { VariableMonitor } from "../../../../domain/monitoring/VariableMonitor";
 import { buildNotifyEventRequests } from "../notifyEventV201";

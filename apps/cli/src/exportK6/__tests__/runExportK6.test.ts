@@ -204,6 +204,41 @@ describe("runExportK6", () => {
       expect(message).toContain('unsupported node type "useBehavior" (node x)');
     });
 
+    it.each([
+      ["notify", { kind: "firmwareStatus", status: "Installed" }],
+      ["switch", { value: 1, cases: [1] }],
+      ["choice", { options: [{}, {}] }],
+      ["setState", { key: "k", value: 1 }],
+    ])("%s (schema 1.6, #654)", async (type, data) => {
+      const message = await refuse(withNode(type, data));
+      expect(message).toContain(`unsupported node type "${type}" (node x)`);
+      expect(message).toContain("k6 runtime does not have");
+    });
+
+    it.each([{ until: "2030-01-01T00:00:00.000Z" }, { jitterSeconds: 2 }])(
+      "delay with %j (schema 1.6, #654)",
+      async (extra) => {
+        const message = await refuse(
+          withNode("delay", { delaySeconds: 1, ...extra }),
+        );
+        expect(message).toContain("not supported by export-k6 (node x)");
+      },
+    );
+
+    it("useBehavior with params or mode disable (schema 1.6)", async () => {
+      for (const data of [
+        { behaviorId: "default.firmware", params: { stepMs: 500 } },
+        { behaviorId: "default.firmware", mode: "disable" },
+      ]) {
+        const message = await refuse(withNode("useBehavior", data));
+        expect(message).toContain(
+          'unsupported node type "useBehavior" (node x)',
+        );
+        expect(message).toContain("params");
+        expect(message).toContain("disable");
+      }
+    });
+
     it("csmsCallTrigger with behavior replace", async () => {
       const message = await refuse(
         withNode("csmsCallTrigger", { action: "Reset", behavior: "replace" }),
@@ -232,6 +267,50 @@ describe("runExportK6", () => {
         }),
       );
       expect(message).toContain('"$from"');
+    });
+
+    it.each([
+      ["parallel", {}],
+      ["join", { mode: "any" }],
+    ])("%s (schema 1.9)", async (type, data) => {
+      const message = await refuse(withNode(type, data));
+      expect(message).toContain(`unsupported node type "${type}" (node x)`);
+      expect(message).toContain("schema 1.9");
+    });
+
+    it("a timeout edge (schema 1.8), named by id", async () => {
+      const message = await refuse({
+        ...withNode("statusTrigger", {
+          targetStatus: "Charging",
+          timeout: 5,
+        }),
+        edges: [
+          ...VALID.edges,
+          { id: "late", source: "x", target: "c", kind: "timeout" },
+        ],
+      });
+      expect(message).toContain(
+        "timeout edges (schema 1.8) are not supported by export-k6 (edge late from x)",
+      );
+    });
+
+    it("a loop edge (schema 1.10), named by id", async () => {
+      const message = await refuse({
+        ...VALID,
+        edges: [
+          ...VALID.edges,
+          {
+            id: "again",
+            source: "b",
+            target: "b",
+            kind: "loop",
+            loop: { times: 3 },
+          },
+        ],
+      });
+      expect(message).toContain(
+        "loop edges (schema 1.10) are not supported by export-k6 (edge again from b)",
+      );
     });
 
     it("still exports csmsCallTrigger with behavior observe", async () => {

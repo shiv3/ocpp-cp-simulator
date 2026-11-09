@@ -3,9 +3,9 @@ import { useEffect, useState } from "react";
 import type {
   HistoryOptions,
   StateHistoryEntry,
-} from "@ocpp-cp-sim/core/cp/application/services/types/StateSnapshot";
+} from "@ocpp-cp-simulator/core/cp/domain/services/StateSnapshot";
 import { useDataContext } from "../providers/DataProvider";
-import type { RemoteConnectionState } from "@ocpp-cp-sim/client/remote/RemoteChargePointService";
+import type { RemoteConnectionState } from "@ocpp-cp-simulator/client/remote/RemoteChargePointService";
 
 interface UseStateHistoryOptions {
   autoRefresh?: boolean;

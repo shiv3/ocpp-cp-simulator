@@ -7,7 +7,7 @@ import {
   HOUR_MS,
   runFleet,
   sha256Lines,
-} from "@ocpp-cp-sim/core/cp/shared/__tests__/virtualFleet";
+} from "@ocpp-cp-simulator/core/cp/shared/__tests__/virtualFleet";
 
 interface RunOptions {
   wsUrl: string;

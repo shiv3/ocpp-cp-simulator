@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 
 function callResultFrame(messageId: string): (frame: OcppFrame) => boolean {
@@ -34,7 +34,7 @@ async function bootAccepted(csms: MockCsms): Promise<void> {
 describe("OCPP 2.1 inbound CSMS calls", () => {
   it("handles v21 net-new, shared, malformed, and unknown inbound CALLs", async () => {
     const csms = startMockCsms();
-    const cp = new ChargePoint(
+    const cp = createChargePoint(
       "CP21-INBOUND",
       DefaultBootNotification,
       1,
@@ -111,8 +111,8 @@ describe("OCPP 2.1 inbound CSMS calls", () => {
       ).toEqual([
         4,
         "v21-set-der-malformed",
-        "FormatViolation",
-        "Invalid SetDERControl payload",
+        "OccurrenceConstraintViolation",
+        "Invalid SetDERControl payload: must have required property 'isDefault'",
         {},
       ]);
 

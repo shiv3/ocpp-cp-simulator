@@ -1,10 +1,10 @@
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import type {
   ChargePointSnapshot,
   ConnectorSnapshot,
-} from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+} from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 import type { LiveRunState } from "../../lib/scenarioRunState";
-import { matchesLabelSelector } from "@ocpp-cp-sim/contracts/labels";
+import { matchesLabelSelector } from "@ocpp-cp-simulator/contracts/labels";
 
 /** One charge point of the list with everything the three views and the
  *  filters read: the live snapshot (status, heartbeat, connectors) plus what

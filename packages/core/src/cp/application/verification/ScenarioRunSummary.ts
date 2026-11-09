@@ -6,7 +6,7 @@ import type { ScenarioRunResult } from "./ScenarioAssertions";
 import {
   SCENARIO_RUN_EXECUTION_STATES,
   SCENARIO_VERDICTS,
-} from "@ocpp-cp-sim/contracts/scenario";
+} from "@ocpp-cp-simulator/contracts/scenario";
 
 // Defined in `packages/contracts/src` (#578); re-exported for the existing import sites.
 export { SCENARIO_RUN_EXECUTION_STATES, SCENARIO_VERDICTS };
@@ -14,7 +14,7 @@ export { SCENARIO_RUN_EXECUTION_STATES, SCENARIO_VERDICTS };
 /**
  * The read side of the scenario run history (#388): what `scenario.runs.list`
  * returns and filters on. Shared by the daemon, the control plane and the
- * console; the stores live in `cp/domain/persistence/ScenarioRunRepository`.
+ * console; the stores live in `cp/application/verification/ScenarioRunRepository`.
  */
 
 export type ScenarioRunExecutionState = ScenarioRunResult["executionState"];

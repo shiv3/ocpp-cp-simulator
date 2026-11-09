@@ -1,12 +1,12 @@
 // apps/cli/src/exportK6/runExportK6.ts
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { validateScenarioSchema } from "@ocpp-cp-sim/core/scenario/scenarioSchemaValidator";
-import { SUPPORTED_ASSERTION_TYPES } from "@ocpp-cp-sim/k6-runtime/assertions";
+import { validateScenarioSchema } from "@ocpp-cp-simulator/core/scenario/scenarioSchemaValidator";
+import { SUPPORTED_ASSERTION_TYPES } from "@ocpp-cp-simulator/k6-runtime/assertions";
 import type {
   ScenarioJson,
   ScenarioNodeJson,
-} from "@ocpp-cp-sim/k6-runtime/types";
+} from "@ocpp-cp-simulator/k6-runtime/types";
 import { RUNTIME_FILES } from "./runtimeManifest";
 import { RUNTIME_SOURCES } from "./runtimeSources";
 import {
@@ -193,9 +193,37 @@ function validateExportability(scenario: ScenarioJson): string[] {
         );
       }
     }
+    // Schema 1.6 (#654): a wait the k6 interpreter has no seeded stream or
+    // station clock for.
+    if (
+      node.type === "delay" &&
+      (data.until !== undefined || data.jitterSeconds !== undefined)
+    ) {
+      problems.push(
+        `delay "until" and "jitterSeconds" (schema 1.6) are not supported by export-k6 (node ${node.id}): the k6 runtime waits for delaySeconds only`,
+      );
+    }
     if (node.type === "ocppCall" && containsFrom(data.payload)) {
       problems.push(
         `ocppCall payload uses "$from", which needs a CALL taken over by a csmsCallTrigger with behavior "replace"; export-k6 does not support it (node ${node.id})`,
+      );
+    }
+  }
+  // Schema 1.8 / 1.10: the k6 interpreter walks ordinary edges only and fails on a
+  // timeout; it has no loop bounds either. Either kind would be silently taken
+  // as a next step.
+  const rawEdges: unknown[] = Array.isArray(scenario.edges)
+    ? scenario.edges
+    : [];
+  for (const edge of rawEdges) {
+    if (isPlainObject(edge) && edge.kind === "timeout") {
+      problems.push(
+        `timeout edges (schema 1.8) are not supported by export-k6 (edge ${String(edge.id)} from ${String(edge.source)}): the k6 runtime fails the iteration when a wait times out; remove the edge or run the scenario on the simulator`,
+      );
+    }
+    if (isPlainObject(edge) && edge.kind === "loop") {
+      problems.push(
+        `loop edges (schema 1.10) are not supported by export-k6 (edge ${String(edge.id)} from ${String(edge.source)}): the k6 runtime has no loop bounds (times, forSeconds, until); run the scenario on the simulator`,
       );
     }
   }
@@ -220,8 +248,19 @@ function validateExportability(scenario: ScenarioJson): string[] {
 const REFUSED_BEHAVIOR_NODES: Readonly<Record<string, string>> = {
   callResponse:
     ": answering a CALL the scenario took over needs a station behavior engine, which the k6 runtime does not have",
+  notify:
+    ": sending a status notification from a scenario (schema 1.6) goes through the station engine, which the k6 runtime does not have",
+  switch:
+    ": branching on a value (schema 1.6) needs the $from roots of a station, which the k6 runtime does not have",
+  choice:
+    ": a seeded choice (schema 1.6) needs the station's seeded streams, which the k6 runtime does not have",
+  setState:
+    ": the state of a run (schema 1.6) is read through $from, which the k6 runtime does not have",
+  parallel:
+    ": forking a branch and meeting it at a join (schema 1.9) needs branch-scoped cancellation, which the k6 interpreter (one walk per virtual user) does not have",
+  join: ": a join (schema 1.9) meets the branches of a parallel, which export-k6 does not support",
   useBehavior:
-    ": selecting a loaded behavior needs a station behavior engine, which the k6 runtime does not have",
+    ': selecting a behavior, setting its params (schema 1.6) or disabling it (mode "disable") needs a station behavior engine, which the k6 runtime does not have; a k6 behavior runs with its declared defaults',
 };
 
 /** Does `value` hold a `{ "$from": … }` reference anywhere? */

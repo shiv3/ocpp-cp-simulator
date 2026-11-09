@@ -9,7 +9,7 @@ import {
   isValidInstallCertificateResponseV21,
   isValidSecurityEventNotificationRequestV201,
   isValidSecurityEventNotificationRequestV21,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import type { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
 import type { Database } from "../../../../domain/persistence/Database";
 import { computeCertificateHashData } from "../../../../domain/security/certificateHash";
@@ -410,17 +410,154 @@ describe.each(VERSIONS)(
       function signingContext(store: CertificateStore, maxChainSize = 10000) {
         const certificateInstalled = vi.fn();
         const certificateStored = vi.fn();
+        const certificateRejected = vi.fn();
         const ctx: V201InboundContext = {
           ...context(store, 10, maxChainSize).ctx,
           certificateSigning: {
             requestSignature: vi.fn(),
+            isKnownSignRequestId: () => true,
             requestCombinedSignature: vi.fn(),
             certificateStored,
             certificateInstalled,
+            certificateRejected,
           },
         };
-        return { ctx, certificateInstalled, certificateStored };
+        return {
+          ctx,
+          certificateInstalled,
+          certificateStored,
+          certificateRejected,
+        };
       }
+
+      // #587 A02.FR.06/07/20
+      it("rejects an expired leaf with the security event and ends the resends, but not for a superseded CSR", async () => {
+        const store = new CertificateStore();
+        const root = await selfSignedRoot("01", "Root");
+        const csr = await store.generateNewCsr("CP", "CPO");
+        const { ctx, certificateRejected, certificateStored } =
+          signingContext(store);
+
+        const expired = await handlers.CertificateSigned(
+          {
+            certificateChain: await leafForCsr("02", csr, root, {
+              notBeforeOffsetMs: -86_400_000,
+              notAfterOffsetMs: -1_000,
+            }),
+            certificateType: "ChargingStationCertificate",
+          },
+          ctx,
+        );
+        expect(expired.response).toEqual({ status: "Rejected" });
+        expect(validSigned(expired.response)).toBe(true);
+        expect(certificateRejected).toHaveBeenCalledExactlyOnceWith(
+          "ChargingStationCertificate",
+        );
+        expect(certificateStored).not.toHaveBeenCalled();
+        await expired.afterResult?.();
+        expect(ctx.sendCall).toHaveBeenCalledWith(
+          "SecurityEventNotification",
+          expect.objectContaining({
+            type: "InvalidChargingStationCertificate",
+          }),
+        );
+        expect(store.listSignedChains()).toEqual([]);
+
+        certificateRejected.mockClear();
+        const other = await generateCsr("CP-OTHER", "CPO");
+        const superseded = await handlers.CertificateSigned(
+          {
+            certificateChain: await leafForCsr("03", other.pem, root, {
+              notBeforeOffsetMs: -86_400_000,
+              notAfterOffsetMs: -1_000,
+            }),
+            certificateType: "ChargingStationCertificate",
+          },
+          ctx,
+        );
+        expect(superseded.response).toEqual({ status: "Rejected" });
+        expect(certificateRejected).not.toHaveBeenCalled();
+      });
+
+      // #587: 2.0.1 ed4 and 2.1 ed2 A02.FR.06/07 both ask for the current
+      // date to be within the validity period.
+      it("rejects a leaf that is not valid yet, with the security event", async () => {
+        const store = new CertificateStore();
+        const root = await selfSignedRoot("01", "Root");
+        const csr = await store.generateNewCsr("CP", "CPO");
+        const { ctx, certificateRejected, certificateInstalled } =
+          signingContext(store);
+
+        const result = await handlers.CertificateSigned(
+          {
+            certificateChain: await leafForCsr("02", csr, root, {
+              notBeforeOffsetMs: 3_600_000,
+            }),
+            certificateType: "ChargingStationCertificate",
+          },
+          ctx,
+        );
+        expect(result.response).toEqual({ status: "Rejected" });
+        expect(certificateRejected).toHaveBeenCalledTimes(1);
+        expect(certificateInstalled).not.toHaveBeenCalled();
+        expect(store.listSignedChains()).toEqual([]);
+        await result.afterResult?.();
+        expect(ctx.sendCall).toHaveBeenCalledWith(
+          "SecurityEventNotification",
+          expect.objectContaining({
+            type: "InvalidChargingStationCertificate",
+          }),
+        );
+      });
+
+      // #587 A02.FR.06/07/20 (TC_A_14_CS): a leaf outside the operator
+      // hierarchy, or with wrong Certificate Properties, is Rejected with the
+      // event and ends the resends like an expired one.
+      it.each([
+        ["outside the CSMS root hierarchy", undefined, "does not lead to"],
+        [
+          "with a URL as commonName",
+          "CN=wss://csms.example.com,O=Example",
+          "A00.FR.511",
+        ],
+      ])(
+        "rejects a leaf %s, with the security event and no further resends",
+        async (_label, subject, expectedReason) => {
+          const store = new CertificateStore();
+          const root = await selfSignedRoot("01", "Root");
+          await store.installRootCertificate("CsmsRootCertificate", root.pem, {
+            maxEntries: 10,
+          });
+          const csr = await store.generateNewCsr("CP", "CPO");
+          const issuer = subject
+            ? root
+            : await selfSignedRoot("09", "Invalid Signing CA");
+          const { ctx, certificateRejected, certificateInstalled } =
+            signingContext(store);
+
+          const result = await handlers.CertificateSigned(
+            {
+              certificateChain: await leafForCsr("02", csr, issuer, {
+                subject,
+              }),
+              certificateType: "ChargingStationCertificate",
+            },
+            ctx,
+          );
+          expect(result.response).toEqual({ status: "Rejected" });
+          expect(certificateRejected).toHaveBeenCalledTimes(1);
+          expect(certificateInstalled).not.toHaveBeenCalled();
+          expect(store.listSignedChains()).toEqual([]);
+          await result.afterResult?.();
+          expect(ctx.sendCall).toHaveBeenCalledWith(
+            "SecurityEventNotification",
+            expect.objectContaining({
+              type: "InvalidChargingStationCertificate",
+              techInfo: expect.stringContaining(expectedReason),
+            }),
+          );
+        },
+      );
 
       // #564: the chain is handed on when it is stored, not when the answer
       // is written, which a dropped answer never reaches.

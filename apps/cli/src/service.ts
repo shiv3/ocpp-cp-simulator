@@ -1,65 +1,81 @@
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import type { StartTransactionOutcome } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
+import type {
+  Behavior,
+  JsonObject,
+} from "@ocpp-cp-simulator/contracts/behavior";
+import { describeDefaultBehaviors } from "@ocpp-cp-simulator/core/cp/application/engine/behaviors/index";
 import type {
   DiagnosticsStatus,
   FirmwareStatus,
   UploadLogStatus,
-} from "@ocpp-cp-sim/core/cp/domain/types/FirmwareLogStatus";
-import { ChargePoint } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
+} from "@ocpp-cp-simulator/core/cp/domain/types/FirmwareLogStatus";
+import type { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
+import { createChargePoint } from "@ocpp-cp-simulator/core/cp/infrastructure/charge-point/createChargePoint";
 import type {
   AuthorizationCacheSeedEntry,
   AuthorizationCacheView,
-} from "@ocpp-cp-sim/core/cp/domain/auth/AuthorizationCacheSeed";
+} from "@ocpp-cp-simulator/core/cp/domain/auth/AuthorizationCacheSeed";
 import type {
   DataTransferData,
   DataTransferResult,
-} from "@ocpp-cp-sim/core/cp/domain/types/DataTransfer";
+} from "@ocpp-cp-simulator/core/cp/domain/types/DataTransfer";
 import type {
   OcppCallOutcome,
   OcppCallRequest,
   RawFrameOutcome,
   RawFrameRequest,
-} from "@ocpp-cp-sim/core/cp/domain/types/OcppCall";
+} from "@ocpp-cp-simulator/core/cp/domain/types/OcppCall";
 import type {
   Get15118EVCertificateRequest,
   Get15118EVCertificateResult,
-} from "@ocpp-cp-sim/core/cp/domain/security/get15118EVCertificate";
-import type { AutoMeterValueSetting } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
+} from "@ocpp-cp-simulator/core/cp/domain/security/get15118EVCertificate";
+import type {
+  AutoMeterValueSetting,
+  PowerLossOptions,
+  PowerLossRecord,
+  PowerRestoreOptions,
+  PowerRestoreResult,
+} from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
 import type {
   BootNotificationResult,
   ChargePointEvents,
   IncomingCallCompletion,
-} from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePointEvents";
-import type { Database } from "@ocpp-cp-sim/core/cp/domain/persistence/Database";
+} from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePointEvents";
+import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
 import type {
   BootNotification,
   StatusNotificationOptions,
-} from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+} from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import {
   hasStatusNotificationOptions,
   OCPPStatus,
-} from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
-import { isSoapVersion } from "@ocpp-cp-sim/core/cp/domain/types/OcppVersion";
-import { soapDialectForVersion } from "@ocpp-cp-sim/core/cp/infrastructure/transport/soap/dialect";
-import { OCPPSoapServer } from "@ocpp-cp-sim/core/cp/infrastructure/transport/soap/OCPPSoapServer";
-import type { ResolvedNetworkSimConfig } from "@ocpp-cp-sim/core/cp/infrastructure/transport/network-sim/config";
+} from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
+import { isSoapVersion } from "@ocpp-cp-simulator/core/cp/domain/types/OcppVersion";
+import { soapDialectForVersion } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/soap/dialect";
+import { OCPPSoapServer } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/soap/OCPPSoapServer";
+import type { ResolvedNetworkSimConfig } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/network-sim/config";
 import { getGlobalTraceWriter } from "./trace/TraceWriter";
 import {
   splitStopReason,
   type MeterReadingContext,
   type StartTransactionCommandOptions,
+  type IdTokenTypeName,
   type StopTransactionCommandOptions,
   type TransactionUpdateOptions,
-} from "@ocpp-cp-sim/core/cp/domain/connector/Transaction";
-import { LogType } from "@ocpp-cp-sim/core/cp/shared/Logger";
-import { AutoTrafficRunner } from "@ocpp-cp-sim/core/cp/application/services/AutoTrafficRunner";
+} from "@ocpp-cp-simulator/core/cp/domain/connector/Transaction";
+import { LogType } from "@ocpp-cp-simulator/core/cp/shared/Logger";
+import { AutoTrafficRunner } from "@ocpp-cp-simulator/core/cp/application/services/AutoTrafficRunner";
 import {
   AUTO_TRAFFIC_ID_TAG,
+  AutoTrafficIdTagPicker,
+  autoTrafficVehicleLabel,
+  autoTrafficVehiclePatch,
   defaultAutoTrafficConfig,
   emptyAutoTrafficCounters,
   validateAutoTrafficConfig,
   type AutoTrafficConfig,
   type AutoTrafficCounters,
-} from "@ocpp-cp-sim/core/cp/domain/connector/AutoTraffic";
+} from "@ocpp-cp-simulator/core/cp/domain/connector/AutoTraffic";
 import { getGlobalMetricsRecorder } from "./server/metrics/MetricsRecorder";
 import {
   waitForBootAccepted,
@@ -71,12 +87,12 @@ import type {
   ChargePointStatus,
   ConnectorStatus,
 } from "./types";
-import { ScenarioExecutor } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioExecutor";
-import { ScenarioRunStateError } from "@ocpp-cp-sim/core/cp/domain/errors/ScenarioRunStateError";
-import { normalizeLabels } from "@ocpp-cp-sim/contracts/labels";
-import type { ScenarioEvents } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import { createScenarioExecutorCallbacks } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioRuntime";
-import { EventEmitter } from "@ocpp-cp-sim/core/cp/shared/EventEmitter";
+import { ScenarioExecutor } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioExecutor";
+import { ScenarioRunStateError } from "@ocpp-cp-simulator/core/cp/domain/errors/ScenarioRunStateError";
+import { normalizeLabels } from "@ocpp-cp-simulator/contracts/labels";
+import type { ScenarioEvents } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import { createScenarioExecutorCallbacks } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioRuntime";
+import { EventEmitter } from "@ocpp-cp-simulator/core/cp/shared/EventEmitter";
 import type {
   ScenarioDefinition,
   ScenarioExecutionContext,
@@ -84,76 +100,69 @@ import type {
   ScenarioExecutionState,
   ScenarioMode,
   ScenarioWaitIntervention,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import {
   isAutoStartKeyOf,
   matchAutoStart,
-} from "@ocpp-cp-sim/core/cp/application/scenario/autoStart";
-import { legacyGeneratedBaseId } from "@ocpp-cp-sim/core/cp/domain/persistence/legacyStartupInstances";
-import { SqliteScenarioRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/SqliteScenarioRepository";
-import type { ScenarioRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/ScenarioRepository";
-import { SqliteEngineStateRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/EngineStateRepository";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/autoStart";
+import { legacyGeneratedBaseId } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/legacyStartupInstances";
+import { SqliteScenarioRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/SqliteScenarioRepository";
+import type { ScenarioRepository } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioRepository";
+import { SqliteEngineStateRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/SqliteEngineStateRepository";
 import {
   parsePersistedEngineState,
   type PersistedEngineState,
-} from "@ocpp-cp-sim/core/cp/application/engine/ChargerState";
-import { SqliteConnectorRuntimeRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/SqliteConnectorRuntimeRepository";
-import type { ScenarioRunRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/ScenarioRunRepository";
-import { createScenarioRunRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/createScenarioRunRepository";
+} from "@ocpp-cp-simulator/core/cp/application/engine/ChargerState";
+import { SqliteConnectorRuntimeRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/SqliteConnectorRuntimeRepository";
+import type { ScenarioRunRepository } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunRepository";
+import { createScenarioRunRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/createScenarioRunRepository";
 import type {
   ChargingSessionPage,
   ChargingSessionQuery,
   ChargingSessionRepository,
-} from "@ocpp-cp-sim/core/cp/domain/persistence/ChargingSessionRepository";
-import { createChargingSessionRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/createChargingSessionRepository";
-import type { ChargingSession } from "@ocpp-cp-sim/core/cp/domain/session/ChargingSession";
-import { ChargingSessionRecorder } from "@ocpp-cp-sim/core/cp/application/services/ChargingSessionRecorder";
+} from "@ocpp-cp-simulator/core/cp/domain/persistence/ChargingSessionRepository";
+import { createChargingSessionRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/createChargingSessionRepository";
+import type { ChargingSession } from "@ocpp-cp-simulator/core/cp/domain/session/ChargingSession";
+import { ChargingSessionRecorder } from "@ocpp-cp-simulator/core/cp/application/services/ChargingSessionRecorder";
 import {
   NoopConnectorRuntimeRepository,
   type ConnectorRuntimeRepository,
   type ScenarioPositionSnapshot,
-} from "@ocpp-cp-sim/core/cp/domain/persistence/ConnectorRuntimeRepository";
+} from "@ocpp-cp-simulator/core/cp/domain/persistence/ConnectorRuntimeRepository";
 import type {
   EVSettings,
   EVSettingsPatch,
-} from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
-import { getDefaultEVSettings } from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
-import type { AutoMeterValueConfig } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
-import type {
-  ActiveChargingProfile,
-  Connector,
-} from "@ocpp-cp-sim/core/cp/domain/connector/Connector";
+} from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
+import { getDefaultEVSettings } from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
+import type { AutoMeterValueConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
+import type { ActiveChargingProfile } from "@ocpp-cp-simulator/core/cp/domain/connector/Connector";
 import type {
   StateHistoryEntry,
   HistoryOptions,
-} from "@ocpp-cp-sim/core/cp/application/services/types/StateSnapshot";
+} from "@ocpp-cp-simulator/core/cp/domain/services/StateSnapshot";
 import type {
   TimelineEntry,
   TimelinePage,
   TimelineQuery,
-} from "@ocpp-cp-sim/core/cp/application/services/OperationalTimeline";
+} from "@ocpp-cp-simulator/core/cp/application/services/OperationalTimeline";
 import {
   scenarioTemplates,
   getTemplateById,
-} from "@ocpp-cp-sim/core/utils/scenarioTemplates";
+} from "@ocpp-cp-simulator/core/utils/scenarioTemplates";
 import { scenarioInstanceId } from "./scenarioInstanceId";
-import { TranscriptBuffer } from "@ocpp-cp-sim/core/cp/application/verification/TranscriptBuffer";
 import {
-  evaluateAssertions,
-  computeVerdictSummary,
-  frameToTranscriptEntry,
-  redactTranscriptEntry,
-  type ScenarioRunResult,
-  type ScenarioStateSnapshot,
-} from "@ocpp-cp-sim/core/cp/application/verification/ScenarioAssertions";
+  ScenarioRunRecorder,
+  makeScenarioRunId,
+} from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunRecorder";
+import type { ScenarioRunResult } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioAssertions";
 import {
   redactSensitiveText,
   redactSensitiveValue,
-} from "@ocpp-cp-sim/core/cp/shared/redaction";
+} from "@ocpp-cp-simulator/core/cp/shared/redaction";
 import {
   assertLoadableScenario,
   validateLoadableScenario,
-} from "@ocpp-cp-sim/core/scenario/loadableScenario";
+} from "@ocpp-cp-simulator/core/scenario/loadableScenario";
 import { appVersion } from "./appVersion";
 
 export type CLIEvent =
@@ -376,29 +385,6 @@ export interface SessionSettledInfo {
 type SessionSettledHandler = (info: SessionSettledInfo) => void;
 
 /**
- * #179: mint a stable, human-legible run id for one scenario execution.
- * `scenarioId#<epochMs>-<rand>` — the scenarioId anchors it to the scenario,
- * the epoch + short random suffix distinguish repeated runs of the same one.
- */
-function makeScenarioRunId(scenarioId: string): string {
-  const rand = Math.random().toString(36).slice(2, 6);
-  return `${scenarioId}#${Date.now()}-${rand}`;
-}
-
-/**
- * #179 Phase 3: snapshot a connector's observable state for a run report's
- * initialState / finalState. Mirrors the fields StateSnapshot already exposes
- * per connector (status / meter / active transaction id).
- */
-function connectorStateSnapshot(connector: Connector): ScenarioStateSnapshot {
-  return {
-    connectorStatus: connector.status,
-    meterValue: connector.meterValue,
-    transactionId: connector.transaction?.id ?? null,
-  };
-}
-
-/**
  * Whether a run that is ending should release the connector's EV settings
  * override.
  *
@@ -520,6 +506,12 @@ export class CLIChargePointService {
   private readonly _evSettingsOwnerByConnector: Map<number, string> = new Map();
   private readonly _autoTraffic = new Map<number, AutoTrafficRunner>();
   private readonly _autoTrafficConfigs = new Map<number, AutoTrafficConfig>();
+  /** The idTag stream of each running connector, rebuilt on every
+   *  reconfigure so a new strategy, cpIndex or seed takes effect (#603). */
+  private readonly _autoTrafficPickers = new Map<
+    number,
+    AutoTrafficIdTagPicker | null
+  >();
   // Resolvers for waitForScenarioArmed(scenarioId), keyed like _executors.
   // Populated only when a caller actually opts in (run_scenario's
   // awaitArmed); resolved and cleared by the onStateChange hook in
@@ -530,30 +522,33 @@ export class CLIChargePointService {
   // and lifecycle events can be correlated to a specific run. Keyed like
   // _executors (by scenarioId) and cleared alongside it.
   private readonly _runIdByScenario: Map<string, string> = new Map();
-  // #179 Phase 2b: OCPP wire transcript capture for the currently-executing
-  // scenario, keyed like _executors/_runIdByScenario by scenarioId. Started
-  // alongside the run id in runScenario and stopped (then dropped) once the
-  // run ends, in finalizeScenarioRun.
-  private readonly _transcriptByScenario: Map<string, TranscriptBuffer> =
-    new Map();
-  // #179 Phase 2b/3: wall-clock start time (ISO) + the connector's state
-  // snapshot at that moment, for the currently-executing scenario's run.
-  // Read back by finalizeScenarioRun to build the ScenarioRunResult's
-  // startedAt/initialState fields.
-  private readonly _runStartByScenario: Map<
-    string,
-    { readonly startedAt: string; readonly initialState: ScenarioStateSnapshot }
-  > = new Map();
-  // Per-run strict flag, keyed like _executors/_runIdByScenario by scenarioId.
-  // Stores the per-run strict option if provided, consulted by finalizeScenarioRun.
-  private readonly _strictByScenario: Map<string, boolean> = new Map();
-  // #240: operator actions (extend / retry / continue) taken on the parked
-  // waits of the currently-executing run, keyed like _strictByScenario and
-  // copied into the run report by finalizeScenarioRun.
-  private readonly _interventionsByScenario: Map<
-    string,
-    ScenarioWaitIntervention[]
-  > = new Map();
+  // #394: transcript capture, assertions, verdict and the stored report of
+  // every run, shared with the browser runtime (see ScenarioRunRecorder).
+  private _recorderInstance: ScenarioRunRecorder | undefined;
+  // Built on first use: it needs the charge point, created further down the
+  // constructor than the run history.
+  private get _recorder(): ScenarioRunRecorder {
+    if (!this._recorderInstance) {
+      this._recorderInstance = new ScenarioRunRecorder({
+        chargePoint: this._chargePoint,
+        runs: this._runs,
+        simulatorVersion: appVersion,
+        ocppVersion: () => this._init.ocppVersion ?? "OCPP-1.6J",
+        // The daemon stamps wall-clock times, whatever the charge point's clock.
+        now: () => Date.now(),
+        onRecorded: (result) =>
+          this.emit({
+            event: "scenario_run_recorded",
+            data: {
+              connectorId: result.connectorId,
+              scenarioId: result.scenarioId,
+              runId: result.runId,
+            },
+          }),
+      });
+    }
+    return this._recorderInstance;
+  }
   // #388: finished-run reports. The daemon hands every charge point one
   // shared store (see CPRegistry), bounded per charge point and persisted with
   // --state-db; scenario_report reads it, scenario.runs.list pages through it.
@@ -726,13 +721,13 @@ export class CLIChargePointService {
       );
     }
 
-    // OCPPWebSocket concatenates wsUrl + cpId, so strip trailing cpId if present.
+    // OCPPWebSocket appends the identity to wsUrl, so strip a trailing cpId if present.
     // OCPP SOAP versions post to the CentralSystemService URL exactly as configured.
     const baseUrl = isSoapVersion(ocppVersion)
       ? centralSystemUrl
       : buildBaseUrl(init.wsUrl, init.cpId);
 
-    this._chargePoint = new ChargePoint(
+    this._chargePoint = createChargePoint(
       init.cpId,
       bootNotification,
       init.connectors,
@@ -760,6 +755,22 @@ export class CLIChargePointService {
         ...(init.urlDistribution
           ? { urlDistribution: init.urlDistribution }
           : {}),
+        ...(init.inboundValidation
+          ? { inboundValidation: init.inboundValidation }
+          : {}),
+        ...(init.reservationAuthorizeIdTag
+          ? { reservationAuthorizeIdTag: true }
+          : {}),
+        ...(init.transport?.reconnect
+          ? { reconnect: init.transport.reconnect }
+          : {}),
+        ...(init.capabilityProfile
+          ? { capabilityProfile: init.capabilityProfile }
+          : {}),
+        ...(init.chargerCapabilities
+          ? { chargerCapabilities: init.chargerCapabilities }
+          : {}),
+        ...(init.transport?.ws ? { ws: init.transport.ws } : {}),
         ...(init.idTags ? { idTags: init.idTags } : {}),
         ...(init.idTagDistribution
           ? { idTagDistribution: init.idTagDistribution }
@@ -858,6 +869,18 @@ export class CLIChargePointService {
         authorizationKey: options.authorizationKey,
         cpoName: options.cpoName,
         ...(options.txUpdatedMeterValues ? { txUpdatedMeterValues: true } : {}),
+        ...(options.inboundValidation
+          ? { inboundValidation: options.inboundValidation }
+          : {}),
+        ...(options.reservationAuthorizeIdTag
+          ? { reservationAuthorizeIdTag: true }
+          : {}),
+        ...(options.capabilityProfile
+          ? { capabilityProfile: options.capabilityProfile }
+          : {}),
+        ...(options.chargerCapabilities
+          ? { chargerCapabilities: options.chargerCapabilities }
+          : {}),
         tls: options.tls,
         tlsCaPath: options.tlsCaPath,
         tlsCertPath: options.tlsCertPath,
@@ -975,6 +998,7 @@ export class CLIChargePointService {
         transactionStartTime: tx?.startTime ? tx.startTime.toISOString() : null,
         transactionTagId: tx?.tagId ?? null,
         transactionBatteryCapacityKwh: tx?.batteryCapacityKwh ?? null,
+        evConnection: connector.evConnection,
       });
     });
 
@@ -1004,6 +1028,11 @@ export class CLIChargePointService {
         securityProfile: this._init.securityProfile,
         cpoName: this._init.cpoName,
         txUpdatedMeterValues: this._init.txUpdatedMeterValues,
+        inboundValidation: this._init.inboundValidation,
+        reservationAuthorizeIdTag: this._init.reservationAuthorizeIdTag,
+        capabilityProfile: this._init.capabilityProfile,
+        transport: this._init.transport,
+        chargerCapabilities: this._init.chargerCapabilities,
         tlsCaPath: this._init.tlsCaPath,
         tlsCertPath: this._init.tlsCertPath,
         tlsKeyPath: this._init.tlsKeyPath,
@@ -1012,6 +1041,9 @@ export class CLIChargePointService {
         ...(this._init.behaviors === undefined
           ? {}
           : { behaviors: [...this._init.behaviors] }),
+        ...(this._init.behaviorParams === undefined
+          ? {}
+          : { behaviorParams: { ...this._init.behaviorParams } }),
       },
     };
   }
@@ -1023,6 +1055,34 @@ export class CLIChargePointService {
    */
   setLabels(labels: ChargePointInitOptions["labels"]): void {
     this._init = { ...this._init, labels: normalizeLabels(labels) };
+  }
+
+  /**
+   * #724: a ChangeConfiguration of `AuthorizationKey` / `SecurityProfile` (and
+   * the A05.FR.08 fallback) is the station's new credential. `getInit()` follows
+   * it, so a `cp.update` that omits the field keeps the changed value, and
+   * `listener` lets the registry write it to the charge point's row: a restart
+   * rebuilds the station from that row. Not for 2.x, which has no such keys.
+   */
+  onSecurityCredentialsChange(
+    listener: (change: {
+      securityProfile?: 0 | 1 | 2 | 3;
+      authorizationKey?: string;
+    }) => void,
+  ): () => void {
+    if (this._init.ocppVersion?.startsWith("OCPP-2")) return () => {};
+    return this._chargePoint.configuration.onChange((key, value) => {
+      if (key === "AuthorizationKey" && typeof value === "string") {
+        this._init = { ...this._init, authorizationKey: value };
+        listener({ authorizationKey: value });
+      } else if (
+        key === "SecurityProfile" &&
+        (value === 0 || value === 1 || value === 2 || value === 3)
+      ) {
+        this._init = { ...this._init, securityProfile: value };
+        listener({ securityProfile: value });
+      }
+    });
   }
 
   /** Original init the CP was constructed from. Used by socket.io control
@@ -1082,6 +1142,39 @@ export class CLIChargePointService {
     );
   }
 
+  /** Queue the transaction message written but not answered, so the next
+   *  start delivers it (#622: the shutdown wait ended first). */
+  queueUnansweredStop(): boolean {
+    return this._chargePoint.queueUnansweredTransactionCall();
+  }
+
+  /** Whether the socket to the CSMS is open right now (#622). */
+  isOnline(): boolean {
+    return this._chargePoint.isOnline();
+  }
+
+  /** Ids of the connectors with a session running right now (#622). */
+  openTransactionConnectorIds(): number[] {
+    return [...this._chargePoint.connectors.values()]
+      .filter((connector) => connector.hasRunningTransaction)
+      .map((connector) => connector.id);
+  }
+
+  /**
+   * Subscribe to the frames this charge point writes to and reads from its
+   * socket, as the `Sent: <raw>` / `Received: <raw>` lines the logger emits
+   * (#622: a graceful shutdown waits for the CSMS to answer the stops).
+   * Returns the unsubscribe function.
+   */
+  onWireFrame(
+    handler: (direction: "Sent" | "Received", raw: string) => void,
+  ): () => void {
+    return this._chargePoint.logger.on("log.WebSocket", (entry) => {
+      const match = /^(Sent|Received): (.*)$/s.exec(entry.message);
+      if (match) handler(match[1] as "Sent" | "Received", match[2]);
+    });
+  }
+
   /** Whether the connector still exists. A reload held for one that has been
    *  removed can never be applied, and nothing else would say so (#314). */
   hasConnector(connectorId: number): boolean {
@@ -1103,6 +1196,19 @@ export class CLIChargePointService {
     return this._chargePoint.triggerNetworkSimDisconnect(ruleId);
   }
 
+  /** #455: whether the station is without power. */
+  get poweredOff(): boolean {
+    return this._chargePoint.poweredOff;
+  }
+
+  powerLoss(options?: PowerLossOptions): PowerLossRecord {
+    return this._chargePoint.powerLoss(options);
+  }
+
+  powerRestore(options?: PowerRestoreOptions): PowerRestoreResult {
+    return this._chargePoint.restorePower(options);
+  }
+
   reset(): void {
     this._chargePoint.reset();
   }
@@ -1115,8 +1221,8 @@ export class CLIChargePointService {
     connectorId: number,
     tagId: string,
     options: StartTransactionCommandOptions = {},
-  ): void {
-    this._chargePoint.startTransaction(
+  ): Promise<StartTransactionOutcome> {
+    return this._chargePoint.startTransaction(
       tagId,
       connectorId,
       undefined,
@@ -1148,6 +1254,16 @@ export class CLIChargePointService {
   /** #488: an EV-side disconnect on `connectorId`. */
   evDisconnected(connectorId: number): void {
     this._chargePoint.evDisconnected(connectorId);
+  }
+
+  /** #453: a cable was plugged into the EV side of `connectorId`. */
+  evPlugIn(connectorId: number): void {
+    this._chargePoint.evPlugIn(connectorId);
+  }
+
+  /** #453: the EV on `connectorId` asks for energy or stops asking. */
+  evSetReady(connectorId: number, ready: boolean): void {
+    this._chargePoint.evSetReady(connectorId, ready);
   }
 
   setMeterValue(connectorId: number, value: number): void {
@@ -1202,8 +1318,8 @@ export class CLIChargePointService {
     return this._chargePoint.resolveIdTag(tagId, connectorId);
   }
 
-  authorize(tagId: string): void {
-    this._chargePoint.authorize(tagId);
+  authorize(tagId: string, idTokenType?: IdTokenTypeName): void {
+    this._chargePoint.authorize(tagId, idTokenType);
   }
 
   /** Station-initiated DataTransfer.req; resolves with the CSMS's answer (#348). */
@@ -1318,24 +1434,84 @@ export class CLIChargePointService {
     this._autoTrafficConfigs.set(connectorId, config);
     const existing = this._autoTraffic.get(connectorId);
     if (existing) {
+      // The picker restarts with the runner's seeded stream.
+      this._autoTrafficPickers.set(
+        connectorId,
+        config.enabled
+          ? this.autoTrafficIdTagPicker(connectorId, config)
+          : null,
+      );
       existing.reconfigure(config);
-      if (!config.enabled) this._autoTraffic.delete(connectorId);
+      if (!config.enabled) {
+        this._autoTraffic.delete(connectorId);
+        this._autoTrafficPickers.delete(connectorId);
+      }
       return;
     }
     if (!config.enabled) return;
 
+    this._autoTrafficPickers.set(
+      connectorId,
+      this.autoTrafficIdTagPicker(connectorId, config),
+    );
     const runner = new AutoTrafficRunner(config, this._init.cpId, connectorId, {
+      // One tag per session (#603), from the pool when the charge point has
+      // one.
+      idTag: () =>
+        this._autoTrafficPickers.get(connectorId)?.next() ??
+        AUTO_TRAFFIC_ID_TAG,
+      // A cycle starts only on an Accepted charge point, an Available
+      // connector and no active transaction (#603); otherwise it is skipped.
+      startBlocker: (id) => {
+        if (this._chargePoint.poweredOff)
+          return "the charge point has no power";
+        if (!this._chargePoint.bootAccepted) {
+          return "the charge point is not Accepted";
+        }
+        const connector = this._chargePoint.getConnector(id);
+        if (!connector) return `connector ${id} not found`;
+        if (connector.hasRunningTransaction) return "a transaction is active";
+        if (connector.status !== OCPPStatus.Available) {
+          return `the connector is ${connector.status}`;
+        }
+        return null;
+      },
       // Awaited: a CSMS that refuses the tag must be counted as a refusal, not
       // reported as a started session.
-      authorize: async () => {
-        const status =
-          await this._chargePoint.authorizeAndWait(AUTO_TRAFFIC_ID_TAG);
+      authorize: async (_id, idTag) => {
+        const status = await this._chargePoint.authorizeAndWait(idTag);
         return status === "Accepted";
       },
-      startTransaction: async (id) => {
-        this._chargePoint.startTransaction(AUTO_TRAFFIC_ID_TAG, id);
+      // `intent` is set under `sessionModel: "intent"` (#327): the session
+      // opens at the drawn SoC, targets the drawn SoC and stops there.
+      startTransaction: async (id, idTag, intent, vehicle) => {
+        // #627: the drawn vehicle becomes the connector's, before the start,
+        // so the transaction (battery capacity, opening SoC) and every
+        // MeterValues of the session read the vehicle the traffic drew.
+        if (vehicle) {
+          this.requireConnector(id).applyEvSettingsOverride(
+            autoTrafficVehiclePatch(vehicle),
+          );
+          this._chargePoint.logger.info(
+            `[auto-traffic] ${this._init.cpId}/${id} vehicle ${autoTrafficVehicleLabel(vehicle)}`,
+            LogType.TRANSACTION,
+          );
+        }
+        const outcome = await this._chargePoint.startTransaction(
+          idTag,
+          id,
+          undefined,
+          intent?.initialSoc,
+          intent
+            ? { targetSoc: intent.targetSoc, stopAtTarget: true }
+            : undefined,
+        );
+        return outcome.started;
       },
+      sessionRunning: (id) =>
+        this._chargePoint.getConnector(id)?.hasRunningTransaction ?? false,
       stopTransaction: async (id) => this.stopTransaction(id),
+      poweredOff: () => this._chargePoint.poweredOff,
       // A scenario owns the connector while any executor is running: a run's
       // verdict must never depend on whether background traffic fired.
       scenarioActive: () => this._executors.size > 0,
@@ -1344,6 +1520,24 @@ export class CLIChargePointService {
     });
     this._autoTraffic.set(connectorId, runner);
     runner.start();
+  }
+
+  /** The traffic's idTag stream, or `null` without a pool (#603). */
+  private autoTrafficIdTagPicker(
+    connectorId: number,
+    config: AutoTrafficConfig,
+  ): AutoTrafficIdTagPicker | null {
+    const pool = this._chargePoint.idTagPoolInfo();
+    if (!pool) return null;
+    return new AutoTrafficIdTagPicker(
+      // Read at each draw: `--watch` swaps the pool's list (#314).
+      () => this._chargePoint.idTagPoolInfo()?.tags ?? pool.tags,
+      config.idTagStrategy ?? pool.distribution,
+      config.seed,
+      this._init.cpId,
+      connectorId,
+      config.cpIndex,
+    );
   }
 
   getAutoTrafficConfig(connectorId: number): AutoTrafficConfig {
@@ -1548,8 +1742,13 @@ export class CLIChargePointService {
     // `undefined`, returned as `{}` instead of `{ scenarioId }`, and left an
     // entry in list_scenarios that could be neither run nor removed. Full
     // schema conformance stays advisory (issue #214) -- only this minimal set
-    // is a gate.
-    assertLoadableScenario(definition);
+    // is a gate. A missing `name` / `targetType` is filled in (the id,
+    // "connector") and reported, as the web console's import always allowed.
+    definition = assertLoadableScenario(definition, (message) =>
+      process.stderr.write(
+        `[CLI] loadScenario ${String(definition.id)}: ${message}\n`,
+      ),
+    );
     const connector = this._chargePoint.connectors.get(connectorId);
     if (!connector) {
       throw new Error(`Connector ${connectorId} not found`);
@@ -1705,14 +1904,9 @@ export class CLIChargePointService {
       this._chargePoint.timeline.endRun(connectorId, runId);
     }
     this._runIdByScenario.delete(scenarioId);
-    const transcript = this._transcriptByScenario.get(scenarioId);
-    if (transcript) {
-      transcript.stop();
-      this._transcriptByScenario.delete(scenarioId);
+    if (connectorId !== undefined) {
+      this._recorder.discard(scenarioId, connectorId);
     }
-    this._runStartByScenario.delete(scenarioId);
-    this._strictByScenario.delete(scenarioId);
-    this._interventionsByScenario.delete(scenarioId);
   }
 
   /**
@@ -1754,13 +1948,17 @@ export class CLIChargePointService {
     // already the DB's truth, and one bad entry must not fail the others.
     for (const def of definitions) {
       const check = validateLoadableScenario(def);
-      if (!check.valid) {
+      if (!check.valid || !check.definition) {
         process.stderr.write(
           `[CLI] syncConnectorRuntimeScenarios: skipping unloadable definition on connector ${connectorId}: ${check.errors.join("; ")}\n`,
         );
         continue;
       }
-      this._scenarios.set(def.id, { definition: def, connectorId });
+      // A missing name / targetType is filled in, as loadScenario does.
+      this._scenarios.set(check.definition.id, {
+        definition: check.definition,
+        connectorId,
+      });
     }
     // The replaced set may drop whatever auto-started last, so clear the dedup
     // key and — if the CP is already up — kick auto-start for the new set.
@@ -1837,31 +2035,13 @@ export class CLIChargePointService {
     // #179: mint a stable run id for this invocation, threaded into every
     // lifecycle event (and echoed on scenario_status) so a headless runner can
     // correlate a specific run.
-    const runId = makeScenarioRunId(scenarioId);
+    const runId = makeScenarioRunId(scenarioId, Date.now(), Math.random());
     this._runIdByScenario.set(scenarioId, runId);
 
-    // Record the per-run strict override; clear any leftover from a prior run
-    // of the same scenario that never reached finalizeScenarioRun.
-    if (options?.strict !== undefined) {
-      this._strictByScenario.set(scenarioId, options.strict);
-    } else {
-      this._strictByScenario.delete(scenarioId);
-    }
-
-    const interventions: ScenarioWaitIntervention[] = [];
-    this._interventionsByScenario.set(scenarioId, interventions);
-
-    // #179 Phase 2b: capture the OCPP wire transcript for this run so its
-    // declared assertions (if any) can be evaluated once it ends.
-    const transcript = new TranscriptBuffer(this._chargePoint.logger);
-    transcript.start();
-    this._transcriptByScenario.set(scenarioId, transcript);
-    // #179 Phase 3: snapshot the connector's state right as the run starts,
-    // for the report's `initialState` field (see finalizeScenarioRun).
-    this._runStartByScenario.set(scenarioId, {
-      startedAt: new Date().toISOString(),
-      initialState: connectorStateSnapshot(connector),
-    });
+    // #179 Phase 2b/3: capture the OCPP wire transcript for this run so its
+    // declared assertions (if any) can be evaluated once it ends, and
+    // snapshot the connector for the report's `initialState`.
+    this._recorder.begin(scenarioId, connector, { strict: options?.strict });
 
     // Set by the onError hook below; read in executor.start().finally() to
     // decide this run's verdict executionState ("error" vs "completed").
@@ -1904,7 +2084,11 @@ export class CLIChargePointService {
           });
         },
         onWaitIntervention: (intervention) => {
-          interventions.push(intervention);
+          this._recorder.recordIntervention(
+            scenarioId,
+            connectorId,
+            intervention,
+          );
           this.emit({
             event: "scenario_wait_changed",
             data: {
@@ -2481,122 +2665,16 @@ export class CLIChargePointService {
     timeout: { nodeId: string; expectation?: unknown } | null,
     stopped = false,
   ): void {
-    this._chargePoint.timeline.endRun(connectorId, runId);
-    const transcript = this._transcriptByScenario.get(scenarioId);
-    if (!transcript) return;
-    transcript.stop();
-    this._transcriptByScenario.delete(scenarioId);
-
-    const endedAt = new Date().toISOString();
-    const start = this._runStartByScenario.get(scenarioId);
-    this._runStartByScenario.delete(scenarioId);
-    const startedAt = start?.startedAt ?? endedAt;
-    const initialState: ScenarioStateSnapshot = start?.initialState ?? {
-      connectorStatus: "Unknown",
-      meterValue: 0,
-      transactionId: null,
-    };
-
-    const definition = this._scenarios.get(scenarioId)?.definition;
-    const assertionSpecs = definition?.assertions ?? [];
-    const assertions = evaluateAssertions(assertionSpecs, transcript.frames);
-
-    // Effective strict: per-run option, then the scenario definition, then off.
-    const perRunStrict = this._strictByScenario.get(scenarioId);
-    this._strictByScenario.delete(scenarioId);
-    const interventions = this._interventionsByScenario.get(scenarioId) ?? [];
-    this._interventionsByScenario.delete(scenarioId);
-    const effectiveStrict =
-      perRunStrict !== undefined
-        ? perRunStrict
-        : (definition?.strictCompatibility ?? false);
-
-    const verdictSummary = computeVerdictSummary(assertions, {
+    this._recorder.finalize({
+      scenarioId,
+      connectorId,
+      runId,
+      definition: this._scenarios.get(scenarioId)?.definition,
       executionState,
       blocked,
-      strict: effectiveStrict,
-    });
-    this._chargePoint.timeline.record({
-      kind: "scenario_finished",
-      connectorId,
-      runId,
-      summary: `Scenario ${scenarioId} ${stopped ? "stopped" : "finished"}: ${verdictSummary.verdict}`,
-      data: {
-        scenarioId,
-        verdict: verdictSummary.verdict,
-        executionState,
-        stopped,
-      },
-    });
-
-    // #179 Phase 3: flatten + redact the captured transcript before it can
-    // reach a client (payloads carry auth material -- redactTranscriptEntry).
-    const transcriptEntries = transcript.frames.map((frame, i) =>
-      redactTranscriptEntry(frameToTranscriptEntry(frame, i)),
-    );
-
-    const connector = this._chargePoint.connectors.get(connectorId);
-    const finalState: ScenarioStateSnapshot = connector
-      ? connectorStateSnapshot(connector)
-      : initialState;
-
-    this.recordRunResult({
-      schemaVersion: 1,
-      runId,
-      scenarioId,
-      scenarioName: definition?.name,
-      cpId: this._chargePoint.id,
-      connectorId,
-      // #179 Phase 3: was a hard-coded "0.0.0", so a report from a GHCR
-      // release looked exactly like one off a dev checkout.
-      simulatorVersion: appVersion(),
-      ocppVersion: this._init.ocppVersion ?? "OCPP-1.6J",
-      startedAt,
-      endedAt,
-      durationMs: Math.max(
-        0,
-        new Date(endedAt).getTime() - new Date(startedAt).getTime(),
-      ),
-      executionState,
-      stopped,
-      verdict: verdictSummary.verdict,
-      conformanceVerdict: verdictSummary.conformanceVerdict,
-      compatibilityVerdict: verdictSummary.compatibilityVerdict,
-      strict: verdictSummary.strict,
-      assertions,
-      transcript: transcriptEntries,
       errors,
       timeout,
-      interventions,
-      initialState,
-      finalState,
-    });
-  }
-
-  /** Stores a run result in the run history (which applies retention), then
-   *  announces it with `scenario_run_recorded` — after the write, so a client
-   *  refreshing on the event reads the run. A failed write never fails the
-   *  run — it already ended, only its report is lost — and is logged on the
-   *  charge point, so it shows in the console and `logs.get` rather than only
-   *  on the daemon's stderr. */
-  private recordRunResult(result: ScenarioRunResult): void {
-    try {
-      this._runs.record(result);
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      this._chargePoint.logger.error(
-        `Scenario run ${result.runId} finished (${result.verdict}) but its report was not recorded: ${reason}`,
-        LogType.SCENARIO,
-      );
-      return;
-    }
-    this.emit({
-      event: "scenario_run_recorded",
-      data: {
-        connectorId: result.connectorId,
-        scenarioId: result.scenarioId,
-        runId: result.runId,
-      },
+      stopped,
     });
   }
 
@@ -2642,10 +2720,10 @@ export class CLIChargePointService {
       this.notifySessionSettled({ connectorId, scenarioId: null });
     }
 
+    // Only the reservation made for this connector: a connector-0 one is
+    // nobody's session to clear (#595).
     const reservation =
-      this._chargePoint.reservationManager.getReservationForConnector(
-        connectorId,
-      );
+      this._chargePoint.reservationManager.reservationOn(connectorId);
     if (reservation) {
       this._chargePoint.reservationManager.cancelReservation(
         reservation.reservationId,
@@ -2782,11 +2860,7 @@ export class CLIChargePointService {
     // #179 Phase 2b: drop any in-flight transcript subscriptions so a
     // torn-down service doesn't leave stale Logger listeners behind. No
     // verdicts are computed here (the whole service is going away).
-    for (const transcript of this._transcriptByScenario.values()) {
-      transcript.stop();
-    }
-    this._transcriptByScenario.clear();
-    this._runStartByScenario.clear();
+    this._recorder.dispose();
     // The scenario map is gone, so no id can be asked about any more.
     this._lastRunStatusByScenario.clear();
     // Every run this service knew about is over, so no run owns a connector's
@@ -2802,6 +2876,7 @@ export class CLIChargePointService {
     // alongside its replacement.
     for (const runner of this._autoTraffic.values()) runner.stop();
     this._autoTraffic.clear();
+    this._autoTrafficPickers.clear();
 
     // #447: detached before the teardown, so a shutdown leaves running
     // sessions open for the next start to reconcile.
@@ -2889,6 +2964,21 @@ export class CLIChargePointService {
   }
 
   private attachEventForwarders(): void {
+    // #603: a StartTransaction.conf that is not Accepted turns a start the
+    // runner counted as accepted (the request went out) into a refusal;
+    // once per session, and only for the answer to the start.
+    this._unsubscribes.push(
+      this._chargePoint.events.on(
+        "startTransactionNotAccepted",
+        ({ connectorId, midSession }) => {
+          // 2.x: an Updated that carries the idToken can be refused after
+          // the start was accepted; that is not a start refusal.
+          if (!midSession) {
+            this._autoTraffic.get(connectorId)?.noteStartConfRefused();
+          }
+        },
+      ),
+    );
     this._unsubscribes.push(
       this._chargePoint.timeline.onRecord((entry) =>
         this.emit({ event: "timeline_entry", data: entry }),
@@ -3199,8 +3289,28 @@ export class CLIChargePointService {
    * cannot load (duplicate id, unmet `requires`) throws; the ones before it
    * stay loaded.
    */
-  loadBehaviors(behaviors: readonly Behavior[]): void {
-    for (const behavior of behaviors) this._chargePoint.loadBehavior(behavior);
+  loadBehaviors(
+    behaviors: readonly Behavior[],
+    params?: Readonly<Record<string, JsonObject>>,
+  ): void {
+    this.applyDefaultParams(params);
+    for (const behavior of behaviors) {
+      const own = params?.[behavior.id];
+      this._chargePoint.loadBehavior(
+        behavior,
+        own === undefined ? {} : { params: own },
+      );
+    }
+  }
+
+  /** Set (or clear) the params the selection gives the built-in behaviors. */
+  private applyDefaultParams(
+    params: Readonly<Record<string, JsonObject>> | undefined,
+  ): void {
+    const engine = this._chargePoint.engine;
+    for (const { id } of describeDefaultBehaviors()) {
+      engine.setSelectionParams(id, params?.[id]);
+    }
   }
 
   /** The engine state that survives a rebuild (see `ChargerEngine.persistable`). */
@@ -3211,6 +3321,15 @@ export class CLIChargePointService {
   /** Put a {@link engineStateSnapshot} back, before behaviors load. */
   restoreEngineState(saved: PersistedEngineState): void {
     this._chargePoint.engine.restoreState(saved);
+  }
+
+  /**
+   * The params `ctx.params` hands the behavior with this id now (defaults,
+   * the selection's keys, then any running scenario's). Throws for an id that
+   * is neither loaded nor built in.
+   */
+  effectiveBehaviorParams(id: string): JsonObject {
+    return this._chargePoint.engine.effectiveParams(id);
   }
 
   /** Ids of the code behaviors loaded on this charge point, in load order. */
@@ -3238,10 +3357,23 @@ export class CLIChargePointService {
   setBehaviors(
     wanted: readonly Behavior[],
     selection: readonly string[] | undefined,
+    params?: Readonly<Record<string, JsonObject>>,
   ): void {
     const engine = this._chargePoint.engine;
     const keep = new Set(wanted.map((b) => b.id));
     const have = new Set(engine.behaviorIds);
+    // A behavior kept with other params is changed in place: its `main`
+    // restarts with the new values, but the layers of running scenarios and
+    // its open CALLs stay.
+    const before = engine.selectedParams;
+    const changed = [...have].filter(
+      (id) =>
+        keep.has(id) &&
+        JSON.stringify(before[id] ?? null) !==
+          JSON.stringify(params?.[id] ?? null),
+    );
+    this.applyDefaultParams(params);
+    for (const id of changed) engine.reselectBehaviorParams(id, params?.[id]);
     // Check first, so a behavior this station cannot run changes nothing.
     for (const behavior of wanted) {
       if (!have.has(behavior.id)) engine.assertLoadable(behavior);
@@ -3250,13 +3382,21 @@ export class CLIChargePointService {
       if (!keep.has(id)) this._chargePoint.unloadBehavior(id);
     }
     for (const behavior of wanted) {
-      if (!have.has(behavior.id)) this._chargePoint.loadBehavior(behavior);
+      if (!have.has(behavior.id)) {
+        const own = params?.[behavior.id];
+        this._chargePoint.loadBehavior(
+          behavior,
+          own === undefined ? {} : { params: own },
+        );
+      }
     }
     this._init = {
       ...this._init,
       ...(selection === undefined
         ? { behaviors: undefined }
         : { behaviors: [...selection] }),
+      behaviorParams:
+        params && Object.keys(params).length > 0 ? { ...params } : undefined,
     };
   }
 
@@ -3660,7 +3800,8 @@ export class CLIChargePointService {
 }
 
 /**
- * OCPPWebSocket concatenates `${wsUrl}${cpId}` when connecting.
+ * OCPPWebSocket appends the percent-encoded identity as a path segment when
+ * connecting (`wsUrlWithBasic.ts`, OCPP-J 1.6 §3.1.1).
  * If the user provides a full URL like `wss://host/chargepoint/CP001`,
  * strip the trailing cpId so it doesn't get doubled.
  * If the URL is already a base URL like `wss://host/chargepoint/`, use as-is.

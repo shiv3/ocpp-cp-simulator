@@ -1,4 +1,4 @@
-import type { EVSettings } from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
+import type { EVSettings } from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
 
 /**
  * A scenario's EV settings as saved: empty fields (`undefined`, `null`, `""`)

@@ -6,9 +6,9 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { useAllActiveScenarioRuns } from "./useAllActiveScenarioRuns";
 import { createFakeChargePointService, pushEvent } from "../test/harness";
 import { DataContext } from "../../data/providers/DataProvider";
-import type { ChargePointSnapshot } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
-import type { ScenarioExecutionContext } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import type { ChargePointSnapshot } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
+import type { ScenarioExecutionContext } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 
 function connector(id: number): ChargePointSnapshot["connectors"][number] {
   return {

@@ -6,7 +6,7 @@
 //     --behavior examples/behaviors/flaky-firmware.ts
 //
 // Rules a behavior follows (the ESLint config in
-// `@ocpp-cp-sim/contracts/eslint-behavior` enforces them):
+// `@ocpp-cp-simulator/contracts/eslint-behavior` enforces them):
 //   - waits go through ctx.sleep, draws through ctx.random, instants through
 //     ctx.now;
 //   - user data lives in ctx.state (JSON only), never at module scope;
@@ -14,7 +14,7 @@
 import type {
   Behavior,
   BehaviorContext,
-} from "@ocpp-cp-sim/contracts/behavior";
+} from "@ocpp-cp-simulator/contracts/behavior";
 
 /** Chance, per update, that the install fails. */
 const FAILURE_RATE = 0.3;

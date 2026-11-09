@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ScenarioDefinition } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import { profileFromCatalog } from "@ocpp-cp-sim/core/cp/domain/vehicle/importProfile";
+import type { ScenarioDefinition } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import { profileFromCatalog } from "@ocpp-cp-simulator/core/cp/domain/vehicle/importProfile";
 import {
   applyVehicleSettings,
   resolveEvSettings,
-} from "@ocpp-cp-sim/core/cp/domain/vehicle/VehicleProfile";
+} from "@ocpp-cp-simulator/core/cp/domain/vehicle/VehicleProfile";
 import { presetForScenario } from "../../components/vehicle/vehicleChoice";
 import { exportScenarioToJSON, parseScenarioJSON } from "../scenarioFile";
 

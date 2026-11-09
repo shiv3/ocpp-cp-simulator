@@ -1,4 +1,4 @@
-import type { Database } from "@ocpp-cp-sim/core/cp/domain/persistence/Database";
+import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
 
 /**
  * The `watched_scenario_files` table (schema v12, #314): which file a scenario

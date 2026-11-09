@@ -10,7 +10,7 @@ import type {
   TriggerMessageRequestV201,
   TriggerMessageResponseV201,
   UnlockConnectorResponseV201,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import type {
   V201HandlerResult,
   V201InboundContext,
@@ -147,6 +147,10 @@ export const handleTriggerMessageV201 = (
   // SignV2G20Certificate before this runs) and keeps answering
   // NotImplemented for SignCombinedCertificate.
   const requested: string = req.requestedMessage;
+  // #618: a target the capability profile leaves out is not implemented.
+  if (ctx.chargePoint?.isTriggerTargetSupported?.(requested) === false) {
+    return notImplemented;
+  }
   if (
     requested === "SignV2G20Certificate" ||
     requested === "SignCombinedCertificate"
@@ -174,9 +178,16 @@ export const handleTriggerMessageV201 = (
 
   switch (req.requestedMessage) {
     case "BootNotification":
+      // F06.FR.17: after an Accepted boot the answer is Rejected and nothing
+      // is sent. Pending, Rejected and unanswered boots keep Accepted.
+      if (ctx.bootAccepted?.()) {
+        return {
+          response: { status: "Rejected" } satisfies TriggerMessageResponseV201,
+        };
+      }
       return {
         response: accepted,
-        afterResult: () => ctx.chargePoint.boot(),
+        afterResult: () => ctx.chargePoint.boot("Triggered"),
       };
 
     case "Heartbeat":
@@ -196,13 +207,25 @@ export const handleTriggerMessageV201 = (
       return {
         response: accepted,
         afterResult: () => {
+          // F06.FR.06: the measurands of AlignedDataCtrlr.Measurands, with
+          // context Trigger (ReadingContextEnumType). An empty aligned list
+          // falls back to the sampled list: TC_F_11_CS/TC_F_12_CS expect a
+          // MeterValuesRequest from a station that configured neither.
+          const aligned =
+            ctx.chargePoint.configuration.meterValuesAlignedData();
+          const measurands =
+            aligned.length > 0
+              ? aligned
+              : ctx.chargePoint.configuration.meterValuesSampledData();
+          const send = (id: number): void =>
+            ctx.chargePoint.sendMeterValue(id, "Trigger", { measurands });
           if (connectorId === undefined || connectorId === 0) {
-            for (const id of ctx.chargePoint.connectors.keys()) {
-              ctx.chargePoint.sendMeterValue(id);
-            }
+            for (const id of ctx.chargePoint.connectors.keys()) send(id);
+            // The station main meter on connector 0 / EVSE 0 (#617), when it has one.
+            if (ctx.chargePoint.mainMeter) send(0);
             return;
           }
-          ctx.chargePoint.sendMeterValue(connectorId);
+          send(connectorId);
         },
       };
 

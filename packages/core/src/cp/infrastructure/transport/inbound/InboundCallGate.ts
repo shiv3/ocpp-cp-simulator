@@ -1,4 +1,4 @@
-import type { BehaviorRegistry } from "../../../application/behavior/BehaviorRegistry";
+import type { ChargePointBehaviorRegistry } from "../../../domain/engine/behaviorRules";
 import { BehaviorRegistry as DefaultBehaviorRegistry } from "../../../application/behavior/BehaviorRegistry";
 import type { InboundCallPolicy } from "../../../domain/charge-point/ChargePoint";
 import { csmsActionAliases } from "../../../domain/types/csmsActionNames";
@@ -12,6 +12,9 @@ import type { CallExchange } from "./CallExchange";
  * 1. `incomingCallReceived`, announced to the scenario layer and the control plane
  * 2. `inboundPolicy` (sticky): reply with a CALLERROR, or stay silent
  * 3. `responseOverride` (one-shot): reply `{ status }`
+ * 3b. the static capability profile (#618): reply CALLERROR `NotImplemented`
+ *    for a disabled action, and `{ status: "NotImplemented" }` to a
+ *    TriggerMessage / ExtendedTriggerMessage whose target it leaves out
  * 4. `BehaviorRegistry.resolve()`, synchronous
  * 5. otherwise: the default path, which the caller runs
  *
@@ -43,12 +46,22 @@ export interface InboundCallGatePorts {
    * not a `{ status }`, so the real handler answers.
    */
   takeOverride(action: string): { status: string } | "unhonoured" | null;
+  /** Step 3b: does the station's capability profile disable `action`? */
+  isDisabled?(action: string): boolean;
+  /** Step 3b: may TriggerMessage / ExtendedTriggerMessage request `target`
+   *  under the capability profile? */
+  isTriggerTargetSupported?(target: string): boolean;
 }
 
 export interface InboundCallGateOptions {
   readonly ports: InboundCallGatePorts;
   /** Step 4. A registry that diverts nothing by default. */
-  readonly registry?: BehaviorRegistry;
+  readonly registry?: ChargePointBehaviorRegistry;
+  /**
+   * Checked after the CALL was announced: true leaves it unanswered and with
+   * no effect (1.6 §4.2, while BootNotification is Rejected).
+   */
+  readonly silenced?: () => boolean;
   /** Prefix of the gate's log lines, e.g. `"[v2.0.1] "`. */
   readonly logPrefix?: string;
   info(message: string): void;
@@ -56,7 +69,7 @@ export interface InboundCallGateOptions {
 }
 
 export class InboundCallGate {
-  private readonly registry: BehaviorRegistry;
+  private readonly registry: ChargePointBehaviorRegistry;
   private readonly prefix: string;
   private readonly open = new Set<CallExchange>();
 
@@ -86,6 +99,14 @@ export class InboundCallGate {
     const { ports } = this.options;
     const action = exchange.action;
     ports.notifyReceived(action, payload, exchange.messageId);
+
+    if (this.options.silenced?.()) {
+      this.options.warn(
+        `${this.prefix}Boot Rejected (§4.2): ignored ${action} (no response)`,
+      );
+      exchange.suppress();
+      return { kind: "settled" };
+    }
 
     const policy = ports.policyFor(action);
     if (policy) {
@@ -121,6 +142,36 @@ export class InboundCallGate {
       return { kind: "settled" };
     }
 
+    if (ports.isDisabled?.(action)) {
+      // #618: the station is declared as lacking this feature. Below the
+      // sticky policy and the one-shot override (a scenario keeps
+      // precedence), above rules and handlers, which never see the CALL.
+      this.options.warn(
+        `${this.prefix}Capability profile: ${action} is not implemented, replied CallError(NotImplemented)`,
+      );
+      exchange.replyError("NotImplemented", "This action is not supported");
+      return { kind: "settled" };
+    }
+
+    if (isTriggerAction(action) && ports.isTriggerTargetSupported) {
+      const target = (payload as { requestedMessage?: unknown } | null)
+        ?.requestedMessage;
+      if (
+        typeof target === "string" &&
+        !ports.isTriggerTargetSupported(target)
+      ) {
+        // #618: the profile leaves this target out. Checked here, not in the
+        // handlers, so a scenario rule or a code behavior cannot answer
+        // Accepted for it. `NotImplemented` is the CALLRESULT status of
+        // TriggerMessage and ExtendedTriggerMessage in every version.
+        this.options.warn(
+          `${this.prefix}Capability profile: ${action} for ${target} is not implemented, replied NotImplemented`,
+        );
+        exchange.reply({ status: "NotImplemented" });
+        return { kind: "settled" };
+      }
+    }
+
     const connectorId = connectorIdOf(payload);
     const resolution = this.registry.resolve(
       {
@@ -135,6 +186,10 @@ export class InboundCallGate {
     }
     return { kind: "default" };
   }
+}
+
+function isTriggerAction(action: string): boolean {
+  return action === "TriggerMessage" || action === "ExtendedTriggerMessage";
 }
 
 function connectorIdOf(payload: unknown): number | undefined {
@@ -164,8 +219,13 @@ export function ports16(chargePoint: {
   ): void;
   getInboundCallPolicy(action: string): InboundCallPolicy | undefined;
   consumeResponseOverride(action: string): string | null;
+  isActionDisabled?(action: string): boolean;
+  isTriggerTargetSupported?(target: string): boolean;
 }): InboundCallGatePorts {
   return {
+    isDisabled: (action) => chargePoint.isActionDisabled?.(action) ?? false,
+    isTriggerTargetSupported: (target) =>
+      chargePoint.isTriggerTargetSupported?.(target) ?? true,
     notifyReceived: (action, payload, messageId) =>
       chargePoint.notifyIncomingCall(action, payload, messageId),
     policyFor: (action) => chargePoint.getInboundCallPolicy(action),
@@ -192,10 +252,15 @@ export function portsAliased(
     hasResponseOverride(action: string): boolean;
     consumeResponseOverride(action: string): string | null;
     clearResponseOverride(action: string): void;
+    isActionDisabled?(action: string): boolean;
+    isTriggerTargetSupported?(target: string): boolean;
   },
   statusless: ReadonlySet<string>,
 ): InboundCallGatePorts {
   return {
+    isDisabled: (action) => chargePoint.isActionDisabled?.(action) ?? false,
+    isTriggerTargetSupported: (target) =>
+      chargePoint.isTriggerTargetSupported?.(target) ?? true,
     notifyReceived: (action, payload, messageId) =>
       chargePoint.notifyIncomingCall(action, payload, messageId),
     policyFor: (action) => {

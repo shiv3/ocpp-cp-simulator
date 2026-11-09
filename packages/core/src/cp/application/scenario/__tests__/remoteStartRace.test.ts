@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { createScenarioExecutorCallbacks } from "../ScenarioRuntime";
 import { cancelIfCancellable } from "../cancellable";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../../infrastructure/charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import { RemoteStartTransactionHandler } from "../../../infrastructure/transport/handlers/call/RemoteStartTransactionHandler";
 import { RemoteStopTransactionHandler } from "../../../infrastructure/transport/handlers/call/RemoteStopTransactionHandler";
@@ -27,7 +28,7 @@ import type { HandlerContext } from "../../../infrastructure/transport/handlers/
 function newChargePoint(id: string): ChargePoint {
   // wsUrl points at an unused local port — no real transport connection is
   // ever attempted, matching the pattern used by cert16RemoteStart.test.ts.
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     id,
     DefaultBootNotification,
     1,
@@ -144,6 +145,9 @@ describe("run_scenario / RemoteStartTransaction race — bypass visibility", () 
     await cp.startTransaction("RACE-TAG", 1, undefined, undefined, {
       triggerReason: "RemoteStart",
     });
+    // The CSMS issued the id (a `0` is real, #328); a RemoteStopTransaction
+    // cannot name a transaction whose StartTransaction.conf never came (#727).
+    connector.assignTransactionId(7);
     const txId = connector.transaction?.id;
     if (txId == null) throw new Error("the transaction got no id");
 

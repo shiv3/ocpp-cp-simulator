@@ -3,7 +3,8 @@ import { ScenarioExecutor } from "../ScenarioExecutor";
 import { createScenarioExecutorCallbacks } from "../ScenarioRuntime";
 import type { ScenarioDefinition } from "../ScenarioTypes";
 import { ScenarioNodeType } from "../ScenarioTypes";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../../infrastructure/charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 
 /**
@@ -42,7 +43,7 @@ function newChargePoint(id: string): ChargePoint {
   // wsUrl points at an unused local port — no real transport connection is
   // ever attempted; AuthorizeBeforeLocalStart stays at its default (true)
   // so this test exercises the real default wiring end-to-end.
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     id,
     DefaultBootNotification,
     1,

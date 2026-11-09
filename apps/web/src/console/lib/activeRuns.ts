@@ -1,5 +1,5 @@
-import type { ScenarioExpectation } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import type { ChargePointService } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+import type { ScenarioExpectation } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import type { ChargePointService } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 import { isLiveRunState, type LiveRunState } from "./scenarioRunState";
 
 export interface ActiveScenarioRun {

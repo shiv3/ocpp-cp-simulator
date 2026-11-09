@@ -1,3 +1,4 @@
+import type { TFunction } from "@/i18n";
 import { useTranslation } from "react-i18next";
 import React, { Suspense, lazy, useState } from "react";
 
@@ -9,22 +10,31 @@ import {
   NODE_FORM_REGISTRY,
   isScenarioNodeType,
 } from "../../../../components/scenario/forms/nodeFormRegistry";
-import type { NodeFormData } from "../../../../components/scenario/forms/types";
+import type {
+  LaneTarget,
+  NodeFormContext,
+  NodeFormData,
+} from "../../../../components/scenario/forms/types";
+import { collectStateKeys } from "../../../../components/scenario/forms/scenarioValue";
+import { applySelectHandleEdit } from "../../../lib/selectHandleEdit";
+import { recognizeBlockTree } from "../../../lib/blockTree";
+import { stepNumbers as treeStepNumbers } from "../../../lib/stepTree";
+import { nodeTitle } from "../run/stepVisuals";
 import {
   applyCurveConfigToMeterNode,
   meterNodeToCurveConfig,
 } from "../../../../components/scenario/meterValueNodeConfig";
-import type { AutoMeterValueConfig } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
-import type {
-  ScenarioNode,
-  ScenarioNodeData,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import type { AutoMeterValueConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
+import {
+  type ScenarioDefinition,
+  type ScenarioNode,
+  type ScenarioNodeData,
+  ScenarioNodeType,
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import EmptyState from "../../../components/EmptyState";
 
-// Lazy + Suspense, matching how the v2 ReactFlow editor
-// (`apps/web/src/components/scenario/ScenarioEditor.tsx`) loads this modal — it's a
-// canvas-heavy component only needed when a MeterValue step's "Configure
-// curve" action is used.
+// Lazy + Suspense: a canvas-heavy component only needed when a MeterValue
+// step's "Configure curve" action is used.
 const MeterValueCurveModal = lazy(
   () => import("../../../../components/MeterValueCurveModal"),
 );
@@ -33,17 +43,94 @@ export interface StepInspectorProps {
   /** The selected step node, or `null` when nothing is selected. */
   node: ScenarioNode | null;
   onChange: (data: ScenarioNodeData) => void;
+  /** The scenario around the step: the forms then offer its setState keys
+   *  and show where a switch's / choice's lanes lead. */
+  scenario?: ScenarioDefinition;
+  /** A change to more than the step's data (a switch case reordered moves
+   *  its lane's edge too). Absent: such edits change the data alone. */
+  onScenarioChange?: (next: ScenarioDefinition) => void;
+  /** The number each step's box shows (the tree's pre-order numbers, as
+   *  the editor has them); absent: worked out from `scenario`. */
+  stepNumbers?: ReadonlyMap<string, number>;
+  /** Open this lane's row of the selected switch / choice (a lane tag was
+   *  clicked); `nodeId` names the step it was asked for. */
+  focusLane?: { nodeId: string; handle: string; nonce: number } | null;
+}
+
+/** What the step's form may know of the scenario around it. */
+function formContext(
+  t: TFunction,
+  scenario: ScenarioDefinition | undefined,
+  node: ScenarioNode,
+  toNodeData: (form: NodeFormData) => ScenarioNodeData,
+  onScenarioChange: StepInspectorProps["onScenarioChange"],
+  stepNumbers: StepInspectorProps["stepNumbers"],
+): NodeFormContext | undefined {
+  if (!scenario) return undefined;
+  const context: NodeFormContext = {
+    stateKeys: collectStateKeys(scenario.nodes),
+  };
+  const prefix =
+    node.type === ScenarioNodeType.SWITCH
+      ? "case"
+      : node.type === ScenarioNodeType.CHOICE
+        ? "option"
+        : null;
+  if (prefix === null) return context;
+  context.laneEdgeCount = (handle) =>
+    scenario.edges.filter(
+      (e) => e.source === node.id && e.sourceHandle === handle,
+    ).length;
+  let numbers = stepNumbers ?? null;
+  context.laneTarget = (handle): LaneTarget | null => {
+    // The executor follows the first edge on a handle.
+    const edge = scenario.edges.find(
+      (e) => e.source === node.id && e.sourceHandle === handle,
+    );
+    if (!edge) return null;
+    const target = scenario.nodes.find((n) => n.id === edge.target);
+    if (!target) return { kind: "step", text: edge.target };
+    if (target.type === ScenarioNodeType.END) return { kind: "end" };
+    numbers ??= treeStepNumbers(recognizeBlockTree(scenario));
+    const n = numbers.get(target.id) ?? null;
+    const label = String(target.data.label ?? "").trim();
+    const title = label === "" ? nodeTitle(target) : label;
+    return {
+      kind: "step",
+      text: n === null ? title : t("scenarioEditor.lane.step", { n, title }),
+    };
+  };
+  if (onScenarioChange) {
+    context.onReindex = (next, mapping) =>
+      onScenarioChange(
+        applySelectHandleEdit(
+          scenario,
+          node.id,
+          toNodeData(next),
+          prefix,
+          mapping,
+        ),
+      );
+  }
+  return context;
 }
 
 /**
  * The scenario editor's step inspector: renders the registry form
  * for whichever step is selected (Task 7 brief — `entry.Component` reused
- * verbatim outside ReactFlow), plus a common Label/Description section that
+ * verbatim), plus a common Label/Description section that
  * every step type gets regardless of whether its own form surfaces those
  * fields (several registry forms, e.g. ConfigSetForm/CancelReservationForm,
  * currently render no fields of their own beyond `NoExtraConfigForm`).
  */
-const StepInspector: React.FC<StepInspectorProps> = ({ node, onChange }) => {
+const StepInspector: React.FC<StepInspectorProps> = ({
+  node,
+  onChange,
+  scenario,
+  onScenarioChange,
+  stepNumbers,
+  focusLane,
+}) => {
   const { t } = useTranslation();
   const [isCurveModalOpen, setIsCurveModalOpen] = useState(false);
 
@@ -73,6 +160,22 @@ const StepInspector: React.FC<StepInspectorProps> = ({ node, onChange }) => {
     onChange(entry.formToNodeData(next));
   };
 
+  const baseContext = formContext(
+    t,
+    scenario,
+    node,
+    entry.formToNodeData,
+    onScenarioChange,
+    stepNumbers,
+  );
+  const context: NodeFormContext | undefined =
+    focusLane && focusLane.nodeId === node.id
+      ? {
+          ...baseContext,
+          focusLane: { handle: focusLane.handle, nonce: focusLane.nonce },
+        }
+      : baseContext;
+
   const handleCurveSave = (config: AutoMeterValueConfig) => {
     handleFormChange(applyCurveConfigToMeterNode(formValue, config));
     setIsCurveModalOpen(false);
@@ -83,7 +186,7 @@ const StepInspector: React.FC<StepInspectorProps> = ({ node, onChange }) => {
   // the window width says nothing about where the inspector sits.
   return (
     <div data-testid="step-inspector" className="@container space-y-4">
-      <h2 className="text-base font-semibold text-cx-fg">{entry.title}</h2>
+      <h2 className="text-base font-semibold text-cx-fg">{t(entry.title)}</h2>
 
       <div className="grid grid-cols-1 gap-3 border-b border-cx-border pb-4 @lg:grid-cols-2">
         <TextField
@@ -109,6 +212,7 @@ const StepInspector: React.FC<StepInspectorProps> = ({ node, onChange }) => {
           value={formValue}
           onChange={handleFormChange}
           onOpenMeterCurve={() => setIsCurveModalOpen(true)}
+          context={context}
         />
       </div>
 

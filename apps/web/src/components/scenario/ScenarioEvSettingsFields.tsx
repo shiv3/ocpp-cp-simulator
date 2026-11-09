@@ -1,11 +1,11 @@
 import { useTranslation } from "react-i18next";
 import React, { useState } from "react";
 
-import { MIN_UI_POWER_FACTOR } from "@ocpp-cp-sim/core/cp/domain/connector/ChargingCurve";
+import { MIN_UI_POWER_FACTOR } from "@ocpp-cp-simulator/core/cp/domain/connector/ChargingCurve";
 import {
   EV_PRESETS,
   type EVSettings,
-} from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
+} from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
 import { cn } from "../../lib/utils";
 import { useVehicleSelect } from "../vehicle/useVehicleSelect";
 import { isPresetName, presetForScenario } from "../vehicle/vehicleChoice";

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { OCPP_TRACE_SCHEMA_VERSION } from "../OcppTraceRecord";
+import { SCHEMA_VERSION } from "@open-ocpp-trace/core";
 import {
   logLineToTraceRecord,
   logLinesToTrace,
@@ -30,7 +30,7 @@ describe("logLineToTraceRecord", () => {
     );
 
     expect(record).toEqual({
-      schemaVersion: OCPP_TRACE_SCHEMA_VERSION,
+      schemaVersion: SCHEMA_VERSION,
       timestamp: "2026-07-14T02:00:00.000Z",
       transport: "json",
       ocppVersion: "1.6",
@@ -93,7 +93,7 @@ describe("logLineToTraceRecord", () => {
 
 describe("trace format v1.1", () => {
   it("stamps records with schemaVersion 1.1", () => {
-    expect(OCPP_TRACE_SCHEMA_VERSION).toBe("1.1");
+    expect(SCHEMA_VERSION).toBe("1.1");
   });
 
   it("carries the verbatim frame text in raw, preserving spacing and key order", () => {
@@ -181,5 +181,65 @@ describe("logLinesToTrace", () => {
     );
     expect(resultA?.action).toBe("BootNotification");
     expect(resultB?.action).toBe("Heartbeat");
+  });
+});
+
+describe("inbound validation violations (#593)", () => {
+  it("merges the violation into the inbound CALL record's meta", () => {
+    const records = logLinesToTrace([
+      {
+        timestamp: "2026-01-01T00:00:00.000Z",
+        message: 'Received: [2,"v-1","Reset",{"type":"Warm"}]',
+        cpId: "CP1",
+      },
+      {
+        timestamp: "2026-01-01T00:00:00.001Z",
+        message: `Inbound validation: ${JSON.stringify({
+          messageId: "v-1",
+          action: "Reset",
+          mode: "enforce",
+          errorCode: "PropertyConstraintViolation",
+          description: "bad enum",
+        })}`,
+        cpId: "CP1",
+      },
+      {
+        timestamp: "2026-01-01T00:00:00.002Z",
+        message: 'Sent: [4,"v-1","PropertyConstraintViolation","bad enum",{}]',
+        cpId: "CP1",
+      },
+    ]);
+    expect(records).toHaveLength(2);
+    expect(records[0].meta).toEqual({
+      validation: {
+        mode: "enforce",
+        errorCode: "PropertyConstraintViolation",
+        description: "bad enum",
+      },
+    });
+    expect(records[1].meta).toBeUndefined();
+  });
+});
+
+// Key order is visible in every JSONL line the trace writers produce, so the
+// move to the SDK's discriminated TraceRecord (#886) must not reorder it.
+describe("record key order", () => {
+  const ctx = { ocppVersion: "1.6" };
+  it.each([
+    [
+      'Sent: [2,"k-1","Heartbeat",{}]',
+      "schemaVersion timestamp transport direction messageType ocppVersion chargePointId messageId action payload raw",
+    ],
+    [
+      'Received: [3,"k-1",{}]',
+      "schemaVersion timestamp transport direction messageType ocppVersion chargePointId messageId payload raw",
+    ],
+    [
+      'Received: [4,"k-1","NotImplemented","",{}]',
+      "schemaVersion timestamp transport direction messageType ocppVersion chargePointId messageId error raw",
+    ],
+  ])("%s", (message, keys) => {
+    const record = logLineToTraceRecord(line(message, { cpId: "CP1" }), ctx);
+    expect(Object.keys(record ?? {}).join(" ")).toBe(keys);
   });
 });

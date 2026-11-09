@@ -11,8 +11,9 @@ export class Outbox implements IChargePointMessageHandler {
     bootPayload: Parameters<
       IChargePointMessageHandler["sendBootNotification"]
     >[0],
+    reason?: Parameters<IChargePointMessageHandler["sendBootNotification"]>[1],
   ): ReturnType<IChargePointMessageHandler["sendBootNotification"]> {
-    return this.handler.sendBootNotification(bootPayload);
+    return this.handler.sendBootNotification(bootPayload, reason);
   }
 
   sendHeartbeat(): ReturnType<IChargePointMessageHandler["sendHeartbeat"]> {
@@ -30,9 +31,9 @@ export class Outbox implements IChargePointMessageHandler {
   }
 
   authorize(
-    tagId: Parameters<IChargePointMessageHandler["authorize"]>[0],
+    ...args: Parameters<IChargePointMessageHandler["authorize"]>
   ): ReturnType<IChargePointMessageHandler["authorize"]> {
-    return this.handler.authorize(tagId);
+    return this.handler.authorize(...args);
   }
 
   sendTransactionEvent(
@@ -89,6 +90,14 @@ export class Outbox implements IChargePointMessageHandler {
     return this.handler.sendSecurityEventNotification(type, techInfo);
   }
 
+  queueSecurityEventNotification(type: string, techInfo?: string): void {
+    this.handler.queueSecurityEventNotification?.(type, techInfo);
+  }
+
+  flushQueuedSecurityEvents(): void {
+    this.handler.flushQueuedSecurityEvents?.();
+  }
+
   sendSignCertificate(
     csr?: Parameters<IChargePointMessageHandler["sendSignCertificate"]>[0],
   ): ReturnType<IChargePointMessageHandler["sendSignCertificate"]> {
@@ -140,6 +149,13 @@ export class Outbox implements IChargePointMessageHandler {
     return this.handler.sendSignedFirmwareStatusNotification(status, requestId);
   }
 
+  sendReservationStatusUpdate(
+    reservationId: number,
+    status: "Expired" | "Removed",
+  ): void {
+    this.handler.sendReservationStatusUpdate?.(reservationId, status);
+  }
+
   sendNotifyEvent(
     events: Parameters<IChargePointMessageHandler["sendNotifyEvent"]>[0],
   ): ReturnType<IChargePointMessageHandler["sendNotifyEvent"]> {
@@ -164,10 +180,18 @@ export class Outbox implements IChargePointMessageHandler {
     return this.handler.setBootStatus(status);
   }
 
+  runTriggered<T>(fn: () => T): T {
+    return this.handler.runTriggered ? this.handler.runTriggered(fn) : fn();
+  }
+
   getDataTransferHandler(): ReturnType<
     IChargePointMessageHandler["getDataTransferHandler"]
   > {
     return this.handler.getDataTransferHandler();
+  }
+
+  queueUnansweredTransactionCall(): boolean {
+    return this.handler.queueUnansweredTransactionCall?.() ?? false;
   }
 
   hasTransactionMessagesInFlight(): boolean {

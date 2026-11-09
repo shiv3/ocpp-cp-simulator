@@ -1,8 +1,8 @@
-import type { EventEnvelope } from "@ocpp-cp-sim/contracts/index";
-import { RemoteChargePointService } from "@ocpp-cp-sim/client/remote/RemoteChargePointService";
+import type { EventEnvelope } from "@ocpp-cp-simulator/contracts/index";
+import { RemoteChargePointService } from "@ocpp-cp-simulator/client/remote/RemoteChargePointService";
 import { toJsonResponse } from "./output";
 import type { JsonCommand } from "./types";
-import type { SerializedLogLine } from "@ocpp-cp-sim/trace/logEntryToTrace";
+import type { SerializedLogLine } from "@ocpp-cp-simulator/trace/logEntryToTrace";
 
 export interface ClientLocation {
   readonly httpUrl: string;

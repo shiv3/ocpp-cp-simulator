@@ -357,6 +357,54 @@ describe("CertificateStore pending CSR and signed chains (A02 / A03)", () => {
     expect(store.listSignedChains()).toEqual([]);
   });
 
+  // #587, A02.FR.06
+  it("rejects an expired leaf, keeps the CSR pending and stores nothing", async () => {
+    const store = new CertificateStore();
+    const root = await selfSignedRoot("01", "CSO Root");
+    const csrPem = await store.generateNewCsr("CP-1", "Example CPO");
+    const expired = await leafForCsr("02", csrPem, root, {
+      notBeforeOffsetMs: -86_400_000,
+      notAfterOffsetMs: -1_000,
+    });
+
+    expect(
+      await store.applySignedChain("ChargingStationCertificate", [expired]),
+    ).toMatchObject({ status: "Expired" });
+    expect(store.pendingCsr("ChargingStationCertificate")).toBe(csrPem);
+    expect(store.listSignedChains()).toEqual([]);
+  });
+
+  it("rejects a leaf that is not valid yet and stores nothing (A02.FR.06)", async () => {
+    const store = new CertificateStore();
+    const root = await selfSignedRoot("01", "CSO Root");
+    const csrPem = await store.generateNewCsr("CP-1", "Example CPO");
+    const future = await leafForCsr("02", csrPem, root, {
+      notBeforeOffsetMs: 3_600_000,
+    });
+
+    expect(
+      await store.applySignedChain("ChargingStationCertificate", [future]),
+    ).toMatchObject({ status: "NotYetValid" });
+    expect(store.listSignedChains()).toEqual([]);
+  });
+
+  it("tells a superseded CSR's chain from an expired one by the key first", async () => {
+    const store = new CertificateStore();
+    const root = await selfSignedRoot("01", "CSO Root");
+    await store.generateNewCsr("CP-1", "Example CPO");
+    const otherCsr = await generateCsr("CP-OTHER", "Example CPO");
+    const expiredForeign = await leafForCsr("02", otherCsr.pem, root, {
+      notAfterOffsetMs: -1_000,
+      notBeforeOffsetMs: -86_400_000,
+    });
+
+    expect(
+      await store.applySignedChain("ChargingStationCertificate", [
+        expiredForeign,
+      ]),
+    ).toEqual({ status: "PublicKeyMismatch" });
+  });
+
   it("rejects an unparseable chain", async () => {
     const store = new CertificateStore();
     await store.generateNewCsr("CP-1", "Example CPO");

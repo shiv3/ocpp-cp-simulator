@@ -1,9 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import {
-  OCPPWebSocket,
-  type OcppMessageErrorPayload,
-  type SocketClose,
-} from "../OCPPWebSocket";
+import { OCPPWebSocket, type OcppMessageErrorPayload } from "../OCPPWebSocket";
+import type { SocketClose } from "../../../domain/transport/ChargePointSocket";
 import type { Logger } from "../../../shared/Logger";
 import type {
   Settlement,

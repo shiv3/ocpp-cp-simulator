@@ -11,9 +11,9 @@ import {
   VehicleCatalogError,
   type CatalogVariant,
   type VehicleCatalog,
-} from "@ocpp-cp-sim/core/cp/domain/vehicle/VehicleCatalog";
-import type { VehicleProfile } from "@ocpp-cp-sim/core/cp/domain/vehicle/VehicleProfile";
-import { OpenEvDirectoryClient } from "@ocpp-cp-sim/core/cp/infrastructure/vehicle-catalog/open-ev-directory/OpenEvDirectoryClient";
+} from "@ocpp-cp-simulator/core/cp/domain/vehicle/VehicleCatalog";
+import type { VehicleProfile } from "@ocpp-cp-simulator/core/cp/domain/vehicle/VehicleProfile";
+import { OpenEvDirectoryClient } from "@ocpp-cp-simulator/core/cp/infrastructure/vehicle-catalog/open-ev-directory/OpenEvDirectoryClient";
 
 type Handler = (...args: unknown[]) => void;
 type RpcAck =

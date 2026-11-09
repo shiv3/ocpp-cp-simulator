@@ -1,5 +1,5 @@
 {
-  "name": "@ocpp-cp-sim/contracts",
+  "name": "@ocpp-cp-simulator/contracts",
   "version": "0.0.0",
   "private": true,
   "type": "module",

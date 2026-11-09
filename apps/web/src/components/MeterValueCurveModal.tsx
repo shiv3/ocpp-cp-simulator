@@ -18,8 +18,8 @@ import { cn } from "@/lib/utils";
 import type {
   AutoMeterValueConfig,
   CurvePoint,
-} from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
-import { calculateBezierPoint } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
+} from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
+import { calculateBezierPoint } from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
 
 interface MeterValueCurveModalProps {
   isOpen: boolean;

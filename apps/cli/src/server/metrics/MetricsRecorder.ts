@@ -3,14 +3,14 @@ import {
   LogType,
   type LogEntry,
   type Logger,
-} from "@ocpp-cp-sim/core/cp/shared/Logger";
-import { TraceCorrelator } from "@ocpp-cp-sim/trace/TraceCorrelator";
+} from "@ocpp-cp-simulator/core/cp/shared/Logger";
+import { TraceCorrelator } from "@ocpp-cp-simulator/trace/TraceCorrelator";
 import {
   logLineToTraceRecord,
   type SerializedLogLine,
-} from "@ocpp-cp-sim/trace/logEntryToTrace";
-import type { OcppTraceRecord } from "@ocpp-cp-sim/trace/OcppTraceRecord";
-import { isSoapVersion } from "@ocpp-cp-sim/core/cp/domain/types/OcppVersion";
+} from "@ocpp-cp-simulator/trace/logEntryToTrace";
+import type { TraceRecord } from "@open-ocpp-trace/core";
+import { isSoapVersion } from "@ocpp-cp-simulator/core/cp/domain/types/OcppVersion";
 import { toTraceOcppVersion } from "../../trace/TraceWriter";
 
 export interface MetricsAttachContext {
@@ -257,7 +257,7 @@ export class MetricsRecorder {
    * overwrite the first, and the first answer would then be timed against the
    * wrong action and consume the entry the second answer needed.
    */
-  observe(record: OcppTraceRecord, cpId = record.chargePointId ?? ""): void {
+  observe(record: TraceRecord, cpId = record.chargePointId ?? ""): void {
     const action = this.actionLabel(record.action);
     bump(this.messages, `${action} ${record.direction}`);
 

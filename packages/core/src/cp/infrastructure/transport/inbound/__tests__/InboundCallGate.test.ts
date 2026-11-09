@@ -3,6 +3,7 @@ import {
   BehaviorRegistry,
   type BehaviorCall,
 } from "../../../../application/behavior/BehaviorRegistry";
+import type { ChargePointBehaviorRegistry } from "../../../../domain/engine/behaviorRules";
 import type { InboundCallPolicy } from "../../../../domain/charge-point/ChargePoint";
 import { ResponseEffectQueue } from "../../network-sim/ResponseEffectQueue";
 import { CallExchange } from "../CallExchange";
@@ -58,7 +59,7 @@ const gate = (
   cp: ReturnType<typeof chargePointDouble>,
   options: {
     aliased?: boolean;
-    registry?: BehaviorRegistry;
+    registry?: ChargePointBehaviorRegistry;
     log?: string[];
   } = {},
 ) =>
@@ -159,6 +160,23 @@ describe("InboundCallGate", () => {
         {},
       ),
     ).toEqual({ kind: "default" });
+  });
+
+  it("takes any registry that implements the domain interface (#575)", () => {
+    const rec: Recorder = { events: [], frames: [] };
+    const cp = chargePointDouble(rec);
+    const resolve = vi.fn((_call: BehaviorCall) => ({
+      kind: "default" as const,
+    }));
+    const registry: ChargePointBehaviorRegistry = {
+      register: () => () => {},
+      ranks: () => new Map(),
+      release: () => [],
+      resolve,
+    };
+    gate(cp, { registry }).admit(exchangeFor("Reset", rec), { type: "Soft" });
+    expect(resolve).toHaveBeenCalledTimes(1);
+    expect(resolve.mock.calls[0]?.[0]).toMatchObject({ action: "Reset" });
   });
 
   it("answers in the turn it was asked: nothing is deferred by a microtask (#456)", () => {

@@ -21,17 +21,6 @@ exports[`OCPP 2.0.1 boot handshake boots, accepts, then reports station and conn
     "<uuid>",
     "StatusNotification",
     {
-      "connectorId": 0,
-      "connectorStatus": "Available",
-      "evseId": 0,
-      "timestamp": "<ts>",
-    },
-  ],
-  [
-    2,
-    "<uuid>",
-    "StatusNotification",
-    {
       "connectorId": 1,
       "connectorStatus": "Available",
       "evseId": 1,

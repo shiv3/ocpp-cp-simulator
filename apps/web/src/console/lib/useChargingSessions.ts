@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { ChargingSessionPage } from "@ocpp-cp-sim/core/cp/domain/persistence/ChargingSessionRepository";
-import type { ChargingSession } from "@ocpp-cp-sim/core/cp/domain/session/ChargingSession";
+import type { ChargingSessionPage } from "@ocpp-cp-simulator/core/cp/domain/persistence/ChargingSessionRepository";
+import type { ChargingSession } from "@ocpp-cp-simulator/core/cp/domain/session/ChargingSession";
 import { useDataContext } from "../../data/providers/DataProvider";
-import { CHARGING_SESSIONS_PAGE_DEFAULT } from "@ocpp-cp-sim/contracts/index";
+import { CHARGING_SESSIONS_PAGE_DEFAULT } from "@ocpp-cp-simulator/contracts/index";
 
 const EMPTY_PAGE: ChargingSessionPage = { sessions: [], total: 0 };
 

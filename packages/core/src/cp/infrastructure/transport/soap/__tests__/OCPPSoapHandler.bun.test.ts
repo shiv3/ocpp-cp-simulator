@@ -1,6 +1,7 @@
 import { describe, expect, it, spyOn } from "bun:test";
 
-import { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../../charge-point/createChargePoint";
 import type { BootNotificationResult } from "../../../../domain/charge-point/ChargePointEvents";
 import type { Transaction } from "../../../../domain/connector/Transaction";
 import type { BootNotification } from "../../../../domain/types/OcppTypes";
@@ -356,7 +357,7 @@ function createSoapChargePoint(
   callbackUrl: string,
   requestTimeoutMs?: number,
 ): ChargePoint {
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     cpId,
     bootNotification(),
     1,
@@ -455,7 +456,7 @@ describe("OCPPSoapHandler CP-to-CSMS client", () => {
         meterType: "",
         meterSerialNumber: "Meter-001",
       };
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         cpId,
         bootNotification,
         1,
@@ -1408,7 +1409,7 @@ describe("OCPPSoapHandler CP-to-CSMS client", () => {
       const csms = startFakeCentralSystemService();
       const cpId = "CP-SOAP-SEND-ONLY";
       // No callback URL — browser local mode scenario
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         cpId,
         bootNotification(),
         1,

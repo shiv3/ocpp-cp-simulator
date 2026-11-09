@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/shiv3/ocpp-cp-simulator/schema/scenario.schema.json",
-  "title": "ScenarioDefinition (scenario schema v1.5)",
-  "$comment": "Scenario file format v1.5 (csmsCallTrigger behavior / onBusy, callResponse and useBehavior nodes and the $from payload reference added by issue #566; issue #214; connectionTrigger node and csmsCallTrigger payload condition added by issue #240; evSettings charging curve and electrical fields added by issue #301; ocppCall node added by issue #389; libraryId added by the web console Library). Mirrors packages/core/src/cp/application/scenario/ScenarioTypes.ts. See docs/concepts/scenario-format.md for the field overview and versioning rules. This is a first published contract: it is STRICT on known fields (types, required-ness, closed-vocabulary enums) but PERMISSIVE on unknown keys at every object level (additionalProperties: true) — real editor exports carry xyflow UI fields (width/height/selected/style/...) that this schema deliberately does not reject. Validation against this schema is advisory only in this version: the simulator warns on a mismatch but never refuses to load a file.",
+  "title": "ScenarioDefinition (scenario schema v1.10)",
+  "$comment": "Scenario file format v1.10 (edge kind \"loop\" with loop bounds added in v1.10; parallel and join nodes added in v1.9; edge kind \"timeout\" added in v1.8; $from root \"response\" and $match switch cases added in v1.7; useBehavior params and mode disable added by issue #654; csmsCallTrigger behavior / onBusy, callResponse and useBehavior nodes and the $from payload reference added by issue #566; issue #214; connectionTrigger node and csmsCallTrigger payload condition added by issue #240; evSettings charging curve and electrical fields added by issue #301; ocppCall node added by issue #389; libraryId added by the web console Library). Mirrors packages/core/src/cp/application/scenario/ScenarioTypes.ts. See docs/concepts/scenario-format.md for the field overview and versioning rules. This is a first published contract: it is STRICT on known fields (types, required-ness, closed-vocabulary enums) but PERMISSIVE on unknown keys at every object level (additionalProperties: true) — real editor exports carry xyflow UI fields (width/height/selected/style/...) that this schema deliberately does not reject. Validation against this schema is advisory only in this version: the simulator warns on a mismatch but never refuses to load a file.",
   "type": "object",
   "additionalProperties": true,
   "required": ["id", "name", "targetType", "nodes", "edges"],
@@ -23,6 +23,29 @@
     "libraryId": {
       "type": "string",
       "description": "The web console Library scenario this per-connector copy was made from (v1.4). Set when a connector is assigned a library scenario; absent on library entries and on scenarios loaded by hand."
+    },
+    "recordedFrom": {
+      "type": "object",
+      "description": "Set on a scenario made by recording a behavior run (v1.6, issue #654 step 2); informational, the runtime ignores it. Marks the scenario as a recording, never the default behavior it came from.",
+      "required": ["behaviorId", "commit", "seed", "version"],
+      "properties": {
+        "behaviorId": {
+          "type": "string",
+          "description": "The behavior that ran, e.g. default.firmware."
+        },
+        "commit": {
+          "type": "string",
+          "description": "The build that ran it: git commit when known, else the version label."
+        },
+        "seed": {
+          "type": ["string", "number"],
+          "description": "The seed of the run; the same seed records the same scenario."
+        },
+        "version": {
+          "type": "string",
+          "description": "The simulator version that recorded it."
+        }
+      }
     },
     "name": { "type": "string" },
     "description": { "type": "string" },
@@ -142,6 +165,52 @@
           "exclusiveMinimum": 0,
           "maximum": 1
         },
+        "vehicleBehavior": {
+          "description": "What the vehicle wants and when (issue #835): a preset id or a policy, with an optional intent. Absent keeps the historical behavior (the vehicle asks for all it can take from the plug-in on). See docs/concepts/vehicle-behavior.md.",
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "preset": {
+              "type": "string",
+              "enum": [
+                "immediate",
+                "target-soc",
+                "delayed-15min",
+                "overnight",
+                "ev-pause-resume",
+                "demand-dip"
+              ]
+            },
+            "policy": {
+              "type": "object",
+              "additionalProperties": true,
+              "required": ["type"],
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "immediate",
+                    "delayed",
+                    "target-soc",
+                    "scheduled-window",
+                    "manual-suspend",
+                    "demand-steps"
+                  ]
+                }
+              }
+            },
+            "intent": {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "targetSoc": { "type": "number", "minimum": 0, "maximum": 100 },
+                "requestedEnergyWh": { "type": "number", "minimum": 0 },
+                "departureAt": { "type": "number", "minimum": 0 }
+              }
+            },
+            "stopWhenDone": { "type": "boolean" }
+          }
+        },
         "attribution": {
           "description": "Credit owed for third-party data copied into these settings (issue #458): set when an imported vehicle profile is applied, one entry per source license, so the credit travels with the copied values. Informational: it changes nothing at run time. A preset clears it. When an entry has shareAlike, the copied data is shared under that license.",
           "type": "array",
@@ -217,19 +286,122 @@
         "sourceHandle": { "type": ["string", "null"] },
         "targetHandle": { "type": ["string", "null"] },
         "type": { "type": "string" },
-        "animated": { "type": "boolean" }
+        "animated": { "type": "boolean" },
+        "kind": {
+          "$comment": "v1.8. \"timeout\": followed only when the source trigger wait (remoteStartTrigger, remoteStopTrigger, statusTrigger, reservationTrigger, csmsCallTrigger, connectionTrigger) times out; the first such edge runs instead of failing the run. Ordinary successor selection (Start fan-out, the first edge, switch / choice handles) ignores it. Absent: an ordinary edge. v1.10. \"loop\": followed out of its source after each round while its `loop` bounds are not satisfied (do-while), only when the source leaves by its next edge; never as an ordinary next step. Absent: an ordinary edge.",
+          "enum": ["timeout", "loop"]
+        },
+        "loop": {
+          "$comment": "v1.10. Bounds of a kind \"loop\" edge; any satisfied bound exits, none present loops forever. times: rounds (0 behaves like 1); forSeconds: seconds of the station clock since the loop was entered, a round that crosses it completes; until: value and cases as switch (JSON constants or { \"$match\": ... }, a missing value matches only an exists:false case). A malformed bound fails the run when the loop's check is reached.",
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "times": { "type": "integer", "minimum": 0 },
+            "forSeconds": { "type": "number", "minimum": 0 },
+            "until": {
+              "type": "object",
+              "required": ["value", "cases"],
+              "properties": {
+                "value": {},
+                "cases": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/switchCase" }
+                }
+              }
+            }
+          }
+        }
       }
     },
+    "switchCase": {
+      "$comment": "A case of a switch (v1.6) or of the until of a loop edge (v1.10): a JSON constant, or since v1.7 a matcher when the case is an object whose only key is \"$match\".",
+      "if": {
+        "type": "object",
+        "required": ["$match"],
+        "maxProperties": 1
+      },
+      "then": { "$ref": "#/$defs/matcher" }
+    },
+    "matcher": {
+      "$comment": "v1.7. A switch case that matches by operators instead of JSON equality: { \"$match\": { \"in\": [\"Blocked\", \"Invalid\"] } }. The operators are ANDed. gt/gte/lt/lte compare numbers numerically, strings lexicographically, and a canonical decimal string as a number; other pairings do not match. equals/in are strict JSON equality. not takes a body of the same operators without another not. An unknown operator or a wrongly typed argument fails the run when the switch runs.",
+      "type": "object",
+      "required": ["$match"],
+      "properties": {
+        "$match": {
+          "type": "object",
+          "minProperties": 1,
+          "properties": {
+            "equals": {},
+            "in": { "type": "array" },
+            "gt": { "type": ["number", "string"] },
+            "gte": { "type": ["number", "string"] },
+            "lt": { "type": ["number", "string"] },
+            "lte": { "type": ["number", "string"] },
+            "exists": { "type": "boolean" },
+            "startsWith": { "type": "string" },
+            "endsWith": { "type": "string" },
+            "includes": { "type": "string" },
+            "not": {
+              "type": "object",
+              "minProperties": 1,
+              "properties": {
+                "equals": {},
+                "in": { "type": "array" },
+                "gt": { "type": ["number", "string"] },
+                "gte": { "type": ["number", "string"] },
+                "lt": { "type": ["number", "string"] },
+                "lte": { "type": ["number", "string"] },
+                "exists": { "type": "boolean" },
+                "startsWith": { "type": "string" },
+                "endsWith": { "type": "string" },
+                "includes": { "type": "string" }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "fromReference": {
+      "$comment": "v1.5 (#566), roots v1.6 (#654), response v1.7. A whole value read from a root: call (the CALL of the branch), response (the answer to the latest ocppCall of the branch: kind \"result\" | \"error\", action, messageId, payload, errorCode, errorDescription, errorDetails), charger, connector or state (what setState stored). Read-only; a path that names nothing fails the run.",
+      "type": "object",
+      "required": ["$from"],
+      "properties": {
+        "$from": {
+          "type": "string",
+          "pattern": "^(call|response|charger|connector|state)\\."
+        }
+      },
+      "additionalProperties": false
+    },
     "callResponseSpec": {
-      "$comment": "v1.5 (#566). How a scenario answers a CALL it owns: a CALLRESULT with `payload`, a CALLERROR with `errorCode` / `errorDescription`, or silence (`none`).",
+      "$comment": "v1.5 (#566). How a scenario answers a CALL it owns: a CALLRESULT with `payload`, a CALLERROR with `errorCode` / `errorDescription`, or silence (`none`). v1.6 (#654): `accepted` / `rejected` are the version-neutral answers of the CALL's own action (ctx.accepted / ctx.rejected) and take no payload.",
       "type": "object",
       "properties": {
-        "kind": { "enum": ["result", "error", "none"] },
+        "kind": { "enum": ["result", "error", "none", "accepted", "rejected"] },
         "payload": { "type": "object" },
         "errorCode": { "type": "string" },
         "errorDescription": { "type": "string" }
       },
-      "required": ["kind"]
+      "required": ["kind"],
+      "allOf": [
+        {
+          "$comment": "#846: the executor throws on a payload (or skipValidation) next to accepted / rejected.",
+          "if": {
+            "properties": { "kind": { "enum": ["accepted", "rejected"] } }
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["payload"] },
+                { "required": ["skipValidation"] }
+              ]
+            }
+          }
+        }
+      ]
     },
     "baseNodeData": {
       "type": "object",
@@ -274,7 +446,13 @@
             "connectionTrigger",
             "ocppCall",
             "callResponse",
-            "useBehavior"
+            "useBehavior",
+            "notify",
+            "switch",
+            "choice",
+            "setState",
+            "parallel",
+            "join"
           ]
         },
         "position": { "$ref": "#/$defs/position" },
@@ -305,7 +483,23 @@
                   "tagId": { "type": "string" },
                   "batteryCapacityKwh": { "type": "number" },
                   "initialSoc": { "type": "number" },
-                  "stopReason": { "type": "string" }
+                  "stopReason": { "type": "string" },
+                  "idTokenType": {
+                    "type": "string",
+                    "enum": [
+                      "Central",
+                      "eMAID",
+                      "ISO14443",
+                      "ISO15693",
+                      "KeyCode",
+                      "Local",
+                      "MacAddress",
+                      "NoAuthorization",
+                      "DirectPayment",
+                      "EVCCID",
+                      "VIN"
+                    ]
+                  }
                 }
               }
             }
@@ -349,7 +543,17 @@
               "data": {
                 "required": ["delaySeconds"],
                 "properties": {
-                  "delaySeconds": { "type": "number" }
+                  "delaySeconds": { "type": "number" },
+                  "until": {
+                    "$comment": "v1.6 (#654). Wait until this instant on the station's clock or for delaySeconds, whichever is longer.",
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "jitterSeconds": {
+                    "$comment": "v1.6 (#654). Add a seeded draw of 0..jitterSeconds (millisecond resolution); the same seed gives the same wait.",
+                    "type": "number",
+                    "minimum": 0
+                  }
                 }
               }
             }
@@ -605,10 +809,12 @@
           "then": {
             "properties": {
               "data": {
-                "$comment": "v1.5 (#566). Selects a behavior loaded on the station by id. Data only: the code is loaded with the station, never by a scenario. Fails the run if no loaded behavior has that id.",
+                "$comment": "v1.5 (#566), params and mode v1.6 (#654). Selects a behavior by id (one loaded on the station, or a built-in default.*). Data only: the code is loaded with the station, never by a scenario. Fails the run if no such behavior exists. params are the behavior's knobs for the run: JSON only, validated at run time against the behavior's params schema (see behavior.list), refused rather than coerced. mode disable answers the behavior's CALLs with the version's accepted answer and nothing after, for the run, and takes no params.",
                 "required": ["behaviorId"],
                 "properties": {
-                  "behaviorId": { "type": "string", "minLength": 1 }
+                  "behaviorId": { "type": "string", "minLength": 1 },
+                  "mode": { "enum": ["use", "disable"] },
+                  "params": { "type": "object" }
                 }
               }
             }
@@ -668,6 +874,115 @@
                     "items": { "type": "string" }
                   }
                 }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "notify" } } },
+          "then": {
+            "properties": {
+              "data": {
+                "$comment": "v1.6 (#654). ctx.notify as a node: sends the status notification and goes on without waiting for the CSMS. The status must belong to the kind's vocabulary (checked at run time). requestId may be a $from; signedFirmwareStatus needs one.",
+                "required": ["kind", "status"],
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "firmwareStatus",
+                      "signedFirmwareStatus",
+                      "logStatus",
+                      "diagnosticsStatus"
+                    ]
+                  },
+                  "status": { "type": "string", "minLength": 1 },
+                  "requestId": {
+                    "oneOf": [
+                      { "type": "integer", "minimum": 0 },
+                      { "$ref": "#/$defs/fromReference" }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "switch" } } },
+          "then": {
+            "properties": {
+              "data": {
+                "$comment": "v1.6 (#654). The run goes on along the edge whose sourceHandle is case-<n> for the first case equal to value, else along `default`; a branch with no such edge ends. Equality is JSON equality and never converts types. cases are constants (no $from). v1.7: a case that is an object whose only key is \"$match\" is a matcher instead of a constant (see #/$defs/matcher); a value whose $from names nothing goes to the first { \"$match\": { \"exists\": false } } case, else fails the run.",
+                "required": ["value", "cases"],
+                "properties": {
+                  "value": {},
+                  "cases": {
+                    "type": "array",
+                    "items": { "$ref": "#/$defs/switchCase" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "choice" } } },
+          "then": {
+            "properties": {
+              "data": {
+                "$comment": "v1.6 (#654). A seeded, weighted draw among options; the run goes on along the edge whose sourceHandle is option-<n>. weight defaults to 1 and must be above 0. The same seed gives the same draw.",
+                "required": ["options"],
+                "properties": {
+                  "options": {
+                    "type": "array",
+                    "minItems": 2,
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "weight": { "type": "number", "exclusiveMinimum": 0 },
+                        "label": { "type": "string" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "setState" } } },
+          "then": {
+            "properties": {
+              "data": {
+                "$comment": "v1.6 (#654). Stores a JSON value (a whole value may be a $from) under key in the state of this run; {\"$from\": \"state.<key>\"} reads it back. The state lives for the run, is shared by its parallel branches and is not persisted.",
+                "required": ["key", "value"],
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                  },
+                  "value": {}
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "parallel" } } },
+          "then": {
+            "properties": {
+              "data": {
+                "$comment": "v1.9. Runs every outgoing ordinary edge as its own branch, each with a fresh CALL slot, and waits until those branches meet at a join; the run goes on after the join with a fresh flow. Data: label only."
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "join" } } },
+          "then": {
+            "properties": {
+              "data": {
+                "$comment": "v1.9. Where the branches of a parallel meet. mode all (default): go on once every branch arrived or ended; any: go on at the first arrival and cancel the other branches. Reached by a branch no parallel started, it is a plain step.",
+                "properties": { "mode": { "enum": ["all", "any"] } }
               }
             }
           }

@@ -486,15 +486,15 @@ export interface StartDisposition {
  * the only handle that could ever close the CSMS's session, and does it at
  * precisely the moment the session is most likely to be real.
  *
- * Preserving it costs one CALL, not a stream. The charge point never cycles
- * again, and a connector merely holding a transaction runs no meter scheduler:
- * `Connector.startConfiguredMeterValue` needs `autoConfig.enabled` or an
- * increment fallback, `cp.create` accepts no field that sets either, and the
- * daemon constructs every charge point with `autoMeterValueSetting = null`
- * (`apps/cli/src/service.ts`). The exception is the moment the late conf lands:
- * `StartTransactionResultHandler` drives the connector to `Charging`, which
- * emits one `StatusNotification`. One frame per retired charge point, against
- * the whole transaction cycle it no longer runs. Teardown's closing sweep
+ * Preserving it costs a trickle, not a stream. The charge point never cycles
+ * again and runs no auto-meter scheduler (`cp.create` accepts no field that
+ * sets one, and the daemon constructs every charge point with
+ * `autoMeterValueSetting = null`, `apps/cli/src/service.ts`). But the station
+ * samples a running 1.x transaction itself every `MeterValueSampleInterval`
+ * seconds (default 60, #722), so one MeterValues a minute goes out until
+ * teardown. The late conf adds one `StatusNotification`: the connector moves
+ * to `Charging`. All of it small, against the whole transaction cycle the
+ * charge point no longer runs. Teardown's closing sweep
  * issues the stop — outside every measurement window, and late enough that the
  * conf has usually landed and the stop carries the real id.
  *

@@ -1,7 +1,8 @@
 import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { StepLane } from "./scenarioSteps";
+/** A lane: the Graph view's `StepLane`, or a block-tree `SeqPath`. */
+export type LaneKey = string | number;
 
 /** A pointer must travel this far before a press becomes a drag, so a click
  *  still selects. */
@@ -10,14 +11,14 @@ export const DRAG_THRESHOLD_PX = 6;
 /** One draggable step: its lane and its index there. */
 export interface LaneDragItem {
   id: string;
-  lane: StepLane;
+  lane: LaneKey;
   index: number;
 }
 
 /** A drag in progress. */
 export interface LaneDrag {
   id: string;
-  lane: StepLane;
+  lane: LaneKey;
   /** The step's index in its lane when the drag started. */
   from: number;
   /** The index it would have after a release now. */
@@ -29,9 +30,9 @@ export interface LaneDrag {
 export interface UseLaneDragOptions {
   /** The vertical centre of each step of `lane`, in order, in the pointer's
    *  coordinate space (only differences matter). Read once per drag. */
-  measure: (lane: StepLane) => number[];
+  measure: (lane: LaneKey) => number[];
   /** A release at a new index. */
-  onDrop: (id: string, lane: StepLane, from: number, to: number) => void;
+  onDrop: (id: string, lane: LaneKey, from: number, to: number) => void;
 }
 
 export interface LaneDragHandlers {

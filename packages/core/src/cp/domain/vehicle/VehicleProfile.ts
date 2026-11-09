@@ -8,7 +8,7 @@ import type {
   VehicleProfileOrigin,
   VehicleSpecOverrides,
   VehicleSpecs,
-} from "@ocpp-cp-sim/contracts/vehicleProfile";
+} from "@ocpp-cp-simulator/contracts/vehicleProfile";
 
 // The profile data model is defined in `packages/contracts/src` (#578); these re-exports
 // keep the old import path working.

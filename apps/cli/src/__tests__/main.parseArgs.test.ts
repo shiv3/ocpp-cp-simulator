@@ -3,19 +3,32 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   labelKeySchema,
   labelValueSchema,
-} from "@ocpp-cp-sim/contracts/labels";
+} from "@ocpp-cp-simulator/contracts/labels";
 
 const repoRoot = resolve(
   dirname(fileURLToPath(import.meta.url)),
   "../../../..",
 );
 
+// Each call starts a bun process (hundreds of ms, seconds under a loaded full
+// run). Make ONE call per test (#473, #783): a test with several calls spends
+// several start-ups against the default 5 s timeout. Use it.each for cases.
+// A second call fails the test at once, instead of as a timeout on a busy
+// machine.
+let callsThisTest = 0;
+beforeEach(() => {
+  callsThisTest = 0;
+});
+
 function runParseArgs(args: string[]) {
+  if (++callsThisTest > 1) {
+    throw new Error("runParseArgs runs once per test; split the test (#783)");
+  }
   const script = [
     'import { buildBootstrap, parseArgs } from "./apps/cli/src/main.ts";',
     'import { buildOcppWebSocketConnectOptions } from "./packages/core/src/cp/infrastructure/transport/wsUrlWithBasic.ts";',
@@ -57,11 +70,30 @@ function runParseArgs(args: string[]) {
     "  watch: options.watch,",
     "  oedBaseUrl: options.oedBaseUrl,",
     "  oedApiKeyFile: options.oedApiKeyFile,",
+    "  fleetTemplateFiles: options.fleetTemplateFiles,",
+    "  bootstrapPacing: options.bootstrapPacing ?? null,",
     "  labels: options.labels ?? null,",
     "  bootstrapLabels: buildBootstrap(options)?.labels ?? null,",
+    "  transport: options.transport ?? null,",
     "  txUpdatedMeterValues: options.txUpdatedMeterValues ?? null,",
     "  bootstrapTxUpdatedMeterValues:",
     "    buildBootstrap(options)?.txUpdatedMeterValues ?? null,",
+    "  inboundValidation: options.inboundValidation ?? null,",
+    "  bootstrapInboundValidation:",
+    "    buildBootstrap(options)?.inboundValidation ?? null,",
+    "  reservationAuthorizeIdTag: options.reservationAuthorizeIdTag ?? null,",
+    "  bootstrapReservationAuthorizeIdTag:",
+    "    buildBootstrap(options)?.reservationAuthorizeIdTag ?? null,",
+    "  ops: {",
+    "    allowedHosts: options.allowedHosts, trustedProxies: options.trustedProxies,",
+    "    requireTls: options.requireTls, rateLimitPerIp: options.rateLimitPerIp,",
+    "    rateLimitMaxIps: options.rateLimitMaxIps, logLevel: options.logLevel,",
+    "    logFile: options.logFile, logMaxBytes: options.logMaxBytes,",
+    "    logRotateDaily: options.logRotateDaily, logKeep: options.logKeep,",
+    "    shutdownStopTransactions: options.shutdownStopTransactions,",
+    "    shutdownWaitMs: options.shutdownWaitMs,",
+    "    connectRestored: options.connectRestored, cpBulkWaitMs: options.cpBulkWaitMs,",
+    "  },",
     "}));",
   ].join("\n");
 
@@ -218,6 +250,74 @@ describe("parseArgs OCPP 1.6 security flags", () => {
     });
   });
 
+  const INBOUND_BASE = [
+    "--cp-id",
+    "CP-593",
+    "--ws-url",
+    "ws://csms.example.test/ocpp/",
+  ];
+
+  it("--inbound-validation sets the #593 mode for the bootstrap charge point", () => {
+    const enforce = runParseArgs([
+      ...INBOUND_BASE,
+      "--inbound-validation",
+      "enforce",
+    ]);
+    expect(enforce.status).toBe(0);
+    expect(JSON.parse(enforce.stdout)).toMatchObject({
+      inboundValidation: "enforce",
+      bootstrapInboundValidation: "enforce",
+    });
+  });
+
+  it("leaves --inbound-validation unset by default (#593)", () => {
+    const unset = runParseArgs(INBOUND_BASE);
+    expect(JSON.parse(unset.stdout)).toMatchObject({
+      inboundValidation: null,
+      bootstrapInboundValidation: null,
+    });
+  });
+
+  it("refuses an unknown --inbound-validation mode (#593)", () => {
+    const bad = runParseArgs([
+      ...INBOUND_BASE,
+      "--inbound-validation",
+      "strict",
+    ]);
+    expect(bad.status).toBe(1);
+    expect(bad.stderr).toContain("--inbound-validation must be");
+  });
+
+  // One runParseArgs per test (#783): an "on" and an "off" case in one test
+  // is the shape that timed out.
+  const RESERVATION_BASE = [
+    "--cp-id",
+    "CP-595",
+    "--ws-url",
+    "ws://csms.example.test/ocpp/",
+  ];
+
+  it("--reservation-authorize-id-tag turns the #595 option on for the bootstrap charge point", () => {
+    const on = runParseArgs([
+      ...RESERVATION_BASE,
+      "--reservation-authorize-id-tag",
+    ]);
+    expect(on.status).toBe(0);
+    expect(JSON.parse(on.stdout)).toMatchObject({
+      reservationAuthorizeIdTag: true,
+      bootstrapReservationAuthorizeIdTag: true,
+    });
+  });
+
+  it("--reservation-authorize-id-tag stays off by default (#595)", () => {
+    const off = runParseArgs(RESERVATION_BASE);
+    expect(off.status).toBe(0);
+    expect(JSON.parse(off.stdout)).toMatchObject({
+      reservationAuthorizeIdTag: null,
+      bootstrapReservationAuthorizeIdTag: null,
+    });
+  });
+
   it("--tx-updated-meter-values turns the #347 option on for the bootstrap charge point", () => {
     const on = runParseArgs([
       "--cp-id",
@@ -233,7 +333,9 @@ describe("parseArgs OCPP 1.6 security flags", () => {
       txUpdatedMeterValues: true,
       bootstrapTxUpdatedMeterValues: true,
     });
+  });
 
+  it("--tx-updated-meter-values stays off by default (#347)", () => {
     const off = runParseArgs([
       "--cp-id",
       "CP-347",
@@ -391,6 +493,105 @@ describe("parseArgs OCPP 1.6 security flags", () => {
     expect(result.status).toBe(0);
     const parsed = JSON.parse(result.stdout);
     expect(parsed.openOptions.headers).toEqual({ "X-Trace": "trace-1" });
+  });
+
+  const WS_BASE = ["--cp-id", "CP-1", "--ws-url", "ws://127.0.0.1:9000/ocpp"];
+
+  it("has no transport options unless a reconnect or --ws-* flag is given (#609)", () => {
+    const none = JSON.parse(runParseArgs(WS_BASE).stdout);
+    expect(none.transport).toBeNull();
+  });
+
+  it("collects the reconnect flags into transport.reconnect (#609)", () => {
+    const result = runParseArgs([
+      ...WS_BASE,
+      "--reconnect-max-attempts",
+      "5",
+      "--reconnect-mode",
+      "fixed",
+      "--reconnect-base-delay-ms",
+      "250",
+      "--reconnect-max-delay-ms",
+      "2000",
+      "--reconnect-jitter-ms",
+      "50",
+      "--boot-retry-limit",
+      "-1",
+    ]);
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout).transport).toEqual({
+      reconnect: {
+        maxAttempts: 5,
+        mode: "fixed",
+        baseDelayMs: 250,
+        maxDelayMs: 2000,
+        jitterMs: 50,
+        bootRetryLimit: -1,
+      },
+    });
+  });
+
+  it("collects --ws-* flags into transport.ws (#611)", () => {
+    const ok = runParseArgs([
+      ...WS_BASE,
+      "--ws-handshake-timeout-ms",
+      "4000",
+      "--ws-no-compression",
+      "--ws-proxy",
+      "http://proxy.example:3128",
+    ]);
+    expect(ok.status).toBe(0);
+    expect(JSON.parse(ok.stdout).transport).toEqual({
+      ws: {
+        handshakeTimeoutMs: 4000,
+        perMessageDeflate: false,
+        proxy: "http://proxy.example:3128",
+      },
+    });
+  });
+
+  it.each([
+    [["--ws-max-payload", "1024"], '"maxPayloadBytes" is not supported on bun'],
+    [
+      ["--ws-local-address", "10.0.0.5"],
+      '"localAddress" is not supported on bun',
+    ],
+    [["--ws-proxy", "socks5://p:1"], "ws.proxy"],
+  ])("refuses %j, which Bun ignores (#611)", (flags, message) => {
+    const result = runParseArgs([...WS_BASE, ...flags]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(message);
+  });
+
+  it("refuses --ws-* flags on a SOAP version (#611)", () => {
+    const soap = runParseArgs([
+      "--cp-id",
+      "CP-1",
+      "--ws-url",
+      "http://127.0.0.1:9000/cs",
+      "--ocpp-version",
+      "OCPP-1.6S",
+      "--soap-callback-url",
+      "http://127.0.0.1:9100/cb",
+      "--ws-no-compression",
+    ]);
+    expect(soap.status).toBe(1);
+    expect(soap.stderr).toContain("SOAP versions have none");
+  });
+
+  it.each([
+    [["--reconnect-mode", "linear"], "--reconnect-mode must be"],
+    [["--reconnect-max-attempts", "-2"], "--reconnect-max-attempts must be"],
+    [["--reconnect-max-attempts", "1.5"], "an integer"],
+    [["--reconnect-jitter-ms", "abc"], "--reconnect-jitter-ms must be"],
+    [
+      ["--reconnect-base-delay-ms", "5000", "--reconnect-max-delay-ms", "1000"],
+      "maxDelayMs must be >= baseDelayMs",
+    ],
+  ])("rejects bad reconnect flags %j (#609)", (flags, message) => {
+    const result = runParseArgs([...WS_BASE, ...flags]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(message);
   });
 
   it("rejects invalid security profiles", () => {
@@ -1172,4 +1373,260 @@ describe("parseArgs --label (#472)", () => {
       );
     },
   );
+});
+
+describe("parseArgs --fleet-template (#445)", () => {
+  const DAEMON = ["--daemon"];
+
+  it("collects every repeated --fleet-template", () => {
+    const result = runParseArgs([
+      ...DAEMON,
+      "--fleet-template",
+      "a.json",
+      "--fleet-template",
+      "b.json",
+    ]);
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout).fleetTemplateFiles).toEqual([
+      "a.json",
+      "b.json",
+    ]);
+  });
+
+  it("is empty by default", () => {
+    expect(JSON.parse(runParseArgs(DAEMON).stdout).fleetTemplateFiles).toEqual(
+      [],
+    );
+  });
+
+  it("is refused without a path", () => {
+    const noPath = runParseArgs([...DAEMON, "--fleet-template"]);
+    expect(noPath.status).toBe(1);
+    expect(noPath.stderr).toContain("--fleet-template needs a file path");
+  });
+
+  it("is refused outside a server mode", () => {
+    const standalone = runParseArgs([
+      "--cp-id",
+      "CP",
+      "--ws-url",
+      "ws://csms.example.test/ocpp/",
+      "--fleet-template",
+      "a.json",
+    ]);
+    expect(standalone.status).toBe(1);
+    expect(standalone.stderr).toContain("--fleet-template needs a server mode");
+  });
+});
+
+describe("daemon operations flags (#620, #621, #622)", () => {
+  it("defaults keep today's behavior", () => {
+    const result = runParseArgs(["--daemon"]);
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout).ops).toEqual({
+      allowedHosts: [],
+      trustedProxies: [],
+      requireTls: false,
+      rateLimitPerIp: 0,
+      rateLimitMaxIps: 10000,
+      logLevel: null,
+      logFile: null,
+      logMaxBytes: null,
+      logRotateDaily: false,
+      logKeep: 5,
+      shutdownStopTransactions: false,
+      shutdownWaitMs: 5000,
+      connectRestored: true,
+      cpBulkWaitMs: 10000,
+    });
+  });
+
+  it("parses every flag", () => {
+    const result = runParseArgs([
+      "--daemon",
+      "--allowed-host",
+      "a.example",
+      "--allowed-host",
+      "b.example:9700",
+      "--trusted-proxy",
+      "10.0.0.0/8",
+      "--require-tls",
+      "--rate-limit-per-ip",
+      "20",
+      "--rate-limit-max-ips",
+      "500",
+      "--log-level",
+      "warn",
+      "--log-file",
+      "/tmp/x.log",
+      "--log-max-size",
+      "10m",
+      "--log-rotate-daily",
+      "--log-keep",
+      "7",
+      "--shutdown-stop-transactions",
+      "--shutdown-wait-ms",
+      "9000",
+      "--no-connect-restored",
+      "--cp-bulk-wait-ms",
+      "20000",
+    ]);
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout).ops).toEqual({
+      allowedHosts: ["a.example", "b.example:9700"],
+      trustedProxies: ["10.0.0.0/8"],
+      requireTls: true,
+      rateLimitPerIp: 20,
+      rateLimitMaxIps: 500,
+      logLevel: "warn",
+      logFile: "/tmp/x.log",
+      logMaxBytes: 10 * 1024 * 1024,
+      logRotateDaily: true,
+      logKeep: 7,
+      shutdownStopTransactions: true,
+      shutdownWaitMs: 9000,
+      connectRestored: false,
+      cpBulkWaitMs: 20000,
+    });
+  });
+
+  it.each([
+    [["--trusted-proxy", "not-an-ip"], "--trusted-proxy"],
+    [["--log-level", "loud"], "--log-level"],
+    [["--log-max-size", "big"], "--log-max-size"],
+    [["--rate-limit-max-ips", "0"], "--rate-limit-max-ips"],
+  ])("rejects %j", (args, flag) => {
+    const result = runParseArgs(["--daemon", ...args]);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(flag);
+  });
+});
+
+describe("parseArgs startup pacing (#610)", () => {
+  const DAEMON = [
+    "--daemon",
+    "--cp-id",
+    "CP",
+    "--cp-count",
+    "20",
+    "--ws-url",
+    "ws://csms.example.test/ocpp/",
+  ];
+
+  it("has no pacing unless asked for, so the built-in default applies", () => {
+    const result = runParseArgs(DAEMON);
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout).bootstrapPacing).toBeNull();
+  });
+
+  it("collects the four flags and fills the rest from the defaults", () => {
+    const result = runParseArgs([
+      ...DAEMON,
+      "--bootstrap-concurrency",
+      "2",
+      "--start-delay",
+      "250",
+      "--start-jitter",
+      "100",
+      "--start-seed",
+      "7",
+    ]);
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout).bootstrapPacing).toEqual({
+      concurrency: 2,
+      startDelayMs: 250,
+      startJitterMs: 100,
+      startSeed: 7,
+    });
+  });
+
+  it("fills the pacing defaults around a single flag", () => {
+    const partial = runParseArgs([...DAEMON, "--start-delay", "50"]);
+    expect(JSON.parse(partial.stdout).bootstrapPacing).toEqual({
+      concurrency: 8,
+      startDelayMs: 50,
+      startJitterMs: 0,
+      startSeed: 0,
+    });
+  });
+
+  it.each([
+    [["--bootstrap-concurrency", "0"], "--bootstrap-concurrency must be"],
+    [["--bootstrap-concurrency", "x"], "--bootstrap-concurrency must be"],
+    [["--start-delay", "-1"], "--start-delay must be"],
+    [["--start-jitter", "1.5"], "--start-jitter must be"],
+    [
+      ["--start-seed", "3"],
+      "--start-seed has no effect without --start-jitter",
+    ],
+  ])("refuses %j", (flags, message) => {
+    const result = runParseArgs([...DAEMON, ...flags]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(message);
+  });
+
+  it("refuses the flags outside a server mode", () => {
+    const standalone = runParseArgs([
+      "--cp-id",
+      "CP",
+      "--ws-url",
+      "ws://csms.example.test/ocpp/",
+      "--start-delay",
+      "10",
+    ]);
+    expect(standalone.status).toBe(1);
+    expect(standalone.stderr).toContain("--start-delay needs a server mode");
+  });
+
+  it("refuses the flags without --cp-id", () => {
+    const noCp = runParseArgs(["--daemon", "--start-delay", "10"]);
+    expect(noCp.status).toBe(1);
+    expect(noCp.stderr).toContain("--start-delay needs a server mode");
+  });
+
+  it("refuses the flags combined with a client mode, even next to --http-port", () => {
+    const result = runParseArgs([
+      "--http-port",
+      "9700",
+      "--send",
+      '{"method":"cp.list"}',
+      "--cp-id",
+      "CP",
+      "--start-delay",
+      "10",
+    ]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      "--start-delay cannot be combined with a client mode",
+    );
+  });
+
+  it("refuses a schedule longer than a timer can hold", () => {
+    const tooLong = runParseArgs([...DAEMON, "--start-delay", "200000000"]);
+    expect(tooLong.status).toBe(1);
+    expect(tooLong.stderr).toContain("must not exceed 2147483647 ms");
+  });
+
+  it("accepts the largest schedule a timer can hold", () => {
+    // (20 - 1) × 113025455 = 2147483645, plus a jitter of 2.
+    const edge = runParseArgs([
+      ...DAEMON,
+      "--start-delay",
+      "113025455",
+      "--start-jitter",
+      "2",
+    ]);
+    expect(edge.status).toBe(0);
+  });
+
+  it("refuses a schedule one millisecond over the largest one", () => {
+    const over = runParseArgs([
+      ...DAEMON,
+      "--start-delay",
+      "113025455",
+      "--start-jitter",
+      "3",
+    ]);
+    expect(over.status).toBe(1);
+  });
 });

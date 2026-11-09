@@ -29,6 +29,10 @@ import type {
   OcppCallNodeData,
   CallResponseNodeData,
   UseBehaviorNodeData,
+  NotifyNodeData,
+  SwitchNodeData,
+  ChoiceNodeData,
+  SetStateNodeData,
   ScenarioCallExchange,
   ConnectionTriggerNodeData,
   StartTransactionOptions,
@@ -36,8 +40,29 @@ import type {
   ScenarioExpectation,
   ScenarioWaitIntervention,
 } from "./ScenarioTypes";
-import { ScenarioNodeType } from "./ScenarioTypes";
-import { resolveFromExchange } from "./resolveFrom";
+import {
+  NOTIFY_KINDS,
+  ScenarioFlowNodeType,
+  ScenarioNodeType,
+} from "./ScenarioTypes";
+import {
+  isFromReference,
+  resolveFrom,
+  resolveFromOrMissing,
+  type FromScope,
+  type ScenarioOcppResponse,
+} from "./resolveFrom";
+import {
+  DIAGNOSTICS_STATUSES,
+  FIRMWARE_STATUSES,
+  UPLOAD_LOG_STATUSES,
+} from "@ocpp-cp-simulator/contracts/firmwareLogStatus";
+import { jsonProblem } from "../behavior/paramsSchema";
+import {
+  MISSING,
+  matchCase,
+  matcherProblem,
+} from "../../../scenario/valueMatch";
 import { DEFAULT_ID_TAG } from "../../domain/auth/IdTagPool";
 import { deriveExpectation } from "./ScenarioExpectations";
 import {
@@ -48,6 +73,7 @@ import {
 } from "../state/machines/ScenarioStateMachine";
 import { interpret } from "robot3";
 import { cancelIfCancellable } from "./cancellable";
+import { BranchScope, ParallelRegion } from "./branchScope";
 import { WaitControl, type WaitSignal } from "./WaitControl";
 import { ScenarioRunStateError } from "../../domain/errors/ScenarioRunStateError";
 import type { EventEmitter } from "../../shared/EventEmitter";
@@ -55,6 +81,22 @@ import { realClock } from "../../shared/clock";
 import type { SimClock } from "../../shared/clock";
 import { systemRngStreams } from "../../shared/rng";
 import type { Rng } from "../../shared/rng";
+import {
+  isTerminal,
+  loopBounds,
+  loopStep,
+  lowerScenario,
+  isJoin,
+  joinMode,
+  nextStep,
+  resolveOrigin,
+  successors,
+  timeoutStep,
+  type ScenarioProgram,
+} from "../../../scenario/scenarioGraph";
+import { connectionRule } from "../../../scenario/scenarioConnectionRules";
+
+type ScenarioEdge = ScenarioDefinition["edges"][number];
 
 type AutoMeterStartConfig = Parameters<
   NonNullable<ScenarioExecutorCallbacks["onStartAutoMeterValue"]>
@@ -82,9 +124,48 @@ interface ParkedWait {
 interface Flow {
   exchange: ScenarioCallExchange | null;
   answered: boolean;
+  /**
+   * The answer to the latest `ocppCall` of this branch (schema 1.7), for the
+   * root `response`. Latest wins; a branch from Start begins without one.
+   */
+  response: ScenarioOcppResponse | null;
+  /**
+   * Set by a `switch` or `choice` node (schema 1.6): the `sourceHandle` of the
+   * one edge the branch goes on along. Read and cleared by the walk.
+   */
+  handle: string | null;
+  /**
+   * Set by a trigger wait whose timeout expired and that has a timeout edge
+   * (schema 1.8): the node the branch goes on to instead of failing. Read
+   * and cleared by the walk.
+   */
+  timeoutTarget: ScenarioNode | null;
+  /**
+   * The branch's cancellation scope (schema 1.9): the run's root scope, or
+   * the scope of a branch a `parallel` started. Every wait of the branch
+   * races `scope.ended`.
+   */
+  scope: BranchScope;
+  /**
+   * The state of the loop edges (schema 1.10) this branch is in, by edge id:
+   * rounds done and when the loop was entered (station clock, epoch ms). Fresh
+   * whenever the branch arrives at a loop's header other than along the loop
+   * edge itself; dropped when the loop exits.
+   */
+  loops: Map<string, { rounds: number; since: number }>;
 }
 
-const newFlow = (): Flow => ({ exchange: null, answered: false });
+const newFlow = (scope: BranchScope): Flow => ({
+  exchange: null,
+  answered: false,
+  response: null,
+  handle: null,
+  timeoutTarget: null,
+  scope,
+  loops: new Map(),
+});
+
+const STATE_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 const isMeterValueTimeout = (error: unknown): boolean =>
   error instanceof Error &&
@@ -135,6 +216,8 @@ export class ScenarioExecutor {
   private aborted = false;
   private abortResolve: (() => void) | null = null;
   private abortPromise: Promise<void> = Promise.resolve();
+  /** The run's cancellation scope; it ends with `abortPromise` (schema 1.9). */
+  private rootScope: BranchScope = BranchScope.root(this.abortPromise);
   private remoteStartTagId: string | null = null;
   private remoteStartOptions: StartTransactionOptions | null = null;
   // Reason captured from the most recent RemoteStopTrigger node, forwarded
@@ -168,6 +251,14 @@ export class ScenarioExecutor {
   private armedCertificateQuirks = false;
   private readonly clock: SimClock;
   private readonly rng: Rng;
+  /** The state of the run (schema 1.6 `setState`); fresh for every start. */
+  private runState: Record<string, unknown> = Object.create(null) as Record<
+    string,
+    unknown
+  >;
+  /** The scenario lowered for walking (scenarioGraph.ts); rebuilt when the
+   *  definition's node or edge array is replaced. */
+  private lowered: ScenarioProgram<ScenarioNode, ScenarioEdge> | null = null;
 
   constructor(
     scenario: ScenarioDefinition,
@@ -236,6 +327,7 @@ export class ScenarioExecutor {
     this.currentNodeStartedAt = null;
     this.parkedWaits = [];
     this.executedNodes = [];
+    this.runState = Object.create(null) as Record<string, unknown>;
     this.stepResolve = null;
     this.pendingSteps = 0;
     this.armedOverrideActions = [];
@@ -243,6 +335,7 @@ export class ScenarioExecutor {
     this.abortPromise = new Promise<void>((resolve) => {
       this.abortResolve = resolve;
     });
+    this.rootScope = BranchScope.root(this.abortPromise);
     // Dispatch START event to transition to running state
     this.service.send({ type: "START", mode });
     this.notifyStateChange();
@@ -368,8 +461,9 @@ export class ScenarioExecutor {
     let originNode: ScenarioNode | undefined;
     let resumed = false;
 
+    const program = this.program();
     if (resumeFromNodeId) {
-      originNode = this.scenario.nodes.find((n) => n.id === resumeFromNodeId);
+      originNode = program.nodesById.get(resumeFromNodeId);
       if (originNode) {
         // Seed executedNodes from the resume snapshot so any node-history
         // check inside an executor down the flow has the right shape.
@@ -402,22 +496,40 @@ export class ScenarioExecutor {
 
     if (!originNode) {
       // Normal path: find and execute the Start node.
-      originNode = this.scenario.nodes.find(
-        (n) => n.type === ScenarioNodeType.START || n.data.label === "Start",
-      );
+      originNode = resolveOrigin(program);
       if (!originNode) {
         throw new Error("No start node found in scenario");
       }
-      await this.executeSingleNode(originNode, newFlow());
+      const originFlow = newFlow(this.rootScope);
+      await this.executeSingleNode(originNode, originFlow);
+      if (originFlow.timeoutTarget) {
+        // Schema 1.8: an origin that is a timed-out wait (a legacy wait
+        // labelled "Start") leaves by its timeout edge alone.
+        const target = originFlow.timeoutTarget;
+        originFlow.timeoutTarget = null;
+        await this.executeSequentialFlow(target, originFlow);
+        this.currentNodeId = null;
+        this.currentNodeStartedAt = null;
+        return;
+      }
     }
 
     // Walk outgoing edges from the origin node (whether Start or resume).
-    const outgoingEdges = this.scenario.edges.filter(
-      (e) => e.source === originNode!.id,
+    const nextNodes = successors(program, originNode, { asOrigin: true }).map(
+      (edge) => program.nodesById.get(edge.target)!,
     );
-    const nextNodes = outgoingEdges
-      .map((edge) => this.scenario.nodes.find((n) => n.id === edge.target))
-      .filter((node): node is ScenarioNode => node !== undefined);
+
+    const originOut = connectionRule(originNode.type).out;
+    if (resumed && (originOut === "select" || originOut === "fork")) {
+      // The chosen handle is not persisted: decide again (a choice from its
+      // seeded stream), then go on along that one edge. A parallel (schema
+      // 1.9) runs again: it has no effect of its own, and its branches then
+      // meet at their join as in a fresh run.
+      await this.executeSequentialFlow(originNode, newFlow(this.rootScope));
+      this.currentNodeId = null;
+      this.currentNodeStartedAt = null;
+      return;
+    }
 
     if (nextNodes.length === 0) {
       const tag = resumed ? "Resume point" : "Start";
@@ -434,7 +546,7 @@ export class ScenarioExecutor {
         `[${this.scenario.name}] Executing single branch`,
         "debug",
       );
-      await this.executeSequentialFlow(nextNodes[0]!, newFlow());
+      await this.executeSequentialFlow(nextNodes[0]!, newFlow(this.rootScope));
     } else {
       // Multiple branches - execute in parallel
       this.callbacks.log?.(
@@ -450,6 +562,31 @@ export class ScenarioExecutor {
   }
 
   /**
+   * The lowered scenario, rebuilt only when `nodes` or `edges` is replaced.
+   *
+   * Invariant: while a run is live, `scenario.nodes` / `scenario.edges` (and
+   * the node and edge objects in them) are replaced, never mutated in place.
+   * The cache is keyed on the two arrays' identity, so an in-place push,
+   * splice or edit of an edge would not be seen: `executeFlow` (origin and
+   * resume point) and `executeSequentialFlow` (`nextStep` after every node)
+   * would keep walking the graph as it was lowered. Neither the executor nor
+   * its callers write to them (the console editor and a `--watch` reload
+   * build new arrays); the permissive test "never mutates the definition's
+   * node and edge arrays" freezes them to keep the executor honest.
+   */
+  private program(): ScenarioProgram<ScenarioNode, ScenarioEdge> {
+    const { nodes, edges } = this.scenario;
+    if (
+      !this.lowered ||
+      this.lowered.nodes !== nodes ||
+      this.lowered.edges !== edges
+    ) {
+      this.lowered = lowerScenario({ nodes, edges });
+    }
+    return this.lowered;
+  }
+
+  /**
    * Execute multiple branches in parallel
    * Each branch runs independently until it reaches an End node or terminates
    */
@@ -461,7 +598,7 @@ export class ScenarioExecutor {
         `[${this.scenario.name}] Starting branch ${index + 1} from node: ${node.data?.label || node.id}`,
         "debug",
       );
-      return this.executeSequentialFlow(node, newFlow());
+      return this.executeSequentialFlow(node, newFlow(this.rootScope));
     });
 
     // Wait for all branches to complete
@@ -477,60 +614,298 @@ export class ScenarioExecutor {
    */
   private async executeSequentialFlow(
     startNode: ScenarioNode,
-    flow: Flow,
+    branchFlow: Flow,
   ): Promise<void> {
     let currentNode = startNode;
+    let flow = branchFlow;
+    // Schema 1.9: the join this branch goes on from after its parallel's
+    // branches met there; it runs as a step, not as an arrival.
+    let continuingJoin: ScenarioNode | null = null;
+    // When this branch's walk began: the clock of a loop the branch is already
+    // inside (it started or resumed in the body) counts from here.
+    const walkStartedAt = this.clock.now();
+    this.enterNode(currentNode, flow);
 
     while (
       currentNode &&
       !this.aborted &&
       getScenarioStateName(this.service) !== "idle"
     ) {
+      if (flow.scope.cancelled) break;
+      if (isJoin(currentNode) && currentNode !== continuingJoin) {
+        const region = flow.scope.region;
+        if (region) {
+          // Schema 1.9: a branch a parallel started ends at a join.
+          this.arriveAtJoin(currentNode, flow, region);
+          return;
+        }
+        this.callbacks.log?.(
+          `[${this.scenario.name}] Join "${currentNode.data?.label || currentNode.id}" reached by a branch no parallel started; it runs as a plain step`,
+          "info",
+        );
+      }
+      continuingJoin = null;
+
       // Execute the current node
       await this.executeSingleNode(currentNode, flow);
 
       // If the node finished while paused, do not make the next node visible
       // until the run has been resumed. Stop/abort can also land while parked.
-      await this.waitIfPaused();
+      await this.waitIfPaused(flow.scope);
       if (this.aborted || getScenarioStateName(this.service) === "idle") {
         break;
       }
+      if (flow.scope.cancelled) break;
+
+      // Schema 1.8: a wait that timed out goes on along its timeout edge.
+      const timedOutTo = flow.timeoutTarget;
+      flow.timeoutTarget = null;
+      if (timedOutTo) {
+        flow.handle = null;
+        currentNode = timedOutTo;
+        this.enterNode(currentNode, flow);
+        continue;
+      }
 
       // Check if this is the end node
-      if (
-        currentNode.type === ScenarioNodeType.END ||
-        currentNode.data.label === "End"
-      ) {
+      if (isTerminal(currentNode)) {
         break;
       }
 
-      // Find next node
-      const outgoingEdges = this.scenario.edges.filter(
-        (e) => e.source === currentNode!.id,
-      );
-      if (outgoingEdges.length === 0) {
-        break; // No more nodes to execute
+      // Schema 1.9: a parallel forks; this branch waits for its branches to
+      // meet at a join and goes on from there with a fresh flow.
+      if (connectionRule(currentNode.type).out === "fork") {
+        const join = await this.runParallel(currentNode, flow);
+        if (!join) break;
+        flow = newFlow(flow.scope);
+        currentNode = join;
+        continuingJoin = join;
+        continue;
       }
 
-      // Find the first edge that points to an existing node
-      let nextNode = null;
-      for (const edge of outgoingEdges) {
-        const candidate = this.scenario.nodes.find((n) => n.id === edge.target);
-        if (candidate) {
-          nextNode = candidate;
-          break;
-        }
+      // Find next node. A switch or choice picked one edge by its handle
+      // (schema 1.6).
+      const handle = flow.handle;
+      flow.handle = null;
+
+      // Schema 1.10: a loop edge out of this node, after its round. Going
+      // round again keeps the loop's state; exiting drops it and the branch
+      // goes on along the node's ordinary edge, if any.
+      const loop =
+        handle === null ? loopStep(this.program(), currentNode) : null;
+      if (
+        loop &&
+        !this.loopExits(loop.edge, currentNode, flow, walkStartedAt)
+      ) {
+        currentNode = loop.target;
+        continue;
       }
 
-      if (!nextNode) {
+      const step = nextStep(this.program(), currentNode, handle);
+      if (step.kind === "noEdgeForHandle") {
+        this.callbacks.log?.(
+          `[${this.scenario.name}] "${currentNode.data?.label || currentNode.id}" chose "${handle}", which has no edge; the branch ends`,
+          "info",
+        );
+        break;
+      }
+      if (step.kind === "missingTargets") {
         console.warn(
           `[ScenarioExecutor] All outgoing edges from node ${currentNode!.id} point to non-existent nodes. Branch will end here.`,
         );
         break;
       }
+      if (step.kind !== "edge") {
+        break; // No more nodes to execute
+      }
 
-      currentNode = nextNode;
+      currentNode = step.target;
+      this.enterNode(currentNode, flow);
     }
+
+    if (flow.scope.cancelled && !this.aborted) {
+      this.callbacks.log?.(
+        `[${this.scenario.name}] Branch at "${currentNode.data?.label || currentNode.id}" cancelled: another branch reached an "any" join first, or a sibling failed`,
+        "info",
+      );
+      this.dropOpenCall(flow, "cancelled the branch");
+    }
+  }
+
+  /**
+   * Schema 1.9: answer the CALL a branch still holds unanswered with
+   * `InternalError` now, because its flow is dropped (the branch was
+   * cancelled, reached a join, or forked at a parallel). Does not wait for
+   * the answer to settle.
+   */
+  private dropOpenCall(flow: Flow, why: string): void {
+    const exchange = flow.exchange;
+    if (!exchange || flow.answered) return;
+    flow.answered = true;
+    this.callbacks.log?.(
+      `${exchange.action}: the scenario ${why} before it answered this call; answering InternalError`,
+      "warn",
+    );
+    try {
+      void exchange
+        .answer({
+          kind: "error",
+          errorCode: "InternalError",
+          errorDescription: `The scenario ${why} before it answered this call`,
+        })
+        .catch(() => undefined);
+    } catch {
+      // An answer that cannot be sent is the runtime's to report.
+    }
+  }
+
+  /** Schema 1.9: a branch of `region` reached `join`; the branch ends here. */
+  private arriveAtJoin(
+    join: ScenarioNode,
+    flow: Flow,
+    region: ParallelRegion,
+  ): void {
+    const mode = joinMode(join);
+    this.callbacks.log?.(
+      `[${this.scenario.name}] A branch of "${region.parallelNodeId}" reached join "${join.data?.label || join.id}" (${mode})`,
+      "debug",
+    );
+    this.dropOpenCall(flow, "reached a join");
+    region.arrive(join, mode);
+  }
+
+  /**
+   * Schema 1.9: run every outgoing ordinary edge of `node` (a `parallel`) as
+   * its own branch, each with a fresh flow and a child scope, and wait until
+   * they meet. Resolves with the join to go on from, or null when no branch
+   * reached one (or this branch was cancelled, or the run stopped). A branch
+   * that fails cancels its siblings and fails the run.
+   */
+  private async runParallel(
+    node: ScenarioNode,
+    flow: Flow,
+  ): Promise<ScenarioNode | null> {
+    const program = this.program();
+    const targets = successors(program, node).map((edge) =>
+      program.nodesById.get(edge.target)!,
+    );
+    const label = node.data?.label || node.id;
+    // The flow after the join is fresh: the CALL held here is dropped.
+    this.dropOpenCall(flow, "forked the branch at a parallel");
+    const region = new ParallelRegion(node.id);
+    this.callbacks.log?.(
+      `[${this.scenario.name}] "${label}" starts ${targets.length} parallel branches`,
+      "info",
+    );
+    for (const target of targets) {
+      const scope = flow.scope.child(region);
+      region.addBranch(scope);
+      this.executeSequentialFlow(target, newFlow(scope)).then(
+        () => {
+          scope.release();
+          region.branchEnded();
+        },
+        (error: unknown) => {
+          scope.release();
+          if (region.isSettled) {
+            this.callbacks.log?.(
+              `[${this.scenario.name}] A cancelled branch of "${label}" failed: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+              "warn",
+            );
+          }
+          region.fail(error);
+        },
+      );
+    }
+    region.empty();
+
+    const outcome = await Promise.race([
+      region.settled,
+      flow.scope.ended.then(() => null),
+    ]);
+    // Whatever settled it, nothing of this execution runs on: an `any` join
+    // cancels the other branches, a failure its siblings, a stop everything.
+    for (const branch of region.branches) branch.cancel();
+    if (outcome === null || this.aborted) return null;
+    if (outcome.kind === "failed") throw outcome.error;
+    if (outcome.kind === "noJoin") {
+      this.callbacks.log?.(
+        `[${this.scenario.name}] No branch of "${label}" reached a join; the branch ends`,
+        "info",
+      );
+      return null;
+    }
+    this.callbacks.log?.(
+      `[${this.scenario.name}] The branches of "${label}" met at "${
+        (outcome.join as ScenarioNode).data?.label || outcome.join.id
+      }" (${joinMode(outcome.join)})`,
+      "info",
+    );
+    return outcome.join as ScenarioNode;
+  }
+
+  /**
+   * The branch arrives at `node` by anything but a loop edge (an ordinary
+   * edge, or the walk starting there): every loop edge back to `node` begins
+   * afresh, so a nested loop restarts when the outer body enters it again.
+   */
+  private enterNode(node: ScenarioNode, flow: Flow): void {
+    const loops = this.program().loopEdgesInto.get(node.id);
+    if (!loops) return;
+    const since = this.clock.now();
+    for (const edge of loops) flow.loops.set(edge.id, { rounds: 0, since });
+  }
+
+  /**
+   * Schema 1.10: the end-of-round check of a loop edge, right after its
+   * source ran (do-while): count the round, then exit when `times` rounds are
+   * done, `forSeconds` have passed on the station clock since the loop was
+   * entered, or `until` matches one of its cases, as a switch does. Without a
+   * bound the loop never exits. A malformed `loop` fails the run here.
+   */
+  private loopExits(
+    edge: ScenarioEdge,
+    source: ScenarioNode,
+    flow: Flow,
+    walkStartedAt: number,
+  ): boolean {
+    const read = loopBounds(edge);
+    if ("problem" in read) {
+      throw new Error(`loop edge "${edge.id}": ${read.problem}`);
+    }
+    const { times, forSeconds, until } = read.bounds;
+    let state = flow.loops.get(edge.id);
+    if (!state) {
+      state = { rounds: 0, since: walkStartedAt };
+      flow.loops.set(edge.id, state);
+    }
+    state.rounds += 1;
+    let fired: string | null = null;
+    if (times !== undefined && state.rounds >= times) {
+      fired = `times ${times}`;
+    } else if (
+      forSeconds !== undefined &&
+      this.clock.now() - state.since >= forSeconds * 1000
+    ) {
+      fired = `forSeconds ${forSeconds}`;
+    } else if (until) {
+      const picked = this.pickCase(
+        `loop edge "${edge.id}" until`,
+        until.value,
+        until.cases,
+        flow,
+      );
+      if (picked.index >= 0) fired = `until case ${picked.index}`;
+    }
+    if (fired === null) return false;
+    flow.loops.delete(edge.id);
+    this.callbacks.log?.(
+      `Loop "${edge.id}" out of "${source.data?.label || source.id}" exits (${fired}) after ${state.rounds} round${state.rounds === 1 ? "" : "s"}`,
+      "info",
+    );
+    return true;
   }
 
   /**
@@ -541,15 +916,19 @@ export class ScenarioExecutor {
     flow: Flow,
   ): Promise<void> {
     // A stop() may have landed while the previous node was awaiting; never
-    // start another node once aborted.
-    if (this.aborted) {
+    // start another node once aborted (or once the branch was cancelled).
+    if (this.aborted || flow.scope.cancelled) {
       return;
     }
 
     // Do not make the node visible while paused. This protects the boundary
     // after an in-flight wait resolves under pause.
-    await this.waitIfPaused();
-    if (this.aborted || getScenarioStateName(this.service) === "idle") {
+    await this.waitIfPaused(flow.scope);
+    if (
+      this.aborted ||
+      flow.scope.cancelled ||
+      getScenarioStateName(this.service) === "idle"
+    ) {
       return;
     }
 
@@ -557,8 +936,12 @@ export class ScenarioExecutor {
     // exactly one more node.
     const stateName = getScenarioStateName(this.service);
     if (stateName === "stepping") {
-      await this.waitForStep();
-      if (this.aborted || getScenarioStateName(this.service) === "idle") {
+      await this.waitForStep(flow.scope);
+      if (
+        this.aborted ||
+        flow.scope.cancelled ||
+        getScenarioStateName(this.service) === "idle"
+      ) {
         return;
       }
     }
@@ -631,11 +1014,19 @@ export class ScenarioExecutor {
         break;
 
       case ScenarioNodeType.METER_VALUE:
-        await this.executeMeterValue(node.id, node.data as MeterValueNodeData);
+        await this.executeMeterValue(
+          node.id,
+          node.data as MeterValueNodeData,
+          flow.scope,
+        );
         break;
 
       case ScenarioNodeType.DELAY:
-        await this.executeDelay(node.id, node.data as DelayNodeData);
+        await this.executeDelay(
+          node.id,
+          node.data as DelayNodeData,
+          flow.scope,
+        );
         break;
 
       case ScenarioNodeType.NOTIFICATION:
@@ -650,6 +1041,7 @@ export class ScenarioExecutor {
         await this.executeRemoteStartTrigger(
           node.id,
           node.data as RemoteStartTriggerNodeData,
+          flow,
         );
         break;
 
@@ -657,6 +1049,7 @@ export class ScenarioExecutor {
         await this.executeRemoteStopTrigger(
           node.id,
           node.data as RemoteStopTriggerNodeData,
+          flow,
         );
         break;
 
@@ -664,6 +1057,7 @@ export class ScenarioExecutor {
         await this.executeStatusTrigger(
           node.id,
           node.data as StatusTriggerNodeData,
+          flow,
         );
         break;
 
@@ -681,6 +1075,7 @@ export class ScenarioExecutor {
         await this.executeReservationTrigger(
           node.id,
           node.data as ReservationTriggerNodeData,
+          flow,
         );
         break;
 
@@ -736,11 +1131,33 @@ export class ScenarioExecutor {
         this.executeUseBehavior(node.id, node.data as UseBehaviorNodeData);
         break;
 
+      case ScenarioNodeType.NOTIFY:
+        this.executeNotify(node.data as NotifyNodeData, flow);
+        break;
+
+      case ScenarioNodeType.SWITCH:
+        this.executeSwitch(node.data as SwitchNodeData, flow);
+        break;
+
+      case ScenarioNodeType.CHOICE:
+        this.executeChoice(node.data as ChoiceNodeData, flow);
+        break;
+
+      case ScenarioNodeType.SET_STATE:
+        this.executeSetState(node.data as SetStateNodeData, flow);
+        break;
+
       case ScenarioNodeType.CONNECTION_TRIGGER:
         await this.executeConnectionTrigger(
           node.id,
           node.data as ConnectionTriggerNodeData,
+          flow,
         );
+        break;
+
+      // Schema 1.9: control flow only; the walk forks and meets.
+      case ScenarioFlowNodeType.PARALLEL:
+      case ScenarioFlowNodeType.JOIN:
         break;
 
       default:
@@ -955,9 +1372,9 @@ export class ScenarioExecutor {
       return;
     }
     const { action, skipValidation, applyResponse } = data;
-    const payload = resolveFromExchange(
+    const payload = resolveFrom(
       data.payload,
-      flow.exchange,
+      this.fromScope(flow),
       `ocppCall(${action})`,
     ) as Record<string, unknown>;
     const call = this.callbacks.onSendOcppCall({
@@ -971,12 +1388,28 @@ export class ScenarioExecutor {
     // reported as a run error after `execution.stopped`.
     const outcome = await Promise.race([
       call,
-      this.abortPromise.then(() => null),
+      flow.scope.ended.then(() => null),
     ]);
     if (outcome === null) {
       call.catch(() => undefined);
       return;
     }
+    flow.response =
+      outcome.kind === "callResult"
+        ? {
+            kind: "result",
+            action,
+            messageId: outcome.messageId,
+            payload: outcome.payload,
+          }
+        : {
+            kind: "error",
+            action,
+            messageId: outcome.messageId,
+            errorCode: outcome.errorCode,
+            errorDescription: outcome.errorDescription,
+            errorDetails: outcome.errorDetails,
+          };
     if (outcome.kind === "callResult") {
       this.callbacks.log?.(
         `OCPP call ${data.action} → CALLRESULT ${JSON.stringify(outcome.payload)}`,
@@ -1015,7 +1448,11 @@ export class ScenarioExecutor {
           data.tagId ||
           this.callbacks.onResolveIdTag?.() ||
           DEFAULT_ID_TAG;
-        const options = this.remoteStartOptions;
+        // #599: the node's own idTokenType rides in the options; without
+        // one the callback is called exactly as before.
+        const options: StartTransactionOptions | null = data.idTokenType
+          ? { ...this.remoteStartOptions, idTokenType: data.idTokenType }
+          : this.remoteStartOptions;
         this.remoteStartTagId = null;
         this.remoteStartOptions = null;
         const outcome = options
@@ -1063,6 +1500,7 @@ export class ScenarioExecutor {
   private async executeMeterValue(
     nodeId: string,
     data: MeterValueNodeData,
+    scope: BranchScope,
   ): Promise<void> {
     const meterCallbacks = this.callbacks as MeterValueCallbacks;
     const currentBeforeSeed = this.callbacks.onGetMeterValue?.();
@@ -1164,8 +1602,9 @@ export class ScenarioExecutor {
               resolvedMaxTime,
             ) ??
               (resolvedMaxTime && resolvedMaxTime > 0
-                ? this.sleep(resolvedMaxTime * 1000)
+                ? this.sleep(resolvedMaxTime * 1000, scope)
                 : Promise.resolve()),
+            scope,
           );
         } catch (error) {
           if (!resolvedMaxTime || !isMeterValueTimeout(error)) {
@@ -1174,7 +1613,7 @@ export class ScenarioExecutor {
         }
         this.callbacks.onStopAutoMeterValue?.();
       } else if (resolvedMaxTime && resolvedMaxTime > 0) {
-        await this.waitWithProgress(nodeId, resolvedMaxTime);
+        await this.waitWithProgress(nodeId, resolvedMaxTime, scope);
         this.callbacks.onStopAutoMeterValue?.();
       }
     }
@@ -1194,17 +1633,51 @@ export class ScenarioExecutor {
   private async executeDelay(
     nodeId: string,
     data: DelayNodeData,
+    scope: BranchScope,
   ): Promise<void> {
-    await this.waitWithProgress(nodeId, data.delaySeconds);
+    let seconds = data.delaySeconds;
+    if (data.until !== undefined) {
+      // Schema 1.6 (#654): not before an instant on the station's clock.
+      const at =
+        typeof data.until === "string"
+          ? new Date(data.until).getTime()
+          : Number.NaN;
+      if (Number.isNaN(at)) {
+        throw new Error(
+          `delay: until must be an ISO-8601 date-time, got ${JSON.stringify(data.until)}`,
+        );
+      }
+      seconds = Math.max(seconds, (at - this.clock.now()) / 1000);
+    }
+    if (data.jitterSeconds !== undefined) {
+      const jitter = data.jitterSeconds;
+      if (
+        typeof jitter !== "number" ||
+        !Number.isFinite(jitter) ||
+        jitter < 0
+      ) {
+        throw new Error(
+          `delay: jitterSeconds must be a number of at least 0, got ${JSON.stringify(jitter)}`,
+        );
+      }
+      // Whole milliseconds from the scenario's seeded stream, so one seed
+      // gives one wait. A jitter of 0 draws nothing.
+      if (jitter > 0) {
+        seconds += this.rng.int(0, Math.round(jitter * 1000) + 1) / 1000;
+      }
+    }
+    await this.waitWithProgress(nodeId, seconds, scope);
   }
 
   private async waitWithProgress(
     nodeId: string,
     totalSeconds: number,
+    scope: BranchScope,
   ): Promise<void> {
     if (this.callbacks.onDelay) {
       await this.waitWithOptionalForceSkip(
         this.callbacks.onDelay(totalSeconds),
+        scope,
       );
       return;
     }
@@ -1236,7 +1709,10 @@ export class ScenarioExecutor {
     }, updateInterval);
 
     try {
-      await this.waitWithOptionalForceSkip(this.sleep(totalSeconds * 1000));
+      await this.waitWithOptionalForceSkip(
+        this.sleep(totalSeconds * 1000, scope),
+        scope,
+      );
     } finally {
       this.clock.clearInterval(progressInterval);
 
@@ -1285,6 +1761,7 @@ export class ScenarioExecutor {
   private async executeRemoteStartTrigger(
     nodeId: string,
     data: RemoteStartTriggerNodeData,
+    flow: Flow,
   ): Promise<void> {
     const waitForRemoteStart = this.callbacks.onWaitForRemoteStart;
     if (!waitForRemoteStart) return;
@@ -1292,11 +1769,14 @@ export class ScenarioExecutor {
     const answer = (
       await this.runTriggerWait(
         nodeId,
+        flow,
         data.timeout,
         (seconds) => `Timeout waiting for remote start (${seconds}s)`,
         () => waitForRemoteStart(),
       )
     )?.value;
+    // A cancelled branch (schema 1.9) leaves the run's capture alone.
+    if (flow.scope.cancelled) return;
     // A wait continued past (#240) captures nothing, so the next Transaction
     // node falls back to its own tag.
     if (answer === undefined) {
@@ -1312,6 +1792,11 @@ export class ScenarioExecutor {
         ...(answer.remoteStartId !== undefined
           ? { remoteStartId: answer.remoteStartId }
           : {}),
+        // The type the CSMS sent; a Transaction node's own idTokenType wins
+        // (executeTransaction spreads the node's value last).
+        ...(answer.idTokenType !== undefined
+          ? { idTokenType: answer.idTokenType }
+          : {}),
       };
     }
   }
@@ -1326,6 +1811,7 @@ export class ScenarioExecutor {
   private async executeRemoteStopTrigger(
     nodeId: string,
     data: RemoteStopTriggerNodeData,
+    flow: Flow,
   ): Promise<void> {
     const waitForRemoteStop = this.callbacks.onWaitForRemoteStop;
     if (!waitForRemoteStop) return;
@@ -1336,10 +1822,12 @@ export class ScenarioExecutor {
     // nothing, so that node falls back to its own stopReason.
     const result = await this.runTriggerWait(
       nodeId,
+      flow,
       data.timeout,
       (seconds) => `Timeout waiting for remote stop (${seconds}s)`,
       () => waitForRemoteStop(),
     );
+    if (flow.scope.cancelled) return;
     this.remoteStopReason = result?.value?.reason ?? null;
     this.remoteStopOptions = result
       ? { triggerReason: result.value?.triggerReason ?? "RemoteStop" }
@@ -1353,12 +1841,14 @@ export class ScenarioExecutor {
   private async executeStatusTrigger(
     nodeId: string,
     data: StatusTriggerNodeData,
+    flow: Flow,
   ): Promise<void> {
     const waitForStatus = this.callbacks.onWaitForStatus;
     if (!waitForStatus) return;
 
     await this.runTriggerWait(
       nodeId,
+      flow,
       data.timeout,
       (seconds) =>
         `Timeout waiting for status: ${data.targetStatus} (${seconds}s)`,
@@ -1400,12 +1890,14 @@ export class ScenarioExecutor {
   private async executeReservationTrigger(
     nodeId: string,
     data: ReservationTriggerNodeData,
+    flow: Flow,
   ): Promise<void> {
     const waitForReservation = this.callbacks.onWaitForReservation;
     if (!waitForReservation) return;
 
     await this.runTriggerWait(
       nodeId,
+      flow,
       data.timeout,
       (seconds) => `Timeout waiting for reservation (${seconds}s)`,
       () => waitForReservation(),
@@ -1608,16 +2100,19 @@ export class ScenarioExecutor {
   /**
    * Wait if execution is paused
    */
-  private async waitIfPaused(): Promise<void> {
-    while (getScenarioStateName(this.service) === "paused") {
-      await this.sleep(100);
+  private async waitIfPaused(scope: BranchScope): Promise<void> {
+    while (
+      getScenarioStateName(this.service) === "paused" &&
+      !scope.cancelled
+    ) {
+      await this.sleep(100, scope);
     }
   }
 
   /**
    * Wait for step command
    */
-  private async waitForStep(): Promise<void> {
+  private async waitForStep(scope: BranchScope): Promise<void> {
     const stateName = getScenarioStateName(this.service);
     if (stateName !== "stepping") return;
 
@@ -1634,7 +2129,7 @@ export class ScenarioExecutor {
     });
 
     try {
-      await Promise.race([stepPromise, this.abortPromise]);
+      await Promise.race([stepPromise, scope.ended]);
     } finally {
       if (this.stepResolve === localResolve) {
         this.stepResolve = null;
@@ -1644,10 +2139,11 @@ export class ScenarioExecutor {
 
   private async waitWithOptionalForceSkip(
     waitPromise: Promise<unknown>,
+    scope: BranchScope,
   ): Promise<void> {
     const stateName = getScenarioStateName(this.service);
     if (stateName !== "stepping") {
-      await Promise.race([waitPromise, this.abortPromise]);
+      await Promise.race([waitPromise, scope.ended]);
       return;
     }
 
@@ -1658,7 +2154,7 @@ export class ScenarioExecutor {
     this.forceSkipResolve = localResolve;
 
     try {
-      await Promise.race([waitPromise, forcePromise, this.abortPromise]);
+      await Promise.race([waitPromise, forcePromise, scope.ended]);
     } finally {
       if (this.forceSkipResolve === localResolve) {
         this.forceSkipResolve = null;
@@ -1676,13 +2172,13 @@ export class ScenarioExecutor {
   /**
    * Sleep utility
    */
-  private sleep(ms: number): Promise<void> {
-    if (this.aborted) {
+  private sleep(ms: number, scope: BranchScope): Promise<void> {
+    if (this.aborted || scope.cancelled) {
       return Promise.resolve();
     }
     return Promise.race([
       new Promise<void>((resolve) => this.clock.setTimeout(resolve, ms)),
-      this.abortPromise,
+      scope.ended,
     ]);
   }
 
@@ -1694,9 +2190,15 @@ export class ScenarioExecutor {
    * the awaited answer, or null when there is none (continued, force-skipped
    * or stopped). Timeout-bearing waits also surface 100ms remaining-time
    * progress events.
+   *
+   * When the timeout expires the run fails with the timeout error, unless
+   * the node has a timeout edge (schema 1.8, `timeoutStep`): then the wait
+   * resolves with null like a continued one (nothing is captured) and
+   * `flow.timeoutTarget` sends the branch along that edge.
    */
   private async runTriggerWait<T>(
     nodeId: string,
+    flow: Flow,
     timeoutSeconds: number | undefined,
     timeoutMessage: (seconds: number) => string,
     startWait: () => Promise<T>,
@@ -1706,6 +2208,9 @@ export class ScenarioExecutor {
     const expectation = node
       ? deriveExpectation(node, this.scenario.targetId)
       : null;
+    const program = this.program();
+    const programNode = program.nodesById.get(nodeId);
+    const onTimeout = programNode ? timeoutStep(program, programNode) : null;
 
     for (;;) {
       const startedAt = this.clock.now();
@@ -1721,7 +2226,8 @@ export class ScenarioExecutor {
       // Only this attempt's own answer is returned: a withdrawn attempt that
       // answers late (e.g. with a stale RemoteStart tag) never reaches the run.
       let answer = null as { value: T } | null;
-      let outcome: WaitSignal | "settled";
+      let timeoutError: unknown = null;
+      let outcome: WaitSignal | "settled" | "timedOut";
       try {
         waitPromise = startWait();
         outcome = await Promise.race([
@@ -1729,8 +2235,15 @@ export class ScenarioExecutor {
             waitPromise.then((value) => {
               answer = { value };
             }),
+            flow.scope,
           ).then(() => "settled" as const),
-          control.expired,
+          // Without a timeout edge the expiry rejects and fails the run.
+          onTimeout
+            ? control.expired.catch((error: unknown) => {
+                timeoutError = error;
+                return "timedOut" as const;
+              })
+            : control.expired,
           control.signal,
         ]);
       } finally {
@@ -1741,7 +2254,25 @@ export class ScenarioExecutor {
         this.notifyStateChange();
       }
 
+      // A cancelled branch (schema 1.9) captures nothing.
+      if (flow.scope.cancelled) return null;
       if (outcome === "settled") return answer;
+      if (outcome === "timedOut" && onTimeout && !this.aborted) {
+        const reason =
+          timeoutError instanceof Error
+            ? timeoutError.message
+            : String(timeoutError);
+        this.callbacks.log?.(
+          `[${this.scenario.name}] ${reason}; "${
+            node?.data?.label || nodeId
+          }" goes on along its timeout edge to "${
+            onTimeout.target.data?.label || onTimeout.target.id
+          }"`,
+          "info",
+        );
+        flow.timeoutTarget = onTimeout.target;
+        return null;
+      }
       if (outcome === "continue" || this.aborted) return null;
     }
   }
@@ -1804,6 +2335,7 @@ export class ScenarioExecutor {
     const replace = data.behavior === "replace";
     const result = await this.runTriggerWait(
       nodeId,
+      flow,
       data.timeout,
       (seconds) =>
         `Timeout waiting for CSMS call ${data.action}${
@@ -1860,11 +2392,19 @@ export class ScenarioExecutor {
         `callResponse: the ${exchange.action} CALL of this branch is already answered`,
       );
     }
+    if (
+      (data.kind === "accepted" || data.kind === "rejected") &&
+      (data.payload !== undefined || data.skipValidation)
+    ) {
+      throw new Error(
+        `callResponse: kind "${data.kind}" is the ${exchange.action} answer of the station's OCPP version and takes no payload`,
+      );
+    }
     const payload =
       data.kind === "result"
-        ? (resolveFromExchange(
+        ? (resolveFrom(
             data.payload ?? {},
-            exchange,
+            this.fromScope(flow),
             `callResponse(${exchange.action})`,
           ) as Record<string, unknown>)
         : undefined;
@@ -1878,9 +2418,14 @@ export class ScenarioExecutor {
           : { errorDescription: data.errorDescription }),
         ...(data.skipValidation ? { skipValidation: true } : {}),
       }),
-      this.abortPromise.then(() => null),
+      flow.scope.ended.then(() => null),
     ]);
-    if (settled === null) return;
+    if (settled === null) {
+      // Cancelled mid-answer (schema 1.9): the answer is on its way, never
+      // answer the CALL again.
+      if (flow.scope.cancelled) flow.answered = true;
+      return;
+    }
     flow.answered = true;
     if (!settled.delivered) {
       throw new Error(
@@ -1898,19 +2443,230 @@ export class ScenarioExecutor {
     if (!this.callbacks.onUseBehavior) {
       throw new Error("useBehavior: this station cannot select behaviors");
     }
-    this.callbacks.onUseBehavior(data.behaviorId, nodeId);
-    this.callbacks.log?.(`Using behavior ${data.behaviorId}`, "info");
+    const mode = data.mode ?? "use";
+    if (mode !== "use" && mode !== "disable") {
+      throw new Error(
+        `useBehavior: mode must be "use" or "disable", got ${JSON.stringify(mode)}`,
+      );
+    }
+    const params = data.params;
+    if (params !== undefined) {
+      const bad = jsonProblem(params, "params");
+      if (bad || typeof params !== "object" || Array.isArray(params)) {
+        throw new Error(
+          `useBehavior ${data.behaviorId}: params must be a JSON object${bad ? ` (${bad})` : ""}`,
+        );
+      }
+      if (mode === "disable" && Object.keys(params).length > 0) {
+        throw new Error(
+          `useBehavior ${data.behaviorId}: mode "disable" takes no params`,
+        );
+      }
+    }
+    this.callbacks.onUseBehavior(data.behaviorId, nodeId, {
+      mode,
+      ...(params === undefined ? {} : { params }),
+    });
+    this.callbacks.log?.(
+      mode === "disable"
+        ? `Disabling behavior ${data.behaviorId} for this run`
+        : `Using behavior ${data.behaviorId}` +
+            (params && Object.keys(params).length > 0
+              ? ` with params ${JSON.stringify(params)}`
+              : ""),
+      "info",
+    );
+  }
+
+  /** What a `$from` of this branch can read (schema 1.5, 1.6). */
+  private fromScope(flow: Flow): FromScope {
+    return {
+      exchange: flow.exchange,
+      response: flow.response,
+      state: this.runState,
+      ...(this.callbacks.onReadStation
+        ? { station: this.callbacks.onReadStation }
+        : {}),
+    };
+  }
+
+  /** Schema 1.6 (#654): `ctx.notify` as a node; does not wait for the CSMS. */
+  private executeNotify(data: NotifyNodeData, flow: Flow): void {
+    if (!this.callbacks.onNotify) {
+      throw new Error("notify: this station cannot send notifications");
+    }
+    if (!(NOTIFY_KINDS as readonly string[]).includes(data.kind)) {
+      throw new Error(
+        `notify: kind must be one of ${NOTIFY_KINDS.join(", ")}, got ${JSON.stringify(data.kind)}`,
+      );
+    }
+    const statuses: readonly string[] =
+      data.kind === "logStatus"
+        ? UPLOAD_LOG_STATUSES
+        : data.kind === "diagnosticsStatus"
+          ? DIAGNOSTICS_STATUSES
+          : FIRMWARE_STATUSES;
+    if (typeof data.status !== "string" || !statuses.includes(data.status)) {
+      throw new Error(
+        `notify: status for ${data.kind} must be one of ${statuses.join(", ")}, got ${JSON.stringify(data.status)}`,
+      );
+    }
+    let requestId: number | undefined;
+    if (data.requestId !== undefined) {
+      const resolved = resolveFrom(
+        data.requestId,
+        this.fromScope(flow),
+        `notify(${data.kind})`,
+      );
+      if (
+        typeof resolved !== "number" ||
+        !Number.isInteger(resolved) ||
+        resolved < 0
+      ) {
+        throw new Error(
+          `notify: requestId must be a whole number of at least 0, got ${JSON.stringify(resolved)}`,
+        );
+      }
+      requestId = resolved;
+    }
+    if (data.kind === "signedFirmwareStatus" && requestId === undefined) {
+      throw new Error("notify: signedFirmwareStatus needs a requestId");
+    }
+    this.callbacks.onNotify(data.kind, data.status, requestId);
+    this.callbacks.log?.(
+      `Notified ${data.kind} ${data.status}` +
+        (requestId === undefined ? "" : ` (requestId ${requestId})`),
+      "info",
+    );
+  }
+
+  /** Schema 1.6 (#654): go on along `case-<n>` of the first equal case, else `default`. */
+  private executeSwitch(data: SwitchNodeData, flow: Flow): void {
+    const { index, value } = this.pickCase(
+      "switch",
+      data.value,
+      data.cases,
+      flow,
+    );
+    flow.handle = index >= 0 ? `case-${index}` : "default";
+    this.callbacks.log?.(
+      `Switch on ${value === MISSING ? "(missing)" : JSON.stringify(value)} → ${flow.handle}`,
+      "info",
+    );
+  }
+
+  /**
+   * The case a value picks, for a switch and for the `until` of a loop edge
+   * (schema 1.10): the index of the first case that matches (a JSON constant
+   * by equality, `{ "$match": … }` by its operators), or -1. `valueSpec` is
+   * resolved against this branch (`$from`); a missing value matches only an
+   * `exists: false` case, else the run fails with the usual error. Throws, with
+   * `label` as prefix, on malformed cases. Returns the resolved value too.
+   */
+  private pickCase(
+    label: string,
+    valueSpec: unknown,
+    cases: unknown,
+    flow: Flow,
+  ): { index: number; value: unknown } {
+    if (!Array.isArray(cases)) {
+      throw new Error(`${label}: cases must be an array`);
+    }
+    cases.forEach((value: unknown, index: number) => {
+      const bad = jsonProblem(value, `cases[${index}]`);
+      if (bad || isFromReference(value)) {
+        throw new Error(
+          `${label}: cases are JSON constants${bad ? ` (${bad})` : ', a "$from" is not allowed'}`,
+        );
+      }
+      const problem = matcherProblem(value);
+      if (problem) {
+        throw new Error(`${label}: cases[${index}]: ${problem.message}`);
+      }
+    });
+    const scope = this.fromScope(flow);
+    const value = resolveFromOrMissing(valueSpec, scope, label);
+    const index = cases.findIndex((candidate: unknown) =>
+      matchCase(value, candidate),
+    );
+    if (value === MISSING && index < 0) {
+      // No `exists: false` case: fail as before, with the usual message.
+      resolveFrom(valueSpec, scope, label);
+    }
+    return { index, value };
+  }
+
+  /** Schema 1.6 (#654): a seeded, weighted draw; go on along `option-<n>`. */
+  private executeChoice(data: ChoiceNodeData, flow: Flow): void {
+    const options = data.options;
+    if (!Array.isArray(options) || options.length < 2) {
+      throw new Error("choice: options must list at least two options");
+    }
+    const weights = options.map((option, index) => {
+      const weight = option?.weight ?? 1;
+      if (
+        typeof weight !== "number" ||
+        !Number.isFinite(weight) ||
+        weight <= 0
+      ) {
+        throw new Error(
+          `choice: options[${index}].weight must be a number above 0, got ${JSON.stringify(weight)}`,
+        );
+      }
+      return weight;
+    });
+    const total = weights.reduce((sum, weight) => sum + weight, 0);
+    const draw = this.rng.next() * total;
+    let acc = 0;
+    let picked = weights.length - 1;
+    for (let i = 0; i < weights.length; i += 1) {
+      acc += weights[i]!;
+      if (draw < acc) {
+        picked = i;
+        break;
+      }
+    }
+    flow.handle = `option-${picked}`;
+    this.callbacks.log?.(
+      `Choice → ${flow.handle}${options[picked]?.label ? ` (${options[picked]!.label})` : ""}`,
+      "info",
+    );
+  }
+
+  /** Schema 1.6 (#654): store a JSON value in the state of this run. */
+  private executeSetState(data: SetStateNodeData, flow: Flow): void {
+    if (typeof data.key !== "string" || !STATE_KEY.test(data.key)) {
+      throw new Error(
+        `setState: key must be letters, digits and underscores, not starting with a digit, got ${JSON.stringify(data.key)}`,
+      );
+    }
+    const value = resolveFrom(
+      data.value,
+      this.fromScope(flow),
+      `setState(${data.key})`,
+    );
+    const bad = jsonProblem(value, "value");
+    if (bad || value === undefined) {
+      throw new Error(`setState: value must be JSON${bad ? ` (${bad})` : ""}`);
+    }
+    this.runState[data.key] = value;
+    this.callbacks.log?.(
+      `State ${data.key} = ${JSON.stringify(value)}`,
+      "info",
+    );
   }
 
   /** Issue #240: park until the WebSocket reaches data.event. */
   private async executeConnectionTrigger(
     nodeId: string,
     data: ConnectionTriggerNodeData,
+    flow: Flow,
   ): Promise<void> {
     const waitForConnection = this.callbacks.onWaitForConnection;
     if (!waitForConnection) return;
     const result = await this.runTriggerWait(
       nodeId,
+      flow,
       data.timeout,
       (seconds) => `Timeout waiting for ${data.event} (${seconds}s)`,
       () => waitForConnection(data.event),

@@ -3,7 +3,7 @@ import type { HandlerOutcome } from "../../network-sim/ResponseEffectQueue";
 import type {
   UpdateFirmwareRequestV16,
   UpdateFirmwareResponseV16,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import { defaultBehavior16 } from "./defaultBehavior";
 
 /**

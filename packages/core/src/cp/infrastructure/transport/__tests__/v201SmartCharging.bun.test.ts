@@ -2,8 +2,9 @@ import { describe, expect, it } from "bun:test";
 import type {
   GetCompositeScheduleResponseV201,
   ReportChargingProfilesRequestV201,
-} from "@ocpp-cp-sim/ocpp/index";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+} from "@ocpp-cp-simulator/ocpp/index";
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
 import { bootedChargePoint } from "./stationHarness";
@@ -72,7 +73,7 @@ function txDefaultProfile(id: number): Record<string, unknown> {
 describe("OCPP 2.0.1 Smart Charging", () => {
   it("sets, reports, composites, and clears profiles via the shared v201 registry", async () => {
     const csms = startMockCsms();
-    const cp = new ChargePoint(
+    const cp = createChargePoint(
       "CP201-SMART-CHARGING",
       DefaultBootNotification,
       1,
@@ -237,7 +238,7 @@ describe("OCPP 2.0.1 Smart Charging on the operational timeline (#469)", () => {
 describe("OCPP 2.1 shared Smart Charging handler", () => {
   it("rejects v21-only Dynamic profiles at the shared mapper boundary", async () => {
     const csms = startMockCsms();
-    const cp = new ChargePoint(
+    const cp = createChargePoint(
       "CP21-SMART-CHARGING",
       DefaultBootNotification,
       1,

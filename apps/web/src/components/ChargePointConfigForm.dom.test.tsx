@@ -451,4 +451,53 @@ describe("ChargePointConfigForm", () => {
       expect(button("Add label")).toBeUndefined();
     });
   });
+
+  describe("txUpdatedMeterValues (#550)", () => {
+    const toggle = () => document.getElementById("txUpdatedMeterValues");
+
+    for (const mode of ["remote", "local"] as const) {
+      it(`is offered on OCPP 2.0.1 / 2.1 and saved in ${mode} mode`, async () => {
+        const { onSave } = await render({
+          mode,
+          initialConfig: {
+            ...defaultChargePointConfig,
+            cpId: "CP-1",
+            ocppVersion: "OCPP-2.0.1",
+          },
+        });
+        expect(toggle()).not.toBeNull();
+        expect(toggle()!.getAttribute("aria-checked")).toBe("false");
+
+        await act(async () => toggle()!.click());
+        expect(toggle()!.getAttribute("aria-checked")).toBe("true");
+        await act(async () => button("Save")!.click());
+        expect(onSave.mock.calls[0][0]).toMatchObject({
+          txUpdatedMeterValues: true,
+        });
+
+        await act(async () => toggle()!.click());
+        await act(async () => button("Save")!.click());
+        expect(onSave.mock.calls[1][0]).toMatchObject({
+          txUpdatedMeterValues: false,
+        });
+      });
+
+      it(`is hidden on OCPP 1.6 in ${mode} mode`, async () => {
+        await render({ mode });
+        expect(toggle()).toBeNull();
+      });
+    }
+
+    it("shows the stored value when editing", async () => {
+      await render({
+        initialConfig: {
+          ...defaultChargePointConfig,
+          cpId: "CP-1",
+          ocppVersion: "OCPP-2.1",
+          txUpdatedMeterValues: true,
+        },
+      });
+      expect(toggle()!.getAttribute("aria-checked")).toBe("true");
+    });
+  });
 });

@@ -68,8 +68,8 @@ import {
   DEFAULT_HOLD_MS,
   runBehaviorIteration,
   stopAtMs,
-} from "@ocpp-cp-sim/k6-runtime/behaviorRun";
-import { wire16 } from "@ocpp-cp-sim/k6-runtime/wire/v16";
+} from "@ocpp-cp-simulator/k6-runtime/behaviorRun";
+import { wire16 } from "@ocpp-cp-simulator/k6-runtime/wire/v16";
 
 const base = {
   env: {},

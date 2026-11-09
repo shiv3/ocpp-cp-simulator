@@ -4,6 +4,7 @@ import { buildSampledValues } from "../MeterValueBuilder";
 import type { Connector } from "../Connector";
 import type { EVSettings } from "../EVSettings";
 import { resolveActivePhases } from "../ChargingCurve";
+import { stubOperatingPoint } from "./operatingPointStub";
 
 /**
  * The slice of `Connector` the sample builder actually reads. A stub rather
@@ -50,7 +51,9 @@ function connectorStub(options: {
     activePhaseCount: () => activePhases,
     // The real connector resolves both from one instant, so the stub hands
     // back the same pair rather than letting the two drift (#301).
-    scheduleConstraints: () => ({ watts, activePhases }),
+    operatingPoint() {
+      return stubOperatingPoint(this, watts, activePhases);
+    },
   } as unknown as Connector;
 }
 

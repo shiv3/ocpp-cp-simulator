@@ -1,6 +1,6 @@
 // apps/cli/src/exportK6/__tests__/profiles.test.ts
 import { describe, expect, it } from "vitest";
-import { buildOptions } from "@ocpp-cp-sim/k6-runtime/profiles";
+import { buildOptions } from "@ocpp-cp-simulator/k6-runtime/profiles";
 
 describe("buildOptions", () => {
   it("defaults to a small steady profile with a success threshold", () => {

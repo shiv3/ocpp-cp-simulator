@@ -4,9 +4,12 @@ import {
   BehaviorHost,
   type BehaviorCp,
   type CallHandler,
-} from "@ocpp-cp-sim/k6-runtime/behaviorHost";
-import type { Behavior } from "@ocpp-cp-sim/k6-runtime/behaviorTypes";
-import type { CallObserver, WireCall } from "@ocpp-cp-sim/k6-runtime/types";
+} from "@ocpp-cp-simulator/k6-runtime/behaviorHost";
+import type { Behavior } from "@ocpp-cp-simulator/k6-runtime/behaviorTypes";
+import type {
+  CallObserver,
+  WireCall,
+} from "@ocpp-cp-simulator/k6-runtime/types";
 import { unsupportedCtxUses } from "../runExportK6Behavior";
 
 const timers = {

@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { scenarioTemplates } from "@ocpp-cp-sim/core/utils/scenarioTemplates";
+import { scenarioTemplates } from "@ocpp-cp-simulator/core/utils/scenarioTemplates";
 import { flush } from "../../test/harness";
 import TemplateGallery from "./TemplateGallery";
 
@@ -107,7 +107,10 @@ describe("TemplateBrowserDialog", () => {
       Array.from(first.querySelectorAll("button")).map((b) =>
         b.textContent?.trim(),
       ),
-    ).toEqual(["Use template"]);
+    ).toEqual([
+      expect.stringContaining(scenarioTemplates[0].name),
+      "Use template",
+    ]);
   });
 
   it("focuses the search and narrows the list by name and description, ignoring case", async () => {
@@ -197,5 +200,112 @@ describe("TemplateBrowserDialog", () => {
     await openBrowser();
     expect(search().value).toBe("");
     expect(rows()).toHaveLength(scenarioTemplates.length);
+  });
+});
+
+function preview(): HTMLElement | null {
+  return (
+    dialog()?.querySelector<HTMLElement>('[data-testid="template-preview"]') ??
+    null
+  );
+}
+
+function keyInSearch(key: string) {
+  search().dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+}
+
+describe("TemplateBrowserDialog preview", () => {
+  it("previews the first template, then the one a row picks", async () => {
+    await renderGallery();
+    await openBrowser();
+
+    expect(preview()?.dataset.previewTemplateId).toBe(scenarioTemplates[0].id);
+    expect(rows()[0].dataset.selected).toBe("true");
+
+    const target = scenarioTemplates[3];
+    const row = rows().find((r) => r.dataset.templateId === target.id)!;
+    await act(async () =>
+      row
+        .querySelector<HTMLButtonElement>('button[aria-label^="Preview "]')!
+        .click(),
+    );
+    expect(preview()?.dataset.previewTemplateId).toBe(target.id);
+    expect(row.dataset.selected).toBe("true");
+    expect(preview()!.textContent).toContain(target.name);
+  });
+
+  it("Arrow keys in the search move the selection, and Enter uses it", async () => {
+    const { onUseTemplate } = await renderGallery();
+    await openBrowser();
+
+    await act(async () => keyInSearch("ArrowDown"));
+    await act(async () => keyInSearch("ArrowDown"));
+    await act(async () => keyInSearch("ArrowUp"));
+    expect(preview()?.dataset.previewTemplateId).toBe(scenarioTemplates[1].id);
+
+    await act(async () => keyInSearch("Enter"));
+    await flush(10);
+    expect(onUseTemplate).toHaveBeenCalledWith(scenarioTemplates[1]);
+  });
+
+  it("keeps a picked template that the search still lists, else falls back to the first", async () => {
+    await renderGallery();
+    await openBrowser();
+    const loop = rows().find(
+      (r) => r.dataset.templateId === "status-triggered-actions",
+    )!;
+    await act(async () =>
+      loop
+        .querySelector<HTMLButtonElement>('button[aria-label^="Preview "]')!
+        .click(),
+    );
+    await act(async () => setInputValue(search(), "heartbeat"));
+    expect(preview()?.dataset.previewTemplateId).toBe(
+      "status-triggered-actions",
+    );
+    await act(async () => setInputValue(search(), "cert"));
+    expect(preview()?.dataset.previewTemplateId).toBe(
+      rows()[0].dataset.templateId,
+    );
+  });
+
+  it("draws the template as the editor's graph, loop included, and shows a picked step's settings read-only", async () => {
+    await renderGallery();
+    await openBrowser();
+    await act(async () => setInputValue(search(), "Status-Triggered"));
+    const view = preview()!;
+    expect(view.dataset.previewTemplateId).toBe("status-triggered-actions");
+
+    // The Graph view by default, with the loop back drawn.
+    expect(
+      view.querySelector('path[data-loop-arc="notification-heartbeat"]'),
+    ).not.toBeNull();
+    // Read-only: no "+" to add a step.
+    expect(view.querySelector('button[aria-label^="Add step"]')).toBeNull();
+
+    const detail = () =>
+      view.querySelector<HTMLElement>('[data-testid="template-step-detail"]')!;
+    expect(detail().textContent).toContain("Select a step");
+    await act(async () =>
+      view
+        .querySelector<HTMLButtonElement>(
+          '[data-node-id="delay-10s"] button, button[data-node-id="delay-10s"]',
+        )!
+        .click(),
+    );
+    const fieldset = detail().querySelector("fieldset");
+    expect(fieldset?.disabled).toBe(true);
+    const seconds = fieldset!.querySelector<HTMLInputElement>(
+      'input[type="number"]',
+    );
+    expect(seconds?.value).toBe("10");
+
+    // The Steps view lists the same steps.
+    await act(async () =>
+      view
+        .querySelector<HTMLButtonElement>('button[data-view="steps"]')!
+        .click(),
+    );
+    expect(view.querySelectorAll("[data-step-id]")).toHaveLength(3);
   });
 });

@@ -1,6 +1,6 @@
 import { createContext } from "react";
 
-import type { LogEntry } from "@ocpp-cp-sim/core/cp/shared/Logger";
+import type { LogEntry } from "@ocpp-cp-simulator/core/cp/shared/Logger";
 
 /** One aggregated log line: which CP it came from, the raw entry, and a
  *  monotonic append-order counter used as a stable React key (timestamps

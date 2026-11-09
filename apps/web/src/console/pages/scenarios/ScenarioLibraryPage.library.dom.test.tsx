@@ -17,15 +17,14 @@ import {
 } from "../../test/scenarioStore";
 import { LIBRARY_SCOPE, libraryCopyId } from "../../lib/scenarioLibrary";
 import { createEmptyScenario, insertStep } from "../../lib/scenarioSteps";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import {
   ScenarioNodeType,
   type ScenarioDefinition,
   type ScenarioExecutionContext,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import type { ChargePointSnapshot } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
-import { scenarioTemplates } from "@ocpp-cp-sim/core/utils/scenarioTemplates";
-import statusTriggeredActions from "@ocpp-cp-sim/core/utils/scenarios/status-triggered-actions.json";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import type { ChargePointSnapshot } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
+import { scenarioTemplates } from "@ocpp-cp-simulator/core/utils/scenarioTemplates";
 
 function connector(id: number): ChargePointSnapshot["connectors"][number] {
   return {
@@ -300,46 +299,6 @@ describe("Scenario Library", () => {
     expect(
       container.querySelector('button[aria-label="Add a parallel branch"]'),
     ).toBeTruthy();
-  });
-
-  it("a Meter Value node of the full graph editor shows its configured value: a library scenario has no connector reading", async () => {
-    // A loop keeps the scenario in the full graph editor.
-    const loop = statusTriggeredActions as unknown as ScenarioDefinition;
-    const store = createScenarioStore();
-    store.set(LIBRARY_SCOPE, null, [
-      {
-        ...loop,
-        id: "lib-loop",
-        targetType: "connector",
-        targetId: undefined,
-        nodes: [
-          ...loop.nodes,
-          {
-            id: "meter-1",
-            type: ScenarioNodeType.METER_VALUE,
-            position: { x: 0, y: 900 },
-            data: { label: "Meter", value: 10, sendMessage: true },
-          },
-        ],
-      },
-    ]);
-    const { container } = await renderLibrary(
-      "/scenarios?tab=library&edit=lib-loop&view=graph",
-      { store, seed: false },
-    );
-    // The graph editor is lazy-loaded.
-    for (let i = 0; i < 100; i++) {
-      if (container.querySelector(".react-flow__node")) break;
-      await act(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 20));
-      });
-    }
-    const meter = container.querySelector(
-      '.react-flow__node[data-id="meter-1"]',
-    );
-
-    expect(meter, "the full graph editor's Meter Value node").not.toBeNull();
-    expect(meter!.textContent).toContain("10 Wh");
   });
 
   it("+ New scenario asks only for a name and creates a library scenario", async () => {

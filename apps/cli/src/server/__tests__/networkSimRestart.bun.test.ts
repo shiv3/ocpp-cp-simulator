@@ -8,9 +8,9 @@ import { rmSync } from "node:fs";
 import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
 import { NetworkSimManager } from "../NetworkSimManager";
-import { BunSqliteDatabase } from "@ocpp-cp-sim/core/cp/domain/persistence/BunSqliteDatabase";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/BunSqliteDatabase";
 import type { ChargePointInitOptions } from "../../types";
-import type { NetworkSimLayerConfig } from "@ocpp-cp-sim/core/cp/infrastructure/transport/network-sim/config";
+import type { NetworkSimLayerConfig } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/network-sim/config";
 
 /**
  * Generate a unique temp database path.

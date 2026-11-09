@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test";
 
 import { CLIChargePointService, scenarioPositionIsOwnedBy } from "../service";
-import type { ScenarioDefinition } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import { ScenarioNodeType } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import type { ScenarioDefinition } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import { ScenarioNodeType } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import { testCpInit } from "./testCpInit";
 
 /**

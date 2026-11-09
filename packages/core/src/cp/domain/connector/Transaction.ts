@@ -1,24 +1,32 @@
-import type { MeterSampleOverrides } from "./MeterValueBuilder";
+import type { MeterSampleOverrides, SampledValue } from "./MeterValueBuilder";
 import {
+  DEFAULT_ID_TOKEN_TYPE,
+  ID_TOKEN_TYPE_VALUES,
+  ID_TOKEN_TYPE_VALUES_V21_ONLY,
   METER_READING_CONTEXTS,
   STOP_REASONS,
   STOP_TRANSACTION_REASON_VALUES,
   TRANSACTION_CHARGING_STATE_VALUES,
   TRANSACTION_EVENT_TRIGGER_REASON_VALUES,
   TRANSACTION_STOPPED_REASON_VALUES,
+  type IdTokenTypeName,
   type MeterReadingContext,
   type StopReason,
   type StopTransactionReason,
   type TransactionChargingState,
   type TransactionEventTriggerReason,
   type TransactionStoppedReason,
-} from "@ocpp-cp-sim/contracts/transactionVocabulary";
+} from "@ocpp-cp-simulator/contracts/transactionVocabulary";
 
 // The vocabularies are defined in `packages/contracts/src` (#578); these re-exports keep
 // the old import path working.
 export {
+  DEFAULT_ID_TOKEN_TYPE,
+  ID_TOKEN_TYPE_VALUES,
+  ID_TOKEN_TYPE_VALUES_V21_ONLY,
   METER_READING_CONTEXTS,
   STOP_REASONS,
+  type IdTokenTypeName,
   type MeterReadingContext,
   type StopReason,
   type StopTransactionReason,
@@ -138,6 +146,8 @@ export function endedTriggerReason(
 export interface StartTransactionCommandOptions {
   triggerReason?: TransactionEventTriggerReason;
   chargingState?: TransactionChargingState;
+  /** OCPP 2.x `IdToken.type` of the Authorize and TransactionEvent (#599). */
+  idTokenType?: IdTokenTypeName;
 }
 
 /** `stop_transaction` options a control-plane caller may name (#335). */
@@ -170,6 +180,20 @@ export interface TransactionUpdateOptions extends MeterSampleOverrides {
   skipWithoutMeterValue?: boolean;
 }
 
+/** One formatted meter-value entry of the transaction-end history (#607):
+ *  what the CSMS would have seen at `timestamp`, kept as formatted samples so
+ *  a configuration change later in the session cannot reformat it. */
+export interface TxEndedSample {
+  /** ISO 8601 instant of the sample. */
+  timestamp: string;
+  sampledValue: SampledValue[];
+}
+
+/** Upper bound of {@link Transaction.txEndedSamples}; the oldest entries are
+ *  dropped beyond it so a very long session stays bounded in memory and in
+ *  the persisted transaction. */
+export const TX_ENDED_SAMPLES_MAX = 1000;
+
 export interface Transaction {
   /** CSMS-assigned (OCPP 1.x); `0` until StartTransaction.conf assigns it.
    *  No transaction is `connector.transaction === null`, never a null id. */
@@ -179,6 +203,14 @@ export interface Transaction {
    *  `0` is then a placeholder the CSMS failed to process, not an id it
    *  issued: RemoteStopTransaction does not match it (#491, #527). */
   startCallError?: boolean;
+  /** OCPP 1.x (#727): no StartTransaction.conf has assigned `id` yet, so its
+   *  `0` is a placeholder, not an id the CSMS issued (a CSMS-issued `0` is
+   *  real, #328). Set when the transaction begins, cleared by the conf. While
+   *  it is set and no StartTransaction.req of the transaction is still on its
+   *  way (it timed out, was discarded, or was lost in a restart), the
+   *  transaction's StopTransaction.req and MeterValues.req carry `-1` (1.6
+   *  errata 3.18), and RemoteStopTransaction does not match it. */
+  startUnanswered?: boolean;
   connectorId: number;
   tagId: string;
   meterStart: number;
@@ -212,6 +244,9 @@ export interface Transaction {
   /** OCPP 2.x TransactionEvent chargingState for the Started event (#335).
    *  If absent the encoder sends `Charging`, the historical value. */
   startChargingState?: TransactionChargingState;
+  /** OCPP 2.x `IdToken.type` for the Authorize and the Started / Ended
+   *  TransactionEvent (#599). If absent the encoder sends `ISO14443`. */
+  idTokenType?: IdTokenTypeName;
   /** #315: the OCMF document signed for the begin reading when the
    *  transaction started (only while `SampledDataSignReadings` is on). 1.6
    *  has nowhere to send it at start, so it rides in StopTransaction's
@@ -219,6 +254,12 @@ export interface Transaction {
    *  the meter's page numbers in time order. Dropped when a transaction is
    *  restored after a restart: the key that signed it is gone. */
   signedBeginOcmf?: string;
+  /** #607: the history that StopTransaction.transactionData (1.6) or the
+   *  Ended event (2.x) carries beside the begin and end readings: 1.6 also
+   *  holds the `Transaction.Begin` sample taken at start, because only
+   *  StopTransaction can send it. Bounded by {@link TX_ENDED_SAMPLES_MAX}
+   *  and persisted with the transaction (transaction_json). */
+  txEndedSamples?: TxEndedSample[];
   /** OCPP 2.x TransactionEvent triggerReason for the Ended event. If absent,
    *  the encoder defaults to the local StopAuthorized path. */
   stopTriggerReason?: TransactionStopTriggerReason;
@@ -237,4 +278,11 @@ export interface Transaction {
   authorizationRejectedMidSession?: boolean;
   batteryCapacityKwh?: number; // EV battery capacity in kWh
   initialSoc?: number; // Initial State of Charge percentage (0-100)
+  /** Target SoC of this session (0-100); absent means the connector's EV
+   *  settings default applies. Persisted view of `SessionIntent.targetSoc`. */
+  targetSoc?: number;
+  /** Stop this session when it reaches {@link targetSoc} (#327). Absent means
+   *  the connector's `autoConfig.stopAtTargetSoc` applies. Written by
+   *  auto-traffic's `sessionModel: "intent"`. */
+  stopAtTarget?: boolean;
 }

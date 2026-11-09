@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import {
   runBehavior,
   type BehaviorRun,
-} from "@ocpp-cp-sim/core/test/behavior/runBehavior";
+} from "@ocpp-cp-simulator/core/test/behavior/runBehavior";
 import { LocalChargePointService } from "../LocalChargePointService";
 
 let runs: BehaviorRun[] = [];

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import { startMockCsms, type MockCsms } from "./mockCsms";
 import { canBindBunServe } from "../../../../test/bunServe";
@@ -8,7 +8,7 @@ import { canBindBunServe } from "../../../../test/bunServe";
  * #474 over a real socket: which closes put the charge point in error.
  */
 async function connectedChargePoint(csms: MockCsms) {
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     "CP-CLOSE-ERROR",
     DefaultBootNotification,
     1,

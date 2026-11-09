@@ -63,38 +63,138 @@ const SENSITIVE_ESCAPABLE_NAME = sensitiveName(escapeRun(0));
  * assignment before it, else at the end of the text, whatever quotes its
  * body holds (#519). All fail closed.
  *
- * The `:` / `=` lookbehind comes after the quote it checks: placed before
- * it, V8 runs it at every backtrack position of a long whitespace run
- * (quadratic).
+ * These rules are read in code ({@link quotedValueEnd}), not matched by one
+ * regex (#567).
  *
  * The assignment guard also looks past one backslash: the escape branch
  * consumes `\p` of `\privateKey=` in one step, so the guard never runs at
  * the `p`. The END label is letters, digits, spaces and dots only (real
  * PEM labels, `X9.42 DH PARAMETERS` included), so it cannot carry an
  * assignment either.
+ *
+ * The opening of a quoted assignment, value not included: `$1` is the name
+ * and separator, `$2` the quote. The value is cut in code, by
+ * {@link quotedValueEnd}, not by a regex: JavaScriptCore (Bun) runs a long
+ * `(?:…|…)*` value loop at some 8 µs per character, and gives up a match
+ * of some 50k characters (#547, #567), where V8 runs it in microseconds.
  */
-const noAssignmentAhead = (name: string): string => `(?!\\\\?${name}\\s*[:=])`;
-const NO_ASSIGNMENT_AHEAD = noAssignmentAhead(SENSITIVE_ASSIGNMENT_NAME);
-const NO_ESCAPABLE_ASSIGNMENT_AHEAD = noAssignmentAhead(
-  SENSITIVE_ESCAPABLE_NAME,
-);
-/** A PEM value up to `close`, its closing quote. */
-const pemValue = (close: string): string =>
-  `(?=\\s*-----BEGIN)` +
-  `(?:(?:${NO_ASSIGNMENT_AHEAD}[\\s\\S])*?` +
-  `-----END[A-Z0-9 .]*-----(?:\\s|\\\\+[nr])*${close}|[\\s\\S]*)`;
-const QUOTED_PEM_VALUE = pemValue("\\2");
-const QUOTED_MULTILINE_VALUE =
-  `(?:${NO_ASSIGNMENT_AHEAD}(?:\\\\[\\s\\S]|(?!\\2)[^\\\\]))*` +
-  `\\2(?<![:=]\\s*\\2)(?=[\\s,}\\]]|$)`;
-const QUOTED_LINE_VALUE =
-  `(?:${NO_ESCAPABLE_ASSIGNMENT_AHEAD}(?:\\\\[^\\n]|(?!\\2)[^\\\\\\n]))*` +
-  `\\2|[^\\n]*`;
-const SENSITIVE_ASSIGNMENT = new RegExp(
-  `(${SENSITIVE_ESCAPABLE_NAME}\\s*[:=]\\s*)(["'])` +
-    `(?:${QUOTED_PEM_VALUE}|${QUOTED_MULTILINE_VALUE}|${QUOTED_LINE_VALUE})`,
+const SENSITIVE_QUOTED_ASSIGNMENT_OPENER = new RegExp(
+  `(${SENSITIVE_ESCAPABLE_NAME}\\s*[:=]\\s*)(["'])`,
   "gi",
 );
+/** A sensitive assignment starts here: the guard of a value, tested in code. */
+const ASSIGNMENT_AHEAD = new RegExp(
+  `\\\\?${SENSITIVE_ASSIGNMENT_NAME}\\s*[:=]`,
+  "iy",
+);
+const ESCAPABLE_ASSIGNMENT_AHEAD = new RegExp(
+  `\\\\?${SENSITIVE_ESCAPABLE_NAME}\\s*[:=]`,
+  "iy",
+);
+/** A name starts with one of these (or a quote / backslash before it). */
+const ASSIGNMENT_AHEAD_START = /[\\"abpst]/i;
+const PEM_BEGIN = /\s*-----BEGIN/iy;
+/** A PEM `-----END …-----` marker and the closing quote `close` after it. */
+const pemEndPattern = (close: string): RegExp =>
+  new RegExp(`-----END[A-Z0-9 .]*-----(?:\\s|\\\\+[nr])*${close}`, "iy");
+const PEM_END_BY_QUOTE: Record<string, RegExp> = {
+  '"': pemEndPattern('"'),
+  "'": pemEndPattern("'"),
+};
+
+/** Just past a PEM value's closing quote, else the end of the text. */
+function pemValueEnd(text: string, start: number, pemEnd: RegExp): number {
+  for (let index = start; index < text.length; index += 1) {
+    pemEnd.lastIndex = index;
+    if (text[index] === "-" && pemEnd.test(text)) return pemEnd.lastIndex;
+    if (assignmentAhead(text, index, ASSIGNMENT_AHEAD)) break;
+  }
+  return text.length;
+}
+
+function assignmentAhead(text: string, index: number, guard: RegExp): boolean {
+  if (!ASSIGNMENT_AHEAD_START.test(text[index] ?? "")) return false;
+  guard.lastIndex = index;
+  return guard.test(text);
+}
+
+/**
+ * Just past a quoted value that starts at `start` (after its opening
+ * `quote`), by the rules documented above: a PEM value, else a value that
+ * ends at a quote followed by a delimiter, else the first unescaped quote
+ * of its opening line, else the end of that line. Each branch is the regex
+ * it replaces, step by step: the PEM one lazily, the others greedily with no
+ * way back (a quote cannot be consumed, so the only place a greedy loop can
+ * end is where it stopped).
+ */
+function quotedValueEnd(text: string, start: number, quote: string): number {
+  PEM_BEGIN.lastIndex = start;
+  if (PEM_BEGIN.test(text)) {
+    return pemValueEnd(text, start, PEM_END_BY_QUOTE[quote]);
+  }
+
+  let index = start;
+  while (index < text.length) {
+    if (assignmentAhead(text, index, ASSIGNMENT_AHEAD)) break;
+    const char = text[index];
+    if (char === "\\") {
+      if (index + 1 >= text.length) break;
+      index += 2;
+    } else if (char === quote) {
+      break;
+    } else {
+      index += 1;
+    }
+  }
+  if (text[index] === quote && endsMultilineValue(text, index)) {
+    return index + 1;
+  }
+
+  index = start;
+  while (index < text.length) {
+    if (assignmentAhead(text, index, ESCAPABLE_ASSIGNMENT_AHEAD)) break;
+    const char = text[index];
+    if (char === "\n") break;
+    if (char === "\\") {
+      if (index + 1 >= text.length || text[index + 1] === "\n") break;
+      index += 2;
+    } else if (char === quote) {
+      break;
+    } else {
+      index += 1;
+    }
+  }
+  if (text[index] === quote) return index + 1;
+  const lineEnd = text.indexOf("\n", start);
+  return lineEnd === -1 ? text.length : lineEnd;
+}
+
+/** The quote at `index` ends a value that began on an earlier line: a
+ *  delimiter follows, and no `:` / `=` (and whitespace) precedes it. */
+function endsMultilineValue(text: string, index: number): boolean {
+  if (index + 1 < text.length && !/[\s,}\]]/.test(text[index + 1])) {
+    return false;
+  }
+  let before = index - 1;
+  while (before >= 0 && /\s/.test(text[before])) before -= 1;
+  return !(before >= 0 && (text[before] === ":" || text[before] === "="));
+}
+
+function redactQuotedAssignments(text: string): string {
+  let out = "";
+  let from = 0;
+  SENSITIVE_QUOTED_ASSIGNMENT_OPENER.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = SENSITIVE_QUOTED_ASSIGNMENT_OPENER.exec(text)) !== null) {
+    const quote = match[2];
+    const end = quotedValueEnd(text, match.index + match[0].length, quote);
+    out +=
+      text.slice(from, match.index) + match[1] + quote + REDACTED_VALUE + quote;
+    from = end;
+    SENSITIVE_QUOTED_ASSIGNMENT_OPENER.lastIndex = end;
+  }
+  return out + text.slice(from);
+}
 /**
  * A value opened by an escaped quote (#531): JSON logged inside a string
  * (`{\"privateKey\":\"S1\"}`), or serialized again (`\\\"`). It ends at the
@@ -107,14 +207,88 @@ const SENSITIVE_ASSIGNMENT = new RegExp(
  * (three serializations); with a longer one the name itself no longer
  * matches, so a deeper-serialized value is not redacted at all.
  */
-const ESCAPED_QUOTE_CLOSE = `(?<!\\\\)(?:\\2\\\\\\2\\\\)*\\2\\3`;
-const SENSITIVE_ESCAPED_ASSIGNMENT = new RegExp(
-  `(${SENSITIVE_ESCAPABLE_NAME}\\s*[:=]\\s*(${escapeRun(1)}))(["'])` +
-    `(?:${pemValue(ESCAPED_QUOTE_CLOSE)}` +
-    `|(?:${NO_ESCAPABLE_ASSIGNMENT_AHEAD}(?!${ESCAPED_QUOTE_CLOSE})[^\\n])*` +
-    `${ESCAPED_QUOTE_CLOSE}|[^\\n]*)`,
+const SENSITIVE_ESCAPED_OPENER = new RegExp(
+  `(${SENSITIVE_ESCAPABLE_NAME}\\s*[:=]\\s*(${escapeRun(1)}))(["'])`,
   "gi",
 );
+const escapedCloseCache = new Map<string, RegExp>();
+/**
+ * The closing quote of an escaped value: the opener's backslash run
+ * `escapes` and `quote`, with any number of (run, backslash) pairs between,
+ * and no backslash before it. Sticky, built once per run length and quote.
+ */
+function escapedCloseSource(escapes: string, quote: string): string {
+  const run = "\\\\".repeat(escapes.length);
+  return `(?<!\\\\)(?:${run}\\\\${run}\\\\)*${run}${quote}`;
+}
+function escapedClose(escapes: string, quote: string): RegExp {
+  const key = `${escapes.length}${quote}`;
+  let close = escapedCloseCache.get(key);
+  if (!close) {
+    close = new RegExp(escapedCloseSource(escapes, quote), "y");
+    escapedCloseCache.set(key, close);
+  }
+  return close;
+}
+const escapedPemEndCache = new Map<string, RegExp>();
+function escapedPemEnd(escapes: string, quote: string): RegExp {
+  const key = `${escapes.length}${quote}`;
+  let end = escapedPemEndCache.get(key);
+  if (!end) {
+    end = pemEndPattern(escapedCloseSource(escapes, quote));
+    escapedPemEndCache.set(key, end);
+  }
+  return end;
+}
+
+function escapedValueEnd(
+  text: string,
+  start: number,
+  escapes: string,
+  quote: string,
+): number {
+  PEM_BEGIN.lastIndex = start;
+  if (PEM_BEGIN.test(text)) {
+    return pemValueEnd(text, start, escapedPemEnd(escapes, quote));
+  }
+  const close = escapedClose(escapes, quote);
+  let index = start;
+  while (index < text.length && text[index] !== "\n") {
+    close.lastIndex = index;
+    if (close.test(text)) return close.lastIndex;
+    if (assignmentAhead(text, index, ESCAPABLE_ASSIGNMENT_AHEAD)) break;
+    index += 1;
+  }
+  const lineEnd = text.indexOf("\n", start);
+  return lineEnd === -1 ? text.length : lineEnd;
+}
+
+function redactEscapedAssignments(text: string): string {
+  let out = "";
+  let from = 0;
+  SENSITIVE_ESCAPED_OPENER.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = SENSITIVE_ESCAPED_OPENER.exec(text)) !== null) {
+    const escapes = match[2];
+    const quote = match[3];
+    const end = escapedValueEnd(
+      text,
+      match.index + match[0].length,
+      escapes,
+      quote,
+    );
+    out +=
+      text.slice(from, match.index) +
+      match[1] +
+      quote +
+      REDACTED_VALUE +
+      escapes +
+      quote;
+    from = end;
+    SENSITIVE_ESCAPED_OPENER.lastIndex = end;
+  }
+  return out + text.slice(from);
+}
 /**
  * The head of an object or array held by a member whose name is followed by an
  * escaped quote (`\"privateKey\":{…}`, #531): up to and including the opening
@@ -269,61 +443,6 @@ const URL_USERINFO = /(\b[a-z][a-z0-9+.-]*:\/\/[^/\s:@]*):[^/\s@]*@/gi;
 const URL_SECRET_QUERY =
   /([?&](?:ocpp_ws_secret|password|passwd|secret|token|access_token|api[-_]?key|auth(?:orization)?[-_]?key)=)([^&#\s"'<>]+)/gi;
 
-/** The opening of a quoted sensitive assignment, value not included. */
-const SENSITIVE_QUOTED_OPENER = new RegExp(
-  `(${SENSITIVE_ASSIGNMENT_NAME}\\s*[:=]\\s*)(["'])`,
-  "gi",
-);
-
-/**
- * #547: a regex engine may give up on a long match and report none, where
- * another completes it: JavaScriptCore (Bun) does on a quoted value of some
- * 50k characters that V8 (Node) redacts. `SENSITIVE_ASSIGNMENT` then leaves
- * the value in clear. Every quoted opener it handled is followed by the
- * redacted value, so one that is not was missed: its value is cut here, in
- * code, without a regex over its length. It ends at the first unescaped
- * matching quote on its line; a PEM value, or one with no such quote, runs
- * to the end of the text. Fails closed; a no-op where the regex completed.
- */
-function redactMissedQuotedValues(text: string): string {
-  let out = "";
-  let from = 0;
-  SENSITIVE_QUOTED_OPENER.lastIndex = 0;
-  let match: RegExpExecArray | null;
-  while ((match = SENSITIVE_QUOTED_OPENER.exec(text)) !== null) {
-    const quote = match[2];
-    const valueStart = match.index + match[0].length;
-    if (text.startsWith(`${REDACTED_VALUE}${quote}`, valueStart)) continue;
-    out +=
-      text.slice(from, match.index) + match[1] + quote + REDACTED_VALUE + quote;
-    const end = quotedValueEndOnLine(text, valueStart, quote);
-    if (end === null) return out;
-    from = end;
-    SENSITIVE_QUOTED_OPENER.lastIndex = end;
-  }
-  return out + text.slice(from);
-}
-
-/** Just past the closing quote on the value's first line; `null` for a PEM
- *  value or when the line holds none. */
-function quotedValueEndOnLine(
-  text: string,
-  start: number,
-  quote: string,
-): number | null {
-  if (/^\s*-----BEGIN/.test(text.slice(start, start + 64))) return null;
-  for (let index = start; index < text.length; index += 1) {
-    const char = text[index];
-    if (char === "\n") return null;
-    if (char === "\\") {
-      index += 1;
-    } else if (char === quote) {
-      return index + 1;
-    }
-  }
-  return null;
-}
-
 export function redactSensitiveText(text: string): string {
   return redactAssignments(redactOcppKeyValueText(text))
     .replace(URL_USERINFO, `$1:${REDACTED_VALUE}@`)
@@ -340,14 +459,14 @@ function redactAssignments(text: string): string {
   if (!SENSITIVE_NAME_PRESENT.test(text)) return text;
   let redacted = text;
   if (redacted.includes("\\")) {
-    redacted = redactEscapedStructuredValues(redacted).replace(
-      SENSITIVE_ESCAPED_ASSIGNMENT,
-      `$1$3${REDACTED_VALUE}$2$3`,
+    redacted = redactEscapedAssignments(
+      redactEscapedStructuredValues(redacted),
     );
   }
-  return redactMissedQuotedValues(
-    redacted.replace(SENSITIVE_ASSIGNMENT, `$1$2${REDACTED_VALUE}$2`),
-  ).replace(SENSITIVE_BARE_ASSIGNMENT, redactBareValue);
+  return redactQuotedAssignments(redacted).replace(
+    SENSITIVE_BARE_ASSIGNMENT,
+    redactBareValue,
+  );
 }
 
 /**

@@ -42,8 +42,9 @@ Three surfaces use the same API, `ChargePoint.sendOcppCall`:
 
 The CALL goes through the normal transport: the same correlation, the
 `Sent:` / `Received:` log lines and therefore the
-[trace export](trace-format.md#producing-records), and on OCPP 1.6 the
-one-CALL-in-flight queue (§4.1.1) and the boot gate (§4.2). The frame is
+[trace export](trace-format.md#producing-records), and the
+one-CALL-in-flight queue (§4.1.1; OCPP 1.6, and 2.0.1 / 2.1 since #708) and,
+on 1.6, the boot gate (§4.2). The frame is
 `[2, <messageId>, <action>, <payload>]`, and the answer carries it back
 verbatim as `sentFrame`.
 
@@ -132,7 +133,7 @@ A refused call writes nothing. The message says why — the unsupported-action
 message lists the version's actions, the invalid-payload message carries the
 schema errors. The 25 s wait is kept under the Socket.IO client's 30 s RPC
 timeout, so a remote caller sees this error rather than the client's generic
-one. On OCPP 1.6 the wait starts when the call is queued: a call still waiting
+one. On OCPP-J the wait starts when the call is queued: a call still waiting
 behind an unanswered CALL when its 25 s are up is withdrawn and never sent, so
 a caller told "no answer" never sees it go out later. A dropped call is never re-queued, including on OCPP 1.6, where a normal
 StartTransaction / StopTransaction / MeterValues would be kept for a retry.

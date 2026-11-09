@@ -5,7 +5,7 @@ import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
 import { createRuntimeDeps } from "../socketServer";
 import type { CLIChargePointService } from "../../service";
-import type { ScenarioDefinition } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import type { ScenarioDefinition } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 
 /**
  * #318 / #352, at the RPC implementation's level.

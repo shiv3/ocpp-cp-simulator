@@ -5,8 +5,8 @@ import * as x509 from "@peculiar/x509";
 import type {
   CertificateSignedRequestV16,
   GetConfigurationRequestV16,
-} from "@ocpp-cp-sim/ocpp/index";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+} from "@ocpp-cp-simulator/ocpp/index";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import { startMockCsms } from "./mockCsms";
 import { canBindBunServe } from "../../../../test/bunServe";
@@ -81,7 +81,7 @@ describe.skipIf(!canBindBunServe())(
 
     it("CertificateSigned: allowed algorithm → Accepted and stored", async () => {
       const csms = startMockCsms();
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "CP016-QUIRKS-SIG-ALLOWED",
         DefaultBootNotification,
         1,
@@ -126,7 +126,7 @@ describe.skipIf(!canBindBunServe())(
 
     it("CertificateSigned: disallowed algorithm → Rejected, not stored", async () => {
       const csms = startMockCsms();
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "CP016-QUIRKS-SIG-DISALLOWED",
         DefaultBootNotification,
         1,
@@ -171,7 +171,7 @@ describe.skipIf(!canBindBunServe())(
 
     it("CertificateSigned: quirk unset → Accepted regardless of algorithm", async () => {
       const csms = startMockCsms();
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "CP016-QUIRKS-SIG-UNSET",
         DefaultBootNotification,
         1,
@@ -214,7 +214,7 @@ describe.skipIf(!canBindBunServe())(
 
     it("GetConfiguration: hiddenConfigurationKeys → full dump lacks hidden keys", async () => {
       const csms = startMockCsms();
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "CP016-QUIRKS-GET-CONFIG-HIDDEN",
         DefaultBootNotification,
         1,
@@ -265,7 +265,7 @@ describe.skipIf(!canBindBunServe())(
 
     it("GetConfiguration: explicit request for hidden key → in unknownKey", async () => {
       const csms = startMockCsms();
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "CP016-QUIRKS-GET-CONFIG-UNKNOWN",
         DefaultBootNotification,
         1,
@@ -318,7 +318,7 @@ describe.skipIf(!canBindBunServe())(
 
     it("GetConfiguration: after clearCertificateQuirks → hidden key is served again", async () => {
       const csms = startMockCsms();
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "CP016-QUIRKS-GET-CONFIG-CLEARED",
         DefaultBootNotification,
         1,

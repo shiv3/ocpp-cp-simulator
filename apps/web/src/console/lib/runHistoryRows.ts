@@ -1,4 +1,4 @@
-import type { ScenarioRunSummary } from "@ocpp-cp-sim/core/cp/application/verification/ScenarioRunSummary";
+import type { ScenarioRunSummary } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunSummary";
 import type { ScenarioRunHistoryEntry } from "./useScenarioRun";
 
 /** One line of a run history list: a run the page tracked itself, or one

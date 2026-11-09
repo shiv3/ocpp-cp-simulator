@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { GetDiagnosticsHandler } from "../GetDiagnosticsHandler";
 import { Logger } from "../../../../../shared/Logger";
 import type { HandlerContext } from "../../MessageHandlerRegistry";
-import { ChargePoint } from "../../../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../../../domain/types/OcppTypes";
 import { isHandlerOutcome } from "../../../network-sim/ResponseEffectQueue";
 
@@ -10,7 +10,7 @@ type DiagStatus = "Idle" | "Uploaded" | "UploadFailed" | "Uploading";
 
 function buildContext() {
   const sent: DiagStatus[] = [];
-  const chargePoint = new ChargePoint(
+  const chargePoint = createChargePoint(
     "test-cp-diagnostics",
     DefaultBootNotification,
     1,

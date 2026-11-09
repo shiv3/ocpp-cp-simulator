@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import { SelectField, TextField } from "./FormFields";
 import type { NodeFormComponentProps, NodeFormData } from "./types";
 

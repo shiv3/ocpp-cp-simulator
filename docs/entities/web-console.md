@@ -7,6 +7,7 @@ sources:
   - index.html
   - vite.config.ts
 related:
+  - ../concepts/fleet-templates.md
   - web-console-tour.md
   - desktop-app.md
   - daemon.md
@@ -19,7 +20,7 @@ related:
   - open-ev-directory.md
   - ../concepts/operational-timeline.md
   - ../concepts/charging-sessions.md
-updated: 2026-11-07
+updated: 2026-11-09
 ---
 
 # Web console (browser UI)
@@ -61,10 +62,15 @@ Socket.IO connection documented in [Control plane](../concepts/control-plane.md)
 `rpc` acks for commands and `event` push envelopes for CP / registry updates.
 The detection rules are in [Local vs Remote mode](../concepts/local-vs-remote-mode.md).
 
-The **Scenario Editor** authors all of schema 1.5 ([Scenario format](../concepts/scenario-format.md#csmscalltrigger-replace-callresponse-from-and-usebehavior-schema-15)):
-`csmsCallTrigger` with `behavior: "replace"` and `onBusy`, a `callResponse` node and a `useBehavior` node. `$from` has
-no control of its own (type it in the payload JSON) and the console has no selector for which behaviors a charge point
-runs (the RPC `cp.behaviors.set` does).
+The **Scenario Editor** authors all of schema 1.5 and 1.6 ([Scenario format](../concepts/scenario-format.md#csmscalltrigger-replace-callresponse-from-and-usebehavior-schema-15)):
+`csmsCallTrigger` with `behavior: "replace"` and `onBusy`, a `callResponse` node and a `useBehavior` node. The
+`useBehavior` form has a mode (use / disable) and, for a behavior whose params it knows, **one form rendered from the
+params schema** (a select for an enum, a number field for an integer, a checkbox for a boolean, text for a string, a
+JSON box for anything else), filled with the defaults; it saves only the keys that differ, and "Reset to defaults"
+clears them. The built-in `default.*` behaviors are known to the console; for any other id it falls back to a JSON box
+for `params`, because the console has no list of the daemon's loaded behaviors yet (`behavior.list` has it). `$from`
+has no control of its own (type it in the payload JSON) and the console has no selector for which behaviors a charge
+point runs (the RPC `cp.behaviors.set` does).
 
 Local mode can also run **behavior code**: `LocalChargePointService.loadBehaviorBundle(id, blob | text)` imports a bundle
 built with `ocpp-cp-sim behavior build` through `import(blobUrl)` and loads it onto one charge point of the page. It is
@@ -86,8 +92,10 @@ The browser app serves one web console:
   [Scenario editor](#scenario-editor-steps-and-graph)) and a read-only run
   page (`/scenarios/run`, see
   [Scenario runs](#scenario-runs-panel-and-page)), a cross-CP **Run history**
-  (`/scenarios/runs`, #388), a global **Message log** (`/logs`), and
-  **Settings** (`/settings`, where global
+  (`/scenarios/runs`, #388), a global **Message log** (`/logs`),
+  **Fleet templates** (`/fleets`, remote mode: list, view, save, delete and
+  create a fleet from a [fleet template](../concepts/fleet-templates.md#web-console), #445),
+  and **Settings** (`/settings`, where global
   [network simulation](../concepts/network-simulation.md), the
   [**Vehicle profiles**](#settings-page) card and the **Reset all
   simulator data** button live; the Settings cards and the Network Simulation
@@ -153,8 +161,8 @@ view is the default and leaves the parameter out.
 
 In the Hierarchy view a row's head holds, left to right: a **twist** button
 (`Collapse connectors of <id>` / `Expand …`, `aria-expanded`) that folds the
-connector grid away (kept on the page, not in the URL), a plug icon colored by
-status, the id, the OCPP version as small muted text, the status (dot and text), the
+connector grid away (kept on the page, not in the URL), a charging-station
+[icon](#icons) colored by status, the id, the OCPP version as small muted text, the status (dot and text), the
 **Scenario** badge (amber **Waiting: …** while a run is parked), the **Net
 sim** badge, the [labels](../concepts/control-plane.md#charge-point-labels) as
 `key=value` chips, one small dot per connector (tooltip `#<n> <Status>`), and at the
@@ -321,7 +329,16 @@ The charge point page (`/cp/:id`) is one column, top to bottom:
   embedded (the URL the charge point dials), with a **Copy** button (**Copied**
   for 1.5 s; it does nothing when the browser has no clipboard API). It is not
   an input: the value is edited in the WebSocket URL and Basic Auth fields
-  only. The Add dialog opens with the Charge Point ID focused. The helpers are in
+  only. The **Send periodic meter values as TransactionEvent (Updated)**
+  checkbox (#550) is the `txUpdatedMeterValues` option
+  ([OCPP versions and transports](../concepts/ocpp-versions-and-transports.md);
+  off by default). It is offered only for OCPP 2.0.1 and 2.1, because 1.x
+  ignores the option, and it follows the version select. In Remote mode the
+  Add and Edit forms send it with `cp.create` / `cp.update` (an Edit that
+  never touched it sends back the value it read). In Local mode the config is
+  shared by every browser charge point, so the option is stored in that shared
+  config like the OCPP version: it applies to all local charge points,
+  including already running ones. The Add dialog opens with the Charge Point ID focused. The helpers are in
   [`chargePointConfig.ts`](../../apps/web/src/components/chargePointConfig.ts).
 - **Charge point (connector 0)**, a card above the connectors (below).
 - **The connectors.** The full page shows **every connector at once**, like the
@@ -435,7 +452,7 @@ A connector card is the connector as a charging session
 ([`ConnectorCard.tsx`](../../apps/web/src/console/pages/cp/ConnectorCard.tsx)), top to
 bottom:
 
-- **Header**: `Connector <n>`, its status, its availability (`Operative` /
+- **Header**: a generic plug [icon](#icons), `Connector <n>`, its status, its availability (`Operative` /
   `Inoperative`, set by ChangeAvailability, #422), then **⚙ Config** (the
   [Config dialog](#config-dialog)) and **Controls ▾** (`aria-expanded`,
   `aria-controls`), which unfolds the [simulator controls](#simulator-controls)
@@ -454,11 +471,12 @@ bottom:
   (**Charging (faulted)** with a transaction) with nothing to press;
   `Unavailable` disables every step and says _Unavailable: send Available in
   Controls to plug in_. Start calls `startTransaction(cp, n, tag)`, Stop
-  `stopTransaction`. **Plug in** sends a StatusNotification `Preparing`
-  (`sendStatusNotification`), as the exported k6 runtime does for a
-  `connectorPlug` plug-in. **Unplug** is an EV-side disconnect
-  (`evDisconnected`, #488): the station sends `Available` without a
-  transaction; with one, `StopTransactionOnEVSideDisconnect` stops it with
+  `stopTransaction`. **Plug in** drives the connector's EV and cable model
+  (`evPlugIn`, #453): an idle `Available` connector reports `Preparing`, in
+  any other state the cable is only recorded (see
+  [Charging sessions](../concepts/charging-sessions.md#ev-and-cable-model)). **Unplug** is an EV-side disconnect
+  (`evDisconnected`, #488): the station returns a `Preparing` or `Finishing` connector to `Available`
+  without a transaction; with one, `StopTransactionOnEVSideDisconnect` stops it with
   `EVDisconnected` or keeps it as `SuspendedEV` (see
   [Charging sessions](../concepts/charging-sessions.md#ev-side-disconnect-and-connection-loss)).
   The stepper offers Unplug only in `Finishing` or, without a transaction,
@@ -526,14 +544,16 @@ it. A failed or refused value keeps the dialog open with the reason.
   (`saveSocMeterSync`) and applies it (`setConnectorSocMeterSync`). Until the
   preference is read the switch is disabled; if it cannot be read, the dialog
   says so.
-- **Auto meter** (#418): **Enabled**, `every [n] s`, **Stop at target SoC**,
+- **Auto meter** (#418): **Enabled**, `every [n] s` (how often the register
+  moves; on 1.x the MeterValues themselves go out every
+  `MeterValueSampleInterval`, #722; on 2.x they follow `n`), **Stop at target SoC**,
   the presets **Constant 7.4 kW**, **Ramp and hold** and **Taper (DC-like)**
   (under the EV's max power), and the **curve editor**: power (kW) over the
   session (minutes) as an SVG, points dragged with the pointer (kept between
   their neighbours, at whole minutes and 0.1 kW, and under the EV's max power,
   drawn as a dashed red line), a points table (minute, kW, ✕; at least two
   points) with **+ Add point**, and a summary (duration, energy over the curve
-  and its share of the battery, peak, the number of MeterValues at the
+  and its share of the battery, peak, the number of meter updates at the
   interval). It starts on the connector's live configuration, else the one
   saved for it, else the default; when the saved one cannot be read, the tab
   says so and offers no editor (it would start on the default). **Save**
@@ -807,7 +827,8 @@ controls (**Skip**, **Next**, **Stop**, **Edit**, the enabled box, the
 (`data-selected="true"`).
 
 The **definition panel** shows the scenario's name, `Library`, its step count
-(and branch count), **Edit scenario** (the panel's
+(and branch count: the lanes that run, of every branch point that picks or
+fans out), **Edit scenario** (the panel's
 [edit mode](#editing-in-the-side-panel)), **Used by** — the
 connectors assigned a copy of it, as chips linking to
 `/cp/<id>?connector=<n>`, a running one marked with its run state's dot, or "no
@@ -840,14 +861,14 @@ exact id: the scenarios some connector of that charge point uses; the charge
 point page's **Scenarios** menu item opens it with this set) and **Enabled
 only**, then one row per Library scenario:
 
-| Column   | Shows                                                                                                                |
-| -------- | -------------------------------------------------------------------------------------------------------------------- |
-| Scenario | The name, the description under it (muted).                                                                          |
-| Steps    | The step count of the Steps view's layout; a scenario that view cannot draw shows its node count and a `graph` chip. |
-| Used by  | `<n> connectors` (the connectors holding a copy; the tooltip names them), or —.                                      |
-| Running  | One state pill per live run of a copy, or —.                                                                         |
-| Enabled  | A checkbox; a change saves the Library scenario and re-pushes it to its users.                                       |
-| Edit     | **Edit** (the inline editor) and the `…` menu: **Duplicate**, **Export JSON**, **Delete**.                           |
+| Column   | Shows                                                                                                              |
+| -------- | ------------------------------------------------------------------------------------------------------------------ |
+| Scenario | The name, the description under it (muted).                                                                        |
+| Steps    | The step count of the Steps view's block tree; a scenario without a START shows its node count and a `graph` chip. |
+| Used by  | `<n> connectors` (the connectors holding a copy; the tooltip names them), or —.                                    |
+| Running  | One state pill per live run of a copy, or —.                                                                       |
+| Enabled  | A checkbox; a change saves the Library scenario and re-pushes it to its users.                                     |
+| Edit     | **Edit** (the inline editor) and the `…` menu: **Duplicate**, **Export JSON**, **Delete**.                         |
 
 **+ New scenario** asks for a name only and **Use template** and **Import JSON**
 ask nothing: each creates a Library scenario (a template instance or an
@@ -859,16 +880,25 @@ them (their other definitions stay), then the Library scenario.
 **Template browser.** The gallery only shows eight cards, so **Browse all N
 templates** (N is every built-in template, 40+ with the `cert16-*` suites)
 opens a dialog, **Scenario templates**
-([`TemplateBrowserDialog.tsx`](../../apps/web/src/console/pages/scenarios/TemplateBrowserDialog.tsx)):
-a search box (focused on open; matches the name or the description,
-case-insensitive), the count `N of M`, and a scrollable list with one row per
-template: name, target type chip (`chargePoint` / `connector`), the description
-(two lines) and **Use template**. **Use template** creates the Library scenario
-exactly like the gallery's button and closes the dialog; **Enter** in the search
-uses the first template still listed. The search starts empty each time the
-dialog opens. (The old ReactFlow editor had its own picker; the console's
-scenario editor has none, so this dialog is the only way to a template beyond
-the first eight.)
+([`TemplateBrowserDialog.tsx`](../../apps/web/src/console/pages/scenarios/TemplateBrowserDialog.tsx)),
+split in two. On the left: a search box (focused on open; matches the name or
+the description, case-insensitive), the count `N of M`, and a scrollable list
+with one row per template: name, target type chip (`chargePoint` /
+`connector`), the description (two lines) and **Use template**. A click on a
+row selects it; **↑ / ↓** in the search move the selection and **Enter** uses
+the selected template. The selection starts on the first template, and falls
+back to the first one still listed when the search hides it. On the right, the
+selected template as the scenario editor would show it, read-only
+([`TemplatePreview.tsx`](../../apps/web/src/console/pages/scenarios/TemplatePreview.tsx)):
+its name, description, step and branch count and trigger, a primary **Use
+template**, the **Graph / Steps** views (Graph first and by default; loops drawn as in the
+editor; no `+` controls), and, for a step picked there, the editor's inspector
+with every field disabled. A shape the views cannot draw is listed as an
+outline. In a narrow dialog the two sides take turns: a row opens the preview,
+**← Templates** goes back. **Use template** creates the Library scenario exactly
+like the gallery's button and closes the dialog. The search starts empty each
+time the dialog opens. (This dialog is the only way to a template beyond the
+first eight.)
 
 **The editor.** `?edit=<id>` opens the [editor](#scenario-editor-steps-and-graph)
 in place of the table, with the header `← Library`, the name, the trigger, the
@@ -904,7 +934,7 @@ A scenario run shows in two places with the same content: the **run panel**
 (beside the Scenarios page's Active runs, or beside the full charge point page
 at `/cp/<id>?connector=<n>&run=<scenarioId>`, whose **Close** removes `run`
 and replaces the history entry) and the read-only **run page**
-(`/scenarios/run?cp=…&connector=…&id=…[&run=<runId>][&view=graph]`). Both
+(`/scenarios/run?cp=…&connector=…&id=…[&run=<runId>][&view=steps]`). Both
 show the scenario name, `<charge point> #<connector>`, the run state,
 `k / N · <elapsed>` and a progress bar, **Start** or **Stop**, the wait
 controls while the run is parked, and **Edit scenario**: in the panel it
@@ -922,33 +952,93 @@ scenario** opens it there (or in the Library, for a copy).
 
 The run page has no message log (the charge point page and the Message log
 page hold the traffic); its **Run history** stays under the steps, full width.
-It also has a **Steps | Graph** switch, kept in `?view=` (replacing the
-history entry; Steps is the default). The panel always shows Steps.
+It also has a **Graph | Steps** switch, kept in `?view=` (replacing the
+history entry; Graph is the default, `?view=steps` opens Steps). The panel
+always shows Steps.
 
-- **Steps** — one box per step, top to bottom, numbered: the step type's tile,
-  its title and summary, the state pill on the current step and a check on a
-  done one; steps not reached yet are dimmed. When the scenario forks, the
-  steps after the fork node stand in side-by-side columns, one per branch,
-  each under a lane tag (`A`, `B`, … in the lane colour, the branch name —
-  the first step's label, unless it is the type's default, else
-  `Branch A`, … — and `done/total`). The executor starts every branch at
-  once after the fork node.
-- **Graph** — the same order drawn as connected cards: the chain in one lane,
-  each branch curving into a lane of its own below the fork node; a travelled
-  path takes its lane's colour. It is drawn by the console itself, not the
-  editor's graph library.
+- **Steps** — the [block tree](#editor-model-block-tree) drawn top to
+  bottom, one box per step, numbered in tree order (a branch point, then
+  each of its lanes, then what follows): the step type's tile (its
+  category's [icon](#icons) and colour), its title and summary, the state
+  pill on the current step and a check on a done one; steps not reached yet
+  are dimmed. A **branch point** — a START with several edges, a `switch`, a
+  `choice`, a step with more edges than its first — is its box (none for
+  START) over a framed block: a header saying how it picks (**Switch on
+  `<value>`**, **Choice: one option at random, by weight**, **Start: all
+  run**, **Only the first runs**), then its lanes side by side, each under a
+  lane tag: the lane letter (`A`, `B`, … in the lane colour), the condition
+  chip (`case-0 → "Accepted"`, `default`, `option-1 · 30% · "slow"`, `all
+run`, `runs`, `ignored`, `unpickable: case-7`) and the lane's step count
+  (`done/total` during a run). A lane the executor never takes (_ignored_,
+  _unpickable_) is dashed and muted. A lane holds its own steps, branch
+  points and loops, to any depth. Where the lanes meet again the block ends
+  with **Continues at step N** and the sequence goes on below it. A
+  **loop** is drawn like Scratch's "forever" block: its steps sit inside a
+  C-shaped block (tinted purple) whose top arm reads **Repeat forever** — or
+  **Repeat** when a `switch` / `choice` inside may leave it — plus "each
+  round waits at step N first" when the loop starts at a Delay or a trigger,
+  and whose bottom arm reads **Back to step N**. A loop drawn by a
+  [loop edge](../concepts/scenario-format.md#loop-edges-schema-110)
+  (schema 1.10) says its bounds on the top arm instead, in the order
+  `times`, `forSeconds`, `until`: **Repeat 3 times / for 2 h / until
+  `$from: connector.power.soc` is `≥ 80` (whichever first)** — the `until`
+  cases as chips (a `$match` case described as in a switch's lane chip),
+  _(whichever first)_ only with two bounds or more — or **Repeat forever**
+  when the loop edge has none; a malformed `loop` reads **Repeat (bounds
+  unreadable: …)**. A bounded loop can stand anywhere in a lane: the steps
+  after its block run once a bound fires. A lane of a branch point
+  inside the loop that never comes back to the loop's first step leaves the
+  loop: its tag in the block says **Leaves the loop (below)**, and its steps
+  follow the block under **After leaving the loop at step N** (they run once).
+  A sequence that ends in a jump elsewhere gets a one-line note: **Then back
+  to step N** (a back edge that is not a loop) or **Then on to step N** (a
+  join). Steps nothing reaches are listed last under **Steps nothing
+  reaches**.
+- **Graph** — the same block tree drawn as connected cards, laid out
+  recursively ([`treeGraphLayout.ts`](../../apps/web/src/console/lib/treeGraphLayout.ts)):
+  a START dot, then a column of cards; under a branch point its lanes stand
+  side by side, each as wide as what it holds (a nested branch point widens
+  its lane), each under a lane tag (letter, condition chip, step count; dead
+  lanes dashed and muted). The branch point's curve ends at the top of the
+  tag and the lane goes on from its bottom, so no curve crosses a tag's
+  text. Lanes that meet again run into a merge point below the lowest lane,
+  and the sequence goes on under it; a lane end is an END ring. A loop is a
+  tinted rounded rectangle behind its body, labelled **Repeat forever** /
+  **Repeat** (and "each round waits at step N first"), or with a loop edge
+  its bounds as in the Steps view (the label truncates; the full text is its
+  tooltip), with a solid purple
+  return arc from each way back, down the rectangle's left side into the
+  loop's first card; a lane that leaves the loop stands right of the
+  rectangle, its curve crossing the rectangle's edge; every lane that
+  leaves the loop, at any depth, has its tag marked with a leave icon. A
+  bounded loop goes on from the bottom of its rectangle to the block after
+  it. A
+  jump (a link: a back edge that is no loop, a join) is a dashed orthogonal
+  line with an arrowhead: out of the source card's side, up or down a
+  channel (beside everything between the two rows, or the corridor between
+  two columns), across the gap row above the target and down into the
+  target's top corner; of the channels, the shortest that crosses no card
+  or lane tag and keeps clear of END rings, `+` discs and merge points
+  wins, each further jump in a channel one step aside. When every plain
+  route crosses a card, routes that leave along the source's own gap row, or
+  enter along another free row above the target, are tried too; when none is
+  clean (none of 30000 random layouts needed it), the jump is drawn as a dashed
+  curve beside everything instead, and may cross cards. An edge back into a
+  START that fans out is not drawn (START has no card). Steps nothing reaches
+  stand in a column on the right under **Steps nothing reaches**. A
+  travelled path takes its lane's colour; the canvas scrolls sideways when
+  wider than its column. It is drawn by the console itself (SVG and placed
+  cards), not a graph library.
 
-Both views draw a chain, then at most one fork whose branches each run to
-their end (END, a step with no next step, or an edge to a missing node). A
-scenario with a join (two branches reaching one step), a loop, a second fork,
-or a step no path reaches is shown as a flat list in definition order instead,
-marked "order approximate". The layout is a pure function,
-[`deriveStepLayout`](../../apps/web/src/console/lib/stepLayout.ts).
+Both views draw any scenario with a START. A scenario without one is shown
+as a flat list in definition order instead, marked "order approximate".
 
 ### Scenario editor: steps and graph
 
-The editor shows one scenario in two views, switched by the **Steps | Graph**
-toggle and kept in the URL (`&view=steps|graph`). It opens inline on the
+The editor shows one scenario in two views, switched by the **Graph | Steps**
+toggle and kept in the URL (`&view=steps|graph`). Graph is the main view: it
+is the default and the toggle's first option, and `&view=steps` opens Steps
+(the template preview opens on Graph too). It opens inline on the
 Library tab for a [Library scenario](#scenario-library)
 (`/scenarios?tab=library&edit=<id>`, header `← Library`, **Save and apply to
 <n> connectors**, **Used by** chips), as the per-connector editor
@@ -959,55 +1049,236 @@ scenario** everywhere edits the Library entry when the scenario is a Library
 scenario or a copy of one (`libraryId`). All use the same content
 ([`ScenarioEditorContent`](../../apps/web/src/console/pages/scenarios/edit/ScenarioEditorContent.tsx)):
 
-- **Steps** — the step boxes of the run views' Steps view: the chain, then at
-  most one fork with its branches side by side. A click selects a step: its
-  form opens in the inspector (beside the steps, sticky, when the editor is
-  wider than about 860 px; under them when it is narrower), whose header moves the step up or down **within its
-  lane** (the chain or its branch — a move never crosses lanes) and deletes
-  it. Hovering the gap between two boxes of a lane shows a small `+`
-  (**Insert step between n and n+1**) that opens the step picker there (as the
-  old step list did); **+ Add step** under the chain and under each branch
-  appends a step (inserting at the end of the chain of a forked scenario makes
-  the new step the fork node). Each box has a grab handle (**Drag to
-  reorder**) on its left: dragging it up or down shows a drop line where the
-  box will land, a release moves it there (only within its lane), and
-  **Escape** cancels; a focused box takes **Alt+↑ / Alt+↓** to move one place
-  and **Delete** to remove it (asked first, in the page). **+ Add parallel
-  branch** adds a branch holding one Delay step — to a chain, it creates the
-  fork at the chain's last step (its first branch is the chain's own, empty,
-  continuation to END). Deleting a branch's last step drops the branch, and a
-  single remaining branch folds into the chain. Steps is the default for any
-  scenario this view can draw.
-- **Graph** — the same layout drawn as on the [run page](#scenario-runs-panel-and-page):
-  connected cards, the chain in lane 0 and each branch curving into a lane of
-  its own. A click selects a card for the inspector (the selected card gets a
-  small ✕ that removes it); a `+` disc on the path after the last card of the
-  chain and of each branch (**Add step after step n**; on an empty branch
-  **Add step to <branch>**) and a `+` shown on
-  hover between two cards of a lane (**Insert step between n and n+1**) open
-  the step picker at that place; **+ branch** beside the fork node (beside
-  the chain's last card when there is no fork yet) adds a parallel branch.
-  A card drags up or down within its lane like a Steps box (the card follows
-  the pointer over a drop line; a press that moves less than 6 px is a click,
-  so it still selects; **Escape** cancels), and a focused card takes
-  **Alt+↑ / Alt+↓** and **Delete** the same way. A scenario the layout cannot
-  draw (a join, a loop, a second fork, a node no path reaches) opens the full
-  node graph editor (ReactFlow: nodes, edges, the node palette,
-  auto-arrange, undo / redo, a node panel — double-click a node, then
-  **Save**) under the line "This scenario has joins or loops; the full graph
-  editor is used", with **Steps** disabled. Once open, that editor stays for
-  the visit even when an edit makes the scenario drawable again (picking
-  **Steps** leaves it). A **Meter Value** node there shows the connector's
-  live meter reading once the connector reports one, and its configured
-  value until then (always in the Library editor, which has no connector);
-  a reading is not an edit — no unsaved change, no undo step.
+**Graph canvas and side panel** (editor and template preview alike). The
+Graph view is its own scroll container (both axes, at most 75% of the window
+high), so a wide graph (a switch with many lanes, e.g. template
+`dataflow-authorize-branch-16`) never draws under the right-hand step panel;
+it opens scrolled to the trunk. Its toolbar has **−**, **+**, **Fit** (the whole
+graph visible, never above 100%) and **100%**; Ctrl/⌘ + wheel zooms (25%–200%).
+The zoom (a number or `fit`) is remembered in `localStorage`
+(`ocpp-cp.console.graph.zoom`, one value for every Graph view). The step panel
+folds into a thin rail with the round button on its edge (`aria-expanded`),
+remembered per view (`ocpp-cp.console.scenario.inspector.collapsed`,
+`ocpp-cp.console.template.inspector.collapsed`); selecting a step expands it.
+Both stores are best effort: blocked storage only means nothing is remembered.
+
+- **Steps** — the run views' Steps view of the block tree, with its
+  controls. Every structural edit goes through the tree's operations
+  ([below](#editor-model-block-tree)), and every control is enabled from
+  `editCapabilities`: a control that does not apply is disabled with the
+  reason as its tooltip, and a refused keyboard edit (Alt+↑ / Alt+↓, Delete)
+  says why in a line above the steps. A click selects a step (a branch
+  point's box too): its form opens in the inspector (beside the steps,
+  sticky, when the editor is wider than about 860 px; under them when it is
+  narrower), whose header holds **Add a branch** (a `switch` / `choice`),
+  **Repeat from this step to the end of its lane** (`wrapInLoop`), **Stop
+  repeating** (`unwrapLoop`, shown for a step a loop repeats), move up /
+  down **within its sequence** and delete. Hovering the gap before a block
+  shows a small `+` (**Insert step between n and n+1**, or **Insert step
+  before step n** at the top of a lane) that opens the step picker there
+  (known limitation: the root sequence has no `+` before step 1; insert
+  after it and move the new step up);
+  **+ Add step** at the end of each sequence appends (it is left out under a
+  block every path of which ends on its own, and disabled with the reason
+  where nothing runs). The step picker lists the types in groups (Status,
+  Transaction & reservation, Meter & EV, Wait & Trigger, Flow control, OCPP
+  messages, Station quirks & config), each with the same icon as its step
+  card; hovering or focusing (ArrowUp / ArrowDown) a type describes it in a
+  pane beside the list, and the search matches titles and descriptions. An
+  entry that cannot go to that place stays listed but is marked disabled
+  (`aria-disabled`, still hoverable and focusable): picking it does nothing,
+  and the pane shows why under its description (also its tooltip). Under
+  Flow control, **Repeat** (where the view passes `onPickStructure`: both
+  views of the editor) opens an empty Repeat block at that place (UI only;
+  nothing is saved until a step is in it). At the end of a lane that ends
+  (END, a jump, nothing) the repeat is a plain back edge and repeats until
+  the run stops, as before. Anywhere else — steps follow it, or the lane
+  goes on to a merge — it is written as a loop edge with the default bound
+  `times: 3` so the steps after it stay reachable, the block says so, and
+  its step picker refuses Switch, Choice and End (a bounded loop is checked
+  after its last step, which must go on: `cannot.loopNeedsNextStep`). It is
+  refused only as a loop's first block (`cannot.loopHeader`) and where no
+  step can go. Picking **Switch** or **Choice** inserts a branch
+  point with one empty lane per case / option, meeting again at the block
+  that followed (`insertForkBlock`). Each step box has a grab handle
+  (**Drag to reorder**): dragging shows a drop line, a release moves the
+  step within its sequence (a branch point or a loop is one block and stays
+  where it is; a branch point's box has no handle; a refused drop says why,
+  as a refused key does), **Escape** cancels; a
+  focused box takes **Alt+↑ / Alt+↓** and **Delete** (asked first, in the
+  page). Each branch point's header has **+ branch** (`addLane`: START, a
+  `switch` / `choice` with a case or option no lane has yet — refused with
+  "Every case or option already has a branch" otherwise, and on a step's
+  extra edges, "Only START, a switch or a choice can take another branch");
+  each lane tag has a remove button (`removeLane`, asked first when the lane
+  has steps; refused for the last lane and for a running lane whose removal
+  would let an ignored edge with its handle run). Under a chain from START,
+  **+ Add parallel branch** makes START fan out: the chain becomes its first
+  lane, the new lane holds one Delay. The inspector of a sequence's last
+  step has the **After this step** select (_End of scenario_, _Go to step
+  N_, or _Loop back to step N_ for a step a run comes back from, `setLink`);
+  on the step that closes a loop it is disabled and points to **Stop
+  repeating**. **Bounds** (on every loop block's top arm, and beside a Graph
+  loop's label, where it opens the editor below the label) edits when the
+  loop ends, built like a switch: **A number of rounds** (`times`), **A
+  duration** (hours, minutes, seconds → `forSeconds`) and **Until a value
+  matches** — the switch step's own value field and case list
+  ([`switchCases.tsx`](../../apps/web/src/components/scenario/forms/switchCases.tsx),
+  shared with `SwitchForm`: a `$from` or a constant, cases as constants,
+  `$match` cases shown as chips, the duplicate and `$from`-in-a-case
+  warnings) (`setLoopBounds`). Each change is written at once to the loop
+  edge's `loop` (the edge keeps its id, `kind` and unknown fields; the
+  editor writes only the bounds it shows, so unknown keys inside `loop`
+  go). Bounds on a plain loop turn its one back edge into a loop edge
+  (refused with several back edges, `cannot.loopSeveralBackEdges`, or when it
+  leaves a `switch` / `choice`); the branch then ends when a bound fires,
+  and steps can be added after the loop. A loop with steps after it (or a
+  lane going on to a merge) cannot lose its last bound: that checkbox is
+  disabled with "Steps follow this repeat: keep at least one bound"
+  (`cannot.unboundedMidLane`). At the end of a lane the bounds can all go;
+  `loop` is then removed and the loop edge repeats forever. **Stop repeating** (on the loop block's top arm and in the
+  inspector) takes the innermost loop around the step away: its steps run
+  once, and every edge that went back to the loop's first step (the closing
+  step's, and each lane's that came back) goes on where the loop went on —
+  the block after the loop, else where its sequence went (END for a loop
+  that ended its lane). Those edges keep their id and fields; only their
+  target changes. Lanes that already left the loop stay as they are. Edits never change which lane
+  of a `switch` / `choice` an edge runs (see
+  [the schema 1.6 nodes](../concepts/scenario-format.md#the-schema-16-nodes)).
+- **Graph** — the same tree drawn as on the [run page](#scenario-runs-panel-and-page),
+  with the same edits as the Steps view, all through the tree's operations
+  and enabled from `editCapabilities`. A click selects a card for the
+  inspector (the selected card gets a small ✕ that removes it); a `+` disc
+  at the end of each sequence (**Add step after step n**; on an empty lane
+  **Add step to <condition>**) and a `+` shown on hover in the gap before a
+  block (**Insert step between n and n+1**, **Insert step before step n**)
+  open the step picker at that place; **+ branch** beside each branch
+  point's card (beside the START dot for START, which fans out a chain)
+  adds a lane, disabled with the reason when refused (inside a loop the
+  rectangle is wide enough to hold it); a lane tag's ✕ removes the lane;
+  **Stop repeating** at the right of a loop's label unwraps the loop. A card drags up or down within its sequence like a
+  Steps box (the card follows the pointer over a drop line; a press that
+  moves less than 6 px is a click, so it still selects; **Escape**
+  cancels); a branch point's card does not drag. A focused card takes
+  **Alt+↑ / Alt+↓** and **Delete** the same way. Above the steps, a warning box lists wiring the executor would only half run (`validateScenarioGraph`, see [connection rules](../concepts/scenario-format.md#connection-rules)): a fork after a step, a step nothing reaches, a `switch` / `choice` edge it never takes (no handle it can pick, or a second edge on one handle), an edge to a missing node, a Call Response its branch holds no CALL for, a `replace` trigger whose CALL is never answered. It never blocks Save.
+  The editor works the diagnostics out once per change and marks each one
+  where it applies ([`graphIssueMarks.ts`](../../apps/web/src/console/lib/graphIssueMarks.ts)):
+  - a step it names gets a severity badge (icon and count; rose for an
+    error, amber for a warning, blue for info) and a border or inset ring in
+    that colour: top-right on Graph cards and Steps boxes, at the right end
+    of outline rows. The badge's tooltip and the card's accessible description
+    list the messages.
+  - in the Graph view, an edge it names that the view draws (the edge into a
+    card, a lane's edge, the edge into END or a merge point, a loop's return
+    arc, a jump) is stroked in
+    the severity colour, with a marker at its midpoint and `data-issue` set
+    to the codes on the path. A dashed link stays dashed.
+  - an edge the view does not draw (a dangling edge, or any edge in the
+    Steps view and the outline) marks its source step as an edge issue
+    instead ("On an edge from this step: …").
+  - START and END are marked only by a diagnostic about them (in the Graph
+    view, beside the start dot and the end rings). `missingStart` names no
+    node, so it is listed in the box only.
+
+  Each line of the box that has a step is a button. It selects that step
+  (the inspector opens, as a click on the card does) and scrolls it into
+  view. Hovering or focusing a line highlights its card or edge. Hovering or
+  focusing a marked card tints its lines. The run page and the Library's
+  read view have no box and no marks. The template preview shows the marks
+  without the box (no shipped template has any). A scenario without a START
+  cannot be drawn: it is shown as an outline list (steps in order, following
+  their edges, with where each jumps to) whose steps can be selected and
+  edited, but not re-wired. There is no ReactFlow editor
+  any more (retired in the round that added loops).
 
 The two views share the drag
 ([`useLaneDrag`](../../apps/web/src/console/lib/useLaneDrag.ts), pointer events, no
-drag-and-drop library) and the insert picker, so they behave the same. The
-edits rebuild the graph's edges and positions
-([`scenarioSteps.ts`](../../apps/web/src/console/lib/scenarioSteps.ts),
-`insertLaneStep` / `moveLaneStep` / `removeLaneStep` / `addParallelBranch`).
+drag-and-drop library), the insert picker and the tree's operations, so
+they behave the same.
+
+#### Editor model (block tree)
+
+Underneath both views sits one model of the graph, the **block tree**
+([`blockTree.ts`](../../apps/web/src/console/lib/blockTree.ts),
+`recognizeBlockTree`): nested sequences of steps, forks and loops, recovered
+from the graph the way the executor reads it (`lowerScenario`,
+`nextStep`, `pickableHandles`; see
+[connection rules](../concepts/scenario-format.md#connection-rules)).
+"Structure what can be structured; every other edge stays visible as a link."
+
+- **Forks**: START with several edges (all run), a `switch` / `choice` (one
+  lane per handle it can pick, in handle order), and a step with more than
+  one edge (only the first runs). A second edge on one handle, an edge with
+  a handle the node never picks, and a step's later edges are lanes too,
+  marked _ignored_ / _unpickable_, so no edge disappears; a `switch` /
+  `choice` whose only edge it never takes is a one-lane fork, not a chain.
+  Lanes meet again at the fork's immediate post-dominator (its _merge_),
+  and the sequence goes on there. Loops and merges are worked out on the
+  edges that run only, so a never-taken edge cannot make a loop or hide a
+  merge.
+- **Loops**: a back edge whose target dominates its source (a reducible
+  loop) makes a loop block; its first exit (file order) is where the
+  sequence goes on. Any other back edge (an irreducible loop) stays a link.
+- **Loop edges** (schema 1.10, `kind: "loop"`): the loop edge a step follows
+  (`loopStep`) out of `S` back to `H` makes a **bounded** loop block
+  (`LoopBlock.loopEdge`: its id and `loop`) when it is the only back edge of
+  `H`'s natural loop and `S`'s ordinary next edge leaves that loop: the
+  body runs from `H` to `S` (its _latch_), and the sequence goes on along
+  `S`'s ordinary edge — mid-lane, unlike a plain loop. A loop edge out of a
+  fork (a `switch` / `choice`, a step with extra edges), into a header that
+  has other back edges, or that is not a reducible back edge stays a link
+  (role `loopEdge`, written back untouched).
+- **Links**: an edge into a step placed elsewhere (join), a back edge that
+  is not a loop, an edge into START, an edge to a missing node, an edge out
+  of END. **Detached**: steps no path from START reaches.
+- Every node other than END is placed exactly once and every edge is drawn
+  once or kept once as a link (`assertTreeCovers`). Recognition never throws
+  and depends only on file order, never on sorted ids.
+
+Writing a tree back (`rebuildFromTree`) never changes what the file means:
+
+- an edge is reused by (source, target, handle), else retargeted from an
+  unused edge with the same (source, handle) — inserting a step turns `s→t`
+  into `s→n` with the same id, handle and unknown fields — else made new;
+- reused edges keep their index in `edges` (a new edge takes the slot of the
+  edge it replaces, else goes last), and `assertFirstEdgeWins` checks that
+  every edge drawn as running is still the one the executor takes (first
+  edge to an existing node; first edge per handle), so reordering can never
+  revive a dead edge;
+- links are written back untouched; existing node positions never move (a
+  new node goes just below its predecessor);
+- a round trip without edits returns the file unchanged except `updatedAt`
+  (checked on every shipped template and docs example, and on seeded random
+  graphs, also with random loop edges);
+- a bounded loop's edge is matched by id only and never to an ordinary edge
+  (nor the other way); it goes from whichever step is the body's latch
+  now, so inserting, removing or moving the last step of the body moves the
+  loop edge with it, its id, `kind`, `loop` and unknown fields kept. A loop
+  edge no loop keeps any more (its loop was unwrapped, or emptied) goes, and
+  its id is never reused for an ordinary edge.
+
+The tree's operations (`insertStep`, `moveStep`, `removeStep`, `addLane`,
+`removeLane`, `insertForkBlock`, `wrapInLoop`, `unwrapLoop`, `setLink`, `setLaneHandle`,
+`setLaneCondition`, `setLoopBounds`) are pure functions of the definition and the tree, and
+`editCapabilities` tells which apply to a selection, with the reason
+(`scenarios.editor.cannot.*`) when one does not. An edit that would make a
+never-taken edge run — removing a lane, a step or a one-lane `switch` while
+an ignored or unpickable edge waits behind it, or changing a running lane's
+handle — is refused (`revivesDeadEdge`); remove the dead edge first.
+Removing the first lane of a step's extra edges is allowed with a note
+(`note.promotesNextEdge`): the next edge then runs, which is what removing
+the first one means. A bounded loop must keep exactly one latch, a step
+that leaves by "next" (and follows no earlier loop edge): an edit that
+would end its body with a `switch` / `choice` (inserting one last, moving a
+chain switch last, removing the latch after a branch point) is refused with
+`cannot.breaksLoopBounds`. `wrapInLoop` makes a bounded loop (`times: 3`)
+when something follows the wrapped blocks and a plain back edge otherwise;
+`unwrapLoop` on a bounded loop drops its loop edge and the latch goes on
+along its ordinary edge. The Steps view and the inspector use them (above);
+what the views read off the tree (numbering, condition chips, lanes that
+leave a loop) is in [`stepTree.ts`](../../apps/web/src/console/lib/stepTree.ts).
+`deriveStepLayout` (the old chain-plus-one-fork projection) no longer draws
+any view; it calls a file with any loop edge unsupported.
 
 Both views edit the same definition: unsaved changes survive a switch, and
 nothing is written until **Save**. The per-connector editor's Save saves this
@@ -1025,14 +1296,38 @@ steps or graph or under them follows the editor's own width, not the
 window's (a container query: two columns above about 860 px), on the page and
 in a side panel alike. The inspector lays its fields out in two columns when
 it is wide enough itself (under the steps) and in one beside them.
-The full graph editor does not rewrite the trigger from a **Status Trigger** node, as
+The editor does not rewrite the trigger from a **Status Trigger** node, as
 the classic UI's graph editor did, so pick **On status change** in the header for a scenario that should start
-on a status. Opening a scenario in the full graph editor is
-not an edit: an edge to a missing node is hidden there, and leaves the saved
-definition only with the first save after a graph edit. Before #411 a branching
+on a status. Before #411 a branching
 scenario opened read-only, with a link to the classic UI's graph editor; before
-the Library, the Steps view showed only a single chain; before this round the
-Graph view was always the ReactFlow editor.
+the Library, the Steps view showed only a single chain.
+
+#### The switch and choice inspectors
+
+A step's JSON values are edited without writing JSON. The **value field** (`ScenarioValueField`, used for a
+`switch` `value`, a `notify` `requestId` and a `setState` `value`) toggles between **Constant** — a type (text,
+number, true / false, null, JSON) and the matching input — and **Read from…** — a root (`call`, `charger`,
+`connector`, `state`) and a path with suggestions: the fields each root reports, `payload.` for `call`, and the keys
+the scenario's `setState` steps store for `state`; it writes `{ "$from": "<root>.<path>" }`. Any value round-trips:
+one it cannot show otherwise (an object, a `$from` on an unknown root) is shown as JSON, unchanged until edited, and
+text that does not parse keeps the last valid value with the error beside the field. An unknown field or state key
+is noted, not refused.
+
+A **switch** lists its cases, each a constant (cases cannot read from the run) beside the lane it leads to (**Step
+n · title**, **End of scenario**, or _no step yet_), with up / down / remove, **Add case**, and a last read-only
+**default** row with its lane. A **choice** lists its options with a weight, a bar and a percentage of the total
+weight, an optional label and its lane. Reordering or removing an item moves the lanes' edges with their items in
+the same change ([scenario format](../concepts/scenario-format.md#the-schema-16-nodes)); removing one whose lane leads
+somewhere asks first in the page, naming how many edges the lane holds, and on yes removes that lane's edges only.
+Adding an item whose handle already holds an edge in the file (left past the list, never picked so far) asks before
+adding, naming where it leads: keep that edge (the new item runs it), detach it (that handle's edges only), or cancel.
+A duplicated case value (only the first can match), fewer than two options and a weight that is not above 0 are
+warned beside the list; none blocks Save. Malformed lists stay as the file has them: `cases` that are not a list are
+shown with a notice and change only on **Replace with an empty list**; an option that is not an object (`null`) is
+shown as an invalid row drawn with weight 1, as the executor reads it, until **Replace with an empty option**. A
+`notify` `requestId` constant must be a whole number of at least 0; a `$from` path is checked against the fields
+each root reports, by structure (`charger.connectorIds.0`, `connector.power`), and an unknown one is only noted. In
+the template preview the same inspector is read-only.
 
 #### Editing in the side panel
 
@@ -1044,7 +1339,7 @@ connectors** for a Library scenario with users), **Cancel**, the expand button
 (**Open in the Library editor**, or **Open in the editor** for a definition
 that is not a Library copy: the editor page on the same scenario) and close;
 the trigger and **Enabled** sit under it, then **Used by**, the description
-and EV settings, the **Steps | Graph** switch, and the steps or the graph
+and EV settings, the **Graph | Steps** switch (Graph first and by default), and the graph or the steps
 with the inspector under them — or beside them, sticky, once the panel is
 dragged wider than about 860 px of editor. **Cancel** returns to the read view; with unsaved
 changes it first asks in the panel (**Discard unsaved changes?** —
@@ -1094,7 +1389,8 @@ default. The section shows the frame as sent and the CALLRESULT or CALLERROR, or
 why the call was refused; a SOAP CP gets a notice instead of the form. It
 works in both modes.
 
-The run page's **Run history** lists the daemon's recorded runs of that
+The run page's **Run history** lists the recorded runs (the daemon's, or the
+browser's `scenario_runs` table in Local mode, #394) of that
 scenario on that connector — the latest 20, newest first, with each run's
 result and verdict — plus the run the page is tracking until the daemon records
 it, so the history survives navigating away and back or a daemon restart with
@@ -1113,9 +1409,7 @@ charge point only; a link without `runCp` opens its run only when that id
 names a single one. Both re-list when the daemon
 records a run, and when a charge point is deleted or the simulator reset
 ([Scenario run history](../concepts/control-plane.md#scenario-run-history), #388).
-In Local mode the run page keeps a history of this page view only, and the
-Run History page says it needs the daemon — local run reports are tracked in
-#394.
+Local mode behaves the same, from the browser database.
 
 The console shows the running build as
 `ocpp-cp-simulator · ui vX.Y.Z · daemon vX.Y.Z · GitHub` in a footer under the
@@ -1205,6 +1499,7 @@ current vehicle's fields
 
 ## What the console can do
 
+- Remote mode: save daemon addresses and switch between them from the sidebar ([Local vs Remote mode](../concepts/local-vs-remote-mode.md#switching-daemons-remote-mode), #619).
 - Create charge points and connectors, connect to a CSMS over OCPP-J
   (1.6J / 2.0.1 / 2.1) or — in Local mode, send-only — the SOAP versions
   (see [OCPP versions & transports](../concepts/ocpp-versions-and-transports.md)).
@@ -1229,6 +1524,61 @@ ngrok` / `--soap-public-base-url`), the SOAP callback URL is optional in the
 - Persist everything (charge points, scenarios, configuration overrides,
   logs) — sql.js + IndexedDB in Local mode, the daemon's SQLite in Remote
   mode ([State persistence](../concepts/state-persistence.md)).
+
+## Icons
+
+The console draws its icons from two libraries (#823):
+
+- [Lucide](https://lucide.dev) (`lucide-react`) for generic UI: navigation
+  chrome, actions, menus, dialogs and controls.
+- [EVIcons](https://evicons.dev/icons) (`@evicons/react`) for EV-charging
+  concepts, where an icon names a domain entity:
+
+| Where                                                 | EVIcons icon      | Stands for                  |
+| ----------------------------------------------------- | ----------------- | --------------------------- |
+| Sidebar **Charge Points** link, dashboard empty state | `ChargingStation` | the charge points           |
+| Dashboard Hierarchy row head, colored by status       | `ChargingStation` | the charge point            |
+| [Connector card](#connector-card) header              | `ChargingPlug`    | a connector                 |
+| Step tile, **Transaction** category                   | `ChargingBolt`    | Transaction, Unlock Outcome |
+| Step tile, **Meter & EV** category                    | `CarPlugged`      | Meter Value, Connector Plug |
+
+Rules:
+
+- An EVIcons icon is used only where its documented meaning matches what is
+  shown. `ChargingPlug` is the generic plug ("no specific connector type");
+  `ChargingSocket` ("no tethered cable") and the connector-standard icons
+  (`PlugType2`, `PlugCcs2`, …) are not used: OCPP data does not tell the
+  physical connector, and the console never infers it from a connector id or
+  status. A category tile names every step type of its category, so it takes
+  a general icon: `ChargingBolt` ("charging or electricity in general") for
+  Transaction, which also holds Unlock Outcome, rather than `ChargingSession`
+  ("a live session").
+- Domain icons are decorative (`aria-hidden`) and sit beside a text label.
+  One exception: in the collapsed sidebar the **Charge Points** icon stands
+  alone, and the link keeps its label as accessible name and tooltip. A status
+  color on an icon repeats the status written next to it.
+- Icons draw in `currentColor`, so they follow the light and dark themes.
+- EVIcons draws a 1.5 stroke by default, Lucide 2: pass `strokeWidth={2}`
+  where an EVIcons icon sits among Lucide ones. A component that takes either
+  kind types its icon prop as
+  `ComponentType<{ className?: string; strokeWidth?: number }>`.
+- Import icons by name from the package root; the package has no side
+  effects, so the bundle keeps only the icons used.
+- Licenses: EVIcons is
+  [MIT, © 2026 Landolsi Digital](https://github.com/evicons/evicons/blob/main/LICENSE)
+  and Lucide is [ISC](https://github.com/lucide-icons/lucide/blob/main/LICENSE).
+  Both ask that the notice travel with copies of the code, so `vite build`
+  (the `rollup-plugin-license` entry of
+  [`vite.config.ts`](../../vite.config.ts)) writes
+  `dist/THIRD-PARTY-LICENSES.txt`: every bundled package with name, version,
+  SPDX id, repository and license text (a package that ships no license file
+  gets its SPDX id and author instead). It lives in `dist/`, so the npm
+  tarball (`files`), the [Docker image](docker-image.md) (`COPY dist`) and the
+  [desktop app](desktop-app.md) (`frontendDist` and the `web-console/`
+  resource) carry it with no extra step; `scripts/verify-cli-tarball.sh` fails
+  a tarball whose `dist/` lacks it (#857).
+- The package is pinned exactly in `package.json` (`0.8.0`, as `@noble/curves`
+  is): it is young, so bump it on purpose.
 
 ## Development
 

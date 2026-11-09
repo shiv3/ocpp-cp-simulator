@@ -25,6 +25,12 @@ import type { Database } from "../persistence/Database";
  * Status returned from a ChangeConfiguration.req attempt. Mirrors
  * OCPP 1.6 §5.3 / §7.22 ConfigurationStatus.
  */
+/** A check of a new value of one key: `false` refuses it. */
+export type ChangeGuard = (
+  current: ConfigurationValue["value"],
+  next: ConfigurationValue["value"],
+) => boolean;
+
 export type ConfigurationChangeStatus =
   "Accepted" | "Rejected" | "RebootRequired" | "NotSupported";
 
@@ -35,7 +41,10 @@ export type ConfigurationChangeStatus =
  */
 const REBOOT_REQUIRED_KEYS = new Set<string>([
   "ChargingScheduleMaxPeriods", // pre-allocated array sizes etc.
-  "SecurityProfile", // transport profile changes require reconnect/reboot.
+  // A SecurityProfile change needs a reconnect; a charge point with a
+  // transport that applies it installs a guard for it (#724) and answers
+  // `Accepted` instead. One without (OCPP-S) keeps answering RebootRequired.
+  "SecurityProfile",
   // (Extend as additional reboot-sensitive keys are wired in.)
 ]);
 
@@ -70,6 +79,8 @@ export class ConfigurationStore {
   private readonly listeners = new Set<ConfigurationChangeListener>();
   /** Keys published by `defineRuntimeKey` / `defineRuntimeIntegerKey`. */
   private readonly runtimeKeys = new Set<string>();
+  /** Per-key checks run by `applyChange` before a value is stored. */
+  private readonly changeGuards = new Map<string, ChangeGuard>();
 
   constructor(
     private readonly chargePointId: string,
@@ -173,6 +184,12 @@ export class ConfigurationStore {
     );
   }
 
+  /** Canonical key `MeterValueSampleInterval` (seconds); default `60`, `0` =
+   *  no periodic sample (1.6 errata 3.15, §4.7, #722). */
+  meterValueSampleInterval(): number {
+    return this.getInteger("MeterValueSampleInterval") ?? 60;
+  }
+
   /** Canonical key `ClockAlignedDataInterval` (seconds); default `0` = no
    *  clock-aligned data (#454). */
   clockAlignedDataInterval(): number {
@@ -183,6 +200,38 @@ export class ConfigurationStore {
    *  clock-aligned sample at all (#454). */
   meterValuesAlignedData(): string[] {
     return this.getArray("MeterValuesAlignedData") ?? [];
+  }
+
+  /** Core key `StopTxnSampledData` (2.x `SampledDataCtrlr.TxEndedMeasurands`);
+   *  default `[]`: no sampled transaction-end data (#607). */
+  stopTxnSampledData(): string[] {
+    return this.getArray("StopTxnSampledData") ?? [];
+  }
+
+  /** Core key `StopTxnAlignedData` (2.x `AlignedDataCtrlr.TxEndedMeasurands`);
+   *  default `[]` (#607). */
+  stopTxnAlignedData(): string[] {
+    return this.getArray("StopTxnAlignedData") ?? [];
+  }
+
+  /** 2.x key `TxStartedMeasurands`; default `[]` (#607). */
+  txStartedMeasurands(): string[] {
+    return this.getArray("TxStartedMeasurands") ?? [];
+  }
+
+  /** 2.x key `TxEndedInterval` (seconds); default `0` (#607). */
+  txEndedInterval(): number {
+    return this.getInteger("TxEndedInterval") ?? 0;
+  }
+
+  /** 2.x key `AlignedDataTxEndedInterval` (seconds); default `0` (#607). */
+  alignedDataTxEndedInterval(): number {
+    return this.getInteger("AlignedDataTxEndedInterval") ?? 0;
+  }
+
+  /** 2.x key `AlignedDataSendDuringIdle`; default `false` (#607). */
+  alignedDataSendDuringIdle(): boolean {
+    return this.getBoolean("AlignedDataSendDuringIdle") ?? false;
   }
 
   /** Canonical key `TransactionMessageAttempts`; default `3`. */
@@ -203,6 +252,27 @@ export class ConfigurationStore {
     return this.getInteger("MessageTimeout") ?? 30;
   }
 
+  /** 2.x key `OfflineThreshold` (seconds); default `60` (#702). 2.x reads it
+   *  as `OCPPCommCtrlr.OfflineThreshold` (B04.FR.01/02). */
+  offlineThreshold(): number {
+    return this.getInteger("OfflineThreshold") ?? 60;
+  }
+
+  /** 2.x simulator key `BootOnReconnect`; default `false` (#702): whether
+   *  every connect, a reconnect after a connection loss included, sends a
+   *  BootNotification (OCPP-J 2.0.1 §5.4 says SHOULD NOT). */
+  bootOnReconnect(): boolean {
+    return this.getBoolean("BootOnReconnect") ?? false;
+  }
+
+  /** 2.x key `OfflineQueueMaxEvents` (#554): most TransactionEvents the E11
+   *  offline queue holds before it drops `Updated` ones (E11.FR.04/05);
+   *  default `1000`, `0` = no limit. A simulator key: the spec has no
+   *  variable for the size. */
+  offlineQueueMaxEvents(): number {
+    return this.getInteger("OfflineQueueMaxEvents") ?? 1000;
+  }
+
   /** 2.x key `OfflineQueuingSeverity` (0-9); default `0` (#538). 2.x reads
    *  it as `MonitoringCtrlr.OfflineQueuingSeverity`. */
   offlineQueuingSeverity(): number {
@@ -219,6 +289,13 @@ export class ConfigurationStore {
    *  carries a non-Accepted idTagInfo.status (issue #181). */
   stopTransactionOnInvalidId(): boolean {
     return this.getBoolean("StopTransactionOnInvalidId") ?? true;
+  }
+
+  /** Canonical key `MaxEnergyOnInvalidId` (2.x `TxCtrlr.MaxEnergyOnInvalidId`);
+   *  default `0`. Wh still delivered after a non-Accepted id when
+   *  `StopTransactionOnInvalidId` is false (E05.FR.03; 2.x only, 1.6 errata 3.17 is #736). */
+  maxEnergyOnInvalidId(): number {
+    return this.getInteger("MaxEnergyOnInvalidId") ?? 0;
   }
 
   /** Canonical key `StopTransactionOnEVSideDisconnect` (2.x
@@ -336,6 +413,15 @@ export class ConfigurationStore {
     return this.values.delete(name);
   }
 
+  /**
+   * Whether `SupportedFeatureProfiles` lists `SmartCharging` (#594); true when
+   * the key is absent.
+   */
+  smartChargingSupported(): boolean {
+    const profiles = this.getArray("SupportedFeatureProfiles");
+    return profiles === undefined || profiles.includes("SmartCharging");
+  }
+
   /** Canonical key `LocalAuthListEnabled`; default `true`. */
   localAuthListEnabled(): boolean {
     return this.getBoolean("LocalAuthListEnabled") ?? true;
@@ -359,6 +445,22 @@ export class ConfigurationStore {
   /** Canonical key `WebSocketPingInterval` (seconds); default `0` = no ping. */
   webSocketPingInterval(): number {
     return this.getInteger("WebSocketPingInterval") ?? 0;
+  }
+
+  /** 2.x `OCPPCommCtrlr.RetryBackOffWaitMinimum` in seconds (#609, Part 4
+   *  §5.4); the default is derived from the reconnect policy, 1 without one. */
+  retryBackOffWaitMinimum(): number {
+    return this.getInteger("RetryBackOffWaitMinimum") ?? 1;
+  }
+
+  /** 2.x `OCPPCommCtrlr.RetryBackOffRandomRange` in seconds (#609). */
+  retryBackOffRandomRange(): number {
+    return this.getInteger("RetryBackOffRandomRange") ?? 0;
+  }
+
+  /** 2.x `OCPPCommCtrlr.RetryBackOffRepeatTimes` (#609). */
+  retryBackOffRepeatTimes(): number {
+    return this.getInteger("RetryBackOffRepeatTimes") ?? 5;
   }
 
   /** Canonical key `CertificateStoreMaxLength`; default `10`. */
@@ -401,12 +503,28 @@ export class ConfigurationStore {
   }
 
   /**
+   * Installs a check of a ChangeConfiguration of `name` (#724: the A05 check
+   * of `SecurityProfile`, the §7.2 format of `AuthorizationKey`):
+   * `applyChange` answers `Rejected` and keeps the value when the guard
+   * refuses it. The charge point installs the guards once its own initial
+   * values are applied; `applyChange(..., { bypassGuard: true })` skips them.
+   */
+  setChangeGuard(name: string, guard: ChangeGuard | null): void {
+    if (guard) this.changeGuards.set(name, guard);
+    else this.changeGuards.delete(name);
+  }
+
+  /**
    * Apply a ChangeConfiguration.req: parses the string value into the key's
    * declared type, persists, fires listeners, and returns the spec-defined
    * status. Unknown keys → `NotSupported`. Readonly keys → `Rejected`.
    * Parse failures → `Rejected`.
    */
-  applyChange(name: string, rawValue: string): ConfigurationChangeStatus {
+  applyChange(
+    name: string,
+    rawValue: string,
+    options: { bypassGuard?: boolean } = {},
+  ): ConfigurationChangeStatus {
     const entry = this.values.get(name);
     if (!entry) return "NotSupported";
     if (entry.key.readonly) return "Rejected";
@@ -414,12 +532,19 @@ export class ConfigurationStore {
     const parsed = parseValue(entry.key, rawValue);
     if (parsed === PARSE_FAILED) return "Rejected";
     if (!isConfigurationValueValid(entry.key, parsed)) return "Rejected";
+    const guard = this.changeGuards.get(name);
+    if (guard && options.bypassGuard !== true && !guard(entry.value, parsed)) {
+      return "Rejected";
+    }
 
     const next = { key: entry.key, value: parsed } as ConfigurationValue;
     this.values.set(name, next);
     this.persistOverride(name, parsed);
     this.emit(name, parsed);
 
+    if (name === "SecurityProfile" && this.changeGuards.has(name)) {
+      return "Accepted";
+    }
     return REBOOT_REQUIRED_KEYS.has(name) ? "RebootRequired" : "Accepted";
   }
 
@@ -431,6 +556,70 @@ export class ConfigurationStore {
 
   // ── persistence ─────────────────────────────────────────────────────────
 
+  /** Put one stored override back, if its key is known and writable and the
+   *  value still fits it. */
+  private applyStoredOverride(name: string, raw: string): void {
+    const entry = this.values.get(name);
+    // Silently skip overrides for keys the current defaults don't know
+    // about (e.g. obsolete keys from an older simulator version) and
+    // readonly keys — both indicate operator error rather than a real
+    // override.
+    if (!entry || entry.key.readonly) return;
+    let value: unknown;
+    try {
+      value = JSON.parse(raw);
+    } catch {
+      return;
+    }
+    if (
+      !isValueAssignable(entry.key, value) ||
+      !isConfigurationValueValid(entry.key, value)
+    ) {
+      return;
+    }
+    this.values.set(name, {
+      key: entry.key,
+      value,
+    } as ConfigurationValue);
+  }
+
+  /**
+   * Declare a writable, persisted integer key the station owns beyond the
+   * standard list, such as a vendor current limit (#608). `ChangeConfiguration`
+   * answers `Accepted` for it (OCPP 1.6 §5.3: an unknown key is
+   * `NotSupported`), and a value changed earlier is read back from the
+   * database. Never shadows a key that already exists; returns whether the
+   * key was declared.
+   */
+  defineWritableIntegerKey(
+    name: string,
+    value: number,
+    bounds: { readonly min?: number; readonly max?: number } = {},
+  ): boolean {
+    if (this.values.has(name)) return false;
+    const key: IntegerConfigurationKey = {
+      name,
+      required: false,
+      readonly: false,
+      type: "integer",
+      ...(bounds.min !== undefined && { min: bounds.min }),
+      ...(bounds.max !== undefined && { max: bounds.max }),
+    };
+    this.values.set(name, { key, value });
+    if (this.database) {
+      try {
+        const row = this.database.get<{ value: string }>(
+          "SELECT value FROM configuration WHERE cp_id = ? AND key = ?",
+          [this.chargePointId, name],
+        );
+        if (row) this.applyStoredOverride(name, row.value);
+      } catch (err) {
+        console.error("Failed to load config override:", err);
+      }
+    }
+    return true;
+  }
+
   private loadOverrides(): void {
     if (!this.database) return;
     try {
@@ -439,28 +628,7 @@ export class ConfigurationStore {
         [this.chargePointId],
       );
       for (const { key: name, value: raw } of rows) {
-        const entry = this.values.get(name);
-        // Silently skip overrides for keys the current defaults don't know
-        // about (e.g. obsolete keys from an older simulator version) and
-        // readonly keys — both indicate operator error rather than a real
-        // override.
-        if (!entry || entry.key.readonly) continue;
-        let value: unknown;
-        try {
-          value = JSON.parse(raw);
-        } catch {
-          continue;
-        }
-        if (
-          !isValueAssignable(entry.key, value) ||
-          !isConfigurationValueValid(entry.key, value)
-        ) {
-          continue;
-        }
-        this.values.set(name, {
-          key: entry.key,
-          value,
-        } as ConfigurationValue);
+        this.applyStoredOverride(name, raw);
       }
     } catch (err) {
       console.error("Failed to load config overrides:", err);

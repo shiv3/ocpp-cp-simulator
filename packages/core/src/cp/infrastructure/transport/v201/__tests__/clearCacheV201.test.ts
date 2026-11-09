@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../../domain/types/OcppTypes";
 import { Logger } from "../../../../shared/Logger";
 import { handleClearCacheV201 } from "../coreControlV201";
 import type { V201InboundContext } from "../inboundRegistryV201";
 
 function buildChargePoint(version: string): ChargePoint {
-  return new ChargePoint(
+  return createChargePoint(
     "test-cp-452-v2",
     DefaultBootNotification,
     1,

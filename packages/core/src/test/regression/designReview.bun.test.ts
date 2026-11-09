@@ -1,6 +1,6 @@
 // Decisions of the design review (S1, S3, S4, S8): see docs/concepts/charger-engine.md.
 import { afterEach, describe, expect, test } from "bun:test";
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
 import { runBehavior, type BehaviorRun } from "../behavior/runBehavior";
 
 let runs: BehaviorRun[] = [];

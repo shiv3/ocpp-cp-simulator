@@ -22,7 +22,7 @@ related:
   - open-ev-directory.md
   - ../concepts/vehicle-profiles.md
   - ../concepts/charger-engine.md
-updated: 2026-11-08
+updated: 2026-11-09
 ---
 
 # Daemon (server mode)
@@ -363,12 +363,14 @@ says only whether one is set.
 
 ## Error reporting
 
-`SENTRY_DSN` (and optionally `SENTRY_ENVIRONMENT`) in the daemon's environment
-turns on opt-in Sentry error reporting ([#794](https://github.com/shiv3/ocpp-cp-simulator/issues/794)): uncaught exceptions, unhandled
-rejections and fatal exits, with the credentials the redaction recognises
-scrubbed (an unlabelled one in an error message is not). It does not reach the
-console the daemon serves, whose DSN is fixed when the UI is built
-(`VITE_SENTRY_DSN`). Details: [Error reporting](../concepts/error-reporting.md).
+`OCPP_SIM_ERROR_REPORTER` in the daemon's environment turns on opt-in error
+reporting ([#794](https://github.com/shiv3/ocpp-cp-simulator/issues/794)): `sentry` (with `SENTRY_DSN`, optionally
+`SENTRY_ENVIRONMENT`) or a module specifier for another adapter. Uncaught
+exceptions, unhandled rejections and fatal exits are reported, with the
+credentials the redaction recognises scrubbed (an unlabelled one in an error
+message is not); an unhandled rejection still exits the daemon with code 1.
+It does not reach the console the daemon serves, whose adapter is fixed when
+the UI is built (`VITE_ERROR_REPORTER`). Details: [Error reporting](../concepts/error-reporting.md).
 
 ## Docker
 

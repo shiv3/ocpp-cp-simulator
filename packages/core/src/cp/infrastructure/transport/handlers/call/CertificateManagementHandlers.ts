@@ -161,8 +161,9 @@ export class GetInstalledCertificateIdsHandler implements CallHandler<
  * chains are outside the 1.6 scope: their hashes answer NotFound, which
  * also keeps the Charge Point Certificate undeletable (M04.FR.05). A
  * CentralSystemRootCertificate that validates the current connection (one
- * of the `--tls-ca` certificates of a `wss://` connection) answers Failed
- * and stays installed (M04.FR.06, #537).
+ * of the `--tls-ca` certificates of a `wss://` connection, narrowed to the
+ * root that ended the server's chain where the transport can read it, #563)
+ * answers Failed and stays installed (M04.FR.06, #537).
  */
 export class DeleteCertificateHandler implements CallHandler<
   DeleteCertificateRequestV16,

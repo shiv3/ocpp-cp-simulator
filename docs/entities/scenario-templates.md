@@ -1,7 +1,7 @@
 ---
 title: Built-in scenario templates
 type: entity
-summary: The scenario JSON files shipped inside the package — six general-purpose flows, six `dataflow-*` showcases of the schema 1.7 data-flow features, six `resilience-*` failure / recovery scenarios, the 47 `cert16-*` OCPP 1.6 certification test-case templates and the OCTT strictness probe — and how template instances behave.
+summary: The scenario JSON files shipped inside the package — six general-purpose flows, six `dataflow-*` showcases of the schema 1.7 data-flow features and the 1.10 loop edge, six `resilience-*` failure / recovery scenarios, the 47 `cert16-*` OCPP 1.6 certification test-case templates and the OCTT strictness probe — and how template instances behave.
 sources:
   - packages/core/src/utils/scenarioTemplates.ts
   - packages/core/src/utils/scenarios/*.json
@@ -116,7 +116,7 @@ shape (OCPP 1.6 `idTag` / `idTagInfo` against 2.0.1 `idToken` / `idTokenInfo`).
 | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `dataflow-authorize-branch-16` / `-201`         | `ocppCall` Authorize, then a `switch` on `response.payload.idTagInfo.status` (`idTokenInfo` on 2.0.1): Accepted starts a session, `$match in` Blocked / Invalid / Expired, ConcurrentTx, and `default`.                                                        |
 | `dataflow-call-error-handling`                  | `ocppCall` DataTransfer, then `response.kind`; on a result `response.payload.status`, on a CALLERROR `response.errorCode` with `$match` `in` / `endsWith` / `startsWith`. Each outcome reports itself with its own DataTransfer `messageId`. Version-agnostic. |
-| `dataflow-charge-to-soc`                        | A real loop: meter for 7 s, then a `switch` on `connector.power.soc` with `$match gte 80` leaves the loop; `default` is the back edge.                                                                                                                         |
+| `dataflow-charge-to-soc`                        | A bounded loop edge (schema 1.10): the `meter` step (7 s a pass) loops back to itself until `connector.power.soc` matches `$match gte 80` (`until`) or 2 hours (`forSeconds: 7200`) have passed, then stops the transaction. No `switch` node.                 |
 | `dataflow-remote-start-reauthorize-16` / `-201` | `csmsCallTrigger` with `behavior: "replace"`, a `callResponse` Accepted, then Authorize with the tag read from the CALL (`$from call.payload.idTag`) and a `switch` on the answer.                                                                             |
 
 The `cert16-tc023-*` templates are untouched: their ids are part of the TCK contract and

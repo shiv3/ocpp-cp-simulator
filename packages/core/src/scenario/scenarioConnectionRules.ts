@@ -32,6 +32,10 @@
  * node whose rule `waits` follows one, and only when its timeout expires
  * (`timeoutStep` in `scenarioGraph.ts`); every other walk ignores it.
  *
+ * Schema 1.10: an edge with `kind: "loop"` is not an ordinary edge. Only a
+ * node that leaves by "next" follows one (`loopStep` in `scenarioGraph.ts`),
+ * after a round, while its bounds are not satisfied; every other walk ignores it.
+ *
  * The graph itself (origin, branch ends, the edge taken next) is read
  * through `scenarioGraph.ts`, which the executor uses too; the checks live in
  * `scenarioGraphValidator.ts`. Advisory like the JSON schema: callers report
@@ -102,6 +106,13 @@ export interface ConnectionRule<D = unknown> {
    * run when that timeout expires (schema 1.8). Absent on every other node.
    */
   waits?: true;
+  /**
+   * The node takes time or waits for something outside the run (a delay, a
+   * meter value, an OCPP round trip, a trigger wait), so a loop whose body
+   * has one is not a busy loop (schema 1.10, `busyLoop`). Absent on every
+   * other node.
+   */
+  pauses?: true;
 }
 
 /** Node data the rules read, per node type; the rest read none. */
@@ -131,7 +142,14 @@ const readsResponse = (value: unknown): ResponseEffect => ({
 const step: ConnectionRule = { out: "next", call: noCall };
 /** A trigger wait: a step that parks in `runTriggerWait` until its event or
  *  its `timeout` (schema 1.8: a timeout edge then runs instead of failing). */
-const wait: ConnectionRule = { out: "next", call: noCall, waits: true };
+const wait: ConnectionRule = {
+  out: "next",
+  call: noCall,
+  waits: true,
+  pauses: true,
+};
+/** A step that takes time or waits for an event (see `pauses`). */
+const pause: ConnectionRule = { out: "next", call: noCall, pauses: true };
 
 export const CONNECTION_RULES: ConnectionRuleTable = {
   // executeFlow: the run starts here and every outgoing edge becomes a
@@ -141,8 +159,8 @@ export const CONNECTION_RULES: ConnectionRuleTable = {
   [ScenarioNodeType.END]: { out: "none", call: noCall },
   [ScenarioNodeType.STATUS_CHANGE]: step,
   [ScenarioNodeType.TRANSACTION]: step,
-  [ScenarioNodeType.METER_VALUE]: step,
-  [ScenarioNodeType.DELAY]: step,
+  [ScenarioNodeType.METER_VALUE]: pause,
+  [ScenarioNodeType.DELAY]: pause,
   [ScenarioNodeType.NOTIFICATION]: step,
   [ScenarioNodeType.CONNECTOR_PLUG]: step,
   // Waits park until their event (runTriggerWait) and then go on like a step;
@@ -192,6 +210,7 @@ export const CONNECTION_RULES: ConnectionRuleTable = {
     out: "next",
     call: (data) => (data?.behavior === "replace" ? "takesOver" : "none"),
     waits: true,
+    pauses: true,
   },
   // executeCallResponse: throws without flow.exchange or once flow.answered.
   // (its payload is resolved through fromScope(flow) too.)
@@ -210,6 +229,7 @@ export const CONNECTION_RULES: ConnectionRuleTable = {
       reads: containsRootReference(data?.payload, "response"),
       produces: true,
     }),
+    pauses: true,
   },
   // Schema 1.9: executeSequentialFlow forks every outgoing ordinary edge into
   // a branch with a fresh flow, waits for them at a join, and goes on after
@@ -292,15 +312,33 @@ export type GraphIssueCode =
   /** A wait has several timeout edges: only the first one to an existing
    *  node runs; reported on each other one. */
   | "extraTimeoutEdge"
-  /** The file uses a construct newer than its declared `schemaVersion`
-   *  (`data.since`): it runs, but an older simulator would ignore it (info). */
-  | "newerConstruct"
   /** A `join` that no branch of a `parallel` reaches: it only ever runs as
    *  a plain step (schema 1.9). */
   | "joinWithoutParallel"
   /** A `parallel` none of whose branches reaches a `join`: the branches just
    *  end, and nothing runs after the parallel (info, schema 1.9). */
-  | "parallelWithoutJoin";
+  | "parallelWithoutJoin"
+  /** An edge with `kind: "loop"` (schema 1.10) out of a node that does not
+   *  leave by "next" (an End, a switch / choice, the origin START): it is
+   *  never followed. */
+  | "loopEdgeIgnored"
+  /** A node has several loop edges: only the first one to an existing node
+   *  counts; reported on each other one. */
+  | "extraLoopEdge"
+  /** The `loop` of a loop edge is malformed (`times` / `forSeconds` not a
+   *  number of at least 0, `until` not an object, bad cases): the run fails
+   *  when the loop's check is reached. `data.problem` says what. */
+  | "invalidLoop"
+  /** A loop edge without a `times` bound whose body has no node that waits
+   *  (a delay, meter value, OCPP call or trigger wait): it spins without
+   *  letting time pass. */
+  | "busyLoop"
+  /** A bounded loop edge whose source has no ordinary next edge: when a bound
+   *  fires, the branch ends (info). */
+  | "loopWithoutExit"
+  /** The file uses a construct newer than its declared `schemaVersion`
+   *  (`data.since`): it runs, but an older simulator would ignore it (info). */
+  | "newerConstruct";
 
 /** A finding of `validateScenarioGraph` (`scenarioGraphValidator.ts`): a
  *  {@link Diagnostic} narrowed to the graph codes. */
@@ -311,6 +349,6 @@ export interface GraphIssue extends Diagnostic<GraphIssueCode> {
   edgeId?: string;
   /** `error`: the scenario cannot run as drawn; `warning`: part of it is
    *  ignored; `info`: advisory only (`timeoutEdgeNeverFires`,
-   *  `newerConstruct`). */
+   *  `loopWithoutExit`, `newerConstruct`). */
   severity: "error" | "warning" | "info";
 }

@@ -19,6 +19,12 @@
  * apart from the ordinary edges. {@link nextStep}, {@link successors} and the
  * origin's fan-out never see it; only {@link timeoutStep} follows one, out of
  * a trigger wait whose timeout expired.
+ *
+ * Schema 1.10: an edge with `kind: "loop"` ({@link isLoopEdge}) is kept apart
+ * from the ordinary edges. {@link nextStep}, {@link successors} and the
+ * origin's fan-out never see it; only {@link loopStep} follows one, out of the
+ * source node of a branch that leaves it by "next", after a round, while the
+ * edge's bounds ({@link loopBounds}) are not satisfied.
  */
 import {
   ScenarioFlowNodeType,
@@ -42,14 +48,21 @@ export interface GraphEdgeLike {
   target: string;
   /** The handle a `switch` / `choice` picks (`case-N`, `default`, `option-N`). */
   sourceHandle?: string | null;
-  /** `"timeout"` (schema 1.8): followed only when the source wait times out.
-   *  Absent, or any other value: an ordinary edge. */
+  /** `"timeout"` (schema 1.8) or `"loop"` (schema 1.10): see
+   *  {@link isTimeoutEdge} and {@link isLoopEdge}. Absent, or any other value:
+   *  an ordinary edge. */
   kind?: unknown;
+  /** The bounds of a loop edge (`LoopBounds`), unvalidated: {@link loopBounds}. */
+  loop?: unknown;
 }
 
 /** An edge taken only when its source wait times out (schema 1.8). */
 export const isTimeoutEdge = (edge: GraphEdgeLike): boolean =>
   edge.kind === "timeout";
+
+/** A loop edge (schema 1.10): followed only by {@link loopStep}. */
+export const isLoopEdge = (edge: GraphEdgeLike): boolean =>
+  edge.kind === "loop";
 
 /** A `join` (schema 1.9): where the branches of a `parallel` meet. */
 export const isJoin = (node: GraphNodeLike): boolean =>
@@ -86,7 +99,7 @@ export interface ScenarioProgram<
   /** By id; with duplicate ids the first node wins, as the executor's
    *  `nodes.find` does. */
   readonly nodesById: ReadonlyMap<string, N>;
-  /** Every ordinary (not timeout) edge by source id, in file order, whether
+  /** Every ordinary (not timeout, not loop) edge by source id, in file order, whether
    *  or not its target exists. */
   readonly edgesFrom: ReadonlyMap<string, readonly E[]>;
   /** By source id, in file order: the ordinary edges whose source and target
@@ -97,6 +110,13 @@ export interface ScenarioProgram<
    *  source and target both exist, out of any node. Only
    *  {@link timeoutStep} follows one. */
   readonly timeoutEdges: ReadonlyMap<string, readonly E[]>;
+  /** By source id, in file order: the loop edges (schema 1.10) whose source
+   *  and target both exist, out of any node. Only {@link loopStep} follows
+   *  one. */
+  readonly loopEdges: ReadonlyMap<string, readonly E[]>;
+  /** By target id, in file order: the same loop edges, keyed by the node
+   *  they lead back to (their header). */
+  readonly loopEdgesInto: ReadonlyMap<string, readonly E[]>;
   /** Where a fresh run starts ({@link resolveOrigin}). */
   readonly origin: N | undefined;
   /** The origin first, then every other node of type `start`. Only the
@@ -157,6 +177,8 @@ export function lowerScenario<N extends GraphNodeLike, E extends GraphEdgeLike>(
   const edgesFrom = new Map<string, E[]>();
   const outgoing = new Map<string, E[]>();
   const timeoutEdges = new Map<string, E[]>();
+  const loopEdges = new Map<string, E[]>();
+  const loopEdgesInto = new Map<string, E[]>();
   const add = (map: Map<string, E[]>, edge: E) => {
     const list = map.get(edge.source);
     if (list) list.push(edge);
@@ -164,7 +186,8 @@ export function lowerScenario<N extends GraphNodeLike, E extends GraphEdgeLike>(
   };
   for (const edge of def.edges) {
     const timeout = isTimeoutEdge(edge);
-    if (!timeout) add(edgesFrom, edge);
+    const loop = isLoopEdge(edge);
+    if (!timeout && !loop) add(edgesFrom, edge);
     const source = nodesById.get(edge.source);
     if (!source || !nodesById.has(edge.target)) {
       diagnostics.push({
@@ -177,6 +200,14 @@ export function lowerScenario<N extends GraphNodeLike, E extends GraphEdgeLike>(
     if (timeout) {
       // Reported by the validator (timeoutEdgeOnNonWait), not as edgeOutOfEnd.
       add(timeoutEdges, edge);
+      continue;
+    }
+    if (loop) {
+      // Reported by the validator (loopEdgeIgnored), not as edgeOutOfEnd.
+      add(loopEdges, edge);
+      const into = loopEdgesInto.get(edge.target);
+      if (into) into.push(edge);
+      else loopEdgesInto.set(edge.target, [edge]);
       continue;
     }
     // The origin's edges are run by executeFlow whatever the origin is.
@@ -198,6 +229,8 @@ export function lowerScenario<N extends GraphNodeLike, E extends GraphEdgeLike>(
     edgesFrom,
     outgoing,
     timeoutEdges,
+    loopEdges,
+    loopEdgesInto,
     origin,
     starts,
     diagnostics,
@@ -274,6 +307,104 @@ export function timeoutStep<N extends GraphNodeLike, E extends GraphEdgeLike>(
   if (!connectionRule(node.type).waits || isTerminal(node)) return null;
   const edge = program.timeoutEdges.get(node.id)?.[0];
   return edge ? { edge, target: program.nodesById.get(edge.target)! } : null;
+}
+
+/**
+ * The loop edge a branch may follow after `node` ran (schema 1.10): the first
+ * loop edge to an existing node, when the node leaves by "next" (not the
+ * origin's fan-out, not a switch / choice, not a node that ends its branch).
+ * `null` otherwise; any further loop edge of the node is ignored. Whether the
+ * loop goes round again or exits is up to its bounds ({@link loopBounds}).
+ */
+export function loopStep<N extends GraphNodeLike, E extends GraphEdgeLike>(
+  program: ScenarioProgram<N, E>,
+  node: N,
+): { edge: E; target: N } | null {
+  if (connectionRule(node.type).out !== "next" || isTerminal(node)) return null;
+  const edge = program.loopEdges.get(node.id)?.[0];
+  return edge ? { edge, target: program.nodesById.get(edge.target)! } : null;
+}
+
+/** The bounds of a loop edge, read as the executor reads them. */
+export interface ReadLoopBounds {
+  times?: number;
+  forSeconds?: number;
+  /** `cases` is an array; each case is checked when the loop runs. */
+  until?: { value: unknown; cases: readonly unknown[] };
+}
+
+const isPlainRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
+/**
+ * `edge.loop` as the executor reads it: the bounds present (none = loop
+ * forever), or `{ problem }` naming what is malformed. Unknown keys are
+ * ignored. A bad `times` / `forSeconds` is not a finite number of at least
+ * 0; `until` must be an object whose `cases` is an array (the cases
+ * themselves are checked as a switch's are, when the loop runs).
+ */
+export function loopBounds(
+  edge: GraphEdgeLike,
+): { bounds: ReadLoopBounds } | { problem: string } {
+  const raw = edge.loop;
+  if (raw === undefined) return { bounds: {} };
+  if (!isPlainRecord(raw)) return { problem: "loop must be an object" };
+  const bounds: ReadLoopBounds = {};
+  for (const key of ["times", "forSeconds"] as const) {
+    const v = raw[key];
+    if (v === undefined) continue;
+    if (typeof v !== "number" || !Number.isFinite(v) || v < 0) {
+      return {
+        problem: `loop.${key} must be a finite number of at least 0, got ${JSON.stringify(v)}`,
+      };
+    }
+    bounds[key] = v;
+  }
+  if (raw.until !== undefined) {
+    const until = raw.until;
+    if (!isPlainRecord(until)) {
+      return { problem: "loop.until must be an object with value and cases" };
+    }
+    if (!Array.isArray(until.cases)) {
+      return { problem: "loop.until: cases must be an array" };
+    }
+    bounds.until = { value: until.value, cases: until.cases };
+  }
+  return { bounds };
+}
+
+/**
+ * The natural loop of a loop edge `source → header` (schema 1.10): the
+ * header plus every node that reaches the source backwards, over the ordinary,
+ * the timeout and the loop edges of the program, without passing through the header.
+ */
+export function loopBody<N extends GraphNodeLike, E extends GraphEdgeLike>(
+  program: ScenarioProgram<N, E>,
+  edge: E,
+): ReadonlySet<string> {
+  const incoming = new Map<string, string[]>();
+  for (const map of [
+    program.outgoing,
+    program.loopEdges,
+    program.timeoutEdges,
+  ]) {
+    for (const edges of map.values()) {
+      for (const e of edges) {
+        const list = incoming.get(e.target);
+        if (list) list.push(e.source);
+        else incoming.set(e.target, [e.source]);
+      }
+    }
+  }
+  const body = new Set<string>([edge.target]);
+  const queue = [edge.source];
+  while (queue.length > 0) {
+    const id = queue.pop()!;
+    if (body.has(id)) continue;
+    body.add(id);
+    queue.push(...(incoming.get(id) ?? []));
+  }
+  return body;
 }
 
 export interface SuccessorOptions {

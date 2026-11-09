@@ -186,6 +186,7 @@ export function useDescribeIssue(
         n,
         title: node ? nodeTitle(node) : "",
         handle: String(issue.data?.handle ?? ""),
+        problem: String(issue.data?.problem ?? ""),
       });
     };
   }, [scenario, tree, t]);

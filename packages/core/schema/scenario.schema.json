@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/shiv3/ocpp-cp-simulator/schema/scenario.schema.json",
-  "title": "ScenarioDefinition (scenario schema v1.9)",
-  "$comment": "Scenario file format v1.9 (parallel and join nodes added in v1.9; edge kind \"timeout\" added in v1.8; $from root \"response\" and $match switch cases added in v1.7; useBehavior params and mode disable added by issue #654; csmsCallTrigger behavior / onBusy, callResponse and useBehavior nodes and the $from payload reference added by issue #566; issue #214; connectionTrigger node and csmsCallTrigger payload condition added by issue #240; evSettings charging curve and electrical fields added by issue #301; ocppCall node added by issue #389; libraryId added by the web console Library). Mirrors packages/core/src/cp/application/scenario/ScenarioTypes.ts. See docs/concepts/scenario-format.md for the field overview and versioning rules. This is a first published contract: it is STRICT on known fields (types, required-ness, closed-vocabulary enums) but PERMISSIVE on unknown keys at every object level (additionalProperties: true) — real editor exports carry xyflow UI fields (width/height/selected/style/...) that this schema deliberately does not reject. Validation against this schema is advisory only in this version: the simulator warns on a mismatch but never refuses to load a file.",
+  "title": "ScenarioDefinition (scenario schema v1.10)",
+  "$comment": "Scenario file format v1.10 (edge kind \"loop\" with loop bounds added in v1.10; parallel and join nodes added in v1.9; edge kind \"timeout\" added in v1.8; $from root \"response\" and $match switch cases added in v1.7; useBehavior params and mode disable added by issue #654; csmsCallTrigger behavior / onBusy, callResponse and useBehavior nodes and the $from payload reference added by issue #566; issue #214; connectionTrigger node and csmsCallTrigger payload condition added by issue #240; evSettings charging curve and electrical fields added by issue #301; ocppCall node added by issue #389; libraryId added by the web console Library). Mirrors packages/core/src/cp/application/scenario/ScenarioTypes.ts. See docs/concepts/scenario-format.md for the field overview and versioning rules. This is a first published contract: it is STRICT on known fields (types, required-ness, closed-vocabulary enums) but PERMISSIVE on unknown keys at every object level (additionalProperties: true) — real editor exports carry xyflow UI fields (width/height/selected/style/...) that this schema deliberately does not reject. Validation against this schema is advisory only in this version: the simulator warns on a mismatch but never refuses to load a file.",
   "type": "object",
   "additionalProperties": true,
   "required": ["id", "name", "targetType", "nodes", "edges"],
@@ -288,10 +288,39 @@
         "type": { "type": "string" },
         "animated": { "type": "boolean" },
         "kind": {
-          "$comment": "v1.8. \"timeout\": followed only when the source trigger wait (remoteStartTrigger, remoteStopTrigger, statusTrigger, reservationTrigger, csmsCallTrigger, connectionTrigger) times out; the first such edge runs instead of failing the run. Ordinary successor selection (Start fan-out, the first edge, switch / choice handles) ignores it. Absent: an ordinary edge.",
-          "enum": ["timeout"]
+          "$comment": "v1.8. \"timeout\": followed only when the source trigger wait (remoteStartTrigger, remoteStopTrigger, statusTrigger, reservationTrigger, csmsCallTrigger, connectionTrigger) times out; the first such edge runs instead of failing the run. Ordinary successor selection (Start fan-out, the first edge, switch / choice handles) ignores it. Absent: an ordinary edge. v1.10. \"loop\": followed out of its source after each round while its `loop` bounds are not satisfied (do-while), only when the source leaves by its next edge; never as an ordinary next step. Absent: an ordinary edge.",
+          "enum": ["timeout", "loop"]
+        },
+        "loop": {
+          "$comment": "v1.10. Bounds of a kind \"loop\" edge; any satisfied bound exits, none present loops forever. times: rounds (0 behaves like 1); forSeconds: seconds of the station clock since the loop was entered, a round that crosses it completes; until: value and cases as switch (JSON constants or { \"$match\": ... }, a missing value matches only an exists:false case). A malformed bound fails the run when the loop's check is reached.",
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "times": { "type": "integer", "minimum": 0 },
+            "forSeconds": { "type": "number", "minimum": 0 },
+            "until": {
+              "type": "object",
+              "required": ["value", "cases"],
+              "properties": {
+                "value": {},
+                "cases": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/switchCase" }
+                }
+              }
+            }
+          }
         }
       }
+    },
+    "switchCase": {
+      "$comment": "A case of a switch (v1.6) or of the until of a loop edge (v1.10): a JSON constant, or since v1.7 a matcher when the case is an object whose only key is \"$match\".",
+      "if": {
+        "type": "object",
+        "required": ["$match"],
+        "maxProperties": 1
+      },
+      "then": { "$ref": "#/$defs/matcher" }
     },
     "matcher": {
       "$comment": "v1.7. A switch case that matches by operators instead of JSON equality: { \"$match\": { \"in\": [\"Blocked\", \"Invalid\"] } }. The operators are ANDed. gt/gte/lt/lte compare numbers numerically, strings lexicographically, and a canonical decimal string as a number; other pairings do not match. equals/in are strict JSON equality. not takes a body of the same operators without another not. An unknown operator or a wrongly typed argument fails the run when the switch runs.",
@@ -888,14 +917,7 @@
                   "value": {},
                   "cases": {
                     "type": "array",
-                    "items": {
-                      "if": {
-                        "type": "object",
-                        "required": ["$match"],
-                        "maxProperties": 1
-                      },
-                      "then": { "$ref": "#/$defs/matcher" }
-                    }
+                    "items": { "$ref": "#/$defs/switchCase" }
                   }
                 }
               }

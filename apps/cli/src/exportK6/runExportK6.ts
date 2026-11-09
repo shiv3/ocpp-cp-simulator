@@ -209,8 +209,9 @@ function validateExportability(scenario: ScenarioJson): string[] {
       );
     }
   }
-  // Schema 1.8: the k6 interpreter walks ordinary edges only and fails on a
-  // timeout, so a timeout edge would be silently taken as a next step.
+  // Schema 1.8 / 1.10: the k6 interpreter walks ordinary edges only and fails on a
+  // timeout; it has no loop bounds either. Either kind would be silently taken
+  // as a next step.
   const rawEdges: unknown[] = Array.isArray(scenario.edges)
     ? scenario.edges
     : [];
@@ -218,6 +219,11 @@ function validateExportability(scenario: ScenarioJson): string[] {
     if (isPlainObject(edge) && edge.kind === "timeout") {
       problems.push(
         `timeout edges (schema 1.8) are not supported by export-k6 (edge ${String(edge.id)} from ${String(edge.source)}): the k6 runtime fails the iteration when a wait times out; remove the edge or run the scenario on the simulator`,
+      );
+    }
+    if (isPlainObject(edge) && edge.kind === "loop") {
+      problems.push(
+        `loop edges (schema 1.10) are not supported by export-k6 (edge ${String(edge.id)} from ${String(edge.source)}): the k6 runtime has no loop bounds (times, forSeconds, until); run the scenario on the simulator`,
       );
     }
   }

@@ -273,5 +273,10 @@
   "scenarios.editor.issue.joinWithoutParallel": "步骤 {{n}}({{title}})是汇合节点,但没有任何并行分支到达它:它只作为普通步骤运行。",
   "scenarios.editor.issue.parallelWithoutJoin": "步骤 {{n}}({{title}})启动的并行分支都不会到达汇合节点:分支直接结束,之后不会运行任何步骤。",
   "scenarios.stepHelp.parallel": "把每条出边作为各自独立的分支同时执行。每个分支有自己的 CALL 和应答;运行状态(state)是共享的。用“汇合”步骤把分支重新合到一起。",
-  "scenarios.stepHelp.join": "并行步骤的各分支在此汇合。“全部”在每个分支都到达或结束后继续;“任一”在第一个分支到达时继续,并取消其余分支。"
+  "scenarios.stepHelp.join": "并行步骤的各分支在此汇合。“全部”在每个分支都到达或结束后继续;“任一”在第一个分支到达时继续,并取消其余分支。",
+  "scenarios.editor.issue.loopEdgeIgnored": "步骤 {{n}}({{title}})有循环边,但该步骤不沿“下一步”边继续(它结束分支、按句柄选边,或是 Start):循环边不会被执行。",
+  "scenarios.editor.issue.extraLoopEdge": "步骤 {{n}}({{title}})有多条循环边:只有第一条生效。",
+  "scenarios.editor.issue.invalidLoop": "步骤 {{n}}({{title}})的循环边上限格式不正确({{problem}}):运行会在到达循环判断时失败。",
+  "scenarios.editor.issue.busyLoop": "步骤 {{n}}({{title}})的循环没有“times”上限,且循环内没有任何等待(延时、电量值、OCPP 调用或触发器等待):它会在时间不前进的情况下空转。",
+  "scenarios.editor.issue.loopWithoutExit": "步骤 {{n}}({{title}})有带上限的循环边,但没有普通的下一步边:达到上限后分支结束。"
 }

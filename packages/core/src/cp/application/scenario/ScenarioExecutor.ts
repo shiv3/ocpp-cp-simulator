@@ -83,6 +83,8 @@ import { systemRngStreams } from "../../shared/rng";
 import type { Rng } from "../../shared/rng";
 import {
   isTerminal,
+  loopBounds,
+  loopStep,
   lowerScenario,
   isJoin,
   joinMode,
@@ -144,6 +146,13 @@ interface Flow {
    * races `scope.ended`.
    */
   scope: BranchScope;
+  /**
+   * The state of the loop edges (schema 1.10) this branch is in, by edge id:
+   * rounds done and when the loop was entered (station clock, epoch ms). Fresh
+   * whenever the branch arrives at a loop's header other than along the loop
+   * edge itself; dropped when the loop exits.
+   */
+  loops: Map<string, { rounds: number; since: number }>;
 }
 
 const newFlow = (scope: BranchScope): Flow => ({
@@ -153,6 +162,7 @@ const newFlow = (scope: BranchScope): Flow => ({
   handle: null,
   timeoutTarget: null,
   scope,
+  loops: new Map(),
 });
 
 const STATE_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -611,6 +621,10 @@ export class ScenarioExecutor {
     // Schema 1.9: the join this branch goes on from after its parallel's
     // branches met there; it runs as a step, not as an arrival.
     let continuingJoin: ScenarioNode | null = null;
+    // When this branch's walk began: the clock of a loop the branch is already
+    // inside (it started or resumed in the body) counts from here.
+    const walkStartedAt = this.clock.now();
+    this.enterNode(currentNode, flow);
 
     while (
       currentNode &&
@@ -649,6 +663,7 @@ export class ScenarioExecutor {
       if (timedOutTo) {
         flow.handle = null;
         currentNode = timedOutTo;
+        this.enterNode(currentNode, flow);
         continue;
       }
 
@@ -672,6 +687,20 @@ export class ScenarioExecutor {
       // (schema 1.6).
       const handle = flow.handle;
       flow.handle = null;
+
+      // Schema 1.10: a loop edge out of this node, after its round. Going
+      // round again keeps the loop's state; exiting drops it and the branch
+      // goes on along the node's ordinary edge, if any.
+      const loop =
+        handle === null ? loopStep(this.program(), currentNode) : null;
+      if (
+        loop &&
+        !this.loopExits(loop.edge, currentNode, flow, walkStartedAt)
+      ) {
+        currentNode = loop.target;
+        continue;
+      }
+
       const step = nextStep(this.program(), currentNode, handle);
       if (step.kind === "noEdgeForHandle") {
         this.callbacks.log?.(
@@ -691,6 +720,7 @@ export class ScenarioExecutor {
       }
 
       currentNode = step.target;
+      this.enterNode(currentNode, flow);
     }
 
     if (flow.scope.cancelled && !this.aborted) {
@@ -814,6 +844,68 @@ export class ScenarioExecutor {
       "info",
     );
     return outcome.join as ScenarioNode;
+  }
+
+  /**
+   * The branch arrives at `node` by anything but a loop edge (an ordinary
+   * edge, or the walk starting there): every loop edge back to `node` begins
+   * afresh, so a nested loop restarts when the outer body enters it again.
+   */
+  private enterNode(node: ScenarioNode, flow: Flow): void {
+    const loops = this.program().loopEdgesInto.get(node.id);
+    if (!loops) return;
+    const since = this.clock.now();
+    for (const edge of loops) flow.loops.set(edge.id, { rounds: 0, since });
+  }
+
+  /**
+   * Schema 1.10: the end-of-round check of a loop edge, right after its
+   * source ran (do-while): count the round, then exit when `times` rounds are
+   * done, `forSeconds` have passed on the station clock since the loop was
+   * entered, or `until` matches one of its cases, as a switch does. Without a
+   * bound the loop never exits. A malformed `loop` fails the run here.
+   */
+  private loopExits(
+    edge: ScenarioEdge,
+    source: ScenarioNode,
+    flow: Flow,
+    walkStartedAt: number,
+  ): boolean {
+    const read = loopBounds(edge);
+    if ("problem" in read) {
+      throw new Error(`loop edge "${edge.id}": ${read.problem}`);
+    }
+    const { times, forSeconds, until } = read.bounds;
+    let state = flow.loops.get(edge.id);
+    if (!state) {
+      state = { rounds: 0, since: walkStartedAt };
+      flow.loops.set(edge.id, state);
+    }
+    state.rounds += 1;
+    let fired: string | null = null;
+    if (times !== undefined && state.rounds >= times) {
+      fired = `times ${times}`;
+    } else if (
+      forSeconds !== undefined &&
+      this.clock.now() - state.since >= forSeconds * 1000
+    ) {
+      fired = `forSeconds ${forSeconds}`;
+    } else if (until) {
+      const picked = this.pickCase(
+        `loop edge "${edge.id}" until`,
+        until.value,
+        until.cases,
+        flow,
+      );
+      if (picked.index >= 0) fired = `until case ${picked.index}`;
+    }
+    if (fired === null) return false;
+    flow.loops.delete(edge.id);
+    this.callbacks.log?.(
+      `Loop "${edge.id}" out of "${source.data?.label || source.id}" exits (${fired}) after ${state.rounds} round${state.rounds === 1 ? "" : "s"}`,
+      "info",
+    );
+    return true;
   }
 
   /**
@@ -2450,35 +2542,58 @@ export class ScenarioExecutor {
 
   /** Schema 1.6 (#654): go on along `case-<n>` of the first equal case, else `default`. */
   private executeSwitch(data: SwitchNodeData, flow: Flow): void {
-    if (!Array.isArray(data.cases)) {
-      throw new Error("switch: cases must be an array");
-    }
-    data.cases.forEach((value, index) => {
-      const bad = jsonProblem(value, `cases[${index}]`);
-      if (bad || isFromReference(value)) {
-        throw new Error(
-          `switch: cases are JSON constants${bad ? ` (${bad})` : ', a "$from" is not allowed'}`,
-        );
-      }
-      const problem = matcherProblem(value);
-      if (problem) {
-        throw new Error(`switch: cases[${index}]: ${problem.message}`);
-      }
-    });
-    const scope = this.fromScope(flow);
-    const value = resolveFromOrMissing(data.value, scope, "switch");
-    const index = data.cases.findIndex((candidate) =>
-      matchCase(value, candidate),
+    const { index, value } = this.pickCase(
+      "switch",
+      data.value,
+      data.cases,
+      flow,
     );
-    if (value === MISSING && index < 0) {
-      // No `exists: false` case: fail as before, with the usual message.
-      resolveFrom(data.value, scope, "switch");
-    }
     flow.handle = index >= 0 ? `case-${index}` : "default";
     this.callbacks.log?.(
       `Switch on ${value === MISSING ? "(missing)" : JSON.stringify(value)} → ${flow.handle}`,
       "info",
     );
+  }
+
+  /**
+   * The case a value picks, for a switch and for the `until` of a loop edge
+   * (schema 1.10): the index of the first case that matches (a JSON constant
+   * by equality, `{ "$match": … }` by its operators), or -1. `valueSpec` is
+   * resolved against this branch (`$from`); a missing value matches only an
+   * `exists: false` case, else the run fails with the usual error. Throws, with
+   * `label` as prefix, on malformed cases. Returns the resolved value too.
+   */
+  private pickCase(
+    label: string,
+    valueSpec: unknown,
+    cases: unknown,
+    flow: Flow,
+  ): { index: number; value: unknown } {
+    if (!Array.isArray(cases)) {
+      throw new Error(`${label}: cases must be an array`);
+    }
+    cases.forEach((value: unknown, index: number) => {
+      const bad = jsonProblem(value, `cases[${index}]`);
+      if (bad || isFromReference(value)) {
+        throw new Error(
+          `${label}: cases are JSON constants${bad ? ` (${bad})` : ', a "$from" is not allowed'}`,
+        );
+      }
+      const problem = matcherProblem(value);
+      if (problem) {
+        throw new Error(`${label}: cases[${index}]: ${problem.message}`);
+      }
+    });
+    const scope = this.fromScope(flow);
+    const value = resolveFromOrMissing(valueSpec, scope, label);
+    const index = cases.findIndex((candidate: unknown) =>
+      matchCase(value, candidate),
+    );
+    if (value === MISSING && index < 0) {
+      // No `exists: false` case: fail as before, with the usual message.
+      resolveFrom(valueSpec, scope, label);
+    }
+    return { index, value };
   }
 
   /** Schema 1.6 (#654): a seeded, weighted draw; go on along `option-<n>`. */

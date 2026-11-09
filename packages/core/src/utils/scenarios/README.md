@@ -68,7 +68,7 @@ The `dataflow-*` templates are not certification cases. They show what a scenari
 | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | dataflow-authorize-branch-16 / dataflow-authorize-branch-201                 | Authorize, then branch on the idTagInfo / idTokenInfo status: Accepted starts a session; Blocked, Invalid, Expired (`$match in`); ConcurrentTx; default. |
 | dataflow-call-error-handling                                                 | DataTransfer probe; branch on `response.kind`, then on the status of a result or the `errorCode` of a CALLERROR (`in`, `endsWith`, `startsWith`).        |
-| dataflow-charge-to-soc                                                       | Loop that meters until `connector.power.soc` is at least 80 (`$match gte`).                                                                              |
+| dataflow-charge-to-soc                                                       | Bounded loop edge (1.10) that meters until `connector.power.soc` is at least 80 (`until` with `$match gte`) or 2 hours pass (`forSeconds`).              |
 | dataflow-remote-start-reauthorize-16 / dataflow-remote-start-reauthorize-201 | Own the CSMS's remote start (`replace`), answer Accepted, Authorize the tag read from the CALL, branch on the answer.                                    |
 
 ## Non-certification templates using newer scenario features

@@ -273,5 +273,10 @@
   "scenarios.editor.issue.joinWithoutParallel": "ステップ {{n}}({{title}})は合流ですが、並列のどの枝からも到達しません。通常のステップとしてだけ実行されます。",
   "scenarios.editor.issue.parallelWithoutJoin": "ステップ {{n}}({{title}})が始める並列の枝はどれも合流に到達しません。枝はそのまま終わり、その後には何も実行されません。",
   "scenarios.stepHelp.parallel": "出ているすべてのエッジを、それぞれ別の分岐として同時に実行します。分岐ごとに CALL とその応答を別々に持ち、実行の状態(state)は共有します。分岐は「合流」ステップで再び合わせます。",
-  "scenarios.stepHelp.join": "「並列」ステップの分岐が合わさる場所です。「すべて」は全分岐が到達または終了したら先へ進み、「いずれか」は最初に到達した時点で進み、他の分岐を中止します。"
+  "scenarios.stepHelp.join": "「並列」ステップの分岐が合わさる場所です。「すべて」は全分岐が到達または終了したら先へ進み、「いずれか」は最初に到達した時点で進み、他の分岐を中止します。",
+  "scenarios.editor.issue.loopEdgeIgnored": "ステップ {{n}}({{title}})にループのエッジがありますが、このステップは次のエッジへ進みません(枝の終端、ハンドルで選ぶステップ、または Start です)。ループのエッジは辿られません。",
+  "scenarios.editor.issue.extraLoopEdge": "ステップ {{n}}({{title}})に複数のループのエッジがあります。最初の1本だけが有効です。",
+  "scenarios.editor.issue.invalidLoop": "ステップ {{n}}({{title}})のループのエッジの上限が不正です({{problem}})。ループの判定に到達した時点で実行が失敗します。",
+  "scenarios.editor.issue.busyLoop": "ステップ {{n}}({{title}})は「times」の上限なしでループし、ループ内に待つステップ(遅延、メーター値、OCPP コール、トリガー待ち)がありません。時間が進まないまま回り続けます。",
+  "scenarios.editor.issue.loopWithoutExit": "ステップ {{n}}({{title}})には上限付きのループのエッジがありますが、通常の次のエッジがありません。上限に達すると枝はそこで終わります。"
 }

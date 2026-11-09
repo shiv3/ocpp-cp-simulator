@@ -291,5 +291,10 @@
   "scenarios.editor.issue.joinWithoutParallel": "L’étape {{n}} ({{title}}) est une jonction, mais aucune branche d’un parallèle ne l’atteint : elle ne s’exécute que comme une étape ordinaire.",
   "scenarios.editor.issue.parallelWithoutJoin": "L’étape {{n}} ({{title}}) lance des branches parallèles qui n’atteignent aucune jonction : elles se terminent simplement et rien ne s’exécute après.",
   "scenarios.stepHelp.parallel": "Exécute chaque arête sortante comme une branche distincte, en même temps. Chaque branche a son propre CALL et sa propre réponse ; l'état de l'exécution est partagé. Réunissez les branches avec une étape Jonction.",
-  "scenarios.stepHelp.join": "Point de rencontre des branches d'une étape Parallèle. « Toutes » continue quand chaque branche est arrivée ou terminée ; « Une » continue dès la première arrivée et annule les autres."
+  "scenarios.stepHelp.join": "Point de rencontre des branches d'une étape Parallèle. « Toutes » continue quand chaque branche est arrivée ou terminée ; « Une » continue dès la première arrivée et annule les autres.",
+  "scenarios.editor.issue.loopEdgeIgnored": "L’étape {{n}} ({{title}}) a une arête de boucle, mais elle ne continue pas par une arête suivante (elle termine sa branche, choisit une arête par poignée, ou est Start) : l’arête de boucle n’est jamais suivie.",
+  "scenarios.editor.issue.extraLoopEdge": "L’étape {{n}} ({{title}}) a plusieurs arêtes de boucle : seule la première compte.",
+  "scenarios.editor.issue.invalidLoop": "L’étape {{n}} ({{title}}) a une arête de boucle aux bornes mal formées ({{problem}}) : l’exécution échoue quand le contrôle de la boucle est atteint.",
+  "scenarios.editor.issue.busyLoop": "L’étape {{n}} ({{title}}) boucle sans borne « times », et rien dans la boucle n’attend (ni délai, ni valeur de compteur, ni appel OCPP, ni attente de déclencheur) : elle tourne sans laisser le temps passer.",
+  "scenarios.editor.issue.loopWithoutExit": "L’étape {{n}} ({{title}}) a une arête de boucle bornée mais aucune arête suivante ordinaire : quand une borne est atteinte, la branche se termine."
 }

@@ -369,6 +369,8 @@ reporting ([#794](https://github.com/shiv3/ocpp-cp-simulator/issues/794)): `sent
 exceptions, unhandled rejections and fatal exits are reported, with the
 credentials the redaction recognises scrubbed (an unlabelled one in an error
 message is not); an unhandled rejection still exits the daemon with code 1.
+A second uncaught exception or unhandled rejection raised while the first
+one is being flushed is printed to stderr but not reported.
 It does not reach the console the daemon serves, whose adapter is fixed when
 the UI is built (`VITE_ERROR_REPORTER`). Details: [Error reporting](../concepts/error-reporting.md).
 

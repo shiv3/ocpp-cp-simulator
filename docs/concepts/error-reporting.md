@@ -106,9 +106,11 @@ adapter is plugged in:
 - **CLI / daemon** (`apps/cli/src/errorReporting.ts`): only while a reporter
   is active, it listens for unhandled rejections and uncaught exceptions,
   captures them (`handled: false`), flushes (up to 2 s), prints the error to
-  stderr and exits with code 1, as the runtime does without a reporter. The
-  error a `Fatal:` exit reports goes through `reportFatalError` (mechanism
-  `fatal`, flushed up to 2 s). Without a reporter no handler is installed.
+  stderr and exits with code 1, as the runtime does without a reporter. A
+  second one raised while the first is being flushed is printed to stderr
+  but not reported: the exit is already on its way. The error a `Fatal:`
+  exit reports goes through `reportFatalError` (mechanism `fatal`, flushed
+  up to 2 s). Without a reporter no handler is installed.
 - **Web console** (`apps/web/src/lib/errorReporting.ts`): it builds the three
   React root error hooks (`onUncaughtError`, `onCaughtError`,
   `onRecoverableError`), which capture with the matching mechanism and the

@@ -1632,8 +1632,10 @@ probe path; it must match the daemon's `--health-path` when that is changed
 
 `VITE_ERROR_REPORTER=sentry` with `VITE_SENTRY_DSN` (and optionally
 `VITE_SENTRY_ENVIRONMENT`), set when the bundle is built, turns on opt-in
-error reporting in the console ([#794](https://github.com/shiv3/ocpp-cp-simulator/issues/794)). Without it the console reports nothing
-and never downloads an adapter chunk; see
+error reporting in the console ([#794](https://github.com/shiv3/ocpp-cp-simulator/issues/794)). Without `VITE_ERROR_REPORTER` the
+console reports nothing and never downloads an adapter chunk; with
+`sentry` but no `VITE_SENTRY_DSN` it downloads the adapter chunk, not the
+Sentry SDK, and reports nothing; see
 [Error reporting](../concepts/error-reporting.md).
 
 ### Prerequisites

@@ -85,6 +85,9 @@ daemon, which runs from the CLI bundle without `.git`. A deployment that builds 
 image must pass the build arg: a runtime `-e APP_COMMIT=…` alone changes the
 daemon but not the UI bundle, which is fixed at build time.
 
+The build needs `GITHUB_TOKEN` set to a token with `read:packages`; see
+[Building locally](#building-locally).
+
 ```sh
 docker build --secret id=github_token,env=GITHUB_TOKEN \
   --build-arg APP_COMMIT=$(git rev-parse HEAD) -t ocpp-cp-sim .

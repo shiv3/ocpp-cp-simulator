@@ -7,6 +7,7 @@ sources:
   - index.html
   - vite.config.ts
 related:
+  - ../concepts/fleet-templates.md
   - web-console-tour.md
   - desktop-app.md
   - daemon.md
@@ -91,8 +92,10 @@ The browser app serves one web console:
   [Scenario editor](#scenario-editor-steps-and-graph)) and a read-only run
   page (`/scenarios/run`, see
   [Scenario runs](#scenario-runs-panel-and-page)), a cross-CP **Run history**
-  (`/scenarios/runs`, #388), a global **Message log** (`/logs`), and
-  **Settings** (`/settings`, where global
+  (`/scenarios/runs`, #388), a global **Message log** (`/logs`),
+  **Fleet templates** (`/fleets`, remote mode: list, view, save, delete and
+  create a fleet from a [fleet template](../concepts/fleet-templates.md#web-console), #445),
+  and **Settings** (`/settings`, where global
   [network simulation](../concepts/network-simulation.md), the
   [**Vehicle profiles**](#settings-page) card and the **Reset all
   simulator data** button live; the Settings cards and the Network Simulation

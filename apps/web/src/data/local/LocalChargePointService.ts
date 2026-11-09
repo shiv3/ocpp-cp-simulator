@@ -13,6 +13,11 @@ import {
   type FirmwareStatus,
   type UploadLogStatus,
 } from "@ocpp-cp-simulator/core/cp/domain/types/FirmwareLogStatus";
+import type {
+  FleetCreateParams,
+  FleetCreateResult,
+  FleetTemplate,
+} from "@ocpp-cp-simulator/contracts/methods";
 import { getDefaultStore } from "jotai";
 import type {
   DataTransferData,
@@ -81,6 +86,7 @@ import type { ConfigRepository } from "@ocpp-cp-simulator/client/interfaces/Conf
 import type { ConnectorSettingsRepository } from "@ocpp-cp-simulator/client/interfaces/ConnectorSettingsRepository";
 import {
   BROWSER_AUTO_TRAFFIC_UNSUPPORTED_MESSAGE,
+  BROWSER_FLEET_TEMPLATES_UNSUPPORTED_MESSAGE,
   BROWSER_LABELS_UNSUPPORTED_MESSAGE,
   BROWSER_SCENARIO_FILE_UNSUPPORTED_MESSAGE,
   BROWSER_TLS_UNSUPPORTED_MESSAGE,
@@ -907,6 +913,35 @@ export class LocalChargePointService implements ChargePointService {
       "browser_labels_unsupported",
       BROWSER_LABELS_UNSUPPORTED_MESSAGE,
     );
+  }
+
+  /** Fleet templates (#445) are stored by the daemon: refuse rather than
+   *  show an empty list that could never be filled. */
+  private fleetTemplatesUnsupported(): never {
+    throw new UnsupportedFeatureError(
+      "browser_fleet_templates_unsupported",
+      BROWSER_FLEET_TEMPLATES_UNSUPPORTED_MESSAGE,
+    );
+  }
+
+  async listFleetTemplates(): Promise<FleetTemplate[]> {
+    return this.fleetTemplatesUnsupported();
+  }
+
+  async getFleetTemplate(_id: string): Promise<FleetTemplate> {
+    return this.fleetTemplatesUnsupported();
+  }
+
+  async saveFleetTemplate(_template: FleetTemplate): Promise<string> {
+    return this.fleetTemplatesUnsupported();
+  }
+
+  async deleteFleetTemplate(_id: string): Promise<void> {
+    return this.fleetTemplatesUnsupported();
+  }
+
+  async createFleet(_params: FleetCreateParams): Promise<FleetCreateResult> {
+    return this.fleetTemplatesUnsupported();
   }
 
   async getAutoTrafficConfig(

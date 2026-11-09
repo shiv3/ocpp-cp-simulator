@@ -15,6 +15,7 @@
   "dependencies": {
     "@ocpp-cp-simulator/contracts": "workspace:*",
     "@ocpp-cp-simulator/k6-runtime": "workspace:*",
-    "@ocpp-cp-simulator/ocpp": "workspace:*"
+    "@ocpp-cp-simulator/ocpp": "workspace:*",
+    "@ocpp-cp-simulator/vehicle": "workspace:*"
   }
 }

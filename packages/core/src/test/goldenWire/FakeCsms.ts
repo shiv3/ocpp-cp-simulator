@@ -191,8 +191,12 @@ export class FakeCsms {
     return this.socket !== null;
   }
 
+  /** Called with every frame as it is recorded (the behavior recorder timestamps them). */
+  onFrame: ((frame: WireFrame) => void) | null = null;
+
   private record(frame: WireFrame): void {
     this.frames.push(frame);
+    this.onFrame?.(frame);
     this.lastFrameAt = Date.now();
     for (const waiter of [...this.waiters]) {
       if (waiter.pred(frame)) {

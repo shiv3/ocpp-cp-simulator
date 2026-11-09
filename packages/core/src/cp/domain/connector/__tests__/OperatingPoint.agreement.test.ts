@@ -486,4 +486,18 @@ describe("the charger cap is one more term of the resolution (#327)", () => {
     connector.status = OCPPStatus.Preparing;
     expect(connector.operatingPoint().offeredW).toBe(0);
   });
+
+  // #846: Power.Offered / Current.Offered go to an EV that is there.
+  it("Connector: an EV-side disconnect offers nothing, a not-ready EV is still offered", () => {
+    const connector = charging({ currentType: "DC", maxChargingPowerKw: 50 });
+    connector.status = OCPPStatus.SuspendedEV;
+
+    connector.markEvReady(false);
+    expect(connector.evConnection).toBe("connected-not-ready");
+    expect(connector.operatingPoint().offeredW).toBe(50_000);
+
+    connector.markEvUnplugged();
+    expect(connector.evConnection).toBe("disconnected");
+    expect(connector.operatingPoint().offeredW).toBe(0);
+  });
 });

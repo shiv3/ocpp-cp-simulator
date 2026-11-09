@@ -1,3 +1,7 @@
+import {
+  vehicleBehaviorConfigProblem,
+  type VehicleBehaviorConfig,
+} from "@ocpp-cp-simulator/vehicle/config";
 import { withNormalizedChargingCurve } from "./ChargingCurve";
 
 /** A point on the piecewise-linear charging curve. */
@@ -35,6 +39,14 @@ export interface EVSettings {
   voltageV?: number;
   /** cos φ, AC only. Absent means 1 (unity). */
   powerFactor?: number;
+  /**
+   * What the vehicle wants and when (#835): a preset id or a policy, with an
+   * optional intent. Absent means the historical behavior: the vehicle asks
+   * for all it can take from the plug-in on. While set, it drives the
+   * connector's EV readiness (`SuspendedEV`) and puts its demand into the
+   * operating point; it never changes a CSMS charging profile.
+   */
+  vehicleBehavior?: VehicleBehaviorConfig;
   /**
    * Credit owed for third-party data in these settings (#458): set when a
    * vehicle profile imported from a catalog is applied, so the attribution
@@ -105,9 +117,20 @@ export class InvalidEvSettingsPatchError extends Error {
   }
 }
 
+/** A `vehicleBehavior` that names no known preset or has a malformed policy
+ *  (#835). A kind of invalid patch, so a control surface answers it like one. */
+export class InvalidVehicleBehaviorError extends InvalidEvSettingsPatchError {
+  constructor(readonly problem: string) {
+    super(["vehicleBehavior"]);
+    this.message = `vehicleBehavior: ${problem}`;
+    this.name = "InvalidVehicleBehaviorError";
+  }
+}
+
 /**
- * Refuses settings or a patch that set a required field to `null`. Checked
- * before anything is written, so a refused write changes nothing.
+ * Refuses settings or a patch that set a required field to `null` or carry a
+ * `vehicleBehavior` that cannot run. Checked before anything is written, so a
+ * refused write changes nothing.
  */
 export function assertRequiredFieldsKept(settings: object): void {
   const values = settings as Record<string, unknown>;
@@ -115,6 +138,11 @@ export function assertRequiredFieldsKept(settings: object): void {
     (field) => values[field] === null,
   );
   if (removed.length > 0) throw new InvalidEvSettingsPatchError(removed);
+  const behavior = values.vehicleBehavior;
+  if (behavior !== undefined && behavior !== null) {
+    const problem = vehicleBehaviorConfigProblem(behavior);
+    if (problem) throw new InvalidVehicleBehaviorError(problem);
+  }
 }
 
 /**

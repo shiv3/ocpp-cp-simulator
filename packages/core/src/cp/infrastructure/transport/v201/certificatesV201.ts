@@ -335,8 +335,13 @@ function answerDeleteCertificate(
 
 /**
  * A02 / A03: the chain is accepted only when it parses, a CSR is pending
- * for its use, and the leaf carries that CSR's public key (A02.FR.06).
- * Anything else is Rejected and raises an
+ * for its use, the leaf carries that CSR's public key and the A02.FR.06
+ * checks pass: every chain member is within its validity period (a leaf not
+ * valid yet is Rejected on 2.0.1 and 2.1 alike), the leaf meets the
+ * Certificate Properties (key size, serial number, O, CN; A00.FR.501-511)
+ * and the chain belongs to the operator hierarchy (signed link by link, the
+ * last member installed as a root or signed by one; see
+ * `signedChainChecks.ts`). Anything else is Rejected and raises an
  * `InvalidChargingStationCertificate` security event once the answer is
  * written (A02.FR.07). An absent `certificateType` means the certificate
  * serves both the CSMS and the 15118 connection; the simulator has no
@@ -344,12 +349,9 @@ function answerDeleteCertificate(
  *
  * The CSR's resend back-off ends on an Accepted chain (#537), through
  * `certificateInstalled` (A02.FR.17 asks about a CertificateSigned "for this
- * CSR"), and on a rejection of a chain whose leaf matches the CSR's key but
- * is not valid (#587, A02.FR.20), through `certificateRejected`. Any other
- * rejection leaves it running. The validity period is checked (A02.FR.06): an
- * expired leaf is Rejected; a leaf not valid yet is Rejected on 2.1 and
- * accepted on 2.0.1, which waits for its `notBefore` (A02.FR.08). The
- * Certificate Properties and the operator hierarchy are not checked.
+ * CSR"), and on a rejection of a chain whose leaf matches the CSR's key
+ * (#587, A02.FR.20), through `certificateRejected`. Any other rejection
+ * leaves it running.
  */
 async function certificateSigned(
   mapping: CertificateWireMapping,
@@ -415,17 +417,18 @@ async function certificateSigned(
         afterResult: () => ctx.certificateSigning?.certificateInstalled(use),
       };
     }
-    reason = {
-      Malformed: "malformed certificate chain",
-      NoPendingCsr: `no pending CSR for ${use}`,
-      PublicKeyMismatch: "the leaf does not match the pending CSR's public key",
-      Expired: "the leaf certificate has expired",
-      NotYetValid: "the leaf certificate is not valid yet",
-    }[outcome.status];
-    // #587 A02.FR.20: an invalid certificate answering this CSR (its key
-    // matched) ends the resends until the CSMS triggers a new signature. A
-    // chain for a superseded CSR, or none pending, leaves them running.
-    if (outcome.status === "Expired" || outcome.status === "NotYetValid") {
+    if (outcome.status === "Malformed") {
+      reason = "malformed certificate chain";
+    } else if (outcome.status === "NoPendingCsr") {
+      reason = `no pending CSR for ${use}`;
+    } else if (outcome.status === "PublicKeyMismatch") {
+      reason = "the leaf does not match the pending CSR's public key";
+    } else {
+      // #587 A02.FR.06/07/20: an invalid certificate answering this CSR (its
+      // key matched) ends the resends until the CSMS triggers a new
+      // signature. A chain for a superseded CSR, or none pending, leaves
+      // them running.
+      reason = outcome.reason;
       ctx.certificateSigning?.certificateRejected(use);
     }
   }

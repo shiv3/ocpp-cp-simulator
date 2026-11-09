@@ -170,6 +170,24 @@ function releaseConnectors(cp: ChargePoint, ctx: BehaviorContext): void {
   ctx.state[HELD] = [];
 }
 
+/**
+ * 2.x L01.FR.33: activating the installed firmware (the reboot) waits until
+ * all transactions have ended, whatever `waitForTransactions` says: that
+ * param only governs when the download / install starts (L01.FR.06). False
+ * when the update was cancelled meanwhile.
+ */
+async function transactionsEndedBeforeReboot(
+  cp: ChargePoint,
+  ctx: BehaviorContext,
+  cancelled: () => boolean,
+): Promise<boolean> {
+  while (hasTransaction(cp)) {
+    await ctx.sleep(POLL_MS);
+    if (cancelled()) return false;
+  }
+  return !cancelled();
+}
+
 const hasTransaction = (cp: ChargePoint): boolean =>
   [...cp.connectors.values()].some((connector) => connector.transaction);
 
@@ -399,7 +417,7 @@ export function firmwareBehavior(cp: ChargePoint): Behavior {
                 }
                 if (ctx.params.reboot === "afterInstalled") {
                   releaseConnectors(cp, ctx);
-                  cp.boot();
+                  cp.boot("FirmwareUpdate");
                 }
               } finally {
                 ctx.state.inFlight = false;
@@ -432,7 +450,7 @@ async function rebootAndWait(
     });
   });
   try {
-    cp.boot();
+    cp.boot("FirmwareUpdate"); // 2.x B01.FR.09
     await ctx.until(accepted, { ms: BOOT_WAIT_MS });
     // The boot gate opens right after the event; let it.
     await ctx.sleep(0);
@@ -560,6 +578,8 @@ async function train2(
     if (ctx.params.reboot === "beforeInstalled") {
       // L01.FR.15, FR.32 a: the new firmware reports Installed after the boot.
       status("InstallRebooting");
+      // L01.FR.33: not while a transaction runs.
+      if (!(await transactionsEndedBeforeReboot(cp, ctx, cancelled))) return;
       releaseConnectors(cp, ctx);
       if (!(await rebootAndWait(cp, ctx)) || cancelled()) return;
       status("Installed");
@@ -571,8 +591,10 @@ async function train2(
     if (ctx.params.reboot === "afterInstalled") {
       await stepPause(ctx);
       if (cancelled()) return;
+      // L01.FR.33: not while a transaction runs.
+      if (!(await transactionsEndedBeforeReboot(cp, ctx, cancelled))) return;
       releaseConnectors(cp, ctx);
-      cp.boot(); // L01.FR.32 b
+      cp.boot("FirmwareUpdate"); // L01.FR.32 b, B01.FR.09
     }
   } finally {
     if (ctx.state.generation === generation) {

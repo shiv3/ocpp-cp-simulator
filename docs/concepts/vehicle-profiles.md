@@ -225,6 +225,12 @@ with everything else — a deliberate decision (`resetOnStateReset: true`): a
 reset means a clean simulator. `cp.delete` never touches them; they belong to
 no charge point.
 
+## Relation to #835
+
+A profile says what the vehicle _can_ do; [vehicle behavior](vehicle-behavior.md)
+says what it _wants_ and when, as `evSettings.vehicleBehavior`. The same profile
+can be combined with any behavior policy, and a profile never requires one.
+
 ## Relation to #311 and #327
 
 #311 asked for a reusable `VehicleProfile` shared by the traffic generator

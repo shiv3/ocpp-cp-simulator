@@ -7,12 +7,12 @@ vi.mock("@socket.io/bun-engine", () => ({
 import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
 import { createRuntimeDeps, errorCodeFrom, runRpc } from "../socketServer";
-import { METHODS, type Params } from "@ocpp-cp-sim/contracts/index";
-import { STR_64K_MAX } from "@ocpp-cp-sim/contracts/limits";
+import { METHODS, type Params } from "@ocpp-cp-simulator/contracts/index";
+import { STR_64K_MAX } from "@ocpp-cp-simulator/contracts/limits";
 import {
   OcppCallNoAnswerError,
   OcppCallRejectedError,
-} from "@ocpp-cp-sim/core/cp/domain/errors/OcppCallErrors";
+} from "@ocpp-cp-simulator/core/cp/domain/errors/OcppCallErrors";
 
 // #383: the zod schema in `METHODS` is the one narrowing step on the daemon
 // path. These pin what that means at the edges: a schema-valid request is

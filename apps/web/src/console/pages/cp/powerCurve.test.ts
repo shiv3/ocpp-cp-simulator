@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { evaluateCurveKwh } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
+import { evaluateCurveKwh } from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
 import {
   curveEnergyKwh,
   curvePointsToPower,

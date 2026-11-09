@@ -3,9 +3,10 @@
 // template's README describes is played by the fake CSMS.
 import { ScenarioExecutor } from "../../cp/application/scenario/ScenarioExecutor";
 import { createScenarioExecutorCallbacks } from "../../cp/application/scenario/ScenarioRuntime";
-import type {
-  ScenarioDefinition,
-  ScenarioEvents,
+import {
+  ScenarioNodeType,
+  type ScenarioDefinition,
+  type ScenarioEvents,
 } from "../../cp/application/scenario/ScenarioTypes";
 import { EventEmitter } from "../../cp/shared/EventEmitter";
 import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
@@ -85,11 +86,27 @@ function callPayload(
         { idTag: "LOCAL-2", idTagInfo: { status: "Accepted" } },
       ],
     },
+    "resilience-temporary-unavailable-recovery:ChangeAvailability#0": {
+      connectorId: 1,
+      type: "Inoperative",
+    },
+    "resilience-temporary-unavailable-recovery:ChangeAvailability#1": {
+      connectorId: 1,
+      type: "Operative",
+    },
     "cert16-tc052-cancel-reservation-rejected:CancelReservation": {
       reservationId: 4242,
     },
     "cert16-tc055-trigger-message-rejected:TriggerMessage": {
       requestedMessage: "Heartbeat",
+    },
+    // The template starts with its hardcoded CERT-RES01, so that is the tag
+    // the CSMS reserves for (a start by another tag is refused, 1.6 §5.13).
+    "cert16-reservation-basic:ReserveNow": {
+      connectorId: 1,
+      expiryDate: FUTURE,
+      idTag: "CERT-RES01",
+      reservationId: 1,
     },
     "cert16-tc056-central-smart-charging-txdefault:SetChargingProfile": {
       connectorId: 1,
@@ -124,6 +141,11 @@ function callPayload(
     GetConfiguration: {},
     ChangeConfiguration: { key: "MeterValueSampleInterval", value: "30" },
     RemoteStartTransaction: { idTag: "CSMS-RS", connectorId: 1 },
+    RequestStartTransaction: {
+      idToken: { idToken: "CSMS-RS", type: "ISO14443" },
+      remoteStartId: 1,
+      evseId: 1,
+    },
     RemoteStopTransaction: { transactionId: rig.transactionId(1) },
     GetLocalListVersion: {},
     SendLocalList: {
@@ -217,35 +239,66 @@ function operatorFor(templateId: string): Operator {
 }
 
 /** Per-template extra CSMS-side or EV-side steps run once the run started. */
-const SIDE_STEPS: Readonly<Record<string, (rig: Rig) => Promise<void>>> = {
-  // These three wait for the connector to reach a status; the EV side
-  // (plug-in, a local start, a fault) is what the operator does by hand.
-  "multi-status-monitor": async (rig) => {
-    await new Promise((r) => setTimeout(r, 400));
-    rig.plugIn();
-    await new Promise((r) => setTimeout(r, 400));
-    await rig.cp.startTransaction("MSM-1", 1);
-    await new Promise((r) => setTimeout(r, 400));
-    rig.cp.updateConnectorStatus(1, OCPPStatus.Faulted);
-    await new Promise((r) => setTimeout(r, 400));
-  },
-  "smart-charging": async (rig) => {
-    await new Promise((r) => setTimeout(r, 400));
-    rig.plugIn();
-    await new Promise((r) => setTimeout(r, 400));
-    await rig.cp.startTransaction("SC-1", 1);
-    await new Promise((r) => setTimeout(r, 700));
-    rig.cp.stopTransaction(1);
-  },
-};
+export const SIDE_STEPS: Readonly<Record<string, (rig: Rig) => Promise<void>>> =
+  {
+    // #444: the operator cuts the connection once the run is waiting for it.
+    "resilience-communication-loss-recovery": async (rig) => {
+      await new Promise((r) => setTimeout(r, 600));
+      rig.csms.dropConnection();
+    },
+    // #455: the power goes once a transaction runs, and comes back 300 ms later.
+    "resilience-power-loss-recovery": async (rig) => {
+      const deadline = Date.now() + 20_000;
+      while (!rig.cp.getConnector(1)?.hasRunningTransaction) {
+        if (Date.now() > deadline)
+          throw new Error("no transaction to interrupt");
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      await new Promise((r) => setTimeout(r, 300));
+      rig.cp.powerLoss();
+      await new Promise((r) => setTimeout(r, 300));
+      rig.cp.restorePower({ transactions: "end" });
+    },
+    // These three wait for the connector to reach a status; the EV side
+    // (plug-in, a local start, a fault) is what the operator does by hand.
+    "multi-status-monitor": async (rig) => {
+      await new Promise((r) => setTimeout(r, 400));
+      rig.plugIn();
+      await new Promise((r) => setTimeout(r, 400));
+      await rig.cp.startTransaction("MSM-1", 1);
+      await new Promise((r) => setTimeout(r, 400));
+      rig.cp.updateConnectorStatus(1, OCPPStatus.Faulted);
+      await new Promise((r) => setTimeout(r, 400));
+    },
+    "smart-charging": async (rig) => {
+      await new Promise((r) => setTimeout(r, 400));
+      rig.plugIn();
+      await new Promise((r) => setTimeout(r, 400));
+      await rig.cp.startTransaction("SC-1", 1);
+      await new Promise((r) => setTimeout(r, 700));
+      rig.cp.stopTransaction(1);
+    },
+  };
 
-async function runTemplate(rig: Rig, templateId: string): Promise<void> {
+export interface RunTemplateOptions {
+  /** Change the instantiated definition before it runs (shorter waits). */
+  readonly edit?: (def: ScenarioDefinition) => void;
+  /** Receives the id of every node the executor runs, in order, repeats included. */
+  readonly visited?: string[];
+}
+
+export async function runTemplate(
+  rig: Rig,
+  templateId: string,
+  opts: RunTemplateOptions = {},
+): Promise<void> {
   const template = scenarioTemplates.find((t) => t.id === templateId);
   if (!template) throw new Error(`unknown template ${templateId}`);
   const cp = rig.cp;
   const connector = cp.getConnector(1);
   if (!connector) throw new Error("connector 1 missing");
   const def: ScenarioDefinition = template.createScenario(cp.id, 1);
+  opts.edit?.(def);
   const callbacks = createScenarioExecutorCallbacks({
     chargePoint: cp,
     connector,
@@ -280,6 +333,7 @@ async function runTemplate(rig: Rig, templateId: string): Promise<void> {
   const seen = new Set<string>();
   events.on("node.execute", (data) => {
     const { nodeId } = data as { nodeId?: string };
+    if (nodeId) opts.visited?.push(nodeId);
     const node = (def.nodes as unknown as NodeLike[]).find(
       (n) => n.id === nodeId,
     );
@@ -320,6 +374,12 @@ async function runTemplate(rig: Rig, templateId: string): Promise<void> {
  * here (and a fixture), never a silent change of what "every template" covers.
  */
 export const PINNED_TEMPLATE_IDS: readonly string[] = [
+  "resilience-communication-loss-recovery",
+  "resilience-connector-fault-recovery",
+  "resilience-ev-disconnect-recovery",
+  "resilience-temporary-unavailable-recovery",
+  "resilience-authorization-rejected",
+  "resilience-power-loss-recovery",
   "cert16-octt-strictness-probe",
   "cert16-reservation-basic",
   "cert16-tc001-cold-boot",
@@ -374,10 +434,124 @@ export const PINNED_TEMPLATE_IDS: readonly string[] = [
   "remote-start-auto-meter",
   "smart-charging",
   "status-triggered-actions",
+  "dataflow-authorize-branch-16",
+  "dataflow-authorize-branch-201",
+  "dataflow-call-error-handling",
+  "dataflow-charge-to-soc",
+  "dataflow-remote-start-reauthorize-16",
+  "dataflow-remote-start-reauthorize-201",
+  "remote-start-timeout-fallback",
+  "parallel-heartbeat-session",
 ];
 
-export const scenarioCases: GoldenCase[] = scenarioTemplates.map((t) => ({
-  name: `16-scenario-${t.id}`,
-  version: "1.6",
-  run: (rig) => runTemplate(rig, t.id),
-}));
+/**
+ * #565, §3.7: a scenario that starts a transaction and stops it 0.3 s later,
+ * while the StartTransaction.req waits out its 1 s retry interval after a
+ * CALLERROR. The StopTransaction.req follows the resend and carries the id
+ * its conf assigns.
+ */
+function stopDuringStartRetry(): ScenarioDefinition {
+  const at = (y: number) => ({ x: 0, y });
+  return {
+    id: "golden-stop-during-start-retry",
+    name: "golden-stop-during-start-retry",
+    targetType: "connector",
+    targetId: 1,
+    nodes: [
+      {
+        id: "start",
+        type: ScenarioNodeType.START,
+        position: at(0),
+        data: { label: "Start" },
+      },
+      {
+        id: "tx-start",
+        type: ScenarioNodeType.TRANSACTION,
+        position: at(100),
+        data: { label: "Transaction Start", action: "start", tagId: "SC-565" },
+      },
+      {
+        id: "pause",
+        type: ScenarioNodeType.DELAY,
+        position: at(200),
+        data: { label: "Delay", delaySeconds: 0.3 },
+      },
+      {
+        id: "tx-stop",
+        type: ScenarioNodeType.TRANSACTION,
+        position: at(300),
+        data: { label: "Transaction Stop", action: "stop" },
+      },
+      {
+        id: "end",
+        type: ScenarioNodeType.END,
+        position: at(400),
+        data: { label: "End" },
+      },
+    ],
+    edges: [
+      { id: "e1", source: "start", target: "tx-start" },
+      { id: "e2", source: "tx-start", target: "pause" },
+      { id: "e3", source: "pause", target: "tx-stop" },
+      { id: "e4", source: "tx-stop", target: "end" },
+    ],
+    createdAt: "2026-11-08T00:00:00.000Z",
+    updatedAt: "2026-11-08T00:00:00.000Z",
+    defaultExecutionMode: "oneshot",
+    enabled: true,
+    trigger: { type: "manual" },
+  };
+}
+
+async function runStopDuringStartRetry(rig: Rig): Promise<void> {
+  rig.cp.configuration.applyChange("TransactionMessageAttempts", "3");
+  rig.cp.configuration.applyChange("TransactionMessageRetryInterval", "1");
+  rig.csms.responders.StartTransaction = (_p, c) =>
+    c.nth < 2
+      ? { error: { code: "InternalError", description: "x" } }
+      : { transactionId: 7, idTagInfo: { status: "Accepted" } };
+  rig.plugIn();
+  await rig.csms.settle();
+  const connector = rig.cp.getConnector(1)!;
+  const events = new EventEmitter<ScenarioEvents>();
+  let finished: (error?: unknown) => void = () => undefined;
+  const done = new Promise<void>((resolve, reject) => {
+    finished = (error) => (error ? reject(error) : resolve());
+  });
+  events.on("execution.completed", () => finished());
+  events.on("execution.error", (info) =>
+    finished(new Error(String(JSON.stringify(info)))),
+  );
+  const callbacks = createScenarioExecutorCallbacks({
+    chargePoint: rig.cp,
+    connector,
+  });
+  const executor = new ScenarioExecutor(
+    stopDuringStartRetry(),
+    callbacks,
+    events,
+  );
+  const running = executor.start();
+  try {
+    await done;
+    await new Promise((r) => setTimeout(r, 2500));
+  } finally {
+    executor.stop();
+    await running.catch(() => undefined);
+  }
+  await rig.csms.settle(400);
+}
+
+export const scenarioCases: GoldenCase[] = [
+  ...scenarioTemplates.map((t): GoldenCase => ({
+    // The `-201` data-flow templates carry 2.0.1 payloads.
+    name: `${t.id.endsWith("-201") ? "201" : "16"}-scenario-${t.id}`,
+    version: t.id.endsWith("-201") ? "2.0.1" : "1.6",
+    run: (rig) => runTemplate(rig, t.id),
+  })),
+  {
+    name: "16-scenario-stop-during-start-retry",
+    version: "1.6",
+    run: runStopDuringStartRetry,
+  },
+];

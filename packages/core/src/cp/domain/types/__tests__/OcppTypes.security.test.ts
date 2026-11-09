@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { actionValidatorV16 } from "@ocpp-cp-sim/ocpp/v16/validators";
-import * as validators from "@ocpp-cp-sim/ocpp/v16/validators";
+import { actionValidatorV16 } from "@ocpp-cp-simulator/ocpp/v16/validators";
+import * as validators from "@ocpp-cp-simulator/ocpp/v16/validators";
 import { OCPPAction } from "../OcppTypes";
 
 const securityActions = [

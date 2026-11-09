@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
 import { ChargerEngine } from "../../cp/application/engine/ChargerEngine";
 import { runBehavior, type BehaviorRun } from "./runBehavior";
 
@@ -76,7 +76,9 @@ describe("replaceBehavior", () => {
     await run.call("Reset", { type: "Soft" });
     run.cp.engine.replaceBehavior(counter("c"));
     await run.call("Reset", { type: "Soft" });
-    expect(run.cp.engine.snapshot().behaviors.c).toEqual({ n: 3 });
+    expect((run.cp.engine as ChargerEngine).snapshot().behaviors.c).toEqual({
+      n: 3,
+    });
   });
 
   test("a running main sees ctx.stopping and the new main starts after it returns", async () => {
@@ -175,14 +177,18 @@ describe("replaceBehavior", () => {
     expect(run.callsOf("StatusNotification").at(-1)!.payload).toMatchObject({
       info: "v1",
     });
-    expect(run.cp.engine.snapshot().behaviors.h).toEqual({ last: "v1" });
+    expect((run.cp.engine as ChargerEngine).snapshot().behaviors.h).toEqual({
+      last: "v1",
+    });
     run.cp.engine.replaceBehavior(versioned("v2"));
     run.cp.updateConnectorStatus(1, "Available" as never);
     await run.settle();
     expect(run.callsOf("StatusNotification").at(-1)!.payload).toMatchObject({
       info: "v2",
     });
-    expect(run.cp.engine.snapshot().behaviors.h).toEqual({ last: "v2" });
+    expect((run.cp.engine as ChargerEngine).snapshot().behaviors.h).toEqual({
+      last: "v2",
+    });
   });
 
   test("replacing with the same code puts nothing on the wire", async () => {

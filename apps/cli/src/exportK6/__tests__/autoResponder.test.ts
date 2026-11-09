@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   createResponderState,
   respondToCall16,
-} from "@ocpp-cp-sim/k6-runtime/autoResponder";
+} from "@ocpp-cp-simulator/k6-runtime/autoResponder";
 
 describe("respondToCall16", () => {
   it("accepts remote start/stop by default", () => {

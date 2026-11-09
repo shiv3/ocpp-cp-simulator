@@ -1,4 +1,4 @@
-import type { SetVariablesRequestV201 } from "@ocpp-cp-sim/ocpp/index";
+import type { SetVariablesRequestV201 } from "@ocpp-cp-simulator/ocpp/index";
 import { describe, expect, it } from "vitest";
 import {
   ConfigurationKeys,
@@ -332,3 +332,82 @@ describe("handleSetVariablesV201 Target attribute (2.1, #538)", () => {
     expect(targets.get("EVSEPower1")).toBe(target);
   });
 });
+
+// #714, B05.FR.07: a MemberList over MeasurandEnumType with a member outside
+// the enum is Rejected (InvalidValue) and the previous list is kept.
+describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
+  "handleSetVariablesV201 measurand lists on %s (#714)",
+  (ocppVersion) => {
+    const lists = [
+      ["SampledDataCtrlr", "TxUpdatedMeasurands", "MeterValuesSampledData"],
+      ["AlignedDataCtrlr", "Measurands", "MeterValuesAlignedData"],
+      // #607: the transaction-end lists are MemberLists over the same enum.
+      ["SampledDataCtrlr", "TxStartedMeasurands", "TxStartedMeasurands"],
+      ["SampledDataCtrlr", "TxEndedMeasurands", "StopTxnSampledData"],
+      ["AlignedDataCtrlr", "TxEndedMeasurands", "StopTxnAlignedData"],
+    ] as const;
+
+    const set = (
+      store: ConfigurationStore,
+      component: string,
+      variable: string,
+      attributeValue: string,
+    ) =>
+      handleSetVariablesV201(
+        {
+          setVariableData: [
+            {
+              attributeValue,
+              component: { name: component },
+              variable: { name: variable },
+            },
+          ],
+        },
+        store,
+        { ocppVersion },
+      ).setVariableResult[0]!;
+
+    it.each(lists)("%s.%s", (component, variable, key) => {
+      const store = new ConfigurationStore(
+        "cp-test",
+        [
+          {
+            key: ConfigurationKeys.Core.MeterValuesSampledData,
+            value: ["Energy.Active.Import.Register"],
+          },
+          { key: ConfigurationKeys.Core.MeterValuesAlignedData, value: [] },
+          { key: ConfigurationKeys.Custom.TxStartedMeasurands, value: [] },
+          { key: ConfigurationKeys.Core.StopTxnSampledData, value: [] },
+          { key: ConfigurationKeys.Core.StopTxnAlignedData, value: [] },
+        ],
+        null,
+      );
+      for (const bad of [
+        "Energy.Active.Import.Register,Temperature,Foo",
+        "Temperature",
+        "RPM",
+      ]) {
+        const before = store.getArray(key);
+        const result = set(store, component, variable, bad);
+        expect(result.attributeStatus).toBe("Rejected");
+        expect(result.attributeStatusInfo?.reasonCode).toBe("InvalidValue");
+        expect(store.getArray(key)).toEqual(before);
+      }
+      const ok = set(
+        store,
+        component,
+        variable,
+        "Energy.Active.Import.Register,Voltage,Frequency",
+      );
+      expect(ok.attributeStatus).toBe("Accepted");
+      expect(store.getArray(key)).toEqual([
+        "Energy.Active.Import.Register",
+        "Voltage",
+        "Frequency",
+      ]);
+      expect(set(store, component, variable, "").attributeStatus).toBe(
+        "Accepted",
+      );
+    });
+  },
+);

@@ -3,7 +3,8 @@
 // CSMS of the golden wire test, with behaviors loaded. Runs under `bun test`
 // only (the fake CSMS uses Bun.serve).
 import { createHash } from "node:crypto";
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
+import type { ChargerEngine } from "../../cp/application/engine/ChargerEngine";
 import type { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
 import { drainMicrotasks, VirtualClock } from "../../cp/shared/clock";
 import type {
@@ -86,9 +87,6 @@ export async function runBehavior(
     noConnect: true,
   });
   const { cp, csms } = rig;
-  await rig.connectAndBoot();
-  const origin = csms.mark();
-  for (const behavior of options.behaviors ?? []) cp.loadBehavior(behavior);
   // A real hop first: with no traffic in flight the fake CSMS reports quiet at
   // once, and the work that follows a virtual timer (scenario nodes, behavior
   // continuations) still needs its turn.
@@ -106,9 +104,17 @@ export async function runBehavior(
   // the test here; the daemon only warns and keeps the last storable value.
   const settle = async (): Promise<void> => {
     await settleOnce();
-    cp.engine.assertStorableState();
+    (cp.engine as ChargerEngine).assertStorableState();
   };
+  // A failed run returns no `dispose()`, so a boot, a refused behavior or a
+  // first settle that throws tears the rig down here: otherwise the station
+  // stays connected and the memory transport's WebSocket patch outlives the
+  // test file (#803).
+  let origin: number;
   try {
+    await rig.connectAndBoot();
+    origin = csms.mark();
+    for (const behavior of options.behaviors ?? []) cp.loadBehavior(behavior);
     await settle();
   } catch (error) {
     await rig.dispose();

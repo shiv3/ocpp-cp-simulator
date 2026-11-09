@@ -20,12 +20,12 @@ import {
   type EVSettings,
   EV_PRESETS,
   defaultEVSettings,
-} from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
+} from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
 import {
   DEFAULT_VOLTAGE_V,
   MIN_UI_POWER_FACTOR,
   withNormalizedChargingCurve,
-} from "@ocpp-cp-sim/core/cp/domain/connector/ChargingCurve";
+} from "@ocpp-cp-simulator/core/cp/domain/connector/ChargingCurve";
 
 /**
  * The electrical values the Default EV Settings controls are showing, filled

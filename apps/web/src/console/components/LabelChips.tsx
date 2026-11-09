@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next";
 import React from "react";
 
 import { cn } from "@/lib/utils";
-import type { Labels } from "@ocpp-cp-sim/contracts/labels";
+import type { Labels } from "@ocpp-cp-simulator/contracts/labels";
 
 export interface LabelChipsProps {
   labels?: Labels;

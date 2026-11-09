@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { ScenarioExecutor } from "../ScenarioExecutor";
 import { createScenarioExecutorCallbacks } from "../ScenarioRuntime";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../../infrastructure/charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import type { ScenarioDefinition } from "../ScenarioTypes";
 import { ScenarioNodeType } from "../ScenarioTypes";
@@ -31,7 +32,7 @@ function newChargePoint(
   id: string,
   version: "OCPP-1.6J" | "OCPP-2.0.1" = "OCPP-1.6J",
 ): ChargePoint {
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     id,
     DefaultBootNotification,
     1,

@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ScenarioManager } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioManager";
-import type { ScenarioDefinition } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import type { ChargePoint } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
-import type { EVSettings } from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
-import type { AutoMeterValueConfig } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
-import { OcppCallNoAnswerError } from "@ocpp-cp-sim/core/cp/domain/errors/OcppCallErrors";
-import { DefaultBootNotification } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import type { ScenarioManager } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioManager";
+import type { ScenarioDefinition } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import type { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
+import type { EVSettings } from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
+import type { AutoMeterValueConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
+import { OcppCallNoAnswerError } from "@ocpp-cp-simulator/core/cp/domain/errors/OcppCallErrors";
+import { DefaultBootNotification } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import { LocalChargePointService } from "./LocalChargePointService";
 import type { LocalChargePointDefinition } from "./LocalChargePointService";
 
@@ -265,7 +265,7 @@ describe("LocalChargePointService A1.1d port methods", () => {
       executeScenario: vi.fn().mockResolvedValue(undefined),
       destroy: vi.fn(),
     } as unknown as ScenarioManager;
-    connector?.setScenarioManager(manager);
+    service.getScenarioRuntime("CP-PORT")!.setScenarioManager(1, manager);
 
     const result = await service.runScenarioTemplate(
       "CP-PORT",
@@ -291,7 +291,7 @@ describe("LocalChargePointService A1.1d port methods", () => {
       continueWait: vi.fn(),
       destroy: vi.fn(),
     } as unknown as ScenarioManager;
-    setup.chargePoint.getConnector(1)?.setScenarioManager(manager);
+    service.getScenarioRuntime("CP-PORT")!.setScenarioManager(1, manager);
 
     await service.extendScenarioWait("CP-PORT", 1, "s1", 30);
     await service.retryScenarioWait("CP-PORT", 1, "s1");

@@ -1,10 +1,10 @@
 // Runs under `bun test`: the repository is exercised on the `bun:sqlite` built-in.
 import { afterEach, describe, expect, it } from "bun:test";
 
-import { BunSqliteDatabase } from "../../persistence/BunSqliteDatabase";
+import { BunSqliteDatabase } from "../../../infrastructure/persistence/BunSqliteDatabase";
 import { VariableMonitorRepository } from "../VariableMonitorRepository";
 import type { VariableMonitor } from "../VariableMonitor";
-import { ChargePoint } from "../../charge-point/ChargePoint";
+import { createChargePoint } from "../../../infrastructure/charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../types/OcppTypes";
 
 /** #457: the `variable_monitors` table behind N07.FR.13 / FR.14. */
@@ -150,7 +150,7 @@ describe("VariableMonitorRepository", () => {
 describe("ChargePoint variable-monitor persistence", () => {
   it("stores the triggered flag of a monitor installed beyond its threshold", () => {
     const db = openDb();
-    const cp = new ChargePoint(
+    const cp = createChargePoint(
       "CP-PERSIST",
       DefaultBootNotification,
       1,

@@ -1,4 +1,4 @@
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 
 export type StatusPillStatus = OCPPStatus | "Connected" | "Disconnected";
 

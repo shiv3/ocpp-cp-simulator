@@ -6,10 +6,10 @@ import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { ChargePointEvents } from "../../../domain/charge-point/ChargePointEvents";
 import type { Transaction } from "../../../domain/connector/Transaction";
 import { OCPPMessageType } from "../../../domain/types/OcppTypes";
-import { strictValidationErrors } from "@ocpp-cp-sim/ocpp/validate";
-import { v201Schemas } from "@ocpp-cp-sim/ocpp/v201/schemas";
-import { v21Schemas } from "@ocpp-cp-sim/ocpp/v21/schemas";
-import type { TransactionEventRequestV201 } from "@ocpp-cp-sim/ocpp/index";
+import { strictValidationErrors } from "@ocpp-cp-simulator/ocpp/validate";
+import { v201Schemas } from "@ocpp-cp-simulator/ocpp/v201/schemas";
+import { v21Schemas } from "@ocpp-cp-simulator/ocpp/v21/schemas";
+import type { TransactionEventRequestV201 } from "@ocpp-cp-simulator/ocpp/index";
 
 /**
  * #529, OCPP 2.0.1 / 2.1 E13 (2.0.1 Table 120 / 2.1 E13 use case,
@@ -144,8 +144,12 @@ function setup(
       transactionMessageAttempts: vi.fn(() => config.attempts ?? 3),
       transactionMessageRetryInterval: vi.fn(() => config.interval ?? 60),
       messageTimeout: vi.fn(() => config.timeout ?? 30),
+      offlineQueueMaxEvents: vi.fn(() => 1000),
       stopTransactionOnInvalidId: vi.fn(() => true),
       meterValuesSampledData: vi.fn(() => []),
+      stopTxnSampledData: vi.fn(() => []),
+      stopTxnAlignedData: vi.fn(() => []),
+      txStartedMeasurands: vi.fn(() => []),
     },
   };
   const handler = new OCPPMessageHandlerV201(
@@ -376,6 +380,23 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       )._pendingRequests;
       expect(pending.has(second.messageId)).toBe(false);
       expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("releases the hold when the resend is dropped and the earlier transmission has timed out (#565)", () => {
+      const { socket, start, handler } = setup(version);
+      const eventTypes = () =>
+        socket
+          .transactionEvents()
+          .map((c) => (c.payload as TransactionEventRequestV201).eventType);
+      start();
+      // Attempt 1 times out; the resend finds the network-sim queue full.
+      vi.advanceTimersByTime(30_000);
+      socket.outcomes.push("queue_overflow");
+      vi.advanceTimersByTime(60_000);
+      expect(eventTypes()).toEqual(["Started", "Started"]);
+
+      handler.sendTransactionUpdate(1, { triggerReason: "MeterValuePeriodic" });
+      expect(eventTypes()).toEqual(["Started", "Started", "Updated"]);
     });
 
     it("ignores a CALLRESULT arriving after the message was discarded", () => {

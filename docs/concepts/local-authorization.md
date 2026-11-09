@@ -106,6 +106,10 @@ where it used to start. And identifiers are case insensitive: SendLocalList
 entries that differ only by case become one entry, and a differential
 update removing `abc` removes `ABC`.
 
+## LocalListConflict (OCPP 1.6)
+
+1.6 §3.5.2: when the validity the CSMS reports contradicts the Local Authorization List, the charge point informs the CSMS with a `StatusNotification` for connector `0` and `errorCode` `LocalListConflict` (#744). Every CSMS verdict that reaches `recordAuthorizationResult` is compared with the list entry of the same `idTag`: the `idTagInfo.status` of `Authorize.conf`, `StartTransaction.conf` and the optional one of `StopTransaction.conf`. The notification carries the current connector-0 status. No notification is sent when the two statuses agree, when the `idTag` is not in the list, or while `LocalAuthListEnabled` is false. An `Accepted` entry past its `expiryDate` counts as `Expired` (§3.5.4). The list stays the authority: the verdict is not cached for a listed identifier (§3.5.3) and the list changes only with the next `SendLocalList`. 2.x has no such message, so nothing is sent there.
+
 ## Authorization Cache
 
 One entry per identifier: the status as received (valid and NOT-valid alike,
@@ -165,8 +169,14 @@ Get/SetVariables and GetBaseReport reach the keys through the [device model regi
 | `AuthCtrlr.LocalPreAuthorize`            | `LocalPreAuthorize`          |
 | `AuthCtrlr.LocalAuthorizeOffline`        | `LocalAuthorizeOffline`      |
 | `AuthCtrlr.OfflineTxForUnknownIdEnabled` | `AllowOfflineTxForUnknownId` |
+| `AuthCtrlr.MasterPassGroupId`            | `MasterPassGroupId`          |
 | `LocalAuthListCtrlr.Enabled`             | `LocalAuthListEnabled`       |
 
+- `GetLocalListVersion` answers `versionNumber: 0` ("no Local Authorization
+  List") when `LocalAuthListCtrlr.Enabled` is not true (D02.FR.03) and when
+  the CSMS has sent no update yet (D02.FR.02), otherwise the version of the
+  last `SendLocalList` (D02.FR.01) (#695). OCPP 1.6 answers `-1` for a
+  disabled list (§5.10).
 - `AuthCacheLifeTime` exists on 2.x charge points only, so a 1.6
   GetConfiguration lists the same keys as before. It counts seconds from an
   entry's last CSMS update (see [Limits](#limits)); `0`, the default, means no lifetime, and
@@ -192,6 +202,10 @@ Get/SetVariables and GetBaseReport reach the keys through the [device model regi
 **Behaviour change in #452 (2.x wire).** Under the default configuration
 (cache disabled), ClearCache now answers `Rejected` instead of `Accepted`.
 GetBaseReport lists the five new variables.
+
+### CustomerInformation
+
+A 2.x `CustomerInformation` (N09 / N10, #602) names a customer by `idToken` and / or `customerIdentifier` (both matched like any identifier, case insensitively). Without `idToken`, `customerIdentifier` and `customerCertificate` the answer is `Invalid` (reason code `MissingParam`); with `report` and `clear` both false it is `Rejected` (`NoAction`); otherwise `Accepted`. Once the answer settled, `report` sends the Authorization Cache entry, the Local Authorization List entry and the running transactions of the customer in `NotifyCustomerInformation` (`seqNo` from 0, `tbc` on every part but the last, parts of at most 512 characters, the report taken before a `clear`), and `clear` removes the matching Authorization Cache entries, whatever `AuthorizationCacheEnabled` says. A `clear` alone sends no `NotifyCustomerInformation`. The Local Authorization List belongs to the CSMS and is never cleared, and a `customerCertificate` alone matches nothing: the simulator keeps no per-certificate customer data.
 
 ## Control-plane seam
 
@@ -220,8 +234,9 @@ with ISO `expiresAt`, `insertedAt` and `updatedAt`.
 
 - No `StatusNotification` with `LocalListConflict` (§3.5.2) is sent when a
   CSMS answer contradicts the Local Authorization List.
-- No Master Pass group (`AuthCtrlr.MasterPassGroupId`, C12.FR.09) and no
-  `AuthCacheCtrlr.DisablePostAuthorize`.
+- A Master Pass group (`AuthCtrlr.MasterPassGroupId`, C12.FR.09) only
+  refuses a `RequestStartTransaction` whose `groupIdToken` is that group (C16.FR.03, #598); the local stop
+  path does not use it. There is no `AuthCacheCtrlr.DisablePostAuthorize`.
 - `AuthCacheCtrlr.LifeTime` runs from the entry's last update by the CSMS,
   as 2.1 C10.FR.10 has it ("since idTokenInfo was last updated"). 2.0.1
   has no such requirement: its §2.4.3 / C10.FR.08 count the lifetime

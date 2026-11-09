@@ -7,7 +7,7 @@ import {
   startTestServer,
   type TestServer,
 } from "./socketHarness";
-import { startMockCsms } from "@ocpp-cp-sim/core/cp/infrastructure/transport/__tests__/mockCsms";
+import { startMockCsms } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/__tests__/mockCsms";
 
 /**
  * #395: the daemon's Socket.IO control plane carries the same

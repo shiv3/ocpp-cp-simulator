@@ -2,6 +2,8 @@ import path from "path";
 import { readFileSync } from "fs";
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react-swc";
+import license from "rollup-plugin-license";
+import { renderNotices } from "./scripts/licenseNotices";
 
 // Surface the package version to the app (footer link, issue #93). Stays
 // "0.0.0" in dev and is stamped by the release tooling; unstamped, the label
@@ -19,7 +21,31 @@ const appCommit = process.env.APP_COMMIT ?? "";
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    // MIT / ISC ask that the copyright and permission notice travel with every
+    // copy that carries the code, and the bundle inlines React, Lucide and the
+    // rest (#857). The notices file sits in dist/, so the npm tarball (`files`),
+    // the Docker image (COPY dist) and the Tauri app (frontendDist) all ship it.
+    license({
+      thirdParty: {
+        output: {
+          file: path.resolve(__dirname, "dist/THIRD-PARTY-LICENSES.txt"),
+          template: (dependencies) =>
+            renderNotices(
+              [...dependencies].map((d) => ({
+                name: d.name ?? "",
+                version: d.version ?? "",
+                license: d.license,
+                licenseText: d.licenseText,
+                repository: d.repository,
+                author: d.author?.text(),
+              })),
+            ),
+        },
+      },
+    }),
+  ],
   // Absolute base so the SPA's deep nested routes (e.g. /cp/:id,
   // /scenarios/edit) resolve their /assets/* references from the server root
   // on a hard load / refresh / shared link. A relative "./" base resolves
@@ -53,7 +79,13 @@ export default defineConfig({
     // bun:sqlite is a runtime built-in that vite can't resolve. Tests
     // ending in `.bun.test.ts` run under `bun test` instead (see the
     // `test:bun` npm script); skip them here.
-    exclude: ["**/node_modules/**", "**/dist/**", "**/*.bun.test.ts"],
+    exclude: [
+      "**/node_modules/**",
+      "**/dist/**",
+      "**/*.bun.test.ts",
+      // standalone Bun reproductions (#833), run by hand with `bun test`
+      "repro/**",
+    ],
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov"],

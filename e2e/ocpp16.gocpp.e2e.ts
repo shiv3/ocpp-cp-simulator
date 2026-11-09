@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { ChargePoint } from "../packages/core/src/cp/domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../packages/core/src/cp/domain/charge-point/ChargePoint";
+import { createChargePoint } from "../packages/core/src/cp/infrastructure/charge-point/createChargePoint";
 import {
   DefaultBootNotification,
   OCPPStatus,
@@ -27,7 +28,7 @@ afterAll(async () => {
 });
 
 function makeChargePoint(cpId: string): ChargePoint {
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     cpId,
     DefaultBootNotification,
     1,
@@ -434,6 +435,37 @@ test(
       const secondBoot = await waitForBootReady(cp, cpId, sinceSeq);
 
       expect(secondBoot.seq).toBeGreaterThan(sinceSeq);
+      expect(cp.getConnector(1)?.status).toBe(OCPPStatus.Available);
+    } finally {
+      await cp.disconnect();
+    }
+  },
+  TEST_TIMEOUT_MS,
+);
+
+test(
+  "enforce: a Reset with an invalid type is answered with a PropertyConstraintViolation CALLERROR (#593)",
+  async () => {
+    const cpId = "cp16-inbound-validation";
+    const cp = makeChargePoint(cpId);
+    cp.setInboundValidation("enforce");
+
+    try {
+      await connectBootReady(cp, cpId);
+      const response = await csms.command({
+        cpId,
+        action: "Reset",
+        type: "Warm",
+      });
+
+      // The CSMS client reports the CALLERROR as a failed command whose error
+      // carries the OCPP-J 1.6 code; the station did not reset.
+      expect(response.ok).toBe(false);
+      // Only the command error carries the CALLERROR code; a match anywhere
+      // else in the response would not prove the station sent it.
+      expect(typeof response.error).toBe("string");
+      expect(response.error).toContain("PropertyConstraintViolation");
+      expect(response.result).toBeUndefined();
       expect(cp.getConnector(1)?.status).toBe(OCPPStatus.Available);
     } finally {
       await cp.disconnect();

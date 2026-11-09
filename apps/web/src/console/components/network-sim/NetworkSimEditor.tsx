@@ -6,7 +6,7 @@ import {
   type NetworkSimLayerConfig,
   type NetworkSimRule,
   NETWORK_SIM_LIMITS,
-} from "@ocpp-cp-sim/core/cp/infrastructure/transport/network-sim/config";
+} from "@ocpp-cp-simulator/core/cp/infrastructure/transport/network-sim/config";
 import {
   type RuleFormEntry,
   type LayerFormState,

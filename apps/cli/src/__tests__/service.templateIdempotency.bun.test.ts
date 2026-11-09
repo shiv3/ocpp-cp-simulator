@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test";
 
 import { CLIChargePointService } from "../service";
-import { BunSqliteDatabase } from "@ocpp-cp-sim/core/cp/domain/persistence/BunSqliteDatabase";
-import type { Database } from "@ocpp-cp-sim/core/cp/domain/persistence/Database";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/BunSqliteDatabase";
+import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
 import { testCpInit } from "./testCpInit";
 
 /**

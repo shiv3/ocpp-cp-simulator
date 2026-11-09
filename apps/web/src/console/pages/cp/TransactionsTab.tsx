@@ -4,7 +4,7 @@ import React from "react";
 import { cn } from "@/lib/utils";
 import type { MessageKey } from "@/i18n";
 import { formatEnergyKwh, formatSessionDuration } from "@/lib/connectorFormat";
-import type { ChargingSessionOutcome } from "@ocpp-cp-sim/core/cp/domain/session/ChargingSession";
+import type { ChargingSessionOutcome } from "@ocpp-cp-simulator/core/cp/domain/session/ChargingSession";
 
 import EmptyState from "../../components/EmptyState";
 import { useChargingSessions } from "../../lib/useChargingSessions";

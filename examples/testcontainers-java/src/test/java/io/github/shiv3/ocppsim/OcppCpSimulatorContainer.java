@@ -15,7 +15,7 @@ import java.time.Duration;
  * port with no authentication. See {@code docs/server.md} and {@code Dockerfile}.
  *
  * <p>Build the image first from the repository root:
- * <pre>{@code docker build -t ocpp-cp-simulator:local .}</pre>
+ * <pre>{@code docker build --secret id=github_token,env=GITHUB_TOKEN -t ocpp-cp-simulator:local .}</pre>
  * or point {@code OCPP_SIM_IMAGE} at a published tag.
  */
 public class OcppCpSimulatorContainer extends GenericContainer<OcppCpSimulatorContainer> {

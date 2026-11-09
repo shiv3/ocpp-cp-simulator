@@ -1,4 +1,4 @@
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
 
 // Everything the k6 host does provide from stage E: it must export.
 const behavior: Behavior = {

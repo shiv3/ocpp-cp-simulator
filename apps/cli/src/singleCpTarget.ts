@@ -1,65 +1,67 @@
+import type { StartTransactionOutcome } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
 import * as fs from "fs";
 import type {
   DataTransferData,
   DataTransferResult,
-} from "@ocpp-cp-sim/core/cp/domain/types/DataTransfer";
+} from "@ocpp-cp-simulator/core/cp/domain/types/DataTransfer";
 import type {
   OcppCallOutcome,
   OcppCallRequest,
   RawFrameOutcome,
   RawFrameRequest,
-} from "@ocpp-cp-sim/core/cp/domain/types/OcppCall";
+} from "@ocpp-cp-simulator/core/cp/domain/types/OcppCall";
 import type {
   Get15118EVCertificateRequest,
   Get15118EVCertificateResult,
-} from "@ocpp-cp-sim/core/cp/domain/security/get15118EVCertificate";
+} from "@ocpp-cp-simulator/core/cp/domain/security/get15118EVCertificate";
 import type {
   DiagnosticsStatus,
   FirmwareStatus,
   UploadLogStatus,
-} from "@ocpp-cp-sim/core/cp/domain/types/FirmwareLogStatus";
+} from "@ocpp-cp-simulator/core/cp/domain/types/FirmwareLogStatus";
 
 import type {
   AuthorizationCacheSeedEntry,
   AuthorizationCacheView,
-} from "@ocpp-cp-sim/core/cp/domain/auth/AuthorizationCacheSeed";
+} from "@ocpp-cp-simulator/core/cp/domain/auth/AuthorizationCacheSeed";
 import type { CLIChargePointService } from "./service";
 import {
   defaultAutoTrafficConfig,
   type AutoTrafficConfig,
-} from "@ocpp-cp-sim/core/cp/domain/connector/AutoTraffic";
+} from "@ocpp-cp-simulator/core/cp/domain/connector/AutoTraffic";
 import type {
   ChargePointService,
   ChargePointSnapshot,
   ScenarioTemplateInfo,
-} from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+} from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 import type { ChargePointStatus } from "./types";
 import type {
   EVSettings,
   EVSettingsPatch,
-} from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
-import type { AutoMeterValueConfig } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
-import type { ActiveChargingProfile } from "@ocpp-cp-sim/core/cp/domain/connector/Connector";
+} from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
+import type { AutoMeterValueConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
+import type { ActiveChargingProfile } from "@ocpp-cp-simulator/core/cp/domain/connector/Connector";
 import type {
   ScenarioDefinition,
   ScenarioExecutionContext,
   ScenarioMode,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import type { ScenarioRunResult } from "@ocpp-cp-sim/core/cp/application/verification/ScenarioAssertions";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import type { ScenarioRunResult } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioAssertions";
 import type {
   HistoryOptions,
   StateHistoryEntry,
-} from "@ocpp-cp-sim/core/cp/application/services/types/StateSnapshot";
+} from "@ocpp-cp-simulator/core/cp/domain/services/StateSnapshot";
 import type {
   OCPPStatus,
   StatusNotificationOptions,
-} from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+} from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import type {
   MeterReadingContext,
   StartTransactionCommandOptions,
+  IdTokenTypeName,
   StopTransactionCommandOptions,
   TransactionUpdateOptions,
-} from "@ocpp-cp-sim/core/cp/domain/connector/Transaction";
+} from "@ocpp-cp-simulator/core/cp/domain/connector/Transaction";
 
 export interface FacadeSingleCpTarget {
   readonly chargePointService: ChargePointService;
@@ -86,7 +88,7 @@ export interface SingleCpCommandOps {
     connectorId: number,
     tagId: string,
     options?: StartTransactionCommandOptions,
-  ): Promise<void>;
+  ): Promise<StartTransactionOutcome | void>;
   setAutoTrafficConfig(
     connectorId: number,
     config: AutoTrafficConfig,
@@ -102,6 +104,10 @@ export interface SingleCpCommandOps {
   ): Promise<void>;
   /** #488: an EV-side disconnect on `connectorId`. */
   evDisconnected(connectorId: number): Promise<void>;
+  /** #453: a cable was plugged into the EV side of `connectorId`. */
+  evPlugIn(connectorId: number): Promise<void>;
+  /** #453: the EV asks for energy (`true`) or stops asking (`false`). */
+  evSetReady(connectorId: number, ready: boolean): Promise<void>;
   setMeterValue(connectorId: number, value: number): Promise<void>;
   sendMeterValue(
     connectorId: number,
@@ -110,7 +116,7 @@ export interface SingleCpCommandOps {
   sendHeartbeat(): Promise<void>;
   startHeartbeat(intervalSeconds: number): Promise<void>;
   stopHeartbeat(): Promise<void>;
-  authorize(tagId: string): Promise<void>;
+  authorize(tagId: string, idTokenType?: IdTokenTypeName): Promise<void>;
   sendDataTransfer(
     vendorId: string,
     messageId?: string,
@@ -277,7 +283,7 @@ function legacyCommandOps(service: CLIChargePointService): SingleCpCommandOps {
     },
     getStatus: async () => service.getStatus(),
     startTransaction: async (connectorId, tagId, options) => {
-      service.startTransaction(connectorId, tagId, options);
+      return service.startTransaction(connectorId, tagId, options);
     },
     setAutoTrafficConfig: async (connectorId, config) => {
       service.setAutoTrafficConfig(connectorId, config);
@@ -292,6 +298,12 @@ function legacyCommandOps(service: CLIChargePointService): SingleCpCommandOps {
     },
     evDisconnected: async (connectorId) => {
       service.evDisconnected(connectorId);
+    },
+    evPlugIn: async (connectorId) => {
+      service.evPlugIn(connectorId);
+    },
+    evSetReady: async (connectorId, ready) => {
+      service.evSetReady(connectorId, ready);
     },
     setMeterValue: async (connectorId, value) => {
       service.setMeterValue(connectorId, value);
@@ -308,8 +320,8 @@ function legacyCommandOps(service: CLIChargePointService): SingleCpCommandOps {
     stopHeartbeat: async () => {
       service.stopHeartbeat();
     },
-    authorize: async (tagId) => {
-      service.authorize(tagId);
+    authorize: async (tagId, idTokenType) => {
+      service.authorize(tagId, idTokenType);
     },
     sendDataTransfer: (vendorId, messageId, data) =>
       service.sendDataTransfer(vendorId, messageId, data),
@@ -459,6 +471,9 @@ function facadeCommandOps(target: FacadeSingleCpTarget): SingleCpCommandOps {
     sendTransactionUpdate: (connectorId, options) =>
       service.sendTransactionUpdate(cpId, connectorId, options),
     evDisconnected: (connectorId) => service.evDisconnected(cpId, connectorId),
+    evPlugIn: (connectorId) => service.evPlugIn(cpId, connectorId),
+    evSetReady: (connectorId, ready) =>
+      service.evSetReady(cpId, connectorId, ready),
     setMeterValue: (connectorId, value) =>
       service.setMeterValue(cpId, connectorId, value),
     sendMeterValue: (connectorId, context) =>
@@ -467,7 +482,8 @@ function facadeCommandOps(target: FacadeSingleCpTarget): SingleCpCommandOps {
     startHeartbeat: (intervalSeconds) =>
       service.startHeartbeat(cpId, intervalSeconds),
     stopHeartbeat: () => service.stopHeartbeat(cpId),
-    authorize: (tagId) => service.authorize(cpId, tagId),
+    authorize: (tagId, idTokenType) =>
+      service.authorize(cpId, tagId, idTokenType),
     sendDataTransfer: (vendorId, messageId, data) =>
       service.sendDataTransfer(cpId, vendorId, messageId, data),
     sendOcppCall: (request) => service.sendOcppCall(cpId, request),
@@ -609,6 +625,7 @@ function snapshotToCliStatus(snapshot: ChargePointSnapshot): ChargePointStatus {
         : null,
       transactionTagId: connector.transactionTagId,
       transactionBatteryCapacityKwh: connector.transactionBatteryCapacityKwh,
+      evConnection: connector.evConnection,
     })),
     heartbeat: snapshot.heartbeat,
     config: snapshot.config
@@ -624,6 +641,10 @@ function snapshotToCliStatus(snapshot: ChargePointSnapshot): ChargePointStatus {
           securityProfile: snapshot.config.securityProfile,
           cpoName: snapshot.config.cpoName,
           txUpdatedMeterValues: snapshot.config.txUpdatedMeterValues,
+          inboundValidation: snapshot.config.inboundValidation,
+          reservationAuthorizeIdTag: snapshot.config.reservationAuthorizeIdTag,
+          capabilityProfile: snapshot.config.capabilityProfile,
+          chargerCapabilities: snapshot.config.chargerCapabilities,
           tlsCaPath: snapshot.config.tlsCaPath,
           tlsCertPath: snapshot.config.tlsCertPath,
           tlsKeyPath: snapshot.config.tlsKeyPath,

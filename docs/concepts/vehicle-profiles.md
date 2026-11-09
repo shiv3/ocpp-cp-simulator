@@ -6,13 +6,15 @@ sources:
   - packages/core/src/cp/domain/vehicle/VehicleProfile.ts
   - packages/core/src/cp/domain/vehicle/importProfile.ts
   - packages/core/src/cp/domain/vehicle/VehicleCatalog.ts
-  - packages/core/src/cp/domain/persistence/VehicleProfileRepository.ts
+  - packages/core/src/cp/infrastructure/persistence/VehicleProfileRepository.ts
   - packages/contracts/src/vehicle.ts
   - packages/contracts/src/vehicleProfile.ts
   - apps/web/src/components/vehicle/vehicleChoice.ts
   - "issue #458"
   - "issue #327"
   - "issue #311"
+  - "issue #627"
+  - packages/core/src/cp/domain/connector/AutoTraffic.ts
 related:
   - ../entities/open-ev-directory.md
   - ../entities/web-console.md
@@ -23,7 +25,7 @@ related:
   - ../entities/daemon.md
   - ../entities/mcp-endpoint.md
   - ../sources/github-issues.md
-updated: 2026-11-05
+updated: 2026-11-09
 ---
 
 # Vehicle profiles
@@ -147,6 +149,17 @@ electrical model from a scenario would need a `null` in the scenario file,
 which the format does not carry. **Custom**, and re-selecting the current
 model's own name, keep the current vehicle's fields.
 
+## Several vehicles for background traffic
+
+[Auto-traffic](control-plane.md#background-traffic) can draw a vehicle per
+session from a weighted `vehiclePool` (#627). A pool entry is a copy of
+`resolveEvSettings(profile, type)` taken when the pool is saved, so it follows
+the snapshot rule below: the pool works offline and a later edit of the profile
+changes nothing until the pool is saved again. The drawn vehicle is applied to
+the connector with the same replace-whole patch as picking a vehicle in the
+console, which is how the traffic generator and the meter model read one
+vehicle.
+
 ## Snapshot, not reference — the offline guarantee
 
 Applying a profile copies its values into the connector's EV settings, the
@@ -211,6 +224,12 @@ the in-memory store too, when there is no database —
 with everything else — a deliberate decision (`resetOnStateReset: true`): a
 reset means a clean simulator. `cp.delete` never touches them; they belong to
 no charge point.
+
+## Relation to #835
+
+A profile says what the vehicle _can_ do; [vehicle behavior](vehicle-behavior.md)
+says what it _wants_ and when, as `evSettings.vehicleBehavior`. The same profile
+can be combined with any behavior policy, and a profile never requires one.
 
 ## Relation to #311 and #327
 

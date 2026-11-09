@@ -1,4 +1,4 @@
-import { schemas, validationErrors } from "@ocpp-cp-sim/ocpp/index";
+import { schemas, validationErrors } from "@ocpp-cp-simulator/ocpp/index";
 import { V16_TO_V201_CSMS_ACTION } from "../../domain/types/csmsActionNames";
 import { isOcpp2Version } from "../../domain/types/OcppVersion";
 

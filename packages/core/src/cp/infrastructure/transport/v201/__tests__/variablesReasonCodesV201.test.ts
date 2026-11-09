@@ -1,7 +1,7 @@
 import type {
   GetVariablesRequestV201,
   SetVariablesRequestV201,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import { describe, expect, it } from "vitest";
 import type { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
 import { defaultConfiguration } from "../../../../domain/charge-point/Configuration";

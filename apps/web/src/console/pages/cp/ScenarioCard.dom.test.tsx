@@ -10,9 +10,9 @@ import {
 import { createScenarioStore } from "../../test/scenarioStore";
 import { LIBRARY_SCOPE, libraryCopyId } from "../../lib/scenarioLibrary";
 import { createEmptyScenario } from "../../lib/scenarioSteps";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
-import type { ScenarioDefinition } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import type { ChargePointSnapshot } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
+import type { ScenarioDefinition } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import type { ChargePointSnapshot } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 
 function connector(id: number): ChargePointSnapshot["connectors"][number] {
   return {

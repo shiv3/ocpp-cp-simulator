@@ -1,32 +1,41 @@
 import type {
   AuthorizationCacheSeedEntry,
   AuthorizationCacheView,
-} from "@ocpp-cp-sim/core/cp/domain/auth/AuthorizationCacheSeed";
+} from "@ocpp-cp-simulator/core/cp/domain/auth/AuthorizationCacheSeed";
 import type {
   ConfigurationKeyList,
   ConfigurationSetStatus,
-} from "@ocpp-cp-sim/core/cp/domain/charge-point/configurationAccess";
+} from "@ocpp-cp-simulator/core/cp/domain/charge-point/configurationAccess";
 import {
   VehicleCatalogError,
   type VehicleCatalog,
   type VehicleCatalogErrorKind,
-} from "@ocpp-cp-sim/core/cp/domain/vehicle/VehicleCatalog";
-import type { VehicleProfile } from "@ocpp-cp-sim/core/cp/domain/vehicle/VehicleProfile";
+} from "@ocpp-cp-simulator/core/cp/domain/vehicle/VehicleCatalog";
+import type {
+  PowerLossOptions,
+  PowerRestoreOptions,
+} from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
+import type {
+  FleetCreateParams,
+  FleetCreateResult,
+  FleetTemplate,
+} from "@ocpp-cp-simulator/contracts/methods";
+import type { VehicleProfile } from "@ocpp-cp-simulator/core/cp/domain/vehicle/VehicleProfile";
 import { io, type Socket } from "socket.io-client";
 import type {
   DataTransferData,
   DataTransferResult,
-} from "@ocpp-cp-sim/core/cp/domain/types/DataTransfer";
+} from "@ocpp-cp-simulator/core/cp/domain/types/DataTransfer";
 import type {
   OcppCallOutcome,
   OcppCallRequest,
   RawFrameOutcome,
   RawFrameRequest,
-} from "@ocpp-cp-sim/core/cp/domain/types/OcppCall";
+} from "@ocpp-cp-simulator/core/cp/domain/types/OcppCall";
 import type {
   Get15118EVCertificateRequest,
   Get15118EVCertificateResult,
-} from "@ocpp-cp-sim/core/cp/domain/security/get15118EVCertificate";
+} from "@ocpp-cp-simulator/core/cp/domain/security/get15118EVCertificate";
 
 import type {
   ChargePointEvent,
@@ -43,54 +52,55 @@ import type {
   OCPPAvailability,
   OCPPStatus,
   StatusNotificationOptions,
-} from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+} from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import type {
   MeterReadingContext,
   StartTransactionCommandOptions,
+  IdTokenTypeName,
   StopTransactionCommandOptions,
   TransactionUpdateOptions,
-} from "@ocpp-cp-sim/core/cp/domain/connector/Transaction";
-import { LogLevel, LogType } from "@ocpp-cp-sim/core/cp/shared/Logger";
+} from "@ocpp-cp-simulator/core/cp/domain/connector/Transaction";
+import { LogLevel, LogType } from "@ocpp-cp-simulator/core/cp/shared/Logger";
 import type {
   EVSettings,
   EVSettingsPatch,
-} from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
-import type { AutoTrafficConfig } from "@ocpp-cp-sim/core/cp/domain/connector/AutoTraffic";
+} from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
+import type { AutoTrafficConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/AutoTraffic";
 import type {
   DiagnosticsStatus,
   FirmwareStatus,
   UploadLogStatus,
-} from "@ocpp-cp-sim/core/cp/domain/types/FirmwareLogStatus";
-import type { AutoMeterValueConfig } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
-import type { ActiveChargingProfile } from "@ocpp-cp-sim/core/cp/domain/connector/Connector";
+} from "@ocpp-cp-simulator/core/cp/domain/types/FirmwareLogStatus";
+import type { AutoMeterValueConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
+import type { ActiveChargingProfile } from "@ocpp-cp-simulator/core/cp/domain/connector/Connector";
 import type {
   ScenarioDefinition,
   ScenarioExecutionContext,
   ScenarioMode,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import type { ScenarioRunResult } from "@ocpp-cp-sim/core/cp/application/verification/ScenarioAssertions";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import type { ScenarioRunResult } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioAssertions";
 import type {
   ScenarioRunPage,
   ScenarioRunQuery,
-} from "@ocpp-cp-sim/core/cp/application/verification/ScenarioRunSummary";
+} from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunSummary";
 import type {
   TimelineEntry,
   TimelinePage,
   TimelineQuery,
-} from "@ocpp-cp-sim/core/cp/application/services/OperationalTimeline";
+} from "@ocpp-cp-simulator/core/cp/application/services/OperationalTimeline";
 import type {
   ChargingSessionPage,
   ChargingSessionQuery,
-} from "@ocpp-cp-sim/core/cp/domain/persistence/ChargingSessionRepository";
-import type { ChargingSession } from "@ocpp-cp-sim/core/cp/domain/session/ChargingSession";
+} from "@ocpp-cp-simulator/core/cp/domain/persistence/ChargingSessionRepository";
+import type { ChargingSession } from "@ocpp-cp-simulator/core/cp/domain/session/ChargingSession";
 import type {
   HistoryOptions,
   StateHistoryEntry,
-} from "@ocpp-cp-sim/core/cp/application/services/types/StateSnapshot";
+} from "@ocpp-cp-simulator/core/cp/domain/services/StateSnapshot";
 import type {
   NetworkSimLayerConfig,
   ResolvedNetworkSimConfig,
-} from "@ocpp-cp-sim/core/cp/infrastructure/transport/network-sim/config";
+} from "@ocpp-cp-simulator/core/cp/infrastructure/transport/network-sim/config";
 import {
   RPC_TIMEOUT_MS,
   RpcFailure,
@@ -108,7 +118,7 @@ import {
   type StatusWire,
   type SubscribeResult,
   type WireSimulatorConfig,
-} from "@ocpp-cp-sim/contracts/index";
+} from "@ocpp-cp-simulator/contracts/index";
 
 type CpEventEnvelope = Extract<EventEnvelope, { kind: "cp" }>;
 type RegistryEventEnvelope = Extract<EventEnvelope, { kind: "registry" }>;
@@ -229,6 +239,7 @@ function toConnectorSnapshot(c: ServerConnectorStatus): ConnectorSnapshot {
       : null,
     transactionTagId: c.transactionTagId ?? null,
     transactionBatteryCapacityKwh: c.transactionBatteryCapacityKwh ?? null,
+    evConnection: c.evConnection,
   };
 }
 
@@ -269,12 +280,20 @@ function toSnapshotConfig(config: WireConfig): ChargePointSnapshot["config"] {
     securityProfile: config.securityProfile,
     cpoName: config.cpoName,
     txUpdatedMeterValues: config.txUpdatedMeterValues,
+    inboundValidation: config.inboundValidation,
+    reservationAuthorizeIdTag: config.reservationAuthorizeIdTag,
+    capabilityProfile: config.capabilityProfile,
+    ...(config.transport === undefined ? {} : { transport: config.transport }),
+    chargerCapabilities: config.chargerCapabilities,
     tlsCaPath: config.tlsCaPath,
     tlsCertPath: config.tlsCertPath,
     tlsKeyPath: config.tlsKeyPath,
     bootNotification: config.bootNotification ?? null,
     labels: config.labels,
     ...(config.behaviors === undefined ? {} : { behaviors: config.behaviors }),
+    ...(config.behaviorParams === undefined
+      ? {}
+      : { behaviorParams: config.behaviorParams }),
   };
 }
 
@@ -930,8 +949,15 @@ export class RemoteChargePointService implements ChargePointService {
     await this.runCpRpc(id, "stop_heartbeat");
   }
 
-  async authorize(id: string, tagId: string): Promise<void> {
-    await this.runCpRpc(id, "authorize", { tagId });
+  async authorize(
+    id: string,
+    tagId: string,
+    idTokenType?: IdTokenTypeName,
+  ): Promise<void> {
+    await this.runCpRpc(id, "authorize", {
+      tagId,
+      ...(idTokenType ? { idTokenType } : {}),
+    });
   }
 
   async sendDataTransfer(
@@ -1015,6 +1041,7 @@ export class RemoteChargePointService implements ChargePointService {
       ...(options?.chargingState
         ? { chargingState: options.chargingState }
         : {}),
+      ...(options?.idTokenType ? { idTokenType: options.idTokenType } : {}),
     });
   }
 
@@ -1052,6 +1079,18 @@ export class RemoteChargePointService implements ChargePointService {
 
   async evDisconnected(id: string, connectorId: number): Promise<void> {
     await this.runCpRpc(id, "ev_disconnected", { connector: connectorId });
+  }
+
+  async evPlugIn(id: string, connectorId: number): Promise<void> {
+    await this.runCpRpc(id, "ev_plug_in", { connector: connectorId });
+  }
+
+  async evSetReady(
+    id: string,
+    connectorId: number,
+    ready: boolean,
+  ): Promise<void> {
+    await this.runCpRpc(id, "ev_ready", { connector: connectorId, ready });
   }
 
   async sendStatusNotification(
@@ -1744,6 +1783,27 @@ export class RemoteChargePointService implements ChargePointService {
     await this.rpc("cp.labels.set", { cpId, labels });
   }
 
+  async listFleetTemplates(): Promise<FleetTemplate[]> {
+    return this.rpc("fleet.template.list", {});
+  }
+
+  async getFleetTemplate(id: string): Promise<FleetTemplate> {
+    return this.rpc("fleet.template.get", { id });
+  }
+
+  async saveFleetTemplate(template: FleetTemplate): Promise<string> {
+    const saved = await this.rpc("fleet.template.save", { template });
+    return saved.id;
+  }
+
+  async deleteFleetTemplate(id: string): Promise<void> {
+    await this.rpc("fleet.template.delete", { id });
+  }
+
+  async createFleet(params: FleetCreateParams): Promise<FleetCreateResult> {
+    return this.rpc("fleet.create", params);
+  }
+
   async removeChargePoint(id: string): Promise<void> {
     await this.rpc("cp.delete", { cpId: id });
   }
@@ -1929,6 +1989,33 @@ export class RemoteChargePointService implements ChargePointService {
       cpId,
       ruleId,
     })) as unknown as { ok: true } | { ok: false; error: string };
+  }
+
+  async powerLoss(
+    cpId: string,
+    options?: PowerLossOptions,
+  ): Promise<
+    { ok: true; transactions: number } | { ok: false; error: string }
+  > {
+    return (await this.rpc("power.loss", {
+      cpId,
+      ...options,
+    })) as unknown as
+      { ok: true; transactions: number } | { ok: false; error: string };
+  }
+
+  async powerRestore(cpId: string, options?: PowerRestoreOptions) {
+    return (await this.rpc("power.restore", {
+      cpId,
+      ...options,
+    })) as unknown as
+      | {
+          ok: true;
+          outageMs: number;
+          recovery: "resume" | "end" | "none";
+          transactions: number;
+        }
+      | { ok: false; error: string };
   }
 
   /**

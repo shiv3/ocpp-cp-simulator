@@ -4,10 +4,9 @@ import { OCPPMessageHandler } from "../OCPPMessageHandler";
 import type { OCPPWebSocket, OcppMessageErrorPayload } from "../OCPPWebSocket";
 import type { ProtocolCodec } from "../profile/ProtocolProfile";
 import { outgoingV16Warning } from "../codec/validateV16";
-import {
-  ChargePoint,
-  type StartTransactionOutcome,
-} from "../../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { type StartTransactionOutcome } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import {
   DefaultBootNotification,
   OCPPAction,
@@ -30,7 +29,7 @@ type IncomingMessageHandler = (
 ) => void;
 
 function newChargePoint(id: string): ChargePoint {
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     id,
     DefaultBootNotification,
     1,

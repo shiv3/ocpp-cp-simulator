@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 
-import type { ServerInfo } from "@ocpp-cp-sim/contracts/index";
-import type { ChargePointService } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+import type { ServerInfo } from "@ocpp-cp-simulator/contracts/index";
+import type { ChargePointService } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 import { useDataContext } from "../providers/DataProvider";
-import type { RemoteConnectionState } from "@ocpp-cp-sim/client/remote/RemoteChargePointService";
+import type { RemoteConnectionState } from "@ocpp-cp-simulator/client/remote/RemoteChargePointService";
 
 /**
  * `server.info` is fixed for one daemon run, so one fetch per connection is

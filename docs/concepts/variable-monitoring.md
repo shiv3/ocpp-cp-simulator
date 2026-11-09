@@ -14,7 +14,7 @@ sources:
   - packages/core/src/cp/infrastructure/transport/v201/reportParts.ts
   - packages/core/src/cp/domain/monitoring/monitorCatalog.ts
   - packages/core/src/cp/domain/monitoring/monitoringCtrlrKeys.ts
-  - packages/core/src/cp/domain/persistence/schema.ts
+  - packages/core/src/cp/infrastructure/persistence/schema.ts
   - packages/core/src/cp/infrastructure/transport/v201/deviceModelMap.ts
   - packages/core/src/cp/infrastructure/transport/v201/baseReportV201.ts
   - packages/core/src/cp/infrastructure/transport/v21/inboundRegistryV21.ts

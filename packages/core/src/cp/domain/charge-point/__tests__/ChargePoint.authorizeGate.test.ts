@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChargePoint } from "../ChargePoint";
+import type { ChargePoint } from "../ChargePoint";
+import { createChargePoint } from "../../../infrastructure/charge-point/createChargePoint";
 import { OCPPStatus } from "../../types/OcppTypes";
 import type { BootNotification } from "../../types/OcppTypes";
 import { DefaultBootNotification } from "../../types/OcppTypes";
@@ -18,7 +19,7 @@ import { handleSetVariablesV201 } from "../../../infrastructure/transport/v201/s
 const bootNotification: BootNotification = DefaultBootNotification;
 
 function buildChargePoint(connectorCount = 1): ChargePoint {
-  return new ChargePoint(
+  return createChargePoint(
     "test-cp-181",
     bootNotification,
     connectorCount,
@@ -492,7 +493,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
     it("a cached Accepted tag pre-authorizes within the lifetime, then asks the CSMS again", async () => {
       vi.useFakeTimers();
       vi.setSystemTime(Date.parse("2026-10-29T12:00:00Z"));
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "test-cp-452-lifetime",
         bootNotification,
         1,
@@ -520,7 +521,11 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
 
       await vi.advanceTimersByTimeAsync(2_000);
       const promise = cp.authorizeAndWait("TAG-A", 5000);
-      expect(authorizeSpy).toHaveBeenCalledWith("TAG-A");
+      expect(authorizeSpy).toHaveBeenCalledWith(
+        "TAG-A",
+        undefined,
+        expect.any(Object),
+      );
       cp.notifyAuthorizeResult("TAG-A", "Accepted");
       await expect(promise).resolves.toBe("Accepted");
     });

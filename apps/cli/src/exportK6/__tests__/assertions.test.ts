@@ -7,8 +7,8 @@
 // runtime/assertions.ts's top-of-file comment for why the two engines must
 // agree and what, if anything, can't be reproduced from a TranscriptEntry.
 import { describe, expect, it } from "vitest";
-import { evaluateAssertions } from "@ocpp-cp-sim/k6-runtime/assertions";
-import type { TranscriptEntry } from "@ocpp-cp-sim/k6-runtime/types";
+import { evaluateAssertions } from "@ocpp-cp-simulator/k6-runtime/assertions";
+import type { TranscriptEntry } from "@ocpp-cp-simulator/k6-runtime/types";
 
 function sent(
   action: string,

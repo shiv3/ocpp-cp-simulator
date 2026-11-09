@@ -46,8 +46,8 @@ export interface LocalAuthListLimits {
  * persistence layer is intentionally NOT touched here so the LocalAuthList
  * doesn't drift from upstream state across daemon restarts.
  *
- * Note on the `version` field: §6.10 / §9.4 specify -1 as the value the CP
- * reports when LocalAuthListManagement is disabled. The manager itself
+ * Note on the `version` field: §6.10 / §9.4 specify -1 as the value a 1.6 CP
+ * reports when LocalAuthListManagement is disabled (2.x answers 0, D02.FR.03). The manager itself
  * does not know whether the feature is enabled — the handler consults
  * Configuration (`LocalAuthListEnabled`) and short-circuits to -1 before
  * calling `getVersion()`.

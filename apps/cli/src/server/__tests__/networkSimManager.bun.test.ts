@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { BunSqliteDatabase } from "@ocpp-cp-sim/core/cp/domain/persistence/BunSqliteDatabase";
-import type { Database } from "@ocpp-cp-sim/core/cp/domain/persistence/Database";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/BunSqliteDatabase";
+import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
 import type {
   NetworkSimLayerConfig,
   ResolvedNetworkSimConfig,
-} from "@ocpp-cp-sim/core/cp/infrastructure/transport/network-sim/config";
+} from "@ocpp-cp-simulator/core/cp/infrastructure/transport/network-sim/config";
 import { NetworkSimManager } from "../NetworkSimManager";
 
 const databases: Database[] = [];

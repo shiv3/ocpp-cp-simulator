@@ -6,7 +6,7 @@ sources:
   - packages/core/src/cp/domain/session/ChargingSession.ts
   - packages/core/src/cp/application/services/ChargingSessionRecorder.ts
   - packages/core/src/cp/domain/persistence/ChargingSessionRepository.ts
-  - packages/core/src/cp/domain/persistence/SqliteChargingSessionRepository.ts
+  - packages/core/src/cp/infrastructure/persistence/SqliteChargingSessionRepository.ts
   - packages/contracts/src/methods.ts (sessions.list)
   - "issue #447"
   - "issue #491"
@@ -16,6 +16,8 @@ sources:
   - "issue #549"
   - "issue #527"
   - packages/core/src/cp/domain/charge-point/ChargePoint.ts (evDisconnected)
+  - packages/core/src/cp/domain/connector/EvConnection.ts
+  - "issue #453"
 related:
   - operational-timeline.md
   - state-persistence.md
@@ -26,7 +28,9 @@ related:
   - ../entities/cli.md
   - local-vs-remote-mode.md
   - local-authorization.md
-updated: 2026-11-05
+  - power-loss.md
+  - smart-charging.md
+updated: 2026-11-09
 ---
 
 # Charging sessions
@@ -88,11 +92,14 @@ for 2.x):
 | `active`      | The transaction is still running.                                                                                                                                                                                                                                  |
 | `failed`      | The CSMS refused the start: it did not accept the id on the start and the station stopped on it (`DeAuthorized`, see below). An id a 2.x `Updated` answer withdraws mid-session ends it `interrupted`. A CALLERROR is not a refusal (see below).                   |
 | `interrupted` | It ended with `EmergencyStop`, `HardReset`, `SoftReset`, `ImmediateReset`, `Reboot`, `PowerLoss`, `UnlockCommand`, `GroundFault`, `OvercurrentFault`, `PowerQuality`, `Timeout`, or `DeAuthorized` without a CSMS rejection; or its end was lost across a restart. |
-| `completed`   | Any other end: `Local`, `Remote`, `EVDisconnected`, `Other`, `EnergyLimitReached`, `SOCLimitReached`, `StoppedByEV`, …                                                                                                                                             |
 
-A rejected id the station kept charging on (`StopTransactionOnInvalidId` /
-`TxCtrlr/StopTxOnInvalidId` false) still ends `completed`; its
-`authorizationStatus` keeps the CSMS's answer.
+A [power loss](power-loss.md) (#455) that the station ends after the reboot closes the session `interrupted` with `PowerLoss`; one it resumes keeps the session `active`.
+| `completed` | Any other end: `Local`, `Remote`, `EVDisconnected`, `Other`, `EnergyLimitReached`, `SOCLimitReached`, `StoppedByEV`, … |
+
+A rejected id the station kept the transaction open for
+(`StopTransactionOnInvalidId` / `TxCtrlr/StopTxOnInvalidId` false) still ends
+`completed`; its `authorizationStatus` keeps the CSMS's answer. The station
+delivers no more energy on it (see below).
 
 ### Rejections and failed starts (#447)
 
@@ -108,12 +115,30 @@ Two domain gaps were closed so these outcomes can be told apart:
   `transactionStartFailed` event is gone. `ChargePoint.stopTransaction` still
   ignores a transaction whose stop time is already set, such as one restored
   from a `connector_runtime` snapshot persisted before #491.
+- **1.6 `StopTransactionOnInvalidId` false (#736).** A non-Accepted
+  StartTransaction.conf `idTagInfo` keeps the transaction open and, per
+  §4.8 (errata 3.17), only stops the energy delivery: the connector goes to
+  `SuspendedEVSE` and the energy register stops rising until the CSMS or the
+  user stops the transaction. `MaxEnergyOnInvalidId` > 0 delivers that many
+  Wh first (the connector goes `Charging`, then `SuspendedEVSE` once the
+  allowance is used up). The default (`true`) still stops with `DeAuthorized`.
 - **2.x `idTokenInfo`.** TransactionEvent.conf `idTokenInfo` used to be
   ignored. A status other than `Accepted` for a running transaction now
   mirrors 1.6 (#181): with `TxCtrlr/StopTxOnInvalidId` (default true) the
   station ends it with `triggerReason: Deauthorized` and
-  `stoppedReason: DeAuthorized`; with it false the transaction keeps running.
-  Either way `startTransactionNotAccepted` reports it.
+  `stoppedReason: DeAuthorized`; with it false the transaction stays open but
+  the energy delivery stops (#696, E05.FR.02, C15.FR.06): the connector goes
+  to `SuspendedEVSE`, the energy register stops rising, and the station sends
+  one `TransactionEvent(Updated)` with `triggerReason: ChargingStateChanged`
+  and `chargingState: SuspendedEVSE`. `TxCtrlr/MaxEnergyOnInvalidId` (the 1.6
+  key `MaxEnergyOnInvalidId`, default `0`) delivers that many more Wh first
+  (E05.FR.03; the register stops at that allowance, `unit: Wh` in
+  GetBaseReport), then the same suspension. The hold also applies when the EV
+  side was `SuspendedEV`, and a later request for `Charging` is reported as
+  `SuspendedEVSE` while the hold lasts. The hold ends with the transaction
+  and is not persisted: with `--state-db` a restart restores the transaction
+  but the energy flows again. 2.x only; 1.6 errata 3.17 is not applied
+  yet (#736). Either way `startTransactionNotAccepted` reports it.
 
 In both versions the CSMS's answer is written to the transaction
 (`Transaction.authorizationStatus`, persisted with it) before the station
@@ -121,9 +146,10 @@ stops on it, so the stop already carries its cause.
 
 A CALLERROR answering a transaction-related message is not a failed start,
 on any version: a 2.0.1 / 2.1 TransactionEvent (`Started`, `Updated` or
-`Ended`; OCPP E13, #490), or an OCPP-J 1.6 StartTransaction.req,
+`Ended`; OCPP E13, #490), an OCPP-J 1.6 StartTransaction.req,
 StopTransaction.req or MeterValues.req of a transaction (Part 2 §3.7.1,
-#527). Both treat it as a failure to process the message: the station
+#527), or the same three over OCPP-S 1.6 answered with a SOAP Fault or an
+HTTP error status (#585). All of them treat it as a failure to process the message: the station
 resends the message and finally discards it, and leaves the transaction as
 it was: still running, or already stopped for a StopTransaction.req or an
 `Ended` event (see
@@ -189,12 +215,30 @@ browser reload (which restores none) leaves it `interrupted`.
 
 ## Reading it
 
-- **Control plane:** [`sessions.list`](control-plane.md) — `cpId` (required),
-  filters `connectorId` and `outcomes`, then a window like `logs.get`'s:
+- **Control plane:** [`sessions.list`](control-plane.md) — `cpId` selects one
+  charge point; **omitted, it lists across the fleet** (#489, below). Filters
+  `connectorId` and `outcomes`, `startedFrom` / `startedTo`, then a window like `logs.get`'s:
   `limit` takes the newest N (default 50, at most 500), `offset` skips the
   newest N first, and `order` (`"desc"`, newest first, by default; by start
   time) only orders the returned page.
   Answers `{ sessions, total }`; an unknown `cpId` answers `not_found`.
+- **Fleet-wide (#489):** without `cpId`, `sessions.list` pages through every
+  charge point's sessions together, so "which sessions failed in the last
+  hour?" is one call: `{ outcomes: ["failed"], startedFrom: "<an hour ago>" }`.
+  `labels` (the [label selector](control-plane.md#charge-point-labels); `{}` or
+  omitted means every charge point, as in `cp.list`) narrows the fleet; it is
+  refused with `invalid_params` together with `cpId`. `startedFrom` is
+  inclusive and `startedTo` exclusive, ISO 8601 with a zone designator
+  (`2026-11-08T00:00:00Z`, `+09:00` accepted; anything else is
+  `invalid_params`), so adjacent windows never overlap. They also apply to a
+  single charge point. The order is start time (newest first by default), then
+  record order, newest record first, so charge points with equal start times
+  keep a fixed place and `offset` paging never skips or repeats a session. Each
+  session names its charge point in `cpId`; `total` counts the matches across
+  the fleet; a selector matching no charge point answers
+  `{ sessions: [], total: 0 }`, not `not_found`. The retention above is per
+  charge point, so a fleet page can reach back further for a quiet charge point
+  than for a busy one.
 - **MCP:** the curated [`list_charging_sessions`](../entities/mcp-endpoint.md)
   tool.
 - **Push:** every stored change is pushed to subscribers of the charge point
@@ -202,6 +246,53 @@ browser reload (which restores none) leaves it `interrupted`.
   session (in Local mode, a `charging-session` event of the browser service).
 - **Console:** the charge point page's
   [Transactions](../entities/web-console.md#transactions-tab) tab.
+
+## EV and cable model
+
+Whether a cable is plugged in and whether the EV asks for energy is a small
+physical model of its own on the connector (#453), separate from the OCPP
+status it causes. `Connector.evConnection` is one of:
+
+| State                 | Meaning                                                                          |
+| --------------------- | -------------------------------------------------------------------------------- |
+| `disconnected`        | No cable, or the EV side was unplugged. The state of a new connector.            |
+| `connected-ready`     | A cable is plugged in and the EV asks for energy (right after a plug-in).        |
+| `connected-not-ready` | A cable is plugged in and the EV does not ask for energy (a paused or full car). |
+
+It is not a second state machine: three `ChargePoint` operations change it and
+turn the change into status writes, transactions and wire messages the existing
+handlers already own. They are reached by the `ev_plug_in`, `ev_ready` and
+`ev_disconnected` [methods](control-plane.md), the console's **Plug in** /
+**Unplug**, a scenario `connectorPlug` node, the behaviors' `ctx.plugIn` /
+`ctx.unplug`. The state is observable as `evConnection` on each connector of
+`status`.
+
+| Operation                            | Idle `Available` connector                                                                                      | Running transaction                                                                                                                                                                                                                   | Other states (`Unavailable`, `Faulted`, `Reserved`, no power) |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `evPlugIn` (`ev_plug_in`)            | `Preparing` (1.6 §4.9 A2; 2.x `Occupied`), ConnectionTimeOut starts                                             | 1.x: cable already recorded, nothing sent. 2.x idToken first (E03, the transaction began before the cable): `TransactionEvent(Updated)` `CablePluggedIn` / `EVConnected`, the EVConnectionTimeOut ends, the offer starts (`Charging`) | Cable recorded, the status stays                              |
+| `evSetReady(false)` (`ev_ready`)     | Recorded                                                                                                        | `Charging` → `SuspendedEV` (1.6 §4.9 C4), the energy offer stops (2.x: `TransactionEvent(Updated)`, `chargingState` `SuspendedEV`, `triggerReason` `ChargingStateChanged`, E01.FR.19)                                                 | Recorded                                                      |
+| `evSetReady(true)`                   | Recorded                                                                                                        | `SuspendedEV` → `Charging` (1.6 §4.9 D3; 2.x: `Updated`, `chargingState` `Charging`, `ChargingStateChanged`)                                                                                                                          | Recorded                                                      |
+| `evDisconnected` (`ev_disconnected`) | `Preparing`, `Finishing`, `SuspendedEV`, `SuspendedEVSE` → `Available` (1.6 §4.9 B1); `Available` sends nothing | [EV-side disconnect](#ev-side-disconnect-and-connection-loss)                                                                                                                                                                         | Status stays                                                  |
+
+Rules:
+
+- A plug-in is idempotent; readiness needs a cable (`ev_ready` without one
+  fails with `Connector N has no EV plugged in`) and is idempotent.
+- On 1.x a transaction implies an EV on the cable: a start without a prior plug-in, and
+  a transaction restored after a restart, show `connected-ready`. On 2.x a start
+  without a prior plug-in records no cable (idToken first, E03); only a restored
+  transaction infers one.
+- The cable goes with the EV: the auto-reset to `Available` after a stop clears it,
+  and whatever frees a connector with a cable in (ChangeAvailability back to
+  Operative, a reservation that ends, the firmware hold) shows `Preparing` (2.x
+  `Occupied`) instead of `Available` (1.6 §4.9; 2.0.1 G01, H03.FR.10). A plug-in on an
+  idle `Available` connector always reports `Preparing`.
+- The cable is **not persisted** and a restart or reconnect invents no cable
+  transition: a restored connector shows `connected-*` only when its transaction
+  or a cable-only status (`Preparing`, `Finishing`, `Suspended*`, `Charging`)
+  proves one, and never sends a status for it. A reset of an idle plugged-in
+  connector keeps `Preparing`.
+- The connector lock and a partial plug are not modelled.
 
 ## EV-side disconnect and connection loss
 
@@ -224,9 +315,9 @@ WebSocket closes ([#488](https://github.com/shiv3/ocpp-cp-simulator/issues/488))
   energy register no longer rises, while the periodic MeterValues keep going
   out, and the derived power is zero outside `Charging`. A second unplug
   while so suspended sends nothing. The connector lock is not
-  modelled. Without a running transaction, the console's **Unplug** sends
-  StatusNotification `Available`, as before, while a scenario plug-out stays a
-  no-op.
+  modelled. Without a running transaction an unplug (the console's
+  **Unplug**, a scenario plug-out) returns a `Preparing` or `Finishing`
+  connector to `Available`; a connector in another state keeps its status (#453).
 
 - **EV connection timeout.** Starting a transaction before the cable is in
   puts the connector in `Preparing` and starts the `ConnectionTimeOut` timer
@@ -248,8 +339,7 @@ WebSocket closes ([#488](https://github.com/shiv3/ocpp-cp-simulator/issues/488))
   [`pending_messages`](state-persistence.md) with `--state-db`, in memory
   otherwise) and replayed after the next accepted boot. So is a resend still
   waiting out its retry interval after a CALLERROR, which keeps its count of
-  transmissions; a StartTransaction.req resend is discarded instead if its
-  transaction no longer runs (#527). On 2.x the TransactionEvents
+  transmissions, and the transaction messages held behind it (#565). On 2.x the TransactionEvents
   (`Started`, `Updated`, `Ended`) go to the same queue (E11.FR.01): those
   produced offline, those written but unanswered when the socket closed, and
   a pending E13 resend. After the next accepted boot they are replayed in the
@@ -259,17 +349,20 @@ WebSocket closes ([#488](https://github.com/shiv3/ocpp-cp-simulator/issues/488))
   ([#528](https://github.com/shiv3/ocpp-cp-simulator/issues/528)). The
   transaction itself survives, and its later events carry the same
   `transactionId`.
+  A replayed row stays in the queue until the CSMS answers, the queue holds
+  at most `OfflineQueueMaxEvents` TransactionEvents (`Updated` events are
+  dropped first when it is full, never `Started` or `Ended`, #554), and
+  `GetTransactionStatus` reports `messagesInQueue` from it (E14).
 
 ## Limits
 
-- 2.x `GetTransactionStatus` still answers `messagesInQueue: false`, even
-  while the E11 queue holds TransactionEvents of the transaction (E14).
 - The E10 resume is not modelled: plugging the cable back in during a
-  transaction suspended by an EV-side disconnect sends `Preparing`, not a
-  TransactionEvent `Updated` with `triggerReason` `CablePluggedIn` followed by
-  `Charging`.
+  transaction suspended by an EV-side disconnect records the cable and sends
+  nothing (the transaction stays `SuspendedEV`), instead of a TransactionEvent
+  `Updated` with `triggerReason` `CablePluggedIn` followed by `Charging`.
 - On 1.6, an Unplug while StartTransaction.conf is still pending stops the
-  transaction with StopTransaction `transactionId: 0`. This predates #488
+  transaction; the StopTransaction.req takes the id of that conf when it is
+  written (`-1` if the request is discarded, #565). This predates #488
   (`stop_transaction` does the same), but the Unplug button now reaches it.
 - A 1.6 StartTransaction that is never answered, or that is discarded after
   `TransactionMessageAttempts` CALLERRORs, keeps `transactionId: null`.
@@ -283,11 +376,25 @@ WebSocket closes ([#488](https://github.com/shiv3/ocpp-cp-simulator/issues/488))
   and one that already ended (a 1.6 StopTransaction.req, a 2.x `Ended` event)
   stays ended.
 - On 1.6 a transaction stopped before its StartTransaction.req got a conf
-  stops with `transactionId: 0`. A resend still waiting is discarded, but a
-  StartTransaction.req already on the wire or queued ahead of the stop reaches
-  the CSMS, which can keep open a transaction nothing stops
-  ([#565](https://github.com/shiv3/ocpp-cp-simulator/issues/565)).
-- `sessions.list` takes one charge point; there is no fleet-wide listing yet
-  ([#489](https://github.com/shiv3/ocpp-cp-simulator/issues/489)).
+  stops with the `transactionId` that conf assigns when it arrives while the
+  request is resent or in flight (before its 30 s timeout): the
+  StopTransaction.req waits behind a StartTransaction.req being resent, or in
+  flight, and is built with the id when it is written (also when it is salvaged
+  to the offline queue). If the request is discarded, it carries `-1` (1.6
+  errata 3.18). So does a transaction whose StartTransaction.req timed out
+  (the 30 s watchdog; 1.6 does not resend a timeout), and one restored after a
+  restart or a resend lost when the link closed, with its StartTransaction.req
+  neither queued nor in flight (#727): the transaction records that no conf
+  assigned its id (`startUnanswered`, persisted with it) and its messages carry
+  `-1` from then on. A conf that still arrives late gives the later messages
+  its id. A stop requested while the connector goes to `Preparing` (a
+  `connectorStatusChange` listener) waits until the StartTransaction.req is
+  queued, so the StopTransaction.req follows it with its conf's id (§3.7,
+  chronological delivery). A StartTransaction.req resend is never dropped because its transaction stopped
+  ([#565](https://github.com/shiv3/ocpp-cp-simulator/issues/565),
+  [order of transaction messages](ocpp-versions-and-transports.md#transaction-message-retries-ocpp-j-16)).
+- The fleet-wide listing (#489) is a control-plane and MCP feature only: the
+  console's Transactions tab and the `ChargePointService` client interface
+  still read one charge point.
 - Local mode does not drop a removed charge point's sessions until
   `state.reset`.

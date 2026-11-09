@@ -8,12 +8,13 @@ sources:
   - scripts/bench/lib.ts
   - scripts/bench/fleetBench.slowpath.test-bun.ts
   - scripts/bench/engineScale.ts
+  - scripts/bench/mockCsmsServer.ts
 related:
   - ../analyses/charger-engine-migration.md#verification-results
   - ../entities/daemon.md#measured-scale-ceiling
   - ../analyses/fleet-load-and-observability-roadmap.md#5a-measured-scale-ceiling
   - ../concepts/control-plane.md#cpcreate_many--the-batch-fields
-updated: 2026-11-07
+updated: 2026-11-08
 ---
 
 # Source: `scripts/bench/README.md`
@@ -23,6 +24,8 @@ timing visibly degrades" — the question
 [issue #302](github-issues.md) opened because nothing in the code enforced or
 measured one. This is a benchmark, not a test: no pass/fail assertion, only a
 printed table.
+
+**First result (#626).** [Daemon → Measured scale ceiling](../entities/daemon.md#result-first-measured-ceiling-626-2026-11-08) records the first run, against `mockCsmsServer.ts` (the smoke test's mock CSMS as its own process), and the file-descriptor trap: a limit of 1024 caps a fleet at about 999 connections.
 
 **Run.** `bun scripts/bench/fleet-bench.ts --csms-url <ws(s)://...> --daemon-url
 <http(s)://...>` against a daemon already started with `--metrics`. Flags
@@ -370,12 +373,14 @@ synchronously, so the late `StartTransaction.conf` — which is still routed to
 `StartTransactionResultHandler`, since the watchdog never evicts the request —
 would find `Connector.transactionId`'s setter with nothing to write to and
 return. The placeholder stop destroys the only handle that could close the CSMS
-session. Preserving it costs **one CALL, not a stream**: the charge point never
-cycles again and runs no meter scheduler (`cp.create` accepts no field that
-enables one and the daemon constructs every charge point with
-`autoMeterValueSetting = null`), and the single frame it still emits is the
-`StatusNotification` produced when the late conf drives the connector to
-`Charging`. Teardown's closing sweep issues the stop instead, outside every
+session. Preserving it costs **a trickle, not a stream**: the charge point never
+cycles again and runs no auto-meter scheduler (`cp.create` accepts no field
+that enables one and the daemon constructs every charge point with
+`autoMeterValueSetting = null`), but a running 1.x transaction is sampled by
+the station every `MeterValueSampleInterval` seconds (default 60, #722), so one
+`MeterValues` a minute (`transactionId` `0` until a late conf assigns the real
+id) also goes out until teardown, besides the `StatusNotification` produced
+when the late conf drives the connector to `Charging`. Teardown's closing sweep issues the stop instead, outside every
 measurement window and late enough that the conf has usually landed.
 
 **A create whose client deadline expired keeps creating.** `cp.create_many`
@@ -734,7 +739,7 @@ sandboxes. See
 [Daemon → Measured scale ceiling](../entities/daemon.md#measured-scale-ceiling)
 for what to record once someone runs it, and
 [Roadmap → 5a](../analyses/fleet-load-and-observability-roadmap.md#5a-measured-scale-ceiling)
-for how that number gates 5b (a worker model).
+for how that number feeds 5b (a worker model, under consideration in a separate issue; see the follow-up issue).
 
 ## engineScale.ts
 

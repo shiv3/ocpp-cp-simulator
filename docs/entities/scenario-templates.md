@@ -1,20 +1,31 @@
 ---
 title: Built-in scenario templates
 type: entity
-summary: The scenario JSON files shipped inside the package — six general-purpose flows plus the 47 `cert16-*` OCPP 1.6 certification test-case templates and the OCTT strictness probe — and how template instances behave.
+summary: The scenario JSON files shipped inside the package — six general-purpose flows, six `dataflow-*` showcases of the schema 1.7 data-flow features and the 1.10 loop edge, six `resilience-*` failure / recovery scenarios, the 47 `cert16-*` OCPP 1.6 certification test-case templates and the OCTT strictness probe — and how template instances behave.
 sources:
   - packages/core/src/utils/scenarioTemplates.ts
   - packages/core/src/utils/scenarios/*.json
   - packages/core/src/utils/scenarios/README.md
+  - packages/core/src/utils/tckContract.templateIds.test.ts
+  - "issue #346"
 related:
   - ../concepts/scenario-format.md
+  - ../concepts/power-loss.md
+  - ../concepts/network-simulation.md
+  - ../concepts/web-console-i18n.md
   - ../sources/cert16-templates-readme.md
   - ../sources/steve-verify-readme.md
   - cli.md
-updated: 2026-11-05
+updated: 2026-11-09
 ---
 
 # Built-in scenario templates
+
+> **The `cert16-*` ids are an external contract.** open-ocpp-tck addresses the
+> templates by id, so the set of ids only grows: a rename or removal keeps the
+> old id working as an alias for at least one minor release, and
+> `tckContract.templateIds.test.ts` fails otherwise. See
+> [CLI → TCK contract](cli.md#tck-contract) (#346).
 
 Every built-in template is a flat `ScenarioDefinition` JSON file under
 [`packages/core/src/utils/scenarios/`](../../packages/core/src/utils/scenarios/) — the same
@@ -24,6 +35,16 @@ example files under `docs/examples/scenarios/` use — wrapped by
 editor-facing `ScenarioTemplate` interface. Because they are plain files, the
 daemon's `--scenario-template-file` can load any of them straight off disk
 without going through the loader.
+
+The web console displays each template's `name` and `description` through its
+locale tables (`templates.<id>.name` / `.description`, see
+[web console internationalization](../concepts/web-console-i18n.md)). The
+English table must repeat the file's text word for word and every locale must
+keep its OCPP message names, so a change to either field goes with a change to
+`apps/web/src/i18n/locales/*/templates.json` in the same commit (#807). A
+template may have no entry: no test requires one, and the console then shows
+the file's own text in every language. The `resilience-*` templates got their
+entries in #817.
 
 ## Where templates are used
 
@@ -71,7 +92,9 @@ the raw README summarized at
 Profiles covered: Core, RemoteTrigger, LocalAuthList, Reservation,
 SmartCharging, Firmware, plus the Authorize-outcome cases (TC_023.x, issue
 #181). Security / certificate test cases (TC_073–TC_088) and offline
-transaction cases are out of scope.
+transaction cases are out of scope for the `cert16-*` set; the
+[power-loss primitive](../concepts/power-loss.md) and the
+[resilience templates](#resilience-templates-resilience-) cover recovery after an outage.
 
 `cert16-octt-strictness-probe` is a special template: it uses
 warning-severity `ocpp_absent` assertions to flag CSMS behaviors that are
@@ -80,6 +103,78 @@ legal in OCPP 1.6 but known to break OCTT certification runs — see
 
 The [steve-verify](../sources/steve-verify-readme.md) harness drives all 47
 `cert16-*` templates against a real SteVe CSMS.
+
+## Data-flow templates (`dataflow-*`)
+
+Six templates that show off what a scenario can read and branch on (schema 1.7):
+the `$from` roots `response`, `call` and `connector`, and `switch` cases written as
+`$match` matchers. They need no certification setup; the CSMS only has to answer the way
+the case being demonstrated needs. The `-16` / `-201` pairs differ only in the payload
+shape (OCPP 1.6 `idTag` / `idTagInfo` against 2.0.1 `idToken` / `idTokenInfo`).
+
+| Template id                                     | Shows                                                                                                                                                                                                                                                          |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dataflow-authorize-branch-16` / `-201`         | `ocppCall` Authorize, then a `switch` on `response.payload.idTagInfo.status` (`idTokenInfo` on 2.0.1): Accepted starts a session, `$match in` Blocked / Invalid / Expired, ConcurrentTx, and `default`.                                                        |
+| `dataflow-call-error-handling`                  | `ocppCall` DataTransfer, then `response.kind`; on a result `response.payload.status`, on a CALLERROR `response.errorCode` with `$match` `in` / `endsWith` / `startsWith`. Each outcome reports itself with its own DataTransfer `messageId`. Version-agnostic. |
+| `dataflow-charge-to-soc`                        | A bounded loop edge (schema 1.10): the `meter` step (7 s a pass) loops back to itself until `connector.power.soc` matches `$match gte 80` (`until`) or 2 hours (`forSeconds: 7200`) have passed, then stops the transaction. No `switch` node.                 |
+| `dataflow-remote-start-reauthorize-16` / `-201` | `csmsCallTrigger` with `behavior: "replace"`, a `callResponse` Accepted, then Authorize with the tag read from the CALL (`$from call.payload.idTag`) and a `switch` on the answer.                                                                             |
+
+The `cert16-tc023-*` templates are untouched: their ids are part of the TCK contract and
+their golden frames pin them. `dataflow-authorize-branch-*` covers the same ground (one
+Authorize, a different answer each time) in one file and reads the answer instead of
+relying on a pre-registered tag per outcome. Each template is run by
+`packages/core/src/test/goldenWire/dataflowTemplates.bun.test.ts` against the fake CSMS
+with several answers, asserting the branch taken, and is validated with
+`validateScenarioGraph` (no findings).
+
+## `remote-start-timeout-fallback` (timeout edge, schema 1.8)
+
+Waits 30 s for a `RemoteStartTransaction`. On the answer it starts a session with
+automatic meter values; if the wait times out, its `kind: "timeout"` edge sets the
+connector back to Available and ends instead of failing the run. Not a certification
+case. Its golden frames pin the event path; the timeout path is covered by
+`ScenarioExecutor.timeoutEdges.test.ts`
+(see [Scenario format](../concepts/scenario-format.md)).
+
+## `parallel-heartbeat-session` (parallel / join, schema 1.9)
+
+A `parallel` node runs a three-Heartbeat branch next to a `RemoteStartTransaction` session
+(start, meter values); a `join` with `mode: "all"` waits for both branches, then the run
+ends. Not a certification case. Its golden frames pin one run (the fake CSMS answers the
+heartbeats and sends the remote start); see
+[Scenario format](../concepts/scenario-format.md) for `parallel` / `join`.
+
+## Resilience templates (`resilience-*`)
+
+Six assertion-driven scenarios for operational failures and their recovery
+(#444). They add no fault mechanism of their own: a fault is either an event
+the scenario reports itself (a `Faulted` status), a normal operator action
+(`ChangeAvailability`, an idTag the CSMS blocks, pulling the cable), or an
+injection through an existing primitive — [network simulation](../concepts/network-simulation.md)
+(`network_sim.disconnect.trigger`, or any socket drop) and the
+[power-loss](../concepts/power-loss.md) primitive (`power.loss` / `power.restore`,
+#455). A `connectionTrigger` only observes, so the injection is the operator's
+(or a test's). Each ends in the run's machine-readable verdict
+(`conformanceVerdict` / `verdict` of the [run report](../concepts/scenario-format.md#assertions--verdicts)).
+Like the `cert16-*` templates they auto-start on connect; use
+`run_scenario_template { "once": true }` to run one deliberately.
+
+| Template id                                 | Fault                                                               | Passes when                                                                                                                                                                                                                                                                                                                                                |
+| ------------------------------------------- | ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `resilience-communication-loss-recovery`    | Operator cuts the connection while the connector is Available       | After the drop, the reconnect and Available again, a DataTransfer probe (`org.ocpp-cp-sim.resilience` / `link-probe`) went out over the recovered link. No BootNotification is asserted: OCPP-J 1.6 §5.4 and 2.x Part 4 §5.4 say a station SHOULD NOT send one on a plain reconnect unless its boot data changed. Version-agnostic (run on 1.6 and 2.0.1). |
+| `resilience-connector-fault-recovery`       | The scenario reports `Faulted` / `GroundFailure`, holds 3 s, clears | Both StatusNotifications were sent; the fault carries `errorCode: GroundFailure` (1.6 payload).                                                                                                                                                                                                                                                            |
+| `resilience-ev-disconnect-recovery`         | The cable is pulled mid-charge                                      | `StopTransaction` with reason `EVDisconnected` after `StartTransaction` (1.6 §4.10) and the connector Available again.                                                                                                                                                                                                                                     |
+| `resilience-temporary-unavailable-recovery` | CSMS sends `ChangeAvailability` Inoperative, then Operative         | Both calls arrived; the connector reported Unavailable, then Available (1.6 payload for the statuses).                                                                                                                                                                                                                                                     |
+| `resilience-authorization-rejected`         | The idTag `RESIL-BLK` is Blocked on the CSMS (operator prepares it) | `Authorize` was answered `Blocked` and no `StartTransaction` followed (1.6 payload).                                                                                                                                                                                                                                                                       |
+| `resilience-power-loss-recovery`            | Operator calls `power.loss`, then `power.restore`, during a session | A BootNotification and then a StatusNotification went out after the power came back. Independent of resume / end.                                                                                                                                                                                                                                          |
+
+Assertions on the 1.6 payload shape (`StatusNotification.status`,
+`StopTransaction.reason`, `idTagInfo`) make those templates 1.6 scenarios; the
+communication-loss and power-loss ones only look at action names. Checks run
+through `packages/core/src/test/goldenWire/resilienceTemplates.bun.test.ts`
+(each template against the fake CSMS, with the injection the table names,
+passing, and failing on an empty transcript) next to the usual per-template
+golden frames.
 
 ## Template instances
 

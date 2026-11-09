@@ -7,7 +7,7 @@ import {
 } from "./FormFields";
 import { CallResponseSpecFields } from "./CallResponseForm";
 import type { NodeFormComponentProps, NodeFormData } from "./types";
-import { CSMS_CALL_TRIGGER_ACTIONS } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import { CSMS_CALL_TRIGGER_ACTIONS } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 
 export default function CsmsCallTriggerForm({
   value,

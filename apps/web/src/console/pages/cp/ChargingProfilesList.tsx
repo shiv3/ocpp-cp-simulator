@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import React from "react";
 
-import type { ActiveChargingProfile } from "@ocpp-cp-sim/core/cp/domain/connector/Connector";
+import type { ActiveChargingProfile } from "@ocpp-cp-simulator/core/cp/domain/connector/Connector";
 
 export interface ChargingProfilesListProps {
   /** Every installed profile; when empty, `current` alone (older

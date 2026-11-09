@@ -13,6 +13,7 @@ import {
   type PeriodicDisconnectRule,
   type ResolvedNetworkSimConfig,
 } from "./config";
+import type { GenerationToken } from "../../../domain/transport/networkSim";
 
 export interface ControllerHost {
   writeUpstream(raw: string): void;
@@ -29,10 +30,7 @@ export interface ControllerHost {
 export type DisconnectRuleType =
   ManualDisconnectRule["type"] | PeriodicDisconnectRule["type"];
 
-export interface GenerationToken {
-  readonly gen: number;
-  readonly closeCause: CloseCause | null;
-}
+export type { GenerationToken };
 
 type PipelineShutdown = {
   reason: "socket_closed" | "disposed";

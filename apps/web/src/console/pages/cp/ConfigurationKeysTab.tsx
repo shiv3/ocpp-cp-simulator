@@ -3,7 +3,7 @@ import React, { useCallback, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { useDataContext } from "@/data/providers/DataProvider";
-import type { ConfigurationKeyInfo } from "@ocpp-cp-sim/core/cp/domain/charge-point/configurationAccess";
+import type { ConfigurationKeyInfo } from "@ocpp-cp-simulator/core/cp/domain/charge-point/configurationAccess";
 
 import EmptyState from "../../components/EmptyState";
 

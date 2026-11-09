@@ -7,7 +7,7 @@ import type { CLIChargePointService } from "../../service";
 import {
   ScenarioNodeType,
   type ScenarioDefinition,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 
 /**
  * A disabled scenario releases only its own auto-start dedup key. Before

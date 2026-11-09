@@ -1,11 +1,6 @@
 import type { Connector } from "./Connector";
-import {
-  currentAmpsFor,
-  effectiveChargingPowerW,
-  effectiveVoltageV,
-  effectivePowerFactor,
-  resolveSocForCurve,
-} from "./ChargingCurve";
+import { convertUnit, type SampledValueOverride } from "./MeterRealism";
+import type { OperatingPoint } from "./OperatingPoint";
 
 /** Subset of ReadingContext values we actually use (§7.35). */
 export type ReadingContext =
@@ -24,6 +19,10 @@ export type ReadingContext =
 export interface MeterSampleOverrides {
   measurands?: string[];
   timestamp?: Date;
+  /** An operating point captured earlier, formatted instead of resolving
+   *  anew: a `Transaction.End` sample describes the last charging instant,
+   *  not a connector that has already left `Charging` (#607, #327). */
+  point?: OperatingPoint;
 }
 
 /** SampledValue shape per OCPP 1.6 §7.43. */
@@ -35,6 +34,83 @@ export interface SampledValue {
   phase?: string;
   location?: string;
   format?: "Raw" | "SignedData";
+  /** Power of ten of `value` (2.0.1 `unitOfMeasure.multiplier`, #616). Only
+   *  set when the caller asked for it with `unitMultiplier`; 1.6 has none. */
+  multiplier?: number;
+}
+
+/** How the caller's protocol dialect shapes the samples (#616). */
+export interface SampleBuildOptions {
+  /** The dialect carries `unitOfMeasure.multiplier` (OCPP 2.x). Without it a
+   *  configured multiplier is ignored, never half-applied. */
+  unitMultiplier?: boolean;
+  /**
+   * Which Interval stream this sample belongs to (#615). Each stream measures
+   * from its own previous reading, so two readers in one tick do not eat each
+   * other's interval (1.6 §7.31: an interval is per reading interval). The
+   * default is `aligned` for `Sample.Clock` and `sampled` for the rest; the
+   * transaction-end history (#607) names its own (`txEnded-sampled`,
+   * `txEnded-aligned`).
+   */
+  intervalStream?: string;
+}
+
+/**
+ * Spell the samples for an OCPP-J 1.6 wire message. OCPP-J 1.6 errata (2025-04)
+ * §2.1: the original JSON schemas spell the Temperature unit `Celcius`, a
+ * Central System validating against them rejects `Celsius`, so Charge Point
+ * implementers are "advised to remain using the not corrected version of the
+ * spelling Celcius". OCPP-S 1.6 (WSDL) and 2.x keep `Celsius`; they do not call
+ * this.
+ */
+export function toOcppJ16Wire(samples: SampledValue[]): SampledValue[] {
+  return samples.map((sample) =>
+    sample.unit === "Celsius" ? { ...sample, unit: "Celcius" } : sample,
+  );
+}
+
+/**
+ * The unit OCPP 2.0.1 / 2.1 Part 2 Appendices ch. 2 (Standardized Units of
+ * Measure) assigns to a measurand, or `undefined` for a unitless one
+ * (`Power.Factor`) and one this table does not know.
+ *
+ * The builder leaves `Frequency` (1.6 errata 3.86: 1.6 has no Hz) and the
+ * measurands it does not model without a unit, which is right for 1.6 but on
+ * 2.x the Appendix says the default of `unit` is always `Wh`: a 50 Hz sample
+ * without `unitOfMeasure` reads as 50 Wh (#713). The 2.x message handler fills
+ * the gap from here; 1.6 never calls this.
+ */
+export function unitOfMeasurandV2x(measurand: string): string | undefined {
+  if (measurand === "Power.Factor") return undefined;
+  switch (measurand) {
+    case "Frequency":
+      return "Hz";
+    case "Voltage":
+      return "V";
+    case "SoC":
+      return "Percent";
+    case "RPM":
+      return "RPM";
+    case "Temperature":
+      return "Celsius";
+  }
+  // Quantity families, by the prefix the enum names them with.
+  if (measurand.startsWith("Current.")) return "A";
+  if (measurand.startsWith("Energy.Active.")) return "Wh";
+  if (measurand.startsWith("Energy.Reactive.")) return "varh";
+  if (measurand.startsWith("Energy.Apparent.")) return "VAh";
+  if (measurand.startsWith("Power.Active.")) return "W";
+  if (measurand.startsWith("Power.Reactive.")) return "var";
+  if (measurand.startsWith("Power.Offered")) return "W";
+  // 2.1-only measurands (Appendix ch. 2 / MeasurandEnumType, #766).
+  if (measurand.startsWith("Voltage.")) return "V";
+  if (measurand.startsWith("Power.Import.")) return "W";
+  if (measurand.startsWith("Power.Export.")) return "W";
+  if (measurand.startsWith("Display.RemainingTime")) return "s";
+  if (/^Display\..*SOC$/.test(measurand)) return "Percent";
+  if (measurand.startsWith("EnergyRequest.")) return "Wh";
+  if (measurand === "Display.BatteryEnergyCapacity") return "Wh";
+  return undefined;
 }
 
 /**
@@ -61,47 +137,41 @@ export function buildSampledValues(
   connector: Connector,
   measurands: string[],
   context: ReadingContext,
+  options: SampleBuildOptions = {},
+  capturedPoint?: OperatingPoint,
 ): SampledValue[] {
   const samples: SampledValue[] = [];
   const meterWh = connector.meterValue;
-  const soc = connector.soc;
-  // Power.Active.Import — what the battery actually accepts right now,
-  // curve included — and Power.Offered — what the EVSE/profile makes
-  // available, independent of the battery's own acceptance (#301: a 100 kW
-  // charger still *offers* 100 kW to a nearly-full battery that only draws
-  // 10 kW of it).
-  const settings = connector.evSettings;
-  // Both schedule-derived constraints come from one resolve at one instant.
-  // Resolving them separately took the watt cap from one schedule period and
-  // the phase divisor from the next whenever a boundary fell between the two
-  // calls — a 10 A three-phase period capping at 6900 W and then being divided
-  // as one phase, reported as 30 A. This is also the one call in a sample
-  // build that can emit `scheduleLimitChange` (#301).
-  const { watts: scheduleLimitW, activePhases } =
-    connector.scheduleConstraints();
-  const powerW = derivedInstantaneousPowerW(connector, scheduleLimitW);
-  const offeredW = derivedOfferedPowerW(connector, scheduleLimitW);
-  // Both currents divide by the phases actually in use, the same count the
-  // watt cap was converted on — not the connector's wiring. A 10 A
-  // single-phase limit caps a 3-phase connector at 2300 W, and dividing that
-  // across three wires reported 3.3 A for a line carrying 10, so the sample
-  // contradicted the profile it was produced under (#301).
-  const currentA = currentAmpsFor(powerW, settings ?? {}, activePhases);
-  const offeredCurrentA = currentAmpsFor(
+  const realism = connector.meterRealism;
+  // The Interval and Export measurands carry real values only on a connector
+  // with meter realism (#615); otherwise they stay the historical zero.
+  const real = realism !== undefined;
+  const interval =
+    real && measurands.some((m) => m.endsWith(".Interval"))
+      ? connector.takeIntervalEnergyWh(
+          options.intervalStream ??
+            (context === "Sample.Clock" ? "aligned" : "sampled"),
+        )
+      : { importWh: 0, exportWh: 0 };
+  // Formatting only: every physical quantity below comes from one operating
+  // point resolved at one instant (#327), so the samples of a MeterValue
+  // describe one instant and the energy register reads the same record. The
+  // read is pure: the code that sends the sample set announces a schedule
+  // crossing first (`Connector.announceScheduleCrossingNow`).
+  const point = capturedPoint ?? connector.operatingPoint();
+  const {
+    soc,
+    acceptedW: powerW,
     offeredW,
-    settings ?? {},
-    activePhases,
-  );
-  // The same cap expressed in the units the bounded samples are printed in.
-  // `Infinity` when no profile is active, which makes the bound a no-op.
-  const limitA = currentAmpsFor(scheduleLimitW, settings ?? {}, activePhases);
-  // The voltage that actually produced `currentA`, not the raw configured
-  // value: a `voltageV` of 0, negative or non-finite falls back to 230 in the
-  // derivation, and reporting the raw number here would put a `Voltage` sample
-  // on the wire that the `Current.Import` beside it contradicts (#301).
-  const voltageV = effectiveVoltageV(settings ?? {});
-  const powerFactor = effectivePowerFactor(settings ?? {});
-  const phases = activePhases;
+    currentA,
+    offeredCurrentA,
+    limitA,
+    voltageV,
+    powerFactor,
+    boundW,
+    activePhases: phases,
+    phaseDetail,
+  } = point;
 
   for (const measurand of measurands) {
     const sample = buildSingleSample(measurand, context, {
@@ -113,10 +183,28 @@ export function buildSampledValues(
       offeredCurrentA,
       voltageV,
       powerFactor,
-      limitW: scheduleLimitW,
+      limitW: boundW,
       limitA,
+      real,
+      exportWh: real ? connector.exportRegisterWh : 0,
+      exportW: point.exportW,
+      exportCurrentA: point.exportCurrentA,
+      intervalImportWh: interval.importWh,
+      intervalExportWh: interval.exportWh,
     });
     if (sample) samples.push(sample);
+    if (phaseDetail && measurand === "Voltage") {
+      const names = ["L1-N", "L2-N", "L3-N"];
+      phaseDetail.voltageV.forEach((v, i) =>
+        samples.push({ ...voltageSample(v, context), phase: names[i] }),
+      );
+      if (phaseDetail.lineToLine) {
+        const ll = ["L1-L2", "L2-L3", "L3-L1"];
+        phaseDetail.lineToLineV.forEach((v, i) =>
+          samples.push({ ...voltageSample(v, context), phase: ll[i] }),
+        );
+      }
+    }
     // Per-phase samples, but only when all three phases are actually in use.
     // A profile restricting a 3-phase connector to fewer would otherwise have
     // the message claim consumption on phases the CSMS excluded — and OCPP's
@@ -135,17 +223,111 @@ export function buildSampledValues(
           voltageV,
           powerFactor,
           // A leg carries a third of the whole-connector power, so the bound
-          // that applies to it is a third of the whole-connector cap. The
+          // that applies to it is a third of the whole-connector bound (the
+          // schedule limit narrowed by the charger cap). The
           // current legs each carry the aggregate line current, so their bound
           // is unchanged.
-          limitW: scheduleLimitW / 3,
+          limitW: boundW / 3,
           limitA,
+          real,
+          exportWh: 0,
+          exportW: 0,
+          exportCurrentA: 0,
+          intervalImportWh: 0,
+          intervalExportWh: 0,
         });
+        if (perPhase && phaseDetail) {
+          // Independent phases (#615): each leg reads its own quantities.
+          const i = ["L1", "L2", "L3"].indexOf(phase);
+          if (measurand === "Current.Import") {
+            perPhase.value = formatBounded(phaseDetail.currentA[i], limitA, 1);
+          } else if (measurand === "Power.Active.Import") {
+            perPhase.value = formatBounded(phaseDetail.powerW[i], Infinity, 0);
+          }
+        }
         if (perPhase) samples.push({ ...perPhase, phase });
       }
     }
   }
-  return samples;
+  const rules = realism?.sampledValues;
+  return rules && rules.length > 0
+    ? applySampledValueOverrides(samples, rules, options)
+    : samples;
+}
+
+function voltageSample(volts: number, context: ReadingContext): SampledValue {
+  return {
+    value: String(Math.round(volts * 10) / 10),
+    context,
+    measurand: "Voltage",
+    unit: "V",
+  };
+}
+
+/**
+ * Reshape the built samples with a connector's overrides (#616). A rule
+ * matches by measurand (and phase when it names one) and changes the unit
+ * (converting inside a family), location, context, phase or value of what it
+ * matches; the first matching rule wins. Pure: the input is not changed.
+ *
+ * The unit names are those of OCPP 1.6 §7.45 UnitOfMeasure and 2.0.1
+ * UnitOfMeasureType; a `multiplier` (a power of ten, 2.0.1 only) divides the
+ * reported value so that `value × 10^multiplier` is the actual one.
+ */
+export function applySampledValueOverrides(
+  samples: readonly SampledValue[],
+  rules: readonly SampledValueOverride[],
+  options: SampleBuildOptions = {},
+): SampledValue[] {
+  const out: SampledValue[] = [];
+  for (const sample of samples) {
+    const rule = rules.find(
+      (r) =>
+        r.measurand === sample.measurand &&
+        (r.phase === undefined || r.phase === sample.phase),
+    );
+    if (!rule) {
+      out.push(sample);
+      continue;
+    }
+    const { set } = rule;
+    if (set.omit) continue;
+    const next: SampledValue = { ...sample };
+    if (set.value !== undefined) {
+      next.value = set.value;
+    } else {
+      let numeric = Number(sample.value);
+      if (Number.isFinite(numeric)) {
+        if (set.unit !== undefined && sample.unit !== undefined) {
+          const converted = convertUnit(numeric, sample.unit, set.unit);
+          if (converted !== null) {
+            numeric = converted;
+            next.value = trimNumber(numeric, set.decimals ?? 3);
+          }
+        }
+        if (options.unitMultiplier && set.multiplier !== undefined) {
+          numeric = numeric / 10 ** set.multiplier;
+          next.value = trimNumber(numeric, set.decimals ?? 3);
+        } else if (set.decimals !== undefined) {
+          next.value = trimNumber(numeric, set.decimals);
+        }
+      }
+    }
+    if (set.unit !== undefined) next.unit = set.unit;
+    if (options.unitMultiplier && set.multiplier !== undefined) {
+      next.multiplier = set.multiplier;
+    }
+    if (set.location !== undefined) next.location = set.location;
+    if (set.context !== undefined) next.context = set.context as ReadingContext;
+    if (set.phase !== undefined) next.phase = set.phase;
+    out.push(next);
+  }
+  return out;
+}
+
+/** `value` to at most `decimals` decimals, without trailing zeros. */
+function trimNumber(value: number, decimals: number): string {
+  return String(Number(value.toFixed(decimals)));
 }
 
 interface MeasurandInputs {
@@ -162,6 +344,14 @@ interface MeasurandInputs {
   limitW: number;
   /** The same cap in amperes, `Infinity` when uncapped. */
   limitA: number;
+  /** The connector has meter realism: Interval and Export measurands carry
+   *  real values (#615). */
+  real: boolean;
+  exportWh: number;
+  exportW: number;
+  exportCurrentA: number;
+  intervalImportWh: number;
+  intervalExportWh: number;
 }
 
 /**
@@ -188,7 +378,10 @@ function buildSingleSample(
       };
     case "Voltage":
       return {
-        value: String(inputs.voltageV),
+        // A fluctuated voltage is a long float: one decimal, as a meter reads.
+        value: inputs.real
+          ? String(Math.round(inputs.voltageV * 10) / 10)
+          : String(inputs.voltageV),
         context,
         measurand,
         unit: "V",
@@ -257,14 +450,49 @@ function buildSingleSample(
         measurand,
       };
     case "Energy.Active.Import.Interval":
+      if (!inputs.real) return { value: "0", context, measurand };
+      return {
+        value: String(inputs.intervalImportWh),
+        context,
+        measurand,
+        unit: "Wh",
+      };
+    case "Energy.Active.Export.Register":
+      if (!inputs.real) return { value: "0", context, measurand };
+      return {
+        value: String(inputs.exportWh),
+        context,
+        measurand,
+        unit: "Wh",
+      };
+    case "Energy.Active.Export.Interval":
+      if (!inputs.real) return { value: "0", context, measurand };
+      return {
+        value: String(inputs.intervalExportWh),
+        context,
+        measurand,
+        unit: "Wh",
+      };
+    case "Power.Active.Export":
+      if (!inputs.real) return { value: "0", context, measurand };
+      return {
+        value: formatBounded(inputs.exportW, Infinity, 0),
+        context,
+        measurand,
+        unit: "W",
+      };
+    case "Current.Export":
+      if (!inputs.real) return { value: "0", context, measurand };
+      return {
+        value: formatBounded(inputs.exportCurrentA, Infinity, 1),
+        context,
+        measurand,
+        unit: "A",
+      };
     case "Energy.Reactive.Import.Register":
     case "Energy.Reactive.Import.Interval":
-    case "Energy.Active.Export.Register":
-    case "Energy.Active.Export.Interval":
     case "Energy.Reactive.Export.Register":
     case "Energy.Reactive.Export.Interval":
-    case "Current.Export":
-    case "Power.Active.Export":
     case "Power.Reactive.Import":
     case "Power.Reactive.Export":
     case "RPM":
@@ -328,74 +556,11 @@ function formatPowerFactor(value: number): string {
 /**
  * #538: the instantaneous active power, in whole watts, exactly as a
  * `Power.Active.Import` sample would report it now, but without announcing
- * a schedule crossing (see `Connector.scheduleLimitWattsNow`).
+ * a schedule crossing (see `Connector.operatingPoint`).
  */
 export function reportedActivePowerW(connector: Connector): number {
-  // Not charging draws nothing (as in derivedInstantaneousPowerW), and a
-  // schedule limit is never negative: skip resolving the schedule.
+  // Not charging draws nothing: skip resolving the schedule.
   if (connector.status !== "Charging") return 0;
-  const limitW = connector.scheduleLimitWattsNow();
-  return Number(
-    formatBounded(derivedInstantaneousPowerW(connector, limitW), limitW, 0),
-  );
-}
-
-/**
- * Best-effort instantaneous power estimate based on whatever rate the
- * scheduler is currently driving. We don't expose the scheduler's tick
- * delta, so we fall back to the EV-settings max charging power when
- * charging, or 0 when not. Good enough for CSMS-side parser testing.
- *
- * This is what the battery actually *accepts* — the charging curve lowers
- * demand here (#301) — and it is also the same effective power
- * {@link Connector}'s meter scheduler accumulates the energy register
- * against, via `effectiveChargingPowerW` (see `Connector.ts`). A billing
- * MeterValue built from this module and the register it reads therefore
- * always agree with each other.
- */
-function derivedInstantaneousPowerW(
-  connector: Connector,
-  scheduleLimitWatts: number,
-): number {
-  // `OCPPStatus.Charging` import is avoided here to keep this module free
-  // of cycles; check via the public string value.
-  if (connector.status !== "Charging") return 0;
-  const settings = connector.evSettings;
-  const maxKw = settings?.maxChargingPowerKw ?? 0;
-  const evMaxW = maxKw > 0 ? maxKw * 1000 : Infinity;
-  return effectiveChargingPowerW({
-    evMaxW,
-    curve: settings?.chargingCurve,
-    socPercent: resolveSocForCurve(
-      connector.soc,
-      connector.transaction?.initialSoc,
-      settings?.initialSoc,
-    ),
-    scheduleLimitWatts,
-  });
-}
-
-/**
- * What the EVSE offers right now — `Power.Offered` / `Current.Offered` — as
- * distinct from what the battery accepts (#301). The charging curve
- * describes battery acceptance, not EVSE capability: a 100 kW charger still
- * *offers* 100 kW to a nearly-full battery even though the battery only
- * draws a fraction of it, so the curve is deliberately not passed here.
- * Still capped by the active charging profile — that cap is the EVSE's own
- * limit, set by the CSMS, not a battery-acceptance concern.
- */
-function derivedOfferedPowerW(
-  connector: Connector,
-  scheduleLimitWatts: number,
-): number {
-  if (connector.status !== "Charging") return 0;
-  const settings = connector.evSettings;
-  const maxKw = settings?.maxChargingPowerKw ?? 0;
-  const evMaxW = maxKw > 0 ? maxKw * 1000 : Infinity;
-  return effectiveChargingPowerW({
-    evMaxW,
-    curve: undefined,
-    socPercent: connector.soc,
-    scheduleLimitWatts,
-  });
+  const point = connector.operatingPoint();
+  return Number(formatBounded(point.acceptedW, point.boundW, 0));
 }

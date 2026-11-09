@@ -20,7 +20,7 @@ related:
   - ../concepts/scenario-format.md
   - ../entities/cli.md
   - ../sources/bench-readme.md
-updated: 2026-11-08
+updated: 2026-11-09
 ---
 
 # Charger engine: migration history
@@ -103,7 +103,7 @@ promise is asynchronous. The SOAP handler is untouched. Decisions the design lef
 ### Stage B: behavior API, registry, scenario 1.5, engine
 
 Status (stage B): the types are in `packages/contracts/src/behavior.ts` (import them as
-`@ocpp-cp-sim/contracts/behavior`; they are not re-exported from the package index, whose names would
+`@ocpp-cp-simulator/contracts/behavior`; they are not re-exported from the package index, whose names would
 collide). Decisions the design left open:
 
 - **`CallAnswer`** (what `onBusy` is) is a `CallOutcome` without `after`.
@@ -190,12 +190,14 @@ design left open:
   transaction paths are not engine-owned yet.
 - **Moved so far** (each with its old code deleted): `default.firmware` (`UpdateFirmware`: the 1.6 status
   train with the one-shot `SimulatedFirmwareUpdateFailure`, the 2.x acknowledgement that stays
-  ack-only; a user behavior opts in to a 2.x train) and `default.signedFirmware` (`SignedUpdateFirmware` on
+  ack-only unless the `train` param opts in to the 2.x train, #600) and `default.signedFirmware` (`SignedUpdateFirmware` on
   1.6: the signed status train carrying `requestId`), `default.diagnostics` (`GetDiagnostics` on 1.6:
   file name, then `Uploading` and `Uploaded` or `UploadFailed` around a real multipart POST) and
-  `default.logs` (`GetLog`: the 1.6 `Uploading`, two seconds, `Uploaded` sequence; on 2.x ack-only with a
-  file name, a user behavior opts in). The diagnostics behavior imports `infrastructure/file_upload`, the one
-  place where `application/` reaches into `infrastructure/`; the upload is platform I/O the engine does not
+  `default.logs` (`GetLog`: the 1.6 `Uploading`, two seconds, `Uploaded` sequence; on 2.x, since #601, `Uploading` and
+  `Uploaded` after the file name and `AcceptedCanceled` for a replaced upload; `auto: false` is the former
+  ack-only). The diagnostics behavior uploads through the charge point's injected
+  `fileUploader` (by default `infrastructure/fileUpload`'s `UploadFile`,
+  [#575](https://github.com/shiv3/ocpp-cp-simulator/issues/575)); the upload is platform I/O the engine does not
   own, and `default.reset` (`Reset`: the 1.6 `Accepted` and reset after the answer; the 2.x
   `Rejected` / `Scheduled` / `Accepted` rules and the reset after the answer; since the merge of #635 an `OnIdle`
   reset answered `Scheduled` is queued on the `ChargePoint` once the answer settled and runs when the last
@@ -305,7 +307,8 @@ transactions, persistence and resume. Decisions the design left open:
   its public API), and answers `RemoteStartTransaction`, `RemoteStopTransaction` (1.6) and
   `RequestStartTransaction`, `RequestStopTransaction` (2.x) with the `AuthorizeRemoteTxRequests` and scenario
   delegation behavior of before. The handlers translate. `ChargePoint` hands the module a `TransactionPorts`
-  (`sendTransactionEvent`, `startConnectionTimeout`) for the two things it keeps private. Meter value
+  (`sendTransactionEvent`, `startConnectionTimeout`) for the two things it keeps private; since #575 the type
+  is in `domain/engine/` and `ChargePoint` reaches the module through the `transactions` port of its deps. Meter value
   calculation (`Connector`, `MeterValueBuilder`) and charging profile resolution (`clearChargingProfiles`)
   stay services.
 - **The scenario registry stays.** `_scenarioHandledConnectors`, `_scenarioStopHandledConnectors`,
@@ -350,7 +353,7 @@ loading behavior code. Decisions the design left open:
   `Bun.build` with a plugin that lowers every project source with `ts.transpileModule` to ES2017 (Bun itself
   does not lower) and checks the syntax again for `.js` sources. The syntax check goes first because the ES2017
   library reports the same constructs as "cannot find name".
-- **ESLint config.** `@ocpp-cp-sim/contracts/eslint-behavior` (`packages/contracts/eslint/behavior.js`, plain
+- **ESLint config.** `@ocpp-cp-simulator/contracts/eslint-behavior` (`packages/contracts/eslint/behavior.js`, plain
   JavaScript so that a user's config can import it without a TypeScript loader). Syntax rules only: it needs the
   user's parser. Module-scope state is reported as `let` / `var`, `new Map|Set|WeakMap|WeakSet|Array|Object`,
   and an empty `[]` or `{}`; a non-empty constant table is allowed.

@@ -1,9 +1,9 @@
 import { describe, it, expect } from "bun:test";
-import type { NotifyReportRequestV201 } from "@ocpp-cp-sim/ocpp/index";
-import type { ReportDataType } from "@ocpp-cp-sim/ocpp/types/v201/notify-report";
-import { isValidNotifyReportRequestV201 } from "@ocpp-cp-sim/ocpp/v201/index";
+import type { NotifyReportRequestV201 } from "@ocpp-cp-simulator/ocpp/index";
+import type { ReportDataType } from "@ocpp-cp-simulator/ocpp/types/v201/notify-report";
+import { isValidNotifyReportRequestV201 } from "@ocpp-cp-simulator/ocpp/v201/index";
 import { startMockCsms, normalizeTranscript } from "./mockCsms";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 
 function reportDatum(
@@ -27,7 +27,7 @@ function reportDatum(
 describe("OCPP 2.0.1 GetBaseReport", () => {
   it("answers Accepted and sends one NotifyReport with mapped configuration variables", async () => {
     const csms = startMockCsms();
-    const cp = new ChargePoint(
+    const cp = createChargePoint(
       "CP201-BASE-REPORT",
       DefaultBootNotification,
       1,
@@ -52,12 +52,6 @@ describe("OCPP 2.0.1 GetBaseReport", () => {
         interval: 300,
       });
 
-      await csms.waitForFrame(
-        (frame) =>
-          frame[0] === 2 &&
-          frame[2] === "StatusNotification" &&
-          (frame[3] as { evseId?: number }).evseId === 0,
-      );
       await csms.waitForFrame(
         (frame) =>
           frame[0] === 2 &&

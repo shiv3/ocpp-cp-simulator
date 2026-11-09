@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChargePoint } from "../ChargePoint";
+import type { ChargePoint } from "../ChargePoint";
+import { createChargePoint } from "../../../infrastructure/charge-point/createChargePoint";
 import type { BootNotification } from "../../types/OcppTypes";
 import { DefaultBootNotification } from "../../types/OcppTypes";
 
@@ -11,7 +12,7 @@ import { DefaultBootNotification } from "../../types/OcppTypes";
 const bootNotification: BootNotification = DefaultBootNotification;
 
 function buildChargePoint(): ChargePoint {
-  return new ChargePoint(
+  return createChargePoint(
     "test-cp-448",
     bootNotification,
     1,

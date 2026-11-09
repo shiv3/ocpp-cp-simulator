@@ -24,9 +24,19 @@
 # still moves it through scripts/roll-cli-latest.sh, and serialises only the
 # pointer move rather than the whole workflow.
 #
-# Usage: scripts/verify-install-urls.sh
-# Needs network access to github.com.
+# Usage: scripts/verify-install-urls.sh [--offline]
+#   (no flag)  the offline invariants and the network fetch of every URL.
+#   --offline  only what reads the repository: no network access needed, so a
+#              GitHub release outage cannot fail it (#808).
+# The fetch needs network access to github.com.
 set -uo pipefail
+
+OFFLINE=0
+case "${1:-}" in
+  "") ;;
+  --offline) OFFLINE=1 ;;
+  *) echo "usage: $0 [--offline]" >&2; exit 2 ;;
+esac
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
@@ -54,6 +64,10 @@ if [ -z "$URLS" ]; then
 fi
 
 for url in $URLS; do
+  if [ "$OFFLINE" = 1 ]; then
+    echo "  skip (offline) $url"
+    continue
+  fi
   code=""
   for attempt in 1 2 3; do
     # -I follows the redirect to the signed asset host; only the final status
@@ -80,7 +94,7 @@ done
 #    is still there and still produced by the roll script.
 # ---------------------------------------------------------------------------
 grep -q 'releases/download/cli-latest/ocpp-cp-simulator.tgz' .github/workflows/cli-release.yml || {
-  echo "::error file=.github/workflows/cli-release.yml::release notes no longer advertise the rolling cli-latest URL"
+  echo "::error file=.github/workflows/cli-release.yml::the workflow no longer references the rolling cli-latest URL"
   rc=1
 }
 grep -qE '^ *\./scripts/roll-cli-latest\.sh' .github/workflows/cli-release.yml || {
@@ -110,5 +124,11 @@ grep -q 'group: cli-latest-pointer' .github/workflows/cli-release.yml || {
   rc=1
 }
 
-[ $rc -eq 0 ] && echo "==> every advertised install URL resolves"
+if [ $rc -eq 0 ]; then
+  if [ "$OFFLINE" = 1 ]; then
+    echo "==> offline invariants hold (install URLs not fetched)"
+  else
+    echo "==> every advertised install URL resolves"
+  fi
+fi
 exit $rc

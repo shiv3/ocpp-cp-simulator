@@ -2,9 +2,10 @@ import { describe, it, expect } from "bun:test";
 import type {
   MeterValuesRequestV201,
   TransactionEventRequestV201,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import {
   DefaultBootNotification,
   OCPPStatus,
@@ -40,7 +41,7 @@ async function bootedChargePoint(
   id: string,
   version: "OCPP-2.0.1" | "OCPP-1.6" = "OCPP-2.0.1",
 ): Promise<ChargePoint> {
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     id,
     DefaultBootNotification,
     1,
@@ -70,7 +71,7 @@ async function bootedChargePoint(
 
 describe("OCPP 2.0.1 TransactionEvent width (#335)", () => {
   it("carries a caller's triggerReason / chargingState on Started and stoppedReason / triggerReason on Ended", async () => {
-    const csms = startMockCsms();
+    const csms = startMockCsms({ answerCalls: true });
     const cp = await bootedChargePoint(csms, "CP201-WIDTH-LIFECYCLE");
     try {
       // A cable-first session: the transaction opens on plug-in, not on
@@ -115,7 +116,7 @@ describe("OCPP 2.0.1 TransactionEvent width (#335)", () => {
   });
 
   it("derives stoppedReason from the 1.6 reason when none is named (unchanged default)", async () => {
-    const csms = startMockCsms();
+    const csms = startMockCsms({ answerCalls: true });
     const cp = await bootedChargePoint(csms, "CP201-WIDTH-DEFAULT-STOP");
     try {
       await cp.startTransaction("TAG-335", 1);
@@ -131,7 +132,7 @@ describe("OCPP 2.0.1 TransactionEvent width (#335)", () => {
   });
 
   it("sends a driven Updated event with the caller's triggerReason, chargingState and metered sampledValues carrying context", async () => {
-    const csms = startMockCsms();
+    const csms = startMockCsms({ answerCalls: true });
     const cp = await bootedChargePoint(csms, "CP201-WIDTH-UPDATED");
     try {
       await cp.startTransaction("TAG-335", 1);
@@ -209,7 +210,7 @@ describe("OCPP 2.0.1 TransactionEvent width (#335)", () => {
   });
 
   it("ignores a driven Updated event when no transaction is running", async () => {
-    const csms = startMockCsms();
+    const csms = startMockCsms({ answerCalls: true });
     const cp = await bootedChargePoint(csms, "CP201-WIDTH-NO-TX");
     try {
       const before = csms.received.length - 1;
@@ -231,7 +232,7 @@ describe("OCPP 2.0.1 TransactionEvent width (#335)", () => {
   });
 
   it("puts the requested ReadingContext on standalone MeterValues sampledValues", async () => {
-    const csms = startMockCsms();
+    const csms = startMockCsms({ answerCalls: true });
     const cp = await bootedChargePoint(csms, "CP201-WIDTH-CONTEXT");
     try {
       cp.setMeterValue(1, 250);

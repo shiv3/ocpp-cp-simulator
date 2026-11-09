@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import { parseCreateBody } from "../httpServer";
-import { createParamsSchema } from "@ocpp-cp-sim/contracts/index";
+import { createParamsSchema } from "@ocpp-cp-simulator/contracts/index";
 import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
 import { createRuntimeDeps } from "../socketServer";
-import { SupervisionUrlPool } from "@ocpp-cp-sim/core/cp/infrastructure/transport/SupervisionUrlPool";
-import { BunSqliteDatabase } from "@ocpp-cp-sim/core/cp/domain/persistence/BunSqliteDatabase";
-import { toWireCreateParams } from "@ocpp-cp-sim/client/remote/RemoteChargePointService";
+import { SupervisionUrlPool } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/SupervisionUrlPool";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/BunSqliteDatabase";
+import { toWireCreateParams } from "@ocpp-cp-simulator/client/remote/RemoteChargePointService";
 
 const OCPP_J = {
   cpId: "CP001",

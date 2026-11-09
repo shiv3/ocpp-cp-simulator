@@ -1,9 +1,10 @@
 import type { Node, Edge } from "@xyflow/react";
-import type { ScenarioMode } from "@ocpp-cp-sim/contracts/scenario";
+import type { ScenarioMode } from "@ocpp-cp-simulator/contracts/scenario";
 import type { OCPPStatus } from "../../domain/types/OcppTypes";
 import type { CurvePoint } from "../../domain/connector/MeterValueCurve";
 import type { EVSettings } from "../../domain/connector/EVSettings";
 import type {
+  IdTokenTypeName,
   TransactionStartTriggerReason,
   TransactionStopTriggerReason,
 } from "../../domain/connector/Transaction";
@@ -95,7 +96,35 @@ export enum ScenarioNodeType {
   CALL_RESPONSE = "callResponse",
   // Schema 1.5 (#566): select a behavior loaded on the station by id.
   USE_BEHAVIOR = "useBehavior",
+  // Schema 1.6 (#654, step 3): the bounded set of new nodes. A verb the
+  // station already has on `ctx` (`ctx.notify`, `ctx.state`) or one of the
+  // listed decision nodes; see docs/concepts/scenario-format.md, "What the
+  // format will not do".
+  /** Send a status notification (`ctx.notify`), fire-and-forget. */
+  NOTIFY = "notify",
+  /** Branch on the equality of a value with JSON constants. */
+  SWITCH = "switch",
+  /** Branch on a seeded, weighted draw. */
+  CHOICE = "choice",
+  /** Store a JSON value in the run's state, read back through `$from`. */
+  SET_STATE = "setState",
 }
+
+/**
+ * Schema 1.9 flow-control nodes: fork a branch into parallel branches and
+ * meet them again. Kept apart from {@link ScenarioNodeType}, which lists the
+ * steps the console editor offers (its palettes and forms are keyed by it);
+ * the executor, the graph rules and the schema know both.
+ */
+export enum ScenarioFlowNodeType {
+  /** Run every outgoing ordinary edge as its own branch. */
+  PARALLEL = "parallel",
+  /** Where the branches of a `parallel` meet; `mode` "all" (default) or "any". */
+  JOIN = "join",
+}
+
+/** A node type the executor runs: a step or a flow-control node. */
+export type AnyScenarioNodeType = ScenarioNodeType | ScenarioFlowNodeType;
 
 /**
  * Base node data
@@ -124,16 +153,22 @@ export type TransactionNodeData = BaseNodeData & {
    *  "EVDisconnected" for TC_005, "PowerLoss"). A reason captured by a
    *  preceding RemoteStopTrigger node still wins. Issue #110. */
   stopReason?: string;
+  /** OCPP 2.x `IdToken.type` of the start's Authorize and TransactionEvents
+   *  (#599); `ISO14443` when absent. Ignored on 1.6. Only for start. */
+  idTokenType?: IdTokenTypeName;
 };
 
 export interface RemoteStartDetails {
   tagId: string;
   remoteStartId?: number;
+  /** The CSMS's `idToken.type` of a 2.x RequestStartTransaction (#599). */
+  idTokenType?: IdTokenTypeName;
 }
 
 export interface StartTransactionOptions {
   triggerReason?: TransactionStartTriggerReason;
   remoteStartId?: number;
+  idTokenType?: IdTokenTypeName;
 }
 
 export interface StopTransactionOptions {
@@ -180,6 +215,13 @@ export type MeterValueNodeData = BaseNodeData & {
  */
 export type DelayNodeData = BaseNodeData & {
   delaySeconds: number;
+  /** Schema 1.6 (#654): ISO-8601 instant on the station's clock. The node
+   *  waits until then or for `delaySeconds`, whichever is longer; an instant
+   *  that has passed adds nothing. */
+  until?: string;
+  /** Schema 1.6 (#654): add a seeded draw of 0 to `jitterSeconds` (millisecond
+   *  resolution) to the wait. The same seed gives the same wait. */
+  jitterSeconds?: number;
 };
 
 /**
@@ -259,7 +301,10 @@ export type CsmsCallTriggerNodeData = BaseNodeData & {
  * value, resolved against the exchange of the branch.
  */
 export type CallResponseSpec = {
-  kind: "result" | "error" | "none";
+  /** `accepted` / `rejected` (schema 1.6, #654): the version-neutral answer of
+   *  the CALL's action, `ctx.accepted(action)` / `ctx.rejected(action)`; they
+   *  take no `payload`. */
+  kind: "result" | "error" | "none" | "accepted" | "rejected";
   payload?: Record<string, unknown>;
   errorCode?: string;
   errorDescription?: string;
@@ -277,10 +322,85 @@ export type CallResponseNodeData = BaseNodeData &
     skipValidation?: boolean;
   };
 
-/** Use Behavior Node Data (schema 1.5, #566): data only, the id of a behavior
- *  loaded on the station. Fails the run if none has that id. */
+/** The kinds of status notification a `notify` node sends. */
+export const NOTIFY_KINDS = [
+  "firmwareStatus",
+  "signedFirmwareStatus",
+  "logStatus",
+  "diagnosticsStatus",
+] as const;
+export type NotifyKind = (typeof NOTIFY_KINDS)[number];
+
+/** A whole value read from a root: `{ "$from": "state.key" }` (schema 1.5, 1.6). */
+export type FromReference = { $from: string };
+
+/**
+ * Notify Node Data (schema 1.6, #654): `ctx.notify` as a node. Sends the
+ * status notification and goes on without waiting for the CSMS. `requestId`
+ * may be a `$from` reference; `signedFirmwareStatus` needs one.
+ */
+export type NotifyNodeData = BaseNodeData & {
+  kind: NotifyKind;
+  status: string;
+  requestId?: number | FromReference;
+};
+
+/**
+ * Switch Node Data (schema 1.6, #654): the run goes on along the edge whose
+ * `sourceHandle` is `case-<n>` for the first case equal to `value`, else along
+ * `default`; a branch with no such edge ends. Equality is JSON equality: it
+ * never converts (`1` is not `"1"`). `value` is a constant or a `$from`.
+ */
+export type SwitchNodeData = BaseNodeData & {
+  value: unknown;
+  cases: unknown[];
+};
+
+/**
+ * Choice Node Data (schema 1.6, #654): a seeded, weighted draw among
+ * `options`; the run goes on along the edge whose `sourceHandle` is
+ * `option-<n>`. `weight` defaults to 1. The same seed gives the same draw.
+ */
+export type ChoiceNodeData = BaseNodeData & {
+  options: Array<{ weight?: number; label?: string }>;
+};
+
+/**
+ * Set State Node Data (schema 1.6, #654): stores `value` (JSON; a whole value
+ * may be a `$from`) under `key` in the state of this run, which `$from`
+ * `state.<key>` reads back. The state lives for the run, shared by its
+ * parallel branches, and is not persisted.
+ */
+export type SetStateNodeData = BaseNodeData & {
+  key: string;
+  value: unknown;
+};
+
+/** Parallel Node Data (schema 1.9): a label only. */
+export type ParallelNodeData = BaseNodeData;
+
+/**
+ * Join Node Data (schema 1.9). `all` (the default; any other value too):
+ * go on once every branch of the parallel execution arrived or ended;
+ * `any`: go on at the first arrival and cancel the other branches.
+ */
+export type JoinNodeData = BaseNodeData & {
+  mode?: "all" | "any";
+};
+
+/** Use Behavior Node Data (schema 1.5, #566; `params` and `mode` 1.6, #654):
+ *  data only, the id of a behavior (loaded on the station, or a built-in
+ *  `default.*`). Fails the run if none has that id.
+ *
+ *  `mode: "use"` (the default) selects it; `params` are its knobs for the run,
+ *  merged over the station's selection and the behavior's defaults, validated
+ *  against its params schema, and refused (the run fails) when they do not
+ *  fit. `mode: "disable"` answers each of its CALLs with the version's
+ *  `accepted` answer and nothing after, for the run; it takes no params. */
 export type UseBehaviorNodeData = BaseNodeData & {
   behaviorId: string;
+  mode?: "use" | "disable";
+  params?: Record<string, unknown>;
 };
 
 /**
@@ -498,6 +618,11 @@ export type ScenarioNodeData =
   | OcppCallNodeData
   | CallResponseNodeData
   | UseBehaviorNodeData
+  | NotifyNodeData
+  | SwitchNodeData
+  | ChoiceNodeData
+  | SetStateNodeData
+  | JoinNodeData
   | StartNodeData
   | ConnectionTriggerNodeData
   | BaseNodeData;
@@ -506,6 +631,33 @@ export type ScenarioNodeData =
  * Scenario node with typed data
  */
 export type ScenarioNode = Node<ScenarioNodeData>;
+
+/**
+ * The bounds of a loop edge (schema 1.10). All optional; the first one that is
+ * satisfied at the end of a round exits the loop, none at all loops forever.
+ */
+export interface LoopBounds {
+  /** Exit after this many rounds (a round is one pass of the source node;
+   *  0 behaves like 1: the check runs after the first pass). */
+  times?: number;
+  /** Exit at the first check at or after this many seconds of the station
+   *  clock since the loop was entered. A round that crosses it completes. */
+  forSeconds?: number;
+  /** Exit when `value` (a `$from` reference or a constant, as `switch.value`)
+   *  matches one of `cases` (JSON constants or `{ "$match": … }`, as
+   *  `switch.cases`). */
+  until?: { value: unknown; cases: unknown[] };
+}
+
+/**
+ * A scenario edge. `kind: "loop"` (schema 1.10) marks a loop edge: followed
+ * out of its source after a round while its `loop` bounds are not satisfied,
+ * and never as an ordinary next step. Any other edge is ordinary.
+ */
+export type ScenarioEdge = Edge & {
+  kind?: "loop";
+  loop?: LoopBounds;
+};
 
 /**
  * Scenario trigger configuration
@@ -520,14 +672,26 @@ export interface ScenarioTrigger {
 
 /**
  * Scenario file schema version (issue #214), mirroring the `"major.minor"`
- * string convention and versioning rules of {@link
- * ../../../../../trace/src/OcppTraceRecord.ts | OCPP_TRACE_SCHEMA_VERSION}: additive
+ * string convention and versioning rules of the Open OCPP Trace format's
+ * `SCHEMA_VERSION` (`@open-ocpp-trace/core`, #886): additive
  * optional fields bump the minor version, consumers MUST ignore unknown
  * fields, and a semantic change to an existing field is a new major version.
  * See `packages/core/schema/scenario.schema.json` (Draft 2020-12) and
  * `docs/concepts/scenario-format.md`.
  */
-export const SCENARIO_SCHEMA_VERSION = "1.5";
+export const SCENARIO_SCHEMA_VERSION = "1.10";
+
+/** Where a recorded scenario came from (schema 1.6, #654 step 2). */
+export interface ScenarioRecordedFrom {
+  /** The id of the behavior that ran, e.g. `default.firmware`. */
+  behaviorId: string;
+  /** The build that ran it: git commit when known, else the version label. */
+  commit: string;
+  /** The seed of the run: the same seed records the same scenario. */
+  seed: string | number;
+  /** The simulator version that recorded it. */
+  version: string;
+}
 
 /**
  * Scenario definition
@@ -557,12 +721,18 @@ export interface ScenarioDefinition {
    * hand (CLI, MCP, a JSON import onto a connector).
    */
   libraryId?: string;
+  /**
+   * Set on a scenario made by recording a behavior run (schema 1.6, #654
+   * step 2), so it is never mistaken for the default behavior it came from.
+   * Informational: the runtime ignores it.
+   */
+  recordedFrom?: ScenarioRecordedFrom;
   name: string;
   description?: string;
   targetType: "chargePoint" | "connector";
   targetId?: number; // Connector ID if targetType is "connector"
   nodes: ScenarioNode[];
-  edges: Edge[];
+  edges: ScenarioEdge[];
   createdAt: string;
   updatedAt: string;
 
@@ -897,8 +1067,12 @@ export interface ScenarioExecutorCallbacks {
    *  armed and answer the CALLs it still owns with CALLERROR `InternalError`. */
   onRunEnded?: () => void;
   /** Schema 1.5: select the behavior loaded on the station with this id;
-   *  throws if there is none. */
-  onUseBehavior?: (behaviorId: string, nodeId: string) => void;
+   *  throws if there is none. Schema 1.6: `params` and `mode: "disable"`. */
+  onUseBehavior?: (
+    behaviorId: string,
+    nodeId: string,
+    options?: { mode: "use" | "disable"; params?: Record<string, unknown> },
+  ) => void;
   /** Issue #240: park until the WebSocket reaches `event`. Level-triggered;
    *  never rejects on disconnect. */
   onWaitForConnection?: (event: "connected" | "disconnected") => Promise<void>;
@@ -979,6 +1153,14 @@ export interface ScenarioExecutorCallbacks {
   /** #389: send an expert OCPP call; resolves with the CSMS's answer and
    *  rejects when the call is refused or gets no answer. */
   onSendOcppCall?: (request: OcppCallRequest) => Promise<OcppCallOutcome>;
+  /** Schema 1.6 (#654): send a status notification (`notify` node). */
+  onNotify?: (kind: NotifyKind, status: string, requestId?: number) => void;
+  /**
+   * Schema 1.6 (#654): the read-only `$from` roots that live on the station.
+   * `charger` is the station, `connector` the connector the scenario is bound
+   * to (undefined for a station-level scenario). A plain JSON object.
+   */
+  onReadStation?: (root: "charger" | "connector") => unknown;
   /** §4.3: send CP-initiated DataTransfer.req. */
   onSendDataTransfer?: (
     vendorId: string,

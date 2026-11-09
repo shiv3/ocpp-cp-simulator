@@ -7,7 +7,11 @@ sources:
   - docker-compose.yml
   - .github/workflows/docker-publish.yml
   - .github/workflows/ci.yml
+  - .tool-versions
   - docker/
+  - bunfig.toml
+  - "issue #346"
+  - "issue #886"
 related:
   - cli.md
   - daemon.md
@@ -16,7 +20,8 @@ related:
   - ../concepts/log-format.md
   - ../concepts/access-control.md
   - ../sources/reverse-proxy-sso-example.md
-updated: 2026-11-05
+  - ../analyses/testing-strategy.md
+updated: 2026-11-09
 ---
 
 # Docker image
@@ -80,8 +85,12 @@ daemon, which runs from the CLI bundle without `.git`. A deployment that builds 
 image must pass the build arg: a runtime `-e APP_COMMIT=…` alone changes the
 daemon but not the UI bundle, which is fixed at build time.
 
+The build needs `GITHUB_TOKEN` set to a token with `read:packages`; see
+[Building locally](#building-locally).
+
 ```sh
-docker build --build-arg APP_COMMIT=$(git rev-parse HEAD) -t ocpp-cp-sim .
+docker build --secret id=github_token,env=GITHUB_TOKEN \
+  --build-arg APP_COMMIT=$(git rev-parse HEAD) -t ocpp-cp-sim .
 ```
 
 A tag build ends by asking the registry for every tag it just pushed and
@@ -159,7 +168,9 @@ and the `state.reset` RPC used by the Reset action.
 persistent volume + sensible defaults:
 
 ```sh
-# Bring it up (binds ./.state on the host)
+# Bring it up (binds ./.state on the host); the build needs GITHUB_TOKEN,
+# see Building locally
+export GITHUB_TOKEN=${GITHUB_TOKEN:-$(gh auth token)}
 docker compose up --build
 
 # Override CP / CSMS / port via env
@@ -220,11 +231,63 @@ docker run --rm -p 9700:9700 \
 See [Log format](../concepts/log-format.md) for the schema and the related
 `logs.get` / `logs.clear` RPC methods.
 
+## Running the CLI
+
+The image runs the [CLI](cli.md) as well as the daemon, with no
+`--entrypoint` override (#346). The entrypoint (`docker/entrypoint.sh`) chooses
+by looking at the arguments:
+
+| Arguments                                                                                    | What runs                                                                                                                          |
+| -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `--json` anywhere, or first argument `analyze`, `export-k6` or `behavior`                    | `bun dist-cli/main.js <your arguments>`: nothing is added                                                                          |
+| first argument `cli`                                                                         | the same; `cli` is dropped, so any CLI flag combination can be forced (`cli --cp-id CP1 --ws-url …` runs the REPL, not the daemon) |
+| anything else, including a flag-first line such as `--cp-id cp1 --ws-url …`, or no arguments | the daemon: `--http-host 0.0.0.0 --unsafe-remote --web-console $HTTP_PORT` (+ `--state-db`, `--health-path`) then your arguments   |
+
+`STATE_DB` and `HEALTH_PATH` apply to the daemon only. JSON mode is the
+[JSON Lines protocol](../concepts/control-plane.md) on stdin / stdout, so keep
+stdin open with `-i`:
+
+```sh
+echo '{"id":1,"command":"status"}' | docker run -i --rm \
+  ghcr.io/shiv3/ocpp-cp-simulator:latest \
+  --json --cp-id CP001 --ws-url ws://csms.example/ocpp/ --ocpp-version OCPP-1.6J
+```
+
+CLI mode runs as the user the container was started as (root by default, or
+whatever `docker run --user` names): the entrypoint does not drop to `bun` and
+does not `chown` anything. A host directory mounted for `--trace-output`
+(`-v "$PWD/results:/trace"`) or a 0600 key / certificate file therefore works
+whatever its owner, which the daemon's `bun` user (uid 1000) cannot promise. The
+`HEALTHCHECK` passes without probing in CLI mode (the entrypoint leaves
+`/tmp/.ocpp-cli-mode`), since there is no daemon to ask.
+
+Behaviour change: before CLI mode, `--json` anywhere on the command line was
+ignored by the image, because the daemon wins in `main.ts`, and the container
+started the daemon. It now starts JSON mode, which exits 0 as soon as stdin is
+closed, so `docker run -d <image> --json …` without `-i` ends immediately.
+
+The container exits 0 when stdin reaches EOF. This is the supported way to
+drive the simulator from a test runner such as
+[open-ocpp-tck](https://github.com/juherr/open-ocpp-tck).
+
+### `bun src/cli/main.ts` compatibility
+
+Images up to v0.9.0 ran the CLI from source, and open-ocpp-tck starts them as
+`docker run -i --entrypoint bun <image> src/cli/main.ts --json …` with
+`/app` as the working directory. The image no longer has sources, but it ships
+`/app/src/cli/main.ts` (from `docker/cli-shim.ts`): a few lines that run
+`dist-cli/main.js` with the same arguments, stdio and exit code, so that
+command line keeps working. It is a compatibility path, not an interface to
+build on; use the table above. `cliBundle.bun.test.ts` (shim and bundle answer
+a JSON Lines command and exit 0 on stdin EOF) and `dockerEntrypoint.bun.test.ts`
+(the argument table) pin both, and the `docker-build` job in `ci.yml` runs
+both shapes against the built image.
+
 ## Image details
 
 | Aspect            | Value                                                                                                                   |
 | ----------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| Base              | `oven/bun:1-alpine` (multi-stage build)                                                                                 |
+| Base              | `oven/bun:${BUN_VERSION}-alpine`, `BUN_VERSION` pinned to the bun of `.tool-versions` (multi-stage build)               |
 | Default user      | `bun` (non-root)                                                                                                        |
 | Exposed port      | `9700`                                                                                                                  |
 | Volumes           | `/data` (state DB)                                                                                                      |
@@ -232,7 +295,19 @@ See [Log format](../concepts/log-format.md) for the schema and the related
 | Control plane     | Socket.IO at `/socket.io/`; REST control endpoints and the Unix-domain socket are removed                               |
 | Bundled scenarios | `/app/docs/examples/scenarios/` (point `--scenario-template-file` at one of these or mount your own under `/scenarios`) |
 
-The entrypoint starts the daemon with
+Unless overridden, the image runs the Bun that CI tests on, not the latest
+1.x: the
+`BUN_VERSION` build arg defaults to the version on the `bun` line of
+`.tool-versions` (1.4.3), the `docker-build` job in `ci.yml` and
+`docker-publish.yml` both pass the value read from that file, and
+`scripts/__tests__/bunVersionPin.bun.test.ts` fails when the `Dockerfile`
+default drifts from it. `docker-compose.yml` passes no `BUN_VERSION`, so a
+compose build uses the pinned default. `--build-arg BUN_VERSION=<x.y.z>`
+still overrides it; Bun 1.4.4 breaks the WebSocket client (see
+[Testing strategy](../analyses/testing-strategy.md)).
+
+Unless it is running the CLI (see [Running the CLI](#running-the-cli)), the
+entrypoint starts the daemon with
 `--http-host 0.0.0.0 --unsafe-remote --web-console ${HTTP_PORT}`. The unsafe
 override is required because the container intentionally binds a non-loopback
 address; exposure is controlled by Docker port mapping, CORS, optional
@@ -251,10 +326,12 @@ Notes:
   `http://localhost:9700/` while the daemon listens on 8080 internally.
 
 The image **doesn't** contain Vite / Tauri / dev dependencies, sources or
-`node_modules`: the build stage runs `bun run build` (the web console, `dist/`)
+`node_modules`: the build stage runs `bun run build` (the web console, `dist/`, with its
+`THIRD-PARTY-LICENSES.txt`, #857; these notices cover the **web console only**,
+not the packages inlined in `dist-cli/main.js`)
 and `bun run build:cli` (the CLI and daemon as one bundle,
 `dist-cli/main.js`), and the runtime layer holds only those two, the scenario
-examples and `docker/entrypoint.sh`, which starts `bun dist-cli/main.js`. That
+examples and `docker/entrypoint.sh`, which starts `bun dist-cli/main.js`, and the one-file `src/cli/main.ts` shim. That
 is the same pair the npm tarball ships, so the two cannot drift apart the way
 the source-based image and the tarball once did (#320); see
 [What the package ships](cli.md#what-the-package-ships). The image carries one
@@ -267,10 +344,20 @@ OCPP validators and schemas.
 ## Building locally
 
 ```sh
-docker build -t ocpp-cp-sim:dev .
+export GITHUB_TOKEN=${GITHUB_TOKEN:-$(gh auth token)}   # any token with read:packages
+docker build --secret id=github_token,env=GITHUB_TOKEN -t ocpp-cp-sim:dev .
 docker run --rm -p 9700:9700 -v "$PWD/.state:/data" ocpp-cp-sim:dev \
   --cp-id CP001 --ws-url wss://example.invalid/chargepoint/
 ```
+
+The build's `bun install` fetches the
+[Open OCPP Trace SDK](../concepts/trace-format.md#reference-implementation)
+(`@open-ocpp-trace/*`) from GitHub Packages, which asks for a token even for
+a public package (#886). Pass any token with `read:packages` as the
+`github_token` build secret, as above: the Dockerfile mounts it for that one
+`RUN` step only, so it never lands in a layer or in the image history.
+`docker compose up --build` forwards the `GITHUB_TOKEN` environment variable
+as the same secret. Pulling the published image needs no token.
 
 The build is fully self-contained (no host node_modules required); first build
 ≈ 60 s, subsequent rebuilds hit the Bun install cache for ≈ 10 s.
@@ -286,7 +373,7 @@ probe) and at runtime (forwarded to the daemon's `--health-path`):
 
 ```sh
 # 1) Build with the custom path baked into the UI bundle.
-docker build \
+docker build --secret id=github_token,env=GITHUB_TOKEN \
   --build-arg HEALTH_PATH=/internal/healthz \
   -t ocpp-cp-sim:custom-health .
 

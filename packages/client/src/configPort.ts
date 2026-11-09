@@ -1,7 +1,7 @@
 import type {
   SimulatorConfigInput,
   WireSimulatorConfig,
-} from "@ocpp-cp-sim/contracts/index";
+} from "@ocpp-cp-simulator/contracts/index";
 import type { Config } from "./interfaces/ConfigRepository";
 
 export function getConfigBasicAuthPassword(
@@ -51,6 +51,9 @@ export function mergeWriteOnlyConfigSecrets(
     connectorNumber: next.connectorNumber,
     tagID: next.tagID,
     ocppVersion: next.ocppVersion,
+    ...(next.txUpdatedMeterValues !== undefined
+      ? { txUpdatedMeterValues: next.txUpdatedMeterValues }
+      : {}),
     basicAuthSettings: {
       enabled: next.basicAuthSettings.enabled,
       username: next.basicAuthSettings.username,

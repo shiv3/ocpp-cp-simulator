@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { ChargePoint } from "../packages/core/src/cp/domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../packages/core/src/cp/domain/charge-point/ChargePoint";
+import { createChargePoint } from "../packages/core/src/cp/infrastructure/charge-point/createChargePoint";
 import { getDefaultEVSettings } from "../packages/core/src/cp/domain/connector/EVSettings";
 import {
   DefaultBootNotification,
@@ -42,7 +43,7 @@ afterAll(async () => {
 });
 
 function makeChargePoint(cpId: string): ChargePoint {
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     cpId,
     DefaultBootNotification,
     1,

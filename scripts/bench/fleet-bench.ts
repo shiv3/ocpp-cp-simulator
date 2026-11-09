@@ -1059,9 +1059,10 @@ function armLoad(
       // the rest of the run and through teardown — the placeholder stop
       // destroys the only handle that could ever close it.
       //
-      // Preserving it costs one CALL, not a stream — see
+      // Preserving it costs a trickle, not a stream — see
       // `dispositionAfterStart`. This charge point never cycles again and runs
-      // no meter scheduler; the one frame it still emits is the
+      // no auto-meter scheduler, but its running 1.x transaction is sampled
+      // every `MeterValueSampleInterval` seconds (#722); it also emits the
       // `StatusNotification` that the late conf's transition to `Charging`
       // produces. Teardown's `closeOpenTransactions` sweep issues the stop
       // instead — outside every measurement window, and late enough that the

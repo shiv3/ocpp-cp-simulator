@@ -225,6 +225,7 @@ const COMPONENTS: readonly DeviceModelComponentDef[] = [
   { name: "LocalAuthListCtrlr", summary: "The local authorization list." },
   { name: "AuthCtrlr", summary: "Authorization." },
   { name: "AuthCacheCtrlr", summary: "The authorization cache." },
+  { name: "ReservationCtrlr", summary: "Reservations." },
   { name: "MonitoringCtrlr", summary: "Variable monitoring." },
   { name: "ChargingStation", summary: "The station as a whole." },
   { name: "SecurityCtrlr", summary: "Security and certificates." },
@@ -289,7 +290,11 @@ const runtime = (
   ...rest,
 });
 
-/** The measurands the meter value builder models (`MeterValueBuilder`). */
+/**
+ * The measurands the meter value builder models (`MeterValueBuilder`) that are
+ * in the 2.x `MeasurandEnumType` (no `Temperature` or `RPM`, 1.6 measurands;
+ * #714).
+ */
 const METER_MEASURANDS: readonly string[] = [
   "Energy.Active.Import.Register",
   "Energy.Active.Import.Interval",
@@ -310,9 +315,7 @@ const METER_MEASURANDS: readonly string[] = [
   "Power.Offered",
   "Power.Factor",
   "SoC",
-  "Temperature",
   "Frequency",
-  "RPM",
 ];
 
 const VARIABLES: readonly DeviceModelVariableDef[] = [
@@ -374,6 +377,59 @@ const VARIABLES: readonly DeviceModelVariableDef[] = [
     min: 1,
     default: 30,
   }),
+  // #702: B04.FR.01/02; 2.x only, the spec gives no default.
+  persistent("OCPPCommCtrlr", "OfflineThreshold", "OfflineThreshold", {
+    sharedWith16: false,
+    mutability: "ReadWrite",
+    dataType: "integer",
+    min: 0,
+    default: 60,
+    effect:
+      "Seconds offline after which a reconnect sends a StatusNotification for every connector.",
+  }),
+  // #609: Part 4 §5.4 reconnect back-off; 2.x only.
+  persistent(
+    "OCPPCommCtrlr",
+    "RetryBackOffWaitMinimum",
+    "RetryBackOffWaitMinimum",
+    {
+      sharedWith16: false,
+      mutability: "ReadWrite",
+      dataType: "integer",
+      min: 1,
+      max: Math.floor(MAX_TIMER_MS / 1000),
+      default: 1,
+      effect: "Seconds before the first reconnect attempt.",
+    },
+  ),
+  persistent(
+    "OCPPCommCtrlr",
+    "RetryBackOffRandomRange",
+    "RetryBackOffRandomRange",
+    {
+      sharedWith16: false,
+      mutability: "ReadWrite",
+      dataType: "integer",
+      min: 0,
+      max: Math.floor(MAX_TIMER_MS / 1000),
+      default: 0,
+      effect: "A random extra wait, in seconds, added to every reconnect wait.",
+    },
+  ),
+  persistent(
+    "OCPPCommCtrlr",
+    "RetryBackOffRepeatTimes",
+    "RetryBackOffRepeatTimes",
+    {
+      sharedWith16: false,
+      mutability: "ReadWrite",
+      dataType: "integer",
+      min: 0,
+      max: 30,
+      default: 5,
+      effect: "How many times the reconnect wait doubles.",
+    },
+  ),
   persistent("TxCtrlr", "EVConnectionTimeOut", "ConnectionTimeOut", {
     mutability: "ReadWrite",
     dataType: "integer",
@@ -409,6 +465,65 @@ const VARIABLES: readonly DeviceModelVariableDef[] = [
     default: false,
     effect: "Meter values carry a signed OCMF record.",
   }),
+  // #607: transaction-end meter data (Part 2 Appendices ch. 3).
+  persistent("SampledDataCtrlr", "TxStartedMeasurands", "TxStartedMeasurands", {
+    sharedWith16: false,
+    mutability: "ReadWrite",
+    dataType: "MemberList",
+    valuesList: METER_MEASURANDS,
+    default: [],
+    effect: "Extra Transaction.Begin samples in TransactionEvent(Started).",
+  }),
+  persistent("SampledDataCtrlr", "TxEndedMeasurands", "StopTxnSampledData", {
+    mutability: "ReadWrite",
+    dataType: "MemberList",
+    valuesList: METER_MEASURANDS,
+    default: [],
+    effect: "The sampled measurands TransactionEvent(Ended) carries.",
+  }),
+  persistent("SampledDataCtrlr", "TxEndedInterval", "TxEndedInterval", {
+    sharedWith16: false,
+    mutability: "ReadWrite",
+    dataType: "integer",
+    min: 0,
+    max: Math.floor(MAX_TIMER_MS / 1000),
+    default: 0,
+    effect:
+      "Seconds between the periodic samples TransactionEvent(Ended) carries.",
+  }),
+  persistent("AlignedDataCtrlr", "TxEndedMeasurands", "StopTxnAlignedData", {
+    mutability: "ReadWrite",
+    dataType: "MemberList",
+    valuesList: METER_MEASURANDS,
+    default: [],
+    effect: "The clock-aligned measurands TransactionEvent(Ended) carries.",
+  }),
+  persistent(
+    "AlignedDataCtrlr",
+    "TxEndedInterval",
+    "AlignedDataTxEndedInterval",
+    {
+      sharedWith16: false,
+      mutability: "ReadWrite",
+      dataType: "integer",
+      min: 0,
+      max: Math.floor(MAX_TIMER_MS / 1000),
+      default: 0,
+      effect: "The clock-aligned grid of the TransactionEvent(Ended) history.",
+    },
+  ),
+  persistent(
+    "AlignedDataCtrlr",
+    "SendDuringIdle",
+    "AlignedDataSendDuringIdle",
+    {
+      sharedWith16: false,
+      mutability: "ReadWrite",
+      dataType: "boolean",
+      default: false,
+      effect: "Clock-aligned meter values are sent only while idle.",
+    },
+  ),
   persistent("AlignedDataCtrlr", "Interval", "ClockAlignedDataInterval", {
     mutability: "ReadWrite",
     dataType: "integer",
@@ -469,6 +584,15 @@ const VARIABLES: readonly DeviceModelVariableDef[] = [
       effect: "An offline station starts a transaction for an unknown id.",
     },
   ),
+  // #598: C12.FR.09; "" = no master pass. 2.x only.
+  persistent("AuthCtrlr", "MasterPassGroupId", "MasterPassGroupId", {
+    sharedWith16: false,
+    mutability: "ReadWrite",
+    dataType: "string",
+    default: "",
+    effect:
+      "A RequestStartTransaction whose groupIdToken is this group is refused.",
+  }),
   persistent("AuthCacheCtrlr", "Enabled", "AuthorizationCacheEnabled", {
     mutability: "ReadWrite",
     dataType: "boolean",
@@ -489,6 +613,24 @@ const VARIABLES: readonly DeviceModelVariableDef[] = [
     default: true,
     effect: "A transaction stops when its id is invalidated.",
   }),
+  persistent("TxCtrlr", "MaxEnergyOnInvalidId", "MaxEnergyOnInvalidId", {
+    mutability: "ReadWrite",
+    dataType: "integer",
+    unit: "Wh",
+    default: 0,
+    effect: "Wh still delivered after the id of a transaction is invalidated.",
+  }),
+  // #709: H01.FR.18/19, the 2.x name of 1.6 ReserveConnectorZeroSupported.
+  persistent(
+    "ReservationCtrlr",
+    "NonEvseSpecific",
+    "ReserveConnectorZeroSupported",
+    {
+      mutability: "ReadOnly",
+      dataType: "boolean",
+      default: false,
+    },
+  ),
   persistent(
     "TxCtrlr",
     "StopTxOnEVSideDisconnect",

@@ -4,7 +4,7 @@ import {
   actionValidatorV16,
   actionValidatorV201,
   actionValidatorV21,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import { buildV16CallHandlerRegistry } from "../../handlers/buildV16CallHandlerRegistry";
 import type { OCPPAction } from "../../../../domain/types/OcppTypes";
 import { buildV201InboundRegistry } from "../../v201/inboundRegistryV201";

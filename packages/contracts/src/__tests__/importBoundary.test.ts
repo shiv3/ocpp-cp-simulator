@@ -1,6 +1,6 @@
 // packages/contracts/src/__tests__/importBoundary.test.ts
 //
-// @ocpp-cp-sim/contracts is the contract of the control plane (#578). The
+// @ocpp-cp-simulator/contracts is the contract of the control plane (#578). The
 // charge-point core and both apps depend on it, never the reverse, so no
 // non-test file here may import another workspace package, reach outside its
 // own src/ with a relative path, or use the apps/web `@/` alias (at runtime
@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest";
 const protocolDir = fileURLToPath(new URL("..", import.meta.url));
 
 /**
- * Workspace packages (`@ocpp-cp-sim/<name>`) that this package may import
+ * Workspace packages (`@ocpp-cp-simulator/<name>`) that this package may import
  * besides itself. Each entry is a dependency in its package.json. Empty
  * today: the protocol depends on third-party packages (zod) only. The core
  * must never appear here.
@@ -65,7 +65,7 @@ function classify(
   if (specifier.startsWith("@/")) return { kind: "alias" };
   if (specifier.startsWith("."))
     return { kind: "path", path: resolve(dirname(from), specifier) };
-  const ws = /^(@ocpp-cp-sim\/[^/]+)/.exec(specifier);
+  const ws = /^(@ocpp-cp-simulator\/[^/]+)/.exec(specifier);
   return ws ? { kind: "package", name: ws[1]! } : null;
 }
 
@@ -97,7 +97,7 @@ describe("packages/contracts/src import boundary", () => {
         if (target.kind === "path" && isInside(target.path, own)) continue;
         if (
           target.kind === "package" &&
-          (target.name === "@ocpp-cp-sim/contracts" ||
+          (target.name === "@ocpp-cp-simulator/contracts" ||
             ALLOWED_WORKSPACE_PACKAGES.includes(target.name))
         )
           continue;

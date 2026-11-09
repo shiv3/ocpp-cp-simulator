@@ -15,7 +15,7 @@
 //   bun run check:boundaries --list core     # files mapped to one package
 //
 // Across packages an import must name the package
-// (`@ocpp-cp-sim/core/cp/domain/...`, resolved through the package's
+// (`@ocpp-cp-simulator/core/cp/domain/...`, resolved through the package's
 // `exports`), never a relative path into another package. TypeScript project
 // references forbid cycles at the type level too, so `import type`,
 // `export type ... from` and `import("x").T` count as edges exactly like
@@ -26,6 +26,14 @@
 // at compile time, and `import()` is how a cycle is legitimately deferred. It
 // relies on the `consistent-type-imports` lint rule to mark an import used only
 // as a type, or the cycle it closes would be reported as a real one.
+//
+// Inside packages/core/src/cp the layers have a direction too (#571):
+// domain may import only domain and shared; application may import domain,
+// application and shared (never infrastructure); infrastructure may import
+// every layer; shared imports only shared. Every layer may use the other
+// workspace packages the package rules above allow. LAYER_EXEMPTIONS lists
+// the edges let through; it is empty since #575, and an entry that stops
+// matching fails the run. Tests are not checked.
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, posix, resolve } from "node:path";
@@ -41,6 +49,7 @@ export const PACKAGE_NAMES = [
   "contracts",
   "trace",
   "k6-runtime",
+  "vehicle",
   "core",
   "client",
   "apps/cli",
@@ -64,6 +73,7 @@ export const PACKAGE_DIRS: Readonly<Record<PackageName, string>> = {
   ocpp: "packages/ocpp",
   contracts: "packages/contracts",
   trace: "packages/trace",
+  vehicle: "packages/vehicle",
   "k6-runtime": "packages/k6-runtime",
   core: "packages/core",
   client: "packages/client",
@@ -71,9 +81,9 @@ export const PACKAGE_DIRS: Readonly<Record<PackageName, string>> = {
   "apps/web": "apps/web",
 };
 
-/** `@ocpp-cp-sim/<dir name>`: the name a package is imported and declared by. */
+/** `@ocpp-cp-simulator/<dir name>`: the name a package is imported and declared by. */
 export function packageNameOf(pkg: PackageName): string {
-  return `@ocpp-cp-sim/${PACKAGE_DIRS[pkg].split("/")[1]}`;
+  return `@ocpp-cp-simulator/${PACKAGE_DIRS[pkg].split("/")[1]}`;
 }
 
 /**
@@ -88,6 +98,8 @@ export function packageNameOf(pkg: PackageName): string {
  *   schemas.
  * - packages/contracts: the wire/RPC vocabulary shared by daemon and clients.
  * - packages/trace: the trace format reader/writer.
+ * - packages/vehicle: the vehicle behavior domain (#835): what the vehicle
+ *   wants and when. Imports nothing, so it can leave the repository unchanged.
  * - packages/k6-runtime: dependency-free files copied verbatim into an
  *   export; runtimeManifest.test.ts enforces that they import nothing outside
  *   themselves.
@@ -105,6 +117,7 @@ export const PACKAGE_MAP: readonly MapEntry[] = [
   { match: "packages/contracts/", pkg: "contracts" },
   { match: "packages/trace/", pkg: "trace" },
   { match: "packages/k6-runtime/", pkg: "k6-runtime" },
+  { match: "packages/vehicle/", pkg: "vehicle" },
   { match: "packages/core/", pkg: "core" },
   { match: "packages/client/", pkg: "client" },
   { match: "apps/cli/", pkg: "apps/cli" },
@@ -119,7 +132,8 @@ export const ALLOWED_DEPENDENCIES: Readonly<
   contracts: [],
   trace: [],
   "k6-runtime": [],
-  core: ["ocpp", "contracts", "trace", "k6-runtime"],
+  vehicle: [],
+  core: ["ocpp", "contracts", "trace", "k6-runtime", "vehicle"],
   client: ["core", "contracts", "ocpp", "trace"],
   "apps/cli": ["ocpp", "contracts", "trace", "k6-runtime", "core", "client"],
   "apps/web": ["ocpp", "contracts", "trace", "k6-runtime", "core", "client"],
@@ -135,6 +149,7 @@ export const PORTABLE_PACKAGES: ReadonlySet<PackageName> = new Set([
   "contracts",
   "trace",
   "k6-runtime",
+  "vehicle",
   "core",
   "client",
 ]);
@@ -211,7 +226,7 @@ export const SPECIFIER_ALLOW_LIST: Readonly<
     { readonly specifiers: readonly string[]; readonly why: string }
   >
 > = {
-  "packages/core/src/cp/domain/persistence/BunSqliteDatabase.ts": {
+  "packages/core/src/cp/infrastructure/persistence/BunSqliteDatabase.ts": {
     specifiers: ["bun:sqlite", "node:path", "node:fs"],
     why: "The Bun-only Database implementation behind the daemon's state file. Never reached from the browser bundle (browserBundleNoDaemonXml.bun.test.ts guards that); the web console uses SqlJsDatabase instead.",
   },
@@ -249,6 +264,49 @@ export const TEST_ALLOW_LIST: readonly KnownViolation[] = [
 ];
 
 // ---------------------------------------------------------------------------
+// Layers inside packages/core/src/cp (#571)
+// ---------------------------------------------------------------------------
+
+export const CP_ROOT = "packages/core/src/cp/";
+export const LAYERS = [
+  "domain",
+  "application",
+  "infrastructure",
+  "shared",
+] as const;
+export type Layer = (typeof LAYERS)[number];
+
+/**
+ * Which layers each layer may import (itself always included). An import of a
+ * file under packages/core/src outside src/cp, or of an app, is also refused
+ * from domain and shared: those layers know nothing of the code around them.
+ */
+export const LAYER_RULES: Readonly<Record<Layer, readonly Layer[]>> = {
+  domain: ["domain", "shared"],
+  application: ["domain", "application", "shared"],
+  infrastructure: ["domain", "application", "infrastructure", "shared"],
+  shared: ["shared"],
+};
+
+/** Layers that may not import core code outside src/cp. */
+const SEALED_LAYERS: ReadonlySet<Layer> = new Set<Layer>(["domain", "shared"]);
+
+export function layerOf(file: string): Layer | null {
+  if (!file.startsWith(CP_ROOT)) return null;
+  const top = file.slice(CP_ROOT.length).split("/")[0];
+  return (LAYERS as readonly string[]).includes(top!) ? (top as Layer) : null;
+}
+
+/**
+ * Layer-breaking imports let through, one entry per importing file and
+ * imported file. Matching violations are printed as warnings and do not fail
+ * the run; an entry that matches nothing fails it. The list is empty since
+ * #575 (#577's goal): a new entry needs a reason in `why` and the issue that
+ * removes it. Tests are not covered by the rule.
+ */
+export const LAYER_EXEMPTIONS: readonly KnownViolation[] = [];
+
+// ---------------------------------------------------------------------------
 // Machinery
 // ---------------------------------------------------------------------------
 
@@ -260,6 +318,7 @@ export interface Config {
   readonly specifierAllowList: typeof SPECIFIER_ALLOW_LIST;
   readonly knownViolations: readonly KnownViolation[];
   readonly testAllowList: readonly KnownViolation[];
+  readonly layerExemptions: readonly KnownViolation[];
   /** Alias prefix -> repo-relative directory, e.g. "@/" -> "apps/web/src/". */
   readonly aliases: Readonly<Record<string, string>>;
 }
@@ -272,6 +331,7 @@ export const DEFAULT_CONFIG: Config = {
   specifierAllowList: SPECIFIER_ALLOW_LIST,
   knownViolations: KNOWN_VIOLATIONS,
   testAllowList: TEST_ALLOW_LIST,
+  layerExemptions: LAYER_EXEMPTIONS,
   aliases: { "@/": "apps/web/src/" },
 };
 
@@ -520,11 +580,11 @@ export function resolveExport(
   return exportsMap[best.key]!.replace("*", matched);
 }
 
-const PACKAGE_SPECIFIER = /^(@ocpp-cp-sim\/[^/]+)(?:\/(.*))?$/;
+const PACKAGE_SPECIFIER = /^(@ocpp-cp-simulator\/[^/]+)(?:\/(.*))?$/;
 
 export interface Resolution {
   readonly path: string;
-  /** The specifier named a workspace package (`@ocpp-cp-sim/x/...`). */
+  /** The specifier named a workspace package (`@ocpp-cp-simulator/x/...`). */
   readonly viaPackage: boolean;
 }
 
@@ -597,12 +657,12 @@ export interface Edge {
   readonly kind: ImportKind;
   readonly typeOnly: boolean;
   readonly test: boolean;
-  /** Imported through `@ocpp-cp-sim/<package>/...` rather than by path. */
+  /** Imported through `@ocpp-cp-simulator/<package>/...` rather than by path. */
   readonly viaPackage: boolean;
 }
 
 export interface Violation {
-  readonly type: "edge" | "specifier" | "relative";
+  readonly type: "edge" | "specifier" | "relative" | "layer";
   /** "client → apps/web" for an edge, "core ⊅ node" for a specifier. */
   readonly group: string;
   readonly file: string;
@@ -643,13 +703,37 @@ export interface Snapshot {
   readonly others: ReadonlySet<string>;
   /**
    * The workspace manifests (`<dir>/package.json`) by package. When present
-   * they resolve `@ocpp-cp-sim/...` specifiers through their real `exports`
+   * they resolve `@ocpp-cp-simulator/...` specifiers through their real `exports`
    * and are checked against the imports; without them the "./*" convention
    * is assumed and no manifest is checked.
    */
   readonly manifests?: ReadonlyMap<PackageName, PackageManifest>;
   /** The root package.json text: it must not depend on a workspace package. */
   readonly rootManifestText?: string;
+}
+
+/**
+ * The rule a core file breaks by importing `to`, or null. Only files under
+ * packages/core/src/cp/<layer>/ are judged; `to` is the resolved target.
+ */
+export function layerViolationOf(
+  from: string,
+  to: string,
+): { group: string } | null {
+  const a = layerOf(from);
+  if (!a) return null;
+  const b = layerOf(to);
+  if (b) {
+    return LAYER_RULES[a].includes(b) ? null : { group: `layer ${a} ⊅ ${b}` };
+  }
+  if (
+    SEALED_LAYERS.has(a) &&
+    (to.startsWith("apps/") ||
+      (to.startsWith("packages/core/") && !to.startsWith(CP_ROOT)) ||
+      (to.startsWith(CP_ROOT) && !b))
+  )
+    return { group: `layer ${a} ⊅ code outside the layers` };
+  return null;
 }
 
 export function checkBoundaries(
@@ -679,6 +763,14 @@ export function checkBoundaries(
     matrix[p] = Object.fromEntries(PACKAGE_NAMES.map((q) => [q, 0]));
     fileCounts[p] = 0;
   }
+
+  const suppressLayer = (v: Violation): boolean => {
+    const hit = config.layerExemptions.find(
+      (k) => k.from === v.file && k.to === v.target,
+    );
+    if (hit) usedAllowances.add(`layer:${hit.from}->${hit.to}`);
+    return !!hit;
+  };
 
   const suppress = (v: Violation): boolean => {
     const list = v.test ? config.testAllowList : config.knownViolations;
@@ -767,6 +859,20 @@ export function checkBoundaries(
         viaPackage: res.viaPackage,
       });
       matrix[fromPkg]![toPkg]!++;
+      const layerViolation = test ? null : layerViolationOf(file, res.path);
+      if (layerViolation) {
+        const v: Violation = {
+          type: "layer",
+          group: layerViolation.group,
+          file,
+          target: res.path,
+          specifier: imp.specifier,
+          typeOnly: imp.typeOnly,
+          test,
+          message: `${file} imports ${res.path}${imp.typeOnly ? " (type-only)" : ""}`,
+        };
+        (suppressLayer(v) ? warnings : violations).push(v);
+      }
       if (fromPkg !== toPkg && !config.allowed[fromPkg].includes(toPkg)) {
         const v: Violation = {
           type: "edge",
@@ -803,6 +909,9 @@ export function checkBoundaries(
   for (const k of config.knownViolations)
     if (!usedAllowances.has(`known:${k.from}->${k.to}`))
       staleAllowances.push(`KNOWN_VIOLATIONS ${k.from} -> ${k.to}`);
+  for (const k of config.layerExemptions)
+    if (!usedAllowances.has(`layer:${k.from}->${k.to}`))
+      staleAllowances.push(`LAYER_EXEMPTIONS ${k.from} -> ${k.to}`);
   for (const k of config.testAllowList)
     if (!usedAllowances.has(`test:${k.from}->${k.to}`))
       staleAllowances.push(`TEST_ALLOW_LIST ${k.from} -> ${k.to}`);
@@ -928,7 +1037,7 @@ export function checkManifests(
       needed.set(name, (needed.get(name) ?? 0) + 1);
     }
     const declared = Object.entries(manifest.dependencies ?? {}).filter(([n]) =>
-      n.startsWith("@ocpp-cp-sim/"),
+      n.startsWith("@ocpp-cp-simulator/"),
     );
     for (const [name, range] of declared) {
       if (range !== "workspace:*")

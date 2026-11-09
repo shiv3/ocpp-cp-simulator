@@ -1,6 +1,7 @@
 import { describe, it, expect, spyOn } from "bun:test";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 
 /**
@@ -67,7 +68,7 @@ async function connectAndBoot(csms: MockCsms, cp: ChargePoint): Promise<void> {
 }
 
 function newV16ChargePoint(id: string, url: string): ChargePoint {
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     id,
     DefaultBootNotification,
     1,

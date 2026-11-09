@@ -6,7 +6,7 @@ import {
   type ManualDisconnectRule,
   type PeriodicDisconnectRule,
   NETWORK_SIM_LIMITS,
-} from "@ocpp-cp-sim/core/cp/infrastructure/transport/network-sim/config";
+} from "@ocpp-cp-simulator/core/cp/infrastructure/transport/network-sim/config";
 
 /**
  * Form-friendly representation of a single rule.

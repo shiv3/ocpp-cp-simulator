@@ -1,0 +1,228 @@
+{
+  "id": "parallel-heartbeat-session",
+  "name": "Heartbeat in Parallel with a Remote-Started Session",
+  "description": "A parallel node fans out into two branches: one sends three Heartbeats 5 s apart, the other waits for RemoteStartTransaction, starts the transaction and sends bounded MeterValues. A join (mode all) waits for both branches, then the run ends.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": {
+    "type": "manual"
+  },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": {
+        "x": 400,
+        "y": 50
+      },
+      "data": {
+        "label": "Start",
+        "triggerOn": "connect"
+      }
+    },
+    {
+      "id": "fork",
+      "type": "parallel",
+      "position": {
+        "x": 400,
+        "y": 150
+      },
+      "data": {
+        "label": "Fork"
+      }
+    },
+    {
+      "id": "hb-1",
+      "type": "notification",
+      "position": {
+        "x": 200,
+        "y": 280
+      },
+      "data": {
+        "label": "Send Heartbeat",
+        "messageType": "Heartbeat",
+        "payload": {}
+      }
+    },
+    {
+      "id": "hb-delay-1",
+      "type": "delay",
+      "position": {
+        "x": 200,
+        "y": 380
+      },
+      "data": {
+        "label": "Wait 5 s",
+        "delaySeconds": 5
+      }
+    },
+    {
+      "id": "hb-2",
+      "type": "notification",
+      "position": {
+        "x": 200,
+        "y": 480
+      },
+      "data": {
+        "label": "Send Heartbeat",
+        "messageType": "Heartbeat",
+        "payload": {}
+      }
+    },
+    {
+      "id": "hb-delay-2",
+      "type": "delay",
+      "position": {
+        "x": 200,
+        "y": 580
+      },
+      "data": {
+        "label": "Wait 5 s",
+        "delaySeconds": 5
+      }
+    },
+    {
+      "id": "hb-3",
+      "type": "notification",
+      "position": {
+        "x": 200,
+        "y": 680
+      },
+      "data": {
+        "label": "Send Heartbeat",
+        "messageType": "Heartbeat",
+        "payload": {}
+      }
+    },
+    {
+      "id": "trigger-remote-start",
+      "type": "remoteStartTrigger",
+      "position": {
+        "x": 600,
+        "y": 280
+      },
+      "data": {
+        "label": "Wait for RemoteStartTransaction",
+        "timeout": 0
+      }
+    },
+    {
+      "id": "tx-start",
+      "type": "transaction",
+      "position": {
+        "x": 600,
+        "y": 400
+      },
+      "data": {
+        "label": "Start Transaction",
+        "action": "start",
+        "tagId": "PARALLEL-TAG"
+      }
+    },
+    {
+      "id": "meter-auto",
+      "type": "meterValue",
+      "position": {
+        "x": 600,
+        "y": 520
+      },
+      "data": {
+        "label": "Bounded Auto MeterValue",
+        "value": 0,
+        "sendMessage": true,
+        "autoIncrement": true,
+        "incrementInterval": 5,
+        "incrementAmount": 500,
+        "maxTime": 30,
+        "maxValue": 0
+      }
+    },
+    {
+      "id": "join-1",
+      "type": "join",
+      "position": {
+        "x": 400,
+        "y": 800
+      },
+      "data": {
+        "label": "Join (all)",
+        "mode": "all"
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": {
+        "x": 400,
+        "y": 900
+      },
+      "data": {
+        "label": "End"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "start-1",
+      "target": "fork"
+    },
+    {
+      "id": "e2",
+      "source": "fork",
+      "target": "hb-1"
+    },
+    {
+      "id": "e3",
+      "source": "hb-1",
+      "target": "hb-delay-1"
+    },
+    {
+      "id": "e4",
+      "source": "hb-delay-1",
+      "target": "hb-2"
+    },
+    {
+      "id": "e5",
+      "source": "hb-2",
+      "target": "hb-delay-2"
+    },
+    {
+      "id": "e6",
+      "source": "hb-delay-2",
+      "target": "hb-3"
+    },
+    {
+      "id": "e7",
+      "source": "hb-3",
+      "target": "join-1"
+    },
+    {
+      "id": "e8",
+      "source": "fork",
+      "target": "trigger-remote-start"
+    },
+    {
+      "id": "e9",
+      "source": "trigger-remote-start",
+      "target": "tx-start"
+    },
+    {
+      "id": "e10",
+      "source": "tx-start",
+      "target": "meter-auto"
+    },
+    {
+      "id": "e11",
+      "source": "meter-auto",
+      "target": "join-1"
+    },
+    {
+      "id": "e12",
+      "source": "join-1",
+      "target": "end-1"
+    }
+  ]
+}

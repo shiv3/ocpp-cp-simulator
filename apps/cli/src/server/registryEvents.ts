@@ -8,8 +8,8 @@ import {
   registryCpToWire,
   statusToWire,
   type SimulatorConfigInput,
-} from "@ocpp-cp-sim/contracts/index";
-import type { ScenarioDefinition } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+} from "@ocpp-cp-simulator/contracts/index";
+import type { ScenarioDefinition } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import type { FileReloadEvent } from "./FileReloadManager";
 import type { CPRegistry } from "./CPRegistry";
 import type { EventBus, EventEnvelope as BusEventEnvelope } from "./eventBus";

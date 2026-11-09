@@ -3,13 +3,13 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
-import type { ChargePoint } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
-import { buildSampledValues } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueBuilder";
+import type { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
+import { buildSampledValues } from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueBuilder";
 import {
   DefaultBootNotification,
   OCPPStatus,
-} from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
-import type { VehicleProfile } from "@ocpp-cp-sim/core/cp/domain/vehicle/VehicleProfile";
+} from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
+import type { VehicleProfile } from "@ocpp-cp-simulator/core/cp/domain/vehicle/VehicleProfile";
 import { LocalChargePointService } from "../../../data/local/LocalChargePointService";
 import { DataContext } from "../../../data/providers/DataProvider";
 import ConnectorConfigDialog from "./ConnectorConfigDialog";

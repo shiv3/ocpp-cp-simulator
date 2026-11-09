@@ -7,7 +7,8 @@ import type {
 } from "../ScenarioTypes";
 import { ScenarioNodeType } from "../ScenarioTypes";
 import { EventEmitter } from "../../../shared/EventEmitter";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../../infrastructure/charge-point/createChargePoint";
 import type { Connector } from "../../../domain/connector/Connector";
 import type { Transaction } from "../../../domain/connector/Transaction";
 import {
@@ -220,7 +221,7 @@ function runtimeCallbacksWithActiveTransaction(): {
 }
 
 function newChargePoint(id: string): ChargePoint {
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     id,
     DefaultBootNotification,
     1,

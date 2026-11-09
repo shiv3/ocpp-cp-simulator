@@ -2,7 +2,8 @@ import { stationNow } from "../stationNow";
 import type {
   FirmwareStatusNotificationRequestV201,
   LogStatusNotificationRequestV201,
-} from "@ocpp-cp-sim/ocpp/index";
+  ReservationStatusUpdateRequestV201,
+} from "@ocpp-cp-simulator/ocpp/index";
 import type {
   AuthorizeRequestV201,
   BootNotificationRequestV201,
@@ -15,6 +16,7 @@ import type {
   GetVariablesRequestV201,
   HeartbeatRequestV201,
   MeterValuesRequestV201,
+  NotifyCustomerInformationRequestV201,
   NotifyReportRequestV201,
   ReportChargingProfilesRequestV201,
   ClearVariableMonitoringRequestV201,
@@ -27,7 +29,7 @@ import type {
   SignCertificateRequestV201,
   StatusNotificationRequestV201,
   TransactionEventRequestV201,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import {
   isValidCancelReservationRequestV201,
   isValidCertificateSignedRequestV201,
@@ -69,8 +71,8 @@ import {
   isValidUnlockConnectorRequestV201,
   isValidUnpublishFirmwareRequestV201,
   isValidUpdateFirmwareRequestV201,
-} from "@ocpp-cp-sim/ocpp/validation/v201/index";
-import type { ReportDataType } from "@ocpp-cp-sim/ocpp/types/v201/notify-report";
+} from "@ocpp-cp-simulator/ocpp/validation/v201/index";
+import type { ReportDataType } from "@ocpp-cp-simulator/ocpp/types/v201/notify-report";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { matchesComponentVariable } from "../../../domain/monitoring/selectMonitors";
 import type { SignedCertificateUse } from "../../../domain/security/certificateUse";
@@ -89,7 +91,6 @@ import {
 import {
   handleClearDisplayMessageAckV201,
   handleCostUpdatedAckV201,
-  handleCustomerInformationAckV201,
   handleDataTransferAckV201,
   handleGetDisplayMessagesAckV201,
   handleGetLocalListVersionAckV201,
@@ -135,6 +136,7 @@ import {
   handleGetCompositeScheduleV201,
   handleSetChargingProfileV201,
 } from "./smartChargingV201";
+import { handleCustomerInformationV201 } from "./customerInformationV201";
 
 export type V201Action =
   | "BootNotification"
@@ -145,6 +147,8 @@ export type V201Action =
   | "Authorize"
   | "DataTransfer"
   | "NotifyReport"
+  // #602: N09 report answering CustomerInformation.
+  | "NotifyCustomerInformation"
   // #457: N02 report answering GetMonitoringReport.
   | "NotifyMonitoringReport"
   // #457: N07 variable-monitor events.
@@ -153,6 +157,8 @@ export type V201Action =
   // #345: station-initiated firmware / log lifecycle reports (L01/L02, N01).
   | "FirmwareStatusNotification"
   | "LogStatusNotification"
+  // #712: H04 / H01.FR.16-17 reservation ended without a transaction.
+  | "ReservationStatusUpdate"
   // #456: A02 certificate signing and its security event (A02.FR.07).
   | "SignCertificate"
   | "SecurityEventNotification"
@@ -168,11 +174,13 @@ export type V201RequestPayload =
   | AuthorizeRequestV201
   | DataTransferRequestV201
   | NotifyReportRequestV201
+  | NotifyCustomerInformationRequestV201
   | NotifyMonitoringReportPayload
   | NotifyEventPayload
   | ReportChargingProfilesRequestV201
   | FirmwareStatusNotificationRequestV201
   | LogStatusNotificationRequestV201
+  | ReservationStatusUpdateRequestV201
   | SignCertificateRequestV201
   | SecurityEventNotificationRequestV201
   | GetCertificateStatusRequestV201;
@@ -190,26 +198,64 @@ export interface V201CertificateSigning {
    */
   requestSignature(use: SignedCertificateUse): Promise<void>;
   /**
+   * TriggerMessage SignCombinedCertificate (2.1 F06.FR.08, #553): a new
+   * CSR sent without `certificateType`, which asks for one certificate for
+   * both the CSMS connection and the 15118 connection. The simulator has no
+   * 15118 stack, so the chain that answers is its Charging Station
+   * certificate.
+   */
+  requestCombinedSignature(): Promise<void>;
+  /**
+   * A chain for `use` was just stored, before its CALLRESULT is written
+   * (#564): a security-profile-3 station hands a new Charging Station
+   * certificate to the transport as the next connection's TLS client
+   * certificate now, so it is used even when the answer is dropped before it
+   * is written (a manual disconnect while network simulation holds it).
+   */
+  certificateStored(use: SignedCertificateUse): void;
+  /**
+   * 2.1 A02.FR.26 / A03.FR.22: whether `requestId` is one the station sent in
+   * a SignCertificateRequest. A CertificateSigned that carries another id is
+   * Rejected.
+   */
+  isKnownSignRequestId(requestId: number): boolean;
+  /**
    * A chain for `use` was installed, the only thing that ends its CSR's
    * resend back-off (a rejected chain leaves it running, #537): for a V2G
    * certificate the station asks the CSMS for the OCSP status of the certificate and its sub-CAs
-   * (M06.FR.07); a security-profile-3 station switches to a new Charging
+   * (M06.FR.07); a security-profile-3 station reconnects with a new Charging
    * Station certificate as its TLS client certificate (A02.FR.08).
    */
   certificateInstalled(use: SignedCertificateUse): void;
+  /**
+   * A chain for `use` answered the pending CSR (its leaf carries the CSR's
+   * key) but is not valid and was Rejected: the SignCertificate resends
+   * stop until the CSMS triggers a new one (A02.FR.20, #587).
+   */
+  certificateRejected(use: SignedCertificateUse): void;
 }
 
 export interface V201InboundContext {
   readonly chargePoint: ChargePoint;
   readonly logger: Logger;
   readonly sendCall: (action: V201Action, payload: V201RequestPayload) => void;
+  /** E14 (#554): whether TransactionEvents are still to be delivered, for
+   *  one transaction or (no id) overall. Absent in unit-test contexts. */
+  readonly hasTransactionEventsToDeliver?: (transactionId?: string) => boolean;
   /** Absent in contexts built without a message handler (unit tests). */
   readonly certificateSigning?: V201CertificateSigning;
+  /**
+   * Whether the CSMS's answer to the last BootNotificationRequest was
+   * Accepted. Absent in contexts built without a message handler.
+   */
+  readonly bootAccepted?: () => boolean;
 }
 
 export interface V201HandlerResult {
   readonly response: unknown;
   readonly afterResult?: () => void;
+  /** Answer with an RPC CALLERROR instead of a CALLRESULT (`response` is unused). */
+  readonly callError?: { readonly code: string; readonly description: string };
 }
 
 export interface V201InboundHandler {
@@ -232,6 +278,7 @@ function deviceModelContext(ctx: V201InboundContext): DeviceModelContext {
   return {
     evseExists: (evse) => v201EvseExists(evse, ctx.chargePoint.connectors),
     targets: ctx.chargePoint.deviceModelTargets,
+    ocppVersion: ctx.chargePoint.ocppVersion,
   };
 }
 
@@ -582,7 +629,7 @@ export function buildV201InboundRegistry(): V201InboundRegistry {
       "CustomerInformation",
       {
         validate: isValidCustomerInformationRequestV201,
-        handle: handleCustomerInformationAckV201,
+        handle: handleCustomerInformationV201,
       },
     ],
     [

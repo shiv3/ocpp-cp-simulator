@@ -4,6 +4,7 @@ import { OCPPSoapHandler } from "../OCPPSoapHandler";
 import { OCPP12_DIALECT, OCPP15_DIALECT, OCPP16_DIALECT } from "../dialect";
 import type { Logger } from "../../../../shared/Logger";
 import type { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
+import { stubOperatingPoint } from "../../../../domain/connector/__tests__/operatingPointStub";
 
 /**
  * Regressions for #301 on OCPP 1.5 SOAP. Both cover the same rule: OCPP 1.5's
@@ -44,7 +45,10 @@ function threePhaseConnectorStub(): unknown {
     // Three phases in use: no profile restricts them (#301).
     activePhaseCount: () => 3,
     // One resolve, one instant (#301).
-    scheduleConstraints: () => ({ watts: Infinity, activePhases: 3 }),
+    announceScheduleCrossingNow() {},
+    operatingPoint() {
+      return stubOperatingPoint(this, Infinity, 3);
+    },
   };
 }
 
@@ -159,7 +163,10 @@ function taperedConnectorStub(): unknown {
     // DC has no phases (#301).
     activePhaseCount: () => 1,
     // One resolve, one instant (#301).
-    scheduleConstraints: () => ({ watts: Infinity, activePhases: 1 }),
+    announceScheduleCrossingNow() {},
+    operatingPoint() {
+      return stubOperatingPoint(this, Infinity, 1);
+    },
   };
 }
 

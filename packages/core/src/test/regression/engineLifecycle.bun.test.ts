@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
+import type { ChargerEngine } from "../../cp/application/engine/ChargerEngine";
 import { runBehavior, type BehaviorRun } from "../behavior/runBehavior";
 import { InboundCallGate } from "../../cp/infrastructure/transport/inbound/InboundCallGate";
 import { BehaviorRegistry } from "../../cp/application/behavior/BehaviorRegistry";
@@ -72,7 +73,8 @@ describe("work outlives its stop", () => {
       open = r;
     });
     let ctx0:
-      import("@ocpp-cp-sim/contracts/behavior").BehaviorContext | undefined;
+      | import("@ocpp-cp-simulator/contracts/behavior").BehaviorContext
+      | undefined;
     const wrapped: Behavior = {
       ...b,
       onCall: {
@@ -114,7 +116,7 @@ describe("work outlives its stop", () => {
       },
     };
     const run = await start({ version: "1.6", behaviors: [b], seed: "x" });
-    run.cp.engine.resume();
+    (run.cp.engine as ChargerEngine).resume();
     await run.settle();
     run.cp.engine.unloadBehavior("res");
     await run.advance(2000);
@@ -132,7 +134,7 @@ describe("work outlives its stop", () => {
       },
     });
     const run = await start({ version: "1.6", behaviors: [mk()], seed: "x" });
-    run.cp.engine.resume();
+    (run.cp.engine as ChargerEngine).resume();
     await run.settle();
     run.cp.engine.replaceBehavior(mk());
     await run.advance(2000);
@@ -150,7 +152,7 @@ describe("work outlives its stop", () => {
     };
     const run = await start({ version: "1.6", seed: "x" });
     run.cp.loadBehavior(b, { dormant: true });
-    run.cp.engine.resume();
+    (run.cp.engine as ChargerEngine).resume();
     await run.settle();
     expect(ran).toBe(false);
   });

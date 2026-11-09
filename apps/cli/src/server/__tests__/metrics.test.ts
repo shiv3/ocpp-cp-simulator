@@ -2,20 +2,21 @@ import { describe, expect, it } from "vitest";
 
 import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
-import { Logger, LogType } from "@ocpp-cp-sim/core/cp/shared/Logger";
+import { Logger, LogType } from "@ocpp-cp-simulator/core/cp/shared/Logger";
 import {
   CALL_DURATION_BUCKETS_SECONDS,
   MetricsRecorder,
   RECONNECT_ATTEMPT_PREFIX,
 } from "../metrics/MetricsRecorder";
 import { renderMetrics } from "../metrics/render";
-import type { OcppTraceRecord } from "@ocpp-cp-sim/trace/OcppTraceRecord";
+import { emptyAutoTrafficCounters } from "@ocpp-cp-simulator/core/cp/domain/connector/AutoTraffic";
+import type { TraceRecord } from "@open-ocpp-trace/core";
 
 function call(
   action: string,
   messageId: string,
   timestamp: string,
-): OcppTraceRecord {
+): TraceRecord {
   return {
     schemaVersion: "1.1",
     timestamp,
@@ -27,7 +28,7 @@ function call(
   };
 }
 
-function result(messageId: string, timestamp: string): OcppTraceRecord {
+function result(messageId: string, timestamp: string): TraceRecord {
   return {
     schemaVersion: "1.1",
     timestamp,
@@ -94,6 +95,7 @@ describe("MetricsRecorder (#298)", () => {
       messageType: "CALLERROR",
       messageId: "1",
       action: "DataTransfer",
+      error: { code: "NotImplemented" },
     });
 
     expect(recorder.callErrors.get("DataTransfer")).toBe(1);
@@ -128,6 +130,91 @@ describe("MetricsRecorder (#298)", () => {
     recorder.countRpc("cp.create", "ok");
     expect(recorder.rpcRequests.get("cp.create ok")).toBe(2);
     expect(recorder.rpcRequests.get("cp.create error")).toBe(1);
+  });
+});
+
+describe("renderMetrics AutoTraffic counters (#603)", () => {
+  it("sums the outcomes over every connector and exposes first and last run", () => {
+    const counters = (over: Record<string, number | null>) => ({
+      ...emptyAutoTrafficCounters(),
+      ...over,
+    });
+    const services = new Map([
+      [
+        "cp-1",
+        {
+          getStatus: () => ({ status: "Available", connectors: [{ id: 1 }] }),
+          getAutoTrafficCounters: () =>
+            counters({
+              attempted: 5,
+              skipped: 2,
+              authorizeAccepted: 3,
+              startAccepted: 3,
+              stopAccepted: 2,
+              consecutiveSkips: 1,
+              firstRunAt: 2_000,
+              lastRunAt: 9_000,
+            }),
+        },
+      ],
+      [
+        "cp-2",
+        {
+          getStatus: () => ({ status: "Available", connectors: [{ id: 1 }] }),
+          getAutoTrafficCounters: () =>
+            counters({
+              attempted: 4,
+              skipped: 4,
+              authorizeRejected: 1,
+              consecutiveSkips: 4,
+              firstRunAt: 1_000,
+              lastRunAt: 5_000,
+            }),
+        },
+      ],
+    ]);
+    const registry = {
+      list: () => [...services.keys()],
+      get: (id: string) => services.get(id),
+    } as unknown as CPRegistry;
+    const text = renderMetrics(registry, new MetricsRecorder());
+    expect(text).toContain(
+      'ocppcp_auto_traffic_cycles_total{result="attempted"} 9',
+    );
+    expect(text).toContain(
+      'ocppcp_auto_traffic_cycles_total{result="skipped"} 6',
+    );
+    expect(text).toContain(
+      'ocppcp_auto_traffic_steps_total{step="authorize",outcome="accepted"} 3',
+    );
+    expect(text).toContain(
+      'ocppcp_auto_traffic_steps_total{step="authorize",outcome="rejected"} 1',
+    );
+    expect(text).toContain(
+      'ocppcp_auto_traffic_steps_total{step="stop",outcome="accepted"} 2',
+    );
+    expect(text).toContain("ocppcp_auto_traffic_consecutive_skips 4");
+    expect(text).toContain("ocppcp_auto_traffic_first_run_timestamp_seconds 1");
+    expect(text).toContain("ocppcp_auto_traffic_last_run_timestamp_seconds 9");
+    // No cpId label, as for every other metric.
+    expect(text).not.toContain("cp-1");
+  });
+
+  it("omits the timestamps before any cycle ran", () => {
+    const registry = {
+      list: () => [],
+      get: () => undefined,
+    } as unknown as CPRegistry;
+    const text = renderMetrics(registry, new MetricsRecorder());
+    expect(text).toContain(
+      "# TYPE ocppcp_auto_traffic_first_run_timestamp_seconds gauge",
+    );
+    expect(text).not.toMatch(
+      /^ocppcp_auto_traffic_first_run_timestamp_seconds /m,
+    );
+    expect(text).toContain(
+      'ocppcp_auto_traffic_cycles_total{result="attempted"} 0',
+    );
   });
 });
 

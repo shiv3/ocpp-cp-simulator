@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 
-import { unrefTimer } from "@ocpp-cp-sim/core/cp/shared/timers";
+import { unrefTimer } from "@ocpp-cp-simulator/core/cp/shared/timers";
 
 /**
  * How long to wait after the last filesystem event before calling back.

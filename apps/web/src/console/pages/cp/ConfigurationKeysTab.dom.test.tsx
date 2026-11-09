@@ -8,9 +8,9 @@ import {
   renderConsole,
   type FakeChargePointService,
 } from "../../test/harness";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
-import type { ConfigurationKeyInfo } from "@ocpp-cp-sim/core/cp/domain/charge-point/configurationAccess";
-import type { ChargePointService } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
+import type { ConfigurationKeyInfo } from "@ocpp-cp-simulator/core/cp/domain/charge-point/configurationAccess";
+import type { ChargePointService } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 
 /** #612: the CP page's "Configuration" tab reads and writes configuration keys. */
 

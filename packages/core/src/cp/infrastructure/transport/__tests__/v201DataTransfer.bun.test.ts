@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import { outgoingV201Warning } from "../codec/validateV201";
 import { startMockCsms } from "./mockCsms";
@@ -7,7 +7,7 @@ import { startMockCsms } from "./mockCsms";
 describe("OCPP 2.0.1 CP-initiated DataTransfer", () => {
   it("sends a DataTransfer CALL with vendor id, message id, and string data", async () => {
     const csms = startMockCsms();
-    const cp = new ChargePoint(
+    const cp = createChargePoint(
       "CP201-DATA-TRANSFER",
       DefaultBootNotification,
       1,

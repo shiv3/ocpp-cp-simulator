@@ -9,7 +9,7 @@
 //
 // Expected on the CSMS: UpdateFirmware answered `{}`, then Downloading,
 // Installing and Installed with requestId 42, and no Downloaded (dropped).
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
 
 const behavior: Behavior = {
   api: 1,

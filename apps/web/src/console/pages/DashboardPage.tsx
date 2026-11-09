@@ -1,9 +1,10 @@
 import { useTranslation } from "react-i18next";
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Plus, PlugZap, SearchX } from "lucide-react";
+import { Plus, SearchX } from "lucide-react";
+import { ChargingStation } from "@evicons/react";
 
 import { Button } from "@/components/ui/button";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import ChargePointConfigModal, {
   defaultChargePointConfig,
 } from "../../components/ChargePointConfigModal";
@@ -149,7 +150,7 @@ const DashboardPage: React.FC = () => {
 
         {chargePoints.length === 0 ? (
           <EmptyState
-            icon={PlugZap}
+            icon={ChargingStation}
             title={t("dashboard.page.empty.title")}
             hint={t("dashboard.page.empty.hint")}
             action={addButton}

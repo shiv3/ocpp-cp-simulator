@@ -11,10 +11,10 @@ import {
   startMockCsms,
   type MockCsms,
   type OcppFrame,
-} from "@ocpp-cp-sim/core/cp/infrastructure/transport/__tests__/mockCsms";
+} from "@ocpp-cp-simulator/core/cp/infrastructure/transport/__tests__/mockCsms";
 import type { CLIChargePointService } from "../../service";
-import type { Connector } from "@ocpp-cp-sim/core/cp/domain/connector/Connector";
-import essentialCpBehavior from "@ocpp-cp-sim/core/utils/scenarios/essential-cp-behavior.json";
+import type { Connector } from "@ocpp-cp-simulator/core/cp/domain/connector/Connector";
+import essentialCpBehavior from "@ocpp-cp-simulator/core/utils/scenarios/essential-cp-behavior.json";
 
 /**
  * #367: "Essential CP Behavior" ran its first session correctly, but on the

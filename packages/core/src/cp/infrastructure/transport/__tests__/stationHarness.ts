@@ -1,6 +1,9 @@
+import type { ChargePointCapabilityProfile } from "../../../domain/charge-point/CapabilityProfile";
 // Test-only helpers for bun tests that drive a real ChargePoint against the
 // mock CSMS (#348 DataTransfer, #389 expert calls).
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import type { ChargerCapabilities } from "../../../domain/charge-point/ChargerCapabilities";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import type { Database } from "../../../domain/persistence/Database";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import type { MockCsms, OcppFrame } from "./mockCsms";
@@ -15,6 +18,10 @@ export interface StationOptions {
   readonly connectors?: number;
   /** The --state-db database; in-memory state when absent. */
   readonly database?: Database | null;
+  /** Static capability profile (#618). */
+  readonly capabilityProfile?: ChargePointCapabilityProfile;
+  /** What the charger hardware delivers (#327, #608). */
+  readonly chargerCapabilities?: ChargerCapabilities;
 }
 
 /** A charge point pointed at `csms`, not connected yet. */
@@ -24,7 +31,7 @@ export function stationFor(
   version: string,
   options: StationOptions = {},
 ): ChargePoint {
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     id,
     DefaultBootNotification,
     options.connectors ?? 1,
@@ -35,7 +42,14 @@ export function stationFor(
     {},
     [],
     version,
-    {},
+    {
+      ...(options.capabilityProfile && {
+        capabilityProfile: options.capabilityProfile,
+      }),
+      ...(options.chargerCapabilities && {
+        chargerCapabilities: options.chargerCapabilities,
+      }),
+    },
   );
   cp.events.on("error", () => undefined);
   return cp;

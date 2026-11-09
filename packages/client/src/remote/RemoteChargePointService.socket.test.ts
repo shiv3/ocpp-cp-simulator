@@ -9,10 +9,10 @@ import {
   type StatusWire,
   type SubscribeResult,
   type WireSimulatorConfig,
-} from "@ocpp-cp-sim/contracts/index";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
-import type { ScenarioDefinition } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import type { AutoMeterValueConfig } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
+} from "@ocpp-cp-simulator/contracts/index";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
+import type { ScenarioDefinition } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import type { AutoMeterValueConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
 
 type Handler = (...args: any[]) => void;
 
@@ -389,6 +389,73 @@ describe("RemoteChargePointService socket.io rpc", () => {
           },
         ],
         results: [{ cpId: "cp-1" }],
+      },
+      {
+        name: "listFleetTemplates",
+        invoke: (service) => service.listFleetTemplates(),
+        expected: [{ method: "fleet.template.list", params: {} }],
+        results: [[]],
+      },
+      {
+        name: "getFleetTemplate",
+        invoke: (service) => service.getFleetTemplate("t"),
+        expected: [{ method: "fleet.template.get", params: { id: "t" } }],
+        results: [
+          {
+            id: "t",
+            name: "T",
+            groups: [
+              { name: "g", members: [{ cpId: "A", blueprintId: "ac-22kw" }] },
+            ],
+          },
+        ],
+      },
+      {
+        name: "saveFleetTemplate",
+        invoke: (service) =>
+          service.saveFleetTemplate({
+            id: "t",
+            name: "T",
+            groups: [
+              { name: "g", members: [{ cpId: "A", blueprintId: "ac-22kw" }] },
+            ],
+          }),
+        expected: [
+          {
+            method: "fleet.template.save",
+            params: {
+              template: {
+                id: "t",
+                name: "T",
+                groups: [
+                  {
+                    name: "g",
+                    members: [{ cpId: "A", blueprintId: "ac-22kw" }],
+                  },
+                ],
+              },
+            },
+          },
+        ],
+        results: [{ id: "t" }],
+      },
+      {
+        name: "deleteFleetTemplate",
+        invoke: (service) => service.deleteFleetTemplate("t"),
+        expected: [{ method: "fleet.template.delete", params: { id: "t" } }],
+        results: [{ ok: true }],
+      },
+      {
+        name: "createFleet",
+        invoke: (service) =>
+          service.createFleet({ templateId: "t", idPrefix: "x-" }),
+        expected: [
+          {
+            method: "fleet.create",
+            params: { templateId: "t", idPrefix: "x-" },
+          },
+        ],
+        results: [{ templateId: "t", created: ["x-A"], failed: [] }],
       },
       {
         name: "removeChargePoint",

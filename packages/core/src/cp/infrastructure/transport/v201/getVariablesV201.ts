@@ -1,14 +1,14 @@
 import type {
   GetVariablesRequestV201,
   GetVariablesResponseV201,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import type { ConfigurationStore } from "../../../domain/charge-point/ConfigurationStore";
 import type { DeviceModelTargets } from "../../../domain/charge-point/DeviceModelTargets";
 import {
   resolveDeviceModelVariable,
   type DeviceModelEvse,
 } from "./deviceModelMap";
-import { renderConfigValue } from "./renderConfigValue";
+import { renderConfigValue } from "../../../domain/charge-point/renderConfigValue";
 import { REASON, statusInfo } from "./variableStatusInfo";
 import { variablesRequestLimitViolation } from "./variablesRequestLimits";
 
@@ -22,6 +22,9 @@ export interface DeviceModelContext {
   /** The variables with a Target attribute and their targets (2.1 only);
    *  without it, `Target` is NotSupportedAttributeType everywhere. */
   readonly targets?: DeviceModelTargets;
+  /** The station's OCPP version, to pick the `MeasurandEnumType` a measurand
+   *  list is checked against (#714); without it, lists are not checked. */
+  readonly ocppVersion?: string;
 }
 
 export function handleGetVariablesV201(

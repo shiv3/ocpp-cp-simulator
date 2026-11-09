@@ -1,7 +1,7 @@
 import type {
   SetVariablesRequestV201,
   SetVariablesResponseV201,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import type { ConfigurationStore } from "../../../domain/charge-point/ConfigurationStore";
 import type { DeviceModelContext } from "./getVariablesV201";
 import { resolveDeviceModelVariable } from "./deviceModelMap";
@@ -14,6 +14,20 @@ import {
   type VariableStatusInfo,
 } from "./variableStatusInfo";
 import { variablesRequestLimitViolation } from "./variablesRequestLimits";
+import { unknownMeasurands } from "./measurandEnum";
+
+/** The configuration keys behind the MemberLists over MeasurandEnumType
+ *  (`SampledDataCtrlr.TxUpdatedMeasurands`, `AlignedDataCtrlr.Measurands`,
+ *  and the three TxStarted / TxEnded lists, #607). */
+const MEASURAND_LIST_KEYS: ReadonlySet<string> = new Set([
+  "MeterValuesSampledData",
+  "MeterValuesAlignedData",
+  // SampledDataCtrlr.TxStartedMeasurands / TxEndedMeasurands and
+  // AlignedDataCtrlr.TxEndedMeasurands (#607).
+  "TxStartedMeasurands",
+  "StopTxnSampledData",
+  "StopTxnAlignedData",
+]);
 
 type SetVariableResult = SetVariablesResponseV201["setVariableResult"][number];
 
@@ -90,6 +104,29 @@ export function handleSetVariablesV201(
     }
     if (type !== undefined && type !== "Actual") {
       return { attributeStatus: "NotSupportedAttributeType", ...echo };
+    }
+
+    // B05.FR.07 (#714): a MemberList value "incorrectly formatted for the
+    // given Variable" is Rejected - here a member outside the version's
+    // MeasurandEnumType (Temperature and RPM are 1.6 measurands). The
+    // previous list is kept. Checked first so the reason names the members.
+    if (context.ocppVersion !== undefined && MEASURAND_LIST_KEYS.has(v16Key)) {
+      const members = data.attributeValue
+        .split(",")
+        .map((m) => m.trim())
+        .filter((m) => m !== "");
+      const unknown = unknownMeasurands(members, context.ocppVersion);
+      if (unknown.length > 0) {
+        return rejected(
+          statusInfo(
+            REASON.invalidValue,
+            `Not a MeasurandEnumType value: ${unknown.join(", ")}`.slice(
+              0,
+              512,
+            ),
+          ),
+        );
+      }
     }
 
     // B05.FR.07, FR.08 first: a badly formatted or out-of-range value is

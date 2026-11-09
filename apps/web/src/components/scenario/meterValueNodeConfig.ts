@@ -1,9 +1,9 @@
 import type {
   AutoMeterValueConfig,
   CurvePoint,
-} from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
+} from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
 
-/** Loosely-typed bag matching the ScenarioEditor node form state. */
+/** Loosely-typed bag matching the node form state. */
 export type MeterNodeFormData = Record<string, unknown>;
 
 /** Fallback curve used when a MeterValue node has none configured yet. */
@@ -16,7 +16,7 @@ const DEFAULT_CURVE_POINTS: CurvePoint[] = [
  * Build the {@link MeterValueCurveModal}'s `initialConfig` from a scenario
  * MeterValue node's form data.
  *
- * A scenario expresses "charge until battery full" through
+ * A scenario expresses "charge until the EV's target SoC" through
  * `stopMode === "evSettings"` — that's what {@link ScenarioExecutor} honors,
  * not the modal's own `stopAtTargetSoc`. We surface that flag as the modal
  * checkbox so the two controls stay in sync and the checkbox round-trips

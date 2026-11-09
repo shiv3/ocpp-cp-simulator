@@ -1,4 +1,4 @@
-import type { ChargePointService } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+import type { ChargePointService } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 
 /**
  * Downloads every persisted log row of `cpIds` (in that order) as one JSON

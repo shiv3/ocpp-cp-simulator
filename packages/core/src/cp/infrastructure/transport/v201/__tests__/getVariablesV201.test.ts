@@ -1,4 +1,4 @@
-import type { GetVariablesRequestV201 } from "@ocpp-cp-sim/ocpp/index";
+import type { GetVariablesRequestV201 } from "@ocpp-cp-simulator/ocpp/index";
 import { describe, expect, it } from "vitest";
 import {
   ConfigurationKeys,
@@ -9,7 +9,7 @@ import { DeviceModelTargets } from "../../../../domain/charge-point/DeviceModelT
 import {
   isValidGetVariablesResponseV21,
   isValidSetVariablesResponseV21,
-} from "@ocpp-cp-sim/ocpp/v21/index";
+} from "@ocpp-cp-simulator/ocpp/v21/index";
 import { handleGetVariablesV201 } from "../getVariablesV201";
 import { handleSetVariablesV201 } from "../setVariablesV201";
 

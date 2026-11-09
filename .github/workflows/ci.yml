@@ -20,11 +20,14 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The install-URL step diffs the pull request against its base.
+          fetch-depth: 0
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version-file: .bun-version
+          bun-version-file: .tool-versions
 
       - name: Setup Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -33,6 +36,9 @@ jobs:
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+        env:
+          # @open-ocpp-trace/* is on GitHub Packages (bunfig.toml).
+          GITHUB_TOKEN: ${{ github.token }}
 
       - name: Lint
         run: bun run lint
@@ -42,7 +48,7 @@ jobs:
       # scripts/check-package-boundaries.ts maps every file under packages/ and
       # apps/ to its package and fails on an import the package may not have
       # (type-only imports included), on a cross-package import that is not an
-      # @ocpp-cp-sim/<package> specifier, on a package.json whose workspace:*
+      # @ocpp-cp-simulator/<package> specifier, on a package.json whose workspace:*
       # dependencies differ from what the package imports, or on a UI / Node /
       # Bun-only specifier in a package that must run in both Bun and the
       # browser. #570: it also fails on a cycle of static value imports.
@@ -101,8 +107,38 @@ jobs:
       # advertise and fails if one does not return 200. Needs network access to
       # github.com, and has a short retry so a blip is not a red build; a 404
       # fails immediately.
+      #
+      # #808: the fetch depends on a GitHub release being reachable, so a
+      # release outage turned every unrelated pull request red. A pull request
+      # fetches only when its diff adds or removes an advertised install
+      # command (the same `install -g https://` pattern the script greps for,
+      # so what is checked and what triggers the check cannot drift apart) or
+      # touches the release plumbing; otherwise only the offline invariants
+      # run. A push to main fetches always, and install-urls.yml fetches daily
+      # so a broken cli-latest is still noticed.
       - name: Documented install URLs resolve
-        run: ./scripts/verify-install-urls.sh
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ "$EVENT" != pull_request ]; then
+            ./scripts/verify-install-urls.sh
+            exit
+          fi
+          base="origin/${BASE_REF}"
+          if git diff --unified=0 "$base"...HEAD -- '*.md' \
+               | grep -qE '^[+-].*(pnpm|bun|npm) install -g https://' \
+             || ! git diff --quiet "$base"...HEAD -- \
+                  .github/workflows/ci.yml \
+                  .github/workflows/cli-release.yml \
+                  .github/workflows/install-urls.yml \
+                  scripts/roll-cli-latest.sh \
+                  scripts/verify-install-urls.sh; then
+            ./scripts/verify-install-urls.sh
+          else
+            echo "No install command or release plumbing changed: offline invariants only (#808)"
+            ./scripts/verify-install-urls.sh --offline
+          fi
 
   # Vitest, run once: the coverage run is the test run, and it fails the job
   # on a failing test (it used to run a second time, non-blocking, only for
@@ -119,7 +155,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version-file: .bun-version
+          bun-version-file: .tool-versions
 
       - name: Setup Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -128,6 +164,9 @@ jobs:
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+        env:
+          # @open-ocpp-trace/* is on GitHub Packages (bunfig.toml).
+          GITHUB_TOKEN: ${{ github.token }}
 
       - name: Unit tests with coverage (vitest)
         run: bun run test:coverage
@@ -189,7 +228,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version-file: .bun-version
+          bun-version-file: .tool-versions
 
       - name: Setup Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -198,6 +237,9 @@ jobs:
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+        env:
+          # @open-ocpp-trace/* is on GitHub Packages (bunfig.toml).
+          GITHUB_TOKEN: ${{ github.token }}
 
       - name: Runtime tests with coverage (bun, shard ${{ matrix.shard }} of 3)
         run: >-
@@ -235,6 +277,14 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
+      # Same Bun as docker-publish.yml: the one .tool-versions pins.
+      - name: Read the Bun version
+        id: bun-version
+        run: |
+          version="$(awk '$1=="bun"{print $2}' .tool-versions)"
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
       - name: Build image (no push)
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -246,6 +296,10 @@ jobs:
           tags: ocpp-cp-sim:ci
           build-args: |
             APP_COMMIT=${{ github.sha }}
+            BUN_VERSION=${{ steps.bun-version.outputs.version }}
+          # @open-ocpp-trace/* is on GitHub Packages (Dockerfile, bunfig.toml).
+          secrets: |
+            github_token=${{ github.token }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -281,6 +335,22 @@ jobs:
             exit 1
           fi
 
+      # JSON mode without overriding the entrypoint, and the legacy
+      # `--entrypoint bun src/cli/main.ts` shape open-ocpp-tck still uses
+      # (#346). Each sends one command, closes stdin and expects a reply and
+      # exit 0 (the CSMS URL is a closed port; the reply does not need it).
+      - name: Image runs JSON mode (entrypoint and legacy shim)
+        run: |
+          cmd='{"id":1,"command":"status"}'
+          echo "$cmd" | timeout 60 docker run -i --rm ocpp-cp-sim:ci \
+            --json --cp-id ci-json --ws-url ws://127.0.0.1:9/ocpp/ | tee /tmp/json-entrypoint.out
+          grep -q '"id":1' /tmp/json-entrypoint.out
+          grep -q '"ok":true' /tmp/json-entrypoint.out
+          echo "$cmd" | timeout 60 docker run -i --rm --entrypoint bun -w /app ocpp-cp-sim:ci \
+            src/cli/main.ts --json --cp-id ci-json --ws-url ws://127.0.0.1:9/ocpp/ | tee /tmp/json-shim.out
+          grep -q '"id":1' /tmp/json-shim.out
+          grep -q '"ok":true' /tmp/json-shim.out
+
       - name: Stop the container
         if: always()
         run: docker rm -f ocpp-cp-sim-ci || true
@@ -299,7 +369,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version-file: .bun-version
+          bun-version-file: .tool-versions
 
       - name: Setup Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -308,6 +378,9 @@ jobs:
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+        env:
+          # @open-ocpp-trace/* is on GitHub Packages (bunfig.toml).
+          GITHUB_TOKEN: ${{ github.token }}
 
       - name: Bench slow-path tests (bun)
         run: bun run test:bench-slow

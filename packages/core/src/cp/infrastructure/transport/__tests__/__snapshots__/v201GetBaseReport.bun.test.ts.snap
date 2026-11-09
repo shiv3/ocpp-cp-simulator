@@ -73,6 +73,69 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
             "name": "OCPPCommCtrlr",
           },
           "variable": {
+            "name": "RetryBackOffWaitMinimum",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "1",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "maxLimit": 2147483,
+            "minLimit": 1,
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "OCPPCommCtrlr",
+          },
+          "variable": {
+            "name": "RetryBackOffRandomRange",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "0",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "maxLimit": 2147483,
+            "minLimit": 0,
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "OCPPCommCtrlr",
+          },
+          "variable": {
+            "name": "RetryBackOffRepeatTimes",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "5",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "maxLimit": 30,
+            "minLimit": 0,
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "OCPPCommCtrlr",
+          },
+          "variable": {
             "instance": "TransactionEvent",
             "name": "MessageAttempts",
           },
@@ -126,6 +189,26 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           "variableCharacteristics": {
             "dataType": "integer",
             "minLimit": 1,
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "OCPPCommCtrlr",
+          },
+          "variable": {
+            "name": "OfflineThreshold",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "60",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "minLimit": 0,
             "supportsMonitoring": true,
           },
         },
@@ -193,6 +276,124 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           },
           "variable": {
             "name": "SignReadings",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "false",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "boolean",
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "SampledDataCtrlr",
+          },
+          "variable": {
+            "name": "TxStartedMeasurands",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "MemberList",
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "SampledDataCtrlr",
+          },
+          "variable": {
+            "name": "TxEndedMeasurands",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "MemberList",
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "SampledDataCtrlr",
+          },
+          "variable": {
+            "name": "TxEndedInterval",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "0",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "maxLimit": 2147483,
+            "minLimit": 0,
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "AlignedDataCtrlr",
+          },
+          "variable": {
+            "name": "TxEndedMeasurands",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "MemberList",
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "AlignedDataCtrlr",
+          },
+          "variable": {
+            "name": "TxEndedInterval",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "0",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "maxLimit": 2147483,
+            "minLimit": 0,
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "AlignedDataCtrlr",
+          },
+          "variable": {
+            "name": "SendDuringIdle",
           },
           "variableAttribute": [
             {
@@ -363,6 +564,25 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
         },
         {
           "component": {
+            "name": "AuthCtrlr",
+          },
+          "variable": {
+            "name": "MasterPassGroupId",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "string",
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
             "name": "AuthCacheCtrlr",
           },
           "variable": {
@@ -371,6 +591,25 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           "variableAttribute": [
             {
               "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "false",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "boolean",
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "ReservationCtrlr",
+          },
+          "variable": {
+            "name": "NonEvseSpecific",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
               "type": "Actual",
               "value": "false",
             },
@@ -417,6 +656,26 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           "variableCharacteristics": {
             "dataType": "boolean",
             "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "TxCtrlr",
+          },
+          "variable": {
+            "name": "MaxEnergyOnInvalidId",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "0",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "supportsMonitoring": true,
+            "unit": "Wh",
           },
         },
         {

@@ -9,12 +9,12 @@ import {
   renderConsole,
   type FakeChargePointService,
 } from "../../test/harness";
-import type { AutoMeterValueConfig } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import type { AutoMeterValueConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import type {
   ChargePointService,
   ChargePointSnapshot,
-} from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+} from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 import { clearConnectorPowerCache } from "./useConnectorPower";
 
 type ConnectorSnapshot = ChargePointSnapshot["connectors"][number];
@@ -129,6 +129,11 @@ describe("ConnectorCard: the connector as a charging session", () => {
     unmount = () => act(() => root.unmount());
 
     expect(card().textContent).toContain("Connector 1");
+    // A generic plug: nothing in the snapshot tells the connector standard.
+    const header = card().querySelector("[data-card-header]")!;
+    const plug = header.firstElementChild!;
+    expect(plug.matches("svg.evicon-charging-plug")).toBe(true);
+    expect(plug.getAttribute("aria-hidden")).toBe("true");
     expect(card().textContent).toContain("Available");
     expect(
       card().querySelector('[data-testid="availability"]')?.textContent,
@@ -167,7 +172,7 @@ describe("ConnectorCard: the connector as a charging session", () => {
     expect(batteryRoot.className).toContain("@max-[560px]:items-start");
   });
 
-  it("Plug in on the stepper reports Preparing", async () => {
+  it("Plug in on the stepper drives the EV cable model (#453)", async () => {
     const { root, service } = await renderCard({});
     unmount = () => act(() => root.unmount());
 
@@ -176,11 +181,7 @@ describe("ConnectorCard: the connector as a charging session", () => {
     )!;
     expect(next.textContent).toContain("Plug in");
     await click(next);
-    expect(service.sendStatusNotification).toHaveBeenCalledWith(
-      "CP-1",
-      1,
-      OCPPStatus.Preparing,
-    );
+    expect(service.evPlugIn).toHaveBeenCalledWith("CP-1", 1);
   });
 
   it("Unplug on the stepper is an EV-side disconnect (#488)", async () => {

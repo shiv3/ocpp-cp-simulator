@@ -2,7 +2,6 @@
 import type {
   ClearDisplayMessageResponseV201,
   CostUpdatedResponseV201,
-  CustomerInformationResponseV201,
   DataTransferResponseV201,
   GetDisplayMessagesResponseV201,
   GetLocalListVersionResponseV201,
@@ -12,7 +11,7 @@ import type {
   SetDisplayMessageResponseV201,
   SetNetworkProfileResponseV201,
   UnpublishFirmwareResponseV201,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import type {
   V201HandlerResult,
   V201InboundContext,
@@ -22,8 +21,8 @@ import type {
   SendLocalListItem,
   SendLocalListStatus,
 } from "../../../domain/auth/LocalAuthList";
-import type { AuthorizationStatusEnumType } from "@ocpp-cp-sim/ocpp/v201/types/send-local-list-request";
-import type { SendLocalListStatusEnumType } from "@ocpp-cp-sim/ocpp/v201/types/send-local-list-response";
+import type { AuthorizationStatusEnumType } from "@ocpp-cp-simulator/ocpp/v201/types/send-local-list-request";
+import type { SendLocalListStatusEnumType } from "@ocpp-cp-simulator/ocpp/v201/types/send-local-list-response";
 
 type V201AckHandler = (
   payload: unknown,
@@ -144,12 +143,6 @@ export const handleClearDisplayMessageAckV201 = (() => ({
   } satisfies ClearDisplayMessageResponseV201,
 })) satisfies V201AckHandler;
 
-export const handleCustomerInformationAckV201 = (() => ({
-  response: {
-    status: "Rejected",
-  } satisfies CustomerInformationResponseV201,
-})) satisfies V201AckHandler;
-
 export const handleDataTransferAckV201 = (() => ({
   response: {
     status: "UnknownVendorId",
@@ -207,10 +200,12 @@ export const handleGetLocalListVersionAckV201 = ((
   }
 
   const cp = ctx.chargePoint;
+  // D02.FR.03: without LocalAuthListEnabled the answer is 0, "no Local
+  // Authorization List". (-1 is the 1.6 convention, 1.6 §5.10.)
   if (!cp.configuration.localAuthListEnabled()) {
     return {
       response: {
-        versionNumber: -1,
+        versionNumber: 0,
       } satisfies GetLocalListVersionResponseV201,
     };
   }

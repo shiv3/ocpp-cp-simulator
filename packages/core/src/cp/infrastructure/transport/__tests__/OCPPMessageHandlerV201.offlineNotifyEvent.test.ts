@@ -8,9 +8,9 @@ import type { Logger } from "../../../shared/Logger";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { Transaction } from "../../../domain/connector/Transaction";
 import type { MonitoringEvent } from "../../../domain/monitoring/MonitorEvaluation";
-import { strictValidationErrors } from "@ocpp-cp-sim/ocpp/validate";
-import { v201Schemas } from "@ocpp-cp-sim/ocpp/v201/schemas";
-import { v21Schemas } from "@ocpp-cp-sim/ocpp/v21/schemas";
+import { strictValidationErrors } from "@ocpp-cp-simulator/ocpp/validate";
+import { v201Schemas } from "@ocpp-cp-simulator/ocpp/v201/schemas";
+import { v21Schemas } from "@ocpp-cp-simulator/ocpp/v21/schemas";
 
 /**
  * #538, OCPP 2.0.1 / 2.1 N07.FR.04 / N08.FR.03 on the E11 queue (#528):
@@ -29,7 +29,22 @@ class FakeSocket {
   refuseNext = 0;
   /** The next CALL of this action `sendAction` refuses, once. */
   refuseAction: string | null = null;
-  setMessageHandler(): void {}
+  /** The CSMS answers each written CALL after the write returns. A 2.x
+   *  station sends the next CALL only after the answer (#708). */
+  autoAnswer = false;
+  private handler:
+    | ((type: number, id: string, action: string, payload: unknown) => void)
+    | null = null;
+  setMessageHandler(
+    handler: (
+      type: number,
+      id: string,
+      action: string,
+      payload: unknown,
+    ) => void,
+  ): void {
+    this.handler = handler;
+  }
   onCloseTransaction(): void {}
   isConnected(): boolean {
     return this.connected;
@@ -38,7 +53,7 @@ class FakeSocket {
     return { gen: 1, closeCause: null };
   }
   sendAction(
-    _messageId: string,
+    messageId: string,
     action: string,
     payload: unknown,
     _gen: unknown,
@@ -54,6 +69,9 @@ class FakeSocket {
     }
     this.calls.push({ action, payload });
     onSettled?.({ outcome: "written" });
+    if (this.autoAnswer) {
+      queueMicrotask(() => this.handler?.(3, messageId, action, {}));
+    }
     return true;
   }
   actions(): string[] {
@@ -128,7 +146,11 @@ function setup(ocppVersion: string, offlineQueuingSeverity = 5) {
       transactionMessageRetryInterval: () => 60,
       messageTimeout: () => 30,
       meterValuesSampledData: () => [],
+      stopTxnSampledData: () => [],
+      stopTxnAlignedData: () => [],
+      txStartedMeasurands: () => [],
       offlineQueuingSeverity: () => offlineQueuingSeverity,
+      offlineQueueMaxEvents: () => 1000,
     },
   };
   const handler = new OCPPMessageHandlerV201(
@@ -148,9 +170,16 @@ function setup(ocppVersion: string, offlineQueuingSeverity = 5) {
     socket.connected = false;
     handler.onWebSocketClosed();
   };
-  const reconnect = () => {
+  const reconnect = async () => {
     socket.connected = true;
+    // The replay goes one CALL at a time (#708): the CSMS answers each.
+    socket.autoAnswer = true;
     handler.flushPendingQueue();
+    // Until the chain of answered CALLs stops growing.
+    for (let seen = -1; seen !== socket.calls.length;) {
+      seen = socket.calls.length;
+      for (let i = 0; i < 50; i++) await Promise.resolve();
+    }
   };
   return { socket, handler, start, update, close, reconnect };
 }
@@ -176,13 +205,13 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       }
     };
 
-    it("replays a queued report after Boot Accepted, schema-valid and without an offline marker", () => {
+    it("replays a queued report after Boot Accepted, schema-valid and without an offline marker", async () => {
       const { socket, handler, close, reconnect } = setup(version);
       close();
       handler.queueNotifyEvent([event(1), event(2, 3, "600")]);
       expect(socket.calls).toEqual([]);
 
-      reconnect();
+      await reconnect();
 
       const replayed = socket.notifyEvents();
       expectValid(replayed);
@@ -201,14 +230,14 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       expect(data[0].severity).toBe(version === "OCPP-2.1" ? 4 : undefined);
     });
 
-    it("replays NotifyEvents and TransactionEvents in the order they were produced", () => {
+    it("replays NotifyEvents and TransactionEvents in the order they were produced", async () => {
       const { socket, handler, start, update, close, reconnect } =
         setup(version);
       close();
       start();
       handler.queueNotifyEvent([event(1)]);
       update();
-      reconnect();
+      await reconnect();
       expect(socket.actions()).toEqual([
         "TransactionEvent",
         "NotifyEvent",
@@ -216,13 +245,13 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       ]);
     });
 
-    it("cuts a large report into parts at send time (N07.FR.07)", () => {
+    it("cuts a large report into parts at send time (N07.FR.07)", async () => {
       const { socket, handler, close, reconnect } = setup(version);
       close();
       handler.queueNotifyEvent(
         Array.from({ length: 150 }, (_, i) => event(i + 1)),
       );
-      reconnect();
+      await reconnect();
       const parts = socket.notifyEvents();
       expectValid(parts);
       expect(
@@ -233,13 +262,13 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       ]);
     });
 
-    it("does not hold a live TransactionEvent behind a queued NotifyEvent", () => {
+    it("does not hold a live TransactionEvent behind a queued NotifyEvent", async () => {
       const { socket, handler, start, close, reconnect } = setup(version);
       close();
       handler.queueNotifyEvent([event(1)]);
       // The replay is refused: the NotifyEvent stays at the head.
       socket.refuseNext = 1;
-      reconnect();
+      await reconnect();
       expect(socket.calls).toEqual([]);
 
       start();
@@ -249,18 +278,18 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       ).toBeUndefined();
 
       // The next Boot Accepted replays the NotifyEvent kept at the head.
-      reconnect();
+      await reconnect();
       expect(socket.actions()).toEqual(["TransactionEvent", "NotifyEvent"]);
     });
 
-    it("lets a live TransactionEvent through once the queued ones replayed, a refused NotifyEvent left at the head", () => {
+    it("lets a live TransactionEvent through once the queued ones replayed, a refused NotifyEvent left at the head", async () => {
       const { socket, handler, start, update, close, reconnect } =
         setup(version);
       close();
       start();
       handler.queueNotifyEvent([event(1)]);
       socket.refuseAction = "NotifyEvent";
-      reconnect();
+      await reconnect();
       expect(socket.actions()).toEqual(["TransactionEvent"]);
 
       update();
@@ -273,20 +302,20 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       ).toBeUndefined();
     });
 
-    it("keeps the TransactionEvents queued behind a refused NotifyEvent in order", () => {
+    it("keeps the TransactionEvents queued behind a refused NotifyEvent in order", async () => {
       const { socket, handler, start, update, close, reconnect } =
         setup(version);
       close();
       handler.queueNotifyEvent([event(1)]);
       start();
       socket.refuseAction = "NotifyEvent";
-      reconnect();
+      await reconnect();
       expect(socket.calls).toEqual([]);
 
       // FIFO, as behind a refused TransactionEvent: a new event joins them.
       update();
       expect(socket.calls).toEqual([]);
-      reconnect();
+      await reconnect();
       expect(socket.actions()).toEqual([
         "NotifyEvent",
         "TransactionEvent",
@@ -294,7 +323,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       ]);
     });
 
-    it("caps the queued NotifyEvent reports, dropping the oldest, never a TransactionEvent", () => {
+    it("caps the queued NotifyEvent reports, dropping the oldest, never a TransactionEvent", async () => {
       const { socket, handler, start, update, close, reconnect } =
         setup(version);
       const overflow = 5;
@@ -312,7 +341,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       update();
       expect(fullWarnings()).toHaveLength(1);
 
-      reconnect();
+      await reconnect();
 
       const actions = socket.actions();
       expect(actions.filter((a) => a === "TransactionEvent")).toHaveLength(2);
@@ -342,7 +371,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       expect(fullWarnings()).toHaveLength(2);
     });
 
-    it("drops a Periodic-only report before a threshold crossing at the cap", () => {
+    it("drops a Periodic-only report before a threshold crossing at the cap", async () => {
       const { socket, handler, close, reconnect } = setup(version);
       const periodic = (eventId: number): MonitoringEvent => ({
         ...event(eventId),
@@ -354,7 +383,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       for (let i = 4; i <= MAX_QUEUED_NOTIFY_EVENTS + 3; i += 1) {
         handler.queueNotifyEvent([periodic(i)]);
       }
-      reconnect();
+      await reconnect();
       const replayed = socket
         .notifyEvents()
         .map((p) => (p.eventData as { eventId: number }[])[0].eventId);
@@ -389,11 +418,11 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
       expect(handler.highestQueuedNotifyEventId()).toBe(9);
     });
 
-    it("queues a NotifyEvent the socket is down for, per OfflineQueuingSeverity", () => {
+    it("queues a NotifyEvent the socket is down for, per OfflineQueuingSeverity", async () => {
       const { socket, handler, close, reconnect } = setup(version, 4);
       close();
       handler.sendNotifyEvent([event(1, 4), event(2, 5)]);
-      reconnect();
+      await reconnect();
       const replayed = socket.notifyEvents();
       expectValid(replayed);
       expect(

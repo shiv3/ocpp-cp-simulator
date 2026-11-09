@@ -4,7 +4,7 @@ import { Check } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { deriveDisplayedSteps, stepSummary } from "../../../lib/scenarioSteps";
-import type { ScenarioDefinition } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import type { ScenarioDefinition } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import { stepPhase } from "../../../lib/stepLayout";
 import type { ScenarioRunState } from "../../../lib/useScenarioRun";
 import { nodeTitle } from "./stepVisuals";

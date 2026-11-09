@@ -6,7 +6,7 @@ import React, {
   useState,
 } from "react";
 
-import type { ChargePointEvent } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+import type { ChargePointEvent } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 import { useChargePoints } from "../../data/hooks/useChargePoints";
 import { useConfig } from "../../data/hooks/useConfig";
 import { useDataContext } from "../../data/providers/DataProvider";

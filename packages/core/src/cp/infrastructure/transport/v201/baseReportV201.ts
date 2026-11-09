@@ -2,7 +2,7 @@ import type { ConfigurationStore } from "../../../domain/charge-point/Configurat
 import type {
   ReportDataType,
   VariableAttributeType,
-} from "@ocpp-cp-sim/ocpp/types/v201/notify-report";
+} from "@ocpp-cp-simulator/ocpp/types/v201/notify-report";
 import type { ConfigurationValue } from "../../../domain/charge-point/ConfigurationStore";
 import type { DeviceModelTargets } from "../../../domain/charge-point/DeviceModelTargets";
 import { evseValueKey } from "../../../domain/charge-point/runtimeValueKeys";
@@ -11,7 +11,7 @@ import {
   type DeviceModelRegistry,
   type DeviceModelVariableDef,
 } from "../../../domain/device-model/DeviceModelRegistry";
-import { renderConfigValue } from "./renderConfigValue";
+import { renderConfigValue } from "../../../domain/charge-point/renderConfigValue";
 
 /**
  * One ReportData per registered variable the store has a value for: the

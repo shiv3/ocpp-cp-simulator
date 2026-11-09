@@ -1,20 +1,83 @@
 import { useTranslation } from "react-i18next";
 import React from "react";
-import { Check, GripVertical, Plus } from "lucide-react";
+import {
+  ArrowDown,
+  Check,
+  CornerDownRight,
+  CornerLeftUp,
+  GitBranch,
+  GitMerge,
+  GripVertical,
+  LogOut,
+  Plus,
+  Repeat,
+  RepeatOff,
+  Shuffle,
+  SlidersHorizontal,
+  Split,
+  Timer,
+  X,
+} from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import RunStatePill from "../../../components/RunStatePill";
-import type { ScenarioNode } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import { isLiveRunState } from "../../../lib/scenarioRunState";
-import { stepSummary, type StepLane } from "../../../lib/scenarioSteps";
-import { layoutSteps, stepIndexOf } from "../../../lib/stepLayout";
 import {
+  ScenarioNodeType,
+  type ScenarioNode,
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import {
+  canInsertLoopAt,
+  canMoveStepTo,
+  editCapabilities,
+  firstNodeOf,
+  type Block,
+  type Capability,
+  type ForkBlock,
+  type ForkKind,
+  type Lane,
+  type LaneCondition,
+  type LoopBlock as LoopBlockModel,
+  newLoopIsBounded,
+  type Seq,
+  type SeqPath,
+  seqAt,
+  treeNodes,
+} from "../../../lib/blockTree";
+import { connectionRule } from "@ocpp-cp-simulator/core/scenario/scenarioConnectionRules";
+import type { MessageKey } from "../../../../i18n";
+import { isLiveRunState } from "../../../lib/scenarioRunState";
+import {
+  STRUCTURE_TYPE,
+  WAIT_STEP_TYPES,
+  stepSummary,
+} from "../../../lib/scenarioSteps";
+import {
+  conditionText,
+  forkSummary,
+  isDeadLane,
+  laneHandle,
+  lanesLeavingLoop,
+  linkOf,
+  stepNumbers,
+  treeSteps,
+} from "../../../lib/stepTree";
+import {
+  dropIndex,
   dropNeighbours,
   type LaneDragHandlers,
 } from "../../../lib/useLaneDrag";
+import { useTreeDrag, type TreeDropTarget } from "../../../lib/useTreeDrag";
 import type { ScenarioRunState } from "../../../lib/useScenarioRun";
 import { useStepEditing } from "../edit/stepEditing";
+import IssueBadge from "../edit/IssueBadge";
+import AddStepPicker, { type StructureKind } from "../edit/AddStepPicker";
+import { useStepIssues } from "../edit/issueMarkUi";
 import StepTile from "./StepTile";
+import {
+  LoopBoundsPanel,
+  LoopBoundsSummary,
+  type LoopBoundsEditing,
+} from "./loopBoundsUi";
 import {
   CURRENT_RING,
   boxPhase,
@@ -22,14 +85,15 @@ import {
   laneStyle,
   nodeTitle,
   type BoxPhase,
-  type StepRunViewProps,
+  type StepTreeViewProps,
 } from "./stepVisuals";
 
-export type { StepRunViewProps } from "./stepVisuals";
+export type { StepTreeViewProps } from "./stepVisuals";
 
 /** The editor's extras on a box: drag, the keyboard, the drop line. */
 interface StepBoxEditing {
-  dragHandlers: LaneDragHandlers;
+  /** Absent: the box cannot be dragged (a branch point). */
+  dragHandlers?: LaneDragHandlers;
   onKeyDown: (event: React.KeyboardEvent) => void;
   /** Px the box follows the pointer by while dragged, else null. */
   dragOffset: number | null;
@@ -47,6 +111,15 @@ interface StepBoxProps {
   onSelect?: (nodeId: string) => void;
   /** The editor: an accessible name per box, the grab handle and keys. */
   editing?: StepBoxEditing;
+  /** The step's diagnostics (`useStepIssues`). */
+  marked?: ReturnType<ReturnType<typeof useStepIssues>>;
+  /** The element: a list item of its lane, or a `div` heading a branch
+   *  point's block. */
+  as?: "li" | "div";
+  /** The box is block `blockIndex` of its lane (what a drag measures). */
+  blockIndex?: number;
+  /** Outlined: the step is in the range an inspector action would affect. */
+  ranged?: boolean;
 }
 
 const StepBox: React.FC<StepBoxProps> = ({
@@ -58,6 +131,10 @@ const StepBox: React.FC<StepBoxProps> = ({
   selected,
   onSelect,
   editing,
+  marked,
+  as: Tag = "li",
+  blockIndex,
+  ranged,
 }) => {
   const { t } = useTranslation();
   const live = state !== undefined && isLiveRunState(state) ? state : null;
@@ -91,24 +168,30 @@ const StepBox: React.FC<StepBoxProps> = ({
           />
         )
       )}
+      {marked?.description}
     </>
   );
   const className = cn(
     "flex min-h-[52px] w-full items-center gap-2.5 rounded-[10px] bg-cx-sub px-3 py-2",
-    editing && "pl-7",
+    editing?.dragHandlers && "pl-7",
     phase === "todo" && "opacity-55",
     phase === "current" && live && CURRENT_RING[live],
     failed && "ring-2 ring-cx-rose",
+    marked?.style?.inset,
+    marked?.highlighted && marked.style?.glow,
     selected && "outline outline-2 outline-cx-accent",
   );
   const dragOffset = editing?.dragOffset ?? null;
 
   return (
-    <li
+    <Tag
       data-step-id={step.id}
+      data-block={blockIndex}
       data-phase={failed ? "failed" : phase}
+      data-range-highlight={ranged ? "hint" : undefined}
       className={cn(
-        editing && "relative",
+        (editing || marked?.mark) && "relative",
+        ranged && "rounded-[10px] ring-2 ring-cx-purple ring-offset-1",
         dragOffset !== null &&
           "z-20 rounded-[10px] shadow-[0_8px_24px_rgba(20,20,30,0.18)]",
       )}
@@ -128,7 +211,7 @@ const StepBox: React.FC<StepBoxProps> = ({
           )}
         />
       )}
-      {editing && (
+      {editing?.dragHandlers && (
         // Pointer only (out of the tab order): the box itself takes
         // Alt+ArrowUp/Down.
         <button
@@ -141,6 +224,12 @@ const StepBox: React.FC<StepBoxProps> = ({
         >
           <GripVertical className="h-3.5 w-3.5" />
         </button>
+      )}
+      {marked?.mark && (
+        <IssueBadge
+          mark={marked.mark}
+          className="absolute -top-2.5 right-8 z-10"
+        />
       )}
       {onSelect ? (
         <button
@@ -158,26 +247,214 @@ const StepBox: React.FC<StepBoxProps> = ({
           onClick={() => onSelect(step.id)}
           onKeyDown={editing?.onKeyDown}
           className={className}
+          {...marked?.cardProps}
         >
           {body}
         </button>
       ) : (
-        <div className={className}>{body}</div>
+        <div className={className} {...marked?.cardProps}>
+          {body}
+        </div>
       )}
-    </li>
+    </Tag>
   );
 };
 
-/** The drag reads the boxes where the browser put them. */
-function measureBoxes(lane: StepLane, root: HTMLElement | null): number[] {
-  const list = root?.querySelector(`[data-lane-list="${lane}"]`);
+/** The drag reads the blocks where the browser put them: every block of
+ *  the sequence (`data-block`), in document order. A fork or a loop is one
+ *  block: a step moves only among the blocks of its own sequence. */
+function measureBlocks(path: SeqPath, root: HTMLElement | null): number[] {
+  const list = Array.from(
+    root?.querySelectorAll<HTMLElement>("[data-lane-list]") ?? [],
+  ).find((el) => el.dataset.laneList === path);
   return Array.from(list?.children ?? [])
-    .filter((el) => el.hasAttribute("data-step-id"))
+    .filter((el) => el.hasAttribute("data-block"))
     .map((el) => {
       const rect = el.getBoundingClientRect();
       return rect.top + rect.height / 2;
     });
 }
+
+/** The step types a Repeat block made in the middle of a lane cannot start
+ *  with: its bounds are checked after the step, which must then go on (not a
+ *  switch / choice, not an End). By type, with the reason. */
+function midLaneLoopRefusals(
+  t: (key: MessageKey) => string,
+): Partial<Record<string, string>> {
+  const out: Partial<Record<string, string>> = {};
+  for (const type of Object.values(ScenarioNodeType)) {
+    const rule = connectionRule(type);
+    if (rule.out !== "next" || type === ScenarioNodeType.END) {
+      out[type] = t("scenarios.editor.cannot.loopNeedsNextStep");
+    }
+  }
+  return out;
+}
+
+/** Steps that wait (a delay or a trigger): a loop starting at one waits
+ *  there first on every round. */
+const WAIT_TYPES: ReadonlySet<string> = new Set(WAIT_STEP_TYPES);
+
+/** Steps that may end their branch on a run (a switch or choice whose picked
+ *  handle has no edge): a loop holding one is not "forever". */
+const EXIT_TYPES: ReadonlySet<string> = new Set([
+  ScenarioNodeType.SWITCH,
+  ScenarioNodeType.CHOICE,
+]);
+
+/**
+ * A loop drawn as Scratch draws "forever": a C-shaped block whose top arm
+ * says it repeats, whose left spine holds the repeated steps (`children`,
+ * a list of boxes), and whose bottom arm says where the run goes back to.
+ * The back edge is unconditional, so the loop repeats until the run ends,
+ * unless a switch or choice inside picks a handle with no edge (`canExit`):
+ * then the top arm says "Repeat", not "Repeat forever". A loop edge
+ * (schema 1.10) says its bounds instead: "Repeat 3 times / for 2 h / until
+ * … (whichever first)"; the editor's "Bounds" button edits them inline.
+ * The arms and the spine are tints over whatever is behind them, so the
+ * block reads the same on a page, a card or a panel, in either theme.
+ */
+const LoopBlock: React.FC<{
+  /** The loop (its bounds, when it has a loop edge). */
+  loop: LoopBlockModel;
+  /** The step the loop goes back to (its first step). */
+  target: string;
+  /** Box numbers of the first and last repeated step. */
+  from: number;
+  to: number;
+  /** The first repeated step waits (a delay or a trigger). */
+  waitsFirst: boolean;
+  /** A repeated step may end the branch (a switch or choice). */
+  canExit: boolean;
+  /** A step inside is the run's current step. */
+  active: boolean;
+  /** The loop is block `blockIndex` of its lane (what a drag measures). */
+  blockIndex?: number;
+  /** editable: the "Stop repeating" button and whether it applies. */
+  unwrap?: { cap: Capability; onClick: () => void };
+  /** editable: the "Bounds" button and its inline editor. */
+  bounds?: LoopBoundsEditing;
+  children: React.ReactNode;
+}> = ({
+  loop,
+  target,
+  from,
+  to,
+  waitsFirst,
+  canExit,
+  active,
+  blockIndex,
+  unwrap,
+  bounds,
+  children,
+}) => {
+  const { t } = useTranslation();
+  const labelId = React.useId();
+  const [editingBounds, setEditingBounds] = React.useState(false);
+  const tint = active ? "bg-cx-purple/20" : "bg-cx-purple/12";
+  return (
+    <li
+      data-loop-block=""
+      data-block={blockIndex}
+      data-loop-to={target}
+      aria-label={t("scenarioRun.loopSteps", { from, to })}
+      className="min-w-0"
+    >
+      <div
+        className={cn(
+          "flex min-h-7 flex-wrap items-center gap-x-1.5 rounded-t-[12px] rounded-br-[12px] px-2.5 py-1 text-xs",
+          tint,
+        )}
+      >
+        <span
+          id={labelId}
+          title={t(
+            canExit
+              ? "scenarioRun.loopUntilExit"
+              : "scenarioRun.loopUntilRunStops",
+          )}
+          className="inline-flex items-center gap-1.5 whitespace-nowrap font-semibold text-cx-purple"
+        >
+          <Repeat className="h-3.5 w-3.5 shrink-0" aria-hidden />
+          {loop.loopEdge ? (
+            <LoopBoundsSummary loop={loop} className="whitespace-normal" />
+          ) : (
+            t(canExit ? "scenarioRun.loopRepeat" : "scenarioRun.loopForever")
+          )}
+        </span>
+        {waitsFirst && (
+          <span className="text-cx-muted">
+            · {t("scenarioRun.loopWaitsAt", { n: from })}
+          </span>
+        )}
+        {bounds && (
+          <button
+            type="button"
+            data-testid="edit-loop-bounds"
+            aria-expanded={editingBounds}
+            title={t("scenarioRun.loopBounds.editHint")}
+            onClick={() => setEditingBounds((open) => !open)}
+            className="ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium text-cx-purple hover:bg-cx-purple/15"
+          >
+            <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden />
+            {t("scenarioRun.loopBounds.edit")}
+          </button>
+        )}
+        {unwrap && (
+          <button
+            type="button"
+            data-testid="unwrap-loop"
+            title={
+              unwrap.cap.ok
+                ? t("scenarios.editor.unwrapLoopHint")
+                : t(unwrap.cap.reason)
+            }
+            disabled={!unwrap.cap.ok}
+            onClick={unwrap.onClick}
+            className={cn(
+              !bounds && "ml-auto",
+              "inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium text-cx-purple hover:bg-cx-purple/15 disabled:cursor-not-allowed disabled:opacity-40",
+            )}
+          >
+            <RepeatOff className="h-3.5 w-3.5" aria-hidden />
+            {t("scenarios.editor.unwrapLoop")}
+          </button>
+        )}
+      </div>
+      {bounds && editingBounds && (
+        <div className={cn("px-2.5 pb-2", tint)}>
+          <LoopBoundsPanel
+            loop={loop}
+            editing={bounds}
+            onClose={() => setEditingBounds(false)}
+          />
+        </div>
+      )}
+      <div className="flex">
+        <div aria-hidden className={cn("w-3 shrink-0", tint)} />
+        <div
+          role="group"
+          aria-labelledby={labelId}
+          className="min-w-0 flex-1 py-1.5 pl-1.5"
+        >
+          {children}
+        </div>
+      </div>
+      <div
+        className={cn(
+          "flex min-h-6 items-center gap-1.5 rounded-b-[12px] rounded-tr-[12px] px-2.5 py-1 text-xs text-cx-fg2",
+          tint,
+        )}
+      >
+        <CornerLeftUp
+          className="h-3.5 w-3.5 shrink-0 text-cx-purple"
+          aria-hidden
+        />
+        {t("scenarioRun.loopBackArm", { n: from })}
+      </div>
+    </li>
+  );
+};
 
 /** The hover zone between two boxes of a lane: a small `+` that opens the
  *  step picker for that place (as the old step list's insert slot). */
@@ -203,83 +480,279 @@ const InsertZone: React.FC<{ label: string; onOpen: () => void }> = ({
   );
 };
 
+const FORK_ICONS: Record<
+  ForkKind,
+  React.ComponentType<{ className?: string }>
+> = {
+  start: Split,
+  parallel: Split,
+  switch: GitBranch,
+  choice: Shuffle,
+  timeout: Timer,
+  extra: CornerDownRight,
+};
+
+/** Where a sequence is drawn: inside which loop's block, if any. */
+interface SeqContext {
+  /** The first step of the innermost loop around it, or null. */
+  loopHeader: string | null;
+  /** That loop's lanes that leave it, drawn after its block. */
+  exits: LeavingLane[] | null;
+  /** The steps drawn inside that loop's block. */
+  inLoop: string[] | null;
+}
+
+interface LeavingLane {
+  fork: ForkBlock;
+  lane: Lane;
+  laneIndex: number;
+}
+
+const blockKey = (block: Block) => `${block.kind}:${firstNodeOf(block).id}`;
+
 /**
- * The run's steps as boxes stacked top to bottom: the chain, then — when the
- * scenario forks — one column per branch, side by side, each under a lane tag
- * with its `done/total`. Only a `supported` layout belongs here; the caller
- * shows `RunTimeline` for the rest. `editable` (the editor) adds a `+`
- * between two boxes of a lane, "+ Add step" under each lane, a grab handle
- * to drag a box within its lane, and the keys of `useStepEditing`.
+ * The scenario's block tree as boxes stacked top to bottom
+ * (`recognizeBlockTree`), drawn recursively: steps; a branch point (a START
+ * that fans out, a switch, a choice, a step with edges it never follows) as
+ * its box, a header saying how it picks, its lanes side by side under a
+ * condition chip (lanes that never run muted), and where they meet again;
+ * a loop as a C-shaped block around its body (a lane that leaves the loop
+ * follows the block); a jump as a note; steps nothing reaches in a section
+ * of their own. Boxes are numbered in tree pre-order.
+ *
+ * `editable` (the editor) adds a `+` between two blocks and "+ Add step" at
+ * the end of each sequence, "+ branch" on each branch point and a remove
+ * button on each lane, a grab handle to drag a step within its sequence, and
+ * the keys of `useStepEditing`. Every control is enabled from
+ * `editCapabilities`: a refused one is disabled with the reason as title.
  */
-const StepsView: React.FC<StepRunViewProps> = (props) => {
+const StepsView: React.FC<StepTreeViewProps> = (props) => {
   const {
-    layout,
+    tree,
     currentNodeId,
     state,
     selectedStepId,
     onSelectStep,
+    onSelectLane,
     editable = false,
     onInsertStep,
-    onAddBranch,
+    onInsertStepIntoLoop,
+    onMoveStepTo,
+    onMoveStep,
+    onAddLane,
+    onRemoveLane,
+    onUnwrapLoop,
+    issues,
   } = props;
 
   const { t } = useTranslation();
-  const editing = useStepEditing(props, measureBoxes);
-  const { drag } = editing;
+  const stepIssues = useStepIssues(issues);
+  /** An empty Repeat block the user asked for (UI only: the file has no
+   *  such thing until a step is in it) and its open picker. */
+  const [pendingLoop, setPendingLoop] = React.useState<{
+    path: SeqPath;
+    index: number;
+  } | null>(null);
+  const [pendingPicker, setPendingPicker] = React.useState(false);
+  /** Why the last drop (or the one being aimed) is refused. */
+  const [dropNotice, setDropNotice] = React.useState<string | null>(null);
 
-  if (!editable && layoutSteps(layout).length === 0) {
+  const pendingValid =
+    pendingLoop !== null &&
+    (() => {
+      const seq = seqAt(tree, pendingLoop.path);
+      return (
+        seq !== null &&
+        pendingLoop.index <= seq.blocks.length &&
+        canInsertLoopAt(tree, pendingLoop.path, pendingLoop.index).ok
+      );
+    })();
+  const pending = pendingValid ? pendingLoop : null;
+
+  const structureRefusals = (slot: { lane: SeqPath; index: number }) => {
+    const refusals: Partial<Record<StructureKind, string>> = {};
+    const loopCap = canInsertLoopAt(tree, slot.lane, slot.index);
+    if (!loopCap.ok) refusals.loop = t(loopCap.reason);
+    return refusals;
+  };
+  const editing = useStepEditing<SeqPath>(
+    {
+      ...props,
+      structure: {
+        pick: (slot, kind) => {
+          if (kind === "loop") {
+            setDropNotice(null);
+            setPendingPicker(false);
+            setPendingLoop({ path: slot.lane, index: slot.index });
+          } else {
+            const type = STRUCTURE_TYPE[kind];
+            if (type) onInsertStep?.(slot.lane, slot.index, type);
+          }
+        },
+        refusals: structureRefusals,
+      },
+    },
+    measureBlocks,
+  );
+
+  /** What a drop at (`x`, `y`) would hit: a pending Repeat block, an empty
+   *  lane, or a slot of the sequence under the pointer (else the step's
+   *  own). Reads the layout the browser made. */
+  const locate = (
+    item: { id: string; path: SeqPath; index: number },
+    x: number,
+    y: number,
+    offset: number,
+  ): TreeDropTarget | null => {
+    const root = editing.rootRef.current;
+    const inside = (el: Element, pad: number) => {
+      const r = el.getBoundingClientRect();
+      return (
+        r.width > 0 &&
+        x >= r.left - pad &&
+        x <= r.right + pad &&
+        y >= r.top - pad &&
+        y <= r.bottom + pad
+      );
+    };
+    const zone = Array.from(
+      root?.querySelectorAll<HTMLElement>("[data-drop-pending]") ?? [],
+    ).find((el) => inside(el, 0));
+    if (zone?.dataset.dropPending && pending) {
+      return { path: pending.path, index: pending.index, loop: true };
+    }
+    const hits = [
+      ...Array.from(
+        root?.querySelectorAll<HTMLElement>("[data-lane-list]") ?? [],
+      ).map((el) => ({ el, path: el.dataset.laneList ?? "" })),
+      ...Array.from(
+        root?.querySelectorAll<HTMLElement>("[data-drop-empty]") ?? [],
+      ).map((el) => ({ el, path: el.dataset.dropEmpty ?? "" })),
+    ].filter(({ el }) => inside(el, 14));
+    // The innermost one: the last in document order.
+    const hit = hits[hits.length - 1];
+    const path = hit?.path ?? item.path;
+    const centres = measureBlocks(path, root);
+    if (path === item.path) {
+      return {
+        path,
+        index: dropIndex(centres, item.index, offset),
+        loop: false,
+      };
+    }
+    return {
+      path,
+      index: centres.filter((c) => c < y).length,
+      loop: false,
+    };
+  };
+
+  const dragState = useTreeDrag({
+    locate,
+    onDrop: (item, target) => {
+      if (!target.loop && target.path === item.path) {
+        if (target.index !== item.index)
+          onMoveStep?.(item.id, target.index - item.index);
+        setDropNotice(null);
+        return;
+      }
+      const cap = canMoveStepTo(
+        tree,
+        item.id,
+        target.path,
+        target.index,
+        target.loop,
+      );
+      if (!cap.ok) {
+        setDropNotice(t("scenarioRun.dropRefused", { reason: t(cap.reason) }));
+        return;
+      }
+      setDropNotice(null);
+      onMoveStepTo?.(item.id, target.path, target.index, target.loop);
+    },
+  });
+  const drag = dragState.drag;
+  /** The cross-sequence landing (or a Repeat block): not a same-lane move. */
+  const crossTarget =
+    drag?.target && (drag.target.loop || drag.target.path !== drag.path)
+      ? drag.target
+      : null;
+  const crossCap =
+    crossTarget && drag
+      ? canMoveStepTo(
+          tree,
+          drag.id,
+          crossTarget.path,
+          crossTarget.index,
+          crossTarget.loop,
+        )
+      : null;
+  const steps = React.useMemo(() => treeSteps(tree), [tree]);
+  const numbers = React.useMemo(() => stepNumbers(tree), [tree]);
+  const number = (id: string) => numbers.get(id) ?? null;
+  const typeOf = (id: string) => steps.find((s) => s.id === id)?.type ?? "";
+
+  if (!editable && steps.length === 0) {
     return <p className="text-sm text-cx-muted">{t("scenarioRun.noSteps")}</p>;
   }
 
   const canInsert = editable && onInsertStep !== undefined;
-
-  const addSlot = (lane: StepLane, length: number, label?: string) => {
-    if (!canInsert) return null;
-    if (editing.isSlotOpen(lane, length)) {
-      return <div className="mt-1.5">{editing.picker}</div>;
-    }
-    return (
-      <button
-        type="button"
-        aria-label={label}
-        onClick={() => editing.openSlot(lane, length)}
-        className="mt-1.5 w-full rounded-[10px] border border-dashed border-cx-border-strong py-2 text-[13px] font-medium text-cx-muted hover:text-cx-fg"
-      >
-        {t("scenarioRun.addStepButton")}
-      </button>
-    );
-  };
+  /** A control's title: the reason it is refused, else its label (with
+   *  the note an operation carries). */
+  const capTitle = (cap: Capability, label: string) =>
+    !cap.ok ? t(cap.reason) : cap.note ? `${label} — ${t(cap.note)}` : label;
+  const slotCap = (seq: Seq, index: number) =>
+    editCapabilities(tree, { kind: "slot", path: seq.path, index }).insertStep;
 
   const renderBox = (
     step: ScenarioNode,
-    lane: StepLane,
-    laneIndex: number,
-    laneIds: string[],
+    seq: Seq,
+    index: number,
+    ctx: SeqContext,
+    head = false,
   ) => {
+    ctx.inLoop?.push(step.id);
     let dropLine: StepBoxEditing["dropLine"] = null;
-    if (drag && drag.lane === lane && drag.to !== drag.from) {
-      const { above, below } = dropNeighbours(laneIds, drag);
+    if (
+      drag &&
+      !crossTarget &&
+      drag.path === seq.path &&
+      drag.target &&
+      drag.target.index !== drag.index
+    ) {
+      const ids = seq.blocks.map((b) => firstNodeOf(b).id);
+      const { above, below } = dropNeighbours(ids, {
+        id: drag.id,
+        to: drag.target.index,
+      });
       if (below === step.id) dropLine = "above";
       else if (below === null && above === step.id) dropLine = "below";
     }
     return (
       <StepBox
         key={step.id}
+        as={head ? "div" : "li"}
+        blockIndex={head ? undefined : index}
         step={step}
-        index={stepIndexOf(layout, step.id)}
+        index={number(step.id)}
         phase={boxPhase(step.id, props)}
         failed={state === "error" && step.id === currentNodeId}
         state={state}
         selected={selectedStepId === step.id}
         onSelect={onSelectStep}
+        ranged={props.highlightIds?.includes(step.id)}
+        marked={stepIssues(step.id)}
         editing={
           editable
             ? {
-                dragHandlers: editing.dragHandlers({
-                  id: step.id,
-                  lane,
-                  index: laneIndex,
-                }),
+                // A branch point stays where it is: no grab handle.
+                dragHandlers: head
+                  ? undefined
+                  : dragState.handlers({
+                      id: step.id,
+                      path: seq.path,
+                      index,
+                    }),
                 onKeyDown: editing.onStepKeyDown(step.id),
                 dragOffset: drag?.id === step.id ? drag.offset : null,
                 dropLine,
@@ -290,102 +763,637 @@ const StepsView: React.FC<StepRunViewProps> = (props) => {
     );
   };
 
-  const renderLane = (steps: ScenarioNode[], lane: StepLane) => {
-    const ids = steps.map((s) => s.id);
-    if (!canInsert) {
+  /** The gap before block `i` of `seq`: the insert zone, or the open
+   *  picker. A slot no step can go to has none. */
+  const gap = (seq: Seq, i: number) => {
+    if (!canInsert) return null;
+    if (editing.isSlotOpen(seq.path, i)) {
       return (
-        <ol data-lane-list={lane} className="space-y-1.5">
-          {steps.map((step, i) => renderBox(step, lane, i, ids))}
-        </ol>
+        <li key={`gap-${i}`} className="py-1.5">
+          {editing.picker}
+        </li>
       );
     }
-    // The gaps between boxes are the insert zones (or the open picker).
+    if (drag || !slotCap(seq, i).ok) {
+      return <li key={`gap-${i}`} aria-hidden className="h-1.5" />;
+    }
+    const label =
+      i === 0
+        ? t("scenarioRun.tree.insertAtTop", {
+            n: number(firstNodeOf(seq.blocks[0]).id) ?? "",
+          })
+        : t("scenarioRun.insertBetween", {
+            from: number(firstNodeOf(seq.blocks[i - 1]).id) ?? "",
+            to: number(firstNodeOf(seq.blocks[i]).id) ?? "",
+          });
     return (
-      <ol data-lane-list={lane}>
-        {steps.map((step, i) => (
-          <React.Fragment key={step.id}>
-            {i > 0 &&
-              (editing.isSlotOpen(lane, i) ? (
-                <li className="py-1.5">{editing.picker}</li>
-              ) : drag ? (
-                <li aria-hidden className="h-1.5" />
-              ) : (
-                <InsertZone
-                  label={t("scenarioRun.insertBetween", {
-                    from: stepIndexOf(layout, steps[i - 1].id) ?? "",
-                    to: stepIndexOf(layout, step.id) ?? "",
-                  })}
-                  onOpen={() => editing.openSlot(lane, i)}
-                />
-              ))}
-            {renderBox(step, lane, i, ids)}
-          </React.Fragment>
-        ))}
-      </ol>
+      <InsertZone
+        key={`gap-${i}`}
+        label={label}
+        onOpen={() => editing.openSlot(seq.path, i)}
+      />
     );
   };
 
-  return (
-    <div ref={editing.rootRef}>
-      {layout.main.length > 0 && renderLane(layout.main, "main")}
-      {addSlot("main", layout.main.length)}
-      {layout.fork && (
+  /** "+ Add step" at the end of `seq` (disabled with the reason when no
+   *  step can go there; left out under a block every path of which ends on
+   *  its own: the sequences inside it have their own). */
+  const addSlot = (seq: Seq, laneLabel?: string) => {
+    if (!canInsert) return null;
+    const n = seq.blocks.length;
+    if (editing.isSlotOpen(seq.path, n)) {
+      return <div className="mt-1.5">{editing.picker}</div>;
+    }
+    const cap = slotCap(seq, n);
+    if (
+      !cap.ok &&
+      n > 0 &&
+      cap.reason === "scenarios.editor.cannot.afterBlockEnds"
+    ) {
+      return null;
+    }
+    const last = seq.blocks[n - 1];
+    const label =
+      laneLabel !== undefined
+        ? t("scenarioRun.addToBranch", { name: laneLabel })
+        : last && last.kind !== "step"
+          ? t("scenarioRun.tree.addAfterBlock", {
+              n: number(firstNodeOf(last).id) ?? "",
+            })
+          : undefined;
+    return (
+      <button
+        type="button"
+        aria-label={label}
+        title={cap.ok ? undefined : t(cap.reason)}
+        disabled={!cap.ok}
+        onClick={() => editing.openSlot(seq.path, n)}
+        className="mt-1.5 w-full rounded-[10px] border border-dashed border-cx-border-strong py-2 text-[13px] font-medium text-cx-muted hover:text-cx-fg disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-cx-muted"
+      >
+        {t("scenarioRun.addStepButton")}
+      </button>
+    );
+  };
+
+  /** How a sequence that jumps elsewhere ends: a one-line note. */
+  const exitNote = (seq: Seq) => {
+    const exit = seq.exit;
+    if (exit.kind !== "link") return null;
+    const role = linkOf(tree, exit.edgeId)?.role;
+    const n = number(exit.target);
+    const back = role === "back";
+    const Icon = back ? Repeat : CornerDownRight;
+    return (
+      <p
+        data-link-to={exit.target}
+        data-link-role={role}
+        className="mt-1.5 flex items-center gap-1.5 text-xs text-cx-muted"
+      >
+        <Icon className="h-3.5 w-3.5" aria-hidden />
+        {n === null
+          ? t("scenarioRun.tree.toStart")
+          : back
+            ? t("scenarioRun.loopBack", { n })
+            : t("scenarioRun.joinTo", { n })}
+      </p>
+    );
+  };
+
+  /** The line where a cross-sequence drop would land (rose: refused). */
+  const crossLine = (seq: Seq, i: number) =>
+    crossTarget &&
+    !crossTarget.loop &&
+    crossTarget.path === seq.path &&
+    crossTarget.index === i ? (
+      <li
+        key={`drop-${i}`}
+        aria-hidden
+        data-drop-indicator=""
+        data-drop-refused={crossCap && !crossCap.ok ? "" : undefined}
+        className={cn(
+          "pointer-events-none h-0.5 rounded-full",
+          crossCap && !crossCap.ok ? "bg-cx-rose" : "bg-cx-accent",
+        )}
+      />
+    ) : null;
+
+  /** The empty Repeat block the user asked for: a C-shaped frame to drop
+   *  steps into or add the first step to. Never in the file. */
+  const renderPending = (seq: Seq, index: number) => {
+    if (!pending || pending.path !== seq.path || pending.index !== index) {
+      return null;
+    }
+    const hot = crossTarget?.loop === true;
+    // In the middle of a lane the repeat gets a bound (times: 3), and its
+    // step must go on after it: no switch / choice / End.
+    const bounded = newLoopIsBounded(tree, seq.path, index);
+    const typeRefusals = bounded ? midLaneLoopRefusals(t) : undefined;
+    return (
+      <li key="pending-loop" data-pending-slot={index} className="list-none">
         <div
-          data-testid="step-branches"
-          className={cn(
-            "grid auto-cols-[minmax(250px,1fr)] grid-flow-col gap-3 overflow-x-auto",
-            layout.main.length > 0 &&
-              "mt-1.5 border-t-2 border-cx-border-strong pt-3",
-          )}
+          data-pending-loop=""
+          data-drop-pending={seq.path}
+          aria-label={t("scenarioRun.pendingLoop.title")}
+          className="mt-1.5 min-w-0"
         >
-          {layout.fork.branches.map((branch, index) => {
-            const lane = laneStyle(index);
-            const done = branch.steps.filter(
-              (step) => boxPhase(step.id, props) === "done",
-            ).length;
-            return (
-              <div key={index} data-lane={index} className="min-w-0">
-                <div
-                  data-testid="lane-tag"
-                  className="mb-2 flex items-center gap-2"
-                >
-                  <span
-                    aria-hidden
-                    className={cn(
-                      "flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[11px] font-semibold",
-                      lane.letter,
-                    )}
-                  >
-                    {laneLetter(index)}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-cx-fg2">
-                    {branch.name}
-                  </span>
-                  <span className="font-mono text-xs text-cx-muted">
-                    {state === undefined
-                      ? branch.steps.length
-                      : `${done}/${branch.steps.length}`}
-                  </span>
-                </div>
-                {renderLane(branch.steps, index)}
-                {addSlot(
-                  index,
-                  branch.steps.length,
-                  t("scenarioRun.addToBranch", { name: branch.name }),
-                )}
+          <div className="flex min-h-7 items-center gap-1.5 rounded-t-[12px] rounded-br-[12px] bg-cx-purple/12 px-2.5 py-1 text-xs">
+            <Repeat
+              className="h-3.5 w-3.5 shrink-0 text-cx-purple"
+              aria-hidden
+            />
+            <span className="flex-1 whitespace-nowrap font-semibold text-cx-purple">
+              {t("scenarioRun.pendingLoop.title")}
+            </span>
+            <button
+              type="button"
+              aria-label={t("scenarioRun.pendingLoop.remove")}
+              title={t("scenarioRun.pendingLoop.remove")}
+              onClick={() => {
+                setPendingLoop(null);
+                setPendingPicker(false);
+              }}
+              className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-cx-faint hover:bg-cx-rose/10 hover:text-cx-rose"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <div
+            className={cn(
+              "ml-3 border-l-[10px] border-cx-purple/12 py-2 pl-2",
+              hot && "border-cx-accent/40",
+            )}
+          >
+            <div
+              className={cn(
+                "rounded-[10px] border border-dashed px-3 py-3 text-xs text-cx-muted",
+                hot
+                  ? crossCap && !crossCap.ok
+                    ? "border-cx-rose bg-cx-rose/10"
+                    : "border-cx-accent bg-cx-accent/10"
+                  : "border-cx-border-strong",
+              )}
+            >
+              <p>{t("scenarioRun.pendingLoop.hint")}</p>
+              <p className="mt-1 text-cx-faint">
+                {t("scenarioRun.pendingLoop.unsaved")}
+              </p>
+            </div>
+            {pendingPicker ? (
+              <div className="mt-1.5">
+                <AddStepPicker
+                  typeRefusals={typeRefusals}
+                  onPick={(type) => {
+                    onInsertStepIntoLoop?.(seq.path, pending.index, type);
+                    setPendingPicker(false);
+                    setPendingLoop(null);
+                  }}
+                  onClose={() => setPendingPicker(false)}
+                />
               </div>
-            );
+            ) : (
+              <button
+                type="button"
+                onClick={() => setPendingPicker(true)}
+                className="mt-1.5 w-full rounded-[10px] border border-dashed border-cx-border-strong py-2 text-[13px] font-medium text-cx-muted hover:text-cx-fg"
+              >
+                {t("scenarioRun.addStepButton")}
+              </button>
+            )}
+            {bounded && (
+              <p
+                data-testid="pending-loop-bounded"
+                className="mt-1.5 text-xs text-cx-muted"
+              >
+                {t("scenarioRun.pendingLoop.bounded")}
+              </p>
+            )}
+          </div>
+        </div>
+      </li>
+    );
+  };
+
+  const renderSeq = (
+    seq: Seq,
+    ctx: SeqContext,
+    laneLabel?: string,
+  ): React.ReactNode => {
+    const empty = seq.blocks.length === 0 && seq.path !== "root";
+    const emptyHot =
+      crossTarget && !crossTarget.loop && crossTarget.path === seq.path;
+    return (
+      <>
+        <ol
+          data-lane-list={seq.path}
+          className={canInsert ? undefined : "space-y-1.5"}
+        >
+          {seq.blocks.map((block, i) => (
+            <React.Fragment key={blockKey(block)}>
+              {renderPending(seq, i)}
+              {crossLine(seq, i)}
+              {(i > 0 || seq.path !== "root") && gap(seq, i)}
+              {block.kind === "step"
+                ? renderBox(block.node, seq, i, ctx)
+                : block.kind === "loop"
+                  ? renderLoop(block, i, ctx)
+                  : renderFork(block, seq, i, ctx)}
+            </React.Fragment>
+          ))}
+          {crossLine(seq, seq.blocks.length)}
+          {renderPending(seq, seq.blocks.length)}
+        </ol>
+        {empty && editable && (
+          <p
+            data-drop-empty={seq.path}
+            className={cn(
+              "rounded-[10px] border border-dashed px-3 py-2 text-xs",
+              emptyHot
+                ? crossCap && !crossCap.ok
+                  ? "border-cx-rose bg-cx-rose/10 text-cx-rose"
+                  : "border-cx-accent bg-cx-accent/10 text-cx-fg2"
+                : "border-cx-border-strong text-cx-muted",
+            )}
+          >
+            {t("scenarioRun.emptyLaneHint")}
+          </p>
+        )}
+        {exitNote(seq)}
+        {pending?.path === seq.path && pending.index === seq.blocks.length
+          ? null
+          : addSlot(seq, laneLabel)}
+      </>
+    );
+  };
+
+  const renderLoop = (
+    loop: Extract<Block, { kind: "loop" }>,
+    i: number,
+    ctx: SeqContext,
+  ) => {
+    const inner: SeqContext = {
+      loopHeader: loop.headerId,
+      exits: [],
+      inLoop: [],
+    };
+    const body = renderSeq(loop.body, inner);
+    const inside = inner.inLoop ?? [];
+    ctx.inLoop?.push(...inside);
+    const repeated = inside
+      .map((id) => number(id))
+      .filter((n): n is number => n !== null);
+    const from = number(loop.headerId) ?? 0;
+    return (
+      <>
+        <LoopBlock
+          loop={loop}
+          bounds={editable ? props.loopBounds : undefined}
+          blockIndex={i}
+          target={loop.headerId}
+          from={from}
+          to={Math.max(from, ...repeated)}
+          waitsFirst={WAIT_TYPES.has(typeOf(loop.headerId))}
+          canExit={
+            (inner.exits?.length ?? 0) > 0 ||
+            inside.some((id) => EXIT_TYPES.has(typeOf(id)))
+          }
+          active={inside.some((id) => boxPhase(id, props) === "current")}
+          unwrap={
+            editable && onUnwrapLoop
+              ? {
+                  cap: editCapabilities(tree, {
+                    kind: "node",
+                    nodeId: loop.headerId,
+                  }).unwrapLoop,
+                  onClick: () => onUnwrapLoop(loop.headerId),
+                }
+              : undefined
+          }
+        >
+          {body}
+        </LoopBlock>
+        {inner.exits?.map((exit) => renderLeaving(exit, ctx))}
+      </>
+    );
+  };
+
+  /** A lane that leaves a loop, after the loop's block: its steps run once,
+   *  when the loop is left. */
+  const renderLeaving = (
+    { fork, lane, laneIndex }: LeavingLane,
+    ctx: SeqContext,
+  ) => {
+    const chip = conditionText(lane.condition, fork);
+    return (
+      <li
+        key={`exit:${lane.body.path}`}
+        data-loop-exit={fork.node.id}
+        data-lane-path={lane.body.path}
+        className="mt-1.5 border-l-2 border-dashed border-cx-border-strong pl-3"
+      >
+        <div
+          data-testid="lane-tag"
+          className="mb-2 flex flex-wrap items-center gap-2 text-xs text-cx-muted"
+        >
+          <LogOut className="h-3.5 w-3.5 shrink-0" aria-hidden />
+          <span>
+            {t("scenarioRun.tree.afterLeaving", {
+              n: number(fork.node.id) ?? "",
+            })}
+          </span>
+          {laneChip(laneIndex, chip, {
+            forkId: fork.node.id,
+            condition: lane.condition,
           })}
         </div>
+        {renderSeq(lane.body, ctx, chip)}
+      </li>
+    );
+  };
+
+  const laneChip = (
+    laneIndex: number,
+    chip: string,
+    open?: { forkId: string; condition: LaneCondition },
+  ) => {
+    const handle = open ? laneHandle(open.condition) : null;
+    const label =
+      onSelectLane && open && handle !== null
+        ? t("scenarioRun.tree.openLane", {
+            name: handle,
+            n: number(open.forkId) ?? "",
+          })
+        : null;
+    return (
+      <>
+        <span
+          aria-hidden
+          className={cn(
+            "flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[11px] font-semibold",
+            laneStyle(laneIndex).letter,
+          )}
+        >
+          {laneLetter(laneIndex)}
+        </span>
+        {label !== null && open && handle !== null ? (
+          <button
+            type="button"
+            data-lane-condition=""
+            title={chip}
+            aria-label={label}
+            onClick={() => onSelectLane?.(open.forkId, handle)}
+            className="min-w-0 max-w-full break-all rounded-md bg-cx-sub px-1.5 py-0.5 text-left font-mono text-[11px] text-cx-fg2 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden hover:text-cx-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-cx-accent"
+          >
+            {chip}
+          </button>
+        ) : (
+          <span
+            data-lane-condition=""
+            title={chip}
+            className="min-w-0 max-w-full break-all rounded-md bg-cx-sub px-1.5 py-0.5 font-mono text-[11px] text-cx-fg2 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden"
+          >
+            {chip}
+          </span>
+        )}
+      </>
+    );
+  };
+
+  const renderFork = (
+    fork: ForkBlock,
+    seq: Seq,
+    i: number,
+    ctx: SeqContext,
+  ) => {
+    const isStart = fork.forkKind === "start";
+    const leaving = lanesLeavingLoop(fork, ctx.loopHeader);
+    const Icon = FORK_ICONS[fork.forkKind];
+    const addCap =
+      editable && onAddLane
+        ? editCapabilities(tree, { kind: "node", nodeId: fork.node.id }).addLane
+        : null;
+    const addLabel = isStart
+      ? t("scenarioRun.addParallelBranch")
+      : t("scenarioRun.tree.addLaneTo", { n: number(fork.node.id) ?? "" });
+    return (
+      <li
+        key={fork.node.id}
+        data-block={i}
+        data-fork={fork.node.id}
+        data-fork-kind={fork.forkKind}
+        className="min-w-0"
+      >
+        {!isStart && renderBox(fork.node, seq, i, ctx, true)}
+        <div
+          data-fork-body=""
+          className={cn(
+            "rounded-[12px] border border-cx-border px-2.5 pb-2.5 pt-2",
+            !isStart && "mt-1.5",
+          )}
+        >
+          <div
+            data-testid="fork-header"
+            className="mb-2 flex min-h-[22px] items-center gap-1.5 text-xs"
+          >
+            <Icon className="h-3.5 w-3.5 shrink-0 text-cx-muted" aria-hidden />
+            <span className="min-w-0 flex-1 truncate font-medium text-cx-fg2">
+              {forkSummary(fork)}
+            </span>
+            {addCap && (
+              <button
+                type="button"
+                aria-label={addLabel}
+                title={capTitle(addCap, addLabel)}
+                disabled={!addCap.ok}
+                onClick={() => onAddLane?.(fork.node.id)}
+                className="flex h-[22px] shrink-0 items-center rounded-full border border-dashed border-cx-border-strong bg-cx-card px-2 text-xs font-medium text-cx-muted hover:border-cx-accent hover:text-cx-accent disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-cx-border-strong disabled:hover:text-cx-muted"
+              >
+                {t("scenarioRun.branchPill")}
+              </button>
+            )}
+          </div>
+          <div
+            data-testid="step-branches"
+            // Lanes grow to what they hold (a nested branch point is
+            // wider than one lane); the view scrolls sideways when wide.
+            className="flex gap-3"
+          >
+            {fork.lanes.map((lane, li) =>
+              renderLane(fork, lane, li, leaving.has(li), ctx),
+            )}
+          </div>
+          {mergeFooter(fork, ctx)}
+        </div>
+      </li>
+    );
+  };
+
+  const renderLane = (
+    fork: ForkBlock,
+    lane: Lane,
+    li: number,
+    leaves: boolean,
+    ctx: SeqContext,
+  ) => {
+    const dead = isDeadLane(lane);
+    const chip = conditionText(lane.condition, fork);
+    const laneSteps = treeNodes({
+      root: lane.body,
+      detached: [],
+      origin: null,
+    });
+    const done = laneSteps.filter(
+      (s) => boxPhase(s.id, props) === "done",
+    ).length;
+    const removeCap =
+      editable && onRemoveLane
+        ? editCapabilities(tree, {
+            kind: "lane",
+            nodeId: fork.node.id,
+            laneIndex: li,
+          }).removeLane
+        : null;
+    const removeLabel = t("scenarioRun.tree.removeLane", {
+      lane: laneLetter(li),
+    });
+    if (leaves) ctx.exits?.push({ fork, lane, laneIndex: li });
+    return (
+      <div
+        key={lane.edgeId}
+        data-lane={li}
+        data-lane-path={lane.body.path}
+        data-dead-lane={dead ? "" : undefined}
+        data-leaves-loop={leaves ? "" : undefined}
+        title={dead ? t("scenarioRun.tree.deadLane") : undefined}
+        className={cn(
+          // No min-width of its own: a lane is at least as wide as what it
+          // holds (its tag is 230px).
+          "flex-1 basis-0",
+          dead &&
+            "rounded-[10px] border border-dashed border-cx-border-strong p-1.5 opacity-60",
+        )}
+      >
+        <div
+          data-testid="lane-tag"
+          className="mb-2 flex min-w-[230px] items-center gap-2"
+        >
+          {laneChip(li, chip, {
+            forkId: fork.node.id,
+            condition: lane.condition,
+          })}
+          <span className="flex-1" />
+          <span className="font-mono text-xs text-cx-muted">
+            {state === undefined
+              ? laneSteps.length
+              : `${done}/${laneSteps.length}`}
+          </span>
+          {removeCap && (
+            <button
+              type="button"
+              aria-label={removeLabel}
+              title={capTitle(removeCap, removeLabel)}
+              disabled={!removeCap.ok}
+              onClick={() => onRemoveLane?.(fork.node.id, li)}
+              className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-cx-faint hover:bg-cx-rose/10 hover:text-cx-rose disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-cx-faint"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+        {leaves ? (
+          <p className="flex items-center gap-1.5 text-xs text-cx-muted">
+            <LogOut className="h-3.5 w-3.5" aria-hidden />
+            {t("scenarioRun.tree.leavesLoop")}
+          </p>
+        ) : (
+          renderSeq(lane.body, ctx, chip)
+        )}
+      </div>
+    );
+  };
+
+  const mergeFooter = (fork: ForkBlock, ctx: SeqContext) => {
+    const merge = fork.merge;
+    // Lanes that meet at their loop's first step: the block's back arm
+    // says where they go.
+    if (!merge || merge.nodeId === ctx.loopHeader) return null;
+    if (merge.kind === "join") {
+      return (
+        <p
+          data-join={merge.nodeId}
+          className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-cx-sub px-2 py-0.5 text-xs text-cx-fg2"
+        >
+          <GitMerge className="h-3.5 w-3.5" aria-hidden />
+          {t("scenarioRun.tree.join", { mode: merge.mode })}
+        </p>
+      );
+    }
+    const n = number(merge.nodeId);
+    return (
+      <p
+        data-merge={merge.nodeId}
+        className="mt-2 flex items-center gap-1.5 text-xs text-cx-muted"
+      >
+        <ArrowDown className="h-3.5 w-3.5" aria-hidden />
+        {n !== null
+          ? t("scenarioRun.tree.continuesAt", { n })
+          : t("scenarioRun.tree.continuesAtEnd")}
+      </p>
+    );
+  };
+
+  const origin = tree.origin;
+  const rootFork = tree.root.blocks[0];
+  const startForks =
+    rootFork?.kind === "fork" && rootFork.node.id === origin?.id;
+  const originCap =
+    editable && onAddLane && origin && !startForks
+      ? editCapabilities(tree, { kind: "node", nodeId: origin.id }).addLane
+      : null;
+  const rootCtx: SeqContext = { loopHeader: null, exits: null, inLoop: null };
+
+  return (
+    <div ref={editing.rootRef} className="overflow-x-auto">
+      {(dropNotice || (crossCap && !crossCap.ok)) && (
+        <p
+          role="status"
+          data-drop-refusal=""
+          className="mb-2 rounded-md bg-cx-rose/10 px-2.5 py-1.5 text-xs text-cx-rose"
+        >
+          {crossCap && !crossCap.ok
+            ? t("scenarioRun.dropRefused", { reason: t(crossCap.reason) })
+            : dropNotice}
+        </p>
       )}
-      {editable && onAddBranch && (
+      {renderSeq(tree.root, rootCtx)}
+      {originCap && origin && (
         <button
           type="button"
-          onClick={onAddBranch}
-          className="mt-3 text-[13px] font-medium text-cx-accent hover:underline"
+          title={capTitle(originCap, t("scenarioRun.addParallelBranch"))}
+          disabled={!originCap.ok}
+          onClick={() => onAddLane?.(origin.id)}
+          className="mt-3 text-[13px] font-medium text-cx-accent hover:underline disabled:cursor-not-allowed disabled:opacity-40"
         >
           {t("scenarioRun.addParallelBranchButton")}
         </button>
+      )}
+      {tree.detached.length > 0 && (
+        <section
+          data-testid="detached-steps"
+          aria-label={t("scenarioRun.tree.unreached")}
+          className="mt-4 border-t-2 border-dashed border-cx-border-strong pt-3"
+        >
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-cx-muted">
+            {t("scenarioRun.tree.unreached")}
+          </h3>
+          <p className="mb-2 text-xs text-cx-muted">
+            {t("scenarioRun.tree.unreachedHint")}
+          </p>
+          {tree.detached.map((seq) => (
+            <div key={seq.path} data-detached={seq.path} className="mt-2">
+              {renderSeq(seq, rootCtx)}
+            </div>
+          ))}
+        </section>
       )}
     </div>
   );

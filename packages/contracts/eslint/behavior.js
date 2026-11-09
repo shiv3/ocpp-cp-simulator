@@ -6,7 +6,7 @@
 //
 // Use it from your own eslint.config.js:
 //
-//   import behaviorConfig from "@ocpp-cp-sim/contracts/eslint-behavior";
+//   import behaviorConfig from "@ocpp-cp-simulator/contracts/eslint-behavior";
 //   export default [{ files: ["behaviors/**/*.ts"], ... }, ...behaviorConfig];
 //
 // It needs a TypeScript parser to be configured for the files (for example

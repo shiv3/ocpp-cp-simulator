@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { NotifyReportRequestV201 } from "@ocpp-cp-sim/ocpp/index";
-import { isValidNotifyReportRequestV201 } from "@ocpp-cp-sim/ocpp/v201/index";
+import type { NotifyReportRequestV201 } from "@ocpp-cp-simulator/ocpp/index";
+import { isValidNotifyReportRequestV201 } from "@ocpp-cp-simulator/ocpp/v201/index";
 import type { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
 import { makeChargePoint } from "../../../../domain/charge-point/__tests__/chargePointFixtures";
 import { DEVICE_MODEL } from "../../../../domain/device-model/DeviceModelRegistry";

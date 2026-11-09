@@ -7,7 +7,7 @@ import {
   startTestServer,
   type TestServer,
 } from "./socketHarness";
-import { BunSqliteDatabase } from "@ocpp-cp-sim/core/cp/domain/persistence/BunSqliteDatabase";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/BunSqliteDatabase";
 import { completingScenario } from "../../__tests__/completingScenario";
 
 /**

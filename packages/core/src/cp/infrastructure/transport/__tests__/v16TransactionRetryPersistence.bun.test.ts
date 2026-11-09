@@ -6,8 +6,8 @@ import type { ProtocolCodec } from "../profile/ProtocolProfile";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { ChargePointEvents } from "../../../domain/charge-point/ChargePointEvents";
 import type { Transaction } from "../../../domain/connector/Transaction";
-import { BunSqliteDatabase } from "../../../domain/persistence/BunSqliteDatabase";
-import { SqliteConnectorRuntimeRepository } from "../../../domain/persistence/SqliteConnectorRuntimeRepository";
+import { BunSqliteDatabase } from "../../persistence/BunSqliteDatabase";
+import { SqliteConnectorRuntimeRepository } from "../../persistence/SqliteConnectorRuntimeRepository";
 import { Connector } from "../../../domain/connector/Connector";
 import { Logger, LogLevel } from "../../../shared/Logger";
 import { RemoteStopTransactionHandler } from "../handlers/call/RemoteStopTransactionHandler";
@@ -108,6 +108,7 @@ function station(
     configuration: {
       transactionMessageAttempts: () => 3,
       transactionMessageRetryInterval: () => 3_600,
+      stopTxnSampledData: () => [],
     },
   };
   const codec: ProtocolCodec = { outgoingWarning: () => null };
@@ -287,7 +288,7 @@ describe("OCPP 1.6 transaction message retries across a restart (#527)", () => {
     }
   });
 
-  it("a salvaged resend whose transaction did not survive the restart is discarded", () => {
+  it("a salvaged resend whose transaction did not survive the restart is still replayed: a CSMS that opened it needs its StopTransaction.req (#565)", () => {
     const db = BunSqliteDatabase.open(":memory:");
     try {
       startResendSalvaged(db);
@@ -295,17 +296,10 @@ describe("OCPP 1.6 transaction message retries across a restart (#527)", () => {
       const after = station(db, null);
       after.handler.flushPendingQueue();
 
-      expect(after.socket.written).toEqual([]);
-      expect(after.discarded).toEqual([
-        {
-          connectorId: 1,
-          transactionId: "0",
-          action: "StartTransaction",
-          reason: "callError",
-          attempts: 1,
-        },
+      expect(after.socket.written.map((w) => w.action)).toEqual([
+        "StartTransaction",
       ]);
-      expect(attemptsStored(db)).toEqual([]);
+      expect(after.discarded).toEqual([]);
     } finally {
       db.close();
     }
@@ -339,7 +333,10 @@ describe("OCPP 1.6 transaction message retries across a restart (#527)", () => {
 describe("OCPP 1.6 startCallError across a restart (#527)", () => {
   /** A real connector, saved and restored through `connector_runtime`, then
    *  asked to stop the transaction with the `0` id. */
-  function remoteStopAfterRestart(startCallError: boolean) {
+  function remoteStopAfterRestart(
+    startCallError: boolean,
+    startUnanswered = false,
+  ) {
     const db = BunSqliteDatabase.open(":memory:");
     try {
       const repo = new SqliteConnectorRuntimeRepository(db);
@@ -347,6 +344,7 @@ describe("OCPP 1.6 startCallError across a restart (#527)", () => {
       const before = new Connector(1, logger);
       before.beginTransaction(runningTransaction());
       if (startCallError) before.markStartCallError();
+      if (startUnanswered) before.patchTransaction({ startUnanswered: true });
       repo.save("CP-527", 1, {
         ...before.snapshotRuntime(),
         scenarioPosition: null,
@@ -371,6 +369,10 @@ describe("OCPP 1.6 startCallError across a restart (#527)", () => {
 
   it("a restored `0` the CSMS failed to process is not one a RemoteStopTransaction can name", () => {
     expect(remoteStopAfterRestart(true)).toEqual({ status: "Rejected" });
+  });
+
+  it("a restored `0` whose StartTransaction.req never got an answer is not one either (#727)", () => {
+    expect(remoteStopAfterRestart(false, true)).toEqual({ status: "Rejected" });
   });
 
   it("a restored `0` with no CALLERROR behind it still matches", () => {

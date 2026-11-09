@@ -5,7 +5,7 @@ summary: Master summary of the OCPP CP Simulator — what it is, how the pieces 
 sources:
   - scripts/check-package-boundaries.ts
   - "issue #578"
-updated: 2026-11-07
+updated: 2026-11-09
 ---
 
 # OCPP CP Simulator — overview
@@ -109,21 +109,22 @@ only `packages/core/src/cp/application/engine/` may assign a connector's `status
 `availability`, `scheduledAvailability`, `currentErrorCode`, `errorInfo` or
 `vendorErrorCode`, `transaction`, `transactionId` or a transaction's fields ([Charger engine](concepts/charger-engine.md#the-engine)).
 
-| Package (`@ocpp-cp-sim/<dir>`) | Holds                                                                                                                                                                                                   | May depend on                      |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
-| `packages/ocpp`                | the generated OCPP message types and validators (`src/`) and the vendored OCA schemas (`vendor/ocpp-schemas/`)                                                                                          | nothing                            |
-| `packages/contracts`           | the wire contract of the daemon (`src/`; [control plane](concepts/control-plane.md))                                                                                                                    | nothing                            |
-| `packages/trace`               | the trace reader/writer (`src/`; [trace format](concepts/trace-format.md))                                                                                                                              | nothing                            |
-| `packages/k6-runtime`          | the k6 runtime files copied verbatim into an export (`src/`) and the ambient k6 module types (`k6-types.d.ts`)                                                                                          | nothing                            |
-| `packages/core`                | the charge point and the scenario engine (`src/cp/`, `src/scenario/`), scenario templates and blueprints (`src/utils/`), the shared test helpers (`src/test/`) and the scenario JSON Schema (`schema/`) | ocpp, contracts, trace, k6-runtime |
-| `packages/client`              | how a UI or tool talks to a daemon or to an in-process engine (`src/interfaces/`, `src/remote/`, `src/configPort.ts`, `src/RuntimeMode.ts`, `src/sqlite/SqliteConnectorSettingsRepository.ts`)          | core, contracts, ocpp, trace       |
-| `apps/cli`                     | the CLI, the daemon, the MCP endpoint, `export-k6` and `analyze` (`src/`), and the tests that build the CLI bundle and the Tauri sidecar (`src/build/`)                                                 | every package except `apps/web`    |
-| `apps/web`                     | the browser console: components, console pages, hooks and providers (`src/data/`), store, `lib`, assets, and the jsdom test setup                                                                       | every package except `apps/cli`    |
+| Package (`@ocpp-cp-simulator/<dir>`) | Holds                                                                                                                                                                                                   | May depend on                               |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| `packages/ocpp`                      | the generated OCPP message types and validators (`src/`) and the vendored OCA schemas (`vendor/ocpp-schemas/`)                                                                                          | nothing                                     |
+| `packages/contracts`                 | the wire contract of the daemon (`src/`; [control plane](concepts/control-plane.md))                                                                                                                    | nothing                                     |
+| `packages/trace`                     | the log-to-trace adapter (`src/`; [trace format](concepts/trace-format.md))                                                                                                                             | nothing                                     |
+| `packages/k6-runtime`                | the k6 runtime files copied verbatim into an export (`src/`) and the ambient k6 module types (`k6-types.d.ts`)                                                                                          | nothing                                     |
+| `packages/vehicle`                   | the protocol-independent [vehicle behavior](concepts/vehicle-behavior.md) domain (`src/`): what a vehicle asks for and when, a pure function of its inputs and the instant                              | nothing                                     |
+| `packages/core`                      | the charge point and the scenario engine (`src/cp/`, `src/scenario/`), scenario templates and blueprints (`src/utils/`), the shared test helpers (`src/test/`) and the scenario JSON Schema (`schema/`) | ocpp, contracts, trace, k6-runtime, vehicle |
+| `packages/client`                    | how a UI or tool talks to a daemon or to an in-process engine (`src/interfaces/`, `src/remote/`, `src/configPort.ts`, `src/RuntimeMode.ts`, `src/sqlite/SqliteConnectorSettingsRepository.ts`)          | core, contracts, ocpp, trace                |
+| `apps/cli`                           | the CLI, the daemon, the MCP endpoint, `export-k6` and `analyze` (`src/`), and the tests that build the CLI bundle and the Tauri sidecar (`src/build/`)                                                 | every package except `apps/web`             |
+| `apps/web`                           | the browser console: components, console pages, hooks and providers (`src/data/`), store, `lib`, assets, and the jsdom test setup                                                                       | every package except `apps/cli`             |
 
 Packages are private, versionless and have no build step: each `package.json`
 exposes its sources through `"exports": { "./*": "./src/*.ts" }` (plus explicit
 entries for the few JSON files other packages import), so a specifier mirrors
-the path under `src/` — `@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint`.
+the path under `src/` — `@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint`.
 Bun, Vite and `tsc` (`moduleResolution: bundler`) read the TypeScript directly
 through the workspace links; curated public entry points are future work.
 Third-party dependencies are still declared once, in the root `package.json`.
@@ -133,12 +134,72 @@ typecheck` is `tsc -b`.
 
 Rules the check enforces:
 
-- An import (value, `import type`, `export … from`, `import()`, `new URL("./x", import.meta.url)`, relative, `@/` or `@ocpp-cp-sim/…`) from a package into one that is not in its "may depend on" column fails, **type-only imports included**: TypeScript project references forbid cycles at the type level too. Test files are checked like any other and belong to the package of the directory they sit in.
-- Across packages the import must be an `@ocpp-cp-sim/<package>/…` specifier that resolves through the package's `exports`, never a relative path into another package. Inside one package imports stay relative (inside `apps/web` the `@/` alias, `apps/web/src`, also works).
+- An import (value, `import type`, `export … from`, `import()`, `new URL("./x", import.meta.url)`, relative, `@/` or `@ocpp-cp-simulator/…`) from a package into one that is not in its "may depend on" column fails, **type-only imports included**: TypeScript project references forbid cycles at the type level too. Test files are checked like any other and belong to the package of the directory they sit in.
+- Across packages the import must be an `@ocpp-cp-simulator/<package>/…` specifier that resolves through the package's `exports`, never a relative path into another package. Inside one package imports stay relative (inside `apps/web` the `@/` alias, `apps/web/src`, also works).
 - Each `package.json` is private, named after its directory, and declares exactly the `workspace:*` dependencies its imports need — no more, no less. The root `package.json` must not use `workspace:` anywhere, or the published tarball would not install outside the repository.
-- `ocpp`, `contracts`, `trace`, `k6-runtime`, `core` and `client` must run in both Bun and the browser, so their non-test files may not import `react*`, `jotai`, `zustand`, `@xyflow/*`, `@radix-ui/*`, Vite-only specifiers (`?url`, `?raw`, `virtual:`), `bun:*` or Node built-ins, except for the files on the commented allow-list in the script (today only `packages/core/src/cp/domain/persistence/BunSqliteDatabase.ts`, the daemon's `bun:sqlite` store). Type-only imports of such packages are erased and not flagged.
+- `ocpp`, `contracts`, `trace`, `k6-runtime`, `vehicle`, `core` and `client` must run in both Bun and the browser, so their non-test files may not import `react*`, `jotai`, `zustand`, `@xyflow/*`, `@radix-ui/*`, Vite-only specifiers (`?url`, `?raw`, `virtual:`), `bun:*` or Node built-ins, except for the files on the commented allow-list in the script (today only `packages/core/src/cp/infrastructure/persistence/BunSqliteDatabase.ts`, the daemon's `bun:sqlite` store). Type-only imports of such packages are erased and not flagged.
 - A file under `packages/` or `apps/` that matches no `PACKAGE_MAP` entry fails the check, so a new workspace directory has to be registered on purpose. Known exceptions go in the script's `KNOWN_VIOLATIONS` / `TEST_ALLOW_LIST`, each with a reason; a stale entry also fails.
+- Inside `packages/core/src/cp/` the layers have a direction ([#571](sources/github-issues.md)): `domain/` imports only `domain/` and `shared/`; `application/` imports `domain/`, `application/` and `shared/`, never `infrastructure/`; `infrastructure/` may import every layer; `shared/` imports only `shared/`. `domain/` and `shared/` also may not import core code outside `src/cp` or anything under `apps/`; other workspace packages stay governed by the table above. Type-only imports count, test files are not checked. The script's `LAYER_EXEMPTIONS` list is empty since [#575](https://github.com/shiv3/ocpp-cp-simulator/issues/575) moved `ChargePoint`'s last imports of `application/` behind domain interfaces, which meets the goal of the epic [#577](https://github.com/shiv3/ocpp-cp-simulator/issues/577); the list is kept, so a new violation fails, and so would an entry that no longer matches.
 - A file under `packages/` or `apps/`, test files included, may not reach itself through static value imports, in one package or across several; there is no allow-list for this rule. `import`, a side-effect import, `export … from` (`export *` included, even of a types-only module) and `require` count; `import type`, `export type … from`, `import("x").T` and a dynamic `import()` do not ([#570](sources/github-issues.md)). The ESLint rule `@typescript-eslint/consistent-type-imports` makes an import used only as a type say so, or it would count here. `scripts/` and `e2e/` are not scanned.
+
+### What goes where in `packages/core/src`
+
+The conventions come from
+[#576](https://github.com/shiv3/ocpp-cp-simulator/issues/576). The charge point
+lives in `cp/`, split in four layers; their import direction is the layer
+bullet above, not repeated here.
+
+- `cp/domain/` — the charge point's state and invariants (charge point,
+  connector, session, reservation, security, topology, …) and the ports it
+  needs, such as the repository interfaces and `LogSink` under
+  `domain/persistence/`, the transport ports under `domain/transport/`
+  (`ChargePointSocket`, `RawFrameSink`, `OcppCallActions`) and
+  `ChargePointDeps`, what a charge point is built with. `domain/engine/` holds
+  the engine and behavior vocabulary (`ChargerState`, `EngineEvent`,
+  `PersistedEngineState`, the behavior rules) and the interfaces
+  `ChargePoint` sees its engine and behavior registry through
+  (`ChargePointEngine`, `ChargePointBehaviorRegistry`); `domain/services/`
+  holds the interfaces of its heartbeat, state manager and operational
+  timeline (`ChargePointHeartbeat`, `ChargePointStateManager`,
+  `ChargePointTimeline`) and the state-history types (`StateSnapshot`,
+  `StateTransition`, `ValidationResult`).
+- `cp/application/` — the use cases that drive the domain: the charger engine
+  and its behaviors, services (state history, heartbeat, operational
+  timeline), the scenario engine (`application/scenario/`) and run
+  verification, and the ports they own, such as `ScenarioRepository` and
+  `ScenarioRunRepository`. The engine, the behavior registry and the services
+  implement the `domain/engine/` and `domain/services/` interfaces.
+- `cp/infrastructure/` — adapters to the outside: WebSocket and SOAP
+  transports, the SQLite stores, schema and migrations
+  (`infrastructure/persistence/`, since
+  [#573](https://github.com/shiv3/ocpp-cp-simulator/issues/573)), HTTP
+  (`fileUpload.ts`), the vehicle catalog, and `LogRepository` (log persistence,
+  in `infrastructure/persistence/`). `infrastructure/charge-point/createChargePoint.ts`
+  is the composition root of a charge point
+  ([#575](https://github.com/shiv3/ocpp-cp-simulator/issues/575)): the CLI,
+  the web console, the benches, the e2e suites and the tests build one
+  through it (only `ChargePoint.deps.test.ts` calls the
+  constructor with their own deps), and it
+  passes the `ChargePoint` constructor its `ChargePointDeps` — the transport
+  factory (`createDefaultTransport.ts`), the factories of the engine, the
+  behavior registry, the heartbeat, the state manager and the timeline, and
+  the `transactions` port bound to `default.transaction`
+  (`DEFAULT_SERVICES` in `createDefaultServices.ts`), a `LogRepository` over
+  the charge point's database (a no-op one without a database), and
+  `UploadFile` for GetDiagnostics.
+- `cp/shared/` — dependency-free utilities: clock, RNG, timers, logger,
+  event emitter, reconnect policy, redaction.
+
+Outside `cp/`: `scenario/` holds the scenario-format helpers (schema
+validation, loading, connection rules, partial matching), `utils/` the built-in
+scenario templates and blueprints, `types/` ambient declarations
+(`webcrypto-globals.d.ts`), and `test/` the shared test helpers, behavior
+suites, golden-wire rig and regression tests.
+
+Tests go in a `__tests__/` folder beside the code they cover (outside `cp/`,
+`src/test/` and the two template tests in `utils/` are the exceptions). A
+`*.bun.test.ts` file runs under `bun test`; any other `*.test.ts(x)` runs
+under vitest, which excludes the Bun files.
 
 ## Where to read next
 
@@ -149,4 +210,4 @@ Rules the check enforces:
 | Writing a scenario                   | [Scenario format](concepts/scenario-format.md), [Scenario templates](entities/scenario-templates.md)           |
 | Deploying                            | [Docker image](entities/docker-image.md), [Access control](concepts/access-control.md)                         |
 | Debugging a session                  | [analyze](entities/analyze.md), [Log format](concepts/log-format.md), [Trace format](concepts/trace-format.md) |
-| Maintaining this wiki (human or LLM) | [Conventions](conventions.md), [`CLAUDE.md`](../CLAUDE.md), [Index](index.md), [Log](log.md)                   |
+| Maintaining this wiki (human or LLM) | [Conventions](conventions.md), [`CLAUDE.md`](../CLAUDE.md), [Index](index.md), [Log archive](log.md)           |

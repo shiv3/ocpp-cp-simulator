@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
-import { DefaultBootNotification } from "../../../../domain/types/OcppTypes";
+import {
+  DefaultBootNotification,
+  OCPPStatus,
+} from "../../../../domain/types/OcppTypes";
 import { decideRemoteStart } from "../remoteStartValidation";
 
 function station(): ChargePoint {
@@ -37,7 +40,7 @@ describe("decideRemoteStart without evseId (#839)", () => {
       undefined,
       7,
     );
-    for (const c of cp.connectors.values()) c.status = "Available";
+    for (const c of cp.connectors.values()) c.status = OCPPStatus.Available;
 
     expect(decideRemoteStart(cp, request("ME"))).toEqual({
       ok: true,
@@ -57,7 +60,7 @@ describe("decideRemoteStart without evseId (#839)", () => {
         id,
       );
     }
-    for (const c of cp.connectors.values()) c.status = "Available";
+    for (const c of cp.connectors.values()) c.status = OCPPStatus.Available;
 
     expect(decideRemoteStart(cp, request("ME"))).toMatchObject({ ok: false });
     cp.dispose();

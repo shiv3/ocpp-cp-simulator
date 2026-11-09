@@ -168,7 +168,7 @@
   "scenarios.editor.outlineOnlyNote": "Ce scénario a une forme que l’éditeur d’étapes ne sait pas dessiner (une seconde bifurcation ou une étape non atteinte). Ses étapes sont listées dans l’ordre d’exécution ; vous pouvez modifier leurs réglages, pas leurs liens.",
   "scenarios.editor.issue.missingStart": "Ce scénario n’a pas de nœud Start : il ne peut pas s’exécuter.",
   "scenarios.editor.issue.multipleStart": "Il y a plusieurs nœuds Start ; seul le premier est exécuté.",
-  "scenarios.editor.issue.edgeIntoStart": "Un lien revient vers Start ; il n’est jamais suivi.",
+  "scenarios.editor.issue.edgeIntoStart": "Un lien revient vers Start. Il est suivi, mais l’exécution continue alors par la première branche de Start seulement ; les branches parallèles ne démarrent qu’au début de l’exécution.",
   "scenarios.editor.issue.edgeOutOfEnd": "Un lien part d’un nœud End ; il n’est jamais suivi.",
   "scenarios.editor.issue.extraOutgoing": "L’étape {{n}} ({{title}}) a plusieurs étapes suivantes, mais seul Start lance des branches en parallèle : à l’exécution, seule la première est suivie.",
   "scenarios.editor.issue.danglingEdge": "Un lien pointe vers une étape inexistante ; cette branche s’arrête là.",
@@ -179,5 +179,8 @@
   "scenarios.templateBrowser.selectStepHint": "Choisissez une étape pour voir ses réglages.",
   "scenarios.templateBrowser.listLabel": "Modèles",
   "scenarios.templateBrowser.previewTemplate": "Aperçu de {{name}}",
-  "scenarios.templateBrowser.nothingToPreview": "Aucun modèle à prévisualiser."
+  "scenarios.templateBrowser.nothingToPreview": "Aucun modèle à prévisualiser.",
+  "scenarios.editor.issue.noCallHeld": "L’étape {{n}} ({{title}}) a besoin d’un appel CSMS repris par sa branche (un déclencheur d’appel CSMS avec behavior « replace » plus tôt dans la même branche), mais un chemin n’en a pas : l’exécution y échoue.",
+  "scenarios.editor.issue.callAlreadyAnswered": "L’étape {{n}} ({{title}}) répond, sur un chemin, à un appel CSMS déjà répondu par sa branche : l’exécution y échoue.",
+  "scenarios.editor.issue.callLeftOpen": "L’étape {{n}} ({{title}}) reprend un appel CSMS que sa branche peut laisser sans réponse ; la borne n’y répond InternalError qu’à la fin de l’exécution. Ajoutez une réponse d’appel (kind « none » pour se taire exprès)."
 }

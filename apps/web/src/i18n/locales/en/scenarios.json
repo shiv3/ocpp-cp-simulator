@@ -163,7 +163,7 @@
   "scenarios.editor.outlineOnlyNote": "This scenario has a shape the step editor cannot draw (a second fork or a step nothing leads to). Its steps are listed in running order; you can edit each step's settings, not how they connect.",
   "scenarios.editor.issue.missingStart": "This scenario has no Start node, so it cannot run.",
   "scenarios.editor.issue.multipleStart": "There is more than one Start node; only the first is run.",
-  "scenarios.editor.issue.edgeIntoStart": "An edge leads back into Start; it is never followed.",
+  "scenarios.editor.issue.edgeIntoStart": "An edge leads back into Start. It is followed, but the run goes on along Start's first branch only; the parallel branches start only when the run begins.",
   "scenarios.editor.issue.edgeOutOfEnd": "An edge leaves an End node; it is never followed.",
   "scenarios.editor.issue.extraOutgoing": "Step {{n}} ({{title}}) has several next steps, but only Start runs branches in parallel: at run time only the first one runs.",
   "scenarios.editor.issue.danglingEdge": "An edge points at a step that does not exist; that branch ends there.",
@@ -174,5 +174,8 @@
   "scenarios.templateBrowser.selectStepHint": "Pick a step to see its settings.",
   "scenarios.templateBrowser.listLabel": "Templates",
   "scenarios.templateBrowser.previewTemplate": "Preview {{name}}",
-  "scenarios.templateBrowser.nothingToPreview": "No template to preview."
+  "scenarios.templateBrowser.nothingToPreview": "No template to preview.",
+  "scenarios.editor.issue.noCallHeld": "Step {{n}} ({{title}}) needs a CSMS call its branch took over (a CSMS Call Trigger with behavior “replace” earlier in the same branch), but on some path there is none: the run fails there.",
+  "scenarios.editor.issue.callAlreadyAnswered": "Step {{n}} ({{title}}) answers a CSMS call that its branch has already answered on some path: the run fails there.",
+  "scenarios.editor.issue.callLeftOpen": "Step {{n}} ({{title}}) takes over a CSMS call that its branch can leave unanswered; the station answers it InternalError only when the run ends. Add a Call Response (kind “none” to stay silent on purpose)."
 }

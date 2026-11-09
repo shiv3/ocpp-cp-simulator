@@ -26,6 +26,19 @@ export function isFromReference(value: unknown): value is { $from: string } {
   );
 }
 
+/** Whether `value` holds a `{ "$from": "call.…" }` anywhere
+ *  {@link resolveFromExchange} would resolve it, i.e. whether resolving it
+ *  needs the CALL the branch took over. The other roots (`charger`,
+ *  `connector`, `state`) read the station or the run and need no CALL. */
+export function containsCallReference(value: unknown): boolean {
+  if (isFromReference(value)) return value.$from.split(".")[0] === "call";
+  if (Array.isArray(value)) return value.some(containsCallReference);
+  if (typeof value === "object" && value !== null) {
+    return Object.values(value).some(containsCallReference);
+  }
+  return false;
+}
+
 /**
  * Replace every `{ "$from": "<path>" }` that stands for a whole value in
  * `value` with what the path names (schema 1.5, #566; roots 1.6, #654). A path

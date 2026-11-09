@@ -158,7 +158,7 @@
   "scenarios.editor.outlineOnlyNote": "このシナリオは、ステップエディタで描けない形(2 つ目の分岐、またはどこからも到達しないステップ)です。ステップを実行順に並べています。各ステップの設定は編集できますが、つなぎ方は変更できません。",
   "scenarios.editor.issue.missingStart": "Start ノードが無いため、このシナリオは実行できません。",
   "scenarios.editor.issue.multipleStart": "Start ノードが複数あります。最初の1つだけが実行されます。",
-  "scenarios.editor.issue.edgeIntoStart": "Start に戻るエッジがあります。辿られません。",
+  "scenarios.editor.issue.edgeIntoStart": "Start に戻るエッジがあります。辿られますが、その後は Start の最初の枝だけが進みます。並列の枝が始まるのは実行開始時だけです。",
   "scenarios.editor.issue.edgeOutOfEnd": "End から出るエッジがあります。辿られません。",
   "scenarios.editor.issue.extraOutgoing": "ステップ {{n}}({{title}})の次のステップが複数ありますが、並列に分岐できるのは Start だけです。実行時は最初の1つしか動きません。",
   "scenarios.editor.issue.danglingEdge": "存在しないステップを指すエッジがあります。その枝はそこで終わります。",
@@ -169,5 +169,8 @@
   "scenarios.templateBrowser.selectStepHint": "ステップを選ぶと設定が表示されます。",
   "scenarios.templateBrowser.listLabel": "テンプレート",
   "scenarios.templateBrowser.previewTemplate": "{{name}} をプレビュー",
-  "scenarios.templateBrowser.nothingToPreview": "プレビューするテンプレートがありません。"
+  "scenarios.templateBrowser.nothingToPreview": "プレビューするテンプレートがありません。",
+  "scenarios.editor.issue.noCallHeld": "ステップ {{n}}({{title}})は、同じ枝で先に引き取った CSMS コール(behavior が「replace」の CSMS Call Trigger)が必要ですが、それが無い経路があります。その経路では実行が失敗します。",
+  "scenarios.editor.issue.callAlreadyAnswered": "ステップ {{n}}({{title}})は、その枝がすでに応答した CSMS コールに再度応答する経路があります。その経路では実行が失敗します。",
+  "scenarios.editor.issue.callLeftOpen": "ステップ {{n}}({{title}})が引き取った CSMS コールに、その枝で応答しないまま終わる経路があります。ステーションは実行終了時にようやく InternalError で応答します。Call Response を追加してください(意図的に黙るなら kind「none」)。"
 }

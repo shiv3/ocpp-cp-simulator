@@ -11,9 +11,12 @@ import type { WsClientOptions } from "../../../shared/WsClientOptions";
 const logger = (): Logger =>
   ({ info: () => {}, warn: () => {}, error: () => {} }) as unknown as Logger;
 
-const cleanups: Array<() => void> = [];
-afterEach(() => {
-  for (const fn of cleanups.splice(0)) fn();
+// Last registered, first undone (client, then proxy, then CSMS), and awaited,
+// so a test's sockets are gone before the next test starts: an error left over
+// from one test is otherwise reported against the next one (#825).
+const cleanups: Array<() => unknown> = [];
+afterEach(async () => {
+  for (const fn of cleanups.splice(0).reverse()) await fn();
 });
 
 /**
@@ -31,9 +34,9 @@ function netServer(onConnection: (socket: net.Socket) => void): net.Server {
     socket.on("close", () => sockets.delete(socket));
     onConnection(socket);
   });
-  cleanups.push(() => {
+  cleanups.push(async () => {
     for (const socket of sockets) socket.destroy();
-    server.close();
+    await new Promise<void>((r) => server.close(() => r()));
   });
   return server;
 }

@@ -113,6 +113,8 @@ export interface GraphLink {
   d: string;
   /** The corners of the route (`d` rounds them). */
   points: Point[];
+  /** True when no clean route existed and the dashed curve was drawn. */
+  fallback: boolean;
   edgeId: string;
   from: string;
   to: string;
@@ -1001,12 +1003,21 @@ export function layoutTreeGraph(
     const y1 = Math.min(srcY, gapY);
     const y2 = Math.max(srcY, gapY);
     const ends2 = new Set([edge.source, edge.target]);
-    const route = (channel: number) => {
+    /** One orthogonal route: out of the source's side at `srcY`, (when
+     *  `exitRow` differs, a short step out and along that row first), up or
+     *  down `channel`, across `entryRow`, down into the target's top. */
+    const route = (
+      channel: number,
+      exitRow: number = srcY,
+      entryRow: number = gapY,
+    ) => {
       let swing = channel;
+      const lo = Math.min(y1, exitRow, entryRow);
+      const hi = Math.max(y2, exitRow, entryRow);
       for (const sw of swings) {
         if (
-          sw.top <= y2 &&
-          sw.bottom >= y1 &&
+          sw.top <= hi &&
+          sw.bottom >= lo &&
           Math.abs(sw.x - swing) < LINK_STEP
         ) {
           swing = sw.x + (swing >= srcX ? LINK_STEP : -LINK_STEP);
@@ -1017,11 +1028,19 @@ export function layoutTreeGraph(
         ? { x: srcX + (out * NODE_W) / 2, y: srcY }
         : { x: srcX, y: srcY };
       const tx = to.x + (swing >= to.x ? 1 : -1) * (NODE_W / 2 - LINK_INSET);
+      const lead =
+        exitRow === srcY
+          ? [a]
+          : [
+              a,
+              { x: a.x + out * 8, y: srcY },
+              { x: a.x + out * 8, y: exitRow },
+            ];
       const pts = dedupe([
-        a,
-        { x: swing, y: srcY },
-        { x: swing, y: gapY },
-        { x: tx, y: gapY },
+        ...lead,
+        { x: swing, y: exitRow },
+        { x: swing, y: entryRow },
+        { x: tx, y: entryRow },
         { x: tx, y: to.y },
       ]);
       const score =
@@ -1029,7 +1048,7 @@ export function layoutTreeGraph(
         crossings(pts, soft) * 1e4 +
         crossings(pts, hard, 6, ends2) * 1e3 +
         length(pts);
-      return { pts, swing, score };
+      return { pts, swing, score, curve: false };
     };
     const passed = hard.filter((o) => o.b >= y1 && o.t <= y2);
     const channels = new Set<number>([
@@ -1037,14 +1056,72 @@ export function layoutTreeGraph(
       Math.min(srcX - NODE_W / 2, to.x, ...passed.map((o) => o.l)) - LINK_SWING,
       ...passed.flatMap((o) => [o.r + 12, o.l - 12]),
     ]);
-    const options = [...channels].map(route).filter((o) => o.swing >= 4);
-    const best = options.reduce((m, o) => (o.score < m.score ? o : m));
+    const pick = (opts: ReturnType<typeof route>[]) =>
+      opts.reduce((m, o) => (o.score < m.score ? o : m));
+    let best = pick(
+      [...channels].map((c) => route(c)).filter((o) => o.swing >= 4),
+    );
+    if (best.score >= 1e6) {
+      // Every plain route crosses a card: also leave along the source's own
+      // gap rows, and enter along the free rows above the target.
+      const exitRows = fromCard
+        ? [fromCard.y - GAP / 2, fromCard.y + NODE_H + GAP / 2]
+        : [];
+      const above = cards
+        .filter((c) => c.node.id !== edge.target && Math.abs(c.x - to.x) < 1)
+        .filter((c) => c.y + NODE_H <= to.y)
+        .sort((p, q) => q.y - p.y);
+      const entryRows = [to.y - 6, to.y - GAP / 2 - 6].filter(
+        (y) => y !== gapY,
+      );
+      let prevTop = to.y;
+      for (const c of above.slice(0, 3)) {
+        entryRows.push((c.y + NODE_H + prevTop) / 2);
+        prevTop = c.y;
+      }
+      const more: ReturnType<typeof route>[] = [];
+      const rows: Array<[number, number]> = [
+        ...exitRows.map((r): [number, number] => [r, gapY]),
+        ...entryRows.map((r): [number, number] => [srcY, r]),
+        ...exitRows.flatMap((r) =>
+          entryRows.map((e): [number, number] => [r, e]),
+        ),
+      ];
+      for (const [r, e] of rows) {
+        for (const c of channels) {
+          if (c >= 4) more.push(route(c, r, e));
+        }
+      }
+      if (more.length > 0) {
+        const alt = pick(more);
+        if (alt.score < best.score) best = alt;
+      }
+    }
+    if (best.score >= 1e6) {
+      // No clean route: the dashed curve beside everything (it may cross).
+      const swingR = Math.max(...channels);
+      const r = route(swingR);
+      const a = fromCard
+        ? { x: srcX + NODE_W / 2, y: srcY }
+        : { x: srcX, y: srcY };
+      const b = { x: to.x + NODE_W / 2 + 3, y: to.y + NODE_H / 2 };
+      const p1 = { x: r.swing, y: a.y };
+      const p2 = { x: r.swing, y: b.y };
+      best = {
+        ...r,
+        pts: [a, p1, p2, b],
+        curve: true,
+      };
+    }
     swings.push({ top: y1, bottom: y2, x: best.swing });
     right = Math.max(right, best.swing + 8);
     links.push({
       key: edge.id,
-      d: roundedPath(best.pts),
+      d: best.curve
+        ? `M ${best.pts[0].x} ${best.pts[0].y} C ${best.pts[1].x} ${best.pts[1].y}, ${best.pts[2].x} ${best.pts[2].y}, ${best.pts[3].x} ${best.pts[3].y}`
+        : roundedPath(best.pts),
       points: best.pts,
+      fallback: best.curve,
       edgeId: edge.id,
       from: edge.source,
       to: edge.target,

@@ -1003,7 +1003,11 @@ run`, `runs`, `ignored`, `unpickable: case-7`) and the lane's step count
   two columns), across the gap row above the target and down into the
   target's top corner; of the channels, the shortest that crosses no card
   or lane tag and keeps clear of END rings, `+` discs and merge points
-  wins, each further jump in a channel one step aside. An edge back into a
+  wins, each further jump in a channel one step aside. When every plain
+  route crosses a card, routes that leave along the source's own gap row, or
+  enter along another free row above the target, are tried too; when none is
+  clean (none of 30000 random layouts needed it), the jump is drawn as a dashed
+  curve beside everything instead, and may cross cards. An edge back into a
   START that fans out is not drawn (START has no card). Steps nothing reaches
   stand in a column on the right under **Steps nothing reaches**. A
   travelled path takes its lane's colour; the canvas scrolls sideways when

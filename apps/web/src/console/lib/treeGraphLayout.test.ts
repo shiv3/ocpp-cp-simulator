@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { ScenarioDefinition } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import { scenarioTemplates } from "@ocpp-cp-simulator/core/utils/scenarioTemplates";
 import { recognizeBlockTree } from "./blockTree";
-import { treeSteps } from "./stepTree";
+import { isDrawableTree, treeSteps } from "./stepTree";
 import {
   NODE_H,
   NODE_W,
@@ -20,6 +20,16 @@ import {
   joinIntoLeftLane,
   loopWithTwoExits,
 } from "../test/treeFixtures";
+import {
+  end,
+  graph,
+  node,
+  randomLayoutScenario,
+  randomScenario,
+  start,
+  sw,
+  xorshift,
+} from "./__fixtures__/blockTreeKit";
 
 const layout = (def: ScenarioDefinition, editable = true) =>
   layoutTreeGraph(recognizeBlockTree(def), {
@@ -278,6 +288,65 @@ describe("layoutTreeGraph", () => {
     const a1 = g.cards.find((c) => c.node.id === "a1")!;
     expect(Math.max(...pts.map((p) => p.x))).toBeLessThanOrEqual(a1.x);
   });
+
+  it("a join whose gap row sits in a neighbour lane's row leaves along its own gap row", () => {
+    // Left lane: a loop (rows shift by LOOP_TOP); middle: m; right: r -> l.
+    const def = graph(
+      [start(), node("l"), sw("ls", ["c"]), node("m"), node("r"), end()],
+      [
+        ["start", "l"],
+        ["start", "m"],
+        ["start", "r"],
+        ["l", "ls"],
+        ["ls", "l", "case-0"],
+        ["ls", "end", "default"],
+        ["m", "end"],
+        ["r", "l"],
+      ],
+    );
+    const g = layout(def);
+    const link = g.links.find((l) => l.edgeId === "r->l")!;
+    expect(link).toBeDefined();
+    expect(link.fallback).toBe(false);
+    const boxes = [...cardRects(g), ...tagRects(g)];
+    for (const p of samples(link.d)) {
+      for (const box of boxes) expect(inside(p, box), box.name).toBe(false);
+    }
+  });
+
+  it("random layouts: jumps cross no card or tag; none needs the curve fallback", () => {
+    let links = 0;
+    let fallbacks = 0;
+    for (let seed = 1; seed <= 1000; seed++) {
+      const rand = xorshift(seed);
+      const def = seed % 2 ? randomScenario(rand) : randomLayoutScenario(rand);
+      const tree = recognizeBlockTree(def);
+      if (!isDrawableTree(tree)) continue;
+      const g = layoutTreeGraph(tree, {
+        editable: true,
+        phaseOf: () => "todo",
+      });
+      const boxes = [...cardRects(g), ...tagRects(g)];
+      for (const link of g.links) {
+        links++;
+        if (link.fallback) {
+          fallbacks++;
+          continue;
+        }
+        for (const p of samples(link.d)) {
+          for (const box of boxes) {
+            expect(
+              inside(p, box),
+              `seed ${seed} ${link.edgeId} ${box.name}`,
+            ).toBe(false);
+          }
+        }
+      }
+    }
+    expect(links).toBeGreaterThan(100);
+    // 30000 seeds (both modes) never needed the curve; a regression shows here.
+    expect(fallbacks).toBe(0);
+  }, 30000);
 
   it("an edge back into a START that fans out is not counted as drawn", () => {
     const def = intoStartFanOut();

@@ -25,11 +25,12 @@ const DEFAULT_DEPS: Omit<ChargePointDeps, "logSink"> = {
 };
 
 /**
- * Composition root for a {@link ChargePoint}: the single place that calls its
- * constructor. Every caller (CLI, web console, tests, benches) builds charge
- * points through here so infrastructure dependencies are injected in one
- * spot (#575). The parameters are the constructor's, in the same order and
- * with the same defaults, without the final `deps`.
+ * Composition root for a {@link ChargePoint}: the CLI, the web console, the
+ * tests and the benches build charge points through here, so infrastructure
+ * dependencies are injected in one spot (#575). Only `ChargePoint.deps.test.ts`
+ * calls the constructor directly, to inject test doubles. The parameters are
+ * the constructor's, in the same order and with the same defaults, without the
+ * final `deps`.
  */
 export function createChargePoint(
   id: string,

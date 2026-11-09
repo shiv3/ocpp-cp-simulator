@@ -65,6 +65,17 @@ import { realClock } from "../../shared/clock";
 import type { SimClock } from "../../shared/clock";
 import { systemRngStreams } from "../../shared/rng";
 import type { Rng } from "../../shared/rng";
+import {
+  isTerminal,
+  lowerScenario,
+  nextStep,
+  resolveOrigin,
+  successors,
+  type ScenarioProgram,
+} from "../../../scenario/scenarioGraph";
+import { connectionRule } from "../../../scenario/scenarioConnectionRules";
+
+type ScenarioEdge = ScenarioDefinition["edges"][number];
 
 type AutoMeterStartConfig = Parameters<
   NonNullable<ScenarioExecutorCallbacks["onStartAutoMeterValue"]>
@@ -220,6 +231,9 @@ export class ScenarioExecutor {
     string,
     unknown
   >;
+  /** The scenario lowered for walking (scenarioGraph.ts); rebuilt when the
+   *  definition's node or edge array is replaced. */
+  private lowered: ScenarioProgram<ScenarioNode, ScenarioEdge> | null = null;
 
   constructor(
     scenario: ScenarioDefinition,
@@ -421,8 +435,9 @@ export class ScenarioExecutor {
     let originNode: ScenarioNode | undefined;
     let resumed = false;
 
+    const program = this.program();
     if (resumeFromNodeId) {
-      originNode = this.scenario.nodes.find((n) => n.id === resumeFromNodeId);
+      originNode = program.nodesById.get(resumeFromNodeId);
       if (originNode) {
         // Seed executedNodes from the resume snapshot so any node-history
         // check inside an executor down the flow has the right shape.
@@ -455,9 +470,7 @@ export class ScenarioExecutor {
 
     if (!originNode) {
       // Normal path: find and execute the Start node.
-      originNode = this.scenario.nodes.find(
-        (n) => n.type === ScenarioNodeType.START || n.data.label === "Start",
-      );
+      originNode = resolveOrigin(program);
       if (!originNode) {
         throw new Error("No start node found in scenario");
       }
@@ -465,18 +478,11 @@ export class ScenarioExecutor {
     }
 
     // Walk outgoing edges from the origin node (whether Start or resume).
-    const outgoingEdges = this.scenario.edges.filter(
-      (e) => e.source === originNode!.id,
+    const nextNodes = successors(program, originNode, { asOrigin: true }).map(
+      (edge) => program.nodesById.get(edge.target)!,
     );
-    const nextNodes = outgoingEdges
-      .map((edge) => this.scenario.nodes.find((n) => n.id === edge.target))
-      .filter((node): node is ScenarioNode => node !== undefined);
 
-    if (
-      resumed &&
-      (originNode.type === ScenarioNodeType.SWITCH ||
-        originNode.type === ScenarioNodeType.CHOICE)
-    ) {
+    if (resumed && connectionRule(originNode.type).out === "select") {
       // The chosen handle is not persisted: decide again (a choice from its
       // seeded stream), then go on along that one edge.
       await this.executeSequentialFlow(originNode, newFlow());
@@ -513,6 +519,31 @@ export class ScenarioExecutor {
     // Clear current node
     this.currentNodeId = null;
     this.currentNodeStartedAt = null;
+  }
+
+  /**
+   * The lowered scenario, rebuilt only when `nodes` or `edges` is replaced.
+   *
+   * Invariant: while a run is live, `scenario.nodes` / `scenario.edges` (and
+   * the node and edge objects in them) are replaced, never mutated in place.
+   * The cache is keyed on the two arrays' identity, so an in-place push,
+   * splice or edit of an edge would not be seen: `executeFlow` (origin and
+   * resume point) and `executeSequentialFlow` (`nextStep` after every node)
+   * would keep walking the graph as it was lowered. Neither the executor nor
+   * its callers write to them (the console editor and a `--watch` reload
+   * build new arrays); the permissive test "never mutates the definition's
+   * node and edge arrays" freezes them to keep the executor honest.
+   */
+  private program(): ScenarioProgram<ScenarioNode, ScenarioEdge> {
+    const { nodes, edges } = this.scenario;
+    if (
+      !this.lowered ||
+      this.lowered.nodes !== nodes ||
+      this.lowered.edges !== edges
+    ) {
+      this.lowered = lowerScenario({ nodes, edges });
+    }
+    return this.lowered;
   }
 
   /**
@@ -563,52 +594,33 @@ export class ScenarioExecutor {
       }
 
       // Check if this is the end node
-      if (
-        currentNode.type === ScenarioNodeType.END ||
-        currentNode.data.label === "End"
-      ) {
+      if (isTerminal(currentNode)) {
         break;
       }
 
-      // Find next node
-      let outgoingEdges = this.scenario.edges.filter(
-        (e) => e.source === currentNode!.id,
-      );
-      // A switch or choice picked one edge by its handle (schema 1.6).
+      // Find next node. A switch or choice picked one edge by its handle
+      // (schema 1.6).
       const handle = flow.handle;
       flow.handle = null;
-      if (handle !== null) {
-        outgoingEdges = outgoingEdges.filter((e) => e.sourceHandle === handle);
-        if (outgoingEdges.length === 0) {
-          this.callbacks.log?.(
-            `[${this.scenario.name}] "${currentNode.data?.label || currentNode.id}" chose "${handle}", which has no edge; the branch ends`,
-            "info",
-          );
-          break;
-        }
+      const step = nextStep(this.program(), currentNode, handle);
+      if (step.kind === "noEdgeForHandle") {
+        this.callbacks.log?.(
+          `[${this.scenario.name}] "${currentNode.data?.label || currentNode.id}" chose "${handle}", which has no edge; the branch ends`,
+          "info",
+        );
+        break;
       }
-      if (outgoingEdges.length === 0) {
-        break; // No more nodes to execute
-      }
-
-      // Find the first edge that points to an existing node
-      let nextNode = null;
-      for (const edge of outgoingEdges) {
-        const candidate = this.scenario.nodes.find((n) => n.id === edge.target);
-        if (candidate) {
-          nextNode = candidate;
-          break;
-        }
-      }
-
-      if (!nextNode) {
+      if (step.kind === "missingTargets") {
         console.warn(
           `[ScenarioExecutor] All outgoing edges from node ${currentNode!.id} point to non-existent nodes. Branch will end here.`,
         );
         break;
       }
+      if (step.kind !== "edge") {
+        break; // No more nodes to execute
+      }
 
-      currentNode = nextNode;
+      currentNode = step.target;
     }
   }
 

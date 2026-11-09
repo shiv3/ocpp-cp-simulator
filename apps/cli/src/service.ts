@@ -1741,8 +1741,13 @@ export class CLIChargePointService {
     // `undefined`, returned as `{}` instead of `{ scenarioId }`, and left an
     // entry in list_scenarios that could be neither run nor removed. Full
     // schema conformance stays advisory (issue #214) -- only this minimal set
-    // is a gate.
-    assertLoadableScenario(definition);
+    // is a gate. A missing `name` / `targetType` is filled in (the id,
+    // "connector") and reported, as the web console's import always allowed.
+    definition = assertLoadableScenario(definition, (message) =>
+      process.stderr.write(
+        `[CLI] loadScenario ${String(definition.id)}: ${message}\n`,
+      ),
+    );
     const connector = this._chargePoint.connectors.get(connectorId);
     if (!connector) {
       throw new Error(`Connector ${connectorId} not found`);
@@ -1942,13 +1947,17 @@ export class CLIChargePointService {
     // already the DB's truth, and one bad entry must not fail the others.
     for (const def of definitions) {
       const check = validateLoadableScenario(def);
-      if (!check.valid) {
+      if (!check.valid || !check.definition) {
         process.stderr.write(
           `[CLI] syncConnectorRuntimeScenarios: skipping unloadable definition on connector ${connectorId}: ${check.errors.join("; ")}\n`,
         );
         continue;
       }
-      this._scenarios.set(def.id, { definition: def, connectorId });
+      // A missing name / targetType is filled in, as loadScenario does.
+      this._scenarios.set(check.definition.id, {
+        definition: check.definition,
+        connectorId,
+      });
     }
     // The replaced set may drop whatever auto-started last, so clear the dedup
     // key and — if the CP is already up — kick auto-start for the new set.

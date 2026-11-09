@@ -2,10 +2,8 @@ import { useTranslation } from "react-i18next";
 import React from "react";
 import { AlertTriangle } from "lucide-react";
 
-import {
-  validateScenarioGraph,
-  type GraphIssue,
-} from "@ocpp-cp-simulator/core/scenario/scenarioConnectionRules";
+import type { GraphIssue } from "@ocpp-cp-simulator/core/scenario/scenarioConnectionRules";
+import { validateScenarioGraph } from "@ocpp-cp-simulator/core/scenario/scenarioGraphValidator";
 import type { ScenarioDefinition } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import { outlineScenario } from "../../../lib/scenarioOutline";
 import type { StepLayout } from "../../../lib/stepLayout";

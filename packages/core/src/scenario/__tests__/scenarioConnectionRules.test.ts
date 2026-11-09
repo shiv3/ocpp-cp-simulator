@@ -8,20 +8,21 @@ import { scenarioTemplates } from "../../utils/scenarioTemplates";
 import {
   CONNECTION_RULES,
   connectionRule,
-  validateScenarioGraph,
   type ConnectionRule,
   type ConnectionRuleTable,
 } from "../scenarioConnectionRules";
+import { validateScenarioGraph } from "../scenarioGraphValidator";
 
 const node = (id: string, type = "delay", data?: Record<string, unknown>) => ({
   id,
   type,
   ...(data ? { data } : {}),
 });
-const edge = (source: string, target: string) => ({
-  id: `${source}>${target}`,
+const edge = (source: string, target: string, sourceHandle?: string) => ({
+  id: `${source}>${target}${sourceHandle ? `:${sourceHandle}` : ""}`,
   source,
   target,
+  ...(sourceHandle ? { sourceHandle } : {}),
 });
 const codes = (def: Parameters<typeof validateScenarioGraph>[0]) =>
   validateScenarioGraph(def).map((i) => i.code);
@@ -114,6 +115,46 @@ describe("validateScenarioGraph", () => {
       codes({
         nodes: [node("s1", "start"), node("s2", "start")],
         edges: [],
+      }),
+    ).toEqual(["multipleStart"]);
+  });
+
+  // The executor starts from the origin only; another START runs as a step,
+  // first edge only, and only when an edge reaches it (ScenarioExecutor
+  // permissive test "ignores a second START").
+  it("starts nothing from a second START", () => {
+    expect(
+      validateScenarioGraph({
+        nodes: [node("s1", "start"), node("a"), node("s2", "start"), node("b")],
+        edges: [edge("s1", "a"), edge("s2", "b")],
+      }),
+    ).toEqual([
+      { code: "multipleStart", nodeId: "s2", severity: "warning" },
+      { code: "unreachable", nodeId: "b", severity: "warning" },
+    ]);
+    // Reached by an edge, it runs as a step: on along its first edge only.
+    expect(
+      validateScenarioGraph({
+        nodes: [node("s1", "start"), node("s2", "start"), node("a"), node("b")],
+        edges: [edge("s1", "s2"), edge("s2", "a"), edge("s2", "b")],
+      }),
+    ).toEqual([
+      { code: "multipleStart", nodeId: "s2", severity: "warning" },
+      { code: "extraOutgoing", nodeId: "s2", severity: "warning" },
+    ]);
+    // Its edges hand the branch no fresh CALL slot.
+    expect(
+      codes({
+        nodes: [
+          node("s1", "start"),
+          node("t", "csmsCallTrigger", {
+            action: "Reset",
+            behavior: "replace",
+          }),
+          node("s2", "start"),
+          node("r", "callResponse", { kind: "result" }),
+        ],
+        edges: [edge("s1", "t"), edge("t", "s2"), edge("s2", "r")],
       }),
     ).toEqual(["multipleStart"]);
   });
@@ -313,15 +354,15 @@ describe("validateScenarioGraph: decision nodes and the roots of $from (schema 1
   it("lets a switch or choice leave by several edges: one per handle", () => {
     const nodes = [
       node("s", "start"),
-      node("sw", "switch"),
+      node("sw", "switch", { value: 0, cases: [0] }),
       node("a"),
       node("b"),
       node("e", "end"),
     ];
     const edges = [
       edge("s", "sw"),
-      edge("sw", "a"),
-      edge("sw", "b"),
+      edge("sw", "a", "case-0"),
+      edge("sw", "b", "default"),
       edge("a", "e"),
       edge("b", "e"),
     ];
@@ -335,12 +376,27 @@ describe("validateScenarioGraph: decision nodes and the roots of $from (schema 1
         edges,
       }),
     ).toEqual(["extraOutgoing"]);
+    expect(
+      codes({
+        nodes: [
+          node("s", "start"),
+          node("c", "choice", { options: [{}, {}] }),
+          node("a"),
+          node("b"),
+        ],
+        edges: [
+          edge("s", "c"),
+          edge("c", "a", "option-0"),
+          edge("c", "b", "option-1"),
+        ],
+      }),
+    ).toEqual([]);
   });
 
-  it("follows every edge of a switch when it checks the CALL", () => {
+  it("follows every handle of a switch when it checks the CALL", () => {
     const nodes = [
       node("s", "start"),
-      node("sw", "switch"),
+      node("sw", "switch", { value: 0, cases: [0] }),
       node("ok", "callResponse", { kind: "result" }),
       node("other"),
     ];
@@ -348,9 +404,89 @@ describe("validateScenarioGraph: decision nodes and the roots of $from (schema 1
     expect(
       codes({
         nodes,
-        edges: [edge("s", "sw"), edge("sw", "ok"), edge("sw", "other")],
+        edges: [
+          edge("s", "sw"),
+          edge("sw", "ok", "case-0"),
+          edge("sw", "other", "default"),
+        ],
       }),
     ).toEqual(["noCallHeld"]);
+  });
+
+  // executeSwitch / executeChoice always set flow.handle and nextStep keeps
+  // only the edges with it: an edge without a handle, or with one the node
+  // cannot pick, never runs.
+  it("never follows a switch / choice edge whose handle the node cannot pick", () => {
+    const respond = node("r", "callResponse", { kind: "result" });
+    expect(
+      validateScenarioGraph({
+        nodes: [
+          node("s", "start"),
+          node("sw", "switch", { value: 0, cases: [0] }),
+          respond,
+        ],
+        edges: [edge("s", "sw"), edge("sw", "r")],
+      }),
+    ).toEqual([
+      {
+        code: "unpickableHandle",
+        nodeId: "sw",
+        edgeId: "sw>r",
+        severity: "warning",
+      },
+      { code: "unreachable", nodeId: "r", severity: "warning" },
+    ]);
+    const unpickable = (
+      sw: ReturnType<typeof node>,
+      handle: string,
+    ): string[] =>
+      codes({
+        nodes: [node("s", "start"), sw, node("a")],
+        edges: [edge("s", sw.id), edge(sw.id, "a", handle)],
+      });
+    const sw = node("sw", "switch", { value: 0, cases: [0, 1] });
+    expect(unpickable(sw, "case-1")).toEqual([]);
+    expect(unpickable(sw, "default")).toEqual([]);
+    expect(unpickable(sw, "case-2")).toEqual([
+      "unpickableHandle",
+      "unreachable",
+    ]);
+    expect(unpickable(sw, "option-0")).toEqual([
+      "unpickableHandle",
+      "unreachable",
+    ]);
+    const choice = node("c", "choice", { options: [{}, { weight: 2 }] });
+    expect(unpickable(choice, "option-1")).toEqual([]);
+    expect(unpickable(choice, "option-2")).toEqual([
+      "unpickableHandle",
+      "unreachable",
+    ]);
+    expect(unpickable(choice, "default")).toEqual([
+      "unpickableHandle",
+      "unreachable",
+    ]);
+    // A choice that fails the run before it picks picks nothing.
+    expect(
+      unpickable(node("c", "choice", { options: [{}] }), "option-0"),
+    ).toEqual(["unpickableHandle", "unreachable"]);
+  });
+
+  it("follows only the first edge of a handle when it checks the CALL", () => {
+    expect(
+      codes({
+        nodes: [
+          node("s", "start"),
+          node("sw", "switch", { value: 0, cases: [] }),
+          node("a"),
+          node("r", "callResponse", { kind: "result" }),
+        ],
+        edges: [
+          edge("s", "sw"),
+          edge("sw", "a", "default"),
+          edge("sw", "r", "default"),
+        ],
+      }),
+    ).toEqual([]);
   });
 
   it("notify and setState are plain steps", () => {
@@ -391,6 +527,8 @@ describe("validateScenarioGraph: decision nodes and the roots of $from (schema 1
       }),
     ],
   ] as const)("a $from in %s", (type, dataOf) => {
+    // A switch with one case leaves by `case-0` or `default`.
+    const out = type === "switch" ? "default" : undefined;
     const reader = (path: string) => node("n", type, dataOf({ $from: path }));
 
     it("needs a CALL on the call root", () => {
@@ -419,7 +557,7 @@ describe("validateScenarioGraph: decision nodes and the roots of $from (schema 1
             reader("call.payload.requestId"),
             node("r", "callResponse", { kind: "result" }),
           ],
-          edges: [edge("s", "t"), edge("t", "n"), edge("n", "r")],
+          edges: [edge("s", "t"), edge("t", "n"), edge("n", "r", out)],
         }),
       ).toEqual([]);
     });

@@ -4,9 +4,10 @@
  * lanes stand side by side under it, each as wide as what it holds, under a
  * lane tag the curves end at (never cross); the lanes meet again at a merge
  * point below the tallest one; a loop is a tinted rectangle behind its body
- * with a solid return arc on its left; a jump is a dashed curve swinging out
- * right of the cards it passes; steps nothing reaches stand in a column on
- * the right. Pure (no React): the view draws what this returns.
+ * with a solid return arc on its left; a jump is a dashed line routed
+ * around the cards and lane tags it passes (out of the source's side, along
+ * a channel beside them, across the gap row above the target and into its
+ * top); steps nothing reaches stand in a column on the right. Pure (no React): the view draws what this returns.
  */
 import type { ScenarioNode } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 
@@ -61,10 +62,15 @@ const LOOP_BOTTOM = 46;
 const LOOP_TURN = 20;
 /** Lanes that leave a loop stand this far right of its rectangle. */
 const LEAVING_GAP = 16;
-/** A jump's curve swings this far right of the cards it passes, plus a
- *  step per jump already drawn there. */
+/** A jump's channel runs this far beside the cards it passes, plus a step
+ *  per jump already drawn there; it enters its target this far in from the
+ *  target's corner. */
 const LINK_SWING = 30;
 const LINK_STEP = 14;
+const LINK_INSET = 18;
+/** Room the editor's "+ branch" pill needs right of a branch point's card
+ *  inside a loop's rectangle (beyond the lane's own margin). */
+const PILL_ROOM = 64;
 /** The column of steps nothing reaches starts this far right. */
 const DETACHED_GAP = 40;
 const MARGIN_TOP = 34;
@@ -101,10 +107,12 @@ export interface GraphPath {
   mid: Point;
 }
 
-/** A jump (a link): dashed. */
+/** A jump (a link): dashed, orthogonal. */
 export interface GraphLink {
   key: string;
   d: string;
+  /** The corners of the route (`d` rounds them). */
+  points: Point[];
   edgeId: string;
   from: string;
   to: string;
@@ -269,6 +277,13 @@ export function layoutTreeGraph(
     return result;
   };
   const inner = (ctx: Ctx): Ctx => ({ ...ctx, outsideX: null });
+  /** A loop rectangle's width around a body `bodyW` wide: in the editor,
+   *  room on the right for the "+ branch" pill of a branch point inside. */
+  const loopRectW = (loop: LoopBlock, bodyW: number) =>
+    LOOP_LEFT +
+    bodyW +
+    LOOP_RIGHT +
+    (editable && hasFork(loop.body) ? PILL_ROOM : 0);
   const measureBlock = (block: Block, ctx: Ctx): { w: number; out: number } => {
     if (block.kind === "step") return { w: LANE_W, out: 0 };
     if (block.kind === "loop") {
@@ -279,9 +294,7 @@ export function layoutTreeGraph(
       });
       return {
         w:
-          LOOP_LEFT +
-          body.w +
-          LOOP_RIGHT +
+          loopRectW(block, body.w) +
           (body.out > 0 ? LEAVING_GAP + body.out : 0),
         out: 0,
       };
@@ -573,10 +586,13 @@ export function layoutTreeGraph(
           : t("scenarioRun.tree.addLaneTo", { n: num(fork.node.id) }),
       });
     }
-    const leaving =
-      ctx.outsideX !== null
+    // Lanes that leave the loop around: marked at any depth; only those
+    // of a top-level fork of the loop's body stand outside its rectangle.
+    const leavesLoop =
+      ctx.loopHeader !== null
         ? lanesLeavingLoop(fork, ctx.loopHeader)
         : new Set<number>();
+    const leaving = ctx.outsideX !== null ? leavesLoop : new Set<number>();
     const tagTop = (isStart ? from.y : y + NODE_H) + FORK_DROP;
     const bodyTop = tagTop + TAG_H + GAP;
     const laneWidths = fork.lanes.map(
@@ -612,7 +628,7 @@ export function layoutTreeGraph(
         bodyTop,
         from,
         fromId,
-        leaving.has(i),
+        leavesLoop.has(i),
         ctx,
       );
       lowest = Math.max(lowest, r.bottom);
@@ -759,13 +775,9 @@ export function layoutTreeGraph(
       lane: ctx.lane,
     };
     const body = measureSeq(loop.body, bodyCtx);
-    const total =
-      LOOP_LEFT +
-      body.w +
-      LOOP_RIGHT +
-      (body.out > 0 ? LEAVING_GAP + body.out : 0);
+    const rectW = loopRectW(loop, body.w);
+    const total = rectW + (body.out > 0 ? LEAVING_GAP + body.out : 0);
     const rectLeft = left + (width - total) / 2;
-    const rectW = LOOP_LEFT + body.w + LOOP_RIGHT;
     bodyCtx.outsideX = rectLeft + rectW + LEAVING_GAP;
     const cardsBefore = cards.length;
     const r = layoutSeq(
@@ -898,11 +910,54 @@ export function layoutTreeGraph(
     }
   }
 
-  // Jumps: dashed curves out of the source card's right side into the
-  // target's, swinging right of every card between them (stepped, so two
-  // never share a line).
+  // Jumps: dashed orthogonal routes. Out of the source card's side (an
+  // empty lane: its tag), along a channel beside every card and tag between
+  // the two rows, across the gap row above the target and down into its top
+  // corner; the side (right or left) whose route crosses nothing and is
+  // shortest wins. Channels are stepped so two jumps never share a line.
   const links: GraphLink[] = [];
   const cardOf = new Map(cards.map((c) => [c.node.id, c]));
+  const obstacles = [
+    ...cards.map((c) => ({
+      l: c.x - NODE_W / 2,
+      r: c.x + NODE_W / 2,
+      t: c.y,
+      b: c.y + NODE_H,
+    })),
+    ...tags.map((tg) => ({
+      l: tg.x - tg.w / 2,
+      r: tg.x + tg.w / 2,
+      t: tg.y,
+      b: tg.y + TAG_H,
+    })),
+  ];
+  /** Obstacles a polyline's segments cross (touching an edge is not). */
+  const crossings = (pts: Point[]): number => {
+    let n = 0;
+    for (let k = 1; k < pts.length; k++) {
+      const p = pts[k - 1];
+      const q = pts[k];
+      for (const o of obstacles) {
+        if (
+          Math.max(p.x, q.x) > o.l + 1 &&
+          Math.min(p.x, q.x) < o.r - 1 &&
+          Math.max(p.y, q.y) > o.t + 1 &&
+          Math.min(p.y, q.y) < o.b - 1
+        ) {
+          n++;
+        }
+      }
+    }
+    return n;
+  };
+  const length = (pts: Point[]) =>
+    pts.reduce(
+      (sum, q, k) =>
+        k === 0
+          ? 0
+          : sum + Math.abs(q.x - pts[k - 1].x) + Math.abs(q.y - pts[k - 1].y),
+      0,
+    );
   const swings: Array<{ top: number; bottom: number; x: number }> = [];
   for (const link of tree.links) {
     const edge = link.edge;
@@ -910,37 +965,55 @@ export function layoutTreeGraph(
     const fromCard = cardOf.get(edge.source);
     const start = linkStarts.get(edge.id);
     if (!to || (!fromCard && !start)) continue;
-    const a = fromCard
-      ? { x: fromCard.x + NODE_W / 2, y: fromCard.y + NODE_H / 2 }
-      : { x: start!.x + 4, y: start!.y + 6 };
-    const b = { x: to.x + NODE_W / 2, y: to.y + NODE_H / 2 };
-    const y1 = Math.min(a.y, b.y);
-    const y2 = Math.max(a.y, b.y);
-    const passed = cards.filter((c) => c.y + NODE_H >= y1 && c.y <= y2);
-    let swing =
-      Math.max(a.x, b.x, ...passed.map((c) => c.x + NODE_W / 2)) + LINK_SWING;
-    for (const s of swings) {
-      if (s.top <= y2 && s.bottom >= y1 && Math.abs(s.x - swing) < LINK_STEP) {
-        swing = s.x + LINK_STEP;
+    const gapY = to.y - GAP / 2;
+    const route = (side: 1 | -1) => {
+      const a = fromCard
+        ? { x: fromCard.x + (side * NODE_W) / 2, y: fromCard.y + NODE_H / 2 }
+        : { x: start!.x, y: start!.y + 6 };
+      const tx = to.x + side * (NODE_W / 2 - LINK_INSET);
+      const y1 = Math.min(a.y, gapY);
+      const y2 = Math.max(a.y, gapY);
+      const passed = obstacles.filter((o) => o.b >= y1 && o.t <= y2);
+      let swing =
+        side === 1
+          ? Math.max(a.x, tx, ...passed.map((o) => o.r)) + LINK_SWING
+          : Math.min(a.x, tx, ...passed.map((o) => o.l)) - LINK_SWING;
+      for (const sw of swings) {
+        if (
+          sw.top <= y2 &&
+          sw.bottom >= y1 &&
+          Math.abs(sw.x - swing) < LINK_STEP
+        ) {
+          swing = sw.x + side * LINK_STEP;
+        }
       }
-    }
-    swings.push({ top: y1, bottom: y2, x: swing });
-    right = Math.max(right, swing + 8);
-    const p1 = { x: swing, y: a.y };
-    const p2 = { x: swing, y: b.y };
-    const end = { x: b.x + 3, y: b.y };
+      const pts = dedupe([
+        a,
+        { x: swing, y: a.y },
+        { x: swing, y: gapY },
+        { x: tx, y: gapY },
+        { x: tx, y: to.y },
+      ]);
+      return { pts, swing, y1, y2, side };
+    };
+    const options = [route(1), route(-1)].filter(
+      (o) => o.side === 1 || o.swing >= 4,
+    );
+    const score = (o: (typeof options)[number]) =>
+      crossings(o.pts) * 1e6 + length(o.pts);
+    const best = options.reduce((m, o) => (score(o) < score(m) ? o : m));
+    swings.push({ top: best.y1, bottom: best.y2, x: best.swing });
+    right = Math.max(right, best.swing + 8);
     links.push({
       key: edge.id,
-      d: `M ${a.x} ${a.y} C ${p1.x} ${p1.y}, ${p2.x} ${p2.y}, ${end.x} ${end.y}`,
+      d: roundedPath(best.pts),
+      points: best.pts,
       edgeId: edge.id,
       from: edge.source,
       to: edge.target,
       role: link.role,
       lane: fromCard?.lane ?? 0,
-      mid: {
-        x: (a.x + 3 * p1.x + 3 * p2.x + end.x) / 8,
-        y: (a.y + 3 * p1.y + 3 * p2.y + end.y) / 8,
-      },
+      mid: { x: best.swing, y: (best.y1 + best.y2) / 2 },
     });
   }
 
@@ -964,11 +1037,71 @@ export function layoutTreeGraph(
   };
 }
 
+/** Whether a sequence holds a branch point, at any depth. */
+function hasFork(seq: Seq): boolean {
+  return seq.blocks.some(
+    (b) => b.kind === "fork" || (b.kind === "loop" ? hasFork(b.body) : false),
+  );
+}
+
+/** `pts` without repeated points and the middle of straight runs. */
+function dedupe(pts: Point[]): Point[] {
+  const out: Point[] = [];
+  for (const p of pts) {
+    const last = out[out.length - 1];
+    if (last && last.x === p.x && last.y === p.y) continue;
+    const prev = out[out.length - 2];
+    if (
+      prev &&
+      last &&
+      ((prev.x === last.x && last.x === p.x) ||
+        (prev.y === last.y && last.y === p.y))
+    ) {
+      out[out.length - 1] = p;
+      continue;
+    }
+    out.push(p);
+  }
+  return out;
+}
+
+/** An SVG path through `pts` with its corners rounded. */
+function roundedPath(pts: Point[], radius = 8): string {
+  const parts = [`M ${pts[0].x} ${pts[0].y}`];
+  const toward = (from: Point, to: Point, d: number): Point => {
+    const len = Math.abs(to.x - from.x) + Math.abs(to.y - from.y);
+    return len === 0
+      ? from
+      : {
+          x: from.x + ((to.x - from.x) * d) / len,
+          y: from.y + ((to.y - from.y) * d) / len,
+        };
+  };
+  for (let k = 1; k < pts.length - 1; k++) {
+    const p = pts[k - 1];
+    const c = pts[k];
+    const n = pts[k + 1];
+    const r = Math.min(
+      radius,
+      (Math.abs(c.x - p.x) + Math.abs(c.y - p.y)) / 2,
+      (Math.abs(n.x - c.x) + Math.abs(n.y - c.y)) / 2,
+    );
+    const a = toward(c, p, r);
+    const b = toward(c, n, r);
+    parts.push(`L ${a.x} ${a.y}`, `Q ${c.x} ${c.y} ${b.x} ${b.y}`);
+  }
+  const last = pts[pts.length - 1];
+  parts.push(`L ${last.x} ${last.y}`);
+  return parts.join(" ");
+}
+
 /** The ids of the edges the Graph view draws: every edge the tree draws
- *  structurally and every jump between two placed steps. */
+ *  structurally and every jump between two placed steps (an edge back
+ *  into START is not drawn: START has no card to go into). */
 export function graphEdgeIds(tree: BlockTree): Set<string> {
   const ids = new Set<string>(tree.drawnEdges.keys());
   const placed = new Set<string>(tree.nodePath.keys());
+  if (tree.origin) placed.delete(tree.origin.id);
   for (const link of tree.links) {
     if (placed.has(link.edge.source) && placed.has(link.edge.target)) {
       ids.add(link.edge.id);

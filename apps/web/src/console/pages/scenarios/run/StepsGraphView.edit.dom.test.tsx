@@ -8,8 +8,10 @@ import {
   ScenarioNodeType,
 } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import { recognizeBlockTree } from "../../../lib/blockTree";
+import { GAP, layoutTreeGraph } from "../../../lib/treeGraphLayout";
 import {
   ifElseReconverges,
+  loopWithTwoExits,
   startFanOutWithLoop,
   switchInLane,
   withDetached,
@@ -24,6 +26,7 @@ const onSelectStep = vi.fn();
 const onDeleteStep = vi.fn();
 const onAddLane = vi.fn();
 const onRemoveLane = vi.fn();
+const onUnwrapLoop = vi.fn();
 
 async function render(
   def: ScenarioDefinition,
@@ -44,6 +47,7 @@ async function render(
         onDeleteStep={onDeleteStep}
         onAddLane={onAddLane}
         onRemoveLane={onRemoveLane}
+        onUnwrapLoop={onUnwrapLoop}
       />,
     );
   });
@@ -191,6 +195,38 @@ describe("StepsGraphView (editable block tree)", () => {
     pointer("pointerup", card("check"), 400);
     expect(container.querySelector("[data-drop-indicator]")).toBeNull();
     expect(onMoveStep).toHaveBeenCalledTimes(1);
+  });
+
+  it("the drop line counts a loop as a block of its sequence (it has no card there)", async () => {
+    const def = loopWithTwoExits();
+    // root: first, the loop (head …), out.
+    const g = layoutTreeGraph(recognizeBlockTree(def), {
+      editable: true,
+      phaseOf: () => "todo",
+    });
+    const [firstCentre, loopCentre] = g.centres.get("root")!;
+    const out = g.cards.find((c) => c.node.id === "out")!;
+    await render(def);
+    // first, dragged down past the loop: it would land between the loop
+    // and out.
+    pointer("pointerdown", card("first"), firstCentre);
+    pointer("pointermove", card("first"), loopCentre + 10);
+    const line = container.querySelector<HTMLElement>("[data-drop-indicator]");
+    expect(line).toBeTruthy();
+    expect(parseFloat(line!.style.top)).toBe(out.y - GAP / 2 - 1);
+    pointer("pointerup", card("first"), loopCentre + 10);
+    expect(onMoveStep).toHaveBeenCalledWith("first", 1);
+  });
+
+  it("'Stop repeating' by the loop's label unwraps that loop", async () => {
+    await render(startFanOutWithLoop());
+    const button = container.querySelector<HTMLButtonElement>(
+      '[data-testid="unwrap-loop"]',
+    )!;
+    expect(button.textContent).toContain("Stop repeating");
+    expect(button.disabled).toBe(false);
+    await click(button);
+    expect(onUnwrapLoop).toHaveBeenCalledWith("l0a");
   });
 
   it("Alt+Arrow moves a nested card, Delete asks to remove it", async () => {

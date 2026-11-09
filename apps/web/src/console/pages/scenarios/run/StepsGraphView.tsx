@@ -1,11 +1,13 @@
 import { useTranslation } from "react-i18next";
 import React from "react";
-import { LogOut, Plus, Repeat, X } from "lucide-react";
+import { LogOut, Plus, Repeat, RepeatOff, X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import RunStatePill from "../../../components/RunStatePill";
 import {
   editCapabilities,
+  firstNodeOf,
+  seqAt,
   type Capability,
   type SeqPath,
 } from "../../../lib/blockTree";
@@ -48,6 +50,9 @@ const LOOP_STROKE = "var(--cx-purple)";
 /** The step picker opened from a `+` (and the room it needs below). */
 const PICKER_W = 260;
 const PICKER_H = 330;
+/** Room the loop label leaves for "Stop repeating" at the rectangle's
+ *  right (the editor). */
+const UNWRAP_ROOM = 128;
 const WAIT_TYPES: ReadonlySet<string> = new Set(WAIT_STEP_TYPES);
 
 /**
@@ -81,7 +86,9 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
     onDeleteStep,
     onAddLane,
     onRemoveLane,
+    onUnwrapLoop,
     issues,
+    executedNodeIds,
   } = props;
   const stepIssues = useStepIssues(issues);
   const markCounts = useMarkCounts();
@@ -100,9 +107,50 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
       strokeWidth: highlight?.edgeIds.includes(edgeId) ? 3 : 2,
     };
   };
-  const phaseOf = (id: string): BoxPhase => boxPhase(id, props);
-  const geometry = layoutTreeGraph(tree, { editable, phaseOf });
-  const numbers = stepNumbers(tree);
+  const phaseOf = (id: string): BoxPhase =>
+    boxPhase(id, { currentNodeId, executedNodeIds, state });
+  // Laid out once per tree / run state, not on every pointer move of a drag.
+  const geometry = React.useMemo(
+    () =>
+      layoutTreeGraph(tree, {
+        editable,
+        phaseOf: (id) =>
+          boxPhase(id, { currentNodeId, executedNodeIds, state }),
+      }),
+    [tree, editable, currentNodeId, executedNodeIds, state],
+  );
+  const numbers = React.useMemo(() => stepNumbers(tree), [tree]);
+  /** The capabilities the tags, pills and loops show, once per tree. */
+  const caps = React.useMemo(() => {
+    if (!editable) return null;
+    const lane = new Map<string, Capability>();
+    for (const tag of geometry.tags) {
+      lane.set(
+        tag.key,
+        editCapabilities(tree, {
+          kind: "lane",
+          nodeId: tag.forkId,
+          laneIndex: tag.laneIndex,
+        }).removeLane,
+      );
+    }
+    const addLane = new Map<string, Capability>();
+    for (const pill of geometry.pills) {
+      addLane.set(
+        pill.nodeId,
+        editCapabilities(tree, { kind: "node", nodeId: pill.nodeId }).addLane,
+      );
+    }
+    const unwrap = new Map<string, Capability>();
+    for (const loop of geometry.loops) {
+      unwrap.set(
+        loop.headerId,
+        editCapabilities(tree, { kind: "node", nodeId: loop.headerId })
+          .unwrapLoop,
+      );
+    }
+    return { lane, addLane, unwrap };
+  }, [tree, editable, geometry]);
   const { cards, paths, ends } = geometry;
 
   // The layout is the geometry: a sequence's block centres come from it.
@@ -134,19 +182,30 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
   // The drop line: between the two blocks the dragged card would land
   // between.
   let dropLine: { left: number; top: number } | null = null;
-  if (drag && drag.to !== drag.from) {
-    const seqCards = cards
-      .filter((c) => c.seqPath === drag.lane)
-      .sort((a, b) => a.index - b.index);
-    const { above, below } = dropNeighbours(
-      seqCards.map((c) => c.node.id),
-      drag,
-    );
-    const at = seqCards.find((c) => c.node.id === (below ?? above));
-    if (at) {
+  // Neighbours by block (a loop has no card of its own in its sequence),
+  // as the drag's indices count them.
+  const seq =
+    drag && drag.to !== drag.from ? seqAt(tree, String(drag.lane)) : null;
+  if (drag && seq) {
+    const ids = seq.blocks.map((b) => firstNodeOf(b).id);
+    const { above, below } = dropNeighbours(ids, drag);
+    const column = cards.find((c) => c.seqPath === drag.lane);
+    /** Block `id`'s top and bottom: its card, or its loop's rectangle. */
+    const extent = (id: string) => {
+      const block = seq.blocks[ids.indexOf(id)];
+      const loop =
+        block?.kind === "loop"
+          ? geometry.loops.find((l) => l.headerId === block.headerId)
+          : undefined;
+      if (loop) return { top: loop.rect.y, bottom: loop.rect.y + loop.rect.h };
+      const card = cards.find((c) => c.node.id === id);
+      return card ? { top: card.y, bottom: card.y + NODE_H } : null;
+    };
+    const at = extent(below ?? above ?? "");
+    if (column && at) {
       dropLine = {
-        left: at.x - NODE_W / 2,
-        top: below ? at.y - GAP / 2 - 1 : at.y + NODE_H + GAP / 2 - 1,
+        left: column.x - NODE_W / 2,
+        top: below ? at.top - GAP / 2 - 1 : at.bottom + GAP / 2 - 1,
       };
     }
   }
@@ -325,44 +384,77 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
           const canExit = loop.canExit;
           const header = cards.find((c) => c.node.id === loop.headerId);
           const waits = WAIT_TYPES.has(header?.node.type ?? "");
+          const unwrapCap =
+            onUnwrapLoop && !drag ? caps?.unwrap.get(loop.headerId) : undefined;
           return (
-            // The label leaves room after it for a future bound
-            // ("×N", "until …", "for 2h").
-            <div
-              key={`label:${loop.key}`}
-              data-loop-block=""
-              data-loop-to={loop.headerId}
-              aria-label={t("scenarioRun.loopSteps", {
-                from: loop.from,
-                to: loop.to,
-              })}
-              title={t(
-                canExit
-                  ? "scenarioRun.loopUntilExit"
-                  : "scenarioRun.loopUntilRunStops",
-              )}
-              className="absolute flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-xs"
-              style={{
-                left: loop.label.x,
-                top: loop.label.y,
-                // Inside the rectangle.
-                maxWidth: loop.rect.x + loop.rect.w - loop.label.x - 6,
-              }}
-            >
-              <Repeat className="h-3.5 w-3.5 text-cx-purple" aria-hidden />
-              <span className="font-semibold text-cx-purple">
-                {t(
+            <React.Fragment key={`label:${loop.key}`}>
+              // The label leaves room after it for a future bound // ("×N",
+              "until …", "for 2h").
+              <div
+                data-loop-block=""
+                data-loop-to={loop.headerId}
+                aria-label={t("scenarioRun.loopSteps", {
+                  from: loop.from,
+                  to: loop.to,
+                })}
+                title={t(
                   canExit
-                    ? "scenarioRun.loopRepeat"
-                    : "scenarioRun.loopForever",
+                    ? "scenarioRun.loopUntilExit"
+                    : "scenarioRun.loopUntilRunStops",
                 )}
-              </span>
-              {waits && (
-                <span className="truncate text-cx-muted">
-                  · {t("scenarioRun.loopWaitsAt", { n: loop.from })}
+                className="absolute flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-xs"
+                style={{
+                  left: loop.label.x,
+                  top: loop.label.y,
+                  // Inside the rectangle (and clear of "Stop repeating").
+                  maxWidth:
+                    loop.rect.x +
+                    loop.rect.w -
+                    loop.label.x -
+                    6 -
+                    (unwrapCap ? UNWRAP_ROOM : 0),
+                }}
+              >
+                <Repeat className="h-3.5 w-3.5 text-cx-purple" aria-hidden />
+                <span className="font-semibold text-cx-purple">
+                  {t(
+                    canExit
+                      ? "scenarioRun.loopRepeat"
+                      : "scenarioRun.loopForever",
+                  )}
                 </span>
+                {waits && (
+                  <span className="truncate text-cx-muted">
+                    · {t("scenarioRun.loopWaitsAt", { n: loop.from })}
+                  </span>
+                )}
+              </div>
+              {unwrapCap && (
+                <button
+                  type="button"
+                  data-testid="unwrap-loop"
+                  data-loop={loop.headerId}
+                  title={
+                    unwrapCap.ok
+                      ? t("scenarios.editor.unwrapLoopHint")
+                      : t(unwrapCap.reason)
+                  }
+                  disabled={!unwrapCap.ok}
+                  onClick={() => onUnwrapLoop?.(loop.headerId)}
+                  className="absolute z-10 flex h-[18px] -translate-x-full items-center gap-1 whitespace-nowrap rounded px-1.5 text-xs font-medium text-cx-purple hover:bg-cx-purple/15 disabled:cursor-not-allowed disabled:opacity-40"
+                  style={{
+                    left: loop.rect.x + loop.rect.w - 8,
+                    top: loop.label.y - 1,
+                    maxWidth: UNWRAP_ROOM - 4,
+                  }}
+                >
+                  <RepeatOff className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                  <span className="truncate">
+                    {t("scenarios.editor.unwrapLoop")}
+                  </span>
+                </button>
               )}
-            </div>
+            </React.Fragment>
           );
         })}
 
@@ -425,13 +517,7 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
 
         {geometry.tags.map((tag) => {
           const removeCap =
-            editable && onRemoveLane
-              ? editCapabilities(tree, {
-                  kind: "lane",
-                  nodeId: tag.forkId,
-                  laneIndex: tag.laneIndex,
-                }).removeLane
-              : null;
+            editable && onRemoveLane ? (caps?.lane.get(tag.key) ?? null) : null;
           const removeLabel = t("scenarioRun.tree.removeLane", {
             lane: laneLetter(tag.laneIndex),
           });
@@ -669,10 +755,8 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
           onAddLane &&
           !drag &&
           geometry.pills.map((pill) => {
-            const cap = editCapabilities(tree, {
-              kind: "node",
-              nodeId: pill.nodeId,
-            }).addLane;
+            const cap = caps?.addLane.get(pill.nodeId);
+            if (!cap) return null;
             return (
               <button
                 key={`pill:${pill.nodeId}`}

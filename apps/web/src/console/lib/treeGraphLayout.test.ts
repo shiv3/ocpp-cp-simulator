@@ -12,7 +12,14 @@ import {
   layoutTreeGraph,
   type TreeGraphGeometry,
 } from "./treeGraphLayout";
-import { NESTED_FIXTURES, loopWithTwoExits } from "../test/treeFixtures";
+import {
+  NESTED_FIXTURES,
+  deepLeavingLane,
+  forkInLoop,
+  intoStartFanOut,
+  joinIntoLeftLane,
+  loopWithTwoExits,
+} from "../test/treeFixtures";
 
 const layout = (def: ScenarioDefinition, editable = true) =>
   layoutTreeGraph(recognizeBlockTree(def), {
@@ -143,6 +150,18 @@ describe("layoutTreeGraph", () => {
           }
         }
       }
+      // A jump crosses no card and no tag: it leaves its source's side and
+      // enters its target's top.
+      const cardBoxes = cardRects(g);
+      for (const link of g.links) {
+        for (const p of samples(link.d)) {
+          for (const box of [...cardBoxes, ...tags]) {
+            expect(inside(p, box), `${link.key} through ${box.name}`).toBe(
+              false,
+            );
+          }
+        }
+      }
       // Everything fits the canvas.
       for (const box of boxes) {
         expect(box.x1).toBeGreaterThanOrEqual(0);
@@ -207,7 +226,7 @@ describe("layoutTreeGraph", () => {
     expect([loop.from, loop.to]).toEqual([2, 4]);
   });
 
-  it("a jump is a dashed curve swinging right of the cards it passes", () => {
+  it("a jump is a dashed line routed beside the cards it passes", () => {
     const def = NESTED_FIXTURES.switchInLane();
     def.edges = def.edges.map((e) =>
       e.id === "b->end" ? { ...e, id: "b->x", target: "x" } : e,
@@ -218,6 +237,74 @@ describe("layoutTreeGraph", () => {
     const rightmost = Math.max(...g.cards.map((c) => c.x + NODE_W / 2));
     expect(Math.max(...xs)).toBeGreaterThan(rightmost - NODE_W / 2);
     expect(g.width).toBeGreaterThan(Math.max(...xs));
+  });
+
+  it("a join into a lane on the left runs in the gap row above its target and enters it from the top", () => {
+    const g = layout(joinIntoLeftLane());
+    const link = g.links.find((l) => l.edgeId === "a1->x1")!;
+    const x1 = g.cards.find((c) => c.node.id === "x1")!;
+    const pts = link.points;
+    // Orthogonal: every segment horizontal or vertical.
+    for (let k = 1; k < pts.length; k++) {
+      expect(
+        pts[k].x === pts[k - 1].x || pts[k].y === pts[k - 1].y,
+        JSON.stringify(pts),
+      ).toBe(true);
+    }
+    const last = pts[pts.length - 1];
+    const beforeLast = pts[pts.length - 2];
+    // Down into x1's top edge, from the row gap above it.
+    expect(last.y).toBe(x1.y);
+    expect(beforeLast).toEqual({ x: last.x, y: x1.y - (76 - NODE_H) / 2 });
+    expect(Math.abs(last.x - x1.x)).toBeLessThan(NODE_W / 2);
+    expect(last.x).not.toBe(x1.x); // clear of the structural line in
+    // Not through any card or tag (the generic check, spelled out).
+    const boxes = [...cardRects(g), ...tagRects(g)];
+    for (const p of samples(link.d)) {
+      for (const box of boxes) expect(inside(p, box), box.name).toBe(false);
+    }
+  });
+
+  it("an edge back into a START that fans out is not counted as drawn", () => {
+    const def = intoStartFanOut();
+    const tree = recognizeBlockTree(def);
+    expect(tree.links.map((l) => [l.edge.id, l.role])).toEqual([
+      ["q->start", "intoStart"],
+    ]);
+    expect(graphEdgeIds(tree).has("q->start")).toBe(false);
+    expect(layout(def).links).toEqual([]);
+  });
+
+  it("a lane leaving the loop deeper down still carries the exit mark", () => {
+    const g = layout(deepLeavingLane());
+    const leaves = Object.fromEntries(g.tags.map((t) => [t.key, t.leaves]));
+    // f2's default lane (bye → END) leaves; f2's case-0 and f1's lanes into
+    // f2 or back to head do not.
+    expect(leaves["f2:1"]).toBe(true);
+    expect(leaves["f2:0"]).toBe(false);
+    expect(leaves["f1:1"]).toBe(false);
+  });
+
+  it("a branch point's '+ branch' pill inside a loop stays inside the loop's rectangle", () => {
+    let checked = 0;
+    for (const def of [forkInLoop(), loopWithTwoExits(), deepLeavingLane()]) {
+      const g = layout(def);
+      for (const loop of g.loops) {
+        const r = loop.rect;
+        for (const pill of g.pills) {
+          if (!loop.ids.includes(pill.nodeId)) continue;
+          checked++;
+          // The pill is about 70 px wide ("+ branch").
+          expect(pill.x + 72, `${def.id} ${pill.nodeId}`).toBeLessThanOrEqual(
+            r.x + r.w,
+          );
+        }
+      }
+      // Read-only: no pills, no extra room.
+      const ro = layout(def, false);
+      expect(ro.loops[0].rect.w).toBeLessThan(g.loops[0].rect.w);
+    }
+    expect(checked).toBeGreaterThanOrEqual(3);
   });
 
   it("steps nothing reaches stand in a column on the right", () => {

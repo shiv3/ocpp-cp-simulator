@@ -995,11 +995,15 @@ run`, `runs`, `ignored`, `unpickable: case-7`) and the lane's step count
   **Repeat** (and "each round waits at step N first"), with a solid purple
   return arc from each way back, down the rectangle's left side into the
   loop's first card; a lane that leaves the loop stands right of the
-  rectangle (its tag marked with a leave icon), its curve crossing the
-  rectangle's edge. A jump (a link: a back edge that is no loop, a join, an
-  edge into START) is a dashed curve with an arrowhead from the source
-  card's right side into the target's, swinging right of every card it
-  passes, each further jump one step further out. Steps nothing reaches
+  rectangle, its curve crossing the rectangle's edge; every lane that
+  leaves the loop, at any depth, has its tag marked with a leave icon. A
+  jump (a link: a back edge that is no loop, a join) is a dashed orthogonal
+  line with an arrowhead: out of the source card's side, along a channel
+  beside every card and lane tag it passes, across the gap row above the
+  target and down into the target's top corner (right or left side,
+  whichever crosses no card or tag and is shorter), each further jump one
+  step further out; it never crosses a card or a tag. An edge back into a
+  START that fans out is not drawn (START has no card). Steps nothing reaches
   stand in a column on the right under **Steps nothing reaches**. A
   travelled path takes its lane's colour; the canvas scrolls sideways when
   wider than its column. It is drawn by the console itself (SVG and placed
@@ -1080,8 +1084,9 @@ scenario or a copy of one (`libraryId`). All use the same content
   block (**Insert step between n and n+1**, **Insert step before step n**)
   open the step picker at that place; **+ branch** beside each branch
   point's card (beside the START dot for START, which fans out a chain)
-  adds a lane, disabled with the reason when refused; a lane tag's ✕
-  removes the lane. A card drags up or down within its sequence like a
+  adds a lane, disabled with the reason when refused (inside a loop the
+  rectangle is wide enough to hold it); a lane tag's ✕ removes the lane;
+  **Stop repeating** at the right of a loop's label unwraps the loop. A card drags up or down within its sequence like a
   Steps box (the card follows the pointer over a drop line; a press that
   moves less than 6 px is a click, so it still selects; **Escape**
   cancels); a branch point's card does not drag. A focused card takes

@@ -1,8 +1,9 @@
 import path from "path";
-import { existsSync, readdirSync, readFileSync } from "fs";
+import { readFileSync } from "fs";
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react-swc";
 import license from "rollup-plugin-license";
+import { renderNotices } from "./scripts/licenseNotices";
 
 // Surface the package version to the app (footer link, issue #93). Stays
 // "0.0.0" in dev and is stamped by the release tooling; unstamped, the label
@@ -18,23 +19,6 @@ const pkgVersion = JSON.parse(
 // deploy. resolveBuildVersion truncates it, shared with the daemon side.
 const appCommit = process.env.APP_COMMIT ?? "";
 
-// The license plugin takes the nearest package.json of a bundled module, which
-// for a package that ships a nested `{"type":"module"}` file (socket.io-client's
-// build/esm) is not the package's own, so its text and SPDX id come back empty.
-// Read both from the package root in that case (#857).
-function packageLicense(name: string): { id?: string; text?: string } {
-  const root = path.resolve(__dirname, "node_modules", name);
-  if (!existsSync(root)) return {};
-  const file = readdirSync(root).find((f) => /^licen[sc]e(\.\w+)?$/i.test(f));
-  const pkg = JSON.parse(
-    readFileSync(path.join(root, "package.json"), "utf-8"),
-  );
-  return {
-    id: typeof pkg.license === "string" ? pkg.license : undefined,
-    text: file ? readFileSync(path.join(root, file), "utf-8") : undefined,
-  };
-}
-
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [
@@ -48,34 +32,16 @@ export default defineConfig({
         output: {
           file: path.resolve(__dirname, "dist/THIRD-PARTY-LICENSES.txt"),
           template: (dependencies) =>
-            [
-              "Third-party software bundled in the web console.",
-              "",
-              ...[...dependencies]
-                .sort((a, b) =>
-                  `${a.name}@${a.version}`.localeCompare(
-                    `${b.name}@${b.version}`,
-                  ),
-                )
-                .map((d) => {
-                  const own = d.licenseText ? {} : packageLicense(d.name ?? "");
-                  return [
-                    "=".repeat(78),
-                    `${d.name}@${d.version}`,
-                    `License: ${d.license ?? own.id ?? "UNKNOWN"}`,
-                    ...(d.repository
-                      ? [
-                          `Repository: ${typeof d.repository === "string" ? d.repository : d.repository.url}`,
-                        ]
-                      : []),
-                    "",
-                    d.licenseText?.trim() ||
-                      own.text?.trim() ||
-                      `(no license file in the package; copyright: ${d.author?.text() ?? "see the package"})`,
-                    "",
-                  ].join("\n");
-                }),
-            ].join("\n"),
+            renderNotices(
+              [...dependencies].map((d) => ({
+                name: d.name ?? "",
+                version: d.version ?? "",
+                license: d.license,
+                licenseText: d.licenseText,
+                repository: d.repository,
+                author: d.author?.text(),
+              })),
+            ),
         },
       },
     }),

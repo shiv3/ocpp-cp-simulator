@@ -231,6 +231,9 @@ if [ -f "$PKG_DIR/dist/index.html" ]; then
   # MIT / ISC need the notices to travel with the bundled code (#857).
   [ -s "$PKG_DIR/dist/THIRD-PARTY-LICENSES.txt" ] \
     || fail "the tarball ships dist/ without THIRD-PARTY-LICENSES.txt (vite.config.ts license plugin)"
+  # The fonts are copied, not imported: OFL-1.1 needs their notice too (#857).
+  grep -qi "ibm-plex" "$PKG_DIR/dist/THIRD-PARTY-LICENSES.txt" \
+    || fail "THIRD-PARTY-LICENSES.txt does not mention the bundled ibm-plex fonts (scripts/licenseNotices.ts)"
   [ "$SERVED" = 1 ] || fail "--web-console never served GET /" "$SCRATCH/console.log"
   grep -qi "<div id=\"root\"" "$SCRATCH/index.html" \
     || fail "--web-console served something that is not the UI shell" "$SCRATCH/index.html" "$SCRATCH/console.log"

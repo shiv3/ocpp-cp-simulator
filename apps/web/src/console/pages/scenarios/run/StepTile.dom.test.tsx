@@ -42,8 +42,6 @@ describe("StepTile", () => {
 
   it.each([
     [ScenarioNodeType.TRANSACTION, "evicon-charging-bolt"],
-    [ScenarioNodeType.UNLOCK_OUTCOME, "evicon-charging-bolt"],
-    [ScenarioNodeType.METER_VALUE, "evicon-car-plugged"],
     [ScenarioNodeType.CONNECTOR_PLUG, "evicon-car-plugged"],
   ])("a %s step shows the EV-domain icon %s", async (type, iconClass) => {
     const icon = await tileIcon(type);
@@ -52,8 +50,10 @@ describe("StepTile", () => {
 
   it.each([
     [ScenarioNodeType.STATUS_CHANGE, "lucide-circle-dot"],
-    [ScenarioNodeType.DELAY, "lucide-hourglass"],
-    [ScenarioNodeType.DATA_TRANSFER, "lucide-wrench"],
+    [ScenarioNodeType.METER_VALUE, "lucide-gauge"],
+    [ScenarioNodeType.UNLOCK_OUTCOME, "lucide-lock-open"],
+    [ScenarioNodeType.DELAY, "lucide-timer"],
+    [ScenarioNodeType.DATA_TRANSFER, "lucide-arrow-left-right"],
   ])("a %s step keeps its generic Lucide icon %s", async (type, iconClass) => {
     const icon = await tileIcon(type);
     expect(icon.classList).toContain(iconClass);

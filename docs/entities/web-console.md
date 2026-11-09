@@ -1054,7 +1054,13 @@ scenario or a copy of one (`libraryId`). All use the same content
   after it and move the new step up);
   **+ Add step** at the end of each sequence appends (it is left out under a
   block every path of which ends on its own, and disabled with the reason
-  where nothing runs). Picking **Switch** or **Choice** inserts a branch
+  where nothing runs). The step picker lists the types in groups (Status,
+  Transaction & reservation, Meter & EV, Wait & Trigger, Flow control, OCPP
+  messages, Station quirks & config), each with the same icon as its step
+  card; hovering or focusing (ArrowUp / ArrowDown) a type describes it in a
+  pane beside the list, and the search matches titles and descriptions. A
+  **Repeat** entry under Flow control appears only where the host passes
+  `onPickStructure` (not wired yet). Picking **Switch** or **Choice** inserts a branch
   point with one empty lane per case / option, meeting again at the block
   that followed (`insertForkBlock`). Each step box has a grab handle
   (**Drag to reorder**): dragging shows a drop line, a release moves the

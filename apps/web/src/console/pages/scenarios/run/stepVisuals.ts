@@ -1,5 +1,33 @@
 import type { ComponentType } from "react";
-import { CircleDot, Hourglass, Wrench } from "lucide-react";
+import {
+  ArrowLeftRight,
+  BellRing,
+  CalendarClock,
+  CalendarPlus,
+  CalendarX,
+  CircleDot,
+  CirclePlay,
+  CircleStop,
+  Dices,
+  Eye,
+  FileKey,
+  Gauge,
+  LockOpen,
+  Megaphone,
+  MessageSquare,
+  PhoneIncoming,
+  Puzzle,
+  Replace,
+  Repeat,
+  Reply,
+  SendHorizontal,
+  ShieldBan,
+  SlidersHorizontal,
+  Split,
+  Timer,
+  Variable,
+  Wifi,
+} from "lucide-react";
 import { CarPlugged, ChargingBolt } from "@evicons/react";
 
 import {
@@ -33,32 +61,85 @@ type TileIcon = ComponentType<{
   strokeWidth?: number;
 }>;
 
-// One look per palette category of the editor's "add step" picker, so a type
+// One colour per palette category of the editor's "add step" picker, so a type
 // reads the same in the picker, the step list and the run views. Full literal
 // class strings: Tailwind only sees class names written out in source.
-const CATEGORY_TILES: Record<string, { icon: TileIcon; className: string }> = {
-  Status: { icon: CircleDot, className: "bg-cx-emerald/14 text-cx-emerald" },
-  Transaction: {
-    icon: ChargingBolt,
-    className: "bg-cx-blue/14 text-cx-blue",
-  },
-  "Meter & EV": { icon: CarPlugged, className: "bg-cx-amber/14 text-cx-amber" },
-  "Wait & Trigger": {
-    icon: Hourglass,
-    className: "bg-cx-purple/14 text-cx-purple",
-  },
-  Advanced: { icon: Wrench, className: "bg-cx-gray/14 text-cx-gray" },
+const CATEGORY_CLASS: Record<string, string> = {
+  Status: "bg-cx-emerald/14 text-cx-emerald",
+  Transaction: "bg-cx-blue/14 text-cx-blue",
+  "Meter & EV": "bg-cx-amber/14 text-cx-amber",
+  "Wait & Trigger": "bg-cx-purple/14 text-cx-purple",
+  "Flow control": "bg-cx-rose/14 text-cx-rose",
+  "OCPP messages": "bg-cx-accent/14 text-cx-accent",
+  "Station quirks & config": "bg-cx-gray/14 text-cx-gray",
+};
+
+// One icon per step type (the single source for the picker, the step list
+// and the run views). Types missing here fall back to a dot.
+const TYPE_ICON: Partial<Record<string, TileIcon>> = {
+  statusChange: CircleDot,
+  statusNotification: BellRing,
+  transaction: ChargingBolt,
+  reserveNow: CalendarPlus,
+  cancelReservation: CalendarX,
+  meterValue: Gauge,
+  connectorPlug: CarPlugged,
+  delay: Timer,
+  remoteStartTrigger: CirclePlay,
+  remoteStopTrigger: CircleStop,
+  statusTrigger: Eye,
+  csmsCallTrigger: PhoneIncoming,
+  reservationTrigger: CalendarClock,
+  connectionTrigger: Wifi,
+  switch: Split,
+  choice: Dices,
+  setState: Variable,
+  ocppCall: SendHorizontal,
+  callResponse: Reply,
+  notification: MessageSquare,
+  notify: Megaphone,
+  dataTransfer: ArrowLeftRight,
+  configSet: SlidersHorizontal,
+  useBehavior: Puzzle,
+  unlockOutcome: LockOpen,
+  responseOverride: Replace,
+  inboundPolicy: ShieldBan,
+  certQuirks: FileKey,
 };
 
 /** The icon and colour classes of a step type's tile. */
-export function tileFor(node: ScenarioNode): {
+export function tileForType(type: string | undefined): {
   icon: TileIcon;
   className: string;
 } {
   const category = STEP_CATEGORIES.find((c) =>
-    (c.types as readonly string[]).includes(node.type ?? ""),
+    (c.types as readonly string[]).includes(type ?? ""),
   );
-  return CATEGORY_TILES[category?.label ?? "Advanced"];
+  return {
+    icon: TYPE_ICON[type ?? ""] ?? CircleDot,
+    className:
+      CATEGORY_CLASS[category?.label ?? "Station quirks & config"] ??
+      CATEGORY_CLASS["Station quirks & config"],
+  };
+}
+
+/** Tile of a picker structure entry (not a node type): "loop" is Flow control. */
+export function tileForStructure(kind: string): {
+  icon: TileIcon;
+  className: string;
+} {
+  return {
+    icon: kind === "loop" ? Repeat : CircleDot,
+    className: CATEGORY_CLASS["Flow control"],
+  };
+}
+
+/** The icon and colour classes of a step's tile. */
+export function tileFor(node: ScenarioNode): {
+  icon: TileIcon;
+  className: string;
+} {
+  return tileForType(node.type);
 }
 
 export interface LaneStyle {

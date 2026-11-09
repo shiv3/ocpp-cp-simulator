@@ -48,7 +48,7 @@ import {
 const TODO_STROKE = "var(--cx-border-strong)";
 const LOOP_STROKE = "var(--cx-purple)";
 /** The step picker opened from a `+` (and the room it needs below). */
-const PICKER_W = 260;
+const PICKER_W = 520;
 const PICKER_H = 330;
 const WAIT_TYPES: ReadonlySet<string> = new Set(WAIT_STEP_TYPES);
 

@@ -1260,7 +1260,11 @@ export const STEP_CATEGORIES: ReadonlyArray<{
   {
     label: "Transaction",
     labelKey: "scenarios.category.transaction",
-    types: [ScenarioNodeType.TRANSACTION, ScenarioNodeType.UNLOCK_OUTCOME],
+    types: [
+      ScenarioNodeType.TRANSACTION,
+      ScenarioNodeType.RESERVE_NOW,
+      ScenarioNodeType.CANCEL_RESERVATION,
+    ],
   },
   {
     label: "Meter & EV",
@@ -1273,24 +1277,80 @@ export const STEP_CATEGORIES: ReadonlyArray<{
     types: WAIT_STEP_TYPES,
   },
   {
-    label: "Advanced",
-    labelKey: "scenarios.category.advanced",
+    // Branching and run-state steps. `parallel` / `join` (feat/scenario-
+    // parallel-join) slot in here. Loops are not nodes: they are back edges
+    // the block tree draws (`wrapInLoop`), so they are not offered here.
+    label: "Flow control",
+    labelKey: "scenarios.category.flowControl",
     types: [
-      ScenarioNodeType.RESPONSE_OVERRIDE,
-      ScenarioNodeType.INBOUND_POLICY,
-      ScenarioNodeType.CERT_QUIRKS,
-      ScenarioNodeType.CONFIG_SET,
-      ScenarioNodeType.DATA_TRANSFER,
-      ScenarioNodeType.NOTIFICATION,
-      ScenarioNodeType.OCPP_CALL,
-      ScenarioNodeType.CALL_RESPONSE,
-      ScenarioNodeType.USE_BEHAVIOR,
-      ScenarioNodeType.NOTIFY,
       ScenarioNodeType.SWITCH,
       ScenarioNodeType.CHOICE,
       ScenarioNodeType.SET_STATE,
-      ScenarioNodeType.RESERVE_NOW,
-      ScenarioNodeType.CANCEL_RESERVATION,
+    ],
+  },
+  {
+    label: "OCPP messages",
+    labelKey: "scenarios.category.ocppMessages",
+    types: [
+      ScenarioNodeType.OCPP_CALL,
+      ScenarioNodeType.CALL_RESPONSE,
+      ScenarioNodeType.NOTIFICATION,
+      ScenarioNodeType.NOTIFY,
+      ScenarioNodeType.DATA_TRANSFER,
+    ],
+  },
+  {
+    label: "Station quirks & config",
+    labelKey: "scenarios.category.stationConfig",
+    types: [
+      ScenarioNodeType.CONFIG_SET,
+      ScenarioNodeType.USE_BEHAVIOR,
+      ScenarioNodeType.UNLOCK_OUTCOME,
+      ScenarioNodeType.RESPONSE_OVERRIDE,
+      ScenarioNodeType.INBOUND_POLICY,
+      ScenarioNodeType.CERT_QUIRKS,
     ],
   },
 ];
+
+/** Every user-insertable step type's one-to-three sentence help text, shown
+ *  in the "add a step" picker's description pane. */
+export const STEP_HELP: Readonly<
+  Record<
+    Exclude<ScenarioNodeType, ScenarioNodeType.START | ScenarioNodeType.END>,
+    MessageKey
+  >
+> = {
+  [ScenarioNodeType.STATUS_CHANGE]: "scenarios.stepHelp.statusChange",
+  [ScenarioNodeType.STATUS_NOTIFICATION]:
+    "scenarios.stepHelp.statusNotification",
+  [ScenarioNodeType.TRANSACTION]: "scenarios.stepHelp.transaction",
+  [ScenarioNodeType.UNLOCK_OUTCOME]: "scenarios.stepHelp.unlockOutcome",
+  [ScenarioNodeType.METER_VALUE]: "scenarios.stepHelp.meterValue",
+  [ScenarioNodeType.CONNECTOR_PLUG]: "scenarios.stepHelp.connectorPlug",
+  [ScenarioNodeType.DELAY]: "scenarios.stepHelp.delay",
+  [ScenarioNodeType.REMOTE_START_TRIGGER]:
+    "scenarios.stepHelp.remoteStartTrigger",
+  [ScenarioNodeType.REMOTE_STOP_TRIGGER]:
+    "scenarios.stepHelp.remoteStopTrigger",
+  [ScenarioNodeType.STATUS_TRIGGER]: "scenarios.stepHelp.statusTrigger",
+  [ScenarioNodeType.CSMS_CALL_TRIGGER]: "scenarios.stepHelp.csmsCallTrigger",
+  [ScenarioNodeType.RESERVATION_TRIGGER]:
+    "scenarios.stepHelp.reservationTrigger",
+  [ScenarioNodeType.CONNECTION_TRIGGER]: "scenarios.stepHelp.connectionTrigger",
+  [ScenarioNodeType.SWITCH]: "scenarios.stepHelp.switch",
+  [ScenarioNodeType.CHOICE]: "scenarios.stepHelp.choice",
+  [ScenarioNodeType.SET_STATE]: "scenarios.stepHelp.setState",
+  [ScenarioNodeType.OCPP_CALL]: "scenarios.stepHelp.ocppCall",
+  [ScenarioNodeType.CALL_RESPONSE]: "scenarios.stepHelp.callResponse",
+  [ScenarioNodeType.NOTIFICATION]: "scenarios.stepHelp.notification",
+  [ScenarioNodeType.NOTIFY]: "scenarios.stepHelp.notify",
+  [ScenarioNodeType.DATA_TRANSFER]: "scenarios.stepHelp.dataTransfer",
+  [ScenarioNodeType.RESERVE_NOW]: "scenarios.stepHelp.reserveNow",
+  [ScenarioNodeType.CANCEL_RESERVATION]: "scenarios.stepHelp.cancelReservation",
+  [ScenarioNodeType.CONFIG_SET]: "scenarios.stepHelp.configSet",
+  [ScenarioNodeType.USE_BEHAVIOR]: "scenarios.stepHelp.useBehavior",
+  [ScenarioNodeType.RESPONSE_OVERRIDE]: "scenarios.stepHelp.responseOverride",
+  [ScenarioNodeType.INBOUND_POLICY]: "scenarios.stepHelp.inboundPolicy",
+  [ScenarioNodeType.CERT_QUIRKS]: "scenarios.stepHelp.certQuirks",
+};

@@ -98,6 +98,9 @@ function station(db: BunSqliteDatabase, ocppVersion: string) {
       messageTimeout: () => 30,
       offlineQueueMaxEvents: () => 1000,
       meterValuesSampledData: () => [],
+      stopTxnSampledData: () => [],
+      stopTxnAlignedData: () => [],
+      txStartedMeasurands: () => [],
       offlineQueuingSeverity: () => 5,
     },
   };

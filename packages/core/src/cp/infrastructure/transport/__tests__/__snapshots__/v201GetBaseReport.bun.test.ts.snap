@@ -290,6 +290,124 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
         },
         {
           "component": {
+            "name": "SampledDataCtrlr",
+          },
+          "variable": {
+            "name": "TxStartedMeasurands",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "MemberList",
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "SampledDataCtrlr",
+          },
+          "variable": {
+            "name": "TxEndedMeasurands",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "MemberList",
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "SampledDataCtrlr",
+          },
+          "variable": {
+            "name": "TxEndedInterval",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "0",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "maxLimit": 2147483,
+            "minLimit": 0,
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "AlignedDataCtrlr",
+          },
+          "variable": {
+            "name": "TxEndedMeasurands",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "MemberList",
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "AlignedDataCtrlr",
+          },
+          "variable": {
+            "name": "TxEndedInterval",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "0",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "maxLimit": 2147483,
+            "minLimit": 0,
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "AlignedDataCtrlr",
+          },
+          "variable": {
+            "name": "SendDuringIdle",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "false",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "boolean",
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
             "name": "AlignedDataCtrlr",
           },
           "variable": {

@@ -16,7 +16,7 @@ import type {
   ScenarioWaitIntervention,
 } from "./ScenarioTypes";
 import type { HeldExchange, RuleOwner } from "../behavior/BehaviorRegistry";
-import { responseProblems } from "../engine/responseValidation";
+import { cannedResponse, responseProblems } from "../engine/responseValidation";
 import { clockOf } from "../../shared/clock";
 import type { SimClock, TimerHandle } from "../../shared/clock";
 import { rngOf } from "../../shared/rng";
@@ -391,8 +391,16 @@ const waitForCsmsCall = (
 /** The registry's `onBusy` answer for a scenario's `onBusy` spec. */
 const busyAnswerOf = (
   spec: CallResponseSpec | undefined,
+  chargePoint: ChargePoint,
+  action: string,
 ): import("@ocpp-cp-simulator/contracts/behavior").CallAnswer | undefined => {
   if (!spec) return undefined;
+  if (spec.kind === "accepted" || spec.kind === "rejected") {
+    // Schema 1.6: the version-neutral answer of the CALL's own action.
+    return {
+      response: cannedResponse(action, chargePoint.ocppVersion, spec.kind),
+    };
+  }
   if (spec.kind === "none") return { noResponse: true };
   if (spec.kind === "error") {
     return {
@@ -428,8 +436,13 @@ const scenarioExchangeOf = (
         spec.errorDescription ?? "",
       );
     }
-    const response = spec.payload ?? {};
-    if (!spec.skipValidation) {
+    // Schema 1.6: the answer is the action's own, for this station's version.
+    const canned =
+      spec.kind === "accepted" || spec.kind === "rejected"
+        ? cannedResponse(exchange.action, chargePoint.ocppVersion, spec.kind)
+        : undefined;
+    const response = canned ?? spec.payload ?? {};
+    if (!spec.skipValidation && canned === undefined) {
       const problems = responseProblems(
         exchange.action,
         chargePoint.ocppVersion,
@@ -515,7 +528,7 @@ const waitForCsmsCallReplacing = (
     disconnectOff?.();
     disconnectOff = null;
   };
-  const busy = busyAnswerOf(replace.onBusy);
+  const busy = busyAnswerOf(replace.onBusy, chargePoint, action);
 
   const promise = new Promise<{
     action: string;
@@ -816,12 +829,16 @@ export const createScenarioExecutorCallbacks = (
           );
       }
     },
-    // #488: a plug-out during a transaction is an EV-side disconnect, which
-    // StopTransactionOnEVSideDisconnect turns into a stop or a suspension.
-    // Without a transaction, and for a plug-in, the node stays a no-op: the
-    // templates follow it with their own status nodes.
+    // #453: the node drives the connector's EV and cable model, the same
+    // operations as the control plane. A plug-in moves an idle Available
+    // connector to Preparing; a plug-out is an EV-side disconnect, which
+    // StopTransactionOnEVSideDisconnect turns into a stop or a suspension
+    // when a transaction runs (#488) and otherwise returns a Preparing or
+    // Finishing connector to Available.
     onConnectorPlug: async (action) => {
-      if (action === "plugout" && connector.hasRunningTransaction) {
+      if (action === "plugin") {
+        chargePoint.evPlugIn(connector.id);
+      } else {
         chargePoint.evDisconnected(connector.id);
       }
     },
@@ -986,6 +1003,21 @@ export const createScenarioExecutorCallbacks = (
       chargePoint.configuration.applyChange(key, value);
     },
     onSendOcppCall: (request) => chargePoint.sendOcppCall(request),
+    onNotify: (kind, status, requestId) => {
+      const engineKind =
+        kind === "firmwareStatus"
+          ? "firmware"
+          : kind === "signedFirmwareStatus"
+            ? "signedFirmware"
+            : kind === "logStatus"
+              ? "log"
+              : "diagnostics";
+      chargePoint.engine.notifyStatus(engineKind, status, requestId);
+    },
+    onReadStation: (root) =>
+      root === "charger"
+        ? chargePoint.engine.snapshotCharger()
+        : chargePoint.engine.snapshotConnector(connector.id),
     onSendDataTransfer: (vendorId, messageId, data) => {
       // The node is fire-and-forget by design: the transport logs the answer
       // (or the failure), and a scenario that needs to react to it would be

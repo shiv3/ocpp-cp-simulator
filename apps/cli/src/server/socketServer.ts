@@ -2352,6 +2352,20 @@ async function dispatchFacadeCpCommand(
       );
       return handled(undefined);
     }
+    case "ev_plug_in": {
+      const { params } = call;
+      await runFacadeOperation(() =>
+        chargePointService.evPlugIn(id, params.connector),
+      );
+      return handled(undefined);
+    }
+    case "ev_ready": {
+      const { params } = call;
+      await runFacadeOperation(() =>
+        chargePointService.evSetReady(id, params.connector, params.ready),
+      );
+      return handled(undefined);
+    }
     case "set_meter_value": {
       const { params } = call;
       await runFacadeOperation(() =>
@@ -3051,6 +3065,7 @@ function connectorSnapshotToWire(
     transactionStartTime: toIsoStringOrNull(connector.transactionStartTime),
     transactionTagId: connector.transactionTagId,
     transactionBatteryCapacityKwh: connector.transactionBatteryCapacityKwh,
+    evConnection: connector.evConnection,
   };
 }
 
@@ -3127,6 +3142,7 @@ function mergeUpdateParams(
     init.reservationAuthorizeIdTag,
   );
   preserveWhenMissing(merged, "capabilityProfile", init.capabilityProfile);
+  preserveWhenMissing(merged, "chargerCapabilities", init.chargerCapabilities);
   preserveWhenMissing(merged, "tlsCaPath", init.tlsCaPath);
   preserveWhenMissing(merged, "tlsCertPath", init.tlsCertPath);
   preserveWhenMissing(merged, "tlsKeyPath", init.tlsKeyPath);

@@ -108,6 +108,7 @@ function station(
     configuration: {
       transactionMessageAttempts: () => 3,
       transactionMessageRetryInterval: () => 3_600,
+      stopTxnSampledData: () => [],
     },
   };
   const codec: ProtocolCodec = { outgoingWarning: () => null };

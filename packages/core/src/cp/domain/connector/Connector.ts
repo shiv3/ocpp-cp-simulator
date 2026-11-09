@@ -59,9 +59,12 @@ import {
 } from "./ChargingCurve";
 import {
   resolveOperatingPoint,
+  chargerTermOf,
   vehicleTermOf,
   type OperatingPoint,
 } from "./OperatingPoint";
+import { evConnectionOf, type EvConnectionState } from "./EvConnection";
+import type { MeterRealism } from "./MeterRealism";
 import { resolveSessionIntent, type SessionIntent } from "./SessionIntent";
 import {
   partitionProfiles,
@@ -273,6 +276,16 @@ export class Connector {
   private energyOfferSuspendedValue = false;
 
   /**
+   * The physical EV and cable side of the connector (#453): is a cable
+   * plugged in, and is the EV asking for energy. Orthogonal to the OCPP
+   * status, which the engine's record owns: this is what the status
+   * reacts to, not a second state machine. In memory only; a transaction
+   * that attaches (also a restored one) implies a plugged-in, ready EV.
+   */
+  private evCableConnected = false;
+  private evReadyValue = true;
+
+  /**
    * The CSMS did not accept the id of the running transaction and
    * `StopTransactionOnInvalidId` is false: the station keeps the transaction
    * but stops the energy delivery (2.0.1 E05.FR.02; 2.x only, 1.6 errata 3.17
@@ -307,6 +320,23 @@ export class Connector {
   // default onto every connector while a scenario is mid-flight on the
   // daemon). Cleared when the scenario that set it stops/completes.
   private _evSettingsOverridden = false;
+  /** The charger's delivery cap on this connector in watts (#327);
+   *  `undefined` when the hardware declares none. Set once at construction. */
+  private _maxDeliveryPowerW: number | undefined;
+  /** Opt-in meter realism (#614-#616); `undefined` keeps the constant,
+   *  historical output. Set once at construction, like the delivery cap. */
+  private _meterRealism: MeterRealism | undefined;
+  /** Energy exported so far in Wh (a V2X term, #615), as a float; runtime
+   *  only. */
+  private exportWh = 0;
+  private exportTickedAt: number | null = null;
+  /** Register values the last Interval sample of each stream was measured
+   *  from (#615): one baseline per stream (sampled, aligned, transaction-end
+   *  history), so two readers never share one. */
+  private intervalBaselines = new Map<
+    string,
+    { key: string; importWh: number; exportWh: number }
+  >();
   private _chargingProfiles: ActiveChargingProfile[] = [];
 
   /**
@@ -396,6 +426,19 @@ export class Connector {
     // one waiting for the next session (#301).
     this.socAwaitsNextTransaction = snapshot.socAwaitsNextTransaction ?? false;
     this.lastAutoStartedScenarioKeyValue = snapshot.lastAutoStartedScenarioKey;
+    // The cable is not stored (#453). What a restart shows of it is inferred
+    // from what the snapshot proves: a running transaction, or a status that
+    // only exists with an EV on the cable, means a plugged-in EV. Nothing
+    // else is invented; a restart is not a cable event.
+    this.evCableConnected =
+      (snapshot.transaction !== null &&
+        snapshot.transaction.stopTime === null) ||
+      snapshot.status === OCPPStatus.Preparing ||
+      snapshot.status === OCPPStatus.Finishing ||
+      snapshot.status === OCPPStatus.SuspendedEV ||
+      snapshot.status === OCPPStatus.SuspendedEVSE ||
+      snapshot.status === OCPPStatus.Charging;
+    this.evReadyValue = snapshot.status !== OCPPStatus.SuspendedEV;
     if (this.transaction && this.hasRunningTransaction) {
       this.eventsEmitter.emit("transactionRestored", {
         transaction: this.transaction,
@@ -454,6 +497,8 @@ export class Connector {
         // `MeterValueBuilder` reports, instead of the curve only ever
         // affecting the *reported* number while the register kept climbing
         // on its original trajectory.
+        getDeliveryFactor: () => this.operatingPoint().deliveryFactor,
+        onTick: () => this.integrateExport(),
         getScheduleLimitWatts: () => {
           // The register tick is a tick owner: it announces a schedule
           // crossing, the resolve itself is pure (#327).
@@ -700,12 +745,102 @@ export class Connector {
       schedule: { scheduleLimitW: watts, activePhases },
       vehicle: vehicleTermOf(this._evSettings),
       session: { initialSoc: this.sessionIntent().initialSoc },
+      charger: chargerTermOf(this._maxDeliveryPowerW),
+      meter: {
+        realism: this._meterRealism,
+        sessionStartedAt: this.hasRunningTransaction
+          ? this.transaction?.startTime?.getTime()
+          : undefined,
+      },
       fault: {
+        // A running transaction in a state where the EVSE energizes the
+        // connector; SuspendedEVSE and everything outside the session offer
+        // nothing (OCPP 1.6 §7.7, §7.31).
+        offering:
+          this.hasRunningTransaction &&
+          (this.status === OCPPStatus.Charging ||
+            this.status === OCPPStatus.SuspendedEV),
         energyOfferSuspended: this.energyOfferSuspendedValue,
         // Resolved after the schedule, as before (#301); E05.FR.02.
         energyHeld: this.invalidIdAllowanceUsedUp(),
       },
     });
+  }
+
+  /** The hardware's delivery cap on this connector in watts, `undefined`
+   *  when none is declared (#327). */
+  get maxDeliveryPowerW(): number | undefined {
+    return this._maxDeliveryPowerW;
+  }
+
+  /** Declare the charger's delivery cap (watts, or `undefined` for none). The
+   *  hardware does not change at run time: call this when the connector is
+   *  built, before it samples. */
+  setMaxDeliveryPowerW(watts: number | undefined): void {
+    this._maxDeliveryPowerW = watts;
+  }
+
+  /** The opt-in meter realism of this connector, `undefined` when none. */
+  get meterRealism(): MeterRealism | undefined {
+    return this._meterRealism;
+  }
+
+  /** Declare the meter realism (#614-#616); call when the connector is
+   *  built, before it samples. */
+  setMeterRealism(realism: MeterRealism | undefined): void {
+    this._meterRealism = realism;
+  }
+
+  /** Energy exported so far in whole Wh (`Energy.Active.Export.Register`). */
+  get exportRegisterWh(): number {
+    return Math.round(this.exportWh);
+  }
+
+  /** Integrate the export power since the previous tick. Called at the start
+   *  of every register tick; a no-op without a discharge term. */
+  private integrateExport(): void {
+    if (!this._meterRealism?.export) return;
+    const now = this.clock.now();
+    const point = this.operatingPoint();
+    if (this.exportTickedAt !== null && point.exportW > 0) {
+      this.exportWh +=
+        (point.exportW * (now - this.exportTickedAt)) / 3_600_000;
+    }
+    this.exportTickedAt = now;
+  }
+
+  /**
+   * The energy moved since the previous Interval sample (#615,
+   * `Energy.Active.{Import,Export}.Interval`), then start a new interval. The
+   * first Interval sample of a transaction starts at its `meterStart` (import)
+   * or at the export register as it reads then. Called by the
+   * sample builder only when an Interval measurand is asked for.
+   */
+  takeIntervalEnergyWh(stream = "sampled"): {
+    importWh: number;
+    exportWh: number;
+  } {
+    const key = String(this.transaction?.startTime?.getTime() ?? "none");
+    const importNow = this.meterValueWh;
+    const exportNow = this.exportRegisterWh;
+    const previous = this.intervalBaselines.get(stream);
+    const start =
+      previous?.key === key
+        ? previous
+        : {
+            key,
+            importWh: this.transaction?.meterStart ?? importNow,
+            exportWh: exportNow,
+          };
+    this.intervalBaselines.set(stream, {
+      key,
+      importWh: importNow,
+      exportWh: exportNow,
+    });
+    return {
+      importWh: Math.max(0, importNow - start.importWh),
+      exportWh: Math.max(0, exportNow - start.exportWh),
+    };
   }
 
   /**
@@ -1027,6 +1162,29 @@ export class Connector {
   /** See {@link energyOfferSuspendedValue} (#488). */
   get energyOfferSuspended(): boolean {
     return this.energyOfferSuspendedValue;
+  }
+
+  /** The EV and cable state now (#453), see {@link EvConnectionState}. */
+  get evConnection(): EvConnectionState {
+    return evConnectionOf(this.evCableConnected, this.evReadyValue);
+  }
+
+  /** Record the cable as plugged in; the EV is ready until it says otherwise.
+   *  The status change that follows is the charge point's (#453). */
+  markEvPluggedIn(): void {
+    this.evCableConnected = true;
+    this.evReadyValue = true;
+  }
+
+  /** Record the cable as unplugged. */
+  markEvUnplugged(): void {
+    this.evCableConnected = false;
+    this.evReadyValue = true;
+  }
+
+  /** Record the EV as ready or not ready for energy; needs a plugged-in cable. */
+  markEvReady(ready: boolean): void {
+    this.evReadyValue = ready;
   }
 
   /** Stop the energy offer of the running transaction after an EV-side
@@ -1403,9 +1561,16 @@ export class Connector {
     // has no `startTime` to resolve against and so disarms on its own.
     this.lastSchedulePaused = null;
     this.energyOfferSuspendedValue = false;
+    // A transaction means an EV on the cable (#453): a start without a prior
+    // plug-in, and a restored transaction, imply one.
+    this.evCableConnected = true;
+    this.evReadyValue = true;
     this.energyHeldForInvalidId = false;
     this.invalidIdHoldAtWh = null;
     this.openSessionSoc(this.txView ?? transaction);
+    // The export integral starts with the session, never at the previous one's
+    // last tick (#826 review).
+    this.exportTickedAt = this.clock.now();
     this.startConfiguredMeterValue();
     this.eventsEmitter.emit("transactionChange", { transaction });
   }
@@ -1504,6 +1669,7 @@ export class Connector {
 
   stopTransaction(): void {
     this.meterScheduler.stop();
+    this.exportTickedAt = null;
     this.store.write({ kind: "transaction.set", transaction: null });
     this.eventsEmitter.emit("transactionChange", { transaction: null });
   }
@@ -1547,6 +1713,7 @@ export class Connector {
   stopAutoMeterValue(): void {
     this.configuredStrategyRunning = false;
     this.meterScheduler.stop();
+    this.exportTickedAt = null;
   }
 
   isAutoMeterValueActive(): boolean {
@@ -1629,8 +1796,8 @@ export class Connector {
    * the ChargePoint can end the transaction.
    */
   private checkAutoStop(): void {
-    if (!this.autoConfig.stopAtTargetSoc) return;
     if (!this.transaction) return;
+    if (!this.sessionIntent().stopAtTarget) return;
     if (!this.meterScheduler.isActive()) return;
     const current = this.effectiveSocPercent();
     if (current === null) return;
@@ -1658,6 +1825,7 @@ export class Connector {
     }
 
     this.meterScheduler.stop();
+    this.exportTickedAt = null;
     this.eventsEmitter.emit("autoStopRequested", {
       reason: "targetSocReached",
     });

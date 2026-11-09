@@ -202,6 +202,38 @@ export class ConfigurationStore {
     return this.getArray("MeterValuesAlignedData") ?? [];
   }
 
+  /** Core key `StopTxnSampledData` (2.x `SampledDataCtrlr.TxEndedMeasurands`);
+   *  default `[]`: no sampled transaction-end data (#607). */
+  stopTxnSampledData(): string[] {
+    return this.getArray("StopTxnSampledData") ?? [];
+  }
+
+  /** Core key `StopTxnAlignedData` (2.x `AlignedDataCtrlr.TxEndedMeasurands`);
+   *  default `[]` (#607). */
+  stopTxnAlignedData(): string[] {
+    return this.getArray("StopTxnAlignedData") ?? [];
+  }
+
+  /** 2.x key `TxStartedMeasurands`; default `[]` (#607). */
+  txStartedMeasurands(): string[] {
+    return this.getArray("TxStartedMeasurands") ?? [];
+  }
+
+  /** 2.x key `TxEndedInterval` (seconds); default `0` (#607). */
+  txEndedInterval(): number {
+    return this.getInteger("TxEndedInterval") ?? 0;
+  }
+
+  /** 2.x key `AlignedDataTxEndedInterval` (seconds); default `0` (#607). */
+  alignedDataTxEndedInterval(): number {
+    return this.getInteger("AlignedDataTxEndedInterval") ?? 0;
+  }
+
+  /** 2.x key `AlignedDataSendDuringIdle`; default `false` (#607). */
+  alignedDataSendDuringIdle(): boolean {
+    return this.getBoolean("AlignedDataSendDuringIdle") ?? false;
+  }
+
   /** Canonical key `TransactionMessageAttempts`; default `3`. */
   transactionMessageAttempts(): number {
     return this.getInteger("TransactionMessageAttempts") ?? 3;

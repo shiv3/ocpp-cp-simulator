@@ -56,6 +56,7 @@ function buildContext(opts: {
     ),
     reservationManager,
     updateConnectorStatus,
+    statusWhenFree: () => OCPPStatus.Available,
   });
   const ctx = {
     chargePoint: chargePoint as unknown as ChargePoint,

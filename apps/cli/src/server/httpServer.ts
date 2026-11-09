@@ -28,6 +28,7 @@ import {
   INFLIGHT_CAP,
 } from "@ocpp-cp-simulator/contracts/limits";
 import { labelsSchema } from "@ocpp-cp-simulator/contracts/labels";
+import { chargerCapabilitiesProblem } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargerCapabilities";
 import {
   behaviorIdsSchema,
   behaviorParamsSchema,
@@ -1086,6 +1087,13 @@ export function parseCreateBody(
       ? body.reservationAuthorizeIdTag
       : undefined;
   const capabilityProfile = parseCapabilityProfile(body.capabilityProfile);
+  let chargerCapabilities: ChargePointInitOptions["chargerCapabilities"];
+  if (body.chargerCapabilities !== undefined) {
+    const problem = chargerCapabilitiesProblem(body.chargerCapabilities);
+    if (problem) throw new Error(problem);
+    chargerCapabilities =
+      body.chargerCapabilities as ChargePointInitOptions["chargerCapabilities"];
+  }
   const tlsCaPath =
     typeof body.tlsCaPath === "string" ? body.tlsCaPath : undefined;
   const tlsCertPath =
@@ -1186,6 +1194,7 @@ export function parseCreateBody(
       ? { reservationAuthorizeIdTag }
       : {}),
     ...(capabilityProfile ? { capabilityProfile } : {}),
+    ...(chargerCapabilities ? { chargerCapabilities } : {}),
     tls,
     tlsCaPath,
     tlsCertPath,

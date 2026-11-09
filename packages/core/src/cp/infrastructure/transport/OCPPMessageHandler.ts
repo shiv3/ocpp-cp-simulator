@@ -109,6 +109,7 @@ import { clockOf, unrefTimerHandle } from "../../shared/clock";
 import type { SimClock, TimerHandle } from "../../shared/clock";
 import { systemRngStreams } from "../../shared/rng";
 import type { Rng } from "../../shared/rng";
+import type { OperatingPoint } from "../../domain/connector/OperatingPoint";
 import type { TransactionLifecycleEvent } from "../../domain/transport/TransactionLifecycleEvent";
 import type { MonitoringEvent } from "../../domain/monitoring/MonitorEvaluation";
 import type { Logger } from "../../shared/Logger";
@@ -596,6 +597,28 @@ export class OCPPMessageHandler {
         signedBeginOcmf: signedBegin.ocmf,
       });
     }
+    // #607: the Transaction.Begin sample of StopTxnSampledData waits on the
+    // transaction like the signed one; StopTransaction is the only message
+    // that can carry it (1.6 §3.16.1).
+    const connector = this._chargePoint.getConnector(connectorId);
+    const beginMeasurands =
+      this._chargePoint.configuration.stopTxnSampledData();
+    if (connector && beginMeasurands.length > 0) {
+      const sampledValue = buildSampledValues(
+        connector,
+        beginMeasurands,
+        "Transaction.Begin",
+        { intervalStream: "txEnded-sampled" },
+      );
+      if (sampledValue.length > 0) {
+        patchTransaction(this._chargePoint, connectorId, transaction, {
+          txEndedSamples: [
+            ...(transaction.txEndedSamples ?? []),
+            { timestamp: transaction.startTime.toISOString(), sampledValue },
+          ],
+        });
+      }
+    }
     this.sendRequest(
       OCPPAction.StartTransaction,
       messageId,
@@ -607,6 +630,7 @@ export class OCPPMessageHandler {
   private sendStopTransaction(
     transaction: Transaction,
     connectorId: number,
+    endPoint?: OperatingPoint,
   ): void {
     const messageId = this.generateMessageId();
     // §4.10: reason MAY be omitted when "Local" (the default), but SHOULD
@@ -617,6 +641,7 @@ export class OCPPMessageHandler {
     const transactionData = this.signedTransactionData(
       transaction,
       connectorId,
+      endPoint,
     );
     const payload: StopTransactionRequestV16 = {
       transactionId: transaction.id,
@@ -650,6 +675,7 @@ export class OCPPMessageHandler {
   private signedTransactionData(
     transaction: Transaction,
     connectorId: number,
+    endPoint?: OperatingPoint,
   ): StopTransactionRequestV16["transactionData"] {
     if (transaction.meterStop === null || transaction.stopTime === null)
       return undefined;
@@ -658,7 +684,29 @@ export class OCPPMessageHandler {
       energyWh: transaction.meterStop,
       at: transaction.stopTime,
     });
-    if (!end && !transaction.signedBeginOcmf) return undefined;
+    // #607: the history (begin sample, periodic and clock-aligned ones) and
+    // the Transaction.End sample of StopTxnSampledData, formatted from the
+    // point captured at the stop instant (1.6 §3.16.1, §3.16.2).
+    const history = transaction.txEndedSamples ?? [];
+    const endMeasurands = this._chargePoint.configuration.stopTxnSampledData();
+    const connector = this._chargePoint.getConnector(connectorId);
+    const endSample =
+      connector && endMeasurands.length > 0
+        ? buildSampledValues(
+            connector,
+            endMeasurands,
+            "Transaction.End",
+            { intervalStream: "txEnded-sampled" },
+            endPoint,
+          )
+        : [];
+    if (
+      !end &&
+      !transaction.signedBeginOcmf &&
+      history.length === 0 &&
+      endSample.length === 0
+    )
+      return undefined;
     const data = [
       ...(transaction.signedBeginOcmf
         ? [
@@ -670,6 +718,15 @@ export class OCPPMessageHandler {
                   "Transaction.Begin",
                 ),
               ],
+            },
+          ]
+        : []),
+      ...history,
+      ...(endSample.length > 0
+        ? [
+            {
+              timestamp: transaction.stopTime.toISOString(),
+              sampledValue: endSample,
             },
           ]
         : []),
@@ -689,7 +746,12 @@ export class OCPPMessageHandler {
   public sendTransactionEvent(event: TransactionLifecycleEvent): void {
     if (event.phase === "started")
       this.sendStartTransaction(event.transaction, event.connectorId);
-    else this.sendStopTransaction(event.transaction, event.connectorId);
+    else
+      this.sendStopTransaction(
+        event.transaction,
+        event.connectorId,
+        event.endPoint,
+      );
   }
 
   public sendTransactionUpdate(
@@ -1061,8 +1123,13 @@ export class OCPPMessageHandler {
     overrides: MeterSampleOverrides = {},
   ): void {
     const messageId = this.generateMessageId();
-    const connector = this._chargePoint.getConnector(connectorId);
-    if (!connector) {
+    // Connector 0 is the station main meter, when the station has one (#617).
+    const mainMeter =
+      connectorId === 0 ? this._chargePoint.mainMeter : undefined;
+    const connector = mainMeter
+      ? undefined
+      : this._chargePoint.getConnector(connectorId);
+    if (!connector && !mainMeter) {
       this._logger.warn(
         `sendMeterValue: connector ${connectorId} not found`,
         LogType.METER_VALUE,
@@ -1074,16 +1141,20 @@ export class OCPPMessageHandler {
       overrides.measurands ??
       this._chargePoint.configuration.meterValuesSampledData();
     const sampledValue = toOcppJ16Wire(
-      buildSampledValues(connector, measurands, context),
+      mainMeter
+        ? mainMeter.sampledValues(measurands, context)
+        : buildSampledValues(connector!, measurands, context),
     );
+    if (mainMeter && sampledValue.length === 0) return;
     // The sender is the tick owner: announce a schedule crossing after the
     // read, so this sample describes the state before the status flip (#327).
-    connector.announceScheduleCrossingNow();
+    connector?.announceScheduleCrossingNow();
     const timestamp = overrides.timestamp ?? new Date(this.clock.now());
     // #315: during a transaction, also send the energy register signed.
     // Clock-aligned samples are not signed (no aligned/fiscal records yet).
-    const transaction = connector.transaction;
+    const transaction = connector?.transaction;
     if (
+      connector &&
       context !== "Sample.Clock" &&
       transactionId !== undefined &&
       transaction &&

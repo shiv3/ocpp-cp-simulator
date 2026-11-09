@@ -30,13 +30,16 @@ export interface SessionIntent {
  * SoC, the auto-stop) reads this, so they cannot disagree about the session.
  */
 export function resolveSessionIntent(
-  transaction: Pick<Transaction, "initialSoc" | "targetSoc"> | null | undefined,
+  transaction:
+    | Pick<Transaction, "initialSoc" | "targetSoc" | "stopAtTarget">
+    | null
+    | undefined,
   settings: Partial<Pick<EVSettings, "initialSoc" | "targetSoc">> | undefined,
   stopAtTarget = false,
 ): SessionIntent {
   return {
     initialSoc: transaction?.initialSoc ?? settings?.initialSoc,
     targetSoc: transaction?.targetSoc ?? settings?.targetSoc,
-    stopAtTarget,
+    stopAtTarget: transaction?.stopAtTarget ?? stopAtTarget,
   };
 }

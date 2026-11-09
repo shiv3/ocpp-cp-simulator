@@ -116,6 +116,9 @@ class MockChargePoint {
   configuration = {
     transactionMessageAttempts: () => 3,
     meterValuesSampledData: () => ["Energy.Active.Import.Register"],
+    stopTxnSampledData: () => [],
+    stopTxnAlignedData: () => [],
+    txStartedMeasurands: () => [],
   };
 
   notifyOutgoingCall(_isHeartbeat: boolean): void {

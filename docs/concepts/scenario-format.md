@@ -1,7 +1,7 @@
 ---
 title: Scenario file format (v1.6)
 type: concept
-summary: The node-graph JSON format for scripted charge-point behavior — 26 node types, edges, triggers, EV settings, assertions with a two-axis verdict, `useBehavior` params and disable (1.6) and the limits of the format — as exported by the editor and accepted by the CLI, daemon and MCP; JSON Schema is the source of truth.
+summary: The node-graph JSON format for scripted charge-point behavior — 30 node types, edges, triggers, EV settings, assertions with a two-axis verdict, `useBehavior` params and disable, the 1.6 decision and notify nodes with the read-only `$from` roots, and the limits of the format — as exported by the editor and accepted by the CLI, daemon and MCP; JSON Schema is the source of truth.
 sources:
   - packages/core/schema/scenario.schema.json
   - packages/core/src/cp/application/scenario/ScenarioTypes.ts
@@ -11,10 +11,13 @@ sources:
   - packages/core/src/scenario/scenarioConnectionRules.ts
   - packages/core/src/scenario/deepPartialMatch.ts
   - packages/core/src/cp/domain/connector/ChargingCurve.ts
+  - packages/core/src/cp/domain/connector/MeterRealism.ts
   - packages/core/src/cp/domain/connector/MeterValueBuilder.ts
   - packages/core/src/cp/domain/connector/OperatingPoint.ts
   - packages/core/src/cp/domain/connector/SessionIntent.ts
   - packages/core/src/cp/domain/connector/Connector.ts
+  - packages/core/src/cp/domain/connector/EvConnection.ts
+  - "issue #453"
   - packages/core/src/cp/domain/connector/ChargingScheduleResolver.ts
   - packages/core/src/cp/domain/connector/MeterValueScheduler.ts
   - packages/core/src/cp/infrastructure/transport/OCPPMessageHandlerV201.ts
@@ -22,8 +25,10 @@ sources:
   - "issues #214, #240, #247, #239, #301, #332, #566, #654"
   - packages/core/src/cp/application/scenario/ScenarioRuntime.ts
   - packages/core/src/cp/application/scenario/resolveFrom.ts
+  - packages/core/src/cp/application/scenario/ScenarioExecutor.ts
   - apps/web/src/console/lib/scenarioLibrary.ts
 related:
+  - meter-realism.md
   - ../sources/scenario-json-schema.md
   - ../entities/scenario-templates.md
   - ../sources/example-scenarios.md
@@ -55,7 +60,7 @@ that schema, not a replacement for it.
 
 - **Version `1.6`** (`schemaVersion`). Files stamped `1.0` to `1.5` remain valid — 1.x
   is purely additive (see [Versioning](#versioning)).
-- Covers the full 26-node discriminated union the scenario engine supports
+- Covers the full 30-node discriminated union the scenario engine supports
   (see [Node types](#node-types) below).
 - **Validation against this schema is advisory in this version**: the
   simulator warns (`console.warn` in the browser, stderr / server log on the
@@ -113,40 +118,44 @@ Mirrors the [OCPP trace format](./trace-format.md#versioning)'s rules:
 ```
 
 Every node has `id` (string), `type` (the discriminator — a closed
-enum of the 23 values below), `position` (`{ x: number, y: number }`), and
+enum of the 30 values below), `position` (`{ x: number, y: number }`), and
 `data` (an object requiring at least `label: string`; the rest of `data`'s
 shape depends on `type`).
 
 ## Node types
 
-| `type`               | Required `data` fields (beyond `label`)                          | Notable optional fields                                                                                                                                                                                            |
-| -------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `statusChange`       | `status`                                                         |                                                                                                                                                                                                                    |
-| `transaction`        | `action` (`"start"` \| `"stop"`)                                 | `tagId`, `batteryCapacityKwh`, `initialSoc`, `stopReason`, `idTokenType` (#599, 2.x `IdToken.type` of a start; default `ISO14443`, or the type of the remote start the scenario waited for; the node's value wins) |
-| `meterValue`         | `value`, `sendMessage`                                           | `autoIncrement`, `outputKw`, `maxChargeKwh`, `incrementInterval`, `incrementAmount`, `stopMode`, `maxTime`, `maxValue`, `useCurve`, `curvePoints`, `autoCalculateInterval`                                         |
-| `delay`              | `delaySeconds`                                                   |                                                                                                                                                                                                                    |
-| `notification`       | `messageType`, `payload`                                         |                                                                                                                                                                                                                    |
-| `connectorPlug`      | `action` (`"plugin"` \| `"plugout"`)                             | See [note](#connectorplug-notes) below.                                                                                                                                                                            |
-| `remoteStartTrigger` | —                                                                | `timeout`                                                                                                                                                                                                          |
-| `remoteStopTrigger`  | —                                                                | `timeout`                                                                                                                                                                                                          |
-| `statusTrigger`      | `targetStatus`                                                   | `timeout`                                                                                                                                                                                                          |
-| `reserveNow`         | `expiryMinutes`, `idTag`                                         | `parentIdTag`, `reservationId`                                                                                                                                                                                     |
-| `cancelReservation`  | `reservationId`                                                  |                                                                                                                                                                                                                    |
-| `reservationTrigger` | —                                                                | `timeout`                                                                                                                                                                                                          |
-| `start`              | —                                                                | `triggerOn` (`"connect"` \| `"status"`), `targetStatus`                                                                                                                                                            |
-| `end`                | —                                                                |                                                                                                                                                                                                                    |
-| `statusNotification` | `status`                                                         | `errorCode`, `info`, `vendorErrorCode`, `vendorId`, `connectorId`                                                                                                                                                  |
-| `unlockOutcome`      | `outcome` (`"Unlocked"` \| `"UnlockFailed"` \| `"NotSupported"`) |                                                                                                                                                                                                                    |
-| `configSet`          | `key`, `value`                                                   |                                                                                                                                                                                                                    |
-| `dataTransfer`       | `vendorId`                                                       | `messageId`, `data`                                                                                                                                                                                                |
-| `csmsCallTrigger`    | `action`                                                         | `timeout`, `payload`, `behavior`, `onBusy`. See [payload condition](#csmscalltrigger-payload-condition) and [replace](#csmscalltrigger-replace-callresponse-from-and-usebehavior-schema-15).                       |
-| `responseOverride`   | `action`, `status`                                               | See [note](#responseoverride-notes) below.                                                                                                                                                                         |
-| `inboundPolicy`      | `action`, `policy` (`"answer"` \| `"callerror"` \| `"ignore"`)   | `errorCode`, `errorDescription`. See [note](#inboundpolicy-and-certificate-quirks-notes) below.                                                                                                                    |
-| `certQuirks`         | `mode` (`"set"` \| `"clear"`)                                    | `preset`, `csrKeyAlgorithm`, `csrPemLineEndings`, `requiredCertificateSignatureAlgorithms`, `hiddenConfigurationKeys`. See [note](#inboundpolicy-and-certificate-quirks-notes) below.                              |
-| `connectionTrigger`  | `event` (`"connected"` \| `"disconnected"`)                      | `timeout`. See [note](#connectiontrigger-notes) below.                                                                                                                                                             |
-| `ocppCall`           | `action`, `payload`                                              | `skipValidation`, `applyResponse`. See [note](#ocppcall-notes) below.                                                                                                                                              |
-| `callResponse`       | `kind` (`"result"` \| `"error"` \| `"none"`)                     | `payload`, `errorCode`, `errorDescription`, `skipValidation`. See [note](#csmscalltrigger-replace-callresponse-from-and-usebehavior-schema-15).                                                                    |
-| `useBehavior`        | `behaviorId`                                                     | `mode` (`"use"` \| `"disable"`), `params` (1.6). See [note](#usebehavior-params-and-disable-schema-16).                                                                                                            |
+| `type`               | Required `data` fields (beyond `label`)                                      | Notable optional fields                                                                                                                                                                                            |
+| -------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `statusChange`       | `status`                                                                     |                                                                                                                                                                                                                    |
+| `transaction`        | `action` (`"start"` \| `"stop"`)                                             | `tagId`, `batteryCapacityKwh`, `initialSoc`, `stopReason`, `idTokenType` (#599, 2.x `IdToken.type` of a start; default `ISO14443`, or the type of the remote start the scenario waited for; the node's value wins) |
+| `meterValue`         | `value`, `sendMessage`                                                       | `autoIncrement`, `outputKw`, `maxChargeKwh`, `incrementInterval`, `incrementAmount`, `stopMode`, `maxTime`, `maxValue`, `useCurve`, `curvePoints`, `autoCalculateInterval`                                         |
+| `delay`              | `delaySeconds`                                                               | `until`, `jitterSeconds` (1.6). See [note](#delay-until-and-seeded-jitter).                                                                                                                                        |
+| `notification`       | `messageType`, `payload`                                                     |                                                                                                                                                                                                                    |
+| `connectorPlug`      | `action` (`"plugin"` \| `"plugout"`)                                         | See [note](#connectorplug-notes) below.                                                                                                                                                                            |
+| `remoteStartTrigger` | —                                                                            | `timeout`                                                                                                                                                                                                          |
+| `remoteStopTrigger`  | —                                                                            | `timeout`                                                                                                                                                                                                          |
+| `statusTrigger`      | `targetStatus`                                                               | `timeout`                                                                                                                                                                                                          |
+| `reserveNow`         | `expiryMinutes`, `idTag`                                                     | `parentIdTag`, `reservationId`                                                                                                                                                                                     |
+| `cancelReservation`  | `reservationId`                                                              |                                                                                                                                                                                                                    |
+| `reservationTrigger` | —                                                                            | `timeout`                                                                                                                                                                                                          |
+| `start`              | —                                                                            | `triggerOn` (`"connect"` \| `"status"`), `targetStatus`                                                                                                                                                            |
+| `end`                | —                                                                            |                                                                                                                                                                                                                    |
+| `statusNotification` | `status`                                                                     | `errorCode`, `info`, `vendorErrorCode`, `vendorId`, `connectorId`                                                                                                                                                  |
+| `unlockOutcome`      | `outcome` (`"Unlocked"` \| `"UnlockFailed"` \| `"NotSupported"`)             |                                                                                                                                                                                                                    |
+| `configSet`          | `key`, `value`                                                               |                                                                                                                                                                                                                    |
+| `dataTransfer`       | `vendorId`                                                                   | `messageId`, `data`                                                                                                                                                                                                |
+| `csmsCallTrigger`    | `action`                                                                     | `timeout`, `payload`, `behavior`, `onBusy`. See [payload condition](#csmscalltrigger-payload-condition) and [replace](#csmscalltrigger-replace-callresponse-from-and-usebehavior-schema-15).                       |
+| `responseOverride`   | `action`, `status`                                                           | See [note](#responseoverride-notes) below.                                                                                                                                                                         |
+| `inboundPolicy`      | `action`, `policy` (`"answer"` \| `"callerror"` \| `"ignore"`)               | `errorCode`, `errorDescription`. See [note](#inboundpolicy-and-certificate-quirks-notes) below.                                                                                                                    |
+| `certQuirks`         | `mode` (`"set"` \| `"clear"`)                                                | `preset`, `csrKeyAlgorithm`, `csrPemLineEndings`, `requiredCertificateSignatureAlgorithms`, `hiddenConfigurationKeys`. See [note](#inboundpolicy-and-certificate-quirks-notes) below.                              |
+| `connectionTrigger`  | `event` (`"connected"` \| `"disconnected"`)                                  | `timeout`. See [note](#connectiontrigger-notes) below.                                                                                                                                                             |
+| `ocppCall`           | `action`, `payload`                                                          | `skipValidation`, `applyResponse`. See [note](#ocppcall-notes) below.                                                                                                                                              |
+| `callResponse`       | `kind` (`"result"` \| `"error"` \| `"none"` \| `"accepted"` \| `"rejected"`) | `payload`, `errorCode`, `errorDescription`, `skipValidation`. See [note](#csmscalltrigger-replace-callresponse-from-and-usebehavior-schema-15).                                                                    |
+| `useBehavior`        | `behaviorId`                                                                 | `mode` (`"use"` \| `"disable"`), `params` (1.6). See [note](#usebehavior-params-and-disable-schema-16).                                                                                                            |
+| `notify`             | `kind`, `status`                                                             | `requestId` (a number or a `$from`). 1.6. See [note](#the-schema-16-nodes).                                                                                                                                        |
+| `switch`             | `value`, `cases`                                                             | Edges leave by `sourceHandle` `case-<n>` or `default`. 1.6. See [note](#the-schema-16-nodes).                                                                                                                      |
+| `choice`             | `options`                                                                    | Each option `weight`, `label`; edges leave by `sourceHandle` `option-<n>`. 1.6. See [note](#the-schema-16-nodes).                                                                                                  |
+| `setState`           | `key`, `value`                                                               | 1.6. See [note](#the-schema-16-nodes).                                                                                                                                                                             |
 
 `status` / `targetStatus` fields use the `OCPPStatus` enum: `Available`,
 `Preparing`, `Charging`, `SuspendedEVSE`, `SuspendedEV`, `Finishing`,
@@ -306,7 +315,7 @@ fits in are on one page: [Who answers an inbound CALL](call-precedence.md). If y
 `replace` node, `responseOverride` and a TypeScript behavior, read [Scenario or
 behavior?](../analyses/scenario-or-behavior.md).
 
-**The scenario editor.** The browser Scenario Editor authors all of schema 1.5 and 1.6: a `csmsCallTrigger` form
+**The scenario editor.** The browser Scenario Editor authors all of schema 1.5 and 1.6 (the 1.6 nodes of [this section](#the-schema-16-nodes) included): a `csmsCallTrigger` form
 with `behavior` (`observe` / `replace`) and `onBusy`, a `callResponse` node and a `useBehavior` node (with its
 mode and a params form), and it exports `schemaVersion: "1.6"`. There is no dedicated control for `$from` (type
 it in the payload JSON) and the `useBehavior` id is free text.
@@ -331,15 +340,21 @@ it in the payload JSON) and the `useBehavior` id is free text.
 
 ### `connectorPlug` notes
 
-A plug-in is a no-op in the simulator: it sends nothing (a `transaction`
-start drives `Preparing` itself, #176). A plug-out **during a transaction** is an
-EV-side disconnect (`ChargePoint.evDisconnected`, #488):
+Both actions drive the connector's [EV and cable
+model](charging-sessions.md#ev-and-cable-model) (#453), the same operations the
+control plane's `ev_plug_in` and `ev_disconnected` call; the node no longer
+needs a status node beside it. A plug-in on an idle `Available` connector
+reports `Preparing` (2.x `Occupied`) once; the `transaction` start that follows
+finds the connector already there and sends no second one (#176, #496). In any
+other state the cable is recorded and the status stays. A plug-out **during a
+transaction** is an EV-side disconnect (`ChargePoint.evDisconnected`, #488):
 `StopTransactionOnEVSideDisconnect` (2.x `TxCtrlr.StopTxOnEVSideDisconnect`,
 default `true`) stops the transaction with `EVDisconnected`, or with `false`
 keeps it as `SuspendedEV` (2.x: `TransactionEvent(Updated)`, `triggerReason`
 `EVCommunicationLost`). A later `transaction` stop node then finds no running
-transaction under `true` and does nothing. A plug-out without a transaction is
-still a no-op. The full matrix is in
+transaction under `true` and does nothing. A plug-out without a transaction
+returns a `Preparing` or `Finishing` connector to `Available` and leaves any
+other status alone. The full matrix is in
 [Charging sessions](charging-sessions.md#ev-side-disconnect-and-connection-loss).
 
 The exported k6 runtime keeps no configuration: its plug-in sends
@@ -715,8 +730,8 @@ the same limit, unit and `numberPhases`, so 6 A / 3 phases followed by
 **One operating point per sample (#327).** `Connector.operatingPoint()` is the
 only resolver: a pure function that reads the schedule limit, active phase
 count, battery acceptance, EVSE offer, line currents, voltage, power factor and
-SoC once, from one instant, out of five named input terms (`at`, `schedule`,
-`vehicle`, `session`, `fault`; `OperatingPointInputs`). The energy register
+SoC once, from one instant, out of seven named input terms (`at`, `schedule`,
+`vehicle`, `session`, `charger`, `fault`, `meter`; `OperatingPointInputs`). The energy register
 (`MeterValueScheduler`) accumulates against the point's `accumulationCapW` and
 `MeterValueBuilder` only formats the rest, so the samples of a MeterValue
 describe one instant. The resolution (`OperatingPoint.ts`) imports nothing from
@@ -735,17 +750,50 @@ increment or bezier trajectory under the schedule limit alone, and
 neither is known. `accumulationCapW` is the upper bound on one tick's register
 delta, not a cap on acceptance, and three invariants are pinned by test:
 
-| State                                  | `accumulationCapW`                       |
-| -------------------------------------- | ---------------------------------------- |
-| curve and finite `maxChargingPowerKw`  | `acceptedW`                              |
-| no curve, or no finite vehicle ceiling | the schedule limit (`Infinity` uncapped) |
-| energy offer suspended (`SuspendedEV`) | 0                                        |
+| State                                  | `accumulationCapW`                                                                 |
+| -------------------------------------- | ---------------------------------------------------------------------------------- |
+| curve and finite `maxChargingPowerKw`  | `acceptedW`                                                                        |
+| no curve, or no finite vehicle ceiling | `boundW`: the schedule limit narrowed by the charger cap (`Infinity` with neither) |
+| energy offer suspended (`SuspendedEV`) | 0                                                                                  |
 
 Outside `Charging` the bound is the same as when charging (the scheduler ticks
 through `SuspendedEVSE`; whether it ticks at all is not the point's decision),
-whereas `acceptedW` and `offeredW` are 0. The point also carries `limitedBy`
-(`schedule`, `vehicle`, `suspended`, `none`), a diagnostic that never reaches
-the wire. This is a refactor: no wire byte changes.
+whereas `acceptedW` is 0. The point also carries `limitedBy`
+(`schedule`, `charger`, `vehicle`, `suspended`, `none`), a diagnostic that never
+reaches the wire.
+
+**The charger cap (#327).** `chargerCapabilities` (`cp.create` parameter, a
+blueprint's `params`, `charge_points.charger_capabilities`) declares per
+connector what the hardware delivers, in watts (`maxDeliveryPowerW`). It is the
+third operand of the one narrowing, `boundW = min(schedule limit, charger cap)`,
+and `boundW` is what acceptance, the offer, **both** `accumulationCapW` branches
+and the rounding bound of every sample read, so the cap narrows the energy
+register, `Power.Active.Import`, `Power.Offered` and `Current.Import` together
+and none of them can contradict another. A connector the capability does not
+list has no cap and resolves byte for byte as before. It is not the vehicle's
+`maxChargingPowerKw` (what the EV accepts) and not a charging profile (what the
+CSMS allows); the aggregate of a station is not modelled (there is no power
+sharing), so connectors are never clamped to a sum. `GetCompositeSchedule`
+restates the CSMS profiles, not hardware, and is unaffected. When the schedule
+and the cap are equal `limitedBy` names the schedule, the term an operator can
+change at run time.
+
+**Meter realism (#614–#617).** A seventh input, `meter` (`MeterTerm`), carries the
+opt-in [meter realism](meter-realism.md) of the connector: seeded voltage, power
+and current fluctuation, a power ramp-up, independent per-phase quantities and an
+export term are resolved in `resolveOperatingPoint` (new fields `deliveryFactor`,
+`exportW`, `exportCurrentA`, `phaseDetail`), so the builder still only formats.
+`{}` (nothing configured) resolves byte for byte as before.
+
+**`Power.Offered` is gated on the EVSE energizing the connector.** `offeredW` is
+non-zero for a running transaction in `Charging` **or `SuspendedEV`** and 0 in
+`SuspendedEVSE`, `Preparing`, `Finishing` and every state outside a session. In
+`SuspendedEV` the EVSE still offers energy and the vehicle takes none (OCPP 1.6
+§7.7 `SuspendedEV`; 2.0.1 `ChargingStateEnumType`), and `Power.Offered` is the
+maximum power offered to the EV (1.6 §7.31 Measurand; 2.0.1 Part 2 §3.50
+MeasurandEnumType), so it reads the offer there while `Power.Active.Import`
+reads 0. `SuspendedEVSE` withholds energy, so it offers nothing. Before #327 the
+offer was gated on `Charging` alone and read 0 in `SuspendedEV`.
 
 **A session's opening and target SoC come from its `SessionIntent` (#327).**
 `resolveSessionIntent()` (`SessionIntent.ts`) is the one place that decides
@@ -753,7 +801,13 @@ them: the transaction's own `initialSoc` / `targetSoc`, else the connector's EV
 settings default. The SoC-from-register derivation, its inverse, the curve's
 opening SoC and the target-SoC auto-stop all read it, so they cannot disagree
 about the session. A target is session intent, not a car property:
-`EVSettings.targetSoc` stays as the default a session copies.
+`EVSettings.targetSoc` stays as the default a session copies. The writers of
+the session's own values are the `startTransaction` options `targetSoc` and
+`stopAtTarget` (`Transaction.targetSoc` / `Transaction.stopAtTarget`, persisted
+with the transaction in `connector_runtime.transaction_json`, so a restart
+keeps them without a migration) and its `initialSoc` argument. Today the one
+caller is auto-traffic's [`sessionModel: "intent"`](control-plane.md#background-traffic);
+`stopAtTarget` on the transaction wins over the connector's `stopAtTargetSoc`.
 
 **Known limitation, not a guarantee: a connector declaring none of the four
 electrical fields keeps the pre-1.2 mismatch.** It converts an amp limit with
@@ -950,7 +1004,7 @@ value. Collinearity alone is not enough: `(0,0) (5,5) (20,20)` is collinear,
 unevenly spaced, and differs by 2.5 kWh at its widest.
 
 `Power.Offered` / `Current.Offered` are the EVSE's own offer —
-`min(maxChargingPowerKw, ChargingScheduleResolver limit)` — **not** what the
+`min(maxChargingPowerKw, charger cap, ChargingScheduleResolver limit)` — **not** what the
 curve says the battery accepts. A 100 kW charger still offers 100 kW to a
 nearly-full battery that the curve says only draws 10% of it; conflating the
 two would make a charger appear to shrink as a car fills up.
@@ -1205,6 +1259,65 @@ station behavior engine to hand them to).
 }
 ```
 
+### The schema 1.6 nodes
+
+**Issue #654, step 3.** The bounded set of nodes the format gained after params, each one a verb the station
+already has on `ctx` or a listed decision node ([the test](#what-the-format-will-not-do)). All are additive and
+optional: a 1.5 file means what it meant. In the order the issue lists them:
+
+| Addition                                         | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `callResponse` `kind: "accepted"` / `"rejected"` | Answers the CALL the branch took over with `ctx.accepted(action)` / `ctx.rejected(action)`: the valid `Accepted` / `Rejected` answer of that action on the station's OCPP version (`{}` for 1.6 `UpdateFirmware`, `{ "status": "Accepted" }` on 2.x). No `payload` (the run fails if one is given). `onBusy` takes the same kinds. The 1.6 spelling of an action works on a 2.x station.                                                                                                                                                                                                                                                                                                                                           |
+| `notify`                                         | `kind` `firmwareStatus`, `signedFirmwareStatus`, `logStatus` or `diagnosticsStatus`, a `status` from that notification's vocabulary and an optional `requestId` (`signedFirmwareStatus` needs one). Sends the notification and goes on at once: it does not wait for the CSMS, unlike `ocppCall`. A status outside the vocabulary fails the run.                                                                                                                                                                                                                                                                                                                                                                                   |
+| `switch`                                         | `value` (a constant or a `$from`) is compared with each of `cases` (JSON constants, no `$from`) by **JSON equality**: the same type and value, object keys in any order, never a conversion (`1` is not `"1"`). The branch goes on along the edge whose `sourceHandle` is `case-<n>` for the first equal case, else `default`. A chosen handle with no edge ends the branch, with an info line in the log.                                                                                                                                                                                                                                                                                                                         |
+| `$from` roots `charger`, `connector`, `state`    | Besides `call` ([above](#csmscalltrigger-replace-callresponse-from-and-usebehavior-schema-15)): `charger.id`, `.ocppVersion`, `.status`, `.connectorIds` as `ctx.charger` reports them; `connector.id`, `.status`, `.availability`, `.transactionId`, `.idTag`, `.power.acceptedW` / `.offeredW` / `.soc` / `.limitedBy` as `ctx.connector(id)` reports them, for the connector the scenario is bound to; `state.<key>[.<key>…]` for what `setState` stored. All read-only, whole values only. A path that names nothing, or a `connector` root in a station-level scenario, fails the run. A `$from` works in `ocppCall` and `callResponse` payloads, in `notify` `requestId`, in a `switch` `value` and in a `setState` `value`. |
+| `delay` `until`, `jitterSeconds`                 | See [below](#delay-until-and-seeded-jitter).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `choice`                                         | A seeded, weighted pick among `options` (at least two; `weight` above 0, default 1). The branch goes on along the edge whose `sourceHandle` is `option-<n>`. The draw comes from the scenario's seeded stream, so the same seed gives the same pick; a missing edge ends the branch.                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `setState`                                       | Stores a JSON `value` (a whole value may be a `$from`) under `key` (letters, digits and underscores, not starting with a digit). The state is the run's: shared by its parallel branches, fresh at every start, **not persisted** (a run resumed after a daemon restart starts with an empty state).                                                                                                                                                                                                                                                                                                                                                                                                                               |
+
+```json
+{
+  "nodes": [
+    {
+      "id": "pick",
+      "type": "switch",
+      "position": { "x": 0, "y": 0 },
+      "data": {
+        "label": "Idle?",
+        "value": { "$from": "connector.status" },
+        "cases": ["Available", "Charging"]
+      }
+    },
+    {
+      "id": "idle",
+      "type": "notify",
+      "position": { "x": 0, "y": 0 },
+      "data": {
+        "label": "Report",
+        "kind": "logStatus",
+        "status": "Uploading",
+        "requestId": 7
+      }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "pick", "target": "idle", "sourceHandle": "case-0" }
+  ]
+}
+```
+
+The console's list editor keeps every `sourceHandle` when it rebuilds the edges after an insert, move or removal. A
+`switch` or `choice` placed there gets `default` / `option-0` on its one edge, and a new lane of one gets the next free
+`case-<n>` (then `default`) or `option-<n>`; without a handle the node would end its branch (#822 review).
+
+#### `delay` `until` and seeded jitter
+
+`until` is an ISO-8601 instant on the station's clock: the node waits until then **or** for `delaySeconds`, whichever
+is longer, so `delaySeconds` stays the required floor (use `0`) and an instant that has passed adds nothing. An
+`until` that is not a date fails the run. `jitterSeconds` (a number of at least 0) adds a draw from 0 to
+`jitterSeconds`, in whole milliseconds, from the scenario's seeded stream: the same seed gives the same wait, and
+`0` draws nothing. `export-k6` refuses both (the k6 runtime waits for `delaySeconds` only).
+
 ### What the format will not do
 
 The format does **sequence, wait, select, loop and read**. A node may _read_ a value through `$from` from a
@@ -1224,16 +1337,20 @@ things below is answered with "write a behavior and select it with `useBehavior`
 
 **The test for a new node.** A proposed node must be one of: (1) a **parameter** of a behavior, (2) a **wait**,
 (3) a **verb** the station already has on `ctx` (`send`, `plugIn`, `startCharging`, `notify`, …), or (4) one of the
-listed decision nodes (an equality `switch`, a seeded `choice`, `setState`, none of which exist yet). If it needs
+listed decision nodes (an equality `switch`, a seeded `choice`, `setState`: schema 1.6 ships all three). If it needs
 a `default` branch of its own it is a `switch` in disguise; if it needs two values it is a function. Otherwise it
 is a behavior.
 
-**Budget.** Schema 1.6 ships params and `disable`, and stops: a 1.7 needs a written case that params did not
+**Budget.** Schema 1.6 ships params, `disable` and the nodes of [the section above](#the-schema-16-nodes), and stops: a 1.7 needs a written case that params and those nodes did not
 cover. The parity of scenario nodes and `ctx` members is kept in
 [Scenario or behavior?](../analyses/scenario-or-behavior.md#node--ctx-parity).
 
 ## Changelog
 
+- **v1.6 (nodes)**: Issue #654, step 3. Adds the `notify`, `switch`, `choice` and `setState` node types;
+  `callResponse` `kind` gains `"accepted"` and `"rejected"`; `delay` gains `until` and `jitterSeconds`; `$from`
+  gains the read-only roots `charger`, `connector` and `state`. Shipped within 1.6 (the budget above), purely
+  additive — `1.5` and older files remain valid. See [the note](#the-schema-16-nodes).
 - **v1.6**: Issue #654. `useBehavior` gains `params` (a JSON object, validated against the behavior's params
   schema when the node runs) and `mode` (`"use"` | `"disable"`); `behaviorId` may name a built-in `default.*`
   behavior. Purely additive — `1.5` and older files remain valid. See

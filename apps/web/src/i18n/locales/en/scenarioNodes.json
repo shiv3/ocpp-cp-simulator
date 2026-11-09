@@ -54,5 +54,12 @@
   "scenarioNodes.transaction.stop": "Stop",
   "scenarioNodes.transaction.tag": "Tag: {{value}}",
   "scenarioNodes.callResponse.noAnswer": "no answer",
-  "scenarioNodes.useBehavior.disabled": "Disabled for this run"
+  "scenarioNodes.useBehavior.disabled": "Disabled for this run",
+  "scenarioNodes.title.notify": "Notify",
+  "scenarioNodes.title.switch": "Switch",
+  "scenarioNodes.title.choice": "Choice",
+  "scenarioNodes.title.setState": "Set State",
+  "scenarioNodes.switch.default": "default",
+  "scenarioNodes.choice.options_one": "{{count}} option",
+  "scenarioNodes.choice.options_other": "{{count}} options"
 }

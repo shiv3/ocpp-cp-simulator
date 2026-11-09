@@ -241,7 +241,12 @@ every outgoing event and breadcrumb through it (Sentry's `beforeSend` /
   configuration entries that carry them;
 - then the request's cookies, and every member named `Authorization`,
   `Proxy-Authorization`, `Cookie` or `Set-Cookie` (any case) at any depth:
-  the request's headers, and a header map logged into a breadcrumb.
+  the request's headers, and a header map logged into a breadcrumb;
+- and the `attributeValue` of any `{ variable, attributeValue }` entry whose
+  `variable` is not an object with a string `name`: Sentry normalizes
+  `extra` and `contexts` to `normalizeDepth` before `beforeSend`, which can
+  turn the variable into `"[Object]"` and keep its value, so the name the
+  redaction decides on is gone.
 
 The scrubbing recognises these names and forms only. A credential that is
 neither, such as `Authorization: Basic …` quoted inside an error message or a

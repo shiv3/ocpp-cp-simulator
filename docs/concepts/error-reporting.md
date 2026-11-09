@@ -68,15 +68,17 @@ later is dropped without a second line.
 
 The console's first paint waits for a selected adapter for at most
 `ERROR_REPORTER_WAIT_MS` (300 ms) in `apps/web/src/lib/errorReporting.ts`:
-an optional reporter must not keep the console blank. Past that bound the
-console renders and the adapter keeps loading in the background. React
+an optional reporter must not keep the console blank. The bound covers the
+reporter only: the first paint also waits for the saved language's chunk
+(`i18nReady`), which is not bounded yet
+([#899](https://github.com/shiv3/ocpp-cp-simulator/issues/899)). Past the
+bound the adapter keeps loading in the background. React
 root errors raised meanwhile (the hooks below) are logged at once and handed
 to the adapter once it has started (the first `ERROR_REPORTER_BUFFER_SIZE`,
 20, are kept; later ones are only logged); if it never starts, they stay
 logged only. Nothing else is kept: a `window` error or an unhandled
 rejection raised before the adapter installs its own browser handlers
-(Sentry's `GlobalHandlers`, below) is never reported. Bounding the
-wait for the saved language's chunk (`i18nReady`) is left to a follow-up.
+(Sentry's `GlobalHandlers`, below) is never reported.
 
 The console's variables are **inlined by Vite at build time**. Variables
 given to a daemon at run time do not reach the console that daemon serves:

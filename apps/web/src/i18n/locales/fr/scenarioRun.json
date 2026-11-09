@@ -82,5 +82,8 @@
   "scenarioRun.loopForever": "Répéter indéfiniment",
   "scenarioRun.loopWaitsAt": "chaque tour attend d’abord à l’étape {{n}}",
   "scenarioRun.loopBackArm": "Retour à l’étape {{n}}",
-  "scenarioRun.loopSteps": "Étapes répétées {{from}} à {{to}}"
+  "scenarioRun.loopSteps": "Étapes répétées {{from}} à {{to}}",
+  "scenarioRun.loopRepeat": "Répéter",
+  "scenarioRun.loopUntilExit": "Se répète jusqu’à ce qu’un switch ou un choice en sorte, ou que l’exécution s’arrête",
+  "scenarioRun.loopUntilRunStops": "Se répète jusqu’à l’arrêt de l’exécution"
 }

@@ -81,5 +81,8 @@
   "scenarioRun.loopForever": "Repeat forever",
   "scenarioRun.loopWaitsAt": "each round waits at step {{n}} first",
   "scenarioRun.loopBackArm": "Back to step {{n}}",
-  "scenarioRun.loopSteps": "Repeated steps {{from}} to {{to}}"
+  "scenarioRun.loopSteps": "Repeated steps {{from}} to {{to}}",
+  "scenarioRun.loopRepeat": "Repeat",
+  "scenarioRun.loopUntilExit": "Repeats until a switch or choice in it takes a way out, or the run stops",
+  "scenarioRun.loopUntilRunStops": "Repeats until the run stops"
 }

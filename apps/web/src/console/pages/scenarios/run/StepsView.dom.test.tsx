@@ -146,6 +146,31 @@ describe("StepsView", () => {
     expect(container.querySelector("[data-link-to]")).toBeNull();
   });
 
+  it("a loop holding a switch says Repeat, not forever, and names its group", async () => {
+    const base = statusTriggeredActions as unknown as ScenarioDefinition;
+    const def: ScenarioDefinition = {
+      ...base,
+      nodes: base.nodes.map((n) =>
+        n.id === "notification-heartbeat"
+          ? ({
+              ...n,
+              type: "switch",
+              data: { label: "Route", value: "a", cases: ["a"] },
+            } as unknown as typeof n)
+          : n,
+      ),
+    };
+    await render({}, def);
+    const block = container.querySelector("[data-loop-block]")!;
+    expect(block.textContent).toContain("Repeat");
+    expect(block.textContent).not.toContain("Repeat forever");
+    const group = block.querySelector('[role="group"]')!;
+    const label = document.getElementById(
+      group.getAttribute("aria-labelledby")!,
+    );
+    expect(label?.textContent).toBe("Repeat");
+  });
+
   it("a loop back to the lane's first step encloses the whole lane", async () => {
     // Branch A: charge → meter → back to charge.
     await render({}, rewired(["meter", "charge"]));

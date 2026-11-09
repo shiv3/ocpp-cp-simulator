@@ -80,5 +80,8 @@
   "scenarioRun.loopForever": "一直重复",
   "scenarioRun.loopWaitsAt": "每轮先在步骤 {{n}} 等待",
   "scenarioRun.loopBackArm": "回到步骤 {{n}}",
-  "scenarioRun.loopSteps": "重复的步骤 {{from}} 到 {{to}}"
+  "scenarioRun.loopSteps": "重复的步骤 {{from}} 到 {{to}}",
+  "scenarioRun.loopRepeat": "重复",
+  "scenarioRun.loopUntilExit": "重复，直到其中的 switch / choice 选择退出，或运行停止",
+  "scenarioRun.loopUntilRunStops": "重复，直到运行停止"
 }

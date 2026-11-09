@@ -11,10 +11,13 @@ import {
 
 import { cn } from "@/lib/utils";
 import RunStatePill from "../../../components/RunStatePill";
-import type { ScenarioNode } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import {
+  ScenarioNodeType,
+  type ScenarioNode,
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import { isLiveRunState } from "../../../lib/scenarioRunState";
 import {
-  STEP_CATEGORIES,
+  WAIT_STEP_TYPES,
   canAddBranch,
   findStepLane,
   laneLinkTarget,
@@ -196,15 +199,22 @@ function measureBoxes(lane: StepLane, root: HTMLElement | null): number[] {
 
 /** Steps that wait (a delay or a trigger): a loop starting at one waits
  *  there first on every round. */
-const WAIT_TYPES: ReadonlySet<string> = new Set(
-  STEP_CATEGORIES.find((c) => c.label === "Wait & Trigger")?.types ?? [],
-);
+const WAIT_TYPES: ReadonlySet<string> = new Set(WAIT_STEP_TYPES);
+
+/** Steps that may end their branch on a run (a switch or choice whose picked
+ *  handle has no edge): a loop holding one is not "forever". */
+const EXIT_TYPES: ReadonlySet<string> = new Set([
+  ScenarioNodeType.SWITCH,
+  ScenarioNodeType.CHOICE,
+]);
 
 /**
  * A loop drawn as Scratch draws "forever": a C-shaped block whose top arm
  * says it repeats, whose left spine holds the repeated steps (`children`,
  * a list of boxes), and whose bottom arm says where the run goes back to.
- * The back edge is unconditional, so the loop repeats until the run ends.
+ * The back edge is unconditional, so the loop repeats until the run ends,
+ * unless a switch or choice inside picks a handle with no edge (`canExit`):
+ * then the top arm says "Repeat", not "Repeat forever".
  * The arms and the spine are tints over whatever is behind them, so the
  * block reads the same on a page, a card or a panel, in either theme.
  */
@@ -216,13 +226,16 @@ const LoopBlock: React.FC<{
   to: number;
   /** The first repeated step waits (a delay or a trigger). */
   waitsFirst: boolean;
+  /** A repeated step may end the branch (a switch or choice). */
+  canExit: boolean;
   /** A step inside is the run's current step. */
   active: boolean;
   /** Under the repeated steps, inside the block (the lane's "+ Add step"). */
   footer?: React.ReactNode;
   children: React.ReactNode;
-}> = ({ target, from, to, waitsFirst, active, footer, children }) => {
+}> = ({ target, from, to, waitsFirst, canExit, active, footer, children }) => {
   const { t } = useTranslation();
+  const labelId = React.useId();
   const tint = active ? "bg-cx-purple/20" : "bg-cx-purple/12";
   return (
     <li
@@ -237,9 +250,17 @@ const LoopBlock: React.FC<{
           tint,
         )}
       >
-        <span className="inline-flex items-center gap-1.5 whitespace-nowrap font-semibold text-cx-purple">
+        <span
+          id={labelId}
+          title={t(
+            canExit
+              ? "scenarioRun.loopUntilExit"
+              : "scenarioRun.loopUntilRunStops",
+          )}
+          className="inline-flex items-center gap-1.5 whitespace-nowrap font-semibold text-cx-purple"
+        >
           <Repeat className="h-3.5 w-3.5 shrink-0" aria-hidden />
-          {t("scenarioRun.loopForever")}
+          {t(canExit ? "scenarioRun.loopRepeat" : "scenarioRun.loopForever")}
         </span>
         {waitsFirst && (
           <span className="text-cx-muted">
@@ -249,7 +270,11 @@ const LoopBlock: React.FC<{
       </div>
       <div className="flex">
         <div aria-hidden className={cn("w-3 shrink-0", tint)} />
-        <div className="min-w-0 flex-1 py-1.5 pl-1.5">
+        <div
+          role="group"
+          aria-labelledby={labelId}
+          className="min-w-0 flex-1 py-1.5 pl-1.5"
+        >
           {children}
           {footer}
         </div>
@@ -443,6 +468,9 @@ const StepsView: React.FC<StepRunViewProps> = (props) => {
           from={stepIndexOf(layout, steps[loopStart].id) ?? 0}
           to={stepIndexOf(layout, last.id) ?? 0}
           waitsFirst={WAIT_TYPES.has(steps[loopStart].type ?? "")}
+          canExit={steps
+            .slice(loopStart)
+            .some((s) => EXIT_TYPES.has(s.type ?? ""))}
           active={steps
             .slice(loopStart)
             .some((s) => boxPhase(s.id, props) === "current")}

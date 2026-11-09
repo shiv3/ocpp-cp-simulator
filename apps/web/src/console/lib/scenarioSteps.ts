@@ -1232,6 +1232,17 @@ export function stepSummary(node: ScenarioNode): string {
  * Every `ScenarioNodeType` except START/END (which are implicit chain
  * endpoints, not user-insertable steps) appears in exactly one bucket.
  */
+/** Step types that wait (a delay or a trigger) before the run goes on. */
+export const WAIT_STEP_TYPES: ScenarioNodeType[] = [
+  ScenarioNodeType.DELAY,
+  ScenarioNodeType.REMOTE_START_TRIGGER,
+  ScenarioNodeType.REMOTE_STOP_TRIGGER,
+  ScenarioNodeType.STATUS_TRIGGER,
+  ScenarioNodeType.CSMS_CALL_TRIGGER,
+  ScenarioNodeType.RESERVATION_TRIGGER,
+  ScenarioNodeType.CONNECTION_TRIGGER,
+];
+
 export const STEP_CATEGORIES: ReadonlyArray<{
   /** Stable English id (also keys the tile styles); show `labelKey`. */
   label: string;
@@ -1259,15 +1270,7 @@ export const STEP_CATEGORIES: ReadonlyArray<{
   {
     label: "Wait & Trigger",
     labelKey: "scenarios.category.waitTrigger",
-    types: [
-      ScenarioNodeType.DELAY,
-      ScenarioNodeType.REMOTE_START_TRIGGER,
-      ScenarioNodeType.REMOTE_STOP_TRIGGER,
-      ScenarioNodeType.STATUS_TRIGGER,
-      ScenarioNodeType.CSMS_CALL_TRIGGER,
-      ScenarioNodeType.RESERVATION_TRIGGER,
-      ScenarioNodeType.CONNECTION_TRIGGER,
-    ],
+    types: WAIT_STEP_TYPES,
   },
   {
     label: "Advanced",

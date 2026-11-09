@@ -80,5 +80,8 @@
   "scenarioRun.loopForever": "ずっと繰り返す",
   "scenarioRun.loopWaitsAt": "毎回まずステップ {{n}} で待つ",
   "scenarioRun.loopBackArm": "ステップ {{n}} に戻る",
-  "scenarioRun.loopSteps": "繰り返すステップ {{from}}〜{{to}}"
+  "scenarioRun.loopSteps": "繰り返すステップ {{from}}〜{{to}}",
+  "scenarioRun.loopRepeat": "くり返す",
+  "scenarioRun.loopUntilExit": "中の Switch / Choice が抜ける道を選ぶか、run が止まるまでくり返します",
+  "scenarioRun.loopUntilRunStops": "run が止まるまでくり返します"
 }

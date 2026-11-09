@@ -1363,3 +1363,11 @@ export const STEP_HELP: Readonly<
   [ScenarioNodeType.INBOUND_POLICY]: "scenarios.stepHelp.inboundPolicy",
   [ScenarioNodeType.CERT_QUIRKS]: "scenarios.stepHelp.certQuirks",
 };
+
+/** The step type a branch structure stands for. */
+export const STRUCTURE_TYPE: Partial<
+  Record<"loop" | "switch" | "choice", ScenarioNodeType>
+> = {
+  switch: ScenarioNodeType.SWITCH,
+  choice: ScenarioNodeType.CHOICE,
+};

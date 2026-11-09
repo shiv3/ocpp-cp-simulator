@@ -128,8 +128,10 @@ export function tileForStructure(kind: string): {
   icon: TileIcon;
   className: string;
 } {
+  // A branch block looks like the step it inserts.
+  if (kind === "switch" || kind === "choice") return tileForType(kind);
   return {
-    icon: kind === "loop" ? Repeat : CircleDot,
+    icon: Repeat,
     className: CATEGORY_CLASS["Flow control"],
   };
 }
@@ -212,6 +214,22 @@ export interface StepTreeViewProps extends RunViewCommonProps {
   /** editable: a step type picked for slot `index` of the sequence at
    *  `path` (its length appends). */
   onInsertStep?: (path: SeqPath, index: number, type: ScenarioNodeType) => void;
+  /** editable: the first step of an empty Repeat block (UI-only until now)
+   *  at slot `index` of the sequence at `path`: the repeat is written
+   *  around it. */
+  onInsertStepIntoLoop?: (
+    path: SeqPath,
+    index: number,
+    type: ScenarioNodeType,
+  ) => void;
+  /** editable: step `nodeId` dropped in another sequence (or into a new
+   *  Repeat block, `loop`) at slot `index` of the sequence at `path`. */
+  onMoveStepTo?: (
+    nodeId: string,
+    path: SeqPath,
+    index: number,
+    loop: boolean,
+  ) => void;
   /** editable: add a branch to the fork (or START / switch / choice) of
    *  `nodeId`. */
   onAddLane?: (nodeId: string) => void;

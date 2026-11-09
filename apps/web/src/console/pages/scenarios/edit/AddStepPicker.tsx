@@ -7,14 +7,15 @@ import { cn } from "@/lib/utils";
 import { STEP_CATEGORIES, STEP_HELP } from "../../../lib/scenarioSteps";
 import { tileForStructure, tileForType } from "../run/stepVisuals";
 import type { MessageKey } from "../../../../i18n";
-import type { ScenarioNodeType } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import { ScenarioNodeType } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 
 /**
  * Structures are entries that are not a node type: picking one inserts a block
- * (a loop today; "switch" / "choice" branch blocks are meant to join later).
- * An entry is listed only when the host passes `onPickStructure`.
+ * (a Repeat block, or a Switch / Choice branch block). Entries are listed only
+ * when the host passes `onPickStructure`; the plain Switch and Choice step
+ * entries are then replaced by the structure ones.
  */
-export type StructureKind = "loop";
+export type StructureKind = "loop" | "switch" | "choice";
 
 const STRUCTURE_ENTRIES: ReadonlyArray<{
   kind: StructureKind;
@@ -29,6 +30,18 @@ const STRUCTURE_ENTRIES: ReadonlyArray<{
     titleKey: "scenarios.addStep.structure.loop",
     helpKey: "scenarios.addStep.structure.loopHelp",
   },
+  {
+    kind: "switch",
+    category: "Flow control",
+    titleKey: "scenarios.addStep.structure.switch",
+    helpKey: "scenarios.addStep.structure.switchHelp",
+  },
+  {
+    kind: "choice",
+    category: "Flow control",
+    titleKey: "scenarios.addStep.structure.choice",
+    helpKey: "scenarios.addStep.structure.choiceHelp",
+  },
 ];
 
 /** Ids of structure entries share the type ids' `active` state under this prefix. */
@@ -38,6 +51,9 @@ export interface AddStepPickerProps {
   onPick: (type: ScenarioNodeType) => void;
   /** Wired by the host to offer structure entries (Repeat). Omit to hide them. */
   onPickStructure?: (kind: StructureKind) => void;
+  /** A structure that cannot go to this slot: listed but disabled, with the
+   *  (translated) reason as its title. */
+  structureRefusals?: Partial<Record<StructureKind, string>>;
   onClose: () => void;
 }
 
@@ -78,6 +94,7 @@ const TypeTile: React.FC<{ type: string; size: "sm" | "md" }> = ({
 const AddStepPicker: React.FC<AddStepPickerProps> = ({
   onPick,
   onPickStructure,
+  structureRefusals,
   onClose,
 }) => {
   const { t } = useTranslation();
@@ -95,6 +112,12 @@ const AddStepPicker: React.FC<AddStepPickerProps> = ({
       labelKey: category.labelKey,
       entries: [
         ...category.types
+          .filter(
+            (type) =>
+              !onPickStructure ||
+              (type !== ScenarioNodeType.SWITCH &&
+                type !== ScenarioNodeType.CHOICE),
+          )
           .filter((type) =>
             matches(
               t(NODE_FORM_REGISTRY[type].title),
@@ -124,6 +147,9 @@ const AddStepPicker: React.FC<AddStepPickerProps> = ({
       ],
     })).filter((category) => category.entries.length > 0);
   }, [query, t, onPickStructure]);
+
+  const refusalOf = (kind: StructureKind | null) =>
+    kind ? structureRefusals?.[kind] : undefined;
 
   const shownEntry = active
     ? sections.flatMap((s) => s.entries).find((e) => e.id === active)
@@ -218,6 +244,8 @@ const AddStepPicker: React.FC<AddStepPickerProps> = ({
                         : undefined
                       : undefined
                   }
+                  disabled={refusalOf(entry.structure) !== undefined}
+                  title={refusalOf(entry.structure)}
                   onClick={() =>
                     entry.type
                       ? onPick(entry.type)
@@ -226,7 +254,7 @@ const AddStepPicker: React.FC<AddStepPickerProps> = ({
                   onMouseEnter={() => setActive(entry.id)}
                   onFocus={() => setActive(entry.id)}
                   className={cn(
-                    "flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-sm text-cx-fg2 hover:bg-cx-sub focus-visible:bg-cx-sub",
+                    "flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-sm text-cx-fg2 hover:bg-cx-sub focus-visible:bg-cx-sub disabled:cursor-not-allowed disabled:opacity-50",
                     shownEntry?.id === entry.id && "bg-cx-sub",
                   )}
                 >

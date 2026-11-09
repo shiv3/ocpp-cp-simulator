@@ -179,5 +179,16 @@
   "scenarios.templateBrowser.nothingToPreview": "No template to preview.",
   "scenarios.editor.issue.noCallHeld": "Step {{n}} ({{title}}) needs a CSMS call its branch took over (a CSMS Call Trigger with behavior “replace” earlier in the same branch), but on some path there is none: the run fails there.",
   "scenarios.editor.issue.callAlreadyAnswered": "Step {{n}} ({{title}}) answers a CSMS call that its branch has already answered on some path: the run fails there.",
-  "scenarios.editor.issue.callLeftOpen": "Step {{n}} ({{title}}) takes over a CSMS call that its branch can leave unanswered; the station answers it InternalError only when the run ends. Add a Call Response (kind “none” to stay silent on purpose)."
+  "scenarios.editor.issue.callLeftOpen": "Step {{n}} ({{title}}) takes over a CSMS call that its branch can leave unanswered; the station answers it InternalError only when the run ends. Add a Call Response (kind “none” to stay silent on purpose).",
+  "scenarios.editor.issueShowStep": "Select this step and show it",
+  "scenarios.editor.severity.error": "Error",
+  "scenarios.editor.severity.warning": "Warning",
+  "scenarios.editor.severity.info": "Note",
+  "scenarios.editor.marks.error_one": "{{count}} error",
+  "scenarios.editor.marks.error_other": "{{count}} errors",
+  "scenarios.editor.marks.warning_one": "{{count}} warning",
+  "scenarios.editor.marks.warning_other": "{{count}} warnings",
+  "scenarios.editor.marks.info_one": "{{count}} note",
+  "scenarios.editor.marks.info_other": "{{count}} notes",
+  "scenarios.editor.marks.onEdge": "On an edge from this step: {{message}}"
 }

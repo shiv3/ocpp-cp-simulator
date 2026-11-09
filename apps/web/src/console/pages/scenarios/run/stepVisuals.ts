@@ -19,6 +19,7 @@ import {
 import type { ScenarioRunState } from "../../../lib/useScenarioRun";
 import { STEP_CATEGORIES, type StepLane } from "../../../lib/scenarioSteps";
 import { t } from "../../../../i18n";
+import type { ViewIssues } from "../edit/issueMarkUi";
 
 /** The registry title of a step's type ("Status Change"), as the editor's
  *  step list and the run timeline show it. */
@@ -131,6 +132,9 @@ export interface StepRunViewProps {
   onDeleteStep?: (nodeId: string, options: { confirm: boolean }) => void;
   /** editable: add a parallel branch. */
   onAddBranch?: () => void;
+  /** The scenario's diagnostics, marked on the steps (and, in the Graph
+   *  view, on the edges) they are about. */
+  issues?: ViewIssues;
 }
 
 export type BoxPhase = StepPhase | "plain";

@@ -18,6 +18,14 @@ import {
 } from "../../../lib/stepLayout";
 import { dropNeighbours } from "../../../lib/useLaneDrag";
 import { useStepEditing, type InsertSlot } from "../edit/stepEditing";
+import {
+  IssueBadge,
+  SEVERITY,
+  useMarkCounts,
+  useMarkMessages,
+  useStepIssues,
+} from "../edit/issueMarkUi";
+import { highlightedBy, type IssueMark } from "../../../lib/graphIssueMarks";
 import { t } from "../../../../i18n";
 import StepTile from "./StepTile";
 import {
@@ -67,6 +75,7 @@ interface LinkPath {
   lane: number;
   from: string;
   to: string;
+  mid: Point;
 }
 
 /** How far a link's curve swings out right of the cards. */
@@ -79,6 +88,14 @@ interface GraphPath {
   /** The target node's id, or `end`. */
   to: string;
   done: boolean;
+  /** The scenario edge drawn, when there is one. */
+  edgeId?: string;
+  mid: Point;
+}
+
+interface Point {
+  x: number;
+  y: number;
 }
 
 /** A `+` of the editor: where a picked step goes, centred at (x, y). */
@@ -108,12 +125,27 @@ interface GraphGeometry {
 
 const laneX = (lane: number) => X0 + lane * LANE_W;
 
-/** Straight within a lane; a cubic curve when it moves into another lane. */
-function connect(x1: number, y1: number, x2: number, y2: number): string {
-  if (x1 === x2) return `M ${x1} ${y1} L ${x2} ${y2}`;
-  const mid = (y1 + y2) / 2;
-  return `M ${x1} ${y1} C ${x1} ${mid}, ${x2} ${mid}, ${x2} ${y2}`;
+/** Straight within a lane; a cubic curve when it moves into another lane.
+ *  Both are symmetric, so the middle of the path is the middle point. */
+function connect(
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+): { d: string; mid: Point } {
+  const mid = { x: (x1 + x2) / 2, y: (y1 + y2) / 2 };
+  if (x1 === x2) return { d: `M ${x1} ${y1} L ${x2} ${y2}`, mid };
+  return {
+    d: `M ${x1} ${y1} C ${x1} ${mid.y}, ${x2} ${mid.y}, ${x2} ${y2}`,
+    mid,
+  };
 }
+
+/** The point of a cubic Bézier at t = 0.5. */
+const cubicMid = (p0: Point, p1: Point, p2: Point, p3: Point): Point => ({
+  x: (p0.x + 3 * p1.x + 3 * p2.x + p3.x) / 8,
+  y: (p0.y + 3 * p1.y + 3 * p2.y + p3.y) / 8,
+});
 
 /** Places every card, path, cap and (for the editor) `+` on the grid. */
 function computeGeometry(
@@ -144,10 +176,11 @@ function computeGeometry(
     placed.push({ step, lane: 0, top, stepLane: "main", index: row });
     paths.push({
       key: `${prevId ?? "start"}->${step.id}`,
-      d: connect(X0, prevBottom, X0, top),
+      ...connect(X0, prevBottom, X0, top),
       lane: 0,
       to: step.id,
       done: travelled(step.id),
+      edgeId: layout.edgeInto?.[step.id],
     });
     if (prevId) {
       zones.push({
@@ -195,10 +228,11 @@ function computeGeometry(
         placed.push({ step, lane, top, stepLane: lane, index: row });
         paths.push({
           key: `${row === 0 ? (prevId ?? "start") : branch.steps[row - 1].id}->${step.id}`,
-          d: connect(fromX, bottom, laneX(lane), top),
+          ...connect(fromX, bottom, laneX(lane), top),
           lane,
           to: step.id,
           done: travelled(step.id),
+          edgeId: layout.edgeInto?.[step.id],
         });
         if (row > 0) {
           zones.push({
@@ -228,10 +262,11 @@ function computeGeometry(
       });
       paths.push({
         key: `${last?.id ?? prevId ?? "start"}->end-${lane}`,
-        d: connect(fromX, bottom, laneX(lane), endY - END_R),
+        ...connect(fromX, bottom, laneX(lane), endY - END_R),
         lane,
         to: "end",
         done: last ? phaseOf(last.id) === "done" : false,
+        edgeId: branch.endEdgeId,
       });
     });
   } else {
@@ -247,10 +282,11 @@ function computeGeometry(
     });
     paths.push({
       key: `${lastMain?.id ?? "start"}->end`,
-      d: connect(X0, prevBottom, X0, endY - END_R),
+      ...connect(X0, prevBottom, X0, endY - END_R),
       lane: 0,
       to: "end",
       done: lastMain ? phaseOf(lastMain.id) === "done" : false,
+      edgeId: layout.endEdgeId,
     });
   }
 
@@ -272,6 +308,12 @@ function computeGeometry(
       lane: from.lane,
       from: link.source,
       to: link.target,
+      mid: cubicMid(
+        { x: x1, y: y1 },
+        { x: swing, y: y1 },
+        { x: swing, y: y2 },
+        { x: x2 + 3, y: y2 },
+      ),
     });
   }
 
@@ -321,7 +363,25 @@ const StepsGraphView: React.FC<StepRunViewProps> = (props) => {
     onInsertStep,
     onDeleteStep,
     onAddBranch,
+    issues,
   } = props;
+  const stepIssues = useStepIssues(issues);
+  const markCounts = useMarkCounts();
+  const markMessages = useMarkMessages();
+  const highlight = highlightedBy(issues?.marks, issues?.highlight);
+  const edgeMark = (edgeId: string | undefined) =>
+    edgeId === undefined ? undefined : issues?.marks.edges.get(edgeId);
+  /** A drawn edge with a diagnostic: stroked in its severity's colour
+   *  (thicker while its warning line is pointed at). */
+  const edgeIssueProps = (edgeId: string | undefined) => {
+    const mark = edgeMark(edgeId);
+    if (!mark || edgeId === undefined) return null;
+    return {
+      "data-issue": mark.entries.map((e) => e.code).join(" "),
+      stroke: SEVERITY[mark.severity].color,
+      strokeWidth: highlight?.edgeIds.includes(edgeId) ? 3 : 2,
+    };
+  };
   const phaseOf = (id: string): BoxPhase => boxPhase(id, props);
   const geometry = computeGeometry(layout, phaseOf, editable);
   const { placed, paths, ends, tags, startY } = geometry;
@@ -425,9 +485,11 @@ const StepsGraphView: React.FC<StepRunViewProps> = (props) => {
               key={path.key}
               d={path.d}
               data-to={path.to}
+              data-edge-id={path.edgeId}
               fill="none"
               strokeWidth={path.done ? 2 : 1.5}
               stroke={path.done ? laneStyle(path.lane).color : TODO_STROKE}
+              {...edgeIssueProps(path.edgeId)}
             />
           ))}
           <defs>
@@ -454,6 +516,8 @@ const StepsGraphView: React.FC<StepRunViewProps> = (props) => {
               strokeDasharray="5 4"
               stroke={laneStyle(link.lane).color}
               markerEnd="url(#graph-link-arrow)"
+              data-edge-id={link.key}
+              {...edgeIssueProps(link.key)}
             />
           ))}
           <circle
@@ -476,6 +540,43 @@ const StepsGraphView: React.FC<StepRunViewProps> = (props) => {
             />
           ))}
         </svg>
+
+        {[
+          ...paths.map((p) => ({ key: p.key, edgeId: p.edgeId, mid: p.mid })),
+          ...geometry.links.map((l) => ({
+            key: l.key,
+            edgeId: l.key,
+            mid: l.mid,
+          })),
+        ].map(({ key, edgeId, mid }) => {
+          const mark = edgeMark(edgeId);
+          return mark ? (
+            <EdgeIssueMarker
+              key={`issue:${key}`}
+              mark={mark}
+              x={mid.x}
+              y={mid.y}
+              label={markCounts(mark)}
+              title={markMessages(mark)}
+            />
+          ) : null;
+        })}
+        {issues?.marks.start && (
+          <IssueBadge
+            mark={issues.marks.start}
+            className="absolute z-10"
+            style={{ left: X0 + START_R + 6, top: startY - 9 }}
+          />
+        )}
+        {issues?.marks.end &&
+          ends.map((end) => (
+            <IssueBadge
+              key={`end-issue:${end.lane}`}
+              mark={issues.marks.end!}
+              className="absolute z-10"
+              style={{ left: laneX(end.lane) + END_R + 6, top: end.y - 9 }}
+            />
+          ))}
 
         {tags.map((tag) => (
           <div
@@ -507,13 +608,16 @@ const StepsGraphView: React.FC<StepRunViewProps> = (props) => {
           const phase = phaseOf(step.id);
           const failed = state === "error" && step.id === currentNodeId;
           const selected = selectedStepId === step.id;
+          const marked = stepIssues(step.id);
           const className = cn(
             "flex items-center gap-2 rounded-xl border-[1.5px] bg-cx-card px-2.5 text-left",
             phase === "current" && live
               ? CURRENT_CARD[live]
               : failed
                 ? "border-cx-rose ring-4 ring-cx-rose/15"
-                : phase !== "done" && "border-cx-border",
+                : phase !== "done" &&
+                  (marked.style ? marked.style.border : "border-cx-border"),
+            marked.highlighted && marked.style?.glow,
             selected && "outline outline-2 outline-cx-accent",
           );
           const place: React.CSSProperties = {
@@ -539,6 +643,13 @@ const StepsGraphView: React.FC<StepRunViewProps> = (props) => {
                 </span>
               </span>
               {phase === "current" && live && <RunStatePill state={live} />}
+              {marked.mark && (
+                <IssueBadge
+                  mark={marked.mark}
+                  className="absolute -top-2.5 right-4"
+                />
+              )}
+              {marked.description}
             </>
           );
 
@@ -578,9 +689,10 @@ const StepsGraphView: React.FC<StepRunViewProps> = (props) => {
                   title={t("scenarioRun.clickToEdit")}
                   onClick={() => onSelectStep?.(step.id)}
                   onKeyDown={editing.onStepKeyDown(step.id)}
+                  {...marked.cardProps}
                   className={cn(
                     className,
-                    "h-full w-full",
+                    "relative h-full w-full",
                     dragged ? "cursor-grabbing" : "cursor-grab",
                   )}
                   style={doneBorder}
@@ -611,6 +723,7 @@ const StepsGraphView: React.FC<StepRunViewProps> = (props) => {
             "data-phase": failed ? "failed" : phase,
             className: cn("absolute", className),
             style: { ...place, ...doneBorder },
+            ...marked.cardProps,
           };
           return onSelectStep ? (
             <button
@@ -678,6 +791,33 @@ const StepsGraphView: React.FC<StepRunViewProps> = (props) => {
         )}
       </div>
     </div>
+  );
+};
+
+/** The marker at the middle of a drawn edge with a diagnostic. */
+const EdgeIssueMarker: React.FC<{
+  mark: IssueMark;
+  x: number;
+  y: number;
+  label: string;
+  title: string;
+}> = ({ mark, x, y, label, title }) => {
+  const style = SEVERITY[mark.severity];
+  const Icon = style.icon;
+  return (
+    <span
+      role="img"
+      data-edge-issue={mark.severity}
+      aria-label={label}
+      title={title}
+      className={cn(
+        "absolute z-10 flex h-4 w-4 items-center justify-center rounded-full border border-current bg-cx-card",
+        style.text,
+      )}
+      style={{ left: x - 8, top: y - 8 }}
+    >
+      <Icon aria-hidden className="h-2.5 w-2.5" strokeWidth={2.5} />
+    </span>
   );
 };
 

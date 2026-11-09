@@ -184,5 +184,19 @@
   "scenarios.templateBrowser.nothingToPreview": "Aucun modèle à prévisualiser.",
   "scenarios.editor.issue.noCallHeld": "L’étape {{n}} ({{title}}) a besoin d’un appel CSMS repris par sa branche (un déclencheur d’appel CSMS avec behavior « replace » plus tôt dans la même branche), mais un chemin n’en a pas : l’exécution y échoue.",
   "scenarios.editor.issue.callAlreadyAnswered": "L’étape {{n}} ({{title}}) répond, sur un chemin, à un appel CSMS déjà répondu par sa branche : l’exécution y échoue.",
-  "scenarios.editor.issue.callLeftOpen": "L’étape {{n}} ({{title}}) reprend un appel CSMS que sa branche peut laisser sans réponse ; la borne n’y répond InternalError qu’à la fin de l’exécution. Ajoutez une réponse d’appel (kind « none » pour se taire exprès)."
+  "scenarios.editor.issue.callLeftOpen": "L’étape {{n}} ({{title}}) reprend un appel CSMS que sa branche peut laisser sans réponse ; la borne n’y répond InternalError qu’à la fin de l’exécution. Ajoutez une réponse d’appel (kind « none » pour se taire exprès).",
+  "scenarios.editor.issueShowStep": "Sélectionner cette étape et l’afficher",
+  "scenarios.editor.severity.error": "Erreur",
+  "scenarios.editor.severity.warning": "Avertissement",
+  "scenarios.editor.severity.info": "Remarque",
+  "scenarios.editor.marks.error_one": "{{count}} erreur",
+  "scenarios.editor.marks.error_many": "{{count}} erreurs",
+  "scenarios.editor.marks.error_other": "{{count}} erreurs",
+  "scenarios.editor.marks.warning_one": "{{count}} avertissement",
+  "scenarios.editor.marks.warning_many": "{{count}} avertissements",
+  "scenarios.editor.marks.warning_other": "{{count}} avertissements",
+  "scenarios.editor.marks.info_one": "{{count}} remarque",
+  "scenarios.editor.marks.info_many": "{{count}} remarques",
+  "scenarios.editor.marks.info_other": "{{count}} remarques",
+  "scenarios.editor.marks.onEdge": "Sur un lien partant de cette étape : {{message}}"
 }

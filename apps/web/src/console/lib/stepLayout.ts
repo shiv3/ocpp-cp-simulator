@@ -28,6 +28,11 @@ export interface StepBranch {
    *  `null` when that edge has none: the editor keeps it without one. */
   handle: string | null;
   steps: ScenarioNode[];
+  /** The fork edge into this branch. */
+  edgeId?: string;
+  /** The edge from the branch's last step (the fork node for an empty
+   *  branch: the fork edge) into END, when there is one. */
+  endEdgeId?: string;
 }
 
 /**
@@ -45,6 +50,12 @@ export interface StepLayout {
   fork: null | { branches: StepBranch[] };
   /** Loops and joins; see `StepLink`. */
   links: StepLink[];
+  /** The edge each step is drawn entered by (the previous step's, START's
+   *  or the fork's edge), by step id. */
+  edgeInto?: Readonly<Record<string, string>>;
+  /** Without a fork: the edge from the chain's last step (or START) into
+   *  END, when there is one. */
+  endEdgeId?: string;
 }
 
 const UNSUPPORTED: StepLayout = {
@@ -99,6 +110,8 @@ export function deriveStepLayout(
   const links: StepLink[] = [];
   let current = start;
   let forkEdges: Edge[] | null = null;
+  const edgeInto: Record<string, string> = {};
+  let endEdgeId: string | undefined;
 
   for (;;) {
     const out = outgoing.get(current.id) ?? [];
@@ -110,13 +123,17 @@ export function deriveStepLayout(
     const target = nodesById.get(out[0].target);
     // A dangling edge, or an edge back into START.
     if (!target || target.id === start.id) return UNSUPPORTED;
-    if (target.type === ScenarioNodeType.END) break;
+    if (target.type === ScenarioNodeType.END) {
+      endEdgeId = out[0].id;
+      break;
+    }
     if (visited.has(target.id)) {
       // A loop back into the chain: the chain ends here, drawn as a link.
       links.push(linkOf(out[0]));
       break;
     }
     visited.add(target.id);
+    edgeInto[target.id] = out[0].id;
     main.push(target);
     current = target;
   }
@@ -125,6 +142,8 @@ export function deriveStepLayout(
   for (const [index, edge] of (forkEdges ?? []).entries()) {
     const steps: ScenarioNode[] = [];
     let target = nodesById.get(edge.target);
+    let into: Edge = edge;
+    let branchEnd: string | undefined;
     // A branch ends at END, at a node with no outgoing edge, or at a dangling
     // edge (the executor just stops that branch there).
     while (target && target.type !== ScenarioNodeType.END) {
@@ -132,6 +151,7 @@ export function deriveStepLayout(
       if (visited.has(target.id) && steps.length === 0) return UNSUPPORTED;
       visited.add(target.id);
       steps.push(target);
+      edgeInto[target.id] = into.id;
       const out: Edge[] = outgoing.get(target.id) ?? [];
       if (out.length > 1) return UNSUPPORTED; // a second fork
       const next: ScenarioNode | undefined =
@@ -142,12 +162,16 @@ export function deriveStepLayout(
         links.push(linkOf(out[0]));
         break;
       }
+      if (out.length === 1) into = out[0];
       target = next;
     }
+    if (target?.type === ScenarioNodeType.END) branchEnd = into.id;
     branches.push({
       name: branchName(steps[0], index),
       handle: typeof edge.sourceHandle === "string" ? edge.sourceHandle : null,
       steps,
+      edgeId: edge.id,
+      ...(branchEnd ? { endEdgeId: branchEnd } : {}),
     });
   }
 
@@ -162,7 +186,22 @@ export function deriveStepLayout(
     main,
     fork: forkEdges ? { branches } : null,
     links,
+    edgeInto,
+    ...(endEdgeId ? { endEdgeId } : {}),
   };
+}
+
+/** The ids of the edges the Graph view draws: into every step, into END,
+ *  and the loop / join links. */
+export function drawnEdgeIds(layout: StepLayout): Set<string> {
+  const ids = new Set<string>(Object.values(layout.edgeInto ?? {}));
+  if (layout.endEdgeId) ids.add(layout.endEdgeId);
+  for (const branch of layout.fork?.branches ?? []) {
+    if (branch.edgeId) ids.add(branch.edgeId);
+    if (branch.endEdgeId) ids.add(branch.endEdgeId);
+  }
+  for (const link of layout.links) ids.add(link.id);
+  return ids;
 }
 
 const linkOf = (edge: Edge): StepLink => ({

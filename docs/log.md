@@ -2393,6 +2393,14 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - The 2.x component/variable mapping moved from `deviceModelMap.ts` into a typed registry (`packages/core/src/cp/domain/device-model/DeviceModelRegistry.ts`) with mutability, data type, values list, limits, unit, default and persistence per variable; GetVariables, SetVariables, SetVariableMonitoring and GetBaseReport resolve through it, shared 1.6 keys still map to the `ConfigurationStore`. `ClockCtrlr`, `DeviceDataCtrlr`, `TariffCostCtrlr` and `ISO15118Ctrlr` are registered without variables; `TxCtrlr.TxStartPoint` / `TxStopPoint` are registered `ReadOnly` (#569: no writable variable without simulated behavior). Wire output unchanged. New page: [Device Model registry](entities/device-model.md); updated [Variable monitoring](concepts/variable-monitoring.md) and [Local authorization](concepts/local-authorization.md).
 
+## [2026-11-08] ingest | GetBaseReport report bases and chunked NotifyReport (#605)
+
+- `GetBaseReport` returns the contents of its `reportBase` (`ConfigurationInventory`: settable entries; `FullInventory`: all; `SummaryInventory`: availability of the station and EVSEs) and the `NotifyReport` is cut into parts by the new read-only `DeviceDataCtrlr.ItemsPerMessage[GetReport]` / `BytesPerMessage[GetReport]` (defaults 100 / 65536) with `requestId`, `seqNo` from 0 and `tbc`; `GetReport` shares the parts; a `WriteOnly` value is never reported. Wire output of the existing golden cases is unchanged; four 2.0.1 golden cases added. Updated [Device Model registry](entities/device-model.md).
+
 ## [2026-11-08] lint | Device Model registry review fixes (#604)
 
 - `OCPPCommCtrlr.ResetRetries` is `ReadOnly` on 2.x (the 2.x `ConfigurationStore` key is read-only, the 1.6 key stays read-write): nothing retries a reset, so a writable value would change nothing (#569). Every `MemberList` variable now reports a `valuesList` (`TxStartPoint`, `TxStopPoint`, the measurands), and the registry refuses a `MemberList` without one. Updated [Device Model registry](entities/device-model.md).
+
+## [2026-11-08] lint | GetBaseReport review fixes (#605)
+
+- The `DeviceDataCtrlr` limit keys live in one module, `deviceDataCtrlrKeys.ts` (was `reportLimits.ts`), and the `GetReport` limits are registry constants (`constant: true`) published with the other constants instead of by a private `publishReportLimits`. The docs say the limits are not enforced on an inbound request. The golden fixtures `201-base-report-*` and the `v201GetBaseReport` snapshot were re-recorded on the merged base (valuesList for MemberList variables, `ResetRetries` ReadOnly). Updated [Device Model registry](entities/device-model.md).

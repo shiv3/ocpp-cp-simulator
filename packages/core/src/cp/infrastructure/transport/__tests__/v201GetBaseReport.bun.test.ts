@@ -69,7 +69,7 @@ describe("OCPP 2.0.1 GetBaseReport", () => {
         2,
         "gbr-1",
         "GetBaseReport",
-        { requestId: 42, reportBase: "ConfigurationInventory" },
+        { requestId: 42, reportBase: "FullInventory" },
       ]);
 
       const callResultFrame = await csms.waitForFrame(

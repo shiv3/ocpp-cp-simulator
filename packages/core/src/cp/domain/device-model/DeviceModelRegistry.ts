@@ -3,6 +3,11 @@
 // values live in the ConfigurationStore under `valueKey`.
 import { MAX_TIMER_MS } from "../../shared/timers";
 import {
+  DEVICE_DATA_CTRLR_KEYS,
+  REPORT_MAX_BYTES,
+  REPORT_MAX_ITEMS,
+} from "./deviceDataCtrlrKeys";
+import {
   MONITORING_CTRLR_KEYS,
   MONITORING_REQUEST_MAX_BYTES,
   MONITORING_REQUEST_MAX_ITEMS,
@@ -511,6 +516,31 @@ const VARIABLES: readonly DeviceModelVariableDef[] = [
     default: "Authorized,EVConnected",
     constant: true,
   }),
+  // #605: the size of the NotifyReport parts of GetBaseReport / GetReport.
+  runtime(
+    "DeviceDataCtrlr",
+    "ItemsPerMessage",
+    DEVICE_DATA_CTRLR_KEYS.itemsPerGetReport,
+    {
+      instance: "GetReport",
+      dataType: "integer",
+      min: 1,
+      default: REPORT_MAX_ITEMS,
+      constant: true,
+    },
+  ),
+  runtime(
+    "DeviceDataCtrlr",
+    "BytesPerMessage",
+    DEVICE_DATA_CTRLR_KEYS.bytesPerGetReport,
+    {
+      instance: "GetReport",
+      dataType: "integer",
+      min: 1,
+      default: REPORT_MAX_BYTES,
+      constant: true,
+    },
+  ),
   // #538: MonitoringCtrlr (2.0.1 Part 2 §2.11.3-§2.11.9, 2.1 §2.13.3-§2.13.9).
   runtime(
     "MonitoringCtrlr",

@@ -37,3 +37,44 @@ export function splitIntoParts<T>(
   }
   return parts;
 }
+
+/**
+ * Split a non-empty list into parts of at most `maxItems` items whose
+ * `frameBytes` stays within `maxBytes`. An item that alone exceeds `maxBytes`
+ * still goes out, alone: it cannot be divided further.
+ *
+ * `frameBytes(items, seqNo)` is the size of the whole message that would carry
+ * `items`; it is measured as a part that is not the last (`tbc` true), which
+ * is never shorter than the last one.
+ */
+export function splitIntoSizedParts<T>(
+  items: readonly [T, ...T[]],
+  maxItems: number,
+  maxBytes: number,
+  frameBytes: (items: readonly T[], seqNo: number) => number,
+): ReportPart<T>[] {
+  if (!Number.isInteger(maxItems) || maxItems < 1) {
+    throw new RangeError(`maxItems must be a positive integer`);
+  }
+  const chunks: T[][] = [];
+  let current: T[] = [];
+  for (const item of items) {
+    const grown = [...current, item];
+    const fits =
+      current.length === 0 ||
+      (grown.length <= maxItems &&
+        frameBytes(grown, chunks.length) <= maxBytes);
+    if (fits) {
+      current = grown;
+    } else {
+      chunks.push(current);
+      current = [item];
+    }
+  }
+  chunks.push(current);
+  return chunks.map((chunk, seqNo) => ({
+    items: chunk as unknown as readonly [T, ...T[]],
+    seqNo,
+    tbc: seqNo < chunks.length - 1,
+  }));
+}

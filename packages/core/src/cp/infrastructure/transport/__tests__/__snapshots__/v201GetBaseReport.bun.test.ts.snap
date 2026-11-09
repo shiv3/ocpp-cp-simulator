@@ -480,6 +480,48 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
         },
         {
           "component": {
+            "name": "DeviceDataCtrlr",
+          },
+          "variable": {
+            "instance": "GetReport",
+            "name": "ItemsPerMessage",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "100",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "minLimit": 1,
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "DeviceDataCtrlr",
+          },
+          "variable": {
+            "instance": "GetReport",
+            "name": "BytesPerMessage",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "65536",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "minLimit": 1,
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
             "name": "MonitoringCtrlr",
           },
           "variable": {

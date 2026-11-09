@@ -96,7 +96,10 @@ function reportDatum(
     variableAttribute: [
       {
         type: "Actual",
-        value: renderConfigValue(entry),
+        // B07.FR.03: the value of a WriteOnly variable is never reported.
+        ...(def.mutability !== "WriteOnly" && {
+          value: renderConfigValue(entry),
+        }),
         mutability: def.mutability,
       },
     ] as [VariableAttributeType],
@@ -114,4 +117,64 @@ function reportDatum(
       supportsMonitoring: true,
     },
   };
+}
+
+export type ReportBase =
+  "ConfigurationInventory" | "FullInventory" | "SummaryInventory";
+
+const isWritable = (rd: ReportDataType): boolean =>
+  rd.variableAttribute.some((a) => a.mutability !== "ReadOnly");
+
+/** `AvailabilityState`, the variable a summary is made of (B07.FR.09). */
+const isAvailability = (rd: ReportDataType): boolean =>
+  rd.variable.name === "AvailabilityState";
+
+/**
+ * The part of the full device-model report that `reportBase` asks for
+ * (B07.FR.07-FR.09), in the full report's order:
+ *
+ * - `FullInventory`: everything.
+ * - `ConfigurationInventory`: the component-variables the operator can set,
+ *   i.e. with a ReadWrite or WriteOnly attribute (B07.FR.07).
+ * - `SummaryInventory`: `AvailabilityState` of the Charging Station and of
+ *   every EVSE, and of a Connector only when it differs from its EVSE's
+ *   ("if known and different from EVSE", B07.FR.09 note). The simulator
+ *   registers no Active / Problem / Tripped / Overload / Fallback variable,
+ *   so there is no abnormal-state part to add.
+ */
+export function selectReportBase(
+  full: readonly ReportDataType[],
+  reportBase: ReportBase,
+): ReportDataType[] {
+  switch (reportBase) {
+    case "FullInventory":
+      return [...full];
+    case "ConfigurationInventory":
+      return full.filter(isWritable);
+    case "SummaryInventory": {
+      const evseState = new Map<number, string | undefined>();
+      for (const rd of full) {
+        if (rd.component.name === "EVSE" && isAvailability(rd)) {
+          const id = rd.component.evse?.id;
+          if (id !== undefined) {
+            evseState.set(id, rd.variableAttribute[0].value);
+          }
+        }
+      }
+      return full.filter((rd) => {
+        if (!isAvailability(rd)) return false;
+        if (rd.component.name === "Connector") {
+          const id = rd.component.evse?.id;
+          return (
+            id === undefined ||
+            rd.variableAttribute[0].value !== evseState.get(id)
+          );
+        }
+        return (
+          rd.component.name === "ChargingStation" ||
+          rd.component.name === "EVSE"
+        );
+      });
+    }
+  }
 }

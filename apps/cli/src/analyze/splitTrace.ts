@@ -339,7 +339,10 @@ export async function splitTraceRecords(
   };
   let total = 0;
 
-  for await (const result of readRecords(source, { onError: "yield", maxLineBytes })) {
+  for await (const result of readRecords(source, {
+    onError: "yield",
+    maxLineBytes,
+  })) {
     total++;
 
     if (!result.ok) {

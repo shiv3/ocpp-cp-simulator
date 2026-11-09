@@ -366,7 +366,9 @@ import closure outside the scanned directories) are accepted: the golden wire te
 
 `ChargePoint` remains the facade with its public API; `Connector` fields are read views of the engine state. The
 transition table `ALLOWED_CONNECTOR_STATUS_TRANSITIONS` (`domain/connector/ConnectorTransitions.ts`) is
-enforced only as a warning on `full` writes, so that scenarios can force transitions. `StateManager` only
+the 53 transitions of the OCPP 1.6 section 4.9 table (cell codes A2…I8 in the source, checked cell by cell in
+`ConnectorTransitions.test.ts`; B6 comes from errata v3.0, I1–I8 mean a resolved fault returns to the pre-fault
+status, Preparing → Unavailable is not in it). It is enforced only as a warning on `full` writes, so that scenarios can force transitions. `StateManager` only
 records `StateHistory`.
 
 **Delivery timings.** One table, because the four timings below are each justified by rule 4 and are easy to

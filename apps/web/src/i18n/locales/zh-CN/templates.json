@@ -103,6 +103,8 @@
   "templates.multi-status-monitor.description": "并行监控多个状态并执行不同的动作",
   "templates.remote-start-auto-meter.name": "远程启动 + AutoMeterValue",
   "templates.remote-start-auto-meter.description": "等待 RemoteStartTransaction → 开始充电 → AutoMeterValue",
+  "templates.remote-start-timeout-fallback.name": "远程启动 + 超时回退",
+  "templates.remote-start-timeout-fallback.description": "最多等待 30 秒的 RemoteStartTransaction;超时则沿 timeout 边回到 Available",
   "templates.smart-charging.name": "智能充电(AutoMeterValue)",
   "templates.smart-charging.description": "处于 Charging 时自动递增 MeterValue,到 Finishing 时停止",
   "templates.status-triggered-actions.name": "状态触发的自动动作",

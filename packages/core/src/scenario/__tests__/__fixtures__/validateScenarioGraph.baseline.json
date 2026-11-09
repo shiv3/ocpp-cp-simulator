@@ -11,6 +11,8 @@
   "template:status-triggered-actions:c1": [],
   "template:remote-start-auto-meter": [],
   "template:remote-start-auto-meter:c1": [],
+  "template:remote-start-timeout-fallback": [],
+  "template:remote-start-timeout-fallback:c1": [],
   "template:cert16-tc001-cold-boot": [],
   "template:cert16-tc001-cold-boot:c1": [],
   "template:cert16-tc003-charging-plugin-first": [],

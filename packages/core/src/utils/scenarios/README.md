@@ -71,6 +71,12 @@ The `dataflow-*` templates are not certification cases. They show what a scenari
 | dataflow-charge-to-soc                                                       | Loop that meters until `connector.power.soc` is at least 80 (`$match gte`).                                                                              |
 | dataflow-remote-start-reauthorize-16 / dataflow-remote-start-reauthorize-201 | Own the CSMS's remote start (`replace`), answer Accepted, Authorize the tag read from the CALL, branch on the answer.                                    |
 
+## Non-certification templates using newer scenario features
+
+| Scenario ID                   | Feature                    | Description                                                                                                                                                                     |
+| ----------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| remote-start-timeout-fallback | Timeout edges (schema 1.8) | Waits 30 s for RemoteStartTransaction. On timeout, the `kind: "timeout"` edge sets the connector back to Available (StatusNotification) and ends the run instead of failing it. |
+
 ## Numbering Note
 
 Scenario identifiers follow the OCPP Certification Test Cases (OCPPSC) specification test-case numbering: TC_001, TC_003, TC_004, etc. The unlock scenarios TC_017 (Unlock Connector — Occupied, Succeeds) and TC_018 (Unlock Connector — Failure) predate the formal OCPPSC mapping; TC_017 ≈ "unlock with active session" and TC_018 ≈ "unlock failure / stuck lock".

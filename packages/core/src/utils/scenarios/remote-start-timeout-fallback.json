@@ -1,0 +1,83 @@
+{
+  "id": "remote-start-timeout-fallback",
+  "name": "Remote Start with Timeout Fallback",
+  "description": "Wait up to 30 s for a RemoteStartTransaction. If it arrives, start the transaction and send bounded MeterValues. If the wait times out, follow the timeout edge: set the connector back to Available (StatusNotification) and end instead of failing the run.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": { "type": "manual" },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": { "x": 400, "y": 50 },
+      "data": { "label": "Start", "triggerOn": "connect" }
+    },
+    {
+      "id": "trigger-remote-start",
+      "type": "remoteStartTrigger",
+      "position": { "x": 400, "y": 150 },
+      "data": {
+        "label": "Wait for RemoteStartTransaction (30 s)",
+        "timeout": 30
+      }
+    },
+    {
+      "id": "tx-start",
+      "type": "transaction",
+      "position": { "x": 250, "y": 280 },
+      "data": {
+        "label": "Start Transaction",
+        "action": "start",
+        "tagId": "TIMEOUT-TAG"
+      }
+    },
+    {
+      "id": "meter-auto",
+      "type": "meterValue",
+      "position": { "x": 250, "y": 400 },
+      "data": {
+        "label": "Bounded Auto MeterValue",
+        "value": 0,
+        "sendMessage": true,
+        "autoIncrement": true,
+        "incrementInterval": 5,
+        "incrementAmount": 500,
+        "maxTime": 30,
+        "maxValue": 0
+      }
+    },
+    {
+      "id": "end-ok",
+      "type": "end",
+      "position": { "x": 250, "y": 520 },
+      "data": { "label": "End (started)" }
+    },
+    {
+      "id": "status-available",
+      "type": "statusChange",
+      "position": { "x": 600, "y": 280 },
+      "data": { "label": "Back to Available", "status": "Available" }
+    },
+    {
+      "id": "end-timeout",
+      "type": "end",
+      "position": { "x": 600, "y": 400 },
+      "data": { "label": "End (timed out)" }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start-1", "target": "trigger-remote-start" },
+    { "id": "e2", "source": "trigger-remote-start", "target": "tx-start" },
+    { "id": "e3", "source": "tx-start", "target": "meter-auto" },
+    { "id": "e4", "source": "meter-auto", "target": "end-ok" },
+    {
+      "id": "e5",
+      "source": "trigger-remote-start",
+      "target": "status-available",
+      "kind": "timeout"
+    },
+    { "id": "e6", "source": "status-available", "target": "end-timeout" }
+  ]
+}

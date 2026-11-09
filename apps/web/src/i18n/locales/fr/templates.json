@@ -103,6 +103,8 @@
   "templates.multi-status-monitor.description": "Surveiller plusieurs statuts en parallèle et exécuter différentes actions",
   "templates.remote-start-auto-meter.name": "Démarrage à distance + MeterValue automatique",
   "templates.remote-start-auto-meter.description": "Attendre RemoteStartTransaction → démarrer la recharge → AutoMeterValue",
+  "templates.remote-start-timeout-fallback.name": "Démarrage à distance avec repli sur timeout",
+  "templates.remote-start-timeout-fallback.description": "Attendre RemoteStartTransaction jusqu'à 30 s ; au timeout, suivre l'arête timeout et revenir en Available",
   "templates.smart-charging.name": "Smart Charging (MeterValue automatique)",
   "templates.smart-charging.description": "Incrémenter automatiquement MeterValue en Charging, arrêter en Finishing",
   "templates.status-triggered-actions.name": "Actions automatiques déclenchées par le statut",

@@ -72,12 +72,25 @@ describe("loadScenario rejects definitions missing required fields", () => {
     ]);
   });
 
-  for (const field of ["id", "name", "targetType", "nodes", "edges"]) {
+  for (const field of ["id", "nodes", "edges"]) {
     it(`rejects a definition with no "${field}"`, () => {
       const service = newService();
       expect(() => service.loadScenario(1, without(field))).toThrow(field);
       // Nothing half-loaded: no runtime entry to leak into list_scenarios.
       expect(service.listScenarios(1)).toEqual([]);
+    });
+  }
+
+  // The web console's import always accepted these; since one gate serves
+  // both, the daemon fills them in instead of refusing the file.
+  for (const field of ["name", "targetType"]) {
+    it(`fills in a missing "${field}"`, () => {
+      const service = newService();
+      expect(service.loadScenario(1, without(field))).toBe("valid-scenario");
+      expect(service.getScenario(1, "valid-scenario")).toMatchObject({
+        name: field === "name" ? "valid-scenario" : "Valid",
+        targetType: "connector",
+      });
     });
   }
 
@@ -89,13 +102,15 @@ describe("loadScenario rejects definitions missing required fields", () => {
     expect(service.listScenarios(1)).toEqual([]);
   });
 
-  it("rejects a bad targetType and a non-array nodes/edges", () => {
+  it("fills in a bad targetType, rejects a non-array nodes/edges", () => {
     const service = newService();
     const badTarget = validScenario() as unknown as Record<string, unknown>;
     badTarget.targetType = "station";
-    expect(() =>
+    badTarget.id = "bad-target";
+    expect(
       service.loadScenario(1, badTarget as unknown as ScenarioDefinition),
-    ).toThrow("targetType");
+    ).toBe("bad-target");
+    expect(service.getScenario(1, "bad-target")?.targetType).toBe("connector");
 
     const badNodes = validScenario() as unknown as Record<string, unknown>;
     badNodes.nodes = { 0: "not-an-array" };
@@ -103,7 +118,9 @@ describe("loadScenario rejects definitions missing required fields", () => {
       service.loadScenario(1, badNodes as unknown as ScenarioDefinition),
     ).toThrow("nodes");
 
-    expect(service.listScenarios(1)).toEqual([]);
+    expect(service.listScenarios(1).map((s) => s.scenarioId)).toEqual([
+      "bad-target",
+    ]);
   });
 
   it("rejects a non-object payload without throwing a TypeError", () => {

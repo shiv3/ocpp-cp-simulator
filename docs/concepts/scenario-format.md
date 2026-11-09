@@ -9,6 +9,9 @@ sources:
   - packages/core/src/cp/application/verification/ScenarioAssertions.ts
   - packages/core/src/scenario/scenarioSchemaValidator.ts
   - packages/core/src/scenario/scenarioConnectionRules.ts
+  - packages/core/src/scenario/scenarioGraph.ts
+  - packages/core/src/scenario/scenarioGraphValidator.ts
+  - packages/core/src/scenario/loadableScenario.ts
   - packages/core/src/scenario/deepPartialMatch.ts
   - packages/core/src/cp/domain/connector/ChargingCurve.ts
   - packages/core/src/cp/domain/connector/MeterRealism.ts
@@ -454,9 +457,16 @@ The edge type does not say which nodes may connect; the rules below are what
 [`scenarioConnectionRules.ts`](../../packages/core/src/scenario/scenarioConnectionRules.ts)
 as `CONNECTION_RULES`, one entry per node type. The table is typed
 (`ConnectionRuleTable`, keyed by every `ScenarioNodeType`), so a new node type
-does not compile until it declares its rule. `validateScenarioGraph` checks a
-scenario against it. The checks are advisory like the schema: the web
-console's editor lists the issues above the steps and never blocks Save.
+does not compile until it declares its rule. Where a run starts, where a
+branch ends and which edge it takes next are stated once, in
+[`scenarioGraph.ts`](../../packages/core/src/scenario/scenarioGraph.ts)
+(`resolveOrigin`, `isTerminal`, `nextStep` / `successors`, and
+`lowerScenario`, an in-memory index that is never persisted): the executor
+walks the graph through it, and `validateScenarioGraph`
+([`scenarioGraphValidator.ts`](../../packages/core/src/scenario/scenarioGraphValidator.ts))
+reads the graph through the same functions, so the two cannot drift. The
+checks are advisory like the schema: the web console's editor lists the
+issues above the steps and never blocks Save.
 
 Two kinds of rule are real. **How a node is left** (`out`):
 
@@ -516,6 +526,29 @@ that a fork after a step, as the console's "+ Add parallel branch" builds when
 the chain already has steps, is `extraOutgoing`: at run time only its first
 branch runs.
 
+#### Tolerant contract
+
+The executor runs the shapes below without failing the run, and no validator
+may turn them into a hard failure: they are diagnostics at most. Frozen by
+[`ScenarioExecutor.permissive.test.ts`](../../packages/core/src/cp/application/scenario/__tests__/ScenarioExecutor.permissive.test.ts);
+change the two together.
+
+- An unknown node type: a `console.warn` ("Unknown node type: …"), then on
+  along its first edge like any step.
+- An edge to a missing node: skipped, the next edge is tried; when every edge
+  of a node points at a missing node the branch ends with a `console.warn`.
+- An edge out of `end`: never followed.
+- An edge back into `start`: followed, and `start` runs again as a step (on
+  along its first edge only).
+- A second `start`: ignored; the run starts from the first.
+- A node labelled "Start" (when it comes first) or "End", of any type: acts as
+  `start` / `end`.
+- A `switch` or `choice` whose picked handle has no edge: the branch ends with
+  an `info` log ("… chose "…", which has no edge; the branch ends").
+
+The only graph shape that fails a run is one with nowhere to start: "No start
+node found in scenario".
+
 ## Assertions & verdicts
 
 An optional array of declarative pass/fail checks evaluated against the
@@ -573,6 +606,18 @@ The simulator itself calls this at every import point (browser upload,
 `--scenario` / `--scenario-template-file`, and the `load_scenario` /
 `run_scenario_file` Socket.IO methods) and only ever warns — see [Status &
 scope](#status--scope).
+
+The hard gate is smaller and shared by the browser import
+(`parseScenarioJSON`) and the daemon (`loadScenario`, `--watch` reloads):
+`checkLoadableScenario` in
+[`loadableScenario.ts`](../../packages/core/src/scenario/loadableScenario.ts)
+rejects only a value that is not an object or lacks a non-empty string `id` or
+`nodes` / `edges` arrays. A missing or non-string `name` becomes the `id`, a
+missing or unknown `targetType` becomes `"connector"`, each logged; the daemon
+also refuses an `id` it cannot address (blank once trimmed, or too long), which
+the browser only warns about. The `load_scenario` method's inline `scenario`
+object is still checked by its wire schema, which requires `name` and
+`targetType`.
 
 ## Re-reading a scenario file (`--watch`)
 

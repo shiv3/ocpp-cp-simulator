@@ -845,13 +845,15 @@ describe("a held scenario reload survives the run that blocked it (#314)", () =>
   });
 
   it("rejects an unloadable edit outright instead of holding it", async () => {
-    // `isScenarioShape` asks only for `id`, `nodes` and `edges`, so an edit that
-    // dropped `name` reached `applyOrDefer`, was held behind the run, and had
-    // its bytes recorded as the baseline — and `loadScenario`'s own gate then
-    // rejected them when the hold released. The reload was lost in the way that
-    // matters: the baseline said the charge point already held those bytes, so
-    // the next save of the *same* text would be a no-op. The reload path now
-    // runs the load's gate before accepting anything for deferral.
+    // `isScenarioShape` used to ask only for `id`, `nodes` and `edges`, so an
+    // edit that dropped `name` reached `applyOrDefer`, was held behind the run,
+    // and had its bytes recorded as the baseline — and `loadScenario`'s own
+    // gate then rejected them when the hold released. The reload was lost in
+    // the way that matters: the baseline said the charge point already held
+    // those bytes, so the next save of the *same* text would be a no-op. The
+    // reload path runs the load's gate before accepting anything for deferral.
+    // Since the gates were unified a missing `name` is filled in, so the
+    // unloadable edit here is one whose `nodes` is not an array.
     const dir = tempDir();
     const file = writeFile(dir, "s.json", runnableScenario("gate-run", 30));
     const backend = new TestWatchBackend();
@@ -867,12 +869,12 @@ describe("a held scenario reload survives the run that blocked it (#314)", () =>
     service.runScenario(1, "gate-run");
     expect(service.isScenarioRunning("gate-run")).toBe(true);
 
-    const nameless = JSON.parse(runnableScenario("gate-run", 7)) as Record<
+    const unloadable = JSON.parse(runnableScenario("gate-run", 7)) as Record<
       string,
       unknown
     >;
-    delete nameless.name;
-    backend.save(file, JSON.stringify(nameless));
+    unloadable.nodes = { 0: "not-an-array" };
+    backend.save(file, JSON.stringify(unloadable));
     await waitFor(
       () => events.some((e) => e.outcome === "rejected"),
       "an immediate rejection",
@@ -881,7 +883,7 @@ describe("a held scenario reload survives the run that blocked it (#314)", () =>
     // reported as `deferred` and would have cached these bytes.
     expect(events.some((e) => e.outcome === "deferred")).toBe(false);
     expect(events.find((e) => e.outcome === "rejected")?.error).toContain(
-      "name",
+      "scenario definition",
     );
     expect(loadedDelaySeconds(server, "CP-GATE", "gate-run")).toBe(30);
 
@@ -1399,15 +1401,13 @@ describe("a rejected save never becomes the baseline (#314)", () => {
     });
     await rpc(socket, "load_scenario", { connector: 1, file }, "CP-BASELINE");
 
-    // Structurally a scenario (id/nodes/edges) so it clears the watcher's own
-    // shape check, but with a `name` `assertLoadableScenario` refuses — so
-    // `loadScenario` throws and the reload is rejected after parsing. It used
-    // to use a bad `targetType`, which stopped working once a reload began
-    // pinning the target to what was loaded: the bad value never reaches the
-    // load any more, which is the point of that rule.
+    // Parses, but is no scenario the load gate accepts, so the reload is
+    // rejected after parsing. It used to use a bad `targetType`, then a
+    // non-string `name`; the gate now fills both in (the browser always
+    // accepted them), so it is `edges` that is not an array.
     const unloadable = JSON.stringify({
       ...JSON.parse(scenario("baseline-keep", 22)),
-      name: 42,
+      edges: "not-an-array",
     });
     backend.save(file, unloadable);
     await waitFor(() => events.length > 0, "a rejection event");

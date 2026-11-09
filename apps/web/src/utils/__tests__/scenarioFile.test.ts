@@ -114,6 +114,37 @@ describe("parseScenarioJSON", () => {
     ).toThrow("Invalid scenario file format");
   });
 
+  it("fills in a missing name / targetType like the daemon, with a warning", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const result = parseScenarioJSON(
+        JSON.stringify(
+          createValidScenario({ name: undefined, targetType: undefined }),
+        ),
+      );
+      expect(result.name).toBe("test-scenario");
+      expect(result.targetType).toBe("connector");
+      const messages = warn.mock.calls.map(([m]) => String(m));
+      expect(messages).toContain(
+        '[scenarioFile] Imported scenario "test-scenario": scenario has no "name"; using the id',
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("still loads an id the daemon would refuse, with a warning", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(
+        parseScenarioJSON(JSON.stringify(createValidScenario({ id: "  " }))).id,
+      ).toBe("  ");
+      expect(warn).toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("rejects non-object top-level JSON (null / array / scalar)", () => {
     expect(() => parseScenarioJSON("null")).toThrow(
       "Invalid scenario file format",

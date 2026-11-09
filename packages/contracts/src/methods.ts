@@ -253,8 +253,10 @@ export const scenarioWaitExtensionSecondsSchema = z
  * Socket.IO and MCP (see `parseRpcParams` in socketServer.ts). An intersection
  * keeps the byte bound and stays permissive about unknown keys — real editor
  * exports carry xyflow UI fields. `CLIChargePointService.loadScenario`
- * re-checks the same invariants for the paths that never see this schema
- * (`file`, the startup loaders). Full schema conformance remains advisory
+ * re-checks `id`, `nodes` and `edges` for the paths that never see this schema
+ * (`file`, the startup loaders) and fills in a missing `name` / `targetType`
+ * there, as the web console's import does (`checkLoadableScenario`); this wire
+ * schema still requires both. Full schema conformance remains advisory
  * (issue #214).
  */
 const LOADABLE_SCENARIO_OBJ = () =>

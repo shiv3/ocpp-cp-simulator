@@ -138,5 +138,19 @@
   "cp.controls.confirmRemove": "Remove connector {{id}} from {{cpId}}? The removal is not saved: the connector comes back when the charge point is created again.",
   "cp.controls.removeFailed": "Connector not removed: {{message}}",
   "cp.socMeterSync.readFailed": "Sync preference not read ({{error}}): Set SoC leaves the meter alone until you turn sync on.",
-  "cp.socMeterSync.applyFailed": "Sync not applied to the connector: {{error}}"
+  "cp.socMeterSync.applyFailed": "Sync not applied to the connector: {{error}}",
+  "cp.section.configuration": "Configuration",
+  "cp.configKeys.unsupported": "Configuration keys are not available for this connection",
+  "cp.configKeys.loadFailed": "Could not read the configuration keys",
+  "cp.configKeys.empty": "This charge point has no configuration keys",
+  "cp.configKeys.key": "Key",
+  "cp.configKeys.value": "Value",
+  "cp.configKeys.access": "Access",
+  "cp.configKeys.valueOf": "Value of {{key}}",
+  "cp.configKeys.writeOnly": "write-only; value is never shown",
+  "cp.configKeys.save": "Save",
+  "cp.configKeys.saved": "Saved",
+  "cp.configKeys.rebootRequired": "Saved; takes effect after a reboot",
+  "cp.configKeys.readOnly": "Read-only",
+  "cp.configKeys.readWrite": "Read-write"
 }

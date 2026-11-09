@@ -441,6 +441,9 @@ describe("runAnalyze (integration, real @ocpp-debugkit/toolkit)", () => {
       "excluded: 0 soap record(s), 0 non-1.6 record(s), 1 unparseable line(s), 1 invalid record(s)",
     );
     expect(stderr).toContain("Error: no analyzable records found");
+    expect(stderr.indexOf("excluded:")).toBeLessThan(
+      stderr.indexOf("Error: no analyzable records found"),
+    );
   });
 
   it("returns exit code 1 and an error on stderr when the trace file is missing", async () => {

@@ -646,7 +646,7 @@ const StepsGraphView: React.FC<StepRunViewProps> = (props) => {
               {marked.mark && (
                 <IssueBadge
                   mark={marked.mark}
-                  className="absolute -top-2.5 right-4"
+                  className="absolute -top-2.5 right-8"
                 />
               )}
               {marked.description}

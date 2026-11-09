@@ -169,7 +169,7 @@ const StepBox: React.FC<StepBoxProps> = ({
       {marked?.mark && (
         <IssueBadge
           mark={marked.mark}
-          className="absolute -top-2.5 right-4 z-10"
+          className="absolute -top-2.5 right-8 z-10"
         />
       )}
       {onSelect ? (

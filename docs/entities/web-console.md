@@ -1044,7 +1044,31 @@ scenario or a copy of one (`libraryId`). All use the same content
   **After this step** select — _End of scenario_ or _Loop back to step N_ — that
   sets or clears the link (`setLaneLink`); a link keeps leaving the lane's last
   card through inserts, moves and deletes, and is dropped when its target is
-  deleted. A chain closed by a loop takes no **+ branch**. Above the steps, a warning box lists wiring the executor would only half run (`validateScenarioGraph`, see [connection rules](../concepts/scenario-format.md#connection-rules)): a fork after a step, a step nothing reaches, a `switch` / `choice` edge it never takes (no handle it can pick, or a second edge on one handle), an edge to a missing node, a Call Response its branch holds no CALL for, a `replace` trigger whose CALL is never answered. It never blocks Save. A scenario with a
+  deleted. A chain closed by a loop takes no **+ branch**. Above the steps, a warning box lists wiring the executor would only half run (`validateScenarioGraph`, see [connection rules](../concepts/scenario-format.md#connection-rules)): a fork after a step, a step nothing reaches, a `switch` / `choice` edge it never takes (no handle it can pick, or a second edge on one handle), an edge to a missing node, a Call Response its branch holds no CALL for, a `replace` trigger whose CALL is never answered. It never blocks Save.
+  The editor works the diagnostics out once per change and marks each one
+  where it applies ([`graphIssueMarks.ts`](../../apps/web/src/console/lib/graphIssueMarks.ts)):
+  - a step it names gets a severity badge (icon and count; rose for an
+    error, amber for a warning, blue for info) and a border or inset ring in
+    that colour: top-right on Graph cards and Steps boxes, at the right end
+    of outline rows. The badge's tooltip and the card's accessible description
+    list the messages.
+  - in the Graph view, an edge it names that the view draws (the edge into a
+    card, a fork edge, the edge into END, a loop or join link) is stroked in
+    the severity colour, with a marker at its midpoint and `data-issue` set
+    to the codes on the path. A dashed link stays dashed.
+  - an edge the view does not draw (a dangling edge, or any edge in the
+    Steps view and the outline) marks its source step as an edge issue
+    instead ("On an edge from this step: …").
+  - START and END are marked only by a diagnostic about them (in the Graph
+    view, beside the start dot and the end rings). `missingStart` names no
+    node, so it is listed in the box only.
+
+  Each line of the box that has a step is a button. It selects that step
+  (the inspector opens, as a click on the card does) and scrolls it into
+  view. Hovering or focusing a line highlights its card or edge. Hovering or
+  focusing a marked card tints its lines. The run page and the Library's
+  read view have no box and no marks. The template preview shows the marks
+  without the box (no shipped template has any). A scenario with a
   second fork, or a node no path reaches, cannot be drawn: it is shown as an
   outline list (steps in running order with where each jumps to) whose steps
   can be selected and edited, but not re-wired. There is no ReactFlow editor

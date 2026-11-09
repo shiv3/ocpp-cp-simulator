@@ -73,7 +73,6 @@ function isReply(value: unknown): value is CsmsReply {
   return keys.length === 1 && (keys[0] === "result" || keys[0] === "error");
 }
 
-/** Deterministic id for the next CSMS-initiated CALL: `csms-1`, `csms-2`, ... */
 /** A 20 ms settle tick that took longer than this marks a starved process. */
 const STARVED_TICK_MS = 60;
 
@@ -92,6 +91,7 @@ export class FakeCsms {
   private readonly connectionWaiters = new Set<() => void>();
   private readonly callCounts = new Map<string, number>();
   private readonly pending = new Map<string, (frame: WireFrame) => void>();
+  /** Deterministic id for the next CSMS-initiated CALL: `csms-1`, `csms-2`, ... */
   private nextCallId = 0;
   private transactionCounter = 0;
   private lastFrameAt = Date.now();
@@ -376,16 +376,19 @@ export class FakeCsms {
         pred,
         resolve,
         reject,
-        timer: setTimeout(() => {
-          this.waiters.delete(waiter);
-          reject(
-            new Error(
-              `fake CSMS: timed out waiting for a frame (have ${this.frames
-                .map((f) => `${f.dir}${f.action ?? f.kind}`)
-                .join(", ")})`,
-            ),
-          );
-        }, options.timeoutMs ?? 15_000),
+        timer: setTimeout(
+          () => {
+            this.waiters.delete(waiter);
+            reject(
+              new Error(
+                `fake CSMS: timed out waiting for a frame (have ${this.frames
+                  .map((f) => `${f.dir}${f.action ?? f.kind}`)
+                  .join(", ")})`,
+              ),
+            );
+          },
+          this.budget(options.timeoutMs ?? 15_000),
+        ),
       };
       this.waiters.add(waiter);
     });
@@ -417,6 +420,19 @@ export class FakeCsms {
     this.lastFrameAt = Date.now();
   }
 
+  /**
+   * One deadline (epoch ms) for a whole case, set by the runner below the test
+   * timeout. Every wait and settle shares it, so a case that never settles
+   * fails with its own message, not as a bare test timeout (#848).
+   */
+  caseDeadline: number | undefined;
+
+  /** `ms`, cut down to what is left of the case deadline. */
+  budget(ms: number): number {
+    if (this.caseDeadline === undefined) return ms;
+    return Math.max(0, Math.min(ms, this.caseDeadline - Date.now()));
+  }
+
   /** Number of frames recorded so far; use as the `from` of a later wait. */
   mark(): number {
     return this.frames.length;
@@ -429,7 +445,7 @@ export class FakeCsms {
    */
   async settle(quietMs = 250, maxMs = 60_000): Promise<void> {
     if (this.memory) return this.settleMemory();
-    const deadline = Date.now() + maxMs;
+    const deadline = Date.now() + this.budget(maxMs);
     while (Date.now() < deadline) {
       const tickStart = Date.now();
       // A quiet window only means "nothing more is coming" while the event

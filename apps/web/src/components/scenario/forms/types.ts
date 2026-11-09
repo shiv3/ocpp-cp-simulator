@@ -11,6 +11,10 @@ export type LaneTarget = { kind: "step"; text: string } | { kind: "end" };
  * optional: a form rendered without it (or read-only) edits its own data.
  */
 export interface NodeFormContext {
+  /** Open this lane's row (`case-<n>`, `default`, `option-<n>`): scroll it
+   *  into view, highlight it briefly and focus its field. `nonce` changes
+   *  on every request, so asking for the same lane again repeats it. */
+  focusLane?: { handle: string; nonce: number };
   /** The keys the scenario's setState steps store (`$from` `state.<key>`). */
   stateKeys?: readonly string[];
   /** Where the lane on `handle` (`case-<n>`, `default`, `option-<n>`) leads:

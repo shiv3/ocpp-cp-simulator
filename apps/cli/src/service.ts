@@ -50,7 +50,16 @@ import {
   hasStatusNotificationOptions,
   OCPPStatus,
 } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
-import { isSoapVersion } from "@ocpp-cp-simulator/core/cp/domain/types/OcppVersion";
+import {
+  readConfigurationKeys,
+  writeConfigurationKey,
+  type ConfigurationKeyList,
+  type ConfigurationSetStatus,
+} from "@ocpp-cp-simulator/core/cp/domain/charge-point/configurationAccess";
+import {
+  isOcpp2Version,
+  isSoapVersion,
+} from "@ocpp-cp-simulator/core/cp/domain/types/OcppVersion";
 import { soapDialectForVersion } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/soap/dialect";
 import { OCPPSoapServer } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/soap/OCPPSoapServer";
 import type { ResolvedNetworkSimConfig } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/network-sim/config";
@@ -1605,6 +1614,26 @@ export class CLIChargePointService {
     query: Omit<ChargingSessionQuery, "cpId"> = {},
   ): ChargingSessionPage {
     return this._sessions.list({ ...query, cpId: this._init.cpId });
+  }
+
+  /** #612: this charge point's OCPP configuration keys. */
+  getConfigurationKeys(keys: readonly string[] = []): ConfigurationKeyList {
+    return readConfigurationKeys(
+      this._chargePoint.configuration,
+      isOcpp2Version(this._chargePoint.ocppVersion),
+      keys,
+    );
+  }
+
+  /** #612: write one configuration key; see {@link writeConfigurationKey}. */
+  setConfigurationKey(key: string, value: string): ConfigurationSetStatus {
+    return writeConfigurationKey(
+      this._chargePoint.configuration,
+      isOcpp2Version(this._chargePoint.ocppVersion),
+      key,
+      value,
+      this._chargePoint.logger,
+    );
   }
 
   private requireConnector(connectorId: number) {

@@ -40,6 +40,11 @@ export function usePanelParams(): PanelParams {
       // `tab` (the lower half's section) belongs to one charge point: another
       // charge point opens on its message log, the same one keeps its section.
       if (nextCpId !== cpId) next.delete("tab");
+      // A scenario view (`run`, `edit`, `pview`) belongs to the charge point it
+      // replaced the panel body of: a click on a row or connector leaves it.
+      next.delete("run");
+      next.delete("edit");
+      next.delete("pview");
       setParams(next, { replace: cpId !== null });
     },
     [params, setParams, cpId],
@@ -50,6 +55,9 @@ export function usePanelParams(): PanelParams {
     next.delete("cp");
     next.delete("connector");
     next.delete("tab");
+    next.delete("run");
+    next.delete("edit");
+    next.delete("pview");
     setParams(next, { replace: true });
   }, [params, setParams]);
 

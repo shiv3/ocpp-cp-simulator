@@ -82,6 +82,7 @@ describe("handleSetVariablesV201", () => {
         },
         {
           attributeStatus: "Rejected",
+          attributeStatusInfo: { reasonCode: "ReadOnly" },
           component: { name: "AuthCtrlr" },
           variable: { name: "AuthorizeRemoteStart" },
         },

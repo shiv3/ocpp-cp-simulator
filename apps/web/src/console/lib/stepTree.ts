@@ -300,3 +300,19 @@ export function loopBoundsInput(
       : {}),
   };
 }
+
+/** The handle a switch / choice lane leaves its step on (`case-<n>`,
+ *  `default`, `option-<n>`); null for any other kind of lane, which has no
+ *  row in the inspector to open. */
+export function laneHandle(condition: LaneCondition): string | null {
+  switch (condition.kind) {
+    case "case":
+      return `case-${condition.index}`;
+    case "default":
+      return "default";
+    case "option":
+      return `option-${condition.index}`;
+    default:
+      return null;
+  }
+}

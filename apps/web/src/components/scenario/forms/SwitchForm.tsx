@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 import { LaneLine } from "./SelectLanes";
 import { CaseList, SwitchValueField } from "./switchCases";
 import { useIndexedLanes } from "./useIndexedLanes";
+import { LANE_ROW_FOCUS_CLASS, useLaneFocus } from "./useLaneFocus";
 import type { NodeFormComponentProps, NodeFormData } from "./types";
 
 /** Schema 1.6 (#654): goes on along `case-<n>` for the first case equal to
@@ -25,6 +26,7 @@ export default function SwitchForm({
     store: (next) => ({ ...value, cases: next }),
     onChange,
   });
+  const { rowProps } = useLaneFocus(context);
   const setCase = (index: number, next: unknown) =>
     onChange({
       ...value,
@@ -75,6 +77,7 @@ export default function SwitchForm({
         <CaseList
           cases={cases}
           testIdPrefix="switch"
+          rowProps={(index) => rowProps(`case-${index}`)}
           onSet={setCase}
           onMove={(index, to) => lanes.move(index, to)}
           onRemove={(index) => lanes.remove(index)}
@@ -87,7 +90,8 @@ export default function SwitchForm({
           after={
             <li
               data-testid="switch-default"
-              className="space-y-1.5 rounded border border-dashed border-gray-300 p-2 dark:border-gray-600"
+              {...rowProps("default")}
+              className={`space-y-1.5 rounded border border-dashed border-gray-300 p-2 dark:border-gray-600 ${LANE_ROW_FOCUS_CLASS}`}
             >
               <div className="flex items-center gap-2">
                 <span className="font-mono text-xs text-secondary">

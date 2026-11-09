@@ -45,6 +45,11 @@ updates:
       - dependency-name: "typescript"
         update-types:
           - "version-update:semver-major"
+      # Dependabot resolves a scoped package's registry from .npmrc, not
+      # bunfig.toml, so it looks up @open-ocpp-trace/* on npmjs and gets a
+      # 404 that marks every weekly bun run failed. The registry above still
+      # lets it install the lockfile; bump the SDK by hand (#886).
+      - dependency-name: "@open-ocpp-trace/*"
     groups:
       js-dependencies:
         patterns:

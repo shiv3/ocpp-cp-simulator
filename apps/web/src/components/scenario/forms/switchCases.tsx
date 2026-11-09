@@ -7,6 +7,7 @@ import {
 import { ScenarioValueField } from "./ScenarioValueField";
 import { RowActions } from "./SelectLanes";
 import { jsonEqual } from "./scenarioValue";
+import { LANE_ROW_FOCUS_CLASS } from "./useLaneFocus";
 
 /**
  * The pieces of a `switch` (schema 1.6 / 1.7) the editor shows wherever a
@@ -86,6 +87,7 @@ export function CaseList({
   testIdPrefix,
   extra,
   after,
+  rowProps,
 }: {
   cases: readonly unknown[];
   onSet: (index: number, value: unknown) => void;
@@ -94,6 +96,8 @@ export function CaseList({
   testIdPrefix: string;
   extra?: (index: number) => ReactNode;
   after?: ReactNode;
+  /** Props of case row `index` (see `useLaneFocus`). */
+  rowProps?: (index: number) => Record<string, unknown>;
 }) {
   const { t } = useTranslation();
   return (
@@ -105,7 +109,8 @@ export function CaseList({
           <li
             key={index}
             data-testid={`${testIdPrefix}-case-${index}`}
-            className="space-y-1.5 rounded border border-gray-300 p-2 dark:border-gray-600"
+            {...rowProps?.(index)}
+            className={`space-y-1.5 rounded border border-gray-300 p-2 dark:border-gray-600 ${LANE_ROW_FOCUS_CLASS}`}
           >
             <div className="flex items-center gap-2">
               <span className="font-mono text-xs text-secondary">{name}</span>

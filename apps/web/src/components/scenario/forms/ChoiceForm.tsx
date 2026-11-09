@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 import { useId } from "react";
 import { LaneLine, RowActions } from "./SelectLanes";
 import { useIndexedLanes } from "./useIndexedLanes";
+import { LANE_ROW_FOCUS_CLASS, useLaneFocus } from "./useLaneFocus";
 import type { NodeFormComponentProps, NodeFormData } from "./types";
 
 type Option = { weight?: number; label?: string };
@@ -45,6 +46,7 @@ export default function ChoiceForm({
     store: (next) => ({ ...value, options: next }),
     onChange,
   });
+  const { rowProps } = useLaneFocus(context);
   const update = (index: number, patch: Option) =>
     onChange({
       ...value,
@@ -83,7 +85,8 @@ export default function ChoiceForm({
               <li
                 key={index}
                 data-testid={`choice-option-${index}`}
-                className="space-y-1.5 rounded border border-gray-300 p-2 dark:border-gray-600"
+                {...rowProps(name)}
+                className={`space-y-1.5 rounded border border-gray-300 p-2 dark:border-gray-600 ${LANE_ROW_FOCUS_CLASS}`}
               >
                 <div className="flex items-center gap-2">
                   <span className="shrink-0 font-mono text-xs text-secondary">

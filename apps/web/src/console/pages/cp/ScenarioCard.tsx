@@ -38,6 +38,10 @@ export interface ScenarioCardProps {
   /** Router state for the scenario-name link to the run panel: what the
    *  charge point page's Back link needs (`{ from }`). */
   runLinkState?: unknown;
+  /** Opens a scenario of this connector in the run panel (`edit`: in its
+   *  editor), live or not. Without it the card links to the run / editor
+   *  pages instead. */
+  onOpenScenario?: (scenarioId: string, edit?: boolean) => void;
 }
 
 /** Value of the option standing for a definition that is not a Library copy
@@ -56,9 +60,18 @@ const LiveRun: React.FC<{
   run: ActiveScenarioRun;
   now: number;
   runLinkState?: unknown;
+  onOpenScenario?: (scenarioId: string, edit?: boolean) => void;
   onStop: () => void;
   scheduleRefresh: () => void;
-}> = ({ cpId, run, now, runLinkState, onStop, scheduleRefresh }) => {
+}> = ({
+  cpId,
+  run,
+  now,
+  runLinkState,
+  onOpenScenario,
+  onStop,
+  scheduleRefresh,
+}) => {
   const { t } = useTranslation();
   const { chargePointService } = useDataContext();
   const elapsed = formatElapsed(now - (run.currentNodeStartedAt ?? now));
@@ -74,17 +87,29 @@ const LiveRun: React.FC<{
     >
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-2">
         <h3 className="font-semibold text-cx-fg">
-          <Link
-            to={`/cp/${encodeURIComponent(cpId)}?connector=${
-              run.connectorId
-            }&run=${encodeURIComponent(run.scenarioId)}`}
-            state={runLinkState}
-            title={t("cpPanels.scenario.showRunTitle")}
-            className="inline-flex items-center gap-0.5 hover:text-cx-accent hover:underline"
-          >
-            {run.name}
-            <ChevronRight className="h-3.5 w-3.5" />
-          </Link>
+          {onOpenScenario ? (
+            <button
+              type="button"
+              onClick={() => onOpenScenario(run.scenarioId)}
+              title={t("cpPanels.scenario.showRunTitle")}
+              className="inline-flex items-center gap-0.5 hover:text-cx-accent hover:underline"
+            >
+              {run.name}
+              <ChevronRight className="h-3.5 w-3.5" />
+            </button>
+          ) : (
+            <Link
+              to={`/cp/${encodeURIComponent(cpId)}?connector=${
+                run.connectorId
+              }&run=${encodeURIComponent(run.scenarioId)}`}
+              state={runLinkState}
+              title={t("cpPanels.scenario.showRunTitle")}
+              className="inline-flex items-center gap-0.5 hover:text-cx-accent hover:underline"
+            >
+              {run.name}
+              <ChevronRight className="h-3.5 w-3.5" />
+            </Link>
+          )}
         </h3>
         <RunStatePill state={run.state} />
         <span className="text-[12.5px] text-cx-muted">
@@ -167,7 +192,8 @@ const ScenarioPicker: React.FC<{
   connectorId: number;
   connectorIds: number[];
   onRunStarted: () => void;
-}> = ({ cpId, connectorId, connectorIds, onRunStarted }) => {
+  onOpenScenario?: (scenarioId: string, edit?: boolean) => void;
+}> = ({ cpId, connectorId, connectorIds, onRunStarted, onOpenScenario }) => {
   const { t } = useTranslation();
   const { chargePointService } = useDataContext();
   const library = useScopeDefinitions(LIBRARY_SCOPE, null);
@@ -306,10 +332,24 @@ const ScenarioPicker: React.FC<{
     <>
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
         <h3 className="font-semibold text-cx-fg">
-          {t("cpPanels.scenario.noneRunning")}
+          {current && onOpenScenario ? (
+            <button
+              type="button"
+              onClick={() => onOpenScenario(current.id)}
+              title={t("cpPanels.scenario.openTitle")}
+              className="inline-flex items-center gap-0.5 hover:text-cx-accent hover:underline"
+            >
+              {current.name}
+              <ChevronRight className="h-3.5 w-3.5" />
+            </button>
+          ) : (
+            t("cpPanels.scenario.noneRunning")
+          )}
         </h3>
         <span className="text-[12.5px] text-cx-muted">
-          {t("cpPanels.scenario.pickHint")}
+          {current && onOpenScenario
+            ? t("cpPanels.scenario.notRunning")
+            : t("cpPanels.scenario.pickHint")}
         </span>
       </div>
       <div className="mt-2.5 flex flex-wrap items-center gap-2">
@@ -340,7 +380,27 @@ const ScenarioPicker: React.FC<{
         >
           {t("cpPanels.scenario.run")}
         </Button>
-        {current && (
+        {current && onOpenScenario && (
+          <>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => onOpenScenario(current.id)}
+            >
+              {t("cpPanels.scenario.open")}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => onOpenScenario(current.id, true)}
+            >
+              {t("cpPanels.scenario.edit")}
+            </Button>
+          </>
+        )}
+        {current && !onOpenScenario && (
           <Link
             to={editScenarioUrl(cpId, connectorId, current)}
             className={buttonVariants({ variant: "outline", size: "sm" })}
@@ -388,6 +448,7 @@ const ScenarioCard: React.FC<ScenarioCardProps> = ({
   refresh,
   scheduleRefresh,
   runLinkState,
+  onOpenScenario,
 }) => {
   const { t } = useTranslation();
   const { chargePointService } = useDataContext();
@@ -430,6 +491,7 @@ const ScenarioCard: React.FC<ScenarioCardProps> = ({
           connectorId={connectorId}
           connectorIds={connectorIds}
           onRunStarted={scheduleRefresh}
+          onOpenScenario={onOpenScenario}
         />
       ) : (
         <div className="flex flex-col gap-4">
@@ -440,6 +502,7 @@ const ScenarioCard: React.FC<ScenarioCardProps> = ({
               run={run}
               now={now}
               runLinkState={runLinkState}
+              onOpenScenario={onOpenScenario}
               scheduleRefresh={scheduleRefresh}
               onStop={() => void handleStop(run.connectorId, run.scenarioId)}
             />

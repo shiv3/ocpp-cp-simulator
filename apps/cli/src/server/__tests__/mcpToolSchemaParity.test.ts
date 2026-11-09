@@ -345,6 +345,8 @@ describe("MCP curated tool schema parity (general, #299)", () => {
     { tool: "get_logs", method: "logs.get" },
     { tool: "get_timeline", method: "timeline.get" },
     { tool: "list_charging_sessions", method: "sessions.list" },
+    { tool: "get_config_keys", method: "cp.config_keys.get" },
+    { tool: "set_config_key", method: "cp.config_keys.set" },
     {
       tool: "network_sim_trigger_disconnect",
       method: "network_sim.disconnect.trigger",

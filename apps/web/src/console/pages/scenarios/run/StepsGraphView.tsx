@@ -147,6 +147,7 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
     state,
     selectedStepId,
     onSelectStep,
+    onSelectLane,
     editable = false,
     onInsertStep,
     onWrapInLoopRange,
@@ -1127,6 +1128,23 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
               const removeLabel = t("scenarioRun.tree.removeLane", {
                 lane: laneLetter(tag.laneIndex),
               });
+              const tip = [
+                tag.text,
+                tag.dead
+                  ? t("scenarioRun.tree.deadLane")
+                  : tag.leaves
+                    ? t("scenarioRun.tree.leavesLoop")
+                    : null,
+              ]
+                .filter(Boolean)
+                .join(" — ");
+              const openLabel =
+                onSelectLane && tag.handle !== null
+                  ? t("scenarioRun.tree.openLane", {
+                      name: tag.handle,
+                      n: numbers.get(tag.forkId) ?? "",
+                    })
+                  : null;
               return (
                 <div
                   key={tag.key}
@@ -1164,12 +1182,26 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
                   >
                     {laneLetter(tag.laneIndex)}
                   </span>
-                  <span
-                    data-lane-condition=""
-                    className="min-w-0 flex-1 truncate font-mono text-[11px] text-cx-fg2"
-                  >
-                    {tag.text}
-                  </span>
+                  {openLabel && tag.handle !== null ? (
+                    <button
+                      type="button"
+                      data-lane-condition=""
+                      aria-label={openLabel}
+                      title={tip}
+                      onClick={() => onSelectLane?.(tag.forkId, tag.handle!)}
+                      className="min-w-0 flex-1 truncate rounded text-left font-mono text-[11px] text-cx-fg2 hover:text-cx-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-cx-accent"
+                    >
+                      {tag.text}
+                    </button>
+                  ) : (
+                    <span
+                      data-lane-condition=""
+                      title={tip}
+                      className="min-w-0 flex-1 truncate font-mono text-[11px] text-cx-fg2"
+                    >
+                      {tag.text}
+                    </span>
+                  )}
                   {tag.leaves && (
                     <LogOut
                       className="h-3 w-3 shrink-0 text-cx-purple"

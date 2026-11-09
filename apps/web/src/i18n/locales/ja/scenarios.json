@@ -146,11 +146,6 @@
   "scenarios.templateBrowser.noMatch": "「{{query}}」に一致するテンプレートはありません。",
   "scenarios.templateBrowser.searchLabel": "テンプレートを検索",
   "scenarios.templateBrowser.searchPlaceholder": "名前または説明で検索",
-  "scenarios.templateBrowser.showSteps": "中身を見る",
-  "scenarios.templateBrowser.hideSteps": "中身を隠す",
-  "scenarios.templateBrowser.stepsLabel": "ステップ",
-  "scenarios.templateBrowser.goesTo": "→ {{steps}} へ",
-  "scenarios.templateBrowser.thenEnd": "→ 終了",
   "scenarios.templateBrowser.title": "シナリオテンプレート",
   "scenarios.category.status": "ステータス",
   "scenarios.category.transaction": "トランザクション",
@@ -167,5 +162,12 @@
   "scenarios.editor.issue.edgeOutOfEnd": "End から出るエッジがあります。辿られません。",
   "scenarios.editor.issue.extraOutgoing": "ステップ {{n}}({{title}})の次のステップが複数ありますが、並列に分岐できるのは Start だけです。実行時は最初の1つしか動きません。",
   "scenarios.editor.issue.danglingEdge": "存在しないステップを指すエッジがあります。その枝はそこで終わります。",
-  "scenarios.editor.issue.unreachable": "ステップ {{n}}({{title}})は Start から到達できないため、実行されません。"
+  "scenarios.editor.issue.unreachable": "ステップ {{n}}({{title}})は Start から到達できないため、実行されません。",
+  "scenarios.templateBrowser.previewLabel": "{{name}} のプレビュー",
+  "scenarios.templateBrowser.backToList": "← テンプレート一覧",
+  "scenarios.templateBrowser.readOnlyNote": "読み取り専用のプレビューです。「テンプレートを使用」で編集できるコピーを作成します。",
+  "scenarios.templateBrowser.selectStepHint": "ステップを選ぶと設定が表示されます。",
+  "scenarios.templateBrowser.listLabel": "テンプレート",
+  "scenarios.templateBrowser.previewTemplate": "{{name}} をプレビュー",
+  "scenarios.templateBrowser.nothingToPreview": "プレビューするテンプレートがありません。"
 }

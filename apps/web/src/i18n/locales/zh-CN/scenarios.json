@@ -146,11 +146,6 @@
   "scenarios.templateBrowser.noMatch": "没有与“{{query}}”匹配的模板。",
   "scenarios.templateBrowser.searchLabel": "搜索模板",
   "scenarios.templateBrowser.searchPlaceholder": "按名称或描述搜索",
-  "scenarios.templateBrowser.showSteps": "查看步骤",
-  "scenarios.templateBrowser.hideSteps": "隐藏步骤",
-  "scenarios.templateBrowser.stepsLabel": "步骤",
-  "scenarios.templateBrowser.goesTo": "→ {{steps}}",
-  "scenarios.templateBrowser.thenEnd": "→ 结束",
   "scenarios.templateBrowser.title": "场景模板",
   "scenarios.category.status": "状态",
   "scenarios.category.transaction": "事务",
@@ -167,5 +162,12 @@
   "scenarios.editor.issue.edgeOutOfEnd": "有一条边从 End 节点引出,不会被执行。",
   "scenarios.editor.issue.extraOutgoing": "步骤 {{n}}({{title}})有多个后续步骤,但只有 Start 能并行分支:运行时只会执行第一个。",
   "scenarios.editor.issue.danglingEdge": "有一条边指向不存在的步骤,该分支到此结束。",
-  "scenarios.editor.issue.unreachable": "步骤 {{n}}({{title}})无法从 Start 到达,永远不会运行。"
+  "scenarios.editor.issue.unreachable": "步骤 {{n}}({{title}})无法从 Start 到达,永远不会运行。",
+  "scenarios.templateBrowser.previewLabel": "{{name}} 的预览",
+  "scenarios.templateBrowser.backToList": "← 模板",
+  "scenarios.templateBrowser.readOnlyNote": "只读预览：“使用模板”会创建一个可编辑的副本。",
+  "scenarios.templateBrowser.selectStepHint": "选择一个步骤以查看其设置。",
+  "scenarios.templateBrowser.listLabel": "模板",
+  "scenarios.templateBrowser.previewTemplate": "预览 {{name}}",
+  "scenarios.templateBrowser.nothingToPreview": "没有可预览的模板。"
 }

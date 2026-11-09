@@ -22,7 +22,7 @@ related:
   - access-control.md
   - scenario-format.md
   - state-persistence.md
-updated: 2026-11-09
+updated: 2026-11-10
 ---
 
 # OCPP 1.6 security profiles
@@ -344,10 +344,15 @@ chain is reported as its leaf, with the sub-CAs as `childCertificateHashData`
   Charge Point certificate answers `NotFound` and that certificate cannot be
   deleted (whitepaper M04.FR.05). A `CentralSystemRootCertificate` that
   validates the current connection answers `Failed` and stays installed
-  (whitepaper M04.FR.06, #537). That is one equal (DER) to a `--tls-ca`
-  certificate of a `wss://` connection that verifies the server. Over
-  `ws://`, without `--tls-ca` (the runtime's trust store validates) or with
-  verification off, no root is in use. 2.x has no such rule.
+  (whitepaper M04.FR.06, #537). That is one equal (DER) to the root that
+  validates a `wss://` connection that verifies the server. Where the client
+  can read the server's chain (the Node `ws` client) that is the one
+  self-signed root the chain ends in, so another `--tls-ca` root is deleted
+  with `Accepted` (#563). Bun's native client (the daemon and the image) and
+  the browser cannot read it, so every `--tls-ca` certificate counts as in
+  use there. Over `ws://`, without `--tls-ca` (the runtime's trust store
+  validates) or with verification off, no root is in use. 2.x has no such
+  rule.
 - `CertificateSigned` checks the chain first (A02.FR.06, #732): every
   certificate is inside its validity period, each is signed by the next, when
   `CentralSystemRootCertificate`s are installed the top certificate is one of

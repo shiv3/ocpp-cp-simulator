@@ -59,6 +59,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])("%s MessageTimeout", (v) => {
     expect(handleSetVariablesV201(request, store).setVariableResult[0]).toEqual(
       {
         attributeStatus: "Rejected",
+        attributeStatusInfo: { reasonCode: "ReadOnly" },
         component,
         variable,
       },

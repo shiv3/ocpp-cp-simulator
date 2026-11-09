@@ -34,6 +34,8 @@ export function reduceChargerState(
   event: EngineEvent,
 ): ChargerState {
   switch (event.type) {
+    case "reported":
+      return reduceChargerState(state, { ...event, type: "notified" });
     case "notified": {
       const record = {
         status: event.status,

@@ -16,10 +16,13 @@ const CASE_DEADLINE_MS = 75_000;
 
 /** Run one case and return the normalized transcript. */
 export async function recordCase(c: GoldenCase): Promise<string[]> {
-  const rig = await Rig.create({ version: c.version, ...c.options });
   // Below the 90 s test timeout of goldenWire.bun.test.ts, so a stuck case
   // reports "never settled" and still reaches the finally below.
-  rig.csms.caseDeadline = Date.now() + CASE_DEADLINE_MS;
+  const rig = await Rig.create({
+    version: c.version,
+    ...c.options,
+    deadlineMs: CASE_DEADLINE_MS,
+  });
   try {
     await c.run(rig);
     await rig.csms.settle(400);

@@ -47,7 +47,47 @@ export function isBrowserRuntime(): boolean {
  * ping frame (#406) — on Bun's native client and the `ws` package; the
  * browser `WebSocket` API has no way to send one, so there it does nothing.
  */
-export type OcppSocket = WebSocket & { ping(): void };
+export type OcppSocket = WebSocket & {
+  ping(): void;
+  /**
+   * The self-signed root, as PEM, that ended the CSMS certificate chain of
+   * this open `wss://` connection (#563). Only the Node `ws` client can read
+   * the chain; Bun's native client and the browser cannot, and answer
+   * `undefined`.
+   */
+  validatingRootPem?(): string | undefined;
+};
+
+/** The part of a Node `PeerCertificate` the root lookup reads. */
+interface PeerCertificateLike {
+  readonly raw?: Uint8Array;
+  readonly issuerCertificate?: PeerCertificateLike;
+}
+
+function derToPem(der: Uint8Array): string {
+  let binary = "";
+  for (const byte of der) binary += String.fromCharCode(byte);
+  const lines = btoa(binary).match(/.{1,64}/g) ?? [];
+  return `-----BEGIN CERTIFICATE-----\n${lines.join("\n")}\n-----END CERTIFICATE-----\n`;
+}
+
+/**
+ * Walks `issuerCertificate` from the peer certificate to the certificate that
+ * is its own issuer (Node resolves the last link from the trust store) and
+ * returns it as PEM. `undefined` when the chain does not end in one, so the
+ * caller keeps the wider answer.
+ */
+export function peerChainRootPem(
+  peer: PeerCertificateLike | undefined,
+): string | undefined {
+  let cert = peer;
+  for (let depth = 0; cert && depth < 16; depth += 1) {
+    const issuer = cert.issuerCertificate;
+    if (issuer === cert) return cert.raw ? derToPem(cert.raw) : undefined;
+    cert = issuer;
+  }
+  return undefined;
+}
 
 export function buildOcppWebSocketUrl(params: {
   baseUrl: string;
@@ -185,6 +225,10 @@ interface NodeWsLike {
   close(code?: number, reason?: string): void;
   terminate(): void;
   readonly readyState: number;
+  /** The TLS socket of a `wss://` connection, once it is open. */
+  readonly _socket?: {
+    getPeerCertificate?(detailed: boolean): PeerCertificateLike;
+  };
 }
 
 type NodeWsConstructor = new (
@@ -635,6 +679,8 @@ class DeferredNodeWebSocket {
   private closeDispatched = false;
   /** Set once a non-101 response has been reported and the socket torn down. */
   private refusalHandled = false;
+  /** The root that ended the server's chain, read when the socket opens. */
+  private rootPem: string | undefined;
 
   constructor(
     url: string,
@@ -676,6 +722,10 @@ class DeferredNodeWebSocket {
 
   ping(): void {
     this.socket?.ping();
+  }
+
+  validatingRootPem(): string | undefined {
+    return this.rootPem;
   }
 
   close(code?: number, reason?: string): void {
@@ -791,6 +841,13 @@ class DeferredNodeWebSocket {
       }
       socket.on("open", () => {
         this.state = WebSocket.OPEN;
+        try {
+          this.rootPem = peerChainRootPem(
+            socket._socket?.getPeerCertificate?.(true),
+          );
+        } catch {
+          this.rootPem = undefined;
+        }
         this.onopen?.({ type: "open" } as Event);
       });
       socket.on("message", (data) => {

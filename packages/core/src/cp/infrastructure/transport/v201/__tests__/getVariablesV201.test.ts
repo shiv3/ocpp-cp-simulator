@@ -466,9 +466,25 @@ describe("handleGetVariablesV201 / handleSetVariablesV201 Target attribute (2.1,
     ).toBe("NotSupportedAttributeType");
     expect(
       handleGetVariablesV201(
-        { getVariableData: [{ attributeType: "MaxSet", ...POWER }] },
+        {
+          getVariableData: [
+            {
+              attributeType: "MaxSet",
+              component: { name: "OCPPCommCtrlr" },
+              variable: { name: "HeartbeatInterval" },
+            },
+          ],
+        },
         store,
         context,
+      ).getVariableResult[0].attributeStatus,
+    ).toBe("NotSupportedAttributeType");
+    // Without targets the 2.0.1 station has no MinSet / MaxSet either.
+    expect(
+      handleGetVariablesV201(
+        { getVariableData: [{ attributeType: "MinSet", ...POWER }] },
+        store,
+        { evseExists: context.evseExists },
       ).getVariableResult[0].attributeStatus,
     ).toBe("NotSupportedAttributeType");
   });

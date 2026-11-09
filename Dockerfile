@@ -129,6 +129,14 @@ ENV VITE_HEALTH_PATH=$HEALTH_PATH
 # run time (see the runtime stage).
 ARG APP_COMMIT
 ENV APP_COMMIT=$APP_COMMIT
+# Opt-in console error reporting (#794): empty by default, so the published
+# image reports nothing. VITE_ERROR_REPORTER selects a built-in adapter
+# (sentry), whose own variables follow. Vite bakes them into the bundle, so
+# runtime OCPP_SIM_ERROR_REPORTER / SENTRY_DSN on the container cover the
+# daemon only.
+ARG VITE_ERROR_REPORTER=""
+ARG VITE_SENTRY_DSN=""
+ARG VITE_SENTRY_ENVIRONMENT=""
 RUN bun run build && bun run build:cli
 
 

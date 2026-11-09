@@ -1289,6 +1289,106 @@ export const goldenCases: GoldenCase[] = [
     });
     await settle(rig);
   }),
+  // #605: one case per report base (B07.FR.07-FR.09), then a full report
+  // split by ItemsPerMessage into parts linked by seqNo / tbc (B07.FR.10).
+  ...(
+    ["ConfigurationInventory", "FullInventory", "SummaryInventory"] as const
+  ).map((reportBase) =>
+    c201(`base-report-${reportBase}`, async (rig) => {
+      await rig.csms.call("GetBaseReport", { requestId: 1, reportBase });
+      await rig.csms.waitForCall("NotifyReport", { timeoutMs: 30_000 });
+      await settle(rig);
+    }),
+  ),
+  c201("base-report-chunked", async (rig) => {
+    rig.cp.configuration.defineRuntimeIntegerKey(
+      "ItemsPerMessageGetReport",
+      15,
+      {
+        min: 1,
+      },
+    );
+    await rig.csms.call("GetBaseReport", {
+      requestId: 2,
+      reportBase: "FullInventory",
+    });
+    await rig.csms.waitForCall("NotifyReport", { nth: 3, timeoutMs: 30_000 });
+    await settle(rig);
+  }),
+  // #606: reason codes (B05.FR.07-FR.09, B06.FR.09) and the DeviceDataCtrlr
+  // size limits (B05.FR.11, B06.FR.05) in the statusInfo of each result.
+  c201("variables-reason-codes", async (rig) => {
+    const heartbeat = {
+      component: { name: "OCPPCommCtrlr" },
+      variable: { name: "HeartbeatInterval" },
+    };
+    await rig.csms.call("SetVariables", {
+      setVariableData: [
+        {
+          component: { name: "AuthCtrlr" },
+          variable: { name: "AuthorizeRemoteStart" },
+          attributeValue: "true",
+        },
+        { ...heartbeat, attributeValue: "soon" },
+        {
+          component: { name: "AlignedDataCtrlr" },
+          variable: { name: "Interval" },
+          attributeValue: "86401",
+        },
+        {
+          component: { name: "ChargingStation" },
+          variable: { name: "AvailabilityState" },
+          attributeValue: "Nope",
+        },
+        { ...heartbeat, attributeValue: "60", attributeType: "MaxSet" },
+        { ...heartbeat, attributeValue: "60" },
+      ],
+    });
+    await rig.csms.call("GetVariables", {
+      getVariableData: [
+        {
+          component: { name: "DeviceDataCtrlr" },
+          variable: { name: "ItemsPerMessage", instance: "SetVariables" },
+        },
+        {
+          component: { name: "DeviceDataCtrlr" },
+          variable: { name: "BytesPerMessage", instance: "GetVariables" },
+        },
+      ],
+    });
+    await settle(rig);
+  }),
+  c201("variables-too-many-elements", async (rig) => {
+    const heartbeat = {
+      component: { name: "OCPPCommCtrlr" },
+      variable: { name: "HeartbeatInterval" },
+    };
+    await rig.csms.call("SetVariables", {
+      setVariableData: Array.from({ length: 101 }, () => ({
+        ...heartbeat,
+        attributeValue: "60",
+      })),
+    });
+    await rig.csms.call("GetVariables", {
+      getVariableData: Array.from({ length: 101 }, () => heartbeat),
+    });
+    await settle(rig);
+  }),
+  c201("variables-too-large", async (rig) => {
+    const heartbeat = {
+      component: { name: "OCPPCommCtrlr" },
+      variable: { name: "HeartbeatInterval" },
+    };
+    await rig.csms.call("SetVariables", {
+      // attributeValue is capped at 1000 characters by the schema: 70 of
+      // them pass the item limit (100) and exceed the byte limit (65536).
+      setVariableData: Array.from({ length: 70 }, () => ({
+        ...heartbeat,
+        attributeValue: "9".repeat(1000),
+      })),
+    });
+    await settle(rig);
+  }),
   ...both("data-transfer", async (rig) => {
     await rig.csms.call("DataTransfer", { vendorId: "com.example" });
     rig.cp.sendDataTransfer("com.example.cp", "ping", "payload");

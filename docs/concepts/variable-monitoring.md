@@ -48,7 +48,8 @@ version surface.
 
 ## The device model behind a monitor
 
-A monitor targets a component/variable pair resolved through the same map as
+A monitor targets a component/variable pair resolved through the same
+[Device Model registry](../entities/device-model.md) as
 `GetVariables` / `SetVariables`
 ([`deviceModelMap.ts`](../../packages/core/src/cp/infrastructure/transport/v201/deviceModelMap.ts)):
 each 2.x variable there is backed by a configuration key, a 1.6 key or a
@@ -126,7 +127,9 @@ only variable with a target: a configuration variable's value is its
 setting, with no goal distinct from it, while the power is a measurement
 a CSMS can set a goal for. Every other variable, and every variable of a
 2.0.1 station, answers `NotSupportedAttributeType` for `Target` (B05.FR.06,
-B06.FR.08). Targets are kept in memory, not persisted.
+B06.FR.08). Targets are kept in memory, not persisted. The same variable has
+`MinSet` and `MaxSet` attributes that bound the Target (#606; see
+[GetVariables and SetVariables results](../entities/device-model.md#minset-and-maxset)).
 
 ## Monitor types
 

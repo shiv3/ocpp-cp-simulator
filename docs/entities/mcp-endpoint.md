@@ -96,6 +96,8 @@ The endpoint exposes the curated tools listed below, wrapping the daemon's
 | `tail_logs`                   | `logs.get`                    | `cpId`, `lines?` (default 50, max 1000), `level?` (this level or more severe), `type?`, `contains?` (case-insensitive) — the end of the log, oldest first, the newest entry last; filters apply before the tail is taken. Use `get_logs` to page further back (#613)                                                                                                                 |
 | `get_timeline`                | `timeline.get`                | `cpId`, `connectorId?`, `runId?`, `incidentId?`, `kinds?`, `limit?`, `offset?`, `order?` — the [operational timeline](../concepts/operational-timeline.md), windowed like `get_logs` (#448)                                                                                                                                                                                          |
 | `list_charging_sessions`      | `sessions.list`               | `cpId?` (omitted: the whole fleet, #489), `labels?`, `startedFrom?`, `startedTo?`, `connectorId?`, `outcomes?`, `limit?` (default 50), `offset?`, `order?` — the [charging sessions](../concepts/charging-sessions.md), newest first by default (#447)                                                                                                                               |
+| `get_config_keys`             | `cp.config_keys.get`          | `cpId`, `keys?` — the OCPP [configuration keys](../concepts/control-plane.md#configuration-keys-612) of a running charge point; a write-only value is returned empty (#612)                                                                                                                                                                                                          |
+| `set_config_key`              | `cp.config_keys.set`          | `cpId`, `key`, `value` — write one key; `not_found` for an unknown key, `invalid_params` for a read-only key or a refused value (#612)                                                                                                                                                                                                                                               |
 
 Most of these tools hand-declare a copy of their method's fields rather than
 deriving it (`cp_create` / `cp_create_many`, `cp_list`, `cp_labels_set`,
@@ -103,7 +105,7 @@ deriving it (`cp_create` / `cp_create_many`, `cp_list`, `cp_labels_set`,
 [cp.create parameters](../concepts/control-plane.md#cpcreate-parameters)), so
 a field the method later gains, or an optional field the tool over-tightened
 to required, could silently drift out of reach of an MCP agent (#284, #299).
-`get_timeline` and `list_charging_sessions` sit in between: they list their
+`get_timeline`, `list_charging_sessions`, `get_config_keys` and `set_config_key` sit in between: they list their
 fields by hand but take each field's schema from the method's, so a field
 cannot be over-tightened, while a field the method gains still has to be added.
 `mcpToolSchemaParity.test.ts` guards against both directions for every

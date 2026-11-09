@@ -251,6 +251,29 @@ describe("DeleteCertificateHandler", () => {
       expect(v16View(certificateStore)).toEqual([]);
     });
 
+    it("answers per root when the connection is validated by one of two", async () => {
+      // The transport hands over the root that ended the chain (#563).
+      const inUse = await selfSignedRootCert("01", "Validating Root");
+      const spare = await selfSignedRootCert("02", "Spare Root");
+      const { ctx, certificateStore } = buildContext(
+        10,
+        new CertificateStore(),
+        inUse,
+      );
+      await installV16(certificateStore, "CentralSystemRootCertificate", inUse);
+      await installV16(certificateStore, "CentralSystemRootCertificate", spare);
+      const [inUseHash, spareHash] = certificateStore
+        .listRootCertificates()
+        .map((c) => c.hashData);
+      const handler = new DeleteCertificateHandler();
+      expect(
+        await handler.handle({ certificateHashData: spareHash }, ctx),
+      ).toEqual({ status: "Accepted" });
+      expect(
+        await handler.handle({ certificateHashData: inUseHash }, ctx),
+      ).toEqual({ status: "Failed" });
+    });
+
     it("deletes the same certificate installed as a ManufacturerRootCertificate", async () => {
       const pem = await selfSignedRootCert("01", "Manufacturer");
       const { res } = await deleteInstalled(

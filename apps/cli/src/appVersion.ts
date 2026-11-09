@@ -25,14 +25,14 @@ import { resolveBuildVersion } from "@ocpp-cp-simulator/contracts/buildVersion";
  *   4. `local-dev` — nothing stamped, said out loud rather than reported as a
  *      real release.
  */
-export function appVersion(): string {
+export function appVersion(env: NodeJS.ProcessEnv = process.env): string {
   // Read on every call so a process that sets the env late (or a test) isn't
   // stuck with an import-time snapshot.
   const packageVersion = (pkg as { version?: unknown }).version;
   return resolveBuildVersion({
-    explicit: process.env.APP_VERSION,
+    explicit: env.APP_VERSION,
     packageVersion:
       typeof packageVersion === "string" ? packageVersion : undefined,
-    commit: process.env.APP_COMMIT,
+    commit: env.APP_COMMIT,
   });
 }

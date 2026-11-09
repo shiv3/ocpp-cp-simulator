@@ -3,7 +3,7 @@
 // would take real seconds. The clock starts at 2030-01-01 and moves only when
 // a case advances it.
 import { SIGNING_CERTIFICATE } from "../../cp/domain/security/__tests__/signingCertificateFixture";
-import { tcpPort } from "../bunServe";
+import { LOOPBACK, tcpPort } from "../bunServe";
 import { drainMicrotasks, VirtualClock } from "../../cp/shared/clock";
 import type { GoldenCase } from "./cases";
 import type { Rig } from "./rig";
@@ -141,6 +141,7 @@ v16("get-diagnostics-retries", async (rig, advance) => {
   let hits = 0;
   const target = Bun.serve({
     port: 0,
+    hostname: LOOPBACK,
     fetch: () => {
       hits++;
       return new Response("no", { status: 500 });
@@ -148,7 +149,7 @@ v16("get-diagnostics-retries", async (rig, advance) => {
   });
   try {
     await rig.csms.call("GetDiagnostics", {
-      location: `http://127.0.0.1:${tcpPort(target)}/upload`,
+      location: `http://${LOOPBACK}:${tcpPort(target)}/upload`,
       retries: 2,
       retryInterval: 1,
     });
@@ -175,6 +176,7 @@ v16("get-diagnostics-timeout", async (rig, advance) => {
   let hits = 0;
   const target = Bun.serve({
     port: 0,
+    hostname: LOOPBACK,
     fetch: () => {
       hits++;
       return new Promise<Response>(() => undefined);
@@ -182,7 +184,7 @@ v16("get-diagnostics-timeout", async (rig, advance) => {
   });
   try {
     await rig.csms.call("GetDiagnostics", {
-      location: `http://127.0.0.1:${tcpPort(target)}/upload`,
+      location: `http://${LOOPBACK}:${tcpPort(target)}/upload`,
     });
     await realWaitFor(() => hits === 1, "the attempt");
     await realPause(50);

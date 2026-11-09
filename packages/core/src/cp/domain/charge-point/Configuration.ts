@@ -745,7 +745,15 @@ export const defaultConfiguration: (cp: ChargePoint) => Configuration = (
     intVal(ConfigurationKeys.Core.MeterValueSampleInterval, 60),
     intVal(ConfigurationKeys.Core.MinimumStatusDuration, 0),
     intVal(ConfigurationKeys.Core.NumberOfConnectors, cp.connectorNumber),
-    intVal(ConfigurationKeys.Core.ResetRetries, 1),
+    // 2.x narrows the 1.6 read-write key to ReadOnly (OCPPCommCtrlr.
+    // ResetRetries): the simulated reset never fails, so nothing retries and
+    // a writable value would change nothing (#569, #604).
+    intVal(
+      isOcpp2Version(cp.ocppVersion)
+        ? { ...ConfigurationKeys.Core.ResetRetries, readonly: true }
+        : ConfigurationKeys.Core.ResetRetries,
+      1,
+    ),
     boolVal(ConfigurationKeys.Core.StopTransactionOnEVSideDisconnect, true),
     boolVal(ConfigurationKeys.Core.StopTransactionOnInvalidId, true),
     arrVal(ConfigurationKeys.Core.StopTxnAlignedData, []),

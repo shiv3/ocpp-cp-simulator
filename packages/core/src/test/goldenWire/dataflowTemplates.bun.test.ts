@@ -258,15 +258,44 @@ describe("dataflow-charge-to-soc", () => {
           },
         );
         expect(visited.filter((n) => n === "meter")).toHaveLength(passes);
-        expect(visited.filter((n) => n === "check")).toHaveLength(passes);
-        expect(visited.slice(-4)).toEqual([
-          "check",
-          "tx-stop",
-          "plug-out",
-          "end-1",
-        ]);
+        expect(visited).not.toContain("check");
+        expect(visited.slice(-3)).toEqual(["tx-stop", "plug-out", "end-1"]);
       },
       60_000,
     );
   }
+
+  // The loop edge's other bound: the SoC never gets near 80 (10%), so the
+  // `forSeconds` bound ends the loop (a pass is about 1.5 s here, so 2 s lets
+  // the loop go round once and exits at the end of the second pass).
+  test.concurrent(
+    "exits by forSeconds when the SoC never reaches 80%, and stops the transaction",
+    async () => {
+      const { rig, visited } = await run(
+        "1.6",
+        "dataflow-charge-to-soc",
+        {},
+        (def) => {
+          quick(def);
+          const d = def as unknown as {
+            nodes: { id: string; data: Record<string, unknown> }[];
+            edges: { id: string; loop?: { forSeconds: number } }[];
+          };
+          d.nodes.find((n) => n.id === "tx-start")!.data.initialSoc = 10;
+          d.edges.find((e) => e.id === "e5")!.loop!.forSeconds = 2;
+        },
+      );
+      try {
+        const passes = visited.filter((n) => n === "meter").length;
+        expect(passes).toBeGreaterThanOrEqual(2);
+        expect(passes).toBeLessThanOrEqual(3);
+        expect(visited.slice(-3)).toEqual(["tx-stop", "plug-out", "end-1"]);
+        // Stopped by the template's own tx-stop step, reached through the exit.
+        expect(visited).toContain("tx-stop");
+      } finally {
+        await rig.dispose();
+      }
+    },
+    60_000,
+  );
 });

@@ -50,12 +50,15 @@ export const TAG_H = 22;
 /** Lowest lane's bottom to the merge point, and the merge point to the
  *  next card. */
 const MERGE_DROP = 26;
-/** A loop's rectangle: the channel its return arc runs in (left), the band
- *  its label sits in (top), and the room the arc turns in (bottom). */
+/** A loop's rectangle: the channel its return arc runs in (left), a pad
+ *  (top), and the band at the bottom where the arc turns and, under it,
+ *  the label sits (out of the way of the line entering the loop). */
 const LOOP_LEFT = 30;
 const LOOP_RIGHT = 10;
-const LOOP_TOP = 30;
-const LOOP_BOTTOM = 20;
+const LOOP_TOP = 14;
+const LOOP_BOTTOM = 46;
+/** The arc's turn below the body. */
+const LOOP_TURN = 20;
 /** Lanes that leave a loop stand this far right of its rectangle. */
 const LEAVING_GAP = 16;
 /** A jump's curve swings this far right of the cards it passes, plus a
@@ -789,7 +792,7 @@ export function layoutTreeGraph(
     const header = cards.find((c) => c.node.id === loop.headerId);
     const channelX = rectLeft + 14;
     const arcs: GraphPath[] = back.map((b, k) => {
-      const turnY = rectBottom - 8;
+      const turnY = innerBottom + LOOP_TURN;
       const hy = (header?.y ?? y + LOOP_TOP) + NODE_H / 2;
       const hx = (header?.x ?? b.x) - NODE_W / 2;
       const rr = 8;
@@ -823,7 +826,7 @@ export function layoutTreeGraph(
       headerId: loop.headerId,
       rect: { x: rectLeft, y, w: rectW, h: rectBottom - y },
       arcs,
-      label: { x: rectLeft + 10, y: y + 7 },
+      label: { x: rectLeft + LOOP_LEFT, y: rectBottom - 22 },
       from,
       to: Math.max(from, ...repeated),
       canExit: onward.length > 0 || inside.some((c) => c.isFork),

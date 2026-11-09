@@ -33,12 +33,13 @@ one value, one validation and one persistence path.
 
 ## Who uses it
 
-| Consumer                         | Uses                                                                                                                                                                                                      |
-| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GetVariables` / `SetVariables`  | `resolveDeviceModelVariable` ([`deviceModelMap.ts`](../../packages/core/src/cp/infrastructure/transport/v201/deviceModelMap.ts)) → store key; unknown names answer `UnknownComponent` / `UnknownVariable` |
-| `SetVariableMonitoring`          | the same resolution, so monitors keep working on every registered variable ([Variable monitoring](../concepts/variable-monitoring.md#the-device-model-behind-a-monitor))                                  |
-| `GetBaseReport` / `NotifyReport` | mutability, `dataType`, `valuesList`, `minLimit` / `maxLimit` and `unit` of each reported variable come from the entry; only variables the store has a value for are listed                               |
-| `ChargePoint`                    | publishes the registry's constants as read-only runtime keys at start (2.x only)                                                                                                                          |
+| Consumer                         | Uses                                                                                                                                                                                                                                                  |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GetVariables` / `SetVariables`  | `resolveDeviceModelVariable` ([`deviceModelMap.ts`](../../packages/core/src/cp/infrastructure/transport/v201/deviceModelMap.ts)) → store key; unknown names answer `UnknownComponent` / `UnknownVariable`                                             |
+| `SetVariableMonitoring`          | the same resolution, so monitors keep working on every registered variable ([Variable monitoring](../concepts/variable-monitoring.md#the-device-model-behind-a-monitor))                                                                              |
+| `GetBaseReport` / `NotifyReport` | mutability, `dataType`, `valuesList`, `minLimit` / `maxLimit` and `unit` of each reported variable come from the entry; only variables the store has a value for are listed                                                                           |
+| `cp.config_keys.get` / `.set`    | `byValueKey` → component, variable, instance and mutability of each listed key; a store key without an entry is neither listed nor writable, a `ReadOnly` one is refused ([Control plane](../concepts/control-plane.md#configuration-keys-612), #612) |
+| `ChargePoint`                    | publishes the registry's constants as read-only runtime keys at start (2.x only)                                                                                                                                                                      |
 
 ## Entry fields
 

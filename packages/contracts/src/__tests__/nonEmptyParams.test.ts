@@ -178,6 +178,16 @@ const NON_EMPTY_FIELDS: ReadonlyArray<{
     field: "incidentId",
   },
   { method: "sessions.list", valid: { cpId: "CP" }, field: "cpId" },
+  {
+    method: "cp.config_keys.get",
+    valid: { cpId: "CP" },
+    field: "cpId",
+  },
+  {
+    method: "cp.config_keys.set",
+    valid: { cpId: "CP", key: "K", value: "1" },
+    field: "key",
+  },
   { method: "blueprint.delete", valid: { id: "b" }, field: "id" },
 ];
 

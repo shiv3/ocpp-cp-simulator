@@ -1,4 +1,11 @@
 import { VehicleProfileRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/VehicleProfileRepository";
+import {
+  readConfigurationKeys,
+  writeConfigurationKey,
+  type ConfigurationKeyList,
+  type ConfigurationSetStatus,
+} from "@ocpp-cp-sim/core/cp/domain/charge-point/configurationAccess";
+import { isOcpp2Version } from "@ocpp-cp-sim/core/cp/domain/types/OcppVersion";
 import type {
   AuthorizationCacheSeedEntry,
   AuthorizationCacheView,
@@ -938,6 +945,33 @@ export class LocalChargePointService implements ChargePointService {
     query: Omit<ChargingSessionQuery, "cpId"> = {},
   ): Promise<ChargingSessionPage> {
     return this.chargingSessions.list({ ...query, cpId: id });
+  }
+
+  async getConfigurationKeys(
+    id: string,
+    keys: readonly string[] = [],
+  ): Promise<ConfigurationKeyList> {
+    const cp = this.getExistingChargePointOrThrow(id);
+    return readConfigurationKeys(
+      cp.configuration,
+      isOcpp2Version(cp.ocppVersion),
+      keys,
+    );
+  }
+
+  async setConfigurationKey(
+    id: string,
+    key: string,
+    value: string,
+  ): Promise<ConfigurationSetStatus> {
+    const cp = this.getExistingChargePointOrThrow(id);
+    return writeConfigurationKey(
+      cp.configuration,
+      isOcpp2Version(cp.ocppVersion),
+      key,
+      value,
+      cp.logger,
+    );
   }
 
   async getScenarioTemplates(): Promise<ScenarioTemplateInfo[]> {

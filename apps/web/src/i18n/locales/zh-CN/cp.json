@@ -138,5 +138,19 @@
   "cp.controls.confirmRemove": "从 {{cpId}} 移除连接器 {{id}}？移除不会被保存：重新创建充电桩后连接器会恢复。",
   "cp.controls.removeFailed": "未能移除连接器：{{message}}",
   "cp.socMeterSync.readFailed": "未能读取同步设置({{error}}):在开启同步之前,设置 SoC 不会改动电表。",
-  "cp.socMeterSync.applyFailed": "未能将同步应用到连接器:{{error}}"
+  "cp.socMeterSync.applyFailed": "未能将同步应用到连接器:{{error}}",
+  "cp.section.configuration": "配置",
+  "cp.configKeys.unsupported": "此连接不支持配置键",
+  "cp.configKeys.loadFailed": "无法读取配置键",
+  "cp.configKeys.empty": "此充电桩没有配置键",
+  "cp.configKeys.key": "键",
+  "cp.configKeys.value": "值",
+  "cp.configKeys.access": "访问权限",
+  "cp.configKeys.valueOf": "{{key}} 的值",
+  "cp.configKeys.writeOnly": "只写，不显示值",
+  "cp.configKeys.save": "保存",
+  "cp.configKeys.saved": "已保存",
+  "cp.configKeys.rebootRequired": "已保存，重启后生效",
+  "cp.configKeys.readOnly": "只读",
+  "cp.configKeys.readWrite": "可读写"
 }

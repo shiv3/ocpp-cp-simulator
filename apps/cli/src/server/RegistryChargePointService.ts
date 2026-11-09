@@ -1,5 +1,9 @@
 import * as fs from "fs";
 import type {
+  ConfigurationKeyList,
+  ConfigurationSetStatus,
+} from "@ocpp-cp-sim/core/cp/domain/charge-point/configurationAccess";
+import type {
   AuthorizationCacheSeedEntry,
   AuthorizationCacheView,
 } from "@ocpp-cp-sim/core/cp/domain/auth/AuthorizationCacheSeed";
@@ -625,6 +629,21 @@ export class RegistryChargePointService implements ChargePointService {
     query?: Omit<ChargingSessionQuery, "cpId">,
   ): Promise<ChargingSessionPage> {
     return this.requireService(id).listChargingSessions(query);
+  }
+
+  async getConfigurationKeys(
+    id: string,
+    keys?: readonly string[],
+  ): Promise<ConfigurationKeyList> {
+    return this.requireService(id).getConfigurationKeys(keys);
+  }
+
+  async setConfigurationKey(
+    id: string,
+    key: string,
+    value: string,
+  ): Promise<ConfigurationSetStatus> {
+    return this.requireService(id).setConfigurationKey(key, value);
   }
 
   async listScenarioDefinitions(

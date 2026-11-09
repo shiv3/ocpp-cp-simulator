@@ -184,7 +184,11 @@ export interface LinkEdge {
     | "dangling"
     | "intoStart"
     | "outOfEnd"
-    | "timeoutDead";
+    | "timeoutDead"
+    /** A loop edge (`kind: "loop"`, schema 1.10): not an ordinary edge, so no
+     *  block draws it yet (the Steps view has no bounds form). It stays in
+     *  the file exactly as it is while the steps around it are edited. */
+    | "loopEdge";
 }
 
 export interface BlockTree {
@@ -598,6 +602,11 @@ export function recognizeBlockTree(def: Def): BlockTree {
       if (laneOf.has(edge) || links.some((l) => l.edge === edge)) continue;
       links.push({ edge, role: "timeoutDead" });
     }
+  }
+
+  // Loop edges (schema 1.10) are in no lane: kept as they are.
+  for (const edges of program.loopEdges.values()) {
+    for (const edge of edges) links.push({ edge, role: "loopEdge" });
   }
 
   type Entry = { edge: Edge } | { node: string };
@@ -1120,7 +1129,8 @@ export function rebuildFromTree<D extends Def>(def: D, tree: BlockTree): D {
     if (
       link.role === "dangling" ||
       link.role === "outOfEnd" ||
-      link.role === "timeoutDead"
+      link.role === "timeoutDead" ||
+      link.role === "loopEdge"
     ) {
       if (removed(link.edge.source) || removed(link.edge.target)) continue;
       untouched.add(link.edge);

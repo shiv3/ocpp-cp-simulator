@@ -257,9 +257,9 @@ describe("withScenarioSchemaVersion", () => {
 
   it("keeps a newer schemaVersion and raises an older one", () => {
     expect(
-      withScenarioSchemaVersion(createValidScenario({ schemaVersion: "1.9" }))
+      withScenarioSchemaVersion(createValidScenario({ schemaVersion: "1.11" }))
         .schemaVersion,
-    ).toBe("1.9");
+    ).toBe("1.11");
     expect(
       withScenarioSchemaVersion(createValidScenario({ schemaVersion: "2.0" }))
         .schemaVersion,

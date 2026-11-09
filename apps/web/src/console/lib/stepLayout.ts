@@ -111,6 +111,9 @@ export function deriveStepLayout(
   const structural = new Set<string>(tree.drawnEdges.keys());
   const placed = new Set<string>([start.id, ...tree.nodePath.keys()]);
   for (const link of tree.links) {
+    // A loop edge (schema 1.10) is not an edge of the chain or the fork:
+    // the run views cannot show its bounds.
+    if (link.role === "loopEdge") return UNSUPPORTED;
     if (link.role === "outOfEnd") {
       // Out of END: never walked. Out of a placed step that ends its
       // branch: the old layout walked on along it; not projectable.

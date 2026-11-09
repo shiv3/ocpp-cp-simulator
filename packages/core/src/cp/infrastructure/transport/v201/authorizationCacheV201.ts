@@ -3,6 +3,7 @@ import type {
   IdTokenType,
 } from "@ocpp-cp-simulator/ocpp/v201/types/authorize-response";
 import type { CsmsAuthorizationResult } from "../../../domain/auth/StationAuthorization";
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 
 /**
  * OCPP 2.x idTokenInfo → the domain's CSMS verdict (#452; 2.0.1 Part 2
@@ -40,4 +41,23 @@ export function cacheableIdToken(
   if (token.idToken === "" || token.type === "NoAuthorization")
     return undefined;
   return token.idToken;
+}
+
+/**
+ * #452: feed the CSMS's idTokenInfo on `idToken` to the Authorization
+ * Cache (C10.FR.04 AuthorizeResponse, C10.FR.05 TransactionEventResponse).
+ * Only real answers come here: the "Invalid" synthesized from a CALLERROR
+ * is not a verdict and is never cached.
+ */
+export function recordIdTokenInfo(
+  chargePoint: Pick<ChargePoint, "recordAuthorizationResult">,
+  idToken: Pick<IdTokenType, "idToken" | "type"> | undefined,
+  idTokenInfo: IdTokenInfoType | undefined,
+): void {
+  const key = cacheableIdToken(idToken);
+  if (key === undefined || idTokenInfo === undefined) return;
+  chargePoint.recordAuthorizationResult(
+    key,
+    authorizationResultFromIdTokenInfo(idTokenInfo),
+  );
 }

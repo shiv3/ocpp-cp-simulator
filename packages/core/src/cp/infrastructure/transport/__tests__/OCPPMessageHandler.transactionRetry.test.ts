@@ -93,13 +93,27 @@ function setup(config: { attempts?: number; interval?: number } = {}) {
       if (this.transaction) this.transaction.startCallError = true;
     },
   };
+  const connector2 = {
+    ...connector,
+    id: 2,
+    transaction: transaction({ connectorId: 2 }) as Transaction | null,
+    assignTransactionId(id: number) {
+      this.transactionId = id;
+    },
+    markStartCallError() {
+      if (this.transaction) this.transaction.startCallError = true;
+    },
+  };
   const rejected: Array<ChargePointEvents["transactionMessageRejected"]> = [];
   const discarded: Array<ChargePointEvents["transactionMessageDiscarded"]> = [];
   const chargePoint = {
     id: "CP-527",
     database: null,
-    connectors: new Map([[1, connector]]),
-    getConnector: vi.fn(() => connector),
+    connectors: new Map([
+      [1, connector],
+      [2, connector2],
+    ]),
+    getConnector: vi.fn((id?: number) => (id === 2 ? connector2 : connector)),
     notifyOutgoingCall: vi.fn(),
     recordAuthorizationResult: vi.fn(),
     signedMeterFor: vi.fn(() => null),
@@ -128,7 +142,15 @@ function setup(config: { attempts?: number; interval?: number } = {}) {
     codec,
   );
   handler.setBootStatus({ status: "Accepted" });
-  return { socket, connector, chargePoint, handler, rejected, discarded };
+  return {
+    socket,
+    connector,
+    connector2,
+    chargePoint,
+    handler,
+    rejected,
+    discarded,
+  };
 }
 
 describe("OCPP 1.6 transaction message CALLERROR retry (#527, §3.7.1)", () => {
@@ -1482,6 +1504,77 @@ describe("OCPP 1.6 transaction messages without a CSMS id carry -1 (#727)", () =
     });
 
     expect(socket.of("StopTransaction").map(idOf)).toEqual([9]);
+  });
+
+  it("a timed-out Start leaves no outcome behind once the Stop built after it went out", async () => {
+    const { socket, connector, handler } = setup();
+    connector.transaction = transaction({ startUnanswered: true });
+    handler.sendTransactionEvent({
+      phase: "started",
+      transaction: connector.transaction,
+      connectorId: 1,
+    });
+    await vi.advanceTimersByTimeAsync(30_000);
+    handler.sendTransactionEvent({
+      phase: "ended",
+      transaction: ended(),
+      connectorId: 1,
+    });
+    expect(socket.of("StopTransaction").map(idOf)).toEqual([-1]);
+
+    const outcomes = (
+      handler as unknown as { _startOutcomes: Map<string, number> }
+    )._startOutcomes;
+    // The Stop carried -1 itself and holds no startRef: nothing consumes an
+    // entry, so none is recorded (#847).
+    expect(outcomes.size).toBe(0);
+  });
+
+  it("two connectors with the same tag and start time: the offline queue replays each Stop with its own Start's id", () => {
+    const { socket, connector, connector2, handler } = setup();
+    const same = { startUnanswered: true };
+    connector.transaction = transaction(same);
+    connector2.transaction = transaction({ ...same, connectorId: 2 });
+    socket.connected = false;
+    handler.onWebSocketClosed();
+    for (const [c, id] of [
+      [connector2, 2],
+      [connector, 1],
+    ] as const) {
+      handler.sendTransactionEvent({
+        phase: "started",
+        transaction: c.transaction!,
+        connectorId: id,
+      });
+    }
+    for (const id of [2, 1]) {
+      handler.sendTransactionEvent({
+        phase: "ended",
+        transaction: ended({ connectorId: id }),
+        connectorId: id,
+      });
+    }
+
+    socket.connected = true;
+    handler.flushPendingQueue();
+    const answer = (transactionId: number) =>
+      socket.callResult(socket.last().id, {
+        transactionId,
+        idTagInfo: { status: "Accepted" },
+      });
+    // Starts go out in the order they were queued: connector 2, then 1.
+    expect(socket.of("StartTransaction")).toHaveLength(1);
+    answer(222);
+    expect(socket.of("StartTransaction")).toHaveLength(2);
+    answer(111);
+
+    // One CALL at a time: the second Stop goes once the first is answered.
+    expect(socket.of("StopTransaction")).toHaveLength(1);
+    socket.callResult(socket.last().id, {});
+    const stops = socket.of("StopTransaction");
+    expect(stops).toHaveLength(2);
+    // Queued Stop 2 then Stop 1: each takes the id of its own connector.
+    expect(stops.map((w) => idOf(w))).toEqual([222, 111]);
   });
 
   it("a CSMS-issued 0 stays 0", () => {

@@ -2386,6 +2386,19 @@ export class OCPPMessageHandler {
     start: StartTransactionRequestV16,
     connectorId: number,
   ): void {
+    // Recorded only for a queued, held or waiting message that takes its id
+    // from this Start (#847): a message built after the discard already
+    // carries `-1` (`wireTransactionId`) and has no `startRef`, so nothing
+    // would ever consume the entry.
+    if (
+      !this.hasMessageWaitingOn({
+        connectorId,
+        idTag: start.idTag,
+        startedAt: start.timestamp,
+      })
+    ) {
+      return;
+    }
     this.recordStartOutcome(start, connectorId, UNKNOWN_TRANSACTION_ID);
   }
 

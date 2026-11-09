@@ -1,10 +1,10 @@
 import { describe, it, expect } from "bun:test";
 import { CLIChargePointService } from "../service";
-import { BunSqliteDatabase } from "@ocpp-cp-sim/core/cp/domain/persistence/BunSqliteDatabase";
-import { runMigrations } from "@ocpp-cp-sim/core/cp/domain/persistence/schema";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/BunSqliteDatabase";
+import { runMigrations } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/schema";
 import type { ChargePointInitOptions } from "../types";
-import type { Connector } from "@ocpp-cp-sim/core/cp/domain/connector/Connector";
-import type { Transaction } from "@ocpp-cp-sim/core/cp/domain/connector/Transaction";
+import type { Connector } from "@ocpp-cp-simulator/core/cp/domain/connector/Connector";
+import type { Transaction } from "@ocpp-cp-simulator/core/cp/domain/connector/Transaction";
 
 /**
  * Whether a stored SoC is waiting for the next transaction has to cross the

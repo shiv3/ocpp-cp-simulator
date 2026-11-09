@@ -41,7 +41,7 @@ import {
   defaultChargePointConfig,
   type ChargePointConfig,
 } from "@/components/chargePointConfig";
-import { getConfigBasicAuthPassword } from "@ocpp-cp-sim/client/configPort";
+import { getConfigBasicAuthPassword } from "@ocpp-cp-simulator/client/configPort";
 import { useChargePointView } from "@/data/hooks/useChargePointView";
 import { downloadStoredLogs } from "@/lib/downloadStoredLogs";
 import { cn } from "@/lib/utils";
@@ -52,14 +52,14 @@ import { useServerInfo } from "@/data/hooks/useServerInfo";
 import { useActiveScenarioRuns } from "../../lib/useActiveScenarioRuns";
 import { useGlobalLogs } from "../../lib/useGlobalLogs";
 import { usePanelParams } from "../../lib/usePanelParams";
-import type { ChargePointSnapshot } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
-import type { WireSimulatorConfig } from "@ocpp-cp-sim/contracts/index";
+import type { ChargePointSnapshot } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
+import type { WireSimulatorConfig } from "@ocpp-cp-simulator/contracts/index";
 import type {
   NetworkSimLayerConfig,
   NetworkSimRule,
-} from "@ocpp-cp-sim/core/cp/infrastructure/transport/network-sim/config";
-import type { ChargePoint } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+} from "@ocpp-cp-simulator/core/cp/infrastructure/transport/network-sim/config";
+import type { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 
 import BottomPanel from "../../components/BottomPanel";
 import EmptyState from "../../components/EmptyState";
@@ -182,6 +182,7 @@ function buildChargePointConfig(
     connectorNumber,
     wsURL: localConfig.wsURL,
     ocppVersion: localConfig.ocppVersion,
+    txUpdatedMeterValues: localConfig.txUpdatedMeterValues,
     basicAuthEnabled: localConfig.basicAuthSettings.enabled,
     basicAuthUsername: localConfig.basicAuthSettings.username,
     basicAuthPassword: getConfigBasicAuthPassword(localConfig),

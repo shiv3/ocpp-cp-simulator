@@ -4,9 +4,9 @@ import type {
   ChargePointEvent,
   ChargePointSnapshot,
   ConnectorSnapshot,
-} from "@ocpp-cp-sim/client/interfaces/ChargePointService";
-import type { LogEntry } from "@ocpp-cp-sim/core/cp/shared/Logger";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+} from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
+import type { LogEntry } from "@ocpp-cp-simulator/core/cp/shared/Logger";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import { useDataContext } from "../providers/DataProvider";
 
 export interface HeartbeatView {

@@ -1,7 +1,6 @@
-import {
-  ChargePoint,
-  type ChargePointSimulationOptions,
-} from "../../cp/domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
+import { type ChargePointSimulationOptions } from "../../cp/domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../cp/infrastructure/charge-point/createChargePoint";
 import {
   DefaultBootNotification,
   OCPPStatus,
@@ -17,6 +16,7 @@ import {
 export const OCPP_VERSION_STRING: Record<WireVersion, string> = {
   "1.6": "OCPP-1.6J",
   "2.0.1": "OCPP-2.0.1",
+  "2.1": "OCPP-2.1",
 };
 
 export interface RigOptions {
@@ -25,6 +25,8 @@ export interface RigOptions {
   readonly responders?: Readonly<Record<string, CsmsResponder>>;
   /** Run before `connect()`, to arm configuration, policies or overrides. */
   readonly beforeConnect?: (cp: ChargePoint) => void;
+  /** Transport options of the station (hardware, `chargerCapabilities`). */
+  readonly transportOptions?: import("../../cp/domain/charge-point/ChargePoint").ChargePointTransportOptions;
   /** Leave the station unconnected; the case connects it itself. */
   readonly noConnect?: boolean;
   /** A clock and a seed for the station (the behavior test harness). */
@@ -34,6 +36,15 @@ export interface RigOptions {
   /** How long traffic must be quiet before a step counts as settled. */
   readonly quietMs?: number;
 }
+
+/**
+ * How long a case waits for the first BootNotification. The file runs ~340
+ * cases at once on real sockets, so on a loaded machine the handshake of one
+ * case can queue behind the others for longer than the 15 s default of a frame
+ * wait. The budget stays under the 90 s test timeout so a real hang still
+ * fails with the frames seen (#848).
+ */
+const BOOT_BUDGET_MS = 60_000;
 
 /** A real ChargePoint wired to a fake CSMS, one per golden case. */
 export class Rig {
@@ -51,7 +62,7 @@ export class Rig {
       responders: options.responders,
       ...(options.memory ? { memory: true } : {}),
     });
-    const cp = new ChargePoint(
+    const cp = createChargePoint(
       "CP-GOLDEN",
       DefaultBootNotification,
       options.connectors ?? 1,
@@ -62,7 +73,7 @@ export class Rig {
       {},
       [],
       OCPP_VERSION_STRING[options.version],
-      {},
+      options.transportOptions ?? {},
       undefined,
       undefined,
       undefined,
@@ -91,9 +102,40 @@ export class Rig {
     this.cp.connect();
     await this.csms.waitForFrame(
       (f) => f.dir === "CP>" && f.action === "BootNotification",
-      { from },
+      { from, timeoutMs: BOOT_BUDGET_MS },
     );
     await this.csms.settle();
+  }
+
+  /**
+   * Wait for the station to be back after a dropped connection (the `nth`
+   * connection of the run). OCPP 1.6 boots again on every connect; 2.x does
+   * not (OCPP-J 2.0.1 §5.4, #702), so the connection itself is what it waits
+   * for there.
+   */
+  async reconnected(nth = 2, timeoutMs = 30_000): Promise<void> {
+    if (this.is16) {
+      await this.csms.waitForCall("BootNotification", { nth, timeoutMs });
+      return;
+    }
+    const deadline = Date.now() + timeoutMs;
+    while (this.csms.openCount < nth) {
+      if (Date.now() > deadline) {
+        throw new Error(`no reconnect #${nth} within ${timeoutMs}ms`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    // The server sees the upgrade before the station sees its socket open. The
+    // station's resume (status reports, #702) only follows then, so wait for
+    // it to be done with the boot step, else a loaded runner lets `settle`
+    // return before the first frame of the new connection (#824).
+    while (!this.cp.bootAccepted) {
+      if (Date.now() > deadline) {
+        throw new Error(`reconnect #${nth} not resumed within ${timeoutMs}ms`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    this.csms.noteActivity();
   }
 
   /** An HTTP endpoint that accepts every upload with 200, for diagnostics/logs. */

@@ -1,5 +1,5 @@
 import * as readline from "readline";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import { formatStatus, formatEvent } from "./output";
 import {
   cleanupSingleCpTarget,

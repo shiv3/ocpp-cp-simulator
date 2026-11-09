@@ -6,7 +6,7 @@ import {
   CP_CREATE_MANY_MAX,
   expandIdPattern,
   MAX_GENERATED_CP_ID_LENGTH,
-} from "@ocpp-cp-sim/contracts/index";
+} from "@ocpp-cp-simulator/contracts/index";
 import {
   connectTestClient,
   startTestServer,
@@ -383,7 +383,7 @@ describe("cp.update declares autoConnect too (#295)", () => {
     // `updateCp` reads autoConnect off the raw params as a reconnect. Leaving
     // it off updateParamsSchema made list_methods advertise a schema that
     // omitted it, so schema-driven clients could not discover the option.
-    const { METHODS } = await import("@ocpp-cp-sim/contracts/index");
+    const { METHODS } = await import("@ocpp-cp-simulator/contracts/index");
     for (const method of ["cp.create", "cp.update"] as const) {
       const shape = (
         METHODS[method].params as unknown as {

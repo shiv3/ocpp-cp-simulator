@@ -1,11 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RawFrameSender } from "../RawFrameSender";
-import type {
-  IncomingFrameInterceptor,
-  OCPPWebSocket,
-  TransportObserverEvents,
-} from "../OCPPWebSocket";
+import type { IncomingFrameInterceptor, OCPPWebSocket } from "../OCPPWebSocket";
+import type { TransportObserverEvents } from "../../../domain/transport/ChargePointSocket";
 import type { Settlement } from "../network-sim/NetworkSimPipeline";
 import { EventEmitter } from "../../../shared/EventEmitter";
 import { OcppCallNoAnswerError } from "../../../domain/errors/OcppCallErrors";

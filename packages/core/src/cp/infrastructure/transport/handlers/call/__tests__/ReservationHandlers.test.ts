@@ -33,6 +33,7 @@ interface ReservationManagerShape {
   createReservation: ReturnType<typeof vi.fn>;
   getReservation: ReturnType<typeof vi.fn>;
   cancelReservation: ReturnType<typeof vi.fn>;
+  getAllReservations: ReturnType<typeof vi.fn>;
 }
 
 function buildContext(opts: {
@@ -44,12 +45,18 @@ function buildContext(opts: {
     createReservation: vi.fn(),
     getReservation: vi.fn(),
     cancelReservation: vi.fn(),
+    // ReserveNow counts the reservations the station holds (#595).
+    getAllReservations: vi.fn(() => []),
     ...opts.reservationManager,
   };
   const chargePoint = withEngine({
     getConnector: vi.fn(() => opts.connector),
+    connectors: new Map(
+      opts.connector ? [[1, { id: 1, ...opts.connector }]] : [],
+    ),
     reservationManager,
     updateConnectorStatus,
+    statusWhenFree: () => OCPPStatus.Available,
   });
   const ctx = {
     chargePoint: chargePoint as unknown as ChargePoint,

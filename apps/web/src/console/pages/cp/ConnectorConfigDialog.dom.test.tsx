@@ -9,13 +9,13 @@ import {
   flush,
   type FakeChargePointService,
 } from "../../test/harness";
-import type { AutoMeterValueConfig } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
-import type { EVSettings } from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
-import type { ChargePointService } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+import type { AutoMeterValueConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
+import type { EVSettings } from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
+import type { ChargePointService } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 import ConnectorConfigDialog, { type ConfigTab } from "./ConnectorConfigDialog";
 import { curvePointsToPower } from "./powerCurve";
-import type { VehicleProfile } from "@ocpp-cp-sim/core/cp/domain/vehicle/VehicleProfile";
+import type { VehicleProfile } from "@ocpp-cp-simulator/core/cp/domain/vehicle/VehicleProfile";
 
 let root: Root | null = null;
 

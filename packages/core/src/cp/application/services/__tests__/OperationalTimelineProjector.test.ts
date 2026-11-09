@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../../infrastructure/charge-point/createChargePoint";
 import type { ChargePointEvents } from "../../../domain/charge-point/ChargePointEvents";
 import type {
   ActiveChargingProfile,
@@ -32,7 +33,7 @@ function buildChargePoint(
   ocppVersion = "OCPP-1.6J",
   connectorCount = 1,
 ): ChargePoint {
-  return new ChargePoint(
+  return createChargePoint(
     "CP-448",
     DefaultBootNotification,
     connectorCount,

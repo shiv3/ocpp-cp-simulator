@@ -328,7 +328,9 @@ export const reservationBasicSpec: ScenarioSpec<void> = {
         chargePointSelectList: steve.cpSelect(cpId),
         connectorId: "1",
         expiry: reservationExpirySoon(),
-        idTag: "CERT-TAG-1",
+        // The scenario starts with CERT-RES01; a start by any other tag on a
+        // reserved connector is refused (1.6 §5.13), so reserve for that one.
+        idTag: "CERT-RES01",
       });
     } catch (err) {
       warnOpFailed("ReserveNow", err);
@@ -360,7 +362,7 @@ export const reservationBasicSpec: ScenarioSpec<void> = {
       rec,
       lines,
       /Sent: \[2,.*"StartTransaction".*"idTag":"CERT-RES01"/,
-      "StartTransaction sent with the scenario's hardcoded idTag CERT-RES01 (not the ReserveNow idTag)",
+      "StartTransaction sent with the scenario's hardcoded idTag CERT-RES01, the ReserveNow idTag",
     );
     assertSent(rec, frames, "StopTransaction", "StopTransaction sent");
 

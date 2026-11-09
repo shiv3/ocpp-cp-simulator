@@ -5,8 +5,8 @@ import type {
   ScenarioExecutionContext,
   ScenarioExecutionMode,
   ScenarioExpectation,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import type { ChargePointEvent } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import type { ChargePointEvent } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 import { useDataContext } from "../../data/providers/DataProvider";
 import {
   isLiveRunState,

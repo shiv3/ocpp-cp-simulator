@@ -13,6 +13,8 @@ export interface InlineConfirmProps {
   /** The confirm button reads as destructive (rose). */
   danger?: boolean;
   className?: string;
+  /** A third answer, between cancel and confirm (e.g. "Detach the edge"). */
+  secondary?: { label: string; onClick: () => void };
 }
 
 /**
@@ -28,6 +30,7 @@ const InlineConfirm: React.FC<InlineConfirmProps> = ({
   onCancel,
   danger = false,
   className,
+  secondary,
 }) => {
   const confirmRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -56,6 +59,16 @@ const InlineConfirm: React.FC<InlineConfirmProps> = ({
       <Button type="button" size="sm" variant="outline" onClick={onCancel}>
         {cancelLabel}
       </Button>
+      {secondary && (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={secondary.onClick}
+        >
+          {secondary.label}
+        </Button>
+      )}
       <Button
         ref={confirmRef}
         type="button"

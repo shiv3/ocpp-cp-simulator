@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import type { ScenarioDefinition } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import type { ScenarioDefinition } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import type {
   Database,
   SqlParam,
   SqlRow,
-} from "@ocpp-cp-sim/core/cp/domain/persistence/Database";
+} from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
 import { LocalChargePointService } from "./LocalChargePointService";
 
 interface ScenarioRow {

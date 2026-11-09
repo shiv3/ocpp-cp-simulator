@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import type { Socket } from "socket.io-client";
 
-import { BunSqliteDatabase } from "@ocpp-cp-sim/core/cp/domain/persistence/BunSqliteDatabase";
-import type { ChargePoint } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/BunSqliteDatabase";
+import type { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
 import type { CLIChargePointService } from "../../service";
 import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
@@ -176,6 +176,91 @@ describe("#447 sessions.list over RPC", () => {
     expect(page.sessions).toMatchObject([
       { connectorId: 1, outcome: "interrupted", endedAt: null },
     ]);
+  });
+});
+
+describe("#489 fleet-wide sessions.list", () => {
+  async function fleetServer() {
+    const server = await startTestServer({ database: null });
+    servers.push(server);
+    for (const [cpId, site] of [
+      ["CP-A", "s1"],
+      ["CP-B", "s2"],
+    ] as const) {
+      skipAuthorizeGate(
+        server.registry.create(
+          { ...CP_INIT, cpId, labels: { site } },
+          { seedDefault: false },
+        ),
+      );
+    }
+    const socket = await connectTestClient(server);
+    sockets.push(socket);
+    for (const cpId of ["CP-A", "CP-B"]) {
+      const ack = await rpc(
+        socket,
+        "start_transaction",
+        { connector: 1, tagId: "T" },
+        cpId,
+      );
+      expect(ack.ok).toBe(true);
+    }
+    for (let i = 0; i < 100; i++) {
+      const ack = await rpc(socket, "sessions.list", {});
+      if (ack.result.total === 2) break;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    return socket;
+  }
+
+  it("lists every charge point without cpId, and narrows by label, outcome and time", async () => {
+    const socket = await fleetServer();
+
+    const all = await rpc(socket, "sessions.list", {});
+    expect(all.ok).toBe(true);
+    expect(all.result.sessions.map((s: any) => s.cpId).sort()).toEqual([
+      "CP-A",
+      "CP-B",
+    ]);
+
+    const s2 = await rpc(socket, "sessions.list", { labels: { site: "s2" } });
+    expect(s2.result.sessions.map((s: any) => s.cpId)).toEqual(["CP-B"]);
+
+    const none = await rpc(socket, "sessions.list", {
+      labels: { site: "nowhere" },
+    });
+    expect(none.result).toEqual({ sessions: [], total: 0 });
+
+    const failed = await rpc(socket, "sessions.list", {
+      outcomes: ["failed"],
+    });
+    expect(failed.result.total).toBe(0);
+
+    const future = await rpc(socket, "sessions.list", {
+      startedFrom: new Date(Date.now() + 3_600_000).toISOString(),
+    });
+    expect(future.result.total).toBe(0);
+    // A zone offset is accepted and compared as the instant it names.
+    const past = await rpc(socket, "sessions.list", {
+      startedFrom: "2020-01-01T09:00:00+09:00",
+      startedTo: "2099-01-01T00:00:00Z",
+    });
+    expect(past.result.total).toBe(2);
+  });
+
+  it("refuses labels together with cpId, and a bad instant", async () => {
+    const socket = await fleetServer();
+    const both = await rpc(socket, "sessions.list", {
+      cpId: "CP-A",
+      labels: { site: "s1" },
+    });
+    expect(both.ok).toBe(false);
+    expect(both.error.code).toBe("invalid_params");
+    const bad = await rpc(socket, "sessions.list", {
+      startedFrom: "yesterday",
+    });
+    expect(bad.ok).toBe(false);
+    expect(bad.error.code).toBe("invalid_params");
   });
 });
 

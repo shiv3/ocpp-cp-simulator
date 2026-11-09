@@ -1,47 +1,48 @@
 {
   "id": "cert16-tc048-2-reserve-now-occupied",
   "name": "Cert 1.6 Reservation: TC_048_2 Reserve Now — Occupied",
-  "description": "Plug-in; set status Preparing; arm Occupied response override; CSMS sends ReserveNow; CP responds with Occupied status; plug-out; reset to Available.",
+  "description": "Plug-in → StatusNotification(Preparing); CSMS sends ReserveNow; the connector is occupied (Preparing, §4.9) so CP responds with Occupied status (§5.13); plug-out → StatusNotification(Available).",
   "targetType": "connector",
   "targetId": 1,
-  "trigger": { "type": "manual" },
+  "trigger": {
+    "type": "manual"
+  },
   "defaultExecutionMode": "oneshot",
   "enabled": true,
   "nodes": [
     {
       "id": "start-1",
       "type": "start",
-      "position": { "x": 400, "y": 50 },
-      "data": { "label": "Start", "triggerOn": "connect" }
+      "position": {
+        "x": 400,
+        "y": 50
+      },
+      "data": {
+        "label": "Start",
+        "triggerOn": "connect"
+      }
     },
     {
       "id": "plug-in",
       "type": "connectorPlug",
-      "position": { "x": 400, "y": 150 },
-      "data": { "label": "Plug In", "action": "plugin" }
-    },
-    {
-      "id": "status-preparing",
-      "type": "statusChange",
-      "position": { "x": 400, "y": 250 },
-      "data": { "label": "Set Preparing", "status": "Preparing" }
-    },
-    {
-      "id": "arm-occupied-response",
-      "type": "responseOverride",
-      "position": { "x": 400, "y": 350 },
+      "position": {
+        "x": 400,
+        "y": 150
+      },
       "data": {
-        "label": "Arm Occupied response for ReserveNow",
-        "action": "ReserveNow",
-        "status": "Occupied"
+        "label": "Plug In",
+        "action": "plugin"
       }
     },
     {
       "id": "trigger-reserve-now",
       "type": "csmsCallTrigger",
-      "position": { "x": 400, "y": 450 },
+      "position": {
+        "x": 400,
+        "y": 450
+      },
       "data": {
-        "label": "Wait for ReserveNow (will be Occupied)",
+        "label": "Wait for ReserveNow (answered Occupied)",
         "action": "ReserveNow",
         "timeout": 0
       }
@@ -49,37 +50,47 @@
     {
       "id": "plug-out",
       "type": "connectorPlug",
-      "position": { "x": 400, "y": 550 },
-      "data": { "label": "Plug Out", "action": "plugout" }
-    },
-    {
-      "id": "status-available",
-      "type": "statusChange",
-      "position": { "x": 400, "y": 650 },
-      "data": { "label": "Set Available", "status": "Available" }
+      "position": {
+        "x": 400,
+        "y": 550
+      },
+      "data": {
+        "label": "Plug Out",
+        "action": "plugout"
+      }
     },
     {
       "id": "end-1",
       "type": "end",
-      "position": { "x": 400, "y": 750 },
-      "data": { "label": "End" }
+      "position": {
+        "x": 400,
+        "y": 750
+      },
+      "data": {
+        "label": "End"
+      }
     }
   ],
   "edges": [
-    { "id": "e1", "source": "start-1", "target": "plug-in" },
-    { "id": "e2", "source": "plug-in", "target": "status-preparing" },
     {
-      "id": "e3",
-      "source": "status-preparing",
-      "target": "arm-occupied-response"
+      "id": "e1",
+      "source": "start-1",
+      "target": "plug-in"
     },
     {
-      "id": "e4",
-      "source": "arm-occupied-response",
+      "id": "e2",
+      "source": "plug-in",
       "target": "trigger-reserve-now"
     },
-    { "id": "e5", "source": "trigger-reserve-now", "target": "plug-out" },
-    { "id": "e6", "source": "plug-out", "target": "status-available" },
-    { "id": "e7", "source": "status-available", "target": "end-1" }
+    {
+      "id": "e5",
+      "source": "trigger-reserve-now",
+      "target": "plug-out"
+    },
+    {
+      "id": "e6",
+      "source": "plug-out",
+      "target": "end-1"
+    }
   ]
 }

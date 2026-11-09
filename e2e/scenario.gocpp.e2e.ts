@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { ChargePoint } from "../packages/core/src/cp/domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../packages/core/src/cp/domain/charge-point/ChargePoint";
+import { createChargePoint } from "../packages/core/src/cp/infrastructure/charge-point/createChargePoint";
 import {
   DefaultBootNotification,
   OCPPStatus,
@@ -500,7 +501,7 @@ function makeChargePoint(
   version: OcppVersion,
   csms: CsmsHandle,
 ): ChargePoint {
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     cpId,
     DefaultBootNotification,
     1,

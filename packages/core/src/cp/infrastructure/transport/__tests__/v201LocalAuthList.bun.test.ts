@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import type { SendLocalListRequestV201 } from "@ocpp-cp-sim/ocpp/index";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import type { SendLocalListRequestV201 } from "@ocpp-cp-simulator/ocpp/index";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
 
@@ -51,7 +51,7 @@ function sendLocalList(
 describe("OCPP 2.0.1 local authorization list", () => {
   it("reports and updates the local list version through CSMS calls", async () => {
     const csms = startMockCsms();
-    const cp = new ChargePoint(
+    const cp = createChargePoint(
       "CP201-LOCAL-AUTH-LIST",
       DefaultBootNotification,
       1,

@@ -1,7 +1,28 @@
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import type {
+  Behavior,
+  BehaviorParams,
+} from "@ocpp-cp-simulator/contracts/behavior";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { isOcpp2Version } from "../../../domain/types/OcppVersion";
 import { LogType } from "../../../shared/Logger";
+
+/** The knob of Reset; the default adds no wait. */
+const PARAMS: BehaviorParams = {
+  schema: {
+    type: "object",
+    properties: {
+      delayMs: {
+        type: "integer",
+        minimum: 0,
+        maximum: 3_600_000,
+        title: "Delay (ms)",
+        description:
+          "Wait this long after the answer settled before the reset takes effect (transactions stopped, then the boot)",
+      },
+    },
+  },
+  defaults: { delayMs: 0 },
+};
 
 interface Reset16Request {
   type: "Hard" | "Soft";
@@ -24,23 +45,33 @@ interface Reset2Request {
  * `OnIdle` reset while a targeted EVSE has a running transaction (#597: once
  * settled, the reset is queued and the station boots when the last targeted
  * transaction ends), otherwise `Accepted`; once settled, transactions of the
- * targeted EVSEs are stopped (unless `ImmediateAndResume`, which keeps them),
- * queued OnIdle resets are dropped and the station boots again.
+ * targeted EVSEs are stopped, queued OnIdle resets are dropped and the
+ * station boots again. 2.1 `ImmediateAndResume` (B13) is `Rejected` while a
+ * targeted EVSE has a transaction: the station does not support transaction
+ * resumption (B13.FR.01); with none it is an Immediate reset (B13.FR.02).
  */
 export function resetBehavior(cp: ChargePoint): Behavior {
   return {
     api: 1,
     id: "default.reset",
+    params: PARAMS,
     onCall: {
       Reset: {
         mode: "replace",
-        handle: (request) => {
+        handle: (request, ctx) => {
+          // A wait of 0 adds no turn (not even an `await`): the work runs in
+          // the turn it always did.
+          const delayMs = ctx.params.delayMs as number;
           if (!isOcpp2Version(cp.ocppVersion)) {
             const { type } = request as Reset16Request;
             cp.logger.info(`Reset request received: ${type}`, LogType.OCPP);
             return {
               response: { status: "Accepted" },
               after: async () => {
+                if (delayMs > 0) await ctx.sleep(delayMs);
+                // Power was lost while the reset waited: a station without
+                // power resets nothing (#798).
+                if (cp.poweredOff) return;
                 cp.applyRemoteReset(type);
               },
             };
@@ -53,6 +84,17 @@ export function resetBehavior(cp: ChargePoint): Behavior {
               ? all
               : all.filter((connector) => connector.id === evseId);
           if (evseId !== undefined && targets.length === 0) {
+            return { response: { status: "Rejected" } };
+          }
+          // 2.1 B13.FR.01: without transaction resumption support (no
+          // TxCtrlr.TxResumptionTimeout, so "0 or non-existent") an
+          // ImmediateAndResume reset with ongoing transactions is Rejected;
+          // B13.FR.02 keeps Accepted when none is ongoing on the whole
+          // Charging Station, whatever evseId the request carries.
+          if (
+            type === "ImmediateAndResume" &&
+            all.some((connector) => connector.hasRunningTransaction)
+          ) {
             return { response: { status: "Rejected" } };
           }
           if (
@@ -69,17 +111,20 @@ export function resetBehavior(cp: ChargePoint): Behavior {
           return {
             response: { status: "Accepted" },
             after: async () => {
-              if (type !== "ImmediateAndResume") {
-                cp.cancelPendingResetsOnIdle(evseId);
-                for (const connector of targets) {
-                  if (connector.hasRunningTransaction) {
-                    cp.stopTransaction(connector.id, "HardReset", {
-                      triggerReason: "ResetCommand",
-                    });
-                  }
+              if (delayMs > 0) await ctx.sleep(delayMs);
+              if (cp.poweredOff) return; // power was lost during the wait (#798)
+              cp.cancelPendingResetsOnIdle(evseId);
+              for (const connector of targets) {
+                if (connector.hasRunningTransaction) {
+                  cp.stopTransaction(connector.id, "HardReset", {
+                    triggerReason: "ResetCommand",
+                  });
                 }
               }
-              cp.boot();
+              // B11.FR.03/04: the station reboots and cold-boots; with an evseId
+              // (B11.FR.08) only that EVSE is reset.
+              if (evseId === undefined) cp.boot("RemoteReset");
+              else cp.resetEvse(evseId);
             },
           };
         },

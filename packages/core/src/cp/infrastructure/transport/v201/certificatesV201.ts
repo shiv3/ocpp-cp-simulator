@@ -4,13 +4,13 @@ import type {
   DeleteCertificateRequestV201,
   GetInstalledCertificateIdsRequestV201,
   InstallCertificateRequestV201,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import type {
   CertificateSignedResponseV21,
   DeleteCertificateResponseV21,
   GetInstalledCertificateIdsResponseV21,
   InstallCertificateResponseV21,
-} from "@ocpp-cp-sim/ocpp/v21/index";
+} from "@ocpp-cp-simulator/ocpp/v21/index";
 import type {
   DeleteCertificateOutcome,
   InstalledCertificateIds,
@@ -335,19 +335,23 @@ function answerDeleteCertificate(
 
 /**
  * A02 / A03: the chain is accepted only when it parses, a CSR is pending
- * for its use, and the leaf carries that CSR's public key (A02.FR.06).
- * Anything else is Rejected and raises an
+ * for its use, the leaf carries that CSR's public key and the A02.FR.06
+ * checks pass: every chain member is within its validity period (a leaf not
+ * valid yet is Rejected on 2.0.1 and 2.1 alike), the leaf meets the
+ * Certificate Properties (key size, serial number, O, CN; A00.FR.501-511)
+ * and the chain belongs to the operator hierarchy (signed link by link, the
+ * last member installed as a root or signed by one; see
+ * `signedChainChecks.ts`). Anything else is Rejected and raises an
  * `InvalidChargingStationCertificate` security event once the answer is
  * written (A02.FR.07). An absent `certificateType` means the certificate
  * serves both the CSMS and the 15118 connection; the simulator has no
  * 15118 stack, so it is the Charging Station certificate.
  *
- * Only an Accepted chain ends the CSR's resend back-off (#537), through
- * `certificateInstalled`: A02.FR.17 asks about a CertificateSigned "for
- * this CSR". The station has no A02.FR.06 period or hierarchy check, so a
- * chain whose leaf matches the CSR's key is Accepted and no rejection can
- * be tied to this CSR as an invalid answer: A02.FR.20 has no case to apply
- * to yet.
+ * The CSR's resend back-off ends on an Accepted chain (#537), through
+ * `certificateInstalled` (A02.FR.17 asks about a CertificateSigned "for this
+ * CSR"), and on a rejection of a chain whose leaf matches the CSR's key
+ * (#587, A02.FR.20), through `certificateRejected`. Any other rejection
+ * leaves it running.
  */
 async function certificateSigned(
   mapping: CertificateWireMapping,
@@ -371,6 +375,24 @@ async function certificateSigned(
       response: { status: "Rejected" } satisfies CertificateSignedResponseV21,
     };
   }
+  // #720 A02.FR.26 / A03.FR.22 (2.1): a requestId the station never issued.
+  // Only Rejected is asked for: nothing is stored, the pending CSR and its
+  // back-off go on, and no security event is raised. An absent requestId is
+  // handled as before (the field is optional).
+  const answeredRequestId = (req as { requestId?: number }).requestId;
+  if (
+    answeredRequestId !== undefined &&
+    ctx.certificateSigning &&
+    !ctx.certificateSigning.isKnownSignRequestId(answeredRequestId)
+  ) {
+    ctx.logger.warn(
+      `CertificateSigned rejected: unknown requestId ${answeredRequestId}`,
+      LogType.OCPP,
+    );
+    return {
+      response: { status: "Rejected" } satisfies CertificateSignedResponseV21,
+    };
+  }
   const pems = splitPemChain(req.certificateChain);
   let reason: string;
   if (!use) {
@@ -387,17 +409,28 @@ async function certificateSigned(
         `CertificateSigned accepted: stored ${pems.length} certificate(s) as ${use}`,
         LogType.OCPP,
       );
+      // #564: not left to the effect below, which a dropped answer skips.
+      ctx.certificateSigning?.certificateStored(use);
       return {
         response: { status: "Accepted" } satisfies CertificateSignedResponseV21,
         // #537 M06.FR.07: a new V2G certificate's OCSP status is fetched.
         afterResult: () => ctx.certificateSigning?.certificateInstalled(use),
       };
     }
-    reason = {
-      Malformed: "malformed certificate chain",
-      NoPendingCsr: `no pending CSR for ${use}`,
-      PublicKeyMismatch: "the leaf does not match the pending CSR's public key",
-    }[outcome.status];
+    if (outcome.status === "Malformed") {
+      reason = "malformed certificate chain";
+    } else if (outcome.status === "NoPendingCsr") {
+      reason = `no pending CSR for ${use}`;
+    } else if (outcome.status === "PublicKeyMismatch") {
+      reason = "the leaf does not match the pending CSR's public key";
+    } else {
+      // #587 A02.FR.06/07/20: an invalid certificate answering this CSR (its
+      // key matched) ends the resends until the CSMS triggers a new
+      // signature. A chain for a superseded CSR, or none pending, leaves
+      // them running.
+      reason = outcome.reason;
+      ctx.certificateSigning?.certificateRejected(use);
+    }
   }
   ctx.logger.warn(`CertificateSigned rejected: ${reason}`, LogType.OCPP);
   return {

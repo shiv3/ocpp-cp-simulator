@@ -7,18 +7,18 @@ import { useCpConfigActions } from "./useCpConfigActions";
 import { createFakeChargePointService } from "../../test/harness";
 import { DataContext } from "../../../data/providers/DataProvider";
 import { useConfig } from "../../../data/hooks/useConfig";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import type { ChargePointConfig } from "../../../components/ChargePointConfigModal";
 import type {
   ChargePointService,
   ChargePointSnapshot,
   ConnectorSnapshot,
   CreateChargePointParams,
-} from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+} from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 import type {
   SimulatorConfigInput,
   WireSimulatorConfig,
-} from "@ocpp-cp-sim/contracts/index";
+} from "@ocpp-cp-simulator/contracts/index";
 
 beforeAll(() => {
   (
@@ -237,6 +237,26 @@ describe("useCpConfigActions", () => {
         expectedRemoteParams,
       );
       expect(service.updateChargePoint).not.toHaveBeenCalled();
+    });
+
+    it("sends txUpdatedMeterValues on create and update, true and false (#550)", async () => {
+      for (const value of [true, false]) {
+        const service = createFakeChargePointService();
+        const { root, click } = await mountProbe(service, "remote", {
+          ...fixtureConfig,
+          ocppVersion: "OCPP-2.0.1",
+          txUpdatedMeterValues: value,
+        });
+        await click("add");
+        await click("update");
+        expect(service.createChargePoint).toHaveBeenCalledWith(
+          expect.objectContaining({ txUpdatedMeterValues: value }),
+        );
+        expect(service.updateChargePoint).toHaveBeenCalledWith(
+          expect.objectContaining({ txUpdatedMeterValues: value }),
+        );
+        await unmount(root);
+      }
     });
 
     it("updateCp calls updateChargePoint, not createChargePoint", async () => {
@@ -480,6 +500,20 @@ describe("useCpConfigActions", () => {
         { ChargePointID: "CP-1", ConnectorNumber: 2 },
       ]);
       expect(saved?.wsURL).toBe("ws://localhost:9000/CP-1");
+    });
+
+    it("addCp persists txUpdatedMeterValues into the shared config (#550)", async () => {
+      for (const value of [true, false]) {
+        const { service, saveConfig } = createStatefulConfigService(null);
+        const { root, click } = await mountProbe(service, "local", {
+          ...fixtureConfig,
+          ocppVersion: "OCPP-2.0.1",
+          txUpdatedMeterValues: value,
+        });
+        await click("add");
+        expect(saveConfig.mock.calls[0][0]?.txUpdatedMeterValues).toBe(value);
+        await unmount(root);
+      }
     });
 
     it("removeCp drops the CP from Experimental.ChargePointIDs", async () => {

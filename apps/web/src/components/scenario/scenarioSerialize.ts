@@ -2,7 +2,7 @@ import type { Edge } from "@xyflow/react";
 import type {
   ScenarioDefinition,
   ScenarioNode,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 
 const RUNTIME_NODE_DATA_KEYS = new Set([
   "progress",

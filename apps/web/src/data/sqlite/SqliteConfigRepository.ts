@@ -1,5 +1,5 @@
-import type { Database } from "@ocpp-cp-sim/core/cp/domain/persistence/Database";
-import type { ConfigRepository } from "@ocpp-cp-sim/client/interfaces/ConfigRepository";
+import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
+import type { ConfigRepository } from "@ocpp-cp-simulator/client/interfaces/ConfigRepository";
 import type { Config } from "../../store/store";
 
 const CONFIG_KEY = "global_config";

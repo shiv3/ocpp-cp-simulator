@@ -1,17 +1,65 @@
 import {
+  AUTO_TRAFFIC_ID_TAG,
   AutoTrafficPlanner,
+  autoTrafficVehicleLabel,
   emptyAutoTrafficCounters,
   type AutoTrafficConfig,
   type AutoTrafficCounters,
+  type AutoTrafficIntent,
+  type AutoTrafficVehicle,
 } from "../../domain/connector/AutoTraffic";
 import { realClock } from "../../shared/clock";
 import type { SimClock, TimerHandle } from "../../shared/clock";
 
+/** How often a session whose time is up re-checks for power (#798). */
+const POWER_RECHECK_MS = 1000;
+
+/** How often an intent session checks whether its target was reached (#327). */
+const INTENT_RECHECK_MS = 1000;
+
 export interface AutoTrafficHooks {
+  /**
+   * The idTag a session on this connector presents (#603). The runner asks
+   * once per session, so Authorize and the start use the same tag. Absent:
+   * {@link AUTO_TRAFFIC_ID_TAG}.
+   */
+  idTag?: (connectorId: number) => string;
+  /**
+   * Why a session cannot start now, or `null` when it can (#603): the charge
+   * point is not Accepted, the connector is not Available, or a transaction
+   * is active. Such a cycle counts as skipped.
+   */
+  startBlocker?: (connectorId: number) => string | null;
   /** Authorize a tag; resolve `false` when the CSMS refused. */
-  authorize: (connectorId: number) => Promise<boolean>;
-  startTransaction: (connectorId: number) => Promise<void>;
+  authorize: (connectorId: number, idTag: string) => Promise<boolean>;
+  /**
+   * Start a session; resolve `false` when it did not begin (#603). `vehicle`
+   * is the pool vehicle drawn for the session (#627): the hook makes the
+   * connector that vehicle before the start, so the traffic and the meter
+   * model read the same one. Absent: the connector's own EV settings.
+   */
+  startTransaction: (
+    connectorId: number,
+    idTag: string,
+    intent?: AutoTrafficIntent,
+    vehicle?: AutoTrafficVehicle,
+  ) => Promise<void | boolean>;
+  /**
+   * `sessionModel: "intent"` only (#327): whether the connector still has the
+   * transaction this runner started. The vehicle reaching its target SoC ends
+   * it from the station's side (the connector's auto-stop); the runner notices
+   * here and counts the session completed instead of stopping it again.
+   * Absent: the session only ends at its ceiling.
+   */
+  sessionRunning?: (connectorId: number) => boolean;
   stopTransaction: (connectorId: number) => Promise<void>;
+  /**
+   * Whether the station is without power (#798). A session whose duration
+   * ends during an outage stays open: how a transaction interrupted by a
+   * power loss ends is decided by the recovery after the restore, not by the
+   * traffic timer.
+   */
+  poweredOff?: (connectorId: number) => boolean;
   /** Whether a scenario currently owns this connector. */
   scenarioActive: (connectorId: number) => boolean;
   log: (message: string) => void;
@@ -35,6 +83,9 @@ export class AutoTrafficRunner {
   private stopped = false;
   /** Whether a session this runner started is still open. */
   private sessionOpen = false;
+  /** The start conf of the open session was already counted as refused, so
+   *  a later refusal in the same session corrects nothing (#603). */
+  private startConfSettled = false;
   private startedAtMs = 0;
   readonly counters: AutoTrafficCounters = emptyAutoTrafficCounters();
 
@@ -77,6 +128,20 @@ export class AutoTrafficRunner {
     }
   }
 
+  /**
+   * The CSMS answered this connector's StartTransaction with an idTagInfo that
+   * is not Accepted (#603). The session was counted `startAccepted` when the
+   * request went out; the conf corrects it to a refusal. `started` and
+   * `completed` still count the session, which the station may leave running
+   * (`StopTransactionOnInvalidId`).
+   */
+  noteStartConfRefused(): void {
+    if (!this.sessionOpen || this.startConfSettled) return;
+    this.startConfSettled = true;
+    if (this.counters.startAccepted > 0) this.counters.startAccepted--;
+    this.counters.startRejected++;
+  }
+
   /** Replace the config. Restarts the stream, so the seed takes effect. */
   reconfigure(config: AutoTrafficConfig): void {
     this.stop();
@@ -91,24 +156,49 @@ export class AutoTrafficRunner {
     this.timer = this.clock.setTimeout(
       () => {
         this.timer = null;
-        void this.runStep(step.start, step.durationSec);
+        const vehicle =
+          step.vehicleIndex !== undefined
+            ? this.config.vehiclePool?.[step.vehicleIndex]
+            : undefined;
+        void this.runStep(step.start, step.durationSec, step.intent, vehicle);
       },
       Math.max(0, step.gapSec * 1000),
     );
   }
 
   private expired(): boolean {
-    if (this.config.stopAfterSec === undefined) return false;
+    const now = this.clock.now();
+    if (
+      this.config.stopAfterSec !== undefined &&
+      now - this.startedAtMs >= this.config.stopAfterSec * 1000
+    ) {
+      return true;
+    }
+    // #603: the absolute stop time.
     return (
-      this.clock.now() - this.startedAtMs >= this.config.stopAfterSec * 1000
+      this.config.stopAt !== undefined && now >= Date.parse(this.config.stopAt)
     );
   }
 
-  private async runStep(start: boolean, durationSec: number): Promise<void> {
+  /** A cycle that began no session (#603). */
+  private skip(): void {
+    this.counters.skipped++;
+    this.counters.consecutiveSkips++;
+    this.scheduleNext();
+  }
+
+  private lastSkipReason: string | null = null;
+
+  private async runStep(
+    start: boolean,
+    durationSec: number,
+    intent?: AutoTrafficIntent,
+    vehicle?: AutoTrafficVehicle,
+  ): Promise<void> {
     if (this.stopped) return;
     if (this.expired()) {
       this.hooks.log(
-        `[auto-traffic] ${this.cpId}/${this.connectorId} stopped (stopAfterSec reached)`,
+        `[auto-traffic] ${this.cpId}/${this.connectorId} stopped (${this.config.stopAt !== undefined && this.clock.now() >= Date.parse(this.config.stopAt) ? "stopAt" : "stopAfterSec"} reached)`,
       );
       this.stop();
       return;
@@ -120,23 +210,62 @@ export class AutoTrafficRunner {
     }
 
     this.counters.attempted++;
+    const now = this.clock.now();
+    this.counters.firstRunAt ??= now;
+    this.counters.lastRunAt = now;
     if (!start) {
-      this.counters.skipped++;
-      this.scheduleNext();
+      this.skip();
+      return;
+    }
+    const blocker = this.hooks.startBlocker?.(this.connectorId) ?? null;
+    if (blocker !== null) {
+      // Once per reason: a fleet with disconnected charge points would log
+      // every cycle otherwise.
+      if (blocker !== this.lastSkipReason) {
+        this.lastSkipReason = blocker;
+        this.hooks.log(
+          `[auto-traffic] ${this.cpId}/${this.connectorId} cycle skipped: ${blocker}`,
+        );
+      }
+      this.skip();
       return;
     }
 
+    this.lastSkipReason = null;
+    const idTag = this.hooks.idTag?.(this.connectorId) ?? AUTO_TRAFFIC_ID_TAG;
     try {
       if (this.config.requireAuthorize) {
-        const accepted = await this.hooks.authorize(this.connectorId);
+        let accepted: boolean;
+        try {
+          accepted = await this.hooks.authorize(this.connectorId, idTag);
+        } catch (err) {
+          this.counters.authorizeRejected++;
+          throw err;
+        }
         if (this.stopped) return;
         if (!accepted) {
+          this.counters.authorizeRejected++;
           this.counters.rejected++;
           this.scheduleNext();
           return;
         }
+        this.counters.authorizeAccepted++;
       }
-      await this.hooks.startTransaction(this.connectorId);
+      const started = await this.hooks
+        .startTransaction(this.connectorId, idTag, intent, vehicle)
+        .catch((err: unknown) => {
+          this.counters.startRejected++;
+          throw err;
+        });
+      if (started === false) {
+        this.counters.startRejected++;
+        this.counters.rejected++;
+        this.hooks.log(
+          `[auto-traffic] ${this.cpId}/${this.connectorId} start refused`,
+        );
+        this.scheduleNext();
+        return;
+      }
       // Re-checked after every await: `stop()` can land while the authorize or
       // the start is in flight, and without this the runner would install a
       // fresh timer after cancellation.
@@ -147,7 +276,15 @@ export class AutoTrafficRunner {
         return;
       }
       this.sessionOpen = true;
+      this.startConfSettled = false;
       this.counters.started++;
+      this.counters.startAccepted++;
+      if (vehicle) {
+        const label = autoTrafficVehicleLabel(vehicle);
+        const vehicles = (this.counters.vehicles ??= {});
+        vehicles[label] = (vehicles[label] ?? 0) + 1;
+      }
+      this.counters.consecutiveSkips = 0;
     } catch (err) {
       // A failed start is not a reason to stop generating: the CSMS being
       // unreachable for one attempt is exactly the condition a load run is
@@ -160,6 +297,11 @@ export class AutoTrafficRunner {
       return;
     }
 
+    if (intent && this.hooks.sessionRunning) {
+      // The ceiling is the drawn duration; the target usually comes first.
+      this.watchIntentSession(this.clock.now() + durationSec * 1000);
+      return;
+    }
     this.timer = this.clock.setTimeout(
       () => {
         this.timer = null;
@@ -169,13 +311,44 @@ export class AutoTrafficRunner {
     );
   }
 
+  /** Re-check an intent session every second until the station ended it
+   *  (target reached) or the ceiling passes (#327). */
+  private watchIntentSession(ceilingAtMs: number): void {
+    this.timer = this.clock.setTimeout(() => {
+      this.timer = null;
+      if (this.stopped) return;
+      if (this.hooks.sessionRunning?.(this.connectorId) === false) {
+        // The vehicle reached its target and the station stopped the
+        // transaction: the session completed on its own.
+        this.sessionOpen = false;
+        this.counters.completed++;
+        this.scheduleNext();
+        return;
+      }
+      if (this.clock.now() >= ceilingAtMs) {
+        void this.endSession();
+        return;
+      }
+      this.watchIntentSession(ceilingAtMs);
+    }, INTENT_RECHECK_MS);
+  }
+
   private async endSession(): Promise<void> {
     if (this.stopped) return;
+    if (this.hooks.poweredOff?.(this.connectorId)) {
+      this.timer = this.clock.setTimeout(() => {
+        this.timer = null;
+        void this.endSession();
+      }, POWER_RECHECK_MS);
+      return;
+    }
     try {
       this.sessionOpen = false;
       await this.hooks.stopTransaction(this.connectorId);
       this.counters.completed++;
+      this.counters.stopAccepted++;
     } catch (err) {
+      this.counters.stopRejected++;
       this.hooks.log(
         `[auto-traffic] ${this.cpId}/${this.connectorId} stop failed: ${err instanceof Error ? err.message : String(err)}`,
       );

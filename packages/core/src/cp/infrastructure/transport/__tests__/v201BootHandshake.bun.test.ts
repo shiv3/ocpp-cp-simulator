@@ -1,12 +1,12 @@
 import { describe, it, expect } from "bun:test";
 import { startMockCsms, normalizeTranscript } from "./mockCsms";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 
 describe("OCPP 2.0.1 boot handshake", () => {
   it("boots, accepts, then reports station and connector availability", async () => {
     const csms = startMockCsms();
-    const cp = new ChargePoint(
+    const cp = createChargePoint(
       "CP201",
       DefaultBootNotification,
       2,
@@ -40,19 +40,8 @@ describe("OCPP 2.0.1 boot handshake", () => {
         interval: 300,
       });
 
-      const status0 = await csms.waitForFrame(
-        (f) =>
-          f[0] === 2 &&
-          f[2] === "StatusNotification" &&
-          (f[3] as { evseId?: number; connectorId?: number }).evseId === 0 &&
-          (f[3] as { evseId?: number; connectorId?: number }).connectorId === 0,
-      );
-      expect(status0[3]).toMatchObject({
-        evseId: 0,
-        connectorId: 0,
-        connectorStatus: "Available",
-      });
-
+      // B01.FR.05: connectors only; the station scope (evseId 0) has no
+      // StatusNotification (#703).
       for (const evseId of [1, 2]) {
         const status = await csms.waitForFrame(
           (f) =>

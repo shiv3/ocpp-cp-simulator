@@ -148,7 +148,7 @@ export function powerFractionAtSoc(
  * Returns 0 rather than `Infinity` when neither ceiling is finite (no
  * `maxChargingPowerKw` and no active profile) — there is no sensible power
  * number to report for an uncapped, curve-less session, and 0 is the
- * historical fallback `derivedInstantaneousPowerW` used before this was
+ * historical fallback the report path used before this was
  * factored out.
  */
 export function effectiveChargingPowerW(params: {

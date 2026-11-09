@@ -1,4 +1,4 @@
-import { MAX_SESSIONS_PER_CP } from "@ocpp-cp-sim/contracts/chargingSession";
+import { MAX_SESSIONS_PER_CP } from "@ocpp-cp-simulator/contracts/chargingSession";
 import type {
   ChargingSession,
   ChargingSessionOutcome,
@@ -22,15 +22,27 @@ import type {
 export { MAX_SESSIONS_PER_CP };
 
 export interface ChargingSessionQuery {
-  cpId: string;
+  /** One charge point's sessions. Omitted: every charge point's (#489),
+   *  narrowed by `cpIds` when given. */
+  cpId?: string;
+  /** Fleet-wide only (no `cpId`): the charge points to list, e.g. the ones a
+   *  label selector matched. An empty list matches nothing. */
+  cpIds?: readonly string[];
   connectorId?: number;
+  /** Only sessions that started at or after this instant (ISO 8601, UTC,
+   *  `Date#toISOString` form — the form `startedAt` is stored in). */
+  startedFrom?: string;
+  /** Only sessions that started strictly before this instant (same form). */
+  startedTo?: string;
   outcomes?: ChargingSessionOutcome[];
   /** How many sessions to return: the newest N, like `logs.get`. */
   limit?: number;
   /** How many of the newest sessions to skip before taking `limit`. */
   offset?: number;
   /** Order of the returned window, by start time; `desc` (newest first) by
-   *  default. It never changes which sessions `limit` / `offset` select. */
+   *  default. It never changes which sessions `limit` / `offset` select.
+   *  Equal start times, across charge points too, fall back to record order
+   *  (the newest record first), so a page boundary never reshuffles. */
   order?: "asc" | "desc";
 }
 
@@ -88,12 +100,19 @@ export class InMemoryChargingSessionRepository implements ChargingSessionReposit
   }
 
   list(query: ChargingSessionQuery): ChargingSessionPage {
-    const { connectorId, outcomes } = query;
-    const matching = [...(this.byCp.get(query.cpId)?.values() ?? [])]
+    const { connectorId, outcomes, startedFrom, startedTo } = query;
+    const cpIds =
+      query.cpId !== undefined
+        ? [query.cpId]
+        : (query.cpIds ?? [...this.byCp.keys()]);
+    const matching = cpIds
+      .flatMap((cpId) => [...(this.byCp.get(cpId)?.values() ?? [])])
       .filter(
         ({ session }) =>
           (connectorId === undefined || session.connectorId === connectorId) &&
-          (outcomes === undefined || outcomes.includes(session.outcome)),
+          (outcomes === undefined || outcomes.includes(session.outcome)) &&
+          (startedFrom === undefined || session.startedAt >= startedFrom) &&
+          (startedTo === undefined || session.startedAt < startedTo),
       )
       .sort(
         (a, b) =>

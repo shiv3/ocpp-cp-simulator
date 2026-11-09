@@ -3,7 +3,7 @@
 # Point `cli-latest` at the highest published CLI release.
 #
 # Usage: scripts/roll-cli-latest.sh <triggering-version> <triggering-tag>
-#   e.g. scripts/roll-cli-latest.sh 0.4.0 cli-v0.4.0
+#   e.g. scripts/roll-cli-latest.sh 0.10.0 v0.10.0
 #
 # Env:
 #   GH_TOKEN       required by `gh`
@@ -14,12 +14,13 @@
 # ---------------------------------------------------------------------------
 # THE CONTRACT
 #
-#   `cli-latest` always serves the highest published `cli-vX.Y.Z` release, and
+#   `cli-latest` always serves the highest published `vX.Y.Z` (or legacy
+#   `cli-vX.Y.Z`) release, and
 #   never a lower one, whatever order the pointer jobs run in or fail in.
 #
 # Carve-outs, stated rather than accidental:
 #   * A CLI release tagged with a SemVer prerelease or build-metadata suffix
-#     (`cli-v1.0.0-rc.1`) is not eligible to own the pointer and is ignored
+#     (`v1.0.0-rc.1`) is not eligible to own the pointer and is ignored
 #     when picking the highest. Install those by their pinned URL.
 #   * If the highest release is later deleted, the pointer follows the new
 #     highest downwards, with a `::warning::`. An unpublished release cannot be
@@ -205,6 +206,17 @@ is_release_version() {
   [ "$(printf '%s' "$1" | awk -F. '{print NF}')" = 3 ]
 }
 
+# The release tag that carries version $1: the unified `v` train when it is in
+# the listing, else the legacy `cli-v` one. Uses LISTING (set below) and falls
+# back to `v` when it is empty.
+tag_for_version() {
+  if printf '%s\n' "${LISTING:-}" | grep -qxF "cli-v$1" && ! printf '%s\n' "${LISTING:-}" | grep -qxF "v$1"; then
+    printf 'cli-v%s' "$1"
+  else
+    printf 'v%s' "$1"
+  fi
+}
+
 # 0 when $1 is strictly newer than $2.
 version_gt() {
   awk -v a="$1" -v b="$2" '
@@ -226,7 +238,7 @@ if ! is_release_version "$VERSION"; then
 fi
 
 # ---------------------------------------------------------------------------
-# 1. Highest published cli-vX.Y.Z, with the triggering version as a floor.
+# 1. Highest published vX.Y.Z / cli-vX.Y.Z, with the triggering version as a floor.
 #    Fails closed: a listing that cannot be read stops the run.
 # ---------------------------------------------------------------------------
 TARGET="$VERSION"
@@ -255,10 +267,20 @@ done
 while IFS= read -r tag; do
   case "$tag" in
     cli-v*) candidate="${tag#cli-v}" ;;
+    v*) candidate="${tag#v}" ;;
     *) continue ;;
   esac
   is_release_version "$candidate" || continue
   if version_gt "$candidate" "$TARGET"; then
+    # Desktop-only `v*` releases from before the trains were unified carry no
+    # CLI tarball and must not own the pointer. Ask the release itself; a
+    # failed lookup skips the candidate (the pointer then stays on the lower
+    # release it already serves, never on one it cannot verify).
+    if ! gh release view "$tag" --repo "$REPO_SLUG" --json assets \
+      --jq '.assets[].name' 2>/dev/null | grep -qxF "$ASSET_NAME"; then
+      echo "skipping ${tag}: no ${ASSET_NAME} asset (desktop-only release, or lookup failed)"
+      continue
+    fi
     TARGET="$candidate"
   fi
 done <<EOF
@@ -305,7 +327,7 @@ fi
 if [ -n "$CURRENT" ] && ! is_release_version "$CURRENT"; then
   echo "::warning::${POINTER_TAG}'s version marker reads '${CURRENT}', which is not a plain X.Y.Z version; ignoring it and overwriting with ${TARGET}."
 elif [ -n "$CURRENT" ] && version_gt "$CURRENT" "$TARGET"; then
-  RECORDED_TAG="cli-v${CURRENT}"
+  RECORDED_TAG="$(tag_for_version "$CURRENT")"
   echo "${POINTER_TAG} records ${CURRENT}, higher than anything the listing showed (${TARGET}); confirming whether ${RECORDED_TAG} is still published"
   if RECORDED_DRAFT="$(gh api "repos/${REPO_SLUG}/releases/tags/${RECORDED_TAG}" --jq '.draft' 2>/tmp/roll-gh-err.$$)"; then
     rm -f /tmp/roll-gh-err.$$
@@ -329,7 +351,7 @@ elif [ -n "$CURRENT" ] && version_gt "$CURRENT" "$TARGET"; then
   fi
 fi
 
-TARGET_TAG="cli-v${TARGET}"
+TARGET_TAG="$(tag_for_version "$TARGET")"
 if [ "$TARGET" = "$VERSION" ]; then
   echo "highest published CLI release is ${TARGET_TAG} (the release that triggered this run)"
 else
@@ -357,9 +379,9 @@ NOTES="Rolling pointer to the highest published CLI release (currently **${TARGE
 bun install -g https://github.com/${REPO_SLUG}/releases/download/${POINTER_TAG}/${ASSET_NAME}
 \`\`\`
 
-Release notes and per-version tarballs live on the \`cli-v*\` releases.
-Kept as a pre-release so it never becomes the repository's \"Latest\" release —
-the desktop \`v*\` train owns that badge (#321).
+Release notes and per-version tarballs live on the \`v*\` releases
+(\`cli-v*\` before the trains were unified).
+Kept as a pre-release so it never becomes the repository's \"Latest\" release.
 
 ${MARKER_PREFIX} ${TARGET} -->"
 

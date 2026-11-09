@@ -2,7 +2,7 @@ import type {
   StateHistoryEntry,
   HistoryOptions,
   StateStatistics,
-} from "./types/StateSnapshot";
+} from "../../domain/services/StateSnapshot";
 
 /**
  * State history management class

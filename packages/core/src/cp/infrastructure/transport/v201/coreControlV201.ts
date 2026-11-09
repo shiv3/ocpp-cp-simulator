@@ -10,12 +10,13 @@ import type {
   TriggerMessageRequestV201,
   TriggerMessageResponseV201,
   UnlockConnectorResponseV201,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import type {
   V201HandlerResult,
   V201InboundContext,
 } from "./inboundRegistryV201";
 import { LogType } from "../../../shared/Logger";
+import { OCPP_2_1 } from "../../../domain/types/OcppVersion";
 
 /**
  * B11 / B12 Reset.req: translation only. The `default.reset` behavior of the
@@ -102,11 +103,51 @@ export const handleTriggerMessageV201 = (
   const req = payload as TriggerMessageRequestV201;
   const connectorId = req.evse?.id;
 
+  // #553, 2.1 F06.FR.08. 2.0.1 has no V2G20 certificate (its schema refuses
+  // SignV2G20Certificate before this runs) and keeps answering
+  // NotImplemented for SignCombinedCertificate.
+  const requested: string = req.requestedMessage;
+  // #618: a target the capability profile leaves out is not implemented.
+  if (ctx.chargePoint?.isTriggerTargetSupported?.(requested) === false) {
+    return notImplemented;
+  }
+  if (
+    requested === "SignV2G20Certificate" ||
+    requested === "SignCombinedCertificate"
+  ) {
+    const signing = ctx.certificateSigning;
+    if (!signing || ctx.chargePoint.ocppVersion !== OCPP_2_1) {
+      return notImplemented;
+    }
+    return {
+      response: accepted,
+      afterResult: () => {
+        const sent =
+          requested === "SignV2G20Certificate"
+            ? signing.requestSignature("V2G20Certificate")
+            : signing.requestCombinedSignature();
+        sent.catch((err: unknown) => {
+          ctx.logger.error(
+            `TriggerMessage ${requested}: could not send SignCertificate: ${err instanceof Error ? err.message : String(err)}`,
+            LogType.OCPP,
+          );
+        });
+      },
+    };
+  }
+
   switch (req.requestedMessage) {
     case "BootNotification":
+      // F06.FR.17: after an Accepted boot the answer is Rejected and nothing
+      // is sent. Pending, Rejected and unanswered boots keep Accepted.
+      if (ctx.bootAccepted?.()) {
+        return {
+          response: { status: "Rejected" } satisfies TriggerMessageResponseV201,
+        };
+      }
       return {
         response: accepted,
-        afterResult: () => ctx.chargePoint.boot(),
+        afterResult: () => ctx.chargePoint.boot("Triggered"),
       };
 
     case "Heartbeat":
@@ -126,19 +167,31 @@ export const handleTriggerMessageV201 = (
       return {
         response: accepted,
         afterResult: () => {
+          // F06.FR.06: the measurands of AlignedDataCtrlr.Measurands, with
+          // context Trigger (ReadingContextEnumType). An empty aligned list
+          // falls back to the sampled list: TC_F_11_CS/TC_F_12_CS expect a
+          // MeterValuesRequest from a station that configured neither.
+          const aligned =
+            ctx.chargePoint.configuration.meterValuesAlignedData();
+          const measurands =
+            aligned.length > 0
+              ? aligned
+              : ctx.chargePoint.configuration.meterValuesSampledData();
+          const send = (id: number): void =>
+            ctx.chargePoint.sendMeterValue(id, "Trigger", { measurands });
           if (connectorId === undefined || connectorId === 0) {
-            for (const id of ctx.chargePoint.connectors.keys()) {
-              ctx.chargePoint.sendMeterValue(id);
-            }
+            for (const id of ctx.chargePoint.connectors.keys()) send(id);
+            // The station main meter on connector 0 / EVSE 0 (#617), when it has one.
+            if (ctx.chargePoint.mainMeter) send(0);
             return;
           }
-          ctx.chargePoint.sendMeterValue(connectorId);
+          send(connectorId);
         },
       };
 
     // #537 A02: a new key pair and CSR once the answer is written
-    // (A02.FR.02, F06.FR.04). SignCombinedCertificate and 2.1's
-    // SignV2G20Certificate stay NotImplemented (F06.FR.08).
+    // (A02.FR.02, F06.FR.04). SignV2G20Certificate and SignCombinedCertificate
+    // (2.1, F06.FR.08) are handled before the switch.
     case "SignChargingStationCertificate":
     case "SignV2GCertificate": {
       const signing = ctx.certificateSigning;

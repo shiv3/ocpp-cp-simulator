@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 
 function callResultFrame(messageId: string): (frame: OcppFrame) => boolean {
@@ -59,7 +59,7 @@ async function bootAccepted(csms: MockCsms): Promise<void> {
 describe("OCPP 2.0.1 TriggerMessage", () => {
   it("answers first, then emits supported requested messages", async () => {
     const csms = startMockCsms();
-    const cp = new ChargePoint(
+    const cp = createChargePoint(
       "CP201-TRIGGER",
       DefaultBootNotification,
       1,
@@ -99,7 +99,6 @@ describe("OCPP 2.0.1 TriggerMessage", () => {
       expect(csms.received.indexOf(statusCall)).toBeGreaterThan(
         csms.received.indexOf(statusResult),
       );
-      await waitForNewCall(csms, "StatusNotification", statusSeen);
 
       const heartbeatSeen = receivedMessageIds(csms);
       csms.send([

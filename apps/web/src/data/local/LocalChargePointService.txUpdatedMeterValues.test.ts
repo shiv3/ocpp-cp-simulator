@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { ChargePoint } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
-import { DefaultBootNotification } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import type { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
+import { DefaultBootNotification } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import { LocalChargePointService } from "./LocalChargePointService";
 import type { LocalChargePointDefinition } from "./LocalChargePointService";
 
@@ -62,5 +62,22 @@ describe("LocalChargePointService txUpdatedMeterValues (#347)", () => {
     connector.onMeterSend!(1);
     expect(scheduled).toHaveBeenCalledWith(1);
     expect(plain).not.toHaveBeenCalled();
+  });
+
+  it("applies a change to a charge point that already exists (#550)", async () => {
+    const service = new LocalChargePointService();
+    await service.syncLocalChargePoints([localDefinition()]);
+    await service.syncLocalChargePoints([
+      localDefinition({ txUpdatedMeterValues: true }),
+    ]);
+    expect(chargePointOf(service, "CP-LOCAL-347").txUpdatedMeterValues).toBe(
+      true,
+    );
+    await service.syncLocalChargePoints([
+      localDefinition({ txUpdatedMeterValues: false }),
+    ]);
+    expect(chargePointOf(service, "CP-LOCAL-347").txUpdatedMeterValues).toBe(
+      false,
+    );
   });
 });

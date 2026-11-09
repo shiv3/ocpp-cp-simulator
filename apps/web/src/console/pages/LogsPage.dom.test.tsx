@@ -9,12 +9,12 @@ import {
   type FakeChargePointService,
   type ReportedLocation,
 } from "../test/harness";
-import { LogLevel, LogType } from "@ocpp-cp-sim/core/cp/shared/Logger";
+import { LogLevel, LogType } from "@ocpp-cp-simulator/core/cp/shared/Logger";
 import type {
   ChargePointEvent,
   ChargePointService,
   ChargePointSnapshot,
-} from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+} from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 
 async function unmount(root: Root): Promise<void> {
   await act(async () => {

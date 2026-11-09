@@ -3,8 +3,8 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
-import { behaviorsOfModule } from "@ocpp-cp-sim/core/cp/application/engine/behaviorModule";
+import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
+import { behaviorsOfModule } from "@ocpp-cp-simulator/core/cp/application/engine/behaviorModule";
 import { bundleBehavior } from "./bundleBehavior";
 import { missingCapabilityProblem } from "./ctxUse";
 

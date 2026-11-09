@@ -1,0 +1,344 @@
+{
+  "id": "dataflow-call-error-handling",
+  "name": "Data flow: Handle a CALLERROR (DataTransfer probe)",
+  "description": "Sends a DataTransfer probe (vendorId org.example.dataflow, messageId probe) and branches on response.kind. A CALLRESULT is sorted by response.payload.status (Accepted, or a $match in UnknownVendorId / UnknownMessageId, or Rejected). A CALLERROR is sorted by response.errorCode: a $match in NotImplemented / NotSupported, a $match endsWith Violation, a $match startsWith Internal, anything else. Each outcome reports itself with its own DataTransfer messageId (ok, unknown, rejected, unsupported, malformed, internal, other-error), so the branch taken shows in the message log. Version-agnostic; a CSMS that answers the unknown vendor with a CALLERROR drives the error side.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": {
+    "type": "manual"
+  },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": {
+        "x": 600,
+        "y": 50
+      },
+      "data": {
+        "label": "Start",
+        "triggerOn": "connect"
+      }
+    },
+    {
+      "id": "probe",
+      "type": "ocppCall",
+      "position": {
+        "x": 600,
+        "y": 150
+      },
+      "data": {
+        "label": "DataTransfer probe",
+        "action": "DataTransfer",
+        "payload": {
+          "vendorId": "org.example.dataflow",
+          "messageId": "probe"
+        }
+      }
+    },
+    {
+      "id": "kind",
+      "type": "switch",
+      "position": {
+        "x": 600,
+        "y": 270
+      },
+      "data": {
+        "label": "Answer kind?",
+        "value": {
+          "$from": "response.kind"
+        },
+        "cases": ["result", "error"]
+      }
+    },
+    {
+      "id": "status",
+      "type": "switch",
+      "position": {
+        "x": 250,
+        "y": 420
+      },
+      "data": {
+        "label": "Result status?",
+        "value": {
+          "$from": "response.payload.status"
+        },
+        "cases": [
+          "Accepted",
+          {
+            "$match": {
+              "in": ["UnknownVendorId", "UnknownMessageId"]
+            }
+          },
+          "Rejected"
+        ]
+      }
+    },
+    {
+      "id": "code",
+      "type": "switch",
+      "position": {
+        "x": 950,
+        "y": 420
+      },
+      "data": {
+        "label": "Error code?",
+        "value": {
+          "$from": "response.errorCode"
+        },
+        "cases": [
+          {
+            "$match": {
+              "in": ["NotImplemented", "NotSupported"]
+            }
+          },
+          {
+            "$match": {
+              "endsWith": "Violation"
+            }
+          },
+          {
+            "$match": {
+              "startsWith": "Internal"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "rep-ok",
+      "type": "dataTransfer",
+      "position": {
+        "x": 0,
+        "y": 580
+      },
+      "data": {
+        "label": "Report ok",
+        "vendorId": "org.example.dataflow",
+        "messageId": "ok"
+      }
+    },
+    {
+      "id": "rep-unknown",
+      "type": "dataTransfer",
+      "position": {
+        "x": 180,
+        "y": 580
+      },
+      "data": {
+        "label": "Report unknown",
+        "vendorId": "org.example.dataflow",
+        "messageId": "unknown"
+      }
+    },
+    {
+      "id": "rep-rejected",
+      "type": "dataTransfer",
+      "position": {
+        "x": 360,
+        "y": 580
+      },
+      "data": {
+        "label": "Report rejected",
+        "vendorId": "org.example.dataflow",
+        "messageId": "rejected"
+      }
+    },
+    {
+      "id": "rep-other-result",
+      "type": "dataTransfer",
+      "position": {
+        "x": 540,
+        "y": 580
+      },
+      "data": {
+        "label": "Report other-result",
+        "vendorId": "org.example.dataflow",
+        "messageId": "other-result"
+      }
+    },
+    {
+      "id": "rep-unsupported",
+      "type": "dataTransfer",
+      "position": {
+        "x": 720,
+        "y": 580
+      },
+      "data": {
+        "label": "Report unsupported",
+        "vendorId": "org.example.dataflow",
+        "messageId": "unsupported"
+      }
+    },
+    {
+      "id": "rep-malformed",
+      "type": "dataTransfer",
+      "position": {
+        "x": 900,
+        "y": 580
+      },
+      "data": {
+        "label": "Report malformed",
+        "vendorId": "org.example.dataflow",
+        "messageId": "malformed"
+      }
+    },
+    {
+      "id": "rep-internal",
+      "type": "dataTransfer",
+      "position": {
+        "x": 1080,
+        "y": 580
+      },
+      "data": {
+        "label": "Report internal",
+        "vendorId": "org.example.dataflow",
+        "messageId": "internal"
+      }
+    },
+    {
+      "id": "rep-other-error",
+      "type": "dataTransfer",
+      "position": {
+        "x": 1260,
+        "y": 580
+      },
+      "data": {
+        "label": "Report other-error",
+        "vendorId": "org.example.dataflow",
+        "messageId": "other-error"
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": {
+        "x": 600,
+        "y": 720
+      },
+      "data": {
+        "label": "End"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "start-1",
+      "target": "probe"
+    },
+    {
+      "id": "e2",
+      "source": "probe",
+      "target": "kind"
+    },
+    {
+      "id": "e3",
+      "source": "kind",
+      "target": "status",
+      "sourceHandle": "case-0"
+    },
+    {
+      "id": "e4",
+      "source": "kind",
+      "target": "code",
+      "sourceHandle": "case-1"
+    },
+    {
+      "id": "e5",
+      "source": "status",
+      "target": "rep-ok",
+      "sourceHandle": "case-0"
+    },
+    {
+      "id": "e6",
+      "source": "status",
+      "target": "rep-unknown",
+      "sourceHandle": "case-1"
+    },
+    {
+      "id": "e7",
+      "source": "status",
+      "target": "rep-rejected",
+      "sourceHandle": "case-2"
+    },
+    {
+      "id": "e8",
+      "source": "status",
+      "target": "rep-other-result",
+      "sourceHandle": "default"
+    },
+    {
+      "id": "e9",
+      "source": "code",
+      "target": "rep-unsupported",
+      "sourceHandle": "case-0"
+    },
+    {
+      "id": "e10",
+      "source": "code",
+      "target": "rep-malformed",
+      "sourceHandle": "case-1"
+    },
+    {
+      "id": "e11",
+      "source": "code",
+      "target": "rep-internal",
+      "sourceHandle": "case-2"
+    },
+    {
+      "id": "e12",
+      "source": "code",
+      "target": "rep-other-error",
+      "sourceHandle": "default"
+    },
+    {
+      "id": "e13",
+      "source": "kind",
+      "target": "rep-other-error",
+      "sourceHandle": "default"
+    },
+    {
+      "id": "e14",
+      "source": "rep-ok",
+      "target": "end-1"
+    },
+    {
+      "id": "e15",
+      "source": "rep-unknown",
+      "target": "end-1"
+    },
+    {
+      "id": "e16",
+      "source": "rep-rejected",
+      "target": "end-1"
+    },
+    {
+      "id": "e17",
+      "source": "rep-other-result",
+      "target": "end-1"
+    },
+    {
+      "id": "e18",
+      "source": "rep-unsupported",
+      "target": "end-1"
+    },
+    {
+      "id": "e19",
+      "source": "rep-malformed",
+      "target": "end-1"
+    },
+    {
+      "id": "e20",
+      "source": "rep-internal",
+      "target": "end-1"
+    },
+    {
+      "id": "e21",
+      "source": "rep-other-error",
+      "target": "end-1"
+    }
+  ]
+}

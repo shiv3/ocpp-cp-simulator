@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ChargePoint } from "../ChargePoint";
+import { createChargePoint } from "../../../infrastructure/charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../types/OcppTypes";
 import type { CloseCause } from "../../../infrastructure/transport/network-sim";
 
@@ -8,7 +8,7 @@ import type { CloseCause } from "../../../infrastructure/transport/network-sim";
  * than 1000/1005, puts it in error.
  */
 function connectedChargePoint() {
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     "test-cp-close-error",
     DefaultBootNotification,
     1,

@@ -9,9 +9,9 @@ import {
   flush,
   type FakeChargePointService,
 } from "../../test/harness";
-import { defaultEVSettings } from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
-import type { ChargePointService } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+import { defaultEVSettings } from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
+import type { ChargePointService } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 import ConnectorControls from "./ConnectorControls";
 
 let root: Root | null = null;
@@ -184,20 +184,16 @@ describe("ConnectorControls: what a real charger would not do by itself", () => 
     );
   });
 
-  it("Connector: plug in reports Preparing; unplug is an EV-side disconnect (#488)", async () => {
+  it("Connector: plug in drives the EV cable model (#453); unplug is an EV-side disconnect (#488)", async () => {
     const { container, service } = await renderControls();
     const connector = group(container, "Connector");
     await click(button(connector, "Plug in"));
-    expect(service.sendStatusNotification).toHaveBeenCalledWith(
-      "CP-1",
-      1,
-      OCPPStatus.Preparing,
-    );
+    expect(service.evPlugIn).toHaveBeenCalledWith("CP-1", 1);
     await click(button(connector, "Unplug"));
     // The station decides what the unplug means (stop, suspend or
     // Available); the console no longer sends Available itself.
     expect(service.evDisconnected).toHaveBeenCalledWith("CP-1", 1);
-    expect(service.sendStatusNotification).toHaveBeenCalledTimes(1);
+    expect(service.sendStatusNotification).not.toHaveBeenCalled();
   });
 
   it("Connector: Remove asks first", async () => {

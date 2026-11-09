@@ -10,9 +10,9 @@ import {
 } from "../../test/harness";
 import { forkScenario } from "../../test/scenarioFixtures";
 import { LIBRARY_SCOPE } from "../../lib/scenarioLibrary";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
-import type { ChargePointSnapshot } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
-import type { ScenarioExecutionContext } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
+import type { ChargePointSnapshot } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
+import type { ScenarioExecutionContext } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 
 function snapshot(id: string): ChargePointSnapshot {
   return {
@@ -189,7 +189,9 @@ describe("Scenarios page — side panel", () => {
     const panel = document.querySelector(PANEL)!;
     expect(panel.querySelector("h2")?.textContent).toBe("Fork demo");
     expect(panel.textContent).toContain("Library");
-    expect(panel.textContent).toContain("5 steps · 2 branches");
+    // Status Change has two edges, but only its first runs: no branches.
+    expect(panel.textContent).toContain("Library · 5 steps");
+    expect(panel.textContent).not.toContain("branches");
     expect(panel.textContent).toContain("Used by");
     // The assigned connector, marked with its live run.
     const chip = Array.from(panel.querySelectorAll("a")).find(
@@ -256,7 +258,8 @@ describe("Scenarios page — side panel", () => {
       panel.querySelector('[role="group"][aria-label="Editor view"]'),
     ).toBeTruthy();
     expect(panel.querySelector('[data-testid="library-used-by"]')).toBeTruthy();
-    expect(panel.querySelectorAll("[data-step-id]")).toHaveLength(5);
+    // The graph is the editor's default view, in the panel too.
+    expect(panel.querySelectorAll("[data-node-id]")).toHaveLength(5);
     // The expand button opens the Library editor page on the same scenario.
     expect(
       panel

@@ -1,8 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  ChargePoint,
-  RENEWED_CERTIFICATE_RECONNECT_MAX_DEFER_MS,
-} from "../ChargePoint";
+import type { ChargePoint } from "../ChargePoint";
+import { RENEWED_CERTIFICATE_RECONNECT_MAX_DEFER_MS } from "../ChargePoint";
+import { createChargePoint } from "../../../infrastructure/charge-point/createChargePoint";
 import { OcppCallNoAnswerError } from "../../errors/OcppCallErrors";
 import { DefaultBootNotification } from "../../types/OcppTypes";
 import type { OCPPWebSocket } from "../../../infrastructure/transport/OCPPWebSocket";
@@ -19,7 +18,7 @@ import {
  * its next connection, which keeps its own timing.
  */
 function profile3Station(version = "OCPP-2.0.1"): ChargePoint {
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     "CP-RENEW-UNIT",
     DefaultBootNotification,
     1,
@@ -74,26 +73,6 @@ describe("ChargePoint.useRenewedClientCertificate", () => {
 
     await cp.useRenewedClientCertificate();
 
-    expect(reset).not.toHaveBeenCalled();
-    cp.dispose();
-  });
-
-  it("keeps a certificate not yet valid across a manual disconnect", async () => {
-    vi.useFakeTimers();
-    const cp = profile3Station();
-    vi.spyOn(cp.certificateStore, "tlsClientIdentity").mockResolvedValue({
-      ...IDENTITY,
-      notBefore: new Date(Date.now() + 5_000),
-    });
-    const present = vi.spyOn(transportOf(cp), "useRenewedClientCertificate");
-    const reset = vi.spyOn(cp, "reset").mockImplementation(() => undefined);
-
-    await cp.useRenewedClientCertificate();
-    cp.disconnect();
-    await vi.advanceTimersByTimeAsync(5_000);
-
-    // Presented at the next connect(), with no reconnect of its own.
-    expect(present).toHaveBeenCalledTimes(1);
     expect(reset).not.toHaveBeenCalled();
     cp.dispose();
   });
@@ -255,35 +234,23 @@ describe("ChargePoint.useRenewedClientCertificate", () => {
       return resolvers;
     }
 
-    const notYetValid = () => ({
-      ...IDENTITY,
-      notBefore: new Date(Date.now() + 60_000),
-    });
-
-    it("keeps a single notBefore wait when called twice", async () => {
-      vi.useFakeTimers();
+    it("presents the identity of the newest request only when called twice", async () => {
       const cp = profile3Station();
       const resolvers = deferredIdentities(cp);
       const present = vi.spyOn(transportOf(cp), "useRenewedClientCertificate");
-      const baseline = vi.getTimerCount();
 
       const first = cp.useRenewedClientCertificate();
       const second = cp.useRenewedClientCertificate();
-      resolvers[1](notYetValid());
+      resolvers[1](IDENTITY);
       await second;
-      resolvers[0](notYetValid());
+      resolvers[0](IDENTITY);
       await first;
 
-      expect(vi.getTimerCount() - baseline).toBe(1);
-      // The one left is the one dispose() cancels.
-      const before = vi.getTimerCount();
-      cp.dispose();
+      // The superseded read does nothing, and no notBefore wait is armed
+      // (#587: CertificateSigned refuses a leaf that is not valid yet).
+      expect(present).toHaveBeenCalledTimes(1);
       expect(switchTimerOf(cp)).toBeNull();
-      resolvers.length = 0;
-      await vi.advanceTimersByTimeAsync(60_000);
-      expect(before).toBeGreaterThan(0);
-      expect(resolvers).toHaveLength(0);
-      expect(present).not.toHaveBeenCalled();
+      cp.dispose();
     });
 
     it("arms nothing once disposed while reading the store", async () => {
@@ -294,7 +261,7 @@ describe("ChargePoint.useRenewedClientCertificate", () => {
 
       const pending = cp.useRenewedClientCertificate();
       cp.dispose();
-      resolvers[0](notYetValid());
+      resolvers[0](IDENTITY);
       await pending;
 
       expect(switchTimerOf(cp)).toBeNull();
@@ -319,7 +286,7 @@ describe("ChargePoint.useRenewedClientCertificate", () => {
   });
 
   describe("releaseRenewedClientCertificate (cp.update replaces the instance)", () => {
-    it("cancels the wait, forgets the identity and the keys, keeps the chain", async () => {
+    it("forgets the identity and the keys, keeps the chain", async () => {
       vi.useFakeTimers();
       const cp = profile3Station();
       const root = await selfSignedRoot("01", "Root");
@@ -329,12 +296,8 @@ describe("ChargePoint.useRenewedClientCertificate", () => {
       ]);
       const identity = vi
         .spyOn(cp.certificateStore, "tlsClientIdentity")
-        .mockResolvedValue({
-          ...IDENTITY,
-          notBefore: new Date(Date.now() + 60_000),
-        });
+        .mockResolvedValue(IDENTITY);
       await cp.useRenewedClientCertificate();
-      expect(switchTimerOf(cp)).not.toBeNull();
       const clear = vi.spyOn(transportOf(cp), "clearRenewedClientCertificate");
       const present = vi.spyOn(transportOf(cp), "useRenewedClientCertificate");
 

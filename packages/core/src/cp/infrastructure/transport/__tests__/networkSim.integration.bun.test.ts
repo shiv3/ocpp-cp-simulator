@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import {
   resolveNetworkSimConfig,
@@ -66,8 +66,8 @@ async function acceptBootAndDrainV201(csms: MockCsms): Promise<void> {
     interval: 300,
   });
 
-  // Wait for and reply to StatusNotifications (evseId=0, connectorId=0 and evseId=1, connectorId=1)
-  await replyStatusNotificationV201(csms, 0, 0);
+  // Wait for and reply to the StatusNotification of evseId=1, connectorId=1
+  // (2.x sends none for the station scope, #703).
   await replyStatusNotificationV201(csms, 1, 1);
 }
 
@@ -76,7 +76,7 @@ describe.skipIf(!canBindBunServe())(
   () => {
     it("upstream latency enforces lower bound on frame delivery", async () => {
       const csms = startMockCsms();
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "CP-UPSTREAM-LATENCY",
         DefaultBootNotification,
         1,
@@ -149,7 +149,7 @@ describe.skipIf(!canBindBunServe())(
 
     it("latency does not break normal payload delivery", async () => {
       const csms = startMockCsms();
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "CP-LATENCY-INTEGRITY",
         DefaultBootNotification,
         1,
@@ -210,7 +210,7 @@ describe.skipIf(!canBindBunServe())(
 
     it("forced disconnect + delayed reconnect enforces lower bound on reconnection delay", async () => {
       const csms = startMockCsms();
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "CP-FORCED-DISCONNECT",
         DefaultBootNotification,
         1,
@@ -294,7 +294,7 @@ describe.skipIf(!canBindBunServe())(
 
     it("transaction messages salvage across forced disconnect and reconnect", async () => {
       const csms = startMockCsms();
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "CP-TX-SALVAGE",
         DefaultBootNotification,
         1,
@@ -393,7 +393,7 @@ describe.skipIf(!canBindBunServe())(
 
     it("delayed downstream frame not dispatched after reconnect", async () => {
       const csms = startMockCsms();
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "CP-DOWNSTREAM-DELAY",
         DefaultBootNotification,
         1,
@@ -501,7 +501,7 @@ describe.skipIf(!canBindBunServe())(
     // than bun's 5 s default under load (#473).
     it("periodic disconnect may fire around boot without crashing", async () => {
       const csms = startMockCsms();
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "CP-PERIODIC-BOOT",
         DefaultBootNotification,
         1,
@@ -594,7 +594,7 @@ describe.skipIf(!canBindBunServe())(
 
     it("upstream latency lower bound on OCPP 2.0.1 charge point", async () => {
       const csms = startMockCsms();
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "CP-201-UPSTREAM-LATENCY",
         DefaultBootNotification,
         1,
@@ -666,7 +666,7 @@ describe.skipIf(!canBindBunServe())(
 
     it("OCPP 2.1 smoke test: latency + forced disconnect", async () => {
       const csms = startMockCsms();
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "CP-21-SMOKE",
         DefaultBootNotification,
         1,

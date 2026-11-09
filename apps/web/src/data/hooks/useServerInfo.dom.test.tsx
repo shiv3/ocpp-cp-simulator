@@ -3,8 +3,8 @@ import { act, type JSX } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ServerInfo } from "@ocpp-cp-sim/contracts/index";
-import type { RemoteConnectionState } from "@ocpp-cp-sim/client/remote/RemoteChargePointService";
+import type { ServerInfo } from "@ocpp-cp-simulator/contracts/index";
+import type { RemoteConnectionState } from "@ocpp-cp-simulator/client/remote/RemoteChargePointService";
 import { useServerInfo } from "./useServerInfo";
 
 interface FakeService {

@@ -1,9 +1,10 @@
 import { useTranslation } from "react-i18next";
 import React, { useEffect, useId, useState } from "react";
 import { ChevronDown, ChevronUp, Settings } from "lucide-react";
+import { ChargingPlug } from "@evicons/react";
 
 import { Button } from "@/components/ui/button";
-import { defaultAutoMeterValueConfig } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
+import { defaultAutoMeterValueConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
 import { useConnectorView } from "@/data/hooks/useConnectorView";
 import { useGlobalTagIds } from "@/data/hooks/useGlobalTagIds";
 import { useDataContext } from "@/data/providers/DataProvider";
@@ -175,6 +176,10 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({
           onSelect && "cursor-pointer",
         )}
       >
+        <ChargingPlug
+          strokeWidth={2}
+          className="h-4 w-4 shrink-0 text-cx-muted"
+        />
         <b className="text-[15px] font-semibold text-cx-fg">
           {t("cp.connector.title", { id: connectorId })}
         </b>
@@ -227,9 +232,9 @@ const ConnectorCard: React.FC<ConnectorCardProps> = ({
           )
         }
         onStart={(tagId) =>
-          void step(t("cp.connector.startCharging"), () =>
-            chargePointService.startTransaction(cpId, connectorId, tagId),
-          )
+          void step(t("cp.connector.startCharging"), async () => {
+            await chargePointService.startTransaction(cpId, connectorId, tagId);
+          })
         }
         onStop={() =>
           void step(t("cp.connector.stopCharging"), () =>

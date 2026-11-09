@@ -23,7 +23,13 @@
 #       --scenario-template-file /scenarios/demo-charging.json \
 #       --scenario-connector all
 
-ARG BUN_VERSION=1
+# Bun for the build and runtime stages. Must match the bun line of
+# .tool-versions, the single source of the Bun version (mise, every
+# workflow): the image runs the Bun the tests ran on, not whatever 1.x
+# is latest. The workflows pass the value read from .tool-versions;
+# scripts/__tests__/bunVersionPin.bun.test.ts fails when this default
+# drifts. Override with --build-arg BUN_VERSION=<x.y.z>.
+ARG BUN_VERSION=1.4.3
 # Health-check URL path. Same value is baked into the UI bundle at build
 # time (as VITE_HEALTH_PATH) and re-applied at runtime as the daemon's
 # --health-path flag, so the browser's remote-mode auto-detect probe and
@@ -58,6 +64,7 @@ COPY packages/ocpp/package.json ./packages/ocpp/package.json
 COPY packages/contracts/package.json ./packages/contracts/package.json
 COPY packages/trace/package.json ./packages/trace/package.json
 COPY packages/k6-runtime/package.json ./packages/k6-runtime/package.json
+COPY packages/vehicle/package.json ./packages/vehicle/package.json
 COPY packages/core/package.json ./packages/core/package.json
 COPY packages/client/package.json ./packages/client/package.json
 COPY apps/cli/package.json ./apps/cli/package.json
@@ -74,7 +81,14 @@ COPY apps/web/package.json ./apps/web/package.json
 # a half-extracted entry is not reused. A genuine failure (a lockfile that
 # does not match, a package that does not exist) still fails, three times
 # and roughly 20 seconds slower.
-RUN for attempt in 1 2 3; do \
+# @open-ocpp-trace/* comes from GitHub Packages, which asks for a token even
+# for a public package (bunfig.toml): pass one as the `github_token` secret,
+#   docker build --secret id=github_token,env=GITHUB_TOKEN .
+# A secret mount never lands in a layer or in the image history.
+RUN --mount=type=secret,id=github_token \
+    [ -s /run/secrets/github_token ] || { echo "missing the github_token build secret (a token with read:packages): docker build --secret id=github_token,env=GITHUB_TOKEN ."; exit 1; }; \
+    export GITHUB_TOKEN="$(cat /run/secrets/github_token)"; \
+    for attempt in 1 2 3; do \
       bun install --frozen-lockfile --ignore-scripts && break; \
       [ "$attempt" = 3 ] && { echo "bun install failed 3 times; giving up"; exit 1; }; \
       echo "bun install failed (attempt $attempt/3); retrying"; \
@@ -98,6 +112,8 @@ COPY scripts/bench/tsconfig.json ./scripts/bench/tsconfig.json
 # Same for scripts/tsconfig.json (#578, the package-boundary checker's
 # project): referenced from the root tsconfig.json, so it must be present.
 COPY scripts/tsconfig.json ./scripts/tsconfig.json
+# vite.config.ts imports the third-party notices renderer (#857).
+COPY scripts/licenseNotices.ts ./scripts/licenseNotices.ts
 COPY tailwind.config.js postcss.config.js ./
 COPY public ./public
 COPY packages ./packages
@@ -150,6 +166,12 @@ RUN apk add --no-cache su-exec
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
+# `bun src/cli/main.ts …` keeps working for callers that still override the
+# entrypoint with it (open-ocpp-tck, #346): a shim that runs the bundle. New
+# callers use `docker run -i <image> --json …`, see docker/entrypoint.sh.
+RUN mkdir -p /app/src/cli
+COPY docker/cli-shim.ts /app/src/cli/main.ts
+
 # IMPORTANT: stay as root so the entrypoint can chown /data. The shim
 # drops to `bun` via su-exec before exec'ing the simulator.
 USER root
@@ -186,6 +208,10 @@ EXPOSE 9700
 #   2. Compose --http-host 0.0.0.0 --unix-socket none --web-console
 #      $HTTP_PORT [--state-db $STATE_DB] and append any user CMD args.
 #   3. Exec bun dist-cli/main.js as the non-root `bun` user.
+# When the first argument is `cli`, `analyze`, `export-k6` or `behavior`, or
+# `--json` is among the arguments, step 2 is skipped and the arguments go to
+# the CLI as they are (JSON mode over stdin, subcommands), without su-exec so
+# the caller's identity (`--user`, mounted host directories) is kept; #346.
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 
 # No-args default — the daemon comes up empty; create CPs via POST /v1/cp
@@ -193,4 +219,4 @@ ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD []
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget -qO- "http://127.0.0.1:${HTTP_PORT}${HEALTH_PATH}" >/dev/null 2>&1 || exit 1
+  CMD [ -e /tmp/.ocpp-cli-mode ] || wget -qO- "http://127.0.0.1:${HTTP_PORT}${HEALTH_PATH}" >/dev/null 2>&1 || exit 1

@@ -1,7 +1,9 @@
+import type { JsonObject } from "@ocpp-cp-simulator/contracts/behavior";
 import { cancellablePromise, type CancellableWait } from "./cancellable";
 import { csmsActionMatches } from "../../domain/types/csmsActionNames";
 import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
 import type { Connector } from "../../domain/connector/Connector";
+import type { IdTokenTypeName } from "../../domain/connector/Transaction";
 import { OCPPStatus, ReservationStatus } from "../../domain/types/OcppTypes";
 import { LogType } from "../../shared/Logger";
 import { deepPartialMatch } from "../../../scenario/deepPartialMatch";
@@ -14,7 +16,7 @@ import type {
   ScenarioWaitIntervention,
 } from "./ScenarioTypes";
 import type { HeldExchange, RuleOwner } from "../behavior/BehaviorRegistry";
-import { responseProblems } from "../engine/responseValidation";
+import { cannedResponse, responseProblems } from "../engine/responseValidation";
 import { clockOf } from "../../shared/clock";
 import type { SimClock, TimerHandle } from "../../shared/clock";
 import { rngOf } from "../../shared/rng";
@@ -121,7 +123,11 @@ const waitForRemoteStart = (
   connector: Connector,
   log: NonNullable<ScenarioExecutorCallbacks["log"]>,
   runStartedAt: number,
-): CancellableWait<{ tagId: string; remoteStartId?: number }> => {
+): CancellableWait<{
+  tagId: string;
+  remoteStartId?: number;
+  idTokenType?: IdTokenTypeName;
+}> => {
   // §4.9 S3: fail-fast if the charge point cannot receive RemoteStartTransaction
   if (!chargePoint.canReceiveCsmsCall("RemoteStartTransaction")) {
     const version = chargePoint.ocppVersion;
@@ -167,44 +173,50 @@ const waitForRemoteStart = (
 
   let cleanupFn: (() => void) | null = null;
 
-  const promise = new Promise<{ tagId: string; remoteStartId?: number }>(
-    (resolve, reject) => {
-      let settled = false;
+  const promise = new Promise<{
+    tagId: string;
+    remoteStartId?: number;
+    idTokenType?: IdTokenTypeName;
+  }>((resolve, reject) => {
+    let settled = false;
 
-      const cleanup = () => {
-        if (settled) return;
-        settled = true;
-        chargePoint.events.off("remoteStartReceived", handler);
-        chargePoint.events.off("disconnected", disconnectHandler);
-        chargePoint.unregisterScenarioHandler(connector.id);
-      };
+    const cleanup = () => {
+      if (settled) return;
+      settled = true;
+      chargePoint.events.off("remoteStartReceived", handler);
+      chargePoint.events.off("disconnected", disconnectHandler);
+      chargePoint.unregisterScenarioHandler(connector.id);
+    };
 
-      cleanupFn = cleanup;
+    cleanupFn = cleanup;
 
-      const handler = (data: {
-        connectorId: number;
-        tagId: string;
-        remoteStartId?: number;
-      }) => {
-        if (data.connectorId !== connector.id) return;
-        cleanup();
-        resolve({
-          tagId: data.tagId,
-          ...(data.remoteStartId !== undefined
-            ? { remoteStartId: data.remoteStartId }
-            : {}),
-        });
-      };
+    const handler = (data: {
+      connectorId: number;
+      tagId: string;
+      remoteStartId?: number;
+      idTokenType?: IdTokenTypeName;
+    }) => {
+      if (data.connectorId !== connector.id) return;
+      cleanup();
+      resolve({
+        tagId: data.tagId,
+        ...(data.remoteStartId !== undefined
+          ? { remoteStartId: data.remoteStartId }
+          : {}),
+        ...(data.idTokenType !== undefined
+          ? { idTokenType: data.idTokenType }
+          : {}),
+      });
+    };
 
-      const disconnectHandler = () => {
-        cleanup();
-        reject(new Error("Disconnected while waiting for remote start"));
-      };
+    const disconnectHandler = () => {
+      cleanup();
+      reject(new Error("Disconnected while waiting for remote start"));
+    };
 
-      chargePoint.events.on("remoteStartReceived", handler);
-      chargePoint.events.on("disconnected", disconnectHandler);
-    },
-  );
+    chargePoint.events.on("remoteStartReceived", handler);
+    chargePoint.events.on("disconnected", disconnectHandler);
+  });
 
   return {
     promise,
@@ -379,8 +391,16 @@ const waitForCsmsCall = (
 /** The registry's `onBusy` answer for a scenario's `onBusy` spec. */
 const busyAnswerOf = (
   spec: CallResponseSpec | undefined,
-): import("@ocpp-cp-sim/contracts/behavior").CallAnswer | undefined => {
+  chargePoint: ChargePoint,
+  action: string,
+): import("@ocpp-cp-simulator/contracts/behavior").CallAnswer | undefined => {
   if (!spec) return undefined;
+  if (spec.kind === "accepted" || spec.kind === "rejected") {
+    // Schema 1.6: the version-neutral answer of the CALL's own action.
+    return {
+      response: cannedResponse(action, chargePoint.ocppVersion, spec.kind),
+    };
+  }
   if (spec.kind === "none") return { noResponse: true };
   if (spec.kind === "error") {
     return {
@@ -416,8 +436,13 @@ const scenarioExchangeOf = (
         spec.errorDescription ?? "",
       );
     }
-    const response = spec.payload ?? {};
-    if (!spec.skipValidation) {
+    // Schema 1.6: the answer is the action's own, for this station's version.
+    const canned =
+      spec.kind === "accepted" || spec.kind === "rejected"
+        ? cannedResponse(exchange.action, chargePoint.ocppVersion, spec.kind)
+        : undefined;
+    const response = canned ?? spec.payload ?? {};
+    if (!spec.skipValidation && canned === undefined) {
       const problems = responseProblems(
         exchange.action,
         chargePoint.ocppVersion,
@@ -503,7 +528,7 @@ const waitForCsmsCallReplacing = (
     disconnectOff?.();
     disconnectOff = null;
   };
-  const busy = busyAnswerOf(replace.onBusy);
+  const busy = busyAnswerOf(replace.onBusy, chargePoint, action);
 
   const promise = new Promise<{
     action: string;
@@ -804,12 +829,16 @@ export const createScenarioExecutorCallbacks = (
           );
       }
     },
-    // #488: a plug-out during a transaction is an EV-side disconnect, which
-    // StopTransactionOnEVSideDisconnect turns into a stop or a suspension.
-    // Without a transaction, and for a plug-in, the node stays a no-op: the
-    // templates follow it with their own status nodes.
+    // #453: the node drives the connector's EV and cable model, the same
+    // operations as the control plane. A plug-in moves an idle Available
+    // connector to Preparing; a plug-out is an EV-side disconnect, which
+    // StopTransactionOnEVSideDisconnect turns into a stop or a suspension
+    // when a transaction runs (#488) and otherwise returns a Preparing or
+    // Finishing connector to Available.
     onConnectorPlug: async (action) => {
-      if (action === "plugout" && connector.hasRunningTransaction) {
+      if (action === "plugin") {
+        chargePoint.evPlugIn(connector.id);
+      } else {
         chargePoint.evDisconnected(connector.id);
       }
     },
@@ -846,14 +875,23 @@ export const createScenarioExecutorCallbacks = (
       }
       return cancellablePromise(waitForCsmsCall(chargePoint, action, payload));
     },
-    onUseBehavior: (behaviorId, nodeId) => {
+    onUseBehavior: (behaviorId, nodeId, options) => {
+      const disable = options?.mode === "disable";
       const owner: RuleOwner = {
         kind: "scenario",
-        scenarioId: `use:${behaviorId}`,
+        scenarioId: `${disable ? "disable" : "use"}:${behaviorId}`,
         connectorId: connector.id,
         nodeId,
       };
-      chargePoint.engine.activateBehavior(behaviorId, owner);
+      if (disable) {
+        chargePoint.engine.disableBehavior(behaviorId, owner);
+      } else {
+        chargePoint.engine.activateBehavior(
+          behaviorId,
+          owner,
+          options?.params as JsonObject | undefined,
+        );
+      }
       armedOwners.set(`${behaviorId}:${connector.id}:${nodeId}`, owner);
     },
     onRunEnded: () => {
@@ -965,6 +1003,21 @@ export const createScenarioExecutorCallbacks = (
       chargePoint.configuration.applyChange(key, value);
     },
     onSendOcppCall: (request) => chargePoint.sendOcppCall(request),
+    onNotify: (kind, status, requestId) => {
+      const engineKind =
+        kind === "firmwareStatus"
+          ? "firmware"
+          : kind === "signedFirmwareStatus"
+            ? "signedFirmware"
+            : kind === "logStatus"
+              ? "log"
+              : "diagnostics";
+      chargePoint.engine.notifyStatus(engineKind, status, requestId);
+    },
+    onReadStation: (root) =>
+      root === "charger"
+        ? chargePoint.engine.snapshotCharger()
+        : chargePoint.engine.snapshotConnector(connector.id),
     onSendDataTransfer: (vendorId, messageId, data) => {
       // The node is fire-and-forget by design: the transport logs the answer
       // (or the failure), and a scenario that needs to react to it would be

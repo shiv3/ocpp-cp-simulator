@@ -1,4 +1,4 @@
-import type { Database } from "@ocpp-cp-sim/core/cp/domain/persistence/Database";
+import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
 
 /**
  * `scenarios.startup_source` (schema v19, #338): which startup flag generated

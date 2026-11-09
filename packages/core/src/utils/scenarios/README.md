@@ -60,6 +60,24 @@ These built-in JSON templates implement the Charge Point side of OCPP 1.6 certif
 | cert16-tc023-2-authorize-expired                    | TC_023.2 | Authorize Outcome (Expired)               | Core          | Ensure idTag CERT023-EXP is registered with an expiry_date in the past. Plug in. Verify the CP sends Authorize.req, receives idTagInfo.status Expired, and does NOT send StartTransaction.req. Plug out.                                       |
 | cert16-tc023-3-authorize-blocked                    | TC_023.3 | Authorize Outcome (Blocked)               | Core          | Ensure idTag CERT023-BLK is registered as blocked. Plug in. Verify the CP sends Authorize.req, receives idTagInfo.status Blocked, and does NOT send StartTransaction.req. Plug out.                                                            |
 
+## Data-Flow Templates
+
+The `dataflow-*` templates are not certification cases. They show what a scenario can read and branch on (schema 1.7): `$from` roots `response`, `call` and `connector`, and `$match` cases of a `switch`.
+
+| Scenario ID                                                                  | What it shows                                                                                                                                            |
+| ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| dataflow-authorize-branch-16 / dataflow-authorize-branch-201                 | Authorize, then branch on the idTagInfo / idTokenInfo status: Accepted starts a session; Blocked, Invalid, Expired (`$match in`); ConcurrentTx; default. |
+| dataflow-call-error-handling                                                 | DataTransfer probe; branch on `response.kind`, then on the status of a result or the `errorCode` of a CALLERROR (`in`, `endsWith`, `startsWith`).        |
+| dataflow-charge-to-soc                                                       | Bounded loop edge (1.10) that meters until `connector.power.soc` is at least 80 (`until` with `$match gte`) or 2 hours pass (`forSeconds`).              |
+| dataflow-remote-start-reauthorize-16 / dataflow-remote-start-reauthorize-201 | Own the CSMS's remote start (`replace`), answer Accepted, Authorize the tag read from the CALL, branch on the answer.                                    |
+
+## Non-certification templates using newer scenario features
+
+| Scenario ID                   | Feature                      | Description                                                                                                                                                                     |
+| ----------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| remote-start-timeout-fallback | Timeout edges (schema 1.8)   | Waits 30 s for RemoteStartTransaction. On timeout, the `kind: "timeout"` edge sets the connector back to Available (StatusNotification) and ends the run instead of failing it. |
+| parallel-heartbeat-session    | Parallel / join (schema 1.9) | A `parallel` node runs a three-Heartbeat branch next to a RemoteStartTransaction session; a `join` (mode all) waits for both, then the run ends.                                |
+
 ## Numbering Note
 
 Scenario identifiers follow the OCPP Certification Test Cases (OCPPSC) specification test-case numbering: TC_001, TC_003, TC_004, etc. The unlock scenarios TC_017 (Unlock Connector — Occupied, Succeeds) and TC_018 (Unlock Connector — Failure) predate the formal OCPPSC mapping; TC_017 ≈ "unlock with active session" and TC_018 ≈ "unlock failure / stuck lock".
@@ -96,6 +114,6 @@ The following test cases are not covered by scenarios:
 
 - **TC_007** (Cached Authorization) — no template yet. Since #452 the CP has a real Authorization Cache and consults it, with the Local Authorization List, on a local start (`AuthorizationCacheEnabled`, `LocalPreAuthorize`, `LocalAuthorizeOffline`, `AllowOfflineTxForUnknownId`; see `docs/concepts/local-authorization.md`), so the case is drivable; the template itself is not written.
 - **TC_032, TC_037, TC_039** (Offline Power Failure, Offline Transactions) — No offline transaction queue or transaction replication in the scenario engine.
-- **TC_047** (Reservation Expiry) — CP expires reservations passively on TTL; transition is internal, not observable as a status change.
-- **TC_049** (Charge-Point-Wide Reservation) — CP has no connector 0; ReserveNow(connectorId=0) is rejected by core; no distinct behavior to verify.
+- **TC_047** (Reservation Expiry) — no template yet. The expiry is observable since #739: the connector goes back to Available (StatusNotification, and ReservationStatusUpdate(Expired) on 2.x) at the `expiryDate`, so the case is drivable.
+- **TC_049** (Charge-Point-Wide Reservation) — no template yet. `ReserveNow(connectorId=0)` is supported (#595): it keeps one connector free per reservation, so the case is drivable.
 - **TC_073–TC_088** (Security, Certificates, Key Provisioning) — TLS/PKI infrastructure and security setup are outside the requested feature profiles.

@@ -1,5 +1,5 @@
 {
-  "name": "@ocpp-cp-sim/k6-runtime",
+  "name": "@ocpp-cp-simulator/k6-runtime",
   "version": "0.0.0",
   "private": true,
   "type": "module",

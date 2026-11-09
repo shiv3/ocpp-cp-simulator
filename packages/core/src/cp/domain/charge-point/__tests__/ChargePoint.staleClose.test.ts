@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChargePoint } from "../ChargePoint";
+import type { ChargePoint } from "../ChargePoint";
+import { createChargePoint } from "../../../infrastructure/charge-point/createChargePoint";
 import { DefaultBootNotification, OCPPStatus } from "../../types/OcppTypes";
 
 /**
@@ -60,7 +61,7 @@ vi.mock("../../../infrastructure/transport/wsUrlWithBasic", async (orig) => ({
 }));
 
 function newChargePoint() {
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     "test-cp-stale-close",
     DefaultBootNotification,
     1,

@@ -1,7 +1,7 @@
 import initSqlJs from "sql.js";
 
 import type { Database, SqlParam } from "../cp/domain/persistence/Database";
-import { runMigrations } from "../cp/domain/persistence/schema";
+import { runMigrations } from "../cp/infrastructure/persistence/schema";
 
 /** In-memory sql.js database behind the domain `Database` port, so the
  *  service, its ChargePoints and the scenario repository share real SQL. */

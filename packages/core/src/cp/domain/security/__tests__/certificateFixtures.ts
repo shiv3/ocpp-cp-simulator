@@ -13,11 +13,11 @@ export interface TestAuthority {
   keys: CryptoKeyPair;
 }
 
-function validity() {
+function validity(options: IssuedOptions = {}) {
   const now = Date.now();
   return {
-    notBefore: new Date(now - 60_000),
-    notAfter: new Date(now + 86_400_000),
+    notBefore: new Date(now + (options.notBeforeOffsetMs ?? -60_000)),
+    notAfter: new Date(now + (options.notAfterOffsetMs ?? 86_400_000)),
   };
 }
 
@@ -42,9 +42,17 @@ export async function selfSignedRoot(
 }
 
 export interface IssuedOptions {
+  /** Override the default validity period (a minute ago, a day ahead). */
+  notBefore?: Date;
+  notAfter?: Date;
   /** OCSP responder URL put in an Authority Information Access extension
    *  (#537, M06). */
   ocspUrl?: string;
+  /** Validity period, in ms from now (default -60 s to +1 day). */
+  notBeforeOffsetMs?: number;
+  notAfterOffsetMs?: number;
+  /** Subject of a leaf, instead of the CSR's (#587 Certificate Properties). */
+  subject?: string;
 }
 
 function aiaExtensions({ ocspUrl }: IssuedOptions): x509.Extension[] {
@@ -69,7 +77,7 @@ export async function subCa(
     serialNumber,
     subject: name,
     issuer: issuer.name,
-    ...validity(),
+    ...validity(options),
     signingAlgorithm: EC_ALG,
     publicKey: keys.publicKey,
     signingKey: issuer.keys.privateKey,
@@ -103,13 +111,58 @@ export async function leafForCsr(
   const csr = new x509.Pkcs10CertificateRequest(csrPem);
   const cert = await x509.X509CertificateGenerator.create({
     serialNumber,
-    subject: csr.subject,
+    subject: options.subject ?? csr.subject,
     issuer: issuer.name,
-    ...validity(),
+    ...validity(options),
+    ...(options.notBefore ? { notBefore: options.notBefore } : {}),
+    ...(options.notAfter ? { notAfter: options.notAfter } : {}),
     signingAlgorithm: EC_ALG,
     publicKey: csr.publicKey,
     signingKey: issuer.keys.privateKey,
     extensions: aiaExtensions(options),
   });
+  return cert.toString("pem");
+}
+
+export interface SigningLeafOptions {
+  notBefore?: Date;
+  notAfter?: Date;
+  /** The CA that signs the leaf; absent: a self-signed certificate. */
+  issuer?: TestAuthority;
+}
+
+/**
+ * A firmware signing certificate (L01.FR.21 / L01.FR.23) with a validity
+ * period of the test's choosing, so an expired or not-yet-valid one can be
+ * built. Self-signed unless `issuer` is given.
+ */
+export async function signingLeaf(
+  options: SigningLeafOptions = {},
+): Promise<string> {
+  const keys = await crypto.subtle.generateKey(EC_ALG, true, [
+    "sign",
+    "verify",
+  ]);
+  const { notBefore, notAfter } = { ...validity(), ...options };
+  const subject = "CN=Firmware signer,O=Example";
+  const cert = options.issuer
+    ? await x509.X509CertificateGenerator.create({
+        serialNumber: "0a1b",
+        subject,
+        issuer: options.issuer.name,
+        notBefore,
+        notAfter,
+        signingAlgorithm: EC_ALG,
+        publicKey: keys.publicKey,
+        signingKey: options.issuer.keys.privateKey,
+      })
+    : await x509.X509CertificateGenerator.createSelfSigned({
+        serialNumber: "0a1b",
+        name: subject,
+        notBefore,
+        notAfter,
+        signingAlgorithm: EC_ALG,
+        keys,
+      });
   return cert.toString("pem");
 }

@@ -3,7 +3,7 @@ import {
   EV_PRESETS,
   type EVSettings,
   type EVSettingsPatch,
-} from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
+} from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
 import {
   resolveEvSettings,
   type EditableSpecField,
@@ -11,7 +11,7 @@ import {
   type VehicleCurrentType,
   type VehicleEvSettings,
   type VehicleProfile,
-} from "@ocpp-cp-sim/core/cp/domain/vehicle/VehicleProfile";
+} from "@ocpp-cp-simulator/core/cp/domain/vehicle/VehicleProfile";
 
 /**
  * Saved vehicle profiles in the vehicle selects (#458): the connector's

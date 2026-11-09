@@ -4,7 +4,7 @@
 //
 //   ocpp-cp-sim --cp-id CP001 --ws-url ws://localhost:9000 \
 //     --behavior examples/behaviors/heartbeat-loop.ts
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
 
 /** Milliseconds between two heartbeats. */
 const PERIOD_MS = 1000;

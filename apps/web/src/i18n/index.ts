@@ -5,7 +5,7 @@ import { initReactI18next } from "react-i18next";
 import { NAMESPACES, enResources } from "./resources";
 
 /** Supported UI languages. English is the default and the fallback. */
-export const LOCALES = ["en", "zh-CN", "ja"] as const;
+export const LOCALES = ["en", "zh-CN", "ja", "fr"] as const;
 export type Locale = (typeof LOCALES)[number];
 export const DEFAULT_LOCALE: Locale = "en";
 
@@ -15,6 +15,7 @@ export const LOCALE_LABELS: Record<Locale, string> = {
   en: "English",
   "zh-CN": "简体中文",
   ja: "日本語",
+  fr: "Français",
 };
 
 export const LOCALE_STORAGE_KEY = "ocpp-cp.console.locale";

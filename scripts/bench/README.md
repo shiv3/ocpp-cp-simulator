@@ -29,6 +29,18 @@ for where a run's result gets recorded.
   `OCPP-1.6J` unless told otherwise, and a 2.x-only CSMS rejects every 1.6J
   handshake — which shows up as an unsettled fleet and an empty table, not as
   an error naming the cause.
+- `scripts/bench/mockCsmsServer.ts` is the same auto-acking mock CSMS the
+  smoke test uses, run in its own process (`bun scripts/bench/mockCsmsServer.ts`
+  prints `MOCK_CSMS ws://…`). Use it to measure the **daemon**, not the CSMS:
+  it answers at once, so the reported latency is the daemon's. It enforces
+  nothing, so it says nothing about handshake or schema behaviour.
+- **A file-descriptor limit of 1024 caps the fleet at about 999 connections**,
+  whichever side hits it first (the daemon holds one socket per charge point,
+  the CSMS one per connection). The first symptom is a step whose `connected`
+  stops near 999 and whose `unsettled` is the rest, with no error naming the
+  cause (this happened in the #626 run). Raise `ulimit -n` for **both** the
+  daemon and the CSMS before a sweep past 900 (`ulimit -n 65536`, or
+  `prlimit --nofile=65536 --pid <pid>` on a running process).
 
 ## Quick start
 
@@ -435,16 +447,18 @@ bun scripts/bench/fleet-bench.ts --csms-url ... --daemon-url ... --tx-interval 1
    ever close it, at precisely the moment the session is most likely to be
    real.
 
-   Preserving it costs **one CALL, not a stream**. The charge point never cycles
-   again and runs no meter scheduler: `Connector.startConfiguredMeterValue`
-   needs `autoConfig.enabled` or an increment fallback, `cp.create` accepts no
-   field that sets either, and the daemon constructs every charge point with
-   `autoMeterValueSetting = null` (`apps/cli/src/service.ts`). The one frame it does
-   still emit is at the moment the late conf lands, when
-   `StartTransactionResultHandler` drives the connector to `Charging` and a
-   `StatusNotification` goes out — one frame per retired charge point, against
-   the whole transaction cycle it no longer runs. Teardown's closing sweep
-   issues the stop, outside every measurement window and late enough that the
+   Preserving it costs **a trickle, not a stream**. The charge point never
+   cycles again and runs no auto-meter scheduler (`cp.create` accepts no field
+   that enables one and the daemon constructs every charge point with
+   `autoMeterValueSetting = null`, `apps/cli/src/service.ts`). But a running
+   1.x transaction is sampled by the station itself every
+   `MeterValueSampleInterval` seconds (default 60, #722), so a retired charge
+   point also sends one `MeterValues` a minute until teardown: with the
+   placeholder `transactionId` `0` until a late conf assigns the real one, and
+   inside the measurement windows it spans. On top of that it emits the
+   `StatusNotification` produced when the late conf drives the connector to
+   `Charging` — against the whole transaction cycle it no longer runs.
+   Teardown's closing sweep issues the stop, outside every measurement window and late enough that the
    conf has usually landed, so the stop carries the real id. What that does
    _not_ guarantee is listed under "Known limitations".
 
@@ -913,9 +927,10 @@ runner):` and can be copied verbatim. With a remote one it says
 - the **knee** — the N where p50/p95 visibly diverges from the N=1..a few
   baseline, or where `timeouts`/`errors`/`reconnects` first go non-zero.
 
-This script cannot produce that number itself (no CSMS is available in this
-repo's CI or review sandboxes) — running it is a manual step for whoever has
-a spare machine and a CSMS.
+This script cannot produce that number itself — running it is a manual step.
+The first result (#626, 2026-11-08) is in
+[`docs/entities/daemon.md` → Measured scale ceiling](../../docs/entities/daemon.md#measured-scale-ceiling);
+read its commands there to repeat it.
 
 ## Known limitations
 
@@ -1135,9 +1150,10 @@ a spare machine and a CSMS.
 - `timeouts` and every other number is fleet-wide, not per charge point:
   `/metrics` carries no `cpId` label by design. That is why the preflight
   refuses a daemon with a pre-existing fleet.
-- No MeterValues are driven during a transaction — set
-  `MeterValueSampleInterval` on the CPs' config if you want that traffic
-  included (not currently a flag on this script).
+- No MeterValues are driven by the script. A 1.6 CP still sends one every
+  `MeterValueSampleInterval` seconds (default 60) while its transaction runs
+  (#722); set the key to `0` on the CPs' config to leave that traffic out
+  (not currently a flag on this script).
 
 ## Directory layout
 
@@ -1222,6 +1238,8 @@ a spare machine and a CSMS.
   ids. Overrides are otherwise independent: shortening the RPC deadline does
   not re-derive the local-start wait from it.
 
+- `mockCsmsServer.ts` — `startMockCsms()` as a stand-alone process, for runs
+  that should measure the daemon and not share its event loop with the CSMS.
 - `smokeHarness.ts` — what both run-level suites share: the mock CSMS (with
   per-action `delayMs` and `stallAfter`, hooks on receipt and on reply, and
   open transactions tracked by id, so a placeholder stop does not count as a

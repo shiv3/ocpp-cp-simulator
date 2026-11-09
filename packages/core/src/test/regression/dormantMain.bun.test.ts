@@ -3,7 +3,7 @@
 // dormant behavior's main on the first activation, and nothing stops it when the
 // run ends: it keeps sending.
 import { afterEach, expect, test } from "bun:test";
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
 import { runBehavior, type BehaviorRun } from "../behavior/runBehavior";
 
 let runs: BehaviorRun[] = [];

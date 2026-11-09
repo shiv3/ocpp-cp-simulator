@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import type { AutoMeterValueConfig } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
+import type { AutoMeterValueConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
 import type {
   Database,
   SqlParam,
   SqlRow,
-} from "@ocpp-cp-sim/core/cp/domain/persistence/Database";
+} from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
 import { LocalChargePointService } from "./LocalChargePointService";
 
 class MemoryConnectorSettingsDatabase implements Database {

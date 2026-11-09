@@ -6,6 +6,8 @@ import smartChargingJson from "./scenarios/smart-charging.json";
 import multiStatusMonitorJson from "./scenarios/multi-status-monitor.json";
 import statusTriggeredActionsJson from "./scenarios/status-triggered-actions.json";
 import remoteStartAutoMeterJson from "./scenarios/remote-start-auto-meter.json";
+import remoteStartTimeoutFallbackJson from "./scenarios/remote-start-timeout-fallback.json";
+import parallelHeartbeatSessionJson from "./scenarios/parallel-heartbeat-session.json";
 
 // OCPP 1.6 Core certification scenarios (issue #110, first slice). TC
 // numbers follow the issue's own numbering, not an external test suite.
@@ -75,6 +77,25 @@ import cert16Tc023_3AuthorizeBlockedJson from "./scenarios/cert16-tc023-3-author
 // OCPP 1.6 Certificate quirks (issue #247 Phase 3): probe with OCTT legacy
 // behaviors (RSA CSR, CRLF PEM, RSASSA-PKCS1-v1_5 only, hidden CpoName).
 import cert16OcttStrictnessProbeJson from "./scenarios/cert16-octt-strictness-probe.json";
+
+// Operational failure / recovery scenarios (issue #444, #455): assertion-driven,
+// each ends in a machine-readable run verdict.
+import resilienceCommunicationLossRecoveryJson from "./scenarios/resilience-communication-loss-recovery.json";
+import resilienceConnectorFaultRecoveryJson from "./scenarios/resilience-connector-fault-recovery.json";
+import resilienceEvDisconnectRecoveryJson from "./scenarios/resilience-ev-disconnect-recovery.json";
+import resilienceTemporaryUnavailableRecoveryJson from "./scenarios/resilience-temporary-unavailable-recovery.json";
+import resilienceAuthorizationRejectedJson from "./scenarios/resilience-authorization-rejected.json";
+import resiliencePowerLossRecoveryJson from "./scenarios/resilience-power-loss-recovery.json";
+
+// Data-flow showcase templates (schema 1.7): branch on the answer to an
+// ocppCall (`$from` root `response`), `$match` switch cases, a loop that
+// exits on the connector's SoC, and a replaced CSMS call.
+import dataflowAuthorizeBranch16Json from "./scenarios/dataflow-authorize-branch-16.json";
+import dataflowAuthorizeBranch201Json from "./scenarios/dataflow-authorize-branch-201.json";
+import dataflowRemoteStartReauthorize16Json from "./scenarios/dataflow-remote-start-reauthorize-16.json";
+import dataflowRemoteStartReauthorize201Json from "./scenarios/dataflow-remote-start-reauthorize-201.json";
+import dataflowCallErrorHandlingJson from "./scenarios/dataflow-call-error-handling.json";
+import dataflowChargeToSocJson from "./scenarios/dataflow-charge-to-soc.json";
 
 export interface ScenarioTemplate {
   id: string;
@@ -147,6 +168,8 @@ export const scenarioTemplates: ScenarioTemplate[] = [
   templateFromJson(multiStatusMonitorJson as ScenarioDefinition),
   templateFromJson(statusTriggeredActionsJson as ScenarioDefinition),
   templateFromJson(remoteStartAutoMeterJson as ScenarioDefinition),
+  templateFromJson(remoteStartTimeoutFallbackJson as ScenarioDefinition),
+  templateFromJson(parallelHeartbeatSessionJson as ScenarioDefinition),
 
   // OCPP 1.6 Core certification scenarios (issue #110, first slice) —
   // grouped together so they surface as a block in the template picker.
@@ -239,6 +262,26 @@ export const scenarioTemplates: ScenarioTemplate[] = [
   // OCPP 1.6 Certificate quirks scenarios (issue #247 Phase 3) —
   // emulate certification-tool behaviors.
   templateFromJson(cert16OcttStrictnessProbeJson as ScenarioDefinition),
+
+  // Operational failure / recovery scenarios (issue #444).
+  templateFromJson(
+    resilienceCommunicationLossRecoveryJson as ScenarioDefinition,
+  ),
+  templateFromJson(resilienceConnectorFaultRecoveryJson as ScenarioDefinition),
+  templateFromJson(resilienceEvDisconnectRecoveryJson as ScenarioDefinition),
+  templateFromJson(
+    resilienceTemporaryUnavailableRecoveryJson as ScenarioDefinition,
+  ),
+  templateFromJson(resilienceAuthorizationRejectedJson as ScenarioDefinition),
+  templateFromJson(resiliencePowerLossRecoveryJson as ScenarioDefinition),
+
+  // Data-flow showcase templates (schema 1.7).
+  templateFromJson(dataflowAuthorizeBranch16Json as ScenarioDefinition),
+  templateFromJson(dataflowAuthorizeBranch201Json as ScenarioDefinition),
+  templateFromJson(dataflowRemoteStartReauthorize16Json as ScenarioDefinition),
+  templateFromJson(dataflowRemoteStartReauthorize201Json as ScenarioDefinition),
+  templateFromJson(dataflowCallErrorHandlingJson as ScenarioDefinition),
+  templateFromJson(dataflowChargeToSocJson as ScenarioDefinition),
 ];
 
 export function getTemplateById(

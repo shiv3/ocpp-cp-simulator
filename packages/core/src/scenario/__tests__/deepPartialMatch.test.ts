@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { deepPartialMatch } from "../deepPartialMatch";
-import { deepPartialMatch as k6DeepPartialMatch } from "@ocpp-cp-sim/k6-runtime/assertions";
+import { deepPartialMatch as k6DeepPartialMatch } from "@ocpp-cp-simulator/k6-runtime/assertions";
 
 /** Shared vectors run against BOTH implementations: the k6 runtime cannot
  *  import repo modules (purity gate), so its copy stays — this table is

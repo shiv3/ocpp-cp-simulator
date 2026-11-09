@@ -1,0 +1,261 @@
+{
+  "id": "dataflow-authorize-branch-16",
+  "name": "Data flow: Authorize, then branch on the answer (OCPP 1.6)",
+  "description": "Plugs in, sends Authorize for DEMO-TAG-1 and branches on response.payload.idTagInfo.status with a switch. Accepted starts a short session and stops it; Blocked, Invalid or Expired (one case, a $match in) and every other status unplug without starting. Shows $from root response and $match in; the one template covers what the three cert16-tc023 variants fake with three files, whatever the CSMS answers. Needs a CSMS that knows DEMO-TAG-1; OCPP 1.6 payloads.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": {
+    "type": "manual"
+  },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "evSettings": {
+    "modelName": "Reference EV",
+    "batteryCapacityKwh": 60,
+    "maxChargingPowerKw": 11,
+    "initialSoc": 20,
+    "targetSoc": 80
+  },
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": {
+        "x": 400,
+        "y": 50
+      },
+      "data": {
+        "label": "Start",
+        "triggerOn": "connect"
+      }
+    },
+    {
+      "id": "plug-in",
+      "type": "connectorPlug",
+      "position": {
+        "x": 400,
+        "y": 150
+      },
+      "data": {
+        "label": "Plug In",
+        "action": "plugin"
+      }
+    },
+    {
+      "id": "authorize",
+      "type": "ocppCall",
+      "position": {
+        "x": 400,
+        "y": 250
+      },
+      "data": {
+        "label": "Authorize DEMO-TAG-1",
+        "action": "Authorize",
+        "payload": {
+          "idTag": "DEMO-TAG-1"
+        }
+      }
+    },
+    {
+      "id": "branch",
+      "type": "switch",
+      "position": {
+        "x": 400,
+        "y": 370
+      },
+      "data": {
+        "label": "Authorize status?",
+        "value": {
+          "$from": "response.payload.idTagInfo.status"
+        },
+        "cases": [
+          "Accepted",
+          {
+            "$match": {
+              "in": ["Blocked", "Invalid", "Expired"]
+            }
+          },
+          "ConcurrentTx"
+        ]
+      }
+    },
+    {
+      "id": "tx-start",
+      "type": "transaction",
+      "position": {
+        "x": 100,
+        "y": 500
+      },
+      "data": {
+        "label": "Start Transaction",
+        "action": "start",
+        "tagId": "DEMO-TAG-1"
+      }
+    },
+    {
+      "id": "meter",
+      "type": "meterValue",
+      "position": {
+        "x": 100,
+        "y": 600
+      },
+      "data": {
+        "label": "Meter 5 s",
+        "value": 0,
+        "sendMessage": true,
+        "autoIncrement": true,
+        "incrementInterval": 2,
+        "incrementAmount": 500,
+        "stopMode": "manual",
+        "maxTime": 5
+      }
+    },
+    {
+      "id": "tx-stop",
+      "type": "transaction",
+      "position": {
+        "x": 100,
+        "y": 700
+      },
+      "data": {
+        "label": "Stop Transaction",
+        "action": "stop"
+      }
+    },
+    {
+      "id": "denied",
+      "type": "delay",
+      "position": {
+        "x": 400,
+        "y": 500
+      },
+      "data": {
+        "label": "Denied: wait 2 s",
+        "delaySeconds": 2
+      }
+    },
+    {
+      "id": "busy",
+      "type": "delay",
+      "position": {
+        "x": 700,
+        "y": 500
+      },
+      "data": {
+        "label": "Already in use: wait 2 s",
+        "delaySeconds": 2
+      }
+    },
+    {
+      "id": "other",
+      "type": "delay",
+      "position": {
+        "x": 1000,
+        "y": 500
+      },
+      "data": {
+        "label": "Other status: wait 2 s",
+        "delaySeconds": 2
+      }
+    },
+    {
+      "id": "plug-out",
+      "type": "connectorPlug",
+      "position": {
+        "x": 400,
+        "y": 820
+      },
+      "data": {
+        "label": "Plug Out",
+        "action": "plugout"
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": {
+        "x": 400,
+        "y": 920
+      },
+      "data": {
+        "label": "End"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "start-1",
+      "target": "plug-in"
+    },
+    {
+      "id": "e2",
+      "source": "plug-in",
+      "target": "authorize"
+    },
+    {
+      "id": "e3",
+      "source": "authorize",
+      "target": "branch"
+    },
+    {
+      "id": "e4",
+      "source": "branch",
+      "target": "tx-start",
+      "sourceHandle": "case-0"
+    },
+    {
+      "id": "e5",
+      "source": "branch",
+      "target": "denied",
+      "sourceHandle": "case-1"
+    },
+    {
+      "id": "e6",
+      "source": "branch",
+      "target": "busy",
+      "sourceHandle": "case-2"
+    },
+    {
+      "id": "e7",
+      "source": "branch",
+      "target": "other",
+      "sourceHandle": "default"
+    },
+    {
+      "id": "e8",
+      "source": "tx-start",
+      "target": "meter"
+    },
+    {
+      "id": "e9",
+      "source": "meter",
+      "target": "tx-stop"
+    },
+    {
+      "id": "e10",
+      "source": "tx-stop",
+      "target": "plug-out"
+    },
+    {
+      "id": "e11",
+      "source": "denied",
+      "target": "plug-out"
+    },
+    {
+      "id": "e12",
+      "source": "busy",
+      "target": "plug-out"
+    },
+    {
+      "id": "e13",
+      "source": "other",
+      "target": "plug-out"
+    },
+    {
+      "id": "e14",
+      "source": "plug-out",
+      "target": "end-1"
+    }
+  ]
+}

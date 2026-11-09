@@ -10,7 +10,8 @@ import {
   vi,
   type MockInstance,
 } from "vitest";
-import { Logger, LogType } from "@ocpp-cp-sim/core/cp/shared/Logger";
+import { Logger, LogType } from "@ocpp-cp-simulator/core/cp/shared/Logger";
+import { readRecords as readSdkRecords } from "@open-ocpp-trace/jsonl";
 import { TraceWriter } from "../TraceWriter";
 
 function readRecords(filePath: string): unknown[] {
@@ -134,6 +135,160 @@ describe("TraceWriter", () => {
       expect(warnSpy).toHaveBeenCalledTimes(1);
       expect(warnSpy.mock.calls[0][0]).toContain("[TraceWriter]");
       expect(warnSpy.mock.calls[0][0]).toContain(filePath);
+    });
+  });
+
+  it("attaches an inbound validation violation to the CALL record's meta (#593)", async () => {
+    const writer = new TraceWriter(filePath);
+    const logger = new Logger();
+    writer.attach({ cpId: "CP001", ocppVersion: "OCPP-1.6J", logger });
+
+    logger.info(
+      'Received: [2,"in-1","Reset",{"type":"Warm"}]',
+      LogType.WEBSOCKET,
+    );
+    logger.warn(
+      `Inbound validation: ${JSON.stringify({
+        messageId: "in-1",
+        action: "Reset",
+        mode: "warn",
+        errorCode: "PropertyConstraintViolation",
+        description:
+          "Inbound Reset: type must be equal to one of the allowed values",
+      })}`,
+      LogType.WEBSOCKET,
+    );
+    logger.info('Sent: [3,"in-1",{"status":"Accepted"}]', LogType.WEBSOCKET);
+    await Promise.resolve();
+
+    const records = readRecords(filePath);
+    expect(records).toHaveLength(2);
+    expect(records[0]).toMatchObject({
+      messageType: "CALL",
+      messageId: "in-1",
+      direction: "csms-to-cp",
+      meta: {
+        validation: {
+          mode: "warn",
+          errorCode: "PropertyConstraintViolation",
+        },
+      },
+    });
+    expect(records[1]).toMatchObject({ messageType: "CALLRESULT" });
+    expect((records[1] as { meta?: unknown }).meta).toBeUndefined();
+  });
+
+  it("writes an inbound CALL with no violation unchanged, in order", async () => {
+    const writer = new TraceWriter(filePath);
+    const logger = new Logger();
+    writer.attach({ cpId: "CP001", ocppVersion: "OCPP-1.6J", logger });
+    logger.info(
+      'Received: [2,"in-2","Reset",{"type":"Soft"}]',
+      LogType.WEBSOCKET,
+    );
+    logger.info('Sent: [3,"in-2",{"status":"Accepted"}]', LogType.WEBSOCKET);
+    await Promise.resolve();
+    const records = readRecords(filePath) as Array<{
+      messageType: string;
+      meta?: unknown;
+    }>;
+    expect(records.map((r) => r.messageType)).toEqual(["CALL", "CALLRESULT"]);
+    expect(records[0].meta).toBeUndefined();
+  });
+
+  /**
+   * The simulator must keep tracing OCPP it knows to be invalid (#886): the
+   * SDK writer validates the record envelope only, never `payload` or `raw`,
+   * so a schema violation (#593) or a malformed fault-injection frame (#393)
+   * that still parses as an OCPP-J array is written, with `raw` exactly as it
+   * crossed the wire.
+   */
+  describe("invalid OCPP is still traced (#886)", () => {
+    async function sdkRecords(): Promise<unknown[]> {
+      const text = fs.readFileSync(filePath, "utf8");
+      const out: unknown[] = [];
+      for await (const result of readSdkRecords([text], { onError: "yield" })) {
+        expect(result.ok, JSON.stringify(result)).toBe(true);
+        if (result.ok) out.push(result.record);
+      }
+      return out;
+    }
+
+    it("writes an inbound CALL whose payload violates the schema, with meta.validation (#593)", async () => {
+      const writer = new TraceWriter(filePath);
+      const logger = new Logger();
+      writer.attach({ cpId: "CP001", ocppVersion: "OCPP-1.6J", logger });
+
+      const frame = '[2,"in-3","Reset",{"type":42,"unexpected":true}]';
+      logger.info(`Received: ${frame}`, LogType.WEBSOCKET);
+      logger.warn(
+        `Inbound validation: ${JSON.stringify({
+          messageId: "in-3",
+          action: "Reset",
+          mode: "warn",
+          errorCode: "TypeConstraintViolation",
+          description: "Inbound Reset: type must be string",
+        })}`,
+        LogType.WEBSOCKET,
+      );
+      await Promise.resolve();
+
+      const records = await sdkRecords();
+      expect(records).toHaveLength(1);
+      expect(records[0]).toMatchObject({
+        messageType: "CALL",
+        action: "Reset",
+        payload: { type: 42, unexpected: true },
+        raw: frame,
+        meta: {
+          validation: {
+            mode: "warn",
+            errorCode: "TypeConstraintViolation",
+          },
+        },
+      });
+    });
+
+    it("writes malformed OCPP-J frames (#393) with a byte-identical raw", () => {
+      const writer = new TraceWriter(filePath);
+      const logger = new Logger();
+      writer.attach({ cpId: "CP001", ocppVersion: "OCPP-1.6J", logger });
+
+      // A CALL whose payload is a string plus an extra array element, and a
+      // CALLERROR whose code is not a string and whose details are missing,
+      // both with irregular spacing a re-serialization would lose.
+      const call = '[2, "f-1","Heartbeat", "notAnObject",  "extra"]';
+      const callError = '[4,"f-2", 123 ]';
+      logger.info(`Sent: ${call}`, LogType.WEBSOCKET);
+      logger.info(`Sent: ${callError}`, LogType.WEBSOCKET);
+
+      const lines = fs
+        .readFileSync(filePath, "utf8")
+        .split("\n")
+        .filter((line) => line.length > 0)
+        .map((line) => JSON.parse(line) as { raw?: string });
+      expect(lines).toHaveLength(2);
+      expect(lines[0]).toMatchObject({
+        messageType: "CALL",
+        action: "Heartbeat",
+        payload: "notAnObject",
+      });
+      expect(lines[0].raw).toBe(call);
+      expect(lines[1]).toMatchObject({
+        messageType: "CALLERROR",
+        messageId: "f-2",
+      });
+      expect(lines[1].raw).toBe(callError);
+    });
+
+    it("writes JSONL the SDK reader accepts line by line", async () => {
+      const writer = new TraceWriter(filePath);
+      const logger = new Logger();
+      writer.attach({ cpId: "CP001", ocppVersion: "OCPP-1.6J", logger });
+      logger.info('Sent: [2, "f-3","Heartbeat", 7]', LogType.WEBSOCKET);
+      logger.info('Received: [4,"f-3", null, 5]', LogType.WEBSOCKET);
+
+      expect(await sdkRecords()).toHaveLength(2);
     });
   });
 });

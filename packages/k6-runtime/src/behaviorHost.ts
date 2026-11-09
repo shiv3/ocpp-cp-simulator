@@ -654,6 +654,11 @@ export class BehaviorHost {
       get state(): Record<string, JsonValue> {
         return userState;
       },
+      // k6 runs a behavior with its declared defaults: a selector cannot set
+      // params there (export-k6 refuses a useBehavior that does).
+      params: Object.freeze({
+        ...(behavior.params?.defaults ?? {}),
+      }) as Readonly<Record<string, JsonValue>>,
       async send(action, payload, opts) {
         if (host.isStopping) throw new BehaviorStopped();
         // From inside a beforeSend the CALL waits for its turn, so it goes out

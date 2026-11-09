@@ -4,7 +4,7 @@
 // the k6 runtime. Stub them out so resolveIdentity — a pure function with no
 // k6 dependency of its own — can be exercised under vitest.
 import { describe, expect, it, vi } from "vitest";
-import { resolveIdentity } from "@ocpp-cp-sim/k6-runtime/index";
+import { resolveIdentity } from "@ocpp-cp-simulator/k6-runtime/index";
 
 vi.mock("k6", () => ({ check: () => true }));
 vi.mock("k6/websockets", () => ({ WebSocket: class {} }));

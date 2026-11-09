@@ -3,11 +3,11 @@ import React from "react";
 import { Link } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import type {
   ScenarioDefinition,
   ScenarioTrigger,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import TargetChip from "../../../components/TargetChip";
 import { buildScenarioUrl } from "../../../lib/useAllScenarios";
 

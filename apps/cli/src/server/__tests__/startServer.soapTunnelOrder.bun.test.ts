@@ -8,8 +8,8 @@ import {
   buildSoapEnvelope,
   OCPP16_DIALECT,
   parseSoapEnvelope,
-} from "@ocpp-cp-sim/core/cp/infrastructure/transport/soap/index";
-import { BunSqliteDatabase } from "@ocpp-cp-sim/core/cp/domain/persistence/BunSqliteDatabase";
+} from "@ocpp-cp-simulator/core/cp/infrastructure/transport/soap/index";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/BunSqliteDatabase";
 import type { SoapTunnel, SoapTunnelOptions } from "../../soapTunnel";
 import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";

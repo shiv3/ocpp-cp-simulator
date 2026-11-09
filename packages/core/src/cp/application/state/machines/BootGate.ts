@@ -29,6 +29,8 @@ export type BootGateStatus =
  */
 export class BootGate {
   private _status: BootGateStatus = { status: "Idle" };
+  /** Depth of the {@link runTriggered} scopes currently running. */
+  private _triggered = 0;
 
   constructor(private readonly clock: SimClock = realClock) {}
 
@@ -45,6 +47,34 @@ export class BootGate {
    */
   set(status: BootGateStatus): void {
     this._status = status;
+  }
+
+  /**
+   * §4.2: "While Rejected, the Charge Point SHALL NOT respond to any Central
+   * System initiated message." True from the Rejected answer until the retry
+   * interval has passed, i.e. until the retry BootNotification is due. Pending
+   * and Accepted answer as usual.
+   */
+  isInboundSilenced(now?: Date): boolean {
+    if (this._status.status !== "Rejected") return false;
+    const currentTime = now ?? new Date(this.clock.now());
+    return currentTime < this._status.retryAfter;
+  }
+
+  /**
+   * Run `fn` as the answer to an accepted TriggerMessage. §4.2: a Pending
+   * station may send "unless it has been instructed by the Central System to
+   * do so with a TriggerMessage.req", so a CALL made synchronously inside
+   * `fn` passes the gate while Pending. Idle and Rejected are not widened:
+   * a Rejected station stays silent until the retry interval has passed.
+   */
+  runTriggered<T>(fn: () => T): T {
+    this._triggered++;
+    try {
+      return fn();
+    } finally {
+      this._triggered--;
+    }
   }
 
   /**
@@ -65,8 +95,9 @@ export class BootGate {
         // After Accepted, all CALLs are allowed.
         return true;
       case "Pending":
-        // In Pending, only BootNotification is allowed (checked above).
-        return false;
+        // In Pending, only BootNotification is allowed (checked above), plus
+        // what a TriggerMessage asked for (§4.2).
+        return this._triggered > 0;
       case "Rejected":
         // In Rejected, check if retryAfter has elapsed.
         return currentTime >= this._status.retryAfter;

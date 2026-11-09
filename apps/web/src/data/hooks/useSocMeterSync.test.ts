@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { EVSettings } from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
+import type { EVSettings } from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
 import { meterFromSoc, socFromMeter } from "./useSocMeterSync";
 
 const evSettings: EVSettings = {

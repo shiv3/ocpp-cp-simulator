@@ -32,13 +32,18 @@ export class ReservationManager {
    *  the StatusNotification; without it a lapsed reservation left the connector
    *  stuck Reserved on the wire. Explicit cancel/use paths delete directly and
    *  do NOT fire this — their status transition is handled by the caller. */
-  private readonly onExpire?: (connectorId: number) => void;
+  private readonly onExpire?: (
+    connectorId: number,
+    reservation: Reservation,
+  ) => void;
 
   private readonly clock: SimClock;
+  /** One timer per reservation, armed at its `expiryDate` (#739). */
+  private readonly expiryTimers = new Map<number, TimerHandle>();
 
   constructor(
     logger: Logger,
-    onExpire?: (connectorId: number) => void,
+    onExpire?: (connectorId: number, reservation: Reservation) => void,
     clock: SimClock = realClock,
   ) {
     this.clock = clock;
@@ -54,6 +59,14 @@ export class ReservationManager {
    * @param idTag ID tag for which the reservation is made
    * @param parentIdTag Optional parent ID tag
    * @param reservationId Reservation ID from central system
+   * @param options `replaceExisting`: OCPP 1.6 ReserveNow replaces the
+   *   reservation that has the same `reservationId` (#595); the other checks
+   *   run as if it were already gone, and it is only dropped when the new one
+   *   is accepted (2.x passes it too, OCPP 2.0.1 H01.FR.02). Without it a
+   *   repeated id is `Rejected`.
+   *   `shareAnyConnector`: connector-0 reservations do not exclude each other
+   *   (1.6 only needs one connector kept free per reservation); the caller
+   *   checks that enough connectors remain.
    * @returns ReservationStatus
    */
   createReservation(
@@ -62,6 +75,33 @@ export class ReservationManager {
     idTag: string,
     parentIdTag: string | undefined,
     reservationId: number,
+    options: { replaceExisting?: boolean; shareAnyConnector?: boolean } = {},
+  ): ReservationStatus {
+    const replaced = options.replaceExisting
+      ? this.reservations.get(reservationId)
+      : undefined;
+    if (replaced) this.drop(reservationId);
+    const status = this.tryCreate(
+      connectorId,
+      expiryDate,
+      idTag,
+      parentIdTag,
+      reservationId,
+      options.shareAnyConnector === true,
+    );
+    if (replaced && status !== ReservationStatus.Accepted) {
+      this.store(replaced);
+    }
+    return status;
+  }
+
+  private tryCreate(
+    connectorId: number,
+    expiryDate: Date,
+    idTag: string,
+    parentIdTag: string | undefined,
+    reservationId: number,
+    shareAnyConnector: boolean,
   ): ReservationStatus {
     // Check if reservation ID already exists
     if (this.reservations.has(reservationId)) {
@@ -72,8 +112,14 @@ export class ReservationManager {
       return ReservationStatus.Rejected;
     }
 
-    // Check if connector already has a reservation
-    const existingReservation = this.getReservationForConnector(connectorId);
+    // Check if connector already has a reservation: its own, exactly. A
+    // connector-0 reservation is not "on" any connector, so it neither blocks
+    // a specific reservation nor (with `shareAnyConnector`) another
+    // connector-0 one; the caller counts the connectors that remain.
+    const existingReservation =
+      shareAnyConnector && connectorId === 0
+        ? undefined
+        : this.reservationOn(connectorId);
     if (existingReservation) {
       this.logger.warn(
         `Connector ${connectorId} already has an active reservation`,
@@ -100,7 +146,7 @@ export class ReservationManager {
       createdAt: new Date(this.clock.now()),
     };
 
-    this.reservations.set(reservationId, reservation);
+    this.store(reservation);
 
     this.logger.info(
       `Created reservation ${reservationId} for connector ${connectorId} (idTag: ${idTag}, expiry: ${expiryDate})`,
@@ -125,7 +171,7 @@ export class ReservationManager {
       return false;
     }
 
-    this.reservations.delete(reservationId);
+    this.drop(reservationId);
 
     this.logger.info(
       `Cancelled reservation ${reservationId} (connector: ${reservation.connectorId})`,
@@ -147,7 +193,7 @@ export class ReservationManager {
       return false;
     }
 
-    this.reservations.delete(reservationId);
+    this.drop(reservationId);
 
     this.logger.info(
       `Used reservation ${reservationId} (connector: ${reservation.connectorId})`,
@@ -158,36 +204,81 @@ export class ReservationManager {
   }
 
   /**
-   * Check if a reservation is valid for a given ID tag
-   * @param reservationId Reservation ID
-   * @param idTag ID tag attempting to use the reservation
-   * @returns true if valid, false otherwise
+   * The reservation made for exactly `connectorId` (connector 0 included), if
+   * any. A connector-0 reservation is never returned for another connector.
    */
-  isValidReservation(reservationId: number, idTag: string): boolean {
-    const reservation = this.reservations.get(reservationId);
-    if (!reservation) {
-      return false;
+  reservationOn(connectorId: number): Reservation | undefined {
+    this.cleanupExpiredReservations();
+    for (const reservation of this.reservations.values()) {
+      if (reservation.connectorId === connectorId) return reservation;
     }
+    return undefined;
+  }
 
-    // Check if expired
-    if (reservation.expiryDate.getTime() <= this.clock.now()) {
-      this.logger.warn(
-        `Reservation ${reservationId} has expired`,
-        LogType.GENERAL,
-      );
-      return false;
-    }
-
-    // Check if ID tag matches (or parent ID tag matches)
-    if (reservation.idTag === idTag || reservation.parentIdTag === idTag) {
-      return true;
-    }
-
-    return false;
+  /** Whether {@link reservationOn} finds a reservation for `connectorId`. */
+  hasReservationOn(connectorId: number): boolean {
+    return this.reservationOn(connectorId) !== undefined;
   }
 
   /**
-   * Get reservation for a specific connector
+   * The reservation that applies to a session of `idTag` on `connectorId`
+   * (OCPP 1.6 §5.13, §3.11; 2.0.1 H03.FR.01-06): the one made for exactly that
+   * connector, else a connector-0 reservation, provided it admits the tag
+   * ({@link reservationAdmits}; `parentOfTag` is the tag's parent id or
+   * groupIdToken when the station knows it). A reservation held by someone
+   * else is never returned, so another tag's session neither consumes nor
+   * cancels it; whether such a session is *refused* is the caller's decision
+   * ({@link reservationOn}).
+   */
+  reservationFor(
+    connectorId: number,
+    idTag: string,
+    parentOfTag?: string,
+  ): Reservation | undefined {
+    const exact = this.reservationOn(connectorId);
+    if (exact) {
+      return reservationAdmits(exact, idTag, parentOfTag) ? exact : undefined;
+    }
+    if (connectorId === 0) return undefined;
+    for (const reservation of this.reservations.values()) {
+      if (
+        reservation.connectorId === 0 &&
+        reservationAdmits(reservation, idTag, parentOfTag)
+      ) {
+        return reservation;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Terminate every reservation `selector` names, without the expiry callback
+   * (the caller reports the termination): the reservations on one connector,
+   * or all of them. OCPP 1.6 §5.13 (a connector or the station becoming
+   * Faulted or Unavailable ends the reservation), 2.0.1 H01.FR.16/17.
+   * @returns the terminated reservations
+   */
+  terminateReservations(
+    selector: { connectorId: number } | "all",
+  ): Reservation[] {
+    const terminated = [...this.reservations.values()].filter(
+      (r) => selector === "all" || r.connectorId === selector.connectorId,
+    );
+    for (const reservation of terminated) {
+      this.drop(reservation.reservationId);
+      this.logger.info(
+        `Terminated reservation ${reservation.reservationId} (connector: ${reservation.connectorId})`,
+        LogType.GENERAL,
+      );
+    }
+    return terminated;
+  }
+
+  /**
+   * Get reservation for a specific connector, falling back to any connector-0
+   * reservation whatever its tag. Only for observing ("is there a reservation
+   * that could concern this connector?"); consuming or cancelling goes through
+   * {@link reservationFor} / {@link reservationOn}.
    * @param connectorId Connector ID
    * @returns Reservation if found, undefined otherwise
    */
@@ -256,7 +347,7 @@ export class ReservationManager {
 
     for (const id of expiredReservationIds) {
       const reservation = this.reservations.get(id);
-      this.reservations.delete(id);
+      this.drop(id);
       this.logger.info(
         `Cleaned up expired reservation ${id} (connector: ${reservation?.connectorId})`,
         LogType.GENERAL,
@@ -268,7 +359,7 @@ export class ReservationManager {
       // process / stop future cleanups. Isolate it and keep cleaning up.
       if (reservation) {
         try {
-          this.onExpire?.(reservation.connectorId);
+          this.onExpire?.(reservation.connectorId, reservation);
         } catch (err) {
           this.logger.error(
             `onExpire callback threw for connector ${reservation.connectorId}: ${String(err)}`,
@@ -279,8 +370,48 @@ export class ReservationManager {
     }
   }
 
+  private store(reservation: Reservation): void {
+    this.reservations.set(reservation.reservationId, reservation);
+    this.armExpiry(reservation);
+  }
+
+  private drop(reservationId: number): void {
+    this.reservations.delete(reservationId);
+    const timer = this.expiryTimers.get(reservationId);
+    if (timer !== undefined) {
+      this.clock.clearTimeout(timer);
+      this.expiryTimers.delete(reservationId);
+    }
+  }
+
   /**
-   * Start automatic cleanup timer (runs every minute)
+   * #739, OCPP 1.6 §5.13 / 2.0.1 H04.FR.01: the reservation is ended at its
+   * `expiryDate`, not at the next 60 s sweep. A timer that fires a tick early
+   * re-arms for what is left.
+   */
+  private armExpiry(reservation: Reservation): void {
+    const { reservationId } = reservation;
+    const previous = this.expiryTimers.get(reservationId);
+    if (previous !== undefined) this.clock.clearTimeout(previous);
+    const delay = Math.max(
+      1,
+      reservation.expiryDate.getTime() - this.clock.now(),
+    );
+    this.expiryTimers.set(
+      reservationId,
+      this.clock.setTimeout(() => {
+        this.expiryTimers.delete(reservationId);
+        this.cleanupExpiredReservations();
+        if (this.reservations.get(reservationId) === reservation) {
+          this.armExpiry(reservation);
+        }
+      }, delay),
+    );
+  }
+
+  /**
+   * Start the periodic sweep (every minute): only a fallback now that each
+   * reservation has its own expiry timer.
    */
   private startCleanupTimer(): void {
     this.cleanupTimer = this.clock.setInterval(() => {
@@ -299,10 +430,54 @@ export class ReservationManager {
   }
 
   /**
+   * Put reservations back after a connection loss that was not a reboot
+   * (#702): those whose expiry has not passed, with the cleanup timer
+   * running again. Returns the ones restored.
+   */
+  restore(reservations: readonly Reservation[]): Reservation[] {
+    const now = this.clock.now();
+    const kept = reservations.filter((r) => r.expiryDate.getTime() > now);
+    // `store` arms each one's expiry timer: `dispose()` cleared them when
+    // the link was lost, and without it the 60 s sweep would end a
+    // reservation up to a minute late (#839, H04.FR.01).
+    for (const reservation of kept) {
+      this.store({ ...reservation });
+    }
+    if (!this.cleanupTimer) this.startCleanupTimer();
+    return kept;
+  }
+
+  /**
    * Cleanup all resources
    */
   dispose(): void {
     this.stopCleanupTimer();
+    for (const timer of this.expiryTimers.values()) {
+      this.clock.clearTimeout(timer);
+    }
+    this.expiryTimers.clear();
     this.reservations.clear();
   }
+}
+
+/**
+ * Whether a session of `idTag` may use `reservation` (OCPP 1.6 §5.13: the
+ * `idTag`, or a parent idTag equal to the reservation's `parentIdTag`; 2.0.1
+ * H03.FR.01/04: the idToken, or the groupIdToken). `parentOfTag` is the
+ * presented tag's parent id / groupIdToken as the station knows it (Local
+ * Authorization List, Authorization Cache, Authorize.conf), if it does. The
+ * presented tag being the reservation's parent tag itself counts too (#595).
+ */
+export function reservationAdmits(
+  reservation: Reservation,
+  idTag: string,
+  parentOfTag?: string,
+): boolean {
+  if (reservation.idTag === idTag) return true;
+  const { parentIdTag } = reservation;
+  return (
+    parentIdTag !== undefined &&
+    (parentIdTag === idTag ||
+      (parentOfTag !== undefined && parentOfTag === parentIdTag))
+  );
 }

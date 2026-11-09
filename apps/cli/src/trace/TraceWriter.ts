@@ -1,19 +1,25 @@
 /**
  * Live producer for the OCPP trace format (issue #188 / `--trace-output`):
  * subscribes to a charge point's Logger and appends every OCPP-J wire frame
- * as a JSONL {@link OcppTraceRecord}, so a trace file grows in real time
+ * as a JSONL {@link TraceRecord}, so a trace file grows in real time
  * during a run rather than requiring a post-hoc log export + convert step.
  */
 
 import * as fs from "fs";
-import { isSoapVersion } from "@ocpp-cp-sim/core/cp/domain/types/OcppVersion";
-import type { Logger } from "@ocpp-cp-sim/core/cp/shared/Logger";
-import { LogLevel, type LogEntry } from "@ocpp-cp-sim/core/cp/shared/Logger";
+import { isSoapVersion } from "@ocpp-cp-simulator/core/cp/domain/types/OcppVersion";
+import type { Logger } from "@ocpp-cp-simulator/core/cp/shared/Logger";
+import {
+  LogLevel,
+  type LogEntry,
+} from "@ocpp-cp-simulator/core/cp/shared/Logger";
 import {
   logLineToTraceRecord,
+  parseInboundValidation,
   type SerializedLogLine,
-} from "@ocpp-cp-sim/trace/logEntryToTrace";
-import { TraceCorrelator } from "@ocpp-cp-sim/trace/TraceCorrelator";
+} from "@ocpp-cp-simulator/trace/logEntryToTrace";
+import type { TraceRecord } from "@open-ocpp-trace/core";
+import { TraceCorrelator } from "@ocpp-cp-simulator/trace/TraceCorrelator";
+import { serializeRecord } from "@open-ocpp-trace/jsonl/writer";
 
 export interface TraceWriterAttachContext {
   /** Charge point id stamped on every record from this subscription. */
@@ -61,6 +67,32 @@ export class TraceWriter {
     const transport = isSoapVersion(ctx.ocppVersion) ? "soap" : "json";
     const ocppVersion = toTraceOcppVersion(ctx.ocppVersion);
 
+    // serializeRecord checks the envelope only, never payload or raw, so
+    // invalid OCPP (#393 fault injection, #593 schema violations) is still
+    // traced (#886). A record it rejects is warned about and skipped below,
+    // like an I/O failure.
+    const write = (record: TraceRecord) =>
+      fs.appendFileSync(this.filePath, serializeRecord(record));
+
+    // An inbound CALL is logged before its handler runs, so a schema
+    // violation (#593) is only known a moment later. Hold the CALL record back
+    // until the next record or the end of the current tick, then write it with
+    // `meta.validation` if the charge point reported one.
+    let pending: TraceRecord | null = null;
+    const flush = () => {
+      if (!pending) return;
+      const record = pending;
+      pending = null;
+      try {
+        write(record);
+      } catch (err) {
+        console.warn(
+          `[TraceWriter] failed to write trace record to ${this.filePath}`,
+          err,
+        );
+      }
+    };
+
     const listener = (entry: LogEntry) => {
       // Logger.log() emits synchronously, so a runtime I/O failure here
       // (disk full, file replaced, permission revoked) must not propagate
@@ -75,6 +107,16 @@ export class TraceWriter {
           message: entry.message,
           cpId: ctx.cpId,
         };
+        const violation = parseInboundValidation(line.message);
+        if (violation) {
+          if (pending && pending.messageId === violation.messageId) {
+            pending.meta = {
+              ...pending.meta,
+              validation: violation.validation,
+            };
+          }
+          return;
+        }
         const record = logLineToTraceRecord(line, {
           ocppVersion,
           transport,
@@ -82,7 +124,16 @@ export class TraceWriter {
         });
         if (!record) return;
         this.correlator.observe(record);
-        fs.appendFileSync(this.filePath, JSON.stringify(record) + "\n");
+        flush();
+        if (
+          record.messageType === "CALL" &&
+          record.direction === "csms-to-cp"
+        ) {
+          pending = record;
+          queueMicrotask(flush);
+        } else {
+          write(record);
+        }
       } catch (err) {
         console.warn(
           `[TraceWriter] failed to write trace record to ${this.filePath}`,
@@ -91,7 +142,11 @@ export class TraceWriter {
       }
     };
 
-    return ctx.logger.on("log.WebSocket", listener);
+    const off = ctx.logger.on("log.WebSocket", listener);
+    return () => {
+      off();
+      flush();
+    };
   }
 }
 

@@ -4,7 +4,7 @@ import { OCPPMessageHandler } from "../OCPPMessageHandler";
 import type { OCPPWebSocket } from "../OCPPWebSocket";
 import type { ProtocolCodec } from "../profile/ProtocolProfile";
 import { outgoingV16Warning } from "../codec/validateV16";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import {
   DefaultBootNotification,
   OCPPAction,
@@ -28,7 +28,7 @@ type IncomingMessageHandler = (
 const NO_HANDLER = "No handler for action result";
 
 function harness() {
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     "CP-407",
     DefaultBootNotification,
     1,
@@ -130,11 +130,23 @@ describe("SecurityEventNotification.req on OCPP 1.6 (#537)", () => {
     ).resolves.toBeUndefined();
   });
 
-  it("resolves when the boot gate suppresses it", async () => {
+  it("queues a critical event the boot gate holds back (A04.FR.02, #734)", async () => {
     const h = harness();
     h.handler.setBootStatus({ status: "Pending" });
     await expect(
       h.handler.sendSecurityEventNotification("StartupOfTheDevice"),
+    ).resolves.toBeUndefined();
+    expect(h.info).toHaveBeenCalledWith(
+      expect.stringContaining("Queued security event StartupOfTheDevice"),
+      expect.anything(),
+    );
+  });
+
+  it("resolves when the boot gate suppresses a non-critical event", async () => {
+    const h = harness();
+    h.handler.setBootStatus({ status: "Pending" });
+    await expect(
+      h.handler.sendSecurityEventNotification("InvalidMessages"),
     ).resolves.toBeUndefined();
     expect(h.warn).toHaveBeenCalledWith(
       expect.stringContaining("Suppressing SecurityEventNotification"),

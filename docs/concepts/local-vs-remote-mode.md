@@ -16,7 +16,7 @@ related:
   - vehicle-profiles.md
   - ../entities/open-ev-directory.md
   - charging-sessions.md
-updated: 2026-11-05
+updated: 2026-11-08
 ---
 
 # Local vs Remote mode (browser)
@@ -38,6 +38,26 @@ must match the daemon's `--health-path`, see [Daemon → Health](../entities/dae
 
 There is no toggle — the mode is decided once on page load and never
 overridden.
+
+## Switching daemons (Remote mode)
+
+In Remote mode the sidebar lists the daemon that served the console ("This
+server") and the addresses you saved (#619). Picking one points the console at
+that daemon: it first answers the health probe (`{ "ok": true }`), then the
+Socket.IO connection must come up within 8 seconds. If either step fails, the
+previous daemon stays selected and the sidebar says so. The saved list
+(`ocpp-cp.saved-daemons`, at most 20 `http(s)://host[:port]` origins with an
+optional name) and the last choice (`ocpp-cp.active-daemon`) live in
+`localStorage`; after a reload the console re-selects the last daemon if it
+still answers, else it falls back to the serving daemon. Addresses with
+embedded credentials are refused, so no password is stored. The other daemon
+must allow the console's origin ([`--cors-origin`](../entities/daemon.md)).
+Limits: a daemon protected by Basic Auth cannot be switched to (the browser
+sends no credentials cross-origin, so the probe fails and the switch reports it
+unreachable after 8 s), and a daemon started with a different `--health-path`
+is not probed at that path. A run of the switch that is overtaken by a newer
+one neither commits nor rolls back.
+Local mode has no switcher and never touches these keys.
 
 ## Consequences
 
@@ -76,6 +96,12 @@ overridden.
   `-wait-changed` events — the same events the daemon pushes, without a
   `runId`. Before #411 that runtime lived in the classic UI's connector card:
   with only the web console open, a Local-mode scenario could not run.
+  The runtime, not the `Connector`, holds each connector's `ScenarioManager`
+  and its event emitter (since
+  [#575](https://github.com/shiv3/ocpp-cp-simulator/issues/575)). Removing a
+  connector destroys its manager and still emits `scenario-completed` for a
+  running scenario (the run is discarded: no run report); unregistering the
+  charge point destroys every manager without emitting it.
   Auto-start follows the daemon's rules
   ([Scenario format → start notes](scenario-format.md#start-notes-triggeron-connect-fires-on-_every_-connect)).
   Only the automatic starts wait for the charge point to be `Available` — a
@@ -98,14 +124,22 @@ overridden.
   decided from what the definition installed under the id _declared_.
 - The scenario wait controls (extend / retry / continue, #240) work in both
   modes and refuse an idle scenario the same way. The run report that records
-  them (`interventions`) exists only on the daemon — Local mode has no run
-  reports.
-- The scenario run history (#388) is daemon-only: `scenario.runs.list`, the
-  run page's recorded history and the `/scenarios/runs` page need Remote
-  mode. In Local mode the run page lists only the runs started or attached
-  while the page is open, and forgets them when it closes. This is a deferred
-  part of #388, not a design choice: the browser runtime builds no run
-  reports (the transcript capture, assertion evaluation and verdict live in
-  the daemon's service), so it has nothing to record. Moving that report
-  builder to the shared application layer and recording local runs in the
-  sql.js `scenario_runs` table is tracked in #394.
+  them (`interventions`) is built the same way in both (#394).
+- The scenario run history (#388, #394) works in both modes. One shared
+  component (`ScenarioRunRecorder`, application layer) captures the OCPP
+  transcript, evaluates the assertions, computes the verdict and assembles the
+  report for the daemon's service and for the browser's `ScenarioManager`, so
+  the same scenario yields the same report shape in either. In Local mode the
+  reports go to the sql.js `scenario_runs` table (in memory when the database
+  could not be opened), so a run survives a page reload; retention is the
+  same 100 runs per charge point. `getScenarioReport` and `listScenarioRuns`
+  answer from it, the run page and `/scenarios/runs` list and filter it as
+  they do on the daemon, and the Local service emits the `scenario-*` events
+  with a `runId` (minted per run) and `scenario-run-recorded`. A charge point
+  removed from the saved configuration, and **Reset all simulator data**, drop
+  its runs; entering Remote mode merely releases the charge points and keeps
+  them. Open runs are tracked per connector, so one scenario id can run on two
+  connectors at once and each leaves its own report. Removing a charge point
+  while a run is open discards that run without a report, as on the daemon.
+  Differences: a Local run's `simulatorVersion` is the console build's, and the
+  timeline gets run attribution and `scenario_finished` only.

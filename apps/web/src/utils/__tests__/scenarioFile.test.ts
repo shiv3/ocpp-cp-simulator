@@ -3,8 +3,8 @@ import { parseScenarioJSON, withScenarioSchemaVersion } from "../scenarioFile";
 import {
   SCENARIO_SCHEMA_VERSION,
   type ScenarioDefinition,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import { validateScenarioSchema } from "@ocpp-cp-sim/core/scenario/scenarioSchemaValidator";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import { validateScenarioSchema } from "@ocpp-cp-simulator/core/scenario/scenarioSchemaValidator";
 
 describe("parseScenarioJSON", () => {
   const createValidScenario = (
@@ -114,6 +114,61 @@ describe("parseScenarioJSON", () => {
     ).toThrow("Invalid scenario file format");
   });
 
+  it("fills in a missing name / targetType like the daemon, with a warning", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const result = parseScenarioJSON(
+        JSON.stringify(
+          createValidScenario({ name: undefined, targetType: undefined }),
+        ),
+      );
+      expect(result.name).toBe("test-scenario");
+      expect(result.targetType).toBe("connector");
+      const messages = warn.mock.calls.map(([m]) => String(m));
+      expect(messages).toContain(
+        '[scenarioFile] Imported scenario "test-scenario": scenario has no "name"; using the id',
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("keeps a present but unknown targetType / non-string name as written, with a warning", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const result = parseScenarioJSON(
+        JSON.stringify({
+          ...createValidScenario(),
+          name: 42,
+          targetType: "station",
+        }),
+      );
+      expect(result.targetType).toBe("station");
+      expect(result.name).toBe(42);
+      const messages = warn.mock.calls.map(([m]) => String(m));
+      expect(messages).toContain(
+        '[scenarioFile] Imported scenario "test-scenario": scenario "targetType" must be one of "chargePoint" | "connector"',
+      );
+      expect(messages).toContain(
+        '[scenarioFile] Imported scenario "test-scenario": scenario "name" must be a string',
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("still loads an id the daemon would refuse, with a warning", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(
+        parseScenarioJSON(JSON.stringify(createValidScenario({ id: "  " }))).id,
+      ).toBe("  ");
+      expect(warn).toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("rejects non-object top-level JSON (null / array / scalar)", () => {
     expect(() => parseScenarioJSON("null")).toThrow(
       "Invalid scenario file format",
@@ -200,13 +255,33 @@ describe("withScenarioSchemaVersion", () => {
     expect(scenario.schemaVersion).toBeUndefined();
   });
 
-  it("is at the current v1.5 schema version", () => {
+  it("keeps a newer schemaVersion and raises an older one", () => {
+    expect(
+      withScenarioSchemaVersion(createValidScenario({ schemaVersion: "1.11" }))
+        .schemaVersion,
+    ).toBe("1.11");
+    expect(
+      withScenarioSchemaVersion(createValidScenario({ schemaVersion: "2.0" }))
+        .schemaVersion,
+    ).toBe("2.0");
+    for (const old of ["1.0", "1.5", SCENARIO_SCHEMA_VERSION, "garbage"]) {
+      expect(
+        withScenarioSchemaVersion(createValidScenario({ schemaVersion: old }))
+          .schemaVersion,
+      ).toBe(SCENARIO_SCHEMA_VERSION);
+    }
+  });
+
+  it("is at the current v1.10 schema version", () => {
     // Each additive schema version bumps the stamp: the v1.2 evSettings
     // fields (#301) once shipped with the stamp left at "1.1", and a browser
     // export could not be told apart from one written before them. v1.3
     // adds the ocppCall node type (#389), v1.4 the optional libraryId, v1.5 the
-    // callResponse and useBehavior nodes and csmsCallTrigger behavior (#566).
-    expect(SCENARIO_SCHEMA_VERSION).toBe("1.5");
+    // callResponse and useBehavior nodes and csmsCallTrigger behavior (#566),
+    // v1.6 useBehavior params and the decision nodes (#654), v1.7 the `$from`
+    // root "response" and `$match` switch cases, v1.8 timeout edges, v1.9 the
+    // parallel and join nodes, v1.10 loop bounds.
+    expect(SCENARIO_SCHEMA_VERSION).toBe("1.10");
   });
 
   it("produces a scenario that still validates against packages/core/schema/scenario.schema.json", () => {

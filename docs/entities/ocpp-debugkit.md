@@ -6,10 +6,11 @@ sources:
   - package.json (`@ocpp-debugkit/toolkit` pin)
   - apps/cli/src/analyze/
   - "issue #188"
+  - "issue #886"
 related:
   - analyze.md
   - ../concepts/trace-format.md
-updated: 2026-11-05
+updated: 2026-11-09
 ---
 
 # OCPP DebugKit
@@ -26,10 +27,12 @@ timeline and renders Markdown / HTML reports.
   the implementation-independent contract between a producer of OCPP traffic
   (this simulator) and an analyzer (DebugKit), so neither is coupled to the
   other's internal models.
-- The [`analyze` subcommand](analyze.md) is the integration: it splits a trace
-  by charge point (and optionally connector) to work around the toolkit's
-  single-station model, excludes SOAP / non-1.6 records, and feeds the rest to
-  the toolkit's `/core` and `/reporter` entry points via dynamic `import()`.
+- The [`analyze` subcommand](analyze.md) is the integration: it reads a trace
+  with the [Open OCPP Trace SDK](../concepts/trace-format.md#reference-implementation)
+  reader (#886), splits it by charge point (and optionally connector) to work
+  around the toolkit's single-station model, excludes SOAP / non-1.6 records,
+  and feeds the rest, re-serialized as JSONL by the SDK writer, to the
+  toolkit's `/core` and `/reporter` entry points via dynamic `import()`.
 - Two toolkit rules were fixed upstream to group by `connectorId` as a result
   of issue #188 (`STATUS_TRANSITION_VIOLATION`, `METER_VALUE_ANOMALY`, since
   0.4.2).

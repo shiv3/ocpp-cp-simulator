@@ -1,7 +1,7 @@
 {
   "id": "cert16-tc012-remote-stop",
   "name": "Cert 1.6 Core: TC_012 Remote Stop Transaction",
-  "description": "Locally-started session (StartTransaction.req + running MeterValue.req) already Charging when RemoteStopTransaction.req arrives; StopTransaction.req → StatusNotification(Finishing) → StatusNotification(Available).",
+  "description": "Locally-started session (StartTransaction.req + running MeterValues.req) already Charging when RemoteStopTransaction.req arrives; StopTransaction.req → StatusNotification(Finishing) → StatusNotification(Available).",
   "targetType": "connector",
   "targetId": 1,
   "trigger": { "type": "manual" },

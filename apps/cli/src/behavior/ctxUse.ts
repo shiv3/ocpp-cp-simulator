@@ -1,5 +1,5 @@
 import ts from "typescript";
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
 
 /** The `ctx` members that need a capability in `requires`. */
 const NEEDS: Readonly<Record<string, "physical" | "raw-frames">> = {

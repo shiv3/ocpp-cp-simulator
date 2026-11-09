@@ -5,6 +5,7 @@ import { redactSensitiveText } from "../../shared/redaction";
 import { isCertificateInBundle } from "../../domain/security/certificateHash";
 import {
   isBrowserRuntime,
+  OcppSecurityProfileConfigError,
   openOcppWebSocket,
   probeUpgradeRefusal,
   type OcppSocket,
@@ -36,7 +37,7 @@ import type {
   ResetResponseV16,
   TriggerMessageResponseV16,
   UnlockConnectorResponseV16,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import {
   NetworkSimController,
   type ControllerHost,
@@ -46,26 +47,19 @@ import {
   type ResolvedNetworkSimConfig,
   type DisconnectRuleType,
 } from "./network-sim";
-import type { NetworkFaultInjected } from "../../domain/charge-point/ChargePointEvents";
+import type { WsClientOptions } from "../../shared/WsClientOptions";
+import {
+  DEFAULT_RECONNECT_POLICY,
+  nextReconnectDelayMs,
+  type ReconnectPolicy,
+  type RetryBackOffVariables,
+} from "../../shared/ReconnectPolicy";
+import type {
+  ChargePointSocket,
+  SocketClose,
+  TransportObserverEvents,
+} from "../../domain/transport/ChargePointSocket";
 import { EventEmitter } from "../../shared/EventEmitter";
-
-/** #448: what the transport reports to observers (the charge point). A
- *  throwing listener is caught by the emitter, never by the transport. */
-export interface TransportObserverEvents {
-  /** A network-sim disconnect rule fired; emitted before the close. */
-  simulatedDisconnect: NetworkFaultInjected;
-  /** A reconnect was scheduled; emitted once the close that caused it has
-   *  been handed to the `onclose` callback. */
-  reconnectScheduled: { attempt: number; delayMs: number };
-  /** #393: the current generation ended, whatever the cause (a close, a
-   *  disconnect, a reset, a simulated drop), or the transport was disposed.
-   *  Emitted once per generation, before any replacement socket opens. */
-  closed: { cause: CloseCause | "disposed" };
-  /** #537 A02.FR.10: a connection opened with the previous client
-   *  certificate while the renewed one was unconfirmed; the renewed one is
-   *  discarded (A02.FR.29 reports it). */
-  renewedClientCertificateDiscarded: Record<string, never>;
-}
 
 /**
  * #393: sees every well-shaped incoming frame (an array of 3 to 5 elements)
@@ -113,9 +107,6 @@ type MessageHandler = (
   action: OCPPAction,
   payload: OcppMessagePayload,
 ) => void;
-
-/** What the charge point is told about a socket's close. */
-export type SocketClose = Pick<CloseEvent, "code" | "reason">;
 
 /**
  * Whether a connection attempt ended before any peer answered: connection
@@ -171,7 +162,7 @@ class GenerationTokenImpl implements GenerationToken {
   }
 }
 
-export class OCPPWebSocket {
+export class OCPPWebSocket implements ChargePointSocket {
   private _ws: OcppSocket | null = null;
   private _url: string;
   private _basicAuth: { username: string; password: string } | null = null;
@@ -183,8 +174,15 @@ export class OCPPWebSocket {
   /** #406: `WebSocketPingInterval` in seconds; 0 sends no client ping. */
   private _pingIntervalSeconds: number = 0;
   private _reconnectAttempts: number = 0;
-  private _baseReconnectDelay: number = 1000; // 1 second base delay
-  private _maxReconnectDelay: number = 30000; // 30 seconds max delay
+  /** #609: how long to wait between attempts, and when to stop. */
+  private _reconnectPolicy: ReconnectPolicy = DEFAULT_RECONNECT_POLICY;
+  /** Uniform in [0, 1); the charge point's seeded `reconnect` stream. */
+  private _reconnectRandom: () => number = Math.random;
+  /** #611: connection options; the runtime support was checked by the owner. */
+  private _wsOptions: WsClientOptions = {};
+  private _handshakeTimer: ReturnType<typeof setTimeout> | null = null;
+  /** #609: 2.x `RetryBackOff*` variables; null on 1.6. */
+  private _retryBackOff: RetryBackOffVariables | null = null;
   private _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private _onOpenCallback: (() => void) | null = null;
   private _onCloseCallback:
@@ -219,6 +217,10 @@ export class OCPPWebSocket {
   private _ocppVersion: string;
   private _securityProfile?: OcppSecurityProfile;
   private _authorizationKey?: string;
+  private _securityProfileFallback: (() => void) | null = null;
+  /** `setSecurityCredentials` ran: a credential that cannot open a
+   *  connection is then reported and retried, not thrown (#724). */
+  private _credentialsChangedAtRuntime = false;
   private _cpoName?: string;
   private _tls?: OcppTlsOptions;
   /**
@@ -236,6 +238,8 @@ export class OCPPWebSocket {
     confirmed: boolean;
     presentNext: boolean;
   } | null = null;
+  /** #564: the client certificate (PEM) the current attempt presents. */
+  private _connectionClientCertificate: string | undefined;
 
   // Network simulation
   private _controller: NetworkSimController;
@@ -255,6 +259,7 @@ export class OCPPWebSocket {
   readonly observers = new EventEmitter<TransportObserverEvents>();
   private _pendingReconnectNotice: { attempt: number; delayMs: number } | null =
     null;
+  private _pendingGaveUp: { attempts: number } | null = null;
   private _disposed: boolean = false;
 
   constructor(
@@ -304,6 +309,40 @@ export class OCPPWebSocket {
   }
 
   /**
+   * #609: replace the reconnect policy. `random` returns a number in
+   * [0, 1) and draws the jitter; the charge point passes its seeded
+   * `reconnect` stream so a run replays. Takes effect from the next attempt.
+   */
+  setReconnectPolicy(policy: ReconnectPolicy, random?: () => number): void {
+    this._reconnectPolicy = policy;
+    if (random) this._reconnectRandom = random;
+  }
+
+  /**
+   * #611: handshake timeout, compression, max payload, proxy, local address.
+   * The caller must have checked them against the runtime
+   * (`assertWsClientOptions`): this does not drop what the runtime would
+   * ignore. Applies from the next connection attempt.
+   */
+  setWsClientOptions(options: WsClientOptions): void {
+    this._wsOptions = options;
+  }
+
+  get wsClientOptions(): WsClientOptions {
+    return this._wsOptions;
+  }
+
+  get reconnectPolicy(): ReconnectPolicy {
+    return this._reconnectPolicy;
+  }
+
+  /** #609: OCPP 2.x `RetryBackOffWaitMinimum` / `RandomRange` /
+   *  `RepeatTimes`; `null` returns to the policy alone (1.6). */
+  setRetryBackOff(variables: RetryBackOffVariables | null): void {
+    this._retryBackOff = variables;
+  }
+
+  /**
    * Hand the socket a set of supervision URLs to choose between.
    *
    * A setter rather than a constructor parameter: the constructor already
@@ -331,6 +370,43 @@ export class OCPPWebSocket {
       : bundle;
   }
 
+  /**
+   * #724 A01.FR.03 / A05.FR.07: the credentials the next connection attempt
+   * sends. Read on every attempt, so a ChangeConfiguration of
+   * `AuthorizationKey` or `SecurityProfile` is used by the next reconnect.
+   */
+  public setSecurityCredentials(credentials: {
+    securityProfile?: OcppSecurityProfile;
+    authorizationKey?: string;
+  }): void {
+    this._credentialsChangedAtRuntime = true;
+    if ("securityProfile" in credentials) {
+      this._securityProfile = credentials.securityProfile;
+    }
+    if ("authorizationKey" in credentials) {
+      this._authorizationKey = credentials.authorizationKey;
+    }
+  }
+
+  /**
+   * #724 A05.FR.08: until a connection opens, a socket close that is not a
+   * manual disconnect calls `fallback` once, before the next attempt, so the
+   * caller can put the previous security profile back.
+   */
+  public armSecurityProfileFallback(fallback: () => void): void {
+    this._securityProfileFallback = fallback;
+  }
+
+  /** `--tls-ca` certificates are configured. */
+  public hasConfiguredTrustAnchors(): boolean {
+    return !!this._tls?.ca;
+  }
+
+  /** A client certificate is configured (`--tls-cert`) or was renewed. */
+  public hasClientCertificate(): boolean {
+    return !!this._tls?.cert || this._renewedClientCertificate !== null;
+  }
+
   /** Whether the CSMS link authenticates with a client certificate
    *  (security profile 3), the one a renewed certificate replaces. */
   public usesClientCertificate(): boolean {
@@ -346,6 +422,11 @@ export class OCPPWebSocket {
   public useRenewedClientCertificate(identity: ClientIdentity): void {
     if (!this.usesClientCertificate()) return;
     const previous = this._renewedClientCertificate;
+    // Handed over again (#564): the first hand-over stands, with whatever
+    // the connections since have settled about it.
+    if (previous?.cert === identity.cert && previous.key === identity.key) {
+      return;
+    }
     // A02.FR.28: the fallback is the certificate in use, which is a
     // renewal confirmed earlier rather than the configured one.
     const fallback = previous?.confirmed
@@ -358,6 +439,14 @@ export class OCPPWebSocket {
       confirmed: false,
       presentNext: true,
     };
+  }
+
+  /** Whether the open (or opening) connection presents `cert` as its client
+   *  certificate (#564): one that does needs no reconnect to switch to it. */
+  public presentsClientCertificate(cert: string): boolean {
+    return (
+      this._connectionClientCertificate === cert && this.isOpenOrConnecting()
+    );
   }
 
   /**
@@ -474,9 +563,12 @@ export class OCPPWebSocket {
     this._selfRequestedClose = false;
 
     const attempt = this.nextTlsOptions();
+    this._connectionClientCertificate = attempt.tls?.cert;
     let opened = false;
     const onopenHandler = () => {
       opened = true;
+      this._securityProfileFallback = null;
+      this.clearHandshakeTimer();
       this.onClientCertificateOpened(attempt.renewed);
       // A working connection clears the refusal budget, so the next genuine
       // refusal is diagnosed immediately rather than waiting out the window.
@@ -498,6 +590,7 @@ export class OCPPWebSocket {
     // already open, and must still report its own cause (#474).
     const socketToken = this._currentGeneration;
     const oncloseHandler = (ev: CloseEvent) => {
+      this.clearHandshakeTimer();
       const closeCause = this.closeCauseOf(socketToken);
       // Logged for every socket, stale ones included: it is the only line
       // carrying the real close code of a socket a reset superseded, and the
@@ -508,6 +601,11 @@ export class OCPPWebSocket {
       );
       // Generation guard: only process close if this socket belongs to the current generation
       if (socketGeneration === this._generationCounter) {
+        if (!opened && !this._isManualDisconnect) {
+          const fallback = this._securityProfileFallback;
+          this._securityProfileFallback = null;
+          fallback?.();
+        }
         // Only a failed connection attempt counts, not one the station
         // closed itself before it opened, nor one no CSMS ever saw.
         if (!opened && closeCause === "network" && !neverReachedCsms(ev)) {
@@ -521,6 +619,9 @@ export class OCPPWebSocket {
       const notice = this._pendingReconnectNotice;
       this._pendingReconnectNotice = null;
       if (notice) this.observers.emit("reconnectScheduled", notice);
+      const gaveUp = this._pendingGaveUp;
+      this._pendingGaveUp = null;
+      if (gaveUp) this.observers.emit("reconnectGaveUp", gaveUp);
     };
 
     // Resolving here, per attempt, is what keeps the URL list out of
@@ -530,28 +631,81 @@ export class OCPPWebSocket {
       this._url = this._urlPool.next();
     }
 
-    this._ws = openOcppWebSocket({
-      baseUrl: this._url,
-      chargePointId: this._chargePointId,
-      basicAuth: this._basicAuth,
-      extraHeaders: this._extraHeaders,
-      extraSubprotocols: this._extraSubprotocols,
-      ocppVersion: this._ocppVersion,
-      securityProfile: this._securityProfile,
-      authorizationKey: this._authorizationKey,
-      cpoName: this._cpoName,
-      tls: attempt.tls,
-      warn: (message) => this._logger.warn(message, LogType.WEBSOCKET),
-      onConnectOptions: (options) => {
-        this._lastConnectOptions = options;
-        this._refusalStatusReported = false;
-      },
-      onopen: onopenHandler,
-      onmessage: onmessageHandler,
-      onerror: onerrorHandler,
-      onclose: oncloseHandler,
-    });
+    try {
+      this._ws = openOcppWebSocket({
+        baseUrl: this._url,
+        chargePointId: this._chargePointId,
+        basicAuth: this._basicAuth,
+        extraHeaders: this._extraHeaders,
+        extraSubprotocols: this._extraSubprotocols,
+        ocppVersion: this._ocppVersion,
+        securityProfile: this._securityProfile,
+        authorizationKey: this._authorizationKey,
+        cpoName: this._cpoName,
+        tls: attempt.tls,
+        ...(Object.keys(this._wsOptions).length > 0
+          ? { ws: this._wsOptions }
+          : {}),
+        warn: (message) => this._logger.warn(message, LogType.WEBSOCKET),
+        onConnectOptions: (options) => {
+          this._lastConnectOptions = options;
+          this._refusalStatusReported = false;
+        },
+        onopen: onopenHandler,
+        onmessage: onmessageHandler,
+        onerror: onerrorHandler,
+        onclose: oncloseHandler,
+      });
+    } catch (error) {
+      // A credential a ChangeConfiguration left unusable (#724) must not end
+      // the reconnect loop: report it, undo a pending security-profile switch
+      // and try again. A misconfiguration at start-up still throws.
+      if (
+        !(error instanceof OcppSecurityProfileConfigError) ||
+        !this._credentialsChangedAtRuntime
+      ) {
+        throw error;
+      }
+      this._logger.error(
+        `Cannot open the connection: ${error.message}`,
+        LogType.WEBSOCKET,
+      );
+      const fallback = this._securityProfileFallback;
+      this._securityProfileFallback = null;
+      fallback?.();
+      this._ws = null;
+      if (!this._isManualDisconnect && !this._disposed) this.attemptReconnect();
+      return;
+    }
     this._socketToken = socketToken;
+    this.armHandshakeTimer(this._ws);
+  }
+
+  /** #611: no runtime times the handshake out natively (Bun never does), so
+   *  an attempt that has not opened in time is closed here; it then fails
+   *  like any other connection failure and the reconnect policy takes over. */
+  private armHandshakeTimer(socket: OcppSocket): void {
+    this.clearHandshakeTimer();
+    const timeoutMs = this._wsOptions.handshakeTimeoutMs;
+    if (timeoutMs === undefined) return;
+    this._handshakeTimer = setTimeout(() => {
+      this._handshakeTimer = null;
+      if (this._ws !== socket || socket.readyState !== WebSocket.CONNECTING) {
+        return;
+      }
+      this._logger.warn(
+        `WebSocket handshake timed out after ${timeoutMs} ms (ws.handshakeTimeoutMs)`,
+        LogType.WEBSOCKET,
+      );
+      socket.close();
+    }, timeoutMs);
+  }
+
+  private clearHandshakeTimer(): void {
+    if (this._handshakeTimer) {
+      clearTimeout(this._handshakeTimer);
+      this._handshakeTimer = null;
+    }
   }
 
   public disconnect(): void {
@@ -564,6 +718,9 @@ export class OCPPWebSocket {
 
     // Set manual disconnect flag to prevent auto-reconnect
     this._isManualDisconnect = true;
+    // A05.FR.08 covers the connection that follows the switch only: an
+    // operator's disconnect ends it.
+    this._securityProfileFallback = null;
 
     // Clear reconnect timer to prevent reconnection attempts
     if (this._reconnectTimer) {
@@ -617,6 +774,7 @@ export class OCPPWebSocket {
     }
 
     this._disposed = true;
+    this._securityProfileFallback = null;
 
     // Shut down controller with reason 'disposed'
     this._controller.shutdownPipelines({ reason: "disposed" });
@@ -630,6 +788,7 @@ export class OCPPWebSocket {
       clearTimeout(this._reconnectTimer);
       this._reconnectTimer = null;
     }
+    this.clearHandshakeTimer();
 
     if (this._ws) {
       this._ws.close();
@@ -1204,13 +1363,29 @@ export class OCPPWebSocket {
 
     this._reconnectAttempts++;
 
-    // Calculate delay with exponential backoff: baseDelay * 2^(attempts - 1)
-    // Example: 1s, 2s, 4s, 8s, 16s, 30s (max)
-    const exponentialDelay =
-      this._baseReconnectDelay * Math.pow(2, this._reconnectAttempts - 1);
-    const backoffDelay = Math.min(exponentialDelay, this._maxReconnectDelay);
+    const decision = nextReconnectDelayMs(
+      this._reconnectPolicy,
+      this._reconnectAttempts,
+      this._reconnectRandom,
+      this._retryBackOff,
+    );
+    if (decision.kind === "give-up") {
+      const attempts = this._reconnectAttempts - 1;
+      this._logger.warn(
+        `Giving up reconnecting after ${attempts} attempt(s) (reconnect.maxAttempts=${this._reconnectPolicy.maxAttempts})`,
+        LogType.WEBSOCKET,
+      );
+      // A later explicit connect() starts with a fresh budget.
+      this._reconnectAttempts = 0;
+      this._reconnectNotBefore = null;
+      this._pendingReconnectNotice = null;
+      // Announced with the close, after the disconnect it follows.
+      this._pendingGaveUp = { attempts };
+      return;
+    }
+    const backoffDelay = decision.delayMs;
 
-    // Reconnect reservation: the actual scheduled delay is the max of the exponential backoff
+    // Reconnect reservation: the actual scheduled delay is the max of the backoff
     // and the remaining time until reconnectNotBefore
     const reservationDelay = this._reconnectNotBefore
       ? Math.max(0, this._reconnectNotBefore - Date.now())

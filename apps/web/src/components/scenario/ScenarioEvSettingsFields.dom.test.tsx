@@ -3,8 +3,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
-import type { EVSettings } from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
-import type { VehicleProfile } from "@ocpp-cp-sim/core/cp/domain/vehicle/VehicleProfile";
+import type { EVSettings } from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
+import type { VehicleProfile } from "@ocpp-cp-simulator/core/cp/domain/vehicle/VehicleProfile";
 import { DataContext } from "../../data/providers/DataProvider";
 import { createFakeChargePointService } from "../../console/test/harness";
 import ScenarioEvSettingsFields from "./ScenarioEvSettingsFields";

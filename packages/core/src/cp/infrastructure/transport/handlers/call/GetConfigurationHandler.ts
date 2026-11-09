@@ -2,7 +2,7 @@ import type { CallHandler, HandlerContext } from "../MessageHandlerRegistry";
 import type {
   GetConfigurationRequestV16,
   GetConfigurationResponseV16,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import type {
   ConfigurationValue,
   StringConfigurationValue,

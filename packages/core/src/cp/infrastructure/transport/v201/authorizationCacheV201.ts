@@ -1,7 +1,7 @@
 import type {
   IdTokenInfoType,
   IdTokenType,
-} from "@ocpp-cp-sim/ocpp/v201/types/authorize-response";
+} from "@ocpp-cp-simulator/ocpp/v201/types/authorize-response";
 import type { CsmsAuthorizationResult } from "../../../domain/auth/StationAuthorization";
 
 /**

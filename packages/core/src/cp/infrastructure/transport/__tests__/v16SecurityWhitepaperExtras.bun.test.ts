@@ -1,3 +1,4 @@
+import { SIGNING_CERTIFICATE } from "../../../domain/security/__tests__/signingCertificateFixture";
 import "reflect-metadata";
 import { describe, expect, it } from "bun:test";
 import * as x509 from "@peculiar/x509";
@@ -6,8 +7,8 @@ import type {
   DeleteCertificateResponseV16,
   GetInstalledCertificateIdsResponseV16,
   InstallCertificateResponseV16,
-} from "@ocpp-cp-sim/ocpp/index";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+} from "@ocpp-cp-simulator/ocpp/index";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import { computeCertificateHashData } from "../../../domain/security/certificateHash";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import { startMockCsms } from "./mockCsms";
@@ -64,7 +65,7 @@ describe.skipIf(!canBindBunServe())(
   () => {
     it("ExtendedTriggerMessage(Heartbeat) is accepted and fires a Heartbeat", async () => {
       const csms = startMockCsms();
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "CP016-XTM",
         DefaultBootNotification,
         1,
@@ -106,7 +107,7 @@ describe.skipIf(!canBindBunServe())(
 
     it("install → get → delete round-trips a root certificate over the wire", async () => {
       const csms = startMockCsms();
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "CP016-CERTMGMT",
         DefaultBootNotification,
         1,
@@ -185,7 +186,7 @@ describe.skipIf(!canBindBunServe())(
 
     it("answers a query and a delete sent right after an install as if it had completed", async () => {
       const csms = startMockCsms();
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "CP016-CERT-B2B",
         DefaultBootNotification,
         1,
@@ -268,7 +269,7 @@ describe.skipIf(!canBindBunServe())(
 
     it("GetLog is accepted and reports Uploading then Uploaded with requestId", async () => {
       const csms = startMockCsms();
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "CP016-GETLOG",
         DefaultBootNotification,
         1,
@@ -329,7 +330,7 @@ describe.skipIf(!canBindBunServe())(
 
     it("SignedUpdateFirmware is accepted and starts the Downloading train with requestId", async () => {
       const csms = startMockCsms();
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "CP016-SIGNEDFW",
         DefaultBootNotification,
         1,
@@ -357,8 +358,7 @@ describe.skipIf(!canBindBunServe())(
             firmware: {
               location: "http://example.invalid/firmware.bin",
               retrieveDateTime: new Date().toISOString(),
-              signingCertificate:
-                "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----",
+              signingCertificate: SIGNING_CERTIFICATE,
               signature: "deadbeef",
             },
           },

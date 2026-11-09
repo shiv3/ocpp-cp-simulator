@@ -1,16 +1,18 @@
+import DaemonSwitcher from "./components/DaemonSwitcher";
 import { useTranslation } from "react-i18next";
 import React, { useId, useState } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import {
   History,
+  Layers,
   PanelLeftClose,
   PanelLeftOpen,
-  PlugZap,
   Play,
   ScrollText,
   Settings as SettingsIcon,
   Zap,
 } from "lucide-react";
+import { ChargingStation } from "@evicons/react";
 import { cn } from "@/lib/utils";
 import { type MessageKey } from "../i18n";
 import { useDataContext } from "../data/providers/DataProvider";
@@ -28,7 +30,7 @@ import { GlobalLogsProvider } from "./lib/GlobalLogsProvider";
 interface NavItem {
   labelKey: MessageKey;
   to: string;
-  icon: React.ComponentType<{ className?: string }>;
+  icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
   isActive: (pathname: string) => boolean;
 }
 
@@ -39,7 +41,7 @@ const NAV_ITEMS: NavItem[] = [
   {
     labelKey: "common.nav.chargePoints",
     to: "/",
-    icon: PlugZap,
+    icon: ChargingStation,
     isActive: (pathname) => pathname === "/" || pathname.startsWith("/cp/"),
   },
   {
@@ -55,6 +57,12 @@ const NAV_ITEMS: NavItem[] = [
     to: "/scenarios/runs",
     icon: History,
     isActive: (pathname) => pathname.startsWith("/scenarios/runs"),
+  },
+  {
+    labelKey: "common.nav.fleets",
+    to: "/fleets",
+    icon: Layers,
+    isActive: (pathname) => pathname.startsWith("/fleets"),
   },
   {
     labelKey: "common.nav.messageLog",
@@ -188,6 +196,7 @@ const AppShell: React.FC = () => {
                   )}
                 >
                   <Icon
+                    strokeWidth={2}
                     className={cn(
                       "h-4 w-4 shrink-0",
                       active && "text-cx-accent",
@@ -254,6 +263,7 @@ const AppShell: React.FC = () => {
                 {serverUrl}
               </div>
             )}
+            {!collapsed && <DaemonSwitcher />}
           </div>
         </aside>
 

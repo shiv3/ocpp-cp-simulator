@@ -1,6 +1,6 @@
 import { describe, it, expect } from "bun:test";
 import { CLIChargePointService } from "../service";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import { completingScenario } from "./completingScenario";
 import { parkingScenario } from "./parkingScenario";
 import { testCpInit } from "./testCpInit";

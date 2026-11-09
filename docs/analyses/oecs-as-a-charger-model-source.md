@@ -14,7 +14,7 @@ related:
   - ../concepts/control-plane.md
   - fleet-load-and-observability-roadmap.md
   - ../sources/github-issues.md
-updated: 2026-11-05
+updated: 2026-11-08
 ---
 
 # OECS as a charger model source
@@ -149,7 +149,7 @@ maxValue, unit, readOnly, rebootRequired}`, which lines up with OCPP 1.6
 - **Provenance.** `blueprintSchema` has no `source`-shaped field, and Zod object
   parsing strips unknown keys, so an imported document's origin would be silently
   discarded today. The good news is that
-  [`BlueprintRepository`](../../packages/core/src/cp/domain/persistence/BlueprintRepository.ts)
+  [`BlueprintRepository`](../../packages/core/src/cp/infrastructure/persistence/BlueprintRepository.ts)
   stores the definition as a JSON blob validated only at the control-plane
   boundary — adding fields needs a `blueprintSchema` change but **no SQLite
   migration**.
@@ -229,8 +229,8 @@ per-connector block with no reader is a record pretending to be a description.
 Fable said a minimal `hardware.connectors[]` **together with the reader that
 makes it real**, because without it an imported AC wallbox and an imported DC
 charger differ only in a connector count, which is the failure the issue exists
-to prevent. Put to Codex directly with the code (`derivedInstantaneousPowerW`
-is a `Math.min` over the EV limit and the schedule limit; Q4 already commits
+to prevent. Put to Codex directly with the code (the former `derivedInstantaneousPowerW`,
+now `resolveOperatingPoint`, is a `Math.min` over the EV limit and the schedule limit; Q4 already commits
 this issue to a charger-side power field and its reader), **Codex conceded**:
 its rule was "no hardware without a reader", not "no hardware", and given Q4 an
 identity-only importer is an artificial boundary.
@@ -249,26 +249,28 @@ The agreed first slice:
   `ChargePointInitOptions` + the `charge_points` table, the runtime `Connector`;
 - **one** authoritative effective-limit calculation,
   `min(EV acceptance, connector delivery, active schedule)`, used by every
-  consumer. This is more than one extra term in `derivedInstantaneousPowerW`,
-  and the two readers **do not share the entry point the first draft named**:
-
-  - **Reported power** — `MeterValueBuilder` calls
-    `connector.scheduleConstraints()`, which resolves against its own instant
-    and never goes through `currentScheduleLimitWatts()`.
-  - **Delivered energy** — `MeterValueScheduler` calls
-    `getScheduleLimitWatts()`, wired to `effectiveMeterCapWatts()`, which
-    _does_ call `currentScheduleLimitWatts()`.
-
-  So a cap added in `currentScheduleLimitWatts()` would narrow the register and
-  leave the reported `Power.Active.Import` unbounded — the exact
-  telemetry-contradicts-register failure this bullet exists to prevent, with the
-  sign flipped. The one point both paths already pass through is the private
-  **`Connector.resolveScheduleConstraints(now)`**, which both callers invoke
-  directly; that is where the hardware cap belongs, and a test asserting the two
-  readers agree under a cap is what keeps it there;
+  consumer. Since #327 steps 1–2 that calculation is a single record:
+  `Connector.operatingPoint()` (pure; the tick owners announce a schedule
+  crossing) resolves the schedule limit and phase count from
+  one instant and hands `MeterValueScheduler` (`accumulationCapW`) and
+  `MeterValueBuilder` (`acceptedW`, `offeredW`, currents) the **same** result,
+  through the pure `resolveOperatingPoint()` in
+  `packages/core/src/cp/domain/connector/OperatingPoint.ts`. A charger-side cap
+  is one more term in that function, so it narrows the energy register and the
+  reported `Power.Active.Import` together. Before #327 the two readers did not
+  share an entry point — the builder went through `scheduleConstraints()` and
+  the scheduler through `effectiveMeterCapWatts()` →
+  `currentScheduleLimitWatts()` — so a cap added to the latter would have
+  narrowed only the register. `OperatingPoint.agreement.test.ts` keeps it that
+  way;
 
 - the built-ins' ratings moved out of `evSettings.maxChargingPowerKw` in the
-  same change as the cap, before the importer commit.
+  same change as the cap, before the importer commit. **Done (#327, PR C):**
+  `chargerCapabilities` is a `cp.create` parameter (so a blueprint's `params`
+  carries it), a `charge_points.charger_capabilities` column (schema v31) and
+  `Connector.maxDeliveryPowerW`; `boundW` is its one reader. The blueprint
+  `schemaVersion` step stays the importer's own preceding change, so an older
+  daemon still strips the field from a blueprint it reads.
 
 Deferred until a reader exists: connector `type`, `currentType`, `phases`,
 voltage / current limits, configuration seeding, feature-profile reporting or

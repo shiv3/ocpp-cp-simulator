@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
-import { dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { compile } from "json-schema-to-typescript";
@@ -254,6 +254,61 @@ export const schemas: {
   v16: v16Schemas,
   v201: v201Schemas,
   v21: v21Schemas,
+};`,
+  );
+}
+
+async function writeSchemaSources(
+  specsByVersion: Map<Version, MessageSpec[]>,
+): Promise<void> {
+  // The raw text of every vendored file, exactly as it is on disk (#613): the
+  // MCP resources serve these strings, because the OCA schemas are CC BY-ND
+  // and must be redistributed byte for byte, which a parsed and re-serialized
+  // object is not. The URI parts come from the file name, the same way the
+  // type names above do.
+  const sections: string[] = [];
+
+  for (const version of versions) {
+    const specs = specsByVersion.get(version) ?? [];
+    const entries: string[] = [];
+
+    for (const spec of specs) {
+      const text = await readFile(spec.sourcePath, "utf8");
+
+      entries.push(`  {
+    action: ${JSON.stringify(spec.action)},
+    direction: ${JSON.stringify(spec.kind === "Request" ? "request" : "response")},
+    fileName: ${JSON.stringify(basename(spec.sourcePath))},
+    text: ${JSON.stringify(text)},
+  },`);
+    }
+
+    sections.push(`  ${version}: [\n${entries.join("\n")}\n  ],`);
+  }
+
+  const notice = await readFile(join(vendorDir, "NOTICE"), "utf8");
+
+  await writeGenerated(
+    join(outputDir, "schemaSources.ts"),
+    `${generatedHeader}export interface OcppSchemaSource {
+  /** OCPP action name, e.g. \`BootNotification\`. */
+  action: string;
+  direction: "request" | "response";
+  /** File name under packages/ocpp/vendor/ocpp-schemas/<version>/. */
+  fileName: string;
+  /** The file's bytes, as text, unmodified. */
+  text: string;
+}
+
+/** Verbatim text of packages/ocpp/vendor/ocpp-schemas/NOTICE. */
+export const schemaNotice: string = ${JSON.stringify(notice)};
+
+export const schemaSources: {
+  v16: OcppSchemaSource[];
+  v201: OcppSchemaSource[];
+  v21: OcppSchemaSource[];
+} = {
+${sections.join("\n")}
 };`,
   );
 }
@@ -693,6 +748,7 @@ async function main(): Promise<void> {
   }
 
   await writeSchemaAggregate();
+  await writeSchemaSources(specsByVersion);
   await writeValidateModule();
   await writeEnumsModule();
   await writeRootIndex();

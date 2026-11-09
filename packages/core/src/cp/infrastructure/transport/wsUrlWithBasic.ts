@@ -4,12 +4,14 @@
  * many CSMS implementations accept (e.g. `ocpp_ws_secret`). CLI runtimes (Bun
  * / Node `ws`) send the credentials as a real HTTP Basic header instead.
  */
+import type { WsClientOptions } from "../../shared/WsClientOptions";
 import {
   OCPP_WEBSOCKET_PROTOCOL_16,
   OCPP_WEBSOCKET_PROTOCOL_201,
   ocppVersionToSubprotocol,
 } from "./profile/subprotocols";
-import type { OcppSecurityProfile } from "@ocpp-cp-sim/contracts/securityProfile";
+import type { OcppSecurityProfile } from "@ocpp-cp-simulator/contracts/securityProfile";
+import type { OcppTlsOptions } from "../../domain/transport/ConnectionSecurity";
 
 export {
   OCPP_WEBSOCKET_PROTOCOL_16,
@@ -19,15 +21,7 @@ export {
 
 export const OCPP_BROWSER_WS_SECRET_QUERY_PARAM = "ocpp_ws_secret";
 
-export type { OcppSecurityProfile };
-
-export interface OcppTlsOptions {
-  readonly ca?: string;
-  readonly cert?: string;
-  readonly key?: string;
-  readonly rejectUnauthorized?: boolean;
-  readonly serverName?: string;
-}
+export type { OcppSecurityProfile, OcppTlsOptions };
 
 export interface BasicAuthSettings {
   username: string;
@@ -140,7 +134,15 @@ export function buildOcppWebSocketUrl(params: {
       params.basicAuth.password,
     );
   }
-  url.pathname += params.chargePointId;
+  // OCPP-J 1.6 §3.1.1: the identity is appended to the endpoint URL and "has
+  // to be percent-encoded as necessary as described in [RFC3986]". The `/`
+  // between endpoint and identity belongs here, so every caller (CLI, daemon,
+  // web console) gets the same URL whether or not its endpoint ends in `/`.
+  // encodeURIComponent keeps an identity containing `/`, `%`, `?` or `#` in one
+  // path segment; the URL parser would leave a `/` as a separator and a `%`
+  // raw. The Basic Auth username stays the unencoded identity.
+  if (!url.pathname.endsWith("/")) url.pathname += "/";
+  url.pathname += encodeURIComponent(params.chargePointId);
   return url.toString();
 }
 
@@ -198,6 +200,8 @@ type WebSocketWithHeaders = new (
     protocols?: string | string[];
     headers?: Record<string, string>;
     tls?: OcppTlsOptions;
+    perMessageDeflate?: boolean;
+    proxy?: string;
   },
 ) => WebSocket;
 
@@ -237,6 +241,9 @@ type NodeWsConstructor = new (
     key?: string;
     rejectUnauthorized?: boolean;
     servername?: string;
+    perMessageDeflate?: boolean;
+    maxPayload?: number;
+    localAddress?: string;
   },
 ) => NodeWsLike;
 
@@ -254,10 +261,12 @@ export interface OcppWebSocketConnectOptions {
   readonly protocols: ReadonlyArray<string>;
   readonly headers: Record<string, string>;
   readonly tls?: OcppTlsOptions;
+  /** #611: the client options the runtime must honour at the handshake. */
+  readonly ws?: WsClientOptions;
   readonly useNodeWsFallback: boolean;
 }
 
-function isBunRuntime(): boolean {
+export function isBunRuntime(): boolean {
   return (
     typeof globalThis !== "undefined" &&
     typeof (globalThis as { Bun?: unknown }).Bun !== "undefined"
@@ -379,6 +388,7 @@ export function buildOcppWebSocketConnectOptions(params: {
   securityProfile?: OcppSecurityProfile;
   authorizationKey?: string;
   tls?: OcppTlsOptions;
+  ws?: WsClientOptions;
   warn?: (message: string) => void;
 }): OcppWebSocketConnectOptions {
   const basicAuth = resolveBasicAuth(params);
@@ -418,6 +428,7 @@ export function buildOcppWebSocketConnectOptions(params: {
     protocols,
     headers,
     tls,
+    ...(params.ws ? { ws: params.ws } : {}),
     useNodeWsFallback:
       isNodeRuntime() && !isBunRuntime() && !isBrowserRuntime(),
   };
@@ -522,6 +533,9 @@ export async function probeUpgradeRefusal(
       // Same trust decisions as the handshake: a private-CA station whose
       // probe verified against the public roots would report a lie.
       ...(options.tls ? { tls: options.tls } : {}),
+      // #611: through the same proxy, or the probe would answer for a path
+      // the handshake did not take (Bun's fetch honours `proxy`).
+      ...(options.ws?.proxy ? { proxy: options.ws.proxy } : {}),
     } as RequestInit);
     const location = response.headers.get("location");
     return {
@@ -674,12 +688,13 @@ class DeferredNodeWebSocket {
     headers: Record<string, string>,
     tls: OcppTlsOptions | undefined,
     handlers: OcppWebSocketEventHandlers = {},
+    wsOptions: WsClientOptions | undefined = undefined,
   ) {
     this.onopen = handlers.onopen ?? null;
     this.onmessage = handlers.onmessage ?? null;
     this.onerror = handlers.onerror ?? null;
     this.onclose = handlers.onclose ?? null;
-    void this.connect(url, protocols, headers, tls);
+    void this.connect(url, protocols, headers, tls, wsOptions);
   }
 
   get onerror(): ((event: Event) => void) | null {
@@ -727,6 +742,7 @@ class DeferredNodeWebSocket {
     protocols: ReadonlyArray<string>,
     headers: Record<string, string>,
     tls: OcppTlsOptions | undefined,
+    wsOptions: WsClientOptions | undefined,
   ): Promise<void> {
     try {
       const wsModule = (await import(/* @vite-ignore */ "ws")) as unknown as {
@@ -747,6 +763,16 @@ class DeferredNodeWebSocket {
           : {}),
         ...(tls?.serverName !== undefined
           ? { servername: tls.serverName }
+          : {}),
+        // #611: `ws` honours all three (measured); the proxy it cannot.
+        ...(wsOptions?.perMessageDeflate !== undefined
+          ? { perMessageDeflate: wsOptions.perMessageDeflate }
+          : {}),
+        ...(wsOptions?.maxPayloadBytes !== undefined
+          ? { maxPayload: wsOptions.maxPayloadBytes }
+          : {}),
+        ...(wsOptions?.localAddress !== undefined
+          ? { localAddress: wsOptions.localAddress }
           : {}),
       });
       socket.on("error", (error) => {
@@ -876,6 +902,21 @@ class DeferredNodeWebSocket {
   }
 }
 
+/** The options Bun's native client takes in its constructor (#611). */
+function bunOnlyOptions(
+  ws: WsClientOptions | undefined,
+): { perMessageDeflate?: boolean; proxy?: string } | undefined {
+  if (!ws || (ws.perMessageDeflate === undefined && ws.proxy === undefined)) {
+    return undefined;
+  }
+  return {
+    ...(ws.perMessageDeflate !== undefined
+      ? { perMessageDeflate: ws.perMessageDeflate }
+      : {}),
+    ...(ws.proxy !== undefined ? { proxy: ws.proxy } : {}),
+  };
+}
+
 export function openOcppWebSocket(params: {
   baseUrl: string;
   chargePointId: string;
@@ -896,6 +937,9 @@ export function openOcppWebSocket(params: {
   authorizationKey?: string;
   cpoName?: string;
   tls?: OcppTlsOptions;
+  /** #611: handshake/compression/payload/proxy/local-address options. The
+   *  caller has already checked the runtime supports them. */
+  ws?: WsClientOptions;
   warn?: (message: string) => void;
   /** #288: hands back the options this handshake is about to use, so a later
    *  refusal probe replays the same request instead of a reconstruction of it. */
@@ -921,14 +965,17 @@ export function openOcppWebSocket(params: {
       connectOptions.headers,
       connectOptions.tls,
       handlers,
+      connectOptions.ws,
     ) as unknown as OcppSocket;
   }
-  if (!isBrowserRuntime() && (hasHeaders || connectOptions.tls)) {
+  const bunOptions = bunOnlyOptions(connectOptions.ws);
+  if (!isBrowserRuntime() && (hasHeaders || connectOptions.tls || bunOptions)) {
     return new BufferedErrorWebSocket(
       new (WebSocket as unknown as WebSocketWithHeaders)(connectOptions.url, {
         protocols: [...connectOptions.protocols],
         ...(hasHeaders ? { headers: connectOptions.headers } : {}),
         ...(connectOptions.tls ? { tls: connectOptions.tls } : {}),
+        ...bunOptions,
       }),
       handlers,
     ) as unknown as OcppSocket;

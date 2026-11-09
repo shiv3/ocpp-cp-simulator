@@ -1,4 +1,4 @@
-import type { ChargePointService } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+import type { ChargePointService } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 
 /** #240: what an operator can do with a run's parked wait. */
 export type WaitControlAction = "extend" | "retry" | "continue";

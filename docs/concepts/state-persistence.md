@@ -60,16 +60,27 @@ The store follows the layer direction of `packages/core/src/cp/`
 ([Overview → What goes where](../overview.md#what-goes-where-in-packagescoresrc),
 [#573](https://github.com/shiv3/ocpp-cp-simulator/issues/573)):
 
-- **Ports, in `domain/persistence/`** — `Database` (the SQL handle that domain
-  stores such as `CertificateStore` and `AuthorizationCache` write through),
+- **Ports, in `domain/persistence/`** — `Database` (the SQL handle the
+  infrastructure repositories are built on; no domain store uses it,
+  [#878](https://github.com/shiv3/ocpp-cp-simulator/issues/878)),
   `ChargingSessionRepository`, `ConnectorRuntimeRepository` and
-  `EngineStateRepository`, and `LogSink`, where a charge point persists its
-  log entries.
+  `EngineStateRepository`, `LogSink`, where a charge point persists its log
+  entries, and the per-charge-point repositories bundled in
+  `ChargePointRepositories` (#878): `AuthorizationCacheRepository`,
+  `CertificateRepository`, `ConfigurationOverrideRepository`,
+  `ConnectorSettingsRepository` (availability), `PendingMessageRepository`
+  and `VariableMonitorRepository`. Each is bound to one charge point and
+  throws on failure; the domain store that owns the state (`AuthorizationCache`,
+  `CertificateStore`, `ConfigurationStore`, `PendingMessageQueue`, …) catches
+  and logs, as before. A charge point without a database gets `Noop*`
+  repositories: its state lives in memory only.
 - **Scenario ports, in `application/`** — `scenario/ScenarioRepository.ts` and
   `verification/ScenarioRunRepository.ts`; no domain code uses them.
 - **SQLite, in `infrastructure/persistence/`** — `BunSqliteDatabase` (the
   daemon's `bun:sqlite` handle), `schema.ts` with `migrations/`, the `Sqlite*`
-  repositories and their `create*Repository` factories,
+  repositories and their `create*Repository` factories
+  (`createChargePointRepositories` builds a charge point's bundle, which
+  `createChargePoint` injects through `ChargePointDeps.repositories`),
   `BlueprintRepository`, `FleetTemplateRepository`,
   `VehicleProfileRepository`, `upsert.ts`, `resetState.ts` and
   `LogRepository`, the default `LogSink`: `createChargePoint` builds one per

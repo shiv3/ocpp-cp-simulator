@@ -6,6 +6,7 @@ sources:
   - README.md (Security Profiles section, PR #97 / issue #94)
   - apps/cli/src/
   - packages/core/src/cp/domain/security/CertificateStore.ts (certificate store, issue #456)
+  - packages/core/src/cp/infrastructure/persistence/SqliteCertificateRepository.ts (`certificates` table, issue #878)
   - packages/core/src/cp/infrastructure/transport/certificateUseMapping.ts (certificate-use mapping, issue #456)
   - packages/core/src/cp/infrastructure/transport/v201/certificatesV201.ts (2.x certificate handlers, issue #456)
   - packages/core/src/cp/domain/security/SignCertificateBackoff.ts (A02.FR.17-19 resend back-off, issue #537)
@@ -809,7 +810,8 @@ ids are the 2.0.1 and 2.1 Part 2 ones unless marked.
 ### Persistence
 
 With [state persistence](state-persistence.md) on, trust anchors and signed
-chains survive a restart (`certificates` table, schema v18). Pending CSRs do
+chains survive a restart (`certificates` table, schema v18, written through
+the store's `CertificateRepository`, #878). Pending CSRs do
 not: the key pair behind a CSR is gone after a restart, and neither does the
 A02.FR.17 resend back-off; a CSMS gets a new CSR through `TriggerMessage`.
 The private key of an accepted chain is gone too, so a profile-3 station

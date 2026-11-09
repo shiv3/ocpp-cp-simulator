@@ -6,7 +6,7 @@ import { createEmptyScenario, insertStep } from "../../../lib/scenarioSteps";
 import {
   ScenarioNodeType,
   type ScenarioDefinition,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import {
   createFakeChargePointService,
   flush,

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { useDataContext } from "@/data/providers/DataProvider";
-import type { ChargePointEvent } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+import type { ChargePointEvent } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 
 /** One meter reading: when the console saw it, and the register in Wh. */
 export interface PowerSample {

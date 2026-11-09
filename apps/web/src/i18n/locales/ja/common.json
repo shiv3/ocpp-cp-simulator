@@ -7,6 +7,7 @@
   "common.nav.chargePoints": "充電器",
   "common.nav.scenarios": "シナリオ",
   "common.nav.runHistory": "実行履歴",
+  "common.nav.fleets": "フリートテンプレート",
   "common.nav.messageLog": "メッセージログ",
   "common.nav.settings": "設定",
   "common.sidebar.expand": "サイドバーを開く",
@@ -105,5 +106,19 @@
   "common.catalog.notConfiguredLocal": "先に Open EV Directory の URL を入力してください。",
   "common.catalog.notConfiguredRemote": "デーモンで車両インポートが無効になっています (--oed-base-url none または OED_BASE_URL=none)。",
   "common.payloadCondition": "ペイロード条件",
-  "common.dialog.close": "閉じる"
+  "common.dialog.close": "閉じる",
+  "common.daemon.select": "デーモン",
+  "common.daemon.origin": "このサーバー ({{url}})",
+  "common.daemon.switching": "切り替え中…",
+  "common.daemon.switchFailed": "{{url}} に切り替えられませんでした。直前のデーモンのままです。",
+  "common.daemon.invalid": "認証情報を含まない http(s) アドレスを入力してください。",
+  "common.daemon.duplicate": "このアドレスは保存済みです。",
+  "common.daemon.full": "保存できるデーモンの数の上限です。",
+  "common.daemon.addressLabel": "デーモンのアドレス",
+  "common.daemon.nameLabel": "名前",
+  "common.daemon.namePlaceholder": "名前(任意)",
+  "common.daemon.saveAndSwitch": "保存して切り替え",
+  "common.daemon.cancel": "キャンセル",
+  "common.daemon.add": "デーモンを追加",
+  "common.daemon.forget": "削除"
 }

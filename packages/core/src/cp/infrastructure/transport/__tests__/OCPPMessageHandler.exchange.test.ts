@@ -67,6 +67,9 @@ function setup() {
     configuration: {
       transactionMessageAttempts: () => 3,
       meterValuesSampledData: () => [],
+      stopTxnSampledData: () => [],
+      stopTxnAlignedData: () => [],
+      txStartedMeasurands: () => [],
     },
     notifyIncomingCall: vi.fn(),
     notifyIncomingCallCompleted: (c: unknown) => completions.push(c),

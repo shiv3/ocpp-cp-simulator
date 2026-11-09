@@ -9,10 +9,10 @@ import type { ScenarioRunResult } from "../../application/verification/ScenarioA
 import {
   SCENARIO_RUN_EXECUTION_STATES,
   SCENARIO_VERDICTS,
-} from "@ocpp-cp-sim/contracts/scenario";
+} from "@ocpp-cp-simulator/contracts/scenario";
 import { DEFAULT_AUTHORIZATION_CACHE_MAX_ENTRIES } from "../../domain/auth/AuthorizationCache";
-import { AUTHORIZATION_CACHE_SEED_MAX } from "@ocpp-cp-sim/contracts/authorization";
-import { STOP_TRANSACTION_REASON_VALUES } from "@ocpp-cp-sim/contracts/transactionVocabulary";
+import { AUTHORIZATION_CACHE_SEED_MAX } from "@ocpp-cp-simulator/contracts/authorization";
+import { STOP_TRANSACTION_REASON_VALUES } from "@ocpp-cp-simulator/contracts/transactionVocabulary";
 
 describe("protocol vocabularies match the charge-point types", () => {
   it("scenario verdicts", () => {

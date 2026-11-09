@@ -1,7 +1,7 @@
 // Runs under `bun test` because it uses the `bun:sqlite` built-in.
 import { describe, expect, it } from "bun:test";
 
-import { BunSqliteDatabase } from "../../persistence/BunSqliteDatabase";
+import { BunSqliteDatabase } from "../../../infrastructure/persistence/BunSqliteDatabase";
 import { makeChargePoint } from "./chargePointFixtures";
 
 /**

@@ -6,7 +6,7 @@ import { RefreshCw } from "lucide-react";
 import type {
   TimelineEntry,
   TimelineKind,
-} from "@ocpp-cp-sim/core/cp/application/services/OperationalTimeline";
+} from "@ocpp-cp-simulator/core/cp/application/services/OperationalTimeline";
 import { cn } from "@/lib/utils";
 
 import EmptyState from "../../components/EmptyState";
@@ -22,16 +22,20 @@ type Tone = "fault" | "recovery" | "connection" | "neutral";
 
 const TONE_BY_KIND: Partial<Record<TimelineKind, Tone>> = {
   network_fault_injected: "fault",
+  power_lost: "fault",
+  power_restored: "recovery",
   disconnected: "fault",
   authorization_rejected: "fault",
   transaction_rejected: "fault",
   transaction_message_rejected: "fault",
   transaction_message_discarded: "fault",
+  gave_up: "fault",
   scenario_error: "fault",
   recovery_completed: "recovery",
   connected: "connection",
   reconnecting: "connection",
   boot_notification: "connection",
+  reconnected_without_boot: "connection",
 };
 
 const TONE_CLASS: Record<Tone, string> = {

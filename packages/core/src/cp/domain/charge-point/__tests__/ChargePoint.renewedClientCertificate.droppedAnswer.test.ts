@@ -1,7 +1,8 @@
 import "reflect-metadata";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ChargePoint } from "../ChargePoint";
+import type { ChargePoint } from "../ChargePoint";
+import { createChargePoint } from "../../../infrastructure/charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../types/OcppTypes";
 import {
   leafForCsr,
@@ -94,7 +95,7 @@ async function until(done: () => boolean): Promise<void> {
 }
 
 function station(version: string): ChargePoint {
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     "CP-DROPPED",
     DefaultBootNotification,
     1,

@@ -380,6 +380,72 @@ describe("runAnalyze (integration, real @ocpp-debugkit/toolkit)", () => {
     expect(content).not.toContain("CP-201");
   });
 
+  it("reports records that break the trace format as invalid records on stderr (#886)", async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "analyze-invalid-"));
+    const tracePath = path.join(dir, "trace.jsonl");
+    const outPath = path.join(dir, "report.md");
+
+    const lines = [
+      rec("CP001", {
+        timestamp: "2026-01-01T00:00:00.000Z",
+        direction: "cp-to-csms",
+        messageType: "CALL",
+        messageId: "1",
+        action: "Heartbeat",
+        payload: {},
+      }),
+      // No timestamp: JSON, but not a valid trace record.
+      rec("CP001", {
+        direction: "csms-to-cp",
+        messageType: "CALLRESULT",
+        messageId: "1",
+        payload: {},
+      }),
+      "this is not json",
+    ];
+    fs.writeFileSync(tracePath, lines.join("\n") + "\n");
+
+    const { result: code, stderr } = await withCapturedIo(() =>
+      runAnalyze({ file: tracePath, output: outPath }),
+    );
+
+    expect(code).toBe(0);
+    expect(stderr).toContain(
+      "excluded: 0 soap record(s), 0 non-1.6 record(s), 1 unparseable line(s), 1 invalid record(s)",
+    );
+  });
+
+  it("reports the exclusion counts before failing on a trace with nothing left to analyze", async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "analyze-all-excluded-"));
+    const tracePath = path.join(dir, "trace.jsonl");
+
+    const lines = [
+      // No timestamp: JSON, but not a valid trace record.
+      rec("CP001", {
+        direction: "cp-to-csms",
+        messageType: "CALL",
+        messageId: "1",
+        action: "Heartbeat",
+        payload: {},
+      }),
+      "this is not json",
+    ];
+    fs.writeFileSync(tracePath, lines.join("\n") + "\n");
+
+    const { result: code, stderr } = await withCapturedIo(() =>
+      runAnalyze({ file: tracePath }),
+    );
+
+    expect(code).toBe(1);
+    expect(stderr).toContain(
+      "excluded: 0 soap record(s), 0 non-1.6 record(s), 1 unparseable line(s), 1 invalid record(s)",
+    );
+    expect(stderr).toContain("Error: no analyzable records found");
+    expect(stderr.indexOf("excluded:")).toBeLessThan(
+      stderr.indexOf("Error: no analyzable records found"),
+    );
+  });
+
   it("returns exit code 1 and an error on stderr when the trace file is missing", async () => {
     const { result: code, stderr } = await withCapturedIo(() =>
       runAnalyze({ file: "/nonexistent/does-not-exist.jsonl" }),

@@ -16,7 +16,7 @@ afterEach(() => {
 });
 
 const source = (id: string, marker: string): string => `
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
 const behavior: Behavior = { api: 1, id: ${JSON.stringify(id)}, onCall: { Reset: { mode: "replace", handle: () => ({ response: { status: ${JSON.stringify(marker)} } }) } } };
 export default behavior;
 `;

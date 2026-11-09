@@ -1,5 +1,6 @@
 import { McpServer, StreamableHttpTransport } from "mcp-lite";
 import { z } from "zod";
+import { registerSchemaResources } from "./schemaResources";
 import { registerTools } from "./tools";
 import type { RuntimeSocketIoDeps } from "../socketServer";
 import { appVersion } from "../../appVersion";
@@ -22,6 +23,7 @@ export function createMcpHandler(
   });
 
   registerTools(mcp, deps);
+  registerSchemaResources(mcp);
 
   const transport = new StreamableHttpTransport();
   return transport.bind(mcp);

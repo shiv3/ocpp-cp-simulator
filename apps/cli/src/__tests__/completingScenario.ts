@@ -2,7 +2,7 @@ import {
   ScenarioNodeType,
   type AssertionSpec,
   type ScenarioDefinition,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 
 /**
  * Test fixture: start → meterValue (not sent) → end, on `connectorId`. It

@@ -4,10 +4,10 @@ import {
   CLIChargePointService,
   shouldReleaseEvSettingsOverride,
 } from "../service";
-import type { ScenarioDefinition } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import { ScenarioNodeType } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import type { EVSettings } from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
-import { getDefaultEVSettings } from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
+import type { ScenarioDefinition } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import { ScenarioNodeType } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import type { EVSettings } from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
+import { getDefaultEVSettings } from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
 import { testCpInit } from "./testCpInit";
 
 /**

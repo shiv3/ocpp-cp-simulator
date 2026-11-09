@@ -1,6 +1,6 @@
 // apps/cli/src/exportK6/__tests__/wire16.test.ts
 import { describe, expect, it } from "vitest";
-import { wire16 } from "@ocpp-cp-sim/k6-runtime/wire/v16";
+import { wire16 } from "@ocpp-cp-simulator/k6-runtime/wire/v16";
 
 const NOW = "2026-07-29T00:00:00.000Z";
 

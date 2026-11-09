@@ -2,8 +2,11 @@ import { useTranslation } from "react-i18next";
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { Save, X } from "lucide-react";
 import { buildFullOcppUrl } from "../utils/ocppUrl";
-import { BROWSER_TLS_UNSUPPORTED_MESSAGE } from "@ocpp-cp-sim/client/interfaces/UnsupportedFeatureError";
-import { isSoapVersion } from "@ocpp-cp-sim/core/cp/domain/types/OcppVersion";
+import { BROWSER_TLS_UNSUPPORTED_MESSAGE } from "@ocpp-cp-simulator/client/interfaces/UnsupportedFeatureError";
+import {
+  isOcpp2Version,
+  isSoapVersion,
+} from "@ocpp-cp-simulator/core/cp/domain/types/OcppVersion";
 import {
   adaptCentralSystemUrlScheme,
   adaptOcppUrlSecurity,
@@ -12,7 +15,7 @@ import {
   classifyBasicAuthSource,
   type OcppSecurityProfile,
   type OcppTlsOptions,
-} from "@ocpp-cp-sim/core/cp/infrastructure/transport/wsUrlWithBasic";
+} from "@ocpp-cp-simulator/core/cp/infrastructure/transport/wsUrlWithBasic";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import {
@@ -848,6 +851,29 @@ const ChargePointConfigForm: React.FC<ChargePointConfigFormProps> = ({
           </p>
         )}
 
+        {/* #550: OCPP 2.x only; 1.x ignores the option. */}
+        {isOcpp2Version(config.ocppVersion) && (
+          <div className="mb-4">
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="txUpdatedMeterValues"
+                checked={config.txUpdatedMeterValues === true}
+                onCheckedChange={(checked) =>
+                  updateConfig("txUpdatedMeterValues", checked === true)
+                }
+              />
+              <Label
+                htmlFor="txUpdatedMeterValues"
+                className="text-[13px] font-normal text-cx-fg2 dark:text-cx-fg2"
+              >
+                {t("settings.form.txUpdatedMeterValues")}
+              </Label>
+            </div>
+            <p className={HINT_CLASS}>
+              {t("settings.form.txUpdatedMeterValuesHint")}
+            </p>
+          </div>
+        )}
         {/* Auto Meter */}
         <div>
           <div className="flex items-center gap-2">

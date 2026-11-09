@@ -1,4 +1,4 @@
-import type { BootNotification } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import type { BootNotification } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 
 export interface Config {
   wsURL: string;
@@ -6,6 +6,8 @@ export interface Config {
   connectorNumber: number;
   tagID: string;
   ocppVersion: string;
+  /** #550: shared by every browser charge point; absent means off. */
+  txUpdatedMeterValues?: boolean;
   basicAuthSettings: BasicAuthSettings;
   autoMeterValueSetting: AutoMeterValueSetting;
   Experimental: Experimental | null;

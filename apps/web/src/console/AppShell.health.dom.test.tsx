@@ -3,7 +3,7 @@ import { act } from "react";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { createFakeChargePointService, renderConsole } from "./test/harness";
-import type { RemoteConnectionState } from "@ocpp-cp-sim/client/remote/RemoteChargePointService";
+import type { RemoteConnectionState } from "@ocpp-cp-simulator/client/remote/RemoteChargePointService";
 
 /** A fake service that reports a daemon connection state, as
  *  `RemoteChargePointService` does. */

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ChargePoint } from "../ChargePoint";
+import { createChargePoint } from "../../../infrastructure/charge-point/createChargePoint";
 import type { BootNotification } from "../../types/OcppTypes";
 import { DefaultBootNotification } from "../../types/OcppTypes";
 
@@ -8,7 +8,7 @@ const bootNotification: BootNotification = DefaultBootNotification;
 describe("ChargePoint.networkSimClose — drain-before-teardown ordering", () => {
   describe("disconnect() drains before teardown", () => {
     it("WebSocket CP: disconnect() calls socket.disconnect first, then teardownAfterClose", () => {
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "test-cp-ws",
         bootNotification,
         1,
@@ -54,7 +54,7 @@ describe("ChargePoint.networkSimClose — drain-before-teardown ordering", () =>
     });
 
     it("SOAP CP: disconnect() skips socket disconnect", () => {
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "test-cp-soap",
         bootNotification,
         1,
@@ -91,7 +91,7 @@ describe("ChargePoint.networkSimClose — drain-before-teardown ordering", () =>
 
   describe("reset() uses cause-aware internal reset for WebSocket", () => {
     it("WebSocket CP: reset() calls disconnectInternal, not the operator disconnect", () => {
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "test-cp-ws-reset",
         bootNotification,
         1,
@@ -138,7 +138,7 @@ describe("ChargePoint.networkSimClose — drain-before-teardown ordering", () =>
     });
 
     it("SOAP CP: reset() falls back to disconnect() + connect()", () => {
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "test-cp-soap-reset",
         bootNotification,
         1,
@@ -179,7 +179,7 @@ describe("ChargePoint.networkSimClose — drain-before-teardown ordering", () =>
 
   describe("dispose() shuts down and tears down", () => {
     it("WebSocket CP: dispose() calls socket.dispose and teardownAfterClose", () => {
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "test-cp-ws-dispose",
         bootNotification,
         1,
@@ -213,7 +213,7 @@ describe("ChargePoint.networkSimClose — drain-before-teardown ordering", () =>
     });
 
     it("SOAP CP: dispose() only tears down (no socket dispose)", () => {
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "test-cp-soap-dispose",
         bootNotification,
         1,
@@ -247,7 +247,7 @@ describe("ChargePoint.networkSimClose — drain-before-teardown ordering", () =>
 
   describe("network-sim config forwarding", () => {
     it("setNetworkSimConfig forwards to socket for WebSocket CP", () => {
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "test-cp-ws-config",
         bootNotification,
         1,
@@ -276,7 +276,7 @@ describe("ChargePoint.networkSimClose — drain-before-teardown ordering", () =>
     });
 
     it("setNetworkSimConfig is a no-op for SOAP CP", () => {
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "test-cp-soap-config",
         bootNotification,
         1,
@@ -302,7 +302,7 @@ describe("ChargePoint.networkSimClose — drain-before-teardown ordering", () =>
 
   describe("network-sim disconnect trigger", () => {
     it("WebSocket CP: triggerNetworkSimDisconnect forwards to socket", () => {
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "test-cp-ws-trigger",
         bootNotification,
         1,
@@ -328,7 +328,7 @@ describe("ChargePoint.networkSimClose — drain-before-teardown ordering", () =>
     });
 
     it("WebSocket CP: triggerNetworkSimDisconnect forwards error responses from socket", () => {
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "test-cp-ws-trigger-error",
         bootNotification,
         1,
@@ -354,7 +354,7 @@ describe("ChargePoint.networkSimClose — drain-before-teardown ordering", () =>
     });
 
     it("SOAP CP: triggerNetworkSimDisconnect returns not_connected", () => {
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "test-cp-soap-trigger",
         bootNotification,
         1,

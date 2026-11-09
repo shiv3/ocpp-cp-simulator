@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   defaultAutoTrafficConfig,
   type AutoTrafficConfig,
+  type AutoTrafficVehicle,
 } from "../../../domain/connector/AutoTraffic";
 import { AutoTrafficRunner, type AutoTrafficHooks } from "../AutoTrafficRunner";
 
@@ -50,6 +51,25 @@ async function advance(ms: number): Promise<void> {
 describe("AutoTrafficRunner (#300)", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
+
+  it("leaves a session open while the station has no power and stops it once power returns (#798)", async () => {
+    let off = false;
+    const h = hooks({ poweredOff: () => off });
+    const runner = new AutoTrafficRunner(CONFIG, "CP1", 1, h);
+    runner.start();
+    try {
+      await advance(5_000); // the gap, then the start
+      expect(h.events).toEqual(["start"]);
+      off = true;
+      await advance(30_000); // the duration expires during the outage
+      expect(h.events).toEqual(["start"]);
+      off = false;
+      await advance(1_000);
+      expect(h.events).toEqual(["start", "stop"]);
+    } finally {
+      runner.stop();
+    }
+  });
 
   it("runs gap, start, duration, stop, repeat", async () => {
     const h = hooks();
@@ -221,6 +241,273 @@ describe("AutoTrafficRunner (#300)", () => {
   });
 });
 
+describe("AutoTrafficRunner idTag, preconditions and counters (#603)", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("presents one idTag per session to Authorize and to the start", async () => {
+    const tags = ["A", "B"];
+    let n = 0;
+    const seen: string[] = [];
+    const h = hooks({
+      idTag: () => tags[n++ % tags.length]!,
+      authorize: async (_id, tag) => {
+        seen.push(`authorize:${tag}`);
+        return true;
+      },
+      startTransaction: async (_id, tag) => {
+        seen.push(`start:${tag}`);
+      },
+    });
+    const runner = new AutoTrafficRunner(
+      { ...CONFIG, requireAuthorize: true },
+      "CP1",
+      1,
+      h,
+    );
+    runner.start();
+    try {
+      await advance(5_000);
+      await advance(10_000 + 5_000);
+      expect(seen).toEqual([
+        "authorize:A",
+        "start:A",
+        "authorize:B",
+        "start:B",
+      ]);
+    } finally {
+      runner.stop();
+    }
+  });
+
+  it("falls back to the fixed idTag without a pool hook", async () => {
+    const seen: string[] = [];
+    const h = hooks({
+      startTransaction: async (_id, tag) => {
+        seen.push(tag);
+      },
+    });
+    const runner = new AutoTrafficRunner(CONFIG, "CP1", 1, h);
+    runner.start();
+    try {
+      await advance(5_000);
+      expect(seen).toEqual(["123456"]);
+    } finally {
+      runner.stop();
+    }
+  });
+
+  it("skips a cycle whose start precondition fails, and counts the run of skips", async () => {
+    let blocker: string | null = "the connector is Charging";
+    const h = hooks({ startBlocker: () => blocker });
+    const runner = new AutoTrafficRunner(CONFIG, "CP1", 1, h);
+    runner.start();
+    try {
+      await advance(5_000);
+      await advance(5_000);
+      await advance(5_000);
+      expect(h.events).toEqual([]);
+      expect(runner.counters.attempted).toBe(3);
+      expect(runner.counters.skipped).toBe(3);
+      expect(runner.counters.consecutiveSkips).toBe(3);
+
+      blocker = null;
+      await advance(5_000);
+      expect(h.events).toEqual(["start"]);
+      expect(runner.counters.consecutiveSkips).toBe(0);
+      expect(runner.counters.skipped).toBe(3);
+    } finally {
+      runner.stop();
+    }
+  });
+
+  it("counts a roll below probabilityOfStart in the run of skips too", async () => {
+    const h = hooks();
+    const runner = new AutoTrafficRunner(
+      { ...CONFIG, probabilityOfStart: 0 },
+      "CP1",
+      1,
+      h,
+    );
+    runner.start();
+    try {
+      await advance(10_000);
+      expect(runner.counters.consecutiveSkips).toBe(2);
+    } finally {
+      runner.stop();
+    }
+  });
+
+  it("counts Authorize, start and stop outcomes apart", async () => {
+    let accept = true;
+    const h = hooks({ authorize: async () => accept });
+    const runner = new AutoTrafficRunner(
+      { ...CONFIG, requireAuthorize: true },
+      "CP1",
+      1,
+      h,
+    );
+    runner.start();
+    try {
+      await advance(5_000);
+      await advance(10_000);
+      expect(runner.counters).toMatchObject({
+        authorizeAccepted: 1,
+        authorizeRejected: 0,
+        startAccepted: 1,
+        stopAccepted: 1,
+        stopRejected: 0,
+      });
+      accept = false;
+      await advance(5_000);
+      expect(runner.counters).toMatchObject({
+        authorizeAccepted: 1,
+        authorizeRejected: 1,
+        startAccepted: 1,
+      });
+    } finally {
+      runner.stop();
+    }
+  });
+
+  it("counts a start the charge point refused, and a stop that failed", async () => {
+    let refuse = true;
+    const h = hooks({
+      startTransaction: async () => (refuse ? false : undefined),
+      stopTransaction: async () => {
+        throw new Error("boom");
+      },
+    });
+    const runner = new AutoTrafficRunner(CONFIG, "CP1", 1, h);
+    runner.start();
+    try {
+      await advance(5_000);
+      expect(runner.counters).toMatchObject({
+        startRejected: 1,
+        startAccepted: 0,
+        started: 0,
+        rejected: 1,
+      });
+      refuse = false;
+      await advance(5_000);
+      await advance(10_000);
+      expect(runner.counters).toMatchObject({
+        startAccepted: 1,
+        stopRejected: 1,
+        stopAccepted: 0,
+      });
+    } finally {
+      runner.stop();
+    }
+  });
+
+  it("moves a start the CSMS refused in its conf from accepted to rejected", async () => {
+    const h = hooks();
+    const runner = new AutoTrafficRunner(CONFIG, "CP1", 1, h);
+    runner.start();
+    try {
+      await advance(5_000);
+      expect(runner.counters.startAccepted).toBe(1);
+      runner.noteStartConfRefused();
+      expect(runner.counters).toMatchObject({
+        startAccepted: 0,
+        startRejected: 1,
+      });
+      // Nothing to correct without an open session.
+      await advance(10_000);
+      runner.noteStartConfRefused();
+      expect(runner.counters.startRejected).toBe(1);
+    } finally {
+      runner.stop();
+    }
+  });
+
+  it("counts a refused start answer once per session", async () => {
+    const h = hooks();
+    const runner = new AutoTrafficRunner(CONFIG, "CP1", 1, h);
+    runner.start();
+    try {
+      await advance(5_000);
+      runner.noteStartConfRefused();
+      runner.noteStartConfRefused();
+      expect(runner.counters).toMatchObject({
+        startAccepted: 0,
+        startRejected: 1,
+      });
+    } finally {
+      runner.stop();
+    }
+  });
+
+  it("logs a skipped cycle once per reason", async () => {
+    const log = vi.fn();
+    let blocker = "the connector is Charging";
+    const h = hooks({ startBlocker: () => blocker, log });
+    const runner = new AutoTrafficRunner(CONFIG, "CP1", 1, h);
+    runner.start();
+    try {
+      await advance(5_000);
+      await advance(5_000);
+      await advance(5_000);
+      const skipLogs = () =>
+        log.mock.calls.filter(([m]) => String(m).includes("cycle skipped"));
+      expect(skipLogs()).toHaveLength(1);
+      blocker = "a transaction is active";
+      await advance(5_000);
+      expect(skipLogs()).toHaveLength(2);
+    } finally {
+      runner.stop();
+    }
+  });
+
+  it("records the first and the latest run", async () => {
+    const h = hooks();
+    const runner = new AutoTrafficRunner(CONFIG, "CP1", 1, h);
+    expect(runner.counters.firstRunAt).toBeNull();
+    runner.start();
+    try {
+      await advance(5_000);
+      const first = runner.counters.firstRunAt;
+      expect(first).not.toBeNull();
+      await advance(15_000);
+      expect(runner.counters.firstRunAt).toBe(first);
+      expect(runner.counters.lastRunAt).toBe(first! + 15_000);
+    } finally {
+      runner.stop();
+    }
+  });
+
+  it("stops at the absolute stop time", async () => {
+    const stopAt = new Date(Date.now() + 12_000).toISOString();
+    const h = hooks();
+    const runner = new AutoTrafficRunner({ ...CONFIG, stopAt }, "CP1", 1, h);
+    runner.start();
+    try {
+      await advance(5_000 + 10_000);
+      const started = runner.counters.started;
+      expect(started).toBe(1);
+      await advance(60_000);
+      expect(runner.counters.started).toBe(started);
+    } finally {
+      runner.stop();
+    }
+  });
+
+  it("is idle after a stop time already in the past", async () => {
+    const h = hooks();
+    const runner = new AutoTrafficRunner(
+      { ...CONFIG, stopAt: new Date(Date.now() - 1000).toISOString() },
+      "CP1",
+      1,
+      h,
+    );
+    runner.start();
+    await advance(60_000);
+    expect(h.events).toEqual([]);
+    expect(runner.counters.attempted).toBe(0);
+  });
+});
+
 describe("stopping ends the session it started (#300)", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
@@ -267,5 +554,133 @@ describe("stopping ends the session it started (#300)", () => {
     pending.release?.();
     await advance(120_000);
     expect(h.events).toEqual(["stop"]);
+  });
+
+  describe("sessionModel intent (#327)", () => {
+    const INTENT: AutoTrafficConfig = { ...CONFIG, sessionModel: "intent" };
+
+    it("hands the drawn intent to the start and counts a station-side end as completed without a second stop", async () => {
+      let running = true;
+      const intents: unknown[] = [];
+      const h = hooks({
+        startTransaction: async (_id, _tag, intent) => {
+          intents.push(intent);
+          h.events.push("start");
+        },
+        sessionRunning: () => running,
+      });
+      const runner = new AutoTrafficRunner(INTENT, "CP1", 1, h);
+      runner.start();
+      try {
+        await advance(5_000); // the gap, then the start
+        expect(intents).toHaveLength(1);
+        expect(intents[0]).toMatchObject({
+          initialSoc: expect.any(Number),
+          targetSoc: expect.any(Number),
+        });
+        running = false; // the connector reached the target and stopped
+        await advance(1_000);
+        expect(h.events).toEqual(["start"]);
+        expect(runner.counters.completed).toBe(1);
+      } finally {
+        runner.stop();
+      }
+    });
+
+    it("stops a session whose vehicle never reaches the target at the duration ceiling", async () => {
+      const h = hooks({ sessionRunning: () => true });
+      const runner = new AutoTrafficRunner(INTENT, "CP1", 1, h);
+      runner.start();
+      try {
+        await advance(5_000);
+        await advance(9_000);
+        expect(h.events).toEqual(["start"]);
+        await advance(1_000); // 10 s ceiling
+        expect(h.events).toEqual(["start", "stop"]);
+        expect(runner.counters.stopAccepted).toBe(1);
+      } finally {
+        runner.stop();
+      }
+    });
+
+    it("passes no intent under the duration model", async () => {
+      const seen: unknown[] = [];
+      const h = hooks({
+        startTransaction: async (_id, _tag, intent) => {
+          seen.push(intent);
+        },
+      });
+      const runner = new AutoTrafficRunner(CONFIG, "CP1", 1, h);
+      runner.start();
+      try {
+        await advance(5_000);
+        expect(seen).toEqual([undefined]);
+      } finally {
+        runner.stop();
+      }
+    });
+  });
+
+  describe("vehiclePool (#627)", () => {
+    const pool: AutoTrafficVehicle[] = [
+      {
+        weight: 1,
+        profileId: "a",
+        vehicle: {
+          modelName: "A",
+          batteryCapacityKwh: 40,
+          maxChargingPowerKw: 7,
+        },
+      },
+      {
+        weight: 1,
+        profileId: "b",
+        vehicle: {
+          modelName: "B",
+          batteryCapacityKwh: 80,
+          maxChargingPowerKw: 11,
+        },
+      },
+    ];
+    const POOLED: AutoTrafficConfig = { ...CONFIG, vehiclePool: pool };
+
+    async function drawn(config: AutoTrafficConfig, sessions: number) {
+      const seen: (string | undefined)[] = [];
+      const h = hooks({
+        startTransaction: async (_id, _tag, _intent, vehicle) => {
+          seen.push(vehicle?.profileId);
+        },
+      });
+      const runner = new AutoTrafficRunner(config, "CP1", 1, h);
+      runner.start();
+      try {
+        // gap 5 s + duration 10 s per session
+        await advance(15_000 * sessions);
+      } finally {
+        runner.stop();
+      }
+      return { seen, runner };
+    }
+
+    it("hands the drawn vehicle to the start and counts sessions per vehicle", async () => {
+      const { seen, runner } = await drawn(POOLED, 8);
+      expect(seen.length).toBeGreaterThanOrEqual(7);
+      expect(seen.every((v) => v === "a" || v === "b")).toBe(true);
+      const counted = runner.counters.vehicles ?? {};
+      expect((counted.a ?? 0) + (counted.b ?? 0)).toBe(runner.counters.started);
+    });
+
+    it("replays the same vehicle order for the same seed", async () => {
+      const first = await drawn(POOLED, 8);
+      const second = await drawn(POOLED, 8);
+      expect(second.seen).toEqual(first.seen);
+      expect(new Set(first.seen).size).toBe(2);
+    });
+
+    it("hands no vehicle and keeps no vehicle counter without a pool", async () => {
+      const { seen, runner } = await drawn(CONFIG, 2);
+      expect(seen).toEqual([undefined, undefined]);
+      expect(runner.counters.vehicles).toBeUndefined();
+    });
   });
 });

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ChargePoint } from "../ChargePoint";
+import type { ChargePoint } from "../ChargePoint";
+import { createChargePoint } from "../../../infrastructure/charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../types/OcppTypes";
 import type { OcppTlsOptions } from "../../../infrastructure/transport/wsUrlWithBasic";
 
@@ -9,7 +10,7 @@ import type { OcppTlsOptions } from "../../../infrastructure/transport/wsUrlWith
  * connection that verifies the server.
  */
 function chargePoint(url: string, tls?: OcppTlsOptions): ChargePoint {
-  return new ChargePoint(
+  return createChargePoint(
     "CP-TRUST",
     DefaultBootNotification,
     1,

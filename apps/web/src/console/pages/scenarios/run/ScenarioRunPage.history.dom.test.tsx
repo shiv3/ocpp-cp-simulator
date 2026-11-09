@@ -7,13 +7,13 @@ import { createEmptyScenario, insertStep } from "../../../lib/scenarioSteps";
 import {
   ScenarioNodeType,
   type ScenarioDefinition,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import type { ScenarioRunResult } from "@ocpp-cp-sim/core/cp/application/verification/ScenarioAssertions";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import type { ScenarioRunResult } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioAssertions";
 import {
   summarizeRun,
   type ScenarioRunSummary,
-} from "@ocpp-cp-sim/core/cp/application/verification/ScenarioRunSummary";
-import { scenarioRunResult } from "@ocpp-cp-sim/core/test/scenarioRunFixtures";
+} from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunSummary";
+import { scenarioRunResult } from "@ocpp-cp-simulator/core/test/scenarioRunFixtures";
 import {
   createFakeChargePointService,
   flush,
@@ -192,7 +192,7 @@ describe("ScenarioRunPage run history (#388)", () => {
     );
   });
 
-  it("keeps the session-only history in local mode", async () => {
+  it("lists the recorded runs in local mode too (#394)", async () => {
     const service = serviceWith([summarizeRun(report())]);
     const { container, root } = await renderConsole(PATH, {
       service,
@@ -201,7 +201,7 @@ describe("ScenarioRunPage run history (#388)", () => {
     cleanup = () => unmount(root);
     await flush();
 
-    expect(service.listScenarioRuns).not.toHaveBeenCalled();
-    expect(container.textContent).toContain("No runs yet this session.");
+    expect(service.listScenarioRuns).toHaveBeenCalled();
+    expect(container.textContent).not.toContain("No runs yet this session.");
   });
 });

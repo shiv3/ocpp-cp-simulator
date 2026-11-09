@@ -1,8 +1,8 @@
-import type { AutoMeterValueConfig } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
-import type { AutoTrafficConfig } from "@ocpp-cp-sim/core/cp/domain/connector/AutoTraffic";
-import type { ActiveChargingProfile } from "@ocpp-cp-sim/core/cp/domain/connector/Connector";
-import type { Database } from "@ocpp-cp-sim/core/cp/domain/persistence/Database";
-import type { OCPPAvailability } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import type { AutoMeterValueConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
+import type { AutoTrafficConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/AutoTraffic";
+import type { ActiveChargingProfile } from "@ocpp-cp-simulator/core/cp/domain/connector/Connector";
+import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
+import type { OCPPAvailability } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import type { ConnectorSettingsRepository } from "../interfaces/ConnectorSettingsRepository";
 
 const SOC_METER_SYNC_KEY = "soc_meter_sync";

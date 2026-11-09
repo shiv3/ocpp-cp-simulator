@@ -5,7 +5,8 @@ import {
   StopTransactionResultHandler,
 } from "../TransactionResultHandlers";
 import { MeterValuesResultHandler } from "../OtherResultHandlers";
-import { ChargePoint } from "../../../../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../../../charge-point/createChargePoint";
 import { OCPPStatus } from "../../../../../domain/types/OcppTypes";
 import type { BootNotification } from "../../../../../domain/types/OcppTypes";
 import { DefaultBootNotification } from "../../../../../domain/types/OcppTypes";
@@ -38,7 +39,7 @@ import type { HandlerContext } from "../../MessageHandlerRegistry";
 const bootNotification: BootNotification = DefaultBootNotification;
 
 function buildChargePoint(connectorCount = 1): ChargePoint {
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     "test-cp-175",
     bootNotification,
     connectorCount,
@@ -382,8 +383,9 @@ describe("StartTransactionResultHandler (#527) — late conf", () => {
  * now acted on per §4.8 `StopTransactionOnInvalidId` — default true stops
  * the transaction with reason "DeAuthorized" (delegating to
  * ChargePoint.stopTransaction, so the #175/#176 Finishing/Available
- * cascade applies exactly as a normal stop would); false leaves the
- * transaction running. Either way a `startTransactionNotAccepted` event is
+ * cascade applies exactly as a normal stop would); false keeps the
+ * transaction open and only stops the energy delivery (SuspendedEVSE,
+ * #736, errata 3.17). Either way a `startTransactionNotAccepted` event is
  * emitted for observability.
  */
 describe("StartTransactionResultHandler (#181) — StopTransactionOnInvalidId", () => {
@@ -421,7 +423,7 @@ describe("StartTransactionResultHandler (#181) — StopTransactionOnInvalidId", 
     ]);
   });
 
-  it("keeps the transaction running (Charging) and only logs+emits when StopTransactionOnInvalidId=false", () => {
+  it("keeps the transaction open but stops the energy (SuspendedEVSE) when StopTransactionOnInvalidId=false (#736)", () => {
     const cp = buildChargePoint();
     const applyStatus = cp.configuration.applyChange(
       "StopTransactionOnInvalidId",
@@ -448,15 +450,49 @@ describe("StartTransactionResultHandler (#181) — StopTransactionOnInvalidId", 
     expect(stopped).toEqual([]);
     expect(connector.transaction).not.toBeNull();
     expect(connector.transaction?.id).toBe(777);
-    expect(connector.status).toBe(OCPPStatus.Charging);
+    expect(connector.status).toBe(OCPPStatus.SuspendedEVSE);
+    expect(connector.energyHeld).toBe(true);
     expect(notAccepted).toEqual([
       { connectorId: 1, status: "Expired", stopped: false },
     ]);
   });
 
+  it("MaxEnergyOnInvalidId > 0 charges first and holds once the allowance is used up (#736)", () => {
+    vi.useFakeTimers();
+    try {
+      const cp = buildChargePoint();
+      cp.configuration.applyChange("StopTransactionOnInvalidId", "false");
+      cp.configuration.applyChange("MaxEnergyOnInvalidId", "300");
+      const connector = cp.getConnector(1)!;
+      cp.startTransaction("TAG-736", 1);
+
+      new StartTransactionResultHandler(1).handle(
+        { transactionId: 778, idTagInfo: { status: "Blocked" } },
+        buildContext(cp),
+      );
+
+      expect(connector.status).toBe(OCPPStatus.Charging);
+      expect(connector.energyHeld).toBe(false);
+      connector.startManualMeterStrategy({
+        kind: "increment",
+        intervalSeconds: 1,
+        incrementValue: 100,
+      });
+      vi.advanceTimersByTime(10_000);
+
+      expect(connector.meterValue).toBe(300);
+      expect(connector.energyHeld).toBe(true);
+      expect(connector.status).toBe(OCPPStatus.SuspendedEVSE);
+      connector.stopAutoMeterValue();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("StopTransactionOnInvalidId=false does not re-drive Charging when already there (idempotent)", () => {
     const cp = buildChargePoint();
     cp.configuration.applyChange("StopTransactionOnInvalidId", "false");
+    cp.configuration.applyChange("MaxEnergyOnInvalidId", "100");
     const connector = cp.getConnector(1)!;
     cp.startTransaction("TAG-181-C", 1);
     cp.updateConnectorStatus(1, OCPPStatus.Charging);

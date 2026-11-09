@@ -77,6 +77,17 @@ describe("ChargingProfileStore", () => {
     ).toBeNull();
   });
 
+  it("treats validTo as exclusive: now == validTo is outside [validFrom, validTo) (K01.FR.37, #707)", () => {
+    const validTo = "2026-08-01T00:00:00.000Z";
+    const store = new ChargingProfileStore();
+    store.add(profile({ chargingProfileId: 1, validTo }));
+    const purpose = ChargingProfilePurposeType.ChargePointMaxProfile;
+    expect(
+      store.getActive(purpose, new Date("2026-07-31T23:59:59.999Z")),
+    ).not.toBeNull();
+    expect(store.getActive(purpose, new Date(validTo))).toBeNull();
+  });
+
   describe("take", () => {
     it("removes by profileId", () => {
       const store = new ChargingProfileStore();
@@ -110,5 +121,36 @@ describe("ChargingProfileStore", () => {
       expect(store.take({}).length).toBe(2);
       expect(store.all()).toEqual([]);
     });
+  });
+});
+
+describe("ChargingProfileStore: schedule duration (1.6 errata 3.43)", () => {
+  const now = new Date("2026-01-01T00:10:01Z");
+  const upper = profile({
+    chargingProfileId: 2,
+    stackLevel: 2,
+    startSchedule: "2026-01-01T00:00:00Z",
+    duration: 600,
+    chargingSchedulePeriods: [{ startPeriod: 0, limit: 1000 }],
+  });
+
+  it("falls back to the next lower stackLevel once the duration has elapsed", () => {
+    const store = new ChargingProfileStore();
+    store.add(profile({ chargingProfileId: 1, stackLevel: 1 }));
+    store.add(upper);
+    const purpose = ChargingProfilePurposeType.ChargePointMaxProfile;
+    expect(
+      store.getActive(purpose, new Date("2026-01-01T00:09:59Z"))
+        ?.chargingProfileId,
+    ).toBe(2);
+    expect(store.getActive(purpose, now)?.chargingProfileId).toBe(1);
+  });
+
+  it("has no active profile when nothing lower exists", () => {
+    const store = new ChargingProfileStore();
+    store.add(upper);
+    expect(
+      store.getActive(ChargingProfilePurposeType.ChargePointMaxProfile, now),
+    ).toBeNull();
   });
 });

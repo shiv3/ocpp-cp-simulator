@@ -1,18 +1,18 @@
 import { useCallback } from "react";
 
 import type { ChargePointConfig } from "../../../components/ChargePointConfigModal";
-import type { CreateChargePointParams } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
-import type { SimulatorConfigInput } from "@ocpp-cp-sim/contracts/index";
+import type { CreateChargePointParams } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
+import type { SimulatorConfigInput } from "@ocpp-cp-simulator/contracts/index";
 import {
   defaultAutoMeterValueConfig,
   type AutoMeterValueConfig,
-} from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
+} from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
 import { t } from "../../../i18n";
 import { useChargePoints } from "../../../data/hooks/useChargePoints";
 import { useConfig } from "../../../data/hooks/useConfig";
 import { useDataContext } from "../../../data/providers/DataProvider";
 import { useGlobalTagIds } from "../../../data/hooks/useGlobalTagIds";
-import { getTemplateById } from "@ocpp-cp-sim/core/utils/scenarioTemplates";
+import { getTemplateById } from "@ocpp-cp-simulator/core/utils/scenarioTemplates";
 
 export interface UseCpConfigActionsResult {
   addCp: (cpConfig: ChargePointConfig) => Promise<void>;
@@ -250,6 +250,9 @@ export function useCpConfigActions(): UseCpConfigActionsResult {
           ChargePointID: cpConfig.cpId,
           tagID: tagIDs[0] || "123456",
           ocppVersion: cpConfig.ocppVersion,
+          ...(cpConfig.txUpdatedMeterValues !== undefined
+            ? { txUpdatedMeterValues: cpConfig.txUpdatedMeterValues }
+            : {}),
           basicAuthSettings: {
             enabled: cpConfig.basicAuthEnabled,
             username: cpConfig.basicAuthUsername,

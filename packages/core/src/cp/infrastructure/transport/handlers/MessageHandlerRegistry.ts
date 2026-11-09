@@ -49,7 +49,7 @@ import type {
   UnlockConnectorResponseV16,
   UpdateFirmwareRequestV16,
   UpdateFirmwareResponseV16,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import type { OCPPAction } from "../../../domain/types/OcppTypes";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { Logger } from "../../../shared/Logger";

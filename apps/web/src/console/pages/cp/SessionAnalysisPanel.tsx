@@ -25,9 +25,10 @@ import { useDataContext } from "@/data/providers/DataProvider";
 import {
   logLinesToTrace,
   type SerializedLogLine,
-} from "@ocpp-cp-sim/trace/logEntryToTrace";
-import { ANALYZE_DISCLAIMER } from "@ocpp-cp-sim/trace/analysisDisclaimer";
-import { ensureToolkitBufferShim } from "@ocpp-cp-sim/trace/toolkitBufferShim";
+} from "@ocpp-cp-simulator/trace/logEntryToTrace";
+import { ANALYZE_DISCLAIMER } from "@ocpp-cp-simulator/trace/analysisDisclaimer";
+import { ensureToolkitBufferShim } from "@ocpp-cp-simulator/trace/toolkitBufferShim";
+import { serializeRecord } from "@open-ocpp-trace/jsonl/writer";
 
 import EmptyState from "../../components/EmptyState";
 
@@ -123,7 +124,8 @@ const SessionAnalysisPanel: React.FC<SessionAnalysisPanelProps> = ({
         commit({ kind: "empty", message: t("cpPanels.analysis.noTraffic") });
         return;
       }
-      const jsonl = records.map((record) => JSON.stringify(record)).join("\n");
+      // serializeRecord ends every line with LF (#886).
+      const jsonl = records.map((record) => serializeRecord(record)).join("");
 
       // The toolkit's parse guards call Node's `Buffer.byteLength`; in a
       // browser that global doesn't exist (issue #238) — see the shim's doc.

@@ -1,10 +1,16 @@
+import type { BootstrapPacing } from "./server/bootstrapPacing";
 import type {
   OcppSecurityProfile,
   OcppTlsOptions,
-} from "@ocpp-cp-sim/core/cp/infrastructure/transport/wsUrlWithBasic";
-import type { UrlDistribution } from "@ocpp-cp-sim/core/cp/infrastructure/transport/SupervisionUrlPool";
-import type { IdTagDistribution } from "@ocpp-cp-sim/core/cp/domain/auth/IdTagPool";
-import type { Labels } from "@ocpp-cp-sim/contracts/labels";
+} from "@ocpp-cp-simulator/core/cp/infrastructure/transport/wsUrlWithBasic";
+import type { TransportConfig } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/TransportConfig";
+import type { UrlDistribution } from "@ocpp-cp-simulator/core/cp/domain/transport/UrlDistribution";
+import type { InboundValidationMode } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
+import type { ChargePointCapabilityProfile } from "@ocpp-cp-simulator/core/cp/domain/charge-point/CapabilityProfile";
+import type { ChargerCapabilities } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargerCapabilities";
+import type { IdTagDistribution } from "@ocpp-cp-simulator/core/cp/domain/auth/IdTagPool";
+import type { Labels } from "@ocpp-cp-simulator/contracts/labels";
+import type { JsonObject } from "@ocpp-cp-simulator/contracts/behavior";
 
 export interface SoapTunnelConfig {
   readonly provider: "ngrok";
@@ -33,6 +39,12 @@ export interface CLIOptions {
    * charge points this process bootstraps run. Empty: all of them.
    */
   readonly useBehaviors?: readonly string[];
+  /**
+   * `--behavior-params <id>=<json file or inline json>`, repeatable: params
+   * for the behaviors (a loaded one or a built-in `default.*`) the charge
+   * points this process bootstraps run. JSON only.
+   */
+  readonly behaviorParams?: Readonly<Record<string, JsonObject>>;
   /** `--watch-behaviors`: reload a behavior file when it changes. */
   readonly watchBehaviors?: boolean;
   /** `--allow-behavior-reload`: the daemon answers the `behavior.reload` method. */
@@ -50,6 +62,10 @@ export interface CLIOptions {
    * `--cp-id CP --cp-count 3` yields CP001..CP003.
    */
   readonly cpIdPattern: string | null;
+  /** `--fleet-template <file>`, repeatable (#445). */
+  readonly fleetTemplateFiles: readonly string[];
+  /** Startup pacing flags (#610); absent: the defaults (8 at once, no delay). */
+  readonly bootstrapPacing?: BootstrapPacing;
   /**
    * `--label key=value` (#472): labels every bootstrapped charge point is
    * created with. A charge point restored from `--state-db` keeps its own.
@@ -160,6 +176,37 @@ export interface CLIOptions {
    *  Only safe when a trusted proxy sets those headers (the daemon must not be
    *  reachable directly). Set by `--trust-forwarded-headers`. */
   readonly trustForwardedHeaders: boolean;
+  /** `--allowed-host` (repeatable): Host names the daemon answers to besides
+   *  IP literals and `localhost` (#620). Empty = no Host check. */
+  readonly allowedHosts: ReadonlyArray<string>;
+  /** `--trusted-proxy` (repeatable): IPs / CIDRs whose forwarding headers are
+   *  believed (#620). Empty = `--trust-forwarded-headers` believes any peer. */
+  readonly trustedProxies: ReadonlyArray<string>;
+  /** `--require-tls`: refuse non-loopback clients not carried over TLS (#620). */
+  readonly requireTls: boolean;
+  /** `--rate-limit-per-ip`: requests per second per client IP; 0 = off (#620). */
+  readonly rateLimitPerIp: number;
+  /** `--rate-limit-max-ips`: client IPs tracked by the limiter (#620). */
+  readonly rateLimitMaxIps: number;
+  /** `--log-level`: drop console / file lines below this level (#621). */
+  readonly logLevel: "debug" | "info" | "warn" | "error" | null;
+  /** `--log-file`: copy console log lines into this file (#621). */
+  readonly logFile: string | null;
+  /** `--log-max-size`: rotate the log file past this many bytes (#621). */
+  readonly logMaxBytes: number | null;
+  /** `--log-rotate-daily`: rotate the log file when the date changes (#621). */
+  readonly logRotateDaily: boolean;
+  /** `--log-keep`: rotated log files to keep (#621). */
+  readonly logKeep: number;
+  /** `--shutdown-stop-transactions`: stop running transactions on SIGINT /
+   *  SIGTERM and wait for the CSMS to answer (#622). */
+  readonly shutdownStopTransactions: boolean;
+  /** `--shutdown-wait-ms`: longest wait for those answers (#622). */
+  readonly shutdownWaitMs: number;
+  /** `false` after `--no-connect-restored` (#622). */
+  readonly connectRestored: boolean;
+  /** `--cp-bulk-wait-ms`: per-charge-point wait of `cp.bulk` (#622). */
+  readonly cpBulkWaitMs: number;
   /** Absolute or relative path of a directory the daemon serves as static
    *  files (SPA-aware). Null disables static hosting. */
   readonly serveStatic: string | null;
@@ -199,6 +246,15 @@ export interface CLIOptions {
   readonly cpoName?: string;
   /** `--tx-updated-meter-values` (#347). See ChargePointInitOptions. */
   readonly txUpdatedMeterValues?: boolean;
+  /** `--inbound-validation` (#593). See ChargePointInitOptions. */
+  readonly inboundValidation?: InboundValidationMode;
+  /** `--reservation-authorize-id-tag` (#595). See ChargePointInitOptions. */
+  readonly reservationAuthorizeIdTag?: boolean;
+  /** `--reconnect-*` and `--boot-retry-limit` (#609). */
+  readonly transport?: TransportConfig;
+  readonly capabilityProfile?: ChargePointCapabilityProfile;
+  /** Charger-side delivery caps per connector (#327). */
+  readonly chargerCapabilities?: ChargerCapabilities;
   readonly tls?: OcppTlsOptions;
   readonly tlsCaPath?: string;
   readonly tlsCertPath?: string;
@@ -221,6 +277,15 @@ export interface ChargePointInitOptions {
   /** All supervision URLs, when more than one was given. OCPP-J only. */
   readonly supervisionUrls?: readonly string[];
   readonly urlDistribution?: UrlDistribution;
+  /** OCPP 1.6J inbound CALL payload validation (#593). Default `warn`. */
+  readonly inboundValidation?: InboundValidationMode;
+  /** OCPP 1.6 ReserveNow authorizes the idTag first (#595). Default false. */
+  readonly reservationAuthorizeIdTag?: boolean;
+  /** Transport settings (#609): reconnect policy. Persisted. */
+  readonly transport?: TransportConfig;
+  readonly capabilityProfile?: ChargePointCapabilityProfile;
+  /** Charger-side delivery caps per connector (#327). Persisted. */
+  readonly chargerCapabilities?: ChargerCapabilities;
   /**
    * Resolved idTags this charge point draws from when a call names none. The
    * `file` form is resolved at creation, so what is stored and persisted is
@@ -303,6 +368,12 @@ export interface ChargePointInitOptions {
    * start.
    */
   readonly behaviors?: readonly string[];
+  /**
+   * Params the selection sets on behaviors, by behavior id (a loaded one or a
+   * built-in `default.*`); JSON only, checked against each behavior's params
+   * schema. Absent: every behavior runs with its defaults.
+   */
+  readonly behaviorParams?: Readonly<Record<string, JsonObject>>;
 }
 
 export interface JsonCommand {
@@ -343,6 +414,9 @@ export interface ConnectorStatus {
   readonly transactionStartTime: string | null;
   readonly transactionTagId: string | null;
   readonly transactionBatteryCapacityKwh: number | null;
+  /** The EV and cable state (#453). */
+  readonly evConnection?:
+    "disconnected" | "connected-ready" | "connected-not-ready";
 }
 
 export interface ChargePointStatus {
@@ -384,6 +458,11 @@ export interface ChargePointStatus {
     readonly securityProfile?: OcppSecurityProfile;
     readonly cpoName?: string;
     readonly txUpdatedMeterValues?: boolean;
+    readonly inboundValidation?: InboundValidationMode;
+    readonly reservationAuthorizeIdTag?: boolean;
+    readonly capabilityProfile?: ChargePointCapabilityProfile;
+    readonly transport?: TransportConfig;
+    readonly chargerCapabilities?: ChargerCapabilities;
     readonly tlsCaPath?: string;
     readonly tlsCertPath?: string;
     readonly tlsKeyPath?: string;
@@ -399,5 +478,6 @@ export interface ChargePointStatus {
     } | null;
     readonly labels?: Labels;
     readonly behaviors?: readonly string[];
+    readonly behaviorParams?: Readonly<Record<string, JsonObject>>;
   };
 }

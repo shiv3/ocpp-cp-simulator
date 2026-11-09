@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import {
+  ScenarioFlowNodeType,
   ScenarioNodeType,
   type ScenarioNodeData,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import {
   NODE_FORM_REGISTRY,
   meterValueFormToNodeData,
@@ -37,9 +38,12 @@ function expectUnknownFieldsDropped(
 }
 
 describe("NODE_FORM_REGISTRY", () => {
-  it("has an entry for every ScenarioNodeType", () => {
+  it("has an entry for every ScenarioNodeType and ScenarioFlowNodeType", () => {
     expect(Object.keys(NODE_FORM_REGISTRY).sort()).toEqual(
-      Object.values(ScenarioNodeType).sort(),
+      [
+        ...Object.values(ScenarioNodeType),
+        ...Object.values(ScenarioFlowNodeType),
+      ].sort(),
     );
   });
 
@@ -201,6 +205,40 @@ describe("NODE_FORM_REGISTRY", () => {
     );
   });
 
+  it("round-trips useBehavior params and mode (#654)", () => {
+    const entry = NODE_FORM_REGISTRY[ScenarioNodeType.USE_BEHAVIOR];
+    expectFormRoundTrip(ScenarioNodeType.USE_BEHAVIOR, {
+      label: "Tune",
+      behaviorId: "default.firmware",
+      params: { stepMs: 500, failAt: "DownloadFailed" },
+    });
+    expectFormRoundTrip(ScenarioNodeType.USE_BEHAVIOR, {
+      label: "Off",
+      behaviorId: "default.firmware",
+      mode: "disable",
+    });
+    // "use" is the default and stays out of the file; a disabled node has no params.
+    expect(
+      entry.formToNodeData({ behaviorId: "x", mode: "use" } as NodeFormData),
+    ).not.toHaveProperty("mode");
+    expect(
+      entry.formToNodeData({
+        behaviorId: "x",
+        mode: "disable",
+        params: { a: 1 },
+      } as NodeFormData),
+    ).not.toHaveProperty("params");
+    // A node saved before 1.6 is unchanged.
+    expect(
+      entry.formToNodeData(
+        entry.nodeDataToForm({
+          label: "u",
+          behaviorId: "x",
+        } as ScenarioNodeData),
+      ),
+    ).toEqual({ label: "u", behaviorId: "x" });
+  });
+
   describe("csmsCallTrigger behavior (#566)", () => {
     const entry = NODE_FORM_REGISTRY[ScenarioNodeType.CSMS_CALL_TRIGGER];
 
@@ -238,5 +276,109 @@ describe("NODE_FORM_REGISTRY", () => {
       expect(bare).toHaveProperty("behavior", "replace");
       expect(bare).not.toHaveProperty("onBusy");
     });
+  });
+
+  it("round-trips the lifecycle nodes and drops runtime fields (#654)", () => {
+    const forms: Array<[ScenarioNodeType, NodeFormData]> = [
+      [
+        ScenarioNodeType.NOTIFY,
+        { label: "N", kind: "logStatus", status: "Uploaded", requestId: 7 },
+      ],
+      [
+        ScenarioNodeType.NOTIFY,
+        {
+          label: "N",
+          kind: "signedFirmwareStatus",
+          status: "Installed",
+          requestId: { $from: "call.payload.requestId" },
+        },
+      ],
+      [
+        ScenarioNodeType.NOTIFY,
+        { label: "N", kind: "diagnosticsStatus", status: "Idle" },
+      ],
+      [
+        ScenarioNodeType.SWITCH,
+        {
+          label: "S",
+          value: { $from: "state.mode" },
+          cases: ["a", 1, true, null, { x: 1 }],
+        },
+      ],
+      [
+        ScenarioNodeType.CHOICE,
+        {
+          label: "C",
+          options: [{ weight: 3, label: "likely" }, { weight: 0.5 }, {}],
+        },
+      ],
+      [
+        ScenarioNodeType.SET_STATE,
+        { label: "T", key: "attempts_1", value: { $from: "call.action" } },
+      ],
+      [ScenarioNodeType.SET_STATE, { label: "T", key: "n", value: 0 }],
+    ];
+    for (const [type, formData] of forms) {
+      expectFormRoundTrip(type, formData);
+      expectUnknownFieldsDropped(
+        type,
+        NODE_FORM_REGISTRY[type].formToNodeData(formData),
+      );
+    }
+  });
+
+  it("keeps malformed switch cases and non-object options as authored", () => {
+    const sw = NODE_FORM_REGISTRY[ScenarioNodeType.SWITCH];
+    const cases = { a: 1 };
+    const swData = sw.formToNodeData(
+      sw.nodeDataToForm({ label: "S", value: 1, cases } as never),
+    ) as unknown as { cases: unknown };
+    expect(swData.cases).toEqual(cases);
+    const ch = NODE_FORM_REGISTRY[ScenarioNodeType.CHOICE];
+    const chData = ch.formToNodeData(
+      ch.nodeDataToForm({
+        label: "C",
+        options: [null, { weight: 2 }],
+      } as never),
+    ) as unknown as { options: unknown[] };
+    expect(chData.options).toEqual([null, { weight: 2 }]);
+  });
+
+  it("keeps the delay extensions out of a plain delay (#654)", () => {
+    const entry = NODE_FORM_REGISTRY[ScenarioNodeType.DELAY];
+    const plain = entry.formToNodeData({
+      label: "D",
+      delaySeconds: 3,
+      until: "",
+    } as NodeFormData);
+    expect(plain).toEqual({ label: "D", delaySeconds: 3 });
+    expectFormRoundTrip(ScenarioNodeType.DELAY, {
+      label: "D",
+      delaySeconds: 3,
+      until: "2026-01-01T09:00:00Z",
+      jitterSeconds: 1.5,
+    });
+    expect(
+      entry.formToNodeData({
+        label: "D",
+        delaySeconds: 3,
+        jitterSeconds: -1,
+      } as NodeFormData),
+    ).not.toHaveProperty("jitterSeconds");
+  });
+
+  it("answers accepted / rejected with no payload, error or validation flag (#654)", () => {
+    const entry = NODE_FORM_REGISTRY[ScenarioNodeType.CALL_RESPONSE];
+    for (const kind of ["accepted", "rejected"]) {
+      const saved = entry.formToNodeData({
+        label: "R",
+        kind,
+        payload: { a: 1 },
+        errorCode: "GenericError",
+        skipValidation: true,
+      } as NodeFormData);
+      expect(saved).toEqual({ label: "R", kind });
+      expectFormRoundTrip(ScenarioNodeType.CALL_RESPONSE, { label: "R", kind });
+    }
   });
 });

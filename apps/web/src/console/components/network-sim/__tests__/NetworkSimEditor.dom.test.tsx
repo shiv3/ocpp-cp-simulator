@@ -10,7 +10,7 @@ import {
 import type {
   NetworkSimLayerConfig,
   NetworkSimRule,
-} from "@ocpp-cp-sim/core/cp/infrastructure/transport/network-sim/config";
+} from "@ocpp-cp-simulator/core/cp/infrastructure/transport/network-sim/config";
 
 /** Drive a controlled input the way React's synthetic onChange expects. */
 function setInputValue(input: HTMLInputElement, next: string): void {

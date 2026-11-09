@@ -2,7 +2,8 @@
 // Imported by *.bun.test.ts files (runs under `bun test`, not vitest).
 import type { ServerWebSocket } from "bun";
 import { tcpPort } from "../../../../test/bunServe";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 
 export type OcppFrame = unknown[];
@@ -32,6 +33,9 @@ export interface MockCsms {
   url: string;
   port: number;
   received: OcppFrame[];
+  /** The `Authorization` header of every WebSocket upgrade request, in
+   *  order (#724: the Basic credentials a station presents). */
+  upgradeAuthorizations: Array<string | null>;
   waitForConnection: (timeoutMs?: number) => Promise<void>;
   waitForFrame: (
     pred: (f: OcppFrame) => boolean,
@@ -60,10 +64,26 @@ export interface MockCsmsOptions {
   };
   /** A fixed port, so a test can restart the CSMS where a station looks. */
   readonly port?: number;
+  /**
+   * Answer every 2.x StatusNotification with an empty CALLRESULT (default
+   * true). A 2.x station sends one CALL at a time (OCPP-J §4.1.1, #708), so
+   * an unanswered StatusNotification would hold back the CALL a test waits
+   * for until MessageTimeout. A test that wants to see the station wait
+   * turns this off.
+   */
+  readonly answerStatusNotifications?: boolean;
+  /**
+   * Answer every CALL but BootNotification (default false): `{}`, and an
+   * Accepted idTokenInfo for Authorize. For tests that care about the
+   * traffic and not about when the CSMS answers; a 2.x station waits for
+   * each answer before it sends the next CALL (#708).
+   */
+  readonly answerCalls?: boolean;
 }
 
 export function startMockCsms(options: MockCsmsOptions = {}): MockCsms {
   const received: OcppFrame[] = [];
+  const upgradeAuthorizations: Array<string | null> = [];
   const waiters = new Set<FrameWaiter>();
   const connectionWaiters = new Set<ConnectionWaiter>();
   const connectionsList: MockCsmsConnection[] = [];
@@ -92,6 +112,7 @@ export function startMockCsms(options: MockCsmsOptions = {}): MockCsms {
         }
       : {}),
     fetch(req, srv) {
+      upgradeAuthorizations.push(req.headers.get("authorization"));
       if (srv.upgrade(req)) {
         return undefined;
       }
@@ -128,6 +149,35 @@ export function startMockCsms(options: MockCsmsOptions = {}): MockCsms {
           return;
         }
         received.push(frame);
+        if (
+          options.answerStatusNotifications !== false &&
+          frame[0] === 2 &&
+          frame[2] === "StatusNotification" &&
+          typeof (frame[3] as { connectorStatus?: unknown } | undefined)
+            ?.connectorStatus === "string"
+        ) {
+          // 2.x shape (1.6 says `status`).
+          _ws.send(JSON.stringify([3, frame[1], {}]));
+        }
+        if (
+          options.answerCalls === true &&
+          frame[0] === 2 &&
+          frame[2] !== "BootNotification" &&
+          !(
+            options.answerStatusNotifications !== false &&
+            frame[2] === "StatusNotification"
+          )
+        ) {
+          _ws.send(
+            JSON.stringify([
+              3,
+              frame[1],
+              frame[2] === "Authorize"
+                ? { idTokenInfo: { status: "Accepted" } }
+                : {},
+            ]),
+          );
+        }
         for (const w of [...waiters]) {
           if (w.pred(frame)) {
             w.resolve(frame); // resolve() removes the waiter and clears its timer
@@ -183,6 +233,7 @@ export function startMockCsms(options: MockCsmsOptions = {}): MockCsms {
     url: `${tls ? "wss" : "ws"}://localhost:${port}/`,
     port,
     received,
+    upgradeAuthorizations,
     waitForConnection(timeoutMs = 2000) {
       if (socket) {
         return Promise.resolve();
@@ -298,7 +349,7 @@ export async function bootedV201ChargePoint(
   csms: MockCsms,
   id: string,
 ): Promise<ChargePoint> {
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     id,
     DefaultBootNotification,
     1,

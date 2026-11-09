@@ -29,7 +29,7 @@ npm run dev
 ocpp-cp-sim --ws-url ws://localhost:9000/ocpp --cp-id CP001
 ```
 
-### Install as a global command (`ocpp-cp-sim`)
+### Install as a global command (`ocpp-cp-sim`; `ocpsim` and `cp-sim` are aliases)
 
 ```bash
 # pnpm (recommended)
@@ -43,11 +43,11 @@ bun link              # in this repo
 bun link ocpp-cp-simulator   # in any other project
 ```
 
-> Every install command above is fetched by CI, so a URL printed here resolves. Do **not** use GitHub's `releases/latest/download/…` — this repo has two tag trains (`v*` desktop, `cli-v*` CLI) and "latest" resolves across both, landing on a desktop release that carries no `.tgz`.
+> Every install command above is fetched by CI, so a URL printed here resolves. Do **not** use GitHub's `releases/latest/download/…` — releases made before the trains were unified carry no `.tgz`, so "latest" can land on one. Use the `cli-latest` URL below.
 >
-> `releases/download/cli-latest/ocpp-cp-simulator.tgz` is a rolling pre-release the `Release CLI` workflow moves onto every stable CLI release (a SemVer prerelease such as `cli-v1.0.0-rc.1` is skipped), so the commands above always install the newest stable CLI. To pin a version, use that release's own asset instead, e.g. `releases/download/cli-v0.4.0/ocpp-cp-simulator-0.4.0.tgz`. See [docs/entities/cli.md](docs/entities/cli.md#why-cli-latest-and-not-releaseslatest).
+> `releases/download/cli-latest/ocpp-cp-simulator.tgz` is a rolling pre-release the `Release CLI` workflow moves onto every stable CLI release (a SemVer prerelease such as `v1.0.0-rc.1` is skipped), so the commands above always install the newest stable CLI. To pin a version, use that release's own asset instead, e.g. `releases/download/v0.10.0/ocpp-cp-simulator-0.10.0.tgz`. See [docs/entities/cli.md](docs/entities/cli.md#why-cli-latest-and-not-releaseslatest).
 >
-> The release tarballs are produced by the `Release CLI` workflow on `cli-v*` tags. A bare `bun install -g github:shiv3/ocpp-cp-simulator` does **not** work — `dist/` is built at release time, not committed, and bun doesn't install devDependencies for global packages so the on-install `vite build` can't run.
+> The release tarballs are produced by the `Release CLI` workflow on `v*` tags (the same tag that builds the desktop app, so the CLI and the app share one version). A bare `bun install -g github:shiv3/ocpp-cp-simulator` does **not** work — `dist/` is built at release time, not committed, and bun doesn't install devDependencies for global packages so the on-install `vite build` can't run.
 
 Then run from anywhere:
 
@@ -102,4 +102,4 @@ Also browsable at https://deepwiki.com/shiv3/ocpp-cp-simulator.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md): the checks to run before pushing, the wiki update rule, and how issues and pull requests are labelled and assigned to milestones.
+See [CONTRIBUTING.md](CONTRIBUTING.md): the checks to run before pushing, the wiki update rule, the contribution terms, and how issues and pull requests are labelled and assigned to milestones. Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md).

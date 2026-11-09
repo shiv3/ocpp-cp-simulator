@@ -11,8 +11,16 @@
 import { z } from "zod";
 import { normalizeKeyName, redactSensitiveValue } from "./redaction";
 import { OBJ_MAX_BYTES, STR_256, STR_64K, boundedObject } from "./limits";
+import {
+  chargerCapabilitiesSchema,
+  type ReadonlyChargerCapabilities,
+} from "./chargerCapabilities";
 import { labelsSchema, type Labels } from "./labels";
 import type { OcppSecurityProfile } from "./securityProfile";
+import {
+  transportConfigSchema,
+  type TransportConfigWire,
+} from "./transportConfig";
 
 // ---------------------------------------------------------------------------
 // Redaction helpers
@@ -30,6 +38,15 @@ export function redactUrl(url: string): string {
   }
 }
 
+/** The transport settings with the proxy URL's `user:pass@` removed (#684). */
+export function redactTransport(
+  transport: TransportConfigWire,
+): TransportConfigWire {
+  const proxy = transport.ws?.proxy;
+  if (proxy === undefined || !transport.ws) return transport;
+  return { ...transport, ws: { ...transport.ws, proxy: redactUrl(proxy) } };
+}
+
 interface FullBootNotification {
   firmwareVersion?: string;
   chargePointSerialNumber?: string;
@@ -38,6 +55,12 @@ interface FullBootNotification {
   meterType?: string;
   iccid?: string;
   imsi?: string;
+}
+
+/** Static capability profile (#618); see the `cp.create` parameter. */
+export interface WireCapabilityProfile {
+  disabledActions?: readonly string[];
+  triggerMessageTargets?: readonly string[];
 }
 
 interface FullCpConfig {
@@ -54,6 +77,11 @@ interface FullCpConfig {
   securityProfile?: OcppSecurityProfile;
   cpoName?: string;
   txUpdatedMeterValues?: boolean;
+  inboundValidation?: "off" | "warn" | "enforce";
+  reservationAuthorizeIdTag?: boolean;
+  capabilityProfile?: WireCapabilityProfile;
+  /** Reconnect policy and WebSocket client options (#609, #611). */
+  transport?: TransportConfigWire;
   tlsCaPath?: string;
   tlsCertPath?: string;
   tlsKeyPath?: string;
@@ -61,6 +89,10 @@ interface FullCpConfig {
   labels?: Labels;
   /** Ids of the loaded behaviors this charge point runs; absent: all of them. */
   behaviors?: readonly string[];
+  /** Params the selection sets on behaviors (#654), by behavior id. */
+  behaviorParams?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+  /** What the charger hardware delivers per connector (#327). */
+  chargerCapabilities?: ReadonlyChargerCapabilities;
 }
 
 /**
@@ -88,12 +120,58 @@ export function redactCp(config: FullCpConfig): WireCpConfig {
     securityProfile: config.securityProfile,
     cpoName: config.cpoName,
     txUpdatedMeterValues: config.txUpdatedMeterValues,
+    inboundValidation: config.inboundValidation,
+    reservationAuthorizeIdTag: config.reservationAuthorizeIdTag,
+    capabilityProfile: config.capabilityProfile
+      ? {
+          ...(config.capabilityProfile.disabledActions
+            ? { disabledActions: [...config.capabilityProfile.disabledActions] }
+            : {}),
+          ...(config.capabilityProfile.triggerMessageTargets
+            ? {
+                triggerMessageTargets: [
+                  ...config.capabilityProfile.triggerMessageTargets,
+                ],
+              }
+            : {}),
+        }
+      : undefined,
+    ...(config.transport
+      ? { transport: redactTransport(config.transport) }
+      : {}),
     tlsCaPath: config.tlsCaPath,
     tlsCertPath: config.tlsCertPath,
     tlsKeyPath: config.tlsKeyPath,
     bootNotification: config.bootNotification ?? null,
     labels: config.labels,
     behaviors: config.behaviors ? [...config.behaviors] : undefined,
+    behaviorParams: config.behaviorParams,
+    chargerCapabilities: config.chargerCapabilities
+      ? {
+          connectors: config.chargerCapabilities.connectors.map((c) => ({
+            connectorId: c.connectorId,
+            maxDeliveryPowerW: c.maxDeliveryPowerW,
+            ...(c.dcEfficiency !== undefined
+              ? { dcEfficiency: c.dcEfficiency }
+              : {}),
+            ...(c.meter ? { meter: structuredClone(c.meter) } : {}),
+          })),
+          ...(config.chargerCapabilities.mainMeter
+            ? {
+                mainMeter: structuredClone(
+                  config.chargerCapabilities.mainMeter,
+                ),
+              }
+            : {}),
+          ...(config.chargerCapabilities.powerSharing
+            ? {
+                powerSharing: structuredClone(
+                  config.chargerCapabilities.powerSharing,
+                ),
+              }
+            : {}),
+        }
+      : undefined,
   };
 }
 
@@ -131,12 +209,23 @@ export const wireCpConfigSchema = z
       .optional(),
     cpoName: STR_64K.optional(),
     txUpdatedMeterValues: z.boolean().optional(),
+    inboundValidation: z.enum(["off", "warn", "enforce"]).optional(),
+    reservationAuthorizeIdTag: z.boolean().optional(),
+    capabilityProfile: z
+      .object({
+        disabledActions: z.array(STR_256).optional(),
+        triggerMessageTargets: z.array(STR_256).optional(),
+      })
+      .optional(),
+    transport: transportConfigSchema.optional(),
     tlsCaPath: STR_64K.optional(),
     tlsCertPath: STR_64K.optional(),
     tlsKeyPath: STR_64K.optional(),
     bootNotification: bootNotificationWireSchema,
     labels: labelsSchema.optional(),
     behaviors: z.array(STR_256).optional(),
+    behaviorParams: z.record(STR_256, boundedObject(16_384)).optional(),
+    chargerCapabilities: chargerCapabilitiesSchema.optional(),
   })
   .strict();
 export type WireCpConfig = z.infer<typeof wireCpConfigSchema>;
@@ -174,6 +263,9 @@ const simulatorConfigBaseSchema = z
     connectorNumber: z.number().int().min(0),
     tagID: STR_64K,
     ocppVersion: STR_64K,
+    // #550: browser local mode has one shared config, so the per-charge-point
+    // #347 option is shared there too. Absent means off.
+    txUpdatedMeterValues: z.boolean().optional(),
     basicAuthSettings: wireBasicAuthSettingsSchema,
     autoMeterValueSetting: z
       .object({
@@ -255,6 +347,10 @@ export const connectorStatusWireSchema = z
     transactionStartTime: z.string().nullable(),
     transactionTagId: z.string().nullable(),
     transactionBatteryCapacityKwh: z.number().nullable(),
+    // #453: absent from a daemon that predates the cable model.
+    evConnection: z
+      .enum(["disconnected", "connected-ready", "connected-not-ready"])
+      .optional(),
   })
   .strict();
 

@@ -1,7 +1,7 @@
 import { vi, type Mock } from "vitest";
 
-import type { ScenarioDefinition } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import type { ChargePointService } from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+import type { ScenarioDefinition } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import type { ChargePointService } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 
 /**
  * An in-memory scenario definition store with the four per-scope methods of

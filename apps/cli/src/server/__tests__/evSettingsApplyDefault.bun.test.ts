@@ -2,7 +2,7 @@
 // Runs under `bun test`: a real daemon, driven over Socket.IO.
 import { afterEach, describe, expect, it } from "bun:test";
 
-import { defaultEVSettings } from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
+import { defaultEVSettings } from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
 import { startServer, type RunningServer } from "../startServer";
 import { connectTestClient } from "./socketHarness";
 

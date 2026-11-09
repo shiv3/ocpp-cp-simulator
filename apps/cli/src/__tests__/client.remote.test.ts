@@ -59,11 +59,11 @@ const remoteMockState = (() => {
 // discriminator: it is undefined inside vitest's workers even when the vitest
 // CLI itself was launched by `bunx`/`bun run` (vitest forks node workers).
 const realRemoteChargePointService = (globalThis as { Bun?: unknown }).Bun
-  ? (await import("@ocpp-cp-sim/client/remote/RemoteChargePointService"))
+  ? (await import("@ocpp-cp-simulator/client/remote/RemoteChargePointService"))
       .RemoteChargePointService
   : undefined;
 
-vi.mock("@ocpp-cp-sim/client/remote/RemoteChargePointService", () => ({
+vi.mock("@ocpp-cp-simulator/client/remote/RemoteChargePointService", () => ({
   RemoteChargePointService: remoteMockState.MockRemoteChargePointService,
 }));
 
@@ -75,9 +75,12 @@ vi.mock("@ocpp-cp-sim/client/remote/RemoteChargePointService", () => ({
 afterAll(async () => {
   if (!realRemoteChargePointService) return;
   const { mock } = await import("bun:test");
-  mock.module("@ocpp-cp-sim/client/remote/RemoteChargePointService", () => ({
-    RemoteChargePointService: realRemoteChargePointService,
-  }));
+  mock.module(
+    "@ocpp-cp-simulator/client/remote/RemoteChargePointService",
+    () => ({
+      RemoteChargePointService: realRemoteChargePointService,
+    }),
+  );
 });
 
 const { sendCommand, stopDaemon } = await import("../client");

@@ -13,7 +13,7 @@ import type {
   SetMonitoringLevelResponseV201,
   SetVariableMonitoringRequestV201,
   SetVariableMonitoringResponseV201,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import type { ConfigurationStore } from "../../../domain/charge-point/ConfigurationStore";
 import type { DeviceModelContext } from "./getVariablesV201";
 import type {

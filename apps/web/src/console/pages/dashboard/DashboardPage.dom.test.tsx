@@ -8,12 +8,12 @@ import {
   renderConsole,
   type FakeChargePointService,
 } from "../../test/harness";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
-import { LogLevel, LogType } from "@ocpp-cp-sim/core/cp/shared/Logger";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
+import { LogLevel, LogType } from "@ocpp-cp-simulator/core/cp/shared/Logger";
 import type {
   ChargePointEvent,
   ChargePointSnapshot,
-} from "@ocpp-cp-sim/client/interfaces/ChargePointService";
+} from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 
 async function unmount(root: Root): Promise<void> {
   await act(async () => {
@@ -152,6 +152,7 @@ describe("DashboardPage", () => {
     });
 
     expect(container.textContent).toContain("No charge points");
+    expect(container.querySelector("svg.evicon-charging-station")).toBeTruthy();
     const addButtons = Array.from(container.querySelectorAll("button")).filter(
       (b) => b.textContent?.includes("Add Charge Point"),
     );

@@ -1,13 +1,14 @@
 // Runs under `bun test` (bun:sqlite), not vitest.
 import { describe, expect, it } from "bun:test";
-import { BunSqliteDatabase } from "../../persistence/BunSqliteDatabase";
+import { BunSqliteDatabase } from "../../../infrastructure/persistence/BunSqliteDatabase";
 import { AuthorizationCache } from "../AuthorizationCache";
-import { ChargePoint } from "../../charge-point/ChargePoint";
+import type { ChargePoint } from "../../charge-point/ChargePoint";
+import { createChargePoint } from "../../../infrastructure/charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../types/OcppTypes";
 import type { Database } from "../../persistence/Database";
 
 function chargePointOn(db: Database): ChargePoint {
-  return new ChargePoint(
+  return createChargePoint(
     "CP-452-RESTART",
     DefaultBootNotification,
     1,

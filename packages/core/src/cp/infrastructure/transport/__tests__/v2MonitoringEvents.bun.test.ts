@@ -2,15 +2,16 @@ import { describe, expect, it } from "bun:test";
 import {
   isValidNotifyEventRequestV201,
   isValidSetMonitoringBaseResponseV201,
-} from "@ocpp-cp-sim/ocpp/v201/index";
+} from "@ocpp-cp-simulator/ocpp/v201/index";
 import {
   isValidNotifyEventRequestV21,
   isValidSetMonitoringBaseResponseV21,
-} from "@ocpp-cp-sim/ocpp/v21/index";
+} from "@ocpp-cp-simulator/ocpp/v21/index";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
-import { BunSqliteDatabase } from "../../../domain/persistence/BunSqliteDatabase";
+import { BunSqliteDatabase } from "../../persistence/BunSqliteDatabase";
 import type { Database } from "../../../domain/persistence/Database";
 
 /**
@@ -48,7 +49,7 @@ function makeChargePoint(
   version: string,
   database: Database | null = null,
 ): ChargePoint {
-  const cp = new ChargePoint(
+  const cp = createChargePoint(
     id,
     DefaultBootNotification,
     1,
@@ -132,7 +133,7 @@ async function nextNotifyEvent(
 describe("OCPP 2.x NotifyEvent from variable monitors (#457)", () => {
   for (const v of VERSIONS) {
     it(`${v.version}: threshold crossings send schema-valid trigger and cleared events, filtered by level`, async () => {
-      const csms = startMockCsms();
+      const csms = startMockCsms({ answerCalls: true });
       const cp = makeChargePoint(csms, `CP-EVENTS-${v.version}`, v.version);
       try {
         cp.connect();
@@ -225,7 +226,7 @@ describe("OCPP 2.x NotifyEvent from variable monitors (#457)", () => {
     });
 
     it(`${v.version}: an EVSE-scoped monitor reports its EVSE and the transaction running there; an unknown EVSE is an unknown component (#538)`, async () => {
-      const csms = startMockCsms();
+      const csms = startMockCsms({ answerCalls: true });
       const cp = makeChargePoint(csms, `CP-EVSE-${v.version}`, v.version);
       try {
         cp.connect();
@@ -297,7 +298,7 @@ describe("OCPP 2.x NotifyEvent from variable monitors (#457)", () => {
     });
 
     it(`${v.version}: SetMonitoringBase keeps or deletes the custom monitors and restores the station's own (N03)`, async () => {
-      const csms = startMockCsms();
+      const csms = startMockCsms({ answerCalls: true });
       const cp = makeChargePoint(csms, `CP-BASE-${v.version}`, v.version);
       try {
         cp.connect();
@@ -362,7 +363,7 @@ describe("OCPP 2.x NotifyEvent from variable monitors (#457)", () => {
   }
 
   it("OCPP 1.6: a ChangeConfiguration sends no NotifyEvent, even with a monitor in the store", async () => {
-    const csms = startMockCsms();
+    const csms = startMockCsms({ answerCalls: true });
     const cp = makeChargePoint(csms, "CP-EVENTS-16", "OCPP-1.6J");
     try {
       cp.connect();
@@ -395,7 +396,7 @@ describe("OCPP 2.x NotifyEvent from variable monitors (#457)", () => {
   });
 
   it("OCPP 2.0.1: no NotifyEvent while BootNotification is Pending; the thresholds report once Accepted (B02.FR.02)", async () => {
-    const csms = startMockCsms();
+    const csms = startMockCsms({ answerCalls: true });
     const cp = makeChargePoint(csms, "CP-MONITOR-PENDING", "OCPP-2.0.1");
     try {
       cp.connect();
@@ -453,7 +454,7 @@ describe("OCPP 2.x NotifyEvent from variable monitors (#457)", () => {
   it("OCPP 2.0.1: a restored trigger whose value is back in range at start-up sends cleared once Accepted (N07.FR.14)", async () => {
     const db = BunSqliteDatabase.open(":memory:");
     const cpId = "CP-MONITOR-RESTART-CLEARED";
-    const first = startMockCsms();
+    const first = startMockCsms({ answerCalls: true });
     const before = makeChargePoint(first, cpId, "OCPP-2.0.1", db);
     try {
       before.connect();
@@ -477,7 +478,7 @@ describe("OCPP 2.x NotifyEvent from variable monitors (#457)", () => {
       "HeartbeatInterval",
     ]);
 
-    const second = startMockCsms();
+    const second = startMockCsms({ answerCalls: true });
     const after = makeChargePoint(second, cpId, "OCPP-2.0.1", db);
     try {
       after.connect();
@@ -499,7 +500,7 @@ describe("OCPP 2.x NotifyEvent from variable monitors (#457)", () => {
   it("OCPP 2.0.1: monitors and their triggered state survive a restart; the level does not (N07.FR.13, FR.14)", async () => {
     const db = BunSqliteDatabase.open(":memory:");
     const cpId = "CP-MONITOR-RESTART";
-    const first = startMockCsms();
+    const first = startMockCsms({ answerCalls: true });
     const before = makeChargePoint(first, cpId, "OCPP-2.0.1", db);
     try {
       before.connect();
@@ -521,7 +522,7 @@ describe("OCPP 2.x NotifyEvent from variable monitors (#457)", () => {
       await first.stop();
     }
 
-    const second = startMockCsms();
+    const second = startMockCsms({ answerCalls: true });
     const after = makeChargePoint(second, cpId, "OCPP-2.0.1", db);
     try {
       expect(after.monitoring.list()).toEqual(before.monitoring.list());
@@ -558,7 +559,7 @@ describe("OCPP 2.x NotifyEvent from variable monitors (#457)", () => {
       await second.stop();
     }
 
-    const third = startMockCsms();
+    const third = startMockCsms({ answerCalls: true });
     const reopened = makeChargePoint(third, cpId, "OCPP-2.0.1", db);
     try {
       expect(

@@ -8,21 +8,40 @@ import {
   type ScenarioDefinition,
   type ScenarioNode,
   ScenarioNodeType,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import { isLoopEdge } from "@ocpp-cp-simulator/core/scenario/scenarioGraph";
 import i18n from "../../i18n";
+import { recognizeBlockTree } from "./blockTree";
 import { isLiveRunState } from "./scenarioRunState";
-import { createDefaultNode, deriveLinearSteps } from "./scenarioSteps";
+import { createDefaultNode } from "./scenarioSteps";
+
+/** An edge that jumps back to (or joins) a step already drawn: a loop or a
+ *  join. It leaves the last step of its lane, which ends there. */
+export interface StepLink {
+  id: string;
+  source: string;
+  target: string;
+}
 
 export interface StepBranch {
   name: string;
+  /** `sourceHandle` of the fork edge into this branch: the lane a `switch`
+   *  (`case-<n>`, `default`) or `choice` (`option-<n>`) runs (schema 1.6).
+   *  `null` when that edge has none: the editor keeps it without one. */
+  handle: string | null;
   steps: ScenarioNode[];
+  /** The fork edge into this branch. */
+  edgeId?: string;
+  /** The edge from the branch's last step (the fork node for an empty
+   *  branch: the fork edge) into END, when there is one. */
+  endEdgeId?: string;
 }
 
 /**
  * The shape the run views (Steps and Graph) can draw: a chain, optionally
- * ending in one fork whose branches each run to their end. Anything else
- * (a join, a loop, a second fork, a node no walk reaches) is `supported:
- * false`, and the caller falls back to `RunTimeline`'s flat list.
+ * ending in one fork whose branches each run to their end, plus `links` for
+ * loops and joins. Anything else (a second fork, a node no walk reaches) is
+ * `supported: false`, and the caller falls back to a flat outline.
  */
 export interface StepLayout {
   supported: boolean;
@@ -31,9 +50,22 @@ export interface StepLayout {
    *  at once after it. */
   main: ScenarioNode[];
   fork: null | { branches: StepBranch[] };
+  /** Loops and joins; see `StepLink`. */
+  links: StepLink[];
+  /** The edge each step is drawn entered by (the previous step's, START's
+   *  or the fork's edge), by step id. */
+  edgeInto?: Readonly<Record<string, string>>;
+  /** Without a fork: the edge from the chain's last step (or START) into
+   *  END, when there is one. */
+  endEdgeId?: string;
 }
 
-const UNSUPPORTED: StepLayout = { supported: false, main: [], fork: null };
+const UNSUPPORTED: StepLayout = {
+  supported: false,
+  main: [],
+  fork: null,
+  links: [],
+};
 
 const defaultLabels = new Map<string, Set<string>>();
 
@@ -61,33 +93,50 @@ function branchName(first: ScenarioNode | undefined, index: number): string {
   return `Branch ${String.fromCharCode(65 + (index % 26))}`;
 }
 
+/**
+ * The run views' layout, projected from the block tree
+ * (`recognizeBlockTree`): supported when the tree is a chain plus at most
+ * one fork (and links), with nothing detached. The projection walks the
+ * edges the tree structures (drawn edges and links), never an edge the tree
+ * keeps aside: a step that ends its branch but has edges (a legacy "End"
+ * label) is unsupported. The result is the layout the views have always
+ * read.
+ */
 export function deriveStepLayout(
   def: Pick<ScenarioDefinition, "nodes" | "edges">,
 ): StepLayout {
+  // A loop edge (schema 1.10) is not an edge of the chain or the fork,
+  // structured or not: this layout cannot show its bounds.
+  if (def.edges.some(isLoopEdge)) return UNSUPPORTED;
+  const tree = recognizeBlockTree(def);
+  const start = tree.origin;
+  if (!start || start.type !== ScenarioNodeType.START) return UNSUPPORTED;
+  if (tree.detached.length > 0) return UNSUPPORTED;
+  const structural = new Set<string>(tree.drawnEdges.keys());
+  const placed = new Set<string>([start.id, ...tree.nodePath.keys()]);
+  for (const link of tree.links) {
+    if (link.role === "outOfEnd") {
+      // Out of END: never walked. Out of a placed step that ends its
+      // branch: the old layout walked on along it; not projectable.
+      if (placed.has(link.edge.source)) return UNSUPPORTED;
+    } else structural.add(link.edge.id);
+  }
   const outgoing = new Map<string, Edge[]>();
   for (const edge of def.edges) {
+    if (!structural.has(edge.id)) continue;
     const list = outgoing.get(edge.source);
     if (list) list.push(edge);
     else outgoing.set(edge.source, [edge]);
   }
 
-  // Without a fork anywhere, the linear walk already decides (dangling edge,
-  // cycle, orphan, unreached END) — one rule for the editor and these views.
-  if (![...outgoing.values()].some((edges) => edges.length > 1)) {
-    const linear = deriveLinearSteps(def);
-    return linear.isLinear
-      ? { supported: true, main: linear.steps, fork: null }
-      : UNSUPPORTED;
-  }
-
-  const start = def.nodes.find((n) => n.type === ScenarioNodeType.START);
-  if (!start) return UNSUPPORTED;
-
   const nodesById = new Map(def.nodes.map((n) => [n.id, n]));
   const visited = new Set<string>([start.id]);
   const main: ScenarioNode[] = [];
+  const links: StepLink[] = [];
   let current = start;
   let forkEdges: Edge[] | null = null;
+  const edgeInto: Record<string, string> = {};
+  let endEdgeId: string | undefined;
 
   for (;;) {
     const out = outgoing.get(current.id) ?? [];
@@ -97,42 +146,96 @@ export function deriveStepLayout(
       break;
     }
     const target = nodesById.get(out[0].target);
-    // A dangling edge or a cycle in the chain before the fork.
-    if (!target || visited.has(target.id)) return UNSUPPORTED;
+    // A dangling edge, or an edge back into START.
+    if (!target || target.id === start.id) return UNSUPPORTED;
+    if (target.type === ScenarioNodeType.END) {
+      endEdgeId = out[0].id;
+      break;
+    }
+    if (visited.has(target.id)) {
+      // A loop back into the chain: the chain ends here, drawn as a link.
+      links.push(linkOf(out[0]));
+      break;
+    }
     visited.add(target.id);
-    if (target.type === ScenarioNodeType.END) break;
+    edgeInto[target.id] = out[0].id;
     main.push(target);
     current = target;
   }
 
-  // The only fork is not on the chain from START: it sits on an orphan.
-  if (!forkEdges) return UNSUPPORTED;
-
   const branches: StepBranch[] = [];
-  for (const [index, edge] of forkEdges.entries()) {
+  for (const [index, edge] of (forkEdges ?? []).entries()) {
     const steps: ScenarioNode[] = [];
     let target = nodesById.get(edge.target);
+    let into: Edge = edge;
+    let branchEnd: string | undefined;
     // A branch ends at END, at a node with no outgoing edge, or at a dangling
     // edge (the executor just stops that branch there).
     while (target && target.type !== ScenarioNodeType.END) {
-      // Reached twice: a join of two branches, or a loop back.
-      if (visited.has(target.id)) return UNSUPPORTED;
+      // The branch's first step is already placed: not an editable lane.
+      if (visited.has(target.id) && steps.length === 0) return UNSUPPORTED;
       visited.add(target.id);
       steps.push(target);
+      edgeInto[target.id] = into.id;
       const out: Edge[] = outgoing.get(target.id) ?? [];
       if (out.length > 1) return UNSUPPORTED; // a second fork
-      target = out.length === 1 ? nodesById.get(out[0].target) : undefined;
+      const next: ScenarioNode | undefined =
+        out.length === 1 ? nodesById.get(out[0].target) : undefined;
+      if (next && next.type !== ScenarioNodeType.END && visited.has(next.id)) {
+        // A join of two branches, or a loop back: a link, the lane ends.
+        if (next.id === start.id) return UNSUPPORTED;
+        links.push(linkOf(out[0]));
+        break;
+      }
+      if (out.length === 1) into = out[0];
+      target = next;
     }
-    branches.push({ name: branchName(steps[0], index), steps });
+    if (target?.type === ScenarioNodeType.END) branchEnd = into.id;
+    branches.push({
+      name: branchName(steps[0], index),
+      handle: typeof edge.sourceHandle === "string" ? edge.sourceHandle : null,
+      steps,
+      edgeId: edge.id,
+      ...(branchEnd ? { endEdgeId: branchEnd } : {}),
+    });
   }
 
+  // A step no walk reaches (END may stand alone: nothing leads there).
   const orphan = def.nodes.some(
     (n) => n.type !== ScenarioNodeType.END && !visited.has(n.id),
   );
   if (orphan) return UNSUPPORTED;
 
-  return { supported: true, main, fork: { branches } };
+  return {
+    supported: true,
+    main,
+    fork: forkEdges ? { branches } : null,
+    links,
+    edgeInto,
+    ...(endEdgeId ? { endEdgeId } : {}),
+  };
 }
+
+/** The ids of the edges the Graph view draws: into every step, into END,
+ *  and the loop / join links. */
+export function drawnEdgeIds(layout: StepLayout): Set<string> {
+  const ids = new Set<string>(Object.values(layout.edgeInto ?? {}));
+  if (layout.endEdgeId) ids.add(layout.endEdgeId);
+  // A branch's fork edge is drawn as the edge into its first step (in
+  // `edgeInto`) or, for an empty branch, as its edge to END (`endEdgeId`);
+  // a fork edge to a missing node is not drawn at all.
+  for (const branch of layout.fork?.branches ?? []) {
+    if (branch.endEdgeId) ids.add(branch.endEdgeId);
+  }
+  for (const link of layout.links) ids.add(link.id);
+  return ids;
+}
+
+const linkOf = (edge: Edge): StepLink => ({
+  id: edge.id,
+  source: edge.source,
+  target: edge.target,
+});
 
 /** Every step of the layout in display order: main, then each branch. */
 export function layoutSteps(layout: StepLayout): ScenarioNode[] {

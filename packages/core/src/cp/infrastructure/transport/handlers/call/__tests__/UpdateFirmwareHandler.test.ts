@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { UpdateFirmwareHandler } from "../UpdateFirmwareHandler";
-import { ChargePoint } from "../../../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../../../domain/types/OcppTypes";
 import { Logger } from "../../../../../shared/Logger";
 import type { HandlerContext } from "../../MessageHandlerRegistry";
@@ -13,7 +13,7 @@ import { isHandlerOutcome } from "../../../network-sim/ResponseEffectQueue";
  * so the schedule under test is the one that ships.
  */
 function buildContext() {
-  const chargePoint = new ChargePoint(
+  const chargePoint = createChargePoint(
     "test-cp-update-firmware",
     DefaultBootNotification,
     1,

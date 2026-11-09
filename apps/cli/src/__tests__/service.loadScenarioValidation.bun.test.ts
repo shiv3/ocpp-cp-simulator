@@ -1,11 +1,11 @@
 import { describe, expect, it } from "bun:test";
 
 import { CLIChargePointService } from "../service";
-import { BunSqliteDatabase } from "@ocpp-cp-sim/core/cp/domain/persistence/BunSqliteDatabase";
+import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/BunSqliteDatabase";
 import {
   type ScenarioDefinition,
   ScenarioNodeType,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import { testCpInit } from "./testCpInit";
 
 /**
@@ -72,12 +72,25 @@ describe("loadScenario rejects definitions missing required fields", () => {
     ]);
   });
 
-  for (const field of ["id", "name", "targetType", "nodes", "edges"]) {
+  for (const field of ["id", "nodes", "edges"]) {
     it(`rejects a definition with no "${field}"`, () => {
       const service = newService();
       expect(() => service.loadScenario(1, without(field))).toThrow(field);
       // Nothing half-loaded: no runtime entry to leak into list_scenarios.
       expect(service.listScenarios(1)).toEqual([]);
+    });
+  }
+
+  // The web console's import always accepted these; since one gate serves
+  // both, the daemon fills them in instead of refusing the file.
+  for (const field of ["name", "targetType"]) {
+    it(`fills in a missing "${field}"`, () => {
+      const service = newService();
+      expect(service.loadScenario(1, without(field))).toBe("valid-scenario");
+      expect(service.getScenario(1, "valid-scenario")).toMatchObject({
+        name: field === "name" ? "valid-scenario" : "Valid",
+        targetType: "connector",
+      });
     });
   }
 
@@ -89,13 +102,23 @@ describe("loadScenario rejects definitions missing required fields", () => {
     expect(service.listScenarios(1)).toEqual([]);
   });
 
-  it("rejects a bad targetType and a non-array nodes/edges", () => {
+  it("rejects a bad targetType or name and a non-array nodes/edges", () => {
     const service = newService();
+    // Present but wrong: refused with the daemon's old messages, never
+    // turned into "connector" / the id.
     const badTarget = validScenario() as unknown as Record<string, unknown>;
     badTarget.targetType = "station";
     expect(() =>
       service.loadScenario(1, badTarget as unknown as ScenarioDefinition),
-    ).toThrow("targetType");
+    ).toThrow(
+      'scenario "targetType" must be one of "chargePoint" | "connector"',
+    );
+
+    const badName = validScenario() as unknown as Record<string, unknown>;
+    badName.name = 42;
+    expect(() =>
+      service.loadScenario(1, badName as unknown as ScenarioDefinition),
+    ).toThrow('scenario "name" must be a string');
 
     const badNodes = validScenario() as unknown as Record<string, unknown>;
     badNodes.nodes = { 0: "not-an-array" };

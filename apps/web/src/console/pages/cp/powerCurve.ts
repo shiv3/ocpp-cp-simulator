@@ -19,7 +19,7 @@ import {
   evaluateCurveKwh,
   normalizeCurvePoints,
   type CurvePoint,
-} from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
+} from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
 
 import { t } from "../../../i18n";
 

@@ -5,18 +5,18 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ScenarioNodeType,
   type ScenarioDefinition,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import type { EVSettings } from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
-import type { AutoMeterValueConfig } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import type { EVSettings } from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
+import type { AutoMeterValueConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
 import type {
   Database,
   SqlParam,
   SqlRow,
-} from "@ocpp-cp-sim/core/cp/domain/persistence/Database";
-import { SqliteScenarioRepository } from "@ocpp-cp-sim/core/cp/domain/persistence/SqliteScenarioRepository";
-import { OCPPStatus } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
-import type { SimulatorConfigInput } from "@ocpp-cp-sim/contracts/index";
-import { SqliteConnectorSettingsRepository } from "@ocpp-cp-sim/client/sqlite/SqliteConnectorSettingsRepository";
+} from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
+import { SqliteScenarioRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/SqliteScenarioRepository";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
+import type { SimulatorConfigInput } from "@ocpp-cp-simulator/contracts/index";
+import { SqliteConnectorSettingsRepository } from "@ocpp-cp-simulator/client/sqlite/SqliteConnectorSettingsRepository";
 import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
 import type { RegistryConfigRepository } from "../RegistryChargePointService";

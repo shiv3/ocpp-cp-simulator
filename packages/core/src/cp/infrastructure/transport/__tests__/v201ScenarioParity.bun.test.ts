@@ -2,8 +2,9 @@ import { describe, expect, it } from "bun:test";
 import type {
   TransactionEventRequestV201,
   UnlockConnectorRequestV201,
-} from "@ocpp-cp-sim/ocpp/index";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+} from "@ocpp-cp-simulator/ocpp/index";
+import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
 
@@ -65,8 +66,8 @@ function newChargePoint(id: string): {
   csms: MockCsms;
   chargePoint: ChargePoint;
 } {
-  const csms = startMockCsms();
-  const chargePoint = new ChargePoint(
+  const csms = startMockCsms({ answerCalls: true });
+  const chargePoint = createChargePoint(
     id,
     DefaultBootNotification,
     1,

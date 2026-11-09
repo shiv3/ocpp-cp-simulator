@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
+import type { ChargerEngine } from "../../cp/application/engine/ChargerEngine";
 import { runBehavior, type BehaviorRun } from "./runBehavior";
 
 let run: BehaviorRun | undefined;
@@ -114,7 +115,9 @@ describe("loading behaviors", () => {
     });
     await run.call("UpdateFirmware", fw16);
     await run.call("UpdateFirmware", fw16);
-    expect(run.cp.engine.snapshot().behaviors.counter).toEqual({ count: 2 });
+    expect(
+      (run.cp.engine as ChargerEngine).snapshot().behaviors.counter,
+    ).toEqual({ count: 2 });
   });
 
   test("an invalid response is refused with InternalError unless validation is skipped", async () => {

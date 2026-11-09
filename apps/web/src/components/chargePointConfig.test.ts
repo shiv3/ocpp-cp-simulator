@@ -3,11 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   SUPPORTED_OCPP_VERSIONS,
   isSoapVersion,
-} from "@ocpp-cp-sim/core/cp/domain/types/OcppVersion";
+} from "@ocpp-cp-simulator/core/cp/domain/types/OcppVersion";
 import {
   LABEL_VALUE_MAX,
   LABELS_MAX_ENTRIES,
-} from "@ocpp-cp-sim/contracts/labels";
+} from "@ocpp-cp-simulator/contracts/labels";
 import {
   OCPP_VERSION_OPTIONS,
   labelMapFromRows,

@@ -1,7 +1,7 @@
 {
   "id": "cert16-tc003-charging-plugin-first",
   "name": "Cert 1.6 Core: TC_003 Charging Session (Plug-In First)",
-  "description": "Plug-in → StatusNotification(Preparing); idTag presented → StartTransaction.req → StatusNotification(Charging); bounded MeterValue.req while charging; StopTransaction.req → StatusNotification(Finishing) → StatusNotification(Available).",
+  "description": "Plug-in → StatusNotification(Preparing); idTag presented → StartTransaction.req → StatusNotification(Charging); bounded MeterValues.req while charging; StopTransaction.req → StatusNotification(Finishing) → StatusNotification(Available).",
   "targetType": "connector",
   "targetId": 1,
   "trigger": { "type": "manual" },

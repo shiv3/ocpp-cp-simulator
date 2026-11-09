@@ -15,7 +15,7 @@
 //   bun run check:boundaries --list core     # files mapped to one package
 //
 // Across packages an import must name the package
-// (`@ocpp-cp-sim/core/cp/domain/...`, resolved through the package's
+// (`@ocpp-cp-simulator/core/cp/domain/...`, resolved through the package's
 // `exports`), never a relative path into another package. TypeScript project
 // references forbid cycles at the type level too, so `import type`,
 // `export type ... from` and `import("x").T` count as edges exactly like
@@ -31,9 +31,9 @@
 // domain may import only domain and shared; application may import domain,
 // application and shared (never infrastructure); infrastructure may import
 // every layer; shared imports only shared. Every layer may use the other
-// workspace packages the package rules above allow. The edges that break this
-// today are listed in LAYER_EXEMPTIONS; an entry that stops matching fails the
-// run, so the list can only shrink. Tests are not checked.
+// workspace packages the package rules above allow. LAYER_EXEMPTIONS lists
+// the edges let through; it is empty since #575, and an entry that stops
+// matching fails the run. Tests are not checked.
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, posix, resolve } from "node:path";
@@ -49,6 +49,7 @@ export const PACKAGE_NAMES = [
   "contracts",
   "trace",
   "k6-runtime",
+  "vehicle",
   "core",
   "client",
   "apps/cli",
@@ -72,6 +73,7 @@ export const PACKAGE_DIRS: Readonly<Record<PackageName, string>> = {
   ocpp: "packages/ocpp",
   contracts: "packages/contracts",
   trace: "packages/trace",
+  vehicle: "packages/vehicle",
   "k6-runtime": "packages/k6-runtime",
   core: "packages/core",
   client: "packages/client",
@@ -79,9 +81,9 @@ export const PACKAGE_DIRS: Readonly<Record<PackageName, string>> = {
   "apps/web": "apps/web",
 };
 
-/** `@ocpp-cp-sim/<dir name>`: the name a package is imported and declared by. */
+/** `@ocpp-cp-simulator/<dir name>`: the name a package is imported and declared by. */
 export function packageNameOf(pkg: PackageName): string {
-  return `@ocpp-cp-sim/${PACKAGE_DIRS[pkg].split("/")[1]}`;
+  return `@ocpp-cp-simulator/${PACKAGE_DIRS[pkg].split("/")[1]}`;
 }
 
 /**
@@ -96,6 +98,8 @@ export function packageNameOf(pkg: PackageName): string {
  *   schemas.
  * - packages/contracts: the wire/RPC vocabulary shared by daemon and clients.
  * - packages/trace: the trace format reader/writer.
+ * - packages/vehicle: the vehicle behavior domain (#835): what the vehicle
+ *   wants and when. Imports nothing, so it can leave the repository unchanged.
  * - packages/k6-runtime: dependency-free files copied verbatim into an
  *   export; runtimeManifest.test.ts enforces that they import nothing outside
  *   themselves.
@@ -113,6 +117,7 @@ export const PACKAGE_MAP: readonly MapEntry[] = [
   { match: "packages/contracts/", pkg: "contracts" },
   { match: "packages/trace/", pkg: "trace" },
   { match: "packages/k6-runtime/", pkg: "k6-runtime" },
+  { match: "packages/vehicle/", pkg: "vehicle" },
   { match: "packages/core/", pkg: "core" },
   { match: "packages/client/", pkg: "client" },
   { match: "apps/cli/", pkg: "apps/cli" },
@@ -127,7 +132,8 @@ export const ALLOWED_DEPENDENCIES: Readonly<
   contracts: [],
   trace: [],
   "k6-runtime": [],
-  core: ["ocpp", "contracts", "trace", "k6-runtime"],
+  vehicle: [],
+  core: ["ocpp", "contracts", "trace", "k6-runtime", "vehicle"],
   client: ["core", "contracts", "ocpp", "trace"],
   "apps/cli": ["ocpp", "contracts", "trace", "k6-runtime", "core", "client"],
   "apps/web": ["ocpp", "contracts", "trace", "k6-runtime", "core", "client"],
@@ -143,6 +149,7 @@ export const PORTABLE_PACKAGES: ReadonlySet<PackageName> = new Set([
   "contracts",
   "trace",
   "k6-runtime",
+  "vehicle",
   "core",
   "client",
 ]);
@@ -219,7 +226,7 @@ export const SPECIFIER_ALLOW_LIST: Readonly<
     { readonly specifiers: readonly string[]; readonly why: string }
   >
 > = {
-  "packages/core/src/cp/domain/persistence/BunSqliteDatabase.ts": {
+  "packages/core/src/cp/infrastructure/persistence/BunSqliteDatabase.ts": {
     specifiers: ["bun:sqlite", "node:path", "node:fs"],
     why: "The Bun-only Database implementation behind the daemon's state file. Never reached from the browser bundle (browserBundleNoDaemonXml.bun.test.ts guards that); the web console uses SqlJsDatabase instead.",
   },
@@ -291,82 +298,13 @@ export function layerOf(file: string): Layer | null {
 }
 
 /**
- * Layer-breaking imports that exist today, one entry per importing file and
+ * Layer-breaking imports let through, one entry per importing file and
  * imported file. Matching violations are printed as warnings and do not fail
- * the run; an entry that matches nothing fails it, so delete each entry in
- * the PR that removes the import. The goal (#577) is an empty list. Tests are
- * not covered by the rule.
+ * the run; an entry that matches nothing fails it. The list is empty since
+ * #575 (#577's goal): a new entry needs a reason in `why` and the issue that
+ * removes it. Tests are not covered by the rule.
  */
-export const LAYER_EXEMPTIONS: readonly KnownViolation[] = [
-  {
-    from: "packages/core/src/cp/application/engine/behaviors/diagnostics.ts",
-    to: "packages/core/src/cp/infrastructure/file_upload.ts",
-    why: "The diagnostics behavior calls the file-upload client directly; it needs a port in application.",
-  },
-  ...[
-    "application/behavior/BehaviorRegistry.ts",
-    "application/engine/ChargerEngine.ts",
-    "application/engine/behaviors/transaction.ts",
-    "application/services/HeartbeatService.ts",
-    "application/services/OperationalTimeline.ts",
-    "application/services/OperationalTimelineProjector.ts",
-    "application/services/StateManager.ts",
-  ].map((t) => ({
-    from: "packages/core/src/cp/domain/charge-point/ChargePoint.ts",
-    to: `packages/core/src/cp/${t}`,
-    why: "ChargePoint still wires the application services itself; clears with the ChargePoint split (#575).",
-  })),
-  ...[
-    "infrastructure/transport/OCPPWebSocket.ts",
-    "infrastructure/transport/RawFrameSender.ts",
-    "infrastructure/transport/SupervisionUrlPool.ts",
-    "infrastructure/transport/codec/ocppCallCatalog.ts",
-    "infrastructure/transport/network-sim/index.ts",
-    "infrastructure/transport/profile/profiles.ts",
-    "infrastructure/transport/soap/dialect.ts",
-    "infrastructure/transport/soap/index.ts",
-    "infrastructure/transport/v201/renderConfigValue.ts",
-    "infrastructure/transport/wsUrlWithBasic.ts",
-  ].map((t) => ({
-    from: "packages/core/src/cp/domain/charge-point/ChargePoint.ts",
-    to: `packages/core/src/cp/${t}`,
-    why: "ChargePoint still builds the transport itself; clears with the ChargePoint split (#575).",
-  })),
-  ...[
-    "application/scenario/ScenarioManager.ts",
-    "application/scenario/ScenarioTypes.ts",
-  ].map((t) => ({
-    from: "packages/core/src/cp/domain/connector/Connector.ts",
-    to: `packages/core/src/cp/${t}`,
-    why: "Connector holds the scenario manager and its types; clears with the ChargePoint / Connector split (#575).",
-  })),
-  {
-    from: "packages/core/src/cp/domain/persistence/ScenarioRepository.ts",
-    to: "packages/core/src/cp/application/scenario/ScenarioTypes.ts",
-    why: "The repository port names the scenario types; clears when they move to domain (#573).",
-  },
-  ...[
-    "application/verification/ScenarioAssertions.ts",
-    "application/verification/ScenarioRunSummary.ts",
-  ].map((t) => ({
-    from: "packages/core/src/cp/domain/persistence/ScenarioRunRepository.ts",
-    to: `packages/core/src/cp/${t}`,
-    why: "The repository port names the run summary types; clears when they move to domain (#573).",
-  })),
-  {
-    from: "packages/core/src/cp/domain/persistence/SqliteScenarioRepository.ts",
-    to: "packages/core/src/cp/application/scenario/ScenarioTypes.ts",
-    why: "SQLite implementation lives in domain; clears when it moves to infrastructure (#573).",
-  },
-  ...[
-    "application/verification/ScenarioAssertions.ts",
-    "application/verification/ScenarioRunSummary.ts",
-  ].map((t) => ({
-    from: "packages/core/src/cp/domain/persistence/SqliteScenarioRunRepository.ts",
-    to: `packages/core/src/cp/${t}`,
-    why: "SQLite implementation lives in domain; clears when it moves to infrastructure (#573).",
-  })),
-];
+export const LAYER_EXEMPTIONS: readonly KnownViolation[] = [];
 
 // ---------------------------------------------------------------------------
 // Machinery
@@ -642,11 +580,11 @@ export function resolveExport(
   return exportsMap[best.key]!.replace("*", matched);
 }
 
-const PACKAGE_SPECIFIER = /^(@ocpp-cp-sim\/[^/]+)(?:\/(.*))?$/;
+const PACKAGE_SPECIFIER = /^(@ocpp-cp-simulator\/[^/]+)(?:\/(.*))?$/;
 
 export interface Resolution {
   readonly path: string;
-  /** The specifier named a workspace package (`@ocpp-cp-sim/x/...`). */
+  /** The specifier named a workspace package (`@ocpp-cp-simulator/x/...`). */
   readonly viaPackage: boolean;
 }
 
@@ -719,7 +657,7 @@ export interface Edge {
   readonly kind: ImportKind;
   readonly typeOnly: boolean;
   readonly test: boolean;
-  /** Imported through `@ocpp-cp-sim/<package>/...` rather than by path. */
+  /** Imported through `@ocpp-cp-simulator/<package>/...` rather than by path. */
   readonly viaPackage: boolean;
 }
 
@@ -765,7 +703,7 @@ export interface Snapshot {
   readonly others: ReadonlySet<string>;
   /**
    * The workspace manifests (`<dir>/package.json`) by package. When present
-   * they resolve `@ocpp-cp-sim/...` specifiers through their real `exports`
+   * they resolve `@ocpp-cp-simulator/...` specifiers through their real `exports`
    * and are checked against the imports; without them the "./*" convention
    * is assumed and no manifest is checked.
    */
@@ -1099,7 +1037,7 @@ export function checkManifests(
       needed.set(name, (needed.get(name) ?? 0) + 1);
     }
     const declared = Object.entries(manifest.dependencies ?? {}).filter(([n]) =>
-      n.startsWith("@ocpp-cp-sim/"),
+      n.startsWith("@ocpp-cp-simulator/"),
     );
     for (const [name, range] of declared) {
       if (range !== "workspace:*")

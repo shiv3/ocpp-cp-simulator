@@ -1,10 +1,33 @@
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import type {
+  Behavior,
+  BehaviorParams,
+} from "@ocpp-cp-simulator/contracts/behavior";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { isOcpp2Version } from "../../../domain/types/OcppVersion";
 import { LogType } from "../../../shared/Logger";
 
-/** Time the simulated 1.6 upload takes. */
-const UPLOAD_MS = 2000;
+/** The knobs of the 1.6 upload; the default is the former constant. */
+const PARAMS: BehaviorParams = {
+  schema: {
+    type: "object",
+    properties: {
+      uploadMs: {
+        type: "integer",
+        minimum: 0,
+        maximum: 3_600_000,
+        title: "Upload time (ms)",
+        description: "Time between Uploading and Uploaded",
+      },
+      auto: {
+        type: "boolean",
+        title: "Automatic upload (OCPP 2.x)",
+        description:
+          "OCPP 2.x only: send Uploading and Uploaded after an accepted GetLog, and answer AcceptedCanceled to a GetLog that replaces an upload in progress (N01.FR.12). Off: acknowledge only, the control plane drives the notifications. OCPP 1.6 always uploads",
+      },
+    },
+  },
+  defaults: { uploadMs: 2000, auto: true },
+};
 
 interface GetLogRequest {
   logType?: string;
@@ -17,17 +40,25 @@ interface GetLogRequest {
  * OCPP 1.6 Security Whitepaper: the response returns the log's file name,
  * then, once it settled, the station sends LogStatusNotification `Uploading`
  * and, two seconds later, `Uploaded`, both carrying `requestId`. There is no
- * real log to upload, so the sequence is timer-driven.
+ * real log to upload, so the sequence is timer-driven. A request that arrives
+ * while an upload runs cancels it and is answered `AcceptedCanceled`
+ * (whitepaper N01.FR.11): only the new request's `Uploaded` is sent.
  *
- * OCPP 2.x (N01): the request is accepted with a file name and its
- * `requestId` remembered for the LogStatusNotification reports the control
- * plane drives; the station reports nothing on its own. A user behavior can
- * opt in to a sequence.
+ * OCPP 2.x (N01): the request is accepted with a file name and, once the
+ * answer settled, the station sends LogStatusNotification `Uploading` and,
+ * `uploadMs` later, `Uploaded`, both carrying the request's `requestId`
+ * (N01.FR.07 to FR.09; #601). A GetLog that arrives during an upload is
+ * answered `AcceptedCanceled`; the upload it replaces ends with a
+ * LogStatusNotification `AcceptedCanceled` for its own `requestId`
+ * (N01.FR.12, FR.20) and never reports `Uploaded`. With `auto` off the
+ * station reports nothing on its own and the control plane drives the
+ * notifications, as before #601.
  */
 export function logsBehavior(cp: ChargePoint): Behavior {
   return {
     api: 1,
     id: "default.logs",
+    params: PARAMS,
     onCall: {
       GetLog: {
         mode: "replace",
@@ -38,14 +69,70 @@ export function logsBehavior(cp: ChargePoint): Behavior {
               cp.noteLogRequest(req.requestId);
             }
             const logType = req.logType ?? "DiagnosticsLog";
+            const auto = ctx.params.auto === true;
+            const previous = ctx.state.uploadingRequestId;
+            const replaces =
+              auto && previous !== undefined && previous !== null;
+            const seqAtRequest = cp.logStatusSeq;
+            // Taken now, with the answer: the old upload stops reporting from
+            // this point, so it cannot send Uploaded after this request was
+            // answered AcceptedCanceled (#846).
+            let generation = 0;
+            if (auto) {
+              generation =
+                (typeof ctx.state.uploadGeneration === "number"
+                  ? ctx.state.uploadGeneration
+                  : 0) + 1;
+              ctx.state.uploadGeneration = generation;
+            }
             return {
               response: {
-                status: "Accepted",
+                status: replaces ? "AcceptedCanceled" : "Accepted",
                 // GetLogResponse.filename is bounded at 255 in the 2.0.1 schema.
                 filename: `${cp.id}-${logType}-${req.requestId ?? 0}.log`.slice(
                   -255,
                 ),
               },
+              after: auto
+                ? async (): Promise<void> => {
+                    const requestId = req.requestId ?? 0;
+                    // Another sender of this request's status train (the
+                    // control plane, a scenario `notify` node) takes the
+                    // lifecycle over: it sends nothing more (N01.FR.09).
+                    let seenSeq = seqAtRequest;
+                    const driven = (): boolean =>
+                      cp.logStatusSeq !== seenSeq &&
+                      cp.lastLogStatusRequestId === requestId;
+                    if (typeof previous === "number") {
+                      // N01.FR.20: the cancelled upload reports it.
+                      ctx.notify.logStatus("AcceptedCanceled", {
+                        requestId: previous,
+                      });
+                      if (!driven()) seenSeq = cp.logStatusSeq;
+                    }
+                    ctx.state.uploadingRequestId = requestId;
+                    const send = (status: "Uploading" | "Uploaded"): void => {
+                      ctx.notify.logStatus(status, { requestId });
+                      seenSeq = cp.logStatusSeq;
+                    };
+                    try {
+                      if (!driven()) send("Uploading");
+                      await ctx.sleep(ctx.params.uploadMs as number);
+                      if (
+                        ctx.stopping ||
+                        ctx.state.uploadGeneration !== generation ||
+                        driven()
+                      ) {
+                        return;
+                      }
+                      send("Uploaded");
+                    } finally {
+                      if (ctx.state.uploadGeneration === generation) {
+                        ctx.state.uploadingRequestId = null;
+                      }
+                    }
+                  }
+                : undefined,
             };
           }
 
@@ -53,16 +140,29 @@ export function logsBehavior(cp: ChargePoint): Behavior {
             `GetLog request received: logType=${req.logType} requestId=${req.requestId}`,
             LogType.DIAGNOSTICS,
           );
+          // N01.FR.11 / L01.FR.26: a request while an upload runs cancels it
+          // and is answered AcceptedCanceled. Taking the next run number is
+          // the cancellation: the old upload sends nothing more.
+          const cancelsRunning = ctx.state.inFlight === true;
+          const run = Number(ctx.state.run ?? 0) + 1;
+          ctx.state.run = run;
           return {
             response: {
-              status: "Accepted",
+              status: cancelsRunning ? "AcceptedCanceled" : "Accepted",
               filename: `${cp.id}-${req.logType}-${req.requestId}.log`,
             },
             // Status notifications follow the CALLRESULT, never precede it.
             after: async (): Promise<void> => {
-              ctx.notify.logStatus("Uploading", { requestId: req.requestId });
-              await ctx.sleep(UPLOAD_MS);
-              ctx.notify.logStatus("Uploaded", { requestId: req.requestId });
+              if (ctx.state.run !== run) return;
+              ctx.state.inFlight = true;
+              try {
+                ctx.notify.logStatus("Uploading", { requestId: req.requestId });
+                await ctx.sleep(ctx.params.uploadMs as number);
+                if (ctx.state.run !== run) return;
+                ctx.notify.logStatus("Uploaded", { requestId: req.requestId });
+              } finally {
+                if (ctx.state.run === run) ctx.state.inFlight = false;
+              }
             },
           };
         },

@@ -16,7 +16,7 @@
 import type {
   Behavior,
   BehaviorContext,
-} from "@ocpp-cp-sim/contracts/behavior";
+} from "@ocpp-cp-simulator/contracts/behavior";
 
 /** Added to every meter reading the station reports (Wh in the default unit). */
 const METER_OFFSET = 1000;

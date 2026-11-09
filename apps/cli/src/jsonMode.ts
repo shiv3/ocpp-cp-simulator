@@ -3,16 +3,16 @@ import {
   FIRMWARE_STATUSES,
   isOneOf,
   UPLOAD_LOG_STATUSES,
-} from "@ocpp-cp-sim/core/cp/domain/types/FirmwareLogStatus";
-import type { DataTransferData } from "@ocpp-cp-sim/core/cp/domain/types/DataTransfer";
-import type { AuthorizationCacheSeedEntry } from "@ocpp-cp-sim/core/cp/domain/auth/AuthorizationCacheSeed";
+} from "@ocpp-cp-simulator/core/cp/domain/types/FirmwareLogStatus";
+import type { DataTransferData } from "@ocpp-cp-simulator/core/cp/domain/types/DataTransfer";
+import type { AuthorizationCacheSeedEntry } from "@ocpp-cp-simulator/core/cp/domain/auth/AuthorizationCacheSeed";
 import * as readline from "readline";
 import * as fs from "fs";
 import {
   hasStatusNotificationOptions,
   OCPPStatus,
   type StatusNotificationOptions,
-} from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+} from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import {
   authorizationCacheSeedSchema,
   dataTransferDataSchema,
@@ -20,24 +20,25 @@ import {
   scenarioWaitExtensionSecondsSchema,
   type Params,
   type RpcMethod,
-} from "@ocpp-cp-sim/contracts/index";
+} from "@ocpp-cp-simulator/contracts/index";
 import { toJsonResponse, toJsonEvent } from "./output";
 import type { JsonCommand } from "./types";
 import type {
   ScenarioDefinition,
   ScenarioMode,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
-import type { EVSettings } from "@ocpp-cp-sim/core/cp/domain/connector/EVSettings";
-import type { AutoMeterValueConfig } from "@ocpp-cp-sim/core/cp/domain/connector/MeterValueCurve";
-import type { AutoTrafficConfig } from "@ocpp-cp-sim/core/cp/domain/connector/AutoTraffic";
-import type { HistoryOptions } from "@ocpp-cp-sim/core/cp/application/services/types/StateSnapshot";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import type { EVSettings } from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
+import type { AutoMeterValueConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
+import type { AutoTrafficConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/AutoTraffic";
+import type { HistoryOptions } from "@ocpp-cp-simulator/core/cp/domain/services/StateSnapshot";
 import {
+  ID_TOKEN_TYPE_VALUES,
   METER_READING_CONTEXTS,
   STOP_REASONS,
   TRANSACTION_CHARGING_STATES,
   TRANSACTION_EVENT_TRIGGER_REASONS,
-} from "@ocpp-cp-sim/core/cp/domain/connector/Transaction";
-import { SCENARIO_MODES } from "@ocpp-cp-sim/contracts/index";
+} from "@ocpp-cp-simulator/core/cp/domain/connector/Transaction";
+import { SCENARIO_MODES } from "@ocpp-cp-simulator/contracts/index";
 import {
   cleanupSingleCpTarget,
   getSingleCpCommandOps,
@@ -132,7 +133,9 @@ export async function handleJsonCommand(
     case "start_transaction": {
       const connectorId = requirePositiveInt(params, "connector");
       const tagId = requireString(params, "tagId");
-      await ops.startTransaction(connectorId, tagId, {
+      // Answers once the transaction exists or the start was refused (#813),
+      // so the next command can follow at once.
+      const outcome = await ops.startTransaction(connectorId, tagId, {
         triggerReason: optionalEnum(
           params,
           "triggerReason",
@@ -143,8 +146,9 @@ export async function handleJsonCommand(
           "chargingState",
           TRANSACTION_CHARGING_STATES,
         ),
+        idTokenType: optionalEnum(params, "idTokenType", ID_TOKEN_TYPE_VALUES),
       });
-      return undefined;
+      return outcome;
     }
 
     case "stop_transaction": {
@@ -181,6 +185,19 @@ export async function handleJsonCommand(
 
     case "ev_disconnected": {
       await ops.evDisconnected(requirePositiveInt(params, "connector"));
+      return undefined;
+    }
+
+    case "ev_plug_in": {
+      await ops.evPlugIn(requirePositiveInt(params, "connector"));
+      return undefined;
+    }
+
+    case "ev_ready": {
+      await ops.evSetReady(
+        requirePositiveInt(params, "connector"),
+        requireBoolean(params, "ready"),
+      );
       return undefined;
     }
 
@@ -270,7 +287,10 @@ export async function handleJsonCommand(
 
     case "authorize": {
       const tagId = requireString(params, "tagId");
-      await ops.authorize(tagId);
+      await ops.authorize(
+        tagId,
+        optionalEnum(params, "idTokenType", ID_TOKEN_TYPE_VALUES),
+      );
       return undefined;
     }
 

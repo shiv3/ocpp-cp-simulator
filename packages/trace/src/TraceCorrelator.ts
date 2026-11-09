@@ -6,7 +6,7 @@
  * pre-collected batch.
  */
 
-import type { OcppTraceRecord } from "./OcppTraceRecord";
+import type { TraceRecord } from "@open-ocpp-trace/core";
 
 /** Cap on pending CALL entries awaiting a response. Pending CALLs that never
  * receive a response must not grow unboundedly in a long daemon run. */
@@ -16,7 +16,7 @@ export const MAX_PENDING_CORRELATIONS = 10_000;
  *  multiple CPs (e.g. the daemon's JSON log), and two CPs may reuse the same
  *  messageId. The JSON tuple stays unambiguous whatever the cpId/messageId
  *  contain. */
-function correlationKey(record: OcppTraceRecord): string {
+function correlationKey(record: TraceRecord): string {
   return JSON.stringify([record.chargePointId ?? "", record.messageId]);
 }
 
@@ -24,7 +24,7 @@ export class TraceCorrelator {
   private readonly actionByKey = new Map<string, string>();
 
   /** Record a CALL's action / back-fill a CALLRESULT/CALLERROR action, in place. Returns the same record. */
-  observe(record: OcppTraceRecord): OcppTraceRecord {
+  observe(record: TraceRecord): TraceRecord {
     if (record.messageId === undefined) return record;
     const key = correlationKey(record);
     if (record.action) {

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ChargePoint } from "../ChargePoint";
+import type { ChargePoint } from "../ChargePoint";
+import { createChargePoint } from "../../../infrastructure/charge-point/createChargePoint";
 import type { BootNotification } from "../../types/OcppTypes";
 import { DefaultBootNotification } from "../../types/OcppTypes";
 
@@ -24,7 +25,7 @@ function startUpdateFirmware(cp: ChargePoint): void {
 }
 
 function buildChargePoint(): ChargePoint {
-  return new ChargePoint(
+  return createChargePoint(
     "test-cp-firmware-failure",
     bootNotification,
     1,

@@ -1,7 +1,7 @@
 // The k6 host of the behavior API, on a fake charge point and real (short)
 // timers. The k6 side is exercised by the real-k6 run in docs/concepts/charger-engine.md.
 import { describe, expect, it } from "vitest";
-import { RngStreams } from "@ocpp-cp-sim/core/cp/shared/rng";
+import { RngStreams } from "@ocpp-cp-simulator/core/cp/shared/rng";
 import {
   BehaviorHost,
   BehaviorStopped,
@@ -9,10 +9,13 @@ import {
   unmetBy,
   type BehaviorCp,
   type CallHandler,
-} from "@ocpp-cp-sim/k6-runtime/behaviorHost";
-import { seededStream } from "@ocpp-cp-sim/k6-runtime/behaviorRandom";
-import type { Behavior } from "@ocpp-cp-sim/k6-runtime/behaviorTypes";
-import type { CallObserver, WireCall } from "@ocpp-cp-sim/k6-runtime/types";
+} from "@ocpp-cp-simulator/k6-runtime/behaviorHost";
+import { seededStream } from "@ocpp-cp-simulator/k6-runtime/behaviorRandom";
+import type { Behavior } from "@ocpp-cp-simulator/k6-runtime/behaviorTypes";
+import type {
+  CallObserver,
+  WireCall,
+} from "@ocpp-cp-simulator/k6-runtime/types";
 
 const timers = {
   setTimeout: (fn: () => void, ms: number) =>

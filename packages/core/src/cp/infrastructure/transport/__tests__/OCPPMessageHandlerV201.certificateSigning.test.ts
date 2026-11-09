@@ -12,7 +12,7 @@ import {
   isValidSignCertificateRequestV21,
   isValidTriggerMessageResponseV201,
   isValidTriggerMessageResponseV21,
-} from "@ocpp-cp-sim/ocpp/index";
+} from "@ocpp-cp-simulator/ocpp/index";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { defaultConfiguration } from "../../../domain/charge-point/Configuration";
 import { ConfigurationStore } from "../../../domain/charge-point/ConfigurationStore";
@@ -49,6 +49,13 @@ type WireEvent =
 
 class FakeSocket {
   readonly wire: WireEvent[] = [];
+  /** What the CSMS answers at once, per action, after the write returns. A
+   *  2.x station sends the next CALL only after the answer (#708); the tests
+   *  answer SignCertificate themselves, since its answer starts the back-off. */
+  readonly autoAnswers = new Map<string, unknown>([
+    ["SecurityEventNotification", {}],
+    ["GetCertificateStatus", { status: "Failed" }],
+  ]);
   private handler:
     | ((type: number, id: string, action: string, payload: unknown) => void)
     | null = null;
@@ -74,6 +81,10 @@ class FakeSocket {
   ): boolean {
     this.wire.push({ kind: "call", messageId, action, payload });
     onSettled?.({ outcome: "written" });
+    if (this.autoAnswers.has(action)) {
+      const answer = this.autoAnswers.get(action);
+      queueMicrotask(() => this.deliverResult(messageId, answer));
+    }
     return true;
   }
   sendResult(
@@ -183,6 +194,21 @@ async function settle(socket: FakeSocket, count: number): Promise<void> {
   });
 }
 
+/** Lets the fake CSMS answer a chain of CALLs, one microtask each. */
+async function flush(): Promise<void> {
+  for (let i = 0; i < 50; i++) await Promise.resolve();
+}
+
+/** Two CSRs in a row: the second SignCertificate waits behind the unanswered
+ *  first (§4.1.1) until its MessageTimeout. */
+async function twoSignRequests(socket: FakeSocket): Promise<void> {
+  await trigger(socket, "SignChargingStationCertificate");
+  await settle(socket, 1);
+  await trigger(socket, "SignChargingStationCertificate");
+  vi.advanceTimersByTime(30_000);
+  await settle(socket, 2);
+}
+
 let seq = 0;
 
 async function trigger(
@@ -246,10 +272,7 @@ describe.each(Object.keys(VERSIONS) as Version[])("%s", (version) => {
 
   it("generates a new key pair on every trigger (A02.FR.02)", async () => {
     const { socket } = setup(version);
-    await trigger(socket, "SignChargingStationCertificate");
-    await settle(socket, 1);
-    await trigger(socket, "SignChargingStationCertificate");
-    await settle(socket, 2);
+    await twoSignRequests(socket);
     const [first, second] = socket.calls("SignCertificate");
     expect(second.payload.csr).not.toBe(first.payload.csr);
   });
@@ -436,7 +459,10 @@ describe.each(Object.keys(VERSIONS) as Version[])("%s", (version) => {
 
       await handler.sendSignCertificate("not a csr");
       const [, refused] = socket.calls("SignCertificate");
-      expect(refused.payload).toEqual({ csr: "not a csr" });
+      expect(refused.payload).toEqual({
+        csr: "not a csr",
+        ...(version === "OCPP-2.1" ? { requestId: expect.any(Number) } : {}),
+      });
       socket.deliverResult(refused.messageId, { status });
 
       vi.advanceTimersByTime(10_000);
@@ -445,6 +471,91 @@ describe.each(Object.keys(VERSIONS) as Version[])("%s", (version) => {
       expect(calls[2].payload).toEqual(pending.payload);
     },
   );
+
+  // #720 A02.FR.24 / A03.FR.20 (2.1): the request carries a requestId.
+  it(
+    version === "OCPP-2.1"
+      ? "sends a requestId on every SignCertificate and keeps it on the back-off resend (A02.FR.24)"
+      : "sends no requestId (the 2.0.1 schema has none)",
+    async () => {
+      const { socket, handler } = setup(version);
+      await trigger(socket, "SignChargingStationCertificate");
+      await settle(socket, 1);
+      // One CALL at a time (#708): the manual request goes out once the
+      // triggered one is answered.
+      const [triggered] = socket.calls("SignCertificate");
+      socket.deliverResult(triggered.messageId, { status: "Accepted" });
+      await handler.sendSignCertificate();
+      const [, manual] = socket.calls("SignCertificate");
+      socket.deliverResult(manual.messageId, { status: "Accepted" });
+      vi.advanceTimersByTime(10_000);
+      const resent = socket.calls("SignCertificate")[2];
+      expect(validSign(triggered.payload)).toBe(true);
+      expect(validSign(manual.payload)).toBe(true);
+      if (version === "OCPP-2.1") {
+        expect(typeof triggered.payload.requestId).toBe("number");
+        expect(typeof manual.payload.requestId).toBe("number");
+        expect(manual.payload.requestId).not.toBe(triggered.payload.requestId);
+        expect(resent.payload.requestId).toBe(manual.payload.requestId);
+      } else {
+        expect(triggered.payload).not.toHaveProperty("requestId");
+        expect(manual.payload).not.toHaveProperty("requestId");
+      }
+      expect(resent.payload).toEqual(manual.payload);
+    },
+  );
+
+  if (version === "OCPP-2.1") {
+    it("rejects a CertificateSigned with an unknown requestId and keeps the pending CSR and back-off (A02.FR.26)", async () => {
+      const { socket, certificateStore } = setup(version);
+      await trigger(socket, "SignChargingStationCertificate");
+      await settle(socket, 1);
+      const [sign] = socket.calls("SignCertificate");
+      socket.deliverResult(sign.messageId, { status: "Accepted" });
+      const root = await selfSignedRoot("01", "Root");
+      const leaf = await leafForCsr("02", sign.payload.csr as string, root);
+
+      const unknown = await deliverSigned(socket, {
+        certificateChain: leaf,
+        certificateType: "ChargingStationCertificate",
+        requestId: (sign.payload.requestId as number) + 999,
+      });
+      expect(unknown).toEqual({ status: "Rejected" });
+      expect(validSigned(unknown)).toBe(true);
+      expect(certificateStore.listSignedChains()).toHaveLength(0);
+      expect(certificateStore.pendingCsr("ChargingStationCertificate")).toBe(
+        sign.payload.csr,
+      );
+      expect(socket.calls("SecurityEventNotification")).toHaveLength(0);
+      // The back-off goes on: the CSR is resent.
+      vi.advanceTimersByTime(10_000);
+      expect(socket.calls("SignCertificate")).toHaveLength(2);
+
+      // The issued id, and no id at all, are processed as before.
+      const matching = await deliverSigned(socket, {
+        certificateChain: leaf,
+        certificateType: "ChargingStationCertificate",
+        requestId: sign.payload.requestId,
+      });
+      expect(matching).toEqual({ status: "Accepted" });
+      expect(certificateStore.listSignedChains()).toHaveLength(1);
+    });
+
+    it("processes a CertificateSigned without a requestId as before", async () => {
+      const { socket, certificateStore } = setup(version);
+      await trigger(socket, "SignChargingStationCertificate");
+      await settle(socket, 1);
+      const [sign] = socket.calls("SignCertificate");
+      const root = await selfSignedRoot("01", "Root");
+      const leaf = await leafForCsr("02", sign.payload.csr as string, root);
+      const answer = await deliverSigned(socket, {
+        certificateChain: leaf,
+        certificateType: "ChargingStationCertificate",
+      });
+      expect(answer).toEqual({ status: "Accepted" });
+      expect(certificateStore.listSignedChains()).toHaveLength(1);
+    });
+  }
 
   it("never resends a CSR that does not parse", async () => {
     const { socket, handler } = setup(version);
@@ -564,7 +675,11 @@ describe.each(Object.keys(VERSIONS) as Version[])("%s", (version) => {
           sign.payload,
         );
 
-        // A second rejection does not start the sequence over either.
+        // A second rejection does not start the sequence over either. The
+        // CSMS answers the resend first (one CALL in flight, §4.1.1).
+        socket.deliverResult(socket.calls("SignCertificate")[1].messageId, {
+          status: "Accepted",
+        });
         await deliverSigned(socket, await payload());
         vi.advanceTimersByTime(20_000);
         expect(socket.calls("SignCertificate")).toHaveLength(3);
@@ -575,10 +690,7 @@ describe.each(Object.keys(VERSIONS) as Version[])("%s", (version) => {
 
     it("does not let a chain for a CSR a newer trigger replaced cut the current CSR's resends", async () => {
       const { socket } = setup(version);
-      await trigger(socket, "SignChargingStationCertificate");
-      await settle(socket, 1);
-      await trigger(socket, "SignChargingStationCertificate");
-      await settle(socket, 2);
+      await twoSignRequests(socket);
       const [stale, current] = socket.calls("SignCertificate");
       socket.deliverResult(current.messageId, { status: "Accepted" });
 
@@ -639,10 +751,7 @@ describe.each(Object.keys(VERSIONS) as Version[])("%s", (version) => {
 
   it("ignores a late answer to a request a newer CSR replaced", async () => {
     const { socket } = setup(version);
-    await trigger(socket, "SignChargingStationCertificate");
-    await settle(socket, 1);
-    await trigger(socket, "SignChargingStationCertificate");
-    await settle(socket, 2);
+    await twoSignRequests(socket);
     const [stale, current] = socket.calls("SignCertificate");
     socket.deliverResult(current.messageId, { status: "Accepted" });
     vi.advanceTimersByTime(5_000);
@@ -655,10 +764,7 @@ describe.each(Object.keys(VERSIONS) as Version[])("%s", (version) => {
 
   it("does not start the back-off on a replaced request's Accepted", async () => {
     const { socket } = setup(version);
-    await trigger(socket, "SignChargingStationCertificate");
-    await settle(socket, 1);
-    await trigger(socket, "SignChargingStationCertificate");
-    await settle(socket, 2);
+    await twoSignRequests(socket);
     const [stale, current] = socket.calls("SignCertificate");
     socket.deliverResult(stale.messageId, { status: "Accepted" });
     vi.advanceTimersByTime(5_000);
@@ -831,7 +937,8 @@ describe.each([
       const { socket, handler } = setup(version);
       vi.spyOn(socket, "isConnected").mockReturnValue(false);
 
-      const sending = handler.sendSecurityEventNotification("ResetOrReboot");
+      // Non-critical: a critical type would be queued (A04.FR.02, #552).
+      const sending = handler.sendSecurityEventNotification("InvalidMessages");
 
       await expect(sending).rejects.toBeInstanceOf(OcppCallNoAnswerError);
       await expect(sending).rejects.toMatchObject({
@@ -853,7 +960,7 @@ describe.each([
         );
 
         await expect(
-          handler.sendSecurityEventNotification("ResetOrReboot"),
+          handler.sendSecurityEventNotification("InvalidMessages"),
         ).rejects.toMatchObject({
           reason: "dropped",
           message: expect.stringContaining(outcome),
@@ -894,6 +1001,7 @@ describe.each([
     await trigger(env.socket, "SignV2GCertificate");
     await settle(env.socket, 1);
     const [sign] = env.socket.calls("SignCertificate");
+    env.socket.deliverResult(sign.messageId, { status: "Accepted" });
     const root = await selfSignedRoot("01", "V2G Root");
     const sub = await subCa("02", "V2G Sub-CA", root, {
       ocspUrl: "http://ocsp.example.com/sub",
@@ -937,12 +1045,15 @@ describe.each([
 
   it("caches an Accepted ocspResult and keeps nothing for Failed (M06.FR.02-04, FR.06)", async () => {
     const env = setup(version);
+    env.socket.autoAnswers.delete("GetCertificateStatus");
     await installV2gChain(env);
-    const [leafRequest, subRequest] = env.socket.calls("GetCertificateStatus");
+    const [leafRequest] = env.socket.calls("GetCertificateStatus");
     env.socket.deliverResult(leafRequest.messageId, {
       status: "Accepted",
       ocspResult: OCSP_RESPONSE_GOOD_BASE64,
     });
+    // The sub-CA's request goes after the leaf's answer.
+    const subRequest = env.socket.calls("GetCertificateStatus")[1];
     env.socket.deliverResult(subRequest.messageId, { status: "Failed" });
 
     const [leafHash, subHash] =
@@ -956,14 +1067,18 @@ describe.each([
   it("asks again at boot and then every week (M06.FR.06, FR.10)", async () => {
     const env = setup(version);
     await installV2gChain(env);
+    await flush();
     expect(env.socket.calls("GetCertificateStatus")).toHaveLength(2);
 
     env.handler.setBootStatus({ status: "Accepted" });
+    await flush();
     expect(env.socket.calls("GetCertificateStatus")).toHaveLength(4);
 
     vi.advanceTimersByTime(7 * 24 * 3600 * 1000 - 1);
+    await flush();
     expect(env.socket.calls("GetCertificateStatus")).toHaveLength(4);
     vi.advanceTimersByTime(1);
+    await flush();
     expect(env.socket.calls("GetCertificateStatus")).toHaveLength(6);
 
     env.handler.onWebSocketClosed();

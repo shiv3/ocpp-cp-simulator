@@ -6,12 +6,12 @@ import type {
   Behavior as ContractBehavior,
   BehaviorContext as ContractContext,
   CallOutcome as ContractOutcome,
-} from "@ocpp-cp-sim/contracts/behavior";
+} from "@ocpp-cp-simulator/contracts/behavior";
 import type {
   Behavior,
   BehaviorContext,
   CallOutcome,
-} from "@ocpp-cp-sim/k6-runtime/behaviorTypes";
+} from "@ocpp-cp-simulator/k6-runtime/behaviorTypes";
 
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 const behavior: Same<ContractBehavior, Behavior> = true;

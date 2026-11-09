@@ -1,6 +1,7 @@
 import { describe, it, expect } from "bun:test";
-import { ChargePoint } from "@ocpp-cp-sim/core/cp/domain/charge-point/ChargePoint";
-import { DefaultBootNotification } from "@ocpp-cp-sim/core/cp/domain/types/OcppTypes";
+import type { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
+import { createChargePoint } from "@ocpp-cp-simulator/core/cp/infrastructure/charge-point/createChargePoint";
+import { DefaultBootNotification } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import { waitForBootAccepted } from "../waitForBootAccepted";
 
 /**
@@ -15,7 +16,7 @@ import { waitForBootAccepted } from "../waitForBootAccepted";
  * behaves correctly around that transition.
  */
 function makeChargePoint(id: string): ChargePoint {
-  return new ChargePoint(
+  return createChargePoint(
     id,
     DefaultBootNotification,
     1,

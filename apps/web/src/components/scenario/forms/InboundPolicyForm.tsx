@@ -4,7 +4,7 @@ import type { NodeFormComponentProps, NodeFormData } from "./types";
 import {
   INBOUND_POLICY_ACTIONS,
   INBOUND_POLICY_ERROR_CODES,
-} from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 
 const DEFAULT_ACTION: (typeof INBOUND_POLICY_ACTIONS)[number] = "Reset";
 const DEFAULT_POLICY = "callerror";

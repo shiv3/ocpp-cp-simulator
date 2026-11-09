@@ -1,6 +1,24 @@
-import type { CallAnswer, CallBehavior } from "@ocpp-cp-sim/contracts/behavior";
+import type { CallAnswer } from "@ocpp-cp-simulator/contracts/behavior";
 import { behaviorActionMatches } from "../../domain/types/csmsActionNames";
 import { deepPartialMatch } from "../../../scenario/deepPartialMatch";
+import type {
+  BehaviorCall,
+  BehaviorResolution,
+  BehaviorRegistryOptions,
+  BehaviorRule,
+  ChargePointBehaviorRegistry,
+  HeldExchange,
+  RuleOwner,
+} from "../../domain/engine/behaviorRules";
+
+// The rule vocabulary is defined in domain (#575); re-exported for the
+// existing import sites.
+export type {
+  BehaviorCall,
+  BehaviorRule,
+  HeldExchange,
+  RuleOwner,
+} from "../../domain/engine/behaviorRules";
 
 /**
  * The rules that may take an inbound CSMS CALL over from the default path
@@ -13,102 +31,6 @@ import { deepPartialMatch } from "../../../scenario/deepPartialMatch";
  * registered a rule decides what to do with a CALL the rule takes
  * ({@link BehaviorRule.take}).
  */
-
-/** An inbound CSMS CALL as the registry sees it. */
-export interface BehaviorCall {
-  /** The action as it arrived on the wire. */
-  readonly action: string;
-  readonly payload: unknown;
-  /** The connector the CALL names, when it names one. */
-  readonly connectorId?: number;
-}
-
-/** Who registered a rule, and so who releases it. */
-export type RuleOwner =
-  | { readonly kind: "code"; readonly behaviorId: string }
-  | {
-      readonly kind: "scenario";
-      readonly scenarioId: string;
-      readonly connectorId: number;
-      readonly nodeId: string;
-    };
-
-/**
- * What the registry needs from the exchange of a CALL. `CallExchange`
- * satisfies it; the registry does not import the transport.
- */
-export interface HeldAnswerOptions {
-  /** Work that follows the answer once it settled on the wire. */
-  readonly effect?: () => void;
-  /** Told once if `effect` will not run. */
-  readonly onEffectDropped?: (reason: string) => void;
-}
-
-/** How an observed answer ended; always resolves. */
-export type HeldSettlement =
-  | { readonly delivered: true }
-  | { readonly delivered: false; readonly reason: string };
-
-export interface HeldExchange {
-  readonly state: "open" | "answered" | "suppressed" | "abandoned";
-  readonly action: string;
-  readonly messageId: string;
-  onClosed(listener: () => void): void;
-  reply(payload: unknown, options?: HeldAnswerOptions): void;
-  replyError(
-    errorCode: string,
-    errorDescription: string,
-    options?: HeldAnswerOptions,
-  ): void;
-  /** Like `reply`, and says whether the frame was written. */
-  respond(
-    payload: unknown,
-    options?: HeldAnswerOptions,
-  ): Promise<HeldSettlement>;
-  respondError(
-    errorCode: string,
-    errorDescription: string,
-    options?: HeldAnswerOptions,
-  ): Promise<HeldSettlement>;
-  suppress(): unknown;
-}
-
-export interface BehaviorRule {
-  readonly owner: RuleOwner;
-  /** The action in either OCPP version's spelling. */
-  readonly action: string;
-  /**
-   * The connector the rule belongs to. A ranking hint, not a filter: among
-   * the rules that match a CALL, those for exactly the connector it names win
-   * (use `match` to filter on a payload field).
-   */
-  readonly connectorId?: number;
-  /** A deep partial match against the request payload. */
-  readonly match?: Record<string, unknown>;
-  readonly mode: CallBehavior["mode"];
-  /** What a second matching CALL gets while the rule holds an open exchange. */
-  readonly onBusy?: CallAnswer;
-  /**
-   * The registry chose this rule for `call` and `exchange` is now held by it.
-   * Runs synchronously inside the gate: start the work, do not await it here.
-   */
-  take(call: BehaviorCall, exchange: HeldExchange): void;
-}
-
-/** What to do with a CALL. */
-export type BehaviorResolution =
-  /** No rule applies: run the default path. */
-  | { readonly kind: "default" }
-  /** A rule took the CALL; it answers through the exchange. */
-  | { readonly kind: "taken"; readonly rule: BehaviorRule }
-  /** The rule that applies already holds an open exchange: `onBusy` was sent. */
-  | { readonly kind: "busy"; readonly rule: BehaviorRule };
-
-export interface BehaviorRegistryOptions {
-  /** The station's OCPP version; action names translate on 2.x only. */
-  readonly ocppVersion?: () => string;
-  warn?(message: string): void;
-}
 
 const DEFAULT_RESOLUTION: BehaviorResolution = { kind: "default" };
 
@@ -138,7 +60,7 @@ export function ruleKey(owner: RuleOwner, action: string): string {
   return `${ruleOwnerKey(owner)}|${action}`;
 }
 
-export class BehaviorRegistry {
+export class BehaviorRegistry implements ChargePointBehaviorRegistry {
   private readonly entries: Entry[] = [];
   private seq = 0;
 

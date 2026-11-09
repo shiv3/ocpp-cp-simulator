@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
 import { runBehavior, type BehaviorRun } from "./runBehavior";
 
 let runs: BehaviorRun[] = [];
@@ -392,5 +392,31 @@ describe("event hooks", () => {
     run.cp.updateConnectorStatus(1, "Preparing" as never);
     await run.settle();
     expect(order).toEqual([]);
+  });
+});
+
+describe("ctx.connector().power (#327)", () => {
+  test("is a read-only snapshot of the operating point", async () => {
+    const seen: unknown[] = [];
+    const run = await start([
+      {
+        api: 1,
+        id: "watch-power",
+        on: {
+          connectorStatus: (e, ctx) => {
+            seen.push(ctx.connector(e.connectorId)?.power);
+          },
+        },
+      },
+    ]);
+    run.cp.updateConnectorStatus(1, "Preparing" as never);
+    await run.settle();
+    // Not charging: nothing accepted or offered; the rest is the connector's
+    // own operating point.
+    const connector = run.cp.getConnector(1)!;
+    const point = connector.operatingPoint();
+    expect(seen).toEqual([
+      { acceptedW: 0, offeredW: 0, soc: point.soc, limitedBy: point.limitedBy },
+    ]);
   });
 });

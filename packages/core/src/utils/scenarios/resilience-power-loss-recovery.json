@@ -1,0 +1,153 @@
+{
+  "id": "resilience-power-loss-recovery",
+  "name": "Resilience: Power Loss Recovery",
+  "description": "Operator-driven, uses the power-loss primitive (#455). Plugs in and starts a session; then trigger power.loss (the transaction survives it) and power.restore (or power.loss with restoreAfterMs). Passes when the charge point booted again after the loss and reported its connector status. What happens to the transaction depends on the recovery chosen (resume, or end with PowerLoss; docs/concepts/charging-sessions.md), so the verdict does not depend on it.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": {
+    "type": "manual"
+  },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": {
+        "x": 400,
+        "y": 50
+      },
+      "data": {
+        "label": "Start",
+        "triggerOn": "connect"
+      }
+    },
+    {
+      "id": "plug-in",
+      "type": "connectorPlug",
+      "position": {
+        "x": 400,
+        "y": 150
+      },
+      "data": {
+        "label": "Plug in",
+        "action": "plugin"
+      }
+    },
+    {
+      "id": "tx-start",
+      "type": "transaction",
+      "position": {
+        "x": 400,
+        "y": 250
+      },
+      "data": {
+        "label": "Start transaction",
+        "action": "start",
+        "tagId": "RESIL-PWR"
+      }
+    },
+    {
+      "id": "wait-down",
+      "type": "connectionTrigger",
+      "position": {
+        "x": 400,
+        "y": 350
+      },
+      "data": {
+        "label": "Wait for the power loss",
+        "event": "disconnected",
+        "timeout": 600
+      }
+    },
+    {
+      "id": "wait-up",
+      "type": "connectionTrigger",
+      "position": {
+        "x": 400,
+        "y": 450
+      },
+      "data": {
+        "label": "Wait for the reboot",
+        "event": "connected",
+        "timeout": 600
+      }
+    },
+    {
+      "id": "settle",
+      "type": "delay",
+      "position": {
+        "x": 400,
+        "y": 550
+      },
+      "data": {
+        "label": "Let the reboot settle",
+        "delaySeconds": 5
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": {
+        "x": 400,
+        "y": 650
+      },
+      "data": {
+        "label": "End"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "start-1",
+      "target": "plug-in"
+    },
+    {
+      "id": "e2",
+      "source": "plug-in",
+      "target": "tx-start"
+    },
+    {
+      "id": "e3",
+      "source": "tx-start",
+      "target": "wait-down"
+    },
+    {
+      "id": "e4",
+      "source": "wait-down",
+      "target": "wait-up"
+    },
+    {
+      "id": "e5",
+      "source": "wait-up",
+      "target": "settle"
+    },
+    {
+      "id": "e6",
+      "source": "settle",
+      "target": "end-1"
+    }
+  ],
+  "createdAt": "2026-11-08T00:00:00Z",
+  "updatedAt": "2026-11-08T00:00:00Z",
+  "assertions": [
+    {
+      "id": "rebooted",
+      "type": "ocpp_sent",
+      "action": "BootNotification",
+      "description": "BootNotification sent after the power came back (1.6 \u00a74.2; 2.x B01.FR.03)"
+    },
+    {
+      "id": "status-after-boot",
+      "type": "message_after",
+      "before": {
+        "action": "BootNotification"
+      },
+      "after": {
+        "action": "StatusNotification"
+      },
+      "description": "Connector status reported after the reboot"
+    }
+  ]
+}

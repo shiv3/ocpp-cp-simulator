@@ -1,12 +1,12 @@
 import { describe, it, expect } from "bun:test";
 import { startMockCsms, normalizeTranscript } from "./mockCsms";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 
 describe("OCPP 1.6 unknown action (golden)", () => {
   it("answers CALLERROR NotImplemented to an unknown CSMS action", async () => {
     const csms = startMockCsms();
-    const cp = new ChargePoint(
+    const cp = createChargePoint(
       "CP002",
       DefaultBootNotification,
       1,

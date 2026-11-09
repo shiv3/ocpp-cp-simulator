@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 
-import { ChargePoint } from "../ChargePoint";
+import type { ChargePoint } from "../ChargePoint";
+import { createChargePoint } from "../../../infrastructure/charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../types/OcppTypes";
 import * as ocpp from "../../types/OcppTypes";
 
@@ -23,7 +24,7 @@ import * as ocpp from "../../types/OcppTypes";
  * snapshot -- otherwise the stale arm outlives a process restart too.
  */
 function makeChargePoint(connectorCount = 2): ChargePoint {
-  return new ChargePoint(
+  return createChargePoint(
     "cp-rearm",
     DefaultBootNotification,
     connectorCount,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ChargePoint } from "../ChargePoint";
+import { createChargePoint } from "../../../infrastructure/charge-point/createChargePoint";
 import type { BootNotification } from "../../types/OcppTypes";
 import { DefaultBootNotification } from "../../types/OcppTypes";
 
@@ -18,7 +18,7 @@ const bootNotification: BootNotification = DefaultBootNotification;
 describe("ChargePoint.canReceiveCsmsCall", () => {
   describe("WebSocket versions", () => {
     it("OCPP-1.6J (WebSocket) can receive all CSMS calls", () => {
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "test-cp-1.6j",
         bootNotification,
         1,
@@ -42,7 +42,7 @@ describe("ChargePoint.canReceiveCsmsCall", () => {
     });
 
     it("OCPP-2.0.1 (WebSocket) can receive all CSMS calls", () => {
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "test-cp-2.0.1",
         bootNotification,
         1,
@@ -65,7 +65,7 @@ describe("ChargePoint.canReceiveCsmsCall", () => {
 
   describe("OCPP-1.5 SOAP", () => {
     it("OCPP-1.5 send-only (no callback) cannot receive any calls", () => {
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "test-cp-1.5-send-only",
         bootNotification,
         1,
@@ -89,7 +89,7 @@ describe("ChargePoint.canReceiveCsmsCall", () => {
     });
 
     it("OCPP-1.5 with callback can receive the full 1.5 CS→CP surface (#257)", () => {
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "test-cp-1.5-callback",
         bootNotification,
         1,
@@ -125,7 +125,7 @@ describe("ChargePoint.canReceiveCsmsCall", () => {
 
   describe("OCPP-1.2 SOAP", () => {
     it("OCPP-1.2 send-only (no callback) cannot receive any calls", () => {
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "test-cp-1.2-send-only",
         bootNotification,
         1,
@@ -147,7 +147,7 @@ describe("ChargePoint.canReceiveCsmsCall", () => {
     });
 
     it("OCPP-1.2 with callback can receive OCPP-1.2 operations", () => {
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "test-cp-1.2-callback",
         bootNotification,
         1,
@@ -180,7 +180,7 @@ describe("ChargePoint.canReceiveCsmsCall", () => {
 
   describe("OCPP-1.6-SOAP", () => {
     it("OCPP-1.6S send-only (no callback) cannot receive any calls", () => {
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "test-cp-1.6s-send-only",
         bootNotification,
         1,
@@ -203,7 +203,7 @@ describe("ChargePoint.canReceiveCsmsCall", () => {
     });
 
     it("OCPP-1.6S with callback can receive all OCPP-1.6 operations", () => {
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "test-cp-1.6s-callback",
         bootNotification,
         1,
@@ -238,7 +238,7 @@ describe("ChargePoint.canReceiveCsmsCall", () => {
 
   describe("edge cases", () => {
     it("handles unknown operations (returns false for any dialect)", () => {
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "test-cp-edge",
         bootNotification,
         1,
@@ -261,7 +261,7 @@ describe("ChargePoint.canReceiveCsmsCall", () => {
     });
 
     it("CP→CS operations (those not in dialect) return false", () => {
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         "test-cp-cpcs",
         bootNotification,
         1,

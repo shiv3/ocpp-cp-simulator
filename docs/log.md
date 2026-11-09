@@ -1,11 +1,17 @@
 ---
-title: Log
+title: Log (archive)
 type: log
-summary: Append-only, chronological record of wiki operations (ingest / query / lint / restructure). Newest entries at the bottom.
+summary: Archive, frozen 2026-11-08. Chronological record of wiki operations up to that date; history now lives in git.
 updated: 2026-11-08
 ---
 
-# Log
+# Log (archive)
+
+> **Archived: no longer updated as of 2026-11-08.** Do not append here. Wiki
+> changes are now recorded by git: `git log -- docs/` (add `-p` for diffs),
+> `git log --grep '#N'` for an issue or PR number, the PR that closed the issue,
+> and branch names `<type>/<issue number>-<slug>`. The commit message and PR
+> description say which pages changed and why.
 
 Format: `## [YYYY-MM-DD] <op> | <title>` then bullets of pages touched.
 `grep "^## \[" docs/log.md | tail -5` shows the latest entries.
@@ -2174,7 +2180,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 ## [2026-11-05] restructure | The repository is a Bun workspace (#578)
 
 - `src/`, `vendor/ocpp-schemas/` and `schema/` moved with `git mv` into `packages/{ocpp,contracts,trace,k6-runtime,core,client}` and `apps/{cli,web}`, as assigned by `PACKAGE_MAP`; the mechanical part (moves, import specifiers, every path named in docs, config, scripts and comments) is produced by `scripts/workspaces-move.ts`, so it can be regenerated on a newer `main`. Behaviour is unchanged. The older entries in this log keep the paths they were written with.
-- [Overview](overview.md#source-layout-and-package-boundaries): the package map is now the layout, with the `exports` convention, the `workspace:*` rule and the `tsc -b` projects. `scripts/check-package-boundaries.ts` additionally checks that cross-package imports are `@ocpp-cp-sim/…` specifiers and that each `package.json` declares exactly the workspace dependencies its imports need.
+- [Overview](overview.md#source-layout-and-package-boundaries): the package map is now the layout, with the `exports` convention, the `workspace:*` rule and the `tsc -b` projects. `scripts/check-package-boundaries.ts` additionally checks that cross-package imports are `@ocpp-cp-simulator/…` specifiers and that each `package.json` declares exactly the workspace dependencies its imports need.
 - [Testing strategy](analyses/testing-strategy.md#type-checking): one composite tsconfig per package; `typecheck` is `tsc -b` because `--noEmit` is rejected for project references.
 - [CLI](entities/cli.md), [Docker image](entities/docker-image.md): the image now runs the `dist-cli/main.js` bundle with no `node_modules`; the tarball check also refuses workspace members and `workspace:` ranges and installs with npm.
 - Two files the single-project setup had hidden were placed correctly in `PACKAGE_MAP`: `k6-types.d.ts` belongs to `k6-runtime`, `domSmoke.dom.test.tsx` to `apps/web`.
@@ -2300,7 +2306,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 ## [2026-11-07] ingest | Behavior types, BehaviorRegistry and ChargerEngine (charger engine stage B)
 
-- `@ocpp-cp-sim/contracts/behavior` holds the behavior API types; `BehaviorRegistry` now selects between code behaviors and scenario rules (exact connector, oldest registration, `onBusy`, release by owner); `ChargerEngine` and `ChargerState` own the event queue, the `ctx` implementation and the behaviors loaded with `cp.loadBehavior()`. `runBehavior()` drives them on a `VirtualClock`. [Charger engine design](concepts/charger-engine.md#behavior-api) records the decisions, [Testing strategy](analyses/testing-strategy.md#behavior-tests) the harness.
+- `@ocpp-cp-simulator/contracts/behavior` holds the behavior API types; `BehaviorRegistry` now selects between code behaviors and scenario rules (exact connector, oldest registration, `onBusy`, release by owner); `ChargerEngine` and `ChargerState` own the event queue, the `ctx` implementation and the behaviors loaded with `cp.loadBehavior()`. `runBehavior()` drives them on a `VirtualClock`. [Charger engine design](concepts/charger-engine.md#behavior-api) records the decisions, [Testing strategy](analyses/testing-strategy.md#behavior-tests) the harness.
 
 ## [2026-11-07] ingest | Default behaviors move into the engine (charger engine stage B)
 
@@ -2334,7 +2340,7 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 ## [2026-11-07] ingest | Loading behavior code (charger engine stage D1)
 
-- `--behavior` / `--allow-behavior-code` on the CLI and daemon, `behavior build`, the `@ocpp-cp-sim/contracts/eslint-behavior` config and `examples/behaviors/flaky-firmware.ts`; `engine_state` (schema 23) persists behavior `ctx.state` and the notification statuses and `engine.resume()` runs after the session reconcile; `runBehavior` talks to the fake CSMS over an in-memory socket by default. [Charger engine design](analyses/charger-engine-migration.md), [CLI](entities/cli.md#behavior-code---behavior-and-behavior-build), [Daemon](entities/daemon.md), [State persistence](concepts/state-persistence.md), [Testing strategy](analyses/testing-strategy.md#behavior-tests).
+- `--behavior` / `--allow-behavior-code` on the CLI and daemon, `behavior build`, the `@ocpp-cp-simulator/contracts/eslint-behavior` config and `examples/behaviors/flaky-firmware.ts`; `engine_state` (schema 23) persists behavior `ctx.state` and the notification statuses and `engine.resume()` runs after the session reconcile; `runBehavior` talks to the fake CSMS over an in-memory socket by default. [Charger engine design](analyses/charger-engine-migration.md), [CLI](entities/cli.md#behavior-code---behavior-and-behavior-build), [Daemon](entities/daemon.md), [State persistence](concepts/state-persistence.md), [Testing strategy](analyses/testing-strategy.md#behavior-tests).
 
 ## [2026-11-07] ingest | k6, browser and scale verification (charger engine stage D2)
 
@@ -2405,7 +2411,53 @@ other. Reworded on all three pages to say what is and is not watched (the
 
 - F06.FR.08: on 2.1 `SignV2G20Certificate` answers `Accepted` and sends a new CSR with `certificateType = V2G20Certificate`; `SignCombinedCertificate` answers `Accepted` and sends one new CSR with `certificateType` omitted (the 2.1 enum: both the 15118 and the CSMS connection), stored as the Charging Station certificate when the chain comes back. 2.0.1 `SignCombinedCertificate` stays `NotImplemented`. Page touched: [Security profiles](concepts/security-profiles.md). No existing wire fixture changes.
 
-## [2026-11-08] ingest | 2.x TriggerMessage for TransactionEvent, FirmwareStatusNotification and LogStatusNotification (#596)
+## [2026-11-08] ingest | Inbound OCPP 1.6J CALL validation (#593)
 
-- `entities/default-behaviors.md`: the targets of the 2.x `TriggerMessage`, the EVSE handling of `TransactionEvent` and the `Idle` rule (no `requestId`) of the two status messages.
-- Review fixes: a trigger answers the last status the station sent by any route, including the `firmware_status_notification` / `log_status_notification` commands (the engine records it, new `reported` event); L01.FR.25/26 and F06.FR.14-16 decide Idle, `Installed` and failed statuses; the triggered `TransactionEvent` carries `chargingState` and a `Trigger` meter sample (F06.FR.07; fixture `201-trigger-transaction-event` re-recorded). [Control plane](concepts/control-plane.md): the `Idle` rule of the two commands.
+- `OCPPMessageHandler.handleCall` validates the payload of a CALL that reached the default handler against the vendored 1.6 request schema (formats checked) and, per `inboundValidation` (`off` / `warn` default / `enforce`), logs it or answers a CALLERROR with the OCPP-J 1.6 §4.2.3 code (`FormationViolation`, `OccurenceConstraintViolation`, `TypeConstraintViolation`, `PropertyConstraintViolation`). Policies, overrides and rules answer first.
+- Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#inbound-call-validation-on-ocpp-j-16), [Who answers an inbound CALL](concepts/call-precedence.md), [GitHub issues](sources/github-issues.md).
+
+## [2026-11-08] ingest | Inbound validation: traced violations and the `inboundValidation` setting (#593 review)
+
+- A `warn` / `enforce` violation is traced: the inbound CALL's record carries `meta.validation = { mode, errorCode, description }` (a structured `Inbound validation:` line on the `WebSocket` log channel, merged by `logLinesToTrace` and held back by the live `--trace-output` writer for one tick). `inboundValidation` is settable: `--inbound-validation`, `cp.create` / `cp.update` (contracts, HTTP, MCP), persisted in `charge_points.inbound_validation` (schema v25). The wiki states the order with the #594 `NotSupported`.
+- Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#inbound-call-validation-on-ocpp-j-16), [Trace format](concepts/trace-format.md#validation-violations-meta), [CLI](entities/cli.md), [Daemon](entities/daemon.md), [Control plane](concepts/control-plane.md), [State persistence](concepts/state-persistence.md).
+
+## [2026-11-08] ingest | OCPP 1.6 SetChargingProfile replacement and TxProfile preconditions (#594)
+
+- `SetChargingProfile` on 1.6 replaces by `chargingProfileId` or by `stackLevel` + purpose (2.x unchanged), rejects a TxProfile without an active transaction or with another `transactionId`, and answers CALLERROR `NotSupported` when `SupportedFeatureProfiles` lacks `SmartCharging`. Handlers can now answer a CALLERROR by throwing `HandlerCallError`. No golden fixture changed.
+- Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#ocpp-16-setchargingprofile), [GitHub issues](sources/github-issues.md).
+
+## [2026-11-08] ingest | SetChargingProfile review fixes: displaced profiles, NotSupported scope, running transaction (#594 review)
+
+- `chargingProfileApplied` carries `replacedIds` (profiles displaced by the same-slot rule); `replaced` now means "same id updated", so the timeline no longer reports an update for a profile it never had, and a displaced profile's expiry timer is cancelled. The TxProfile precondition uses `hasRunningTransaction`. `ClearChargingProfile` and `GetCompositeSchedule` answer `NotSupported` without `SmartCharging` too. The wiki states the 1.6-S behavior (generic SOAP Fault).
+- Pages: [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#ocpp-16-setchargingprofile), [Operational timeline](concepts/operational-timeline.md#smart-charging-profiles).
+
+## [2026-11-08] ingest | OCPP-S 1.6 retries transaction-related messages after a SOAP Fault (#585)
+
+- [OCPP versions and transports](concepts/ocpp-versions-and-transports.md#deviation-ocpp-s-16-retries-after-a-soap-fault): the "OCPP-S does not retry" sentence now covers 1.2 and 1.5 only; new section on the 1.6S deviation (errata 3.2): Heartbeat probe, `TransactionMessageAttempts` / `TransactionMessageRetryInterval`, `transactionMessageRejected` / `transactionMessageDiscarded`, discard of an outlived StartTransaction, cancel on stop and dispose. 1.2 and 1.5 were not checked against their specs.
+- [GitHub issues](sources/github-issues.md): #585.
+
+## [2026-11-08] fix | OCPP-S 1.6 transaction retry review follow-ups (#585)
+
+- [Charging sessions](concepts/charging-sessions.md): the "CALLERROR is not a failed start" paragraph names the OCPP-S 1.6 SOAP Fault / HTTP error case. A stop no longer moves a waiting `StartTransaction` connector to `Charging`; a Fault landing after a stop sends no Heartbeat; a resend due while the boot gate is closed is discarded with a notice. [GitHub issues](sources/github-issues.md): `updated:` bumped.
+
+## [2026-11-08] ingest | Run a scenario template on a label selector (#486)
+
+- New `cp.scenario.run { labels, connector, templateId, evSettings?, strict?, once? }` and MCP `cp_scenario_run`: `run_scenario_template` on every charge point a label selector matches, with `cp.bulk`'s selector rules, fan-out and partial-success result (`started` carries each `scenarioId`). A method of its own (decision D07), not a `cp.bulk` action. Pages: [Socket.IO control plane](concepts/control-plane.md#charge-point-labels), [MCP endpoint](entities/mcp-endpoint.md).
+
+## [2026-11-08] ingest | Fleet-wide charging session listing (#489)
+
+- `sessions.list` and the `list_charging_sessions` MCP tool accept a missing `cpId` and list across every charge point, with new `labels` (selector, fleet-wide only), `startedFrom` (inclusive) and `startedTo` (exclusive) filters; order is start time then record order. Pages: [Charging sessions](concepts/charging-sessions.md#reading-it), [Socket.IO control plane](concepts/control-plane.md), [MCP endpoint](entities/mcp-endpoint.md), [index](index.md).
+
+## [2026-11-08] ingest | Web console toggle for `txUpdatedMeterValues` (#550)
+
+- The Add and Edit forms of an OCPP 2.0.1 / 2.1 charge point have a `txUpdatedMeterValues` checkbox (en / ja / zh-CN). Remote mode sends it with `cp.create` / `cp.update`; Local mode stores it in the shared simulator config (new optional `txUpdatedMeterValues` field of the config wire schema, kept by the browser config port), `useChargePoints` passes it to the local charge points and `syncLocalChargePoints` applies a change to running ones. Updated [Web console](entities/web-console.md), [OCPP versions and transports](concepts/ocpp-versions-and-transports.md).
+
+## [2026-11-08] ingest | 2.x TriggerMessage(BootNotification) after an Accepted boot is Rejected (#690)
+
+- F06.FR.17: on 2.0.1 / 2.1 the answer is `Rejected` and no BootNotification follows when the last BootNotification answer was `Accepted`; Pending, Rejected and unanswered boots still answer `Accepted` and send it. Golden `201-trigger-message-all` re-recorded (id-4).
+- Page: [Control plane](concepts/control-plane.md).
+
+## [2026-11-08] ingest | Configurable daemon startup concurrency and staggering (#610)
+
+- `entities/daemon.md`, `entities/cli.md`: `--bootstrap-concurrency` (default 8, the previous fixed value), `--start-delay`, `--start-jitter`, `--start-seed`; all four need a server mode and `--cp-id`, and a bad number exits 1. Review fixes: a charge point deleted or updated while it waits is skipped, the flags are refused next to a client mode, and the schedule is bounded by the 2^31-1 ms timer limit; `daemon.md` states the requirements and that `--state-db` restores are not paced.
+- `index.md`: no change (no page added).

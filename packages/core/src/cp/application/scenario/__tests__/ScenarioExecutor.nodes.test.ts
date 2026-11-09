@@ -104,6 +104,7 @@ function createRuntimeMocks(connectorIds = [1]) {
     startTransaction: vi.fn(),
     stopTransaction: vi.fn(),
     evDisconnected: vi.fn(),
+    evPlugIn: vi.fn(),
     setMeterValue: vi.fn((connectorId: number, value: number) => {
       const connector = connectorsById.get(connectorId);
       if (connector) {
@@ -216,6 +217,71 @@ describe("ScenarioExecutor node dispatch", () => {
 
     expect(onStartTransaction).toHaveBeenCalledWith("TAG-1", 77, 12);
   });
+
+  it("hands a start node's idTokenType to onStartTransaction (#599)", async () => {
+    const onStartTransaction = vi.fn(async () => {});
+
+    await runSingleNode(
+      ScenarioNodeType.TRANSACTION,
+      {
+        label: "Start Transaction",
+        action: "start",
+        tagId: "TAG-1",
+        idTokenType: "eMAID",
+      },
+      { onStartTransaction },
+    );
+
+    expect(onStartTransaction).toHaveBeenCalledWith(
+      "TAG-1",
+      undefined,
+      undefined,
+      { idTokenType: "eMAID" },
+    );
+  });
+
+  it.each([
+    ["the request's type when the node names none", undefined, "Central"],
+    ["the node's own type over the request's", "eMAID", "eMAID"],
+  ] as const)(
+    "a start after a remote start trigger uses %s (#599)",
+    async (_name, nodeType, expected) => {
+      const onStartTransaction = vi.fn(async () => {});
+      const executor = new ScenarioExecutor(
+        scenarioWithMiddleNodes("remote-type", [
+          node("trigger", ScenarioNodeType.REMOTE_START_TRIGGER, {
+            label: "Wait",
+            timeout: 5,
+          } as ScenarioNodeData),
+          node("start-node", ScenarioNodeType.TRANSACTION, {
+            label: "Start",
+            action: "start",
+            ...(nodeType ? { idTokenType: nodeType } : {}),
+          }),
+        ]),
+        {
+          onWaitForRemoteStart: async () => ({
+            tagId: "REMOTE-1",
+            remoteStartId: 4,
+            idTokenType: "Central",
+          }),
+          onStartTransaction,
+        },
+      );
+      await executor.start();
+
+      expect(onStartTransaction).toHaveBeenCalledWith(
+        "REMOTE-1",
+        undefined,
+        undefined,
+        {
+          triggerReason: "RemoteStart",
+          remoteStartId: 4,
+          idTokenType: expected,
+        },
+      );
+    },
+  );
 
   it("dispatches transaction stop nodes to onStopTransaction", async () => {
     const onStopTransaction = vi.fn(async () => {});
@@ -524,7 +590,7 @@ describe("createScenarioExecutorCallbacks runtime effects", () => {
     );
   });
 
-  it("documents the runtime plug-in callback as a no-op that still advances the flow", async () => {
+  it("routes a plug-in to ChargePoint.evPlugIn and keeps the flow advancing (#453)", async () => {
     const { chargePoint, chargePointShape, connector } = createRuntimeMocks();
     const callbacks = createScenarioExecutorCallbacks({
       chargePoint,
@@ -545,13 +611,13 @@ describe("createScenarioExecutorCallbacks runtime effects", () => {
       callbacks,
     );
 
-    // A plug-in is a no-op: cable state is not represented in the domain
-    // model, but the scenario flow must keep advancing so authored plug nodes
-    // do not stall production scenarios.
+    // The plug-in drives the connector's EV and cable model; the flow keeps
+    // advancing so authored plug nodes do not stall production scenarios.
     await expect(executor.start()).resolves.toBeUndefined();
 
     expect(executor.getContext().state).toBe("completed");
     expect(chargePointShape.setMeterValue).toHaveBeenCalledWith(1, 42);
+    expect(chargePointShape.evPlugIn).toHaveBeenCalledWith(1);
     expect(chargePointShape.evDisconnected).not.toHaveBeenCalled();
   });
 
@@ -569,7 +635,7 @@ describe("createScenarioExecutorCallbacks runtime effects", () => {
     expect(chargePointShape.evDisconnected).toHaveBeenCalledWith(1);
   });
 
-  it("keeps a plug-out without a transaction a no-op (#488)", async () => {
+  it("routes a plug-out without a transaction to ChargePoint.evDisconnected, which decides the status (#453)", async () => {
     const { chargePoint, chargePointShape, connector } = createRuntimeMocks();
     const callbacks = createScenarioExecutorCallbacks({
       chargePoint,
@@ -578,9 +644,9 @@ describe("createScenarioExecutorCallbacks runtime effects", () => {
 
     await callbacks.onConnectorPlug?.("plugout");
 
-    // Templates follow a plug-out with their own status nodes; sending
-    // Available here would duplicate them.
-    expect(chargePointShape.evDisconnected).not.toHaveBeenCalled();
+    // The charge point returns a Preparing or Finishing connector to Available
+    // and leaves any other status alone; the node sends no status itself.
+    expect(chargePointShape.evDisconnected).toHaveBeenCalledWith(1);
     expect(chargePointShape.updateConnectorStatus).not.toHaveBeenCalled();
   });
 

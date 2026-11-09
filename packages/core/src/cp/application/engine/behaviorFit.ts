@@ -1,10 +1,11 @@
 import type {
   Behavior,
   BehaviorCapability,
-} from "@ocpp-cp-sim/contracts/behavior";
+} from "@ocpp-cp-simulator/contracts/behavior";
 import { isOcpp2Version, isSoapVersion } from "../../domain/types/OcppVersion";
 import { csmsActionAliases } from "../../domain/types/csmsActionNames";
 import { DEFAULT_ACTIONS } from "./behaviors/defaultActions";
+import { paramsDeclarationProblem } from "../behavior/paramsSchema";
 
 /** The closed set of `requires` names. */
 const CAPABILITIES: ReadonlySet<string> = new Set([
@@ -50,6 +51,8 @@ export function behaviorShapeProblem(
       return `Behavior ${behavior.id}: requires "${capability}", which is not a capability (${[...CAPABILITIES].join(", ")})`;
     }
   }
+  const params = paramsDeclarationProblem(behavior.params);
+  if (params) return `Behavior ${behavior.id}: ${params}`;
   for (const [action, call] of Object.entries(behavior.onCall ?? {})) {
     if (call.mode === "extend" && !hasDefault(action)) {
       return `Behavior ${behavior.id}: onCall.${action} uses mode "extend", but ${action} has no default behavior to extend; use mode "replace"`;

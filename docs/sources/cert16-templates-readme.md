@@ -11,7 +11,7 @@ related:
   - ../concepts/scenario-format.md
   - steve-verify-readme.md
   - ../concepts/local-authorization.md
-updated: 2026-11-05
+updated: 2026-11-09
 ---
 
 # Source: `packages/core/src/utils/scenarios/README.md`
@@ -47,6 +47,7 @@ not encoded in the JSON Schema ([Scenario format](../concepts/scenario-format.md
 **Out of scope.** TC_007 (cached authorization — no template yet; since
 #452 the [Authorization Cache](../concepts/local-authorization.md) exists and
 a local start consults it, so the case is drivable), TC_032/037/039 (offline transactions — no
-offline queue in the engine), TC_047 (reservation expiry not observable),
-TC_049 (no connector 0 reservation), TC_073–TC_088 (security / certificates /
+offline queue in the engine), TC_047 (reservation expiry: no template yet; observable
+since #739, so drivable), TC_049 (connector-0 reservation: no template yet;
+supported since #595, so drivable), TC_073–TC_088 (security / certificates /
 key provisioning).

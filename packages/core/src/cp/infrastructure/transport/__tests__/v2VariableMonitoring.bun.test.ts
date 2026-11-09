@@ -5,16 +5,16 @@ import {
   isValidNotifyMonitoringReportRequestV201,
   isValidSetMonitoringLevelResponseV201,
   isValidSetVariableMonitoringResponseV201,
-} from "@ocpp-cp-sim/ocpp/v201/index";
+} from "@ocpp-cp-simulator/ocpp/v201/index";
 import {
   isValidClearVariableMonitoringResponseV21,
   isValidGetMonitoringReportResponseV21,
   isValidNotifyMonitoringReportRequestV21,
   isValidSetMonitoringLevelResponseV21,
   isValidSetVariableMonitoringResponseV21,
-} from "@ocpp-cp-sim/ocpp/v21/index";
+} from "@ocpp-cp-simulator/ocpp/v21/index";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
-import { ChargePoint } from "../../../domain/charge-point/ChargePoint";
+import { createChargePoint } from "../../charge-point/createChargePoint";
 import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
 
 type Validator = (data: unknown) => boolean;
@@ -77,7 +77,7 @@ describe("OCPP 2.x variable monitoring", () => {
   for (const v of VERSIONS) {
     it(`${v.version}: sets, reports and clears monitors with schema-valid frames`, async () => {
       const csms = startMockCsms();
-      const cp = new ChargePoint(
+      const cp = createChargePoint(
         `CP-MONITORING-${v.version}`,
         DefaultBootNotification,
         1,

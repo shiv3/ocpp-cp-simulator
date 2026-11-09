@@ -1,11 +1,11 @@
-import { buildSoapCallbackUrl } from "@ocpp-cp-sim/core/cp/infrastructure/transport/soap/soapCallbackUrl";
-import type { ServerInfo } from "@ocpp-cp-sim/contracts/index";
+import { buildSoapCallbackUrl } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/soap/soapCallbackUrl";
+import type { ServerInfo } from "@ocpp-cp-simulator/contracts/index";
 import {
   LABELS_MAX_ENTRIES,
   labelKeySchema,
   labelValueSchema,
   type Labels,
-} from "@ocpp-cp-sim/contracts/labels";
+} from "@ocpp-cp-simulator/contracts/labels";
 import {
   OCPP_1_2,
   OCPP_1_5,
@@ -14,12 +14,12 @@ import {
   OCPP_2_0_1,
   OCPP_2_1,
   isSoapVersion,
-} from "@ocpp-cp-sim/core/cp/domain/types/OcppVersion";
+} from "@ocpp-cp-simulator/core/cp/domain/types/OcppVersion";
 import { t } from "../i18n";
 import type {
   OcppSecurityProfile,
   OcppTlsOptions,
-} from "@ocpp-cp-sim/core/cp/infrastructure/transport/wsUrlWithBasic";
+} from "@ocpp-cp-simulator/core/cp/infrastructure/transport/wsUrlWithBasic";
 
 /*
  * The charge point configuration shape and its pure helpers, shared by the
@@ -57,7 +57,10 @@ export interface ChargePointConfig {
   securityProfile?: OcppSecurityProfile;
   authorizationKey?: string;
   cpoName?: string;
-  /** #347: no form input; carried so an edit sends back what it read. */
+  /**
+   * #347 / #550: send CP-initiated meter values of an OCPP 2.x transaction as
+   * TransactionEvent(Updated). `undefined` keeps what the charge point has.
+   */
   txUpdatedMeterValues?: boolean;
   tls?: OcppTlsOptions;
   tlsCaPath?: string;

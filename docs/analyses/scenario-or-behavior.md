@@ -6,6 +6,8 @@ sources:
   - packages/contracts/src/behavior.ts
   - packages/core/src/cp/application/engine/behaviors/
   - packages/core/src/test/behavior/precedence.bun.test.ts
+  - packages/core/src/test/behavior/recordBehavior.ts
+  - scripts/record-behavior.ts
   - examples/behaviors/
   - "issue #566"
 related:
@@ -14,7 +16,7 @@ related:
   - ../concepts/scenario-format.md
   - ../entities/default-behaviors.md
   - ../entities/cli.md
-updated: 2026-11-08
+updated: 2026-11-09
 ---
 
 # Scenario or behavior?
@@ -61,7 +63,7 @@ Each recipe is the smallest thing that works; the file names are in `examples/be
 Behavior:
 
 ```ts
-import type { Behavior } from "@ocpp-cp-sim/contracts/behavior";
+import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
 
 export default {
   api: 1,
@@ -145,6 +147,41 @@ A `csmsCallTrigger` (`behavior: "replace"`) then a `callResponse` whose payload 
 reads the request. The same in code reads `req`. Both answer once; a second CALL while the first is open gets
 `onBusy`.
 
+### Tune a default from a scenario
+
+The defaults have knobs ([which](../entities/default-behaviors.md#params)). Select the default by id and set the
+param; it lasts for the run and nothing else is rewritten:
+
+```json
+{
+  "type": "useBehavior",
+  "data": {
+    "behaviorId": "default.firmware",
+    "params": { "stepMs": 30000, "failAt": "InstallationFailed" }
+  }
+}
+```
+
+The same knobs for the station, not for a run: `--behavior-params 'default.firmware={"stepMs":30000}'`,
+`behaviorParams` on `cp.create` / `cp.update`, or `cp.behaviors.set`. A value that does not fit is refused with the
+reason (`"stepMs": "30000"` is not a number), never converted. When the knob you need does not exist, that is the
+signal to write a behavior (below) and select it with `useBehavior`; a node is not added per knob.
+
+### Switch a default off from a scenario
+
+```json
+{
+  "type": "useBehavior",
+  "data": { "behaviorId": "default.firmware", "mode": "disable" }
+}
+```
+
+For the run, `UpdateFirmware` is answered with the version's `Accepted` and nothing follows: no status
+notifications. Compare "Disable an action's follow-up" above, which is the same thing as a behavior for the
+station's whole life. `disable` works for any behavior id, a code behavior included (it then silences its rules for
+the run), and takes no params. Because it answers `Accepted` without acting, `default.reset` disabled does not
+reset and `default.transaction` disabled starts nothing; use `inboundPolicy` to refuse instead.
+
 ### Select a behavior from a scenario
 
 Load it dormant (`cp.loadBehavior(b, { dormant: true })` in embedding code; a behavior given with `--behavior` is
@@ -157,25 +194,88 @@ already serving), then add a `useBehavior` node with its id. While the run is al
 `runBehavior()` drives it on a virtual clock against an in-memory fake CSMS and a state that cannot be stored fails
 the test (`packages/core/src/test/behavior/runBehavior.ts`, [testing strategy](testing-strategy.md#behavior-tests)).
 
-## JSON node and `ctx` verb
+### Record a run as a scenario
+
+To see what a behavior does as data (to read it, to edit it, to give a CSMS team a file), run it on the virtual
+clock and keep the trace (#654, step 2). This is **not** a conversion of the behavior to JSON: a recording is what
+_one_ run did, so a branch the run did not take, a draw of another seed and a decision on connector state are not in
+it. Converting behaviors was rejected on #654; a recording never replaces `useBehavior`.
+
+```sh
+bun scripts/record-behavior.ts default.firmware --action UpdateFirmware \
+  --payload '{"location":"http://fw.example/f.bin","retrieveDate":"2020-01-01T00:00:00Z"}' \
+  --params '{"stepMs":5000,"failAt":"InstallationFailed"}' --seed demo \
+  --out recorded.json --diagram recorded.mmd
+```
+
+`<behavior>` is a built-in `default.*` id or the path of a behavior module. The run uses a real station, the seeded
+streams and the fake CSMS of the behavior tests (`recordBehavior()` in
+`packages/core/src/test/behavior/recordBehavior.ts`), so it takes no real time and the same seed records the same
+file. What the station put on the wire after the CALL, and when, becomes nodes:
+
+| Effect of the run                                           | Node                                                                                                  |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| the CSMS CALL that triggers the behavior                    | `csmsCallTrigger`, `behavior: "replace"`                                                              |
+| the station's answer                                        | `callResponse` `accepted` / `rejected` when it is the canned answer, else `result` / `error` / `none` |
+| time between two effects (`ctx.sleep`, seeded jitter drawn) | `delay`, in seconds, at the resolution of the clock step (250 ms by default)                          |
+| Firmware / SignedFirmware / Log / Diagnostics status        | `notify`; a `requestId` equal to the CALL's becomes `{ "$from": "call.payload.requestId" }`           |
+| any other station-initiated CALL                            | `ocppCall`                                                                                            |
+
+`Heartbeat` is station upkeep and is left out. A CALL sent before the answer settled cannot be expressed (the
+scenario holds the CALL until `callResponse`) and is reported on stderr as `not recorded`, never invented.
+
+The output carries `recordedFrom: { behaviorId, commit, seed, version }` (schema 1.6, informational: the runtime
+ignores it), so a recording is never mistaken for the default it came from. The diagram is Mermaid source, for
+example the recording above (OCPP 1.6 §4.5 UpdateFirmware, §6.19 FirmwareStatusNotification):
+
+```mermaid
+sequenceDiagram
+  participant CSMS
+  participant CP as Charge point
+  CSMS->>CP: UpdateFirmware
+  CP->>CSMS: UpdateFirmware.conf {}
+  CP->>CSMS: FirmwareStatusNotification Downloading
+  Note over CP: 5 s
+  CP->>CSMS: FirmwareStatusNotification Downloaded
+  Note over CP: 5 s
+  CP->>CSMS: FirmwareStatusNotification Installing
+  Note over CP: 5 s
+  CP->>CSMS: FirmwareStatusNotification InstallationFailed
+```
+
+## Node ↔ ctx parity
 
 The same job has a name in each world. Where a column is empty there is no equivalent yet; the engine's intended
 end state is that the scenario executor becomes a client of `ctx` ([contract](../concepts/charger-engine.md#where-this-is-going)).
+Keep this table current: when a scenario node or a `ctx` member is added, its row is added in the same change, so the
+gap is visible instead of argued. A proposed new node must pass the [test for a new
+node](../concepts/scenario-format.md#what-the-format-will-not-do): a behavior parameter, a wait, a verb `ctx` already
+has, or a listed decision node.
 
-| Scenario node                                | `ctx` / behavior member                                                        | Note                                                                                                        |
-| -------------------------------------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
-| `ocppCall`                                   | `ctx.send(action, payload)`                                                    | Both pass `beforeSend`                                                                                      |
-| `csmsCallTrigger` `observe`                  | `on.callReceived`                                                              | Observation only                                                                                            |
-| `csmsCallTrigger` `replace` + `callResponse` | `onCall[action]` with `mode: "replace"` returning a `CallOutcome`              | `kind: "none"` is `{ noResponse: true }`                                                                    |
-| `responseOverride`                           | `onCall` `replace` returning `ctx.accepted` / `ctx.rejected`                   | The node is one-shot; the rule is permanent                                                                 |
-| `inboundPolicy`                              | —                                                                              | Sticky; wins over every behavior                                                                            |
-| `delay`                                      | `ctx.sleep(ms)`                                                                | Both on the station's clock                                                                                 |
-| `connectorPlug` plugin / plugout             | `ctx.plugIn` / `ctx.unplug`                                                    | Need `requires: ["physical"]`                                                                               |
-| `transaction` start / stop                   | `ctx.startCharging` / `ctx.stopCharging`                                       | The same transaction default runs                                                                           |
-| `notification` (firmware, log, …)            | `ctx.notify.firmwareStatus(…)` and friends                                     |                                                                                                             |
-| `statusChange`                               | `ctx.setConnectorStatus` (experimental)                                        |                                                                                                             |
-| `statusTrigger`, `connectionTrigger`         | `on.connectorStatus`, `on.connected`, `on.disconnected`                        | A hook fires on every event; a trigger waits once                                                           |
-| `remoteStartTrigger`, `remoteStopTrigger`    | `onCall` for the remote actions                                                | The trigger parks the default; see [parking](../concepts/call-precedence.md#scenario-parking-is-not-a-rule) |
-| `useBehavior`                                | select by id (`--use-behavior`, `behaviors`, `cp.behaviors.set`)               |                                                                                                             |
-| —                                            | `beforeSend`, `on.callResult`, `on.transactionStarted` / `Stopped`, `onResume` | Code only: hooks and rewriting have no node                                                                 |
-| pause, step, resume, verdicts                | —                                                                              | Scenario only                                                                                               |
+| Scenario node                                | `ctx` / behavior member                                                                  | Note                                                                                                        |
+| -------------------------------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `ocppCall`                                   | `ctx.send(action, payload)`                                                              | Both pass `beforeSend`                                                                                      |
+| `csmsCallTrigger` `observe`                  | `on.callReceived`                                                                        | Observation only                                                                                            |
+| `csmsCallTrigger` `replace` + `callResponse` | `onCall[action]` with `mode: "replace"` returning a `CallOutcome`                        | `kind: "none"` is `{ noResponse: true }`                                                                    |
+| `responseOverride`                           | `onCall` `replace` returning `ctx.accepted` / `ctx.rejected`                             | The node is one-shot; the rule is permanent                                                                 |
+| `inboundPolicy`                              | —                                                                                        | Sticky; wins over every behavior                                                                            |
+| `delay`                                      | `ctx.sleep(ms)`                                                                          | Both on the station's clock                                                                                 |
+| `connectorPlug` plugin / plugout             | `ctx.plugIn` / `ctx.unplug`                                                              | Need `requires: ["physical"]`                                                                               |
+| `transaction` start / stop                   | `ctx.startCharging` / `ctx.stopCharging`                                                 | The same transaction default runs                                                                           |
+| `notification` (firmware, log, …)            | `ctx.notify.firmwareStatus(…)` and friends                                               |                                                                                                             |
+| `statusChange`                               | `ctx.setConnectorStatus` (experimental)                                                  |                                                                                                             |
+| `statusTrigger`, `connectionTrigger`         | `on.connectorStatus`, `on.connected`, `on.disconnected`                                  | A hook fires on every event; a trigger waits once                                                           |
+| `remoteStartTrigger`, `remoteStopTrigger`    | `onCall` for the remote actions                                                          | The trigger parks the default; see [parking](../concepts/call-precedence.md#scenario-parking-is-not-a-rule) |
+| `callResponse` `accepted` / `rejected`       | `ctx.accepted(action)` / `ctx.rejected(action)`                                          | Schema 1.6: the answer of the CALL's own action on the station's version; no payload                        |
+| `notify`                                     | `ctx.notify.firmwareStatus(…)`, `signedFirmwareStatus`, `logStatus`, `diagnosticsStatus` | Schema 1.6: fire-and-forget; `requestId` may be a `$from`                                                   |
+| `switch`                                     | `if` / `===` on `ctx.connector(id)`, `ctx.charger`, `ctx.state`                          | Schema 1.6: JSON equality against constants, one edge per case plus `default`; no ordering, no arithmetic   |
+| `$from` roots `charger`, `connector`         | `ctx.charger`, `ctx.connector(id)`                                                       | Schema 1.6: read-only, whole values only                                                                    |
+| `delay` `until`, `jitterSeconds`             | `ctx.sleep(ms)` after `ctx.now()`, `ctx.random(stream).int(…)`                           | Schema 1.6: `until` is a floor on the wait; the jitter is seeded                                            |
+| `choice`                                     | `ctx.random(stream)`                                                                     | Schema 1.6: a seeded, weighted pick of one edge; the same seed gives the same pick                          |
+| `setState` and the `$from` root `state`      | `ctx.state`                                                                              | Schema 1.6: JSON, per run (a behavior's `ctx.state` is per station), shared by parallel branches            |
+| `useBehavior`                                | select by id (`--use-behavior`, `behaviors`, `cp.behaviors.set`)                         |                                                                                                             |
+| `useBehavior` `params`                       | `Behavior.params` read as `ctx.params`; `--behavior-params`, `behaviorParams`            | A parameter of a behavior; the layer ends with the run                                                      |
+| `useBehavior` `mode: "disable"`              | `onCall` `replace` returning `ctx.accepted(action)`                                      | For the run, scenario rules outrank code                                                                    |
+| `unlockOutcome`                              | `default.unlock` param `outcome`                                                         | The node sets the connector's value (persistent); the param is for the station or a run                     |
+| —                                            | `beforeSend`, `on.callResult`, `on.transactionStarted` / `Stopped`, `onResume`           | Code only: hooks and rewriting have no node                                                                 |
+| pause, step, resume, verdicts                | —                                                                                        | Scenario only                                                                                               |

@@ -7,6 +7,7 @@
   "common.nav.chargePoints": "Charge Points",
   "common.nav.scenarios": "Scenarios",
   "common.nav.runHistory": "Run History",
+  "common.nav.fleets": "Fleet templates",
   "common.nav.messageLog": "Message Log",
   "common.nav.settings": "Settings",
   "common.sidebar.expand": "Expand sidebar",
@@ -105,5 +106,19 @@
   "common.catalog.notConfiguredLocal": "Enter the Open EV Directory URL first.",
   "common.catalog.notConfiguredRemote": "Vehicle import is turned off on the daemon (--oed-base-url none or OED_BASE_URL=none).",
   "common.payloadCondition": "payload condition",
-  "common.dialog.close": "Close"
+  "common.dialog.close": "Close",
+  "common.daemon.select": "Daemon",
+  "common.daemon.origin": "This server ({{url}})",
+  "common.daemon.switching": "Switching…",
+  "common.daemon.switchFailed": "Could not switch to {{url}}; staying on the previous daemon.",
+  "common.daemon.invalid": "Enter an http(s) address without credentials.",
+  "common.daemon.duplicate": "This address is already saved.",
+  "common.daemon.full": "The list of saved daemons is full.",
+  "common.daemon.addressLabel": "Daemon address",
+  "common.daemon.nameLabel": "Name",
+  "common.daemon.namePlaceholder": "Name (optional)",
+  "common.daemon.saveAndSwitch": "Save and switch",
+  "common.daemon.cancel": "Cancel",
+  "common.daemon.add": "Add daemon",
+  "common.daemon.forget": "Forget"
 }

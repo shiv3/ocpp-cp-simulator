@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 
-import type { ScenarioDefinition } from "@ocpp-cp-sim/core/cp/application/scenario/ScenarioTypes";
+import type { ScenarioDefinition } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import { useChargePoints } from "../../data/hooks/useChargePoints";
 import { useConfig } from "../../data/hooks/useConfig";
 import { libraryEditorUsers, type LibraryUserState } from "./scenarioLibrary";

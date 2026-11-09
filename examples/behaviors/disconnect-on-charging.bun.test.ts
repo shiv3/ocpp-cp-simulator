@@ -4,6 +4,7 @@ import {
   runBehavior,
   type BehaviorRun,
 } from "../../packages/core/src/test/behavior/runBehavior";
+import type { ChargerEngine } from "../../packages/core/src/cp/application/engine/ChargerEngine";
 import { disconnectOnCharging } from "./disconnect-on-charging";
 
 let runs: BehaviorRun[] = [];
@@ -39,7 +40,9 @@ describe("disconnect-on-charging", () => {
   test("misbehaves once the connector is charging", async () => {
     const run = await charging("seed-1");
     expect(
-      run.cp.engine.snapshot().behaviors["disconnect-on-charging"].misbehaved,
+      (run.cp.engine as ChargerEngine).snapshot().behaviors[
+        "disconnect-on-charging"
+      ].misbehaved,
     ).toBe(1);
   });
 
@@ -59,8 +62,9 @@ describe("disconnect-on-charging", () => {
     ).meterValue[0]!.sampledValue[0]!.value;
     expect(Number(value)).toBeGreaterThanOrEqual(1000);
     expect(
-      run.cp.engine.snapshot().behaviors["disconnect-on-charging"]
-        .meterValuesAltered,
+      (run.cp.engine as ChargerEngine).snapshot().behaviors[
+        "disconnect-on-charging"
+      ].meterValuesAltered,
     ).toBeGreaterThanOrEqual(1);
   });
 

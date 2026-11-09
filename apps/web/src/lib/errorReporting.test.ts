@@ -1,7 +1,7 @@
 import type { ErrorInfo } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { restrictedDataCollection } from "@ocpp-cp-simulator/contracts/errorReporting";
+import { restrictedDataCollection } from "@ocpp-cp-simulator/contracts/sentryOptions";
 import { REDACTED_VALUE } from "@ocpp-cp-simulator/contracts/redaction";
 import { initErrorReporting, readErrorReportingConfig } from "./errorReporting";
 

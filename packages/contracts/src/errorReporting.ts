@@ -1,52 +1,57 @@
 import { isPlainObject, redactSensitiveValue } from "./redaction";
 
 /**
- * Opt-in error reporting (#794). The web console and the CLI/daemon each wire
- * a Sentry SDK, but only when the operator supplies a DSN: nothing is ever
- * hard-coded, and without one the SDK is not even loaded. These helpers are
- * the SDK-free part both apps share.
+ * Opt-in error reporting (#794), vendor-neutral. The CLI/daemon and the web
+ * console each own the process- or page-level part (which errors are caught,
+ * flushing before an exit, the React root hooks) and hand every error to an
+ * {@link ErrorReporter}. An adapter (Sentry is the first built-in one)
+ * implements that interface for one vendor and is loaded only when the
+ * operator selects it: nothing is hard-coded, and without a selection no
+ * vendor SDK is loaded at all. This module is the SDK-free contract both
+ * apps and every adapter share.
  */
-export interface ErrorReportingConfig {
-  readonly dsn: string;
-  readonly release: string;
-  readonly environment?: string;
+
+/** Where and how an error was caught. */
+export interface ErrorReportContext {
+  /** Where the error was caught: "fatal" | "unhandledRejection" | "uncaughtException" | "react.uncaught" | "react.caught" | "react.recoverable" */
+  readonly mechanism: string;
+  /** `false` when nothing in the app handled the error (it ends the process or the React root). */
+  readonly handled: boolean;
+  /** React's component stack, for the React root hooks. */
+  readonly componentStack?: string;
 }
 
-/** `null` (reporting off) unless `dsn` is a non-blank string. */
-export function resolveErrorReportingConfig(input: {
-  dsn: unknown;
-  environment: unknown;
-  release: string;
-}): ErrorReportingConfig | null {
-  const dsn = typeof input.dsn === "string" ? input.dsn.trim() : "";
-  if (!dsn) return null;
-  const environment =
-    typeof input.environment === "string" ? input.environment.trim() : "";
-  return environment
-    ? { dsn, release: input.release, environment }
-    : { dsn, release: input.release };
+/** One vendor's error sink, as the apps see it. */
+export interface ErrorReporter {
+  /** Never throws. */
+  captureException(error: unknown, context: ErrorReportContext): void;
+  /** Resolves true when everything queued was sent within the timeout. */
+  flush(timeoutMs: number): Promise<boolean>;
 }
+
+/** What an app hands an adapter's {@link ErrorReporterFactory}. */
+export interface ErrorReporterInit {
+  /** The build's own version (`packages/contracts/src/buildVersion.ts`). */
+  readonly release: string;
+  /** Vendor settings come from the vendor's own variables (SENTRY_DSN, DD_*, ...). */
+  readonly env: Readonly<Record<string, unknown>>;
+  /** Adapters MUST run every outgoing event and breadcrumb through this (beforeSend or the SDK's equivalent). */
+  readonly scrub: <T>(report: T) => T;
+}
+
+/** Resolves to null when the adapter is selected but not configured (e.g. no DSN). May reject; the caller treats that as "reporting off". */
+export type ErrorReporterFactory = (
+  init: ErrorReporterInit,
+) => Promise<ErrorReporter | null>;
 
 /**
- * The Sentry SDK's `dataCollection` option (v11, which replaced
- * `sendDefaultPii`) with every optional category off: its defaults collect
- * user fields, cookies, HTTP headers and bodies, query strings and local
- * variables. Plain data, so this package stays free of the SDK.
+ * The selected adapter (`OCPP_SIM_ERROR_REPORTER`, `VITE_ERROR_REPORTER`):
+ * a built-in name or, on the CLI, a module specifier. `null` (reporting off)
+ * unless it is a non-blank string.
  */
-export function restrictedDataCollection() {
-  return {
-    userInfo: false,
-    cookies: false,
-    httpHeaders: false,
-    httpBodies: [] as never[],
-    urlQueryParams: false,
-    stackFrameVariables: false,
-    databaseQueryData: false,
-    queues: false,
-    graphQL: { document: false, variables: false },
-    genAI: { inputs: false, outputs: false },
-    mcp: { inputs: false, outputs: false },
-  };
+export function resolveErrorReporterName(value: unknown): string | null {
+  const name = typeof value === "string" ? value.trim() : "";
+  return name || null;
 }
 
 /** Headers that carry credentials, compared lower-cased. */
@@ -73,6 +78,7 @@ function dropCredentialHeaders(value: unknown): unknown {
 }
 
 /**
+ * The scrubber every adapter receives as {@link ErrorReporterInit.scrub}.
  * Run an event or a breadcrumb through the redaction the trace and log
  * writers use (CSMS `user:pass@` URLs, bearer tokens, OCPP secrets such as
  * `AuthorizationKey`), then drop the request's cookies and every member

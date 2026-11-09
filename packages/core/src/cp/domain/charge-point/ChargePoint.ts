@@ -4403,6 +4403,11 @@ export class ChargePoint {
 
     this.clearChargingProfiles(connectorId, {}, "ConnectorRemoved");
     this.stopPeriodicSampling(connectorId);
+    // The driver's own 1 s timer outlives Connector.dispose() and would keep
+    // calling evSetReady / stopTransaction on a connector the station no longer
+    // has (#864 review).
+    this._vehicleDrivers.get(connectorId)?.dispose();
+    this._vehicleDrivers.delete(connectorId);
     connector.dispose();
     this._engine.detachConnector(connectorId);
     const removed = this._connectors.delete(connectorId);

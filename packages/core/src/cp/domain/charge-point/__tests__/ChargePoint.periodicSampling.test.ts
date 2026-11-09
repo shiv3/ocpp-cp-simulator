@@ -68,6 +68,21 @@ describe("ChargePoint periodic sampling (#839)", () => {
     cp.dispose();
   });
 
+  it("removeConnector disposes the vehicle behavior driver of that connector", () => {
+    vi.useFakeTimers();
+    const cp = station();
+    const drivers = (cp as unknown as { _vehicleDrivers: Map<number, unknown> })
+      ._vehicleDrivers;
+    expect(drivers.has(1)).toBe(true);
+    const dispose = vi.spyOn(drivers.get(1) as { dispose(): void }, "dispose");
+
+    cp.removeConnector(1);
+
+    expect(dispose).toHaveBeenCalledTimes(1);
+    expect(drivers.has(1)).toBe(false);
+    cp.dispose();
+  });
+
   it("a MeterValueSampleInterval of 0 stops the running sampler; a positive value re-arms it", () => {
     const cp = station();
     startTransaction(cp);

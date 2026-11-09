@@ -1,79 +1,127 @@
 import type { RootOptions } from "react-dom/client";
 
 import { resolveBuildVersion } from "@ocpp-cp-simulator/contracts/buildVersion";
-import { scrubErrorReport } from "@ocpp-cp-simulator/contracts/errorReporting";
 import {
-  type SentryConfig as ErrorReportingConfig,
-  resolveSentryConfig as resolveErrorReportingConfig,
-  restrictedDataCollection,
-} from "@ocpp-cp-simulator/contracts/sentryOptions";
-
-type SentryReact = typeof import("@sentry/react");
+  type ErrorReporter,
+  type ErrorReporterFactory,
+  resolveErrorReporterName,
+  scrubErrorReport,
+} from "@ocpp-cp-simulator/contracts/errorReporting";
 
 export type RootErrorHooks = Pick<
   RootOptions,
   "onUncaughtError" | "onCaughtError" | "onRecoverableError"
 >;
 
+type ReporterModule = { createErrorReporter: ErrorReporterFactory };
+
 /**
- * Opt-in error reporting for the console (#794). Vite bakes
- * `VITE_SENTRY_DSN` into the bundle at build time: a `SENTRY_DSN` given to the
- * daemon at runtime does not reach the console it serves. Without it the
- * console reports nothing.
+ * The console's adapters, by the name `VITE_ERROR_REPORTER` selects them
+ * with. Each is a lazy chunk, so the default build (no selector) never
+ * downloads a vendor SDK. The console cannot load an arbitrary module: a new
+ * adapter is added here (and under `errorReporters/`).
  */
-export function readErrorReportingConfig(
-  env: Record<string, unknown> = import.meta.env,
-): ErrorReportingConfig | null {
-  return resolveErrorReportingConfig({
-    dsn: env.VITE_SENTRY_DSN,
-    environment: env.VITE_SENTRY_ENVIRONMENT,
-    release: resolveBuildVersion({
-      packageVersion: __APP_VERSION__,
-      commit: __APP_COMMIT__,
-    }),
+export const BUILTIN_REPORTERS: Readonly<
+  Record<string, () => Promise<ReporterModule>>
+> = {
+  sentry: () => import("./errorReporters/sentry"),
+};
+
+/** Why a built-in adapter resolved to `null`, for the warning. */
+const NOT_CONFIGURED: Readonly<Record<string, string>> = {
+  sentry: "VITE_SENTRY_DSN is not set",
+};
+
+/** The console's own build version, as the release. */
+function consoleRelease(): string {
+  return resolveBuildVersion({
+    packageVersion: __APP_VERSION__,
+    commit: __APP_COMMIT__,
   });
 }
 
 /**
- * Start Sentry when a DSN is configured and return the `createRoot` error
- * hooks that feed it. The SDK is a lazy chunk, so the default (no DSN) build
- * never downloads it; an SDK that fails to load or start leaves reporting off
- * rather than the console blank, so this never rejects. Errors only: no
- * tracing, no session replay, no session reports.
+ * The `createRoot` error hooks that hand every React root error to the
+ * reporter. Taking these hooks over replaces React's default logging, so
+ * they log too.
  */
-export async function initErrorReporting(
-  config: ErrorReportingConfig | null = readErrorReportingConfig(),
-  load: () => Promise<SentryReact> = () => import("@sentry/react"),
-): Promise<RootErrorHooks> {
-  if (!config) return {};
-  let Sentry: SentryReact;
-  try {
-    Sentry = await load();
-    Sentry.init({
-      ...config,
-      dataCollection: restrictedDataCollection(),
-      beforeSend: (event) => scrubErrorReport(event),
-      beforeBreadcrumb: (breadcrumb) => scrubErrorReport(breadcrumb),
-      // Errors only: BrowserSession would report a session on every page load.
-      integrations: (defaults) =>
-        defaults.filter(({ name }) => name !== "BrowserSession"),
-    });
-  } catch (err) {
-    console.warn("Error reporting disabled: the Sentry SDK did not start", err);
-    return {};
-  }
-  // Taking these hooks over replaces React's default logging, so log too.
-  const capture = Sentry.reactErrorHandler();
+export function rootErrorHooks(reporter: ErrorReporter): RootErrorHooks {
+  const capture = (
+    error: unknown,
+    mechanism: string,
+    handled: boolean,
+    componentStack: string | null | undefined,
+  ) => {
+    try {
+      reporter.captureException(
+        error,
+        componentStack
+          ? { mechanism, handled, componentStack }
+          : { mechanism, handled },
+      );
+    } catch {
+      // A broken adapter must not take the console down with it.
+    }
+  };
   return {
     onUncaughtError: (error, errorInfo) => {
-      capture(error, errorInfo);
+      capture(error, "react.uncaught", false, errorInfo.componentStack);
       console.error(error);
     },
-    onCaughtError: Sentry.reactErrorHandler((error, errorInfo) =>
-      console.error(error, errorInfo.componentStack),
-    ),
-    onRecoverableError: Sentry.reactErrorHandler((error) =>
-      console.error(error),
-    ),
+    onCaughtError: (error, errorInfo) => {
+      capture(error, "react.caught", true, errorInfo.componentStack);
+      console.error(error, errorInfo.componentStack);
+    },
+    onRecoverableError: (error, errorInfo) => {
+      capture(error, "react.recoverable", true, errorInfo.componentStack);
+      console.error(error);
+    },
   };
+}
+
+/**
+ * Opt-in error reporting for the console (#794), vendor-neutral. Vite bakes
+ * `VITE_ERROR_REPORTER` (and the adapter's own variables, such as
+ * `VITE_SENTRY_DSN`) into the bundle at build time: variables given to the
+ * daemon at run time do not reach the console it serves. Without a selector
+ * the console reports nothing and loads no adapter.
+ *
+ * Never rejects: an unknown name, or an adapter that fails to load or start,
+ * leaves reporting off with one warning rather than the console blank.
+ * Resolves to the `createRoot` error hooks ({} while reporting is off).
+ */
+export async function initErrorReporting(
+  env: Record<string, unknown> = import.meta.env,
+  builtins: Readonly<
+    Record<string, () => Promise<ReporterModule>>
+  > = BUILTIN_REPORTERS,
+): Promise<RootErrorHooks> {
+  const name = resolveErrorReporterName(env.VITE_ERROR_REPORTER);
+  if (!name) return {};
+  const load = Object.hasOwn(builtins, name) ? builtins[name] : undefined;
+  if (!load) {
+    console.warn(
+      `Error reporting disabled: unknown error reporter "${name}" (built in: ${Object.keys(builtins).join(", ")})`,
+    );
+    return {};
+  }
+  let reporter: ErrorReporter | null;
+  try {
+    const { createErrorReporter } = await load();
+    reporter = await createErrorReporter({
+      release: consoleRelease(),
+      env,
+      scrub: scrubErrorReport,
+    });
+  } catch (err) {
+    console.warn(`Error reporting disabled: ${name} did not start`, err);
+    return {};
+  }
+  if (!reporter) {
+    console.warn(
+      `Error reporting disabled: ${name} selected but ${NOT_CONFIGURED[name] ?? "not configured"}`,
+    );
+    return {};
+  }
+  return rootErrorHooks(reporter);
 }

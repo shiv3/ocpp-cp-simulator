@@ -114,6 +114,8 @@ COPY scripts/bench/tsconfig.json ./scripts/bench/tsconfig.json
 COPY scripts/tsconfig.json ./scripts/tsconfig.json
 # vite.config.ts imports the third-party notices renderer (#857).
 COPY scripts/licenseNotices.ts ./scripts/licenseNotices.ts
+# `bun run build:cli` writes the CLI bundle's notices with this (#870).
+COPY scripts/generate-cli-notices.ts ./scripts/generate-cli-notices.ts
 COPY tailwind.config.js postcss.config.js ./
 COPY public ./public
 COPY packages ./packages

@@ -3,7 +3,7 @@ import path from "path";
 import { bundledPackages, renderNotices } from "./licenseNotices";
 
 // `bun build` writes no license listing, so the CLI bundle (dist-cli/main.js,
-// the Docker image, the Tauri sidecar) shipped the code of socket.io, ws, ...
+// the Docker image, the Tauri sidecar) shipped the code of socket.io, engine.io, ...
 // without the notices their MIT / ISC licenses ask for (#870). This reads the
 // build's metafile, finds the npm packages it inlined and writes their notices.
 // (`ws` is not among them: with `--target=bun` the bundle uses Bun's own.)

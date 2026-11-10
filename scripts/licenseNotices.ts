@@ -167,7 +167,7 @@ export function bundledPackages(
   ownScope = "@ocpp-cp-simulator/",
 ): NoticeEntry[] {
   const found = new Map<string, NoticeEntry>();
-  for (const input of inputs) {
+  for (const input of Array.from(inputs)) {
     const normalized = input.replace(/\\/g, "/");
     const at = normalized.lastIndexOf("node_modules/");
     if (at === -1) continue;
@@ -198,5 +198,5 @@ export function bundledPackages(
           : ((pkg.author as { name?: string } | undefined)?.name ?? undefined),
     });
   }
-  return [...found.values()];
+  return Array.from(found.values());
 }

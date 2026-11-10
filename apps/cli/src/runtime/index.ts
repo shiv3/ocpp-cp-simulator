@@ -5,6 +5,7 @@
  * the layer existed (the Docker image and the Tauri sidecar run on Bun).
  */
 import { bunRuntime } from "./bun";
+import { nodeRuntime } from "./node";
 import type { Runtime } from "./types";
 
 export type {
@@ -24,4 +25,4 @@ export { isMainModule, moduleDir } from "./paths";
 export const isBun: boolean =
   typeof (globalThis as { Bun?: unknown }).Bun !== "undefined";
 
-export const runtime: Runtime = bunRuntime;
+export const runtime: Runtime = isBun ? bunRuntime : nodeRuntime;

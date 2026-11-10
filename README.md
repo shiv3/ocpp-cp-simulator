@@ -33,12 +33,13 @@ ocpp-cp-sim --ws-url ws://localhost:9000/ocpp --cp-id CP001
 
 ```bash
 # From the npm registry (Bun is needed at run time: the bin runs under a `bun` shebang)
-bun install -g ocpp-cp-simulator      # or: npm install -g ocpp-cp-simulator
+pnpm install -g ocpp-cp-simulator     # or: bun install -g / npm install -g ocpp-cp-simulator
 
 # Without installing
 bunx ocpp-cp-simulator --help         # or: npx ocpp-cp-simulator --help
 
 # Prebuilt release tarball (same package, from GitHub)
+pnpm install -g https://github.com/shiv3/ocpp-cp-simulator/releases/download/cli-latest/ocpp-cp-simulator.tgz
 bun install -g https://github.com/shiv3/ocpp-cp-simulator/releases/download/cli-latest/ocpp-cp-simulator.tgz
 
 # From a local checkout

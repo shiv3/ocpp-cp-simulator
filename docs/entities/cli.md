@@ -77,10 +77,11 @@ installed:
 
 ```bash
 # npm registry (recommended) — ships the web-console dist/. Needs Bun at run time.
-bun install -g ocpp-cp-simulator      # or: npm install -g ocpp-cp-simulator
+pnpm install -g ocpp-cp-simulator     # or: bun install -g / npm install -g ocpp-cp-simulator
 bunx ocpp-cp-simulator --help         # or: npx ocpp-cp-simulator --help (no install)
 
 # The same package as a prebuilt release tarball
+pnpm install -g https://github.com/shiv3/ocpp-cp-simulator/releases/download/cli-latest/ocpp-cp-simulator.tgz
 bun install -g https://github.com/shiv3/ocpp-cp-simulator/releases/download/cli-latest/ocpp-cp-simulator.tgz
 
 # From a local checkout (dev) — the bin is the built bundle, so build it first

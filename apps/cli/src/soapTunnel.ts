@@ -19,6 +19,7 @@
 
 import { redactSensitiveText } from "@ocpp-cp-simulator/core/cp/shared/redaction";
 import { isHttpUrl, joinSoapCallbackUrl } from "./soapCallbackUrl";
+import { runtime } from "./runtime";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 /** How long to wait for stderr to drain once the agent has exited. */
@@ -36,7 +37,7 @@ export interface SoapTunnel {
   close(): void;
 }
 
-/** The slice of a child process the spawn mode needs; `Bun.spawn` satisfies it. */
+/** The slice of a child process the spawn mode needs; `runtime.spawn` satisfies it. */
 export interface SpawnedTunnelProcess {
   readonly stdout: ReadableStream<Uint8Array>;
   readonly stderr: ReadableStream<Uint8Array>;
@@ -93,23 +94,11 @@ export function localHostForTunnel(httpHost: string): string {
 // spawn mode
 // ---------------------------------------------------------------------------
 
-function bunSpawn(
+function runtimeSpawn(
   argv: string[],
   env: Record<string, string | undefined>,
 ): SpawnedTunnelProcess {
-  const proc = Bun.spawn({
-    cmd: argv,
-    env,
-    stdin: "ignore",
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  return {
-    stdout: proc.stdout,
-    stderr: proc.stderr,
-    exited: proc.exited,
-    kill: () => proc.kill(),
-  };
+  return runtime.spawn({ cmd: argv, env });
 }
 
 function ngrokArgv(
@@ -180,7 +169,7 @@ async function spawnNgrokTunnel(
   opts: SoapTunnelOptions,
   timeoutMs: number,
 ): Promise<SoapTunnel> {
-  const spawn = opts.spawn ?? bunSpawn;
+  const spawn = opts.spawn ?? runtimeSpawn;
   const env: Record<string, string | undefined> = {
     ...(opts.env ?? process.env),
   };

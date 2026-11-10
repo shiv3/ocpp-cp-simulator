@@ -227,8 +227,12 @@ export const SPECIFIER_ALLOW_LIST: Readonly<
   >
 > = {
   "packages/core/src/cp/infrastructure/persistence/BunSqliteDatabase.ts": {
-    specifiers: ["bun:sqlite", "node:path", "node:fs"],
-    why: "The Bun-only Database implementation behind the daemon's state file. Never reached from the browser bundle (browserBundleNoDaemonXml.bun.test.ts guards that); the web console uses SqlJsDatabase instead.",
+    specifiers: ["node:path", "node:fs"],
+    why: "The Bun-only Database implementation behind the daemon's state file (`bun:sqlite` is loaded through process.getBuiltinModule since #916). Never reached from the browser bundle (browserBundleNoDaemonXml.bun.test.ts guards that); the web console uses SqlJsDatabase instead.",
+  },
+  "packages/core/src/cp/infrastructure/persistence/NodeSqliteDatabase.ts": {
+    specifiers: ["node:path", "node:fs"],
+    why: "The Node twin of BunSqliteDatabase (#916; `node:sqlite` itself is loaded through process.getBuiltinModule). Daemon-only for the same reason; openSqliteDatabase picks one of the two by runtime.",
   },
 };
 

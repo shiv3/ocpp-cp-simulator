@@ -1,13 +1,15 @@
 /**
  * Domain-level SQL database abstraction.
  *
- * Two adapters target the same shape:
- *   - `BunSqliteDatabase`  (CLI / daemon, `bun:sqlite`)
+ * Three adapters target the same shape:
+ *   - `BunSqliteDatabase`  (CLI / daemon on Bun, `bun:sqlite`)
+ *   - `NodeSqliteDatabase` (CLI / daemon on Node, `node:sqlite`, #916)
  *   - `SqlJsDatabase`      (browser, sql.js + IndexedDB)
+ * The daemon opens one with `openSqliteDatabase`, which picks by runtime.
  *
  * The interface is intentionally narrow — `exec/run/all/get/close/flush` —
  * so domain modules can hold a `Database` reference without caring whether
- * it lives in WASM (browser) or in `bun:sqlite` (daemon). All SQL
+ * it lives in WASM (browser) or in the runtime's SQLite (daemon). All SQL
  * statements are plain SQLite dialect; both adapters accept the same
  * placeholder syntax (positional `?`).
  *
@@ -35,7 +37,8 @@ export interface Database {
   /**
    * Persist any pending in-memory changes. The browser adapter exports the
    * sql.js database to a Uint8Array and writes it to IndexedDB; the daemon
-   * adapter is a no-op (`bun:sqlite` writes through to disk synchronously).
+   * adapters are no-ops (`bun:sqlite` and `node:sqlite` write through to
+   * disk synchronously).
    * Callers may `await flush()` whenever they need to be sure data has
    * survived a crash/reload, but most write sites can fire-and-forget — the
    * browser adapter debounces internally.

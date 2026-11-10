@@ -33,7 +33,8 @@ import {
   labelValueSchema,
   normalizeLabels,
 } from "@ocpp-cp-simulator/contracts/labels";
-import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/BunSqliteDatabase";
+import { openSqliteDatabase } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/openSqliteDatabase";
+import { isMainModule, moduleDir } from "./runtime";
 import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
 import { setGlobalLogFormat } from "@ocpp-cp-simulator/core/cp/shared/Logger";
 import { TraceWriter, setGlobalTraceWriter } from "./trace/TraceWriter";
@@ -106,7 +107,8 @@ function hasIndexHtml(dir: string): boolean {
  *    `bun build` bundle, `<pkg>/dist-cli/main.js`, beside `<pkg>/dist`
  *    (#578). One level up.
  * 3. **`bun build --compile` binary** — the Tauri sidecar. Here the module
- *    lives in the binary's virtual filesystem, so `import.meta.dir` is
+ *    lives in the binary's virtual filesystem, so the module directory
+ *    (`moduleDir(import.meta)`, Bun's `import.meta.dir`) is
  *    `/$bunfs/root` (POSIX) or `B:\~BUN\root` (Windows) and walking up
  *    from it yields `/dist`, which never exists. That was issue #319:
  *    `src-tauri/src/lib.rs` spawns the sidecar with `--web-console`, so
@@ -136,9 +138,9 @@ export function resolveBundledDist(
     // (node_modules/), and a stray dist/ there must not win over the
     // package's own. From a source checkout this is <repo>/apps/cli/dist, which
     // does not exist, so shape 1 is reached unchanged.
-    path.resolve(import.meta.dir, "../dist"),
+    path.resolve(moduleDir(import.meta), "../dist"),
     // Shape 1 (source checkout): <repo>/apps/cli/src -> <repo>/dist.
-    path.resolve(import.meta.dir, "../../../dist"),
+    path.resolve(moduleDir(import.meta), "../../../dist"),
     // Shape 3 (compiled): a `dist/` shipped beside or one level above the
     // binary, and the macOS .app layout where the sidecar sits in
     // Contents/MacOS/ and Tauri resources in Contents/Resources/.
@@ -1053,7 +1055,7 @@ export function parseArgs(argv: string[]): CLIOptions {
         "Error: --web-console could not find the built web console " +
           "(a directory containing index.html).\n" +
           bundled.searched.map((dir) => `  searched: ${dir}\n`).join("") +
-          `  import.meta.dir: ${import.meta.dir}\n` +
+          `  import.meta.dir: ${moduleDir(import.meta)}\n` +
           `  process.execPath: ${process.execPath}\n` +
           "Fixes: from a source checkout run `bun run build`; from a " +
           "release install the prebuilt tarball, which ships dist/; " +
@@ -2468,7 +2470,7 @@ async function main(): Promise<void> {
   // across reruns the same way the daemon does.
   let replDatabase: Database | null = null;
   if (options.stateDb) {
-    replDatabase = BunSqliteDatabase.open(options.stateDb);
+    replDatabase = await openSqliteDatabase(options.stateDb);
   }
   const behaviors = await loadBehavesOrExit(
     options.behaviorFiles,
@@ -2507,7 +2509,7 @@ async function main(): Promise<void> {
   }
 }
 
-if (import.meta.main) {
+if (isMainModule(import.meta)) {
   main().catch(async (err) => {
     process.stderr.write(
       `Fatal: ${err instanceof Error ? err.message : err}\n`,

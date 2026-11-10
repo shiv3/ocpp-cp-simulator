@@ -228,6 +228,11 @@ if [ -f "$PKG_DIR/dist/index.html" ]; then
     kill -0 "$DAEMON_PID" 2>/dev/null || break
     sleep 0.5
   done
+  # The CLI bundle inlines socket.io, ws, ...: their notices travel with it (#870).
+  [ -s "$PKG_DIR/dist-cli/THIRD-PARTY-LICENSES.txt" ] \
+    || fail "the tarball ships dist-cli/main.js without dist-cli/THIRD-PARTY-LICENSES.txt (scripts/generate-cli-notices.ts)"
+  grep -qi "socket.io" "$PKG_DIR/dist-cli/THIRD-PARTY-LICENSES.txt" \
+    || fail "dist-cli/THIRD-PARTY-LICENSES.txt does not list socket.io, which the bundle inlines"
   # MIT / ISC need the notices to travel with the bundled code (#857).
   [ -s "$PKG_DIR/dist/THIRD-PARTY-LICENSES.txt" ] \
     || fail "the tarball ships dist/ without THIRD-PARTY-LICENSES.txt (vite.config.ts license plugin)"

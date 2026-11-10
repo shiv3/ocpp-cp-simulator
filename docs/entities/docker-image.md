@@ -328,10 +328,10 @@ Notes:
 
 The image **doesn't** contain Vite / Tauri / dev dependencies, sources or
 `node_modules`: the build stage runs `bun run build` (the web console, `dist/`, with its
-`THIRD-PARTY-LICENSES.txt`, #857; these notices cover the **web console only**,
-not the packages inlined in `dist-cli/main.js`)
+`THIRD-PARTY-LICENSES.txt`, #857)
 and `bun run build:cli` (the CLI and daemon as one bundle,
-`dist-cli/main.js`), and the runtime layer holds only those two, the scenario
+`dist-cli/main.js`, with the notices of the packages it inlines in
+`dist-cli/THIRD-PARTY-LICENSES.txt`, #870), and the runtime layer holds only those two, the scenario
 examples and `docker/entrypoint.sh`, which starts `bun dist-cli/main.js`, and the one-file `src/cli/main.ts` shim. That
 is the same pair the npm tarball ships, so the two cannot drift apart the way
 the source-based image and the tarball once did (#320); see

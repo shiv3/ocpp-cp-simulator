@@ -59,11 +59,15 @@ function init(env: Record<string, unknown>) {
   return { release: "1.0.0", env, scrub: scrubErrorReport };
 }
 
-async function started(env: Record<string, unknown> = { SENTRY_DSN: DSN }) {
+async function started(
+  env: Record<string, unknown> = { SENTRY_DSN: DSN },
+  onBun = true,
+) {
   const sentry = fakeSentry();
   const reporter = await createErrorReporter(
     init(env),
     async () => sentry as never,
+    onBun,
   );
   return { sentry, reporter, options: sentry.init.mock.calls[0]?.[0] };
 }
@@ -118,6 +122,23 @@ describe("Sentry adapter (CLI)", () => {
         { name, options: { sessions: false } },
       ]);
     }
+  });
+
+  it("leaves the Bun integrations out on Node and says the runtime is Node (#916)", async () => {
+    const { options, sentry } = await started({ SENTRY_DSN: DSN }, false);
+    const resolved = resolveIntegrations(options, BUN_DEFAULTS);
+    expect(resolved.map(({ name }) => name).sort()).toEqual(
+      ["Console", "Http"].sort(),
+    );
+    expect(resolved.find((i) => i.name === "Http")).toEqual({
+      name: "Http",
+      options: { sessions: false },
+    });
+    expect(sentry.bunServerIntegration).not.toHaveBeenCalled();
+    expect(options.runtime).toEqual({
+      name: "node",
+      version: process.versions.node,
+    });
   });
 
   it("passes the mechanism to the SDK, and never throws", async () => {

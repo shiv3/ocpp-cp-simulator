@@ -1,6 +1,10 @@
 import { existsSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { bundleBehavior, typecheckBehavior } from "./bundleBehavior";
+import {
+  behaviorBundlingUnavailable,
+  bundleBehavior,
+  typecheckBehavior,
+} from "./bundleBehavior";
 
 export interface BuildBehaviorResult {
   readonly ok: boolean;
@@ -13,6 +17,9 @@ export async function buildBehaviorFile(
   file: string,
   out?: string,
 ): Promise<BuildBehaviorResult> {
+  // Before the type check, which takes seconds and would be wasted.
+  const unavailable = behaviorBundlingUnavailable("build");
+  if (unavailable) return { ok: false, outFile: null, problems: [unavailable] };
   if (!existsSync(file)) {
     return { ok: false, outFile: null, problems: [`No such file: ${file}`] };
   }

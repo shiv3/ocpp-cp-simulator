@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
 import { findForbiddenSyntax, type SyntaxProblem } from "./syntaxGuard";
+import { isBun } from "../runtime";
 
 export interface BundleResult {
   readonly ok: boolean;
@@ -19,6 +20,20 @@ export interface BundleOptions {
 }
 
 const SOURCE_FILTER = /\.(?:[cm]?[tj]s|tsx?)$/;
+
+/**
+ * Bundling uses `Bun.build`, so it needs Bun (#916). On Node, `behavior build`
+ * and loading a behavior file fail with this instead of a TypeError; null when
+ * the runtime can bundle.
+ */
+export function behaviorBundlingUnavailable(
+  mode: BundleOptions["mode"],
+): string | null {
+  if (isBun) return null;
+  return mode === "build"
+    ? "`behavior build` needs Bun: https://bun.sh"
+    : "Loading a behavior file needs Bun: https://bun.sh";
+}
 
 const formatProblem = (p: SyntaxProblem): string =>
   `${p.file}:${p.line}:${p.column}: ${p.message}`;
@@ -78,6 +93,8 @@ export async function bundleBehavior(
   file: string,
   options: BundleOptions,
 ): Promise<BundleResult> {
+  const unavailable = behaviorBundlingUnavailable(options.mode);
+  if (unavailable) return { ok: false, code: "", problems: [unavailable] };
   const entry = path.resolve(file);
   const problems: string[] = [];
   const plugin: Bun.BunPlugin = {

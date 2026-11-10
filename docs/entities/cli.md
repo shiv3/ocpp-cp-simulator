@@ -70,11 +70,17 @@ npm run cli -- --ws-url ws://localhost:9000/ocpp --cp-id CP001
 
 ### Installing as the `ocpp-cp-sim` command
 
-The package exposes a `ocpp-cp-sim` bin so it can be invoked from anywhere once
+The package exposes four bins for the same entry point: `ocpp-cp-sim`, its
+aliases `ocpsim` and `cp-sim`, and `ocpp-cp-simulator` (the one `npx` / `bunx`
+run, since it matches the package name). It can be invoked from anywhere once
 installed:
 
 ```bash
-# Prebuilt release tarball (recommended) — ships the web-console dist/
+# npm registry (recommended) — ships the web-console dist/. Needs Bun at run time.
+bun install -g ocpp-cp-simulator      # or: npm install -g ocpp-cp-simulator
+bunx ocpp-cp-simulator --help         # or: npx ocpp-cp-simulator --help (no install)
+
+# The same package as a prebuilt release tarball
 bun install -g https://github.com/shiv3/ocpp-cp-simulator/releases/download/cli-latest/ocpp-cp-simulator.tgz
 
 # From a local checkout (dev) — the bin is the built bundle, so build it first
@@ -95,18 +101,21 @@ ocpp-cp-sim --daemon
 > cannot run `vite build` on install. Use the prebuilt tarball URL above.
 > Release tarballs are produced by the `Release CLI` workflow on `v*` tags — the same tag that builds the desktop app, so the CLI, the app and the libraries share one version. (Releases up to `cli-v0.4.1` used a separate `cli-v*` train.)
 >
-> **npm registry.** The same workflow's `publish-npm` job publishes that
-> tarball to the npm registry as `ocpp-cp-simulator`, authenticated by
-> GitHub's OIDC token (npm trusted publishing, no stored secret) and gated on
-> the repository variable `NPM_PUBLISH=true` — the first version is published
-> by hand from the release asset, the trusted publisher is then registered on
-> npmjs.com, and the variable is set. Until that first publish has happened
-> this page does not advertise `npm install -g ocpp-cp-simulator`, for the
-> reason #321 gives: a documented install command must resolve. The package
-> needs Bun at run time whichever way it is installed — the bin is
-> `dist-cli/main.js`, a `bun build --target=bun` bundle under a `bun`
-> shebang, and the daemon uses `bun:sqlite` and `Bun.serve`. A SemVer prerelease (`v1.0.0-rc.1`) is published under
+> **npm registry.** `ocpp-cp-simulator` is published on npm (first version
+> `0.10.0`, #814 / #815). The `publish-npm` job of the `Release CLI` workflow
+> publishes the release's own tarball on every `v*` tag, authenticated by
+> GitHub's OIDC token (npm trusted publishing, no stored secret; the trusted
+> publisher allows `npm publish`) and gated on the repository variable
+> `NPM_PUBLISH=true`. A SemVer prerelease (`v1.0.0-rc.1`) is published under
 > the `next` dist-tag, never `latest`; a re-run of a tag already on npm skips.
+> The package needs Bun at run time whichever way it is installed — the bin is
+> `dist-cli/main.js`, a `bun build --target=bun` bundle under a `bun` shebang,
+> and the daemon uses `bun:sqlite` and `Bun.serve`.
+>
+> The first version had to be published by hand (a package that does not exist
+> yet cannot have a trusted publisher); that publish also went through npm's
+> staged-publish approval, which the trusted publisher's "Allow `npm publish`"
+> setting skips for the CI publishes.
 
 ### Why `cli-latest` and not `releases/latest`
 

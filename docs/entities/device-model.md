@@ -85,6 +85,13 @@ the key read-write: the simulated reset never fails, so nothing retries, and a
 writable value would change nothing. The 1.6 key stays read-write; on 2.x
 `defaultConfiguration` marks the store key read-only to match.
 
+`AuthCtrlr.AuthorizeRemoteStart` (1.6 `AuthorizeRemoteTxRequests`) is
+`ReadWrite` on both versions (#921): OCPP 1.6 §9.1.3 and 2.0.1 Part 2 §2.3.4
+leave the mutability to the station, and both values are implemented — a
+remote start authorized like a local one, or started at once (see
+[default behaviors](default-behaviors.md)). A CSMS, a scenario or the
+operator's `set_config_key` can turn it on; it persists like any writable key.
+
 A `MemberList` variable, like an `OptionList` one, carries a `valuesList`
 (mandatory in `VariableCharacteristicsType` for `OptionList`, `MemberList` and
 `SequenceList`); the registry refuses one without it and refuses it on any other
@@ -132,7 +139,7 @@ one of their variables answers `UnknownVariable`, not `UnknownComponent`.
 | `AlignedDataCtrlr.SendDuringIdle`                          | `AlignedDataSendDuringIdle`               | ReadWrite  | boolean    | –                                                      | false                                             | Persistent  |
 | `LocalAuthListCtrlr.Enabled`                               | `LocalAuthListEnabled` (1.6)              | ReadWrite  | boolean    | –                                                      | true                                              | Persistent  |
 | `LocalAuthListCtrlr.ItemsPerMessage`                       | `SendLocalListMaxLength` (1.6)            | ReadOnly   | integer    | –                                                      | 100                                               | Persistent  |
-| `AuthCtrlr.AuthorizeRemoteStart`                           | `AuthorizeRemoteTxRequests` (1.6)         | ReadOnly   | boolean    | –                                                      | false                                             | Persistent  |
+| `AuthCtrlr.AuthorizeRemoteStart`                           | `AuthorizeRemoteTxRequests` (1.6)         | ReadWrite  | boolean    | –                                                      | false                                             | Persistent  |
 | `AuthCtrlr.LocalPreAuthorize`                              | `LocalPreAuthorize` (1.6)                 | ReadWrite  | boolean    | –                                                      | false                                             | Persistent  |
 | `AuthCtrlr.LocalAuthorizeOffline`                          | `LocalAuthorizeOffline` (1.6)             | ReadWrite  | boolean    | –                                                      | true                                              | Persistent  |
 | `AuthCtrlr.OfflineTxForUnknownIdEnabled`                   | `AllowOfflineTxForUnknownId` (1.6)        | ReadWrite  | boolean    | –                                                      | false                                             | Persistent  |

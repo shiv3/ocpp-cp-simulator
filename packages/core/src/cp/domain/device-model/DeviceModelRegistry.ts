@@ -555,10 +555,14 @@ const VARIABLES: readonly DeviceModelVariableDef[] = [
       default: 100,
     },
   ),
+  // §2.3.4 leaves the mutability to the station; both values are implemented
+  // (F01.FR.01/02, #762), so it is writable (#921); configurable in #922.
   persistent("AuthCtrlr", "AuthorizeRemoteStart", "AuthorizeRemoteTxRequests", {
-    mutability: "ReadOnly",
+    mutability: "ReadWrite",
     dataType: "boolean",
     default: false,
+    effect:
+      "A remote start is authorized like a local one before it starts (F01.FR.01).",
   }),
   // #452: local authorization (2.0.1 Part 2 §2.3-§2.4, C10-C15).
   persistent("AuthCtrlr", "LocalPreAuthorize", "LocalPreAuthorize", {

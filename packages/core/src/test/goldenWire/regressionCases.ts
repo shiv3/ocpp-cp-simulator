@@ -29,10 +29,10 @@ const both = (name: string, run: Case["run"], options?: Case["options"]) => {
 };
 const cfg = (r: Rig, k: string, v: string) =>
   (r.cp as any).configuration.applyChange(k, v);
-// The key is read-only for the CSMS (ChangeConfiguration is Rejected): it is
-// the station's own choice, set here the way a scenario or the CLI sets it.
+// Set off the wire, the way a scenario or the operator's set_config_key sets
+// it (#921: the key is writable on both versions).
 const authorizeRemote = (r: Rig, on: boolean) => {
-  if (!r.cp.configuration.setRuntimeValue("AuthorizeRemoteTxRequests", on)) {
+  if (cfg(r, "AuthorizeRemoteTxRequests", String(on)) !== "Accepted") {
     throw new Error("AuthorizeRemoteTxRequests cannot be set");
   }
 };
@@ -1863,6 +1863,36 @@ both("remote-start-no-authorize", async (r) => {
   r.plugIn();
   await settle(r);
   await r.remoteStart("TAG-NA");
+  await settle(r);
+  await r.remoteStop();
+});
+// #921: the key is the station's choice to make writable (1.6 §9.1.3, 2.0.1
+// Part 2 §2.3.4: R or RW); the CSMS turns it on, and the remote start then
+// authorizes first.
+c16("remote-start-authorize-change-configuration", async (r) => {
+  await r.csms.call("ChangeConfiguration", {
+    key: "AuthorizeRemoteTxRequests",
+    value: "true",
+  });
+  r.plugIn();
+  await settle(r);
+  await r.remoteStart("TAG-RA");
+  await settle(r);
+  await r.remoteStop();
+});
+c201("remote-start-authorize-set-variables", async (r) => {
+  await r.csms.call("SetVariables", {
+    setVariableData: [
+      {
+        component: { name: "AuthCtrlr" },
+        variable: { name: "AuthorizeRemoteStart" },
+        attributeValue: "true",
+      },
+    ],
+  });
+  r.plugIn();
+  await settle(r);
+  await r.remoteStart("TAG-RA");
   await settle(r);
   await r.remoteStop();
 });

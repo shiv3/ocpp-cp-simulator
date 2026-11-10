@@ -1325,9 +1325,9 @@ export const goldenCases: GoldenCase[] = [
     await rig.csms.call("SetVariables", {
       setVariableData: [
         {
-          component: { name: "AuthCtrlr" },
-          variable: { name: "AuthorizeRemoteStart" },
-          attributeValue: "true",
+          component: { name: "LocalAuthListCtrlr" },
+          variable: { name: "ItemsPerMessage" },
+          attributeValue: "50",
         },
         { ...heartbeat, attributeValue: "soon" },
         {

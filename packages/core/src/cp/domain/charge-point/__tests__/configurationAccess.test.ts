@@ -189,4 +189,21 @@ describe("configuration key access (#612)", () => {
       expect(s.getInteger("HeartbeatInterval")).toBe(77);
     });
   });
+
+  // #921: 1.6 §9.1.3 and 2.0.1 Part 2 §2.3.4 leave the key R or RW; it is
+  // writable so both remote-start behaviours (§5.11, F01) can be exercised.
+  it.each([
+    ["OCPP 1.6", false],
+    ["OCPP 2.x", true],
+  ])("%s: lets the operator turn AuthorizeRemoteTxRequests on", (_, is2x) => {
+    const s = store();
+    expect(
+      writeConfigurationKey(s, is2x, "AuthorizeRemoteTxRequests", "true"),
+    ).toBe("Accepted");
+    expect(s.authorizeRemoteTxRequests()).toBe(true);
+    const { keys } = readConfigurationKeys(s, is2x, [
+      "AuthorizeRemoteTxRequests",
+    ]);
+    expect(keys[0]).toMatchObject({ readonly: false, value: "true" });
+  });
 });

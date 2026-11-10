@@ -35,7 +35,10 @@ export const ConfigurationKeys = {
     AuthorizeRemoteTxRequests: {
       name: "AuthorizeRemoteTxRequests",
       required: true,
-      readonly: true, // Choice is up to Charge Point implementation
+      // R or RW is the Charge Point's choice (§9.1.3; 2.0.1 Part 2 §2.3.4).
+      // Writable, so both behaviours of §5.11 / F01 can be exercised (#921);
+      // a custom key choosing the accessibility is #922.
+      readonly: false,
       type: "boolean",
     } as BooleanConfigurationKey,
     // Number of times to blink Charge Point lighting when signalling

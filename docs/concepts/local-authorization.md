@@ -27,7 +27,7 @@ related:
   - control-plane.md
   - ../entities/mcp-endpoint.md
   - operational-timeline.md
-updated: 2026-11-09
+updated: 2026-11-10
 ---
 
 # Local authorization
@@ -44,7 +44,11 @@ The whole gate sits behind the simulator's custom key
 `AuthorizeBeforeLocalStart` (default `true`). With `false`, a local start
 neither sends Authorize.req nor consults the list or the cache, offline
 included — the pre-#181 wire. A RemoteStart-triggered start skips the gate
-too.
+too: a remote start is authorized the same way (list, cache, then
+`Authorize.req`, starting only on `Accepted`) only when the writable
+`AuthorizeRemoteTxRequests` (2.x `AuthCtrlr.AuthorizeRemoteStart`, default
+`false`) is true — 1.6 §5.11, 2.x F01 (#762, #921); see
+[default behaviors](../entities/default-behaviors.md).
 
 ## Configuration keys
 

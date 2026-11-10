@@ -91,12 +91,12 @@ describe("OCPP 2.0.1 GetBaseReport", () => {
         mutability: "ReadWrite",
       });
 
-      const authorizeRemoteStart = reportDatum(
+      const itemsPerMessage = reportDatum(
         reportData,
-        "AuthCtrlr",
-        "AuthorizeRemoteStart",
+        "LocalAuthListCtrlr",
+        "ItemsPerMessage",
       );
-      expect(authorizeRemoteStart.variableAttribute[0]).toMatchObject({
+      expect(itemsPerMessage.variableAttribute[0]).toMatchObject({
         mutability: "ReadOnly",
       });
 

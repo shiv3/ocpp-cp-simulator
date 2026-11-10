@@ -64,7 +64,7 @@ describe("SetVariables reason codes", () => {
   });
 
   it("a ReadOnly variable: Rejected / ReadOnly (B05.FR.09)", () => {
-    const r = setOne(newStore(), "AuthCtrlr", "AuthorizeRemoteStart", "true");
+    const r = setOne(newStore(), "LocalAuthListCtrlr", "ItemsPerMessage", "50");
     expect(r.attributeStatus).toBe("Rejected");
     expect(r.attributeStatusInfo?.reasonCode).toBe("ReadOnly");
   });

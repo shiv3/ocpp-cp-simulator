@@ -28,7 +28,7 @@ import {
 } from "./socketServer";
 import { createMcpHandler } from "./mcp/mcpServer";
 import { RegistryChargePointService } from "./RegistryChargePointService";
-import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/BunSqliteDatabase";
+import { openSqliteDatabase } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/openSqliteDatabase";
 import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
 import { SqliteConnectorSettingsRepository } from "@ocpp-cp-simulator/client/sqlite/SqliteConnectorSettingsRepository";
 import {
@@ -313,7 +313,7 @@ export async function startServer(
   // visible because a silent in-memory daemon would surprise the operator.
   let database: Database | null = null;
   if (opts.stateDb) {
-    database = BunSqliteDatabase.open(opts.stateDb);
+    database = await openSqliteDatabase(opts.stateDb);
     serverLog(`State DB: ${opts.stateDb}`);
   } else {
     serverLog("State DB: in-memory (pass --state-db <path> to persist)");

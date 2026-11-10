@@ -33,7 +33,7 @@ import {
   labelValueSchema,
   normalizeLabels,
 } from "@ocpp-cp-simulator/contracts/labels";
-import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/BunSqliteDatabase";
+import { openSqliteDatabase } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/openSqliteDatabase";
 import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
 import { setGlobalLogFormat } from "@ocpp-cp-simulator/core/cp/shared/Logger";
 import { TraceWriter, setGlobalTraceWriter } from "./trace/TraceWriter";
@@ -2468,7 +2468,7 @@ async function main(): Promise<void> {
   // across reruns the same way the daemon does.
   let replDatabase: Database | null = null;
   if (options.stateDb) {
-    replDatabase = BunSqliteDatabase.open(options.stateDb);
+    replDatabase = await openSqliteDatabase(options.stateDb);
   }
   const behaviors = await loadBehavesOrExit(
     options.behaviorFiles,

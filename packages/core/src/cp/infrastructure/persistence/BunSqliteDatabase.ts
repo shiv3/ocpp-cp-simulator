@@ -1,4 +1,4 @@
-import { Database as BunDB } from "bun:sqlite";
+import type { Database as BunDB } from "bun:sqlite";
 import { dirname } from "node:path";
 import { mkdirSync, existsSync } from "node:fs";
 
@@ -21,6 +21,11 @@ import { runMigrations } from "./schema";
  *
  * `flush()` is a no-op because `bun:sqlite` writes through to disk (WAL
  * mode is enabled in the constructor so concurrent reads stay fast).
+ *
+ * `bun:sqlite` is loaded in `open()` (`process.getBuiltinModule`), not by a
+ * static import, so a bundle that also runs on Node (#916) can contain this
+ * file: Node refuses a `bun:` import while loading the bundle, before
+ * `openSqliteDatabase` has picked the Node adapter.
  */
 export class BunSqliteDatabase implements Database {
   private constructor(private readonly db: BunDB) {}
@@ -32,7 +37,7 @@ export class BunSqliteDatabase implements Database {
         mkdirSync(dir, { recursive: true });
       }
     }
-    const db = new BunDB(path);
+    const db = new (loadBunSqlite().Database)(path);
     db.exec("PRAGMA journal_mode = WAL;");
     db.exec("PRAGMA foreign_keys = ON;");
     const adapter = new BunSqliteDatabase(db);
@@ -66,4 +71,13 @@ export class BunSqliteDatabase implements Database {
   private coerce(params: SqlParam[]): SqlParam[] {
     return params.map((p) => (typeof p === "boolean" ? (p ? 1 : 0) : p));
   }
+}
+
+type BunSqliteModule = typeof import("bun:sqlite");
+
+function loadBunSqlite(): BunSqliteModule {
+  const mod = process.getBuiltinModule("bun:sqlite") as
+    BunSqliteModule | undefined;
+  if (!mod) throw new Error("bun:sqlite is only available on Bun");
+  return mod;
 }

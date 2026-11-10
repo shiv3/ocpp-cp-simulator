@@ -69,6 +69,8 @@ COPY packages/core/package.json ./packages/core/package.json
 COPY packages/client/package.json ./packages/client/package.json
 COPY apps/cli/package.json ./apps/cli/package.json
 COPY apps/web/package.json ./apps/web/package.json
+# The trace viewer packages are vendored tarballs until their first release.
+COPY vendor ./vendor
 # `bun install` reaches the network for every package, and a transient
 # tarball-extraction failure there fails the whole build:
 #

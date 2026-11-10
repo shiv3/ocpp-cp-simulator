@@ -121,6 +121,8 @@
     "@eslint/js": "^10.0.1",
     "@open-ocpp-trace/core": "0.1.0",
     "@open-ocpp-trace/jsonl": "0.1.0",
+    "@open-ocpp-trace/viewer-core": "file:./vendor/open-ocpp-trace/open-ocpp-trace-viewer-core-0.0.0.tgz",
+    "@open-ocpp-trace/viewer-react": "file:./vendor/open-ocpp-trace/open-ocpp-trace-viewer-react-0.0.0.tgz",
     "@tailwindcss/postcss": "^4.3.5",
     "@tauri-apps/cli": "^2.12.4",
     "@testing-library/jest-dom": "^7.0.1",
@@ -161,5 +163,8 @@
   "lint-staged": {
     "*.{ts,tsx,js,jsx,css,md,json}": "prettier --write",
     "*.{ts,tsx}": "eslint --cache --fix"
+  },
+  "overrides": {
+    "@open-ocpp-trace/viewer-core": "file:./vendor/open-ocpp-trace/open-ocpp-trace-viewer-core-0.0.0.tgz"
   }
 }

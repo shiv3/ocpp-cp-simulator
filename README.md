@@ -32,10 +32,14 @@ ocpp-cp-sim --ws-url ws://localhost:9000/ocpp --cp-id CP001
 ### Install as a global command (`ocpp-cp-sim`; `ocpsim` and `cp-sim` are aliases)
 
 ```bash
-# pnpm (recommended)
-pnpm install -g https://github.com/shiv3/ocpp-cp-simulator/releases/download/cli-latest/ocpp-cp-simulator.tgz
+# From the npm registry (Bun is needed at run time: the bin runs under a `bun` shebang)
+pnpm install -g ocpp-cp-simulator     # or: bun install -g / npm install -g ocpp-cp-simulator
 
-# bun
+# Without installing
+bunx ocpp-cp-simulator --help         # or: npx ocpp-cp-simulator --help
+
+# Prebuilt release tarball (same package, from GitHub)
+pnpm install -g https://github.com/shiv3/ocpp-cp-simulator/releases/download/cli-latest/ocpp-cp-simulator.tgz
 bun install -g https://github.com/shiv3/ocpp-cp-simulator/releases/download/cli-latest/ocpp-cp-simulator.tgz
 
 # From a local checkout
@@ -43,7 +47,9 @@ bun link              # in this repo
 bun link ocpp-cp-simulator   # in any other project
 ```
 
-> Every install command above is fetched by CI, so a URL printed here resolves. Do **not** use GitHub's `releases/latest/download/…` — releases made before the trains were unified carry no `.tgz`, so "latest" can land on one. Use the `cli-latest` URL below.
+The package installs four commands for the same entry point: `ocpp-cp-sim`, `ocpsim`, `cp-sim` and `ocpp-cp-simulator` (what `npx` / `bunx` run).
+
+> Every install URL above is fetched by CI, so a URL printed here resolves. Do **not** use GitHub's `releases/latest/download/…` — releases made before the trains were unified carry no `.tgz`, so "latest" can land on one. Use the `cli-latest` URL below.
 >
 > `releases/download/cli-latest/ocpp-cp-simulator.tgz` is a rolling pre-release the `Release CLI` workflow moves onto every stable CLI release (a SemVer prerelease such as `v1.0.0-rc.1` is skipped), so the commands above always install the newest stable CLI. To pin a version, use that release's own asset instead, e.g. `releases/download/v0.10.0/ocpp-cp-simulator-0.10.0.tgz`. See [docs/entities/cli.md](docs/entities/cli.md#why-cli-latest-and-not-releaseslatest).
 >

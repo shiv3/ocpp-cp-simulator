@@ -57,3 +57,5 @@ scripts/steve-verify/.runtime/
 
 # `npm pack` output (scripts/verify-cli-tarball.sh, .github/workflows/cli-release.yml)
 *.tgz
+# The trace viewer packages, vendored until their first release.
+!vendor/open-ocpp-trace/*.tgz

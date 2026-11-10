@@ -1,8 +1,9 @@
 import { useTranslation } from "react-i18next";
-import React, { useMemo } from "react";
+import React, { Suspense, lazy, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { t as translate } from "../../i18n";
 import {
   LogViewer,
@@ -15,6 +16,11 @@ import { useDataContext } from "../../data/providers/DataProvider";
 import { downloadStoredLogs } from "../../lib/downloadStoredLogs";
 import PageHeader from "../components/PageHeader";
 import { useGlobalLogs, type GlobalLogEntry } from "../lib/useGlobalLogs";
+
+// The trace viewer is its own chunk, fetched when the Trace tab opens.
+const TraceView = lazy(() => import("../components/TraceView"));
+
+type LogsView = "log" | "trace";
 
 /**
  * Global, cross-charge-point Message Log. Aggregates every CP's
@@ -29,6 +35,10 @@ import { useGlobalLogs, type GlobalLogEntry } from "../lib/useGlobalLogs";
  * as `?cp=<id>` (repeated for several): the charge point page links here with
  * its own id, and a reload keeps the choice. Download and Clear act on the
  * selected charge points, on all of them when none is.
+ *
+ * A **Trace** tab (`?view=trace`) shows the same buffer's OCPP-J frames as
+ * Open OCPP Trace records in the trace viewer (`TraceView`), with the same
+ * charge point filter. Only the active tab is mounted.
  */
 const LogsPage: React.FC = () => {
   const { t } = useTranslation();
@@ -46,6 +56,13 @@ const LogsPage: React.FC = () => {
     const next = new URLSearchParams(searchParams);
     next.delete("cp");
     for (const id of ids) next.append("cp", id);
+    setSearchParams(next, { replace: true });
+  };
+  const view: LogsView = searchParams.get("view") === "trace" ? "trace" : "log";
+  const setView = (value: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (value === "trace") next.set("view", "trace");
+    else next.delete("view");
     setSearchParams(next, { replace: true });
   };
 
@@ -127,14 +144,43 @@ const LogsPage: React.FC = () => {
           </Button>
         }
       />
-      <LogViewer
-        logs={logs}
-        selectedCpIds={selectedCpIds}
-        onCpFilterChange={setSelectedCpIds}
-        onClear={handleClear}
-        onDownload={handleDownload}
-        className="flex-1"
-      />
+      <Tabs
+        value={view}
+        onValueChange={setView}
+        className="flex min-h-0 flex-1 flex-col"
+      >
+        <TabsList>
+          <TabsTrigger value="log">{t("dashboard.logs.tabs.log")}</TabsTrigger>
+          <TabsTrigger value="trace">
+            {t("dashboard.logs.tabs.trace")}
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent
+          value="log"
+          className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
+        >
+          <LogViewer
+            logs={logs}
+            selectedCpIds={selectedCpIds}
+            onCpFilterChange={setSelectedCpIds}
+            onClear={handleClear}
+            onDownload={handleDownload}
+            className="flex-1"
+          />
+        </TabsContent>
+        <TabsContent
+          value="trace"
+          className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
+        >
+          <Suspense fallback={null}>
+            <TraceView
+              entries={entries}
+              selectedCpIds={selectedCpIds}
+              onCpFilterChange={setSelectedCpIds}
+            />
+          </Suspense>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 };

@@ -2342,9 +2342,10 @@ export class ChargePoint {
    *
    * On OCPP 2.x the CALL may wait behind another one (Part 4 §4.1.1, #708), so
    * the timeout is armed when the Authorize is written, not when it is queued
-   * (#762), and lasts at least `MessageTimeout`. `failClosed` (F01.FR.01: energy
-   * transfer only after authorization was obtained) makes an unanswered
-   * Authorize resolve "Unknown" instead of warn-and-proceed "Accepted".
+   * (#762), and lasts at least `MessageTimeout`. `failClosed` (2.x F01.FR.01,
+   * 1.6 §5.11: a remote start only after authorization was obtained, #921)
+   * makes an unanswered Authorize resolve "Unknown" instead of
+   * warn-and-proceed "Accepted".
    */
   authorizeAndWait(
     tagId: string,
@@ -2423,7 +2424,7 @@ export class ChargePoint {
         }
         if (options.failClosed) {
           this._logger.warn(
-            `Timeout (${waitMs}ms) awaiting Authorize.conf for ${tagId}; not authorized (F01.FR.01)`,
+            `Timeout (${waitMs}ms) awaiting Authorize.conf for ${tagId}; not authorized (${queued ? "F01.FR.01" : "§5.11"})`,
             LogType.TRANSACTION,
           );
           resolve("Unknown");

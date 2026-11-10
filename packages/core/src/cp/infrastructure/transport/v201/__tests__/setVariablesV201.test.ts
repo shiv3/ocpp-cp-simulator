@@ -16,8 +16,8 @@ function storeWithDefaults(): ConfigurationStore {
       value: 300,
     },
     {
-      key: ConfigurationKeys.Core.AuthorizeRemoteTxRequests,
-      value: false,
+      key: ConfigurationKeys.LocalAuthListManagement.SendLocalListMaxLength,
+      value: 100,
     },
     {
       key: ConfigurationKeys.LocalAuthListManagement.LocalAuthListEnabled,
@@ -42,9 +42,9 @@ describe("handleSetVariablesV201", () => {
           variable: { name: "HeartbeatInterval" },
         },
         {
-          attributeValue: "true",
-          component: { name: "AuthCtrlr" },
-          variable: { name: "AuthorizeRemoteStart" },
+          attributeValue: "50",
+          component: { name: "LocalAuthListCtrlr" },
+          variable: { name: "ItemsPerMessage" },
         },
         {
           attributeValue: "anything",
@@ -83,8 +83,8 @@ describe("handleSetVariablesV201", () => {
         {
           attributeStatus: "Rejected",
           attributeStatusInfo: { reasonCode: "ReadOnly" },
-          component: { name: "AuthCtrlr" },
-          variable: { name: "AuthorizeRemoteStart" },
+          component: { name: "LocalAuthListCtrlr" },
+          variable: { name: "ItemsPerMessage" },
         },
         {
           attributeStatus: "UnknownComponent",
@@ -116,7 +116,7 @@ describe("handleSetVariablesV201", () => {
     });
 
     expect(store.getInteger("HeartbeatInterval")).toBe(120);
-    expect(store.getBoolean("AuthorizeRemoteTxRequests")).toBe(false);
+    expect(store.getInteger("SendLocalListMaxLength")).toBe(100);
     expect(store.getBoolean("LocalAuthListEnabled")).toBe(false);
     expect(changes).toEqual([
       ["HeartbeatInterval", 120],

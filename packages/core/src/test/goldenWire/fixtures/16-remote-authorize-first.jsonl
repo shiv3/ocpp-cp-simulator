@@ -5,9 +5,9 @@
 {"d":"CP>","k":"call","id":"id-3","a":"StatusNotification","p":{"connectorId":1,"errorCode":"NoError","status":"Available"}}
 {"d":"CSMS>","k":"result","id":"id-3","p":{}}
 {"d":"CSMS>","k":"call","id":"id-4","a":"RemoteStartTransaction","p":{"idTag":"TAG-A","connectorId":1}}
+{"d":"CP>","k":"result","id":"id-4","p":{"status":"Accepted"}}
 {"d":"CP>","k":"call","id":"id-5","a":"Authorize","p":{"idTag":"TAG-A"}}
 {"d":"CSMS>","k":"result","id":"id-5","p":{"idTagInfo":{"status":"Accepted"}}}
-{"d":"CP>","k":"result","id":"id-4","p":{"status":"Accepted"}}
 {"d":"CP>","k":"call","id":"id-6","a":"StatusNotification","p":{"connectorId":1,"errorCode":"NoError","status":"Preparing"}}
 {"d":"CSMS>","k":"result","id":"id-6","p":{}}
 {"d":"CP>","k":"call","id":"id-7","a":"StartTransaction","p":{"connectorId":1,"idTag":"TAG-A","meterStart":0,"timestamp":"<ts>"}}

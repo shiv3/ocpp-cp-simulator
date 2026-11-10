@@ -554,4 +554,15 @@ export const scenarioCases: GoldenCase[] = [
     version: "1.6",
     run: runStopDuringStartRetry,
   },
+  // #921: with AuthorizeRemoteTxRequests on, a remote start a scenario owns
+  // still sends Authorize.req, after RemoteStartTransaction.conf (the order
+  // the OCA TC_010 / TC_011_1 / TC_059 cases check); the scenario starts.
+  {
+    name: "16-scenario-cert16-tc010-remote-start-authorize",
+    version: "1.6",
+    run: (rig) => {
+      rig.cp.configuration.applyChange("AuthorizeRemoteTxRequests", "true");
+      return runTemplate(rig, "cert16-tc010-remote-start");
+    },
+  },
 ];

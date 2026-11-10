@@ -74,11 +74,12 @@ export function packageLicense(
 export function renderNotices(
   dependencies: Iterable<NoticeEntry>,
   nodeModules?: string,
+  options: { title?: string; assetPackages?: readonly string[] } = {},
 ): string {
   const seen = new Set<string>();
   const all: NoticeEntry[] = Array.from(dependencies);
   for (const d of all) seen.add(d.name);
-  for (const name of CSS_AND_FONT_PACKAGES) {
+  for (const name of options.assetPackages ?? CSS_AND_FONT_PACKAGES) {
     if (seen.has(name)) continue;
     const dir = packageDir(
       name,
@@ -89,7 +90,7 @@ export function renderNotices(
     all.push({ name, version: readPackage(dir).version ?? "" });
   }
   return [
-    "Third-party software bundled in the web console.",
+    options.title ?? "Third-party software bundled in the web console.",
     "",
     ...all
       .sort((a, b) =>
@@ -114,4 +115,50 @@ export function renderNotices(
         ].join("\n");
       }),
   ].join("\n");
+}
+
+/**
+ * The npm packages a `bun build --metafile` run inlined into a bundle (#870).
+ * `inputs` are the metafile's input paths (relative to `root`); the package of
+ * an input is the one under its LAST `node_modules/`, so a nested copy
+ * (`node_modules/a/node_modules/b/x.js`) is `b`, not `a`. The workspace's own
+ * packages are ours, not third-party, and are left out.
+ */
+export function bundledPackages(
+  inputs: Iterable<string>,
+  root: string,
+  ownScope = "@ocpp-cp-simulator/",
+): NoticeEntry[] {
+  const found = new Map<string, NoticeEntry>();
+  for (const input of inputs) {
+    const normalized = input.replace(/\\/g, "/");
+    const at = normalized.lastIndexOf("node_modules/");
+    if (at === -1) continue;
+    const parts = normalized.slice(at + "node_modules/".length).split("/");
+    const name = parts[0]?.startsWith("@")
+      ? parts.slice(0, 2).join("/")
+      : parts[0];
+    if (!name || name.startsWith(ownScope)) continue;
+    const dir = path.join(root, normalized.slice(0, at), "node_modules", name);
+    if (!existsSync(path.join(dir, "package.json"))) continue;
+    const pkg = readPackage(dir) as {
+      version?: string;
+      license?: unknown;
+      repository?: string | { url?: string };
+      author?: unknown;
+    };
+    const key = `${name}@${pkg.version ?? ""}`;
+    if (found.has(key)) continue;
+    found.set(key, {
+      name,
+      version: pkg.version ?? "",
+      license: typeof pkg.license === "string" ? pkg.license : undefined,
+      repository: pkg.repository,
+      author:
+        typeof pkg.author === "string"
+          ? pkg.author
+          : ((pkg.author as { name?: string } | undefined)?.name ?? undefined),
+    });
+  }
+  return [...found.values()];
 }

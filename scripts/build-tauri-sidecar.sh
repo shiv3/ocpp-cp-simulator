@@ -47,7 +47,13 @@ OUT="$OUT_DIR/ocpp-cp-sim-${TARGET}${EXT}"
 mkdir -p "$OUT_DIR"
 
 echo "Building Bun sidecar for $TARGET ($BUN_TARGET) → $OUT"
-bun build --compile --target="$BUN_TARGET" --outfile="$OUT" apps/cli/src/main.ts
+META="$(mktemp "${TMPDIR:-/tmp}/sidecar-meta.XXXXXX")"
+trap 'rm -f "$META"' EXIT
+bun build --compile --target="$BUN_TARGET" --outfile="$OUT" --metafile="$META" apps/cli/src/main.ts
+# The compiled binary inlines the same packages as dist-cli/main.js; ship their
+# notices as a bundle resource (src-tauri/tauri.conf.json) (#870).
+mkdir -p dist-cli
+bun run scripts/generate-cli-notices.ts "$META" dist-cli/THIRD-PARTY-LICENSES.txt
 
 # Ensure the bin is executable on macOS/Linux. Bun does this for us in
 # practice, but be explicit so a fresh CI checkout never trips on a

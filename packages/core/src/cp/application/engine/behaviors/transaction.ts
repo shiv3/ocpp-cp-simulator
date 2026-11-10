@@ -224,7 +224,7 @@ async function remoteStart(
   if (cp.configuration.authorizeRemoteTxRequests() && !centrallyAuthorized) {
     if (!ocpp2) {
       cp.logger.info(
-        `AuthorizeRemoteTxRequests=true: sending Authorize.req for ${idTag}`,
+        `AuthorizeRemoteTxRequests=true: authorizing ${idTag} before the remote start`,
         LogType.OCPP,
       );
     }

@@ -151,7 +151,7 @@ describe("OCPP 1.6 remote start with AuthorizeRemoteTxRequests (#921, §5.11)", 
     5000,
   );
 
-  it("waits fail-closed: an unanswered Authorize does not start the transaction", async () => {
+  it("waits fail-closed for the Authorize.conf, without starting meanwhile", async () => {
     await withStation("CP016-921-UNANSWERED", async (csms, cp) => {
       const wait = spyOn(cp, "authorizeAndWait");
       await remoteStart(csms, "TAG-921-SILENT");
@@ -165,6 +165,18 @@ describe("OCPP 1.6 remote start with AuthorizeRemoteTxRequests (#921, §5.11)", 
         },
       );
       await expectNoFrame(csms, isStartTransaction);
+    });
+  }, 5000);
+
+  // The wait above lasts 10 s; this is what it ends in on 1.6 (the 2.x
+  // counterpart is in v2xOneCallInFlight.bun.test.ts).
+  it("a fail-closed wait left unanswered on 1.6 resolves Unknown, not Accepted", async () => {
+    await withStation("CP016-921-TIMEOUT", async (csms, cp) => {
+      const outcome = cp.authorizeAndWait("TAG-921-SILENT", 100, undefined, {
+        failClosed: true,
+      });
+      await csms.waitForCall("Authorize");
+      expect(await outcome).toBe("Unknown");
     });
   }, 5000);
 });

@@ -1,8 +1,8 @@
 import * as fs from "fs";
-import type { Server } from "bun";
 import type { CLIChargePointService } from "../service";
+import { runtime, type RuntimeServer } from "../runtime";
 
-type AnyServer = Server<unknown>;
+type AnyServer = RuntimeServer;
 import type { ChargePointInitOptions, SoapTunnelConfig } from "../types";
 import {
   matchesLabelSelector,
@@ -184,7 +184,7 @@ export interface ServerOptions {
   /**
    * Optional second HTTP listener for the bundled web console. If equal
    * to `httpPort`, a single listener serves both socket.io/health and UI. If different,
-   * a second `Bun.serve` is bound to this port (the UI is also exposed on
+   * a second listener is bound to this port (the UI is also exposed on
    * that port together with socket.io/health so the browser can reach both at the
    * same origin).
    */
@@ -278,7 +278,7 @@ export async function startServer(
   let registryRef: CPRegistry | null = null;
   let lifecycle: ReturnType<typeof createLifecycle> | null = null;
   const soapCallbackServer = inputOpts.soapTunnel
-    ? Bun.serve({
+    ? await runtime.serve({
         port: inputOpts.soapTunnel.localPort,
         hostname: inputOpts.httpHost,
         fetch: createSoapCallbackHandlers({ registry: () => registryRef })
@@ -727,12 +727,11 @@ export async function startServer(
 
   if (opts.httpPort != null) {
     const handlers = httpPortShared ? consoleHandlers : apiHandlers;
-    const httpServer = Bun.serve({
+    const httpServer = await runtime.serve({
       port: opts.httpPort,
       hostname: opts.httpHost,
       fetch: handlers.fetch,
-      idleTimeout: socketIo.idleTimeout,
-      websocket: socketIo.websocket,
+      socketIo: socketIo.engine,
     });
     servers.push(httpServer);
     boundHttpPort = httpServer.port ?? null;
@@ -747,12 +746,11 @@ export async function startServer(
   }
 
   if (opts.webConsolePort != null && !httpPortShared) {
-    const consoleServer = Bun.serve({
+    const consoleServer = await runtime.serve({
       port: opts.webConsolePort,
       hostname: opts.httpHost,
       fetch: consoleHandlers.fetch,
-      idleTimeout: socketIo.idleTimeout,
-      websocket: socketIo.websocket,
+      socketIo: socketIo.engine,
     });
     servers.push(consoleServer);
     lifecycle.attachServer(consoleServer);
@@ -782,7 +780,7 @@ export async function startServer(
   lifecycle.installSignalHandlers();
 
   // ---------------------------------------------------------------------
-  // The daemon is now SERVING. `Bun.serve` is bound above, so socket.io and
+  // The daemon is now SERVING. The listeners are bound above, so socket.io and
   // the HTTP routes accept requests from here on, and everything below runs
   // concurrently with them: fleet creation, `--state-db` restore, the bounded
   // connect loop (which awaits the network), `runStartupScenario`, and the

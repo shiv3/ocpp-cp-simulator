@@ -1,5 +1,4 @@
 import { isIP } from "node:net";
-import type { Server } from "bun";
 import * as path from "path";
 import type { CLIChargePointService } from "../service";
 import type { ChargePointInitOptions } from "../types";
@@ -35,6 +34,7 @@ import {
 } from "@ocpp-cp-simulator/contracts/methods";
 import { appVersion } from "../appVersion";
 import { MAX_ID_TAGS, readIdTagsFile } from "./idTagFile";
+import { runtime, type RuntimeServer } from "../runtime";
 
 /**
  * Serve files out of a directory as a 404 fallback for the HTTP router.
@@ -68,7 +68,7 @@ async function serveStatic(
     return null;
   }
 
-  let file = Bun.file(resolved);
+  let file = runtime.file(resolved);
   let servedFallback = false;
   if (!(await file.exists())) {
     // SPA fallback: only for "looks like a page" requests (no extension on
@@ -76,11 +76,11 @@ async function serveStatic(
     // honestly 404 so the browser doesn't render HTML for a JS bundle.
     const last = pathname.split("/").pop() ?? "";
     if (last.includes(".")) return null;
-    file = Bun.file(path.join(absoluteRoot, "index.html"));
+    file = runtime.file(path.join(absoluteRoot, "index.html"));
     if (!(await file.exists())) return null;
     servedFallback = true;
   }
-  const res = new Response(file);
+  const res = await file.response();
   res.headers.set("cache-control", cacheControlFor(pathname, servedFallback));
   return res;
 }
@@ -476,7 +476,7 @@ function timingSafeStringEqual(a: string, b: string): boolean {
 export interface HttpHandlers {
   fetch: (
     req: Request,
-    server: Server<Record<string, unknown>>,
+    server: RuntimeServer,
   ) => Response | Promise<Response | undefined> | undefined;
 }
 
@@ -484,7 +484,7 @@ export interface SocketIoRoute {
   matches(pathname: string): boolean;
   handleRequest(
     req: Request,
-    server: Server<Record<string, unknown>>,
+    server: RuntimeServer,
   ): Response | Promise<Response>;
 }
 
@@ -608,7 +608,7 @@ export function createHttpHandlers(deps: {
    * path 404s like any other — the endpoint is opt-in.
    */
   metrics?: { render: () => string; exemptFromBasicAuth: boolean } | null;
-  /** Optional socket.io/Engine.IO route mounted on the same Bun listener. */
+  /** Optional socket.io/Engine.IO route mounted on the same listener. */
   socketIo?: SocketIoRoute | null;
   /** #620: Host allowlist, trusted proxies, TLS requirement and per-IP rate
    *  limit. Absent = no such checks (default). */
@@ -727,7 +727,7 @@ export function createHttpHandlers(deps: {
 
   function dispatch(
     req: Request,
-    _server: Server<Record<string, unknown>>,
+    _server: RuntimeServer,
   ): Response | Promise<Response> {
     const url = new URL(req.url);
 

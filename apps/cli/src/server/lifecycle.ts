@@ -1,10 +1,8 @@
 import * as fs from "fs";
-import type { Server } from "bun";
 import type { CPRegistry } from "./CPRegistry";
+import type { RuntimeServer } from "../runtime";
 
-// We don't introspect the WS data type from this module, so any concrete
-// generic is fine. The route handlers narrow it where they need to.
-type AnyServer = Server<unknown>;
+type AnyServer = RuntimeServer;
 
 export interface Lifecycle {
   attachServer(server: AnyServer): void;

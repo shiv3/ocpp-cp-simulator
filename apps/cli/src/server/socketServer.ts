@@ -2,8 +2,8 @@ import type { JsonObject } from "@ocpp-cp-simulator/contracts/behavior";
 import { describeDefaultBehaviors } from "@ocpp-cp-simulator/core/cp/application/engine/behaviors/index";
 import * as fs from "fs";
 import * as path from "path";
-import type { Server as BunServer, WebSocketHandler } from "bun";
-import { Server as Engine } from "@socket.io/bun-engine";
+import { runtime, type RuntimeServer, type SocketIoEngine } from "../runtime";
+import type { BunWebSocketHandler } from "../runtime/bun";
 import {
   Server as SocketIoServer,
   type Socket as SocketIoSocket,
@@ -155,20 +155,17 @@ export const SOCKET_IO_PATH = "/socket.io/";
 export const SOCKET_IO_PING_INTERVAL_MS = 25_000;
 export const SOCKET_IO_PING_TIMEOUT_MS = 20_000;
 
-type AnyWebSocketHandler = WebSocketHandler<Record<string, unknown>>;
-
 export interface SocketIoAttachment {
   readonly io: SocketIoServer;
-  readonly engine: Engine;
-  readonly websocket: AnyWebSocketHandler;
+  /** The runtime's Engine.IO server; pass it to `runtime.serve({ socketIo })`. */
+  readonly engine: SocketIoEngine;
+  /** Bun only: the `websocket` handler for `Bun.serve` (see {@link SocketIoEngine}). */
+  readonly websocket: BunWebSocketHandler;
   readonly idleTimeout: number;
   /** The push bridge, so a caller that produced it indirectly (the daemon's
    *  `--watch` reloader, #314) can emit through the same socket.io server. */
   readonly registryEvents: RegistryEventBridge | null;
-  handleRequest(
-    req: Request,
-    server: BunServer<Record<string, unknown>>,
-  ): Promise<Response>;
+  handleRequest(req: Request, server: RuntimeServer): Promise<Response>;
   close(): Promise<void>;
 }
 
@@ -259,14 +256,12 @@ export function attachSocketIo(deps?: SocketIoDeps): SocketIoAttachment {
     pingInterval: SOCKET_IO_PING_INTERVAL_MS,
     pingTimeout: SOCKET_IO_PING_TIMEOUT_MS,
   });
-  const engine = new Engine({
+  const engine = runtime.createSocketIoEngine(io, {
     path: SOCKET_IO_PATH,
     pingInterval: SOCKET_IO_PING_INTERVAL_MS,
     pingTimeout: SOCKET_IO_PING_TIMEOUT_MS,
     maxHttpBufferSize: MAX_HTTP_BUFFER,
   });
-
-  io.bind(engine);
   const registryEvents = deps
     ? createRegistryEventBridge(io, { registry: deps.registry, bus: deps.bus })
     : null;
@@ -275,20 +270,15 @@ export function attachSocketIo(deps?: SocketIoDeps): SocketIoAttachment {
     : undefined;
   registerSocketHandlers(io, runtimeDeps);
 
-  const handler = engine.handler();
-  const idleTimeout = Math.max(
-    handler.idleTimeout,
-    Math.floor(SOCKET_IO_PING_INTERVAL_MS / 1_000) + 1,
-  );
-
   return {
     io,
     engine,
-    websocket: handler.websocket as AnyWebSocketHandler,
-    idleTimeout,
+    // Undefined on Node, where upgrades arrive on the http.Server.
+    websocket: engine.websocket as BunWebSocketHandler,
+    idleTimeout: engine.idleTimeout,
     registryEvents,
     handleRequest(req, server) {
-      return engine.handleRequest(req, server as never);
+      return engine.handleRequest(req, server);
     },
     close() {
       registryEvents?.close();

@@ -92,6 +92,30 @@ describe("CLI bundle notices (#870)", () => {
     expect(names).not.toContain("gone");
   });
 
+  it("reads the legacy `licenses` array and falls back for a package that ships no license", () => {
+    put(
+      path.join(root, "node_modules", "legacy"),
+      { name: "legacy", version: "1.0.0", licenses: [{ type: "MIT" }] },
+      "legacy text",
+    );
+    put(path.join(root, "node_modules", "mcp-lite"), {
+      name: "mcp-lite",
+      version: "0.10.0",
+    });
+    const got = bundledPackages(
+      ["node_modules/legacy/a.js", "node_modules/mcp-lite/b.js"],
+      root,
+    );
+    const by = (n: string) => got.find((p) => p.name === n);
+    expect(by("legacy")?.license).toBe("MIT");
+    expect(by("mcp-lite")?.license).toBe("MIT");
+    const text = renderNotices(got, path.join(root, "node_modules"), {
+      assetPackages: [],
+    });
+    expect(text).toContain("Copyright (c) 2025 Fiberplane");
+    expect(text).not.toContain("UNKNOWN");
+  });
+
   it("renders the CLI title and no web-console fonts", () => {
     const text = renderNotices(
       bundledPackages(inputs, root),

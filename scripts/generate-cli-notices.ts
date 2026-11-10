@@ -6,6 +6,7 @@ import { bundledPackages, renderNotices } from "./licenseNotices";
 // the Docker image, the Tauri sidecar) shipped the code of socket.io, ws, ...
 // without the notices their MIT / ISC licenses ask for (#870). This reads the
 // build's metafile, finds the npm packages it inlined and writes their notices.
+// (`ws` is not among them: with `--target=bun` the bundle uses Bun's own.)
 //
 //   bun build ... --metafile=<meta.json> ... && \
 //     bun run scripts/generate-cli-notices.ts <meta.json> [out]

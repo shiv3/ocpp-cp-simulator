@@ -279,4 +279,15 @@ jobs:
           DIST_TAG=latest
           case "$VERSION" in *-*|*+*) DIST_TAG=next ;; esac
           npm publish "ocpp-cp-simulator-${VERSION}.tgz" --access public --tag "$DIST_TAG"
-          npm view "ocpp-cp-simulator@${VERSION}" version
+          # The registry is eventually consistent: right after a successful
+          # publish `npm view` can still return E404, so poll before failing.
+          for i in $(seq 1 12); do
+            if [ -n "$(npm view "ocpp-cp-simulator@${VERSION}" version 2>/dev/null)" ]; then
+              echo "ocpp-cp-simulator@${VERSION} is visible on npm"
+              exit 0
+            fi
+            echo "waiting for ocpp-cp-simulator@${VERSION} to appear on npm (${i}/12)"
+            sleep 10
+          done
+          echo "::error::ocpp-cp-simulator@${VERSION} was published but is not visible on npm after 2 minutes"
+          exit 1

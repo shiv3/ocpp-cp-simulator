@@ -6,7 +6,7 @@ import {
   startMockCsms,
   type MockCsms,
 } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/__tests__/mockCsms";
-import { tcpPort } from "@ocpp-cp-simulator/core/test/bunServe";
+import { LOOPBACK, tcpPort } from "@ocpp-cp-simulator/core/test/bunServe";
 
 import {
   connectTestClient,
@@ -178,7 +178,11 @@ describe("cp.bulk on a label selector (#470)", () => {
     const csms = startMockCsms();
     csmsList.push(csms);
     const { socket } = await client();
-    const closed = Bun.serve({ port: 0, fetch: () => new Response("") });
+    const closed = Bun.serve({
+      port: 0,
+      hostname: LOOPBACK,
+      fetch: () => new Response(""),
+    });
     const closedPort = tcpPort(closed);
     await closed.stop(true);
     await rpc(socket, "cp.create", {

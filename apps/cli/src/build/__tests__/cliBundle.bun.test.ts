@@ -12,7 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { tcpPort } from "@ocpp-cp-simulator/core/test/bunServe";
+import { LOOPBACK, tcpPort } from "@ocpp-cp-simulator/core/test/bunServe";
 
 // The published CLI is one `bun build --target=bun` file, dist-cli/main.js,
 // shipped beside dist/ and nothing else (#578): no src/, no packages/core/schema/, no
@@ -75,8 +75,16 @@ function run(args: string[]): { exitCode: number; out: string } {
   };
 }
 
+/**
+ * A port number for the bundle's daemon, which binds it itself (127.0.0.1) in
+ * a child process, so no server of this test can keep it. The probe is bound
+ * to loopback, so the kernel picks a number free there and not one a wildcard
+ * test server elsewhere in the run still holds.
+ */
 async function freePort(): Promise<number> {
-  const server = Bun.serve({ port: 0, fetch: () => new Response("") });
+  const server = Bun.serve({
+ port: 0,
+ hostname: LOOPBACK, fetch: () => new Response("") });
   const port = tcpPort(server);
   await server.stop(true);
   return port;

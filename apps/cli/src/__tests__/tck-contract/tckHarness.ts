@@ -2,7 +2,7 @@
 // mode as a child process, with a stub CSMS on a local port, the way
 // open-ocpp-tck runs it (stdin JSON Lines in, stdout lines out).
 import { fileURLToPath } from "node:url";
-import { tcpPort } from "@ocpp-cp-simulator/core/test/bunServe";
+import { LOOPBACK, tcpPort } from "@ocpp-cp-simulator/core/test/bunServe";
 
 const repoRoot = fileURLToPath(new URL("../../../../..", import.meta.url));
 
@@ -43,6 +43,7 @@ export function startStubCsms(subprotocol = "ocpp1.6"): StubCsms {
   const frames: string[] = [];
   const server = Bun.serve({
     port: 0,
+    hostname: LOOPBACK,
     fetch(req, srv) {
       return srv.upgrade(req, {
         headers: { "Sec-WebSocket-Protocol": subprotocol },

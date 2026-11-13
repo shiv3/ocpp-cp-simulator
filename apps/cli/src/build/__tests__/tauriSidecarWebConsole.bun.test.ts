@@ -12,7 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { tcpPort } from "@ocpp-cp-simulator/core/test/bunServe";
+import { LOOPBACK, tcpPort } from "@ocpp-cp-simulator/core/test/bunServe";
 
 // Regression guard for issue #319 — "the bundled daemon exits(1) on spawn".
 //
@@ -101,8 +101,11 @@ function buildArgs(opts: {
   return out;
 }
 
+/** Loopback-bound probe: see freePort in cliBundle.bun.test.ts. */
 async function freePort(): Promise<number> {
-  const server = Bun.serve({ port: 0, fetch: () => new Response("") });
+  const server = Bun.serve({
+ port: 0,
+ hostname: LOOPBACK, fetch: () => new Response("") });
   const port = tcpPort(server);
   await server.stop(true);
   return port;

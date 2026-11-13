@@ -1,5 +1,6 @@
 // Runs under `bun test`: startServer pulls in the `bun:sqlite` built-in.
 import { afterEach, describe, expect, it, spyOn } from "bun:test";
+import { LOOPBACK, tcpPort } from "@ocpp-cp-simulator/core/test/bunServe";
 
 import type { ChargePointInitOptions } from "../../types";
 import { startServer, type RunningServer } from "../startServer";
@@ -84,8 +85,12 @@ describe("startServer: pacing and a charge point changed while it waits (#610)",
     cleanups.push(() => stderr.mockRestore());
     // A port picked up front: startServer resolves only after the paced
     // loop, so it cannot report the bound one while the test must act.
-    const probe = Bun.serve({ port: 0, fetch: () => new Response("") });
-    const port = probe.port!;
+    const probe = Bun.serve({
+      port: 0,
+      hostname: LOOPBACK,
+      fetch: () => new Response(""),
+    });
+    const port = tcpPort(probe);
     probe.stop(true);
     const started = startServer({ ...BASE_OPTIONS, httpPort: port }).then(
       (r) => {

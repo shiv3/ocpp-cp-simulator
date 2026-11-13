@@ -6,7 +6,7 @@ import {
   buildOcppWebSocketConnectOptions,
   probeUpgradeRefusal,
 } from "../wsUrlWithBasic";
-import { tcpPort } from "../../../../test/bunServe";
+import { LOOPBACK, tcpPort } from "../../../../test/bunServe";
 
 /**
  * #288 — a refused upgrade must say which refusal it was.
@@ -31,6 +31,7 @@ function startRefusingServer(
   let requests = 0;
   const server = Bun.serve({
     port: 0,
+    hostname: LOOPBACK,
     fetch() {
       requests += 1;
       return new Response("", { status, headers });
@@ -82,7 +83,7 @@ describe("probeUpgradeRefusal", () => {
   it("reports the status for a refused upgrade", async () => {
     const server = tracked(401);
     const options = buildOcppWebSocketConnectOptions({
-      baseUrl: `ws://127.0.0.1:${server.port}/ocpp/`,
+      baseUrl: `ws://127.0.0.1:${tcpPort(server)}/ocpp/`,
       chargePointId: "CP001",
       basicAuth: { username: "CP001", password: "secret" },
       ocppVersion: "OCPP-1.6J",
@@ -95,7 +96,7 @@ describe("probeUpgradeRefusal", () => {
     const target = "wss://edge.example/ocpp/CP001";
     const server = tracked(301, { Location: target });
     const options = buildOcppWebSocketConnectOptions({
-      baseUrl: `ws://127.0.0.1:${server.port}/ocpp/`,
+      baseUrl: `ws://127.0.0.1:${tcpPort(server)}/ocpp/`,
       chargePointId: "CP001",
       basicAuth: null,
       ocppVersion: "OCPP-1.6J",
@@ -113,6 +114,7 @@ describe("probeUpgradeRefusal", () => {
     let seen: Record<string, string> = {};
     const server = Bun.serve({
       port: 0,
+      hostname: LOOPBACK,
       fetch(req) {
         req.headers.forEach((value, key) => {
           seen[key] = value;
@@ -122,7 +124,7 @@ describe("probeUpgradeRefusal", () => {
     });
     try {
       const options = buildOcppWebSocketConnectOptions({
-        baseUrl: `ws://127.0.0.1:${server.port}/ocpp/`,
+        baseUrl: `ws://127.0.0.1:${tcpPort(server)}/ocpp/`,
         chargePointId: "CP001",
         basicAuth: { username: "CP001", password: "secret" },
         ocppVersion: "OCPP-1.6J",
@@ -148,6 +150,7 @@ describe("probeUpgradeRefusal", () => {
     // starts another one every minute.
     const server = Bun.serve({
       port: 0,
+      hostname: LOOPBACK,
       async fetch() {
         await Bun.sleep(60_000);
         return new Response("late", { status: 401 });
@@ -156,7 +159,7 @@ describe("probeUpgradeRefusal", () => {
     try {
       const started = Date.now();
       const result = await probeUpgradeRefusal({
-        url: `ws://127.0.0.1:${server.port}/ocpp/CP001`,
+        url: `ws://127.0.0.1:${tcpPort(server)}/ocpp/CP001`,
         protocols: [],
         headers: {},
         useNodeWsFallback: false,
@@ -176,6 +179,7 @@ describe("probeUpgradeRefusal", () => {
     const seen: (string | null)[] = [];
     const server = Bun.serve({
       port: 0,
+      hostname: LOOPBACK,
       fetch(req) {
         seen.push(req.headers.get("authorization"));
         return new Response("", { status: 401 });
@@ -183,7 +187,7 @@ describe("probeUpgradeRefusal", () => {
     });
     try {
       const result = await probeUpgradeRefusal({
-        url: `ws://CP001:s3cr3t@127.0.0.1:${server.port}/ocpp/`,
+        url: `ws://CP001:s3cr3t@127.0.0.1:${tcpPort(server)}/ocpp/`,
         protocols: [],
         headers: {},
         useNodeWsFallback: false,

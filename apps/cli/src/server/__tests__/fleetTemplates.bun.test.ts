@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- test ack payloads */
 import { afterEach, describe, expect, it, spyOn } from "bun:test";
+import { LOOPBACK, tcpPort } from "@ocpp-cp-simulator/core/test/bunServe";
 import type { Socket } from "socket.io-client";
 
 import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/BunSqliteDatabase";
@@ -451,12 +452,13 @@ describe("fleet templates over the control plane (#445)", () => {
     const dialled: string[] = [];
     const csms = Bun.serve({
       port: 0,
+      hostname: LOOPBACK,
       fetch(req) {
         dialled.push(new URL(req.url).pathname);
         return new Response("no", { status: 400 });
       },
     });
-    const url = `ws://127.0.0.1:${csms.port}/ocpp/`;
+    const url = `ws://127.0.0.1:${tcpPort(csms)}/ocpp/`;
     try {
       await rpc(socket, "blueprint.save", {
         blueprint: {

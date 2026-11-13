@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* Regressions of the second review (N2, N3, N4, N9, N10). */
 import { afterEach, describe, expect, it } from "bun:test";
+import { LOOPBACK, tcpPort } from "@ocpp-cp-simulator/core/test/bunServe";
 import type { Socket } from "socket.io-client";
 import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
 import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/BunSqliteDatabase";
@@ -65,6 +66,7 @@ function fakeCsms() {
   let opened = 0;
   const server = Bun.serve({
     port: 0,
+    hostname: LOOPBACK,
     fetch(req, srv) {
       if (
         srv.upgrade(req, { headers: { "Sec-WebSocket-Protocol": "ocpp1.6" } })
@@ -100,7 +102,7 @@ function fakeCsms() {
   });
   csmses.push(server);
   return {
-    url: `ws://127.0.0.1:${server.port}/ocpp/`,
+    url: `ws://127.0.0.1:${tcpPort(server)}/ocpp/`,
     get open() {
       return open;
     },

@@ -176,12 +176,6 @@ RUN apk add --no-cache su-exec
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
-# `bun src/cli/main.ts …` keeps working for callers that still override the
-# entrypoint with it (open-ocpp-tck, #346): a shim that runs the bundle. New
-# callers use `docker run -i <image> --json …`, see docker/entrypoint.sh.
-RUN mkdir -p /app/src/cli
-COPY docker/cli-shim.ts /app/src/cli/main.ts
-
 # IMPORTANT: stay as root so the entrypoint can chown /data. The shim
 # drops to `bun` via su-exec before exec'ing the simulator.
 USER root

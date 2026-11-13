@@ -9,7 +9,7 @@ related:
   - ../entities/web-console.md
   - local-vs-remote-mode.md
   - ../entities/scenario-templates.md
-updated: 2026-11-09
+updated: 2026-11-13
 ---
 
 # Web console internationalization
@@ -29,7 +29,7 @@ the default and the fallback), **Simplified Chinese** (`zh-CN`), **Japanese**
 
 ## How it works
 
-[react-i18next](https://react.i18next.com/) with `i18next-browser-languagedetector` (reads only `localStorage`, key above) and `i18next-resources-to-backend`. `apps/web/src/i18n/index.ts` initialises i18next; `main.tsx` waits for `i18nReady` so the first paint is already in the saved language. Components call `const { t } = useTranslation()` (re-renders on language change); code outside React imports `t` from `@/i18n`. Component tests need no provider: `test/setup.dom.ts` imports the module, which initialises English synchronously.
+[react-i18next](https://react.i18next.com/) with `i18next-browser-languagedetector` (reads only `localStorage`, key above) and `i18next-resources-to-backend`. `apps/web/src/i18n/index.ts` initialises i18next; `main.tsx` waits for `i18nReady` so the first paint is already in the saved language, but at most `I18N_FIRST_PAINT_WAIT_MS` (300 ms, `i18n/firstPaint.ts`, #899): past the bound the console renders in English and switches when the locale chunk arrives. Components call `const { t } = useTranslation()` (re-renders on language change); code outside React imports `t` from `@/i18n`. Component tests need no provider: `test/setup.dom.ts` imports the module, which initialises English synchronously.
 
 - **Resources.** `locales/<locale>/<namespace>.json`, one file per namespace (`common`, `settings`, `scenarios`, ...). Keys are flat dotted strings (`keySeparator: false`) such as `"scenarios.count.step_one"`, written in the file of their namespace; `common` is the default namespace and the rest are fallback namespaces, so call sites carry no `ns:` prefix. Flat JSON loads in Weblate / Crowdin and i18next tooling as is.
 - **Lazy loading.** English is imported statically (`resources.ts`) and is part of the main bundle. `ja`, `zh-CN` and `fr` are found with `import.meta.glob` and become one chunk per namespace, fetched by `changeLanguage` the first time the language is chosen (or at start when it is saved). The build output shows them as separate `common-*.js`, `settings-*.js`, ... files.

@@ -343,6 +343,8 @@ const VARIABLES: readonly DeviceModelVariableDef[] = [
     mutability: "ReadWrite",
     dataType: "integer",
     default: 1,
+    effect:
+      "Stored and reported only: the simulated reset never fails, so nothing retries.",
   }),
   // #490: OCPP 2.0.1 §2.1.10/2.1.11, 2.1 §2.1.12 — variableInstance
   // "TransactionEvent".

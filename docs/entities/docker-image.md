@@ -22,7 +22,7 @@ related:
   - ../concepts/access-control.md
   - ../sources/reverse-proxy-sso-example.md
   - ../analyses/testing-strategy.md
-updated: 2026-11-09
+updated: 2026-11-13
 ---
 
 # Docker image
@@ -271,18 +271,18 @@ The container exits 0 when stdin reaches EOF. This is the supported way to
 drive the simulator from a test runner such as
 [open-ocpp-tck](https://github.com/juherr/open-ocpp-tck).
 
-### `bun src/cli/main.ts` compatibility
+### Removed: `bun src/cli/main.ts` shim
 
-Images up to v0.9.0 ran the CLI from source, and open-ocpp-tck starts them as
-`docker run -i --entrypoint bun <image> src/cli/main.ts --json …` with
-`/app` as the working directory. The image no longer has sources, but it ships
-`/app/src/cli/main.ts` (from `docker/cli-shim.ts`): a few lines that run
-`dist-cli/main.js` with the same arguments, stdio and exit code, so that
-command line keeps working. It is a compatibility path, not an interface to
-build on; use the table above. `cliBundle.bun.test.ts` (shim and bundle answer
-a JSON Lines command and exit 0 on stdin EOF) and `dockerEntrypoint.bun.test.ts`
-(the argument table) pin both, and the `docker-build` job in `ci.yml` runs
-both shapes against the built image.
+Images from 0.8.0 to 0.9.x shipped `/app/src/cli/main.ts` (a one-file shim) so
+that `docker run -i --entrypoint bun <image> src/cli/main.ts --json …` kept
+working. open-ocpp-tck now runs the image on its own entrypoint, so the shim is
+gone (#919). Images up to 0.7.12 still carry real sources. For an image
+without the shim and without `--json` detection, set
+`SIM_ENTRYPOINT=bun SIM_COMMAND=src/cli/main.ts` in the TCK instead.
+`dockerEntrypoint.bun.test.ts` pins the argument table and, with a stub `bun`,
+the run path through `docker/entrypoint.sh` (argv passthrough, JSON Lines in
+and out, exit 0 on stdin EOF, SIGTERM forwarding). The `docker-build` job in
+`ci.yml` runs JSON mode against the built image.
 
 ## Image details
 
@@ -332,7 +332,7 @@ The image **doesn't** contain Vite / Tauri / dev dependencies, sources or
 and `bun run build:cli` (the CLI and daemon as one bundle,
 `dist-cli/main.js`, with the notices of the packages it inlines in
 `dist-cli/THIRD-PARTY-LICENSES.txt`, #870), and the runtime layer holds only those two, the scenario
-examples and `docker/entrypoint.sh`, which starts `bun dist-cli/main.js`, and the one-file `src/cli/main.ts` shim. That
+examples and `docker/entrypoint.sh`, which starts `bun dist-cli/main.js`. That
 is the same pair the npm tarball ships, so the two cannot drift apart the way
 the source-based image and the tarball once did (#320); see
 [What the package ships](cli.md#what-the-package-ships). The image carries one

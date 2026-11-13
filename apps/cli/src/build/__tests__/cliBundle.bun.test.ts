@@ -3,7 +3,6 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
-  copyFileSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -236,80 +235,5 @@ describe("the CLI bundle runs away from the source tree (#578)", () => {
       }
     },
     90_000,
-  );
-});
-
-// open-ocpp-tck starts the image as
-// `docker run -i --entrypoint bun <image> src/cli/main.ts --json …` (#346).
-// The image has no src/ any more; docker/cli-shim.ts is installed at that
-// path and runs the bundle. Same layout as the Dockerfile: <pkg>/src/cli/
-// main.ts beside <pkg>/dist-cli/main.js, run with <pkg> as the cwd.
-describe("`bun src/cli/main.ts` keeps working through the shim (#346)", () => {
-  let pkg = "";
-  let shim = "";
-
-  beforeAll(() => {
-    pkg = join(root, "pkg");
-    shim = join(pkg, "src", "cli", "main.ts");
-    mkdirSync(dirname(shim), { recursive: true });
-    copyFileSync(join(repoRoot, "docker/cli-shim.ts"), shim);
-  });
-
-  async function jsonSession(
-    entry: string,
-    input: string,
-  ): Promise<{ exitCode: number; stdout: string }> {
-    const proc = Bun.spawn(
-      [
-        process.execPath,
-        entry,
-        "--json",
-        "--cp-id",
-        "TCK1",
-        "--ws-url",
-        "ws://127.0.0.1:9/ocpp/",
-      ],
-      { cwd: pkg, stdin: "pipe", stdout: "pipe", stderr: "pipe" },
-    );
-    proc.stdin.write(input);
-    await proc.stdin.end();
-    const stdout = await new Response(proc.stdout).text();
-    return { exitCode: await proc.exited, stdout };
-  }
-
-  it("forwards arguments and the exit code", () => {
-    const help = Bun.spawnSync([process.execPath, shim, "--help"], {
-      cwd: pkg,
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    expect(help.stdout.toString() + help.stderr.toString()).toContain(
-      "Usage: ocpp-cp-sim",
-    );
-    expect(help.exitCode).toBe(0);
-
-    const bad = Bun.spawnSync([process.execPath, shim, "--no-such-flag"], {
-      cwd: pkg,
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    expect(bad.exitCode).toBe(1);
-  });
-
-  it(
-    "answers a JSON Lines command and exits 0 when stdin closes, like the bundle",
-    async () => {
-      const input = '{"id":1,"command":"status"}\n';
-      const viaShim = await jsonSession(shim, input);
-      const direct = await jsonSession(bundle, input);
-      for (const r of [viaShim, direct]) {
-        expect(r.exitCode).toBe(0);
-        const reply = JSON.parse(
-          r.stdout.split("\n").find((l) => l.startsWith('{"id":1')) ?? "null",
-        );
-        expect(reply).toMatchObject({ id: 1, ok: true });
-      }
-    },
-    60_000,
   );
 });

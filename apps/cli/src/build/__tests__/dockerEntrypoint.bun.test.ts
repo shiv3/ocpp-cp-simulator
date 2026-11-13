@@ -1,5 +1,5 @@
-import { describe, expect, it } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -161,5 +161,125 @@ describe("docker/entrypoint.sh argument logic (#346)", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+// Golden for the surface open-ocpp-tck depends on (#919): the image run on its
+// own entrypoint, `docker run -i <image> --json …`. No docker here, so the
+// script runs for real with a stub `bun` first on PATH. The stub stands in for
+// `bun dist-cli/main.js`: it records its argv, answers each stdin JSON line
+// with a JSON reply plus Logger-style `Sent:` / `Received:` lines, exits 0 on
+// stdin EOF and on SIGTERM (after saying so). exec in the entrypoint means the
+// signal reaches the stub directly, as `docker stop` reaches the CLI.
+describe("docker/entrypoint.sh run path, through a stub bun (#919)", () => {
+  let dir = "";
+
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), "entrypoint-golden-"));
+    const stub = join(dir, "bun");
+    writeFileSync(
+      stub,
+      `#!${process.execPath}
+const lines = [];
+process.stdout.write(JSON.stringify({ argv: process.argv.slice(2) }) + "\\n");
+process.on("SIGTERM", () => {
+  process.stdout.write("got SIGTERM\\n", () => process.exit(0));
+});
+process.stdout.write("ready\\n");
+let buf = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buf += chunk;
+  let i;
+  while ((i = buf.indexOf("\\n")) >= 0) {
+    const line = buf.slice(0, i);
+    buf = buf.slice(i + 1);
+    const cmd = JSON.parse(line);
+    process.stdout.write("Received: " + line + "\\n");
+    const reply = JSON.stringify({ id: cmd.id, ok: true });
+    process.stdout.write("Sent: " + reply + "\\n");
+    process.stdout.write(reply + "\\n");
+  }
+});
+process.stdin.on("end", () => process.exit(0));
+`,
+    );
+    chmodSync(stub, 0o755);
+  });
+
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+  const TCK_ARGS = [
+    "--ws-url",
+    "ws://csms/ocpp/",
+    "--cp-id",
+    "CP1",
+    "--json",
+    "--ocpp-version",
+    "OCPP-1.6J",
+  ];
+
+  function spawnEntrypoint(args: string[]) {
+    return Bun.spawn(["sh", entrypoint, ...args], {
+      // HTTP_PORT / STATE_DB are set in the image; CLI mode must ignore them.
+      env: {
+        PATH: `${dir}:${process.env.PATH ?? ""}`,
+        HTTP_PORT: "9700",
+        STATE_DB: "/data/state.db",
+      },
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+  }
+
+  it("passes argv through unchanged, answers JSON Lines, exits 0 on stdin EOF", async () => {
+    const proc = spawnEntrypoint(TCK_ARGS);
+    proc.stdin.write('{"id":1,"command":"status"}\n');
+    proc.stdin.write('{"id":2,"command":"status"}\n');
+    await proc.stdin.end();
+    const stdout = await new Response(proc.stdout).text();
+    expect(await proc.exited).toBe(0);
+    expect(stdout.split("\n")).toEqual([
+      JSON.stringify({ argv: ["dist-cli/main.js", ...TCK_ARGS] }),
+      "ready",
+      'Received: {"id":1,"command":"status"}',
+      'Sent: {"id":1,"ok":true}',
+      '{"id":1,"ok":true}',
+      'Received: {"id":2,"command":"status"}',
+      'Sent: {"id":2,"ok":true}',
+      '{"id":2,"ok":true}',
+      "",
+    ]);
+  });
+
+  it("exits 0 on an empty stdin", async () => {
+    const proc = spawnEntrypoint(TCK_ARGS);
+    await proc.stdin.end();
+    const stdout = await new Response(proc.stdout).text();
+    expect(await proc.exited).toBe(0);
+    expect(stdout).not.toContain("[server]");
+  });
+
+  it("forwards SIGTERM to the CLI", async () => {
+    const proc = spawnEntrypoint(TCK_ARGS);
+    const reader = proc.stdout.getReader();
+    let seen = "";
+    const decoder = new TextDecoder();
+    // Wait for the stub's handler to be installed before signalling.
+    while (!seen.includes("ready\n")) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      seen += decoder.decode(value);
+    }
+    expect(seen).toContain("ready\n");
+    proc.kill("SIGTERM");
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      seen += decoder.decode(value);
+    }
+    expect(await proc.exited).toBe(0);
+    expect(seen).toContain("got SIGTERM\n");
   });
 });

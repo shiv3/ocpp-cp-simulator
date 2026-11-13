@@ -22,7 +22,7 @@ related:
   - ../concepts/local-authorization.md
   - default-behaviors.md
   - ../sources/github-issues.md
-updated: 2026-11-10
+updated: 2026-11-13
 ---
 
 # Device Model registry
@@ -80,10 +80,10 @@ because that variable is writable). Making them `ReadWrite` belongs with
 the follow-up that makes transaction timing follow them; writable earlier they
 would accept a value that changes nothing.
 
-`OCPPCommCtrlr.ResetRetries` is `ReadOnly` on 2.x although OCPP 1.6 §9.1 lists
-the key read-write: the simulated reset never fails, so nothing retries, and a
-writable value would change nothing. The 1.6 key stays read-write; on 2.x
-`defaultConfiguration` marks the store key read-only to match.
+`OCPPCommCtrlr.ResetRetries` is `ReadWrite` on 1.6 and 2.x (OCPP 2.0.1 Part 2
+§2.1.14, 2.1 Edition 2 §2.1.15; #914). The simulated reset never fails, so the
+value is stored and reported but nothing retries. A value stored while the key
+was briefly read-only on 2.x (#569) is applied again on restart.
 
 `AuthCtrlr.AuthorizeRemoteStart` (1.6 `AuthorizeRemoteTxRequests`) is
 `ReadWrite` on both versions (#921): OCPP 1.6 §9.1.3 and 2.0.1 Part 2 §2.3.4
@@ -115,7 +115,7 @@ one of their variables answers `UnknownVariable`, not `UnknownComponent`.
 | ---------------------------------------------------------- | ----------------------------------------- | ---------- | ---------- | ------------------------------------------------------ | ------------------------------------------------- | ----------- |
 | `OCPPCommCtrlr.HeartbeatInterval`                          | `HeartbeatInterval` (1.6)                 | ReadWrite  | integer    | –                                                      | 300                                               | Persistent  |
 | `OCPPCommCtrlr.WebSocketPingInterval`                      | `WebSocketPingInterval` (1.6)             | ReadWrite  | integer    | min 0, max 2147483                                     | 0                                                 | Persistent  |
-| `OCPPCommCtrlr.ResetRetries`                               | `ResetRetries` (1.6)                      | ReadOnly   | integer    | –                                                      | 1                                                 | Persistent  |
+| `OCPPCommCtrlr.ResetRetries`                               | `ResetRetries` (1.6)                      | ReadWrite  | integer    | –                                                      | 1                                                 | Persistent  |
 | `OCPPCommCtrlr.MessageAttempts[TransactionEvent]`          | `TransactionMessageAttempts` (1.6)        | ReadWrite  | integer    | –                                                      | 3                                                 | Persistent  |
 | `OCPPCommCtrlr.MessageAttemptInterval[TransactionEvent]`   | `TransactionMessageRetryInterval` (1.6)   | ReadWrite  | integer    | –                                                      | 60                                                | Persistent  |
 | `OCPPCommCtrlr.MessageTimeout[Default]`                    | `MessageTimeout`                          | ReadOnly   | integer    | min 1                                                  | 30                                                | Persistent  |

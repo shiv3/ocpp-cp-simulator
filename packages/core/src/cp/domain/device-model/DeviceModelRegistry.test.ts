@@ -89,15 +89,15 @@ describe("DEVICE_MODEL", () => {
     }
   });
 
-  it("keeps ResetRetries read-write on 1.6 and ReadOnly on 2.x", () => {
+  it("keeps ResetRetries read-write on 1.6 and 2.x (Part 2 §2.1.14)", () => {
     const resetRetries = (version: "OCPP-1.6J" | "OCPP-2.0.1") =>
       defaultConfiguration(cpOf(version)).find(
         (e) => e.key.name === "ResetRetries",
       )?.key.readonly;
     expect(resetRetries("OCPP-1.6J")).toBe(false);
-    expect(resetRetries("OCPP-2.0.1")).toBe(true);
+    expect(resetRetries("OCPP-2.0.1")).toBe(false);
     expect(DEVICE_MODEL.find("OCPPCommCtrlr", "ResetRetries")?.mutability).toBe(
-      "ReadOnly",
+      "ReadWrite",
     );
   });
 

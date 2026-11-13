@@ -338,12 +338,9 @@ const VARIABLES: readonly DeviceModelVariableDef[] = [
       effect: "The WebSocket ping timer restarts; 0 disables client pings.",
     },
   ),
-  // ReadOnly on 2.x although 1.6 lists the key read-write (§9.1): the
-  // simulated reset never fails, so nothing retries and a writable value
-  // would change nothing (#569). `defaultConfiguration` marks the 2.x store
-  // key read-only to match.
+  // ReadWrite per OCPP 2.0.1 Part 2 §2.1.14 and 2.1 Ed2 §2.1.15, as on 1.6.
   persistent("OCPPCommCtrlr", "ResetRetries", "ResetRetries", {
-    mutability: "ReadOnly",
+    mutability: "ReadWrite",
     dataType: "integer",
     default: 1,
   }),

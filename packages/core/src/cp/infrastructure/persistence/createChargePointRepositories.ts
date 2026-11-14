@@ -1,7 +1,7 @@
 import { NoopAuthorizationCacheRepository } from "../../domain/persistence/AuthorizationCacheRepository";
 import { NoopCertificateRepository } from "../../domain/persistence/CertificateRepository";
 import type { ChargePointRepositories } from "../../domain/persistence/ChargePointRepositories";
-import { NoopConfigurationOverrideRepository } from "../../domain/persistence/ConfigurationOverrideRepository";
+import { InMemoryConfigurationOverrideRepository } from "../../domain/persistence/ConfigurationOverrideRepository";
 import { NoopConnectorSettingsRepository } from "../../domain/persistence/ConnectorSettingsRepository";
 import type { Database } from "../../domain/persistence/Database";
 import { NoopPendingMessageRepository } from "../../domain/persistence/PendingMessageRepository";
@@ -23,7 +23,7 @@ export function createChargePointRepositories(
     return {
       authorizationCache: new NoopAuthorizationCacheRepository(),
       certificates: new NoopCertificateRepository(),
-      configuration: new NoopConfigurationOverrideRepository(),
+      configuration: new InMemoryConfigurationOverrideRepository(),
       connectorSettings: new NoopConnectorSettingsRepository(),
       pendingMessages: new NoopPendingMessageRepository(),
       variableMonitors: new NoopVariableMonitorRepository(),

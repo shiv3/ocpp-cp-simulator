@@ -663,6 +663,20 @@ export class SerialCallQueueV16 {
     return true;
   }
 
+  /** #924: whether a transaction-related CALL is queued, written and
+   *  unanswered, or waiting out a resend (the offline queue is the handler's
+   *  to count). Other CALLs do not count: they carry no state that moves with
+   *  the identity. */
+  public hasUnsettledCalls(): boolean {
+    return (
+      (this._serialInFlight !== null &&
+        isTransactionRelated(this._serialInFlight.action)) ||
+      this._serialQueue.some((entry) => isTransactionRelated(entry.action)) ||
+      this._transactionMessageRetries.size > 0 ||
+      (this._held?.length ?? 0) > 0
+    );
+  }
+
   /** The socket closed: the first step of the handler's onWebSocketClosed.
    *  Cancels the in-flight timer and releases the slot. */
   public clearInFlightOnClose(): void {

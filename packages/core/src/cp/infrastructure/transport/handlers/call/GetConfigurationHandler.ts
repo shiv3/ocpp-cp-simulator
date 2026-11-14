@@ -3,6 +3,7 @@ import type {
   GetConfigurationRequestV16,
   GetConfigurationResponseV16,
 } from "@ocpp-cp-simulator/ocpp/index";
+import type { ConfigurationStore } from "../../../../domain/charge-point/ConfigurationStore";
 import type {
   ConfigurationValue,
   StringConfigurationValue,
@@ -46,6 +47,7 @@ export class GetConfigurationHandler implements CallHandler<
         }
         return true;
       }),
+      store,
     );
 
     // Log once per request if any keys were hidden
@@ -66,10 +68,12 @@ export class GetConfigurationHandler implements CallHandler<
 
   private mapConfiguration(
     config: ConfigurationValue[],
+    store: ConfigurationStore,
   ): OcppConfigurationKey[] {
     return config.map((c) => ({
       key: c.key.name,
-      readonly: c.key.readonly,
+      // #924: read-only where the host cannot rename the station.
+      readonly: c.key.readonly || store.isReadOnlyOnThisHost(c.key.name),
       value: this.mapValue(c),
     }));
   }

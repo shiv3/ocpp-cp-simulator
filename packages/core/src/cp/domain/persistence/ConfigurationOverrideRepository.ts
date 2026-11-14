@@ -36,3 +36,24 @@ export class NoopConfigurationOverrideRepository implements ConfigurationOverrid
 
   save(_key: string, _value: string): void {}
 }
+
+/**
+ * Overrides kept in memory, for a charge point without a state database
+ * (#924): without it the identity change a CSMS accepted would have nowhere
+ * to wait for the reboot. Lost with the process, like everything else there.
+ */
+export class InMemoryConfigurationOverrideRepository implements ConfigurationOverrideRepository {
+  private readonly rows = new Map<string, string>();
+
+  loadAll(): StoredConfigurationOverride[] {
+    return [...this.rows].map(([key, value]) => ({ key, value }));
+  }
+
+  get(key: string): string | null {
+    return this.rows.get(key) ?? null;
+  }
+
+  save(key: string, value: string): void {
+    this.rows.set(key, value);
+  }
+}

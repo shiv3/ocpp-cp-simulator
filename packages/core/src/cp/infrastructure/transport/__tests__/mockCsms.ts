@@ -36,6 +36,9 @@ export interface MockCsms {
   /** The `Authorization` header of every WebSocket upgrade request, in
    *  order (#724: the Basic credentials a station presents). */
   upgradeAuthorizations: Array<string | null>;
+  /** The URL path of every WebSocket upgrade request, in order (#924: the
+   *  identity a station connects under). */
+  requestPaths: string[];
   waitForConnection: (timeoutMs?: number) => Promise<void>;
   waitForFrame: (
     pred: (f: OcppFrame) => boolean,
@@ -84,6 +87,7 @@ export interface MockCsmsOptions {
 export function startMockCsms(options: MockCsmsOptions = {}): MockCsms {
   const received: OcppFrame[] = [];
   const upgradeAuthorizations: Array<string | null> = [];
+  const requestPaths: string[] = [];
   const waiters = new Set<FrameWaiter>();
   const connectionWaiters = new Set<ConnectionWaiter>();
   const connectionsList: MockCsmsConnection[] = [];
@@ -113,6 +117,7 @@ export function startMockCsms(options: MockCsmsOptions = {}): MockCsms {
       : {}),
     fetch(req, srv) {
       upgradeAuthorizations.push(req.headers.get("authorization"));
+      requestPaths.push(new URL(req.url).pathname);
       if (srv.upgrade(req)) {
         return undefined;
       }
@@ -234,6 +239,7 @@ export function startMockCsms(options: MockCsmsOptions = {}): MockCsms {
     port,
     received,
     upgradeAuthorizations,
+    requestPaths,
     waitForConnection(timeoutMs = 2000) {
       if (socket) {
         return Promise.resolve();

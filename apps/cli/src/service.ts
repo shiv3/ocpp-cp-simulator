@@ -1,4 +1,5 @@
 import type { StartTransactionOutcome } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
+import type { IdentityRenameHost } from "@ocpp-cp-simulator/core/cp/domain/charge-point/chargePointIdentity";
 import type {
   Behavior,
   JsonObject,
@@ -1096,6 +1097,31 @@ export class CLIChargePointService {
         listener({ securityProfile: value });
       }
     });
+  }
+
+  /**
+   * #924: let the host (the registry) rename this charge point through
+   * ChangeConfiguration `ChargePointIdentity` / SetVariables
+   * `SecurityCtrlr.Identity`. Not for the SOAP versions, whose callback URL
+   * carries the identity: their key stays Rejected.
+   */
+  enableIdentityRename(host: IdentityRenameHost): void {
+    if (isSoapVersion(this._init.ocppVersion ?? "OCPP-1.6J")) return;
+    this._chargePoint.enableIdentityRename(host);
+  }
+
+  /** The configuration the CSMS changed, for a rebuild without a database (#924). */
+  configurationOverridesSnapshot(): { key: string; value: string }[] {
+    return this._chargePoint.storedConfigurationOverrides();
+  }
+
+  restoreConfigurationOverrides(rows: { key: string; value: string }[]): void {
+    this._chargePoint.restoreConfigurationOverrides(rows);
+  }
+
+  /** The identity that the next reboot activates (#924), or null. */
+  get pendingIdentity(): string | null {
+    return this._chargePoint.pendingIdentity;
   }
 
   /** Original init the CP was constructed from. Used by socket.io control
@@ -3842,7 +3868,7 @@ export class CLIChargePointService {
  * strip the trailing cpId so it doesn't get doubled.
  * If the URL is already a base URL like `wss://host/chargepoint/`, use as-is.
  */
-function buildBaseUrl(wsUrl: string, cpId: string): string {
+export function buildBaseUrl(wsUrl: string, cpId: string): string {
   if (wsUrl.endsWith(`/${cpId}`)) {
     return wsUrl.slice(0, -cpId.length);
   }

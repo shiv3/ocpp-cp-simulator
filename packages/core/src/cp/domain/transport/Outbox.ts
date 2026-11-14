@@ -198,6 +198,10 @@ export class Outbox implements IChargePointMessageHandler {
     return this.handler.hasTransactionMessagesInFlight?.() ?? false;
   }
 
+  hasUnsettledMessages(): boolean {
+    return this.handler.hasUnsettledMessages?.() ?? false;
+  }
+
   onWebSocketClosed(): ReturnType<
     IChargePointMessageHandler["onWebSocketClosed"]
   > {

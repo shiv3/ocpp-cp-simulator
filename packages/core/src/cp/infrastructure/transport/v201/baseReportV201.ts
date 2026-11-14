@@ -41,7 +41,10 @@ export function buildBaseReportData(
           ...(def.instance !== undefined ? { instance: def.instance } : {}),
         },
         entry,
-        def,
+        // #924: read-only where the host cannot rename the station.
+        store.isReadOnlyOnThisHost(def.valueKey)
+          ? { ...def, mutability: "ReadOnly" }
+          : def,
       ),
     );
   }

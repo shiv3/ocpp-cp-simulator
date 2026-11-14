@@ -1,5 +1,11 @@
 import { VehicleBehaviorDriver } from "./VehicleBehaviorDriver";
 import {
+  chargePointIdentityRejection,
+  identityRenameTimings,
+  PENDING_IDENTITY_OVERRIDE,
+  type IdentityRenameHost,
+} from "./chargePointIdentity";
+import {
   connectorShareW,
   stationBudgetW,
   type PowerSharingConfig,
@@ -541,6 +547,9 @@ export class ChargePoint {
   private readonly _stateManager: ChargePointStateManager;
   private readonly _timeline: ChargePointTimeline;
   private readonly _timelineProjector: ChargePointTimelineProjector;
+  private _identityHost: IdentityRenameHost | null = null;
+  /** #924: a rename waits for the outbox to drain. */
+  private _identityRenameWaiting = false;
   private readonly _logSink: LogSink;
   /** #878: the stores this charge point persists its own state through. */
   private readonly _repositories: ChargePointRepositories;
@@ -3797,6 +3806,7 @@ export class ChargePoint {
    * then runs final CP-side teardown.
    */
   dispose(): void {
+    this._identityHost = null; // #924: a waiting rename stops.
     for (const driver of this._vehicleDrivers.values()) driver.dispose();
     this._vehicleDrivers.clear();
     if (this._powerRestoreTimer !== null) {
@@ -3821,6 +3831,138 @@ export class ChargePoint {
     // that just cascaded to `logs` gets one row back for the deleted id
     // (#326).
     this._logSink.close();
+  }
+
+  /**
+   * #924: let a host rename this charge point through ChangeConfiguration
+   * `ChargePointIdentity` (1.6) / SetVariables `SecurityCtrlr.Identity` (2.x).
+   * An accepted value is only stored as pending (persisted with the charge
+   * point's configuration rows) and the write answers `RebootRequired`; the
+   * key keeps reporting the active identity until the host applies it at a
+   * reboot. Without a host the key is Rejected.
+   */
+  enableIdentityRename(host: IdentityRenameHost): void {
+    this._identityHost = host;
+    this._configuration.setChangeInterceptor("ChargePointIdentity", (raw) => {
+      const reason = chargePointIdentityRejection(raw);
+      if (reason !== undefined) {
+        this._logger.warn(
+          `ChangeConfiguration ChargePointIdentity refused: ${reason}`,
+          LogType.CONFIGURATION,
+        );
+        return "Rejected";
+      }
+      if (raw === this._id) {
+        // Same as the active identity: nothing to reboot for, and it
+        // cancels an earlier pending rename (the last write wins).
+        this._configuration.writeStoredOverride(PENDING_IDENTITY_OVERRIDE, "");
+        return "Accepted";
+      }
+      if (host.isTaken(raw)) {
+        this._logger.warn(
+          `ChangeConfiguration ChargePointIdentity refused: ${raw} is already used by another charge point`,
+          LogType.CONFIGURATION,
+        );
+        return "Rejected";
+      }
+      this._configuration.writeStoredOverride(PENDING_IDENTITY_OVERRIDE, raw);
+      return "RebootRequired";
+    });
+  }
+
+  /** The configuration the CSMS changed (#924): carried over by a rebuild
+   *  that has no state database to read it back from. */
+  storedConfigurationOverrides(): { key: string; value: string }[] {
+    return this._configuration.storedOverrides();
+  }
+
+  restoreConfigurationOverrides(
+    rows: readonly { key: string; value: string }[],
+  ): void {
+    this._configuration.restoreStoredOverrides(rows);
+  }
+
+  /** The identity accepted by ChangeConfiguration / SetVariables that the
+   *  next reboot activates, or null (#924). */
+  get pendingIdentity(): string | null {
+    const raw = this._configuration.readStoredOverride(
+      PENDING_IDENTITY_OVERRIDE,
+    );
+    return raw === null || raw === "" ? null : raw;
+  }
+
+  /**
+   * #924: called where the station reboots (Reset, 2.x immediate / scheduled
+   * reset). When a pending identity exists the host rebuilds the charge
+   * point under it and this returns true: the caller must not reboot this
+   * instance. False when there is nothing pending or the host refused (for
+   * example the id was taken since); the reboot then goes on as the old
+   * identity.
+   *
+   * A transaction the reset just ended is not yet settled with the CSMS: its
+   * StopTransaction.req / TransactionEvent(Ended) may be in flight or queued
+   * offline, and the queue and the open session row move with the identity.
+   * So the host is only called once the outbox has drained, polled every
+   * {@link identityRenameTimings}. After {@link identityRenameTimings}
+   * (the CSMS never answered, or the link is down) the rename is cancelled
+   * and `reboot` runs as the current identity: the CSMS keeps the identity
+   * that knows the transaction, and the next ChangeConfiguration can ask
+   * again.
+   */
+  applyPendingIdentityAtReboot(reboot: () => void): boolean {
+    const pending = this.pendingIdentity;
+    if (pending === null || this._identityHost === null) return false;
+    if (pending === this._id) return false;
+    if (this._identityRenameWaiting) return true;
+    if (!this._outbox.hasUnsettledMessages()) {
+      return this.applyIdentityNow(pending);
+    }
+    this._identityRenameWaiting = true;
+    const deadline = this._clock.now() + identityRenameTimings.drainTimeoutMs;
+    this._logger.info(
+      `Identity change to ${pending} waits for the outbox to drain`,
+      LogType.CONFIGURATION,
+    );
+    const poll = (): void => {
+      if (this._identityHost === null) {
+        this._identityRenameWaiting = false;
+        return; // The station was cleaned up meanwhile.
+      }
+      if (!this._outbox.hasUnsettledMessages()) {
+        this._identityRenameWaiting = false;
+        const latest = this.pendingIdentity;
+        if (
+          latest !== null &&
+          latest !== this._id &&
+          this.applyIdentityNow(latest)
+        ) {
+          return;
+        }
+        reboot();
+        return;
+      }
+      if (this._clock.now() >= deadline) {
+        this._identityRenameWaiting = false;
+        this._logger.warn(
+          `Identity change to ${pending} cancelled: transaction messages were not settled within ${identityRenameTimings.drainTimeoutMs / 1000}s; rebooting as ${this._id}`,
+          LogType.CONFIGURATION,
+        );
+        this._configuration.writeStoredOverride(PENDING_IDENTITY_OVERRIDE, "");
+        reboot();
+        return;
+      }
+      this._clock.setTimeout(poll, identityRenameTimings.pollMs);
+    };
+    this._clock.setTimeout(poll, identityRenameTimings.pollMs);
+    return true;
+  }
+
+  private applyIdentityNow(pending: string): boolean {
+    if (this._identityHost?.applyAtReboot(pending)) return true;
+    // Refused (for example the id was taken meanwhile): the rename is dropped
+    // and the reboot goes on as the current identity.
+    this._configuration.writeStoredOverride(PENDING_IDENTITY_OVERRIDE, "");
+    return false;
   }
 
   applyRemoteReset(
@@ -3849,12 +3991,16 @@ export class ChargePoint {
       // #734: reported once the station is back with an Accepted boot.
       this._outbox.queueSecurityEventNotification("ResetOrReboot", reason);
     }
-    this._startupEventPending = true;
-    if (type === "Hard") {
-      this.reset("RemoteReset");
-    } else {
-      this.boot("RemoteReset");
-    }
+    const reboot = (): void => {
+      this._startupEventPending = true;
+      if (type === "Hard") {
+        this.reset("RemoteReset");
+      } else {
+        this.boot("RemoteReset");
+      }
+    };
+    if (this.applyPendingIdentityAtReboot(reboot)) return;
+    reboot();
   }
 
   authorize(
@@ -3993,7 +4139,9 @@ export class ChargePoint {
     this._pendingResetsOnIdle = remaining;
     // A station-wide reset reboots everything and subsumes EVSE resets.
     if (runnable.some((pending) => pending.evseId === undefined)) {
-      this.boot("ScheduledReset");
+      const reboot = (): void => this.boot("ScheduledReset");
+      if (this.applyPendingIdentityAtReboot(reboot)) return;
+      reboot();
       return;
     }
     for (const evseId of new Set(runnable.map((pending) => pending.evseId))) {

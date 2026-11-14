@@ -1084,6 +1084,14 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     return this._dataTransferHandler;
   }
 
+  /** #924: a TransactionEvent is active or waits in the offline queue. */
+  public hasUnsettledMessages(): boolean {
+    return (
+      this._transactionEvents.hasTransactionMessagesInFlight() ||
+      this._pendingQueue.size() > 0
+    );
+  }
+
   public hasTransactionMessagesInFlight(): boolean {
     return this._transactionEvents.hasTransactionMessagesInFlight();
   }

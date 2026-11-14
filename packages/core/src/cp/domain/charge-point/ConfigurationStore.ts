@@ -16,12 +16,17 @@ import type {
 import { ConfigurationKeys, defaultConfiguration } from "./Configuration";
 import type { ChargePoint } from "./ChargePoint";
 import {
+  CHARGE_POINT_IDENTITY_KEY,
+  PENDING_IDENTITY_OVERRIDE,
+} from "./chargePointIdentity";
+import {
   isSignedMeterMode,
   type SignedMeterMode,
 } from "../connector/SignedMeterData";
 import {
   NoopConfigurationOverrideRepository,
   type ConfigurationOverrideRepository,
+  type StoredConfigurationOverride,
 } from "../persistence/ConfigurationOverrideRepository";
 
 /**
@@ -84,6 +89,16 @@ export class ConfigurationStore {
   private readonly runtimeKeys = new Set<string>();
   /** Per-key checks run by `applyChange` before a value is stored. */
   private readonly changeGuards = new Map<string, ChangeGuard>();
+  /**
+   * Per-key handlers that answer a ChangeConfiguration themselves, storing
+   * nothing in the key (the key keeps showing its current value). Without a
+   * host that renames the charge point, `ChargePointIdentity` is Rejected (#924).
+   */
+  private identityRenamable = false;
+  private readonly changeInterceptors = new Map<
+    string,
+    (rawValue: string) => ConfigurationChangeStatus
+  >([[CHARGE_POINT_IDENTITY_KEY, () => "Rejected"]]);
 
   private readonly overrides: ConfigurationOverrideRepository;
 
@@ -535,6 +550,8 @@ export class ConfigurationStore {
     const entry = this.values.get(name);
     if (!entry) return "NotSupported";
     if (entry.key.readonly) return "Rejected";
+    const intercept = this.changeInterceptors.get(name);
+    if (intercept) return intercept(rawValue);
 
     const parsed = parseValue(entry.key, rawValue);
     if (parsed === PARSE_FAILED) return "Rejected";
@@ -555,6 +572,72 @@ export class ConfigurationStore {
     return REBOOT_REQUIRED_KEYS.has(name) ? "RebootRequired" : "Accepted";
   }
 
+  /**
+   * Installs a handler for a ChangeConfiguration of `name` that decides the
+   * status itself and leaves the stored value alone (#924: the pending
+   * identity is not the key's value, `GetConfiguration` keeps reporting the
+   * active one). It runs after the unknown-key and ReadOnly checks.
+   */
+  setChangeInterceptor(
+    name: string,
+    handler: ((rawValue: string) => ConfigurationChangeStatus) | null,
+  ): void {
+    if (handler) this.changeInterceptors.set(name, handler);
+    else this.changeInterceptors.delete(name);
+    if (name === CHARGE_POINT_IDENTITY_KEY)
+      this.identityRenamable = handler !== null;
+  }
+
+  /** Whether the host of this charge point can rename it (#924). Until a
+   *  host installs its handler `ChargePointIdentity` is reported read-only,
+   *  because every write to it is answered Rejected (standalone CLI, browser
+   *  local mode, SOAP). */
+  isReadOnlyOnThisHost(name: string): boolean {
+    return name === CHARGE_POINT_IDENTITY_KEY && !this.identityRenamable;
+  }
+
+  /** The raw stored override of `name`, or null (also when it is not a key). */
+  readStoredOverride(name: string): string | null {
+    try {
+      return this.overrides.get(name);
+    } catch (err) {
+      console.error("Failed to read config override:", err);
+      return null;
+    }
+  }
+
+  /** Store a raw (already encoded) override of `name`; best effort. */
+  writeStoredOverride(name: string, value: string): void {
+    try {
+      this.overrides.save(name, value);
+    } catch (err) {
+      console.error("Failed to persist config override:", err);
+    }
+  }
+
+  /** The raw overrides stored for this charge point (the CSMS-changed
+   *  values), without the pending identity: what a rebuild must carry over
+   *  when there is no state database to read them back from (#924). */
+  storedOverrides(): StoredConfigurationOverride[] {
+    try {
+      return this.overrides
+        .loadAll()
+        .filter((row) => row.key !== PENDING_IDENTITY_OVERRIDE);
+    } catch (err) {
+      console.error("Failed to read config overrides:", err);
+      return [];
+    }
+  }
+
+  /** Put {@link storedOverrides} of another instance back: stored and applied
+   *  like at construction. */
+  restoreStoredOverrides(rows: readonly StoredConfigurationOverride[]): void {
+    for (const { key, value } of rows) {
+      this.writeStoredOverride(key, value);
+      this.applyStoredOverride(key, value);
+    }
+  }
+
   /** Subscribe to value changes. Returns an unsubscribe function. */
   onChange(listener: ConfigurationChangeListener): () => void {
     this.listeners.add(listener);
@@ -572,6 +655,8 @@ export class ConfigurationStore {
     // readonly keys — both indicate operator error rather than a real
     // override.
     if (!entry || entry.key.readonly) return;
+    // The active identity is the charge point's id, never an override (#924).
+    if (name === CHARGE_POINT_IDENTITY_KEY) return;
     let value: unknown;
     try {
       value = JSON.parse(raw);

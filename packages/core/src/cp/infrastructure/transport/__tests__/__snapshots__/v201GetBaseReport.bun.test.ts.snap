@@ -605,6 +605,25 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
         },
         {
           "component": {
+            "name": "SecurityCtrlr",
+          },
+          "variable": {
+            "name": "Identity",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "CP201-BASE-REPORT",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "string",
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
             "name": "AuthCacheCtrlr",
           },
           "variable": {

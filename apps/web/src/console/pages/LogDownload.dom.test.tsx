@@ -239,8 +239,16 @@ describe("downloading a charge point's logs (#421)", () => {
 
     await flush();
 
-    expect(document.body.textContent).toContain(
-      "Failed to download logs: database closed",
+    // Sonner paints the pending -> failed swap a frame or two later; poll
+    // instead of trusting one flush on a loaded runner.
+    await vi.waitFor(
+      async () => {
+        await flush();
+        expect(document.body.textContent).toContain(
+          "Failed to download logs: database closed",
+        );
+      },
+      { timeout: 3000 },
     );
     expect(downloads).toEqual([]);
   });

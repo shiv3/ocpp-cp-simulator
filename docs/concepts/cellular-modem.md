@@ -162,8 +162,8 @@ every change, so a station restart or a daemon restart keeps the card, its
 subscription state and the selected interface; a restored charge point finds it
 even though its stored init has no `modem`. Deleting the charge point deletes
 the row. A corrupt row is ignored. **Without a state database** (`:memory:`
-daemon, tests, the single-CP CLI) a restart starts again from the configured
-initial state.
+daemon, tests) a restart starts again from the configured initial state. The
+single-CP CLI has no modem option: it runs without a modem model.
 
 ## Where it runs
 

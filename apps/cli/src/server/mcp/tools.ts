@@ -1360,7 +1360,7 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
 
   mcp.tool("modem_command", {
     description:
-      "Change a charge point's SIM (#928): insert_sim, remove_sim, replace_sim, suspend_subscription, activate_subscription or set_network_interface. A refused transition answers its typed error (slot_occupied, slot_empty, already_suspended, already_active, modem_absent, invalid_sim). The card keeps its iccid/imsi while suspended.",
+      "Change a charge point's SIM (#928): insert_sim, remove_sim, replace_sim, suspend_subscription, activate_subscription, set_network_interface (networkInterface) or set_reporting_policy (reporting, #929). A refused command answers its typed error (slot_occupied, slot_empty, already_suspended, already_active, modem_absent, invalid_sim, invalid_network_interface, invalid_reporting_policy) or no_modem_model when the charge point has no modem model. The card keeps its iccid/imsi while suspended.",
     inputSchema: modemCommandSchema,
     handler: async (args) => {
       try {

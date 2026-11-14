@@ -257,8 +257,6 @@ export interface CLIOptions {
   readonly capabilityProfile?: ChargePointCapabilityProfile;
   /** Charger-side delivery caps per connector (#327). */
   readonly chargerCapabilities?: ChargerCapabilities;
-  /** Cellular modem and SIM (#928). Initial state only; see `modem` in cp.create. */
-  readonly modem?: ModemConfig;
   readonly tls?: OcppTlsOptions;
   readonly tlsCaPath?: string;
   readonly tlsCertPath?: string;

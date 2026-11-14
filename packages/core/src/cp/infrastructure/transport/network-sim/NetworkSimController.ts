@@ -96,13 +96,16 @@ export class NetworkSimController {
     upstreamBytesPerSecond: number | null;
     downstreamBytesPerSecond: number | null;
   }): void {
-    this.bandwidth = {
+    const next = {
       up: limits.upstreamBytesPerSecond,
       down: limits.downstreamBytesPerSecond,
     };
-    // A new limit starts from an idle link: frames already queued keep the
-    // deadlines they were given.
-    this.linkFreeAt = { up: 0, down: 0 };
+    // Only a changed cap starts from an idle link (frames already queued keep
+    // the deadlines they were given). A call with unchanged caps, such as a
+    // link-state change, must not forget the queued frames' transmission time.
+    if (next.up !== this.bandwidth.up) this.linkFreeAt.up = 0;
+    if (next.down !== this.bandwidth.down) this.linkFreeAt.down = 0;
+    this.bandwidth = next;
   }
 
   /**
@@ -112,15 +115,24 @@ export class NetworkSimController {
    * link, which also keeps FIFO order. Payload bytes only: no WebSocket, TLS
    * or TCP overhead is modelled.
    */
-  private bandwidthDelayMs(direction: "up" | "down", raw: string): number {
+  private bandwidthDelayMs(
+    direction: "up" | "down",
+    raw: string,
+  ): { delayMs: number; commit: () => void } {
     const cap = this.bandwidth[direction];
-    if (cap === null) return 0;
+    if (cap === null) return { delayMs: 0, commit: () => {} };
     const now = Date.now();
     const bytes = new TextEncoder().encode(raw).byteLength;
     const start = Math.max(now, this.linkFreeAt[direction]);
     const finish = start + Math.ceil((bytes * 1000) / cap);
-    this.linkFreeAt[direction] = finish;
-    return finish - now;
+    // The link is only occupied once the frame is accepted: the caller commits
+    // after `enqueue` succeeded, so a frame dropped for overflow costs no time.
+    return {
+      delayMs: finish - now,
+      commit: () => {
+        this.linkFreeAt[direction] = finish;
+      },
+    };
   }
 
   public sendUpstream(
@@ -129,8 +141,14 @@ export class NetworkSimController {
   ): boolean {
     if (this.resolved?.enabled !== true) {
       const throttle = this.bandwidthDelayMs("up", raw);
-      if (throttle > 0) {
-        return this.upstreamPipeline.enqueue(raw, throttle, onSettled);
+      if (throttle.delayMs > 0) {
+        const accepted = this.upstreamPipeline.enqueue(
+          raw,
+          throttle.delayMs,
+          onSettled,
+        );
+        if (accepted) throttle.commit();
+        return accepted;
       }
       // When disabled, only take the synchronous fast path if the pipeline is empty.
       // If frames are still draining from a prior enabled state, enqueue with 0 delay
@@ -162,18 +180,23 @@ export class NetworkSimController {
       }
     }
 
-    return this.upstreamPipeline.enqueue(
+    const throttle = this.bandwidthDelayMs("up", raw);
+    const accepted = this.upstreamPipeline.enqueue(
       raw,
-      delayMs + this.bandwidthDelayMs("up", raw),
+      delayMs + throttle.delayMs,
       onSettled,
     );
+    if (accepted) throttle.commit();
+    return accepted;
   }
 
   public receiveDownstream(raw: string): void {
     if (this.resolved?.enabled !== true) {
       const throttle = this.bandwidthDelayMs("down", raw);
-      if (throttle > 0) {
-        if (!this.downstreamPipeline.enqueue(raw, throttle)) {
+      if (throttle.delayMs > 0) {
+        if (this.downstreamPipeline.enqueue(raw, throttle.delayMs)) {
+          throttle.commit();
+        } else {
           this.host.log(
             `Network simulation discarded downstream frame for ${this.chargePointId}: queue_overflow`,
           );
@@ -214,12 +237,10 @@ export class NetworkSimController {
       }
     }
 
-    if (
-      !this.downstreamPipeline.enqueue(
-        raw,
-        delayMs + this.bandwidthDelayMs("down", raw),
-      )
-    ) {
+    const throttle = this.bandwidthDelayMs("down", raw);
+    if (this.downstreamPipeline.enqueue(raw, delayMs + throttle.delayMs)) {
+      throttle.commit();
+    } else {
       this.host.log(
         `Network simulation discarded downstream frame for ${this.chargePointId}: queue_overflow`,
       );

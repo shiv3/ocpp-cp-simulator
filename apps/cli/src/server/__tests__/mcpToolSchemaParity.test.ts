@@ -29,6 +29,7 @@ import type { RpcMethod } from "@ocpp-cp-simulator/contracts/index";
 
 type ListedTool = {
   name: string;
+  description?: string;
   inputSchema: {
     properties?: Record<string, unknown>;
     required?: string[];
@@ -366,6 +367,20 @@ describe("MCP curated tool schema parity (general, #299)", () => {
       await assertToolNotNarrowerThanMethod(tool, method);
     });
   }
+
+  it("modem_command describes every command and typed error", async () => {
+    const tool = (await fetchToolsList()).find(
+      (t) => t.name === "modem_command",
+    );
+    for (const word of [
+      "set_reporting_policy",
+      "invalid_network_interface",
+      "invalid_reporting_policy",
+      "no_modem_model",
+    ]) {
+      expect(tool?.description).toContain(word);
+    }
+  });
 
   // The list above is what makes this "general": a new hand-written curated
   // tool that isn't added to it (or to one of the other exemptions) would

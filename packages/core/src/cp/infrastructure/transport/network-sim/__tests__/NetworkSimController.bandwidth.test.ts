@@ -180,4 +180,50 @@ describe("NetworkSimController bandwidth (#930)", () => {
     vi.advanceTimersByTime(60_000);
     expect(written.map((w) => JSON.parse(w.raw)[1])).toEqual(["a", "b"]);
   });
+  it("keeps the queued link time when the caps are set again unchanged", () => {
+    const { controller, written } = setup();
+    const caps = {
+      upstreamBytesPerSecond: 1000,
+      downstreamBytesPerSecond: null,
+    };
+    controller.setBandwidthLimits(caps);
+    const a = frame("a", 400);
+    const b = frame("b", 100);
+    const t0 = Date.now();
+    controller.sendUpstream(a);
+    // A link-state change re-applies the same caps.
+    controller.setBandwidthLimits({ ...caps });
+    controller.sendUpstream(b);
+    vi.advanceTimersByTime(60_000);
+    // b did not overlap a: it finished a full transmission time after a.
+    expect(written.map((w) => w.at)).toEqual([
+      t0 + bytes(a),
+      t0 + bytes(a) + bytes(b),
+    ]);
+  });
+
+  it("does not occupy the link for a frame dropped on overflow", () => {
+    const { controller, dispatched } = setup();
+    controller.setBandwidthLimits({
+      upstreamBytesPerSecond: null,
+      downstreamBytesPerSecond: 1000,
+    });
+    for (let i = 0; i < PIPELINE_BUDGET.maxFrames; i++) {
+      controller.receiveDownstream(frame(`f${i}`, 0));
+    }
+    const dropped = frame("dropped", 5000);
+    controller.receiveDownstream(dropped);
+    // Drain everything that was accepted, stopping at the last one.
+    while (dispatched.length < PIPELINE_BUDGET.maxFrames) {
+      vi.advanceTimersByTime(10);
+    }
+    expect(dispatched).toHaveLength(PIPELINE_BUDGET.maxFrames);
+    // The dropped 5 s frame left no reservation: a new frame is only as late
+    // as its own transmission time.
+    const next = frame("next", 100);
+    const t0 = Date.now();
+    controller.receiveDownstream(next);
+    vi.advanceTimersByTime(60_000);
+    expect(dispatched.at(-1)!.at).toBe(t0 + bytes(next));
+  });
 });

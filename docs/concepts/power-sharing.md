@@ -93,3 +93,7 @@ without a main meter has no AC-side measurement to show it on.
   cap does).
 - Only the active-power budget is modelled; there is no per-phase balancing.
 - V2X export is not converted.
+- The budget is configured inside the station; there is no run-time external
+  limit from an EMS or LMS. The design note
+  [EMS / LMS co-simulation interop](../analyses/ems-lms-cosimulation-interop.md)
+  (#931) proposes one as a separate term.

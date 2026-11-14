@@ -44,7 +44,7 @@ updated: 2026-11-14
 # CLI (`ocpp-cp-sim`)
 
 Headless charge point simulator for scripting, CI pipelines, and
-AI/automation integration. Runs on [Bun](https://bun.sh/). The same binary
+AI/automation integration. Runs on [Node.js](https://nodejs.org/) >= 22.13 or on [Bun](https://bun.sh/). The same binary
 is also the launcher for the [daemon](daemon.md) and a thin Socket.IO client
 for a daemon someone else started.
 
@@ -77,8 +77,11 @@ installed:
 
 ```bash
 # npm registry (recommended) — ships the web-console dist/. Runs on Node >= 22.13 or Bun.
-pnpm install -g ocpp-cp-simulator     # or: bun install -g / npm install -g ocpp-cp-simulator
-npx ocpp-cp-simulator --help          # or: bunx ocpp-cp-simulator --help (no install)
+npm install -g ocpp-cp-simulator      # or: pnpm install -g (needs Node >= 22.13 on PATH)
+npx ocpp-cp-simulator --help          # no install
+# Bun-only machine (no node on PATH), see "Bun-only machines" under Runtimes:
+bunx ocpp-cp-simulator --help
+bun install -g ocpp-cp-simulator && bun --bun "$(which ocpp-cp-sim)" --help
 
 # The same package as a prebuilt release tarball
 pnpm install -g https://github.com/shiv3/ocpp-cp-simulator/releases/download/cli-latest/ocpp-cp-simulator.tgz
@@ -400,16 +403,22 @@ outside the checkout and runs it from another one.
 
 `--runtime node|bun` (#916) pins the runtime: `node` cuts PATH down to node's
 directory (the script fails if `bun` is still found), installs with npm only
-and runs the bin through its `node` shebang; `bun` runs it with `bun --bun`.
+and runs the bin through its `node` shebang; `bun` is a Bun-only machine: PATH
+holds the system tools minus node / npm / npx plus bun (the script fails if
+`node` is still found), the tarball is installed with `bun install -g` and the
+bin runs as `bun --bun <bin>`. It also prints what running the bin directly
+does there (it fails, see below).
 A `--json` status command over stdin is part of the smoke. The `cli-runtimes`
 job in `ci.yml` runs it on Node 22.13 (the floor), 24 and 26 (current LTS) and
 on Bun, with `--expect-dist`. The vitest suite stays on Node `lts/*` only: six
 test files use the global `CloseEvent`, which Node 22 lacks.
 
-The [Docker image](docker-image.md) and the desktop
-[sidecar](desktop-app.md) still run from the sources (`bun apps/cli/src/main.ts`
-and `bun build --compile apps/cli/src/main.ts`); the embedded k6 runtime serves
-the sidecar too.
+The [Docker image](docker-image.md) does not run the published bundle: it
+builds `dist-cli/main.js` with `bun run build:cli:bun` (`bun build --target=bun`,
+a `bun` shebang) and runs that under Bun, and
+`cliBundle.bun.test.ts` pins that bundle. The desktop [sidecar](desktop-app.md)
+is `bun build --compile` of `apps/cli/src/main.ts`; the embedded k6 runtime
+serves both.
 
 All flags described below apply whether you run the installed `ocpp-cp-sim`
 command or, from a source checkout, `bun apps/cli/src/main.ts …`.
@@ -434,6 +443,24 @@ only, `--ws-max-payload` and `--ws-local-address` are Node only: a start that
 asks for the other runtime's option is refused, not silently ignored). To use a
 behavior file from an npm install, run the CLI under Bun:
 `bunx --bun ocpp-cp-simulator --behavior ./b.ts ...`.
+
+### Bun-only machines
+
+The bin starts with `#!/usr/bin/env node`. Where Node is not installed, a plain
+`ocpp-cp-sim` (the symlink `bun install -g` creates) therefore **fails** with
+`/usr/bin/env: 'node': No such file or directory`. This is a known regression
+of #916: before it the shebang was `bun` and `bun install -g` plus a plain run
+worked on a Bun-only machine. What works there, verified with Bun 1.3.14 and no
+`node` on PATH (CI job "CLI on Bun (no Node)" covers the `bun --bun` row; the `bunx` row was checked by hand):
+
+| Command                                                                         | Result                                                           |
+| ------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `bun install -g ocpp-cp-simulator`, then `ocpp-cp-sim ...`                      | fails: `env: 'node': No such file or directory`                  |
+| `bun install -g ocpp-cp-simulator`, then `bun --bun "$(which ocpp-cp-sim)" ...` | works (also `bun "$(which ocpp-cp-sim)" ...`)                    |
+| `bunx ocpp-cp-simulator ...` / `bunx --bun ocpp-cp-simulator ...`               | works: with no Node on PATH `bunx` runs the bin under Bun itself |
+
+Workaround: use `bunx` / `bun --bun <bin>`, or a shell alias
+`alias ocpp-cp-sim='bun --bun "$(which ocpp-cp-sim)"'`, or install Node.
 
 Not changed: the [Docker image](docker-image.md) and the Tauri sidecar run on
 Bun with a separate `bun build --target=bun` bundle (`bun run build:cli:bun`).

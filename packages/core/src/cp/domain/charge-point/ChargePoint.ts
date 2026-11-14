@@ -823,7 +823,14 @@ export class ChargePoint {
             `Connector ${connectorId} schedule period limit=${watts}W, resuming → Charging`,
             LogType.OCPP,
           );
-          this.updateConnectorStatus(connectorId, OCPPStatus.Charging);
+          // §4.9: SuspendedEVSE takes precedence over SuspendedEV; once the
+          // EVSE side lifts, an EV that is not ready leaves SuspendedEV (#871).
+          this.updateConnectorStatus(
+            connectorId,
+            connector.evConnection === "connected-not-ready"
+              ? OCPPStatus.SuspendedEV
+              : OCPPStatus.Charging,
+          );
         }
       });
       // #722: MeterValueSampleInterval drives the periodic MeterValues of a

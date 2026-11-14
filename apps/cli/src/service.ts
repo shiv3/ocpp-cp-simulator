@@ -791,7 +791,8 @@ export class CLIChargePointService {
       init.cpoName,
       init.tls,
     );
-    this._chargePoint.txUpdatedMeterValues = init.txUpdatedMeterValues === true;
+    this._chargePoint.txUpdatedMeterValues =
+      init.txUpdatedMeterValues !== false;
     if (database) this.persistEngineState(database, init.cpId);
     this._soapServer = isSoapVersion(ocppVersion)
       ? new OCPPSoapServer(
@@ -878,7 +879,9 @@ export class CLIChargePointService {
         securityProfile: options.securityProfile,
         authorizationKey: options.authorizationKey,
         cpoName: options.cpoName,
-        ...(options.txUpdatedMeterValues ? { txUpdatedMeterValues: true } : {}),
+        ...(options.txUpdatedMeterValues !== undefined
+          ? { txUpdatedMeterValues: options.txUpdatedMeterValues }
+          : {}),
         ...(options.inboundValidation
           ? { inboundValidation: options.inboundValidation }
           : {}),

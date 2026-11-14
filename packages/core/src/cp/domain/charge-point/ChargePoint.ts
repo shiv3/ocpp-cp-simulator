@@ -585,8 +585,8 @@ export class ChargePoint {
   private _status: ChargePointStatus = OCPPStatus.Unavailable;
   private _error = "";
   private _autoMeterValueSetting: AutoMeterValueSetting | null;
-  /** #347: see {@link sendScheduledMeterValue}. Off by default. */
-  private _txUpdatedMeterValues = false;
+  /** #347: see {@link sendScheduledMeterValue}. On by default (#551). */
+  private _txUpdatedMeterValues = true;
   private readonly _scenarioHandledConnectors: Set<number> = new Set();
   // Mirror of _scenarioHandledConnectors but for the stop side. When a
   // connector id is in this set, the RemoteStopTransaction default
@@ -1640,7 +1640,8 @@ export class ChargePoint {
   /**
    * #347: whether the meter-value scheduler's samples taken during an OCPP
    * 2.x transaction ride TransactionEvent(Updated, MeterValuePeriodic)
-   * instead of MeterValues. Off by default; ignored on 1.x.
+   * instead of MeterValues. On by default (#551); false restores the
+   * standalone MeterValues. Ignored on 1.x.
    */
   get txUpdatedMeterValues(): boolean {
     return this._txUpdatedMeterValues;

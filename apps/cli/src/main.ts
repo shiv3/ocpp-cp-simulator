@@ -365,7 +365,7 @@ export function parseArgs(argv: string[]): CLIOptions {
   let tlsKeyPath: string | undefined;
   let insecureTlsKeyPerms = false;
   let cpoName: string | undefined;
-  let txUpdatedMeterValues = false;
+  let txUpdatedMeterValues: boolean | undefined;
   let inboundValidation: InboundValidationMode | undefined;
   let reservationAuthorizeIdTag = false;
   // #609: reconnect flags collect here and are validated as one object below.
@@ -990,6 +990,9 @@ export function parseArgs(argv: string[]): CLIOptions {
         break;
       case "--tx-updated-meter-values":
         txUpdatedMeterValues = true;
+        break;
+      case "--no-tx-updated-meter-values":
+        txUpdatedMeterValues = false;
         break;
       case "--web-console":
         webConsoleEnabled = true;
@@ -1667,7 +1670,7 @@ export function parseArgs(argv: string[]): CLIOptions {
     securityProfile,
     authorizationKey,
     cpoName,
-    ...(txUpdatedMeterValues ? { txUpdatedMeterValues } : {}),
+    ...(txUpdatedMeterValues !== undefined ? { txUpdatedMeterValues } : {}),
     ...(inboundValidation ? { inboundValidation } : {}),
     ...(reservationAuthorizeIdTag ? { reservationAuthorizeIdTag } : {}),
     ...(Object.keys(reconnect).length > 0 || Object.keys(wsFlags).length > 0
@@ -1824,7 +1827,11 @@ Options:
                            OCPP 2.x: send the periodic meter samples taken
                            during a transaction as TransactionEvent(Updated,
                            MeterValuePeriodic) instead of MeterValues.
-                           Off by default.
+                           On by default (the flag is accepted for
+                           compatibility).
+  --no-tx-updated-meter-values
+                           OCPP 2.x: opt out; send the periodic samples as
+                           standalone MeterValues again.
   --basic-auth-user <u>    Outgoing WS Basic auth username (CP → CSMS)
   --basic-auth-pass <p>    Outgoing WS Basic auth password (CP → CSMS)
   --web-console-basic-auth-user <u>
@@ -2179,7 +2186,9 @@ export function buildBootstrap(
     securityProfile: options.securityProfile,
     authorizationKey: options.authorizationKey,
     cpoName: options.cpoName,
-    ...(options.txUpdatedMeterValues ? { txUpdatedMeterValues: true } : {}),
+    ...(options.txUpdatedMeterValues !== undefined
+      ? { txUpdatedMeterValues: options.txUpdatedMeterValues }
+      : {}),
     ...(options.inboundValidation
       ? { inboundValidation: options.inboundValidation }
       : {}),

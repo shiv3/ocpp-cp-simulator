@@ -402,7 +402,7 @@ const cpParamsBaseSchema = z.object({
     .boolean()
     .optional()
     .describe(
-      "OCPP 2.x only: send the periodic meter samples taken during a transaction as TransactionEvent(Updated, MeterValuePeriodic) instead of MeterValues. Defaults to false",
+      "OCPP 2.x only: send the periodic meter samples taken during a transaction as TransactionEvent(Updated, MeterValuePeriodic) instead of MeterValues. Defaults to true; false restores the standalone MeterValues",
     ),
   inboundValidation: z
     .enum(["off", "warn", "enforce"])

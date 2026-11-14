@@ -106,7 +106,7 @@ measurand list against the station version's `MeasurandEnumType` and answers
 `OCPPCommCtrlr`, `TxCtrlr`, `SampledDataCtrlr`, `AlignedDataCtrlr`, `DeviceDataCtrlr`,
 `LocalAuthListCtrlr`, `AuthCtrlr`, `AuthCacheCtrlr`, `ReservationCtrlr`, `MonitoringCtrlr`,
 `ChargingStation`, `SecurityCtrlr`, and the EVSE-scoped `EVSE` and `Connector`
-(which need `component.evse`). `ClockCtrlr`, `TariffCostCtrlr` and `ISO15118Ctrlr` exist with no variable yet: a request for
+(which need `component.evse`). `ClockCtrlr` publishes `DateTime` and `TimeSource` (#704). `TariffCostCtrlr` and `ISO15118Ctrlr` exist with no variable yet: a request for
 one of their variables answers `UnknownVariable`, not `UnknownComponent`.
 
 ## Variables
@@ -168,9 +168,37 @@ one of their variables answers `UnknownVariable`, not `UnknownComponent`.
 | `SecurityCtrlr.MaxCertificateChainSize`                    | `MaxCertificateChainSize`                 | ReadOnly   | integer    | min 1, max 10000                                       | 10000                                             | Persistent  |
 | `SecurityCtrlr.CertSigningWaitMinimum`                     | `CertSigningWaitMinimum`                  | ReadWrite  | integer    | min 1                                                  | 60                                                | Persistent  |
 | `SecurityCtrlr.CertSigningRepeatTimes`                     | `CertSigningRepeatTimes`                  | ReadWrite  | integer    | min 0                                                  | 3                                                 | Persistent  |
+| `SecurityCtrlr.SecurityProfile`                            | `SecurityProfile`                         | ReadOnly   | integer    | min 0, max 3                                           | 0                                                 | Persistent  |
+| `SecurityCtrlr.OrganizationName`                           | `CpoName`                                 | ReadOnly   | string     | –                                                      | empty                                             | Persistent  |
+| `SecurityCtrlr.BasicAuthPassword`                          | `AuthorizationKey`                        | WriteOnly  | string     | –                                                      | empty                                             | Persistent  |
+| `OCPPCommCtrlr.FileTransferProtocols`                      | `FileTransferProtocols`                   | ReadOnly   | MemberList | HTTP, HTTPS                                            | HTTP,HTTPS                                        | Volatile    |
+| `OCPPCommCtrlr.UnlockOnEVSideDisconnect`                   | `UnlockConnectorOnEVSideDisconnect`       | ReadOnly   | boolean    | –                                                      | true                                              | Persistent  |
+| `ClockCtrlr.DateTime`                                      | `ClockDateTime`                           | ReadOnly   | string     | read live from the station clock (ISO 8601)            | runtime                                           | Volatile    |
+| `ClockCtrlr.TimeSource`                                    | `ClockTimeSource`                         | ReadOnly   | OptionList | Heartbeat                                              | Heartbeat                                         | Volatile    |
+| `LocalAuthListCtrlr.Entries`                               | `LocalAuthListEntries`                    | ReadOnly   | integer    | min 0; entries of the local list                       | 0                                                 | Volatile    |
 | `EVSE.Power`                                               | `EVSEPower`                               | ReadOnly   | decimal    | unit W                                                 | runtime                                           | Volatile    |
 | `EVSE.AvailabilityState`                                   | `EVSEAvailabilityState`                   | ReadOnly   | OptionList | one of Available/Occupied/Reserved/Unavailable/Faulted | runtime                                           | Volatile    |
 | `Connector.AvailabilityState`                              | `ConnectorAvailabilityState`              | ReadOnly   | OptionList | one of Available/Occupied/Reserved/Unavailable/Faulted | runtime                                           | Volatile    |
+
+### Required variables (#704)
+
+Part 2 §2 marks these "Required yes"; all are registered. A variable with no
+simulated behavior is ReadOnly (#569 rule), even where the 1.6 key it shares is
+writable: `SecurityProfile` (a 2.x upgrade would need the A05 reconnect, which
+only the 1.6 `ChangeConfiguration` path drives), `OrganizationName` (no
+certificate request carries it) and `UnlockOnEVSideDisconnect` (the simulated
+connector has no lock). `OfflineThreshold` was registered by #702.
+`FileTransferProtocols` is `HTTP,HTTPS` (the transfer is simulated; no protocol
+is actually spoken); `TimeSource` is `Heartbeat` (the clock follows the CSMS).
+`BasicAuthPassword` is the 1.6 `AuthorizationKey` (A01.FR.01/02): a
+`SetVariables` stores it and the next connection uses it, the same change
+guards apply (16-20 bytes at profiles 1 and 2), GetVariables answers
+`Rejected` (B06.FR.09), the reports omit its value (B07.FR.03), and the
+station log line of a `SetVariables` shows `[REDACTED]` instead of the value
+(A01.FR.12). The Security-log event of A01.FR.11 stays the gap tracked in #839.
+The network-profile variables (`NetworkConfigurationPriority`,
+`ActiveNetworkProfile`, `NetworkProfileConnectionAttempts`) are not registered:
+#569.
 
 ## Reports: GetBaseReport and NotifyReport
 

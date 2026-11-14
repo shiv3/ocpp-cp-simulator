@@ -18,6 +18,16 @@ const cpOf = (ocppVersion: string) =>
     supportsWebSocketPing: true,
   }) as ChargePoint;
 
+/**
+ * Variables ReadOnly on 2.x although the 1.6 key they share is writable: the
+ * simulator has no 2.x behavior behind a write (#704, #569).
+ */
+const READ_ONLY_OVER_WRITABLE_KEY = new Set([
+  "SecurityCtrlr/SecurityProfile",
+  "SecurityCtrlr/OrganizationName",
+  "OCPPCommCtrlr/UnlockOnEVSideDisconnect",
+]);
+
 describe("DEVICE_MODEL", () => {
   it("has the components of #604", () => {
     for (const name of [
@@ -69,7 +79,12 @@ describe("DEVICE_MODEL", () => {
       const entry = v201.get(def.valueKey);
       expect(entry, id).toBeDefined();
       if (!entry) continue;
-      expect(def.mutability === "ReadOnly", id).toBe(entry.key.readonly);
+      if (!READ_ONLY_OVER_WRITABLE_KEY.has(id)) {
+        expect(def.mutability === "ReadOnly", id).toBe(entry.key.readonly);
+      } else {
+        expect(def.mutability, id).toBe("ReadOnly");
+        expect(entry.key.readonly, id).toBe(false);
+      }
       expect(def.sharedWith16, id).toBe(v16.has(def.valueKey));
       expect(def.min, id).toBe(entry.key.min);
       expect(def.max, id).toBe(entry.key.max);

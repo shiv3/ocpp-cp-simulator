@@ -742,6 +742,162 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
         },
         {
           "component": {
+            "name": "SecurityCtrlr",
+          },
+          "variable": {
+            "name": "SecurityProfile",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "0",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "maxLimit": 3,
+            "minLimit": 0,
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "SecurityCtrlr",
+          },
+          "variable": {
+            "name": "OrganizationName",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "string",
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "SecurityCtrlr",
+          },
+          "variable": {
+            "name": "BasicAuthPassword",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "WriteOnly",
+              "type": "Actual",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "string",
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "OCPPCommCtrlr",
+          },
+          "variable": {
+            "name": "FileTransferProtocols",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "HTTP,HTTPS",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "MemberList",
+            "supportsMonitoring": true,
+            "valuesList": "HTTP,HTTPS",
+          },
+        },
+        {
+          "component": {
+            "name": "OCPPCommCtrlr",
+          },
+          "variable": {
+            "name": "UnlockOnEVSideDisconnect",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "true",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "boolean",
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "ClockCtrlr",
+          },
+          "variable": {
+            "name": "DateTime",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "<ts>",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "string",
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "ClockCtrlr",
+          },
+          "variable": {
+            "name": "TimeSource",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "Heartbeat",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "OptionList",
+            "supportsMonitoring": true,
+            "valuesList": "Heartbeat",
+          },
+        },
+        {
+          "component": {
+            "name": "LocalAuthListCtrlr",
+          },
+          "variable": {
+            "name": "Entries",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "0",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "minLimit": 0,
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
             "name": "DeviceDataCtrlr",
           },
           "variable": {

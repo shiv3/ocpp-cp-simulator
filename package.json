@@ -38,6 +38,9 @@
     "dist",
     "dist-cli"
   ],
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",

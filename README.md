@@ -25,18 +25,18 @@ npm install
 # Browser UI (dev server)
 npm run dev
 
-# CLI / Server mode (requires Bun)
+# CLI / Server mode (Node >= 22.13 or Bun)
 ocpp-cp-sim --ws-url ws://localhost:9000/ocpp --cp-id CP001
 ```
 
 ### Install as a global command (`ocpp-cp-sim`; `ocpsim` and `cp-sim` are aliases)
 
 ```bash
-# From the npm registry (Bun is needed at run time: the bin runs under a `bun` shebang)
+# From the npm registry (runs on Node >= 22.13 or on Bun; no Bun needed)
 pnpm install -g ocpp-cp-simulator     # or: bun install -g / npm install -g ocpp-cp-simulator
 
 # Without installing
-bunx ocpp-cp-simulator --help         # or: npx ocpp-cp-simulator --help
+npx ocpp-cp-simulator --help          # or: bunx ocpp-cp-simulator --help
 
 # Prebuilt release tarball (same package, from GitHub)
 pnpm install -g https://github.com/shiv3/ocpp-cp-simulator/releases/download/cli-latest/ocpp-cp-simulator.tgz

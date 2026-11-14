@@ -1,7 +1,7 @@
 ---
 title: State persistence
 type: concept
-summary: Both the daemon (`bun:sqlite` via `--state-db`) and the browser (sql.js + IndexedDB) back their state with the same SQLite schema — scenarios, configuration overrides, charging profiles, availability, pending messages, the authorization cache, CP registry, logs, saved vehicle profiles, charging sessions, installed certificates, variable monitors and the daemon's scenario run history survive restart / reload.
+summary: Both the daemon (`node:sqlite` on Node, `bun:sqlite` on Bun, via `--state-db`) and the browser (sql.js + IndexedDB) back their state with the same SQLite schema — scenarios, configuration overrides, charging profiles, availability, pending messages, the authorization cache, CP registry, logs, saved vehicle profiles, charging sessions, installed certificates, variable monitors and the daemon's scenario run history survive restart / reload.
 sources:
   - packages/core/src/cp/domain/persistence/ (repository ports, `Database`)
   - packages/core/src/cp/application/scenario/ScenarioRepository.ts
@@ -21,7 +21,7 @@ related:
   - local-authorization.md
   - security-profiles.md
   - variable-monitoring.md
-updated: 2026-11-09
+updated: 2026-11-14
 ---
 
 # State persistence
@@ -77,7 +77,7 @@ The store follows the layer direction of `packages/core/src/cp/`
 - **Scenario ports, in `application/`** — `scenario/ScenarioRepository.ts` and
   `verification/ScenarioRunRepository.ts`; no domain code uses them.
 - **SQLite, in `infrastructure/persistence/`** — `BunSqliteDatabase` (the
-  daemon's `bun:sqlite` handle), `schema.ts` with `migrations/`, the `Sqlite*`
+  daemon's `node:sqlite` / `bun:sqlite` handle), `schema.ts` with `migrations/`, the `Sqlite*`
   repositories and their `create*Repository` factories
   (`createChargePointRepositories` builds a charge point's bundle, which
   `createChargePoint` injects through `ChargePointDeps.repositories`),

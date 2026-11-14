@@ -62,10 +62,7 @@ export function transactionBehavior(cp: ChargePoint): Behavior {
             ? remoteStartable(cp, connectorId, idTag)
               ? connectorId
               : undefined
-            : [...cp.connectors.keys()]
-                .filter((id) => id > 0)
-                .sort((a, b) => a - b)
-                .find((id) => remoteStartable(cp, id, idTag));
+            : pickRemoteStartConnector(cp, idTag);
           if (resolved === undefined) {
             return { response: { status: "Rejected" } };
           }
@@ -175,6 +172,29 @@ export function transactionBehavior(cp: ChargePoint): Behavior {
  * groupIdToken, as the station knows it) and not the last connector a
  * reservation without a connector keeps for its owner (§5.13, H01.FR.07).
  */
+/**
+ * 1.6 RemoteStartTransaction without a `connectorId` (#839): the connector
+ * reserved for this tag (or its parent) comes first, as on 2.x
+ * (`decideRemoteStart`), so the reservation is used up instead of staying and
+ * blocking others; otherwise the lowest connector that can start.
+ */
+export function pickRemoteStartConnector(
+  cp: ChargePoint,
+  idTag: string,
+): number | undefined {
+  const ids = [...cp.connectors.keys()]
+    .filter((id) => id > 0)
+    .sort((a, b) => a - b);
+  const parent = cp.knownParentIdOf(idTag);
+  return (
+    ids.find(
+      (id) =>
+        cp.reservationManager.reservationFor(id, idTag, parent) !== undefined &&
+        remoteStartable(cp, id, idTag),
+    ) ?? ids.find((id) => remoteStartable(cp, id, idTag))
+  );
+}
+
 function remoteStartable(
   cp: ChargePoint,
   connectorId: number,

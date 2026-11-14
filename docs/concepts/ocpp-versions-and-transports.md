@@ -38,7 +38,7 @@ related:
   - operational-timeline.md
   - expert-ocpp-calls.md
   - variable-monitoring.md
-updated: 2026-11-09
+updated: 2026-11-14
 ---
 
 # OCPP versions and transports
@@ -739,6 +739,19 @@ so the CALL that follows an accepted `TriggerMessage` or `ExtendedTriggerMessage
 the gate while `Pending`. Anything not triggered (transaction messages, status
 changes, heartbeats) stays suppressed, and a `Rejected` station sends nothing
 even when triggered.
+
+Known gap (#839): while the boot is `Pending` or `Rejected` a MeterValues.req is
+dropped, not queued (§3.7 asks for transaction-related messages to be queued),
+so a restored transaction loses one sample per interval until the boot is
+`Accepted`. Kept as is: queueing would change the default wire of a Pending
+boot.
+
+A scenario `config.set` node writes through the same guard as a CSMS
+ChangeConfiguration (`applyChange` without `bypassGuard`): a refusal is only
+logged, and a write to `AuthorizationKey` / `SecurityProfile` does not
+reconnect or apply the A05.FR.08 fallback. Chosen over `bypassGuard: true`
+(#839) because a scenario that skips the guard could leave the station with
+credentials it cannot connect with.
 
 ## OCPP-J 1.6 boot gate (§4.2)
 

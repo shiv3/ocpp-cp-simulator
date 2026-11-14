@@ -354,6 +354,62 @@ export const connectorStatusWireSchema = z
   })
   .strict();
 
+/**
+ * The cellular modem and SIM as read surfaces show them (#928): identifiers
+ * are masked to their last four characters, never the full ICCID / IMSI.
+ */
+const cellularLinkWireSchema = z
+  .object({
+    networkInterface: z.enum(["ethernet", "wifi", "cellular"]),
+    available: z.boolean(),
+    reasons: z
+      .array(
+        z.enum([
+          "modem_absent",
+          "sim_missing",
+          "subscription_suspended",
+          "sim_network_blocked",
+        ]),
+      )
+      .max(8),
+    upstreamBytesPerSecond: z.number().nullable(),
+    downstreamBytesPerSecond: z.number().nullable(),
+    policies: z
+      .array(
+        z
+          .object({
+            id: STR_64K,
+            by: z.enum(["simId", "iccid", "operator"]),
+            service: z.enum(["online", "blocked"]),
+          })
+          .strict(),
+      )
+      .max(200),
+    enforced: z.boolean(),
+  })
+  .strict();
+
+export const modemWireSchema = z
+  .object({
+    slot: z.enum(["no_modem", "empty", "inserted"]),
+    reporting: z.enum(["none", "iccid", "iccid-and-imsi"]),
+    networkInterface: z.enum(["ethernet", "wifi", "cellular"]),
+    /** #930: whether the link may be up, why not, and the effective caps. */
+    link: cellularLinkWireSchema.optional(),
+    sim: z
+      .object({
+        simId: STR_64K,
+        iccid: STR_64K.nullable(),
+        imsi: STR_64K.nullable(),
+        operator: STR_64K.nullable(),
+        subscription: z.enum(["active", "suspended"]),
+      })
+      .strict()
+      .nullable(),
+  })
+  .strict();
+export type ModemWire = z.infer<typeof modemWireSchema>;
+
 export const statusWireSchema = z
   .object({
     id: STR_64K,
@@ -376,6 +432,8 @@ export const statusWireSchema = z
       .nullable()
       .optional(),
     config: wireCpConfigSchema.optional(),
+    /** #928: absent when the station has no modem model. */
+    modem: modemWireSchema.optional(),
   })
   .strict();
 export type StatusWire = z.infer<typeof statusWireSchema>;
@@ -391,6 +449,7 @@ interface FullStatus {
   heartbeat?: { intervalSeconds: number; lastSentAt: string | null };
   networkSim?: { enabled: boolean; manualRuleIds: string[] } | null;
   config?: FullCpConfig;
+  modem?: ModemWire;
 }
 
 /** Map `service.getStatus()` → wire status with the embedded config redacted. */
@@ -403,6 +462,7 @@ export function statusToWire(status: FullStatus): StatusWire {
     heartbeat: status.heartbeat,
     networkSim: status.networkSim,
     config: status.config ? redactCp(status.config) : undefined,
+    ...(status.modem ? { modem: status.modem } : {}),
   };
 }
 

@@ -54,6 +54,17 @@ export class NetworkSimController {
   private disposed = false;
   private configRevision = 0;
   private disconnectRequestedThisSession = false;
+  /**
+   * #930: sustained payload caps. A frame occupies the link for
+   * `bytes / cap` seconds, one frame at a time per direction; `linkFreeAt` is
+   * when the previous frame has finished. Independent of the latency rules,
+   * and in force even when they are disabled.
+   */
+  private bandwidth: { up: number | null; down: number | null } = {
+    up: null,
+    down: null,
+  };
+  private linkFreeAt: { up: number; down: number } = { up: 0, down: 0 };
 
   public constructor(
     private readonly host: ControllerHost,
@@ -80,11 +91,65 @@ export class NetworkSimController {
     }
   }
 
+  /** Set the sustained caps (bytes per second); `null` removes one. */
+  public setBandwidthLimits(limits: {
+    upstreamBytesPerSecond: number | null;
+    downstreamBytesPerSecond: number | null;
+  }): void {
+    const next = {
+      up: limits.upstreamBytesPerSecond,
+      down: limits.downstreamBytesPerSecond,
+    };
+    // Only a changed cap starts from an idle link (frames already queued keep
+    // the deadlines they were given). A call with unchanged caps, such as a
+    // link-state change, must not forget the queued frames' transmission time.
+    if (next.up !== this.bandwidth.up) this.linkFreeAt.up = 0;
+    if (next.down !== this.bandwidth.down) this.linkFreeAt.down = 0;
+    this.bandwidth = next;
+  }
+
+  /**
+   * The extra delay a frame of this size needs on a capped direction: its
+   * transmission time plus the wait for the frames ahead of it. The frame's
+   * deadline is therefore the moment its last byte would have crossed the
+   * link, which also keeps FIFO order. Payload bytes only: no WebSocket, TLS
+   * or TCP overhead is modelled.
+   */
+  private bandwidthDelayMs(
+    direction: "up" | "down",
+    raw: string,
+  ): { delayMs: number; commit: () => void } {
+    const cap = this.bandwidth[direction];
+    if (cap === null) return { delayMs: 0, commit: () => {} };
+    const now = Date.now();
+    const bytes = new TextEncoder().encode(raw).byteLength;
+    const start = Math.max(now, this.linkFreeAt[direction]);
+    const finish = start + Math.ceil((bytes * 1000) / cap);
+    // The link is only occupied once the frame is accepted: the caller commits
+    // after `enqueue` succeeded, so a frame dropped for overflow costs no time.
+    return {
+      delayMs: finish - now,
+      commit: () => {
+        this.linkFreeAt[direction] = finish;
+      },
+    };
+  }
+
   public sendUpstream(
     raw: string,
     onSettled?: (settlement: Settlement) => void,
   ): boolean {
     if (this.resolved?.enabled !== true) {
+      const throttle = this.bandwidthDelayMs("up", raw);
+      if (throttle.delayMs > 0) {
+        const accepted = this.upstreamPipeline.enqueue(
+          raw,
+          throttle.delayMs,
+          onSettled,
+        );
+        if (accepted) throttle.commit();
+        return accepted;
+      }
       // When disabled, only take the synchronous fast path if the pipeline is empty.
       // If frames are still draining from a prior enabled state, enqueue with 0 delay
       // to preserve FIFO ordering.
@@ -115,11 +180,29 @@ export class NetworkSimController {
       }
     }
 
-    return this.upstreamPipeline.enqueue(raw, delayMs, onSettled);
+    const throttle = this.bandwidthDelayMs("up", raw);
+    const accepted = this.upstreamPipeline.enqueue(
+      raw,
+      delayMs + throttle.delayMs,
+      onSettled,
+    );
+    if (accepted) throttle.commit();
+    return accepted;
   }
 
   public receiveDownstream(raw: string): void {
     if (this.resolved?.enabled !== true) {
+      const throttle = this.bandwidthDelayMs("down", raw);
+      if (throttle.delayMs > 0) {
+        if (this.downstreamPipeline.enqueue(raw, throttle.delayMs)) {
+          throttle.commit();
+        } else {
+          this.host.log(
+            `Network simulation discarded downstream frame for ${this.chargePointId}: queue_overflow`,
+          );
+        }
+        return;
+      }
       // When disabled, only take the synchronous fast path if the pipeline is empty.
       // If frames are still draining from a prior enabled state, enqueue with 0 delay
       // to preserve FIFO ordering.
@@ -154,7 +237,10 @@ export class NetworkSimController {
       }
     }
 
-    if (!this.downstreamPipeline.enqueue(raw, delayMs)) {
+    const throttle = this.bandwidthDelayMs("down", raw);
+    if (this.downstreamPipeline.enqueue(raw, delayMs + throttle.delayMs)) {
+      throttle.commit();
+    } else {
       this.host.log(
         `Network simulation discarded downstream frame for ${this.chargePointId}: queue_overflow`,
       );

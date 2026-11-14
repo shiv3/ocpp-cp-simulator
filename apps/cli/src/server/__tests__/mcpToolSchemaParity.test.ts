@@ -29,6 +29,7 @@ import type { RpcMethod } from "@ocpp-cp-simulator/contracts/index";
 
 type ListedTool = {
   name: string;
+  description?: string;
   inputSchema: {
     properties?: Record<string, unknown>;
     required?: string[];
@@ -351,6 +352,12 @@ describe("MCP curated tool schema parity (general, #299)", () => {
       tool: "network_sim_trigger_disconnect",
       method: "network_sim.disconnect.trigger",
     },
+    {
+      tool: "cellular_policy_set",
+      method: "network_sim.cellular.save",
+    },
+    { tool: "modem_get", method: "modem.get" },
+    { tool: "modem_command", method: "modem.command" },
     { tool: "power_loss", method: "power.loss" },
     { tool: "power_restore", method: "power.restore" },
   ];
@@ -360,6 +367,20 @@ describe("MCP curated tool schema parity (general, #299)", () => {
       await assertToolNotNarrowerThanMethod(tool, method);
     });
   }
+
+  it("modem_command describes every command and typed error", async () => {
+    const tool = (await fetchToolsList()).find(
+      (t) => t.name === "modem_command",
+    );
+    for (const word of [
+      "set_reporting_policy",
+      "invalid_network_interface",
+      "invalid_reporting_policy",
+      "no_modem_model",
+    ]) {
+      expect(tool?.description).toContain(word);
+    }
+  });
 
   // The list above is what makes this "general": a new hand-written curated
   // tool that isn't added to it (or to one of the other exemptions) would
@@ -371,6 +392,8 @@ describe("MCP curated tool schema parity (general, #299)", () => {
       "cp_create_many",
       "network_sim_get",
       "network_sim_set",
+      // reads two methods (policies and status); takes no params.
+      "cellular_policy_get",
       "control_scenario_wait",
       // tail_logs adds client-side filters on top of logs.get's cpId.
       "tail_logs",

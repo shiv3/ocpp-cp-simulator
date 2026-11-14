@@ -387,6 +387,11 @@ export async function startServer(
     applyToCp: (cpId, resolved) => {
       registry.get(cpId)?.setNetworkSimConfig(resolved);
     },
+    listCpIds: () => [...registry.list()],
+    applyCellularPolicies: (cpId, policies) => {
+      registry.get(cpId)?.setCellularPolicies(policies);
+    },
+    getCellularLink: (cpId) => registry.get(cpId)?.modemState()?.link ?? null,
     triggerCpDisconnect: (cpId, ruleId) => {
       const svc = registry.get(cpId);
       if (!svc) {

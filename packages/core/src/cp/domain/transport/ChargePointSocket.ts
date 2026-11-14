@@ -78,4 +78,11 @@ export interface ChargePointSocket {
     ruleId: string,
   ): { ok: true } | { ok: false; error: "sim_disabled" | "rule_not_manual" };
   setPingInterval(seconds: number): void;
+  /** #930: take the link administratively down (`reason`) or up (`null`). */
+  setLinkBlocked(reason: string | null): void;
+  /** #930: sustained payload caps in bytes per second, `null` = uncapped. */
+  setBandwidthLimits(limits: {
+    upstreamBytesPerSecond: number | null;
+    downstreamBytesPerSecond: number | null;
+  }): void;
 }

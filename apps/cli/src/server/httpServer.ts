@@ -27,6 +27,7 @@ import {
   INFLIGHT_CAP,
 } from "@ocpp-cp-simulator/contracts/limits";
 import { labelsSchema } from "@ocpp-cp-simulator/contracts/labels";
+import { modemConfigProblem } from "@ocpp-cp-simulator/core/cp/domain/modem/CellularModem";
 import { chargerCapabilitiesProblem } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargerCapabilities";
 import {
   behaviorIdsSchema,
@@ -1094,6 +1095,12 @@ export function parseCreateBody(
     chargerCapabilities =
       body.chargerCapabilities as ChargePointInitOptions["chargerCapabilities"];
   }
+  let modem: ChargePointInitOptions["modem"];
+  if (body.modem !== undefined) {
+    const problem = modemConfigProblem(body.modem);
+    if (problem) throw new Error(problem);
+    modem = body.modem as ChargePointInitOptions["modem"];
+  }
   const tlsCaPath =
     typeof body.tlsCaPath === "string" ? body.tlsCaPath : undefined;
   const tlsCertPath =
@@ -1195,6 +1202,7 @@ export function parseCreateBody(
       : {}),
     ...(capabilityProfile ? { capabilityProfile } : {}),
     ...(chargerCapabilities ? { chargerCapabilities } : {}),
+    ...(modem ? { modem } : {}),
     tls,
     tlsCaPath,
     tlsCertPath,

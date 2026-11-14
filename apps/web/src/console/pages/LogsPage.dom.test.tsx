@@ -361,7 +361,6 @@ describe("LogsPage", () => {
   });
 
   it("says why the persisted rows could not be cleared", async () => {
-    const alert = vi.spyOn(window, "alert").mockImplementation(() => {});
     vi.spyOn(console, "error").mockImplementation(() => {});
     const { container } = await mount("/logs?cp=CP-A", {
       clearStoredLogs: vi.fn(async () => {
@@ -372,7 +371,7 @@ describe("LogsPage", () => {
     await click(button(container, "Clear screen + DB"));
     await flush();
 
-    expect(alert).toHaveBeenCalledWith(
+    expect(document.body.textContent).toContain(
       "Failed to clear stored logs: database closed",
     );
     vi.restoreAllMocks();

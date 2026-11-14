@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 
+import { notify } from "@/lib/toast";
 import type { ChargePointConfig } from "../../../components/ChargePointConfigModal";
 import type { CreateChargePointParams } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 import type { SimulatorConfigInput } from "@ocpp-cp-simulator/contracts/index";
@@ -141,7 +142,7 @@ export function useCpConfigActions(): UseCpConfigActionsResult {
   );
 
   // Create-vs-update dispatch, then the auto-meter follow-up, then a
-  // refresh; errors are reported to the operator with an alert, not
+  // refresh; errors are reported to the operator with an error toast, not
   // rethrown — the returned promise always resolves.
   const saveRemote = useCallback(
     async (cpConfig: ChargePointConfig, isEdit: boolean) => {
@@ -166,7 +167,7 @@ export function useCpConfigActions(): UseCpConfigActionsResult {
       } catch (err) {
         const action = isEdit ? "update" : "create";
         console.error(`Failed to ${action} remote CP`, err);
-        alert(
+        notify.error(
           t(
             isEdit
               ? "dashboard.actions.updateFailed"
@@ -289,7 +290,7 @@ export function useCpConfigActions(): UseCpConfigActionsResult {
         // like DashboardPage `void addCp(...)`, so a bare rejection here would
         // be an unhandled rejection with no feedback.
         console.error("Failed to save local CP", err);
-        alert(
+        notify.error(
           t("dashboard.actions.saveFailed", {
             error: err instanceof Error ? err.message : String(err),
           }),
@@ -333,7 +334,7 @@ export function useCpConfigActions(): UseCpConfigActionsResult {
           return true;
         } catch (err) {
           console.error("Failed to remove remote CP", err);
-          alert(
+          notify.error(
             t("dashboard.actions.removeFailed", {
               error: err instanceof Error ? err.message : String(err),
             }),
@@ -372,7 +373,7 @@ export function useCpConfigActions(): UseCpConfigActionsResult {
         // Same operator-facing contract as the remote branch above, so a
         // local storage failure doesn't become an unhandled rejection.
         console.error("Failed to remove local CP", err);
-        alert(
+        notify.error(
           t("dashboard.actions.removeFailed", {
             error: err instanceof Error ? err.message : String(err),
           }),

@@ -227,7 +227,6 @@ describe("downloading a charge point's logs (#421)", () => {
   });
 
   it("says why the logs could not be downloaded", async () => {
-    const alert = vi.spyOn(window, "alert").mockImplementation(() => {});
     vi.spyOn(console, "error").mockImplementation(() => {});
     const { root } = await render("/cp/CP-1", {
       listStoredLogs: vi.fn(async () => {
@@ -238,7 +237,9 @@ describe("downloading a charge point's logs (#421)", () => {
 
     await click(button("Download"));
 
-    expect(alert).toHaveBeenCalledWith(
+    await flush();
+
+    expect(document.body.textContent).toContain(
       "Failed to download logs: database closed",
     );
     expect(downloads).toEqual([]);

@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { notify } from "@/lib/toast";
 import React, {
   Suspense,
   lazy,
@@ -388,7 +389,7 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
       if (scope === "all" && chargePointService.clearStoredLogs) {
         void chargePointService.clearStoredLogs(cpId).catch((err) => {
           console.error(`Failed to clear stored logs for ${cpId}`, err);
-          alert(
+          notify.error(
             translate("cp.page.clearLogsFailed", {
               message: err instanceof Error ? err.message : String(err),
             }),
@@ -400,14 +401,18 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
   );
 
   const handleDownloadLogs = useCallback(() => {
-    void downloadStoredLogs(chargePointService, [cpId], cpId).catch((err) => {
-      console.error(`Failed to download logs for ${cpId}`, err);
-      alert(
-        translate("cp.page.downloadLogsFailed", {
-          message: err instanceof Error ? err.message : String(err),
-        }),
+    notify
+      .promise(downloadStoredLogs(chargePointService, [cpId], cpId), {
+        loading: translate("dashboard.logs.downloadPending"),
+        success: translate("dashboard.logs.downloadDone"),
+        error: (err) =>
+          translate("cp.page.downloadLogsFailed", {
+            message: err instanceof Error ? err.message : String(err),
+          }),
+      })
+      .catch((err) =>
+        console.error(`Failed to download logs for ${cpId}`, err),
       );
-    });
   }, [chargePointService, cpId]);
 
   // The selected connector when this CP has it, else the first one: what the

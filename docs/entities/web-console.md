@@ -21,7 +21,7 @@ related:
   - open-ev-directory.md
   - ../concepts/operational-timeline.md
   - ../concepts/charging-sessions.md
-updated: 2026-11-10
+updated: 2026-11-14
 ---
 
 # Web console (browser UI)
@@ -801,7 +801,8 @@ all of them when none is ticked:
 - **Clear screen** drops those charge points' lines from the console's buffer
   and leaves the persisted rows;
 - **Clear screen + DB** also deletes their persisted rows (`logs.clear`, once
-  per charge point); a failure is shown in an alert.
+  per charge point); progress and the result (or the failure) are shown in a
+  [toast](#toast-notifications).
 
 ### Scenarios page
 
@@ -1570,6 +1571,41 @@ ngrok` / `--soap-public-base-url`), the SOAP callback URL is optional in the
 - Persist everything (charge points, scenarios, configuration overrides,
   logs) — sql.js + IndexedDB in Local mode, the daemon's SQLite in Remote
   mode ([State persistence](../concepts/state-persistence.md)).
+
+## Toast notifications
+
+Transient feedback for a user action (#937) goes through one typed API,
+`notify` in `apps/web/src/lib/toast.ts`, rendered by a single `<AppToaster />`
+(`components/ui/sonner.tsx`) mounted in `App.tsx` inside `DarkModeProvider`.
+The library ([Sonner](https://sonner.emilkowal.ski/)) is a dependency of the
+web app only; nothing under `packages/` or `apps/cli` imports it.
+
+- `notify.success | error | warning | info(message, { id?, description?, duration? })`
+  and `notify.promise(promise, { loading, success, error, id? })` (pending,
+  then success or error in the same toast; returns the original promise, so
+  the caller still handles a rejection).
+- Auto-dismiss: success / info 4 s, warning 6 s, error 10 s. Hovering or
+  focusing a toast pauses the timer; each has a close button; Alt+T focuses the
+  region.
+- Dedupe: the id defaults to `<kind>:<message>`, so the same message repeated
+  updates one toast instead of stacking, while a success never replaces an
+  error (different id). `notify.promise` gets a unique id per call, so
+  overlapping operations keep separate toasts.
+- Accessibility: one `aria-live="polite"` region labelled `common.toast.region`
+  (translated); animations are off under `prefers-reduced-motion`. Light / dark
+  follows the console theme; colours come from the `--popover` / `--border`
+  tokens. At most five toasts are visible.
+- Translate the message at the call site (`t(...)`, or `translate(...)` outside
+  React); the toaster only translates its own chrome.
+- Not for: per-field validation and errors the user must act on (keep those
+  inline, e.g. `ConfigurationKeysTab`), and OCPP frames, status changes or log
+  entries (they belong in the Message Log / timeline). There is no notification
+  center.
+- Migrated so far: create / update / remove charge point errors
+  (`useCpConfigActions`), the Message Log page and charge-point-page log
+  download / clear (pending → done / failed). Other `alert()` call sites
+  (`ScenarioLibraryPage`, `MeterValueCurveModal`, ...) are still blocking
+  alerts and can move to `notify` one at a time.
 
 ## Icons
 

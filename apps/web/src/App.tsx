@@ -8,6 +8,7 @@ import {
   useLocation,
 } from "react-router-dom";
 import { DarkModeProvider } from "./contexts/DarkModeContext.tsx";
+import { AppToaster } from "./components/ui/sonner.tsx";
 import ConsoleApp from "./console/ConsoleApp.tsx";
 
 /**
@@ -47,6 +48,8 @@ export const AppRoutes: React.FC = () => (
       element={
         <DarkModeProvider>
           <ConsoleApp />
+          {/* The single toast host (#937). */}
+          <AppToaster />
         </DarkModeProvider>
       }
     />

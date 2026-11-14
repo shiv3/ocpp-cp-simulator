@@ -120,5 +120,6 @@
   "common.daemon.saveAndSwitch": "保存して切り替え",
   "common.daemon.cancel": "キャンセル",
   "common.daemon.add": "デーモンを追加",
-  "common.daemon.forget": "削除"
+  "common.daemon.forget": "削除",
+  "common.toast.region": "通知"
 }

@@ -1,4 +1,12 @@
-import type { DataAttribution, EVSettings } from "../connector/EVSettings";
+import {
+  withoutNulls,
+  type DataAttribution,
+  type EVSettings,
+} from "../connector/EVSettings";
+import {
+  vehicleSettingsPatch,
+  type VehicleSettings,
+} from "../connector/VehicleSettings";
 import type {
   CurveQuality,
   DcCurvePoint,
@@ -41,10 +49,7 @@ export type VehicleCurrentType = "AC" | "DC";
  * `phases` stays optional because DC ignores it. The attribution is explicit
  * too (`[]` for a hand-made profile): it travels with the copied values.
  */
-export type VehicleEvSettings = Pick<
-  EVSettings,
-  "modelName" | "batteryCapacityKwh" | "maxChargingPowerKw" | "phases"
-> &
+export type VehicleEvSettings = VehicleSettings &
   Required<Pick<EVSettings, "chargingCurve" | "currentType" | "attribution">>;
 
 /** Facts the user should see when a profile is applied. Nothing is hidden. */
@@ -206,14 +211,20 @@ export function resolveEvSettings(
 /**
  * Put a resolved vehicle onto existing settings: the session's SoCs and the
  * electrical values a vehicle does not determine (voltage, power factor) are
- * kept. A plain spread, because {@link VehicleEvSettings} already carries an
- * explicit curve and current type.
+ * kept. The vehicle slice goes through {@link vehicleSettingsPatch}, the one
+ * writer the auto-traffic pool uses too, so the previous vehicle is replaced
+ * whole: a field this vehicle lacks (the phase count of a DC vehicle) is
+ * removed, not left to the vehicle before it. The patch's `null` ("remove")
+ * is dropped here because the result is a plain settings object, not a patch.
  */
 export function applyVehicleSettings<T extends Partial<EVSettings>>(
   base: T,
   vehicle: VehicleEvSettings,
 ): T & VehicleEvSettings {
-  return { ...base, ...vehicle };
+  return withoutNulls({
+    ...base,
+    ...vehicleSettingsPatch(vehicle),
+  }) as unknown as T & VehicleEvSettings;
 }
 
 /** The credit the profile's sources ask for, in the settings' shape. */

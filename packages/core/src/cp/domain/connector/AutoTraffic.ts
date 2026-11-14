@@ -1,6 +1,7 @@
 import { cyrb128, draw, xoshiro128ss } from "../../shared/SeededRng";
 import type { IdTagDistribution } from "../auth/IdTagPool";
-import type { EVSettings, EVSettingsPatch } from "./EVSettings";
+import type { EVSettingsPatch } from "./EVSettings";
+import { vehicleSettingsPatch, type VehicleSettings } from "./VehicleSettings";
 
 /**
  * Background charging traffic for one connector (#300).
@@ -95,15 +96,8 @@ export interface AutoTrafficVehicle {
   vehicle: AutoTrafficVehicleSettings;
 }
 
-/** The part of EV settings a vehicle determines; the session's own SoCs and
- *  the electrical values a vehicle does not determine are not in it. */
-export type AutoTrafficVehicleSettings = Pick<
-  EVSettings,
-  "modelName" | "batteryCapacityKwh" | "maxChargingPowerKw"
-> &
-  Partial<
-    Pick<EVSettings, "chargingCurve" | "currentType" | "phases" | "attribution">
-  >;
+/** The vehicle slice of EV settings; the one definition is {@link VehicleSettings}. */
+export type AutoTrafficVehicleSettings = VehicleSettings;
 
 /** The label a pool vehicle is counted and logged under. */
 export function autoTrafficVehicleLabel(entry: AutoTrafficVehicle): string {
@@ -119,16 +113,7 @@ export function autoTrafficVehicleLabel(entry: AutoTrafficVehicle): string {
 export function autoTrafficVehiclePatch(
   entry: AutoTrafficVehicle,
 ): EVSettingsPatch {
-  const v = entry.vehicle;
-  return {
-    modelName: v.modelName,
-    batteryCapacityKwh: v.batteryCapacityKwh,
-    maxChargingPowerKw: v.maxChargingPowerKw,
-    chargingCurve: v.chargingCurve ?? [],
-    currentType: v.currentType ?? null,
-    phases: v.phases ?? null,
-    attribution: v.attribution ?? null,
-  };
+  return vehicleSettingsPatch(entry.vehicle);
 }
 
 /**

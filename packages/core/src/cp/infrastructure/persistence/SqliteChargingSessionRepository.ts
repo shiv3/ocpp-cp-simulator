@@ -130,6 +130,16 @@ export class SqliteChargingSessionRepository implements ChargingSessionRepositor
     );
   }
 
+  /** See `SqliteScenarioRunRepository.renameChargePoint` (#924). */
+  renameChargePoint(oldId: string, newId: string): void {
+    if (oldId === newId) return;
+    this.db.run(
+      "UPDATE charging_sessions SET " +
+        "session_json = json_set(session_json, '$.cpId', ?) WHERE cp_id = ?",
+      [newId, newId],
+    );
+  }
+
   deleteForChargePoint(cpId: string): void {
     this.db.run("DELETE FROM charging_sessions WHERE cp_id = ?", [cpId]);
   }

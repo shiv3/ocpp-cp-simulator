@@ -222,6 +222,25 @@ export class NetworkSimManager {
     }
   }
 
+  /** A charge point's identity changed (#924): its own network simulation
+   *  layer follows it (memory and the `kv` row). */
+  onCpRenamed(oldId: string, newId: string): void {
+    const config = this.perCp.get(oldId);
+    if (config === undefined) return;
+    this.perCp.delete(oldId);
+    this.perCp.set(newId, config);
+    if (this.database) {
+      this.database.run("DELETE FROM kv WHERE key = ?", [
+        `networkSim:cp:${oldId}`,
+      ]);
+      this.database.run(
+        "INSERT INTO kv (key, value) VALUES (?, ?) " +
+          "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+        [`networkSim:cp:${newId}`, JSON.stringify(config)],
+      );
+    }
+  }
+
   onCpDeleted(cpId: string): void {
     this.perCp.delete(cpId);
     if (this.database) {

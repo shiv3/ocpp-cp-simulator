@@ -115,6 +115,19 @@ export class SqliteScenarioRunRepository implements ScenarioRunRepository {
     return { runs, total };
   }
 
+  /** The rows' `cp_id` column is moved by the registry with every other
+   *  per-charge-point table; this rewrites the `cpId` inside the stored
+   *  JSON of the rows now under `newId` (#924). */
+  renameChargePoint(oldId: string, newId: string): void {
+    if (oldId === newId) return;
+    this.db.run(
+      "UPDATE scenario_runs SET " +
+        "summary_json = json_set(summary_json, '$.cpId', ?), " +
+        "report_json = json_set(report_json, '$.cpId', ?) WHERE cp_id = ?",
+      [newId, newId, newId],
+    );
+  }
+
   deleteForChargePoint(cpId: string): void {
     this.db.run("DELETE FROM scenario_runs WHERE cp_id = ?", [cpId]);
   }

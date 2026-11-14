@@ -11,8 +11,6 @@ export interface SecurityProfileChangeInput {
   readonly next: number;
   /** The stored `AuthorizationKey`. */
   readonly authorizationKey: string;
-  /** The key is a 2.x BasicAuthPassword (16-40 printable characters). */
-  readonly ocpp2?: boolean;
   /** A currently valid CentralSystemRootCertificate is available. */
   readonly hasCentralSystemRoot: boolean;
   /** A currently valid ChargePointCertificate is available. */
@@ -82,9 +80,7 @@ export function checkSecurityProfileChange(
   if (next === current) return { allowed: true, upgrade: false };
   if (
     (next === 1 || next === 2) &&
-    !(input.ocpp2 === true
-      ? isValidBasicAuthPassword(input.authorizationKey)
-      : isValidAuthorizationKey(input.authorizationKey))
+    !isValidAuthorizationKey(input.authorizationKey)
   ) {
     return {
       allowed: false,

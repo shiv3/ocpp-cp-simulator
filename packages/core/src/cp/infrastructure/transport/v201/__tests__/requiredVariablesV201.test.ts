@@ -5,10 +5,7 @@ import { ConfigurationStore } from "../../../../domain/charge-point/Configuratio
 import { RUNTIME_VALUE_KEYS } from "../../../../domain/charge-point/runtimeValueKeys";
 import { DEVICE_MODEL } from "../../../../domain/device-model/DeviceModelRegistry";
 import { LocalAuthListManager } from "../../../../domain/auth/LocalAuthList";
-import {
-  makeChargePoint,
-  OverrideDatabase,
-} from "../../../../domain/charge-point/__tests__/chargePointFixtures";
+import { makeChargePoint } from "../../../../domain/charge-point/__tests__/chargePointFixtures";
 import { MonitoringStore } from "../../../../domain/monitoring/MonitoringStore";
 import { buildOcppWebSocketConnectOptions } from "../../wsUrlWithBasic";
 import { handleSetVariableMonitoringV201 } from "../variableMonitoringV201";
@@ -182,6 +179,17 @@ describe("required device-model variables (#704)", () => {
   });
 
   describe("BasicAuthPassword on 2.x (#704)", () => {
+    /** A 2.x station on security profile 1, where the guard is active. */
+    const profile1Station = (id?: string) => {
+      const cp = makeChargePoint({
+        ...(id !== undefined && { id }),
+        ocppVersion: "OCPP-2.0.1",
+      });
+      cp.configuration.applyChange("SecurityProfile", "1", {
+        bypassGuard: true,
+      });
+      return cp;
+    };
     const setPassword = (cp: ReturnType<typeof makeChargePoint>, v: string) =>
       handleSetVariablesV201(
         {
@@ -202,11 +210,7 @@ describe("required device-model variables (#704)", () => {
       "x".repeat(40),
       "y".repeat(16),
     ])("sends %s as-is in the next connection's Basic header", (password) => {
-      const cp = makeChargePoint({
-        id: "CP-2x",
-        ocppVersion: "OCPP-2.0.1",
-        database: new OverrideDatabase({ SecurityProfile: "1" }),
-      });
+      const cp = profile1Station("CP-2x");
       try {
         expect(setPassword(cp, password)).toBe("Accepted");
         const opts = buildOcppWebSocketConnectOptions({
@@ -226,10 +230,7 @@ describe("required device-model variables (#704)", () => {
     });
 
     it("refuses a password outside 16-40 printable characters", () => {
-      const cp = makeChargePoint({
-        ocppVersion: "OCPP-2.0.1",
-        database: new OverrideDatabase({ SecurityProfile: "1" }),
-      });
+      const cp = profile1Station();
       try {
         expect(setPassword(cp, "short")).toBe("Rejected");
         expect(setPassword(cp, "z".repeat(41))).toBe("Rejected");

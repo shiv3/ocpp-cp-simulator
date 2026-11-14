@@ -1031,7 +1031,11 @@ export class ChargePoint {
     }
     this.wireConfigurationListeners();
     this.wirePowerSharing(transportOptions.chargerCapabilities?.powerSharing);
-    if (!isOcpp2Version(this._ocppVersion) && this._webSocket) {
+    if (isOcpp2Version(this._ocppVersion)) {
+      // 2.x: only the BasicAuthPassword (AuthorizationKey) guard; the
+      // SecurityProfile prerequisites are the 1.6 ChangeConfiguration's (#704).
+      this.wireAuthorizationKeyGuard();
+    } else if (this._webSocket) {
       this.wireSecurityConfiguration();
     }
     // §5.2: a CP-level Unavailable set previously must survive a reboot.
@@ -1458,6 +1462,11 @@ export class ChargePoint {
    * values, which are not ChangeConfiguration requests.
    */
   private wireSecurityConfiguration(): void {
+    this.wireAuthorizationKeyGuard();
+    this.wireSecurityProfileGuard();
+  }
+
+  private wireAuthorizationKeyGuard(): void {
     // §7.2: with profile 1 or 2 the key is the Basic Auth password; one the
     // transport cannot derive it from (an empty value or one of another length) would stop
     // every later connection attempt, so it is refused and the old key kept.
@@ -1481,6 +1490,9 @@ export class ChargePoint {
       );
       return false;
     });
+  }
+
+  private wireSecurityProfileGuard(): void {
     this._configuration.setChangeGuard("SecurityProfile", (current, next) => {
       const now = this.nowDate();
       const verdict = checkSecurityProfileChange({
@@ -1488,7 +1500,6 @@ export class ChargePoint {
         next: typeof next === "number" ? next : 0,
         authorizationKey:
           this._configuration.getString("AuthorizationKey") ?? "",
-        ocpp2: isOcpp2Version(this._ocppVersion),
         // Only what the TLS connection validates the CSMS with: roots that
         // InstallCertificate stored do not join its trust, so counting them
         // would accept an upgrade that cannot connect.

@@ -38,7 +38,7 @@ related:
   - ../concepts/log-format.md
   - ../concepts/local-authorization.md
   - ../concepts/charger-engine.md
-updated: 2026-11-09
+updated: 2026-11-14
 ---
 
 # CLI (`ocpp-cp-sim`)
@@ -109,9 +109,10 @@ ocpp-cp-sim --daemon
 > publisher allows `npm publish`) and gated on the repository variable
 > `NPM_PUBLISH=true`. A SemVer prerelease (`v1.0.0-rc.1`) is published under
 > the `next` dist-tag, never `latest`; a re-run of a tag already on npm skips.
-> The package needs Bun at run time whichever way it is installed — the bin is
-> `dist-cli/main.js`, a `bun build --target=bun` bundle under a `bun` shebang,
-> and the daemon uses `bun:sqlite` and `Bun.serve`.
+> The bin is `dist-cli/main.js`, one bundle under a `node` shebang that also
+> runs on Bun (#916); the daemon uses `node:sqlite` and `node:http` on Node,
+> `bun:sqlite` and `Bun.serve` on Bun. Behavior bundling (`behavior build`,
+> `--behavior`) still needs Bun. Step 4 of #916 rewrites the install docs.
 >
 > The first version had to be published by hand (a package that does not exist
 > yet cannot have a trusted publisher); that publish also went through npm's
@@ -363,10 +364,10 @@ so a broken `cli-latest` is still noticed between such changes.
 
 `package.json`'s `files` field lists two build outputs and no sources:
 
-| Entry      | What it is                                                                                                                                                                                                                                                                                                                        |
-| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `dist-cli` | `main.js`, the `bin`: one `bun build --target=bun` bundle of `apps/cli/src/main.ts` (`bun run build:cli`, about 5 MB). Every repository module the CLI imports is inlined — the [vendored OCA JSON schemas](../sources/vendored-ocpp-schemas.md), `packages/core/schema/scenario.schema.json` and the scenario templates included |
-| `dist`     | The Vite-built web console served by `--web-console`                                                                                                                                                                                                                                                                              |
+| Entry      | What it is                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `dist-cli` | `main.js`, the `bin`: one ES-module bundle of `apps/cli/src/main.ts` with a `#!/usr/bin/env node` shebang that runs on Node and on Bun (`bun run build:cli`, `scripts/build-cli.ts`, built with rolldown; `bun build --target=node` emits some modules twice, #916). The Docker image and the Tauri sidecar keep the `bun build --target=bun` output (`bun run build:cli:bun`). Every repository module the CLI imports is inlined — the [vendored OCA JSON schemas](../sources/vendored-ocpp-schemas.md), `packages/core/schema/scenario.schema.json` and the scenario templates included |
+| `dist`     | The Vite-built web console served by `--web-console`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
 Both are built by `prepack` (and explicitly by `cli-release.yml`), never
 committed. The bundle finds `dist/` one level up from itself

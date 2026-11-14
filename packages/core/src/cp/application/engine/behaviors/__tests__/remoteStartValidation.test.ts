@@ -67,3 +67,22 @@ describe("decideRemoteStart without evseId (#839)", () => {
     cp.dispose();
   });
 });
+
+describe("1.6 RemoteStartTransaction without connectorId (#839)", () => {
+  it("tries the tag's own reserved connector first", async () => {
+    const { pickRemoteStartConnector } = await import("../transaction");
+    const cp = station();
+    cp.reservationManager.createReservation(
+      2,
+      new Date(Date.now() + 3_600_000),
+      "ME",
+      undefined,
+      9,
+    );
+    for (const c of cp.connectors.values()) c.status = OCPPStatus.Available;
+    expect(pickRemoteStartConnector(cp, "ME")).toBe(2);
+    // another tag skips the reserved connector
+    expect(pickRemoteStartConnector(cp, "OTHER")).toBe(1);
+    cp.dispose();
+  });
+});

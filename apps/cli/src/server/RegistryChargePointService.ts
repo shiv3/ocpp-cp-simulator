@@ -1,3 +1,4 @@
+import type { CellularPolicySet } from "@ocpp-cp-simulator/core/cp/domain/modem/cellularLink";
 import type { ModemCommand as ModemCommandInput } from "@ocpp-cp-simulator/contracts/modem";
 import type { StartTransactionOutcome } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
 import { isSoapVersion } from "@ocpp-cp-simulator/core/cp/domain/types/OcppVersion";
@@ -1073,6 +1074,19 @@ export class RegistryChargePointService implements ChargePointService {
     // Trigger the disconnect
     const manager = this.registry.getNetworkSimManager();
     return manager.triggerDisconnect(cpId, ruleId);
+  }
+
+  /** #930: daemon-only SIM-scoped policies, persisted by the manager. */
+  getCellularPolicies(): CellularPolicySet {
+    return this.registry.getNetworkSimManager().getCellular();
+  }
+
+  async saveCellularPolicies(policies: CellularPolicySet | null) {
+    this.registry.getNetworkSimManager().saveCellular(policies);
+  }
+
+  getCellularStatus() {
+    return this.registry.getNetworkSimManager().cellularStatus();
   }
 
   async getModem(cpId: string) {

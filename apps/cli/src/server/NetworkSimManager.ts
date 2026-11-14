@@ -8,7 +8,21 @@ import {
   resolveNetworkSimConfig,
 } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/network-sim/config";
 
+import {
+  cellularPoliciesProblem,
+  type CellularLinkWire,
+  type CellularPolicySet,
+} from "@ocpp-cp-simulator/core/cp/domain/modem/cellularLink";
+
+const CELLULAR_KEY = "networkSim:cellular";
+
 export interface NetworkSimManagerDeps {
+  /** #930: every registered charge point (SOAP included: it reports the link). */
+  listCpIds?(): string[];
+  /** #930: push the SIM-scoped policy set to a charge point. */
+  applyCellularPolicies?(cpId: string, policies: CellularPolicySet): void;
+  /** #930: the resolved cellular link of a charge point, or `null`. */
+  getCellularLink?(cpId: string): CellularLinkWire | null;
   listLiveWsCpIds(): string[];
   applyToCp(cpId: string, resolved: ResolvedNetworkSimConfig): void;
   triggerCpDisconnect(
@@ -24,6 +38,8 @@ export interface NetworkSimManagerDeps {
 export class NetworkSimManager {
   private globalLayer: NetworkSimLayerConfig | null = null;
   private perCp: Map<string, NetworkSimLayerConfig> = new Map();
+  /** #930: SIM-scoped policies (persisted as one document). */
+  private cellular: CellularPolicySet = {};
 
   constructor(
     private readonly database: Database | null,
@@ -62,6 +78,30 @@ export class NetworkSimManager {
       );
     }
 
+    // #930: SIM-scoped policies
+    try {
+      const row = this.database.get<{ value: string }>(
+        "SELECT value FROM kv WHERE key = ?",
+        [CELLULAR_KEY],
+      );
+      if (row) {
+        const parsed = JSON.parse(row.value) as unknown;
+        const problem = cellularPoliciesProblem(parsed);
+        if (problem === null) this.cellular = parsed as CellularPolicySet;
+        else {
+          console.error(
+            "[NetworkSimManager] Failed to load cellular policies:",
+            problem,
+          );
+        }
+      }
+    } catch (err) {
+      console.error(
+        "[NetworkSimManager] Error loading cellular policies:",
+        err instanceof Error ? err.message : err,
+      );
+    }
+
     // Load all per-CP configs
     try {
       const rows = this.database.all<{ key: string; value: string }>(
@@ -94,6 +134,77 @@ export class NetworkSimManager {
         err instanceof Error ? err.message : err,
       );
     }
+  }
+
+  getCellular(): CellularPolicySet {
+    return this.cellular;
+  }
+
+  /**
+   * #930: replace the SIM-scoped policy set (`null` clears it), persist it and
+   * push it to every charge point. A policy selects by SIM identity, ICCID or
+   * operator, so it also governs stations that acquire a matching SIM later
+   * and charge points created after this call. Independent of the global and
+   * per-CP layers: those can never reactivate a blocked SIM.
+   */
+  saveCellular(policies: CellularPolicySet | null): void {
+    const next = policies ?? {};
+    const problem = cellularPoliciesProblem(next);
+    if (problem !== null) {
+      throw new Error(`Invalid cellular policies: ${problem}`);
+    }
+    if (this.database) {
+      if (policies === null || Object.keys(next).length === 0) {
+        this.database.run("DELETE FROM kv WHERE key = ?", [CELLULAR_KEY]);
+      } else {
+        this.database.run(
+          "INSERT INTO kv (key, value) VALUES (?, ?) " +
+            "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+          [CELLULAR_KEY, JSON.stringify(next)],
+        );
+      }
+    }
+    this.cellular = next;
+    for (const cpId of this.deps.listCpIds?.() ?? []) {
+      try {
+        this.deps.applyCellularPolicies?.(cpId, next);
+      } catch (err) {
+        console.error(
+          `[NetworkSimManager] Failed to apply cellular policies to CP "${cpId}":`,
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
+  }
+
+  /**
+   * #930: what an operator needs to see — the policies, how many stations
+   * are out of service or throttled, and each affected station's link.
+   * Stations without a modem model are not governed and not listed.
+   */
+  cellularStatus(): {
+    policies: CellularPolicySet;
+    total: number;
+    unavailable: number;
+    throttled: number;
+    cps: Array<{ cpId: string; link: CellularLinkWire }>;
+  } {
+    const cps: Array<{ cpId: string; link: CellularLinkWire }> = [];
+    for (const cpId of this.deps.listCpIds?.() ?? []) {
+      const link = this.deps.getCellularLink?.(cpId);
+      if (link) cps.push({ cpId, link });
+    }
+    return {
+      policies: this.cellular,
+      total: cps.length,
+      unavailable: cps.filter((c) => !c.link.available).length,
+      throttled: cps.filter(
+        (c) =>
+          c.link.upstreamBytesPerSecond !== null ||
+          c.link.downstreamBytesPerSecond !== null,
+      ).length,
+      cps,
+    };
   }
 
   getGlobal(): NetworkSimLayerConfig | null {
@@ -211,6 +322,15 @@ export class NetworkSimManager {
   }
 
   onCpCreated(cpId: string): void {
+    try {
+      // #930: before the charge point connects, like the network layers.
+      this.deps.applyCellularPolicies?.(cpId, this.cellular);
+    } catch (err) {
+      console.error(
+        `[NetworkSimManager] Failed to attach cellular policies to new CP "${cpId}":`,
+        err instanceof Error ? err.message : err,
+      );
+    }
     try {
       const resolved = this.resolveFor(cpId);
       this.deps.applyToCp(cpId, resolved);

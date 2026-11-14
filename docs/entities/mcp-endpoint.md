@@ -125,6 +125,8 @@ RPC methods:
 | -------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
 | `network_sim_get`                | `network_sim.global.get`, `network_sim.cp.get`   | `cpId?` — if omitted, returns global config; if set, returns per-CP config and resolved state                 |
 | `network_sim_set`                | `network_sim.global.save`, `network_sim.cp.save` | `cpId?`, `config` — if omitted, saves global config; if set, saves per-CP config                              |
+| `cellular_policy_get`            | `network_sim.cellular.get`, `.status`            | — SIM-scoped policies and the effect on every governed station (#930)                                         |
+| `cellular_policy_set`            | `network_sim.cellular.save`                      | `policies` — replace the SIM-scoped policies; `null` clears them                                              |
 | `modem_get`                      | `modem.get`                                      | `cpId` — masked modem and SIM state ([Cellular modem and SIM](../concepts/cellular-modem.md))                 |
 | `modem_command`                  | `modem.command`                                  | `cpId`, `command`, `sim?`, `networkInterface?` — insert / remove / replace SIM, suspend / activate, interface |
 | `network_sim_trigger_disconnect` | `network_sim.disconnect.trigger`                 | `cpId`, `ruleId` — triggers a manual-disconnect rule for the CP                                               |

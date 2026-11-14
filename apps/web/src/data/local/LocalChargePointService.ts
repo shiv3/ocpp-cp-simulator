@@ -212,7 +212,7 @@ function toChargePointSnapshot(cp: ChargePoint): ChargePointSnapshot {
         : null,
     },
     networkSim: cp.networkSimSummary(),
-    ...(cp.modem ? { modem: cp.modem.redacted() } : {}),
+    ...(cp.modemState() ? { modem: cp.modemState()! } : {}),
   };
 }
 
@@ -1616,13 +1616,13 @@ export class LocalChargePointService implements ChargePointService {
     const cp = this.chargePoints.get(cpId);
     if (!cp) return { ok: false as const, error: "cp_not_found" };
     if (!cp.modem) return { ok: false as const, error: "no_modem_model" };
-    return { ok: true as const, modem: cp.modem.redacted() };
+    return { ok: true as const, modem: cp.modemState()! };
   }
 
   async modemCommand(cpId: string, command: ModemCommandInput) {
     const cp = this.chargePoints.get(cpId);
     if (!cp) return { ok: false as const, error: "cp_not_found" };
-    return runModemCommand(cp.modem, command);
+    return runModemCommand(cp.modem, command, () => cp.modemState()!);
   }
 
   async powerLoss(

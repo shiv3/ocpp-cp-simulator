@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { notify } from "@/lib/toast";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -461,7 +462,7 @@ describe("useCpConfigActions", () => {
       const service = createFakeChargePointService({
         updateChargePoint: undefined,
       });
-      const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
+      const alertSpy = vi.spyOn(notify, "error").mockImplementation(() => 0);
       const { root, click } = await mountProbe(service, "remote");
       cleanup = () => unmount(root);
 
@@ -565,7 +566,7 @@ describe("useCpConfigActions", () => {
         BootNotification: null,
       };
       const { service, saveConfig } = createStatefulConfigService(initial);
-      const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
+      const alertSpy = vi.spyOn(notify, "error").mockImplementation(() => 0);
       const { root, click } = await mountProbe(service, "local");
       cleanup = () => unmount(root);
 
@@ -578,13 +579,13 @@ describe("useCpConfigActions", () => {
       expect(alertSpy.mock.calls[0][0]).toContain("already exists");
     });
 
-    it("addCp surfaces a local persistence failure via alert (no unhandled rejection)", async () => {
+    it("addCp surfaces a local persistence failure via an error toast (no unhandled rejection)", async () => {
       const saveConfig = vi.fn(async () => {
         throw new Error("disk full");
       });
       const loadConfig = vi.fn(async () => null);
       const service = createFakeChargePointService({ saveConfig, loadConfig });
-      const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
+      const alertSpy = vi.spyOn(notify, "error").mockImplementation(() => 0);
       const { root, click } = await mountProbe(service, "local");
       cleanup = () => unmount(root);
 

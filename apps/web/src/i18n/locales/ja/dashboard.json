@@ -63,5 +63,9 @@
   "dashboard.actions.duplicateId": "ID「{{id}}」の充電器は既に存在します",
   "dashboard.actions.notInConfig": "充電器「{{id}}」は設定にありません",
   "dashboard.filter.cps_other": "{{count}} 台",
-  "dashboard.filter.connectors_other": "コネクター {{count}} 個"
+  "dashboard.filter.connectors_other": "コネクター {{count}} 個",
+  "dashboard.logs.downloadPending": "ログのダウンロードを準備中…",
+  "dashboard.logs.downloadDone": "ログをダウンロードしました",
+  "dashboard.logs.clearDone": "保存済みログを消去しました",
+  "dashboard.logs.clearPending": "保存済みログを消去中…"
 }

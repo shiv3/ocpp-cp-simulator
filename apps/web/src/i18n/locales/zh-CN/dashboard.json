@@ -63,5 +63,9 @@
   "dashboard.actions.duplicateId": "ID 为“{{id}}”的充电桩已存在",
   "dashboard.actions.notInConfig": "充电桩“{{id}}”不在配置中",
   "dashboard.filter.cps_other": "{{count}} 个充电桩",
-  "dashboard.filter.connectors_other": "{{count}} 个连接器"
+  "dashboard.filter.connectors_other": "{{count}} 个连接器",
+  "dashboard.logs.downloadPending": "正在准备下载日志…",
+  "dashboard.logs.downloadDone": "日志已下载",
+  "dashboard.logs.clearDone": "已清除保存的日志",
+  "dashboard.logs.clearPending": "正在清除保存的日志…"
 }

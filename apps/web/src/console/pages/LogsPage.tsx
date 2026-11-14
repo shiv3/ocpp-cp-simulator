@@ -12,6 +12,7 @@ import {
 import { useChargePoints } from "../../data/hooks/useChargePoints";
 import { useConfig } from "../../data/hooks/useConfig";
 import { useDataContext } from "../../data/providers/DataProvider";
+import { notify } from "@/lib/toast";
 import { downloadStoredLogs } from "../../lib/downloadStoredLogs";
 import PageHeader from "../components/PageHeader";
 import { useGlobalLogs, type GlobalLogEntry } from "../lib/useGlobalLogs";
@@ -82,16 +83,19 @@ const LogsPage: React.FC = () => {
         : selectedCpIds.length === 1
           ? selectedCpIds[0]
           : "selected";
-    void downloadStoredLogs(chargePointService, scopeIds, label).catch(
-      (err) => {
-        console.error("Failed to download logs", err);
-        alert(
-          translate("dashboard.logs.downloadFailed", {
-            error: err instanceof Error ? err.message : String(err),
-          }),
-        );
-      },
-    );
+    const failed = (err: unknown) =>
+      translate("dashboard.logs.downloadFailed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    // One toast per click: pending, then done or the failure (ids are unique
+    // per call, so two overlapping downloads never overwrite each other).
+    notify
+      .promise(downloadStoredLogs(chargePointService, scopeIds, label), {
+        loading: translate("dashboard.logs.downloadPending"),
+        success: translate("dashboard.logs.downloadDone"),
+        error: failed,
+      })
+      .catch((err) => console.error("Failed to download logs", err));
   };
 
   const handleClear = (scope: ClearLogsScope) => {
@@ -99,16 +103,23 @@ const LogsPage: React.FC = () => {
     if (scope !== "all" || !chargePointService.clearStoredLogs) return;
     // One alert for the lot, not one per charge point.
     const { clearStoredLogs } = chargePointService;
-    void Promise.all(
-      scopeIds.map((cpId) => clearStoredLogs.call(chargePointService, cpId)),
-    ).catch((err) => {
-      console.error("Failed to clear stored logs", err);
-      alert(
-        translate("dashboard.logs.clearFailed", {
-          error: err instanceof Error ? err.message : String(err),
-        }),
-      );
-    });
+    notify
+      .promise(
+        Promise.all(
+          scopeIds.map((cpId) =>
+            clearStoredLogs.call(chargePointService, cpId),
+          ),
+        ),
+        {
+          loading: translate("dashboard.logs.clearPending"),
+          success: translate("dashboard.logs.clearDone"),
+          error: (err) =>
+            translate("dashboard.logs.clearFailed", {
+              error: err instanceof Error ? err.message : String(err),
+            }),
+        },
+      )
+      .catch((err) => console.error("Failed to clear stored logs", err));
   };
 
   return (

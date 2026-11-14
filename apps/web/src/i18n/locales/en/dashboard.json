@@ -65,5 +65,9 @@
   "dashboard.filter.cps_one": "{{count}} CP",
   "dashboard.filter.cps_other": "{{count}} CPs",
   "dashboard.filter.connectors_one": "{{count}} connector",
-  "dashboard.filter.connectors_other": "{{count}} connectors"
+  "dashboard.filter.connectors_other": "{{count}} connectors",
+  "dashboard.logs.downloadPending": "Preparing log download…",
+  "dashboard.logs.downloadDone": "Logs downloaded",
+  "dashboard.logs.clearDone": "Stored logs cleared",
+  "dashboard.logs.clearPending": "Clearing stored logs…"
 }

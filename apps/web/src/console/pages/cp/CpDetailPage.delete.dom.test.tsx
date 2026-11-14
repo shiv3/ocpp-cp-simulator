@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { notify } from "@/lib/toast";
 import { act } from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -125,7 +126,7 @@ describe("CpDetailPage: delete the charge point (#415)", () => {
 
   it("Remote: stays on the page and reports the error when the daemon refuses", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
-    const alert = vi.spyOn(window, "alert").mockImplementation(() => {});
+    const alert = vi.spyOn(notify, "error").mockImplementation(() => 0);
     vi.spyOn(console, "error").mockImplementation(() => {});
     const service = cpService({
       removeChargePoint: vi.fn(async () => {
@@ -168,7 +169,7 @@ describe("CpDetailPage: delete the charge point (#415)", () => {
 
   it("Local: refuses while the configuration is not loaded, instead of saving an empty one", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
-    const alert = vi.spyOn(window, "alert").mockImplementation(() => {});
+    const alert = vi.spyOn(notify, "error").mockImplementation(() => 0);
     vi.spyOn(console, "error").mockImplementation(() => {});
     const saveConfig = vi.fn(async () => {});
     const service = cpService({

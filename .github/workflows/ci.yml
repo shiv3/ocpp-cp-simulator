@@ -146,26 +146,35 @@ jobs:
   # `node` shebang with Bun removed from PATH (the script fails if it is still
   # found), on the oldest supported Node (22.13, the first with an unflagged
   # node:sqlite), the maintenance LTS (24) and the current LTS (26); the `bun`
-  # leg runs the same tarball with `bun --bun`. Each leg builds the web
+  # leg is a Bun-ONLY machine: node (and npm) are hidden from PATH, the tarball
+  # is installed with `bun install -g` and the bin runs as `bun --bun <bin>`
+  # (run directly, its `node` shebang cannot start there: a known limitation,
+  # documented in docs/entities/cli.md). Each leg builds the web
   # console and the bundle with Bun (building needs it), packs with the
   # `prepack` skipped, and verifies with --expect-dist so the web-console
   # stage runs too. The Docker image and the desktop sidecar are not part of
   # this: they stay on Bun.
   cli-runtimes:
-    name: CLI on ${{ matrix.runtime }} ${{ matrix.node }}
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         include:
-          - runtime: node
+          - name: CLI on Node 22.13
+            runtime: node
             node: "22.13.0"
-          - runtime: node
+          - name: CLI on Node 24
+            runtime: node
             node: "24"
-          - runtime: node
+          - name: CLI on Node 26
+            runtime: node
             node: "26"
-          - runtime: bun
+          # Node is installed only so `npm pack` can run; the verify script
+          # then removes it from PATH.
+          - name: CLI on Bun (no Node)
+            runtime: bun
             node: "26"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

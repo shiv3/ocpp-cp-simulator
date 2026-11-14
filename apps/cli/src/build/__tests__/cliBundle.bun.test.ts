@@ -13,8 +13,11 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { LOOPBACK, tcpPort } from "@ocpp-cp-simulator/core/test/bunServe";
 
-// The published CLI is one `bun build --target=bun` file, dist-cli/main.js,
-// shipped beside dist/ and nothing else (#578): no src/, no packages/core/schema/, no
+// This pins the `bun build --target=bun` bundle (`bun run build:cli:bun`),
+// the one the Docker image and the desktop sidecar run. The published package
+// ships a different file, a Node-and-Bun bundle from `bun run build:cli`
+// (#916), which scripts/verify-cli-tarball.sh covers on CI. Both are one file,
+// dist-cli/main.js, shipped beside dist/ and nothing else (#578): no src/, no packages/core/schema/, no
 // vendor/. Everything the CLI needs at run time must therefore be inside the
 // bundle, and every path it derives from its own location must be derived
 // from the bundle's, not from apps/cli/src/main.ts's.
@@ -29,7 +32,8 @@ import { LOOPBACK, tcpPort } from "@ocpp-cp-simulator/core/test/bunServe";
 // cwd outside it too, so a lookup that silently falls back to the repository
 // cannot pass. Runs under `bun test` (needs Bun.spawn and `bun build`), as
 // the sidecar test beside this one does; scripts/verify-cli-tarball.sh covers
-// the same ground through an actual `npm pack` + `bun install -g` on CI.
+// the same ground for the published bundle through an actual `npm pack` +
+// install on Node and on Bun (CI job cli-runtimes).
 
 const repoRoot = fileURLToPath(new URL("../../../../..", import.meta.url));
 
@@ -43,7 +47,7 @@ beforeAll(() => {
   cwd = join(root, "elsewhere");
   mkdirSync(dirname(bundle), { recursive: true });
   mkdirSync(cwd, { recursive: true });
-  // The same command as `bun run build:cli`, with the output redirected.
+  // The same command as `bun run build:cli:bun`, with the output redirected.
   const build = Bun.spawnSync(
     [
       process.execPath,
@@ -90,7 +94,7 @@ async function freePort(): Promise<number> {
 }
 
 describe("the CLI bundle runs away from the source tree (#578)", () => {
-  it("keeps the bun shebang, so an installed bin starts without a loader", () => {
+  it("keeps the bun shebang of the Docker/sidecar bundle", () => {
     expect(readFileSync(bundle, "utf8").startsWith("#!/usr/bin/env bun\n")).toBe(
       true,
     );

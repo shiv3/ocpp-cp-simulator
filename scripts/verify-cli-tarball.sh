@@ -18,8 +18,16 @@
 #                 `bun` is still found, the tarball is installed with npm only
 #                 and every stage runs the bin through its `node` shebang.
 #                 Needs a tarball argument (building the bundle needs Bun).
-# --runtime bun   runs the installed bundle with `bun --bun`, ignoring the
-#                 shebang, so the same package is exercised on Bun.
+# --runtime bun   proves the package runs on a Bun-ONLY machine: PATH is a
+#                 directory of links to everything in /usr/bin and /bin except
+#                 node, nodejs, npm and npx, plus bun, and the script fails if
+#                 `node` is still found. The tarball is installed with
+#                 `bun install -g` and every stage runs the bin as
+#                 `bun --bun <bin>`. Running the bin directly does NOT work
+#                 there: its shebang is `#!/usr/bin/env node` (#916), which
+#                 fails with "env: 'node': No such file or directory"; the
+#                 script prints that result but does not fail on it (known
+#                 limitation, see docs/entities/cli.md).
 # (no flag)       the original mix: bun and npm installs, bin run by shebang.
 #
 # With no tarball argument it builds the CLI bundle (`bun run build:cli`, the
@@ -85,9 +93,30 @@ if [ "$RUNTIME" = node ]; then
   fi
   echo "==> runtime: node $(node -v), no bun on PATH"
 elif [ "$RUNTIME" = bun ]; then
+  BUN_BIN="$(command -v bun)" || { echo "::error::bun not found"; exit 2; }
+  NONODE="$SCRATCH/no-node-path"
+  mkdir -p "$NONODE"
+  for dir in /bin /usr/bin; do
+    for f in "$dir"/*; do
+      case "$(basename "$f")" in node|nodejs|npm|npx|corepack|bun|bunx) continue ;; esac
+      [ -e "$NONODE/$(basename "$f")" ] || ln -s "$f" "$NONODE/$(basename "$f")"
+    done
+  done
+  ln -s "$BUN_BIN" "$NONODE/bun"
+  ln -s "$BUN_BIN" "$NONODE/bunx"
+  export PATH="$NONODE"
+  if command -v node > /dev/null 2>&1; then
+    echo "::error::--runtime bun: node is still on PATH ($(command -v node)); the point is to run without it"
+    exit 2
+  fi
   RUN=(bun --bun)
-  echo "==> runtime: bun $(bun -v) (bun --bun, shebang ignored)"
+  echo "==> runtime: bun $(bun -v), no node on PATH (bun --bun <bin>)"
 fi
+# A free loopback port, from whichever runtime this run has.
+pick_port() {
+  local js='const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>{const p=s.address().port;s.close(()=>console.log(p))})'
+  if command -v node > /dev/null 2>&1; then node -e "$js"; else bun -e "$js"; fi
+}
 
 if [ -z "$TARBALL" ]; then
   echo "==> building the CLI bundle (bun run build:cli)"
@@ -156,6 +185,14 @@ fi
 # works because of it would hide behind this script's own checks.
 [ -f "$PKG_DIR/dist-cli/main.js" ] || fail "installed package has no dist-cli/main.js (is \"dist-cli\" in package.json#files, and was build:cli run?)" "$SCRATCH/install.log"
 [ ! -e "$PKG_DIR/src" ] || fail "installed package ships src/ — the tarball must carry only the bundle and dist/" "$SCRATCH/install.log"
+if [ "$RUNTIME" = bun ]; then
+  # Informational: what a Bun-only user gets from running the bin directly.
+  if "$BIN" --help > "$SCRATCH/direct.log" 2>&1; then
+    echo "==> note: the bin also runs directly without node on PATH"
+  else
+    echo "==> note: running the bin directly without node fails, as documented: $(head -n 1 "$SCRATCH/direct.log")"
+  fi
+fi
 if [ "$RUNTIME" != bun ]; then
   head -n 1 "$PKG_DIR/dist-cli/main.js" | grep -q '^#!/usr/bin/env node$' \
     || fail "dist-cli/main.js does not start with the node shebang (#916)"
@@ -217,7 +254,7 @@ fi
 # same warning. The CSMS URL points at a closed port on purpose: the CP fails
 # to connect, which is fine, /v1/healthz must still answer 200.
 # ---------------------------------------------------------------------------
-PORT="$(node -e 'const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>{const p=s.address().port;s.close(()=>console.log(p))})')"
+PORT="$(pick_port)"
 [ -n "$PORT" ] || fail "could not pick a free port"
 echo "==> [C] daemon on 127.0.0.1:$PORT with a bootstrapped CP"
 "${RUN[@]}" "$BIN" --http-port "$PORT" --state-db :memory: \
@@ -277,7 +314,7 @@ done
 # `files` dropping "dist" is invisible to stages A-C.
 # ---------------------------------------------------------------------------
 if [ -f "$PKG_DIR/dist/index.html" ]; then
-  PORT="$(node -e 'const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>{const p=s.address().port;s.close(()=>console.log(p))})')"
+  PORT="$(pick_port)"
   [ -n "$PORT" ] || fail "could not pick a free port"
   echo "==> [D] daemon with --web-console on 127.0.0.1:$PORT"
   "${RUN[@]}" "$BIN" --http-port "$PORT" --web-console --state-db :memory: > "$SCRATCH/console.log" 2>&1 &

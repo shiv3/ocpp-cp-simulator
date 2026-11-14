@@ -185,6 +185,47 @@ export class Rig {
     this.csms.noteActivity();
   }
 
+  /**
+   * Wait until `condition()` holds. It is a condition, not a delay: the case
+   * goes on at once when it is true, however slow the machine, and fails with
+   * `what` when it never is (#867).
+   */
+  async until(
+    condition: () => boolean,
+    what: string,
+    timeoutMs = 30_000,
+  ): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (!condition()) {
+      if (Date.now() > deadline) {
+        throw new Error(
+          `gave up waiting for ${what}; station: ${this.socketSummary()}`,
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+  }
+
+  /**
+   * `stopTransaction`, then wait for the stop to be complete on the wire: the
+   * connector is `Available` again (the last StatusNotification of a stop on
+   * 1.6 and 2.x). `settle()` alone can return before the stop's first frame
+   * is sent, because its quiet window starts at an older frame (#867).
+   */
+  async stopAndSettle(connectorId = 1, reason?: string): Promise<void> {
+    const from = this.csms.mark();
+    this.cp.stopTransaction(connectorId, reason as never);
+    await this.csms.waitForFrame(
+      (f) => {
+        if (f.dir !== "CP>" || f.action !== "StatusNotification") return false;
+        const p = f.payload as { status?: string; connectorStatus?: string };
+        return (p.status ?? p.connectorStatus) === "Available";
+      },
+      { from },
+    );
+    await this.csms.settle();
+  }
+
   /** An HTTP endpoint that accepts every upload with 200, for diagnostics/logs. */
   uploadUrl(): string {
     this.sink ??= Bun.serve({

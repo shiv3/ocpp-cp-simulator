@@ -15,6 +15,23 @@ import { Rig, type RigOptions } from "./rig";
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const settle = (r: Rig) => r.csms.settle();
+/**
+ * #867: a case whose waits are pauses on the wire (a drop that must land
+ * while a latency rule holds a frame, an offline stretch, a heartbeat period)
+ * runs on its own VirtualClock with the in-memory socket. `pause(ms)` moves
+ * the station's clock and lets the traffic settle, so the case takes no real
+ * time and a loaded machine cannot reorder it.
+ */
+const virtual = (seed = "g867") => {
+  const clock = new VirtualClock();
+  return {
+    pause: async (r: Rig, ms: number) => {
+      await clock.advanceBy(ms);
+      await settle(r);
+    },
+    options: { memory: true, simulation: { clock, seed } } as Case["options"],
+  };
+};
 const cases: Case[] = [];
 export const regressionCases = cases;
 const c16 = (name: string, run: Case["run"], options?: Case["options"]) =>
@@ -1211,49 +1228,68 @@ c16("ns-diagnostics-drop", async (r) => {
   await wait(1000);
   await settle(r);
 });
-both("ns-remote-stop-drop", async (r) => {
-  await charging(r);
+// #867: a drop that lands while the station's answer to a CSMS CALL is held by
+// a latency rule. The answer is held by a rule far longer than the case, the
+// drop follows the moment the station holds it (a condition, not a 100 ms
+// window), and the 500 ms rule is back before the station reconnects, so what
+// follows is paced as before. The case ends on a quiet window longer than the
+// rule instead of a fixed wait.
+const HELD_MS = 60_000;
+const upstreamHeld = (r: Rig): number =>
+  (r.cp as any)._webSocket._controller.upstreamPipeline.size;
+const dropWithAnswerHeld = async (r: Rig, send: () => void) => {
+  latency(r, HELD_MS);
+  send();
+  await r.until(() => upstreamHeld(r) > 0, "the station's answer to be held");
+  r.csms.dropConnection();
   latency(r);
-  const id = r.transactionId(1);
-  void (r.is16
-    ? r.csms.callNoWait("RemoteStopTransaction", { transactionId: id })
-    : r.csms.callNoWait("RequestStopTransaction", { transactionId: id }));
-  await wait(100);
-  await dropAndBack(r);
-  // 2.x sends one CALL at a time (#708): three CALLs under 500 ms latency
-  // need more than 1 s.
-  await wait(r.is16 ? 1000 : 3500);
+  await r.reconnected(2);
+  // 2.x sends one CALL at a time (#708): each is 500 ms behind the last.
+  await r.csms.settle(1500);
+};
+// `charging` plus the wait for the StatusNotification the last step causes,
+// which settle() does not see coming.
+const chargingSynced = async (r: Rig, tag = "TAG-1", c = 1) => {
+  r.plugIn(c);
   await settle(r);
+  await r.cp.startTransaction(tag, c);
+  await settle(r);
+  const from = r.csms.mark();
+  r.cp.updateConnectorStatus(c, OCPPStatus.Charging);
+  await r.csms.waitForFrame(
+    (f) => f.dir === "CP>" && f.action === "StatusNotification",
+    { from },
+  );
+  await settle(r);
+};
+both("ns-remote-stop-drop", async (r) => {
+  await chargingSynced(r);
+  const id = r.transactionId(1);
+  await dropWithAnswerHeld(r, () => {
+    void (r.is16
+      ? r.csms.callNoWait("RemoteStopTransaction", { transactionId: id })
+      : r.csms.callNoWait("RequestStopTransaction", { transactionId: id }));
+  });
 });
 both("ns-remote-start-drop", async (r) => {
-  latency(r);
-  void (r.is16
-    ? r.csms.callNoWait("RemoteStartTransaction", {
-        idTag: "T",
-        connectorId: 1,
-      })
-    : r.csms.callNoWait("RequestStartTransaction", {
-        idToken: { idToken: "T", type: "ISO14443" },
-        remoteStartId: 4,
-        evseId: 1,
-      }));
-  await wait(100);
-  await dropAndBack(r);
-  // 2.x sends one CALL at a time (#708): three CALLs under 500 ms latency
-  // need more than 1 s.
-  await wait(r.is16 ? 1000 : 3500);
-  await settle(r);
+  await dropWithAnswerHeld(r, () => {
+    void (r.is16
+      ? r.csms.callNoWait("RemoteStartTransaction", {
+          idTag: "T",
+          connectorId: 1,
+        })
+      : r.csms.callNoWait("RequestStartTransaction", {
+          idToken: { idToken: "T", type: "ISO14443" },
+          remoteStartId: 4,
+          evseId: 1,
+        }));
+  });
 });
 both("ns-reset-drop", async (r) => {
-  await charging(r);
-  latency(r);
-  r.csms.callNoWait("Reset", { type: r.is16 ? "Soft" : "Immediate" });
-  await wait(100);
-  await dropAndBack(r);
-  // 2.x sends one CALL at a time (#708): three CALLs under 500 ms latency
-  // need more than 1 s.
-  await wait(r.is16 ? 1000 : 3500);
-  await settle(r);
+  await chargingSynced(r);
+  await dropWithAnswerHeld(r, () => {
+    r.csms.callNoWait("Reset", { type: r.is16 ? "Soft" : "Immediate" });
+  });
 });
 both("ns-avail-drop", async (r) => {
   latency(r);
@@ -1475,24 +1511,29 @@ c16("diagnostics-bad-url", async (r) => {
   await wait(500);
   await settle(r);
 });
-c201("malformed-calls", async (r) => {
-  for (const [a, p] of [
-    ["RequestStartTransaction", {}],
-    ["RequestStartTransaction", { remoteStartId: 1, idToken: {} }],
-    ["RequestStopTransaction", {}],
-    ["Reset", {}],
-    ["ChangeAvailability", {}],
-    ["UnlockConnector", {}],
-    ["ReserveNow", {}],
-    ["CancelReservation", {}],
-    ["GetLog", {}],
-    ["UpdateFirmware", {}],
-  ] as const) {
-    await r.csms.call(a, p, 3000).catch(() => undefined);
-    await wait(30);
-  }
-  await settle(r);
-});
+const malformedc201V = virtual();
+c201(
+  "malformed-calls",
+  async (r) => {
+    for (const [a, p] of [
+      ["RequestStartTransaction", {}],
+      ["RequestStartTransaction", { remoteStartId: 1, idToken: {} }],
+      ["RequestStopTransaction", {}],
+      ["Reset", {}],
+      ["ChangeAvailability", {}],
+      ["UnlockConnector", {}],
+      ["ReserveNow", {}],
+      ["CancelReservation", {}],
+      ["GetLog", {}],
+      ["UpdateFirmware", {}],
+    ] as const) {
+      await r.csms.call(a, p, 3000).catch(() => undefined);
+      await malformedc201V.pause(r, 30);
+    }
+    await settle(r);
+  },
+  malformedc201V.options,
+);
 // 1.6 §3.5.2 (#744): a CSMS verdict that contradicts the Local Authorization
 // List is reported with StatusNotification(0, LocalListConflict).
 const sendLocalList16 = (r: Rig, status = "Accepted") =>
@@ -1556,25 +1597,30 @@ c201("violation-codes", async (r) => {
   }
   await settle(r);
 });
-c16("malformed-calls", async (r) => {
-  for (const [a, p] of [
-    ["RemoteStartTransaction", {}],
-    ["RemoteStopTransaction", {}],
-    ["Reset", {}],
-    ["ChangeAvailability", {}],
-    ["UnlockConnector", {}],
-    ["ReserveNow", {}],
-    ["CancelReservation", {}],
-    ["GetLog", {}],
-    ["UpdateFirmware", {}],
-    ["GetDiagnostics", {}],
-    ["SignedUpdateFirmware", {}],
-  ] as const) {
-    await r.csms.call(a, p, 3000).catch(() => undefined);
-    await wait(30);
-  }
-  await settle(r);
-});
+const malformedc16V = virtual();
+c16(
+  "malformed-calls",
+  async (r) => {
+    for (const [a, p] of [
+      ["RemoteStartTransaction", {}],
+      ["RemoteStopTransaction", {}],
+      ["Reset", {}],
+      ["ChangeAvailability", {}],
+      ["UnlockConnector", {}],
+      ["ReserveNow", {}],
+      ["CancelReservation", {}],
+      ["GetLog", {}],
+      ["UpdateFirmware", {}],
+      ["GetDiagnostics", {}],
+      ["SignedUpdateFirmware", {}],
+    ] as const) {
+      await r.csms.call(a, p, 3000).catch(() => undefined);
+      await malformedc16V.pause(r, 30);
+    }
+    await settle(r);
+  },
+  malformedc16V.options,
+);
 both("preparing-listener-stops", async (r) => {
   let done = false;
   r.plugIn();
@@ -1690,12 +1736,10 @@ withNext(
   async (_r, n) => {
     n.cp.updateConnectorStatus(1, OCPPStatus.Charging);
     await settle(n);
-    n.cp.stopTransaction(1);
-    await settle(n);
+    await n.stopAndSettle();
     await n.cp.startTransaction("NEW", 1);
     await settle(n);
-    n.cp.stopTransaction(1);
-    await settle(n);
+    await n.stopAndSettle();
   },
   (r) => charging(r),
 );
@@ -1709,8 +1753,7 @@ withNext(
 withNext(
   "restart-scheduled-avail",
   async (_r, n) => {
-    n.cp.stopTransaction(1);
-    await settle(n);
+    await n.stopAndSettle();
   },
   async (r) => {
     await charging(r);
@@ -1721,8 +1764,7 @@ withNext(
 withNext(
   "restart-start-unanswered",
   async (_r, n) => {
-    n.cp.stopTransaction(1);
-    await settle(n);
+    await n.stopAndSettle();
   },
   async (r) => {
     r.csms.responders.StartTransaction = () => "silent";
@@ -1738,8 +1780,7 @@ withNext(
   async (_r, n) => {
     await n.cp.startTransaction("NEW", 1);
     await settle(n);
-    n.cp.stopTransaction(1);
-    await settle(n);
+    await n.stopAndSettle();
   },
   async (r) => {
     await charging(r);
@@ -1773,55 +1814,78 @@ const statusOf = (f: { payload: unknown }) =>
 // A StopTransaction / TransactionEvent(Ended) carries the stop time, and every
 // timestamp keeps its millisecond form (strict normalization).
 for (const v of ["1.6", "2.0.1"] as const) {
-  strict("timestamps-start-meter-stop", v, async (r) => {
-    r.plugIn();
-    await settle(r);
-    await r.cp.startTransaction("TAG-T", 1);
-    await settle(r);
-    await wait(2000);
-    r.cp.setMeterValue(1, 500);
-    r.cp.sendMeterValue(1);
-    await settle(r);
-    await wait(2000);
+  const ts = virtual();
+  strict(
+    "timestamps-start-meter-stop",
+    v,
+    async (r) => {
+      r.plugIn();
+      await settle(r);
+      await r.cp.startTransaction("TAG-T", 1);
+      await settle(r);
+      await ts.pause(r, 2000);
+      r.cp.setMeterValue(1, 500);
+      r.cp.sendMeterValue(1);
+      await settle(r);
+      await ts.pause(r, 2000);
+      r.cp.stopTransaction(1);
+      await settle(r);
+    },
+    ts.options,
+  );
+}
+strict(
+  "message-ids-are-uuids",
+  "1.6",
+  async (r) => {
+    await charging(r);
     r.cp.stopTransaction(1);
     await settle(r);
-  });
-}
-strict("message-ids-are-uuids", "1.6", async (r) => {
-  await charging(r);
-  r.cp.stopTransaction(1);
-  await settle(r);
-});
+  },
+  virtual().options,
+);
 
 // The offline queue is flushed in order, with the original timestamps.
-strict("offline-flush-order", "1.6", async (r) => {
-  await charging(r);
-  r.cp.disconnect();
-  await wait(200);
-  for (const wh of [100, 200, 300]) {
-    r.cp.setMeterValue(1, wh);
-    r.cp.sendMeterValue(1);
-    await wait(1100);
-  }
-  r.cp.stopTransaction(1);
-  await wait(100);
-  await r.connectAndBoot();
-  await settle(r);
-});
-strict("offline-flush-order", "2.0.1", async (r) => {
-  await charging(r);
-  r.cp.disconnect();
-  await wait(200);
-  for (const wh of [100, 200, 300]) {
-    r.cp.setMeterValue(1, wh);
-    r.cp.sendMeterValue(1);
-    await wait(1100);
-  }
-  r.cp.stopTransaction(1);
-  await wait(100);
-  await r.connectAndBoot();
-  await settle(r);
-});
+const flush16 = virtual();
+strict(
+  "offline-flush-order",
+  "1.6",
+  async (r) => {
+    await charging(r);
+    r.cp.disconnect();
+    await flush16.pause(r, 200);
+    for (const wh of [100, 200, 300]) {
+      r.cp.setMeterValue(1, wh);
+      r.cp.sendMeterValue(1);
+      await flush16.pause(r, 1100);
+    }
+    r.cp.stopTransaction(1);
+    await flush16.pause(r, 100);
+    await r.connectAndBoot();
+    await settle(r);
+  },
+  flush16.options,
+);
+const flush201 = virtual();
+strict(
+  "offline-flush-order",
+  "2.0.1",
+  async (r) => {
+    await charging(r);
+    r.cp.disconnect();
+    await flush201.pause(r, 200);
+    for (const wh of [100, 200, 300]) {
+      r.cp.setMeterValue(1, wh);
+      r.cp.sendMeterValue(1);
+      await flush201.pause(r, 1100);
+    }
+    r.cp.stopTransaction(1);
+    await flush201.pause(r, 100);
+    await r.connectAndBoot();
+    await settle(r);
+  },
+  flush201.options,
+);
 
 // AuthorizeRemoteTxRequests: the Authorize goes first, and a denial stops it.
 both(
@@ -2260,24 +2324,31 @@ both(
     },
   },
 );
-both(
-  "heartbeat-pace",
-  async (r) => {
-    await wait(2500);
-    await settle(r);
-  },
-  {
-    responders: {
-      BootNotification: () => ({
-        result: {
-          status: "Accepted",
-          currentTime: "2030-01-01T00:00:00.000Z",
-          interval: 1,
-        },
-      }),
+// Each version gets its own clock: the cases run concurrently.
+for (const add of [c16, c201]) {
+  const heartbeatPace = virtual();
+  add(
+    "heartbeat-pace",
+    async (r) => {
+      // One period at a time: the next heartbeat is armed once the answer to
+      // the last one has arrived, so a single 2.5 s jump would fire only one.
+      for (const ms of [1000, 1000, 500]) await heartbeatPace.pause(r, ms);
+      await settle(r);
     },
-  },
-);
+    {
+      ...heartbeatPace.options,
+      responders: {
+        BootNotification: () => ({
+          result: {
+            status: "Accepted",
+            currentTime: "2030-01-01T00:00:00.000Z",
+            interval: 1,
+          },
+        }),
+      },
+    },
+  );
+}
 both("reconnect-pace", async (r) => {
   r.csms.dropConnection();
   await r.reconnected(2, 6000);

@@ -22,9 +22,9 @@
 {"d":"CSMS>","k":"result","id":"id-11","p":{}}
 {"d":"CP>","k":"call","id":"id-12","a":"MeterValues","p":{"transactionId":1,"connectorId":1,"meterValue":[{"timestamp":"<ts+0s 9999-99-99T99:99:99.999Z>","sampledValue":[{"value":"100","context":"Sample.Periodic","measurand":"Energy.Active.Import.Register","unit":"Wh"},{"value":"150000","context":"Sample.Periodic","measurand":"Power.Active.Import","unit":"W"}]}]}}
 {"d":"CSMS>","k":"result","id":"id-12","p":{}}
-{"d":"CP>","k":"call","id":"id-13","a":"MeterValues","p":{"transactionId":1,"connectorId":1,"meterValue":[{"timestamp":"<ts+2s 9999-99-99T99:99:99.999Z>","sampledValue":[{"value":"200","context":"Sample.Periodic","measurand":"Energy.Active.Import.Register","unit":"Wh"},{"value":"150000","context":"Sample.Periodic","measurand":"Power.Active.Import","unit":"W"}]}]}}
+{"d":"CP>","k":"call","id":"id-13","a":"MeterValues","p":{"transactionId":1,"connectorId":1,"meterValue":[{"timestamp":"<ts+1s 9999-99-99T99:99:99.999Z>","sampledValue":[{"value":"200","context":"Sample.Periodic","measurand":"Energy.Active.Import.Register","unit":"Wh"},{"value":"150000","context":"Sample.Periodic","measurand":"Power.Active.Import","unit":"W"}]}]}}
 {"d":"CSMS>","k":"result","id":"id-13","p":{}}
-{"d":"CP>","k":"call","id":"id-14","a":"MeterValues","p":{"transactionId":1,"connectorId":1,"meterValue":[{"timestamp":"<ts+3s 9999-99-99T99:99:99.999Z>","sampledValue":[{"value":"300","context":"Sample.Periodic","measurand":"Energy.Active.Import.Register","unit":"Wh"},{"value":"150000","context":"Sample.Periodic","measurand":"Power.Active.Import","unit":"W"}]}]}}
+{"d":"CP>","k":"call","id":"id-14","a":"MeterValues","p":{"transactionId":1,"connectorId":1,"meterValue":[{"timestamp":"<ts+2s 9999-99-99T99:99:99.999Z>","sampledValue":[{"value":"300","context":"Sample.Periodic","measurand":"Energy.Active.Import.Register","unit":"Wh"},{"value":"150000","context":"Sample.Periodic","measurand":"Power.Active.Import","unit":"W"}]}]}}
 {"d":"CSMS>","k":"result","id":"id-14","p":{}}
 {"d":"CP>","k":"call","id":"id-15","a":"StopTransaction","p":{"transactionId":1,"idTag":"TAG-1","meterStop":300,"timestamp":"<ts+4s 9999-99-99T99:99:99.999Z>"}}
 {"d":"CSMS>","k":"result","id":"id-15","p":{"idTagInfo":{"status":"Accepted"}}}

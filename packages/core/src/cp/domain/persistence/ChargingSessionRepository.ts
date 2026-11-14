@@ -60,6 +60,9 @@ export interface ChargingSessionRepository {
    *  order: the ones a restart has to reconcile. */
   unended(cpId: string): ChargingSession[];
   deleteForChargePoint(cpId: string): void;
+  /** A renamed charge point (#924): its sessions now belong to `newId`, and
+   *  the stored `cpId` of each follows. */
+  renameChargePoint(oldId: string, newId: string): void;
   clear(): void;
 }
 
@@ -134,6 +137,21 @@ export class InMemoryChargingSessionRepository implements ChargingSessionReposit
 
   deleteForChargePoint(cpId: string): void {
     this.byCp.delete(cpId);
+  }
+
+  renameChargePoint(oldId: string, newId: string): void {
+    const sessions = this.byCp.get(oldId);
+    if (!sessions || oldId === newId) return;
+    this.byCp.delete(oldId);
+    this.byCp.set(
+      newId,
+      new Map(
+        [...sessions].map(([sessionId, stored]) => [
+          sessionId,
+          { ...stored, session: { ...stored.session, cpId: newId } },
+        ]),
+      ),
+    );
   }
 
   clear(): void {

@@ -22,7 +22,7 @@ related:
   - ../concepts/local-authorization.md
   - default-behaviors.md
   - ../sources/github-issues.md
-updated: 2026-11-13
+updated: 2026-11-14
 ---
 
 # Device Model registry
@@ -168,6 +168,7 @@ one of their variables answers `UnknownVariable`, not `UnknownComponent`.
 | `SecurityCtrlr.MaxCertificateChainSize`                    | `MaxCertificateChainSize`                 | ReadOnly   | integer    | min 1, max 10000                                       | 10000                                             | Persistent  |
 | `SecurityCtrlr.CertSigningWaitMinimum`                     | `CertSigningWaitMinimum`                  | ReadWrite  | integer    | min 1                                                  | 60                                                | Persistent  |
 | `SecurityCtrlr.CertSigningRepeatTimes`                     | `CertSigningRepeatTimes`                  | ReadWrite  | integer    | min 0                                                  | 3                                                 | Persistent  |
+| `SecurityCtrlr.Identity`                                   | `ChargePointIdentity`                     | ReadWrite  | string     | 1-48 URL-safe characters                               | the active identity                               | Persistent  |
 | `EVSE.Power`                                               | `EVSEPower`                               | ReadOnly   | decimal    | unit W                                                 | runtime                                           | Volatile    |
 | `EVSE.AvailabilityState`                                   | `EVSEAvailabilityState`                   | ReadOnly   | OptionList | one of Available/Occupied/Reserved/Unavailable/Faulted | runtime                                           | Volatile    |
 | `Connector.AvailabilityState`                              | `ConnectorAvailabilityState`              | ReadOnly   | OptionList | one of Available/Occupied/Reserved/Unavailable/Faulted | runtime                                           | Volatile    |

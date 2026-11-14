@@ -123,8 +123,10 @@ export function resetBehavior(cp: ChargePoint): Behavior {
               }
               // B11.FR.03/04: the station reboots and cold-boots; with an evseId
               // (B11.FR.08) only that EVSE is reset.
-              if (evseId === undefined) cp.boot("RemoteReset");
-              else cp.resetEvse(evseId);
+              if (evseId === undefined) {
+                // #924: a pending identity is activated by this reboot.
+                if (!cp.applyPendingIdentityAtReboot()) cp.boot("RemoteReset");
+              } else cp.resetEvse(evseId);
             },
           };
         },

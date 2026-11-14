@@ -14,3 +14,9 @@
 {"d":"CSMS>","k":"result","id":"id-7","p":{}}
 {"d":"CP>","k":"call","id":"id-8","a":"MeterValues","p":{"transactionId":1,"connectorId":1,"meterValue":[{"timestamp":"<ts+2s 9999-99-99T99:99:99.999Z>","sampledValue":[{"value":"500","context":"Sample.Periodic","measurand":"Energy.Active.Import.Register","unit":"Wh"},{"value":"150000","context":"Sample.Periodic","measurand":"Power.Active.Import","unit":"W"}]}]}}
 {"d":"CSMS>","k":"result","id":"id-8","p":{}}
+{"d":"CP>","k":"call","id":"id-9","a":"StopTransaction","p":{"transactionId":1,"idTag":"TAG-T","meterStop":500,"timestamp":"<ts+4s 9999-99-99T99:99:99.999Z>"}}
+{"d":"CSMS>","k":"result","id":"id-9","p":{"idTagInfo":{"status":"Accepted"}}}
+{"d":"CP>","k":"call","id":"id-10","a":"StatusNotification","p":{"connectorId":1,"errorCode":"NoError","status":"Finishing"}}
+{"d":"CSMS>","k":"result","id":"id-10","p":{}}
+{"d":"CP>","k":"call","id":"id-11","a":"StatusNotification","p":{"connectorId":1,"errorCode":"NoError","status":"Available"}}
+{"d":"CSMS>","k":"result","id":"id-11","p":{}}

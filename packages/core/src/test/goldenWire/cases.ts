@@ -2,6 +2,7 @@ import type { JsonObject } from "@ocpp-cp-simulator/contracts/behavior";
 import type { ChargePoint } from "../../cp/domain/charge-point/ChargePoint";
 import { SIGNING_CERTIFICATE } from "../../cp/domain/security/__tests__/signingCertificateFixture";
 import { OCPPStatus } from "../../cp/domain/types/OcppTypes";
+import { drainMicrotasks, VirtualClock } from "../../cp/shared/clock";
 import type { WireVersion } from "./FakeCsms";
 import type { Rig, RigOptions } from "./rig";
 
@@ -39,6 +40,28 @@ const both = (
 ): GoldenCase[] => [c16(name, run, options), c201(name, run, options)];
 
 const settle = (rig: Rig) => rig.csms.settle();
+
+/**
+ * A case on its own VirtualClock and the in-memory socket (#867): what the
+ * station does "on the next turn of the clock" happens when `turn()` runs, not
+ * after a real delay. One clock per version, since the cases run concurrently.
+ */
+const bothVirtual = (
+  name: string,
+  run: (rig: Rig, turn: () => Promise<void>) => Promise<void>,
+): GoldenCase[] =>
+  [c16, c201].map((add) => {
+    const clock = new VirtualClock();
+    return add(
+      name,
+      (rig) =>
+        run(rig, async () => {
+          await clock.advanceBy(0);
+          await drainMicrotasks();
+        }),
+      { memory: true, simulation: { clock, seed: "g867" } },
+    );
+  });
 
 /** Select `default.firmware` params for the whole case (a code-owned layer). */
 const selectFirmware = (cp: ChargePoint, params: JsonObject): void =>
@@ -344,8 +367,7 @@ export const goldenCases: GoldenCase[] = [
     rig.cp.setMeterValue(1, 4200);
     rig.cp.sendMeterValue(1);
     await settle(rig);
-    rig.cp.stopTransaction(1, "Local");
-    await settle(rig);
+    await rig.stopAndSettle(1, "Local");
   }),
   // #327: a charger cap of 11 kW on a 22 kW three-phase vehicle. Power.Offered
   // and Power.Active.Import both read the capped value (one operating point),
@@ -477,7 +499,7 @@ export const goldenCases: GoldenCase[] = [
   // #835: a vehicle that has not started asking for energy is SuspendedEV
   // with the transaction running (1.6 §4.9 C4; 2.0.1 chargingState
   // SuspendedEV), through the readiness operation of #453.
-  ...both("vehicle-delayed-suspended-ev", async (rig) => {
+  ...bothVirtual("vehicle-delayed-suspended-ev", async (rig, turn) => {
     rig.cp.getConnector(1)!.applyEvSettingsOverride({
       vehicleBehavior: { policy: { type: "delayed", delayMs: 3_600_000 } },
     });
@@ -493,7 +515,7 @@ export const goldenCases: GoldenCase[] = [
     // The vehicle reacts to the status change after the event, on the next
     // turn of the clock; 2.0.1 sends nothing for Preparing to Charging, so
     // there is no traffic for `settle` to wait for.
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await turn();
     await settle(rig);
     rig.cp.stopTransaction(1, "Local");
     await settle(rig);

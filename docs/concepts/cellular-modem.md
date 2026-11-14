@@ -97,6 +97,16 @@ The MCP tools are `modem_get` and `modem_command`
 recreating the charge point, and change nothing on the OCPP connection by
 themselves. `replace_sim` creates a new `simId`.
 
+## Link state (#930)
+
+`modem.get` and the status wire carry `link` beside the card:
+`networkInterface`, `available`, `reasons`, the effective byte caps and the
+policies that select the card. A **suspended card does not by itself disconnect
+anything unless the station's interface is `cellular`**; on a cellular station
+the link is held down until the subscription is active and no policy blocks it.
+The gate, the SIM-scoped policies and the throttling are described in
+[Network simulation](network-simulation.md#sim-scoped-service-and-throttling-930).
+
 ## BootNotification identifiers (#929)
 
 With a modem model, **the installed SIM is the single source of truth** for

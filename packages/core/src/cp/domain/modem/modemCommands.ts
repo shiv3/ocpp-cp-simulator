@@ -26,8 +26,8 @@ export interface ModemCommandInput {
   readonly reporting?: SimReportingPolicy;
 }
 
-export type ModemCommandResult =
-  | { ok: true; modem: RedactedModemState }
+export type ModemCommandResult<M = RedactedModemState> =
+  | { ok: true; modem: M }
   | { ok: false; error: ModemErrorCode | "no_modem_model" };
 
 function requireSim(input: ModemCommandInput): SimCardInit {
@@ -43,10 +43,12 @@ function requireSim(input: ModemCommandInput): SimCardInit {
  * leaves the state as it was and answers its typed code. The answer carries
  * the masked state, never the full identifiers.
  */
-export function runModemCommand(
+export function runModemCommand<M = RedactedModemState>(
   modem: CellularModem | null,
   input: ModemCommandInput,
-): ModemCommandResult {
+  /** The state to answer with; default: the masked modem state. */
+  view?: () => M,
+): ModemCommandResult<M> {
   if (!modem) return { ok: false, error: "no_modem_model" };
   try {
     switch (input.command) {
@@ -72,7 +74,10 @@ export function runModemCommand(
         modem.setNetworkInterface(input.networkInterface as NetworkInterface);
         break;
     }
-    return { ok: true, modem: modem.redacted() };
+    return {
+      ok: true,
+      modem: view ? view() : (modem.redacted() as unknown as M),
+    };
   } catch (err) {
     if (err instanceof ModemError) return { ok: false, error: err.code };
     throw err;

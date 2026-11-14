@@ -1539,6 +1539,21 @@ export const METHODS = {
     }),
     result: ANY,
   },
+  // #930: SIM-scoped cellular policies (`online | blocked`, byte caps), by
+  // simId / ICCID / operator. Persisted; apply to every charge point, also to
+  // ones that acquire a matching SIM or are created later.
+  "network_sim.cellular.get": { params: EMPTY, result: ANY },
+  "network_sim.cellular.save": {
+    params: z.object({
+      policies: boundedObject(OBJ_MAX_BYTES)
+        .nullable()
+        .describe(
+          "Policy id -> { match: { simId | iccid | operator }, service?: online|blocked, upstreamBytesPerSecond?, downstreamBytesPerSecond?, enabled? }; replaces the whole set, null clears it",
+        ),
+    }),
+    result: ANY,
+  },
+  "network_sim.cellular.status": { params: EMPTY, result: ANY },
   "network_sim.disconnect.trigger": {
     params: z.object({ cpId: STR_64K, ruleId: STR_64K }),
     result: ANY,
@@ -1904,6 +1919,9 @@ export const EXPLICIT_METHODS = [
   "network_sim.global.save",
   "network_sim.cp.get",
   "network_sim.cp.save",
+  "network_sim.cellular.get",
+  "network_sim.cellular.save",
+  "network_sim.cellular.status",
   "network_sim.disconnect.trigger",
   "power.loss",
   "power.restore",

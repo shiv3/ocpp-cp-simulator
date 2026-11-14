@@ -62,9 +62,17 @@ import {
   maskSimIdentifier,
   type ModemChange,
   type ModemConfig,
+  type RedactedModemState,
   type SimCard,
 } from "../modem/CellularModem";
 import { bootNotificationFor } from "../modem/bootIdentifiers";
+import {
+  resolveCellularLink,
+  sameCellularLink,
+  type CellularLinkState,
+  type CellularLinkWire,
+  type CellularPolicySet,
+} from "../modem/cellularLink";
 import type { OcppCallActions } from "../transport/OcppCallActions";
 import type {
   ChargePointDeps,
@@ -644,6 +652,12 @@ export class ChargePoint {
   // been applied via setNetworkSimConfig, null for SOAP CPs or when no config
   // has been applied yet.
   private _modem: CellularModem | null = null;
+  /** #930: the SIM-scoped policies the daemon pushed (empty: none). */
+  private _cellularPolicies: CellularPolicySet = {};
+  /** #930: the last resolved link; `null` without a modem model. */
+  private _cellularLink: CellularLinkState | null = null;
+  /** #930: an explicit connect() arrived while the link was down. */
+  private _connectOnLinkRestore = false;
   private _networkSimSummary: {
     enabled: boolean;
     manualRuleIds: string[];
@@ -756,7 +770,10 @@ export class ChargePoint {
           deps.repositories.modem,
         )
       : CellularModem.restore(this._id, deps.repositories.modem);
-    this._modem?.onChange((change) => this.logModemChange(change));
+    this._modem?.onChange((change) => {
+      this.logModemChange(change);
+      this.reevaluateCellularLink();
+    });
     this._certificateStore = new CertificateStore(
       this._repositories.certificates,
       this._clock,
@@ -1078,6 +1095,9 @@ export class ChargePoint {
     this._webSocket?.setPingInterval(
       this._configuration.webSocketPingInterval(),
     );
+    // #930: a suspended SIM on a cellular station keeps the link down from
+    // the very first connect, also after a restart.
+    this.reevaluateCellularLink();
   }
 
   /** Read a persisted Operative/Inoperative flag from the DB for the given
@@ -2593,6 +2613,17 @@ export class ChargePoint {
       return;
     }
 
+    if (this._webSocket && this._cellularLink?.available === false) {
+      // #930: the cellular link is down; an operator connect cannot defeat
+      // that. Remembered, so restoring service dials. No boot flag is set:
+      // whether a BootNotification follows stays the #702 rule.
+      this._logger.info(
+        `connect() deferred: the cellular link is unavailable (${this._cellularLink.reasons.join(", ")})`,
+        LogType.WEBSOCKET,
+      );
+      this._connectOnLinkRestore = true;
+      return;
+    }
     // Idempotent: if a socket is already open or mid-handshake, don't
     // create a second one. The daemon's startServer can hit this twice
     // when restoreFromDatabase() auto-connects and then the bootstrap
@@ -3502,6 +3533,7 @@ export class ChargePoint {
   }
 
   disconnect(): void {
+    this._connectOnLinkRestore = false;
     this._logger.info(
       this._webSocket
         ? "Disconnecting from WebSocket"
@@ -3607,6 +3639,9 @@ export class ChargePoint {
 
   reset(reason: BootReason = "LocalReset"): void {
     this._bootReason = reason;
+    // The reset's own boot goes out at the next open, even when the link is
+    // down and the connect below is deferred (#930).
+    this._bootOnNextOpen = true;
     if (this._webSocket) {
       // WebSocket CP: use cause-aware internal reset (preserves reconnect reservation)
       this._webSocket.disconnectInternal(); // drains, does NOT set manual, does NOT clear reservation
@@ -4681,6 +4716,90 @@ export class ChargePoint {
    */
   bootPayload(): BootNotification {
     return bootNotificationFor(this._bootNotification, this._modem);
+  }
+
+  /**
+   * #930: install the SIM-scoped policies (the daemon pushes the whole set to
+   * every charge point, also to one created later). The selection is dynamic:
+   * it is recomputed against the card in the slot now and after every SIM
+   * change, so a replaced card is governed by the policies that match the new
+   * one. Ignored by a station without a modem model.
+   */
+  setCellularPolicies(policies: CellularPolicySet): void {
+    this._cellularPolicies = policies;
+    this.reevaluateCellularLink();
+  }
+
+  /** #930: the resolved cellular link, or `null` without a modem model. */
+  cellularLink(): CellularLinkState | null {
+    return this._cellularLink;
+  }
+
+  /**
+   * #930: the masked modem state with its resolved link, or `null` without a
+   * modem model. `enforced` is false for a SOAP station: its transport is not
+   * a socket the link gate can hold down.
+   */
+  modemState(): (RedactedModemState & { link: CellularLinkWire }) | null {
+    if (!this._modem || !this._cellularLink) return null;
+    return {
+      ...this._modem.redacted(),
+      link: { ...this._cellularLink, enforced: this._webSocket !== null },
+    };
+  }
+
+  /**
+   * Resolve the cellular link and apply it: caps to the transport, the
+   * availability gate to the socket. Idempotent; emits `cellularLinkChanged`
+   * only when the result differs. The OCPP side is untouched: no boot, no
+   * reset, power and transactions stay (#930, #702).
+   */
+  private reevaluateCellularLink(): void {
+    const modem = this._modem;
+    const next = modem
+      ? resolveCellularLink(modem.snapshot(), this._cellularPolicies)
+      : null;
+    const previous = this._cellularLink;
+    if (sameCellularLink(previous, next)) return;
+    this._cellularLink = next;
+    if (!next) return;
+    this._webSocket?.setBandwidthLimits({
+      upstreamBytesPerSecond: next.upstreamBytesPerSecond,
+      downstreamBytesPerSecond: next.downstreamBytesPerSecond,
+    });
+    const wasAvailable = previous?.available ?? true;
+    if (next.available !== wasAvailable) {
+      this._logger.info(
+        next.available
+          ? "Cellular link restored"
+          : `Cellular link unavailable: ${next.reasons.join(", ")}`,
+        LogType.WEBSOCKET,
+      );
+      this._webSocket?.setLinkBlocked(
+        next.available ? null : next.reasons.join(","),
+      );
+      if (next.available && this._connectOnLinkRestore) {
+        this._connectOnLinkRestore = false;
+        if (this._webSocket && !this._webSocket.isOpenOrConnecting()) {
+          this.connect();
+        }
+      }
+    }
+    if (
+      next.available !== wasAvailable ||
+      next.upstreamBytesPerSecond !==
+        (previous?.upstreamBytesPerSecond ?? null) ||
+      next.downstreamBytesPerSecond !==
+        (previous?.downstreamBytesPerSecond ?? null)
+    ) {
+      this._events.emit("cellularLinkChanged", {
+        available: next.available,
+        previouslyAvailable: wasAvailable,
+        reasons: next.reasons,
+        upstreamBytesPerSecond: next.upstreamBytesPerSecond,
+        downstreamBytesPerSecond: next.downstreamBytesPerSecond,
+      });
+    }
   }
 
   private logModemChange(change: ModemChange): void {

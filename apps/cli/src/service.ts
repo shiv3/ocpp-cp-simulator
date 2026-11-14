@@ -12,10 +12,10 @@ import type {
 import type { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
 import {
   runModemCommand,
-  type ModemCommandInput,
   type ModemCommandResult,
-  type RedactedModemState,
+  type ModemCommandInput,
 } from "@ocpp-cp-simulator/core/cp/domain/modem/index";
+import type { CellularPolicySet } from "@ocpp-cp-simulator/core/cp/domain/modem/cellularLink";
 import { createChargePoint } from "@ocpp-cp-simulator/core/cp/infrastructure/charge-point/createChargePoint";
 import type {
   AuthorizationCacheSeedEntry,
@@ -1031,8 +1031,8 @@ export class CLIChargePointService {
           : null,
       },
       networkSim: this._chargePoint.networkSimSummary(),
-      ...(this._chargePoint.modem
-        ? { modem: this._chargePoint.modem.redacted() }
+      ...(this._chargePoint.modemState()
+        ? { modem: this._chargePoint.modemState()! }
         : {}),
       config: {
         wsUrl: this._init.wsUrl,
@@ -1221,14 +1221,23 @@ export class CLIChargePointService {
     return this._chargePoint.poweredOff;
   }
 
+  /** #930: install the SIM-scoped policy set (see NetworkSimManager). */
+  setCellularPolicies(policies: CellularPolicySet): void {
+    this._chargePoint.setCellularPolicies(policies);
+  }
+
   /** #928: the masked modem state, or `null` without a modem model. */
-  modemState(): RedactedModemState | null {
-    return this._chargePoint.modem?.redacted() ?? null;
+  modemState(): ReturnType<ChargePoint["modemState"]> {
+    return this._chargePoint.modemState();
   }
 
   /** #928: one modem lifecycle command. */
-  modemCommand(command: ModemCommandInput): ModemCommandResult {
-    return runModemCommand(this._chargePoint.modem, command);
+  modemCommand(
+    command: ModemCommandInput,
+  ): ModemCommandResult<NonNullable<ReturnType<ChargePoint["modemState"]>>> {
+    return runModemCommand(this._chargePoint.modem, command, () =>
+      this._chargePoint.modemState()!,
+    );
   }
 
   powerLoss(options?: PowerLossOptions): PowerLossRecord {

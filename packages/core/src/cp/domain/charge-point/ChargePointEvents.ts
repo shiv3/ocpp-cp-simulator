@@ -1,3 +1,4 @@
+import type { CellularOutageReason } from "../modem/cellularLink";
 import type { OCPPStatus, OCPPAvailability } from "../types/OcppTypes";
 import type { ActiveChargingProfile } from "../connector/Connector";
 import type { IdTokenTypeName } from "../connector/Transaction";
@@ -95,6 +96,16 @@ export interface ChargePointEvents {
    *  closed, so the `disconnected` that follows can be attributed to it
    *  (#448). */
   networkFaultInjected: NetworkFaultInjected;
+  /** #930: the cellular link of a station on a cellular path went down or
+   *  came back, or its effective throughput caps changed. A modem change that
+   *  leaves the link as it was emits nothing. */
+  cellularLinkChanged: {
+    available: boolean;
+    previouslyAvailable: boolean;
+    reasons: readonly CellularOutageReason[];
+    upstreamBytesPerSecond: number | null;
+    downstreamBytesPerSecond: number | null;
+  };
 
   // Connector events
   connectorStatusChange: {

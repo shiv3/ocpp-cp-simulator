@@ -184,6 +184,15 @@ export class OCPPWebSocket implements ChargePointSocket {
   /** #609: 2.x `RetryBackOff*` variables; null on 1.6. */
   private _retryBackOff: RetryBackOffVariables | null = null;
   private _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * #930: why the link is administratively down (a suspended or blocked SIM on
+   * a cellular station), or `null`. While set, no socket is opened by any path
+   * (connect, reset, the reconnect timer) and no reconnect attempt is counted.
+   */
+  private _linkBlockedReason: string | null = null;
+  /** #930: the link was wanted when it went down (or a connect asked for it
+   *  while down); restoring service dials again with a fresh budget. */
+  private _resumeOnLinkRestore = false;
   private _onOpenCallback: (() => void) | null = null;
   private _onCloseCallback:
     ((ev: SocketClose, cause: CloseCause) => void) | null = null;
@@ -536,6 +545,19 @@ export class OCPPWebSocket implements ChargePointSocket {
     onopen: (() => void) | null = null,
     onclose: ((ev: SocketClose, cause: CloseCause) => void) | null = null,
   ): void {
+    if (this._linkBlockedReason !== null) {
+      // #930: the cellular link is down. Remember the request and any
+      // callbacks, open nothing; restoring service connects.
+      if (onopen) this._onOpenCallback = onopen;
+      if (onclose) this._onCloseCallback = onclose;
+      this._isManualDisconnect = false;
+      this._resumeOnLinkRestore = !this._disposed;
+      this._logger.info(
+        `connect deferred: the cellular link is unavailable (${this._linkBlockedReason})`,
+        LogType.WEBSOCKET,
+      );
+      return;
+    }
     // #478: a socket the charge point closed (reset, disconnect) fires its
     // close event asynchronously, after this new generation exists. Report it
     // now, so its `disconnected` precedes the next `connected` and its
@@ -712,6 +734,9 @@ export class OCPPWebSocket implements ChargePointSocket {
     if (this._disposed) {
       return;
     }
+    // An operator's disconnect ends the wish to be connected, also while the
+    // link is down (#930).
+    this._resumeOnLinkRestore = false;
 
     // Drain synchronously FIRST (spec 2.6 step 1)
     this.runCloseTransaction("manual");
@@ -1354,7 +1379,69 @@ export class OCPPWebSocket implements ChargePointSocket {
     }
   }
 
+  /**
+   * #930: take the link down (`reason`) or bring it back (`null`).
+   *
+   * Down: the open socket, if any, is closed with the `simulated` cause (a
+   * deliberate simulated outage, not a failure of the station), the reconnect
+   * timer is cancelled and the attempt budget reset, so an outage of any
+   * length consumes none of the #609 policy. The station keeps its power and
+   * its transactions; the close transaction salvages queued messages exactly
+   * as for any lost link. Up: if a connection was wanted, dial again now with
+   * a fresh budget through the normal `connect()` (no reboot, no extra boot:
+   * whether a BootNotification follows is the charge point's own #702 rule).
+   */
+  public setLinkBlocked(reason: string | null): void {
+    if (this._disposed || reason === this._linkBlockedReason) return;
+    if (reason !== null) {
+      const hadLink =
+        !this._isManualDisconnect &&
+        (this._ws !== null || this._reconnectTimer !== null);
+      this._linkBlockedReason = reason;
+      this._resumeOnLinkRestore = this._resumeOnLinkRestore || hadLink;
+      if (this._reconnectTimer) {
+        clearTimeout(this._reconnectTimer);
+        this._reconnectTimer = null;
+      }
+      this._reconnectAttempts = 0;
+      this._reconnectNotBefore = null;
+      this._pendingReconnectNotice = null;
+      if (this._ws) {
+        this.runCloseTransaction("simulated");
+        this._selfRequestedClose = true;
+        this._ws.close();
+        this._ws = null;
+        this.stopPingInterval();
+      }
+      return;
+    }
+    this._linkBlockedReason = null;
+    if (!this._resumeOnLinkRestore) return;
+    this._resumeOnLinkRestore = false;
+    this._reconnectAttempts = 0;
+    this._logger.info(
+      "The cellular link is restored; reconnecting",
+      LogType.WEBSOCKET,
+    );
+    this.connect();
+  }
+
+  /** #930: whether the link is administratively down, and why. */
+  public get linkBlockedReason(): string | null {
+    return this._linkBlockedReason;
+  }
+
+  /** #930: sustained payload caps per direction (bytes per second), or `null`. */
+  public setBandwidthLimits(limits: {
+    upstreamBytesPerSecond: number | null;
+    downstreamBytesPerSecond: number | null;
+  }): void {
+    this._controller.setBandwidthLimits(limits);
+  }
+
   private attemptReconnect(): void {
+    // #930: an administratively down link is not a failed attempt.
+    if (this._linkBlockedReason !== null) return;
     // Clear any existing reconnect timer
     if (this._reconnectTimer) {
       clearTimeout(this._reconnectTimer);

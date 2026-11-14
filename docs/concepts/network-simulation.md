@@ -1,10 +1,12 @@
 ---
 title: Network simulation
 type: concept
-summary: Phase-1 in-process fault injection for WebSocket charge points — seeded latency/jitter, manual and periodic disconnects, delayed reconnect — configured at runtime (UI, RPC, MCP) as a global layer with per-CP null-tombstone overrides.
+summary: Phase-1 in-process fault injection for WebSocket charge points — seeded latency/jitter, manual and periodic disconnects, delayed reconnect — plus the SIM-scoped cellular service gate and byte-aware throttling (#930) — configured at runtime (UI, RPC, MCP) as a global layer with per-CP null-tombstone overrides.
 sources:
   - packages/core/src/cp/infrastructure/transport/network-sim/ (rule engine; issue #242)
   - apps/cli/src/server/__tests__/networkSimMcp.bun.test.ts
+  - packages/core/src/cp/domain/modem/cellularLink.ts (SIM-scoped link resolution; issue #930)
+  - packages/core/src/test/goldenWire/cellularLink.bun.test.ts
 related:
   - control-plane.md
   - ../entities/mcp-endpoint.md
@@ -116,11 +118,105 @@ The same seed always produces the same fault sequence within a rule set:
 These are daemon-level methods of the [control plane](control-plane.md#daemon-methods)
 (no `cpId` envelope field; the CP is named in `params`).
 
+## SIM-scoped service and throttling (#930)
+
+The rules above target a charge point's socket. A **cellular outage is not a
+forced disconnect with a delayed reconnect**: a suspended SIM must keep the
+link down until service is restored, however the station tries to dial. This
+layer is separate from the latency / disconnect rules and is driven by the
+[modem and SIM model](cellular-modem.md).
+
+**Which stations.** Only a station with a modem model whose `networkInterface`
+is `cellular`. A station on `ethernet` / `wifi` keeps its session while its
+unused SIM is suspended, removed or blocked, and caps do not apply to it (no
+implicit failover or multi-interface routing). A station without a modem model
+(the legacy default) is never touched.
+
+**Resolution** (`resolveCellularLink`, pure): the link is available only with a
+modem, a card, an `active` subscription and no `blocked` policy. The reasons
+are independent and all reported: `modem_absent`, `sim_missing`,
+`subscription_suspended`, `sim_network_blocked`. (`no_coverage`, proposed in
+#930, is reserved: coverage is not simulated.)
+
+**The gate.** When the link goes down the open socket is closed with the
+`simulated` cause (not an error, not a station fault) and the station keeps
+its power and its transactions; queued messages are salvaged as for any lost
+link. While it is down, **no path opens a socket**: an operator `connect`, a
+`reset`, the reconnect timer and a daemon restart (the gate is evaluated when
+the charge point is built, before it connects) all end without a connection. A
+`connect` is remembered and dials when service returns; an operator
+`disconnect` forgets it. The down time **consumes none of the reconnect
+attempt budget** (#609). On restore the station dials with a fresh budget
+through the normal `connect()`. It is not rebooted and no BootNotification is
+fabricated: OCPP 2.x resumes without one while its boot data is unchanged
+(#702); OCPP 1.6 boots on every connect, as for any reconnect.
+
+**Policies.** `network_sim.cellular.save` installs a persisted set, policy id →
+
+```json
+{
+  "match": { "iccid": "8944501234567890123" },
+  "service": "blocked",
+  "upstreamBytesPerSecond": 2000,
+  "downstreamBytesPerSecond": 8000,
+  "enabled": true
+}
+```
+
+`match` has exactly one of `simId` (the simulator's SIM identity), `iccid` or
+`operator` (a label shared by a group of cards). `service` is `online`
+(default) or `blocked`. Caps are optional integers (bytes per second,
+1-1,000,000,000). Selection is dynamic and by the card currently in the slot:
+a policy applies to stations that acquire a matching SIM later (insert,
+replace) and to charge points created later, without a rule per `cpId`.
+**Precedence:** there is none to get wrong, because policies only restrict:
+`blocked` beats `online` (an `online` policy never reactivates a suspended
+subscription or undoes a block), the lowest matching cap per direction wins,
+and the result does not depend on policy order or selector. The global and
+per-CP `network_sim` layers never touch the gate: a per-CP rule cannot bring a
+suspended or blocked SIM back. Those layers are preserved as they were.
+
+**Throttling.** A cap makes a frame occupy the link for `bytes / cap` seconds,
+one frame at a time per direction, on top of any latency rule; deadlines are
+FIFO so order is kept and a large frame delays everything behind it. It is
+**byte-aware** (UTF-8 length of the OCPP-J frame) and deterministic (no
+randomness; the clock is the only input). The queue is the pipeline's bounded
+budget (512 frames / 2 MiB per direction): a frame over the budget is rejected
+explicitly (downstream: logged `queue_overflow`; upstream: the sender's
+`queue_overflow` settlement), and frames still queued when the link closes are
+settled `socket_closed` with the close cause, never silently lost.
+
+**What is and is not simulated.** An in-process, protocol-level approximation
+of payload throughput on the WebSocket. Not simulated: TCP (windows, half-open
+connections, retransmission), TLS and WebSocket framing overhead, radio
+registration, signal quality, QoS, packet loss. OCPP-S / SOAP stations are not
+gated or throttled (their transport is not a socket); their link is reported
+with `enforced: false`. The policies and their persistence are daemon features;
+browser Local mode honours the SIM state (a suspended SIM holds the link down)
+but has no policy store. An external TCP proxy backend (Toxiproxy) was
+considered in #930 and is not part of this change: the in-process engine works
+in the browser and the daemon without extra infrastructure, and the policy
+resolution is independent of how the caps are enforced, so a proxy backend can
+be added later behind the same seam.
+
+| Method                        | Params                           | Result / purpose                                                                                                                                                                                       |
+| ----------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `network_sim.cellular.get`    | `{}`                             | `{ policies }` (empty object when none).                                                                                                                                                               |
+| `network_sim.cellular.save`   | `{ "policies": object \| null }` | Validate, persist (`kv` key `networkSim:cellular`) and push to every charge point. Replaces the whole set; `null` clears it. Invalid: `invalid_params`, the previous set stays.                        |
+| `network_sim.cellular.status` | `{}`                             | `{ policies, total, unavailable, throttled, cps: [{ cpId, link }] }`: the governed stations (those with a modem model) and each one's link: `available`, `reasons`, effective caps, matching policies. |
+
+`modem.get`, the status wire and the MCP tools (`cellular_policy_get`,
+`cellular_policy_set`) show the same `link`. The
+[operational timeline](operational-timeline.md) records `cellular_link_lost`,
+`cellular_link_restored` and `cellular_throughput_changed`, next to the
+`disconnected` / `connected` entries they cause.
+
 ## Persistence
 
 Configs are stored in the [state database](state-persistence.md) (if
 `--state-db` is configured) under keys `networkSim:global` and
-`networkSim:cp:<cpId>`. Configs survive daemon restart and are automatically
+`networkSim:cp:<cpId>`; the cellular policy set is the single document
+`networkSim:cellular`. Configs survive daemon restart and are automatically
 applied before a restored CP reconnects. A corrupt stored value is logged and
 treated as absent (graceful degradation).
 

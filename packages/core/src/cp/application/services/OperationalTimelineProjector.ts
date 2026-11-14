@@ -176,6 +176,41 @@ export class OperationalTimelineProjector implements ChargePointTimelineProjecto
         at: startedAt,
       });
     });
+    // #930: an intentional simulated outage of the cellular link (suspended
+    // SIM, blocked service, removed card). Not a hardware fault, and not an
+    // incident: the `disconnected` / `connected` entries around it tell the
+    // OCPP side, these tell the cause and the restoration.
+    on(
+      "cellularLinkChanged",
+      ({
+        available,
+        previouslyAvailable,
+        reasons,
+        upstreamBytesPerSecond,
+        downstreamBytesPerSecond,
+      }) => {
+        const data = {
+          reasons: [...reasons],
+          upstreamBytesPerSecond,
+          downstreamBytesPerSecond,
+        };
+        if (available !== previouslyAvailable) {
+          this.timeline.record({
+            kind: available ? "cellular_link_restored" : "cellular_link_lost",
+            summary: available
+              ? "Cellular link restored"
+              : `Cellular link lost (${reasons.join(", ")})`,
+            data,
+          });
+          return;
+        }
+        this.timeline.record({
+          kind: "cellular_throughput_changed",
+          summary: `Cellular throughput caps: up ${formatCap(upstreamBytesPerSecond)}, down ${formatCap(downstreamBytesPerSecond)}`,
+          data,
+        });
+      },
+    );
     on("powerLost", ({ transactions }) => {
       this.timeline.record({
         kind: "power_lost",
@@ -466,6 +501,10 @@ function profileSummary(profile: ActiveChargingProfile) {
 
 function profileFields(connectorId: number, profile: ActiveChargingProfile) {
   return { connectorId, ...profileSummary(profile) };
+}
+
+function formatCap(bytesPerSecond: number | null): string {
+  return bytesPerSecond === null ? "uncapped" : `${bytesPerSecond} B/s`;
 }
 
 function formatSeconds(ms: number): string {

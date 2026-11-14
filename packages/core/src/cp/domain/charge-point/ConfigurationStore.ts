@@ -82,6 +82,8 @@ export class ConfigurationStore {
   private readonly listeners = new Set<ConfigurationChangeListener>();
   /** Keys published by `defineRuntimeKey` / `defineRuntimeIntegerKey`. */
   private readonly runtimeKeys = new Set<string>();
+  /** Runtime string keys read live from a supplier (`defineLiveKey`). */
+  private readonly liveKeys = new Map<string, () => string>();
   /** Per-key checks run by `applyChange` before a value is stored. */
   private readonly changeGuards = new Map<string, ChangeGuard>();
 
@@ -110,6 +112,7 @@ export class ConfigurationStore {
 
   /** All entries the store currently knows about (defaults + overrides). */
   all(): Configuration {
+    this.refreshLive();
     return Array.from(this.values.values());
   }
 
@@ -120,6 +123,7 @@ export class ConfigurationStore {
 
   /** Return entries for the requested keys; missing keys are listed in `unknown`. */
   read(keys: string[]): { known: Configuration; unknown: string[] } {
+    this.refreshLive();
     if (keys.length === 0) {
       return { known: this.all(), unknown: [] };
     }
@@ -149,6 +153,7 @@ export class ConfigurationStore {
 
   /** Raw lookup. Returns `undefined` for unknown keys. */
   get(name: string): ConfigurationValue | undefined {
+    this.refreshLive(name);
     return this.values.get(name);
   }
 
@@ -385,6 +390,24 @@ export class ConfigurationStore {
     this.values.set(name, { key, value });
     this.runtimeKeys.add(name);
     this.emit(name, value);
+  }
+
+  /**
+   * A read-only runtime string whose value is asked of `supplier` on every
+   * read, such as `ClockCtrlr.DateTime` (#704). Listeners are not told: the
+   * value changes with every read.
+   */
+  defineLiveKey(name: string, supplier: () => string): void {
+    this.liveKeys.set(name, supplier);
+    this.defineRuntimeKey(name, supplier());
+  }
+
+  private refreshLive(only?: string): void {
+    for (const [name, supplier] of this.liveKeys) {
+      if (only !== undefined && only !== name) continue;
+      const entry = this.values.get(name);
+      if (entry) this.values.set(name, { key: entry.key, value: supplier() });
+    }
   }
 
   /**

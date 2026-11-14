@@ -23,7 +23,7 @@ related:
   - access-control.md
   - scenario-format.md
   - state-persistence.md
-updated: 2026-11-10
+updated: 2026-11-14
 ---
 
 # OCPP 1.6 security profiles
@@ -770,9 +770,9 @@ copies the count into the configuration on every store change, so a
 variable monitor on it fires too. `MaxCertificateChainSize` defaults to
 the spec's `maxLimit`, also the schema's `maxLength`, so it refuses nothing
 a valid frame holds. Both are ReadOnly, so a CSMS cannot change them.
-Mapping `SecurityCtrlr` makes it a known component: its other variables
-(`SecurityProfile`, `BasicAuthPassword`, …) now answer `UnknownVariable`
-instead of `UnknownComponent`.
+`SecurityProfile` (ReadOnly), `OrganizationName` (ReadOnly) and
+`BasicAuthPassword` (WriteOnly, the 1.6 `AuthorizationKey`, A01.FR.01/02) are
+registered too (#704, see [Device Model registry](../entities/device-model.md#required-variables-704)).
 
 The dispatcher of 2.x inbound CALLs awaits a handler only when it returns a
 promise. A synchronous handler still answers in the same tick, so a

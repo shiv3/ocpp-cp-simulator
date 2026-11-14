@@ -361,6 +361,7 @@ export const connectorStatusWireSchema = z
 export const modemWireSchema = z
   .object({
     slot: z.enum(["no_modem", "empty", "inserted"]),
+    reporting: z.enum(["none", "iccid", "iccid-and-imsi"]),
     networkInterface: z.enum(["ethernet", "wifi", "cellular"]),
     sim: z
       .object({

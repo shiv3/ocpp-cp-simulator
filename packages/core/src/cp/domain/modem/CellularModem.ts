@@ -45,6 +45,19 @@ export interface SimCardInit {
   readonly subscription?: SubscriptionState;
 }
 
+/**
+ * What the BootNotification reports of the installed SIM (#929). Independent
+ * of the subscription state: a suspended card still has identifiers.
+ */
+export type SimReportingPolicy = "none" | "iccid" | "iccid-and-imsi";
+export const SIM_REPORTING_POLICIES: readonly SimReportingPolicy[] = [
+  "none",
+  "iccid",
+  "iccid-and-imsi",
+];
+/** Default when a modem model is configured: report what the card carries. */
+export const DEFAULT_SIM_REPORTING: SimReportingPolicy = "iccid-and-imsi";
+
 /** Initial modem configuration (`modem` in the charge point's init). */
 export interface ModemConfig {
   /** Default `true`. `false`: the station has no cellular modem at all. */
@@ -53,6 +66,8 @@ export interface ModemConfig {
   readonly networkInterface?: NetworkInterface;
   /** The card in the slot at start; absent or `null`: an empty slot. */
   readonly sim?: SimCardInit | null;
+  /** What the BootNotification reports of the card (#929). Default `iccid-and-imsi`. */
+  readonly reporting?: SimReportingPolicy;
 }
 
 /**
@@ -63,6 +78,7 @@ export type ModemSlotState = "no_modem" | "empty" | "inserted";
 
 export interface ModemSnapshot {
   readonly slot: ModemSlotState;
+  readonly reporting: SimReportingPolicy;
   readonly networkInterface: NetworkInterface;
   readonly sim: SimCard | null;
 }
@@ -74,7 +90,8 @@ export type ModemErrorCode =
   | "already_suspended"
   | "already_active"
   | "invalid_sim"
-  | "invalid_network_interface";
+  | "invalid_network_interface"
+  | "invalid_reporting_policy";
 
 /** A refused modem command; the state is left as it was. */
 export class ModemError extends Error {
@@ -93,7 +110,8 @@ export type ModemChange =
   | { kind: "sim_replaced"; previous: SimCard; sim: SimCard }
   | { kind: "subscription_suspended"; sim: SimCard }
   | { kind: "subscription_activated"; sim: SimCard }
-  | { kind: "network_interface_changed"; networkInterface: NetworkInterface };
+  | { kind: "network_interface_changed"; networkInterface: NetworkInterface }
+  | { kind: "reporting_policy_changed"; reporting: SimReportingPolicy };
 
 /**
  * ICCID / IMSI are subscriber identifiers; deployments may regulate them. Every
@@ -128,6 +146,7 @@ export function redactSimCard(sim: SimCard): RedactedSimCard {
 
 export interface RedactedModemState {
   readonly slot: ModemSlotState;
+  readonly reporting: SimReportingPolicy;
   readonly networkInterface: NetworkInterface;
   readonly sim: RedactedSimCard | null;
 }
@@ -137,8 +156,17 @@ interface PersistedModem {
   readonly present: boolean;
   readonly networkInterface: NetworkInterface;
   readonly sim: SimCard | null;
+  /** Absent in a document written before #929: the default applies. */
+  readonly reporting?: SimReportingPolicy;
   /** Cards made so far: the next `simId` suffix, kept across a restart. */
   readonly seq: number;
+}
+
+function isReporting(value: unknown): value is SimReportingPolicy {
+  return (
+    typeof value === "string" &&
+    (SIM_REPORTING_POLICIES as readonly string[]).includes(value)
+  );
 }
 
 function isInterface(value: unknown): value is NetworkInterface {
@@ -198,7 +226,7 @@ export function modemConfigProblem(config: unknown): string | null {
   }
   const c = config as Record<string, unknown>;
   for (const key of Object.keys(c)) {
-    if (!["present", "networkInterface", "sim"].includes(key)) {
+    if (!["present", "networkInterface", "sim", "reporting"].includes(key)) {
       return `modem.${key}: unknown field`;
     }
   }
@@ -207,6 +235,9 @@ export function modemConfigProblem(config: unknown): string | null {
   }
   if (c.networkInterface !== undefined && !isInterface(c.networkInterface)) {
     return "modem.networkInterface must be ethernet, wifi or cellular";
+  }
+  if (c.reporting !== undefined && !isReporting(c.reporting)) {
+    return "modem.reporting must be none, iccid or iccid-and-imsi";
   }
   if (c.sim !== undefined && c.sim !== null) {
     const problem = simCardInitProblem(c.sim);
@@ -227,6 +258,7 @@ export function modemConfigProblem(config: unknown): string | null {
 export class CellularModem {
   private _present: boolean;
   private _interface: NetworkInterface;
+  private _reporting: SimReportingPolicy;
   private _sim: SimCard | null;
   private _seq: number;
   private readonly _listeners = new Set<(change: ModemChange) => void>();
@@ -245,12 +277,14 @@ export class CellularModem {
     if (problem) throw new ModemError("invalid_sim", problem);
     this._present = config.present ?? true;
     this._interface = config.networkInterface ?? "ethernet";
+    this._reporting = config.reporting ?? DEFAULT_SIM_REPORTING;
     this._seq = 0;
     this._sim = null;
     const stored = this.load();
     if (stored) {
       this._present = stored.present;
       this._interface = stored.networkInterface;
+      this._reporting = stored.reporting ?? DEFAULT_SIM_REPORTING;
       this._sim = stored.sim;
       this._seq = stored.seq;
     } else {
@@ -268,6 +302,10 @@ export class CellularModem {
     return this._interface;
   }
 
+  get reporting(): SimReportingPolicy {
+    return this._reporting;
+  }
+
   /** The card in the slot, or `null`. */
   get sim(): SimCard | null {
     return this._sim;
@@ -276,6 +314,7 @@ export class CellularModem {
   snapshot(): ModemSnapshot {
     return {
       slot: this.slot,
+      reporting: this._reporting,
       networkInterface: this._interface,
       sim: this._sim,
     };
@@ -285,6 +324,7 @@ export class CellularModem {
   redacted(): RedactedModemState {
     return {
       slot: this.slot,
+      reporting: this._reporting,
       networkInterface: this._interface,
       sim: this._sim ? redactSimCard(this._sim) : null,
     };
@@ -363,6 +403,19 @@ export class CellularModem {
     this.commit({ kind: "network_interface_changed", networkInterface });
   }
 
+  /** What the BootNotification reports of the card; see {@link projectBootIdentifiers}. */
+  setReportingPolicy(reporting: SimReportingPolicy): void {
+    if (!isReporting(reporting)) {
+      throw new ModemError(
+        "invalid_reporting_policy",
+        "reporting must be none, iccid or iccid-and-imsi",
+      );
+    }
+    if (reporting === this._reporting) return;
+    this._reporting = reporting;
+    this.commit({ kind: "reporting_policy_changed", reporting });
+  }
+
   private requireModem(): void {
     if (!this._present) {
       throw new ModemError("modem_absent", "The station has no cellular modem");
@@ -428,6 +481,7 @@ export class CellularModem {
       v: 1,
       present: this._present,
       networkInterface: this._interface,
+      reporting: this._reporting,
       sim: this._sim,
       seq: this._seq,
     };

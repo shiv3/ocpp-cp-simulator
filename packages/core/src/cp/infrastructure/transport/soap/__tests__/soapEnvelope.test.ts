@@ -50,6 +50,23 @@ describe("OCPP 1.5 SOAP envelope builder", () => {
     );
   });
 
+  it("omits iccid and imsi from the BootNotification when the payload has none (#929)", () => {
+    const xml = buildSoapEnvelope({
+      operation: "BootNotification",
+      chargeBoxIdentity: CHARGE_BOX_IDENTITY,
+      messageId: "uuid:boot-2",
+      from: CALLBACK_URL,
+      to: CENTRAL_SYSTEM_URL,
+      payload: {
+        chargePointModel: "Model-A",
+        chargePointVendor: "Vendor-A",
+      },
+    });
+    expect(xml).not.toContain("iccid");
+    expect(xml).not.toContain("imsi");
+    expect(xml).toContain("<cs:chargePointModel>Model-A</cs:chargePointModel>");
+  });
+
   it("builds the exact Heartbeat request envelope", () => {
     const xml = buildSoapEnvelope({
       operation: "Heartbeat",

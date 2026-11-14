@@ -15,6 +15,7 @@ sources:
   - "issue #311"
   - "issue #627"
   - packages/core/src/cp/domain/connector/AutoTraffic.ts
+  - packages/core/src/cp/domain/connector/VehicleSettings.ts
 related:
   - ../entities/open-ev-directory.md
   - ../entities/web-console.md
@@ -25,7 +26,7 @@ related:
   - ../entities/daemon.md
   - ../entities/mcp-endpoint.md
   - ../sources/github-issues.md
-updated: 2026-11-09
+updated: 2026-11-14
 ---
 
 # Vehicle profiles
@@ -235,12 +236,24 @@ can be combined with any behavior policy, and a profile never requires one.
 
 #311 asked for a reusable `VehicleProfile` shared by the traffic generator
 and MeterValues, and was folded into #327 (one resolved operating point per
-tick, from one vehicle profile). This profile is that reusable vehicle object:
-it resolves to `EVSettings`, which every existing consumer already reads. The
-#327 refactor — one operating point computed per tick for accumulation,
-reporting and background traffic — is **not** part of #458; when it lands it
-should consume `VehicleProfile` / `resolveEvSettings` rather than add a
-second vehicle model.
+tick, from one vehicle profile). The profile resolves to `EVSettings`, which
+is the one place the vehicle lives at run time:
+
+- `VehicleSettings` (`connector/VehicleSettings.ts`) is the single definition
+  of the vehicle slice of `EVSettings` (model, battery, ceiling, curve,
+  current type, phases, attribution). `VehicleEvSettings` (what a profile
+  resolves to) is its strict form, and the auto-traffic pool's
+  `AutoTrafficVehicleSettings` is an alias of it.
+- `vehicleSettingsPatch()` is the one writer: applying a profile and the
+  traffic generator drawing a pool vehicle (`autoTrafficVehiclePatch`) both
+  replace the previous vehicle whole through the connector's EV settings.
+- `Connector.operatingPoint()` reads the vehicle back out of the same
+  settings (`vehicleTermOf`). The traffic generator and the meter model
+  therefore cannot be given two different vehicles for one connector; a test
+  (`VehicleSettings.oneVehicle.test.ts`) pins it.
+
+The operating point itself is described in
+[Scenario format → One operating point per sample](scenario-format.md).
 
 ## Licensing and attribution
 

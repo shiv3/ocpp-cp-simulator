@@ -45,11 +45,11 @@ describe("DEVICE_MODEL", () => {
     }
   });
 
-  it("registers TxStartPoint / TxStopPoint ReadOnly until timing follows them", () => {
+  it("registers TxStartPoint / TxStopPoint ReadWrite with the member sets that drive the timing (#697)", () => {
     for (const name of ["TxStartPoint", "TxStopPoint"]) {
       const v = DEVICE_MODEL.find("TxCtrlr", name);
-      expect(v?.mutability).toBe("ReadOnly");
-      expect(v?.constant).toBe(true);
+      expect(v?.mutability).toBe("ReadWrite");
+      expect(v?.allowedLists?.length).toBeGreaterThan(0);
     }
   });
 

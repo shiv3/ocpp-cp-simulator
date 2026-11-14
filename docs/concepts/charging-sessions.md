@@ -30,7 +30,7 @@ related:
   - local-authorization.md
   - power-loss.md
   - smart-charging.md
-updated: 2026-11-09
+updated: 2026-11-14
 ---
 
 # Charging sessions
@@ -293,6 +293,31 @@ Rules:
   proves one, and never sends a status for it. A reset of an idle plugged-in
   connector keeps `Preparing`.
 - The connector lock and a partial plug are not modelled.
+
+## Transaction start and stop points (#697)
+
+On OCPP 2.x `TxCtrlr.TxStartPoint` and `TxStopPoint` (ReadWrite, 2.x only; the
+accepted member sets are in [the device model](../entities/device-model.md))
+time the TransactionEvents. The defaults reproduce the timing before they were
+writable, so no existing transcript changes.
+
+| Setting                                                   | Behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TxStartPoint` `Authorized` (default)                     | `Started` follows the authorization (local start or RequestStartTransaction).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `TxStartPoint` `EVConnected`, or `Authorized,EVConnected` | A plug-in of an idle, Operative `Available` connector (`evPlugIn`) sends `Started` (triggerReason `CablePluggedIn`, chargingState `EVConnected`, no `idToken`; the earlier of the two start points wins, which is the plug-in). The transaction is `awaitingAuthorization`. A later tag (after its Authorize when `AuthorizeBeforeLocalStart` is on) or RequestStartTransaction is an `Updated` event (triggerReason `Authorized` / `RemoteStart` with the `idToken`, the `remoteStartId`, chargingState `Charging`) and the energy starts. A denied Authorize keeps the transaction waiting. |
+| `TxStopPoint` `Authorized,EVConnected` (default)          | A tag stop, RequestStopTransaction, a deauthorization and the cable unplug each end the transaction (`Ended`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `TxStopPoint` `EVConnected`                               | An authorization ending (a tag stop, RequestStopTransaction, a deauthorization: triggerReasons `StopAuthorized`, `RemoteStop`, `Deauthorized`; F03.FR.02, C15.FR.03) sends `Updated` with that triggerReason and chargingState `SuspendedEVSE`, and the energy stops; the transaction stays open and the cable unplug sends `Ended` (`EVCommunicationLost`, `EVDisconnected`). A second authorization ending while it waits sends nothing. Every other stop cause (timeout, power loss, EV disconnect, reset) still ends the transaction.                                                     |
+
+Decisions: `EVConnectionTimeOut` also bounds the wait for an idToken after a
+cable start (the timer runs while the connector is in `Preparing`; on expiry the
+transaction ends with `EVConnectTimeout` / `Timeout`). An `Updated` event for an
+authorization ending carries no `stoppedReason` (the transaction has not
+stopped), and the `Ended` at the unplug carries the unplug's own. With
+`StopTxOnEVSideDisconnect=false` an unplug does not end the transaction
+whatever the stop point (it goes `SuspendedEV`, as before). `TxStartPoint` /
+`TxStopPoint` sets that need a power-path, energy-transfer or parking-bay
+signal the simulator does not model are not accepted. 1.6 has no start or stop
+points.
 
 ## EV-side disconnect and connection loss
 

@@ -709,7 +709,7 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           },
           "variableAttribute": [
             {
-              "mutability": "ReadOnly",
+              "mutability": "ReadWrite",
               "type": "Actual",
               "value": "Authorized",
             },
@@ -717,7 +717,7 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           "variableCharacteristics": {
             "dataType": "MemberList",
             "supportsMonitoring": true,
-            "valuesList": "Authorized",
+            "valuesList": "Authorized,EVConnected",
           },
         },
         {
@@ -729,7 +729,7 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           },
           "variableAttribute": [
             {
-              "mutability": "ReadOnly",
+              "mutability": "ReadWrite",
               "type": "Actual",
               "value": "Authorized,EVConnected",
             },

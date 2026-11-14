@@ -17,6 +17,7 @@ import { variablesRequestLimitViolation } from "./variablesRequestLimits";
 import { unknownMeasurands } from "./measurandEnum";
 import {
   DEVICE_MODEL,
+  sameMembers,
   type DeviceModelVariableDef,
 } from "../../../domain/device-model/DeviceModelRegistry";
 
@@ -58,7 +59,19 @@ export function variableValueRejection(
       );
     }
   }
-  return checkVariableValue(def, value);
+  const rejected = checkVariableValue(def, value);
+  if (rejected !== undefined || def.allowedLists === undefined) return rejected;
+  // #697: a member set the simulator does not implement.
+  const members = value
+    .split(",")
+    .map((m) => m.trim())
+    .filter((m) => m !== "");
+  return def.allowedLists.some((l) => sameMembers(l, members))
+    ? undefined
+    : statusInfo(
+        REASON.invalidValue,
+        `Supported: ${def.allowedLists.map((l) => l.join(",")).join(" | ")}`,
+      );
 }
 
 /**

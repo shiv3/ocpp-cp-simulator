@@ -591,6 +591,20 @@ export const ConfigurationKeys = {
       type: "integer",
       min: 0,
     } as IntegerConfigurationKey,
+    // #697: `TxCtrlr.TxStartPoint` / `TxStopPoint`, the events that start and
+    // end a transaction. 2.x only.
+    TxStartPoint: {
+      name: "TxStartPoint",
+      required: false,
+      readonly: false,
+      type: "array",
+    } as ArrayConfigurationKey,
+    TxStopPoint: {
+      name: "TxStopPoint",
+      required: false,
+      readonly: false,
+      type: "array",
+    } as ArrayConfigurationKey,
     // #607: OCPP 2.x transaction-end metering (Part 2 Appendices, chapter 3).
     // `SampledDataCtrlr.TxStartedMeasurands` lists the measurands of the
     // Started event; empty keeps the energy register alone. 2.x only.
@@ -883,6 +897,11 @@ export const defaultConfiguration: (cp: ChargePoint) => Configuration = (
     // SendDuringIdle); the defaults add nothing to the messages.
     ...(isOcpp2Version(cp.ocppVersion)
       ? [
+          arrVal(ConfigurationKeys.Custom.TxStartPoint, ["Authorized"]),
+          arrVal(ConfigurationKeys.Custom.TxStopPoint, [
+            "Authorized",
+            "EVConnected",
+          ]),
           arrVal(ConfigurationKeys.Custom.TxStartedMeasurands, []),
           intVal(ConfigurationKeys.Custom.TxEndedInterval, 0),
           intVal(ConfigurationKeys.Custom.AlignedDataTxEndedInterval, 0),

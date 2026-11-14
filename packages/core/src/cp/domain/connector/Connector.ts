@@ -1705,9 +1705,11 @@ export class Connector {
     this.energyOfferSuspendedValue = false;
     // A transaction means an EV on the cable (#453): a start without a prior
     // plug-in, and a restored transaction, imply one.
+    // `ev_ready(false)` recorded before the start stays (1.6 §4.9 B4: the EV
+    // is not ready, so the session goes to SuspendedEV, #846).
+    if (!this.evCableConnected) this.evReadyValue = true;
     this.evCableConnected = true;
     this.ensureVehicleSession();
-    this.evReadyValue = true;
     this.energyHeldForInvalidId = false;
     this.invalidIdHoldAtWh = null;
     this.openSessionSoc(this.txView ?? transaction);

@@ -662,6 +662,67 @@ const VARIABLES: readonly DeviceModelVariableDef[] = [
     default: "Authorized,EVConnected",
     constant: true,
   }),
+  // #704: variables Part 2 §2 marks "Required yes". Each is ReadOnly unless
+  // the simulator has behavior behind a write (#604 rule, #569).
+  // §2.2: the profile in force; upgrading by SetVariables would need the
+  // A05 reconnect, which only ChangeConfiguration (1.6) drives, so ReadOnly.
+  persistent("SecurityCtrlr", "SecurityProfile", "SecurityProfile", {
+    mutability: "ReadOnly",
+    dataType: "integer",
+    min: 0,
+    max: 3,
+    default: 0,
+  }),
+  // §2.2: the CPO name; the simulator puts it in no certificate request, so
+  // ReadOnly. Shares the 1.6 key CpoName.
+  persistent("SecurityCtrlr", "OrganizationName", "CpoName", {
+    mutability: "ReadOnly",
+    dataType: "string",
+    default: "",
+  }),
+  // A01.FR.01/02: the password the next connection uses for HTTP Basic
+  // authentication. It is the 1.6 AuthorizationKey; never readable.
+  persistent("SecurityCtrlr", "BasicAuthPassword", "AuthorizationKey", {
+    mutability: "WriteOnly",
+    dataType: "string",
+    default: "",
+    effect:
+      "The next connection authenticates with it (HTTP Basic, profiles 1 and 2).",
+  }),
+  // §2.1: the file transfer is simulated (no bytes move), so the station
+  // names the two protocols a CSMS location normally uses.
+  runtime("OCPPCommCtrlr", "FileTransferProtocols", "FileTransferProtocols", {
+    dataType: "MemberList",
+    valuesList: ["HTTP", "HTTPS"],
+    default: "HTTP,HTTPS",
+    constant: true,
+  }),
+  // §2.1: 1.6 UnlockConnectorOnEVSideDisconnect; the simulated connector
+  // has no lock to release, so it is reported and not writable.
+  persistent(
+    "OCPPCommCtrlr",
+    "UnlockOnEVSideDisconnect",
+    "UnlockConnectorOnEVSideDisconnect",
+    { mutability: "ReadOnly", dataType: "boolean", default: true },
+  ),
+  // §2.5: the station's own clock, read live; the time comes from the
+  // CSMS (BootNotification / Heartbeat), so the only source is Heartbeat.
+  runtime("ClockCtrlr", "DateTime", RUNTIME_VALUE_KEYS.clockDateTime, {
+    dataType: "string",
+  }),
+  runtime("ClockCtrlr", "TimeSource", "ClockTimeSource", {
+    dataType: "OptionList",
+    valuesList: ["Heartbeat"],
+    default: "Heartbeat",
+    constant: true,
+  }),
+  // §2.4 (with the local list): how many entries the list holds.
+  runtime(
+    "LocalAuthListCtrlr",
+    "Entries",
+    RUNTIME_VALUE_KEYS.localAuthListEntries,
+    { dataType: "integer", min: 0 },
+  ),
   // #605: the size of the NotifyReport parts of GetBaseReport / GetReport.
   runtime(
     "DeviceDataCtrlr",

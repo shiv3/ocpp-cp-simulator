@@ -1046,6 +1046,7 @@ export class ChargePoint {
     if (isOcpp2Version(this._ocppVersion)) {
       this.wireVariableMonitoring();
       this.wireCertificateEntries();
+      this.wireClockAndLocalList();
       this.wireRenewedClientIdentity();
     }
     // A persisted override never fires onChange; the scheduler only runs
@@ -1383,6 +1384,21 @@ export class ChargePoint {
       (c) => c.hasRunningTransaction,
     );
     return active.length === 1 ? running(active[0]) : undefined;
+  }
+
+  /**
+   * #704: 2.x `ClockCtrlr.DateTime` reads the station clock on every read;
+   * `LocalAuthListCtrlr.Entries` follows the local list.
+   */
+  private wireClockAndLocalList(): void {
+    this._configuration.defineLiveKey(RUNTIME_VALUE_KEYS.clockDateTime, () =>
+      this.nowDate().toISOString(),
+    );
+    const key = RUNTIME_VALUE_KEYS.localAuthListEntries;
+    this._configuration.defineRuntimeIntegerKey(key, 0, { min: 0 });
+    this._localAuthListManager.onChange((entries) => {
+      this._configuration.setRuntimeValue(key, entries);
+    });
   }
 
   /**

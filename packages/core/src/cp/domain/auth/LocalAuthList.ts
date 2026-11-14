@@ -56,10 +56,20 @@ export class LocalAuthListManager {
   /** Keyed by {@link idTokenKey}: an idTag is case insensitive (#452). */
   private list: Map<string, LocalAuthorizationEntry> = new Map();
   private version = 0;
+  private readonly changeListeners = new Set<(entries: number) => void>();
   private readonly logger: Logger;
 
   constructor(logger: Logger) {
     this.logger = logger;
+  }
+
+  /** Called after every accepted update with the new entry count (#704). */
+  onChange(listener: (entries: number) => void): void {
+    this.changeListeners.add(listener);
+  }
+
+  private notifyChanged(): void {
+    for (const l of this.changeListeners) l(this.list.size);
   }
 
   getVersion(): number {
@@ -113,6 +123,7 @@ export class LocalAuthListManager {
       `Local auth list replaced (version=${listVersion}, entries=${this.list.size})`,
       LogType.OCPP,
     );
+    this.notifyChanged();
     return "Accepted";
   }
 
@@ -164,12 +175,14 @@ export class LocalAuthListManager {
       `Local auth list diff applied (version=${listVersion}, entries=${this.list.size})`,
       LogType.OCPP,
     );
+    this.notifyChanged();
     return "Accepted";
   }
 
   dispose(): void {
     this.list.clear();
     this.version = 0;
+    this.changeListeners.clear();
   }
 }
 

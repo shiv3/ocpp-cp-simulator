@@ -83,7 +83,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])("Device Model registry (%s)", (v) => {
         getVariableData: [
           {
             component: { name: "ClockCtrlr" },
-            variable: { name: "TimeSource" },
+            variable: { name: "NoSuchVariable" },
           },
           { component: { name: "NoSuchCtrlr" }, variable: { name: "X" } },
         ],

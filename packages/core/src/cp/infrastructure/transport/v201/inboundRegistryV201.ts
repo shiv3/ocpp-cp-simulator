@@ -78,6 +78,7 @@ import { matchesComponentVariable } from "../../../domain/monitoring/selectMonit
 import type { SignedCertificateUse } from "../../../domain/security/certificateUse";
 import type { Logger } from "../../../shared/Logger";
 import { buildBaseReportData, selectReportBase } from "./baseReportV201";
+import { filterByComponentCriteria } from "./reportCriteria";
 import { splitIntoSizedParts } from "./reportParts";
 import {
   DEVICE_DATA_CTRLR_KEYS,
@@ -383,8 +384,12 @@ export function handleGetReportV201(
     );
   }
 
-  // componentCriteria is ignored because the flat configuration store does not
-  // model Active/Available/Enabled/Problem state.
+  // B08.FR.05/07-10/13 (#701): the criteria narrow the components, ANDed
+  // with the componentVariable filter above.
+  if (req.componentCriteria && req.componentCriteria.length > 0) {
+    reportData = filterByComponentCriteria(reportData, req.componentCriteria);
+  }
+
   const first = reportData[0];
   if (first === undefined) {
     return {

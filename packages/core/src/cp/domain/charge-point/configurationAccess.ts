@@ -86,12 +86,13 @@ function render(entry: ConfigurationValue): string {
 function describe(
   entry: ConfigurationValue,
   is2x: boolean,
+  hostReadOnly = false,
 ): ConfigurationKeyInfo | null {
   const base = {
     key: entry.key.name,
     value: render(entry),
     type: entry.key.type,
-    readonly: entry.key.readonly,
+    readonly: entry.key.readonly || hostReadOnly,
   } as const;
   // The 1.6 flag set has no write-only; the store's rule (`AuthorizationKey`)
   // is reported the way 2.x does so a client can hide the value.
@@ -105,11 +106,11 @@ function describe(
   return {
     ...base,
     // The registry decides in 2.x; a pinned test keeps it equal to the flag.
-    readonly: def.mutability === "ReadOnly",
+    readonly: def.mutability === "ReadOnly" || hostReadOnly,
     component: def.component,
     variable: def.variable,
     ...(def.instance === undefined ? {} : { instance: def.instance }),
-    mutability: def.mutability,
+    mutability: hostReadOnly ? "ReadOnly" : def.mutability,
   };
 }
 
@@ -123,7 +124,11 @@ export function readConfigurationKeys(
   const infos: ConfigurationKeyInfo[] = [];
   const missing = [...unknown];
   for (const entry of known) {
-    const info = describe(entry, is2x);
+    const info = describe(
+      entry,
+      is2x,
+      store.isReadOnlyOnThisHost(entry.key.name),
+    );
     if (info) infos.push(info);
     // A key outside the Device Model is "unknown" only when it was asked for;
     // a full read lists what is registered and nothing else.
@@ -150,7 +155,7 @@ export function writeConfigurationKey(
 ): ConfigurationSetStatus {
   const entry = store.get(key);
   if (!entry) throw new UnknownConfigurationKeyError(key);
-  const info = describe(entry, is2x);
+  const info = describe(entry, is2x, store.isReadOnlyOnThisHost(key));
   if (!info) throw new UnknownConfigurationKeyError(key);
   if (info.readonly || info.mutability === "ReadOnly") {
     throw new ConfigurationWriteRejectedError(key, "read_only");

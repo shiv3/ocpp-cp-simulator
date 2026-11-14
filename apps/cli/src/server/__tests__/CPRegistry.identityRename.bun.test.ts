@@ -7,7 +7,10 @@ import { startMockCsms } from "@ocpp-cp-simulator/core/cp/infrastructure/transpo
 import type { MockCsms } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/__tests__/mockCsms";
 import type { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
 
+import { identityRenameTimings } from "@ocpp-cp-simulator/core/cp/domain/charge-point/chargePointIdentity";
+
 import { CPRegistry } from "../CPRegistry";
+import { NetworkSimManager } from "../NetworkSimManager";
 import { EventBus } from "../eventBus";
 
 /** #924: rename a charge point through ChangeConfiguration, applied at reboot. */
@@ -16,6 +19,7 @@ const csmsList: MockCsms[] = [];
 const databases: BunSqliteDatabase[] = [];
 
 afterEach(async () => {
+  while (timers.length > 0) clearInterval(timers.pop());
   while (registries.length > 0) registries.pop()?.shutdownAll();
   while (databases.length > 0) databases.pop()?.close();
   while (csmsList.length > 0) await csmsList.pop()?.stop();
@@ -55,6 +59,26 @@ async function acceptBoot(csms: MockCsms): Promise<void> {
     interval: 300,
   });
 }
+
+/** The mock only answers 2.x StatusNotifications; 1.6 CALLs are serial, so
+ *  answer them or the next CALL never leaves the station. */
+function answerStatusNotifications(csms: MockCsms): void {
+  const answered = new Set<string>();
+  const timer = setInterval(() => {
+    for (const f of csms.received) {
+      if (
+        f[0] === 2 &&
+        f[2] === "StatusNotification" &&
+        !answered.has(f[1] as string)
+      ) {
+        answered.add(f[1] as string);
+        csms.replyCallResult(f[1] as string, {});
+      }
+    }
+  }, 10);
+  timers.push(timer);
+}
+const timers: ReturnType<typeof setInterval>[] = [];
 
 const change = (csms: MockCsms, key: string, value: string) =>
   call(csms, "ChangeConfiguration", { key, value });
@@ -264,5 +288,221 @@ describe("ChargePointIdentity rename (#924)", () => {
       "T-2",
     ]);
     expect(chargePointOf(restored, "T-1").pendingIdentity).toBeNull();
+  });
+
+  /** Boots a box with the CSMS accepting, answers Authorize / Start, leaves a
+   *  transaction open and a rename pending. */
+  async function boxWithOpenTransaction(
+    registry: CPRegistry,
+    csms: MockCsms,
+    cpId: string,
+    newId: string,
+  ): Promise<void> {
+    registry.create({ cpId, wsUrl: csms.url, ...INIT }, { seedDefault: false });
+    registry
+      .get(cpId)
+      ?.connect()
+      .catch(() => undefined);
+    await acceptBoot(csms);
+    answerStatusNotifications(csms);
+    expect((await change(csms, "ChargePointIdentity", newId)).status).toBe(
+      "RebootRequired",
+    );
+    const started = chargePointOf(registry, cpId).startTransaction("TAG", 1);
+    const auth = await csms.waitForCall("Authorize");
+    csms.replyCallResult(auth.messageId, {
+      idTagInfo: { status: "Accepted" },
+    });
+    const start = await csms.waitForCall("StartTransaction");
+    csms.replyCallResult(start.messageId, {
+      transactionId: 77,
+      idTagInfo: { status: "Accepted" },
+    });
+    await started;
+  }
+
+  it("with a transaction open, waits for the StopTransaction to be acknowledged before the rebuild", async () => {
+    const csms = startMockCsms();
+    csmsList.push(csms);
+    const db = BunSqliteDatabase.open(":memory:");
+    databases.push(db);
+    const registry = new CPRegistry(new EventBus(), db);
+    registries.push(registry);
+    await boxWithOpenTransaction(registry, csms, "TX-OLD", "TX-NEW");
+
+    expect((await call(csms, "Reset", { type: "Soft" })).status).toBe(
+      "Accepted",
+    );
+    // The stop is on the wire under the OLD identity and unanswered: the
+    // station has not been rebuilt, nothing dialed the new identity.
+    const stop = await csms.waitForCall("StopTransaction");
+    await new Promise((r) => setTimeout(r, 400));
+    expect(csms.requestPaths).toEqual(["/TX-OLD"]);
+    expect(registry.list()).toEqual(["TX-OLD"]);
+
+    csms.replyCallResult(stop.messageId, { idTagInfo: { status: "Accepted" } });
+    const stopIndex = csms.received.findIndex(
+      (f) => f[2] === "StopTransaction",
+    );
+    await csms.waitForFrame(
+      (f) =>
+        f[2] === "BootNotification" && csms.received.indexOf(f) > stopIndex,
+      5000,
+    );
+    expect(csms.requestPaths).toEqual(["/TX-OLD", "/TX-NEW"]);
+    expect(registry.list()).toEqual(["TX-NEW"]);
+    // Nothing unsettled moved to the new identity.
+    expect(
+      db.get<{ n: number }>(
+        "SELECT COUNT(*) AS n FROM pending_messages WHERE cp_id = 'TX-NEW'",
+      )?.n,
+    ).toBe(0);
+    expect(csms.received.filter((f) => f[2] === "StopTransaction").length).toBe(
+      1,
+    );
+  });
+
+  it("falls back to rebooting as the old identity when the stop is never acknowledged", async () => {
+    const csms = startMockCsms();
+    csmsList.push(csms);
+    const registry = new CPRegistry(new EventBus(), null);
+    registries.push(registry);
+    const saved = { ...identityRenameTimings };
+    identityRenameTimings.pollMs = 20;
+    identityRenameTimings.drainTimeoutMs = 300;
+    try {
+      await boxWithOpenTransaction(registry, csms, "FB-OLD", "FB-NEW");
+      const bootsBefore = csms.received.filter(
+        (f) => f[2] === "BootNotification",
+      ).length;
+      await call(csms, "Reset", { type: "Soft" });
+      const stop = await csms.waitForCall("StopTransaction");
+      // Not answered for longer than the timeout: the rename is cancelled.
+      await new Promise((r) => setTimeout(r, 700));
+      expect(chargePointOf(registry, "FB-OLD").pendingIdentity).toBeNull();
+      // The reboot (serial CALLs) goes out once the stop is settled.
+      csms.replyCallResult(stop.messageId, {
+        idTagInfo: { status: "Accepted" },
+      });
+      await csms.waitForFrame(
+        (f) =>
+          f[2] === "BootNotification" &&
+          csms.received.filter((x) => x[2] === "BootNotification").length >
+            bootsBefore,
+        5000,
+      );
+      expect(csms.requestPaths).toEqual(["/FB-OLD"]);
+      expect(registry.list()).toEqual(["FB-OLD"]);
+      expect(chargePointOf(registry, "FB-OLD").pendingIdentity).toBeNull();
+    } finally {
+      Object.assign(identityRenameTimings, saved);
+    }
+  });
+
+  it("a failure while moving rows rolls everything back: nothing is half renamed", async () => {
+    const csms = startMockCsms();
+    csmsList.push(csms);
+    const db = BunSqliteDatabase.open(":memory:");
+    databases.push(db);
+    const manager = new NetworkSimManager(db, {
+      listLiveWsCpIds: () => [],
+      applyToCp: () => undefined,
+      triggerCpDisconnect: () => ({ ok: false, error: "unused" }),
+    });
+    const registry = new CPRegistry(new EventBus(), db);
+    registry.setNetworkSimManager(manager);
+    registries.push(registry);
+    registry.create(
+      { cpId: "RB-OLD", wsUrl: csms.url, ...INIT },
+      { seedDefault: false },
+    );
+    manager.saveCp("RB-OLD", {
+      enabled: false,
+      seed: 456,
+      rules: {
+        disconnect: { type: "manual-disconnect", reconnectDelayMs: 5000 },
+      },
+    });
+    db.run(
+      "INSERT INTO scenario_runs (cp_id, run_id, connector_id, scenario_id, started_at, ended_at, execution_state, verdict, summary_json, report_json) VALUES ('RB-OLD', 'r1', 1, 's', 't', 't', 'done', 'pass', '{\"cpId\":\"RB-OLD\"}', '{\"cpId\":\"RB-OLD\"}')",
+    );
+    const wsBefore = db.get<{ ws_url: string }>(
+      "SELECT ws_url FROM charge_points WHERE cp_id = 'RB-OLD'",
+    )?.ws_url;
+    const kvBefore = db.all("SELECT key, value FROM kv ORDER BY key");
+
+    // Failure injection: the last statement of the transaction (the session
+    // JSON rewrite) throws, after every other step has run.
+    const realRun = db.run.bind(db);
+    db.run = ((sql: string, params?: unknown[]) => {
+      if (sql.includes("UPDATE charging_sessions SET")) {
+        throw new Error("injected failure");
+      }
+      return realRun(sql, params as never);
+    }) as typeof db.run;
+    expect(() => registry.renameIdentity("RB-OLD", "RB-NEW")).toThrow(
+      "injected failure",
+    );
+    db.run = realRun as typeof db.run;
+
+    expect(registry.list()).toEqual(["RB-OLD"]);
+    for (const table of ["charge_points", "configuration", "scenario_runs"]) {
+      expect(
+        db.get<{ n: number }>(
+          `SELECT COUNT(*) AS n FROM ${table} WHERE cp_id = 'RB-NEW'`,
+        )?.n,
+      ).toBe(0);
+    }
+    expect(
+      db.get<{ ws_url: string }>(
+        "SELECT ws_url FROM charge_points WHERE cp_id = 'RB-OLD'",
+      )?.ws_url,
+    ).toBe(wsBefore);
+    expect(
+      db.get<{ s: string }>(
+        "SELECT summary_json AS s FROM scenario_runs WHERE cp_id = 'RB-OLD'",
+      )?.s,
+    ).toContain("RB-OLD");
+    expect(db.all("SELECT key, value FROM kv ORDER BY key")).toEqual(kvBefore);
+  });
+
+  it("without a state database the rename works and CSMS-changed configuration carries over", async () => {
+    const csms = startMockCsms();
+    csmsList.push(csms);
+    const registry = new CPRegistry(new EventBus(), null);
+    registries.push(registry);
+    registry.create(
+      { cpId: "ND-OLD", wsUrl: csms.url, ...INIT },
+      { seedDefault: false },
+    );
+    registry
+      .get("ND-OLD")
+      ?.connect()
+      .catch(() => undefined);
+    await acceptBoot(csms);
+    expect((await change(csms, "HeartbeatInterval", "123")).status).toBe(
+      "Accepted",
+    );
+    expect((await change(csms, "ChargePointIdentity", "ND-NEW")).status).toBe(
+      "RebootRequired",
+    );
+    const bootsBefore = csms.received.filter(
+      (f) => f[2] === "BootNotification",
+    ).length;
+    await call(csms, "Reset", { type: "Soft" });
+    await csms.waitForFrame(
+      (f) =>
+        f[2] === "BootNotification" &&
+        csms.received.filter((x) => x[2] === "BootNotification").length >
+          bootsBefore,
+      5000,
+    );
+    expect(csms.requestPaths).toEqual(["/ND-OLD", "/ND-NEW"]);
+    expect(registry.list()).toEqual(["ND-NEW"]);
+    expect(
+      chargePointOf(registry, "ND-NEW").configuration.getInteger(
+        "HeartbeatInterval",
+      ),
+    ).toBe(123);
   });
 });

@@ -15,7 +15,10 @@ import type {
 } from "./Configuration";
 import { ConfigurationKeys, defaultConfiguration } from "./Configuration";
 import type { ChargePoint } from "./ChargePoint";
-import { CHARGE_POINT_IDENTITY_KEY } from "./chargePointIdentity";
+import {
+  CHARGE_POINT_IDENTITY_KEY,
+  PENDING_IDENTITY_OVERRIDE,
+} from "./chargePointIdentity";
 import {
   isSignedMeterMode,
   type SignedMeterMode,
@@ -23,6 +26,7 @@ import {
 import {
   NoopConfigurationOverrideRepository,
   type ConfigurationOverrideRepository,
+  type StoredConfigurationOverride,
 } from "../persistence/ConfigurationOverrideRepository";
 
 /**
@@ -90,6 +94,7 @@ export class ConfigurationStore {
    * nothing in the key (the key keeps showing its current value). Without a
    * host that renames the charge point, `ChargePointIdentity` is Rejected (#924).
    */
+  private identityRenamable = false;
   private readonly changeInterceptors = new Map<
     string,
     (rawValue: string) => ConfigurationChangeStatus
@@ -579,6 +584,16 @@ export class ConfigurationStore {
   ): void {
     if (handler) this.changeInterceptors.set(name, handler);
     else this.changeInterceptors.delete(name);
+    if (name === CHARGE_POINT_IDENTITY_KEY)
+      this.identityRenamable = handler !== null;
+  }
+
+  /** Whether the host of this charge point can rename it (#924). Until a
+   *  host installs its handler `ChargePointIdentity` is reported read-only,
+   *  because every write to it is answered Rejected (standalone CLI, browser
+   *  local mode, SOAP). */
+  isReadOnlyOnThisHost(name: string): boolean {
+    return name === CHARGE_POINT_IDENTITY_KEY && !this.identityRenamable;
   }
 
   /** The raw stored override of `name`, or null (also when it is not a key). */
@@ -597,6 +612,29 @@ export class ConfigurationStore {
       this.overrides.save(name, value);
     } catch (err) {
       console.error("Failed to persist config override:", err);
+    }
+  }
+
+  /** The raw overrides stored for this charge point (the CSMS-changed
+   *  values), without the pending identity: what a rebuild must carry over
+   *  when there is no state database to read them back from (#924). */
+  storedOverrides(): StoredConfigurationOverride[] {
+    try {
+      return this.overrides
+        .loadAll()
+        .filter((row) => row.key !== PENDING_IDENTITY_OVERRIDE);
+    } catch (err) {
+      console.error("Failed to read config overrides:", err);
+      return [];
+    }
+  }
+
+  /** Put {@link storedOverrides} of another instance back: stored and applied
+   *  like at construction. */
+  restoreStoredOverrides(rows: readonly StoredConfigurationOverride[]): void {
+    for (const { key, value } of rows) {
+      this.writeStoredOverride(key, value);
+      this.applyStoredOverride(key, value);
     }
   }
 

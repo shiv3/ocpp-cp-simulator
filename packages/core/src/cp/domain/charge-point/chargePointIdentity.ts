@@ -40,6 +40,18 @@ export function chargePointIdentityRejection(
   return undefined;
 }
 
+/**
+ * #924: how a rename that waits for the outbox to drain behaves. `pollMs`:
+ * how often it looks again; `drainTimeoutMs`: how long the transaction
+ * messages of the reset may stay unsettled before the rename is cancelled and
+ * the box reboots as its current identity. Mutable only so that tests can
+ * shorten them.
+ */
+export const identityRenameTimings = {
+  pollMs: 100,
+  drainTimeoutMs: 30_000,
+};
+
 /** What the host that owns a charge point's identity provides. */
 export interface IdentityRenameHost {
   /** Whether another charge point of this simulator already has `id`. */

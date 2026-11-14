@@ -13,11 +13,18 @@ import { PENDING_IDENTITY_OVERRIDE } from "@ocpp-cp-simulator/core/cp/domain/cha
  *
  * The pending-identity row of the `configuration` table is dropped: the
  * rename it asked for has now happened.
+ *
+ * `alsoInTransaction` runs after the table updates and before COMMIT, on the
+ * same connection: whatever else must move with the identity (the
+ * `charge_points` URL columns, the `cpId` copies inside stored JSON, the
+ * network simulation `kv` row) goes there, so that a failure anywhere rolls
+ * all of it back and nothing is left half renamed.
  */
 export function renameChargePointRows(
   db: Database,
   oldId: string,
   newId: string,
+  alsoInTransaction?: () => void,
 ): void {
   if (oldId === newId) return;
   const taken = db.get<{ n: number }>(
@@ -36,6 +43,7 @@ export function renameChargePointRows(
       newId,
       PENDING_IDENTITY_OVERRIDE,
     ]);
+    alsoInTransaction?.();
     db.exec("COMMIT");
   } catch (err) {
     try {

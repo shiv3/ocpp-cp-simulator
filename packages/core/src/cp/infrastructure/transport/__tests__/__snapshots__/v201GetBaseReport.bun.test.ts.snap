@@ -612,7 +612,7 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           },
           "variableAttribute": [
             {
-              "mutability": "ReadWrite",
+              "mutability": "ReadOnly",
               "type": "Actual",
               "value": "CP201-BASE-REPORT",
             },

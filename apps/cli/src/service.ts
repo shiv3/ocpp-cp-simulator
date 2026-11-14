@@ -1110,6 +1110,15 @@ export class CLIChargePointService {
     this._chargePoint.enableIdentityRename(host);
   }
 
+  /** The configuration the CSMS changed, for a rebuild without a database (#924). */
+  configurationOverridesSnapshot(): { key: string; value: string }[] {
+    return this._chargePoint.storedConfigurationOverrides();
+  }
+
+  restoreConfigurationOverrides(rows: { key: string; value: string }[]): void {
+    this._chargePoint.restoreConfigurationOverrides(rows);
+  }
+
   /** The identity that the next reboot activates (#924), or null. */
   get pendingIdentity(): string | null {
     return this._chargePoint.pendingIdentity;

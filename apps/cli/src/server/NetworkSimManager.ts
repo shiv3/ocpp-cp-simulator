@@ -225,10 +225,24 @@ export class NetworkSimManager {
   /** A charge point's identity changed (#924): its own network simulation
    *  layer follows it (memory and the `kv` row). */
   onCpRenamed(oldId: string, newId: string): void {
+    this.persistCpRenamed(oldId, newId);
+    this.moveCpRenamedInMemory(oldId, newId);
+  }
+
+  /** The memory half of {@link onCpRenamed}: cannot fail, so the registry
+   *  runs it once the rows have committed. */
+  moveCpRenamedInMemory(oldId: string, newId: string): void {
     const config = this.perCp.get(oldId);
     if (config === undefined) return;
     this.perCp.delete(oldId);
     this.perCp.set(newId, config);
+  }
+
+  /** The `kv` half of {@link onCpRenamed}: the registry runs it inside the
+   *  transaction that renames the rows, so a failure rolls it back. */
+  persistCpRenamed(oldId: string, newId: string): void {
+    const config = this.perCp.get(oldId);
+    if (config === undefined) return;
     if (this.database) {
       this.database.run("DELETE FROM kv WHERE key = ?", [
         `networkSim:cp:${oldId}`,

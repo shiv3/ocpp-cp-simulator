@@ -142,7 +142,10 @@ describe("configuration key access (#612)", () => {
         expect(def, k.key).toBeDefined();
         expect(k.component).toBe(def?.component);
         expect(k.variable).toBe(def?.variable);
-        expect(k.mutability).toBe(def?.mutability);
+        // #924: ChargePointIdentity is ReadOnly where no host can rename.
+        expect(k.mutability).toBe(
+          k.key === "ChargePointIdentity" ? "ReadOnly" : def?.mutability,
+        );
       }
       expect(keys.find((k) => k.key === "HeartbeatInterval")).toMatchObject({
         component: "OCPPCommCtrlr",

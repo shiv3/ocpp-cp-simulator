@@ -793,6 +793,12 @@ export class OCPPMessageHandler {
     this._delivery.salvageOnClose();
   }
 
+  /** #924: a CALL is still queued, in flight or waiting for a resend, or a
+   *  message waits in the offline queue. */
+  public hasUnsettledMessages(): boolean {
+    return this._delivery.hasUnsettledCalls() || this._pendingQueue.size() > 0;
+  }
+
   /** See {@link SerialCallQueueV16.queueUnansweredTransactionCall}: §3.7 /
    *  errata 3.36, called by a graceful daemon shutdown. Returns whether a
    *  CALL was queued. */

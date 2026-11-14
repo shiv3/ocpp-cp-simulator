@@ -3,6 +3,8 @@ import type { ChargePoint } from "../../../../domain/charge-point/ChargePoint";
 import { defaultConfiguration } from "../../../../domain/charge-point/Configuration";
 import { ConfigurationStore } from "../../../../domain/charge-point/ConfigurationStore";
 import { chargePointIdentityRejection } from "../../../../domain/charge-point/chargePointIdentity";
+import { readConfigurationKeys } from "../../../../domain/charge-point/configurationAccess";
+import { buildBaseReportData } from "../baseReportV201";
 import { handleGetVariablesV201 } from "../getVariablesV201";
 import { handleSetVariablesV201 } from "../setVariablesV201";
 
@@ -63,6 +65,26 @@ describe("SecurityCtrlr.Identity (#924)", () => {
     const res = set(store, "NEW_ID");
     expect(res.attributeStatus).toBe("Rejected");
     expect(store.getString("ChargePointIdentity")).toBe("CP-ACTIVE");
+  });
+
+  it("is reported read-only until a host can rename, then ReadWrite", () => {
+    const store = newStore();
+    const mutability = () =>
+      readConfigurationKeys(store, true, ["ChargePointIdentity"]).keys[0];
+    expect(mutability()?.readonly).toBe(true);
+    expect(mutability()?.mutability).toBe("ReadOnly");
+    const report = buildBaseReportData(store);
+    const datum = report.find((d) => d.variable.name === "Identity");
+    expect(datum?.variableAttribute[0]?.mutability).toBe("ReadOnly");
+
+    store.setChangeInterceptor("ChargePointIdentity", () => "RebootRequired");
+    expect(mutability()?.readonly).toBe(false);
+    expect(mutability()?.mutability).toBe("ReadWrite");
+    // 1.6 view of the same store.
+    expect(
+      readConfigurationKeys(store, false, ["ChargePointIdentity"]).keys[0]
+        ?.readonly,
+    ).toBe(false);
   });
 
   it("rejects what cannot go in a URL path", () => {

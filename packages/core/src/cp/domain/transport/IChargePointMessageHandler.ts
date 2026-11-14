@@ -162,6 +162,11 @@ export interface IChargePointMessageHandler {
    *  on 2.x, the only version that reconnects for a renewed client
    *  certificate; absent means none. */
   hasTransactionMessagesInFlight?(): boolean;
+  /** #924: whether any message is unsettled: awaiting its write, its answer
+   *  or a resend, or sitting in the offline queue. A charge point is only
+   *  renamed once this is false, so that nothing is replayed under an
+   *  identity the CSMS never saw. Absent means none. */
+  hasUnsettledMessages?(): boolean;
   /** Queue the transaction-related CALL written but not answered (1.6; the
    *  2.x handler queues it on close anyway). Absent means none. */
   queueUnansweredTransactionCall?(): boolean;

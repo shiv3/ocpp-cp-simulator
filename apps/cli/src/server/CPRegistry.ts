@@ -135,6 +135,13 @@ interface CPRegistryOptions {
   readonly behaviors?: BehaviorLibrary | readonly Behavior[];
 }
 
+/** The `charge_points` URL columns a rename rewrites (#924). */
+interface StoredUrls {
+  wsUrl: string;
+  centralSystemUrl: string | null;
+  supervisionUrls: string | null;
+}
+
 export class CPRegistry {
   private readonly services = new Map<string, CLIChargePointService>();
   private readonly unsubscribes = new Map<string, () => void>();
@@ -522,16 +529,21 @@ export class CPRegistry {
             ? `${newId} is used by another charge point`
             : undefined);
         if (reason !== undefined) throw new Error(reason);
-        if (newId !== oldId) renameChargePointRows(database, oldId, newId);
-        else
+        if (newId !== oldId) {
+          // Rows, stored JSON copies and the network simulation row move in
+          // one transaction.
+          renameChargePointRows(database, oldId, newId, () => {
+            this.scenarioRuns.renameChargePoint(oldId, newId);
+            this.chargingSessions.renameChargePoint(oldId, newId);
+            this.networkSimManager?.persistCpRenamed(oldId, newId);
+          });
+          this.networkSimManager?.moveCpRenamedInMemory(oldId, newId);
+        } else {
           database.run(
             "UPDATE configuration SET value = '' WHERE cp_id = ? AND \"key\" = ?",
             [oldId, PENDING_IDENTITY_OVERRIDE],
           );
-        // The rows moved; the histories that keep a copy of the id follow.
-        this.scenarioRuns.renameChargePoint(oldId, newId);
-        this.chargingSessions.renameChargePoint(oldId, newId);
-        this.networkSimManager?.onCpRenamed(oldId, newId);
+        }
         console.log(
           `[CPRegistry] Charge point "${oldId}" renamed to "${newId}" (identity change applied at start)`,
         );
@@ -619,27 +631,53 @@ export class CPRegistry {
     const engineState = this.database
       ? undefined
       : existing.engineStateSnapshot();
+    // Without a state database nothing else carries what the CSMS changed
+    // with ChangeConfiguration across the rebuild (#924).
+    const configurationOverrides = this.database
+      ? undefined
+      : existing.configurationOverridesSnapshot();
     const column = this.storedSelection.get(oldId);
     const paramsColumn = this.storedParams.get(oldId);
 
-    // Rows first: when they cannot move nothing else has been touched.
+    // Rows first, all in ONE transaction: the table rows, the charge_points
+    // URL columns, the `cpId` inside stored run / session JSON and the
+    // network simulation row. When anything fails the transaction rolls back
+    // and nothing, in the database or in memory, has been touched.
+    const previousRow = this.database?.get<{
+      ws_url: string;
+      central_system_url: string | null;
+      supervision_urls: string | null;
+    }>(
+      "SELECT ws_url, central_system_url, supervision_urls " +
+        "FROM charge_points WHERE cp_id = ?",
+      [oldId],
+    );
+    const moveRows = (from: string, to: string, urls: StoredUrls): void => {
+      const database = this.database;
+      if (!database) return;
+      renameChargePointRows(database, from, to, () => {
+        database.run(
+          "UPDATE charge_points SET ws_url = ?, central_system_url = ?, " +
+            "supervision_urls = ? WHERE cp_id = ?",
+          [urls.wsUrl, urls.centralSystemUrl, urls.supervisionUrls, to],
+        );
+        this.scenarioRuns.renameChargePoint(from, to);
+        this.chargingSessions.renameChargePoint(from, to);
+        this.networkSimManager?.persistCpRenamed(from, to);
+      });
+    };
     if (this.database) {
-      renameChargePointRows(this.database, oldId, newId);
-      this.database.run(
-        "UPDATE charge_points SET ws_url = ?, central_system_url = ?, " +
-          "supervision_urls = ? WHERE cp_id = ?",
-        [
-          nextInit.wsUrl,
-          nextInit.centralSystemUrl ?? nextInit.wsUrl,
-          nextInit.supervisionUrls
-            ? JSON.stringify(nextInit.supervisionUrls)
-            : null,
-          newId,
-        ],
-      );
+      moveRows(oldId, newId, {
+        wsUrl: nextInit.wsUrl,
+        centralSystemUrl: nextInit.centralSystemUrl ?? nextInit.wsUrl,
+        supervisionUrls: nextInit.supervisionUrls
+          ? JSON.stringify(nextInit.supervisionUrls)
+          : null,
+      });
+    } else {
+      this.scenarioRuns.renameChargePoint(oldId, newId);
+      this.chargingSessions.renameChargePoint(oldId, newId);
     }
-    this.scenarioRuns.renameChargePoint(oldId, newId);
-    this.chargingSessions.renameChargePoint(oldId, newId);
 
     // Take the old station down like update() does, then bring the new up.
     this.unsubscribes.get(oldId)?.();
@@ -655,23 +693,36 @@ export class CPRegistry {
     existing.cleanup();
     if (column !== undefined) this.storedSelection.set(newId, column);
     if (paramsColumn !== undefined) this.storedParams.set(newId, paramsColumn);
-    this.networkSimManager?.onCpRenamed(oldId, newId);
+    this.networkSimManager?.moveCpRenamedInMemory(oldId, newId);
 
     let svc: CLIChargePointService;
     try {
-      svc = this.instantiate(preparedInit, { engineState });
+      svc = this.instantiate(preparedInit, {
+        engineState,
+        configurationOverrides,
+      });
     } catch (error) {
       // Put the old identity back, rows and station.
       this.storedSelection.delete(newId);
       this.storedParams.delete(newId);
-      if (this.database) renameChargePointRows(this.database, newId, oldId);
-      this.scenarioRuns.renameChargePoint(newId, oldId);
-      this.chargingSessions.renameChargePoint(newId, oldId);
-      this.networkSimManager?.onCpRenamed(newId, oldId);
+      if (this.database && previousRow) {
+        moveRows(newId, oldId, {
+          wsUrl: previousRow.ws_url,
+          centralSystemUrl: previousRow.central_system_url,
+          supervisionUrls: previousRow.supervision_urls,
+        });
+      } else {
+        this.scenarioRuns.renameChargePoint(newId, oldId);
+        this.chargingSessions.renameChargePoint(newId, oldId);
+      }
+      this.networkSimManager?.moveCpRenamedInMemory(newId, oldId);
       if (column !== undefined) this.storedSelection.set(oldId, column);
       if (paramsColumn !== undefined)
         this.storedParams.set(oldId, paramsColumn);
-      const back = this.instantiate(previousInit, { engineState });
+      const back = this.instantiate(previousInit, {
+        engineState,
+        configurationOverrides,
+      });
       back.restoreScenariosFromDatabase();
       for (const { connectorId, definition } of scenarioSnapshot) {
         try {
@@ -1155,9 +1206,11 @@ export class CPRegistry {
     {
       reconcileSessions = true,
       engineState,
+      configurationOverrides,
     }: {
       reconcileSessions?: boolean;
       engineState?: ReturnType<CLIChargePointService["engineStateSnapshot"]>;
+      configurationOverrides?: { key: string; value: string }[];
     } = {},
   ): CLIChargePointService {
     const svc = new CLIChargePointService(
@@ -1187,6 +1240,9 @@ export class CPRegistry {
       applyAtReboot: (newId) => this.scheduleIdentityRename(init.cpId, newId),
     });
     if (engineState) svc.restoreEngineState(engineState);
+    if (configurationOverrides) {
+      svc.restoreConfigurationOverrides(configurationOverrides);
+    }
     try {
       svc.loadBehaviors(
         this.library.select(init.behaviors),

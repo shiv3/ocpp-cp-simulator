@@ -15,6 +15,10 @@ export const RUNTIME_VALUE_KEYS = {
   connectorState: "ConnectorAvailabilityState",
   /** `ChargingStation.AvailabilityState`. */
   chargingStationAvailabilityState: "ChargingStationAvailabilityState",
+  /** `ClockCtrlr.DateTime`: the station clock, read live (#704). */
+  clockDateTime: "ClockDateTime",
+  /** `LocalAuthListCtrlr.Entries`: the entries of the local list (#704). */
+  localAuthListEntries: "LocalAuthListEntries",
 } as const;
 
 export function evseValueKey(prefix: string, evseId: number): string {

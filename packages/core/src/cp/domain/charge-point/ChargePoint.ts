@@ -153,6 +153,7 @@ import { CertificateStore } from "../security/CertificateStore";
 import {
   checkSecurityProfileChange,
   isValidAuthorizationKey,
+  isValidBasicAuthPassword,
   isCertificateCurrentlyValid,
 } from "../security/securityProfileChange";
 import {
@@ -1030,7 +1031,11 @@ export class ChargePoint {
     }
     this.wireConfigurationListeners();
     this.wirePowerSharing(transportOptions.chargerCapabilities?.powerSharing);
-    if (!isOcpp2Version(this._ocppVersion) && this._webSocket) {
+    if (isOcpp2Version(this._ocppVersion)) {
+      // 2.x: only the BasicAuthPassword (AuthorizationKey) guard; the
+      // SecurityProfile prerequisites are the 1.6 ChangeConfiguration's (#704).
+      this.wireAuthorizationKeyGuard();
+    } else if (this._webSocket) {
       this.wireSecurityConfiguration();
     }
     // §5.2: a CP-level Unavailable set previously must survive a reboot.
@@ -1046,6 +1051,7 @@ export class ChargePoint {
     if (isOcpp2Version(this._ocppVersion)) {
       this.wireVariableMonitoring();
       this.wireCertificateEntries();
+      this.wireClockAndLocalList();
       this.wireRenewedClientIdentity();
     }
     // A persisted override never fires onChange; the scheduler only runs
@@ -1386,6 +1392,21 @@ export class ChargePoint {
   }
 
   /**
+   * #704: 2.x `ClockCtrlr.DateTime` reads the station clock on every read;
+   * `LocalAuthListCtrlr.Entries` follows the local list.
+   */
+  private wireClockAndLocalList(): void {
+    this._configuration.defineLiveKey(RUNTIME_VALUE_KEYS.clockDateTime, () =>
+      this.nowDate().toISOString(),
+    );
+    const key = RUNTIME_VALUE_KEYS.localAuthListEntries;
+    this._configuration.defineRuntimeIntegerKey(key, 0, { min: 0 });
+    this._localAuthListManager.onChange((entries) => {
+      this._configuration.setRuntimeValue(key, entries);
+    });
+  }
+
+  /**
    * #537: 2.x `SecurityCtrlr.CertificateEntries` is the number of installed
    * trust anchors, the set M05.FR.06 limits. The certificate store stays
    * the source; the configuration value follows it, so GetVariables,
@@ -1441,6 +1462,11 @@ export class ChargePoint {
    * values, which are not ChangeConfiguration requests.
    */
   private wireSecurityConfiguration(): void {
+    this.wireAuthorizationKeyGuard();
+    this.wireSecurityProfileGuard();
+  }
+
+  private wireAuthorizationKeyGuard(): void {
     // §7.2: with profile 1 or 2 the key is the Basic Auth password; one the
     // transport cannot derive it from (an empty value or one of another length) would stop
     // every later connection attempt, so it is refused and the old key kept.
@@ -1448,16 +1474,25 @@ export class ChargePoint {
       const profile = this._configuration.getInteger("SecurityProfile") ?? 0;
       if (
         (profile !== 1 && profile !== 2) ||
-        isValidAuthorizationKey(`${next}`)
+        (isOcpp2Version(this._ocppVersion)
+          ? isValidBasicAuthPassword(`${next}`)
+          : isValidAuthorizationKey(`${next}`))
       ) {
         return true;
       }
       this._logger.warn(
-        `ChangeConfiguration AuthorizationKey refused: security profile ${profile} needs a key of 16-20 bytes (32-40 hex digits, or 16-20 plain characters), whitepaper §7.2`,
+        `ChangeConfiguration AuthorizationKey refused: security profile ${profile} needs ${
+          isOcpp2Version(this._ocppVersion)
+            ? "a BasicAuthPassword of 16-40 printable characters (A00.FR.202)"
+            : "a key of 16-20 bytes (32-40 hex digits, or 16-20 plain characters), whitepaper §7.2"
+        }`,
         LogType.CONFIGURATION,
       );
       return false;
     });
+  }
+
+  private wireSecurityProfileGuard(): void {
     this._configuration.setChangeGuard("SecurityProfile", (current, next) => {
       const now = this.nowDate();
       const verdict = checkSecurityProfileChange({

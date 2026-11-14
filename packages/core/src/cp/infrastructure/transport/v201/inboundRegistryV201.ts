@@ -76,7 +76,10 @@ import type { ReportDataType } from "@ocpp-cp-simulator/ocpp/types/v201/notify-r
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { matchesComponentVariable } from "../../../domain/monitoring/selectMonitors";
 import type { SignedCertificateUse } from "../../../domain/security/certificateUse";
-import type { Logger } from "../../../shared/Logger";
+import { LogType, type Logger } from "../../../shared/Logger";
+import { REDACTED_VALUE } from "../../../shared/redaction";
+import { DEVICE_MODEL } from "../../../domain/device-model/DeviceModelRegistry";
+import type { SetVariablesResponseV201 } from "@ocpp-cp-simulator/ocpp/index";
 import { buildBaseReportData, selectReportBase } from "./baseReportV201";
 import { filterByComponentCriteria } from "./reportCriteria";
 import { splitIntoSizedParts } from "./reportParts";
@@ -283,6 +286,30 @@ function deviceModelContext(ctx: V201InboundContext): DeviceModelContext {
   };
 }
 
+/**
+ * One log line per SetVariables element. The value of a WriteOnly variable
+ * (BasicAuthPassword) is never logged (A01.FR.11/12, #704).
+ */
+function logSetVariables(
+  request: SetVariablesRequestV201,
+  response: SetVariablesResponseV201,
+  logger: Logger,
+): void {
+  request.setVariableData.forEach((data, i) => {
+    const def = DEVICE_MODEL.find(
+      data.component.name,
+      data.variable.name,
+      data.variable.instance,
+    );
+    const value =
+      def?.mutability === "WriteOnly" ? REDACTED_VALUE : data.attributeValue;
+    logger.info(
+      `SetVariables ${data.component.name}.${data.variable.name}='${value}' → ${response.setVariableResult[i]?.attributeStatus}`,
+      LogType.CONFIGURATION,
+    );
+  });
+}
+
 /** Every variable of the charge point's device model, as reported. */
 function fullReportData(ctx: V201InboundContext): ReportDataType[] {
   return buildBaseReportData(
@@ -441,13 +468,16 @@ export function buildV201InboundRegistry(): V201InboundRegistry {
       "SetVariables",
       {
         validate: isValidSetVariablesRequestV201,
-        handle: (p, ctx) => ({
-          response: handleSetVariablesV201(
-            p as SetVariablesRequestV201,
+        handle: (p, ctx) => {
+          const request = p as SetVariablesRequestV201;
+          const response = handleSetVariablesV201(
+            request,
             ctx.chargePoint.configuration,
             deviceModelContext(ctx),
-          ),
-        }),
+          );
+          logSetVariables(request, response, ctx.logger);
+          return { response };
+        },
       },
     ],
     [

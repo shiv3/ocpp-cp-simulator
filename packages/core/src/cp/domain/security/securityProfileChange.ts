@@ -42,6 +42,15 @@ export function isValidAuthorizationKey(value: string): boolean {
 }
 
 /**
+ * OCPP 2.x `SecurityCtrlr.BasicAuthPassword` (A00.FR.202): 16 to 40 printable
+ * ASCII characters, sent as-is in the Basic Authorization header. Unlike the
+ * 1.6 key it has no hex form: 32-40 hex characters are a literal password.
+ */
+export function isValidBasicAuthPassword(value: string): boolean {
+  return /^[\x21-\x7e]{16,40}$/.test(value);
+}
+
+/**
  * The checks of whitepaper ed.4 for a ChangeConfiguration of
  * `SecurityProfile`. A05.FR.01 refuses a value greater than 1 and lower than
  * or equal to the current one, and A00.FR.005 / §7.8 refuse any other

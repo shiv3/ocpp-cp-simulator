@@ -91,6 +91,10 @@ export function handleSetVariableMonitoringV201(
     if (resolved.status !== "Found") {
       return { status: resolved.status, ...echo }; // N04.FR.03, FR.04
     }
+    // A variable a monitor could leak (BasicAuthPassword) takes none (N04.FR.05).
+    if (resolved.variable.supportsMonitoring === false) {
+      return { status: "UnsupportedMonitorType", ...echo };
+    }
     const { valueKey } = resolved;
     const entry = configuration.get(valueKey);
     if (entry === undefined) {

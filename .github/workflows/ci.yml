@@ -140,6 +140,61 @@ jobs:
             ./scripts/verify-install-urls.sh --offline
           fi
 
+  # The published package runs on Node as well as Bun (#916). The `test` job
+  # above exercises the tarball with whatever its installers pick; this one
+  # pins the runtime. The `node` legs run the installed bin through its
+  # `node` shebang with Bun removed from PATH (the script fails if it is still
+  # found), on the oldest supported Node (22.13, the first with an unflagged
+  # node:sqlite), the maintenance LTS (24) and the current LTS (26); the `bun`
+  # leg runs the same tarball with `bun --bun`. Each leg builds the web
+  # console and the bundle with Bun (building needs it), packs with the
+  # `prepack` skipped, and verifies with --expect-dist so the web-console
+  # stage runs too. The Docker image and the desktop sidecar are not part of
+  # this: they stay on Bun.
+  cli-runtimes:
+    name: CLI on ${{ matrix.runtime }} ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runtime: node
+            node: "22.13.0"
+          - runtime: node
+            node: "24"
+          - runtime: node
+            node: "26"
+          - runtime: bun
+            node: "26"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .tool-versions
+
+      - name: Setup Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+        env:
+          # @open-ocpp-trace/* is on GitHub Packages (bunfig.toml).
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Build web console and CLI bundle
+        run: bun run build && bun run build:cli
+
+      - name: Pack tarball
+        run: npm pack --silent --ignore-scripts --pack-destination "$RUNNER_TEMP"
+
+      - name: Installed package runs on ${{ matrix.runtime }}
+        run: ./scripts/verify-cli-tarball.sh --expect-dist --runtime ${{ matrix.runtime }} "$RUNNER_TEMP"/ocpp-cp-simulator-*.tgz
+
   # Vitest, run once: the coverage run is the test run, and it fails the job
   # on a failing test (it used to run a second time, non-blocking, only for
   # coverage). Coverage and the JUnit report go to Codecov even when a test

@@ -120,5 +120,6 @@
   "common.daemon.saveAndSwitch": "Enregistrer et basculer",
   "common.daemon.cancel": "Annuler",
   "common.daemon.add": "Ajouter un démon",
-  "common.daemon.forget": "Oublier"
+  "common.daemon.forget": "Oublier",
+  "common.toast.region": "Notifications"
 }

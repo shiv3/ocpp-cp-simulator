@@ -120,5 +120,6 @@
   "common.daemon.saveAndSwitch": "Save and switch",
   "common.daemon.cancel": "Cancel",
   "common.daemon.add": "Add daemon",
-  "common.daemon.forget": "Forget"
+  "common.daemon.forget": "Forget",
+  "common.toast.region": "Notifications"
 }

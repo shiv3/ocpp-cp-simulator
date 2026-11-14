@@ -111,6 +111,7 @@
     "robot3": "^1.4.0",
     "socket.io": "^4.8.4",
     "socket.io-client": "^4.8.4",
+    "sonner": "^2.0.8",
     "sql.js": "^1.15.2",
     "ws": "^8.22.1",
     "xmlbuilder2": "^4.0.3",

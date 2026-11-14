@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { vi } from "vitest";
 
 import { ConsoleRoutes } from "../ConsoleApp";
+import { AppToaster } from "../../components/ui/sonner";
 import { DarkModeProvider } from "../../contexts/DarkModeContext";
 import LocationReporter, { type ReportedLocation } from "./LocationReporter";
 import { DataContext } from "../../data/providers/DataProvider";
@@ -180,6 +181,7 @@ export async function renderConsole<
               <Route path="/*" element={<ConsoleRoutes />} />
             </Routes>
           </DataContext.Provider>
+          <AppToaster />
         </DarkModeProvider>
       </MemoryRouter>,
     );

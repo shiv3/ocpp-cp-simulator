@@ -67,5 +67,9 @@
   "dashboard.filter.cps_other": "{{count}} bornes",
   "dashboard.filter.connectors_one": "{{count}} connecteur",
   "dashboard.filter.connectors_many": "{{count}} connecteurs",
-  "dashboard.filter.connectors_other": "{{count}} connecteurs"
+  "dashboard.filter.connectors_other": "{{count}} connecteurs",
+  "dashboard.logs.downloadPending": "Préparation du téléchargement des journaux…",
+  "dashboard.logs.downloadDone": "Journaux téléchargés",
+  "dashboard.logs.clearDone": "Journaux stockés effacés",
+  "dashboard.logs.clearPending": "Effacement des journaux stockés…"
 }

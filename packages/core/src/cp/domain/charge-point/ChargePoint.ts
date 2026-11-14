@@ -57,6 +57,13 @@ import type {
   SocketClose,
 } from "../transport/ChargePointSocket";
 import type { RawFrameSink } from "../transport/RawFrameSink";
+import {
+  CellularModem,
+  maskSimIdentifier,
+  type ModemChange,
+  type ModemConfig,
+  type SimCard,
+} from "../modem/CellularModem";
 import type { OcppCallActions } from "../transport/OcppCallActions";
 import type {
   ChargePointDeps,
@@ -398,6 +405,10 @@ export interface ChargePointTransportOptions {
   /** What the charger hardware delivers per connector (#327). Absent:
    *  no connector is capped. */
   readonly chargerCapabilities?: ChargerCapabilities;
+  /** Cellular modem and SIM model (#928). Absent: no modem model, and the
+   *  BootNotification keeps its static `iccid` / `imsi`. Persisted state for
+   *  the charge point's id wins over this initial state. */
+  readonly modem?: ModemConfig;
   /** Static capability profile (#618). Absent: nothing is disabled. */
   readonly capabilityProfile?: ChargePointCapabilityProfile;
   /** OCPP 1.6J only. Default `warn`. */
@@ -631,6 +642,7 @@ export class ChargePoint {
   // Network simulation summary: { enabled, manualRuleIds } when a config has
   // been applied via setNetworkSimConfig, null for SOAP CPs or when no config
   // has been applied yet.
+  private _modem: CellularModem | null = null;
   private _networkSimSummary: {
     enabled: boolean;
     manualRuleIds: string[];
@@ -735,6 +747,15 @@ export class ChargePoint {
     this._repositories = deps.repositories;
     this._fileUploader = deps.fileUploader;
     // #456: installed certificates survive a restart when state persists.
+    // #928: the initial config, or (without one) the state a restart finds.
+    this._modem = transportOptions.modem
+      ? new CellularModem(
+          this._id,
+          transportOptions.modem,
+          deps.repositories.modem,
+        )
+      : CellularModem.restore(this._id, deps.repositories.modem);
+    this._modem?.onChange((change) => this.logModemChange(change));
     this._certificateStore = new CertificateStore(
       this._repositories.certificates,
       this._clock,
@@ -4639,6 +4660,31 @@ export class ChargePoint {
       return;
     }
     this._outbox.sendStatusNotification(connectorId, connector.status);
+  }
+
+  /**
+   * The cellular modem and SIM (#928), or `null` when no modem model is
+   * configured for this station (the legacy default).
+   */
+  get modem(): CellularModem | null {
+    return this._modem;
+  }
+
+  private logModemChange(change: ModemChange): void {
+    const mask = (sim: SimCard) => maskSimIdentifier(sim.iccid) ?? "no iccid";
+    const message =
+      change.kind === "sim_inserted"
+        ? `SIM inserted: ${change.sim.simId} (iccid ${mask(change.sim)}, ${change.sim.subscription})`
+        : change.kind === "sim_removed"
+          ? `SIM removed: ${change.sim.simId} (iccid ${mask(change.sim)})`
+          : change.kind === "sim_replaced"
+            ? `SIM replaced: ${change.previous.simId} -> ${change.sim.simId} (iccid ${mask(change.sim)}, ${change.sim.subscription})`
+            : change.kind === "subscription_suspended"
+              ? `SIM subscription suspended: ${change.sim.simId}`
+              : change.kind === "subscription_activated"
+                ? `SIM subscription activated: ${change.sim.simId}`
+                : `Network interface: ${change.networkInterface}`;
+    this._logger.info(message, LogType.SYSTEM);
   }
 
   /**

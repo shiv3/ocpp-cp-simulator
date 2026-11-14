@@ -47,6 +47,8 @@ import {
   type PowerLossOptions,
   type PowerRestoreOptions,
 } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
+import { runModemCommand } from "@ocpp-cp-simulator/core/cp/domain/modem/index";
+import type { ModemCommand as ModemCommandInput } from "@ocpp-cp-simulator/contracts/modem";
 import { createChargePoint } from "@ocpp-cp-simulator/core/cp/infrastructure/charge-point/createChargePoint";
 import {
   splitStopReason,
@@ -210,6 +212,7 @@ function toChargePointSnapshot(cp: ChargePoint): ChargePointSnapshot {
         : null,
     },
     networkSim: cp.networkSimSummary(),
+    ...(cp.modem ? { modem: cp.modem.redacted() } : {}),
   };
 }
 
@@ -1607,6 +1610,19 @@ export class LocalChargePointService implements ChargePointService {
       return { ok: false, error: "not_connected" };
     }
     return cp.triggerNetworkSimDisconnect(ruleId);
+  }
+
+  async getModem(cpId: string) {
+    const cp = this.chargePoints.get(cpId);
+    if (!cp) return { ok: false as const, error: "cp_not_found" };
+    if (!cp.modem) return { ok: false as const, error: "no_modem_model" };
+    return { ok: true as const, modem: cp.modem.redacted() };
+  }
+
+  async modemCommand(cpId: string, command: ModemCommandInput) {
+    const cp = this.chargePoints.get(cpId);
+    if (!cp) return { ok: false as const, error: "cp_not_found" };
+    return runModemCommand(cp.modem, command);
   }
 
   async powerLoss(

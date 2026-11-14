@@ -13,7 +13,8 @@ related:
   - scenario-format.md
   - operational-timeline.md
   - power-loss.md
-updated: 2026-11-08
+  - cellular-modem.md
+updated: 2026-11-14
 ---
 
 # Network simulation

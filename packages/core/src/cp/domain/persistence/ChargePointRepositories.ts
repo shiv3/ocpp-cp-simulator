@@ -2,6 +2,7 @@ import type { AuthorizationCacheRepository } from "./AuthorizationCacheRepositor
 import type { CertificateRepository } from "./CertificateRepository";
 import type { ConfigurationOverrideRepository } from "./ConfigurationOverrideRepository";
 import type { ConnectorSettingsRepository } from "./ConnectorSettingsRepository";
+import type { ModemRepository } from "./ModemRepository";
 import type { PendingMessageRepository } from "./PendingMessageRepository";
 import type { VariableMonitorRepository } from "./VariableMonitorRepository";
 
@@ -21,6 +22,8 @@ export interface ChargePointRepositories {
   readonly configuration: ConfigurationOverrideRepository;
   /** Per-connector availability (`connector_settings`). */
   readonly connectorSettings: ConnectorSettingsRepository;
+  /** The cellular modem and SIM state (`kv` row `modem:<cpId>`, #928). */
+  readonly modem: ModemRepository;
   /** The undelivered transaction-related messages (`pending_messages`),
    *  read by the message handler's queue. */
   readonly pendingMessages: PendingMessageRepository;

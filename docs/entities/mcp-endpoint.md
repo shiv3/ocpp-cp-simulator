@@ -24,7 +24,7 @@ related:
   - ../concepts/operational-timeline.md
   - ../concepts/charging-sessions.md
   - ../concepts/local-authorization.md
-updated: 2026-11-08
+updated: 2026-11-14
 ---
 
 # MCP endpoint (`POST /mcp`)
@@ -121,11 +121,13 @@ they can call.
 Further tools wrap the [network simulation](../concepts/network-simulation.md)
 RPC methods:
 
-| Tool                             | RPC Method(s)                                    | Params                                                                                        |
-| -------------------------------- | ------------------------------------------------ | --------------------------------------------------------------------------------------------- |
-| `network_sim_get`                | `network_sim.global.get`, `network_sim.cp.get`   | `cpId?` — if omitted, returns global config; if set, returns per-CP config and resolved state |
-| `network_sim_set`                | `network_sim.global.save`, `network_sim.cp.save` | `cpId?`, `config` — if omitted, saves global config; if set, saves per-CP config              |
-| `network_sim_trigger_disconnect` | `network_sim.disconnect.trigger`                 | `cpId`, `ruleId` — triggers a manual-disconnect rule for the CP                               |
+| Tool                             | RPC Method(s)                                    | Params                                                                                                        |
+| -------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| `network_sim_get`                | `network_sim.global.get`, `network_sim.cp.get`   | `cpId?` — if omitted, returns global config; if set, returns per-CP config and resolved state                 |
+| `network_sim_set`                | `network_sim.global.save`, `network_sim.cp.save` | `cpId?`, `config` — if omitted, saves global config; if set, saves per-CP config                              |
+| `modem_get`                      | `modem.get`                                      | `cpId` — masked modem and SIM state ([Cellular modem and SIM](../concepts/cellular-modem.md))                 |
+| `modem_command`                  | `modem.command`                                  | `cpId`, `command`, `sim?`, `networkInterface?` — insert / remove / replace SIM, suspend / activate, interface |
+| `network_sim_trigger_disconnect` | `network_sim.disconnect.trigger`                 | `cpId`, `ruleId` — triggers a manual-disconnect rule for the CP                                               |
 
 Two more tools simulate a [power loss](../concepts/power-loss.md) (#455): `power_loss`
 (`cpId`, `restoreAfterMs?`, `transactions?`, `txResumptionTimeoutSeconds?`) wraps `power.loss`, `power_restore`

@@ -8,6 +8,7 @@ import type { DeviceModelTargets } from "../../../domain/charge-point/DeviceMode
 import { evseValueKey } from "../../../domain/charge-point/runtimeValueKeys";
 import {
   DEVICE_MODEL,
+  effectiveMutability,
   type DeviceModelRegistry,
   type DeviceModelVariableDef,
 } from "../../../domain/device-model/DeviceModelRegistry";
@@ -100,8 +101,12 @@ function reportDatum(
   component: ReportDataType["component"],
   variable: ReportDataType["variable"],
   entry: ConfigurationValue,
-  def: DeviceModelVariableDef,
+  registryDef: DeviceModelVariableDef,
 ): ReportDataType {
+  const def = {
+    ...registryDef,
+    mutability: effectiveMutability(registryDef, entry.key),
+  };
   return {
     component,
     variable,

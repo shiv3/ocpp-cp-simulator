@@ -9,7 +9,10 @@
 // which component / variable they appear. A 2.x store key without a registry
 // entry is not part of the station's Device Model: it is neither listed nor
 // writable (#569: acceptance implies implemented behavior).
-import { DEVICE_MODEL } from "../device-model/DeviceModelRegistry";
+import {
+  DEVICE_MODEL,
+  effectiveMutability,
+} from "../device-model/DeviceModelRegistry";
 import { LogType, type Logger } from "../../shared/Logger";
 import { REDACTED_VALUE } from "../../shared/redaction";
 import {
@@ -102,14 +105,15 @@ function describe(
   }
   const def = DEVICE_MODEL.byValueKey(entry.key.name);
   if (!def) return null;
+  const mutability = effectiveMutability(def, entry.key);
   return {
     ...base,
     // The registry decides in 2.x; a pinned test keeps it equal to the flag.
-    readonly: def.mutability === "ReadOnly",
+    readonly: mutability === "ReadOnly",
     component: def.component,
     variable: def.variable,
     ...(def.instance === undefined ? {} : { instance: def.instance }),
-    mutability: def.mutability,
+    mutability,
   };
 }
 
@@ -150,9 +154,18 @@ export function writeConfigurationKey(
 ): ConfigurationSetStatus {
   const entry = store.get(key);
   if (!entry) throw new UnknownConfigurationKeyError(key);
+  // The access key (#922) is no Device Model variable, so on 2.x `describe`
+  // does not know it; the operator can still write it.
   const info = describe(entry, is2x);
-  if (!info) throw new UnknownConfigurationKeyError(key);
-  if (info.readonly || info.mutability === "ReadOnly") {
+  if (!info && !store.isOperatorWritable(key)) {
+    throw new UnknownConfigurationKeyError(key);
+  }
+  // A key the station made read-only for the CSMS (#922) stays writable here.
+  if (
+    info &&
+    (info.readonly || info.mutability === "ReadOnly") &&
+    !store.isOperatorWritable(key)
+  ) {
     throw new ConfigurationWriteRejectedError(key, "read_only");
   }
   const limit = is2x
@@ -161,7 +174,7 @@ export function writeConfigurationKey(
   if (value.length > limit || (accepts && !accepts(key, value))) {
     throw new ConfigurationWriteRejectedError(key, "invalid_value");
   }
-  const status = store.applyChange(key, value);
+  const status = store.applyChange(key, value, { operator: true });
   // The CSMS-driven writes are logged; so is this one, or a changed
   // HeartbeatInterval could not be explained from the log.
   logger?.info(

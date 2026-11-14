@@ -23,12 +23,24 @@ function schedulerTick(cp: ChargePoint, connectorId: number): void {
 }
 
 describe("CLIChargePointService txUpdatedMeterValues (#347)", () => {
-  it("is off unless asked for", () => {
+  it("is on unless opted out (#551)", () => {
     const svc = new CLIChargePointService(
       testCpInit({ cpId: "CP347-default", ocppVersion: "OCPP-2.0.1" }),
     );
-    expect(chargePointOf(svc).txUpdatedMeterValues).toBe(false);
+    expect(chargePointOf(svc).txUpdatedMeterValues).toBe(true);
     expect(svc.getStatus().config?.txUpdatedMeterValues).toBeUndefined();
+  });
+
+  it("false opts out and routes scheduler ticks to sendMeterValue (#551)", () => {
+    const svc = new CLIChargePointService(
+      testCpInit({
+        cpId: "CP551-off",
+        ocppVersion: "OCPP-2.0.1",
+        txUpdatedMeterValues: false,
+      }),
+    );
+    expect(chargePointOf(svc).txUpdatedMeterValues).toBe(false);
+    expect(svc.getStatus().config?.txUpdatedMeterValues).toBe(false);
   });
 
   it("turns it on and routes scheduler ticks through sendScheduledMeterValue", () => {

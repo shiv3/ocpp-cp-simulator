@@ -21,7 +21,7 @@ related:
   - open-ev-directory.md
   - ../concepts/operational-timeline.md
   - ../concepts/charging-sessions.md
-updated: 2026-11-10
+updated: 2026-11-14
 ---
 
 # Web console (browser UI)
@@ -335,7 +335,7 @@ The charge point page (`/cp/:id`) is one column, top to bottom:
   only. The **Send periodic meter values as TransactionEvent (Updated)**
   checkbox (#550) is the `txUpdatedMeterValues` option
   ([OCPP versions and transports](../concepts/ocpp-versions-and-transports.md);
-  off by default). It is offered only for OCPP 2.0.1 and 2.1, because 1.x
+  on by default since #551; clear it to send standalone `MeterValues`). It is offered only for OCPP 2.0.1 and 2.1, because 1.x
   ignores the option, and it follows the version select. In Remote mode the
   Add and Edit forms send it with `cp.create` / `cp.update` (an Edit that
   never touched it sends back the value it read). In Local mode the config is

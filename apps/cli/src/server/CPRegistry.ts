@@ -338,10 +338,13 @@ export class CPRegistry {
           this.library,
           restored_behaviors.init.behaviors,
         ),
-        // #347: NULL — off, or a row older than the column — restores as off.
-        ...(row.tx_updated_meter_values === 1
-          ? { txUpdatedMeterValues: true }
-          : {}),
+        // #551: 0 restores the opt-out; NULL (a row older than the default
+        // flip, or one never set) and 1 restore as the default (on).
+        ...(row.tx_updated_meter_values === 0
+          ? { txUpdatedMeterValues: false }
+          : row.tx_updated_meter_values === 1
+            ? { txUpdatedMeterValues: true }
+            : {}),
         // #593: NULL, or a value this build does not know, restores as the
         // default (warn).
         ...(row.inbound_validation === "off" ||
@@ -1118,7 +1121,14 @@ export class CPRegistry {
               ? JSON.stringify(init.behaviorParams)
               : null,
         ],
-        ["tx_updated_meter_values", init.txUpdatedMeterValues ? 1 : null],
+        [
+          "tx_updated_meter_values",
+          init.txUpdatedMeterValues === undefined
+            ? null
+            : init.txUpdatedMeterValues
+              ? 1
+              : 0,
+        ],
         ["inbound_validation", init.inboundValidation ?? null],
         [
           "capability_profile",

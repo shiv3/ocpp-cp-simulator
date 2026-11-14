@@ -466,19 +466,19 @@ describe("ChargePointConfigForm", () => {
           },
         });
         expect(toggle()).not.toBeNull();
-        expect(toggle()!.getAttribute("aria-checked")).toBe("false");
+        expect(toggle()!.getAttribute("aria-checked")).toBe("true"); // #551: on by default
 
         await act(async () => toggle()!.click());
-        expect(toggle()!.getAttribute("aria-checked")).toBe("true");
+        expect(toggle()!.getAttribute("aria-checked")).toBe("false");
         await act(async () => button("Save")!.click());
         expect(onSave.mock.calls[0][0]).toMatchObject({
-          txUpdatedMeterValues: true,
+          txUpdatedMeterValues: false,
         });
 
         await act(async () => toggle()!.click());
         await act(async () => button("Save")!.click());
         expect(onSave.mock.calls[1][0]).toMatchObject({
-          txUpdatedMeterValues: false,
+          txUpdatedMeterValues: true,
         });
       });
 
@@ -494,10 +494,10 @@ describe("ChargePointConfigForm", () => {
           ...defaultChargePointConfig,
           cpId: "CP-1",
           ocppVersion: "OCPP-2.1",
-          txUpdatedMeterValues: true,
+          txUpdatedMeterValues: false,
         },
       });
-      expect(toggle()!.getAttribute("aria-checked")).toBe("true");
+      expect(toggle()!.getAttribute("aria-checked")).toBe("false");
     });
   });
 });

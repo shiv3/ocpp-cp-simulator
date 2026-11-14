@@ -94,7 +94,7 @@ describe("txUpdatedMeterValues over the control plane (#347)", () => {
     }
   });
 
-  it("cp.create without it leaves it off", async () => {
+  it("cp.create without it leaves it on (#551 default)", async () => {
     const server = await startTestServer();
     servers.push(server);
     const socket = await connectTestClient(server);
@@ -106,7 +106,7 @@ describe("txUpdatedMeterValues over the control plane (#347)", () => {
       expect(created.ok).toBe(true);
       expect(
         chargePointOf(server.registry.get("CP347-off")).txUpdatedMeterValues,
-      ).toBe(false);
+      ).toBe(true);
     } finally {
       socket.disconnect();
     }
@@ -153,7 +153,43 @@ describe("txUpdatedMeterValues on --state-db (#347)", () => {
     }
   });
 
-  it("restores a row without the column value as off", () => {
+  it("an opt-out (false) is stored as 0 and survives a restart (#551)", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    const registry = new CPRegistry(new EventBus(), db);
+    let restored: CPRegistry | null = null;
+    try {
+      registry.create(
+        {
+          cpId: "CP551-out",
+          basicAuth: null,
+          ...BASE,
+          txUpdatedMeterValues: false,
+        },
+        { seedDefault: false },
+      );
+      expect(
+        db.get<{ tx_updated_meter_values: number | null }>(
+          "SELECT tx_updated_meter_values FROM charge_points WHERE cp_id = ?",
+          ["CP551-out"],
+        ),
+      ).toEqual({ tx_updated_meter_values: 0 });
+      registry.shutdownAll();
+      restored = new CPRegistry(new EventBus(), db);
+      restored.restoreFromDatabase({ connect: false });
+      expect(restored.get("CP551-out")?.getInit().txUpdatedMeterValues).toBe(
+        false,
+      );
+      expect(
+        chargePointOf(restored.get("CP551-out")).txUpdatedMeterValues,
+      ).toBe(false);
+    } finally {
+      registry.shutdownAll();
+      restored?.shutdownAll();
+      db.close();
+    }
+  });
+
+  it("restores a row without the column value as the default (on, #551)", () => {
     const db = BunSqliteDatabase.open(":memory:");
     const registry = new CPRegistry(new EventBus(), db);
     try {
@@ -172,7 +208,7 @@ describe("txUpdatedMeterValues on --state-db (#347)", () => {
       );
       expect(
         chargePointOf(registry.get("CP347-old")).txUpdatedMeterValues,
-      ).toBe(false);
+      ).toBe(true);
     } finally {
       registry.shutdownAll();
       db.close();

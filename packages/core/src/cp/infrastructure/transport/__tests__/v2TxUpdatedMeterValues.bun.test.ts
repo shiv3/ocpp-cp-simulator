@@ -21,7 +21,7 @@ import {
  * #347: with `txUpdatedMeterValues` on, an OCPP 2.x station sends the
  * scheduler's samples taken during a transaction as
  * TransactionEvent(Updated, MeterValuePeriodic) instead of MeterValues.
- * Off by default; outside a transaction, and for every MeterValues a caller
+ * On by default since #551 (false opts out); outside a transaction, and for every MeterValues a caller
  * asks for explicitly (control plane, TriggerMessage), MeterValues stays.
  * The Started / Ended register readings say which boundary they are.
  */
@@ -67,8 +67,8 @@ describe("OCPP 2.x scheduled meter samples in TransactionEvent (#347)", () => {
           `CP347-on-${v.version}`,
           v.version,
         );
-        expect(cp.txUpdatedMeterValues).toBe(false);
-        cp.txUpdatedMeterValues = true;
+        // #551: the default is on, no setter call needed.
+        expect(cp.txUpdatedMeterValues).toBe(true);
         cp.configuration.applyChange("AuthorizeBeforeLocalStart", "false");
         cp.startTransaction("TAG-347", 1);
         await csms.waitForFrame(event("Started"));
@@ -109,7 +109,7 @@ describe("OCPP 2.x scheduled meter samples in TransactionEvent (#347)", () => {
       }
     });
 
-    it(`${v.version}: off (the default), during a transaction: MeterValues`, async () => {
+    it(`${v.version}: opted out (#551), during a transaction: MeterValues`, async () => {
       const csms = startMockCsms();
       const stop = answerEverythingElse(csms, []);
       try {
@@ -118,6 +118,7 @@ describe("OCPP 2.x scheduled meter samples in TransactionEvent (#347)", () => {
           `CP347-off-${v.version}`,
           v.version,
         );
+        cp.txUpdatedMeterValues = false;
         cp.configuration.applyChange("AuthorizeBeforeLocalStart", "false");
         cp.startTransaction("TAG-347", 1);
         await csms.waitForFrame(event("Started"));

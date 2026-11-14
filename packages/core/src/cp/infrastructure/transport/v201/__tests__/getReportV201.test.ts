@@ -169,6 +169,33 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
         );
         expect(components(kept.rows)).toEqual(new Set(["LocalAuthListCtrlr"]));
       });
+
+      it("evaluates criteria on the whole component, not just the selected variables (B08.FR.05)", () => {
+        // AuthCacheCtrlr.Enabled is false, so the component is excluded even
+        // though only its Policy variable is selected.
+        const excluded = report(
+          [
+            {
+              component: { name: "AuthCacheCtrlr" },
+              variable: { name: "Policy" },
+            },
+          ],
+          ["Enabled"],
+        );
+        expect(excluded.status).toBe("EmptyResultSet");
+        expect(excluded.rows).toEqual([]);
+        // LocalAuthListCtrlr.Enabled is true: the selected variable stays.
+        const kept = report(
+          [
+            {
+              component: { name: "LocalAuthListCtrlr" },
+              variable: { name: "Enabled" },
+            },
+          ],
+          ["Enabled"],
+        );
+        expect(kept.rows.map((r) => r[3])).toEqual(["Enabled"]);
+      });
     });
   },
 );

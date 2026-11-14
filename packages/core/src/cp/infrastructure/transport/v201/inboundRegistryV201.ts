@@ -372,7 +372,8 @@ export function handleGetReportV201(
   ctx: V201InboundContext,
 ): V201HandlerResult {
   const req = payload as GetReportRequestV201;
-  let reportData = fullReportData(ctx);
+  const allData = fullReportData(ctx);
+  let reportData = allData;
 
   if (req.componentVariable && req.componentVariable.length > 0) {
     const wanted = req.componentVariable;
@@ -385,9 +386,14 @@ export function handleGetReportV201(
   }
 
   // B08.FR.05/07-10/13 (#701): the criteria narrow the components, ANDed
-  // with the componentVariable filter above.
+  // with the componentVariable filter above; the flags are built from the
+  // full report so the selection cannot hide them.
   if (req.componentCriteria && req.componentCriteria.length > 0) {
-    reportData = filterByComponentCriteria(reportData, req.componentCriteria);
+    reportData = filterByComponentCriteria(
+      reportData,
+      req.componentCriteria,
+      allData,
+    );
   }
 
   const first = reportData[0];

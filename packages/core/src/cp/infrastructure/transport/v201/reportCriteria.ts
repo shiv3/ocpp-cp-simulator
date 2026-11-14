@@ -16,18 +16,27 @@ function componentKey(rd: ReportDataType): string {
  * has no variable of that name (B08.FR.07-09) or whose variable is `true`;
  * `Problem` holds only for a component whose `Problem` variable is `true`
  * (B08.FR.10). All rows of a satisfying component are kept; narrowing to
- * `componentVariable` is a separate, ANDed step.
+ * `componentVariable` is a separate, ANDed step; the flags are read from
+ * `allData` (the unfiltered report) so a variable selection cannot hide them.
  */
 export function filterByComponentCriteria(
   reportData: readonly ReportDataType[],
   criteria: readonly ComponentCriterion[],
+  allData: readonly ReportDataType[] = reportData,
 ): ReportDataType[] {
+  // The flags come from ALL of the device model's rows, not just the
+  // selected ones: a componentVariable filter must not hide the
+  // Enabled/Active/... variable a criterion is evaluated on (B08.FR.05).
   const flags = new Map<string, Map<string, boolean[]>>();
-  for (const rd of reportData) {
+  for (const rd of allData) {
     const key = componentKey(rd);
     const byName = flags.get(key) ?? new Map<string, boolean[]>();
     const values = byName.get(rd.variable.name) ?? [];
-    values.push(rd.variableAttribute[0]?.value === "true");
+    // The criteria flags are the Actual attribute (type absent = Actual).
+    const actual = rd.variableAttribute.find(
+      (a) => a.type === undefined || a.type === "Actual",
+    );
+    values.push(actual?.value === "true");
     byName.set(rd.variable.name, values);
     flags.set(key, byName);
   }

@@ -153,6 +153,7 @@ import { CertificateStore } from "../security/CertificateStore";
 import {
   checkSecurityProfileChange,
   isValidAuthorizationKey,
+  isValidBasicAuthPassword,
   isCertificateCurrentlyValid,
 } from "../security/securityProfileChange";
 import {
@@ -1464,12 +1465,18 @@ export class ChargePoint {
       const profile = this._configuration.getInteger("SecurityProfile") ?? 0;
       if (
         (profile !== 1 && profile !== 2) ||
-        isValidAuthorizationKey(`${next}`)
+        (isOcpp2Version(this._ocppVersion)
+          ? isValidBasicAuthPassword(`${next}`)
+          : isValidAuthorizationKey(`${next}`))
       ) {
         return true;
       }
       this._logger.warn(
-        `ChangeConfiguration AuthorizationKey refused: security profile ${profile} needs a key of 16-20 bytes (32-40 hex digits, or 16-20 plain characters), whitepaper §7.2`,
+        `ChangeConfiguration AuthorizationKey refused: security profile ${profile} needs ${
+          isOcpp2Version(this._ocppVersion)
+            ? "a BasicAuthPassword of 16-40 printable characters (A00.FR.202)"
+            : "a key of 16-20 bytes (32-40 hex digits, or 16-20 plain characters), whitepaper §7.2"
+        }`,
         LogType.CONFIGURATION,
       );
       return false;
@@ -1481,6 +1488,7 @@ export class ChargePoint {
         next: typeof next === "number" ? next : 0,
         authorizationKey:
           this._configuration.getString("AuthorizationKey") ?? "",
+        ocpp2: isOcpp2Version(this._ocppVersion),
         // Only what the TLS connection validates the CSMS with: roots that
         // InstallCertificate stored do not join its trust, so counting them
         // would accept an upgrade that cannot connect.

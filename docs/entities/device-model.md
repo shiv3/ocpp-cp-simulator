@@ -173,7 +173,7 @@ one of their variables answers `UnknownVariable`, not `UnknownComponent`.
 | `SecurityCtrlr.BasicAuthPassword`                          | `AuthorizationKey`                        | WriteOnly  | string     | –                                                      | empty                                             | Persistent  |
 | `OCPPCommCtrlr.FileTransferProtocols`                      | `FileTransferProtocols`                   | ReadOnly   | MemberList | HTTP, HTTPS                                            | HTTP,HTTPS                                        | Volatile    |
 | `OCPPCommCtrlr.UnlockOnEVSideDisconnect`                   | `UnlockConnectorOnEVSideDisconnect`       | ReadOnly   | boolean    | –                                                      | true                                              | Persistent  |
-| `ClockCtrlr.DateTime`                                      | `ClockDateTime`                           | ReadOnly   | string     | read live from the station clock (ISO 8601)            | runtime                                           | Volatile    |
+| `ClockCtrlr.DateTime`                                      | `ClockDateTime`                           | ReadOnly   | dateTime   | read live from the station clock (ISO 8601)            | runtime                                           | Volatile    |
 | `ClockCtrlr.TimeSource`                                    | `ClockTimeSource`                         | ReadOnly   | OptionList | Heartbeat                                              | Heartbeat                                         | Volatile    |
 | `LocalAuthListCtrlr.Entries`                               | `LocalAuthListEntries`                    | ReadOnly   | integer    | min 0; entries of the local list                       | 0                                                 | Volatile    |
 | `EVSE.Power`                                               | `EVSEPower`                               | ReadOnly   | decimal    | unit W                                                 | runtime                                           | Volatile    |
@@ -191,8 +191,14 @@ connector has no lock). `OfflineThreshold` was registered by #702.
 `FileTransferProtocols` is `HTTP,HTTPS` (the transfer is simulated; no protocol
 is actually spoken); `TimeSource` is `Heartbeat` (the clock follows the CSMS).
 `BasicAuthPassword` is the 1.6 `AuthorizationKey` (A01.FR.01/02): a
-`SetVariables` stores it and the next connection uses it, the same change
-guards apply (16-20 bytes at profiles 1 and 2), GetVariables answers
+`SetVariables` stores it and the next connection sends it as-is in the Basic
+`Authorization` header (on 2.x there is no hex form: 32-40 hex characters are a
+literal password, unlike the 1.6 key). At profiles 1 and 2 the change guard
+accepts 16-40 printable ASCII characters on 2.x (the 1.6 key keeps 16-20
+characters or 32-40 hex digits). The characteristics report `maxLimit` 40 and
+`supportsMonitoring` false, and `SetVariableMonitoring` on it answers
+`UnsupportedMonitorType` (a monitor could leak the value through `NotifyEvent`
+`actualValue`). GetVariables answers
 `Rejected` (B06.FR.09), the reports omit its value (B07.FR.03), and the
 station log line of a `SetVariables` shows `[REDACTED]` instead of the value
 (A01.FR.12). The Security-log event of A01.FR.11 stays the gap tracked in #839.

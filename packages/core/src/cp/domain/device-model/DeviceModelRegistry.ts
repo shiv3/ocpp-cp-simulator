@@ -25,7 +25,13 @@ export type DeviceModelMutability = "ReadOnly" | "ReadWrite" | "WriteOnly";
 
 /** The `DataEnumType` values the simulator uses. */
 export type DeviceModelDataType =
-  "string" | "integer" | "decimal" | "boolean" | "OptionList" | "MemberList";
+  | "string"
+  | "dateTime"
+  | "integer"
+  | "decimal"
+  | "boolean"
+  | "OptionList"
+  | "MemberList";
 
 export type DeviceModelDefault = string | number | boolean | readonly string[];
 
@@ -69,6 +75,17 @@ export interface DeviceModelVariableDef {
   readonly min?: number;
   readonly max?: number;
   readonly unit?: string;
+  /**
+   * `maxLimit` of a non-numeric variable: for a `string`, its maximum length
+   * (VariableCharacteristicsType). Reported only; `max` stays for numbers.
+   */
+  readonly maxLimit?: number;
+  /**
+   * `false` when no monitor may be installed on the variable (reported as
+   * `supportsMonitoring: false`; SetVariableMonitoring answers
+   * `UnsupportedMonitorType`). Defaults to true.
+   */
+  readonly supportsMonitoring?: boolean;
   /** The value of a fresh station; also the value a constant publishes. */
   readonly default?: DeviceModelDefault;
   readonly persistence: DeviceModelPersistence;
@@ -685,6 +702,10 @@ const VARIABLES: readonly DeviceModelVariableDef[] = [
   persistent("SecurityCtrlr", "BasicAuthPassword", "AuthorizationKey", {
     mutability: "WriteOnly",
     dataType: "string",
+    // 16-40 characters on 2.x (A00.FR.202, whitepaper §7.2). A monitor could
+    // leak the secret through NotifyEvent actualValue, so none is allowed.
+    maxLimit: 40,
+    supportsMonitoring: false,
     default: "",
     effect:
       "The next connection authenticates with it (HTTP Basic, profiles 1 and 2).",
@@ -708,7 +729,7 @@ const VARIABLES: readonly DeviceModelVariableDef[] = [
   // §2.5: the station's own clock, read live; the time comes from the
   // CSMS (BootNotification / Heartbeat), so the only source is Heartbeat.
   runtime("ClockCtrlr", "DateTime", RUNTIME_VALUE_KEYS.clockDateTime, {
-    dataType: "string",
+    dataType: "dateTime",
   }),
   runtime("ClockCtrlr", "TimeSource", "ClockTimeSource", {
     dataType: "OptionList",

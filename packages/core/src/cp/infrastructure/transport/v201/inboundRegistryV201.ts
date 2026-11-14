@@ -277,6 +277,14 @@ export interface V201InboundHandler {
 export type V201InboundRegistry = ReadonlyMap<string, V201InboundHandler>;
 
 /** The charge point's EVSEs and Targets, for a device-model lookup. */
+function deviceModelContext(ctx: V201InboundContext): DeviceModelContext {
+  return {
+    evseExists: (evse) => v201EvseExists(evse, ctx.chargePoint.connectors),
+    targets: ctx.chargePoint.deviceModelTargets,
+    ocppVersion: ctx.chargePoint.ocppVersion,
+  };
+}
+
 /**
  * One log line per SetVariables element. The value of a WriteOnly variable
  * (BasicAuthPassword) is never logged (A01.FR.11/12, #704).
@@ -299,14 +307,6 @@ function logSetVariables(
       LogType.CONFIGURATION,
     );
   });
-}
-
-function deviceModelContext(ctx: V201InboundContext): DeviceModelContext {
-  return {
-    evseExists: (evse) => v201EvseExists(evse, ctx.chargePoint.connectors),
-    targets: ctx.chargePoint.deviceModelTargets,
-    ocppVersion: ctx.chargePoint.ocppVersion,
-  };
 }
 
 /** Every variable of the charge point's device model, as reported. */

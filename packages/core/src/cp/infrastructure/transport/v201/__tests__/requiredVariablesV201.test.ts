@@ -5,6 +5,13 @@ import { ConfigurationStore } from "../../../../domain/charge-point/Configuratio
 import { RUNTIME_VALUE_KEYS } from "../../../../domain/charge-point/runtimeValueKeys";
 import { DEVICE_MODEL } from "../../../../domain/device-model/DeviceModelRegistry";
 import { LocalAuthListManager } from "../../../../domain/auth/LocalAuthList";
+import {
+  makeChargePoint,
+  OverrideDatabase,
+} from "../../../../domain/charge-point/__tests__/chargePointFixtures";
+import { MonitoringStore } from "../../../../domain/monitoring/MonitoringStore";
+import { buildOcppWebSocketConnectOptions } from "../../wsUrlWithBasic";
+import { handleSetVariableMonitoringV201 } from "../variableMonitoringV201";
 import { buildBaseReportData } from "../baseReportV201";
 import { handleGetVariablesV201 } from "../getVariablesV201";
 import { handleSetVariablesV201 } from "../setVariablesV201";
@@ -172,5 +179,92 @@ describe("required device-model variables (#704)", () => {
       localAuthListMaxLength: 10,
     });
     expect(get(s, "LocalAuthListCtrlr", "Entries").attributeValue).toBe("1");
+  });
+
+  describe("BasicAuthPassword on 2.x (#704)", () => {
+    const setPassword = (cp: ReturnType<typeof makeChargePoint>, v: string) =>
+      handleSetVariablesV201(
+        {
+          setVariableData: [
+            {
+              component: { name: "SecurityCtrlr" },
+              variable: { name: "BasicAuthPassword" },
+              attributeValue: v,
+            },
+          ],
+        },
+        cp.configuration,
+      ).setVariableResult[0].attributeStatus;
+
+    it.each([
+      "0123456789abcdef0123456789abcdef", // 32 hex chars: a literal password
+      "correct horse battery staple".replace(/ /g, "-"), // 28 non-hex chars
+      "x".repeat(40),
+      "y".repeat(16),
+    ])("sends %s as-is in the next connection's Basic header", (password) => {
+      const cp = makeChargePoint({
+        id: "CP-2x",
+        ocppVersion: "OCPP-2.0.1",
+        database: new OverrideDatabase({ SecurityProfile: "1" }),
+      });
+      try {
+        expect(setPassword(cp, password)).toBe("Accepted");
+        const opts = buildOcppWebSocketConnectOptions({
+          baseUrl: "wss://csms.example/ocpp/",
+          chargePointId: "CP-2x",
+          basicAuth: null,
+          ocppVersion: "OCPP-2.0.1",
+          securityProfile: 1,
+          authorizationKey: cp.configuration.getString("AuthorizationKey"),
+        });
+        expect(opts.headers.Authorization).toBe(
+          `Basic ${btoa(`CP-2x:${password}`)}`,
+        );
+      } finally {
+        cp.dispose();
+      }
+    });
+
+    it("refuses a password outside 16-40 printable characters", () => {
+      const cp = makeChargePoint({
+        ocppVersion: "OCPP-2.0.1",
+        database: new OverrideDatabase({ SecurityProfile: "1" }),
+      });
+      try {
+        expect(setPassword(cp, "short")).toBe("Rejected");
+        expect(setPassword(cp, "z".repeat(41))).toBe("Rejected");
+        expect(setPassword(cp, "has a space inside it")).toBe("Rejected");
+      } finally {
+        cp.dispose();
+      }
+    });
+
+    it("reports maxLimit 40 and no monitoring support", () => {
+      const rd = buildBaseReportData(store()).find(
+        (r) => r.variable.name === "BasicAuthPassword",
+      );
+      expect(rd?.variableCharacteristics?.maxLimit).toBe(40);
+      expect(rd?.variableCharacteristics?.supportsMonitoring).toBe(false);
+    });
+
+    it("refuses SetVariableMonitoring on it", () => {
+      const res = handleSetVariableMonitoringV201(
+        {
+          setMonitoringData: [
+            {
+              type: "Delta",
+              severity: 5,
+              value: 1,
+              component: { name: "SecurityCtrlr" },
+              variable: { name: "BasicAuthPassword" },
+            },
+          ],
+        },
+        new MonitoringStore(),
+        store(),
+        {},
+      );
+      expect(res.setMonitoringResult[0].status).toBe("UnsupportedMonitorType");
+    });
   });
 });

@@ -124,9 +124,12 @@ function reportDatum(
       // The bounds SetVariables and SetVariableMonitoring enforce (a
       // threshold outside them is ValueOutOfRange, N04.FR.06).
       ...(def.min !== undefined && { minLimit: def.min }),
-      ...(def.max !== undefined && { maxLimit: def.max }),
-      // Every registered variable accepts at least a Delta monitor (#457).
-      supportsMonitoring: true,
+      ...((def.max ?? def.maxLimit) !== undefined && {
+        maxLimit: def.max ?? def.maxLimit,
+      }),
+      // Every registered variable accepts at least a Delta monitor (#457),
+      // except one a monitor could leak (BasicAuthPassword, #704).
+      supportsMonitoring: def.supportsMonitoring !== false,
     },
   };
 }

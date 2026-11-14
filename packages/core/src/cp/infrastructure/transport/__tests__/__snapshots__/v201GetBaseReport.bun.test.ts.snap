@@ -795,7 +795,8 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           ],
           "variableCharacteristics": {
             "dataType": "string",
-            "supportsMonitoring": true,
+            "maxLimit": 40,
+            "supportsMonitoring": false,
           },
         },
         {
@@ -852,7 +853,7 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
             },
           ],
           "variableCharacteristics": {
-            "dataType": "string",
+            "dataType": "dateTime",
             "supportsMonitoring": true,
           },
         },

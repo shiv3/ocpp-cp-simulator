@@ -4,6 +4,7 @@
  * many CSMS implementations accept (e.g. `ocpp_ws_secret`). CLI runtimes (Bun
  * / Node `ws`) send the credentials as a real HTTP Basic header instead.
  */
+import { isOcpp2Version } from "../../domain/types/OcppVersion";
 import type { WsClientOptions } from "../../shared/WsClientOptions";
 import {
   OCPP_WEBSOCKET_PROTOCOL_16,
@@ -327,6 +328,7 @@ function resolveBasicAuth(params: {
   basicAuth: BasicAuthSettings | null;
   securityProfile?: OcppSecurityProfile;
   authorizationKey?: string;
+  ocppVersion?: string;
 }): BasicAuthSettings | null {
   const source = classifyBasicAuthSource({
     securityProfile: params.securityProfile,
@@ -342,9 +344,12 @@ function resolveBasicAuth(params: {
     }
     return {
       username: params.chargePointId,
-      // #260: the AuthorizationKey is stored hex; the Basic header carries its
-      // decoded (non-hex) form per TC_085_CS.
-      password: authorizationKeyToBasicPassword(params.authorizationKey),
+      // #260: the 1.6 AuthorizationKey is stored hex; the Basic header
+      // carries its decoded (non-hex) form per TC_085_CS. On 2.x the key is
+      // SecurityCtrlr.BasicAuthPassword and goes on the wire as-is (#704).
+      password: isOcpp2Version(params.ocppVersion ?? "")
+        ? params.authorizationKey
+        : authorizationKeyToBasicPassword(params.authorizationKey),
     };
   }
   return params.basicAuth; // "legacy"

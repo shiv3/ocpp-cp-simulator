@@ -87,6 +87,7 @@ export function checkVariableValue(
         : statusInfo(REASON.invalidValue, `${bad.trim()} is not a member`);
     }
     case "string":
+    case "dateTime":
       return undefined;
   }
 }

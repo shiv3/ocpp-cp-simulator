@@ -11,6 +11,8 @@ export interface SecurityProfileChangeInput {
   readonly next: number;
   /** The stored `AuthorizationKey`. */
   readonly authorizationKey: string;
+  /** The key is a 2.x BasicAuthPassword (16-40 printable characters). */
+  readonly ocpp2?: boolean;
   /** A currently valid CentralSystemRootCertificate is available. */
   readonly hasCentralSystemRoot: boolean;
   /** A currently valid ChargePointCertificate is available. */
@@ -39,6 +41,15 @@ export function isValidAuthorizationKey(value: string): boolean {
     /^(?:[0-9a-fA-F]{2}){16,20}$/.test(value) ||
     /^[\x21-\x7e]{16,20}$/.test(value)
   );
+}
+
+/**
+ * OCPP 2.x `SecurityCtrlr.BasicAuthPassword` (A00.FR.202): 16 to 40 printable
+ * ASCII characters, sent as-is in the Basic Authorization header. Unlike the
+ * 1.6 key it has no hex form: 32-40 hex characters are a literal password.
+ */
+export function isValidBasicAuthPassword(value: string): boolean {
+  return /^[\x21-\x7e]{16,40}$/.test(value);
 }
 
 /**
@@ -71,7 +82,9 @@ export function checkSecurityProfileChange(
   if (next === current) return { allowed: true, upgrade: false };
   if (
     (next === 1 || next === 2) &&
-    !isValidAuthorizationKey(input.authorizationKey)
+    !(input.ocpp2 === true
+      ? isValidBasicAuthPassword(input.authorizationKey)
+      : isValidAuthorizationKey(input.authorizationKey))
   ) {
     return {
       allowed: false,

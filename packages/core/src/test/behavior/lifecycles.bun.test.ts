@@ -423,6 +423,28 @@ describe("reboot after the update (#600)", () => {
     expect(run.callsOf("BootNotification")).toHaveLength(1);
   });
 
+  // L01.FR.07 (#871): idle EVSEs stay held Unavailable while the reboot waits
+  // for the running transaction.
+  test("2.x reboot wait holds idle EVSEs Unavailable with connectorsUnavailable", async () => {
+    run = await runBehavior({
+      version: "2.0.1",
+      connectors: 2,
+      behaviors: [session(8000)],
+    });
+    select(run, {
+      train: true,
+      stepMs: 100,
+      reboot: "afterInstalled",
+      connectorsUnavailable: true,
+    });
+    await run.advance(2000);
+    expect(run.cp.getConnector(1)?.transaction).toBeTruthy();
+    await run.call("UpdateFirmware", fw2(34));
+    await run.advance(3000);
+    expect(run.callsOf("BootNotification")).toHaveLength(0);
+    expect(run.cp.getConnector(2)?.availability).toBe("Inoperative");
+  });
+
   // B01.FR.09 (#846): the reboot after a firmware update says so.
   test("2.x reboots after a firmware update with BootNotification reason FirmwareUpdate", async () => {
     run = await runBehavior({ version: "2.0.1" });

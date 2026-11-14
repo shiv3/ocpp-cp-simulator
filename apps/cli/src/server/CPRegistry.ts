@@ -342,7 +342,9 @@ export class CPRegistry {
         // flip, or one never set) and 1 restore as the default (on).
         ...(row.tx_updated_meter_values === 0
           ? { txUpdatedMeterValues: false }
-          : {}),
+          : row.tx_updated_meter_values === 1
+            ? { txUpdatedMeterValues: true }
+            : {}),
         // #593: NULL, or a value this build does not know, restores as the
         // default (warn).
         ...(row.inbound_validation === "off" ||

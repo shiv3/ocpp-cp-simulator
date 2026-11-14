@@ -17,6 +17,7 @@ import { variablesRequestLimitViolation } from "./variablesRequestLimits";
 import { unknownMeasurands } from "./measurandEnum";
 import {
   DEVICE_MODEL,
+  effectiveMutability,
   type DeviceModelVariableDef,
 } from "../../../domain/device-model/DeviceModelRegistry";
 
@@ -184,7 +185,12 @@ export function handleSetVariablesV201(
       context.ocppVersion,
     );
     if (badValue !== undefined) return rejected(badValue);
-    if (def.mutability === "ReadOnly") {
+    const entry = store.get(v16Key);
+    if (
+      def.mutability === "ReadOnly" ||
+      (entry !== undefined &&
+        effectiveMutability(def, entry.key) === "ReadOnly")
+    ) {
       return rejected(statusInfo(REASON.readOnly)); // B05.FR.09
     }
 

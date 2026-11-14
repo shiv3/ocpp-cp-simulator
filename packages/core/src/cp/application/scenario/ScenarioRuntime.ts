@@ -1000,7 +1000,7 @@ export const createScenarioExecutorCallbacks = (
       chargePoint.clearCertificateQuirks();
     },
     onConfigSet: (key, value) => {
-      chargePoint.configuration.applyChange(key, value);
+      chargePoint.configuration.applyChange(key, value, { operator: true });
     },
     onSendOcppCall: (request) => chargePoint.sendOcppCall(request),
     onNotify: (kind, status, requestId) => {

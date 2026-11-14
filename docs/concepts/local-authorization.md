@@ -27,7 +27,7 @@ related:
   - control-plane.md
   - ../entities/mcp-endpoint.md
   - operational-timeline.md
-updated: 2026-11-10
+updated: 2026-11-14
 ---
 
 # Local authorization
@@ -50,17 +50,31 @@ too: a remote start is authorized the same way (list, cache, then
 `false`) is true — 1.6 §5.11, 2.x F01 (#762, #921); see
 [default behaviors](../entities/default-behaviors.md).
 
+The accessibility of that key is the station's choice (1.6 §9.1.3, 2.0.1 Part 2
+§2.3.4). The simulator custom key `AuthorizeRemoteTxRequestsReadOnly`
+(boolean, default `false` = read-write, #922) makes it read-only: a
+`ChangeConfiguration` is `Rejected`, a `SetVariables` is `Rejected` with reason
+code `ReadOnly`, and `GetConfiguration` / `GetBaseReport` / the operator's key
+list report it read-only. It applies at once, without a reboot. The operator
+(`set_config_key`, CLI, a scenario `configSet`) can still write the value of
+the read-only key, so a read-only `true` station is reachable: set the value
+first or later, the CSMS cannot change it. The custom key is not a Device Model
+variable (like `AuthorizeBeforeLocalStart`), so a CSMS cannot see or flip it;
+on 2.x it is set by a scenario `configSet` or a persisted override, not by
+`SetVariables`.
+
 ## Configuration keys
 
-| Key                          | Default | Effect                                                                                 |
-| ---------------------------- | ------- | -------------------------------------------------------------------------------------- |
-| `AuthorizationCacheEnabled`  | `false` | Consult and fill the Authorization Cache (1.6 §9.1.2)                                  |
-| `LocalAuthListEnabled`       | `true`  | Consult the Local Authorization List                                                   |
-| `LocalPreAuthorize`          | `false` | Online: start for a valid local entry without Authorize.req (§9.1.13)                  |
-| `LocalAuthorizeOffline`      | `true`  | Offline: start for a valid local entry (§9.1.12)                                       |
-| `AllowOfflineTxForUnknownId` | `false` | Offline: start for an identifier neither the list nor the cache knows (§3.5.4)         |
-| `AuthorizeBeforeLocalStart`  | `true`  | Simulator key: run this gate at all (#181)                                             |
-| `StopTransactionOnInvalidId` | `true`  | Unchanged by #452: what a non-Accepted StartTransaction.conf does to a running session |
+| Key                                 | Default | Effect                                                                                 |
+| ----------------------------------- | ------- | -------------------------------------------------------------------------------------- |
+| `AuthorizationCacheEnabled`         | `false` | Consult and fill the Authorization Cache (1.6 §9.1.2)                                  |
+| `LocalAuthListEnabled`              | `true`  | Consult the Local Authorization List                                                   |
+| `LocalPreAuthorize`                 | `false` | Online: start for a valid local entry without Authorize.req (§9.1.13)                  |
+| `LocalAuthorizeOffline`             | `true`  | Offline: start for a valid local entry (§9.1.12)                                       |
+| `AllowOfflineTxForUnknownId`        | `false` | Offline: start for an identifier neither the list nor the cache knows (§3.5.4)         |
+| `AuthorizeBeforeLocalStart`         | `true`  | Simulator key: run this gate at all (#181)                                             |
+| `AuthorizeRemoteTxRequestsReadOnly` | `false` | Simulator key: make `AuthorizeRemoteTxRequests` read-only for the CSMS (#922)          |
+| `StopTransactionOnInvalidId`        | `true`  | Unchanged by #452: what a non-Accepted StartTransaction.conf does to a running session |
 
 ## Decision
 

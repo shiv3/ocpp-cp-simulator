@@ -6,7 +6,7 @@ import { Logger, LogLevel } from "../../../shared/Logger";
 import { autoTrafficVehiclePatch } from "../AutoTraffic";
 import { Connector } from "../Connector";
 import { vehicleTermOf } from "../OperatingPoint";
-import { vehicleSettingsPatch, type VehicleSettings } from "../VehicleSettings";
+import type { VehicleSettings } from "../VehicleSettings";
 import {
   applyVehicleSettings,
   type VehicleEvSettings,
@@ -82,15 +82,108 @@ describe("one vehicle for the traffic generator and the meter model (#327)", () 
     expect(c.evSettings.currentType).toBeUndefined();
   });
 
-  it("auto-traffic's patch is the shared one (no second writer of the slice)", () => {
-    const vehicle: VehicleSettings = PROFILE_RESOLVED;
-    expect(autoTrafficVehiclePatch({ weight: 2, vehicle })).toEqual(
-      vehicleSettingsPatch(vehicle),
-    );
-    const dir = dirname(fileURLToPath(import.meta.url));
-    const source = readFileSync(join(dir, "..", "AutoTraffic.ts"), "utf8");
-    expect(source).not.toMatch(/batteryCapacityKwh:\s*v\./);
-    expect(source).toContain("vehicleSettingsPatch(");
+  const AC_A: VehicleEvSettings = {
+    modelName: "AC car",
+    batteryCapacityKwh: 40,
+    maxChargingPowerKw: 11,
+    chargingCurve: [],
+    currentType: "AC",
+    phases: 3,
+    attribution: [
+      {
+        text: "A",
+        licenseName: "CC-BY-4.0",
+        licenseUrl: "u",
+        shareAlike: false,
+      },
+    ],
+  };
+  const DC_B: VehicleEvSettings = { ...PROFILE_RESOLVED, attribution: [] };
+  const DC_C: VehicleEvSettings = {
+    modelName: "Bare",
+    batteryCapacityKwh: 30,
+    maxChargingPowerKw: 50,
+    chargingCurve: [],
+    currentType: "DC",
+    attribution: [],
+  };
+  const VEHICLES = [AC_A, DC_B, DC_C];
+
+  // The invariant behind "one writer": whichever vehicles were applied before,
+  // the connector ends up exactly as if the last one had been applied to a
+  // fresh connector, through either entry point.
+  it.each([
+    [
+      "profile apply",
+      (c: Connector, v: VehicleEvSettings) => {
+        c.evSettings = applyVehicleSettings(c.evSettings, v);
+      },
+    ],
+    [
+      "pool patch",
+      (c: Connector, v: VehicleEvSettings) => {
+        c.applyEvSettingsOverride(
+          autoTrafficVehiclePatch({ weight: 1, vehicle: v }),
+        );
+      },
+    ],
+  ])(
+    "%s: any sequence equals the last vehicle on a fresh connector",
+    (_n, apply) => {
+      for (const first of VEHICLES) {
+        for (const second of VEHICLES) {
+          for (const last of VEHICLES) {
+            const seq = connector();
+            apply(seq, first);
+            apply(seq, second);
+            apply(seq, last);
+            const fresh = connector();
+            apply(fresh, last);
+            expect(seq.evSettings).toEqual(fresh.evSettings);
+            expect(vehicleTermOf(seq.evSettings)).toEqual(
+              vehicleTermOf(fresh.evSettings),
+            );
+          }
+        }
+      }
+    },
+  );
+
+  it("both entry points leave the same settings for the same vehicle sequence", () => {
+    for (const first of VEHICLES) {
+      for (const last of VEHICLES) {
+        const viaProfile = connector();
+        viaProfile.evSettings = applyVehicleSettings(
+          viaProfile.evSettings,
+          first,
+        );
+        viaProfile.evSettings = applyVehicleSettings(
+          viaProfile.evSettings,
+          last,
+        );
+        const viaPool = connector();
+        for (const v of [first, last]) {
+          viaPool.applyEvSettingsOverride(
+            autoTrafficVehiclePatch({ weight: 1, vehicle: v }),
+          );
+        }
+        expect(viaProfile.evSettings).toEqual(viaPool.evSettings);
+      }
+    }
+  });
+
+  it("a DC profile applied after an AC one keeps nothing of the AC vehicle (regression)", () => {
+    const c = connector();
+    c.evSettings = applyVehicleSettings(c.evSettings, AC_A);
+    expect(c.evSettings.phases).toBe(3);
+    c.evSettings = applyVehicleSettings(c.evSettings, DC_C);
+    expect(c.evSettings.phases).toBeUndefined();
+    expect(c.evSettings.attribution ?? []).toEqual([]);
+    expect(c.evSettings.modelName).toBe("Bare");
+    expect(c.evSettings.currentType).toBe("DC");
+    expect(c.evSettings.chargingCurve ?? []).toEqual([]);
+    // The plain result carries no stale phases either (the web console form).
+    expect(applyVehicleSettings({ phases: 3 }, DC_C).phases).toBeUndefined();
   });
 
   it("VehicleSettings.ts is protocol-agnostic", () => {

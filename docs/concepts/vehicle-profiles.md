@@ -242,15 +242,20 @@ is the one place the vehicle lives at run time:
 - `VehicleSettings` (`connector/VehicleSettings.ts`) is the single definition
   of the vehicle slice of `EVSettings` (model, battery, ceiling, curve,
   current type, phases, attribution). `VehicleEvSettings` (what a profile
-  resolves to) is its strict form, and the auto-traffic pool's
+  resolves to) is derived from it (the same type with the curve, current type
+  and attribution required), and the auto-traffic pool's
   `AutoTrafficVehicleSettings` is an alias of it.
-- `vehicleSettingsPatch()` is the one writer: applying a profile and the
-  traffic generator drawing a pool vehicle (`autoTrafficVehiclePatch`) both
-  replace the previous vehicle whole through the connector's EV settings.
+- `vehicleSettingsPatch()` is the one writer: `applyVehicleSettings` (the web
+  console's vehicle select) and the traffic generator drawing a pool vehicle
+  (`autoTrafficVehiclePatch`) both build the vehicle part from it and replace
+  the previous vehicle whole. A field the new vehicle lacks is removed, so a DC
+  vehicle applied after an AC one keeps no phase count (nor the AC vehicle's
+  attribution).
 - `Connector.operatingPoint()` reads the vehicle back out of the same
   settings (`vehicleTermOf`). The traffic generator and the meter model
   therefore cannot be given two different vehicles for one connector; a test
-  (`VehicleSettings.oneVehicle.test.ts`) pins it.
+  (`VehicleSettings.oneVehicle.test.ts`) pins it by applying vehicle
+  sequences to one connector and comparing with a fresh connector.
 
 The operating point itself is described in
 [Scenario format → One operating point per sample](scenario-format.md).

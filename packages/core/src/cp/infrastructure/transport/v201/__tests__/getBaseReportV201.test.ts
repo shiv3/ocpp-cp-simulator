@@ -90,7 +90,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])("%s GetBaseReport", (ocppVersion) => {
       );
     expect(writable).toBe(true);
     expect(ids).toContain("OCPPCommCtrlr.HeartbeatInterval");
-    expect(ids).not.toContain("TxCtrlr.TxStartPoint");
+    expect(ids).toContain("TxCtrlr.TxStartPoint");
     expect(ids).not.toContain("ChargingStation.AvailabilityState");
     expect(ids.length).toBeLessThan(run("FullInventory").ids.length);
   });

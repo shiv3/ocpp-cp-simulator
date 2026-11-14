@@ -254,7 +254,15 @@ export class TransactionMessagesV201 {
       ...(transaction.reservationId !== undefined
         ? { reservationId: transaction.reservationId }
         : {}),
-      idToken: this.wireIdToken(transaction.tagId, transaction.idTokenType),
+      // #697: a transaction the cable started has no idToken yet.
+      ...(transaction.awaitingAuthorization
+        ? {}
+        : {
+            idToken: this.wireIdToken(
+              transaction.tagId,
+              transaction.idTokenType,
+            ),
+          }),
       evse: v201TransactionEvse(connectorId),
       meterValue: [
         {
@@ -555,9 +563,20 @@ export class TransactionMessagesV201 {
         ...(options.chargingState
           ? { chargingState: options.chargingState }
           : {}),
+        ...(options.remoteStartId !== undefined
+          ? { remoteStartId: options.remoteStartId }
+          : {}),
       },
       ...(transaction.reservationId !== undefined
         ? { reservationId: transaction.reservationId }
+        : {}),
+      ...(options.idToken
+        ? {
+            idToken: this.wireIdToken(
+              options.idToken.tagId,
+              options.idToken.type,
+            ),
+          }
         : {}),
       evse: v201TransactionEvse(connectorId),
       ...(meterValue ? { meterValue } : {}),

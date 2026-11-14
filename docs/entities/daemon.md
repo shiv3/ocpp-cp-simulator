@@ -1,7 +1,7 @@
 ---
 title: Daemon (server mode)
 type: entity
-summary: The long-lived Bun process that hosts many charge points and exposes one Socket.IO control plane, health, optional web-console assets, SOAP callbacks, and the MCP endpoint over a single HTTP port.
+summary: The long-lived Node or Bun process that hosts many charge points and exposes one Socket.IO control plane, health, optional web-console assets, SOAP callbacks, and the MCP endpoint over a single HTTP port.
 sources:
   - apps/cli/src/server/
   - apps/cli/src/main.ts
@@ -22,12 +22,12 @@ related:
   - open-ev-directory.md
   - ../concepts/vehicle-profiles.md
   - ../concepts/charger-engine.md
-updated: 2026-11-09
+updated: 2026-11-14
 ---
 
 # Daemon (server mode)
 
-The simulator can run as a long-lived Bun process. A single daemon can host
+The simulator can run as a long-lived process on Node >= 22.13 or on Bun (#916; [CLI → Runtimes](cli.md#runtimes)). A single daemon can host
 **many charge points** concurrently and exposes one Socket.IO control plane for
 the browser UI, the bundled CLI client, and external agents. The wire contract
 of that control plane is documented in [Control plane](../concepts/control-plane.md);

@@ -73,7 +73,7 @@ export interface ChainCheckInput {
 }
 
 /**
- * Validity of every chain member, Certificate Properties of the leaf, and
+ * Validity of every chain member, Certificate Properties (key, serial and O of every member, the CN rule of the leaf), and
  * the hierarchy. The leaf's own validity is reported first so the outcome
  * names the certificate the CSMS most likely meant.
  *

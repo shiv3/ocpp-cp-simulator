@@ -23,7 +23,7 @@ related:
   - access-control.md
   - scenario-format.md
   - state-persistence.md
-updated: 2026-11-10
+updated: 2026-11-14
 ---
 
 # OCPP 1.6 security profiles
@@ -538,10 +538,11 @@ CALLERROR.
      passed, or whose `notBefore` is still ahead, is `Rejected` on 2.0.1 and
      2.1 alike (the A02.FR.06 texts are identical). The current date is
      the station's clock.
-  2. _Certificate Properties of the leaf_ (A00.FR.501-511, the SHALL rules):
-     an RSA key of at least 2048 bits or an elliptic curve of at least 224
+  2. _Certificate Properties_ (A00.FR.501-511, the SHALL rules; the key, serial
+     and `O` checks apply to every chain member, the `CN` rule to the leaf
+     only): an RSA key of at least 2048 bits or an elliptic curve of at least 224
      bits (A00.FR.502/503), a serial number (A00.FR.508), an `O` RDN
-     (A00.FR.509), and for the Charging Station certificate a `CN` that is
+     (A00.FR.509), and for the leaf of a Charging Station certificate a `CN` that is
      not a URL or an IP address (A00.FR.511). The SHOULD rules (signature
      algorithm, hash, Key Usage; A00.FR.505/506/512) are not checked.
   3. _Hierarchy_ (Certificate Hierarchy, A00.FR.6xx): each member must be

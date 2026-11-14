@@ -37,6 +37,7 @@ import {
 import { subscribeResultSchema } from "./envelope";
 import { VEHICLE_METHODS, vehicleCatalogInfoSchema } from "./vehicle";
 import { labelsSchema } from "./labels";
+import { modemCommandSchema, modemConfigSchema } from "./modem";
 import { transportConfigSchema } from "./transportConfig";
 import {
   ID_TOKEN_TYPE_VALUES as ID_TOKEN_TYPES,
@@ -482,6 +483,11 @@ const cpParamsBaseSchema = z.object({
   labels: labelsSchema.optional(),
   behaviors: behaviorIdsSchema.optional(),
   behaviorParams: behaviorParamsSchema.optional(),
+  modem: modemConfigSchema
+    .optional()
+    .describe(
+      "Cellular modem and SIM (#928). Omit for no modem model: the BootNotification keeps its static iccid/imsi. State persisted for the id (--state-db) wins over this initial state, so cp.update does not reset a swapped card; use the modem.* methods to change it",
+    ),
   chargerCapabilities: chargerCapabilitiesSchema
     .optional()
     .describe(
@@ -1512,6 +1518,10 @@ export const METHODS = {
     result: ANY,
   },
 
+  // -- cellular modem and SIM (#928) --
+  "modem.get": { params: z.object({ cpId: STR_64K }), result: ANY },
+  "modem.command": { params: modemCommandSchema, result: ANY },
+
   // -- network simulation --
   "network_sim.global.get": { params: EMPTY, result: ANY },
   "network_sim.global.save": {
@@ -1888,6 +1898,8 @@ export const EXPLICIT_METHODS = [
   "server.info",
   "events.subscribe",
   "events.unsubscribe",
+  "modem.get",
+  "modem.command",
   "network_sim.global.get",
   "network_sim.global.save",
   "network_sim.cp.get",

@@ -1,3 +1,4 @@
+import type { ModemCommand as ModemCommandInput } from "@ocpp-cp-simulator/contracts/modem";
 import type { StartTransactionOutcome } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
 import { isSoapVersion } from "@ocpp-cp-simulator/core/cp/domain/types/OcppVersion";
 import * as fs from "fs";
@@ -1074,6 +1075,20 @@ export class RegistryChargePointService implements ChargePointService {
     return manager.triggerDisconnect(cpId, ruleId);
   }
 
+  async getModem(cpId: string) {
+    const service = this.registry.get(cpId);
+    if (!service) return { ok: false as const, error: "cp_not_found" };
+    const modem = service.modemState();
+    if (!modem) return { ok: false as const, error: "no_modem_model" };
+    return { ok: true as const, modem };
+  }
+
+  async modemCommand(cpId: string, command: ModemCommandInput) {
+    const service = this.registry.get(cpId);
+    if (!service) return { ok: false as const, error: "cp_not_found" };
+    return service.modemCommand(command);
+  }
+
   async powerLoss(
     cpId: string,
     options?: PowerLossOptions,
@@ -1173,6 +1188,7 @@ function toInitOptions(
     capabilityProfile: params.capabilityProfile ?? existing?.capabilityProfile,
     chargerCapabilities:
       params.chargerCapabilities ?? existing?.chargerCapabilities,
+    modem: params.modem ?? existing?.modem,
     tls: params.tls ?? existing?.tls,
     tlsCaPath: params.tlsCaPath ?? existing?.tlsCaPath,
     tlsCertPath: params.tlsCertPath ?? existing?.tlsCertPath,
@@ -1221,6 +1237,7 @@ function toChargePointSnapshot(status: ChargePointStatus): ChargePointSnapshot {
     connectors: status.connectors.map(toConnectorSnapshot),
     heartbeat: status.heartbeat,
     networkSim: status.networkSim,
+    ...(status.modem ? { modem: status.modem } : {}),
     config: status.config
       ? {
           wsUrl: status.config.wsUrl,

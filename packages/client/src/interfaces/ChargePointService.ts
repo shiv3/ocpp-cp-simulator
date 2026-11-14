@@ -81,6 +81,10 @@ import type { TransportConfig } from "@ocpp-cp-simulator/core/cp/infrastructure/
 import type { UrlDistribution } from "@ocpp-cp-simulator/core/cp/domain/transport/UrlDistribution";
 import type { IdTagDistribution } from "@ocpp-cp-simulator/core/cp/domain/auth/IdTagPool";
 import type { Labels } from "@ocpp-cp-simulator/contracts/labels";
+import type { ModemConfig } from "@ocpp-cp-simulator/core/cp/domain/modem/CellularModem";
+import type { ModemWire as RedactedModemState } from "@ocpp-cp-simulator/contracts/events";
+import type { ModemWire } from "@ocpp-cp-simulator/contracts/events";
+import type { ModemCommand as ModemCommandInput } from "@ocpp-cp-simulator/contracts/modem";
 import type {
   FleetCreateParams,
   FleetCreateResult,
@@ -138,6 +142,9 @@ export interface ChargePointSnapshot {
   /** Network simulation summary: { enabled, manualRuleIds } when a config has
    *  been applied, null for SOAP CPs or when no config has been applied. */
   networkSim?: { enabled: boolean; manualRuleIds: string[] } | null;
+  /** Cellular modem and SIM, identifiers masked (#928); absent when the
+   *  station has no modem model. */
+  modem?: ModemWire;
   /** Init the CP was constructed with — exposed in Remote mode so the web
    *  console can prefill the "Edit CP" modal. Undefined in Local mode
    *  (the browser already owns the config) and on older daemons that
@@ -248,6 +255,9 @@ export interface CreateChargePointParams {
   /** Charger-side delivery caps per connector (#327); omitted on an update
    *  keeps the current ones. */
   chargerCapabilities?: ReadonlyChargerCapabilities;
+  /** Cellular modem and SIM (#928): initial state; persisted state wins, and
+   *  omitted on an update keeps the current model. */
+  modem?: ModemConfig;
   tls?: OcppTlsOptions;
   tlsCaPath?: string;
   tlsCertPath?: string;
@@ -600,6 +610,20 @@ export interface ChargePointService {
     cpId: string,
     ruleId: string,
   ): Promise<{ ok: true } | { ok: false; error: string }>;
+
+  /** #928: the masked modem and SIM state, or `no_modem_model`. */
+  getModem(
+    cpId: string,
+  ): Promise<
+    { ok: true; modem: RedactedModemState } | { ok: false; error: string }
+  >;
+  /** #928: one lifecycle command; a refused transition answers its typed code. */
+  modemCommand(
+    cpId: string,
+    command: ModemCommandInput,
+  ): Promise<
+    { ok: true; modem: RedactedModemState } | { ok: false; error: string }
+  >;
 
   /** #455: the station loses power (socket gone, transactions kept). */
   powerLoss(

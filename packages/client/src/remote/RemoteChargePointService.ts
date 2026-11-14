@@ -1,3 +1,5 @@
+import type { ModemWire } from "@ocpp-cp-simulator/contracts/events";
+import type { ModemCommand as ModemCommandInput } from "@ocpp-cp-simulator/contracts/modem";
 import type {
   AuthorizationCacheSeedEntry,
   AuthorizationCacheView,
@@ -256,6 +258,7 @@ function toChargePointSnapshot(s: StatusWire): ChargePointSnapshot {
         }
       : undefined,
     networkSim: s.networkSim ?? null,
+    ...(s.modem ? { modem: s.modem } : {}),
     config: s.config ? toSnapshotConfig(s.config) : undefined,
   };
 }
@@ -1989,6 +1992,24 @@ export class RemoteChargePointService implements ChargePointService {
       cpId,
       ruleId,
     })) as unknown as { ok: true } | { ok: false; error: string };
+  }
+
+  async getModem(
+    cpId: string,
+  ): Promise<{ ok: true; modem: ModemWire } | { ok: false; error: string }> {
+    return (await this.rpc("modem.get", { cpId })) as unknown as
+      { ok: true; modem: ModemWire } | { ok: false; error: string };
+  }
+
+  async modemCommand(
+    cpId: string,
+    command: ModemCommandInput,
+  ): Promise<{ ok: true; modem: ModemWire } | { ok: false; error: string }> {
+    return (await this.rpc("modem.command", {
+      ...command,
+      cpId,
+    })) as unknown as
+      { ok: true; modem: ModemWire } | { ok: false; error: string };
   }
 
   async powerLoss(

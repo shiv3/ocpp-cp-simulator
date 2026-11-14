@@ -10,6 +10,12 @@ import type {
   UploadLogStatus,
 } from "@ocpp-cp-simulator/core/cp/domain/types/FirmwareLogStatus";
 import type { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
+import {
+  runModemCommand,
+  type ModemCommandInput,
+  type ModemCommandResult,
+  type RedactedModemState,
+} from "@ocpp-cp-simulator/core/cp/domain/modem/index";
 import { createChargePoint } from "@ocpp-cp-simulator/core/cp/infrastructure/charge-point/createChargePoint";
 import type {
   AuthorizationCacheSeedEntry,
@@ -780,6 +786,7 @@ export class CLIChargePointService {
         ...(init.chargerCapabilities
           ? { chargerCapabilities: init.chargerCapabilities }
           : {}),
+        ...(init.modem ? { modem: init.modem } : {}),
         ...(init.transport?.ws ? { ws: init.transport.ws } : {}),
         ...(init.idTags ? { idTags: init.idTags } : {}),
         ...(init.idTagDistribution
@@ -1024,6 +1031,9 @@ export class CLIChargePointService {
           : null,
       },
       networkSim: this._chargePoint.networkSimSummary(),
+      ...(this._chargePoint.modem
+        ? { modem: this._chargePoint.modem.redacted() }
+        : {}),
       config: {
         wsUrl: this._init.wsUrl,
         connectors: this._init.connectors,
@@ -1209,6 +1219,16 @@ export class CLIChargePointService {
   /** #455: whether the station is without power. */
   get poweredOff(): boolean {
     return this._chargePoint.poweredOff;
+  }
+
+  /** #928: the masked modem state, or `null` without a modem model. */
+  modemState(): RedactedModemState | null {
+    return this._chargePoint.modem?.redacted() ?? null;
+  }
+
+  /** #928: one modem lifecycle command. */
+  modemCommand(command: ModemCommandInput): ModemCommandResult {
+    return runModemCommand(this._chargePoint.modem, command);
   }
 
   powerLoss(options?: PowerLossOptions): PowerLossRecord {

@@ -23,6 +23,7 @@ import {
 import type { ChargePointInitOptions } from "../types";
 import type { AutoTrafficConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/AutoTraffic";
 import type { EventBus } from "./eventBus";
+import { SqliteModemRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/SqliteModemRepository";
 import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
 import type { NetworkSimManager } from "./NetworkSimManager";
 import { OcppSecurityProfileConfigError } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/wsUrlWithBasic";
@@ -1255,6 +1256,7 @@ export class CPRegistry {
     if (this.networkSimManager) {
       this.networkSimManager.onCpDeleted(cpId);
     }
+    if (this.database) new SqliteModemRepository(cpId, this.database).delete();
     // Operator-initiated removal: drop the persisted row too. Process
     // shutdown goes through shutdownAll() instead and intentionally
     // leaves rows so restart restores them.

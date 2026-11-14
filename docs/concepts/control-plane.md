@@ -15,6 +15,7 @@ related:
   - ../entities/mcp-endpoint.md
   - network-simulation.md
   - power-loss.md
+  - cellular-modem.md
   - log-format.md
   - state-persistence.md
   - ../analyses/rest-to-socketio-migration.md
@@ -26,7 +27,7 @@ related:
   - charging-sessions.md
   - local-authorization.md
   - fleet-templates.md
-updated: 2026-11-09
+updated: 2026-11-14
 ---
 
 # Socket.IO control plane
@@ -889,6 +890,7 @@ Guarantees a conformance driver can rely on:
 | `connector_settings.soc_meter_sync.get` / `.save`                    | `{ "cpId", "connectorId" }` (+ `enabled` on save)                                                                                    | Persisted SoC↔meter sync flag: one simulator-wide value in `kv`; `cpId` / `connectorId` are accepted but not used.                                                                                                                                                                                                                                                                                        |
 | `ev_settings.apply_default`                                          | `{ "settings": object }`                                                                                                             | Push default EV settings onto every connector of every CP that has no explicit / scenario override (issue #105). Distinct from the per-CP `set_ev_settings`, which always marks an override.                                                                                                                                                                                                              |
 | `network_sim.*`                                                      | see [Network simulation → RPC methods](network-simulation.md#rpc-methods)                                                            | Global / per-CP fault-injection config and manual disconnect trigger.                                                                                                                                                                                                                                                                                                                                     |
+| `modem.get` / `modem.command`                                        | see [Cellular modem and SIM](cellular-modem.md) (`cpId`, `command`, `sim?`, `networkInterface?`)                                     | Read and change a charge point's SIM (#928).                                                                                                                                                                                                                                                                                                                                                              |
 | `power.loss` / `power.restore`                                       | see [Power loss and transaction recovery](power-loss.md) (`cpId`, `restoreAfterMs?`, `transactions?`, `txResumptionTimeoutSeconds?`) | Simulate a power loss and its recovery (#455).                                                                                                                                                                                                                                                                                                                                                            |
 | `vehicle_profiles.list` / `.save` / `.delete`                        | see [Vehicle profiles and catalog](#vehicle-profiles-and-catalog)                                                                    | Saved [vehicle profiles](vehicle-profiles.md) (#458).                                                                                                                                                                                                                                                                                                                                                     |
 | `vehicle_catalog.*`                                                  | see [Vehicle profiles and catalog](#vehicle-profiles-and-catalog)                                                                    | Search and read the vehicle catalog through the daemon, with the daemon's API key ([Open EV Directory](../entities/open-ev-directory.md)).                                                                                                                                                                                                                                                                |

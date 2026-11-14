@@ -400,6 +400,14 @@ packaging breaks on the PR that breaks it. `apps/cli/src/build/__tests__/cliBund
 pins the same shape without `npm pack`: it builds the bundle into a directory
 outside the checkout and runs it from another one.
 
+`--runtime node|bun` (#916) pins the runtime: `node` cuts PATH down to node's
+directory (the script fails if `bun` is still found), installs with npm only
+and runs the bin through its `node` shebang; `bun` runs it with `bun --bun`.
+A `--json` status command over stdin is part of the smoke. The `cli-runtimes`
+job in `ci.yml` runs it on Node 22.13 (the floor), 24 and 26 (current LTS) and
+on Bun, with `--expect-dist`. The vitest suite stays on Node `lts/*` only: six
+test files use the global `CloseEvent`, which Node 22 lacks.
+
 The [Docker image](docker-image.md) and the desktop
 [sidecar](desktop-app.md) still run from the sources (`bun apps/cli/src/main.ts`
 and `bun build --compile apps/cli/src/main.ts`); the embedded k6 runtime serves

@@ -335,7 +335,24 @@ describe("parseArgs OCPP 1.6 security flags", () => {
     });
   });
 
-  it("--tx-updated-meter-values stays off by default (#347)", () => {
+  it("--no-tx-updated-meter-values opts out of the #551 default", () => {
+    const off = runParseArgs([
+      "--cp-id",
+      "CP-551",
+      "--ws-url",
+      "ws://csms.example.test/ocpp/",
+      "--ocpp-version",
+      "OCPP-2.0.1",
+      "--no-tx-updated-meter-values",
+    ]);
+    expect(off.status).toBe(0);
+    expect(JSON.parse(off.stdout)).toMatchObject({
+      txUpdatedMeterValues: false,
+      bootstrapTxUpdatedMeterValues: false,
+    });
+  });
+
+  it("txUpdatedMeterValues is left unset without a flag, so the default (on) applies (#551)", () => {
     const off = runParseArgs([
       "--cp-id",
       "CP-347",

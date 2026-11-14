@@ -33,11 +33,11 @@ function chargePointOf(service: LocalChargePointService, id: string) {
 }
 
 describe("LocalChargePointService txUpdatedMeterValues (#347)", () => {
-  it("is off unless the definition asks for it", async () => {
+  it("is on unless the definition opts out (#551)", async () => {
     const service = new LocalChargePointService();
     await service.syncLocalChargePoints([localDefinition()]);
     expect(chargePointOf(service, "CP-LOCAL-347").txUpdatedMeterValues).toBe(
-      false,
+      true,
     );
   });
 

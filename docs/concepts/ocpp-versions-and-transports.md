@@ -38,7 +38,7 @@ related:
   - operational-timeline.md
   - expert-ocpp-calls.md
   - variable-monitoring.md
-updated: 2026-11-09
+updated: 2026-11-14
 ---
 
 # OCPP versions and transports
@@ -985,22 +985,30 @@ OCPP 2.0.1 and 2.1 carry in-transaction sampled data
 (`SampledDataCtrlr.TxUpdatedMeasurands`, mapped to `MeterValuesSampledData`)
 in `TransactionEvent(Updated)`, and keep `MeterValuesRequest` for data
 outside a transaction. The simulator's per-connector meter-value scheduler
-sends `MeterValuesRequest` either way **by default**, because changing that
-would change the wire for every existing 2.x integration.
+puts those samples in `TransactionEvent(Updated)` **by default** (#551).
+The default flipped from the standalone `MeterValuesRequest` it had in the
+release that introduced the option (#347): this is a **wire-behaviour change**
+for every 2.x charge point that did not set the option, and a CSMS that only
+reads `MeterValues` during a transaction no longer sees the scheduler samples.
 
-A charge point created with `txUpdatedMeterValues: true` (`cp.create`,
-`cp.update`, `cp.create_many`, the MCP `cp_create` tools) or with
-`--tx-updated-meter-values` opts in. It is persisted with `--state-db`. The
+To restore the standalone `MeterValuesRequest`, set `txUpdatedMeterValues:
+false` (`cp.create`, `cp.update`, `cp.create_many`, the MCP `cp_create` tools),
+pass `--no-tx-updated-meter-values`, or clear the checkbox in the web console.
+`--tx-updated-meter-values` and `txUpdatedMeterValues: true` still work and
+are the explicit form of the default. `cp.update` without the field keeps the
+stored value. With `--state-db` an explicit `false` is stored as `0` and
+survives a restart; a row with no stored value (older than the flip, or never
+set) restores as the default, on. The
 [web console](../entities/web-console.md) has a checkbox for it on the Add and
 Edit forms of an OCPP 2.0.1 / 2.1 charge point (#550); in Local mode it is a
 setting of the shared config, so it applies to every browser charge point.
 
-| Scheduler sample, OCPP 2.x | Option off (default) | Option on                                         |
-| -------------------------- | -------------------- | ------------------------------------------------- |
-| Transaction running        | `MeterValues`        | `TransactionEvent(Updated)`, `MeterValuePeriodic` |
-| No transaction             | `MeterValues`        | `MeterValues`                                     |
+| Scheduler sample, OCPP 2.x | Option on (default)                               | Option off (opt-out) |
+| -------------------------- | ------------------------------------------------- | -------------------- |
+| Transaction running        | `TransactionEvent(Updated)`, `MeterValuePeriodic` | `MeterValues`        |
+| No transaction             | `MeterValues`                                     | `MeterValues`        |
 
-With the option on, the Updated event shares the transaction's `seqNo` and
+With the option on (the default), the Updated event shares the transaction's `seqNo` and
 goes through the [transaction message retries](#transaction-message-retries-ocpp-2x);
 its sampled values carry `context` `Sample.Periodic`, and a sample with no
 value in it sends nothing, as `MeterValues` does. The option never applies to

@@ -1762,6 +1762,34 @@ export const goldenCases: GoldenCase[] = [
     rig.cp.evDisconnected(1);
     await settle(rig);
   }),
+  // Review of #960: EVConnected alone does not start at the authorization. A
+  // tag before the plug-in is authorized and waits; the plug-in starts the
+  // transaction (Started CablePluggedIn) and the token follows as Updated.
+  c201("tx-start-ev-connected-tag-before-plugin", async (rig) => {
+    rig.cp.configuration.applyChange("TxStartPoint", "EVConnected");
+    await settle(rig);
+    await rig.startLocal("TAG-1");
+    await settle(rig);
+    rig.cp.evPlugIn(1);
+    await settle(rig);
+    rig.cp.stopTransaction(1);
+    await settle(rig);
+    rig.cp.evDisconnected(1);
+    await settle(rig);
+  }),
+  c201("tx-start-ev-connected-remote-before-plugin", async (rig) => {
+    rig.cp.configuration.applyChange("TxStartPoint", "EVConnected");
+    await settle(rig);
+    await rig.remoteStart();
+    await settle(rig);
+    rig.cp.evPlugIn(1);
+    await rig.csms.waitForCall("TransactionEvent");
+    await settle(rig);
+    await settle(rig);
+    await rig.remoteStop();
+    rig.cp.evDisconnected(1);
+    await settle(rig);
+  }),
   // The earlier of the two starts: here the plug-in.
   c201("tx-start-authorized-or-ev-connected", async (rig) => {
     rig.cp.configuration.applyChange("TxStartPoint", "Authorized,EVConnected");
@@ -1780,6 +1808,19 @@ export const goldenCases: GoldenCase[] = [
     await settle(rig);
     await rig.startLocal("TAG-1");
     await rig.remoteStop();
+    rig.cp.evDisconnected(1);
+    await settle(rig);
+  }),
+  // Review of #960: a stop that is not an authorization ending (a reason such
+  // as EVDisconnected, no trigger reason) ends the transaction (Ended).
+  c201("tx-stop-ev-connected-behavior-stop", async (rig) => {
+    rig.cp.configuration.applyChange("TxStopPoint", "EVConnected");
+    rig.cp.evPlugIn(1);
+    await settle(rig);
+    await rig.startLocal("TAG-1");
+    await settle(rig);
+    rig.cp.stopTransaction(1, "EVDisconnected");
+    await settle(rig);
     rig.cp.evDisconnected(1);
     await settle(rig);
   }),

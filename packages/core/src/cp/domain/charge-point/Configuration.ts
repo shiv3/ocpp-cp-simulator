@@ -453,12 +453,14 @@ export const ConfigurationKeys = {
     // "ReadOnly or ReadWrite": the choice is the station's). false (default)
     // = read-write, as before; true = ChangeConfiguration / SetVariables of
     // it are Rejected for the CSMS (the operator can still write the value).
-    // Applies at once. Not a Device Model variable: a CSMS cannot see or
-    // flip it.
+    // Applies at once. Not a Device Model variable. Read-only for the CSMS
+    // (ChangeConfiguration is Rejected, GetConfiguration says readonly), so
+    // a CSMS cannot flip it back; only the operator path (set_config_key,
+    // scenario configSet, a persisted override) writes it.
     AuthorizeRemoteTxRequestsReadOnly: {
       name: "AuthorizeRemoteTxRequestsReadOnly",
       required: false,
-      readonly: false,
+      readonly: true,
       type: "boolean",
     } as BooleanConfigurationKey,
     // Issue #452: the store key behind OCPP 2.x `AuthCacheCtrlr.LifeTime`

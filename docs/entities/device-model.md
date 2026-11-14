@@ -95,7 +95,8 @@ The custom key `AuthorizeRemoteTxRequestsReadOnly` (default `false`, #922)
 makes it `ReadOnly` for this station: the registry stays static, and the
 store's per-station flag lowers the reported and enforced mutability
 (`effectiveMutability`) in `SetVariables`, `GetBaseReport` and the operator's
-key list. The operator can still write the value. See
+key list. The operator can still write the value, and the custom key itself
+(read-only for the CSMS, not a Device Model variable) through `set_config_key`. See
 [local authorization](../concepts/local-authorization.md).
 
 A `MemberList` variable, like an `OptionList` one, carries a `valuesList`

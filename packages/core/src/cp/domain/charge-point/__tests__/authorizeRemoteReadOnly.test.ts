@@ -19,6 +19,7 @@ import { makeChargePoint } from "./chargePointFixtures";
 // accessibility of AuthorizeRemoteTxRequests / AuthCtrlr.AuthorizeRemoteStart.
 const RO = "AuthorizeRemoteTxRequestsReadOnly";
 const KEY = "AuthorizeRemoteTxRequests";
+const OP = { operator: true } as const;
 
 const stations: ChargePoint[] = [];
 afterEach(() => {
@@ -48,17 +49,24 @@ describe("AuthorizeRemoteTxRequestsReadOnly (#922)", () => {
 
   it("applies at once: the CSMS write is Rejected, then accepted again", () => {
     const s = store();
-    expect(s.applyChange(RO, "true")).toBe("Accepted");
+    expect(s.applyChange(RO, "true", OP)).toBe("Accepted");
     expect(s.get(KEY)?.key.readonly).toBe(true);
     expect(s.applyChange(KEY, "true")).toBe("Rejected");
     expect(s.authorizeRemoteTxRequests()).toBe(false);
-    expect(s.applyChange(RO, "false")).toBe("Accepted");
+    expect(s.applyChange(RO, "false", OP)).toBe("Accepted");
     expect(s.applyChange(KEY, "true")).toBe("Accepted");
   });
 
-  it("is not itself a read-only key, and no other read-only key opens up", () => {
+  it("is read-only for the CSMS, writable for the operator; no other read-only key opens up", () => {
     const s = store();
-    expect(s.get(RO)?.key.readonly).toBe(false);
+    expect(s.get(RO)?.key.readonly).toBe(true);
+    expect(s.applyChange(RO, "true")).toBe("Rejected");
+    expect(s.getBoolean(RO)).toBe(false);
+    expect(s.applyChange(RO, "true", OP)).toBe("Accepted");
+    expect(s.applyChange(RO, "false")).toBe("Rejected");
+    expect(s.getBoolean(RO)).toBe(true);
+    expect(writeConfigurationKey(s, false, RO, "false")).toBe("Accepted");
+    expect(s.getBoolean(RO)).toBe(false);
     expect(
       s.applyChange("GetConfigurationMaxKeys", "5", { operator: true }),
     ).toBe("Rejected");
@@ -70,7 +78,7 @@ describe("AuthorizeRemoteTxRequestsReadOnly (#922)", () => {
   ])("%s operator access", (_, version, is2x) => {
     it("still writes the value while it is read-only for the CSMS, and reports it read-only", () => {
       const s = store(version);
-      s.applyChange(RO, "true");
+      s.applyChange(RO, "true", OP);
       const { keys } = readConfigurationKeys(s, is2x, [KEY]);
       expect(keys[0]).toMatchObject({ readonly: true });
       if (is2x) expect(keys[0]?.mutability).toBe("ReadOnly");
@@ -94,7 +102,7 @@ describe("AuthorizeRemoteTxRequestsReadOnly (#922)", () => {
 
   it("1.6: ChangeConfiguration is Rejected and GetConfiguration reports readonly", () => {
     const cp = station("OCPP-1.6J");
-    cp.configuration.applyChange(RO, "true");
+    cp.configuration.applyChange(RO, "true", OP);
     const handle = (value: string) =>
       new ChangeConfigurationHandler().handle({ key: KEY, value }, {
         chargePoint: cp,
@@ -102,6 +110,44 @@ describe("AuthorizeRemoteTxRequestsReadOnly (#922)", () => {
       } as never);
     expect(handle("true")).toEqual({ status: "Rejected" });
     expect(cp.configuration.read([KEY]).known[0]?.key.readonly).toBe(true);
+  });
+
+  it("1.6: a CSMS cannot flip the access key back", () => {
+    const cp = station("OCPP-1.6J");
+    cp.configuration.applyChange(RO, "true", OP);
+    const handle = (key: string, value: string) =>
+      new ChangeConfigurationHandler().handle({ key, value }, {
+        chargePoint: cp,
+        logger: { info() {} } as unknown as Logger,
+      } as never);
+    expect(handle(RO, "false")).toEqual({ status: "Rejected" });
+    expect(handle(KEY, "true")).toEqual({ status: "Rejected" });
+    expect(cp.configuration.getBoolean(RO)).toBe(true);
+  });
+
+  it("2.x: the operator's write path reaches the access key", () => {
+    const s = store("OCPP-2.0.1");
+    expect(writeConfigurationKey(s, true, RO, "true")).toBe("Accepted");
+    expect(s.get(KEY)?.key.readonly).toBe(true);
+  });
+
+  it("a persisted override of the access key is restored", () => {
+    const saved = new Map<string, string>([[RO, "true"]]);
+    const repo = {
+      loadAll: () => [...saved].map(([key, value]) => ({ key, value })),
+      get: (k: string) => saved.get(k) ?? null,
+      save: (k: string, v: string) => void saved.set(k, v),
+    };
+    const s = new ConfigurationStore(
+      defaultConfiguration({
+        connectorNumber: 1,
+        wsUrl: "ws://x/",
+        ocppVersion: "OCPP-1.6J",
+      } as ChargePoint),
+      repo as never,
+    );
+    expect(s.getBoolean(RO)).toBe(true);
+    expect(s.get(KEY)?.key.readonly).toBe(true);
   });
 
   it("2.x: SetVariables is Rejected / ReadOnly, then ReadWrite again", () => {
@@ -119,13 +165,13 @@ describe("AuthorizeRemoteTxRequestsReadOnly (#922)", () => {
         },
         cp.configuration,
       ).setVariableResult[0];
-    cp.configuration.applyChange(RO, "true");
+    cp.configuration.applyChange(RO, "true", OP);
     expect(set()).toMatchObject({
       attributeStatus: "Rejected",
       attributeStatusInfo: { reasonCode: "ReadOnly" },
     });
     expect(cp.configuration.authorizeRemoteTxRequests()).toBe(false);
-    cp.configuration.applyChange(RO, "false");
+    cp.configuration.applyChange(RO, "false", OP);
     expect(set()?.attributeStatus).toBe("Accepted");
   });
 
@@ -146,7 +192,7 @@ describe("AuthorizeRemoteTxRequestsReadOnly (#922)", () => {
         )?.variableAttribute[0]?.mutability;
     };
     expect(mutability()).toBe("ReadWrite");
-    cp.configuration.applyChange(RO, "true");
+    cp.configuration.applyChange(RO, "true", OP);
     expect(mutability()).toBe("ReadOnly");
   });
 

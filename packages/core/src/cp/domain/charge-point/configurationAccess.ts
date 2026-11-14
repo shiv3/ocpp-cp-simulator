@@ -154,10 +154,15 @@ export function writeConfigurationKey(
 ): ConfigurationSetStatus {
   const entry = store.get(key);
   if (!entry) throw new UnknownConfigurationKeyError(key);
+  // The access key (#922) is no Device Model variable, so on 2.x `describe`
+  // does not know it; the operator can still write it.
   const info = describe(entry, is2x);
-  if (!info) throw new UnknownConfigurationKeyError(key);
+  if (!info && !store.isOperatorWritable(key)) {
+    throw new UnknownConfigurationKeyError(key);
+  }
   // A key the station made read-only for the CSMS (#922) stays writable here.
   if (
+    info &&
     (info.readonly || info.mutability === "ReadOnly") &&
     !store.isOperatorWritable(key)
   ) {

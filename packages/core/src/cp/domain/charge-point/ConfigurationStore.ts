@@ -63,6 +63,9 @@ const ACCESS_KEYS: ReadonlyMap<string, string> = new Map([
   ["AuthorizeRemoteTxRequests", "AuthorizeRemoteTxRequestsReadOnly"],
 ]);
 
+/** The access keys themselves: read-only for the CSMS, operator-writable. */
+const ACCESS_KEY_NAMES: ReadonlySet<string> = new Set(ACCESS_KEYS.values());
+
 /**
  * One-shot listener type used by `ConfigurationStore.onChange`. The store
  * fires it whenever a value mutates (via `set` or `applyMany`); the
@@ -173,7 +176,7 @@ export class ConfigurationStore {
   /** Whether the operator may write `name` although it is read-only for the
    *  CSMS because its access key says so (#922). */
   isOperatorWritable(name: string): boolean {
-    return ACCESS_KEYS.has(name);
+    return ACCESS_KEYS.has(name) || ACCESS_KEY_NAMES.has(name);
   }
 
   /** Typed getters for the common shapes. Returns `undefined` when missing or wrong type. */
@@ -556,7 +559,10 @@ export class ConfigurationStore {
     // #922: the operator (control plane, scenario) may still write a key the
     // station made read-only for the CSMS through its access key; any other
     // read-only key stays read-only for everyone.
-    if (entry.key.readonly && !(options.operator && ACCESS_KEYS.has(name))) {
+    if (
+      entry.key.readonly &&
+      !(options.operator && this.isOperatorWritable(name))
+    ) {
       return "Rejected";
     }
 
@@ -610,7 +616,7 @@ export class ConfigurationStore {
     // about (e.g. obsolete keys from an older simulator version) and
     // readonly keys — both indicate operator error rather than a real
     // override.
-    if (!entry || entry.key.readonly) return;
+    if (!entry || (entry.key.readonly && !ACCESS_KEY_NAMES.has(name))) return;
     let value: unknown;
     try {
       value = JSON.parse(raw);

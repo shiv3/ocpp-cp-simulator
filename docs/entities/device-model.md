@@ -203,6 +203,17 @@ are `ReadOnly` (the appendix words them as limits on the CSMS's request; the
 simulator reuses them as its part size, so there is one number to read; it does not enforce them on an inbound GetBaseReport / GetReport, B08.FR.17). They are registry constants (`constant: true`), published at start-up with the other constants, and `deviceDataCtrlrKeys.ts` names their keys. The
 parts are sent back to back, the way `NotifyMonitoringReport` is.
 
+**GetReport `componentCriteria`** (B08.FR.05, FR.07-FR.10, FR.13, FR.15; #701;
+`v201/reportCriteria.ts`). The criteria narrow the report to components: a
+component satisfies `Active`, `Available` or `Enabled` when it has no variable of
+that name or the variable is `true`, and satisfies `Problem` only when its
+`Problem` variable is `true`. Several criteria are ORed, and the result is ANDed
+with `componentVariable`. Today only `LocalAuthListCtrlr` and `AuthCacheCtrlr`
+have an `Enabled` variable (`AuthCacheCtrlr` is `false` by default, so `Enabled`
+leaves it out), no component has `Active`, `Available` or `Problem`, so `Active` /
+`Available` report everything and `Problem` answers `EmptyResultSet`. Both
+2.0.1 and 2.1 use the same handler.
+
 ## GetVariables and SetVariables results
 
 Both handlers answer from the entry (#606). Every element of a request gets a

@@ -24,12 +24,13 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
 
     function report(
       componentVariable: GetReportRequestV201["componentVariable"],
+      componentCriteria?: GetReportRequestV201["componentCriteria"],
     ) {
       const cp = makeChargePoint({ ocppVersion, connectorCount: 2 });
       stations.push(cp);
       const sendCall = vi.fn();
       const result = handleGetReportV201(
-        { requestId: 1, componentVariable },
+        { requestId: 1, componentVariable, componentCriteria },
         { chargePoint: cp, logger: {} as Logger, sendCall },
       );
       result.afterResult?.();
@@ -99,6 +100,75 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
         report([{ component: { name: "EVSE" } }]).rows.map(([, id]) => id),
       );
       expect(evses).toEqual(new Set([1, 2]));
+    });
+
+    describe("componentCriteria (B08.FR.05, FR.07-FR.10, FR.13, FR.15)", () => {
+      const components = (rows: unknown[][]) => new Set(rows.map((r) => r[0]));
+
+      it("answers EmptyResultSet for Problem when no Problem variable is set", () => {
+        const { status, rows } = report(undefined, ["Problem"]);
+        expect(status).toBe("EmptyResultSet");
+        expect(rows).toEqual([]);
+      });
+
+      it("keeps components without the variable and leaves out a false Enabled", () => {
+        const all = report(undefined);
+        const { status, rows } = report(undefined, ["Enabled"]);
+        expect(status).toBe("Accepted");
+        const kept = components(rows);
+        // AuthCacheCtrlr.Enabled is false by default; LocalAuthListCtrlr's is true.
+        expect(kept.has("AuthCacheCtrlr")).toBe(false);
+        expect(kept.has("LocalAuthListCtrlr")).toBe(true);
+        expect(kept.has("OCPPCommCtrlr")).toBe(true);
+        expect(rows.length).toBeLessThan(all.rows.length);
+      });
+
+      it("reports a component again once its Enabled turns true", () => {
+        const cp = makeChargePoint({ ocppVersion, connectorCount: 1 });
+        stations.push(cp);
+        cp.configuration.applyChange("AuthorizationCacheEnabled", "true");
+        const sendCall = vi.fn();
+        const result = handleGetReportV201(
+          { requestId: 1, componentCriteria: ["Enabled"] },
+          { chargePoint: cp, logger: {} as Logger, sendCall },
+        );
+        result.afterResult?.();
+        const names = new Set(
+          (
+            sendCall.mock.calls[0]?.[1] as NotifyReportRequestV201
+          ).reportData?.map((rd) => rd.component.name),
+        );
+        expect(names.has("AuthCacheCtrlr")).toBe(true);
+      });
+
+      it("treats Active and Available as true for components without them", () => {
+        const all = report(undefined);
+        expect(report(undefined, ["Active"]).rows).toEqual(all.rows);
+        expect(report(undefined, ["Available"]).rows).toEqual(all.rows);
+      });
+
+      it("ORs several criteria", () => {
+        const enabled = report(undefined, ["Enabled"]);
+        expect(report(undefined, ["Problem", "Enabled"]).rows).toEqual(
+          enabled.rows,
+        );
+        expect(report(undefined, ["Enabled", "Active"]).rows).toEqual(
+          report(undefined).rows,
+        );
+      });
+
+      it("ANDs the criteria with componentVariable", () => {
+        const { rows } = report(
+          [{ component: { name: "AuthCacheCtrlr" } }],
+          ["Enabled"],
+        );
+        expect(rows).toEqual([]);
+        const kept = report(
+          [{ component: { name: "LocalAuthListCtrlr" } }],
+          ["Enabled"],
+        );
+        expect(components(kept.rows)).toEqual(new Set(["LocalAuthListCtrlr"]));
+      });
     });
   },
 );

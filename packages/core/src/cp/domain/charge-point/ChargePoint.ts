@@ -1,5 +1,10 @@
 import { VehicleBehaviorDriver } from "./VehicleBehaviorDriver";
 import {
+  chargePointIdentityRejection,
+  PENDING_IDENTITY_OVERRIDE,
+  type IdentityRenameHost,
+} from "./chargePointIdentity";
+import {
   connectorShareW,
   stationBudgetW,
   type PowerSharingConfig,
@@ -541,6 +546,7 @@ export class ChargePoint {
   private readonly _stateManager: ChargePointStateManager;
   private readonly _timeline: ChargePointTimeline;
   private readonly _timelineProjector: ChargePointTimelineProjector;
+  private _identityHost: IdentityRenameHost | null = null;
   private readonly _logSink: LogSink;
   /** #878: the stores this charge point persists its own state through. */
   private readonly _repositories: ChargePointRepositories;
@@ -3815,6 +3821,71 @@ export class ChargePoint {
     this._logSink.close();
   }
 
+  /**
+   * #924: let a host rename this charge point through ChangeConfiguration
+   * `ChargePointIdentity` (1.6) / SetVariables `SecurityCtrlr.Identity` (2.x).
+   * An accepted value is only stored as pending (persisted with the charge
+   * point's configuration rows) and the write answers `RebootRequired`; the
+   * key keeps reporting the active identity until the host applies it at a
+   * reboot. Without a host the key is Rejected.
+   */
+  enableIdentityRename(host: IdentityRenameHost): void {
+    this._identityHost = host;
+    this._configuration.setChangeInterceptor("ChargePointIdentity", (raw) => {
+      const reason = chargePointIdentityRejection(raw);
+      if (reason !== undefined) {
+        this._logger.warn(
+          `ChangeConfiguration ChargePointIdentity refused: ${reason}`,
+          LogType.CONFIGURATION,
+        );
+        return "Rejected";
+      }
+      if (raw === this._id) {
+        // Same as the active identity: nothing to reboot for, and it
+        // cancels an earlier pending rename (the last write wins).
+        this._configuration.writeStoredOverride(PENDING_IDENTITY_OVERRIDE, "");
+        return "Accepted";
+      }
+      if (host.isTaken(raw)) {
+        this._logger.warn(
+          `ChangeConfiguration ChargePointIdentity refused: ${raw} is already used by another charge point`,
+          LogType.CONFIGURATION,
+        );
+        return "Rejected";
+      }
+      this._configuration.writeStoredOverride(PENDING_IDENTITY_OVERRIDE, raw);
+      return "RebootRequired";
+    });
+  }
+
+  /** The identity accepted by ChangeConfiguration / SetVariables that the
+   *  next reboot activates, or null (#924). */
+  get pendingIdentity(): string | null {
+    const raw = this._configuration.readStoredOverride(
+      PENDING_IDENTITY_OVERRIDE,
+    );
+    return raw === null || raw === "" ? null : raw;
+  }
+
+  /**
+   * #924: called where the station reboots (Reset, 2.x immediate / scheduled
+   * reset). When a pending identity exists the host rebuilds the charge
+   * point under it and this returns true: the caller must not reboot this
+   * instance. False when there is nothing pending or the host refused (for
+   * example the id was taken since); the reboot then goes on as the old
+   * identity.
+   */
+  applyPendingIdentityAtReboot(): boolean {
+    const pending = this.pendingIdentity;
+    if (pending === null || this._identityHost === null) return false;
+    if (pending === this._id) return false;
+    if (this._identityHost.applyAtReboot(pending)) return true;
+    // Refused (for example the id was taken meanwhile): the rename is dropped
+    // and the reboot goes on as the current identity.
+    this._configuration.writeStoredOverride(PENDING_IDENTITY_OVERRIDE, "");
+    return false;
+  }
+
   applyRemoteReset(
     type: ChargePointResetType,
     source: ChargePointResetSource = "ocpp-call",
@@ -3841,6 +3912,7 @@ export class ChargePoint {
       // #734: reported once the station is back with an Accepted boot.
       this._outbox.queueSecurityEventNotification("ResetOrReboot", reason);
     }
+    if (this.applyPendingIdentityAtReboot()) return;
     this._startupEventPending = true;
     if (type === "Hard") {
       this.reset("RemoteReset");
@@ -3985,6 +4057,7 @@ export class ChargePoint {
     this._pendingResetsOnIdle = remaining;
     // A station-wide reset reboots everything and subsumes EVSE resets.
     if (runnable.some((pending) => pending.evseId === undefined)) {
+      if (this.applyPendingIdentityAtReboot()) return;
       this.boot("ScheduledReset");
       return;
     }

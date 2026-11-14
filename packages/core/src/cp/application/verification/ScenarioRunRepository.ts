@@ -30,6 +30,9 @@ export interface ScenarioRunRepository {
   latest(cpId: string, scenarioId: string): ScenarioRunResult | null;
   list(query: ScenarioRunQuery): ScenarioRunPage;
   deleteForChargePoint(cpId: string): void;
+  /** A renamed charge point (#924): its runs now belong to `newId`, and the
+   *  stored `cpId` of each follows. */
+  renameChargePoint(oldId: string, newId: string): void;
   clear(): void;
 }
 
@@ -97,6 +100,21 @@ export class InMemoryScenarioRunRepository implements ScenarioRunRepository {
 
   deleteForChargePoint(cpId: string): void {
     this.byCp.delete(cpId);
+  }
+
+  renameChargePoint(oldId: string, newId: string): void {
+    const runs = this.byCp.get(oldId);
+    if (!runs || oldId === newId) return;
+    this.byCp.delete(oldId);
+    this.byCp.set(
+      newId,
+      new Map(
+        [...runs].map(([runId, stored]) => [
+          runId,
+          { ...stored, result: { ...stored.result, cpId: newId } },
+        ]),
+      ),
+    );
   }
 
   clear(): void {

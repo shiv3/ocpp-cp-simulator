@@ -440,6 +440,15 @@ export const ConfigurationKeys = {
     // Authorize.conf before StartTransaction.req; Invalid/Expired/Blocked
     // refuses the start. Mirrors the official OCTT TC_003/004 flows. Set
     // to false to restore the pre-#181 wire (StartTransaction.req only).
+    // #924: the charge point identity (the cpId in the WebSocket URL), as a
+    // vendor key on 1.6 and `SecurityCtrlr.Identity` on 2.x. Reads the ACTIVE
+    // identity; a write is a pending rename applied at the next reboot.
+    ChargePointIdentity: {
+      name: "ChargePointIdentity",
+      required: false,
+      readonly: false,
+      type: "string",
+    } as StringConfigurationKey,
     AuthorizeBeforeLocalStart: {
       name: "AuthorizeBeforeLocalStart",
       required: false,
@@ -822,6 +831,7 @@ export const defaultConfiguration: (cp: ChargePoint) => Configuration = (
     strVal(ConfigurationKeys.Custom.OcppServer, cp.wsUrl),
     strVal(ConfigurationKeys.Custom.SimulatedFirmwareUpdateFailure, ""),
     boolVal(ConfigurationKeys.Custom.AuthorizeBeforeLocalStart, true),
+    strVal(ConfigurationKeys.Custom.ChargePointIdentity, cp.id),
     // #452: 2.x only (AuthCacheCtrlr.LifeTime); a 1.6 GetConfiguration
     // keeps its key set.
     ...(isOcpp2Version(cp.ocppVersion)

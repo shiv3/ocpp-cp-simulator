@@ -5,7 +5,12 @@ import {
   chargerCapabilitiesProblem,
   type ChargerCapabilities,
 } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargerCapabilities";
-import { CLIChargePointService } from "../service";
+import { buildBaseUrl, CLIChargePointService } from "../service";
+import {
+  chargePointIdentityRejection,
+  PENDING_IDENTITY_OVERRIDE,
+} from "@ocpp-cp-simulator/core/cp/domain/charge-point/chargePointIdentity";
+import { renameChargePointRows } from "./renameChargePointRows";
 import type { SessionSettledInfo } from "../service";
 import type {
   Behavior,
@@ -259,6 +264,7 @@ export class CPRegistry {
    */
   restoreFromDatabase(opts: { connect?: boolean } = {}): string[] {
     if (!this.database) return [];
+    this.applyPendingIdentitiesFromDatabase();
     const rows = this.database.all<ChargePointRow>(
       "SELECT cp_id, ws_url, supervision_urls, url_distribution, " +
         "id_tags, id_tag_distribution, id_tag_file, " +
@@ -473,6 +479,240 @@ export class CPRegistry {
     // between rebuilding the fleet and letting it dial.
     if (opts.connect !== false) this.connectRestored(restored);
     return restored;
+  }
+
+  /** Whether `id` belongs to a charge point of this simulator, live or
+   *  stored (#924). */
+  private identityTaken(id: string): boolean {
+    if (this.services.has(id)) return true;
+    const row = this.database?.get<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM charge_points WHERE cp_id = ?",
+      [id],
+    );
+    return (row?.n ?? 0) > 0;
+  }
+
+  /**
+   * #924: a simulator restart is a reboot of every charge point, so an
+   * identity a CSMS changed and nobody applied yet is applied before the
+   * rows are read. The value is checked again here (valid, not used by
+   * another stored charge point); one that fails is dropped with a warning
+   * and the charge point keeps its identity.
+   */
+  private applyPendingIdentitiesFromDatabase(): void {
+    const database = this.database;
+    if (!database) return;
+    let pending: { cp_id: string; value: string }[];
+    try {
+      pending = database.all<{ cp_id: string; value: string }>(
+        "SELECT cp_id, value FROM configuration WHERE \"key\" = ? AND value != ''",
+        [PENDING_IDENTITY_OVERRIDE],
+      );
+    } catch {
+      return; // A database from before the table existed.
+    }
+    for (const { cp_id: oldId, value: newId } of pending) {
+      try {
+        const reason =
+          chargePointIdentityRejection(newId) ??
+          (this.identityTaken(newId) && newId !== oldId
+            ? `${newId} is used by another charge point`
+            : undefined);
+        if (reason !== undefined) throw new Error(reason);
+        if (newId !== oldId) renameChargePointRows(database, oldId, newId);
+        else
+          database.run(
+            "UPDATE configuration SET value = '' WHERE cp_id = ? AND \"key\" = ?",
+            [oldId, PENDING_IDENTITY_OVERRIDE],
+          );
+        // The rows moved; the histories that keep a copy of the id follow.
+        this.scenarioRuns.renameChargePoint(oldId, newId);
+        this.chargingSessions.renameChargePoint(oldId, newId);
+        this.networkSimManager?.onCpRenamed(oldId, newId);
+        console.log(
+          `[CPRegistry] Charge point "${oldId}" renamed to "${newId}" (identity change applied at start)`,
+        );
+      } catch (error) {
+        database.run(
+          "UPDATE configuration SET value = '' WHERE cp_id = ? AND \"key\" = ?",
+          [oldId, PENDING_IDENTITY_OVERRIDE],
+        );
+        console.warn(
+          `[CPRegistry] Dropped the pending identity "${newId}" of "${oldId}": ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+  }
+
+  /**
+   * #924: the charge point `oldId` reboots with a pending identity. The
+   * checks are made now (so a refusal reboots it as before) and the rebuild
+   * runs on a later turn, once the Reset has settled. Returns false when the
+   * rename cannot happen.
+   */
+  private scheduleIdentityRename(oldId: string, newId: string): boolean {
+    if (
+      chargePointIdentityRejection(newId) !== undefined ||
+      newId === oldId ||
+      this.identityTaken(newId) ||
+      !this.services.has(oldId)
+    ) {
+      return false;
+    }
+    setTimeout(() => {
+      try {
+        this.renameIdentity(oldId, newId);
+      } catch (error) {
+        console.error(
+          `[CPRegistry] Rename of "${oldId}" to "${newId}" failed:`,
+          error,
+        );
+      }
+    }, 0);
+    return true;
+  }
+
+  /**
+   * Rename a charge point (#924): the station is rebuilt under `newId` and
+   * dials `<wsUrl>/<newId>`, keeping everything that is its own: the
+   * configuration the CSMS changed, connector settings, scenarios and their
+   * selection, run and session history, logs, network simulation, labels.
+   * With a state database every `cp_id` table moves in one transaction;
+   * without one the in-memory scenarios and histories are carried over. The
+   * old identity disappears (`removed`, then `added` for the new one).
+   * Open transactions end like on any reboot; the rebuilt station sends a
+   * BootNotification under the new identity.
+   *
+   * Throws, leaving the old station as it was, when `newId` is invalid, used
+   * or the rows cannot be moved.
+   */
+  renameIdentity(oldId: string, newId: string): CLIChargePointService {
+    const existing = this.services.get(oldId);
+    if (!existing) throw new Error(`cpId not found: ${oldId}`);
+    const reason = chargePointIdentityRejection(newId);
+    if (reason !== undefined) throw new Error(reason);
+    if (newId === oldId) return existing;
+    if (this.identityTaken(newId)) {
+      throw new Error(`cpId already exists: ${newId}`);
+    }
+    const previousInit = existing.getInit();
+    // The URL may end in the old identity; the transport appends the new one.
+    const baseUrl = (url: string) => buildBaseUrl(url, oldId);
+    const nextInit: ChargePointInitOptions = {
+      ...previousInit,
+      cpId: newId,
+      wsUrl: baseUrl(previousInit.wsUrl),
+      ...(previousInit.centralSystemUrl !== undefined && {
+        centralSystemUrl: baseUrl(previousInit.centralSystemUrl),
+      }),
+      ...(previousInit.supervisionUrls !== undefined && {
+        supervisionUrls: previousInit.supervisionUrls.map(baseUrl),
+      }),
+    };
+    const preparedInit = this.prepareInit(nextInit);
+    const scenarioSnapshot = existing.snapshotScenarios();
+    const engineState = this.database
+      ? undefined
+      : existing.engineStateSnapshot();
+    const column = this.storedSelection.get(oldId);
+    const paramsColumn = this.storedParams.get(oldId);
+
+    // Rows first: when they cannot move nothing else has been touched.
+    if (this.database) {
+      renameChargePointRows(this.database, oldId, newId);
+      this.database.run(
+        "UPDATE charge_points SET ws_url = ?, central_system_url = ?, " +
+          "supervision_urls = ? WHERE cp_id = ?",
+        [
+          nextInit.wsUrl,
+          nextInit.centralSystemUrl ?? nextInit.wsUrl,
+          nextInit.supervisionUrls
+            ? JSON.stringify(nextInit.supervisionUrls)
+            : null,
+          newId,
+        ],
+      );
+    }
+    this.scenarioRuns.renameChargePoint(oldId, newId);
+    this.chargingSessions.renameChargePoint(oldId, newId);
+
+    // Take the old station down like update() does, then bring the new up.
+    this.unsubscribes.get(oldId)?.();
+    this.unsubscribes.delete(oldId);
+    this.services.delete(oldId);
+    this.storedSelection.delete(oldId);
+    this.storedParams.delete(oldId);
+    this.notifyRegistryMembership({
+      change: "removed",
+      cpId: oldId,
+      service: existing,
+    });
+    existing.cleanup();
+    if (column !== undefined) this.storedSelection.set(newId, column);
+    if (paramsColumn !== undefined) this.storedParams.set(newId, paramsColumn);
+    this.networkSimManager?.onCpRenamed(oldId, newId);
+
+    let svc: CLIChargePointService;
+    try {
+      svc = this.instantiate(preparedInit, { engineState });
+    } catch (error) {
+      // Put the old identity back, rows and station.
+      this.storedSelection.delete(newId);
+      this.storedParams.delete(newId);
+      if (this.database) renameChargePointRows(this.database, newId, oldId);
+      this.scenarioRuns.renameChargePoint(newId, oldId);
+      this.chargingSessions.renameChargePoint(newId, oldId);
+      this.networkSimManager?.onCpRenamed(newId, oldId);
+      if (column !== undefined) this.storedSelection.set(oldId, column);
+      if (paramsColumn !== undefined)
+        this.storedParams.set(oldId, paramsColumn);
+      const back = this.instantiate(previousInit, { engineState });
+      back.restoreScenariosFromDatabase();
+      for (const { connectorId, definition } of scenarioSnapshot) {
+        try {
+          back.loadScenario(connectorId, definition);
+        } catch {
+          // It loaded before; the original error is the one to report.
+        }
+      }
+      this.notifyRegistryMembership({
+        change: "added",
+        cpId: oldId,
+        service: back,
+      });
+      back.connect().catch(() => undefined);
+      throw error;
+    }
+    this.networkSimManager?.onCpCreated(newId);
+    svc.restoreScenariosFromDatabase();
+    for (const { connectorId, definition } of scenarioSnapshot) {
+      try {
+        svc.loadScenario(connectorId, definition);
+      } catch (err) {
+        console.warn(
+          `[CPRegistry] Failed to re-attach scenario ${definition.id} to ${newId}/connector ${connectorId} during rename:`,
+          err,
+        );
+      }
+    }
+    if (this.scenarioDefinitions instanceof InMemoryScenarioRepository) {
+      this.scenarioDefinitions.deleteForChargePoint(oldId);
+    }
+    this.notifyInitChange();
+    this.notifyRegistryMembership({
+      change: "added",
+      cpId: newId,
+      service: svc,
+    });
+    svc.connect().catch((err) => {
+      console.error(
+        `[CPRegistry] connect after the rename to "${newId}" failed:`,
+        err,
+      );
+    });
+    return svc;
   }
 
   /**
@@ -938,6 +1178,10 @@ export class CPRegistry {
       unsub();
       unsubSettled();
       unsubCredentials();
+    });
+    svc.enableIdentityRename({
+      isTaken: (id) => this.identityTaken(id),
+      applyAtReboot: (newId) => this.scheduleIdentityRename(init.cpId, newId),
     });
     if (engineState) svc.restoreEngineState(engineState);
     try {

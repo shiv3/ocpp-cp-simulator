@@ -602,6 +602,14 @@ const VARIABLES: readonly DeviceModelVariableDef[] = [
     default: false,
     effect: "The authorization cache is used or not.",
   }),
+  // #924: always the ACTIVE identity; a write is applied at the next reboot.
+  persistent("SecurityCtrlr", "Identity", "ChargePointIdentity", {
+    mutability: "ReadWrite",
+    dataType: "string",
+    // No default: a station's value is its own identity.
+    effect:
+      "A new charge point identity, applied at the next reboot (RebootRequired).",
+  }),
   persistent("AuthCacheCtrlr", "LifeTime", "AuthCacheLifeTime", {
     sharedWith16: false,
     mutability: "ReadWrite",

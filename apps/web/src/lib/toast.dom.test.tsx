@@ -69,6 +69,15 @@ describe("notify / AppToaster", () => {
     expect(toastId("error", "x")).not.toBe(toastId("success", "x"));
   });
 
+  it("translates the close button label", async () => {
+    await act(async () => void notify.info("labelled"));
+    await settle();
+    const close = document.querySelector<HTMLButtonElement>(
+      "[data-close-button]",
+    )!;
+    expect(close.getAttribute("aria-label")).toBe("Close");
+  });
+
   it("dismisses on the close button", async () => {
     await act(async () => void notify.info("closable"));
     await settle();

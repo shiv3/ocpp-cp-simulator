@@ -28,6 +28,7 @@ export const AppToaster: React.FC = () => {
       visibleToasts={5}
       containerAriaLabel={t("common.toast.region")}
       toastOptions={{
+        closeButtonAriaLabel: t("common.toast.close"),
         classNames: {
           toast:
             "!border-border !bg-popover !text-popover-foreground !shadow-lg",

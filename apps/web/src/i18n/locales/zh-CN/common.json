@@ -121,5 +121,6 @@
   "common.daemon.cancel": "取消",
   "common.daemon.add": "添加守护进程",
   "common.daemon.forget": "移除",
-  "common.toast.region": "通知"
+  "common.toast.region": "通知",
+  "common.toast.close": "关闭"
 }

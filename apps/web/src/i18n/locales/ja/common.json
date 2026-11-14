@@ -121,5 +121,6 @@
   "common.daemon.cancel": "キャンセル",
   "common.daemon.add": "デーモンを追加",
   "common.daemon.forget": "削除",
-  "common.toast.region": "通知"
+  "common.toast.region": "通知",
+  "common.toast.close": "閉じる"
 }

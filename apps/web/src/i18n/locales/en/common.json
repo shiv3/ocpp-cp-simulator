@@ -121,5 +121,6 @@
   "common.daemon.cancel": "Cancel",
   "common.daemon.add": "Add daemon",
   "common.daemon.forget": "Forget",
-  "common.toast.region": "Notifications"
+  "common.toast.region": "Notifications",
+  "common.toast.close": "Close"
 }

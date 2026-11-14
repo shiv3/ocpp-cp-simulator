@@ -387,14 +387,18 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
       setLogsClearedBeforeSeq(globalLogEntries[0]?.seq ?? -1);
       // "Clear screen + DB" also deletes the CP's persisted log rows.
       if (scope === "all" && chargePointService.clearStoredLogs) {
-        void chargePointService.clearStoredLogs(cpId).catch((err) => {
-          console.error(`Failed to clear stored logs for ${cpId}`, err);
-          notify.error(
-            translate("cp.page.clearLogsFailed", {
-              message: err instanceof Error ? err.message : String(err),
-            }),
+        notify
+          .promise(chargePointService.clearStoredLogs(cpId), {
+            loading: translate("dashboard.logs.clearPending"),
+            success: translate("dashboard.logs.clearDone"),
+            error: (err) =>
+              translate("cp.page.clearLogsFailed", {
+                message: err instanceof Error ? err.message : String(err),
+              }),
+          })
+          .catch((err) =>
+            console.error(`Failed to clear stored logs for ${cpId}`, err),
           );
-        });
       }
     },
     [globalLogEntries, chargePointService, cpId],

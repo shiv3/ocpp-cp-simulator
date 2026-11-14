@@ -1592,7 +1592,8 @@ web app only; nothing under `packages/` or `apps/cli` imports it.
   error (different id). `notify.promise` gets a unique id per call, so
   overlapping operations keep separate toasts.
 - Accessibility: one `aria-live="polite"` region labelled `common.toast.region`
-  (translated); animations are off under `prefers-reduced-motion`. Light / dark
+  (translated; the close button is `common.toast.close`). Errors go through
+  the same polite region (no assertive alert), so they do not interrupt speech; animations are off under `prefers-reduced-motion`. Light / dark
   follows the console theme; colours come from the `--popover` / `--border`
   tokens. At most five toasts are visible.
 - Translate the message at the call site (`t(...)`, or `translate(...)` outside

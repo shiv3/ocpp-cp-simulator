@@ -101,4 +101,19 @@ describe("Connector EV connection (#453)", () => {
     );
     expect(ended.evConnection).toBe("disconnected");
   });
+
+  it("keeps ev_ready(false) recorded before the start (#846)", () => {
+    const connector = newConnector();
+    connector.markEvPluggedIn();
+    connector.markEvReady(false);
+    connector.beginTransaction(transaction());
+    expect(connector.evConnection).toBe("connected-not-ready");
+  });
+
+  it("a start without a prior plug-in implies a ready EV (#846)", () => {
+    const connector = newConnector();
+    connector.markEvReady(false);
+    connector.beginTransaction(transaction());
+    expect(connector.evConnection).toBe("connected-ready");
+  });
 });

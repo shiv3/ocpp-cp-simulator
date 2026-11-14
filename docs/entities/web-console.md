@@ -191,7 +191,9 @@ the page, not the last keystroke). The connector filter is `?conn=`, not
 `?connector=`: that one is the side panel's selected connector (see below) and
 the two are independent. The comboboxes filter as you type; **Enter**
 takes the first suggestion, **Esc** closes the suggestions (and does not close
-the side panel), and **Clear** empties the field.
+the side panel), and **Clear** empties the field. The list has no
+arrow-key navigation yet; the [UI SDK evaluation](../analyses/ui-sdk-evaluation.md)
+(#936) records the gap and why the fix stays in this component.
 
 | Field (label)             | URL            | Matches                                                                                                                                                                                                                                                        |
 | ------------------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

@@ -182,6 +182,16 @@ export class ConfigurationStore {
     return entry.value as string[];
   }
 
+  /** 2.x `TxCtrlr.TxStartPoint` (#697); `Authorized` when absent. */
+  txStartPoint(): string[] {
+    return this.getArray("TxStartPoint") ?? ["Authorized"];
+  }
+
+  /** 2.x `TxCtrlr.TxStopPoint` (#697); `Authorized,EVConnected` when absent. */
+  txStopPoint(): string[] {
+    return this.getArray("TxStopPoint") ?? ["Authorized", "EVConnected"];
+  }
+
   /** Canonical key `MeterValuesSampledData`; default `["Energy.Active.Import.Register"]`. */
   meterValuesSampledData(): string[] {
     return (

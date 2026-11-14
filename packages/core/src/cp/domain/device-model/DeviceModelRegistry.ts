@@ -65,6 +65,12 @@ export interface DeviceModelVariableDef {
    * is mandatory for OptionList, MemberList and SequenceList).
    */
   readonly valuesList?: readonly string[];
+  /**
+   * A MemberList only: the member sets the simulator implements, when not
+   * every subset of `valuesList` is (#697). A write of any other set is
+   * Rejected (#569: configuration acceptance implies implemented behavior).
+   */
+  readonly allowedLists?: readonly (readonly string[])[];
   /** Inclusive bounds of an `integer` / `decimal` variable. */
   readonly min?: number;
   readonly max?: number;
@@ -110,6 +116,14 @@ export interface DeviceModelRegistry {
   /** The variable behind a store key (the prefix, for an EVSE-scoped one). */
   byValueKey(valueKey: string): DeviceModelVariableDef | undefined;
   variablesOf(component: string): readonly DeviceModelVariableDef[];
+}
+
+/** Whether two member lists hold the same members, in any order. */
+export function sameMembers(
+  a: readonly string[],
+  b: readonly string[],
+): boolean {
+  return a.length === b.length && [...a].sort().join() === [...b].sort().join();
 }
 
 /** `component/variable[/instance]`, the registry's identity of a variable. */
@@ -174,6 +188,22 @@ export function createDeviceModelRegistry(
       fail(
         "valuesList goes with OptionList and MemberList, and only with them",
       );
+    }
+    if (v.allowedLists !== undefined) {
+      if (v.dataType !== "MemberList") fail("allowedLists on a non-MemberList");
+      for (const list of v.allowedLists) {
+        if (list.some((m) => !v.valuesList?.includes(m))) {
+          fail("allowedLists outside valuesList");
+        }
+      }
+      const def = Array.isArray(v.default)
+        ? v.default
+        : typeof v.default === "string"
+          ? v.default.split(",")
+          : [];
+      if (!v.allowedLists.some((l) => sameMembers(l, def))) {
+        fail("default outside allowedLists");
+      }
     }
     if (typeof v.default === "number") {
       if (v.min !== undefined && v.default < v.min) fail("default below min");
@@ -645,22 +675,32 @@ const VARIABLES: readonly DeviceModelVariableDef[] = [
       effect: "A transaction stops when the EV unplugs.",
     },
   ),
-  // #604: when a transaction starts and stops is fixed in the simulator
-  // (Started on authorization, Ended on deauthorization, EV disconnect or
-  // connection timeout). These two describe it and are ReadOnly until the
-  // transaction timing follows them (a follow-up of #604): writable now, they
-  // would accept a value that changes nothing (#569).
-  runtime("TxCtrlr", "TxStartPoint", "TxStartPoint", {
-    dataType: "MemberList",
-    valuesList: ["Authorized"],
-    default: "Authorized",
-    constant: true,
-  }),
-  runtime("TxCtrlr", "TxStopPoint", "TxStopPoint", {
+  // #697: the events that start and end a transaction. Only the member sets
+  // below drive the simulated timing; any other set is Rejected (#569). The
+  // defaults reproduce the timing before they were writable.
+  persistent("TxCtrlr", "TxStartPoint", "TxStartPoint", {
+    sharedWith16: false,
+    mutability: "ReadWrite",
     dataType: "MemberList",
     valuesList: ["Authorized", "EVConnected"],
-    default: "Authorized,EVConnected",
-    constant: true,
+    allowedLists: [
+      ["Authorized"],
+      ["EVConnected"],
+      ["Authorized", "EVConnected"],
+    ],
+    default: ["Authorized"],
+    effect:
+      "EVConnected starts the transaction at the cable plug-in (Started, CablePluggedIn); the authorization is then an Updated event.",
+  }),
+  persistent("TxCtrlr", "TxStopPoint", "TxStopPoint", {
+    sharedWith16: false,
+    mutability: "ReadWrite",
+    dataType: "MemberList",
+    valuesList: ["Authorized", "EVConnected"],
+    allowedLists: [["Authorized", "EVConnected"], ["EVConnected"]],
+    default: ["Authorized", "EVConnected"],
+    effect:
+      "Without Authorized, a remote stop, a deauthorization or a tag stop gives an Updated event and the transaction ends at the cable unplug.",
   }),
   // #605: the size of the NotifyReport parts of GetBaseReport / GetReport.
   runtime(

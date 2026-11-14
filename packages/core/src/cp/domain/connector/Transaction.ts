@@ -169,6 +169,9 @@ export interface StopTransactionCommandOptions {
 export interface TransactionUpdateOptions extends MeterSampleOverrides {
   triggerReason: TransactionEventTriggerReason;
   chargingState?: TransactionChargingState;
+  /** #697: the idToken an Updated(Authorized / RemoteStart) carries. */
+  idToken?: { tagId: string; type?: IdTokenTypeName };
+  remoteStartId?: number;
   meterValues?: boolean;
   context?: MeterReadingContext;
   /**
@@ -244,6 +247,15 @@ export interface Transaction {
   /** OCPP 2.x TransactionEvent chargingState for the Started event (#335).
    *  If absent the encoder sends `Charging`, the historical value. */
   startChargingState?: TransactionChargingState;
+  /** #697: the transaction was started by the cable (`TxStartPoint`
+   *  `EVConnected`) and no idToken has been authorized yet; its Started
+   *  event carries none. Cleared by the Updated(Authorized / RemoteStart)
+   *  that follows. */
+  awaitingAuthorization?: boolean;
+  /** #697: the authorization ended (remote stop, deauthorization, a tag
+   *  stop) while `TxStopPoint` lacks `Authorized`: the transaction stays
+   *  open, its energy stopped, until the stop point that ends it. */
+  authorizationEnded?: boolean;
   /** OCPP 2.x `IdToken.type` for the Authorize and the Started / Ended
    *  TransactionEvent (#599). If absent the encoder sends `ISO14443`. */
   idTokenType?: IdTokenTypeName;

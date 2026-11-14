@@ -71,14 +71,15 @@ bounds or `valuesList` all throw when the registry is built, and a test pins
 every entry to the `ConfigurationStore` definition it maps onto (read-only
 flag, type, bounds, allowed values, default, 1.6 sharing).
 
-`TxCtrlr.TxStartPoint` and `TxStopPoint` are registered `ReadOnly`: the
-simulator starts a transaction on authorization and ends it on deauthorization,
-EV disconnect or connection timeout, and their values (`Authorized`,
-`Authorized,EVConnected`) describe that (`TxStopPoint` reads
-`Authorized,EVConnected` while `StopTxOnEVSideDisconnect` is true, its default,
-because that variable is writable). Making them `ReadWrite` belongs with
-the follow-up that makes transaction timing follow them; writable earlier they
-would accept a value that changes nothing.
+`TxCtrlr.TxStartPoint` and `TxStopPoint` are `ReadWrite` MemberLists (#697;
+they were `ReadOnly` constants until the transaction timing followed them, #604).
+Only the member sets the simulator implements are accepted, through the
+registry's `allowedLists`: `TxStartPoint` `Authorized` (default),
+`EVConnected` or both; `TxStopPoint` `Authorized,EVConnected` (default) or
+`EVConnected`. Any other set (for example `PowerPathClosed`, `EnergyTransfer`,
+or `Authorized` alone) is `Rejected` / `InvalidValue` and changes nothing
+(#569). How each set times the TransactionEvents is in
+[charging sessions](../concepts/charging-sessions.md#transaction-start-and-stop-points-697).
 
 `OCPPCommCtrlr.ResetRetries` is `ReadWrite` on 1.6 and 2.x (OCPP 2.0.1 Part 2
 §2.1.14, 2.1 Edition 2 §2.1.15; #914). The simulated reset never fails, so the
@@ -150,8 +151,8 @@ one of their variables answers `UnknownVariable`, not `UnknownComponent`.
 | `TxCtrlr.MaxEnergyOnInvalidId`                             | `MaxEnergyOnInvalidId` (1.6)              | ReadWrite  | integer    | unit Wh                                                | 0                                                 | Persistent  |
 | `ReservationCtrlr.NonEvseSpecific`                         | `ReserveConnectorZeroSupported` (1.6)     | ReadOnly   | boolean    | –                                                      | false                                             | Persistent  |
 | `TxCtrlr.StopTxOnEVSideDisconnect`                         | `StopTransactionOnEVSideDisconnect` (1.6) | ReadWrite  | boolean    | –                                                      | true                                              | Persistent  |
-| `TxCtrlr.TxStartPoint`                                     | `TxStartPoint`                            | ReadOnly   | MemberList | Authorized                                             | Authorized                                        | Volatile    |
-| `TxCtrlr.TxStopPoint`                                      | `TxStopPoint`                             | ReadOnly   | MemberList | Authorized, EVConnected                                | Authorized,EVConnected                            | Volatile    |
+| `TxCtrlr.TxStartPoint`                                     | `TxStartPoint`                            | ReadWrite  | MemberList | Authorized, EVConnected (sets: A, E, A+E)              | Authorized                                        | Persistent  |
+| `TxCtrlr.TxStopPoint`                                      | `TxStopPoint`                             | ReadWrite  | MemberList | Authorized, EVConnected (sets: A+E, E)                 | Authorized,EVConnected                            | Persistent  |
 | `DeviceDataCtrlr.ItemsPerMessage[GetVariables]`            | `ItemsPerMessageGetVariables`             | ReadOnly   | integer    | –                                                      | 100                                               | Volatile    |
 | `DeviceDataCtrlr.BytesPerMessage[GetVariables]`            | `BytesPerMessageGetVariables`             | ReadOnly   | integer    | –                                                      | 65536                                             | Volatile    |
 | `DeviceDataCtrlr.ItemsPerMessage[SetVariables]`            | `ItemsPerMessageSetVariables`             | ReadOnly   | integer    | –                                                      | 100                                               | Volatile    |

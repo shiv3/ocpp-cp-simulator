@@ -231,6 +231,9 @@ export interface AutoMeterValueSetting {
 }
 
 export interface StartTransactionOptions {
+  /** #697 (2.x, internal): the cable starts the transaction before any
+   *  idToken is authorized (`TxStartPoint` `EVConnected`). */
+  awaitAuthorization?: boolean;
   triggerReason?: TransactionStartTriggerReason;
   remoteStartId?: number;
   /** OCPP 2.x Started-event chargingState (#335); `Charging` when absent. */
@@ -1212,7 +1215,7 @@ export class ChargePoint {
   }
 
   /**
-   * The registry's constants (#604), such as `TxCtrlr.TxStartPoint`, as
+   * The registry's constants (#604), such as `ClockCtrlr.TimeSource`, as
    * read-only runtime keys, so reads, reports and monitors see them.
    */
   private publishDeviceModelConstants(): void {
@@ -4165,6 +4168,22 @@ export class ChargePoint {
       !connector.hasRunningTransaction &&
       connector.status === OCPPStatus.Available
     ) {
+      // #697: TxStartPoint EVConnected starts the transaction at the
+      // plug-in (Started, CablePluggedIn, EVConnected); the idToken that
+      // follows is an Updated event. The start puts the connector in
+      // Preparing itself.
+      if (
+        isOcpp2Version(this._ocppVersion) &&
+        connector.availability === "Operative" &&
+        this._configuration.txStartPoint().includes("EVConnected")
+      ) {
+        void this.startTransaction("", connectorId, undefined, undefined, {
+          awaitAuthorization: true,
+          triggerReason: "CablePluggedIn",
+          chargingState: "EVConnected",
+        });
+        return;
+      }
       this.updateConnectorStatus(connectorId, OCPPStatus.Preparing);
     }
   }

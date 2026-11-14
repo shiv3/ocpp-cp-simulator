@@ -164,7 +164,8 @@ export function decideRemoteStart(
 
   const busy = (id: number): boolean => {
     const tx = cp.getConnector(id)?.transaction;
-    return !!tx && tx.stopTime === null;
+    // #697: a transaction the cable started still waits for its idToken.
+    return !!tx && tx.stopTime === null && !tx.awaitingAuthorization;
   };
   // A reservation belongs to this request when it was made for this idToken
   // or for its group (F01.FR.21 / F01.FR.22): the request's groupIdToken, else

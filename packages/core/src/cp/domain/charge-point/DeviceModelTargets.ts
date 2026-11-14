@@ -10,7 +10,8 @@ export type DeviceModelTargetLimit = "MinSet" | "MaxSet";
  * A declared key also has the `MinSet` and `MaxSet` attributes: the lowest
  * and highest Target the CSMS allows (2.0.1 Part 2 §3.2 AttributeEnumType,
  * Part 1 §4 example "The target may not be set above/below this value"). A
- * Target outside them is refused by SetVariables. Like Targets they live in
+ * Target outside them is refused by SetVariables, and so is a limit that would
+ * leave the current Target outside them (#914). Like Targets they live in
  * memory and start unset.
  *
  * Only declared keys have a Target; a declared key starts without a value

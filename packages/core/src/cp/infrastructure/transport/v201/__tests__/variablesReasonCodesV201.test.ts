@@ -346,6 +346,25 @@ describe("MinSet / MaxSet (B05 remark, Part 2 §3.2)", () => {
     expect(s.targets.getLimit("EVSEPower1", "MaxSet")).toBe(5000);
   });
 
+  it("a limit that would leave the current Target outside is Rejected / ValueOutOfRange, never clamped (#914)", () => {
+    const s = setup();
+    set(s, "Target", "3000");
+    for (const [type, value] of [
+      ["MinSet", "4000"],
+      ["MaxSet", "2000"],
+    ] as const) {
+      const r = set(s, type, value);
+      expect(r.attributeStatus).toBe("Rejected");
+      expect(r.attributeStatusInfo?.reasonCode).toBe("ValueOutOfRange");
+      expect(s.targets.getLimit("EVSEPower1", type)).toBeUndefined();
+    }
+    expect(s.targets.get("EVSEPower1")).toBe(3000);
+    // A limit equal to the Target, or on the right side of it, is fine.
+    expect(set(s, "MinSet", "3000").attributeStatus).toBe("Accepted");
+    expect(set(s, "MaxSet", "3000").attributeStatus).toBe("Accepted");
+    expect(s.targets.get("EVSEPower1")).toBe(3000);
+  });
+
   it("a variable without a Target has no MinSet / MaxSet", () => {
     const s = setup();
     expect(

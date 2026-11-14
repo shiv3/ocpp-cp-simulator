@@ -64,6 +64,7 @@ import {
   type ModemConfig,
   type SimCard,
 } from "../modem/CellularModem";
+import { bootNotificationFor } from "../modem/bootIdentifiers";
 import type { OcppCallActions } from "../transport/OcppCallActions";
 import type {
   ChargePointDeps,
@@ -3351,7 +3352,7 @@ export class ChargePoint {
       isOcpp2Version(this._ocppVersion) &&
       !this._configuration.bootOnReconnect() &&
       this._bootedWith !== null &&
-      this._bootedWith === JSON.stringify(this._bootNotification)
+      this._bootedWith === JSON.stringify(this.bootPayload())
     ) {
       return this.resumeAfterReconnect();
     }
@@ -3491,12 +3492,12 @@ export class ChargePoint {
     if (!this.isOnline()) this._bootOnNextOpen = true;
     this._bootUnanswered = true;
     this._ackedStatus = new Map();
-    this._bootSentFingerprint = JSON.stringify(this._bootNotification);
+    this._bootSentFingerprint = JSON.stringify(this.bootPayload());
     // OCPP 1.6J §4.2: the CP MUST NOT send any other CALL message until
     // BootNotification has been Accepted. The connector-level
     // StatusNotification fan-out happens in BootNotificationResultHandler
     // after we get the Accepted response.
-    this._outbox.sendBootNotification(this._bootNotification, this._bootReason);
+    this._outbox.sendBootNotification(this.bootPayload(), this._bootReason);
     this.error = "";
   }
 
@@ -4670,6 +4671,18 @@ export class ChargePoint {
     return this._modem;
   }
 
+  /**
+   * The BootNotification as it would be sent now (#929): the static boot
+   * data, with `iccid` / `imsi` taken from the installed SIM when a modem
+   * model is configured. Read at the moment of every boot and of the 2.x
+   * "did the boot data change" comparison on reconnect (#702); a SIM change
+   * therefore shows up in the next real or triggered BootNotification and
+   * never causes one by itself.
+   */
+  bootPayload(): BootNotification {
+    return bootNotificationFor(this._bootNotification, this._modem);
+  }
+
   private logModemChange(change: ModemChange): void {
     const mask = (sim: SimCard) => maskSimIdentifier(sim.iccid) ?? "no iccid";
     const message =
@@ -4683,7 +4696,9 @@ export class ChargePoint {
               ? `SIM subscription suspended: ${change.sim.simId}`
               : change.kind === "subscription_activated"
                 ? `SIM subscription activated: ${change.sim.simId}`
-                : `Network interface: ${change.networkInterface}`;
+                : change.kind === "reporting_policy_changed"
+                  ? `SIM reporting policy: ${change.reporting}`
+                  : `Network interface: ${change.networkInterface}`;
     this._logger.info(message, LogType.SYSTEM);
   }
 

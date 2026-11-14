@@ -1,0 +1,4 @@
+{"d":"CP>","k":"call","id":"id-1","a":"BootNotification","p":{"reason":"PowerUp","chargingStation":{"model":"Model","vendorName":"Vendor","serialNumber":"123456","firmwareVersion":"1.0","modem":{"iccid":"8944501234567890123"}}}}
+{"d":"CSMS>","k":"result","id":"id-1","p":{"status":"Accepted","currentTime":"<ts>","interval":3600}}
+{"d":"CP>","k":"call","id":"id-2","a":"StatusNotification","p":{"timestamp":"<ts>","connectorStatus":"Available","evseId":1,"connectorId":1}}
+{"d":"CSMS>","k":"result","id":"id-2","p":{}}

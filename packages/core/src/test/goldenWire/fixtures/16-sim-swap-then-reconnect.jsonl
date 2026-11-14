@@ -1,0 +1,12 @@
+{"d":"CP>","k":"call","id":"id-1","a":"BootNotification","p":{"chargeBoxSerialNumber":"123456","chargePointModel":"Model","chargePointSerialNumber":"123456","chargePointVendor":"Vendor","firmwareVersion":"1.0","meterSerialNumber":"123456","meterType":"","iccid":"8944501234567890123","imsi":"310150123456789"}}
+{"d":"CSMS>","k":"result","id":"id-1","p":{"status":"Accepted","currentTime":"<ts>","interval":3600}}
+{"d":"CP>","k":"call","id":"id-2","a":"StatusNotification","p":{"connectorId":0,"errorCode":"NoError","status":"Available"}}
+{"d":"CSMS>","k":"result","id":"id-2","p":{}}
+{"d":"CP>","k":"call","id":"id-3","a":"StatusNotification","p":{"connectorId":1,"errorCode":"NoError","status":"Available"}}
+{"d":"CSMS>","k":"result","id":"id-3","p":{}}
+{"d":"CP>","k":"call","id":"id-4","a":"BootNotification","p":{"chargeBoxSerialNumber":"123456","chargePointModel":"Model","chargePointSerialNumber":"123456","chargePointVendor":"Vendor","firmwareVersion":"1.0","meterSerialNumber":"123456","meterType":"","iccid":"8900000000000000002","imsi":"310150000000002"}}
+{"d":"CSMS>","k":"result","id":"id-4","p":{"status":"Accepted","currentTime":"<ts>","interval":3600}}
+{"d":"CP>","k":"call","id":"id-5","a":"StatusNotification","p":{"connectorId":0,"errorCode":"NoError","status":"Available"}}
+{"d":"CSMS>","k":"result","id":"id-5","p":{}}
+{"d":"CP>","k":"call","id":"id-6","a":"StatusNotification","p":{"connectorId":1,"errorCode":"NoError","status":"Available"}}
+{"d":"CSMS>","k":"result","id":"id-6","p":{}}

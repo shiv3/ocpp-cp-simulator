@@ -5,6 +5,7 @@ import {
   type NetworkInterface,
   type RedactedModemState,
   type SimCardInit,
+  type SimReportingPolicy,
 } from "./CellularModem";
 
 /** One lifecycle command, as `modem.command` carries it (#928). */
@@ -15,11 +16,14 @@ export interface ModemCommandInput {
     | "replace_sim"
     | "suspend_subscription"
     | "activate_subscription"
-    | "set_network_interface";
+    | "set_network_interface"
+    | "set_reporting_policy";
   /** The card, for `insert_sim` and `replace_sim`. */
   readonly sim?: SimCardInit;
   /** For `set_network_interface`. */
   readonly networkInterface?: NetworkInterface;
+  /** For `set_reporting_policy` (#929). */
+  readonly reporting?: SimReportingPolicy;
 }
 
 export type ModemCommandResult =
@@ -60,6 +64,9 @@ export function runModemCommand(
         break;
       case "activate_subscription":
         modem.activateSubscription();
+        break;
+      case "set_reporting_policy":
+        modem.setReportingPolicy(input.reporting as SimReportingPolicy);
         break;
       case "set_network_interface":
         modem.setNetworkInterface(input.networkInterface as NetworkInterface);

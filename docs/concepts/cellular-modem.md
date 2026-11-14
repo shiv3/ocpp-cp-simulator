@@ -88,6 +88,7 @@ change the state with the commands below.
 | `suspend_subscription`  | —                  | `modem_absent`, `slot_empty`, `already_suspended` |
 | `activate_subscription` | —                  | `modem_absent`, `slot_empty`, `already_active`    |
 | `set_network_interface` | `networkInterface` | `invalid_network_interface`                       |
+| `set_reporting_policy`  | `reporting`        | `invalid_reporting_policy`                        |
 
 The answer is `{ ok: true, modem }` or `{ ok: false, error }`; a refused command
 leaves the state untouched (`cp_not_found` and `no_modem_model` also appear).
@@ -96,6 +97,44 @@ The MCP tools are `modem_get` and `modem_command`
 recreating the charge point, and change nothing on the OCPP connection by
 themselves. `replace_sim` creates a new `simId`.
 
+## BootNotification identifiers (#929)
+
+With a modem model, **the installed SIM is the single source of truth** for
+the modem identifiers of the BootNotification. It is read from one projection
+(`bootPayload()` in the charge point, `projectBootIdentifiers` in
+`packages/core/src/cp/domain/modem/bootIdentifiers.ts`) at the moment the
+message is prepared, whatever triggers it (cold boot, Reset, `TriggerMessage`,
+firmware update, a reconnect that boots).
+
+| `reporting` (default `iccid-and-imsi`) | Reported of the card                             |
+| -------------------------------------- | ------------------------------------------------ |
+| `none`                                 | nothing                                          |
+| `iccid`                                | the ICCID                                        |
+| `iccid-and-imsi`                       | the ICCID and the IMSI (each if the card has it) |
+
+- **Where they go.** OCPP 1.6 JSON and SOAP: the optional top-level `iccid` /
+  `imsi`. OCPP 2.0.1 / 2.1: `chargingStation.modem.iccid` / `.imsi`. No
+  nonstandard field is added.
+- **Omitted, never faked.** No modem, an empty slot, policy `none` or an
+  identifier the card lacks: the field is left out entirely (in SIM-backed mode
+  a 1.6 BootNotification has no `iccid` / `imsi` keys, not empty strings; a 2.x
+  one has no `modem` object). No placeholder is invented.
+- **Precedence.** The static `bootNotification.iccid` / `imsi` apply **only
+  without a modem model**; with one they are ignored (not merged), so there is
+  never a second writable source. Without a model the payload is the same
+  object as before: the 1.6 empty strings and every golden fixture stay
+  byte-identical.
+- **Subscription state is not coupled to reporting**: a suspended card keeps
+  its identifiers and keeps reporting them.
+- **Changes take effect at the next boot, never cause one.** Insert, remove,
+  replace and policy changes alter the _next_ BootNotification (real or
+  triggered). They do not reboot the station, do not send a BootNotification,
+  and a reconnect alone does not either. On OCPP 2.x a pure reconnect still
+  follows #702: it resumes without a BootNotification while the boot data is
+  unchanged, and sends one when the projected data changed (a swap; a
+  subscription change does not change it); the `BootOnReconnect` switch keeps
+  its meaning. OCPP 1.6 sends a BootNotification on every connect, as before.
+
 ## Privacy policy for ICCID / IMSI
 
 ICCID and IMSI identify a subscriber and some deployments regulate them.
@@ -103,8 +142,7 @@ ICCID and IMSI identify a subscriber and some deployments regulate them.
 `*` when four or fewer): `cp.status` / the `modem` block of the status wire,
 `modem.get`, `modem.command` answers, the MCP tools and the log lines
 (`SIM inserted: … (iccid ***************0123, active)`). The full values leave
-the simulator in one place only, the BootNotification (when a later change
-projects them there). They are never in `cp.list`, the operational timeline or
+the simulator in one place only, the BootNotification the reporting policy allows. They are never in `cp.list`, the operational timeline or
 the redacted diagnostics.
 
 ## Persistence

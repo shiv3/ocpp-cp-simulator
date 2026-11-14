@@ -24,6 +24,12 @@ export const simCardInitSchema = z
 
 export const networkInterfaceSchema = z.enum(["ethernet", "wifi", "cellular"]);
 
+export const simReportingPolicySchema = z.enum([
+  "none",
+  "iccid",
+  "iccid-and-imsi",
+]);
+
 /** `modem` in cp.create / blueprints (#928). */
 export const modemConfigSchema = z
   .object({
@@ -40,6 +46,11 @@ export const modemConfigSchema = z
       .nullable()
       .optional()
       .describe("Card in the slot at start; absent or null: empty slot"),
+    reporting: simReportingPolicySchema
+      .optional()
+      .describe(
+        "What the BootNotification reports of the card; default iccid-and-imsi. With a modem model the card replaces the static bootNotification iccid/imsi",
+      ),
   })
   .strict();
 
@@ -51,6 +62,7 @@ export const MODEM_COMMANDS = [
   "suspend_subscription",
   "activate_subscription",
   "set_network_interface",
+  "set_reporting_policy",
 ] as const;
 
 export const modemCommandSchema = z
@@ -63,6 +75,9 @@ export const modemCommandSchema = z
     networkInterface: networkInterfaceSchema
       .optional()
       .describe("For set_network_interface"),
+    reporting: simReportingPolicySchema
+      .optional()
+      .describe("For set_reporting_policy"),
   })
   .strict();
 export type ModemCommand = z.infer<typeof modemCommandSchema>;

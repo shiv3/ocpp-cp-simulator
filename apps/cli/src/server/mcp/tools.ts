@@ -1,3 +1,4 @@
+import { modemCommandSchema } from "@ocpp-cp-simulator/contracts/modem";
 import { z } from "zod";
 import { LogType } from "@ocpp-cp-simulator/core/cp/shared/Logger";
 import type { McpServer, ToolCallResult } from "mcp-lite";
@@ -1299,6 +1300,73 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
           },
         });
         return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("cellular_policy_get", {
+    description:
+      "SIM-scoped cellular policies (#930) and their effect: the policy set, how many stations are out of service or throttled, and each governed station's link (available, reasons, effective byte caps, which policies select it).",
+    inputSchema: z.object({}),
+    handler: async () => {
+      try {
+        const [policies, status] = await Promise.all([
+          runRpc(deps, { method: "network_sim.cellular.get", params: {} }),
+          runRpc(deps, { method: "network_sim.cellular.status", params: {} }),
+        ]);
+        return successResult({ ...(policies as object), status });
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("cellular_policy_set", {
+    description:
+      "Replace the SIM-scoped cellular policies (#930); null clears them. A policy selects cards by simId, iccid or operator and sets service online|blocked and/or upstream/downstream bytes-per-second caps. A blocked SIM keeps a cellular-only station offline until restored, whatever connect/reset/reconnect is tried. Applies to stations that acquire a matching SIM later.",
+    inputSchema: z.object({
+      ...METHODS["network_sim.cellular.save"].params.shape,
+    }),
+    handler: async (args) => {
+      try {
+        return successResult(
+          await runRpc(deps, {
+            method: "network_sim.cellular.save",
+            params: args,
+          }),
+        );
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("modem_get", {
+    description:
+      "Read a charge point's cellular modem and SIM (#928): slot state (no_modem, empty, inserted), selected network interface and the card with its identifiers masked to the last four characters. Answers no_modem_model when the station has no modem model.",
+    inputSchema: z.object({ cpId: z.string().describe("Charge point id") }),
+    handler: async (args) => {
+      try {
+        return successResult(
+          await runRpc(deps, { method: "modem.get", params: args }),
+        );
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("modem_command", {
+    description:
+      "Change a charge point's SIM (#928): insert_sim, remove_sim, replace_sim, suspend_subscription, activate_subscription or set_network_interface. A refused transition answers its typed error (slot_occupied, slot_empty, already_suspended, already_active, modem_absent, invalid_sim). The card keeps its iccid/imsi while suspended.",
+    inputSchema: modemCommandSchema,
+    handler: async (args) => {
+      try {
+        return successResult(
+          await runRpc(deps, { method: "modem.command", params: args }),
+        );
       } catch (err) {
         return errorResult(err);
       }

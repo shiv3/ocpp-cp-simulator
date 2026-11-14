@@ -1,3 +1,5 @@
+import type { CellularPolicySet } from "@ocpp-cp-simulator/core/cp/domain/modem/cellularLink";
+import type { ModemCommand as ModemCommandInput } from "@ocpp-cp-simulator/contracts/modem";
 import type { JsonObject } from "@ocpp-cp-simulator/contracts/behavior";
 import { describeDefaultBehaviors } from "@ocpp-cp-simulator/core/cp/application/engine/behaviors/index";
 import * as fs from "fs";
@@ -596,8 +598,31 @@ export async function dispatchRpcCore(
       return getNetworkSimCp(deps, call.params);
     case "network_sim.cp.save":
       return saveNetworkSimCp(deps, call.params);
+    case "network_sim.cellular.get":
+      return runFacadeOperation(() => ({
+        policies: deps.chargePointService.getCellularPolicies(),
+      }));
+    case "network_sim.cellular.save":
+      return saveCellularPolicies(deps, call.params);
+    case "network_sim.cellular.status":
+      return runFacadeOperation(() =>
+        deps.chargePointService.getCellularStatus(),
+      );
     case "network_sim.disconnect.trigger":
       return triggerNetworkSimDisconnect(deps, call.params);
+    case "modem.get":
+      return runFacadeOperation(() =>
+        deps.chargePointService.getModem(call.params.cpId),
+      );
+    case "modem.command": {
+      const { cpId, ...command } = call.params;
+      return runFacadeOperation(() =>
+        deps.chargePointService.modemCommand(
+          cpId,
+          command as ModemCommandInput,
+        ),
+      );
+    }
     case "power.loss": {
       const { cpId, ...options } = call.params;
       return runFacadeOperation(() =>
@@ -1632,6 +1657,23 @@ async function saveNetworkSimCp(
       deps.chargePointService.saveNetworkSimCp(
         params.cpId,
         params.config as NetworkSimLayerConfig | null,
+      ),
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    throw new RpcFailure("invalid_params", message);
+  }
+  return { ok: true };
+}
+
+async function saveCellularPolicies(
+  deps: RuntimeSocketIoDeps,
+  params: Params<"network_sim.cellular.save">,
+): Promise<{ ok: true }> {
+  try {
+    await runFacadeOperation(() =>
+      deps.chargePointService.saveCellularPolicies(
+        params.policies as CellularPolicySet | null,
       ),
     );
   } catch (err) {
@@ -3064,6 +3106,7 @@ function snapshotToWireStatus(snapshot: ChargePointSnapshot): StatusWire {
     heartbeat: snapshot.heartbeat,
     networkSim: snapshot.networkSim,
     config: snapshot.config,
+    modem: snapshot.modem,
   });
 }
 
@@ -3172,6 +3215,7 @@ function mergeUpdateParams(
   );
   preserveWhenMissing(merged, "capabilityProfile", init.capabilityProfile);
   preserveWhenMissing(merged, "chargerCapabilities", init.chargerCapabilities);
+  preserveWhenMissing(merged, "modem", init.modem);
   preserveWhenMissing(merged, "tlsCaPath", init.tlsCaPath);
   preserveWhenMissing(merged, "tlsCertPath", init.tlsCertPath);
   preserveWhenMissing(merged, "tlsKeyPath", init.tlsKeyPath);

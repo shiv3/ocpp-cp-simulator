@@ -7,9 +7,11 @@ import type { TransportConfig } from "@ocpp-cp-simulator/core/cp/infrastructure/
 import type { UrlDistribution } from "@ocpp-cp-simulator/core/cp/domain/transport/UrlDistribution";
 import type { InboundValidationMode } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
 import type { ChargePointCapabilityProfile } from "@ocpp-cp-simulator/core/cp/domain/charge-point/CapabilityProfile";
+import type { ModemConfig } from "@ocpp-cp-simulator/core/cp/domain/modem/CellularModem";
 import type { ChargerCapabilities } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargerCapabilities";
 import type { IdTagDistribution } from "@ocpp-cp-simulator/core/cp/domain/auth/IdTagPool";
 import type { Labels } from "@ocpp-cp-simulator/contracts/labels";
+import type { ModemWire } from "@ocpp-cp-simulator/contracts/events";
 import type { JsonObject } from "@ocpp-cp-simulator/contracts/behavior";
 
 export interface SoapTunnelConfig {
@@ -255,6 +257,8 @@ export interface CLIOptions {
   readonly capabilityProfile?: ChargePointCapabilityProfile;
   /** Charger-side delivery caps per connector (#327). */
   readonly chargerCapabilities?: ChargerCapabilities;
+  /** Cellular modem and SIM (#928). Initial state only; see `modem` in cp.create. */
+  readonly modem?: ModemConfig;
   readonly tls?: OcppTlsOptions;
   readonly tlsCaPath?: string;
   readonly tlsCertPath?: string;
@@ -286,6 +290,9 @@ export interface ChargePointInitOptions {
   readonly capabilityProfile?: ChargePointCapabilityProfile;
   /** Charger-side delivery caps per connector (#327). Persisted. */
   readonly chargerCapabilities?: ChargerCapabilities;
+  /** Cellular modem and SIM (#928): initial state. The live state is persisted
+   *  by the modem itself (`kv` row `modem:<cpId>`), not in this record. */
+  readonly modem?: ModemConfig;
   /**
    * Resolved idTags this charge point draws from when a call names none. The
    * `file` form is resolved at creation, so what is stored and persisted is
@@ -436,6 +443,8 @@ export interface ChargePointStatus {
   /** Network simulation summary: { enabled, manualRuleIds } when a config has
    *  been applied, null for SOAP CPs or when no config has been applied. */
   readonly networkSim?: { enabled: boolean; manualRuleIds: string[] } | null;
+  /** Cellular modem and SIM, identifiers masked (#928); absent without a modem model. */
+  readonly modem?: ModemWire;
   /** Snapshot of the init the CP was constructed with. Surfaced so the
    *  web console can prefill the "Edit CP" modal in Remote mode without
    *  needing a second roundtrip — local-mode persistence is already in

@@ -351,6 +351,12 @@ describe("MCP curated tool schema parity (general, #299)", () => {
       tool: "network_sim_trigger_disconnect",
       method: "network_sim.disconnect.trigger",
     },
+    {
+      tool: "cellular_policy_set",
+      method: "network_sim.cellular.save",
+    },
+    { tool: "modem_get", method: "modem.get" },
+    { tool: "modem_command", method: "modem.command" },
     { tool: "power_loss", method: "power.loss" },
     { tool: "power_restore", method: "power.restore" },
   ];
@@ -371,6 +377,8 @@ describe("MCP curated tool schema parity (general, #299)", () => {
       "cp_create_many",
       "network_sim_get",
       "network_sim_set",
+      // reads two methods (policies and status); takes no params.
+      "cellular_policy_get",
       "control_scenario_wait",
       // tail_logs adds client-side filters on top of logs.get's cpId.
       "tail_logs",

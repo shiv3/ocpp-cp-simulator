@@ -57,6 +57,22 @@ import type {
   SocketClose,
 } from "../transport/ChargePointSocket";
 import type { RawFrameSink } from "../transport/RawFrameSink";
+import {
+  CellularModem,
+  maskSimIdentifier,
+  type ModemChange,
+  type ModemConfig,
+  type RedactedModemState,
+  type SimCard,
+} from "../modem/CellularModem";
+import { bootNotificationFor } from "../modem/bootIdentifiers";
+import {
+  resolveCellularLink,
+  sameCellularLink,
+  type CellularLinkState,
+  type CellularLinkWire,
+  type CellularPolicySet,
+} from "../modem/cellularLink";
 import type { OcppCallActions } from "../transport/OcppCallActions";
 import type {
   ChargePointDeps,
@@ -398,6 +414,10 @@ export interface ChargePointTransportOptions {
   /** What the charger hardware delivers per connector (#327). Absent:
    *  no connector is capped. */
   readonly chargerCapabilities?: ChargerCapabilities;
+  /** Cellular modem and SIM model (#928). Absent: no modem model, and the
+   *  BootNotification keeps its static `iccid` / `imsi`. Persisted state for
+   *  the charge point's id wins over this initial state. */
+  readonly modem?: ModemConfig;
   /** Static capability profile (#618). Absent: nothing is disabled. */
   readonly capabilityProfile?: ChargePointCapabilityProfile;
   /** OCPP 1.6J only. Default `warn`. */
@@ -631,6 +651,13 @@ export class ChargePoint {
   // Network simulation summary: { enabled, manualRuleIds } when a config has
   // been applied via setNetworkSimConfig, null for SOAP CPs or when no config
   // has been applied yet.
+  private _modem: CellularModem | null = null;
+  /** #930: the SIM-scoped policies the daemon pushed (empty: none). */
+  private _cellularPolicies: CellularPolicySet = {};
+  /** #930: the last resolved link; `null` without a modem model. */
+  private _cellularLink: CellularLinkState | null = null;
+  /** #930: an explicit connect() arrived while the link was down. */
+  private _connectOnLinkRestore = false;
   private _networkSimSummary: {
     enabled: boolean;
     manualRuleIds: string[];
@@ -735,6 +762,18 @@ export class ChargePoint {
     this._repositories = deps.repositories;
     this._fileUploader = deps.fileUploader;
     // #456: installed certificates survive a restart when state persists.
+    // #928: the initial config, or (without one) the state a restart finds.
+    this._modem = transportOptions.modem
+      ? new CellularModem(
+          this._id,
+          transportOptions.modem,
+          deps.repositories.modem,
+        )
+      : CellularModem.restore(this._id, deps.repositories.modem);
+    this._modem?.onChange((change) => {
+      this.logModemChange(change);
+      this.reevaluateCellularLink();
+    });
     this._certificateStore = new CertificateStore(
       this._repositories.certificates,
       this._clock,
@@ -1056,6 +1095,9 @@ export class ChargePoint {
     this._webSocket?.setPingInterval(
       this._configuration.webSocketPingInterval(),
     );
+    // #930: a suspended SIM on a cellular station keeps the link down from
+    // the very first connect, also after a restart.
+    this.reevaluateCellularLink();
   }
 
   /** Read a persisted Operative/Inoperative flag from the DB for the given
@@ -2571,6 +2613,17 @@ export class ChargePoint {
       return;
     }
 
+    if (this._webSocket && this._cellularLink?.available === false) {
+      // #930: the cellular link is down; an operator connect cannot defeat
+      // that. Remembered, so restoring service dials. No boot flag is set:
+      // whether a BootNotification follows stays the #702 rule.
+      this._logger.info(
+        `connect() deferred: the cellular link is unavailable (${this._cellularLink.reasons.join(", ")})`,
+        LogType.WEBSOCKET,
+      );
+      this._connectOnLinkRestore = true;
+      return;
+    }
     // Idempotent: if a socket is already open or mid-handshake, don't
     // create a second one. The daemon's startServer can hit this twice
     // when restoreFromDatabase() auto-connects and then the bootstrap
@@ -3330,7 +3383,7 @@ export class ChargePoint {
       isOcpp2Version(this._ocppVersion) &&
       !this._configuration.bootOnReconnect() &&
       this._bootedWith !== null &&
-      this._bootedWith === JSON.stringify(this._bootNotification)
+      this._bootedWith === JSON.stringify(this.bootPayload())
     ) {
       return this.resumeAfterReconnect();
     }
@@ -3470,16 +3523,17 @@ export class ChargePoint {
     if (!this.isOnline()) this._bootOnNextOpen = true;
     this._bootUnanswered = true;
     this._ackedStatus = new Map();
-    this._bootSentFingerprint = JSON.stringify(this._bootNotification);
+    this._bootSentFingerprint = JSON.stringify(this.bootPayload());
     // OCPP 1.6J §4.2: the CP MUST NOT send any other CALL message until
     // BootNotification has been Accepted. The connector-level
     // StatusNotification fan-out happens in BootNotificationResultHandler
     // after we get the Accepted response.
-    this._outbox.sendBootNotification(this._bootNotification, this._bootReason);
+    this._outbox.sendBootNotification(this.bootPayload(), this._bootReason);
     this.error = "";
   }
 
   disconnect(): void {
+    this._connectOnLinkRestore = false;
     this._logger.info(
       this._webSocket
         ? "Disconnecting from WebSocket"
@@ -3585,6 +3639,9 @@ export class ChargePoint {
 
   reset(reason: BootReason = "LocalReset"): void {
     this._bootReason = reason;
+    // The reset's own boot goes out at the next open, even when the link is
+    // down and the connect below is deferred (#930).
+    this._bootOnNextOpen = true;
     if (this._webSocket) {
       // WebSocket CP: use cause-aware internal reset (preserves reconnect reservation)
       this._webSocket.disconnectInternal(); // drains, does NOT set manual, does NOT clear reservation
@@ -4639,6 +4696,129 @@ export class ChargePoint {
       return;
     }
     this._outbox.sendStatusNotification(connectorId, connector.status);
+  }
+
+  /**
+   * The cellular modem and SIM (#928), or `null` when no modem model is
+   * configured for this station (the legacy default).
+   */
+  get modem(): CellularModem | null {
+    return this._modem;
+  }
+
+  /**
+   * The BootNotification as it would be sent now (#929): the static boot
+   * data, with `iccid` / `imsi` taken from the installed SIM when a modem
+   * model is configured. Read at the moment of every boot and of the 2.x
+   * "did the boot data change" comparison on reconnect (#702); a SIM change
+   * therefore shows up in the next real or triggered BootNotification and
+   * never causes one by itself.
+   */
+  bootPayload(): BootNotification {
+    return bootNotificationFor(this._bootNotification, this._modem);
+  }
+
+  /**
+   * #930: install the SIM-scoped policies (the daemon pushes the whole set to
+   * every charge point, also to one created later). The selection is dynamic:
+   * it is recomputed against the card in the slot now and after every SIM
+   * change, so a replaced card is governed by the policies that match the new
+   * one. Ignored by a station without a modem model.
+   */
+  setCellularPolicies(policies: CellularPolicySet): void {
+    this._cellularPolicies = policies;
+    this.reevaluateCellularLink();
+  }
+
+  /** #930: the resolved cellular link, or `null` without a modem model. */
+  cellularLink(): CellularLinkState | null {
+    return this._cellularLink;
+  }
+
+  /**
+   * #930: the masked modem state with its resolved link, or `null` without a
+   * modem model. `enforced` is false for a SOAP station: its transport is not
+   * a socket the link gate can hold down.
+   */
+  modemState(): (RedactedModemState & { link: CellularLinkWire }) | null {
+    if (!this._modem || !this._cellularLink) return null;
+    return {
+      ...this._modem.redacted(),
+      link: { ...this._cellularLink, enforced: this._webSocket !== null },
+    };
+  }
+
+  /**
+   * Resolve the cellular link and apply it: caps to the transport, the
+   * availability gate to the socket. Idempotent; emits `cellularLinkChanged`
+   * only when the result differs. The OCPP side is untouched: no boot, no
+   * reset, power and transactions stay (#930, #702).
+   */
+  private reevaluateCellularLink(): void {
+    const modem = this._modem;
+    const next = modem
+      ? resolveCellularLink(modem.snapshot(), this._cellularPolicies)
+      : null;
+    const previous = this._cellularLink;
+    if (sameCellularLink(previous, next)) return;
+    this._cellularLink = next;
+    if (!next) return;
+    this._webSocket?.setBandwidthLimits({
+      upstreamBytesPerSecond: next.upstreamBytesPerSecond,
+      downstreamBytesPerSecond: next.downstreamBytesPerSecond,
+    });
+    const wasAvailable = previous?.available ?? true;
+    if (next.available !== wasAvailable) {
+      this._logger.info(
+        next.available
+          ? "Cellular link restored"
+          : `Cellular link unavailable: ${next.reasons.join(", ")}`,
+        LogType.WEBSOCKET,
+      );
+      this._webSocket?.setLinkBlocked(
+        next.available ? null : next.reasons.join(","),
+      );
+      if (next.available && this._connectOnLinkRestore) {
+        this._connectOnLinkRestore = false;
+        if (this._webSocket && !this._webSocket.isOpenOrConnecting()) {
+          this.connect();
+        }
+      }
+    }
+    if (
+      next.available !== wasAvailable ||
+      next.upstreamBytesPerSecond !==
+        (previous?.upstreamBytesPerSecond ?? null) ||
+      next.downstreamBytesPerSecond !==
+        (previous?.downstreamBytesPerSecond ?? null)
+    ) {
+      this._events.emit("cellularLinkChanged", {
+        available: next.available,
+        previouslyAvailable: wasAvailable,
+        reasons: next.reasons,
+        upstreamBytesPerSecond: next.upstreamBytesPerSecond,
+        downstreamBytesPerSecond: next.downstreamBytesPerSecond,
+      });
+    }
+  }
+
+  private logModemChange(change: ModemChange): void {
+    const mask = (sim: SimCard) => maskSimIdentifier(sim.iccid) ?? "no iccid";
+    const message =
+      change.kind === "sim_inserted"
+        ? `SIM inserted: ${change.sim.simId} (iccid ${mask(change.sim)}, ${change.sim.subscription})`
+        : change.kind === "sim_removed"
+          ? `SIM removed: ${change.sim.simId} (iccid ${mask(change.sim)})`
+          : change.kind === "sim_replaced"
+            ? `SIM replaced: ${change.previous.simId} -> ${change.sim.simId} (iccid ${mask(change.sim)}, ${change.sim.subscription})`
+            : change.kind === "subscription_suspended"
+              ? `SIM subscription suspended: ${change.sim.simId}`
+              : change.kind === "subscription_activated"
+                ? `SIM subscription activated: ${change.sim.simId}`
+                : change.kind === "reporting_policy_changed"
+                  ? `SIM reporting policy: ${change.reporting}`
+                  : `Network interface: ${change.networkInterface}`;
+    this._logger.info(message, LogType.SYSTEM);
   }
 
   /**

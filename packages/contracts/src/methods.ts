@@ -37,6 +37,7 @@ import {
 import { subscribeResultSchema } from "./envelope";
 import { VEHICLE_METHODS, vehicleCatalogInfoSchema } from "./vehicle";
 import { labelsSchema } from "./labels";
+import { modemCommandSchema, modemConfigSchema } from "./modem";
 import { transportConfigSchema } from "./transportConfig";
 import {
   ID_TOKEN_TYPE_VALUES as ID_TOKEN_TYPES,
@@ -482,6 +483,11 @@ const cpParamsBaseSchema = z.object({
   labels: labelsSchema.optional(),
   behaviors: behaviorIdsSchema.optional(),
   behaviorParams: behaviorParamsSchema.optional(),
+  modem: modemConfigSchema
+    .optional()
+    .describe(
+      "Cellular modem and SIM (#928). Omit for no modem model: the BootNotification keeps its static iccid/imsi. State persisted for the id (--state-db) wins over this initial state, so cp.update does not reset a swapped card; use the modem.* methods to change it",
+    ),
   chargerCapabilities: chargerCapabilitiesSchema
     .optional()
     .describe(
@@ -1512,6 +1518,10 @@ export const METHODS = {
     result: ANY,
   },
 
+  // -- cellular modem and SIM (#928) --
+  "modem.get": { params: z.object({ cpId: STR_64K }), result: ANY },
+  "modem.command": { params: modemCommandSchema, result: ANY },
+
   // -- network simulation --
   "network_sim.global.get": { params: EMPTY, result: ANY },
   "network_sim.global.save": {
@@ -1529,6 +1539,21 @@ export const METHODS = {
     }),
     result: ANY,
   },
+  // #930: SIM-scoped cellular policies (`online | blocked`, byte caps), by
+  // simId / ICCID / operator. Persisted; apply to every charge point, also to
+  // ones that acquire a matching SIM or are created later.
+  "network_sim.cellular.get": { params: EMPTY, result: ANY },
+  "network_sim.cellular.save": {
+    params: z.object({
+      policies: boundedObject(OBJ_MAX_BYTES)
+        .nullable()
+        .describe(
+          "Policy id -> { match: { simId | iccid | operator }, service?: online|blocked, upstreamBytesPerSecond?, downstreamBytesPerSecond?, enabled? }; replaces the whole set, null clears it",
+        ),
+    }),
+    result: ANY,
+  },
+  "network_sim.cellular.status": { params: EMPTY, result: ANY },
   "network_sim.disconnect.trigger": {
     params: z.object({ cpId: STR_64K, ruleId: STR_64K }),
     result: ANY,
@@ -1888,10 +1913,15 @@ export const EXPLICIT_METHODS = [
   "server.info",
   "events.subscribe",
   "events.unsubscribe",
+  "modem.get",
+  "modem.command",
   "network_sim.global.get",
   "network_sim.global.save",
   "network_sim.cp.get",
   "network_sim.cp.save",
+  "network_sim.cellular.get",
+  "network_sim.cellular.save",
+  "network_sim.cellular.status",
   "network_sim.disconnect.trigger",
   "power.loss",
   "power.restore",

@@ -3,6 +3,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { Server as SocketIoServer } from "socket.io";
 import { io as connectClient, type Socket } from "socket.io-client";
+import { connect } from "node:net";
 import { serveNode } from "../node/serve";
 import { createNodeSocketIoEngine } from "../node/socketIo";
 import type { FetchHandler, RuntimeServer, SocketIoEngine } from "../types";
@@ -114,6 +115,44 @@ describe("serveNode", () => {
         fetch: () => new Response("b"),
       }),
     ).rejects.toMatchObject({ code: "EADDRINUSE" });
+  });
+
+  it("answers 400 to a Host header that is not a valid authority", async () => {
+    const { server } = await start(() => new Response("never"));
+    const reply = await new Promise<string>((resolve, reject) => {
+      const sock = connect(server.port!, "127.0.0.1", () =>
+        sock.write("GET / HTTP/1.1\r\nHost: a b\r\nConnection: close\r\n\r\n"),
+      );
+      let data = "";
+      sock.on("data", (c) => (data += c));
+      sock.on("end", () => resolve(data));
+      sock.on("error", reject);
+    });
+    expect(reply.startsWith("HTTP/1.1 400")).toBe(true);
+  });
+
+  it("answers 400 to an upgrade with a bad Host header and survives a reset", async () => {
+    const { server, base } = await start(() => new Response("ok"));
+    const reply = await new Promise<string>((resolve, reject) => {
+      const sock = connect(server.port!, "127.0.0.1", () =>
+        sock.write(
+          "GET / HTTP/1.1\r\nHost: a b\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n",
+        ),
+      );
+      let data = "";
+      sock.on("data", (c) => (data += c));
+      sock.on("end", () => resolve(data));
+      sock.on("error", reject);
+    });
+    expect(reply.startsWith("HTTP/1.1 400")).toBe(true);
+    const reset = connect(server.port!, "127.0.0.1", () => {
+      reset.write(
+        "GET / HTTP/1.1\r\nHost: x\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n",
+      );
+      reset.resetAndDestroy();
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    expect((await fetch(base)).status).toBe(200);
   });
 
   it("stop(true) closes the listener", async () => {

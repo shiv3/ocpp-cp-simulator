@@ -91,9 +91,9 @@ describe("useChargePoints local mode txUpdatedMeterValues (#550)", () => {
     expect(chargePointOf(service, "CP-550").txUpdatedMeterValues).toBe(false);
   });
 
-  it("leaves it off when the config does not carry it", async () => {
+  it("leaves it on (#551 default) when the config does not carry it", async () => {
     const service = await newService();
     await runEffect(service, localConfig());
-    expect(chargePointOf(service, "CP-550").txUpdatedMeterValues).toBe(false);
+    expect(chargePointOf(service, "CP-550").txUpdatedMeterValues).toBe(true);
   });
 });

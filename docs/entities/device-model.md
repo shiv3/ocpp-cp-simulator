@@ -22,7 +22,7 @@ related:
   - ../concepts/local-authorization.md
   - default-behaviors.md
   - ../sources/github-issues.md
-updated: 2026-11-13
+updated: 2026-11-14
 ---
 
 # Device Model registry
@@ -248,6 +248,9 @@ changes nothing. Setting either takes a plain decimal and is kept in memory,
 like a `Target`:
 
 - a `Target` below `MinSet` or above `MaxSet` is `Rejected` / `ValueOutOfRange`;
+- a `MinSet` above the current `Target`, or a `MaxSet` below it, is `Rejected` /
+  `ValueOutOfRange` (#914): the limit is refused and the `Target` is never
+  clamped, so the CSMS moves the `Target` first and then narrows the range;
 - `MinSet` above `MaxSet` (or `MaxSet` below `MinSet`) is `Rejected` /
   `ValueOutOfRange`;
 - `GetVariables` answers an empty string while one is unset (B06.FR.13), and

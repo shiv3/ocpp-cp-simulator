@@ -605,8 +605,8 @@ export class ChargePoint {
   private _status: ChargePointStatus = OCPPStatus.Unavailable;
   private _error = "";
   private _autoMeterValueSetting: AutoMeterValueSetting | null;
-  /** #347: see {@link sendScheduledMeterValue}. Off by default. */
-  private _txUpdatedMeterValues = false;
+  /** #347: see {@link sendScheduledMeterValue}. On by default (#551). */
+  private _txUpdatedMeterValues = true;
   private readonly _scenarioHandledConnectors: Set<number> = new Set();
   // Mirror of _scenarioHandledConnectors but for the stop side. When a
   // connector id is in this set, the RemoteStopTransaction default
@@ -862,7 +862,14 @@ export class ChargePoint {
             `Connector ${connectorId} schedule period limit=${watts}W, resuming → Charging`,
             LogType.OCPP,
           );
-          this.updateConnectorStatus(connectorId, OCPPStatus.Charging);
+          // §4.9: SuspendedEVSE takes precedence over SuspendedEV; once the
+          // EVSE side lifts, an EV that is not ready leaves SuspendedEV (#871).
+          this.updateConnectorStatus(
+            connectorId,
+            connector.evConnection === "connected-not-ready"
+              ? OCPPStatus.SuspendedEV
+              : OCPPStatus.Charging,
+          );
         }
       });
       // #722: MeterValueSampleInterval drives the periodic MeterValues of a
@@ -1682,7 +1689,8 @@ export class ChargePoint {
   /**
    * #347: whether the meter-value scheduler's samples taken during an OCPP
    * 2.x transaction ride TransactionEvent(Updated, MeterValuePeriodic)
-   * instead of MeterValues. Off by default; ignored on 1.x.
+   * instead of MeterValues. On by default (#551); false restores the
+   * standalone MeterValues. Ignored on 1.x.
    */
   get txUpdatedMeterValues(): boolean {
     return this._txUpdatedMeterValues;

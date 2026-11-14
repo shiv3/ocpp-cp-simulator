@@ -21,7 +21,7 @@ const wire = (csms: MockCsms): string[] =>
 
 /** Resolves once the CSMS has seen `raw`, JSON or not. */
 async function waitForRaw(csms: MockCsms, raw: string): Promise<void> {
-  const deadline = Date.now() + 2000;
+  const deadline = Date.now() + 10_000;
   while (!wire(csms).includes(raw)) {
     if (Date.now() > deadline) throw new Error(`never saw ${raw}`);
     await new Promise((resolve) => setTimeout(resolve, 5));
@@ -123,26 +123,36 @@ describe("raw frames (#393)", () => {
         const raw = '[2,"raw-c"]';
         const sending = cp.sendRawFrame({ frame: raw, waitMs: 5000 });
         await waitForRaw(csms, raw);
-        const opens = csms.openCount();
+        const firstBootIds = new Set(
+          csms.received.filter(callOf("BootNotification")).map((f) => f[1]),
+        );
+        const resumed = new Promise<void>((resolve) => {
+          cp.events.on("reconnectResumed", () => resolve());
+        });
         csms.closeCurrentConnection(1002);
         const outcome = await sending;
         expect(outcome.reply).toBeNull();
         expect(outcome.closed).toBe("network");
 
-        // The station reconnects on its own; once it is back, a normal CALL
-        // is answered and correlated.
-        const deadline = Date.now() + 10_000;
-        while (csms.openCount() === opens || !cp.isOnline()) {
-          if (Date.now() > deadline) throw new Error("no reconnect");
-          await new Promise((resolve) => setTimeout(resolve, 20));
-        }
-        const boot = csms.received.filter(callOf("BootNotification"));
-        for (const frame of boot) {
-          csms.replyCallResult(frame[1] as string, {
+        // The station reconnects on its own. Wait for the one thing this
+        // session does to resume (#888): 1.6 boots again, and exactly that
+        // BootNotification is answered (`isOnline()` and the socket's open
+        // say nothing about whether the frame reached the CSMS, and the first
+        // session's boot must not be answered twice); 2.x sends no boot when
+        // its boot data is unchanged (#702) and reports `reconnectResumed`.
+        if (version === "OCPP-1.6J") {
+          const reboot = await csms.waitForFrame(
+            (frame) =>
+              callOf("BootNotification")(frame) && !firstBootIds.has(frame[1]),
+            10_000,
+          );
+          csms.replyCallResult(reboot[1] as string, {
             status: "Accepted",
             currentTime: "2026-10-30T00:00:00.000Z",
             interval: 300,
           });
+        } else {
+          await resumed;
         }
         const next = await cp.sendOcppCall({
           action: "Heartbeat",

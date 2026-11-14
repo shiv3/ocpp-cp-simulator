@@ -148,6 +148,24 @@ export function handleSetVariablesV201(
           );
         }
       }
+      // #914: a new limit may not leave the current Target outside the
+      // range. The limit is rejected, the Target is never clamped (the CSMS
+      // set the Target and must move it explicitly first).
+      if (type !== "Target") {
+        const target = targets.get(v16Key);
+        if (target !== undefined) {
+          if (type === "MinSet" && value > target) {
+            return rejected(
+              statusInfo(REASON.valueOutOfRange, `above the Target ${target}`),
+            );
+          }
+          if (type === "MaxSet" && value < target) {
+            return rejected(
+              statusInfo(REASON.valueOutOfRange, `below the Target ${target}`),
+            );
+          }
+        }
+      }
       if (type === "Target") targets.set(v16Key, value);
       else targets.setLimit(v16Key, type, value);
       return { attributeStatus: "Accepted", attributeType: type, ...echo }; // B05.FR.03

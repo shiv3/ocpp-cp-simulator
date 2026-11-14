@@ -1,0 +1,10 @@
+{
+  "name": "ui-sdk-combobox-spike",
+  "private": true,
+  "type": "module",
+  "description": "Isolated spike for #936. Not a workspace member; never imported by the web console.",
+  "devDependencies": {
+    "@ui-sdk/core": "0.1.0-beta.1",
+    "@ui-sdk/react": "0.1.0-beta.1"
+  }
+}

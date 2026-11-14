@@ -181,9 +181,15 @@ async function transactionsEndedBeforeReboot(
   ctx: BehaviorContext,
   cancelled: () => boolean,
 ): Promise<boolean> {
+  // L01.FR.07 (#871): with `connectorsUnavailable` the idle EVSEs stay held
+  // Unavailable while waiting, or a new session could postpone the reboot
+  // indefinitely.
+  const hold = ctx.params.connectorsUnavailable === true;
+  if (hold) holdIdleConnectors(cp, ctx);
   while (hasTransaction(cp)) {
     await ctx.sleep(POLL_MS);
     if (cancelled()) return false;
+    if (hold) holdIdleConnectors(cp, ctx);
   }
   return !cancelled();
 }

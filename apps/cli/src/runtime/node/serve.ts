@@ -85,6 +85,9 @@ export function serveNode(options: ServeOptions): Promise<RuntimeServer> {
   server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     upgraded.add(socket);
     socket.once("close", () => upgraded.delete(socket));
+    // A reset while the fetch handler is pending or the refusal is written
+    // must not surface as an unhandled 'error' event.
+    socket.on("error", () => {});
     void handleUpgrade(req, socket, head);
   });
 
@@ -92,7 +95,17 @@ export function serveNode(options: ServeOptions): Promise<RuntimeServer> {
     req: IncomingMessage,
     res: ServerResponse,
   ): Promise<void> {
-    const request = toRequest(req, options, true);
+    let request: Request;
+    try {
+      request = toRequest(req, options, true);
+    } catch {
+      // e.g. a Host header that is not a valid authority.
+      if (!res.headersSent) {
+        res.writeHead(400, { connection: "close" });
+      }
+      res.end();
+      return;
+    }
     rawByRequest.set(request, { kind: "request", req, res });
     let response: Response | undefined;
     try {
@@ -123,7 +136,15 @@ export function serveNode(options: ServeOptions): Promise<RuntimeServer> {
     socket: Duplex,
     head: Buffer,
   ): Promise<void> {
-    const request = toRequest(req, options, false);
+    let request: Request;
+    try {
+      request = toRequest(req, options, false);
+    } catch {
+      socket.end(
+        "HTTP/1.1 400 Bad Request\r\nconnection: close\r\ncontent-length: 0\r\n\r\n",
+      );
+      return;
+    }
     const raw: RawNodeRequest = { kind: "upgrade", req, socket, head };
     rawByRequest.set(request, raw);
     let response: Response | undefined;

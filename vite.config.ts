@@ -83,6 +83,8 @@ export default defineConfig({
       "**/node_modules/**",
       "**/dist/**",
       "**/*.bun.test.ts",
+      // isolated spikes with their own install (#936), run by hand
+      "apps/web/spikes/**",
       // standalone Bun reproductions (#833), run by hand with `bun test`
       "repro/**",
     ],

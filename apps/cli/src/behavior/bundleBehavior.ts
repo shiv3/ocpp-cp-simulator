@@ -31,8 +31,8 @@ export function behaviorBundlingUnavailable(
 ): string | null {
   if (isBun) return null;
   return mode === "build"
-    ? "`behavior build` needs Bun: https://bun.sh"
-    : "Loading a behavior file needs Bun: https://bun.sh";
+    ? "`behavior build` needs Bun (run the CLI under Bun, e.g. `bunx --bun ocpp-cp-simulator behavior build ...`): https://bun.sh"
+    : "Loading a behavior file needs Bun (run the CLI under Bun, e.g. `bunx --bun ocpp-cp-simulator ...`): https://bun.sh";
 }
 
 const formatProblem = (p: SyntaxProblem): string =>

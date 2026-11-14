@@ -96,7 +96,7 @@ jobs:
       - name: Build web console (vite)
         run: bun run build
 
-      # The tarball ships the CLI as one `bun build` bundle (dist-cli/main.js,
+      # The tarball ships the CLI as one bundle (dist-cli/main.js,
       # the `bin`), not as sources: a published package must not depend on
       # the source layout (#578). `npm pack --ignore-scripts` below skips the
       # `prepack` hook that would otherwise run this.

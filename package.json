@@ -41,7 +41,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "build:cli": "bun build --target=bun --outfile=dist-cli/main.js --metafile=dist-cli/.metafile.json apps/cli/src/main.ts && bun run scripts/generate-cli-notices.ts dist-cli/.metafile.json && rm dist-cli/.metafile.json",
+    "build:cli": "bun run scripts/build-cli.ts",
+    "build:cli:bun": "bun build --target=bun --outfile=dist-cli/main.js --metafile=dist-cli/.metafile.json apps/cli/src/main.ts && bun run scripts/generate-cli-notices.ts dist-cli/.metafile.json && rm dist-cli/.metafile.json",
     "test": "vitest run && bun run test:bun",
     "test:vitest": "vitest run",
     "test:bun": "bun test --isolate bun.test",
@@ -149,6 +150,7 @@
     "lint-staged": "^17.6.0",
     "postcss": "^8.5.32",
     "prettier": "3.9.10",
+    "rolldown": "~1.2.16",
     "rollup-plugin-license": "^3.7.1",
     "tailwind-merge": "^3.7.0",
     "tailwindcss": "^4.3.5",

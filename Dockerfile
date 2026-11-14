@@ -114,7 +114,7 @@ COPY scripts/bench/tsconfig.json ./scripts/bench/tsconfig.json
 COPY scripts/tsconfig.json ./scripts/tsconfig.json
 # vite.config.ts imports the third-party notices renderer (#857).
 COPY scripts/licenseNotices.ts ./scripts/licenseNotices.ts
-# `bun run build:cli` writes the CLI bundle's notices with this (#870).
+# `bun run build:cli:bun` writes the CLI bundle's notices with this (#870).
 COPY scripts/generate-cli-notices.ts ./scripts/generate-cli-notices.ts
 COPY tailwind.config.js postcss.config.js ./
 COPY public ./public
@@ -139,7 +139,7 @@ ENV APP_COMMIT=$APP_COMMIT
 ARG VITE_ERROR_REPORTER=""
 ARG VITE_SENTRY_DSN=""
 ARG VITE_SENTRY_ENVIRONMENT=""
-RUN bun run build && bun run build:cli
+RUN bun run build && bun run build:cli:bun
 
 
 # ----- Stage 2: the runtime image -------------------------------------

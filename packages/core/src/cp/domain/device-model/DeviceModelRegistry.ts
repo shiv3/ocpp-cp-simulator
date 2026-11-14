@@ -606,7 +606,7 @@ const VARIABLES: readonly DeviceModelVariableDef[] = [
   persistent("SecurityCtrlr", "Identity", "ChargePointIdentity", {
     mutability: "ReadWrite",
     dataType: "string",
-    default: "",
+    // No default: a station's value is its own identity.
     effect:
       "A new charge point identity, applied at the next reboot (RebootRequired).",
   }),

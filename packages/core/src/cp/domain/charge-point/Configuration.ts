@@ -36,8 +36,10 @@ export const ConfigurationKeys = {
       name: "AuthorizeRemoteTxRequests",
       required: true,
       // R or RW is the Charge Point's choice (§9.1.3; 2.0.1 Part 2 §2.3.4).
-      // Writable, so both behaviours of §5.11 / F01 can be exercised (#921);
-      // a custom key choosing the accessibility is #922.
+      // Writable, so both behaviours of §5.11 / F01 can be exercised (#921).
+      // The custom key `AuthorizeRemoteTxRequestsReadOnly` (#922) makes this
+      // key read-only per station: the ConfigurationStore swaps the flag on
+      // its entry (`ACCESS_KEYS`), so this static default stays `false`.
       readonly: false,
       type: "boolean",
     } as BooleanConfigurationKey,
@@ -446,6 +448,19 @@ export const ConfigurationKeys = {
       readonly: false,
       type: "boolean",
     } as BooleanConfigurationKey,
+    // #922: chooses the accessibility of `AuthorizeRemoteTxRequests` (1.6
+    // §9.1.3 "R or RW", 2.0.1 Part 2 §2.3.4 `AuthCtrlr.AuthorizeRemoteStart`
+    // "ReadOnly or ReadWrite": the choice is the station's). false (default)
+    // = read-write, as before; true = ChangeConfiguration / SetVariables of
+    // it are Rejected for the CSMS (the operator can still write the value).
+    // Applies at once. Not a Device Model variable: a CSMS cannot see or
+    // flip it.
+    AuthorizeRemoteTxRequestsReadOnly: {
+      name: "AuthorizeRemoteTxRequestsReadOnly",
+      required: false,
+      readonly: false,
+      type: "boolean",
+    } as BooleanConfigurationKey,
     // Issue #452: the store key behind OCPP 2.x `AuthCacheCtrlr.LifeTime`
     // (2.0.1 Part 2 §2.4.3, C10.FR.08): seconds an Authorization Cache
     // entry without a cacheExpiryDateTime stays valid after its last
@@ -822,6 +837,7 @@ export const defaultConfiguration: (cp: ChargePoint) => Configuration = (
     strVal(ConfigurationKeys.Custom.OcppServer, cp.wsUrl),
     strVal(ConfigurationKeys.Custom.SimulatedFirmwareUpdateFailure, ""),
     boolVal(ConfigurationKeys.Custom.AuthorizeBeforeLocalStart, true),
+    boolVal(ConfigurationKeys.Custom.AuthorizeRemoteTxRequestsReadOnly, false),
     // #452: 2.x only (AuthCacheCtrlr.LifeTime); a 1.6 GetConfiguration
     // keeps its key set.
     ...(isOcpp2Version(cp.ocppVersion)

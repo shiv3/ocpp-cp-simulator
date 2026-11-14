@@ -52,6 +52,18 @@ const REBOOT_REQUIRED_KEYS = new Set<string>([
 ]);
 
 /**
+ * Keys whose accessibility is chosen per station by a boolean custom key
+ * (#922): `AuthorizeRemoteTxRequests` is read-only while
+ * `AuthorizeRemoteTxRequestsReadOnly` is true. The store swaps the `readonly`
+ * flag on its own entry, so every reader of `entry.key.readonly`
+ * (ChangeConfiguration, GetConfiguration, the operator's key list, and on 2.x
+ * SetVariables / GetBaseReport through `effectiveMutability`) sees it.
+ */
+const ACCESS_KEYS: ReadonlyMap<string, string> = new Map([
+  ["AuthorizeRemoteTxRequests", "AuthorizeRemoteTxRequestsReadOnly"],
+]);
+
+/**
  * One-shot listener type used by `ConfigurationStore.onChange`. The store
  * fires it whenever a value mutates (via `set` or `applyMany`); the
  * subscriber is expected to push the new value into whichever subsystem
@@ -98,6 +110,7 @@ export class ConfigurationStore {
       this.values.set(entry.key.name, entry);
     }
     this.loadOverrides();
+    this.syncAccess();
   }
 
   /** Build a store from the canonical defaults plus any persisted overrides. */
@@ -155,6 +168,12 @@ export class ConfigurationStore {
   isWriteOnly(name: string): boolean {
     const entry = this.values.get(name);
     return entry ? isWriteOnlyConfigurationKey(entry.key) : false;
+  }
+
+  /** Whether the operator may write `name` although it is read-only for the
+   *  CSMS because its access key says so (#922). */
+  isOperatorWritable(name: string): boolean {
+    return ACCESS_KEYS.has(name);
   }
 
   /** Typed getters for the common shapes. Returns `undefined` when missing or wrong type. */
@@ -530,11 +549,16 @@ export class ConfigurationStore {
   applyChange(
     name: string,
     rawValue: string,
-    options: { bypassGuard?: boolean } = {},
+    options: { bypassGuard?: boolean; operator?: boolean } = {},
   ): ConfigurationChangeStatus {
     const entry = this.values.get(name);
     if (!entry) return "NotSupported";
-    if (entry.key.readonly) return "Rejected";
+    // #922: the operator (control plane, scenario) may still write a key the
+    // station made read-only for the CSMS through its access key; any other
+    // read-only key stays read-only for everyone.
+    if (entry.key.readonly && !(options.operator && ACCESS_KEYS.has(name))) {
+      return "Rejected";
+    }
 
     const parsed = parseValue(entry.key, rawValue);
     if (parsed === PARSE_FAILED) return "Rejected";
@@ -547,12 +571,27 @@ export class ConfigurationStore {
     const next = { key: entry.key, value: parsed } as ConfigurationValue;
     this.values.set(name, next);
     this.persistOverride(name, parsed);
+    this.syncAccess();
     this.emit(name, parsed);
 
     if (name === "SecurityProfile" && this.changeGuards.has(name)) {
       return "Accepted";
     }
     return REBOOT_REQUIRED_KEYS.has(name) ? "RebootRequired" : "Accepted";
+  }
+
+  /** Apply the access keys (#922) to the entries they govern. */
+  private syncAccess(): void {
+    for (const [name, accessKey] of ACCESS_KEYS) {
+      const entry = this.values.get(name);
+      if (!entry) continue;
+      const readonly = this.getBoolean(accessKey) ?? false;
+      if (entry.key.readonly === readonly) continue;
+      this.values.set(name, {
+        key: { ...entry.key, readonly },
+        value: entry.value,
+      } as ConfigurationValue);
+    }
   }
 
   /** Subscribe to value changes. Returns an unsubscribe function. */

@@ -572,6 +572,7 @@ describe("createScenarioExecutorCallbacks runtime effects", () => {
     expect(chargePointShape.configuration.applyChange).toHaveBeenCalledWith(
       "MeterValueSampleInterval",
       "5",
+      { operator: true },
     );
     expect(chargePointShape.sendStatusNotificationRaw).toHaveBeenCalledWith(
       0,

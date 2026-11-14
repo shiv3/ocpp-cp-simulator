@@ -112,6 +112,21 @@ export interface DeviceModelRegistry {
   variablesOf(component: string): readonly DeviceModelVariableDef[];
 }
 
+/**
+ * The mutability this station reports and enforces for `def`. The registry is
+ * static; a station can make a ReadWrite key read-only through its store entry
+ * (`AuthorizeRemoteTxRequestsReadOnly`, #922). A ReadOnly or WriteOnly
+ * definition is never widened.
+ */
+export function effectiveMutability(
+  def: DeviceModelVariableDef,
+  key: { readonly readonly: boolean },
+): DeviceModelMutability {
+  return def.mutability === "ReadWrite" && key.readonly
+    ? "ReadOnly"
+    : def.mutability;
+}
+
 /** `component/variable[/instance]`, the registry's identity of a variable. */
 export function deviceModelVariableId(v: {
   component: string;
@@ -555,7 +570,9 @@ const VARIABLES: readonly DeviceModelVariableDef[] = [
     },
   ),
   // §2.3.4 leaves the mutability to the station; both values are implemented
-  // (F01.FR.01/02, #762), so it is writable (#921); configurable in #922.
+  // (F01.FR.01/02, #762), so it is writable (#921). `ReadWrite` is the
+  // default; a station can make it ReadOnly with the custom key
+  // `AuthorizeRemoteTxRequestsReadOnly` (#922), see `effectiveMutability`.
   persistent("AuthCtrlr", "AuthorizeRemoteStart", "AuthorizeRemoteTxRequests", {
     mutability: "ReadWrite",
     dataType: "boolean",

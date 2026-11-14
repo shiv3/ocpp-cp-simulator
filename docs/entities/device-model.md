@@ -91,6 +91,12 @@ leave the mutability to the station, and both values are implemented — a
 remote start authorized like a local one, or started at once (see
 [default behaviors](default-behaviors.md)). A CSMS, a scenario or the
 operator's `set_config_key` can turn it on; it persists like any writable key.
+The custom key `AuthorizeRemoteTxRequestsReadOnly` (default `false`, #922)
+makes it `ReadOnly` for this station: the registry stays static, and the
+store's per-station flag lowers the reported and enforced mutability
+(`effectiveMutability`) in `SetVariables`, `GetBaseReport` and the operator's
+key list. The operator can still write the value. See
+[local authorization](../concepts/local-authorization.md).
 
 A `MemberList` variable, like an `OptionList` one, carries a `valuesList`
 (mandatory in `VariableCharacteristicsType` for `OptionList`, `MemberList` and

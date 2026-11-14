@@ -11,7 +11,16 @@
 # installed package catches this and every future instance.
 #
 # Usage:
-#   scripts/verify-cli-tarball.sh [--expect-dist] [path/to/ocpp-cp-simulator-<version>.tgz]
+#   scripts/verify-cli-tarball.sh [--expect-dist] [--runtime node|bun] [path/to/ocpp-cp-simulator-<version>.tgz]
+#
+# --runtime node  (#916) proves the package runs WITHOUT Bun: PATH is cut down
+#                 to node's directory plus /usr/bin:/bin, the script fails if
+#                 `bun` is still found, the tarball is installed with npm only
+#                 and every stage runs the bin through its `node` shebang.
+#                 Needs a tarball argument (building the bundle needs Bun).
+# --runtime bun   runs the installed bundle with `bun --bun`, ignoring the
+#                 shebang, so the same package is exercised on Bun.
+# (no flag)       the original mix: bun and npm installs, bin run by shebang.
 #
 # With no tarball argument it builds the CLI bundle (`bun run build:cli`, the
 # `bin` the tarball ships) and packs one itself (`npm pack --ignore-scripts`,
@@ -50,12 +59,35 @@ fail() {
 
 EXPECT_DIST=0
 TARBALL=""
-for arg in "$@"; do
-  case "$arg" in
+RUNTIME=""
+while [ $# -gt 0 ]; do
+  case "$1" in
     --expect-dist) EXPECT_DIST=1 ;;
-    *) TARBALL="$arg" ;;
+    --runtime) shift; RUNTIME="${1:-}" ;;
+    *) TARBALL="$1" ;;
   esac
+  shift
 done
+case "$RUNTIME" in
+  ""|node|bun) ;;
+  *) echo "::error::--runtime takes node or bun, not '$RUNTIME'"; exit 2 ;;
+esac
+# RUN is the command prefix every stage runs the installed bin with (`env`:
+# the bin runs through its shebang).
+RUN=(env)
+if [ "$RUNTIME" = node ]; then
+  [ -n "$TARBALL" ] || { echo "::error::--runtime node needs a tarball argument (building the bundle needs Bun)"; exit 2; }
+  NODE_BIN="$(command -v node)" || { echo "::error::node not found"; exit 2; }
+  export PATH="$(dirname "$NODE_BIN"):/usr/bin:/bin"
+  if command -v bun > /dev/null 2>&1; then
+    echo "::error::--runtime node: bun is still on PATH ($(command -v bun)); the point is to run without it"
+    exit 2
+  fi
+  echo "==> runtime: node $(node -v), no bun on PATH"
+elif [ "$RUNTIME" = bun ]; then
+  RUN=(bun --bun)
+  echo "==> runtime: bun $(bun -v) (bun --bun, shebang ignored)"
+fi
 
 if [ -z "$TARBALL" ]; then
   echo "==> building the CLI bundle (bun run build:cli)"
@@ -98,21 +130,36 @@ fi
 # global tree (bin/ + install/global/node_modules), so this never touches the
 # developer's or the runner's real global installs.
 # ---------------------------------------------------------------------------
-export BUN_INSTALL="$SCRATCH/bun-global"
-mkdir -p "$BUN_INSTALL"
-echo "==> bun install -g $TARBALL"
-bun install -g --backend=copyfile "$TARBALL" > "$SCRATCH/install.log" 2>&1
-[ $? -eq 0 ] || fail "bun install -g" "$SCRATCH/install.log"
+if [ "$RUNTIME" = node ]; then
+  # No Bun: install with npm, which is how most users get the package.
+  NPM_PREFIX="$SCRATCH/npm-global"
+  mkdir -p "$NPM_PREFIX"
+  echo "==> npm install -g $TARBALL"
+  npm install -g --prefix "$NPM_PREFIX" --no-audit --no-fund "$TARBALL" > "$SCRATCH/install.log" 2>&1
+  [ $? -eq 0 ] || fail "npm install -g" "$SCRATCH/install.log"
+  BIN="$NPM_PREFIX/bin/ocpp-cp-sim"
+  PKG_DIR="$NPM_PREFIX/lib/node_modules/ocpp-cp-simulator"
+else
+  export BUN_INSTALL="$SCRATCH/bun-global"
+  mkdir -p "$BUN_INSTALL"
+  echo "==> bun install -g $TARBALL"
+  bun install -g --backend=copyfile "$TARBALL" > "$SCRATCH/install.log" 2>&1
+  [ $? -eq 0 ] || fail "bun install -g" "$SCRATCH/install.log"
 
-BIN="$BUN_INSTALL/bin/ocpp-cp-sim"
+  BIN="$BUN_INSTALL/bin/ocpp-cp-sim"
+  PKG_DIR="$BUN_INSTALL/install/global/node_modules/ocpp-cp-simulator"
+fi
 [ -x "$BIN" ] || fail "installed bin missing or not executable: $BIN" "$SCRATCH/install.log"
-PKG_DIR="$BUN_INSTALL/install/global/node_modules/ocpp-cp-simulator"
 [ -d "$PKG_DIR" ] || fail "installed package dir missing: $PKG_DIR" "$SCRATCH/install.log"
 # The package is the bundle plus dist/; no source tree (#578). A src/ in the
 # tarball means `files` regressed to shipping sources, and anything that only
 # works because of it would hide behind this script's own checks.
 [ -f "$PKG_DIR/dist-cli/main.js" ] || fail "installed package has no dist-cli/main.js (is \"dist-cli\" in package.json#files, and was build:cli run?)" "$SCRATCH/install.log"
 [ ! -e "$PKG_DIR/src" ] || fail "installed package ships src/ — the tarball must carry only the bundle and dist/" "$SCRATCH/install.log"
+if [ "$RUNTIME" != bun ]; then
+  head -n 1 "$PKG_DIR/dist-cli/main.js" | grep -q '^#!/usr/bin/env node$' \
+    || fail "dist-cli/main.js does not start with the node shebang (#916)"
+fi
 
 # ---------------------------------------------------------------------------
 # Stage A — the binary starts at all. This is what caught #320, when the
@@ -122,7 +169,7 @@ PKG_DIR="$BUN_INSTALL/install/global/node_modules/ocpp-cp-simulator"
 # (There is no --version flag; --help is the cheapest full-boot smoke.)
 # ---------------------------------------------------------------------------
 echo "==> [A] ocpp-cp-sim --help"
-"$BIN" --help > "$SCRATCH/help.log" 2>&1
+"${RUN[@]}" "$BIN" --help > "$SCRATCH/help.log" 2>&1
 [ $? -eq 0 ] || fail "'ocpp-cp-sim --help' exited non-zero" "$SCRATCH/help.log"
 grep -q "Usage: ocpp-cp-sim" "$SCRATCH/help.log" || fail "--help printed no usage banner" "$SCRATCH/help.log"
 
@@ -132,7 +179,9 @@ grep -q "Usage: ocpp-cp-sim" "$SCRATCH/help.log" || fail "--help printed no usag
 # too, so this is the check that it neither errors nor skips the bin. Skipped
 # where npm is not installed.
 # ---------------------------------------------------------------------------
-if command -v npm > /dev/null 2>&1; then
+if [ "$RUNTIME" = node ]; then
+  echo "==> [A2] skipped: the install above was npm already"
+elif command -v npm > /dev/null 2>&1; then
   echo "==> [A2] npm install -g $TARBALL"
   NPM_PREFIX="$SCRATCH/npm-global"
   mkdir -p "$NPM_PREFIX"
@@ -153,9 +202,13 @@ fi
 # could not inline) must resolve from the installed package's own
 # node_modules, or the published CLI fails on that import.
 # ---------------------------------------------------------------------------
-echo "==> [B] bun build --compile (from the installed tree)"
-bun build --compile "$PKG_DIR/dist-cli/main.js" --outfile "$SCRATCH/compiled" > "$SCRATCH/compile.log" 2>&1
-[ $? -eq 0 ] || fail "the installed bundle's import graph does not resolve" "$SCRATCH/compile.log"
+if [ "$RUNTIME" = node ]; then
+  echo "==> [B] skipped: needs bun"
+else
+  echo "==> [B] bun build --compile (from the installed tree)"
+  bun build --compile "$PKG_DIR/dist-cli/main.js" --outfile "$SCRATCH/compiled" > "$SCRATCH/compile.log" 2>&1
+  [ $? -eq 0 ] || fail "the installed bundle's import graph does not resolve" "$SCRATCH/compile.log"
+fi
 
 # ---------------------------------------------------------------------------
 # Stage C — it serves. Boots the daemon WITH a charge point, because creating
@@ -167,7 +220,7 @@ bun build --compile "$PKG_DIR/dist-cli/main.js" --outfile "$SCRATCH/compiled" > 
 PORT="$(node -e 'const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>{const p=s.address().port;s.close(()=>console.log(p))})')"
 [ -n "$PORT" ] || fail "could not pick a free port"
 echo "==> [C] daemon on 127.0.0.1:$PORT with a bootstrapped CP"
-"$BIN" --http-port "$PORT" --state-db :memory: \
+"${RUN[@]}" "$BIN" --http-port "$PORT" --state-db :memory: \
   --cp-id verify-smoke --connectors 2 \
   --ws-url ws://127.0.0.1:9/ocpp/ > "$SCRATCH/daemon.log" 2>&1 &
 DAEMON_PID=$!
@@ -192,13 +245,23 @@ wait "$DAEMON_PID" 2>/dev/null
 DAEMON_PID=""
 
 # ---------------------------------------------------------------------------
+# Stage C1 — JSON Lines mode (#916): a command on stdin gets its answer on
+# stdout. The CSMS URL is a closed port again; `status` does not need a link.
+# ---------------------------------------------------------------------------
+echo "==> [C1] --json status over stdin"
+( echo '{"id":"smoke","command":"status"}'; sleep 3 ) \
+  | "${RUN[@]}" "$BIN" --cp-id verify-json --ws-url ws://127.0.0.1:9/ocpp/ --json > "$SCRATCH/json.log" 2>&1
+grep -q '"id":"smoke","ok":true' "$SCRATCH/json.log" \
+  || fail "--json did not answer the status command" "$SCRATCH/json.log"
+
+# ---------------------------------------------------------------------------
 # Stage C2 — export-k6 writes its runtime. The runtime used to be copied from
 # src/cli/exportK6/runtime/ beside the running module, which a bundle does not
 # have; it is embedded now (runtimeSources.ts). Run from the installed tree,
 # this is the check that the embedded copy reaches the export.
 # ---------------------------------------------------------------------------
 echo "==> [C2] export-k6 from the installed tree"
-"$BIN" export-k6 --scenario "$REPO_ROOT/docs/examples/scenarios/demo-charging.json" \
+"${RUN[@]}" "$BIN" export-k6 --scenario "$REPO_ROOT/docs/examples/scenarios/demo-charging.json" \
   --out "$SCRATCH/k6-export" > "$SCRATCH/export-k6.log" 2>&1
 [ $? -eq 0 ] || fail "'ocpp-cp-sim export-k6' exited non-zero" "$SCRATCH/export-k6.log"
 for f in scenario.k6.ts ocpp-runtime/index.ts ocpp-runtime/wire/v16.ts; do
@@ -217,7 +280,7 @@ if [ -f "$PKG_DIR/dist/index.html" ]; then
   PORT="$(node -e 'const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>{const p=s.address().port;s.close(()=>console.log(p))})')"
   [ -n "$PORT" ] || fail "could not pick a free port"
   echo "==> [D] daemon with --web-console on 127.0.0.1:$PORT"
-  "$BIN" --http-port "$PORT" --web-console --state-db :memory: > "$SCRATCH/console.log" 2>&1 &
+  "${RUN[@]}" "$BIN" --http-port "$PORT" --web-console --state-db :memory: > "$SCRATCH/console.log" 2>&1 &
   DAEMON_PID=$!
   SERVED=0
   for _ in $(seq 1 60); do

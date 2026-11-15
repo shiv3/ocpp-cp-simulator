@@ -34,7 +34,10 @@ import { MeterSampling } from "./MeterSampling";
 import { PowerLossController } from "./PowerLossController";
 
 import { ConnectionTimeouts } from "./ConnectionTimeouts";
+
 import { ResetOnIdle } from "./ResetOnIdle";
+
+import { PlugInFlow } from "./PlugInFlow";
 import { EventEmitter } from "../../shared/EventEmitter";
 
 import { realClock } from "../../shared/clock";
@@ -337,14 +340,6 @@ export class ChargePoint {
   private readonly _engine: ChargePointEngine;
   /** #575: the default transaction behavior, see `deps.transactions`. */
   private readonly _transactions: ChargePointTransactions;
-  /** #697: an idToken authorized before the cable was in, per connector;
-   *  `TxStartPoint` `EVConnected` starts the transaction at the plug-in.
-   *  Per connector is per EVSE on the 1:1 topology; an EVSE with several
-   *  connectors will key it by EVSE (#628). */
-  private readonly _tokenAwaitingPlugIn = new Map<
-    number,
-    { tagId: string; options: StartTransactionOptions }
-  >();
   /** #628: how the connectors group into EVSEs; every 2.x EVSE reference
    *  is mapped through it. Fixed at construction. */
   private readonly _topology: StationTopology;
@@ -480,6 +475,14 @@ export class ChargePoint {
     configuration: () => this._configuration,
     logger: () => this._logger,
     ocppVersion: () => this._ocppVersion,
+  });
+  private readonly _plugIn = new PlugInFlow({
+    chargePoint: this,
+    configuration: () => this._configuration,
+    connectionTimeouts: () => this._connectionTimeouts,
+    logger: () => this._logger,
+    ocppVersion: () => this._ocppVersion,
+    outbox: () => this._outbox,
   });
   private readonly _configWiring = new ConfigurationWiring({
     chargePoint: () => this,
@@ -3058,67 +3061,7 @@ export class ChargePoint {
    * status. The EV and cable model (#453) records the cable as unplugged.
    */
   evDisconnected(connectorId: number): void {
-    const connector = this.getConnector(connectorId);
-    if (!connector) {
-      this._logger.error(
-        `Connector ${connectorId} not found`,
-        LogType.TRANSACTION,
-      );
-      return;
-    }
-
-    connector.markEvUnplugged();
-    this._tokenAwaitingPlugIn.delete(connectorId);
-    if (!connector.hasRunningTransaction) {
-      // Only the states that exist because a cable is plugged in fall back
-      // to Available (#453); an unplug does not lift an Unavailable, Faulted
-      // or Reserved connector, nor repeat an Available.
-      if (
-        connector.status === OCPPStatus.Preparing ||
-        connector.status === OCPPStatus.Finishing ||
-        connector.status === OCPPStatus.SuspendedEV ||
-        connector.status === OCPPStatus.SuspendedEVSE
-      ) {
-        this.updateConnectorStatus(connectorId, OCPPStatus.Available);
-      }
-      return;
-    }
-
-    if (
-      connector.energyOfferSuspended &&
-      connector.status === OCPPStatus.SuspendedEV
-    ) {
-      this._logger.debug(
-        `Connector ${connectorId} EV side already disconnected, ignoring`,
-        LogType.TRANSACTION,
-      );
-      return;
-    }
-
-    if (this._configuration.stopTransactionOnEVSideDisconnect()) {
-      this._logger.info(
-        `Connector ${connectorId} EV side disconnected, stopping the transaction (StopTransactionOnEVSideDisconnect=true)`,
-        LogType.TRANSACTION,
-      );
-      this.stopTransaction(connector, "EVDisconnected", {
-        triggerReason: "EVCommunicationLost",
-        stoppedReason: "EVDisconnected",
-      });
-      return;
-    }
-
-    this._logger.info(
-      `Connector ${connectorId} EV side disconnected, suspending the transaction (StopTransactionOnEVSideDisconnect=false)`,
-      LogType.TRANSACTION,
-    );
-    connector.suspendEnergyOffer();
-    if (isOcpp2Version(this._ocppVersion)) {
-      this._outbox.sendTransactionUpdate(connectorId, {
-        triggerReason: "EVCommunicationLost",
-        chargingState: "SuspendedEV",
-      });
-    }
-    this.updateConnectorStatus(connectorId, OCPPStatus.SuspendedEV);
+    this._plugIn.evDisconnected(connectorId);
   }
 
   /**
@@ -3130,14 +3073,7 @@ export class ChargePoint {
    * (#830 review).
    */
   statusWhenFree(connectorId: number): OCPPStatus {
-    const connector = this.getConnector(connectorId);
-    return connector &&
-      connectorId !== 0 &&
-      !this.poweredOff &&
-      !connector.hasRunningTransaction &&
-      connector.evConnection !== "disconnected"
-      ? OCPPStatus.Preparing
-      : OCPPStatus.Available;
+    return this._plugIn.statusWhenFree(connectorId);
   }
 
   /**
@@ -3151,84 +3087,7 @@ export class ChargePoint {
    * does not lift them. Unplug with {@link evDisconnected}.
    */
   evPlugIn(connectorId: number): void {
-    const connector = this.getConnector(connectorId);
-    if (!connector || connectorId === 0) {
-      this._logger.error(
-        `Connector ${connectorId} not found`,
-        LogType.TRANSACTION,
-      );
-      return;
-    }
-    if (connector.evConnection !== "disconnected") {
-      // A cable recorded while the connector shows Available (a path that
-      // freed it without looking at the cable) still reports the plug-in.
-      if (
-        !this.poweredOff &&
-        !connector.hasRunningTransaction &&
-        connector.status === OCPPStatus.Available
-      ) {
-        this.updateConnectorStatus(connectorId, OCPPStatus.Preparing);
-      }
-      return;
-    }
-    connector.markEvPluggedIn();
-    if (
-      isOcpp2Version(this._ocppVersion) &&
-      connector.hasRunningTransaction &&
-      !this.poweredOff
-    ) {
-      // E03 (idToken first): the cable arrives after the transaction began.
-      // E03.FR.12 / E02.FR.17: Updated, CablePluggedIn, chargingState
-      // EVConnected; the EVConnectionTimeOut is over (E03.FR.05 applies only
-      // when no EV connects); the energy offer then starts (Charging).
-      this._connectionTimeouts.clear(connectorId);
-      this._outbox.sendTransactionUpdate(connectorId, {
-        triggerReason: "CablePluggedIn",
-        chargingState: "EVConnected",
-      });
-      if (connector.status === OCPPStatus.Preparing) {
-        this.updateConnectorStatus(connectorId, OCPPStatus.Charging);
-      }
-      return;
-    }
-    if (
-      !this.poweredOff &&
-      !connector.hasRunningTransaction &&
-      connector.status === OCPPStatus.Available
-    ) {
-      // #697: TxStartPoint EVConnected starts the transaction at the
-      // plug-in (Started, CablePluggedIn, EVConnected); the idToken that
-      // follows is an Updated event. The start puts the connector in
-      // Preparing itself.
-      if (
-        isOcpp2Version(this._ocppVersion) &&
-        connector.availability === "Operative" &&
-        this._configuration.txStartPoint().includes("EVConnected")
-      ) {
-        const waiting = this._tokenAwaitingPlugIn.get(connectorId);
-        this._tokenAwaitingPlugIn.delete(connectorId);
-        void (async () => {
-          await this.startTransaction("", connectorId, undefined, undefined, {
-            awaitAuthorization: true,
-            triggerReason: "CablePluggedIn",
-            chargingState: "EVConnected",
-          });
-          // The token authorized before the plug-in joins the transaction
-          // the cable just started (Updated Authorized / RemoteStart).
-          if (waiting) {
-            await this.startTransaction(
-              waiting.tagId,
-              connectorId,
-              undefined,
-              undefined,
-              { ...waiting.options, preAuthorized: true },
-            );
-          }
-        })();
-        return;
-      }
-      this.updateConnectorStatus(connectorId, OCPPStatus.Preparing);
-    }
+    this._plugIn.evPlugIn(connectorId);
   }
 
   /** #697: hold an authorized idToken until the cable is plugged in. */
@@ -3237,7 +3096,7 @@ export class ChargePoint {
     tagId: string,
     options: StartTransactionOptions,
   ): void {
-    this._tokenAwaitingPlugIn.set(connectorId, { tagId, options });
+    this._plugIn.deferStartUntilPlugIn(connectorId, tagId, options);
   }
 
   /**
@@ -3249,33 +3108,7 @@ export class ChargePoint {
    * the readiness is recorded and nothing is sent. Idempotent.
    */
   evSetReady(connectorId: number, ready: boolean): void {
-    const connector = this.getConnector(connectorId);
-    if (!connector || connectorId === 0) {
-      this._logger.error(
-        `Connector ${connectorId} not found`,
-        LogType.TRANSACTION,
-      );
-      return;
-    }
-    if (connector.evConnection === "disconnected") {
-      throw new Error(`Connector ${connectorId} has no EV plugged in`);
-    }
-    connector.markEvReady(ready);
-    if (!connector.hasRunningTransaction) return;
-    if (!ready) {
-      if (connector.status !== OCPPStatus.Charging) return;
-      connector.suspendEnergyOffer();
-      // On 2.x the status write carries the TransactionEvent(Updated).
-      this.updateConnectorStatus(connectorId, OCPPStatus.SuspendedEV);
-      return;
-    }
-    if (
-      connector.status !== OCPPStatus.SuspendedEV ||
-      !connector.energyOfferSuspended
-    ) {
-      return;
-    }
-    this.updateConnectorStatus(connectorId, OCPPStatus.Charging);
+    this._plugIn.evSetReady(connectorId, ready);
   }
 
   cleanTransaction(connectorOrId: Connector | number): void {

@@ -247,28 +247,44 @@ export class RpcEndpoint {
       );
       return;
     }
-    let result: unknown;
+    let answer: string;
     try {
-      result = await handler(payload, { messageId, action });
-    } catch (error) {
-      this.reply(
+      // An answer that cannot be encoded (a cycle, a BigInt) counts as a
+      // handler failure.
+      answer = encodeCallResult(
         messageId,
-        error instanceof RpcHandlerError
-          ? encodeCallError(
-              messageId,
-              error.errorCode,
-              error.errorDescription,
-              error.errorDetails,
-            )
-          : encodeCallError(
-              messageId,
-              dialect.internalError,
-              `Handler for ${action} failed`,
-            ),
+        await handler(payload, { messageId, action }),
       );
-      return;
+    } catch (error) {
+      answer = this.failureFrame(messageId, action, error);
     }
-    this.reply(messageId, encodeCallResult(messageId, result));
+    this.reply(messageId, answer);
+  }
+
+  /** The CALLERROR for a handler that threw: its own for an
+   *  `RpcHandlerError` whose details can be encoded, else `InternalError`. */
+  private failureFrame(
+    messageId: string,
+    action: string,
+    error: unknown,
+  ): string {
+    if (error instanceof RpcHandlerError) {
+      try {
+        return encodeCallError(
+          messageId,
+          error.errorCode,
+          error.errorDescription,
+          error.errorDetails,
+        );
+      } catch {
+        // Details that cannot be encoded: fall through to InternalError.
+      }
+    }
+    return encodeCallError(
+      messageId,
+      this.options.dialect.internalError,
+      `Handler for ${action} failed`,
+    );
   }
 
   private reply(messageId: string, frame: string): void {

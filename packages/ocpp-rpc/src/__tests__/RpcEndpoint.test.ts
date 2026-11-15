@@ -212,6 +212,27 @@ describe("RpcEndpoint CALLERROR paths", () => {
     expect(csms.sent.join("")).not.toContain("secret detail");
   });
 
+  it("answers InternalError when the answer it built cannot be encoded", async () => {
+    const { cs, csms } = pair(OCPP16_RPC_DIALECT);
+    const cyclic: Record<string, unknown> = { secret: "secret detail" };
+    cyclic.self = cyclic;
+    csms.endpoint.handle("Heartbeat", () => cyclic);
+    csms.endpoint.handle("StatusNotification", () => {
+      throw new RpcHandlerError("GenericError", "denied", cyclic);
+    });
+    const outcomes = ["Heartbeat", "StatusNotification"].map((action) =>
+      cs.endpoint.call(action, {}).catch((e: unknown) => e),
+    );
+    await flush();
+    expect([...csms.sent].sort()).toEqual([
+      '[4,"cs-1","InternalError","Handler for Heartbeat failed",{}]',
+      '[4,"cs-2","InternalError","Handler for StatusNotification failed",{}]',
+    ]);
+    for (const outcome of await Promise.all(outcomes)) {
+      expect(outcome).toBeInstanceOf(RpcCallError);
+    }
+  });
+
   it.each([
     [
       "1.6",

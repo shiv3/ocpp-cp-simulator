@@ -139,7 +139,9 @@ manifest still exports `"./*"`, so every consumer imports
   the validator's description.
 - A handler that throws `RpcHandlerError(code, description, details)` is answered
   with that code; any other throw is answered `InternalError` with the generic
-  description `Handler for <action> failed`, never the exception's message.
+  description `Handler for <action> failed`, never the exception's message. So is
+  an answer that cannot be encoded (a cyclic result or `RpcHandlerError`
+  details), with empty details `{}`.
 - `call` resolves with the CALLRESULT payload, or rejects with `RpcCallError`
   (CALLERROR), `RpcInvalidResponseError` (CALLRESULT failing `validate`),
   `RpcTimeoutError`, `RpcClosedError`, or the error `send` threw.

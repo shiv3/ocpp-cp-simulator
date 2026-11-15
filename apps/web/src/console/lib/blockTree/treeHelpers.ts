@@ -87,3 +87,11 @@ export function assertTreeCovers(def: Def, tree: BlockTree): void {
     if (!edgeCount.has(id)) throw new Error(`edge ${id} is not accounted`);
   }
 }
+
+/** The node the run reaches at slot `index` of `seq`: the block there, or
+ *  the node the sequence falls through to; null at an end / link / stop. */
+export function nodeAtSlot(seq: Seq, index: number): string | null {
+  const block = seq.blocks[index];
+  if (block) return firstNodeOf(block).id;
+  return seq.exit.kind === "fallthrough" ? seq.exit.to : null;
+}

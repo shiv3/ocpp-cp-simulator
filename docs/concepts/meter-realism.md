@@ -81,6 +81,17 @@ of ten of 2.0.1 `unitOfMeasure.multiplier` (the actual value is
 it, because 1.6 §7.45 UnitOfMeasure has no such field. 2.x samples now also carry
 `location` when one is set.
 
+A `set` is refused, like any invalid meter setting (`cp.create` fails, #846),
+when it names a `location`, `context` or `phase` that 1.6, 2.0.1 and 2.1 do not
+all define (`location` is one of `Body`, `Cable`, `EV`, `Inlet`, `Outlet`: 2.1's
+`Upstream` has no 1.6 or 2.0.1 equivalent), a `unit` that is empty or longer
+than 20 characters (2.x `UnitOfMeasureType.unit`), or a `value` that is not a
+plain decimal such as `-12.5` (2.x sends it as a JSON number, so a non-number
+would be `null`). The `unit` is not checked against 1.6's closed list: the
+validator does not know the charge point's OCPP version. A stored
+configuration that fails these checks is dropped when the registry restores
+the charge point, like any other invalid `chargerCapabilities`.
+
 ## Station main meter (#617)
 
 `chargerCapabilities.mainMeter` (`baseLoadW`, `voltageV`, `phases`, `seed`,

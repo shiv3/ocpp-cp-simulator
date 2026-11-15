@@ -689,4 +689,54 @@ describe("chargerCapabilities carries the meter config", () => {
     expect(chargerCapabilitiesProblem(badMain)).toMatch(/phases/);
     expect(chargerCapabilitiesSchema.safeParse(badMain).success).toBe(false);
   });
+
+  // #846: an override reaches the wire as is; a value no OCPP version
+  // defines, or a value that is not a number (a NaN is `null` on 2.x),
+  // is refused like every other invalid meter setting.
+  const withSet = (set: Record<string, unknown>) => ({
+    connectors: [
+      {
+        connectorId: 1,
+        maxDeliveryPowerW: 11_000,
+        meter: { sampledValues: [{ measurand: "Voltage", set }] },
+      },
+    ],
+    mainMeter: { sampledValues: [{ measurand: "Voltage", set }] },
+  });
+
+  it.each([
+    [{ location: "Pocket" }, /location/],
+    [{ location: "Upstream" }, /location/],
+    [{ context: "Sample" }, /context/],
+    [{ phase: "L4" }, /phase/],
+    [{ unit: "" }, /unit/],
+    [{ unit: "MegaWattHoursPerDay" + "x".repeat(2) }, /unit/],
+    [{ value: "abc" }, /value/],
+    [{ value: "" }, /value/],
+    [{ value: " " }, /value/],
+    [{ value: "0x10" }, /value/],
+    [{ value: "NaN" }, /value/],
+    [{ value: "Infinity" }, /value/],
+    [{ value: "1e3" }, /value/],
+  ])("refuses the override set %j in both validators", (set, problem) => {
+    expect(chargerCapabilitiesProblem(withSet(set))).toMatch(problem);
+    expect(chargerCapabilitiesSchema.safeParse(withSet(set)).success).toBe(
+      false,
+    );
+    const mainOnly = { ...withSet(set), connectors: [] };
+    expect(chargerCapabilitiesProblem(mainOnly)).toMatch(problem);
+    expect(chargerCapabilitiesSchema.safeParse(mainOnly).success).toBe(false);
+  });
+
+  it.each([
+    { location: "Outlet", context: "Sample.Clock", phase: "L1-N" },
+    { location: "EV", context: "Interruption.End", phase: "N" },
+    { value: "-12.5", unit: "kWh" },
+    { value: "0" },
+  ])("accepts the override set %j in both validators", (set) => {
+    expect(chargerCapabilitiesProblem(withSet(set))).toBeNull();
+    expect(chargerCapabilitiesSchema.safeParse(withSet(set)).success).toBe(
+      true,
+    );
+  });
 });

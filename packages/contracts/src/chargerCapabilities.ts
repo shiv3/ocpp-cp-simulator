@@ -2,19 +2,48 @@ import { z } from "zod";
 
 const pct = z.number().min(0).max(50).finite();
 
+// The SampledValue values an override may set, as every JSON version defines
+// them; mirrors `overridesProblem` in core's `MeterRealism.ts` (#846).
+const overrideLocation = z.enum(["Body", "Cable", "EV", "Inlet", "Outlet"]);
+const overrideContext = z.enum([
+  "Interruption.Begin",
+  "Interruption.End",
+  "Other",
+  "Sample.Clock",
+  "Sample.Periodic",
+  "Transaction.Begin",
+  "Transaction.End",
+  "Trigger",
+]);
+const overridePhase = z.enum([
+  "L1",
+  "L2",
+  "L3",
+  "N",
+  "L1-N",
+  "L2-N",
+  "L3-N",
+  "L1-L2",
+  "L2-L3",
+  "L3-L1",
+]);
+
 const sampledValueOverrideSchema = z
   .object({
     measurand: z.string().regex(/^[A-Za-z][A-Za-z.]*$/),
     phase: z.string().optional(),
     set: z
       .object({
-        unit: z.string().optional(),
+        unit: z.string().min(1).max(20).optional(),
         multiplier: z.number().int().optional(),
         decimals: z.number().int().min(0).max(10).optional(),
-        location: z.string().optional(),
-        context: z.string().optional(),
-        phase: z.string().optional(),
-        value: z.string().optional(),
+        location: overrideLocation.optional(),
+        context: overrideContext.optional(),
+        phase: overridePhase.optional(),
+        value: z
+          .string()
+          .regex(/^-?\d+(\.\d+)?$/)
+          .optional(),
         omit: z.boolean().optional(),
       })
       .strict(),

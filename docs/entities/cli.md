@@ -1,7 +1,7 @@
 ---
 title: CLI (`ocpp-cp-sim`)
 type: entity
-summary: The headless Bun binary — interactive REPL, JSON Lines mode, daemon launcher, and Socket.IO client modes — plus the full flag reference.
+summary: The headless binary (Node >= 22.13 or Bun) — interactive REPL, JSON Lines mode, daemon launcher, and Socket.IO client modes — plus the full flag reference.
 sources:
   - apps/cli/src/main.ts
   - apps/cli/src/exportK6/runtimeSources.ts
@@ -44,13 +44,13 @@ updated: 2026-11-14
 # CLI (`ocpp-cp-sim`)
 
 Headless charge point simulator for scripting, CI pipelines, and
-AI/automation integration. Runs on [Bun](https://bun.sh/). The same binary
+AI/automation integration. Runs on [Node.js](https://nodejs.org/) >= 22.13 or on [Bun](https://bun.sh/). The same binary
 is also the launcher for the [daemon](daemon.md) and a thin Socket.IO client
 for a daemon someone else started.
 
 ## Prerequisites
 
-- [Bun](https://bun.sh/) runtime
+- [Node.js](https://nodejs.org/) >= 22.13 **or** [Bun](https://bun.sh/) to run the package (#916); Bun to develop in the repository and to use behavior files (see [Runtimes](#runtimes))
 
 ## Quick Start
 
@@ -76,9 +76,12 @@ run, since it matches the package name). It can be invoked from anywhere once
 installed:
 
 ```bash
-# npm registry (recommended) — ships the web-console dist/. Needs Bun at run time.
-pnpm install -g ocpp-cp-simulator     # or: bun install -g / npm install -g ocpp-cp-simulator
-bunx ocpp-cp-simulator --help         # or: npx ocpp-cp-simulator --help (no install)
+# npm registry (recommended) — ships the web-console dist/. Runs on Node >= 22.13 or Bun.
+npm install -g ocpp-cp-simulator      # or: pnpm install -g (needs Node >= 22.13 on PATH)
+npx ocpp-cp-simulator --help          # no install
+# Bun-only machine (no node on PATH), see "Bun-only machines" under Runtimes:
+bunx ocpp-cp-simulator --help
+bun install -g ocpp-cp-simulator && bun --bun "$(which ocpp-cp-sim)" --help
 
 # The same package as a prebuilt release tarball
 pnpm install -g https://github.com/shiv3/ocpp-cp-simulator/releases/download/cli-latest/ocpp-cp-simulator.tgz
@@ -110,9 +113,7 @@ ocpp-cp-sim --daemon
 > `NPM_PUBLISH=true`. A SemVer prerelease (`v1.0.0-rc.1`) is published under
 > the `next` dist-tag, never `latest`; a re-run of a tag already on npm skips.
 > The bin is `dist-cli/main.js`, one bundle under a `node` shebang that also
-> runs on Bun (#916); the daemon uses `node:sqlite` and `node:http` on Node,
-> `bun:sqlite` and `Bun.serve` on Bun. Behavior bundling (`behavior build`,
-> `--behavior`) still needs Bun. Step 4 of #916 rewrites the install docs.
+> runs on Bun (#916). See [Runtimes](#runtimes).
 >
 > The first version had to be published by hand (a package that does not exist
 > yet cannot have a trusted publisher); that publish also went through npm's
@@ -402,19 +403,70 @@ outside the checkout and runs it from another one.
 
 `--runtime node|bun` (#916) pins the runtime: `node` cuts PATH down to node's
 directory (the script fails if `bun` is still found), installs with npm only
-and runs the bin through its `node` shebang; `bun` runs it with `bun --bun`.
+and runs the bin through its `node` shebang; `bun` is a Bun-only machine: PATH
+holds the system tools minus node / npm / npx plus bun (the script fails if
+`node` is still found), the tarball is installed with `bun install -g` and the
+bin runs as `bun --bun <bin>`. It also prints what running the bin directly
+does there (it fails, see below).
 A `--json` status command over stdin is part of the smoke. The `cli-runtimes`
 job in `ci.yml` runs it on Node 22.13 (the floor), 24 and 26 (current LTS) and
 on Bun, with `--expect-dist`. The vitest suite stays on Node `lts/*` only: six
 test files use the global `CloseEvent`, which Node 22 lacks.
 
-The [Docker image](docker-image.md) and the desktop
-[sidecar](desktop-app.md) still run from the sources (`bun apps/cli/src/main.ts`
-and `bun build --compile apps/cli/src/main.ts`); the embedded k6 runtime serves
-the sidecar too.
+The [Docker image](docker-image.md) does not run the published bundle: it
+builds `dist-cli/main.js` with `bun run build:cli:bun` (`bun build --target=bun`,
+a `bun` shebang) and runs that under Bun, and
+`cliBundle.bun.test.ts` pins that bundle. The desktop [sidecar](desktop-app.md)
+is `bun build --compile` of `apps/cli/src/main.ts`; the embedded k6 runtime
+serves both.
 
 All flags described below apply whether you run the installed `ocpp-cp-sim`
 command or, from a source checkout, `bun apps/cli/src/main.ts …`.
+
+## Runtimes
+
+The published package runs on **Node >= 22.13** (tested on 22.13, 24 and 26,
+the current LTS) **and on Bun**; the same `dist-cli/main.js` serves both
+(#916). `engines.node` is `>=22.13.0`. The runtime is chosen once at start-up
+(`typeof Bun`, `apps/cli/src/runtime/`).
+
+| Area                                                  | Node                                                                            | Bun                                   |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------- | ------------------------------------- |
+| HTTP / Socket.IO (daemon, web console, SOAP listener) | `node:http` + the stock Socket.IO engine                                        | `Bun.serve` + `@socket.io/bun-engine` |
+| State DB (`--state-db`)                               | `node:sqlite` (its ExperimentalWarning is filtered)                             | `bun:sqlite`                          |
+| OCPP WebSocket client                                 | `ws` (handshake headers, TLS options, `--ws-max-payload`, `--ws-local-address`) | native `WebSocket` (`--ws-proxy`)     |
+| `behavior build`, `--behavior`, `--watch-behaviors`   | **not available**: fails with "needs Bun"                                       | available                             |
+| Sentry (`SENTRY_DSN`)                                 | `@sentry/bun` without the Bun-only integrations, `runtime: node`                | `@sentry/bun`                         |
+
+Where a flag differs per runtime, the flag table says so (`--ws-proxy` is Bun
+only, `--ws-max-payload` and `--ws-local-address` are Node only: a start that
+asks for the other runtime's option is refused, not silently ignored). To use a
+behavior file from an npm install, run the CLI under Bun:
+`bunx --bun ocpp-cp-simulator --behavior ./b.ts ...`.
+
+### Bun-only machines
+
+The bin starts with `#!/usr/bin/env node`. Where Node is not installed, a plain
+`ocpp-cp-sim` (the symlink `bun install -g` creates) therefore **fails** with
+`/usr/bin/env: 'node': No such file or directory`. This is a known regression
+of #916: before it the shebang was `bun` and `bun install -g` plus a plain run
+worked on a Bun-only machine. What works there, verified with Bun 1.3.14 and no
+`node` on PATH (CI job "CLI on Bun (no Node)" covers the `bun --bun` row; the `bunx` row was checked by hand):
+
+| Command                                                                         | Result                                                           |
+| ------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `bun install -g ocpp-cp-simulator`, then `ocpp-cp-sim ...`                      | fails: `env: 'node': No such file or directory`                  |
+| `bun install -g ocpp-cp-simulator`, then `bun --bun "$(which ocpp-cp-sim)" ...` | works (also `bun "$(which ocpp-cp-sim)" ...`)                    |
+| `bunx ocpp-cp-simulator ...` / `bunx --bun ocpp-cp-simulator ...`               | works: with no Node on PATH `bunx` runs the bin under Bun itself |
+
+Workaround: use `bunx` / `bun --bun <bin>`, or a shell alias
+`alias ocpp-cp-sim='bun --bun "$(which ocpp-cp-sim)"'`, or install Node.
+
+Not changed: the [Docker image](docker-image.md) and the Tauri sidecar run on
+Bun with a separate `bun build --target=bun` bundle (`bun run build:cli:bun`).
+Building the package from the repository still needs Bun (`bun run build:cli`);
+only running it does not. CI proves the Bun-free run: the `cli-runtimes` job
+(see [What the package ships](#what-the-package-ships)).
 
 ## Operation Modes
 
@@ -738,6 +790,8 @@ daemon's stored logs and writes a Markdown / HTML report. It has its own page:
 [analyze](analyze.md).
 
 ### Behavior code: `--behavior` and `behavior build`
+
+> Needs Bun: on Node, `--behavior` and `behavior build` fail with a "needs Bun" message (see [Runtimes](#runtimes)).
 
 A [behavior](../concepts/charger-engine.md#behavior-api) is a TypeScript or
 JavaScript module whose default export is a behavior (`{ api: 1, id, requires?, onCall?, on?, beforeSend?, main?, onResume? }`)

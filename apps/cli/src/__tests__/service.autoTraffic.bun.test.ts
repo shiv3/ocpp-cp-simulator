@@ -183,6 +183,58 @@ describe("AutoTraffic on a charge point (#603)", () => {
     }
   });
 
+  // #846: the connector's target-SoC auto-stop reaches the runner, so an
+  // intent session it ends counts completed; any other end does not.
+  it.each([
+    ["the target-SoC auto-stop", true, 1],
+    ["any other station-side end", false, 0],
+  ])(
+    "routes the connector auto-stop to the runner: an intent session ended by %s",
+    async (_label, autoStop, completed) => {
+      const { svc } = station();
+      const cp = (
+        svc as unknown as {
+          _chargePoint: {
+            getConnector(id: number): {
+              events: {
+                emit(event: "autoStopRequested", data: object): void;
+              };
+            };
+            startTransaction: () => Promise<{ started: boolean }>;
+          };
+        }
+      )._chargePoint;
+      const config: AutoTrafficConfig = {
+        ...CONFIG,
+        requireAuthorize: false,
+        sessionModel: "intent",
+        minDurationSec: 60,
+        maxDurationSec: 60,
+      };
+      cp.startTransaction = async () => {
+        // The stub opens no transaction, so the runner sees the session end
+        // at its next check (1 s); the auto-stop fires once the session is
+        // open and before that check.
+        if (autoStop) {
+          setTimeout(
+            () =>
+              cp.getConnector(1).events.emit("autoStopRequested", {
+                reason: "targetSocReached",
+              }),
+            100,
+          );
+        }
+        return { started: true };
+      };
+      svc.setAutoTrafficConfig(1, config);
+      await wait(1_300);
+      const counters = { ...svc.getAutoTrafficCounters(1) };
+      svc.setAutoTrafficConfig(1, { ...config, enabled: false });
+      expect(counters.started).toBeGreaterThan(0);
+      expect(counters.completed).toBe(completed);
+    },
+  );
+
   it("rebuilds the idTag stream when the traffic is reconfigured", () => {
     const { svc } = station();
     const pickerOf = () =>

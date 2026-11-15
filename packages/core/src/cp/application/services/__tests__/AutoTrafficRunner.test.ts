@@ -559,7 +559,7 @@ describe("stopping ends the session it started (#300)", () => {
   describe("sessionModel intent (#327)", () => {
     const INTENT: AutoTrafficConfig = { ...CONFIG, sessionModel: "intent" };
 
-    it("hands the drawn intent to the start and counts a station-side end as completed without a second stop", async () => {
+    it("hands the drawn intent to the start and counts the target-SoC auto-stop as completed without a second stop", async () => {
       let running = true;
       const intents: unknown[] = [];
       const h = hooks({
@@ -578,10 +578,36 @@ describe("stopping ends the session it started (#300)", () => {
           initialSoc: expect.any(Number),
           targetSoc: expect.any(Number),
         });
-        running = false; // the connector reached the target and stopped
+        // The connector reached the target and stopped (EnergyLimitReached).
+        runner.noteTargetReached();
+        running = false;
         await advance(1_000);
         expect(h.events).toEqual(["start"]);
         expect(runner.counters.completed).toBe(1);
+      } finally {
+        runner.stop();
+      }
+    });
+
+    // #846: a RemoteStop, an EV-side unplug, a power loss or a Reset ends the
+    // session from the station's side too, but it did not reach its target.
+    it("does not count a station-side end before the target as completed", async () => {
+      let running = true;
+      const h = hooks({ sessionRunning: () => running });
+      const runner = new AutoTrafficRunner(INTENT, "CP1", 1, h);
+      runner.start();
+      try {
+        await advance(5_000);
+        expect(h.events).toEqual(["start"]);
+        running = false; // e.g. a RemoteStop
+        await advance(1_000);
+        expect(h.events).toEqual(["start"]);
+        expect(runner.counters.completed).toBe(0);
+        expect(runner.counters.stopAccepted).toBe(0);
+        // The traffic goes on: the next cycle starts a new session.
+        running = true;
+        await advance(5_000);
+        expect(h.events).toEqual(["start", "start"]);
       } finally {
         runner.stop();
       }

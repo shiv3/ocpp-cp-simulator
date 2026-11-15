@@ -381,7 +381,10 @@ low-power or schedule-capped session). The vehicle is the connector's current EV
 settings, the same one MeterValues are built from. The intent is drawn after the
 duration and before the roll, so under `"intent"` a seed keeps the gaps and
 durations it gives under `"duration"`; the intent ends the session through
-`completed` without a `stopAccepted`. Validation:
+`completed` without a `stopAccepted`. Only that target-SoC auto-stop counts as
+`completed`: a session the station ends some other way (a RemoteStop, an
+EV-side unplug, a power loss, a Reset) counts neither `completed` nor
+`stopAccepted`, and the next cycle follows (#846). Validation:
 `sessionModel must be "duration" or "intent"`, and each bound a number from 0 to 100
 with min not above max.
 

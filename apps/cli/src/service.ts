@@ -3,7 +3,6 @@ import type {
   Behavior,
   JsonObject,
 } from "@ocpp-cp-simulator/contracts/behavior";
-import { describeDefaultBehaviors } from "@ocpp-cp-simulator/core/cp/application/engine/behaviors/index";
 import type {
   DiagnosticsStatus,
   FirmwareStatus,
@@ -75,15 +74,9 @@ import {
   type TransactionUpdateOptions,
 } from "@ocpp-cp-simulator/core/cp/domain/connector/Transaction";
 import { LogType } from "@ocpp-cp-simulator/core/cp/shared/Logger";
-import { AutoTrafficRunner } from "@ocpp-cp-simulator/core/cp/application/services/AutoTrafficRunner";
+import type { AutoTrafficRunner } from "@ocpp-cp-simulator/core/cp/application/services/AutoTrafficRunner";
+import type { AutoTrafficIdTagPicker } from "@ocpp-cp-simulator/core/cp/domain/connector/AutoTraffic";
 import {
-  AUTO_TRAFFIC_ID_TAG,
-  AutoTrafficIdTagPicker,
-  autoTrafficVehicleLabel,
-  autoTrafficVehiclePatch,
-  defaultAutoTrafficConfig,
-  emptyAutoTrafficCounters,
-  validateAutoTrafficConfig,
   type AutoTrafficConfig,
   type AutoTrafficCounters,
 } from "@ocpp-cp-simulator/core/cp/domain/connector/AutoTraffic";
@@ -118,11 +111,7 @@ import {
 import { legacyGeneratedBaseId } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/legacyStartupInstances";
 import { SqliteScenarioRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/SqliteScenarioRepository";
 import type { ScenarioRepository } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioRepository";
-import { SqliteEngineStateRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/SqliteEngineStateRepository";
-import {
-  parsePersistedEngineState,
-  type PersistedEngineState,
-} from "@ocpp-cp-simulator/core/cp/application/engine/ChargerState";
+import type { PersistedEngineState } from "@ocpp-cp-simulator/core/cp/application/engine/ChargerState";
 import { SqliteConnectorRuntimeRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/SqliteConnectorRuntimeRepository";
 import type { ScenarioRunRepository } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunRepository";
 import { createScenarioRunRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/createScenarioRunRepository";
@@ -177,6 +166,29 @@ import type {
   SessionSettledInfo,
 } from "./service/cliEvents";
 import { attachEventForwarders } from "./service/eventForwarders";
+import {
+  getAutoTrafficConfig,
+  getAutoTrafficCounters,
+  setAutoTrafficConfig,
+  type AutoTrafficHost,
+} from "./service/autoTraffic";
+import {
+  restoreAutoTrafficFromDatabase,
+  restoreConnectorRuntimeFromDatabase,
+  persistEngineState,
+  type RuntimePersistenceHost,
+} from "./service/runtimePersistence";
+import {
+  assertBehaviorsLoadable,
+  behaviorIds,
+  effectiveBehaviorParams,
+  engineStateSnapshot,
+  loadBehaviors,
+  replaceBehaviors,
+  restoreEngineState,
+  setBehaviors,
+  type BehaviorsHost,
+} from "./service/behaviors";
 import type { ForwarderHost } from "./service/forwarderHost";
 
 export type { CLIEvent, SessionSettledInfo };
@@ -1309,133 +1321,16 @@ export class CLIChargePointService {
    * reconfigure that kept the old stream would not be reproducible.
    */
   setAutoTrafficConfig(connectorId: number, config: AutoTrafficConfig): void {
-    this.requireConnector(connectorId);
-    const invalid = validateAutoTrafficConfig(config);
-    if (invalid) throw new Error(invalid);
-
-    this._autoTrafficConfigs.set(connectorId, config);
-    const existing = this._autoTraffic.get(connectorId);
-    if (existing) {
-      // The picker restarts with the runner's seeded stream.
-      this._autoTrafficPickers.set(
-        connectorId,
-        config.enabled
-          ? this.autoTrafficIdTagPicker(connectorId, config)
-          : null,
-      );
-      existing.reconfigure(config);
-      if (!config.enabled) {
-        this._autoTraffic.delete(connectorId);
-        this._autoTrafficPickers.delete(connectorId);
-      }
-      return;
-    }
-    if (!config.enabled) return;
-
-    this._autoTrafficPickers.set(
-      connectorId,
-      this.autoTrafficIdTagPicker(connectorId, config),
-    );
-    const runner = new AutoTrafficRunner(config, this._init.cpId, connectorId, {
-      // One tag per session (#603), from the pool when the charge point has
-      // one.
-      idTag: () =>
-        this._autoTrafficPickers.get(connectorId)?.next() ??
-        AUTO_TRAFFIC_ID_TAG,
-      // A cycle starts only on an Accepted charge point, an Available
-      // connector and no active transaction (#603); otherwise it is skipped.
-      startBlocker: (id) => {
-        if (this._chargePoint.poweredOff)
-          return "the charge point has no power";
-        if (!this._chargePoint.bootAccepted) {
-          return "the charge point is not Accepted";
-        }
-        const connector = this._chargePoint.getConnector(id);
-        if (!connector) return `connector ${id} not found`;
-        if (connector.hasRunningTransaction) return "a transaction is active";
-        if (connector.status !== OCPPStatus.Available) {
-          return `the connector is ${connector.status}`;
-        }
-        return null;
-      },
-      // Awaited: a CSMS that refuses the tag must be counted as a refusal, not
-      // reported as a started session.
-      authorize: async (_id, idTag) => {
-        const status = await this._chargePoint.authorizeAndWait(idTag);
-        return status === "Accepted";
-      },
-      // `intent` is set under `sessionModel: "intent"` (#327): the session
-      // opens at the drawn SoC, targets the drawn SoC and stops there.
-      startTransaction: async (id, idTag, intent, vehicle) => {
-        // #627: the drawn vehicle becomes the connector's, before the start,
-        // so the transaction (battery capacity, opening SoC) and every
-        // MeterValues of the session read the vehicle the traffic drew.
-        if (vehicle) {
-          this.requireConnector(id).applyEvSettingsOverride(
-            autoTrafficVehiclePatch(vehicle),
-          );
-          this._chargePoint.logger.info(
-            `[auto-traffic] ${this._init.cpId}/${id} vehicle ${autoTrafficVehicleLabel(vehicle)}`,
-            LogType.TRANSACTION,
-          );
-        }
-        const outcome = await this._chargePoint.startTransaction(
-          idTag,
-          id,
-          undefined,
-          intent?.initialSoc,
-          intent
-            ? { targetSoc: intent.targetSoc, stopAtTarget: true }
-            : undefined,
-        );
-        return outcome.started;
-      },
-      sessionRunning: (id) =>
-        this._chargePoint.getConnector(id)?.hasRunningTransaction ?? false,
-      stopTransaction: async (id) => this.stopTransaction(id),
-      poweredOff: () => this._chargePoint.poweredOff,
-      // A scenario owns the connector while any executor is running: a run's
-      // verdict must never depend on whether background traffic fired.
-      scenarioActive: () => this._executors.size > 0,
-      log: (message) =>
-        this._chargePoint.logger.info(message, LogType.TRANSACTION),
-    });
-    this._autoTraffic.set(connectorId, runner);
-    runner.start();
-  }
-
-  /** The traffic's idTag stream, or `null` without a pool (#603). */
-  private autoTrafficIdTagPicker(
-    connectorId: number,
-    config: AutoTrafficConfig,
-  ): AutoTrafficIdTagPicker | null {
-    const pool = this._chargePoint.idTagPoolInfo();
-    if (!pool) return null;
-    return new AutoTrafficIdTagPicker(
-      // Read at each draw: `--watch` swaps the pool's list (#314).
-      () => this._chargePoint.idTagPoolInfo()?.tags ?? pool.tags,
-      config.idTagStrategy ?? pool.distribution,
-      config.seed,
-      this._init.cpId,
-      connectorId,
-      config.cpIndex,
-    );
+    setAutoTrafficConfig(this.autoTrafficHost(), connectorId, config);
   }
 
   getAutoTrafficConfig(connectorId: number): AutoTrafficConfig {
-    this.requireConnector(connectorId);
-    return (
-      this._autoTrafficConfigs.get(connectorId) ?? {
-        ...defaultAutoTrafficConfig,
-      }
-    );
+    return getAutoTrafficConfig(this.autoTrafficHost(), connectorId);
   }
 
   /** Per-connector counters, the assertion surface for a load run. */
   getAutoTrafficCounters(connectorId: number): AutoTrafficCounters {
-    return (
-      this._autoTraffic.get(connectorId)?.counters ?? emptyAutoTrafficCounters()
-    );
+    return getAutoTrafficCounters(this.autoTrafficHost(), connectorId);
   }
 
   setAutoResetToAvailable(connectorId: number, enabled: boolean): void {
@@ -2818,6 +2713,71 @@ export class CLIChargePointService {
     this._sessionSettledHandlers.clear();
   }
 
+  private autoTrafficHost(): AutoTrafficHost {
+    const self = (): CLIChargePointService => this;
+    return {
+      get chargePoint() {
+        return self()._chargePoint;
+      },
+      get init() {
+        return self()._init;
+      },
+      get autoTraffic() {
+        return self()._autoTraffic;
+      },
+      get autoTrafficConfigs() {
+        return self()._autoTrafficConfigs;
+      },
+      get autoTrafficPickers() {
+        return self()._autoTrafficPickers;
+      },
+      scenarioActive: () => self()._executors.size > 0,
+      requireConnector: (connectorId) => self().requireConnector(connectorId),
+      stopTransaction: (connectorId) => self().stopTransaction(connectorId),
+    };
+  }
+
+  private runtimePersistenceHost(): RuntimePersistenceHost {
+    const self = (): CLIChargePointService => this;
+    return {
+      get chargePoint() {
+        return self()._chargePoint;
+      },
+      get init() {
+        return self()._init;
+      },
+      get database() {
+        return self().database;
+      },
+      get runtimeRepo() {
+        return self()._runtimeRepo;
+      },
+      get pendingScenarioResumes() {
+        return self()._pendingScenarioResumes;
+      },
+      get scenarioPositionByConnector() {
+        return self()._scenarioPositionByConnector;
+      },
+      setAutoTrafficConfig: (connectorId, config) =>
+        self().setAutoTrafficConfig(connectorId, config),
+    };
+  }
+
+  private behaviorsHost(): BehaviorsHost {
+    const self = (): CLIChargePointService => this;
+    return {
+      get chargePoint() {
+        return self()._chargePoint;
+      },
+      get init() {
+        return self()._init;
+      },
+      set init(value) {
+        self()._init = value;
+      },
+    };
+  }
+
   private createForwarderHost(): ForwarderHost {
     const self = (): CLIChargePointService => this;
     return {
@@ -2962,53 +2922,14 @@ export class CLIChargePointService {
       connectorId: number,
     ): Promise<AutoTrafficConfig | null>;
   }): Promise<number> {
-    if (!this.database) return 0;
-    let started = 0;
-    for (const connectorId of this._chargePoint.connectors.keys()) {
-      const config = await repository.loadAutoTrafficConfig(
-        this._init.cpId,
-        connectorId,
-      );
-      if (!config?.enabled) continue;
-      try {
-        this.setAutoTrafficConfig(connectorId, config);
-        started++;
-      } catch {
-        // A stored config that no longer validates must not stop the restore
-        // for every other connector.
-      }
-    }
-    return started;
+    return restoreAutoTrafficFromDatabase(
+      this.runtimePersistenceHost(),
+      repository,
+    );
   }
 
   restoreConnectorRuntimeFromDatabase(): number {
-    if (!this.database) return 0;
-    let restored = 0;
-    this._chargePoint.connectors.forEach((connector, connectorId) => {
-      const snapshot = this._runtimeRepo.load(this._init.cpId, connectorId);
-      if (!snapshot) return;
-      connector.restoreRuntimeSnapshot(snapshot);
-      // Capture the scenario position so the auto-start path can resume
-      // the scenario at the saved node instead of replaying from `start`.
-      // Stored on both _pendingScenarioResumes (for runScenario to
-      // consume once) and _scenarioPositionByConnector (so the row stays
-      // self-consistent on later connector-field-change writes that
-      // happen before the executor is re-armed). The same snapshot is
-      // intentionally placed in both maps; runScenario removes the
-      // pending entry as soon as it hands the position to the executor.
-      if (snapshot.scenarioPosition) {
-        this._pendingScenarioResumes.set(
-          connectorId,
-          snapshot.scenarioPosition,
-        );
-        this._scenarioPositionByConnector.set(
-          connectorId,
-          snapshot.scenarioPosition,
-        );
-      }
-      restored += 1;
-    });
-    return restored;
+    return restoreConnectorRuntimeFromDatabase(this.runtimePersistenceHost());
   }
 
   /**
@@ -3020,19 +2941,7 @@ export class CLIChargePointService {
    * read is ignored.
    */
   private persistEngineState(database: Database, cpId: string): void {
-    const repo = new SqliteEngineStateRepository(database);
-    const engine = this._chargePoint.engine;
-    const saved = parsePersistedEngineState(repo.load(cpId));
-    if (saved) engine.restoreState(saved);
-    // Normalized after the restore, so an untouched engine writes nothing.
-    let lastSaved = JSON.stringify(engine.persistable());
-    engine.onPersist(() => {
-      const next = engine.persistable();
-      const text = JSON.stringify(next);
-      if (text === lastSaved) return;
-      repo.save(cpId, next);
-      lastSaved = text;
-    });
+    persistEngineState(this.runtimePersistenceHost(), database, cpId);
   }
 
   /**
@@ -3044,34 +2953,17 @@ export class CLIChargePointService {
     behaviors: readonly Behavior[],
     params?: Readonly<Record<string, JsonObject>>,
   ): void {
-    this.applyDefaultParams(params);
-    for (const behavior of behaviors) {
-      const own = params?.[behavior.id];
-      this._chargePoint.loadBehavior(
-        behavior,
-        own === undefined ? {} : { params: own },
-      );
-    }
-  }
-
-  /** Set (or clear) the params the selection gives the built-in behaviors. */
-  private applyDefaultParams(
-    params: Readonly<Record<string, JsonObject>> | undefined,
-  ): void {
-    const engine = this._chargePoint.engine;
-    for (const { id } of describeDefaultBehaviors()) {
-      engine.setSelectionParams(id, params?.[id]);
-    }
+    loadBehaviors(this.behaviorsHost(), behaviors, params);
   }
 
   /** The engine state that survives a rebuild (see `ChargerEngine.persistable`). */
   engineStateSnapshot(): PersistedEngineState {
-    return this._chargePoint.engine.persistable();
+    return engineStateSnapshot(this.behaviorsHost());
   }
 
   /** Put a {@link engineStateSnapshot} back, before behaviors load. */
   restoreEngineState(saved: PersistedEngineState): void {
-    this._chargePoint.engine.restoreState(saved);
+    restoreEngineState(this.behaviorsHost(), saved);
   }
 
   /**
@@ -3080,12 +2972,12 @@ export class CLIChargePointService {
    * is neither loaded nor built in.
    */
   effectiveBehaviorParams(id: string): JsonObject {
-    return this._chargePoint.engine.effectiveParams(id);
+    return effectiveBehaviorParams(this.behaviorsHost(), id);
   }
 
   /** Ids of the code behaviors loaded on this charge point, in load order. */
   behaviorIds(): string[] {
-    return [...this._chargePoint.engine.behaviorIds];
+    return behaviorIds(this.behaviorsHost());
   }
 
   /**
@@ -3094,9 +2986,7 @@ export class CLIChargePointService {
    * and must find out before it closes the old one.
    */
   assertBehaviorsLoadable(wanted: readonly Behavior[]): void {
-    for (const behavior of wanted) {
-      this._chargePoint.engine.assertLoadable(behavior);
-    }
+    assertBehaviorsLoadable(this.behaviorsHost(), wanted);
   }
 
   /**
@@ -3110,45 +3000,7 @@ export class CLIChargePointService {
     selection: readonly string[] | undefined,
     params?: Readonly<Record<string, JsonObject>>,
   ): void {
-    const engine = this._chargePoint.engine;
-    const keep = new Set(wanted.map((b) => b.id));
-    const have = new Set(engine.behaviorIds);
-    // A behavior kept with other params is changed in place: its `main`
-    // restarts with the new values, but the layers of running scenarios and
-    // its open CALLs stay.
-    const before = engine.selectedParams;
-    const changed = [...have].filter(
-      (id) =>
-        keep.has(id) &&
-        JSON.stringify(before[id] ?? null) !==
-          JSON.stringify(params?.[id] ?? null),
-    );
-    this.applyDefaultParams(params);
-    for (const id of changed) engine.reselectBehaviorParams(id, params?.[id]);
-    // Check first, so a behavior this station cannot run changes nothing.
-    for (const behavior of wanted) {
-      if (!have.has(behavior.id)) engine.assertLoadable(behavior);
-    }
-    for (const id of [...have]) {
-      if (!keep.has(id)) this._chargePoint.unloadBehavior(id);
-    }
-    for (const behavior of wanted) {
-      if (!have.has(behavior.id)) {
-        const own = params?.[behavior.id];
-        this._chargePoint.loadBehavior(
-          behavior,
-          own === undefined ? {} : { params: own },
-        );
-      }
-    }
-    this._init = {
-      ...this._init,
-      ...(selection === undefined
-        ? { behaviors: undefined }
-        : { behaviors: [...selection] }),
-      behaviorParams:
-        params && Object.keys(params).length > 0 ? { ...params } : undefined,
-    };
+    setBehaviors(this.behaviorsHost(), wanted, selection, params);
   }
 
   /**
@@ -3157,26 +3009,7 @@ export class CLIChargePointService {
    * ones already replaced go back to the version they had.
    */
   replaceBehaviors(next: readonly Behavior[]): void {
-    const engine = this._chargePoint.engine;
-    for (const behavior of next) engine.assertLoadable(behavior);
-    const done: Behavior[] = [];
-    try {
-      for (const behavior of next) {
-        const previous = engine.behaviorOf(behavior.id);
-        engine.replaceBehavior(behavior);
-        if (previous) done.push(previous);
-      }
-    } catch (error) {
-      for (const previous of done.reverse()) {
-        try {
-          engine.replaceBehavior(previous);
-        } catch {
-          // The old version ran here a moment ago; if it cannot be put back
-          // the original error is still the one to report.
-        }
-      }
-      throw error;
-    }
+    replaceBehaviors(this.behaviorsHost(), next);
   }
 
   /**

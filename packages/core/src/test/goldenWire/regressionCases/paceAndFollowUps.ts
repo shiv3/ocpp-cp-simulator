@@ -102,36 +102,45 @@ c16("firmware-step-pace", async (r) => {
   await wait(4000);
   await settle(r);
 });
-c16("firmware-failure-is-one-shot", async (r) => {
-  cfg(r, "SimulatedFirmwareUpdateFailure", "InstallationFailed");
-  const done = (n: number) =>
-    r.csms.frames.filter(
-      (f) =>
-        f.action === "FirmwareStatusNotification" &&
-        ["Installed", "InstallationFailed"].includes(statusOf(f) ?? ""),
-    ).length >= n;
-  const until = async (n: number) => {
-    for (let i = 0; i < 300 && !done(n); i++) await wait(100);
-  };
-  await r.csms.call("UpdateFirmware", {
-    location: "http://x/a.bin",
-    retrieveDate: FAR_PAST,
-  });
-  await until(1);
-  await settle(r);
-  await r.csms.call("UpdateFirmware", {
-    location: "http://x/b.bin",
-    retrieveDate: FAR_PAST,
-  });
-  await until(2);
-  await settle(r);
-  await r.csms.call("UpdateFirmware", {
-    location: "http://x/c.bin",
-    retrieveDate: FAR_PAST,
-  });
-  await until(3);
-  await settle(r);
-});
+// On a VirtualClock (#871): the clock moves one 2 s step at a time and stops
+// as soon as the update has ended, so the third request arrives while the
+// pause after Installed still holds the update in flight, and is ignored
+// (the recorded fixture), instead of racing that pause on the wall clock.
+const firmwareOneShot = virtual();
+c16(
+  "firmware-failure-is-one-shot",
+  async (r) => {
+    cfg(r, "SimulatedFirmwareUpdateFailure", "InstallationFailed");
+    const done = (n: number) =>
+      r.csms.frames.filter(
+        (f) =>
+          f.action === "FirmwareStatusNotification" &&
+          ["Installed", "InstallationFailed"].includes(statusOf(f) ?? ""),
+      ).length >= n;
+    const until = async (n: number) => {
+      for (let i = 0; i < 10 && !done(n); i++) {
+        await firmwareOneShot.pause(r, 2000);
+      }
+      if (!done(n)) throw new Error(`firmware update ${n} never ended`);
+    };
+    await r.csms.call("UpdateFirmware", {
+      location: "http://x/a.bin",
+      retrieveDate: FAR_PAST,
+    });
+    await until(1);
+    await r.csms.call("UpdateFirmware", {
+      location: "http://x/b.bin",
+      retrieveDate: FAR_PAST,
+    });
+    await until(2);
+    await r.csms.call("UpdateFirmware", {
+      location: "http://x/c.bin",
+      retrieveDate: FAR_PAST,
+    });
+    await settle(r);
+  },
+  firmwareOneShot.options,
+);
 
 // Diagnostics: an upload that cannot reach its target reports UploadFailed.
 c16("diagnostics-unreachable", async (r) => {

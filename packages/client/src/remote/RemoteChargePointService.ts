@@ -114,6 +114,8 @@ import {
   RemoteSubscriptions,
   type ScenarioStatusRequest,
 } from "./RemoteSubscriptions";
+import { RemoteConnectorRpc } from "./RemoteConnectorRpc";
+import { RemoteScenarioRpc } from "./RemoteScenarioRpc";
 import { publicFailure, toVehicleCatalogError } from "./rpcErrors";
 import { cpListItemToSnapshot, toChargePointSnapshot } from "./snapshotMapping";
 
@@ -214,6 +216,19 @@ export class RemoteChargePointService implements ChargePointService {
     listScenarioDefinitions: (cpId, connectorId) =>
       this.listScenarioDefinitions(cpId, connectorId),
     activeStateHistory: this.activeStateHistory,
+    activeScenarioStatus: this.activeScenarioStatus,
+  });
+  private readonly connectorRpc = new RemoteConnectorRpc({
+    rpc: (method, params, cpId) => this.rpc(method, params, cpId),
+    runCpRpc: (id, method, params) => this.runCpRpc(id, method, params),
+    getChargePoint: (id) => this.getChargePoint(id),
+    setBounded: (map, key, value) => this.setBounded(map, key, value),
+    activeStateHistory: this.activeStateHistory,
+  });
+  private readonly scenarioRpc = new RemoteScenarioRpc({
+    rpc: (method, params, cpId) => this.rpc(method, params, cpId),
+    runCpRpc: (id, method, params) => this.runCpRpc(id, method, params),
+    setBounded: (map, key, value) => this.setBounded(map, key, value),
     activeScenarioStatus: this.activeScenarioStatus,
   });
   private nextRpcId = 1;
@@ -573,7 +588,7 @@ export class RemoteChargePointService implements ChargePointService {
   }
 
   async removeConnector(id: string, connectorId: number): Promise<void> {
-    await this.runCpRpc(id, "remove_connector", { connector: connectorId });
+    return this.connectorRpc.removeConnector(id, connectorId);
   }
 
   async setEVSettings(
@@ -581,32 +596,18 @@ export class RemoteChargePointService implements ChargePointService {
     connectorId: number,
     settings: EVSettingsPatch,
   ): Promise<void> {
-    await this.runCpRpc(id, "set_ev_settings", {
-      connector: connectorId,
-      settings: settings as unknown as Record<string, unknown>,
-    });
+    return this.connectorRpc.setEVSettings(id, connectorId, settings);
   }
 
   async getEVSettings(
     id: string,
     connectorId: number,
   ): Promise<EVSettings | null> {
-    const snapshot = await this.getChargePoint(id);
-    const connector = snapshot?.connectors.find((c) => c.id === connectorId);
-    return connector?.evSettings ?? null;
+    return this.connectorRpc.getEVSettings(id, connectorId);
   }
 
   async applyDefaultEVSettings(settings: EVSettings): Promise<void> {
-    // The daemon's connectors never see the browser-only Default EV Settings,
-    // so push it onto every connector of every known charge point (#107) via
-    // a single daemon-level RPC. This must NOT go through setEVSettings
-    // (per-connector, marks an explicit override, #105) — the daemon-side
-    // RegistryChargePointService.applyDefaultEVSettings routes it through
-    // each connector's default-propagation path instead, so an active
-    // scenario/explicit override isn't clobbered.
-    await this.rpc("ev_settings.apply_default", {
-      settings: settings as unknown as Record<string, unknown>,
-    });
+    return this.connectorRpc.applyDefaultEVSettings(settings);
   }
 
   async setAutoMeterValueConfig(
@@ -614,19 +615,14 @@ export class RemoteChargePointService implements ChargePointService {
     connectorId: number,
     config: AutoMeterValueConfig,
   ): Promise<void> {
-    await this.runCpRpc(id, "set_auto_meter_config", {
-      connector: connectorId,
-      config: config as unknown as Record<string, unknown>,
-    });
+    return this.connectorRpc.setAutoMeterValueConfig(id, connectorId, config);
   }
 
   async getAutoMeterValueConfig(
     id: string,
     connectorId: number,
   ): Promise<AutoMeterValueConfig | null> {
-    const snapshot = await this.getChargePoint(id);
-    const connector = snapshot?.connectors.find((c) => c.id === connectorId);
-    return connector?.autoMeterValueConfig ?? null;
+    return this.connectorRpc.getAutoMeterValueConfig(id, connectorId);
   }
 
   async setAutoTrafficConfig(
@@ -634,21 +630,14 @@ export class RemoteChargePointService implements ChargePointService {
     connectorId: number,
     config: AutoTrafficConfig,
   ): Promise<void> {
-    await this.runCpRpc(id, "set_auto_traffic_config", {
-      connector: connectorId,
-      config: config as unknown as Record<string, unknown>,
-    });
+    return this.connectorRpc.setAutoTrafficConfig(id, connectorId, config);
   }
 
   async getAutoTrafficConfig(
     id: string,
     connectorId: number,
   ): Promise<AutoTrafficConfig | null> {
-    const data = await this.rpc("connector_settings.auto_traffic.get", {
-      cpId: id,
-      connectorId,
-    });
-    return (data as unknown as AutoTrafficConfig | null) ?? null;
+    return this.connectorRpc.getAutoTrafficConfig(id, connectorId);
   }
 
   async saveAutoTrafficConfig(
@@ -656,22 +645,14 @@ export class RemoteChargePointService implements ChargePointService {
     connectorId: number,
     config: AutoTrafficConfig,
   ): Promise<void> {
-    await this.rpc("connector_settings.auto_traffic.save", {
-      cpId: id,
-      connectorId,
-      config: config as unknown as Record<string, unknown>,
-    });
+    return this.connectorRpc.saveAutoTrafficConfig(id, connectorId, config);
   }
 
   async getAutoMeterConfig(
     id: string,
     connectorId: number,
   ): Promise<AutoMeterValueConfig | null> {
-    const data = await this.rpc("connector_settings.auto_meter.get", {
-      cpId: id,
-      connectorId,
-    });
-    return (data as unknown as AutoMeterValueConfig | null) ?? null;
+    return this.connectorRpc.getAutoMeterConfig(id, connectorId);
   }
 
   async saveAutoMeterConfig(
@@ -679,11 +660,7 @@ export class RemoteChargePointService implements ChargePointService {
     connectorId: number,
     config: AutoMeterValueConfig,
   ): Promise<void> {
-    await this.rpc("connector_settings.auto_meter.save", {
-      cpId: id,
-      connectorId,
-      config: config as unknown as Record<string, unknown>,
-    });
+    return this.connectorRpc.saveAutoMeterConfig(id, connectorId, config);
   }
 
   async setAutoResetToAvailable(
@@ -691,10 +668,7 @@ export class RemoteChargePointService implements ChargePointService {
     connectorId: number,
     enabled: boolean,
   ): Promise<void> {
-    await this.runCpRpc(id, "set_auto_reset_to_available", {
-      connector: connectorId,
-      enabled,
-    });
+    return this.connectorRpc.setAutoResetToAvailable(id, connectorId, enabled);
   }
 
   async setConnectorMode(
@@ -702,7 +676,7 @@ export class RemoteChargePointService implements ChargePointService {
     connectorId: number,
     mode: ScenarioMode,
   ): Promise<void> {
-    await this.runCpRpc(id, "set_mode", { connector: connectorId, mode });
+    return this.connectorRpc.setConnectorMode(id, connectorId, mode);
   }
 
   async setConnectorSoc(
@@ -710,7 +684,7 @@ export class RemoteChargePointService implements ChargePointService {
     connectorId: number,
     soc: number | null,
   ): Promise<void> {
-    await this.runCpRpc(id, "set_soc", { connector: connectorId, soc });
+    return this.connectorRpc.setConnectorSoc(id, connectorId, soc);
   }
 
   async setConnectorSocMeterSync(
@@ -718,17 +692,11 @@ export class RemoteChargePointService implements ChargePointService {
     connectorId: number,
     enabled: boolean,
   ): Promise<void> {
-    await this.runCpRpc(id, "set_soc_meter_sync", {
-      connector: connectorId,
-      enabled,
-    });
+    return this.connectorRpc.setConnectorSocMeterSync(id, connectorId, enabled);
   }
 
   async getSocMeterSync(id: string, connectorId: number): Promise<boolean> {
-    return this.rpc("connector_settings.soc_meter_sync.get", {
-      cpId: id,
-      connectorId,
-    });
+    return this.connectorRpc.getSocMeterSync(id, connectorId);
   }
 
   async saveSocMeterSync(
@@ -736,57 +704,32 @@ export class RemoteChargePointService implements ChargePointService {
     connectorId: number,
     enabled: boolean,
   ): Promise<void> {
-    await this.rpc("connector_settings.soc_meter_sync.save", {
-      cpId: id,
-      connectorId,
-      enabled,
-    });
+    return this.connectorRpc.saveSocMeterSync(id, connectorId, enabled);
   }
 
   async getChargingProfiles(
     id: string,
     connectorId: number,
   ): Promise<ReadonlyArray<ActiveChargingProfile>> {
-    const data = await this.runCpRpc(id, "get_charging_profiles", {
-      connector: connectorId,
-    });
-    return (data as ActiveChargingProfile[]) ?? [];
+    return this.connectorRpc.getChargingProfiles(id, connectorId);
   }
 
   async getStateHistory(
     id: string,
     options?: HistoryOptions,
   ): Promise<StateHistoryEntry[]> {
-    this.setBounded(this.activeStateHistory, id, options);
-    const data = await this.runCpRpc(
-      id,
-      "get_state_history",
-      (options ? { options } : {}) as Params<"get_state_history">,
-    );
-    const list = (data as Array<Record<string, unknown>>) ?? [];
-    return list.map((raw) => ({
-      ...raw,
-      timestamp:
-        typeof raw.timestamp === "string"
-          ? new Date(raw.timestamp)
-          : new Date(),
-    })) as unknown as StateHistoryEntry[];
+    return this.connectorRpc.getStateHistory(id, options);
   }
 
   async getScenarioTemplates(): Promise<ScenarioTemplateInfo[]> {
-    const data = await this.rpc("scenario.templates", {});
-    return data ?? [];
+    return this.scenarioRpc.getScenarioTemplates();
   }
 
   async listScenarioDefinitions(
     id: string,
     connectorId: number | null,
   ): Promise<ScenarioDefinition[]> {
-    const data = await this.rpc("scenario.definitions.list", {
-      cpId: id,
-      connectorId,
-    });
-    return (data as unknown as ScenarioDefinition[]) ?? [];
+    return this.scenarioRpc.listScenarioDefinitions(id, connectorId);
   }
 
   async saveScenarioDefinition(
@@ -794,12 +737,7 @@ export class RemoteChargePointService implements ChargePointService {
     connectorId: number | null,
     definition: ScenarioDefinition,
   ): Promise<ScenarioDefinition> {
-    const data = await this.rpc("scenario.definitions.save", {
-      cpId: id,
-      connectorId,
-      definition: definition as unknown as Record<string, unknown>,
-    });
-    return (data as unknown as ScenarioDefinition) ?? definition;
+    return this.scenarioRpc.saveScenarioDefinition(id, connectorId, definition);
   }
 
   async replaceConnectorScenarioDefinitions(
@@ -807,12 +745,11 @@ export class RemoteChargePointService implements ChargePointService {
     connectorId: number | null,
     definitions: readonly ScenarioDefinition[],
   ): Promise<ScenarioDefinition[]> {
-    const data = await this.rpc("scenario.definitions.replace", {
-      cpId: id,
+    return this.scenarioRpc.replaceConnectorScenarioDefinitions(
+      id,
       connectorId,
-      definitions: definitions as unknown as Record<string, unknown>[],
-    });
-    return (data as unknown as ScenarioDefinition[]) ?? [...definitions];
+      definitions,
+    );
   }
 
   async deleteScenarioDefinition(
@@ -820,11 +757,11 @@ export class RemoteChargePointService implements ChargePointService {
     connectorId: number | null,
     definitionId: string,
   ): Promise<void> {
-    await this.rpc("scenario.definitions.delete", {
-      cpId: id,
+    return this.scenarioRpc.deleteScenarioDefinition(
+      id,
       connectorId,
       definitionId,
-    });
+    );
   }
 
   subscribeScenarioDefinitions(
@@ -845,12 +782,12 @@ export class RemoteChargePointService implements ChargePointService {
     connectorId: number,
     evSettings?: Partial<EVSettings>,
   ): Promise<{ scenarioId: string }> {
-    const data = await this.runCpRpc(id, "load_scenario_template", {
+    return this.scenarioRpc.loadScenarioTemplate(
+      id,
       templateId,
-      connector: connectorId,
-      ...(evSettings ? { evSettings } : {}),
-    });
-    return (data as { scenarioId: string }) ?? { scenarioId: "" };
+      connectorId,
+      evSettings,
+    );
   }
 
   async loadScenario(
@@ -858,25 +795,14 @@ export class RemoteChargePointService implements ChargePointService {
     connectorId: number,
     definition: ScenarioDefinition,
   ): Promise<{ scenarioId: string }> {
-    const data = await this.runCpRpc(id, "load_scenario", {
-      connector: connectorId,
-      // ScenarioDefinition structurally satisfies the method's required fields
-      // (id / name / targetType / nodes / edges); the cast is only needed
-      // because an interface has no index signature to match the bounded
-      // record half of the param type.
-      scenario: definition as unknown as Params<"load_scenario">["scenario"],
-    });
-    return (data as { scenarioId: string }) ?? { scenarioId: "" };
+    return this.scenarioRpc.loadScenario(id, connectorId, definition);
   }
 
   async listScenarios(
     id: string,
     connectorId: number,
   ): Promise<ScenarioListItem[]> {
-    const data = await this.runCpRpc(id, "list_scenarios", {
-      connector: connectorId,
-    });
-    return (data as ScenarioListItem[]) ?? [];
+    return this.scenarioRpc.listScenarios(id, connectorId);
   }
 
   async runScenario(
@@ -884,10 +810,7 @@ export class RemoteChargePointService implements ChargePointService {
     connectorId: number,
     scenarioId: string,
   ): Promise<void> {
-    await this.runCpRpc(id, "run_scenario", {
-      connector: connectorId,
-      scenarioId,
-    });
+    return this.scenarioRpc.runScenario(id, connectorId, scenarioId);
   }
 
   async runScenarioFile(
@@ -895,11 +818,7 @@ export class RemoteChargePointService implements ChargePointService {
     path: string,
     opts: ScenarioRunOptions = {},
   ): Promise<{ scenarioId: string }> {
-    const data = await this.runCpRpc(id, "run_scenario_file", {
-      connector: opts.connectorId ?? 1,
-      file: path,
-    });
-    return (data as { scenarioId: string }) ?? { scenarioId: "" };
+    return this.scenarioRpc.runScenarioFile(id, path, opts);
   }
 
   async runScenarioTemplate(
@@ -907,18 +826,7 @@ export class RemoteChargePointService implements ChargePointService {
     templateId: string,
     opts: ScenarioRunOptions = {},
   ): Promise<{ scenarioId: string }> {
-    const data = await this.runCpRpc(id, "run_scenario_template", {
-      connector: opts.connectorId ?? 1,
-      templateId,
-      ...(opts.evSettings !== undefined
-        ? {
-            evSettings: opts.evSettings as unknown as Record<string, unknown>,
-          }
-        : {}),
-      ...(opts.strict !== undefined ? { strict: opts.strict } : {}),
-      ...(opts.once !== undefined ? { once: opts.once } : {}),
-    });
-    return (data as { scenarioId: string }) ?? { scenarioId: "" };
+    return this.scenarioRpc.runScenarioTemplate(id, templateId, opts);
   }
 
   async stopScenario(
@@ -926,10 +834,7 @@ export class RemoteChargePointService implements ChargePointService {
     connectorId: number,
     scenarioId: string,
   ): Promise<void> {
-    await this.runCpRpc(id, "stop_scenario", {
-      connector: connectorId,
-      scenarioId,
-    });
+    return this.scenarioRpc.stopScenario(id, connectorId, scenarioId);
   }
 
   async resetScenario(
@@ -937,10 +842,7 @@ export class RemoteChargePointService implements ChargePointService {
     connectorId: number,
     scenarioId: string,
   ): Promise<void> {
-    await this.runCpRpc(id, "scenario_reset", {
-      connector: connectorId,
-      scenarioId,
-    });
+    return this.scenarioRpc.resetScenario(id, connectorId, scenarioId);
   }
 
   async stepScenario(
@@ -949,11 +851,7 @@ export class RemoteChargePointService implements ChargePointService {
     scenarioId: string,
     force = false,
   ): Promise<void> {
-    await this.runCpRpc(id, "step_scenario", {
-      connector: connectorId,
-      scenarioId,
-      force,
-    });
+    return this.scenarioRpc.stepScenario(id, connectorId, scenarioId, force);
   }
 
   async extendScenarioWait(
@@ -962,11 +860,12 @@ export class RemoteChargePointService implements ChargePointService {
     scenarioId: string,
     seconds: number,
   ): Promise<void> {
-    await this.runCpRpc(id, "extend_scenario_wait", {
-      connector: connectorId,
+    return this.scenarioRpc.extendScenarioWait(
+      id,
+      connectorId,
       scenarioId,
       seconds,
-    });
+    );
   }
 
   async retryScenarioWait(
@@ -974,10 +873,7 @@ export class RemoteChargePointService implements ChargePointService {
     connectorId: number,
     scenarioId: string,
   ): Promise<void> {
-    await this.runCpRpc(id, "retry_scenario_wait", {
-      connector: connectorId,
-      scenarioId,
-    });
+    return this.scenarioRpc.retryScenarioWait(id, connectorId, scenarioId);
   }
 
   async continueScenarioWait(
@@ -985,16 +881,11 @@ export class RemoteChargePointService implements ChargePointService {
     connectorId: number,
     scenarioId: string,
   ): Promise<void> {
-    await this.runCpRpc(id, "continue_scenario_wait", {
-      connector: connectorId,
-      scenarioId,
-    });
+    return this.scenarioRpc.continueScenarioWait(id, connectorId, scenarioId);
   }
 
   async stopAllScenarios(id: string, connectorId: number): Promise<void> {
-    await this.runCpRpc(id, "stop_all_scenarios", {
-      connector: connectorId,
-    });
+    return this.scenarioRpc.stopAllScenarios(id, connectorId);
   }
 
   async removeScenario(
@@ -1002,10 +893,7 @@ export class RemoteChargePointService implements ChargePointService {
     connectorId: number,
     scenarioId: string,
   ): Promise<void> {
-    await this.runCpRpc(id, "remove_scenario", {
-      connector: connectorId,
-      scenarioId,
-    });
+    return this.scenarioRpc.removeScenario(id, connectorId, scenarioId);
   }
 
   async getScenarioStatus(
@@ -1013,17 +901,7 @@ export class RemoteChargePointService implements ChargePointService {
     connectorId: number,
     scenarioId: string,
   ): Promise<ScenarioExecutionContext | null> {
-    const key = `${id}\u0000${connectorId}\u0000${scenarioId}`;
-    this.setBounded(this.activeScenarioStatus, key, {
-      cpId: id,
-      connector: connectorId,
-      scenarioId,
-    });
-    const data = await this.runCpRpc(id, "scenario_status", {
-      connector: connectorId,
-      scenarioId,
-    });
-    return (data as ScenarioExecutionContext | null) ?? null;
+    return this.scenarioRpc.getScenarioStatus(id, connectorId, scenarioId);
   }
 
   async getScenarioReport(
@@ -1032,12 +910,12 @@ export class RemoteChargePointService implements ChargePointService {
     scenarioId: string,
     runId?: string,
   ): Promise<ScenarioRunResult | null> {
-    const data = await this.runCpRpc(id, "scenario_report", {
-      connector: connectorId,
+    return this.scenarioRpc.getScenarioReport(
+      id,
+      connectorId,
       scenarioId,
-      ...(runId === undefined ? {} : { runId }),
-    });
-    return (data as ScenarioRunResult | null) ?? null;
+      runId,
+    );
   }
 
   async getScenario(
@@ -1045,11 +923,7 @@ export class RemoteChargePointService implements ChargePointService {
     connectorId: number,
     scenarioId: string,
   ): Promise<ScenarioDefinition | null> {
-    const data = await this.runCpRpc(id, "get_scenario", {
-      connector: connectorId,
-      scenarioId,
-    });
-    return (data as ScenarioDefinition | null) ?? null;
+    return this.scenarioRpc.getScenario(id, connectorId, scenarioId);
   }
 
   subscribe(

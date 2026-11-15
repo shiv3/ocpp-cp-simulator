@@ -6,6 +6,7 @@ sources:
   - packages/core/src/cp/application/engine/ChargerEngine.ts
   - packages/core/src/cp/application/engine/behaviorContext.ts
   - packages/core/src/cp/application/engine/behaviorLifecycle.ts
+  - packages/core/src/cp/application/engine/callRunner.ts
   - packages/core/src/cp/application/engine/scope.ts
   - packages/core/src/cp/application/engine/ChargerState.ts
   - packages/core/src/cp/application/behavior/BehaviorRegistry.ts
@@ -571,7 +572,7 @@ Compatibility measures, kept so that callers and tests need not change, with an 
   `detachTransaction`.
 - The three write scopes of a status write (`local`, `event`, `full`): one write chosen by which facade a caller
   used. The target is one scope with explicit effects.
-- `_scenarioHandledConnectors`, `_scenarioStopHandledConnectors` and the `noteDefaultHandled…` marks (see
+- `_scenarioHandledConnectors`, `_scenarioStopHandledConnectors` and the `noteDefaultHandled…` marks (all in `domain/charge-point/ScenarioCallOwnership.ts`) (see
   [parking](call-precedence.md#scenario-parking-is-not-a-rule)): the second ownership mechanism for RemoteStart /
   RemoteStop. The target is scenario rules in the registry, which needs a golden case recorded on `main` for the
   intended behavior first.

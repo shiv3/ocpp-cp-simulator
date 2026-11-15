@@ -1485,7 +1485,8 @@ one supported measurand is configured, the request goes out with it.
 **A `limit: 0` period moves the connector to `SuspendedEVSE`, once per
 crossing.** A charging profile whose active period allows nothing pauses
 delivery, and the connector reports that by moving between `Charging` and
-`SuspendedEVSE`; resuming moves it back. The transition is edge-triggered, so
+`SuspendedEVSE`; resuming moves it back, or to `SuspendedEV` when the EV
+stopped asking for energy meanwhile (#871). The transition is edge-triggered, so
 repeated samples at one limit report it once — but it is announced from the
 first resolve made in a state that can act on it, not from the first resolve of
 any kind. A crossing seen while the connector is still `Preparing`, which is

@@ -465,9 +465,11 @@ is restored (E11 "Connection Loss During Transaction", #528):
 
 Limits:
 
-- The replay goes out as a burst: 2.x has no serial queue (see the known
-  limitation above), so the station does not wait for one answer before
-  sending the next replayed event.
+- The replay goes through the one-CALL slot
+  ([§4.1.1](#one-call-in-flight-on-2x-ocpp-j-411), #708): each replayed event
+  waits for the answer (or the `MessageTimeout`) of the CALL before it, and a
+  replayed event that fails waits out its E13 resend before the next one goes
+  (#565).
 - A live event (never queued) that is written and unanswered when the
   process crashes is lost: only the E11 queue is durable. A replayed event
   is durable until answered (#554), as the E04 failure postcondition asks.

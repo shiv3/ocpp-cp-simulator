@@ -34,6 +34,8 @@ import { ResetOnIdle } from "./ResetOnIdle";
 import { PlugInFlow } from "./PlugInFlow";
 
 import { ConnectorWiring } from "./ConnectorWiring";
+
+import { BootLifecycle } from "./BootLifecycle";
 import { EventEmitter } from "../../shared/EventEmitter";
 
 import { realClock } from "../../shared/clock";
@@ -68,7 +70,6 @@ import type {
   ChargingProfileSource,
   ClearedChargingProfiles,
   IncomingCallCompletion,
-  RegistrationStatus,
 } from "./ChargePointEvents";
 
 import { ConfigurationStore } from "./ConfigurationStore";
@@ -315,10 +316,6 @@ export class ChargePoint {
   private readonly _clock: SimClock;
   /** #609 */
   private readonly _reconnectPolicy: ReconnectPolicy;
-  /** #609: automatic BootNotification re-sends since the last Accepted. */
-  private _bootRetries = 0;
-  /** A boot give-up waiting for its `bootNotificationResult` to be emitted. */
-  private _bootGaveUp: number | null = null;
 
   /** The resolved reconnect policy (#609); also read by the default 2.x
    *  `RetryBackOff*` variables. */
@@ -456,7 +453,7 @@ export class ChargePoint {
     ocppVersion: () => this._ocppVersion,
     outbox: () => this._outbox,
     markStartupEventPending: () => {
-      this._startupEventPending = true;
+      this._boot.startupEventPending = true;
     },
     teardownAfterClose: () => this.teardownAfterClose(),
     webSocket: () => this._webSocket,
@@ -494,6 +491,57 @@ export class ChargePoint {
     writeConnector: (connectorId, write) =>
       this.writeConnector(connectorId, write),
   });
+  private readonly _boot: BootLifecycle = (() => {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    const cp = this;
+    return new BootLifecycle({
+      chargePoint: cp,
+      state: {
+        get bootAccepted() {
+          return cp._bootAccepted;
+        },
+        set bootAccepted(value) {
+          cp._bootAccepted = value;
+        },
+        get bootReason() {
+          return cp._bootReason;
+        },
+        set bootReason(value) {
+          cp._bootReason = value;
+        },
+        get bootedWith() {
+          return cp._bootedWith;
+        },
+        set bootedWith(value) {
+          cp._bootedWith = value;
+        },
+        get bootSentFingerprint() {
+          return cp._bootSentFingerprint;
+        },
+        set bootSentFingerprint(value) {
+          cp._bootSentFingerprint = value;
+        },
+        get bootUnanswered() {
+          return cp._bootUnanswered;
+        },
+        set bootUnanswered(value) {
+          cp._bootUnanswered = value;
+        },
+      },
+      clearOutage: () => cp.clearOutage(),
+      clock: () => cp._clock,
+      clockAligned: () => cp._clockAligned,
+      configuration: () => cp._configuration,
+      events: () => cp._events,
+      logger: () => cp._logger,
+      monitorEvaluation: () => cp._monitorEvaluation,
+      ocppVersion: () => cp._ocppVersion,
+      outbox: () => cp._outbox,
+      power: () => cp._power,
+      reconnectPolicy: () => cp._reconnectPolicy,
+      txEndedAligned: () => cp._txEndedAligned,
+    });
+  })();
   private readonly _configWiring = new ConfigurationWiring({
     chargePoint: () => this,
     certificateStore: () => this._certificateStore,
@@ -1865,7 +1913,7 @@ export class ChargePoint {
         `Connecting via ${this._ocppVersion} SOAP client`,
         LogType.OCPP,
       );
-      this._bootRetries = 0;
+      this._boot.bootRetries = 0;
       this.boot();
       this._events.emit("connected", undefined);
       this._engine.observe({ type: "connected" });
@@ -1911,7 +1959,7 @@ export class ChargePoint {
     this._webSocket.connect(
       () => {
         // A new connection starts a fresh BootNotification budget (#609).
-        this._bootRetries = 0;
+        this._boot.bootRetries = 0;
         const resumed = this.onSocketOpen();
         this._events.emit("connected", undefined);
         if (resumed) this._events.emit("reconnectResumed", resumed);
@@ -2207,8 +2255,6 @@ export class ChargePoint {
     this._outbox.sendSignedFirmwareStatusNotification(status, requestId);
   }
 
-  /** #734: the device has (re)started and has not reported it yet. */
-  private _startupEventPending = true;
   /** The CSMS answered a StatusNotification for `connectorId` (0 = the charge
    *  point) with `status` (#702). */
   noteStatusAcknowledged(connectorId: number, status: OCPPStatus): void {
@@ -2217,31 +2263,7 @@ export class ChargePoint {
 
   /** Boot-notification gate accessors used by BootNotificationResultHandler. */
   markBootAccepted(): void {
-    this._bootReason = "PowerUp";
-    this._bootAccepted = true;
-    this._outbox.setBootStatus({ status: "Accepted" });
-    if (this._ocppVersion === "OCPP-1.6J") {
-      // #734 A04.FR.02: events raised while the station could not send them
-      // (ResetOrReboot among them) go out first, with their own timestamps.
-      this._outbox.flushQueuedSecurityEvents();
-      // StartupOfTheDevice reports a start of the device: once per process
-      // start, per reset and per power restore, not per reconnect or
-      // triggered boot. It is
-      // consumed by the first Accepted boot either way, so a later change of
-      // the security profile does not report a startup that already passed.
-      if (this._startupEventPending) {
-        this._startupEventPending = false;
-        if ((this._configuration.getInteger("SecurityProfile") ?? 0) >= 1) {
-          void this._outbox.sendSecurityEventNotification("StartupOfTheDevice");
-        }
-      }
-    }
-    // §4.7/§4.8/§4.10 + errata 3.18: flush queued transaction-related
-    // messages now that the boot gate is open. Run via queueMicrotask so
-    // any post-boot StatusNotification fan-out goes first.
-    queueMicrotask(() => this._outbox.flushPendingQueue());
-    // After the post-boot status fan-out, and with the gate already open.
-    queueMicrotask(() => this.engine.bootAccepted());
+    this._boot.markBootAccepted();
   }
 
   /** §4.2: run `fn` as the answer to an accepted TriggerMessage. */
@@ -2250,32 +2272,11 @@ export class ChargePoint {
   }
 
   markBootPending(): void {
-    this._bootAccepted = false;
-    this._outbox.setBootStatus({ status: "Pending" });
+    this._boot.markBootPending();
   }
 
   markBootRejected(retryAfterSeconds: number): void {
-    this._bootAccepted = false;
-    this._outbox.setBootStatus({
-      status: "Rejected",
-      retryAfter: new Date(this._clock.now() + retryAfterSeconds * 1000),
-    });
-    // #609: `bootRetryLimit` caps the automatic re-sends (-1: no cap).
-    const limit = this._reconnectPolicy.bootRetryLimit;
-    if (limit >= 0 && this._bootRetries >= limit) {
-      this._logger.warn(
-        `Giving up BootNotification after ${this._bootRetries} retr${this._bootRetries === 1 ? "y" : "ies"} (reconnect.bootRetryLimit=${limit})`,
-        LogType.OCPP,
-      );
-      // Reported once `bootNotificationResult` (Rejected), its cause, is out.
-      this._bootGaveUp = this._bootRetries;
-      return;
-    }
-    this._bootRetries++;
-    // Re-send BootNotification.req once the interval elapses (§4.2).
-    this._clock.setTimeout(() => {
-      this.boot();
-    }, retryAfterSeconds * 1000);
+    this._boot.markBootRejected(retryAfterSeconds);
   }
 
   /**
@@ -2286,118 +2287,7 @@ export class ChargePoint {
    * run — so the event precedes every status change it causes (#395).
    */
   onBootNotificationResult(result: BootNotificationResult): void {
-    this._bootUnanswered = false;
-    const status: RegistrationStatus =
-      result.status === "Accepted" || result.status === "Pending"
-        ? result.status
-        : "Rejected";
-    const interval =
-      typeof result.interval === "number" && result.interval > 0
-        ? result.interval
-        : 0;
-    switch (status) {
-      case "Accepted":
-        this._bootRetries = 0;
-        this._logger.info("Boot notification accepted", LogType.OCPP);
-        this._bootedWith = this._bootSentFingerprint;
-        this.clearOutage();
-        this.markBootAccepted();
-        break;
-      case "Pending":
-        this._bootedWith = null;
-        this._logger.warn(
-          `BootNotification Pending — only CSMS-initiated traffic allowed${
-            interval > 0 ? `, retry interval=${interval}s` : ""
-          }`,
-          LogType.OCPP,
-        );
-        // Spec: stay quiet but keep the WebSocket open. No retry timer here;
-        // CSMS can move us to Accepted/Rejected via subsequent flow.
-        this.markBootPending();
-        break;
-      case "Rejected": {
-        this._bootedWith = null;
-        const wait = interval > 0 ? interval : 60;
-        this._logger.error(
-          `BootNotification Rejected — silent for ${wait}s before retry`,
-          LogType.OCPP,
-        );
-        this.markBootRejected(wait);
-        break;
-      }
-    }
-    // The CSMS's interval, not the 60s retry a Rejected with 0 falls back to.
-    this._events.emit("bootNotificationResult", {
-      status,
-      interval,
-      currentTime: result.currentTime,
-    });
-    if (this._bootGaveUp !== null) {
-      const attempts = this._bootGaveUp;
-      this._bootGaveUp = null;
-      this._events.emit("gaveUp", { target: "boot_notification", attempts });
-    }
-    if (status === "Accepted") {
-      this.applyBootAccepted(interval);
-    } else {
-      this.stopHeartbeat();
-      this._clockAligned.disable();
-      this._txEndedAligned.disable();
-      // B02.FR.02: no NotifyEvent until the boot is Accepted.
-      this._monitorEvaluation?.setReporting(false);
-    }
-  }
-
-  private applyBootAccepted(interval: number): void {
-    // Send connector 0 (charge point level) status first
-    this.updateConnectorStatus(0, OCPPStatus.Available);
-    // #455: a transaction the power-loss recovery is about to end was already
-    // decided at the loss. Reporting its pre-loss status (Charging) after the
-    // reboot would suggest energy flowed after the restart, so the recovery's
-    // own Finishing / Available is the first thing the CSMS hears (#811).
-    const ending = this._power.connectorsEndedByPowerRecovery();
-    this.connectors.forEach((connector) => {
-      if (ending.has(connector.id)) return;
-      // Reset to Available only when this is a fresh post-boot state —
-      // i.e. autoReset is enabled AND no transaction is in flight. A
-      // connector that was restored from `connector_runtime` with an
-      // active transaction must keep its persisted status (typically
-      // Preparing → Charging) so the CSMS-side view stays consistent
-      // with the resumed transaction id; otherwise the CSMS sees us
-      // bounce Charging → Available and the transaction is orphaned.
-      // (See `restoreConnectorRuntimeFromDatabase` for the persisted
-      // shape and `Connector.restoreRuntimeSnapshot` for how the
-      // private fields are restored ahead of this StatusNotification.)
-      if (
-        connector.availability !== "Inoperative" &&
-        connector.autoResetToAvailable &&
-        !connector.hasRunningTransaction
-      ) {
-        this.updateConnectorStatus(connector.id, OCPPStatus.Available);
-        return;
-      }
-      this.updateConnectorStatus(connector.id, connector.status);
-    });
-    this.status = OCPPStatus.Available;
-
-    if (interval > 0) {
-      this.startHeartbeat(interval);
-      this._logger.info(
-        `Periodic Heartbeat enabled at ${interval}s interval`,
-        LogType.HEARTBEAT,
-      );
-    } else {
-      this.stopHeartbeat();
-    }
-
-    this._clockAligned.enable();
-    this._txEndedAligned.enable();
-    // #455: after the status fan-out and the flush of the queue (both
-    // already scheduled), so the recovery's messages come last.
-    queueMicrotask(() => this._power.runPowerRecovery());
-    // Re-checks the thresholds: what changed while Pending or offline, and
-    // a restored trigger already back in range (N07.FR.14).
-    this._monitorEvaluation?.setReporting(true);
+    this._boot.onBootNotificationResult(result);
   }
 
   /**
@@ -2797,7 +2687,7 @@ export class ChargePoint {
       // #734: reported once the station is back with an Accepted boot.
       this._outbox.queueSecurityEventNotification("ResetOrReboot", reason);
     }
-    this._startupEventPending = true;
+    this._boot.startupEventPending = true;
     if (type === "Hard") {
       this.reset("RemoteReset");
     } else {

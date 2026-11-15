@@ -1,13 +1,6 @@
 import { VehicleBehaviorDriver } from "./VehicleBehaviorDriver";
 
 import {
-  connectorShareW,
-  stationBudgetW,
-  type PowerSharingConfig,
-  type ShareParticipant,
-} from "./PowerSharing";
-
-import {
   dcEfficiencyFor,
   maxDeliveryPowerWFor,
   meterRealismFor,
@@ -31,6 +24,9 @@ import {
 import { translatesCsmsActionNames } from "../types/csmsActionNames";
 
 import { DeviceModelPublisher } from "./DeviceModelPublisher";
+
+import { ConfigurationWiring } from "./ConfigurationWiring";
+
 import { EventEmitter } from "../../shared/EventEmitter";
 
 import { realClock } from "../../shared/clock";
@@ -183,7 +179,9 @@ import {
   type MeterSampleOverrides,
   type ReadingContext,
 } from "../connector/MeterValueBuilder";
-import { RUNTIME_VALUE_KEYS, toV2ConnectorStatus } from "./runtimeValueKeys";
+
+import { toV2ConnectorStatus } from "./runtimeValueKeys";
+
 import {
   ReservationManager,
   type Reservation,
@@ -215,13 +213,6 @@ import type { ActiveChargingProfile } from "../connector/Connector";
 import { CertificateStore } from "../security/CertificateStore";
 
 import {
-  checkSecurityProfileChange,
-  isValidAuthorizationKey,
-  isValidBasicAuthPassword,
-  isCertificateCurrentlyValid,
-} from "../security/securityProfileChange";
-
-import {
   checkNetworkProfile,
   NetworkProfileStore,
   type NetworkConnectionProfile,
@@ -229,6 +220,7 @@ import {
 } from "../security/networkProfiles";
 
 import { MonitoringStore } from "../monitoring/MonitoringStore";
+
 import { DEFAULT_MONITOR_CATALOG } from "../monitoring/monitorCatalog";
 
 import type { MonitorEvaluation } from "../monitoring/MonitorEvaluation";
@@ -396,7 +388,6 @@ export class ChargePoint {
    *  transactions. */
   private readonly _periodicSamplers: Map<number, TimerHandle> = new Map();
   /** Applies each connector's vehicle behavior to the station (#835). */
-  private _powerSharing: PowerSharingConfig | undefined;
   private readonly _vehicleDrivers: Map<number, VehicleBehaviorDriver> =
     new Map();
   /** #702: the next socket open is a (re)start of the link — the first
@@ -466,6 +457,21 @@ export class ChargePoint {
   private readonly _monitoring = new MonitoringStore(DEFAULT_MONITOR_CATALOG);
   // #538: Target attributes of the 2.1 device model (EVSE.Power).
   private readonly _deviceModelTargets = new DeviceModelTargets();
+  private readonly _configWiring = new ConfigurationWiring({
+    chargePoint: () => this,
+    certificateStore: () => this._certificateStore,
+    clockAligned: () => this._clockAligned,
+    configuration: () => this._configuration,
+    connectors: () => this._connectors,
+    heartbeat: () => this._heartbeat,
+    localAuthListManager: () => this._localAuthListManager,
+    logger: () => this._logger,
+    nowDate: () => this.nowDate(),
+    ocppVersion: () => this._ocppVersion,
+    rearmPeriodicSampling: () => this.rearmPeriodicSampling(),
+    txEndedAligned: () => this._txEndedAligned,
+    webSocket: () => this._webSocket,
+  });
   private readonly _deviceModel = new DeviceModelPublisher({
     clock: () => this._clock,
     configuration: () => this._configuration,
@@ -960,14 +966,16 @@ export class ChargePoint {
     if (cpoName !== undefined) {
       this._configuration.applyChange("CpoName", cpoName);
     }
-    this.wireConfigurationListeners();
-    this.wirePowerSharing(transportOptions.chargerCapabilities?.powerSharing);
+    this._configWiring.wireConfigurationListeners();
+    this._configWiring.wirePowerSharing(
+      transportOptions.chargerCapabilities?.powerSharing,
+    );
     if (isOcpp2Version(this._ocppVersion)) {
       // 2.x: only the BasicAuthPassword (AuthorizationKey) guard; the
       // SecurityProfile prerequisites are the 1.6 ChangeConfiguration's (#704).
-      this.wireAuthorizationKeyGuard();
+      this._configWiring.wireAuthorizationKeyGuard();
     } else if (this._webSocket) {
-      this.wireSecurityConfiguration();
+      this._configWiring.wireSecurityConfiguration();
     }
     // §5.2: a CP-level Unavailable set previously must survive a reboot.
     // We don't actually transition status here (no WebSocket yet); the
@@ -981,8 +989,8 @@ export class ChargePoint {
     }
     if (isOcpp2Version(this._ocppVersion)) {
       this._deviceModel.wireVariableMonitoring();
-      this.wireCertificateEntries();
-      this.wireClockAndLocalList();
+      this._configWiring.wireCertificateEntries();
+      this._configWiring.wireClockAndLocalList();
       this.wireRenewedClientIdentity();
     }
     // A persisted override never fires onChange; the scheduler only runs
@@ -991,7 +999,7 @@ export class ChargePoint {
       this._configuration.clockAlignedDataInterval(),
     );
     if (isOcpp2Version(this._ocppVersion)) {
-      this.applyRetryBackOff();
+      this._configWiring.applyRetryBackOff();
       this._txEndedAligned.setIntervalSeconds(
         this._configuration.alignedDataTxEndedInterval(),
       );
@@ -1082,39 +1090,6 @@ export class ChargePoint {
   }
 
   /**
-   * #704: 2.x `ClockCtrlr.DateTime` reads the station clock on every read;
-   * `LocalAuthListCtrlr.Entries` follows the local list.
-   */
-  private wireClockAndLocalList(): void {
-    this._configuration.defineLiveKey(RUNTIME_VALUE_KEYS.clockDateTime, () =>
-      this.nowDate().toISOString(),
-    );
-    const key = RUNTIME_VALUE_KEYS.localAuthListEntries;
-    this._configuration.defineRuntimeIntegerKey(key, 0, { min: 0 });
-    this._localAuthListManager.onChange((entries) => {
-      this._configuration.setRuntimeValue(key, entries);
-    });
-  }
-
-  /**
-   * #537: 2.x `SecurityCtrlr.CertificateEntries` is the number of installed
-   * trust anchors, the set M05.FR.06 limits. The certificate store stays
-   * the source; the configuration value follows it, so GetVariables,
-   * GetBaseReport and variable monitors read it like any other variable,
-   * and a change fires the configuration listeners monitors evaluate on.
-   */
-  private wireCertificateEntries(): void {
-    const sync = (): void => {
-      this._configuration.setRuntimeValue(
-        "CertificateEntries",
-        this._certificateStore.listRootCertificates().length,
-      );
-    };
-    sync();
-    this._certificateStore.onChange(sync);
-  }
-
-  /**
    * #537: the transport presents a renewed Charging Station certificate
    * only while the store holds its key. Once the store's current chain has
    * none (replaced by a chain signed for a caller-supplied CSR, removed),
@@ -1127,228 +1102,18 @@ export class ChargePoint {
   }
 
   /**
-   * #724 (1.6 security whitepaper A01, A05): the transport sends the
-   * stored `AuthorizationKey` and `SecurityProfile` from the next attempt
-   * on, and a `SecurityProfile` change is checked against the A05
-   * prerequisites. Installed after the constructor applied its own initial
-   * values, which are not ChangeConfiguration requests.
-   */
-  private wireSecurityConfiguration(): void {
-    this.wireAuthorizationKeyGuard();
-    this.wireSecurityProfileGuard();
-  }
-
-  private wireAuthorizationKeyGuard(): void {
-    // §7.2: with profile 1 or 2 the key is the Basic Auth password; one the
-    // transport cannot derive it from (an empty value or one of another length) would stop
-    // every later connection attempt, so it is refused and the old key kept.
-    this._configuration.setChangeGuard("AuthorizationKey", (_current, next) => {
-      const profile = this._configuration.getInteger("SecurityProfile") ?? 0;
-      if (
-        (profile !== 1 && profile !== 2) ||
-        (isOcpp2Version(this._ocppVersion)
-          ? isValidBasicAuthPassword(`${next}`)
-          : isValidAuthorizationKey(`${next}`))
-      ) {
-        return true;
-      }
-      this._logger.warn(
-        `ChangeConfiguration AuthorizationKey refused: security profile ${profile} needs ${
-          isOcpp2Version(this._ocppVersion)
-            ? "a BasicAuthPassword of 16-40 printable characters (A00.FR.202)"
-            : "a key of 16-20 bytes (32-40 hex digits, or 16-20 plain characters), whitepaper §7.2"
-        }`,
-        LogType.CONFIGURATION,
-      );
-      return false;
-    });
-  }
-
-  private wireSecurityProfileGuard(): void {
-    this._configuration.setChangeGuard("SecurityProfile", (current, next) => {
-      const now = this.nowDate();
-      const verdict = checkSecurityProfileChange({
-        current: typeof current === "number" ? current : 0,
-        next: typeof next === "number" ? next : 0,
-        authorizationKey:
-          this._configuration.getString("AuthorizationKey") ?? "",
-        // Only what the TLS connection validates the CSMS with: roots that
-        // InstallCertificate stored do not join its trust, so counting them
-        // would accept an upgrade that cannot connect.
-        hasCentralSystemRoot:
-          this._webSocket?.hasConfiguredTrustAnchors() ?? false,
-        hasChargePointCertificate:
-          this._certificateStore
-            .listSignedChains("ChargingStationCertificate")
-            .some((chain) => isCertificateCurrentlyValid(chain.pems[0], now)) ||
-          (this._webSocket?.hasClientCertificate() ?? false),
-      });
-      if (!verdict.allowed) {
-        this._logger.warn(
-          `ChangeConfiguration SecurityProfile=${next} refused (${verdict.requirement}): ${verdict.reason}`,
-          LogType.CONFIGURATION,
-        );
-      }
-      return verdict.allowed;
-    });
-    this._configuration.onChange((key, value) => {
-      if (key === "AuthorizationKey" && typeof value === "string") {
-        this._webSocket?.setSecurityCredentials({ authorizationKey: value });
-      } else if (key === "SecurityProfile" && typeof value === "number") {
-        this._webSocket?.setSecurityCredentials({
-          securityProfile: value as OcppSecurityProfile,
-        });
-      }
-    });
-  }
-
-  /**
    * #724 A05.FR.06-08: after the CALLRESULT of an accepted `SecurityProfile`
    * upgrade the station disconnects and reconnects with the new profile.
    * When that connection does not open, the previous profile is put back
    * and used for the next attempt (A05.FR.08).
    */
   switchSecurityProfile(previousProfile: number): void {
-    this._webSocket?.armSecurityProfileFallback(() => {
-      this._logger.warn(
-        `Could not connect with security profile ${this._configuration.getInteger("SecurityProfile")}; falling back to profile ${previousProfile} (A05.FR.08)`,
-        LogType.CONFIGURATION,
-      );
-      this._configuration.applyChange(
-        "SecurityProfile",
-        String(previousProfile),
-        { bypassGuard: true },
-      );
-    });
-    this._logger.info(
-      "SecurityProfile changed: reconnecting with the new profile (A05.FR.06/07)",
-      LogType.CONFIGURATION,
-    );
-    this.reset();
-  }
-
-  /**
-   * Let the connectors share the station's power budget (#608). The share is
-   * read at every operating point resolve from the connectors' transactions
-   * at that instant, so a transaction that starts or stops moves it with no
-   * bookkeeping. A declared current limit key becomes a writable configuration
-   * key; it is read here at resolve time too, so `ChangeConfiguration`
-   * changes the budget at once.
-   */
-  private wirePowerSharing(config: PowerSharingConfig | undefined): void {
-    if (!config) return;
-    this._powerSharing = config;
-    const limit = config.currentLimit;
-    if (limit) {
-      const declared = this._configuration.defineWritableIntegerKey(
-        limit.key,
-        Math.round(limit.valueA),
-        { min: 1 },
-      );
-      if (!declared) {
-        this._logger.warn(
-          `powerSharing.currentLimit.key ${limit.key} is already a configuration key; the declared limit is ignored`,
-          LogType.CONFIGURATION,
-        );
-      }
-    }
-    const strategy = config.strategy ?? "equal";
-    for (const [connectorId, connector] of this._connectors) {
-      connector.setStationShareProvider(() => {
-        const participants: ShareParticipant[] = [];
-        for (const [id, c] of this._connectors) {
-          participants.push({
-            connectorId: id,
-            capW: c.maxDeliveryPowerW ?? Infinity,
-            active: c.hasRunningTransaction,
-          });
-        }
-        return connectorShareW(
-          this.stationPowerBudgetW(),
-          strategy,
-          participants,
-          connectorId,
-        );
-      });
-    }
+    this._configWiring.switchSecurityProfile(previousProfile);
   }
 
   /** The station's power budget in watts now, `Infinity` without sharing. */
   stationPowerBudgetW(): number {
-    const limit = this._powerSharing?.currentLimit;
-    return stationBudgetW(
-      this._powerSharing,
-      limit ? this._configuration.getInteger(limit.key) : undefined,
-    );
-  }
-
-  /** Hook up subsystems that react to live Configuration changes. */
-  /** #609: hand the 2.x `RetryBackOff*` variables to the transport. */
-  private applyRetryBackOff(): void {
-    this._webSocket?.setRetryBackOff({
-      waitMinimumSeconds: this._configuration.retryBackOffWaitMinimum(),
-      randomRangeSeconds: this._configuration.retryBackOffRandomRange(),
-      repeatTimes: this._configuration.retryBackOffRepeatTimes(),
-    });
-  }
-
-  private wireConfigurationListeners(): void {
-    this._configuration.onChange((key, value) => {
-      switch (key) {
-        case "HeartbeatInterval":
-          if (typeof value === "number" && value > 0) {
-            this._heartbeat.startHeartbeat(value);
-          } else {
-            this._heartbeat.stopHeartbeat();
-          }
-          break;
-        case "MeterValueSampleInterval":
-          // §3.16.1 / §9.1.19 ask for a sample "every MeterValueSampleInterval
-          // seconds" and, at 0, for none: the samplers of the running
-          // transactions are re-armed with the new value (#839, #722). 2.x
-          // does not run them.
-          this._logger.info(
-            `MeterValueSampleInterval=${String(value)}`,
-            LogType.CONFIGURATION,
-          );
-          this.rearmPeriodicSampling();
-          break;
-        case "WebSocketPingInterval":
-          // #406: re-arms the ping timer at once on an open socket.
-          if (typeof value === "number") {
-            this._webSocket?.setPingInterval(value);
-          }
-          break;
-        case "RetryBackOffWaitMinimum":
-        case "RetryBackOffRandomRange":
-        case "RetryBackOffRepeatTimes":
-          // #609: applies from the next reconnect attempt.
-          this.applyRetryBackOff();
-          break;
-        case "ClockAlignedDataInterval":
-          // #454: takes effect at once on the new grid while boot is Accepted.
-          if (typeof value === "number") {
-            this._clockAligned.setIntervalSeconds(value);
-          }
-          this._logger.info(
-            `ClockAlignedDataInterval=${String(value)}${
-              this._configuration.meterValuesAlignedData().length === 0
-                ? " (MeterValuesAlignedData is empty: nothing will be sent)"
-                : ""
-            }`,
-            LogType.CONFIGURATION,
-          );
-          break;
-        case "AlignedDataTxEndedInterval":
-          // #607: the grid of the 2.x transaction-end history.
-          if (typeof value === "number") {
-            this._txEndedAligned.setIntervalSeconds(value);
-          }
-          break;
-        default:
-          break;
-      }
-    });
+    return this._configWiring.stationPowerBudgetW();
   }
 
   /**

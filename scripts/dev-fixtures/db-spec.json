@@ -1,0 +1,106 @@
+[
+  {
+    "cpId": "shiv3-sc-ac-basic",
+    "connectors": 2,
+    "chargerType": 11,
+    "maxPowerKw": 7.4,
+    "vendor": "ocpp-cp-simulator",
+    "model": "SC-AC7"
+  },
+  {
+    "cpId": "shiv3-sc-dc-quick",
+    "connectors": 2,
+    "chargerType": 1,
+    "maxPowerKw": 50,
+    "vendor": "ocpp-cp-simulator",
+    "model": "SC-DC50"
+  },
+  {
+    "cpId": "shiv3-sc-multi-connector",
+    "connectors": 6,
+    "chargerType": 11,
+    "maxPowerKw": 22,
+    "vendor": "ocpp-cp-simulator",
+    "model": "SC-AC22x6"
+  },
+  {
+    "cpId": "shiv3-sc-cert-config",
+    "connectors": 4,
+    "chargerType": 11,
+    "maxPowerKw": 7.4,
+    "vendor": "ocpp-cp-simulator",
+    "model": "SC-AC7"
+  },
+  {
+    "cpId": "shiv3-sc-remote-control",
+    "connectors": 6,
+    "chargerType": 11,
+    "maxPowerKw": 11,
+    "vendor": "ocpp-cp-simulator",
+    "model": "SC-AC11x6"
+  },
+  {
+    "cpId": "shiv3-sc-reboot-power",
+    "connectors": 3,
+    "chargerType": 11,
+    "maxPowerKw": 7.4,
+    "vendor": "ocpp-cp-simulator",
+    "model": "SC-AC7"
+  },
+  {
+    "cpId": "shiv3-sc-network-resilience",
+    "connectors": 3,
+    "chargerType": 11,
+    "maxPowerKw": 7.4,
+    "vendor": "ocpp-cp-simulator",
+    "model": "SC-AC7"
+  },
+  {
+    "cpId": "shiv3-sc-fault-negative",
+    "connectors": 6,
+    "chargerType": 11,
+    "maxPowerKw": 7.4,
+    "vendor": "ocpp-cp-simulator",
+    "model": "SC-AC7"
+  },
+  {
+    "cpId": "shiv3-sc-auth-outcomes",
+    "connectors": 4,
+    "chargerType": 11,
+    "maxPowerKw": 7.4,
+    "vendor": "ocpp-cp-simulator",
+    "model": "SC-AC7"
+  },
+  {
+    "cpId": "shiv3-sc-reservation",
+    "connectors": 4,
+    "chargerType": 11,
+    "maxPowerKw": 7.4,
+    "vendor": "ocpp-cp-simulator",
+    "model": "SC-AC7"
+  },
+  {
+    "cpId": "shiv3-sc-local-list",
+    "connectors": 2,
+    "chargerType": 11,
+    "maxPowerKw": 7.4,
+    "vendor": "ocpp-cp-simulator",
+    "model": "SC-AC7"
+  },
+  {
+    "cpId": "shiv3-sc-smart-charging",
+    "connectors": 4,
+    "chargerType": 11,
+    "maxPowerKw": 22,
+    "vendor": "ocpp-cp-simulator",
+    "model": "SC-AC22x4"
+  },
+  {
+    "cpId": "shiv3-sc-firmware-diag",
+    "connectors": 2,
+    "chargerType": 11,
+    "maxPowerKw": 7.4,
+    "vendor": "ocpp-cp-simulator",
+    "model": "SC-AC7"
+  }
+]

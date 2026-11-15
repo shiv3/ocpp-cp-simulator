@@ -20,7 +20,7 @@ related:
   - ../concepts/scenario-format.md
   - ../entities/cli.md
   - ../sources/bench-readme.md
-updated: 2026-11-09
+updated: 2026-11-15
 ---
 
 # Charger engine: migration history
@@ -557,8 +557,11 @@ Decisions the design left open:
 - **Spelling.** On a 1.6 station the 2.x spelling of a one-to-one pair (`RequestStartTransaction`,
   `RequestStopTransaction`, `SetVariables`, `GetVariables`) names the 1.6 action in an `onCall` key. The folded
   pairs (`GetLog`, `UpdateFirmware`, `TriggerMessage`) are distinct messages on 1.6 and are not translated.
-- **Connector of a 2.x CALL.** The gate ranks rules by `evseId`, then `evse.id`, then `connectorId`: this
-  simulator maps an EVSE to a connector one to one.
+- **Connector of a 2.x CALL.** The gate ranks rules by the domain connector the CALL names. On 2.x the
+  station topology (`StationTopology`, #628) resolves `evseId` or `evse.id` with the index beside it
+  (`connectorId`, `evse.connectorId`): an EVSE alone stands for its first connector, and a pair the EVSE
+  does not have names no connector. Every EVSE has one connector today (the 1:1 topology), so EVSE N is
+  connector N.
 - **Hook payloads.** `transactionStarted` is built when it is delivered, so a 2.x transaction carries its
   UUID; `ctx.connector(id).transactionId` is the UUID on 2.x; `transactionStopped.reason` is the reason on the
   wire (`stoppedReason` before `stopReason`). `transactionStarted` also fires when a new transaction replaces a

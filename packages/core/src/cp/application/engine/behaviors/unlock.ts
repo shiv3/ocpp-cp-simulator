@@ -37,7 +37,8 @@ const PARAMS: BehaviorParams = {
  * returned (`Unlocked` by default, which a scenario can flip to
  * `UnlockFailed` or `NotSupported`).
  *
- * OCPP 2.x (F05): an unknown connector answers `UnknownConnector`, an ongoing
+ * OCPP 2.x (F05): an unknown `(evseId, connectorId)` pair answers
+ * `UnknownConnector` (F05.FR.03), an ongoing
  * authorized transaction `OngoingAuthorizedTransaction` (it is neither
  * unlocked nor stopped), otherwise `Unlocked` or `UnlockFailed` after the
  * connector's configured response.
@@ -53,9 +54,17 @@ export function unlockBehavior(cp: ChargePoint): Behavior {
         handle: (request, ctx) => {
           const outcome = ctx.params.outcome as string;
           if (isOcpp2Version(cp.ocppVersion)) {
-            const connector = cp.getConnector(
-              (request as { evseId: number }).evseId,
-            );
+            const { evseId, connectorId } = request as {
+              evseId: number;
+              connectorId: number;
+            };
+            // F05: the request names `(evseId, connectorId)`, both required.
+            // The station topology (#628) resolves the pair; a connector
+            // the EVSE does not have (e.g. connectorId 2 on a 1:1 station)
+            // is unknown (F05.FR.03), never the EVSE's other connector.
+            const id = cp.topology.connectorAt(evseId, connectorId);
+            const connector =
+              id === undefined ? undefined : cp.getConnector(id);
             if (!connector) return { response: { status: "UnknownConnector" } };
             if (connector.transaction) {
               return {

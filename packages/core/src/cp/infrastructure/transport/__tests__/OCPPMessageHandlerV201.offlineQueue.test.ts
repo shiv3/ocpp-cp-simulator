@@ -10,6 +10,7 @@ import { strictValidationErrors } from "@ocpp-cp-simulator/ocpp/validate";
 import { v201Schemas } from "@ocpp-cp-simulator/ocpp/v201/schemas";
 import { v21Schemas } from "@ocpp-cp-simulator/ocpp/v21/schemas";
 import type { TransactionEventRequestV201 } from "@ocpp-cp-simulator/ocpp/index";
+import { StationTopology } from "../../../domain/topology/StationTopology";
 
 /**
  * #528, OCPP 2.0.1 / 2.1 E11 (Connection Loss During Transaction):
@@ -148,6 +149,7 @@ function setup(ocppVersion: string) {
   const cp = {
     id: `CP-528-${ocppVersion}`,
     ocppVersion,
+    topology: StationTopology.identity(1),
     connectors: new Map([[1, connector]]),
     getConnector: vi.fn(() => connector),
     notifyOutgoingCall: vi.fn(),

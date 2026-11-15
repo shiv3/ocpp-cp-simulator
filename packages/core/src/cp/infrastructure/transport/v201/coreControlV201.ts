@@ -17,6 +17,7 @@ import type {
 } from "./inboundRegistryV201";
 import { LogType } from "../../../shared/Logger";
 import { OCPP_2_1 } from "../../../domain/types/OcppVersion";
+import { v201EvseTargets } from "./topologyWireV201";
 
 /**
  * B11 / B12 Reset.req: translation only. The `default.reset` behavior of the
@@ -141,7 +142,10 @@ export const handleTriggerMessageV201 = (
   }
 
   const req = payload as TriggerMessageRequestV201;
-  const connectorId = req.evse?.id;
+  // #628: the EVSE (and connector) named by the CSMS, as domain connectors;
+  // undefined for the whole station.
+  const evseTargets = (): number[] | undefined =>
+    v201EvseTargets(ctx.chargePoint.topology, req.evse);
 
   // #553, 2.1 F06.FR.08. 2.0.1 has no V2G20 certificate (its schema refuses
   // SignV2G20Certificate before this runs) and keeps answering
@@ -199,8 +203,16 @@ export const handleTriggerMessageV201 = (
     case "StatusNotification":
       return {
         response: accepted,
-        afterResult: () =>
-          ctx.chargePoint.sendCurrentStatusNotification(connectorId),
+        afterResult: () => {
+          const targetIds = evseTargets();
+          if (targetIds === undefined) {
+            ctx.chargePoint.sendCurrentStatusNotification(req.evse?.id);
+            return;
+          }
+          for (const id of targetIds) {
+            ctx.chargePoint.sendCurrentStatusNotification(id);
+          }
+        },
       };
 
     case "MeterValues":
@@ -217,15 +229,16 @@ export const handleTriggerMessageV201 = (
             aligned.length > 0
               ? aligned
               : ctx.chargePoint.configuration.meterValuesSampledData();
+          const targetIds = evseTargets();
           const send = (id: number): void =>
             ctx.chargePoint.sendMeterValue(id, "Trigger", { measurands });
-          if (connectorId === undefined || connectorId === 0) {
+          if (targetIds === undefined) {
             for (const id of ctx.chargePoint.connectors.keys()) send(id);
             // The station main meter on connector 0 / EVSE 0 (#617), when it has one.
             if (ctx.chargePoint.mainMeter) send(0);
             return;
           }
-          send(connectorId);
+          for (const id of targetIds) send(id);
         },
       };
 
@@ -233,13 +246,12 @@ export const handleTriggerMessageV201 = (
     // transaction of the requested EVSE, or of every EVSE without one. With
     // no running transaction there is nothing to report: Rejected.
     case "TransactionEvent": {
+      const targetIds = evseTargets();
       const targets = Array.from(ctx.chargePoint.connectors.values())
         .filter(
           (c) =>
             c.hasRunningTransaction &&
-            (connectorId === undefined ||
-              connectorId === 0 ||
-              c.id === connectorId),
+            (targetIds === undefined || targetIds.includes(c.id)),
         )
         .map((c) => ({ id: c.id, status: String(c.status) }));
       if (targets.length === 0) {

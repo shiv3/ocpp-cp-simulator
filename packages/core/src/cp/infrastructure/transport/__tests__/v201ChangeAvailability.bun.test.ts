@@ -145,3 +145,119 @@ describe("OCPP 2.0.1 ChangeAvailability", () => {
     }
   });
 });
+
+// OCPP 2.0.1 Ed4 Part 2 G03 (2.1 likewise): `evse.id` + `evse.connectorId`
+// addresses one connector of an EVSE (TC_G_15..TC_G_17_CS, TC_G_19_CS; a CSMS
+// sends it in TC_G_07/08_CSMS). A connector the EVSE does not have is
+// Rejected with the Appendix reason code UnknownConnectorId instead of
+// changing the EVSE's connector 1.
+describe("OCPP 2.x ChangeAvailability with evse.connectorId (G03)", () => {
+  for (const version of ["OCPP-2.0.1", "OCPP-2.1"] as const) {
+    it(`${version}: changes the named connector and rejects one the EVSE lacks`, async () => {
+      const csms = startMockCsms();
+      const cp = createChargePoint(
+        `CP-CHANGE-AVAILABILITY-CONNECTOR-${version}`,
+        DefaultBootNotification,
+        2,
+        csms.url,
+        null,
+        null,
+        null,
+        {},
+        [],
+        version,
+        {},
+      );
+      cp.events.on("error", () => undefined);
+
+      try {
+        cp.connect();
+        await bootAccepted(csms);
+
+        // TC_G_07_CSMS-style connector-level change on a 1:1 station: same
+        // answer and StatusNotification as the EVSE-level form.
+        csms.send([
+          2,
+          "ca-connector",
+          "ChangeAvailability",
+          {
+            operationalStatus: "Inoperative",
+            evse: { id: 1, connectorId: 1 },
+          } satisfies ChangeAvailabilityRequestV201,
+        ]);
+        const accepted = await csms.waitForFrame(
+          callResultFrame("ca-connector"),
+        );
+        expect(accepted).toEqual([3, "ca-connector", { status: "Accepted" }]);
+        const unavailable = await csms.waitForFrame(
+          statusNotificationFrameAfter(
+            csms,
+            csms.received.indexOf(accepted),
+            1,
+            "Unavailable",
+          ),
+        );
+        expect(unavailable[3]).toMatchObject({ evseId: 1, connectorId: 1 });
+        expect(cp.getConnector(1)?.availability).toBe("Inoperative");
+
+        // G03: EVSE 2 has no connector 2 -> Rejected, UnknownConnectorId,
+        // and connector 2 (EVSE 2's only one) stays Operative.
+        csms.send([
+          2,
+          "ca-no-connector",
+          "ChangeAvailability",
+          {
+            operationalStatus: "Inoperative",
+            evse: { id: 2, connectorId: 2 },
+          } satisfies ChangeAvailabilityRequestV201,
+        ]);
+        const rejected = await csms.waitForFrame(
+          callResultFrame("ca-no-connector"),
+        );
+        expect(rejected).toEqual([
+          3,
+          "ca-no-connector",
+          {
+            status: "Rejected",
+            statusInfo: {
+              reasonCode: "UnknownConnectorId",
+              additionalInfo: "EVSE 2 has no connector 2",
+            },
+          },
+        ]);
+        expect(cp.getConnector(2)?.availability).toBe("Operative");
+
+        // An unknown EVSE keeps the plain Rejected it always answered.
+        csms.send([
+          2,
+          "ca-no-evse",
+          "ChangeAvailability",
+          {
+            operationalStatus: "Inoperative",
+            evse: { id: 9, connectorId: 1 },
+          } satisfies ChangeAvailabilityRequestV201,
+        ]);
+        expect(await csms.waitForFrame(callResultFrame("ca-no-evse"))).toEqual([
+          3,
+          "ca-no-evse",
+          { status: "Rejected" },
+        ]);
+
+        // Nothing was sent for EVSE 2 after the rejected request.
+        const after = csms.received.indexOf(rejected);
+        expect(
+          csms.received.some(
+            (frame, index) =>
+              index > after &&
+              frame[0] === 2 &&
+              frame[2] === "StatusNotification" &&
+              (frame[3] as { evseId?: number }).evseId === 2,
+          ),
+        ).toBe(false);
+      } finally {
+        cp.disconnect();
+        await csms.stop();
+      }
+    });
+  }
+});

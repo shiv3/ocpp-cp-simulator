@@ -10,6 +10,7 @@ import { SqlitePendingMessageRepository } from "../../persistence/SqlitePendingM
 import { strictValidationErrors } from "@ocpp-cp-simulator/ocpp/validate";
 import { v201Schemas } from "@ocpp-cp-simulator/ocpp/v201/schemas";
 import { v21Schemas } from "@ocpp-cp-simulator/ocpp/v21/schemas";
+import { StationTopology } from "../../../domain/topology/StationTopology";
 
 /**
  * #538, N07.FR.04 with --state-db: a NotifyEvent queued while offline is a
@@ -89,6 +90,7 @@ function station(db: BunSqliteDatabase, ocppVersion: string) {
     id: "CP-538",
     pendingMessages: new SqlitePendingMessageRepository("CP-538", db),
     ocppVersion,
+    topology: StationTopology.identity(1),
     connectors: new Map([[1, connector]]),
     getConnector: () => connector,
     notifyOutgoingCall() {},

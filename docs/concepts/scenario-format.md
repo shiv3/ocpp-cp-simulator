@@ -7,6 +7,7 @@ sources:
   - packages/core/src/cp/application/scenario/ScenarioTypes.ts
   - packages/core/src/cp/application/scenario/types/nodeData.ts
   - packages/core/src/cp/application/scenario/types/graph.ts
+  - packages/core/src/cp/application/scenario/types/catalogs.ts
   - packages/core/src/cp/application/scenario/WaitControl.ts
   - packages/core/src/cp/application/verification/ScenarioAssertions.ts
   - packages/core/src/scenario/scenarioSchemaValidator.ts
@@ -219,7 +220,7 @@ station the 1.6 name is translated (`RemoteStartTransaction` answers a
 (#349). Which `status` values are valid depends on `action` (e.g. `action:
 "RemoteStartTransaction"` only accepts `status: "Accepted" | "Rejected"`; see
 `RESPONSE_OVERRIDE_STATUSES` in
-[`ScenarioTypes.ts`](../../packages/core/src/cp/application/scenario/ScenarioTypes.ts)). The
+[`types/catalogs.ts`](../../packages/core/src/cp/application/scenario/types/catalogs.ts), re-exported by `ScenarioTypes.ts`). The
 schema types both fields as plain strings and does **not** enforce this
 action → status constraint — encoding the full per-action status matrix
 into JSON Schema would make the schema harder to read for little benefit

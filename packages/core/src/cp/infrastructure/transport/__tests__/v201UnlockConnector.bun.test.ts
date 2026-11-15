@@ -62,7 +62,10 @@ async function bootAccepted(csms: MockCsms): Promise<void> {
   );
 }
 
-function newChargePoint(id: string): {
+function newChargePoint(
+  id: string,
+  version: "OCPP-2.0.1" | "OCPP-2.1" = "OCPP-2.0.1",
+): {
   csms: MockCsms;
   cp: ChargePoint;
 } {
@@ -77,7 +80,7 @@ function newChargePoint(id: string): {
     null,
     {},
     [],
-    "OCPP-2.0.1",
+    version,
     {},
   );
   cp.events.on("error", () => undefined);
@@ -139,6 +142,39 @@ describe("OCPP 2.0.1 UnlockConnector", () => {
       await csms.stop();
     }
   });
+
+  // OCPP 2.0.1 Part 2 F05.FR.03 (2.1 likewise): a connector the station
+  // does not have answers UnknownConnector; TC_F_10_CS sends
+  // `{ evseId: <configured>, connectorId: 999 }`. On a 1:1 station EVSE 1 has
+  // only connector 1, so `connectorId: 2` must not unlock connector 1. A
+  // CSMS under test relies on the station telling the pair apart.
+  for (const version of ["OCPP-2.0.1", "OCPP-2.1"] as const) {
+    it(`F05.FR.03 (${version}): returns UnknownConnector for a connectorId the EVSE does not have`, async () => {
+      const { csms, cp } = newChargePoint(
+        `CP-UNLOCK-NOCONN-${version}`,
+        version,
+      );
+
+      try {
+        cp.connect();
+        await bootAccepted(csms);
+
+        const result = await sendUnlockConnector(csms, "unlock-noconn", {
+          evseId: 1,
+          connectorId: 2,
+        });
+
+        expect(result).toEqual([
+          3,
+          "unlock-noconn",
+          { status: "UnknownConnector" },
+        ]);
+      } finally {
+        cp.disconnect();
+        await csms.stop();
+      }
+    });
+  }
 
   it("returns OngoingAuthorizedTransaction without stopping an active transaction", async () => {
     const { csms, cp } = newChargePoint("CP201-UNLOCK-ACTIVE");

@@ -4,7 +4,8 @@ import { OCPPStatus } from "../types/OcppTypes";
  * Configuration keys of the runtime values a 2.x station publishes as
  * device-model variables (#538), so GetVariables reads them and variable
  * monitors watch them. Read-only, never persisted, 2.x only. A per-EVSE
- * value's key is {@link evseValueKey} of its prefix (EVSE N is connector N).
+ * value's key is {@link evseValueKey} of its prefix and the EVSE id, which
+ * `ChargePoint.topology` maps from the domain connector (#628).
  */
 export const RUNTIME_VALUE_KEYS = {
   /** `EVSE.Power`: instantaneous active power in W, prefix of a per-EVSE key. */

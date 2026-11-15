@@ -334,10 +334,12 @@ for (const [version, provider] of CASES) {
 // A second action shows nothing here is specific to firmware: UnlockConnector
 // exists on both versions with a different request, and a default that answers
 // `Unlocked`.
+// On 2.x the station is 1:1: EVSE N has one connector, number 1, and any
+// other connectorId is UnknownConnector (F05.FR.03).
 const unlock = (v: WireVersion, connector: number) =>
   v === "1.6"
     ? { connectorId: connector }
-    : { evseId: connector, connectorId: connector };
+    : { evseId: connector, connectorId: 1 };
 const matchConnector = (v: WireVersion) =>
   v === "1.6" ? { connectorId: 1 } : { evseId: 1 };
 

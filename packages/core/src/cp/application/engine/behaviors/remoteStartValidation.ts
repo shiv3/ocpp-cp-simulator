@@ -187,8 +187,13 @@ export function decideRemoteStart(
     cp.reservationManager.reservationFor(id, idToken, groupId) !== undefined;
 
   if (request.evseId !== undefined) {
+    // The EVSE's connector through the station topology (#628); on the 1:1
+    // station EVSE N holds only connector N.
+    const evseConnectorId = cp.topology.connectorsOf(request.evseId)[0];
     const connector =
-      request.evseId >= 1 ? cp.getConnector(request.evseId) : undefined;
+      evseConnectorId === undefined
+        ? undefined
+        : cp.getConnector(evseConnectorId);
     if (!connector) {
       return reject("UnknownEvse", `EVSE ${request.evseId} does not exist`);
     }

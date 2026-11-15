@@ -5,6 +5,7 @@ import type { Logger } from "../../../shared/Logger";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { MeterValuesRequestV201 } from "@ocpp-cp-simulator/ocpp/index";
 import { stubOperatingPoint } from "../../../domain/connector/__tests__/operatingPointStub";
+import { StationTopology } from "../../../domain/topology/StationTopology";
 
 /**
  * Transport-boundary regression for #301 finding 1: `MeterValueBuilder`
@@ -68,6 +69,7 @@ function threePhaseConnectorStub(): unknown {
 
 function createMockChargePoint(connector: unknown): ChargePoint {
   return {
+    topology: StationTopology.identity(1),
     getConnector: vi.fn(() => connector),
     notifyOutgoingCall: vi.fn(),
     // Signed meter data (#315) off, as by default.

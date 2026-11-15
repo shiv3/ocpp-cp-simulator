@@ -15,6 +15,7 @@ import {
   type V201InboundHandler,
   type V201InboundRegistry,
 } from "../v201/inboundRegistryV201";
+import { StationTopology } from "../../../domain/topology/StationTopology";
 
 /**
  * #456: a 2.x inbound handler may return a promise (certificate hashing is
@@ -101,6 +102,7 @@ function setup(entries: Record<string, V201InboundHandler>) {
     id: "cp-test",
     configuration,
     // #538: GetBaseReport lists the per-EVSE variables of each connector.
+    topology: StationTopology.identity(1),
     connectors: new Map(),
     notifyIncomingCall: vi.fn(),
     notifyIncomingCallCompleted: vi.fn(),

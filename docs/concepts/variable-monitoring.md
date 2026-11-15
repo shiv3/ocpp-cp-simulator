@@ -27,7 +27,7 @@ sources:
 related:
   - ocpp-versions-and-transports.md
   - state-persistence.md
-updated: 2026-11-09
+updated: 2026-11-15
 ---
 
 # OCPP 2.x variable monitoring
@@ -66,7 +66,8 @@ as those messages do (N04.FR.03, FR.04).
   instances answers whatever instance the CSMS names.
 - **EVSE.** A component is its name plus its EVSE scope, so a
   `component.evse` the station does not have answers `UnknownComponent`
-  (N04.FR.03, #538). EVSE N is connector N and has one connector, number 1:
+  (N04.FR.03, #538). The station topology maps EVSEs to connectors (#628);
+  every EVSE has one connector today, number 1, so EVSE N is connector N:
   on a two-connector station `evse` 1 or 2 (with `connectorId` 1 or none)
   resolves, `evse` 0 or 3 or `connectorId` 2 does not. `GetVariables` /
   `SetVariables` do not check the EVSE of a station-wide variable; an

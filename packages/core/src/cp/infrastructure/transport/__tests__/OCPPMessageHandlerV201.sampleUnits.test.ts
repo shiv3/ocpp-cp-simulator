@@ -7,6 +7,7 @@ import type { MeterValuesRequestV201 } from "@ocpp-cp-simulator/ocpp/index";
 import { schemas } from "@ocpp-cp-simulator/ocpp/index";
 import { unitOfMeasurandV2x } from "../../../domain/connector/MeterValueBuilder";
 import { stubOperatingPoint } from "../../../domain/connector/__tests__/operatingPointStub";
+import { StationTopology } from "../../../domain/topology/StationTopology";
 
 // #713: OCPP 2.0.1 Part 2 Appendices ch. 2 - "Default value of unit is always
 // Wh", so every 2.x sample except a unitless one must name its unit.
@@ -140,6 +141,7 @@ function sendAll(measurands: string[], ocppVersion?: string) {
   };
   const chargePoint = {
     ...(ocppVersion ? { ocppVersion } : {}),
+    topology: StationTopology.identity(1),
     getConnector: vi.fn(() => connectorStub()),
     notifyOutgoingCall: vi.fn(),
     signedMeterFor: vi.fn(() => null),

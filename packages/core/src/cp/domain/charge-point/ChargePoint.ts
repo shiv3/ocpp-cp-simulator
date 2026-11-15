@@ -16,6 +16,8 @@ import {
 import {
   completeConstruction,
   createStationAuthorization,
+  routeLogEntries,
+  wireSocket,
 } from "./ChargePointSetup";
 import { CapabilityGate } from "./CapabilityGate";
 import { IdTagSource } from "./IdTagSource";
@@ -492,19 +494,7 @@ export class ChargePoint {
     // (server-hosted with callback) vs send-only (no callback URL).
     this._messaging.hasSoapCallbackUrl = !!transportOptions.soapCallbackUrl;
 
-    // Setup logger callback to emit log events
-    this._logger.loggingCallback = (entry) => {
-      this._events.emit("log", {
-        timestamp: entry.timestamp,
-        level: entry.level,
-        type: entry.type,
-        message: entry.message,
-      });
-      // Buffered write — the default LogRepository batches up to 50
-      // entries before hitting the DB so high-frequency log lines don't
-      // thrash the IndexedDB flush in the browser.
-      this._logSink.append(this._id, entry);
-    };
+    routeLogEntries(this._logger, this._events, () => this._logSink, this._id);
 
     this._connectorWiring.createConnectors(
       connectorCount,
@@ -544,26 +534,18 @@ export class ChargePoint {
     this._messaging.receivesCsmsCall = (action) =>
       transport.receivesCsmsCall(action);
     if (this._webSocket) {
-      this._webSocket.setWsClientOptions(wsClientOptions);
-      // Seeded even without `simulation.seed` (no CLI flag or `cp.create`
-      // field sets one): by the charge point id, so the same id draws the
-      // same jitter on every run, like the SupervisionUrlPool's hash (#609).
-      const reconnectRng =
-        simulation.seed === undefined
-          ? new RngStreams(this._id).stream(this._id, "reconnect")
-          : this.rng("reconnect");
-      this._webSocket.setReconnectPolicy(this._reconnectPolicy, () =>
-        reconnectRng.next(),
-      );
-      this._webSocket.observers.on("reconnectGaveUp", ({ attempts }) =>
-        this._events.emit("gaveUp", { target: "reconnect", attempts }),
-      );
-      this._webSocket.observers.on("simulatedDisconnect", (fault) =>
-        this._events.emit("networkFaultInjected", fault),
-      );
-      this._webSocket.observers.on("reconnectScheduled", (info) =>
-        this._events.emit("reconnecting", info),
-      );
+      wireSocket(this._webSocket, {
+        wsClientOptions,
+        reconnectPolicy: this._reconnectPolicy,
+        // Seeded even without `simulation.seed` (no CLI flag or `cp.create`
+        // field sets one): by the charge point id, so the same id draws the
+        // same jitter on every run, like the SupervisionUrlPool's hash (#609).
+        reconnectRng: () =>
+          simulation.seed === undefined
+            ? new RngStreams(this._id).stream(this._id, "reconnect")
+            : this.rng("reconnect"),
+        events: this._events,
+      });
     }
     this._outbox = new Outbox(this._messageHandler);
 

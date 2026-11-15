@@ -1,4 +1,12 @@
+import type { EventEmitter } from "../../shared/EventEmitter";
+import type { Logger } from "../../shared/Logger";
+import type { ReconnectPolicy } from "../../shared/ReconnectPolicy";
+import type { WsClientOptions } from "../../shared/WsClientOptions";
+import type { Rng } from "../../shared/rng";
 import type { SimClock } from "../../shared/clock";
+import type { LogSink } from "../persistence/LogSink";
+import type { ChargePointSocket } from "../transport/ChargePointSocket";
+import type { ChargePointEvents } from "./ChargePointEvents";
 import { AuthorizationCache } from "../auth/AuthorizationCache";
 import { idTokenMaxLength } from "../auth/AuthorizationCacheSeed";
 import type { LocalAuthListManager } from "../auth/LocalAuthList";
@@ -117,4 +125,54 @@ export function completeConstruction(
   // #930: a suspended SIM on a cellular station keeps the link down from
   // the very first connect, also after a restart.
   ctx.cellular().reevaluateCellularLink();
+}
+
+/**
+ * The transport options and observers a WebSocket charge point sets on its
+ * socket once the factory built it. `reconnectRng` is read after the client
+ * options are set, as the constructor always did.
+ */
+export function wireSocket(
+  socket: ChargePointSocket,
+  options: {
+    readonly wsClientOptions: WsClientOptions;
+    readonly reconnectPolicy: ReconnectPolicy;
+    readonly reconnectRng: () => Rng;
+    readonly events: EventEmitter<ChargePointEvents>;
+  },
+): void {
+  socket.setWsClientOptions(options.wsClientOptions);
+  const reconnectRng = options.reconnectRng();
+  socket.setReconnectPolicy(options.reconnectPolicy, () => reconnectRng.next());
+  socket.observers.on("reconnectGaveUp", ({ attempts }) =>
+    options.events.emit("gaveUp", { target: "reconnect", attempts }),
+  );
+  socket.observers.on("simulatedDisconnect", (fault) =>
+    options.events.emit("networkFaultInjected", fault),
+  );
+  socket.observers.on("reconnectScheduled", (info) =>
+    options.events.emit("reconnecting", info),
+  );
+}
+
+/** Every log line of the charge point becomes a `log` event and goes to the
+ *  log sink. */
+export function routeLogEntries(
+  logger: Logger,
+  events: EventEmitter<ChargePointEvents>,
+  sink: () => LogSink,
+  cpId: string,
+): void {
+  logger.loggingCallback = (entry) => {
+    events.emit("log", {
+      timestamp: entry.timestamp,
+      level: entry.level,
+      type: entry.type,
+      message: entry.message,
+    });
+    // Buffered write — the default LogRepository batches up to 50
+    // entries before hitting the DB so high-frequency log lines don't
+    // thrash the IndexedDB flush in the browser.
+    sink().append(cpId, entry);
+  };
 }

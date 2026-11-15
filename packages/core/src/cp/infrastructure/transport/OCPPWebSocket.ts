@@ -55,10 +55,8 @@ import {
   ClientCertificateState,
   type ClientIdentity,
 } from "./ws/clientCertificateState";
-import {
-  GenerationTokenImpl,
-  neverReachedCsms,
-} from "./ws/closeClassification";
+import { GenerationTokenImpl } from "./ws/closeClassification";
+import { UpgradeRefusalDiagnostic } from "./ws/upgradeRefusalDiagnostic";
 import {
   dispatchIncomingFrame,
   writeUpstreamPhysical,
@@ -71,7 +69,7 @@ import { ReconnectScheduler } from "./ws/reconnectScheduler";
 import { createHost } from "./ws/socketHost";
 import { PingTimer } from "./ws/pingTimer";
 
-export { neverReachedCsms };
+export { neverReachedCsms } from "./ws/closeClassification";
 
 /**
  * #393: sees every well-shaped incoming frame (an array of 3 to 5 elements)
@@ -170,12 +168,8 @@ export class OCPPWebSocket implements ChargePointSocket {
   /** #288: the options the current handshake used, replayed by the refusal
    *  probe so it asks the question the socket asked. */
   private _lastConnectOptions: OcppWebSocketConnectOptions | null = null;
-  /** When the probe last ran, so a retry loop cannot multiply the CSMS's
-   *  request rate. Cleared on a successful open. */
-  private _lastRefusalProbeAt: number = 0;
-  /** Set when the client itself reported the HTTP status (the `ws` path),
-   *  so the probe does not ask a question already answered. */
-  private _refusalStatusReported: boolean = false;
+  /** #288: the attempt's error log and the refusal probe. */
+  private readonly _refusal: UpgradeRefusalDiagnostic;
   // Extra HTTP headers + Sec-WebSocket-Protocol tokens attached on each
   // upgrade. Both are CLI-only — DOM WebSocket ignores extraHeaders, but
   // the runtime fallback in openOcppWebSocket handles that.
@@ -259,6 +253,13 @@ export class OCPPWebSocket implements ChargePointSocket {
       emitDiscarded: () =>
         this.observers.emit("renewedClientCertificateDiscarded", {}),
     });
+    this._refusal = new UpgradeRefusalDiagnostic(
+      logger,
+      (generation) =>
+        !this._disposed &&
+        this._generationCounter === generation &&
+        this._ws?.readyState !== WebSocket.OPEN,
+    );
 
     // Initialize network simulation controller and current generation
     this._currentGeneration = new GenerationTokenImpl(this._generationCounter);
@@ -284,8 +285,8 @@ export class OCPPWebSocket implements ChargePointSocket {
       stopPingInterval: () => this.stopPingInterval(),
       runCloseTransaction: (closeCause) => this.runCloseTransaction(closeCause),
       handleOpen: () => this._closer.handleOpen(),
-      handleError: (evt) => this._closer.handleError(evt),
-      handleClose: (ev, closeCause) => this._closer.handleClose(ev, closeCause),
+      handleClose: (closeCause, probeRefusal) =>
+        this._closer.handleClose(closeCause, probeRefusal),
       closeCauseOf: (token) => this._closer.closeCauseOf(token),
       reportClose: (token, ev) => this._closer.reportClose(token, ev),
       clearHandshakeTimer: () => this.clearHandshakeTimer(),
@@ -305,8 +306,7 @@ export class OCPPWebSocket implements ChargePointSocket {
       this._onCloseCallback,
       this._isManualDisconnect,
       this._selfRequestedClose,
-      this._lastRefusalProbeAt,
-      this._refusalStatusReported,
+      this._refusal,
       this._extraHeaders,
       this._extraSubprotocols,
       this._ocppVersion,

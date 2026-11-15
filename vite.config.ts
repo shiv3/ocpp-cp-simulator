@@ -85,7 +85,7 @@ export default defineConfig({
       "**/*.bun.test.ts",
       // isolated spikes with their own install (#936), run by hand
       "apps/web/spikes/**",
-      // standalone Bun reproductions (#833), run by hand with `bun test`
+      // standalone Bun WebSocket probe (#1033, #1034), run by hand
       "repro/**",
     ],
     coverage: {

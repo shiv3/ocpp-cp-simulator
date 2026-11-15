@@ -15,7 +15,7 @@ related:
   - trace-format.md
   - ../entities/analyze.md
   - ../entities/cli.md
-updated: 2026-11-08
+updated: 2026-11-15
 ---
 
 # Log format
@@ -184,19 +184,28 @@ only logs this line, with the real code, and leaves the new connection alone
 
 ## WebSocket handshake failures
 
-A CSMS that refuses the upgrade produces, in CLI/daemon mode:
+A CSMS that refuses the upgrade produces, in CLI/daemon mode on Bun 1.4.4:
 
 ```
-[ERROR] [WebSocket] WebSocket error: WebSocket connection to 'ws://…' failed: Expected 101 status code
-[INFO]  [WebSocket] WebSocket closed: code=1002, reason=Expected 101 status code, wasClean=false, cause=network
+[ERROR] [WebSocket] WebSocket error: WebSocket connection to 'ws://…' failed: Expected 101 status code: 401
+[INFO]  [WebSocket] WebSocket closed: code=1006, reason=none, wasClean=false, cause=network
 [ERROR] [WebSocket] WebSocket upgrade refused: HTTP 401 — credentials refused, or the CSMS considers the connection insecure for its security profile (diagnostic GET after the handshake failed)
 ```
 
+Bun 1.4.3 and earlier write the first two lines differently: the error
+message ends at `Expected 101 status code`, with no status, and the close
+reads `code=1002, reason=Expected 101 status code`. The third line is the
+same on both.
+
 The third line is the one that names the cause (#288). It exists because the
-runtime will not: Bun's native WebSocket reports 401, 404 and a 301 redirect
-with the identical `code=1002, Expected 101 status code`, so after a refused
+runtime will not say enough: Bun 1.4.3 reports 401, 404 and a 301 redirect
+with the identical `code=1002, Expected 101 status code`, and Bun 1.4.4
+closes every failed attempt with a blank 1006 and quotes only the status in
+the error message, never a redirect's `Location`. So after a refused
 handshake the daemon replays it as one plain `GET` with the same headers and
-logs the status that comes back. A `3xx` also logs its `Location`, which is
+logs the status that comes back. The probe is triggered by
+`Expected 101 status code` in the error message (Bun 1.4.4) or by the 1002
+close (Bun 1.4.3), never by a blank 1006 alone (#1033). A `3xx` also logs its `Location`, which is
 what a cleartext `ws://` to a TLS-only edge looks like.
 
 Two properties worth knowing, because the line is a diagnostic and not a
@@ -204,8 +213,10 @@ protocol event:
 
 - **It costs one extra request, and only on failure.** The probe runs at most
   once a minute per charge point and resets on a successful open, so the
-  reconnect loop does not multiply the CSMS's request rate. A close that is
-  not a refused upgrade (a TCP failure, a TLS failure) never triggers it.
+  reconnect loop does not multiply the CSMS's request rate. A failed attempt
+  that is not a refused upgrade (a TCP failure, a DNS failure, a TLS
+  failure) never triggers it: on Bun 1.4.4 neither its error message nor
+  its close quotes `Expected 101 status code` (#1033).
 - **It never follows a redirect**, so the station's credentials are not
   forwarded to whatever host `Location` names.
 

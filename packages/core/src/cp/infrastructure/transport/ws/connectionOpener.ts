@@ -8,9 +8,11 @@ import {
 import { type CloseCause } from "../network-sim";
 import { type SocketClose } from "../../../domain/transport/ChargePointSocket";
 import {
+  classifyFailedAttempt,
+  describeConnectError,
   GenerationTokenImpl,
-  neverReachedCsms,
   SUPERSEDED_CLOSE,
+  type ConnectErrorDetail,
 } from "./closeClassification";
 import type { OcppWebSocketHost } from "./socketHost";
 
@@ -70,9 +72,7 @@ export class ConnectionOpener {
       this.host.securityProfileFallback = null;
       this.clearHandshakeTimer();
       this.host.clientCerts.onOpened(attempt.renewed);
-      // A working connection clears the refusal budget, so the next genuine
-      // refusal is diagnosed immediately rather than waiting out the window.
-      this.host.lastRefusalProbeAt = 0;
+      this.host.refusal.clearBudget();
       this.host.urlPool?.onSuccess();
       this.host.handleOpen();
       if (this.host.onOpenCallback) {
@@ -82,7 +82,16 @@ export class ConnectionOpener {
     const onmessageHandler = (ev: MessageEvent) => {
       this.host.controller.receiveDownstream(ev.data.toString());
     };
-    const onerrorHandler = this.host.handleError;
+    // #1034: the first error of this attempt, before it opened. Bun 1.4.4
+    // puts the cause there and closes with a blank 1006. Closure-local, so a
+    // superseded socket's late error cannot speak for this attempt, nor
+    // silence its refusal probe by reporting a status of its own (#1033).
+    let firstError: ConnectErrorDetail | undefined;
+    let statusReported = false;
+    const onerrorHandler = (ev: Event) => {
+      if (!opened) firstError ??= describeConnectError(ev);
+      if (this.host.refusal.reportError(ev)) statusReported = true;
+    };
 
     // Capture the current generation for this socket connection
     const socketGeneration = this.host.generationCounter;
@@ -108,10 +117,13 @@ export class ConnectionOpener {
         }
         // Only a failed connection attempt counts, not one the station
         // closed itself before it opened, nor one no CSMS ever saw.
-        if (!opened && closeCause === "network" && !neverReachedCsms(ev)) {
+        const kind = opened ? null : classifyFailedAttempt(ev, firstError);
+        if (kind && closeCause === "network" && kind !== "unreached") {
           this.host.clientCerts.onFailed(attempt.renewed);
         }
-        this.host.handleClose(ev, closeCause);
+        // #288: ask the CSMS why it refused, unless the client said so.
+        const probe = kind === "upgrade-refused" && !statusReported;
+        this.host.handleClose(closeCause, probe);
       }
       this.host.reportClose(socketToken, ev);
       // #448: announced once the charge point has handled the close, so an
@@ -149,7 +161,6 @@ export class ConnectionOpener {
         warn: (message) => this.host.logger.warn(message, LogType.WEBSOCKET),
         onConnectOptions: (options) => {
           this.host.lastConnectOptions = options;
-          this.host.refusalStatusReported = false;
         },
         onopen: onopenHandler,
         onmessage: onmessageHandler,

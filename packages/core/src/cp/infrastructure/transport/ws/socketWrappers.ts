@@ -336,8 +336,8 @@ export class DeferredNodeWebSocket {
           void request;
           socket.terminate();
           this.state = WebSocket.CLOSED;
-          // 1002 to match what the Bun client reports for the same refusal,
-          // so everything downstream sees one shape.
+          // 1002 to match what Bun 1.4.3 reports for the same refusal; the
+          // `httpStatus` above is what classifies it (closeClassification).
           this.dispatchCloseOnce({
             type: "close",
             code: 1002,

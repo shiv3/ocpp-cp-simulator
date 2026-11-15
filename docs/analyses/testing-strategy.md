@@ -86,9 +86,11 @@ stalls the event loop for seconds: `E11 1.6 GetConfiguration` in
 test takes 63 ms on Bun 1.3.13 and 1.5 ms with `--isolate`. The full suite
 was not slower with `--isolate` (346 s against 363 s). The
 mechanism inside Bun is not established: the same cases run outside
-`bun:test` leave no such stall. The CI shards hid it, because those two files
-land in different shards. `test:bun:cli` deliberately runs **without**
-`--isolate` (see below).
+`bun:test` leave no such stall. It may be oven-sh/bun#33261, whose async
+matchers return real promises since oven-sh/bun#44833; the pair has not been
+re-run on a release carrying that change (#1038). The CI shards hid it,
+because those two files land in different shards. `test:bun:cli`
+deliberately runs **without** `--isolate` (see below).
 
 The Bun version comes from `.tool-versions` (`bun 1.4.3`). `oven-sh/setup-bun`
 reads it in every workflow through `bun-version-file`, so CI and the release
@@ -101,12 +103,29 @@ image follows the same pin: the `Dockerfile` builds on
 that `scripts/__tests__/bunVersionPin.bun.test.ts` keeps equal to it (see
 [Docker image](../entities/docker-image.md)). Before #803 CI pinned
 1.3.14 in `.bun-version`, which mise ignores, and the release workflows built
-with `latest`. 1.4.3 is pinned, not the newer 1.4.4: its WebSocket client
-breaks seven tests that pass on 1.4.3, and the files fail on their own as
-well. `handshakeRefusal` no longer names a refused handshake, `tlsSecurityProfiles`
-gets a different close for a refused connection, and `v201LocalAuthList` sees
-its connection closed with `1002 Received new message inside a fragmented
-message`. Re-run those three files before raising the pin.
+with `latest`. 1.4.3 is pinned, not the newer 1.4.4: seven WebSocket tests
+that pass on 1.4.3 failed on 1.4.4, also when their files run alone (#833).
+
+- `handshakeRefusal`: an upgrade refused with 401, 404 or 302 closed with
+  `1002` and the reason `Expected 101 status code` on 1.4.3. On 1.4.4 the
+  status is in the `error` event's message and the close is `1006` with an
+  empty reason.
+- `tlsSecurityProfiles`: `wss://` to a self-signed server or to a plain-HTTP
+  port closed with `1015` on 1.4.3 and `1006` on 1.4.4.
+- Both are an intentional Bun change (oven-sh/bun#45223: failure details
+  moved from the close event to the `ErrorEvent`), not a regression to report
+  upstream. The transport now reads the cause of a failed attempt from the
+  error event on both versions (#1033, #1034), and these two files pass on
+  1.4.4. `repro/bun-1.4.x/ws-failure-causes.ts` prints what each cause
+  carries on a given Bun.
+- `v201LocalAuthList` still fails on 1.4.4: Bun closes a valid connection with
+  `1002 Received new message inside a fragmented message`.
+  That is oven-sh/bun#45805, reported passing on canary after
+  oven-sh/bun#44833; the general fix oven-sh/bun#46093 was still open on
+  2026-11-15.
+
+Re-run those three files, and the golden-wire pair above without
+`--isolate`, before raising the pin (#1038).
 
 Coverage (`bun run test:coverage` / `test:coverage:bun`, uploaded to Codecov
 in CI) merges both reports — `coverage/lcov.info` (Vitest) and

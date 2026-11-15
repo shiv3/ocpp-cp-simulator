@@ -4,19 +4,15 @@ import type {
   FirmwareStatus,
   UploadLogStatus,
 } from "../types/FirmwareLogStatus";
-import {
-  capabilityProfileConflicts,
-  disabledActionErrorCode,
-  isActionDisabled,
-  isTriggerTargetSupported,
-  type ChargePointCapabilityProfile,
-  type DisabledActionErrorCode,
+import type {
+  ChargePointCapabilityProfile,
+  DisabledActionErrorCode,
 } from "./CapabilityProfile";
-import { translatesCsmsActionNames } from "../types/csmsActionNames";
 import {
   createCollaborators,
   type ChargePointCollaborators,
 } from "./ChargePointCollaborators";
+import { CapabilityGate } from "./CapabilityGate";
 import { EventEmitter } from "../../shared/EventEmitter";
 import { realClock } from "../../shared/clock";
 import type { SimClock, TimerHandle } from "../../shared/clock";
@@ -86,7 +82,7 @@ import type {
   BootReason,
   ChargePointStatus,
 } from "../types/OcppTypes";
-import { isOcpp2Version, isSoapVersion, OCPP_1_6 } from "../types/OcppVersion";
+import { isOcpp2Version, isSoapVersion } from "../types/OcppVersion";
 import { DeviceModelTargets } from "./DeviceModelTargets";
 import { OCPPStatus } from "../types/OcppTypes";
 import type {
@@ -276,7 +272,7 @@ export class ChargePoint {
       evseIdOf: (connectorId) => this.evseIdOf(connectorId),
       loadAvailability: (connectorId) => this.loadAvailability(connectorId),
       warnCapabilityProfileConflicts: () =>
-        this.warnCapabilityProfileConflicts(),
+        this._capabilityGate.warnConflicts(),
       writeConnector: (connectorId, write) =>
         this.writeConnector(connectorId, write),
     },
@@ -371,63 +367,34 @@ export class ChargePoint {
   });
 
   private _inboundValidation: InboundValidationMode;
-  private readonly _capabilityProfile: ChargePointCapabilityProfile | undefined;
+  private readonly _capabilityGate: CapabilityGate;
 
   /** See {@link ChargePointCapabilityProfile}. */
   get capabilityProfile(): ChargePointCapabilityProfile | undefined {
-    return this._capabilityProfile;
+    return this._capabilityGate.profile;
   }
 
-  /** Is the inbound `action` disabled by the capability profile (#618)? */
+  /** Is the inbound `action` disabled by the capability profile (#618)?
+   *  @see CapabilityGate.isActionDisabled */
   isActionDisabled(action: string): boolean {
-    return isActionDisabled(
-      this._capabilityProfile,
-      action,
-      translatesCsmsActionNames(this._ocppVersion),
-    );
+    return this._capabilityGate.isActionDisabled(action);
   }
 
   /** The CALLERROR code a disabled action is answered with (#618). */
   disabledActionErrorCode(): DisabledActionErrorCode {
-    return disabledActionErrorCode(this._capabilityProfile);
+    return this._capabilityGate.disabledActionErrorCode();
   }
 
-  /**
-   * Does this station keep a connector status change the OCPP 1.6 §4.9 table
-   * does not list off the wire (`statusTransitions: "enforce"`, #618)? OCPP
-   * 1.6J only: the table is written in the 1.6 status vocabulary, which 2.x
-   * reports through a different ConnectorStatusEnumType with no such table.
-   */
+  /** Whether the station keeps an out-of-table 1.6 status change off the wire
+   *  (`statusTransitions: "enforce"`, #618).
+   *  @see CapabilityGate.enforcesStatusTransitions */
   get enforcesStatusTransitions(): boolean {
-    return (
-      this._capabilityProfile?.statusTransitions === "enforce" &&
-      this._ocppVersion === OCPP_1_6
-    );
-  }
-
-  /**
-   * Log every place the capability profile contradicts the 1.6
-   * `SupportedFeatureProfiles` configuration key (#618). Advisory: nothing
-   * is refused.
-   */
-  private warnCapabilityProfileConflicts(): void {
-    if (this._ocppVersion !== OCPP_1_6 || !this._capabilityProfile) return;
-    const conflicts = capabilityProfileConflicts(
-      this._capabilityProfile,
-      this._configuration?.getArray("SupportedFeatureProfiles"),
-    );
-    for (const conflict of conflicts) {
-      this._logger.warn(conflict.message, LogType.SYSTEM);
-    }
+    return this._capabilityGate.enforcesStatusTransitions;
   }
 
   /** May TriggerMessage request `target` under the capability profile (#618)? */
   isTriggerTargetSupported(target: string): boolean {
-    return isTriggerTargetSupported(
-      this._capabilityProfile,
-      target,
-      translatesCsmsActionNames(this._ocppVersion),
-    );
+    return this._capabilityGate.isTriggerTargetSupported(target);
   }
 
   /** See {@link InboundValidationMode}. Read on every inbound CALL. */
@@ -500,7 +467,14 @@ export class ChargePoint {
       transportOptions.inboundValidation ?? DEFAULT_INBOUND_VALIDATION;
     this._reservationAuthorizeIdTag =
       transportOptions.reservationAuthorizeIdTag ?? false;
-    this._capabilityProfile = transportOptions.capabilityProfile;
+    this._capabilityGate = new CapabilityGate(
+      transportOptions.capabilityProfile,
+      {
+        configuration: () => this._configuration,
+        logger: () => this._logger,
+        ocppVersion: () => this._ocppVersion,
+      },
+    );
     this._logger.setCpId(this._id);
     this._logSink = deps.logSink;
     this._repositories = deps.repositories;

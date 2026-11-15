@@ -1,11 +1,15 @@
-import type { IdTagDistribution, IdTagPool } from "../auth/IdTagPool";
+import {
+  DEFAULT_ID_TAG,
+  type IdTagDistribution,
+  type IdTagPool,
+} from "../auth/IdTagPool";
 import type { ChargePoint } from "./ChargePoint";
 
 /** What the id tag source needs from its charge point. */
 export interface IdTagSourceHost {
   /** Public members go through it so spies on the charge point still see
    *  them. */
-  readonly chargePoint: Pick<ChargePoint, "canReplaceIdTags">;
+  readonly chargePoint: Pick<ChargePoint, "canReplaceIdTags" | "nextIdTag">;
 }
 
 /**
@@ -44,6 +48,18 @@ export class IdTagSource {
           distribution: this.pool.distributionPolicy,
         }
       : null;
+  }
+
+  /**
+   * The idTag a control-plane call presents (#299): an explicit tag always
+   * wins, the pool only fills a gap, and a charge point without one keeps the
+   * historical literal. OCPP messages always carry a tag, so callers resolve
+   * before building one.
+   */
+  resolveIdTag(tagId: string | undefined, connectorId?: number): string {
+    return (
+      tagId ?? this.host.chargePoint.nextIdTag(connectorId) ?? DEFAULT_ID_TAG
+    );
   }
 
   /**

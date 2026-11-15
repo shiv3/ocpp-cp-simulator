@@ -49,6 +49,13 @@ export interface MeterSamplingHost {
  * public methods as thin delegates.
  */
 export class MeterSampling {
+  /**
+   * #347: whether the meter-value scheduler's samples taken during an OCPP
+   * 2.x transaction ride TransactionEvent(Updated, MeterValuePeriodic)
+   * instead of MeterValues. On by default (#551); false restores the
+   * standalone MeterValues. Ignored on 1.x. See {@link sendScheduledMeterValue}.
+   */
+  txUpdatedMeterValues = true;
   /** Station-driven periodic samplers of the running transactions. */
   readonly samplers: Map<number, TimerHandle> = new Map();
 

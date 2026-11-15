@@ -22,19 +22,21 @@ import {
 import { CapabilityGate } from "./CapabilityGate";
 import { IdTagSource } from "./IdTagSource";
 import { EventEmitter } from "../../shared/EventEmitter";
-import { realClock } from "../../shared/clock";
-import type { SimClock, TimerHandle } from "../../shared/clock";
-import { RngStreams, systemRngStreams } from "../../shared/rng";
-import type { Rng, RngSource } from "../../shared/rng";
+import { realClock, type SimClock, type TimerHandle } from "../../shared/clock";
+import {
+  RngStreams,
+  systemRngStreams,
+  type Rng,
+  type RngSource,
+} from "../../shared/rng";
 import type {
   DataTransferData,
   DataTransferResult,
 } from "../types/DataTransfer";
-import type { LogEntry } from "../../shared/Logger";
-import { Logger, LogType } from "../../shared/Logger";
+import { Logger, LogType, type LogEntry } from "../../shared/Logger";
 import { MainMeter } from "./MainMeter";
 import { ClockAlignedMeterScheduler } from "./ClockAlignedMeterScheduler";
-import type { Connector } from "../connector/Connector";
+import type { ActiveChargingProfile, Connector } from "../connector/Connector";
 import type { ConnectorWrite } from "../connector/ConnectorRecord";
 import type {
   BootNotificationResult,
@@ -81,15 +83,15 @@ import {
 import type { ChargePointRepositories } from "../persistence/ChargePointRepositories";
 import type { LogSink } from "../persistence/LogSink";
 import type { PendingMessageRepository } from "../persistence/PendingMessageRepository";
-import type {
-  StatusNotificationOptions,
-  BootNotification,
-  BootReason,
-  ChargePointStatus,
+import {
+  OCPPStatus,
+  type StatusNotificationOptions,
+  type BootNotification,
+  type BootReason,
+  type ChargePointStatus,
 } from "../types/OcppTypes";
 import { isSoapVersion } from "../types/OcppVersion";
 import { DeviceModelTargets } from "./DeviceModelTargets";
-import { OCPPStatus } from "../types/OcppTypes";
 import type {
   IdTokenTypeName,
   StopTransactionReason,
@@ -101,14 +103,15 @@ import {
 } from "../connector/MeterValueBuilder";
 import { ReservationManager } from "../reservation/Reservation";
 import { LocalAuthListManager } from "../auth/LocalAuthList";
-import type { StationAuthorization } from "../auth/StationAuthorization";
-import { type CsmsAuthorizationResult } from "../auth/StationAuthorization";
+import type {
+  CsmsAuthorizationResult,
+  StationAuthorization,
+} from "../auth/StationAuthorization";
 import {
   ChargingProfileStore,
   type ApplyChargingProfileOptions,
   type ProfileRemoveCriteria,
 } from "./ChargingProfileStore";
-import type { ActiveChargingProfile } from "../connector/Connector";
 import { CertificateStore } from "../security/CertificateStore";
 import {
   NetworkProfileStore,
@@ -119,11 +122,7 @@ import { MonitoringStore } from "../monitoring/MonitoringStore";
 import { DEFAULT_MONITOR_CATALOG } from "../monitoring/monitorCatalog";
 import type { MonitorEvaluation } from "../monitoring/MonitorEvaluation";
 import type { OcmfMeter } from "../connector/SignedMeterData";
-import {
-  DEFAULT_ID_TAG,
-  IdTagPool,
-  type IdTagDistribution,
-} from "../auth/IdTagPool";
+import { IdTagPool, type IdTagDistribution } from "../auth/IdTagPool";
 import { assertWsClientOptions } from "../../shared/WsClientOptions";
 import {
   resolveReconnectPolicy,
@@ -247,7 +246,7 @@ export class ChargePoint {
     monitoring: () => this._monitoring,
     monitorEvaluation: () => this._monitorEvaluation,
     networkProfiles: () => this._networkProfiles,
-    nowDate: () => this._nowDate(),
+    nowDate: () => this.nowDate(),
     ocppVersion: () => this._ocppVersion,
     outbox: () => this._outbox,
     rawFrames: () => this._rawFrames,
@@ -266,7 +265,10 @@ export class ChargePoint {
     vehicleDrivers: () => this._vehicleDrivers,
     webSocket: () => this._webSocket,
     assertPowered: () => this.assertPowered(),
-    evseIdOf: (connectorId) => this.evseIdOf(connectorId),
+    // The EVSE a domain connector (k > 0) belongs to on the 2.x wire (#628);
+    // an id outside the topology keeps the 1:1 mapping.
+    evseIdOf: (connectorId) =>
+      this._topology.evseOf(connectorId) ?? connectorId,
     loadAvailability: (connectorId) =>
       this._parts.connectorWiring.loadAvailability(connectorId),
     warnCapabilityProfileConflicts: () => this._capabilityGate.warnConflicts(),
@@ -326,8 +328,6 @@ export class ChargePoint {
   private _status: ChargePointStatus = OCPPStatus.Unavailable;
   private _error = "";
   private _autoMeterValueSetting: AutoMeterValueSetting | null;
-  /** #347: see {@link sendScheduledMeterValue}. On by default (#551). */
-  private _txUpdatedMeterValues = true;
   // Network simulation summary: { enabled, manualRuleIds } when a config has
   // been applied via setNetworkSimConfig, null for SOAP CPs or when no config
   // has been applied yet.
@@ -627,12 +627,8 @@ export class ChargePoint {
     return this._engine;
   }
 
-  /**
-   * Load a behavior object (docs/concepts/charger-engine.md, "Behavior API")
-   * into this station: its `onCall` rules take the matching inbound CALLs over
-   * from the default behavior, and `main` starts. Throws on a duplicate id or
-   * a `requires` this station cannot meet.
-   */
+  /** Load a behavior object into this station; throws on a duplicate id or an
+   *  unmet `requires`. @see ChargePointEngine.loadBehavior */
   loadBehavior(behavior: Behavior, options?: LoadBehaviorOptions): void {
     this._engine.loadBehavior(behavior, options);
   }
@@ -645,11 +641,6 @@ export class ChargePoint {
   /** The random stream `name` of this charge point (see `RngStreams`). */
   rng(name: string): Rng {
     return this._rngSource.stream(this._id, name);
-  }
-
-  /** The current instant of {@link clock} as a `Date`. */
-  private _nowDate(): Date {
-    return new Date(this._clock.now());
   }
 
   /** Where the message handler's PendingMessageQueue stores its rows
@@ -683,18 +674,14 @@ export class ChargePoint {
     return this._parts.configWiring.stationPowerBudgetW();
   }
 
-  /**
-   * #347: whether the meter-value scheduler's samples taken during an OCPP
-   * 2.x transaction ride TransactionEvent(Updated, MeterValuePeriodic)
-   * instead of MeterValues. On by default (#551); false restores the
-   * standalone MeterValues. Ignored on 1.x.
-   */
+  /** #347: whether scheduler samples ride TransactionEvent(Updated) on 2.x.
+   *  @see MeterSampling.txUpdatedMeterValues */
   get txUpdatedMeterValues(): boolean {
-    return this._txUpdatedMeterValues;
+    return this._parts.sampling.txUpdatedMeterValues;
   }
 
   set txUpdatedMeterValues(enabled: boolean) {
-    this._txUpdatedMeterValues = enabled;
+    this._parts.sampling.txUpdatedMeterValues = enabled;
   }
 
   get autoMeterValueSetting(): AutoMeterValueSetting | null {
@@ -801,12 +788,6 @@ export class ChargePoint {
     return this._topology;
   }
 
-  /** The EVSE a domain connector (k > 0) belongs to on the 2.x wire (#628);
-   *  an id outside the topology keeps the 1:1 mapping. */
-  private evseIdOf(connectorId: number): number {
-    return this._topology.evseOf(connectorId) ?? connectorId;
-  }
-
   /** The idTag to present when the caller named none; `null` without a pool.
    *  @see IdTagSource.nextIdTag */
   nextIdTag(connectorId = 0): string | null {
@@ -822,14 +803,10 @@ export class ChargePoint {
     return this._idTags.idTagPoolInfo();
   }
 
-  /**
-   * The idTag a control-plane call presents (#299): an explicit tag always
-   * wins, the pool only fills a gap, and a charge point without one keeps the
-   * historical literal. OCPP messages always carry a tag, so callers resolve
-   * before building one.
-   */
+  /** The idTag a control-plane call presents (#299): an explicit tag wins, the
+   *  pool only fills a gap. @see IdTagSource.resolveIdTag */
   resolveIdTag(tagId: string | undefined, connectorId?: number): string {
-    return tagId ?? this.nextIdTag(connectorId) ?? DEFAULT_ID_TAG;
+    return this._idTags.resolveIdTag(tagId, connectorId);
   }
 
   /** Whether a pool exists to replace (#314).
@@ -1014,7 +991,7 @@ export class ChargePoint {
 
   /** The active ChargePointMaxProfile at the station level, `null` if none. */
   getActiveChargePointMaxProfile(
-    now: Date = this._nowDate(),
+    now: Date = this.nowDate(),
   ): ActiveChargingProfile | null {
     return this._parts.profileControl.getActiveChargePointMaxProfile(now);
   }
@@ -1467,15 +1444,10 @@ export class ChargePoint {
     return this._parts.power.restorePower(options);
   }
 
-  /**
-   * Stop variable monitoring for good: its periodic timers, which run
-   * offline too (N08.FR.03), and any event still in flight. For an
-   * instance being discarded without {@link dispose} — the one a
-   * `cp.update` replaces — whose timers would otherwise keep it alive and
-   * queue NotifyEvents under its id (#538).
-   */
+  /** Stop variable monitoring for good (its timers run offline too, N08.FR.03);
+   *  for an instance discarded without {@link dispose}. @see DeviceModelPublisher.stopMonitoring */
   stopMonitoring(): void {
-    this._monitorEvaluation?.dispose();
+    this._parts.deviceModel.stopMonitoring();
   }
 
   /**

@@ -66,6 +66,17 @@ export class DeviceModelPublisher {
   constructor(private readonly host: DeviceModelPublisherHost) {}
 
   /**
+   * Stop variable monitoring for good: its periodic timers, which run
+   * offline too (N08.FR.03), and any event still in flight. For an
+   * instance being discarded without {@link dispose} — the one a
+   * `cp.update` replaces — whose timers would otherwise keep it alive and
+   * queue NotifyEvents under its id (#538).
+   */
+  stopMonitoring(): void {
+    this.evaluation?.dispose();
+  }
+
+  /**
    * OCPP 2.x variable monitoring (#457): restore the persisted monitors
    * (N07.FR.13), keep the table in step with the store, and evaluate the
    * monitors whenever SetVariables or a scenario `configSet` node changes

@@ -112,7 +112,12 @@ export interface ChargePointEngine {
   behaviorOf(id: string): Behavior | undefined;
   /** Throws if this station cannot run `behavior`. */
   assertLoadable(behavior: Behavior): void;
-  /** Load a behavior; throws and registers nothing when it cannot. */
+  /**
+   * Load a behavior object (docs/concepts/charger-engine.md, "Behavior API")
+   * into this station: its `onCall` rules take the matching inbound CALLs over
+   * from the default behavior, and `main` starts. Throws on a duplicate id or
+   * a `requires` this station cannot meet.
+   */
   loadBehavior(behavior: Behavior, options?: LoadBehaviorOptions): void;
   /** Swap a loaded behavior for a new version of it. */
   replaceBehavior(next: Behavior): void;

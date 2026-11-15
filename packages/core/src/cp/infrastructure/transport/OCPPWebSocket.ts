@@ -16,8 +16,8 @@ import type {
   OcppTlsOptions,
   OcppWebSocketConnectOptions,
 } from "./wsUrlWithBasic";
-import type { OCPPErrorCode } from "../../domain/types/OcppTypes";
-import { OCPPAction, OCPPMessageType } from "../../domain/types/OcppTypes";
+import type { OCPPAction, OCPPErrorCode } from "../../domain/types/OcppTypes";
+import { OCPPMessageType } from "../../domain/types/OcppTypes";
 import type {
   AuthorizeRequestV16,
   BootNotificationRequestV16,
@@ -60,6 +60,22 @@ import type {
   TransportObserverEvents,
 } from "../../domain/transport/ChargePointSocket";
 import { EventEmitter } from "../../shared/EventEmitter";
+import {
+  ClientCertificateState,
+  type ClientIdentity,
+} from "./ws/clientCertificateState";
+import {
+  describeRefusal,
+  GenerationTokenImpl,
+  neverReachedCsms,
+  SUPERSEDED_CLOSE,
+} from "./ws/closeClassification";
+import {
+  dispatchIncomingFrame,
+  writeUpstreamPhysical,
+} from "./ws/wsNetworkSim";
+
+export { neverReachedCsms };
 
 /**
  * #393: sees every well-shaped incoming frame (an array of 3 to 5 elements)
@@ -101,66 +117,12 @@ export type OcppMessageErrorPayload = {
   readonly errorDetails?: object;
 };
 
-type MessageHandler = (
+export type MessageHandler = (
   messageType: OCPPMessageType,
   messageId: string,
   action: OCPPAction,
   payload: OcppMessagePayload,
 ) => void;
-
-/**
- * Whether a connection attempt ended before any peer answered: connection
- * refused or unreachable, or a DNS failure. Such an attempt presented no
- * certificate, so it says nothing about it (#537, A02.FR.28). Bun's close
- * reason says so; the `ws` path reports the same one. Measured on Bun 1.3.14
- * and 1.4.3, a CSMS refusing a client certificate closes with `Connection
- * ended` (1006), a refused upgrade with `Expected 101 status code` (1002)
- * and a handshake dropped early with `TLS handshake failed` (1015): none
- * match, so all of them count as the certificate failing. A refused upgrade
- * counts because Bun hides its status, and a proxy that terminates TLS can
- * refuse a client certificate with one.
- */
-export function neverReachedCsms(close: SocketClose): boolean {
-  return close.code === 1006 && /^Failed to connect/i.test(close.reason);
-}
-
-/** A TLS client certificate chain (PEM) and its private key (PEM). */
-interface ClientIdentity {
-  readonly cert: string;
-  readonly key: string;
-}
-
-/**
- * Reported for a socket the charge point closed itself (reset, disconnect)
- * when the next connect supersedes it before its close event lands (#478).
- * `close()` sends no status code, so the late close event mostly reads 1005
- * as well.
- */
-const SUPERSEDED_CLOSE: SocketClose = { code: 1005, reason: "" };
-
-/**
- * GenerationTokenImpl: immutable per-generation object carrying the generation number
- * and, once closed, its latched close cause. First-cause latching: the first close
- * of a generation latches its cause; later close processing for that same generation
- * must NOT overwrite it.
- */
-class GenerationTokenImpl implements GenerationToken {
-  private _closeCause: CloseCause | null = null;
-  /** The charge point has been told this generation's socket closed (#478). */
-  closeReported = false;
-
-  constructor(readonly gen: number) {}
-
-  get closeCause(): CloseCause | null {
-    return this._closeCause;
-  }
-
-  latchCloseCause(cause: CloseCause): void {
-    if (this._closeCause === null) {
-      this._closeCause = cause;
-    }
-  }
-}
 
 export class OCPPWebSocket implements ChargePointSocket {
   private _ws: OcppSocket | null = null;
@@ -232,21 +194,11 @@ export class OCPPWebSocket implements ChargePointSocket {
   private _credentialsChangedAtRuntime = false;
   private _cpoName?: string;
   private _tls?: OcppTlsOptions;
-  /**
-   * #537 A02.FR.08: a renewed Charging Station certificate presented in
-   * place of the configured `cert` / `key`. Memory-only. `confirmed` once a
-   * connection presenting it opened; until then failed attempts alternate
-   * between it and `fallback` (2.1 A02.FR.28 with B10.FR.08): the identity
-   * in use before it, a previously confirmed renewal or, when absent, the
-   * configured one.
-   */
-  private _renewedClientCertificate: {
-    readonly cert: string;
-    readonly key: string;
-    readonly fallback?: ClientIdentity;
-    confirmed: boolean;
-    presentNext: boolean;
-  } | null = null;
+  private readonly _clientCerts: ClientCertificateState;
+  /** Read by tests that cast to reach it. */
+  private get _renewedClientCertificate() {
+    return this._clientCerts.renewed;
+  }
   /** #564: the client certificate (PEM) the current attempt presents. */
   private _connectionClientCertificate: string | undefined;
 
@@ -300,12 +252,24 @@ export class OCPPWebSocket implements ChargePointSocket {
     this._authorizationKey = authorizationKey;
     this._cpoName = cpoName;
     this._tls = tls;
+    this._clientCerts = new ClientCertificateState({
+      logger,
+      tls: () => this._tls,
+      emitDiscarded: () =>
+        this.observers.emit("renewedClientCertificateDiscarded", {}),
+    });
 
     // Initialize network simulation controller and current generation
     this._currentGeneration = new GenerationTokenImpl(this._generationCounter);
     const controllerHost: ControllerHost = {
-      writeUpstream: (raw: string) => this.writeUpstreamPhysical(raw),
-      dispatchDownstream: (raw: string) => this.dispatchIncoming(raw),
+      writeUpstream: (raw: string) =>
+        writeUpstreamPhysical(this._ws, raw, this._logger),
+      dispatchDownstream: (raw: string) =>
+        dispatchIncomingFrame(raw, {
+          logger: this._logger,
+          intercept: (frame) => this._incomingInterceptor?.(frame) ?? false,
+          handler: () => this._messageHandler,
+        }),
       requestSimulatedDisconnect: (reconnectDelayMs, ruleId, ruleType) =>
         this.simulateConnectionLoss(reconnectDelayMs, ruleId, ruleType),
       log: (message: string) => this._logger.info(message, LogType.NETWORK_SIM),
@@ -430,24 +394,7 @@ export class OCPPWebSocket implements ChargePointSocket {
    */
   public useRenewedClientCertificate(identity: ClientIdentity): void {
     if (!this.usesClientCertificate()) return;
-    const previous = this._renewedClientCertificate;
-    // Handed over again (#564): the first hand-over stands, with whatever
-    // the connections since have settled about it.
-    if (previous?.cert === identity.cert && previous.key === identity.key) {
-      return;
-    }
-    // A02.FR.28: the fallback is the certificate in use, which is a
-    // renewal confirmed earlier rather than the configured one.
-    const fallback = previous?.confirmed
-      ? { cert: previous.cert, key: previous.key }
-      : previous?.fallback;
-    this._renewedClientCertificate = {
-      cert: identity.cert,
-      key: identity.key,
-      ...(fallback ? { fallback } : {}),
-      confirmed: false,
-      presentNext: true,
-    };
+    this._clientCerts.use(identity);
   }
 
   /** Whether the open (or opening) connection presents `cert` as its client
@@ -466,73 +413,12 @@ export class OCPPWebSocket implements ChargePointSocket {
    * or removed). The refusal probe's replay options lose the key too.
    */
   public clearRenewedClientCertificate(): void {
-    this._renewedClientCertificate = null;
+    this._clientCerts.renewed = null;
     if (this._lastConnectOptions) {
       this._lastConnectOptions = {
         ...this._lastConnectOptions,
         tls: this._tls,
       };
-    }
-  }
-
-  /** The TLS options of the next attempt, and whether it presents the
-   *  renewed certificate. */
-  private nextTlsOptions(): {
-    tls: OcppTlsOptions | undefined;
-    renewed: boolean;
-  } {
-    const renewed = this._renewedClientCertificate;
-    if (renewed && (renewed.confirmed || renewed.presentNext)) {
-      return { tls: this.tlsWith(renewed), renewed: true };
-    }
-    const fallback = renewed?.fallback;
-    return {
-      tls: fallback ? this.tlsWith(fallback) : this._tls,
-      renewed: false,
-    };
-  }
-
-  private tlsWith(identity: ClientIdentity): OcppTlsOptions {
-    return { ...(this._tls ?? {}), cert: identity.cert, key: identity.key };
-  }
-
-  /** A connection opened: settles which client certificate the station
-   *  keeps while the renewed one is unconfirmed (A02.FR.10). */
-  private onClientCertificateOpened(presentedRenewed: boolean): void {
-    const renewed = this._renewedClientCertificate;
-    if (!renewed || renewed.confirmed) return;
-    if (presentedRenewed) {
-      renewed.confirmed = true;
-      this._logger.info(
-        "Connected with the renewed Charging Station certificate (A02.FR.08)",
-        LogType.WEBSOCKET,
-      );
-      return;
-    }
-    // The certificate in use before the renewal stays the station's.
-    const fallback = renewed.fallback;
-    this._renewedClientCertificate = fallback
-      ? { ...fallback, confirmed: true, presentNext: false }
-      : null;
-    this._logger.warn(
-      "Connected with the previous client certificate after the renewed one failed; discarding the renewed certificate (A02.FR.10)",
-      LogType.WEBSOCKET,
-    );
-    this.observers.emit("renewedClientCertificateDiscarded", {});
-  }
-
-  /** An attempt reached the CSMS and closed before it opened: the next one
-   *  presents the other certificate while the renewed one is unconfirmed
-   *  (A02.FR.28). */
-  private onClientCertificateFailed(presentedRenewed: boolean): void {
-    const renewed = this._renewedClientCertificate;
-    if (!renewed || renewed.confirmed) return;
-    renewed.presentNext = !presentedRenewed;
-    if (presentedRenewed) {
-      this._logger.warn(
-        "Could not connect with the renewed Charging Station certificate; the next attempt presents the previous one (A02.FR.28)",
-        LogType.WEBSOCKET,
-      );
     }
   }
 
@@ -584,14 +470,14 @@ export class OCPPWebSocket implements ChargePointSocket {
     this._isManualDisconnect = false;
     this._selfRequestedClose = false;
 
-    const attempt = this.nextTlsOptions();
+    const attempt = this._clientCerts.nextTlsOptions();
     this._connectionClientCertificate = attempt.tls?.cert;
     let opened = false;
     const onopenHandler = () => {
       opened = true;
       this._securityProfileFallback = null;
       this.clearHandshakeTimer();
-      this.onClientCertificateOpened(attempt.renewed);
+      this._clientCerts.onOpened(attempt.renewed);
       // A working connection clears the refusal budget, so the next genuine
       // refusal is diagnosed immediately rather than waiting out the window.
       this._lastRefusalProbeAt = 0;
@@ -631,7 +517,7 @@ export class OCPPWebSocket implements ChargePointSocket {
         // Only a failed connection attempt counts, not one the station
         // closed itself before it opened, nor one no CSMS ever saw.
         if (!opened && closeCause === "network" && !neverReachedCsms(ev)) {
-          this.onClientCertificateFailed(attempt.renewed);
+          this._clientCerts.onFailed(attempt.renewed);
         }
         this.handleClose(ev, closeCause);
       }
@@ -1063,86 +949,6 @@ export class OCPPWebSocket implements ChargePointSocket {
     this.stopPingInterval();
   }
 
-  /**
-   * Physical send (the actual websocket.send call).
-   * This is what the ControllerHost.writeUpstream calls.
-   */
-  private writeUpstreamPhysical(raw: string): void {
-    if (!this._ws || this._ws.readyState !== WebSocket.OPEN) {
-      // A delayed frame can reach its release after the socket dropped. Throw
-      // so the pipeline settles it `write_failed` instead of `written` — a
-      // frame that never hit the wire must stay in its sender's custody
-      // (transaction CALLs are salvaged into PendingMessageQueue from there).
-      // The send methods gate on isConnected(), so the immediate paths never
-      // land here.
-      this._logger.warn("WebSocket is not connected", LogType.WEBSOCKET);
-      throw new Error("WebSocket is not connected");
-    }
-    this._ws.send(raw);
-    this._logger.info(`Sent: ${raw}`, LogType.WEBSOCKET);
-  }
-
-  /**
-   * Dispatch incoming message through the normal parse/validate path.
-   * This is what the ControllerHost.dispatchDownstream calls after any delay.
-   */
-  private dispatchIncoming(raw: string): void {
-    this._logger.info(`Received: ${raw}`, LogType.WEBSOCKET);
-    try {
-      const messageArray = JSON.parse(raw);
-
-      // Validate message format: must be array with length 3 (CALLRESULT), 4 (CALL), or 5 (CALLERROR)
-      if (
-        !Array.isArray(messageArray) ||
-        messageArray.length < 3 ||
-        messageArray.length > 5
-      ) {
-        this._logger.error(
-          "Invalid message format: " + messageArray,
-          LogType.WEBSOCKET,
-        );
-        return;
-      }
-
-      if (this._incomingInterceptor?.(messageArray)) return;
-
-      if (this._messageHandler) {
-        if (messageArray.length === 3) {
-          // CALLRESULT: [messageType, messageId, payload]
-          const [messageType, messageId, payload] = messageArray;
-          this._messageHandler(
-            messageType,
-            messageId,
-            OCPPAction.CallResult,
-            payload,
-          );
-        } else if (messageArray.length === 4) {
-          // CALL: [messageType, messageId, action, payload]
-          const [messageType, messageId, action, payload] = messageArray;
-          this._messageHandler(messageType, messageId, action, payload);
-        } else if (messageArray.length === 5) {
-          // CALLERROR: [messageType, messageId, errorCode, errorDescription, errorDetails]
-          const [
-            messageType,
-            messageId,
-            errorCode,
-            errorDescription,
-            errorDetails,
-          ] = messageArray;
-          this._messageHandler(messageType, messageId, OCPPAction.CallResult, {
-            errorCode,
-            errorDescription,
-            errorDetails: errorDetails ?? {},
-          });
-        }
-      } else {
-        this._logger.warn("No message handler set", LogType.WEBSOCKET);
-      }
-    } catch (error) {
-      this._logger.error(`Error parsing message: ${error}`, LogType.WEBSOCKET);
-    }
-  }
-
   /** Whether this runtime's socket can send a ping frame (#406): Bun's
    *  client and `ws` can, the browser `WebSocket` API cannot. */
   get supportsPing(): boolean {
@@ -1240,7 +1046,7 @@ export class OCPPWebSocket implements ChargePointSocket {
     if (typeof detail.httpStatus === "number") {
       this._refusalStatusReported = true;
       this._logger.error(
-        this.describeRefusal(detail.httpStatus, detail.httpLocation),
+        describeRefusal(detail.httpStatus, detail.httpLocation),
         LogType.WEBSOCKET,
       );
       return;
@@ -1253,22 +1059,6 @@ export class OCPPWebSocket implements ChargePointSocket {
         : `WebSocket error type: ${detail.type}`,
       LogType.WEBSOCKET,
     );
-  }
-
-  /** One sentence per HTTP status, naming the operator's next move (#288). */
-  private describeRefusal(status: number, location?: string): string {
-    const hint =
-      status === 401 || status === 403
-        ? " — credentials refused, or the CSMS considers the connection insecure for its security profile"
-        : status === 404
-          ? " — the CSMS does not know this charge point id"
-          : status >= 300 && status < 400
-            ? // The Location comes from the CSMS and may carry userinfo or a
-              // secret query parameter of its own, so it is redacted like any
-              // other URL that reaches the log.
-              ` — the endpoint redirects${location ? ` to ${redactSensitiveText(location)}` : ""}; a cleartext ws:// to a TLS-only edge looks like this`
-            : "";
-    return `WebSocket upgrade refused: HTTP ${status}${hint}`;
   }
 
   /**
@@ -1302,7 +1092,7 @@ export class OCPPWebSocket implements ChargePointSocket {
         if (this._generationCounter !== probedGeneration) return;
         if (this._ws?.readyState === WebSocket.OPEN) return;
         this._logger.error(
-          `${this.describeRefusal(detail.status, detail.location)} (diagnostic GET after the handshake failed)`,
+          `${describeRefusal(detail.status, detail.location)} (diagnostic GET after the handshake failed)`,
           LogType.WEBSOCKET,
         );
       })

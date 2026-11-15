@@ -15,6 +15,9 @@ sources:
   - packages/core/src/cp/application/scenario/nodes/policies.ts
   - packages/core/src/cp/application/scenario/nodes/meterValue.ts
   - packages/core/src/cp/application/scenario/nodes/branching.ts
+  - packages/core/src/cp/application/scenario/nodes/calls.ts
+  - packages/core/src/cp/application/scenario/nodes/transaction.ts
+  - packages/core/src/cp/application/scenario/nodes/triggers.ts
   - packages/core/schema/scenario.schema.json
   - packages/core/src/cp/domain/charge-point/ChargePoint.ts
   - "OCA OCPP 2.0.1 edition 4: Part 2 specification, Part 5 certification profiles, Part 6 test cases"

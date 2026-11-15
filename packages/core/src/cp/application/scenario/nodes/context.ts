@@ -5,6 +5,8 @@ import type {
   ScenarioExecutorCallbacks,
   ScenarioExpectation,
   ScenarioNode,
+  StartTransactionOptions,
+  StopTransactionOptions,
 } from "../ScenarioTypes";
 import type { FromScope, ScenarioOcppResponse } from "../resolveFrom";
 import type { BranchScope } from "../branchScope";
@@ -83,6 +85,11 @@ export interface NodeRunContext {
   readonly armedInboundPolicyActions: string[];
   readonly parkedWaits: ParkedWait[];
   readonly aborted: boolean;
+  /** Captured by a remote start / stop trigger for the next Transaction node. */
+  remoteStartTagId: string | null;
+  remoteStartOptions: StartTransactionOptions | null;
+  remoteStopReason: string | null;
+  remoteStopOptions: StopTransactionOptions | null;
   markCertificateQuirksArmed(): void;
   unpark(control: WaitControl): void;
   notifyStateChange(): void;

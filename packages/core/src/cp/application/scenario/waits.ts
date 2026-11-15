@@ -3,6 +3,7 @@ import { timeoutStep } from "../../../scenario/scenarioGraph";
 import { cancelIfCancellable } from "./cancellable";
 import { WaitControl, type WaitSignal } from "./WaitControl";
 import type { Flow, NodeRunContext } from "./nodes/context";
+import type { BranchScope } from "./branchScope";
 
 /**
  * Park on a trigger wait (#240). The executor owns the node's timeout
@@ -137,4 +138,69 @@ function reportWaitProgress(
       total,
     });
   };
+}
+
+export async function waitWithProgress(
+  ctx: NodeRunContext,
+  nodeId: string,
+  totalSeconds: number,
+  scope: BranchScope,
+): Promise<void> {
+  if (ctx.callbacks.onDelay) {
+    await ctx.waitWithOptionalForceSkip(
+      ctx.callbacks.onDelay(totalSeconds),
+      scope,
+    );
+    return;
+  }
+
+  const updateInterval = 100; // Update progress every 100ms
+  let elapsed = 0;
+
+  const progressInterval = ctx.clock.setInterval(() => {
+    elapsed += updateInterval / 1000;
+    const remaining = Math.max(0, totalSeconds - elapsed);
+
+    if (ctx.callbacks.onNodeProgress) {
+      ctx.callbacks.onNodeProgress(nodeId, remaining, totalSeconds);
+    }
+
+    // Emit node progress events
+    const progressData = {
+      scenarioId: ctx.scenario.id,
+      nodeId,
+      remaining,
+      total: totalSeconds,
+    };
+    ctx.eventEmitter?.emit("nodeProgress", progressData); // Backward compatibility
+    ctx.eventEmitter?.emit("node.progress", progressData); // Hierarchical event
+
+    if (remaining <= 0) {
+      ctx.clock.clearInterval(progressInterval);
+    }
+  }, updateInterval);
+
+  try {
+    await ctx.waitWithOptionalForceSkip(
+      ctx.sleep(totalSeconds * 1000, scope),
+      scope,
+    );
+  } finally {
+    ctx.clock.clearInterval(progressInterval);
+
+    // Final progress update
+    if (ctx.callbacks.onNodeProgress) {
+      ctx.callbacks.onNodeProgress(nodeId, 0, totalSeconds);
+    }
+
+    // Emit final progress events
+    const finalProgressData = {
+      scenarioId: ctx.scenario.id,
+      nodeId,
+      remaining: 0,
+      total: totalSeconds,
+    };
+    ctx.eventEmitter?.emit("nodeProgress", finalProgressData); // Backward compatibility
+    ctx.eventEmitter?.emit("node.progress", finalProgressData); // Hierarchical event
+  }
 }

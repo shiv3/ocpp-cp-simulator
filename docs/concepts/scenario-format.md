@@ -35,6 +35,9 @@ sources:
   - packages/core/src/cp/application/scenario/ScenarioRuntime.ts
   - packages/core/src/cp/application/scenario/resolveFrom.ts
   - packages/core/src/cp/application/scenario/ScenarioExecutor.ts
+  - packages/core/src/cp/application/scenario/nodes/calls.ts
+  - packages/core/src/cp/application/scenario/nodes/transaction.ts
+  - packages/core/src/cp/application/scenario/nodes/triggers.ts
   - packages/core/src/cp/application/scenario/waits.ts
   - packages/core/src/cp/application/scenario/nodes/context.ts
   - packages/core/src/cp/application/scenario/nodes/policies.ts

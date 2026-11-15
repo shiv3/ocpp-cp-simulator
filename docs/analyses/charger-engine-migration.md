@@ -13,6 +13,9 @@ sources:
   - packages/core/src/cp/application/scenario/nodes/policies.ts
   - packages/core/src/cp/application/scenario/nodes/meterValue.ts
   - packages/core/src/cp/application/scenario/nodes/branching.ts
+  - packages/core/src/cp/application/scenario/nodes/calls.ts
+  - packages/core/src/cp/application/scenario/nodes/transaction.ts
+  - packages/core/src/cp/application/scenario/nodes/triggers.ts
   - packages/k6-runtime/src/interpreter.ts
   - packages/k6-runtime/src/behaviorHost.ts
   - apps/cli/src/exportK6/runExportK6Behavior.ts

@@ -1,10 +1,4 @@
-import { VehicleBehaviorDriver } from "./VehicleBehaviorDriver";
-
-import {
-  dcEfficiencyFor,
-  maxDeliveryPowerWFor,
-  meterRealismFor,
-} from "./ChargerCapabilities";
+import type { VehicleBehaviorDriver } from "./VehicleBehaviorDriver";
 
 import type {
   DiagnosticsStatus,
@@ -38,6 +32,8 @@ import { ConnectionTimeouts } from "./ConnectionTimeouts";
 import { ResetOnIdle } from "./ResetOnIdle";
 
 import { PlugInFlow } from "./PlugInFlow";
+
+import { ConnectorWiring } from "./ConnectorWiring";
 import { EventEmitter } from "../../shared/EventEmitter";
 
 import { realClock } from "../../shared/clock";
@@ -61,7 +57,7 @@ import { MainMeter } from "./MainMeter";
 
 import { ClockAlignedMeterScheduler } from "./ClockAlignedMeterScheduler";
 
-import { Connector } from "../connector/Connector";
+import type { Connector } from "../connector/Connector";
 
 import type { ConnectorWrite } from "../connector/ConnectorRecord";
 
@@ -484,6 +480,20 @@ export class ChargePoint {
     ocppVersion: () => this._ocppVersion,
     outbox: () => this._outbox,
   });
+  private readonly _connectorWiring = new ConnectorWiring({
+    chargePoint: this,
+    authorizationFlow: () => this._authorizationFlow,
+    clock: () => this._clock,
+    connectors: () => this._connectors,
+    engine: () => this._engine,
+    loadAvailability: (connectorId) => this.loadAvailability(connectorId),
+    logger: () => this._logger,
+    sampling: () => this._sampling,
+    stationProfiles: () => this._stationProfiles,
+    vehicleDrivers: () => this._vehicleDrivers,
+    writeConnector: (connectorId, write) =>
+      this.writeConnector(connectorId, write),
+  });
   private readonly _configWiring = new ConfigurationWiring({
     chargePoint: () => this,
     certificateStore: () => this._certificateStore,
@@ -717,127 +727,11 @@ export class ChargePoint {
       this._logSink.append(this._id, entry);
     };
 
-    for (let connectorId = 1; connectorId <= connectorCount; connectorId++) {
-      const connector = new Connector(
-        connectorId,
-        this._logger,
-        () => this._stationProfiles,
-        this._clock,
-      );
-      connector.setMaxDeliveryPowerW(
-        maxDeliveryPowerWFor(transportOptions.chargerCapabilities, connectorId),
-      );
-      connector.setMeterRealism(
-        meterRealismFor(transportOptions.chargerCapabilities, connectorId),
-      );
-      connector.setDcEfficiency(
-        dcEfficiencyFor(transportOptions.chargerCapabilities, connectorId),
-      );
-      // §5.2: Unavailable set via ChangeAvailability persists across
-      // reboots. Restore the persisted value before any event listeners
-      // have a chance to react.
-      this._engine.attachConnector(connector);
-      const persisted = this.loadAvailability(connectorId);
-      if (persisted) {
-        this.writeConnector(connectorId, {
-          kind: "availability",
-          availability: persisted,
-        });
-      }
-      if (autoMeterValueSetting?.enabled) {
-        connector.setIncrementFallback({
-          intervalSeconds: autoMeterValueSetting.interval,
-          incrementValue: autoMeterValueSetting.value,
-        });
-      }
-      // When the connector signals an auto-stop (e.g. target SoC reached),
-      // end the in-flight transaction the same way the user would.
-      connector.events.on("autoStopRequested", ({ reason }) => {
-        if (this._power.poweredOff) return;
-        this._logger.info(
-          `Connector ${connectorId} auto-stop requested (${reason})`,
-          LogType.TRANSACTION,
-        );
-        this.stopTransaction(connector, undefined, {
-          triggerReason: "EnergyLimitReached",
-        });
-      });
-      // §5.10 / §5.16: when the active schedule period switches between
-      // limit=0 and a non-zero limit during a live transaction, the CP
-      // should reflect that on the OCPP layer by toggling Charging ↔
-      // SuspendedEVSE so the CSMS sees the pause.
-      connector.events.on("scheduleLimitChange", ({ paused, watts }) => {
-        if (!connector.transaction) return;
-        if (paused && connector.status === OCPPStatus.Charging) {
-          this._logger.info(
-            `Connector ${connectorId} schedule period limit=0 (W), pausing → SuspendedEVSE`,
-            LogType.OCPP,
-          );
-          this.updateConnectorStatus(connectorId, OCPPStatus.SuspendedEVSE);
-        } else if (
-          !paused &&
-          connector.status === OCPPStatus.SuspendedEVSE &&
-          !connector.energyHeld
-        ) {
-          this._logger.info(
-            `Connector ${connectorId} schedule period limit=${watts}W, resuming → Charging`,
-            LogType.OCPP,
-          );
-          // §4.9: SuspendedEVSE takes precedence over SuspendedEV; once the
-          // EVSE side lifts, an EV that is not ready leaves SuspendedEV (#871).
-          this.updateConnectorStatus(
-            connectorId,
-            connector.evConnection === "connected-not-ready"
-              ? OCPPStatus.SuspendedEV
-              : OCPPStatus.Charging,
-          );
-        }
-      });
-      // #722: MeterValueSampleInterval drives the periodic MeterValues of a
-      // 1.x transaction; the interval is read when the transaction starts.
-      connector.events.on("transactionChange", ({ transaction }) => {
-        if (transaction && connector.hasRunningTransaction) {
-          this._sampling.startPeriodicSampling(connector);
-        } else this._sampling.stopPeriodicSampling(connectorId);
-      });
-      // A transaction restored after a daemon restart is running again and
-      // gets its sampler back (the restore itself emits no transactionChange).
-      connector.events.on("transactionRestored", () =>
-        this._sampling.startPeriodicSampling(connector),
-      );
-      // The MaxEnergyOnInvalidId allowance ran out (E05.FR.03 → .02).
-      connector.events.on("invalidIdEnergyExhausted", () => {
-        this._authorizationFlow.reportEnergyHeld(connector);
-      });
-      this._connectors.set(connectorId, connector);
-      this._vehicleDrivers.set(
-        connectorId,
-        new VehicleBehaviorDriver(
-          connector,
-          this._clock,
-          {
-            setReady: (id, ready) => {
-              if (this._power.poweredOff) return;
-              if (this.getConnector(id)?.evConnection === "disconnected") {
-                return;
-              }
-              this.evSetReady(id, ready);
-            },
-            requestStop: (id) => {
-              if (this._power.poweredOff) return;
-              this._logger.info(
-                `Connector ${id} vehicle asked to end the session`,
-                LogType.TRANSACTION,
-              );
-              this.stopTransaction(connector, undefined, {
-                triggerReason: "EnergyLimitReached",
-              });
-            },
-          },
-          connectorId,
-        ),
-      );
-    }
+    this._connectorWiring.createConnectors(
+      connectorCount,
+      transportOptions.chargerCapabilities,
+      autoMeterValueSetting,
+    );
 
     const mainMeterConfig = transportOptions.chargerCapabilities?.mainMeter;
     if (mainMeterConfig) {

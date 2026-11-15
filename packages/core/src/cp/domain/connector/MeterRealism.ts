@@ -60,9 +60,11 @@ export interface SampledValueSet {
   multiplier?: number;
   /** Decimals of a converted value. Default 3. */
   decimals?: number;
-  location?: string;
-  context?: string;
-  phase?: string;
+  /** Location, context and phase take only the values `overridesProblem`
+   *  accepts, as the contracts schema does (#846). */
+  location?: (typeof OVERRIDE_LOCATIONS)[number];
+  context?: (typeof OVERRIDE_CONTEXTS)[number];
+  phase?: (typeof OVERRIDE_PHASES)[number];
   /** Fixed value, as sent. Wins over conversion. */
   value?: string;
   /** Drop the sample. */
@@ -176,6 +178,50 @@ export function convertUnit(
 
 const MEASURAND_RE = /^[A-Za-z][A-Za-z.]*$/;
 
+/** The SampledValue values an override may set, as every JSON version
+ *  defines them (1.6 §7.30 Location, §7.35 ReadingContext, §7.34 Phase;
+ *  2.0.1 and 2.1 LocationEnumType, ReadingContextEnumType, PhaseEnumType).
+ *  2.1's `Upstream` location is left out: 1.6 and 2.0.1 have no such value
+ *  (#846). Mirrored by `packages/contracts/src/chargerCapabilities.ts`. */
+const OVERRIDE_LOCATIONS = ["Body", "Cable", "EV", "Inlet", "Outlet"] as const;
+const OVERRIDE_CONTEXTS = [
+  "Interruption.Begin",
+  "Interruption.End",
+  "Other",
+  "Sample.Clock",
+  "Sample.Periodic",
+  "Transaction.Begin",
+  "Transaction.End",
+  "Trigger",
+] as const;
+const OVERRIDE_PHASES = [
+  "L1",
+  "L2",
+  "L3",
+  "N",
+  "L1-N",
+  "L2-N",
+  "L3-N",
+  "L1-L2",
+  "L2-L3",
+  "L3-L1",
+] as const;
+/** A fixed value: a plain decimal, which 1.6 sends as the string and 2.x as
+ *  a JSON number (anything else would be `null` there, #846). */
+const OVERRIDE_VALUE_RE = /^-?\d+(\.\d+)?$/;
+/** 2.0.1 / 2.1 UnitOfMeasureType.unit is a string of at most 20. */
+const OVERRIDE_UNIT_MAX = 20;
+
+function enumProblem(
+  value: unknown,
+  allowed: readonly string[],
+  label: string,
+): string | null {
+  return value !== undefined && !allowed.includes(value as string)
+    ? `${label} must be one of ${allowed.join(", ")}`
+    : null;
+}
+
 function pct(value: unknown, label: string): string | null {
   if (value === undefined) return null;
   if (
@@ -211,6 +257,21 @@ function overridesProblem(list: unknown, label: string): string | null {
       if (s[key] !== undefined && typeof s[key] !== "string") {
         return `${label} set.${key} must be a string`;
       }
+    }
+    const badEnum =
+      enumProblem(s.location, OVERRIDE_LOCATIONS, `${label} set.location`) ??
+      enumProblem(s.context, OVERRIDE_CONTEXTS, `${label} set.context`) ??
+      enumProblem(s.phase, OVERRIDE_PHASES, `${label} set.phase`);
+    if (badEnum) return badEnum;
+    if (
+      s.unit !== undefined &&
+      ((s.unit as string).length === 0 ||
+        (s.unit as string).length > OVERRIDE_UNIT_MAX)
+    ) {
+      return `${label} set.unit must be 1 to ${OVERRIDE_UNIT_MAX} characters`;
+    }
+    if (s.value !== undefined && !OVERRIDE_VALUE_RE.test(s.value as string)) {
+      return `${label} set.value must be a decimal number`;
     }
     if (
       s.multiplier !== undefined &&

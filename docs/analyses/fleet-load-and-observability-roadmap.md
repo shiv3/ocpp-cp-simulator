@@ -16,7 +16,7 @@ related:
   - choosing-an-interface.md
   - ../sources/github-issues.md
   - ../sources/bench-readme.md
-updated: 2026-11-09
+updated: 2026-11-15
 ---
 
 # Fleet, load and observability roadmap
@@ -109,7 +109,7 @@ rather than copy that.
 **Touches.** `packages/contracts/src/methods.ts`, `apps/cli/src/server/socketServer.ts`
 (`dispatchRpcCore`), `apps/cli/src/server/CPRegistry.ts`, a curated tool in
 `apps/cli/src/server/mcp/tools.ts`, and a CLI flag pair (`--cp-count`,
-`--cp-id-pattern`) in `apps/cli/src/main.ts`.
+`--cp-id-pattern`) in `apps/cli/src/cli/flags/cpFlags.ts`.
 
 **Acceptance.**
 

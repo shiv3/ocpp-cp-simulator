@@ -4,6 +4,8 @@ type: entity
 summary: The headless binary (Node >= 22.13 or Bun) — interactive REPL, JSON Lines mode, daemon launcher, and Socket.IO client modes — plus the full flag reference.
 sources:
   - apps/cli/src/main.ts
+  - apps/cli/src/cli/
+  - apps/cli/src/bundledDist.ts
   - apps/cli/src/exportK6/runtimeSources.ts
   - scripts/generate-k6-runtime.ts
   - apps/cli/src/types.ts
@@ -372,7 +374,7 @@ so a broken `cli-latest` is still noticed between such changes.
 
 Both are built by `prepack` (and explicitly by `cli-release.yml`), never
 committed. The bundle finds `dist/` one level up from itself
-(`resolveBundledDist` in `main.ts`), and `export-k6` writes its k6 runtime
+(`resolveBundledDist` in `apps/cli/src/bundledDist.ts`), and `export-k6` writes its k6 runtime
 from an embedded copy (`apps/cli/src/exportK6/runtimeSources.ts`, generated from
 `runtime/` by `bun run gen:k6-runtime`; a stale copy fails
 `runtimeManifest.test.ts`). Nothing in the package depends on the source

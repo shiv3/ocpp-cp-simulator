@@ -1,5 +1,6 @@
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { startRefusalByReservation } from "../../../domain/reservation/reservationModel";
+import { OCPPStatus } from "../../../domain/types/OcppTypes";
 import { OCPP_2_1 } from "../../../domain/types/OcppVersion";
 
 /** `IdTokenEnumType` of OCPP 2.0.1 Part 2 §3.43. On 2.1 `IdTokenType.type` is
@@ -121,7 +122,7 @@ function checkIdToken(
  *   F01.FR.20), then an Available one.
  *
  * Reason codes are Appendix ch. 5 codes only. Where the Appendix has none
- * (an inoperative EVSE, no free EVSE) the code is `Unspecified` and
+ * (an inoperative or Faulted EVSE, no free EVSE) the code is `Unspecified` and
  * `additionalInfo` says what happened.
  */
 export function decideRemoteStart(
@@ -200,6 +201,10 @@ export function decideRemoteStart(
     if (connector.availability !== "Operative") {
       // F01.FR.23: Rejected; the Appendix has no reason code for it.
       return reject("Unspecified", `EVSE ${request.evseId} is inoperative`);
+    }
+    if (connector.status === OCPPStatus.Faulted) {
+      // F01.FR.23 covers Faulted too, as 1.6 does since #775 (#839).
+      return reject("Unspecified", `EVSE ${request.evseId} is faulted`);
     }
     if (busy(connector.id)) {
       return reject(

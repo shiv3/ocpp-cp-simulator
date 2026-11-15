@@ -53,6 +53,12 @@ describe("Connector EV connection (#453)", () => {
     expect(startChargingStateOf("connected-ready")).toBe("Charging");
   });
 
+  // #871: SuspendedEV is "the EVSE is offering energy but the EV is not
+  // taking any" (1.6 §4.9 B4; ChargingStateEnumType).
+  it("startChargingStateOf: a not-ready EV is SuspendedEV", () => {
+    expect(startChargingStateOf("connected-not-ready")).toBe("SuspendedEV");
+  });
+
   it("starts disconnected, plugs in ready, unplugs and resets readiness", () => {
     const connector = newConnector();
     expect(connector.evConnection).toBe("disconnected");

@@ -359,6 +359,45 @@ describe("EV cable model on OCPP 1.6 (#453)", () => {
     }
   });
 
+  // #871: an EV that does not ask for energy when the transaction starts is
+  // SuspendedEV from the start (1.6 §4.9 B4), never Charging first.
+  it("a start for a not-ready EV goes Preparing to SuspendedEV, and ready resumes Charging", async () => {
+    const csms = startMockCsms();
+    const { cp, stopAnswering } = await v16Station(csms, "CP16-NOT-READY");
+    try {
+      cp.evPlugIn(1);
+      cp.evSetReady(1, false);
+      await csms.waitForFrame(statusOf("Preparing"));
+      const before = csms.received.length - 1;
+
+      cp.startTransaction("TAG-871", 1);
+      const start = await csms.waitForCall("StartTransaction");
+      csms.replyCallResult(start.messageId, {
+        transactionId: 8710,
+        idTagInfo: { status: "Accepted" },
+      });
+      await csms.waitForFrame(
+        (f) => statusOf("SuspendedEV")(f) && indexAfter(csms, before)(f),
+      );
+      await sentinel(cp, csms);
+      expect(statusesSince(csms, before)).toEqual(["SuspendedEV"]);
+      const connector = cp.getConnector(1)!;
+      expect(connector.energyOfferSuspended).toBe(true);
+
+      const resumed = csms.received.length - 1;
+      cp.evSetReady(1, true);
+      await csms.waitForFrame(
+        (f) => statusOf("Charging")(f) && indexAfter(csms, resumed)(f),
+      );
+      expect(connector.status).toBe(OCPPStatus.Charging);
+      expect(connector.energyOfferSuspended).toBe(false);
+    } finally {
+      stopAnswering();
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
+
   it("readiness without a cable is refused, and without a transaction it is only recorded", async () => {
     const csms = startMockCsms();
     const { cp, stopAnswering } = await v16Station(csms, "CP16-CABLE-NOEV");
@@ -563,6 +602,110 @@ describe("EV cable model on OCPP 2.0.1 (#453)", () => {
         )
       )[3] as TransactionEventRequestV201;
       expect(started.transactionInfo.chargingState).toBe("Charging");
+    } finally {
+      stopAnswering();
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
+
+  // #871: SuspendedEV is "the EVSE is offering energy but the EV is not taking
+  // any" (ChargingStateEnumType); a not-ready EV starts there, not in Charging.
+  it("a start for a not-ready EV reports SuspendedEV in Started, and ready resumes Charging", async () => {
+    const csms = startMockCsms();
+    const { cp, stopAnswering } = await v201Station(csms, "CP201-NOT-READY");
+    try {
+      cp.evPlugIn(1);
+      cp.evSetReady(1, false);
+      await cp.startTransaction("TAG-871", 1);
+      const started = (
+        await csms.waitForFrame(
+          (f) =>
+            callOf("TransactionEvent")(f) &&
+            (f[3] as TransactionEventRequestV201).eventType === "Started",
+        )
+      )[3] as TransactionEventRequestV201;
+      expect(started.transactionInfo.chargingState).toBe("SuspendedEV");
+      await sentinel(cp, csms);
+      const connector = cp.getConnector(1)!;
+      expect(connector.status).toBe(OCPPStatus.SuspendedEV);
+      expect(connector.energyOfferSuspended).toBe(true);
+      expect(transactionEvents(csms)).toHaveLength(1);
+
+      cp.evSetReady(1, true);
+      await csms.waitForFrame(
+        (f) =>
+          callOf("TransactionEvent")(f) &&
+          (f[3] as TransactionEventRequestV201).transactionInfo
+            .chargingState === "Charging",
+      );
+      expect(
+        transactionEvents(csms).map((e) => e.transactionInfo.chargingState),
+      ).toEqual(["SuspendedEV", "Charging"]);
+      expect(connector.status).toBe(OCPPStatus.Charging);
+    } finally {
+      stopAnswering();
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
+
+  it("an explicit SuspendedEV start state for a ready EV holds no offer (#335 unchanged)", async () => {
+    const csms = startMockCsms();
+    const { cp, stopAnswering } = await v201Station(csms, "CP201-EXPLICIT");
+    try {
+      cp.evPlugIn(1);
+      await cp.startTransaction("TAG-871", 1, undefined, undefined, {
+        chargingState: "SuspendedEV",
+      });
+      const started = (
+        await csms.waitForFrame(
+          (f) =>
+            callOf("TransactionEvent")(f) &&
+            (f[3] as TransactionEventRequestV201).eventType === "Started",
+        )
+      )[3] as TransactionEventRequestV201;
+      expect(started.transactionInfo.chargingState).toBe("SuspendedEV");
+      await sentinel(cp, csms);
+      const connector = cp.getConnector(1)!;
+      expect(connector.status).toBe(OCPPStatus.Preparing);
+      expect(connector.energyOfferSuspended).toBe(false);
+    } finally {
+      stopAnswering();
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
+
+  it("TxStartPoint EVConnected: the idToken for a not-ready EV reports SuspendedEV, not Charging", async () => {
+    const csms = startMockCsms();
+    const { cp, stopAnswering } = await v201Station(csms, "CP201-NR-EVCONN");
+    try {
+      cp.configuration.applyChange("TxStartPoint", "EVConnected");
+      cp.evPlugIn(1);
+      await csms.waitForFrame(
+        (f) =>
+          callOf("TransactionEvent")(f) &&
+          (f[3] as TransactionEventRequestV201).eventType === "Started",
+      );
+      cp.evSetReady(1, false);
+      await cp.startTransaction("TAG-871", 1);
+      const authorized = (
+        await csms.waitForFrame(
+          (f) =>
+            callOf("TransactionEvent")(f) &&
+            (f[3] as TransactionEventRequestV201).triggerReason ===
+              "Authorized",
+        )
+      )[3] as TransactionEventRequestV201;
+      expect(authorized.transactionInfo.chargingState).toBe("SuspendedEV");
+      await sentinel(cp, csms);
+      const connector = cp.getConnector(1)!;
+      expect(connector.status).toBe(OCPPStatus.SuspendedEV);
+      expect(connector.energyOfferSuspended).toBe(true);
+      expect(
+        transactionEvents(csms).map((e) => e.transactionInfo.chargingState),
+      ).toEqual(["EVConnected", "SuspendedEV"]);
     } finally {
       stopAnswering();
       cp.disconnect();

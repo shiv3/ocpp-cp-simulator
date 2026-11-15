@@ -168,7 +168,8 @@ export const transactionCases: GoldenCase[] = [
   }),
   // #835: a vehicle that has not started asking for energy is SuspendedEV
   // with the transaction running (1.6 §4.9 C4; 2.0.1 chargingState
-  // SuspendedEV), through the readiness operation of #453.
+  // SuspendedEV), through the readiness operation of #453. #871: the
+  // transaction starts there (1.6 §4.9 B4), never Charging first.
   ...bothVirtual("vehicle-delayed-suspended-ev", async (rig, turn) => {
     rig.cp.getConnector(1)!.applyEvSettingsOverride({
       vehicleBehavior: { policy: { type: "delayed", delayMs: 3_600_000 } },
@@ -177,14 +178,10 @@ export const transactionCases: GoldenCase[] = [
     // for a transaction that starts first (E03).
     rig.cp.evPlugIn(1);
     await settle(rig);
+    // The vehicle reacts to the plug-in after the event, on the next turn of
+    // the clock: it says it is not ready before the driver authorizes.
+    await turn();
     await rig.startLocal("TAG-1");
-    // 2.0.1 leaves the connector in Preparing until the EVSE energizes it.
-    if (rig.cp.getConnector(1)!.status === OCPPStatus.Preparing) {
-      rig.cp.updateConnectorStatus(1, OCPPStatus.Charging);
-    }
-    // The vehicle reacts to the status change after the event, on the next
-    // turn of the clock; 2.0.1 sends nothing for Preparing to Charging, so
-    // there is no traffic for `settle` to wait for.
     await turn();
     await settle(rig);
     rig.cp.stopTransaction(1, "Local");

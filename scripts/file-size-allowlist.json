@@ -26,7 +26,7 @@
   "packages/core/src/cp/domain/charge-point/ChargePoint.ts": 5132,
   "packages/core/src/cp/domain/charge-point/Configuration.ts": 946,
   "packages/core/src/cp/domain/charge-point/ConfigurationStore.ts": 839,
-  "packages/core/src/cp/domain/connector/Connector.ts": 1699,
+  "packages/core/src/cp/domain/connector/Connector.ts": 1245,
   "packages/core/src/cp/domain/device-model/DeviceModelRegistry.ts": 1048,
   "packages/core/src/cp/domain/security/CertificateStore.ts": 880,
   "packages/core/src/cp/infrastructure/transport/OCPPWebSocket.ts": 1294,

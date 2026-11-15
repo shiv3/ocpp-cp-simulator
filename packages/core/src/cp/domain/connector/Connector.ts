@@ -14,10 +14,6 @@ import {
 import type {
   ChargePointErrorCode,
   OCPPAvailability,
-  ChargingProfileKindType,
-  ChargingProfilePurposeType,
-  ChargingRateUnitType,
-  RecurrencyKindType,
 } from "../types/OcppTypes";
 import { OCPPStatus } from "../types/OcppTypes";
 import type { ScenarioMode } from "@ocpp-cp-simulator/contracts/scenario";
@@ -39,12 +35,8 @@ import {
 import {
   type EVSettings,
   type EVSettingsPatch,
-  assertRequiredFieldsKept,
-  defaultEVSettings,
   getDefaultEVSettings,
-  withoutNulls,
 } from "./EVSettings";
-import { withNormalizedChargingCurve } from "./ChargingCurve";
 import {
   resolveOperatingPoint,
   chargerTermOf,
@@ -53,20 +45,17 @@ import {
   type OperatingPoint,
 } from "./OperatingPoint";
 import { evConnectionOf, type EvConnectionState } from "./EvConnection";
-import {
-  evaluateVehicleBehavior,
-  startVehicleSession,
-} from "@ocpp-cp-simulator/vehicle/evaluate";
 import type {
   VehicleBehaviorSpec,
   VehicleSnapshot,
 } from "@ocpp-cp-simulator/vehicle/contracts";
-import { resolveVehicleBehaviorConfig } from "@ocpp-cp-simulator/vehicle/config";
 import type { MeterRealism } from "./MeterRealism";
 import { resolveSessionIntent, type SessionIntent } from "./SessionIntent";
 import { ScheduleLimiter } from "./ScheduleLimiter";
 import { ConnectorChargingProfiles } from "./ConnectorChargingProfiles";
 import { ConnectorEnergy } from "./ConnectorEnergy";
+import { ConnectorVehicle } from "./ConnectorVehicle";
+import { ConnectorEvSettings } from "./ConnectorEvSettings";
 import { ConnectorRuntimeSnapshot } from "./connectorRuntimeSnapshot";
 import {
   type ApplyChargingProfileOptions,
@@ -74,112 +63,12 @@ import {
   type ProfileRemoveCriteria,
 } from "../charge-point/ChargingProfileStore";
 
-export interface ChargingSchedulePeriod {
-  startPeriod: number;
-  limit: number;
-  numberPhases?: number;
-}
-
-/**
- * Represents an active charging profile for a connector.
- * Populated by SetChargingProfile, cleared by ClearChargingProfile.
- *
- * OCPP 1.6J Smart Charging Profile Management
- * ===========================================
- *
- * SIMPLIFIED IMPLEMENTATION NOTES:
- *
- * 1. Profile Storage:
- *    - Each connector stores its own array of profiles
- *    - Profiles from connectorId=0 are duplicated to each connector (non-spec-compliant)
- *    - SPEC: Charge-point-level profiles should be stored centrally at ChargePoint level
- *
- * 2. Active Profile Selection (getActiveChargingProfile):
- *    - Returns profile with highest stackLevel among currently valid profiles
- *    - Checks validFrom/validTo for time-based validity
- *    - Does NOT implement purpose-based precedence (TxProfile > TxDefaultProfile)
- *    - SPEC: Should apply purpose precedence, then stackLevel within purpose
- *
- * 3. Recurring Profiles:
- *    - Stored as-is without calculating current period based on time elapsed
- *    - SPEC: Should calculate which period applies based on Daily/Weekly recurrence
- *
- * 4. ChargePointMaxProfile:
- *    - Treated as regular profile without enforcing station-wide total limit
- *    - SPEC: Should enforce that sum of all connector draws doesn't exceed this limit
- *
- * For production charge point implementation, see OCPP 1.6J spec section 5.10.
- */
-export interface ActiveChargingProfile {
-  chargingProfileId: number;
-  connectorId: number;
-  stackLevel: number;
-  chargingProfilePurpose: ChargingProfilePurposeType;
-  chargingProfileKind: ChargingProfileKindType;
-  chargingRateUnit: ChargingRateUnitType;
-  recurrencyKind?: RecurrencyKindType;
-  validFrom?: string; // ISO 8601 timestamp
-  validTo?: string; // ISO 8601 timestamp
-  /**
-   * `chargingSchedule.startSchedule`: the instant an Absolute or Recurring
-   * schedule's `startPeriod` offsets count from (1.6 §7.13). Distinct from
-   * `validFrom`, which only bounds when the profile may apply.
-   */
-  startSchedule?: string; // ISO 8601 timestamp
-  /** `chargingSchedule.duration` in seconds: the schedule ends after it (per cycle for Recurring). */
-  duration?: number;
-  /** `chargingSchedule.minChargingRate`, kept so the profile round-trips. */
-  minChargingRate?: number;
-  chargingSchedulePeriods: ChargingSchedulePeriod[];
-}
-
-export interface ConnectorEvents {
-  statusChange: { status: OCPPStatus; previousStatus: OCPPStatus };
-  /**
-   * Fires when `beginTransaction` or `stopTransaction` flips the
-   * `transaction` field, distinct from `transactionIdChange`
-   * (which only fires when the CSMS confirms a real id on an
-   * already-active transaction). Persistence listeners use this to
-   * catch the "transaction object just started" / "just cleared" edges
-   * without needing a polling read.
-   */
-  transactionChange: { transaction: Transaction | null };
-  transactionIdChange: { transactionId: number };
-  /**
-   * `restoreRuntimeSnapshot` put a running transaction back after a restart.
-   * `transactionChange` stays silent on a restore (it would persist and
-   * announce what is already stored), so a subscriber that has to act on a
-   * transaction that is running again (the periodic sampler, #722) listens
-   * to this one.
-   */
-  transactionRestored: { transaction: Transaction };
-  meterValueChange: { meterValue: number };
-  socChange: { soc: number | null };
-  availabilityChange: { availability: OCPPAvailability };
-  autoMeterValueChange: { config: AutoMeterValueConfig };
-  modeChange: { mode: ScenarioMode };
-  autoResetToAvailableChange: { enabled: boolean };
-  evSettingsChange: { settings: EVSettings };
-  chargingProfileChange: { profile: ActiveChargingProfile | null };
-  chargingProfilesChange: { profiles: ActiveChargingProfile[] };
-  /** Emitted when the auto-meter has reached an automatic stop condition
-   *  (currently: SoC >= EVSettings.targetSoc with stopAtTargetSoc). The
-   *  ChargePoint subscribes and ends the in-flight transaction. */
-  autoStopRequested: { reason: "targetSocReached" };
-  /** Emitted when the resolved schedule limit crosses the paused boundary
-   *  (i.e. enters or leaves a limit=0 period of the active charging
-   *  profile). The ChargePoint listens and flips Charging ↔ SuspendedEVSE
-   *  accordingly. `watts` is the new effective cap. */
-  scheduleLimitChange: { paused: boolean; watts: number };
-  /** The `MaxEnergyOnInvalidId` allowance of a transaction whose id was not
-   *  accepted is used up: the energy hold has just started (E05.FR.02;
-   *  2.x only, 1.6 errata 3.17 is #736). The ChargePoint moves the connector to
-   *  SuspendedEVSE. */
-  invalidIdEnergyExhausted: Record<string, never>;
-  /** `dispose()` is tearing the connector down (the ChargePoint removed it).
-   *  Emitted once, before every listener is dropped. */
-  disposed: Record<string, never>;
-}
+export type {
+  ChargingSchedulePeriod,
+  ActiveChargingProfile,
+  ConnectorEvents,
+} from "./ConnectorEvents";
+import type { ActiveChargingProfile, ConnectorEvents } from "./ConnectorEvents";
 
 interface IncrementStrategyConfig {
   intervalSeconds: number;
@@ -315,12 +204,6 @@ export class Connector {
   private modeValue: ScenarioMode = "manual";
   private _autoResetToAvailable = true;
   private _evSettings: EVSettings = getDefaultEVSettings();
-  // True while an explicit/scenario override is active (#105): a running
-  // scenario's evSettings must win over any later Default EV Settings
-  // propagation (e.g. a browser reload in remote mode re-pushing the
-  // default onto every connector while a scenario is mid-flight on the
-  // daemon). Cleared when the scenario that set it stops/completes.
-  private _evSettingsOverridden = false;
   /** The charger's delivery cap on this connector in watts (#327);
    *  `undefined` when the hardware declares none. Set once at construction. */
   private _maxDeliveryPowerW: number | undefined;
@@ -348,9 +231,11 @@ export class Connector {
     setSocPercent: (v) => {
       this.socPercent = v;
     },
+    socAwaitsNextTransaction: () => this.socAwaitsNextTransaction,
     setSocAwaitsNextTransaction: (v) => {
       this.socAwaitsNextTransaction = v;
     },
+    patchTransaction: (fields) => this.patchTransaction(fields),
     exportWh: () => this.exportWh,
     exportRegisterWh: () => this.exportRegisterWh,
     setExportWh: (v) => {
@@ -408,6 +293,27 @@ export class Connector {
     status: () => this.status,
     emitScheduleLimitChange: (e) =>
       this.eventsEmitter.emit("scheduleLimitChange", e),
+  });
+  private readonly evSettingsWriter = new ConnectorEvSettings({
+    evSettings: () => this._evSettings,
+    setEvSettings: (v) => {
+      this._evSettings = v;
+    },
+    emit: (...args) => this.eventsEmitter.emit(...args),
+  });
+  private readonly vehicle = new ConnectorVehicle({
+    now: () => this.clock.now(),
+    evCableConnected: () => this.evCableConnected,
+    vehicleConnectedAt: () => this.vehicleConnectedAt,
+    setVehicleConnectedAt: (v) => {
+      this.vehicleConnectedAt = v;
+    },
+    evSettings: () => this._evSettings,
+    sessionIntent: () => this.sessionIntent(),
+    transaction: () => this.transaction,
+    hasRunningTransaction: () => this.hasRunningTransaction,
+    meterValueWh: () => this.meterValueWh,
+    effectiveSocPercent: () => this.effectiveSocPercent(),
   });
   private readonly profiles = new ConnectorChargingProfiles({
     nowDate: () => this.nowDate(),
@@ -544,7 +450,7 @@ export class Connector {
         stationShareW: this.stationShareProvider?.(),
         conversionEfficiency: this._dcEfficiency,
       }),
-      demand: this.vehicleDemandTerm(now.getTime()),
+      demand: this.vehicle.vehicleDemandTerm(now.getTime()),
       meter: {
         realism: this._meterRealism,
         sessionStartedAt: this.hasRunningTransaction
@@ -605,81 +511,19 @@ export class Connector {
     this._dcEfficiency = efficiency;
   }
 
-  /** The behavior the vehicle follows, resolved from its EV settings
-   *  (`vehicleBehavior`), `null` when none is set (#835). */
+  /** See {@link ConnectorVehicle.vehicleBehavior}. */
   get vehicleBehavior(): VehicleBehaviorSpec | null {
-    return resolveVehicleBehaviorConfig(this._evSettings.vehicleBehavior);
+    return this.vehicle.vehicleBehavior;
   }
 
-  /** Stamp the instant the vehicle connected, if a cable is on and nothing
-   *  was stamped yet: a vehicle that was there before its behavior was set
-   *  keeps its plug-in time (#835). */
+  /** See {@link ConnectorVehicle.ensureVehicleSession}. */
   ensureVehicleSession(): void {
-    if (this.evCableConnected && this.vehicleConnectedAt === null) {
-      this.vehicleConnectedAt = this.clock.now();
-    }
+    this.vehicle.ensureVehicleSession();
   }
 
-  /**
-   * What the vehicle wants now, separately from what the connector delivers
-   * (#835): its phase, its demand and the state of its objective. `null`
-   * without a behavior or a cable. Pure: the same connector state at the same
-   * instant gives the same snapshot.
-   */
+  /** See {@link ConnectorVehicle.vehicleSnapshot}. */
   vehicleSnapshot(): VehicleSnapshot | null {
-    return this.vehicleSnapshotAt(this.clock.now());
-  }
-
-  private vehicleSnapshotAt(now: number): VehicleSnapshot | null {
-    const spec = this.vehicleBehavior;
-    if (!spec || !this.evCableConnected) return null;
-    const intent = this.sessionIntent();
-    const settings = this._evSettings;
-    const transaction = this.transaction;
-    const delivered =
-      transaction && this.hasRunningTransaction
-        ? Math.max(0, this.meterValueWh - (transaction.meterStart ?? 0))
-        : 0;
-    return evaluateVehicleBehavior(
-      {
-        ...spec,
-        intent: {
-          ...(intent.targetSoc !== undefined && {
-            targetSoc: intent.targetSoc,
-          }),
-          ...(intent.requestedWh !== undefined && {
-            requestedEnergyWh: intent.requestedWh,
-          }),
-          ...(intent.departureAt !== undefined && {
-            departureAt: intent.departureAt,
-          }),
-          ...spec.intent,
-        },
-      },
-      {
-        ...(settings.maxChargingPowerKw > 0 && {
-          maxPowerW: settings.maxChargingPowerKw * 1000,
-        }),
-        ...(settings.batteryCapacityKwh > 0 && {
-          batteryCapacityWh: settings.batteryCapacityKwh * 1000,
-        }),
-      },
-      startVehicleSession(this.vehicleConnectedAt ?? now),
-      { soc: this.effectiveSocPercent(), deliveredWh: delivered },
-      now,
-    );
-  }
-
-  /** The demand term of the resolution: absent without a behavior (the
-   *  vehicle asks for all it can take), else what the vehicle asks for now. */
-  private vehicleDemandTerm(now: number): { requestedW: number } | undefined {
-    const snapshot = this.vehicleSnapshotAt(now);
-    if (!snapshot) return undefined;
-    return {
-      requestedW: snapshot.demand.readyToCharge
-        ? snapshot.demand.requestedPowerW
-        : 0,
-    };
+    return this.vehicle.vehicleSnapshot();
   }
 
   /** The opt-in meter realism of this connector, `undefined` when none. */
@@ -1142,61 +986,22 @@ export class Connector {
   }
 
   set evSettings(settings: EVSettings) {
-    // Normalized here, at the one boundary every write to evSettings passes
-    // through (the setter, `applyEvSettingsOverride` and
-    // `applyDefaultEvSettings` all funnel here) — so every reader
-    // (`powerFractionAtSoc`, the meter scheduler) can assume an
-    // already-sorted, already-validated curve rather than re-normalizing
-    // per sample (#301).
-    // A `null` is a merge patch's "remove" (#458): never stored, and refused
-    // for a required field before anything is written.
-    assertRequiredFieldsKept(settings);
-    this._evSettings = withNormalizedChargingCurve(
-      withoutNulls({ ...settings }),
-    );
-    this.eventsEmitter.emit("evSettingsChange", { settings: this._evSettings });
+    this.evSettingsWriter.set(settings);
   }
 
-  /**
-   * Explicit/scenario set (#105): merges `partial` into the current EV
-   * settings and marks the connector as overridden, so a later Default EV
-   * Settings propagation (`applyDefaultEvSettings`) no-ops until
-   * {@link clearEvSettingsOverride} runs.
-   */
+  /** See {@link ConnectorEvSettings.applyEvSettingsOverride}. */
   applyEvSettingsOverride(partial: EVSettingsPatch): void {
-    // Refused before the override is claimed: a rejected write changes
-    // nothing, the ownership included.
-    assertRequiredFieldsKept(partial);
-    this._evSettingsOverridden = true;
-    // A merge patch: absent keys keep their value, `null` removes the key
-    // (the setter drops it).
-    this.evSettings = { ...this._evSettings, ...partial } as EVSettings;
+    this.evSettingsWriter.applyEvSettingsOverride(partial);
   }
 
-  /**
-   * Default-EV-settings propagation (#105), only when no override is active —
-   * a running scenario/explicit override wins over this until cleared.
-   *
-   * Merged onto the built-in {@link defaultEVSettings} (#333), as
-   * {@link applyEvSettingsOverride} merges onto the current settings: a field
-   * the default omits reads back as the built-in value rather than vanishing,
-   * so a partial `ev_settings.apply_default` can no longer leave a required
-   * field such as `initialSoc` absent. Onto the constant, not the current
-   * settings: a default that names no `chargingCurve` describes a car without
-   * one, so nothing of an earlier default or override carries over.
-   */
+  /** See {@link ConnectorEvSettings.applyDefaultEvSettings}. */
   applyDefaultEvSettings(settings: EVSettingsPatch): void {
-    if (this._evSettingsOverridden) return;
-    this.evSettings = { ...defaultEVSettings, ...settings } as EVSettings;
+    this.evSettingsWriter.applyDefaultEvSettings(settings);
   }
 
-  /**
-   * Unmark the override (current values are kept as-is) so the next
-   * `applyDefaultEvSettings` call can take effect. Called when the scenario
-   * that set the override stops or completes.
-   */
+  /** See {@link ConnectorEvSettings.clearEvSettingsOverride}. */
   clearEvSettingsOverride(): void {
-    this._evSettingsOverridden = false;
+    this.evSettingsWriter.clearEvSettingsOverride();
   }
 
   /** Get all charging profiles for this connector, highest stack level first. */
@@ -1351,96 +1156,9 @@ export class Connector {
     this.eventsEmitter.emit("transactionChange", { transaction });
   }
 
-  /**
-   * Replace a SoC left over from the previous session with this session's
-   * opening value, before the meter scheduler's first interval runs.
-   *
-   * `stopTransaction` intentionally leaves `socPercent` alone, so a connector
-   * that finished at 82% still reads 82% when the next car plugs in. Every
-   * other part of the domain already treats
-   * `transaction.initialSoc ?? evSettings.initialSoc` as the new session's
-   * starting point — `socFromMeterValue` computes exactly that on the first
-   * meter tick — so the curve was being evaluated against the wrong battery
-   * for precisely one interval, the one that sets the opening power (#301).
-   * This does the same reset one tick earlier, and does it whether or not
-   * meter/SoC sync is on: with sync off nothing would ever have corrected it.
-   *
-   * A `"pending"` SoC is kept and claimed for this session: it was set while
-   * the connector was idle, so it describes the car plugged in now — typed
-   * into the side panel before pressing Start, or handed to
-   * `startTransaction` as `initialSoc`, which the ChargePoint writes through
-   * the `soc` setter just before this runs. Everything else belongs to a
-   * session that has ended and is replaced. That is what closes the leak an
-   * explicit `initialSoc` used to have: it arrives `"pending"`, becomes
-   * `"session"` here, and the *next* `beginTransaction` therefore treats it as
-   * the leftover it has become rather than as a fresh statement about a new
-   * car.
-   */
+  /** See {@link ConnectorEnergy.openSessionSoc}. */
   private openSessionSoc(transaction: Transaction): void {
-    if (this.socAwaitsNextTransaction) {
-      this.socAwaitsNextTransaction = false;
-      // Keeping the value is not enough: it also has to become what this
-      // session computes from. `socFromMeterValue` derives SoC as
-      // `transaction.initialSoc ?? evSettings.initialSoc` plus delivered
-      // energy, so with meter/SoC sync on — the default — the very first meter
-      // update recomputed from the EV default and overwrote the operator's
-      // number. Owning the value and being the baseline are different
-      // questions, and answering only the first left the curve and the
-      // auto-stop running on a figure nobody entered (#301). Adopting it here
-      // makes every derivation agree by construction, and it rides along in
-      // the persisted transaction so a restart keeps the same answer.
-      // Unconditionally, not only when the transaction named none: a claimed
-      // pending value *is* this session's opening SoC, so the two must not be
-      // able to disagree. On the real path they never do —
-      // `ChargePoint.startTransaction` writes its `initialSoc` through the
-      // `soc` setter moments before this runs, so the assignment is a no-op —
-      // and where they could, the connector's own value is the later statement
-      // and the one the operator can see.
-      if (this.socPercent !== null) {
-        this.patchTransaction({ initialSoc: this.socPercent });
-      }
-      return;
-    }
-    const opening = resolveSessionIntent(
-      transaction,
-      this._evSettings,
-    ).initialSoc;
-    if (opening === undefined) {
-      // No opening value anywhere, and the SoC on hand belongs to a session
-      // that has ended — so there is nothing to replace it *with*, and keeping
-      // it would open the transaction on the previous session's battery, which
-      // is exactly what this method exists to prevent. Every other derivation
-      // already treats the absent case as `0`: `socFromMeterValue` computes
-      // `transaction.initialSoc ?? evSettings.initialSoc ?? 0`, and
-      // `resolveSocForCurve` falls back the same way. Clearing to `null` makes
-      // the curve and the auto-stop read that same fallback from the first
-      // tick instead of the leftover — with meter/SoC sync on the leftover
-      // survived exactly one interval, the one that sets the opening power,
-      // and with sync off it survived the whole session (#301).
-      //
-      // `null`, not `0`: "not reported" is what we know, and every reader
-      // already resolves it to `0`. This also makes the `undefined` case agree
-      // with a JSON `null` `initialSoc`, which reaches the assignment below
-      // and clears the value already.
-      //
-      // `EVSettings.initialSoc` is typed `number`, so TypeScript believes this
-      // is unreachable. Until #333 it was not: `applyDefaultEvSettings`
-      // replaced the settings wholesale, so an `ev_settings.apply_default`
-      // that omitted `initialSoc` landed here. Both entry points now merge
-      // (`applyEvSettingsOverride` onto the current settings,
-      // `applyDefaultEvSettings` onto `defaultEVSettings`), so no known write
-      // drops it. The branch stays as the guard for settings cast past the
-      // type: the `evSettings` setter refuses a `null` required field, not an
-      // absent one.
-      if (this.socPercent !== null) {
-        this.socPercent = null;
-        this.eventsEmitter.emit("socChange", { soc: null });
-      }
-      return;
-    }
-    if (this.socPercent === opening) return;
-    this.socPercent = opening;
-    this.eventsEmitter.emit("socChange", { soc: opening });
+    this.energy.openSessionSoc(transaction);
   }
 
   stopTransaction(): void {

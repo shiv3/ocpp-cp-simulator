@@ -39,9 +39,7 @@ import type {
   ScenarioWaitIntervention,
 } from "./ScenarioTypes";
 import { ScenarioFlowNodeType, ScenarioNodeType } from "./ScenarioTypes";
-import { resolveFrom, type FromScope } from "./resolveFrom";
-import { jsonProblem } from "../behavior/paramsSchema";
-import { DEFAULT_ID_TAG } from "../../domain/auth/IdTagPool";
+import { type FromScope } from "./resolveFrom";
 import {
   createScenarioMachine,
   getScenarioStateName,
@@ -66,7 +64,33 @@ import {
   executeSwitch,
   pickCase,
 } from "./nodes/branching";
-import { runTriggerWait } from "./waits";
+import {
+  executeCallResponse,
+  executeConfigSet,
+  executeDataTransfer,
+  executeOcppCall,
+  executeStatusNotification,
+  executeUnlockOutcome,
+  executeUseBehavior,
+} from "./nodes/calls";
+import {
+  executeConnectorPlug,
+  executeDelay,
+  executeNotification,
+  executeStatusChange,
+  executeTransaction,
+} from "./nodes/transaction";
+import {
+  executeCancelReservation,
+  executeConnectionTrigger,
+  executeCsmsCallTrigger,
+  executeRemoteStartTrigger,
+  executeRemoteStopTrigger,
+  executeReservationTrigger,
+  executeReserveNow,
+  executeStatusTrigger,
+} from "./nodes/triggers";
+import { waitWithProgress } from "./waits";
 import { ScenarioRunStateError } from "../../domain/errors/ScenarioRunStateError";
 import type { EventEmitter } from "../../shared/EventEmitter";
 import { realClock } from "../../shared/clock";
@@ -280,6 +304,30 @@ export class ScenarioExecutor {
       },
       get aborted() {
         return host.aborted;
+      },
+      get remoteStartTagId() {
+        return host.remoteStartTagId;
+      },
+      set remoteStartTagId(value) {
+        host.remoteStartTagId = value;
+      },
+      get remoteStartOptions() {
+        return host.remoteStartOptions;
+      },
+      set remoteStartOptions(value) {
+        host.remoteStartOptions = value;
+      },
+      get remoteStopReason() {
+        return host.remoteStopReason;
+      },
+      set remoteStopReason(value) {
+        host.remoteStopReason = value;
+      },
+      get remoteStopOptions() {
+        return host.remoteStopOptions;
+      },
+      set remoteStopOptions(value) {
+        host.remoteStopOptions = value;
       },
       markCertificateQuirksArmed: () => {
         host.armedCertificateQuirks = true;
@@ -988,11 +1036,17 @@ export class ScenarioExecutor {
 
     switch (node.type) {
       case ScenarioNodeType.STATUS_CHANGE:
-        await this.executeStatusChange(node.data as StatusChangeNodeData);
+        await executeStatusChange(
+          this.nodeCtx,
+          node.data as StatusChangeNodeData,
+        );
         break;
 
       case ScenarioNodeType.TRANSACTION:
-        await this.executeTransaction(node.data as TransactionNodeData);
+        await executeTransaction(
+          this.nodeCtx,
+          node.data as TransactionNodeData,
+        );
         break;
 
       case ScenarioNodeType.METER_VALUE:
@@ -1005,7 +1059,8 @@ export class ScenarioExecutor {
         break;
 
       case ScenarioNodeType.DELAY:
-        await this.executeDelay(
+        await executeDelay(
+          this.nodeCtx,
           node.id,
           node.data as DelayNodeData,
           flow.scope,
@@ -1013,15 +1068,22 @@ export class ScenarioExecutor {
         break;
 
       case ScenarioNodeType.NOTIFICATION:
-        await this.executeNotification(node.data as NotificationNodeData);
+        await executeNotification(
+          this.nodeCtx,
+          node.data as NotificationNodeData,
+        );
         break;
 
       case ScenarioNodeType.CONNECTOR_PLUG:
-        await this.executeConnectorPlug(node.data as ConnectorPlugNodeData);
+        await executeConnectorPlug(
+          this.nodeCtx,
+          node.data as ConnectorPlugNodeData,
+        );
         break;
 
       case ScenarioNodeType.REMOTE_START_TRIGGER:
-        await this.executeRemoteStartTrigger(
+        await executeRemoteStartTrigger(
+          this.nodeCtx,
           node.id,
           node.data as RemoteStartTriggerNodeData,
           flow,
@@ -1029,7 +1091,8 @@ export class ScenarioExecutor {
         break;
 
       case ScenarioNodeType.REMOTE_STOP_TRIGGER:
-        await this.executeRemoteStopTrigger(
+        await executeRemoteStopTrigger(
+          this.nodeCtx,
           node.id,
           node.data as RemoteStopTriggerNodeData,
           flow,
@@ -1037,7 +1100,8 @@ export class ScenarioExecutor {
         break;
 
       case ScenarioNodeType.STATUS_TRIGGER:
-        await this.executeStatusTrigger(
+        await executeStatusTrigger(
+          this.nodeCtx,
           node.id,
           node.data as StatusTriggerNodeData,
           flow,
@@ -1045,17 +1109,19 @@ export class ScenarioExecutor {
         break;
 
       case ScenarioNodeType.RESERVE_NOW:
-        await this.executeReserveNow(node.data as ReserveNowNodeData);
+        await executeReserveNow(this.nodeCtx, node.data as ReserveNowNodeData);
         break;
 
       case ScenarioNodeType.CANCEL_RESERVATION:
-        await this.executeCancelReservation(
+        await executeCancelReservation(
+          this.nodeCtx,
           node.data as CancelReservationNodeData,
         );
         break;
 
       case ScenarioNodeType.RESERVATION_TRIGGER:
-        await this.executeReservationTrigger(
+        await executeReservationTrigger(
+          this.nodeCtx,
           node.id,
           node.data as ReservationTriggerNodeData,
           flow,
@@ -1063,7 +1129,8 @@ export class ScenarioExecutor {
         break;
 
       case ScenarioNodeType.CSMS_CALL_TRIGGER:
-        await this.executeCsmsCallTrigger(
+        await executeCsmsCallTrigger(
+          this.nodeCtx,
           node.id,
           node.data as CsmsCallTriggerNodeData,
           flow,
@@ -1071,13 +1138,17 @@ export class ScenarioExecutor {
         break;
 
       case ScenarioNodeType.STATUS_NOTIFICATION:
-        await this.executeStatusNotification(
+        await executeStatusNotification(
+          this.nodeCtx,
           node.data as StatusNotificationNodeData,
         );
         break;
 
       case ScenarioNodeType.UNLOCK_OUTCOME:
-        await this.executeUnlockOutcome(node.data as UnlockOutcomeNodeData);
+        await executeUnlockOutcome(
+          this.nodeCtx,
+          node.data as UnlockOutcomeNodeData,
+        );
         break;
 
       case ScenarioNodeType.RESPONSE_OVERRIDE:
@@ -1099,23 +1170,38 @@ export class ScenarioExecutor {
         break;
 
       case ScenarioNodeType.CONFIG_SET:
-        await this.executeConfigSet(node.data as ConfigSetNodeData);
+        await executeConfigSet(this.nodeCtx, node.data as ConfigSetNodeData);
         break;
 
       case ScenarioNodeType.DATA_TRANSFER:
-        await this.executeDataTransfer(node.data as DataTransferNodeData);
+        await executeDataTransfer(
+          this.nodeCtx,
+          node.data as DataTransferNodeData,
+        );
         break;
 
       case ScenarioNodeType.OCPP_CALL:
-        await this.executeOcppCall(node.data as OcppCallNodeData, flow);
+        await executeOcppCall(
+          this.nodeCtx,
+          node.data as OcppCallNodeData,
+          flow,
+        );
         break;
 
       case ScenarioNodeType.CALL_RESPONSE:
-        await this.executeCallResponse(node.data as CallResponseNodeData, flow);
+        await executeCallResponse(
+          this.nodeCtx,
+          node.data as CallResponseNodeData,
+          flow,
+        );
         break;
 
       case ScenarioNodeType.USE_BEHAVIOR:
-        this.executeUseBehavior(node.id, node.data as UseBehaviorNodeData);
+        executeUseBehavior(
+          this.nodeCtx,
+          node.id,
+          node.data as UseBehaviorNodeData,
+        );
         break;
 
       case ScenarioNodeType.NOTIFY:
@@ -1135,7 +1221,8 @@ export class ScenarioExecutor {
         break;
 
       case ScenarioNodeType.CONNECTION_TRIGGER:
-        await this.executeConnectionTrigger(
+        await executeConnectionTrigger(
+          this.nodeCtx,
           node.id,
           node.data as ConnectionTriggerNodeData,
           flow,
@@ -1152,492 +1239,12 @@ export class ScenarioExecutor {
     }
   }
 
-  /** Send a StatusNotification.req with the user-supplied payload. */
-  private async executeStatusNotification(
-    data: StatusNotificationNodeData,
-  ): Promise<void> {
-    // ScenarioRuntime resolves the bound connectorId for the runtime. When
-    // the node specifies an explicit connectorId we use that (e.g. 0 to
-    // target the CP main controller); otherwise the runtime fills in the
-    // scenario's bound connector.
-    if (!this.callbacks.onSendStatusNotification) return;
-    const targetConnectorId = data.connectorId ?? -1;
-    this.callbacks.onSendStatusNotification(targetConnectorId, data.status, {
-      errorCode: data.errorCode,
-      info: data.info,
-      vendorErrorCode: data.vendorErrorCode,
-      vendorId: data.vendorId,
-    });
-    this.callbacks.log?.(
-      `StatusNotification connector=${targetConnectorId} status=${data.status}${
-        data.errorCode ? ` errorCode=${data.errorCode}` : ""
-      }`,
-      "info",
-    );
-  }
-
-  /** Pre-arm the connector's next UnlockConnector.req response. */
-  private async executeUnlockOutcome(
-    data: UnlockOutcomeNodeData,
-  ): Promise<void> {
-    if (!this.callbacks.onSetUnlockOutcome) {
-      this.callbacks.log?.(
-        "UnlockOutcome: no onSetUnlockOutcome callback wired",
-        "warn",
-      );
-      return;
-    }
-    this.callbacks.onSetUnlockOutcome(data.outcome);
-    this.callbacks.log?.(`Connector unlockResponse → ${data.outcome}`, "info");
-  }
-
-  /** Apply a ChangeConfiguration locally via the ConfigurationStore. */
-  private async executeConfigSet(data: ConfigSetNodeData): Promise<void> {
-    if (!this.callbacks.onConfigSet) {
-      this.callbacks.log?.("ConfigSet: no onConfigSet callback wired", "warn");
-      return;
-    }
-    this.callbacks.onConfigSet(data.key, data.value);
-    this.callbacks.log?.(`ConfigSet ${data.key}='${data.value}'`, "info");
-  }
-
-  /** Send a CP-initiated DataTransfer.req with the user's vendor/message id. */
-  private async executeDataTransfer(data: DataTransferNodeData): Promise<void> {
-    if (!this.callbacks.onSendDataTransfer) {
-      this.callbacks.log?.(
-        "DataTransfer: no onSendDataTransfer callback wired",
-        "warn",
-      );
-      return;
-    }
-    this.callbacks.onSendDataTransfer(data.vendorId, data.messageId, data.data);
-    this.callbacks.log?.(`DataTransfer vendorId=${data.vendorId}`, "info");
-  }
-
-  /** Send an expert OCPP call (#389) and log the answer. A CALLERROR is an
-   *  answer — often the one the scenario is after — so the flow goes on; a
-   *  refusal or no answer throws and fails the run. */
-  private async executeOcppCall(
-    data: OcppCallNodeData,
-    flow: Flow,
-  ): Promise<void> {
-    if (!this.callbacks.onSendOcppCall) {
-      this.callbacks.log?.(
-        "OCPP call: no onSendOcppCall callback wired",
-        "warn",
-      );
-      return;
-    }
-    const { action, skipValidation, applyResponse } = data;
-    const payload = resolveFrom(
-      data.payload,
-      this.fromScope(flow),
-      `ocppCall(${action})`,
-    ) as Record<string, unknown>;
-    const call = this.callbacks.onSendOcppCall({
-      action,
-      payload,
-      skipValidation,
-      applyResponse,
-    });
-    // stop() must not wait up to 25 s for the answer. Once stopped, the call's
-    // fate is no longer this run's: a later rejection is swallowed rather than
-    // reported as a run error after `execution.stopped`.
-    const outcome = await Promise.race([
-      call,
-      flow.scope.ended.then(() => null),
-    ]);
-    if (outcome === null) {
-      call.catch(() => undefined);
-      return;
-    }
-    flow.response =
-      outcome.kind === "callResult"
-        ? {
-            kind: "result",
-            action,
-            messageId: outcome.messageId,
-            payload: outcome.payload,
-          }
-        : {
-            kind: "error",
-            action,
-            messageId: outcome.messageId,
-            errorCode: outcome.errorCode,
-            errorDescription: outcome.errorDescription,
-            errorDetails: outcome.errorDetails,
-          };
-    if (outcome.kind === "callResult") {
-      this.callbacks.log?.(
-        `OCPP call ${data.action} → CALLRESULT ${JSON.stringify(outcome.payload)}`,
-        "info",
-      );
-    } else {
-      this.callbacks.log?.(
-        `OCPP call ${data.action} → CALLERROR ${outcome.errorCode}: ${outcome.errorDescription}`,
-        "warn",
-      );
-    }
-  }
-
-  /**
-   * Execute status change node
-   */
-  private async executeStatusChange(data: StatusChangeNodeData): Promise<void> {
-    if (this.callbacks.onStatusChange) {
-      // Schema 1.11 (#618): the explicit override is passed only when set,
-      // so a plain status change calls back exactly as before.
-      if (data.allowInvalidTransition === true) {
-        await this.callbacks.onStatusChange(data.status, {
-          allowInvalidTransition: true,
-        });
-      } else {
-        await this.callbacks.onStatusChange(data.status);
-      }
-    }
-  }
-
-  /**
-   * Execute transaction node
-   */
-  private async executeTransaction(data: TransactionNodeData): Promise<void> {
-    if (data.action === "start") {
-      if (this.callbacks.onStartTransaction) {
-        // Use the tagId captured from a preceding RemoteStartTrigger node if available
-        // Precedence: a tag captured from a preceding RemoteStartTrigger, then
-        // the node's own literal, then the charge point's pool (#299), then
-        // the historical default so a charge point without a pool is
-        // unchanged.
-        const tagId =
-          this.remoteStartTagId ||
-          data.tagId ||
-          this.callbacks.onResolveIdTag?.() ||
-          DEFAULT_ID_TAG;
-        // #599: the node's own idTokenType rides in the options; without
-        // one the callback is called exactly as before.
-        const options: StartTransactionOptions | null = data.idTokenType
-          ? { ...this.remoteStartOptions, idTokenType: data.idTokenType }
-          : this.remoteStartOptions;
-        this.remoteStartTagId = null;
-        this.remoteStartOptions = null;
-        const outcome = options
-          ? await this.callbacks.onStartTransaction(
-              tagId,
-              data.batteryCapacityKwh,
-              data.initialSoc,
-              options,
-            )
-          : await this.callbacks.onStartTransaction(
-              tagId,
-              data.batteryCapacityKwh,
-              data.initialSoc,
-            );
-        // Issue #181: a denied local-authorize gate is a LOGGED SKIP, not
-        // an error — the scenario continues to its next node (e.g. plugout
-        // / end) exactly like TC_023's Authorize-Invalid/Expired/Blocked
-        // graphs expect. `outcome` is `void` for callback implementations
-        // that don't report one, so only act on it when present.
-        if (outcome && outcome.started === false) {
-          this.callbacks.log?.(
-            `Transaction start denied (${outcome.denialStatus ?? "refused"}); continuing scenario`,
-            "warn",
-          );
-        }
-      }
-    } else if (data.action === "stop") {
-      if (this.callbacks.onStopTransaction) {
-        const reason = this.remoteStopReason ?? data.stopReason ?? undefined;
-        const options = this.remoteStopOptions;
-        this.remoteStopReason = null;
-        this.remoteStopOptions = null;
-        if (options) {
-          await this.callbacks.onStopTransaction(reason, options);
-        } else {
-          await this.callbacks.onStopTransaction(reason);
-        }
-      }
-    }
-  }
-
-  /**
-   * Execute delay node with progress updates
-   */
-  private async executeDelay(
-    nodeId: string,
-    data: DelayNodeData,
-    scope: BranchScope,
-  ): Promise<void> {
-    let seconds = data.delaySeconds;
-    if (data.until !== undefined) {
-      // Schema 1.6 (#654): not before an instant on the station's clock.
-      const at =
-        typeof data.until === "string"
-          ? new Date(data.until).getTime()
-          : Number.NaN;
-      if (Number.isNaN(at)) {
-        throw new Error(
-          `delay: until must be an ISO-8601 date-time, got ${JSON.stringify(data.until)}`,
-        );
-      }
-      seconds = Math.max(seconds, (at - this.clock.now()) / 1000);
-    }
-    if (data.jitterSeconds !== undefined) {
-      const jitter = data.jitterSeconds;
-      if (
-        typeof jitter !== "number" ||
-        !Number.isFinite(jitter) ||
-        jitter < 0
-      ) {
-        throw new Error(
-          `delay: jitterSeconds must be a number of at least 0, got ${JSON.stringify(jitter)}`,
-        );
-      }
-      // Whole milliseconds from the scenario's seeded stream, so one seed
-      // gives one wait. A jitter of 0 draws nothing.
-      if (jitter > 0) {
-        seconds += this.rng.int(0, Math.round(jitter * 1000) + 1) / 1000;
-      }
-    }
-    await this.waitWithProgress(nodeId, seconds, scope);
-  }
-
   private async waitWithProgress(
     nodeId: string,
     totalSeconds: number,
     scope: BranchScope,
   ): Promise<void> {
-    if (this.callbacks.onDelay) {
-      await this.waitWithOptionalForceSkip(
-        this.callbacks.onDelay(totalSeconds),
-        scope,
-      );
-      return;
-    }
-
-    const updateInterval = 100; // Update progress every 100ms
-    let elapsed = 0;
-
-    const progressInterval = this.clock.setInterval(() => {
-      elapsed += updateInterval / 1000;
-      const remaining = Math.max(0, totalSeconds - elapsed);
-
-      if (this.callbacks.onNodeProgress) {
-        this.callbacks.onNodeProgress(nodeId, remaining, totalSeconds);
-      }
-
-      // Emit node progress events
-      const progressData = {
-        scenarioId: this.scenario.id,
-        nodeId,
-        remaining,
-        total: totalSeconds,
-      };
-      this.eventEmitter?.emit("nodeProgress", progressData); // Backward compatibility
-      this.eventEmitter?.emit("node.progress", progressData); // Hierarchical event
-
-      if (remaining <= 0) {
-        this.clock.clearInterval(progressInterval);
-      }
-    }, updateInterval);
-
-    try {
-      await this.waitWithOptionalForceSkip(
-        this.sleep(totalSeconds * 1000, scope),
-        scope,
-      );
-    } finally {
-      this.clock.clearInterval(progressInterval);
-
-      // Final progress update
-      if (this.callbacks.onNodeProgress) {
-        this.callbacks.onNodeProgress(nodeId, 0, totalSeconds);
-      }
-
-      // Emit final progress events
-      const finalProgressData = {
-        scenarioId: this.scenario.id,
-        nodeId,
-        remaining: 0,
-        total: totalSeconds,
-      };
-      this.eventEmitter?.emit("nodeProgress", finalProgressData); // Backward compatibility
-      this.eventEmitter?.emit("node.progress", finalProgressData); // Hierarchical event
-    }
-  }
-
-  /**
-   * Execute notification node
-   */
-  private async executeNotification(data: NotificationNodeData): Promise<void> {
-    if (this.callbacks.onSendNotification) {
-      await this.callbacks.onSendNotification(data.messageType, data.payload);
-    }
-  }
-
-  /**
-   * Execute connector plug node
-   */
-  private async executeConnectorPlug(
-    data: ConnectorPlugNodeData,
-  ): Promise<void> {
-    if (this.callbacks.onConnectorPlug) {
-      await this.callbacks.onConnectorPlug(data.action);
-    }
-  }
-
-  /**
-   * Execute remote start trigger node with progress updates
-   * Waits for RemoteStartTransaction request from central system
-   * Captures the tagId for use by subsequent Transaction nodes
-   */
-  private async executeRemoteStartTrigger(
-    nodeId: string,
-    data: RemoteStartTriggerNodeData,
-    flow: Flow,
-  ): Promise<void> {
-    const waitForRemoteStart = this.callbacks.onWaitForRemoteStart;
-    if (!waitForRemoteStart) return;
-
-    const answer = (
-      await runTriggerWait(
-        this.nodeCtx,
-        nodeId,
-        flow,
-        data.timeout,
-        (seconds) => `Timeout waiting for remote start (${seconds}s)`,
-        () => waitForRemoteStart(),
-      )
-    )?.value;
-    // A cancelled branch (schema 1.9) leaves the run's capture alone.
-    if (flow.scope.cancelled) return;
-    // A wait continued past (#240) captures nothing, so the next Transaction
-    // node falls back to its own tag.
-    if (answer === undefined) {
-      this.remoteStartTagId = null;
-      this.remoteStartOptions = null;
-    } else if (typeof answer === "string") {
-      this.remoteStartTagId = answer;
-      this.remoteStartOptions = { triggerReason: "RemoteStart" };
-    } else {
-      this.remoteStartTagId = answer.tagId;
-      this.remoteStartOptions = {
-        triggerReason: "RemoteStart",
-        ...(answer.remoteStartId !== undefined
-          ? { remoteStartId: answer.remoteStartId }
-          : {}),
-        // The type the CSMS sent; a Transaction node's own idTokenType wins
-        // (executeTransaction spreads the node's value last).
-        ...(answer.idTokenType !== undefined
-          ? { idTokenType: answer.idTokenType }
-          : {}),
-      };
-    }
-  }
-
-  /**
-   * Execute remote stop trigger node. Mirror of executeRemoteStartTrigger
-   * but for the CSMS-initiated stop side. Parks the scenario until the
-   * runtime callback resolves (the runtime installs a scenario-stop
-   * handler on the CP so the default RemoteStopTransactionHandler defers
-   * to us).
-   */
-  private async executeRemoteStopTrigger(
-    nodeId: string,
-    data: RemoteStopTriggerNodeData,
-    flow: Flow,
-  ): Promise<void> {
-    const waitForRemoteStop = this.callbacks.onWaitForRemoteStop;
-    if (!waitForRemoteStop) return;
-
-    // Capture {reason, triggerReason} so the next Transaction Stop node can
-    // pass `reason` through to StopTransaction.req. The runtime hard-codes
-    // "Remote" for the CSMS path (§6.21). A continued wait (#240) captures
-    // nothing, so that node falls back to its own stopReason.
-    const result = await runTriggerWait(
-      this.nodeCtx,
-      nodeId,
-      flow,
-      data.timeout,
-      (seconds) => `Timeout waiting for remote stop (${seconds}s)`,
-      () => waitForRemoteStop(),
-    );
-    if (flow.scope.cancelled) return;
-    this.remoteStopReason = result?.value?.reason ?? null;
-    this.remoteStopOptions = result
-      ? { triggerReason: result.value?.triggerReason ?? "RemoteStop" }
-      : null;
-  }
-
-  /**
-   * Execute status trigger node with progress updates
-   * Waits for connector status to change to target status
-   */
-  private async executeStatusTrigger(
-    nodeId: string,
-    data: StatusTriggerNodeData,
-    flow: Flow,
-  ): Promise<void> {
-    const waitForStatus = this.callbacks.onWaitForStatus;
-    if (!waitForStatus) return;
-
-    await runTriggerWait(
-      this.nodeCtx,
-      nodeId,
-      flow,
-      data.timeout,
-      (seconds) =>
-        `Timeout waiting for status: ${data.targetStatus} (${seconds}s)`,
-      () => waitForStatus(data.targetStatus),
-    );
-  }
-
-  /**
-   * Execute reserve now node
-   */
-  private async executeReserveNow(data: ReserveNowNodeData): Promise<void> {
-    if (!this.callbacks.onReserveNow) return;
-
-    // Generate reservation ID if not provided
-    const reservationId = data.reservationId || this.rng.int(0, 1000000);
-
-    await this.callbacks.onReserveNow(
-      data.expiryMinutes,
-      data.idTag,
-      data.parentIdTag,
-      reservationId,
-    );
-  }
-
-  /**
-   * Execute cancel reservation node
-   */
-  private async executeCancelReservation(
-    data: CancelReservationNodeData,
-  ): Promise<void> {
-    if (!this.callbacks.onCancelReservation) return;
-
-    await this.callbacks.onCancelReservation(data.reservationId);
-  }
-
-  /**
-   * Execute reservation trigger node (wait for ReserveNow request)
-   */
-  private async executeReservationTrigger(
-    nodeId: string,
-    data: ReservationTriggerNodeData,
-    flow: Flow,
-  ): Promise<void> {
-    const waitForReservation = this.callbacks.onWaitForReservation;
-    if (!waitForReservation) return;
-
-    await runTriggerWait(
-      this.nodeCtx,
-      nodeId,
-      flow,
-      data.timeout,
-      (seconds) => `Timeout waiting for reservation (${seconds}s)`,
-      () => waitForReservation(),
-    );
+    await waitWithProgress(this.nodeCtx, nodeId, totalSeconds, scope);
   }
 
   /**
@@ -1918,175 +1525,6 @@ export class ScenarioExecutor {
     ]);
   }
 
-  /**
-   * Issue #110: park the scenario until the CSMS sends `data.action`.
-   * Mirror of executeRemoteStopTrigger; the CP core handler still runs,
-   * we only synchronize on arrival and log the payload.
-   */
-  private async executeCsmsCallTrigger(
-    nodeId: string,
-    data: CsmsCallTriggerNodeData,
-    flow: Flow,
-  ): Promise<void> {
-    const waitForCsmsCall = this.callbacks.onWaitForCsmsCall;
-    if (!waitForCsmsCall) return;
-    if (
-      data.payload !== undefined &&
-      (typeof data.payload !== "object" ||
-        data.payload === null ||
-        Array.isArray(data.payload))
-    ) {
-      throw new Error(
-        `csmsCallTrigger(${data.action}): payload condition must be a JSON object`,
-      );
-    }
-    const replace = data.behavior === "replace";
-    const result = await runTriggerWait(
-      this.nodeCtx,
-      nodeId,
-      flow,
-      data.timeout,
-      (seconds) =>
-        `Timeout waiting for CSMS call ${data.action}${
-          data.payload ? " matching payload" : ""
-        } (${seconds}s)`,
-      () =>
-        waitForCsmsCall(
-          data.action,
-          data.payload,
-          replace
-            ? {
-                scenarioId: this.scenario.id,
-                nodeId,
-                ...(data.onBusy ? { onBusy: data.onBusy } : {}),
-              }
-            : undefined,
-        ),
-    );
-    if (result) {
-      this.callbacks.log?.(
-        `CSMS call received: ${result.value.action}`,
-        "info",
-      );
-      if (replace) {
-        if (!result.value.exchange) {
-          throw new Error(
-            `csmsCallTrigger(${data.action}): behavior "replace" is not available on this station`,
-          );
-        }
-        // The branch owns the CALL from here on.
-        flow.exchange = result.value.exchange;
-        flow.answered = false;
-      }
-    }
-  }
-
-  /**
-   * Schema 1.5 (#566): answer the CALL this branch took over and wait until
-   * the answer settled on the wire. An answer that was not delivered (the
-   * connection closed or changed, the frame was dropped) fails the run.
-   */
-  private async executeCallResponse(
-    data: CallResponseNodeData,
-    flow: Flow,
-  ): Promise<void> {
-    const exchange = flow.exchange;
-    if (!exchange) {
-      throw new Error(
-        'callResponse: this branch holds no CALL; place it after a csmsCallTrigger with behavior "replace"',
-      );
-    }
-    if (flow.answered) {
-      throw new Error(
-        `callResponse: the ${exchange.action} CALL of this branch is already answered`,
-      );
-    }
-    if (
-      (data.kind === "accepted" || data.kind === "rejected") &&
-      (data.payload !== undefined || data.skipValidation)
-    ) {
-      throw new Error(
-        `callResponse: kind "${data.kind}" is the ${exchange.action} answer of the station's OCPP version and takes no payload`,
-      );
-    }
-    const payload =
-      data.kind === "result"
-        ? (resolveFrom(
-            data.payload ?? {},
-            this.fromScope(flow),
-            `callResponse(${exchange.action})`,
-          ) as Record<string, unknown>)
-        : undefined;
-    const settled = await Promise.race([
-      exchange.answer({
-        kind: data.kind,
-        ...(payload === undefined ? {} : { payload }),
-        ...(data.errorCode === undefined ? {} : { errorCode: data.errorCode }),
-        ...(data.errorDescription === undefined
-          ? {}
-          : { errorDescription: data.errorDescription }),
-        ...(data.skipValidation ? { skipValidation: true } : {}),
-      }),
-      flow.scope.ended.then(() => null),
-    ]);
-    if (settled === null) {
-      // Cancelled mid-answer (schema 1.9): the answer is on its way, never
-      // answer the CALL again.
-      if (flow.scope.cancelled) flow.answered = true;
-      return;
-    }
-    flow.answered = true;
-    if (!settled.delivered) {
-      throw new Error(
-        `callResponse: the answer to ${exchange.action} was not delivered (${settled.reason})`,
-      );
-    }
-    this.callbacks.log?.(
-      `Answered ${exchange.action} with ${data.kind}`,
-      "info",
-    );
-  }
-
-  /** Schema 1.5 (#566): select a behavior loaded on the station. */
-  private executeUseBehavior(nodeId: string, data: UseBehaviorNodeData): void {
-    if (!this.callbacks.onUseBehavior) {
-      throw new Error("useBehavior: this station cannot select behaviors");
-    }
-    const mode = data.mode ?? "use";
-    if (mode !== "use" && mode !== "disable") {
-      throw new Error(
-        `useBehavior: mode must be "use" or "disable", got ${JSON.stringify(mode)}`,
-      );
-    }
-    const params = data.params;
-    if (params !== undefined) {
-      const bad = jsonProblem(params, "params");
-      if (bad || typeof params !== "object" || Array.isArray(params)) {
-        throw new Error(
-          `useBehavior ${data.behaviorId}: params must be a JSON object${bad ? ` (${bad})` : ""}`,
-        );
-      }
-      if (mode === "disable" && Object.keys(params).length > 0) {
-        throw new Error(
-          `useBehavior ${data.behaviorId}: mode "disable" takes no params`,
-        );
-      }
-    }
-    this.callbacks.onUseBehavior(data.behaviorId, nodeId, {
-      mode,
-      ...(params === undefined ? {} : { params }),
-    });
-    this.callbacks.log?.(
-      mode === "disable"
-        ? `Disabling behavior ${data.behaviorId} for this run`
-        : `Using behavior ${data.behaviorId}` +
-            (params && Object.keys(params).length > 0
-              ? ` with params ${JSON.stringify(params)}`
-              : ""),
-      "info",
-    );
-  }
-
   /** What a `$from` of this branch can read (schema 1.5, 1.6). */
   private fromScope(flow: Flow): FromScope {
     return {
@@ -2097,24 +1535,5 @@ export class ScenarioExecutor {
         ? { station: this.callbacks.onReadStation }
         : {}),
     };
-  }
-
-  /** Issue #240: park until the WebSocket reaches data.event. */
-  private async executeConnectionTrigger(
-    nodeId: string,
-    data: ConnectionTriggerNodeData,
-    flow: Flow,
-  ): Promise<void> {
-    const waitForConnection = this.callbacks.onWaitForConnection;
-    if (!waitForConnection) return;
-    const result = await runTriggerWait(
-      this.nodeCtx,
-      nodeId,
-      flow,
-      data.timeout,
-      (seconds) => `Timeout waiting for ${data.event} (${seconds}s)`,
-      () => waitForConnection(data.event),
-    );
-    if (result) this.callbacks.log?.(`Connection event: ${data.event}`, "info");
   }
 }

@@ -17,6 +17,7 @@ sources:
   - packages/core/src/cp/infrastructure/transport/__tests__/strictModes.bun.test.ts
   - packages/core/src/cp/application/engine/ChargerEngine.ts
   - packages/core/src/cp/application/engine/behaviorLifecycle.ts
+  - packages/core/src/cp/application/engine/callRunner.ts
   - packages/core/src/cp/domain/connector/ConnectorTransitions.ts
 related:
   - charger-engine.md

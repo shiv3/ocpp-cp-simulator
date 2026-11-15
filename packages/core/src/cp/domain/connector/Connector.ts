@@ -66,6 +66,8 @@ import type { MeterRealism } from "./MeterRealism";
 import { resolveSessionIntent, type SessionIntent } from "./SessionIntent";
 import { ScheduleLimiter } from "./ScheduleLimiter";
 import { ConnectorChargingProfiles } from "./ConnectorChargingProfiles";
+import { ConnectorEnergy } from "./ConnectorEnergy";
+import { ConnectorRuntimeSnapshot } from "./connectorRuntimeSnapshot";
 import {
   type ApplyChargingProfileOptions,
   type ChargingProfileStore,
@@ -336,13 +338,67 @@ export class Connector {
    *  only. */
   private exportWh = 0;
   private exportTickedAt: number | null = null;
-  /** Register values the last Interval sample of each stream was measured
-   *  from (#615): one baseline per stream (sampled, aligned, transaction-end
-   *  history), so two readers never share one. */
-  private intervalBaselines = new Map<
-    string,
-    { key: string; importWh: number; exportWh: number }
-  >();
+  private readonly energy = new ConnectorEnergy({
+    now: () => this.clock.now(),
+    meterValueWh: () => this.meterValueWh,
+    setMeterValueWh: (v) => {
+      this.meterValueWh = v;
+    },
+    socPercent: () => this.socPercent,
+    setSocPercent: (v) => {
+      this.socPercent = v;
+    },
+    setSocAwaitsNextTransaction: (v) => {
+      this.socAwaitsNextTransaction = v;
+    },
+    exportWh: () => this.exportWh,
+    exportRegisterWh: () => this.exportRegisterWh,
+    setExportWh: (v) => {
+      this.exportWh = v;
+    },
+    exportTickedAt: () => this.exportTickedAt,
+    setExportTickedAt: (v) => {
+      this.exportTickedAt = v;
+    },
+    socMeterSyncEnabled: () => this.socMeterSyncEnabledValue,
+    meterRealism: () => this._meterRealism,
+    evSettings: () => this._evSettings,
+    transaction: () => this.transaction,
+    sessionIntent: () => this.sessionIntent(),
+    operatingPoint: () => this.operatingPoint(),
+    isMeterSchedulerActive: () => this.meterScheduler.isActive(),
+    stopMeterScheduler: () => this.meterScheduler.stop(),
+    emit: (...args) => this.eventsEmitter.emit(...args),
+  });
+  private readonly runtimeSnapshot = new ConnectorRuntimeSnapshot({
+    record: () => this.record,
+    writeRecord: (w) => this.store.write(w),
+    meterValueWh: () => this.meterValueWh,
+    setMeterValueWh: (v) => {
+      this.meterValueWh = v;
+    },
+    socPercent: () => this.socPercent,
+    setSocPercent: (v) => {
+      this.socPercent = v;
+    },
+    socAwaitsNextTransaction: () => this.socAwaitsNextTransaction,
+    setSocAwaitsNextTransaction: (v) => {
+      this.socAwaitsNextTransaction = v;
+    },
+    lastAutoStartedScenarioKey: () => this.lastAutoStartedScenarioKeyValue,
+    setLastAutoStartedScenarioKey: (v) => {
+      this.lastAutoStartedScenarioKeyValue = v;
+    },
+    setEvCableConnected: (v) => {
+      this.evCableConnected = v;
+    },
+    setEvReady: (v) => {
+      this.evReadyValue = v;
+    },
+    transaction: () => this.transaction,
+    hasRunningTransaction: () => this.hasRunningTransaction,
+    emit: (...args) => this.eventsEmitter.emit(...args),
+  });
   private readonly scheduleLimiter = new ScheduleLimiter({
     nowDate: () => this.nowDate(),
     getActiveChargingProfile: (now) => this.getActiveChargingProfile(now),
@@ -363,111 +419,14 @@ export class Connector {
       this.eventsEmitter.emit("chargingProfileChange", e),
   });
 
-  /**
-   * Capture the runtime state needed to resume this connector after a
-   * daemon restart. Paired with {@link restoreRuntimeSnapshot}. The
-   * returned shape is a structural copy: callers can persist it and
-   * round-trip it through JSON without aliasing live connector state.
-   */
-  snapshotRuntime(): {
-    status: OCPPStatus;
-    availability: OCPPAvailability;
-    scheduledAvailability: OCPPAvailability | null;
-    transaction: Transaction | null;
-    meterValueWh: number;
-    socPercent: number | null;
-    socAwaitsNextTransaction: boolean;
-    lastAutoStartedScenarioKey: string | null;
-  } {
-    // The engine-owned part is read from the connector's record, which is
-    // the charger engine's state, in one go.
-    const record = this.record;
-    return {
-      status: record.status,
-      availability: record.availability,
-      scheduledAvailability: record.scheduledAvailability,
-      transaction: record.transaction
-        ? transactionOfRecord(record.transaction)
-        : null,
-      meterValueWh: this.meterValueWh,
-      socPercent: this.socPercent,
-      socAwaitsNextTransaction: this.socAwaitsNextTransaction,
-      lastAutoStartedScenarioKey: this.lastAutoStartedScenarioKeyValue,
-    };
+  snapshotRuntime(): ReturnType<ConnectorRuntimeSnapshot["snapshotRuntime"]> {
+    return this.runtimeSnapshot.snapshotRuntime();
   }
 
-  /**
-   * Apply a snapshot captured before a daemon restart. Writes the
-   * private fields directly so we do NOT emit `statusChange` /
-   * `meterChange` / etc. — emitting on restore would cause the
-   * ChargePoint to push a duplicate StatusNotification or MeterValues
-   * before the WebSocket is even up, and would cause the auto-start
-   * dedup key to be cleared by re-triggering its setter.
-   *
-   * Restore is idempotent on already-default values: nulls and
-   * `meterValueWh = 0` simply rewrite the existing zero state.
-   */
-  restoreRuntimeSnapshot(snapshot: {
-    status: OCPPStatus;
-    availability: OCPPAvailability;
-    scheduledAvailability: OCPPAvailability | null;
-    transaction: Transaction | null;
-    meterValueWh: number;
-    socPercent: number | null;
-    /** Absent in snapshots written before this field existed; `false` there,
-     *  which is the behaviour those builds had. */
-    /** Absent in snapshots written before this field existed; `false` there,
-     *  so a restored value is treated as a leftover rather than inherited by
-     *  the next transaction. */
-    socAwaitsNextTransaction?: boolean;
-    lastAutoStartedScenarioKey: string | null;
-  }): void {
-    this.store.write({
-      kind: "restore",
-      status: snapshot.status,
-      availability: snapshot.availability,
-      scheduledAvailability: snapshot.scheduledAvailability,
-      transaction: snapshot.transaction
-        ? recordOfTransaction({
-            ...snapshot.transaction,
-            signedBeginOcmf: undefined,
-          })
-        : null,
-    });
-    // #315: the signing key is in memory only, so a begin reading signed
-    // before the restart no longer matches MeterPublicKey<id>; drop it.
-    this.meterValueWh = snapshot.meterValueWh;
-    this.socPercent = snapshot.socPercent;
-    // Carried across the restart with the SoC it describes. Without it a
-    // restored meter-derived SoC came back looking explicit, and the next
-    // transaction on that connector opened on the previous battery's charge
-    // again — the defect this marker exists to prevent, reachable a second
-    // time through persistence (#301).
-    // Carried across the restart with the SoC it describes, not inferred from
-    // it. Reconstructing this from "does the snapshot carry a transaction?"
-    // could not see the case that matters: a session that has *ended* leaves a
-    // value that is session-owned and transaction-less, indistinguishable from
-    // one waiting for the next session (#301).
-    this.socAwaitsNextTransaction = snapshot.socAwaitsNextTransaction ?? false;
-    this.lastAutoStartedScenarioKeyValue = snapshot.lastAutoStartedScenarioKey;
-    // The cable is not stored (#453). What a restart shows of it is inferred
-    // from what the snapshot proves: a running transaction, or a status that
-    // only exists with an EV on the cable, means a plugged-in EV. Nothing
-    // else is invented; a restart is not a cable event.
-    this.evCableConnected =
-      (snapshot.transaction !== null &&
-        snapshot.transaction.stopTime === null) ||
-      snapshot.status === OCPPStatus.Preparing ||
-      snapshot.status === OCPPStatus.Finishing ||
-      snapshot.status === OCPPStatus.SuspendedEV ||
-      snapshot.status === OCPPStatus.SuspendedEVSE ||
-      snapshot.status === OCPPStatus.Charging;
-    this.evReadyValue = snapshot.status !== OCPPStatus.SuspendedEV;
-    if (this.transaction && this.hasRunningTransaction) {
-      this.eventsEmitter.emit("transactionRestored", {
-        transaction: this.transaction,
-      });
-    }
+  restoreRuntimeSnapshot(
+    snapshot: Parameters<ConnectorRuntimeSnapshot["restoreRuntimeSnapshot"]>[0],
+  ): void {
+    this.runtimeSnapshot.restoreRuntimeSnapshot(snapshot);
   }
 
   /**
@@ -739,51 +698,17 @@ export class Connector {
     return Math.round(this.exportWh);
   }
 
-  /** Integrate the export power since the previous tick. Called at the start
-   *  of every register tick; a no-op without a discharge term. */
+  /** See {@link ConnectorEnergy.integrateExport}. */
   private integrateExport(): void {
-    if (!this._meterRealism?.export) return;
-    const now = this.clock.now();
-    const point = this.operatingPoint();
-    if (this.exportTickedAt !== null && point.exportW > 0) {
-      this.exportWh +=
-        (point.exportW * (now - this.exportTickedAt)) / 3_600_000;
-    }
-    this.exportTickedAt = now;
+    this.energy.integrateExport();
   }
 
-  /**
-   * The energy moved since the previous Interval sample (#615,
-   * `Energy.Active.{Import,Export}.Interval`), then start a new interval. The
-   * first Interval sample of a transaction starts at its `meterStart` (import)
-   * or at the export register as it reads then. Called by the
-   * sample builder only when an Interval measurand is asked for.
-   */
+  /** See {@link ConnectorEnergy.takeIntervalEnergyWh}. */
   takeIntervalEnergyWh(stream = "sampled"): {
     importWh: number;
     exportWh: number;
   } {
-    const key = String(this.transaction?.startTime?.getTime() ?? "none");
-    const importNow = this.meterValueWh;
-    const exportNow = this.exportRegisterWh;
-    const previous = this.intervalBaselines.get(stream);
-    const start =
-      previous?.key === key
-        ? previous
-        : {
-            key,
-            importWh: this.transaction?.meterStart ?? importNow,
-            exportWh: exportNow,
-          };
-    this.intervalBaselines.set(stream, {
-      key,
-      importWh: importNow,
-      exportWh: exportNow,
-    });
-    return {
-      importWh: Math.max(0, importNow - start.importWh),
-      exportWh: Math.max(0, exportNow - start.exportWh),
-    };
+    return this.energy.takeIntervalEnergyWh(stream);
   }
 
   /**
@@ -808,18 +733,7 @@ export class Connector {
   }
 
   private socFromMeterValue(meterValueWh: number): number | null {
-    const transactionCapacity = this.transaction?.batteryCapacityKwh;
-    const capacity =
-      transactionCapacity && transactionCapacity > 0
-        ? transactionCapacity
-        : this._evSettings.batteryCapacityKwh;
-    if (capacity <= 0) return null;
-
-    const initial = this.sessionIntent().initialSoc ?? 0;
-    const meterStart = this.transaction?.meterStart ?? 0;
-    const deliveredKWh = Math.max(0, meterValueWh - meterStart) / 1000;
-    const derived = initial + (deliveredKWh / capacity) * 100;
-    return Math.min(100, Math.max(0, derived));
+    return this.energy.socFromMeterValue(meterValueWh);
   }
 
   get id(): number {
@@ -1600,100 +1514,14 @@ export class Connector {
   }
 
   private applyMeterValue(value: number): void {
-    // OCPP 1.6 register meter values — StartTransaction.meterStart,
-    // StopTransaction.meterStop and MeterValues sampled values for
-    // Energy.Active.Import.Register — are integer watt-hours. The auto-meter
-    // curve interpolates in kWh and can yield a fractional Wh, so round to an
-    // integer here. A fractional meterStop is rejected by a strict CSMS with a
-    // FormationViolation ("cannot unmarshal number … into … of type int"),
-    // which silently strands the transaction in "Charging".
-    const meterValueWh = Math.round(value);
-    this.meterValueWh = meterValueWh;
-    this.eventsEmitter.emit("meterValueChange", { meterValue: meterValueWh });
-    // Mirror the new meter value into SoC when the UI has flipped Sync on.
-    // We do it here (not just in UI handlers) so the scenario's auto-meter
-    // scheduler and any other domain caller also drive SoC. capacity=0 means
-    // we have no way to convert — leave SoC untouched in that case.
-    if (this.socMeterSyncEnabledValue) {
-      const derived = this.socFromMeterValue(meterValueWh);
-      if (derived !== null && this.socPercent !== derived) {
-        this.socPercent = derived;
-        this.socAwaitsNextTransaction = false;
-        this.eventsEmitter.emit("socChange", { soc: derived });
-      }
-    }
-    this.checkAutoStop();
+    this.energy.applyMeterValue(value);
   }
 
-  /**
-   * Effective SoC used for the auto-stop check. Prefers the explicit
-   * `socPercent` (manual override, or values reported via MeterValue
-   * SoC samples) and falls back to the value implied by the meter
-   * (initialSoc + deliveredKWh / capacityKWh × 100).
-   */
   private effectiveSocPercent(): number | null {
-    if (this.socPercent !== null) return this.socPercent;
-    return this.socFromMeterValue(this.meterValueWh);
+    return this.energy.effectiveSocPercent();
   }
 
-  /**
-   * If `stopAtTargetSoc` is enabled and the connector has hit its target,
-   * stop the in-flight meter scheduler and fire `autoStopRequested` so
-   * the ChargePoint can end the transaction.
-   */
   private checkAutoStop(): void {
-    if (!this.transaction) return;
-    if (!this.sessionIntent().stopAtTarget) return;
-    if (!this.meterScheduler.isActive()) return;
-    const current = this.effectiveSocPercent();
-    if (current === null) return;
-    const targetSoc = this.sessionIntent().targetSoc;
-    if (targetSoc === undefined || current < targetSoc) return;
-
-    // We've reached or exceeded the target SoC. A coarse curve / increment tick
-    // can land WELL past the target in a single step (e.g. 95% when the target
-    // is 80%), and we only stop *after* the value was applied — so clamp the
-    // meter back to the energy for exactly the target SoC and re-sync before
-    // stopping. Otherwise the session ends at the overshot value (#105).
-    const targetMeterWh = this.meterWhForSoc(targetSoc);
-    if (targetMeterWh !== null && this.meterValueWh > targetMeterWh) {
-      this.meterValueWh = targetMeterWh;
-      this.eventsEmitter.emit("meterValueChange", {
-        meterValue: targetMeterWh,
-      });
-      if (this.socMeterSyncEnabledValue) {
-        const derived = this.socFromMeterValue(targetMeterWh);
-        if (derived !== null && this.socPercent !== derived) {
-          this.socPercent = derived;
-          this.eventsEmitter.emit("socChange", { soc: derived });
-        }
-      }
-    }
-
-    this.meterScheduler.stop();
-    this.exportTickedAt = null;
-    this.eventsEmitter.emit("autoStopRequested", {
-      reason: "targetSocReached",
-    });
-  }
-
-  /**
-   * Inverse of {@link socFromMeterValue}: the integer meter Wh corresponding to
-   * exactly `soc` percent, using the same capacity / initialSoc / meterStart
-   * inputs so the round-trip is consistent. Returns null when capacity is
-   * unknown.
-   */
-  private meterWhForSoc(soc: number): number | null {
-    const transactionCapacity = this.transaction?.batteryCapacityKwh;
-    const capacity =
-      transactionCapacity && transactionCapacity > 0
-        ? transactionCapacity
-        : this._evSettings.batteryCapacityKwh;
-    if (capacity <= 0) return null;
-    const initial = this.sessionIntent().initialSoc ?? 0;
-    const meterStart = this.transaction?.meterStart ?? 0;
-    const deliveredKWh = ((soc - initial) / 100) * capacity;
-    if (deliveredKWh <= 0) return meterStart;
-    return Math.round(meterStart + deliveredKWh * 1000);
+    this.energy.checkAutoStop();
   }
 }

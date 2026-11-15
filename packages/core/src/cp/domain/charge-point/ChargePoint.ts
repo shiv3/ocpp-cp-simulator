@@ -38,6 +38,8 @@ import { ConnectorWiring } from "./ConnectorWiring";
 import { BootLifecycle, type BootState } from "./BootLifecycle";
 
 import { OutageLifecycle } from "./OutageLifecycle";
+
+import { ChargingProfileControl } from "./ChargingProfileControl";
 import { EventEmitter } from "../../shared/EventEmitter";
 
 import { realClock } from "../../shared/clock";
@@ -155,11 +157,7 @@ import { isOcpp2Version, isSoapVersion, OCPP_1_6 } from "../types/OcppVersion";
 
 import { DeviceModelTargets } from "./DeviceModelTargets";
 
-import {
-  ChargingProfilePurposeType,
-  isChargePointStatus,
-  OCPPStatus,
-} from "../types/OcppTypes";
+import { isChargePointStatus, OCPPStatus } from "../types/OcppTypes";
 
 import type {
   IdTokenTypeName,
@@ -391,6 +389,13 @@ export class ChargePoint {
   private readonly _stationProfiles: ChargingProfileStore =
     new ChargingProfileStore();
   private readonly _certificateStore: CertificateStore;
+  private readonly _profileControl = new ChargingProfileControl({
+    chargePoint: this,
+    connectors: () => this._connectors,
+    events: () => this._events,
+    nowDate: () => this._nowDate(),
+    stationProfiles: () => this._stationProfiles,
+  });
   // OCPP 2.x variable monitors and monitoring level (N04-N06, #457).
   private readonly _monitoring = new MonitoringStore(DEFAULT_MONITOR_CATALOG);
   // #538: Target attributes of the 2.1 device model (EVSE.Power).
@@ -1551,96 +1556,40 @@ export class ChargePoint {
 
   /**
    * Install a profile on the station store (`connectorId` 0) or on its
-   * connector, replacing any profile with the same id in that scope (and,
-   * with `options.replaceSameSlot`, the one with the same stackLevel and
-   * purpose), and
-   * emit `chargingProfileApplied`. Validation is the caller's job.
-   *
-   * @returns `false`, changing nothing, when the connector does not exist.
+   * connector and emit `chargingProfileApplied`; `false` when the connector
+   * does not exist (#469).
+   * @see ChargingProfileControl.applyChargingProfile
    */
   applyChargingProfile(
     profile: ActiveChargingProfile,
     source: ChargingProfileSource,
     options: ApplyChargingProfileOptions = {},
   ): boolean {
-    const idsBefore = (list: readonly ActiveChargingProfile[]) =>
-      list.map((p) => p.chargingProfileId);
-    let before: number[];
-    let after: number[];
-    if (profile.connectorId === 0) {
-      before = idsBefore(this._stationProfiles.all());
-      this._stationProfiles.add(profile, options);
-      after = idsBefore(this._stationProfiles.all());
-    } else {
-      const connector = this.getConnector(profile.connectorId);
-      if (!connector) return false;
-      before = idsBefore(connector.chargingProfiles);
-      connector.addChargingProfile(profile, options);
-      after = idsBefore(connector.chargingProfiles);
-    }
-    const replaced = before.includes(profile.chargingProfileId);
-    // Other profiles the same-slot rule displaced (#594).
-    const replacedIds = before.filter(
-      (id) => id !== profile.chargingProfileId && !after.includes(id),
-    );
-    this._events.emit("chargingProfileApplied", {
-      connectorId: profile.connectorId,
-      profile,
-      replaced,
-      replacedIds,
-      source,
-    });
-    return true;
+    return this._profileControl.applyChargingProfile(profile, source, options);
   }
 
   /**
-   * Remove the profiles matching `criteria` (1.6 §5.4 / 2.x K10 targets):
-   * no `connectorId` clears the station store and every connector, `0` the
-   * station store only, `> 0` that connector. Emits one
-   * `chargingProfilesCleared` per scope that lost a profile.
-   *
-   * @returns The non-empty scopes, station store first.
+   * Remove the profiles matching `criteria` from the station store and/or the
+   * connectors; returns the non-empty scopes.
+   * @see ChargingProfileControl.clearChargingProfiles
    */
   clearChargingProfiles(
     connectorId: number | undefined,
     criteria: ProfileRemoveCriteria,
     reason: ChargingProfileClearReason,
   ): ClearedChargingProfiles[] {
-    const cleared: ClearedChargingProfiles[] = [];
-    const report = (scope: number, profiles: ActiveChargingProfile[]) => {
-      if (profiles.length === 0) return;
-      cleared.push({ connectorId: scope, profiles });
-      this._events.emit("chargingProfilesCleared", {
-        connectorId: scope,
-        profiles,
-        reason,
-      });
-    };
-    if (connectorId === undefined || connectorId === 0) {
-      report(0, this._stationProfiles.take(criteria));
-    }
-    if (connectorId === 0) return cleared;
-    const targets =
-      connectorId === undefined
-        ? this._connectors.values()
-        : [this.getConnector(connectorId)];
-    for (const connector of targets) {
-      if (connector) {
-        report(connector.id, connector.takeChargingProfiles(criteria));
-      }
-    }
-    return cleared;
+    return this._profileControl.clearChargingProfiles(
+      connectorId,
+      criteria,
+      reason,
+    );
   }
 
-  /** Convenience: the currently active ChargePointMaxProfile (highest
-   *  stackLevel) at the station level. Returns `null` if none. */
+  /** The active ChargePointMaxProfile at the station level, `null` if none. */
   getActiveChargePointMaxProfile(
     now: Date = this._nowDate(),
   ): ActiveChargingProfile | null {
-    return this._stationProfiles.getActive(
-      ChargingProfilePurposeType.ChargePointMaxProfile,
-      now,
-    );
+    return this._profileControl.getActiveChargePointMaxProfile(now);
   }
 
   /**

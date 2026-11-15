@@ -133,7 +133,6 @@ import type {
 } from "@ocpp-cp-simulator/core/cp/application/services/OperationalTimeline";
 import { ScenarioRunRecorder } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunRecorder";
 import type { ScenarioRunResult } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioAssertions";
-import { redactSensitiveText } from "@ocpp-cp-simulator/core/cp/shared/redaction";
 import { appVersion } from "./appVersion";
 
 import type {
@@ -167,6 +166,14 @@ import {
   type BehaviorsHost,
 } from "./service/behaviors";
 import type { ForwarderHost } from "./service/forwarderHost";
+import {
+  attachStateHistoryForwarder,
+  cleanup,
+  persistConnectorRuntime,
+  recordScenarioOnTimeline,
+  setupMeterValueCallbacks,
+  type ServiceLifecycleHost,
+} from "./service/serviceLifecycle";
 import {
   getStatus,
   onFirmwareVersionChange,
@@ -1399,65 +1406,7 @@ export class CLIChargePointService {
   }
 
   cleanup(permanent: boolean = false): void {
-    for (const executor of this._executors.values()) {
-      executor.stop();
-    }
-    this._executors.clear();
-    this._scenarios.clear();
-    // #179 Phase 2b: drop any in-flight transcript subscriptions so a
-    // torn-down service doesn't leave stale Logger listeners behind. No
-    // verdicts are computed here (the whole service is going away).
-    this._recorder.dispose();
-    // The scenario map is gone, so no id can be asked about any more.
-    this._lastRunStatusByScenario.clear();
-    // Every run this service knew about is over, so no run owns a connector's
-    // EV settings override any more. The connectors go with the charge point
-    // below, and a `CPRegistry.update` rebuild installs fresh ones — an owner
-    // left here would name a run that cannot come back (#314).
-    this._evSettingsOwnerByConnector.clear();
-    // Permanent deletion uses dispose() to cancel controller timers;
-    // non-permanent (update, shutdown) uses disconnect().
-    // Before the permanent/temporary split: `CPRegistry.update` cleans up with
-    // `permanent = false` and then replaces the service, so a runner left
-    // going here would keep generating wire work from a discarded instance,
-    // alongside its replacement.
-    for (const runner of this._autoTraffic.values()) runner.stop();
-    this._autoTraffic.clear();
-    this._autoTrafficPickers.clear();
-
-    // #447: detached before the teardown, so a shutdown leaves running
-    // sessions open for the next start to reconcile.
-    this._sessionRecorder.dispose();
-    if (permanent) {
-      // The station is gone for good: a `main` that writes `ctx.state` while it
-      // stops must not bring the `engine_state` row back for the next station
-      // under this id.
-      this._chargePoint.engine.onPersist(null);
-      this._chargePoint.dispose();
-    } else {
-      // #538: the periodic monitors keep their timers offline. Stopped
-      // first, so the disconnect does not re-arm them on an instance that
-      // `CPRegistry.update` is about to replace.
-      this._chargePoint.stopMonitoring();
-      // #537: a manual disconnect keeps the renewed certificate wait, but
-      // this instance is being replaced (`CPRegistry.update`) or the process
-      // is stopping: its wait, store listener and in-memory keys go too.
-      this._chargePoint.releaseRenewedClientCertificate();
-      this._chargePoint.disconnect();
-      // The engine of a discarded instance stops with it: its `main` loops,
-      // hooks and open exchanges would run on beside the replacement, and its
-      // persist listener would keep overwriting the `engine_state` row the
-      // replacement owns now. The row itself stays (an update keeps it).
-      this._chargePoint.engine.onPersist(null);
-      this._chargePoint.engine.dispose();
-    }
-    this.detachConnectorEventForwarders();
-    for (const unsub of this._unsubscribes) {
-      unsub();
-    }
-    this._unsubscribes = [];
-    this._handlers.clear();
-    this._sessionSettledHandlers.clear();
+    return cleanup(this.serviceLifecycleHost(), permanent);
   }
 
   private scenarioCatalogHost(): ScenarioCatalogHost {
@@ -1577,6 +1526,67 @@ export class CLIChargePointService {
     };
   }
 
+  private serviceLifecycleHost(): ServiceLifecycleHost {
+    const self = (): CLIChargePointService => this;
+    return {
+      get chargePoint() {
+        return self()._chargePoint;
+      },
+      get executors() {
+        return self()._executors;
+      },
+      get scenarios() {
+        return self()._scenarios;
+      },
+      get recorder() {
+        return self()._recorder;
+      },
+      get lastRunStatusByScenario() {
+        return self()._lastRunStatusByScenario;
+      },
+      get evSettingsOwnerByConnector() {
+        return self()._evSettingsOwnerByConnector;
+      },
+      get autoTraffic() {
+        return self()._autoTraffic;
+      },
+      get autoTrafficPickers() {
+        return self()._autoTrafficPickers;
+      },
+      get sessionRecorder() {
+        return self()._sessionRecorder;
+      },
+      get handlers() {
+        return self()._handlers;
+      },
+      get sessionSettledHandlers() {
+        return self()._sessionSettledHandlers;
+      },
+      get runtimeRepo() {
+        return self()._runtimeRepo;
+      },
+      get init() {
+        return self()._init;
+      },
+      get scenarioPositionByConnector() {
+        return self()._scenarioPositionByConnector;
+      },
+      get unsubscribes() {
+        return self()._unsubscribes;
+      },
+      set unsubscribes(value) {
+        self()._unsubscribes = value;
+      },
+      get connectorUnsubscribes() {
+        return self()._connectorUnsubscribes;
+      },
+      set connectorUnsubscribes(value) {
+        self()._connectorUnsubscribes = value;
+      },
+      emit: (evt) => self().emit(evt),
+    };
+  }
+
   private autoTrafficHost(): AutoTrafficHost {
     const self = (): CLIChargePointService => this;
     return {
@@ -1687,75 +1697,19 @@ export class CLIChargePointService {
     }
   }
 
-  /** #448: scenario runs are minted here, not in the domain, so their
-   *  lifecycle reaches the operational timeline from the events announcing
-   *  it. `startRun` attributes the connector's later entries to the run;
-   *  `finalizeScenarioRun` ends it and records its outcome — not the
-   *  `scenario_completed` event, which a manual stop also sends. */
   private recordScenarioOnTimeline(evt: CLIEvent): void {
-    let detail: { summary: string; data?: Record<string, unknown> };
-    switch (evt.event) {
-      case "scenario_started":
-        this._chargePoint.timeline.startRun(
-          evt.data.connectorId,
-          evt.data.runId,
-        );
-        detail = { summary: "started" };
-        break;
-      case "scenario_wait_changed":
-        detail = {
-          summary: `wait on ${evt.data.nodeId} ${evt.data.kind}`,
-          data: { nodeId: evt.data.nodeId, kind: evt.data.kind },
-        };
-        break;
-      case "scenario_error": {
-        const error = redactSensitiveText(evt.data.error);
-        detail = { summary: `failed: ${error}`, data: { error } };
-        break;
-      }
-      default:
-        return;
-    }
-    const { connectorId, scenarioId, runId } = evt.data;
-    this._chargePoint.timeline.record({
-      kind: evt.event,
-      connectorId,
-      runId,
-      summary: `Scenario ${scenarioId} ${detail.summary}`,
-      data: { scenarioId, ...detail.data },
-    });
+    return recordScenarioOnTimeline(this.serviceLifecycleHost(), evt);
   }
 
-  /**
-   * Persist the connector's current runtime snapshot to the daemon DB.
-   * Called from every event listener that touches a persisted field
-   * (status, availability, transaction, meter, soc). No-op when the
-   * daemon is running without `--state-db`. Errors are swallowed and
-   * logged: a transient SQLite write failure should not crash an
-   * in-flight OCPP transaction.
-   */
   private persistConnectorRuntime(
     connector: ReturnType<typeof this._chargePoint.connectors.get>,
     connectorId: number,
   ): void {
-    if (!connector) return;
-    try {
-      this._runtimeRepo.save(this._init.cpId, connectorId, {
-        ...connector.snapshotRuntime(),
-        // Persist whichever scenario position we last captured for this
-        // connector, so the row stays a self-consistent snapshot even
-        // when the trigger is a connector field change (status/meter/…)
-        // rather than a scenario node completion.
-        scenarioPosition:
-          this._scenarioPositionByConnector.get(connectorId) ?? null,
-      });
-    } catch (err) {
-      console.warn(
-        `[service] failed to persist connector_runtime for ` +
-          `${this._init.cpId}:${connectorId}`,
-        err,
-      );
-    }
+    return persistConnectorRuntime(
+      this.serviceLifecycleHost(),
+      connector,
+      connectorId,
+    );
   }
 
   /**
@@ -1933,41 +1887,12 @@ export class CLIChargePointService {
     );
   }
 
-  private detachConnectorEventForwarders(): void {
-    for (const unsub of this._connectorUnsubscribes) {
-      try {
-        unsub();
-      } catch {
-        // ignore
-      }
-    }
-    this._connectorUnsubscribes = [];
-  }
-
   private attachStateHistoryForwarder(): void {
-    const history = this._chargePoint.stateManager.history;
-    // StateHistory emits an "entry" event whenever a transition is recorded.
-    // Fall back to no-op if the underlying impl doesn't expose subscribe.
-    const subscribe = (
-      history as unknown as {
-        subscribe?: (cb: (entry: StateHistoryEntry) => void) => () => void;
-      }
-    ).subscribe;
-    if (typeof subscribe === "function") {
-      this._unsubscribes.push(
-        subscribe.call(history, (entry: StateHistoryEntry) => {
-          this.emit({ event: "state_history_entry", data: { entry } });
-        }),
-      );
-    }
+    return attachStateHistoryForwarder(this.serviceLifecycleHost());
   }
 
   private setupMeterValueCallbacks(): void {
-    this._chargePoint.connectors.forEach((connector) => {
-      connector.setOnMeterValueSend((id) => {
-        this._chargePoint.sendScheduledMeterValue(id);
-      });
-    });
+    return setupMeterValueCallbacks(this.serviceLifecycleHost());
   }
 }
 

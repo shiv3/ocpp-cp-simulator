@@ -15,10 +15,11 @@ import type {
   ChargePointErrorCode,
   OCPPAvailability,
   ChargingProfileKindType,
+  ChargingProfilePurposeType,
   ChargingRateUnitType,
   RecurrencyKindType,
 } from "../types/OcppTypes";
-import { OCPPStatus, ChargingProfilePurposeType } from "../types/OcppTypes";
+import { OCPPStatus } from "../types/OcppTypes";
 import type { ScenarioMode } from "@ocpp-cp-simulator/contracts/scenario";
 import type { Transaction } from "./Transaction";
 import {
@@ -43,16 +44,7 @@ import {
   getDefaultEVSettings,
   withoutNulls,
 } from "./EVSettings";
-import {
-  isScheduleInEffect,
-  resolveEffectiveLimitWatts,
-  resolveEffectivePhaseLimit,
-} from "./ChargingScheduleResolver";
-import {
-  electricalModelOf,
-  resolveActivePhases,
-  withNormalizedChargingCurve,
-} from "./ChargingCurve";
+import { withNormalizedChargingCurve } from "./ChargingCurve";
 import {
   resolveOperatingPoint,
   chargerTermOf,
@@ -72,9 +64,9 @@ import type {
 import { resolveVehicleBehaviorConfig } from "@ocpp-cp-simulator/vehicle/config";
 import type { MeterRealism } from "./MeterRealism";
 import { resolveSessionIntent, type SessionIntent } from "./SessionIntent";
+import { ScheduleLimiter } from "./ScheduleLimiter";
+import { ConnectorChargingProfiles } from "./ConnectorChargingProfiles";
 import {
-  partitionProfiles,
-  upsertProfile,
   type ApplyChargingProfileOptions,
   type ChargingProfileStore,
   type ProfileRemoveCriteria,
@@ -351,7 +343,25 @@ export class Connector {
     string,
     { key: string; importWh: number; exportWh: number }
   >();
-  private _chargingProfiles: ActiveChargingProfile[] = [];
+  private readonly scheduleLimiter = new ScheduleLimiter({
+    nowDate: () => this.nowDate(),
+    getActiveChargingProfile: (now) => this.getActiveChargingProfile(now),
+    stationProfiles: () => this.stationProfilesProvider(),
+    evSettings: () => this._evSettings,
+    transaction: () => this.transaction,
+    status: () => this.status,
+    emitScheduleLimitChange: (e) =>
+      this.eventsEmitter.emit("scheduleLimitChange", e),
+  });
+  private readonly profiles = new ConnectorChargingProfiles({
+    nowDate: () => this.nowDate(),
+    stationProfiles: () => this.stationProfilesProvider(),
+    transaction: () => this.transaction,
+    emitChargingProfilesChange: (e) =>
+      this.eventsEmitter.emit("chargingProfilesChange", e),
+    emitChargingProfileChange: (e) =>
+      this.eventsEmitter.emit("chargingProfileChange", e),
+  });
 
   /**
    * Capture the runtime state needed to resume this connector after a
@@ -517,7 +527,7 @@ export class Connector {
           // The register tick is a tick owner: it announces a schedule
           // crossing, the resolve itself is pure (#327).
           const point = this.operatingPoint();
-          this.announceScheduleCrossing(point.scheduleLimitW);
+          this.scheduleLimiter.announceScheduleCrossing(point.scheduleLimitW);
           return point.accumulationCapW;
         },
       },
@@ -531,209 +541,20 @@ export class Connector {
     return new Date(this.clock.now());
   }
 
-  /**
-   * Resolve the effective wattage cap from the active charging profile (if
-   * any) at the current instant, anchored to the in-flight transaction's
-   * start time. Returns `Infinity` when uncapped — i.e. no profile, or no
-   * transaction context to anchor a Relative schedule on.
-   *
-   * A profile expressed in amperes is converted through this connector's
-   * declared electrical model, so an amp limit survives the trip through
-   * watts and back into the reported `Current.Import` (#301).
-   *
-   * Side-effect: if the paused/active state flipped since the last call,
-   * emits `scheduleLimitChange` so the ChargePoint can move the connector
-   * between Charging and SuspendedEVSE.
-   *
-   * That emission is **edge-triggered and idempotent**, which is what makes it
-   * safe to call this more than once for the same instant — `MeterValueBuilder`
-   * does, once for accepted power and once for offered power. `lastSchedulePaused`
-   * is written before the emit, so a second call at the same boundary state
-   * finds it equal and emits nothing; an uncapped second call finds it already
-   * reset to `null` and does nothing either. A subscriber counting transitions
-   * therefore sees one per real crossing, not one per sample. Contrast
-   * {@link activePhaseCount} below, which is side-effect-free outright because
-   * it has no boundary state to latch — the two are safe for the same reason
-   * stated two different ways (#301).
-   *
-   * Idempotent against *repetition* is not the same as safe in every state,
-   * and the difference cost a real defect: a crossing seen while the connector
-   * is `Preparing` cannot move it anywhere, so latching it there consumed the
-   * only edge that would ever be announced. The announcement is therefore
-   * skipped entirely outside `Charging` / `SuspendedEVSE`, latch included. Mid-tick crossings of a period
-   * boundary inside a Recurring or Absolute profile are picked up this way
-   * without needing an extra timer.
-   */
+  /** See {@link ScheduleLimiter.currentScheduleLimitWatts}. */
   currentScheduleLimitWatts(): number {
-    const { watts } = this.resolveScheduleConstraints(this.nowDate());
-    this.announceScheduleCrossing(watts);
-    return watts;
+    return this.scheduleLimiter.currentScheduleLimitWatts();
   }
 
-  /**
-   * The watt cap and the active phase count, resolved from **one** instant.
-   *
-   * One instant covers every clock-dependent question the resolve asks:
-   * which Tx-layer profile applies (`validFrom` / `validTo`), which station
-   * `ChargePointMaxProfile` applies, which schedule period of each is active,
-   * and the phase restriction in force.
-   *
-   * Both constraints are read for every MeterValue, and each used to resolve
-   * against its own `new Date()`. A charging-schedule period boundary falling
-   * between the two calls took the cap from one period and the divisor from
-   * the next: a 10 A three-phase period yields 6900 W, divided as one phase
-   * and reported as 30 A — a sample set describing two instants at once,
-   * which is the property the single schedule resolve was introduced to hold.
-   * A profile-validity boundary falling between the two active-profile
-   * lookups was the same defect one layer up, and is closed the same way
-   * (#301).
-   *
-   * Emits `scheduleLimitChange` on a crossing exactly as
-   * {@link currentScheduleLimitWatts} does, and is the call a sampling path
-   * should make instead of those two.
-   */
+  /** See {@link ScheduleLimiter.scheduleConstraints}. */
   scheduleConstraints(): { watts: number; activePhases: number } {
-    const constraints = this.resolveScheduleConstraints(this.nowDate());
-    this.announceScheduleCrossing(constraints.watts);
-    return constraints;
+    return this.scheduleLimiter.scheduleConstraints();
   }
 
-  /**
-   * Resolve both schedule-derived constraints at `now`. Pure: the crossing
-   * announcement is {@link announceScheduleCrossing}'s job, so a caller that
-   * only wants a number — `activePhaseCount` — can share this without
-   * acquiring a side effect.
-   */
-  private resolveScheduleConstraints(now: Date): {
-    watts: number;
-    activePhases: number;
-  } {
-    // `now` reaches the *selection* of both profiles, not only the period and
-    // phase resolvers below. Both lookups defaulted to a clock reading of
-    // their own, so a `validFrom` / `validTo` boundary falling between them
-    // and the pinned instant selected a profile belonging to a different
-    // moment than the periods were then resolved against — applied a moment
-    // early, or omitted a moment late (#301). Every applicable-profile
-    // question in this method is now asked about one instant.
-    const txProfile = this.getActiveChargingProfile(now);
-    const stationMax =
-      this.stationProfilesProvider()?.getActive(
-        ChargingProfilePurposeType.ChargePointMaxProfile,
-        now,
-      ) ?? null;
-    const start = this.transaction?.startTime ?? null;
-    const resolved = resolveEffectiveLimitWatts(
-      txProfile,
-      stationMax,
-      start,
-      now,
-      // A `ChargingRateUnit=A` limit is converted with this connector's own
-      // volts/phases/cos φ when it declares them, so that the current
-      // `MeterValueBuilder` derives back from the resulting cap never exceeds
-      // the amperage the CSMS set (#301). `undefined` for a connector that
-      // declares no electrical model — that is the pre-#301 conversion and it
-      // stays exactly where it was.
-      electricalModelOf(this._evSettings),
-    );
-    const limitPhases = resolveEffectivePhaseLimit(
-      txProfile,
-      stationMax,
-      start,
-      now,
-    );
-    return {
-      watts: resolved.watts,
-      activePhases: resolveActivePhases(
-        this._evSettings,
-        limitPhases ?? undefined,
-      ),
-    };
-  }
-
-  /** Emit `scheduleLimitChange` when the paused/active boundary has moved
-   *  since the last resolve. Edge-triggered: see
-   *  {@link currentScheduleLimitWatts}'s note on why repeated calls at one
-   *  boundary state emit once. */
-  private announceScheduleCrossing(watts: number): void {
-    // No profile in force: disarm, whatever the connector's status. This is
-    // bookkeeping, not an announcement — it emits nothing — so it deliberately
-    // runs before the status guard below. The case it carries is a withdrawal
-    // seen *inside* a live session, in a status the listener ignores: the car
-    // pauses (`SuspendedEV`), the CSMS withdraws the zero-limit profile while
-    // it is stopped, the car resumes, and a fresh zero-limit profile arrives.
-    // Skipping the disarm there left the latch at `true` for a crossing that
-    // had genuinely been undone, and the new pause went unannounced — the
-    // meter capped at zero while the connector reported Charging (#301).
-    // Across a *transaction* boundary the latch is re-armed by
-    // {@link beginTransaction} instead, which is where its lifetime ends;
-    // this disarm cannot cover that case, because a profile that survives the
-    // session is never cleared and nothing samples in the gap.
-    if (watts === Infinity) {
-      this.lastSchedulePaused = null;
-      return;
-    }
-
-    // The status guard gates **the announcement only**, not the disarm above.
-    // The ChargePoint listener toggles Charging ↔ SuspendedEVSE and does
-    // nothing otherwise, so latching a crossing seen while `Preparing` — a
-    // scenario's first MeterValue lands there, before StartTransaction is
-    // accepted — consumed the one edge that would ever be reported: every
-    // later resolve found the latch already set and stayed silent. The latch
-    // is idempotent against repetition (see {@link currentScheduleLimitWatts}),
-    // which is a different thing from being safe against a crossing nobody
-    // could act on. Leaving the latch untouched here means the first resolve
-    // that *can* act announces it (#301).
-    if (
-      this.status !== OCPPStatus.Charging &&
-      this.status !== OCPPStatus.SuspendedEVSE
-    ) {
-      return;
-    }
-
-    const paused = watts === 0;
-    if (
-      this.lastSchedulePaused === null ||
-      paused !== this.lastSchedulePaused
-    ) {
-      this.lastSchedulePaused = paused;
-      this.eventsEmitter.emit("scheduleLimitChange", { paused, watts });
-    }
-  }
-
-  /**
-   * How many phases this connector is delivering on right now: its own wiring
-   * (1 for DC), narrowed by the tightest `numberPhases` any applicable
-   * charging profile imposes.
-   *
-   * The restriction is composed across the Tx-layer profile and the
-   * `ChargePointMaxProfile` **independently** of the watt cap, because they
-   * are independent constraints: the profile that supplies the lower wattage
-   * need not be the one that restricts the phases, and a restriction still in
-   * force must not be dropped merely because the other profile won on watts
-   * (#301). The per-phase MeterValues samples read this, so they cannot claim
-   * consumption on a phase the CSMS excluded.
-   *
-   * Unlike {@link currentScheduleLimitWatts} this has no side effects — it
-   * never emits `scheduleLimitChange` — because it is called while building a
-   * sample set, not while driving the meter.
-   */
+  /** See {@link ScheduleLimiter.activePhaseCount}. */
   activePhaseCount(): number {
-    return this.resolveScheduleConstraints(this.nowDate()).activePhases;
+    return this.scheduleLimiter.activePhaseCount();
   }
-
-  /**
-   * Snapshot of the last resolved "paused" state, used to detect crossings of
-   * the limit=0 boundary across schedule periods. `null` means nothing has
-   * been announced yet.
-   *
-   * **Its lifetime is one transaction.** It records what this session last
-   * told the ChargePoint, and the `scheduleLimitChange` listener returns
-   * without a transaction attached, so "already announced" is only a
-   * meaningful claim within one. It is re-armed to `null` by
-   * {@link beginTransaction}, and disarmed mid-session by
-   * {@link announceScheduleCrossing} whenever no profile is in force (#301).
-   */
-  private lastSchedulePaused: boolean | null = null;
 
   /**
    * Every physical quantity for this instant, resolved once (#327): the
@@ -751,7 +572,8 @@ export class Connector {
    */
   operatingPoint(): OperatingPoint {
     const now = this.nowDate();
-    const { watts, activePhases } = this.resolveScheduleConstraints(now);
+    const { watts, activePhases } =
+      this.scheduleLimiter.resolveScheduleConstraints(now);
     return resolveOperatingPoint({
       at: now.getTime(),
       charging: this.status === OCPPStatus.Charging,
@@ -971,7 +793,9 @@ export class Connector {
    * boundary emits nothing.
    */
   announceScheduleCrossingNow(): void {
-    this.announceScheduleCrossing(this.operatingPoint().scheduleLimitW);
+    this.scheduleLimiter.announceScheduleCrossing(
+      this.operatingPoint().scheduleLimitW,
+    );
   }
 
   /** This session's opening and target SoC: see {@link resolveSessionIntent}. */
@@ -1461,76 +1285,16 @@ export class Connector {
     this._evSettingsOverridden = false;
   }
 
-  /**
-   * Get all charging profiles for this connector, sorted by stack level (highest first)
-   */
+  /** Get all charging profiles for this connector, highest stack level first. */
   get chargingProfiles(): ActiveChargingProfile[] {
-    return [...this._chargingProfiles].sort(
-      (a, b) => b.stackLevel - a.stackLevel,
-    );
+    return this.profiles.chargingProfiles;
   }
 
-  /**
-   * Resolve the connector's currently active **Tx-layer** charging profile
-   * per OCPP 1.6 §3.13.3 precedence rules:
-   *
-   *   1. The connector's own TxProfile (highest valid stackLevel) — if
-   *      one exists it completely overrules anything else at the Tx layer.
-   *   2. Otherwise, the highest valid TxDefaultProfile among:
-   *        - this connector's own TxDefaultProfile(s), and
-   *        - the station-wide TxDefaultProfile(s) (installed by the CSMS
-   *          via SetChargingProfile.req with connectorId=0).
-   *
-   * The ChargePointMaxProfile lives separately on the ChargePoint and is
-   * combined with this result via `min` inside the resolver.
-   *
-   * Returns `null` when no Tx-layer profile applies.
-   */
+  /** See {@link ConnectorChargingProfiles.getActiveChargingProfile}. */
   getActiveChargingProfile(
     now: Date = this.nowDate(),
   ): ActiveChargingProfile | null {
-    const txStart = this.transaction?.startTime ?? null;
-    const isValid = (profile: ActiveChargingProfile) => {
-      if (profile.validFrom && new Date(profile.validFrom) > now) return false;
-      if (profile.validTo && new Date(profile.validTo) <= now) return false;
-      // A schedule past its `duration` (or not yet at its `startSchedule`)
-      // yields to the next lower stackLevel (1.6 errata 3.43).
-      return isScheduleInEffect(profile, txStart, now);
-    };
-
-    // Tier 1: TxProfile on this connector wins outright (§3.13.3).
-    const txProfiles = this._chargingProfiles.filter(
-      (p) =>
-        p.chargingProfilePurpose === ChargingProfilePurposeType.TxProfile &&
-        isValid(p),
-    );
-    if (txProfiles.length > 0) {
-      return txProfiles.reduce((best, c) =>
-        c.stackLevel > best.stackLevel ? c : best,
-      );
-    }
-
-    // Tier 2: TxDefaultProfile — connector-own and station-wide compete
-    // by stackLevel. (If a CSMS wants connector defaults to always win
-    // over station defaults, it sets them at a higher stackLevel.)
-    const ownDefaults = this._chargingProfiles.filter(
-      (p) =>
-        p.chargingProfilePurpose ===
-          ChargingProfilePurposeType.TxDefaultProfile && isValid(p),
-    );
-    const stationDefaults =
-      this.stationProfilesProvider()
-        ?.all()
-        .filter(
-          (p) =>
-            p.chargingProfilePurpose ===
-              ChargingProfilePurposeType.TxDefaultProfile && isValid(p),
-        ) ?? [];
-    const defaults = [...ownDefaults, ...stationDefaults];
-    if (defaults.length === 0) return null;
-    return defaults.reduce((best, c) =>
-      c.stackLevel > best.stackLevel ? c : best,
-    );
+    return this.profiles.getActiveChargingProfile(now);
   }
 
   /**
@@ -1546,79 +1310,32 @@ export class Connector {
    * @deprecated Use addChargingProfile() or setChargingProfiles() instead
    */
   set chargingProfile(profile: ActiveChargingProfile | null) {
-    if (profile === null) {
-      this.clearAllChargingProfiles();
-    } else {
-      this._chargingProfiles = [profile];
-      this.emitProfileChanges();
-    }
+    this.profiles.chargingProfile = profile;
   }
 
-  /**
-   * Add or update a charging profile. If a profile with the same ID exists, it is replaced.
-   * @returns Whether a profile with the same ID was replaced
-   */
+  /** Add or update a charging profile; returns whether one was replaced. */
   addChargingProfile(
     profile: ActiveChargingProfile,
     options: ApplyChargingProfileOptions = {},
   ): boolean {
-    const { profiles, replaced } = upsertProfile(
-      this._chargingProfiles,
-      profile,
-      options,
-    );
-    this._chargingProfiles = profiles;
-    this.emitProfileChanges();
-    return replaced;
+    return this.profiles.addChargingProfile(profile, options);
   }
 
-  /**
-   * Remove the charging profiles matching every given criterion
-   * @returns The removed profiles
-   */
+  /** Remove the charging profiles matching every given criterion. */
   takeChargingProfiles(
     criteria: ProfileRemoveCriteria,
   ): ActiveChargingProfile[] {
-    const { kept, removed } = partitionProfiles(
-      this._chargingProfiles,
-      criteria,
-    );
-    this._chargingProfiles = kept;
-    if (removed.length > 0) {
-      this.emitProfileChanges();
-    }
-    return removed;
+    return this.profiles.takeChargingProfiles(criteria);
   }
 
-  /**
-   * Clear all charging profiles
-   */
+  /** Clear all charging profiles. */
   clearAllChargingProfiles(): void {
-    if (this._chargingProfiles.length > 0) {
-      this._chargingProfiles = [];
-      this.emitProfileChanges();
-    }
+    this.profiles.clearAllChargingProfiles();
   }
 
-  /**
-   * Set all charging profiles (replaces existing profiles)
-   */
+  /** Set all charging profiles (replaces existing profiles). */
   setChargingProfiles(profiles: ActiveChargingProfile[]): void {
-    this._chargingProfiles = [...profiles];
-    this.emitProfileChanges();
-  }
-
-  /**
-   * Emit events when charging profiles change
-   */
-  private emitProfileChanges(): void {
-    this.eventsEmitter.emit("chargingProfilesChange", {
-      profiles: this.chargingProfiles,
-    });
-    // Also emit backwards-compatible event
-    this.eventsEmitter.emit("chargingProfileChange", {
-      profile: this.getActiveChargingProfile(),
-    });
+    this.profiles.setChargingProfiles(profiles);
   }
 
   get autoMeterValueConfig(): AutoMeterValueConfig {
@@ -1701,7 +1418,7 @@ export class Connector {
     // than at `stopTransaction`, is deliberate: this is the only path that
     // attaches a transaction to this connector, and any resolve in the gap
     // has no `startTime` to resolve against and so disarms on its own.
-    this.lastSchedulePaused = null;
+    this.scheduleLimiter.rearm();
     this.energyOfferSuspendedValue = false;
     // A transaction means an EV on the cable (#453): a start without a prior
     // plug-in, and a restored transaction, imply one.

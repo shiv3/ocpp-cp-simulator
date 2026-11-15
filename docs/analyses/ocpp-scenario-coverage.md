@@ -7,6 +7,8 @@ sources:
   - packages/core/src/cp/infrastructure/transport/v201/csmsAcksV201.ts
   - packages/core/src/cp/infrastructure/transport/v21/inboundRegistryV21.ts
   - packages/core/src/cp/application/scenario/ScenarioTypes.ts
+  - packages/core/src/cp/application/scenario/types/nodeData.ts
+  - packages/core/src/cp/application/scenario/types/graph.ts
   - packages/core/src/cp/application/scenario/ScenarioExecutor.ts
   - packages/core/schema/scenario.schema.json
   - packages/core/src/cp/domain/charge-point/ChargePoint.ts

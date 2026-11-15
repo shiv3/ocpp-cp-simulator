@@ -21,7 +21,7 @@ related:
   - open-ev-directory.md
   - ../concepts/operational-timeline.md
   - ../concepts/charging-sessions.md
-updated: 2026-11-14
+updated: 2026-11-15
 ---
 
 # Web console (browser UI)
@@ -1249,7 +1249,10 @@ they behave the same.
 
 Underneath both views sits one model of the graph, the **block tree**
 ([`blockTree.ts`](../../apps/web/src/console/lib/blockTree.ts),
-`recognizeBlockTree`): nested sequences of steps, forks and loops, recovered
+`recognizeBlockTree`; its types, structural successors and dominator
+computation live in
+[`blockTree/`](../../apps/web/src/console/lib/blockTree/) and are re-exported
+by `blockTree.ts`): nested sequences of steps, forks and loops, recovered
 from the graph the way the executor reads it (`lowerScenario`,
 `nextStep`, `pickableHandles`; see
 [connection rules](../concepts/scenario-format.md#connection-rules)).

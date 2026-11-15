@@ -118,6 +118,12 @@ import type {
   RegistryMembershipChange,
   RegistryMembershipEvent,
 } from "./CPRegistry";
+import type { StopReason } from "@ocpp-cp-simulator/contracts/transactionVocabulary";
+import { RpcFailure } from "@ocpp-cp-simulator/contracts/errors";
+import { stopChargePointTransactionsAndWait } from "./gracefulShutdown";
+
+/** `--shutdown-wait-ms`'s default. */
+const DEFAULT_STOP_WAIT_MS = 5000;
 
 export type RegistryChargePointSubscriptionEvent =
   | { type: "snapshot"; cps: ChargePointSnapshot[] }
@@ -133,6 +139,9 @@ export interface RegistryChargePointServiceDeps {
   readonly scenarioRepository: ScenarioRepository;
   readonly connectorSettingsRepository: ConnectorSettingsRepository;
   readonly onReset?: () => void;
+  /** The wait of an opt-in `stopTransactions` on `cp.delete` / `disconnect`
+   *  (ms): the daemon's `--shutdown-wait-ms`. Default 5000. */
+  readonly stopTransactionsWaitMs?: number;
 }
 
 export interface RegistryConfigRepository {
@@ -178,6 +187,48 @@ export class RegistryChargePointService implements ChargePointService {
     if (!existing) throw new Error(`cpId not found: ${params.cpId}`);
     refuseProfileOnSoap(params, existing.getInit().ocppVersion);
     this.registry.update(toInitOptions(params, existing.getInit()));
+  }
+
+  /**
+   * Daemon-only: stop the running transactions of one charge point and wait,
+   * up to `--shutdown-wait-ms`, for the CSMS to answer the stops, then close
+   * it: what an opt-in `cp.delete` (`close: "remove"`) or `disconnect`
+   * (`close: "disconnect"`) with `stopTransactions` does. Rejects when no
+   * such charge point is registered.
+   *
+   * The wait and the close target the instance registered when the request
+   * started. A `cp.update` of the same cpId during the wait replaces that
+   * instance; the stop then leaves the replacement alone and the close is
+   * refused (rejects with `unavailable`), so it never removes or disconnects
+   * the replacement or deletes its persisted row.
+   */
+  async stopTransactionsThenClose(
+    id: string,
+    close: "remove" | "disconnect",
+    reason?: StopReason,
+  ): Promise<void> {
+    const service = this.requireService(id);
+    const stillRegistered = () => this.registry.get(id) === service;
+    await stopChargePointTransactionsAndWait(
+      {
+        list: () => [id],
+        get: (cpId) => (cpId === id && stillRegistered() ? service : undefined),
+      },
+      id,
+      this.deps.stopTransactionsWaitMs ?? DEFAULT_STOP_WAIT_MS,
+      {
+        reason,
+        log: (line) => service.logTransactionNote(line),
+      },
+    );
+    if (!stillRegistered()) {
+      throw new RpcFailure(
+        "unavailable",
+        `cpId ${id} was replaced while its transactions were being stopped; the replacement was left as is`,
+      );
+    }
+    if (close === "remove") this.registry.remove(id);
+    else service.disconnect();
   }
 
   async removeChargePoint(id: string): Promise<void> {

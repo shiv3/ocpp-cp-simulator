@@ -771,7 +771,7 @@ export class ChargePoint {
 
   constructor(
     private readonly _id: string,
-    private readonly _bootNotification: BootNotification,
+    private _bootNotification: BootNotification,
     connectorCount: number,
     wsUrl: string,
     basicAuthSettings: BasicAuthSettings | null,
@@ -4924,6 +4924,29 @@ export class ChargePoint {
    */
   bootPayload(): BootNotification {
     return bootNotificationFor(this._bootNotification, this._modem);
+  }
+
+  /**
+   * The firmware the station runs from now on: the `firmwareVersion` of
+   * every later BootNotification (OCPP 1.6 §4.2, 2.0.1 B01). Set by a
+   * simulated firmware update that ended in Installed with `bumpVersion`
+   * (OCPP 1.6 §5.19, 2.0.1 L01), before the reboot's BootNotification. Sends
+   * nothing by itself; emits `firmwareVersionChanged` when the value changed,
+   * so a host can persist it. The boot data object is replaced, never
+   * mutated: it may be shared with the caller that built the station.
+   */
+  setFirmwareVersion(firmwareVersion: string): void {
+    const previous = this._bootNotification.firmwareVersion;
+    if (previous === firmwareVersion) return;
+    this._bootNotification = { ...this._bootNotification, firmwareVersion };
+    this._logger.info(
+      `Firmware version ${String(previous)} -> ${firmwareVersion}`,
+      LogType.OCPP,
+    );
+    this._events.emit("firmwareVersionChanged", {
+      firmwareVersion,
+      ...(previous === undefined ? {} : { previous }),
+    });
   }
 
   /**

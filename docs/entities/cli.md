@@ -769,6 +769,10 @@ ocpp-cp-sim --cp-id CP001 --http-url http://127.0.0.1:9700 \
   --send '{"command":"status"}' \
   --http-basic-auth-user admin --http-basic-auth-pass secret
 
+# Stop CP001's running transactions (reason Other), wait for the answers, then disconnect
+ocpp-cp-sim --cp-id CP001 \
+  --send '{"command":"disconnect","params":{"stopTransactions":true}}'
+
 # Shut down the server
 ocpp-cp-sim --stop
 ```
@@ -777,7 +781,9 @@ ocpp-cp-sim --stop
 methods such as `cp.create`, `logs.get`, and `state.reset` are available over
 the Socket.IO RPC contract documented in
 [Control plane → Daemon methods](../concepts/control-plane.md#daemon-methods)
-and through the browser UI. How the client authenticates to a protected
+and through the browser UI. `stopTransactions` on `disconnect` and `cp.delete` is a daemon feature
+([Control plane → Stopping transactions on close](../concepts/control-plane.md#stopping-transactions-on-close)):
+the standalone JSON Lines and REPL `disconnect` ignore it. How the client authenticates to a protected
 daemon is covered in [Access control](../concepts/access-control.md#authenticating-to-a-protected-daemon).
 
 ## Subcommands
@@ -1227,7 +1233,7 @@ the OCPP answer are unchanged.
 | `--log-rotate-daily`                        | No       | off                                     | Rotate `--log-file` when the local date changes.                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `--log-keep <n>`                            | No       | `5`                                     | Rotated files kept (`file.1` … `file.n`).                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `--shutdown-stop-transactions`              | No       | off                                     | On any shutdown (SIGINT / SIGTERM, `server.shutdown`) stop every running transaction and wait for the CSMS to answer before exiting. See [Daemon → Shutdown and restore](daemon.md#shutdown-and-restore).                                                                                                                                                                                                                                                                                     |
-| `--shutdown-wait-ms <ms>`                   | No       | `5000`                                  | Longest wait for those answers. A second signal ends the wait.                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `--shutdown-wait-ms <ms>`                   | No       | `5000`                                  | Longest wait for those answers. A second signal ends the wait. Also the wait of `cp.delete` / `disconnect` with `stopTransactions: true` ([Control plane](../concepts/control-plane.md#stopping-transactions-on-close)), which needs no `--shutdown-stop-transactions`.                                                                                                                                                                                                                       |
 | `--no-connect-restored`                     | No       | off                                     | Restore the charge points of `--state-db` without dialling them; connect with `cp.connect` / `cp.bulk`.                                                                                                                                                                                                                                                                                                                                                                                       |
 | `--cp-bulk-wait-ms <ms>`                    | No       | `10000`                                 | Per-charge-point wait of `cp.bulk` and `cp.scenario.run` ([Control plane](../concepts/control-plane.md#charge-point-labels)).                                                                                                                                                                                                                                                                                                                                                                 |
 | `--trace-output <path>`                     | No       | -                                       | Append each OCPP-J (WebSocket) wire message as a JSONL trace record ([Trace format](../concepts/trace-format.md)) in REPL, JSON, and daemon modes; SOAP transport is not captured yet.                                                                                                                                                                                                                                                                                                        |

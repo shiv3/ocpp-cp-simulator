@@ -21,7 +21,7 @@ related:
   - ../concepts/charger-engine.md
   - charger-engine-migration.md
   - ../entities/docker-image.md
-updated: 2026-11-09
+updated: 2026-11-15
 ---
 
 # Testing strategy
@@ -238,7 +238,7 @@ in both directions in arrival order, normalizes it, and compares it with a commi
   whole case one budget, boot included, under the test timeout; a boot or reconnect wait that runs out
   reports the frames seen and the station's socket events (refusals, scheduled reconnects).
 - **Cases**: three sets, 335 in all (103 scripted + 54 templates + 178 regression = 335 fixtures; the suite
-  reports 338 tests, the 335 cases plus 3 harness checks). `cases.ts` holds 103 scripted cases over both versions (boot
+  reports 338 tests, the 335 cases plus 3 harness checks). `cases.ts` holds 103 scripted cases over both versions (the first sections live in `goldenWire/cases/{boot,transactions,reset,firmware}.ts` with the shared helpers in `cases/helpers.ts`; `cases.ts` concatenates them in the original order) (boot
   including Pending and Rejected, status walk, authorize, local and remote start / stop, meter values, EV
   disconnect, reset, `UpdateFirmware` including `SimulatedFirmwareUpdateFailure`, `SignedUpdateFirmware`,
   `GetDiagnostics` / `GetLog`, `ChangeAvailability` including `Scheduled`, reservations, unlock,

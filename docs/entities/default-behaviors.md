@@ -6,6 +6,7 @@ sources:
   - packages/core/src/cp/application/engine/behaviors/
   - packages/core/src/cp/application/behavior/paramsSchema.ts
   - packages/core/src/cp/application/engine/behaviors/defaultActions.ts
+  - packages/core/src/cp/application/engine/behaviors/firmwareVersion.ts
   - packages/core/src/cp/infrastructure/transport/handlers/buildV16CallHandlerRegistry.ts
   - packages/core/src/cp/infrastructure/transport/v201/inboundRegistryV201.ts
   - "issue #566"
@@ -31,7 +32,7 @@ related:
   - ../analyses/scenario-or-behavior.md
   - cli.md
   - ../concepts/scenario-format.md
-updated: 2026-11-14
+updated: 2026-11-15
 ---
 
 # Default behaviors
@@ -87,9 +88,11 @@ Set them where a behavior is selected: a scenario's [`useBehavior`](../concepts/
 |                          | `train`                 | boolean                                                                                         | `false`        | OCPP 2.x only (#600): walk the [2.x train](#ocpp-2x-firmware-train) instead of only acknowledging. 1.6 always walks its train.                                                                                                                                                                                                                                                                                                                   |
 |                          | `waitForTransactions`   | boolean                                                                                         | `false`        | Hold the installation until no connector has a transaction (1.6 §5.19; 2.x L01.FR.06). Polled once a second.                                                                                                                                                                                                                                                                                                                                     |
 |                          | `connectorsUnavailable` | boolean                                                                                         | `false`        | Park idle connectors `Unavailable` from the wait for transactions (or from the install, when not waiting) until the update ends, and park one that becomes idle meanwhile (1.6 §5.19; 2.x L01.FR.07). Neither the availability nor the status is persisted by the hold, and the update gives both back, also when it fails or is replaced.                                                                                                       |
-|                          | `reboot`                | `none`, `afterInstalled`, `beforeInstalled`                                                     | `none`         | `beforeInstalled`: after `Installing` send BootNotification and report `Installed` once the CSMS accepted it (1.6 §5.19 "automatic reboot"; 2.x L01.FR.32 a, with `InstallRebooting` first). `afterInstalled`: report `Installed`, then send BootNotification (L01.FR.32 b). Waits up to ten minutes for the acceptance; without it `Installed` is not reported. The reported `firmwareVersion` does not change.                                 |
+|                          | `reboot`                | `none`, `afterInstalled`, `beforeInstalled`                                                     | `none`         | `beforeInstalled`: after `Installing` send BootNotification and report `Installed` once the CSMS accepted it (1.6 §5.19 "automatic reboot"; 2.x L01.FR.32 a, with `InstallRebooting` first). `afterInstalled`: report `Installed`, then send BootNotification (L01.FR.32 b). Waits up to ten minutes for the acceptance; without it `Installed` is not reported. The reported `firmwareVersion` changes only with `bumpVersion`.                 |
 |                          | `jitterMs`              | integer 0 to 3 600 000                                                                          | `0`            | Add a draw from 0 to `jitterMs` to every step, from the station's seeded stream `firmware`: the same seed gives the same timing. `0` draws nothing.                                                                                                                                                                                                                                                                                              |
+|                          | `bumpVersion`           | boolean                                                                                         | `false`        | When the update ends in `Installed`, the station runs the new firmware: the next BootNotification (the reboot's, with 2.x reason `FirmwareUpdate`; with `reboot: none` the next boot) carries the version [derived](#firmware-version-after-the-update) from `location`. Never on a failure. On 2.x it needs `train`.                                                                                                                            |
 | `default.signedFirmware` | `stepMs`                | integer 0 to 3 600 000                                                                          | `2000`         | Time between two `SignedFirmwareStatusNotification`s.                                                                                                                                                                                                                                                                                                                                                                                            |
+|                          | `bumpVersion`           | boolean                                                                                         | `false`        | `Installed` sets the station's `firmwareVersion` to the version [derived](#firmware-version-after-the-update) from `firmware.location`. This train never reboots: the next BootNotification (a `Reset`, a reconnect) carries it.                                                                                                                                                                                                                 |
 | `default.logs`           | `uploadMs`              | integer 0 to 3 600 000                                                                          | `2000`         | Time between `Uploading` and `Uploaded`.                                                                                                                                                                                                                                                                                                                                                                                                         |
 |                          | `auto`                  | boolean                                                                                         | `true`         | OCPP 2.x only (#601): send `Uploading` and `Uploaded` after an accepted `GetLog` and answer `AcceptedCanceled` to a `GetLog` that replaces an upload. `false` is the station of before #601: acknowledge only, the control plane drives the notifications. 1.6 always uploads.                                                                                                                                                                   |
 | `default.reset`          | `delayMs`               | integer 0 to 3 600 000                                                                          | `0`            | Wait this long after the answer settled before the reset takes effect (transactions stopped, then the boot or reconnect). `0` adds no wait at all. A 2.x `OnIdle` reset that is `Scheduled` is not delayed: it already waits for the last transaction.                                                                                                                                                                                           |
@@ -126,6 +129,43 @@ next wait without sending anything more (L01.FR.24 allows `DownloadFailed` / `In
 not require them). A train that was replaced leaves the connectors it parked to the train that replaced it. Not
 simulated: `InvalidCertificate` for a bad signing certificate (L01.FR.21, FR.22), `DownloadPaused` and a bootloader
 that cannot report `Installing` (FR.23).
+
+## Firmware version after the update
+
+A CSMS that rolls firmware out decides that a station is done by its inventory: the `firmwareVersion` of the
+BootNotification that follows the update (OCPP 1.6 §4.2 BootNotification.req, §5.19 UpdateFirmware, §4.7
+FirmwareStatusNotification `Installed`; 2.0.1 L01.FR.28, the reboot of L01.FR.32 with BootReason `FirmwareUpdate`,
+B01.FR.09). A station that reboots with the version it had cannot test that logic, so `bumpVersion` (off by
+default: with it off the wire is unchanged) makes `default.firmware` and `default.signedFirmware` install a new
+version when the update ends in `Installed`.
+
+The version is set when the update reaches `Installed`, and with `reboot: beforeInstalled` just before the reboot's
+BootNotification, so that boot carries it. It is never set on a failure path (`DownloadFailed`,
+`InvalidSignature`, `InstallationFailed`, `InstallVerificationFailed`), on an update that was replaced or
+cancelled before that point, or on the 2.x acknowledge-only path (`train: false`), where the control plane reports
+the statuses. One exception to "replaced": with `reboot: beforeInstalled` the version is set (and persisted) before
+the reboot, so a request that replaces the train while it waits for the reboot's answer leaves the station on the
+version the old train already set; `Installed` is then not sent for it.
+
+The new version (`deriveFirmwareVersion` in
+[`firmwareVersion.ts`](../../packages/core/src/cp/application/engine/behaviors/firmwareVersion.ts)):
+
+1. Take the request's `location` (1.6 `UpdateFirmware.location`, 2.x and SignedUpdateFirmware
+   `firmware.location`), drop the query (`?…`) and fragment (`#…`), and keep the last non-empty path segment.
+2. Strip archive and image extensions from its end, as often as they occur (case-insensitive): `bin`, `img`,
+   `hex`, `fw`, `dfu`, `elf`, `swu`, `pkg`, `deb`, `rpm`, `ipk`, `zip`, `tar`, `tgz`, `gz`, `bz2`, `xz`, `zst`,
+   `7z`, `sig`, `signed`.
+3. The first match of `/\d+(?:\.\d+)+(?:[-+][0-9A-Za-z.-]+)?/` is the version:
+   `https://x/fw/cp-firmware-2.3.1.bin` → `2.3.1`, `v1.4.0-rc1.tar.gz` → `1.4.0-rc1`. A match equal to the current
+   version is kept (the same firmware rolled out again).
+4. Without a match the current version is incremented: a trailing number goes up by one, keeping leading zeros
+   (`1.0` → `1.1`, `fw-7` → `fw-8`, `2.0.9` → `2.0.10`, `fw-007` → `fw-008`); without a trailing number `.1` is
+   appended (`beta` → `beta.1`); an empty version becomes `1`.
+5. The result is cut to 50 characters, the BootNotification limit (1.6 CiString50Type, 2.x string(50)).
+
+On the daemon the new version is written to the charge point's `boot_notif` column, so a restart boots with it
+(see [State persistence](../concepts/state-persistence.md)), and `cp.update` without `bootNotification` keeps it.
+The browser's Local mode does not store it: a reload brings the configured version back.
 
 ## Per action and version
 

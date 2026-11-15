@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { stopTransactionsAndWait } from "../gracefulShutdown";
+import {
+  stopChargePointTransactionsAndWait,
+  stopTransactionsAndWait,
+} from "../gracefulShutdown";
 import { createLifecycle } from "../lifecycle";
 import type { CPRegistry } from "../CPRegistry";
 
@@ -11,6 +14,9 @@ function fakeService(opts: {
   connectors?: number[];
   /** Read on every pass, so a test can open a transaction mid-wait. */
   live?: () => number[];
+  /** The transaction id each connector's stop carries; absent = not known
+   *  yet (a 1.6 id not assigned), which claims the first stop frame. */
+  wireIds?: Record<number, string>;
 }) {
   let handler: FrameHandler | null = null;
   const stopped: number[] = [];
@@ -24,6 +30,7 @@ function fakeService(opts: {
       return true;
     },
     openTransactionConnectorIds: () => opts.live?.() ?? opts.connectors ?? [1],
+    transactionWireId: (id: number) => opts.wireIds?.[id],
     onWireFrame: (h: FrameHandler) => {
       handler = h;
       return () => {
@@ -87,7 +94,9 @@ describe("stopTransactionsAndWait", () => {
 
   it("gives up at the time limit when the CSMS never answers", async () => {
     const cp = fakeService({ connectors: [1] });
-    const report = await stopTransactionsAndWait(registryOf({ A: cp }), 150);
+    const done = stopTransactionsAndWait(registryOf({ A: cp }), 150);
+    cp.emit("Sent", '[2,"m1","StopTransaction",{"transactionId":7}]');
+    const report = await done;
     expect(report).toEqual({ stopped: 1, delivered: 0, timedOut: true });
     expect(cp.queued.count).toBe(1); // the unanswered stop is not lost
   });
@@ -131,6 +140,55 @@ describe("stopTransactionsAndWait", () => {
     await expect(done).resolves.toMatchObject({ stopped: 2, delivered: 2 });
   });
 
+  it("counts only answers to the stops it made, not another stop's", async () => {
+    const cp = fakeService({ connectors: [1], wireIds: { 1: "7" } });
+    const done = stopTransactionsAndWait(registryOf({ A: cp }), 5000);
+    let settled = false;
+    void done.then(() => (settled = true));
+    // A stop of another transaction (a scenario, a replayed queue) and its
+    // answer go by first: the wait goes on.
+    cp.emit("Sent", '[2,"x1","StopTransaction",{"transactionId":99}]');
+    cp.emit("Received", '[3,"x1",{}]');
+    cp.emit(
+      "Sent",
+      '[2,"x2","TransactionEvent",{"eventType":"Ended","transactionInfo":{"transactionId":"other"}}]',
+    );
+    cp.emit("Received", '[3,"x2",{}]');
+    await new Promise((r) => setTimeout(r, 150));
+    expect(settled).toBe(false);
+    cp.emit("Sent", '[2,"m1","StopTransaction",{"transactionId":7}]');
+    cp.emit("Received", '[3,"m1",{}]');
+    await expect(done).resolves.toEqual({
+      stopped: 1,
+      delivered: 1,
+      timedOut: false,
+    });
+  });
+
+  it("queues at the limit only when a stop of its own is unanswered", async () => {
+    // Its own stop answered, another one not: nothing to queue.
+    const answered = fakeService({ connectors: [1], wireIds: { 1: "7" } });
+    const first = stopTransactionsAndWait(registryOf({ A: answered }), 2000);
+    answered.emit("Sent", '[2,"x1","StopTransaction",{"transactionId":99}]');
+    answered.emit("Sent", '[2,"m1","StopTransaction",{"transactionId":7}]');
+    answered.emit("Received", '[3,"m1",{}]');
+    await expect(first).resolves.toMatchObject({ delivered: 1 });
+    expect(answered.queued.count).toBe(0);
+
+    // Another stop answered, its own not: the wait times out and queues it.
+    const pending = fakeService({ connectors: [1], wireIds: { 1: "7" } });
+    const second = stopTransactionsAndWait(registryOf({ A: pending }), 150);
+    pending.emit("Sent", '[2,"m1","StopTransaction",{"transactionId":7}]');
+    pending.emit("Sent", '[2,"x1","StopTransaction",{"transactionId":99}]');
+    pending.emit("Received", '[3,"x1",{}]');
+    await expect(second).resolves.toEqual({
+      stopped: 1,
+      delivered: 0,
+      timedOut: true,
+    });
+    expect(pending.queued.count).toBe(1);
+  });
+
   it("stops waiting when told to skip", async () => {
     const cp = fakeService({ connectors: [1] });
     let skip!: () => void;
@@ -143,6 +201,51 @@ describe("stopTransactionsAndWait", () => {
     );
     skip();
     await expect(done).resolves.toMatchObject({ stopped: 1, delivered: 0 });
+  });
+});
+
+describe("stopChargePointTransactionsAndWait", () => {
+  it("stops only the named charge point and waits for its answer", async () => {
+    const a = fakeService({ connectors: [1, 2] });
+    const b = fakeService({ connectors: [1] });
+    const done = stopChargePointTransactionsAndWait(
+      registryOf({ A: a, B: b }),
+      "A",
+      5000,
+    );
+    expect(a.stopped).toEqual([1, 2]);
+    expect(b.stopped).toEqual([]);
+    expect(b.subscribed()).toBe(false);
+    a.emit("Sent", '[2,"m1","StopTransaction",{"transactionId":1}]');
+    a.emit("Sent", '[2,"m2","StopTransaction",{"transactionId":2}]');
+    a.emit("Received", '[3,"m1",{}]');
+    a.emit("Received", '[3,"m2",{}]');
+    await expect(done).resolves.toEqual({
+      stopped: 2,
+      delivered: 2,
+      timedOut: false,
+    });
+  });
+
+  it("defaults to Other and passes a given reason, keeping AbnormalCondition", async () => {
+    const a = fakeService({ connectors: [1], online: false });
+    await stopChargePointTransactionsAndWait(registryOf({ A: a }), "A", 0);
+    await stopChargePointTransactionsAndWait(registryOf({ A: a }), "A", 0, {
+      reason: "Local",
+    });
+    expect(a.options).toEqual([
+      { reason: "Other", triggerReason: "AbnormalCondition" },
+      { reason: "Local", triggerReason: "AbnormalCondition" },
+    ]);
+  });
+
+  it("does nothing for an unknown charge point", async () => {
+    const report = await stopChargePointTransactionsAndWait(
+      registryOf({}),
+      "missing",
+      5000,
+    );
+    expect(report).toEqual({ stopped: 0, delivered: 0, timedOut: false });
   });
 });
 

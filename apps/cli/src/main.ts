@@ -1940,7 +1940,9 @@ Options:
                            On any shutdown (signal, server.shutdown) stop running
                            transactions and wait
                            for the CSMS to answer before exiting.
-  --shutdown-wait-ms <ms>  Longest wait for those answers (default 5000).
+  --shutdown-wait-ms <ms>  Longest wait for those answers (default 5000); also
+                           the wait of cp.delete / disconnect with
+                           stopTransactions.
   --no-connect-restored    Restore charge points from --state-db without dialling
                            them (connect with cp.connect).
   --cp-bulk-wait-ms <ms>   Per-charge-point wait of cp.bulk (default 10000).
@@ -2461,6 +2463,7 @@ async function main(): Promise<void> {
       shutdownStopTransactions: options.shutdownStopTransactions
         ? { waitMs: options.shutdownWaitMs }
         : undefined,
+      shutdownWaitMs: options.shutdownWaitMs,
       connectRestored: options.connectRestored,
       cpBulkWaitMs: options.cpBulkWaitMs,
       staticDir: options.serveStatic,

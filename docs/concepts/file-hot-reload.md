@@ -6,6 +6,7 @@ sources:
   - apps/cli/src/server/FileWatcher.ts
   - apps/cli/src/server/FileReloadManager.ts
   - apps/cli/src/server/startServer.ts
+  - apps/cli/src/server/startupScenario.ts
   - apps/cli/src/service.ts
   - GitHub issue #314
   - GitHub issue #338
@@ -15,7 +16,7 @@ related:
   - state-persistence.md
   - control-plane.md
   - scenario-format.md
-updated: 2026-11-05
+updated: 2026-11-15
 ---
 
 # File hot-reload (`--watch`)
@@ -345,7 +346,8 @@ scenario. That deletion, too, does not depend on `--watch`.
 `--scenario-template` and `--scenario-template-file` each load a definition onto
 every selected connector, so two of them together is a question with no answer.
 The daemon refuses the combination — at parse time in the CLI, and again before
-`startServer` opens the state DB, with a message naming the flags it cannot
+`startServer` opens the state DB (`startupScenarioOptionConflict` in
+`startupScenario.ts`), with a message naming the flags it cannot
 reconcile — rather than ranking them. Ranking is what it did before, and it did
 it in three places that disagreed: the load preferred `--scenario-template`, the
 boot's single file read preferred `--scenario-template-file`, and the claim

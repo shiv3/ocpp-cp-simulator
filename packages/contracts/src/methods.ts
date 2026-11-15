@@ -72,6 +72,26 @@ const CONN_NONNEG = z.number().int().min(0);
 const CONN_DEF = CONN_POS.nullable();
 const EMPTY = z.object({});
 /**
+ * The opt-in stop of `cp.delete` / `disconnect`: the running transactions are
+ * stopped, and the answers waited for up to the daemon's `--shutdown-wait-ms`,
+ * before the charge point is closed. Without it the charge point goes away
+ * with its transactions open and sends nothing.
+ */
+const STOP_ON_CLOSE = {
+  stopTransactions: z
+    .boolean()
+    .optional()
+    .describe(
+      "Stop every running transaction first (1.6 StopTransaction, 2.x TransactionEvent Ended with triggerReason AbnormalCondition) and wait up to the daemon's --shutdown-wait-ms (default 5000) for the CSMS to answer. Default false: the transactions stay open and nothing is sent",
+    ),
+  reason: z
+    .enum(STOP_REASONS)
+    .optional()
+    .describe(
+      "With stopTransactions: StopTransaction.req reason (1.6) / stoppedReason (2.x); default Other, as the shutdown stop",
+    ),
+};
+/**
  * A string that names something — an id, a tag, a vendor, a path. Empty names
  * nothing, and the handlers do not re-check (#383): an empty `tagId` would
  * skip the idTag pool, an empty `scenarioId` would look up no scenario.
@@ -1061,7 +1081,7 @@ const powerRecoveryShape = {
 export const METHODS = {
   // -- lifecycle --
   connect: { params: EMPTY, result: ANY },
-  disconnect: { params: EMPTY, result: ANY },
+  disconnect: { params: z.object(STOP_ON_CLOSE), result: ANY },
   reset: { params: EMPTY, result: ANY },
   status: { params: EMPTY, result: statusWireSchema },
   heartbeat: { params: EMPTY, result: ANY },
@@ -1653,7 +1673,10 @@ export const METHODS = {
     result: fleetCreateResultSchema,
   },
   "cp.update": { params: updateParamsSchema, result: ANY },
-  "cp.delete": { params: z.object({ cpId: NON_EMPTY_STR }), result: ANY },
+  "cp.delete": {
+    params: z.object({ cpId: NON_EMPTY_STR, ...STOP_ON_CLOSE }),
+    result: ANY,
+  },
   "cp.labels.set": {
     params: cpLabelsSetParamsSchema,
     result: z.object({ cpId: STR_64K }),

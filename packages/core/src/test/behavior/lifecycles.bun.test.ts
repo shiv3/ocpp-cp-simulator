@@ -265,19 +265,19 @@ describe("OCPP 2.x firmware train (#600)", () => {
   });
 });
 
-/** A session on connector 1: plug in at 0.5 s, charge, stop after `chargeMs`. */
-const session = (chargeMs: number): Behavior => ({
+/** A session on `connector` (default 1): plug in at 0.5 s, charge, stop after `chargeMs`. */
+const session = (chargeMs: number, connector = 1): Behavior => ({
   api: 1,
-  id: "session",
+  id: connector === 1 ? "session" : `session-${connector}`,
   requires: ["physical"],
   main: async (ctx) => {
-    ctx.plugIn(1);
+    ctx.plugIn(connector);
     await ctx.sleep(500);
-    ctx.startCharging(1, "TAG-1");
+    ctx.startCharging(connector, `TAG-${connector}`);
     await ctx.sleep(chargeMs);
-    ctx.stopCharging(1, "Local");
+    ctx.stopCharging(connector, "Local");
     await ctx.sleep(500);
-    ctx.unplug(1);
+    ctx.unplug(connector);
   },
 });
 
@@ -504,6 +504,38 @@ describe("reboot after the update (#600)", () => {
     await run.advance(3000);
     expect(run.callsOf("BootNotification")).toHaveLength(0);
     expect(run.cp.getConnector(2)?.availability).toBe("Inoperative");
+  });
+
+  // L01.FR.07 (#871, #956): an EVSE whose session ends while the reboot still
+  // waits for another one is held too, and given back after the reboot.
+  test("2.x reboot wait holds an EVSE that becomes idle during the wait", async () => {
+    run = await runBehavior({
+      version: "2.0.1",
+      connectors: 2,
+      behaviors: [session(8000), session(3000, 2)],
+    });
+    select(run, {
+      train: true,
+      stepMs: 100,
+      reboot: "afterInstalled",
+      connectorsUnavailable: true,
+    });
+    await run.advance(2000);
+    expect(run.cp.getConnector(2)?.transaction).toBeTruthy();
+    await run.call("UpdateFirmware", fw2(35));
+    await run.advance(1000);
+    expect(statuses(run).at(-1)).toBe("Installed");
+    expect(run.cp.getConnector(2)?.availability).toBe("Operative");
+
+    await run.advance(2000); // session 2 ends at about 4 s
+    expect(run.cp.getConnector(1)?.transaction).toBeTruthy();
+    expect(run.callsOf("BootNotification")).toHaveLength(0);
+    expect(run.cp.getConnector(2)?.availability).toBe("Inoperative");
+    expect(run.cp.getConnector(2)?.status).toBe(OCPPStatus.Unavailable);
+
+    await run.advance(6000); // session 1 ends at about 9.5 s
+    expect(run.callsOf("BootNotification")).toHaveLength(1);
+    expect(run.cp.getConnector(2)?.availability).toBe("Operative");
   });
 
   // B01.FR.09 (#846): the reboot after a firmware update says so.

@@ -55,10 +55,7 @@ import {
   ClientCertificateState,
   type ClientIdentity,
 } from "./ws/clientCertificateState";
-import {
-  GenerationTokenImpl,
-  neverReachedCsms,
-} from "./ws/closeClassification";
+import { GenerationTokenImpl } from "./ws/closeClassification";
 import { UpgradeRefusalDiagnostic } from "./ws/upgradeRefusalDiagnostic";
 import {
   dispatchIncomingFrame,
@@ -72,7 +69,7 @@ import { ReconnectScheduler } from "./ws/reconnectScheduler";
 import { createHost } from "./ws/socketHost";
 import { PingTimer } from "./ws/pingTimer";
 
-export { neverReachedCsms };
+export { neverReachedCsms } from "./ws/closeClassification";
 
 /**
  * #393: sees every well-shaped incoming frame (an array of 3 to 5 elements)

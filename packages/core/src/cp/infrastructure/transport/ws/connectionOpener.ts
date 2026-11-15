@@ -8,9 +8,11 @@ import {
 import { type CloseCause } from "../network-sim";
 import { type SocketClose } from "../../../domain/transport/ChargePointSocket";
 import {
+  classifyFailedAttempt,
+  describeConnectError,
   GenerationTokenImpl,
-  neverReachedCsms,
   SUPERSEDED_CLOSE,
+  type ConnectErrorDetail,
 } from "./closeClassification";
 import type { OcppWebSocketHost } from "./socketHost";
 
@@ -80,7 +82,14 @@ export class ConnectionOpener {
     const onmessageHandler = (ev: MessageEvent) => {
       this.host.controller.receiveDownstream(ev.data.toString());
     };
-    const onerrorHandler = this.host.handleError;
+    // #1034: the first error of this attempt, before it opened. Bun 1.4.4
+    // puts the cause there and closes with a blank 1006. Closure-local, so a
+    // superseded socket's late error cannot speak for this attempt.
+    let firstError: ConnectErrorDetail | undefined;
+    const onerrorHandler = (ev: Event) => {
+      if (!opened) firstError ??= describeConnectError(ev);
+      this.host.handleError(ev);
+    };
 
     // Capture the current generation for this socket connection
     const socketGeneration = this.host.generationCounter;
@@ -106,7 +115,8 @@ export class ConnectionOpener {
         }
         // Only a failed connection attempt counts, not one the station
         // closed itself before it opened, nor one no CSMS ever saw.
-        if (!opened && closeCause === "network" && !neverReachedCsms(ev)) {
+        const kind = opened ? null : classifyFailedAttempt(ev, firstError);
+        if (kind && closeCause === "network" && kind !== "unreached") {
           this.host.clientCerts.onFailed(attempt.renewed);
         }
         this.host.handleClose(ev, closeCause);

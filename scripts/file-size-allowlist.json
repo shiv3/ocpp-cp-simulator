@@ -39,11 +39,8 @@
   "packages/core/src/cp/domain/security/CertificateStore.ts": 880,
   "packages/core/src/cp/infrastructure/transport/OCPPMessageHandler.ts": 1191,
   "packages/core/src/cp/infrastructure/transport/OCPPMessageHandlerV201.ts": 1127,
-  "packages/core/src/cp/infrastructure/transport/OCPPWebSocket.ts": 1294,
   "packages/core/src/cp/infrastructure/transport/soap/OCPPSoapHandler.ts": 809,
   "packages/core/src/cp/infrastructure/transport/soap/soapEnvelope.ts": 905,
-  "packages/core/src/cp/infrastructure/transport/v16/serialCallQueueV16.ts": 1017,
-  "packages/core/src/cp/infrastructure/transport/wsUrlWithBasic.ts": 992,
   "packages/core/src/test/goldenWire/cases.ts": 945,
   "packages/core/src/test/goldenWire/regressionCases.ts": 2861
 }

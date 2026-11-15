@@ -16,7 +16,7 @@ related:
   - choosing-an-interface.md
   - ../sources/github-issues.md
   - ../sources/bench-readme.md
-updated: 2026-11-09
+updated: 2026-11-15
 ---
 
 # Fleet, load and observability roadmap
@@ -157,8 +157,8 @@ So:
 
 **Touches.** `cpParamsBaseSchema` in `packages/contracts/src/methods.ts`, the resolution
 step in `apps/cli/src/service.ts`, and URL selection in
-`packages/core/src/cp/infrastructure/transport/OCPPWebSocket.ts` beside the existing
-exponential-backoff logic (~L820).
+`packages/core/src/cp/infrastructure/transport/ws/reconnectScheduler.ts` beside the existing
+exponential-backoff logic (`attemptReconnect`).
 
 **Acceptance.** After a forced disconnect (reusing
 [network simulation](../concepts/network-simulation.md)) `round-robin` lands on

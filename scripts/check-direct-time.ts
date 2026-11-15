@@ -50,6 +50,7 @@ export const SCANNED_FILES = [
   "packages/core/src/cp/infrastructure/transport/v201/eventQueuesV201.ts",
   "packages/core/src/cp/infrastructure/transport/v201/callPipelineV201.ts",
   "packages/core/src/cp/infrastructure/transport/v16/serialCallQueueV16.ts",
+  "packages/core/src/cp/infrastructure/transport/v16/transactionCallErrorV16.ts",
   "packages/core/src/cp/infrastructure/transport/v16/transactionMessagesV16.ts",
   "packages/core/src/cp/infrastructure/transport/v16/securityEventQueueV16.ts",
   "packages/core/src/cp/infrastructure/transport/CallWaiters.ts",

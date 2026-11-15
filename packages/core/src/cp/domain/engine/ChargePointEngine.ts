@@ -1,5 +1,6 @@
 import type {
   Behavior,
+  BehaviorParamsProjection,
   ChargerSnapshot,
   ConnectorSnapshot,
   JsonObject,
@@ -87,6 +88,8 @@ export interface ChargePointEngine {
   readonly state: ChargerState;
   /** Ids of the loaded code behaviors. */
   readonly behaviorIds: readonly string[];
+  /** The resolved behavior params, read-only (selected / armed / active, overrides). */
+  behaviorParamsProjection(): BehaviorParamsProjection;
   /** The params the station's selection gave each behavior, a copy. */
   readonly selectedParams: Record<string, JsonObject>;
 

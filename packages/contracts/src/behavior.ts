@@ -239,6 +239,79 @@ export interface Behavior {
   onResume?(ctx: BehaviorContext): Promise<void>;
 }
 
+/**
+ * The resolved behavior params of a station, as a read-only projection (#654).
+ * An integration contract for diagnostics (#925 `scenario-run.json`): it is
+ * plain JSON, holds no engine internals and adds no behavior. Lists are sorted
+ * (behaviors by id, owners by key, overrides by param name) so a serialization
+ * with sorted object keys is deterministic.
+ */
+export interface BehaviorParamsProjection {
+  readonly schemaVersion: 1;
+  readonly behaviors: readonly BehaviorProjection[];
+}
+
+/** Who holds a behavior for the length of a scenario run (`useBehavior`). */
+export interface BehaviorHolderProjection {
+  readonly scenarioId: string;
+  readonly connectorId: number;
+  readonly nodeId: string;
+  /** `disable`: the run answers `Accepted` instead of the behavior. */
+  readonly mode: "use" | "disable";
+  /** Names of the params this holder set; the values are in `overrides`. */
+  readonly paramKeys: readonly string[];
+}
+
+/** A param whose effective value is not the behavior's default. */
+export interface BehaviorOverrideProjection {
+  readonly key: string;
+  /** `null` when the behavior declares no default for it. */
+  readonly default: JsonValue | null;
+  readonly effective: JsonValue;
+  /** The layer that decided: the station's selection or a running scenario. */
+  readonly source: "selection" | "scenario";
+}
+
+export interface BehaviorProjection {
+  readonly id: string;
+  readonly kind: "default" | "code";
+  /** Behaviors carry no version today; reserved, always `null`. */
+  readonly version: string | null;
+  readonly declaresParams: boolean;
+  /**
+   * `selected`: the station's configuration chose it (a loaded code behavior,
+   * or a built-in with selection params). `armed`: a scenario run holds it
+   * now. `active`: it answers CALLs right now (not disabled; a dormant one
+   * only while a run holds it). A built-in is active unless a run disables it.
+   */
+  readonly state: {
+    readonly selected: boolean;
+    readonly armed: boolean;
+    readonly active: boolean;
+    readonly disabled: boolean;
+  };
+  /** Running scenario holders, oldest first. Empty once the runs ended or were cancelled. */
+  readonly heldBy: readonly BehaviorHolderProjection[];
+  readonly params: {
+    readonly defaults: JsonObject;
+    /** The station's selection layer, `{}` when none. */
+    readonly selection: JsonObject;
+    /** What `ctx.params` hands out now. */
+    readonly effective: JsonObject;
+    readonly overrides: readonly BehaviorOverrideProjection[];
+  };
+  /**
+   * Counts since the behavior was loaded: scenario arms, releases (a run that
+   * ended or was cancelled; the two are not told apart) and re-arms (the same
+   * node armed again while still held: a restart or a loop).
+   */
+  readonly history: {
+    readonly armed: number;
+    readonly released: number;
+    readonly rearmed: number;
+  };
+}
+
 /** A read-only view of one connector. */
 export interface ConnectorSnapshot {
   readonly id: number;

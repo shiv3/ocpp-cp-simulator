@@ -1212,6 +1212,26 @@ export class CLIChargePointService {
   }
 
   /**
+   * The id a stop of the session running on `connectorId` carries on the
+   * wire: the 2.x `transactionInfo.transactionId`, or the 1.6 CSMS-assigned
+   * `transactionId`. `undefined` when there is no session, or when a 1.6
+   * StartTransaction.conf has not assigned the id yet (the stop's id is not
+   * known before it is sent). Lets a wait tell its own stops from others.
+   */
+  transactionWireId(connectorId: number): string | undefined {
+    const transaction =
+      this._chargePoint.connectors.get(connectorId)?.transaction;
+    if (!transaction) return undefined;
+    if (transaction.cpTransactionId !== undefined) {
+      return transaction.cpTransactionId;
+    }
+    if (transaction.startUnanswered || transaction.startCallError) {
+      return undefined;
+    }
+    return String(transaction.id);
+  }
+
+  /**
    * Subscribe to the frames this charge point writes to and reads from its
    * socket, as the `Sent: <raw>` / `Received: <raw>` lines the logger emits
    * (#622: a graceful shutdown waits for the CSMS to answer the stops).

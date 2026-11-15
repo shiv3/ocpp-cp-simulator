@@ -505,6 +505,70 @@ describe("EV cable model on OCPP 2.0.1 (#453)", () => {
       await csms.stop();
     }
   });
+
+  // #846: E02.FR.13 gives every Started a chargingState, and
+  // ChargingStateEnumType has `Idle` for "no connection between EV and EVSE".
+  // An idToken-first start (E03) is not Charging before the cable is in; the
+  // plug-in then reports EVConnected and the energy offer Charging.
+  it("idToken first: Started reports Idle, then the plug-in EVConnected and Charging", async () => {
+    const csms = startMockCsms();
+    const { cp, stopAnswering } = await v201Station(csms, "CP201-TOKEN-1ST");
+    try {
+      await cp.startTransaction("TAG-846", 1);
+      const started = (
+        await csms.waitForFrame(
+          (f) =>
+            callOf("TransactionEvent")(f) &&
+            (f[3] as TransactionEventRequestV201).eventType === "Started",
+        )
+      )[3] as TransactionEventRequestV201;
+      expect(started.transactionInfo.chargingState).toBe("Idle");
+
+      cp.evPlugIn(1);
+      await csms.waitForFrame(
+        (f) =>
+          callOf("TransactionEvent")(f) &&
+          (f[3] as TransactionEventRequestV201).transactionInfo
+            .chargingState === "Charging",
+      );
+      expect(
+        transactionEvents(csms).map((e) => [
+          e.eventType,
+          e.triggerReason,
+          e.transactionInfo.chargingState,
+        ]),
+      ).toEqual([
+        ["Started", "Authorized", "Idle"],
+        ["Updated", "CablePluggedIn", "EVConnected"],
+        ["Updated", "ChargingStateChanged", "Charging"],
+      ]);
+    } finally {
+      stopAnswering();
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
+
+  it("cable first: Started still reports Charging", async () => {
+    const csms = startMockCsms();
+    const { cp, stopAnswering } = await v201Station(csms, "CP201-CABLE-1ST");
+    try {
+      cp.evPlugIn(1);
+      await cp.startTransaction("TAG-846", 1);
+      const started = (
+        await csms.waitForFrame(
+          (f) =>
+            callOf("TransactionEvent")(f) &&
+            (f[3] as TransactionEventRequestV201).eventType === "Started",
+        )
+      )[3] as TransactionEventRequestV201;
+      expect(started.transactionInfo.chargingState).toBe("Charging");
+    } finally {
+      stopAnswering();
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
 });
 
 describe("TC_003 plug-in-first template over the wire (#453)", () => {

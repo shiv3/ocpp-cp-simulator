@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Connector } from "../Connector";
-import { evConnectionOf } from "../EvConnection";
+import { evConnectionOf, startChargingStateOf } from "../EvConnection";
 import { Logger, LogLevel } from "../../../shared/Logger";
 import { OCPPStatus } from "../../types/OcppTypes";
 import type { Transaction } from "../Transaction";
@@ -45,6 +45,12 @@ describe("Connector EV connection (#453)", () => {
     expect(evConnectionOf(false, false)).toBe("disconnected");
     expect(evConnectionOf(true, true)).toBe("connected-ready");
     expect(evConnectionOf(true, false)).toBe("connected-not-ready");
+  });
+
+  // #846: ChargingStateEnumType `Idle` is "no connection between EV and EVSE".
+  it("startChargingStateOf: no cable is Idle, a cable in is Charging", () => {
+    expect(startChargingStateOf("disconnected")).toBe("Idle");
+    expect(startChargingStateOf("connected-ready")).toBe("Charging");
   });
 
   it("starts disconnected, plugs in ready, unplugs and resets readiness", () => {

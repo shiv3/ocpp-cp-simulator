@@ -100,6 +100,28 @@ describe("package boundaries on synthetic input", () => {
     expect(hasFailures(r)).toBe(true);
   });
 
+  it("keeps ocpp-rpc free of the simulator: only ocpp may be imported (#978)", () => {
+    const r = checkBoundaries(
+      snapshot({
+        "packages/ocpp-rpc/src/a.ts": [
+          'import { x } from "@ocpp-cp-simulator/core/cp/b";',
+          'import { y } from "@ocpp-cp-simulator/ocpp/c";',
+          "export const z = x + y;",
+        ].join("\n"),
+        "packages/core/src/cp/b.ts": "export const x = 1;",
+        "packages/ocpp/src/c.ts": "export const y = 1;",
+      }),
+    );
+    expect(r.violations.map((v) => [v.group, v.file, v.target])).toEqual([
+      [
+        "ocpp-rpc → core",
+        "packages/ocpp-rpc/src/a.ts",
+        "packages/core/src/cp/b.ts",
+      ],
+    ]);
+    expect(hasFailures(r)).toBe(true);
+  });
+
   it("catches a type-only forbidden edge, in every spelling", () => {
     const r = checkBoundaries(
       snapshot({

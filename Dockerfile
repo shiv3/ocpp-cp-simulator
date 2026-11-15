@@ -61,6 +61,7 @@ WORKDIR /app
 # layer stays cached until one of them (or the lockfile) changes.
 COPY package.json bun.lock bunfig.toml ./
 COPY packages/ocpp/package.json ./packages/ocpp/package.json
+COPY packages/ocpp-rpc/package.json ./packages/ocpp-rpc/package.json
 COPY packages/contracts/package.json ./packages/contracts/package.json
 COPY packages/trace/package.json ./packages/trace/package.json
 COPY packages/k6-runtime/package.json ./packages/k6-runtime/package.json

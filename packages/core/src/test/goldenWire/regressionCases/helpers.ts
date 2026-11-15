@@ -5,6 +5,7 @@
    these cases reach into station internals (configuration, listeners, runtime
    snapshots) that the public types do not expose */
 import { OCPPStatus } from "../../../cp/domain/types/OcppTypes";
+import { resolveNetworkSimConfig } from "../../../cp/infrastructure/transport/network-sim";
 import { VirtualClock } from "../../../cp/shared/clock";
 import type { GoldenCase as Case } from "../cases";
 import { Rig, type RigOptions } from "../rig";
@@ -136,3 +137,21 @@ export async function restart(r: Rig, options: Partial<RigOptions> = {}) {
   await next.connectAndBoot();
   return next;
 }
+
+export const latency = (r: Rig, ms = 500) =>
+  r.cp.setNetworkSimConfig(
+    resolveNetworkSimConfig(
+      {
+        enabled: true,
+        seed: 1,
+        rules: { l: { type: "latency", direction: "upstream", delayMs: ms } },
+      } as any,
+      null,
+      "CP-GOLDEN",
+    ) as any,
+  );
+export const dropAndBack = async (r: Rig, nth = 2) => {
+  r.csms.dropConnection();
+  await r.reconnected(nth);
+  await settle(r);
+};

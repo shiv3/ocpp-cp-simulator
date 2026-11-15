@@ -9,6 +9,7 @@ import { isOcpp2Version } from "../../../domain/types/OcppVersion";
 import { checkFirmwareSigningCertificate } from "../../../domain/security/signingCertificate";
 import { OCPPStatus } from "../../../domain/types/OcppTypes";
 import { LogType } from "../../../shared/Logger";
+import { deriveFirmwareVersion } from "./firmwareVersion";
 
 /**
  * The knobs of the 1.6 simulated update (docs/entities/default-behaviors.md).
@@ -79,6 +80,12 @@ const PARAMS: BehaviorParams = {
         description:
           "Add a seeded random 0..jitterMs to every step: the same seed gives the same timing. 0 draws nothing",
       },
+      bumpVersion: {
+        type: "boolean",
+        title: "Bump version",
+        description:
+          "When the update ends in Installed, the station runs the new firmware: the firmwareVersion of the next BootNotification (the reboot's, or the next boot when reboot is none) is the version in the file name of the request's location, else the current version incremented (docs/entities/default-behaviors.md). Never on a failure. OCPP 2.x applies it with train only",
+      },
     },
   },
   defaults: {
@@ -90,10 +97,12 @@ const PARAMS: BehaviorParams = {
     connectorsUnavailable: false,
     reboot: "none",
     jitterMs: 0,
+    bumpVersion: false,
   },
 };
 
 interface UpdateFirmwareRequest {
+  /** OCPP 1.6 */
   location?: string;
   retrieveDate?: string;
   retries?: number | null;
@@ -101,6 +110,7 @@ interface UpdateFirmwareRequest {
   requestId?: number;
   /** OCPP 2.x */
   firmware?: {
+    location?: string;
     retrieveDateTime?: string;
     installDateTime?: string;
     signature?: string;
@@ -248,6 +258,24 @@ function resolveFailure(
   return failAt === "none" ? configured : failAt;
 }
 
+/**
+ * `bumpVersion`: the update ended in Installed, so the station now runs the
+ * firmware from `location` (OCPP 1.6 §5.19, §4.7 Installed; 2.0.1 L01.FR.28).
+ * Called before the reboot's BootNotification, so that boot (2.x reason
+ * FirmwareUpdate, B01.FR.09) carries the new `firmwareVersion`; never on a
+ * failure path.
+ */
+function installVersion(
+  cp: ChargePoint,
+  ctx: BehaviorContext,
+  location: string | undefined,
+): void {
+  if (ctx.params.bumpVersion !== true) return;
+  cp.setFirmwareVersion(
+    deriveFirmwareVersion(location, cp.bootPayload().firmwareVersion),
+  );
+}
+
 function startTime(ctx: BehaviorContext, date: string | undefined): number {
   const parsed = new Date(date ?? Number.NaN).getTime();
   return Number.isNaN(parsed) || ctx.params.startAt === "now"
@@ -280,8 +308,10 @@ function startTime(ctx: BehaviorContext, date: string | undefined): number {
  * replaces one in progress is answered `AcceptedCanceled` (L01.FR.24).
  *
  * Params: `stepMs`, `failAt`, `startAt` (#654); `train`,
- * `waitForTransactions`, `connectorsUnavailable`, `reboot`, `jitterMs` (#600),
- * all off by default so the default wire output is unchanged. `failAt` set to
+ * `waitForTransactions`, `connectorsUnavailable`, `reboot`, `jitterMs` (#600);
+ * `bumpVersion` (the firmwareVersion after Installed, see
+ * {@link installVersion}), all off by default so the default wire output is
+ * unchanged. `failAt` set to
  * a failure wins over the one-shot configuration key, which is still read and
  * cleared.
  *
@@ -413,12 +443,16 @@ export function firmwareBehavior(cp: ChargePoint): Behavior {
                   ) {
                     // §5.19 "automatic reboot": Installed follows the boot.
                     releaseConnectors(cp, ctx);
+                    installVersion(cp, ctx, req.location);
                     if (!(await rebootAndWait(cp, ctx))) return;
                     ctx.notify.firmwareStatus("Installed");
                     await stepPause(ctx);
                     return;
                   }
                   ctx.notify.firmwareStatus(step);
+                  if (step === "Installed") {
+                    installVersion(cp, ctx, req.location);
+                  }
                   await stepPause(ctx);
                 }
                 if (ctx.params.reboot === "afterInstalled") {
@@ -587,12 +621,14 @@ async function train2(
       // L01.FR.33: not while a transaction runs.
       if (!(await transactionsEndedBeforeReboot(cp, ctx, cancelled))) return;
       releaseConnectors(cp, ctx);
+      installVersion(cp, ctx, firmware.location);
       if (!(await rebootAndWait(cp, ctx)) || cancelled()) return;
       status("Installed");
       reportFirmwareUpdated(cp);
       return;
     }
     status("Installed"); // L01.FR.28
+    installVersion(cp, ctx, firmware.location);
     reportFirmwareUpdated(cp); // L01.FR.31
     if (ctx.params.reboot === "afterInstalled") {
       await stepPause(ctx);

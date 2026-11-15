@@ -500,6 +500,160 @@ describe("reboot after the update (#600)", () => {
   });
 });
 
+/** The firmwareVersion of every BootNotification, 1.6 and 2.x shapes. */
+const bootVersions = (r: BehaviorRun) =>
+  r.callsOf("BootNotification").map((f) => {
+    const p = f.payload as {
+      firmwareVersion?: string;
+      chargingStation?: { firmwareVersion?: string };
+    };
+    return p.chargingStation?.firmwareVersion ?? p.firmwareVersion;
+  });
+
+// bumpVersion: after Installed the station runs the new firmware, and the
+// BootNotification that follows says so (1.6 §5.19 / §4.7; 2.0.1 L01.FR.32,
+// B01 with reason FirmwareUpdate).
+describe("firmware version after the update (bumpVersion)", () => {
+  const fw16At = (location: string) => ({ ...fw16, location });
+
+  test("1.6 beforeInstalled: the reboot's boot carries the version of the location", async () => {
+    run = await runBehavior({ version: "1.6" });
+    const before = run.cp.bootPayload().firmwareVersion;
+    select(run, { stepMs: 100, reboot: "beforeInstalled", bumpVersion: true });
+    await run.call(
+      "UpdateFirmware",
+      fw16At("https://x/fw/cp-firmware-2.3.1.bin?sig=1"),
+    );
+    await run.advance(2000);
+    expect(before).not.toBe("2.3.1");
+    expect(bootVersions(run).at(-1)).toBe("2.3.1");
+    expect(statuses(run).at(-1)).toBe("Installed");
+  });
+
+  test("1.6 without the param: the reboot reports the same version (default wire)", async () => {
+    run = await runBehavior({ version: "1.6" });
+    const before = run.cp.bootPayload().firmwareVersion;
+    select(run, { stepMs: 100, reboot: "beforeInstalled" });
+    await run.call("UpdateFirmware", fw16At("https://x/fw/cp-2.3.1.bin"));
+    await run.advance(2000);
+    expect(bootVersions(run).at(-1)).toBe(before);
+    expect(run.cp.bootPayload().firmwareVersion).toBe(before);
+  });
+
+  test("1.6 reboot none: no boot, the next one carries the incremented version", async () => {
+    run = await runBehavior({ version: "1.6" });
+    run.cp.setFirmwareVersion("fw-7");
+    select(run, { stepMs: 100, bumpVersion: true });
+    const boots = run.callsOf("BootNotification").length;
+    await run.call("UpdateFirmware", fw16At("https://x/fw/latest.bin"));
+    await run.advance(2000);
+    expect(statuses(run).at(-1)).toBe("Installed");
+    expect(run.callsOf("BootNotification")).toHaveLength(boots);
+    run.cp.boot();
+    await run.advance(100);
+    expect(bootVersions(run).at(-1)).toBe("fw-8");
+  });
+
+  test("1.6 a failed update keeps the version", async () => {
+    run = await runBehavior({ version: "1.6" });
+    const before = run.cp.bootPayload().firmwareVersion;
+    select(run, {
+      stepMs: 100,
+      reboot: "beforeInstalled",
+      bumpVersion: true,
+      failAt: "InstallationFailed",
+    });
+    await run.call("UpdateFirmware", fw16At("https://x/fw/cp-2.3.1.bin"));
+    await run.advance(2000);
+    expect(statuses(run).at(-1)).toBe("InstallationFailed");
+    expect(run.cp.bootPayload().firmwareVersion).toBe(before);
+  });
+
+  test("2.x afterInstalled: Installed, then a FirmwareUpdate boot with the new version", async () => {
+    run = await runBehavior({ version: "2.0.1" });
+    select(run, {
+      train: true,
+      stepMs: 100,
+      reboot: "afterInstalled",
+      bumpVersion: true,
+    });
+    await run.call(
+      "UpdateFirmware",
+      fw2(40, { location: "https://x/v1.4.0-rc1.tar.gz" }),
+    );
+    await run.advance(2000);
+    const boot = run.callsOf("BootNotification").at(-1)?.payload;
+    expect(boot).toMatchObject({
+      reason: "FirmwareUpdate",
+      chargingStation: { firmwareVersion: "1.4.0-rc1" },
+    });
+  });
+
+  test("2.x beforeInstalled: the InstallRebooting boot carries the new version", async () => {
+    run = await runBehavior({ version: "2.0.1" });
+    run.cp.setFirmwareVersion("2.0.9");
+    select(run, {
+      train: true,
+      stepMs: 100,
+      reboot: "beforeInstalled",
+      bumpVersion: true,
+    });
+    await run.call("UpdateFirmware", fw2(41));
+    await run.advance(2000);
+    expect(statuses(run)).toContain("InstallRebooting");
+    expect(bootVersions(run).at(-1)).toBe("2.0.10");
+  });
+
+  test("2.x without the param: the FirmwareUpdate boot keeps the version", async () => {
+    run = await runBehavior({ version: "2.0.1" });
+    const before = run.cp.bootPayload().firmwareVersion;
+    select(run, { train: true, stepMs: 100, reboot: "afterInstalled" });
+    await run.call(
+      "UpdateFirmware",
+      fw2(42, { location: "https://x/fw-9.9.9.bin" }),
+    );
+    await run.advance(2000);
+    expect(bootVersions(run).at(-1)).toBe(before);
+  });
+
+  test("2.x InvalidSignature keeps the version", async () => {
+    run = await runBehavior({ version: "2.0.1" });
+    const before = run.cp.bootPayload().firmwareVersion;
+    select(run, {
+      train: true,
+      stepMs: 100,
+      reboot: "afterInstalled",
+      bumpVersion: true,
+      failAt: "InvalidSignature",
+    });
+    await run.call(
+      "UpdateFirmware",
+      fw2(43, { location: "https://x/fw-9.9.9.bin" }),
+    );
+    await run.advance(2000);
+    expect(run.cp.bootPayload().firmwareVersion).toBe(before);
+  });
+
+  test("1.6 SignedUpdateFirmware: Installed sets the version for the next boot", async () => {
+    run = await runBehavior({ version: "1.6" });
+    select(run, { stepMs: 100, bumpVersion: true }, "default.signedFirmware");
+    await run.call("SignedUpdateFirmware", {
+      requestId: 2,
+      firmware: {
+        location: "https://x/fw/signed-3.1.0.bin",
+        retrieveDateTime: "2020-01-01T00:00:00.000Z",
+        signingCertificate: SIGNING_CERTIFICATE,
+        signature: "s",
+      },
+    });
+    await run.advance(1000);
+    expect(statuses(run, "SignedFirmwareStatusNotification").at(-1)).toBe(
+      "Installed",
+    );
+    expect(run.cp.bootPayload().firmwareVersion).toBe("3.1.0");
+  });
+});
+
 describe("OCPP 2.x GetLog upload (#601)", () => {
   const getLog = (requestId: number) => ({
     logType: "DiagnosticsLog",

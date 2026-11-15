@@ -20,9 +20,6 @@
   "packages/core/src/cp/domain/connector/Connector.ts": 1245,
   "packages/core/src/cp/domain/device-model/DeviceModelRegistry.ts": 1048,
   "packages/core/src/cp/domain/security/CertificateStore.ts": 880,
-  "packages/core/src/cp/infrastructure/transport/OCPPWebSocket.ts": 1294,
   "packages/core/src/cp/infrastructure/transport/soap/OCPPSoapHandler.ts": 809,
-  "packages/core/src/cp/infrastructure/transport/soap/soapEnvelope.ts": 905,
-  "packages/core/src/cp/infrastructure/transport/v16/serialCallQueueV16.ts": 1017,
-  "packages/core/src/cp/infrastructure/transport/wsUrlWithBasic.ts": 992
+  "packages/core/src/cp/infrastructure/transport/soap/soapEnvelope.ts": 905
 }

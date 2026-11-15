@@ -10,6 +10,11 @@ sources:
   - packages/core/src/cp/application/scenario/types/nodeData.ts
   - packages/core/src/cp/application/scenario/types/graph.ts
   - packages/core/src/cp/application/scenario/ScenarioExecutor.ts
+  - packages/core/src/cp/application/scenario/waits.ts
+  - packages/core/src/cp/application/scenario/nodes/context.ts
+  - packages/core/src/cp/application/scenario/nodes/policies.ts
+  - packages/core/src/cp/application/scenario/nodes/meterValue.ts
+  - packages/core/src/cp/application/scenario/nodes/branching.ts
   - packages/core/schema/scenario.schema.json
   - packages/core/src/cp/domain/charge-point/ChargePoint.ts
   - "OCA OCPP 2.0.1 edition 4: Part 2 specification, Part 5 certification profiles, Part 6 test cases"

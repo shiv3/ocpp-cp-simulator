@@ -33,38 +33,15 @@ import type {
   SwitchNodeData,
   ChoiceNodeData,
   SetStateNodeData,
-  ScenarioCallExchange,
   ConnectionTriggerNodeData,
   StartTransactionOptions,
   StopTransactionOptions,
-  ScenarioExpectation,
   ScenarioWaitIntervention,
 } from "./ScenarioTypes";
-import {
-  NOTIFY_KINDS,
-  ScenarioFlowNodeType,
-  ScenarioNodeType,
-} from "./ScenarioTypes";
-import {
-  isFromReference,
-  resolveFrom,
-  resolveFromOrMissing,
-  type FromScope,
-  type ScenarioOcppResponse,
-} from "./resolveFrom";
-import {
-  DIAGNOSTICS_STATUSES,
-  FIRMWARE_STATUSES,
-  UPLOAD_LOG_STATUSES,
-} from "@ocpp-cp-simulator/contracts/firmwareLogStatus";
+import { ScenarioFlowNodeType, ScenarioNodeType } from "./ScenarioTypes";
+import { resolveFrom, type FromScope } from "./resolveFrom";
 import { jsonProblem } from "../behavior/paramsSchema";
-import {
-  MISSING,
-  matchCase,
-  matcherProblem,
-} from "../../../scenario/valueMatch";
 import { DEFAULT_ID_TAG } from "../../domain/auth/IdTagPool";
-import { deriveExpectation } from "./ScenarioExpectations";
 import {
   createScenarioMachine,
   getScenarioStateName,
@@ -72,9 +49,24 @@ import {
   type ScenarioMachineService,
 } from "../state/machines/ScenarioStateMachine";
 import { interpret } from "robot3";
-import { cancelIfCancellable } from "./cancellable";
 import { BranchScope, ParallelRegion } from "./branchScope";
-import { WaitControl, type WaitSignal } from "./WaitControl";
+import type { WaitControl } from "./WaitControl";
+import { type WaitSignal } from "./WaitControl";
+import type { Flow, NodeRunContext, ParkedWait } from "./nodes/context";
+import {
+  executeCertQuirks,
+  executeInboundPolicy,
+  executeResponseOverride,
+} from "./nodes/policies";
+import { executeMeterValue } from "./nodes/meterValue";
+import {
+  executeChoice,
+  executeNotify,
+  executeSetState,
+  executeSwitch,
+  pickCase,
+} from "./nodes/branching";
+import { runTriggerWait } from "./waits";
 import { ScenarioRunStateError } from "../../domain/errors/ScenarioRunStateError";
 import type { EventEmitter } from "../../shared/EventEmitter";
 import { realClock } from "../../shared/clock";
@@ -91,69 +83,11 @@ import {
   nextStep,
   resolveOrigin,
   successors,
-  timeoutStep,
   type ScenarioProgram,
 } from "../../../scenario/scenarioGraph";
 import { connectionRule } from "../../../scenario/scenarioConnectionRules";
 
 type ScenarioEdge = ScenarioDefinition["edges"][number];
-
-type AutoMeterStartConfig = Parameters<
-  NonNullable<ScenarioExecutorCallbacks["onStartAutoMeterValue"]>
->[0] & { sendMessage?: boolean };
-type MeterValueCallbacks = ScenarioExecutorCallbacks & {
-  onGetTransactionMeterStart?: () => number | null;
-};
-
-/** #240: a parked trigger wait — what it awaits and the controls of its
- *  armed attempt. */
-interface ParkedWait {
-  nodeId: string;
-  control: WaitControl;
-  expectation: ScenarioExpectation | null;
-  /** Epoch ms the node started parking; restarts on a retry. */
-  startedAt: number;
-}
-
-/**
- * What one branch of the run owns (schema 1.5, #566): the CALL its
- * `csmsCallTrigger` took over. Branches from Start get one each, so parallel
- * branches can own different CALLs; the run ends with it unanswered only after
- * the runtime answered `InternalError` (see `onRunEnded`).
- */
-interface Flow {
-  exchange: ScenarioCallExchange | null;
-  answered: boolean;
-  /**
-   * The answer to the latest `ocppCall` of this branch (schema 1.7), for the
-   * root `response`. Latest wins; a branch from Start begins without one.
-   */
-  response: ScenarioOcppResponse | null;
-  /**
-   * Set by a `switch` or `choice` node (schema 1.6): the `sourceHandle` of the
-   * one edge the branch goes on along. Read and cleared by the walk.
-   */
-  handle: string | null;
-  /**
-   * Set by a trigger wait whose timeout expired and that has a timeout edge
-   * (schema 1.8): the node the branch goes on to instead of failing. Read
-   * and cleared by the walk.
-   */
-  timeoutTarget: ScenarioNode | null;
-  /**
-   * The branch's cancellation scope (schema 1.9): the run's root scope, or
-   * the scope of a branch a `parallel` started. Every wait of the branch
-   * races `scope.ended`.
-   */
-  scope: BranchScope;
-  /**
-   * The state of the loop edges (schema 1.10) this branch is in, by edge id:
-   * rounds done and when the loop was entered (station clock, epoch ms). Fresh
-   * whenever the branch arrives at a loop's header other than along the loop
-   * edge itself; dropped when the loop exits.
-   */
-  loops: Map<string, { rounds: number; since: number }>;
-}
 
 const newFlow = (scope: BranchScope): Flow => ({
   exchange: null,
@@ -164,12 +98,6 @@ const newFlow = (scope: BranchScope): Flow => ({
   scope,
   loops: new Map(),
 });
-
-const STATE_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
-
-const isMeterValueTimeout = (error: unknown): boolean =>
-  error instanceof Error &&
-  error.message.startsWith("Timeout waiting for meter value:");
 
 /** Time and randomness a scenario run reads; the platform's by default. */
 export interface ScenarioExecutorSimOptions {
@@ -259,6 +187,8 @@ export class ScenarioExecutor {
   /** The scenario lowered for walking (scenarioGraph.ts); rebuilt when the
    *  definition's node or edge array is replaced. */
   private lowered: ScenarioProgram<ScenarioNode, ScenarioEdge> | null = null;
+  /** What the extracted node and wait functions read of this run (nodes/context.ts). */
+  private readonly nodeCtx: NodeRunContext;
 
   constructor(
     scenario: ScenarioDefinition,
@@ -313,6 +243,57 @@ export class ScenarioExecutor {
         this.previousState = currentState;
       }
     });
+
+    this.nodeCtx = this.createNodeContext();
+  }
+
+  private createNodeContext(): NodeRunContext {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias -- the getters read the live fields
+    const host = this;
+    return {
+      get scenario() {
+        return host.scenario;
+      },
+      get callbacks() {
+        return host.callbacks;
+      },
+      get eventEmitter() {
+        return host.eventEmitter;
+      },
+      get clock() {
+        return host.clock;
+      },
+      get rng() {
+        return host.rng;
+      },
+      get runState() {
+        return host.runState;
+      },
+      get armedOverrideActions() {
+        return host.armedOverrideActions;
+      },
+      get armedInboundPolicyActions() {
+        return host.armedInboundPolicyActions;
+      },
+      get parkedWaits() {
+        return host.parkedWaits;
+      },
+      get aborted() {
+        return host.aborted;
+      },
+      markCertificateQuirksArmed: () => {
+        host.armedCertificateQuirks = true;
+      },
+      unpark: (control) => host.unpark(control),
+      notifyStateChange: () => host.notifyStateChange(),
+      program: () => host.program(),
+      fromScope: (flow) => host.fromScope(flow),
+      waitWithOptionalForceSkip: (waitPromise, scope) =>
+        host.waitWithOptionalForceSkip(waitPromise, scope),
+      sleep: (ms, scope) => host.sleep(ms, scope),
+      waitWithProgress: (nodeId, totalSeconds, scope) =>
+        host.waitWithProgress(nodeId, totalSeconds, scope),
+    };
   }
 
   /**
@@ -891,7 +872,8 @@ export class ScenarioExecutor {
     ) {
       fired = `forSeconds ${forSeconds}`;
     } else if (until) {
-      const picked = this.pickCase(
+      const picked = pickCase(
+        this.nodeCtx,
         `loop edge "${edge.id}" until`,
         until.value,
         until.cases,
@@ -1014,7 +996,8 @@ export class ScenarioExecutor {
         break;
 
       case ScenarioNodeType.METER_VALUE:
-        await this.executeMeterValue(
+        await executeMeterValue(
+          this.nodeCtx,
           node.id,
           node.data as MeterValueNodeData,
           flow.scope,
@@ -1098,17 +1081,21 @@ export class ScenarioExecutor {
         break;
 
       case ScenarioNodeType.RESPONSE_OVERRIDE:
-        await this.executeResponseOverride(
+        await executeResponseOverride(
+          this.nodeCtx,
           node.data as ResponseOverrideNodeData,
         );
         break;
 
       case ScenarioNodeType.INBOUND_POLICY:
-        await this.executeInboundPolicy(node.data as InboundPolicyNodeData);
+        await executeInboundPolicy(
+          this.nodeCtx,
+          node.data as InboundPolicyNodeData,
+        );
         break;
 
       case ScenarioNodeType.CERT_QUIRKS:
-        await this.executeCertQuirks(node.data as CertQuirksNodeData);
+        await executeCertQuirks(this.nodeCtx, node.data as CertQuirksNodeData);
         break;
 
       case ScenarioNodeType.CONFIG_SET:
@@ -1132,19 +1119,19 @@ export class ScenarioExecutor {
         break;
 
       case ScenarioNodeType.NOTIFY:
-        this.executeNotify(node.data as NotifyNodeData, flow);
+        executeNotify(this.nodeCtx, node.data as NotifyNodeData, flow);
         break;
 
       case ScenarioNodeType.SWITCH:
-        this.executeSwitch(node.data as SwitchNodeData, flow);
+        executeSwitch(this.nodeCtx, node.data as SwitchNodeData, flow);
         break;
 
       case ScenarioNodeType.CHOICE:
-        this.executeChoice(node.data as ChoiceNodeData, flow);
+        executeChoice(this.nodeCtx, node.data as ChoiceNodeData, flow);
         break;
 
       case ScenarioNodeType.SET_STATE:
-        this.executeSetState(node.data as SetStateNodeData, flow);
+        executeSetState(this.nodeCtx, node.data as SetStateNodeData, flow);
         break;
 
       case ScenarioNodeType.CONNECTION_TRIGGER:
@@ -1202,136 +1189,6 @@ export class ScenarioExecutor {
     }
     this.callbacks.onSetUnlockOutcome(data.outcome);
     this.callbacks.log?.(`Connector unlockResponse → ${data.outcome}`, "info");
-  }
-
-  /** Issue #110: pre-arm a one-shot `{ status }` response override. */
-  private async executeResponseOverride(
-    data: ResponseOverrideNodeData,
-  ): Promise<void> {
-    if (!this.callbacks.onArmResponseOverride) {
-      this.callbacks.log?.(
-        "ResponseOverride: no onArmResponseOverride callback wired",
-        "warn",
-      );
-      return;
-    }
-    this.callbacks.onArmResponseOverride(data.action, data.status);
-    // Issue #110: track this action so we can clear it when the run ends.
-    if (!this.armedOverrideActions.includes(data.action)) {
-      this.armedOverrideActions.push(data.action);
-    }
-    this.callbacks.log?.(
-      `Armed response override: ${data.action} → ${data.status}`,
-      "info",
-    );
-  }
-
-  /** Issue #247: set or clear an inbound call policy. */
-  private async executeInboundPolicy(
-    data: InboundPolicyNodeData,
-  ): Promise<void> {
-    if (data.policy === "answer") {
-      // Clear the policy for this action.
-      if (!this.callbacks.onClearInboundPolicy) {
-        this.callbacks.log?.(
-          "InboundPolicy: no onClearInboundPolicy callback wired",
-          "warn",
-        );
-        return;
-      }
-      this.callbacks.onClearInboundPolicy(data.action);
-      this.callbacks.log?.(`Cleared inbound policy: ${data.action}`, "info");
-    } else if (data.policy === "callerror" || data.policy === "ignore") {
-      // Arm a new policy.
-      if (!this.callbacks.onSetInboundPolicy) {
-        this.callbacks.log?.(
-          "InboundPolicy: no onSetInboundPolicy callback wired",
-          "warn",
-        );
-        return;
-      }
-      this.callbacks.onSetInboundPolicy(
-        data.action,
-        data.policy,
-        data.errorCode,
-        data.errorDescription,
-      );
-      // Track this action so we can clear it when the run ends.
-      if (!this.armedInboundPolicyActions.includes(data.action)) {
-        this.armedInboundPolicyActions.push(data.action);
-      }
-      const policyDesc =
-        data.policy === "callerror"
-          ? `callerror(${data.errorCode ?? "NotImplemented"})`
-          : "ignore";
-      this.callbacks.log?.(
-        `Armed inbound policy: ${data.action} → ${policyDesc}`,
-        "info",
-      );
-    }
-  }
-
-  /** Issue #247 Phase 3: set or clear certificate quirks. */
-  private async executeCertQuirks(data: CertQuirksNodeData): Promise<void> {
-    if (data.mode === "clear") {
-      // Clear all quirks.
-      if (!this.callbacks.onClearCertificateQuirks) {
-        this.callbacks.log?.(
-          "CertQuirks: no onClearCertificateQuirks callback wired",
-          "warn",
-        );
-        return;
-      }
-      this.callbacks.onClearCertificateQuirks();
-      this.callbacks.log?.("Cleared certificate quirks", "info");
-    } else if (data.mode === "set") {
-      // Build quirks from preset (if any) + explicit overrides.
-      const quirks: Record<string, unknown> = {};
-
-      // Start with preset if specified
-      if (data.preset === "octt") {
-        quirks.csrKeyAlgorithm = "RSA";
-        quirks.csrPemLineEndings = "crlf";
-        quirks.requiredCertificateSignatureAlgorithms = ["RSASSA-PKCS1-v1_5"];
-        quirks.hiddenConfigurationKeys = ["CpoName"];
-      }
-
-      // Apply explicit field overrides
-      if (data.csrKeyAlgorithm !== undefined) {
-        quirks.csrKeyAlgorithm = data.csrKeyAlgorithm;
-      }
-      if (data.csrPemLineEndings !== undefined) {
-        quirks.csrPemLineEndings = data.csrPemLineEndings;
-      }
-      if (data.requiredCertificateSignatureAlgorithms !== undefined) {
-        quirks.requiredCertificateSignatureAlgorithms =
-          data.requiredCertificateSignatureAlgorithms;
-      }
-      if (data.hiddenConfigurationKeys !== undefined) {
-        quirks.hiddenConfigurationKeys = data.hiddenConfigurationKeys;
-      }
-
-      if (!this.callbacks.onSetCertificateQuirks) {
-        this.callbacks.log?.(
-          "CertQuirks: no onSetCertificateQuirks callback wired",
-          "warn",
-        );
-        return;
-      }
-
-      this.callbacks.onSetCertificateQuirks(
-        quirks as Parameters<
-          NonNullable<typeof this.callbacks.onSetCertificateQuirks>
-        >[0],
-      );
-      this.armedCertificateQuirks = true;
-
-      const presetDesc = data.preset ? ` (preset: ${data.preset})` : "";
-      this.callbacks.log?.(
-        `Armed certificate quirks${presetDesc}: ${JSON.stringify(quirks)}`,
-        "info",
-      );
-    }
   }
 
   /** Apply a ChangeConfiguration locally via the ConfigurationStore. */
@@ -1503,139 +1360,6 @@ export class ScenarioExecutor {
   }
 
   /**
-   * Execute meter value node with auto-increment support
-   */
-  private async executeMeterValue(
-    nodeId: string,
-    data: MeterValueNodeData,
-    scope: BranchScope,
-  ): Promise<void> {
-    const meterCallbacks = this.callbacks as MeterValueCallbacks;
-    const currentBeforeSeed = this.callbacks.onGetMeterValue?.();
-    let seededValue = currentBeforeSeed ?? data.value;
-    if (this.callbacks.onSetMeterValue) {
-      // Daemon-restart resume case: the persisted connector_runtime row
-      // restored a non-zero meter accumulator (e.g. 624 Wh from a charge
-      // that was interrupted), and now the scenario walks back into the
-      // meterValue node whose `data.value` is the node's *initial seed*
-      // (commonly 0). Writing that seed would erase the accumulator and
-      // restart the maxValue cap from scratch. Skip the seed write when
-      // the connector already holds more.
-      if (currentBeforeSeed == null || currentBeforeSeed <= data.value) {
-        this.callbacks.onSetMeterValue(data.value);
-        seededValue = data.value;
-      } else {
-        seededValue = currentBeforeSeed;
-        this.callbacks.log?.(
-          `[${this.scenario.name}] Preserving meter accumulator ${currentBeforeSeed}Wh (> node seed ${data.value}Wh) on resume`,
-          "info",
-        );
-      }
-    }
-
-    // Handle auto-increment mode - start AutoMeterValue manager
-    if (data.autoIncrement && this.callbacks.onStartAutoMeterValue) {
-      // Resolve the stop conditions. Default is "manual" for back-compat,
-      // which reads the node's maxTime / maxValue. "evSettings" derives a
-      // maxValue from the connector's EV settings (capacity × ΔSoC).
-      let resolvedMaxTime: number | undefined = data.maxTime;
-      let resolvedMaxValue: number | undefined =
-        data.maxValue ??
-        (data.maxChargeKwh != null
-          ? Math.round(data.maxChargeKwh * 1000)
-          : undefined);
-
-      if (data.stopMode === "evSettings") {
-        const settings = this.callbacks.onGetEVSettings?.() ?? null;
-        if (settings && settings.batteryCapacityKwh > 0) {
-          const delta = Math.max(
-            0,
-            (settings.targetSoc ?? 0) - (settings.initialSoc ?? 0),
-          );
-          if (delta <= 0) {
-            this.callbacks.log?.(
-              `[${this.scenario.name}] stopMode=evSettings target already reached; auto-meter completes without starting`,
-              "info",
-            );
-            return;
-          }
-          // Wh delivered to move from initialSoc% to targetSoc% on a
-          // capacity-kWh battery: capacity_kWh × (Δ%/100) × 1000 Wh/kWh
-          resolvedMaxValue = Math.round(
-            settings.batteryCapacityKwh * delta * 10,
-          );
-          resolvedMaxTime = undefined; // EV-driven runs are value-bounded only
-          this.callbacks.log?.(
-            `[${this.scenario.name}] stopMode=evSettings → maxValue=${resolvedMaxValue}Wh ` +
-              `(capacity=${settings.batteryCapacityKwh}kWh, ` +
-              `${settings.initialSoc ?? 0}% → ${settings.targetSoc ?? 0}%)`,
-            "info",
-          );
-        } else {
-          this.callbacks.log?.(
-            `[${this.scenario.name}] stopMode=evSettings but EV settings unavailable; auto-meter will run unbounded`,
-            "warn",
-          );
-          resolvedMaxValue = undefined;
-          resolvedMaxTime = undefined;
-        }
-      } else {
-        this.callbacks.log?.(
-          `[${this.scenario.name}] Starting AutoMeterValue: interval=${data.incrementInterval || 10}s increment=${data.incrementAmount || 1000}Wh maxTime=${resolvedMaxTime || "unlimited"} maxValue=${resolvedMaxValue || "unlimited"}`,
-          "info",
-        );
-      }
-
-      const meterStart =
-        meterCallbacks.onGetTransactionMeterStart?.() ?? seededValue;
-      const resolvedMaxMeterValue =
-        resolvedMaxValue && resolvedMaxValue > 0
-          ? meterStart + resolvedMaxValue
-          : undefined;
-      const autoMeterConfig: AutoMeterStartConfig = {
-        intervalSeconds: data.incrementInterval || 10,
-        incrementValue: data.incrementAmount || 1000,
-        maxTimeSeconds: resolvedMaxTime,
-        maxValue: resolvedMaxMeterValue,
-        sendMessage: data.sendMessage,
-      };
-
-      this.callbacks.onStartAutoMeterValue(autoMeterConfig);
-
-      if (resolvedMaxMeterValue && resolvedMaxMeterValue > 0) {
-        try {
-          await this.waitWithOptionalForceSkip(
-            this.callbacks.onWaitForMeterValue?.(
-              resolvedMaxMeterValue,
-              resolvedMaxTime,
-            ) ??
-              (resolvedMaxTime && resolvedMaxTime > 0
-                ? this.sleep(resolvedMaxTime * 1000, scope)
-                : Promise.resolve()),
-            scope,
-          );
-        } catch (error) {
-          if (!resolvedMaxTime || !isMeterValueTimeout(error)) {
-            throw error;
-          }
-        }
-        this.callbacks.onStopAutoMeterValue?.();
-      } else if (resolvedMaxTime && resolvedMaxTime > 0) {
-        await this.waitWithProgress(nodeId, resolvedMaxTime, scope);
-        this.callbacks.onStopAutoMeterValue?.();
-      }
-    }
-
-    if (
-      !data.autoIncrement &&
-      data.sendMessage &&
-      this.callbacks.onSendMeterValue
-    ) {
-      await this.callbacks.onSendMeterValue();
-    }
-  }
-
-  /**
    * Execute delay node with progress updates
    */
   private async executeDelay(
@@ -1775,7 +1499,8 @@ export class ScenarioExecutor {
     if (!waitForRemoteStart) return;
 
     const answer = (
-      await this.runTriggerWait(
+      await runTriggerWait(
+        this.nodeCtx,
         nodeId,
         flow,
         data.timeout,
@@ -1828,7 +1553,8 @@ export class ScenarioExecutor {
     // pass `reason` through to StopTransaction.req. The runtime hard-codes
     // "Remote" for the CSMS path (§6.21). A continued wait (#240) captures
     // nothing, so that node falls back to its own stopReason.
-    const result = await this.runTriggerWait(
+    const result = await runTriggerWait(
+      this.nodeCtx,
       nodeId,
       flow,
       data.timeout,
@@ -1854,7 +1580,8 @@ export class ScenarioExecutor {
     const waitForStatus = this.callbacks.onWaitForStatus;
     if (!waitForStatus) return;
 
-    await this.runTriggerWait(
+    await runTriggerWait(
+      this.nodeCtx,
       nodeId,
       flow,
       data.timeout,
@@ -1903,7 +1630,8 @@ export class ScenarioExecutor {
     const waitForReservation = this.callbacks.onWaitForReservation;
     if (!waitForReservation) return;
 
-    await this.runTriggerWait(
+    await runTriggerWait(
+      this.nodeCtx,
       nodeId,
       flow,
       data.timeout,
@@ -2191,134 +1919,6 @@ export class ScenarioExecutor {
   }
 
   /**
-   * Park on a trigger wait (#240). The executor owns the node's timeout
-   * through a {@link WaitControl} instead of the runtime, so an operator can
-   * extend it, retry the wait (withdraw it and arm it again with the full
-   * timeout) or continue past it without the awaited event. Resolves with
-   * the awaited answer, or null when there is none (continued, force-skipped
-   * or stopped). Timeout-bearing waits also surface 100ms remaining-time
-   * progress events.
-   *
-   * When the timeout expires the run fails with the timeout error, unless
-   * the node has a timeout edge (schema 1.8, `timeoutStep`): then the wait
-   * resolves with null like a continued one (nothing is captured) and
-   * `flow.timeoutTarget` sends the branch along that edge.
-   */
-  private async runTriggerWait<T>(
-    nodeId: string,
-    flow: Flow,
-    timeoutSeconds: number | undefined,
-    timeoutMessage: (seconds: number) => string,
-    startWait: () => Promise<T>,
-  ): Promise<{ value: T } | null> {
-    const timeoutMs = Math.max(0, timeoutSeconds || 0) * 1000;
-    const node = this.scenario.nodes.find((n) => n.id === nodeId);
-    const expectation = node
-      ? deriveExpectation(node, this.scenario.targetId)
-      : null;
-    const program = this.program();
-    const programNode = program.nodesById.get(nodeId);
-    const onTimeout = programNode ? timeoutStep(program, programNode) : null;
-
-    for (;;) {
-      const startedAt = this.clock.now();
-      const control = new WaitControl(
-        timeoutMs,
-        (seconds) => new Error(timeoutMessage(seconds)),
-        this.clock,
-      );
-      this.parkedWaits.push({ nodeId, control, expectation, startedAt });
-      this.notifyStateChange();
-      const stopProgress = this.reportWaitProgress(nodeId, control);
-      let waitPromise: Promise<T> | undefined;
-      // Only this attempt's own answer is returned: a withdrawn attempt that
-      // answers late (e.g. with a stale RemoteStart tag) never reaches the run.
-      let answer = null as { value: T } | null;
-      let timeoutError: unknown = null;
-      let outcome: WaitSignal | "settled" | "timedOut";
-      try {
-        waitPromise = startWait();
-        outcome = await Promise.race([
-          this.waitWithOptionalForceSkip(
-            waitPromise.then((value) => {
-              answer = { value };
-            }),
-            flow.scope,
-          ).then(() => "settled" as const),
-          // Without a timeout edge the expiry rejects and fails the run.
-          onTimeout
-            ? control.expired.catch((error: unknown) => {
-                timeoutError = error;
-                return "timedOut" as const;
-              })
-            : control.expired,
-          control.signal,
-        ]);
-      } finally {
-        if (waitPromise) cancelIfCancellable(waitPromise);
-        control.dispose();
-        stopProgress();
-        this.unpark(control);
-        this.notifyStateChange();
-      }
-
-      // A cancelled branch (schema 1.9) captures nothing.
-      if (flow.scope.cancelled) return null;
-      if (outcome === "settled") return answer;
-      if (outcome === "timedOut" && onTimeout && !this.aborted) {
-        const reason =
-          timeoutError instanceof Error
-            ? timeoutError.message
-            : String(timeoutError);
-        this.callbacks.log?.(
-          `[${this.scenario.name}] ${reason}; "${
-            node?.data?.label || nodeId
-          }" goes on along its timeout edge to "${
-            onTimeout.target.data?.label || onTimeout.target.id
-          }"`,
-          "info",
-        );
-        flow.timeoutTarget = onTimeout.target;
-        return null;
-      }
-      if (outcome === "continue" || this.aborted) return null;
-    }
-  }
-
-  /** Emit the 100ms remaining-time progress of a timeout-bearing wait;
-   *  returns the function that stops it. */
-  private reportWaitProgress(nodeId: string, control: WaitControl): () => void {
-    if (control.deadlineAt === null) return () => {};
-
-    const progressInterval = this.clock.setInterval(() => {
-      const remaining = (control.remainingMs() ?? 0) / 1000;
-      const total = control.totalSeconds;
-      this.callbacks.onNodeProgress?.(nodeId, remaining, total);
-      const progressData = {
-        scenarioId: this.scenario.id,
-        nodeId,
-        remaining,
-        total,
-      };
-      this.eventEmitter?.emit("nodeProgress", progressData); // Backward compatibility
-      this.eventEmitter?.emit("node.progress", progressData); // Hierarchical event
-      if (remaining <= 0) this.clock.clearInterval(progressInterval);
-    }, 100);
-
-    return () => {
-      this.clock.clearInterval(progressInterval);
-      const total = control.totalSeconds;
-      this.callbacks.onNodeProgress?.(nodeId, 0, total);
-      this.eventEmitter?.emit("nodeProgress", {
-        scenarioId: this.scenario.id,
-        nodeId,
-        remaining: 0,
-        total,
-      });
-    };
-  }
-
-  /**
    * Issue #110: park the scenario until the CSMS sends `data.action`.
    * Mirror of executeRemoteStopTrigger; the CP core handler still runs,
    * we only synchronize on arrival and log the payload.
@@ -2341,7 +1941,8 @@ export class ScenarioExecutor {
       );
     }
     const replace = data.behavior === "replace";
-    const result = await this.runTriggerWait(
+    const result = await runTriggerWait(
+      this.nodeCtx,
       nodeId,
       flow,
       data.timeout,
@@ -2498,172 +2099,6 @@ export class ScenarioExecutor {
     };
   }
 
-  /** Schema 1.6 (#654): `ctx.notify` as a node; does not wait for the CSMS. */
-  private executeNotify(data: NotifyNodeData, flow: Flow): void {
-    if (!this.callbacks.onNotify) {
-      throw new Error("notify: this station cannot send notifications");
-    }
-    if (!(NOTIFY_KINDS as readonly string[]).includes(data.kind)) {
-      throw new Error(
-        `notify: kind must be one of ${NOTIFY_KINDS.join(", ")}, got ${JSON.stringify(data.kind)}`,
-      );
-    }
-    const statuses: readonly string[] =
-      data.kind === "logStatus"
-        ? UPLOAD_LOG_STATUSES
-        : data.kind === "diagnosticsStatus"
-          ? DIAGNOSTICS_STATUSES
-          : FIRMWARE_STATUSES;
-    if (typeof data.status !== "string" || !statuses.includes(data.status)) {
-      throw new Error(
-        `notify: status for ${data.kind} must be one of ${statuses.join(", ")}, got ${JSON.stringify(data.status)}`,
-      );
-    }
-    let requestId: number | undefined;
-    if (data.requestId !== undefined) {
-      const resolved = resolveFrom(
-        data.requestId,
-        this.fromScope(flow),
-        `notify(${data.kind})`,
-      );
-      if (
-        typeof resolved !== "number" ||
-        !Number.isInteger(resolved) ||
-        resolved < 0
-      ) {
-        throw new Error(
-          `notify: requestId must be a whole number of at least 0, got ${JSON.stringify(resolved)}`,
-        );
-      }
-      requestId = resolved;
-    }
-    if (data.kind === "signedFirmwareStatus" && requestId === undefined) {
-      throw new Error("notify: signedFirmwareStatus needs a requestId");
-    }
-    this.callbacks.onNotify(data.kind, data.status, requestId);
-    this.callbacks.log?.(
-      `Notified ${data.kind} ${data.status}` +
-        (requestId === undefined ? "" : ` (requestId ${requestId})`),
-      "info",
-    );
-  }
-
-  /** Schema 1.6 (#654): go on along `case-<n>` of the first equal case, else `default`. */
-  private executeSwitch(data: SwitchNodeData, flow: Flow): void {
-    const { index, value } = this.pickCase(
-      "switch",
-      data.value,
-      data.cases,
-      flow,
-    );
-    flow.handle = index >= 0 ? `case-${index}` : "default";
-    this.callbacks.log?.(
-      `Switch on ${value === MISSING ? "(missing)" : JSON.stringify(value)} → ${flow.handle}`,
-      "info",
-    );
-  }
-
-  /**
-   * The case a value picks, for a switch and for the `until` of a loop edge
-   * (schema 1.10): the index of the first case that matches (a JSON constant
-   * by equality, `{ "$match": … }` by its operators), or -1. `valueSpec` is
-   * resolved against this branch (`$from`); a missing value matches only an
-   * `exists: false` case, else the run fails with the usual error. Throws, with
-   * `label` as prefix, on malformed cases. Returns the resolved value too.
-   */
-  private pickCase(
-    label: string,
-    valueSpec: unknown,
-    cases: unknown,
-    flow: Flow,
-  ): { index: number; value: unknown } {
-    if (!Array.isArray(cases)) {
-      throw new Error(`${label}: cases must be an array`);
-    }
-    cases.forEach((value: unknown, index: number) => {
-      const bad = jsonProblem(value, `cases[${index}]`);
-      if (bad || isFromReference(value)) {
-        throw new Error(
-          `${label}: cases are JSON constants${bad ? ` (${bad})` : ', a "$from" is not allowed'}`,
-        );
-      }
-      const problem = matcherProblem(value);
-      if (problem) {
-        throw new Error(`${label}: cases[${index}]: ${problem.message}`);
-      }
-    });
-    const scope = this.fromScope(flow);
-    const value = resolveFromOrMissing(valueSpec, scope, label);
-    const index = cases.findIndex((candidate: unknown) =>
-      matchCase(value, candidate),
-    );
-    if (value === MISSING && index < 0) {
-      // No `exists: false` case: fail as before, with the usual message.
-      resolveFrom(valueSpec, scope, label);
-    }
-    return { index, value };
-  }
-
-  /** Schema 1.6 (#654): a seeded, weighted draw; go on along `option-<n>`. */
-  private executeChoice(data: ChoiceNodeData, flow: Flow): void {
-    const options = data.options;
-    if (!Array.isArray(options) || options.length < 2) {
-      throw new Error("choice: options must list at least two options");
-    }
-    const weights = options.map((option, index) => {
-      const weight = option?.weight ?? 1;
-      if (
-        typeof weight !== "number" ||
-        !Number.isFinite(weight) ||
-        weight <= 0
-      ) {
-        throw new Error(
-          `choice: options[${index}].weight must be a number above 0, got ${JSON.stringify(weight)}`,
-        );
-      }
-      return weight;
-    });
-    const total = weights.reduce((sum, weight) => sum + weight, 0);
-    const draw = this.rng.next() * total;
-    let acc = 0;
-    let picked = weights.length - 1;
-    for (let i = 0; i < weights.length; i += 1) {
-      acc += weights[i]!;
-      if (draw < acc) {
-        picked = i;
-        break;
-      }
-    }
-    flow.handle = `option-${picked}`;
-    this.callbacks.log?.(
-      `Choice → ${flow.handle}${options[picked]?.label ? ` (${options[picked]!.label})` : ""}`,
-      "info",
-    );
-  }
-
-  /** Schema 1.6 (#654): store a JSON value in the state of this run. */
-  private executeSetState(data: SetStateNodeData, flow: Flow): void {
-    if (typeof data.key !== "string" || !STATE_KEY.test(data.key)) {
-      throw new Error(
-        `setState: key must be letters, digits and underscores, not starting with a digit, got ${JSON.stringify(data.key)}`,
-      );
-    }
-    const value = resolveFrom(
-      data.value,
-      this.fromScope(flow),
-      `setState(${data.key})`,
-    );
-    const bad = jsonProblem(value, "value");
-    if (bad || value === undefined) {
-      throw new Error(`setState: value must be JSON${bad ? ` (${bad})` : ""}`);
-    }
-    this.runState[data.key] = value;
-    this.callbacks.log?.(
-      `State ${data.key} = ${JSON.stringify(value)}`,
-      "info",
-    );
-  }
-
   /** Issue #240: park until the WebSocket reaches data.event. */
   private async executeConnectionTrigger(
     nodeId: string,
@@ -2672,7 +2107,8 @@ export class ScenarioExecutor {
   ): Promise<void> {
     const waitForConnection = this.callbacks.onWaitForConnection;
     if (!waitForConnection) return;
-    const result = await this.runTriggerWait(
+    const result = await runTriggerWait(
+      this.nodeCtx,
       nodeId,
       flow,
       data.timeout,

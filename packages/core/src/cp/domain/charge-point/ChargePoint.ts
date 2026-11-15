@@ -28,6 +28,8 @@ import { DeviceModelPublisher } from "./DeviceModelPublisher";
 import { ConfigurationWiring } from "./ConfigurationWiring";
 
 import { AuthorizationFlow } from "./AuthorizationFlow";
+
+import { MeterSampling } from "./MeterSampling";
 import { EventEmitter } from "../../shared/EventEmitter";
 
 import { realClock } from "../../shared/clock";
@@ -116,8 +118,6 @@ import type { OcppSecurityProfile } from "@ocpp-cp-simulator/contracts/securityP
 
 import type { OcppTlsOptions } from "../transport/ConnectionSecurity";
 
-import { measurandEnumFor } from "../connector/measurandEnum";
-
 import { Outbox } from "../transport/Outbox";
 
 import {
@@ -173,10 +173,7 @@ import type {
   TransactionUpdateOptions,
 } from "../connector/Transaction";
 
-import { TX_ENDED_SAMPLES_MAX } from "../connector/Transaction";
-
 import {
-  buildSampledValues,
   type MeterSampleOverrides,
   type ReadingContext,
 } from "../connector/MeterValueBuilder";
@@ -385,7 +382,6 @@ export class ChargePoint {
   private readonly _txEndedAligned: ClockAlignedMeterScheduler;
   /** #722: the per-connector `MeterValueSampleInterval` timers of running 1.x
    *  transactions. */
-  private readonly _periodicSamplers: Map<number, TimerHandle> = new Map();
   /** Applies each connector's vehicle behavior to the station (#835). */
   private readonly _vehicleDrivers: Map<number, VehicleBehaviorDriver> =
     new Map();
@@ -463,6 +459,14 @@ export class ChargePoint {
     events: () => this._events,
     logger: () => this._logger,
   });
+  private readonly _sampling = new MeterSampling({
+    chargePoint: this,
+    clock: () => this._clock,
+    configuration: () => this._configuration,
+    connectors: () => this._connectors,
+    mainMeter: () => this._mainMeter,
+    outbox: () => this._outbox,
+  });
   private readonly _configWiring = new ConfigurationWiring({
     chargePoint: () => this,
     certificateStore: () => this._certificateStore,
@@ -474,7 +478,7 @@ export class ChargePoint {
     logger: () => this._logger,
     nowDate: () => this.nowDate(),
     ocppVersion: () => this._ocppVersion,
-    rearmPeriodicSampling: () => this.rearmPeriodicSampling(),
+    rearmPeriodicSampling: () => this._sampling.rearmPeriodicSampling(),
     txEndedAligned: () => this._txEndedAligned,
     webSocket: () => this._webSocket,
   });
@@ -781,13 +785,13 @@ export class ChargePoint {
       // 1.x transaction; the interval is read when the transaction starts.
       connector.events.on("transactionChange", ({ transaction }) => {
         if (transaction && connector.hasRunningTransaction) {
-          this.startPeriodicSampling(connector);
-        } else this.stopPeriodicSampling(connectorId);
+          this._sampling.startPeriodicSampling(connector);
+        } else this._sampling.stopPeriodicSampling(connectorId);
       });
       // A transaction restored after a daemon restart is running again and
       // gets its sampler back (the restore itself emits no transactionChange).
       connector.events.on("transactionRestored", () =>
-        this.startPeriodicSampling(connector),
+        this._sampling.startPeriodicSampling(connector),
       );
       // The MaxEnergyOnInvalidId allowance ran out (E05.FR.03 → .02).
       connector.events.on("invalidIdEnergyExhausted", () => {
@@ -885,7 +889,7 @@ export class ChargePoint {
     );
     this._txEndedAligned = new ClockAlignedMeterScheduler(
       (boundary) =>
-        this.recordAlignedTxEndedSamples(
+        this._sampling.recordAlignedTxEndedSamples(
           this._configuration.stopTxnAlignedData(),
           boundary,
         ),
@@ -2491,67 +2495,6 @@ export class ChargePoint {
   }
 
   /**
-   * One clock-aligned sample per connector for `boundaryMs` (#454), carrying
-   * `MeterValuesAlignedData` with `Sample.Clock` and the boundary instant.
-   * OCPP 2.x puts a sample for an EVSE with a live transaction into
-   * TransactionEvent(Updated, MeterValueClock) — never the MeterValuePeriodic
-   * trigger of #347 — and every other sample into MeterValues. On 1.x a live
-   * transaction's id rides along once the CSMS has assigned one.
-   */
-  private emitClockAlignedSamples(boundaryMs: number): void {
-    // 1.6 samples the transaction-end history on the same grid
-    // (`StopTxnAlignedData`, 1.6 §3.16.2); 2.x has a
-    // grid of its own (`_txEndedAligned`).
-    if (!isOcpp2Version(this._ocppVersion)) {
-      this.recordAlignedTxEndedSamples(
-        this._configuration.stopTxnAlignedData(),
-        boundaryMs,
-      );
-    }
-    // Empty by default; the interval change already logged that it is.
-    const measurands = this._configuration.meterValuesAlignedData();
-    if (measurands.length === 0) return;
-    const timestamp = new Date(boundaryMs);
-    // 2.x AlignedDataCtrlr.SendDuringIdle is a station-level variable: while
-    // any transaction runs, no clock-aligned values go out for any EVSE or the
-    // main meter (J01.FR.20; J01.FR.19 is the per-EVSE form the variable does
-    // not have here).
-    if (
-      isOcpp2Version(this._ocppVersion) &&
-      this._configuration.alignedDataSendDuringIdle() &&
-      [...this._connectors.values()].some((c) => c.hasRunningTransaction)
-    ) {
-      return;
-    }
-    this._connectors.forEach((connector) => {
-      if (
-        this.sendSampleInTransactionEvent(connector, {
-          triggerReason: "MeterValueClock",
-          context: "Sample.Clock",
-          measurands,
-          timestamp,
-        })
-      ) {
-        return;
-      }
-      // `0` until StartTransaction.conf assigns the id.
-      const id = connector.transaction?.id;
-      const transactionId =
-        connector.hasRunningTransaction && id ? id : undefined;
-      this._outbox.sendMeterValue(transactionId, connector.id, "Sample.Clock", {
-        measurands,
-        timestamp,
-      });
-    });
-    if (this._mainMeter) {
-      this._outbox.sendMeterValue(undefined, 0, "Sample.Clock", {
-        measurands,
-        timestamp,
-      });
-    }
-  }
-
-  /**
    * #607: append one formatted sample to the connector's transaction-end
    * history. Formatted now, from the point the sample set of this instant
    * reads, so a later configuration change cannot reformat it (#327 §3.3).
@@ -2562,78 +2505,11 @@ export class ChargePoint {
     context: "Transaction.Begin" | "Sample.Periodic" | "Sample.Clock",
     timestamp: Date,
   ): void {
-    const transaction = connector.transaction;
-    if (!transaction || !connector.hasRunningTransaction) return;
-    // 2.x: the same MeasurandEnumType filter and unit multiplier as every
-    // other sample of the dialect (#714, #826); a name outside the enum is
-    // never recorded (B05.FR.07 rejects it in SetVariables, but a persisted
-    // or scenario-set list may still carry one).
-    const ocpp2 = isOcpp2Version(this._ocppVersion);
-    const allowed = ocpp2 ? measurandEnumFor(this._ocppVersion) : null;
-    const kept = allowed
-      ? measurands.filter((m) => allowed.has(m))
-      : measurands;
-    if (kept.length === 0) return;
-    const sampledValue = buildSampledValues(connector, kept, context, {
-      unitMultiplier: ocpp2,
-      intervalStream:
-        context === "Sample.Clock" ? "txEnded-aligned" : "txEnded-sampled",
-    });
-    if (sampledValue.length === 0) return;
-    const history = transaction.txEndedSamples ?? [];
-    const next = [
-      ...history,
-      { timestamp: timestamp.toISOString(), sampledValue },
-    ].slice(-TX_ENDED_SAMPLES_MAX);
-    connector.patchTransaction({ txEndedSamples: next });
-  }
-
-  /**
-   * The scheduler-tick sample of the history (`StopTxnSampledData`). 1.6
-   * samples at every tick, the cadence of the MeterValues it accompanies
-   * (1.6 §3.16.1). 2.x samples when `TxEndedInterval`
-   * seconds have passed since the previous one (or the start), judged at the
-   * tick, so the interval cannot be finer than the tick.
-   */
-  private recordSampledTxEndedSample(connector: Connector): void {
-    const transaction = connector.transaction;
-    if (!transaction || !connector.hasRunningTransaction) return;
-    const measurands = this._configuration.stopTxnSampledData();
-    if (measurands.length === 0) return;
-    const now = this._clock.now();
-    if (isOcpp2Version(this._ocppVersion)) {
-      const intervalMs = this._configuration.txEndedInterval() * 1000;
-      if (intervalMs <= 0) return;
-      const history = transaction.txEndedSamples ?? [];
-      const last = [...history]
-        .reverse()
-        .find((e) => e.sampledValue[0]?.context === "Sample.Periodic");
-      const lastMs = last
-        ? Date.parse(last.timestamp)
-        : transaction.startTime.getTime();
-      if (now - lastMs < intervalMs) return;
-    }
-    this.recordTxEndedSample(
+    this._sampling.recordTxEndedSample(
       connector,
       measurands,
-      "Sample.Periodic",
-      new Date(now),
-    );
-  }
-
-  private recordAlignedTxEndedSamples(
-    measurands: string[],
-    boundaryMs: number,
-  ): void {
-    if (measurands.length === 0) return;
-    const timestamp = new Date(boundaryMs);
-    this._connectors.forEach((connector) =>
-      this.recordTxEndedSample(
-        connector,
-        measurands,
-        "Sample.Clock",
-        timestamp,
-      ),
+      context,
+      timestamp,
     );
   }
 
@@ -3121,7 +2997,7 @@ export class ChargePoint {
     }
     this._certSwitch.release();
     for (const connectorId of [...this._periodicSamplers.keys()]) {
-      this.stopPeriodicSampling(connectorId);
+      this._sampling.stopPeriodicSampling(connectorId);
     }
     this._webSocket?.dispose(); // terminal: shuts controller down, clears reservation, closes socket
     this.teardownAfterClose(); // final CP-side teardown
@@ -3644,70 +3520,6 @@ export class ChargePoint {
   }
 
   /**
-   * #722, 1.6 errata 3.15 (Part 2 §4.7) and §3.16.1 / §9.1.19: while a
-   * transaction runs and `MeterValueSampleInterval` > 0, a MeterValues.req
-   * with the `MeterValuesSampledData` measurands goes out every interval,
-   * whatever drives the register. The connector's configured meter strategy
-   * (auto-meter curve, increment fallback) then only moves the register, so
-   * there is one sample per tick, not two schedules. 1.x only (SOAP
-   * included): on 2.x the existing sampling is unchanged.
-   *
-   * The interval is read when the sampler starts (the transaction's start,
-   * or its restore after a restart) and again when a ChangeConfiguration of
-   * `MeterValueSampleInterval` re-arms the running samplers (#839); at 0
-   * none runs. Called again for the same running transaction (the
-   * `transactionChange` that persists a `startCallError` or an id), it keeps
-   * the timer and so the phase.
-   */
-  private startPeriodicSampling(connector: Connector): void {
-    if (isOcpp2Version(this._ocppVersion)) return;
-    if (this._periodicSamplers.has(connector.id)) return;
-    connector.setStationOwnsMeterSampling(true);
-    const seconds = this._configuration.meterValueSampleInterval();
-    if (seconds <= 0) return;
-    const timer = this._clock.setInterval(() => {
-      // A connector removed (or replaced under the same id) while its timer
-      // ran is not sampled any more (#839).
-      if (
-        !connector.hasRunningTransaction ||
-        this._connectors.get(connector.id) !== connector
-      ) {
-        this.stopPeriodicSampling(connector.id);
-        return;
-      }
-      // A transaction whose StartTransaction.req was answered with a
-      // CALLERROR (#527) is sampled too (errata 3.15, §4.7: every interval,
-      // SHALL): the MeterValues.req carries the id its StartTransaction got,
-      // or -1 until it has one (errata 3.18, §4.8; #565).
-      // Offline too: §3.7 "When offline, the Charge Point MUST queue any
-      // transaction-related messages", periodic MeterValues included. The
-      // outbox queues it (a MeterValues of a transaction) and replays it in
-      // order after the reconnect.
-      this.sendScheduledMeterValue(connector.id);
-    }, seconds * 1000);
-    this._periodicSamplers.set(connector.id, timer);
-  }
-
-  /** #839: a new `MeterValueSampleInterval` starts the cadence over on every
-   *  running transaction; 0 leaves them without a sampler. */
-  private rearmPeriodicSampling(): void {
-    for (const connectorId of [...this._periodicSamplers.keys()]) {
-      this.stopPeriodicSampling(connectorId);
-    }
-    for (const connector of this._connectors.values()) {
-      if (connector.hasRunningTransaction)
-        this.startPeriodicSampling(connector);
-    }
-  }
-
-  private stopPeriodicSampling(connectorId: number): void {
-    const timer = this._periodicSamplers.get(connectorId);
-    if (timer === undefined) return;
-    this._clock.clearInterval(timer);
-    this._periodicSamplers.delete(connectorId);
-  }
-
-  /**
    * One sample from the connector's meter-value scheduler (#347).
    *
    * With {@link txUpdatedMeterValues} on and an OCPP 2.x transaction
@@ -3720,44 +3532,23 @@ export class ChargePoint {
    * caller or a TriggerMessage asks for stays a MeterValues.
    */
   sendScheduledMeterValue(connectorId: number): void {
-    const connector = this.getConnector(connectorId);
-    if (connector) this.recordSampledTxEndedSample(connector);
-    if (
-      this._txUpdatedMeterValues &&
-      connector &&
-      this.sendSampleInTransactionEvent(connector, {
-        triggerReason: "MeterValuePeriodic",
-        context: "Sample.Periodic",
-        skipWithoutMeterValue: true,
-      })
-    ) {
-      return;
-    }
-    this.sendMeterValue(connectorId);
+    this._sampling.sendScheduledMeterValue(connectorId);
   }
 
-  /**
-   * The OCPP 2.x routing shared by the clock-aligned (#454) and scheduled
-   * (#347) samples: with a transaction running on the connector, the sample
-   * rides TransactionEvent(Updated) and this returns true. Otherwise it
-   * sends nothing and returns false, leaving the caller to send its own
-   * MeterValues.
-   */
-  private sendSampleInTransactionEvent(
-    connector: Connector,
-    sample: Omit<TransactionUpdateOptions, "meterValues">,
-  ): boolean {
-    if (
-      !isOcpp2Version(this._ocppVersion) ||
-      !connector.hasRunningTransaction
-    ) {
-      return false;
-    }
-    this._outbox.sendTransactionUpdate(connector.id, {
-      ...sample,
-      meterValues: true,
-    });
-    return true;
+  // Kept for tests that cast to reach it.
+  private emitClockAlignedSamples(boundaryMs: number): void {
+    this._sampling.emitClockAlignedSamples(boundaryMs);
+  }
+
+  private recordAlignedTxEndedSamples(
+    measurands: string[],
+    boundaryMs: number,
+  ): void {
+    this._sampling.recordAlignedTxEndedSamples(measurands, boundaryMs);
+  }
+
+  private get _periodicSamplers(): Map<number, TimerHandle> {
+    return this._sampling.samplers;
   }
 
   /**
@@ -3788,7 +3579,7 @@ export class ChargePoint {
     if (!connector) return false;
 
     this.clearChargingProfiles(connectorId, {}, "ConnectorRemoved");
-    this.stopPeriodicSampling(connectorId);
+    this._sampling.stopPeriodicSampling(connectorId);
     // The driver's own 1 s timer outlives Connector.dispose() and would keep
     // calling evSetReady / stopTransaction on a connector the station no longer
     // has (#864 review).

@@ -11,6 +11,7 @@ import type { MonitoringEvent } from "../../../domain/monitoring/MonitorEvaluati
 import { strictValidationErrors } from "@ocpp-cp-simulator/ocpp/validate";
 import { v201Schemas } from "@ocpp-cp-simulator/ocpp/v201/schemas";
 import { v21Schemas } from "@ocpp-cp-simulator/ocpp/v21/schemas";
+import { StationTopology } from "../../../domain/topology/StationTopology";
 
 /**
  * #538, OCPP 2.0.1 / 2.1 N07.FR.04 / N08.FR.03 on the E11 queue (#528):
@@ -136,6 +137,7 @@ function setup(ocppVersion: string, offlineQueuingSeverity = 5) {
   const cp = {
     id: `CP-538-${ocppVersion}`,
     ocppVersion,
+    topology: StationTopology.identity(1),
     connectors: new Map([[1, connector]]),
     getConnector: () => connector,
     notifyOutgoingCall: vi.fn(),

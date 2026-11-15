@@ -3,6 +3,7 @@ import { BehaviorRegistry as DefaultBehaviorRegistry } from "../../../applicatio
 import type { InboundCallPolicy } from "../../../domain/charge-point/ChargePoint";
 import { csmsActionAliases } from "../../../domain/types/csmsActionNames";
 import type { CallExchange } from "./CallExchange";
+import type { StationTopology } from "../../../domain/topology/StationTopology";
 
 /**
  * The ordered checks an inbound CSMS CALL passes before the default path
@@ -66,6 +67,12 @@ export interface InboundCallGateOptions {
    * no effect (1.6 §4.2, while BootNotification is Rejected).
    */
   readonly silenced?: () => boolean;
+  /**
+   * How a 2.x `(evseId, connectorId)` maps to a domain connector (#628), to
+   * pick the rules bound to that connector. Absent on 1.6, whose CALLs name
+   * the domain connector directly.
+   */
+  readonly topology?: Pick<StationTopology, "connectorAt" | "connectorsOf">;
   /** Prefix of the gate's log lines, e.g. `"[v2.0.1] "`. */
   readonly logPrefix?: string;
   info(message: string): void;
@@ -179,7 +186,7 @@ export class InboundCallGate {
       }
     }
 
-    const connectorId = connectorIdOf(payload);
+    const connectorId = connectorIdOf(payload, this.options.topology);
     const resolution = this.registry.resolve(
       {
         action,
@@ -199,18 +206,43 @@ function isTriggerAction(action: string): boolean {
   return action === "TriggerMessage" || action === "ExtendedTriggerMessage";
 }
 
-function connectorIdOf(payload: unknown): number | undefined {
+/**
+ * The domain connector a CALL names, for the rules bound to one connector.
+ * 1.6 names it (`connectorId`). 2.x names an EVSE (`evseId` or `evse.id`) and
+ * optionally the connector's index within it (`connectorId` beside `evseId`,
+ * as in UnlockConnector, or `evse.connectorId`); the station topology
+ * resolves the pair, and an EVSE alone stands for its first connector (its
+ * only one on the 1:1 station). A pair the topology does not resolve names no
+ * connector. Without a topology (1.6) and for a CALL that names no EVSE, the
+ * plain `connectorId` / `evse.connectorId` is taken as is.
+ */
+function connectorIdOf(
+  payload: unknown,
+  topology: InboundCallGateOptions["topology"],
+): number | undefined {
   if (typeof payload !== "object" || payload === null) return undefined;
   const body = payload as {
     connectorId?: unknown;
     evseId?: unknown;
     evse?: { id?: unknown; connectorId?: unknown };
   };
-  // This simulator maps an EVSE to a connector one to one, so on 2.x the EVSE
-  // names the connector; `evse.connectorId` and `connectorId` are the index
-  // within the EVSE, and only a CALL that names no EVSE falls back to them.
-  if (typeof body.evseId === "number") return body.evseId;
-  if (typeof body.evse?.id === "number") return body.evse.id;
+  const evseId =
+    typeof body.evseId === "number"
+      ? body.evseId
+      : typeof body.evse?.id === "number"
+        ? body.evse.id
+        : undefined;
+  if (evseId !== undefined) {
+    if (topology === undefined) return evseId;
+    const index =
+      typeof body.evseId === "number"
+        ? body.connectorId
+        : body.evse?.connectorId;
+    if (typeof index === "number") return topology.connectorAt(evseId, index);
+    // An EVSE the topology does not know keeps its id: it matches no
+    // connector's rules, as before.
+    return topology.connectorsOf(evseId)[0] ?? evseId;
+  }
   if (typeof body.connectorId === "number") return body.connectorId;
   return typeof body.evse?.connectorId === "number"
     ? body.evse.connectorId

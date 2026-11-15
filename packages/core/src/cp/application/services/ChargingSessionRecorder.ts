@@ -21,7 +21,7 @@ import type { Rng } from "../../shared/rng";
 /** What the recorder reads off the charge point it is attached to. */
 export type RecordedChargePoint = Pick<
   ChargePoint,
-  "id" | "ocppVersion" | "events" | "connectors"
+  "id" | "ocppVersion" | "events" | "connectors" | "topology"
 >;
 
 export interface ChargingSessionRecorderOptions {
@@ -249,9 +249,11 @@ export class ChargingSessionRecorder {
       sessionId: this.newSessionId(),
       cpId: this.cp.id,
       connectorId,
-      // The simulator gives each connector an EVSE of its own
-      // (`v201TransactionEvse`).
-      evseId: this.isV2 ? connectorId : null,
+      // The EVSE the 2.x wire names the connector under (#628,
+      // `v201TransactionEvse`).
+      evseId: this.isV2
+        ? (this.cp.topology.evseOf(connectorId) ?? connectorId)
+        : null,
       ocppVersion: this.cp.ocppVersion,
       transactionId: this.transactionIdOf(transaction),
       idTag: transaction.tagId || null,

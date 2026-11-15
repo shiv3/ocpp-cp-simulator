@@ -296,12 +296,12 @@ const COMPONENTS: readonly DeviceModelComponentDef[] = [
   {
     name: "EVSE",
     evseScoped: true,
-    summary: "One EVSE (EVSE N is connector N).",
+    summary: "One EVSE of the station topology (one connector each today).",
   },
   {
     name: "Connector",
     evseScoped: true,
-    summary: "The one connector of an EVSE.",
+    summary: "A connector of an EVSE (connector 1 today).",
   },
   { name: "DeviceDataCtrlr", summary: "Device model reporting." },
   // Components the station has but that publish no variable yet: a request
@@ -1024,7 +1024,9 @@ const VARIABLES: readonly DeviceModelVariableDef[] = [
     },
   ),
   // #538: per-EVSE runtime values; `valueKey` is the prefix of the per-EVSE
-  // key. EVSE N is connector N and has one connector, number 1.
+  // key. `ChargePoint.topology` maps a domain connector to its EVSE (#628);
+  // every EVSE has one connector, number 1, until multi-connector EVSEs
+  // bring per-connector keys.
   runtime("EVSE", "Power", RUNTIME_VALUE_KEYS.evsePower, {
     dataType: "decimal",
     unit: "W",

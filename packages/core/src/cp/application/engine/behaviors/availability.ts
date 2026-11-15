@@ -12,7 +12,7 @@ interface ChangeAvailability16Request {
 
 interface ChangeAvailability2Request {
   operationalStatus: OCPPAvailability;
-  evse?: { id: number };
+  evse?: { id: number; connectorId?: number };
 }
 
 function statusOf(
@@ -30,7 +30,9 @@ function statusOf(
  *
  * Rules shared by both versions: a target with a transaction in flight answers
  * `Scheduled` and keeps the change in the connector's `scheduledAvailability`
- * until the transaction stops; an unknown connector answers `Rejected`;
+ * until the transaction stops; an unknown connector answers `Rejected` (on
+ * 2.x a known EVSE without the requested `evse.connectorId` adds the reason
+ * code `UnknownConnectorId`, G03);
  * otherwise `Accepted` and the connector goes `Available` or `Unavailable`
  * with a StatusNotification. Connector id (1.6) or no EVSE (2.x) 0 means the
  * main controller and every connector.
@@ -109,9 +111,9 @@ function change16(cp: ChargePoint, req: ChangeAvailability16Request) {
 
 function change2(cp: ChargePoint, req: ChangeAvailability2Request) {
   const target = req.operationalStatus;
-  const connectorId = req.evse?.id;
+  const evseId = req.evse?.id;
 
-  if (connectorId === undefined) {
+  if (evseId === undefined) {
     // G03.FR.03 / G04.FR.04: a request for the state the EVSE is already in is
     // Accepted; Scheduled applies only to a change that is really pending
     // (G03.FR.05, G04.FR.06). A busy EVSE already in the target state just
@@ -150,7 +152,37 @@ function change2(cp: ChargePoint, req: ChangeAvailability2Request) {
     };
   }
 
-  const connector = cp.getConnector(connectorId);
+  // G03: `evse.id` alone changes an EVSE, `evse.id` + `evse.connectorId` one
+  // connector of it (TC_G_15..TC_G_17_CS and TC_G_19_CS send the pair;
+  // TC_G_07/08_CSMS expect a CSMS to). The station topology (#628) resolves
+  // either. On the 1:1 station an EVSE and its one connector share one
+  // availability, so both forms change the same connector, as before.
+  const evseConnectorId = req.evse?.connectorId;
+  const id =
+    evseConnectorId === undefined
+      ? cp.topology.connectorsOf(evseId)[0]
+      : cp.topology.connectorAt(evseId, evseConnectorId);
+  if (
+    id === undefined &&
+    evseConnectorId !== undefined &&
+    cp.topology.connectorsOf(evseId).length > 0
+  ) {
+    // A known EVSE without that connector: Rejected (G03.FR.02, the answer
+    // says whether the station can make the change), with the Appendix reason code `UnknownConnectorId`
+    // ("Connector Id is not known on EVSE", listed for ChangeAvailability).
+    // It used to change the EVSE's connector 1 instead.
+    return {
+      response: {
+        status: "Rejected",
+        statusInfo: {
+          reasonCode: "UnknownConnectorId",
+          additionalInfo: `EVSE ${evseId} has no connector ${evseConnectorId}`,
+        },
+      },
+    };
+  }
+  const connector = id === undefined ? undefined : cp.getConnector(id);
+  // An unknown EVSE keeps its plain Rejected.
   if (!connector) return { response: { status: "Rejected" } };
   if (connector.transaction) {
     // Already in the requested state: Accepted, and a pending opposite
@@ -174,7 +206,10 @@ function change2(cp: ChargePoint, req: ChangeAvailability2Request) {
     response: { status: "Accepted" },
     after: async () => {
       connector.availability = target;
-      cp.updateConnectorStatus(connectorId, statusOf(cp, target, connectorId));
+      cp.updateConnectorStatus(
+        connector.id,
+        statusOf(cp, target, connector.id),
+      );
       cp.persistAvailability();
     },
   };

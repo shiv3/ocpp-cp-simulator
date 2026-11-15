@@ -10,6 +10,7 @@ import { strictValidationErrors } from "@ocpp-cp-simulator/ocpp/validate";
 import { v201Schemas } from "@ocpp-cp-simulator/ocpp/v201/schemas";
 import { v21Schemas } from "@ocpp-cp-simulator/ocpp/v21/schemas";
 import type { TransactionEventRequestV201 } from "@ocpp-cp-simulator/ocpp/index";
+import { StationTopology } from "../../../domain/topology/StationTopology";
 
 /**
  * #529, OCPP 2.0.1 / 2.1 E13 (2.0.1 Table 120 / 2.1 E13 use case,
@@ -125,6 +126,7 @@ function setup(
   const discarded: Array<ChargePointEvents["transactionMessageDiscarded"]> = [];
   const cp = {
     ocppVersion,
+    topology: StationTopology.identity(1),
     connectors: new Map([[1, connector]]),
     getConnector: vi.fn(() => connector),
     notifyOutgoingCall: vi.fn(),

@@ -62,7 +62,10 @@ export function buildBaseReportData(
       const datum = reportDatum(
         {
           name: def.component,
-          // EVSE N has one connector, number 1.
+          // The `Connector` runtime values are kept per EVSE, for its
+          // connector 1: every EVSE of the 1:1 topology has exactly one
+          // (`StationTopology.identity`). Per-connector keys come with
+          // multi-connector EVSEs (#628).
           evse:
             def.component === "Connector"
               ? { id: evseId, connectorId: 1 }

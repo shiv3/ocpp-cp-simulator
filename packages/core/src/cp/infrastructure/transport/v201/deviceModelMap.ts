@@ -29,7 +29,10 @@ export type DeviceModelResolution =
  * The registry entry and configuration key behind `component.variable[instance]`,
  * EVSE scope included (#538). An EVSE-scoped component (EVSE, Connector) is
  * only found with an `evse` the station has (B06.FR.06, N04.FR.03); without
- * `evseExists` the station has none. A station-wide component ignores
+ * `evseExists` the station has none (the station resolves `evse` through its
+ * topology, #628). The value key is per EVSE: on the 1:1 topology the
+ * `Connector` component of EVSE N is that EVSE's only connector. A
+ * station-wide component ignores
  * `component.evse` here, as GetVariables / SetVariables always did.
  */
 export function resolveDeviceModelVariable(

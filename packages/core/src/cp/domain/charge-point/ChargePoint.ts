@@ -229,6 +229,7 @@ import type {
   ChargePointTimelineProjector,
 } from "../services/ChargePointTimeline";
 import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
+import { StationTopology } from "../topology/StationTopology";
 
 /** RFC 6455 Normal Closure, and No Status Received (a close without a code). */
 const NORMAL_CLOSE_CODES: ReadonlySet<number> = new Set([1000, 1005]);
@@ -510,11 +511,16 @@ export class ChargePoint {
   /** #575: the default transaction behavior, see `deps.transactions`. */
   private readonly _transactions: ChargePointTransactions;
   /** #697: an idToken authorized before the cable was in, per connector;
-   *  `TxStartPoint` `EVConnected` starts the transaction at the plug-in. */
+   *  `TxStartPoint` `EVConnected` starts the transaction at the plug-in.
+   *  Per connector is per EVSE on the 1:1 topology; an EVSE with several
+   *  connectors will key it by EVSE (#628). */
   private readonly _tokenAwaitingPlugIn = new Map<
     number,
     { tagId: string; options: StartTransactionOptions }
   >();
+  /** #628: how the connectors group into EVSEs; every 2.x EVSE reference
+   *  is mapped through it. Fixed at construction. */
+  private readonly _topology: StationTopology;
   /** #393: level C expert sends; null on SOAP. */
   private readonly _rawFrames: RawFrameSink | null;
   /** #389: null on SOAP. */
@@ -792,6 +798,9 @@ export class ChargePoint {
     deps: ChargePointDeps,
   ) {
     this._clock = simulation.clock ?? realClock;
+    // #628: the 1:1 station until the topology is configurable. Before the
+    // engine and the transport, which read it.
+    this._topology = StationTopology.identity(connectorCount);
     // #575: before the connectors are attached and before the transport is
     // built (the message handlers read `behaviors` when they are built).
     this._behaviors = deps.createBehaviorRegistry({
@@ -1387,7 +1396,10 @@ export class ChargePoint {
       // 2.1: EVSE.Power has a Target, for TargetDelta monitors (N07.FR.22).
       if (this._ocppVersion === OCPP_2_1) {
         this._deviceModelTargets.declare(
-          evseValueKey(RUNTIME_VALUE_KEYS.evsePower, connector.id),
+          evseValueKey(
+            RUNTIME_VALUE_KEYS.evsePower,
+            this.evseIdOf(connector.id),
+          ),
         );
       }
       connector.events.on("statusChange", publish);
@@ -1406,16 +1418,19 @@ export class ChargePoint {
   }
 
   /** `EVSE.Power`, `EVSE.AvailabilityState` and
-   *  `Connector.AvailabilityState` of EVSE N (connector N). */
+   *  `Connector.AvailabilityState` of the connector's EVSE (`topology`).
+   *  On a 1:1 station the EVSE and its one connector share the value; an EVSE
+   *  state of its own (G03 Note 1) comes with multi-connector EVSEs (#628). */
   private publishConnectorValues(connector: Connector): void {
     const keys = RUNTIME_VALUE_KEYS;
+    const evseId = this.evseIdOf(connector.id);
     this.publishRuntimeInteger(
-      evseValueKey(keys.evsePower, connector.id),
+      evseValueKey(keys.evsePower, evseId),
       reportedActivePowerW(connector),
     );
     const state = toV2ConnectorStatus(connector.status);
     for (const prefix of [keys.evseState, keys.connectorState]) {
-      this.publishRuntimeString(evseValueKey(prefix, connector.id), state);
+      this.publishRuntimeString(evseValueKey(prefix, evseId), state);
     }
   }
 
@@ -1426,16 +1441,15 @@ export class ChargePoint {
    */
   private withdrawConnectorValues(connectorId: number): void {
     const keys = RUNTIME_VALUE_KEYS;
+    const evseId = this.evseIdOf(connectorId);
     for (const prefix of [
       keys.evsePower,
       keys.evseState,
       keys.connectorState,
     ]) {
-      this._configuration.removeRuntimeKey(evseValueKey(prefix, connectorId));
+      this._configuration.removeRuntimeKey(evseValueKey(prefix, evseId));
     }
-    this._deviceModelTargets.undeclare(
-      evseValueKey(keys.evsePower, connectorId),
-    );
+    this._deviceModelTargets.undeclare(evseValueKey(keys.evsePower, evseId));
   }
 
   /** `ChargingStation.AvailabilityState`: the station-level status. */
@@ -1476,7 +1490,7 @@ export class ChargePoint {
 
   /**
    * The 2.x transactionId a monitor's event is linked to (#538): the
-   * transaction running on the monitor's EVSE (EVSE N is connector N), or,
+   * transaction running on a connector of the monitor's EVSE (`topology`), or,
    * for a station-level monitor reporting only during a transaction, the
    * transaction when exactly one runs. Otherwise none.
    */
@@ -1484,7 +1498,13 @@ export class ChargePoint {
     const running = (c: Connector | undefined) =>
       c?.hasRunningTransaction ? c.transaction?.cpTransactionId : undefined;
     const evse = monitor.component.evse;
-    if (evse !== undefined) return running(this._connectors.get(evse.id));
+    if (evse !== undefined) {
+      for (const id of this._topology.connectorsOf(evse.id)) {
+        const txId = running(this._connectors.get(id));
+        if (txId !== undefined) return txId;
+      }
+      return undefined;
+    }
     if (!monitor.transaction) return undefined;
     const active = [...this._connectors.values()].filter(
       (c) => c.hasRunningTransaction,
@@ -1938,6 +1958,21 @@ export class ChargePoint {
 
   get connectors(): Map<number, Connector> {
     return new Map(this._connectors);
+  }
+
+  /**
+   * How the domain connectors group into EVSEs (#628). The 1:1 station
+   * (`StationTopology.identity`) today. A connector removed at run time stays
+   * in the topology; whether it exists is still `getConnector`'s answer.
+   */
+  get topology(): StationTopology {
+    return this._topology;
+  }
+
+  /** The EVSE a domain connector (k > 0) belongs to on the 2.x wire (#628);
+   *  an id outside the topology keeps the 1:1 mapping. */
+  private evseIdOf(connectorId: number): number {
+    return this._topology.evseOf(connectorId) ?? connectorId;
   }
 
   /**

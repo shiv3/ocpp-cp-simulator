@@ -79,8 +79,15 @@ export function reservationBehavior(cp: ChargePoint): Behavior {
           const req = request as ReserveNow16Request & ReserveNow2Request;
           const reservationId = two ? req.id : req.reservationId;
           // 0 names no connector: 1.6 connector 0, 2.x ReserveNow without
-          // `evseId` (a reservation on an unspecified EVSE, H01.FR.04).
-          const connectorId = two ? (req.evseId ?? 0) : req.connectorId;
+          // `evseId` (a reservation on an unspecified EVSE, H01.FR.04). A
+          // 2.x EVSE maps to its connector through the station topology
+          // (#628); an EVSE it does not know keeps its id and is refused as
+          // an unknown connector.
+          const connectorId = two
+            ? req.evseId === undefined || req.evseId === 0
+              ? 0
+              : (cp.topology.connectorsOf(req.evseId)[0] ?? req.evseId)
+            : req.connectorId;
           const refusal = reserveNowRefusal(cp, connectorId, reservationId);
           if (refusal) return { response: { status: refusal } };
 

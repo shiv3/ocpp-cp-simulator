@@ -38,7 +38,7 @@ related:
   - operational-timeline.md
   - expert-ocpp-calls.md
   - variable-monitoring.md
-updated: 2026-11-14
+updated: 2026-11-15
 ---
 
 # OCPP versions and transports
@@ -304,8 +304,9 @@ each transmission counts as failed once:
 which an unanswered CALL frees the [one-CALL-in-flight slot](#one-call-in-flight-on-2x-ocpp-j-411). The CSMS addresses it as
 `OCPPCommCtrlr.MessageTimeout` with `variableInstance = "Default"` (2.0.1
 and 2.1 §2.1.3 "DefaultMessageTimeout"). The spec makes it ReadOnly: the
-CSMS sets it through a NetworkConnectionProfile, and this simulator answers
-`SetNetworkProfile` with `Rejected`. So `SetVariables` answers `Rejected`
+CSMS sets it through a NetworkConnectionProfile; this simulator stores a
+`SetNetworkProfile` profile but never switches to it
+([security profiles](security-profiles.md#setnetworkprofile-b09)). So `SetVariables` answers `Rejected`
 too, and `GetBaseReport` reports it as ReadOnly. No other 2.x CALL is resent
 on a timeout. 1.6 `GetConfiguration` does not list the key.
 

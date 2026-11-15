@@ -1337,6 +1337,77 @@ export const goldenCases: GoldenCase[] = [
     await rig.csms.waitForCall("NotifyReport", { nth: 3, timeoutMs: 30_000 });
     await settle(rig);
   }),
+  // B09 SetNetworkProfile: a valid profile is Accepted and stored with no
+  // reconnect; invalid content and a security downgrade are Rejected with a
+  // reasonCode (B09.FR.01/02/04).
+  c201("set-network-profile", async (rig) => {
+    const connectionData = {
+      ocppVersion: "OCPP20",
+      ocppTransport: "JSON",
+      ocppCsmsUrl: "wss://csms.example/ocpp/",
+      messageTimeout: 30,
+      securityProfile: 2,
+      ocppInterface: "Wired0",
+    };
+    await rig.csms.call("SetNetworkProfile", {
+      configurationSlot: 1,
+      connectionData,
+    });
+    await rig.csms.call("SetNetworkProfile", {
+      configurationSlot: 2,
+      connectionData: { ...connectionData, ocppTransport: "SOAP" },
+    });
+    rig.cp.configuration.applyChange("SecurityProfile", "3", {
+      bypassGuard: true,
+    });
+    await rig.csms.call("SetNetworkProfile", {
+      configurationSlot: 2,
+      connectionData,
+    });
+    await rig.csms.call("SetVariables", {
+      setVariableData: [
+        {
+          component: { name: "SecurityCtrlr" },
+          variable: { name: "AllowSecurityProfileDowngrade" },
+          attributeValue: "true",
+        },
+      ],
+    });
+    await rig.csms.call("SetNetworkProfile", {
+      configurationSlot: 2,
+      connectionData,
+    });
+    await settle(rig);
+  }),
+  // DeviceDataCtrlr.ConfigurationValueSize / ReportingValueSize: an
+  // oversized SetVariables value is Rejected / TooLargeElement, and a
+  // reported value is cut to ReportingValueSize.
+  c201("variables-value-size", async (rig) => {
+    // Lowered from the schema's maxLength, which the frame validation
+    // already enforces.
+    rig.cp.configuration.defineRuntimeIntegerKey("ConfigurationValueSize", 8);
+    rig.cp.configuration.defineRuntimeIntegerKey("ReportingValueSize", 4);
+    const master = {
+      component: { name: "AuthCtrlr" },
+      variable: { name: "MasterPassGroupId" },
+    };
+    await rig.csms.call("SetVariables", {
+      setVariableData: [
+        { ...master, attributeValue: "GROUP-123" },
+        { ...master, attributeValue: "GROUP-12" },
+      ],
+    });
+    await rig.csms.call("GetVariables", {
+      getVariableData: [
+        master,
+        {
+          component: { name: "DeviceDataCtrlr" },
+          variable: { name: "ConfigurationValueSize" },
+        },
+      ],
+    });
+    await settle(rig);
+  }),
   // #606: reason codes (B05.FR.07-FR.09, B06.FR.09) and the DeviceDataCtrlr
   // size limits (B05.FR.11, B06.FR.05) in the statusInfo of each result.
   c201("variables-reason-codes", async (rig) => {

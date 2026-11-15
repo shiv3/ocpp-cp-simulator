@@ -3280,6 +3280,7 @@ function readStatusNotificationOptions({
   vendorId,
   timestamp,
   suppressChargingStateTransactionEvent,
+  allowInvalidTransition,
 }: Params<"update_connector_status">): StatusNotificationOptions | undefined {
   const opts: StatusNotificationOptions = stripUndefined({
     errorCode,
@@ -3288,8 +3289,11 @@ function readStatusNotificationOptions({
     vendorId,
     timestamp: timestamp === undefined ? undefined : new Date(timestamp),
     suppressChargingStateTransactionEvent,
+    allowInvalidTransition,
   });
-  return hasStatusNotificationOptions(opts) ? opts : undefined;
+  return opts.allowInvalidTransition || hasStatusNotificationOptions(opts)
+    ? opts
+    : undefined;
 }
 
 function parseHistoryOptions(raw: unknown): HistoryOptions | undefined {

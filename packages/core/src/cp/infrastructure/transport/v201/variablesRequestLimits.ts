@@ -1,7 +1,9 @@
 // The DeviceDataCtrlr size limits of GetVariables / SetVariables (#606).
 import type { ConfigurationStore } from "../../../domain/charge-point/ConfigurationStore";
 import {
+  CONFIGURATION_VALUE_MAX_SIZE,
   DEVICE_DATA_CTRLR_KEYS,
+  REPORTING_VALUE_MAX_SIZE,
   VARIABLES_REQUEST_MAX_BYTES,
   VARIABLES_REQUEST_MAX_ITEMS,
 } from "../../../domain/device-model/deviceDataCtrlrKeys";
@@ -68,4 +70,24 @@ export function variablesRequestLimitViolation(
     );
   }
   return undefined;
+}
+
+/** `DeviceDataCtrlr.ConfigurationValueSize`: the longest SetVariables
+ *  attributeValue, in characters. */
+export function configurationValueSize(store: ConfigurationStore): number {
+  return limit(
+    store,
+    DEVICE_DATA_CTRLR_KEYS.configurationValueSize,
+    CONFIGURATION_VALUE_MAX_SIZE,
+  );
+}
+
+/** `DeviceDataCtrlr.ReportingValueSize`: the longest reported value, in
+ *  characters. */
+export function reportingValueSize(store: ConfigurationStore): number {
+  return limit(
+    store,
+    DEVICE_DATA_CTRLR_KEYS.reportingValueSize,
+    REPORTING_VALUE_MAX_SIZE,
+  );
 }

@@ -117,6 +117,18 @@ export interface ChargePointEvents {
     status: OCPPStatus;
     previousStatus: OCPPStatus;
   };
+  /**
+   * #618: a connector status change the OCPP 1.6 §4.9 table does not list
+   * was applied locally, but its StatusNotification was not sent, because the
+   * capability profile sets `statusTransitions: "enforce"`.
+   * `connectorStatusChange` is still emitted for the same change.
+   */
+  statusNotificationSuppressed: {
+    connectorId: number;
+    from: OCPPStatus;
+    to: OCPPStatus;
+    reason: "invalidTransition";
+  };
   connectorAvailabilityChange: {
     connectorId: number;
     availability: OCPPAvailability;

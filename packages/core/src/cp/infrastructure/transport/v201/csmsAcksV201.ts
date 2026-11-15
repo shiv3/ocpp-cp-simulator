@@ -9,6 +9,7 @@ import type {
   SendLocalListRequestV201,
   SendLocalListResponseV201,
   SetDisplayMessageResponseV201,
+  SetNetworkProfileRequestV201,
   SetNetworkProfileResponseV201,
   UnpublishFirmwareResponseV201,
 } from "@ocpp-cp-simulator/ocpp/index";
@@ -61,11 +62,34 @@ function toV201SendLocalListStatus(
   }
 }
 
-export const handleSetNetworkProfileAckV201 = (() => ({
-  response: {
-    status: "Rejected",
-  } satisfies SetNetworkProfileResponseV201,
-})) satisfies V201AckHandler;
+/**
+ * B09 SetNetworkProfile: a valid profile is stored in its slot and Accepted
+ * (B09.FR.02); an invalid one, or one that lowers the security profile while
+ * `AllowSecurityProfileDowngrade` forbids it (B09.FR.04), is Rejected with a
+ * reasonCode. The station does not reconnect here. The 2.1 request has the
+ * same shape plus optional fields, so one handler serves both.
+ */
+export const handleSetNetworkProfileAckV201 = ((
+  payload: unknown,
+  ctx: V201InboundContext,
+): V201HandlerResult => {
+  const req = payload as SetNetworkProfileRequestV201;
+  const verdict = ctx.chargePoint.setNetworkProfile(
+    req.configurationSlot,
+    req.connectionData,
+  );
+  return {
+    response: verdict.accepted
+      ? ({ status: "Accepted" } satisfies SetNetworkProfileResponseV201)
+      : ({
+          status: "Rejected",
+          statusInfo: {
+            reasonCode: verdict.reasonCode,
+            additionalInfo: verdict.additionalInfo.slice(0, 512),
+          },
+        } satisfies SetNetworkProfileResponseV201),
+  };
+}) satisfies V201AckHandler;
 
 export const handleSendLocalListAckV201 = ((
   payload: unknown,

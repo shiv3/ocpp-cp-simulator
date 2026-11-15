@@ -256,4 +256,37 @@ describe("InboundCallGate", () => {
       ).toHaveLength(1);
     });
   });
+
+  describe("capability profile error code (#618)", () => {
+    const disabling = (
+      rec: Recorder,
+      code?: "NotImplemented" | "NotSupported",
+    ) => ({
+      ...chargePointDouble(rec),
+      isActionDisabled: (action: string) => action === "ReserveNow",
+      ...(code ? { disabledActionErrorCode: () => code } : {}),
+    });
+
+    it("answers a disabled action NotImplemented by default", () => {
+      const rec: Recorder = { events: [], frames: [] };
+      const ex = exchangeFor("ReserveNow", rec);
+      expect(gate(disabling(rec)).admit(ex, {})).toEqual({ kind: "settled" });
+      expect(rec.frames).toEqual(["error:NotImplemented"]);
+    });
+
+    it("answers with the profile's code, on 1.6 and aliased ports alike", () => {
+      for (const aliased of [false, true]) {
+        const rec: Recorder = { events: [], frames: [] };
+        const log: string[] = [];
+        const ex = exchangeFor("ReserveNow", rec);
+        expect(
+          gate(disabling(rec, "NotSupported"), { aliased, log }).admit(ex, {}),
+        ).toEqual({ kind: "settled" });
+        expect(rec.frames).toEqual(["error:NotSupported"]);
+        expect(log).toEqual([
+          expect.stringContaining("replied CallError(NotSupported)"),
+        ]);
+      }
+    });
+  });
 });

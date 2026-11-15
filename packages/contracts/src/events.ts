@@ -61,6 +61,8 @@ interface FullBootNotification {
 export interface WireCapabilityProfile {
   disabledActions?: readonly string[];
   triggerMessageTargets?: readonly string[];
+  disabledActionErrorCode?: "NotImplemented" | "NotSupported";
+  statusTransitions?: "warn" | "enforce";
 }
 
 interface FullCpConfig {
@@ -132,6 +134,17 @@ export function redactCp(config: FullCpConfig): WireCpConfig {
                 triggerMessageTargets: [
                   ...config.capabilityProfile.triggerMessageTargets,
                 ],
+              }
+            : {}),
+          ...(config.capabilityProfile.disabledActionErrorCode
+            ? {
+                disabledActionErrorCode:
+                  config.capabilityProfile.disabledActionErrorCode,
+              }
+            : {}),
+          ...(config.capabilityProfile.statusTransitions
+            ? {
+                statusTransitions: config.capabilityProfile.statusTransitions,
               }
             : {}),
         }
@@ -215,6 +228,10 @@ export const wireCpConfigSchema = z
       .object({
         disabledActions: z.array(STR_256).optional(),
         triggerMessageTargets: z.array(STR_256).optional(),
+        disabledActionErrorCode: z
+          .enum(["NotImplemented", "NotSupported"])
+          .optional(),
+        statusTransitions: z.enum(["warn", "enforce"]).optional(),
       })
       .optional(),
     transport: transportConfigSchema.optional(),

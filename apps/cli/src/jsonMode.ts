@@ -813,7 +813,10 @@ function readStatusNotificationOptions(
   readOptionalString(params, "vendorId", opts);
   readOptionalTimestamp(params, "timestamp", opts);
   readOptionalBoolean(params, "suppressChargingStateTransactionEvent", opts);
-  return hasStatusNotificationOptions(opts) ? opts : undefined;
+  readOptionalBoolean(params, "allowInvalidTransition", opts);
+  return opts.allowInvalidTransition || hasStatusNotificationOptions(opts)
+    ? opts
+    : undefined;
 }
 
 function readOptionalString(
@@ -848,7 +851,7 @@ function readOptionalTimestamp(
 
 function readOptionalBoolean(
   params: Record<string, unknown>,
-  key: "suppressChargingStateTransactionEvent",
+  key: "suppressChargingStateTransactionEvent" | "allowInvalidTransition",
   target: StatusNotificationOptions,
 ): void {
   const val = params[key];

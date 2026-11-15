@@ -772,6 +772,12 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
         .describe(
           "OCPP 2.x only: suppress the TransactionEvent a charging-state change would otherwise send",
         ),
+      allowInvalidTransition: z
+        .boolean()
+        .optional()
+        .describe(
+          "Send the StatusNotification even when the charge point's capabilityProfile sets statusTransitions enforce and this change is not in the OCPP 1.6 section 4.9 transition table",
+        ),
     }),
     handler: async (args) => {
       try {
@@ -788,6 +794,7 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
             timestamp: args.timestamp,
             suppressChargingStateTransactionEvent:
               args.suppressChargingStateTransactionEvent,
+            allowInvalidTransition: args.allowInvalidTransition,
           },
         });
         return successResult(result);

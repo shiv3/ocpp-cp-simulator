@@ -3,7 +3,9 @@
 // values live in the ConfigurationStore under `valueKey`.
 import { MAX_TIMER_MS } from "../../shared/timers";
 import {
+  CONFIGURATION_VALUE_MAX_SIZE,
   DEVICE_DATA_CTRLR_KEYS,
+  REPORTING_VALUE_MAX_SIZE,
   REPORT_MAX_BYTES,
   REPORT_MAX_ITEMS,
   VARIABLES_REQUEST_MAX_BYTES,
@@ -857,6 +859,34 @@ const VARIABLES: readonly DeviceModelVariableDef[] = [
       },
     ),
   ]),
+  // Part 2 DeviceDataCtrlr: the longest value the station takes in a
+  // SetVariables (longer is Rejected / TooLargeElement) and the longest it
+  // reports (GetVariables, NotifyReport; longer is truncated). Constants at
+  // the schema's maxLength, so a CSMS reading them knows what to expect.
+  runtime(
+    "DeviceDataCtrlr",
+    "ConfigurationValueSize",
+    DEVICE_DATA_CTRLR_KEYS.configurationValueSize,
+    {
+      dataType: "integer",
+      min: 1,
+      max: CONFIGURATION_VALUE_MAX_SIZE,
+      default: CONFIGURATION_VALUE_MAX_SIZE,
+      constant: true,
+    },
+  ),
+  runtime(
+    "DeviceDataCtrlr",
+    "ReportingValueSize",
+    DEVICE_DATA_CTRLR_KEYS.reportingValueSize,
+    {
+      dataType: "integer",
+      min: 1,
+      max: REPORTING_VALUE_MAX_SIZE,
+      default: REPORTING_VALUE_MAX_SIZE,
+      constant: true,
+    },
+  ),
   // #538: MonitoringCtrlr (2.0.1 Part 2 §2.11.3-§2.11.9, 2.1 §2.13.3-§2.13.9).
   runtime(
     "MonitoringCtrlr",
@@ -976,6 +1006,21 @@ const VARIABLES: readonly DeviceModelVariableDef[] = [
       min: 0,
       default: 3,
       effect: "How many times SignCertificate is resent.",
+    },
+  ),
+  // B09.FR.04: whether SetNetworkProfile may lower the security profile
+  // (from 3 to 2 only). The switch itself happens later, not on the write.
+  persistent(
+    "SecurityCtrlr",
+    "AllowSecurityProfileDowngrade",
+    "AllowSecurityProfileDowngrade",
+    {
+      sharedWith16: false,
+      mutability: "ReadWrite",
+      dataType: "boolean",
+      default: false,
+      effect:
+        "SetNetworkProfile accepts a security profile 2 profile while 3 is in force.",
     },
   ),
   // #538: per-EVSE runtime values; `valueKey` is the prefix of the per-EVSE

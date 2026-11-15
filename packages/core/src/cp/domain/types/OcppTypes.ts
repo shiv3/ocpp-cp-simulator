@@ -82,6 +82,14 @@ export interface StatusNotificationOptions {
   vendorId?: string;
   timestamp?: Date;
   suppressChargingStateTransactionEvent?: boolean;
+  /**
+   * Not a StatusNotification field: the status change is sent even when the
+   * capability profile enforces the OCPP 1.6 §4.9 transition table and the
+   * change is not in it (#618). It does not count for
+   * {@link hasStatusNotificationOptions}: on its own it keeps the normal path
+   * (connector updated, then reported), which is the path it applies to.
+   */
+  allowInvalidTransition?: boolean;
 }
 
 export function hasStatusNotificationOptions(

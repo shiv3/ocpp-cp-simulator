@@ -285,15 +285,24 @@ function statusChangeNodeDataToForm(nodeData: ScenarioNodeData): NodeFormData {
       (nodeData as Partial<StatusChangeNodeData>).status,
       OCPPStatus.Available,
     ),
+    // Schema 1.11 (#618): no control of its own; kept so an edit of the
+    // status does not drop it.
+    allowInvalidTransition: optionalBoolean(
+      (nodeData as Partial<StatusChangeNodeData>).allowInvalidTransition,
+    ),
   });
 }
 
 function statusChangeFormToNodeData(
   formData: NodeFormData,
 ): StatusChangeNodeData {
+  const allowInvalidTransition = optionalBoolean(
+    formData.allowInvalidTransition,
+  );
   return {
     ...baseFromForm(formData),
     status: asOcppStatus(formData.status, OCPPStatus.Available),
+    ...(allowInvalidTransition !== undefined ? { allowInvalidTransition } : {}),
   };
 }
 

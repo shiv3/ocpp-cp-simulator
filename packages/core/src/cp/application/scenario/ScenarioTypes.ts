@@ -139,6 +139,13 @@ export type BaseNodeData = {
  */
 export type StatusChangeNodeData = BaseNodeData & {
   status: OCPPStatus;
+  /**
+   * Schema 1.11 (#618): send the StatusNotification even when the charge
+   * point's capability profile enforces the OCPP 1.6 §4.9 transition table
+   * (`statusTransitions: "enforce"`) and this change is not in it. Absent or
+   * false: the profile decides.
+   */
+  allowInvalidTransition?: boolean;
 };
 
 /**
@@ -679,7 +686,7 @@ export interface ScenarioTrigger {
  * See `packages/core/schema/scenario.schema.json` (Draft 2020-12) and
  * `docs/concepts/scenario-format.md`.
  */
-export const SCENARIO_SCHEMA_VERSION = "1.10";
+export const SCENARIO_SCHEMA_VERSION = "1.11";
 
 /** Where a recorded scenario came from (schema 1.6, #654 step 2). */
 export interface ScenarioRecordedFrom {
@@ -982,7 +989,10 @@ export interface ScenarioCallExchange {
 }
 
 export interface ScenarioExecutorCallbacks {
-  onStatusChange?: (status: OCPPStatus) => Promise<void>;
+  onStatusChange?: (
+    status: OCPPStatus,
+    options?: { readonly allowInvalidTransition?: boolean },
+  ) => Promise<void>;
   /**
    * Returns the domain's `StartTransactionOutcome` (issue #181) so the
    * executor can distinguish a denied local-authorize gate from a real

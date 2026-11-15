@@ -175,6 +175,8 @@ export interface ChargePointSnapshot {
     capabilityProfile?: {
       disabledActions?: readonly string[];
       triggerMessageTargets?: readonly string[];
+      disabledActionErrorCode?: "NotImplemented" | "NotSupported";
+      statusTransitions?: "warn" | "enforce";
     };
     /** #609 / #611: reconnect policy and WebSocket client options; the
      *  proxy URL's credentials are removed. */
@@ -251,6 +253,8 @@ export interface CreateChargePointParams {
   capabilityProfile?: {
     disabledActions?: readonly string[];
     triggerMessageTargets?: readonly string[];
+    disabledActionErrorCode?: "NotImplemented" | "NotSupported";
+    statusTransitions?: "warn" | "enforce";
   };
   /** Charger-side delivery caps per connector (#327); omitted on an update
    *  keeps the current ones. */

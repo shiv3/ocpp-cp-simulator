@@ -13,7 +13,11 @@ import {
   statusInfo,
   type VariableStatusInfo,
 } from "./variableStatusInfo";
-import { variablesRequestLimitViolation } from "./variablesRequestLimits";
+import {
+  configurationValueSize,
+  variablesRequestLimitViolation,
+} from "./variablesRequestLimits";
+import { valueLength } from "../../../domain/device-model/deviceDataCtrlrKeys";
 import { unknownMeasurands } from "./measurandEnum";
 import {
   DEVICE_MODEL,
@@ -108,6 +112,7 @@ export function handleSetVariablesV201(
     req.setVariableData.length,
     store,
   );
+  const maxValueSize = configurationValueSize(store);
   const results = req.setVariableData.map((data): SetVariableResult => {
     const echo = { component: data.component, variable: data.variable };
     const rejected = (info: VariableStatusInfo): SetVariableResult => ({
@@ -127,6 +132,17 @@ export function handleSetVariablesV201(
     const v16Key = resolved.valueKey;
     const def = resolved.variable;
     const type = data.attributeType;
+    // DeviceDataCtrlr.ConfigurationValueSize (Part 2): a longer value is
+    // more than the station takes, whatever the variable.
+    const size = valueLength(data.attributeValue);
+    if (size > maxValueSize) {
+      return rejected(
+        statusInfo(
+          REASON.tooLargeElement,
+          `${size} characters; ConfigurationValueSize is ${maxValueSize}`,
+        ),
+      );
+    }
 
     if (
       (type === "Target" || type === "MinSet" || type === "MaxSet") &&

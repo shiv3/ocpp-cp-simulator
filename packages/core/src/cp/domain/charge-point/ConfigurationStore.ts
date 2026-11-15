@@ -548,6 +548,12 @@ export class ConfigurationStore {
     return this.getInteger("CertSigningRepeatTimes") ?? 3;
   }
 
+  /** 2.x `SecurityCtrlr.AllowSecurityProfileDowngrade` (B09.FR.04); default
+   *  `false`. */
+  allowSecurityProfileDowngrade(): boolean {
+    return this.getBoolean("AllowSecurityProfileDowngrade") ?? false;
+  }
+
   /**
    * Sets a value the station itself keeps current, such as the ReadOnly
    * `CertificateEntries` count (#537). Unlike {@link applyChange} it

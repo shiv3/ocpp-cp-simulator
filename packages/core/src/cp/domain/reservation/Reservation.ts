@@ -27,7 +27,8 @@ export class ReservationManager {
   private cleanupTimer?: TimerHandle;
   /** Invoked with the connector id each time a reservation is dropped by
    *  cleanupExpiredReservations() because its expiry passed — from the periodic
-   *  timer, or lazily via getReservationForConnector()/getAllReservations(). Lets
+   *  timer, or lazily via getReservationForConnector()/getAllReservations() —
+   *  and by expireLapsed() for one that expired while the link was down. Lets
    *  the owner (ChargePoint) return the connector Reserved → Available and emit
    *  the StatusNotification; without it a lapsed reservation left the connector
    *  stuck Reserved on the wire. Explicit cancel/use paths delete directly and
@@ -354,19 +355,23 @@ export class ReservationManager {
       );
       // Return the connector to Available on the wire — the reservation
       // lapsed without an explicit CancelReservation, so nothing else would.
-      // Guard the callback: this runs from the setInterval timer, so an
-      // uncaught throw here would escape the interval and could kill the
-      // process / stop future cleanups. Isolate it and keep cleaning up.
-      if (reservation) {
-        try {
-          this.onExpire?.(reservation.connectorId, reservation);
-        } catch (err) {
-          this.logger.error(
-            `onExpire callback threw for connector ${reservation.connectorId}: ${String(err)}`,
-            LogType.GENERAL,
-          );
-        }
-      }
+      if (reservation) this.notifyExpired(reservation);
+    }
+  }
+
+  /**
+   * Hand a lapsed reservation to the owner. Guarded: this runs from the
+   * timers, so an uncaught throw would escape them and could stop future
+   * cleanups. Isolate it and keep cleaning up.
+   */
+  private notifyExpired(reservation: Reservation): void {
+    try {
+      this.onExpire?.(reservation.connectorId, reservation);
+    } catch (err) {
+      this.logger.error(
+        `onExpire callback threw for connector ${reservation.connectorId}: ${String(err)}`,
+        LogType.GENERAL,
+      );
     }
   }
 
@@ -432,19 +437,45 @@ export class ReservationManager {
   /**
    * Put reservations back after a connection loss that was not a reboot
    * (#702): those whose expiry has not passed, with the cleanup timer
-   * running again. Returns the ones restored.
+   * running again. Returns the ones restored and the ones that expired
+   * while the link was down; the caller ends the latter with
+   * {@link expireLapsed} once the connectors have their status back.
    */
-  restore(reservations: readonly Reservation[]): Reservation[] {
+  restore(reservations: readonly Reservation[]): {
+    restored: Reservation[];
+    lapsed: Reservation[];
+  } {
     const now = this.clock.now();
-    const kept = reservations.filter((r) => r.expiryDate.getTime() > now);
+    const restored: Reservation[] = [];
+    const lapsed: Reservation[] = [];
+    for (const reservation of reservations) {
+      (reservation.expiryDate.getTime() > now ? restored : lapsed).push(
+        reservation,
+      );
+    }
     // `store` arms each one's expiry timer: `dispose()` cleared them when
     // the link was lost, and without it the 60 s sweep would end a
     // reservation up to a minute late (#839, H04.FR.01).
-    for (const reservation of kept) {
+    for (const reservation of restored) {
       this.store({ ...reservation });
     }
     if (!this.cleanupTimer) this.startCleanupTimer();
-    return kept;
+    return { restored, lapsed };
+  }
+
+  /**
+   * End reservations that expired while the link was down (the `lapsed` of
+   * {@link restore}) through the expiry path, so the owner reports them as
+   * for an expiry timer (#839, 2.0.1 H04.FR.01).
+   */
+  expireLapsed(lapsed: readonly Reservation[]): void {
+    for (const reservation of lapsed) {
+      this.logger.info(
+        `Reservation ${reservation.reservationId} expired while offline (connector: ${reservation.connectorId})`,
+        LogType.GENERAL,
+      );
+      this.notifyExpired(reservation);
+    }
   }
 
   /**

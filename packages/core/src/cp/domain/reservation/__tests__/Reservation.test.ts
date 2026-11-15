@@ -212,7 +212,7 @@ describe("ReservationManager expiry timer", () => {
     mgr.dispose();
 
     const after = new ReservationManager(new Logger(), onExpire);
-    expect(after.restore(saved)).toHaveLength(1);
+    expect(after.restore(saved).restored).toHaveLength(1);
     vi.advanceTimersByTime(6_999);
     expect(onExpire).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1);
@@ -220,6 +220,34 @@ describe("ReservationManager expiry timer", () => {
       1,
       expect.objectContaining({ reservationId: 1 }),
     );
+    after.dispose();
+  });
+
+  // #839, H04.FR.01: a reservation that expired while the link was down
+  // still ends through the expiry path, so the owner reports it; restore
+  // hands it back and the caller ends it once the statuses are reported.
+  it("restore hands back a reservation that expired offline, and expireLapsed runs the expiry path", () => {
+    const onExpire = vi.fn();
+    const mgr = new ReservationManager(new Logger(), onExpire);
+    reserve(mgr, 1, "2026-07-13T00:00:07Z");
+    reserve(mgr, 2, "2026-07-13T00:05:00Z", 2);
+    const saved = mgr.getAllReservations();
+    mgr.dispose();
+
+    vi.setSystemTime(new Date("2026-07-13T00:01:00Z"));
+    const after = new ReservationManager(new Logger(), onExpire);
+    const { restored, lapsed } = after.restore(saved);
+    expect(restored.map((r) => r.reservationId)).toEqual([2]);
+    expect(lapsed.map((r) => r.reservationId)).toEqual([1]);
+    expect(onExpire).not.toHaveBeenCalled();
+
+    after.expireLapsed(lapsed);
+    expect(onExpire).toHaveBeenCalledExactlyOnceWith(
+      1,
+      expect.objectContaining({ reservationId: 1 }),
+    );
+    expect(after.getReservation(1)).toBeUndefined();
+    expect(after.getReservation(2)).toBeDefined();
     after.dispose();
   });
 

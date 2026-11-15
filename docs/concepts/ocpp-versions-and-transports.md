@@ -876,7 +876,11 @@ Instead the station resumes what an accepted boot starts (B04, E11):
   station scope is never reported on 2.x
   ([connectors only](#ocpp-2x-statusnotification-reports-connectors-only)).
 - **Reservations** survive the loss with their expiry (a link loss is not a
-  reboot, and B01.FR.13 even keeps `Reserved` across a reboot). A `Reset` still
+  reboot, and B01.FR.13 even keeps `Reserved` across a reboot). One whose
+  expiry passed during the outage ends at the resume through the expiry path:
+  the connector is reported `Available` with the status reports, then
+  `ReservationStatusUpdate(Expired)` goes out (H04.FR.01, steps 4-6, #839).
+  A `Reset` still
   drops them, as before: persisting a reservation across a reboot is not
   modeled. Station-level charging profiles (connectorId 0) are cleared by the
   teardown (`ConnectionClosed`) but restored by the resume, minus those whose

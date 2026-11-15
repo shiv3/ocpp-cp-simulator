@@ -342,8 +342,15 @@ describe("the resolution is protocol-agnostic (#327)", () => {
 
   it("the opening SoC is read from the session intent in one place", () => {
     const dir = dirname(fileURLToPath(import.meta.url));
-    const source = readFileSync(join(dir, "..", "Connector.ts"), "utf8");
-    expect(source).not.toMatch(/_evSettings\.(initialSoc|targetSoc)/);
+    // Connector.ts and the collaborators split out of it (#877).
+    for (const file of [
+      "Connector.ts",
+      "ScheduleLimiter.ts",
+      "ConnectorChargingProfiles.ts",
+    ]) {
+      const source = readFileSync(join(dir, "..", file), "utf8");
+      expect(source).not.toMatch(/_evSettings\.(initialSoc|targetSoc)/);
+    }
     const intent = readFileSync(join(dir, "..", "SessionIntent.ts"), "utf8");
     const imports = [...intent.matchAll(/from\s+"([^"]+)"/g)].map((m) => m[1]);
     for (const spec of imports) {

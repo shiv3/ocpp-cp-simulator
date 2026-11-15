@@ -5,6 +5,8 @@ summary: How the station stores, selects and evaluates charging profiles (SetCha
 sources:
   - packages/core/src/cp/domain/connector/ChargingScheduleResolver.ts
   - packages/core/src/cp/domain/connector/Connector.ts
+  - packages/core/src/cp/domain/connector/ScheduleLimiter.ts
+  - packages/core/src/cp/domain/connector/ConnectorChargingProfiles.ts
   - packages/core/src/cp/domain/charge-point/ChargingProfileStore.ts
   - packages/core/src/cp/infrastructure/transport/handlers/call/SmartChargingHandlers.ts
   - packages/core/src/cp/infrastructure/transport/v201/smartChargingV201.ts
@@ -20,7 +22,7 @@ related:
   - charger-engine.md
   - ocpp-versions-and-transports.md
   - ../entities/default-behaviors.md
-updated: 2026-11-08
+updated: 2026-11-15
 ---
 
 # Smart charging

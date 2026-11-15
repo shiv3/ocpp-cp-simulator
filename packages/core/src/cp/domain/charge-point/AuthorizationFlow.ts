@@ -2,7 +2,11 @@ import { LogType, type Logger } from "../../shared/Logger";
 import type { EventEmitter } from "../../shared/EventEmitter";
 import type { SimClock, TimerHandle } from "../../shared/clock";
 import type { LocalOnlyDecision } from "../auth/LocalAuthorizationResolver";
-import type { StationAuthorization } from "../auth/StationAuthorization";
+import type { LocalAuthListManager } from "../auth/LocalAuthList";
+import type {
+  CsmsAuthorizationResult,
+  StationAuthorization,
+} from "../auth/StationAuthorization";
 import type { Connector } from "../connector/Connector";
 import type { IdTokenTypeName } from "../connector/Transaction";
 import { isOcpp2Version } from "../types/OcppVersion";
@@ -20,10 +24,13 @@ export interface AuthorizationFlowHost {
     | "configuration"
     | "isOnline"
     | "ocppVersion"
+    | "sendStatusNotificationRaw"
+    | "status"
     | "updateConnectorStatus"
   >;
   readonly authorization: () => StationAuthorization;
   readonly clock: () => SimClock;
+  readonly localAuthListManager: () => LocalAuthListManager;
   readonly events: () => EventEmitter<ChargePointEvents>;
   readonly logger: () => Logger;
 }
@@ -35,8 +42,85 @@ export interface AuthorizationFlowHost {
  * methods as thin delegates.
  */
 export class AuthorizationFlow {
+  /** Parent id / groupIdToken of the tags the CSMS authorized (reservations). */
+  private readonly _authorizedParents = new Map<string, string>();
+
   constructor(private readonly host: AuthorizationFlowHost) {}
 
+  /**
+   * The parent id (1.6) or groupIdToken (2.x) the station knows for `idTag`:
+   * Local Authorization List, then Authorization Cache, then the last
+   * Authorize.conf (kept even when the cache is off). Reservation matching by
+   * parent (1.6 §5.13, H03.FR.04/07) uses it; it never asks the CSMS itself.
+   */
+  knownParentIdOf(idTag: string): string | undefined {
+    // A malformed CALL (warn mode runs the handler anyway) can name no tag.
+    if (typeof idTag !== "string") return undefined;
+    return (
+      this.host.localAuthListManager().getEntry(idTag)?.parentIdTag ??
+      this.host.authorization().cache.get(idTag)?.parentId ??
+      this._authorizedParents.get(idTag)
+    );
+  }
+
+  /** Feed a CSMS verdict on `idToken` to the Authorization Cache (#452) and
+   *  report a conflict with the Local Authorization List (#744):
+   *  called by the Authorize / StartTransaction / StopTransaction result
+   *  handlers. A no-op while the cache is disabled or for an identifier of
+   *  the Local Authorization List (1.6 §3.5.3). */
+  recordAuthorizationResult(
+    idToken: string,
+    result: CsmsAuthorizationResult,
+  ): void {
+    if (result.parentId !== undefined) {
+      this._authorizedParents.set(idToken, result.parentId);
+    } else {
+      this._authorizedParents.delete(idToken);
+    }
+    if (this.host.authorization().recordCsmsResult(idToken, result)) {
+      this.host
+        .logger()
+        .debug(
+          `Authorization cache updated: ${idToken} → ${result.status}`,
+          LogType.TRANSACTION,
+        );
+    }
+    // 1.6 §3.5.2: tell the CSMS when its verdict contradicts the Local
+    // Authorization List. 2.x has no such notification (its StatusNotification
+    // carries no errorCode).
+    if (
+      !isOcpp2Version(this.host.chargePoint.ocppVersion) &&
+      this.host.authorization().conflictsWithLocalList(idToken, result.status)
+    ) {
+      this.host
+        .logger()
+        .warn(
+          `CSMS verdict ${result.status} for ${idToken} conflicts with the Local Authorization List; sending LocalListConflict`,
+          LogType.OCPP,
+        );
+      this.host.chargePoint.sendStatusNotificationRaw(
+        0,
+        this.host.chargePoint.status,
+        {
+          errorCode: "LocalListConflict",
+        },
+      );
+    }
+  }
+
+  /** ClearCache (1.6 §5.4): empty the Authorization Cache. Returns whether
+   *  it could be cleared. */
+  clearAuthorizationCache(): boolean {
+    return this.host.authorization().clearCache();
+  }
+
+  /**
+   * `StopTransactionOnInvalidId=false` and the id was not accepted: keep the
+   * transaction but stop the energy delivery (2.0.1
+   * E05.FR.02/03, C15.FR.06; 2.x only, 1.6 errata 3.17 is #736). With `MaxEnergyOnInvalidId` > 0 that much energy
+   * is delivered first; the connector reports SuspendedEVSE either way once
+   * the delivery has stopped.
+   */
   holdEnergyOnInvalidId(connector: Connector): void {
     const allowance =
       this.host.chargePoint.configuration.maxEnergyOnInvalidId();
@@ -65,6 +149,33 @@ export class AuthorizationFlow {
     }
   }
 
+  /**
+   * Authorize `tagId` for a local start (issues #181, #452). Resolves with
+   * an idTagInfo/idTokenInfo status ("Accepted", "Invalid", "Expired",
+   * "Blocked", ...). Never rejects.
+   *
+   * The local decision comes first (see `auth/LocalAuthorizationResolver.ts`
+   * for the rules and their OCPP 1.6 §3.5 / 2.0.1 C12-C15 sources):
+   * - offline, it decides alone, at once, without Authorize.req;
+   * - online, a valid local-list or cache entry with `LocalPreAuthorize`
+   *   resolves "Accepted" without Authorize.req (§9.1.13);
+   * - otherwise Authorize.req goes out and the tag-matched
+   *   `authorizeResult` event resolves it, so concurrent Authorize calls
+   *   for different tags don't cross streams.
+   *
+   * While waiting, a disconnect hands the decision to the offline rules.
+   * A timeout while still connected falls back to what the station knows:
+   * a NOT-valid local-list or cache entry resolves its status (#452);
+   * anything else warns and resolves "Accepted" (warn-and-proceed, #181).
+   * A timeout once the socket is gone applies the offline rules.
+   *
+   * On OCPP 2.x the CALL may wait behind another one (Part 4 §4.1.1, #708), so
+   * the timeout is armed when the Authorize is written, not when it is queued
+   * (#762), and lasts at least `MessageTimeout`. `failClosed` (2.x F01.FR.01,
+   * 1.6 §5.11: a remote start only after authorization was obtained, #921)
+   * makes an unanswered Authorize resolve "Unknown" instead of
+   * warn-and-proceed "Accepted".
+   */
   authorizeAndWait(
     tagId: string,
     timeoutMs = 10000,

@@ -1,6 +1,12 @@
+import { LogType, type Logger } from "../../shared/Logger";
 import type { SimClock, TimerHandle } from "../../shared/clock";
 import type { Connector } from "../connector/Connector";
-import { buildSampledValues } from "../connector/MeterValueBuilder";
+import { OcmfMeter } from "../connector/SignedMeterData";
+import {
+  buildSampledValues,
+  type MeterSampleOverrides,
+  type ReadingContext,
+} from "../connector/MeterValueBuilder";
 import { measurandEnumFor } from "../connector/measurandEnum";
 import {
   TX_ENDED_SAMPLES_MAX,
@@ -20,6 +26,7 @@ export interface MeterSamplingHost {
   readonly chargePoint: Pick<
     ChargePoint,
     | "getConnector"
+    | "id"
     | "ocppVersion"
     | "recordTxEndedSample"
     | "sendMeterValue"
@@ -29,6 +36,7 @@ export interface MeterSamplingHost {
   readonly clock: () => SimClock;
   readonly configuration: () => ConfigurationStore;
   readonly connectors: () => Map<number, Connector>;
+  readonly logger: () => Logger;
   /** Reassigned (tests set it): always read through the function. */
   readonly mainMeter: () => MainMeter | undefined;
   readonly outbox: () => Outbox;
@@ -41,10 +49,81 @@ export interface MeterSamplingHost {
  * public methods as thin delegates.
  */
 export class MeterSampling {
+  /**
+   * #347: whether the meter-value scheduler's samples taken during an OCPP
+   * 2.x transaction ride TransactionEvent(Updated, MeterValuePeriodic)
+   * instead of MeterValues. On by default (#551); false restores the
+   * standalone MeterValues. Ignored on 1.x. See {@link sendScheduledMeterValue}.
+   */
+  txUpdatedMeterValues = true;
   /** Station-driven periodic samplers of the running transactions. */
   readonly samplers: Map<number, TimerHandle> = new Map();
 
+  /** #315: one simulated signing meter per connector, made on first use. */
+  private readonly _signedMeters = new Map<number, OcmfMeter>();
+
   constructor(private readonly host: MeterSamplingHost) {}
+
+  /**
+   * The connector's simulated OCMF signing meter while `SampledDataSignReadings`
+   * is true, else `null` (#315). The ephemeral key is made on first use, held
+   * in memory only, and published read-only as `MeterPublicKey<connectorId>`
+   * so a CSMS can validate against it (2.x stations also send it in every
+   * `signedMeterValue`).
+   */
+  signedMeterFor(connectorId: number): OcmfMeter | null {
+    if (!this.host.configuration().signReadings()) return null;
+    let meter = this._signedMeters.get(connectorId);
+    if (!meter) {
+      meter = new OcmfMeter({
+        meterSerial: `${this.host.chargePoint.id}-${connectorId}`,
+        gatewayId: "ocpp-cp-simulator",
+        gatewaySerial: this.host.chargePoint.id,
+      });
+      this._signedMeters.set(connectorId, meter);
+      this.host
+        .configuration()
+        .defineRuntimeKey(`MeterPublicKey${connectorId}`, meter.publicKeyHex);
+    }
+    return meter;
+  }
+
+  setMeterValue(connectorId: number, value: number): void {
+    const connector = this.host.chargePoint.getConnector(connectorId);
+    if (!connector) {
+      this.host
+        .logger()
+        .error(`Connector ${connectorId} not found`, LogType.METER_VALUE);
+      return;
+    }
+    connector.meterValue = value;
+  }
+
+  sendMeterValue(
+    connectorId: number,
+    context?: ReadingContext,
+    overrides?: MeterSampleOverrides,
+  ): void {
+    if (connectorId === 0 && this.host.mainMeter()) {
+      this.host.outbox().sendMeterValue(undefined, 0, context, overrides);
+      return;
+    }
+    const connector = this.host.chargePoint.getConnector(connectorId);
+    if (!connector) {
+      this.host
+        .logger()
+        .error(`Connector ${connectorId} not found`, LogType.METER_VALUE);
+      return;
+    }
+    this.host
+      .outbox()
+      .sendMeterValue(
+        connector.transaction?.id ?? undefined,
+        connectorId,
+        context,
+        overrides,
+      );
+  }
 
   /**
    * One clock-aligned sample per connector for `boundaryMs` (#454), carrying

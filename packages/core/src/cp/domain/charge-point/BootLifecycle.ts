@@ -5,6 +5,9 @@ import type { MonitorEvaluation } from "../monitoring/MonitorEvaluation";
 import type { Outbox } from "../transport/Outbox";
 import { OCPPStatus } from "../types/OcppTypes";
 import type { BootReason } from "../types/OcppTypes";
+import { bootNotificationFor } from "../modem/bootIdentifiers";
+import type { BootNotification } from "../types/OcppTypes";
+import type { CellularLinkController } from "./CellularLinkController";
 import type { ChargePoint } from "./ChargePoint";
 import type {
   BootNotificationResult,
@@ -13,6 +16,7 @@ import type {
 } from "./ChargePointEvents";
 import type { ClockAlignedMeterScheduler } from "./ClockAlignedMeterScheduler";
 import type { ConfigurationStore } from "./ConfigurationStore";
+import type { OutageLifecycle } from "./OutageLifecycle";
 import type { PowerLossController } from "./PowerLossController";
 import type { ReconnectPolicy } from "../../shared/ReconnectPolicy";
 
@@ -27,6 +31,25 @@ export interface BootState {
   bootUnanswered: boolean;
 }
 
+/** The storage of {@link BootState}; the charge point holds one and hands it
+ *  to the boot and outage lifecycles. */
+export class BootStateStore implements BootState {
+  /** Whether the CSMS's latest BootNotification answer was `Accepted` and the
+   *  connection has not closed since (#603). */
+  bootAccepted = false;
+  /** Reason of the next BootNotification (2.x B01.FR.09); see
+   *  {@link ChargePoint.boot}. */
+  bootReason: BootReason = "PowerUp";
+  /** #702: the payload of the last BootNotification the CSMS Accepted; null
+   *  while the last one was Pending or Rejected, or none was sent. */
+  bootedWith: string | null = null;
+  /** #702: the BootNotification payload last sent, as JSON. */
+  bootSentFingerprint: string | null = null;
+  /** #702: a BootNotification was sent and not answered yet; a close in
+   *  between loses it, so the next open sends one again. */
+  bootUnanswered = false;
+}
+
 /** What the boot lifecycle needs from its charge point. */
 export interface BootLifecycleHost {
   /** Public members go through it so spies on the charge point still see
@@ -35,6 +58,8 @@ export interface BootLifecycleHost {
     ChargePoint,
     | "boot"
     | "connectors"
+    | "error"
+    | "isOnline"
     | "engine"
     | "startHeartbeat"
     | "status"
@@ -42,7 +67,11 @@ export interface BootLifecycleHost {
     | "updateConnectorStatus"
   >;
   readonly state: BootState;
+  readonly outage: () => OutageLifecycle;
+  /** A station without power starts, stops and boots nothing (#798). */
+  readonly assertPowered: () => void;
   readonly clearOutage: () => void;
+  readonly cellular: () => CellularLinkController;
   readonly clock: () => SimClock;
   readonly clockAligned: () => ClockAlignedMeterScheduler;
   readonly configuration: () => ConfigurationStore;
@@ -70,7 +99,76 @@ export class BootLifecycle {
   /** A boot give-up waiting for its `bootNotificationResult` to be emitted. */
   private _bootGaveUp: number | null = null;
 
+  /** The static boot data the station was built with; set by the charge
+   *  point constructor. Replaced, never mutated, by `setFirmwareVersion`. */
+  bootNotification!: BootNotification;
+
   constructor(private readonly host: BootLifecycleHost) {}
+
+  /**
+   * The BootNotification as it would be sent now (#929): the static boot
+   * data, with `iccid` / `imsi` taken from the installed SIM when a modem
+   * model is configured. Read at the moment of every boot and of the 2.x
+   * "did the boot data change" comparison on reconnect (#702); a SIM change
+   * therefore shows up in the next real or triggered BootNotification and
+   * never causes one by itself.
+   */
+  bootPayload(): BootNotification {
+    return bootNotificationFor(
+      this.bootNotification,
+      this.host.cellular().modem,
+    );
+  }
+
+  /**
+   * The firmware the station runs from now on: the `firmwareVersion` of
+   * every later BootNotification (OCPP 1.6 §4.2, 2.0.1 B01). Set by a
+   * simulated firmware update that ended in Installed with `bumpVersion`
+   * (OCPP 1.6 §5.19, 2.0.1 L01), before the reboot's BootNotification. Sends
+   * nothing by itself; emits `firmwareVersionChanged` when the value changed,
+   * so a host can persist it. The boot data object is replaced, never
+   * mutated: it may be shared with the caller that built the station.
+   */
+  setFirmwareVersion(firmwareVersion: string): void {
+    const previous = this.bootNotification.firmwareVersion;
+    if (previous === firmwareVersion) return;
+    this.bootNotification = { ...this.bootNotification, firmwareVersion };
+    this.host
+      .logger()
+      .info(
+        `Firmware version ${String(previous)} -> ${firmwareVersion}`,
+        LogType.OCPP,
+      );
+    this.host.events().emit("firmwareVersionChanged", {
+      firmwareVersion,
+      ...(previous === undefined ? {} : { previous }),
+    });
+  }
+
+  /**
+   * Send BootNotification.req. `reason` (2.x B01.FR.09) is remembered until
+   * the boot is Accepted, so the retry after a Rejected answer repeats it;
+   * an Accepted boot falls back to PowerUp, the reason of a plain reconnect.
+   */
+  sendBootNotification(reason?: BootReason): void {
+    this.host.assertPowered();
+    if (reason) this.host.state.bootReason = reason;
+    // A boot asked for while the socket is down (a Reset, a retry timer) is
+    // lost on the wire: the next open must send it (#702).
+    if (!this.host.chargePoint.isOnline())
+      this.host.outage().bootOnNextOpen = true;
+    this.host.state.bootUnanswered = true;
+    this.host.outage().ackedStatus = new Map();
+    this.host.state.bootSentFingerprint = JSON.stringify(this.bootPayload());
+    // OCPP 1.6J §4.2: the CP MUST NOT send any other CALL message until
+    // BootNotification has been Accepted. The connector-level
+    // StatusNotification fan-out happens in BootNotificationResultHandler
+    // after we get the Accepted response.
+    this.host
+      .outbox()
+      .sendBootNotification(this.bootPayload(), this.host.state.bootReason);
+    this.host.chargePoint.error = "";
+  }
 
   /** Boot-notification gate accessors used by BootNotificationResultHandler. */
   markBootAccepted(): void {

@@ -61,7 +61,33 @@ export class ClientCertificateSwitch {
     });
   }
 
-  /** See {@link ChargePoint.useRenewedClientCertificate}. */
+  /**
+   * `reconnect` true is {@link ChargePoint.useRenewedClientCertificate}:
+   * #537 A02.FR.08: after CertificateSigned accepted a new Charging Station
+   * certificate, a security-profile-3 station switches to it by
+   * reconnecting with it as its TLS client certificate, once its notBefore
+   * has passed (2.0.1 asks for that; 2.1 gets the same wait). A station
+   * that is not connected presents it at its next connection instead of
+   * reconnecting. The reconnect waits, up to
+   * {@link RENEWED_CERTIFICATE_RECONNECT_MAX_DEFER_MS}, for the transaction
+   * messages in flight. Nothing happens on other profiles; when the store
+   * holds no private key for the chain (a CSR the caller supplied) the
+   * transport forgets any renewed identity. A restart or a `cp.update`
+   * presents the configured `--tls-cert` again: the key is never
+   * persisted. A call made while an earlier one still reads the store
+   * supersedes it.
+   *
+   * `reconnect` false is {@link ChargePoint.adoptRenewedClientCertificate}:
+   * #564: the same switch without the reconnect: the renewed certificate is
+   * handed to the transport as soon as the chain is stored, so the next
+   * connection presents it even if the CertificateSigned answer is dropped
+   * before it is written (a manual disconnect while network simulation holds
+   * it). The reconnect of an open connection stays with
+   * {@link ChargePoint.useRenewedClientCertificate}, run once the answer is written, so
+   * the answer goes out on the connection that received the request.
+   * Handing the same identity over again changes nothing, and neither call
+   * runs on a connect, so no connection reconnects for it again.
+   */
   async switchClientCertificate(reconnect: boolean): Promise<void> {
     if (this._clientCertificateSwitchReleased) return;
     this.cancelClientCertificateSwitch();

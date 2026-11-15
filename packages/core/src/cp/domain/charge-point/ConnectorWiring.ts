@@ -1,12 +1,15 @@
 import { LogType, type Logger } from "../../shared/Logger";
+import type { EventEmitter } from "../../shared/EventEmitter";
 import type { SimClock } from "../../shared/clock";
 import { Connector } from "../connector/Connector";
 import type { ChargePointEngine } from "../engine/ChargePointEngine";
 import type { ConnectorWrite } from "../connector/ConnectorRecord";
 import { OCPPStatus } from "../types/OcppTypes";
-import type { OCPPAvailability } from "../types/OcppTypes";
+import type { ChargePointStatus, OCPPAvailability } from "../types/OcppTypes";
+import type { ChargePointRepositories } from "../persistence/ChargePointRepositories";
 import type { AuthorizationFlow } from "./AuthorizationFlow";
 import type { ChargePoint } from "./ChargePoint";
+import type { ChargePointEvents } from "./ChargePointEvents";
 import {
   dcEfficiencyFor,
   maxDeliveryPowerWFor,
@@ -27,8 +30,10 @@ export interface ConnectorWiringHost {
   readonly chargePoint: Pick<
     ChargePoint,
     | "evSetReady"
+    | "clearChargingProfiles"
     | "getConnector"
     | "poweredOff"
+    | "runPendingResetOnIdle"
     | "stopTransaction"
     | "updateConnectorStatus"
   >;
@@ -36,7 +41,9 @@ export interface ConnectorWiringHost {
   readonly clock: () => SimClock;
   readonly connectors: () => Map<number, Connector>;
   readonly engine: () => ChargePointEngine;
-  readonly loadAvailability: (connectorId: number) => OCPPAvailability | null;
+  readonly events: () => EventEmitter<ChargePointEvents>;
+  readonly repositories: () => ChargePointRepositories;
+  readonly status: () => ChargePointStatus;
   readonly logger: () => Logger;
   readonly sampling: () => MeterSampling;
   readonly stationProfiles: () => ChargingProfileStore;
@@ -78,7 +85,7 @@ export class ConnectorWiring {
       // reboots. Restore the persisted value before any event listeners
       // have a chance to react.
       this.host.engine().attachConnector(connector);
-      const persisted = this.host.loadAvailability(connectorId);
+      const persisted = this.loadAvailability(connectorId);
       if (persisted) {
         this.host.writeConnector(connectorId, {
           kind: "availability",
@@ -193,5 +200,82 @@ export class ConnectorWiring {
         ),
       );
     }
+  }
+
+  removeConnector(connectorId: number): boolean {
+    const connector = this.host.connectors().get(connectorId);
+    if (!connector) return false;
+
+    this.host.chargePoint.clearChargingProfiles(
+      connectorId,
+      {},
+      "ConnectorRemoved",
+    );
+    this.host.sampling().stopPeriodicSampling(connectorId);
+    // The driver's own 1 s timer outlives Connector.dispose() and would keep
+    // calling evSetReady / stopTransaction on a connector the station no longer
+    // has (#864 review).
+    this.host.vehicleDrivers().get(connectorId)?.dispose();
+    this.host.vehicleDrivers().delete(connectorId);
+    connector.dispose();
+    this.host.engine().detachConnector(connectorId);
+    const removed = this.host.connectors().delete(connectorId);
+    if (removed) {
+      this.host.events().emit("connectorRemoved", { connectorId });
+      // Removing a busy connector may make a station-wide OnIdle reset
+      // runnable. runPendingResetOnIdle still waits if any remaining target
+      // has a running transaction.
+      this.host.chargePoint.runPendingResetOnIdle();
+    }
+    return removed;
+  }
+
+  /** Read a persisted Operative/Inoperative flag from the DB for the given
+   *  connector (`0` = CP-level). Returns `null` if no override is stored. */
+  loadAvailability(connectorId: number): OCPPAvailability | null {
+    return this.host
+      .repositories()
+      .connectorSettings.loadAvailability(connectorId);
+  }
+
+  private saveAvailability(
+    connectorId: number,
+    availability: OCPPAvailability,
+  ): void {
+    this.host
+      .repositories()
+      .connectorSettings.saveAvailability(connectorId, availability);
+  }
+
+  /**
+   * Snapshot every connector's (and the CP's) `availability` flag to the
+   * configured DB so the §5.2 "Unavailable persists across reboots"
+   * requirement is met. Called by ChangeAvailability after applying.
+   */
+  persistAvailability(): void {
+    this.saveAvailability(
+      0,
+      this.host.status() === OCPPStatus.Unavailable
+        ? "Inoperative"
+        : "Operative",
+    );
+    this.host.connectors().forEach((connector) => {
+      this.saveAvailability(connector.id, connector.availability);
+    });
+  }
+
+  /** The meter-value increment the connectors fall back on when no register
+   *  is fed (the `autoMeterValueSetting`). */
+  applyIncrementFallback(setting: AutoMeterValueSetting | null): void {
+    this.host.connectors().forEach((connector) => {
+      connector.setIncrementFallback(
+        setting?.enabled
+          ? {
+              intervalSeconds: setting.interval,
+              incrementValue: setting.value,
+            }
+          : null,
+      );
+    });
   }
 }

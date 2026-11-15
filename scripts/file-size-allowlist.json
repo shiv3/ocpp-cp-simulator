@@ -12,7 +12,7 @@
   "packages/client/src/remote/RemoteChargePointService.ts": 1250,
   "packages/contracts/src/redaction.ts": 820,
   "packages/core/src/cp/application/engine/ChargerEngine.ts": 1074,
-  "packages/core/src/cp/domain/charge-point/ChargePoint.ts": 3309,
+  "packages/core/src/cp/domain/charge-point/ChargePoint.ts": 1795,
   "packages/core/src/cp/domain/charge-point/ConfigurationStore.ts": 839,
   "packages/core/src/cp/domain/connector/Connector.ts": 1245,
   "packages/core/src/cp/infrastructure/transport/soap/OCPPSoapHandler.ts": 809,

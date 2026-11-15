@@ -196,12 +196,19 @@ export class TransactionMessagesV16 {
     // point captured at the stop instant (1.6 §3.16.1, §3.16.2).
     // The same wire spelling as MeterValues (#846): a Temperature sample
     // says `Celcius` here too (1.6 errata 2025-04 §2.1).
+    // §3.16.5 is read at send time (#846): with both StopTxn keys emptied
+    // during the transaction, the history taken before stays out too.
+    const endMeasurands = this._chargePoint.configuration.stopTxnSampledData();
+    const historyWanted =
+      endMeasurands.length > 0 ||
+      this._chargePoint.configuration.stopTxnAlignedData().length > 0;
     // Only the wire fields: the stored entry kind stays local.
-    const history = (transaction.txEndedSamples ?? []).map((entry) => ({
+    const history = (
+      historyWanted ? (transaction.txEndedSamples ?? []) : []
+    ).map((entry) => ({
       timestamp: entry.timestamp,
       sampledValue: toOcppJ16Wire(entry.sampledValue),
     }));
-    const endMeasurands = this._chargePoint.configuration.stopTxnSampledData();
     const connector = this._chargePoint.getConnector(connectorId);
     const endSample =
       connector && endMeasurands.length > 0

@@ -1249,8 +1249,10 @@ they behave the same.
 
 Underneath both views sits one model of the graph, the **block tree**
 ([`blockTree.ts`](../../apps/web/src/console/lib/blockTree.ts),
-`recognizeBlockTree`; its types, structural successors and dominator
-computation live in
+`recognizeBlockTree`, now in
+[`blockTree/recognize.ts`](../../apps/web/src/console/lib/blockTree/recognize.ts);
+its types, structural successors, dominator computation and tree helpers
+(`treeNodes`, `assertTreeCovers`, in `blockTree/treeHelpers.ts`) live in
 [`blockTree/`](../../apps/web/src/console/lib/blockTree/) and are re-exported
 by `blockTree.ts`): nested sequences of steps, forks and loops, recovered
 from the graph the way the executor reads it (`lowerScenario`,

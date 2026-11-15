@@ -70,9 +70,7 @@ export class ConnectionOpener {
       this.host.securityProfileFallback = null;
       this.clearHandshakeTimer();
       this.host.clientCerts.onOpened(attempt.renewed);
-      // A working connection clears the refusal budget, so the next genuine
-      // refusal is diagnosed immediately rather than waiting out the window.
-      this.host.lastRefusalProbeAt = 0;
+      this.host.refusal.clearBudget();
       this.host.urlPool?.onSuccess();
       this.host.handleOpen();
       if (this.host.onOpenCallback) {

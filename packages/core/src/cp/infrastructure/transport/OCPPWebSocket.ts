@@ -59,6 +59,7 @@ import {
   GenerationTokenImpl,
   neverReachedCsms,
 } from "./ws/closeClassification";
+import { UpgradeRefusalDiagnostic } from "./ws/upgradeRefusalDiagnostic";
 import {
   dispatchIncomingFrame,
   writeUpstreamPhysical,
@@ -170,9 +171,8 @@ export class OCPPWebSocket implements ChargePointSocket {
   /** #288: the options the current handshake used, replayed by the refusal
    *  probe so it asks the question the socket asked. */
   private _lastConnectOptions: OcppWebSocketConnectOptions | null = null;
-  /** When the probe last ran, so a retry loop cannot multiply the CSMS's
-   *  request rate. Cleared on a successful open. */
-  private _lastRefusalProbeAt: number = 0;
+  /** #288: the attempt's error log and the refusal probe. */
+  private readonly _refusal: UpgradeRefusalDiagnostic;
   /** Set when the client itself reported the HTTP status (the `ws` path),
    *  so the probe does not ask a question already answered. */
   private _refusalStatusReported: boolean = false;
@@ -259,6 +259,13 @@ export class OCPPWebSocket implements ChargePointSocket {
       emitDiscarded: () =>
         this.observers.emit("renewedClientCertificateDiscarded", {}),
     });
+    this._refusal = new UpgradeRefusalDiagnostic(
+      logger,
+      (generation) =>
+        !this._disposed &&
+        this._generationCounter === generation &&
+        this._ws?.readyState !== WebSocket.OPEN,
+    );
 
     // Initialize network simulation controller and current generation
     this._currentGeneration = new GenerationTokenImpl(this._generationCounter);
@@ -305,7 +312,7 @@ export class OCPPWebSocket implements ChargePointSocket {
       this._onCloseCallback,
       this._isManualDisconnect,
       this._selfRequestedClose,
-      this._lastRefusalProbeAt,
+      this._refusal,
       this._refusalStatusReported,
       this._extraHeaders,
       this._extraSubprotocols,

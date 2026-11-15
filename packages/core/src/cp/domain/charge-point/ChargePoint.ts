@@ -277,11 +277,10 @@ export class ChargePoint {
     this,
     this._ctx,
   );
-  private readonly _certSwitch = this._parts.certSwitch;
   /** Tests read the pending wait's canceller through this name. */
   // @ts-expect-error TS6133: read by tests through a cast, not by this class
   private get _cancelClientCertificateSwitchTimer(): (() => void) | null {
-    return this._certSwitch.pendingCancel;
+    return this._parts.certSwitch.pendingCancel;
   }
   private readonly _idTags: IdTagSource;
   private readonly _outbox: Outbox;
@@ -290,8 +289,6 @@ export class ChargePoint {
   /** #607: the 2.x `AlignedDataCtrlr.TxEndedInterval` grid, apart from the
    *  `Interval` one: it samples the transaction-end history, sends nothing. */
   private readonly _txEndedAligned: ClockAlignedMeterScheduler;
-  /** #722: the per-connector `MeterValueSampleInterval` timers of running 1.x
-   *  transactions. */
   /** Applies each connector's vehicle behavior to the station (#835). */
   private readonly _vehicleDrivers: Map<number, VehicleBehaviorDriver> =
     new Map();
@@ -303,8 +300,6 @@ export class ChargePoint {
   private readonly _repositories: ChargePointRepositories;
   private readonly _fileUploader: FileUploader;
   private readonly _reservationManager: ReservationManager;
-  /** #597: Reset OnIdle requests answered `Scheduled`, each run once its transactions end. */
-  /** #455: set while the station is without power. */
   private readonly _localAuthListManager: LocalAuthListManager;
   private readonly _authorization: StationAuthorization;
   // §3.13.3: profiles installed with connectorId=0 (ChargePointMaxProfile,
@@ -313,30 +308,15 @@ export class ChargePoint {
   private readonly _stationProfiles: ChargingProfileStore =
     new ChargingProfileStore();
   private readonly _certificateStore: CertificateStore;
-  private readonly _messaging = this._parts.messaging;
-  private readonly _statusControl = this._parts.statusControl;
-  private readonly _profileControl = this._parts.profileControl;
   // OCPP 2.x variable monitors and monitoring level (N04-N06, #457).
   private readonly _monitoring = new MonitoringStore(DEFAULT_MONITOR_CATALOG);
   // #538: Target attributes of the 2.1 device model (EVSE.Power).
   private readonly _deviceModelTargets = new DeviceModelTargets();
-  private readonly _authorizationFlow = this._parts.authorizationFlow;
-  private readonly _sampling = this._parts.sampling;
-  private readonly _power = this._parts.power;
-  private readonly _resetOnIdle = this._parts.resetOnIdle;
-  private readonly _connectionTimeouts = this._parts.connectionTimeouts;
-  private readonly _plugIn = this._parts.plugIn;
-  private readonly _connectorWiring = this._parts.connectorWiring;
-  private readonly _bootState = this._parts.bootState;
-  private readonly _boot = this._parts.boot;
-  private readonly _outage = this._parts.outage;
-  private readonly _configWiring = this._parts.configWiring;
-  private readonly _deviceModel = this._parts.deviceModel;
   // OCPP 2.x NetworkConnectionProfiles stored by SetNetworkProfile (B09).
   private readonly _networkProfiles = new NetworkProfileStore();
   // Their evaluation into NotifyEvent (kept by the device model publisher).
   private get _monitorEvaluation(): MonitorEvaluation | undefined {
-    return this._deviceModel.evaluation;
+    return this._parts.deviceModel.evaluation;
   }
   private readonly _configuration: ConfigurationStore;
 
@@ -348,8 +328,6 @@ export class ChargePoint {
   private _autoMeterValueSetting: AutoMeterValueSetting | null;
   /** #347: see {@link sendScheduledMeterValue}. On by default (#551). */
   private _txUpdatedMeterValues = true;
-  private readonly _scenarioCalls = this._parts.scenarioCalls;
-  private readonly _callOverrides = this._parts.callOverrides;
   // Network simulation summary: { enabled, manualRuleIds } when a config has
   // been applied via setNetworkSimConfig, null for SOAP CPs or when no config
   // has been applied yet.
@@ -434,7 +412,7 @@ export class ChargePoint {
     /** #575: what is built outside the domain; see `createChargePoint`. */
     deps: ChargePointDeps,
   ) {
-    this._boot.bootNotification = _bootNotification;
+    this._parts.boot.bootNotification = _bootNotification;
     this._clock = simulation.clock ?? realClock;
     // #628: the 1:1 station until the topology is configurable. Before the
     // engine and the transport, which read it.
@@ -492,11 +470,12 @@ export class ChargePoint {
     );
     // §4.9 S3: track whether this SOAP CP can receive CSMS-initiated calls
     // (server-hosted with callback) vs send-only (no callback URL).
-    this._messaging.hasSoapCallbackUrl = !!transportOptions.soapCallbackUrl;
+    this._parts.messaging.hasSoapCallbackUrl =
+      !!transportOptions.soapCallbackUrl;
 
     routeLogEntries(this._logger, this._events, () => this._logSink, this._id);
 
-    this._connectorWiring.createConnectors(
+    this._parts.connectorWiring.createConnectors(
       connectorCount,
       transportOptions.chargerCapabilities,
       autoMeterValueSetting,
@@ -531,7 +510,7 @@ export class ChargePoint {
     this._rawFrames = transport.rawFrames;
     this._messageHandler = transport.handler;
     this._callCatalog = transport.callCatalog;
-    this._messaging.receivesCsmsCall = (action) =>
+    this._parts.messaging.receivesCsmsCall = (action) =>
       transport.receivesCsmsCall(action);
     if (this._webSocket) {
       wireSocket(this._webSocket, {
@@ -580,7 +559,10 @@ export class ChargePoint {
     this._reservationManager = new ReservationManager(
       this._logger,
       (connectorId, reservation) =>
-        this._statusControl.onReservationExpired(connectorId, reservation),
+        this._parts.statusControl.onReservationExpired(
+          connectorId,
+          reservation,
+        ),
       this._clock,
     );
     this._localAuthListManager = new LocalAuthListManager(this._logger);
@@ -709,12 +691,12 @@ export class ChargePoint {
   /** #724 A05.FR.06-08: reconnect with the upgraded security profile.
    *  @see ConfigurationWiring.switchSecurityProfile */
   switchSecurityProfile(previousProfile: number): void {
-    this._configWiring.switchSecurityProfile(previousProfile);
+    this._parts.configWiring.switchSecurityProfile(previousProfile);
   }
 
   /** The station's power budget in watts now, `Infinity` without sharing. */
   stationPowerBudgetW(): number {
-    return this._configWiring.stationPowerBudgetW();
+    return this._parts.configWiring.stationPowerBudgetW();
   }
 
   /**
@@ -770,7 +752,7 @@ export class ChargePoint {
    * @see MeterSampling.signedMeterFor
    */
   signedMeterFor(connectorId: number): OcmfMeter | null {
-    return this._sampling.signedMeterFor(connectorId);
+    return this._parts.sampling.signedMeterFor(connectorId);
   }
 
   get certificateStore(): CertificateStore {
@@ -799,7 +781,7 @@ export class ChargePoint {
   /** Whether the Central System's latest BootNotification answer was
    *  `Accepted` and the connection has not closed since (#603). */
   get bootAccepted(): boolean {
-    return this._bootState.bootAccepted;
+    return this._parts.bootState.bootAccepted;
   }
 
   /** Whether the OCPP WebSocket is currently open OR mid-handshake. Used
@@ -826,7 +808,7 @@ export class ChargePoint {
    * @see StationMessaging.canReceiveCsmsCall
    */
   canReceiveCsmsCall(action: string): boolean {
-    return this._messaging.canReceiveCsmsCall(action);
+    return this._parts.messaging.canReceiveCsmsCall(action);
   }
 
   get connectorNumber(): number {
@@ -950,7 +932,7 @@ export class ChargePoint {
    * @see AuthorizationFlow.knownParentIdOf
    */
   knownParentIdOf(idTag: string): string | undefined {
-    return this._authorizationFlow.knownParentIdOf(idTag);
+    return this._parts.authorizationFlow.knownParentIdOf(idTag);
   }
 
   get localAuthListManager(): LocalAuthListManager {
@@ -979,7 +961,10 @@ export class ChargePoint {
     configurationSlot: number,
     profile: NetworkConnectionProfile,
   ): NetworkProfileVerdict {
-    return this._configWiring.setNetworkProfile(configurationSlot, profile);
+    return this._parts.configWiring.setNetworkProfile(
+      configurationSlot,
+      profile,
+    );
   }
 
   /** Local authorization (#452): Authorization Cache + Local Authorization
@@ -1010,13 +995,13 @@ export class ChargePoint {
     idToken: string,
     result: CsmsAuthorizationResult,
   ): void {
-    this._authorizationFlow.recordAuthorizationResult(idToken, result);
+    this._parts.authorizationFlow.recordAuthorizationResult(idToken, result);
   }
 
   /** ClearCache (1.6 §5.4): empty the Authorization Cache. Returns whether
    *  it could be cleared. */
   clearAuthorizationCache(): boolean {
-    return this._authorizationFlow.clearAuthorizationCache();
+    return this._parts.authorizationFlow.clearAuthorizationCache();
   }
 
   /** Read-only: install and remove profiles with `applyChargingProfile` /
@@ -1036,7 +1021,11 @@ export class ChargePoint {
     source: ChargingProfileSource,
     options: ApplyChargingProfileOptions = {},
   ): boolean {
-    return this._profileControl.applyChargingProfile(profile, source, options);
+    return this._parts.profileControl.applyChargingProfile(
+      profile,
+      source,
+      options,
+    );
   }
 
   /**
@@ -1049,7 +1038,7 @@ export class ChargePoint {
     criteria: ProfileRemoveCriteria,
     reason: ChargingProfileClearReason,
   ): ClearedChargingProfiles[] {
-    return this._profileControl.clearChargingProfiles(
+    return this._parts.profileControl.clearChargingProfiles(
       connectorId,
       criteria,
       reason,
@@ -1060,21 +1049,21 @@ export class ChargePoint {
   getActiveChargePointMaxProfile(
     now: Date = this._nowDate(),
   ): ActiveChargingProfile | null {
-    return this._profileControl.getActiveChargePointMaxProfile(now);
+    return this._parts.profileControl.getActiveChargePointMaxProfile(now);
   }
 
   /** Register a connector as handled by a scenario.
    *  @see ScenarioCallOwnership.register */
   registerScenarioHandler(connectorId: number): void {
-    this._scenarioCalls.register(connectorId);
+    this._parts.scenarioCalls.register(connectorId);
   }
 
   unregisterScenarioHandler(connectorId: number): void {
-    this._scenarioCalls.unregister(connectorId);
+    this._parts.scenarioCalls.unregister(connectorId);
   }
 
   isScenarioHandled(connectorId: number): boolean {
-    return this._scenarioCalls.isHandled(connectorId);
+    return this._parts.scenarioCalls.isHandled(connectorId);
   }
 
   notifyRemoteStartReceived(
@@ -1083,18 +1072,18 @@ export class ChargePoint {
     remoteStartId?: number,
     idTokenType?: IdTokenTypeName,
   ): void {
-    this._events.emit("remoteStartReceived", {
+    this._parts.notifications.notifyRemoteStartReceived(
       connectorId,
       tagId,
-      ...(remoteStartId !== undefined ? { remoteStartId } : {}),
-      ...(idTokenType !== undefined ? { idTokenType } : {}),
-    });
+      remoteStartId,
+      idTokenType,
+    );
   }
 
   /** Record a RemoteStartTransaction handled by the default path.
    *  @see ScenarioCallOwnership.noteDefaultHandledRemoteStart */
   noteDefaultHandledRemoteStart(connectorId: number): void {
-    this._scenarioCalls.noteDefaultHandledRemoteStart(connectorId);
+    this._parts.scenarioCalls.noteDefaultHandledRemoteStart(connectorId);
   }
 
   /** Consume the timestamp noteDefaultHandledRemoteStart recorded.
@@ -1103,7 +1092,7 @@ export class ChargePoint {
     connectorId: number,
     sinceMs: number,
   ): number | null {
-    return this._scenarioCalls.takeDefaultHandledRemoteStart(
+    return this._parts.scenarioCalls.takeDefaultHandledRemoteStart(
       connectorId,
       sinceMs,
     );
@@ -1112,24 +1101,27 @@ export class ChargePoint {
   /** Stop-side counterpart of registerScenarioHandler.
    *  @see ScenarioCallOwnership.registerStop */
   registerScenarioStopHandler(connectorId: number): void {
-    this._scenarioCalls.registerStop(connectorId);
+    this._parts.scenarioCalls.registerStop(connectorId);
   }
 
   unregisterScenarioStopHandler(connectorId: number): void {
-    this._scenarioCalls.unregisterStop(connectorId);
+    this._parts.scenarioCalls.unregisterStop(connectorId);
   }
 
   isScenarioStopHandled(connectorId: number): boolean {
-    return this._scenarioCalls.isStopHandled(connectorId);
+    return this._parts.scenarioCalls.isStopHandled(connectorId);
   }
 
   notifyRemoteStopReceived(connectorId: number, transactionId: number): void {
-    this._events.emit("remoteStopReceived", { connectorId, transactionId });
+    this._parts.notifications.notifyRemoteStopReceived(
+      connectorId,
+      transactionId,
+    );
   }
 
   /** Mirror of noteDefaultHandledRemoteStart for the stop side. */
   noteDefaultHandledRemoteStop(connectorId: number): void {
-    this._scenarioCalls.noteDefaultHandledRemoteStop(connectorId);
+    this._parts.scenarioCalls.noteDefaultHandledRemoteStop(connectorId);
   }
 
   /** Mirror of takeDefaultHandledRemoteStart for the stop side. */
@@ -1137,7 +1129,7 @@ export class ChargePoint {
     connectorId: number,
     sinceMs: number,
   ): number | null {
-    return this._scenarioCalls.takeDefaultHandledRemoteStop(
+    return this._parts.scenarioCalls.takeDefaultHandledRemoteStop(
       connectorId,
       sinceMs,
     );
@@ -1148,62 +1140,57 @@ export class ChargePoint {
     payload: unknown,
     messageId?: string,
   ): void {
-    this._events.emit("incomingCallReceived", { action, messageId, payload });
+    this._parts.notifications.notifyIncomingCall(action, payload, messageId);
   }
 
   /** #396: the answer to an incoming CSMS CALL is decided. */
   notifyIncomingCallCompleted(completion: IncomingCallCompletion): void {
-    this._events.emit("incomingCallCompleted", completion);
+    this._parts.notifications.notifyIncomingCallCompleted(completion);
   }
 
   /** Keep the transaction but stop the energy delivery after a non-Accepted id.
    *  @see AuthorizationFlow.holdEnergyOnInvalidId */
   holdEnergyOnInvalidId(connector: Connector): void {
-    this._authorizationFlow.holdEnergyOnInvalidId(connector);
+    this._parts.authorizationFlow.holdEnergyOnInvalidId(connector);
   }
 
-  /** Called by StartTransactionResultHandler when StartTransaction.conf
-   *  carries a non-Accepted idTagInfo.status (issue #181). */
+  /** Called when StartTransaction.conf carries a non-Accepted idTagInfo.status
+   *  (#181). @see StationNotifications.notifyStartTransactionNotAccepted */
   notifyStartTransactionNotAccepted(
     connectorId: number,
     status: string,
     stopped: boolean,
     midSession = false,
   ): void {
-    this._events.emit("startTransactionNotAccepted", {
+    this._parts.notifications.notifyStartTransactionNotAccepted(
       connectorId,
       status,
       stopped,
-      ...(midSession && { midSession: true as const }),
-    });
+      midSession,
+    );
   }
 
-  /** Called by the handlers on each failed transmission of a
-   *  transaction-related message: a 2.x TransactionEvent answered with a
-   *  CALLERROR (#490) or left without answer for `MessageTimeout` (#529), a
-   *  1.6 StartTransaction, StopTransaction or MeterValues of a transaction
-   *  answered with a CALLERROR (#527). Reports only: the transaction is
-   *  untouched. */
+  /** A failed transmission of a transaction-related message (#490, #527,
+   *  #529); reports only. @see StationNotifications.notifyTransactionMessageRejected */
   notifyTransactionMessageRejected(
     event: ChargePointEvents["transactionMessageRejected"],
   ): void {
-    this._events.emit("transactionMessageRejected", event);
+    this._parts.notifications.notifyTransactionMessageRejected(event);
   }
 
-  /** Called by the handlers when a transaction-related message failed its
-   *  last attempt and is dropped (#490, #527). Reports only, like the
-   *  above. */
+  /** A transaction-related message failed its last attempt and is dropped
+   *  (#490, #527); reports only.
+   *  @see StationNotifications.notifyTransactionMessageDiscarded */
   notifyTransactionMessageDiscarded(
     event: ChargePointEvents["transactionMessageDiscarded"],
   ): void {
-    this._events.emit("transactionMessageDiscarded", event);
+    this._parts.notifications.notifyTransactionMessageDiscarded(event);
   }
 
-  /** Called by AuthorizeResultHandler when Authorize.conf arrives
-   *  (issue #181). Fans out to any in-flight `authorizeAndWait` callers
-   *  tagId-matched via the `authorizeResult` event. */
+  /** Called when Authorize.conf arrives (#181); fans out to the in-flight
+   *  `authorizeAndWait` callers. @see StationNotifications.notifyAuthorizeResult */
   notifyAuthorizeResult(tagId: string, status: string): void {
-    this._events.emit("authorizeResult", { tagId, status });
+    this._parts.notifications.notifyAuthorizeResult(tagId, status);
   }
 
   /** Authorize `tagId` for a local start (#181, #452); never rejects.
@@ -1214,7 +1201,7 @@ export class ChargePoint {
     idTokenType?: IdTokenTypeName,
     options: { failClosed?: boolean } = {},
   ): Promise<string> {
-    return this._authorizationFlow.authorizeAndWait(
+    return this._parts.authorizationFlow.authorizeAndWait(
       tagId,
       timeoutMs,
       idTokenType,
@@ -1223,57 +1210,57 @@ export class ChargePoint {
   }
 
   armResponseOverride(action: string, status: string): void {
-    this._callOverrides.armResponseOverride(action, status);
+    this._parts.callOverrides.armResponseOverride(action, status);
   }
 
   /** Returns and clears the armed status for `action`, or null. */
   consumeResponseOverride(action: string): string | null {
-    return this._callOverrides.consumeResponseOverride(action);
+    return this._parts.callOverrides.consumeResponseOverride(action);
   }
 
   /** Read-only probe: is an override armed for `action`? Test/diagnostic
    *  helper — does not consume. */
   hasResponseOverride(action: string): boolean {
-    return this._callOverrides.hasResponseOverride(action);
+    return this._parts.callOverrides.hasResponseOverride(action);
   }
 
   /** Clear an armed response override. No-op if not armed. */
   clearResponseOverride(action: string): void {
-    this._callOverrides.clearResponseOverride(action);
+    this._parts.callOverrides.clearResponseOverride(action);
   }
 
   /** Set an inbound call policy for `action`. Policies are sticky and survive
    *  reconnects; use clearInboundCallPolicy to remove. */
   setInboundCallPolicy(action: string, policy: InboundCallPolicy): void {
-    this._callOverrides.setInboundCallPolicy(action, policy);
+    this._parts.callOverrides.setInboundCallPolicy(action, policy);
   }
 
   /** Get the inbound call policy for `action`, or undefined if none is set. */
   getInboundCallPolicy(action: string): InboundCallPolicy | undefined {
-    return this._callOverrides.getInboundCallPolicy(action);
+    return this._parts.callOverrides.getInboundCallPolicy(action);
   }
 
   /** Clear the inbound call policy for `action`. If `action` is not provided,
    *  clear all policies. */
   clearInboundCallPolicy(action?: string): void {
-    this._callOverrides.clearInboundCallPolicy(action);
+    this._parts.callOverrides.clearInboundCallPolicy(action);
   }
 
   /** Set certificate quirks (CSR generation options, acceptance policies, etc.).
    *  Shallow-merges into current quirks; unset fields inherit prior values.
    *  Sticky until explicitly cleared. */
   setCertificateQuirks(quirks: Partial<CertificateQuirks>): void {
-    this._callOverrides.setCertificateQuirks(quirks);
+    this._parts.callOverrides.setCertificateQuirks(quirks);
   }
 
   /** Reset all certificate quirks to empty state. */
   clearCertificateQuirks(): void {
-    this._callOverrides.clearCertificateQuirks();
+    this._parts.callOverrides.clearCertificateQuirks();
   }
 
   /** Read-only access to current certificate quirks. */
   get certificateQuirks(): CertificateQuirks {
-    return this._callOverrides.certificateQuirks;
+    return this._parts.callOverrides.certificateQuirks;
   }
 
   set loggingCallback(callback: (entry: LogEntry) => void) {
@@ -1281,7 +1268,7 @@ export class ChargePoint {
   }
 
   connect(): void {
-    this._outage.connect();
+    this._parts.outage.connect();
   }
 
   /**
@@ -1295,7 +1282,11 @@ export class ChargePoint {
     status: OCPPStatus,
     opts: StatusNotificationOptions,
   ): void {
-    this._statusControl.sendStatusNotificationRaw(connectorId, status, opts);
+    this._parts.statusControl.sendStatusNotificationRaw(
+      connectorId,
+      status,
+      opts,
+    );
   }
 
   /** Send a CP-initiated DataTransfer.req (§4.3). */
@@ -1315,7 +1306,7 @@ export class ChargePoint {
    * @see StationMessaging.sendOcppCall
    */
   async sendOcppCall(request: OcppCallRequest): Promise<OcppCallOutcome> {
-    return this._messaging.sendOcppCall(request);
+    return this._parts.messaging.sendOcppCall(request);
   }
 
   /**
@@ -1324,7 +1315,7 @@ export class ChargePoint {
    * @see StationMessaging.sendRawFrame
    */
   sendRawFrame(request: RawFrameRequest): Promise<RawFrameOutcome> {
-    return this._messaging.sendRawFrame(request);
+    return this._parts.messaging.sendRawFrame(request);
   }
 
   /**
@@ -1335,25 +1326,25 @@ export class ChargePoint {
   async get15118EVCertificate(
     request: Get15118EVCertificateRequest,
   ): Promise<Get15118EVCertificateResult> {
-    return this._messaging.get15118EVCertificate(request);
+    return this._parts.messaging.get15118EVCertificate(request);
   }
 
   /** #537 A02.FR.08: switch to the renewed client certificate by reconnecting.
    *  @see ClientCertificateSwitch.switchClientCertificate */
   async useRenewedClientCertificate(): Promise<void> {
-    await this._certSwitch.switchClientCertificate(true);
+    await this._parts.certSwitch.switchClientCertificate(true);
   }
 
   /** #564: the same switch without the reconnect.
    *  @see ClientCertificateSwitch.switchClientCertificate */
   async adoptRenewedClientCertificate(): Promise<void> {
-    await this._certSwitch.switchClientCertificate(false);
+    await this._parts.certSwitch.switchClientCertificate(false);
   }
 
   /** #537: end the renewed certificate switch for good.
    *  @see ClientCertificateSwitch.release */
   releaseRenewedClientCertificate(): void {
-    this._certSwitch.release();
+    this._parts.certSwitch.release();
   }
 
   /** Programmatic trigger for SecurityEventNotification; see
@@ -1381,38 +1372,38 @@ export class ChargePoint {
     status: FirmwareStatus,
     requestId?: number,
   ): void {
-    this._messaging.sendFirmwareStatusNotification(status, requestId);
+    this._parts.messaging.sendFirmwareStatusNotification(status, requestId);
   }
 
   /** Send LogStatusNotification.req — see OCPPMessageHandler doc.
    *  @see StationMessaging.sendLogStatusNotification */
   sendLogStatusNotification(status: UploadLogStatus, requestId?: number): void {
-    this._messaging.sendLogStatusNotification(status, requestId);
+    this._parts.messaging.sendLogStatusNotification(status, requestId);
   }
 
   /** Counts every LogStatusNotification this station sent (N01.FR.09).
    *  @see StationMessaging.logStatusSeq */
   get logStatusSeq(): number {
-    return this._messaging.logStatusSeq;
+    return this._parts.messaging.logStatusSeq;
   }
   get lastLogStatusRequestId(): number | undefined {
-    return this._messaging.lastLogStatusRequestId;
+    return this._parts.messaging.lastLogStatusRequestId;
   }
 
   /** `requestId` of the last accepted UpdateFirmware.req (#345).
    *  @see StationMessaging.noteFirmwareRequest */
   noteFirmwareRequest(requestId: number): void {
-    this._messaging.noteFirmwareRequest(requestId);
+    this._parts.messaging.noteFirmwareRequest(requestId);
   }
   get lastFirmwareRequestId(): number | undefined {
-    return this._messaging.lastFirmwareRequestId;
+    return this._parts.messaging.lastFirmwareRequestId;
   }
   /** Same for GetLog.req → LogStatusNotification. */
   noteLogRequest(requestId: number): void {
-    this._messaging.noteLogRequest(requestId);
+    this._parts.messaging.noteLogRequest(requestId);
   }
   get lastLogRequestId(): number | undefined {
-    return this._messaging.lastLogRequestId;
+    return this._parts.messaging.lastLogRequestId;
   }
 
   /** Send SignedFirmwareStatusNotification.req — see OCPPMessageHandler doc. */
@@ -1420,18 +1411,21 @@ export class ChargePoint {
     status: FirmwareStatus,
     requestId?: number,
   ): void {
-    this._messaging.sendSignedFirmwareStatusNotification(status, requestId);
+    this._parts.messaging.sendSignedFirmwareStatusNotification(
+      status,
+      requestId,
+    );
   }
 
   /** The CSMS answered a StatusNotification for `connectorId` (0 = the charge
    *  point) with `status` (#702). */
   noteStatusAcknowledged(connectorId: number, status: OCPPStatus): void {
-    this._outage.ackedStatus.set(connectorId, status);
+    this._parts.outage.ackedStatus.set(connectorId, status);
   }
 
   /** Boot-notification gate accessors used by BootNotificationResultHandler. */
   markBootAccepted(): void {
-    this._boot.markBootAccepted();
+    this._parts.boot.markBootAccepted();
   }
 
   /** §4.2: run `fn` as the answer to an accepted TriggerMessage. */
@@ -1440,17 +1434,17 @@ export class ChargePoint {
   }
 
   markBootPending(): void {
-    this._boot.markBootPending();
+    this._parts.boot.markBootPending();
   }
 
   markBootRejected(retryAfterSeconds: number): void {
-    this._boot.markBootRejected(retryAfterSeconds);
+    this._parts.boot.markBootRejected(retryAfterSeconds);
   }
 
   /** The single entry point for a processed BootNotification.conf.
    *  @see BootLifecycle.onBootNotificationResult */
   onBootNotificationResult(result: BootNotificationResult): void {
-    this._boot.onBootNotificationResult(result);
+    this._parts.boot.onBootNotificationResult(result);
   }
 
   /** #607: append one formatted sample to the transaction-end history.
@@ -1461,7 +1455,7 @@ export class ChargePoint {
     context: "Transaction.Begin" | "Sample.Periodic" | "Sample.Clock",
     timestamp: Date,
   ): void {
-    this._sampling.recordTxEndedSample(
+    this._parts.sampling.recordTxEndedSample(
       connector,
       measurands,
       context,
@@ -1471,7 +1465,7 @@ export class ChargePoint {
 
   /** A station without power starts, stops and boots nothing (#798). */
   private assertPowered(): void {
-    if (this._power.poweredOff) throw new PowerStateError("powered_off");
+    if (this._parts.power.poweredOff) throw new PowerStateError("powered_off");
   }
 
   /**
@@ -1481,47 +1475,49 @@ export class ChargePoint {
    */
   boot(reason?: BootReason): void {
     this.assertPowered();
-    if (reason) this._bootState.bootReason = reason;
+    if (reason) this._parts.bootState.bootReason = reason;
     // A boot asked for while the socket is down (a Reset, a retry timer) is
     // lost on the wire: the next open must send it (#702).
-    if (!this.isOnline()) this._outage.bootOnNextOpen = true;
-    this._bootState.bootUnanswered = true;
-    this._outage.ackedStatus = new Map();
-    this._bootState.bootSentFingerprint = JSON.stringify(this.bootPayload());
+    if (!this.isOnline()) this._parts.outage.bootOnNextOpen = true;
+    this._parts.bootState.bootUnanswered = true;
+    this._parts.outage.ackedStatus = new Map();
+    this._parts.bootState.bootSentFingerprint = JSON.stringify(
+      this.bootPayload(),
+    );
     // OCPP 1.6J §4.2: the CP MUST NOT send any other CALL message until
     // BootNotification has been Accepted. The connector-level
     // StatusNotification fan-out happens in BootNotificationResultHandler
     // after we get the Accepted response.
     this._outbox.sendBootNotification(
       this.bootPayload(),
-      this._bootState.bootReason,
+      this._parts.bootState.bootReason,
     );
     this.error = "";
   }
 
   disconnect(): void {
-    this._outage.disconnect();
+    this._parts.outage.disconnect();
   }
 
   reset(reason: BootReason = "LocalReset"): void {
-    this._outage.reset(reason);
+    this._parts.outage.reset(reason);
   }
 
   /** Whether the station is without power (#455). */
   get poweredOff(): boolean {
-    return this._power.poweredOff;
+    return this._parts.power.poweredOff;
   }
 
   /** Simulate a power loss (#455).
    *  @see PowerLossController.powerLoss */
   powerLoss(options: PowerLossOptions = {}): PowerLossRecord {
-    return this._power.powerLoss(options);
+    return this._parts.power.powerLoss(options);
   }
 
   /** Power returns (#455).
    *  @see PowerLossController.restorePower */
   restorePower(options: PowerRestoreOptions = {}): PowerRestoreResult {
-    return this._power.restorePower(options);
+    return this._parts.power.restorePower(options);
   }
 
   /**
@@ -1541,14 +1537,14 @@ export class ChargePoint {
    * then runs final CP-side teardown.
    */
   dispose(): void {
-    this._outage.dispose();
+    this._parts.outage.dispose();
   }
 
   applyRemoteReset(
     type: ChargePointResetType,
     source: ChargePointResetSource = "ocpp-call",
   ): void {
-    this._resetOnIdle.applyRemoteReset(type, source);
+    this._parts.resetOnIdle.applyRemoteReset(type, source);
   }
 
   authorize(
@@ -1562,7 +1558,7 @@ export class ChargePoint {
   }
 
   set status(newStatus: ChargePointStatus) {
-    this._statusControl.setStationStatus(newStatus);
+    this._parts.statusControl.setStationStatus(newStatus);
   }
 
   /** Start a transaction on a connector; the default lives in the engine
@@ -1607,19 +1603,19 @@ export class ChargePoint {
   /** #597: record a Reset OnIdle answered `Scheduled`.
    *  @see ResetOnIdle.scheduleResetOnIdle */
   scheduleResetOnIdle(evseId?: number): void {
-    this._resetOnIdle.scheduleResetOnIdle(evseId);
+    this._parts.resetOnIdle.scheduleResetOnIdle(evseId);
   }
 
   /** #597: drop every pending Reset OnIdle.
    *  @see ResetOnIdle.cancelPendingResetsOnIdle */
   cancelPendingResetsOnIdle(evseId?: number): void {
-    this._resetOnIdle.cancelPendingResetsOnIdle(evseId);
+    this._parts.resetOnIdle.cancelPendingResetsOnIdle(evseId);
   }
 
   /** #597: boot again once a pending reset has no busy target left.
    *  @see ResetOnIdle.runPendingResetOnIdle */
   runPendingResetOnIdle(): void {
-    this._resetOnIdle.runPendingResetOnIdle();
+    this._parts.resetOnIdle.runPendingResetOnIdle();
   }
 
   /**
@@ -1628,25 +1624,25 @@ export class ChargePoint {
    * @see ConnectorStatusControl.resetEvse
    */
   resetEvse(evseId: number): void {
-    this._statusControl.resetEvse(evseId);
+    this._parts.statusControl.resetEvse(evseId);
   }
 
   /** The EV side of the cable was unplugged (#488).
    *  @see PlugInFlow.evDisconnected */
   evDisconnected(connectorId: number): void {
-    this._plugIn.evDisconnected(connectorId);
+    this._parts.plugIn.evDisconnected(connectorId);
   }
 
   /** The status a connector shows when whatever held it ends.
    *  @see PlugInFlow.statusWhenFree */
   statusWhenFree(connectorId: number): OCPPStatus {
-    return this._plugIn.statusWhenFree(connectorId);
+    return this._parts.plugIn.statusWhenFree(connectorId);
   }
 
   /** A cable was plugged into the connector's EV side (#453).
    *  @see PlugInFlow.evPlugIn */
   evPlugIn(connectorId: number): void {
-    this._plugIn.evPlugIn(connectorId);
+    this._parts.plugIn.evPlugIn(connectorId);
   }
 
   /** #697: hold an authorized idToken until the cable is plugged in. */
@@ -1655,13 +1651,13 @@ export class ChargePoint {
     tagId: string,
     options: StartTransactionOptions,
   ): void {
-    this._plugIn.deferStartUntilPlugIn(connectorId, tagId, options);
+    this._parts.plugIn.deferStartUntilPlugIn(connectorId, tagId, options);
   }
 
   /** The EV asks for energy or stops asking (#453).
    *  @see PlugInFlow.evSetReady */
   evSetReady(connectorId: number, ready: boolean): void {
-    this._plugIn.evSetReady(connectorId, ready);
+    this._parts.plugIn.evSetReady(connectorId, ready);
   }
 
   cleanTransaction(connectorOrId: Connector | number): void {
@@ -1671,7 +1667,7 @@ export class ChargePoint {
   private readonly transactionPorts: TransactionPorts = {
     sendTransactionEvent: (event) => this._outbox.sendTransactionEvent(event),
     startConnectionTimeout: (connectorId) =>
-      this._connectionTimeouts.start(connectorId),
+      this._parts.connectionTimeouts.start(connectorId),
   };
 
   startHeartbeat(period: number): void {
@@ -1699,7 +1695,7 @@ export class ChargePoint {
   }
 
   setMeterValue(connectorId: number, value: number): void {
-    this._sampling.setMeterValue(connectorId, value);
+    this._parts.sampling.setMeterValue(connectorId, value);
   }
 
   sendMeterValue(
@@ -1707,30 +1703,30 @@ export class ChargePoint {
     context?: ReadingContext,
     overrides?: MeterSampleOverrides,
   ): void {
-    this._sampling.sendMeterValue(connectorId, context, overrides);
+    this._parts.sampling.sendMeterValue(connectorId, context, overrides);
   }
 
   /** One sample from the connector's meter-value scheduler (#347).
    *  @see MeterSampling.sendScheduledMeterValue */
   sendScheduledMeterValue(connectorId: number): void {
-    this._sampling.sendScheduledMeterValue(connectorId);
+    this._parts.sampling.sendScheduledMeterValue(connectorId);
   }
 
   // Kept for tests that cast to reach it.
   private emitClockAlignedSamples(boundaryMs: number): void {
-    this._sampling.emitClockAlignedSamples(boundaryMs);
+    this._parts.sampling.emitClockAlignedSamples(boundaryMs);
   }
 
   private recordAlignedTxEndedSamples(
     measurands: string[],
     boundaryMs: number,
   ): void {
-    this._sampling.recordAlignedTxEndedSamples(measurands, boundaryMs);
+    this._parts.sampling.recordAlignedTxEndedSamples(measurands, boundaryMs);
   }
 
   // @ts-expect-error TS6133: read by tests through a cast, not by this class
   private get _periodicSamplers(): Map<number, TimerHandle> {
-    return this._sampling.samplers;
+    return this._parts.sampling.samplers;
   }
 
   /** Drive an OCPP 2.x TransactionEvent(Updated) on a running transaction
@@ -1740,7 +1736,7 @@ export class ChargePoint {
     connectorId: number,
     options: TransactionUpdateOptions,
   ): void {
-    this._messaging.sendTransactionUpdate(connectorId, options);
+    this._parts.messaging.sendTransactionUpdate(connectorId, options);
   }
 
   getConnector(connectorId: number): Connector | undefined {
@@ -1748,11 +1744,11 @@ export class ChargePoint {
   }
 
   removeConnector(connectorId: number): boolean {
-    return this._connectorWiring.removeConnector(connectorId);
+    return this._parts.connectorWiring.removeConnector(connectorId);
   }
 
   updateAllConnectorsStatus(status: OCPPStatus): void {
-    this._statusControl.updateAllConnectorsStatus(status);
+    this._parts.statusControl.updateAllConnectorsStatus(status);
   }
 
   /**
@@ -1766,7 +1762,11 @@ export class ChargePoint {
     status: OCPPStatus,
     options: { readonly allowInvalidTransition?: boolean } = {},
   ): void {
-    this._statusControl.updateConnectorStatus(connectorId, status, options);
+    this._parts.statusControl.updateConnectorStatus(
+      connectorId,
+      status,
+      options,
+    );
   }
 
   /** A write to a connector's engine record (docs/concepts/charger-engine.md). */
@@ -1785,7 +1785,7 @@ export class ChargePoint {
     status: OCPPStatus,
     sendNotification = true,
   ): void {
-    this._statusControl.afterConnectorStatus(
+    this._parts.statusControl.afterConnectorStatus(
       connectorId,
       status,
       sendNotification,
@@ -1798,7 +1798,7 @@ export class ChargePoint {
    * @see ConnectorStatusControl.sendCurrentStatusNotification
    */
   sendCurrentStatusNotification(connectorId?: number): void {
-    this._statusControl.sendCurrentStatusNotification(connectorId);
+    this._parts.statusControl.sendCurrentStatusNotification(connectorId);
   }
 
   /**
@@ -1815,7 +1815,7 @@ export class ChargePoint {
    * @see BootLifecycle.bootPayload
    */
   bootPayload(): BootNotification {
-    return this._boot.bootPayload();
+    return this._parts.boot.bootPayload();
   }
 
   /**
@@ -1824,7 +1824,7 @@ export class ChargePoint {
    * @see BootLifecycle.setFirmwareVersion
    */
   setFirmwareVersion(firmwareVersion: string): void {
-    this._boot.setFirmwareVersion(firmwareVersion);
+    this._parts.boot.setFirmwareVersion(firmwareVersion);
   }
 
   /** #930: install the SIM-scoped policies.

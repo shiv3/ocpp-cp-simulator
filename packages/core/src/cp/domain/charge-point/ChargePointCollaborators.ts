@@ -47,6 +47,7 @@ import { PowerLossController } from "./PowerLossController";
 import { ResetOnIdle } from "./ResetOnIdle";
 import { ScenarioCallOwnership } from "./ScenarioCallOwnership";
 import { StationMessaging } from "./StationMessaging";
+import { StationNotifications } from "./StationNotifications";
 import type { VehicleBehaviorDriver } from "./VehicleBehaviorDriver";
 import type { ChargePointEvents } from "./ChargePointEvents";
 
@@ -111,6 +112,7 @@ export interface ChargePointCollaborators {
   readonly connectorWiring: ConnectorWiring;
   readonly deviceModel: DeviceModelPublisher;
   readonly messaging: StationMessaging;
+  readonly notifications: StationNotifications;
   readonly outage: OutageLifecycle;
   readonly plugIn: PlugInFlow;
   readonly power: PowerLossController;
@@ -161,6 +163,7 @@ export function createCollaborators(
     }),
     deviceModel: new DeviceModelPublisher(ctx),
     messaging: new StationMessaging({ ...ctx, chargePoint: cp }),
+    notifications: new StationNotifications(ctx),
     outage: new OutageLifecycle({
       ...ctx,
       chargePoint: cp,

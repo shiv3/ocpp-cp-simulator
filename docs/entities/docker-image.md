@@ -22,7 +22,7 @@ related:
   - ../concepts/access-control.md
   - ../sources/reverse-proxy-sso-example.md
   - ../analyses/testing-strategy.md
-updated: 2026-11-14
+updated: 2026-11-15
 ---
 
 # Docker image
@@ -304,7 +304,7 @@ Unless overridden, the image runs the Bun that CI tests on, not the latest
 `scripts/__tests__/bunVersionPin.bun.test.ts` fails when the `Dockerfile`
 default drifts from it. `docker-compose.yml` passes no `BUN_VERSION`, so a
 compose build uses the pinned default. `--build-arg BUN_VERSION=<x.y.z>`
-still overrides it; Bun 1.4.4 breaks the WebSocket client (see
+still overrides it; Bun 1.4.4 can close a valid WebSocket connection (see
 [Testing strategy](../analyses/testing-strategy.md)).
 
 Unless it is running the CLI (see [Running the CLI](#running-the-cli)), the

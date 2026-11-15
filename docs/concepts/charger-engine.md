@@ -137,8 +137,11 @@ default stays as before.
 (`CallWaiters`, `ExpertCalls`, `RawFrameSender`, the 1.6 collaborators under `transport/v16/`): their timestamps, the 30 s CALL timeout, the
 `TransactionEvent` resend and timeout timers, the 2.x `GetCompositeSchedule` anchor and the generated-at
 stamps of reports (`ChargePoint.nowDate()`), and their message and transaction ids (streams `message-id` and
-`transaction-id`). `scripts/check-direct-time.ts` (in `check:boundaries`) lists direct `Date.now`, `new Date()`,
-`setTimeout`, `setInterval` and `Math.random` in those places against a shrinking exemption list.
+`transaction-id`). Core's `CallWaiters` is a subclass of `packages/ocpp-rpc`'s, defaulting to `realClock`; the timer
+logic it inherits lives in that package ([Reusable OCPP protocol stack](../analyses/ocpp-protocol-stack.md)).
+`scripts/check-direct-time.ts` (in `check:boundaries`) lists direct `Date.now`, `new Date()`,
+`setTimeout`, `setInterval` and `Math.random` in those places, `packages/ocpp-rpc/src/CallWaiters.ts` and
+`RpcEndpoint.ts` included, against a shrinking exemption list.
 
 **What virtual time covers, exactly.** Everything above, and the engine and the behaviors. It does _not_ cover
 the rest of `infrastructure/transport`: the WebSocket (reconnect back-off, ping and pong timers, the network

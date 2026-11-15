@@ -11,6 +11,7 @@ sources:
 related:
   - ../concepts/ocpp-versions-and-transports.md
   - ../entities/mcp-endpoint.md
+  - ../analyses/ocpp-protocol-stack.md
 updated: 2026-11-15
 ---
 

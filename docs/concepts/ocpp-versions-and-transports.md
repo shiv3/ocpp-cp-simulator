@@ -30,6 +30,7 @@ sources:
   - e2e/README.md
 related:
   - ../sources/vendored-ocpp-schemas.md
+  - ../analyses/ocpp-protocol-stack.md
   - ../entities/csms-peers.md
   - ../entities/cli.md
   - ../entities/daemon.md
@@ -55,7 +56,10 @@ updated: 2026-11-15
 | OCPP 1.6S  | OCPP-S                           | `OCPP-1.6S`  | send-only            | ✅ bidirectional | Full 1.6 message set incl. TriggerMessage and charging profiles      |
 
 Message types and validators for the JSON versions are generated from the
-[vendored OCA schemas](../sources/vendored-ocpp-schemas.md).
+[vendored OCA schemas](../sources/vendored-ocpp-schemas.md). The OCPP-J frame
+codec and the 1.6 / 2.x CALLERROR code tables come from the domain-free
+`packages/ocpp-rpc`; where the rest of the stack lives and how it is being
+extracted is in [Reusable OCPP protocol stack](../analyses/ocpp-protocol-stack.md).
 
 On 2.0.1 and 2.1, `SetVariableMonitoring`, `ClearVariableMonitoring`,
 `GetMonitoringReport`, `SetMonitoringLevel` and `SetMonitoringBase` act on a

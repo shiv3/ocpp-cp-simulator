@@ -16,6 +16,7 @@ import type {
 } from "./ChargePointEvents";
 import type { ClockAlignedMeterScheduler } from "./ClockAlignedMeterScheduler";
 import type { ConfigurationStore } from "./ConfigurationStore";
+import type { OutageLifecycle } from "./OutageLifecycle";
 import type { PowerLossController } from "./PowerLossController";
 import type { ReconnectPolicy } from "../../shared/ReconnectPolicy";
 
@@ -57,6 +58,8 @@ export interface BootLifecycleHost {
     ChargePoint,
     | "boot"
     | "connectors"
+    | "error"
+    | "isOnline"
     | "engine"
     | "startHeartbeat"
     | "status"
@@ -64,6 +67,9 @@ export interface BootLifecycleHost {
     | "updateConnectorStatus"
   >;
   readonly state: BootState;
+  readonly outage: () => OutageLifecycle;
+  /** A station without power starts, stops and boots nothing (#798). */
+  readonly assertPowered: () => void;
   readonly clearOutage: () => void;
   readonly cellular: () => CellularLinkController;
   readonly clock: () => SimClock;
@@ -137,6 +143,31 @@ export class BootLifecycle {
       firmwareVersion,
       ...(previous === undefined ? {} : { previous }),
     });
+  }
+
+  /**
+   * Send BootNotification.req. `reason` (2.x B01.FR.09) is remembered until
+   * the boot is Accepted, so the retry after a Rejected answer repeats it;
+   * an Accepted boot falls back to PowerUp, the reason of a plain reconnect.
+   */
+  sendBootNotification(reason?: BootReason): void {
+    this.host.assertPowered();
+    if (reason) this.host.state.bootReason = reason;
+    // A boot asked for while the socket is down (a Reset, a retry timer) is
+    // lost on the wire: the next open must send it (#702).
+    if (!this.host.chargePoint.isOnline())
+      this.host.outage().bootOnNextOpen = true;
+    this.host.state.bootUnanswered = true;
+    this.host.outage().ackedStatus = new Map();
+    this.host.state.bootSentFingerprint = JSON.stringify(this.bootPayload());
+    // OCPP 1.6J §4.2: the CP MUST NOT send any other CALL message until
+    // BootNotification has been Accepted. The connector-level
+    // StatusNotification fan-out happens in BootNotificationResultHandler
+    // after we get the Accepted response.
+    this.host
+      .outbox()
+      .sendBootNotification(this.bootPayload(), this.host.state.bootReason);
+    this.host.chargePoint.error = "";
   }
 
   /** Boot-notification gate accessors used by BootNotificationResultHandler. */

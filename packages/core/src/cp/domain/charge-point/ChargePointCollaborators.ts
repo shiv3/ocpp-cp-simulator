@@ -141,6 +141,7 @@ export function createCollaborators(
       ...ctx,
       chargePoint: cp,
       state: bootState,
+      outage: () => c.outage,
       clearOutage: () => c.outage.clearOutage(),
       power: () => c.power,
     }),

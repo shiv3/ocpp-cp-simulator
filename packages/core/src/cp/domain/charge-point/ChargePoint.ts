@@ -82,7 +82,6 @@ import type { ChargePointRepositories } from "../persistence/ChargePointReposito
 import type { LogSink } from "../persistence/LogSink";
 import type { PendingMessageRepository } from "../persistence/PendingMessageRepository";
 import type {
-  OCPPAvailability,
   StatusNotificationOptions,
   BootNotification,
   BootReason,
@@ -268,7 +267,8 @@ export class ChargePoint {
     webSocket: () => this._webSocket,
     assertPowered: () => this.assertPowered(),
     evseIdOf: (connectorId) => this.evseIdOf(connectorId),
-    loadAvailability: (connectorId) => this.loadAvailability(connectorId),
+    loadAvailability: (connectorId) =>
+      this._parts.connectorWiring.loadAvailability(connectorId),
     warnCapabilityProfileConflicts: () => this._capabilityGate.warnConflicts(),
     writeConnector: (connectorId, write) =>
       this.writeConnector(connectorId, write),
@@ -612,22 +612,6 @@ export class ChargePoint {
     });
   }
 
-  /** Read a persisted Operative/Inoperative flag from the DB for the given
-   *  connector (`0` = CP-level). Returns `null` if no override is stored. */
-  private loadAvailability(connectorId: number): OCPPAvailability | null {
-    return this._repositories.connectorSettings.loadAvailability(connectorId);
-  }
-
-  private saveAvailability(
-    connectorId: number,
-    availability: OCPPAvailability,
-  ): void {
-    this._repositories.connectorSettings.saveAvailability(
-      connectorId,
-      availability,
-    );
-  }
-
   /** The clock every timer and timestamp of this charge point reads. */
   get clock(): SimClock {
     return this._clock;
@@ -719,16 +703,7 @@ export class ChargePoint {
 
   set autoMeterValueSetting(setting: AutoMeterValueSetting | null) {
     this._autoMeterValueSetting = setting;
-    this._connectors.forEach((connector) => {
-      connector.setIncrementFallback(
-        setting?.enabled
-          ? {
-              intervalSeconds: setting.interval,
-              incrementValue: setting.value,
-            }
-          : null,
-      );
-    });
+    this._parts.connectorWiring.applyIncrementFallback(setting);
   }
 
   get id(): string {
@@ -759,19 +734,11 @@ export class ChargePoint {
     return this._certificateStore;
   }
 
-  /**
-   * Snapshot every connector's (and the CP's) `availability` flag to the
-   * configured DB so the §5.2 "Unavailable persists across reboots"
-   * requirement is met. Called by ChangeAvailability after applying.
-   */
+  /** Snapshot every connector's and the CP's `availability` flag so §5.2
+   *  "Unavailable persists across reboots" holds (ChangeAvailability).
+   *  @see ConnectorWiring.persistAvailability */
   persistAvailability(): void {
-    this.saveAvailability(
-      0,
-      this._status === OCPPStatus.Unavailable ? "Inoperative" : "Operative",
-    );
-    this._connectors.forEach((connector) => {
-      this.saveAvailability(connector.id, connector.availability);
-    });
+    this._parts.connectorWiring.persistAvailability();
   }
 
   get status(): ChargePointStatus {
@@ -1470,29 +1437,11 @@ export class ChargePoint {
 
   /**
    * Send BootNotification.req. `reason` (2.x B01.FR.09) is remembered until
-   * the boot is Accepted, so the retry after a Rejected answer repeats it;
-   * an Accepted boot falls back to PowerUp, the reason of a plain reconnect.
+   * the boot is Accepted; an Accepted boot falls back to PowerUp.
+   * @see BootLifecycle.sendBootNotification
    */
   boot(reason?: BootReason): void {
-    this.assertPowered();
-    if (reason) this._parts.bootState.bootReason = reason;
-    // A boot asked for while the socket is down (a Reset, a retry timer) is
-    // lost on the wire: the next open must send it (#702).
-    if (!this.isOnline()) this._parts.outage.bootOnNextOpen = true;
-    this._parts.bootState.bootUnanswered = true;
-    this._parts.outage.ackedStatus = new Map();
-    this._parts.bootState.bootSentFingerprint = JSON.stringify(
-      this.bootPayload(),
-    );
-    // OCPP 1.6J §4.2: the CP MUST NOT send any other CALL message until
-    // BootNotification has been Accepted. The connector-level
-    // StatusNotification fan-out happens in BootNotificationResultHandler
-    // after we get the Accepted response.
-    this._outbox.sendBootNotification(
-      this.bootPayload(),
-      this._parts.bootState.bootReason,
-    );
-    this.error = "";
+    this._parts.boot.sendBootNotification(reason);
   }
 
   disconnect(): void {
@@ -1508,14 +1457,12 @@ export class ChargePoint {
     return this._parts.power.poweredOff;
   }
 
-  /** Simulate a power loss (#455).
-   *  @see PowerLossController.powerLoss */
+  /** Simulate a power loss (#455). @see PowerLossController.powerLoss */
   powerLoss(options: PowerLossOptions = {}): PowerLossRecord {
     return this._parts.power.powerLoss(options);
   }
 
-  /** Power returns (#455).
-   *  @see PowerLossController.restorePower */
+  /** Power returns (#455). @see PowerLossController.restorePower */
   restorePower(options: PowerRestoreOptions = {}): PowerRestoreResult {
     return this._parts.power.restorePower(options);
   }

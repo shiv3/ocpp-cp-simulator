@@ -269,6 +269,25 @@ describe("runExportK6", () => {
       expect(message).toContain('"$from"');
     });
 
+    it("names every $from root, not only the replaced CALL", async () => {
+      const message = await refuse(
+        withNode("ocppCall", {
+          action: "DataTransfer",
+          payload: { vendorId: { $from: "state.vendor" } },
+        }),
+      );
+      for (const root of [
+        "call",
+        "response",
+        "charger",
+        "connector",
+        "state",
+      ]) {
+        expect(message).toContain(`"${root}."`);
+      }
+      expect(message).toContain("node x");
+    });
+
     it.each([
       ["parallel", {}],
       ["join", { mode: "any" }],

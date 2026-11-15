@@ -343,6 +343,67 @@ describe("transactions and connectors during an update (#600)", () => {
     expect(run.cp.getConnector(1)?.status).toBe(OCPPStatus.Available);
   });
 
+  // #846 / #822: the release gives back what the hold took, not a change the
+  // CSMS made meanwhile, even when that change wrote the same Inoperative.
+  test.each([
+    [
+      "1.6 connector 2",
+      "1.6",
+      () => ({}),
+      fw16,
+      { connectorId: 2, type: "Inoperative" },
+      [2],
+    ],
+    [
+      "1.6 station",
+      "1.6",
+      () => ({}),
+      fw16,
+      { connectorId: 0, type: "Inoperative" },
+      [1, 2],
+    ],
+    [
+      "2.0.1 EVSE 2",
+      "2.0.1",
+      () => ({ train: true }),
+      fw2(22),
+      { operationalStatus: "Inoperative", evse: { id: 2 } },
+      [2],
+    ],
+    [
+      "2.0.1 station",
+      "2.0.1",
+      () => ({ train: true }),
+      fw2(23),
+      { operationalStatus: "Inoperative" },
+      [1, 2],
+    ],
+  ] as const)(
+    "a connector the CSMS made Inoperative during the hold stays so after the update (%s)",
+    async (_label, version, extra, request, change, kept) => {
+      run = await runBehavior({ version, connectors: 2 });
+      select(run, { ...extra(), stepMs: 1000, connectorsUnavailable: true });
+      await run.call("UpdateFirmware", request);
+      await run.advance(2500); // held while installing
+      expect(run.cp.getConnector(2)?.availability).toBe("Inoperative");
+      expect(reply(await run.call("ChangeAvailability", change))).toBe(
+        "Accepted",
+      );
+      await run.advance(3000);
+      expect(statuses(run).at(-1)).toBe("Installed");
+      for (const id of [1, 2]) {
+        const connector = run.cp.getConnector(id);
+        if ((kept as readonly number[]).includes(id)) {
+          expect(connector?.availability).toBe("Inoperative");
+          expect(connector?.status).toBe(OCPPStatus.Unavailable);
+        } else {
+          expect(connector?.availability).toBe("Operative");
+          expect(connector?.status).toBe(OCPPStatus.Available);
+        }
+      }
+    },
+  );
+
   test("a failed update gives the connectors back", async () => {
     run = await runBehavior({ version: "1.6", connectors: 2 });
     select(run, {

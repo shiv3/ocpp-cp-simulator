@@ -124,7 +124,9 @@ The common case is a CSMS behind a TLS-terminating proxy: the edge decrypts,
 so the CSMS itself sees a cleartext connection. A CSMS that enforces the
 security profile then considers the connection insecure and rejects the
 station — typically `401` on the WebSocket upgrade, which surfaces as
-`code=1002, Expected 101 status code` and looks like a station-side fault.
+`Expected 101 status code` (in the close reason, code 1002, on Bun 1.4.3; in
+the error message, followed by the status, on Bun 1.4.4) and looks like a
+station-side fault.
 Making it accept means configuring the CSMS to read the original protocol
 from a forwarded header; the setting is CSMS-specific (SteVe, for one, has a
 protocol-header-from-proxy setting that is empty by default). Check the CSMS
@@ -725,10 +727,15 @@ connected.
   An attempt that reached no server (connection refused or unreachable, a
   DNS failure) does not count: it presented no certificate, so the next one
   presents the same certificate as it did, and a CSMS that is only down
-  during the switch costs no renewal. Everything else counts, including a
-  dropped connection and an upgrade refused with any HTTP status: Bun does
-  not report the status, and a proxy that terminates TLS can refuse a client
-  certificate with one.
+  during the switch costs no renewal. Such an attempt is recognised by the
+  error event that precedes the close on Bun 1.4.4 (`error.code`
+  ECONNREFUSED, ENOTFOUND, EAI_AGAIN, EHOSTUNREACH or ENETUNREACH), by the
+  close `1006 Failed to connect` on Bun 1.4.3, and by a `connect` or
+  `getaddrinfo` syscall under Node (#1034). Everything else counts: a TLS
+  failure, a dropped connection (ECONNRESET, which is how Bun 1.4.4 reports
+  a CSMS refusing the client certificate), an attempt that carries no
+  detail at all, and an upgrade refused with any HTTP status, since a proxy
+  that terminates TLS can refuse a client certificate with one.
   The other certificate is the one in use before the renewal: a renewed
   certificate confirmed earlier, else `--tls-cert`. A02.FR.28 alternates
   once every `NetworkConfigurationPriority` entry has failed; the

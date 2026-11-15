@@ -17,7 +17,7 @@ related:
   - control-plane.md
   - state-persistence.md
   - ocpp-versions-and-transports.md
-updated: 2026-11-09
+updated: 2026-11-15
 ---
 
 # Meter realism
@@ -43,19 +43,19 @@ JSON column, so no schema migration was needed.
 | Field (`meter.`)                   | Meaning                                                                                                                                                                                                                                                                |
 | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `seed`                             | Integer seed of every draw; 0 when absent.                                                                                                                                                                                                                             |
-| `fluctuation.voltagePct`           | Half-width (0–50 %) of the uniform band around the voltage. Currents are derived from the fluctuated voltage.                                                                                                                                                          |
+| `fluctuation.voltagePct`           | Half-width (0–50 %) of the uniform band around the voltage. Currents are derived from the fluctuated voltage, never past the bound's amperes: a sag lowers the power (#846).                                                                                           |
 | `fluctuation.powerPct`             | Same for the load. The register follows it, so energy stays the integral of the reported power.                                                                                                                                                                        |
 | `fluctuation.currentPct`           | Extra jitter on the current as a meter reads it, on top of the load.                                                                                                                                                                                                   |
 | `rampUp.shape` / `durationSeconds` | `linear` or `sigmoid` ramp from 0 to full power, measured from the transaction start.                                                                                                                                                                                  |
 | `phases.voltageImbalancePct`       | Presence of `phases` turns on `L1-N`, `L2-N`, `L3-N` (and unless `lineToLine: false`, `L1-L2`, `L2-L3`, `L3-L1`) Voltage samples and independent per-phase Current.Import and Power.Active.Import. The L-L voltage is computed from the two phase voltages 120° apart. |
-| `phases.loadImbalancePct`          | Per-phase load deviation; the phase powers always add up to the connector power.                                                                                                                                                                                       |
+| `phases.loadImbalancePct`          | Per-phase load deviation; the phase powers always add up to the connector power. A phase held at the bound's amperes passes its excess to the others (#846).                                                                                                           |
 | `export.powerW`                    | A V2X term: while `Charging` the connector exports this power (capped by the charger and the vehicle) and imports nothing.                                                                                                                                             |
 | `sampledValues[]`                  | Overrides (below).                                                                                                                                                                                                                                                     |
 
 Rules:
 
 - **Seeded and pure.** A draw is a hash of `(seed, whole second of the instant, channel)`, so the same seed gives the same series at the same instants and a sample set and the register tick of one second read one draw. Nothing is stored.
-- **Never past the bound.** A ramped or fluctuated power is clamped to the lower of the bound (schedule limit narrowed by the charger cap, #327) and the vehicle's own ceiling: a load at full power dips and never rises above it.
+- **Never past the bound.** A ramped or fluctuated power is clamped to the lower of the bound (schedule limit narrowed by the charger cap, #327) and the vehicle's own ceiling: a load at full power dips and never rises above it. The bound's line current holds too: it is the bound in amperes at the nominal voltage (an A-unit profile's own amperes), so a sagging voltage lowers the power (and `Power.Offered`, and the register bound) instead of raising `Current.Import` past it (#846). With per-phase voltages (`phases.voltageImbalancePct`) the sag is their mean, even without `fluctuation`. The bound need not come from an A-unit profile: a schedule or charger cap in watts is held at its amperes too, so its power dips under a sag (a power-controlled DC charger would hold the power instead).
 - **Energy and power agree** where they already did (a connector with a charging curve and a finite `maxChargingPowerKw`: `accumulationCapW` is scaled by the same factor). A curve-less connector follows its configured increment, which the same factor scales (`OperatingPoint.deliveryFactor`).
 - **Three-phase only.** Per-phase detail needs all three phases in use (the rule of the per-phase samples, #301); a profile restricting the phases, a single-phase or a DC connector reports as before.
 

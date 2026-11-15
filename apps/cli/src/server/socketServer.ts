@@ -40,7 +40,6 @@ import {
   rpcRequestSchema,
   SCENARIO_RUNS_PAGE_DEFAULT,
   CHARGING_SESSIONS_PAGE_DEFAULT,
-  statusToWire,
   subscribeResultSchema,
   type CpListItem,
   type Params,
@@ -55,11 +54,7 @@ import {
 } from "@ocpp-cp-simulator/contracts/index";
 import type { ScenarioRunPage } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunSummary";
 import { TIMELINE_FORMAT_VERSION } from "@ocpp-cp-simulator/core/cp/application/services/OperationalTimeline";
-import type {
-  ChargePointSnapshot,
-  ConnectorSnapshot,
-  CreateChargePointParams,
-} from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
+import type { CreateChargePointParams } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
 import type { ConnectorSettingsRepository } from "@ocpp-cp-simulator/client/interfaces/ConnectorSettingsRepository";
 import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
 import { FleetTemplateRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/FleetTemplateRepository";
@@ -72,15 +67,9 @@ import {
 import { validateScenarioSchema } from "@ocpp-cp-simulator/core/scenario/scenarioSchemaValidator";
 import type { AutoMeterValueConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
 import {
-  InvalidEvSettingsPatchError,
   type EVSettings,
   type EVSettingsPatch,
 } from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
-import {
-  ConfigurationWriteRejectedError,
-  UnknownConfigurationKeyError,
-} from "@ocpp-cp-simulator/core/cp/domain/charge-point/configurationAccess";
-import { InvalidAuthorizationCacheSeedError } from "@ocpp-cp-simulator/core/cp/domain/auth/AuthorizationCacheSeed";
 import type { HistoryOptions } from "@ocpp-cp-simulator/core/cp/domain/services/StateSnapshot";
 import {
   hasStatusNotificationOptions,
@@ -94,17 +83,6 @@ import {
   SOAP_CHARGE_POINT_SERVICE_ROUTE,
 } from "../soapPath";
 import { appVersion } from "../appVersion";
-import {
-  BehaviorNotLoadableError,
-  UnknownBehaviorError,
-  BehaviorParamsError,
-} from "../behavior/BehaviorLibrary";
-import { OcppSecurityProfileConfigError } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/wsUrlWithBasic";
-import { ScenarioRunStateError } from "@ocpp-cp-simulator/core/cp/domain/errors/ScenarioRunStateError";
-import {
-  OcppCallNoAnswerError,
-  OcppCallRejectedError,
-} from "@ocpp-cp-simulator/core/cp/domain/errors/OcppCallErrors";
 import {
   validateLayerConfig,
   type NetworkSimLayerConfig,
@@ -129,15 +107,24 @@ import {
   isBuiltInBlueprint,
   MAX_STORED_BLUEPRINTS,
 } from "@ocpp-cp-simulator/core/utils/blueprints/index";
+import {
+  classifyFacadeError,
+  requireChargePointSnapshot,
+  requireFacadeCpId,
+  runFacadeOperation,
+  type RpcTarget,
+} from "./rpc/facadeErrors";
+import {
+  snapshotToFullCp,
+  snapshotToRegistryCpWire,
+  snapshotToWireStatus,
+} from "./rpc/wireSnapshot";
+import { registerSocketAuth } from "./rpc/socketAuth";
 import type { CPRegistry } from "./CPRegistry";
 import type { EventBus } from "./eventBus";
 import { selectLogWindow } from "@ocpp-cp-simulator/core/cp/shared/window";
 import { getGlobalMetricsRecorder } from "./metrics/MetricsRecorder";
-import {
-  parseCreateBody,
-  parseBasicAuthHeader,
-  credentialsMatch,
-} from "./httpServer";
+import { parseCreateBody } from "./httpServer";
 import {
   createRegistryEventBridge,
   type RegistryEventBridge,
@@ -234,7 +221,6 @@ interface SocketRpcState {
 
 type RpcAckFn = (ack: RpcAck) => void;
 type DirectAckFn = (ack: unknown) => void;
-type FullCp = Parameters<typeof registryCpToWire>[0];
 type RpcMethod = keyof typeof METHODS;
 type FacadeDispatchResult =
   | { readonly handled: true; readonly value: unknown }
@@ -505,16 +491,6 @@ function parseRpcParams<M extends RpcMethod>(
   const params = METHODS[method].params.safeParse(rawParams);
   if (!params.success) throw new RpcFailure("invalid_params", "");
   return params.data as Params<M>;
-}
-
-/**
- * Where a request is aimed. `cpIdInParams` is read off the raw params because
- * the schema strips an undeclared `cpId`, and it is the only way to tell the
- * caller that theirs is in the wrong place (#286).
- */
-interface RpcTarget {
-  readonly cpId: string | undefined;
-  readonly cpIdInParams: boolean;
 }
 
 function rpcTarget(cpId: string | undefined, rawParams: unknown): RpcTarget {
@@ -2932,235 +2908,6 @@ function handled(value: unknown): FacadeDispatchResult {
   return { handled: true, value };
 }
 
-/**
- * The rule that decides which word a facade failure gets back (#286).
- *
- * Exported because it *is* the contract: `not_found` is a statement about the
- * registry, `connect_failed` about the CSMS, `internal` about this daemon, and
- * a test that re-implements the rule instead of calling it would keep passing
- * while the three drifted apart. Returns null when the error is not one this
- * rule classifies, leaving it to propagate.
- */
-export function classifyFacadeError(err: unknown): RpcFailure | null {
-  if (err instanceof RpcFailure) return err;
-  // cp.create/cp.update reject bad security-profile config (missing
-  // authorizationKey for profiles 1-2, missing client cert/key for profile 3)
-  // eagerly via CPRegistry.prepareInit, before anything is mutated.
-  if (err instanceof OcppSecurityProfileConfigError) {
-    return new RpcFailure("invalid_params", err.message);
-  }
-  // An id in `behaviors` that names no loaded behavior; the message lists
-  // the loaded ids.
-  if (
-    err instanceof UnknownBehaviorError ||
-    err instanceof BehaviorParamsError ||
-    err instanceof BehaviorNotLoadableError
-  ) {
-    return new RpcFailure("invalid_params", err.message);
-  }
-  // #458: a set_ev_settings patch that would remove a required field.
-  if (err instanceof InvalidEvSettingsPatchError) {
-    return new RpcFailure("invalid_params", err.message);
-  }
-  // #612: a configuration key the charge point does not have, and one it
-  // has but will not take (read-only, or a value outside its type / bounds).
-  if (err instanceof UnknownConfigurationKeyError) {
-    return new RpcFailure("not_found", err.message);
-  }
-  if (err instanceof ConfigurationWriteRejectedError) {
-    return new RpcFailure("invalid_params", err.message);
-  }
-  // #452: a cache seed refused before anything was written.
-  if (err instanceof InvalidAuthorizationCacheSeedError) {
-    return new RpcFailure("invalid_params", err.message);
-  }
-  if (!(err instanceof Error)) return null;
-  if (err.message.includes("already exists")) {
-    return new RpcFailure("invalid_params", "");
-  }
-  if (
-    err.message.includes("cpId not found") ||
-    err.message.includes("not registered in LocalChargePointService")
-  ) {
-    return new RpcFailure("not_found", "");
-  }
-  // #286: `connect` resolves when the socket opens and rejects on the first
-  // close, so a CSMS that refuses the upgrade lands here. Nothing broke -- the
-  // daemon opened a socket, the CSMS said no, and the reconnect loop is
-  // already running -- so `internal` was the wrong word for it. The close code
-  // and reason travel in the message.
-  if (
-    err.message.startsWith("Connection failed:") ||
-    err.message.startsWith("Connection timeout")
-  ) {
-    return new RpcFailure("connect_failed", err.message);
-  }
-  // #240: a scenario control aimed at a scenario that cannot take it (unknown,
-  // not running, not parked on a wait, …) is a caller error, not a daemon
-  // fault. The message names only the scenario id.
-  if (err instanceof ScenarioRunStateError) {
-    return new RpcFailure("invalid_params", err.message);
-  }
-  // #389: an expert OCPP call refused before anything was written (SOAP
-  // station, action the station does not send, schema-invalid payload
-  // without skipValidation, boot gate) is a caller error; the message says
-  // which. No answer is a timeout, or a disconnect when the CALL never
-  // reached the wire or the socket closed first.
-  if (err instanceof OcppCallRejectedError) {
-    return new RpcFailure("invalid_params", err.message);
-  }
-  if (err instanceof OcppCallNoAnswerError) {
-    return new RpcFailure(
-      err.reason === "timeout" ? "timeout" : "disconnected",
-      err.message,
-    );
-  }
-  return null;
-}
-
-async function runFacadeOperation<T>(
-  operation: () => T | Promise<T>,
-): Promise<T> {
-  try {
-    return await operation();
-  } catch (err) {
-    if (err instanceof RpcFailure) throw err;
-    // The config rejection is the one case worth a server-side line: it names
-    // the missing field (never a secret) and an operator reading the daemon
-    // log should see why a create was refused.
-    if (err instanceof OcppSecurityProfileConfigError) {
-      console.warn(`[server] rejected charge point config: ${err.message}`);
-    }
-    const classified = classifyFacadeError(err);
-    if (classified) throw classified;
-    throw err;
-  }
-}
-
-/**
- * #286 — a missing `cpId` is `invalid_params`, not `not_found`.
- *
- * `not_found` is a statement about the registry: this charge point does not
- * exist. When the envelope simply carried `cpId` in the wrong place it does
- * exist, and the reader is sent hunting for a creation bug. The two shapes
- * are genuinely easy to mix up — `cp.create` takes `cpId` INSIDE `params`,
- * every CP-scoped method takes it as a SIBLING of `method` — so the message
- * names the confusion when the params object is where it ended up.
- */
-function requireFacadeCpId(target: RpcTarget): string {
-  if (!target.cpId) throw missingCpId(target);
-  return target.cpId;
-}
-
-function missingCpId(target: RpcTarget): RpcFailure {
-  return new RpcFailure(
-    "invalid_params",
-    target.cpIdInParams
-      ? 'missing cpId: it belongs beside "method", not inside "params"'
-      : "missing cpId",
-  );
-}
-
-async function requireChargePointSnapshot(
-  chargePointService: RegistryChargePointService,
-  cpId: string,
-): Promise<ChargePointSnapshot> {
-  const snapshot = await runFacadeOperation(() =>
-    chargePointService.getChargePoint(cpId),
-  );
-  if (!snapshot) throw new RpcFailure("not_found", "");
-  return snapshot;
-}
-
-function snapshotToRegistryCpWire(snapshot: ChargePointSnapshot): CpListItem {
-  return registryCpToWire(snapshotToFullCp(snapshot));
-}
-
-/**
- * `ChargePointSnapshot.config` is typed optional to cover Local mode
- * (the browser owns config) and older daemons that predate the field —
- * neither applies to a Registry-produced snapshot today, since
- * `CLIChargePointService.getStatus()` always populates it. Still, throwing
- * here would take down `listCps`/`captureSubscribeSnapshot` for every
- * registered CP over one anomalous snapshot; fall back to a minimal,
- * clearly-incomplete config and warn instead of crashing the RPC.
- */
-function snapshotToFullCp(snapshot: ChargePointSnapshot): FullCp {
-  if (!snapshot.config) {
-    console.warn(
-      `[socketServer] CP snapshot missing config, using fallback: ${snapshot.id}`,
-    );
-    return {
-      id: snapshot.id,
-      status: snapshot.status,
-      config: {
-        wsUrl: "",
-        connectors: snapshot.connectors.length,
-        vendor: "",
-        model: "",
-        basicAuth: null,
-        bootNotification: null,
-      },
-      networkSim: snapshot.networkSim,
-    };
-  }
-  return {
-    id: snapshot.id,
-    status: snapshot.status,
-    config: snapshot.config,
-    networkSim: snapshot.networkSim,
-  };
-}
-
-function snapshotToWireStatus(snapshot: ChargePointSnapshot): StatusWire {
-  return statusToWire({
-    id: snapshot.id,
-    status: snapshot.status,
-    error: snapshot.error,
-    connectors: snapshot.connectors.map(connectorSnapshotToWire),
-    heartbeat: snapshot.heartbeat,
-    networkSim: snapshot.networkSim,
-    config: snapshot.config,
-    modem: snapshot.modem,
-  });
-}
-
-function connectorSnapshotToWire(
-  connector: ConnectorSnapshot,
-): StatusWire["connectors"][number] {
-  return {
-    id: connector.id,
-    status: connector.status,
-    availability: connector.availability,
-    meterValue: connector.meterValue,
-    transactionId: connector.transactionId,
-    soc: connector.soc,
-    mode: connector.mode,
-    autoResetToAvailable: connector.autoResetToAvailable,
-    autoMeterValueConfig: connector.autoMeterValueConfig as Record<
-      string,
-      unknown
-    > | null,
-    evSettings: connector.evSettings as Record<string, unknown> | null,
-    chargingProfile: connector.chargingProfile as Record<
-      string,
-      unknown
-    > | null,
-    chargingProfiles: connector.chargingProfiles.map(
-      (profile) => profile as unknown as Record<string, unknown>,
-    ),
-    transactionStartTime: toIsoStringOrNull(connector.transactionStartTime),
-    transactionTagId: connector.transactionTagId,
-    transactionBatteryCapacityKwh: connector.transactionBatteryCapacityKwh,
-    evConnection: connector.evConnection,
-  };
-}
-
-function toIsoStringOrNull(value: Date | string | null): string | null {
-  if (value === null) return null;
-  return value instanceof Date ? value.toISOString() : value;
-}
-
 function parseCreateInput(
   deps: RuntimeSocketIoDeps,
   params: Params<"cp.create"> | Record<string, unknown>,
@@ -3436,97 +3183,4 @@ function safeLogMessage(err: unknown): string {
   );
 }
 
-/**
- * Read the `Authorization` header off a Socket.IO handshake, tolerating both
- * the plain `IncomingHttpHeaders` record (Node/Engine.IO) and a `Headers`
- * instance, plus the rare repeated-header array form.
- */
-function handshakeAuthorizationHeader(headers: unknown): string | null {
-  if (!headers) return null;
-  if (typeof (headers as Headers).get === "function") {
-    return (headers as Headers).get("authorization");
-  }
-  const value = (headers as Record<string, unknown>).authorization;
-  if (typeof value === "string") return value;
-  if (Array.isArray(value) && typeof value[0] === "string") return value[0];
-  return null;
-}
-
-function registerSocketAuth(
-  io: SocketIoServer,
-  expected: SocketIoDeps["webConsoleBasicAuth"],
-): void {
-  io.use((socket, next) => {
-    if (!expected) {
-      next();
-      return;
-    }
-    // 1) Explicit Socket.IO `auth` payload — used by the CLI client and any
-    //    cross-origin caller that holds the credentials and echoes them in.
-    if (socketAuthMatches(socket.handshake.auth, expected)) {
-      next();
-      return;
-    }
-    // 2) HTTP `Authorization: Basic` header on the handshake request. The
-    //    bundled web console is served from the same origin as this daemon, so
-    //    it is loaded behind the browser's Basic Auth prompt; the browser then
-    //    replays those cached credentials on the same-origin Socket.IO
-    //    handshake. They are opaque to page JS and cannot be copied into the
-    //    `auth` payload above, so accepting the header lets the web console
-    //    connect under --web-console-basic-auth without a second credential
-    //    entry. (A WebSocket upgrade can't carry the header, but Socket.IO
-    //    authenticates once at the handshake, before the transport upgrade.)
-    const headerCreds = parseBasicAuthHeader(
-      handshakeAuthorizationHeader(socket.handshake.headers),
-    );
-    if (headerCreds && credentialsMatch(headerCreds, expected)) {
-      next();
-      return;
-    }
-    next(new Error("unauthorized"));
-  });
-}
-
-function socketAuthMatches(
-  auth: unknown,
-  expected: { readonly username: string; readonly password: string },
-): boolean {
-  const supplied = readSocketAuth(auth);
-  if (!supplied) return false;
-  return (
-    timingSafeStringEqual(supplied.username, expected.username) &&
-    timingSafeStringEqual(supplied.password, expected.password)
-  );
-}
-
-function readSocketAuth(
-  auth: unknown,
-): { readonly username: string; readonly password: string } | null {
-  if (!auth || typeof auth !== "object") return null;
-  const record = auth as Record<string, unknown>;
-  const username =
-    typeof record.user === "string"
-      ? record.user
-      : typeof record.username === "string"
-        ? record.username
-        : null;
-  const password =
-    typeof record.pass === "string"
-      ? record.pass
-      : typeof record.password === "string"
-        ? record.password
-        : null;
-  if (username === null || password === null) return null;
-  return { username, password };
-}
-
-function timingSafeStringEqual(a: string, b: string): boolean {
-  const ba = new TextEncoder().encode(a);
-  const bb = new TextEncoder().encode(b);
-  if (ba.length !== bb.length) return false;
-  let diff = 0;
-  for (let i = 0; i < ba.length; i++) {
-    diff |= ba[i] ^ bb[i];
-  }
-  return diff === 0;
-}
+export { classifyFacadeError };

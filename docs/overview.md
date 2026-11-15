@@ -5,7 +5,7 @@ summary: Master summary of the OCPP CP Simulator — what it is, how the pieces 
 sources:
   - scripts/check-package-boundaries.ts
   - "issue #578"
-updated: 2026-11-14
+updated: 2026-11-15
 ---
 
 # OCPP CP Simulator — overview
@@ -163,6 +163,10 @@ bullet above, not repeated here.
   timeline (`ChargePointHeartbeat`, `ChargePointStateManager`,
   `ChargePointTimeline`) and the state-history types (`StateSnapshot`,
   `StateTransition`, `ValidationResult`).
+  `domain/charge-point/ChargePointTypes.ts` holds the option, outcome and
+  policy types and `PowerStateError` of `ChargePoint`; `ChargePoint.ts`
+  re-exports them, so imports do not change
+  ([#877](https://github.com/shiv3/ocpp-cp-simulator/issues/877)).
 - `cp/application/` — the use cases that drive the domain: the charger engine
   and its behaviors, services (state history, heartbeat, operational
   timeline), the scenario engine (`application/scenario/`) and run

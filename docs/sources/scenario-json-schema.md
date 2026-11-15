@@ -42,7 +42,7 @@ fields the schema deliberately does not reject.
   [Library](../entities/web-console.md#scenario-library) scenario with that
   scenario's `id`; `templateId` likewise names the built-in template an
   instance came from.
-- Mirrors `packages/core/src/cp/application/scenario/ScenarioTypes.ts` (node and graph types in `types/nodeData.ts` and `types/graph.ts`); the closed
+- Mirrors `packages/core/src/cp/application/scenario/ScenarioTypes.ts` (node and graph types in `types/nodeData.ts` and `types/graph.ts`; assertions, runtime types and the action/status catalogs in `types/assertions.ts`, `types/runtime.ts` and `types/catalogs.ts`); the closed
   vocabularies (node `type`, `OCPPStatus`, …) are enumerated here.
 - Validation is **advisory**: the simulator warns on mismatch but never
   refuses to load — except that the `required` top-level fields (`id`,

@@ -107,7 +107,11 @@ export class TransactionMessagesV16 {
         patchTransaction(this._chargePoint, connectorId, transaction, {
           txEndedSamples: [
             ...(transaction.txEndedSamples ?? []),
-            { timestamp: transaction.startTime.toISOString(), sampledValue },
+            {
+              timestamp: transaction.startTime.toISOString(),
+              sampledValue,
+              kind: "begin",
+            },
           ],
         });
       }
@@ -183,8 +187,9 @@ export class TransactionMessagesV16 {
     // point captured at the stop instant (1.6 §3.16.1, §3.16.2).
     // The same wire spelling as MeterValues (#846): a Temperature sample
     // says `Celcius` here too (1.6 errata 2025-04 §2.1).
+    // Only the wire fields: the stored entry kind stays local.
     const history = (transaction.txEndedSamples ?? []).map((entry) => ({
-      ...entry,
+      timestamp: entry.timestamp,
       sampledValue: toOcppJ16Wire(entry.sampledValue),
     }));
     const endMeasurands = this._chargePoint.configuration.stopTxnSampledData();

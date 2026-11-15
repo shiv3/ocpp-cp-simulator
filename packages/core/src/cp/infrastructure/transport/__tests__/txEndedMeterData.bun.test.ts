@@ -10,6 +10,7 @@ import {
   bootedChargePoint,
   callOf,
   callsOf,
+  stationFor,
 } from "./stationHarness";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { MainMeter } from "../../../domain/charge-point/MainMeter";
@@ -89,6 +90,9 @@ describe("OCPP 1.6 transaction-end meter data (#607)", () => {
       await csms.waitForCall("StopTransaction");
 
       const data = stopTx16(csms).transactionData!;
+      // The stored entry kind never reaches the wire.
+      for (const d of data)
+        expect(Object.keys(d).sort()).toEqual(["sampledValue", "timestamp"]);
       const contexts = data.map((d) => d.sampledValue[0].context);
       expect(contexts).toEqual([
         "Transaction.Begin",
@@ -172,32 +176,72 @@ describe("OCPP 1.6 transaction-end meter data (#607)", () => {
     }
   });
 
-  it("the history is bounded", async () => {
+  it("the history is bounded by thinning intermediates, never Begin or the newest", async () => {
     const csms = startMockCsms();
     const stop = answerEverythingElse(csms, ["StartTransaction"]);
     try {
       const cp = await charging16(csms, "CP607-bound");
+      cp.configuration.applyChange("StopTxnSampledData", REGISTER);
       cp.configuration.applyChange("StopTxnAlignedData", REGISTER);
       await startAndCharge16(csms, cp);
       const emit = (ms: number) =>
         (
           cp as unknown as { emitClockAlignedSamples(ms: number): void }
         ).emitClockAlignedSamples(ms);
-      for (let i = 0; i < TX_ENDED_SAMPLES_MAX + 5; i++)
-        emit(1_900_000_000_000 + i * 1000);
+      const at = (i: number) =>
+        new Date(1_900_000_000_000 + i * 1000).toISOString();
+      const count = TX_ENDED_SAMPLES_MAX + 5;
+      for (let i = 0; i < count; i++) emit(1_900_000_000_000 + i * 1000);
       const history = cp.getConnector(1)!.transaction!.txEndedSamples!;
-      expect(history).toHaveLength(TX_ENDED_SAMPLES_MAX);
-      // The oldest are the ones dropped.
-      expect(history[0].timestamp).toBe(
-        new Date(1_900_000_000_000 + 5 * 1000).toISOString(),
-      );
+      expect(history.length).toBeLessThanOrEqual(TX_ENDED_SAMPLES_MAX);
+      expect(history.length).toBeGreaterThan(TX_ENDED_SAMPLES_MAX / 2);
+      // E06.FR.13 / J02.FR.20: intermediates go first (the 2nd, 4th, …
+      // entry), so the Begin sample stays first and the newest stays last.
+      expect(history[0].kind).toBe("begin");
+      expect(history[0].sampledValue[0].context).toBe("Transaction.Begin");
+      expect(history[1].timestamp).toBe(at(1));
+      expect(history.at(-1)!.timestamp).toBe(at(count - 1));
+      // The newest entry when the cap was reached survives the thinning.
+      expect(
+        history.some((e) => e.timestamp === at(TX_ENDED_SAMPLES_MAX - 2)),
+      ).toBe(true);
+      const times = history.map((e) => Date.parse(e.timestamp));
+      expect(times).toEqual([...times].sort((a, b) => a - b));
       // It survives the persisted form (transaction_json).
       const again = JSON.parse(JSON.stringify(cp.getConnector(1)!.transaction));
-      expect(again.txEndedSamples).toHaveLength(TX_ENDED_SAMPLES_MAX);
+      expect(again.txEndedSamples).toHaveLength(history.length);
       cp.disconnect();
     } finally {
       stop();
       await csms.stop();
+    }
+  });
+
+  it("SOAP records no history: its StopTransaction never carries one", () => {
+    const csms = startMockCsms();
+    try {
+      const cp = stationFor(csms, "CP846-soap", "OCPP-1.6S");
+      cp.configuration.applyChange("StopTxnSampledData", REGISTER);
+      const connector = cp.getConnector(1)!;
+      connector.transaction = {
+        id: 1,
+        connectorId: 1,
+        tagId: "TAG-846",
+        meterStart: 0,
+        meterStop: null,
+        startTime: new Date(),
+        stopTime: null,
+        meterSent: false,
+      };
+      cp.recordTxEndedSample(
+        connector,
+        [REGISTER],
+        "Sample.Periodic",
+        new Date(),
+      );
+      expect(connector.transaction?.txEndedSamples).toBeUndefined();
+    } finally {
+      void csms.stop();
     }
   });
 });
@@ -284,6 +328,37 @@ describe("OCPP 2.x transaction-end meter data (#607)", () => {
         POWER,
       ]);
       expect(last.every((s) => s.context === "Transaction.End")).toBe(true);
+      cp.disconnect();
+    } finally {
+      stop();
+      await csms.stop();
+    }
+  });
+
+  // #846: the TxEndedInterval spacing reads the entry kind, not the context
+  // of the first value, which a `meter.sampledValues` override may change.
+  it("TxEndedInterval spacing holds when an override rewrites the context", async () => {
+    const csms = startMockCsms();
+    const stop = answerEverythingElse(csms, []);
+    try {
+      const cp = await start2(csms, "CP846-v2-kind");
+      cp.configuration.applyChange("StopTxnSampledData", POWER);
+      cp.configuration.applyChange("TxEndedInterval", "60");
+      const connector = cp.getConnector(1)!;
+      connector.setMeterRealism({
+        sampledValues: [{ measurand: POWER, set: { context: "Other" } }],
+      });
+      cp.startTransaction("TAG-846", 1);
+      await csms.waitForFrame((f) => callOf("TransactionEvent")(f));
+      connector.patchTransaction({
+        startTime: new Date(Date.now() - 61_000),
+      });
+      cp.sendScheduledMeterValue(1);
+      // Within the interval of the sample just taken: nothing more.
+      cp.sendScheduledMeterValue(1);
+      const history = connector.transaction!.txEndedSamples!;
+      expect(history.map((e) => e.kind)).toEqual(["begin", "periodic"]);
+      expect(history[1].sampledValue[0].context).toBe("Other");
       cp.disconnect();
     } finally {
       stop();

@@ -1074,11 +1074,17 @@ one operating point per sample, so a sample describes one instant (#327).
   the last periodic sample when the stop falls on a tick instead of reading 0
   from a connector already in `Finishing`.
 - **The history is kept as formatted samples** on the transaction
-  (`txEndedSamples`, at most 1,000, oldest dropped), persisted with the
-  transaction (`transaction_json`, no schema change). A later change of a
-  measurand list cannot reformat what was already taken.
+  (`txEndedSamples`), persisted with the transaction (`transaction_json`, no
+  schema change). A later change of a measurand list cannot reformat what was
+  already taken. Each entry also stores what took it (begin, periodic or
+  clock, never sent), so the `TxEndedInterval` spacing holds when a
+  `meter.sampledValues` override rewrites a value's `context` (#846).
+- **At 1,000 entries, every other intermediate entry is dropped** (the 2nd,
+  4th, …), never the first (the `Transaction.Begin` sample) nor the newest:
+  the history keeps its whole span at half the density (E06.FR.13,
+  J02.FR.20; #846).
 - Not covered: SOAP (1.2 / 1.5 / 1.6S) keeps its `StopTransaction` without
-  `transactionData` samples.
+  `transactionData` samples, and records no history (#846).
 
 ## Signed meter values (OCMF, #315)
 

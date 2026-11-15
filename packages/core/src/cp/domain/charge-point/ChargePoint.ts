@@ -80,6 +80,7 @@ import type {
   ChargePointTransport,
 } from "./ChargePointDeps";
 import type { FileUploader } from "./FileUploader";
+import type { DiagnosticsSources } from "./DiagnosticsSources";
 import type {
   CloseCause,
   GenerationToken,
@@ -1992,6 +1993,18 @@ export class ChargePoint {
   /** Uploads the GetDiagnostics file (#575: injected through deps). */
   get fileUploader(): FileUploader {
     return this._fileUploader;
+  }
+
+  private _diagnosticsSources: DiagnosticsSources = {};
+
+  /** What the host attached for the diagnostic snapshot and the scenario
+   *  introspection (#925, #927); `{}` until it does. */
+  get diagnosticsSources(): DiagnosticsSources {
+    return this._diagnosticsSources;
+  }
+
+  setDiagnosticsSources(sources: DiagnosticsSources): void {
+    this._diagnosticsSources = sources;
   }
 
   /** Uploads the GetLog file when `RealLogUpload` is on (#926). */

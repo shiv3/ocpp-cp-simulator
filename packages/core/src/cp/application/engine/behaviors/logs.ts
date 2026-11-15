@@ -8,6 +8,7 @@ import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { isOcpp2Version } from "../../../domain/types/OcppVersion";
 import { LogType } from "../../../shared/Logger";
 import { checkUploadUrl } from "../../../domain/charge-point/uploadUrl";
+import { buildDiagnosticBundle } from "../../diagnostics/DiagnosticBundle";
 import { buildLogArtifact } from "./logArtifact";
 import { MAX_LOG_UPLOAD_RETRIES, uploadWithRetries } from "./uploadRetry";
 
@@ -121,13 +122,39 @@ export function logsBehavior(cp: ChargePoint): Behavior {
         ? ctx.state.uploadGeneration
         : 0) + 1;
     ctx.state.uploadGeneration = generation;
-    const fileName = `${cp.id}-${logType}-${requestId}.jsonl`.slice(-255);
-    // The snapshot is taken now, before the asynchronous upload and its retries.
-    const artifact = buildLogArtifact(cp, fileName, req.log ?? {});
-    cp.logger.info(
-      `GetLog ${requestId}: uploading ${artifact.entries} log entries (${artifact.truncated} truncated)`,
-      LogType.DIAGNOSTICS,
-    );
+    // The snapshot is taken now, before the asynchronous upload and its
+    // retries. With the opt-in `DiagnosticBundle` (#925) the file is the
+    // support bundle, else the bounded log file (#926).
+    const bundleMode = cp.configuration.getBoolean("DiagnosticBundle") === true;
+    let fileName: string;
+    let file: File;
+    if (bundleMode) {
+      fileName = `${cp.id}-${logType}-${requestId}.zip`.slice(-255);
+      const bundle = buildDiagnosticBundle(cp, {
+        action: "GetLog",
+        requestId,
+        logType,
+        ...(req.log?.oldestTimestamp
+          ? { oldestTimestamp: req.log.oldestTimestamp }
+          : {}),
+        ...(req.log?.latestTimestamp
+          ? { latestTimestamp: req.log.latestTimestamp }
+          : {}),
+      });
+      file = new File([bundle.file], fileName, { type: "application/zip" });
+      cp.logger.info(
+        `GetLog ${requestId}: uploading the diagnostic bundle (${file.size} bytes)`,
+        LogType.DIAGNOSTICS,
+      );
+    } else {
+      fileName = `${cp.id}-${logType}-${requestId}.jsonl`.slice(-255);
+      const artifact = buildLogArtifact(cp, fileName, req.log ?? {});
+      file = artifact.file;
+      cp.logger.info(
+        `GetLog ${requestId}: uploading ${artifact.entries} log entries (${artifact.truncated} truncated)`,
+        LogType.DIAGNOSTICS,
+      );
+    }
     return {
       response: {
         status: replaces ? "AcceptedCanceled" : "Accepted",
@@ -156,7 +183,7 @@ export function logsBehavior(cp: ChargePoint): Behavior {
             ctx,
             upload: cp.logUploader,
             location,
-            file: artifact.file,
+            file,
             retries: req.retries,
             retryInterval: req.retryInterval,
             maxRetries: MAX_LOG_UPLOAD_RETRIES,

@@ -50,6 +50,12 @@ interface ConnectorSlot {
 const NO_SPEC: ConnectorSpec = Object.freeze({});
 const NONE: readonly number[] = Object.freeze([]);
 
+/**
+ * How the domain connectors group into EVSEs (#628). The 1:1 station
+ * (`StationTopology.identity`) today. A connector removed at run time stays
+ * in the topology; whether it exists is still `ChargePoint.getConnector`'s
+ * answer.
+ */
 export class StationTopology {
   /** Domain connector k -> its slot; index k - 1. */
   private readonly slots: readonly ConnectorSlot[];

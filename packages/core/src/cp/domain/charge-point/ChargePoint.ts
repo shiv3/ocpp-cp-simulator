@@ -279,6 +279,13 @@ export class ChargePoint {
     this,
     this._ctx,
   );
+  // @ts-expect-error TS6133: tests read and replace the boot data by cast
+  private get _bootNotification(): BootNotification {
+    return this._parts.boot.bootNotification;
+  }
+  private set _bootNotification(value: BootNotification) {
+    this._parts.boot.bootNotification = value;
+  }
   /** Tests read the pending wait's canceller through this name. */
   // @ts-expect-error TS6133: read by tests through a cast, not by this class
   private get _cancelClientCertificateSwitchTimer(): (() => void) | null {
@@ -738,11 +745,8 @@ export class ChargePoint {
     return this._parts.bootState.bootAccepted;
   }
 
-  /** Whether the OCPP WebSocket is currently open OR mid-handshake. Used
-   *  by LocalChargePointService.restoreConnections to avoid issuing a
-   *  second connect() against a CP whose first socket is still in its
-   *  async handshake — without the CONNECTING check we'd race and end up
-   *  with two sockets fighting for the same cpId. */
+  /** Whether the OCPP WebSocket is open OR mid-handshake.
+   *  @see ChargePointSocket.isOpenOrConnecting */
   get isWebSocketConnected(): boolean {
     return this._webSocket?.isOpenOrConnecting() ?? false;
   }
@@ -779,11 +783,7 @@ export class ChargePoint {
     return new Map(this._connectors);
   }
 
-  /**
-   * How the domain connectors group into EVSEs (#628). The 1:1 station
-   * (`StationTopology.identity`) today. A connector removed at run time stays
-   * in the topology; whether it exists is still `getConnector`'s answer.
-   */
+  /** How the domain connectors group into EVSEs (#628). @see StationTopology */
   get topology(): StationTopology {
     return this._topology;
   }

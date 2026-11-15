@@ -71,6 +71,11 @@ export interface ChargePointSocket {
   disconnectInternal(): void;
   dispose(): void;
   isConnected(): boolean;
+  /** Whether the socket is open OR mid-handshake. Used by
+   *  LocalChargePointService.restoreConnections to avoid issuing a second
+   *  connect() against a CP whose first socket is still in its async
+   *  handshake — without the CONNECTING check we'd race and end up with two
+   *  sockets fighting for the same cpId. */
   isOpenOrConnecting(): boolean;
   currentGeneration(): GenerationToken;
   setNetworkSimConfig(resolved: ResolvedNetworkSimConfig): void;

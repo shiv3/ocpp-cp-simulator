@@ -36,7 +36,9 @@ export const SCANNED_DIRS = [
 
 /**
  * Single files scanned as well: the two JSON message handlers and the helpers
- * that arm their timers. The rest of `infrastructure/transport` (the
+ * that arm their timers, including the `ocpp-rpc` code core's `CallWaiters`
+ * delegates to (#978; its `platformClock` default is the one place it may
+ * touch platform timers, so it lives in a file of its own). The rest of `infrastructure/transport` (the
  * WebSocket with its reconnect and ping timers, the SOAP handler) still runs
  * on the platform clock; see "What virtual time covers" in the design.
  */
@@ -56,6 +58,8 @@ export const SCANNED_FILES = [
   "packages/core/src/cp/infrastructure/transport/CallWaiters.ts",
   "packages/core/src/cp/infrastructure/transport/ExpertCalls.ts",
   "packages/core/src/cp/infrastructure/transport/RawFrameSender.ts",
+  "packages/ocpp-rpc/src/CallWaiters.ts",
+  "packages/ocpp-rpc/src/RpcEndpoint.ts",
 ] as const;
 
 export type UseKind =

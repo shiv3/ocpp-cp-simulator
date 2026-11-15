@@ -349,6 +349,9 @@ describe("the resolution is protocol-agnostic (#327)", () => {
       "ConnectorChargingProfiles.ts",
       "ConnectorEnergy.ts",
       "connectorRuntimeSnapshot.ts",
+      "ConnectorVehicle.ts",
+      "ConnectorEvSettings.ts",
+      "ConnectorEvents.ts",
     ]) {
       const source = readFileSync(join(dir, "..", file), "utf8");
       expect(source).not.toMatch(/_evSettings\.(initialSoc|targetSoc)/);

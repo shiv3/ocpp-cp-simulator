@@ -1,0 +1,205 @@
+{
+  "schemaVersion": 1,
+  "id": "abb-terra-ac-22kw-socket-fw1.6.6",
+  "name": "ABB Terra AC 22 kW socket (modelled on public OCPP 1.6 docs, FW 1.6.6)",
+  "description": "Modelled on public documentation of ABB. Not affiliated with or endorsed by ABB. Built only from ABB's public documentation listed in source; not a certified or complete model of the product. Product names are trademarks of their owners.",
+  "params": {
+    "ocppVersion": "OCPP-1.6J",
+    "connectors": 1,
+    "chargerCapabilities": {
+      "connectors": [
+        {
+          "connectorId": 1,
+          "maxDeliveryPowerW": 22000
+        }
+      ]
+    },
+    "capabilityProfile": {
+      "disabledActions": ["ReserveNow", "CancelReservation"],
+      "triggerMessageTargets": [
+        "BootNotification",
+        "DiagnosticsStatusNotification",
+        "FirmwareStatusNotification",
+        "Heartbeat",
+        "MeterValues",
+        "StatusNotification"
+      ]
+    }
+  },
+  "source": {
+    "format": "manual",
+    "citations": "docs/examples/blueprints/abb-terra-ac-22kw-socket-fw1.6.6.sources.json",
+    "documents": [
+      {
+        "id": "abb-terra-ac-ocpp16-implementation-overview-v1.8",
+        "title": "Terra AC wallbox OCPP 1.6 Implementation Overview",
+        "publisher": "ABB E-mobility",
+        "uri": "https://library.e.abb.com/public/8f07987a3a284da6bf4e4f8f53cd6502/ABB_Terra_AC_Charger_OCPP1.6_ImplementationOverview%20_v1.8_FW1.6.6.pdf",
+        "revision": "v1.8, FW 1.6.6",
+        "sha256": "9813939b3c74499e50c60b9c107bfbd0e9b53310fc7a6eb57ea86a6ef48a2533",
+        "retrievedAt": "2026-11-15"
+      },
+      {
+        "id": "abb-terra-ac-wallbox-leaflet-rev-c",
+        "title": "Terra AC wallbox leaflet",
+        "publisher": "ABB E-mobility",
+        "uri": "https://library.e.abb.com/public/d31ba4eebb4541c79ac5c1ccde315d79/9AKK107680A2258%20Terra__AC_wallbox_A5_Leaflet%20rev%20C.pdf",
+        "revision": "9AKK107680A2258 rev C (03/2021)",
+        "sha256": "5f02ff47722964cad556bea73beea97c042c9a3b6d4bd85f96cc2cdb329e4f1c",
+        "retrievedAt": "2026-11-15"
+      }
+    ],
+    "unmapped": [
+      {
+        "what": "Configuration key HeartbeatInterval default 120 (RW); not applied: configuration-key seeding is not implemented yet",
+        "documentId": "abb-terra-ac-ocpp16-implementation-overview-v1.8",
+        "locator": "p.9 §3.2.1"
+      },
+      {
+        "what": "HeartbeatInterval below 10 is accepted but executed as 10",
+        "documentId": "abb-terra-ac-ocpp16-implementation-overview-v1.8",
+        "locator": "p.9 §3.2.1"
+      },
+      {
+        "what": "Configuration key ClockAlignedDataInterval default 0 (RW, range 0 or 30-86399); not applied: configuration-key seeding is not implemented yet",
+        "documentId": "abb-terra-ac-ocpp16-implementation-overview-v1.8",
+        "locator": "p.9 §3.2.1"
+      },
+      {
+        "what": "Configuration key ConnectionTimeOut default 120 (RW, range 10-240); not applied: configuration-key seeding is not implemented yet",
+        "documentId": "abb-terra-ac-ocpp16-implementation-overview-v1.8",
+        "locator": "p.9 §3.2.1"
+      },
+      {
+        "what": "Configuration key GetConfigurationMaxKeys default 20 (R); not applied: configuration-key seeding is not implemented yet",
+        "documentId": "abb-terra-ac-ocpp16-implementation-overview-v1.8",
+        "locator": "p.9 §3.2.1"
+      },
+      {
+        "what": "Configuration key MeterValuesAlignedData default Energy.Active.Import.Register (RW); not applied: configuration-key seeding is not implemented yet",
+        "documentId": "abb-terra-ac-ocpp16-implementation-overview-v1.8",
+        "locator": "p.9 §3.2.1"
+      },
+      {
+        "what": "Configuration key MeterValuesAlignedDataMaxLength default 4 (R); not applied: configuration-key seeding is not implemented yet",
+        "documentId": "abb-terra-ac-ocpp16-implementation-overview-v1.8",
+        "locator": "p.10 §3.2.1"
+      },
+      {
+        "what": "Configuration key MeterValueSampleInterval default 30 (RW, range 0 or 4-65534); not applied: configuration-key seeding is not implemented yet",
+        "documentId": "abb-terra-ac-ocpp16-implementation-overview-v1.8",
+        "locator": "p.10, p.12 §3.2.1"
+      },
+      {
+        "what": "MeterValueSampleInterval below 4 is rejected",
+        "documentId": "abb-terra-ac-ocpp16-implementation-overview-v1.8",
+        "locator": "p.10 §3.2.1"
+      },
+      {
+        "what": "Configuration keys LocalAuthorizeOffline true, LocalPreAuthorize false (RW); not applied: configuration-key seeding is not implemented yet",
+        "documentId": "abb-terra-ac-ocpp16-implementation-overview-v1.8",
+        "locator": "p.10 §3.2.1"
+      },
+      {
+        "what": "Configuration key SupportedFeatureProfiles Core,FirmwareManagement,LocalAuthListManagement,SmartCharging,RemoteTrigger (R; the document spells LocalAuthicationListManagement); not applied: configuration-key seeding is not implemented yet",
+        "documentId": "abb-terra-ac-ocpp16-implementation-overview-v1.8",
+        "locator": "p.10 §3.2.1"
+      },
+      {
+        "what": "Configuration key WebSocketPingInterval default 60 (RW, range 0 or 10-65535); not applied: configuration-key seeding is not implemented yet",
+        "documentId": "abb-terra-ac-ocpp16-implementation-overview-v1.8",
+        "locator": "p.10 §3.2.1"
+      },
+      {
+        "what": "Configuration keys AllowOfflineTxForUnknownId false, AuthorizeRemoteTxRequests false (RW); not applied: configuration-key seeding is not implemented yet",
+        "documentId": "abb-terra-ac-ocpp16-implementation-overview-v1.8",
+        "locator": "p.11 §3.2.1"
+      },
+      {
+        "what": "Configuration keys LocalAuthListEnabled true (RW), LocalAuthListMaxLength 16 (R), SendLocalListMaxLength 8 (R); not applied: configuration-key seeding is not implemented yet",
+        "documentId": "abb-terra-ac-ocpp16-implementation-overview-v1.8",
+        "locator": "p.11 §3.2.1"
+      },
+      {
+        "what": "Configuration keys ChargingScheduleAllowedChargingRateUnit Current,Power (R), ChargingScheduleMaxPeriods 25 (R); not applied: configuration-key seeding is not implemented yet",
+        "documentId": "abb-terra-ac-ocpp16-implementation-overview-v1.8",
+        "locator": "p.11 §3.2.1"
+      },
+      {
+        "what": "ChargeProfileMaxStackLevel and MaxChargingProfilesInstalled are 3 on non-display models and 16 on display models (variant-dependent)",
+        "documentId": "abb-terra-ac-ocpp16-implementation-overview-v1.8",
+        "locator": "p.7 §3.1, p.11 §3.2.1"
+      },
+      {
+        "what": "Configuration key ResetRetries default 0 (RW; only 0 is supported); not applied: configuration-key seeding is not implemented yet",
+        "documentId": "abb-terra-ac-ocpp16-implementation-overview-v1.8",
+        "locator": "p.11 §3.2.1"
+      },
+      {
+        "what": "Configuration keys TransactionMessageAttempts 10, TransactionMessageRetryInterval 10 (RW); not applied: configuration-key seeding is not implemented yet",
+        "documentId": "abb-terra-ac-ocpp16-implementation-overview-v1.8",
+        "locator": "p.11-12 §3.2.1"
+      },
+      {
+        "what": "Configuration key StopTransactionOnInvalidId default true (RW); not applied: configuration-key seeding is not implemented yet",
+        "documentId": "abb-terra-ac-ocpp16-implementation-overview-v1.8",
+        "locator": "p.12 §3.2.1"
+      },
+      {
+        "what": "Configuration key MeterValuesSampledData default Energy.Active.Import.Register,Current.Import,Power.Active.Import,Current.Offered,Voltage (RW; the document writes 'current import', 'power active import'); not applied: configuration-key seeding is not implemented yet",
+        "documentId": "abb-terra-ac-ocpp16-implementation-overview-v1.8",
+        "locator": "p.12 §3.2.1"
+      },
+      {
+        "what": "Configuration key MeterValuesSampledDataMaxLength default 5 (R; the document spells MeterVauesSampledDataMaxLength); not applied: configuration-key seeding is not implemented yet",
+        "documentId": "abb-terra-ac-ocpp16-implementation-overview-v1.8",
+        "locator": "p.12 §3.2.1"
+      },
+      {
+        "what": "Required keys listed as 'to be supported' with value Unknown: ConnectorPhaseRotation, StopTxnAlignedData, StopTxnSampledData, StopTransactionOnEVSideDisconnect, UnlockConnectorOnEVSideDisconnect; optional StopTxnSampledDataMaxLength",
+        "documentId": "abb-terra-ac-ocpp16-implementation-overview-v1.8",
+        "locator": "p.13 §3.2.2"
+      },
+      {
+        "what": "Optional keys not supported: AuthorizationCacheEnabled, MinimumStatusDuration, BlinkRepeat, ConnectorPhaseRotationMaxLength, LightIntensity, StopTxnAlignedDataMaxLength, SupportedFeatureProfilesMaxLength, ConnectorSwitch3to1PhaseSupported, ReserveConnectorZeroSupported",
+        "documentId": "abb-terra-ac-ocpp16-implementation-overview-v1.8",
+        "locator": "p.14 §3.2.3"
+      },
+      {
+        "what": "Custom keys: FreevendEnabled boolean RW true; FreevendIdTag string RW (default: serial number); TimeOffset string RW \"-05:00\"; NextTimeOffsetTransitionDateTime and TimeOffsetNextTransition string RW \"\"",
+        "documentId": "abb-terra-ac-ocpp16-implementation-overview-v1.8",
+        "locator": "p.15 §3.3"
+      },
+      {
+        "what": "ClearCache is answered Accepted but does nothing",
+        "documentId": "abb-terra-ac-ocpp16-implementation-overview-v1.8",
+        "locator": "p.6 §3.1"
+      },
+      {
+        "what": "FirmwareStatusNotification reports only Downloading, Installed, DownloadFailed, InstallationFailed",
+        "documentId": "abb-terra-ac-ocpp16-implementation-overview-v1.8",
+        "locator": "p.7 §3.1"
+      },
+      {
+        "what": "GetDiagnostics returns 7 days of logs, 300 lines / under 25 kB per day",
+        "documentId": "abb-terra-ac-ocpp16-implementation-overview-v1.8",
+        "locator": "p.7 §3.1"
+      },
+      {
+        "what": "SendLocalList: at most 8 idTags per list (20 characters each), 16 idTags in total",
+        "documentId": "abb-terra-ac-ocpp16-implementation-overview-v1.8",
+        "locator": "p.7 §3.1"
+      },
+      {
+        "what": "UnlockConnector is answered NotSupported on cable variants; this blueprint is the socket variant, which keeps the simulator's unlock behaviour",
+        "documentId": "abb-terra-ac-ocpp16-implementation-overview-v1.8",
+        "locator": "p.6-7 §3.1"
+      },
+      {
+        "what": "Connector type: Type 2 socket (with or without shutter); connector types are not modelled",
+        "documentId": "abb-terra-ac-wallbox-leaflet-rev-c",
+        "locator": "p.2 Connectors"
+      }
+    ]
+  }
+}

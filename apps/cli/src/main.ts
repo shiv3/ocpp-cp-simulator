@@ -72,8 +72,12 @@ import {
   isOcppVersion,
   SUPPORTED_OCPP_VERSIONS,
 } from "@ocpp-cp-simulator/core/cp/domain/types/OcppVersion";
+import { loadBlueprintFiles } from "./server/blueprintFiles";
 import { loadFleetTemplateFiles } from "./server/fleetTemplateFiles";
-import type { FleetTemplate } from "@ocpp-cp-simulator/contracts/index";
+import type {
+  Blueprint,
+  FleetTemplate,
+} from "@ocpp-cp-simulator/contracts/index";
 import { DEFAULT_BOOTSTRAP_PACING } from "./server/bootstrapPacing";
 import { tlsKeyPermissionWarning } from "./tlsKeyPermissions";
 
@@ -266,6 +270,7 @@ export function parseArgs(argv: string[]): CLIOptions {
   let cpCount = 1;
   let cpIdPattern: string | null = null;
   const fleetTemplateFiles: string[] = [];
+  const blueprintFiles: string[] = [];
   // Fleet startup pacing (#610); `undefined` keeps the built-in default.
   let bootstrapConcurrency: string | undefined;
   let startDelay: string | undefined;
@@ -393,6 +398,14 @@ export function parseArgs(argv: string[]): CLIOptions {
         break;
       case "--cp-count":
         cpCount = parseInt(next ?? "1", 10);
+        i++;
+        break;
+      case "--blueprint":
+        if (!next || next.startsWith("--")) {
+          process.stderr.write("Error: --blueprint needs a file path\n");
+          process.exit(1);
+        }
+        blueprintFiles.push(next);
         i++;
         break;
       case "--fleet-template":
@@ -1246,6 +1259,15 @@ export function parseArgs(argv: string[]): CLIOptions {
     );
     process.exit(1);
   }
+  if (blueprintFiles.length > 0 && !isServerMode) {
+    // Blueprints are served and instantiated by the daemon (cp.create_many,
+    // fleet.create); outside a server mode the flag would be accepted and
+    // ignored.
+    process.stderr.write(
+      "Error: --blueprint needs a server mode (--daemon, --http-port or --web-console)\n",
+    );
+    process.exit(1);
+  }
   if (fleetTemplateFiles.length > 0 && !isServerMode) {
     // Templates are served and instantiated by the daemon; outside a server
     // mode the flag would be accepted and ignored.
@@ -1603,6 +1625,7 @@ export function parseArgs(argv: string[]): CLIOptions {
     cpId,
     cpCount,
     cpIdPattern,
+    blueprintFiles,
     fleetTemplateFiles,
     bootstrapPacing,
     labels,
@@ -1745,6 +1768,10 @@ Options:
   --cp-id-pattern <tpl>    Id template used with --cp-count (default:
                            <cp-id>{n:03}). {n} is the index, {n:03} zero-pads
                            it.
+  --blueprint <file>       Server mode: load blueprint(s) from a JSON file (one
+                           blueprint or an array; repeatable), e.g. a sample
+                           from docs/examples/blueprints/. Read-only; list and
+                           instantiate with blueprint.list / cp.create_many.
   --fleet-template <file>  Server mode: load fleet template(s) from a JSON file
                            (one template or an array; repeatable). Read-only;
                            list and instantiate with fleet.template.* /
@@ -2413,7 +2440,9 @@ async function main(): Promise<void> {
       options.useBehaviors,
     );
     let fleetTemplates: FleetTemplate[] = [];
+    let blueprints: Blueprint[] = [];
     try {
+      blueprints = loadBlueprintFiles(options.blueprintFiles);
       fleetTemplates = loadFleetTemplateFiles(options.fleetTemplateFiles);
     } catch (err) {
       process.stderr.write(
@@ -2422,6 +2451,7 @@ async function main(): Promise<void> {
       process.exit(1);
     }
     await startServer({
+      blueprints,
       fleetTemplates,
       behaviors,
       watchBehaviors: options.watchBehaviors,

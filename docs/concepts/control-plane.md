@@ -11,6 +11,7 @@ sources:
   - scripts/poc/README.md
 related:
   - ../entities/daemon.md
+  - charger-presets.md
   - ../entities/cli.md
   - ../entities/mcp-endpoint.md
   - network-simulation.md
@@ -27,7 +28,7 @@ related:
   - charging-sessions.md
   - local-authorization.md
   - fleet-templates.md
-updated: 2026-11-14
+updated: 2026-11-15
 ---
 
 # Socket.IO control plane
@@ -664,15 +665,41 @@ A **blueprint** is a named, reusable _hardware_ description — what a charge
 point is — where a [scenario](scenario-format.md) is the _behaviour_ half: what
 it does. They compose, and neither knows about the other.
 
-| Method             | Params          | Returns                     |
-| ------------------ | --------------- | --------------------------- |
-| `blueprint.list`   | `{}`            | Built-ins, then stored ones |
-| `blueprint.save`   | `{ blueprint }` | `{ id }`                    |
-| `blueprint.delete` | `{ id }`        | `{ ok: true }`              |
+| Method             | Params          | Returns                                            |
+| ------------------ | --------------- | -------------------------------------------------- |
+| `blueprint.list`   | `{}`            | Built-ins, then stored and `--blueprint` file ones |
+| `blueprint.save`   | `{ blueprint }` | `{ id }`                                           |
+| `blueprint.delete` | `{ id }`        | `{ ok: true }`                                     |
 
 A blueprint carries an `id`, a `name`, an optional `description`, the
 `cp.create` parameter block (minus `cpId`, which is generated), optional
-default `evSettings`, and an optional `scenarioTemplateId`.
+default `evSettings`, an optional `scenarioTemplateId`, an optional
+`schemaVersion` and an optional `source` (#331).
+
+**`schemaVersion` is optional and absent means 1.** Every blueprint stored
+before the field existed is version 1 and keeps being listed exactly as it was
+saved; the field is not added on read. A version this build does not know is
+refused by `blueprint.save` (`invalid_params`) and by `--blueprint` (exit 1,
+`schemaVersion 2 is not supported by this build (supports 1)`), and a stored
+row written by a newer build is left out of `blueprint.list` but **kept** in
+the database, with one startup log line per row:
+`blueprint <id>: schemaVersion <n> is newer than this daemon (1); not loaded`.
+
+**`source` is provenance**: the public documents a blueprint's values come
+from (each identified by the SHA-256 of its bytes), the path of a per-value
+sources file, and the documented facts the blueprint cannot express
+(`unmapped`). It changes no behaviour; the format and the sourcing rules are
+on [Documented charger presets](charger-presets.md#provenance-source-and-the-sources-file).
+
+**`--blueprint <file>`** loads blueprints from JSON files at startup (one
+blueprint or an array per file, the same schema as `blueprint.save`). They are
+listed and instantiated like stored ones and win over a stored blueprint of
+the same id; `blueprint.save` and `blueprint.delete` refuse their ids with
+`invalid_params`. A file that cannot be read, is not JSON, fails the schema,
+reuses a built-in id or an id another file defines exits the daemon with code
+1 and a message naming the file and the JSON path. The vendor-modelled samples
+in [`docs/examples/blueprints/`](../examples/blueprints/) are loaded this way
+([Documented charger presets](charger-presets.md)).
 
 **`wsUrl` is optional on a blueprint and required at instantiation.** A
 blueprint describes hardware; the CSMS a fleet points at is a property of the
@@ -700,8 +727,8 @@ Saving or deleting a built-in id is refused:
 `blueprint.delete` cannot restore one, so an accidental overwrite would be
 permanent for that daemon.
 
-At most 995 blueprints can be stored. `blueprint.list` returns the built-ins
-and the stored ones under one result cap, so an unbounded store would make the
+At most 995 blueprints can be stored, `--blueprint` file ones included.
+`blueprint.list` returns the built-ins, the file ones and the stored ones under one result cap, so an unbounded store would make the
 call fail validation for everyone rather than refuse the one save that crossed
 the line. A stored row that no longer matches the schema is skipped rather than
 returned, for the same reason.

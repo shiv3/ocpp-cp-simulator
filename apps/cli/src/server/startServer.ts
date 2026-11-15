@@ -39,7 +39,10 @@ import {
 } from "./accessGuard";
 import { stopTransactionsAndWait } from "./gracefulShutdown";
 import { getGlobalLogFormat } from "@ocpp-cp-simulator/core/cp/shared/Logger";
-import { expandIdPattern } from "@ocpp-cp-simulator/contracts/index";
+import {
+  BLUEPRINT_SCHEMA_VERSION,
+  expandIdPattern,
+} from "@ocpp-cp-simulator/contracts/index";
 import {
   localHostForTunnel,
   soapTunnelStartupLines,
@@ -57,7 +60,10 @@ import { OpenEvDirectoryClient } from "@ocpp-cp-simulator/core/cp/infrastructure
 import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
 import type { VehicleCatalogConfig } from "../vehicleCatalogConfig";
 import { FleetTemplateRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/FleetTemplateRepository";
-import type { FleetTemplate } from "@ocpp-cp-simulator/contracts/index";
+import type {
+  Blueprint,
+  FleetTemplate,
+} from "@ocpp-cp-simulator/contracts/index";
 import { BlueprintRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/BlueprintRepository";
 import { FileReloadManager } from "./FileReloadManager";
 import { forgetWatchedScenarioFile } from "./watchedScenarioFiles";
@@ -110,6 +116,8 @@ export interface ServerOptions {
    */
   readonly bootstrapCount?: number;
   readonly bootstrapIdPattern?: string;
+  /** Blueprints read from `--blueprint` files (#331); read-only. */
+  readonly blueprints?: readonly Blueprint[];
   /** Templates read from `--fleet-template` files (#445); read-only. */
   readonly fleetTemplates?: readonly FleetTemplate[];
   /**
@@ -334,7 +342,16 @@ export async function startServer(
   // One instance for both transports: without --state-db the repository holds
   // blueprints in memory, so a per-transport instance would make a blueprint
   // saved over socket.io `not_found` over MCP, and vice versa.
-  const blueprints = new BlueprintRepository(database);
+  // #331: `--blueprint` files are held by the repository, read-only.
+  const blueprints = new BlueprintRepository(database, opts.blueprints ?? []);
+  // A stored row from a newer build is left out of `blueprint.list` (this
+  // build cannot read it) but kept in the database; say so once rather than
+  // let it disappear without a trace.
+  for (const row of blueprints.newerVersionRows()) {
+    serverLog(
+      `blueprint ${row.id}: schemaVersion ${row.schemaVersion} is newer than this daemon (${BLUEPRINT_SCHEMA_VERSION}); not loaded`,
+    );
+  }
   // #445: the same for fleet templates; `--fleet-template` files are held by
   // the repository, read-only.
   const fleetTemplates = new FleetTemplateRepository(

@@ -1,3 +1,4 @@
+import type { BlueprintRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/BlueprintRepository";
 import type { FleetTemplateRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/FleetTemplateRepository";
 import type { Server as BunServer } from "bun";
 import { createServer as createNetServer } from "node:net";
@@ -41,6 +42,8 @@ export interface TestServerOptions {
   readonly insecureTlsKeyPerms?: boolean;
   /** Behaviors loaded as `--behavior` would (the library charge points select from). */
   readonly behaviors?: BehaviorLibrary;
+  /** Blueprints, e.g. a repository holding `--blueprint` file ones (#331). */
+  readonly blueprints?: BlueprintRepository;
   /** Fleet templates, e.g. file-provided ones that skip `fleet.template.save`'s checks (#445). */
   readonly fleetTemplates?: FleetTemplateRepository;
   /**
@@ -142,6 +145,7 @@ export async function startTestServer(
     connectorSettingsRepository,
     chargePointService,
     fileReload,
+    ...(options.blueprints ? { blueprints: options.blueprints } : {}),
     ...(options.fleetTemplates
       ? { fleetTemplates: options.fleetTemplates }
       : {}),

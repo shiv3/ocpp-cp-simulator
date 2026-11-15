@@ -12,9 +12,10 @@ sources:
   - packages/core/src/cp/domain/charge-point/ConfigurationStore.ts
 related:
   - ../concepts/control-plane.md
+  - ../concepts/charger-presets.md
   - fleet-load-and-observability-roadmap.md
   - ../sources/github-issues.md
-updated: 2026-11-08
+updated: 2026-11-15
 ---
 
 # OECS as a charger model source
@@ -292,6 +293,12 @@ maintainer's call.
 ### Two storage risks neither the issue nor the first draft named
 
 - **The blueprint has no `schemaVersion` and no extensibility contract.**
+  _Since #331's first step the blueprint has an optional `schemaVersion`
+  (absent = 1, so pre-versioned rows survive unchanged) and a `source` block
+  shaped after decision 5 and shared with hand-written
+  [documented charger presets](../concepts/charger-presets.md); a stored row
+  from a newer build is logged at startup instead of vanishing. The rest of
+  this item still applies to any future hardware extension._
   `blueprintSchema` is a plain `z.object` (unknown keys stripped),
   `BlueprintRepository` strips again on read, and `save` writes the stripped
   object. The moment a `hardware` block exists, a blueprint written by a newer

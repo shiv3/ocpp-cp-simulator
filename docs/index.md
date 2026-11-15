@@ -2,7 +2,7 @@
 title: Index
 type: index
 summary: Catalog of every page in the wiki with a one-line summary, by category. Read this first when answering a question.
-updated: 2026-11-14
+updated: 2026-11-15
 ---
 
 # Index
@@ -57,6 +57,7 @@ Start at [Overview](overview.md). Conventions for pages are in
 | [OCPP 2.x variable monitoring](concepts/variable-monitoring.md)          | Set/ClearVariableMonitoring, GetMonitoringReport, NotifyEvent, periodic, TargetDelta, runtime values, catalogs, SetMonitoringBase; N ids                                                                                                                                                                                          |
 | [Web console internationalization](concepts/web-console-i18n.md)         | English / Simplified Chinese / Japanese / French UI on react-i18next: JSON per namespace, lazy-loaded non-English locales, CLDR plural keys, typed keys, the language picker, adding strings or a language, the completeness test                                                                                                 |
 | [Fleet templates](concepts/fleet-templates.md)                           | One persisted definition of a heterogeneous fleet (blueprint, scenario, EV, network simulation, labels per charge point), `--fleet-template` files, `fleet.create`, the console's Fleet templates page (#445)                                                                                                                     |
+| [Documented charger presets](concepts/charger-presets.md)                | Sample blueprints modelled on a vendor's public OCPP documentation (ABB Terra AC first), loaded with `--blueprint`; per-value sources with document SHA-256, page and evidence type, enforced by a test (#331)                                                                                                                    |
 | [Local vs Remote mode](concepts/local-vs-remote-mode.md)                 | How the browser picks in-tab vs daemon operation via the health probe, and what differs                                                                                                                                                                                                                                           |
 | [File hot-reload (`--watch`)](concepts/file-hot-reload.md)               | Why each `--watch` reload rule is shaped as it is, and how a watched file's origin survives a restart — the contract itself is on the daemon page                                                                                                                                                                                 |
 | [Vehicle behavior](concepts/vehicle-behavior.md)                         | What a vehicle wants and when: the protocol-independent `packages/vehicle` domain, policies and presets, demand in the operating point, EV readiness, extraction path                                                                                                                                                             |

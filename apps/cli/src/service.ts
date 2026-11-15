@@ -1110,27 +1110,24 @@ export class CLIChargePointService {
 
   /**
    * A simulated firmware update with `bumpVersion` changed the station's
-   * firmwareVersion (`firmwareVersionChanged`). `getInit()` follows it, so a
-   * `cp.update` that omits the field keeps the installed version, and
-   * `listener` lets the registry write it to the row's boot data: a restart
-   * boots with the installed version, as a real station would.
+   * firmwareVersion (`firmwareVersionChanged`). `listener` lets the registry
+   * write it to the row's boot data: a restart boots with the installed
+   * version, as a real station would. `getInit()` follows the change on its
+   * own (see {@link attachEventForwarders}), with or without a listener, so
+   * a `cp.update` that omits the field keeps the installed version however
+   * the service was registered.
    */
   onFirmwareVersionChange(
     listener: (
       bootNotification: NonNullable<ChargePointInitOptions["bootNotification"]>,
     ) => void,
   ): () => void {
-    return this._chargePoint.events.on(
-      "firmwareVersionChanged",
-      ({ firmwareVersion }) => {
-        const bootNotification = {
-          ...(this._init.bootNotification ?? {}),
-          firmwareVersion,
-        };
-        this._init = { ...this._init, bootNotification };
-        listener(bootNotification);
-      },
-    );
+    // Registered after the service's own subscription, so `_init` already
+    // holds the new version when this runs.
+    return this._chargePoint.events.on("firmwareVersionChanged", () => {
+      const { bootNotification } = this._init;
+      if (bootNotification) listener(bootNotification);
+    });
   }
 
   /** A line in this charge point's log, as a transaction message: what an
@@ -3060,6 +3057,23 @@ export class CLIChargePointService {
   }
 
   private attachEventForwarders(): void {
+    // A firmware update with `bumpVersion` installed a new version: the
+    // init a `cp.update` falls back to follows it, whether or not anything
+    // persists it (`onFirmwareVersionChange`).
+    this._unsubscribes.push(
+      this._chargePoint.events.on(
+        "firmwareVersionChanged",
+        ({ firmwareVersion }) => {
+          this._init = {
+            ...this._init,
+            bootNotification: {
+              ...(this._init.bootNotification ?? {}),
+              firmwareVersion,
+            },
+          };
+        },
+      ),
+    );
     // #603: a StartTransaction.conf that is not Accepted turns a start the
     // runner counted as accepted (the request went out) into a refusal;
     // once per session, and only for the answer to the start.

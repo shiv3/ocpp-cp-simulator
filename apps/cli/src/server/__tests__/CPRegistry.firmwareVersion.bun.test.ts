@@ -6,6 +6,7 @@ import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/infrastructure/per
 import type { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
 
 import { CPRegistry } from "../CPRegistry";
+import { CLIChargePointService } from "../../service";
 import { EventBus } from "../eventBus";
 
 function chargePointOf(registry: CPRegistry, cpId: string): ChargePoint {
@@ -62,6 +63,39 @@ describe("CPRegistry keeps the firmwareVersion a firmware update installed", () 
       registry.shutdownAll();
       restored?.shutdownAll();
       db.close();
+    }
+  });
+});
+
+/** The standalone service a `cp.update` falls back to: `registerExisting`
+ *  wires no persistence listener, and the installed version must still
+ *  reach `getInit()`. */
+describe("CLIChargePointService keeps the installed firmwareVersion in its init", () => {
+  it("follows the change with no listener, registered through registerExisting", () => {
+    const registry = new CPRegistry(new EventBus());
+    const svc = new CLIChargePointService({
+      cpId: "cp-fw-standalone",
+      wsUrl: "ws://127.0.0.1:9/",
+      connectors: 1,
+      vendor: "V",
+      model: "M",
+      basicAuth: null,
+      bootNotification: {
+        firmwareVersion: "1.0",
+        chargePointSerialNumber: "SN-1",
+      },
+    });
+    try {
+      registry.registerExisting(svc);
+      (
+        svc as unknown as { _chargePoint: ChargePoint }
+      )._chargePoint.setFirmwareVersion("2.3.1");
+      expect(svc.getInit().bootNotification).toEqual({
+        firmwareVersion: "2.3.1",
+        chargePointSerialNumber: "SN-1",
+      });
+    } finally {
+      registry.shutdownAll();
     }
   });
 });

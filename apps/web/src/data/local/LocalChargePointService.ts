@@ -1,11 +1,7 @@
 import {
-  readConfigurationKeys,
-  writeConfigurationKey,
   type ConfigurationKeyList,
   type ConfigurationSetStatus,
 } from "@ocpp-cp-simulator/core/cp/domain/charge-point/configurationAccess";
-import { configurationWriteCheckV201 } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/v201/setVariablesV201";
-import { isOcpp2Version } from "@ocpp-cp-simulator/core/cp/domain/types/OcppVersion";
 import { VehicleProfileRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/VehicleProfileRepository";
 import type {
   AuthorizationCacheSeedEntry,
@@ -13,9 +9,6 @@ import type {
 } from "@ocpp-cp-simulator/core/cp/domain/auth/AuthorizationCacheSeed";
 import type { VehicleProfile } from "@ocpp-cp-simulator/core/cp/domain/vehicle/VehicleProfile";
 import {
-  DIAGNOSTICS_STATUSES,
-  FIRMWARE_STATUSES,
-  UPLOAD_LOG_STATUSES,
   type DiagnosticsStatus,
   type FirmwareStatus,
   type UploadLogStatus,
@@ -46,47 +39,31 @@ import {
 } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
 import { runModemCommand } from "@ocpp-cp-simulator/core/cp/domain/modem/index";
 import type { ModemCommand as ModemCommandInput } from "@ocpp-cp-simulator/contracts/modem";
-import { createChargePoint } from "@ocpp-cp-simulator/core/cp/infrastructure/charge-point/createChargePoint";
 import {
-  splitStopReason,
   type MeterReadingContext,
   type StartTransactionCommandOptions,
   type IdTokenTypeName,
   type StopTransactionCommandOptions,
   type TransactionUpdateOptions,
 } from "@ocpp-cp-simulator/core/cp/domain/connector/Transaction";
-import type {
-  AutoMeterValueSetting,
-  ChargePoint,
-} from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
+import type { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
 import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
 import { resetSimulatorState } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/resetState";
-import type { ScenarioManager } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioManager";
-import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
-import { behaviorsOfModule } from "@ocpp-cp-simulator/core/cp/application/engine/behaviorModule";
-import { LocalScenarioRuntime } from "./LocalScenarioRuntime";
+import type { LocalScenarioRuntime } from "./LocalScenarioRuntime";
 import {
   attachLocalEventForwarders,
   type LocalEventForwardersHost,
 } from "./localEventForwarders";
-import { requireStatus, toChargePointSnapshot } from "./snapshotMapping";
-import { ScenarioRunRecorder } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunRecorder";
+import { toChargePointSnapshot } from "./snapshotMapping";
 import type { ScenarioRunRepository } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunRepository";
 import { createScenarioRunRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/createScenarioRunRepository";
 import type {
   ScenarioRunPage,
   ScenarioRunQuery,
 } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunSummary";
-import { appVersionString } from "../../lib/appBuildLabel";
 import { SqliteScenarioRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/SqliteScenarioRepository";
-import type {
-  BootNotification,
-  OCPPStatus,
-} from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
-import {
-  hasStatusNotificationOptions,
-  type StatusNotificationOptions,
-} from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
+import type { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
+import { type StatusNotificationOptions } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import type {
   ChargePointEvent,
   ChargePointService,
@@ -102,25 +79,15 @@ import {
   BROWSER_AUTO_TRAFFIC_UNSUPPORTED_MESSAGE,
   BROWSER_FLEET_TEMPLATES_UNSUPPORTED_MESSAGE,
   BROWSER_LABELS_UNSUPPORTED_MESSAGE,
-  BROWSER_SCENARIO_FILE_UNSUPPORTED_MESSAGE,
-  BROWSER_TLS_UNSUPPORTED_MESSAGE,
   UnsupportedFeatureError,
 } from "@ocpp-cp-simulator/client/interfaces/UnsupportedFeatureError";
-import type {
-  OcppSecurityProfile,
-  OcppTlsOptions,
-} from "@ocpp-cp-simulator/core/cp/infrastructure/transport/wsUrlWithBasic";
 import {
-  getDefaultEVSettings,
   type EVSettings,
   type EVSettingsPatch,
 } from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
 import type { AutoMeterValueConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
 import type { AutoTrafficConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/AutoTraffic";
-import type {
-  ActiveChargingProfile,
-  Connector,
-} from "@ocpp-cp-simulator/core/cp/domain/connector/Connector";
+import type { ActiveChargingProfile } from "@ocpp-cp-simulator/core/cp/domain/connector/Connector";
 import type {
   ScenarioDefinition,
   ScenarioExecutionContext,
@@ -158,10 +125,6 @@ import {
   type LocalNetworkSimHost,
 } from "./localNetworkSim";
 import { powerLoss, powerRestore } from "./localPower";
-import {
-  scenarioTemplates,
-  getTemplateById,
-} from "@ocpp-cp-simulator/core/utils/scenarioTemplates";
 import { SqliteConfigRepository } from "../sqlite/SqliteConfigRepository";
 import { SqliteConnectorSettingsRepository } from "@ocpp-cp-simulator/client/sqlite/SqliteConnectorSettingsRepository";
 import type {
@@ -171,39 +134,95 @@ import type {
 } from "@ocpp-cp-simulator/contracts/index";
 import { mergeWriteOnlyConfigSecrets } from "@ocpp-cp-simulator/client/configPort";
 
-export interface LocalChargePointDefinition {
-  id: string;
-  connectorNumber: number;
-  bootNotification: BootNotification;
-  wsUrl: string;
-  centralSystemUrl?: string;
-  soapCallbackUrl?: string;
-  soapPath?: string;
-  basicAuth: { username: string; password: string } | null;
-  autoMeterValueSetting: AutoMeterValueSetting | null;
-  ocppVersion?: string;
-  securityProfile?: OcppSecurityProfile;
-  authorizationKey?: string;
-  cpoName?: string;
-  /** #347: see ChargePoint.txUpdatedMeterValues. Absent means on (#551). */
-  txUpdatedMeterValues?: boolean;
-  tls?: OcppTlsOptions;
-}
+import {
+  reset,
+  sendHeartbeat,
+  startHeartbeat,
+  stopHeartbeat,
+  authorize,
+  sendDataTransfer,
+  sendOcppCall,
+  sendRawFrame,
+  get15118EVCertificate,
+  getAuthorizationCache,
+  seedAuthorizationCache,
+  clearAuthorizationCache,
+  startTransaction,
+  stopTransaction,
+  sendTransactionUpdate,
+  evDisconnected,
+  evPlugIn,
+  evSetReady,
+  sendStatusNotification,
+  sendDiagnosticsStatusNotification,
+  sendFirmwareStatusNotification,
+  sendLogStatusNotification,
+  sendSecurityEventNotification,
+  sendSignCertificate,
+  setMeterValue,
+  sendMeterValue,
+  removeConnector,
+} from "./localCpCommands";
+import {
+  setEVSettings,
+  getEVSettings,
+  applyDefaultEVSettings,
+  setAutoMeterValueConfig,
+  getAutoMeterValueConfig,
+  getAutoMeterConfig,
+  saveAutoMeterConfig,
+  setAutoResetToAvailable,
+  setConnectorMode,
+  setConnectorSoc,
+  setConnectorSocMeterSync,
+  getSocMeterSync,
+  saveSocMeterSync,
+  getChargingProfiles,
+  getStateHistory,
+  getOperationalTimeline,
+  listChargingSessions,
+  getConfigurationKeys,
+  setConfigurationKey,
+} from "./localConnectorOps";
+import {
+  getScenarioTemplates,
+  listScenarioDefinitions,
+  saveScenarioDefinition,
+  replaceConnectorScenarioDefinitions,
+  deleteScenarioDefinition,
+  subscribeScenarioDefinitions,
+  loadScenarioTemplate,
+  loadScenario,
+  listScenarios,
+  runScenario,
+  runScenarioFile,
+  runScenarioTemplate,
+  stopScenario,
+  resetScenario,
+  stepScenario,
+  extendScenarioWait,
+  retryScenarioWait,
+  continueScenarioWait,
+  stopAllScenarios,
+  removeScenario,
+  getScenarioStatus,
+  getScenarioReport,
+  listScenarioRuns,
+  getScenario,
+  createScenarioRuntime,
+} from "./localScenarios";
+import {
+  getExistingChargePointOrThrow,
+  type LocalServiceHost,
+} from "./localHost";
+import {
+  assertBrowserLocalTlsSupported,
+  buildChargePoint,
+  type LocalChargePointDefinition,
+} from "./localBuildChargePoint";
+import { loadBehaviorBundleInto } from "./localBehaviorBundle";
 
-function assertBrowserLocalTlsSupported(
-  definition: LocalChargePointDefinition,
-): void {
-  const profile = definition.securityProfile ?? 0;
-  const hasTlsMaterial = Boolean(
-    definition.tls?.ca || definition.tls?.cert || definition.tls?.key,
-  );
-  if (profile === 2 || profile === 3 || hasTlsMaterial) {
-    throw new UnsupportedFeatureError(
-      "browser_tls_unsupported",
-      BROWSER_TLS_UNSUPPORTED_MESSAGE,
-    );
-  }
-}
+export type { LocalChargePointDefinition };
 
 export class LocalChargePointService implements ChargePointService {
   private readonly chargePoints = new Map<string, ChargePoint>();
@@ -227,6 +246,7 @@ export class LocalChargePointService implements ChargePointService {
   private readonly scenarioRuns: ScenarioRunRepository;
   private readonly forwardersHost: LocalEventForwardersHost;
   private readonly simHost: LocalNetworkSimHost;
+  private readonly localHost: LocalServiceHost;
 
   constructor(
     private readonly database: Database | null = null,
@@ -247,6 +267,15 @@ export class LocalChargePointService implements ChargePointService {
     };
 
     this.simHost = { store: this.store, chargePoints: this.chargePoints };
+    this.localHost = {
+      chargePoints: this.chargePoints,
+      scenarioRuntimes: this.scenarioRuntimes,
+      database,
+      scenarioRepository: this.scenarioRepository,
+      scenarioRuns: this.scenarioRuns,
+      chargingSessions: this.chargingSessions,
+      connectorSettingsRepository: this.connectorSettingsRepository,
+    };
 
     // Subscribe to networkSim atom changes for live re-apply
     this.store.sub(networkSimAtom, () => {
@@ -263,36 +292,8 @@ export class LocalChargePointService implements ChargePointService {
     this.attachEventForwarders(chargePoint);
     this.scenarioRuntimes.set(
       chargePoint.id,
-      new LocalScenarioRuntime(
-        chargePoint,
-        this.scenarioRepository,
-        (event) => this.emit(chargePoint.id, event),
-        new ScenarioRunRecorder({
-          chargePoint,
-          runs: this.scenarioRuns,
-          simulatorVersion: appVersionString,
-          ocppVersion: () => chargePoint.ocppVersion,
-          onRecorded: (result) => {
-            // Persist before announcing: a reload right after must find it.
-            const announce = () =>
-              this.emit(chargePoint.id, {
-                type: "scenario-run-recorded",
-                connectorId: result.connectorId,
-                scenarioId: result.scenarioId,
-                runId: result.runId,
-              });
-            const flushed = this.database?.flush?.();
-            if (!flushed) {
-              announce();
-              return;
-            }
-            void Promise.resolve(flushed)
-              .catch((error) =>
-                console.error("Failed to persist the scenario run", error),
-              )
-              .then(announce);
-          },
-        }),
+      createScenarioRuntime(this.localHost, chargePoint, (id, event) =>
+        this.emit(id, event),
       ),
     );
   }
@@ -316,56 +317,10 @@ export class LocalChargePointService implements ChargePointService {
     id: string,
     bundle: Blob | string,
   ): Promise<string[]> {
-    const cp = this.getExistingChargePointOrThrow(id);
-    const blob =
-      typeof bundle === "string"
-        ? new Blob([bundle], { type: "text/javascript" })
-        : bundle.type === "text/javascript"
-          ? bundle
-          : new Blob([bundle], { type: "text/javascript" });
-    const url = URL.createObjectURL(blob);
-    try {
-      const mod: unknown = await import(/* @vite-ignore */ url);
-      const behaviors = behaviorsOfModule("behavior bundle", mod);
-      const running = new Set(cp.engine.behaviorIds);
-      const seen = new Set<string>();
-      for (const behavior of behaviors) {
-        if (seen.has(behavior.id)) {
-          throw new Error(`behavior id "${behavior.id}" is given twice`);
-        }
-        seen.add(behavior.id);
-      }
-      // Check every behavior, replaced and new alike, before changing anything.
-      for (const behavior of behaviors) cp.engine.assertLoadable(behavior);
-      const added: string[] = [];
-      const replaced: Behavior[] = [];
-      try {
-        for (const behavior of behaviors) {
-          if (running.has(behavior.id)) {
-            const previous = cp.engine.behaviorOf(behavior.id);
-            cp.engine.replaceBehavior(behavior);
-            if (previous) replaced.push(previous);
-          } else {
-            cp.loadBehavior(behavior);
-            added.push(behavior.id);
-          }
-        }
-      } catch (error) {
-        // All or nothing: what was added goes, what was replaced comes back.
-        for (const behaviorId of added) cp.unloadBehavior(behaviorId);
-        for (const previous of replaced.reverse()) {
-          try {
-            cp.engine.replaceBehavior(previous);
-          } catch {
-            // The original error is the one to report.
-          }
-        }
-        throw error;
-      }
-      return behaviors.map((behavior) => behavior.id);
-    } finally {
-      URL.revokeObjectURL(url);
-    }
+    return loadBehaviorBundleInto(
+      this.getExistingChargePointOrThrow(id),
+      bundle,
+    );
   }
 
   /** Unload a behavior loaded with {@link loadBehaviorBundle}. */
@@ -556,19 +511,19 @@ export class LocalChargePointService implements ChargePointService {
   }
 
   async reset(id: string): Promise<void> {
-    this.getExistingChargePointOrThrow(id).reset();
+    return reset(this.localHost, id);
   }
 
   async sendHeartbeat(id: string): Promise<void> {
-    this.getExistingChargePointOrThrow(id).sendHeartbeat();
+    return sendHeartbeat(this.localHost, id);
   }
 
   async startHeartbeat(id: string, intervalSeconds: number): Promise<void> {
-    this.getExistingChargePointOrThrow(id).startHeartbeat(intervalSeconds);
+    return startHeartbeat(this.localHost, id, intervalSeconds);
   }
 
   async stopHeartbeat(id: string): Promise<void> {
-    this.getExistingChargePointOrThrow(id).stopHeartbeat();
+    return stopHeartbeat(this.localHost, id);
   }
 
   async authorize(
@@ -576,7 +531,7 @@ export class LocalChargePointService implements ChargePointService {
     tagId: string,
     idTokenType?: IdTokenTypeName,
   ): Promise<void> {
-    this.getExistingChargePointOrThrow(id).authorize(tagId, idTokenType);
+    return authorize(this.localHost, id, tagId, idTokenType);
   }
 
   async sendDataTransfer(
@@ -585,55 +540,43 @@ export class LocalChargePointService implements ChargePointService {
     messageId?: string,
     data?: DataTransferData,
   ): Promise<DataTransferResult> {
-    return this.getExistingChargePointOrThrow(id).sendDataTransfer(
-      vendorId,
-      messageId,
-      data,
-    );
+    return sendDataTransfer(this.localHost, id, vendorId, messageId, data);
   }
 
   async sendOcppCall(
     id: string,
     request: OcppCallRequest,
   ): Promise<OcppCallOutcome> {
-    return this.getExistingChargePointOrThrow(id).sendOcppCall(request);
+    return sendOcppCall(this.localHost, id, request);
   }
 
   async sendRawFrame(
     id: string,
     request: RawFrameRequest,
   ): Promise<RawFrameOutcome> {
-    return this.getExistingChargePointOrThrow(id).sendRawFrame(request);
+    return sendRawFrame(this.localHost, id, request);
   }
 
   async get15118EVCertificate(
     id: string,
     request: Get15118EVCertificateRequest,
   ): Promise<Get15118EVCertificateResult> {
-    return this.getExistingChargePointOrThrow(id).get15118EVCertificate(
-      request,
-    );
+    return get15118EVCertificate(this.localHost, id, request);
   }
 
   async getAuthorizationCache(id: string): Promise<AuthorizationCacheView> {
-    return this.getExistingChargePointOrThrow(id).authorization.cacheView();
+    return getAuthorizationCache(this.localHost, id);
   }
 
   async seedAuthorizationCache(
     id: string,
     entries: readonly AuthorizationCacheSeedEntry[],
   ): Promise<number> {
-    const seeded =
-      this.getExistingChargePointOrThrow(id).authorization.seedCache(entries);
-    await this.database?.flush?.();
-    return seeded;
+    return seedAuthorizationCache(this.localHost, id, entries);
   }
 
   async clearAuthorizationCache(id: string): Promise<boolean> {
-    const cleared =
-      this.getExistingChargePointOrThrow(id).clearAuthorizationCache();
-    await this.database?.flush?.();
-    return cleared;
+    return clearAuthorizationCache(this.localHost, id);
   }
 
   async startTransaction(
@@ -642,13 +585,7 @@ export class LocalChargePointService implements ChargePointService {
     tagId: string,
     options: StartTransactionCommandOptions = {},
   ): Promise<void> {
-    this.getExistingChargePointOrThrow(id).startTransaction(
-      tagId,
-      connectorId,
-      undefined,
-      undefined,
-      options,
-    );
+    return startTransaction(this.localHost, id, connectorId, tagId, options);
   }
 
   async stopTransaction(
@@ -656,12 +593,7 @@ export class LocalChargePointService implements ChargePointService {
     connectorId: number,
     options: StopTransactionCommandOptions = {},
   ): Promise<void> {
-    const { stopReason, stoppedReason } = splitStopReason(options.reason);
-    this.getExistingChargePointOrThrow(id).stopTransaction(
-      connectorId,
-      stopReason,
-      { triggerReason: options.triggerReason, stoppedReason },
-    );
+    return stopTransaction(this.localHost, id, connectorId, options);
   }
 
   async sendTransactionUpdate(
@@ -669,18 +601,15 @@ export class LocalChargePointService implements ChargePointService {
     connectorId: number,
     options: TransactionUpdateOptions,
   ): Promise<void> {
-    this.getExistingChargePointOrThrow(id).sendTransactionUpdate(
-      connectorId,
-      options,
-    );
+    return sendTransactionUpdate(this.localHost, id, connectorId, options);
   }
 
   async evDisconnected(id: string, connectorId: number): Promise<void> {
-    this.getExistingChargePointOrThrow(id).evDisconnected(connectorId);
+    return evDisconnected(this.localHost, id, connectorId);
   }
 
   async evPlugIn(id: string, connectorId: number): Promise<void> {
-    this.getExistingChargePointOrThrow(id).evPlugIn(connectorId);
+    return evPlugIn(this.localHost, id, connectorId);
   }
 
   async evSetReady(
@@ -688,7 +617,7 @@ export class LocalChargePointService implements ChargePointService {
     connectorId: number,
     ready: boolean,
   ): Promise<void> {
-    this.getExistingChargePointOrThrow(id).evSetReady(connectorId, ready);
+    return evSetReady(this.localHost, id, connectorId, ready);
   }
 
   async sendStatusNotification(
@@ -697,32 +626,20 @@ export class LocalChargePointService implements ChargePointService {
     status: OCPPStatus,
     opts?: StatusNotificationOptions,
   ): Promise<void> {
-    const cp = this.getExistingChargePointOrThrow(id);
-    const allowInvalidTransition = opts?.allowInvalidTransition === true;
-    if (hasStatusNotificationOptions(opts)) {
-      // Use the raw sender so errorCode/info ride along with the
-      // StatusNotification.req without mutating the connector's runtime
-      // status field.
-      cp.sendStatusNotificationRaw(connectorId, status, opts);
-      return;
-    }
-    if (allowInvalidTransition) {
-      cp.updateConnectorStatus(connectorId, status, {
-        allowInvalidTransition: true,
-      });
-      return;
-    }
-    cp.updateConnectorStatus(connectorId, status);
+    return sendStatusNotification(
+      this.localHost,
+      id,
+      connectorId,
+      status,
+      opts,
+    );
   }
 
   async sendDiagnosticsStatusNotification(
     id: string,
     status: DiagnosticsStatus,
   ): Promise<void> {
-    requireStatus(status, DIAGNOSTICS_STATUSES);
-    this.getExistingChargePointOrThrow(id).sendDiagnosticsStatusNotification(
-      status,
-    );
+    return sendDiagnosticsStatusNotification(this.localHost, id, status);
   }
 
   async sendFirmwareStatusNotification(
@@ -730,15 +647,12 @@ export class LocalChargePointService implements ChargePointService {
     status: FirmwareStatus,
     requestId?: number,
   ): Promise<void> {
-    requireStatus(status, FIRMWARE_STATUSES);
-    const chargePoint = this.getExistingChargePointOrThrow(id);
-    // Two-argument form only when a requestId was given (same as the
-    // registry service): the 1.6-era call shape is unchanged.
-    if (requestId === undefined) {
-      chargePoint.sendFirmwareStatusNotification(status);
-    } else {
-      chargePoint.sendFirmwareStatusNotification(status, requestId);
-    }
+    return sendFirmwareStatusNotification(
+      this.localHost,
+      id,
+      status,
+      requestId,
+    );
   }
 
   async sendLogStatusNotification(
@@ -746,11 +660,7 @@ export class LocalChargePointService implements ChargePointService {
     status: UploadLogStatus,
     requestId?: number,
   ): Promise<void> {
-    requireStatus(status, UPLOAD_LOG_STATUSES);
-    this.getExistingChargePointOrThrow(id).sendLogStatusNotification(
-      status,
-      requestId,
-    );
+    return sendLogStatusNotification(this.localHost, id, status, requestId);
   }
 
   async sendSecurityEventNotification(
@@ -758,14 +668,11 @@ export class LocalChargePointService implements ChargePointService {
     type: string,
     techInfo?: string,
   ): Promise<void> {
-    await this.getExistingChargePointOrThrow(id).sendSecurityEventNotification(
-      type,
-      techInfo,
-    );
+    return sendSecurityEventNotification(this.localHost, id, type, techInfo);
   }
 
   async sendSignCertificate(id: string, csr?: string): Promise<void> {
-    await this.getExistingChargePointOrThrow(id).sendSignCertificate(csr);
+    return sendSignCertificate(this.localHost, id, csr);
   }
 
   async setMeterValue(
@@ -773,7 +680,7 @@ export class LocalChargePointService implements ChargePointService {
     connectorId: number,
     value: number,
   ): Promise<void> {
-    this.getExistingChargePointOrThrow(id).setMeterValue(connectorId, value);
+    return setMeterValue(this.localHost, id, connectorId, value);
   }
 
   async sendMeterValue(
@@ -781,11 +688,11 @@ export class LocalChargePointService implements ChargePointService {
     connectorId: number,
     context?: MeterReadingContext,
   ): Promise<void> {
-    this.getExistingChargePointOrThrow(id).sendMeterValue(connectorId, context);
+    return sendMeterValue(this.localHost, id, connectorId, context);
   }
 
   async removeConnector(id: string, connectorId: number): Promise<void> {
-    this.getExistingChargePointOrThrow(id).removeConnector(connectorId);
+    return removeConnector(this.localHost, id, connectorId);
   }
 
   async setEVSettings(
@@ -793,35 +700,18 @@ export class LocalChargePointService implements ChargePointService {
     connectorId: number,
     settings: EVSettingsPatch,
   ): Promise<void> {
-    // Explicit set (#105): marks the connector overridden so a later
-    // Default EV Settings propagation doesn't clobber it.
-    const connector = this.requireConnector(id, connectorId);
-    connector.applyEvSettingsOverride(settings);
-    // The operator now owns the override, so no run does — a run in flight
-    // that claimed it earlier must not release this set when it ends (#333).
-    this.scenarioManagerOf(id, connector)?.disownEvSettingsOverride();
+    return setEVSettings(this.localHost, id, connectorId, settings);
   }
 
   async getEVSettings(
     id: string,
     connectorId: number,
   ): Promise<EVSettings | null> {
-    return this.requireConnector(id, connectorId).evSettings ?? null;
+    return getEVSettings(this.localHost, id, connectorId);
   }
 
   async applyDefaultEVSettings(settings: EVSettingsPatch): Promise<void> {
-    // Connectors freeze getDefaultEVSettings() at construction, so a mid-session
-    // change to the Default EV Settings wouldn't reach the ones already live.
-    // Push it onto every connector (per-connector EV settings aren't a
-    // user-editable, persisted concept — they only come from the default or a
-    // running scenario) so the editor reflects the new default immediately (#107).
-    // Connectors with an active explicit/scenario override skip this (#105) —
-    // see Connector.applyDefaultEvSettings.
-    this.chargePoints.forEach((chargePoint) => {
-      chargePoint.connectors.forEach((connector) => {
-        connector.applyDefaultEvSettings(settings);
-      });
-    });
+    return applyDefaultEVSettings(this.localHost, settings);
   }
 
   async setAutoMeterValueConfig(
@@ -829,25 +719,21 @@ export class LocalChargePointService implements ChargePointService {
     connectorId: number,
     config: AutoMeterValueConfig,
   ): Promise<void> {
-    const connector = this.requireConnector(id, connectorId);
-    connector.autoMeterValueConfig = config;
+    return setAutoMeterValueConfig(this.localHost, id, connectorId, config);
   }
 
   async getAutoMeterValueConfig(
     id: string,
     connectorId: number,
   ): Promise<AutoMeterValueConfig | null> {
-    return this.requireConnector(id, connectorId).autoMeterValueConfig ?? null;
+    return getAutoMeterValueConfig(this.localHost, id, connectorId);
   }
 
   async getAutoMeterConfig(
     id: string,
     connectorId: number,
   ): Promise<AutoMeterValueConfig | null> {
-    return this.connectorSettingsRepository.loadAutoMeterValueConfig(
-      id,
-      connectorId,
-    );
+    return getAutoMeterConfig(this.localHost, id, connectorId);
   }
 
   async saveAutoMeterConfig(
@@ -855,12 +741,7 @@ export class LocalChargePointService implements ChargePointService {
     connectorId: number,
     config: AutoMeterValueConfig,
   ): Promise<void> {
-    await this.connectorSettingsRepository.saveAutoMeterValueConfig(
-      id,
-      connectorId,
-      config,
-    );
-    await this.database?.flush?.();
+    return saveAutoMeterConfig(this.localHost, id, connectorId, config);
   }
 
   /** Only the daemon runs AutoTrafficRunner (#300): refuse rather than
@@ -937,8 +818,7 @@ export class LocalChargePointService implements ChargePointService {
     connectorId: number,
     enabled: boolean,
   ): Promise<void> {
-    const connector = this.requireConnector(id, connectorId);
-    connector.autoResetToAvailable = enabled;
+    return setAutoResetToAvailable(this.localHost, id, connectorId, enabled);
   }
 
   async setConnectorMode(
@@ -946,8 +826,7 @@ export class LocalChargePointService implements ChargePointService {
     connectorId: number,
     mode: ScenarioMode,
   ): Promise<void> {
-    const connector = this.requireConnector(id, connectorId);
-    connector.mode = mode;
+    return setConnectorMode(this.localHost, id, connectorId, mode);
   }
 
   async setConnectorSoc(
@@ -955,8 +834,7 @@ export class LocalChargePointService implements ChargePointService {
     connectorId: number,
     soc: number | null,
   ): Promise<void> {
-    const connector = this.requireConnector(id, connectorId);
-    connector.soc = soc;
+    return setConnectorSoc(this.localHost, id, connectorId, soc);
   }
 
   async setConnectorSocMeterSync(
@@ -964,12 +842,11 @@ export class LocalChargePointService implements ChargePointService {
     connectorId: number,
     enabled: boolean,
   ): Promise<void> {
-    const connector = this.requireConnector(id, connectorId);
-    connector.socMeterSyncEnabled = enabled;
+    return setConnectorSocMeterSync(this.localHost, id, connectorId, enabled);
   }
 
   async getSocMeterSync(_id: string, _connectorId: number): Promise<boolean> {
-    return this.connectorSettingsRepository.loadSocMeterSync();
+    return getSocMeterSync(this.localHost, _id, _connectorId);
   }
 
   async saveSocMeterSync(
@@ -977,53 +854,42 @@ export class LocalChargePointService implements ChargePointService {
     _connectorId: number,
     enabled: boolean,
   ): Promise<void> {
-    await this.connectorSettingsRepository.saveSocMeterSync(enabled);
-    await this.database?.flush?.();
+    return saveSocMeterSync(this.localHost, _id, _connectorId, enabled);
   }
 
   async getChargingProfiles(
     id: string,
     connectorId: number,
   ): Promise<ReadonlyArray<ActiveChargingProfile>> {
-    const connector = this.requireConnector(id, connectorId);
-    return [...connector.chargingProfiles];
+    return getChargingProfiles(this.localHost, id, connectorId);
   }
 
   async getStateHistory(
     id: string,
     options?: HistoryOptions,
   ): Promise<StateHistoryEntry[]> {
-    const cp = this.chargePoints.get(id);
-    if (!cp) return [];
-    return cp.stateManager.history.getHistory(options);
+    return getStateHistory(this.localHost, id, options);
   }
 
   async getOperationalTimeline(
     id: string,
     query?: TimelineQuery,
   ): Promise<TimelinePage> {
-    const cp = this.chargePoints.get(id);
-    if (!cp) return { entries: [], total: 0 };
-    return cp.timeline.query(query);
+    return getOperationalTimeline(this.localHost, id, query);
   }
 
   async listChargingSessions(
     id: string,
     query: Omit<ChargingSessionQuery, "cpId"> = {},
   ): Promise<ChargingSessionPage> {
-    return this.chargingSessions.list({ ...query, cpId: id });
+    return listChargingSessions(this.localHost, id, query);
   }
 
   async getConfigurationKeys(
     id: string,
     keys: readonly string[] = [],
   ): Promise<ConfigurationKeyList> {
-    const cp = this.getExistingChargePointOrThrow(id);
-    return readConfigurationKeys(
-      cp.configuration,
-      isOcpp2Version(cp.ocppVersion),
-      keys,
-    );
+    return getConfigurationKeys(this.localHost, id, keys);
   }
 
   async setConfigurationKey(
@@ -1031,32 +897,18 @@ export class LocalChargePointService implements ChargePointService {
     key: string,
     value: string,
   ): Promise<ConfigurationSetStatus> {
-    const cp = this.getExistingChargePointOrThrow(id);
-    return writeConfigurationKey(
-      cp.configuration,
-      isOcpp2Version(cp.ocppVersion),
-      key,
-      value,
-      cp.logger,
-      isOcpp2Version(cp.ocppVersion)
-        ? configurationWriteCheckV201(cp.ocppVersion)
-        : undefined,
-    );
+    return setConfigurationKey(this.localHost, id, key, value);
   }
 
   async getScenarioTemplates(): Promise<ScenarioTemplateInfo[]> {
-    return scenarioTemplates.map((t) => ({
-      id: t.id,
-      name: t.name,
-      description: t.description,
-    }));
+    return getScenarioTemplates(this.localHost);
   }
 
   async listScenarioDefinitions(
     id: string,
     connectorId: number | null,
   ): Promise<ScenarioDefinition[]> {
-    return this.scenarioRepository.listByConnector(id, connectorId);
+    return listScenarioDefinitions(this.localHost, id, connectorId);
   }
 
   async saveScenarioDefinition(
@@ -1064,9 +916,7 @@ export class LocalChargePointService implements ChargePointService {
     connectorId: number | null,
     definition: ScenarioDefinition,
   ): Promise<ScenarioDefinition> {
-    await this.scenarioRepository.save(id, connectorId, definition);
-    await this.database?.flush?.();
-    return definition;
+    return saveScenarioDefinition(this.localHost, id, connectorId, definition);
   }
 
   async replaceConnectorScenarioDefinitions(
@@ -1074,13 +924,12 @@ export class LocalChargePointService implements ChargePointService {
     connectorId: number | null,
     definitions: readonly ScenarioDefinition[],
   ): Promise<ScenarioDefinition[]> {
-    await this.scenarioRepository.replaceConnector(
+    return replaceConnectorScenarioDefinitions(
+      this.localHost,
       id,
       connectorId,
       definitions,
     );
-    await this.database?.flush?.();
-    return [...definitions];
   }
 
   async deleteScenarioDefinition(
@@ -1088,8 +937,12 @@ export class LocalChargePointService implements ChargePointService {
     connectorId: number | null,
     definitionId: string,
   ): Promise<void> {
-    this.scenarioRepository.deleteOne(id, connectorId, definitionId);
-    await this.database?.flush?.();
+    return deleteScenarioDefinition(
+      this.localHost,
+      id,
+      connectorId,
+      definitionId,
+    );
   }
 
   subscribeScenarioDefinitions(
@@ -1097,9 +950,12 @@ export class LocalChargePointService implements ChargePointService {
     connectorId: number | null,
     handler: (definitions: ScenarioDefinition[]) => void,
   ): () => void {
-    return this.scenarioRepository.subscribe(id, connectorId, () => {
-      handler(this.scenarioRepository.listByConnector(id, connectorId));
-    });
+    return subscribeScenarioDefinitions(
+      this.localHost,
+      id,
+      connectorId,
+      handler,
+    );
   }
 
   async loadScenarioTemplate(
@@ -1108,18 +964,13 @@ export class LocalChargePointService implements ChargePointService {
     connectorId: number,
     evSettings?: Partial<EVSettings>,
   ): Promise<{ scenarioId: string }> {
-    const manager = this.requireScenarioManager(id, connectorId);
-    const template = getTemplateById(templateId);
-    if (!template) throw new Error(`Unknown template: ${templateId}`);
-    const definition = template.createScenario(id, connectorId);
-    if (evSettings) {
-      definition.evSettings = {
-        ...(definition.evSettings ?? getDefaultEVSettings()),
-        ...evSettings,
-      };
-    }
-    manager.setScenario(definition);
-    return { scenarioId: definition.id };
+    return loadScenarioTemplate(
+      this.localHost,
+      id,
+      templateId,
+      connectorId,
+      evSettings,
+    );
   }
 
   async loadScenario(
@@ -1127,33 +978,14 @@ export class LocalChargePointService implements ChargePointService {
     connectorId: number,
     definition: ScenarioDefinition,
   ): Promise<{ scenarioId: string }> {
-    // Upsert, like the daemon: loading one definition must not unload the
-    // connector's other (e.g. status-triggered) scenarios.
-    this.requireScenarioManager(id, connectorId).setScenario(definition);
-    return { scenarioId: definition.id };
+    return loadScenario(this.localHost, id, connectorId, definition);
   }
 
   async listScenarios(
     id: string,
     connectorId: number,
   ): Promise<ScenarioListItem[]> {
-    const connector = this.requireConnector(id, connectorId);
-    const manager = this.scenarioManagerOf(id, connector);
-    if (!manager) return [];
-    const active = new Set(manager.getActiveScenarioIds());
-    return manager.getScenarios().map((s) => {
-      // Live executors only: unlike the daemon, the browser-side manager keeps
-      // no terminal context once a run ends, so `state`/`mode` go back to null
-      // rather than reporting how the last run finished.
-      const context = manager.getScenarioExecutionContext(s.id);
-      return {
-        scenarioId: s.id,
-        name: s.name,
-        active: active.has(s.id),
-        state: context?.state ?? null,
-        mode: context?.mode ?? null,
-      };
-    });
+    return listScenarios(this.localHost, id, connectorId);
   }
 
   async runScenario(
@@ -1161,8 +993,7 @@ export class LocalChargePointService implements ChargePointService {
     connectorId: number,
     scenarioId: string,
   ): Promise<void> {
-    const manager = this.requireScenarioManager(id, connectorId);
-    await manager.executeScenario(scenarioId);
+    return runScenario(this.localHost, id, connectorId, scenarioId);
   }
 
   async runScenarioFile(
@@ -1170,10 +1001,7 @@ export class LocalChargePointService implements ChargePointService {
     _path: string,
     _opts?: ScenarioRunOptions,
   ): Promise<{ scenarioId: string }> {
-    throw new UnsupportedFeatureError(
-      "browser_scenario_file_unsupported",
-      BROWSER_SCENARIO_FILE_UNSUPPORTED_MESSAGE,
-    );
+    return runScenarioFile(this.localHost, _id, _path, _opts);
   }
 
   async runScenarioTemplate(
@@ -1181,24 +1009,7 @@ export class LocalChargePointService implements ChargePointService {
     templateId: string,
     opts: ScenarioRunOptions = {},
   ): Promise<{ scenarioId: string }> {
-    const connectorId = opts.connectorId ?? 1;
-    const manager = this.requireScenarioManager(id, connectorId);
-    const template = getTemplateById(templateId);
-    if (!template) throw new Error(`Unknown template: ${templateId}`);
-    const definition = template.createScenario(id, connectorId);
-    if (opts.evSettings) {
-      definition.evSettings = {
-        ...(definition.evSettings ?? getDefaultEVSettings()),
-        ...opts.evSettings,
-      };
-    }
-    // #352: `once` loads the instance disabled so the connect-triggered
-    // auto-start never re-arms it (LocalScenarioRuntime walks every loaded
-    // definition, as the daemon does).
-    if (opts.once) definition.enabled = false;
-    manager.setScenario(definition);
-    await manager.executeScenario(definition.id);
-    return { scenarioId: definition.id };
+    return runScenarioTemplate(this.localHost, id, templateId, opts);
   }
 
   async stopScenario(
@@ -1206,9 +1017,7 @@ export class LocalChargePointService implements ChargePointService {
     connectorId: number,
     scenarioId: string,
   ): Promise<void> {
-    const connector = this.requireConnector(id, connectorId);
-    const manager = this.scenarioManagerOf(id, connector);
-    manager?.stopScenario(scenarioId);
+    return stopScenario(this.localHost, id, connectorId, scenarioId);
   }
 
   async resetScenario(
@@ -1216,9 +1025,7 @@ export class LocalChargePointService implements ChargePointService {
     connectorId: number,
     scenarioId: string,
   ): Promise<void> {
-    const connector = this.requireConnector(id, connectorId);
-    const manager = this.scenarioManagerOf(id, connector);
-    manager?.stopScenario(scenarioId);
+    return resetScenario(this.localHost, id, connectorId, scenarioId);
   }
 
   async stepScenario(
@@ -1227,19 +1034,7 @@ export class LocalChargePointService implements ChargePointService {
     scenarioId: string,
     force = false,
   ): Promise<void> {
-    const manager = this.requireScenarioManager(id, connectorId);
-    // ScenarioManager.stepScenario calls executor.step(); for forceStep we
-    // dip into the executor directly via the manager's context.
-    if (!force) {
-      manager.stepScenario(scenarioId);
-      return;
-    }
-    const ctx = manager.getScenarioExecutionContext(scenarioId);
-    if (!ctx) throw new Error(`Scenario ${scenarioId} is not running`);
-    const executor = (
-      manager as unknown as { executors: Map<string, { forceStep(): void }> }
-    ).executors.get(scenarioId);
-    executor?.forceStep();
+    return stepScenario(this.localHost, id, connectorId, scenarioId, force);
   }
 
   async extendScenarioWait(
@@ -1248,7 +1043,10 @@ export class LocalChargePointService implements ChargePointService {
     scenarioId: string,
     seconds: number,
   ): Promise<void> {
-    this.requireScenarioManager(id, connectorId).extendWait(
+    return extendScenarioWait(
+      this.localHost,
+      id,
+      connectorId,
       scenarioId,
       seconds,
     );
@@ -1259,7 +1057,7 @@ export class LocalChargePointService implements ChargePointService {
     connectorId: number,
     scenarioId: string,
   ): Promise<void> {
-    this.requireScenarioManager(id, connectorId).retryWait(scenarioId);
+    return retryScenarioWait(this.localHost, id, connectorId, scenarioId);
   }
 
   async continueScenarioWait(
@@ -1267,26 +1065,7 @@ export class LocalChargePointService implements ChargePointService {
     connectorId: number,
     scenarioId: string,
   ): Promise<void> {
-    this.requireScenarioManager(id, connectorId).continueWait(scenarioId);
-  }
-
-  private requireScenarioManager(
-    id: string,
-    connectorId: number,
-  ): ScenarioManager {
-    const manager = this.scenarioManagerOf(
-      id,
-      this.requireConnector(id, connectorId),
-    );
-    if (!manager) throw new Error("Scenario manager not available");
-    return manager;
-  }
-
-  private scenarioManagerOf(
-    id: string,
-    connector: Connector,
-  ): ScenarioManager | undefined {
-    return this.scenarioRuntimes.get(id)?.scenarioManager(connector.id);
+    return continueScenarioWait(this.localHost, id, connectorId, scenarioId);
   }
 
   /** The browser scenario runtime of charge point `id`, while registered. */
@@ -1295,9 +1074,7 @@ export class LocalChargePointService implements ChargePointService {
   }
 
   async stopAllScenarios(id: string, connectorId: number): Promise<void> {
-    const connector = this.requireConnector(id, connectorId);
-    const manager = this.scenarioManagerOf(id, connector);
-    manager?.stopAllScenarios();
+    return stopAllScenarios(this.localHost, id, connectorId);
   }
 
   async removeScenario(
@@ -1305,14 +1082,7 @@ export class LocalChargePointService implements ChargePointService {
     connectorId: number,
     scenarioId: string,
   ): Promise<void> {
-    const connector = this.requireConnector(id, connectorId);
-    const manager = this.scenarioManagerOf(id, connector);
-    manager?.removeScenario(scenarioId);
-    // Drop the persisted row too so reloads don't resurrect it.
-    if (this.database) {
-      this.scenarioRepository.deleteOne(id, connectorId, scenarioId);
-      await this.database.flush?.();
-    }
+    return removeScenario(this.localHost, id, connectorId, scenarioId);
   }
 
   async getScenarioStatus(
@@ -1320,10 +1090,7 @@ export class LocalChargePointService implements ChargePointService {
     connectorId: number,
     scenarioId: string,
   ): Promise<ScenarioExecutionContext | null> {
-    const connector = this.requireConnector(id, connectorId);
-    const manager = this.scenarioManagerOf(id, connector);
-    if (!manager) return null;
-    return manager.getScenarioExecutionContext(scenarioId) ?? null;
+    return getScenarioStatus(this.localHost, id, connectorId, scenarioId);
   }
 
   async getScenarioReport(
@@ -1332,19 +1099,18 @@ export class LocalChargePointService implements ChargePointService {
     scenarioId: string,
     runId?: string,
   ): Promise<ScenarioRunResult | null> {
-    // #394: the same lookup as the daemon's (runs are keyed by scenarioId;
-    // no runId means the latest recorded run).
-    const result =
-      runId === undefined
-        ? this.scenarioRuns.latest(id, scenarioId)
-        : this.scenarioRuns.get(id, runId);
-    if (!result || result.scenarioId !== scenarioId) return null;
-    return result;
+    return getScenarioReport(
+      this.localHost,
+      id,
+      _connectorId,
+      scenarioId,
+      runId,
+    );
   }
 
   /** #394: the run history, paged like the daemon's `scenario.runs.list`. */
   async listScenarioRuns(query: ScenarioRunQuery): Promise<ScenarioRunPage> {
-    return this.scenarioRuns.list(query);
+    return listScenarioRuns(this.localHost, query);
   }
 
   async getScenario(
@@ -1352,19 +1118,7 @@ export class LocalChargePointService implements ChargePointService {
     connectorId: number,
     scenarioId: string,
   ): Promise<ScenarioDefinition | null> {
-    const connector = this.requireConnector(id, connectorId);
-    const manager = this.scenarioManagerOf(id, connector);
-    if (!manager) return null;
-    return manager.getScenario(scenarioId) ?? null;
-  }
-
-  private requireConnector(id: string, connectorId: number) {
-    const cp = this.getExistingChargePointOrThrow(id);
-    const connector = cp.getConnector(connectorId);
-    if (!connector) {
-      throw new Error(`Connector ${connectorId} not found on ${id}`);
-    }
-    return connector;
+    return getScenario(this.localHost, id, connectorId, scenarioId);
   }
 
   subscribe(
@@ -1463,13 +1217,7 @@ export class LocalChargePointService implements ChargePointService {
   }
 
   private getExistingChargePointOrThrow(id: string): ChargePoint {
-    const cp = this.chargePoints.get(id);
-    if (!cp) {
-      throw new Error(
-        `ChargePoint ${id} not registered in LocalChargePointService`,
-      );
-    }
-    return cp;
+    return getExistingChargePointOrThrow(this.chargePoints, id);
   }
 
   /**
@@ -1491,7 +1239,7 @@ export class LocalChargePointService implements ChargePointService {
       seen.add(definition.id);
 
       if (!cp) {
-        cp = this.buildChargePoint(definition);
+        cp = buildChargePoint(this.database, definition);
         this.registerChargePoint(cp);
       } else {
         cp.autoMeterValueSetting = definition.autoMeterValueSetting;
@@ -1517,86 +1265,6 @@ export class LocalChargePointService implements ChargePointService {
     return definitions
       .map((definition) => this.chargePoints.get(definition.id))
       .filter((value): value is ChargePoint => Boolean(value));
-  }
-
-  private buildChargePoint(
-    definition: LocalChargePointDefinition,
-  ): ChargePoint {
-    assertBrowserLocalTlsSupported(definition);
-    const chargePoint = createChargePoint(
-      definition.id,
-      definition.bootNotification,
-      definition.connectorNumber,
-      definition.wsUrl,
-      definition.basicAuth,
-      definition.autoMeterValueSetting,
-      this.database,
-      {},
-      [],
-      definition.ocppVersion,
-      {
-        centralSystemUrl: definition.centralSystemUrl,
-        soapCallbackUrl: definition.soapCallbackUrl,
-        soapPath: definition.soapPath,
-      },
-      definition.securityProfile,
-      definition.authorizationKey,
-      definition.cpoName,
-      definition.tls,
-    );
-    chargePoint.txUpdatedMeterValues =
-      definition.txUpdatedMeterValues !== false;
-
-    // Restore connector-level settings from the SQLite store. Sync reads
-    // are safe because both adapters expose `Database.get/all`
-    // synchronously; we're inside the per-CP construction path that runs
-    // once per registration.
-    if (this.database) {
-      for (
-        let connectorId = 1;
-        connectorId <= definition.connectorNumber;
-        connectorId++
-      ) {
-        const autoMeterRow = this.database.get<{ auto_meter: string | null }>(
-          "SELECT auto_meter FROM connector_settings " +
-            "WHERE cp_id = ? AND connector_id = ?",
-          [definition.id, connectorId],
-        );
-        if (autoMeterRow?.auto_meter) {
-          try {
-            const connector = chargePoint.getConnector(connectorId);
-            if (connector) {
-              connector.autoMeterValueConfig = JSON.parse(
-                autoMeterRow.auto_meter,
-              ) as AutoMeterValueConfig;
-            }
-          } catch {
-            // Corrupted JSON in the row — fall back to defaults.
-          }
-        }
-
-        const profileRows = this.database.all<{ profile: string }>(
-          "SELECT profile FROM charging_profiles " +
-            "WHERE cp_id = ? AND connector_id = ? ORDER BY stack_level DESC",
-          [definition.id, connectorId],
-        );
-        const profiles = profileRows
-          .map((r) => {
-            try {
-              return JSON.parse(r.profile) as ActiveChargingProfile;
-            } catch {
-              return null;
-            }
-          })
-          .filter((p): p is ActiveChargingProfile => p !== null);
-        if (profiles.length > 0) {
-          const connector = chargePoint.getConnector(connectorId);
-          connector?.setChargingProfiles(profiles);
-        }
-      }
-    }
-
-    return chargePoint;
   }
 
   private attachEventForwarders(chargePoint: ChargePoint): void {

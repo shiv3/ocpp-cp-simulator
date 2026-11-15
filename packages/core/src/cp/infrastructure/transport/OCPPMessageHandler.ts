@@ -11,68 +11,20 @@ import type {
 } from "../../domain/types/FirmwareLogStatus";
 import type {
   AuthorizeRequestV16,
-  AuthorizeResponseV16,
-  BootNotificationResponseV16,
-  CancelReservationRequestV16,
-  CertificateSignedRequestV16,
-  ChangeAvailabilityRequestV16,
-  ChangeConfigurationRequestV16,
-  ChangeConfigurationResponseV16,
-  ClearCacheRequestV16,
-  ClearChargingProfileRequestV16,
   DataTransferRequestV16,
-  DataTransferResponseV16,
-  DeleteCertificateRequestV16,
   DiagnosticsStatusNotificationRequestV16,
-  DiagnosticsStatusNotificationResponseV16,
-  ExtendedTriggerMessageRequestV16,
-  FirmwareStatusNotificationResponseV16,
-  GetCompositeScheduleRequestV16,
-  GetConfigurationRequestV16,
-  GetDiagnosticsRequestV16,
-  GetInstalledCertificateIdsRequestV16,
-  GetLocalListVersionRequestV16,
-  GetLogRequestV16,
   HeartbeatRequestV16,
-  HeartbeatResponseV16,
-  InstallCertificateRequestV16,
-  LogStatusNotificationResponseV16,
-  MeterValuesRequestV16,
-  MeterValuesResponseV16,
-  RemoteStartTransactionRequestV16,
-  RemoteStopTransactionRequestV16,
-  ReserveNowRequestV16,
-  ResetRequestV16,
-  SendLocalListRequestV16,
-  SetChargingProfileRequestV16,
-  SecurityEventNotificationResponseV16,
   SignCertificateRequestV16,
-  SignCertificateResponseV16,
   SignedFirmwareStatusNotificationRequestV16,
-  SignedFirmwareStatusNotificationResponseV16,
-  SignedUpdateFirmwareRequestV16,
-  StartTransactionRequestV16,
-  StartTransactionResponseV16,
   StatusNotificationRequestV16,
-  StatusNotificationResponseV16,
-  StopTransactionRequestV16,
-  StopTransactionResponseV16,
-  TriggerMessageRequestV16,
-  UnlockConnectorRequestV16,
-  UpdateFirmwareRequestV16,
 } from "@ocpp-cp-simulator/ocpp/index";
-import { OCPPErrorCodeV16 } from "@ocpp-cp-simulator/ocpp/index";
 import type {
   OcppMessageErrorPayload,
   OcppMessagePayload,
   OcppMessageRequestPayload,
   OCPPWebSocket,
 } from "./OCPPWebSocket";
-import {
-  ResponseEffectQueue,
-  normalizeHandlerResult,
-  type HandlerResult,
-} from "./network-sim";
+import { ResponseEffectQueue } from "./network-sim";
 import type { ProtocolCodec } from "./profile/ProtocolProfile";
 import { CallWaiters } from "./CallWaiters";
 import { ExpertCalls } from "./ExpertCalls";
@@ -85,10 +37,7 @@ import {
   OcppCallRejectedError,
 } from "../../domain/errors/OcppCallErrors";
 import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
-import {
-  isRunningTransactionStartedBy,
-  type TransactionUpdateOptions,
-} from "../../domain/connector/Transaction";
+import { type TransactionUpdateOptions } from "../../domain/connector/Transaction";
 import type {
   MeterSampleOverrides,
   ReadingContext,
@@ -105,7 +54,6 @@ import { LogType } from "../../shared/Logger";
 import type {
   BootNotification,
   ChargePointErrorCode,
-  OCPPErrorCode,
 } from "../../domain/types/OcppTypes";
 import {
   OCPPAction,
@@ -115,100 +63,22 @@ import {
 import { BootGate } from "../../application/state/machines/BootGate";
 
 // Import handler registry and handlers
-import type { HandlerContext } from "./handlers";
 import {
   MessageHandlerRegistry,
   buildV16CallHandlerRegistry,
-  StartTransactionResultHandler,
-  StopTransactionResultHandler,
-  MeterValuesResultHandler,
-  AuthorizeResultHandler,
   DataTransferHandler,
 } from "./handlers";
-import { HandlerCallError } from "./handlers/HandlerCallError";
-import { inboundV16Violation } from "./codec/validateV16";
-import { CallExchange } from "./inbound/CallExchange";
 import { InboundCallGate, ports16 } from "./inbound/InboundCallGate";
-import type { GenerationToken } from "./network-sim/NetworkSimController";
-import {
-  QUEUED_ON_OCPP16,
-  RequestHistory,
-  requestConnectorId,
-} from "./v16/outboundRequestsV16";
+import { QUEUED_ON_OCPP16, RequestHistory } from "./v16/outboundRequestsV16";
 import { SerialCallQueueV16 } from "./v16/serialCallQueueV16";
 import { TransactionMessagesV16 } from "./v16/transactionMessagesV16";
 import { SecurityEventQueueV16 } from "./v16/securityEventQueueV16";
-
-type CoreOcppMessagePayloadCall =
-  | ChangeAvailabilityRequestV16
-  | ChangeConfigurationRequestV16
-  | ClearCacheRequestV16
-  | GetConfigurationRequestV16
-  | RemoteStartTransactionRequestV16
-  | RemoteStopTransactionRequestV16
-  | ResetRequestV16
-  | UnlockConnectorRequestV16;
-
-type FirmwareManagementOcppMessagePayloadCall =
-  | GetDiagnosticsRequestV16
-  | UpdateFirmwareRequestV16
-  | SignedUpdateFirmwareRequestV16;
-
-type LocalAuthListManagementOcppMessagePayloadCall =
-  GetLocalListVersionRequestV16 | SendLocalListRequestV16;
-
-type ReservationOcppMessagePayloadCall =
-  CancelReservationRequestV16 | ReserveNowRequestV16;
-
-type SmartChargingOcppMessagePayloadCall =
-  | ClearChargingProfileRequestV16
-  | GetCompositeScheduleRequestV16
-  | SetChargingProfileRequestV16;
-
-type RemoteTriggerOcppMessagePayloadCall =
-  TriggerMessageRequestV16 | ExtendedTriggerMessageRequestV16;
-
-type SecurityExtensionOcppMessagePayloadCall =
-  | CertificateSignedRequestV16
-  | InstallCertificateRequestV16
-  | GetInstalledCertificateIdsRequestV16
-  | DeleteCertificateRequestV16
-  | GetLogRequestV16;
-
-type OcppMessagePayloadCall =
-  | CoreOcppMessagePayloadCall
-  | FirmwareManagementOcppMessagePayloadCall
-  | LocalAuthListManagementOcppMessagePayloadCall
-  | ReservationOcppMessagePayloadCall
-  | SmartChargingOcppMessagePayloadCall
-  | RemoteTriggerOcppMessagePayloadCall
-  | SecurityExtensionOcppMessagePayloadCall;
-
-type CoreOcppMessagePayloadCallResult =
-  | AuthorizeResponseV16
-  | BootNotificationResponseV16
-  | ChangeConfigurationResponseV16
-  | DataTransferResponseV16
-  | HeartbeatResponseV16
-  | MeterValuesResponseV16
-  | StartTransactionResponseV16
-  | StatusNotificationResponseV16
-  | StopTransactionResponseV16;
-
-type FirmwareManagementOcppMessagePayloadCallResult =
-  | DiagnosticsStatusNotificationResponseV16
-  | FirmwareStatusNotificationResponseV16
-  | SignedFirmwareStatusNotificationResponseV16;
-
-type SecurityExtensionOcppMessagePayloadCallResult =
-  | SecurityEventNotificationResponseV16
-  | SignCertificateResponseV16
-  | LogStatusNotificationResponseV16;
-
-type OcppMessagePayloadCallResult =
-  | CoreOcppMessagePayloadCallResult
-  | FirmwareManagementOcppMessagePayloadCallResult
-  | SecurityExtensionOcppMessagePayloadCallResult;
+import { InboundCallsV16 } from "./v16/inboundCallV16";
+import { CallAnswersV16 } from "./v16/callAnswersV16";
+import type {
+  OcppMessagePayloadCall,
+  OcppMessagePayloadCallResult,
+} from "./v16/payloadTypesV16";
 
 export class OCPPMessageHandler {
   private _chargePoint: ChargePoint;
@@ -264,6 +134,12 @@ export class OCPPMessageHandler {
 
   /** SecurityEventNotification.req and its A04.FR.02 offline queue. */
   private readonly _securityEvents: SecurityEventQueueV16;
+
+  /** Inbound CSMS CALLs: gate, registry, validation, answer (#877). */
+  private readonly _inboundCalls: InboundCallsV16;
+
+  /** CALLRESULT / CALLERROR answers to the station's CALLs (#877). */
+  private readonly _answers: CallAnswersV16;
 
   constructor(
     chargePoint: ChargePoint,
@@ -339,6 +215,24 @@ export class OCPPMessageHandler {
         this._responseEffectQueue.flushAfterCloseFinalization(finalized);
       });
     }
+
+    this._inboundCalls = new InboundCallsV16({
+      chargePoint,
+      webSocket,
+      logger,
+      registry: () => this._registry,
+      gate: this._gate,
+      responseEffectQueue: this._responseEffectQueue,
+    });
+    this._answers = new CallAnswersV16({
+      chargePoint,
+      logger,
+      registry: () => this._registry,
+      requests: this._requests,
+      expertCalls: this._expertCalls,
+      dataTransferWaiters: this._dataTransferWaiters,
+      delivery: this._delivery,
+    });
 
     this._webSocket.setMessageHandler(this.handleIncomingMessage.bind(this));
     this.initializeHandlers();
@@ -834,7 +728,7 @@ export class OCPPMessageHandler {
         // by a later CALL. Handlers that need the order keep it themselves:
         // the certificate handlers run through CertificateStore, which
         // completes its operations one at a time (#456).
-        void this.handleCall(
+        void this._inboundCalls.handleCall(
           messageId,
           action,
           payload as OcppMessagePayloadCall,
@@ -842,14 +736,17 @@ export class OCPPMessageHandler {
         break;
       case OCPPMessageType.CALLRESULT:
         this.observeAnswer(messageId, "result", payload);
-        this.handleCallResult(
+        this._answers.handleCallResult(
           messageId,
           payload as OcppMessagePayloadCallResult,
         );
         break;
       case OCPPMessageType.CALLERROR:
         this.observeAnswer(messageId, "error", payload);
-        this.handleCallError(messageId, payload as OcppMessageErrorPayload);
+        this._answers.handleCallError(
+          messageId,
+          payload as OcppMessageErrorPayload,
+        );
         break;
       default:
         this._logger.error(
@@ -874,299 +771,6 @@ export class OCPPMessageHandler {
       outcome,
       payload,
     });
-  }
-
-  private async handleCall(
-    messageId: string,
-    action: OCPPAction,
-    payload: OcppMessagePayloadCall,
-  ): Promise<void> {
-    behaviorTapOf(this._chargePoint).observe({
-      type: "callReceived",
-      action,
-      messageId,
-      payload,
-    });
-    // Capture the generation at dispatch time (before the await) so a response
-    // produced by an async handler settles against its originating generation.
-    const gen = this._webSocket.currentGeneration();
-    const exchange = this.openExchange(messageId, action, gen);
-
-    // The gate announces the CALL (issue #110, #396: csmsCallTrigger nodes and
-    // the control plane), then applies the inbound policy (#247, sticky) and a
-    // one-shot response override (#110; it replaces the handler entirely, so
-    // the legacy remoteStartReceived/remoteStopReceived delegation never fires
-    // — scenarios combining an override with a wait must use the generic
-    // csmsCallTrigger). Every answer reports itself through the exchange.
-    if (this._gate.admit(exchange, payload).kind === "settled") return;
-
-    // Use registry to get handler
-    const handler = this._registry.getCallHandler(action);
-
-    if (!handler) {
-      this._logger.error(`Unsupported action: ${action}`, LogType.OCPP);
-      exchange.replyError(
-        OCPPErrorCodeV16.NotImplemented,
-        "This action is not supported",
-      );
-      return;
-    }
-
-    // The gate has run: policies, overrides and behavior rules may own a
-    // malformed CALL (docs/concepts/call-precedence.md); validation guards
-    // only what reaches the default handler (#593).
-    const mode = this._chargePoint.inboundValidation;
-    if (mode !== "off") {
-      const violation = inboundV16Violation(action, payload);
-      if (violation) {
-        const message = `Inbound ${action} ${violation.errorCode}: ${violation.description}`;
-        // Structured line for the trace (`meta.validation` on the CALL's
-        // record, packages/trace). It goes out on the WebSocket channel the
-        // trace writer already follows, before the handler or the error reply.
-        this._logger.warn(
-          `Inbound validation: ${JSON.stringify({
-            messageId,
-            action,
-            mode,
-            errorCode: violation.errorCode,
-            description: violation.description,
-          })}`,
-          LogType.WEBSOCKET,
-        );
-        if (mode === "enforce") {
-          this._logger.warn(message, LogType.OCPP);
-          exchange.replyError(violation.errorCode, violation.description);
-          return;
-        }
-        this._logger.warn(`${message} (handler still runs)`, LogType.OCPP);
-      }
-    }
-
-    try {
-      const context: HandlerContext = {
-        chargePoint: this._chargePoint,
-        logger: this._logger,
-      };
-      // `handle()` may return its response synchronously or as a Promise
-      // (see `CallHandler` in MessageHandlerRegistry.ts) — `await` resolves
-      // a plain value immediately, so this is a no-op for sync handlers.
-      const rawResult = await handler.handle(payload, context);
-      const { payload: normalizedPayload, effect } = normalizeHandlerResult(
-        rawResult as HandlerResult,
-      );
-      exchange.reply(normalizedPayload, {
-        ...(effect ? { effect } : {}),
-      });
-    } catch (error) {
-      if (error instanceof HandlerCallError) {
-        this._logger.warn(
-          `${action} answered with CALLERROR ${error.errorCode}: ${error.description}`,
-          LogType.OCPP,
-        );
-        if (exchange.state === "open") {
-          exchange.replyError(error.errorCode, error.description);
-        }
-        return;
-      }
-      this._logger.error(`Error handling ${action}: ${error}`, LogType.OCPP);
-      if (exchange.state === "open") {
-        exchange.replyError(OCPPErrorCodeV16.InternalError, String(error));
-      }
-    }
-  }
-
-  /** The exchange of one inbound CALL, bound to this socket's generation. */
-  private openExchange(
-    messageId: string,
-    action: string,
-    generation: GenerationToken,
-  ): CallExchange {
-    const exchange = new CallExchange({
-      action,
-      messageId,
-      generation,
-      isGenerationCurrent: (g) =>
-        g.gen === this._webSocket.currentGeneration().gen,
-      announce: (completion) =>
-        this._chargePoint.notifyIncomingCallCompleted(completion),
-      writeResult: (payload, gen, onSettled) =>
-        this._webSocket.sendResult(messageId, payload, gen, onSettled),
-      writeError: (errorCode, errorDescription, gen, onSettled) =>
-        this._webSocket.sendError(
-          messageId,
-          { errorCode: errorCode as OCPPErrorCode, errorDescription },
-          gen,
-          onSettled,
-        ),
-      effects: this._responseEffectQueue,
-      warn: (message) => this._logger.warn(message, LogType.OCPP),
-    });
-    this._gate.track(exchange);
-    return exchange;
-  }
-
-  private handleCallResult(
-    messageId: string,
-    payload: OcppMessagePayloadCallResult,
-  ): void {
-    if (this._expertCalls.claimResult(messageId, payload)) {
-      this._delivery.forgetAnsweredCall(messageId);
-      return;
-    }
-    const request = this._requests.get(messageId);
-    if (!request) {
-      this._logger.warn(
-        `Received unexpected CallResult: ${messageId}`,
-        LogType.OCPP,
-      );
-      return;
-    }
-
-    const action = request.action;
-    // #565: before the handler, which can stop the transaction (a Stop built
-    // from here on takes this id when it is sent).
-    if (
-      action === OCPPAction.StartTransaction &&
-      request.attempt !== undefined
-    ) {
-      const id = (payload as StartTransactionResponseV16).transactionId;
-      const start = request.payload as StartTransactionRequestV16;
-      const connectorId = requestConnectorId(request);
-      // A conf for a transaction that no longer runs and that no queued
-      // message waits on (its Stop already went out with `-1`) has nothing
-      // left to rewrite: nothing is recorded, so no entry outlives it.
-      if (
-        typeof id === "number" &&
-        (isRunningTransactionStartedBy(
-          this._chargePoint.getConnector(connectorId)?.transaction,
-          start,
-        ) ||
-          this._delivery.hasMessageWaitingOn({
-            connectorId,
-            idTag: start.idTag,
-            startedAt: start.timestamp,
-          }))
-      ) {
-        this._delivery.recordStartOutcome(start, connectorId, id);
-      }
-    }
-    let handler = this._registry.getCallResultHandler(action);
-
-    // For transaction-related handlers that need connector info, create them dynamically
-    if (!handler) {
-      if (action === OCPPAction.StartTransaction) {
-        const start = request.payload as StartTransactionRequestV16;
-        handler = new StartTransactionResultHandler(
-          requestConnectorId(request),
-          start.idTag,
-          // #527: the station's own StartTransaction.req (it carries an
-          // attempt) answers for its transaction only. An expert call with
-          // applyResponse (#389) applies to the connector as before.
-          request.attempt !== undefined ? start.timestamp : undefined,
-        );
-      } else if (action === OCPPAction.StopTransaction) {
-        handler = new StopTransactionResultHandler(
-          requestConnectorId(request),
-          (request.payload as StopTransactionRequestV16).idTag,
-        );
-      } else if (action === OCPPAction.MeterValues) {
-        handler = new MeterValuesResultHandler(
-          (request.payload as MeterValuesRequestV16).connectorId,
-        );
-      } else if (action === OCPPAction.Authorize) {
-        handler = new AuthorizeResultHandler(
-          request.payload as AuthorizeRequestV16,
-        );
-      }
-    }
-
-    if (handler) {
-      try {
-        const context: HandlerContext = {
-          chargePoint: this._chargePoint,
-          logger: this._logger,
-        };
-        handler.handle(payload, context);
-      } catch (error) {
-        this._logger.error(
-          `Error handling ${action} result: ${error}`,
-          LogType.OCPP,
-        );
-      }
-    } else {
-      this._logger.warn(
-        `No handler for action result: ${action}`,
-        LogType.OCPP,
-      );
-    }
-
-    if (action === OCPPAction.DataTransfer) {
-      const answer = payload as DataTransferResponseV16;
-      this._dataTransferWaiters.resolve(messageId, {
-        status: answer.status,
-        ...(answer.data !== undefined ? { data: answer.data } : {}),
-      });
-    }
-
-    // #565: a resend answered; what waited behind it goes on. Not for one
-    // that already timed out (#839): its timeout released its hold, and the
-    // hold now standing belongs to a newer resend, which must keep it
-    // (§3.7: the messages stay in chronological order).
-    if (
-      request.attempt !== undefined &&
-      request.attempt > 1 &&
-      !request.timedOut
-    ) {
-      this._delivery.releaseHold();
-    }
-    this._requests.remove(messageId);
-    // §4.1.1: response received — release the serialization slot so the
-    // next queued CALL can go out.
-    this._delivery.settleSerialInFlight(messageId);
-  }
-
-  private handleCallError(
-    messageId: string,
-    error: OcppMessageErrorPayload,
-  ): void {
-    const request = this._requests.get(messageId);
-    this._logger.error(
-      `Received CALLERROR for message ${messageId} (action=${request?.action ?? "unknown"}): ${JSON.stringify(error)}`,
-      LogType.OCPP,
-    );
-    if (this._expertCalls.claimError(messageId, error)) {
-      this._delivery.forgetAnsweredCall(messageId);
-      return;
-    }
-
-    if (request?.attempt !== undefined && !request.timedOut) {
-      this._delivery.onTransactionMessageCallError(request, error.errorCode);
-    }
-
-    // Issue #181: a CALLERROR answering Authorize.req is a definite
-    // protocol failure, unlike the authorizeAndWait paths where the CSMS
-    // said nothing at all (#452: a disconnect applies the offline rules;
-    // a timeout refuses a tag known locally as NOT valid and otherwise
-    // proceeds as "Accepted"). Here the CSMS *did* respond, and what it
-    // said was "I couldn't process this" — so treat it as fail-CLOSED:
-    // synthesize a denial ("Invalid") rather than let authorizeAndWait
-    // burn its full timeout waiting for a CALLRESULT that will never
-    // arrive.
-    if (request?.action === OCPPAction.Authorize) {
-      const idTag = (request.payload as AuthorizeRequestV16).idTag;
-      this._chargePoint.notifyAuthorizeResult(idTag, "Invalid");
-    }
-
-    this._dataTransferWaiters.reject(
-      messageId,
-      new Error(
-        `DataTransfer ${messageId} answered with CALLERROR ${error.errorCode}: ${error.errorDescription}`,
-      ),
-    );
-
-    this._requests.remove(messageId);
-    // §4.1.1: CALLERROR also settles the in-flight CALL.
-    this._delivery.settleSerialInFlight(messageId);
   }
 
   // All handler methods have been moved to individual handler classes

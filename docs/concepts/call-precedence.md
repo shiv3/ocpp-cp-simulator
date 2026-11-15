@@ -227,7 +227,7 @@ Tests: `packages/core/src/test/behavior/params.bun.test.ts` ("mode disable", "ou
 
 `RemoteStartTransaction` / `RequestStartTransaction` and `RemoteStopTransaction` / `RequestStopTransaction`
 have an older mechanism: a `remoteStartTrigger` / `remoteStopTrigger` node that is waiting on a connector
-registers it in the station (`_scenarioHandledConnectors`, `_scenarioStopHandledConnectors`). That is
+registers it in the station (`_scenarioHandledConnectors`, `_scenarioStopHandledConnectors` in `ScenarioCallOwnership.ts`). That is
 **parking**: when the CALL reaches the transaction default, the station answers `Accepted` and hands the
 request to the waiting scenario (`remoteStartReceived`) instead of starting the transaction itself. It
 also keeps `noteDefaultHandledRemoteStart` marks so that a trigger armed just after the default started a

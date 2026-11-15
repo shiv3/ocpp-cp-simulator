@@ -1,21 +1,13 @@
 import { runtime, type RuntimeServer } from "../runtime";
 
 type AnyServer = RuntimeServer;
-import type { ChargePointInitOptions, SoapTunnelConfig } from "../types";
-import {
-  matchesLabelSelector,
-  type Labels,
-} from "@ocpp-cp-simulator/contracts/labels";
+import type { ChargePointInitOptions } from "../types";
 import { BehaviorLibrary } from "../behavior/BehaviorLibrary";
 import { CPRegistry } from "./CPRegistry";
 import { NetworkSimManager } from "./NetworkSimManager";
 import { EventBus } from "./eventBus";
 import { createLifecycle } from "./lifecycle";
-import {
-  createHttpHandlers,
-  createSoapCallbackHandlers,
-  type CorsPolicy,
-} from "./httpServer";
+import { createHttpHandlers, createSoapCallbackHandlers } from "./httpServer";
 import {
   attachSocketIo,
   createSocketConfigRepository,
@@ -31,18 +23,19 @@ import {
   createAccessGuard,
   DEFAULT_RATE_LIMIT_MAX_IPS,
   isAccessGuardActive,
-  type AccessGuardOptions,
 } from "./accessGuard";
-import { stopTransactionsAndWait } from "./gracefulShutdown";
-import { getGlobalLogFormat } from "@ocpp-cp-simulator/core/cp/shared/Logger";
-import { expandIdPattern } from "@ocpp-cp-simulator/contracts/index";
+import type { ServerOptions, RunningServer } from "./serverOptions";
 import {
-  localHostForTunnel,
-  soapTunnelStartupLines,
-  startSoapTunnel,
-  type SoapTunnel,
-} from "../soapTunnel";
-import { buildServerInfo, soapCallbackRouteCpId } from "./socketServer";
+  expandBootstrap,
+  expandExplicitSoapCallbackUrl,
+  finishWatchSetup,
+  labelsNotAppliedNote,
+  openSoapTunnel,
+  serverLog,
+} from "./startServerHelpers";
+import { stopTransactionsAndWait } from "./gracefulShutdown";
+import { soapTunnelStartupLines, type SoapTunnel } from "../soapTunnel";
+import { buildServerInfo } from "./socketServer";
 import {
   MetricsRecorder,
   setGlobalMetricsRecorder,
@@ -50,10 +43,7 @@ import {
 import { renderMetrics } from "./metrics/render";
 import { VehicleProfileRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/VehicleProfileRepository";
 import { OpenEvDirectoryClient } from "@ocpp-cp-simulator/core/cp/infrastructure/vehicle-catalog/open-ev-directory/OpenEvDirectoryClient";
-import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
-import type { VehicleCatalogConfig } from "../vehicleCatalogConfig";
 import { FleetTemplateRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/FleetTemplateRepository";
-import type { FleetTemplate } from "@ocpp-cp-simulator/contracts/index";
 import { BlueprintRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/BlueprintRepository";
 import { FileReloadManager } from "./FileReloadManager";
 import {
@@ -68,182 +58,7 @@ import {
   startupScenarioOptionConflict,
   startupTargetCpIds,
 } from "./startupScenario";
-import {
-  DEFAULT_BOOTSTRAP_PACING,
-  forEachPaced,
-  type BootstrapPacing,
-} from "./bootstrapPacing";
-
-/**
- * Setup-time chatter from the daemon ("[server] Listening on …",
- * "[server] Connecting to CSMS…"). Plain mode keeps the legacy
- * "[server] <msg>" prefix; JSON mode wraps each call in a one-line JSON
- * object so the whole stderr stream is structured.
- */
-function serverLog(message: string): void {
-  if (getGlobalLogFormat() === "json") {
-    process.stderr.write(
-      JSON.stringify({
-        timestamp: new Date().toISOString(),
-        level: "INFO",
-        type: "Server",
-        message,
-      }) + "\n",
-    );
-    return;
-  }
-  process.stderr.write(`[server] ${message}\n`);
-}
-
-export interface ServerOptions {
-  readonly httpPort: number | null;
-  readonly httpHost: string;
-  readonly pidPath: string | null;
-  readonly bootstrap: ChargePointInitOptions | null;
-  /**
-   * Number of charge points to bootstrap from `bootstrap`. Above 1 the `cpId`
-   * is replaced by `bootstrapIdPattern` expanded per index; the rest of the
-   * options are shared. Mirrors the `cp.create_many` RPC so a CI job gets the
-   * same fleet from a flag as from the control plane.
-   */
-  readonly bootstrapCount?: number;
-  readonly bootstrapIdPattern?: string;
-  /** Templates read from `--fleet-template` files (#445); read-only. */
-  readonly fleetTemplates?: readonly FleetTemplate[];
-  /**
-   * How the fleet starts: concurrency, delay between starts and seeded jitter
-   * (#610). Absent: 8 at a time with no delay, as before.
-   */
-  readonly bootstrapPacing?: BootstrapPacing;
-  /**
-   * SOAP callback inputs, kept unresolved so a fleet can derive one address
-   * per charge point. `bootstrap.soapCallbackUrl` is already resolved for the
-   * single-CP case and stays authoritative there.
-   */
-  readonly soapCallbackUrlExplicit?: string | null;
-  readonly soapPublicBaseUrl?: string | null;
-  /**
-   * #458: the Open EV Directory API the console imports vehicle profiles
-   * through, with the daemon's API key. Null or absent: import is off and
-   * `vehicle_catalog.*` answers `unavailable`.
-   */
-  readonly vehicleCatalog?: VehicleCatalogConfig | null;
-  /** `--soap-path`; the daemon-wide default for derived callback URLs. */
-  readonly soapPath: string;
-  /**
-   * `--soap-tunnel ngrok` (#183): bind a listener that serves the SOAP
-   * callback route and nothing else, expose it through ngrok, and use the
-   * tunnel's public origin as the SOAP public base. Refused together with
-   * `soapCallbackUrlExplicit` / `soapPublicBaseUrl`, as the CLI does.
-   */
-  readonly soapTunnel?: SoapTunnelConfig | null;
-  /**
-   * The tunnel provider; `startSoapTunnel` (ngrok) unless a caller supplies
-   * another. Tests hand in one that needs no agent.
-   */
-  readonly startSoapTunnel?: typeof startSoapTunnel;
-  /** Serve `GET /metrics`. Off by default; `--metrics` turns it on. */
-  readonly metrics?: boolean;
-  /**
-   * Serve `/metrics` outside the Basic Auth gate. Opt-in for a trusted
-   * network — the default is that the gate covers it, unlike the health path.
-   */
-  readonly metricsNoAuth?: boolean;
-  /**
-   * Behavior code (`--behavior`) loaded onto every charge point of the
-   * daemon, restored and created over RPC included. It runs with the
-   * process's authority, so the daemon refuses it unless
-   * {@link allowBehaviorCode} is set (`--allow-behavior-code`).
-   */
-  readonly behaviors?: BehaviorLibrary | readonly Behavior[];
-  /** `--watch-behaviors`: reload a behavior file when it changes. */
-  readonly watchBehaviors?: boolean;
-  /**
-   * `--allow-behavior-reload`: answer `behavior.reload` without watching. The
-   * method also works with {@link watchBehaviors}. Otherwise it is refused: new
-   * code enters a running daemon only when the operator asked for it.
-   */
-  readonly allowBehaviorReload?: boolean;
-  readonly allowBehaviorCode?: boolean;
-  readonly autoConnect: boolean;
-  readonly startupScenario: {
-    readonly scenario: string | null;
-    readonly scenarioTemplate: string | null;
-    readonly scenarioTemplateFile: string | null;
-    /** "all" | "1" | "1,2,3" — resolved to a list of connector ids at startup. */
-    readonly scenarioConnector: string;
-  } | null;
-  readonly cors: CorsPolicy;
-  /**
-   * If set, non-/v1 GETs are served from this directory (SPA aware).
-   * Lets you ship the daemon and the browser UI in one process.
-   */
-  readonly staticDir: string | null;
-  /**
-   * Optional second HTTP listener for the bundled web console. If equal
-   * to `httpPort`, a single listener serves both socket.io/health and UI. If different,
-   * a second listener is bound to this port (the UI is also exposed on
-   * that port together with socket.io/health so the browser can reach both at the
-   * same origin).
-   */
-  readonly webConsolePort: number | null;
-  /** Filesystem path for the SQLite state DB. `null` means run in memory
-   *  — handy for tests / one-off CSMS probes; durable persistence is off. */
-  readonly stateDb: string | null;
-  /** Absolute URL path the health-check JSON is served on. Defaults to
-   *  `/v1/healthz` (set by the CLI). */
-  readonly healthPath: string;
-  /** Optional Basic Auth credentials for the inbound HTTP server (web
-   *  console / non-health HTTP). Health path is exempt. Null = no
-   *  auth. Plumbed straight through to `createHttpHandlers`. */
-  readonly webConsoleBasicAuth: {
-    readonly username: string;
-    readonly password: string;
-  } | null;
-  readonly insecureTlsKeyPerms: boolean;
-  /**
-   * #620: Host allowlist, trusted proxies, TLS requirement and per-IP rate
-   * limit on the HTTP listeners. Absent or all-empty = none of them.
-   */
-  readonly access?: AccessGuardOptions;
-  /**
-   * #622: on SIGINT / SIGTERM stop every running transaction and wait up to
-   * `waitMs` for the CSMS to receive the stops before the process exits.
-   * Absent = exit at once, as before.
-   */
-  readonly shutdownStopTransactions?: { readonly waitMs: number };
-  /**
-   * `--shutdown-wait-ms`, also the wait of an opt-in `stopTransactions` on
-   * `cp.delete` / `disconnect`, which does not need
-   * `--shutdown-stop-transactions`. Default 5000.
-   */
-  readonly shutdownWaitMs?: number;
-  /**
-   * #622: `false` rebuilds the charge points of `--state-db` without dialling
-   * them (operators connect them with `cp.connect`). Default `true`.
-   */
-  readonly connectRestored?: boolean;
-  /** #622: `cp.bulk` per-charge-point wait (ms). Default `CP_BULK_WAIT_MS`. */
-  readonly cpBulkWaitMs?: number;
-  /**
-   * Re-read the blueprint-instantiated idTag files and scenario files this
-   * process loaded when they change on disk (#314). Off by default: a daemon
-   * that silently re-reads files under the operator is surprising, and the
-   * agent-driven workflows this project is built around go through the control
-   * plane, where there is nothing on disk to re-read.
-   */
-  readonly watch?: boolean;
-}
-
-/** What `startServer` hands back: the bound ports and a way to stop it all. */
-export interface RunningServer {
-  /** Port the API listener bound (`httpPort`, resolved when it was 0); null without one. */
-  readonly httpPort: number | null;
-  /** Port of the SOAP-only listener the tunnel forwards to; null without a tunnel. */
-  readonly soapCallbackPort: number | null;
-  /** Stops every listener, the tunnel and the charge points without exiting the process. */
-  stop(): void;
-}
+import { DEFAULT_BOOTSTRAP_PACING, forEachPaced } from "./bootstrapPacing";
 
 export async function startServer(
   inputOpts: ServerOptions,
@@ -934,172 +749,8 @@ export async function startServer(
   return running;
 }
 
-/**
- * Second pass of the watch restore, then say what is being watched (#314).
- *
- * Three constraints have to hold at once, and no single position in the
- * sequence satisfies all three — which is why the restore is split rather than
- * moved again:
- *
- * 1. **A restored charge point must not run a stale graph.** Its persisted
- *    connect-triggered scenarios start as soon as its boot gate opens, so the
- *    watch has to be back and the file reconciled *before* it dials. The first
- *    pass runs immediately after `restoreFromDatabase({ connect: false })` and
- *    before `connectRestored`.
- * 2. **A startup flag owns its keys before its rows are read.** A stored row
- *    can name the id `--scenario` will claim, and reconciling it first would
- *    put the abandoned graph on the connector and possibly start it. The first
- *    pass therefore skips the bootstrap charge points; this second pass, after
- *    `runStartupScenario`, picks up whatever the flags did not claim — by then
- *    a takeover has deleted the rows they did.
- * 3. **A restored row must not overwrite a live registration.** The listener is
- *    bound before the bootstrap, so an RPC can register a watch at any point
- *    in here. That one is *not* solved by position: `restoreScenarioWatches`
- *    skips keys it already holds, in both passes. Keeping it out of the
- *    ordering is what lets 1 and 2 be satisfied independently.
- *
- * This pass also does the pruning: a row whose scenario is no longer loaded is
- * dropped here, once every path that could still load one has run.
- */
-function finishWatchSetup(
-  fileReload: FileReloadManager | null,
-  serverLog: (message: string) => void,
-): void {
-  fileReload?.restoreScenarioWatches();
-  logWatchSummary(fileReload, serverLog);
-}
-
-/**
- * Report what `--watch` ended up watching.
- *
- * Logged after the fleet exists *and* after `runStartupScenario` has registered
- * whatever `--scenario` / `--scenario-template-file` loaded — those register
- * inside the bootstrap loop, so counting before it told an operator "0 file(s)"
- * about a daemon that was watching a scenario file (#314). An operator who sees
- * nothing reload can then tell "--watch is off" from "--watch is on and no file
- * is behind any of this daemon's state". A filesystem that cannot watch reports
- * itself separately, once, from FileWatcher.
- */
-function logWatchSummary(
-  fileReload: FileReloadManager | null,
-  serverLog: (message: string) => void,
-): void {
-  if (!fileReload) return;
-  const paths = fileReload.watchedPaths();
-  serverLog(
-    `Watch: enabled — re-reading ${paths.length} loaded file(s) on change (#314)` +
-      (paths.length > 0 ? `: ${paths.join(", ")}` : ""),
-  );
-}
-
-/**
- * Suffix for the "reusing" log line when `--label` asked for labels a
- * restored charge point does not carry (#472). The restored labels win, like
- * every other bootstrap option; saying so keeps the flag from looking broken
- * to an operator who added it to an existing deployment.
- */
-function labelsNotAppliedNote(
-  requested: Labels | undefined,
-  restored: Labels | undefined,
-): string {
-  if (!requested) return "";
-  const same =
-    restored !== undefined &&
-    Object.keys(requested).length === Object.keys(restored).length &&
-    matchesLabelSelector(restored, requested);
-  if (same) return "";
-  return ` (--label not applied; it keeps its stored labels ${JSON.stringify(restored ?? {})})`;
-}
-
-/**
- * The charge points `--cp-id` (plus `--cp-count` / `--cp-id-pattern`) asks for.
- *
- * One without a count, N with one — sequential, so the log and the registry
- * events read in id order. Everything but `cpId` is shared, exactly as
- * `cp.create_many` shares it — `--label` labels included (#472).
- */
-function expandBootstrap(
-  opts: ServerOptions,
-): readonly ChargePointInitOptions[] {
-  if (!opts.bootstrap) return [];
-  const count = opts.bootstrapCount ?? 1;
-  if (count <= 1) return [opts.bootstrap];
-  const pattern = opts.bootstrapIdPattern ?? `${opts.bootstrap.cpId}{n:03}`;
-  const fleet: ChargePointInitOptions[] = [];
-  for (let i = 1; i <= count; i++) {
-    const cpId = expandIdPattern(pattern, i);
-    const explicit = opts.soapCallbackUrlExplicit?.trim();
-    fleet.push({
-      ...opts.bootstrap,
-      cpId,
-      // Without an explicit URL the registry derives one per station from
-      // the daemon's SOAP public base at instantiation (#183).
-      ...(explicit
-        ? { soapCallbackUrl: expandExplicitSoapCallbackUrl(explicit, cpId, i) }
-        : {}),
-    });
-  }
-  return fleet;
-}
-
-/**
- * Open the SOAP tunnel described by `--soap-tunnel` towards the SOAP-only
- * listener bound on `localPort`, or nothing. Exported for tests; `start` is
- * the tunnel provider, injectable so the wiring can be checked without an
- * ngrok binary.
- */
-export async function openSoapTunnel(
-  opts: Pick<
-    ServerOptions,
-    "soapTunnel" | "soapCallbackUrlExplicit" | "soapPublicBaseUrl" | "httpHost"
-  >,
-  localPort: number,
-  onExit: (code: number | null) => void,
-  start: typeof startSoapTunnel = startSoapTunnel,
-): Promise<SoapTunnel | null> {
-  if (!opts.soapTunnel) return null;
-  if (opts.soapCallbackUrlExplicit?.trim() || opts.soapPublicBaseUrl?.trim()) {
-    throw new Error(
-      "--soap-tunnel cannot be combined with --soap-callback-url or --soap-public-base-url",
-    );
-  }
-  return start({
-    localHost: localHostForTunnel(opts.httpHost),
-    localPort,
-    authToken: opts.soapTunnel.authToken,
-    domain: opts.soapTunnel.domain,
-    apiUrl: opts.soapTunnel.apiUrl,
-    onExit,
-  });
-}
-
-/**
- * Expand an explicit `--soap-callback-url` for one charge point of a fleet.
- *
- * The daemon routes inbound CS→CP calls on `<soapPath>/<cpId>/ChargePointService`
- * and advertises this URL verbatim, so a fleet sharing one address would send
- * every station's callbacks to the first station's route. The explicit URL
- * therefore carries the same `{n}` placeholder as the id pattern (the CLI
- * refuses one that does not), and its expansion is checked against the route.
- */
-export function expandExplicitSoapCallbackUrl(
-  explicit: string,
-  cpId: string,
-  index: number,
-): string {
-  const expanded = expandIdPattern(explicit, index);
-  // Same rule the RPC enforces, checked the same way — through the router's
-  // own pattern and percent-decoding, so the two cannot disagree about an id
-  // that needs encoding or a path with an extra segment.
-  if (soapCallbackRouteCpId(expanded) !== cpId) {
-    throw new Error(
-      `--soap-callback-url expands to "${expanded}", whose charge point route segment is not "${cpId}". ` +
-        `The daemon routes inbound SOAP calls by that segment, so the CSMS would get 404s.`,
-    );
-  }
-  return expanded;
-}
-
+export type { ServerOptions, RunningServer } from "./serverOptions";
+export { expandExplicitSoapCallbackUrl, openSoapTunnel };
 export { DEFAULT_HTTP_PORT } from "./constants";
 export const DEFAULT_PID_PATH = "/tmp/ocpp-server.pid";
 

@@ -824,7 +824,11 @@ opens), in
   other line, SOAP exchanges included, is not a frame and stays in **Log**; a
   note above the viewer says so. A CSMS CALL's `Inbound validation:` line
   becomes its `meta.validation` when both arrive in the same buffer update.
-  Records carry no `ocppVersion`: the charge point list does not hold it.
+  Each record carries its charge point's `ocppVersion`, from the snapshot's
+  `config` in remote mode and from the browser's config in local mode, mapped
+  the way `--trace-output` does (`toTraceOcppVersion`); a charge point whose
+  version is unknown gives records without one. Records carry no
+  `connectorId` yet: the converter does not set it (#999).
 - **Feed.** One viewer store per visit of the tab, filled from the buffer
   when the tab opens, then fed only the lines it has not seen (ids
   `sim-seq-<seq>`). When the buffer (2000 lines) overflowed past lines the
@@ -838,8 +842,11 @@ opens), in
   stays open.
 - **Export.** **Export selection** and **Export filtered** download the
   records as `ocpp-trace-<scope>-<timestamp>.jsonl`, in the trace format.
-- **Look and language.** The viewer follows the console's dark mode and its
-  `cx-*` colors, and its texts go through react-i18next
+- **Look and language.** The viewer follows the console's dark mode, its
+  `cx-*` colors and fonts, and its controls are restyled like the console's
+  buttons, inputs and section labels
+  ([`TraceView.css`](../../apps/web/src/console/components/TraceView.css));
+  its texts go through react-i18next
   (`dashboard.logs.trace.viewer.*`); a few rare ones (inspector markers,
   error texts) stay in English.
 

@@ -1,4 +1,5 @@
 import "@open-ocpp-trace/viewer-react/styles.css";
+import "./TraceView.css";
 
 import React, {
   useCallback,
@@ -37,7 +38,8 @@ export interface TraceViewProps {
   ocppVersions: ReadonlyMap<string, string>;
 }
 
-/** The console's `cx-*` colors, which follow its dark mode on their own. */
+/** The console's `cx-*` colors, which follow its dark mode on their own, and
+ *  its sans font (TraceView.css sets the controls and the mono data). */
 const TOKENS: ViewerTheme["tokens"] = {
   background: "var(--cx-card)",
   color: "var(--cx-fg)",
@@ -46,6 +48,7 @@ const TOKENS: ViewerTheme["tokens"] = {
   selectedBackground: "var(--cx-sel)",
   selectedColor: "var(--cx-fg)",
   focusColor: "var(--cx-accent)",
+  fontFamily: "var(--font-sans)",
 };
 
 function sameIds(a: readonly string[], b: readonly string[]): boolean {
@@ -135,7 +138,7 @@ const TraceView: React.FC<TraceViewProps> = ({
       <p className="text-[12px] text-cx-muted">
         {t("dashboard.logs.trace.note")}
       </p>
-      <div className="min-h-0 flex-1">
+      <div className="cx-trace min-h-0 flex-1">
         <TraceViewer
           store={store}
           correlator={correlator}

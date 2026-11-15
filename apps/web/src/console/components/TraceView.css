@@ -1,0 +1,162 @@
+/*
+ * The console's look for the trace viewer's controls. The viewer's stylesheet
+ * reverts every control it renders to the browser default (`all: revert`) and
+ * exposes tokens for colors and the font only, so the buttons, fields,
+ * checkboxes and filter groups are restyled here, like the console's own
+ * Button (outline, sm), Input and section labels. Each selector starts with
+ * `.cx-trace` to outrank the viewer's (0,2,1 at most, 0,3,1 for a checkbox).
+ */
+
+/* Data in the console's mono font; the chrome keeps the sans one (token). */
+.cx-trace .oot-list,
+.cx-trace .oot-inspector__code,
+.cx-trace .oot-inspector__fields {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.cx-trace .oot-toolbar {
+  gap: 6px;
+  padding: 6px 8px;
+}
+
+.cx-trace .oot-toolbar button.oot-toolbar-button,
+.cx-trace .oot-filter button.oot-filter-clear,
+.cx-trace .oot-filter button.oot-filter-reset,
+.cx-trace .oot-inspector button.oot-inspector__button,
+.cx-trace .oot-list button.oot-jump {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--cx-border-strong);
+  border-radius: 7px;
+  background: var(--cx-card);
+  color: var(--cx-fg2, var(--cx-fg));
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background-color 0.15s,
+    color 0.15s;
+}
+
+.cx-trace .oot-toolbar button.oot-toolbar-button:hover:not(:disabled),
+.cx-trace .oot-filter button.oot-filter-clear:hover:not(:disabled),
+.cx-trace .oot-filter button.oot-filter-reset:hover:not(:disabled),
+.cx-trace .oot-inspector button.oot-inspector__button:hover:not(:disabled),
+.cx-trace .oot-list button.oot-jump:hover {
+  background: var(--cx-sub);
+  color: var(--cx-fg);
+}
+
+.cx-trace .oot-toolbar button.oot-toolbar-button[aria-pressed="true"] {
+  border-color: var(--cx-accent);
+  background: var(--cx-sel);
+  color: var(--cx-fg);
+  font-weight: 600;
+}
+
+.cx-trace .oot-toolbar button.oot-toolbar-button:disabled,
+.cx-trace .oot-filter button.oot-filter-clear:disabled,
+.cx-trace .oot-filter button.oot-filter-reset:disabled,
+.cx-trace .oot-inspector button.oot-inspector__button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.cx-trace .oot-filter button.oot-filter-clear {
+  height: 24px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+/* "Go to response" and the other pairing links read as links. */
+.cx-trace .oot-inspector button.oot-inspector__link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--cx-accent);
+  font: inherit;
+  font-family: var(--font-sans);
+  cursor: pointer;
+}
+
+.cx-trace .oot-inspector button.oot-inspector__link:hover {
+  text-decoration: underline;
+}
+
+.cx-trace .oot-filter input.oot-filter-input {
+  box-sizing: border-box;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--cx-border);
+  border-radius: 7px;
+  background: var(--cx-card);
+  color: var(--cx-fg);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  color-scheme: inherit;
+}
+
+.cx-trace .oot-filter input.oot-filter-input:hover {
+  border-color: var(--cx-border-strong);
+}
+
+.cx-trace .oot-filter-option input.oot-filter-checkbox[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--cx-accent);
+  cursor: pointer;
+}
+
+.cx-trace .oot-toolbar button.oot-toolbar-button:focus-visible,
+.cx-trace .oot-filter button.oot-filter-clear:focus-visible,
+.cx-trace .oot-filter button.oot-filter-reset:focus-visible,
+.cx-trace .oot-inspector button.oot-inspector__button:focus-visible,
+.cx-trace .oot-inspector button.oot-inspector__link:focus-visible,
+.cx-trace .oot-list button.oot-jump:focus-visible,
+.cx-trace .oot-filter input.oot-filter-input:focus-visible,
+.cx-trace
+  .oot-filter-option
+  input.oot-filter-checkbox[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--cx-accent);
+  outline-offset: 1px;
+}
+
+/* Filter groups as the console's sections: a rule between them and a small
+   uppercase label, instead of the browser's boxed fieldset. */
+.cx-trace .oot-filter {
+  gap: 0;
+}
+
+.cx-trace .oot-filter fieldset.oot-filter-group {
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--cx-border);
+}
+
+.cx-trace .oot-filter legend.oot-filter-legend {
+  margin-bottom: 6px;
+  padding: 0;
+  color: var(--cx-muted);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.cx-trace .oot-filter-option,
+.cx-trace .oot-filter-field {
+  gap: 8px;
+  min-height: 24px;
+}
+
+.cx-trace .oot-filter button.oot-filter-reset {
+  margin: 10px 12px;
+}

@@ -200,6 +200,24 @@ describe("ScenarioExecutor node dispatch", () => {
     expect(onStatusChange).toHaveBeenCalledWith(OCPPStatus.Charging);
   });
 
+  it("passes allowInvalidTransition of a statusChange node on (schema 1.11, #618)", async () => {
+    const onStatusChange = vi.fn(async () => {});
+
+    await runSingleNode(
+      ScenarioNodeType.STATUS_CHANGE,
+      {
+        label: "Status",
+        status: OCPPStatus.Finishing,
+        allowInvalidTransition: true,
+      },
+      { onStatusChange },
+    );
+
+    expect(onStatusChange).toHaveBeenCalledWith(OCPPStatus.Finishing, {
+      allowInvalidTransition: true,
+    });
+  });
+
   it("dispatches transaction start nodes to onStartTransaction", async () => {
     const onStartTransaction = vi.fn(async () => {});
 

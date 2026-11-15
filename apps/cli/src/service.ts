@@ -207,6 +207,13 @@ export type CLIEvent =
       };
     }
   | {
+      // #618: an out-of-table OCPP 1.6 §4.9 transition changed the connector
+      // but its StatusNotification was kept off the wire
+      // (`capabilityProfile.statusTransitions: "enforce"`).
+      readonly event: "status_notification_suppressed";
+      readonly data: ChargePointEvents["statusNotificationSuppressed"];
+    }
+  | {
       readonly event: "transaction_started";
       readonly data: {
         readonly connectorId: number;
@@ -1413,8 +1420,16 @@ export class CLIChargePointService {
     status: OCPPStatus,
     opts?: StatusNotificationOptions,
   ): void {
+    const allowInvalidTransition = opts?.allowInvalidTransition === true;
     if (hasStatusNotificationOptions(opts)) {
+      // Raw: the connector is not changed, so no transition is checked.
       this._chargePoint.sendStatusNotificationRaw(connectorId, status, opts);
+      return;
+    }
+    if (allowInvalidTransition) {
+      this._chargePoint.updateConnectorStatus(connectorId, status, {
+        allowInvalidTransition: true,
+      });
       return;
     }
     this._chargePoint.updateConnectorStatus(connectorId, status);
@@ -3139,6 +3154,9 @@ export class CLIChargePointService {
           });
         },
       ),
+      this._chargePoint.events.on("statusNotificationSuppressed", (data) => {
+        this.emit({ event: "status_notification_suppressed", data });
+      }),
     );
 
     this._unsubscribes.push(

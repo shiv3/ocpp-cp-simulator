@@ -736,8 +736,12 @@ export const createScenarioExecutorCallbacks = (
   const callbacks: ScenarioExecutorCallbacks & {
     onGetTransactionMeterStart: () => number | null;
   } = {
-    onStatusChange: async (status) => {
-      chargePoint.updateConnectorStatus(connector.id, status);
+    onStatusChange: async (status, options) => {
+      if (options) {
+        chargePoint.updateConnectorStatus(connector.id, status, options);
+      } else {
+        chargePoint.updateConnectorStatus(connector.id, status);
+      }
     },
     // #299: the executor has no connector of its own, so the connector it is
     // bound to is closed over here.

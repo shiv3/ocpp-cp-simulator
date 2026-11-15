@@ -433,6 +433,18 @@ const cpParamsBaseSchema = z.object({
         .describe(
           "The message types TriggerMessage / ExtendedTriggerMessage may request; any other target is answered NotImplemented. On OCPP 2.x the 1.6 spellings DiagnosticsStatusNotification and SignChargePointCertificate also stand for LogStatusNotification and SignChargingStationCertificate. [] supports none. Omit to leave the targets as they are",
         ),
+      disabledActionErrorCode: z
+        .enum(["NotImplemented", "NotSupported"])
+        .optional()
+        .describe(
+          "The CALLERROR code a disabled action is answered with (OCPP-J 1.6 section 4.2.3): NotImplemented (default, the action is not known) or NotSupported (the action is recognized but not supported)",
+        ),
+      statusTransitions: z
+        .enum(["warn", "enforce"])
+        .optional()
+        .describe(
+          "OCPP 1.6J only: a connector status change the OCPP 1.6 section 4.9 transition table does not list. warn (default) logs it and sends the StatusNotification; enforce changes the connector but does not send the StatusNotification (event statusNotificationSuppressed), unless the change was requested with allowInvalidTransition",
+        ),
     })
     .strict()
     .optional()
@@ -1312,6 +1324,11 @@ export const METHODS = {
         message: "timestamp must be a date string",
       }).optional(),
       suppressChargingStateTransactionEvent: z.boolean().optional(),
+      // #618: send the StatusNotification even when the capability profile
+      // enforces the OCPP 1.6 §4.9 transition table and this change is not
+      // in it. Applies to the normal path only: with any StatusNotification
+      // field above the message is sent raw and no transition is checked.
+      allowInvalidTransition: z.boolean().optional(),
     }),
     result: ANY,
   },

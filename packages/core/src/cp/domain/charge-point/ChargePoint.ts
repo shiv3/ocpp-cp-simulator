@@ -17,9 +17,12 @@ import type {
   UploadLogStatus,
 } from "../types/FirmwareLogStatus";
 import {
+  capabilityProfileConflicts,
+  disabledActionErrorCode,
   isActionDisabled,
   isTriggerTargetSupported,
   type ChargePointCapabilityProfile,
+  type DisabledActionErrorCode,
 } from "./CapabilityProfile";
 import { translatesCsmsActionNames } from "../types/csmsActionNames";
 import { EventEmitter } from "../../shared/EventEmitter";
@@ -115,6 +118,7 @@ import type {
 import {
   isOcpp2Version,
   isSoapVersion,
+  OCPP_1_6,
   OCPP_2_0_1,
   OCPP_2_1,
 } from "../types/OcppVersion";
@@ -692,6 +696,40 @@ export class ChargePoint {
       action,
       translatesCsmsActionNames(this._ocppVersion),
     );
+  }
+
+  /** The CALLERROR code a disabled action is answered with (#618). */
+  disabledActionErrorCode(): DisabledActionErrorCode {
+    return disabledActionErrorCode(this._capabilityProfile);
+  }
+
+  /**
+   * Does this station keep a connector status change the OCPP 1.6 §4.9 table
+   * does not list off the wire (`statusTransitions: "enforce"`, #618)? OCPP
+   * 1.6J only: the table is written in the 1.6 status vocabulary, which 2.x
+   * reports through a different ConnectorStatusEnumType with no such table.
+   */
+  get enforcesStatusTransitions(): boolean {
+    return (
+      this._capabilityProfile?.statusTransitions === "enforce" &&
+      this._ocppVersion === OCPP_1_6
+    );
+  }
+
+  /**
+   * Log every place the capability profile contradicts the 1.6
+   * `SupportedFeatureProfiles` configuration key (#618). Advisory: nothing
+   * is refused.
+   */
+  private warnCapabilityProfileConflicts(): void {
+    if (this._ocppVersion !== OCPP_1_6 || !this._capabilityProfile) return;
+    const conflicts = capabilityProfileConflicts(
+      this._capabilityProfile,
+      this._configuration?.getArray("SupportedFeatureProfiles"),
+    );
+    for (const conflict of conflicts) {
+      this._logger.warn(conflict.message, LogType.SYSTEM);
+    }
   }
 
   /** May TriggerMessage request `target` under the capability profile (#618)? */
@@ -2669,6 +2707,8 @@ export class ChargePoint {
       return;
     }
 
+    this.warnCapabilityProfileConflicts();
+
     if (this._webSocket && this._cellularLink?.available === false) {
       // #930: the cellular link is down; an operator connect cannot defeat
       // that. Remembered, so restoring service dials. No boot flag is set:
@@ -4602,7 +4642,17 @@ export class ChargePoint {
     );
   }
 
-  updateConnectorStatus(connectorId: number, status: OCPPStatus): void {
+  /**
+   * Change a connector's status and report it with a StatusNotification.
+   * `allowInvalidTransition`: send it even when the capability profile
+   * enforces the OCPP 1.6 §4.9 transition table and the change is not in it
+   * (#618) — an explicit request to send an out-of-table transition.
+   */
+  updateConnectorStatus(
+    connectorId: number,
+    status: OCPPStatus,
+    options: { readonly allowInvalidTransition?: boolean } = {},
+  ): void {
     // Connector 0 represents the charge point main controller (OCPP 1.6J
     // §7.7). It only accepts Available / Unavailable / Faulted; trying to
     // drive it into Charging / Reserved / etc. would create an out-of-spec
@@ -4656,7 +4706,14 @@ export class ChargePoint {
     this._engine.dispatch({
       type: "connector.write",
       connectorId,
-      write: { kind: "status", status, scope: "full" },
+      write: {
+        kind: "status",
+        status,
+        scope: "full",
+        ...(options.allowInvalidTransition
+          ? { allowInvalidTransition: true }
+          : {}),
+      },
     });
   }
 
@@ -4668,10 +4725,16 @@ export class ChargePoint {
   /**
    * The rest of a `full` status write, run by the engine right after the
    * record changed and the listeners were told: the connection-timeout timer
-   * and the StatusNotification.
+   * and the StatusNotification. `sendNotification` false (an out-of-table
+   * transition under `statusTransitions: "enforce"`, #618): everything but
+   * the StatusNotification.
    * @internal
    */
-  afterConnectorStatus(connectorId: number, status: OCPPStatus): void {
+  afterConnectorStatus(
+    connectorId: number,
+    status: OCPPStatus,
+    sendNotification = true,
+  ): void {
     const connector = this.getConnector(connectorId);
     if (!connector) return;
 
@@ -4690,11 +4753,13 @@ export class ChargePoint {
     // happy-path transitions.
     const useErrorCode =
       connector.currentErrorCode !== "NoError" || status === OCPPStatus.Faulted;
-    this._outbox.sendStatusNotification(connectorId, status, {
-      errorCode: useErrorCode ? connector.currentErrorCode : "NoError",
-      info: connector.errorInfo ?? undefined,
-      vendorErrorCode: connector.vendorErrorCode ?? undefined,
-    });
+    if (sendNotification) {
+      this._outbox.sendStatusNotification(connectorId, status, {
+        errorCode: useErrorCode ? connector.currentErrorCode : "NoError",
+        info: connector.errorInfo ?? undefined,
+        vendorErrorCode: connector.vendorErrorCode ?? undefined,
+      });
+    }
 
     // A connector that is Faulted or Unavailable holds no reservation: it is
     // ended after the status the CSMS just saw (H01.FR.16/17).

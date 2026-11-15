@@ -749,11 +749,18 @@ export class LocalChargePointService implements ChargePointService {
     opts?: StatusNotificationOptions,
   ): Promise<void> {
     const cp = this.getExistingChargePointOrThrow(id);
+    const allowInvalidTransition = opts?.allowInvalidTransition === true;
     if (hasStatusNotificationOptions(opts)) {
       // Use the raw sender so errorCode/info ride along with the
       // StatusNotification.req without mutating the connector's runtime
       // status field.
       cp.sendStatusNotificationRaw(connectorId, status, opts);
+      return;
+    }
+    if (allowInvalidTransition) {
+      cp.updateConnectorStatus(connectorId, status, {
+        allowInvalidTransition: true,
+      });
       return;
     }
     cp.updateConnectorStatus(connectorId, status);

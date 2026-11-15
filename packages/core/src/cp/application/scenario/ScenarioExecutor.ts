@@ -1428,7 +1428,15 @@ export class ScenarioExecutor {
    */
   private async executeStatusChange(data: StatusChangeNodeData): Promise<void> {
     if (this.callbacks.onStatusChange) {
-      await this.callbacks.onStatusChange(data.status);
+      // Schema 1.11 (#618): the explicit override is passed only when set,
+      // so a plain status change calls back exactly as before.
+      if (data.allowInvalidTransition === true) {
+        await this.callbacks.onStatusChange(data.status, {
+          allowInvalidTransition: true,
+        });
+      } else {
+        await this.callbacks.onStatusChange(data.status);
+      }
     }
   }
 

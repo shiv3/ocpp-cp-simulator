@@ -7,7 +7,9 @@ import { CPRegistry } from "../CPRegistry";
 import { EventBus } from "../eventBus";
 import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/BunSqliteDatabase";
 import type { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
-import type { CLIChargePointService } from "../../service";
+import { CLIChargePointService, type CLIEvent } from "../../service";
+import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
+import { testCpInit } from "../../__tests__/testCpInit";
 import {
   connectTestClient,
   startTestServer,
@@ -269,5 +271,182 @@ describe("capabilityProfile on --state-db (#618)", () => {
       registry.shutdownAll();
       db.close();
     }
+  });
+});
+
+// #618 strict modes: disabledActionErrorCode and statusTransitions.
+const STRICT = {
+  disabledActions: ["ReserveNow"],
+  disabledActionErrorCode: "NotSupported",
+  statusTransitions: "enforce",
+} as const;
+
+describe("capabilityProfile strict modes over the control plane (#618)", () => {
+  it("cp.create sets disabledActionErrorCode and statusTransitions; status shows them", async () => {
+    const server = await startTestServer();
+    servers.push(server);
+    const socket = await connectTestClient(server);
+    try {
+      const created = await emitRpc(socket, {
+        method: "cp.create",
+        params: { cpId: "CP618-strict", ...BASE, capabilityProfile: STRICT },
+      });
+      expect(created.ok).toBe(true);
+      const cp = chargePointOf(server.registry.get("CP618-strict"));
+      expect(cp.disabledActionErrorCode()).toBe("NotSupported");
+      expect(cp.enforcesStatusTransitions).toBe(true);
+      const status = await emitRpc(socket, {
+        cpId: "CP618-strict",
+        method: "status",
+        params: {},
+      });
+      expect(status.result.config.capabilityProfile).toEqual(STRICT);
+    } finally {
+      socket.disconnect();
+    }
+  });
+
+  it("refuses a value outside either enum", async () => {
+    const server = await startTestServer();
+    servers.push(server);
+    const socket = await connectTestClient(server);
+    try {
+      for (const capabilityProfile of [
+        { statusTransitions: "strict" },
+        { disabledActionErrorCode: "GenericError" },
+        { statusTransitions: true },
+      ]) {
+        const refused = await emitRpc(socket, {
+          method: "cp.create",
+          params: { cpId: "CP618-badenum", ...BASE, capabilityProfile },
+        });
+        expect(refused.ok).toBe(false);
+        expect(server.registry.get("CP618-badenum")).toBeUndefined();
+      }
+    } finally {
+      socket.disconnect();
+    }
+  });
+
+  it("update_connector_status passes allowInvalidTransition to the charge point", async () => {
+    const server = await startTestServer();
+    servers.push(server);
+    const socket = await connectTestClient(server);
+    try {
+      await emitRpc(socket, {
+        method: "cp.create",
+        params: { cpId: "CP618-force", ...BASE, capabilityProfile: STRICT },
+      });
+      const cp = chargePointOf(server.registry.get("CP618-force"));
+      const calls: unknown[][] = [];
+      const original = cp.updateConnectorStatus.bind(cp);
+      cp.updateConnectorStatus = (...args: unknown[]) => {
+        calls.push(args);
+        return (original as (...a: unknown[]) => void)(...args);
+      };
+      const forced = await emitRpc(socket, {
+        cpId: "CP618-force",
+        method: "update_connector_status",
+        params: {
+          connector: 1,
+          status: "Finishing",
+          allowInvalidTransition: true,
+        },
+      });
+      expect(forced.ok).toBe(true);
+      const plain = await emitRpc(socket, {
+        cpId: "CP618-force",
+        method: "update_connector_status",
+        params: { connector: 1, status: "Available" },
+      });
+      expect(plain.ok).toBe(true);
+      expect(calls).toEqual([
+        [1, "Finishing", { allowInvalidTransition: true }],
+        [1, "Available"],
+      ]);
+    } finally {
+      socket.disconnect();
+    }
+  });
+});
+
+describe("capabilityProfile strict modes on --state-db (#618)", () => {
+  it("survive a restart; an unknown value restores as absent", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    const registry = new CPRegistry(new EventBus(), db);
+    let restored: CPRegistry | null = null;
+    try {
+      registry.create(
+        {
+          cpId: "CP618-strict-db",
+          basicAuth: null,
+          ...BASE,
+          capabilityProfile: STRICT,
+        },
+        { seedDefault: false },
+      );
+      registry.create(
+        {
+          cpId: "CP618-future-db",
+          basicAuth: null,
+          ...BASE,
+          capabilityProfile: { disabledActions: ["Reset"] },
+        },
+        { seedDefault: false },
+      );
+      db.run(
+        "UPDATE charge_points SET capability_profile = ? WHERE cp_id = ?",
+        [
+          JSON.stringify({
+            disabledActions: ["Reset"],
+            statusTransitions: "someFutureMode",
+            disabledActionErrorCode: "SomethingElse",
+          }),
+          "CP618-future-db",
+        ],
+      );
+      registry.shutdownAll();
+      restored = new CPRegistry(new EventBus(), db);
+      restored.restoreFromDatabase({ connect: false });
+      expect(
+        restored.get("CP618-strict-db")?.getInit().capabilityProfile,
+      ).toEqual(STRICT);
+      expect(
+        restored.get("CP618-future-db")?.getInit().capabilityProfile,
+      ).toEqual({ disabledActions: ["Reset"] });
+    } finally {
+      registry.shutdownAll();
+      restored?.shutdownAll();
+      db.close();
+    }
+  });
+});
+
+describe("status_notification_suppressed event (#618)", () => {
+  it("is forwarded when an out-of-table transition is kept off the wire", () => {
+    const svc = new CLIChargePointService(
+      testCpInit({
+        cpId: "cp-618-event",
+        capabilityProfile: { statusTransitions: "enforce" },
+      }),
+    );
+    const cp = chargePointOf(svc);
+    const events: CLIEvent[] = [];
+    svc.onEvent((ev) => {
+      if (ev.event === "status_notification_suppressed") events.push(ev);
+    });
+    cp.updateConnectorStatus(1, OCPPStatus.Available);
+    cp.updateConnectorStatus(1, OCPPStatus.Finishing);
+    expect(events).toEqual([
+      {
+        event: "status_notification_suppressed",
+        data: {
+          connectorId: 1,
+          from: OCPPStatus.Available,
+          to: OCPPStatus.Finishing,
+          reason: "invalidTransition",
+        },
+      },
+    ]);
   });
 });

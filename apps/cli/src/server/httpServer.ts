@@ -30,6 +30,10 @@ import { labelsSchema } from "@ocpp-cp-simulator/contracts/labels";
 import { modemConfigProblem } from "@ocpp-cp-simulator/core/cp/domain/modem/CellularModem";
 import { chargerCapabilitiesProblem } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargerCapabilities";
 import {
+  DISABLED_ACTION_ERROR_CODES,
+  STATUS_TRANSITION_MODES,
+} from "@ocpp-cp-simulator/core/cp/domain/charge-point/CapabilityProfile";
+import {
   behaviorIdsSchema,
   behaviorParamsSchema,
 } from "@ocpp-cp-simulator/contracts/methods";
@@ -1231,10 +1235,30 @@ function parseCapabilityProfile(
     }
     return list as string[];
   };
+  const oneOf = <T extends string>(
+    key: string,
+    allowed: readonly T[],
+  ): T | undefined => {
+    const v = raw[key];
+    if (v === undefined) return undefined;
+    if (typeof v !== "string" || !(allowed as readonly string[]).includes(v)) {
+      throw new Error(
+        `capabilityProfile.${key} must be one of ${allowed.join(", ")}`,
+      );
+    }
+    return v as T;
+  };
   const disabledActions = names("disabledActions");
   const triggerMessageTargets = names("triggerMessageTargets");
+  const disabledActionErrorCode = oneOf(
+    "disabledActionErrorCode",
+    DISABLED_ACTION_ERROR_CODES,
+  );
+  const statusTransitions = oneOf("statusTransitions", STATUS_TRANSITION_MODES);
   return {
     ...(disabledActions ? { disabledActions } : {}),
     ...(triggerMessageTargets ? { triggerMessageTargets } : {}),
+    ...(disabledActionErrorCode ? { disabledActionErrorCode } : {}),
+    ...(statusTransitions ? { statusTransitions } : {}),
   };
 }

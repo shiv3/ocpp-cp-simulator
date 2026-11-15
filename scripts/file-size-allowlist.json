@@ -37,8 +37,6 @@
   "packages/core/src/cp/domain/connector/Connector.ts": 1699,
   "packages/core/src/cp/domain/device-model/DeviceModelRegistry.ts": 1048,
   "packages/core/src/cp/domain/security/CertificateStore.ts": 880,
-  "packages/core/src/cp/infrastructure/transport/OCPPMessageHandler.ts": 1191,
-  "packages/core/src/cp/infrastructure/transport/OCPPMessageHandlerV201.ts": 1127,
   "packages/core/src/cp/infrastructure/transport/OCPPWebSocket.ts": 1294,
   "packages/core/src/cp/infrastructure/transport/soap/OCPPSoapHandler.ts": 809,
   "packages/core/src/cp/infrastructure/transport/soap/soapEnvelope.ts": 905,

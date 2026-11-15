@@ -5,6 +5,8 @@ summary: Why `--watch` behaves as it does — the derivation behind each reload 
 sources:
   - apps/cli/src/server/FileWatcher.ts
   - apps/cli/src/server/FileReloadManager.ts
+  - apps/cli/src/server/reload/idTagReload.ts
+  - apps/cli/src/server/reload/scenarioReload.ts
   - apps/cli/src/server/startServer.ts
   - apps/cli/src/server/startupScenario.ts
   - apps/cli/src/service.ts

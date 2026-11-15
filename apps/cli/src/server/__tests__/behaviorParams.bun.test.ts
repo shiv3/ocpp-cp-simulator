@@ -86,6 +86,7 @@ describe("cp.create / cp.update", () => {
       connectorsUnavailable: false,
       reboot: "none",
       jitterMs: 0,
+      bumpVersion: false,
     });
     const list = (await rpc(socket, "cp.list", {})).result as any[];
     expect(list.find((cp) => cp.cpId === "A")).toBeDefined();
@@ -103,6 +104,7 @@ describe("cp.create / cp.update", () => {
       connectorsUnavailable: false,
       reboot: "none",
       jitterMs: 0,
+      bumpVersion: false,
     });
     expect(paramsOf(server, "D", "knob")).toEqual({ count: 1, label: "a" });
   });
@@ -223,6 +225,7 @@ describe("persistence", () => {
       expect(paramsOf(second.server, "P", "knob").count).toBe(8);
       expect(paramsOf(second.server, "P", "default.signedFirmware")).toEqual({
         stepMs: 10,
+        bumpVersion: false,
       });
     } finally {
       await closeAll();
@@ -318,6 +321,7 @@ describe("behavior.list", () => {
       connectorsUnavailable: false,
       reboot: "none",
       jitterMs: 0,
+      bumpVersion: false,
     });
     expect(fw.params.schema.properties.failAt.enum).toEqual([
       "none",

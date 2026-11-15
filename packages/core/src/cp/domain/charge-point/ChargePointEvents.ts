@@ -80,6 +80,10 @@ export interface ChargePointEvents {
    *  any status transition the answer causes (#395). `connected` only means
    *  the socket opened; this is what says the CSMS registered the station. */
   bootNotificationResult: BootNotificationResult;
+  /** The station's firmwareVersion changed: a simulated firmware update
+   *  ended in Installed with the `bumpVersion` param. The next
+   *  BootNotification carries `firmwareVersion`. */
+  firmwareVersionChanged: { firmwareVersion: string; previous?: string };
   /** #702: the socket reopened after a connection loss and the station went
    *  on without a BootNotification (OCPP-J 2.0.1 §5.4). `reportedAll` says
    *  whether the outage exceeded `OfflineThreshold` (B04.FR.01). */

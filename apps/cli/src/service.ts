@@ -1115,6 +1115,34 @@ export class CLIChargePointService {
     });
   }
 
+  /**
+   * A simulated firmware update with `bumpVersion` changed the station's
+   * firmwareVersion (`firmwareVersionChanged`). `listener` lets the registry
+   * write it to the row's boot data: a restart boots with the installed
+   * version, as a real station would. `getInit()` follows the change on its
+   * own (see {@link attachEventForwarders}), with or without a listener, so
+   * a `cp.update` that omits the field keeps the installed version however
+   * the service was registered.
+   */
+  onFirmwareVersionChange(
+    listener: (
+      bootNotification: NonNullable<ChargePointInitOptions["bootNotification"]>,
+    ) => void,
+  ): () => void {
+    // Registered after the service's own subscription, so `_init` already
+    // holds the new version when this runs.
+    return this._chargePoint.events.on("firmwareVersionChanged", () => {
+      const { bootNotification } = this._init;
+      if (bootNotification) listener(bootNotification);
+    });
+  }
+
+  /** A line in this charge point's log, as a transaction message: what an
+   *  opt-in `stopTransactions` on `cp.delete` / `disconnect` did. */
+  logTransactionNote(message: string): void {
+    this._chargePoint.logger.info(message, LogType.TRANSACTION);
+  }
+
   /** Original init the CP was constructed from. Used by socket.io control
    *  flows to surface current config to the web console's edit modal. */
   getInit(): ChargePointInitOptions {
@@ -1188,6 +1216,26 @@ export class CLIChargePointService {
     return [...this._chargePoint.connectors.values()]
       .filter((connector) => connector.hasRunningTransaction)
       .map((connector) => connector.id);
+  }
+
+  /**
+   * The id a stop of the session running on `connectorId` carries on the
+   * wire: the 2.x `transactionInfo.transactionId`, or the 1.6 CSMS-assigned
+   * `transactionId`. `undefined` when there is no session, or when a 1.6
+   * StartTransaction.conf has not assigned the id yet (the stop's id is not
+   * known before it is sent). Lets a wait tell its own stops from others.
+   */
+  transactionWireId(connectorId: number): string | undefined {
+    const transaction =
+      this._chargePoint.connectors.get(connectorId)?.transaction;
+    if (!transaction) return undefined;
+    if (transaction.cpTransactionId !== undefined) {
+      return transaction.cpTransactionId;
+    }
+    if (transaction.startUnanswered || transaction.startCallError) {
+      return undefined;
+    }
+    return String(transaction.id);
   }
 
   /**
@@ -3044,6 +3092,23 @@ export class CLIChargePointService {
   }
 
   private attachEventForwarders(): void {
+    // A firmware update with `bumpVersion` installed a new version: the
+    // init a `cp.update` falls back to follows it, whether or not anything
+    // persists it (`onFirmwareVersionChange`).
+    this._unsubscribes.push(
+      this._chargePoint.events.on(
+        "firmwareVersionChanged",
+        ({ firmwareVersion }) => {
+          this._init = {
+            ...this._init,
+            bootNotification: {
+              ...(this._init.bootNotification ?? {}),
+              firmwareVersion,
+            },
+          };
+        },
+      ),
+    );
     // #603: a StartTransaction.conf that is not Accepted turns a start the
     // runner counted as accepted (the request went out) into a refusal;
     // once per session, and only for the answer to the start.

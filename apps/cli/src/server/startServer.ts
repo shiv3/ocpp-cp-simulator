@@ -215,6 +215,12 @@ export interface ServerOptions {
    */
   readonly shutdownStopTransactions?: { readonly waitMs: number };
   /**
+   * `--shutdown-wait-ms`, also the wait of an opt-in `stopTransactions` on
+   * `cp.delete` / `disconnect`, which does not need
+   * `--shutdown-stop-transactions`. Default 5000.
+   */
+  readonly shutdownWaitMs?: number;
+  /**
    * #622: `false` rebuilds the charge points of `--state-db` without dialling
    * them (operators connect them with `cp.connect`). Default `true`.
    */
@@ -423,6 +429,7 @@ export async function startServer(
     configRepository,
     scenarioRepository,
     connectorSettingsRepository,
+    stopTransactionsWaitMs: opts.shutdownWaitMs,
   });
   // Computed here rather than at the bootstrap loop because the watch restore
   // below needs it: these are the charge points a startup flag will load a

@@ -5,6 +5,7 @@ import type {
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { checkFirmwareSigningCertificate } from "../../../domain/security/signingCertificate";
 import { LogType } from "../../../shared/Logger";
+import { deriveFirmwareVersion } from "./firmwareVersion";
 
 /** The knobs of the simulated update; the defaults are the former constants. */
 const PARAMS: BehaviorParams = {
@@ -18,9 +19,15 @@ const PARAMS: BehaviorParams = {
         title: "Step (ms)",
         description: "Time between two statuses of the update",
       },
+      bumpVersion: {
+        type: "boolean",
+        title: "Bump version",
+        description:
+          "After Installed the station runs the new firmware: the firmwareVersion of the next BootNotification is the version in the file name of firmware.location, else the current version incremented (docs/entities/default-behaviors.md). This train never reboots, so the next boot is the operator's or a Reset",
+      },
     },
   },
-  defaults: { stepMs: 2000 },
+  defaults: { stepMs: 2000, bumpVersion: false },
 };
 
 interface SignedUpdateFirmwareRequest {
@@ -54,7 +61,9 @@ interface SignedUpdateFirmwareRequest {
  * `DownloadScheduled` right after the answer (L01.FR.13), and the train starts
  * then; a future `installDateTime` is announced with `InstallScheduled` after
  * `SignatureVerified` (L01.FR.16) and `Installing` follows at that time
- * (L01.FR.17). A past or absent time keeps the plain train. `retries` / `retryInterval` are logged,
+ * (L01.FR.17). A past or absent time keeps the plain train. With the
+ * `bumpVersion` param, Installed also sets the station's firmwareVersion
+ * (see `deriveFirmwareVersion`), reported at the next BootNotification. `retries` / `retryInterval` are logged,
  * not exercised. A train is separate from the plain UpdateFirmware train.
  */
 export function signedFirmwareBehavior(cp: ChargePoint): Behavior {
@@ -168,6 +177,14 @@ export function signedFirmwareBehavior(cp: ChargePoint): Behavior {
                     if (ctx.state.run !== run) return;
                   }
                   ctx.notify.signedFirmwareStatus(step, req.requestId);
+                  if (step === "Installed" && ctx.params.bumpVersion === true) {
+                    cp.setFirmwareVersion(
+                      deriveFirmwareVersion(
+                        req.firmware.location,
+                        cp.bootPayload().firmwareVersion,
+                      ),
+                    );
+                  }
                   if (step === "Installed") {
                     // L01.FR.33: right after Installed.
                     await cp

@@ -272,4 +272,62 @@ describe("recordBehavior", () => {
     expect(rec.skipped).toEqual([]);
     expectValid(rec);
   }, 60_000);
+
+  test("no answer becomes callResponse kind none; a CALL sent before the answer is listed, not recorded", async () => {
+    const rec = await recordBehavior({
+      behavior: probe,
+      version: "1.6",
+      trigger: { action: "UnlockConnector", payload: { connectorId: 1 } },
+      ...stamp,
+    });
+    expect(types(rec)).toEqual([
+      "start",
+      "csmsCallTrigger",
+      "callResponse",
+      "end",
+    ]);
+    expect(dataOf(rec)[2]).toMatchObject({ kind: "none" });
+    expect(rec.skipped).toEqual([
+      expect.stringMatching(
+        /^DataTransfer at \d+ ms: sent before the answer settled$/,
+      ),
+      "UnlockConnector: the behavior sent no answer",
+    ]);
+    expect(rec.diagram).not.toContain("DataTransfer");
+    expectValid(rec);
+  }, 60_000);
+
+  test("a Heartbeat is left out and any other CALL becomes an ocppCall node", async () => {
+    const rec = await recordBehavior({
+      behavior: probe,
+      version: "1.6",
+      trigger: {
+        action: "ChangeAvailability",
+        payload: { connectorId: 1, type: "Operative" },
+      },
+      ...stamp,
+    });
+    expect(types(rec)).toEqual([
+      "start",
+      "csmsCallTrigger",
+      "callResponse",
+      "delay",
+      "ocppCall",
+      "end",
+    ]);
+    const data = dataOf(rec);
+    expect(data[2]).toMatchObject({ kind: "accepted" });
+    expect(data[3]).toMatchObject({ delaySeconds: 2 });
+    expect(data[4]).toMatchObject({
+      action: "DataTransfer",
+      payload: { vendorId: "v", data: "d" },
+    });
+    expect(rec.skipped).toEqual([
+      expect.stringMatching(
+        /^Heartbeat at \d+ ms: station upkeep, not an effect of the behavior$/,
+      ),
+    ]);
+    expect(rec.diagram).not.toContain("Heartbeat");
+    expectValid(rec);
+  }, 60_000);
 });

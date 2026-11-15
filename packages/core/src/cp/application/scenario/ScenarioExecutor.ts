@@ -6,39 +6,11 @@ import type {
   ScenarioExecutorCallbacks,
   ScenarioEvents,
   ScenarioNode,
-  StatusChangeNodeData,
-  TransactionNodeData,
-  MeterValueNodeData,
-  DelayNodeData,
-  NotificationNodeData,
-  ConnectorPlugNodeData,
-  RemoteStartTriggerNodeData,
-  RemoteStopTriggerNodeData,
-  CsmsCallTriggerNodeData,
-  StatusTriggerNodeData,
-  ReserveNowNodeData,
-  CancelReservationNodeData,
-  ReservationTriggerNodeData,
-  StatusNotificationNodeData,
-  UnlockOutcomeNodeData,
-  ResponseOverrideNodeData,
-  InboundPolicyNodeData,
-  CertQuirksNodeData,
-  ConfigSetNodeData,
-  DataTransferNodeData,
-  OcppCallNodeData,
-  CallResponseNodeData,
-  UseBehaviorNodeData,
-  NotifyNodeData,
-  SwitchNodeData,
-  ChoiceNodeData,
-  SetStateNodeData,
-  ConnectionTriggerNodeData,
   StartTransactionOptions,
   StopTransactionOptions,
   ScenarioWaitIntervention,
 } from "./ScenarioTypes";
-import { ScenarioFlowNodeType, ScenarioNodeType } from "./ScenarioTypes";
+import { ScenarioNodeType } from "./ScenarioTypes";
 import { type FromScope } from "./resolveFrom";
 import {
   createScenarioMachine,
@@ -51,45 +23,8 @@ import { BranchScope, ParallelRegion } from "./branchScope";
 import type { WaitControl } from "./WaitControl";
 import { type WaitSignal } from "./WaitControl";
 import type { Flow, NodeRunContext, ParkedWait } from "./nodes/context";
-import {
-  executeCertQuirks,
-  executeInboundPolicy,
-  executeResponseOverride,
-} from "./nodes/policies";
-import { executeMeterValue } from "./nodes/meterValue";
-import {
-  executeChoice,
-  executeNotify,
-  executeSetState,
-  executeSwitch,
-  pickCase,
-} from "./nodes/branching";
-import {
-  executeCallResponse,
-  executeConfigSet,
-  executeDataTransfer,
-  executeOcppCall,
-  executeStatusNotification,
-  executeUnlockOutcome,
-  executeUseBehavior,
-} from "./nodes/calls";
-import {
-  executeConnectorPlug,
-  executeDelay,
-  executeNotification,
-  executeStatusChange,
-  executeTransaction,
-} from "./nodes/transaction";
-import {
-  executeCancelReservation,
-  executeConnectionTrigger,
-  executeCsmsCallTrigger,
-  executeRemoteStartTrigger,
-  executeRemoteStopTrigger,
-  executeReservationTrigger,
-  executeReserveNow,
-  executeStatusTrigger,
-} from "./nodes/triggers";
+import { pickCase } from "./nodes/branching";
+import { executeNode } from "./nodes/dispatch";
 import {
   sleep,
   waitForStep,
@@ -1032,7 +967,7 @@ export class ScenarioExecutor {
       node.type !== ScenarioNodeType.START &&
       node.type !== ScenarioNodeType.END
     ) {
-      await this.executeNode(node, flow);
+      await executeNode(this.nodeCtx, node, flow);
     }
 
     // Dispatch NODE_COMPLETE event
@@ -1050,222 +985,6 @@ export class ScenarioExecutor {
       `node.${node.type}.complete` as keyof ScenarioEvents,
       nodeCompleteData,
     );
-  }
-
-  /**
-   * Execute a single node
-   */
-  private async executeNode(node: ScenarioNode, flow: Flow): Promise<void> {
-    // Log node execution
-    const nodeLabel = node.data?.label || node.id;
-    this.callbacks.log?.(
-      `[${this.scenario.name}] Executing node: ${nodeLabel} (${node.type})`,
-      "debug",
-    );
-
-    switch (node.type) {
-      case ScenarioNodeType.STATUS_CHANGE:
-        await executeStatusChange(
-          this.nodeCtx,
-          node.data as StatusChangeNodeData,
-        );
-        break;
-
-      case ScenarioNodeType.TRANSACTION:
-        await executeTransaction(
-          this.nodeCtx,
-          node.data as TransactionNodeData,
-        );
-        break;
-
-      case ScenarioNodeType.METER_VALUE:
-        await executeMeterValue(
-          this.nodeCtx,
-          node.id,
-          node.data as MeterValueNodeData,
-          flow.scope,
-        );
-        break;
-
-      case ScenarioNodeType.DELAY:
-        await executeDelay(
-          this.nodeCtx,
-          node.id,
-          node.data as DelayNodeData,
-          flow.scope,
-        );
-        break;
-
-      case ScenarioNodeType.NOTIFICATION:
-        await executeNotification(
-          this.nodeCtx,
-          node.data as NotificationNodeData,
-        );
-        break;
-
-      case ScenarioNodeType.CONNECTOR_PLUG:
-        await executeConnectorPlug(
-          this.nodeCtx,
-          node.data as ConnectorPlugNodeData,
-        );
-        break;
-
-      case ScenarioNodeType.REMOTE_START_TRIGGER:
-        await executeRemoteStartTrigger(
-          this.nodeCtx,
-          node.id,
-          node.data as RemoteStartTriggerNodeData,
-          flow,
-        );
-        break;
-
-      case ScenarioNodeType.REMOTE_STOP_TRIGGER:
-        await executeRemoteStopTrigger(
-          this.nodeCtx,
-          node.id,
-          node.data as RemoteStopTriggerNodeData,
-          flow,
-        );
-        break;
-
-      case ScenarioNodeType.STATUS_TRIGGER:
-        await executeStatusTrigger(
-          this.nodeCtx,
-          node.id,
-          node.data as StatusTriggerNodeData,
-          flow,
-        );
-        break;
-
-      case ScenarioNodeType.RESERVE_NOW:
-        await executeReserveNow(this.nodeCtx, node.data as ReserveNowNodeData);
-        break;
-
-      case ScenarioNodeType.CANCEL_RESERVATION:
-        await executeCancelReservation(
-          this.nodeCtx,
-          node.data as CancelReservationNodeData,
-        );
-        break;
-
-      case ScenarioNodeType.RESERVATION_TRIGGER:
-        await executeReservationTrigger(
-          this.nodeCtx,
-          node.id,
-          node.data as ReservationTriggerNodeData,
-          flow,
-        );
-        break;
-
-      case ScenarioNodeType.CSMS_CALL_TRIGGER:
-        await executeCsmsCallTrigger(
-          this.nodeCtx,
-          node.id,
-          node.data as CsmsCallTriggerNodeData,
-          flow,
-        );
-        break;
-
-      case ScenarioNodeType.STATUS_NOTIFICATION:
-        await executeStatusNotification(
-          this.nodeCtx,
-          node.data as StatusNotificationNodeData,
-        );
-        break;
-
-      case ScenarioNodeType.UNLOCK_OUTCOME:
-        await executeUnlockOutcome(
-          this.nodeCtx,
-          node.data as UnlockOutcomeNodeData,
-        );
-        break;
-
-      case ScenarioNodeType.RESPONSE_OVERRIDE:
-        await executeResponseOverride(
-          this.nodeCtx,
-          node.data as ResponseOverrideNodeData,
-        );
-        break;
-
-      case ScenarioNodeType.INBOUND_POLICY:
-        await executeInboundPolicy(
-          this.nodeCtx,
-          node.data as InboundPolicyNodeData,
-        );
-        break;
-
-      case ScenarioNodeType.CERT_QUIRKS:
-        await executeCertQuirks(this.nodeCtx, node.data as CertQuirksNodeData);
-        break;
-
-      case ScenarioNodeType.CONFIG_SET:
-        await executeConfigSet(this.nodeCtx, node.data as ConfigSetNodeData);
-        break;
-
-      case ScenarioNodeType.DATA_TRANSFER:
-        await executeDataTransfer(
-          this.nodeCtx,
-          node.data as DataTransferNodeData,
-        );
-        break;
-
-      case ScenarioNodeType.OCPP_CALL:
-        await executeOcppCall(
-          this.nodeCtx,
-          node.data as OcppCallNodeData,
-          flow,
-        );
-        break;
-
-      case ScenarioNodeType.CALL_RESPONSE:
-        await executeCallResponse(
-          this.nodeCtx,
-          node.data as CallResponseNodeData,
-          flow,
-        );
-        break;
-
-      case ScenarioNodeType.USE_BEHAVIOR:
-        executeUseBehavior(
-          this.nodeCtx,
-          node.id,
-          node.data as UseBehaviorNodeData,
-        );
-        break;
-
-      case ScenarioNodeType.NOTIFY:
-        executeNotify(this.nodeCtx, node.data as NotifyNodeData, flow);
-        break;
-
-      case ScenarioNodeType.SWITCH:
-        executeSwitch(this.nodeCtx, node.data as SwitchNodeData, flow);
-        break;
-
-      case ScenarioNodeType.CHOICE:
-        executeChoice(this.nodeCtx, node.data as ChoiceNodeData, flow);
-        break;
-
-      case ScenarioNodeType.SET_STATE:
-        executeSetState(this.nodeCtx, node.data as SetStateNodeData, flow);
-        break;
-
-      case ScenarioNodeType.CONNECTION_TRIGGER:
-        await executeConnectionTrigger(
-          this.nodeCtx,
-          node.id,
-          node.data as ConnectionTriggerNodeData,
-          flow,
-        );
-        break;
-
-      // Schema 1.9: control flow only; the walk forks and meets.
-      case ScenarioFlowNodeType.PARALLEL:
-      case ScenarioFlowNodeType.JOIN:
-        break;
-
-      default:
-        console.warn(`Unknown node type: ${node.type}`);
-    }
   }
 
   /**

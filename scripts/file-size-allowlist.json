@@ -25,7 +25,6 @@
   "apps/web/src/console/pages/scenarios/run/StepsView.tsx": 1402,
   "apps/web/src/data/local/LocalChargePointService.ts": 1292,
   "packages/client/src/remote/RemoteChargePointService.ts": 2083,
-  "packages/contracts/src/methods.ts": 1975,
   "packages/contracts/src/redaction.ts": 820,
   "packages/core/src/cp/application/engine/ChargerEngine.ts": 1279,
   "packages/core/src/cp/application/engine/behaviors/transaction.ts": 903,

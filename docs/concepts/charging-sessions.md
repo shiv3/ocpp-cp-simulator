@@ -7,7 +7,7 @@ sources:
   - packages/core/src/cp/application/services/ChargingSessionRecorder.ts
   - packages/core/src/cp/domain/persistence/ChargingSessionRepository.ts
   - packages/core/src/cp/infrastructure/persistence/SqliteChargingSessionRepository.ts
-  - packages/contracts/src/methods.ts (sessions.list)
+  - packages/contracts/src/methods/daemonMethods.ts (sessions.list)
   - "issue #447"
   - "issue #491"
   - "issue #490"
@@ -30,7 +30,7 @@ related:
   - local-authorization.md
   - power-loss.md
   - smart-charging.md
-updated: 2026-11-14
+updated: 2026-11-15
 ---
 
 # Charging sessions

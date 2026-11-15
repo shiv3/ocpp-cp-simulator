@@ -3,7 +3,7 @@ title: Fleet templates
 type: concept
 summary: One persisted definition of a heterogeneous fleet — groups of charge points, each line naming a blueprint, scenario template, EV settings, network simulation, labels and field overrides — shared by `--fleet-template` files and the state database, instantiated by `fleet.create`.
 sources:
-  - packages/contracts/src/methods.ts (fleetTemplateSchema, fleetCreateParamsSchema)
+  - packages/contracts/src/schemas/fleet.ts (fleetTemplateSchema, fleetCreateParamsSchema)
   - apps/cli/src/server/rpc/cpProvisioning.ts (planFleet, createFleet)
   - apps/cli/src/server/fleetTemplateFiles.ts
   - apps/web/src/console/pages/FleetTemplatesPage.tsx

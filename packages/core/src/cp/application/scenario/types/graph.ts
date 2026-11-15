@@ -1,11 +1,8 @@
 import type { Node, Edge } from "@xyflow/react";
 import type { OCPPStatus } from "../../../domain/types/OcppTypes";
 import type { EVSettings } from "../../../domain/connector/EVSettings";
-import type {
-  AssertionSpec,
-  ScenarioNodeData,
-  ScenarioExecutionMode,
-} from "../ScenarioTypes";
+import type { ScenarioNodeData, ScenarioExecutionMode } from "./nodeData";
+import type { AssertionSpec } from "./assertions";
 
 /**
  * Scenario node with typed data

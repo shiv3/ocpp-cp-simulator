@@ -43,6 +43,24 @@ export class PlugInFlow {
 
   constructor(private readonly host: PlugInFlowHost) {}
 
+  /**
+   * The EV side of the cable was unplugged (#488). With a running
+   * transaction, `StopTransactionOnEVSideDisconnect` (2.x
+   * `TxCtrlr.StopTxOnEVSideDisconnect`) decides:
+   * - true: the transaction stops with `EVDisconnected` (1.6 §4.9 / §4.10;
+   *   2.0.1 E09: Ended, triggerReason `EVCommunicationLost`);
+   * - false: the transaction is kept and the connector goes SuspendedEV
+   *   (1.6 §4.9 / §4.10) with its energy offer stopped: the register no
+   *   longer rises while periodic MeterValues keep going out, and the
+   *   derived power is zero outside Charging. On 2.x a
+   *   TransactionEvent(Updated) carries chargingState `SuspendedEV` and
+   *   triggerReason `EVCommunicationLost` (E10); the StatusNotification
+   *   that follows is de-duplicated against it. A second unplug while so
+   *   suspended sends nothing.
+   * Without a transaction a Preparing, Finishing or Suspended* connector goes
+   * Available (1.6 §4.9 B1); an Unavailable, Faulted or Reserved one keeps its
+   * status. The EV and cable model (#453) records the cable as unplugged.
+   */
   evDisconnected(connectorId: number): void {
     const connector = this.host.chargePoint.getConnector(connectorId);
     if (!connector) {
@@ -118,6 +136,14 @@ export class PlugInFlow {
     );
   }
 
+  /**
+   * The status a connector shows when whatever held it (an unavailable
+   * period, a reservation, a firmware hold) ends: `Preparing` (2.x `Occupied`)
+   * while a cable is recorded and no transaction runs (1.6 §4.9; 2.0.1 G01,
+   * H03.FR.10), else `Available`. Without this a plug-in during the hold stayed
+   * recorded while `Available` was shown, and the next plug-in was swallowed
+   * (#830 review).
+   */
   statusWhenFree(connectorId: number): OCPPStatus {
     const connector = this.host.chargePoint.getConnector(connectorId);
     return connector &&
@@ -129,6 +155,16 @@ export class PlugInFlow {
       : OCPPStatus.Available;
   }
 
+  /**
+   * A cable was plugged into the connector's EV side (#453). Idempotent: a
+   * second plug-in changes nothing. An idle `Available` connector reports
+   * `Preparing` (1.6 §4.9 transition A2, "insert plug"; 2.x StatusNotification
+   * `Occupied`, the cable plugged in before the driver authorizes), which starts the
+   * ConnectionTimeOut and allows the authorize / start that follows. In any
+   * other state (a running transaction, Unavailable, Faulted, Reserved,
+   * power lost) the cable is recorded and the status stays: the plug-in
+   * does not lift them. Unplug with {@link evDisconnected}.
+   */
   evPlugIn(connectorId: number): void {
     const connector = this.host.chargePoint.getConnector(connectorId);
     if (!connector || connectorId === 0) {
@@ -232,6 +268,14 @@ export class PlugInFlow {
     this._tokenAwaitingPlugIn.set(connectorId, { tagId, options });
   }
 
+  /**
+   * The EV asks for energy (`ready`) or stops asking (#453). Needs a
+   * plugged-in cable. With a running transaction, "not ready" suspends the
+   * energy offer and reports `SuspendedEV` (1.6 §4.9 C4; 2.x TransactionEvent
+   * Updated, chargingState `SuspendedEV`, triggerReason `ChargingStateChanged`),
+   * and "ready" resumes `Charging` from that (D3). Without a transaction
+   * the readiness is recorded and nothing is sent. Idempotent.
+   */
   evSetReady(connectorId: number, ready: boolean): void {
     const connector = this.host.chargePoint.getConnector(connectorId);
     if (!connector || connectorId === 0) {

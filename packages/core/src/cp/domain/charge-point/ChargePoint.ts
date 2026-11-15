@@ -1,11 +1,9 @@
 import type { VehicleBehaviorDriver } from "./VehicleBehaviorDriver";
-
 import type {
   DiagnosticsStatus,
   FirmwareStatus,
   UploadLogStatus,
 } from "../types/FirmwareLogStatus";
-
 import {
   capabilityProfileConflicts,
   disabledActionErrorCode,
@@ -14,63 +12,36 @@ import {
   type ChargePointCapabilityProfile,
   type DisabledActionErrorCode,
 } from "./CapabilityProfile";
-
 import { translatesCsmsActionNames } from "../types/csmsActionNames";
-
 import { DeviceModelPublisher } from "./DeviceModelPublisher";
-
 import { ConfigurationWiring } from "./ConfigurationWiring";
-
 import { AuthorizationFlow } from "./AuthorizationFlow";
-
 import { MeterSampling } from "./MeterSampling";
-
 import { PowerLossController } from "./PowerLossController";
-
 import { ConnectionTimeouts } from "./ConnectionTimeouts";
-
 import { ResetOnIdle } from "./ResetOnIdle";
-
 import { PlugInFlow } from "./PlugInFlow";
-
 import { ConnectorWiring } from "./ConnectorWiring";
-
 import { BootLifecycle, type BootState } from "./BootLifecycle";
-
 import { OutageLifecycle } from "./OutageLifecycle";
-
 import { StationMessaging } from "./StationMessaging";
-
 import { ConnectorStatusControl } from "./ConnectorStatusControl";
-
 import { ChargingProfileControl } from "./ChargingProfileControl";
 import { EventEmitter } from "../../shared/EventEmitter";
-
 import { realClock } from "../../shared/clock";
-
 import type { SimClock, TimerHandle } from "../../shared/clock";
-
 import { RngStreams, systemRngStreams } from "../../shared/rng";
-
 import type { Rng, RngSource } from "../../shared/rng";
-
 import type {
   DataTransferData,
   DataTransferResult,
 } from "../types/DataTransfer";
-
 import type { LogEntry } from "../../shared/Logger";
-
 import { Logger, LogType } from "../../shared/Logger";
-
 import { MainMeter } from "./MainMeter";
-
 import { ClockAlignedMeterScheduler } from "./ClockAlignedMeterScheduler";
-
 import type { Connector } from "../connector/Connector";
-
 import type { ConnectorWrite } from "../connector/ConnectorRecord";
-
 import type {
   BootNotificationResult,
   ChargePointEvents,
@@ -79,72 +50,48 @@ import type {
   ClearedChargingProfiles,
   IncomingCallCompletion,
 } from "./ChargePointEvents";
-
 import { ConfigurationStore } from "./ConfigurationStore";
-
 import type {
   AuthorizeSendHooks,
   IChargePointMessageHandler,
 } from "../transport/IChargePointMessageHandler";
-
 import type { ChargePointSocket } from "../transport/ChargePointSocket";
-
 import type { RawFrameSink } from "../transport/RawFrameSink";
-
 import { CellularModem, type RedactedModemState } from "../modem/CellularModem";
-
 import { CallOverrides } from "./CallOverrides";
-
 import { ScenarioCallOwnership } from "./ScenarioCallOwnership";
-
 import { CellularLinkController } from "./CellularLinkController";
-
 import { ClientCertificateSwitch } from "./ClientCertificateSwitch";
-
 import { bootNotificationFor } from "../modem/bootIdentifiers";
-
 import {
   type CellularLinkState,
   type CellularLinkWire,
   type CellularPolicySet,
 } from "../modem/cellularLink";
-
 import type { OcppCallActions } from "../transport/OcppCallActions";
-
 import type {
   ChargePointDeps,
   ChargePointTransactions,
   ChargePointTransport,
 } from "./ChargePointDeps";
-
 import type { FileUploader } from "./FileUploader";
-
 import type { ResolvedNetworkSimConfig } from "../transport/networkSim";
-
 import type { OcppSecurityProfile } from "@ocpp-cp-simulator/contracts/securityProfile";
-
 import type { OcppTlsOptions } from "../transport/ConnectionSecurity";
-
 import { Outbox } from "../transport/Outbox";
-
 import {
   type OcppCallOutcome,
   type OcppCallRequest,
   type RawFrameOutcome,
   type RawFrameRequest,
 } from "../types/OcppCall";
-
 import {
   type Get15118EVCertificateRequest,
   type Get15118EVCertificateResult,
 } from "../security/get15118EVCertificate";
-
 import type { ChargePointRepositories } from "../persistence/ChargePointRepositories";
-
 import type { LogSink } from "../persistence/LogSink";
-
 import type { PendingMessageRepository } from "../persistence/PendingMessageRepository";
-
 import type {
   OCPPAvailability,
   StatusNotificationOptions,
@@ -152,96 +99,67 @@ import type {
   BootReason,
   ChargePointStatus,
 } from "../types/OcppTypes";
-
 import { isOcpp2Version, isSoapVersion, OCPP_1_6 } from "../types/OcppVersion";
-
 import { DeviceModelTargets } from "./DeviceModelTargets";
-
 import { OCPPStatus } from "../types/OcppTypes";
-
 import type {
   IdTokenTypeName,
   StopTransactionReason,
   TransactionUpdateOptions,
 } from "../connector/Transaction";
-
 import {
   type MeterSampleOverrides,
   type ReadingContext,
 } from "../connector/MeterValueBuilder";
-
 import { ReservationManager } from "../reservation/Reservation";
-
 import { LocalAuthListManager } from "../auth/LocalAuthList";
-
 import { idTokenMaxLength } from "../auth/AuthorizationCacheSeed";
-
 import { AuthorizationCache } from "../auth/AuthorizationCache";
-
 import {
   StationAuthorization,
   type CsmsAuthorizationResult,
 } from "../auth/StationAuthorization";
-
 import {
   ChargingProfileStore,
   type ApplyChargingProfileOptions,
   type ProfileRemoveCriteria,
 } from "./ChargingProfileStore";
-
 import type { ActiveChargingProfile } from "../connector/Connector";
-
 import { CertificateStore } from "../security/CertificateStore";
-
 import {
   checkNetworkProfile,
   NetworkProfileStore,
   type NetworkConnectionProfile,
   type NetworkProfileVerdict,
 } from "../security/networkProfiles";
-
 import { MonitoringStore } from "../monitoring/MonitoringStore";
-
 import { DEFAULT_MONITOR_CATALOG } from "../monitoring/monitorCatalog";
-
 import type { MonitorEvaluation } from "../monitoring/MonitorEvaluation";
-
 import { OcmfMeter } from "../connector/SignedMeterData";
-
 import {
   DEFAULT_ID_TAG,
   IdTagPool,
   type IdTagDistribution,
 } from "../auth/IdTagPool";
-
 import { assertWsClientOptions } from "../../shared/WsClientOptions";
-
 import {
   resolveReconnectPolicy,
   type ReconnectPolicy,
 } from "../../shared/ReconnectPolicy";
-
 import type { ChargePointBehaviorRegistry } from "../engine/behaviorRules";
-
 import type {
   ChargePointEngine,
   LoadBehaviorOptions,
   TransactionPorts,
 } from "../engine/ChargePointEngine";
-
 import type { ChargePointHeartbeat } from "../services/ChargePointHeartbeat";
-
 import type { ChargePointStateManager } from "../services/ChargePointStateManager";
-
 import type {
   ChargePointTimeline,
   ChargePointTimelineProjector,
 } from "../services/ChargePointTimeline";
-
 import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
-
 import { StationTopology } from "../topology/StationTopology";
-
 import {
   DEFAULT_INBOUND_VALIDATION,
   PowerStateError,
@@ -261,7 +179,6 @@ import {
   type InboundValidationMode,
   type ChargePointTransportOptions,
 } from "./ChargePointTypes";
-
 export {
   DEFAULT_INBOUND_VALIDATION,
   PowerStateError,
@@ -1096,12 +1013,8 @@ export class ChargePoint {
     this._certSwitch.watchClientIdentity();
   }
 
-  /**
-   * #724 A05.FR.06-08: after the CALLRESULT of an accepted `SecurityProfile`
-   * upgrade the station disconnects and reconnects with the new profile.
-   * When that connection does not open, the previous profile is put back
-   * and used for the next attempt (A05.FR.08).
-   */
+  /** #724 A05.FR.06-08: reconnect with the upgraded security profile.
+   *  @see ConfigurationWiring.switchSecurityProfile */
   switchSecurityProfile(previousProfile: number): void {
     this._configWiring.switchSecurityProfile(previousProfile);
   }
@@ -1534,11 +1447,8 @@ export class ChargePoint {
     return this._profileControl.getActiveChargePointMaxProfile(now);
   }
 
-  /**
-   * Register a connector as being handled by a scenario.
-   * When registered, RemoteStartTransaction handler will emit
-   * remoteStartReceived instead of calling startTransaction directly.
-   */
+  /** Register a connector as handled by a scenario.
+   *  @see ScenarioCallOwnership.register */
   registerScenarioHandler(connectorId: number): void {
     this._scenarioCalls.register(connectorId);
   }
@@ -1565,19 +1475,14 @@ export class ChargePoint {
     });
   }
 
-  /** Record that RemoteStartTransaction for `connectorId` was just handled
-   *  by the default (non-scenario) path — i.e. isScenarioHandled(connectorId)
-   *  was false at delivery time. See ScenarioCallOwnership. */
+  /** Record a RemoteStartTransaction handled by the default path.
+   *  @see ScenarioCallOwnership.noteDefaultHandledRemoteStart */
   noteDefaultHandledRemoteStart(connectorId: number): void {
     this._scenarioCalls.noteDefaultHandledRemoteStart(connectorId);
   }
 
-  /** Consume (and remove) the timestamp recorded by
-   *  noteDefaultHandledRemoteStart for `connectorId`, if any exists at or
-   *  after `sinceMs`. Returns that epoch-ms timestamp, or null if there is
-   *  none — or it predates `sinceMs`, i.e. it's a stale bypass from before
-   *  the caller's own run started and therefore unrelated to it. Always
-   *  deletes the entry so a stale record can't linger indefinitely. */
+  /** Consume the timestamp noteDefaultHandledRemoteStart recorded.
+   *  @see ScenarioCallOwnership.takeDefaultHandledRemoteStart */
   takeDefaultHandledRemoteStart(
     connectorId: number,
     sinceMs: number,
@@ -1588,13 +1493,8 @@ export class ChargePoint {
     );
   }
 
-  /**
-   * Counterpart of registerScenarioHandler for the stop side: a
-   * RemoteStopTrigger scenario node registers here so the next
-   * RemoteStopTransaction.req from CSMS gets routed into the scenario
-   * via `remoteStopReceived` instead of the default handler running
-   * stopTransaction() right away.
-   */
+  /** Stop-side counterpart of registerScenarioHandler.
+   *  @see ScenarioCallOwnership.registerStop */
   registerScenarioStopHandler(connectorId: number): void {
     this._scenarioCalls.registerStop(connectorId);
   }
@@ -1640,13 +1540,8 @@ export class ChargePoint {
     this._events.emit("incomingCallCompleted", completion);
   }
 
-  /**
-   * `StopTransactionOnInvalidId=false` and the id was not accepted: keep the
-   * transaction but stop the energy delivery (2.0.1
-   * E05.FR.02/03, C15.FR.06; 2.x only, 1.6 errata 3.17 is #736). With `MaxEnergyOnInvalidId` > 0 that much energy
-   * is delivered first; the connector reports SuspendedEVSE either way once
-   * the delivery has stopped.
-   */
+  /** Keep the transaction but stop the energy delivery after a non-Accepted id.
+   *  @see AuthorizationFlow.holdEnergyOnInvalidId */
   holdEnergyOnInvalidId(connector: Connector): void {
     this._authorizationFlow.holdEnergyOnInvalidId(connector);
   }
@@ -1695,33 +1590,8 @@ export class ChargePoint {
     this._events.emit("authorizeResult", { tagId, status });
   }
 
-  /**
-   * Authorize `tagId` for a local start (issues #181, #452). Resolves with
-   * an idTagInfo/idTokenInfo status ("Accepted", "Invalid", "Expired",
-   * "Blocked", ...). Never rejects.
-   *
-   * The local decision comes first (see `auth/LocalAuthorizationResolver.ts`
-   * for the rules and their OCPP 1.6 §3.5 / 2.0.1 C12-C15 sources):
-   * - offline, it decides alone, at once, without Authorize.req;
-   * - online, a valid local-list or cache entry with `LocalPreAuthorize`
-   *   resolves "Accepted" without Authorize.req (§9.1.13);
-   * - otherwise Authorize.req goes out and the tag-matched
-   *   `authorizeResult` event resolves it, so concurrent Authorize calls
-   *   for different tags don't cross streams.
-   *
-   * While waiting, a disconnect hands the decision to the offline rules.
-   * A timeout while still connected falls back to what the station knows:
-   * a NOT-valid local-list or cache entry resolves its status (#452);
-   * anything else warns and resolves "Accepted" (warn-and-proceed, #181).
-   * A timeout once the socket is gone applies the offline rules.
-   *
-   * On OCPP 2.x the CALL may wait behind another one (Part 4 §4.1.1, #708), so
-   * the timeout is armed when the Authorize is written, not when it is queued
-   * (#762), and lasts at least `MessageTimeout`. `failClosed` (2.x F01.FR.01,
-   * 1.6 §5.11: a remote start only after authorization was obtained, #921)
-   * makes an unanswered Authorize resolve "Unknown" instead of
-   * warn-and-proceed "Accepted".
-   */
+  /** Authorize `tagId` for a local start (#181, #452); never rejects.
+   *  @see AuthorizationFlow.authorizeAndWait */
   authorizeAndWait(
     tagId: string,
     timeoutMs = 10000,
@@ -1852,48 +1722,20 @@ export class ChargePoint {
     return this._messaging.get15118EVCertificate(request);
   }
 
-  /**
-   * #537 A02.FR.08: after CertificateSigned accepted a new Charging Station
-   * certificate, a security-profile-3 station switches to it by
-   * reconnecting with it as its TLS client certificate, once its notBefore
-   * has passed (2.0.1 asks for that; 2.1 gets the same wait). A station
-   * that is not connected presents it at its next connection instead of
-   * reconnecting. The reconnect waits, up to
-   * {@link RENEWED_CERTIFICATE_RECONNECT_MAX_DEFER_MS}, for the transaction
-   * messages in flight. Nothing happens on other profiles; when the store
-   * holds no private key for the chain (a CSR the caller supplied) the
-   * transport forgets any renewed identity. A restart or a `cp.update`
-   * presents the configured `--tls-cert` again: the key is never
-   * persisted. A call made while an earlier one still reads the store
-   * supersedes it.
-   */
+  /** #537 A02.FR.08: switch to the renewed client certificate by reconnecting.
+   *  @see ClientCertificateSwitch.switchClientCertificate */
   async useRenewedClientCertificate(): Promise<void> {
     await this._certSwitch.switchClientCertificate(true);
   }
 
-  /**
-   * #564: the same switch without the reconnect: the renewed certificate is
-   * handed to the transport as soon as the chain is stored, so the next
-   * connection presents it even if the CertificateSigned answer is dropped
-   * before it is written (a manual disconnect while network simulation holds
-   * it). The reconnect of an open connection stays with
-   * {@link useRenewedClientCertificate}, run once the answer is written, so
-   * the answer goes out on the connection that received the request.
-   * Handing the same identity over again changes nothing, and neither call
-   * runs on a connect, so no connection reconnects for it again.
-   */
+  /** #564: the same switch without the reconnect.
+   *  @see ClientCertificateSwitch.switchClientCertificate */
   async adoptRenewedClientCertificate(): Promise<void> {
     await this._certSwitch.switchClientCertificate(false);
   }
 
-  /**
-   * #537: ends the renewed certificate switch for good on an instance being
-   * replaced (`cp.update`) or disposed: cancels the in-flight
-   * wait, stops following the store, and drops every in-memory key — the
-   * transport's renewed identities and the store's private keys. The
-   * stored chains stay; the replacement presents the configured
-   * `--tls-cert`, as after a restart.
-   */
+  /** #537: end the renewed certificate switch for good.
+   *  @see ClientCertificateSwitch.release */
   releaseRenewedClientCertificate(): void {
     this._certSwitch.release();
   }
@@ -1989,22 +1831,14 @@ export class ChargePoint {
     this._boot.markBootRejected(retryAfterSeconds);
   }
 
-  /**
-   * The single entry point for a processed BootNotification.conf, whatever
-   * the OCPP version or transport. A status outside the three the spec
-   * defines is treated as Rejected. The boot gate takes the new status first,
-   * then `bootNotificationResult` is emitted, then the answer's own effects
-   * run — so the event precedes every status change it causes (#395).
-   */
+  /** The single entry point for a processed BootNotification.conf.
+   *  @see BootLifecycle.onBootNotificationResult */
   onBootNotificationResult(result: BootNotificationResult): void {
     this._boot.onBootNotificationResult(result);
   }
 
-  /**
-   * #607: append one formatted sample to the connector's transaction-end
-   * history. Formatted now, from the point the sample set of this instant
-   * reads, so a later configuration change cannot reformat it (#327 §3.3).
-   */
+  /** #607: append one formatted sample to the transaction-end history.
+   *  @see MeterSampling.recordTxEndedSample */
   recordTxEndedSample(
     connector: Connector,
     measurands: string[],
@@ -2059,27 +1893,14 @@ export class ChargePoint {
     return this._power.poweredOff;
   }
 
-  /**
-   * Simulate a power loss (#455): the station disappears without a clean
-   * stop. The socket closes at once, nothing is sent until
-   * {@link restorePower}, and no transaction ends. What a real station keeps
-   * in non-volatile storage stays: the transactions (id, meter, tag) and the
-   * queue of transaction messages that could not be delivered. A network
-   * loss, an OCPP Reset and this are different events: a Reset ends the
-   * transactions first (1.6 §5.14, 2.x B11/B12), a network loss keeps the
-   * station running.
-   */
+  /** Simulate a power loss (#455).
+   *  @see PowerLossController.powerLoss */
   powerLoss(options: PowerLossOptions = {}): PowerLossRecord {
     return this._power.powerLoss(options);
   }
 
-  /**
-   * Power returns (#455). The station boots: BootNotification first (1.6
-   * §4.2, 2.x B01.FR.03 "after a reboot (for instance due to ... power
-   * outage)"), nothing else before it is Accepted, then the transaction
-   * messages the outage left queued, then the recovery of the interrupted
-   * transactions (see {@link PowerRestoreOptions}).
-   */
+  /** Power returns (#455).
+   *  @see PowerLossController.restorePower */
   restorePower(options: PowerRestoreOptions = {}): PowerRestoreResult {
     return this._power.restorePower(options);
   }
@@ -2191,31 +2012,20 @@ export class ChargePoint {
     );
   }
 
-  /**
-   * #597: record a Reset OnIdle that was answered `Scheduled`. `evseId`
-   * undefined targets every connector. It runs when the last targeted
-   * transaction ends (see {@link runPendingResetOnIdle}).
-   */
+  /** #597: record a Reset OnIdle answered `Scheduled`.
+   *  @see ResetOnIdle.scheduleResetOnIdle */
   scheduleResetOnIdle(evseId?: number): void {
     this._resetOnIdle.scheduleResetOnIdle(evseId);
   }
 
-  /**
-   * #597: drop every pending Reset OnIdle. An Immediate reset reboots the
-   * station now, which already satisfies them; keeping them would boot
-   * again on a later transaction end.
-   */
+  /** #597: drop every pending Reset OnIdle.
+   *  @see ResetOnIdle.cancelPendingResetsOnIdle */
   cancelPendingResetsOnIdle(evseId?: number): void {
     this._resetOnIdle.cancelPendingResetsOnIdle(evseId);
   }
 
-  /**
-   * #597: boot again once a pending reset has no targeted connector left
-   * with a transaction. Called when a transaction ends (the engine's default stop) and when a
-   * connector is removed. Each pending
-   * reset stays queued while its targets are still busy; the station
-   * boots once if any of them became runnable.
-   */
+  /** #597: boot again once a pending reset has no busy target left.
+   *  @see ResetOnIdle.runPendingResetOnIdle */
   runPendingResetOnIdle(): void {
     this._resetOnIdle.runPendingResetOnIdle();
   }
@@ -2229,50 +2039,20 @@ export class ChargePoint {
     this._statusControl.resetEvse(evseId);
   }
 
-  /**
-   * The EV side of the cable was unplugged (#488). With a running
-   * transaction, `StopTransactionOnEVSideDisconnect` (2.x
-   * `TxCtrlr.StopTxOnEVSideDisconnect`) decides:
-   * - true: the transaction stops with `EVDisconnected` (1.6 §4.9 / §4.10;
-   *   2.0.1 E09: Ended, triggerReason `EVCommunicationLost`);
-   * - false: the transaction is kept and the connector goes SuspendedEV
-   *   (1.6 §4.9 / §4.10) with its energy offer stopped: the register no
-   *   longer rises while periodic MeterValues keep going out, and the
-   *   derived power is zero outside Charging. On 2.x a
-   *   TransactionEvent(Updated) carries chargingState `SuspendedEV` and
-   *   triggerReason `EVCommunicationLost` (E10); the StatusNotification
-   *   that follows is de-duplicated against it. A second unplug while so
-   *   suspended sends nothing.
-   * Without a transaction a Preparing, Finishing or Suspended* connector goes
-   * Available (1.6 §4.9 B1); an Unavailable, Faulted or Reserved one keeps its
-   * status. The EV and cable model (#453) records the cable as unplugged.
-   */
+  /** The EV side of the cable was unplugged (#488).
+   *  @see PlugInFlow.evDisconnected */
   evDisconnected(connectorId: number): void {
     this._plugIn.evDisconnected(connectorId);
   }
 
-  /**
-   * The status a connector shows when whatever held it (an unavailable
-   * period, a reservation, a firmware hold) ends: `Preparing` (2.x `Occupied`)
-   * while a cable is recorded and no transaction runs (1.6 §4.9; 2.0.1 G01,
-   * H03.FR.10), else `Available`. Without this a plug-in during the hold stayed
-   * recorded while `Available` was shown, and the next plug-in was swallowed
-   * (#830 review).
-   */
+  /** The status a connector shows when whatever held it ends.
+   *  @see PlugInFlow.statusWhenFree */
   statusWhenFree(connectorId: number): OCPPStatus {
     return this._plugIn.statusWhenFree(connectorId);
   }
 
-  /**
-   * A cable was plugged into the connector's EV side (#453). Idempotent: a
-   * second plug-in changes nothing. An idle `Available` connector reports
-   * `Preparing` (1.6 §4.9 transition A2, "insert plug"; 2.x StatusNotification
-   * `Occupied`, the cable plugged in before the driver authorizes), which starts the
-   * ConnectionTimeOut and allows the authorize / start that follows. In any
-   * other state (a running transaction, Unavailable, Faulted, Reserved,
-   * power lost) the cable is recorded and the status stays: the plug-in
-   * does not lift them. Unplug with {@link evDisconnected}.
-   */
+  /** A cable was plugged into the connector's EV side (#453).
+   *  @see PlugInFlow.evPlugIn */
   evPlugIn(connectorId: number): void {
     this._plugIn.evPlugIn(connectorId);
   }
@@ -2286,14 +2066,8 @@ export class ChargePoint {
     this._plugIn.deferStartUntilPlugIn(connectorId, tagId, options);
   }
 
-  /**
-   * The EV asks for energy (`ready`) or stops asking (#453). Needs a
-   * plugged-in cable. With a running transaction, "not ready" suspends the
-   * energy offer and reports `SuspendedEV` (1.6 §4.9 C4; 2.x TransactionEvent
-   * Updated, chargingState `SuspendedEV`, triggerReason `ChargingStateChanged`),
-   * and "ready" resumes `Charging` from that (D3). Without a transaction
-   * the readiness is recorded and nothing is sent. Idempotent.
-   */
+  /** The EV asks for energy or stops asking (#453).
+   *  @see PlugInFlow.evSetReady */
   evSetReady(connectorId: number, ready: boolean): void {
     this._plugIn.evSetReady(connectorId, ready);
   }
@@ -2369,18 +2143,8 @@ export class ChargePoint {
     );
   }
 
-  /**
-   * One sample from the connector's meter-value scheduler (#347).
-   *
-   * With {@link txUpdatedMeterValues} on and an OCPP 2.x transaction
-   * running, it rides TransactionEvent(Updated, MeterValuePeriodic) with
-   * `MeterValuesSampledData` (2.0.1 `SampledDataCtrlr.TxUpdatedMeasurands`),
-   * so the E13 transaction-message retries cover it. A sample with nothing
-   * in it sends nothing, as MeterValues does. Otherwise — option off, no
-   * transaction, or OCPP 1.x — it is the MeterValues of
-   * {@link sendMeterValue}. Only the scheduler calls this: a MeterValues a
-   * caller or a TriggerMessage asks for stays a MeterValues.
-   */
+  /** One sample from the connector's meter-value scheduler (#347).
+   *  @see MeterSampling.sendScheduledMeterValue */
   sendScheduledMeterValue(connectorId: number): void {
     this._sampling.sendScheduledMeterValue(connectorId);
   }
@@ -2542,13 +2306,8 @@ export class ChargePoint {
     });
   }
 
-  /**
-   * #930: install the SIM-scoped policies (the daemon pushes the whole set to
-   * every charge point, also to one created later). The selection is dynamic:
-   * it is recomputed against the card in the slot now and after every SIM
-   * change, so a replaced card is governed by the policies that match the new
-   * one. Ignored by a station without a modem model.
-   */
+  /** #930: install the SIM-scoped policies.
+   *  @see CellularLinkController.setCellularPolicies */
   setCellularPolicies(policies: CellularPolicySet): void {
     this._cellular.setCellularPolicies(policies);
   }
@@ -2558,11 +2317,8 @@ export class ChargePoint {
     return this._cellular.cellularLink();
   }
 
-  /**
-   * #930: the masked modem state with its resolved link, or `null` without a
-   * modem model. `enforced` is false for a SOAP station: its transport is not
-   * a socket the link gate can hold down.
-   */
+  /** #930: the masked modem state with its resolved link.
+   *  @see CellularLinkController.modemState */
   modemState(): (RedactedModemState & { link: CellularLinkWire }) | null {
     return this._cellular.modemState();
   }

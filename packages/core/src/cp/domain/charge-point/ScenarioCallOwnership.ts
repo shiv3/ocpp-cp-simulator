@@ -38,6 +38,11 @@ export class ScenarioCallOwnership {
 
   constructor(private readonly host: ScenarioCallOwnershipHost) {}
 
+  /**
+   * Register a connector as being handled by a scenario.
+   * When registered, RemoteStartTransaction handler will emit
+   * remoteStartReceived instead of calling startTransaction directly.
+   */
   register(connectorId: number): void {
     this._scenarioHandledConnectors.add(connectorId);
   }
@@ -50,6 +55,9 @@ export class ScenarioCallOwnership {
     return this._scenarioHandledConnectors.has(connectorId);
   }
 
+  /** Record that RemoteStartTransaction for `connectorId` was just handled
+   *  by the default (non-scenario) path — i.e. isScenarioHandled(connectorId)
+   *  was false at delivery time. See ScenarioCallOwnership. */
   noteDefaultHandledRemoteStart(connectorId: number): void {
     this._lastDefaultHandledRemoteStart.set(
       connectorId,
@@ -57,6 +65,12 @@ export class ScenarioCallOwnership {
     );
   }
 
+  /** Consume (and remove) the timestamp recorded by
+   *  noteDefaultHandledRemoteStart for `connectorId`, if any exists at or
+   *  after `sinceMs`. Returns that epoch-ms timestamp, or null if there is
+   *  none — or it predates `sinceMs`, i.e. it's a stale bypass from before
+   *  the caller's own run started and therefore unrelated to it. Always
+   *  deletes the entry so a stale record can't linger indefinitely. */
   takeDefaultHandledRemoteStart(
     connectorId: number,
     sinceMs: number,
@@ -66,6 +80,13 @@ export class ScenarioCallOwnership {
     return ts !== undefined && ts >= sinceMs ? ts : null;
   }
 
+  /**
+   * Counterpart of registerScenarioHandler for the stop side: a
+   * RemoteStopTrigger scenario node registers here so the next
+   * RemoteStopTransaction.req from CSMS gets routed into the scenario
+   * via `remoteStopReceived` instead of the default handler running
+   * stopTransaction() right away.
+   */
   registerStop(connectorId: number): void {
     this._scenarioStopHandledConnectors.add(connectorId);
   }

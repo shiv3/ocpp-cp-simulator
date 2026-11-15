@@ -19,6 +19,11 @@ export class ResetOnIdle {
 
   constructor(private readonly host: ResetOnIdleHost) {}
 
+  /**
+   * #597: record a Reset OnIdle that was answered `Scheduled`. `evseId`
+   * undefined targets every connector. It runs when the last targeted
+   * transaction ends (see {@link runPendingResetOnIdle}).
+   */
   scheduleResetOnIdle(evseId?: number): void {
     this._pending.push({ evseId });
     // The transaction can end after the handler decided to answer Scheduled
@@ -27,6 +32,11 @@ export class ResetOnIdle {
     this.runPendingResetOnIdle();
   }
 
+  /**
+   * #597: drop every pending Reset OnIdle. An Immediate reset reboots the
+   * station now, which already satisfies them; keeping them would boot
+   * again on a later transaction end.
+   */
   cancelPendingResetsOnIdle(evseId?: number): void {
     this._pending =
       evseId === undefined
@@ -34,6 +44,13 @@ export class ResetOnIdle {
         : this._pending.filter((pending) => pending.evseId !== evseId);
   }
 
+  /**
+   * #597: boot again once a pending reset has no targeted connector left
+   * with a transaction. Called when a transaction ends (the engine's default stop) and when a
+   * connector is removed. Each pending
+   * reset stays queued while its targets are still busy; the station
+   * boots once if any of them became runnable.
+   */
   runPendingResetOnIdle(): void {
     if (this._pending.length === 0) return;
     const isBusy = (pending: { evseId?: number }): boolean =>

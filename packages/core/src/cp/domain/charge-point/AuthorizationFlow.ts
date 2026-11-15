@@ -114,6 +114,13 @@ export class AuthorizationFlow {
     return this.host.authorization().clearCache();
   }
 
+  /**
+   * `StopTransactionOnInvalidId=false` and the id was not accepted: keep the
+   * transaction but stop the energy delivery (2.0.1
+   * E05.FR.02/03, C15.FR.06; 2.x only, 1.6 errata 3.17 is #736). With `MaxEnergyOnInvalidId` > 0 that much energy
+   * is delivered first; the connector reports SuspendedEVSE either way once
+   * the delivery has stopped.
+   */
   holdEnergyOnInvalidId(connector: Connector): void {
     const allowance =
       this.host.chargePoint.configuration.maxEnergyOnInvalidId();
@@ -142,6 +149,33 @@ export class AuthorizationFlow {
     }
   }
 
+  /**
+   * Authorize `tagId` for a local start (issues #181, #452). Resolves with
+   * an idTagInfo/idTokenInfo status ("Accepted", "Invalid", "Expired",
+   * "Blocked", ...). Never rejects.
+   *
+   * The local decision comes first (see `auth/LocalAuthorizationResolver.ts`
+   * for the rules and their OCPP 1.6 §3.5 / 2.0.1 C12-C15 sources):
+   * - offline, it decides alone, at once, without Authorize.req;
+   * - online, a valid local-list or cache entry with `LocalPreAuthorize`
+   *   resolves "Accepted" without Authorize.req (§9.1.13);
+   * - otherwise Authorize.req goes out and the tag-matched
+   *   `authorizeResult` event resolves it, so concurrent Authorize calls
+   *   for different tags don't cross streams.
+   *
+   * While waiting, a disconnect hands the decision to the offline rules.
+   * A timeout while still connected falls back to what the station knows:
+   * a NOT-valid local-list or cache entry resolves its status (#452);
+   * anything else warns and resolves "Accepted" (warn-and-proceed, #181).
+   * A timeout once the socket is gone applies the offline rules.
+   *
+   * On OCPP 2.x the CALL may wait behind another one (Part 4 §4.1.1, #708), so
+   * the timeout is armed when the Authorize is written, not when it is queued
+   * (#762), and lasts at least `MessageTimeout`. `failClosed` (2.x F01.FR.01,
+   * 1.6 §5.11: a remote start only after authorization was obtained, #921)
+   * makes an unanswered Authorize resolve "Unknown" instead of
+   * warn-and-proceed "Accepted".
+   */
   authorizeAndWait(
     tagId: string,
     timeoutMs = 10000,

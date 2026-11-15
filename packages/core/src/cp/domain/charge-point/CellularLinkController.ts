@@ -76,6 +76,13 @@ export class CellularLinkController {
     this._connectOnLinkRestore = false;
   }
 
+  /**
+   * #930: install the SIM-scoped policies (the daemon pushes the whole set to
+   * every charge point, also to one created later). The selection is dynamic:
+   * it is recomputed against the card in the slot now and after every SIM
+   * change, so a replaced card is governed by the policies that match the new
+   * one. Ignored by a station without a modem model.
+   */
   setCellularPolicies(policies: CellularPolicySet): void {
     this._cellularPolicies = policies;
     this.reevaluateCellularLink();
@@ -85,6 +92,11 @@ export class CellularLinkController {
     return this._cellularLink;
   }
 
+  /**
+   * #930: the masked modem state with its resolved link, or `null` without a
+   * modem model. `enforced` is false for a SOAP station: its transport is not
+   * a socket the link gate can hold down.
+   */
   modemState(): (RedactedModemState & { link: CellularLinkWire }) | null {
     if (!this._modem || !this._cellularLink) return null;
     return {

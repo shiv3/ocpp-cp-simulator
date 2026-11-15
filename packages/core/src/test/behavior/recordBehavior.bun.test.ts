@@ -82,6 +82,24 @@ describe("recordBehavior", () => {
     expect(validateScenarioGraph(rec.scenario)).toEqual([]);
   }, 60_000);
 
+  test("without a commit, recordedFrom.commit falls back to the version label", async () => {
+    const rec = await recordBehavior({
+      behavior: "default.firmware",
+      version: "1.6",
+      trigger: { action: "UpdateFirmware", payload: fw },
+      params: { stepMs: 1000 },
+      seed: "s2",
+      simulatorVersion: "0.0.0-test",
+    });
+    // scenario.schema.json: "git commit when known, else the version label".
+    expect(rec.scenario.recordedFrom).toEqual({
+      behaviorId: "default.firmware",
+      commit: "0.0.0-test",
+      seed: "s2",
+      version: "0.0.0-test",
+    });
+  }, 60_000);
+
   test("the recording replays to the same wire as the behavior", async () => {
     const rec = await recordBehavior({
       behavior: "default.firmware",

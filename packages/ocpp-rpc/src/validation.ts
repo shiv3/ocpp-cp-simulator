@@ -40,6 +40,14 @@ const SCHEMA_SETS: Record<
  * An action with no schema for `version` is let through: a CALL for an
  * unknown action is answered by the missing handler (NotImplemented), not by
  * the validator.
+ *
+ * Admission uses the lenient check (`validateOCPPPayload`, no `format`
+ * keywords), so a 1.6 `expiryDate: "not-a-date"` reaches the handler; the
+ * strict issues only name the violation of a payload already refused. This is
+ * deliberate for now: the simulator itself mixes the two (strict for 1.6
+ * requests since #285, lenient admission for 2.x requests, warn-only for
+ * responses), and the rule for this package is settled when its inbound
+ * dispatch moves here (#1059), rather than adding a third behaviour.
  */
 export function ocppSchemaValidator(version: OcppSchemaVersion): RpcValidator {
   const { set, suffix } = SCHEMA_SETS[version];

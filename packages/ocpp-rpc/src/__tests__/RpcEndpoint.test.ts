@@ -361,6 +361,28 @@ describe("RpcEndpoint timing and lifecycle", () => {
       "socket not open",
     );
   });
+
+  it("reports an answer that send could not write", async () => {
+    const problems: unknown[] = [];
+    const endpoint = new RpcEndpoint({
+      dialect: OCPP16_RPC_DIALECT,
+      nextMessageId: () => "x",
+      send: () => {
+        throw new Error("socket not open");
+      },
+      onProtocolError: (problem) => problems.push(problem),
+    });
+    endpoint.handle("Heartbeat", () => ({ currentTime: "t" }));
+    endpoint.receive('[2,"in-1","Heartbeat",{}]');
+    await flush();
+    expect(problems).toEqual([
+      {
+        reason: "reply-send-failed",
+        raw: '[3,"in-1",{"currentTime":"t"}]',
+        messageId: "in-1",
+      },
+    ]);
+  });
 });
 
 describe("RpcEndpoint malformed and unexpected frames", () => {

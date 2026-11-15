@@ -17,16 +17,18 @@ export type RpcHandler = (
   context: { readonly messageId: string; readonly action: string },
 ) => unknown;
 
-/** A frame the endpoint could not use. It is never answered (see #978: the
- *  spec-conformant replies are a follow-up). */
+/** A frame the endpoint could not use, never answered (see #978: the
+ *  spec-conformant replies are #1060), or an answer `send` could not write. */
 export interface RpcProtocolProblem {
-  readonly reason: RpcDecodeErrorReason | "unmatched-response";
+  readonly reason:
+    RpcDecodeErrorReason | "unmatched-response" | "reply-send-failed";
   readonly raw: string;
   readonly messageId?: string;
 }
 
 export interface RpcEndpointOptions {
-  /** Writes one text frame to the peer. A throw rejects the call being sent. */
+  /** Writes one text frame to the peer. A throw rejects the call being sent,
+   *  or is reported as `reply-send-failed` for an answer. */
   readonly send: (frame: string) => void;
   /** The id of the next outgoing CALL; unique among the calls in flight. */
   readonly nextMessageId: () => string;
@@ -222,6 +224,7 @@ export class RpcEndpoint {
     const handler = this.handlers.get(action);
     if (!handler) {
       this.reply(
+        messageId,
         encodeCallError(
           messageId,
           dialect.notImplemented,
@@ -233,6 +236,7 @@ export class RpcEndpoint {
     const violation = validate?.({ direction: "request", action, payload });
     if (violation) {
       this.reply(
+        messageId,
         encodeCallError(
           messageId,
           dialect.violationCodes[violation.kind],
@@ -246,6 +250,7 @@ export class RpcEndpoint {
       result = await handler(payload, { messageId, action });
     } catch (error) {
       this.reply(
+        messageId,
         error instanceof RpcHandlerError
           ? encodeCallError(
               messageId,
@@ -261,15 +266,16 @@ export class RpcEndpoint {
       );
       return;
     }
-    this.reply(encodeCallResult(messageId, result));
+    this.reply(messageId, encodeCallResult(messageId, result));
   }
 
-  private reply(frame: string): void {
+  private reply(messageId: string, frame: string): void {
     if (this.closed !== null) return;
     try {
       this.options.send(frame);
     } catch {
-      // The link is gone; the peer's own call timeout covers the lost answer.
+      // Nobody awaits an answer; the peer's own call timeout covers it.
+      this.problem({ reason: "reply-send-failed", raw: frame, messageId });
     }
   }
 

@@ -221,7 +221,7 @@ function validateExportability(scenario: ScenarioJson): string[] {
     }
     if (node.type === "ocppCall" && containsFrom(data.payload)) {
       problems.push(
-        `ocppCall payload uses "$from", which needs a CALL taken over by a csmsCallTrigger with behavior "replace"; export-k6 does not support it (node ${node.id})`,
+        `ocppCall payload uses "$from" (roots "call.", "response.", "charger.", "connector." and "state."), which reads the simulator's runtime state; export-k6 does not support it (node ${node.id})`,
       );
     }
   }

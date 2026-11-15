@@ -450,10 +450,9 @@ export function buildOcppWebSocketConnectOptions(params: {
  *
  * The HTTP status is available to the `ws` client, which surfaces it through
  * `unexpected-response`. It is NOT available under Bun's native WebSocket —
- * measured on Bun 1.4: every one of those three cases produces exactly
- * `code=1002, reason=Expected 101 status code` and an error event whose only
- * own property is `isTrusted`. Since the daemon and the published image run
- * under Bun, the status simply does not exist on the path that matters.
+ * Bun 1.4.3 closes all three with `code=1002, Expected 101 status code`; 1.4.4
+ * with a blank 1006 after an error whose message alone quotes the status, and
+ * neither gives the redirect target (#1033). The daemon runs under Bun.
  *
  * So it is fetched: after a refused handshake, one GET to the same URL with
  * the same headers the upgrade carried. Bun's `fetch` forwards `Upgrade`,
@@ -830,8 +829,8 @@ class DeferredNodeWebSocket {
           void request;
           socket.terminate();
           this.state = WebSocket.CLOSED;
-          // 1002 to match what the Bun client reports for the same refusal,
-          // so everything downstream sees one shape.
+          // 1002 to match what Bun 1.4.3 reports for the same refusal; the
+          // `httpStatus` above is what classifies it (closeClassification).
           this.dispatchCloseOnce({
             type: "close",
             code: 1002,

@@ -5,6 +5,7 @@ summary: The long-lived Node or Bun process that hosts many charge points and ex
 sources:
   - apps/cli/src/server/
   - apps/cli/src/main.ts
+  - apps/cli/src/cli/
   - scripts/bench/README.md
 related:
   - ../concepts/error-reporting.md

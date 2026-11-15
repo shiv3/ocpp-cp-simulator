@@ -1,5 +1,4 @@
 {
-  "apps/cli/src/cli/parseArgs.ts": 1469,
   "apps/cli/src/jsonMode.ts": 898,
   "apps/cli/src/server/CPRegistry.ts": 1618,
   "apps/cli/src/server/FileReloadManager.ts": 1455,

@@ -1,18 +1,12 @@
 import type { CLIOptions, SoapTunnelConfig } from "../types";
-import type { InboundValidationMode } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
 import {
-  isHttpUrl,
   resolveSoapCallbackUrl,
   soapCallbackUrlSuffixWarning,
 } from "../soapCallbackUrl";
-import { DEFAULT_SOAP_PATH } from "../soapPath";
-import { isOff } from "../vehicleCatalogConfig";
 import { isSoapVersion } from "@ocpp-cp-simulator/core/cp/domain/types/OcppVersion";
 import { hasIdPatternPlaceholder } from "@ocpp-cp-simulator/contracts/index";
 import {
-  labelKeySchema,
   labelsSchema,
-  labelValueSchema,
   normalizeLabels,
 } from "@ocpp-cp-simulator/contracts/labels";
 import { behaviorFlagProblem } from "../behavior/flags";
@@ -22,799 +16,52 @@ import {
   startupScenarioOptionConflict,
   DEFAULT_HTTP_PORT,
 } from "../server/startServer";
-import {
-  DEFAULT_RATE_LIMIT_MAX_IPS,
-  parseTrustedProxy,
-} from "../server/accessGuard";
-import { parseLogLevel, parseSize } from "../logSink";
-import { CP_BULK_WAIT_MS } from "@ocpp-cp-simulator/contracts/limits";
-import { isOcppVersion } from "@ocpp-cp-simulator/core/cp/domain/types/OcppVersion";
 import { DEFAULT_BOOTSTRAP_PACING } from "../server/bootstrapPacing";
 import { tlsKeyPermissionWarning } from "../tlsKeyPermissions";
 import { cliModuleDir, resolveBundledDist } from "../bundledDist";
-import {
-  OCPP_VERSION_VALUES,
-  parseSecurityProfile,
-  requireNumberFlag,
-  requireFlagValue,
-  readPemFile,
-  isLoopbackHost,
-} from "./flagValues";
+import { readPemFile, isLoopbackHost } from "./flagValues";
 import { parseTransportFlags } from "./transportFlags";
 import { printUsage } from "./usage";
+import { createParseState } from "./flags/parseState";
+import { parseCpFlag } from "./flags/cpFlags";
+import { parseServerFlag } from "./flags/serverFlags";
+import { parseSoapSecurityFlag } from "./flags/soapSecurityFlags";
+import { parseConnectionFlag } from "./flags/connectionFlags";
 
 export function parseArgs(argv: string[]): CLIOptions {
-  let wsUrl = "";
-  let cpId: string | null = null;
-  let cpCount = 1;
-  let cpIdPattern: string | null = null;
-  const fleetTemplateFiles: string[] = [];
-  // Fleet startup pacing (#610); `undefined` keeps the built-in default.
-  let bootstrapConcurrency: string | undefined;
-  let startDelay: string | undefined;
-  let startJitter: string | undefined;
-  let startSeed: string | undefined;
-  const labelEntries: Array<[string, string]> = [];
-  let metrics = false;
-  let metricsNoAuth = false;
-  let watch = false;
-  let connectors = 1;
-  let jsonMode = false;
-  let daemon = false;
-  let send: string | null = null;
-  let events = false;
-  let stop = false;
-  let basicAuthUser = "";
-  let basicAuthPass = "";
-  // HTTP web-console Basic Auth credentials. Distinct from basicAuthUser /
-  // basicAuthPass above — those are sent on the *outgoing* CP → CSMS WS
-  // upgrade; these gate *incoming* HTTP requests to this daemon.
-  let webConsoleBasicAuthUser = "";
-  let webConsoleBasicAuthPass = "";
-  // Basic Auth the CLI *client* modes (--send/--stop/--events) send TO a
-  // daemon protected by --web-console-basic-auth-*. Outbound, mirror image of
-  // webConsoleBasicAuth* above (which is the daemon's inbound gate).
-  let httpBasicAuthUser = "";
-  let httpBasicAuthPass = "";
-  let vendor = "CLI-Vendor";
-  let model = "CLI-Model";
-  let ocppVersion: string | undefined;
-  let scenario: string | null = null;
-  let scenarioTemplate: string | null = null;
-  let scenarioTemplateFile: string | null = null;
-  let scenarioConnector = "1";
-  let httpPort: number | null = null;
-  let httpHost = "127.0.0.1";
-  let unixSocket: string | null = null;
-  let unixSocketWarningPrinted = false;
-  let httpUrl: string | null = null;
-  let allEvents = false;
-  let unsafeRemote = false;
-  const behaviorFiles: string[] = [];
-  const useBehaviors: string[] = [];
-  const behaviorParamSpecs: string[] = [];
-  let watchBehaviors = false;
-  let allowBehaviorReload = false;
-  let allowBehaviorCode = false;
-  let serveStatic: string | null = null;
-  // --web-console: enabled flag + optional explicit port. When the port is
-  // omitted (`--web-console` alone), the UI shares the --http-port listener.
-  let webConsoleEnabled = false;
-  let webConsoleExplicitPort: number | null = null;
-  // Explicit location of the built web console, overriding the search in
-  // resolveBundledDist(). The desktop shell passes its Tauri resource dir
-  // here because a compiled binary cannot find `dist/` on its own (#319).
-  let webConsoleDist: string | null = null;
-  let stateDb: string | null = null;
-  let logFormat: "plain" | "json" = "plain";
-  let healthPath = "/v1/healthz";
-  const corsOrigins: string[] = [];
-  let trustForwardedHeaders = false;
-  const allowedHosts: string[] = [];
-  const trustedProxies: string[] = [];
-  let requireTls = false;
-  let rateLimitPerIp = 0;
-  let rateLimitMaxIps = DEFAULT_RATE_LIMIT_MAX_IPS;
-  let logLevel: CLIOptions["logLevel"] = null;
-  let logFile: string | null = null;
-  let logMaxBytes: number | null = null;
-  let logRotateDaily = false;
-  let logKeep = 5;
-  let shutdownStopTransactions = false;
-  let shutdownWaitMs = 5000;
-  let connectRestored = true;
-  let cpBulkWaitMs = CP_BULK_WAIT_MS;
-  const extraWsHeaders: Record<string, string> = {};
-  const extraWsSubprotocols: string[] = [];
-  let soapCallbackUrl: string | null = null;
-  let soapPublicBaseUrl: string | null = null;
-  let oedBaseUrl: string | null = null;
-  let oedApiKeyFile: string | null = null;
-  let soapTunnel: "none" | "ngrok" = "none";
-  let soapTunnelPort: number | null = null;
-  const ngrok: Record<
-    "--ngrok-auth-token" | "--ngrok-domain" | "--ngrok-api-url",
-    string | null
-  > = {
-    "--ngrok-auth-token": null,
-    "--ngrok-domain": null,
-    "--ngrok-api-url": null,
-  };
-  let soapPath: string = DEFAULT_SOAP_PATH;
-  let securityProfile: CLIOptions["securityProfile"];
-  let authorizationKey: string | undefined;
-  let tlsCaPath: string | undefined;
-  let tlsCertPath: string | undefined;
-  let tlsKeyPath: string | undefined;
-  let insecureTlsKeyPerms = false;
-  let cpoName: string | undefined;
-  let txUpdatedMeterValues: boolean | undefined;
-  let inboundValidation: InboundValidationMode | undefined;
-  let reservationAuthorizeIdTag = false;
-  // #609: reconnect flags collect here and are validated as one object below.
-  const reconnect: Record<string, number | string> = {};
-  // #611: `--ws-*` flags, validated with the reconnect ones.
-  const wsFlags: Record<string, number | string | boolean> = {};
-  let traceOutput: string | null = null;
+  const s = createParseState();
 
   for (let i = 2; i < argv.length; i++) {
     const arg = argv[i];
     const next = argv[i + 1];
+    const cur = { i };
 
-    switch (arg) {
-      case "--ws-url":
-        wsUrl = next ?? "";
-        i++;
-        break;
-      case "--cp-id":
-        cpId = next ?? "";
-        i++;
-        break;
-      case "--connectors":
-        connectors = parseInt(next ?? "1", 10);
-        i++;
-        break;
-      case "--cp-count":
-        cpCount = parseInt(next ?? "1", 10);
-        i++;
-        break;
-      case "--fleet-template":
-        if (!next || next.startsWith("--")) {
-          process.stderr.write("Error: --fleet-template needs a file path\n");
-          process.exit(1);
-        }
-        fleetTemplateFiles.push(next);
-        i++;
-        break;
-      case "--bootstrap-concurrency":
-        bootstrapConcurrency = next ?? "";
-        i++;
-        break;
-      case "--start-delay":
-        startDelay = next ?? "";
-        i++;
-        break;
-      case "--start-jitter":
-        startJitter = next ?? "";
-        i++;
-        break;
-      case "--start-seed":
-        startSeed = next ?? "";
-        i++;
-        break;
-      case "--cp-id-pattern":
-        cpIdPattern = next ?? null;
-        i++;
-        break;
-      case "--label": {
-        if (!next || next.startsWith("--")) {
-          process.stderr.write(
-            "Error: --label requires KEY=VALUE (use multiple --label flags for several labels)\n",
-          );
-          process.exit(1);
-        }
-        // `=` cannot appear in a key, so the first one is the separator and
-        // the value keeps any later `=` or `,` verbatim.
-        const idx = next.indexOf("=");
-        if (idx <= 0) {
-          process.stderr.write(
-            `Error: --label value must be KEY=VALUE, got '${next}'\n`,
-          );
-          process.exit(1);
-        }
-        const key = next.slice(0, idx);
-        const value = next.slice(idx + 1);
-        // Checked one by one rather than left to `labelsSchema` on the whole
-        // map: the record schema drops a `__proto__` key without an issue, so
-        // `--label __proto__=x` would vanish instead of being refused.
-        if (!labelKeySchema.safeParse(key).success) {
-          process.stderr.write(
-            `Error: --label key '${key}' is invalid (${labelKeySchema.description})\n`,
-          );
-          process.exit(1);
-        }
-        if (!labelValueSchema.safeParse(value).success) {
-          process.stderr.write(
-            `Error: --label value for '${key}' is invalid (${labelValueSchema.description})\n`,
-          );
-          process.exit(1);
-        }
-        if (labelEntries.some(([k]) => k === key)) {
-          // Last-wins would silently drop one of two values the operator
-          // typed; refuse instead, like every other ambiguous startup flag.
-          process.stderr.write(`Error: --label key '${key}' given twice\n`);
-          process.exit(1);
-        }
-        labelEntries.push([key, value]);
-        i++;
-        break;
-      }
-      case "--metrics":
-        metrics = true;
-        break;
-      case "--metrics-no-auth":
-        metrics = true;
-        metricsNoAuth = true;
-        break;
-      case "--watch":
-        watch = true;
-        break;
-      case "--json":
-        jsonMode = true;
-        break;
-      case "--daemon":
-        daemon = true;
-        break;
-      case "--send":
-        send = next ?? "";
-        i++;
-        break;
-      case "--events":
-        events = true;
-        break;
-      case "--stop":
-        stop = true;
-        break;
-      case "--basic-auth-user":
-        basicAuthUser = next ?? "";
-        i++;
-        break;
-      case "--basic-auth-pass":
-        basicAuthPass = next ?? "";
-        i++;
-        break;
-      case "--web-console-basic-auth-user":
-        webConsoleBasicAuthUser = next ?? "";
-        i++;
-        break;
-      case "--web-console-basic-auth-pass":
-        webConsoleBasicAuthPass = next ?? "";
-        i++;
-        break;
-      case "--http-basic-auth-user":
-        httpBasicAuthUser = next ?? "";
-        i++;
-        break;
-      case "--http-basic-auth-pass":
-        httpBasicAuthPass = next ?? "";
-        i++;
-        break;
-      case "--vendor":
-        vendor = next ?? "";
-        i++;
-        break;
-      case "--model":
-        model = next ?? "";
-        i++;
-        break;
-      case "--ocpp-version":
-        if (!next || next.startsWith("--") || !isOcppVersion(next)) {
-          process.stderr.write(
-            `Error: --ocpp-version must be one of ${OCPP_VERSION_VALUES}\n`,
-          );
-          process.exit(1);
-        }
-        ocppVersion = next;
-        i++;
-        break;
-      case "--scenario":
-        scenario = next ?? "";
-        i++;
-        break;
-      case "--scenario-template":
-        scenarioTemplate = next ?? "";
-        i++;
-        break;
-      case "--scenario-template-file":
-        scenarioTemplateFile = next ?? "";
-        i++;
-        break;
-      case "--scenario-connector":
-        scenarioConnector = next ?? "1";
-        i++;
-        break;
-      case "--http-port":
-        httpPort = parseInt(next ?? "", 10);
-        i++;
-        break;
-      case "--http-host":
-        httpHost = next ?? "";
-        i++;
-        break;
-      case "--unix-socket":
-        if (!unixSocketWarningPrinted) {
-          process.stderr.write(
-            "Warning: --unix-socket is deprecated and ignored; the daemon " +
-              `uses TCP loopback by default (http://127.0.0.1:${DEFAULT_HTTP_PORT}).\n`,
-          );
-          unixSocketWarningPrinted = true;
-        }
-        unixSocket = null;
-        if (next && !next.startsWith("--")) i++;
-        break;
-      case "--http-url":
-        httpUrl = next ?? "";
-        i++;
-        break;
-      case "--all":
-        allEvents = true;
-        break;
-      case "--unsafe-remote":
-        unsafeRemote = true;
-        break;
-      case "--behavior":
-        if (!next || next.startsWith("--")) {
-          process.stderr.write("Error: --behavior requires a file path\n");
-          process.exit(1);
-        }
-        behaviorFiles.push(next);
-        i++;
-        break;
-      case "--allow-behavior-code":
-        allowBehaviorCode = true;
-        break;
-      case "--use-behavior":
-        if (!next || next.startsWith("--")) {
-          process.stderr.write(
-            "Error: --use-behavior requires a behavior id\n",
-          );
-          process.exit(1);
-        }
-        useBehaviors.push(next);
-        i++;
-        break;
-      case "--behavior-params":
-        if (!next || next.startsWith("--")) {
-          process.stderr.write(
-            "Error: --behavior-params requires <id>=<json file or inline json>\n",
-          );
-          process.exit(1);
-        }
-        behaviorParamSpecs.push(next);
-        i++;
-        break;
-      case "--watch-behaviors":
-        watchBehaviors = true;
-        break;
-      case "--allow-behavior-reload":
-        allowBehaviorReload = true;
-        break;
-      case "--cors-origin":
-        if (!next || next.startsWith("--")) {
-          process.stderr.write(
-            "Error: --cors-origin requires a value (refusing to fall back to open CORS)\n",
-          );
-          process.exit(1);
-        }
-        corsOrigins.push(next);
-        i++;
-        break;
-      case "--allowed-host":
-        if (!next || next.startsWith("--")) {
-          process.stderr.write("Error: --allowed-host requires a host name\n");
-          process.exit(1);
-        }
-        allowedHosts.push(next);
-        i++;
-        break;
-      case "--trusted-proxy":
-        if (!next || next.startsWith("--") || !parseTrustedProxy(next)) {
-          process.stderr.write(
-            "Error: --trusted-proxy requires an IP address or CIDR (for example 10.0.0.0/8)\n",
-          );
-          process.exit(1);
-        }
-        trustedProxies.push(next);
-        i++;
-        break;
-      case "--require-tls":
-        requireTls = true;
-        break;
-      case "--rate-limit-per-ip":
-      case "--rate-limit-max-ips":
-      case "--log-keep":
-      case "--shutdown-wait-ms":
-      case "--cp-bulk-wait-ms": {
-        const value = Number(next);
-        const min = arg === "--rate-limit-max-ips" ? 1 : 0;
-        if (!next || !/^\d+$/.test(next) || value < min) {
-          process.stderr.write(
-            `Error: ${arg} requires a whole number >= ${min}\n`,
-          );
-          process.exit(1);
-        }
-        if (arg === "--rate-limit-per-ip") rateLimitPerIp = value;
-        else if (arg === "--rate-limit-max-ips") rateLimitMaxIps = value;
-        else if (arg === "--log-keep") logKeep = value;
-        else if (arg === "--shutdown-wait-ms") shutdownWaitMs = value;
-        else cpBulkWaitMs = value;
-        i++;
-        break;
-      }
-      case "--log-level": {
-        const level = parseLogLevel(next);
-        if (!level) {
-          process.stderr.write(
-            "Error: --log-level must be debug, info, warn or error\n",
-          );
-          process.exit(1);
-        }
-        logLevel = level;
-        i++;
-        break;
-      }
-      case "--log-file":
-        if (!next || next.startsWith("--")) {
-          process.stderr.write("Error: --log-file requires a file path\n");
-          process.exit(1);
-        }
-        logFile = next;
-        i++;
-        break;
-      case "--log-max-size": {
-        const bytes = parseSize(next);
-        if (bytes === null) {
-          process.stderr.write(
-            "Error: --log-max-size requires a size such as 10m, 512k or 1048576\n",
-          );
-          process.exit(1);
-        }
-        logMaxBytes = bytes;
-        i++;
-        break;
-      }
-      case "--log-rotate-daily":
-        logRotateDaily = true;
-        break;
-      case "--shutdown-stop-transactions":
-        shutdownStopTransactions = true;
-        break;
-      case "--no-connect-restored":
-        connectRestored = false;
-        break;
-      case "--trust-forwarded-headers":
-        trustForwardedHeaders = true;
-        break;
-      case "--state-db":
-        if (!next || next.startsWith("--")) {
-          process.stderr.write(
-            "Error: --state-db requires a path (or ':memory:')\n",
-          );
-          process.exit(1);
-        }
-        stateDb = next;
-        i++;
-        break;
-      case "--trace-output":
-        if (!next || next.startsWith("--")) {
-          process.stderr.write("Error: --trace-output requires a file path\n");
-          process.exit(1);
-        }
-        traceOutput = next;
-        i++;
-        break;
-      case "--log-format":
-        if (next !== "plain" && next !== "json") {
-          process.stderr.write(
-            "Error: --log-format must be 'plain' or 'json'\n",
-          );
-          process.exit(1);
-        }
-        logFormat = next;
-        i++;
-        break;
-      case "--health-path":
-        if (!next || next.startsWith("--") || !next.startsWith("/")) {
-          process.stderr.write(
-            "Error: --health-path requires an absolute path starting with '/'\n",
-          );
-          process.exit(1);
-        }
-        healthPath = next;
-        i++;
-        break;
-      case "--header": {
-        if (!next || next.startsWith("--")) {
-          process.stderr.write(
-            "Error: --header requires KEY:VALUE (use multiple --header flags for several headers)\n",
-          );
-          process.exit(1);
-        }
-        const idx = next.indexOf(":");
-        if (idx <= 0) {
-          process.stderr.write(
-            `Error: --header value must be KEY:VALUE, got '${next}'\n`,
-          );
-          process.exit(1);
-        }
-        const k = next.slice(0, idx).trim();
-        const v = next.slice(idx + 1).trim();
-        if (!k) {
-          process.stderr.write("Error: --header KEY part is empty\n");
-          process.exit(1);
-        }
-        extraWsHeaders[k] = v;
-        i++;
-        break;
-      }
-      case "--ws-subprotocol":
-        if (!next || next.startsWith("--")) {
-          process.stderr.write("Error: --ws-subprotocol requires a value\n");
-          process.exit(1);
-        }
-        extraWsSubprotocols.push(next);
-        i++;
-        break;
-      case "--soap-callback-url":
-        if (!next || next.startsWith("--")) {
-          process.stderr.write("Error: --soap-callback-url requires a URL\n");
-          process.exit(1);
-        }
-        soapCallbackUrl = next;
-        i++;
-        break;
-      case "--oed-base-url":
-        if (!next || next.startsWith("--")) {
-          process.stderr.write("Error: --oed-base-url requires a URL\n");
-          process.exit(1);
-        }
-        if (!isHttpUrl(next) && !isOff(next)) {
-          process.stderr.write(
-            "Error: --oed-base-url must be an absolute http(s) URL or none\n",
-          );
-          process.exit(1);
-        }
-        oedBaseUrl = next;
-        i++;
-        break;
-      case "--oed-api-key-file":
-        if (!next || next.startsWith("--")) {
-          process.stderr.write("Error: --oed-api-key-file requires a path\n");
-          process.exit(1);
-        }
-        oedApiKeyFile = next;
-        i++;
-        break;
-      case "--soap-public-base-url":
-        if (!next || next.startsWith("--")) {
-          process.stderr.write(
-            "Error: --soap-public-base-url requires a URL\n",
-          );
-          process.exit(1);
-        }
-        if (!isHttpUrl(next)) {
-          process.stderr.write(
-            "Error: --soap-public-base-url must be an absolute http(s) URL\n",
-          );
-          process.exit(1);
-        }
-        soapPublicBaseUrl = next;
-        i++;
-        break;
-      case "--soap-tunnel":
-        if (next !== "none" && next !== "ngrok") {
-          process.stderr.write(
-            "Error: --soap-tunnel must be one of: none, ngrok\n",
-          );
-          process.exit(1);
-        }
-        soapTunnel = next;
-        i++;
-        break;
-      case "--soap-tunnel-port": {
-        // Whole value, not a prefix: "9702abc" and "1e3" are mistakes.
-        const port = /^\d+$/.test(next ?? "") ? Number(next) : NaN;
-        if (!Number.isInteger(port) || port < 0 || port > 65535) {
-          process.stderr.write(
-            "Error: --soap-tunnel-port must be a port number (0 picks a free one)\n",
-          );
-          process.exit(1);
-        }
-        soapTunnelPort = port;
-        i++;
-        break;
-      }
-      case "--ngrok-auth-token":
-      case "--ngrok-domain":
-      case "--ngrok-api-url": {
-        if (!next || next.startsWith("--")) {
-          process.stderr.write(`Error: ${arg} requires a value\n`);
-          process.exit(1);
-        }
-        if (arg === "--ngrok-api-url" && !isHttpUrl(next)) {
-          process.stderr.write(
-            "Error: --ngrok-api-url must be an absolute http(s) URL\n",
-          );
-          process.exit(1);
-        }
-        ngrok[arg] = next;
-        i++;
-        break;
-      }
-      case "--soap-path":
-        if (!next || next.startsWith("--") || !next.startsWith("/")) {
-          process.stderr.write(
-            "Error: --soap-path requires an absolute path starting with '/'\n",
-          );
-          process.exit(1);
-        }
-        soapPath = next.replace(/\/+$/, "") || "/";
-        i++;
-        break;
-      case "--security-profile":
-        securityProfile = parseSecurityProfile(next);
-        i++;
-        break;
-      case "--authorization-key":
-        authorizationKey = requireFlagValue("--authorization-key", next);
-        if (!/^[0-9a-fA-F]+$/.test(authorizationKey)) {
-          process.stderr.write(
-            "Error: --authorization-key must be a non-empty hex string\n",
-          );
-          process.exit(1);
-        }
-        i++;
-        break;
-      case "--tls-ca":
-        tlsCaPath = requireFlagValue("--tls-ca", next);
-        i++;
-        break;
-      case "--tls-cert":
-        tlsCertPath = requireFlagValue("--tls-cert", next);
-        i++;
-        break;
-      case "--tls-key":
-        tlsKeyPath = requireFlagValue("--tls-key", next);
-        i++;
-        break;
-      case "--insecure-tls-key-perms":
-        insecureTlsKeyPerms = true;
-        break;
-      case "--cpo-name":
-        cpoName = requireFlagValue("--cpo-name", next);
-        i++;
-        break;
-      case "--inbound-validation": {
-        const value = requireFlagValue("--inbound-validation", next);
-        if (value !== "off" && value !== "warn" && value !== "enforce") {
-          process.stderr.write(
-            "Error: --inbound-validation must be off, warn or enforce\n",
-          );
-          process.exit(1);
-        }
-        inboundValidation = value;
-        i++;
-        break;
-      }
-      case "--reservation-authorize-id-tag":
-        reservationAuthorizeIdTag = true;
-        break;
-      case "--reconnect-max-attempts":
-        reconnect.maxAttempts = requireNumberFlag(arg, next, {
-          integer: true,
-          min: -1,
-        });
-        i++;
-        break;
-      case "--reconnect-mode": {
-        const mode = requireFlagValue(arg, next);
-        if (mode !== "exponential" && mode !== "fixed") {
-          process.stderr.write(
-            'Error: --reconnect-mode must be "exponential" or "fixed"\n',
-          );
-          process.exit(1);
-        }
-        reconnect.mode = mode;
-        i++;
-        break;
-      }
-      case "--reconnect-base-delay-ms":
-        reconnect.baseDelayMs = requireNumberFlag(arg, next, { min: 0 });
-        i++;
-        break;
-      case "--reconnect-max-delay-ms":
-        reconnect.maxDelayMs = requireNumberFlag(arg, next, { min: 0 });
-        i++;
-        break;
-      case "--reconnect-jitter-ms":
-        reconnect.jitterMs = requireNumberFlag(arg, next, { min: 0 });
-        i++;
-        break;
-      case "--ws-handshake-timeout-ms":
-        wsFlags.handshakeTimeoutMs = requireNumberFlag(arg, next, {
-          min: 1,
-        });
-        i++;
-        break;
-      case "--ws-no-compression":
-        wsFlags.perMessageDeflate = false;
-        break;
-      case "--ws-max-payload":
-        wsFlags.maxPayloadBytes = requireNumberFlag(arg, next, {
-          integer: true,
-          min: 1,
-        });
-        i++;
-        break;
-      case "--ws-proxy":
-        wsFlags.proxy = requireFlagValue(arg, next);
-        i++;
-        break;
-      case "--ws-local-address":
-        wsFlags.localAddress = requireFlagValue(arg, next);
-        i++;
-        break;
-      case "--boot-retry-limit":
-        reconnect.bootRetryLimit = requireNumberFlag(arg, next, {
-          integer: true,
-          min: -1,
-        });
-        i++;
-        break;
-      case "--tx-updated-meter-values":
-        txUpdatedMeterValues = true;
-        break;
-      case "--no-tx-updated-meter-values":
-        txUpdatedMeterValues = false;
-        break;
-      case "--web-console":
-        webConsoleEnabled = true;
-        // Optional port: only consume `next` when it looks like a number.
-        // If `next` is missing or another flag, the UI shares --http-port.
-        if (next && !next.startsWith("--") && /^\d+$/.test(next)) {
-          webConsoleExplicitPort = parseInt(next, 10);
-          i++;
-        }
-        break;
-      case "--web-console-dist":
-        webConsoleDist = requireFlagValue("--web-console-dist", next);
-        i++;
-        break;
-      case "--help":
-      case "-h":
+    if (
+      !parseCpFlag(s, arg, next, cur) &&
+      !parseServerFlag(s, arg, next, cur) &&
+      !parseSoapSecurityFlag(s, arg, next, cur) &&
+      !parseConnectionFlag(s, arg, next, cur)
+    ) {
+      if (arg.startsWith("--")) {
+        process.stderr.write(`Unknown option: ${arg}\n`);
         printUsage();
-        process.exit(0);
-        break;
-      default:
-        if (arg.startsWith("--")) {
-          process.stderr.write(`Unknown option: ${arg}\n`);
-          printUsage();
-          process.exit(1);
-        }
+        process.exit(1);
+      }
     }
+    i = cur.i;
   }
 
-  const isClientMode = send !== null || events || stop;
+  const isClientMode = s.send !== null || s.events || s.stop;
 
-  if (!isClientMode && daemon && httpPort == null) {
-    httpPort = DEFAULT_HTTP_PORT;
+  if (!isClientMode && s.daemon && s.httpPort == null) {
+    s.httpPort = DEFAULT_HTTP_PORT;
   }
 
   let webConsolePort: number | null = null;
-  if (webConsoleEnabled) {
+  if (s.webConsoleEnabled) {
     if (
-      webConsoleExplicitPort != null &&
-      (isNaN(webConsoleExplicitPort) || webConsoleExplicitPort < 1)
+      s.webConsoleExplicitPort != null &&
+      (isNaN(s.webConsoleExplicitPort) || s.webConsoleExplicitPort < 1)
     ) {
       process.stderr.write(
         "Error: --web-console port must be a positive integer\n",
@@ -822,7 +69,7 @@ export function parseArgs(argv: string[]): CLIOptions {
       process.exit(1);
     }
     // Port resolution: explicit > --http-port > error.
-    webConsolePort = webConsoleExplicitPort ?? httpPort;
+    webConsolePort = s.webConsoleExplicitPort ?? s.httpPort;
     if (webConsolePort == null) {
       process.stderr.write(
         "Error: --web-console without a port requires --http-port " +
@@ -831,7 +78,7 @@ export function parseArgs(argv: string[]): CLIOptions {
       );
       process.exit(1);
     }
-    const bundled = resolveBundledDist(webConsoleDist);
+    const bundled = resolveBundledDist(s.webConsoleDist);
     if (!bundled.dir) {
       // Name every path that was tried. The old message said only "run
       // `bun run build` in the repo first", which is useless advice to
@@ -849,7 +96,7 @@ export function parseArgs(argv: string[]): CLIOptions {
       );
       process.exit(1);
     }
-    serveStatic = bundled.dir;
+    s.serveStatic = bundled.dir;
     // --web-console alone is enough to put the daemon into server mode —
     // even without --http-port, the web-console port carries socket.io/health
     // alongside the UI on the same origin.
@@ -858,7 +105,7 @@ export function parseArgs(argv: string[]): CLIOptions {
   // A fleet size that is silently wrong is worse than a refused flag: a
   // non-numeric --cp-count would become NaN and bootstrap nothing, and 0 or a
   // negative would quietly bootstrap one, in both cases without saying so.
-  if (!Number.isInteger(cpCount) || cpCount < 1) {
+  if (!Number.isInteger(s.cpCount) || s.cpCount < 1) {
     process.stderr.write("Error: --cp-count must be a positive integer\n");
     process.exit(1);
   }
@@ -869,16 +116,16 @@ export function parseArgs(argv: string[]): CLIOptions {
   // readers of these flags used to answer it differently, which showed up as
   // restore rows held back for a scenario that was never loaded (#314).
   const startupScenarioConflict = startupScenarioOptionConflict({
-    scenario,
-    scenarioTemplate,
-    scenarioTemplateFile,
-    scenarioConnector,
+    scenario: s.scenario,
+    scenarioTemplate: s.scenarioTemplate,
+    scenarioTemplateFile: s.scenarioTemplateFile,
+    scenarioConnector: s.scenarioConnector,
   });
   if (startupScenarioConflict) {
     process.stderr.write(`Error: ${startupScenarioConflict}\n`);
     process.exit(1);
   }
-  if (cpCount > 1 && !cpId) {
+  if (s.cpCount > 1 && !s.cpId) {
     // `buildBootstrap` returns null without a cpId, so the fleet would expand
     // to nothing and the daemon would start with zero charge points while
     // reporting success — the requested count silently ignored.
@@ -889,7 +136,9 @@ export function parseArgs(argv: string[]): CLIOptions {
   }
   // Each pair was checked as it was parsed; this adds the one rule that only
   // the whole map can break (the entry count).
-  const parsedLabels = labelsSchema.safeParse(Object.fromEntries(labelEntries));
+  const parsedLabels = labelsSchema.safeParse(
+    Object.fromEntries(s.labelEntries),
+  );
   if (!parsedLabels.success) {
     process.stderr.write(
       `Error: --label: ${parsedLabels.error.issues[0]?.message ?? "invalid labels"}\n`,
@@ -908,7 +157,7 @@ export function parseArgs(argv: string[]): CLIOptions {
     );
     process.exit(1);
   }
-  if (labels && !cpId) {
+  if (labels && !s.cpId) {
     // Same reasoning as --cp-count: without a cpId nothing is bootstrapped,
     // so the labels would have no charge point to land on.
     process.stderr.write(
@@ -916,7 +165,11 @@ export function parseArgs(argv: string[]): CLIOptions {
     );
     process.exit(1);
   }
-  if (cpCount > 1 && cpIdPattern && !hasIdPatternPlaceholder(cpIdPattern)) {
+  if (
+    s.cpCount > 1 &&
+    s.cpIdPattern &&
+    !hasIdPatternPlaceholder(s.cpIdPattern)
+  ) {
     // Without a placeholder every charge point is asked for under the same id,
     // so the second create throws "already exists" and takes the daemon down
     // after a partially-started fleet. Same rule as `cp.create_many`.
@@ -926,9 +179,9 @@ export function parseArgs(argv: string[]): CLIOptions {
     process.exit(1);
   }
   if (
-    cpCount > 1 &&
-    soapCallbackUrl &&
-    !hasIdPatternPlaceholder(soapCallbackUrl)
+    s.cpCount > 1 &&
+    s.soapCallbackUrl &&
+    !hasIdPatternPlaceholder(s.soapCallbackUrl)
   ) {
     // The daemon routes inbound SOAP calls by the cpId in the callback URL, so
     // one explicit URL cannot serve a fleet. --soap-public-base-url has no such
@@ -940,21 +193,21 @@ export function parseArgs(argv: string[]): CLIOptions {
     process.exit(1);
   }
 
-  const isServerMode = daemon || httpPort != null || webConsoleEnabled;
+  const isServerMode = s.daemon || s.httpPort != null || s.webConsoleEnabled;
 
   // --soap-tunnel (#183). The ngrok options only mean something with the
   // provider selected; attach mode reads an agent someone else configured,
   // so token and domain cannot apply there. The callback server is the
   // daemon's listener, hence server mode. An explicit callback / public base
   // URL is refused alongside it: the tunnel *is* the public base.
-  const ngrokApiUrl = ngrok["--ngrok-api-url"];
-  const ngrokAuthToken = ngrok["--ngrok-auth-token"];
-  const ngrokDomain = ngrok["--ngrok-domain"];
+  const ngrokApiUrl = s.ngrok["--ngrok-api-url"];
+  const ngrokAuthToken = s.ngrok["--ngrok-auth-token"];
+  const ngrokDomain = s.ngrok["--ngrok-domain"];
   let soapTunnelConfig: SoapTunnelConfig | null = null;
-  if (soapTunnel === "none") {
+  if (s.soapTunnel === "none") {
     const stray = [
-      ...Object.entries(ngrok),
-      ["--soap-tunnel-port", soapTunnelPort],
+      ...Object.entries(s.ngrok),
+      ["--soap-tunnel-port", s.soapTunnelPort],
     ].find(([, value]) => value != null);
     if (stray) {
       process.stderr.write(`Error: ${stray[0]} requires --soap-tunnel ngrok\n`);
@@ -968,7 +221,7 @@ export function parseArgs(argv: string[]): CLIOptions {
       );
       process.exit(1);
     }
-    if (ngrokApiUrl && !soapTunnelPort) {
+    if (ngrokApiUrl && !s.soapTunnelPort) {
       // The daemon can pick any free port for an agent it spawns; an agent
       // someone else runs forwards to the port it was configured with.
       process.stderr.write(
@@ -977,7 +230,7 @@ export function parseArgs(argv: string[]): CLIOptions {
       );
       process.exit(1);
     }
-    if (!isSoapVersion(ocppVersion)) {
+    if (!isSoapVersion(s.ocppVersion)) {
       process.stderr.write(
         "Error: --soap-tunnel requires a SOAP --ocpp-version (OCPP-1.2, OCPP-1.5 or OCPP-1.6S)\n",
       );
@@ -991,8 +244,8 @@ export function parseArgs(argv: string[]): CLIOptions {
       process.exit(1);
     }
     const explicit = [
-      ["--soap-callback-url", soapCallbackUrl],
-      ["--soap-public-base-url", soapPublicBaseUrl],
+      ["--soap-callback-url", s.soapCallbackUrl],
+      ["--soap-public-base-url", s.soapPublicBaseUrl],
     ].find(([, value]) => value != null);
     if (explicit) {
       // Two sources for the same public base is a contradiction, not a
@@ -1008,11 +261,11 @@ export function parseArgs(argv: string[]): CLIOptions {
       authToken: ngrokAuthToken,
       domain: ngrokDomain,
       apiUrl: ngrokApiUrl,
-      localPort: soapTunnelPort ?? 0,
+      localPort: s.soapTunnelPort ?? 0,
     };
   }
 
-  if (metrics && healthPath === "/metrics") {
+  if (s.metrics && s.healthPath === "/metrics") {
     // The health route is matched first, so the enabled Prometheus endpoint
     // would be unreachable while both were advertised as working.
     process.stderr.write(
@@ -1020,7 +273,7 @@ export function parseArgs(argv: string[]): CLIOptions {
     );
     process.exit(1);
   }
-  if (cpCount > 1 && !isServerMode) {
+  if (s.cpCount > 1 && !isServerMode) {
     // The standalone REPL / JSON paths bootstrap exactly one charge point, so
     // the flag would be accepted and then ignored: `--cp-count 20` would run a
     // single CP and say nothing about the other nineteen.
@@ -1029,7 +282,7 @@ export function parseArgs(argv: string[]): CLIOptions {
     );
     process.exit(1);
   }
-  if (fleetTemplateFiles.length > 0 && !isServerMode) {
+  if (s.fleetTemplateFiles.length > 0 && !isServerMode) {
     // Templates are served and instantiated by the daemon; outside a server
     // mode the flag would be accepted and ignored.
     process.stderr.write(
@@ -1042,10 +295,10 @@ export function parseArgs(argv: string[]): CLIOptions {
   // a server mode and a bootstrapped fleet or they would be accepted and
   // ignored (#610).
   const pacingFlags: Array<[string, string | undefined, number, boolean]> = [
-    ["--bootstrap-concurrency", bootstrapConcurrency, 1, false],
-    ["--start-delay", startDelay, 0, false],
-    ["--start-jitter", startJitter, 0, false],
-    ["--start-seed", startSeed, 0, true],
+    ["--bootstrap-concurrency", s.bootstrapConcurrency, 1, false],
+    ["--start-delay", s.startDelay, 0, false],
+    ["--start-jitter", s.startJitter, 0, false],
+    ["--start-seed", s.startSeed, 0, true],
   ];
   const pacingValues: Record<string, number> = {};
   for (const [flag, raw, min, allowNegative] of pacingFlags) {
@@ -1073,14 +326,14 @@ export function parseArgs(argv: string[]): CLIOptions {
       );
       process.exit(1);
     }
-    if (!isServerMode || !cpId) {
+    if (!isServerMode || !s.cpId) {
       process.stderr.write(
         `Error: ${flag} needs a server mode (--daemon, --http-port or --web-console) and --cp-id\n`,
       );
       process.exit(1);
     }
   }
-  if (startSeed !== undefined && startJitter === undefined) {
+  if (s.startSeed !== undefined && s.startJitter === undefined) {
     process.stderr.write(
       "Error: --start-seed has no effect without --start-jitter\n",
     );
@@ -1091,7 +344,7 @@ export function parseArgs(argv: string[]): CLIOptions {
   // points, so the last scheduled offset must stay below that.
   const MAX_TIMER_MS = 2 ** 31 - 1;
   const lastOffsetMs =
-    (Math.max(cpCount, 1) - 1) * (pacingValues["--start-delay"] ?? 0) +
+    (Math.max(s.cpCount, 1) - 1) * (pacingValues["--start-delay"] ?? 0) +
     (pacingValues["--start-jitter"] ?? 0);
   if (lastOffsetMs > MAX_TIMER_MS) {
     process.stderr.write(
@@ -1118,7 +371,7 @@ export function parseArgs(argv: string[]): CLIOptions {
     );
     process.exit(1);
   }
-  if (watch && isClientMode) {
+  if (s.watch && isClientMode) {
     // Checked BEFORE the server-mode test, and separately from it, because
     // `isServerMode` is not the whole question (#314). `--send`, `--stop` and
     // `--events` return through the client path before any server is started,
@@ -1133,7 +386,7 @@ export function parseArgs(argv: string[]): CLIOptions {
     );
     process.exit(1);
   }
-  if (watch && !isServerMode) {
+  if (s.watch && !isServerMode) {
     // Same reasoning as --cp-count above: the file watcher lives in the
     // daemon, so outside a server mode the flag would be accepted and then do
     // nothing at all. #295's review settled that a flag which cannot take
@@ -1145,7 +398,7 @@ export function parseArgs(argv: string[]): CLIOptions {
   }
 
   if (isClientMode) {
-    if ((send !== null || events) && !cpId && !allEvents) {
+    if ((s.send !== null || s.events) && !s.cpId && !s.allEvents) {
       process.stderr.write(
         "Error: --cp-id is required (or --all for --events)\n",
       );
@@ -1154,19 +407,19 @@ export function parseArgs(argv: string[]): CLIOptions {
     }
   } else if (!isServerMode) {
     // REPL / JSON mode requires a single bootstrapped CP
-    if (!cpId) {
+    if (!s.cpId) {
       process.stderr.write("Error: --cp-id is required\n");
       printUsage();
       process.exit(1);
     }
-    if (!wsUrl) {
+    if (!s.wsUrl) {
       process.stderr.write("Error: --ws-url is required\n");
       printUsage();
       process.exit(1);
     }
   } else {
     // Server mode: cpId is bootstrap-only. If given, ws-url is also required.
-    if (cpId && !wsUrl) {
+    if (s.cpId && !s.wsUrl) {
       process.stderr.write(
         "Error: --ws-url is required when bootstrapping a CP with --cp-id\n",
       );
@@ -1175,12 +428,12 @@ export function parseArgs(argv: string[]): CLIOptions {
     }
   }
 
-  if (isNaN(connectors) || connectors < 1) {
+  if (isNaN(s.connectors) || s.connectors < 1) {
     process.stderr.write("Error: --connectors must be a positive integer\n");
     process.exit(1);
   }
 
-  if (httpPort != null && (isNaN(httpPort) || httpPort < 1)) {
+  if (s.httpPort != null && (isNaN(s.httpPort) || s.httpPort < 1)) {
     process.stderr.write("Error: --http-port must be a positive integer\n");
     process.exit(1);
   }
@@ -1188,18 +441,21 @@ export function parseArgs(argv: string[]): CLIOptions {
   // Unix sockets are deprecated for the daemon control plane. The flag is
   // still accepted above for launcher compatibility, but it is always ignored.
   if (isServerMode) {
-    unixSocket = null;
+    s.unixSocket = null;
   }
 
   const basicAuth =
-    basicAuthUser && basicAuthPass
-      ? { username: basicAuthUser, password: basicAuthPass }
+    s.basicAuthUser && s.basicAuthPass
+      ? { username: s.basicAuthUser, password: s.basicAuthPass }
       : null;
 
   // Both web-console flags must be supplied together. Half-configured auth
   // (e.g. user without pass) would let everyone in or block everyone out,
   // so we hard-fail at startup instead of silently picking one.
-  if ((webConsoleBasicAuthUser === "") !== (webConsoleBasicAuthPass === "")) {
+  if (
+    (s.webConsoleBasicAuthUser === "") !==
+    (s.webConsoleBasicAuthPass === "")
+  ) {
     process.stderr.write(
       "Error: --web-console-basic-auth-user and --web-console-basic-auth-pass " +
         "must be supplied together (or both omitted)\n",
@@ -1207,21 +463,21 @@ export function parseArgs(argv: string[]): CLIOptions {
     process.exit(1);
   }
   const webConsoleBasicAuth =
-    webConsoleBasicAuthUser && webConsoleBasicAuthPass
+    s.webConsoleBasicAuthUser && s.webConsoleBasicAuthPass
       ? {
-          username: webConsoleBasicAuthUser,
-          password: webConsoleBasicAuthPass,
+          username: s.webConsoleBasicAuthUser,
+          password: s.webConsoleBasicAuthPass,
         }
       : null;
 
   const behaviorProblem = behaviorFlagProblem({
     serverMode: isServerMode,
-    behaviorFiles,
-    allowBehaviorCode,
-    unsafeRemote,
-    useBehaviors,
-    watchBehaviors,
-    allowBehaviorReload,
+    behaviorFiles: s.behaviorFiles,
+    allowBehaviorCode: s.allowBehaviorCode,
+    unsafeRemote: s.unsafeRemote,
+    useBehaviors: s.useBehaviors,
+    watchBehaviors: s.watchBehaviors,
+    allowBehaviorReload: s.allowBehaviorReload,
   });
   if (behaviorProblem) {
     process.stderr.write(`${behaviorProblem}\n`);
@@ -1229,11 +485,11 @@ export function parseArgs(argv: string[]): CLIOptions {
   }
   if (
     isClientMode &&
-    (behaviorFiles.length > 0 ||
-      allowBehaviorCode ||
-      useBehaviors.length > 0 ||
-      watchBehaviors ||
-      allowBehaviorReload)
+    (s.behaviorFiles.length > 0 ||
+      s.allowBehaviorCode ||
+      s.useBehaviors.length > 0 ||
+      s.watchBehaviors ||
+      s.allowBehaviorReload)
   ) {
     process.stderr.write(
       "Error: --behavior, --allow-behavior-code, --use-behavior and " +
@@ -1244,26 +500,26 @@ export function parseArgs(argv: string[]): CLIOptions {
   }
   let behaviorParams: Record<string, JsonObject> = {};
   try {
-    behaviorParams = collectBehaviorParams(behaviorParamSpecs);
+    behaviorParams = collectBehaviorParams(s.behaviorParamSpecs);
   } catch (err) {
     process.stderr.write(
       `Error: ${err instanceof Error ? err.message : String(err)}\n`,
     );
     process.exit(1);
   }
-  if (isClientMode && behaviorParamSpecs.length > 0) {
+  if (isClientMode && s.behaviorParamSpecs.length > 0) {
     process.stderr.write(
       "Error: --behavior-params applies to a running charge point, not to --send / --stop / --events\n",
     );
     process.exit(1);
   }
-  if (behaviorParamSpecs.length > 0 && !cpId) {
+  if (s.behaviorParamSpecs.length > 0 && !s.cpId) {
     process.stderr.write(
       "Error: --behavior-params requires --cp-id (it sets the params of the bootstrapped charge points)\n",
     );
     process.exit(1);
   }
-  if (useBehaviors.length > 0 && !cpId) {
+  if (s.useBehaviors.length > 0 && !s.cpId) {
     // Same reasoning as --label: without a cpId nothing is bootstrapped, so
     // the selection would have no charge point to land on.
     process.stderr.write(
@@ -1275,13 +531,13 @@ export function parseArgs(argv: string[]): CLIOptions {
   if (
     !isClientMode &&
     isServerMode &&
-    !isLoopbackHost(httpHost) &&
+    !isLoopbackHost(s.httpHost) &&
     !webConsoleBasicAuth &&
-    !unsafeRemote
+    !s.unsafeRemote
   ) {
     process.stderr.write(
       `Error: refusing to bind unauthenticated daemon to non-loopback host ` +
-        `${httpHost}. Configure --web-console-basic-auth-user and ` +
+        `${s.httpHost}. Configure --web-console-basic-auth-user and ` +
         "--web-console-basic-auth-pass, bind to 127.0.0.1/localhost/::1, " +
         "or pass --unsafe-remote to override.\n",
     );
@@ -1293,9 +549,9 @@ export function parseArgs(argv: string[]): CLIOptions {
   if (
     !isClientMode &&
     isServerMode &&
-    requireTls &&
-    !isLoopbackHost(httpHost) &&
-    trustedProxies.length === 0
+    s.requireTls &&
+    !isLoopbackHost(s.httpHost) &&
+    s.trustedProxies.length === 0
   ) {
     process.stderr.write(
       "Error: --require-tls on a non-loopback bind needs --trusted-proxy: the " +
@@ -1311,9 +567,9 @@ export function parseArgs(argv: string[]): CLIOptions {
   if (
     !isClientMode &&
     isServerMode &&
-    requireTls &&
-    isLoopbackHost(httpHost) &&
-    trustedProxies.length === 0
+    s.requireTls &&
+    isLoopbackHost(s.httpHost) &&
+    s.trustedProxies.length === 0
   ) {
     process.stderr.write(
       "Warning: --require-tls without --trusted-proxy only constrains " +
@@ -1324,7 +580,7 @@ export function parseArgs(argv: string[]): CLIOptions {
   }
 
   // Same all-or-nothing rule for the client-side credentials.
-  if ((httpBasicAuthUser === "") !== (httpBasicAuthPass === "")) {
+  if ((s.httpBasicAuthUser === "") !== (s.httpBasicAuthPass === "")) {
     process.stderr.write(
       "Error: --http-basic-auth-user and --http-basic-auth-pass " +
         "must be supplied together (or both omitted)\n",
@@ -1332,19 +588,19 @@ export function parseArgs(argv: string[]): CLIOptions {
     process.exit(1);
   }
   const httpBasicAuth =
-    httpBasicAuthUser && httpBasicAuthPass
-      ? { username: httpBasicAuthUser, password: httpBasicAuthPass }
+    s.httpBasicAuthUser && s.httpBasicAuthPass
+      ? { username: s.httpBasicAuthUser, password: s.httpBasicAuthPass }
       : null;
   let tls: CLIOptions["tls"];
-  if (tlsCaPath || tlsCertPath || tlsKeyPath) {
+  if (s.tlsCaPath || s.tlsCertPath || s.tlsKeyPath) {
     tls = {};
-    if (tlsCaPath) tls = { ...tls, ca: readPemFile("--tls-ca", tlsCaPath) };
-    if (tlsCertPath) {
-      tls = { ...tls, cert: readPemFile("--tls-cert", tlsCertPath) };
+    if (s.tlsCaPath) tls = { ...tls, ca: readPemFile("--tls-ca", s.tlsCaPath) };
+    if (s.tlsCertPath) {
+      tls = { ...tls, cert: readPemFile("--tls-cert", s.tlsCertPath) };
     }
-    if (tlsKeyPath) {
-      const warning = tlsKeyPermissionWarning(tlsKeyPath);
-      if (warning && !insecureTlsKeyPerms) {
+    if (s.tlsKeyPath) {
+      const warning = tlsKeyPermissionWarning(s.tlsKeyPath);
+      if (warning && !s.insecureTlsKeyPerms) {
         process.stderr.write(
           `Error: ${warning}. Pass --insecure-tls-key-perms to override.\n`,
         );
@@ -1355,7 +611,7 @@ export function parseArgs(argv: string[]): CLIOptions {
           `Warning: ${warning}; proceeding because --insecure-tls-key-perms was passed.\n`,
         );
       }
-      tls = { ...tls, key: readPemFile("--tls-key", tlsKeyPath) };
+      tls = { ...tls, key: readPemFile("--tls-key", s.tlsKeyPath) };
     }
   }
 
@@ -1364,17 +620,17 @@ export function parseArgs(argv: string[]): CLIOptions {
   // public base is only known once the tunnel is up, so main() resolves it
   // then — see soapCallbackUrl.ts for the ladder.
   const resolvedSoapCallbackUrl = resolveSoapCallbackUrl({
-    explicitCallbackUrl: soapCallbackUrl,
-    publicBaseUrl: soapPublicBaseUrl,
-    cpId,
-    soapPath,
+    explicitCallbackUrl: s.soapCallbackUrl,
+    publicBaseUrl: s.soapPublicBaseUrl,
+    cpId: s.cpId,
+    soapPath: s.soapPath,
   });
-  if (!soapCallbackUrl && soapPublicBaseUrl && resolvedSoapCallbackUrl) {
+  if (!s.soapCallbackUrl && s.soapPublicBaseUrl && resolvedSoapCallbackUrl) {
     process.stderr.write(
       `SOAP callback URL resolved from --soap-public-base-url: ${resolvedSoapCallbackUrl}\n`,
     );
   }
-  if (isSoapVersion(ocppVersion) && resolvedSoapCallbackUrl) {
+  if (isSoapVersion(s.ocppVersion) && resolvedSoapCallbackUrl) {
     const suffixWarning = soapCallbackUrlSuffixWarning(resolvedSoapCallbackUrl);
     if (suffixWarning) {
       process.stderr.write(`Warning: ${suffixWarning}\n`);
@@ -1382,88 +638,94 @@ export function parseArgs(argv: string[]): CLIOptions {
   }
 
   return {
-    wsUrl,
-    cpId,
-    cpCount,
-    cpIdPattern,
-    fleetTemplateFiles,
+    wsUrl: s.wsUrl,
+    cpId: s.cpId,
+    cpCount: s.cpCount,
+    cpIdPattern: s.cpIdPattern,
+    fleetTemplateFiles: s.fleetTemplateFiles,
     bootstrapPacing,
     labels,
-    metrics,
-    metricsNoAuth,
-    watch,
-    connectors,
-    jsonMode,
-    daemon,
-    send,
-    events,
-    stop,
+    metrics: s.metrics,
+    metricsNoAuth: s.metricsNoAuth,
+    watch: s.watch,
+    connectors: s.connectors,
+    jsonMode: s.jsonMode,
+    daemon: s.daemon,
+    send: s.send,
+    events: s.events,
+    stop: s.stop,
     basicAuth,
     webConsoleBasicAuth,
-    vendor,
-    model,
-    ocppVersion,
-    scenario,
-    scenarioTemplate,
-    scenarioTemplateFile,
-    scenarioConnector,
-    httpPort,
-    httpHost,
-    unixSocket,
-    httpUrl,
+    vendor: s.vendor,
+    model: s.model,
+    ocppVersion: s.ocppVersion,
+    scenario: s.scenario,
+    scenarioTemplate: s.scenarioTemplate,
+    scenarioTemplateFile: s.scenarioTemplateFile,
+    scenarioConnector: s.scenarioConnector,
+    httpPort: s.httpPort,
+    httpHost: s.httpHost,
+    unixSocket: s.unixSocket,
+    httpUrl: s.httpUrl,
     httpBasicAuth,
-    allEvents,
-    unsafeRemote,
-    behaviorFiles,
-    allowBehaviorCode,
-    useBehaviors,
+    allEvents: s.allEvents,
+    unsafeRemote: s.unsafeRemote,
+    behaviorFiles: s.behaviorFiles,
+    allowBehaviorCode: s.allowBehaviorCode,
+    useBehaviors: s.useBehaviors,
     behaviorParams,
-    watchBehaviors,
-    allowBehaviorReload,
-    corsOrigins,
-    trustForwardedHeaders,
-    allowedHosts,
-    trustedProxies,
-    requireTls,
-    rateLimitPerIp,
-    rateLimitMaxIps,
-    logLevel,
-    logFile,
-    logMaxBytes,
-    logRotateDaily,
-    logKeep,
-    shutdownStopTransactions,
-    shutdownWaitMs,
-    connectRestored,
-    cpBulkWaitMs,
-    serveStatic,
+    watchBehaviors: s.watchBehaviors,
+    allowBehaviorReload: s.allowBehaviorReload,
+    corsOrigins: s.corsOrigins,
+    trustForwardedHeaders: s.trustForwardedHeaders,
+    allowedHosts: s.allowedHosts,
+    trustedProxies: s.trustedProxies,
+    requireTls: s.requireTls,
+    rateLimitPerIp: s.rateLimitPerIp,
+    rateLimitMaxIps: s.rateLimitMaxIps,
+    logLevel: s.logLevel,
+    logFile: s.logFile,
+    logMaxBytes: s.logMaxBytes,
+    logRotateDaily: s.logRotateDaily,
+    logKeep: s.logKeep,
+    shutdownStopTransactions: s.shutdownStopTransactions,
+    shutdownWaitMs: s.shutdownWaitMs,
+    connectRestored: s.connectRestored,
+    cpBulkWaitMs: s.cpBulkWaitMs,
+    serveStatic: s.serveStatic,
     webConsolePort,
-    stateDb,
-    logFormat,
-    healthPath,
-    extraWsHeaders,
-    extraWsSubprotocols,
+    stateDb: s.stateDb,
+    logFormat: s.logFormat,
+    healthPath: s.healthPath,
+    extraWsHeaders: s.extraWsHeaders,
+    extraWsSubprotocols: s.extraWsSubprotocols,
     soapCallbackUrl: resolvedSoapCallbackUrl,
-    soapCallbackUrlExplicit: soapCallbackUrl,
-    soapPublicBaseUrl,
-    oedBaseUrl,
-    oedApiKeyFile,
+    soapCallbackUrlExplicit: s.soapCallbackUrl,
+    soapPublicBaseUrl: s.soapPublicBaseUrl,
+    oedBaseUrl: s.oedBaseUrl,
+    oedApiKeyFile: s.oedApiKeyFile,
     soapTunnel: soapTunnelConfig,
-    soapPath,
-    securityProfile,
-    authorizationKey,
-    cpoName,
-    ...(txUpdatedMeterValues !== undefined ? { txUpdatedMeterValues } : {}),
-    ...(inboundValidation ? { inboundValidation } : {}),
-    ...(reservationAuthorizeIdTag ? { reservationAuthorizeIdTag } : {}),
-    ...(Object.keys(reconnect).length > 0 || Object.keys(wsFlags).length > 0
-      ? { transport: parseTransportFlags(reconnect, wsFlags, ocppVersion) }
+    soapPath: s.soapPath,
+    securityProfile: s.securityProfile,
+    authorizationKey: s.authorizationKey,
+    cpoName: s.cpoName,
+    ...(s.txUpdatedMeterValues !== undefined
+      ? { txUpdatedMeterValues: s.txUpdatedMeterValues }
+      : {}),
+    ...(s.inboundValidation ? { inboundValidation: s.inboundValidation } : {}),
+    ...(s.reservationAuthorizeIdTag
+      ? { reservationAuthorizeIdTag: s.reservationAuthorizeIdTag }
+      : {}),
+    ...(Object.keys(s.reconnect).length > 0 || Object.keys(s.wsFlags).length > 0
+      ? {
+          transport: parseTransportFlags(s.reconnect, s.wsFlags, s.ocppVersion),
+        }
       : {}),
     tls,
-    tlsCaPath,
-    tlsCertPath,
-    tlsKeyPath,
-    insecureTlsKeyPerms,
-    traceOutput,
+    tlsCaPath: s.tlsCaPath,
+    tlsCertPath: s.tlsCertPath,
+    tlsKeyPath: s.tlsKeyPath,
+    insecureTlsKeyPerms: s.insecureTlsKeyPerms,
+    traceOutput: s.traceOutput,
   };
 }

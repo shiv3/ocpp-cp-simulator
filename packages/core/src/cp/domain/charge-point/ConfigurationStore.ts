@@ -64,7 +64,12 @@ const ACCESS_KEYS: ReadonlyMap<string, string> = new Map([
 ]);
 
 /** The access keys themselves: read-only for the CSMS, operator-writable. */
-const ACCESS_KEY_NAMES: ReadonlySet<string> = new Set(ACCESS_KEYS.values());
+const ACCESS_KEY_NAMES: ReadonlySet<string> = new Set([
+  ...ACCESS_KEYS.values(),
+  // #926: operator-only simulator switches (read-only for the CSMS).
+  "RealLogUpload",
+  "LogUploadAllowPrivateHosts",
+]);
 
 /**
  * One-shot listener type used by `ConfigurationStore.onChange`. The store

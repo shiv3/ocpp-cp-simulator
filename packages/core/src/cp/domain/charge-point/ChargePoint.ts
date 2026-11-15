@@ -579,6 +579,7 @@ export class ChargePoint {
   /** #878: the stores this charge point persists its own state through. */
   private readonly _repositories: ChargePointRepositories;
   private readonly _fileUploader: FileUploader;
+  private readonly _logUploader: FileUploader;
   private readonly _reservationManager: ReservationManager;
   /** Parent id / groupIdToken of the tags the CSMS authorized (reservations). */
   private readonly _authorizedParents = new Map<string, string>();
@@ -775,6 +776,7 @@ export class ChargePoint {
     this._logSink = deps.logSink;
     this._repositories = deps.repositories;
     this._fileUploader = deps.fileUploader;
+    this._logUploader = deps.logUploader ?? deps.fileUploader;
     // #456: installed certificates survive a restart when state persists.
     // #928: the initial config, or (without one) the state a restart finds.
     this._modem = transportOptions.modem
@@ -1990,6 +1992,11 @@ export class ChargePoint {
   /** Uploads the GetDiagnostics file (#575: injected through deps). */
   get fileUploader(): FileUploader {
     return this._fileUploader;
+  }
+
+  /** Uploads the GetLog file when `RealLogUpload` is on (#926). */
+  get logUploader(): FileUploader {
+    return this._logUploader;
   }
 
   get logger(): Logger {

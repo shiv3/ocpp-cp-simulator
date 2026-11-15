@@ -463,6 +463,28 @@ export const ConfigurationKeys = {
       readonly: true,
       type: "boolean",
     } as BooleanConfigurationKey,
+    // #926: opt in to a real GetLog upload (1.6 Security Whitepaper and 2.x).
+    // false (default): GetLog keeps the simulated, timer-driven status train.
+    // true: the station sends a bounded log file to `log.remoteLocation` with
+    // an HTTP PUT and reports `Uploaded` only after the server answered 2xx.
+    // Like the `*ReadOnly` key, read-only for the CSMS (a CSMS must not be
+    // able to switch on transfers of simulator internals); the operator
+    // (set_config_key, a scenario configSet, a persisted override) writes it.
+    RealLogUpload: {
+      name: "RealLogUpload",
+      required: false,
+      readonly: true,
+      type: "boolean",
+    } as BooleanConfigurationKey,
+    // #926: a real GetLog upload refuses a destination that is a loopback,
+    // private, link-local or otherwise internal address (SSRF guard). true
+    // allows them, for a CSMS on the operator's own network. Operator-only.
+    LogUploadAllowPrivateHosts: {
+      name: "LogUploadAllowPrivateHosts",
+      required: false,
+      readonly: true,
+      type: "boolean",
+    } as BooleanConfigurationKey,
     // Issue #452: the store key behind OCPP 2.x `AuthCacheCtrlr.LifeTime`
     // (2.0.1 Part 2 §2.4.3, C10.FR.08): seconds an Authorization Cache
     // entry without a cacheExpiryDateTime stays valid after its last
@@ -854,6 +876,8 @@ export const defaultConfiguration: (cp: ChargePoint) => Configuration = (
     strVal(ConfigurationKeys.Custom.SimulatedFirmwareUpdateFailure, ""),
     boolVal(ConfigurationKeys.Custom.AuthorizeBeforeLocalStart, true),
     boolVal(ConfigurationKeys.Custom.AuthorizeRemoteTxRequestsReadOnly, false),
+    boolVal(ConfigurationKeys.Custom.RealLogUpload, false),
+    boolVal(ConfigurationKeys.Custom.LogUploadAllowPrivateHosts, false),
     // #452: 2.x only (AuthCacheCtrlr.LifeTime); a 1.6 GetConfiguration
     // keeps its key set.
     ...(isOcpp2Version(cp.ocppVersion)

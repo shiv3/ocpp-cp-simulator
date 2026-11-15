@@ -104,9 +104,8 @@ describe("GetDiagnosticsHandler", () => {
       res.afterResponseSettled();
       // microtask drain → schedules Uploading + starts fetch
       await Promise.resolve();
-      // fetch promise resolves on the next microtask + the await chain
-      await Promise.resolve();
-      await Promise.resolve();
+      // fetch resolves and the shared attempt loop (uploadRetry.ts) settles
+      await new Promise((resolve) => setTimeout(resolve, 0));
       expect(sent).toEqual(["Uploading", "Uploaded"]);
     }
   });

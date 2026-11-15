@@ -884,11 +884,9 @@ export class ChargePoint {
     return this._reservationManager;
   }
 
-  /**
-   * The parent id (1.6) or groupIdToken the station knows for `idTag`
-   * (reservation matching, 1.6 §5.13, H03.FR.04/07); it never asks the CSMS.
-   * @see AuthorizationFlow.knownParentIdOf
-   */
+  /** The parent id (1.6) or groupIdToken the station knows for `idTag`
+   *  (reservation matching, 1.6 §5.13, H03.FR.04/07); it never asks the CSMS.
+   *  @see AuthorizationFlow.knownParentIdOf */
   knownParentIdOf(idTag: string): string | undefined {
     return this._parts.authorizationFlow.knownParentIdOf(idTag);
   }
@@ -1503,6 +1501,7 @@ export class ChargePoint {
   }
 
   reset(reason: BootReason = "LocalReset"): void {
+    this._parts.authorizationFlow.forgetAuthorizedParents();
     this._parts.outage.reset(reason);
   }
 

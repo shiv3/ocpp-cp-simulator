@@ -5,6 +5,7 @@ import { OCPPStatus } from "../../types/OcppTypes";
 import type { BootNotification } from "../../types/OcppTypes";
 import { DefaultBootNotification } from "../../types/OcppTypes";
 import { handleSetVariablesV201 } from "../../../infrastructure/transport/v201/setVariablesV201";
+import { MAX_AUTHORIZED_PARENTS } from "../AuthorizationFlow";
 
 /**
  * Issue #181: `ChargePoint.authorizeAndWait` gives `startTransaction` a way
@@ -531,3 +532,59 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
     });
   },
 );
+
+/**
+ * #839: the parent id / groupIdToken of the last Authorize.conf is kept
+ * outside the Authorization Cache (reservation matching uses it even when
+ * the cache is off). It is volatile memory: a reset forgets it, and it is
+ * bounded so a long run cannot grow it without limit.
+ */
+describe("ChargePoint.knownParentIdOf — last Authorize.conf parents (#839)", () => {
+  function cacheOff(cp: ChargePoint): ChargePoint {
+    expect(
+      cp.configuration.applyChange("AuthorizationCacheEnabled", "false"),
+    ).toBe("Accepted");
+    return cp;
+  }
+
+  it("forgets the parents a CSMS verdict carried once the station resets", () => {
+    const cp = cacheOff(buildChargePoint());
+    vi.spyOn(cp, "connect").mockImplementation(() => undefined);
+    cp.recordAuthorizationResult("TAG-A", {
+      status: "Accepted",
+      parentId: "PARENT-A",
+    });
+    expect(cp.knownParentIdOf("TAG-A")).toBe("PARENT-A");
+
+    cp.reset();
+
+    expect(cp.knownParentIdOf("TAG-A")).toBeUndefined();
+  });
+
+  it(`keeps at most ${MAX_AUTHORIZED_PARENTS} parents, dropping the least recently recorded`, () => {
+    const cp = cacheOff(buildChargePoint());
+    for (let i = 0; i < MAX_AUTHORIZED_PARENTS; i++) {
+      cp.recordAuthorizationResult(`TAG-${i}`, {
+        status: "Accepted",
+        parentId: `PARENT-${i}`,
+      });
+    }
+    expect(cp.knownParentIdOf("TAG-0")).toBe("PARENT-0");
+    expect(cp.knownParentIdOf("TAG-1")).toBe("PARENT-1");
+    // A new verdict on TAG-0 makes it the most recent one.
+    cp.recordAuthorizationResult("TAG-0", {
+      status: "Accepted",
+      parentId: "PARENT-0b",
+    });
+
+    cp.recordAuthorizationResult("TAG-NEW", {
+      status: "Accepted",
+      parentId: "PARENT-NEW",
+    });
+
+    expect(cp.knownParentIdOf("TAG-NEW")).toBe("PARENT-NEW");
+    expect(cp.knownParentIdOf("TAG-0")).toBe("PARENT-0b");
+    expect(cp.knownParentIdOf("TAG-1")).toBeUndefined();
+    expect(cp.knownParentIdOf("TAG-2")).toBe("PARENT-2");
+  });
+});

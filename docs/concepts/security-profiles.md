@@ -10,6 +10,7 @@ sources:
   - packages/core/src/cp/infrastructure/transport/certificateUseMapping.ts (certificate-use mapping, issue #456)
   - packages/core/src/cp/infrastructure/transport/v201/certificatesV201.ts (2.x certificate handlers, issue #456)
   - packages/core/src/cp/domain/security/SignCertificateBackoff.ts (A02.FR.17-19 resend back-off, issue #537)
+  - packages/core/src/cp/domain/security/networkProfiles.ts (2.x SetNetworkProfile checks and slots, B09)
   - packages/core/src/cp/infrastructure/transport/v201/certificateSigningV201.ts (2.x SignCertificate, GetCertificateStatus, issue #537)
   - packages/core/src/cp/infrastructure/transport/v201/eventQueuesV201.ts (2.x SecurityEventNotification, issues #537, #552)
   - packages/core/src/cp/infrastructure/transport/handlers/call/CertificateManagementHandlers.ts (1.6 DeleteCertificate M04.FR.06, issue #537)
@@ -23,7 +24,7 @@ related:
   - access-control.md
   - scenario-format.md
   - state-persistence.md
-updated: 2026-11-14
+updated: 2026-11-15
 ---
 
 # OCPP 1.6 security profiles
@@ -240,8 +241,8 @@ password, after `Rejected`/`NotSupported` it keeps it).
 - **`SecurityProfile`**: the value is checked first and answered `Rejected`,
   leaving the profile unchanged, when
   - it is greater than 1 and lower than or equal to the current one
-    (A05.FR.01; `AllowSecurityProfileDowngrade` is not implemented, so a 3 → 2
-    downgrade is refused too);
+    (A05.FR.01; 1.6 has no `AllowSecurityProfileDowngrade`, so a 3 → 2
+    downgrade is refused too; the 2.x variable only governs `SetNetworkProfile`);
   - it is lower than the current one and 0 or 1 (A00.FR.005 and §7.8: the
     profile is never lowered to 1 or below over OCPP). An unchanged 0 or 1
     matches neither rule and is `Accepted`;
@@ -759,12 +760,13 @@ neither certificate is presented to an EV.
 2.x-only keys (#537), read and written through `GetVariables`,
 `SetVariables` and `GetBaseReport`; a 1.6 station has none of them.
 
-| Variable                  | Access | Default | Meaning                                                                     |
-| ------------------------- | ------ | ------- | --------------------------------------------------------------------------- |
-| `CertificateEntries`      | R      | `0`     | Installed trust anchors, the set M05.FR.06 limits (signed chains excluded)  |
-| `MaxCertificateChainSize` | R      | `10000` | Longest `CertificateSigned` `certificateChain` accepted, in characters      |
-| `CertSigningWaitMinimum`  | RW     | `60`    | Seconds before the first SignCertificate resend (min 1); doubled every time |
-| `CertSigningRepeatTimes`  | RW     | `3`     | Resends before waiting for a `TriggerMessage`; `0` = never resend           |
+| Variable                        | Access | Default | Meaning                                                                      |
+| ------------------------------- | ------ | ------- | ---------------------------------------------------------------------------- |
+| `CertificateEntries`            | R      | `0`     | Installed trust anchors, the set M05.FR.06 limits (signed chains excluded)   |
+| `MaxCertificateChainSize`       | R      | `10000` | Longest `CertificateSigned` `certificateChain` accepted, in characters       |
+| `CertSigningWaitMinimum`        | RW     | `60`    | Seconds before the first SignCertificate resend (min 1); doubled every time  |
+| `CertSigningRepeatTimes`        | RW     | `3`     | Resends before waiting for a `TriggerMessage`; `0` = never resend            |
+| `AllowSecurityProfileDowngrade` | RW     | `false` | `SetNetworkProfile` may lower the profile from 3 to 2 (B09.FR.04); see below |
 
 `CertificateEntries` follows the certificate store: the charge point
 copies the count into the configuration on every store change, so a
@@ -774,6 +776,35 @@ a valid frame holds. Both are ReadOnly, so a CSMS cannot change them.
 `SecurityProfile` (ReadOnly), `OrganizationName` (ReadOnly) and
 `BasicAuthPassword` (WriteOnly, the 1.6 `AuthorizationKey`, A01.FR.01/02) are
 registered too (#704, see [Device Model registry](../entities/device-model.md#required-variables-704)).
+
+#### SetNetworkProfile (B09)
+
+`SetNetworkProfile` validates the profile and stores it in its
+`configurationSlot`
+([`networkProfiles.ts`](../../packages/core/src/cp/domain/security/networkProfiles.ts)).
+It never changes the connection: no reconnect, and `SecurityProfile`,
+`MessageTimeout` and the CSMS URL stay as they are. Switching to a stored
+profile belongs to a later Reset / `NetworkConfigurationPriority` change,
+which the simulator does not implement yet (#569). The slots live in memory
+only (a profile can carry passwords), so a restart empties them.
+
+A refusal is `Rejected` with
+`statusInfo.reasonCode` (codes from the 2.1 appendix list; 2.0.1 accepts any
+string) and an `additionalInfo` naming the problem (B09.FR.01):
+
+| Condition                                                                                                                                                       | `reasonCode`          |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------- |
+| `configurationSlot` outside 0-9                                                                                                                                 | `InvalidConfSlot`     |
+| `ocppTransport` is not `JSON`, or `ocppVersion` is not `OCPP20` / `OCPP201` / `OCPP21` (absent is fine on 2.1)                                                  | `UnsupportedParam`    |
+| `securityProfile` outside 0-3, `messageTimeout` below 1, profile 2 or 3 with a `ws://` URL, or a 2.1 `basicAuthPassword` that is not 16-40 printable characters | `InvalidNetworkConf`  |
+| `ocppCsmsUrl` is not a `ws://` / `wss://` URL, or has a query or fragment                                                                                       | `InvalidURL`          |
+| `securityProfile` lower than the current `SecurityProfile`, unless `AllowSecurityProfileDowngrade` is `true` and the change is 3 → 2 (B09.FR.04)                | `NoSecurityDowngrade` |
+
+Otherwise the answer is `Accepted` and the slot's previous profile, if any,
+is replaced (B09.FR.02). `apn` and `vpn` are stored as received; the
+simulator has no modem or VPN to check them against. The CA and client
+certificates that profiles 2 and 3 need are not checked here: they matter
+when the profile is used.
 
 The dispatcher of 2.x inbound CALLs awaits a handler only when it returns a
 promise. A synchronous handler still answers in the same tick, so a

@@ -25,6 +25,11 @@ export const DEVICE_DATA_CTRLR_KEYS = {
   bytesPerGetVariables: "BytesPerMessageGetVariables",
   itemsPerSetVariables: "ItemsPerMessageSetVariables",
   bytesPerSetVariables: "BytesPerMessageSetVariables",
+  /** `ConfigurationValueSize`: the longest SetVariables attributeValue. */
+  configurationValueSize: "ConfigurationValueSize",
+  /** `ReportingValueSize`: the longest value a GetVariables result or a
+   *  NotifyReport carries; longer values are truncated. */
+  reportingValueSize: "ReportingValueSize",
 } as const;
 
 /** ReportData entries in one NotifyReport (the `ItemsPerMessage` default). */
@@ -38,3 +43,32 @@ export const VARIABLES_REQUEST_MAX_ITEMS = 100;
 
 /** The largest GetVariables / SetVariables request, in bytes of its JSON. */
 export const VARIABLES_REQUEST_MAX_BYTES = 65536;
+
+/**
+ * `DeviceDataCtrlr.ConfigurationValueSize` default and maximum: the schema's
+ * maxLength of `SetVariableData.attributeValue` (2.0.1 / 2.1 Part 2
+ * DeviceDataCtrlr); a station may advertise less, never more.
+ */
+export const CONFIGURATION_VALUE_MAX_SIZE = 1000;
+
+/**
+ * `DeviceDataCtrlr.ReportingValueSize` default and maximum: the schema's
+ * maxLength of `GetVariableResult.attributeValue` and
+ * `VariableAttribute.value`.
+ */
+export const REPORTING_VALUE_MAX_SIZE = 2500;
+
+/** The length of `value` in characters (code points), as a schema's
+ *  maxLength counts it. */
+export function valueLength(value: string): number {
+  let n = 0;
+  for (const _ of value) n++;
+  return n;
+}
+
+/** `value` cut to at most `size` characters (code points). */
+export function truncateValue(value: string, size: number): string {
+  if (value.length <= size) return value;
+  const chars = Array.from(value);
+  return chars.length <= size ? value : chars.slice(0, size).join("");
+}

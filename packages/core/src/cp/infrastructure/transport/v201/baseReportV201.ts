@@ -13,12 +13,15 @@ import {
   type DeviceModelVariableDef,
 } from "../../../domain/device-model/DeviceModelRegistry";
 import { renderConfigValue } from "../../../domain/charge-point/renderConfigValue";
+import { truncateValue } from "../../../domain/device-model/deviceDataCtrlrKeys";
+import { reportingValueSize } from "./variablesRequestLimits";
 
 /**
  * One ReportData per registered variable the store has a value for: the
  * station-wide ones, then (#538) the per-EVSE runtime values of every EVSE in
  * `evseIds`, with the Target attribute of the variables that have one (2.1).
  * Mutability, data type, limits and unit come from the registry (#604).
+ * Values longer than `DeviceDataCtrlr.ReportingValueSize` are truncated.
  */
 export function buildBaseReportData(
   store: ConfigurationStore,
@@ -27,6 +30,7 @@ export function buildBaseReportData(
   registry: DeviceModelRegistry = DEVICE_MODEL,
 ): ReportDataType[] {
   const reportData: ReportDataType[] = [];
+  const maxValueSize = reportingValueSize(store);
   const evseScoped = (def: DeviceModelVariableDef): boolean =>
     registry.isEvseScoped(def.component);
 
@@ -43,6 +47,7 @@ export function buildBaseReportData(
         },
         entry,
         def,
+        maxValueSize,
       ),
     );
   }
@@ -66,6 +71,7 @@ export function buildBaseReportData(
         { name: def.variable },
         entry,
         def,
+        maxValueSize,
       );
       if (targets?.supports(valueKey) === true) {
         const target = targets.get(valueKey);
@@ -102,6 +108,7 @@ function reportDatum(
   variable: ReportDataType["variable"],
   entry: ConfigurationValue,
   registryDef: DeviceModelVariableDef,
+  maxValueSize: number,
 ): ReportDataType {
   const def = {
     ...registryDef,
@@ -115,7 +122,7 @@ function reportDatum(
         type: "Actual",
         // B07.FR.03: the value of a WriteOnly variable is never reported.
         ...(def.mutability !== "WriteOnly" && {
-          value: renderConfigValue(entry),
+          value: truncateValue(renderConfigValue(entry), maxValueSize),
         }),
         mutability: def.mutability,
       },

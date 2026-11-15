@@ -27,6 +27,7 @@ import { DeviceModelPublisher } from "./DeviceModelPublisher";
 
 import { ConfigurationWiring } from "./ConfigurationWiring";
 
+import { AuthorizationFlow } from "./AuthorizationFlow";
 import { EventEmitter } from "../../shared/EventEmitter";
 
 import { realClock } from "../../shared/clock";
@@ -199,8 +200,6 @@ import {
   StationAuthorization,
   type CsmsAuthorizationResult,
 } from "../auth/StationAuthorization";
-
-import type { LocalOnlyDecision } from "../auth/LocalAuthorizationResolver";
 
 import {
   ChargingProfileStore,
@@ -457,6 +456,13 @@ export class ChargePoint {
   private readonly _monitoring = new MonitoringStore(DEFAULT_MONITOR_CATALOG);
   // #538: Target attributes of the 2.1 device model (EVSE.Power).
   private readonly _deviceModelTargets = new DeviceModelTargets();
+  private readonly _authorizationFlow = new AuthorizationFlow({
+    chargePoint: this,
+    authorization: () => this._authorization,
+    clock: () => this._clock,
+    events: () => this._events,
+    logger: () => this._logger,
+  });
   private readonly _configWiring = new ConfigurationWiring({
     chargePoint: () => this,
     certificateStore: () => this._certificateStore,
@@ -785,7 +791,7 @@ export class ChargePoint {
       );
       // The MaxEnergyOnInvalidId allowance ran out (E05.FR.03 → .02).
       connector.events.on("invalidIdEnergyExhausted", () => {
-        this.reportEnergyHeld(connector);
+        this._authorizationFlow.reportEnergyHeld(connector);
       });
       this._connectors.set(connectorId, connector);
       this._vehicleDrivers.set(
@@ -1790,25 +1796,7 @@ export class ChargePoint {
    * the delivery has stopped.
    */
   holdEnergyOnInvalidId(connector: Connector): void {
-    const allowance = this._configuration.maxEnergyOnInvalidId();
-    if (connector.holdEnergyForInvalidId(allowance)) {
-      this.reportEnergyHeld(connector);
-    }
-  }
-
-  private reportEnergyHeld(connector: Connector): void {
-    if (!connector.hasRunningTransaction) return;
-    if (
-      connector.status === OCPPStatus.Charging ||
-      connector.status === OCPPStatus.Preparing ||
-      connector.status === OCPPStatus.SuspendedEV
-    ) {
-      this._logger.info(
-        `Connector ${connector.id} energy delivery stopped after a non-Accepted id → SuspendedEVSE`,
-        LogType.TRANSACTION,
-      );
-      this.updateConnectorStatus(connector.id, OCPPStatus.SuspendedEVSE);
-    }
+    this._authorizationFlow.holdEnergyOnInvalidId(connector);
   }
 
   /** Called by StartTransactionResultHandler when StartTransaction.conf
@@ -1888,137 +1876,12 @@ export class ChargePoint {
     idTokenType?: IdTokenTypeName,
     options: { failClosed?: boolean } = {},
   ): Promise<string> {
-    const decision = this._authorization.decide(tagId, this.isOnline());
-    if (decision.kind !== "askCsms") {
-      return Promise.resolve(this.localAuthorizationStatus(tagId, decision));
-    }
-
-    const queued = isOcpp2Version(this.ocppVersion);
-    let armTimeout: () => void = () => undefined;
-    let onNotSent: () => void = () => undefined;
-    const result = new Promise<string>((resolve) => {
-      let settled = false;
-      let timeoutId: TimerHandle | null = null;
-
-      const cleanup = () => {
-        if (settled) return;
-        settled = true;
-        if (timeoutId) this._clock.clearTimeout(timeoutId);
-        this._events.off("authorizeResult", handler);
-        this._events.off("disconnected", disconnectHandler);
-      };
-
-      const handler = (data: { tagId: string; status: string }) => {
-        if (data.tagId !== tagId) return;
-        cleanup();
-        resolve(data.status);
-      };
-
-      const decideOffline = (why: string) => {
-        const status = this.localAuthorizationStatus(
-          tagId,
-          this._authorization.decideOffline(tagId),
-        );
-        this._logger.warn(
-          `${why} while awaiting Authorize.conf for ${tagId}; offline authorization: ${status}`,
-          LogType.TRANSACTION,
-        );
-        resolve(status);
-      };
-
-      const disconnectHandler = () => {
-        cleanup();
-        decideOffline("Disconnected");
-      };
-
-      this._events.on("authorizeResult", handler);
-      this._events.on("disconnected", disconnectHandler);
-
-      const waitMs = queued
-        ? Math.max(timeoutMs, this.configuration.messageTimeout() * 1000)
-        : timeoutMs;
-      armTimeout = () => {
-        if (settled || timeoutId) return;
-        timeoutId = this._clock.setTimeout(onTimeout, waitMs);
-      };
-
-      const onTimeout = () => {
-        cleanup();
-        if (!this.isOnline()) {
-          decideOffline(`Timeout (${waitMs}ms) and offline`);
-          return;
-        }
-        const refusal = this._authorization.decideUnanswered(tagId);
-        if (refusal) {
-          this._logger.warn(
-            `Timeout (${timeoutMs}ms) awaiting Authorize.conf for ${tagId}; falling back to the local decision`,
-            LogType.TRANSACTION,
-          );
-          resolve(this.localAuthorizationStatus(tagId, refusal));
-          return;
-        }
-        if (options.failClosed) {
-          this._logger.warn(
-            `Timeout (${waitMs}ms) awaiting Authorize.conf for ${tagId}; not authorized (${queued ? "F01.FR.01" : "§5.11"})`,
-            LogType.TRANSACTION,
-          );
-          resolve("Unknown");
-          return;
-        }
-        this._logger.warn(
-          `Timeout (${waitMs}ms) awaiting Authorize.conf for ${tagId}; proceeding as Accepted`,
-          LogType.TRANSACTION,
-        );
-        resolve("Accepted");
-      };
-
-      // Never written (not connected, dropped, socket closed): offline the
-      // offline rules decide at once, otherwise the timeout decides, as for
-      // an unanswered CALL.
-      onNotSent = () => {
-        if (settled) return;
-        if (!this.isOnline()) {
-          cleanup();
-          decideOffline("Authorize not sent");
-          return;
-        }
-        armTimeout();
-      };
-
-      // The listeners and timer are set before the CALL goes out, so a
-      // synchronous write arms the timer.
-      if (queued) {
-        this.authorize(tagId, idTokenType, {
-          onWritten: () => armTimeout(),
-          onDropped: () => onNotSent(),
-        });
-      } else {
-        if (idTokenType === undefined) this.authorize(tagId);
-        else this.authorize(tagId, idTokenType);
-        armTimeout();
-      }
-    });
-
-    return result;
-  }
-
-  /** The status a local (no Authorize round trip) decision resolves to. */
-  private localAuthorizationStatus(
-    tagId: string,
-    decision: LocalOnlyDecision,
-  ): string {
-    if (decision.kind === "accept") {
-      this._logger.info(
-        `${tagId} authorized locally (${decision.source}); no Authorize.req sent`,
-        LogType.TRANSACTION,
-      );
-      return "Accepted";
-    }
-    this._logger.warn(
-      `${tagId} refused locally (${decision.source}): ${decision.status}`,
-      LogType.TRANSACTION,
+    return this._authorizationFlow.authorizeAndWait(
+      tagId,
+      timeoutMs,
+      idTokenType,
+      options,
     );
-    return decision.status;
   }
 
   armResponseOverride(action: string, status: string): void {

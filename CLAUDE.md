@@ -88,7 +88,7 @@ Run when asked, after a batch of ingests, or when something looks stale:
 
 - **Contradictions** between pages (defaults, versions, method lists).
 - **Stale claims** superseded by code — spot-check flag tables against
-  `apps/cli/src/main.ts` help text, RPC tables against `packages/contracts/src/methods.ts`,
+  `apps/cli/src/main.ts` help text, RPC tables against `packages/contracts/src/methods.ts` (the barrel; the tables are in `methods/*.ts`),
   MCP tools against `apps/cli/src/server/mcp/tools.ts` (and `tools/*.ts`), template ids against
   `packages/core/src/utils/scenarios/`, node types against `packages/core/schema/scenario.schema.json`.
 - **Broken links / anchors** — relative links must resolve; run a quick check:

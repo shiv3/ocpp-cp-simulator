@@ -1,7 +1,7 @@
 ---
 title: Diagnostics and log upload
 type: concept
-summary: How the station answers GetDiagnostics (1.6) and GetLog (1.6 Security Whitepaper, 2.x) — the default simulated GetLog train, the opt-in real upload (`RealLogUpload`, HTTP PUT, destination checks, retries, statuses, cancellation) and the decisions behind it.
+summary: How the station answers GetDiagnostics (1.6) and GetLog (1.6 Security Whitepaper, 2.x) — the default simulated GetLog train, the opt-in real upload (`RealLogUpload`, HTTP PUT, destination checks, retries, statuses, cancellation), the opt-in versioned diagnostic bundle (`DiagnosticBundle`, diagnostics.zip) and the decisions behind them.
 sources:
   - packages/core/src/cp/application/engine/behaviors/logs.ts
   - packages/core/src/cp/application/engine/behaviors/diagnostics.ts
@@ -9,8 +9,14 @@ sources:
   - packages/core/src/cp/application/engine/behaviors/logArtifact.ts
   - packages/core/src/cp/domain/charge-point/uploadUrl.ts
   - packages/core/src/cp/infrastructure/fileUpload.ts
+  - packages/core/src/cp/application/diagnostics/DiagnosticBundle.ts
+  - packages/core/src/cp/application/diagnostics/zip.ts
+  - packages/core/src/cp/application/diagnostics/scenarioReadModel.ts
+  - packages/core/src/cp/domain/charge-point/DiagnosticsSources.ts
+  - packages/core/src/test/behavior/diagnosticBundle.bun.test.ts
   - packages/core/src/test/behavior/getLogUpload.bun.test.ts
   - "issue #926"
+  - "issue #925"
   - "issue #743"
   - "issue #601"
 related:
@@ -113,3 +119,80 @@ change.
   (#925 §3).
 - **`UploadFailure`** is the failure status of both versions' `GetLog`
   (`UploadFailed` is the 1.6 `GetDiagnostics` spelling).
+
+## Diagnostic bundle (#925)
+
+A versioned, redacted, point-in-time support bundle of one station. Off by
+default, so `GetDiagnostics` keeps uploading `diagnostics.txt` (#743) and
+`GetLog` keeps its simulated train or its log file (#926). The operator key
+**`DiagnosticBundle`** (default `false`, read-only for the CSMS, like
+`RealLogUpload`) switches it on:
+
+| Request                                | Bundle on                                                                                                                                                                                                                                 |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1.6 `GetDiagnostics`                   | The answer names `diagnostics.zip`; the same multipart `POST` and retry rules as before (#743) carry the ZIP; `DiagnosticsStatusNotification` as before                                                                                   |
+| 1.6 Security Whitepaper / 2.x `GetLog` | `logType` `DiagnosticsLog` with `RealLogUpload` on: the #926 upload path sends `<cpId>-DiagnosticsLog-<requestId>.zip`. `SecurityLog` is still `Rejected`. Without `RealLogUpload` GetLog stays simulated: the bundle needs a real upload |
+
+The bundle is built **once, when the request arrives**, by one function
+(`buildDiagnosticBundle`) that reads the live station synchronously, so its
+parts describe the same moment; the upload and each retry send those same
+bytes. The ZIP uses stored (uncompressed) entries with CRC-32 (no Node-only
+module, so it also builds in the browser); `unzip -t` accepts it.
+
+```text
+diagnostics.zip
+├── manifest.json        schemaVersion (1), generatedAt, chargePointId, ocppVersion, transport,
+│                        simulatorVersion, request {action, requestId, logType, window},
+│                        redaction policy, parts {file: present, bytes, entries, truncated, omitted}
+├── configuration.json   effective values with persisted-override | default state, readonly; staged: []
+├── station-state.json   chargePoint, connectors (status, availability, error, transaction), connectivity
+├── scenario.json        installed scenarios, selected (null), definitions of the runs in progress
+├── scenario-run.json    status idle | running | waiting | paused | stepping | multiple | unavailable, runs[], lastRun
+├── logs.jsonl           the station's structured log, request window, newest 1 MiB
+└── ocpp-trace.jsonl     only when the host supplies a trace source and the station is OCPP-J
+```
+
+- **Redaction (one policy, `v1`)**: configuration keys named like a password,
+  secret, token, key, PIN or certificate show `[redacted]` (an empty value stays
+  empty, so "not set" is visible); string values that hold PEM material or
+  credentials (`password=…`, `Bearer …`, `user:pw@host`, `?token=…`) are
+  redacted; members of scenario definitions and structured values go through the
+  shared `redactSensitiveValue` (secret members are dropped); transaction
+  `idTag`s are `[redacted]`; SIM ICCID / IMSI are masked to their last four
+  characters; raw network-simulation state and `state.db` are never dumped.
+- **Bounds**: logs and trace 1 MiB each (the oldest lines go first, the first
+  line is `{"truncated": N}` and the manifest records the count); a scenario
+  definition over 256 KiB is omitted with a reason. `log.oldestTimestamp` /
+  `latestTimestamp` (or `startTime` / `stopTime`) limit logs and trace.
+- **Scenarios**: the core does not own scenario runs; the daemon attaches a
+  read model (`ChargePoint.setDiagnosticsSources`, `DiagnosticsSources.ts`).
+  `selected` is always `null`: the simulator has no scenario selection yet
+  (#569), and none is invented. `status` is `idle` when no run is in progress:
+  a finished run is only ever `lastRun`. Runs on several connectors are all
+  listed (`multiple`, ordered by connector), none chosen. A station without a
+  scenario runtime (the browser's local mode) says `available: false`.
+- **Trace**: not available on OCPP-S (SOAP): the manifest says
+  `omitted: "OCPP-S (SOAP) traces are not supported"`. On OCPP-J the file exists
+  only when the host supplies trace lines (the daemon does not yet), otherwise
+  the manifest says why it is absent.
+- **Connectivity**: network interface, masked modem / SIM state (#928) and the
+  network-simulation summary only; full ICCID / IMSI are never exported (the
+  explicit disclosure policy of the #925 comment is left for a later change).
+- **Non-OCPP use**: `buildDiagnosticBundle(cp, request)` is the domain
+  service; an RPC / MCP method can return `manifest` and `parts` from it
+  without a second collector. No such method is added here.
+
+### Decisions (#925)
+
+- **Opt-in key `DiagnosticBundle`, operator-only.** Rejected: a CSMS-writable
+  key (the CSMS could turn the export on by itself) and a nonstandard OCPP field
+  (the issue rules it out).
+- **GetDiagnostics keeps the multipart `POST`**, GetLog keeps the #926 `PUT`:
+  each CSMS receiver stays compatible with its own operation. Rejected: one
+  transport for both.
+- **The bundle needs `RealLogUpload` on GetLog**, so "Uploaded" always means a
+  real transfer (#925 §8).
+- **`selected` is `null`, not a guess** (see above); `staged` is `[]` because
+  the simulator applies every accepted change at once.
+- **Stored ZIP, no compression**: a pure-TypeScript writer without a
+  dependency; the 1 MiB bounds keep the archive small.

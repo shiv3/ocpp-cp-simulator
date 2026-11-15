@@ -347,7 +347,7 @@ function collectTrace(
   const to = window.latestTimestamp ? Date.parse(window.latestTimestamp) : NaN;
   const inside = lines.filter((line) => {
     if (Number.isNaN(from) && Number.isNaN(to)) return true;
-    let at = NaN;
+    let at: number;
     try {
       const rec = JSON.parse(line) as { timestamp?: unknown; time?: unknown };
       at = Date.parse(String(rec.timestamp ?? rec.time ?? ""));

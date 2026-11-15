@@ -80,6 +80,12 @@ import type {
   ChargePointTransport,
 } from "./ChargePointDeps";
 import type { FileUploader } from "./FileUploader";
+import type { DiagnosticsSources } from "./DiagnosticsSources";
+import {
+  SCENARIO_CONFIG_KEYS,
+  scenarioConfigValues,
+  summarizeScenarios,
+} from "./scenarioReadModel";
 import type {
   CloseCause,
   GenerationToken,
@@ -579,6 +585,7 @@ export class ChargePoint {
   /** #878: the stores this charge point persists its own state through. */
   private readonly _repositories: ChargePointRepositories;
   private readonly _fileUploader: FileUploader;
+  private readonly _logUploader: FileUploader;
   private readonly _reservationManager: ReservationManager;
   /** Parent id / groupIdToken of the tags the CSMS authorized (reservations). */
   private readonly _authorizedParents = new Map<string, string>();
@@ -775,6 +782,7 @@ export class ChargePoint {
     this._logSink = deps.logSink;
     this._repositories = deps.repositories;
     this._fileUploader = deps.fileUploader;
+    this._logUploader = deps.logUploader ?? deps.fileUploader;
     // #456: installed certificates survive a restart when state persists.
     // #928: the initial config, or (without one) the state a restart finds.
     this._modem = transportOptions.modem
@@ -1990,6 +1998,43 @@ export class ChargePoint {
   /** Uploads the GetDiagnostics file (#575: injected through deps). */
   get fileUploader(): FileUploader {
     return this._fileUploader;
+  }
+
+  private _diagnosticsSources: DiagnosticsSources = {};
+
+  /** What the host attached for the diagnostic snapshot and the scenario
+   *  introspection (#925, #927); `{}` until it does. */
+  get diagnosticsSources(): DiagnosticsSources {
+    return this._diagnosticsSources;
+  }
+
+  setDiagnosticsSources(sources: DiagnosticsSources): void {
+    this._diagnosticsSources = sources;
+    if (sources.scenarios) this.wireScenarioIntrospection();
+  }
+
+  /**
+   * #927: publish the read-only scenario read model as live configuration
+   * keys (1.6 `GetConfiguration`, 2.x `SimulatorCtrlr` variables). Only a
+   * station with a scenario runtime has them; the values are asked of the
+   * read model on every read, so they never go stale.
+   */
+  private wireScenarioIntrospection(): void {
+    for (const key of SCENARIO_CONFIG_KEYS) {
+      if (this._configuration.get(key)) continue;
+      this._configuration.defineLiveKey(
+        key,
+        () =>
+          scenarioConfigValues(
+            summarizeScenarios(this._diagnosticsSources.scenarios),
+          )[key],
+      );
+    }
+  }
+
+  /** Uploads the GetLog file when `RealLogUpload` is on (#926). */
+  get logUploader(): FileUploader {
+    return this._logUploader;
   }
 
   get logger(): Logger {

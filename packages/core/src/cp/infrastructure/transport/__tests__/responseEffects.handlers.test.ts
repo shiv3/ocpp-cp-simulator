@@ -43,6 +43,7 @@ function buildContext() {
     ocppVersion: "OCPP-1.6J",
     configuration: {
       getString: () => undefined,
+      getBoolean: () => undefined,
       applyChange: () => "Accepted",
     },
     // The charger engine runs the default behaviors. The firmware ones are

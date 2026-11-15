@@ -10,6 +10,11 @@ import type {
   UploadLogStatus,
 } from "@ocpp-cp-simulator/core/cp/domain/types/FirmwareLogStatus";
 import type { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
+import type {
+  LastRunOutcome,
+  ScenarioIntrospection,
+  ScenarioRunView,
+} from "@ocpp-cp-simulator/core/cp/domain/charge-point/DiagnosticsSources";
 import {
   runModemCommand,
   type ModemCommandResult,
@@ -589,6 +594,8 @@ export class CLIChargePointService {
     string,
     ScenarioExecutionContext
   > = new Map();
+  /** The scenario whose run finished last (#927 `lastRun`). */
+  private _lastFinishedScenarioId: string | null = null;
   private readonly _scenarioRepo: ScenarioRepository;
   private readonly _runtimeRepo: ConnectorRuntimeRepository;
   /**
@@ -798,6 +805,12 @@ export class CLIChargePointService {
       init.cpoName,
       init.tls,
     );
+    // #925 / #927: what the diagnostic bundle and the OCPP scenario read
+    // model name that the core does not own.
+    this._chargePoint.setDiagnosticsSources({
+      simulatorVersion: appVersion(),
+      scenarios: this.scenarioIntrospection(),
+    });
     this._chargePoint.txUpdatedMeterValues =
       init.txUpdatedMeterValues !== false;
     if (database) this.persistEngineState(database, init.cpId);
@@ -2074,6 +2087,66 @@ export class CLIChargePointService {
     return result;
   }
 
+  /**
+   * The scenario read model of this station (#925, #927): installed
+   * scenarios, the runs in progress (one per connector at most) and the last
+   * finished run, from the live executors and the stored reports, never from
+   * a copy.
+   */
+  private scenarioIntrospection(): ScenarioIntrospection {
+    return {
+      installed: () =>
+        [...this._scenarios].map(([id, entry]) => ({
+          id,
+          name: entry.definition.name,
+          connectorId: entry.connectorId,
+          enabled: entry.definition.enabled !== false,
+        })),
+      activeRuns: () => {
+        const runs: ScenarioRunView[] = [];
+        for (const [scenarioId, executor] of this._executors) {
+          const entry = this._scenarios.get(scenarioId);
+          const ctx = executor.getContext();
+          if (ctx.state === "completed" || ctx.state === "error") continue;
+          runs.push({
+            runId: this._runIdByScenario.get(scenarioId) ?? "",
+            scenarioId,
+            ...(entry ? { scenarioName: entry.definition.name } : {}),
+            connectorId: entry?.connectorId ?? 0,
+            state: ctx.state === "idle" ? "running" : ctx.state,
+            stepNodeId: ctx.currentNodeId,
+            ...(ctx.waitDeadlineAt !== undefined
+              ? { waitDeadlineAt: ctx.waitDeadlineAt }
+              : {}),
+          });
+        }
+        return runs;
+      },
+      lastRun: () => {
+        const scenarioId = this._lastFinishedScenarioId;
+        if (scenarioId === null) return null;
+        const status = this._lastRunStatusByScenario.get(scenarioId);
+        if (!status?.runId) return null;
+        const result = this.getScenarioRunResult(scenarioId, status.runId);
+        const outcome: LastRunOutcome = result?.stopped
+          ? "stopped"
+          : status.state === "error" || result?.verdict === "BLOCKED"
+            ? "error"
+            : result?.verdict === "FAIL"
+              ? "failed"
+              : "passed";
+        return {
+          runId: status.runId,
+          scenarioId,
+          connectorId: this._scenarios.get(scenarioId)?.connectorId ?? 0,
+          outcome,
+          ...(result ? { endedAt: Date.parse(result.endedAt) } : {}),
+        };
+      },
+      definition: (scenarioId) => this._scenarios.get(scenarioId)?.definition,
+    };
+  }
+
   runScenario(
     connectorId: number,
     scenarioId: string,
@@ -2657,6 +2730,7 @@ export class CLIChargePointService {
     context: ScenarioExecutionContext,
     errors: ReadonlyArray<string>,
   ): void {
+    this._lastFinishedScenarioId = scenarioId;
     this._lastRunStatusByScenario.set(scenarioId, {
       ...context,
       scenarioId,

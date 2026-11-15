@@ -605,7 +605,11 @@ describe("OCPP 2.1 (stub station)", () => {
     noteLogRequest() {},
     noteFirmwareRequest() {},
     connectors: new Map(),
-    configuration: { getString: () => "", applyChange() {} },
+    configuration: {
+      getString: () => "",
+      getBoolean: () => undefined,
+      applyChange() {},
+    },
     sendSecurityEventNotification: () => Promise.resolve(),
   } as unknown as ChargePoint;
 

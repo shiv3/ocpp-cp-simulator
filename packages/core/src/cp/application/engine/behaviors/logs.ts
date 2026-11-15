@@ -1,10 +1,16 @@
 import type {
   Behavior,
+  BehaviorContext,
+  CallOutcome,
   BehaviorParams,
 } from "@ocpp-cp-simulator/contracts/behavior";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { isOcpp2Version } from "../../../domain/types/OcppVersion";
 import { LogType } from "../../../shared/Logger";
+import { checkUploadUrl } from "../../../domain/charge-point/uploadUrl";
+import { buildDiagnosticBundle } from "../../diagnostics/DiagnosticBundle";
+import { buildLogArtifact } from "./logArtifact";
+import { MAX_LOG_UPLOAD_RETRIES, uploadWithRetries } from "./uploadRetry";
 
 /** The knobs of the 1.6 upload; the default is the former constant. */
 const PARAMS: BehaviorParams = {
@@ -32,6 +38,13 @@ const PARAMS: BehaviorParams = {
 interface GetLogRequest {
   logType?: string;
   requestId?: number;
+  log?: {
+    remoteLocation?: string;
+    oldestTimestamp?: string;
+    latestTimestamp?: string;
+  };
+  retries?: number;
+  retryInterval?: number;
 }
 
 /**
@@ -55,6 +68,143 @@ interface GetLogRequest {
  * notifications, as before #601.
  */
 export function logsBehavior(cp: ChargePoint): Behavior {
+  /**
+   * The real upload (#926), for both versions, when the operator switched
+   * `RealLogUpload` on. Returns undefined when the simulated lifecycle applies
+   * (2.x with `auto` off: the control plane drives the notifications).
+   */
+  const realUpload = (
+    req: GetLogRequest,
+    ctx: BehaviorContext,
+  ): CallOutcome | undefined => {
+    const v2 = isOcpp2Version(cp.ocppVersion);
+    if (v2 && ctx.params.auto !== true) return undefined;
+    const reject = (reasonCode: string, why: string): CallOutcome => {
+      cp.logger.warn(
+        `GetLog request ${req.requestId} rejected: ${why}`,
+        LogType.DIAGNOSTICS,
+      );
+      return {
+        response: v2
+          ? {
+              status: "Rejected",
+              statusInfo: { reasonCode, additionalInfo: why },
+            }
+          : { status: "Rejected" },
+      };
+    };
+    const logType = req.logType ?? "DiagnosticsLog";
+    // The simulator keeps no security log: a SecurityLog request must not
+    // get the diagnostics file under that label.
+    if (logType !== "DiagnosticsLog") {
+      return reject(
+        "UnsupportedParam",
+        `logType ${logType} is not supported; only DiagnosticsLog`,
+      );
+    }
+    const verdict = checkUploadUrl(
+      req.log?.remoteLocation ?? "",
+      cp.configuration.getBoolean("LogUploadAllowPrivateHosts") === true,
+    );
+    if (!verdict.ok) return reject("InvalidURL", verdict.reason);
+    const location = verdict.url.toString();
+    const requestId = req.requestId ?? 0;
+    if (v2 && typeof req.requestId === "number") {
+      cp.noteLogRequest(req.requestId);
+    }
+    const previous = ctx.state.uploadingRequestId;
+    const replaces = previous !== undefined && previous !== null;
+    const seqAtRequest = cp.logStatusSeq;
+    // Taken now, with the answer: the replaced upload stops reporting from
+    // this point (#846).
+    const generation =
+      (typeof ctx.state.uploadGeneration === "number"
+        ? ctx.state.uploadGeneration
+        : 0) + 1;
+    ctx.state.uploadGeneration = generation;
+    // The snapshot is taken now, before the asynchronous upload and its
+    // retries. With the opt-in `DiagnosticBundle` (#925) the file is the
+    // support bundle, else the bounded log file (#926).
+    const bundleMode = cp.configuration.getBoolean("DiagnosticBundle") === true;
+    let fileName: string;
+    let file: File;
+    if (bundleMode) {
+      fileName = `${cp.id}-${logType}-${requestId}.zip`.slice(-255);
+      const bundle = buildDiagnosticBundle(cp, {
+        action: "GetLog",
+        requestId,
+        logType,
+        ...(req.log?.oldestTimestamp
+          ? { oldestTimestamp: req.log.oldestTimestamp }
+          : {}),
+        ...(req.log?.latestTimestamp
+          ? { latestTimestamp: req.log.latestTimestamp }
+          : {}),
+      });
+      file = new File([bundle.file], fileName, { type: "application/zip" });
+      cp.logger.info(
+        `GetLog ${requestId}: uploading the diagnostic bundle (${file.size} bytes)`,
+        LogType.DIAGNOSTICS,
+      );
+    } else {
+      fileName = `${cp.id}-${logType}-${requestId}.jsonl`.slice(-255);
+      const artifact = buildLogArtifact(cp, fileName, req.log ?? {});
+      file = artifact.file;
+      cp.logger.info(
+        `GetLog ${requestId}: uploading ${artifact.entries} log entries (${artifact.truncated} truncated)`,
+        LogType.DIAGNOSTICS,
+      );
+    }
+    return {
+      response: {
+        status: replaces ? "AcceptedCanceled" : "Accepted",
+        filename: fileName,
+      },
+      after: async (): Promise<void> => {
+        let seenSeq = seqAtRequest;
+        // Another sender of this request's status train takes it over.
+        const driven = (): boolean =>
+          cp.logStatusSeq !== seenSeq &&
+          cp.lastLogStatusRequestId === requestId;
+        if (v2 && typeof previous === "number") {
+          // N01.FR.20: the cancelled upload reports it.
+          ctx.notify.logStatus("AcceptedCanceled", { requestId: previous });
+          if (!driven()) seenSeq = cp.logStatusSeq;
+        }
+        ctx.state.uploadingRequestId = requestId;
+        const send = (status: string): void => {
+          ctx.notify.logStatus(status, { requestId });
+          seenSeq = cp.logStatusSeq;
+        };
+        try {
+          if (!driven()) send("Uploading");
+          const done = await uploadWithRetries({
+            cp,
+            ctx,
+            upload: cp.logUploader,
+            location,
+            file,
+            retries: req.retries,
+            retryInterval: req.retryInterval,
+            maxRetries: MAX_LOG_UPLOAD_RETRIES,
+            label: "Log",
+            superseded: () =>
+              ctx.stopping ||
+              ctx.state.uploadGeneration !== generation ||
+              driven(),
+          });
+          if (done === "superseded") return;
+          // Uploaded only after the server accepted the file.
+          send(done ? "Uploaded" : "UploadFailure");
+        } finally {
+          if (ctx.state.uploadGeneration === generation) {
+            ctx.state.uploadingRequestId = null;
+          }
+        }
+      },
+    };
+  };
+
   return {
     api: 1,
     id: "default.logs",
@@ -64,6 +214,10 @@ export function logsBehavior(cp: ChargePoint): Behavior {
         mode: "replace",
         handle: (request, ctx) => {
           const req = (request ?? {}) as GetLogRequest;
+          if (cp.configuration.getBoolean("RealLogUpload") === true) {
+            const real = realUpload(req, ctx);
+            if (real) return real;
+          }
           if (isOcpp2Version(cp.ocppVersion)) {
             if (typeof req.requestId === "number") {
               cp.noteLogRequest(req.requestId);

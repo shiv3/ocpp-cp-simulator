@@ -1,12 +1,8 @@
 import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { LogType } from "../../../shared/Logger";
-
-/** How long one upload attempt may take before it counts as failed. */
-const ATTEMPT_TIMEOUT_MS = 60_000;
-/** Wait between attempts when the request names `retries` but no
- *  `retryInterval` (§6.25: the station decides). */
-const DEFAULT_RETRY_INTERVAL_S = 30;
+import { buildDiagnosticBundle } from "../../diagnostics/DiagnosticBundle";
+import { uploadWithRetries } from "./uploadRetry";
 
 interface GetDiagnosticsRequest {
   location: string;
@@ -63,51 +59,41 @@ export function diagnosticsBehavior(cp: ChargePoint): Behavior {
             `Get diagnostics request received: ${location}`,
             LogType.DIAGNOSTICS,
           );
-          const logs = linesBetween(
-            cp.logger.getLogs(),
-            startTime,
-            stopTime,
-          ).join("\n");
-          const file = new File(
-            [new Blob([logs], { type: "text/plain" })],
-            "diagnostics.txt",
-          );
+          // #925: with the opt-in `DiagnosticBundle` the file is the support
+          // bundle; without it, the plain log lines as before (#743).
+          let file: File;
+          if (cp.configuration.getBoolean("DiagnosticBundle") === true) {
+            file = buildDiagnosticBundle(cp, {
+              action: "GetDiagnostics",
+              ...(startTime ? { oldestTimestamp: startTime } : {}),
+              ...(stopTime ? { latestTimestamp: stopTime } : {}),
+            }).file;
+          } else {
+            const logs = linesBetween(
+              cp.logger.getLogs(),
+              startTime,
+              stopTime,
+            ).join("\n");
+            file = new File(
+              [new Blob([logs], { type: "text/plain" })],
+              "diagnostics.txt",
+            );
+          }
           return {
-            response: { fileName: "diagnostics.txt" },
+            response: { fileName: file.name },
             after: async () => {
               ctx.notify.diagnosticsStatus("Uploading");
-              const attempts = 1 + Math.max(0, Math.trunc(retries ?? 0));
-              const intervalMs =
-                Math.max(0, retryInterval ?? DEFAULT_RETRY_INTERVAL_S) * 1000;
-              for (let attempt = 1; attempt <= attempts; attempt++) {
-                const abort = new AbortController();
-                try {
-                  const upload = cp.fileUploader(location, file, abort.signal);
-                  // A rejection after the timeout is the abort itself.
-                  upload.catch(() => undefined);
-                  const res = await ctx.until(upload, {
-                    ms: ATTEMPT_TIMEOUT_MS,
-                  });
-                  if (res.ok) {
-                    ctx.notify.diagnosticsStatus("Uploaded");
-                    return;
-                  }
-                  cp.logger.warn(
-                    `Diagnostics upload returned HTTP ${res.status} (attempt ${attempt}/${attempts})`,
-                    LogType.DIAGNOSTICS,
-                  );
-                } catch (err) {
-                  abort.abort();
-                  // The station stopped: no final status.
-                  if (ctx.stopping) throw err;
-                  cp.logger.warn(
-                    `Diagnostics upload failed: ${err instanceof Error ? err.message : String(err)} (attempt ${attempt}/${attempts})`,
-                    LogType.DIAGNOSTICS,
-                  );
-                }
-                if (attempt < attempts) await ctx.sleep(intervalMs);
-              }
-              ctx.notify.diagnosticsStatus("UploadFailed");
+              const done = await uploadWithRetries({
+                cp,
+                ctx,
+                upload: cp.fileUploader,
+                location,
+                file,
+                retries,
+                retryInterval,
+                label: "Diagnostics",
+              });
+              ctx.notify.diagnosticsStatus(done ? "Uploaded" : "UploadFailed");
             },
           };
         },

@@ -10,7 +10,7 @@ import type { ChargePointDeps } from "../../domain/charge-point/ChargePointDeps"
 import type { Database } from "../../domain/persistence/Database";
 import type { BootNotification } from "../../domain/types/OcppTypes";
 import type { OcppTlsOptions } from "../../domain/transport/ConnectionSecurity";
-import { UploadFile } from "../fileUpload";
+import { PutFile, UploadFile } from "../fileUpload";
 import { LogRepository } from "../persistence/LogRepository";
 import { createChargePointRepositories } from "../persistence/createChargePointRepositories";
 import { DEFAULT_SERVICES } from "./createDefaultServices";
@@ -26,6 +26,7 @@ const DEFAULT_DEPS: Omit<ChargePointDeps, "logSink" | "repositories"> = {
   ...DEFAULT_SERVICES,
   createTransport: createDefaultTransport,
   fileUploader: UploadFile,
+  logUploader: PutFile,
 };
 
 /**

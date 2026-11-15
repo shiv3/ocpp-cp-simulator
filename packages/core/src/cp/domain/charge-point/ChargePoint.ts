@@ -39,6 +39,8 @@ import { BootLifecycle, type BootState } from "./BootLifecycle";
 
 import { OutageLifecycle } from "./OutageLifecycle";
 
+import { StationMessaging } from "./StationMessaging";
+
 import { ConnectorStatusControl } from "./ConnectorStatusControl";
 
 import { ChargingProfileControl } from "./ChargingProfileControl";
@@ -132,10 +134,7 @@ import {
   type RawFrameRequest,
 } from "../types/OcppCall";
 
-import { OcppCallRejectedError } from "../errors/OcppCallErrors";
-
 import {
-  relayGet15118EVCertificate,
   type Get15118EVCertificateRequest,
   type Get15118EVCertificateResult,
 } from "../security/get15118EVCertificate";
@@ -385,6 +384,16 @@ export class ChargePoint {
   private readonly _stationProfiles: ChargingProfileStore =
     new ChargingProfileStore();
   private readonly _certificateStore: CertificateStore;
+  private readonly _messaging = new StationMessaging({
+    chargePoint: this,
+    callCatalog: () => this._callCatalog,
+    clock: () => this._clock,
+    engine: () => this._engine,
+    logger: () => this._logger,
+    ocppVersion: () => this._ocppVersion,
+    outbox: () => this._outbox,
+    rawFrames: () => this._rawFrames,
+  });
   private readonly _statusControl = new ConnectorStatusControl({
     chargePoint: this,
     connectionTimeouts: () => this._connectionTimeouts,
@@ -1851,78 +1860,31 @@ export class ChargePoint {
 
   /**
    * Expert OCPP call (#389): any station-initiated CALL of this station's
-   * OCPP-J version, with the payload as given. See
-   * {@link IChargePointMessageHandler.sendOcppCall}.
+   * OCPP-J version, with the payload as given.
+   * @see StationMessaging.sendOcppCall
    */
   async sendOcppCall(request: OcppCallRequest): Promise<OcppCallOutcome> {
-    const catalog = this._callCatalog;
-    if (!catalog) {
-      throw new OcppCallRejectedError(
-        "unsupported_transport",
-        `Expert OCPP calls need an OCPP-J station; ${this._ocppVersion} is SOAP`,
-      );
-    }
-    // Checked here, not by the schema, so skipValidation cannot waive it:
-    // the scenario editor can store unparsed JSON text as the payload.
-    const { payload } = request;
-    if (
-      typeof payload !== "object" ||
-      payload === null ||
-      Array.isArray(payload)
-    ) {
-      throw new OcppCallRejectedError(
-        "invalid_payload",
-        "The payload of an OCPP call must be a JSON object",
-      );
-    }
-    if (!catalog.isSupported(request.action)) {
-      throw new OcppCallRejectedError(
-        "unsupported_action",
-        `${request.action} is not a station-initiated call on ${this._ocppVersion}; expected one of ${catalog.actions.join(", ")}`,
-      );
-    }
-    return this._outbox.sendOcppCall(request);
+    return this._messaging.sendOcppCall(request);
   }
 
   /**
    * Expert raw frame (#393, level C of #389): one text frame written to the
-   * WebSocket as given, valid OCPP-J or not, outside the 1.6 serial CALL
-   * queue. Replies are correlated best effort and kept from the station's
-   * handlers. See {@link RawFrameSink}.
+   * WebSocket as given, outside the 1.6 serial CALL queue.
+   * @see StationMessaging.sendRawFrame
    */
   sendRawFrame(request: RawFrameRequest): Promise<RawFrameOutcome> {
-    if (!this._rawFrames) {
-      return Promise.reject(
-        new OcppCallRejectedError(
-          "unsupported_transport",
-          `Raw frames need an OCPP-J station; ${this._ocppVersion} is SOAP`,
-        ),
-      );
-    }
-    return this._rawFrames.send(request);
+    return this._messaging.sendRawFrame(request);
   }
 
   /**
-   * 2.0.1 / 2.1 Get15118EVCertificate relay (M01 / M02, #537): sends the EXI
-   * request the caller supplies, standing in for an EV, and resolves with
-   * the CSMS's answers. See {@link relayGet15118EVCertificate}. Each request
-   * goes through {@link sendOcppCall}, so it is refused before anything is
-   * written on 1.6 and SOAP stations, which have no such message, and when
-   * the payload fails the version's schema (a 2.1-only field or an
-   * over-long `exiRequest` on 2.0.1).
+   * 2.0.1 / 2.1 Get15118EVCertificate relay (M01 / M02, #537); each request
+   * goes through {@link sendOcppCall}, so 1.6 and SOAP stations refuse it.
+   * @see StationMessaging.get15118EVCertificate
    */
   async get15118EVCertificate(
     request: Get15118EVCertificateRequest,
   ): Promise<Get15118EVCertificateResult> {
-    return relayGet15118EVCertificate(
-      request,
-      (payload) =>
-        this.sendOcppCall({ action: "Get15118EVCertificate", payload }),
-      {
-        warn: (message) => this._logger.warn(message, LogType.OCPP),
-        clock: this._clock,
-      },
-    );
+    return this._messaging.get15118EVCertificate(request);
   }
 
   /**
@@ -1990,75 +1952,44 @@ export class ChargePoint {
     this._outbox.sendDiagnosticsStatusNotification(status);
   }
 
-  /** Send FirmwareStatusNotification.req — see OCPPMessageHandler doc. */
+  /** Send FirmwareStatusNotification.req — see OCPPMessageHandler doc.
+   *  @see StationMessaging.sendFirmwareStatusNotification */
   sendFirmwareStatusNotification(
     status: FirmwareStatus,
     requestId?: number,
   ): void {
-    this._outbox.sendFirmwareStatusNotification(status, requestId);
-    // Whichever route sent it (control plane, scenario, behavior), the engine
-    // holds what was last reported, so a TriggerMessage answers it (#596).
-    // The 2.x handler names the last accepted request when none is given,
-    // except for Idle.
-    const reported =
-      requestId ??
-      (status === "Idle" ? undefined : this._lastFirmwareRequestId);
-    this.engine.dispatch({
-      type: "reported",
-      kind: "firmware",
-      status,
-      ...(reported !== undefined ? { requestId: reported } : {}),
-    });
+    this._messaging.sendFirmwareStatusNotification(status, requestId);
   }
 
-  /** Send LogStatusNotification.req — see OCPPMessageHandler doc. */
+  /** Send LogStatusNotification.req — see OCPPMessageHandler doc.
+   *  @see StationMessaging.sendLogStatusNotification */
   sendLogStatusNotification(status: UploadLogStatus, requestId?: number): void {
-    this._logStatusSeq++;
-    this._lastLogStatusRequestId = requestId ?? this._lastLogRequestId;
-    this._outbox.sendLogStatusNotification(status, requestId);
-    const reported =
-      requestId ?? (status === "Idle" ? undefined : this._lastLogRequestId);
-    this.engine.dispatch({
-      type: "reported",
-      kind: "log",
-      status,
-      ...(reported !== undefined ? { requestId: reported } : {}),
-    });
+    this._messaging.sendLogStatusNotification(status, requestId);
   }
 
-  /** Counts every LogStatusNotification this station sent, so the automatic
-   *  GetLog lifecycle can tell that something else (the control plane, a
-   *  scenario `notify` node) is driving the status train of its request
-   *  (N01.FR.09: one final status per requestId). */
-  private _logStatusSeq = 0;
-  private _lastLogStatusRequestId: number | undefined;
+  /** Counts every LogStatusNotification this station sent (N01.FR.09).
+   *  @see StationMessaging.logStatusSeq */
   get logStatusSeq(): number {
-    return this._logStatusSeq;
+    return this._messaging.logStatusSeq;
   }
   get lastLogStatusRequestId(): number | undefined {
-    return this._lastLogStatusRequestId;
+    return this._messaging.lastLogStatusRequestId;
   }
 
-  /** `requestId` of the last UpdateFirmware.req this station accepted, so a
-   *  2.0.1 FirmwareStatusNotification sent without one still names the
-   *  lifecycle it belongs to (#345). Kept until the next accepted request —
-   *  deliberately across reconnects and reboots, since a real update reports
-   *  `Installed` only after the station has rebooted on the new firmware. */
-  private _lastFirmwareRequestId: number | undefined;
-  /** Same for GetLog.req → LogStatusNotification. */
-  private _lastLogRequestId: number | undefined;
-
+  /** `requestId` of the last accepted UpdateFirmware.req (#345).
+   *  @see StationMessaging.noteFirmwareRequest */
   noteFirmwareRequest(requestId: number): void {
-    this._lastFirmwareRequestId = requestId;
+    this._messaging.noteFirmwareRequest(requestId);
   }
   get lastFirmwareRequestId(): number | undefined {
-    return this._lastFirmwareRequestId;
+    return this._messaging.lastFirmwareRequestId;
   }
+  /** Same for GetLog.req → LogStatusNotification. */
   noteLogRequest(requestId: number): void {
-    this._lastLogRequestId = requestId;
+    this._messaging.noteLogRequest(requestId);
   }
   get lastLogRequestId(): number | undefined {
-    return this._lastLogRequestId;
+    return this._messaging.lastLogRequestId;
   }
 
   /** Send SignedFirmwareStatusNotification.req — see OCPPMessageHandler doc. */
@@ -2066,7 +1997,7 @@ export class ChargePoint {
     status: FirmwareStatus,
     requestId?: number,
   ): void {
-    this._outbox.sendSignedFirmwareStatusNotification(status, requestId);
+    this._messaging.sendSignedFirmwareStatusNotification(status, requestId);
   }
 
   /** The CSMS answered a StatusNotification for `connectorId` (0 = the charge

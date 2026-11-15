@@ -1,37 +1,19 @@
 import { useTranslation } from "react-i18next";
 import React from "react";
-import {
-  CornerRightDown,
-  LogOut,
-  Maximize2,
-  Minus,
-  Plus,
-  Repeat,
-  RepeatOff,
-  SlidersHorizontal,
-  X,
-} from "lucide-react";
+import { CornerRightDown } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import RunStatePill from "../../../components/RunStatePill";
 import {
   canSetLaneExit,
-  canWrapInLoop,
   editCapabilities,
   firstNodeOf,
   seqAt,
-  treeNodes,
   type Capability,
   type SeqPath,
 } from "../../../lib/blockTree";
 import { isLiveRunState } from "../../../lib/scenarioRunState";
-import {
-  STRUCTURE_TYPE,
-  WAIT_STEP_TYPES,
-  stepSummary,
-} from "../../../lib/scenarioSteps";
+import { STRUCTURE_TYPE } from "../../../lib/scenarioSteps";
 import { stepNumbers } from "../../../lib/stepTree";
-import { LoopBoundsPanel, LoopBoundsSummary } from "./loopBoundsUi";
 import {
   ZOOM_STEP,
   clampZoom,
@@ -45,9 +27,7 @@ import {
   NODE_H,
   NODE_W,
   START_R,
-  TAG_H,
   layoutTreeGraph,
-  type GraphPlus,
 } from "../../../lib/treeGraphLayout";
 import { dropNeighbours } from "../../../lib/useLaneDrag";
 import { useStepEditing } from "../edit/stepEditing";
@@ -58,68 +38,23 @@ import {
   useMarkMessages,
   useStepIssues,
 } from "../edit/issueMarkUi";
-import { highlightedBy, type IssueMark } from "../../../lib/graphIssueMarks";
-import StepTile from "./StepTile";
+import { highlightedBy } from "../../../lib/graphIssueMarks";
 import {
-  CURRENT_CARD,
   boxPhase,
   laneLetter,
-  laneStyle,
-  nodeTitle,
   type BoxPhase,
   type StepTreeViewProps,
 } from "./stepVisuals";
-
-const TODO_STROKE = "var(--cx-border-strong)";
-const LOOP_STROKE = "var(--cx-purple)";
-/** The step picker opened from a `+` (and the room it needs below). */
-const PICKER_W = 520;
-const PICKER_H = 330;
-/** Room the bounds editor needs below its loop before it opens upward. */
-const BOUNDS_PANEL_H = 300;
-/** Scrolls a freshly opened bounds editor into view in the canvas. */
-const revealBounds = (el: HTMLElement | null) =>
-  el?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
-const WAIT_TYPES: ReadonlySet<string> = new Set(WAIT_STEP_TYPES);
-
-/** Picking a target on the canvas: after Repeat from a `+` (the loop goes
- *  back to an earlier step of the lane) or a lane's connect arrow (the lane
- *  continues at a later step). `origin`: where the arrow starts. */
-type Pick =
-  | { kind: "loop"; path: SeqPath; index: number; origin: Point }
-  | {
-      kind: "lane";
-      path: SeqPath;
-      /** Lane letter, for the words. */
-      lane: string;
-      origin: Point;
-    };
-
-interface Point {
-  x: number;
-  y: number;
-}
-
-/** What clicking a step would do while picking: `cap` says whether, `ids`
- *  are the steps the result affects (the range to highlight). */
-interface PickTarget {
-  cap: Capability;
-  ids: string[];
-  /** Loop: the numbers of the first and last step the loop would repeat. */
-  from?: number;
-  to?: number;
-}
-
-const idsOf = (blocks: ReadonlyArray<import("../../../lib/blockTree").Block>) =>
-  treeNodes({
-    root: {
-      path: "",
-      blocks: [...blocks],
-      exit: { kind: "stop", reason: "noEdge" },
-    },
-    detached: [],
-    origin: null,
-  }).map((n) => n.id);
+import EdgeIssueMarker from "./graph/EdgeIssueMarker";
+import GraphCards from "./graph/GraphCards";
+import GraphEdges from "./graph/GraphEdges";
+import GraphLoops from "./graph/GraphLoops";
+import GraphToolbar from "./graph/GraphToolbar";
+import LaneTags from "./graph/LaneTags";
+import PickPanel from "./graph/PickPanel";
+import PlusButton from "./graph/PlusButton";
+import { PICKER_H, PICKER_W, type Pick, type Point } from "./graph/graphShared";
+import { laneTargets, loopTargets } from "./graph/pickTargets";
 
 /**
  * The block tree (`recognizeBlockTree`) drawn as connected cards, laid out
@@ -246,42 +181,13 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
   /** The loop whose bounds editor is open (its header id). */
   const [openBounds, setOpenBounds] = React.useState<string | null>(null);
 
-  /** What each step of the lane would do as the target of the pick. */
-  const loopTargets = (path: SeqPath, index: number) => {
-    const out = new Map<string, PickTarget>();
-    const lane = seqAt(tree, path);
-    if (!lane) return out;
-    for (let from = 0; from < Math.min(index, lane.blocks.length); from++) {
-      out.set(firstNodeOf(lane.blocks[from]).id, {
-        cap: canWrapInLoop(tree, path, from, index - 1),
-        ids: idsOf(lane.blocks.slice(from, index)),
-      });
-    }
-    return out;
-  };
-  const laneTargets = (path: SeqPath) => {
-    const out = new Map<string, PickTarget>();
-    const m = /^(.*)\/(\d+)\/lanes\/\d+$/.exec(path);
-    const parent = m ? seqAt(tree, m[1]) : null;
-    if (!m || !parent) return out;
-    for (let j = Number(m[2]) + 1; j < parent.blocks.length; j++) {
-      const id = firstNodeOf(parent.blocks[j]).id;
-      out.set(id, {
-        cap: canSetLaneExit(tree, path, id),
-        // The steps the lane would skip, and the one it continues at.
-        ids: idsOf(parent.blocks.slice(Number(m[2]) + 1, j + 1)),
-      });
-    }
-    return out;
-  };
   const pickTargets = React.useMemo(
     () =>
       pick === null
         ? null
         : pick.kind === "loop"
-          ? loopTargets(pick.path, pick.index)
-          : laneTargets(pick.path),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+          ? loopTargets(tree, pick.path, pick.index)
+          : laneTargets(tree, pick.path),
     [pick, tree],
   );
 
@@ -312,7 +218,7 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
               }
             },
             refusals: (slot) => {
-              const targets = loopTargets(slot.lane, slot.index);
+              const targets = loopTargets(tree, slot.lane, slot.index);
               const all = [...targets.values()];
               if (all.some((x) => x.cap.ok)) return {};
               const first = all.find((x) => !x.cap.ok)?.cap;
@@ -530,172 +436,24 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
     }
   }
 
-  const plusButton = (point: GraphPlus, hover: boolean) => (
-    <div
-      key={`${hover ? "zone" : "disc"}:${point.slot.lane}:${point.slot.index}`}
-      // A hover zone covers the gap above a block; a disc stands on its own.
-      className={cn(
-        "absolute z-10 flex items-center justify-center",
-        hover && "group/insert",
-      )}
-      style={
-        hover
-          ? {
-              left: point.x - NODE_W / 2,
-              top: point.y - GAP / 2,
-              width: NODE_W,
-              height: GAP,
-            }
-          : { left: point.x - 9, top: point.y - 9, width: 18, height: 18 }
-      }
-    >
-      <button
-        type="button"
-        aria-label={point.label}
-        title={
-          hover ? t("scenarioRun.insertStepHere") : t("scenarioRun.addAStep")
-        }
-        onClick={() => editing.openSlot(point.slot.lane, point.slot.index)}
-        className={cn(
-          "flex h-[18px] w-[18px] items-center justify-center rounded-full border bg-cx-card",
-          hover
-            ? "border-cx-border-strong text-cx-muted opacity-0 hover:border-cx-accent hover:text-cx-accent focus-visible:opacity-100 group-hover/insert:opacity-100"
-            : "border-cx-accent text-cx-accent hover:bg-cx-accent hover:text-cx-card",
-        )}
-      >
-        <Plus className="h-3 w-3" />
-      </button>
-    </div>
-  );
-
   const allPaths = [...paths, ...geometry.loops.flatMap((loop) => loop.arcs)];
 
   const canvasW = Math.max(width, openPlus ? PICKER_W + 8 : 0);
-  const zoomLabel = `${Math.round(zoom * 100)}%`;
-  const zoomButton =
-    "flex h-6 min-w-6 items-center justify-center rounded px-1.5 text-xs text-cx-fg2 hover:bg-cx-sub disabled:cursor-not-allowed disabled:opacity-40";
 
   return (
     <div data-graph-canvas="">
-      <div
-        role="toolbar"
-        aria-label={t("scenarioRun.zoom.label")}
-        className="mb-1.5 flex items-center justify-end gap-0.5"
-      >
-        <button
-          type="button"
-          aria-label={t("scenarioRun.zoom.out")}
-          title={t("scenarioRun.zoom.out")}
-          disabled={zoom <= 0.25}
-          onClick={() => setZoomMode(clampZoom(zoom / ZOOM_STEP))}
-          className={zoomButton}
-        >
-          <Minus className="h-3.5 w-3.5" aria-hidden />
-        </button>
-        <span
-          data-testid="graph-zoom-level"
-          aria-live="polite"
-          className="w-10 text-center font-mono text-[11px] text-cx-muted"
-        >
-          {zoomLabel}
-        </span>
-        <button
-          type="button"
-          aria-label={t("scenarioRun.zoom.in")}
-          title={t("scenarioRun.zoom.in")}
-          disabled={zoom >= 2}
-          onClick={() => setZoomMode(clampZoom(zoom * ZOOM_STEP))}
-          className={zoomButton}
-        >
-          <Plus className="h-3.5 w-3.5" aria-hidden />
-        </button>
-        <button
-          type="button"
-          aria-pressed={zoomMode === "fit"}
-          title={t("scenarioRun.zoom.fitHint")}
-          onClick={() => setZoomMode("fit")}
-          className={cn(zoomButton, zoomMode === "fit" && "bg-cx-sub")}
-        >
-          <Maximize2 className="mr-1 h-3 w-3" aria-hidden />
-          {t("scenarioRun.zoom.fit")}
-        </button>
-        <button
-          type="button"
-          aria-pressed={zoomMode === 1}
-          title={t("scenarioRun.zoom.resetHint")}
-          onClick={() => setZoomMode(1)}
-          className={cn(zoomButton, zoomMode === 1 && "bg-cx-sub")}
-        >
-          100%
-        </button>
-      </div>
+      <GraphToolbar zoom={zoom} zoomMode={zoomMode} setZoomMode={setZoomMode} />
       {pick && pickTargets && (
-        <div
-          role="group"
-          data-pick-panel=""
-          aria-label={t(
-            pick.kind === "loop"
-              ? "scenarioRun.pick.title"
-              : "scenarioRun.pick.titleLane",
-            { lane: pick.kind === "lane" ? pick.lane : "" },
-          )}
-          className="mb-1.5 rounded-[10px] border border-cx-accent/40 bg-cx-accent/5 px-3 py-2 text-xs"
-        >
-          <div className="flex items-center gap-2">
-            <span className="flex-1 font-medium text-cx-fg">
-              {t(
-                pick.kind === "loop"
-                  ? "scenarioRun.pick.title"
-                  : "scenarioRun.pick.titleLane",
-                { lane: pick.kind === "lane" ? pick.lane : "" },
-              )}
-            </span>
-            <button
-              type="button"
-              onClick={cancelPick}
-              className="rounded border border-cx-border-strong px-2 py-0.5 text-cx-fg2 hover:bg-cx-sub"
-            >
-              {t("scenarioRun.pick.cancel")}
-            </button>
-          </div>
-          <p className="mt-0.5 text-cx-muted">
-            {pickNotice ??
-              t(
-                pick.kind === "loop"
-                  ? "scenarioRun.pick.hint"
-                  : "scenarioRun.pick.hintLane",
-              )}
-          </p>
-          <ul
-            aria-label={t("scenarioRun.pick.listLabel")}
-            className="mt-1.5 flex flex-wrap gap-1.5"
-          >
-            {[...pickTargets.entries()].map(([id, target]) => {
-              const step = cards.find((c) => c.node.id === id)?.node;
-              if (!step) return null;
-              return (
-                <li key={id}>
-                  <button
-                    type="button"
-                    data-pick-target={id}
-                    disabled={!target.cap.ok}
-                    title={target.cap.ok ? undefined : t(target.cap.reason)}
-                    onClick={() => commitPick(id)}
-                    onFocus={() => setHoverId(id)}
-                    onMouseEnter={() => setHoverId(id)}
-                    onBlur={() => setHoverId((h) => (h === id ? null : h))}
-                    className="rounded-md border border-cx-border-strong bg-cx-card px-2 py-1 text-cx-fg2 hover:border-cx-accent focus-visible:border-cx-accent disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    {t("scenarioRun.pick.target", {
-                      n: numbers.get(id) ?? "",
-                      title: nodeTitle(step),
-                    })}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
+        <PickPanel
+          pick={pick}
+          pickTargets={pickTargets}
+          pickNotice={pickNotice}
+          cards={cards}
+          numbers={numbers}
+          cancelPick={cancelPick}
+          commitPick={commitPick}
+          setHoverId={setHoverId}
+        />
       )}
       {/* The scroll container is the canvas: it never draws under the side
           panel, and scrolls both ways. */}
@@ -735,130 +493,13 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
               transformOrigin: "0 0",
             }}
           >
-            <svg
-              aria-hidden
+            <GraphEdges
+              geometry={geometry}
               width={width}
               height={height}
-              data-graph-edges=""
-              className="pointer-events-none absolute inset-0"
-            >
-              <defs>
-                <marker
-                  id="graph-link-arrow"
-                  viewBox="0 0 8 8"
-                  refX="7"
-                  refY="4"
-                  markerWidth="7"
-                  markerHeight="7"
-                  orient="auto"
-                >
-                  <path d="M 0 0 L 8 4 L 0 8 z" fill="var(--cx-faint)" />
-                </marker>
-                <marker
-                  id="graph-loop-arrow"
-                  viewBox="0 0 8 8"
-                  refX="7"
-                  refY="4"
-                  markerWidth="7"
-                  markerHeight="7"
-                  orient="auto"
-                >
-                  <path d="M 0 0 L 8 4 L 0 8 z" fill={LOOP_STROKE} />
-                </marker>
-              </defs>
-              {geometry.loops.map((loop) => (
-                <rect
-                  key={`rect:${loop.key}`}
-                  data-graph-loop={loop.headerId}
-                  x={loop.rect.x}
-                  y={loop.rect.y}
-                  width={loop.rect.w}
-                  height={loop.rect.h}
-                  rx={14}
-                  fill={LOOP_STROKE}
-                  fillOpacity={
-                    loop.ids.some((id) => phaseOf(id) === "current")
-                      ? 0.16
-                      : 0.09
-                  }
-                />
-              ))}
-              {paths.map((path) => (
-                <path
-                  key={path.key}
-                  d={path.d}
-                  data-to={path.to}
-                  data-edge-id={path.edgeId}
-                  fill="none"
-                  strokeWidth={path.done ? 2 : 1.5}
-                  stroke={path.done ? laneStyle(path.lane).color : TODO_STROKE}
-                  {...edgeIssueProps(path.edgeId)}
-                />
-              ))}
-              {geometry.loops.flatMap((loop) =>
-                loop.arcs.map((arc) => (
-                  <path
-                    key={arc.key}
-                    d={arc.d}
-                    data-loop-arc={loop.headerId}
-                    data-edge-id={arc.edgeId}
-                    fill="none"
-                    strokeWidth={arc.done ? 2 : 1.75}
-                    stroke={LOOP_STROKE}
-                    markerEnd="url(#graph-loop-arrow)"
-                    {...edgeIssueProps(arc.edgeId)}
-                  />
-                )),
-              )}
-              {geometry.links.map((link) => (
-                <path
-                  key={link.key}
-                  d={link.d}
-                  data-link-from={link.from}
-                  data-link-to={link.to}
-                  data-link-role={link.role}
-                  fill="none"
-                  strokeWidth={1.5}
-                  strokeDasharray="5 4"
-                  stroke={laneStyle(link.lane).color}
-                  strokeOpacity={link.role === "dead" ? 0.45 : 1}
-                  markerEnd="url(#graph-link-arrow)"
-                  data-edge-id={link.edgeId}
-                  {...edgeIssueProps(link.edgeId)}
-                />
-              ))}
-              {geometry.merges.map((m) => (
-                <circle
-                  key={`merge:${m.x}:${m.y}`}
-                  data-graph-merge=""
-                  cx={m.x}
-                  cy={m.y}
-                  r={3.5}
-                  fill="var(--cx-faint)"
-                />
-              ))}
-              {geometry.start && (
-                <circle
-                  data-graph-start=""
-                  cx={geometry.start.x}
-                  cy={geometry.start.y}
-                  r={START_R}
-                  fill="var(--cx-faint)"
-                />
-              )}
-              {ends.map((end) => (
-                <circle
-                  key={`end:${end.x}:${end.y}`}
-                  data-graph-end=""
-                  cx={end.x}
-                  cy={end.y}
-                  r={END_R}
-                  fill="var(--cx-card)"
-                  stroke="var(--cx-faint)"
-                  strokeWidth={2}
-                />
-              ))}
-            </svg>
+              phaseOf={phaseOf}
+              edgeIssueProps={edgeIssueProps}
+            />
 
             {(() => {
               // The steps the pointer is over while picking, or the ones the
@@ -931,137 +572,16 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
               </svg>
             )}
 
-            {geometry.loops.map((loop) => {
-              const canExit = loop.canExit;
-              const boundsOpen = openBounds === loop.headerId;
-              const header = cards.find((c) => c.node.id === loop.headerId);
-              const waits = WAIT_TYPES.has(header?.node.type ?? "");
-              const unwrapCap =
-                onUnwrapLoop && !drag
-                  ? caps?.unwrap.get(loop.headerId)
-                  : undefined;
-              // The loop's label (its bounds, for a loop edge), then "Bounds"
-              // and "Stop repeating" right after it (the label truncates
-              // first), all inside the rectangle; the bounds editor opens
-              // below it.
-              return (
-                <React.Fragment key={`label:${loop.key}`}>
-                  <div
-                    className="absolute flex items-center gap-2 whitespace-nowrap text-xs"
-                    style={{
-                      left: loop.label.x,
-                      top: loop.label.y - 1,
-                      maxWidth: loop.rect.x + loop.rect.w - loop.label.x - 6,
-                    }}
-                  >
-                    <div
-                      data-loop-block=""
-                      data-loop-to={loop.headerId}
-                      aria-label={t("scenarioRun.loopSteps", {
-                        from: loop.from,
-                        to: loop.to,
-                      })}
-                      title={t(
-                        canExit
-                          ? "scenarioRun.loopUntilExit"
-                          : "scenarioRun.loopUntilRunStops",
-                      )}
-                      className="flex min-w-0 items-center gap-1.5 overflow-hidden"
-                    >
-                      <Repeat
-                        className="h-3.5 w-3.5 shrink-0 text-cx-purple"
-                        aria-hidden
-                      />
-                      {loop.loopEdge ? (
-                        <LoopBoundsSummary
-                          loop={loop}
-                          className="min-w-0 truncate font-semibold text-cx-purple"
-                        />
-                      ) : (
-                        <span className="min-w-0 truncate font-semibold text-cx-purple">
-                          {t(
-                            canExit
-                              ? "scenarioRun.loopRepeat"
-                              : "scenarioRun.loopForever",
-                          )}
-                        </span>
-                      )}
-                      {waits && (
-                        <span className="min-w-0 shrink-[1000] truncate text-cx-muted">
-                          · {t("scenarioRun.loopWaitsAt", { n: loop.from })}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <div
-                    className="absolute flex items-center gap-2 whitespace-nowrap text-xs"
-                    style={{ left: loop.label.x, top: loop.label.y + 21 }}
-                  >
-                    {loopBounds && !drag && (
-                      <button
-                        type="button"
-                        data-testid="edit-loop-bounds"
-                        data-loop={loop.headerId}
-                        aria-expanded={boundsOpen}
-                        title={t("scenarioRun.loopBounds.editHint")}
-                        onClick={() =>
-                          setOpenBounds(boundsOpen ? null : loop.headerId)
-                        }
-                        className="z-10 flex h-[18px] shrink-0 items-center gap-1 rounded border border-cx-purple/40 px-1.5 font-medium text-cx-purple hover:bg-cx-purple/15"
-                      >
-                        <SlidersHorizontal
-                          className="h-3.5 w-3.5 shrink-0"
-                          aria-hidden
-                        />
-                        {t("scenarioRun.loopBounds.edit")}
-                      </button>
-                    )}
-                    {unwrapCap && (
-                      <button
-                        type="button"
-                        data-testid="unwrap-loop"
-                        data-loop={loop.headerId}
-                        title={
-                          unwrapCap.ok
-                            ? t("scenarios.editor.unwrapLoopHint")
-                            : t(unwrapCap.reason)
-                        }
-                        disabled={!unwrapCap.ok}
-                        onClick={() => onUnwrapLoop?.(loop.headerId)}
-                        className="z-10 flex h-[18px] shrink-0 items-center gap-1 rounded border border-cx-purple/40 px-1.5 font-medium text-cx-purple hover:bg-cx-purple/15 disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        <RepeatOff
-                          className="h-3.5 w-3.5 shrink-0"
-                          aria-hidden
-                        />
-                        {t("scenarios.editor.unwrapLoop")}
-                      </button>
-                    )}
-                  </div>
-                  {boundsOpen && loopBounds && (
-                    <div
-                      ref={revealBounds}
-                      className="absolute z-20 w-[340px]"
-                      style={
-                        // Near the canvas bottom: open upward, over the loop.
-                        loop.label.y + 22 + BOUNDS_PANEL_H > height
-                          ? {
-                              left: loop.label.x,
-                              bottom: Math.max(0, height - loop.label.y + 4),
-                            }
-                          : { left: loop.label.x, top: loop.label.y + 44 }
-                      }
-                    >
-                      <LoopBoundsPanel
-                        loop={loop}
-                        editing={loopBounds}
-                        onClose={() => setOpenBounds(null)}
-                      />
-                    </div>
-                  )}
-                </React.Fragment>
-              );
-            })}
+            <GraphLoops
+              geometry={geometry}
+              height={height}
+              dragging={!!drag}
+              openBounds={openBounds}
+              setOpenBounds={setOpenBounds}
+              unwrapCaps={caps?.unwrap}
+              loopBounds={loopBounds}
+              onUnwrapLoop={onUnwrapLoop}
+            />
 
             {allPaths.map(({ key, edgeId, mid }) => {
               const mark = edgeMark(edgeId);
@@ -1120,298 +640,38 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
               </div>
             )}
 
-            {geometry.tags.map((tag) => {
-              const removeCap =
-                editable && onRemoveLane
-                  ? (caps?.lane.get(tag.key) ?? null)
-                  : null;
-              const removeLabel = t("scenarioRun.tree.removeLane", {
-                lane: laneLetter(tag.laneIndex),
-              });
-              const tip = [
-                tag.text,
-                tag.dead
-                  ? t("scenarioRun.tree.deadLane")
-                  : tag.leaves
-                    ? t("scenarioRun.tree.leavesLoop")
-                    : null,
-              ]
-                .filter(Boolean)
-                .join(" — ");
-              const openLabel =
-                onSelectLane && tag.handle !== null
-                  ? t("scenarioRun.tree.openLane", {
-                      name: tag.handle,
-                      n: numbers.get(tag.forkId) ?? "",
-                    })
-                  : null;
-              return (
-                <div
-                  key={tag.key}
-                  data-testid="lane-tag"
-                  data-lane={tag.laneIndex}
-                  data-fork={tag.forkId}
-                  data-dead-lane={tag.dead ? "" : undefined}
-                  data-leaves-loop={tag.leaves ? "" : undefined}
-                  title={
-                    tag.dead
-                      ? t("scenarioRun.tree.deadLane")
-                      : tag.leaves
-                        ? t("scenarioRun.tree.leavesLoop")
-                        : undefined
-                  }
-                  className={cn(
-                    "absolute z-[5] flex items-center gap-1.5 rounded-full border bg-cx-card px-1 text-xs",
-                    tag.dead
-                      ? "border-dashed border-cx-border-strong opacity-60"
-                      : "border-cx-border",
-                  )}
-                  style={{
-                    left: tag.x - tag.w / 2,
-                    top: tag.y,
-                    width: tag.w,
-                    height: TAG_H,
-                  }}
-                >
-                  <span
-                    aria-hidden
-                    className={cn(
-                      "flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold",
-                      laneStyle(tag.laneIndex).letter,
-                    )}
-                  >
-                    {laneLetter(tag.laneIndex)}
-                  </span>
-                  {openLabel && tag.handle !== null ? (
-                    <button
-                      type="button"
-                      data-lane-condition=""
-                      aria-label={openLabel}
-                      title={tip}
-                      onClick={() => onSelectLane?.(tag.forkId, tag.handle!)}
-                      className="min-w-0 flex-1 truncate rounded text-left font-mono text-[11px] text-cx-fg2 hover:text-cx-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-cx-accent"
-                    >
-                      {tag.text}
-                    </button>
-                  ) : (
-                    <span
-                      data-lane-condition=""
-                      title={tip}
-                      className="min-w-0 flex-1 truncate font-mono text-[11px] text-cx-fg2"
-                    >
-                      {tag.text}
-                    </span>
-                  )}
-                  {tag.leaves && (
-                    <LogOut
-                      className="h-3 w-3 shrink-0 text-cx-purple"
-                      aria-hidden
-                    />
-                  )}
-                  <span className="shrink-0 font-mono text-[10px] text-cx-muted">
-                    {tag.count}
-                  </span>
-                  {removeCap && !drag && (
-                    <button
-                      type="button"
-                      aria-label={removeLabel}
-                      title={capTitle(removeCap, removeLabel)}
-                      disabled={!removeCap.ok}
-                      onClick={() => onRemoveLane?.(tag.forkId, tag.laneIndex)}
-                      className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-cx-faint hover:bg-cx-rose/10 hover:text-cx-rose disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-cx-faint"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  )}
-                </div>
-              );
-            })}
+            <LaneTags
+              geometry={geometry}
+              editable={editable}
+              dragging={!!drag}
+              laneCaps={caps?.lane}
+              numbers={numbers}
+              capTitle={capTitle}
+              onRemoveLane={onRemoveLane}
+              onSelectLane={onSelectLane}
+            />
 
-            {cards.map(({ node: step, x, y, lane, seqPath, index, isFork }) => {
-              const phase = phaseOf(step.id);
-              const failed = state === "error" && step.id === currentNodeId;
-              const selected = selectedStepId === step.id;
-              const marked = stepIssues(step.id);
-              const className = cn(
-                "flex items-center gap-2 rounded-xl border-[1.5px] bg-cx-card px-2.5 text-left",
-                phase === "current" && live
-                  ? CURRENT_CARD[live]
-                  : failed
-                    ? "border-cx-rose ring-4 ring-cx-rose/15"
-                    : phase !== "done" &&
-                      (marked.style ? marked.style.border : "border-cx-border"),
-                marked.highlighted && marked.style?.glow,
-                selected && "outline outline-2 outline-cx-accent",
-              );
-              const place: React.CSSProperties = {
-                left: x - NODE_W / 2,
-                top: y,
-                width: NODE_W,
-                height: NODE_H,
-              };
-              // Done cards take their lane's colour (inline: any lane index).
-              const doneBorder: React.CSSProperties =
-                phase === "done" && !failed
-                  ? { borderColor: laneStyle(lane).color }
-                  : {};
-              const number = numbers.get(step.id) ?? "";
-              const body = (
-                <>
-                  <span className="w-[14px] shrink-0 text-right font-mono text-[10px] text-cx-faint">
-                    {number}
-                  </span>
-                  <StepTile node={step} />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[13px] font-medium text-cx-fg">
-                      {nodeTitle(step)}
-                    </span>
-                    <span className="block truncate text-xs text-cx-muted">
-                      {stepSummary(step)}
-                    </span>
-                  </span>
-                  {phase === "current" && live && <RunStatePill state={live} />}
-                  {marked.mark && (
-                    <IssueBadge
-                      mark={marked.mark}
-                      className="absolute -top-2.5 right-8"
-                    />
-                  )}
-                  {marked.description}
-                </>
-              );
-
-              if (editable) {
-                const dragged = drag?.id === step.id;
-                const pickTarget = pickTargets?.get(step.id);
-                const pickState = !pickTargets
-                  ? undefined
-                  : pickTarget?.cap.ok
-                    ? "valid"
-                    : "invalid";
-                const pickReason = !pickTargets
-                  ? undefined
-                  : pickTarget
-                    ? pickTarget.cap.ok
-                      ? undefined
-                      : t(pickTarget.cap.reason)
-                    : t(
-                        pick?.kind === "lane"
-                          ? "scenarioRun.pick.notLater"
-                          : "scenarioRun.pick.notHere",
-                      );
-                return (
-                  <div
-                    key={step.id}
-                    data-node-id={step.id}
-                    data-phase={failed ? "failed" : phase}
-                    data-pick={pickState}
-                    title={pickReason}
-                    onPointerEnter={
-                      pickTargets ? () => setHoverId(step.id) : undefined
-                    }
-                    onPointerLeave={
-                      pickTargets
-                        ? () => setHoverId((h) => (h === step.id ? null : h))
-                        : undefined
-                    }
-                    className={cn(
-                      "absolute select-none",
-                      dragged &&
-                        "z-20 rounded-xl shadow-[0_8px_24px_rgba(20,20,30,0.18)]",
-                      pickState === "invalid" && "opacity-35",
-                      pickState === "valid" &&
-                        "z-10 rounded-xl ring-2 ring-cx-accent/50",
-                      pickState === "valid" &&
-                        hoverId === step.id &&
-                        "ring-4 ring-cx-accent",
-                    )}
-                    style={{
-                      ...place,
-                      ...(dragged
-                        ? { transform: `translateY(${drag.offset / zoom}px)` }
-                        : {}),
-                    }}
-                    // A branch point stays where it is; nothing drags while
-                    // a target is being picked.
-                    {...(isFork || pickTargets
-                      ? {}
-                      : editing.dragHandlers({
-                          id: step.id,
-                          lane: seqPath,
-                          index,
-                        }))}
-                  >
-                    <button
-                      type="button"
-                      aria-pressed={selected}
-                      data-step-select
-                      aria-label={t("scenarioRun.selectStep", {
-                        n: number,
-                        title: nodeTitle(step),
-                      })}
-                      title={t("scenarioRun.clickToEdit")}
-                      onClick={() =>
-                        pickTargets
-                          ? commitPick(step.id)
-                          : onSelectStep?.(step.id)
-                      }
-                      onKeyDown={editing.onStepKeyDown(step.id)}
-                      {...marked.cardProps}
-                      className={cn(
-                        className,
-                        "relative h-full w-full",
-                        isFork
-                          ? "cursor-pointer"
-                          : dragged
-                            ? "cursor-grabbing"
-                            : "cursor-grab",
-                      )}
-                      style={doneBorder}
-                    >
-                      {body}
-                    </button>
-                    {selected && onDeleteStep && !pickTargets && (
-                      <button
-                        type="button"
-                        aria-label={t("scenarioRun.removeStep", { n: number })}
-                        title={t("scenarioRun.removeThisStep")}
-                        // Not the start of a drag.
-                        onPointerDown={(event) => event.stopPropagation()}
-                        onClick={() =>
-                          onDeleteStep(step.id, { confirm: false })
-                        }
-                        className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full border border-cx-border-strong bg-cx-card text-cx-muted hover:border-cx-rose hover:text-cx-rose"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    )}
-                  </div>
-                );
-              }
-
-              const shared = {
-                "data-node-id": step.id,
-                "data-phase": failed ? "failed" : phase,
-                className: cn("absolute", className),
-                style: { ...place, ...doneBorder },
-                ...marked.cardProps,
-              };
-              return onSelectStep ? (
-                <button
-                  key={step.id}
-                  type="button"
-                  aria-pressed={selected}
-                  onClick={() => onSelectStep(step.id)}
-                  {...shared}
-                >
-                  {body}
-                </button>
-              ) : (
-                <div key={step.id} {...shared}>
-                  {body}
-                </div>
-              );
-            })}
+            <GraphCards
+              cards={cards}
+              phaseOf={phaseOf}
+              state={state}
+              currentNodeId={currentNodeId}
+              selectedStepId={selectedStepId}
+              live={live}
+              stepIssues={stepIssues}
+              numbers={numbers}
+              editable={editable}
+              editing={editing}
+              drag={drag}
+              zoom={zoom}
+              pick={pick}
+              pickTargets={pickTargets}
+              hoverId={hoverId}
+              setHoverId={setHoverId}
+              commitPick={commitPick}
+              onSelectStep={onSelectStep}
+              onDeleteStep={onDeleteStep}
+            />
 
             {dropLine && (
               <div
@@ -1428,8 +688,22 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
 
             {canInsert && !drag && !pick && (
               <>
-                {geometry.zones.map((zone) => plusButton(zone, true))}
-                {geometry.discs.map((disc) => plusButton(disc, false))}
+                {geometry.zones.map((zone) => (
+                  <PlusButton
+                    key={`zone:${zone.slot.lane}:${zone.slot.index}`}
+                    point={zone}
+                    hover
+                    onOpen={editing.openSlot}
+                  />
+                ))}
+                {geometry.discs.map((disc) => (
+                  <PlusButton
+                    key={`disc:${disc.slot.lane}:${disc.slot.index}`}
+                    point={disc}
+                    hover={false}
+                    onOpen={editing.openSlot}
+                  />
+                ))}
               </>
             )}
 
@@ -1504,33 +778,6 @@ const StepsGraphView: React.FC<StepTreeViewProps> = (props) => {
         </div>
       </div>
     </div>
-  );
-};
-
-/** The marker at the middle of a drawn edge with a diagnostic. */
-const EdgeIssueMarker: React.FC<{
-  mark: IssueMark;
-  x: number;
-  y: number;
-  label: string;
-  title: string;
-}> = ({ mark, x, y, label, title }) => {
-  const style = SEVERITY[mark.severity];
-  const Icon = style.icon;
-  return (
-    <span
-      role="img"
-      data-edge-issue={mark.severity}
-      aria-label={label}
-      title={title}
-      className={cn(
-        "absolute z-10 flex h-4 w-4 items-center justify-center rounded-full border border-current bg-cx-card",
-        style.text,
-      )}
-      style={{ left: x - 8, top: y - 8 }}
-    >
-      <Icon aria-hidden className="h-2.5 w-2.5" strokeWidth={2.5} />
-    </span>
   );
 };
 

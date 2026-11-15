@@ -20,8 +20,6 @@
   "apps/web/src/console/lib/treeGraphLayout.ts": 1281,
   "apps/web/src/console/pages/cp/CpDetailContent.tsx": 1118,
   "apps/web/src/console/pages/scenarios/edit/ScenarioEditorContent.tsx": 1251,
-  "apps/web/src/console/pages/scenarios/run/StepsGraphView.tsx": 1537,
-  "apps/web/src/console/pages/scenarios/run/StepsView.tsx": 1402,
   "apps/web/src/data/local/LocalChargePointService.ts": 1765,
   "packages/client/src/interfaces/ChargePointService.ts": 994,
   "packages/client/src/remote/RemoteChargePointService.ts": 2083,

@@ -84,11 +84,13 @@ export class ConnectionOpener {
     };
     // #1034: the first error of this attempt, before it opened. Bun 1.4.4
     // puts the cause there and closes with a blank 1006. Closure-local, so a
-    // superseded socket's late error cannot speak for this attempt.
+    // superseded socket's late error cannot speak for this attempt, nor
+    // silence its refusal probe by reporting a status of its own (#1033).
     let firstError: ConnectErrorDetail | undefined;
+    let statusReported = false;
     const onerrorHandler = (ev: Event) => {
       if (!opened) firstError ??= describeConnectError(ev);
-      this.host.handleError(ev);
+      if (this.host.refusal.reportError(ev)) statusReported = true;
     };
 
     // Capture the current generation for this socket connection
@@ -119,7 +121,9 @@ export class ConnectionOpener {
         if (kind && closeCause === "network" && kind !== "unreached") {
           this.host.clientCerts.onFailed(attempt.renewed);
         }
-        this.host.handleClose(ev, closeCause);
+        // #288: ask the CSMS why it refused, unless the client said so.
+        const probe = kind === "upgrade-refused" && !statusReported;
+        this.host.handleClose(closeCause, probe);
       }
       this.host.reportClose(socketToken, ev);
       // #448: announced once the charge point has handled the close, so an
@@ -157,7 +161,6 @@ export class ConnectionOpener {
         warn: (message) => this.host.logger.warn(message, LogType.WEBSOCKET),
         onConnectOptions: (options) => {
           this.host.lastConnectOptions = options;
-          this.host.refusalStatusReported = false;
         },
         onopen: onopenHandler,
         onmessage: onmessageHandler,

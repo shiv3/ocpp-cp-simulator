@@ -61,7 +61,6 @@ export interface OcppWebSocketFields {
   selfRequestedClose: boolean;
   lastConnectOptions: OcppWebSocketConnectOptions | null;
   refusal: UpgradeRefusalDiagnostic;
-  refusalStatusReported: boolean;
   extraHeaders: Record<string, string>;
   extraSubprotocols: ReadonlyArray<string>;
   ocppVersion: string;
@@ -99,8 +98,7 @@ export interface OcppWebSocketCallbacks {
   stopPingInterval(): void;
   runCloseTransaction(closeCause: CloseCause): void;
   handleOpen(): void;
-  handleError(evt: Event): void;
-  handleClose(ev: CloseEvent, closeCause: CloseCause): void;
+  handleClose(closeCause: CloseCause, probeRefusal: boolean): void;
   closeCauseOf(token: GenerationToken): CloseCause;
   reportClose(token: GenerationTokenImpl, ev: SocketClose): void;
   clearHandshakeTimer(): void;
@@ -110,7 +108,7 @@ export type OcppWebSocketHost = OcppWebSocketFields & OcppWebSocketCallbacks;
 
 /** Every key of {@link OcppWebSocketFields}, space separated. */
 const FIELD_NAMES =
-  "ws url basicAuth chargePointId logger messageHandler incomingInterceptor pingInterval pingIntervalSeconds reconnectAttempts reconnectPolicy reconnectRandom wsOptions handshakeTimer retryBackOff reconnectTimer linkBlockedReason resumeOnLinkRestore onOpenCallback onCloseCallback isManualDisconnect selfRequestedClose lastConnectOptions refusal refusalStatusReported extraHeaders extraSubprotocols ocppVersion securityProfile authorizationKey securityProfileFallback credentialsChangedAtRuntime cpoName tls clientCerts connectionClientCertificate controller generationCounter currentGeneration socketToken reconnectNotBefore urlPool onCloseTransactionCallback observers pendingReconnectNotice pendingGaveUp disposed".split(
+  "ws url basicAuth chargePointId logger messageHandler incomingInterceptor pingInterval pingIntervalSeconds reconnectAttempts reconnectPolicy reconnectRandom wsOptions handshakeTimer retryBackOff reconnectTimer linkBlockedReason resumeOnLinkRestore onOpenCallback onCloseCallback isManualDisconnect selfRequestedClose lastConnectOptions refusal extraHeaders extraSubprotocols ocppVersion securityProfile authorizationKey securityProfileFallback credentialsChangedAtRuntime cpoName tls clientCerts connectionClientCertificate controller generationCounter currentGeneration socketToken reconnectNotBefore urlPool onCloseTransactionCallback observers pendingReconnectNotice pendingGaveUp disposed".split(
     " ",
   ) as ReadonlyArray<keyof OcppWebSocketFields>;
 

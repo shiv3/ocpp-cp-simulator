@@ -170,9 +170,6 @@ export class OCPPWebSocket implements ChargePointSocket {
   private _lastConnectOptions: OcppWebSocketConnectOptions | null = null;
   /** #288: the attempt's error log and the refusal probe. */
   private readonly _refusal: UpgradeRefusalDiagnostic;
-  /** Set when the client itself reported the HTTP status (the `ws` path),
-   *  so the probe does not ask a question already answered. */
-  private _refusalStatusReported: boolean = false;
   // Extra HTTP headers + Sec-WebSocket-Protocol tokens attached on each
   // upgrade. Both are CLI-only — DOM WebSocket ignores extraHeaders, but
   // the runtime fallback in openOcppWebSocket handles that.
@@ -288,8 +285,8 @@ export class OCPPWebSocket implements ChargePointSocket {
       stopPingInterval: () => this.stopPingInterval(),
       runCloseTransaction: (closeCause) => this.runCloseTransaction(closeCause),
       handleOpen: () => this._closer.handleOpen(),
-      handleError: (evt) => this._closer.handleError(evt),
-      handleClose: (ev, closeCause) => this._closer.handleClose(ev, closeCause),
+      handleClose: (closeCause, probeRefusal) =>
+        this._closer.handleClose(closeCause, probeRefusal),
       closeCauseOf: (token) => this._closer.closeCauseOf(token),
       reportClose: (token, ev) => this._closer.reportClose(token, ev),
       clearHandshakeTimer: () => this.clearHandshakeTimer(),
@@ -310,7 +307,6 @@ export class OCPPWebSocket implements ChargePointSocket {
       this._isManualDisconnect,
       this._selfRequestedClose,
       this._refusal,
-      this._refusalStatusReported,
       this._extraHeaders,
       this._extraSubprotocols,
       this._ocppVersion,

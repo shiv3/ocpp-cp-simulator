@@ -61,29 +61,6 @@ export class CloseHandler {
     this.host.observers.emit("closed", { cause: closeCause });
   }
 
-  /** #288 — say what the error was, not merely that there was one. */
-  public handleError(evt: Event): void {
-    if (this.host.refusal.reportError(evt)) {
-      this.host.refusalStatusReported = true;
-    }
-  }
-
-  /**
-   * #288 — Bun's native WebSocket reports every refused upgrade identically
-   * (`code=1002, Expected 101 status code`), and the daemon runs under Bun.
-   * So on that close, and only that close, ask the CSMS why. Never once the
-   * `ws` path has reported the status, nor after a manual disconnect.
-   */
-  private maybeProbeRefusal(ev: CloseEvent): void {
-    if (this.host.isManualDisconnect || this.host.disposed) return;
-    if (this.host.refusalStatusReported) return;
-    if (ev.code !== 1002 || !/expected 101/i.test(ev.reason ?? "")) return;
-    this.host.refusal.probe(
-      this.host.lastConnectOptions,
-      this.host.generationCounter,
-    );
-  }
-
   /**
    * Who closed a generation's socket: the cause it latched, else what
    * handleClose would latch now. dispose() latches nothing; a close after it
@@ -103,8 +80,15 @@ export class CloseHandler {
     this.host.onCloseCallback?.(ev, this.closeCauseOf(token));
   }
 
-  public handleClose(ev: CloseEvent, closeCause: CloseCause): void {
-    this.maybeProbeRefusal(ev);
+  /** @param probeRefusal a refused upgrade whose status the client hid:
+   *  ask the CSMS (#288), never after a manual disconnect. */
+  public handleClose(closeCause: CloseCause, probeRefusal: boolean): void {
+    if (probeRefusal && !this.host.isManualDisconnect && !this.host.disposed) {
+      this.host.refusal.probe(
+        this.host.lastConnectOptions,
+        this.host.generationCounter,
+      );
+    }
     this.host.stopPingInterval();
 
     if (this.host.disposed) {

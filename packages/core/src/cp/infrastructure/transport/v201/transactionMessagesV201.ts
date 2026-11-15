@@ -252,6 +252,8 @@ export class TransactionMessagesV201 {
           ? { remoteStartId: transaction.remoteStartId }
           : {}),
       },
+      // E03.FR.03 / H01.FR.15 (#839): only the first TransactionEvent of
+      // the transaction carries the reservation it ends.
       ...(transaction.reservationId !== undefined
         ? { reservationId: transaction.reservationId }
         : {}),
@@ -336,9 +338,6 @@ export class TransactionMessagesV201 {
         transactionId: transaction.cpTransactionId as string,
         chargingState,
       },
-      ...(transaction.reservationId !== undefined
-        ? { reservationId: transaction.reservationId }
-        : {}),
       evse: v201TransactionEvse(this._chargePoint.topology, connectorId),
     };
     this.sendTransactionEventCall(connectorId, payload);
@@ -401,9 +400,6 @@ export class TransactionMessagesV201 {
         // unnamed one is derived from the 1.6-shaped `stopReason`.
         stoppedReason: endedStoppedReason(transaction),
       },
-      ...(transaction.reservationId !== undefined
-        ? { reservationId: transaction.reservationId }
-        : {}),
       ...(transaction.tagId
         ? {
             idToken: this.wireIdToken(
@@ -568,9 +564,6 @@ export class TransactionMessagesV201 {
           ? { remoteStartId: options.remoteStartId }
           : {}),
       },
-      ...(transaction.reservationId !== undefined
-        ? { reservationId: transaction.reservationId }
-        : {}),
       ...(options.idToken
         ? {
             idToken: this.wireIdToken(

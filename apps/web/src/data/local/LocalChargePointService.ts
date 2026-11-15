@@ -41,7 +41,6 @@ import type {
   Get15118EVCertificateResult,
 } from "@ocpp-cp-simulator/core/cp/domain/security/get15118EVCertificate";
 import {
-  PowerStateError,
   type PowerLossOptions,
   type PowerRestoreOptions,
 } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
@@ -146,11 +145,19 @@ import type {
   NetworkSimLayerConfig,
   ResolvedNetworkSimConfig,
 } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/network-sim/config";
-import {
-  resolveNetworkSimConfig,
-  validateLayerConfig,
-} from "@ocpp-cp-simulator/core/cp/infrastructure/transport/network-sim/config";
 import { networkSimAtom, type NetworkSimStore } from "../../store/store";
+import {
+  getNetworkSimCp,
+  getNetworkSimGlobal,
+  getResolvedFor,
+  readNetworkSimStore,
+  reapplyToAllLiveCps,
+  saveNetworkSimCp,
+  saveNetworkSimGlobal,
+  triggerNetworkSimDisconnect,
+  type LocalNetworkSimHost,
+} from "./localNetworkSim";
+import { powerLoss, powerRestore } from "./localPower";
 import {
   scenarioTemplates,
   getTemplateById,
@@ -219,6 +226,7 @@ export class LocalChargePointService implements ChargePointService {
   /** #394: the browser's sql.js `scenario_runs` table, or in memory. */
   private readonly scenarioRuns: ScenarioRunRepository;
   private readonly forwardersHost: LocalEventForwardersHost;
+  private readonly simHost: LocalNetworkSimHost;
 
   constructor(
     private readonly database: Database | null = null,
@@ -237,6 +245,8 @@ export class LocalChargePointService implements ChargePointService {
       chargingSessions: this.chargingSessions,
       emit: (id, event) => this.emit(id, event),
     };
+
+    this.simHost = { store: this.store, chargePoints: this.chargePoints };
 
     // Subscribe to networkSim atom changes for live re-apply
     this.store.sub(networkSimAtom, () => {
@@ -1384,178 +1394,46 @@ export class LocalChargePointService implements ChargePointService {
   }
 
   private readNetworkSimStore(): NetworkSimStore {
-    try {
-      const value = this.store.get(networkSimAtom);
-      if (!value || typeof value !== "object") {
-        console.warn(
-          "[LocalChargePointService] Invalid networkSim store value, using disabled default",
-        );
-        return { version: 1, global: null, perCp: {} };
-      }
-
-      const storeValue = value as unknown as Record<string, unknown>;
-      const version = storeValue.version;
-
-      // Validate version
-      if (version !== 1) {
-        console.warn(
-          `[LocalChargePointService] Unsupported networkSim store version ${version}, using disabled default`,
-        );
-        return { version: 1, global: null, perCp: {} };
-      }
-
-      // Validate global layer
-      let globalLayer: NetworkSimLayerConfig | null = null;
-      if (storeValue.global !== null && storeValue.global !== undefined) {
-        const globalValidation = validateLayerConfig(storeValue.global);
-        if (globalValidation.ok) {
-          globalLayer = globalValidation.config;
-        } else {
-          console.warn(
-            "[LocalChargePointService] Invalid global networkSim config:",
-            globalValidation.errors,
-          );
-        }
-      }
-
-      // Validate perCp layers
-      const perCp: Record<string, NetworkSimLayerConfig> = {};
-      if (
-        storeValue.perCp &&
-        typeof storeValue.perCp === "object" &&
-        !Array.isArray(storeValue.perCp)
-      ) {
-        for (const [cpId, layer] of Object.entries(storeValue.perCp)) {
-          if (layer !== null && layer !== undefined) {
-            const perCpValidation = validateLayerConfig(layer);
-            if (perCpValidation.ok) {
-              perCp[cpId] = perCpValidation.config;
-            } else {
-              console.warn(
-                `[LocalChargePointService] Invalid per-CP networkSim config for ${cpId}:`,
-                perCpValidation.errors,
-              );
-            }
-          }
-        }
-      }
-
-      return { version: 1, global: globalLayer, perCp };
-    } catch (error) {
-      console.warn(
-        "[LocalChargePointService] Failed to read networkSim store:",
-        error,
-      );
-      return { version: 1, global: null, perCp: {} };
-    }
+    return readNetworkSimStore(this.simHost);
   }
 
   private getResolvedFor(cpId: string): ResolvedNetworkSimConfig {
-    const store = this.readNetworkSimStore();
-    return resolveNetworkSimConfig(
-      store.global,
-      store.perCp[cpId] ?? null,
-      cpId,
-    );
+    return getResolvedFor(this.simHost, cpId);
   }
 
   private reapplyToAllLiveCps(): void {
-    this.chargePoints.forEach((cp) => {
-      cp.setNetworkSimConfig(this.getResolvedFor(cp.id));
-    });
+    reapplyToAllLiveCps(this.simHost);
   }
 
   async getNetworkSimGlobal(): Promise<NetworkSimLayerConfig | null> {
-    return this.readNetworkSimStore().global;
+    return getNetworkSimGlobal(this.simHost);
   }
 
   async saveNetworkSimGlobal(
     config: NetworkSimLayerConfig | null,
   ): Promise<void> {
-    if (config !== null) {
-      const validation = validateLayerConfig(config);
-      if (!validation.ok) {
-        throw new Error(
-          `Invalid global networkSim config: ${Object.entries(validation.errors)
-            .map(([key, msg]) => `${key}: ${msg}`)
-            .join("; ")}`,
-        );
-      }
-    }
-
-    const prev = this.readNetworkSimStore();
-    this.store.set(networkSimAtom, { ...prev, global: config });
-
-    // Fan out to all live CPs
-    this.chargePoints.forEach((cp) => {
-      const resolved = resolveNetworkSimConfig(
-        config,
-        prev.perCp[cp.id] ?? null,
-        cp.id,
-      );
-      cp.setNetworkSimConfig(resolved);
-    });
+    return saveNetworkSimGlobal(this.simHost, config);
   }
 
   async getNetworkSimCp(cpId: string): Promise<{
     config: NetworkSimLayerConfig | null;
     resolved: ResolvedNetworkSimConfig;
   }> {
-    const store = this.readNetworkSimStore();
-    return {
-      config: store.perCp[cpId] ?? null,
-      resolved: resolveNetworkSimConfig(
-        store.global,
-        store.perCp[cpId] ?? null,
-        cpId,
-      ),
-    };
+    return getNetworkSimCp(this.simHost, cpId);
   }
 
   async saveNetworkSimCp(
     cpId: string,
     config: NetworkSimLayerConfig | null,
   ): Promise<void> {
-    if (config !== null) {
-      const validation = validateLayerConfig(config);
-      if (!validation.ok) {
-        throw new Error(
-          `Invalid per-CP networkSim config for ${cpId}: ${Object.entries(
-            validation.errors,
-          )
-            .map(([key, msg]) => `${key}: ${msg}`)
-            .join("; ")}`,
-        );
-      }
-    }
-
-    const prev = this.readNetworkSimStore();
-    const newPerCp = { ...prev.perCp };
-    if (config === null) {
-      delete newPerCp[cpId];
-    } else {
-      newPerCp[cpId] = config;
-    }
-
-    this.store.set(networkSimAtom, { ...prev, perCp: newPerCp });
-
-    // Apply resolved config to the live CP if present
-    const cp = this.chargePoints.get(cpId);
-    if (cp) {
-      const resolved = resolveNetworkSimConfig(prev.global, config, cpId);
-      cp.setNetworkSimConfig(resolved);
-    }
+    return saveNetworkSimCp(this.simHost, cpId, config);
   }
 
   async triggerNetworkSimDisconnect(
     cpId: string,
     ruleId: string,
   ): Promise<{ ok: true } | { ok: false; error: string }> {
-    const cp = this.chargePoints.get(cpId);
-    if (!cp) {
-      return { ok: false, error: "not_connected" };
-    }
-    return cp.triggerNetworkSimDisconnect(ruleId);
+    return triggerNetworkSimDisconnect(this.simHost, cpId, ruleId);
   }
 
   async getModem(cpId: string) {
@@ -1577,30 +1455,11 @@ export class LocalChargePointService implements ChargePointService {
   ): Promise<
     { ok: true; transactions: number } | { ok: false; error: string }
   > {
-    const cp = this.chargePoints.get(cpId);
-    if (!cp) return { ok: false, error: "cp_not_found" };
-    try {
-      return {
-        ok: true,
-        transactions: cp.powerLoss(options).transactions.length,
-      };
-    } catch (err) {
-      if (err instanceof PowerStateError) return { ok: false, error: err.code };
-      throw err;
-    }
+    return powerLoss(this.simHost, cpId, options);
   }
 
   async powerRestore(cpId: string, options?: PowerRestoreOptions) {
-    const cp = this.chargePoints.get(cpId);
-    if (!cp) return { ok: false as const, error: "cp_not_found" };
-    try {
-      return { ok: true as const, ...cp.restorePower(options) };
-    } catch (err) {
-      if (err instanceof PowerStateError) {
-        return { ok: false as const, error: err.code };
-      }
-      throw err;
-    }
+    return powerRestore(this.simHost, cpId, options);
   }
 
   private getExistingChargePointOrThrow(id: string): ChargePoint {

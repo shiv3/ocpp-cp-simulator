@@ -68,6 +68,7 @@ const ACCESS_KEY_NAMES: ReadonlySet<string> = new Set([
   ...ACCESS_KEYS.values(),
   // #926: operator-only simulator switches (read-only for the CSMS).
   "RealLogUpload",
+  "DiagnosticBundle",
   "LogUploadAllowPrivateHosts",
 ]);
 
@@ -170,6 +171,18 @@ export class ConfigurationStore {
   /** JSON.stringify(ConfigurationStore) must not expose write-only values. */
   toJSON(): Configuration {
     return this.allRedacted();
+  }
+
+  /** Names of the keys whose value is a stored override (#925). */
+  persistedOverrideKeys(): string[] {
+    try {
+      return this.overrides
+        .loadAll()
+        .map((o) => o.key)
+        .filter((name) => this.values.has(name));
+    } catch {
+      return [];
+    }
   }
 
   /** Raw lookup. Returns `undefined` for unknown keys. */

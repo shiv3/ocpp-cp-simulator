@@ -476,6 +476,19 @@ export const ConfigurationKeys = {
       readonly: true,
       type: "boolean",
     } as BooleanConfigurationKey,
+    // #925: opt in to the versioned diagnostic support bundle. false
+    // (default): GetDiagnostics uploads `diagnostics.txt` (the logger lines)
+    // and a real GetLog (RealLogUpload) uploads the log file. true: both
+    // upload `diagnostics.zip` (manifest, configuration, station state,
+    // scenario, scenario run, logs, trace). A GetLog with logType SecurityLog
+    // never gets it. Operator-only like RealLogUpload: a CSMS must not be able
+    // to ask for simulator internals by switching this on itself.
+    DiagnosticBundle: {
+      name: "DiagnosticBundle",
+      required: false,
+      readonly: true,
+      type: "boolean",
+    } as BooleanConfigurationKey,
     // #926: a real GetLog upload refuses a destination that is a loopback,
     // private, link-local or otherwise internal address (SSRF guard). true
     // allows them, for a CSMS on the operator's own network. Operator-only.
@@ -877,6 +890,7 @@ export const defaultConfiguration: (cp: ChargePoint) => Configuration = (
     boolVal(ConfigurationKeys.Custom.AuthorizeBeforeLocalStart, true),
     boolVal(ConfigurationKeys.Custom.AuthorizeRemoteTxRequestsReadOnly, false),
     boolVal(ConfigurationKeys.Custom.RealLogUpload, false),
+    boolVal(ConfigurationKeys.Custom.DiagnosticBundle, false),
     boolVal(ConfigurationKeys.Custom.LogUploadAllowPrivateHosts, false),
     // #452: 2.x only (AuthCacheCtrlr.LifeTime); a 1.6 GetConfiguration
     // keeps its key set.

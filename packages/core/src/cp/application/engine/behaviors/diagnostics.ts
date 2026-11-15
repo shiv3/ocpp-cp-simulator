@@ -1,6 +1,7 @@
 import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { LogType } from "../../../shared/Logger";
+import { buildDiagnosticBundle } from "../../diagnostics/DiagnosticBundle";
 import { uploadWithRetries } from "./uploadRetry";
 
 interface GetDiagnosticsRequest {
@@ -58,17 +59,28 @@ export function diagnosticsBehavior(cp: ChargePoint): Behavior {
             `Get diagnostics request received: ${location}`,
             LogType.DIAGNOSTICS,
           );
-          const logs = linesBetween(
-            cp.logger.getLogs(),
-            startTime,
-            stopTime,
-          ).join("\n");
-          const file = new File(
-            [new Blob([logs], { type: "text/plain" })],
-            "diagnostics.txt",
-          );
+          // #925: with the opt-in `DiagnosticBundle` the file is the support
+          // bundle; without it, the plain log lines as before (#743).
+          let file: File;
+          if (cp.configuration.getBoolean("DiagnosticBundle") === true) {
+            file = buildDiagnosticBundle(cp, {
+              action: "GetDiagnostics",
+              ...(startTime ? { oldestTimestamp: startTime } : {}),
+              ...(stopTime ? { latestTimestamp: stopTime } : {}),
+            }).file;
+          } else {
+            const logs = linesBetween(
+              cp.logger.getLogs(),
+              startTime,
+              stopTime,
+            ).join("\n");
+            file = new File(
+              [new Blob([logs], { type: "text/plain" })],
+              "diagnostics.txt",
+            );
+          }
           return {
-            response: { fileName: "diagnostics.txt" },
+            response: { fileName: file.name },
             after: async () => {
               ctx.notify.diagnosticsStatus("Uploading");
               const done = await uploadWithRetries({

@@ -1,8 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { notify } from "@/lib/toast";
 import React, {
-  Suspense,
-  lazy,
   useCallback,
   useEffect,
   useId,
@@ -16,37 +14,18 @@ import {
   useNavigate,
   useSearchParams,
 } from "react-router-dom";
-import {
-  Maximize2,
-  MoreHorizontal,
-  Settings,
-  Tag,
-  Trash2,
-  X,
-} from "lucide-react";
+import { X } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
 import {
   LogViewer,
   type ConnectorFilterValue,
 } from "@/components/ui/log-viewer";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import ChargePointConfigForm from "@/components/ChargePointConfigForm";
-import {
-  defaultChargePointConfig,
-  type ChargePointConfig,
-} from "@/components/chargePointConfig";
-import { getConfigBasicAuthPassword } from "@ocpp-cp-simulator/client/configPort";
+import { type ChargePointConfig } from "@/components/chargePointConfig";
 import { useChargePointView } from "@/data/hooks/useChargePointView";
 import { downloadStoredLogs } from "@/lib/downloadStoredLogs";
 import { cn } from "@/lib/utils";
-import { t as translate, type MessageKey } from "@/i18n";
+import { t as translate } from "@/i18n";
 import { useConfig } from "@/data/hooks/useConfig";
 import { useDataContext } from "@/data/providers/DataProvider";
 import { useServerInfo } from "@/data/hooks/useServerInfo";
@@ -54,7 +33,6 @@ import { useActiveScenarioRuns } from "../../lib/useActiveScenarioRuns";
 import { useGlobalLogs } from "../../lib/useGlobalLogs";
 import { usePanelParams } from "../../lib/usePanelParams";
 import type { ChargePointSnapshot } from "@ocpp-cp-simulator/client/interfaces/ChargePointService";
-import type { WireSimulatorConfig } from "@ocpp-cp-simulator/contracts/index";
 import type {
   NetworkSimLayerConfig,
   NetworkSimRule,
@@ -63,155 +41,24 @@ import type { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point
 import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 
 import BottomPanel from "../../components/BottomPanel";
-import EmptyState from "../../components/EmptyState";
 import LabelChips from "../../components/LabelChips";
-import { FILTER_SELECT_CLASS } from "../../components/filterStyles";
-import ExpertCallPanel from "./ExpertCallPanel";
 import PageHeader from "../../components/PageHeader";
 import StatusPill from "../../components/StatusPill";
 import NetworkSimBadge from "../../components/network-sim/NetworkSimBadge";
-import ManualDisconnectButtons from "../../components/network-sim/ManualDisconnectButtons";
 import ChargePointControls from "./ChargePointControls";
-import ConnectorCard from "./ConnectorCard";
-import ConnectorTabs from "./ConnectorTabs";
 import CpLabelsCard from "./CpLabelsCard";
-import ScenarioCard from "./ScenarioCard";
-import TransactionsTab from "./TransactionsTab";
-import ConfigurationKeysTab from "./ConfigurationKeysTab";
+import { CpConnectorsArea } from "./CpConnectorsArea";
+import { CpDetailSections } from "./CpDetailSections";
+import { CpHeaderActions } from "./CpHeaderActions";
+import { CpNetworkSimSection } from "./CpNetworkSimSection";
+import {
+  SECTIONS,
+  buildChargePointConfig,
+  isSection,
+  type Section,
+} from "./cpDetailHelpers";
 import { useCpConfigActions } from "../dashboard/useCpConfigActions";
 import { useChargePointLabels } from "./useChargePointLabels";
-import { NetworkSimEditor } from "../../components/network-sim/NetworkSimEditor";
-
-const StateTransitionViewer = lazy(
-  () => import("@/components/state-transition/StateTransitionViewer"),
-);
-const SessionAnalysisPanel = lazy(() => import("./SessionAnalysisPanel"));
-const OperationalTimelinePanel = lazy(
-  () => import("./OperationalTimelinePanel"),
-);
-
-/** What the lower half shows (`?tab=`); `log` is the default and has no param. */
-type Section =
-  | "log"
-  | "transactions"
-  | "events"
-  | "analysis"
-  | "diagnostics"
-  | "configuration"
-  | "expert"
-  | "network";
-
-/** The lower half's tabs, in order; `log` is the default. */
-const SECTIONS: ReadonlyArray<{ value: Section; labelKey: MessageKey }> = [
-  { value: "log", labelKey: "cp.section.log" },
-  { value: "transactions", labelKey: "cp.section.transactions" },
-  { value: "events", labelKey: "cp.section.events" },
-  { value: "analysis", labelKey: "cp.section.analysis" },
-  { value: "diagnostics", labelKey: "cp.section.diagnostics" },
-  { value: "configuration", labelKey: "cp.section.configuration" },
-  { value: "expert", labelKey: "cp.section.expert" },
-  { value: "network", labelKey: "cp.section.network" },
-];
-
-function isSection(value: string | null): value is Exclude<Section, "log"> {
-  return value !== "log" && SECTIONS.some((section) => section.value === value);
-}
-
-/**
- * Builds the `ChargePointConfig` shape `ChargePointConfigForm` expects,
- * from whichever source currently holds this CP's settings — remote mode's
- * `ChargePointSnapshot.config` (daemon-owned, echoed back from the CP's
- * creation params) or local mode's single shared `useConfig()` result
- * (browser-owned, one config for every local CP). Kept private (not exported)
- * so this file's only runtime export stays the default component.
- */
-function buildChargePointConfig(
-  cpId: string,
-  cp: ChargePointSnapshot | undefined,
-  mode: "local" | "remote",
-  localConfig: WireSimulatorConfig | null,
-): ChargePointConfig {
-  if (mode === "remote") {
-    const c = cp?.config;
-    const bn = c?.bootNotification ?? null;
-    return {
-      ...defaultChargePointConfig,
-      cpId: cp?.id ?? cpId,
-      connectorNumber:
-        c?.connectors ??
-        cp?.connectors.length ??
-        defaultChargePointConfig.connectorNumber,
-      wsURL: c?.wsUrl ?? defaultChargePointConfig.wsURL,
-      ocppVersion: c?.ocppVersion ?? defaultChargePointConfig.ocppVersion,
-      basicAuthEnabled: !!c?.basicAuth,
-      basicAuthUsername: c?.basicAuth?.username ?? "",
-      basicAuthPassword: c?.basicAuth?.password ?? "",
-      securityProfile: c?.securityProfile,
-      soapCallbackUrl: c?.soapCallbackUrl,
-      soapCallbackUrlDerived: c?.soapCallbackUrlDerived,
-      soapPath: c?.soapPath,
-      cpoName: c?.cpoName,
-      txUpdatedMeterValues: c?.txUpdatedMeterValues,
-      tlsCaPath: c?.tlsCaPath,
-      tlsCertPath: c?.tlsCertPath,
-      tlsKeyPath: c?.tlsKeyPath,
-      chargePointVendor:
-        c?.vendor ?? defaultChargePointConfig.chargePointVendor,
-      chargePointModel: c?.model ?? defaultChargePointConfig.chargePointModel,
-      firmwareVersion:
-        bn?.firmwareVersion ?? defaultChargePointConfig.firmwareVersion,
-      chargeBoxSerialNumber: bn?.chargeBoxSerialNumber ?? "",
-      chargePointSerialNumber: bn?.chargePointSerialNumber ?? "",
-      meterSerialNumber: bn?.meterSerialNumber ?? "",
-      meterType: bn?.meterType ?? "",
-      iccid: bn?.iccid ?? "",
-      imsi: bn?.imsi ?? "",
-      // No `labels` (#471): the header's Labels card owns them, and leaving
-      // them out of cp.update keeps the daemon's.
-    };
-  }
-
-  if (!localConfig) {
-    return { ...defaultChargePointConfig, cpId };
-  }
-
-  const connectorNumber =
-    localConfig.Experimental?.ChargePointIDs.find(
-      (entry) => entry.ChargePointID === cpId,
-    )?.ConnectorNumber ?? localConfig.connectorNumber;
-
-  return {
-    ...defaultChargePointConfig,
-    cpId,
-    connectorNumber,
-    wsURL: localConfig.wsURL,
-    ocppVersion: localConfig.ocppVersion,
-    txUpdatedMeterValues: localConfig.txUpdatedMeterValues,
-    basicAuthEnabled: localConfig.basicAuthSettings.enabled,
-    basicAuthUsername: localConfig.basicAuthSettings.username,
-    basicAuthPassword: getConfigBasicAuthPassword(localConfig),
-    autoMeterValueEnabled: localConfig.autoMeterValueSetting.enabled,
-    autoMeterValueInterval: localConfig.autoMeterValueSetting.interval,
-    autoMeterValue: localConfig.autoMeterValueSetting.value,
-    chargePointVendor:
-      localConfig.BootNotification?.chargePointVendor ??
-      defaultChargePointConfig.chargePointVendor,
-    chargePointModel:
-      localConfig.BootNotification?.chargePointModel ??
-      defaultChargePointConfig.chargePointModel,
-    firmwareVersion:
-      localConfig.BootNotification?.firmwareVersion ??
-      defaultChargePointConfig.firmwareVersion,
-    chargeBoxSerialNumber:
-      localConfig.BootNotification?.chargeBoxSerialNumber ?? "",
-    chargePointSerialNumber:
-      localConfig.BootNotification?.chargePointSerialNumber ?? "",
-    meterSerialNumber: localConfig.BootNotification?.meterSerialNumber ?? "",
-    meterType: localConfig.BootNotification?.meterType ?? "",
-    iccid: localConfig.BootNotification?.iccid ?? "",
-    imsi: localConfig.BootNotification?.imsi ?? "",
-  };
-}
 
 export interface CpDetailContentProps {
   cpId: string;
@@ -594,117 +441,25 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
           title={<span className="font-mono">{cpId}</span>}
           titleAs={isPanel ? "h2" : "h1"}
           actions={
-            <>
-              {canSetLabels && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={labels === undefined}
-                  title={
-                    labels === undefined
-                      ? t("cp.page.labelsUnknown")
-                      : t("cp.page.editLabelsTitle")
-                  }
-                  aria-expanded={isLabelsOpen}
-                  aria-controls={isLabelsOpen ? labelsCardId : undefined}
-                  onClick={() => setIsLabelsOpen((open) => !open)}
-                  className={cn(
-                    isLabelsOpen &&
-                      "border-cx-accent bg-cx-sel text-cx-accent hover:bg-cx-sel hover:text-cx-accent",
-                  )}
-                >
-                  <Tag className="h-3.5 w-3.5" />
-                  {t("cp.page.labels")}
-                </Button>
-              )}
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                aria-expanded={isConfigOpen}
-                aria-controls={isConfigOpen ? configCardId : undefined}
-                onClick={() => setIsConfigOpen((open) => !open)}
-                className={cn(
-                  isConfigOpen &&
-                    "border-cx-accent bg-cx-sel text-cx-accent hover:bg-cx-sel hover:text-cx-accent",
-                )}
-              >
-                <Settings className="h-3.5 w-3.5" />
-                {t("cp.page.config")}
-              </Button>
-              <Button
-                type="button"
-                variant={isConnected ? "destructive" : "success"}
-                size="sm"
-                disabled={isConnectPending}
-                onClick={() => void handleToggleConnect()}
-              >
-                {isConnected ? t("cp.page.disconnect") : t("cp.page.connect")}
-              </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="px-2"
-                    aria-label={t("cp.page.more")}
-                    title={t("cp.page.more")}
-                  >
-                    <MoreHorizontal className="h-3.5 w-3.5" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem asChild>
-                    <Link
-                      to={`/scenarios?tab=library&cp=${encodeURIComponent(cpId)}`}
-                    >
-                      {t("cp.page.scenarios")}
-                    </Link>
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    disabled={isDeletePending}
-                    className="text-cx-rose focus:text-cx-rose"
-                    onSelect={() => void handleDelete()}
-                  >
-                    <Trash2 className="mr-2 h-3.5 w-3.5" />
-                    {t("cp.page.delete")}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              {isPanel && (
-                <>
-                  <Button
-                    asChild
-                    variant="outline"
-                    size="sm"
-                    className="px-2"
-                    title={t("cp.page.openFullPage")}
-                  >
-                    <Link
-                      to={fullPageHref}
-                      state={{ from: "/" }}
-                      aria-label={t("cp.page.openFullPage")}
-                    >
-                      <Maximize2 className="h-3.5 w-3.5" />
-                    </Link>
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="px-2"
-                    aria-label={t("cp.page.closePanel")}
-                    title={t("cp.page.closeTitle")}
-                    onClick={closePanel}
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </Button>
-                </>
-              )}
-            </>
+            <CpHeaderActions
+              cpId={cpId}
+              isPanel={isPanel}
+              canSetLabels={canSetLabels}
+              labels={labels}
+              isLabelsOpen={isLabelsOpen}
+              labelsCardId={labelsCardId}
+              setIsLabelsOpen={setIsLabelsOpen}
+              isConfigOpen={isConfigOpen}
+              configCardId={configCardId}
+              setIsConfigOpen={setIsConfigOpen}
+              isConnected={isConnected}
+              isConnectPending={isConnectPending}
+              handleToggleConnect={handleToggleConnect}
+              isDeletePending={isDeletePending}
+              handleDelete={handleDelete}
+              fullPageHref={fullPageHref}
+              closePanel={closePanel}
+            />
           }
         >
           <StatusPill status={isConnected ? view.status : "Disconnected"} />
@@ -761,113 +516,20 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
           heartbeat={view.heartbeat}
         />
 
-        {connectorList.length === 0 ? (
-          <EmptyState
-            title={t("cp.page.noConnectors")}
-            hint={t("cp.page.noConnectorsHint")}
-          />
-        ) : (
-          <>
-            {isPanel ? (
-              <>
-                <ConnectorTabs
-                  connectors={connectorList.map((c) => ({
-                    id: c.id,
-                    status: c.status,
-                  }))}
-                  selectedId={activeConnectorId}
-                  onSelect={onSelectConnector}
-                  panelId={connectorPanelId}
-                />
-                {activeConnectorId != null && (
-                  <div
-                    role="tabpanel"
-                    id={connectorPanelId}
-                    aria-label={t("cp.connector.title", {
-                      id: activeConnectorId,
-                    })}
-                    className="mt-3"
-                  >
-                    <ConnectorCard
-                      key={activeConnectorId}
-                      cpId={cpId}
-                      connectorId={activeConnectorId}
-                    />
-                    <ScenarioCard
-                      cpId={cpId}
-                      connectorId={activeConnectorId}
-                      connectorIds={connectorIds}
-                      runs={runsOn(activeConnectorId)}
-                      refresh={refreshRuns}
-                      scheduleRefresh={scheduleRunsRefresh}
-                      // From the list's panel the link goes to the full page,
-                      // whose Back returns to the list.
-                      runLinkState={{ from: "/" }}
-                      onOpenScenario={
-                        onOpenScenario &&
-                        ((id, edit) =>
-                          onOpenScenario(activeConnectorId, id, edit))
-                      }
-                    />
-                  </div>
-                )}
-              </>
-            ) : (
-              // The full page shows every connector at once, in ONE row that
-              // scrolls horizontally instead of wrapping: `grid-auto-flow:
-              // column`, every column at least a quarter of the row
-              // (`(100% - 3rem) / 4`, 3rem = the three gutters) and at least
-              // 400 px, so at most four are visible; `min(100%, …)` keeps a phone
-              // at one card per view and the `1fr` max lets fewer than four share
-              // the width. More than four overflow into `overflow-x-auto`, and
-              // snapping lands a scroll on a card edge without forcing it. The
-              // row is a focusable region so the arrow keys scroll it, and
-              // `relative` makes it the containing block of the cards' absolutely
-              // positioned bits (the switches' `sr-only` inputs), so the scroll
-              // area clips them instead of widening the page. The card lays
-              // itself out by its own width.
-              <div ref={connectorGridRef} className="@container">
-                <div
-                  data-testid="connector-grid"
-                  role="region"
-                  aria-label={t("cp.connectors.label")}
-                  tabIndex={0}
-                  className="relative grid snap-x snap-proximity items-start gap-4 overflow-x-auto overscroll-x-contain pb-2 [grid-auto-flow:column]"
-                  style={{
-                    gridAutoColumns:
-                      "minmax(min(100%, max(400px, calc((100% - 3rem) / 4))), 1fr)",
-                  }}
-                >
-                  {connectorList.map((connector) => (
-                    <div key={connector.id} className="min-w-0 snap-start">
-                      <ConnectorCard
-                        cpId={cpId}
-                        connectorId={connector.id}
-                        selected={connector.id === activeConnectorId}
-                        onSelect={() => onSelectConnector(connector.id)}
-                      />
-                      <ScenarioCard
-                        cpId={cpId}
-                        connectorId={connector.id}
-                        connectorIds={connectorIds}
-                        runs={runsOn(connector.id)}
-                        refresh={refreshRuns}
-                        scheduleRefresh={scheduleRunsRefresh}
-                        // On the full page the link only adds `?run=`, so the
-                        // page keeps the Back it already had.
-                        runLinkState={location.state}
-                        onOpenScenario={
-                          onOpenScenario &&
-                          ((id, edit) => onOpenScenario(connector.id, id, edit))
-                        }
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </>
-        )}
+        <CpConnectorsArea
+          cpId={cpId}
+          isPanel={isPanel}
+          connectorList={connectorList}
+          connectorIds={connectorIds}
+          activeConnectorId={activeConnectorId}
+          onSelectConnector={onSelectConnector}
+          onOpenScenario={onOpenScenario}
+          connectorPanelId={connectorPanelId}
+          connectorGridRef={connectorGridRef}
+          runsOn={runsOn}
+          refreshRuns={refreshRuns}
+          scheduleRunsRefresh={scheduleRunsRefresh}
+        />
       </div>
 
       <BottomPanel
@@ -932,183 +594,30 @@ const CpDetailContent: React.FC<CpDetailContentProps> = ({
           </section>
         )}
 
-        {section === "transactions" && (
-          <section>
-            <TransactionsTab cpId={cpId} />
-          </section>
-        )}
-
-        {section === "events" && (
-          <section>
-            <Suspense
-              fallback={
-                <div className="p-6 text-sm text-cx-muted">
-                  {t("cp.page.loadingEvents")}
-                </div>
-              }
-            >
-              <OperationalTimelinePanel key={cpId} cpId={cpId} />
-            </Suspense>
-          </section>
-        )}
-
-        {section === "analysis" && (
-          <section>
-            <Suspense
-              fallback={
-                <div className="p-6 text-sm text-cx-muted">
-                  {t("cp.page.loadingAnalysis")}
-                </div>
-              }
-            >
-              <SessionAnalysisPanel
-                cpId={cpId}
-                ocppVersion={resolvedOcppVersion}
-              />
-            </Suspense>
-          </section>
-        )}
-
-        {section === "diagnostics" && (
-          <section>
-            {connectorList.length > 1 && (
-              <select
-                data-testid="diagnostics-connector"
-                aria-label={t("cp.page.connectorSingular")}
-                value={activeConnectorId ?? ""}
-                onChange={(e) => onSelectConnector(Number(e.target.value))}
-                className={cn(FILTER_SELECT_CLASS, "mb-3")}
-              >
-                {connectorList.map((connector) => (
-                  <option key={connector.id} value={connector.id}>
-                    {t("cp.connector.title", { id: connector.id })}
-                  </option>
-                ))}
-              </select>
-            )}
-            {diagnosticsConnector && localCp ? (
-              <div className="h-[520px]">
-                <Suspense
-                  fallback={
-                    <div className="p-6 text-sm text-cx-muted">
-                      {t("cp.page.loadingDiagram")}
-                    </div>
-                  }
-                >
-                  <StateTransitionViewer
-                    connector={diagnosticsConnector}
-                    chargePoint={localCp}
-                  />
-                </Suspense>
-              </div>
-            ) : (
-              <EmptyState
-                title={t("cp.page.diagramUnavailable")}
-                hint={t("cp.page.diagramUnavailableHint")}
-              />
-            )}
-          </section>
-        )}
-
-        {section === "configuration" && (
-          <section>
-            <ConfigurationKeysTab cpId={cpId} />
-          </section>
-        )}
-
-        {section === "expert" && (
-          <section>
-            <ExpertCallPanel
-              cpId={cpId}
-              ocppVersion={resolvedOcppVersion}
-              connected={isConnected}
-            />
-          </section>
-        )}
+        <CpDetailSections
+          section={section}
+          cpId={cpId}
+          resolvedOcppVersion={resolvedOcppVersion}
+          isConnected={isConnected}
+          connectorList={connectorList}
+          activeConnectorId={activeConnectorId}
+          onSelectConnector={onSelectConnector}
+          localCp={localCp}
+          diagnosticsConnector={diagnosticsConnector}
+        />
 
         {section === "network" && (
-          <section>
-            <div className="rounded-[10px] border border-cx-border bg-cx-card p-4 shadow-[0_1px_2px_rgba(20,20,30,0.05)] dark:shadow-none">
-              {networkSimLoadError && (
-                <div className="mb-4 rounded-md border border-cx-rose bg-cx-rose/10 p-3 text-sm text-cx-rose">
-                  {networkSimLoadError}
-                </div>
-              )}
-              {networkSimGlobalConfig === undefined && !networkSimLoadError && (
-                <p className="text-sm text-cx-muted">
-                  {t("cp.page.loadingNetworkSim")}
-                </p>
-              )}
-              {networkSimGlobalConfig === null && !networkSimLoadError && (
-                // No global layer saved: this charge point's settings are an
-                // override of it, so there is nothing to edit yet.
-                <EmptyState
-                  title={t("cp.page.networkSimNotSetUp")}
-                  hint={t("cp.page.networkSimNotSetUpHint")}
-                  action={
-                    <Link
-                      to="/settings#network-simulation"
-                      className="text-sm text-cx-accent hover:underline"
-                    >
-                      {t("cp.page.openNetworkSettings")}
-                    </Link>
-                  }
-                />
-              )}
-              {networkSimGlobalConfig != null && (
-                <>
-                  <NetworkSimEditor
-                    mode="cp"
-                    value={networkSimCpConfig ?? null}
-                    inheritedRules={inheritedNetworkSimRules}
-                    inheritedEnabled={networkSimGlobalConfig.enabled ?? false}
-                    onSave={async (config) => {
-                      try {
-                        await chargePointService.saveNetworkSimCp(cpId, config);
-                        await refreshNetworkSim();
-                      } catch (err) {
-                        console.error(
-                          `Failed to save network sim config for ${cpId}`,
-                          err,
-                        );
-                        throw err;
-                      }
-                    }}
-                    onDeleteOverride={async () => {
-                      try {
-                        await chargePointService.saveNetworkSimCp(cpId, null);
-                        await refreshNetworkSim();
-                      } catch (err) {
-                        console.error(
-                          `Failed to delete network sim override for ${cpId}`,
-                          err,
-                        );
-                        throw err;
-                      }
-                    }}
-                  />
-                  {snapshot?.networkSim?.manualRuleIds &&
-                    snapshot.networkSim.manualRuleIds.length > 0 && (
-                      <div className="mt-6 border-t border-cx-border pt-6">
-                        <h3 className="mb-4 text-base font-semibold text-cx-fg">
-                          {t("cp.page.manualRules")}
-                        </h3>
-                        <ManualDisconnectButtons
-                          manualRuleIds={snapshot.networkSim.manualRuleIds}
-                          isConnected={isConnected}
-                          onTriggerDisconnect={async (ruleId) =>
-                            chargePointService.triggerNetworkSimDisconnect(
-                              cpId,
-                              ruleId,
-                            )
-                          }
-                        />
-                      </div>
-                    )}
-                </>
-              )}
-            </div>
-          </section>
+          <CpNetworkSimSection
+            cpId={cpId}
+            chargePointService={chargePointService}
+            snapshot={snapshot}
+            isConnected={isConnected}
+            networkSimLoadError={networkSimLoadError}
+            networkSimGlobalConfig={networkSimGlobalConfig}
+            networkSimCpConfig={networkSimCpConfig}
+            inheritedNetworkSimRules={inheritedNetworkSimRules}
+            refreshNetworkSim={refreshNetworkSim}
+          />
         )}
       </BottomPanel>
     </div>

@@ -22,6 +22,7 @@ sources:
   - packages/core/src/cp/domain/connector/OperatingPoint.ts
   - packages/core/src/cp/domain/connector/SessionIntent.ts
   - packages/core/src/cp/domain/connector/Connector.ts
+  - packages/core/src/cp/domain/connector/ConnectorEnergy.ts
   - packages/core/src/cp/domain/connector/EvConnection.ts
   - "issue #453"
   - packages/core/src/cp/domain/connector/ChargingScheduleResolver.ts

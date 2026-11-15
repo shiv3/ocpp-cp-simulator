@@ -59,6 +59,8 @@ import type {
 } from "../transport/ChargePointSocket";
 import type { RawFrameSink } from "../transport/RawFrameSink";
 import { CellularModem, type RedactedModemState } from "../modem/CellularModem";
+import { CallOverrides } from "./CallOverrides";
+import { ScenarioCallOwnership } from "./ScenarioCallOwnership";
 import { CellularLinkController } from "./CellularLinkController";
 import { ClientCertificateSwitch } from "./ClientCertificateSwitch";
 import { bootNotificationFor } from "../modem/bootIdentifiers";
@@ -426,39 +428,10 @@ export class ChargePoint {
   private _autoMeterValueSetting: AutoMeterValueSetting | null;
   /** #347: see {@link sendScheduledMeterValue}. On by default (#551). */
   private _txUpdatedMeterValues = true;
-  private readonly _scenarioHandledConnectors: Set<number> = new Set();
-  // Mirror of _scenarioHandledConnectors but for the stop side. When a
-  // connector id is in this set, the RemoteStopTransaction default
-  // handler defers to the scenario instead of stopping the transaction
-  // itself — the scenario is parked on a RemoteStopTrigger node and will
-  // resume into its own Transaction Stop step.
-  private readonly _scenarioStopHandledConnectors: Set<number> = new Set();
-  // Diagnostic-only, paired with _scenarioHandledConnectors: whenever
-  // RemoteStartTransaction lands via the DEFAULT path (no scenario armed on
-  // this connector yet), the timestamp is recorded here. A scenario that
-  // arms afterwards (registerScenarioHandler) consults this to detect that
-  // it just missed a call that arrived while it was still walking toward
-  // the trigger node — the "run_scenario raced RemoteStartTransaction"
-  // footgun: the CSMS command silently starts a real transaction outside
-  // the scenario, and the scenario then parks forever waiting for a call
-  // that already happened. Consumed (deleted) on read via
-  // takeDefaultHandledRemoteStart, so a warning never fires twice and a
-  // stale/unrelated bypass can't leak into a later, unconnected run.
-  private readonly _lastDefaultHandledRemoteStart: Map<number, number> =
-    new Map();
-  // Mirror of the above for the RemoteStopTransaction / stop-side bypass.
-  private readonly _lastDefaultHandledRemoteStop: Map<number, number> =
-    new Map();
-  /** One-shot canned `{ status }` responses per incoming action,
-   *  armed by a scenario responseOverride node (issue #110). */
-  private readonly _responseOverrides = new Map<string, string>();
-  /** Sticky per-action inbound call policies (issue #247). When a CSMS-initiated
-   *  CALL arrives for an action with a policy, reply with CALLERROR or stay silent
-   *  instead of processing normally. Survive reconnects until explicitly cleared. */
-  private readonly _inboundCallPolicies = new Map<string, InboundCallPolicy>();
-  /** Certificate quirks for CSR generation and acceptance (issue #247).
-   *  Used to emulate OCPP conformance tool behavior. Sticky until cleared. */
-  private _certificateQuirks: CertificateQuirks = {};
+  private readonly _scenarioCalls = new ScenarioCallOwnership({
+    clock: () => this._clock,
+  });
+  private readonly _callOverrides = new CallOverrides();
   // §4.9 B6: per-connector ConnectionTimeOut watchdog. Started when a
   // connector enters Preparing, cleared on any other transition. If the
   // timer fires we auto-transition the connector to Finishing.
@@ -2141,15 +2114,15 @@ export class ChargePoint {
    * remoteStartReceived instead of calling startTransaction directly.
    */
   registerScenarioHandler(connectorId: number): void {
-    this._scenarioHandledConnectors.add(connectorId);
+    this._scenarioCalls.register(connectorId);
   }
 
   unregisterScenarioHandler(connectorId: number): void {
-    this._scenarioHandledConnectors.delete(connectorId);
+    this._scenarioCalls.unregister(connectorId);
   }
 
   isScenarioHandled(connectorId: number): boolean {
-    return this._scenarioHandledConnectors.has(connectorId);
+    return this._scenarioCalls.isHandled(connectorId);
   }
 
   notifyRemoteStartReceived(
@@ -2168,9 +2141,9 @@ export class ChargePoint {
 
   /** Record that RemoteStartTransaction for `connectorId` was just handled
    *  by the default (non-scenario) path — i.e. isScenarioHandled(connectorId)
-   *  was false at delivery time. See _lastDefaultHandledRemoteStart. */
+   *  was false at delivery time. See ScenarioCallOwnership. */
   noteDefaultHandledRemoteStart(connectorId: number): void {
-    this._lastDefaultHandledRemoteStart.set(connectorId, this._clock.now());
+    this._scenarioCalls.noteDefaultHandledRemoteStart(connectorId);
   }
 
   /** Consume (and remove) the timestamp recorded by
@@ -2183,9 +2156,10 @@ export class ChargePoint {
     connectorId: number,
     sinceMs: number,
   ): number | null {
-    const ts = this._lastDefaultHandledRemoteStart.get(connectorId);
-    this._lastDefaultHandledRemoteStart.delete(connectorId);
-    return ts !== undefined && ts >= sinceMs ? ts : null;
+    return this._scenarioCalls.takeDefaultHandledRemoteStart(
+      connectorId,
+      sinceMs,
+    );
   }
 
   /**
@@ -2196,15 +2170,15 @@ export class ChargePoint {
    * stopTransaction() right away.
    */
   registerScenarioStopHandler(connectorId: number): void {
-    this._scenarioStopHandledConnectors.add(connectorId);
+    this._scenarioCalls.registerStop(connectorId);
   }
 
   unregisterScenarioStopHandler(connectorId: number): void {
-    this._scenarioStopHandledConnectors.delete(connectorId);
+    this._scenarioCalls.unregisterStop(connectorId);
   }
 
   isScenarioStopHandled(connectorId: number): boolean {
-    return this._scenarioStopHandledConnectors.has(connectorId);
+    return this._scenarioCalls.isStopHandled(connectorId);
   }
 
   notifyRemoteStopReceived(connectorId: number, transactionId: number): void {
@@ -2213,7 +2187,7 @@ export class ChargePoint {
 
   /** Mirror of noteDefaultHandledRemoteStart for the stop side. */
   noteDefaultHandledRemoteStop(connectorId: number): void {
-    this._lastDefaultHandledRemoteStop.set(connectorId, this._clock.now());
+    this._scenarioCalls.noteDefaultHandledRemoteStop(connectorId);
   }
 
   /** Mirror of takeDefaultHandledRemoteStart for the stop side. */
@@ -2221,9 +2195,10 @@ export class ChargePoint {
     connectorId: number,
     sinceMs: number,
   ): number | null {
-    const ts = this._lastDefaultHandledRemoteStop.get(connectorId);
-    this._lastDefaultHandledRemoteStop.delete(connectorId);
-    return ts !== undefined && ts >= sinceMs ? ts : null;
+    return this._scenarioCalls.takeDefaultHandledRemoteStop(
+      connectorId,
+      sinceMs,
+    );
   }
 
   notifyIncomingCall(
@@ -2479,64 +2454,57 @@ export class ChargePoint {
   }
 
   armResponseOverride(action: string, status: string): void {
-    this._responseOverrides.set(action, status);
+    this._callOverrides.armResponseOverride(action, status);
   }
 
   /** Returns and clears the armed status for `action`, or null. */
   consumeResponseOverride(action: string): string | null {
-    const status = this._responseOverrides.get(action);
-    if (status === undefined) return null;
-    this._responseOverrides.delete(action);
-    return status;
+    return this._callOverrides.consumeResponseOverride(action);
   }
 
   /** Read-only probe: is an override armed for `action`? Test/diagnostic
    *  helper — does not consume. */
   hasResponseOverride(action: string): boolean {
-    return this._responseOverrides.has(action);
+    return this._callOverrides.hasResponseOverride(action);
   }
 
   /** Clear an armed response override. No-op if not armed. */
   clearResponseOverride(action: string): void {
-    this._responseOverrides.delete(action);
+    this._callOverrides.clearResponseOverride(action);
   }
 
   /** Set an inbound call policy for `action`. Policies are sticky and survive
    *  reconnects; use clearInboundCallPolicy to remove. */
   setInboundCallPolicy(action: string, policy: InboundCallPolicy): void {
-    this._inboundCallPolicies.set(action, policy);
+    this._callOverrides.setInboundCallPolicy(action, policy);
   }
 
   /** Get the inbound call policy for `action`, or undefined if none is set. */
   getInboundCallPolicy(action: string): InboundCallPolicy | undefined {
-    return this._inboundCallPolicies.get(action);
+    return this._callOverrides.getInboundCallPolicy(action);
   }
 
   /** Clear the inbound call policy for `action`. If `action` is not provided,
    *  clear all policies. */
   clearInboundCallPolicy(action?: string): void {
-    if (action === undefined) {
-      this._inboundCallPolicies.clear();
-    } else {
-      this._inboundCallPolicies.delete(action);
-    }
+    this._callOverrides.clearInboundCallPolicy(action);
   }
 
   /** Set certificate quirks (CSR generation options, acceptance policies, etc.).
    *  Shallow-merges into current quirks; unset fields inherit prior values.
    *  Sticky until explicitly cleared. */
   setCertificateQuirks(quirks: Partial<CertificateQuirks>): void {
-    this._certificateQuirks = { ...this._certificateQuirks, ...quirks };
+    this._callOverrides.setCertificateQuirks(quirks);
   }
 
   /** Reset all certificate quirks to empty state. */
   clearCertificateQuirks(): void {
-    this._certificateQuirks = {};
+    this._callOverrides.clearCertificateQuirks();
   }
 
   /** Read-only access to current certificate quirks. */
   get certificateQuirks(): CertificateQuirks {
-    return this._certificateQuirks;
+    return this._callOverrides.certificateQuirks;
   }
 
   set loggingCallback(callback: (entry: LogEntry) => void) {
@@ -3488,13 +3456,10 @@ export class ChargePoint {
     // (they are bound to the connection). The follow-up of a default behavior,
     // such as the firmware status train, goes on: it did before the engine.
     this._engine.connectionClosed();
-    this._scenarioHandledConnectors.clear();
-    this._scenarioStopHandledConnectors.clear();
-    this._lastDefaultHandledRemoteStart.clear();
-    this._lastDefaultHandledRemoteStop.clear();
+    this._scenarioCalls.clear();
     // Issue #110: stale response overrides must not survive a
     // disconnect — they would silently answer the next real CSMS call.
-    this._responseOverrides.clear();
+    this._callOverrides.clearResponseOverrides();
     // Cancel all ConnectionTimeOut watchdogs so the timer doesn't fire
     // against a disconnected CP.
     this._connectionTimeoutTimers.forEach((t) => this._clock.clearTimeout(t));

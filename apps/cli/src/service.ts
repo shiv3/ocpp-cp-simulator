@@ -89,7 +89,6 @@ import type {
   CLIOptions,
   ChargePointInitOptions,
   ChargePointStatus,
-  ConnectorStatus,
 } from "./types";
 import { ScenarioExecutor } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioExecutor";
 import { normalizeLabels } from "@ocpp-cp-simulator/contracts/labels";
@@ -168,6 +167,12 @@ import {
   type BehaviorsHost,
 } from "./service/behaviors";
 import type { ForwarderHost } from "./service/forwarderHost";
+import {
+  getStatus,
+  onFirmwareVersionChange,
+  onSecurityCredentialsChange,
+  type CpStatusHost,
+} from "./service/cpStatus";
 import {
   handleConnectAutoStart,
   handleStatusAutoStart,
@@ -672,82 +677,7 @@ export class CLIChargePointService {
   }
 
   getStatus(): ChargePointStatus {
-    const connectors: ConnectorStatus[] = [];
-    this._chargePoint.connectors.forEach((connector) => {
-      const tx = connector.transaction;
-      connectors.push({
-        id: connector.id,
-        status: connector.status,
-        availability: connector.availability,
-        meterValue: connector.meterValue,
-        transactionId: tx?.id ?? null,
-        soc: connector.soc,
-        mode: connector.mode,
-        autoResetToAvailable: connector.autoResetToAvailable,
-        autoMeterValueConfig:
-          connector.autoMeterValueConfig as unknown as Record<string, unknown>,
-        evSettings: connector.evSettings as unknown as Record<string, unknown>,
-        chargingProfile:
-          (connector.chargingProfile as unknown as Record<string, unknown>) ??
-          null,
-        chargingProfiles:
-          connector.chargingProfiles as unknown as ReadonlyArray<
-            Record<string, unknown>
-          >,
-        transactionStartTime: tx?.startTime ? tx.startTime.toISOString() : null,
-        transactionTagId: tx?.tagId ?? null,
-        transactionBatteryCapacityKwh: tx?.batteryCapacityKwh ?? null,
-        evConnection: connector.evConnection,
-      });
-    });
-
-    return {
-      id: this._chargePoint.id,
-      status: this._chargePoint.status,
-      error: this._chargePoint.error,
-      connectors,
-      heartbeat: {
-        intervalSeconds: this._chargePoint.heartbeat.intervalSeconds,
-        lastSentAt: this._chargePoint.heartbeat.lastSentAt
-          ? this._chargePoint.heartbeat.lastSentAt.toISOString()
-          : null,
-      },
-      networkSim: this._chargePoint.networkSimSummary(),
-      ...(this._chargePoint.modemState()
-        ? { modem: this._chargePoint.modemState()! }
-        : {}),
-      config: {
-        wsUrl: this._init.wsUrl,
-        connectors: this._init.connectors,
-        vendor: this._init.vendor,
-        model: this._init.model,
-        basicAuth: this._init.basicAuth,
-        centralSystemUrl: this._init.centralSystemUrl,
-        soapCallbackUrl: this._init.soapCallbackUrl,
-        soapCallbackUrlDerived: this._init.soapCallbackUrlDerived,
-        soapPath: this._init.soapPath,
-        ocppVersion: this._init.ocppVersion ?? "OCPP-1.6J",
-        securityProfile: this._init.securityProfile,
-        cpoName: this._init.cpoName,
-        txUpdatedMeterValues: this._init.txUpdatedMeterValues,
-        inboundValidation: this._init.inboundValidation,
-        reservationAuthorizeIdTag: this._init.reservationAuthorizeIdTag,
-        capabilityProfile: this._init.capabilityProfile,
-        transport: this._init.transport,
-        chargerCapabilities: this._init.chargerCapabilities,
-        tlsCaPath: this._init.tlsCaPath,
-        tlsCertPath: this._init.tlsCertPath,
-        tlsKeyPath: this._init.tlsKeyPath,
-        bootNotification: this._init.bootNotification ?? null,
-        labels: this._init.labels,
-        ...(this._init.behaviors === undefined
-          ? {}
-          : { behaviors: [...this._init.behaviors] }),
-        ...(this._init.behaviorParams === undefined
-          ? {}
-          : { behaviorParams: { ...this._init.behaviorParams } }),
-      },
-    };
+    return getStatus(this.cpStatusHost());
   }
 
   /**
@@ -759,54 +689,21 @@ export class CLIChargePointService {
     this._init = { ...this._init, labels: normalizeLabels(labels) };
   }
 
-  /**
-   * #724: a ChangeConfiguration of `AuthorizationKey` / `SecurityProfile` (and
-   * the A05.FR.08 fallback) is the station's new credential. `getInit()` follows
-   * it, so a `cp.update` that omits the field keeps the changed value, and
-   * `listener` lets the registry write it to the charge point's row: a restart
-   * rebuilds the station from that row. Not for 2.x, which has no such keys.
-   */
   onSecurityCredentialsChange(
     listener: (change: {
       securityProfile?: 0 | 1 | 2 | 3;
       authorizationKey?: string;
     }) => void,
   ): () => void {
-    if (this._init.ocppVersion?.startsWith("OCPP-2")) return () => {};
-    return this._chargePoint.configuration.onChange((key, value) => {
-      if (key === "AuthorizationKey" && typeof value === "string") {
-        this._init = { ...this._init, authorizationKey: value };
-        listener({ authorizationKey: value });
-      } else if (
-        key === "SecurityProfile" &&
-        (value === 0 || value === 1 || value === 2 || value === 3)
-      ) {
-        this._init = { ...this._init, securityProfile: value };
-        listener({ securityProfile: value });
-      }
-    });
+    return onSecurityCredentialsChange(this.cpStatusHost(), listener);
   }
 
-  /**
-   * A simulated firmware update with `bumpVersion` changed the station's
-   * firmwareVersion (`firmwareVersionChanged`). `listener` lets the registry
-   * write it to the row's boot data: a restart boots with the installed
-   * version, as a real station would. `getInit()` follows the change on its
-   * own (see {@link attachEventForwarders}), with or without a listener, so
-   * a `cp.update` that omits the field keeps the installed version however
-   * the service was registered.
-   */
   onFirmwareVersionChange(
     listener: (
       bootNotification: NonNullable<ChargePointInitOptions["bootNotification"]>,
     ) => void,
   ): () => void {
-    // Registered after the service's own subscription, so `_init` already
-    // holds the new version when this runs.
-    return this._chargePoint.events.on("firmwareVersionChanged", () => {
-      const { bootNotification } = this._init;
-      if (bootNotification) listener(bootNotification);
-    });
+    return onFirmwareVersionChange(this.cpStatusHost(), listener);
   }
 
   /** A line in this charge point's log, as a transaction message: what an
@@ -1662,6 +1559,21 @@ export class CLIChargePointService {
         return self()._scenarios;
       },
       runScenario: (...args) => self().runScenario(...args),
+    };
+  }
+
+  private cpStatusHost(): CpStatusHost {
+    const self = (): CLIChargePointService => this;
+    return {
+      get chargePoint() {
+        return self()._chargePoint;
+      },
+      get init() {
+        return self()._init;
+      },
+      set init(value) {
+        self()._init = value;
+      },
     };
   }
 

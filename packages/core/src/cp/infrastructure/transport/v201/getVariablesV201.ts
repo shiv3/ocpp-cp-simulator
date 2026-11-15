@@ -10,7 +10,11 @@ import {
 } from "./deviceModelMap";
 import { renderConfigValue } from "../../../domain/charge-point/renderConfigValue";
 import { REASON, statusInfo } from "./variableStatusInfo";
-import { variablesRequestLimitViolation } from "./variablesRequestLimits";
+import {
+  reportingValueSize,
+  variablesRequestLimitViolation,
+} from "./variablesRequestLimits";
+import { truncateValue } from "../../../domain/device-model/deviceDataCtrlrKeys";
 
 type GetVariableResult = GetVariablesResponseV201["getVariableResult"][number];
 
@@ -40,6 +44,9 @@ export function handleGetVariablesV201(
     req.getVariableData.length,
     store,
   );
+  // DeviceDataCtrlr.ReportingValueSize (Part 2): a longer value is
+  // truncated, not refused.
+  const maxValueSize = reportingValueSize(store);
   const results = req.getVariableData.map((data): GetVariableResult => {
     if (violation !== undefined) {
       return {
@@ -77,7 +84,8 @@ export function handleGetVariablesV201(
       return {
         attributeStatus: "Accepted",
         attributeType: data.attributeType,
-        attributeValue: value === undefined ? "" : String(value),
+        attributeValue:
+          value === undefined ? "" : truncateValue(String(value), maxValueSize),
         component: data.component,
         variable: data.variable,
       };
@@ -114,7 +122,7 @@ export function handleGetVariablesV201(
     return {
       attributeStatus: "Accepted",
       attributeType: "Actual",
-      attributeValue: renderConfigValue(entry),
+      attributeValue: truncateValue(renderConfigValue(entry), maxValueSize),
       component: data.component,
       variable: data.variable,
     };

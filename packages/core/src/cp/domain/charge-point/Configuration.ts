@@ -479,7 +479,8 @@ export const ConfigurationKeys = {
     // as a failed transmission (E13). 2.x only, as
     // `OCPPCommCtrlr.MessageTimeout[Default]`, which OCPP 2.0.1 / 2.1 Part 2
     // §2.1.3 "DefaultMessageTimeout" makes ReadOnly (it is set through a
-    // NetworkConnectionProfile; this simulator rejects SetNetworkProfile).
+    // NetworkConnectionProfile; SetNetworkProfile stores a profile but does
+    // not switch to it).
     MessageTimeout: {
       name: "MessageTimeout",
       required: false,
@@ -608,6 +609,15 @@ export const ConfigurationKeys = {
       type: "integer",
       min: 0,
     } as IntegerConfigurationKey,
+    // OCPP 2.x `SecurityCtrlr.AllowSecurityProfileDowngrade`: when true,
+    // SetNetworkProfile accepts a profile with security profile 2 while 3 is
+    // in force (B09.FR.04); any other lowering stays Rejected. 2.x only.
+    AllowSecurityProfileDowngrade: {
+      name: "AllowSecurityProfileDowngrade",
+      required: false,
+      readonly: false,
+      type: "boolean",
+    } as BooleanConfigurationKey,
     // #697: `TxCtrlr.TxStartPoint` / `TxStopPoint`, the events that start and
     // end a transaction. 2.x only.
     TxStartPoint: {
@@ -909,6 +919,10 @@ export const defaultConfiguration: (cp: ChargePoint) => Configuration = (
           intVal(ConfigurationKeys.Custom.MaxCertificateChainSize, 10000),
           intVal(ConfigurationKeys.Custom.CertSigningWaitMinimum, 60),
           intVal(ConfigurationKeys.Custom.CertSigningRepeatTimes, 3),
+          boolVal(
+            ConfigurationKeys.Custom.AllowSecurityProfileDowngrade,
+            false,
+          ),
         ]
       : []),
     // #607: 2.x only (SampledDataCtrlr / AlignedDataCtrlr TxEnded* and

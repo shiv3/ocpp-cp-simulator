@@ -13,6 +13,7 @@ sources:
   - packages/core/src/cp/infrastructure/transport/v201/getVariablesV201.ts
   - packages/core/src/cp/infrastructure/transport/v201/variableStatusInfo.ts
   - packages/core/src/cp/infrastructure/transport/v201/variablesRequestLimits.ts
+  - packages/core/src/cp/domain/security/networkProfiles.ts
   - "issue #604"
   - "issue #606"
   - "issue #569"
@@ -22,7 +23,7 @@ related:
   - ../concepts/local-authorization.md
   - default-behaviors.md
   - ../sources/github-issues.md
-updated: 2026-11-14
+updated: 2026-11-15
 ---
 
 # Device Model registry
@@ -164,6 +165,8 @@ one of their variables answers `UnknownVariable`, not `UnknownComponent`.
 | `DeviceDataCtrlr.BytesPerMessage[GetVariables]`            | `BytesPerMessageGetVariables`             | ReadOnly   | integer    | –                                                      | 65536                                             | Volatile    |
 | `DeviceDataCtrlr.ItemsPerMessage[SetVariables]`            | `ItemsPerMessageSetVariables`             | ReadOnly   | integer    | –                                                      | 100                                               | Volatile    |
 | `DeviceDataCtrlr.BytesPerMessage[SetVariables]`            | `BytesPerMessageSetVariables`             | ReadOnly   | integer    | –                                                      | 65536                                             | Volatile    |
+| `DeviceDataCtrlr.ConfigurationValueSize`                   | `ConfigurationValueSize`                  | ReadOnly   | integer    | min 1, max 1000                                        | 1000                                              | Volatile    |
+| `DeviceDataCtrlr.ReportingValueSize`                       | `ReportingValueSize`                      | ReadOnly   | integer    | min 1, max 2500                                        | 2500                                              | Volatile    |
 | `MonitoringCtrlr.ItemsPerMessage[SetVariableMonitoring]`   | `ItemsPerMessageSetVariableMonitoring`    | ReadOnly   | integer    | –                                                      | 100                                               | Volatile    |
 | `MonitoringCtrlr.BytesPerMessage[SetVariableMonitoring]`   | `BytesPerMessageSetVariableMonitoring`    | ReadOnly   | integer    | –                                                      | 65536                                             | Volatile    |
 | `MonitoringCtrlr.ItemsPerMessage[ClearVariableMonitoring]` | `ItemsPerMessageClearVariableMonitoring`  | ReadOnly   | integer    | –                                                      | 100                                               | Volatile    |
@@ -176,6 +179,7 @@ one of their variables answers `UnknownVariable`, not `UnknownComponent`.
 | `SecurityCtrlr.MaxCertificateChainSize`                    | `MaxCertificateChainSize`                 | ReadOnly   | integer    | min 1, max 10000                                       | 10000                                             | Persistent  |
 | `SecurityCtrlr.CertSigningWaitMinimum`                     | `CertSigningWaitMinimum`                  | ReadWrite  | integer    | min 1                                                  | 60                                                | Persistent  |
 | `SecurityCtrlr.CertSigningRepeatTimes`                     | `CertSigningRepeatTimes`                  | ReadWrite  | integer    | min 0                                                  | 3                                                 | Persistent  |
+| `SecurityCtrlr.AllowSecurityProfileDowngrade`              | `AllowSecurityProfileDowngrade`           | ReadWrite  | boolean    | –                                                      | false                                             | Persistent  |
 | `SecurityCtrlr.SecurityProfile`                            | `SecurityProfile`                         | ReadOnly   | integer    | min 0, max 3                                           | 0                                                 | Persistent  |
 | `SecurityCtrlr.OrganizationName`                           | `CpoName`                                 | ReadOnly   | string     | –                                                      | empty                                             | Persistent  |
 | `SecurityCtrlr.BasicAuthPassword`                          | `AuthorizationKey`                        | WriteOnly  | string     | –                                                      | empty                                             | Persistent  |
@@ -269,6 +273,7 @@ wins, in this order:
 | More elements than `ItemsPerMessage[<message>]`: every element                                                        | `Rejected`                             | `TooManyElements`     | B05.FR.11, B06.FR.05               |
 | Request payload longer than `BytesPerMessage[<message>]` (JSON, UTF-8): every element                                 | `Rejected`                             | `TooLargeElement`     | B05.FR.11, B06.FR.05               |
 | Unknown component / variable                                                                                          | `UnknownComponent` / `UnknownVariable` | none                  | B05.FR.04, FR.05, B06.FR.06, FR.07 |
+| Set: `attributeValue` longer than `ConfigurationValueSize` characters                                                 | `Rejected`                             | `TooLargeElement`     | Part 2 DeviceDataCtrlr             |
 | `attributeType` the variable lacks                                                                                    | `NotSupportedAttributeType`            | none                  | B05.FR.06, B06.FR.08               |
 | Set: value not of the variable's `dataType` (not an integer, decimal or `true` / `false`), or not in its `valuesList` | `Rejected`                             | `InvalidValue`        | B05.FR.07                          |
 | Set: number below `min` or above `max`                                                                                | `Rejected`                             | `ValueOutOfRange`     | B05.FR.08                          |
@@ -284,7 +289,16 @@ constants of 100 and 65536. Over the limit the spec allows a CALLERROR for
 `FormatViolation`) but requires nothing for `SetVariables`; the simulator
 answers both with per-element results so the response keeps one result per
 element, and applies nothing. The byte count is that of the request payload, not
-of the OCPP-J frame around it. An integer is `-?digits` only: `1e2`, `1.5`,
+of the OCPP-J frame around it.
+
+`ConfigurationValueSize` (1000) and `ReportingValueSize` (2500) are read-only
+constants at the schema's `maxLength` of `SetVariableData.attributeValue` and
+`GetVariableResult.attributeValue` / `VariableAttribute.value`. They count
+characters (code points), as `maxLength` does. A `GetVariables` value and a
+`NotifyReport` value longer than `ReportingValueSize` are truncated, not
+refused. At the default sizes the frame's schema validation already refuses a
+longer `SetVariables` value with a CALLERROR; the per-element
+`TooLargeElement` shows when an operator or scenario lowers the runtime key. An integer is `-?digits` only: `1e2`, `1.5`,
 `+5` and padded values are `InvalidValue`.
 
 ### MinSet and MaxSet

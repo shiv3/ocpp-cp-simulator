@@ -173,6 +173,12 @@ import {
   isCertificateCurrentlyValid,
 } from "../security/securityProfileChange";
 import {
+  checkNetworkProfile,
+  NetworkProfileStore,
+  type NetworkConnectionProfile,
+  type NetworkProfileVerdict,
+} from "../security/networkProfiles";
+import {
   MONITORING_BASES,
   MonitoringStore,
 } from "../monitoring/MonitoringStore";
@@ -607,6 +613,8 @@ export class ChargePoint {
   private readonly _monitoring = new MonitoringStore(DEFAULT_MONITOR_CATALOG);
   // #538: Target attributes of the 2.1 device model (EVSE.Power).
   private readonly _deviceModelTargets = new DeviceModelTargets();
+  // OCPP 2.x NetworkConnectionProfiles stored by SetNetworkProfile (B09).
+  private readonly _networkProfiles = new NetworkProfileStore();
   // Their evaluation into NotifyEvent; OCPP 2.x only (N07, #457).
   private _monitorEvaluation: MonitorEvaluation | undefined;
   private readonly _configuration: ConfigurationStore;
@@ -2075,6 +2083,44 @@ export class ChargePoint {
   /** The device-model variables with a Target attribute (2.1, #538). */
   get deviceModelTargets(): DeviceModelTargets {
     return this._deviceModelTargets;
+  }
+
+  /** OCPP 2.x NetworkConnectionProfiles, by configurationSlot (B09). */
+  get networkProfiles(): NetworkProfileStore {
+    return this._networkProfiles;
+  }
+
+  /**
+   * B09 SetNetworkProfile: validate `profile` against the station
+   * (`checkNetworkProfile`) and, when valid, store it in
+   * `configurationSlot`. The connection is left as it is: the stored profile
+   * is used only by a later Reset or NetworkConfigurationPriority change.
+   */
+  setNetworkProfile(
+    configurationSlot: number,
+    profile: NetworkConnectionProfile,
+  ): NetworkProfileVerdict {
+    const verdict = checkNetworkProfile({
+      configurationSlot,
+      profile,
+      currentSecurityProfile:
+        this._configuration.getInteger("SecurityProfile") ?? 0,
+      allowSecurityProfileDowngrade:
+        this._configuration.allowSecurityProfileDowngrade(),
+    });
+    if (verdict.accepted) {
+      this._networkProfiles.set(configurationSlot, profile);
+      this._logger.info(
+        `SetNetworkProfile: stored a profile in slot ${configurationSlot} (security profile ${profile.securityProfile}); the connection is unchanged`,
+        LogType.CONFIGURATION,
+      );
+    } else {
+      this._logger.warn(
+        `SetNetworkProfile slot ${configurationSlot} rejected (${verdict.reasonCode}): ${verdict.additionalInfo}`,
+        LogType.CONFIGURATION,
+      );
+    }
+    return verdict;
   }
 
   /** Local authorization (#452): Authorization Cache + Local Authorization

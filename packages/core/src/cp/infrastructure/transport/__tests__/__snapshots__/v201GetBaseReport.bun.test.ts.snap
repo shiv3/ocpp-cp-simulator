@@ -1021,6 +1021,48 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
         },
         {
           "component": {
+            "name": "DeviceDataCtrlr",
+          },
+          "variable": {
+            "name": "ConfigurationValueSize",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "1000",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "maxLimit": 1000,
+            "minLimit": 1,
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "DeviceDataCtrlr",
+          },
+          "variable": {
+            "name": "ReportingValueSize",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadOnly",
+              "type": "Actual",
+              "value": "2500",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "integer",
+            "maxLimit": 2500,
+            "minLimit": 1,
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
             "name": "MonitoringCtrlr",
           },
           "variable": {
@@ -1259,6 +1301,25 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
           "variableCharacteristics": {
             "dataType": "integer",
             "minLimit": 0,
+            "supportsMonitoring": true,
+          },
+        },
+        {
+          "component": {
+            "name": "SecurityCtrlr",
+          },
+          "variable": {
+            "name": "AllowSecurityProfileDowngrade",
+          },
+          "variableAttribute": [
+            {
+              "mutability": "ReadWrite",
+              "type": "Actual",
+              "value": "false",
+            },
+          ],
+          "variableCharacteristics": {
+            "dataType": "boolean",
             "supportsMonitoring": true,
           },
         },

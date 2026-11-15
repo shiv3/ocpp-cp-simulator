@@ -1,0 +1,14 @@
+{"d":"CP>","k":"call","id":"id-1","a":"BootNotification","p":{"reason":"PowerUp","chargingStation":{"model":"Model","vendorName":"Vendor","serialNumber":"123456","firmwareVersion":"1.0"}}}
+{"d":"CSMS>","k":"result","id":"id-1","p":{"status":"Accepted","currentTime":"<ts>","interval":3600}}
+{"d":"CP>","k":"call","id":"id-2","a":"StatusNotification","p":{"timestamp":"<ts>","connectorStatus":"Available","evseId":1,"connectorId":1}}
+{"d":"CSMS>","k":"result","id":"id-2","p":{}}
+{"d":"CSMS>","k":"call","id":"id-3","a":"SetNetworkProfile","p":{"configurationSlot":1,"connectionData":{"ocppVersion":"OCPP20","ocppTransport":"JSON","ocppCsmsUrl":"wss://csms.example/ocpp/","messageTimeout":30,"securityProfile":2,"ocppInterface":"Wired0"}}}
+{"d":"CP>","k":"result","id":"id-3","p":{"status":"Accepted"}}
+{"d":"CSMS>","k":"call","id":"id-4","a":"SetNetworkProfile","p":{"configurationSlot":2,"connectionData":{"ocppVersion":"OCPP20","ocppTransport":"SOAP","ocppCsmsUrl":"wss://csms.example/ocpp/","messageTimeout":30,"securityProfile":2,"ocppInterface":"Wired0"}}}
+{"d":"CP>","k":"result","id":"id-4","p":{"status":"Rejected","statusInfo":{"reasonCode":"UnsupportedParam","additionalInfo":"ocppTransport SOAP is not supported; only JSON"}}}
+{"d":"CSMS>","k":"call","id":"id-5","a":"SetNetworkProfile","p":{"configurationSlot":2,"connectionData":{"ocppVersion":"OCPP20","ocppTransport":"JSON","ocppCsmsUrl":"wss://csms.example/ocpp/","messageTimeout":30,"securityProfile":2,"ocppInterface":"Wired0"}}}
+{"d":"CP>","k":"result","id":"id-5","p":{"status":"Rejected","statusInfo":{"reasonCode":"NoSecurityDowngrade","additionalInfo":"securityProfile 2 is lower than the profile in force (3) and AllowSecurityProfileDowngrade is false"}}}
+{"d":"CSMS>","k":"call","id":"id-6","a":"SetVariables","p":{"setVariableData":[{"component":{"name":"SecurityCtrlr"},"variable":{"name":"AllowSecurityProfileDowngrade"},"attributeValue":"true"}]}}
+{"d":"CP>","k":"result","id":"id-6","p":{"setVariableResult":[{"attributeStatus":"Accepted","attributeType":"Actual","component":{"name":"SecurityCtrlr"},"variable":{"name":"AllowSecurityProfileDowngrade"}}]}}
+{"d":"CSMS>","k":"call","id":"id-7","a":"SetNetworkProfile","p":{"configurationSlot":2,"connectionData":{"ocppVersion":"OCPP20","ocppTransport":"JSON","ocppCsmsUrl":"wss://csms.example/ocpp/","messageTimeout":30,"securityProfile":2,"ocppInterface":"Wired0"}}}
+{"d":"CP>","k":"result","id":"id-7","p":{"status":"Accepted"}}

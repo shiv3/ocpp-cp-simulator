@@ -70,6 +70,7 @@ function runParseArgs(args: string[]) {
     "  watch: options.watch,",
     "  oedBaseUrl: options.oedBaseUrl,",
     "  oedApiKeyFile: options.oedApiKeyFile,",
+    "  blueprintFiles: options.blueprintFiles,",
     "  fleetTemplateFiles: options.fleetTemplateFiles,",
     "  bootstrapPacing: options.bootstrapPacing ?? null,",
     "  labels: options.labels ?? null,",
@@ -1390,6 +1391,48 @@ describe("parseArgs --label (#472)", () => {
       );
     },
   );
+});
+
+describe("parseArgs --blueprint (#331)", () => {
+  const DAEMON = ["--daemon"];
+
+  it("collects every repeated --blueprint", () => {
+    const result = runParseArgs([
+      ...DAEMON,
+      "--blueprint",
+      "a.json",
+      "--blueprint",
+      "b.json",
+    ]);
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout).blueprintFiles).toEqual([
+      "a.json",
+      "b.json",
+    ]);
+  });
+
+  it("is empty by default", () => {
+    expect(JSON.parse(runParseArgs(DAEMON).stdout).blueprintFiles).toEqual([]);
+  });
+
+  it("is refused without a path", () => {
+    const noPath = runParseArgs([...DAEMON, "--blueprint"]);
+    expect(noPath.status).toBe(1);
+    expect(noPath.stderr).toContain("--blueprint needs a file path");
+  });
+
+  it("is refused outside a server mode", () => {
+    const standalone = runParseArgs([
+      "--cp-id",
+      "CP",
+      "--ws-url",
+      "ws://csms.example.test/ocpp/",
+      "--blueprint",
+      "a.json",
+    ]);
+    expect(standalone.status).toBe(1);
+    expect(standalone.stderr).toContain("--blueprint needs a server mode");
+  });
 });
 
 describe("parseArgs --fleet-template (#445)", () => {

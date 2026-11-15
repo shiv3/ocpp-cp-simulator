@@ -64,6 +64,11 @@ export interface CLIOptions {
    * `--cp-id CP --cp-count 3` yields CP001..CP003.
    */
   readonly cpIdPattern: string | null;
+  /**
+   * `--blueprint <file>`, repeatable (#331): read-only blueprints, e.g. the
+   * documented samples under `docs/examples/blueprints/`.
+   */
+  readonly blueprintFiles: readonly string[];
   /** `--fleet-template <file>`, repeatable (#445). */
   readonly fleetTemplateFiles: readonly string[];
   /** Startup pacing flags (#610); absent: the defaults (8 at once, no delay). */

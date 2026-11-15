@@ -543,8 +543,9 @@ export async function dispatchRpcCore(
     case "cp.create_many":
       return createManyCps(deps, call.params);
     case "blueprint.list":
-      // Built-ins first, then stored ones. Ids are unique across both because
-      // `blueprint.save` refuses a built-in id.
+      // Built-ins first, then stored and --blueprint file ones. Ids are unique
+      // across all three because `blueprint.save` refuses a built-in id and the
+      // file loader refuses a built-in id too (#331).
       return [...builtInBlueprints(), ...deps.blueprints.list()];
     case "blueprint.save":
       return saveBlueprint(deps, call.params);
@@ -935,7 +936,16 @@ function saveBlueprint(
       `"${blueprint.id}" is a built-in blueprint and cannot be replaced; choose another id`,
     );
   }
-  // Checked before the write: the list result carries the built-ins too, so an
+  if (deps.blueprints.isProvided(blueprint.id)) {
+    // Refused rather than shadowed, like a built-in: the file wins at every
+    // start, so a stored copy would be dead the next time the daemon runs.
+    throw new RpcFailure(
+      "invalid_params",
+      `"${blueprint.id}" comes from a --blueprint file and cannot be replaced; choose another id`,
+    );
+  }
+  // Checked before the write: the list result carries the built-ins (and the
+  // --blueprint files, which `list()` includes) too, so an
   // unbounded store would make `blueprint.list` fail validation for everyone
   // rather than refuse the one save that crossed the line.
   const stored = deps.blueprints.list();
@@ -960,6 +970,12 @@ function deleteBlueprint(
     throw new RpcFailure(
       "invalid_params",
       `"${id}" is a built-in blueprint and cannot be deleted`,
+    );
+  }
+  if (deps.blueprints.isProvided(id)) {
+    throw new RpcFailure(
+      "invalid_params",
+      `"${id}" comes from a --blueprint file and cannot be deleted`,
     );
   }
   // `not_found` rather than a silent success: a delete that reports ok for an

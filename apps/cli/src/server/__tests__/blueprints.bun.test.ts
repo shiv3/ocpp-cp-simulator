@@ -508,3 +508,143 @@ describe("a failed blueprint default rolls the charge point back (#297)", () => 
     }
   });
 });
+
+describe("blueprint schemaVersion in the store (#331)", () => {
+  it("keeps a pre-versioned row across a restart, unchanged", () => {
+    // The acceptance test of making the field optional: a row written before
+    // it existed must still be listed, with exactly the content it was saved with.
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      db.run(
+        "INSERT INTO blueprints (id, name, description, definition, updated_at) VALUES (?, ?, ?, ?, ?)",
+        ["site-a", "Site A wallbox", null, JSON.stringify(BLUEPRINT), "t"],
+      );
+      const reopened = new BlueprintRepository(db);
+      expect(reopened.list()).toEqual([BLUEPRINT]);
+      expect(reopened.get("site-a")).toEqual(BLUEPRINT);
+      expect(reopened.newerVersionRows()).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("leaves a newer-version row out of the list but reports it, and keeps it stored", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      const repo = new BlueprintRepository(db);
+      repo.save(BLUEPRINT);
+      db.run(
+        "INSERT INTO blueprints (id, name, description, definition, updated_at) VALUES (?, ?, ?, ?, ?)",
+        [
+          "future",
+          "Future",
+          null,
+          JSON.stringify({ ...BLUEPRINT, id: "future", schemaVersion: 2 }),
+          "t",
+        ],
+      );
+      expect(repo.list().map((b) => b.id)).toEqual(["site-a"]);
+      expect(repo.get("future")).toBeNull();
+      expect(repo.newerVersionRows()).toEqual([
+        { id: "future", schemaVersion: 2 },
+      ]);
+      const row = db.get<{ id: string }>(
+        "SELECT id FROM blueprints WHERE id = ?",
+        ["future"],
+      );
+      expect(row?.id).toBe("future");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("round-trips schemaVersion and source through save", async () => {
+    const server = await startAndTrack();
+    const socket = await connectTestClient(server);
+    try {
+      const withSource = {
+        ...BLUEPRINT,
+        schemaVersion: 1,
+        source: {
+          format: "manual",
+          documents: [
+            {
+              id: "d1",
+              title: "Overview",
+              publisher: "Acme",
+              uri: "https://example.test/d1.pdf",
+              sha256: "b".repeat(64),
+              retrievedAt: "2026-11-15",
+            },
+          ],
+        },
+      };
+      expect(
+        (await rpc(socket, "blueprint.save", { blueprint: withSource })).ok,
+      ).toBe(true);
+      const list = await rpc(socket, "blueprint.list", {});
+      expect(list.result.find((b: any) => b.id === "site-a")).toEqual(
+        withSource,
+      );
+    } finally {
+      socket.disconnect();
+    }
+  });
+});
+
+describe("--blueprint file blueprints (#331)", () => {
+  const FILE_BP = {
+    schemaVersion: 1 as const,
+    id: "from-file",
+    name: "From file",
+    params: { connectors: 1, vendor: "Acme", model: "F1" },
+  };
+
+  it("are listed and win over a stored one of the same id", () => {
+    const db = BunSqliteDatabase.open(":memory:");
+    try {
+      new BlueprintRepository(db).save({ ...FILE_BP, name: "Stored copy" });
+      const repo = new BlueprintRepository(db, [FILE_BP]);
+      expect(repo.isProvided("from-file")).toBe(true);
+      expect(repo.get("from-file")?.name).toBe("From file");
+      expect(repo.list().map((b) => b.name)).toEqual(["From file"]);
+      expect(repo.listStored().map((b) => b.name)).toEqual(["Stored copy"]);
+      expect(repo.delete("from-file")).toBe(false);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("are listed, instantiated, and can be neither replaced nor deleted over the control plane", async () => {
+    const server = await startTestServer({
+      blueprints: new BlueprintRepository(null, [FILE_BP]),
+    });
+    servers.push(server);
+    const socket = await connectTestClient(server);
+    try {
+      const list = await rpc(socket, "blueprint.list", {});
+      expect(list.result.map((b: any) => b.id)).toContain("from-file");
+
+      const save = await rpc(socket, "blueprint.save", {
+        blueprint: { ...FILE_BP, name: "Replaced" },
+      });
+      expect(save.ok).toBe(false);
+      expect(save.error.code).toBe("invalid_params");
+      expect(save.error.message).toContain("--blueprint file");
+
+      const del = await rpc(socket, "blueprint.delete", { id: "from-file" });
+      expect(del.ok).toBe(false);
+      expect(del.error.code).toBe("invalid_params");
+
+      const created = await rpc(socket, "cp.create_many", {
+        blueprintId: "from-file",
+        wsUrl: "ws://csms.example/ocpp/",
+        count: 1,
+      });
+      expect(created.ok).toBe(true);
+      expect(created.result.created).toEqual(["from-file-001"]);
+    } finally {
+      socket.disconnect();
+    }
+  });
+});

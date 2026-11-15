@@ -13,20 +13,10 @@ import {
   type DisabledActionErrorCode,
 } from "./CapabilityProfile";
 import { translatesCsmsActionNames } from "../types/csmsActionNames";
-import { DeviceModelPublisher } from "./DeviceModelPublisher";
-import { ConfigurationWiring } from "./ConfigurationWiring";
-import { AuthorizationFlow } from "./AuthorizationFlow";
-import { MeterSampling } from "./MeterSampling";
-import { PowerLossController } from "./PowerLossController";
-import { ConnectionTimeouts } from "./ConnectionTimeouts";
-import { ResetOnIdle } from "./ResetOnIdle";
-import { PlugInFlow } from "./PlugInFlow";
-import { ConnectorWiring } from "./ConnectorWiring";
-import { BootLifecycle, BootStateStore } from "./BootLifecycle";
-import { OutageLifecycle } from "./OutageLifecycle";
-import { StationMessaging } from "./StationMessaging";
-import { ConnectorStatusControl } from "./ConnectorStatusControl";
-import { ChargingProfileControl } from "./ChargingProfileControl";
+import {
+  createCollaborators,
+  type ChargePointCollaborators,
+} from "./ChargePointCollaborators";
 import { EventEmitter } from "../../shared/EventEmitter";
 import { realClock } from "../../shared/clock";
 import type { SimClock, TimerHandle } from "../../shared/clock";
@@ -58,10 +48,7 @@ import type {
 import type { ChargePointSocket } from "../transport/ChargePointSocket";
 import type { RawFrameSink } from "../transport/RawFrameSink";
 import { CellularModem, type RedactedModemState } from "../modem/CellularModem";
-import { CallOverrides } from "./CallOverrides";
-import { ScenarioCallOwnership } from "./ScenarioCallOwnership";
 import { CellularLinkController } from "./CellularLinkController";
-import { ClientCertificateSwitch } from "./ClientCertificateSwitch";
 import { bootNotificationFor } from "../modem/bootIdentifiers";
 import {
   type CellularLinkState,
@@ -244,14 +231,57 @@ export class ChargePoint {
   private readonly _receivesCsmsCall: ChargePointTransport["receivesCsmsCall"];
   private readonly _messageHandler: IChargePointMessageHandler;
   private readonly _transportUrl: string;
-  private readonly _certSwitch = new ClientCertificateSwitch({
-    logger: () => this._logger,
-    clock: () => this._clock,
-    webSocket: () => this._webSocket,
-    certificateStore: () => this._certificateStore,
-    outbox: () => this._outbox,
-    reset: () => this.reset(),
-  });
+  /** The collaborators; their hosts read this charge point through `ctx`. */
+  private readonly _parts: ChargePointCollaborators = createCollaborators(
+    this,
+    {
+      authorization: () => this._authorization,
+      callCatalog: () => this._callCatalog,
+      cellular: () => this._cellular,
+      certificateStore: () => this._certificateStore,
+      clock: () => this._clock,
+      clockAligned: () => this._clockAligned,
+      configuration: () => this._configuration,
+      connectors: () => this._connectors,
+      deviceModelTargets: () => this._deviceModelTargets,
+      engine: () => this._engine,
+      events: () => this._events,
+      heartbeat: () => this._heartbeat,
+      localAuthListManager: () => this._localAuthListManager,
+      logSink: () => this._logSink,
+      logger: () => this._logger,
+      mainMeter: () => this._mainMeter,
+      monitoring: () => this._monitoring,
+      monitorEvaluation: () => this._monitorEvaluation,
+      networkProfiles: () => this._networkProfiles,
+      nowDate: () => this._nowDate(),
+      ocppVersion: () => this._ocppVersion,
+      outbox: () => this._outbox,
+      rawFrames: () => this._rawFrames,
+      reconnectPolicy: () => this._reconnectPolicy,
+      repositories: () => this._repositories,
+      reservationManager: () => this._reservationManager,
+      stateManager: () => this._stateManager,
+      stationProfiles: () => this._stationProfiles,
+      status: () => this._status,
+      setStatus: (status) => {
+        this._status = status;
+      },
+      timelineProjector: () => this._timelineProjector,
+      topology: () => this._topology,
+      txEndedAligned: () => this._txEndedAligned,
+      vehicleDrivers: () => this._vehicleDrivers,
+      webSocket: () => this._webSocket,
+      assertPowered: () => this.assertPowered(),
+      evseIdOf: (connectorId) => this.evseIdOf(connectorId),
+      loadAvailability: (connectorId) => this.loadAvailability(connectorId),
+      warnCapabilityProfileConflicts: () =>
+        this.warnCapabilityProfileConflicts(),
+      writeConnector: (connectorId, write) =>
+        this.writeConnector(connectorId, write),
+    },
+  );
+  private readonly _certSwitch = this._parts.certSwitch;
   /** Tests read the pending wait's canceller through this name. */
   // @ts-expect-error TS6133: read by tests through a cast, not by this class
   private get _cancelClientCertificateSwitchTimer(): (() => void) | null {
@@ -287,202 +317,25 @@ export class ChargePoint {
   private readonly _stationProfiles: ChargingProfileStore =
     new ChargingProfileStore();
   private readonly _certificateStore: CertificateStore;
-  private readonly _messaging = new StationMessaging({
-    chargePoint: this,
-    callCatalog: () => this._callCatalog,
-    clock: () => this._clock,
-    engine: () => this._engine,
-    logger: () => this._logger,
-    ocppVersion: () => this._ocppVersion,
-    outbox: () => this._outbox,
-    rawFrames: () => this._rawFrames,
-  });
-  private readonly _statusControl = new ConnectorStatusControl({
-    chargePoint: this,
-    connectionTimeouts: () => this._connectionTimeouts,
-    connectors: () => this._connectors,
-    engine: () => this._engine,
-    events: () => this._events,
-    logger: () => this._logger,
-    nowDate: () => this._nowDate(),
-    ocppVersion: () => this._ocppVersion,
-    outbox: () => this._outbox,
-    reservationManager: () => this._reservationManager,
-    status: () => this._status,
-    setStatus: (status) => {
-      this._status = status;
-    },
-    stateManager: () => this._stateManager,
-    writeConnector: (connectorId, write) =>
-      this.writeConnector(connectorId, write),
-  });
-  private readonly _profileControl = new ChargingProfileControl({
-    chargePoint: this,
-    connectors: () => this._connectors,
-    events: () => this._events,
-    nowDate: () => this._nowDate(),
-    stationProfiles: () => this._stationProfiles,
-  });
+  private readonly _messaging = this._parts.messaging;
+  private readonly _statusControl = this._parts.statusControl;
+  private readonly _profileControl = this._parts.profileControl;
   // OCPP 2.x variable monitors and monitoring level (N04-N06, #457).
   private readonly _monitoring = new MonitoringStore(DEFAULT_MONITOR_CATALOG);
   // #538: Target attributes of the 2.1 device model (EVSE.Power).
   private readonly _deviceModelTargets = new DeviceModelTargets();
-  private readonly _authorizationFlow = new AuthorizationFlow({
-    chargePoint: this,
-    authorization: () => this._authorization,
-    localAuthListManager: () => this._localAuthListManager,
-    clock: () => this._clock,
-    events: () => this._events,
-    logger: () => this._logger,
-  });
-  private readonly _sampling = new MeterSampling({
-    chargePoint: this,
-    clock: () => this._clock,
-    configuration: () => this._configuration,
-    connectors: () => this._connectors,
-    logger: () => this._logger,
-    mainMeter: () => this._mainMeter,
-    outbox: () => this._outbox,
-  });
-  private readonly _power = new PowerLossController({
-    chargePoint: this,
-    clock: () => this._clock,
-    connectors: () => this._connectors,
-    events: () => this._events,
-    logger: () => this._logger,
-    nowDate: () => this._nowDate(),
-    ocppVersion: () => this._ocppVersion,
-    outbox: () => this._outbox,
-    markStartupEventPending: () => {
-      this._boot.startupEventPending = true;
-    },
-    teardownAfterClose: () => this._outage.teardownAfterClose(),
-    webSocket: () => this._webSocket,
-  });
-  private readonly _resetOnIdle = new ResetOnIdle({
-    chargePoint: this,
-    assertPowered: () => this.assertPowered(),
-    configuration: () => this._configuration,
-    connectors: () => this._connectors,
-    logger: () => this._logger,
-    markStartupEventPending: () => {
-      this._boot.startupEventPending = true;
-    },
-    ocppVersion: () => this._ocppVersion,
-    outbox: () => this._outbox,
-  });
-  private readonly _connectionTimeouts = new ConnectionTimeouts({
-    chargePoint: this,
-    clock: () => this._clock,
-    configuration: () => this._configuration,
-    logger: () => this._logger,
-    ocppVersion: () => this._ocppVersion,
-  });
-  private readonly _plugIn = new PlugInFlow({
-    chargePoint: this,
-    configuration: () => this._configuration,
-    connectionTimeouts: () => this._connectionTimeouts,
-    logger: () => this._logger,
-    ocppVersion: () => this._ocppVersion,
-    outbox: () => this._outbox,
-  });
-  private readonly _connectorWiring = new ConnectorWiring({
-    chargePoint: this,
-    authorizationFlow: () => this._authorizationFlow,
-    clock: () => this._clock,
-    connectors: () => this._connectors,
-    engine: () => this._engine,
-    events: () => this._events,
-    loadAvailability: (connectorId) => this.loadAvailability(connectorId),
-    logger: () => this._logger,
-    sampling: () => this._sampling,
-    stationProfiles: () => this._stationProfiles,
-    vehicleDrivers: () => this._vehicleDrivers,
-    writeConnector: (connectorId, write) =>
-      this.writeConnector(connectorId, write),
-  });
-  private readonly _bootState = new BootStateStore();
-  private readonly _boot: BootLifecycle = new BootLifecycle({
-    chargePoint: this,
-    state: this._bootState,
-    clearOutage: () => this._outage.clearOutage(),
-    clock: () => this._clock,
-    clockAligned: () => this._clockAligned,
-    configuration: () => this._configuration,
-    events: () => this._events,
-    logger: () => this._logger,
-    monitorEvaluation: () => this._monitorEvaluation,
-    ocppVersion: () => this._ocppVersion,
-    outbox: () => this._outbox,
-    power: () => this._power,
-    reconnectPolicy: () => this._reconnectPolicy,
-    txEndedAligned: () => this._txEndedAligned,
-  });
-  private readonly _outage: OutageLifecycle = new OutageLifecycle({
-    chargePoint: this,
-    state: this._bootState,
-    boot: () => this._boot,
-    callOverrides: () => this._callOverrides,
-    cellular: () => this._cellular,
-    certSwitch: () => this._certSwitch,
-    clock: () => this._clock,
-    clockAligned: () => this._clockAligned,
-    configuration: () => this._configuration,
-    connectionTimeouts: () => this._connectionTimeouts,
-    connectors: () => this._connectors,
-    engine: () => this._engine,
-    events: () => this._events,
-    heartbeat: () => this._heartbeat,
-    localAuthListManager: () => this._localAuthListManager,
-    logSink: () => this._logSink,
-    logger: () => this._logger,
-    monitorEvaluation: () => this._monitorEvaluation,
-    nowDate: () => this._nowDate(),
-    ocppVersion: () => this._ocppVersion,
-    outbox: () => this._outbox,
-    power: () => this._power,
-    reservationManager: () => this._reservationManager,
-    sampling: () => this._sampling,
-    scenarioCalls: () => this._scenarioCalls,
-    stationProfiles: () => this._stationProfiles,
-    timelineProjector: () => this._timelineProjector,
-    txEndedAligned: () => this._txEndedAligned,
-    vehicleDrivers: () => this._vehicleDrivers,
-    webSocket: () => this._webSocket,
-    warnCapabilityProfileConflicts: () => this.warnCapabilityProfileConflicts(),
-    writeConnector: (connectorId, write) =>
-      this.writeConnector(connectorId, write),
-  });
-  private readonly _configWiring = new ConfigurationWiring({
-    chargePoint: () => this,
-    certificateStore: () => this._certificateStore,
-    clockAligned: () => this._clockAligned,
-    configuration: () => this._configuration,
-    connectors: () => this._connectors,
-    heartbeat: () => this._heartbeat,
-    localAuthListManager: () => this._localAuthListManager,
-    logger: () => this._logger,
-    networkProfiles: () => this._networkProfiles,
-    nowDate: () => this.nowDate(),
-    ocppVersion: () => this._ocppVersion,
-    rearmPeriodicSampling: () => this._sampling.rearmPeriodicSampling(),
-    txEndedAligned: () => this._txEndedAligned,
-    webSocket: () => this._webSocket,
-  });
-  private readonly _deviceModel = new DeviceModelPublisher({
-    clock: () => this._clock,
-    configuration: () => this._configuration,
-    connectors: () => this._connectors,
-    deviceModelTargets: () => this._deviceModelTargets,
-    events: () => this._events,
-    monitoring: () => this._monitoring,
-    ocppVersion: () => this._ocppVersion,
-    outbox: () => this._outbox,
-    repositories: () => this._repositories,
-    status: () => this._status,
-    topology: () => this._topology,
-    evseIdOf: (connectorId: number) => this.evseIdOf(connectorId),
-  });
+  private readonly _authorizationFlow = this._parts.authorizationFlow;
+  private readonly _sampling = this._parts.sampling;
+  private readonly _power = this._parts.power;
+  private readonly _resetOnIdle = this._parts.resetOnIdle;
+  private readonly _connectionTimeouts = this._parts.connectionTimeouts;
+  private readonly _plugIn = this._parts.plugIn;
+  private readonly _connectorWiring = this._parts.connectorWiring;
+  private readonly _bootState = this._parts.bootState;
+  private readonly _boot = this._parts.boot;
+  private readonly _outage = this._parts.outage;
+  private readonly _configWiring = this._parts.configWiring;
+  private readonly _deviceModel = this._parts.deviceModel;
   // OCPP 2.x NetworkConnectionProfiles stored by SetNetworkProfile (B09).
   private readonly _networkProfiles = new NetworkProfileStore();
   // Their evaluation into NotifyEvent (kept by the device model publisher).
@@ -501,10 +354,8 @@ export class ChargePoint {
   private _autoMeterValueSetting: AutoMeterValueSetting | null;
   /** #347: see {@link sendScheduledMeterValue}. On by default (#551). */
   private _txUpdatedMeterValues = true;
-  private readonly _scenarioCalls = new ScenarioCallOwnership({
-    clock: () => this._clock,
-  });
-  private readonly _callOverrides = new CallOverrides();
+  private readonly _scenarioCalls = this._parts.scenarioCalls;
+  private readonly _callOverrides = this._parts.callOverrides;
   // §4.9 S3: whether this SOAP CP has a soapCallbackUrl (server-hosted) vs
   // send-only (browser local mode). For non-SOAP versions, always false.
   private readonly _hasSoapCallbackUrl: boolean;

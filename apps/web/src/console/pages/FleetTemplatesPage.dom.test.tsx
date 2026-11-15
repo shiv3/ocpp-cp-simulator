@@ -221,6 +221,28 @@ describe("Fleet templates page (#445)", () => {
     expect(body().querySelector("textarea")).not.toBeNull();
   });
 
+  it("refuses a changed id when editing, instead of saving a copy", async () => {
+    const { service } = await open({
+      saveFleetTemplate: vi.fn(async (template: FleetTemplate) => template.id),
+    });
+    await click(button("Edit Operations lab"));
+    const editor = body().querySelector<HTMLTextAreaElement>("textarea")!;
+    await type(editor, JSON.stringify({ ...LAB, id: "operations-lab-2" }));
+    await click(button("Save"));
+    const alert = body().querySelector('[role="alert"]')!;
+    expect(alert.textContent).toContain('"operations-lab"');
+    expect(alert.textContent).toContain('"operations-lab-2"');
+    expect(service.saveFleetTemplate).not.toHaveBeenCalled();
+    expect(body().querySelector("textarea")).not.toBeNull();
+    // the original id saves as before
+    await type(editor, JSON.stringify({ ...LAB, name: "Lab" }));
+    await click(button("Save"));
+    expect(service.saveFleetTemplate).toHaveBeenCalledWith({
+      ...LAB,
+      name: "Lab",
+    });
+  });
+
   it("deletes after a confirmation, and keeps the template on 'Keep'", async () => {
     const list = vi
       .fn<() => Promise<FleetTemplate[]>>()

@@ -36,6 +36,7 @@
   "fleets.editor.problems": "问题",
   "fleets.editor.cancel": "取消",
   "fleets.editor.save": "保存",
+  "fleets.editor.idChanged": "此模板以 \"{{id}}\" 保存；编辑会保留该 ID。要以 \"{{newId}}\" 保存，请改为新建模板。",
   "fleets.create.title": "从 {{name}} 创建车队",
   "fleets.create.hint": "按模板顺序创建相互独立的充电桩。",
   "fleets.create.wsUrl": "CSMS 地址（可选）",

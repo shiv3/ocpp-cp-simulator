@@ -63,7 +63,7 @@ export const CP_COMMAND_METHODS = {
         .enum(TRANSACTION_CHARGING_STATES)
         .optional()
         .describe(
-          "OCPP 2.x TransactionEvent(Started) chargingState; default from the cable: Idle without one, else Charging (#846)",
+          "OCPP 2.x TransactionEvent(Started) chargingState; default from the cable: Idle without one, SuspendedEV for a not-ready EV (#871), else Charging (#846)",
         ),
       idTokenType: z
         .enum(ID_TOKEN_TYPES)

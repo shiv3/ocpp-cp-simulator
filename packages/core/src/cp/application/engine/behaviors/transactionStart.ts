@@ -298,6 +298,15 @@ export async function startTransaction(
       }
     }
   }
+  // 2.x: the Started event already said SuspendedEV (1.6 waits for the conf).
+  // A state the caller named (#335) is wire only: the EV decides the hold.
+  if (
+    ocpp2 &&
+    evConnection === "connected-not-ready" &&
+    live.startChargingState === "SuspendedEV"
+  ) {
+    holdForNotReadyEv(cp, connector);
+  }
 
   cp.events.emit("transactionStarted", {
     connectorId,
@@ -362,9 +371,10 @@ async function authorizeAwaitingTransaction(
       ? { remoteStartId: options.remoteStartId }
       : {}),
   });
+  const evNotReady = connector.evConnection === "connected-not-ready";
   cp.sendTransactionUpdate(connector.id, {
     triggerReason: remote ? "RemoteStart" : "Authorized",
-    chargingState: "Charging",
+    chargingState: evNotReady ? "SuspendedEV" : "Charging",
     idToken: {
       tagId,
       ...(options.idTokenType !== undefined
@@ -375,7 +385,8 @@ async function authorizeAwaitingTransaction(
       ? { remoteStartId: options.remoteStartId }
       : {}),
   });
-  if (connector.status === OCPPStatus.Preparing) {
+  if (evNotReady) holdForNotReadyEv(cp, connector);
+  else if (connector.status === OCPPStatus.Preparing) {
     cp.updateConnectorStatus(connector.id, OCPPStatus.Charging);
   }
   cp.events.emit("transactionStarted", {
@@ -384,4 +395,18 @@ async function authorizeAwaitingTransaction(
     tagId,
   });
   return { started: true };
+}
+
+/**
+ * #871: a transaction that starts for an EV not asking for energy goes
+ * straight to `SuspendedEV` (1.6 §4.9 B4: "All prerequisites for charging
+ * are met but EV does not start charging"), never `Charging` first. The
+ * offer is held as `evSetReady(false)` holds it, so that the EV's readiness
+ * resumes `Charging`.
+ */
+function holdForNotReadyEv(cp: ChargePoint, connector: Connector): void {
+  connector.suspendEnergyOffer();
+  if (connector.status !== OCPPStatus.SuspendedEV) {
+    cp.updateConnectorStatus(connector.id, OCPPStatus.SuspendedEV);
+  }
 }

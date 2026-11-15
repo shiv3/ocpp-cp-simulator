@@ -130,6 +130,10 @@ manifest still exports `"./*"`, so every consumer imports
 `RpcEndpoint` takes `send`, `nextMessageId`, `dialect` and optionally `clock`,
 `callTimeoutMs` (default 30 s), `validate` and `onProtocolError`. Its contract:
 
+- `nextMessageId` must never return an id twice for the endpoint's lifetime,
+  timed-out calls included: a reused id lets a late answer to the old call
+  settle the new one.
+
 - A CALL with no handler is answered `NotImplemented` **before** validation runs.
   A CALL that fails `validate` is answered with the dialect's violation code and
   the validator's description.

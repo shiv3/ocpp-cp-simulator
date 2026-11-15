@@ -3,7 +3,8 @@ title: Power loss and transaction recovery
 type: concept
 summary: A power loss is neither a network loss nor an OCPP Reset — the socket vanishes, the transactions survive, and after the reboot the station resumes or ends them as the OCPP version requires; driven by `power.loss` / `power.restore`.
 sources:
-  - packages/core/src/cp/domain/charge-point/ChargePoint.ts (powerLoss, restorePower, runPowerRecovery)
+  - packages/core/src/cp/domain/charge-point/ChargePoint.ts (powerLoss, restorePower delegates)
+  - packages/core/src/cp/domain/charge-point/PowerLossController.ts (powerLoss, restorePower, runPowerRecovery)
   - packages/contracts/src/methods/networkPowerMethods.ts (power.loss, power.restore)
   - packages/core/src/test/goldenWire/regressionCases/securityAndPower.ts (power-loss-*)
   - "issue #455"

@@ -1,15 +1,7 @@
 import type { Logger } from "../../shared/Logger";
 import { LogType } from "../../shared/Logger";
-import { encodeCallFrame } from "./callFrame";
-import { redactSensitiveText } from "../../shared/redaction";
 import { isCertificateInBundle } from "../../domain/security/certificateHash";
-import {
-  isBrowserRuntime,
-  OcppSecurityProfileConfigError,
-  openOcppWebSocket,
-  probeUpgradeRefusal,
-  type OcppSocket,
-} from "./wsUrlWithBasic";
+import { isBrowserRuntime, type OcppSocket } from "./wsUrlWithBasic";
 import type { SupervisionUrlPool } from "./SupervisionUrlPool";
 import type {
   OcppSecurityProfile,
@@ -17,7 +9,7 @@ import type {
   OcppWebSocketConnectOptions,
 } from "./wsUrlWithBasic";
 import type { OCPPAction, OCPPErrorCode } from "../../domain/types/OcppTypes";
-import { OCPPMessageType } from "../../domain/types/OcppTypes";
+import type { OCPPMessageType } from "../../domain/types/OcppTypes";
 import type {
   AuthorizeRequestV16,
   BootNotificationRequestV16,
@@ -50,7 +42,6 @@ import {
 import type { WsClientOptions } from "../../shared/WsClientOptions";
 import {
   DEFAULT_RECONNECT_POLICY,
-  nextReconnectDelayMs,
   type ReconnectPolicy,
   type RetryBackOffVariables,
 } from "../../shared/ReconnectPolicy";
@@ -65,15 +56,20 @@ import {
   type ClientIdentity,
 } from "./ws/clientCertificateState";
 import {
-  describeRefusal,
   GenerationTokenImpl,
   neverReachedCsms,
-  SUPERSEDED_CLOSE,
 } from "./ws/closeClassification";
 import {
   dispatchIncomingFrame,
   writeUpstreamPhysical,
 } from "./ws/wsNetworkSim";
+
+import { ConnectionOpener } from "./ws/connectionOpener";
+import { FrameSender } from "./ws/frameSender";
+import { CloseHandler } from "./ws/closeHandler";
+import { ReconnectScheduler } from "./ws/reconnectScheduler";
+import { createHost } from "./ws/socketHost";
+import { PingTimer } from "./ws/pingTimer";
 
 export { neverReachedCsms };
 
@@ -222,6 +218,11 @@ export class OCPPWebSocket implements ChargePointSocket {
     null;
   private _pendingGaveUp: { attempts: number } | null = null;
   private _disposed: boolean = false;
+  private readonly _opener: ConnectionOpener;
+  private readonly _sender: FrameSender;
+  private readonly _closer: CloseHandler;
+  private readonly _reconnect: ReconnectScheduler;
+  private readonly _ping: PingTimer;
 
   constructor(
     url: string,
@@ -275,6 +276,56 @@ export class OCPPWebSocket implements ChargePointSocket {
       log: (message: string) => this._logger.info(message, LogType.NETWORK_SIM),
     };
     this._controller = new NetworkSimController(controllerHost, chargePointId);
+    const host = createHost(this, {
+      isConnected: () => this.isConnected(),
+      connect: (onopen, onclose) => this.connect(onopen, onclose),
+      attemptReconnect: () => this.attemptReconnect(),
+      startPingInterval: () => this.startPingInterval(),
+      stopPingInterval: () => this.stopPingInterval(),
+      runCloseTransaction: (closeCause) => this.runCloseTransaction(closeCause),
+      handleOpen: () => this._closer.handleOpen(),
+      handleError: (evt) => this._closer.handleError(evt),
+      handleClose: (ev, closeCause) => this._closer.handleClose(ev, closeCause),
+      closeCauseOf: (token) => this._closer.closeCauseOf(token),
+      reportClose: (token, ev) => this._closer.reportClose(token, ev),
+      clearHandshakeTimer: () => this.clearHandshakeTimer(),
+    });
+    // Read by the collaborators through `host` (ws/socketHost.ts) only.
+    void [
+      this._basicAuth,
+      this._chargePointId,
+      this._pingInterval,
+      this._pingIntervalSeconds,
+      this._reconnectAttempts,
+      this._reconnectRandom,
+      this._handshakeTimer,
+      this._retryBackOff,
+      this._resumeOnLinkRestore,
+      this._onOpenCallback,
+      this._onCloseCallback,
+      this._isManualDisconnect,
+      this._selfRequestedClose,
+      this._lastRefusalProbeAt,
+      this._refusalStatusReported,
+      this._extraHeaders,
+      this._extraSubprotocols,
+      this._ocppVersion,
+      this._authorizationKey,
+      this._securityProfileFallback,
+      this._credentialsChangedAtRuntime,
+      this._cpoName,
+      this._socketToken,
+      this._reconnectNotBefore,
+      this._urlPool,
+      this._onCloseTransactionCallback,
+      this._pendingReconnectNotice,
+      this._pendingGaveUp,
+    ];
+    this._opener = new ConnectionOpener(host);
+    this._sender = new FrameSender(host);
+    this._closer = new CloseHandler(host);
+    this._reconnect = new ReconnectScheduler(host);
+    this._ping = new PingTimer(host);
   }
 
   get url(): string {
@@ -431,189 +482,11 @@ export class OCPPWebSocket implements ChargePointSocket {
     onopen: (() => void) | null = null,
     onclose: ((ev: SocketClose, cause: CloseCause) => void) | null = null,
   ): void {
-    if (this._linkBlockedReason !== null) {
-      // #930: the cellular link is down. Remember the request and any
-      // callbacks, open nothing; restoring service connects.
-      if (onopen) this._onOpenCallback = onopen;
-      if (onclose) this._onCloseCallback = onclose;
-      this._isManualDisconnect = false;
-      this._resumeOnLinkRestore = !this._disposed;
-      this._logger.info(
-        `connect deferred: the cellular link is unavailable (${this._linkBlockedReason})`,
-        LogType.WEBSOCKET,
-      );
-      return;
-    }
-    // #478: a socket the charge point closed (reset, disconnect) fires its
-    // close event asynchronously, after this new generation exists. Report it
-    // now, so its `disconnected` precedes the next `connected` and its
-    // teardown cannot hit the replacement; the late event then only logs.
-    const superseded = this._socketToken;
-    if (this._ws === null && superseded && !superseded.closeReported) {
-      this.reportClose(superseded, SUPERSEDED_CLOSE);
-    }
-    // A connect during the reconnect backoff supersedes it: left armed, the
-    // timer would open another socket over this one and orphan it.
-    if (this._reconnectTimer) {
-      clearTimeout(this._reconnectTimer);
-      this._reconnectTimer = null;
-    }
-
-    // Increment generation on new connection
-    this._generationCounter++;
-    this._currentGeneration = new GenerationTokenImpl(this._generationCounter);
-
-    // Store callbacks for reconnection
-    if (onopen) this._onOpenCallback = onopen;
-    if (onclose) this._onCloseCallback = onclose;
-
-    this._isManualDisconnect = false;
-    this._selfRequestedClose = false;
-
-    const attempt = this._clientCerts.nextTlsOptions();
-    this._connectionClientCertificate = attempt.tls?.cert;
-    let opened = false;
-    const onopenHandler = () => {
-      opened = true;
-      this._securityProfileFallback = null;
-      this.clearHandshakeTimer();
-      this._clientCerts.onOpened(attempt.renewed);
-      // A working connection clears the refusal budget, so the next genuine
-      // refusal is diagnosed immediately rather than waiting out the window.
-      this._lastRefusalProbeAt = 0;
-      this._urlPool?.onSuccess();
-      this.handleOpen();
-      if (this._onOpenCallback) {
-        this._onOpenCallback();
-      }
-    };
-    const onmessageHandler = (ev: MessageEvent) => {
-      this._controller.receiveDownstream(ev.data.toString());
-    };
-    const onerrorHandler = this.handleError.bind(this);
-
-    // Capture the current generation for this socket connection
-    const socketGeneration = this._generationCounter;
-    // Kept per socket: a reset's close lands after the next generation is
-    // already open, and must still report its own cause (#474).
-    const socketToken = this._currentGeneration;
-    const oncloseHandler = (ev: CloseEvent) => {
-      this.clearHandshakeTimer();
-      const closeCause = this.closeCauseOf(socketToken);
-      // Logged for every socket, stale ones included: it is the only line
-      // carrying the real close code of a socket a reset superseded, and the
-      // CP logs no error for it.
-      this._logger.info(
-        `WebSocket closed: code=${ev.code}, reason=${ev.reason || "none"}, wasClean=${ev.wasClean}, cause=${closeCause}`,
-        LogType.WEBSOCKET,
-      );
-      // Generation guard: only process close if this socket belongs to the current generation
-      if (socketGeneration === this._generationCounter) {
-        if (!opened && !this._isManualDisconnect) {
-          const fallback = this._securityProfileFallback;
-          this._securityProfileFallback = null;
-          fallback?.();
-        }
-        // Only a failed connection attempt counts, not one the station
-        // closed itself before it opened, nor one no CSMS ever saw.
-        if (!opened && closeCause === "network" && !neverReachedCsms(ev)) {
-          this._clientCerts.onFailed(attempt.renewed);
-        }
-        this.handleClose(ev, closeCause);
-      }
-      this.reportClose(socketToken, ev);
-      // #448: announced once the charge point has handled the close, so an
-      // observer sees the disconnect before the reconnect it causes.
-      const notice = this._pendingReconnectNotice;
-      this._pendingReconnectNotice = null;
-      if (notice) this.observers.emit("reconnectScheduled", notice);
-      const gaveUp = this._pendingGaveUp;
-      this._pendingGaveUp = null;
-      if (gaveUp) this.observers.emit("reconnectGaveUp", gaveUp);
-    };
-
-    // Resolving here, per attempt, is what keeps the URL list out of
-    // everything downstream: the snapshot, the persisted `ws_url` and the log
-    // lines all still see one string.
-    if (this._urlPool) {
-      this._url = this._urlPool.next();
-    }
-
-    try {
-      this._ws = openOcppWebSocket({
-        baseUrl: this._url,
-        chargePointId: this._chargePointId,
-        basicAuth: this._basicAuth,
-        extraHeaders: this._extraHeaders,
-        extraSubprotocols: this._extraSubprotocols,
-        ocppVersion: this._ocppVersion,
-        securityProfile: this._securityProfile,
-        authorizationKey: this._authorizationKey,
-        cpoName: this._cpoName,
-        tls: attempt.tls,
-        ...(Object.keys(this._wsOptions).length > 0
-          ? { ws: this._wsOptions }
-          : {}),
-        warn: (message) => this._logger.warn(message, LogType.WEBSOCKET),
-        onConnectOptions: (options) => {
-          this._lastConnectOptions = options;
-          this._refusalStatusReported = false;
-        },
-        onopen: onopenHandler,
-        onmessage: onmessageHandler,
-        onerror: onerrorHandler,
-        onclose: oncloseHandler,
-      });
-    } catch (error) {
-      // A credential a ChangeConfiguration left unusable (#724) must not end
-      // the reconnect loop: report it, undo a pending security-profile switch
-      // and try again. A misconfiguration at start-up still throws.
-      if (
-        !(error instanceof OcppSecurityProfileConfigError) ||
-        !this._credentialsChangedAtRuntime
-      ) {
-        throw error;
-      }
-      this._logger.error(
-        `Cannot open the connection: ${error.message}`,
-        LogType.WEBSOCKET,
-      );
-      const fallback = this._securityProfileFallback;
-      this._securityProfileFallback = null;
-      fallback?.();
-      this._ws = null;
-      if (!this._isManualDisconnect && !this._disposed) this.attemptReconnect();
-      return;
-    }
-    this._socketToken = socketToken;
-    this.armHandshakeTimer(this._ws);
-  }
-
-  /** #611: no runtime times the handshake out natively (Bun never does), so
-   *  an attempt that has not opened in time is closed here; it then fails
-   *  like any other connection failure and the reconnect policy takes over. */
-  private armHandshakeTimer(socket: OcppSocket): void {
-    this.clearHandshakeTimer();
-    const timeoutMs = this._wsOptions.handshakeTimeoutMs;
-    if (timeoutMs === undefined) return;
-    this._handshakeTimer = setTimeout(() => {
-      this._handshakeTimer = null;
-      if (this._ws !== socket || socket.readyState !== WebSocket.CONNECTING) {
-        return;
-      }
-      this._logger.warn(
-        `WebSocket handshake timed out after ${timeoutMs} ms (ws.handshakeTimeoutMs)`,
-        LogType.WEBSOCKET,
-      );
-      socket.close();
-    }, timeoutMs);
+    this._opener.connect(onopen, onclose);
   }
 
   private clearHandshakeTimer(): void {
-    if (this._handshakeTimer) {
-      clearTimeout(this._handshakeTimer);
-      this._handshakeTimer = null;
-    }
+    this._opener.clearHandshakeTimer();
   }
 
   public disconnect(): void {
@@ -723,21 +596,7 @@ export class OCPPWebSocket implements ChargePointSocket {
     gen: GenerationToken,
     onSettled?: (s: Settlement) => void,
   ): boolean {
-    // Stale generation check
-    if (gen.gen !== this._currentGeneration.gen) {
-      // Stale generation: sendAction returns false, onSettled does NOT fire
-      return false;
-    }
-
-    // Socket-open gate: spec section 2.5 requires send-false when socket is not open
-    if (!this.isConnected()) {
-      return false;
-    }
-
-    return this._controller.sendUpstream(
-      encodeCallFrame(messageId, action, payload),
-      onSettled,
-    );
+    return this._sender.sendAction(messageId, action, payload, gen, onSettled);
   }
 
   public sendResult(
@@ -746,42 +605,7 @@ export class OCPPWebSocket implements ChargePointSocket {
     gen: GenerationToken,
     onSettled?: (s: Settlement) => void,
   ): void {
-    // Stale generation check
-    if (gen.gen !== this._currentGeneration.gen) {
-      // Stale generation: settle immediately with socket_closed + old generation's cause
-      const settlement: Settlement = {
-        outcome: "socket_closed",
-        closeCause: gen.closeCause ?? "network",
-      };
-      onSettled?.(settlement);
-      return;
-    }
-
-    // Socket-open gate: spec section 2.5 requires settlement when socket is not open
-    if (!this.isConnected()) {
-      onSettled?.({
-        outcome: "socket_closed",
-        closeCause: this._currentGeneration.closeCause ?? "network",
-      });
-      return;
-    }
-
-    const message = JSON.stringify([
-      OCPPMessageType.CALLRESULT,
-      messageId,
-      payload,
-    ]);
-    const accepted = this._controller.sendUpstream(message, onSettled);
-
-    // If sendUpstream returns false (overflow/stopped), settle immediately with queue_overflow
-    if (!accepted && onSettled) {
-      const settlement: Settlement = { outcome: "queue_overflow" };
-      try {
-        onSettled(settlement);
-      } catch {
-        // Custody callback exception isolation
-      }
-    }
+    this._sender.sendResult(messageId, payload, gen, onSettled);
   }
 
   public sendError(
@@ -790,45 +614,7 @@ export class OCPPWebSocket implements ChargePointSocket {
     gen: GenerationToken,
     onSettled?: (s: Settlement) => void,
   ): void {
-    // Stale generation check
-    if (gen.gen !== this._currentGeneration.gen) {
-      // Stale generation: settle immediately with socket_closed + old generation's cause
-      const settlement: Settlement = {
-        outcome: "socket_closed",
-        closeCause: gen.closeCause ?? "network",
-      };
-      onSettled?.(settlement);
-      return;
-    }
-
-    // Socket-open gate: spec section 2.5 requires settlement when socket is not open
-    if (!this.isConnected()) {
-      onSettled?.({
-        outcome: "socket_closed",
-        closeCause: this._currentGeneration.closeCause ?? "network",
-      });
-      return;
-    }
-
-    // OCPP 1.6J CALLERROR: [4, messageId, errorCode, errorDescription, errorDetails]
-    const message = JSON.stringify([
-      OCPPMessageType.CALLERROR,
-      messageId,
-      payload.errorCode,
-      payload.errorDescription,
-      payload.errorDetails ?? {},
-    ]);
-    const accepted = this._controller.sendUpstream(message, onSettled);
-
-    // If sendUpstream returns false (overflow/stopped), settle immediately with queue_overflow
-    if (!accepted && onSettled) {
-      const settlement: Settlement = { outcome: "queue_overflow" };
-      try {
-        onSettled(settlement);
-      } catch {
-        // Custody callback exception isolation
-      }
-    }
+    this._sender.sendError(messageId, payload, gen, onSettled);
   }
 
   /**
@@ -841,24 +627,7 @@ export class OCPPWebSocket implements ChargePointSocket {
     gen: GenerationToken,
     onSettled?: (s: Settlement) => void,
   ): void {
-    if (gen.gen !== this._currentGeneration.gen || !this.isConnected()) {
-      onSettled?.({
-        outcome: "socket_closed",
-        closeCause:
-          (gen.gen !== this._currentGeneration.gen
-            ? gen.closeCause
-            : this._currentGeneration.closeCause) ?? "network",
-      });
-      return;
-    }
-    const accepted = this._controller.sendUpstream(raw, onSettled);
-    if (!accepted && onSettled) {
-      try {
-        onSettled({ outcome: "queue_overflow" });
-      } catch {
-        // Custody callback exception isolation
-      }
-    }
+    this._sender.sendRaw(raw, gen, onSettled);
   }
 
   /** #393: see {@link IncomingFrameInterceptor}; null removes it. */
@@ -919,34 +688,7 @@ export class OCPPWebSocket implements ChargePointSocket {
     ruleId: string = "",
     ruleType: DisconnectRuleType = "manual-disconnect",
   ): void {
-    if (this._disposed) {
-      return;
-    }
-
-    // Observers learn of the fault while the socket is still up, so the
-    // `disconnected` that follows can be attributed to this rule.
-    this.observers.emit("simulatedDisconnect", {
-      ruleId,
-      ruleType,
-      reconnectDelayMs,
-    });
-
-    // FIRST install the reservation BEFORE draining
-    this._reconnectNotBefore = Date.now() + reconnectDelayMs;
-
-    // THEN run the close transaction for a 'simulated' cause
-    this.runCloseTransaction("simulated");
-
-    // Injected by this charge point's own fault simulator, so it is not
-    // evidence about the supervision URL — see `_selfRequestedClose`.
-    this._selfRequestedClose = true;
-
-    // THEN close the socket WITHOUT setting _isManualDisconnect
-    if (this._ws) {
-      this._ws.close();
-      this._ws = null;
-    }
-    this.stopPingInterval();
+    this._reconnect.simulateConnectionLoss(reconnectDelayMs, ruleId, ruleType);
   }
 
   /** Whether this runtime's socket can send a ping frame (#406): Bun's
@@ -960,213 +702,23 @@ export class OCPPWebSocket implements ChargePointSocket {
    * socket and on every later open; 0 stops the client-side ping.
    */
   public setPingInterval(seconds: number): void {
-    if (seconds === this._pingIntervalSeconds) return;
-    this._pingIntervalSeconds = seconds;
-    this._logger.info(
-      seconds > 0 ? `WebSocket ping every ${seconds}s` : "WebSocket ping off",
-      LogType.WEBSOCKET,
-    );
-    this.startPingInterval();
+    this._ping.setPingInterval(seconds);
   }
 
   public setMessageHandler(handler: MessageHandler): void {
     this._messageHandler = handler;
   }
 
-  private handleOpen(): void {
-    this._logger.info("WebSocket connected successfully", LogType.WEBSOCKET);
-
-    // Reset reconnect attempts on successful connection
-    if (this._reconnectAttempts > 0) {
-      this._logger.info(
-        `Reconnection successful after ${this._reconnectAttempts} attempt(s)`,
-        LogType.WEBSOCKET,
-      );
-    }
-    this._reconnectAttempts = 0;
-
-    // Call controller.onSocketOpen() to arm periodic timers
-    this._controller.onSocketOpen();
-
-    this.startPingInterval();
-  }
-
-  /**
-   * Close transaction: idempotent per generation.
-   * Determines close cause (manual vs network), latches it on the current generation,
-   * drains pipelines, invokes the close-transaction callback, and (implicitly via handleClose)
-   * registers a reconnect request if applicable.
-   */
   private runCloseTransaction(closeCause: CloseCause): void {
-    // If the current generation's cause is already latched, this is idempotent — return
-    if (this._currentGeneration.closeCause !== null) {
-      return;
-    }
-
-    // Latch the cause on the current generation token
-    this._currentGeneration.latchCloseCause(closeCause);
-
-    // Drain pipelines synchronously (custody callbacks run inline)
-    this._controller.shutdownPipelines({
-      reason: "socket_closed",
-      closeCause,
-    });
-
-    // Invoke the close-transaction callback (for Task 7/8/9 effect flushing)
-    if (this._onCloseTransactionCallback) {
-      try {
-        this._onCloseTransactionCallback(this._currentGeneration);
-      } catch {
-        // Callback exception isolation
-      }
-    }
-    this.observers.emit("closed", { cause: closeCause });
+    this._closer.runCloseTransaction(closeCause);
   }
 
-  /**
-   * #288 — say what the error was, not merely that there was one.
-   *
-   * The event carries a message on every runtime that has one to give: the
-   * `ws` client's "Unexpected server response: 401", Bun's
-   * "WebSocket connection to '…' failed: Expected 101 status code", a TLS
-   * failure's own text. Logging only `evt.type` threw all of it away, and
-   * `evt.type` is the constant string "error".
-   *
-   * `httpStatus` is present only on the `ws` path, which is handed the whole
-   * HTTP reply before it errors. Under Bun the status is not knowable here at
-   * all — {@link handleClose} probes for it instead.
-   */
-  private handleError(evt: Event): void {
-    const detail = evt as {
-      type: string;
-      message?: string;
-      httpStatus?: number;
-      httpLocation?: string;
-    };
-    if (typeof detail.httpStatus === "number") {
-      this._refusalStatusReported = true;
-      this._logger.error(
-        describeRefusal(detail.httpStatus, detail.httpLocation),
-        LogType.WEBSOCKET,
-      );
-      return;
-    }
-    this._logger.error(
-      detail.message
-        ? // The client's message quotes the connection URL, which may carry
-          // `user:password@host` credentials -- redact before logging.
-          `WebSocket error: ${redactSensitiveText(detail.message)}`
-        : `WebSocket error type: ${detail.type}`,
-      LogType.WEBSOCKET,
-    );
-  }
-
-  /**
-   * #288 — ask the CSMS why, when the client will not say.
-   *
-   * Bun's native WebSocket reports every refused upgrade identically
-   * (`code=1002, Expected 101 status code`), and the daemon runs under Bun. So
-   * on that close, and only that close, replay the handshake as one plain GET
-   * and log the status it answers with. Gated three ways: the `ws` path has
-   * already reported the status, the probe runs at most once a minute per
-   * charge point, and a manual disconnect never triggers it — the reconnect
-   * loop must not multiply the CSMS's request rate.
-   */
-  private maybeProbeRefusal(ev: CloseEvent): void {
-    if (this._isManualDisconnect || this._disposed) return;
-    if (this._refusalStatusReported) return;
-    if (ev.code !== 1002 || !/expected 101/i.test(ev.reason ?? "")) return;
-    const options = this._lastConnectOptions;
-    if (!options) return;
-    const now = Date.now();
-    if (now - this._lastRefusalProbeAt < 60_000) return;
-    this._lastRefusalProbeAt = now;
-    // The probe is a round trip, and the reconnect loop may well win it. A
-    // refusal logged against a charge point that is connected again reads as
-    // a live problem, so the answer is dropped unless it still describes the
-    // connection that asked the question.
-    const probedGeneration = this._generationCounter;
-    void probeUpgradeRefusal(options)
-      .then((detail) => {
-        if (this._disposed || !detail) return;
-        if (this._generationCounter !== probedGeneration) return;
-        if (this._ws?.readyState === WebSocket.OPEN) return;
-        this._logger.error(
-          `${describeRefusal(detail.status, detail.location)} (diagnostic GET after the handshake failed)`,
-          LogType.WEBSOCKET,
-        );
-      })
-      .catch(() => {
-        // A diagnostic must never become a failure of its own.
-      });
-  }
-
-  /**
-   * Who closed a generation's socket: the cause it latched, else what
-   * handleClose would latch now. dispose() latches nothing; a close after it
-   * is the operator tearing the charge point down, so it reads as manual.
-   */
-  private closeCauseOf(token: GenerationToken): CloseCause {
-    if (token.closeCause !== null) return token.closeCause;
-    return this._disposed || this._isManualDisconnect ? "manual" : "network";
-  }
-
-  /** Tells the charge point a generation's socket closed, once per socket. */
-  private reportClose(token: GenerationTokenImpl, ev: SocketClose): void {
-    if (token.closeReported) return;
-    token.closeReported = true;
-    this._onCloseCallback?.(ev, this.closeCauseOf(token));
-  }
-
-  private handleClose(ev: CloseEvent, closeCause: CloseCause): void {
-    this.maybeProbeRefusal(ev);
-    this.stopPingInterval();
-
-    if (this._disposed) {
-      // Transport is disposed — terminal state, ignore close events
-      return;
-    }
-
-    // Run the close transaction (idempotent per generation; a cause the
-    // charge point latched itself is kept)
-    this.runCloseTransaction(closeCause);
-
-    // Only attempt reconnect if not manually disconnected
-    if (!this._isManualDisconnect) {
-      // Only a close the charge point did not ask for counts as a failure of
-      // the URL in use. A reset, or an injected disconnect, says nothing about
-      // the node and must not push an affinity pool off its primary.
-      if (!this._selfRequestedClose) this._urlPool?.onFailure();
-      this.attemptReconnect();
-    }
-  }
-
-  /**
-   * #406: ping frames are WebSocket control frames, not OCPP messages, so
-   * they bypass the network-sim pipelines and are not logged one by one.
-   */
   private startPingInterval(): void {
-    this.stopPingInterval();
-    const seconds = this._pingIntervalSeconds;
-    if (seconds <= 0 || !this.isConnected()) return;
-    this._pingInterval = setInterval(() => {
-      if (!this._ws || this._ws.readyState !== WebSocket.OPEN) return;
-      try {
-        this._ws.ping();
-      } catch (error) {
-        this._logger.warn(
-          `WebSocket ping failed: ${String(error)}`,
-          LogType.WEBSOCKET,
-        );
-      }
-    }, seconds * 1000);
+    this._ping.startPingInterval();
   }
 
   private stopPingInterval(): void {
-    if (this._pingInterval) {
-      clearInterval(this._pingInterval);
-      this._pingInterval = null;
-    }
+    this._ping.stopPingInterval();
   }
 
   /**
@@ -1182,38 +734,7 @@ export class OCPPWebSocket implements ChargePointSocket {
    * whether a BootNotification follows is the charge point's own #702 rule).
    */
   public setLinkBlocked(reason: string | null): void {
-    if (this._disposed || reason === this._linkBlockedReason) return;
-    if (reason !== null) {
-      const hadLink =
-        !this._isManualDisconnect &&
-        (this._ws !== null || this._reconnectTimer !== null);
-      this._linkBlockedReason = reason;
-      this._resumeOnLinkRestore = this._resumeOnLinkRestore || hadLink;
-      if (this._reconnectTimer) {
-        clearTimeout(this._reconnectTimer);
-        this._reconnectTimer = null;
-      }
-      this._reconnectAttempts = 0;
-      this._reconnectNotBefore = null;
-      this._pendingReconnectNotice = null;
-      if (this._ws) {
-        this.runCloseTransaction("simulated");
-        this._selfRequestedClose = true;
-        this._ws.close();
-        this._ws = null;
-        this.stopPingInterval();
-      }
-      return;
-    }
-    this._linkBlockedReason = null;
-    if (!this._resumeOnLinkRestore) return;
-    this._resumeOnLinkRestore = false;
-    this._reconnectAttempts = 0;
-    this._logger.info(
-      "The cellular link is restored; reconnecting",
-      LogType.WEBSOCKET,
-    );
-    this.connect();
+    this._reconnect.setLinkBlocked(reason);
   }
 
   /** #930: whether the link is administratively down, and why. */
@@ -1230,65 +751,6 @@ export class OCPPWebSocket implements ChargePointSocket {
   }
 
   private attemptReconnect(): void {
-    // #930: an administratively down link is not a failed attempt.
-    if (this._linkBlockedReason !== null) return;
-    // Clear any existing reconnect timer
-    if (this._reconnectTimer) {
-      clearTimeout(this._reconnectTimer);
-      this._reconnectTimer = null;
-    }
-
-    this._reconnectAttempts++;
-
-    const decision = nextReconnectDelayMs(
-      this._reconnectPolicy,
-      this._reconnectAttempts,
-      this._reconnectRandom,
-      this._retryBackOff,
-    );
-    if (decision.kind === "give-up") {
-      const attempts = this._reconnectAttempts - 1;
-      this._logger.warn(
-        `Giving up reconnecting after ${attempts} attempt(s) (reconnect.maxAttempts=${this._reconnectPolicy.maxAttempts})`,
-        LogType.WEBSOCKET,
-      );
-      // A later explicit connect() starts with a fresh budget.
-      this._reconnectAttempts = 0;
-      this._reconnectNotBefore = null;
-      this._pendingReconnectNotice = null;
-      // Announced with the close, after the disconnect it follows.
-      this._pendingGaveUp = { attempts };
-      return;
-    }
-    const backoffDelay = decision.delayMs;
-
-    // Reconnect reservation: the actual scheduled delay is the max of the backoff
-    // and the remaining time until reconnectNotBefore
-    const reservationDelay = this._reconnectNotBefore
-      ? Math.max(0, this._reconnectNotBefore - Date.now())
-      : 0;
-    const actualDelay = Math.max(backoffDelay, reservationDelay);
-
-    this._logger.info(
-      `Reconnecting in ${actualDelay / 1000}s... (attempt ${this._reconnectAttempts})`,
-      LogType.WEBSOCKET,
-    );
-    this._pendingReconnectNotice = {
-      attempt: this._reconnectAttempts,
-      delayMs: actualDelay,
-    };
-
-    this._reconnectTimer = setTimeout(() => {
-      this._reconnectTimer = null;
-
-      // Consume the reservation at socket-open attempt (irreversible consumption point)
-      this._reconnectNotBefore = null;
-
-      this._logger.info(
-        `Attempting reconnection (attempt ${this._reconnectAttempts})...`,
-        LogType.WEBSOCKET,
-      );
-      this.connect();
-    }, actualDelay);
+    this._reconnect.attemptReconnect();
   }
 }

@@ -157,8 +157,8 @@ So:
 
 **Touches.** `cpParamsBaseSchema` in `packages/contracts/src/methods.ts`, the resolution
 step in `apps/cli/src/service.ts`, and URL selection in
-`packages/core/src/cp/infrastructure/transport/OCPPWebSocket.ts` beside the existing
-exponential-backoff logic (~L820).
+`packages/core/src/cp/infrastructure/transport/ws/reconnectScheduler.ts` beside the existing
+exponential-backoff logic (`attemptReconnect`).
 
 **Acceptance.** After a forced disconnect (reusing
 [network simulation](../concepts/network-simulation.md)) `round-robin` lands on

@@ -18,7 +18,7 @@ related:
   - ../concepts/power-loss.md
   - ../concepts/smart-charging.md
   - ../concepts/meter-realism.md
-updated: 2026-11-14
+updated: 2026-11-15
 ---
 
 # EMS / LMS and energy co-simulation interoperability (spike)
@@ -207,7 +207,7 @@ transactions beyond what `status` already shows.
 What is deterministic today, per `docs/concepts/charger-engine.md` and the code:
 the engine, behaviors and the energy register run on `SimClock`, and
 `VirtualClock.advanceTo` fires timers in a fixed order. The WebSocket
-transport still uses real timers (`OCPPWebSocket.ts`: handshake, ping and
+transport still uses real timers (`OCPPWebSocket.ts` and `transport/ws/`: handshake, ping and
 reconnect `setTimeout` / `setInterval`), and SOAP paths too; the daemon creates
 stations on the real clock (no `VirtualClock` in `apps/cli`). So:
 

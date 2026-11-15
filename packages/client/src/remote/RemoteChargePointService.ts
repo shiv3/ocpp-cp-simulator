@@ -8,11 +8,7 @@ import type {
   ConfigurationKeyList,
   ConfigurationSetStatus,
 } from "@ocpp-cp-simulator/core/cp/domain/charge-point/configurationAccess";
-import {
-  VehicleCatalogError,
-  type VehicleCatalog,
-  type VehicleCatalogErrorKind,
-} from "@ocpp-cp-simulator/core/cp/domain/vehicle/VehicleCatalog";
+import type { VehicleCatalog } from "@ocpp-cp-simulator/core/cp/domain/vehicle/VehicleCatalog";
 import type {
   PowerLossOptions,
   PowerRestoreOptions,
@@ -43,7 +39,6 @@ import type {
   ChargePointEvent,
   ChargePointService,
   ChargePointSnapshot,
-  ConnectorSnapshot,
   CreateChargePointParams,
   ScenarioRunOptions,
   ScenarioListItem,
@@ -51,7 +46,6 @@ import type {
   StoredLogEntry,
 } from "../interfaces/ChargePointService";
 import type {
-  OCPPAvailability,
   OCPPStatus,
   StatusNotificationOptions,
 } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
@@ -62,7 +56,6 @@ import type {
   StopTransactionCommandOptions,
   TransactionUpdateOptions,
 } from "@ocpp-cp-simulator/core/cp/domain/connector/Transaction";
-import { LogLevel, LogType } from "@ocpp-cp-simulator/core/cp/shared/Logger";
 import type {
   EVSettings,
   EVSettingsPatch,
@@ -86,7 +79,6 @@ import type {
   ScenarioRunQuery,
 } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunSummary";
 import type {
-  TimelineEntry,
   TimelinePage,
   TimelineQuery,
 } from "@ocpp-cp-simulator/core/cp/application/services/OperationalTimeline";
@@ -94,7 +86,6 @@ import type {
   ChargingSessionPage,
   ChargingSessionQuery,
 } from "@ocpp-cp-simulator/core/cp/domain/persistence/ChargingSessionRepository";
-import type { ChargingSession } from "@ocpp-cp-simulator/core/cp/domain/session/ChargingSession";
 import type {
   HistoryOptions,
   StateHistoryEntry,
@@ -106,7 +97,6 @@ import type {
 import {
   RPC_TIMEOUT_MS,
   RpcFailure,
-  type CpListItem,
   type EventEnvelope,
   type Labels,
   type Params,
@@ -117,10 +107,18 @@ import {
   type RpcRequest,
   type ServerInfo,
   type SimulatorConfigInput,
-  type StatusWire,
   type SubscribeResult,
   type WireSimulatorConfig,
 } from "@ocpp-cp-simulator/contracts/index";
+import { mapServerEventToChargePointEvent } from "./mapServerEvent";
+import { publicFailure, toVehicleCatalogError } from "./rpcErrors";
+import {
+  cpListItemToSnapshot,
+  snapshotToEvents,
+  toChargePointSnapshot,
+} from "./snapshotMapping";
+
+export { mapServerEventToChargePointEvent };
 
 type CpEventEnvelope = Extract<EventEnvelope, { kind: "cp" }>;
 type RegistryEventEnvelope = Extract<EventEnvelope, { kind: "registry" }>;
@@ -129,9 +127,6 @@ type ScenarioDefinitionsEventEnvelope = Extract<
   EventEnvelope,
   { kind: "scenario-definitions" }
 >;
-type ServerCpEvent = CpEventEnvelope["evt"];
-type ServerConnectorStatus = StatusWire["connectors"][number];
-type WireConfig = NonNullable<StatusWire["config"]>;
 
 const CONFIG_EVENTS_SCOPE = "config";
 const SCENARIO_DEFINITIONS_EVENTS_SCOPE = "scenario-definitions";
@@ -198,201 +193,6 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
 }
 
-function emptyConnectorSnapshot(id: number): ConnectorSnapshot {
-  return {
-    id,
-    status: "Unavailable" as OCPPStatus,
-    availability: "Operative",
-    meterValue: 0,
-    transactionId: null,
-    soc: null,
-    mode: "manual",
-    autoResetToAvailable: true,
-    autoMeterValueConfig: null,
-    evSettings: null,
-    chargingProfile: null,
-    chargingProfiles: [],
-    transactionStartTime: null,
-    transactionTagId: null,
-    transactionBatteryCapacityKwh: null,
-  };
-}
-
-function toConnectorSnapshot(c: ServerConnectorStatus): ConnectorSnapshot {
-  return {
-    id: c.id,
-    status: c.status as OCPPStatus,
-    availability: c.availability as OCPPAvailability,
-    meterValue: c.meterValue,
-    transactionId: c.transactionId,
-    soc: c.soc ?? null,
-    mode: (c.mode as ScenarioMode) ?? "manual",
-    autoResetToAvailable: c.autoResetToAvailable ?? true,
-    autoMeterValueConfig:
-      (c.autoMeterValueConfig as unknown as AutoMeterValueConfig | null) ??
-      null,
-    evSettings: (c.evSettings as unknown as EVSettings | null) ?? null,
-    chargingProfile:
-      (c.chargingProfile as unknown as ActiveChargingProfile | null) ?? null,
-    chargingProfiles:
-      (c.chargingProfiles as unknown as ActiveChargingProfile[]) ?? [],
-    transactionStartTime: c.transactionStartTime
-      ? new Date(c.transactionStartTime)
-      : null,
-    transactionTagId: c.transactionTagId ?? null,
-    transactionBatteryCapacityKwh: c.transactionBatteryCapacityKwh ?? null,
-    evConnection: c.evConnection,
-  };
-}
-
-function toChargePointSnapshot(s: StatusWire): ChargePointSnapshot {
-  return {
-    id: s.id,
-    status: s.status as OCPPStatus,
-    error: s.error ?? "",
-    connectors: (s.connectors ?? []).map(toConnectorSnapshot),
-    heartbeat: s.heartbeat
-      ? {
-          intervalSeconds: s.heartbeat.intervalSeconds,
-          lastSentAt: s.heartbeat.lastSentAt,
-        }
-      : undefined,
-    networkSim: s.networkSim ?? null,
-    ...(s.modem ? { modem: s.modem } : {}),
-    config: s.config ? toSnapshotConfig(s.config) : undefined,
-  };
-}
-
-function toSnapshotConfig(config: WireConfig): ChargePointSnapshot["config"] {
-  return {
-    wsUrl: config.wsUrl,
-    centralSystemUrl: config.centralSystemUrl,
-    soapCallbackUrl: config.soapCallbackUrl,
-    soapCallbackUrlDerived: config.soapCallbackUrlDerived,
-    soapPath: config.soapPath,
-    ocppVersion: config.ocppVersion,
-    connectors: config.connectors,
-    vendor: config.vendor,
-    model: config.model,
-    // The socket protocol intentionally redacts passwords. The legacy browser
-    // interface still requires a password field, so remote snapshots expose an
-    // empty placeholder instead of a secret the daemon will not send.
-    basicAuth: config.basicAuth
-      ? { username: config.basicAuth.username, password: "" }
-      : null,
-    securityProfile: config.securityProfile,
-    cpoName: config.cpoName,
-    txUpdatedMeterValues: config.txUpdatedMeterValues,
-    inboundValidation: config.inboundValidation,
-    reservationAuthorizeIdTag: config.reservationAuthorizeIdTag,
-    capabilityProfile: config.capabilityProfile,
-    ...(config.transport === undefined ? {} : { transport: config.transport }),
-    chargerCapabilities: config.chargerCapabilities,
-    tlsCaPath: config.tlsCaPath,
-    tlsCertPath: config.tlsCertPath,
-    tlsKeyPath: config.tlsKeyPath,
-    bootNotification: config.bootNotification ?? null,
-    labels: config.labels,
-    ...(config.behaviors === undefined ? {} : { behaviors: config.behaviors }),
-    ...(config.behaviorParams === undefined
-      ? {}
-      : { behaviorParams: config.behaviorParams }),
-  };
-}
-
-function cpListItemToSnapshot(item: CpListItem): ChargePointSnapshot {
-  const connectorCount = Math.max(0, item.connectors);
-  return {
-    id: item.cpId,
-    status: item.status as OCPPStatus,
-    error: "",
-    connectors: Array.from({ length: connectorCount }, (_, i) =>
-      emptyConnectorSnapshot(i + 1),
-    ),
-    networkSim: item.networkSim ?? null,
-    config: toSnapshotConfig(item),
-  };
-}
-
-function snapshotToEvents(snapshot: ChargePointSnapshot): ChargePointEvent[] {
-  const events: ChargePointEvent[] = [
-    { type: "status", status: snapshot.status },
-  ];
-  if (snapshot.error) events.push({ type: "error", error: snapshot.error });
-  if (snapshot.heartbeat) {
-    events.push({
-      type: "heartbeat",
-      intervalSeconds: snapshot.heartbeat.intervalSeconds,
-      lastSentAt: snapshot.heartbeat.lastSentAt,
-    });
-  }
-
-  for (const connector of snapshot.connectors) {
-    events.push({
-      type: "connector-status",
-      connectorId: connector.id,
-      status: connector.status,
-      previousStatus: connector.status,
-    });
-    events.push({
-      type: "connector-availability",
-      connectorId: connector.id,
-      availability: connector.availability,
-    });
-    events.push({
-      type: "connector-meter",
-      connectorId: connector.id,
-      meterValue: connector.meterValue,
-    });
-    events.push({
-      type: "connector-transaction",
-      connectorId: connector.id,
-      transactionId: connector.transactionId,
-    });
-    events.push({
-      type: "connector-soc",
-      connectorId: connector.id,
-      soc: connector.soc,
-    });
-    events.push({
-      type: "connector-mode",
-      connectorId: connector.id,
-      mode: connector.mode,
-    });
-    events.push({
-      type: "connector-auto-reset-to-available",
-      connectorId: connector.id,
-      enabled: connector.autoResetToAvailable,
-    });
-    if (connector.autoMeterValueConfig) {
-      events.push({
-        type: "connector-auto-meter",
-        connectorId: connector.id,
-        config: connector.autoMeterValueConfig,
-      });
-    }
-    if (connector.evSettings) {
-      events.push({
-        type: "connector-ev-settings",
-        connectorId: connector.id,
-        settings: connector.evSettings,
-      });
-    }
-    events.push({
-      type: "connector-charging-profile",
-      connectorId: connector.id,
-      profile: connector.chargingProfile,
-    });
-    events.push({
-      type: "connector-charging-profiles",
-      connectorId: connector.id,
-      profiles: [...connector.chargingProfiles],
-    });
-  }
-
-  return events;
-}
-
 function isRpcAck<R>(ack: unknown): ack is RpcAck<R> {
   return (
     isRecord(ack) &&
@@ -420,378 +220,6 @@ function authFromUrl(
     // errors through the normal connect_error path.
   }
   return undefined;
-}
-
-/**
- * #458: a failed `vehicle_catalog.*` call as the catalog port's error, so the
- * console handles Local and Remote failures alike. The daemon's message is
- * kept; it never contains the key.
- */
-function toVehicleCatalogError(error: unknown): VehicleCatalogError {
-  if (!(error instanceof RpcFailure)) {
-    return new VehicleCatalogError(
-      "network",
-      error instanceof Error ? error.message : String(error),
-    );
-  }
-  return new VehicleCatalogError(catalogKindOf(error.code), error.message, {
-    retryAfterSeconds: error.retryAfterSeconds,
-  });
-}
-
-/** The reverse of the daemon's mapping in `apps/cli/src/server/vehicleRpc.ts`. */
-function catalogKindOf(code: RpcErrorCode): VehicleCatalogErrorKind {
-  switch (code) {
-    case "unauthorized":
-    case "not_found":
-    case "rate_limited":
-    case "timeout":
-    case "unavailable":
-      return code;
-    case "invalid_params":
-      return "invalid_request";
-    case "disconnected":
-      return "network";
-    default:
-      return "unavailable";
-  }
-}
-
-function publicFailure(code: RpcErrorCode): RpcFailure {
-  switch (code) {
-    case "timeout":
-      return new RpcFailure(code, "rpc timed out");
-    case "disconnected":
-      return new RpcFailure(code, "disconnected");
-    default:
-      return new RpcFailure(code, code.replace(/_/g, " "));
-  }
-}
-
-export function mapServerEventToChargePointEvent(
-  evt: ServerCpEvent,
-): ChargePointEvent | null {
-  const data = isRecord(evt.data) ? evt.data : {};
-
-  switch (evt.event) {
-    case "connected":
-      return { type: "connected" };
-    case "disconnected":
-      return {
-        type: "disconnected",
-        code: typeof data.code === "number" ? data.code : 0,
-        reason: typeof data.reason === "string" ? data.reason : "",
-      };
-    case "status_change":
-      return typeof data.status === "string"
-        ? { type: "status", status: data.status as OCPPStatus }
-        : null;
-    case "error":
-      return typeof data.error === "string"
-        ? { type: "error", error: data.error }
-        : null;
-    case "connector_status":
-      if (
-        typeof data.connectorId === "number" &&
-        typeof data.status === "string" &&
-        typeof data.previousStatus === "string"
-      ) {
-        return {
-          type: "connector-status",
-          connectorId: data.connectorId,
-          status: data.status as OCPPStatus,
-          previousStatus: data.previousStatus as OCPPStatus,
-        };
-      }
-      return null;
-    case "transaction_started":
-      if (
-        typeof data.connectorId === "number" &&
-        typeof data.transactionId === "number"
-      ) {
-        return {
-          type: "connector-transaction",
-          connectorId: data.connectorId,
-          transactionId: data.transactionId,
-        };
-      }
-      return null;
-    case "transaction_stopped":
-      if (typeof data.connectorId === "number") {
-        return {
-          type: "connector-transaction",
-          connectorId: data.connectorId,
-          transactionId: null,
-        };
-      }
-      return null;
-    case "meter_value":
-      if (
-        typeof data.connectorId === "number" &&
-        typeof data.meterValue === "number"
-      ) {
-        return {
-          type: "connector-meter",
-          connectorId: data.connectorId,
-          meterValue: data.meterValue,
-        };
-      }
-      return null;
-    case "log": {
-      const level =
-        typeof data.level === "number"
-          ? (data.level as LogLevel)
-          : LogLevel.INFO;
-      const typeStr =
-        typeof data.type === "string"
-          ? (data.type as LogType)
-          : LogType.GENERAL;
-      const message = typeof data.message === "string" ? data.message : "";
-      const ts = evt.timestamp ? new Date(evt.timestamp) : new Date();
-      return {
-        type: "log",
-        entry: { timestamp: ts, level, type: typeStr, message },
-      };
-    }
-    case "connector_availability":
-      if (
-        typeof data.connectorId === "number" &&
-        typeof data.availability === "string"
-      ) {
-        return {
-          type: "connector-availability",
-          connectorId: data.connectorId,
-          availability: data.availability as OCPPAvailability,
-        };
-      }
-      return null;
-    case "connector_soc":
-      if (typeof data.connectorId === "number") {
-        return {
-          type: "connector-soc",
-          connectorId: data.connectorId,
-          soc: typeof data.soc === "number" ? data.soc : null,
-        };
-      }
-      return null;
-    case "connector_mode":
-      if (
-        typeof data.connectorId === "number" &&
-        typeof data.mode === "string"
-      ) {
-        return {
-          type: "connector-mode",
-          connectorId: data.connectorId,
-          mode: data.mode as ScenarioMode,
-        };
-      }
-      return null;
-    case "connector_auto_reset":
-      if (
-        typeof data.connectorId === "number" &&
-        typeof data.enabled === "boolean"
-      ) {
-        return {
-          type: "connector-auto-reset-to-available",
-          connectorId: data.connectorId,
-          enabled: data.enabled,
-        };
-      }
-      return null;
-    case "connector_auto_meter":
-      if (typeof data.connectorId === "number" && isRecord(data.config)) {
-        return {
-          type: "connector-auto-meter",
-          connectorId: data.connectorId,
-          config: data.config as unknown as AutoMeterValueConfig,
-        };
-      }
-      return null;
-    case "connector_ev_settings":
-      if (typeof data.connectorId === "number" && isRecord(data.settings)) {
-        return {
-          type: "connector-ev-settings",
-          connectorId: data.connectorId,
-          settings: data.settings as unknown as EVSettings,
-        };
-      }
-      return null;
-    case "connector_charging_profile":
-      if (typeof data.connectorId === "number") {
-        return {
-          type: "connector-charging-profile",
-          connectorId: data.connectorId,
-          profile: isRecord(data.profile)
-            ? (data.profile as unknown as ActiveChargingProfile)
-            : null,
-        };
-      }
-      return null;
-    case "connector_charging_profiles":
-      if (
-        typeof data.connectorId === "number" &&
-        Array.isArray(data.profiles)
-      ) {
-        return {
-          type: "connector-charging-profiles",
-          connectorId: data.connectorId,
-          profiles: data.profiles as unknown as ActiveChargingProfile[],
-        };
-      }
-      return null;
-    case "scenario_started":
-      if (
-        typeof data.connectorId === "number" &&
-        typeof data.scenarioId === "string"
-      ) {
-        return {
-          type: "scenario-started",
-          connectorId: data.connectorId,
-          scenarioId: data.scenarioId,
-          ...(typeof data.runId === "string" ? { runId: data.runId } : {}),
-        };
-      }
-      return null;
-    case "scenario_completed":
-      if (
-        typeof data.connectorId === "number" &&
-        typeof data.scenarioId === "string"
-      ) {
-        return {
-          type: "scenario-completed",
-          connectorId: data.connectorId,
-          scenarioId: data.scenarioId,
-          ...(typeof data.runId === "string" ? { runId: data.runId } : {}),
-        };
-      }
-      return null;
-    case "scenario_error":
-      if (
-        typeof data.connectorId === "number" &&
-        typeof data.scenarioId === "string" &&
-        typeof data.error === "string"
-      ) {
-        return {
-          type: "scenario-error",
-          connectorId: data.connectorId,
-          scenarioId: data.scenarioId,
-          ...(typeof data.runId === "string" ? { runId: data.runId } : {}),
-          error: data.error,
-        };
-      }
-      return null;
-    case "scenario_node_execute":
-      if (
-        typeof data.connectorId === "number" &&
-        typeof data.scenarioId === "string" &&
-        typeof data.nodeId === "string"
-      ) {
-        return {
-          type: "scenario-node-execute",
-          connectorId: data.connectorId,
-          scenarioId: data.scenarioId,
-          ...(typeof data.runId === "string" ? { runId: data.runId } : {}),
-          nodeId: data.nodeId,
-        };
-      }
-      return null;
-    case "timeline_entry":
-      // Consumers ignore kinds they do not know (format 1.x), so the kind
-      // is not checked against this build's list.
-      if (
-        typeof data.seq === "number" &&
-        typeof data.timestamp === "string" &&
-        typeof data.kind === "string" &&
-        typeof data.cpId === "string" &&
-        typeof data.summary === "string"
-      ) {
-        return {
-          type: "timeline-entry",
-          entry: data as unknown as TimelineEntry,
-        };
-      }
-      return null;
-    case "charging_session":
-      if (
-        typeof data.sessionId === "string" &&
-        typeof data.cpId === "string" &&
-        typeof data.connectorId === "number" &&
-        typeof data.startedAt === "string" &&
-        typeof data.outcome === "string"
-      ) {
-        return {
-          type: "charging-session",
-          session: data as unknown as ChargingSession,
-        };
-      }
-      return null;
-    case "scenario_run_recorded":
-      if (
-        typeof data.connectorId === "number" &&
-        typeof data.scenarioId === "string" &&
-        typeof data.runId === "string"
-      ) {
-        return {
-          type: "scenario-run-recorded",
-          connectorId: data.connectorId,
-          scenarioId: data.scenarioId,
-          runId: data.runId,
-        };
-      }
-      return null;
-    case "scenario_wait_changed":
-      if (
-        typeof data.connectorId === "number" &&
-        typeof data.scenarioId === "string" &&
-        typeof data.nodeId === "string" &&
-        (data.kind === "extend" ||
-          data.kind === "retry" ||
-          data.kind === "continue")
-      ) {
-        return {
-          type: "scenario-wait-changed",
-          connectorId: data.connectorId,
-          scenarioId: data.scenarioId,
-          ...(typeof data.runId === "string" ? { runId: data.runId } : {}),
-          nodeId: data.nodeId,
-          kind: data.kind,
-        };
-      }
-      return null;
-    case "connector_removed":
-      if (typeof data.connectorId === "number") {
-        return {
-          type: "connector-removed",
-          connectorId: data.connectorId,
-        };
-      }
-      return null;
-    case "heartbeat":
-      if (typeof data.intervalSeconds === "number") {
-        return {
-          type: "heartbeat",
-          intervalSeconds: data.intervalSeconds,
-          lastSentAt:
-            typeof data.lastSentAt === "string" ? data.lastSentAt : null,
-        };
-      }
-      return null;
-    case "state_history_entry":
-      if (isRecord(data.entry)) {
-        const raw = data.entry as Record<string, unknown>;
-        const timestamp =
-          typeof raw.timestamp === "string"
-            ? new Date(raw.timestamp)
-            : new Date();
-        return {
-          type: "state-history-entry",
-          entry: { ...raw, timestamp } as unknown as StateHistoryEntry,
-        };
-      }
-      return null;
-    default:
-      return null;
-  }
 }
 
 export class RemoteChargePointService implements ChargePointService {

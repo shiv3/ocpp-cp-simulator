@@ -1,13 +1,11 @@
 import type { Logger } from "../../shared/Logger";
 import { LogType } from "../../shared/Logger";
 import { encodeCallFrame } from "./callFrame";
-import { redactSensitiveText } from "../../shared/redaction";
 import { isCertificateInBundle } from "../../domain/security/certificateHash";
 import {
   isBrowserRuntime,
   OcppSecurityProfileConfigError,
   openOcppWebSocket,
-  probeUpgradeRefusal,
   type OcppSocket,
 } from "./wsUrlWithBasic";
 import type { SupervisionUrlPool } from "./SupervisionUrlPool";
@@ -65,11 +63,11 @@ import {
   type ClientIdentity,
 } from "./ws/clientCertificateState";
 import {
-  describeRefusal,
   GenerationTokenImpl,
   neverReachedCsms,
   SUPERSEDED_CLOSE,
 } from "./ws/closeClassification";
+import { UpgradeRefusalDiagnostic } from "./ws/upgradeRefusalDiagnostic";
 import {
   dispatchIncomingFrame,
   writeUpstreamPhysical,
@@ -174,9 +172,8 @@ export class OCPPWebSocket implements ChargePointSocket {
   /** #288: the options the current handshake used, replayed by the refusal
    *  probe so it asks the question the socket asked. */
   private _lastConnectOptions: OcppWebSocketConnectOptions | null = null;
-  /** When the probe last ran, so a retry loop cannot multiply the CSMS's
-   *  request rate. Cleared on a successful open. */
-  private _lastRefusalProbeAt: number = 0;
+  /** #288: the attempt's error log and the refusal probe. */
+  private readonly _refusal: UpgradeRefusalDiagnostic;
   /** Set when the client itself reported the HTTP status (the `ws` path),
    *  so the probe does not ask a question already answered. */
   private _refusalStatusReported: boolean = false;
@@ -258,6 +255,13 @@ export class OCPPWebSocket implements ChargePointSocket {
       emitDiscarded: () =>
         this.observers.emit("renewedClientCertificateDiscarded", {}),
     });
+    this._refusal = new UpgradeRefusalDiagnostic(
+      logger,
+      (generation) =>
+        !this._disposed &&
+        this._generationCounter === generation &&
+        this._ws?.readyState !== WebSocket.OPEN,
+    );
 
     // Initialize network simulation controller and current generation
     this._currentGeneration = new GenerationTokenImpl(this._generationCounter);
@@ -478,9 +482,7 @@ export class OCPPWebSocket implements ChargePointSocket {
       this._securityProfileFallback = null;
       this.clearHandshakeTimer();
       this._clientCerts.onOpened(attempt.renewed);
-      // A working connection clears the refusal budget, so the next genuine
-      // refusal is diagnosed immediately rather than waiting out the window.
-      this._lastRefusalProbeAt = 0;
+      this._refusal.clearBudget();
       this._urlPool?.onSuccess();
       this.handleOpen();
       if (this._onOpenCallback) {
@@ -1023,82 +1025,22 @@ export class OCPPWebSocket implements ChargePointSocket {
     this.observers.emit("closed", { cause: closeCause });
   }
 
-  /**
-   * #288 — say what the error was, not merely that there was one.
-   *
-   * The event carries a message on every runtime that has one to give: the
-   * `ws` client's "Unexpected server response: 401", Bun's
-   * "WebSocket connection to '…' failed: Expected 101 status code", a TLS
-   * failure's own text. Logging only `evt.type` threw all of it away, and
-   * `evt.type` is the constant string "error".
-   *
-   * `httpStatus` is present only on the `ws` path, which is handed the whole
-   * HTTP reply before it errors. Under Bun the status is not knowable here at
-   * all — {@link handleClose} probes for it instead.
-   */
+  /** #288 — say what the error was, not merely that there was one. */
   private handleError(evt: Event): void {
-    const detail = evt as {
-      type: string;
-      message?: string;
-      httpStatus?: number;
-      httpLocation?: string;
-    };
-    if (typeof detail.httpStatus === "number") {
-      this._refusalStatusReported = true;
-      this._logger.error(
-        describeRefusal(detail.httpStatus, detail.httpLocation),
-        LogType.WEBSOCKET,
-      );
-      return;
-    }
-    this._logger.error(
-      detail.message
-        ? // The client's message quotes the connection URL, which may carry
-          // `user:password@host` credentials -- redact before logging.
-          `WebSocket error: ${redactSensitiveText(detail.message)}`
-        : `WebSocket error type: ${detail.type}`,
-      LogType.WEBSOCKET,
-    );
+    if (this._refusal.reportError(evt)) this._refusalStatusReported = true;
   }
 
   /**
-   * #288 — ask the CSMS why, when the client will not say.
-   *
-   * Bun's native WebSocket reports every refused upgrade identically
-   * (`code=1002, Expected 101 status code`), and the daemon runs under Bun. So
-   * on that close, and only that close, replay the handshake as one plain GET
-   * and log the status it answers with. Gated three ways: the `ws` path has
-   * already reported the status, the probe runs at most once a minute per
-   * charge point, and a manual disconnect never triggers it — the reconnect
-   * loop must not multiply the CSMS's request rate.
+   * #288 — Bun's native WebSocket reports every refused upgrade identically
+   * (`code=1002, Expected 101 status code`), and the daemon runs under Bun.
+   * So on that close, and only that close, ask the CSMS why. Never once the
+   * `ws` path has reported the status, nor after a manual disconnect.
    */
   private maybeProbeRefusal(ev: CloseEvent): void {
     if (this._isManualDisconnect || this._disposed) return;
     if (this._refusalStatusReported) return;
     if (ev.code !== 1002 || !/expected 101/i.test(ev.reason ?? "")) return;
-    const options = this._lastConnectOptions;
-    if (!options) return;
-    const now = Date.now();
-    if (now - this._lastRefusalProbeAt < 60_000) return;
-    this._lastRefusalProbeAt = now;
-    // The probe is a round trip, and the reconnect loop may well win it. A
-    // refusal logged against a charge point that is connected again reads as
-    // a live problem, so the answer is dropped unless it still describes the
-    // connection that asked the question.
-    const probedGeneration = this._generationCounter;
-    void probeUpgradeRefusal(options)
-      .then((detail) => {
-        if (this._disposed || !detail) return;
-        if (this._generationCounter !== probedGeneration) return;
-        if (this._ws?.readyState === WebSocket.OPEN) return;
-        this._logger.error(
-          `${describeRefusal(detail.status, detail.location)} (diagnostic GET after the handshake failed)`,
-          LogType.WEBSOCKET,
-        );
-      })
-      .catch(() => {
-        // A diagnostic must never become a failure of its own.
-      });
+    this._refusal.probe(this._lastConnectOptions, this._generationCounter);
   }
 
   /**

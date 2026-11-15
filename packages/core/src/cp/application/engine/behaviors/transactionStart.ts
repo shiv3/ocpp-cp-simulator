@@ -20,7 +20,7 @@ import { nowDate, startsInProgress } from "./transactionStop";
  * but could still belong to its group: the reservation names a parent idTag /
  * groupIdToken and the station does not know the tag's own (H03.FR.07/08).
  */
-function mayMatchThroughParent(
+export function mayMatchThroughParent(
   cp: ChargePoint,
   connectorId: number,
   tagId: string,

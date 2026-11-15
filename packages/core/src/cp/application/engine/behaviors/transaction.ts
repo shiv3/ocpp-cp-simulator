@@ -6,6 +6,7 @@ import { isOcpp2Version } from "../../../domain/types/OcppVersion";
 import { LogType } from "../../../shared/Logger";
 import { startRefusalByReservation } from "../../../domain/reservation/reservationModel";
 import { decideRemoteStart } from "./remoteStartValidation";
+import { mayMatchThroughParent } from "./transactionStart";
 
 export { startTransaction } from "./transactionStart";
 export { cleanTransaction, stopTransaction } from "./transactionStop";
@@ -47,7 +48,7 @@ export function transactionBehavior(cp: ChargePoint): Behavior {
           // attempted. A named connector must be able to start; without one
           // the lowest connector that can start is used.
           const resolved = connectorId
-            ? remoteStartable(cp, connectorId, idTag)
+            ? remoteStartable(cp, connectorId, idTag) !== false
               ? connectorId
               : undefined
             : pickRemoteStartConnector(cp, idTag);
@@ -164,17 +165,12 @@ export function transactionBehavior(cp: ChargePoint): Behavior {
 }
 
 /**
- * Whether a remote start for `idTag` can be attempted on the connector (1.6
- * §5.11, errata 3.32): known, Operative, not Faulted, no running transaction,
- * not reserved for another tag (§5.13, H03.FR.09: the tag or its parent id /
- * groupIdToken, as the station knows it) and not the last connector a
- * reservation without a connector keeps for its owner (§5.13, H01.FR.07).
- */
-/**
  * 1.6 RemoteStartTransaction without a `connectorId` (#839): the connector
  * reserved for this tag (or its parent) comes first, as on 2.x
  * (`decideRemoteStart`), so the reservation is used up instead of staying and
- * blocking others; otherwise the lowest connector that can start.
+ * blocking others; then the lowest connector that can start; last a
+ * connector whose reservation the tag may still match through a parent the
+ * station has yet to learn.
  */
 export function pickRemoteStartConnector(
   cp: ChargePoint,
@@ -188,16 +184,31 @@ export function pickRemoteStartConnector(
     ids.find(
       (id) =>
         cp.reservationManager.reservationFor(id, idTag, parent) !== undefined &&
-        remoteStartable(cp, id, idTag),
-    ) ?? ids.find((id) => remoteStartable(cp, id, idTag))
+        remoteStartable(cp, id, idTag) === "yes",
+    ) ??
+    ids.find((id) => remoteStartable(cp, id, idTag) === "yes") ??
+    ids.find((id) => remoteStartable(cp, id, idTag) === "ifParentMatches")
   );
 }
 
+/**
+ * Whether a remote start for `idTag` can be attempted on the connector (1.6
+ * §5.11, errata 3.32): known, Operative, not Faulted, no running transaction,
+ * not reserved for another tag (§5.13, H03.FR.09: the tag or its parent id /
+ * groupIdToken, as the station knows it) and not the last connector a
+ * reservation without a connector keeps for its owner (§5.13, H01.FR.07).
+ *
+ * `ifParentMatches` (#839): a reservation names a parent idTag and the
+ * station knows none for `idTag` (neither Local Authorization List nor
+ * Authorization Cache). §5.13 then has it "send an Authorize.req for the
+ * incoming idTag", so the request is Accepted (errata 3.32: "will attempt to
+ * start") and {@link remoteStart} decides once the Authorize.conf is in.
+ */
 function remoteStartable(
   cp: ChargePoint,
   connectorId: number,
   idTag: string,
-): boolean {
+): "yes" | "ifParentMatches" | false {
   const connector = cp.getConnector(connectorId);
   if (!connector || connector.availability !== "Operative") return false;
   if (connector.status === OCPPStatus.Faulted) return false;
@@ -208,14 +219,19 @@ function remoteStartable(
   ) {
     return false;
   }
-  return (
+  if (
     startRefusalByReservation(
       cp,
       connectorId,
       idTag,
       cp.knownParentIdOf(idTag),
     ) === null
-  );
+  ) {
+    return "yes";
+  }
+  return mayMatchThroughParent(cp, connectorId, idTag)
+    ? "ifParentMatches"
+    : false;
 }
 
 /**
@@ -245,6 +261,12 @@ async function remoteStart(
   const ocpp2 = isOcpp2Version(cp.ocppVersion);
   const centrallyAuthorized =
     idTokenType === "Central" || idTokenType === "NoAuthorization";
+  // 1.6 §5.13 (#839): the reservation names a parent idTag the station does
+  // not know for this tag, so it asks the CSMS and waits for the answer, also
+  // before handing the request to a scenario. The start goes ahead only when
+  // the Authorize.conf names the reservation's parent; otherwise
+  // `startTransaction` refuses it and logs why.
+  const learnParent = !ocpp2 && mayMatchThroughParent(cp, connectorId, idTag);
   if (cp.configuration.authorizeRemoteTxRequests() && !centrallyAuthorized) {
     if (!ocpp2) {
       cp.logger.info(
@@ -268,9 +290,17 @@ async function remoteStart(
         });
         return;
       }
+    } else if (learnParent) {
+      await cp.authorizeAndWait(idTag, undefined, idTokenType);
     } else {
       cp.authorize(idTag, idTokenType);
     }
+  } else if (learnParent) {
+    cp.logger.info(
+      `Connector ${connectorId} is reserved for a parent idTag; authorizing ${idTag} to learn its parent (§5.13)`,
+      LogType.OCPP,
+    );
+    await cp.authorizeAndWait(idTag);
   }
   if (cp.isScenarioHandled(connectorId)) {
     cp.notifyRemoteStartReceived(

@@ -127,7 +127,6 @@ import {
 import type { ActiveChargingProfile } from "../connector/Connector";
 import { CertificateStore } from "../security/CertificateStore";
 import {
-  checkNetworkProfile,
   NetworkProfileStore,
   type NetworkConnectionProfile,
   type NetworkProfileVerdict,
@@ -362,7 +361,15 @@ export class ChargePoint {
   });
   private readonly _resetOnIdle = new ResetOnIdle({
     chargePoint: this,
+    assertPowered: () => this.assertPowered(),
+    configuration: () => this._configuration,
     connectors: () => this._connectors,
+    logger: () => this._logger,
+    markStartupEventPending: () => {
+      this._boot.startupEventPending = true;
+    },
+    ocppVersion: () => this._ocppVersion,
+    outbox: () => this._outbox,
   });
   private readonly _connectionTimeouts = new ConnectionTimeouts({
     chargePoint: this,
@@ -455,6 +462,7 @@ export class ChargePoint {
     heartbeat: () => this._heartbeat,
     localAuthListManager: () => this._localAuthListManager,
     logger: () => this._logger,
+    networkProfiles: () => this._networkProfiles,
     nowDate: () => this.nowDate(),
     ocppVersion: () => this._ocppVersion,
     rearmPeriodicSampling: () => this._sampling.rearmPeriodicSampling(),
@@ -1289,37 +1297,14 @@ export class ChargePoint {
     return this._networkProfiles;
   }
 
-  /**
-   * B09 SetNetworkProfile: validate `profile` against the station
-   * (`checkNetworkProfile`) and, when valid, store it in
-   * `configurationSlot`. The connection is left as it is: the stored profile
-   * is used only by a later Reset or NetworkConfigurationPriority change.
-   */
+  /** B09 SetNetworkProfile: validate and store `profile` in
+   *  `configurationSlot`; the connection is left as it is.
+   *  @see ConfigurationWiring.setNetworkProfile */
   setNetworkProfile(
     configurationSlot: number,
     profile: NetworkConnectionProfile,
   ): NetworkProfileVerdict {
-    const verdict = checkNetworkProfile({
-      configurationSlot,
-      profile,
-      currentSecurityProfile:
-        this._configuration.getInteger("SecurityProfile") ?? 0,
-      allowSecurityProfileDowngrade:
-        this._configuration.allowSecurityProfileDowngrade(),
-    });
-    if (verdict.accepted) {
-      this._networkProfiles.set(configurationSlot, profile);
-      this._logger.info(
-        `SetNetworkProfile: stored a profile in slot ${configurationSlot} (security profile ${profile.securityProfile}); the connection is unchanged`,
-        LogType.CONFIGURATION,
-      );
-    } else {
-      this._logger.warn(
-        `SetNetworkProfile slot ${configurationSlot} rejected (${verdict.reasonCode}): ${verdict.additionalInfo}`,
-        LogType.CONFIGURATION,
-      );
-    }
-    return verdict;
+    return this._configWiring.setNetworkProfile(configurationSlot, profile);
   }
 
   /** Local authorization (#452): Authorization Cache + Local Authorization
@@ -1888,34 +1873,7 @@ export class ChargePoint {
     type: ChargePointResetType,
     source: ChargePointResetSource = "ocpp-call",
   ): void {
-    this.assertPowered();
-    if (source === "ocpp15-soap" && !this.isSoapChargePoint()) {
-      this._logger.warn(
-        "Ignoring SOAP Reset for a charge point that is not registered as a SOAP charge point",
-        LogType.OCPP,
-      );
-      return;
-    }
-    const reason = type === "Hard" ? "HardReset" : "SoftReset";
-    for (const connector of this.connectors.values()) {
-      if (connector.transaction) {
-        this.stopTransaction(connector, reason);
-      }
-    }
-    this._logger.info(`Reset chargePoint: ${this._id}`, LogType.OCPP);
-    if (
-      this._ocppVersion === "OCPP-1.6J" &&
-      (this._configuration.getInteger("SecurityProfile") ?? 0) >= 1
-    ) {
-      // #734: reported once the station is back with an Accepted boot.
-      this._outbox.queueSecurityEventNotification("ResetOrReboot", reason);
-    }
-    this._boot.startupEventPending = true;
-    if (type === "Hard") {
-      this.reset("RemoteReset");
-    } else {
-      this.boot("RemoteReset");
-    }
+    this._resetOnIdle.applyRemoteReset(type, source);
   }
 
   authorize(

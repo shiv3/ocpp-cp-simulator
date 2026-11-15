@@ -4,6 +4,12 @@ import type { Connector } from "../connector/Connector";
 import type { LocalAuthListManager } from "../auth/LocalAuthList";
 import type { CertificateStore } from "../security/CertificateStore";
 import {
+  checkNetworkProfile,
+  type NetworkConnectionProfile,
+  type NetworkProfileStore,
+  type NetworkProfileVerdict,
+} from "../security/networkProfiles";
+import {
   checkSecurityProfileChange,
   isCertificateCurrentlyValid,
   isValidAuthorizationKey,
@@ -37,6 +43,7 @@ export interface ConfigurationWiringHost {
   readonly heartbeat: () => ChargePointHeartbeat;
   readonly localAuthListManager: () => LocalAuthListManager;
   readonly logger: () => Logger;
+  readonly networkProfiles: () => NetworkProfileStore;
   readonly nowDate: () => Date;
   readonly ocppVersion: () => string;
   readonly rearmPeriodicSampling: () => void;
@@ -55,6 +62,44 @@ export class ConfigurationWiring {
   private _powerSharing: PowerSharingConfig | undefined;
 
   constructor(private readonly host: ConfigurationWiringHost) {}
+
+  /**
+   * B09 SetNetworkProfile: validate `profile` against the station
+   * (`checkNetworkProfile`) and, when valid, store it in
+   * `configurationSlot`. The connection is left as it is: the stored profile
+   * is used only by a later Reset or NetworkConfigurationPriority change.
+   */
+  setNetworkProfile(
+    configurationSlot: number,
+    profile: NetworkConnectionProfile,
+  ): NetworkProfileVerdict {
+    const verdict = checkNetworkProfile({
+      configurationSlot,
+      profile,
+      currentSecurityProfile:
+        this.host.configuration().getInteger("SecurityProfile") ?? 0,
+      allowSecurityProfileDowngrade: this.host
+        .configuration()
+        .allowSecurityProfileDowngrade(),
+    });
+    if (verdict.accepted) {
+      this.host.networkProfiles().set(configurationSlot, profile);
+      this.host
+        .logger()
+        .info(
+          `SetNetworkProfile: stored a profile in slot ${configurationSlot} (security profile ${profile.securityProfile}); the connection is unchanged`,
+          LogType.CONFIGURATION,
+        );
+    } else {
+      this.host
+        .logger()
+        .warn(
+          `SetNetworkProfile slot ${configurationSlot} rejected (${verdict.reasonCode}): ${verdict.additionalInfo}`,
+          LogType.CONFIGURATION,
+        );
+    }
+    return verdict;
+  }
 
   /**
    * #704: 2.x `ClockCtrlr.DateTime` reads the station clock on every read;

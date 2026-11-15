@@ -27,7 +27,7 @@
   "packages/client/src/remote/RemoteChargePointService.ts": 2083,
   "packages/contracts/src/methods.ts": 1975,
   "packages/contracts/src/redaction.ts": 820,
-  "packages/core/src/cp/application/engine/ChargerEngine.ts": 1906,
+  "packages/core/src/cp/application/engine/ChargerEngine.ts": 1279,
   "packages/core/src/cp/application/engine/behaviors/transaction.ts": 903,
   "packages/core/src/cp/application/scenario/ScenarioExecutor.ts": 2120,
   "packages/core/src/cp/application/scenario/ScenarioRuntime.ts": 1038,

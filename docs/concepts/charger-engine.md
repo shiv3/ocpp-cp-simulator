@@ -5,6 +5,7 @@ summary: The contract of the charger engine as shipped — one owner of charge p
 sources:
   - packages/core/src/cp/application/engine/ChargerEngine.ts
   - packages/core/src/cp/application/engine/behaviorContext.ts
+  - packages/core/src/cp/application/engine/behaviorLifecycle.ts
   - packages/core/src/cp/application/engine/scope.ts
   - packages/core/src/cp/application/engine/ChargerState.ts
   - packages/core/src/cp/application/behavior/BehaviorRegistry.ts

@@ -55,25 +55,27 @@ export class ConnectorStatusControl {
 
   /**
    * A reservation lapsed (its expiry timer, or the ReservationManager sweep)
-   * without an explicit CancelReservation. OCPP 2.x first reports it
-   * (H04.FR.01, ReservationStatusUpdate `Expired`), then mirrors the cancel
-   * path (H04.FR.03, OCPP 1.6 §5.13): drive the connector back to Available
+   * without an explicit CancelReservation. It mirrors the cancel path
+   * (H04.FR.03, OCPP 1.6 §5.13): drive the connector back to Available
    * through updateConnectorStatus so the CSMS sees the transition on the wire,
    * but only when it's still Reserved: a connector that moved to
-   * Charging/Preparing/etc. in the meantime must not be clobbered.
+   * Charging/Preparing/etc. in the meantime must not be clobbered. OCPP 2.x
+   * then reports the reservation (H04.FR.01, ReservationStatusUpdate
+   * `Expired`), after the status as 2.0.1 H04 steps 4-6 / Figure 84 and 2.1
+   * Figure 98 show it (one CALL in flight, so send order is wire order).
    */
   onReservationExpired(connectorId: number, reservation: Reservation): void {
-    if (isOcpp2Version(this.host.ocppVersion())) {
-      this.host
-        .outbox()
-        .sendReservationStatusUpdate(reservation.reservationId, "Expired");
-    }
     const connector = this.host.chargePoint.getConnector(connectorId);
     if (connector && connector.status === OCPPStatus.Reserved) {
       this.host.chargePoint.updateConnectorStatus(
         connectorId,
         this.host.chargePoint.statusWhenFree(connectorId),
       );
+    }
+    if (isOcpp2Version(this.host.ocppVersion())) {
+      this.host
+        .outbox()
+        .sendReservationStatusUpdate(reservation.reservationId, "Expired");
     }
     syncUnspecifiedReservations(this.host.chargePoint);
   }

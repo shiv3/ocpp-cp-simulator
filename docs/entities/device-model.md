@@ -18,6 +18,11 @@ sources:
   - "issue #606"
   - "issue #569"
   - "issue #605"
+  - packages/core/src/cp/domain/device-model/variablesCommAndMetering.ts
+  - packages/core/src/cp/domain/device-model/variablesAuthAndTransaction.ts
+  - packages/core/src/cp/domain/device-model/variablesRequiredAndMonitoring.ts
+  - packages/core/src/cp/domain/device-model/variablesSecurityAndEvse.ts
+  - packages/core/src/cp/domain/device-model/deviceModelVariableHelpers.ts
 related:
   - ../concepts/variable-monitoring.md
   - ../concepts/local-authorization.md
@@ -32,7 +37,11 @@ The registry is the one place that says which OCPP 2.0.1 / 2.1 components and
 variables the simulator has and what each is (#604, part of the #569 remote
 configuration epic). It is data plus lookups, in
 [`DeviceModelRegistry.ts`](../../packages/core/src/cp/domain/device-model/DeviceModelRegistry.ts);
-`DEVICE_MODEL` is the instance the handlers use. The values stay in the
+`DEVICE_MODEL` is the instance the handlers use. Its variable table is the
+concatenation, in order, of four data files beside it (`variablesCommAndMetering.ts`,
+`variablesAuthAndTransaction.ts`, `variablesRequiredAndMonitoring.ts`,
+`variablesSecurityAndEvse.ts`), built with the `persistent` / `runtime` helpers of
+`deviceModelVariableHelpers.ts` (#877). The values stay in the
 `ConfigurationStore`: a variable shared with a 1.6 key reads and writes the
 same store entry as `GetConfiguration` / `ChangeConfiguration`, so there is
 one value, one validation and one persistence path.
@@ -325,8 +334,9 @@ like a `Target`:
 
 ## Adding a variable
 
-Add the value to the store first (a configuration key in `Configuration.ts`,
-or a runtime key a service publishes), then one entry to `VARIABLES` in the
-registry. Give a writable entry its `effect` and make sure the behavior
+Add the value to the store first (a configuration key in `Configuration.ts`
+or its `configurationKeysCore.ts` / `configurationKeysCustom.ts` groups,
+or a runtime key a service publishes), then one entry to the variable table
+file of its component (the `VARIABLES` of the registry spreads them). Give a writable entry its `effect` and make sure the behavior
 exists; otherwise register it `ReadOnly`. The registry test then checks the
 entry against the store.

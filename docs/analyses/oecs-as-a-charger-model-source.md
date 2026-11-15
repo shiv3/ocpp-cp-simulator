@@ -14,7 +14,7 @@ related:
   - ../concepts/control-plane.md
   - fleet-load-and-observability-roadmap.md
   - ../sources/github-issues.md
-updated: 2026-11-08
+updated: 2026-11-15
 ---
 
 # OECS as a charger model source
@@ -140,7 +140,7 @@ maxValue, unit, readOnly, rebootRequired}`, which lines up with OCPP 1.6
 - **`profiles[]` / `smartCharging`.** OCPP feature profiles (`Core`,
   `SmartCharging`, `Reservation`, …) are free strings in OECS, and the names
   match the `SupportedFeatureProfiles` configuration key the simulator already
-  defines (`packages/core/src/cp/domain/charge-point/Configuration.ts`, read-only array). So
+  defines (`ConfigurationKeys.Core` in `packages/core/src/cp/domain/charge-point/configurationKeysCore.ts`, read-only array). So
   they land in _what the charge point reports_, via the same config-seeding path
   as the keys above. They do not land in behaviour: handlers are registered
   unconditionally, so a model that advertises no `Reservation` profile still

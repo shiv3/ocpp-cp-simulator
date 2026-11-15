@@ -111,11 +111,7 @@ import {
 } from "./blockTree/types";
 
 import { recognizeBlockTree } from "./blockTree/recognize";
-import {
-  boundedLoopProblem,
-  commit,
-  requiredEdges,
-} from "./blockTree/rebuild";
+import { boundedLoopProblem, commit, requiredEdges } from "./blockTree/rebuild";
 import {
   cloneTree,
   continuationAfter,

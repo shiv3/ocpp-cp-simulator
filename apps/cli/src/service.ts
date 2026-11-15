@@ -100,10 +100,6 @@ import type {
   ScenarioExecutionState,
   ScenarioMode,
 } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
-import {
-  isAutoStartKeyOf,
-  matchAutoStart,
-} from "@ocpp-cp-simulator/core/cp/application/scenario/autoStart";
 import { SqliteScenarioRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/SqliteScenarioRepository";
 import type { ScenarioRepository } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioRepository";
 import type { PersistedEngineState } from "@ocpp-cp-simulator/core/cp/application/engine/ChargerState";
@@ -172,6 +168,13 @@ import {
   type BehaviorsHost,
 } from "./service/behaviors";
 import type { ForwarderHost } from "./service/forwarderHost";
+import {
+  handleConnectAutoStart,
+  handleStatusAutoStart,
+  handleStatusChangeAutoTrigger,
+  tryAutoStartForConnector,
+  type AutoStartHost,
+} from "./service/autoStart";
 import {
   getScenarioTemplates,
   listScenarios,
@@ -1646,6 +1649,22 @@ export class CLIChargePointService {
     };
   }
 
+  private autoStartHost(): AutoStartHost {
+    const self = (): CLIChargePointService => this;
+    return {
+      get chargePoint() {
+        return self()._chargePoint;
+      },
+      get executors() {
+        return self()._executors;
+      },
+      get scenarios() {
+        return self()._scenarios;
+      },
+      runScenario: (...args) => self().runScenario(...args),
+    };
+  }
+
   private autoTrafficHost(): AutoTrafficHost {
     const self = (): CLIChargePointService => this;
     return {
@@ -1965,139 +1984,41 @@ export class CLIChargePointService {
     this._sessionRecorder.reconcile();
   }
 
-  /**
-   * Auto-start for `triggerOn: "connect"` (the default), as
-   * LocalScenarioRuntime does in the browser's Local mode. Called when the CP reaches
-   * Available; runs the first matching loaded scenario per connector.
-   */
   private handleConnectAutoStart(): void {
-    for (const connector of this._chargePoint.connectors.values()) {
-      this.tryAutoStartForConnector(connector.id, "connect", null);
-    }
+    return handleConnectAutoStart(this.autoStartHost());
   }
 
-  /**
-   * Mirror for `triggerOn: "status"`: fires when the bound connector reaches
-   * a specific status (e.g. Charging). Connector statusChange events feed in.
-   */
   private handleStatusAutoStart(
     connectorId: number,
     toStatus: OCPPStatus,
   ): void {
-    this.tryAutoStartForConnector(connectorId, "status", toStatus);
+    return handleStatusAutoStart(this.autoStartHost(), connectorId, toStatus);
   }
 
-  /**
-   * Shared auto-start engine: walks loaded scenarios for `connectorId`,
-   * picks the first manual-trigger scenario whose Start node's `triggerOn`
-   * matches `mode` (and `targetStatus` for the "status" case), and runs it
-   * via runScenario(). Dedup uses Connector.lastAutoStartedScenarioKey so a
-   * status oscillation (or a reconnect that re-fires Available) doesn't
-   * restart an already-fired scenario. The browser runtime
-   * (LocalScenarioRuntime) applies the same rules through matchAutoStart.
-   */
   private tryAutoStartForConnector(
     connectorId: number,
     mode: "connect" | "status",
     connectorStatus: OCPPStatus | null,
   ): void {
-    if (this._chargePoint.status !== OCPPStatus.Available) return;
-    const connector = this._chargePoint.connectors.get(connectorId);
-    if (!connector) return;
-
-    for (const [scenarioId, entry] of this._scenarios) {
-      if (entry.connectorId !== connectorId) continue;
-      const def = entry.definition;
-      if (def.enabled === false) {
-        if (isAutoStartKeyOf(connector.lastAutoStartedScenarioKey, def.id)) {
-          connector.lastAutoStartedScenarioKey = null;
-        }
-        continue;
-      }
-      // Defensive: a misshapen scenario (wrong JSON shape, half-parsed
-      // wire payload, …) shouldn't take down the statusChange listener.
-      // Skip silently so other scenarios still get a chance.
-      if (!Array.isArray(def.nodes)) {
-        process.stderr.write(
-          `[CLI] tryAutoStartForConnector: scenario ${scenarioId} has no nodes array; skipping\n`,
-        );
-        continue;
-      }
-      // The eligibility rules (manual trigger, no StatusTrigger node,
-      // Start node's triggerOn / targetStatus) are shared with the browser
-      // runtime (LocalScenarioRuntime) so both fire the same scenarios.
-      const match = matchAutoStart(def, mode, connectorStatus);
-      if (!match) continue;
-
-      // Skip if anything is already running for this connector — matches
-      // ScenarioManager.handleStatusChange's one-scenario-at-a-time rule.
-      let active = false;
-      for (const [otherId, otherEntry] of this._scenarios) {
-        if (otherEntry.connectorId !== connectorId) continue;
-        if (this._executors.has(otherId)) {
-          active = true;
-          break;
-        }
-      }
-      if (active) return;
-
-      // Dedup: re-emitting Available (e.g. after a CSMS reconnect) doesn't
-      // restart an unchanged scenario.
-      if (connector.lastAutoStartedScenarioKey === match.key) return;
-
-      try {
-        connector.lastAutoStartedScenarioKey = match.key;
-        this.runScenario(connectorId, scenarioId);
-      } catch (err) {
-        connector.lastAutoStartedScenarioKey = null;
-        process.stderr.write(
-          `[CLI] connect/status auto-start failed for ${scenarioId}: ${
-            err instanceof Error ? err.message : err
-          }\n`,
-        );
-      }
-      // One scenario per connector per trigger — matches the browser.
-      return;
-    }
+    return tryAutoStartForConnector(
+      this.autoStartHost(),
+      connectorId,
+      mode,
+      connectorStatus,
+    );
   }
 
-  /**
-   * Inline mirror of ScenarioManager.handleStatusChange — finds the first
-   * loaded scenario whose `statusChange` trigger matches the transition
-   * and runs it via runScenario(). Skips scenarios that are disabled,
-   * already running, or whose ChargePoint isn't `Available` (matches the
-   * browser-side guard in ScenarioManager.handleStatusChange; an explicit
-   * runScenario has no such guard in either runtime, #425).
-   */
   private handleStatusChangeAutoTrigger(
     connectorId: number,
     fromStatus: OCPPStatus,
     toStatus: OCPPStatus,
   ): void {
-    if (this._chargePoint.status !== OCPPStatus.Available) return;
-    for (const [scenarioId, entry] of this._scenarios) {
-      if (entry.connectorId !== connectorId) continue;
-      const def = entry.definition;
-      if (def.enabled === false) continue;
-      const trigger = def.trigger;
-      if (!trigger || trigger.type !== "statusChange") continue;
-      const cond = trigger.conditions;
-      if (cond?.fromStatus && cond.fromStatus !== fromStatus) continue;
-      if (cond?.toStatus && cond.toStatus !== toStatus) continue;
-      // Don't restart if it's currently running — let it finish first.
-      if (this._executors.has(scenarioId)) continue;
-      try {
-        this.runScenario(connectorId, scenarioId);
-      } catch (err) {
-        process.stderr.write(
-          `[CLI] statusChange auto-trigger failed for ${scenarioId}: ${
-            err instanceof Error ? err.message : err
-          }\n`,
-        );
-      }
-      // One scenario per status transition — matches ScenarioManager.
-      return;
-    }
+    return handleStatusChangeAutoTrigger(
+      this.autoStartHost(),
+      connectorId,
+      fromStatus,
+      toStatus,
+    );
   }
 
   private detachConnectorEventForwarders(): void {

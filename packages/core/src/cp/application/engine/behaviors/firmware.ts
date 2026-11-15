@@ -144,40 +144,72 @@ function heldIds(ctx: BehaviorContext): number[] {
     : [];
 }
 
+/** Holds idle connectors Unavailable during an update, and gives them back. */
+interface ConnectorHold {
+  hold(ctx: BehaviorContext): void;
+  release(ctx: BehaviorContext): void;
+}
+
 /**
  * OCPP 1.6 §5.19 / 2.x L01.FR.07: connectors that are not in use are set
  * Unavailable while the station waits for the sessions to end, and one that
  * becomes available meanwhile follows. Neither the availability nor the status
- * is persisted by the hold itself; {@link releaseConnectors} undoes it.
+ * is persisted by the hold itself; `release` undoes it.
+ *
+ * An availability written on a held connector after the hold took it (a
+ * ChangeAvailability, even to the same Inoperative) is not the hold's any
+ * more: the connector leaves the held list and `release` leaves it alone
+ * (#846). The watches live with the behavior instance, so a train that
+ * replaces another keeps the connectors the first one held.
  */
-function holdIdleConnectors(cp: ChargePoint, ctx: BehaviorContext): void {
-  const held = heldIds(ctx);
-  for (const connector of cp.connectors.values()) {
-    if (
-      held.includes(connector.id) ||
-      connector.transaction ||
-      connector.availability !== "Operative" ||
-      connector.status !== OCPPStatus.Available
-    ) {
-      continue;
-    }
-    connector.availability = "Inoperative";
-    cp.updateConnectorStatus(connector.id, OCPPStatus.Unavailable);
-    held.push(connector.id);
-  }
-  ctx.state[HELD] = held;
-}
-
-function releaseConnectors(cp: ChargePoint, ctx: BehaviorContext): void {
-  for (const id of heldIds(ctx)) {
-    const connector = cp.getConnector(id);
-    if (!connector) continue;
-    connector.availability = "Operative";
-    if (connector.status === OCPPStatus.Unavailable) {
-      cp.updateConnectorStatus(id, cp.statusWhenFree(id));
-    }
-  }
-  ctx.state[HELD] = [];
+function connectorHold(cp: ChargePoint): ConnectorHold {
+  const watches = new Map<number, () => void>();
+  const unwatch = (id: number): void => {
+    watches.get(id)?.();
+    watches.delete(id);
+  };
+  return {
+    hold(ctx) {
+      const held = heldIds(ctx);
+      for (const connector of cp.connectors.values()) {
+        if (
+          held.includes(connector.id) ||
+          connector.transaction ||
+          connector.availability !== "Operative" ||
+          connector.status !== OCPPStatus.Available
+        ) {
+          continue;
+        }
+        connector.availability = "Inoperative";
+        cp.updateConnectorStatus(connector.id, OCPPStatus.Unavailable);
+        held.push(connector.id);
+        const id = connector.id;
+        unwatch(id);
+        watches.set(
+          id,
+          connector.events.on("availabilityChange", () => {
+            unwatch(id);
+            ctx.state[HELD] = heldIds(ctx).filter((other) => other !== id);
+          }),
+        );
+      }
+      ctx.state[HELD] = held;
+    },
+    release(ctx) {
+      const held = heldIds(ctx);
+      // Before the writes below, or the release would hear itself.
+      for (const id of [...watches.keys()]) unwatch(id);
+      for (const id of held) {
+        const connector = cp.getConnector(id);
+        if (!connector) continue;
+        connector.availability = "Operative";
+        if (connector.status === OCPPStatus.Unavailable) {
+          cp.updateConnectorStatus(id, cp.statusWhenFree(id));
+        }
+      }
+      ctx.state[HELD] = [];
+    },
+  };
 }
 
 /**
@@ -188,6 +220,7 @@ function releaseConnectors(cp: ChargePoint, ctx: BehaviorContext): void {
  */
 async function transactionsEndedBeforeReboot(
   cp: ChargePoint,
+  connectors: ConnectorHold,
   ctx: BehaviorContext,
   cancelled: () => boolean,
 ): Promise<boolean> {
@@ -195,11 +228,11 @@ async function transactionsEndedBeforeReboot(
   // Unavailable while waiting, or a new session could postpone the reboot
   // indefinitely.
   const hold = ctx.params.connectorsUnavailable === true;
-  if (hold) holdIdleConnectors(cp, ctx);
+  if (hold) connectors.hold(ctx);
   while (hasTransaction(cp)) {
     await ctx.sleep(POLL_MS);
     if (cancelled()) return false;
-    if (hold) holdIdleConnectors(cp, ctx);
+    if (hold) connectors.hold(ctx);
   }
   return !cancelled();
 }
@@ -215,21 +248,22 @@ const hasTransaction = (cp: ChargePoint): boolean =>
  */
 async function prepareInstall(
   cp: ChargePoint,
+  connectors: ConnectorHold,
   ctx: BehaviorContext,
   cancelled: () => boolean,
   onWait?: () => void,
 ): Promise<boolean> {
   const hold = ctx.params.connectorsUnavailable === true;
   if (ctx.params.waitForTransactions === true) {
-    if (hold) holdIdleConnectors(cp, ctx);
+    if (hold) connectors.hold(ctx);
     if (hasTransaction(cp)) onWait?.();
     while (hasTransaction(cp)) {
       await ctx.sleep(POLL_MS);
       if (cancelled()) return false;
-      if (hold) holdIdleConnectors(cp, ctx);
+      if (hold) connectors.hold(ctx);
     }
   } else if (hold) {
-    holdIdleConnectors(cp, ctx);
+    connectors.hold(ctx);
   }
   return !cancelled();
 }
@@ -327,6 +361,7 @@ function startTime(ctx: BehaviorContext, date: string | undefined): number {
  * FirmwareUpdated security event (FR.31).
  */
 export function firmwareBehavior(cp: ChargePoint): Behavior {
+  const connectors = connectorHold(cp);
   return {
     api: 1,
     id: "default.firmware",
@@ -373,7 +408,7 @@ export function firmwareBehavior(cp: ChargePoint): Behavior {
             const replaces = ctx.state.inFlight === true;
             return {
               response: { status: replaces ? "AcceptedCanceled" : "Accepted" },
-              after: () => train2(cp, ctx, req),
+              after: () => train2(cp, connectors, ctx, req),
             };
           }
 
@@ -426,7 +461,12 @@ export function firmwareBehavior(cp: ChargePoint): Behavior {
                     // Nothing asked: no extra turn, the former timing.
                     (ctx.params.waitForTransactions === true ||
                       ctx.params.connectorsUnavailable === true) &&
-                    !(await prepareInstall(cp, ctx, () => ctx.stopping))
+                    !(await prepareInstall(
+                      cp,
+                      connectors,
+                      ctx,
+                      () => ctx.stopping,
+                    ))
                   ) {
                     return;
                   }
@@ -442,7 +482,7 @@ export function firmwareBehavior(cp: ChargePoint): Behavior {
                     ctx.params.reboot === "beforeInstalled"
                   ) {
                     // §5.19 "automatic reboot": Installed follows the boot.
-                    releaseConnectors(cp, ctx);
+                    connectors.release(ctx);
                     installVersion(cp, ctx, req.location);
                     if (!(await rebootAndWait(cp, ctx))) return;
                     ctx.notify.firmwareStatus("Installed");
@@ -456,12 +496,12 @@ export function firmwareBehavior(cp: ChargePoint): Behavior {
                   await stepPause(ctx);
                 }
                 if (ctx.params.reboot === "afterInstalled") {
-                  releaseConnectors(cp, ctx);
+                  connectors.release(ctx);
                   cp.boot("FirmwareUpdate");
                 }
               } finally {
                 ctx.state.inFlight = false;
-                if (heldIds(ctx).length > 0) releaseConnectors(cp, ctx);
+                if (heldIds(ctx).length > 0) connectors.release(ctx);
               }
             },
           };
@@ -529,6 +569,7 @@ function reportSecurityEvent(cp: ChargePoint, type: string): void {
  */
 async function train2(
   cp: ChargePoint,
+  connectors: ConnectorHold,
   ctx: BehaviorContext,
   req: UpdateFirmwareRequest,
 ): Promise<void> {
@@ -587,7 +628,7 @@ async function train2(
     if (!Number.isNaN(installAt) && installAt > ctx.now()) {
       status("InstallScheduled");
       if (ctx.params.connectorsUnavailable === true) {
-        holdIdleConnectors(cp, ctx);
+        connectors.hold(ctx);
       }
       await ctx.sleep(installAt - ctx.now());
       if (cancelled()) return;
@@ -597,6 +638,7 @@ async function train2(
     if (
       !(await prepareInstall(
         cp,
+        connectors,
         ctx,
         cancelled,
         !Number.isNaN(installAt) ? undefined : wait,
@@ -619,8 +661,11 @@ async function train2(
       // L01.FR.15, FR.32 a: the new firmware reports Installed after the boot.
       status("InstallRebooting");
       // L01.FR.33: not while a transaction runs.
-      if (!(await transactionsEndedBeforeReboot(cp, ctx, cancelled))) return;
-      releaseConnectors(cp, ctx);
+      if (
+        !(await transactionsEndedBeforeReboot(cp, connectors, ctx, cancelled))
+      )
+        return;
+      connectors.release(ctx);
       installVersion(cp, ctx, firmware.location);
       if (!(await rebootAndWait(cp, ctx)) || cancelled()) return;
       status("Installed");
@@ -634,14 +679,17 @@ async function train2(
       await stepPause(ctx);
       if (cancelled()) return;
       // L01.FR.33: not while a transaction runs.
-      if (!(await transactionsEndedBeforeReboot(cp, ctx, cancelled))) return;
-      releaseConnectors(cp, ctx);
+      if (
+        !(await transactionsEndedBeforeReboot(cp, connectors, ctx, cancelled))
+      )
+        return;
+      connectors.release(ctx);
       cp.boot("FirmwareUpdate"); // L01.FR.32 b, B01.FR.09
     }
   } finally {
     if (ctx.state.generation === generation) {
       ctx.state.inFlight = false;
-      if (heldIds(ctx).length > 0) releaseConnectors(cp, ctx);
+      if (heldIds(ctx).length > 0) connectors.release(ctx);
     }
   }
 }

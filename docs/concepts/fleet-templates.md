@@ -123,7 +123,9 @@ The **Fleet templates** page (`/fleets`, sidebar entry between Run History and M
 - **New / Edit.** A JSON editor holding exactly what a `--fleet-template` file holds. The text is checked
   with `fleetTemplateSchema` before anything is sent; what the daemon still refuses (the id of a file
   template, which cannot be replaced) is shown under the editor and nothing is closed. Saving under an
-  existing stored id replaces it (`fleet.template.save`).
+  existing stored id replaces it (`fleet.template.save`). **Edit** keeps the template's id: a text whose
+  id was changed is refused under the editor and nothing is sent, so an edit never leaves a copy behind
+  (a copy under another id is a **New** template).
 - **Delete.** Asks inline first (`fleet.template.delete`); a file template answers the daemon's refusal.
 - **Create fleet.** A dialog with the optional `wsUrl`, `idPrefix` and `autoConnect` of `fleet.create`.
   Partial success is the result: the dialog lists the created ids, then each failed charge point with its

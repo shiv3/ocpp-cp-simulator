@@ -15,7 +15,6 @@ import type {
   FleetTemplate,
 } from "@ocpp-cp-simulator/contracts/methods";
 import Switch from "../../components/Switch";
-import { templateCpCount } from "../../lib/fleetTemplates";
 
 export interface FleetCreateDialogProps {
   template: FleetTemplate;
@@ -66,7 +65,7 @@ const FleetCreateDialog: React.FC<FleetCreateDialogProps> = ({
           {t("fleets.create.title", { name: template.name })}
         </DialogTitle>
         <DialogDescription className="text-[12.5px] text-cx-muted">
-          {t("fleets.create.hint", { count: templateCpCount(template) })}
+          {t("fleets.create.hint")}
         </DialogDescription>
         {result === null ? (
           <>

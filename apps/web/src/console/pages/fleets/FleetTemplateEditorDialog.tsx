@@ -15,8 +15,10 @@ import { parseFleetTemplateJson } from "../../lib/fleetTemplates";
 export interface FleetTemplateEditorDialogProps {
   /** The text to start from: a new template, or the one being edited. */
   initialText: string;
-  /** Editing keeps the id: saving under another id would make a copy. */
-  mode: "new" | "edit";
+  /** The id of the template being edited; absent for a new one. Editing
+   *  keeps the id: saving under another id would make a copy, so a text
+   *  whose id is not this one is refused before anything is sent. */
+  originalId?: string;
   onSave: (template: FleetTemplate) => Promise<void>;
   onClose: () => void;
 }
@@ -28,7 +30,7 @@ export interface FleetTemplateEditorDialogProps {
  */
 const FleetTemplateEditorDialog: React.FC<FleetTemplateEditorDialogProps> = ({
   initialText,
-  mode,
+  originalId,
   onSave,
   onClose,
 }) => {
@@ -41,6 +43,15 @@ const FleetTemplateEditorDialog: React.FC<FleetTemplateEditorDialogProps> = ({
     const parsed = parseFleetTemplateJson(text);
     if (!parsed.ok) {
       setProblems(parsed.problems);
+      return;
+    }
+    if (originalId !== undefined && parsed.template.id !== originalId) {
+      setProblems([
+        t("fleets.editor.idChanged", {
+          id: originalId,
+          newId: parsed.template.id,
+        }),
+      ]);
       return;
     }
     setProblems([]);
@@ -57,7 +68,7 @@ const FleetTemplateEditorDialog: React.FC<FleetTemplateEditorDialogProps> = ({
     <Dialog open onOpenChange={(open) => !open && !saving && onClose()}>
       <DialogContent className="w-[min(720px,calc(100vw-32px))] max-w-none gap-3 border-cx-border-strong bg-cx-card text-cx-fg sm:rounded-xl">
         <DialogTitle className="text-[15px] font-semibold tracking-normal">
-          {mode === "new"
+          {originalId === undefined
             ? t("fleets.editor.titleNew")
             : t("fleets.editor.titleEdit")}
         </DialogTitle>

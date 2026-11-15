@@ -163,10 +163,7 @@ import {
   makeScenarioRunId,
 } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunRecorder";
 import type { ScenarioRunResult } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioAssertions";
-import {
-  redactSensitiveText,
-  redactSensitiveValue,
-} from "@ocpp-cp-simulator/core/cp/shared/redaction";
+import { redactSensitiveText } from "@ocpp-cp-simulator/core/cp/shared/redaction";
 import {
   assertLoadableScenario,
   validateLoadableScenario,
@@ -179,6 +176,8 @@ import type {
   SessionSettledHandler,
   SessionSettledInfo,
 } from "./service/cliEvents";
+import { attachEventForwarders } from "./service/eventForwarders";
+import type { ForwarderHost } from "./service/forwarderHost";
 
 export type { CLIEvent, SessionSettledInfo };
 
@@ -475,6 +474,9 @@ export class CLIChargePointService {
   // would quietly re-install the pre-edit pool.
   private _init: ChargePointInitOptions;
 
+  /** What the event forwarders (`service/eventForwarders.ts`) read and call. */
+  private readonly _forwarderHost: ForwarderHost = this.createForwarderHost();
+
   constructor(
     init: ChargePointInitOptions,
     /** Shared daemon DB. `null` means run in-memory (no `--state-db`). */
@@ -601,7 +603,7 @@ export class CLIChargePointService {
         )
       : null;
 
-    this.attachEventForwarders();
+    attachEventForwarders(this._forwarderHost);
     this._sessionRecorder = new ChargingSessionRecorder(
       this._chargePoint,
       this._sessions,
@@ -2816,6 +2818,40 @@ export class CLIChargePointService {
     this._sessionSettledHandlers.clear();
   }
 
+  private createForwarderHost(): ForwarderHost {
+    const self = (): CLIChargePointService => this;
+    return {
+      get chargePoint() {
+        return self()._chargePoint;
+      },
+      get unsubscribes() {
+        return self()._unsubscribes;
+      },
+      get connectorUnsubscribes() {
+        return self()._connectorUnsubscribes;
+      },
+      get init() {
+        return self()._init;
+      },
+      set init(value) {
+        self()._init = value;
+      },
+      get autoTraffic() {
+        return self()._autoTraffic;
+      },
+      emit: (evt) => self().emit(evt),
+      notifySessionSettled: (info) => self().notifySessionSettled(info),
+      persistConnectorRuntime: (connector, connectorId) =>
+        self().persistConnectorRuntime(connector, connectorId),
+      handleConnectAutoStart: () => self().handleConnectAutoStart(),
+      handleStatusAutoStart: (connectorId, status) =>
+        self().handleStatusAutoStart(connectorId, status),
+      handleStatusChangeAutoTrigger: (connectorId, from, to) =>
+        self().handleStatusChangeAutoTrigger(connectorId, from, to),
+      attachStateHistoryForwarder: () => self().attachStateHistoryForwarder(),
+    };
+  }
+
   private emit(evt: CLIEvent): void {
     this.recordScenarioOnTimeline(evt);
     for (const handler of this._handlers) {
@@ -2864,214 +2900,6 @@ export class CLIChargePointService {
       summary: `Scenario ${scenarioId} ${detail.summary}`,
       data: { scenarioId, ...detail.data },
     });
-  }
-
-  private attachEventForwarders(): void {
-    // A firmware update with `bumpVersion` installed a new version: the
-    // init a `cp.update` falls back to follows it, whether or not anything
-    // persists it (`onFirmwareVersionChange`).
-    this._unsubscribes.push(
-      this._chargePoint.events.on(
-        "firmwareVersionChanged",
-        ({ firmwareVersion }) => {
-          this._init = {
-            ...this._init,
-            bootNotification: {
-              ...(this._init.bootNotification ?? {}),
-              firmwareVersion,
-            },
-          };
-        },
-      ),
-    );
-    // #603: a StartTransaction.conf that is not Accepted turns a start the
-    // runner counted as accepted (the request went out) into a refusal;
-    // once per session, and only for the answer to the start.
-    this._unsubscribes.push(
-      this._chargePoint.events.on(
-        "startTransactionNotAccepted",
-        ({ connectorId, midSession }) => {
-          // 2.x: an Updated that carries the idToken can be refused after
-          // the start was accepted; that is not a start refusal.
-          if (!midSession) {
-            this._autoTraffic.get(connectorId)?.noteStartConfRefused();
-          }
-        },
-      ),
-    );
-    this._unsubscribes.push(
-      this._chargePoint.timeline.onRecord((entry) =>
-        this.emit({ event: "timeline_entry", data: entry }),
-      ),
-    );
-    this._unsubscribes.push(
-      this._chargePoint.events.on("statusChange", ({ status }) => {
-        this.emit({ event: "status_change", data: { status } });
-        // "Auto-start on connect", the daemon side of the browser's
-        // LocalScenarioRuntime (same rules, matchAutoStart): when the CP
-        // reaches Available (post-BootNotification.Accepted) fire any loaded
-        // manual-trigger scenarios whose Start node opts into
-        // `triggerOn: "connect"`. In Remote mode the browser runs no
-        // scenarios, so this is the only place that does it.
-        if ((status as OCPPStatus) === OCPPStatus.Available) {
-          this.handleConnectAutoStart();
-          // Connector statusChange events fired during BootNotification
-          // handling race ahead of the CP-level Available transition, so
-          // `handleStatusAutoStart` returns early via the
-          // `chargePoint.status !== Available` gate and any
-          // `triggerOn: "status"` scenario targeting the connector's
-          // current state never starts. Re-evaluate every connector here
-          // now that the gate is open. Dedup via lastAutoStartedScenarioKey
-          // keeps repeats of this branch from re-firing what's already up.
-          for (const connector of this._chargePoint.connectors.values()) {
-            this.handleStatusAutoStart(
-              connector.id,
-              connector.status as OCPPStatus,
-            );
-          }
-        }
-      }),
-    );
-
-    this._unsubscribes.push(
-      this._chargePoint.events.on("error", ({ error }) => {
-        this.emit({ event: "error", data: { error } });
-      }),
-    );
-
-    this._unsubscribes.push(
-      this._chargePoint.events.on("connected", () => {
-        this.emit({ event: "connected", data: {} });
-      }),
-    );
-
-    this._unsubscribes.push(
-      this._chargePoint.events.on("bootNotificationResult", (result) => {
-        this.emit({ event: "boot_notification", data: { ...result } });
-      }),
-    );
-
-    this._unsubscribes.push(
-      this._chargePoint.events.on("disconnected", ({ code, reason }) => {
-        this.emit({ event: "disconnected", data: { code, reason } });
-        // ChargePoint.teardownAfterClose (which has already run by the time
-        // this fires) clears every connector's lastAutoStartedScenarioKey so a
-        // `triggerOn: "connect"` scenario re-arms on the next connect. Getting
-        // that into the DB normally rides on the connector statusChange that
-        // teardown's Unavailable cascade emits — but the cascade deliberately
-        // SKIPS a connector mid-transaction, so precisely the connectors that
-        // were charging when the socket dropped never persisted the clear, and
-        // a restart rehydrated the stale arm. Snapshot every connector here
-        // instead of relying on which ones happened to emit.
-        for (const [connectorId, connector] of this._chargePoint.connectors) {
-          this.persistConnectorRuntime(connector, connectorId);
-        }
-      }),
-    );
-
-    this._unsubscribes.push(
-      this._chargePoint.heartbeat.events.on(
-        "stateChange",
-        ({ intervalSeconds, lastSentAt }) => {
-          this.emit({
-            event: "heartbeat",
-            data: {
-              intervalSeconds,
-              lastSentAt: lastSentAt ? lastSentAt.toISOString() : null,
-            },
-          });
-        },
-      ),
-    );
-
-    this._unsubscribes.push(
-      this._chargePoint.events.on(
-        "connectorStatusChange",
-        ({ connectorId, status, previousStatus }) => {
-          this.emit({
-            event: "connector_status",
-            data: { connectorId, status, previousStatus },
-          });
-        },
-      ),
-      this._chargePoint.events.on("statusNotificationSuppressed", (data) => {
-        this.emit({ event: "status_notification_suppressed", data });
-      }),
-    );
-
-    this._unsubscribes.push(
-      this._chargePoint.events.on(
-        "transactionStarted",
-        ({ connectorId, transactionId, tagId }) => {
-          this.emit({
-            event: "transaction_started",
-            data: { connectorId, transactionId, tagId },
-          });
-        },
-      ),
-    );
-
-    this._unsubscribes.push(
-      this._chargePoint.events.on(
-        "transactionStopped",
-        ({ connectorId, transactionId }) => {
-          this.emit({
-            event: "transaction_stopped",
-            data: { connectorId, transactionId },
-          });
-        },
-      ),
-    );
-
-    this._unsubscribes.push(
-      this._chargePoint.events.on(
-        "connectorMeterValueChange",
-        ({ connectorId, meterValue }) => {
-          this.emit({
-            event: "meter_value",
-            data: { connectorId, meterValue },
-          });
-        },
-      ),
-    );
-
-    this._unsubscribes.push(
-      this._chargePoint.events.on("incomingCallReceived", (call) => {
-        this.emit({
-          event: "csms_call_received",
-          // JSON Lines writes events verbatim, so the redaction the
-          // Socket.IO wire applies is not enough on its own.
-          data: { ...call, payload: redactSensitiveValue(call.payload) },
-        });
-      }),
-      this._chargePoint.events.on("incomingCallCompleted", (completion) => {
-        this.emit({ event: "csms_call_completed", data: completion });
-      }),
-    );
-
-    this._unsubscribes.push(
-      this._chargePoint.events.on("log", ({ level, type, message }) => {
-        this.emit({
-          event: "log",
-          data: { level, type, message },
-        });
-      }),
-    );
-
-    this.attachConnectorEventForwarders();
-    this.attachStateHistoryForwarder();
-
-    this._unsubscribes.push(
-      this._chargePoint.events.on("connectorRemoved", ({ connectorId }) => {
-        this.emit({ event: "connector_removed", data: { connectorId } });
-        // #314: whatever a `--watch` reload was waiting on here is gone with
-        // the connector — `removeConnector` disposes it without ever emitting
-        // `transactionChange(null)`, so a held definition would wait for a
-        // notification that can no longer be sent. Announcing the settle is
-        // what lets the reload path see the connector has gone and say so.
-        this.notifySessionSettled({ connectorId, scenarioId: null });
-      }),
-    );
   }
 
   /**
@@ -3369,184 +3197,6 @@ export class CLIChargePointService {
    */
   reconcileChargingSessions(): void {
     this._sessionRecorder.reconcile();
-  }
-
-  private attachConnectorEventForwarders(): void {
-    this._chargePoint.connectors.forEach((connector, connectorId) => {
-      // Runtime persistence: every event that mutates a field in
-      // ConnectorRuntimeSnapshot triggers a full snapshot upsert.
-      // Snapshots are small (one row, ~10 columns) and writes are
-      // throttled naturally by event frequency, so we don't batch.
-      const persist = () =>
-        this.persistConnectorRuntime(connector, connectorId);
-      this._connectorUnsubscribes.push(
-        connector.events.on("statusChange", persist),
-      );
-      this._connectorUnsubscribes.push(
-        connector.events.on("availabilityChange", persist),
-      );
-      this._connectorUnsubscribes.push(
-        connector.events.on("transactionChange", persist),
-      );
-      this._connectorUnsubscribes.push(
-        connector.events.on("transactionChange", ({ transaction }) => {
-          // #314: `Connector.stopTransaction` nulls the field and *then* emits,
-          // so by here `hasOpenTransaction` already answers false. The bus's
-          // `transaction_stopped` fires several statements earlier, while the
-          // transaction is still set — which is why a reload held behind it
-          // cannot be released from there.
-          if (transaction === null) {
-            this.notifySessionSettled({ connectorId, scenarioId: null });
-          }
-        }),
-      );
-      this._connectorUnsubscribes.push(
-        // The backstop, and the reason the contract holds rather than mostly
-        // holding (#314). Every precise gate-opening point already announces a
-        // settle; this one announces on *any* connector status transition, so a
-        // hold cannot outlive the condition that took it. Three review rounds
-        // went to paths where the gate read open and nothing re-read it — a
-        // connector removed, a `StartTransaction` answered with a CALLERROR, a
-        // `cp.update` that dropped the connector — and enumerating the
-        // *condition* did not help, because what was missing each time was a
-        // *trigger*.
-        //
-        // Not the `connector_status` bus-event drain an earlier round rejected,
-        // and the difference matters: that one was proposed *instead of*
-        // understanding where the gate actually opens, and it hid stranded
-        // reloads by accident because it fired while the gate was still shut.
-        // The precise triggers are still there and still fire first; this only
-        // guarantees that a gate which is already open gets looked at again.
-        // Re-reading is cheap — the drain walks the held entries and does
-        // nothing when the gate is shut — and it runs on a later microtask, so
-        // it can never execute inside the teardown that opened it.
-        connector.events.on("statusChange", () => {
-          this.notifySessionSettled({ connectorId, scenarioId: null });
-        }),
-      );
-      this._connectorUnsubscribes.push(
-        connector.events.on("transactionIdChange", persist),
-      );
-      this._connectorUnsubscribes.push(
-        connector.events.on("meterValueChange", persist),
-      );
-      this._connectorUnsubscribes.push(
-        connector.events.on("socChange", persist),
-      );
-      this._connectorUnsubscribes.push(
-        connector.events.on("availabilityChange", ({ availability }) => {
-          this.emit({
-            event: "connector_availability",
-            data: { connectorId, availability },
-          });
-        }),
-      );
-      // Manual meter changes and the auto-meter scheduler emit on the
-      // connector's event bus rather than the charge-point's. Forward
-      // those so remote subscribers see meter updates in real time.
-      this._connectorUnsubscribes.push(
-        connector.events.on("meterValueChange", ({ meterValue }) => {
-          this.emit({
-            event: "meter_value",
-            data: { connectorId, meterValue },
-          });
-        }),
-      );
-      // When the CSMS confirms a StartTransaction, the connector's
-      // transactionId switches from the initial placeholder (0) to the
-      // assigned id. Re-emit transaction_started so remote subscribers see the
-      // accepted id. (transaction_stopped comes from ChargePoint's
-      // transactionStopped, emitted when the transaction ends.)
-      //
-      // #328: the assigned id is re-emitted WHATEVER it is, zero included.
-      // OCPP 1.6 makes `transactionId` schema-valid for any integer, and the
-      // setter this listens to is reached only from the CALLRESULT handlers —
-      // the local placeholder never flows through it — so a `=== 0` guard here
-      // did not skip a duplicate, it made a CSMS that assigns 0 invisible: a
-      // subscriber could not tell "assigned 0" from "no confirmation yet".
-      // Consumers already see two transaction_started per transaction on the
-      // non-zero path (local start, then the assigned id); this is the same
-      // sequence for one more value.
-      this._connectorUnsubscribes.push(
-        connector.events.on("transactionIdChange", ({ transactionId }) => {
-          const tagId = connector.transaction?.tagId ?? "";
-          this.emit({
-            event: "transaction_started",
-            data: { connectorId, transactionId, tagId },
-          });
-        }),
-      );
-      this._connectorUnsubscribes.push(
-        connector.events.on("socChange", ({ soc }) => {
-          this.emit({ event: "connector_soc", data: { connectorId, soc } });
-        }),
-      );
-      this._connectorUnsubscribes.push(
-        connector.events.on("modeChange", ({ mode }) => {
-          this.emit({ event: "connector_mode", data: { connectorId, mode } });
-        }),
-      );
-      this._connectorUnsubscribes.push(
-        connector.events.on("autoResetToAvailableChange", ({ enabled }) => {
-          this.emit({
-            event: "connector_auto_reset",
-            data: { connectorId, enabled },
-          });
-        }),
-      );
-      this._connectorUnsubscribes.push(
-        connector.events.on("autoMeterValueChange", ({ config }) => {
-          this.emit({
-            event: "connector_auto_meter",
-            data: { connectorId, config },
-          });
-        }),
-      );
-      this._connectorUnsubscribes.push(
-        connector.events.on("evSettingsChange", ({ settings }) => {
-          this.emit({
-            event: "connector_ev_settings",
-            data: { connectorId, settings },
-          });
-        }),
-      );
-      this._connectorUnsubscribes.push(
-        connector.events.on("chargingProfileChange", ({ profile }) => {
-          this.emit({
-            event: "connector_charging_profile",
-            data: { connectorId, profile },
-          });
-        }),
-      );
-      this._connectorUnsubscribes.push(
-        connector.events.on("chargingProfilesChange", ({ profiles }) => {
-          this.emit({
-            event: "connector_charging_profiles",
-            data: { connectorId, profiles },
-          });
-        }),
-      );
-
-      // statusChange-triggered scenarios: when this connector transitions,
-      // scan loaded scenarios for matches and auto-run the first one.
-      // Mirrors ScenarioManager.handleStatusChange used by the browser,
-      // inlined here to avoid duplicating the (cp, executors) state the
-      // service already owns. Also drives the manual-trigger +
-      // StartNode.triggerOn === "status" case (as LocalScenarioRuntime does
-      // in the browser's Local mode).
-      this._connectorUnsubscribes.push(
-        connector.events.on("statusChange", ({ status, previousStatus }) => {
-          this.handleStatusChangeAutoTrigger(
-            connectorId,
-            previousStatus as OCPPStatus,
-            status as OCPPStatus,
-          );
-          if ((status as OCPPStatus) !== previousStatus) {
-            this.handleStatusAutoStart(connectorId, status as OCPPStatus);
-          }
-        }),
-      );
-    });
   }
 
   /**

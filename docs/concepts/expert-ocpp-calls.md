@@ -10,6 +10,7 @@ sources:
   - packages/core/src/cp/infrastructure/transport/ExpertCalls.ts
   - apps/web/src/console/pages/cp/ExpertCallPanel.tsx
   - packages/core/src/cp/infrastructure/transport/RawFrameSender.ts
+  - packages/core/src/cp/domain/charge-point/StationMessaging.ts (sendOcppCall, sendRawFrame)
   - "issue #389"
   - "issue #393"
 related:
@@ -18,7 +19,7 @@ related:
   - ocpp-versions-and-transports.md
   - ../entities/web-console.md
   - ../entities/mcp-endpoint.md
-updated: 2026-11-05
+updated: 2026-11-15
 ---
 
 # Expert OCPP calls

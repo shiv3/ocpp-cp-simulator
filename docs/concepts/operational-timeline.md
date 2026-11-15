@@ -8,7 +8,7 @@ sources:
   - packages/core/src/cp/domain/services/ChargePointTimeline.ts
   - apps/cli/src/service/serviceLifecycle.ts (recordScenarioOnTimeline)
   - packages/contracts/src/methods/daemonMethods.ts (timeline.get)
-  - packages/core/src/cp/domain/charge-point/ChargePoint.ts (applyChargingProfile, clearChargingProfiles)
+  - packages/core/src/cp/domain/charge-point/ChargingProfileControl.ts (applyChargingProfile, clearChargingProfiles)
   - "issue #448"
   - "issue #469"
   - "issue #490"

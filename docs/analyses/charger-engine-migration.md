@@ -4,6 +4,7 @@ type: analysis
 summary: How the charger engine was built, stage by stage — the decisions each stage took where the design left a choice, the verification numbers and the two reviews; the current contract is in concepts/charger-engine.md.
 sources:
   - packages/core/src/cp/domain/charge-point/ChargePoint.ts
+  - packages/core/src/cp/domain/charge-point/ConnectorStatusControl.ts (updateConnectorStatus, afterConnectorStatus)
   - packages/core/src/cp/infrastructure/transport/OCPPMessageHandler.ts
   - packages/core/src/cp/infrastructure/transport/OCPPMessageHandlerV201.ts
   - packages/core/src/cp/infrastructure/transport/network-sim/ResponseEffectQueue.ts

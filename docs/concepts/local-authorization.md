@@ -9,7 +9,8 @@ sources:
   - packages/core/src/cp/domain/auth/StationAuthorization.ts
   - packages/core/src/cp/domain/auth/LocalAuthList.ts
   - packages/core/src/cp/domain/charge-point/ChargePoint.ts (authorizeAndWait delegate, startTransaction)
-  - packages/core/src/cp/domain/charge-point/AuthorizationFlow.ts (authorizeAndWait)
+  - packages/core/src/cp/domain/charge-point/AuthorizationFlow.ts (authorizeAndWait, recordAuthorizationResult)
+  - packages/core/src/cp/domain/charge-point/ChargePointSetup.ts (createStationAuthorization)
   - packages/core/src/cp/infrastructure/transport/handlers/callresult/TransactionResultHandlers.ts
   - packages/core/src/cp/infrastructure/transport/handlers/call/OtherCallHandlers.ts (ClearCacheHandler)
   - packages/core/src/cp/infrastructure/transport/v201/deviceModelMap.ts
@@ -270,7 +271,7 @@ with ISO `expiresAt`, `insertedAt` and `updatedAt`.
   expiry and the parent id, and drops `IdTokenType.type`, `evseId` and
   the other `idTokenInfo` fields that 2.1 C10.FR.14 asks to store.
 - The local list always honours its entries' expiry dates
-  (`localListChecksExpiry` is fixed to `true` in `ChargePoint.ts`):
+  (`localListChecksExpiry` is fixed to `true` in `ChargePointSetup.ts`):
   `LocalAuthListCtrlr.SupportsExpiryDateTime` (C13.FR.02/.05) is not
   modelled.
 - A local or offline refusal, a timeout fallback included, emits

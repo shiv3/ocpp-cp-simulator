@@ -172,8 +172,12 @@ bullet above, not repeated here.
   client certificate switch, call overrides, authorization flow, meter
   sampling, device model publisher, configuration wiring, power loss,
   Reset OnIdle, connection timeouts, plug-in flow, connector wiring, boot
-  lifecycle), each taking an explicit host interface; `ChargePoint.ts` keeps
-  the public members as thin delegates.
+  lifecycle, outage lifecycle, connector status control, charging profile
+  control, station messaging and notifications, capability gate, idTag
+  source), each taking an explicit host interface; `ChargePointCollaborators.ts`
+  builds them from one `StationContext` and `ChargePointSetup.ts` holds the
+  end of the constructor. `ChargePoint.ts` keeps the public members as thin
+  delegates.
 - `cp/application/` — the use cases that drive the domain: the charger engine
   and its behaviors, services (state history, heartbeat, operational
   timeline), the scenario engine (`application/scenario/`) and run

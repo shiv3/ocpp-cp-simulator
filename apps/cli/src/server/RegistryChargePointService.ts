@@ -119,6 +119,7 @@ import type {
   RegistryMembershipEvent,
 } from "./CPRegistry";
 import type { StopReason } from "@ocpp-cp-simulator/contracts/transactionVocabulary";
+import { RpcFailure } from "@ocpp-cp-simulator/contracts/errors";
 import {
   stopChargePointTransactionsAndWait,
   type ShutdownStopReport,
@@ -193,17 +194,29 @@ export class RegistryChargePointService implements ChargePointService {
 
   /**
    * Daemon-only: stop the running transactions of one charge point and wait,
-   * up to `--shutdown-wait-ms`, for the CSMS to answer the stops; what an
-   * opt-in `cp.delete` / `disconnect` with `stopTransactions` does before it
-   * closes the charge point. Rejects when no such charge point is registered.
+   * up to `--shutdown-wait-ms`, for the CSMS to answer the stops, then close
+   * it: what an opt-in `cp.delete` (`close: "remove"`) or `disconnect`
+   * (`close: "disconnect"`) with `stopTransactions` does. Rejects when no
+   * such charge point is registered.
+   *
+   * The wait and the close target the instance registered when the request
+   * started. A `cp.update` of the same cpId during the wait replaces that
+   * instance; the stop then leaves the replacement alone and the close is
+   * refused (rejects with `unavailable`), so it never removes or disconnects
+   * the replacement or deletes its persisted row.
    */
-  async stopTransactionsBeforeClose(
+  async stopTransactionsThenClose(
     id: string,
+    close: "remove" | "disconnect",
     reason?: StopReason,
   ): Promise<ShutdownStopReport> {
     const service = this.requireService(id);
-    return stopChargePointTransactionsAndWait(
-      this.registry,
+    const stillRegistered = () => this.registry.get(id) === service;
+    const report = await stopChargePointTransactionsAndWait(
+      {
+        list: () => [id],
+        get: (cpId) => (cpId === id && stillRegistered() ? service : undefined),
+      },
       id,
       this.deps.stopTransactionsWaitMs ?? DEFAULT_STOP_WAIT_MS,
       {
@@ -211,6 +224,15 @@ export class RegistryChargePointService implements ChargePointService {
         log: (line) => service.logTransactionNote(line),
       },
     );
+    if (!stillRegistered()) {
+      throw new RpcFailure(
+        "unavailable",
+        `cpId ${id} was replaced while its transactions were being stopped; the replacement was left as is`,
+      );
+    }
+    if (close === "remove") this.registry.remove(id);
+    else service.disconnect();
+    return report;
   }
 
   async removeChargePoint(id: string): Promise<void> {

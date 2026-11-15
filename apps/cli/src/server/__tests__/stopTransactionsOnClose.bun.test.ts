@@ -52,7 +52,11 @@ async function until<T>(
 }
 
 /** Answers every CALL as a CSMS would, for 1.6 and 2.x. */
-function autoRespond(csms: MockCsms) {
+function autoRespond(
+  csms: MockCsms,
+  /** Calls left unanswered, as a CSMS that never answers them. */
+  ignore: ReadonlySet<string> = new Set(),
+) {
   let cursor = 0;
   let nextTransactionId = 501;
   const timer = setInterval(() => {
@@ -65,6 +69,7 @@ function autoRespond(csms: MockCsms) {
         string,
         any,
       ];
+      if (ignore.has(action)) continue;
       switch (action) {
         case "BootNotification":
           csms.replyCallResult(messageId, {
@@ -111,11 +116,19 @@ const ended = (csms: MockCsms, from = 0): any[] =>
   calls(csms, "TransactionEvent", from).filter((p) => p.eventType === "Ended");
 
 /** A charge point with a running transaction on connector 1. */
-async function withTransaction(ocppVersion: "OCPP-1.6J" | "OCPP-2.0.1") {
+async function withTransaction(
+  ocppVersion: "OCPP-1.6J" | "OCPP-2.0.1",
+  options: {
+    ignore?: ReadonlySet<string>;
+    stopTransactionsWaitMs?: number;
+  } = {},
+) {
   const csms = startMockCsms();
   csmsList.push(csms);
-  autoRespond(csms);
-  const server = await startTestServer();
+  autoRespond(csms, options.ignore);
+  const server = await startTestServer({
+    stopTransactionsWaitMs: options.stopTransactionsWaitMs,
+  });
   servers.push(server);
   const socket = await connectTestClient(server);
   const cpId = `CPSTOP-${ocppVersion}-${servers.length}`;
@@ -232,4 +245,34 @@ describe("cp.delete / disconnect with stopTransactions", () => {
     expect(ended(v201.csms, from)).toEqual([]);
     expect(v201.svc.openTransactionConnectorIds()).toEqual([1]);
   });
+
+  for (const method of ["cp.delete", "disconnect"] as const) {
+    it(`${method} leaves alone a replacement made by a cp.update during the wait`, async () => {
+      const { csms, server, socket, cpId, svc } = await withTransaction(
+        "OCPP-1.6J",
+        // The CSMS never answers the stop, so the wait runs its full length.
+        { ignore: new Set(["StopTransaction"]), stopTransactionsWaitMs: 1500 },
+      );
+      const from = csms.received.length;
+      const closing = emitRpc(
+        socket,
+        method === "cp.delete"
+          ? { method, params: { cpId, stopTransactions: true } }
+          : { cpId, method, params: { stopTransactions: true } },
+      );
+      await until(
+        "the stop",
+        () => calls(csms, "StopTransaction", from).length > 0,
+      );
+      // A cp.update of the same cpId lands while the close waits.
+      const replacement = server.registry.update(svc.getInit());
+      expect(replacement).not.toBe(svc);
+      const result = await closing;
+      expect(result.ok).toBe(false);
+      expect(result.error.code).toBe("unavailable");
+      expect(result.error.message).toContain("was replaced");
+      expect(server.registry.get(cpId)).toBe(replacement);
+      expect(replacement.openTransactionConnectorIds()).toEqual([]);
+    });
+  }
 });

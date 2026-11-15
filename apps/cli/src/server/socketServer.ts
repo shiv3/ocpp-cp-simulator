@@ -1552,13 +1552,14 @@ async function deleteCp(
   deps: RuntimeSocketIoDeps,
   { cpId, stopTransactions, reason }: Params<"cp.delete">,
 ): Promise<{ ok: true }> {
-  if (stopTransactions === true) {
-    await runFacadeOperation(() =>
-      deps.chargePointService.stopTransactionsBeforeClose(cpId, reason),
-    );
-  }
   await runFacadeOperation(() =>
-    deps.chargePointService.removeChargePoint(cpId),
+    stopTransactions === true
+      ? deps.chargePointService.stopTransactionsThenClose(
+          cpId,
+          "remove",
+          reason,
+        )
+      : deps.chargePointService.removeChargePoint(cpId),
   );
   return { ok: true };
 }
@@ -2208,12 +2209,15 @@ async function dispatchFacadeCpCommand(
     }
     case "disconnect": {
       const { stopTransactions, reason } = call.params;
-      if (stopTransactions === true) {
-        await runFacadeOperation(() =>
-          chargePointService.stopTransactionsBeforeClose(id, reason),
-        );
-      }
-      await runFacadeOperation(() => chargePointService.disconnect(id));
+      await runFacadeOperation(() =>
+        stopTransactions === true
+          ? chargePointService.stopTransactionsThenClose(
+              id,
+              "disconnect",
+              reason,
+            )
+          : chargePointService.disconnect(id),
+      );
       return handled(undefined);
     }
     case "reset": {

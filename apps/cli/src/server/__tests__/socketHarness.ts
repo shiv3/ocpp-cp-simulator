@@ -39,6 +39,9 @@ export interface TestServerOptions {
     readonly password: string;
   } | null;
   readonly insecureTlsKeyPerms?: boolean;
+  /** The wait of an opt-in `stopTransactions` on `cp.delete` / `disconnect`
+   *  (`--shutdown-wait-ms`). Default 5000. */
+  readonly stopTransactionsWaitMs?: number;
   /** Behaviors loaded as `--behavior` would (the library charge points select from). */
   readonly behaviors?: BehaviorLibrary;
   /** Fleet templates, e.g. file-provided ones that skip `fleet.template.save`'s checks (#445). */
@@ -100,6 +103,7 @@ export async function startTestServer(
     configRepository,
     scenarioRepository,
     connectorSettingsRepository,
+    stopTransactionsWaitMs: options.stopTransactionsWaitMs,
   });
   const watchOptions =
     options.watch === true

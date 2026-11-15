@@ -5,7 +5,7 @@ summary: Implementation-independent JSON/JSONL record for one OCPP message excha
 sources:
   - packages/trace/src/logEntryToTrace.ts
   - apps/cli/src/trace/TraceWriter.ts
-  - package.json (@open-ocpp-trace/core, @open-ocpp-trace/jsonl)
+  - package.json (@open-ocpp-trace/core, @open-ocpp-trace/jsonl, @open-ocpp-trace/viewer-core, @open-ocpp-trace/viewer-react)
   - "issue #188"
   - "issue #886"
 related:
@@ -14,7 +14,7 @@ related:
   - log-format.md
   - scenario-format.md
   - ../entities/cli.md
-updated: 2026-11-09
+updated: 2026-11-15
 ---
 
 # OCPP Trace Format (v1.1)
@@ -60,6 +60,12 @@ and installed from GitHub Packages, which asks for a token even for a public
 package (`bunfig.toml`; see [CONTRIBUTING.md](../../CONTRIBUTING.md)).
 The CLI bundle and the web console inline them, so the published
 `ocpp-cp-simulator` package does not depend on them.
+
+The web console's Message Log shows the records it derives from its log
+buffer in the [Open OCPP Trace viewer](https://github.com/open-ocpp-trace/viewer)
+(`@open-ocpp-trace/viewer-core` and `@open-ocpp-trace/viewer-react` 0.1.0,
+from the same GitHub Packages registry as the SDK)
+([Trace tab](../entities/web-console.md#trace-tab)).
 
 What stays in this repository is simulator-specific: the log adapter
 (`logEntryToTrace`, `TraceCorrelator`, [below](#producing-records)), the

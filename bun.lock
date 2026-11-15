@@ -58,6 +58,8 @@
         "@eslint/js": "^10.0.1",
         "@open-ocpp-trace/core": "0.1.0",
         "@open-ocpp-trace/jsonl": "0.1.0",
+        "@open-ocpp-trace/viewer-core": "0.1.0",
+        "@open-ocpp-trace/viewer-react": "0.1.0",
         "@tailwindcss/postcss": "^4.3.5",
         "@tauri-apps/cli": "^2.12.4",
         "@testing-library/jest-dom": "^7.0.1",
@@ -302,6 +304,10 @@
     "@open-ocpp-trace/core": ["@open-ocpp-trace/core@0.1.0", "https://npm.pkg.github.com/download/@open-ocpp-trace/core/0.1.0/cad243682df917fdea1fcf29884f7947c2f02c35", {}, "sha512-US6bZlqZepowCAdf6XuuEoXeI1MKBkxxaPXqbkYh+xlRBkz+unBl15gEW5mbYEmh3AXUIqh6ROzwgm9DnknWiw=="],
 
     "@open-ocpp-trace/jsonl": ["@open-ocpp-trace/jsonl@0.1.0", "https://npm.pkg.github.com/download/@open-ocpp-trace/jsonl/0.1.0/3a89a30b2490f6a70e14bc5a12428d18b13ef0f7", { "dependencies": { "@open-ocpp-trace/core": "0.1.0" } }, "sha512-d2s/ZGevHcpNRZCMAYbXVWnm7NtunzjgHvLT0Ljv1SD6j7E9/H3xwJcDDm966vYfAXP0fVNw+Ikiavljc+NmrA=="],
+
+    "@open-ocpp-trace/viewer-core": ["@open-ocpp-trace/viewer-core@0.1.0", "https://npm.pkg.github.com/download/@open-ocpp-trace/viewer-core/0.1.0/1c5f68f744ba7469c5f26fd39453d970185b4627", { "dependencies": { "@open-ocpp-trace/core": "0.1.0" } }, "sha512-c1h867xQWDv51U8STrpQ9pTYpYPMAR7/ZIFVzPhk6DNiR4nhcGi//aNJOUC9cdq6V04avl2gHk+7g1+of8sbUw=="],
+
+    "@open-ocpp-trace/viewer-react": ["@open-ocpp-trace/viewer-react@0.1.0", "https://npm.pkg.github.com/download/@open-ocpp-trace/viewer-react/0.1.0/370432ff963f2953c44ecdd0fb2bd53e07c48f12", { "dependencies": { "@open-ocpp-trace/jsonl": "0.1.0", "@open-ocpp-trace/viewer-core": "0.1.0", "@tanstack/react-virtual": "3.14.26" }, "peerDependencies": { "react": "^18.0.0 || ^19.0.0", "react-dom": "^18.0.0 || ^19.0.0" } }, "sha512-/FU0xRJM/G/eu3mm5tw08V0Kr8ENoEf5cg/CAEfIXZFF5lzfK/Oei+mT/Gbr3KWKQjJfFAQXj0YN0DOesYCLNw=="],
 
     "@opentelemetry/api": ["@opentelemetry/api@1.10.0", "", {}, "sha512-lMkyes8iHrG+mk6WH7X70MdCLI2RS0FwNBY1PyQ8UemaijE2m5mv5A0Niy3HtbYTFrgkUEQjFMXmSAk2hQDuPQ=="],
 
@@ -622,6 +628,10 @@
     "@tailwindcss/oxide-win32-x64-msvc": ["@tailwindcss/oxide-win32-x64-msvc@4.3.5", "", { "os": "win32", "cpu": "x64" }, "sha512-XiKFfIy1RWe7qK4WqByxNW7Oz1/nkOy8o/BWhHminyV1PmpUd8Eedj5v2A8h2kpqeVlz6xRnwk9Fr/ZXNLcZfg=="],
 
     "@tailwindcss/postcss": ["@tailwindcss/postcss@4.3.5", "", { "dependencies": { "@alloc/quick-lru": "^5.2.0", "@tailwindcss/node": "4.3.5", "@tailwindcss/oxide": "4.3.5", "postcss": "^8.5.25", "tailwindcss": "4.3.5" } }, "sha512-FAV37Tlx9wBiT/hkfgVD0Q6CWsP2oUX3lf28nrfjW8+ksILjnpuFulUqWDfNR4/ZiEHHDRBX8DUTzD1Rys687A=="],
+
+    "@tanstack/react-virtual": ["@tanstack/react-virtual@3.14.26", "", { "dependencies": { "@tanstack/virtual-core": "3.19.11" }, "peerDependencies": { "react": "^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0", "react-dom": "^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0" } }, "sha512-HUDlfsrYH6ko5xH56L62Mcl/uzT+AGVNMHFuDNqDJMdZWc1AQa2oeVKNUvZ/RWBZQ4TYtyQerFrNvLnp39h65A=="],
+
+    "@tanstack/virtual-core": ["@tanstack/virtual-core@3.19.11", "", {}, "sha512-/5iHb0RHBvj8Di59FDs4ESNm45jls33aZAi4zccVXZjc/6ZvwQP6nzEYeT6weXjTf9E6/vrp2JhYWRyO+ZP13A=="],
 
     "@tauri-apps/api": ["@tauri-apps/api@2.12.4", "", {}, "sha512-pVmfis+4zT8H0Qhp3xPZx9Ju7kpzvA6rr/PSJPyuwfvucTQ8sVt61NYU9KMkK703UFlYadFmjKA4HhybOtN0gg=="],
 

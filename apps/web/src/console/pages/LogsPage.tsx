@@ -1,8 +1,9 @@
 import { useTranslation } from "react-i18next";
-import React, { useMemo } from "react";
+import React, { Suspense, lazy, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { t as translate } from "../../i18n";
 import {
   LogViewer,
@@ -17,6 +18,11 @@ import { downloadStoredLogs } from "../../lib/downloadStoredLogs";
 import PageHeader from "../components/PageHeader";
 import { useGlobalLogs, type GlobalLogEntry } from "../lib/useGlobalLogs";
 
+// The trace viewer is its own chunk, fetched when the Trace tab opens.
+const TraceView = lazy(() => import("../components/TraceView"));
+
+type LogsView = "log" | "trace";
+
 /**
  * Global, cross-charge-point Message Log. Aggregates every CP's
  * `{type: "log"}` events via `useGlobalLogs` — there's no server-side
@@ -30,13 +36,17 @@ import { useGlobalLogs, type GlobalLogEntry } from "../lib/useGlobalLogs";
  * as `?cp=<id>` (repeated for several): the charge point page links here with
  * its own id, and a reload keeps the choice. Download and Clear act on the
  * selected charge points, on all of them when none is.
+ *
+ * A **Trace** tab (`?view=trace`) shows the same buffer's OCPP-J frames as
+ * Open OCPP Trace records in the trace viewer (`TraceView`), with the same
+ * charge point filter. Only the active tab is mounted.
  */
 const LogsPage: React.FC = () => {
   const { t } = useTranslation();
   const { config, isLoading } = useConfig();
   const { chargePoints } = useChargePoints(config, { isLoading });
   const { entries, paused, setPaused, clear } = useGlobalLogs();
-  const { chargePointService } = useDataContext();
+  const { chargePointService, mode } = useDataContext();
 
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedCpIds = useMemo(
@@ -47,6 +57,13 @@ const LogsPage: React.FC = () => {
     const next = new URLSearchParams(searchParams);
     next.delete("cp");
     for (const id of ids) next.append("cp", id);
+    setSearchParams(next, { replace: true });
+  };
+  const view: LogsView = searchParams.get("view") === "trace" ? "trace" : "log";
+  const setView = (value: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (value === "trace") next.set("view", "trace");
+    else next.delete("view");
     setSearchParams(next, { replace: true });
   };
 
@@ -69,6 +86,20 @@ const LogsPage: React.FC = () => {
       }),
     [entries, viewerEntries],
   );
+
+  // The trace view stamps each frame with its charge point's OCPP version.
+  // Local-mode snapshots carry no `config`: the browser's shared config
+  // holds the version of every local charge point.
+  const ocppVersions = useMemo(() => {
+    const versions = new Map<string, string>();
+    for (const cp of chargePoints) {
+      const version =
+        cp.config?.ocppVersion ??
+        (mode === "local" ? config?.ocppVersion : undefined);
+      if (version) versions.set(cp.id, version);
+    }
+    return versions;
+  }, [chargePoints, mode, config?.ocppVersion]);
 
   // Whose persisted rows Download and Clear screen + DB reach.
   const scopeIds =
@@ -138,14 +169,44 @@ const LogsPage: React.FC = () => {
           </Button>
         }
       />
-      <LogViewer
-        logs={logs}
-        selectedCpIds={selectedCpIds}
-        onCpFilterChange={setSelectedCpIds}
-        onClear={handleClear}
-        onDownload={handleDownload}
-        className="flex-1"
-      />
+      <Tabs
+        value={view}
+        onValueChange={setView}
+        className="flex min-h-0 flex-1 flex-col"
+      >
+        <TabsList>
+          <TabsTrigger value="log">{t("dashboard.logs.tabs.log")}</TabsTrigger>
+          <TabsTrigger value="trace">
+            {t("dashboard.logs.tabs.trace")}
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent
+          value="log"
+          className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
+        >
+          <LogViewer
+            logs={logs}
+            selectedCpIds={selectedCpIds}
+            onCpFilterChange={setSelectedCpIds}
+            onClear={handleClear}
+            onDownload={handleDownload}
+            className="flex-1"
+          />
+        </TabsContent>
+        <TabsContent
+          value="trace"
+          className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
+        >
+          <Suspense fallback={null}>
+            <TraceView
+              entries={entries}
+              selectedCpIds={selectedCpIds}
+              onCpFilterChange={setSelectedCpIds}
+              ocppVersions={ocppVersions}
+            />
+          </Suspense>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 };

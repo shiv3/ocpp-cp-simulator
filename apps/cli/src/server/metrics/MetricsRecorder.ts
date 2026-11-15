@@ -11,7 +11,7 @@ import {
 } from "@ocpp-cp-simulator/trace/logEntryToTrace";
 import type { TraceRecord } from "@open-ocpp-trace/core";
 import { isSoapVersion } from "@ocpp-cp-simulator/core/cp/domain/types/OcppVersion";
-import { toTraceOcppVersion } from "../../trace/TraceWriter";
+import { toTraceOcppVersion } from "@ocpp-cp-simulator/trace/traceOcppVersion";
 
 export interface MetricsAttachContext {
   readonly cpId: string;

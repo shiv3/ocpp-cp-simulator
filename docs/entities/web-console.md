@@ -806,6 +806,63 @@ all of them when none is ticked:
   per charge point); progress and the result (or the failure) are shown in a
   [toast](#toast-notifications).
 
+#### Trace tab
+
+Two tabs sit under the header: **Log** (the `LogViewer` above, the default)
+and **Trace** (`?view=trace`; switching replaces the history entry and keeps
+`?cp=`). Only the active tab is mounted. **Trace** shows the same buffer's
+OCPP-J frames as [trace records](../concepts/trace-format.md) in the
+[Open OCPP Trace viewer](https://github.com/open-ocpp-trace/viewer)
+(`@open-ocpp-trace/viewer-react`, loaded as its own chunk when the tab
+opens), in
+[`TraceView.tsx`](../../apps/web/src/console/components/TraceView.tsx):
+
+- **What it lists.** Each `Sent:` / `Received:` line goes through the
+  simulator's own converter, `logLineToTraceRecord` and a `TraceCorrelator`,
+  serialized the way the CLI's `--trace-output` writer does
+  ([`traceFeed.ts`](../../apps/web/src/console/lib/traceFeed.ts)). Every
+  other line, SOAP exchanges included, is not a frame and stays in **Log**; a
+  note above the viewer says so. A CSMS CALL's `Inbound validation:` line
+  becomes its `meta.validation` when both arrive in the same buffer update.
+  Each record carries its charge point's `ocppVersion`, from the snapshot's
+  `config` in remote mode and from the browser's config in local mode, mapped
+  the way `--trace-output` does (`toTraceOcppVersion`); a charge point whose
+  version is unknown gives records without one. Records carry no
+  `connectorId` yet: the converter does not set it (#999).
+- **Feed.** One viewer store per visit of the tab, filled from the buffer
+  when the tab opens, then fed only the lines it has not seen (ids
+  `sim-seq-<seq>`). When the buffer (2000 lines) overflowed past lines the
+  tab had not read yet, a **dropped** gap is listed where they were.
+- **Correlation.** Responses pair with their CALL per charge point (scope
+  `chargePoint`): two charge points may receive CSMS CALLs with the same
+  message id.
+- **Filters.** The viewer's own panel (charge points, directions, message
+  types, actions, text search). Its charge point group is the page's
+  `?cp=`, shared with **Log**; the other choices are kept while the tab
+  stays open.
+- **Export.** **Export selection** and **Export filtered** download the
+  records as `ocpp-trace-<scope>-<timestamp>.jsonl`, in the trace format.
+- **Detail panel.** The inspector shows the selected entry; its payload is
+  syntax-highlighted
+  ([`jsonHighlight.ts`](../../apps/web/src/console/lib/jsonHighlight.ts),
+  lenient: a cut or redacted payload stays readable). The raw frame, error
+  details and meta are not: viewer-react 0.1.0 hands the host the payload
+  only. **Hide details** / **Show details** in the toolbar folds the panel
+  so the list takes its width; the choice is kept in `localStorage`
+  (`ocpp-cp.console.trace.detailsHidden`).
+- **Look and language.** The viewer follows the console's dark mode, its
+  `cx-*` colors and fonts, and its controls are restyled like the console's
+  buttons, inputs and section labels
+  ([`TraceView.css`](../../apps/web/src/console/components/TraceView.css));
+  its texts go through react-i18next
+  (`dashboard.logs.trace.viewer.*`); a few rare ones (inspector markers,
+  error texts) stay in English.
+
+The viewer packages (`@open-ocpp-trace/viewer-core`,
+`@open-ocpp-trace/viewer-react`) come from GitHub Packages, like the trace
+SDK: `bun install` needs a `GITHUB_TOKEN` with `read:packages`
+([CONTRIBUTING.md](../../CONTRIBUTING.md)).
+
 ### Scenarios page
 
 The Scenarios page (`/scenarios`) has the header **Scenarios** with the

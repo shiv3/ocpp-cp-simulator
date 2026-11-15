@@ -13,24 +13,27 @@ export class CallWaiters<T> {
       resolve: (value: T) => void;
       reject: (error: Error) => void;
       timer: unknown;
+      /** The clock that armed `timer`, the only one that can clear it. */
+      clock: RpcClock;
     }
   >();
 
   constructor(
     private readonly _timeoutMs: number,
     private readonly _timeoutError: (id: string) => Error,
-    /** The clock the timeout runs on, read when a waiter is registered and
-     *  when it settles. */
+    /** The clock the timeout runs on, read when a waiter is registered; the
+     *  waiter keeps that clock to clear its timer. */
     private readonly _clock: () => RpcClock = () => platformClock,
   ) {}
 
   register(id: string): Promise<T> {
     return new Promise<T>((resolve, reject) => {
-      const timer = this._clock().setTimeout(() => {
+      const clock = this._clock();
+      const timer = clock.setTimeout(() => {
         this._waiters.delete(id);
         reject(this._timeoutError(id));
       }, this._timeoutMs);
-      this._waiters.set(id, { resolve, reject, timer });
+      this._waiters.set(id, { resolve, reject, timer, clock });
     });
   }
 
@@ -55,7 +58,7 @@ export class CallWaiters<T> {
     const waiter = this._waiters.get(id);
     if (!waiter) return undefined;
     this._waiters.delete(id);
-    this._clock().clearTimeout(waiter.timer);
+    waiter.clock.clearTimeout(waiter.timer);
     return waiter;
   }
 }

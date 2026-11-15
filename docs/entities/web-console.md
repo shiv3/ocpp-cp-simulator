@@ -1257,7 +1257,11 @@ write-back (`rebuildFromTree`, in `blockTree/rebuild.ts`) and the edit
 primitives (`cloneTree`, `seqAt`, `insertBlockAt`, in
 `blockTree/edit/primitives.ts`), the capability checks (`editCapabilities`,
 `canWrapInLoop`, in `blockTree/capabilities.ts`) and the edits they simulate
-(`applyRemoveStep`, `applyUnwrapLoop`, in `blockTree/edit/applies.ts`) live in
+(`applyRemoveStep`, `applyUnwrapLoop`, in `blockTree/edit/applies.ts`) and the
+operations themselves (`insertStep`, `moveStepTo` in `blockTree/edit/steps.ts`;
+`addLane`, `setLaneExit` in `blockTree/edit/lanes.ts`; `wrapInLoop`,
+`setLoopBounds` in `blockTree/edit/loops.ts`; `setLink` in
+`blockTree/edit/links.ts`) live in
 [`blockTree/`](../../apps/web/src/console/lib/blockTree/) and are re-exported
 by `blockTree.ts`): nested sequences of steps, forks and loops, recovered
 from the graph the way the executor reads it (`lowerScenario`,

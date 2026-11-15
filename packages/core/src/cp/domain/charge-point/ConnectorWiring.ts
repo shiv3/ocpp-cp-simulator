@@ -22,6 +22,7 @@ import type {
 import type { ChargingProfileStore } from "./ChargingProfileStore";
 import type { MeterSampling } from "./MeterSampling";
 import { VehicleBehaviorDriver } from "./VehicleBehaviorDriver";
+import { resumeAfterEvseSuspension } from "./resumeAfterEvseSuspension";
 
 /** What the connector wiring needs from its charge point. */
 export interface ConnectorWiringHost {
@@ -140,14 +141,7 @@ export class ConnectorWiring {
               `Connector ${connectorId} schedule period limit=${watts}W, resuming → Charging`,
               LogType.OCPP,
             );
-          // §4.9: SuspendedEVSE takes precedence over SuspendedEV; once the
-          // EVSE side lifts, an EV that is not ready leaves SuspendedEV (#871).
-          this.host.chargePoint.updateConnectorStatus(
-            connectorId,
-            connector.evConnection === "connected-not-ready"
-              ? OCPPStatus.SuspendedEV
-              : OCPPStatus.Charging,
-          );
+          resumeAfterEvseSuspension(this.host.chargePoint, connector);
         }
       });
       // #722: MeterValueSampleInterval drives the periodic MeterValues of a

@@ -18,6 +18,7 @@ sources:
   - packages/core/src/cp/domain/charge-point/ChargePoint.ts (evDisconnected delegate)
   - packages/core/src/cp/domain/charge-point/PlugInFlow.ts (evDisconnected, evPlugIn, evSetReady)
   - packages/core/src/cp/domain/connector/EvConnection.ts
+  - packages/core/src/cp/domain/charge-point/resumeAfterEvseSuspension.ts
   - "issue #453"
 related:
   - operational-timeline.md
@@ -289,6 +290,12 @@ Rules:
   with one in, `SuspendedEV` when the EV is not ready (#871, also on 1.6:
   `Preparing` to `SuspendedEV`, §4.9 B4). The plug-in that follows an `Idle`
   start reports `EVConnected`, then `Charging`.
+- `ev_ready(false)` during `SuspendedEVSE` is only recorded: "SuspendedEVSE
+  SHALL have precedence over status SuspendedEV" (1.6 §4.9). When the charging
+  limit then lifts from 0 (a schedule period crossing, or Set/Clear
+  ChargingProfile on 1.6 and 2.x) the connector goes to `SuspendedEV`, not
+  `Charging`, with the offer held so that `ev_ready(true)` resumes `Charging`
+  (#871).
 - The cable goes with the EV: the auto-reset to `Available` after a stop clears it,
   and whatever frees a connector with a cable in (ChangeAvailability back to
   Operative, a reservation that ends, the firmware hold) shows `Preparing` (2.x

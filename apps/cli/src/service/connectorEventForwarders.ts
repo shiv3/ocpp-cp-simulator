@@ -56,6 +56,13 @@ export function attachConnectorEventForwarders(host: ForwarderHost): void {
     host.connectorUnsubscribes.push(
       connector.events.on("transactionIdChange", persist),
     );
+    // #846: the target-SoC auto-stop is the one station-side end that
+    // completes an intent session of the traffic.
+    host.connectorUnsubscribes.push(
+      connector.events.on("autoStopRequested", () =>
+        host.autoTraffic.get(connectorId)?.noteTargetReached(),
+      ),
+    );
     host.connectorUnsubscribes.push(
       connector.events.on("meterValueChange", persist),
     );

@@ -47,9 +47,11 @@ export interface AutoTrafficHooks {
   /**
    * `sessionModel: "intent"` only (#327): whether the connector still has the
    * transaction this runner started. The vehicle reaching its target SoC ends
-   * it from the station's side (the connector's auto-stop); the runner notices
-   * here and counts the session completed instead of stopping it again.
-   * Absent: the session only ends at its ceiling.
+   * it from the station's side (the connector's auto-stop, reported through
+   * {@link AutoTrafficRunner.noteTargetReached}); the runner notices here and
+   * counts the session completed instead of stopping it again. Any other
+   * station-side end (#846) is not counted. Absent: the session only ends at
+   * its ceiling.
    */
   sessionRunning?: (connectorId: number) => boolean;
   stopTransaction: (connectorId: number) => Promise<void>;
@@ -86,6 +88,8 @@ export class AutoTrafficRunner {
   /** The start conf of the open session was already counted as refused, so
    *  a later refusal in the same session corrects nothing (#603). */
   private startConfSettled = false;
+  /** The open session ended at its target SoC (#846). */
+  private targetReached = false;
   private startedAtMs = 0;
   readonly counters: AutoTrafficCounters = emptyAutoTrafficCounters();
 
@@ -140,6 +144,14 @@ export class AutoTrafficRunner {
     this.startConfSettled = true;
     if (this.counters.startAccepted > 0) this.counters.startAccepted--;
     this.counters.startRejected++;
+  }
+
+  /**
+   * The connector's target-SoC auto-stop fired (`EnergyLimitReached`, #846):
+   * the only station-side end of an intent session that counts `completed`.
+   */
+  noteTargetReached(): void {
+    if (this.sessionOpen) this.targetReached = true;
   }
 
   /** Replace the config. Restarts the stream, so the seed takes effect. */
@@ -277,6 +289,7 @@ export class AutoTrafficRunner {
       }
       this.sessionOpen = true;
       this.startConfSettled = false;
+      this.targetReached = false;
       this.counters.started++;
       this.counters.startAccepted++;
       if (vehicle) {
@@ -318,10 +331,17 @@ export class AutoTrafficRunner {
       this.timer = null;
       if (this.stopped) return;
       if (this.hooks.sessionRunning?.(this.connectorId) === false) {
-        // The vehicle reached its target and the station stopped the
-        // transaction: the session completed on its own.
+        // The station ended the transaction. Only the target-SoC auto-stop
+        // completes the session; a RemoteStop, an EV-side unplug, a power
+        // loss or a Reset interrupted it (#846).
         this.sessionOpen = false;
-        this.counters.completed++;
+        if (this.targetReached) {
+          this.counters.completed++;
+        } else {
+          this.hooks.log(
+            `[auto-traffic] ${this.cpId}/${this.connectorId} session ended by the station before its target`,
+          );
+        }
         this.scheduleNext();
         return;
       }

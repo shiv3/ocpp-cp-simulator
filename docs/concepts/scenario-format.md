@@ -5,6 +5,8 @@ summary: The node-graph JSON format for scripted charge-point behavior — 32 no
 sources:
   - packages/core/schema/scenario.schema.json
   - packages/core/src/cp/application/scenario/ScenarioTypes.ts
+  - packages/core/src/cp/application/scenario/types/nodeData.ts
+  - packages/core/src/cp/application/scenario/types/graph.ts
   - packages/core/src/cp/application/scenario/WaitControl.ts
   - packages/core/src/cp/application/verification/ScenarioAssertions.ts
   - packages/core/src/scenario/scenarioSchemaValidator.ts

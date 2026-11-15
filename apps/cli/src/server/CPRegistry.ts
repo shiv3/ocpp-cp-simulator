@@ -4,10 +4,8 @@ import type {
   Behavior,
   JsonObject,
 } from "@ocpp-cp-simulator/contracts/behavior";
-import { behaviorFitProblem } from "@ocpp-cp-simulator/core/cp/application/engine/behaviorFit";
 import {
   BehaviorLibrary,
-  BehaviorNotLoadableError,
   type ReplaceOutcome,
 } from "../behavior/BehaviorLibrary";
 import type { ChargePointInitOptions } from "../types";
@@ -16,16 +14,6 @@ import type { EventBus } from "./eventBus";
 import { SqliteModemRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/SqliteModemRepository";
 import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
 import type { NetworkSimManager } from "./NetworkSimManager";
-import { OcppSecurityProfileConfigError } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/wsUrlWithBasic";
-import type {
-  OcppSecurityProfile,
-  OcppTlsOptions,
-} from "@ocpp-cp-simulator/core/cp/infrastructure/transport/wsUrlWithBasic";
-import { buildSoapCallbackUrl } from "../soapCallbackUrl";
-import { DEFAULT_SOAP_PATH } from "../soapPath";
-import { isSoapVersion } from "@ocpp-cp-simulator/core/cp/domain/types/OcppVersion";
-import { perChargePointTables } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/schema";
-import { buildUpsert } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/upsert";
 import {
   matchesLabelSelector,
   type Labels,
@@ -39,21 +27,25 @@ import {
   type ScenarioRepository,
 } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioRepository";
 import { createScenarioRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/createScenarioRepository";
-import { restoreTlsFromPaths, readTlsFromPaths } from "./registry/tlsPaths";
+import { replaceBehaviorsEverywhere } from "./registry/behaviors";
 import {
-  labelsColumn,
-  mergeTlsOptions,
-  parsePersistedSecurityProfile,
-  preserveOmittedInit,
-  restoreBehaviorParams,
-  restoreBehaviors,
-  restoreCapabilityProfile,
-  restoreChargerCapabilities,
-  restoreLabels,
-  restoreTransport,
-  safeJsonParse,
-  type ChargePointRow,
-} from "./registry/rowMapping";
+  notifyInitChange,
+  notifyRegistryMembership,
+  notifySessionSettled,
+} from "./registry/notify";
+import {
+  checkFit,
+  prepareInit,
+  withDerivedSoapCallback,
+} from "./registry/initPrep";
+import {
+  persistBootNotification,
+  persistCreate,
+  persistRemove,
+  persistSecurityCredentials,
+} from "./registry/persistence";
+import { restoreFromDatabase, type RestoreContext } from "./registry/restore";
+import { labelsColumn, preserveOmittedInit } from "./registry/rowMapping";
 
 /**
  * `updated`: a registered charge point's config changed — rebuilt by
@@ -225,224 +217,28 @@ export class CPRegistry {
    * just started (#314).
    */
   restoreFromDatabase(opts: { connect?: boolean } = {}): string[] {
-    if (!this.database) return [];
-    const rows = this.database.all<ChargePointRow>(
-      "SELECT cp_id, ws_url, supervision_urls, url_distribution, " +
-        "id_tags, id_tag_distribution, id_tag_file, " +
-        "connectors, vendor, model, ocpp_version, " +
-        "central_system_url, soap_callback_url, soap_path, " +
-        "security_profile, authorization_key, cpo_name, " +
-        "tls_ca_path, tls_cert_path, tls_key_path, " +
-        "basic_auth, boot_notif, created_at, labels, behaviors, behavior_params, tx_updated_meter_values, " +
-        "inbound_validation, capability_profile, charger_capabilities, " +
-        "transport_options, reservation_authorize_id_tag " +
-        "FROM charge_points ORDER BY created_at ASC",
-    );
-    const restored: string[] = [];
-    for (const row of rows) {
-      if (this.services.has(row.cp_id)) continue;
-      const securityProfile = parsePersistedSecurityProfile(row);
-      // #296: without these the charge point comes back with failover
-      // silently disabled — the one thing a URL list exists to provide.
-      const supervisionUrls = safeJsonParse<string[]>(row.supervision_urls);
-      // #299: without these a charge point created with an idTag pool came
-      // back drawing nothing, silently falling back to the hard-coded literal.
-      const idTags = safeJsonParse<string[]>(row.id_tags);
-      const restored_behaviors = restoreBehaviors(
-        row,
-        this.library,
-        row.ocpp_version ?? "OCPP-1.6J",
-      );
-      const init: ChargePointInitOptions = {
-        cpId: row.cp_id,
-        wsUrl: row.ws_url,
-        ...(supervisionUrls && supervisionUrls.length > 1
-          ? { supervisionUrls }
-          : {}),
-        ...(row.url_distribution
-          ? {
-              urlDistribution: row.url_distribution as NonNullable<
-                ChargePointInitOptions["urlDistribution"]
-              >,
-            }
-          : {}),
-        ...(idTags && idTags.length > 0 ? { idTags } : {}),
-        // #314: the source path comes back too, so a daemon restarted with
-        // --watch re-watches the file instead of holding a snapshot of it.
-        ...(row.id_tag_file ? { idTagFile: row.id_tag_file } : {}),
-        ...(row.id_tag_distribution
-          ? {
-              idTagDistribution: row.id_tag_distribution as NonNullable<
-                ChargePointInitOptions["idTagDistribution"]
-              >,
-            }
-          : {}),
-        connectors: row.connectors,
-        vendor: row.vendor,
-        model: row.model,
-        ocppVersion: row.ocpp_version ?? "OCPP-1.6J",
-        centralSystemUrl: row.central_system_url ?? row.ws_url,
-        soapCallbackUrl: row.soap_callback_url ?? undefined,
-        soapPath: row.soap_path ?? undefined,
-        securityProfile,
-        authorizationKey: row.authorization_key ?? undefined,
-        cpoName: row.cpo_name ?? undefined,
-        tls: this.restoreTlsFromPaths(row, securityProfile),
-        tlsCaPath: row.tls_ca_path ?? undefined,
-        tlsCertPath: row.tls_cert_path ?? undefined,
-        tlsKeyPath: row.tls_key_path ?? undefined,
-        basicAuth: safeJsonParse<ChargePointInitOptions["basicAuth"]>(
-          row.basic_auth,
-        ),
-        bootNotification:
-          safeJsonParse<ChargePointInitOptions["bootNotification"]>(
-            row.boot_notif,
-          ) ?? undefined,
-        labels: restoreLabels(row),
-        ...restored_behaviors.init,
-        ...restoreBehaviorParams(
-          row,
-          this.library,
-          restored_behaviors.init.behaviors,
-        ),
-        // #551: 0 restores the opt-out; NULL (a row older than the default
-        // flip, or one never set) and 1 restore as the default (on).
-        ...(row.tx_updated_meter_values === 0
-          ? { txUpdatedMeterValues: false }
-          : row.tx_updated_meter_values === 1
-            ? { txUpdatedMeterValues: true }
-            : {}),
-        // #593: NULL, or a value this build does not know, restores as the
-        // default (warn).
-        ...(row.inbound_validation === "off" ||
-        row.inbound_validation === "warn" ||
-        row.inbound_validation === "enforce"
-          ? { inboundValidation: row.inbound_validation }
-          : {}),
-        // #595: NULL — off, or a row older than the column — restores as off.
-        ...(row.reservation_authorize_id_tag === 1
-          ? { reservationAuthorizeIdTag: true }
-          : {}),
-        // #609: NULL restores the built-in behaviour.
-        ...restoreTransport(row),
-        // #618: NULL, or JSON this build cannot read, restores as no profile.
-        ...restoreCapabilityProfile(row.capability_profile),
-        // #327: NULL, or JSON this build cannot read, restores as no cap.
-        ...restoreChargerCapabilities(row.charger_capabilities),
-      };
-      // #354 follow-up: a SOAP charge point whose callback URL was derived
-      // from a base the daemon no longer has — the tunnel was not opened this
-      // run, or --soap-public-base-url was dropped — cannot be constructed:
-      // CLIChargePointService refuses a SOAP init with no callback URL. Left
-      // to throw, that one row took the whole restore down and the daemon
-      // with it, healthy WebSocket rows included. Skip the row and say why;
-      // it stays in the table, so it comes back the moment the daemon is
-      // started with a base again (or is updated with an explicit URL).
-      if (
-        isSoapVersion(init.ocppVersion) &&
-        !init.soapCallbackUrl &&
-        !this.canDeriveSoapCallbackUrl()
-      ) {
-        console.warn(
-          `[CPRegistry] Skipping restore of SOAP charge point "${row.cp_id}": ` +
-            "it has no callback URL and the daemon has no SOAP public base to " +
-            "derive one from. Start with --soap-tunnel ngrok or " +
-            "--soap-public-base-url <url> to bring it back, or give it an " +
-            "explicit soapCallbackUrl with cp.update.",
-        );
-        continue;
-      }
-      // Use the internal create path WITHOUT re-inserting into the DB —
-      // these rows already exist.
-      try {
-        const svc = this.instantiate(init, { reconcileSessions: false });
-        if (restored_behaviors.column !== undefined) {
-          this.storedSelection.set(row.cp_id, restored_behaviors.column);
-          this.storedParams.set(row.cp_id, row.behavior_params ?? null);
-        }
-        // Restore per-connector runtime state (OCPP status, in-flight
-        // transaction, meter, soc) BEFORE wiring the WebSocket so the
-        // first StatusNotification we send carries the resumed status
-        // rather than a fresh Available. The snapshot is applied via
-        // Connector.restoreRuntimeSnapshot, which writes private fields
-        // without emitting statusChange — so the listeners on the new
-        // service won't trigger a duplicate persist or notification.
-        const restoredConnectors = svc.restoreConnectorRuntimeFromDatabase();
-        // #447: after the restore, so a restored transaction keeps its session.
-        svc.reconcileChargingSessions();
-        // After the reconcile, which only reads the connectors: `onResume` may
-        // start a transaction, and it must see the restored sessions settled.
-        svc.resumeEngine();
-        if (restoredConnectors > 0) {
-          console.log(
-            `[CPRegistry] Restored ${restoredConnectors} connector runtime ` +
-              `snapshot(s) for CP "${row.cp_id}"`,
-          );
-        }
-        // #300: the traffic config lives in `connector_settings`, not the
-        // connector row, so it needs its own restore. Without it an enabled
-        // configuration survived the restart as a row and came back idle.
-        if (this.connectorSettingsRepository) {
-          void svc
-            .restoreAutoTrafficFromDatabase(this.connectorSettingsRepository)
-            .then((started) => {
-              if (started > 0) {
-                console.log(
-                  `[CPRegistry] Resumed background traffic on ${started} ` +
-                    `connector(s) for CP "${row.cp_id}"`,
-                );
-              }
-            })
-            .catch(() => undefined);
-        }
-        // Rehydrate every scenario the operator had loaded against this CP
-        // before the restart. statusChange-trigger scenarios re-arm via the
-        // connector subscription set up in CLIChargePointService — nothing
-        // to do here beyond loading them.
-        const restoredScenarios = svc.restoreScenariosFromDatabase();
-        if (restoredScenarios > 0) {
-          console.log(
-            `[CPRegistry] Restored ${restoredScenarios} scenario(s) for CP "${row.cp_id}"`,
-          );
-        }
-        // Attach network simulation config BEFORE connecting so the CP
-        // starts with its faults applied.
-        if (this.networkSimManager) {
-          this.networkSimManager.onCpCreated(row.cp_id);
-        }
-        restored.push(row.cp_id);
-      } catch (error) {
-        // One row that cannot be rebuilt is not the daemon's end: the others
-        // come back, and this one stays in the table for a start that can.
-        this.storedSelection.delete(row.cp_id);
-        this.storedParams.delete(row.cp_id);
-        // A step after `instantiate` failed: the service is registered but was
-        // never wired. Take it out, or it sits in list() and never connects.
-        const partial = this.services.get(row.cp_id);
-        if (partial) {
-          this.unsubscribes.get(row.cp_id)?.();
-          this.unsubscribes.delete(row.cp_id);
-          this.services.delete(row.cp_id);
-          try {
-            partial.cleanup(true);
-          } catch {
-            // The restore of this row is being given up anyway.
-          }
-        }
-        console.warn(
-          `[CPRegistry] Skipping restore of charge point "${row.cp_id}": ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      }
-    }
-    // Kick the WebSockets open so BootNotification + StatusNotification fly to
-    // the CSMS automatically. Fire-and-forget — connect() returns immediately
-    // and opens in the background, and we don't want one slow CSMS to block the
-    // others. Deferred entirely when the caller says so, so it can put work
-    // between rebuilding the fleet and letting it dial.
-    if (opts.connect !== false) this.connectRestored(restored);
-    return restored;
+    return restoreFromDatabase(this.restoreContext(), opts);
+  }
+
+  private restoreContext(): RestoreContext {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    const registry = this;
+    return {
+      database: this.database,
+      library: this.library,
+      services: this.services,
+      unsubscribes: this.unsubscribes,
+      storedSelection: this.storedSelection,
+      storedParams: this.storedParams,
+      options: this.options,
+      connectorSettingsRepository: this.connectorSettingsRepository,
+      get networkSimManager() {
+        return registry.networkSimManager;
+      },
+      canDeriveSoapCallbackUrl: () => this.canDeriveSoapCallbackUrl(),
+      instantiate: (init, opts) => this.instantiate(init, opts),
+      connectRestored: (cpIds) => this.connectRestored(cpIds),
+    };
   }
 
   /**
@@ -528,16 +324,7 @@ export class CPRegistry {
   }
 
   private notifySessionSettled(cpId: string, info: SessionSettledInfo): void {
-    for (const sink of this.runSettledSinks) {
-      try {
-        sink(cpId, info);
-      } catch (err) {
-        console.error(
-          `[CPRegistry] session-settled sink error for "${cpId}":`,
-          err,
-        );
-      }
-    }
+    notifySessionSettled(this.runSettledSinks, cpId, info);
   }
 
   /**
@@ -637,12 +424,7 @@ export class CPRegistry {
     ocppVersion: string | undefined,
     behaviors: readonly Behavior[],
   ): void {
-    for (const behavior of behaviors) {
-      const problem = behaviorFitProblem(behavior, {
-        ocppVersion: ocppVersion ?? "OCPP-1.6J",
-      });
-      if (problem) throw new BehaviorNotLoadableError(problem);
-    }
+    checkFit(ocppVersion, behaviors);
   }
 
   /**
@@ -653,22 +435,7 @@ export class CPRegistry {
   private replaceBehaviorsEverywhere(
     behaviors: readonly Behavior[],
   ): ReplaceOutcome {
-    let applied = 0;
-    const failures: string[] = [];
-    for (const [cpId, svc] of this.services) {
-      const running = svc.behaviorIds();
-      const mine = behaviors.filter((b) => running.includes(b.id));
-      if (mine.length === 0) continue;
-      try {
-        svc.replaceBehaviors(mine);
-        applied++;
-      } catch (error) {
-        failures.push(
-          `${cpId} keeps the old version of ${mine.map((b) => b.id).join(", ")}: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    }
-    return { applied, failures };
+    return replaceBehaviorsEverywhere(this.services, behaviors);
   }
 
   /**
@@ -941,108 +708,24 @@ export class CPRegistry {
     cpId: string,
     bootNotification: NonNullable<ChargePointInitOptions["bootNotification"]>,
   ): void {
-    if (!this.database) return;
-    this.database.run(
-      "UPDATE charge_points SET boot_notif = ? WHERE cp_id = ?",
-      [JSON.stringify(bootNotification), cpId],
-    );
+    persistBootNotification(this.database, cpId, bootNotification);
   }
 
   private persistSecurityCredentials(
     cpId: string,
     change: { securityProfile?: number; authorizationKey?: string },
   ): void {
-    if (!this.database) return;
-    if (change.authorizationKey !== undefined) {
-      this.database.run(
-        "UPDATE charge_points SET authorization_key = ? WHERE cp_id = ?",
-        [change.authorizationKey, cpId],
-      );
-    }
-    if (change.securityProfile !== undefined) {
-      this.database.run(
-        "UPDATE charge_points SET security_profile = ? WHERE cp_id = ?",
-        [change.securityProfile, cpId],
-      );
-    }
+    persistSecurityCredentials(this.database, cpId, change);
   }
 
-  /**
-   * Fill in the SOAP callback URL from the daemon's public base when the
-   * charge point has none. Done at instantiation — after create()/update()
-   * have persisted the operator's own init — so the derived value never
-   * reaches the DB row (a free-tier tunnel URL changes between runs) and a
-   * restore re-derives it from whatever base the daemon has *now*.
-   */
   private withDerivedSoapCallback(
     init: ChargePointInitOptions,
   ): ChargePointInitOptions {
-    if (init.soapCallbackUrl) return init;
-    const base = this.options.soapPublicBaseUrl;
-    if (!base || !isSoapVersion(init.ocppVersion)) return init;
-    return {
-      ...init,
-      soapCallbackUrl: buildSoapCallbackUrl(
-        base,
-        init.cpId,
-        init.soapPath ?? this.options.soapPath ?? DEFAULT_SOAP_PATH,
-      ),
-      soapCallbackUrlDerived: true,
-    };
+    return withDerivedSoapCallback(this.options, init);
   }
 
-  /**
-   * Validate config-dependent security-profile requirements eagerly, before
-   * create()/update() persist or mutate anything, so a bad request fails
-   * atomically. Thrown as OcppSecurityProfileConfigError (rather than a
-   * plain Error) so the RPC layer (socketServer.ts runFacadeOperation) can
-   * map it to `invalid_params` with the human-readable message intact,
-   * instead of it falling through to an opaque, unlogged "internal error".
-   */
   private prepareInit(init: ChargePointInitOptions): ChargePointInitOptions {
-    // Ids only: an id that names no loaded behavior is refused here, before
-    // anything is persisted, with the loaded ids in the message.
-    if (init.behaviors !== undefined) this.library.check(init.behaviors);
-    const selected = this.library.select(init.behaviors);
-    this.checkFit(init.ocppVersion, selected);
-    this.library.checkParams(selected, init.behaviorParams);
-    if (
-      (init.securityProfile === 1 || init.securityProfile === 2) &&
-      !init.authorizationKey
-    ) {
-      throw new OcppSecurityProfileConfigError(
-        `securityProfile ${init.securityProfile} requires authorizationKey.`,
-      );
-    }
-    if (
-      init.securityProfile === 3 &&
-      !(init.tls?.cert && init.tls?.key) &&
-      !(init.tlsCertPath && init.tlsKeyPath)
-    ) {
-      throw new OcppSecurityProfileConfigError(
-        "securityProfile 3 requires client certificate and key TLS material.",
-      );
-    }
-    const tlsFromPaths = this.readTlsFromInitPaths(init);
-    if (!tlsFromPaths) return init;
-    return {
-      ...init,
-      tls: init.tls ? mergeTlsOptions(init.tls, tlsFromPaths) : tlsFromPaths,
-    };
-  }
-
-  private readTlsFromInitPaths(
-    init: ChargePointInitOptions,
-  ): OcppTlsOptions | undefined {
-    if (!init.tlsCaPath && !init.tlsCertPath && !init.tlsKeyPath) {
-      return undefined;
-    }
-    return this.readTlsFromPaths({
-      cpId: init.cpId,
-      tlsCaPath: init.tlsCaPath ?? null,
-      tlsCertPath: init.tlsCertPath ?? null,
-      tlsKeyPath: init.tlsKeyPath ?? null,
-    });
+    return prepareInit({ library: this.library, options: this.options }, init);
   }
 
   /**
@@ -1055,129 +738,11 @@ export class CPRegistry {
     behaviorsColumn?: string | null,
     paramsColumn?: string | null,
   ): void {
-    if (!this.database) return;
-    const { sql, params } = buildUpsert(
-      "charge_points",
-      [
-        ["cp_id", init.cpId],
-        ["ws_url", init.wsUrl],
-        [
-          "supervision_urls",
-          init.supervisionUrls ? JSON.stringify(init.supervisionUrls) : null,
-        ],
-        ["url_distribution", init.urlDistribution ?? null],
-        ["id_tags", init.idTags ? JSON.stringify(init.idTags) : null],
-        ["id_tag_distribution", init.idTagDistribution ?? null],
-        ["id_tag_file", init.idTagFile ?? null],
-        ["connectors", init.connectors],
-        ["vendor", init.vendor],
-        ["model", init.model],
-        ["ocpp_version", init.ocppVersion ?? "OCPP-1.6J"],
-        ["central_system_url", init.centralSystemUrl ?? init.wsUrl],
-        ["soap_callback_url", init.soapCallbackUrl ?? null],
-        ["soap_path", init.soapPath ?? null],
-        ["security_profile", init.securityProfile ?? null],
-        ["authorization_key", init.authorizationKey ?? null],
-        ["cpo_name", init.cpoName ?? null],
-        ["tls_ca_path", init.tlsCaPath ?? null],
-        ["tls_cert_path", init.tlsCertPath ?? null],
-        ["tls_key_path", init.tlsKeyPath ?? null],
-        ["basic_auth", init.basicAuth ? JSON.stringify(init.basicAuth) : null],
-        [
-          "boot_notif",
-          init.bootNotification ? JSON.stringify(init.bootNotification) : null,
-        ],
-        ["created_at", new Date().toISOString()],
-        ["labels", labelsColumn(init.labels)],
-        [
-          "behaviors",
-          behaviorsColumn !== undefined
-            ? behaviorsColumn
-            : init.behaviors
-              ? JSON.stringify(init.behaviors)
-              : null,
-        ],
-        [
-          "behavior_params",
-          paramsColumn !== undefined
-            ? paramsColumn
-            : init.behaviorParams && Object.keys(init.behaviorParams).length > 0
-              ? JSON.stringify(init.behaviorParams)
-              : null,
-        ],
-        [
-          "tx_updated_meter_values",
-          init.txUpdatedMeterValues === undefined
-            ? null
-            : init.txUpdatedMeterValues
-              ? 1
-              : 0,
-        ],
-        ["inbound_validation", init.inboundValidation ?? null],
-        [
-          "capability_profile",
-          init.capabilityProfile
-            ? JSON.stringify(init.capabilityProfile)
-            : null,
-        ],
-        [
-          "charger_capabilities",
-          init.chargerCapabilities
-            ? JSON.stringify(init.chargerCapabilities)
-            : null,
-        ],
-        [
-          "transport_options",
-          init.transport ? JSON.stringify(init.transport) : null,
-        ],
-        [
-          "reservation_authorize_id_tag",
-          init.reservationAuthorizeIdTag ? 1 : null,
-        ],
-      ],
-      ["cp_id"],
-      // The row keeps the time it was first created.
-      ["created_at"],
-    );
-    this.database.run(sql, params);
-  }
-
-  private restoreTlsFromPaths(
-    row: ChargePointRow,
-    securityProfile: OcppSecurityProfile | undefined,
-  ): OcppTlsOptions | undefined {
-    return restoreTlsFromPaths(this.options, row, securityProfile);
-  }
-
-  private readTlsFromPaths(paths: {
-    readonly cpId: string;
-    readonly tlsCaPath: string | null;
-    readonly tlsCertPath: string | null;
-    readonly tlsKeyPath: string | null;
-  }): OcppTlsOptions | undefined {
-    return readTlsFromPaths(this.options, paths);
+    persistCreate(this.database, init, behaviorsColumn, paramsColumn);
   }
 
   private persistRemove(cpId: string): void {
-    if (!this.database) return;
-    // Cascade to every `cp_id`-keyed table. There is no FK in the schema, so
-    // the cleanup is explicit — and the list is the schema's own (#326):
-    // hand-maintained here it covered three of the eight, and the rows left
-    // behind (settings, profiles, configuration, queued CALLs, logs, the
-    // desired-connected flag) came back when the same cpId was re-created.
-    // #314's watch rows ride the same list, whether or not this daemon runs
-    // with `--watch`.
-    for (const table of perChargePointTables()) {
-      try {
-        this.database.run(`DELETE FROM ${table} WHERE cp_id = ?`, [cpId]);
-      } catch (err) {
-        // A DB from before a table existed: keep deleting the rest.
-        console.warn(
-          `[CPRegistry] could not delete ${cpId} rows from ${table}:`,
-          err,
-        );
-      }
-    }
+    persistRemove(this.database, cpId);
   }
 
   remove(cpId: string, opts: { notify?: boolean } = {}): boolean {
@@ -1233,22 +798,10 @@ export class CPRegistry {
   }
 
   private notifyInitChange(): void {
-    for (const sink of this.initChangeSinks) {
-      try {
-        sink();
-      } catch {
-        process.stderr.write("[CPRegistry] init change sink error\n");
-      }
-    }
+    notifyInitChange(this.initChangeSinks);
   }
 
   private notifyRegistryMembership(event: RegistryMembershipEvent): void {
-    for (const sink of this.registrySinks) {
-      try {
-        sink(event);
-      } catch {
-        process.stderr.write("[CPRegistry] registry membership sink error\n");
-      }
-    }
+    notifyRegistryMembership(this.registrySinks, event);
   }
 }

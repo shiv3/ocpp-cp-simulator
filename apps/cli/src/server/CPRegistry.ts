@@ -937,11 +937,17 @@ export class CPRegistry {
     const unsubCredentials = svc.onSecurityCredentialsChange((change) =>
       this.persistSecurityCredentials(init.cpId, change),
     );
+    // A firmware update with `bumpVersion` installed a new version: the
+    // row's boot data follows, so a restart boots with it.
+    const unsubFirmware = svc.onFirmwareVersionChange((bootNotification) =>
+      this.persistBootNotification(init.cpId, bootNotification),
+    );
     this.services.set(init.cpId, svc);
     this.unsubscribes.set(init.cpId, () => {
       unsub();
       unsubSettled();
       unsubCredentials();
+      unsubFirmware();
     });
     if (engineState) svc.restoreEngineState(engineState);
     try {
@@ -963,6 +969,17 @@ export class CPRegistry {
     // create(), update() and restoreFromDatabase() all land here.
     this.notifyInitChange();
     return svc;
+  }
+
+  private persistBootNotification(
+    cpId: string,
+    bootNotification: NonNullable<ChargePointInitOptions["bootNotification"]>,
+  ): void {
+    if (!this.database) return;
+    this.database.run(
+      "UPDATE charge_points SET boot_notif = ? WHERE cp_id = ?",
+      [JSON.stringify(bootNotification), cpId],
+    );
   }
 
   private persistSecurityCredentials(

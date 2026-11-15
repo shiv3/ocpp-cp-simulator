@@ -1108,6 +1108,31 @@ export class CLIChargePointService {
     });
   }
 
+  /**
+   * A simulated firmware update with `bumpVersion` changed the station's
+   * firmwareVersion (`firmwareVersionChanged`). `getInit()` follows it, so a
+   * `cp.update` that omits the field keeps the installed version, and
+   * `listener` lets the registry write it to the row's boot data: a restart
+   * boots with the installed version, as a real station would.
+   */
+  onFirmwareVersionChange(
+    listener: (
+      bootNotification: NonNullable<ChargePointInitOptions["bootNotification"]>,
+    ) => void,
+  ): () => void {
+    return this._chargePoint.events.on(
+      "firmwareVersionChanged",
+      ({ firmwareVersion }) => {
+        const bootNotification = {
+          ...(this._init.bootNotification ?? {}),
+          firmwareVersion,
+        };
+        this._init = { ...this._init, bootNotification };
+        listener(bootNotification);
+      },
+    );
+  }
+
   /** Original init the CP was constructed from. Used by socket.io control
    *  flows to surface current config to the web console's edit modal. */
   getInit(): ChargePointInitOptions {

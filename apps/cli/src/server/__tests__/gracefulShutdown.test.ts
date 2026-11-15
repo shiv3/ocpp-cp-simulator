@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { stopTransactionsAndWait } from "../gracefulShutdown";
+import {
+  stopChargePointTransactionsAndWait,
+  stopTransactionsAndWait,
+} from "../gracefulShutdown";
 import { createLifecycle } from "../lifecycle";
 import type { CPRegistry } from "../CPRegistry";
 
@@ -143,6 +146,51 @@ describe("stopTransactionsAndWait", () => {
     );
     skip();
     await expect(done).resolves.toMatchObject({ stopped: 1, delivered: 0 });
+  });
+});
+
+describe("stopChargePointTransactionsAndWait", () => {
+  it("stops only the named charge point and waits for its answer", async () => {
+    const a = fakeService({ connectors: [1, 2] });
+    const b = fakeService({ connectors: [1] });
+    const done = stopChargePointTransactionsAndWait(
+      registryOf({ A: a, B: b }),
+      "A",
+      5000,
+    );
+    expect(a.stopped).toEqual([1, 2]);
+    expect(b.stopped).toEqual([]);
+    expect(b.subscribed()).toBe(false);
+    a.emit("Sent", '[2,"m1","StopTransaction",{"transactionId":1}]');
+    a.emit("Sent", '[2,"m2","StopTransaction",{"transactionId":2}]');
+    a.emit("Received", '[3,"m1",{}]');
+    a.emit("Received", '[3,"m2",{}]');
+    await expect(done).resolves.toEqual({
+      stopped: 2,
+      delivered: 2,
+      timedOut: false,
+    });
+  });
+
+  it("defaults to Other and passes a given reason, keeping AbnormalCondition", async () => {
+    const a = fakeService({ connectors: [1], online: false });
+    await stopChargePointTransactionsAndWait(registryOf({ A: a }), "A", 0);
+    await stopChargePointTransactionsAndWait(registryOf({ A: a }), "A", 0, {
+      reason: "Local",
+    });
+    expect(a.options).toEqual([
+      { reason: "Other", triggerReason: "AbnormalCondition" },
+      { reason: "Local", triggerReason: "AbnormalCondition" },
+    ]);
+  });
+
+  it("does nothing for an unknown charge point", async () => {
+    const report = await stopChargePointTransactionsAndWait(
+      registryOf({}),
+      "missing",
+      5000,
+    );
+    expect(report).toEqual({ stopped: 0, delivered: 0, timedOut: false });
   });
 });
 

@@ -118,6 +118,14 @@ import type {
   RegistryMembershipChange,
   RegistryMembershipEvent,
 } from "./CPRegistry";
+import type { StopReason } from "@ocpp-cp-simulator/contracts/transactionVocabulary";
+import {
+  stopChargePointTransactionsAndWait,
+  type ShutdownStopReport,
+} from "./gracefulShutdown";
+
+/** `--shutdown-wait-ms`'s default. */
+const DEFAULT_STOP_WAIT_MS = 5000;
 
 export type RegistryChargePointSubscriptionEvent =
   | { type: "snapshot"; cps: ChargePointSnapshot[] }
@@ -133,6 +141,9 @@ export interface RegistryChargePointServiceDeps {
   readonly scenarioRepository: ScenarioRepository;
   readonly connectorSettingsRepository: ConnectorSettingsRepository;
   readonly onReset?: () => void;
+  /** The wait of an opt-in `stopTransactions` on `cp.delete` / `disconnect`
+   *  (ms): the daemon's `--shutdown-wait-ms`. Default 5000. */
+  readonly stopTransactionsWaitMs?: number;
 }
 
 export interface RegistryConfigRepository {
@@ -178,6 +189,28 @@ export class RegistryChargePointService implements ChargePointService {
     if (!existing) throw new Error(`cpId not found: ${params.cpId}`);
     refuseProfileOnSoap(params, existing.getInit().ocppVersion);
     this.registry.update(toInitOptions(params, existing.getInit()));
+  }
+
+  /**
+   * Daemon-only: stop the running transactions of one charge point and wait,
+   * up to `--shutdown-wait-ms`, for the CSMS to answer the stops; what an
+   * opt-in `cp.delete` / `disconnect` with `stopTransactions` does before it
+   * closes the charge point. Rejects when no such charge point is registered.
+   */
+  async stopTransactionsBeforeClose(
+    id: string,
+    reason?: StopReason,
+  ): Promise<ShutdownStopReport> {
+    const service = this.requireService(id);
+    return stopChargePointTransactionsAndWait(
+      this.registry,
+      id,
+      this.deps.stopTransactionsWaitMs ?? DEFAULT_STOP_WAIT_MS,
+      {
+        reason,
+        log: (line) => service.logTransactionNote(line),
+      },
+    );
   }
 
   async removeChargePoint(id: string): Promise<void> {

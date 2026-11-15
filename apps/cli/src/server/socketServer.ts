@@ -1550,8 +1550,13 @@ async function reloadBehaviors(
 
 async function deleteCp(
   deps: RuntimeSocketIoDeps,
-  { cpId }: Params<"cp.delete">,
+  { cpId, stopTransactions, reason }: Params<"cp.delete">,
 ): Promise<{ ok: true }> {
+  if (stopTransactions === true) {
+    await runFacadeOperation(() =>
+      deps.chargePointService.stopTransactionsBeforeClose(cpId, reason),
+    );
+  }
   await runFacadeOperation(() =>
     deps.chargePointService.removeChargePoint(cpId),
   );
@@ -2202,6 +2207,12 @@ async function dispatchFacadeCpCommand(
       return handled(undefined);
     }
     case "disconnect": {
+      const { stopTransactions, reason } = call.params;
+      if (stopTransactions === true) {
+        await runFacadeOperation(() =>
+          chargePointService.stopTransactionsBeforeClose(id, reason),
+        );
+      }
       await runFacadeOperation(() => chargePointService.disconnect(id));
       return handled(undefined);
     }

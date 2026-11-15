@@ -1,4 +1,23 @@
+import type { StopReason } from "@ocpp-cp-simulator/contracts/transactionVocabulary";
 import type { CPRegistry } from "./CPRegistry";
+
+/**
+ * The 1.6 StopTransaction `reason` (2.x `stoppedReason`) of a stop the
+ * daemon makes on its own: a shutdown (#622) or an opt-in `cp.delete` /
+ * `disconnect` with `stopTransactions`. OCPP 1.6 §7.41 Reason `Other`: the
+ * stop is neither the EV driver's (`Local`: "stopped locally on request of the
+ * user at the Charge Point") nor the CSMS's (`Remote`). 2.0.1 E06 /
+ * ReasonEnumType spells it the same.
+ */
+export const DAEMON_STOP_REASON: StopReason = "Other";
+
+/** What to stop, and with which reason. */
+export interface StopScope {
+  /** Only these charge points; absent = every one of the registry. */
+  readonly cpIds?: readonly string[];
+  /** Default {@link DAEMON_STOP_REASON}. */
+  readonly reason?: StopReason;
+}
 
 /** What a graceful shutdown found and did, for the log line and tests. */
 export interface ShutdownStopReport {
@@ -23,13 +42,20 @@ const STOP_ACTIONS = new Set(["StopTransaction", "TransactionEvent"]);
  * written, so it cannot be delivered: it is not waited for, and the
  * message stays in the persistent queue for the next start. `waitMs` bounds
  * the whole wait, not each charge point.
+ *
+ * `scope` narrows it to some charge points (an opt-in `cp.delete` /
+ * `disconnect` with `stopTransactions`, see
+ * {@link stopChargePointTransactionsAndWait}) and names the reason.
  */
 export async function stopTransactionsAndWait(
   registry: Pick<CPRegistry, "list" | "get">,
   waitMs: number,
   log: (line: string) => void = () => {},
   skip: Promise<void> = new Promise<void>(() => {}),
+  scope: StopScope = {},
 ): Promise<ShutdownStopReport> {
+  const reason = scope.reason ?? DAEMON_STOP_REASON;
+  const targets = (): readonly string[] => scope.cpIds ?? registry.list();
   let skipped = false;
   void skip.then(() => {
     skipped = true;
@@ -52,7 +78,7 @@ export async function stopTransactionsAndWait(
    *  again while waiting, because a `start_transaction` command, a scenario or
    *  background traffic can open one after the first pass. */
   const stopPass = (): void => {
-    for (const cpId of registry.list()) {
+    for (const cpId of targets()) {
       const svc = registry.get(cpId);
       if (!svc) continue;
       const open = svc.openTransactionConnectorIds();
@@ -91,11 +117,12 @@ export async function stopTransactionsAndWait(
       }
       for (const connectorId of connectors) {
         try {
-          // 1.6 `Reason` Other ("any other reason"); 2.x has no value for a
-          // station going down, and StopAuthorized (the default) would claim
-          // an EV driver authorized the stop, so name AbnormalCondition.
+          // 1.6 `Reason` Other ("any other reason") unless the caller named
+          // one; 2.x has no trigger for a station going down or being taken
+          // away, and StopAuthorized (the default) would claim an EV driver
+          // authorized the stop, so name AbnormalCondition.
           svc.stopTransaction(connectorId, {
-            reason: "Other",
+            reason,
             triggerReason: "AbnormalCondition",
           });
           mine.add(connectorId);
@@ -161,6 +188,28 @@ export async function stopTransactionsAndWait(
     );
   }
   return { stopped, delivered, timedOut };
+}
+
+/**
+ * One charge point's share of the shutdown stop: stop its running
+ * transactions and wait, up to `waitMs`, for the CSMS to answer them, before
+ * an opt-in `cp.delete` or `disconnect` (`stopTransactions: true`) closes it.
+ * Same delivery rules as {@link stopTransactionsAndWait}: an offline charge
+ * point's stops are queued, not waited for.
+ */
+export function stopChargePointTransactionsAndWait(
+  registry: Pick<CPRegistry, "list" | "get">,
+  cpId: string,
+  waitMs: number,
+  options: {
+    readonly reason?: StopReason;
+    readonly log?: (line: string) => void;
+  } = {},
+): Promise<ShutdownStopReport> {
+  return stopTransactionsAndWait(registry, waitMs, options.log, undefined, {
+    cpIds: [cpId],
+    reason: options.reason,
+  });
 }
 
 interface Frame {

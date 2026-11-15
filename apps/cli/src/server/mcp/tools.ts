@@ -389,9 +389,12 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
   });
 
   mcp.tool("cp_delete", {
-    description: "Delete a charge point",
+    description:
+      "Delete a charge point. With stopTransactions: true its running transactions are stopped and their answers waited for first",
     inputSchema: z.object({
       cpId: z.string().describe("Charge point identifier to delete"),
+      stopTransactions: METHODS["cp.delete"].params.shape.stopTransactions,
+      reason: METHODS["cp.delete"].params.shape.reason,
     }),
     handler: async (args) => {
       try {
@@ -426,16 +429,20 @@ function registerCuratedTools(mcp: McpServer, deps: RuntimeSocketIoDeps): void {
   });
 
   mcp.tool("cp_disconnect", {
-    description: "Disconnect a charge point from the central system",
+    description:
+      "Disconnect a charge point from the central system. With stopTransactions: true its running transactions are stopped and their answers waited for first",
     inputSchema: z.object({
       cpId: z.string().describe("Charge point identifier"),
+      stopTransactions: METHODS.disconnect.params.shape.stopTransactions,
+      reason: METHODS.disconnect.params.shape.reason,
     }),
     handler: async (args) => {
       try {
+        const { cpId, ...params } = args;
         const result = await runRpc(deps, {
-          cpId: args.cpId,
+          cpId,
           method: "disconnect",
-          params: {},
+          params,
         });
         return successResult(result);
       } catch (err) {

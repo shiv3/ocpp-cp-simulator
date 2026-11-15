@@ -1133,6 +1133,12 @@ export class CLIChargePointService {
     );
   }
 
+  /** A line in this charge point's log, as a transaction message: what an
+   *  opt-in `stopTransactions` on `cp.delete` / `disconnect` did. */
+  logTransactionNote(message: string): void {
+    this._chargePoint.logger.info(message, LogType.TRANSACTION);
+  }
+
   /** Original init the CP was constructed from. Used by socket.io control
    *  flows to surface current config to the web console's edit modal. */
   getInit(): ChargePointInitOptions {

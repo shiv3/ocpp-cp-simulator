@@ -6,39 +6,10 @@ import type {
   ScenarioExecutorCallbacks,
   ScenarioEvents,
   ScenarioNode,
-  StatusChangeNodeData,
-  TransactionNodeData,
-  MeterValueNodeData,
-  DelayNodeData,
-  NotificationNodeData,
-  ConnectorPlugNodeData,
-  RemoteStartTriggerNodeData,
-  RemoteStopTriggerNodeData,
-  CsmsCallTriggerNodeData,
-  StatusTriggerNodeData,
-  ReserveNowNodeData,
-  CancelReservationNodeData,
-  ReservationTriggerNodeData,
-  StatusNotificationNodeData,
-  UnlockOutcomeNodeData,
-  ResponseOverrideNodeData,
-  InboundPolicyNodeData,
-  CertQuirksNodeData,
-  ConfigSetNodeData,
-  DataTransferNodeData,
-  OcppCallNodeData,
-  CallResponseNodeData,
-  UseBehaviorNodeData,
-  NotifyNodeData,
-  SwitchNodeData,
-  ChoiceNodeData,
-  SetStateNodeData,
-  ConnectionTriggerNodeData,
   StartTransactionOptions,
   StopTransactionOptions,
   ScenarioWaitIntervention,
 } from "./ScenarioTypes";
-import { ScenarioFlowNodeType, ScenarioNodeType } from "./ScenarioTypes";
 import { type FromScope } from "./resolveFrom";
 import {
   createScenarioMachine,
@@ -47,50 +18,12 @@ import {
   type ScenarioMachineService,
 } from "../state/machines/ScenarioStateMachine";
 import { interpret } from "robot3";
-import { BranchScope, ParallelRegion } from "./branchScope";
+import { BranchScope } from "./branchScope";
 import type { WaitControl } from "./WaitControl";
 import { type WaitSignal } from "./WaitControl";
-import type { Flow, NodeRunContext, ParkedWait } from "./nodes/context";
-import {
-  executeCertQuirks,
-  executeInboundPolicy,
-  executeResponseOverride,
-} from "./nodes/policies";
-import { executeMeterValue } from "./nodes/meterValue";
-import {
-  executeChoice,
-  executeNotify,
-  executeSetState,
-  executeSwitch,
-  pickCase,
-} from "./nodes/branching";
-import {
-  executeCallResponse,
-  executeConfigSet,
-  executeDataTransfer,
-  executeOcppCall,
-  executeStatusNotification,
-  executeUnlockOutcome,
-  executeUseBehavior,
-} from "./nodes/calls";
-import {
-  executeConnectorPlug,
-  executeDelay,
-  executeNotification,
-  executeStatusChange,
-  executeTransaction,
-} from "./nodes/transaction";
-import {
-  executeCancelReservation,
-  executeConnectionTrigger,
-  executeCsmsCallTrigger,
-  executeRemoteStartTrigger,
-  executeRemoteStopTrigger,
-  executeReservationTrigger,
-  executeReserveNow,
-  executeStatusTrigger,
-} from "./nodes/triggers";
-import { waitWithProgress } from "./waits";
+import type { Flow, FlowRunContext, ParkedWait } from "./nodes/context";
+import { executeFlow } from "./flow";
+import { sleep, waitWithOptionalForceSkip, waitWithProgress } from "./waits";
 import { ScenarioRunStateError } from "../../domain/errors/ScenarioRunStateError";
 import type { EventEmitter } from "../../shared/EventEmitter";
 import { realClock } from "../../shared/clock";
@@ -98,30 +31,11 @@ import type { SimClock } from "../../shared/clock";
 import { systemRngStreams } from "../../shared/rng";
 import type { Rng } from "../../shared/rng";
 import {
-  isTerminal,
-  loopBounds,
-  loopStep,
   lowerScenario,
-  isJoin,
-  joinMode,
-  nextStep,
-  resolveOrigin,
-  successors,
   type ScenarioProgram,
 } from "../../../scenario/scenarioGraph";
-import { connectionRule } from "../../../scenario/scenarioConnectionRules";
 
 type ScenarioEdge = ScenarioDefinition["edges"][number];
-
-const newFlow = (scope: BranchScope): Flow => ({
-  exchange: null,
-  answered: false,
-  response: null,
-  handle: null,
-  timeoutTarget: null,
-  scope,
-  loops: new Map(),
-});
 
 /** Time and randomness a scenario run reads; the platform's by default. */
 export interface ScenarioExecutorSimOptions {
@@ -212,7 +126,7 @@ export class ScenarioExecutor {
    *  definition's node or edge array is replaced. */
   private lowered: ScenarioProgram<ScenarioNode, ScenarioEdge> | null = null;
   /** What the extracted node and wait functions read of this run (nodes/context.ts). */
-  private readonly nodeCtx: NodeRunContext;
+  private readonly nodeCtx: FlowRunContext;
 
   constructor(
     scenario: ScenarioDefinition,
@@ -271,10 +185,10 @@ export class ScenarioExecutor {
     this.nodeCtx = this.createNodeContext();
   }
 
-  private createNodeContext(): NodeRunContext {
+  private createNodeContext(): FlowRunContext {
     // eslint-disable-next-line @typescript-eslint/no-this-alias -- the getters read the live fields
     const host = this;
-    return {
+    const ctx: FlowRunContext = {
       get scenario() {
         return host.scenario;
       },
@@ -329,6 +243,52 @@ export class ScenarioExecutor {
       set remoteStopOptions(value) {
         host.remoteStopOptions = value;
       },
+      get stepResolve() {
+        return host.stepResolve;
+      },
+      set stepResolve(value) {
+        host.stepResolve = value;
+      },
+      get pendingSteps() {
+        return host.pendingSteps;
+      },
+      set pendingSteps(value) {
+        host.pendingSteps = value;
+      },
+      get forceSkipResolve() {
+        return host.forceSkipResolve;
+      },
+      set forceSkipResolve(value) {
+        host.forceSkipResolve = value;
+      },
+      get rootScope() {
+        return host.rootScope;
+      },
+      get currentNodeId() {
+        return host.currentNodeId;
+      },
+      set currentNodeId(value) {
+        host.currentNodeId = value;
+      },
+      get currentNodeStartedAt() {
+        return host.currentNodeStartedAt;
+      },
+      set currentNodeStartedAt(value) {
+        host.currentNodeStartedAt = value;
+      },
+      get executedNodes() {
+        return host.executedNodes;
+      },
+      set executedNodes(value) {
+        host.executedNodes = value;
+      },
+      sendNodeComplete: (nodeId) => {
+        host.service.send({ type: "NODE_COMPLETE", nodeId });
+      },
+      stateName: () => getScenarioStateName(host.service),
+      sendStep: () => {
+        host.service.send({ type: "STEP" });
+      },
       markCertificateQuirksArmed: () => {
         host.armedCertificateQuirks = true;
       },
@@ -337,11 +297,12 @@ export class ScenarioExecutor {
       program: () => host.program(),
       fromScope: (flow) => host.fromScope(flow),
       waitWithOptionalForceSkip: (waitPromise, scope) =>
-        host.waitWithOptionalForceSkip(waitPromise, scope),
-      sleep: (ms, scope) => host.sleep(ms, scope),
+        waitWithOptionalForceSkip(ctx, waitPromise, scope),
+      sleep: (ms, scope) => sleep(ctx, ms, scope),
       waitWithProgress: (nodeId, totalSeconds, scope) =>
-        host.waitWithProgress(nodeId, totalSeconds, scope),
+        waitWithProgress(ctx, nodeId, totalSeconds, scope),
     };
+    return ctx;
   }
 
   /**
@@ -400,7 +361,7 @@ export class ScenarioExecutor {
     }
 
     try {
-      await this.executeFlow(opts);
+      await executeFlow(this.nodeCtx, opts);
 
       // Check if we were stopped during execution
       const stateName = getScenarioStateName(this.service);
@@ -475,122 +436,6 @@ export class ScenarioExecutor {
   }
 
   /**
-   * Execute the flow from start to end
-   * Supports scenarios with internal loops - use Stop button to exit infinite loops
-   * Supports parallel branches from Start node
-   *
-   * If `opts.resumeFromNodeId` is supplied AND the node exists, the executor
-   * resumes from the outgoing edge of that node — the START node and every
-   * node up to `resumeFromNodeId` are treated as already executed and are
-   * NOT re-fired. Used by the daemon restart path so side-effecting nodes
-   * (Plug In, Start Transaction, …) don't double-emit OCPP traffic.
-   */
-  private async executeFlow(opts?: ScenarioStartOptions): Promise<void> {
-    const resumeFromNodeId = opts?.resumeFromNodeId;
-    let originNode: ScenarioNode | undefined;
-    let resumed = false;
-
-    const program = this.program();
-    if (resumeFromNodeId) {
-      originNode = program.nodesById.get(resumeFromNodeId);
-      if (originNode) {
-        // Seed executedNodes from the resume snapshot so any node-history
-        // check inside an executor down the flow has the right shape.
-        // Fall back to `[resumeFromNodeId]` when the caller didn't provide
-        // the full list (it's only used for diagnostics in most nodes).
-        const seededNodes =
-          opts?.executedNodes && opts.executedNodes.length > 0
-            ? [...opts.executedNodes]
-            : [resumeFromNodeId];
-        this.executedNodes = seededNodes;
-        this.currentNodeId = originNode.id;
-        this.currentNodeStartedAt = this.clock.now();
-        resumed = true;
-        this.callbacks.log?.(
-          `[${this.scenario.name}] Resuming scenario from node "${
-            originNode.data?.label || originNode.id
-          }"`,
-          "info",
-        );
-      } else {
-        // Scenario tree changed between persistence and resume; fall
-        // through to a fresh run. Logged at warn so an operator sees it.
-        this.callbacks.log?.(
-          `[${this.scenario.name}] Cannot resume: node "${resumeFromNodeId}" no ` +
-            "longer exists in scenario; falling back to fresh start",
-          "warn",
-        );
-      }
-    }
-
-    if (!originNode) {
-      // Normal path: find and execute the Start node.
-      originNode = resolveOrigin(program);
-      if (!originNode) {
-        throw new Error("No start node found in scenario");
-      }
-      const originFlow = newFlow(this.rootScope);
-      await this.executeSingleNode(originNode, originFlow);
-      if (originFlow.timeoutTarget) {
-        // Schema 1.8: an origin that is a timed-out wait (a legacy wait
-        // labelled "Start") leaves by its timeout edge alone.
-        const target = originFlow.timeoutTarget;
-        originFlow.timeoutTarget = null;
-        await this.executeSequentialFlow(target, originFlow);
-        this.currentNodeId = null;
-        this.currentNodeStartedAt = null;
-        return;
-      }
-    }
-
-    // Walk outgoing edges from the origin node (whether Start or resume).
-    const nextNodes = successors(program, originNode, { asOrigin: true }).map(
-      (edge) => program.nodesById.get(edge.target)!,
-    );
-
-    const originOut = connectionRule(originNode.type).out;
-    if (resumed && (originOut === "select" || originOut === "fork")) {
-      // The chosen handle is not persisted: decide again (a choice from its
-      // seeded stream), then go on along that one edge. A parallel (schema
-      // 1.9) runs again: it has no effect of its own, and its branches then
-      // meet at their join as in a fresh run.
-      await this.executeSequentialFlow(originNode, newFlow(this.rootScope));
-      this.currentNodeId = null;
-      this.currentNodeStartedAt = null;
-      return;
-    }
-
-    if (nextNodes.length === 0) {
-      const tag = resumed ? "Resume point" : "Start";
-      this.callbacks.log?.(
-        `[${this.scenario.name}] No nodes after ${tag}, scenario ends`,
-        resumed ? "info" : "warn",
-      );
-      return;
-    }
-
-    if (nextNodes.length === 1) {
-      // Single branch - execute sequentially
-      this.callbacks.log?.(
-        `[${this.scenario.name}] Executing single branch`,
-        "debug",
-      );
-      await this.executeSequentialFlow(nextNodes[0]!, newFlow(this.rootScope));
-    } else {
-      // Multiple branches - execute in parallel
-      this.callbacks.log?.(
-        `[${this.scenario.name}] Executing ${nextNodes.length} parallel branches`,
-        "info",
-      );
-      await this.executeParallelBranches(nextNodes);
-    }
-
-    // Clear current node
-    this.currentNodeId = null;
-    this.currentNodeStartedAt = null;
-  }
-
-  /**
    * The lowered scenario, rebuilt only when `nodes` or `edges` is replaced.
    *
    * Invariant: while a run is live, `scenario.nodes` / `scenario.edges` (and
@@ -613,638 +458,6 @@ export class ScenarioExecutor {
       this.lowered = lowerScenario({ nodes, edges });
     }
     return this.lowered;
-  }
-
-  /**
-   * Execute multiple branches in parallel
-   * Each branch runs independently until it reaches an End node or terminates
-   */
-  private async executeParallelBranches(
-    startNodes: ScenarioNode[],
-  ): Promise<void> {
-    const branches = startNodes.map((node, index) => {
-      this.callbacks.log?.(
-        `[${this.scenario.name}] Starting branch ${index + 1} from node: ${node.data?.label || node.id}`,
-        "debug",
-      );
-      return this.executeSequentialFlow(node, newFlow(this.rootScope));
-    });
-
-    // Wait for all branches to complete
-    await Promise.all(branches);
-    this.callbacks.log?.(
-      `[${this.scenario.name}] All ${branches.length} parallel branches completed`,
-      "info",
-    );
-  }
-
-  /**
-   * Execute a sequential flow starting from a given node
-   */
-  private async executeSequentialFlow(
-    startNode: ScenarioNode,
-    branchFlow: Flow,
-  ): Promise<void> {
-    let currentNode = startNode;
-    let flow = branchFlow;
-    // Schema 1.9: the join this branch goes on from after its parallel's
-    // branches met there; it runs as a step, not as an arrival.
-    let continuingJoin: ScenarioNode | null = null;
-    // When this branch's walk began: the clock of a loop the branch is already
-    // inside (it started or resumed in the body) counts from here.
-    const walkStartedAt = this.clock.now();
-    this.enterNode(currentNode, flow);
-
-    while (
-      currentNode &&
-      !this.aborted &&
-      getScenarioStateName(this.service) !== "idle"
-    ) {
-      if (flow.scope.cancelled) break;
-      if (isJoin(currentNode) && currentNode !== continuingJoin) {
-        const region = flow.scope.region;
-        if (region) {
-          // Schema 1.9: a branch a parallel started ends at a join.
-          this.arriveAtJoin(currentNode, flow, region);
-          return;
-        }
-        this.callbacks.log?.(
-          `[${this.scenario.name}] Join "${currentNode.data?.label || currentNode.id}" reached by a branch no parallel started; it runs as a plain step`,
-          "info",
-        );
-      }
-      continuingJoin = null;
-
-      // Execute the current node
-      await this.executeSingleNode(currentNode, flow);
-
-      // If the node finished while paused, do not make the next node visible
-      // until the run has been resumed. Stop/abort can also land while parked.
-      await this.waitIfPaused(flow.scope);
-      if (this.aborted || getScenarioStateName(this.service) === "idle") {
-        break;
-      }
-      if (flow.scope.cancelled) break;
-
-      // Schema 1.8: a wait that timed out goes on along its timeout edge.
-      const timedOutTo = flow.timeoutTarget;
-      flow.timeoutTarget = null;
-      if (timedOutTo) {
-        flow.handle = null;
-        currentNode = timedOutTo;
-        this.enterNode(currentNode, flow);
-        continue;
-      }
-
-      // Check if this is the end node
-      if (isTerminal(currentNode)) {
-        break;
-      }
-
-      // Schema 1.9: a parallel forks; this branch waits for its branches to
-      // meet at a join and goes on from there with a fresh flow.
-      if (connectionRule(currentNode.type).out === "fork") {
-        const join = await this.runParallel(currentNode, flow);
-        if (!join) break;
-        flow = newFlow(flow.scope);
-        currentNode = join;
-        continuingJoin = join;
-        continue;
-      }
-
-      // Find next node. A switch or choice picked one edge by its handle
-      // (schema 1.6).
-      const handle = flow.handle;
-      flow.handle = null;
-
-      // Schema 1.10: a loop edge out of this node, after its round. Going
-      // round again keeps the loop's state; exiting drops it and the branch
-      // goes on along the node's ordinary edge, if any.
-      const loop =
-        handle === null ? loopStep(this.program(), currentNode) : null;
-      if (
-        loop &&
-        !this.loopExits(loop.edge, currentNode, flow, walkStartedAt)
-      ) {
-        currentNode = loop.target;
-        continue;
-      }
-
-      const step = nextStep(this.program(), currentNode, handle);
-      if (step.kind === "noEdgeForHandle") {
-        this.callbacks.log?.(
-          `[${this.scenario.name}] "${currentNode.data?.label || currentNode.id}" chose "${handle}", which has no edge; the branch ends`,
-          "info",
-        );
-        break;
-      }
-      if (step.kind === "missingTargets") {
-        console.warn(
-          `[ScenarioExecutor] All outgoing edges from node ${currentNode!.id} point to non-existent nodes. Branch will end here.`,
-        );
-        break;
-      }
-      if (step.kind !== "edge") {
-        break; // No more nodes to execute
-      }
-
-      currentNode = step.target;
-      this.enterNode(currentNode, flow);
-    }
-
-    if (flow.scope.cancelled && !this.aborted) {
-      this.callbacks.log?.(
-        `[${this.scenario.name}] Branch at "${currentNode.data?.label || currentNode.id}" cancelled: another branch reached an "any" join first, or a sibling failed`,
-        "info",
-      );
-      this.dropOpenCall(flow, "cancelled the branch");
-    }
-  }
-
-  /**
-   * Schema 1.9: answer the CALL a branch still holds unanswered with
-   * `InternalError` now, because its flow is dropped (the branch was
-   * cancelled, reached a join, or forked at a parallel). Does not wait for
-   * the answer to settle.
-   */
-  private dropOpenCall(flow: Flow, why: string): void {
-    const exchange = flow.exchange;
-    if (!exchange || flow.answered) return;
-    flow.answered = true;
-    this.callbacks.log?.(
-      `${exchange.action}: the scenario ${why} before it answered this call; answering InternalError`,
-      "warn",
-    );
-    try {
-      void exchange
-        .answer({
-          kind: "error",
-          errorCode: "InternalError",
-          errorDescription: `The scenario ${why} before it answered this call`,
-        })
-        .catch(() => undefined);
-    } catch {
-      // An answer that cannot be sent is the runtime's to report.
-    }
-  }
-
-  /** Schema 1.9: a branch of `region` reached `join`; the branch ends here. */
-  private arriveAtJoin(
-    join: ScenarioNode,
-    flow: Flow,
-    region: ParallelRegion,
-  ): void {
-    const mode = joinMode(join);
-    this.callbacks.log?.(
-      `[${this.scenario.name}] A branch of "${region.parallelNodeId}" reached join "${join.data?.label || join.id}" (${mode})`,
-      "debug",
-    );
-    this.dropOpenCall(flow, "reached a join");
-    region.arrive(join, mode);
-  }
-
-  /**
-   * Schema 1.9: run every outgoing ordinary edge of `node` (a `parallel`) as
-   * its own branch, each with a fresh flow and a child scope, and wait until
-   * they meet. Resolves with the join to go on from, or null when no branch
-   * reached one (or this branch was cancelled, or the run stopped). A branch
-   * that fails cancels its siblings and fails the run.
-   */
-  private async runParallel(
-    node: ScenarioNode,
-    flow: Flow,
-  ): Promise<ScenarioNode | null> {
-    const program = this.program();
-    const targets = successors(program, node).map((edge) =>
-      program.nodesById.get(edge.target)!,
-    );
-    const label = node.data?.label || node.id;
-    // The flow after the join is fresh: the CALL held here is dropped.
-    this.dropOpenCall(flow, "forked the branch at a parallel");
-    const region = new ParallelRegion(node.id);
-    this.callbacks.log?.(
-      `[${this.scenario.name}] "${label}" starts ${targets.length} parallel branches`,
-      "info",
-    );
-    for (const target of targets) {
-      const scope = flow.scope.child(region);
-      region.addBranch(scope);
-      this.executeSequentialFlow(target, newFlow(scope)).then(
-        () => {
-          scope.release();
-          region.branchEnded();
-        },
-        (error: unknown) => {
-          scope.release();
-          if (region.isSettled) {
-            this.callbacks.log?.(
-              `[${this.scenario.name}] A cancelled branch of "${label}" failed: ${
-                error instanceof Error ? error.message : String(error)
-              }`,
-              "warn",
-            );
-          }
-          region.fail(error);
-        },
-      );
-    }
-    region.empty();
-
-    const outcome = await Promise.race([
-      region.settled,
-      flow.scope.ended.then(() => null),
-    ]);
-    // Whatever settled it, nothing of this execution runs on: an `any` join
-    // cancels the other branches, a failure its siblings, a stop everything.
-    for (const branch of region.branches) branch.cancel();
-    if (outcome === null || this.aborted) return null;
-    if (outcome.kind === "failed") throw outcome.error;
-    if (outcome.kind === "noJoin") {
-      this.callbacks.log?.(
-        `[${this.scenario.name}] No branch of "${label}" reached a join; the branch ends`,
-        "info",
-      );
-      return null;
-    }
-    this.callbacks.log?.(
-      `[${this.scenario.name}] The branches of "${label}" met at "${
-        (outcome.join as ScenarioNode).data?.label || outcome.join.id
-      }" (${joinMode(outcome.join)})`,
-      "info",
-    );
-    return outcome.join as ScenarioNode;
-  }
-
-  /**
-   * The branch arrives at `node` by anything but a loop edge (an ordinary
-   * edge, or the walk starting there): every loop edge back to `node` begins
-   * afresh, so a nested loop restarts when the outer body enters it again.
-   */
-  private enterNode(node: ScenarioNode, flow: Flow): void {
-    const loops = this.program().loopEdgesInto.get(node.id);
-    if (!loops) return;
-    const since = this.clock.now();
-    for (const edge of loops) flow.loops.set(edge.id, { rounds: 0, since });
-  }
-
-  /**
-   * Schema 1.10: the end-of-round check of a loop edge, right after its
-   * source ran (do-while): count the round, then exit when `times` rounds are
-   * done, `forSeconds` have passed on the station clock since the loop was
-   * entered, or `until` matches one of its cases, as a switch does. Without a
-   * bound the loop never exits. A malformed `loop` fails the run here.
-   */
-  private loopExits(
-    edge: ScenarioEdge,
-    source: ScenarioNode,
-    flow: Flow,
-    walkStartedAt: number,
-  ): boolean {
-    const read = loopBounds(edge);
-    if ("problem" in read) {
-      throw new Error(`loop edge "${edge.id}": ${read.problem}`);
-    }
-    const { times, forSeconds, until } = read.bounds;
-    let state = flow.loops.get(edge.id);
-    if (!state) {
-      state = { rounds: 0, since: walkStartedAt };
-      flow.loops.set(edge.id, state);
-    }
-    state.rounds += 1;
-    let fired: string | null = null;
-    if (times !== undefined && state.rounds >= times) {
-      fired = `times ${times}`;
-    } else if (
-      forSeconds !== undefined &&
-      this.clock.now() - state.since >= forSeconds * 1000
-    ) {
-      fired = `forSeconds ${forSeconds}`;
-    } else if (until) {
-      const picked = pickCase(
-        this.nodeCtx,
-        `loop edge "${edge.id}" until`,
-        until.value,
-        until.cases,
-        flow,
-      );
-      if (picked.index >= 0) fired = `until case ${picked.index}`;
-    }
-    if (fired === null) return false;
-    flow.loops.delete(edge.id);
-    this.callbacks.log?.(
-      `Loop "${edge.id}" out of "${source.data?.label || source.id}" exits (${fired}) after ${state.rounds} round${state.rounds === 1 ? "" : "s"}`,
-      "info",
-    );
-    return true;
-  }
-
-  /**
-   * Execute a single node
-   */
-  private async executeSingleNode(
-    node: ScenarioNode,
-    flow: Flow,
-  ): Promise<void> {
-    // A stop() may have landed while the previous node was awaiting; never
-    // start another node once aborted (or once the branch was cancelled).
-    if (this.aborted || flow.scope.cancelled) {
-      return;
-    }
-
-    // Do not make the node visible while paused. This protects the boundary
-    // after an in-flight wait resolves under pause.
-    await this.waitIfPaused(flow.scope);
-    if (
-      this.aborted ||
-      flow.scope.cancelled ||
-      getScenarioStateName(this.service) === "idle"
-    ) {
-      return;
-    }
-
-    // Wait for step before marking/emitting the node so each step exposes
-    // exactly one more node.
-    const stateName = getScenarioStateName(this.service);
-    if (stateName === "stepping") {
-      await this.waitForStep(flow.scope);
-      if (
-        this.aborted ||
-        flow.scope.cancelled ||
-        getScenarioStateName(this.service) === "idle"
-      ) {
-        return;
-      }
-    }
-
-    // Update context with current node
-    this.currentNodeId = node.id;
-    this.currentNodeStartedAt = this.clock.now();
-    this.executedNodes.push(node.id);
-
-    this.notifyStateChange();
-    this.callbacks.onNodeExecute?.(node.id);
-
-    // Emit node execute events
-    const nodeExecuteData = {
-      scenarioId: this.scenario.id,
-      nodeId: node.id,
-      nodeType: node.type as ScenarioNodeType,
-    };
-    this.eventEmitter?.emit("nodeExecute", nodeExecuteData); // Backward compatibility
-    this.eventEmitter?.emit("node.execute", nodeExecuteData); // Hierarchical event
-    // Emit specific node type event: node.{nodeType}.execute
-    this.eventEmitter?.emit(
-      `node.${node.type}.execute` as keyof ScenarioEvents,
-      nodeExecuteData,
-    );
-
-    // Execute node
-    if (
-      node.type !== ScenarioNodeType.START &&
-      node.type !== ScenarioNodeType.END
-    ) {
-      await this.executeNode(node, flow);
-    }
-
-    // Dispatch NODE_COMPLETE event
-    this.service.send({ type: "NODE_COMPLETE", nodeId: node.id });
-
-    // Emit node complete events
-    const nodeCompleteData = {
-      scenarioId: this.scenario.id,
-      nodeId: node.id,
-    };
-    this.eventEmitter?.emit("nodeComplete", nodeCompleteData); // Backward compatibility
-    this.eventEmitter?.emit("node.complete", nodeCompleteData); // Hierarchical event
-    // Emit specific node type event: node.{nodeType}.complete
-    this.eventEmitter?.emit(
-      `node.${node.type}.complete` as keyof ScenarioEvents,
-      nodeCompleteData,
-    );
-  }
-
-  /**
-   * Execute a single node
-   */
-  private async executeNode(node: ScenarioNode, flow: Flow): Promise<void> {
-    // Log node execution
-    const nodeLabel = node.data?.label || node.id;
-    this.callbacks.log?.(
-      `[${this.scenario.name}] Executing node: ${nodeLabel} (${node.type})`,
-      "debug",
-    );
-
-    switch (node.type) {
-      case ScenarioNodeType.STATUS_CHANGE:
-        await executeStatusChange(
-          this.nodeCtx,
-          node.data as StatusChangeNodeData,
-        );
-        break;
-
-      case ScenarioNodeType.TRANSACTION:
-        await executeTransaction(
-          this.nodeCtx,
-          node.data as TransactionNodeData,
-        );
-        break;
-
-      case ScenarioNodeType.METER_VALUE:
-        await executeMeterValue(
-          this.nodeCtx,
-          node.id,
-          node.data as MeterValueNodeData,
-          flow.scope,
-        );
-        break;
-
-      case ScenarioNodeType.DELAY:
-        await executeDelay(
-          this.nodeCtx,
-          node.id,
-          node.data as DelayNodeData,
-          flow.scope,
-        );
-        break;
-
-      case ScenarioNodeType.NOTIFICATION:
-        await executeNotification(
-          this.nodeCtx,
-          node.data as NotificationNodeData,
-        );
-        break;
-
-      case ScenarioNodeType.CONNECTOR_PLUG:
-        await executeConnectorPlug(
-          this.nodeCtx,
-          node.data as ConnectorPlugNodeData,
-        );
-        break;
-
-      case ScenarioNodeType.REMOTE_START_TRIGGER:
-        await executeRemoteStartTrigger(
-          this.nodeCtx,
-          node.id,
-          node.data as RemoteStartTriggerNodeData,
-          flow,
-        );
-        break;
-
-      case ScenarioNodeType.REMOTE_STOP_TRIGGER:
-        await executeRemoteStopTrigger(
-          this.nodeCtx,
-          node.id,
-          node.data as RemoteStopTriggerNodeData,
-          flow,
-        );
-        break;
-
-      case ScenarioNodeType.STATUS_TRIGGER:
-        await executeStatusTrigger(
-          this.nodeCtx,
-          node.id,
-          node.data as StatusTriggerNodeData,
-          flow,
-        );
-        break;
-
-      case ScenarioNodeType.RESERVE_NOW:
-        await executeReserveNow(this.nodeCtx, node.data as ReserveNowNodeData);
-        break;
-
-      case ScenarioNodeType.CANCEL_RESERVATION:
-        await executeCancelReservation(
-          this.nodeCtx,
-          node.data as CancelReservationNodeData,
-        );
-        break;
-
-      case ScenarioNodeType.RESERVATION_TRIGGER:
-        await executeReservationTrigger(
-          this.nodeCtx,
-          node.id,
-          node.data as ReservationTriggerNodeData,
-          flow,
-        );
-        break;
-
-      case ScenarioNodeType.CSMS_CALL_TRIGGER:
-        await executeCsmsCallTrigger(
-          this.nodeCtx,
-          node.id,
-          node.data as CsmsCallTriggerNodeData,
-          flow,
-        );
-        break;
-
-      case ScenarioNodeType.STATUS_NOTIFICATION:
-        await executeStatusNotification(
-          this.nodeCtx,
-          node.data as StatusNotificationNodeData,
-        );
-        break;
-
-      case ScenarioNodeType.UNLOCK_OUTCOME:
-        await executeUnlockOutcome(
-          this.nodeCtx,
-          node.data as UnlockOutcomeNodeData,
-        );
-        break;
-
-      case ScenarioNodeType.RESPONSE_OVERRIDE:
-        await executeResponseOverride(
-          this.nodeCtx,
-          node.data as ResponseOverrideNodeData,
-        );
-        break;
-
-      case ScenarioNodeType.INBOUND_POLICY:
-        await executeInboundPolicy(
-          this.nodeCtx,
-          node.data as InboundPolicyNodeData,
-        );
-        break;
-
-      case ScenarioNodeType.CERT_QUIRKS:
-        await executeCertQuirks(this.nodeCtx, node.data as CertQuirksNodeData);
-        break;
-
-      case ScenarioNodeType.CONFIG_SET:
-        await executeConfigSet(this.nodeCtx, node.data as ConfigSetNodeData);
-        break;
-
-      case ScenarioNodeType.DATA_TRANSFER:
-        await executeDataTransfer(
-          this.nodeCtx,
-          node.data as DataTransferNodeData,
-        );
-        break;
-
-      case ScenarioNodeType.OCPP_CALL:
-        await executeOcppCall(
-          this.nodeCtx,
-          node.data as OcppCallNodeData,
-          flow,
-        );
-        break;
-
-      case ScenarioNodeType.CALL_RESPONSE:
-        await executeCallResponse(
-          this.nodeCtx,
-          node.data as CallResponseNodeData,
-          flow,
-        );
-        break;
-
-      case ScenarioNodeType.USE_BEHAVIOR:
-        executeUseBehavior(
-          this.nodeCtx,
-          node.id,
-          node.data as UseBehaviorNodeData,
-        );
-        break;
-
-      case ScenarioNodeType.NOTIFY:
-        executeNotify(this.nodeCtx, node.data as NotifyNodeData, flow);
-        break;
-
-      case ScenarioNodeType.SWITCH:
-        executeSwitch(this.nodeCtx, node.data as SwitchNodeData, flow);
-        break;
-
-      case ScenarioNodeType.CHOICE:
-        executeChoice(this.nodeCtx, node.data as ChoiceNodeData, flow);
-        break;
-
-      case ScenarioNodeType.SET_STATE:
-        executeSetState(this.nodeCtx, node.data as SetStateNodeData, flow);
-        break;
-
-      case ScenarioNodeType.CONNECTION_TRIGGER:
-        await executeConnectionTrigger(
-          this.nodeCtx,
-          node.id,
-          node.data as ConnectionTriggerNodeData,
-          flow,
-        );
-        break;
-
-      // Schema 1.9: control flow only; the walk forks and meets.
-      case ScenarioFlowNodeType.PARALLEL:
-      case ScenarioFlowNodeType.JOIN:
-        break;
-
-      default:
-        console.warn(`Unknown node type: ${node.type}`);
-    }
-  }
-
-  private async waitWithProgress(
-    nodeId: string,
-    totalSeconds: number,
-    scope: BranchScope,
-  ): Promise<void> {
-    await waitWithProgress(this.nodeCtx, nodeId, totalSeconds, scope);
   }
 
   /**
@@ -1441,88 +654,10 @@ export class ScenarioExecutor {
   }
 
   /**
-   * Wait if execution is paused
-   */
-  private async waitIfPaused(scope: BranchScope): Promise<void> {
-    while (
-      getScenarioStateName(this.service) === "paused" &&
-      !scope.cancelled
-    ) {
-      await this.sleep(100, scope);
-    }
-  }
-
-  /**
-   * Wait for step command
-   */
-  private async waitForStep(scope: BranchScope): Promise<void> {
-    const stateName = getScenarioStateName(this.service);
-    if (stateName !== "stepping") return;
-
-    if (this.pendingSteps > 0) {
-      this.pendingSteps -= 1;
-      this.service.send({ type: "STEP" });
-      return;
-    }
-
-    let localResolve: (() => void) | null = null;
-    const stepPromise = new Promise<void>((resolve) => {
-      localResolve = () => resolve();
-      this.stepResolve = localResolve;
-    });
-
-    try {
-      await Promise.race([stepPromise, scope.ended]);
-    } finally {
-      if (this.stepResolve === localResolve) {
-        this.stepResolve = null;
-      }
-    }
-  }
-
-  private async waitWithOptionalForceSkip(
-    waitPromise: Promise<unknown>,
-    scope: BranchScope,
-  ): Promise<void> {
-    const stateName = getScenarioStateName(this.service);
-    if (stateName !== "stepping") {
-      await Promise.race([waitPromise, scope.ended]);
-      return;
-    }
-
-    let localResolve: (() => void) | null = null;
-    const forcePromise = new Promise<void>((resolve) => {
-      localResolve = resolve;
-    });
-    this.forceSkipResolve = localResolve;
-
-    try {
-      await Promise.race([waitPromise, forcePromise, scope.ended]);
-    } finally {
-      if (this.forceSkipResolve === localResolve) {
-        this.forceSkipResolve = null;
-      }
-    }
-  }
-
-  /**
    * Notify state change
    */
   private notifyStateChange(): void {
     this.callbacks.onStateChange?.(this.getContext());
-  }
-
-  /**
-   * Sleep utility
-   */
-  private sleep(ms: number, scope: BranchScope): Promise<void> {
-    if (this.aborted || scope.cancelled) {
-      return Promise.resolve();
-    }
-    return Promise.race([
-      new Promise<void>((resolve) => this.clock.setTimeout(resolve, ms)),
-      scope.ended,
-    ]);
   }
 
   /** What a `$from` of this branch can read (schema 1.5, 1.6). */

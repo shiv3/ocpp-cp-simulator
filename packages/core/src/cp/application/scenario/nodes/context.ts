@@ -90,6 +90,14 @@ export interface NodeRunContext {
   remoteStartOptions: StartTransactionOptions | null;
   remoteStopReason: string | null;
   remoteStopOptions: StopTransactionOptions | null;
+  /** Step / force-skip plumbing of the wait helpers (waits.ts). */
+  stepResolve: (() => void) | null;
+  pendingSteps: number;
+  forceSkipResolve: (() => void) | null;
+  /** The state name of the run's machine (`idle`, `running`, `paused`, `stepping`, …). */
+  stateName(): string;
+  /** Send the machine its `STEP` event. */
+  sendStep(): void;
   markCertificateQuirksArmed(): void;
   unpark(control: WaitControl): void;
   notifyStateChange(): void;
@@ -105,4 +113,18 @@ export interface NodeRunContext {
     totalSeconds: number,
     scope: BranchScope,
   ): Promise<void>;
+}
+
+/**
+ * What the flow walk (flow.ts) reads and writes of a run on top of the node
+ * functions' view: the machine's state, the run's root scope and the
+ * current-node bookkeeping.
+ */
+export interface FlowRunContext extends NodeRunContext {
+  readonly rootScope: BranchScope;
+  currentNodeId: string | null;
+  currentNodeStartedAt: number | null;
+  executedNodes: string[];
+  /** Send the machine its `NODE_COMPLETE` event. */
+  sendNodeComplete(nodeId: string): void;
 }

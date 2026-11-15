@@ -204,3 +204,89 @@ export async function waitWithProgress(
     ctx.eventEmitter?.emit("node.progress", finalProgressData); // Hierarchical event
   }
 }
+
+/**
+ * Wait if execution is paused
+ */
+export async function waitIfPaused(
+  ctx: NodeRunContext,
+  scope: BranchScope,
+): Promise<void> {
+  while (ctx.stateName() === "paused" && !scope.cancelled) {
+    await sleep(ctx, 100, scope);
+  }
+}
+
+/**
+ * Wait for step command
+ */
+export async function waitForStep(
+  ctx: NodeRunContext,
+  scope: BranchScope,
+): Promise<void> {
+  const stateName = ctx.stateName();
+  if (stateName !== "stepping") return;
+
+  if (ctx.pendingSteps > 0) {
+    ctx.pendingSteps -= 1;
+    ctx.sendStep();
+    return;
+  }
+
+  let localResolve: (() => void) | null = null;
+  const stepPromise = new Promise<void>((resolve) => {
+    localResolve = () => resolve();
+    ctx.stepResolve = localResolve;
+  });
+
+  try {
+    await Promise.race([stepPromise, scope.ended]);
+  } finally {
+    if (ctx.stepResolve === localResolve) {
+      ctx.stepResolve = null;
+    }
+  }
+}
+
+export async function waitWithOptionalForceSkip(
+  ctx: NodeRunContext,
+  waitPromise: Promise<unknown>,
+  scope: BranchScope,
+): Promise<void> {
+  const stateName = ctx.stateName();
+  if (stateName !== "stepping") {
+    await Promise.race([waitPromise, scope.ended]);
+    return;
+  }
+
+  let localResolve: (() => void) | null = null;
+  const forcePromise = new Promise<void>((resolve) => {
+    localResolve = resolve;
+  });
+  ctx.forceSkipResolve = localResolve;
+
+  try {
+    await Promise.race([waitPromise, forcePromise, scope.ended]);
+  } finally {
+    if (ctx.forceSkipResolve === localResolve) {
+      ctx.forceSkipResolve = null;
+    }
+  }
+}
+
+/**
+ * Sleep utility
+ */
+export function sleep(
+  ctx: NodeRunContext,
+  ms: number,
+  scope: BranchScope,
+): Promise<void> {
+  if (ctx.aborted || scope.cancelled) {
+    return Promise.resolve();
+  }
+  return Promise.race([
+    new Promise<void>((resolve) => ctx.clock.setTimeout(resolve, ms)),
+    scope.ended,
+  ]);
+}

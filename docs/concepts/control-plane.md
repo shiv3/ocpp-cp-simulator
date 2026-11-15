@@ -403,7 +403,9 @@ seed are the ones it gives without a pool. Before the start the connector
 vehicle whole: a field the entry lacks is removed, not inherited), so the
 transaction (battery capacity, opening SoC) and every MeterValues of the
 session read the vehicle the traffic drew, and the connector shows the last
-drawn vehicle afterwards. It composes with both session models: under
+drawn vehicle afterwards. A start that does not begin (refused or failed)
+gives the connector back the vehicle it had, and its EV-settings override only
+if it had one (#846). It composes with both session models: under
 `"intent"` the SoC targets are drawn as before and the vehicle decides how fast
 they are reached. `connector.autoTraffic` counters gain `vehicles` (sessions
 begun per label), present once a pooled session has begun. Validation:

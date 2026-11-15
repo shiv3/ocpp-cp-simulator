@@ -990,8 +990,8 @@ export class Connector {
   }
 
   /** See {@link ConnectorEvSettings.applyEvSettingsOverride}. */
-  applyEvSettingsOverride(partial: EVSettingsPatch): void {
-    this.evSettingsWriter.applyEvSettingsOverride(partial);
+  applyEvSettingsOverride(partial: EVSettingsPatch): boolean {
+    return this.evSettingsWriter.applyEvSettingsOverride(partial);
   }
 
   /** See {@link ConnectorEvSettings.applyDefaultEvSettings}. */

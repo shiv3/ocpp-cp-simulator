@@ -348,6 +348,7 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
             "maxLimit": 2147483,
             "minLimit": 0,
             "supportsMonitoring": true,
+            "unit": "s",
           },
         },
         {
@@ -389,6 +390,7 @@ exports[`OCPP 2.0.1 GetBaseReport answers Accepted and sends one NotifyReport wi
             "maxLimit": 2147483,
             "minLimit": 0,
             "supportsMonitoring": true,
+            "unit": "s",
           },
         },
         {

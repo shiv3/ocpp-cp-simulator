@@ -137,8 +137,13 @@ evSettings.targetSoc`) is the intent unless `intent` overrides it; progress is
 - **StartTransaction.conf.** An EV that already is `SuspendedEV` with its energy
   offer withheld stays so when the CSMS accepts the transaction (1.6 §4.8); it
   was driven to `Charging` before.
-- **Stop.** With `stopWhenDone` the driver ends the transaction like the
-  target-SoC auto-stop does (`triggerReason` `EnergyLimitReached` on 2.x).
+- **Stop.** With `stopWhenDone` the driver ends the transaction as a stop the
+  EV asked for (#871): on 2.x the Ended event carries `triggerReason`
+  `StopAuthorized` and `stoppedReason` `StoppedByEV` (E15.FR.04); with a
+  `TxStopPoint` lacking `Authorized` it is one Updated `StopAuthorized` and the
+  transaction ends at the cable (E15.FR.05). OCPP 1.6 has no such `Reason`
+  (`EVDisconnected` is the cable leaving), so its StopTransaction.req carries
+  none, which reads as `Local`.
 - **Protocol honesty.** OCPP 1.6 cannot carry charging intent, and nothing here
   pretends it can. ISO 15118 charging needs, V2G and battery physics are out of
   scope.

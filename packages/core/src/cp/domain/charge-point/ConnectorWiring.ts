@@ -179,14 +179,20 @@ export class ConnectorWiring {
             },
             requestStop: (id) => {
               if (this.host.chargePoint.poweredOff) return;
+              // Asked on every tick: once the authorization ended (E15.FR.05),
+              // the transaction waits for the cable, not for another stop.
+              if (connector.transaction?.authorizationEnded) return;
               this.host
                 .logger()
                 .info(
                   `Connector ${id} vehicle asked to end the session`,
                   LogType.TRANSACTION,
                 );
+              // E15.FR.04: StopAuthorized + StoppedByEV. 1.6 has no such
+              // Reason (EVDisconnected is the cable leaving), so none is set.
               this.host.chargePoint.stopTransaction(connector, undefined, {
-                triggerReason: "EnergyLimitReached",
+                triggerReason: "StopAuthorized",
+                stoppedReason: "StoppedByEV",
               });
             },
           },

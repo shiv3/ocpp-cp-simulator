@@ -49,20 +49,16 @@ import {
   type OperatingPoint,
 } from "./OperatingPoint";
 import { evConnectionOf, type EvConnectionState } from "./EvConnection";
-import {
-  evaluateVehicleBehavior,
-  startVehicleSession,
-} from "@ocpp-cp-simulator/vehicle/evaluate";
 import type {
   VehicleBehaviorSpec,
   VehicleSnapshot,
 } from "@ocpp-cp-simulator/vehicle/contracts";
-import { resolveVehicleBehaviorConfig } from "@ocpp-cp-simulator/vehicle/config";
 import type { MeterRealism } from "./MeterRealism";
 import { resolveSessionIntent, type SessionIntent } from "./SessionIntent";
 import { ScheduleLimiter } from "./ScheduleLimiter";
 import { ConnectorChargingProfiles } from "./ConnectorChargingProfiles";
 import { ConnectorEnergy } from "./ConnectorEnergy";
+import { ConnectorVehicle } from "./ConnectorVehicle";
 import { ConnectorRuntimeSnapshot } from "./connectorRuntimeSnapshot";
 import {
   type ApplyChargingProfileOptions,
@@ -305,6 +301,20 @@ export class Connector {
     emitScheduleLimitChange: (e) =>
       this.eventsEmitter.emit("scheduleLimitChange", e),
   });
+  private readonly vehicle = new ConnectorVehicle({
+    now: () => this.clock.now(),
+    evCableConnected: () => this.evCableConnected,
+    vehicleConnectedAt: () => this.vehicleConnectedAt,
+    setVehicleConnectedAt: (v) => {
+      this.vehicleConnectedAt = v;
+    },
+    evSettings: () => this._evSettings,
+    sessionIntent: () => this.sessionIntent(),
+    transaction: () => this.transaction,
+    hasRunningTransaction: () => this.hasRunningTransaction,
+    meterValueWh: () => this.meterValueWh,
+    effectiveSocPercent: () => this.effectiveSocPercent(),
+  });
   private readonly profiles = new ConnectorChargingProfiles({
     nowDate: () => this.nowDate(),
     stationProfiles: () => this.stationProfilesProvider(),
@@ -440,7 +450,7 @@ export class Connector {
         stationShareW: this.stationShareProvider?.(),
         conversionEfficiency: this._dcEfficiency,
       }),
-      demand: this.vehicleDemandTerm(now.getTime()),
+      demand: this.vehicle.vehicleDemandTerm(now.getTime()),
       meter: {
         realism: this._meterRealism,
         sessionStartedAt: this.hasRunningTransaction
@@ -501,81 +511,19 @@ export class Connector {
     this._dcEfficiency = efficiency;
   }
 
-  /** The behavior the vehicle follows, resolved from its EV settings
-   *  (`vehicleBehavior`), `null` when none is set (#835). */
+  /** See {@link ConnectorVehicle.vehicleBehavior}. */
   get vehicleBehavior(): VehicleBehaviorSpec | null {
-    return resolveVehicleBehaviorConfig(this._evSettings.vehicleBehavior);
+    return this.vehicle.vehicleBehavior;
   }
 
-  /** Stamp the instant the vehicle connected, if a cable is on and nothing
-   *  was stamped yet: a vehicle that was there before its behavior was set
-   *  keeps its plug-in time (#835). */
+  /** See {@link ConnectorVehicle.ensureVehicleSession}. */
   ensureVehicleSession(): void {
-    if (this.evCableConnected && this.vehicleConnectedAt === null) {
-      this.vehicleConnectedAt = this.clock.now();
-    }
+    this.vehicle.ensureVehicleSession();
   }
 
-  /**
-   * What the vehicle wants now, separately from what the connector delivers
-   * (#835): its phase, its demand and the state of its objective. `null`
-   * without a behavior or a cable. Pure: the same connector state at the same
-   * instant gives the same snapshot.
-   */
+  /** See {@link ConnectorVehicle.vehicleSnapshot}. */
   vehicleSnapshot(): VehicleSnapshot | null {
-    return this.vehicleSnapshotAt(this.clock.now());
-  }
-
-  private vehicleSnapshotAt(now: number): VehicleSnapshot | null {
-    const spec = this.vehicleBehavior;
-    if (!spec || !this.evCableConnected) return null;
-    const intent = this.sessionIntent();
-    const settings = this._evSettings;
-    const transaction = this.transaction;
-    const delivered =
-      transaction && this.hasRunningTransaction
-        ? Math.max(0, this.meterValueWh - (transaction.meterStart ?? 0))
-        : 0;
-    return evaluateVehicleBehavior(
-      {
-        ...spec,
-        intent: {
-          ...(intent.targetSoc !== undefined && {
-            targetSoc: intent.targetSoc,
-          }),
-          ...(intent.requestedWh !== undefined && {
-            requestedEnergyWh: intent.requestedWh,
-          }),
-          ...(intent.departureAt !== undefined && {
-            departureAt: intent.departureAt,
-          }),
-          ...spec.intent,
-        },
-      },
-      {
-        ...(settings.maxChargingPowerKw > 0 && {
-          maxPowerW: settings.maxChargingPowerKw * 1000,
-        }),
-        ...(settings.batteryCapacityKwh > 0 && {
-          batteryCapacityWh: settings.batteryCapacityKwh * 1000,
-        }),
-      },
-      startVehicleSession(this.vehicleConnectedAt ?? now),
-      { soc: this.effectiveSocPercent(), deliveredWh: delivered },
-      now,
-    );
-  }
-
-  /** The demand term of the resolution: absent without a behavior (the
-   *  vehicle asks for all it can take), else what the vehicle asks for now. */
-  private vehicleDemandTerm(now: number): { requestedW: number } | undefined {
-    const snapshot = this.vehicleSnapshotAt(now);
-    if (!snapshot) return undefined;
-    return {
-      requestedW: snapshot.demand.readyToCharge
-        ? snapshot.demand.requestedPowerW
-        : 0,
-    };
+    return this.vehicle.vehicleSnapshot();
   }
 
   /** The opt-in meter realism of this connector, `undefined` when none. */

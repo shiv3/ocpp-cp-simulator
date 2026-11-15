@@ -341,6 +341,7 @@ export class ChargePoint {
     clock: () => this._clock,
     configuration: () => this._configuration,
     connectors: () => this._connectors,
+    logger: () => this._logger,
     mainMeter: () => this._mainMeter,
     outbox: () => this._outbox,
   });
@@ -384,6 +385,7 @@ export class ChargePoint {
     clock: () => this._clock,
     connectors: () => this._connectors,
     engine: () => this._engine,
+    events: () => this._events,
     loadAvailability: (connectorId) => this.loadAvailability(connectorId),
     logger: () => this._logger,
     sampling: () => this._sampling,
@@ -2064,15 +2066,7 @@ export class ChargePoint {
   }
 
   setMeterValue(connectorId: number, value: number): void {
-    const connector = this.getConnector(connectorId);
-    if (!connector) {
-      this._logger.error(
-        `Connector ${connectorId} not found`,
-        LogType.METER_VALUE,
-      );
-      return;
-    }
-    connector.meterValue = value;
+    this._sampling.setMeterValue(connectorId, value);
   }
 
   sendMeterValue(
@@ -2080,24 +2074,7 @@ export class ChargePoint {
     context?: ReadingContext,
     overrides?: MeterSampleOverrides,
   ): void {
-    if (connectorId === 0 && this._mainMeter) {
-      this._outbox.sendMeterValue(undefined, 0, context, overrides);
-      return;
-    }
-    const connector = this.getConnector(connectorId);
-    if (!connector) {
-      this._logger.error(
-        `Connector ${connectorId} not found`,
-        LogType.METER_VALUE,
-      );
-      return;
-    }
-    this._outbox.sendMeterValue(
-      connector.transaction?.id ?? undefined,
-      connectorId,
-      context,
-      overrides,
-    );
+    this._sampling.sendMeterValue(connectorId, context, overrides);
   }
 
   /** One sample from the connector's meter-value scheduler (#347).
@@ -2123,23 +2100,14 @@ export class ChargePoint {
     return this._sampling.samplers;
   }
 
-  /**
-   * Drive an OCPP 2.x TransactionEvent(Updated) on a running transaction
-   * (#335). On OCPP 1.6 the handler logs a warning and sends nothing.
-   */
+  /** Drive an OCPP 2.x TransactionEvent(Updated) on a running transaction
+   *  (#335); on 1.6 a warning and nothing sent.
+   *  @see StationMessaging.sendTransactionUpdate */
   sendTransactionUpdate(
     connectorId: number,
     options: TransactionUpdateOptions,
   ): void {
-    const connector = this.getConnector(connectorId);
-    if (!connector) {
-      this._logger.error(
-        `Connector ${connectorId} not found`,
-        LogType.TRANSACTION,
-      );
-      return;
-    }
-    this._outbox.sendTransactionUpdate(connectorId, options);
+    this._messaging.sendTransactionUpdate(connectorId, options);
   }
 
   getConnector(connectorId: number): Connector | undefined {
@@ -2147,27 +2115,7 @@ export class ChargePoint {
   }
 
   removeConnector(connectorId: number): boolean {
-    const connector = this._connectors.get(connectorId);
-    if (!connector) return false;
-
-    this.clearChargingProfiles(connectorId, {}, "ConnectorRemoved");
-    this._sampling.stopPeriodicSampling(connectorId);
-    // The driver's own 1 s timer outlives Connector.dispose() and would keep
-    // calling evSetReady / stopTransaction on a connector the station no longer
-    // has (#864 review).
-    this._vehicleDrivers.get(connectorId)?.dispose();
-    this._vehicleDrivers.delete(connectorId);
-    connector.dispose();
-    this._engine.detachConnector(connectorId);
-    const removed = this._connectors.delete(connectorId);
-    if (removed) {
-      this._events.emit("connectorRemoved", { connectorId });
-      // Removing a busy connector may make a station-wide OnIdle reset
-      // runnable. runPendingResetOnIdle still waits if any remaining target
-      // has a running transaction.
-      this.runPendingResetOnIdle();
-    }
-    return removed;
+    return this._connectorWiring.removeConnector(connectorId);
   }
 
   updateAllConnectorsStatus(status: OCPPStatus): void {

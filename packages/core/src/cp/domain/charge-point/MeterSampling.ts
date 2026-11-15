@@ -1,6 +1,11 @@
+import { LogType, type Logger } from "../../shared/Logger";
 import type { SimClock, TimerHandle } from "../../shared/clock";
 import type { Connector } from "../connector/Connector";
-import { buildSampledValues } from "../connector/MeterValueBuilder";
+import {
+  buildSampledValues,
+  type MeterSampleOverrides,
+  type ReadingContext,
+} from "../connector/MeterValueBuilder";
 import { measurandEnumFor } from "../connector/measurandEnum";
 import {
   TX_ENDED_SAMPLES_MAX,
@@ -29,6 +34,7 @@ export interface MeterSamplingHost {
   readonly clock: () => SimClock;
   readonly configuration: () => ConfigurationStore;
   readonly connectors: () => Map<number, Connector>;
+  readonly logger: () => Logger;
   /** Reassigned (tests set it): always read through the function. */
   readonly mainMeter: () => MainMeter | undefined;
   readonly outbox: () => Outbox;
@@ -45,6 +51,43 @@ export class MeterSampling {
   readonly samplers: Map<number, TimerHandle> = new Map();
 
   constructor(private readonly host: MeterSamplingHost) {}
+
+  setMeterValue(connectorId: number, value: number): void {
+    const connector = this.host.chargePoint.getConnector(connectorId);
+    if (!connector) {
+      this.host
+        .logger()
+        .error(`Connector ${connectorId} not found`, LogType.METER_VALUE);
+      return;
+    }
+    connector.meterValue = value;
+  }
+
+  sendMeterValue(
+    connectorId: number,
+    context?: ReadingContext,
+    overrides?: MeterSampleOverrides,
+  ): void {
+    if (connectorId === 0 && this.host.mainMeter()) {
+      this.host.outbox().sendMeterValue(undefined, 0, context, overrides);
+      return;
+    }
+    const connector = this.host.chargePoint.getConnector(connectorId);
+    if (!connector) {
+      this.host
+        .logger()
+        .error(`Connector ${connectorId} not found`, LogType.METER_VALUE);
+      return;
+    }
+    this.host
+      .outbox()
+      .sendMeterValue(
+        connector.transaction?.id ?? undefined,
+        connectorId,
+        context,
+        overrides,
+      );
+  }
 
   /**
    * One clock-aligned sample per connector for `boundaryMs` (#454), carrying

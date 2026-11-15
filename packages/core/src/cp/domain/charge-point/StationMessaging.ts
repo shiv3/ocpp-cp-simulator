@@ -20,6 +20,7 @@ import type {
   RawFrameOutcome,
   RawFrameRequest,
 } from "../types/OcppCall";
+import type { TransactionUpdateOptions } from "../connector/Transaction";
 import type { ChargePoint } from "./ChargePoint";
 
 /** What the expert sends and status notifications need from their charge
@@ -27,7 +28,7 @@ import type { ChargePoint } from "./ChargePoint";
 export interface StationMessagingHost {
   /** Public members go through it so spies on the charge point still see
    *  them. */
-  readonly chargePoint: Pick<ChargePoint, "sendOcppCall">;
+  readonly chargePoint: Pick<ChargePoint, "getConnector" | "sendOcppCall">;
   readonly callCatalog: () => OcppCallActions | null;
   readonly clock: () => SimClock;
   readonly engine: () => ChargePointEngine;
@@ -46,6 +47,24 @@ export interface StationMessagingHost {
  */
 export class StationMessaging {
   constructor(private readonly host: StationMessagingHost) {}
+
+  /**
+   * Drive an OCPP 2.x TransactionEvent(Updated) on a running transaction
+   * (#335). On OCPP 1.6 the handler logs a warning and sends nothing.
+   */
+  sendTransactionUpdate(
+    connectorId: number,
+    options: TransactionUpdateOptions,
+  ): void {
+    const connector = this.host.chargePoint.getConnector(connectorId);
+    if (!connector) {
+      this.host
+        .logger()
+        .error(`Connector ${connectorId} not found`, LogType.TRANSACTION);
+      return;
+    }
+    this.host.outbox().sendTransactionUpdate(connectorId, options);
+  }
 
   /**
    * Expert OCPP call (#389): any station-initiated CALL of this station's

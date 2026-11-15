@@ -1,4 +1,5 @@
 import { LogType, type Logger } from "../../shared/Logger";
+import type { EventEmitter } from "../../shared/EventEmitter";
 import type { SimClock } from "../../shared/clock";
 import { Connector } from "../connector/Connector";
 import type { ChargePointEngine } from "../engine/ChargePointEngine";
@@ -7,6 +8,7 @@ import { OCPPStatus } from "../types/OcppTypes";
 import type { OCPPAvailability } from "../types/OcppTypes";
 import type { AuthorizationFlow } from "./AuthorizationFlow";
 import type { ChargePoint } from "./ChargePoint";
+import type { ChargePointEvents } from "./ChargePointEvents";
 import {
   dcEfficiencyFor,
   maxDeliveryPowerWFor,
@@ -27,8 +29,10 @@ export interface ConnectorWiringHost {
   readonly chargePoint: Pick<
     ChargePoint,
     | "evSetReady"
+    | "clearChargingProfiles"
     | "getConnector"
     | "poweredOff"
+    | "runPendingResetOnIdle"
     | "stopTransaction"
     | "updateConnectorStatus"
   >;
@@ -36,6 +40,7 @@ export interface ConnectorWiringHost {
   readonly clock: () => SimClock;
   readonly connectors: () => Map<number, Connector>;
   readonly engine: () => ChargePointEngine;
+  readonly events: () => EventEmitter<ChargePointEvents>;
   readonly loadAvailability: (connectorId: number) => OCPPAvailability | null;
   readonly logger: () => Logger;
   readonly sampling: () => MeterSampling;
@@ -193,5 +198,33 @@ export class ConnectorWiring {
         ),
       );
     }
+  }
+
+  removeConnector(connectorId: number): boolean {
+    const connector = this.host.connectors().get(connectorId);
+    if (!connector) return false;
+
+    this.host.chargePoint.clearChargingProfiles(
+      connectorId,
+      {},
+      "ConnectorRemoved",
+    );
+    this.host.sampling().stopPeriodicSampling(connectorId);
+    // The driver's own 1 s timer outlives Connector.dispose() and would keep
+    // calling evSetReady / stopTransaction on a connector the station no longer
+    // has (#864 review).
+    this.host.vehicleDrivers().get(connectorId)?.dispose();
+    this.host.vehicleDrivers().delete(connectorId);
+    connector.dispose();
+    this.host.engine().detachConnector(connectorId);
+    const removed = this.host.connectors().delete(connectorId);
+    if (removed) {
+      this.host.events().emit("connectorRemoved", { connectorId });
+      // Removing a busy connector may make a station-wide OnIdle reset
+      // runnable. runPendingResetOnIdle still waits if any remaining target
+      // has a running transaction.
+      this.host.chargePoint.runPendingResetOnIdle();
+    }
+    return removed;
   }
 }

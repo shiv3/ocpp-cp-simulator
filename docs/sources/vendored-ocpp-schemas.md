@@ -19,17 +19,20 @@ updated: 2026-11-15
 **What it is.** The official OCA OCPP message JSON Schemas for `v16`, `v201`
 and `v21`, vendored **verbatim** from
 https://github.com/juherr/awesome-ev-charging at commit
-`97dc09851c82de14d6a953c3d163f8c79954aeab`, which keeps the OCA distributions
-as published (#1064):
+`24fed58f64ec71fddd3e61f0300af13598b7d7c8`, which keeps the OCA downloads
+byte for byte, line endings included (#1064):
 
-| Directory | Source folder                                                                                              | Files |
-| --------- | ---------------------------------------------------------------------------------------------------------- | ----- |
-| `v16`     | `ocpp/OCPP-1.6/schemas/json/` (core) + `ocpp/Whitepapers/OCPP-1.6-security-whitepaper-edition-3-2/schema/` | 78    |
-| `v201`    | `ocpp/OCPP-2.0.1/OCPP-2.0.1_part3_JSON_schemas/` (part 3, 2020-03-31)                                      | 128   |
-| `v21`     | `ocpp/OCPP-2.1/OCPP-2.1_part3_JSON_schemas/` (part 3, 2025-01-23)                                          | 181   |
+| Directory | Source folder                                                                                     | Files |
+| --------- | ------------------------------------------------------------------------------------------------- | ----- |
+| `v16`     | `ocpp/OCPP-1.6/schemas/json/` (OCA download of 2025-04)                                           | 56    |
+|           | `ocpp/Whitepapers/OCPP-1.6-security-whitepaper-edition-4/schema/` (Security Whitepaper edition 4) | 22    |
+| `v201`    | `ocpp/OCPP-2.0.1/OCPP-2.0.1_part3_JSON_schemas/` (part 3, 2020-03-31, shipped with Edition 4)     | 128   |
+| `v21`     | `ocpp/OCPP-2.1/OCPP-2.1_part3_JSON_schemas/` (part 3, 2025-01-23, shipped with Edition 2)         | 181   |
 
-The 1.6 core files are those of OCA's `OCPP-1.6-JSON-Schemas.zip` with CRLF
-line endings normalized to LF.
+The `README.md` beside each source folder names the OCA file it comes from and
+its SHA-256. The 1.6 core files keep OCA's CRLF line endings, except
+`StopTransaction.json` (LF), the only one OCA reissued in 2025-04: its unit
+enumeration adds `Celsius` beside the `Celcius` typo.
 
 **Licensing / handling rules (from `NOTICE`).**
 
@@ -57,13 +60,13 @@ Wiki pages should cite message names as they appear here.
 
 Until #1064 the files came from `mobilityhouse/ocpp@d6b003d9`, which is not
 verbatim: it strips `id` / `$id`, reindents every 1.6 core and 2.0.1 file, and
-patches three schemas. Switching to the OCA originals changed validation in
-four places, pinned by
+patches three schemas (its `Celsius` patch on `StopTransaction` is the one
+OCA made itself in 2025-04). Switching to the OCA originals changed validation
+in three places, pinned by
 [`vendoredOcaSchemas.test.ts`](../../packages/core/src/cp/infrastructure/transport/codec/__tests__/vendoredOcaSchemas.test.ts):
 
-| Schema                                | mobilityhouse                                 | OCA (now)      | Spec                                                                                 |
-| ------------------------------------- | --------------------------------------------- | -------------- | ------------------------------------------------------------------------------------ |
-| 1.6 `MeterValues`                     | unit `Hertz`                                  | no `Hertz`     | 1.6 edition 2 §7.31: 1.6 has no UnitOfMeasure for frequency; `Frequency` is in Hertz |
-| 1.6 `MeterValues`                     | `minItems: 1` on `meterValue`, `sampledValue` | no `minItems`  | `1..*` on both; the 1.6-J sender drops an empty sample itself instead (#1064)        |
-| 1.6 `StopTransaction`                 | unit `Celsius`                                | `Celcius` only | OCPP-J 1.6 errata: a 1.6-J charge point sends `Celcius` (#745)                       |
-| 2.0.1 `Get15118EVCertificateResponse` | `exiResponse` up to 7500                      | up to 5600     | 2.0.1 edition 3 part 2: `exiResponse string[0..5600]`                                |
+| Schema                                | mobilityhouse                                 | OCA (now)     | Spec                                                                                 |
+| ------------------------------------- | --------------------------------------------- | ------------- | ------------------------------------------------------------------------------------ |
+| 1.6 `MeterValues`                     | unit `Hertz`                                  | no `Hertz`    | 1.6 edition 2 §7.31: 1.6 has no UnitOfMeasure for frequency; `Frequency` is in Hertz |
+| 1.6 `MeterValues`                     | `minItems: 1` on `meterValue`, `sampledValue` | no `minItems` | `1..*` on both; the 1.6-J sender drops an empty sample itself instead (#1064)        |
+| 2.0.1 `Get15118EVCertificateResponse` | `exiResponse` up to 7500                      | up to 5600    | 2.0.1 Edition 4 part 2: `exiResponse string[0..5600]`                                |

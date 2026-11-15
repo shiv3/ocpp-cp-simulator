@@ -81,6 +81,7 @@ export interface StopTransactionRequestV16 {
         | "V"
         | "K"
         | "Celcius"
+        | "Celsius"
         | "Fahrenheit"
         | "Percent";
     }[];

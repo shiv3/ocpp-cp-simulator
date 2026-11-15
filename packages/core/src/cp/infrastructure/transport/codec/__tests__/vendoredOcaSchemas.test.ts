@@ -6,8 +6,9 @@ import { validationErrors } from "@ocpp-cp-simulator/ocpp/validate";
 
 /**
  * #1064 — the vendored schemas are the OCA originals, not the patched copies
- * mobilityhouse/ocpp redistributes. These cases pin where the two differ, so
- * a refresh from a patched source shows up here rather than on the wire.
+ * mobilityhouse/ocpp redistributes. These cases pin the OCA releases where
+ * they differ from those copies, so a refresh from a patched or older source
+ * shows up here rather than on the wire.
  *
  * It lives here rather than under `packages/ocpp/src/`, which the schema
  * generator rewrites.
@@ -34,7 +35,9 @@ describe("vendored OCA schemas (#1064)", () => {
     );
   });
 
-  it("OCPP 1.6 StopTransaction spells the temperature unit Celcius only", () => {
+  // OCA's 2025-04 StopTransaction.json adds `Celsius` beside the `Celcius`
+  // typo; the 2019-12 file had only the typo.
+  it("OCPP 1.6 StopTransaction accepts both temperature spellings (OCA 2025-04)", () => {
     const stop = (unit: string) => ({
       meterStop: 0,
       timestamp: "2026-01-01T00:00:00Z",
@@ -48,7 +51,7 @@ describe("vendored OCA schemas (#1064)", () => {
     });
     const schema = v16Schemas.stopTransactionRequestV16;
     expect(validationErrors(schema, stop("Celcius"))).toEqual([]);
-    expect(validationErrors(schema, stop("Celsius"))).not.toEqual([]);
+    expect(validationErrors(schema, stop("Celsius"))).toEqual([]);
   });
 
   it("OCPP 2.0.1 Get15118EVCertificateResponse caps exiResponse at 5600", () => {

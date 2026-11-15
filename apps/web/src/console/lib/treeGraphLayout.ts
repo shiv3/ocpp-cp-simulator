@@ -19,7 +19,6 @@ import {
   type BlockTree,
   type ForkBlock,
   type Lane,
-  type LinkEdge,
   type LoopBlock,
   loopBlockBounds,
   type Seq,
@@ -32,225 +31,45 @@ import {
   lanesLeavingLoop,
   stepNumbers,
 } from "./stepTree";
-
-export const NODE_W = 228;
-export const NODE_H = 52;
-/** A lane's least width (a card and its margins). */
-export const LANE_W = 262;
-/** Card top to the next card's top in a column. */
-export const ROW_H = 76;
-/** The gap between two cards of a column. */
-export const GAP = ROW_H - NODE_H;
-export const START_R = 5;
-export const END_R = 6;
-/** Gap between a card and the end ring (the editor's leaves room for the
- *  `+` disc on the path). */
-const CAP_GAP = 22;
-const EDIT_CAP_GAP = 46;
-/** A fork card's bottom to its lane tags' top. */
-const FORK_DROP = 46;
-export const TAG_H = 22;
-/** The widest a lane tag grows for a long condition; past it the text is
- *  cut (the full text is the tag's tooltip). */
-export const TAG_MAX_W = 380;
-/** Room a tag has beside its text: the lane letter, the step count and the
- *  remove button, plus padding. */
-const TAG_CHROME = 76;
-/** Monospace 11px glyph advance. */
-const TAG_CHAR_W = 6.6;
-/** The width a lane tag needs to show `text` whole, from the card's width
- *  up to `TAG_MAX_W`. */
-export function tagWidth(text: string): number {
-  return Math.min(
-    TAG_MAX_W,
-    Math.max(NODE_W, Math.ceil(text.length * TAG_CHAR_W) + TAG_CHROME),
-  );
-}
-/** A lane's side margin around its tag. */
-const TAG_MARGIN = 16;
-/** Lowest lane's bottom to the merge point, and the merge point to the
- *  next card. */
-const MERGE_DROP = 26;
-/** A loop's rectangle: the channel its return arc runs in (left), a pad
- *  (top), and the band at the bottom where the arc turns and, under it,
- *  the label sits (out of the way of the line entering the loop). */
-const LOOP_LEFT = 30;
-const LOOP_RIGHT = 10;
-const LOOP_TOP = 14;
-const LOOP_BOTTOM = 46;
-/** Extra band in the editor: the loop's buttons get a row under its label. */
-const LOOP_BUTTON_ROW = 22;
-/** The arc's turn below the body. */
-const LOOP_TURN = 20;
-/** Lanes that leave a loop stand this far right of its rectangle. */
-const LEAVING_GAP = 16;
-/** A jump's channel runs this far beside the cards it passes, plus a step
- *  per jump already drawn there; it enters its target this far in from the
- *  target's corner. */
-const LINK_SWING = 30;
-const LINK_STEP = 14;
-const LINK_INSET = 18;
-/** Room the editor's "+ branch" pill needs right of a branch point's card
- *  inside a loop's rectangle (beyond the lane's own margin). */
-const PILL_ROOM = 64;
-/** The column of steps nothing reaches starts this far right. */
-const DETACHED_GAP = 40;
-const MARGIN_TOP = 34;
-
-export interface Point {
-  x: number;
-  y: number;
-}
-
-/** A card: the box of a step (a branch point's node too). */
-export interface GraphCard {
-  node: ScenarioNode;
-  /** Centre x, top y. */
-  x: number;
-  y: number;
-  /** Its sequence and block index (what a drag moves within). */
-  seqPath: SeqPath;
-  index: number;
-  /** The lane colour (the index of the lane it sits in). */
-  lane: number;
-  /** A branch point's node: it stays where it is. */
-  isFork: boolean;
-}
-
-/** A drawn edge (or the part of one between two drawn points). */
-export interface GraphPath {
-  key: string;
-  d: string;
-  edgeId?: string;
-  lane: number;
-  done: boolean;
-  /** The node it goes into, `end`, `merge` or `tag`. */
-  to: string;
-  mid: Point;
-}
-
-/** A jump (a link): dashed, orthogonal. */
-export interface GraphLink {
-  key: string;
-  d: string;
-  /** The corners of the route (`d` rounds them). */
-  points: Point[];
-  /** True when no clean route existed and the dashed curve was drawn. */
-  fallback: boolean;
-  edgeId: string;
-  from: string;
-  to: string;
-  role: LinkEdge["role"];
-  lane: number;
-  mid: Point;
-}
-
-/** A lane tag: the lane letter and its condition chip. */
-export interface GraphTag {
-  key: string;
-  forkId: string;
-  laneIndex: number;
-  /** The fork's handle the lane leaves on (`case-<n>`, `default`,
-   *  `option-<n>`), null for a lane with no row in the inspector. */
-  handle: string | null;
-  /** Centre x, top y, width. */
-  x: number;
-  y: number;
-  w: number;
-  text: string;
-  dead: boolean;
-  /** The lane leaves the loop its branch point is in. */
-  leaves: boolean;
-  /** Steps in the lane. */
-  count: number;
-}
-
-export interface GraphLoop {
-  key: string;
-  headerId: string;
-  rect: { x: number; y: number; w: number; h: number };
-  /** The return arcs (one per way back), solid. */
-  arcs: GraphPath[];
-  /** Where the label starts (left, baseline-ish top). */
-  label: Point;
-  /** The repeated steps' numbers. */
-  from: number;
-  to: number;
-  /** A switch / choice inside, a lane that leaves, or bounds: not
-   *  "forever". */
-  canExit: boolean;
-  /** The loop's loop edge (schema 1.10), null for a plain back edge. */
-  loopEdge: LoopBlock["loopEdge"];
-  ids: string[];
-}
-
-/** A `+` of the editor. */
-export interface GraphPlus {
-  slot: { lane: SeqPath; index: number };
-  label: string;
-  x: number;
-  y: number;
-}
-
-/** "+ branch" by a branch point (or START). */
-export interface GraphPill {
-  nodeId: string;
-  x: number;
-  y: number;
-  label: string;
-}
-
-export interface TreeGraphGeometry {
-  cards: GraphCard[];
-  paths: GraphPath[];
-  links: GraphLink[];
-  tags: GraphTag[];
-  loops: GraphLoop[];
-  ends: Array<Point & { lane: number }>;
-  merges: Point[];
-  start: Point | null;
-  discs: GraphPlus[];
-  zones: GraphPlus[];
-  pills: GraphPill[];
-  /** Where "Steps nothing reaches" stands, when there are any. */
-  detached: Point | null;
-  /** Each sequence's block centres (y), in block order, for the drag. */
-  centres: ReadonlyMap<SeqPath, number[]>;
-  width: number;
-  height: number;
-}
-
-/** An edge end waiting for what comes next: a card bottom, a tag bottom, a
- *  merge point. */
-interface Open {
-  x: number;
-  y: number;
-  /** The edge drawn from here, when known. */
-  edgeId: string | null;
-  /** The node it leaves (for the run state); null for START. */
-  from: string | null;
-  lane: number;
-  /** A fallthrough's target. */
-  to?: string;
-  /** `edgeId` is final, null included (a tag's or a merge point's line
-   *  out: the edge was drawn into it). */
-  fixed?: boolean;
-}
-
-interface Ctx {
-  /** The header of the innermost loop around, or null. */
-  loopHeader: string | null;
-  /** Lanes that leave that loop stand at this x (top-level forks of its
-   *  body only); null elsewhere. */
-  outsideX: number | null;
-  lane: number;
-}
-
-export interface TreeGraphOptions {
-  editable: boolean;
-  /** "done" / "current" mark a path travelled. */
-  phaseOf: (nodeId: string) => string;
-}
+import {
+  NODE_W,
+  NODE_H,
+  LANE_W,
+  ROW_H,
+  GAP,
+  START_R,
+  END_R,
+  CAP_GAP,
+  EDIT_CAP_GAP,
+  FORK_DROP,
+  TAG_H,
+  tagWidth,
+  TAG_MARGIN,
+  MERGE_DROP,
+  LOOP_LEFT,
+  LOOP_RIGHT,
+  LOOP_TOP,
+  LOOP_BOTTOM,
+  LOOP_BUTTON_ROW,
+  LOOP_TURN,
+  LEAVING_GAP,
+  PILL_ROOM,
+  DETACHED_GAP,
+  MARGIN_TOP,
+  type Point,
+  type GraphCard,
+  type GraphPath,
+  type GraphTag,
+  type GraphLoop,
+  type GraphPlus,
+  type GraphPill,
+  type TreeGraphGeometry,
+  type Open,
+  type Ctx,
+  type TreeGraphOptions,
+} from "./treeGraphLayout/geometry";
+import { hasFork } from "./treeGraphLayout/helpers";
+import { routeJumpLinks } from "./treeGraphLayout/links";
 
 /** Lays the tree out. */
 export function layoutTreeGraph(
@@ -967,225 +786,17 @@ export function layoutTreeGraph(
       dy = r.bottom + ROW_H;
     }
   }
-
-  // Jumps: dashed orthogonal routes. Out of the source card's side (an
-  // empty lane: its tag), along a vertical channel (beside everything
-  // between the two rows, or in the corridor between two columns), across
-  // the gap row above the target and down into its top corner on the
-  // channel's side. Of the channels tried, the one that crosses no card or
-  // tag, keeps clear of END rings, `+` discs, merge points and pills, and is
-  // shortest wins. Channels are stepped so two jumps never share a line.
-  const links: GraphLink[] = [];
-  const cardOf = new Map(cards.map((c) => [c.node.id, c]));
-  interface Box {
-    l: number;
-    r: number;
-    t: number;
-    b: number;
-    id?: string;
-  }
-  const hard: Box[] = [
-    ...cards.map((c) => ({
-      l: c.x - NODE_W / 2,
-      r: c.x + NODE_W / 2,
-      t: c.y,
-      b: c.y + NODE_H,
-      id: c.node.id,
-    })),
-    ...tags.map((tg) => ({
-      l: tg.x - tg.w / 2,
-      r: tg.x + tg.w / 2,
-      t: tg.y,
-      b: tg.y + TAG_H,
-    })),
-  ];
-  const around = (p: Point, r: number): Box => ({
-    l: p.x - r,
-    r: p.x + r,
-    t: p.y - r,
-    b: p.y + r,
+  const { links, reach } = routeJumpLinks(tree, {
+    cards,
+    tags,
+    ends,
+    discs,
+    merges,
+    pills,
+    startDot,
+    linkStarts,
   });
-  const soft: Box[] = [
-    ...ends.map((e) => around(e, END_R + 2)),
-    ...discs.map((d) => around(d, 11)),
-    ...merges.map((m) => around(m, 5)),
-    ...(startDot ? [around(startDot, START_R + 2)] : []),
-    ...pills.map((pl) => ({ l: pl.x, r: pl.x + 72, t: pl.y, b: pl.y + 22 })),
-  ];
-  /** Boxes a polyline's segments cross (touching an edge is not), each
-   *  grown by `pad` (never the jump's own source and target cards). */
-  const crossings = (
-    pts: Point[],
-    boxes: readonly Box[],
-    pad = 0,
-    skip: ReadonlySet<string> = new Set(),
-  ): number => {
-    let n = 0;
-    for (let k = 1; k < pts.length; k++) {
-      const p = pts[k - 1];
-      const q = pts[k];
-      for (const o of boxes) {
-        const g = o.id !== undefined && skip.has(o.id) ? 0 : pad;
-        if (
-          Math.max(p.x, q.x) > o.l - g + 1 &&
-          Math.min(p.x, q.x) < o.r + g - 1 &&
-          Math.max(p.y, q.y) > o.t - g + 1 &&
-          Math.min(p.y, q.y) < o.b + g - 1
-        ) {
-          n++;
-        }
-      }
-    }
-    return n;
-  };
-  const length = (pts: Point[]) =>
-    pts.reduce(
-      (sum, q, k) =>
-        k === 0
-          ? 0
-          : sum + Math.abs(q.x - pts[k - 1].x) + Math.abs(q.y - pts[k - 1].y),
-      0,
-    );
-  const swings: Array<{ top: number; bottom: number; x: number }> = [];
-  for (const link of tree.links) {
-    const edge = link.edge;
-    const to = cardOf.get(edge.target);
-    const fromCard = cardOf.get(edge.source);
-    const start = linkStarts.get(edge.id);
-    if (!to || (!fromCard && !start)) continue;
-    const gapY = to.y - GAP / 2;
-    const srcX = fromCard ? fromCard.x : start!.x;
-    const srcY = fromCard ? fromCard.y + NODE_H / 2 : start!.y + 6;
-    const y1 = Math.min(srcY, gapY);
-    const y2 = Math.max(srcY, gapY);
-    const ends2 = new Set([edge.source, edge.target]);
-    /** One orthogonal route: out of the source's side at `srcY`, (when
-     *  `exitRow` differs, a short step out and along that row first), up or
-     *  down `channel`, across `entryRow`, down into the target's top. */
-    const route = (
-      channel: number,
-      exitRow: number = srcY,
-      entryRow: number = gapY,
-    ) => {
-      let swing = channel;
-      const lo = Math.min(y1, exitRow, entryRow);
-      const hi = Math.max(y2, exitRow, entryRow);
-      for (const sw of swings) {
-        if (
-          sw.top <= hi &&
-          sw.bottom >= lo &&
-          Math.abs(sw.x - swing) < LINK_STEP
-        ) {
-          swing = sw.x + (swing >= srcX ? LINK_STEP : -LINK_STEP);
-        }
-      }
-      const out = swing >= srcX ? 1 : -1;
-      const a = fromCard
-        ? { x: srcX + (out * NODE_W) / 2, y: srcY }
-        : { x: srcX, y: srcY };
-      const tx = to.x + (swing >= to.x ? 1 : -1) * (NODE_W / 2 - LINK_INSET);
-      const lead =
-        exitRow === srcY
-          ? [a]
-          : [
-              a,
-              { x: a.x + out * 8, y: srcY },
-              { x: a.x + out * 8, y: exitRow },
-            ];
-      const pts = dedupe([
-        ...lead,
-        { x: swing, y: exitRow },
-        { x: swing, y: entryRow },
-        { x: tx, y: entryRow },
-        { x: tx, y: to.y },
-      ]);
-      const score =
-        crossings(pts, hard) * 1e6 +
-        crossings(pts, soft) * 1e4 +
-        crossings(pts, hard, 6, ends2) * 1e3 +
-        length(pts);
-      return { pts, swing, score, curve: false };
-    };
-    const passed = hard.filter((o) => o.b >= y1 && o.t <= y2);
-    const channels = new Set<number>([
-      Math.max(srcX + NODE_W / 2, to.x, ...passed.map((o) => o.r)) + LINK_SWING,
-      Math.min(srcX - NODE_W / 2, to.x, ...passed.map((o) => o.l)) - LINK_SWING,
-      ...passed.flatMap((o) => [o.r + 12, o.l - 12]),
-    ]);
-    const pick = (opts: ReturnType<typeof route>[]) =>
-      opts.reduce((m, o) => (o.score < m.score ? o : m));
-    let best = pick(
-      [...channels].map((c) => route(c)).filter((o) => o.swing >= 4),
-    );
-    if (best.score >= 1e6) {
-      // Every plain route crosses a card: also leave along the source's own
-      // gap rows, and enter along the free rows above the target.
-      const exitRows = fromCard
-        ? [fromCard.y - GAP / 2, fromCard.y + NODE_H + GAP / 2]
-        : [];
-      const above = cards
-        .filter((c) => c.node.id !== edge.target && Math.abs(c.x - to.x) < 1)
-        .filter((c) => c.y + NODE_H <= to.y)
-        .sort((p, q) => q.y - p.y);
-      const entryRows = [to.y - 6, to.y - GAP / 2 - 6].filter(
-        (y) => y !== gapY,
-      );
-      let prevTop = to.y;
-      for (const c of above.slice(0, 3)) {
-        entryRows.push((c.y + NODE_H + prevTop) / 2);
-        prevTop = c.y;
-      }
-      const more: ReturnType<typeof route>[] = [];
-      const rows: Array<[number, number]> = [
-        ...exitRows.map((r): [number, number] => [r, gapY]),
-        ...entryRows.map((r): [number, number] => [srcY, r]),
-        ...exitRows.flatMap((r) =>
-          entryRows.map((e): [number, number] => [r, e]),
-        ),
-      ];
-      for (const [r, e] of rows) {
-        for (const c of channels) {
-          if (c >= 4) more.push(route(c, r, e));
-        }
-      }
-      if (more.length > 0) {
-        const alt = pick(more);
-        if (alt.score < best.score) best = alt;
-      }
-    }
-    if (best.score >= 1e6) {
-      // No clean route: the dashed curve beside everything (it may cross).
-      const swingR = Math.max(...channels);
-      const r = route(swingR);
-      const a = fromCard
-        ? { x: srcX + NODE_W / 2, y: srcY }
-        : { x: srcX, y: srcY };
-      const b = { x: to.x + NODE_W / 2 + 3, y: to.y + NODE_H / 2 };
-      const p1 = { x: r.swing, y: a.y };
-      const p2 = { x: r.swing, y: b.y };
-      best = {
-        ...r,
-        pts: [a, p1, p2, b],
-        curve: true,
-      };
-    }
-    swings.push({ top: y1, bottom: y2, x: best.swing });
-    right = Math.max(right, best.swing + 8);
-    links.push({
-      key: edge.id,
-      d: best.curve
-        ? `M ${best.pts[0].x} ${best.pts[0].y} C ${best.pts[1].x} ${best.pts[1].y}, ${best.pts[2].x} ${best.pts[2].y}, ${best.pts[3].x} ${best.pts[3].y}`
-        : roundedPath(best.pts),
-      points: best.pts,
-      fallback: best.curve,
-      edgeId: edge.id,
-      from: edge.source,
-      to: edge.target,
-      role: link.role,
-      lane: fromCard?.lane ?? 0,
-      mid: { x: best.swing, y: (y1 + y2) / 2 },
-    });
-  }
+  right = Math.max(right, reach);
 
   for (const pill of pills) right = Math.max(right, pill.x + 110);
   return {
@@ -1207,64 +818,6 @@ export function layoutTreeGraph(
   };
 }
 
-/** Whether a sequence holds a branch point, at any depth. */
-function hasFork(seq: Seq): boolean {
-  return seq.blocks.some(
-    (b) => b.kind === "fork" || (b.kind === "loop" ? hasFork(b.body) : false),
-  );
-}
-
-/** `pts` without repeated points and the middle of straight runs. */
-function dedupe(pts: Point[]): Point[] {
-  const out: Point[] = [];
-  for (const p of pts) {
-    const last = out[out.length - 1];
-    if (last && last.x === p.x && last.y === p.y) continue;
-    const prev = out[out.length - 2];
-    if (
-      prev &&
-      last &&
-      ((prev.x === last.x && last.x === p.x) ||
-        (prev.y === last.y && last.y === p.y))
-    ) {
-      out[out.length - 1] = p;
-      continue;
-    }
-    out.push(p);
-  }
-  return out;
-}
-
-/** An SVG path through `pts` with its corners rounded. */
-function roundedPath(pts: Point[], radius = 8): string {
-  const parts = [`M ${pts[0].x} ${pts[0].y}`];
-  const toward = (from: Point, to: Point, d: number): Point => {
-    const len = Math.abs(to.x - from.x) + Math.abs(to.y - from.y);
-    return len === 0
-      ? from
-      : {
-          x: from.x + ((to.x - from.x) * d) / len,
-          y: from.y + ((to.y - from.y) * d) / len,
-        };
-  };
-  for (let k = 1; k < pts.length - 1; k++) {
-    const p = pts[k - 1];
-    const c = pts[k];
-    const n = pts[k + 1];
-    const r = Math.min(
-      radius,
-      (Math.abs(c.x - p.x) + Math.abs(c.y - p.y)) / 2,
-      (Math.abs(n.x - c.x) + Math.abs(n.y - c.y)) / 2,
-    );
-    const a = toward(c, p, r);
-    const b = toward(c, n, r);
-    parts.push(`L ${a.x} ${a.y}`, `Q ${c.x} ${c.y} ${b.x} ${b.y}`);
-  }
-  const last = pts[pts.length - 1];
-  parts.push(`L ${last.x} ${last.y}`);
-  return parts.join(" ");
-}
-
 /** The ids of the edges the Graph view draws: every edge the tree draws
  *  structurally and every jump between two placed steps (an edge back
  *  into START is not drawn: START has no card to go into). */
@@ -1279,3 +832,28 @@ export function graphEdgeIds(tree: BlockTree): Set<string> {
   }
   return ids;
 }
+
+export {
+  END_R,
+  GAP,
+  LANE_W,
+  NODE_H,
+  NODE_W,
+  ROW_H,
+  START_R,
+  TAG_H,
+  TAG_MAX_W,
+  tagWidth,
+} from "./treeGraphLayout/geometry";
+export type {
+  GraphCard,
+  GraphLink,
+  GraphLoop,
+  GraphPath,
+  GraphPill,
+  GraphPlus,
+  GraphTag,
+  Point,
+  TreeGraphGeometry,
+  TreeGraphOptions,
+} from "./treeGraphLayout/geometry";

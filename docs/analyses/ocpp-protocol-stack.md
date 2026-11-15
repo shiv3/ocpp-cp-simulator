@@ -152,6 +152,12 @@ manifest still exports `"./*"`, so every consumer imports
   [#1060](https://github.com/shiv3/ocpp-cp-simulator/issues/1060).
 - `close(reason)` rejects every pending call with `RpcClosedError`, and the endpoint
   then ignores frames and does not answer handlers that finish later.
+- `ocppSchemaValidator` admits a payload on the lenient check (no `format`
+  keywords), so a 1.6 `expiryDate: "not-a-date"` reaches the handler. Core mixes
+  the two today (strict for 1.6 requests since #285, lenient admission for 2.x
+  requests, warn-only for responses); the package's rule is settled with
+  [#1059](https://github.com/shiv3/ocpp-cp-simulator/issues/1059), when core's
+  inbound dispatch moves onto it.
 
 **What core consumes today.** `transport/callFrame.ts` delegates to `encodeCall`;
 `ws/frameSender.ts` writes CALLRESULT and CALLERROR with `encodeCallResult` /

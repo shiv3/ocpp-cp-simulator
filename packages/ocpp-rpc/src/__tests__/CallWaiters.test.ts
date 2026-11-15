@@ -46,4 +46,35 @@ describe("CallWaiters (ocpp-rpc)", () => {
     await expect(second).rejects.toThrow("no");
     expect(later).toEqual(["late"]);
   });
+
+  it("clears a waiter's timer on the clock that armed it, even after a swap", async () => {
+    // Two independent clocks that both hand out handle 1.
+    const makeClock = () => {
+      const timers = new Map<number, () => void>();
+      const clock: RpcClock = {
+        setTimeout: (fn) => {
+          timers.set(1, fn);
+          return 1;
+        },
+        clearTimeout: (handle) => timers.delete(handle as number),
+      };
+      return { clock, fire: () => [...timers.values()].forEach((fn) => fn()) };
+    };
+    const first = makeClock();
+    const second = makeClock();
+    let current = first.clock;
+    const waiters = new CallWaiters<string>(
+      100,
+      (id) => new Error(`${id} timed out`),
+      () => current,
+    );
+    const a = waiters.register("a");
+    current = second.clock;
+    const b = waiters.register("b");
+
+    waiters.resolve("a", "ok");
+    await expect(a).resolves.toBe("ok");
+    second.fire();
+    await expect(b).rejects.toThrow("b timed out");
+  });
 });

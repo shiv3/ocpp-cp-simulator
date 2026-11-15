@@ -5,7 +5,7 @@
   "apps/cli/src/server/FileReloadManager.ts": 1455,
   "apps/cli/src/server/RegistryChargePointService.ts": 1559,
   "apps/cli/src/server/httpServer.ts": 1264,
-  "apps/cli/src/server/mcp/tools.ts": 1519,
+  "apps/cli/src/server/mcp/tools.ts": 860,
   "apps/cli/src/server/socketServer.ts": 3532,
   "apps/cli/src/server/startServer.ts": 1125,
   "apps/cli/src/server/startupScenario.ts": 843,

@@ -4,6 +4,7 @@ type: entity
 summary: Stateless Model Context Protocol endpoint served by the daemon so MCP clients such as Claude Code can drive the simulator; curated tools + network-sim tools + power-loss tools + a generic escape hatch, and the OCPP JSON Schemas as resources.
 sources:
   - apps/cli/src/server/mcp/tools.ts
+  - apps/cli/src/server/mcp/tools/
   - apps/cli/src/server/mcp/schemaResources.ts
   - packages/ocpp/src/schemaSources.ts
   - apps/cli/src/server/__tests__/mcpSchemaResources.test.ts

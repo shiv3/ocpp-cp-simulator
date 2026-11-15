@@ -15,7 +15,7 @@
   "apps/web/src/components/scenario/forms/nodeFormRegistry.ts": 1349,
   "apps/web/src/components/ui/log-viewer.tsx": 833,
   "apps/web/src/console/components/vehicle/ImportVehicleDialog.tsx": 852,
-  "apps/web/src/console/lib/blockTree.ts": 3156,
+  "apps/web/src/console/lib/blockTree.ts": 909,
   "apps/web/src/console/lib/scenarioSteps.ts": 1390,
   "apps/web/src/console/lib/treeGraphLayout.ts": 1281,
   "apps/web/src/console/pages/cp/CpDetailContent.tsx": 1118,

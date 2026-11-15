@@ -1255,7 +1255,9 @@ its types, structural successors, dominator computation and tree helpers
 (`treeNodes`, `assertTreeCovers`, in `blockTree/treeHelpers.ts`), the
 write-back (`rebuildFromTree`, in `blockTree/rebuild.ts`) and the edit
 primitives (`cloneTree`, `seqAt`, `insertBlockAt`, in
-`blockTree/edit/primitives.ts`) live in
+`blockTree/edit/primitives.ts`), the capability checks (`editCapabilities`,
+`canWrapInLoop`, in `blockTree/capabilities.ts`) and the edits they simulate
+(`applyRemoveStep`, `applyUnwrapLoop`, in `blockTree/edit/applies.ts`) live in
 [`blockTree/`](../../apps/web/src/console/lib/blockTree/) and are re-exported
 by `blockTree.ts`): nested sequences of steps, forks and loops, recovered
 from the graph the way the executor reads it (`lowerScenario`,

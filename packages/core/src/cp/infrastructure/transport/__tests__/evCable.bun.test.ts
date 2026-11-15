@@ -204,6 +204,85 @@ describe("EV cable model on OCPP 1.6 (#453)", () => {
     }
   });
 
+  it("plug-in does not lift a Faulted connector, and the unplug does not either", async () => {
+    const csms = startMockCsms();
+    const { cp, stopAnswering } = await v16Station(csms, "CP16-CABLE-FAULT");
+    try {
+      cp.updateConnectorStatus(1, OCPPStatus.Faulted);
+      await csms.waitForFrame(statusOf("Faulted"));
+      const before = csms.received.length - 1;
+
+      cp.evPlugIn(1);
+      expect(cp.getConnector(1)?.evConnection).toBe("connected-ready");
+      cp.evDisconnected(1);
+      expect(cp.getConnector(1)?.evConnection).toBe("disconnected");
+
+      await sentinel(cp, csms);
+      expect(statusesSince(csms, before)).toEqual([]);
+      expect(cp.getConnector(1)?.status).toBe(OCPPStatus.Faulted);
+    } finally {
+      stopAnswering();
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
+
+  it("plug-in does not lift a Reserved connector, and the unplug keeps the reservation", async () => {
+    const csms = startMockCsms();
+    const { cp, stopAnswering } = await v16Station(csms, "CP16-CABLE-RES");
+    try {
+      csms.send([
+        2,
+        "rn",
+        "ReserveNow",
+        {
+          connectorId: 1,
+          expiryDate: new Date(Date.now() + 600_000).toISOString(),
+          idTag: "TAG-453",
+          reservationId: 32,
+        },
+      ]);
+      await csms.waitForFrame(statusOf("Reserved"));
+      const before = csms.received.length - 1;
+
+      cp.evPlugIn(1);
+      expect(cp.getConnector(1)?.evConnection).toBe("connected-ready");
+      cp.evDisconnected(1);
+      expect(cp.getConnector(1)?.evConnection).toBe("disconnected");
+
+      await sentinel(cp, csms);
+      expect(statusesSince(csms, before)).toEqual([]);
+      expect(cp.getConnector(1)?.status).toBe(OCPPStatus.Reserved);
+    } finally {
+      stopAnswering();
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
+
+  it("plug-in while powered off records the cable and changes no status", async () => {
+    const csms = startMockCsms();
+    const { cp, stopAnswering } = await v16Station(csms, "CP16-CABLE-OFF");
+    try {
+      cp.powerLoss();
+      expect(cp.poweredOff).toBe(true);
+      const connector = cp.getConnector(1)!;
+      const statusWhileOff = connector.status;
+      const before = csms.received.length - 1;
+
+      cp.evPlugIn(1);
+
+      expect(connector.evConnection).toBe("connected-ready");
+      expect(connector.status).toBe(statusWhileOff);
+      expect(connector.status).not.toBe(OCPPStatus.Preparing);
+      expect(statusesSince(csms, before)).toEqual([]);
+    } finally {
+      stopAnswering();
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
+
   it("plug-out during a transaction stops it with EVDisconnected (StopTransactionOnEVSideDisconnect=true)", async () => {
     const csms = startMockCsms();
     const { cp, stopAnswering } = await v16Station(csms, "CP16-CABLE-STOP");
@@ -341,6 +420,38 @@ describe("EV cable model on OCPP 2.0.1 (#453)", () => {
       await csms.waitForFrame(
         (f) => statusOf("Available")(f) && indexAfter(csms, mid)(f),
       );
+      expect(transactionEvents(csms)).toHaveLength(0);
+    } finally {
+      stopAnswering();
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
+
+  it("a re-plug after a plug-out reports Occupied again", async () => {
+    const csms = startMockCsms();
+    const { cp, stopAnswering } = await v201Station(csms, "CP201-CABLE-RE");
+    try {
+      const before = csms.received.length - 1;
+      cp.evPlugIn(1);
+      await csms.waitForFrame(
+        (f) => statusOf("Occupied")(f) && indexAfter(csms, before)(f),
+      );
+      const mid = csms.received.length - 1;
+      cp.evDisconnected(1);
+      await csms.waitForFrame(
+        (f) => statusOf("Available")(f) && indexAfter(csms, mid)(f),
+      );
+
+      cp.evPlugIn(1);
+
+      await sentinel(cp, csms);
+      expect(statusesSince(csms, before)).toEqual([
+        "Occupied",
+        "Available",
+        "Occupied",
+      ]);
+      expect(cp.getConnector(1)?.evConnection).toBe("connected-ready");
       expect(transactionEvents(csms)).toHaveLength(0);
     } finally {
       stopAnswering();

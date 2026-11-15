@@ -38,7 +38,7 @@ related:
   - operational-timeline.md
   - expert-ocpp-calls.md
   - variable-monitoring.md
-updated: 2026-11-14
+updated: 2026-11-15
 ---
 
 # OCPP versions and transports
@@ -926,6 +926,21 @@ station-wide ChangeAvailability or for a `TriggerMessage(StatusNotification)`
 without an EVSE (#703). OCPP 1.6 `connectorId: 0` is unchanged. Station
 availability is not reported separately; a `ChargingStation.AvailabilityState`
 NotifyEvent (G04.FR.05, a MAY) is not sent.
+
+## EVSE and connector numbering on 2.x
+
+The domain numbers connectors 1..N (the OCPP 1.6 `connectorId`, the
+persisted `connector_id`, the control-plane `connector`, a scenario's
+binding). On 2.0.1 / 2.1 the station maps each one to `(evseId, connectorId)`
+through its station topology (`StationTopology`, #628): StatusNotification,
+TransactionEvent `evse`, MeterValues `evseId`, the device model's `EVSE` /
+`Connector` components and every CSMS CALL that names an EVSE go through it.
+Every station is 1:1 today: connector N is EVSE N, connector 1. A CALL that
+names a connector the EVSE does not have is refused where the action has an
+answer for it: UnlockConnector `UnknownConnector` (F05.FR.03),
+ChangeAvailability `Rejected` with `UnknownConnectorId` (G03). Code:
+`packages/core/src/cp/domain/topology/StationTopology.ts`,
+`transport/v201/topologyWireV201.ts`.
 
 ## One CALL in flight on 2.x (OCPP-J §4.1.1)
 

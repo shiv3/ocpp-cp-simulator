@@ -2,8 +2,14 @@ OCPP JSON Schemas — Attribution
 ================================
 These JSON Schema files are the official Open Charge Alliance (OCA) OCPP message
 schemas, vendored VERBATIM (unmodified) from the public repository:
-  https://github.com/mobilityhouse/ocpp  @ commit d6b003d9f3ab411994f67d428ea51a82991f49e0
-under ocpp/{v16,v201,v21}/schemas/.
+  https://github.com/juherr/awesome-ev-charging  @ commit 97dc09851c82de14d6a953c3d163f8c79954aeab
+which keeps the OCA distributions as published:
+  v16  <- ocpp/OCPP-1.6/schemas/json/ (OCPP 1.6 JSON schemas; the loose
+          files of OCPP-1.6-JSON-Schemas.zip, line endings CRLF -> LF)
+       +  ocpp/Whitepapers/OCPP-1.6-security-whitepaper-edition-3-2/schema/
+          (OCPP 1.6 Security Whitepaper edition 3)
+  v201 <- ocpp/OCPP-2.0.1/OCPP-2.0.1_part3_JSON_schemas/ (OCPP 2.0.1 part 3)
+  v21  <- ocpp/OCPP-2.1/OCPP-2.1_part3_JSON_schemas/ (OCPP 2.1 part 3)
 
 OCPP and its schemas are (c) Open Charge Alliance. The OCPP JSON Schemas (1.6,
 2.0.1 and 2.1) are licensed Creative Commons Attribution-NoDerivatives 4.0

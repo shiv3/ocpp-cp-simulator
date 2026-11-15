@@ -1,5 +1,6 @@
 {
     "$schema": "http://json-schema.org/draft-04/schema#",
+    "id": "urn:OCPP:1.6:2019:12:MeterValuesRequest",
     "title": "MeterValuesRequest",
     "type": "object",
     "properties": {
@@ -11,7 +12,6 @@
         },
         "meterValue": {
             "type": "array",
-            "minItems": 1,
             "items": {
                 "type": "object",
                 "properties": {
@@ -21,7 +21,6 @@
                     },
                     "sampledValue": {
                         "type": "array",
-                        "minItems": 1,
                         "items": {
                             "type": "object",
                             "properties": {
@@ -125,8 +124,7 @@
                                         "Celcius",
                                         "Celsius",
                                         "Fahrenheit",
-                                        "Percent",
-                                        "Hertz"
+                                        "Percent"
                                     ]
                                 }
                             },

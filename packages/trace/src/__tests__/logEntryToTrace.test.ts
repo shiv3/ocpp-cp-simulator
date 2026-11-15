@@ -243,3 +243,151 @@ describe("record key order", () => {
     expect(Object.keys(record ?? {}).join(" ")).toBe(keys);
   });
 });
+
+describe("connectorId (#999)", () => {
+  const ctx16 = { ocppVersion: "1.6" };
+  const ctx201 = { ocppVersion: "2.0.1" };
+  const call = (action: string, payload: unknown) =>
+    `Sent: [2,"c-1","${action}",${JSON.stringify(payload)}]`;
+
+  it.each([
+    ["StatusNotification", { connectorId: 2, status: "Available" }, 2],
+    ["MeterValues", { connectorId: 1, meterValue: [] }, 1],
+    ["StartTransaction", { connectorId: 3, idTag: "T" }, 3],
+    ["RemoteStartTransaction", { connectorId: 1, idTag: "T" }, 1],
+    ["UnlockConnector", { connectorId: 2 }, 2],
+    ["ChangeAvailability", { connectorId: 0, type: "Inoperative" }, 0],
+    ["TriggerMessage", { requestedMessage: "MeterValues", connectorId: 4 }, 4],
+  ])("stamps a 1.6 %s CALL's payload.connectorId", (action, payload, id) => {
+    const record = logLineToTraceRecord(line(call(action, payload)), ctx16);
+    expect(record?.connectorId).toBe(id);
+  });
+
+  it.each([
+    [
+      "StatusNotification",
+      { evseId: 1, connectorId: 2, connectorStatus: "Available" },
+      2,
+    ],
+    ["UnlockConnector", { evseId: 1, connectorId: 1 }, 1],
+    [
+      "TransactionEvent",
+      { eventType: "Started", evse: { id: 1, connectorId: 2 } },
+      2,
+    ],
+    [
+      "ChangeAvailability",
+      { operationalStatus: "Inoperative", evse: { id: 2, connectorId: 1 } },
+      1,
+    ],
+    [
+      "TriggerMessage",
+      {
+        requestedMessage: "StatusNotification",
+        evse: { id: 1, connectorId: 0 },
+      },
+      0,
+    ],
+  ])("stamps a 2.x %s CALL's connector", (action, payload, id) => {
+    const record = logLineToTraceRecord(line(call(action, payload)), ctx201);
+    expect(record?.connectorId).toBe(id);
+  });
+
+  it.each([
+    ["BootNotification", { chargePointVendor: "V" }],
+    ["StopTransaction", { transactionId: 7 }],
+    ["StatusNotification", { connectorId: -1 }],
+    ["StatusNotification", { connectorId: 1.5 }],
+    ["StatusNotification", { connectorId: "1" }],
+    ["StatusNotification", { connectorId: null }],
+    ["TransactionEvent", { evse: { id: 1 } }],
+    ["TransactionEvent", { evse: [{ connectorId: 1 }] }],
+    ["TransactionEvent", { evse: { id: 1, connectorId: -2 } }],
+    ["RequestStartTransaction", { evseId: 1, idToken: {} }],
+    [
+      "GetVariables",
+      {
+        getVariableData: [{ component: { evse: { id: 1, connectorId: 1 } } }],
+      },
+    ],
+  ])("leaves %s %j without connectorId", (action, payload) => {
+    const record = logLineToTraceRecord(line(call(action, payload)), ctx16);
+    expect(record).not.toHaveProperty("connectorId");
+  });
+
+  it("leaves a CALL with no payload object without connectorId", () => {
+    const record = logLineToTraceRecord(line('Sent: [2,"c-1","Heartbeat"]'));
+    expect(record).not.toHaveProperty("connectorId");
+  });
+
+  it("does not stamp a response from its own payload", () => {
+    const record = logLineToTraceRecord(
+      line('Received: [3,"c-1",{"status":"Accepted","connectorId":1}]'),
+      ctx16,
+    );
+    expect(record).not.toHaveProperty("connectorId");
+  });
+
+  it("puts connectorId right after chargePointId", () => {
+    const record = logLineToTraceRecord(
+      line(call("StatusNotification", { connectorId: 1 }), { cpId: "CP1" }),
+      ctx16,
+    );
+    expect(Object.keys(record ?? {}).join(" ")).toBe(
+      "schemaVersion timestamp transport direction messageType ocppVersion chargePointId connectorId messageId action payload raw",
+    );
+  });
+
+  it("back-fills responses and StopTransaction through the batch correlation, per charge point", () => {
+    const at = (message: string, cpId: string) => line(message, { cpId });
+    const records = logLinesToTrace(
+      [
+        at('Sent: [2,"s-1","StartTransaction",{"connectorId":2}]', "A"),
+        at('Sent: [2,"s-1","StartTransaction",{"connectorId":1}]', "B"),
+        at('Received: [3,"s-1",{"transactionId":7}]', "A"),
+        at('Received: [3,"s-1",{"transactionId":7}]', "B"),
+        at(
+          'Received: [2,"r-1","RemoteStopTransaction",{"transactionId":7}]',
+          "A",
+        ),
+        at('Sent: [3,"r-1",{"status":"Accepted"}]', "A"),
+        at('Sent: [2,"t-1","StopTransaction",{"transactionId":7}]', "B"),
+        at('Received: [4,"t-1","InternalError","",{}]', "B"),
+        at('Sent: [2,"h-1","Heartbeat",{}]', "A"),
+        at('Received: [3,"h-1",{}]', "A"),
+      ],
+      ctx16,
+    );
+    expect(records.map((r) => r.connectorId)).toEqual([
+      2,
+      1,
+      2,
+      1,
+      2,
+      2,
+      1,
+      1,
+      undefined,
+      undefined,
+    ]);
+    expect(records[9]).not.toHaveProperty("connectorId");
+    // Back-filled connectorId keeps its slot after chargePointId; the
+    // back-filled action stays last, as before #999.
+    expect(JSON.stringify(records[2])).toBe(
+      JSON.stringify({
+        schemaVersion: SCHEMA_VERSION,
+        timestamp: "2026-07-14T02:00:00.000Z",
+        transport: "json",
+        direction: "csms-to-cp",
+        messageType: "CALLRESULT",
+        ocppVersion: "1.6",
+        chargePointId: "A",
+        connectorId: 2,
+        messageId: "s-1",
+        payload: { transactionId: 7 },
+        raw: '[3,"s-1",{"transactionId":7}]',
+        action: "StartTransaction",
+      }),
+    );
+  });
+});

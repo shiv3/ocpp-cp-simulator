@@ -68,6 +68,34 @@ describe("TraceWriter", () => {
     });
   });
 
+  it("writes connectorId after chargePointId on connector-scoped CALLs, their responses and StopTransaction (#999)", () => {
+    const writer = new TraceWriter(filePath);
+    const logger = new Logger();
+    logger.setCpId("CP001");
+    writer.attach({ cpId: "CP001", ocppVersion: "OCPP-1.6J", logger });
+
+    logger.info(
+      'Sent: [2,"s-1","StartTransaction",{"connectorId":2,"idTag":"T"}]',
+      LogType.WEBSOCKET,
+    );
+    logger.info('Received: [3,"s-1",{"transactionId":7}]', LogType.WEBSOCKET);
+    logger.info(
+      'Sent: [2,"t-1","StopTransaction",{"transactionId":7}]',
+      LogType.WEBSOCKET,
+    );
+    logger.info('Sent: [2,"h-1","Heartbeat",{}]', LogType.WEBSOCKET);
+
+    const lines = fs.readFileSync(filePath, "utf8").split("\n");
+    expect(
+      lines
+        .filter((line) => line.length > 0)
+        .map(
+          (line) => (JSON.parse(line) as { connectorId?: number }).connectorId,
+        ),
+    ).toEqual([2, 2, 2, undefined]);
+    expect(lines[1]).toContain('"chargePointId":"CP001","connectorId":2,');
+  });
+
   it("does not write a row for a non-wire log line", () => {
     const writer = new TraceWriter(filePath);
     const logger = new Logger();

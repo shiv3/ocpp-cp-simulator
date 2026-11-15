@@ -17,6 +17,7 @@ import {
   type TraceRecord,
   type Transport,
 } from "@open-ocpp-trace/core";
+import { payloadConnectorId } from "./connectorId";
 import { TraceCorrelator } from "./TraceCorrelator";
 
 /** A serialized simulator log line (`--log-format json`, `logs.get`, or the
@@ -182,10 +183,16 @@ function toRecord(
 ): TraceRecord {
   // Key order is part of the output (JSONL lines, byte-compared fixtures):
   // schemaVersion, timestamp, transport, direction, messageType, ocppVersion?,
-  // chargePointId?, messageId, action?, payload?, error?, raw. Re-spreading
-  // `messageType` in each branch keeps its position from `head`.
+  // chargePointId?, connectorId?, messageId, action?, payload?, error?, raw.
+  // Re-spreading `messageType` in each branch keeps its position from `head`.
+  // Only a CALL names its connector here; TraceCorrelator back-fills the
+  // others (#999).
   const ocppVersion = context.ocppVersion;
   const chargePointId = line.cpId ?? context.chargePointId;
+  const connectorId =
+    frame.messageType === "CALL"
+      ? payloadConnectorId(frame.payload)
+      : undefined;
   const head = {
     schemaVersion: SCHEMA_VERSION,
     timestamp: line.timestamp,
@@ -194,6 +201,7 @@ function toRecord(
     messageType: frame.messageType,
     ...(ocppVersion ? { ocppVersion } : {}),
     ...(chargePointId ? { chargePointId } : {}),
+    ...(connectorId !== undefined ? { connectorId } : {}),
     messageId: frame.messageId,
   };
   switch (frame.messageType) {
@@ -224,8 +232,10 @@ function toRecord(
 
 /**
  * Convert a single log line to a trace record, or `null` if it is not an
- * OCPP-J wire frame. CALLRESULT/CALLERROR records carry no `action` (there is
- * no cross-line context here); use {@link logLinesToTrace} to back-fill it.
+ * OCPP-J wire frame. A CALL carries the `connectorId` its payload names.
+ * CALLRESULT/CALLERROR records carry no `action` or `connectorId`, and
+ * StopTransaction / RemoteStopTransaction no `connectorId` (there is no
+ * cross-line context here); use {@link logLinesToTrace} to back-fill them.
  */
 export function logLineToTraceRecord(
   line: SerializedLogLine,
@@ -239,7 +249,8 @@ export function logLineToTraceRecord(
 /**
  * Convert a chronological batch of log lines to trace records, dropping
  * non-wire lines and back-filling each CALLRESULT/CALLERROR `action` from the
- * CALL that established its `messageId` (correlated per charge point). A thin
+ * CALL that established its `messageId` (correlated per charge point), and
+ * `connectorId` the same way and through the StartTransaction exchange. A thin
  * wrapper over {@link logLineToTraceRecord} + a single {@link TraceCorrelator}
  * — the correlation itself lives there so a live producer (the CLI's
  * TraceWriter) can reuse it one record at a time.

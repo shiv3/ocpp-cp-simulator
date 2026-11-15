@@ -1,20 +1,4 @@
-/**
- * The two timer operations the RPC layer needs. Any clock with these methods
- * fits, the simulator's virtual `SimClock` included; the handle is opaque.
- */
-export interface RpcClock {
-  setTimeout(fn: () => void, ms: number): unknown;
-  clearTimeout(handle: unknown): void;
-}
-
-/** The platform timers, used when no clock is injected. */
-export const platformClock: RpcClock = {
-  setTimeout: (fn, ms) => globalThis.setTimeout(fn, ms),
-  clearTimeout: (handle) =>
-    globalThis.clearTimeout(
-      handle as Parameters<typeof globalThis.clearTimeout>[0],
-    ),
-};
+import { platformClock, type RpcClock } from "./platformClock";
 
 /**
  * Callers waiting for the answer to one CALL, keyed by message id (#348

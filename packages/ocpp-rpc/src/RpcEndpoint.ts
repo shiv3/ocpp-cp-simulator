@@ -1,4 +1,5 @@
-import { CallWaiters, platformClock, type RpcClock } from "./CallWaiters";
+import { CallWaiters } from "./CallWaiters";
+import { platformClock, type RpcClock } from "./platformClock";
 import type { RpcDialect } from "./dialects";
 import {
   decodeFrame,

@@ -16,7 +16,8 @@ export {
   type RpcDecodeErrorReason,
   type RpcFrame,
 } from "./frames";
-export { CallWaiters, platformClock, type RpcClock } from "./CallWaiters";
+export { CallWaiters } from "./CallWaiters";
+export { platformClock, type RpcClock } from "./platformClock";
 export {
   OCPP16_RPC_DIALECT,
   OCPP2X_RPC_DIALECT,

@@ -150,6 +150,11 @@ export interface ChargePointDeps extends ChargePointServiceFactories {
   repositories: ChargePointRepositories;
   /** Uploads the GetDiagnostics file (read when an upload starts). */
   fileUploader: FileUploader;
+  /**
+   * Uploads a GetLog file when `RealLogUpload` is on (#926); an HTTP PUT in
+   * production. Absent: `fileUploader` is used.
+   */
+  logUploader?: FileUploader;
 }
 
 /** The constructor arguments and resolved state the transport is built from. */

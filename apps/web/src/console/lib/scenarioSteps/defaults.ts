@@ -264,8 +264,10 @@ export function createDefaultNode(type: AnyScenarioNodeType): ScenarioNode {
         position,
         data: {
           label: "Switch",
-          value: { $from: "state.mode" },
-          cases: ["a", "b"],
+          // charger.status resolves in every run, station-level ones
+          // included; a state.<key> would fail until a setState writes it.
+          value: { $from: "charger.status" },
+          cases: ["Available", "Unavailable"],
         } satisfies SwitchNodeData,
       };
     case ScenarioNodeType.CHOICE:

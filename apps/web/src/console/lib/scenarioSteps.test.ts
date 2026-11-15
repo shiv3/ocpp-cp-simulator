@@ -18,7 +18,9 @@ import {
   ScenarioNodeType,
   type ScenarioDefinition,
   type ScenarioNode,
+  type SwitchNodeData,
 } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
+import { resolveFrom } from "@ocpp-cp-simulator/core/cp/application/scenario/resolveFrom";
 import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import type { Edge } from "@xyflow/react";
 import { NODE_FORM_REGISTRY } from "../../components/scenario/forms/nodeFormRegistry";
@@ -533,6 +535,31 @@ describe("createDefaultNode", () => {
       expect(typeof n.data.label).toBe("string");
       expect(n.data.label.length).toBeGreaterThan(0);
     }
+  });
+
+  it("gives a new switch a value that resolves without any setState", () => {
+    const n = createDefaultNode(ScenarioNodeType.SWITCH);
+    // A station-level run with an empty state: no setState ran, no
+    // connector is bound, no CALL or ocppCall answer is held.
+    const value = resolveFrom(
+      (n.data as SwitchNodeData).value,
+      {
+        exchange: null,
+        response: null,
+        state: {},
+        station: (root) =>
+          root === "charger"
+            ? {
+                id: "CP-1",
+                ocppVersion: "1.6",
+                status: "Available",
+                connectorIds: [1],
+              }
+            : undefined,
+      },
+      "switch",
+    );
+    expect(value).toBe("Available");
   });
 
   it("creates START and END nodes too", () => {

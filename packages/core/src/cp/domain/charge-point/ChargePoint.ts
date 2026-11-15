@@ -370,8 +370,6 @@ export class ChargePoint {
   private readonly _repositories: ChargePointRepositories;
   private readonly _fileUploader: FileUploader;
   private readonly _reservationManager: ReservationManager;
-  /** Parent id / groupIdToken of the tags the CSMS authorized (reservations). */
-  private readonly _authorizedParents = new Map<string, string>();
   /** #597: Reset OnIdle requests answered `Scheduled`, each run once its transactions end. */
   /** Reason of the next BootNotification (2.x B01.FR.09); see {@link boot}. */
   private _bootReason: BootReason = "PowerUp";
@@ -427,6 +425,7 @@ export class ChargePoint {
   private readonly _authorizationFlow = new AuthorizationFlow({
     chargePoint: this,
     authorization: () => this._authorization,
+    localAuthListManager: () => this._localAuthListManager,
     clock: () => this._clock,
     events: () => this._events,
     logger: () => this._logger,
@@ -1394,19 +1393,12 @@ export class ChargePoint {
   }
 
   /**
-   * The parent id (1.6) or groupIdToken (2.x) the station knows for `idTag`:
-   * Local Authorization List, then Authorization Cache, then the last
-   * Authorize.conf (kept even when the cache is off). Reservation matching by
-   * parent (1.6 §5.13, H03.FR.04/07) uses it; it never asks the CSMS itself.
+   * The parent id (1.6) or groupIdToken the station knows for `idTag`
+   * (reservation matching, 1.6 §5.13, H03.FR.04/07); it never asks the CSMS.
+   * @see AuthorizationFlow.knownParentIdOf
    */
   knownParentIdOf(idTag: string): string | undefined {
-    // A malformed CALL (warn mode runs the handler anyway) can name no tag.
-    if (typeof idTag !== "string") return undefined;
-    return (
-      this._localAuthListManager.getEntry(idTag)?.parentIdTag ??
-      this._authorization.cache.get(idTag)?.parentId ??
-      this._authorizedParents.get(idTag)
-    );
+    return this._authorizationFlow.knownParentIdOf(idTag);
   }
 
   get localAuthListManager(): LocalAuthListManager {
@@ -1483,46 +1475,19 @@ export class ChargePoint {
   }
 
   /** Feed a CSMS verdict on `idToken` to the Authorization Cache (#452) and
-   *  report a conflict with the Local Authorization List (#744):
-   *  called by the Authorize / StartTransaction / StopTransaction result
-   *  handlers. A no-op while the cache is disabled or for an identifier of
-   *  the Local Authorization List (1.6 §3.5.3). */
+   *  report a conflict with the Local Authorization List (#744).
+   *  @see AuthorizationFlow.recordAuthorizationResult */
   recordAuthorizationResult(
     idToken: string,
     result: CsmsAuthorizationResult,
   ): void {
-    if (result.parentId !== undefined) {
-      this._authorizedParents.set(idToken, result.parentId);
-    } else {
-      this._authorizedParents.delete(idToken);
-    }
-    if (this._authorization.recordCsmsResult(idToken, result)) {
-      this._logger.debug(
-        `Authorization cache updated: ${idToken} → ${result.status}`,
-        LogType.TRANSACTION,
-      );
-    }
-    // 1.6 §3.5.2: tell the CSMS when its verdict contradicts the Local
-    // Authorization List. 2.x has no such notification (its StatusNotification
-    // carries no errorCode).
-    if (
-      !isOcpp2Version(this._ocppVersion) &&
-      this._authorization.conflictsWithLocalList(idToken, result.status)
-    ) {
-      this._logger.warn(
-        `CSMS verdict ${result.status} for ${idToken} conflicts with the Local Authorization List; sending LocalListConflict`,
-        LogType.OCPP,
-      );
-      this.sendStatusNotificationRaw(0, this._status, {
-        errorCode: "LocalListConflict",
-      });
-    }
+    this._authorizationFlow.recordAuthorizationResult(idToken, result);
   }
 
   /** ClearCache (1.6 §5.4): empty the Authorization Cache. Returns whether
    *  it could be cleared. */
   clearAuthorizationCache(): boolean {
-    return this._authorization.clearCache();
+    return this._authorizationFlow.clearAuthorizationCache();
   }
 
   /** Read-only: install and remove profiles with `applyChargingProfile` /

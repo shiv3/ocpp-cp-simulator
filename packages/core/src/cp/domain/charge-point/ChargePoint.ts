@@ -60,7 +60,6 @@ import type { OcppCallActions } from "../transport/OcppCallActions";
 import type {
   ChargePointDeps,
   ChargePointTransactions,
-  ChargePointTransport,
 } from "./ChargePointDeps";
 import type { FileUploader } from "./FileUploader";
 import type { ResolvedNetworkSimConfig } from "../transport/networkSim";
@@ -101,11 +100,8 @@ import {
 } from "../connector/MeterValueBuilder";
 import { ReservationManager } from "../reservation/Reservation";
 import { LocalAuthListManager } from "../auth/LocalAuthList";
-import type {
-  StationAuthorization} from "../auth/StationAuthorization";
-import {
-  type CsmsAuthorizationResult,
-} from "../auth/StationAuthorization";
+import type { StationAuthorization } from "../auth/StationAuthorization";
+import { type CsmsAuthorizationResult } from "../auth/StationAuthorization";
 import {
   ChargingProfileStore,
   type ApplyChargingProfileOptions,
@@ -121,7 +117,7 @@ import {
 import { MonitoringStore } from "../monitoring/MonitoringStore";
 import { DEFAULT_MONITOR_CATALOG } from "../monitoring/monitorCatalog";
 import type { MonitorEvaluation } from "../monitoring/MonitorEvaluation";
-import { OcmfMeter } from "../connector/SignedMeterData";
+import type { OcmfMeter } from "../connector/SignedMeterData";
 import {
   DEFAULT_ID_TAG,
   IdTagPool,
@@ -227,8 +223,6 @@ export class ChargePoint {
   private readonly _rawFrames: RawFrameSink | null;
   /** #389: null on SOAP. */
   private readonly _callCatalog: OcppCallActions | null;
-  /** SOAP dialect dispatch check; see {@link ChargePointTransport.receivesCsmsCall}. */
-  private readonly _receivesCsmsCall: ChargePointTransport["receivesCsmsCall"];
   private readonly _messageHandler: IChargePointMessageHandler;
   private readonly _transportUrl: string;
   /** The collaborators; their hosts read this charge point through `ctx`. */
@@ -343,8 +337,6 @@ export class ChargePoint {
     return this._deviceModel.evaluation;
   }
   private readonly _configuration: ConfigurationStore;
-  // #315: one simulated signing meter per connector, made on first use.
-  private readonly _signedMeters = new Map<number, OcmfMeter>();
 
   // §7.7: connectorId=0 status MUST be Available / Unavailable / Faulted.
   // The narrower type stops the rest of the code from accidentally setting
@@ -356,9 +348,6 @@ export class ChargePoint {
   private _txUpdatedMeterValues = true;
   private readonly _scenarioCalls = this._parts.scenarioCalls;
   private readonly _callOverrides = this._parts.callOverrides;
-  // §4.9 S3: whether this SOAP CP has a soapCallbackUrl (server-hosted) vs
-  // send-only (browser local mode). For non-SOAP versions, always false.
-  private readonly _hasSoapCallbackUrl: boolean;
   // Network simulation summary: { enabled, manualRuleIds } when a config has
   // been applied via setNetworkSimConfig, null for SOAP CPs or when no config
   // has been applied yet.
@@ -501,7 +490,7 @@ export class ChargePoint {
     );
     // §4.9 S3: track whether this SOAP CP can receive CSMS-initiated calls
     // (server-hosted with callback) vs send-only (no callback URL).
-    this._hasSoapCallbackUrl = !!transportOptions.soapCallbackUrl;
+    this._messaging.hasSoapCallbackUrl = !!transportOptions.soapCallbackUrl;
 
     // Setup logger callback to emit log events
     this._logger.loggingCallback = (entry) => {
@@ -552,7 +541,8 @@ export class ChargePoint {
     this._rawFrames = transport.rawFrames;
     this._messageHandler = transport.handler;
     this._callCatalog = transport.callCatalog;
-    this._receivesCsmsCall = (action) => transport.receivesCsmsCall(action);
+    this._messaging.receivesCsmsCall = (action) =>
+      transport.receivesCsmsCall(action);
     if (this._webSocket) {
       this._webSocket.setWsClientOptions(wsClientOptions);
       // Seeded even without `simulation.seed` (no CLI flag or `cp.create`
@@ -794,27 +784,11 @@ export class ChargePoint {
 
   /**
    * The connector's simulated OCMF signing meter while `SampledDataSignReadings`
-   * is true, else `null` (#315). The ephemeral key is made on first use, held
-   * in memory only, and published read-only as `MeterPublicKey<connectorId>`
-   * so a CSMS can validate against it (2.x stations also send it in every
-   * `signedMeterValue`).
+   * is true, else `null` (#315).
+   * @see MeterSampling.signedMeterFor
    */
   signedMeterFor(connectorId: number): OcmfMeter | null {
-    if (!this._configuration.signReadings()) return null;
-    let meter = this._signedMeters.get(connectorId);
-    if (!meter) {
-      meter = new OcmfMeter({
-        meterSerial: `${this._id}-${connectorId}`,
-        gatewayId: "ocpp-cp-simulator",
-        gatewaySerial: this._id,
-      });
-      this._signedMeters.set(connectorId, meter);
-      this._configuration.defineRuntimeKey(
-        `MeterPublicKey${connectorId}`,
-        meter.publicKeyHex,
-      );
-    }
-    return meter;
+    return this._sampling.signedMeterFor(connectorId);
   }
 
   get certificateStore(): CertificateStore {
@@ -864,31 +838,13 @@ export class ChargePoint {
   }
 
   /**
-   * §4.9 S3: check whether this charge point can receive a CSMS-initiated call.
-   *
-   * WebSocket versions can receive all CSMS calls. SOAP versions depend on:
-   * - Send-only (no soapCallbackUrl): cannot receive any calls (no server).
-   * - Server-hosted (with callback): the action must be dispatchable in the
-   *   version's dialect — declared with target "cp", or a bidirectional op
-   *   (DataTransfer). Mirrors OCPPSoapServer's dispatch rule so the guard
-   *   matches what the server actually answers (issue #257: 1.5 now dispatches
-   *   its full CS→CP surface, not just Reset).
+   * §4.9 S3: whether this charge point can receive a CSMS-initiated call
+   * (always on WebSocket; on SOAP only server-hosted with a callback URL and
+   * a dispatchable action).
+   * @see StationMessaging.canReceiveCsmsCall
    */
   canReceiveCsmsCall(action: string): boolean {
-    // WebSocket versions can receive all CSMS calls
-    if (!isSoapVersion(this._ocppVersion)) {
-      return true;
-    }
-
-    // SOAP versions without a callback URL (send-only, e.g. browser local mode)
-    // cannot receive any CSMS-initiated calls — there's no server to host the callback.
-    if (!this._hasSoapCallbackUrl) {
-      return false;
-    }
-
-    // SOAP with callback: the action must be dispatchable in this dialect —
-    // target "cp" or a bidirectional op — matching OCPPSoapServer dispatch.
-    return this._receivesCsmsCall(action) === true;
+    return this._messaging.canReceiveCsmsCall(action);
   }
 
   get connectorNumber(): number {

@@ -21,7 +21,9 @@ import type {
   RawFrameRequest,
 } from "../types/OcppCall";
 import type { TransactionUpdateOptions } from "../connector/Transaction";
+import { isSoapVersion } from "../types/OcppVersion";
 import type { ChargePoint } from "./ChargePoint";
+import type { ChargePointTransport } from "./ChargePointDeps";
 
 /** What the expert sends and status notifications need from their charge
  *  point. */
@@ -46,7 +48,43 @@ export interface StationMessagingHost {
  * delegates.
  */
 export class StationMessaging {
+  /** §4.9 S3: whether this SOAP CP has a soapCallbackUrl (server-hosted) vs
+   *  send-only (browser local mode). For non-SOAP versions, always false.
+   *  Set by the charge point constructor. */
+  hasSoapCallbackUrl = false;
+  /** SOAP dialect dispatch check; see {@link ChargePointTransport.receivesCsmsCall}.
+   *  Set by the charge point constructor. */
+  receivesCsmsCall!: ChargePointTransport["receivesCsmsCall"];
+
   constructor(private readonly host: StationMessagingHost) {}
+
+  /**
+   * §4.9 S3: check whether this charge point can receive a CSMS-initiated call.
+   *
+   * WebSocket versions can receive all CSMS calls. SOAP versions depend on:
+   * - Send-only (no soapCallbackUrl): cannot receive any calls (no server).
+   * - Server-hosted (with callback): the action must be dispatchable in the
+   *   version's dialect — declared with target "cp", or a bidirectional op
+   *   (DataTransfer). Mirrors OCPPSoapServer's dispatch rule so the guard
+   *   matches what the server actually answers (issue #257: 1.5 now dispatches
+   *   its full CS→CP surface, not just Reset).
+   */
+  canReceiveCsmsCall(action: string): boolean {
+    // WebSocket versions can receive all CSMS calls
+    if (!isSoapVersion(this.host.ocppVersion())) {
+      return true;
+    }
+
+    // SOAP versions without a callback URL (send-only, e.g. browser local mode)
+    // cannot receive any CSMS-initiated calls — there's no server to host the callback.
+    if (!this.hasSoapCallbackUrl) {
+      return false;
+    }
+
+    // SOAP with callback: the action must be dispatchable in this dialect —
+    // target "cp" or a bidirectional op — matching OCPPSoapServer dispatch.
+    return this.receivesCsmsCall(action) === true;
+  }
 
   /**
    * Drive an OCPP 2.x TransactionEvent(Updated) on a running transaction

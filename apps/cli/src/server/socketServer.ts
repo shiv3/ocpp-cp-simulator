@@ -1,16 +1,12 @@
-import type { CellularPolicySet } from "@ocpp-cp-simulator/core/cp/domain/modem/cellularLink";
 import type { ModemCommand as ModemCommandInput } from "@ocpp-cp-simulator/contracts/modem";
 import { describeDefaultBehaviors } from "@ocpp-cp-simulator/core/cp/application/engine/behaviors/index";
-import * as fs from "fs";
 import { runtime, type RuntimeServer, type SocketIoEngine } from "../runtime";
 import type { BunWebSocketHandler } from "../runtime/bun";
 import {
   Server as SocketIoServer,
   type Socket as SocketIoSocket,
 } from "socket.io";
-
 import { handleJsonCommand } from "../jsonMode";
-import { runCpBatch, runCpBulk } from "./cpBulk";
 import {
   INFLIGHT_CAP,
   MAX_HTTP_BUFFER,
@@ -19,54 +15,26 @@ import {
   RPC_RATE_PER_SEC,
   RPC_TIMEOUT_MS,
   RpcFailure,
-  ARRAY_MAX_ITEMS,
-  CP_BULK_WAIT_MS,
-  type CpBulkResult,
-  type CpScenarioRunResult,
   isRpcMethod,
-  redactSimulatorConfig,
   registryCpToWire,
   rpcRequestSchema,
-  SCENARIO_RUNS_PAGE_DEFAULT,
-  CHARGING_SESSIONS_PAGE_DEFAULT,
   subscribeResultSchema,
-  type CpListItem,
   type Params,
   type RpcAck,
   type RpcCall,
   type RpcErrorCode,
-  type Result,
   type ServerInfo,
   type SimulatorConfigInput,
   type StatusWire,
   type SubscribeResult,
 } from "@ocpp-cp-simulator/contracts/index";
-import type { ScenarioRunPage } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunSummary";
-import { TIMELINE_FORMAT_VERSION } from "@ocpp-cp-simulator/core/cp/application/services/OperationalTimeline";
 import type { ConnectorSettingsRepository } from "@ocpp-cp-simulator/client/interfaces/ConnectorSettingsRepository";
 import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
 import { FleetTemplateRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/FleetTemplateRepository";
 import type { ScenarioRepository } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioRepository";
-import {
-  isScenarioDefinitionShape,
-  type ScenarioDefinition,
-} from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
-import { validateScenarioSchema } from "@ocpp-cp-simulator/core/scenario/scenarioSchemaValidator";
-import type { AutoMeterValueConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
-import {
-  type EVSettings,
-  type EVSettingsPatch,
-} from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
-import type { HistoryOptions } from "@ocpp-cp-simulator/core/cp/domain/services/StateSnapshot";
-import {
-  hasStatusNotificationOptions,
-  type StatusNotificationOptions,
-} from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import { redactSensitiveText } from "@ocpp-cp-simulator/core/cp/shared/redaction";
 import { DEFAULT_SOAP_PATH } from "../soapPath";
 import { appVersion } from "../appVersion";
-import { type NetworkSimLayerConfig } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/network-sim/config";
-import type { AutoTrafficConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/AutoTraffic";
 import { createScenarioRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/createScenarioRepository";
 import { SqliteConnectorSettingsRepository } from "@ocpp-cp-simulator/client/sqlite/SqliteConnectorSettingsRepository";
 import { BlueprintRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/BlueprintRepository";
@@ -84,19 +52,13 @@ import {
 import { builtInBlueprints } from "@ocpp-cp-simulator/core/utils/blueprints/index";
 import {
   classifyFacadeError,
-  requireChargePointSnapshot,
   requireFacadeCpId,
   runFacadeOperation,
   type RpcTarget,
 } from "./rpc/facadeErrors";
-import {
-  snapshotToFullCp,
-  snapshotToRegistryCpWire,
-  snapshotToWireStatus,
-} from "./rpc/wireSnapshot";
+import { snapshotToFullCp, snapshotToWireStatus } from "./rpc/wireSnapshot";
 import { registerSocketAuth } from "./rpc/socketAuth";
 import {
-  batchFailureReason,
   createCp,
   createFleet,
   createManyCps,
@@ -109,12 +71,42 @@ import {
   setCpBehaviors,
   setCpLabels,
   soapCallbackRouteCpId,
-  stripUndefined,
   updateCp,
 } from "./rpc/cpProvisioning";
+import { dispatchFacadeCpCommand } from "./rpc/facadeCpCommands";
+import {
+  getConfig,
+  saveConfig,
+  getNetworkSimGlobal,
+  saveNetworkSimGlobal,
+  getNetworkSimCp,
+  saveNetworkSimCp,
+  saveCellularPolicies,
+  triggerNetworkSimDisconnect,
+  applyDefaultEVSettingsRpc,
+  listScenarioRuns,
+  getTimeline,
+  listChargingSessions,
+  getConfigKeys,
+  setConfigKey,
+  getAutoMeterConfig,
+  saveAutoMeterConfig,
+  getAutoTrafficSetting,
+  saveAutoTrafficSetting,
+  getSocMeterSync,
+  saveSocMeterSync,
+} from "./rpc/settingsRpcs";
+import {
+  listCps,
+  bulkCps,
+  runScenarioOnSelector,
+  deleteCp,
+  getLogs,
+  clearLogs,
+  resetState,
+} from "./rpc/cpRpcs";
 import type { CPRegistry } from "./CPRegistry";
 import type { EventBus } from "./eventBus";
-import { selectLogWindow } from "@ocpp-cp-simulator/core/cp/shared/window";
 import { getGlobalMetricsRecorder } from "./metrics/MetricsRecorder";
 import {
   createRegistryEventBridge,
@@ -122,9 +114,7 @@ import {
 } from "./registryEvents";
 import type { FileReloadManager } from "./FileReloadManager";
 import {
-  attachScenarioFile,
   deleteScenarioDefinition,
-  detachScenarioFile,
   listScenarioDefinitions,
   replaceConnectorScenarioDefinitions,
   saveScenarioDefinition,
@@ -133,7 +123,6 @@ import {
   RegistryChargePointService,
   type RegistryConfigRepository,
 } from "./RegistryChargePointService";
-
 export const SOCKET_IO_PATH = "/socket.io/";
 export const SOCKET_IO_PING_INTERVAL_MS = 25_000;
 export const SOCKET_IO_PING_TIMEOUT_MS = 20_000;
@@ -216,9 +205,6 @@ interface SocketRpcState {
 type RpcAckFn = (ack: RpcAck) => void;
 type DirectAckFn = (ack: unknown) => void;
 type RpcMethod = keyof typeof METHODS;
-type FacadeDispatchResult =
-  | { readonly handled: true; readonly value: unknown }
-  | { readonly handled: false };
 
 const CONFIG_KEY = "global_config";
 const CONFIG_EVENTS_SCOPE = "config";
@@ -737,414 +723,6 @@ export async function runRpc(
   }
 }
 
-async function listCps(
-  chargePointService: RegistryChargePointService,
-  params: Params<"cp.list">,
-): Promise<CpListItem[]> {
-  // #470: the selector is applied before any status snapshot is built.
-  return runFacadeOperation(async () =>
-    (await chargePointService.listChargePoints(params.labels)).map(
-      snapshotToRegistryCpWire,
-    ),
-  );
-}
-
-/**
- * `cp.bulk` (#470): one lifecycle action on every charge point a label
- * selector matches, each through the same facade call — and so the same error
- * classification — as the per-CP method of that name.
- */
-async function bulkCps(
-  deps: RuntimeSocketIoDeps,
-  { labels, action }: Params<"cp.bulk">,
-): Promise<CpBulkResult> {
-  const service = deps.chargePointService;
-  const cpIds = service.selectChargePointIds(labels);
-  // Refused before acting: nothing caps the registry, and a match the result
-  // arrays cannot hold would fail result validation after every action ran.
-  if (cpIds.length > ARRAY_MAX_ITEMS) {
-    throw new RpcFailure(
-      "invalid_params",
-      `the selector matches ${cpIds.length} charge points, more than ${ARRAY_MAX_ITEMS}; narrow it`,
-    );
-  }
-  // Each action is named after the facade method that runs it.
-  return runCpBulk(
-    cpIds,
-    (cpId) => runFacadeOperation(() => service[action](cpId)),
-    {
-      waitMs: deps.cpBulkWaitMs ?? CP_BULK_WAIT_MS,
-      failureReason: batchFailureReason,
-    },
-  );
-}
-
-/**
- * `cp.scenario.run` (#486): `run_scenario_template` on every charge point a
- * label selector matches, through the same facade call as the per-CP method.
- * Each entry reports the scenario id its charge point started, to follow with
- * `scenario_status` / `scenario.runs.list`. Selection, the over-1,000 refusal
- * and the fan-out are `cp.bulk`'s.
- */
-async function runScenarioOnSelector(
-  deps: RuntimeSocketIoDeps,
-  params: Params<"cp.scenario.run">,
-): Promise<CpScenarioRunResult> {
-  const service = deps.chargePointService;
-  const cpIds = service.selectChargePointIds(params.labels);
-  if (cpIds.length > ARRAY_MAX_ITEMS) {
-    throw new RpcFailure(
-      "invalid_params",
-      `the selector matches ${cpIds.length} charge points, more than ${ARRAY_MAX_ITEMS}; narrow it`,
-    );
-  }
-  const { once } = params;
-  const batch = await runCpBatch(
-    cpIds,
-    (cpId) =>
-      runFacadeOperation(() =>
-        service.runScenarioTemplate(cpId, params.templateId, {
-          connectorId: params.connector,
-          evSettings: params.evSettings as Partial<EVSettings> | undefined,
-          strict: params.strict,
-          ...(once === undefined ? {} : { once }),
-        }),
-      ),
-    {
-      waitMs: deps.cpBulkWaitMs ?? CP_BULK_WAIT_MS,
-      failureReason: batchFailureReason,
-    },
-  );
-  return {
-    matched: batch.matched,
-    started: batch.succeeded.map(({ cpId, value }) => ({
-      cpId,
-      scenarioId: value.scenarioId,
-    })),
-    failed: batch.failed,
-  };
-}
-
-async function deleteCp(
-  deps: RuntimeSocketIoDeps,
-  { cpId, stopTransactions, reason }: Params<"cp.delete">,
-): Promise<{ ok: true }> {
-  await runFacadeOperation(() =>
-    stopTransactions === true
-      ? deps.chargePointService.stopTransactionsThenClose(
-          cpId,
-          "remove",
-          reason,
-        )
-      : deps.chargePointService.removeChargePoint(cpId),
-  );
-  return { ok: true };
-}
-
-async function getLogs(
-  deps: RuntimeSocketIoDeps,
-  params: Params<"logs.get">,
-): Promise<ReadonlyArray<unknown>> {
-  const entries = await runFacadeOperation(() =>
-    deps.chargePointService.listStoredLogs(params.cpId),
-  );
-  // `limit` selects the NEWEST n (see selectLogWindow). It used to take the
-  // oldest n, which made the parameter useless on a long-running charge point:
-  // no limit could reach recent activity.
-  return selectLogWindow(entries, {
-    limit: params.limit,
-    offset: params.offset,
-    order: params.order ?? "asc",
-  });
-}
-
-async function clearLogs(
-  deps: RuntimeSocketIoDeps,
-  { cpId }: Params<"logs.clear">,
-): Promise<{ ok: true }> {
-  await runFacadeOperation(() => deps.chargePointService.clearStoredLogs(cpId));
-  return { ok: true };
-}
-
-async function resetState(deps: RuntimeSocketIoDeps): Promise<{ ok: true }> {
-  await runFacadeOperation(() => deps.chargePointService.resetAllState());
-  // The table is truncated with the others; without --state-db the profiles
-  // live in the repository's memory, which only the repository can empty.
-  deps.vehicleProfiles.clear();
-  deps.registryEvents?.emitReset();
-  return { ok: true };
-}
-
-async function getConfig(
-  chargePointService: RegistryChargePointService,
-): Promise<unknown> {
-  const config = await runFacadeOperation(() =>
-    chargePointService.loadConfig(),
-  );
-  return config ? redactSimulatorConfig(config) : null;
-}
-
-async function saveConfig(
-  deps: RuntimeSocketIoDeps,
-  params: Params<"config.save">,
-): Promise<{ ok: true }> {
-  const saved = await runFacadeOperation(async () => {
-    await deps.chargePointService.saveConfig(params.config);
-    return deps.chargePointService.loadConfig();
-  });
-  deps.registryEvents?.emitConfigChanged(saved);
-  return { ok: true };
-}
-
-async function getNetworkSimGlobal(
-  deps: RuntimeSocketIoDeps,
-): Promise<unknown> {
-  const config = await runFacadeOperation(() =>
-    deps.chargePointService.getNetworkSimGlobal(),
-  );
-  return { config };
-}
-
-async function saveNetworkSimGlobal(
-  deps: RuntimeSocketIoDeps,
-  params: Params<"network_sim.global.save">,
-): Promise<{ ok: true }> {
-  try {
-    await runFacadeOperation(() =>
-      deps.chargePointService.saveNetworkSimGlobal(
-        params.config as NetworkSimLayerConfig | null,
-      ),
-    );
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    throw new RpcFailure("invalid_params", message);
-  }
-  return { ok: true };
-}
-
-async function getNetworkSimCp(
-  deps: RuntimeSocketIoDeps,
-  params: Params<"network_sim.cp.get">,
-): Promise<unknown> {
-  return runFacadeOperation(() =>
-    deps.chargePointService.getNetworkSimCp(params.cpId),
-  );
-}
-
-async function saveNetworkSimCp(
-  deps: RuntimeSocketIoDeps,
-  params: Params<"network_sim.cp.save">,
-): Promise<{ ok: true }> {
-  try {
-    await runFacadeOperation(() =>
-      deps.chargePointService.saveNetworkSimCp(
-        params.cpId,
-        params.config as NetworkSimLayerConfig | null,
-      ),
-    );
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    throw new RpcFailure("invalid_params", message);
-  }
-  return { ok: true };
-}
-
-async function saveCellularPolicies(
-  deps: RuntimeSocketIoDeps,
-  params: Params<"network_sim.cellular.save">,
-): Promise<{ ok: true }> {
-  try {
-    await runFacadeOperation(() =>
-      deps.chargePointService.saveCellularPolicies(
-        params.policies as CellularPolicySet | null,
-      ),
-    );
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    throw new RpcFailure("invalid_params", message);
-  }
-  return { ok: true };
-}
-
-async function triggerNetworkSimDisconnect(
-  deps: RuntimeSocketIoDeps,
-  params: Params<"network_sim.disconnect.trigger">,
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  return runFacadeOperation(() =>
-    deps.chargePointService.triggerNetworkSimDisconnect(
-      params.cpId,
-      params.ruleId,
-    ),
-  );
-}
-
-async function applyDefaultEVSettingsRpc(
-  deps: RuntimeSocketIoDeps,
-  params: Params<"ev_settings.apply_default">,
-): Promise<undefined> {
-  // Possibly partial (#333): the connector merges it onto
-  // `defaultEVSettings`, so nothing here asserts a complete `EVSettings`.
-  await runFacadeOperation(() =>
-    deps.chargePointService.applyDefaultEVSettings(
-      params.settings as unknown as EVSettingsPatch,
-    ),
-  );
-  return undefined;
-}
-
-async function listScenarioRuns(
-  deps: RuntimeSocketIoDeps,
-  params: Params<"scenario.runs.list">,
-): Promise<ScenarioRunPage> {
-  return deps.chargePointService.listScenarioRuns({
-    ...params,
-    limit: params.limit ?? SCENARIO_RUNS_PAGE_DEFAULT,
-  });
-}
-
-/** #448: an unknown cpId is `not_found` — the registry throws, unlike the
- *  stored-logs read behind `logs.get`. */
-async function getTimeline(
-  deps: RuntimeSocketIoDeps,
-  { cpId, ...query }: Params<"timeline.get">,
-): Promise<Result<"timeline.get">> {
-  const page = await runFacadeOperation(() =>
-    deps.chargePointService.getOperationalTimeline(cpId, query),
-  );
-  return { version: TIMELINE_FORMAT_VERSION, ...page };
-}
-
-/**
- * #447: an unknown cpId is `not_found`, like `timeline.get`. #489: without
- * `cpId` the listing spans the fleet, `labels` narrowing it.
- */
-async function listChargingSessions(
-  deps: RuntimeSocketIoDeps,
-  { cpId, labels, startedFrom, startedTo, ...query }: Params<"sessions.list">,
-): Promise<Result<"sessions.list">> {
-  const page = {
-    ...query,
-    // Normalised to the form `startedAt` is stored in, so a zone offset in
-    // the request compares correctly as text.
-    ...(startedFrom === undefined
-      ? {}
-      : { startedFrom: new Date(startedFrom).toISOString() }),
-    ...(startedTo === undefined
-      ? {}
-      : { startedTo: new Date(startedTo).toISOString() }),
-    limit: query.limit ?? CHARGING_SESSIONS_PAGE_DEFAULT,
-  };
-  if (cpId !== undefined) {
-    if (labels !== undefined) {
-      throw new RpcFailure(
-        "invalid_params",
-        "labels selects charge points; it cannot be combined with cpId",
-      );
-    }
-    return runFacadeOperation(() =>
-      deps.chargePointService.listChargingSessions(cpId, page),
-    );
-  }
-  return runFacadeOperation(() =>
-    deps.chargePointService.listFleetChargingSessions({ ...page, labels }),
-  );
-}
-
-/** #612: an unknown cpId is `not_found`, like `sessions.list`. */
-async function getConfigKeys(
-  deps: RuntimeSocketIoDeps,
-  { cpId, keys }: Params<"cp.config_keys.get">,
-): Promise<Result<"cp.config_keys.get">> {
-  const list = await runFacadeOperation(() =>
-    deps.chargePointService.getConfigurationKeys(cpId, keys),
-  );
-  return { keys: [...list.keys], unknown: [...list.unknown] };
-}
-
-/** #612: unknown key → `not_found`; read-only key or refused value →
- *  `invalid_params` (see {@link classifyFacadeError}). */
-async function setConfigKey(
-  deps: RuntimeSocketIoDeps,
-  { cpId, key, value }: Params<"cp.config_keys.set">,
-): Promise<Result<"cp.config_keys.set">> {
-  const status = await runFacadeOperation(() =>
-    deps.chargePointService.setConfigurationKey(cpId, key, value),
-  );
-  return { key, status };
-}
-
-async function getAutoMeterConfig(
-  deps: RuntimeSocketIoDeps,
-  params: Params<"connector_settings.auto_meter.get">,
-): Promise<AutoMeterValueConfig | null> {
-  return runFacadeOperation(() =>
-    deps.chargePointService.getAutoMeterConfig(params.cpId, params.connectorId),
-  );
-}
-
-async function saveAutoMeterConfig(
-  deps: RuntimeSocketIoDeps,
-  params: Params<"connector_settings.auto_meter.save">,
-): Promise<{ ok: true }> {
-  await runFacadeOperation(() =>
-    deps.chargePointService.saveAutoMeterConfig(
-      params.cpId,
-      params.connectorId,
-      params.config as unknown as AutoMeterValueConfig,
-    ),
-  );
-  return { ok: true };
-}
-
-async function getAutoTrafficSetting(
-  deps: RuntimeSocketIoDeps,
-  params: Params<"connector_settings.auto_traffic.get">,
-): Promise<AutoTrafficConfig | null> {
-  return runFacadeOperation(() =>
-    deps.chargePointService.getAutoTrafficConfig(
-      params.cpId,
-      params.connectorId,
-    ),
-  );
-}
-
-async function saveAutoTrafficSetting(
-  deps: RuntimeSocketIoDeps,
-  params: Params<"connector_settings.auto_traffic.save">,
-): Promise<{ ok: true }> {
-  await runFacadeOperation(() =>
-    deps.chargePointService.saveAutoTrafficConfig(
-      params.cpId,
-      params.connectorId,
-      params.config as unknown as AutoTrafficConfig,
-    ),
-  );
-  return { ok: true };
-}
-
-async function getSocMeterSync(
-  deps: RuntimeSocketIoDeps,
-  params: Params<"connector_settings.soc_meter_sync.get">,
-): Promise<boolean> {
-  return runFacadeOperation(() =>
-    deps.chargePointService.getSocMeterSync(params.cpId, params.connectorId),
-  );
-}
-
-async function saveSocMeterSync(
-  deps: RuntimeSocketIoDeps,
-  params: Params<"connector_settings.soc_meter_sync.save">,
-): Promise<{ ok: true }> {
-  await runFacadeOperation(() =>
-    deps.chargePointService.saveSocMeterSync(
-      params.cpId,
-      params.connectorId,
-      params.enabled,
-    ),
-  );
-  return { ok: true };
-}
-
 function shutdownServer(deps: RuntimeSocketIoDeps): { ok: true } {
   if (deps.requestShutdown) {
     setTimeout(() => deps.requestShutdown?.(), 100);
@@ -1247,691 +825,6 @@ export function createSocketConfigRepository(
   return repository;
 }
 
-/**
- * Issue #214: advisory (warning-only) schema check for a scenario value
- * received over the `load_scenario` RPC. Never throws and never blocks
- * loading — a schema mismatch is logged and the caller proceeds exactly as
- * it would have before this check existed.
- */
-function warnOnScenarioSchemaMismatch(source: string, value: unknown): void {
-  const result = validateScenarioSchema(value);
-  if (!result.valid) {
-    console.warn(
-      `[socketServer] "${source}" does not match packages/core/schema/scenario.schema.json (loading anyway): ${result.errors.slice(0, 5).join("; ")}`,
-    );
-  }
-}
-
-async function dispatchFacadeCpCommand(
-  chargePointService: RegistryChargePointService,
-  call: RpcCall,
-  id: string,
-  /** Null unless the daemon runs with `--watch` (#314). */
-  fileReload: FileReloadManager | null = null,
-  /** The `--state-db`, when there is one. Separate from `fileReload` on
-   *  purpose: a `watched_scenario_files` row is a fact about stored state, so
-   *  invalidating it must not depend on this daemon happening to watch (#314). */
-  database: Database | null = null,
-): Promise<FacadeDispatchResult> {
-  switch (call.method) {
-    case "connect": {
-      await runFacadeOperation(() => chargePointService.connect(id));
-      return handled(undefined);
-    }
-    case "disconnect": {
-      const { stopTransactions, reason } = call.params;
-      await runFacadeOperation(() =>
-        stopTransactions === true
-          ? chargePointService.stopTransactionsThenClose(
-              id,
-              "disconnect",
-              reason,
-            )
-          : chargePointService.disconnect(id),
-      );
-      return handled(undefined);
-    }
-    case "reset": {
-      // Declared in METHODS but never routed: it fell through to JSON Lines,
-      // which has no `reset` command, and answered `internal`.
-      await runFacadeOperation(() => chargePointService.reset(id));
-      return handled(undefined);
-    }
-    case "status": {
-      const snapshot = await requireChargePointSnapshot(chargePointService, id);
-      return handled(snapshotToWireStatus(snapshot));
-    }
-    case "heartbeat": {
-      await runFacadeOperation(() => chargePointService.sendHeartbeat(id));
-      return handled(undefined);
-    }
-    case "start_heartbeat": {
-      const { params } = call;
-      await runFacadeOperation(() =>
-        chargePointService.startHeartbeat(id, params.interval),
-      );
-      return handled(undefined);
-    }
-    case "stop_heartbeat": {
-      await runFacadeOperation(() => chargePointService.stopHeartbeat(id));
-      return handled(undefined);
-    }
-    case "start_transaction": {
-      const { params } = call;
-      await runFacadeOperation(() => {
-        const connectorId = params.connector;
-        return chargePointService.startTransaction(
-          id,
-          connectorId,
-          // Optional on the control plane since #299 but not in OCPP's
-          // StartTransaction.req, so a missing one is drawn from the pool here.
-          chargePointService.resolveIdTag(id, params.tagId, connectorId),
-          {
-            triggerReason: params.triggerReason,
-            chargingState: params.chargingState,
-            idTokenType: params.idTokenType,
-          },
-        );
-      });
-      return handled(undefined);
-    }
-    case "stop_transaction": {
-      const { params } = call;
-      await runFacadeOperation(() =>
-        chargePointService.stopTransaction(id, params.connector, {
-          reason: params.reason,
-          triggerReason: params.triggerReason,
-        }),
-      );
-      return handled(undefined);
-    }
-    case "transaction_event": {
-      const { params } = call;
-      await runFacadeOperation(() =>
-        chargePointService.sendTransactionUpdate(id, params.connector, {
-          triggerReason: params.triggerReason,
-          chargingState: params.chargingState,
-          meterValues: params.meterValues,
-          context: params.context,
-        }),
-      );
-      return handled(undefined);
-    }
-    case "authorize": {
-      const { params } = call;
-      // `tagId` is optional on the control plane (#299) but not in OCPP's
-      // Authorize.req, so a missing one is drawn from the pool here.
-      await runFacadeOperation(() =>
-        chargePointService.authorize(
-          id,
-          chargePointService.resolveIdTag(id, params.tagId),
-          params.idTokenType,
-        ),
-      );
-      return handled(undefined);
-    }
-    case "data_transfer": {
-      const { params } = call;
-      // #348: the answer is the point of the message, so it is the result.
-      return handled(
-        await runFacadeOperation(() =>
-          chargePointService.sendDataTransfer(
-            id,
-            params.vendorId,
-            params.messageId,
-            params.data,
-          ),
-        ),
-      );
-    }
-    case "send_ocpp_call": {
-      const { params } = call;
-      // #389: a CALLERROR is an answer too, so it comes back as the result.
-      return handled(
-        await runFacadeOperation(() =>
-          chargePointService.sendOcppCall(id, params),
-        ),
-      );
-    }
-    case "send_raw_frame": {
-      const { params } = call;
-      // #393: no reply is a result too (reply null), as is a close.
-      return handled(
-        await runFacadeOperation(() =>
-          chargePointService.sendRawFrame(id, params),
-        ),
-      );
-    }
-    case "get_15118_ev_certificate": {
-      const { params } = call;
-      // #537: the CSMS's answers (a CALLERROR included) are the result.
-      return handled(
-        await runFacadeOperation(() =>
-          chargePointService.get15118EVCertificate(id, params),
-        ),
-      );
-    }
-    // #452: the Authorization Cache test seam.
-    case "get_auth_cache":
-      return handled(
-        await runFacadeOperation(() =>
-          chargePointService.getAuthorizationCache(id),
-        ),
-      );
-    case "seed_auth_cache": {
-      const { params } = call;
-      const seeded = await runFacadeOperation(() =>
-        chargePointService.seedAuthorizationCache(id, params.entries),
-      );
-      return handled({ seeded });
-    }
-    case "clear_auth_cache": {
-      const cleared = await runFacadeOperation(() =>
-        chargePointService.clearAuthorizationCache(id),
-      );
-      return handled({ cleared });
-    }
-    case "diagnostics_status_notification": {
-      const { params } = call;
-      await runFacadeOperation(() =>
-        chargePointService.sendDiagnosticsStatusNotification(id, params.status),
-      );
-      return handled(undefined);
-    }
-    case "firmware_status_notification": {
-      const { params } = call;
-      const { status, requestId } = params;
-      await runFacadeOperation(() =>
-        requestId === undefined
-          ? chargePointService.sendFirmwareStatusNotification(id, status)
-          : chargePointService.sendFirmwareStatusNotification(
-              id,
-              status,
-              requestId,
-            ),
-      );
-      return handled(undefined);
-    }
-    case "log_status_notification": {
-      const { params } = call;
-      // #345: the schema already holds `status` to the 2.0.1 vocabulary.
-      await runFacadeOperation(() =>
-        chargePointService.sendLogStatusNotification(
-          id,
-          params.status,
-          params.requestId,
-        ),
-      );
-      return handled(undefined);
-    }
-    case "security_event_notification": {
-      const { params } = call;
-      await runFacadeOperation(() =>
-        chargePointService.sendSecurityEventNotification(
-          id,
-          params.type,
-          params.techInfo,
-        ),
-      );
-      return handled(undefined);
-    }
-    case "sign_certificate": {
-      const { params } = call;
-      await runFacadeOperation(() =>
-        chargePointService.sendSignCertificate(id, params.csr),
-      );
-      return handled(undefined);
-    }
-    case "update_connector_status": {
-      const { params } = call;
-      await runFacadeOperation(() =>
-        chargePointService.sendStatusNotification(
-          id,
-          params.connector,
-          params.status,
-          readStatusNotificationOptions(params),
-        ),
-      );
-      return handled(undefined);
-    }
-    case "ev_disconnected": {
-      const { params } = call;
-      await runFacadeOperation(() =>
-        chargePointService.evDisconnected(id, params.connector),
-      );
-      return handled(undefined);
-    }
-    case "ev_plug_in": {
-      const { params } = call;
-      await runFacadeOperation(() =>
-        chargePointService.evPlugIn(id, params.connector),
-      );
-      return handled(undefined);
-    }
-    case "ev_ready": {
-      const { params } = call;
-      await runFacadeOperation(() =>
-        chargePointService.evSetReady(id, params.connector, params.ready),
-      );
-      return handled(undefined);
-    }
-    case "set_meter_value": {
-      const { params } = call;
-      await runFacadeOperation(() =>
-        chargePointService.setMeterValue(id, params.connector, params.value),
-      );
-      return handled(undefined);
-    }
-    case "send_meter_value": {
-      const { params } = call;
-      await runFacadeOperation(() =>
-        chargePointService.sendMeterValue(id, params.connector, params.context),
-      );
-      return handled(undefined);
-    }
-    case "remove_connector": {
-      const { params } = call;
-      const connectorId = params.connector;
-      const before = await requireChargePointSnapshot(chargePointService, id);
-      await runFacadeOperation(() =>
-        chargePointService.removeConnector(id, connectorId),
-      );
-      const after = await chargePointService.getChargePoint(id);
-      return handled({
-        removed:
-          before.connectors.some((connector) => connector.id === connectorId) &&
-          !after?.connectors.some((connector) => connector.id === connectorId),
-      });
-    }
-    case "set_ev_settings": {
-      const { params } = call;
-      await runFacadeOperation(() =>
-        chargePointService.setEVSettings(
-          id,
-          params.connector,
-          params.settings as unknown as EVSettings,
-        ),
-      );
-      return handled(undefined);
-    }
-    case "get_ev_settings": {
-      const { params } = call;
-      return handled(
-        await runFacadeOperation(() =>
-          chargePointService.getEVSettings(id, params.connector),
-        ),
-      );
-    }
-    case "set_auto_traffic_config": {
-      const { params } = call;
-      await runFacadeOperation(() =>
-        chargePointService.setAutoTrafficConfig(
-          id,
-          params.connector,
-          params.config as unknown as AutoTrafficConfig,
-        ),
-      );
-      return handled(undefined);
-    }
-    case "get_auto_traffic_config": {
-      const { params } = call;
-      return handled(
-        await runFacadeOperation(() =>
-          chargePointService.getAutoTrafficConfig(id, params.connector),
-        ),
-      );
-    }
-    case "set_auto_meter_config": {
-      const { params } = call;
-      await runFacadeOperation(() =>
-        chargePointService.setAutoMeterValueConfig(
-          id,
-          params.connector,
-          params.config as unknown as AutoMeterValueConfig,
-        ),
-      );
-      return handled(undefined);
-    }
-    case "get_auto_meter_config": {
-      const { params } = call;
-      return handled(
-        await runFacadeOperation(() =>
-          chargePointService.getAutoMeterValueConfig(id, params.connector),
-        ),
-      );
-    }
-    case "set_auto_reset_to_available": {
-      const { params } = call;
-      await runFacadeOperation(() =>
-        chargePointService.setAutoResetToAvailable(
-          id,
-          params.connector,
-          params.enabled,
-        ),
-      );
-      return handled(undefined);
-    }
-    case "set_mode": {
-      const { params } = call;
-      await runFacadeOperation(() =>
-        chargePointService.setConnectorMode(id, params.connector, params.mode),
-      );
-      return handled(undefined);
-    }
-    case "set_soc": {
-      const { params } = call;
-      await runFacadeOperation(() =>
-        chargePointService.setConnectorSoc(id, params.connector, params.soc),
-      );
-      return handled(undefined);
-    }
-    case "set_soc_meter_sync": {
-      const { params } = call;
-      await runFacadeOperation(() =>
-        chargePointService.setConnectorSocMeterSync(
-          id,
-          params.connector,
-          params.enabled,
-        ),
-      );
-      return handled(undefined);
-    }
-    case "get_charging_profiles": {
-      const { params } = call;
-      return handled(
-        await runFacadeOperation(() =>
-          chargePointService.getChargingProfiles(id, params.connector),
-        ),
-      );
-    }
-    case "get_state_history": {
-      const { params } = call;
-      return handled(
-        await runFacadeOperation(() =>
-          chargePointService.getStateHistory(
-            id,
-            parseHistoryOptions(params.options),
-          ),
-        ),
-      );
-    }
-    case "list_scenario_templates": {
-      await requireChargePointSnapshot(chargePointService, id);
-      return handled(
-        await runFacadeOperation(() =>
-          chargePointService.getScenarioTemplates(),
-        ),
-      );
-    }
-    case "load_scenario_template": {
-      const { params } = call;
-      return handled(
-        await runFacadeOperation(() =>
-          chargePointService.loadScenarioTemplate(
-            id,
-            params.templateId,
-            params.connector,
-            params.evSettings as Partial<EVSettings> | undefined,
-          ),
-        ),
-      );
-    }
-    case "load_scenario": {
-      const { params } = call;
-      const connectorId = params.connector;
-      if (typeof params.file === "string") {
-        // Kept, not re-read: the reload baseline has to be the bytes this
-        // definition came from, or a write between here and the watch starting
-        // is recorded as already-seen and never applied (#314).
-        const loadedText = fs.readFileSync(params.file, "utf-8");
-        const parsed: unknown = JSON.parse(loadedText);
-        if (!isScenarioDefinitionShape(parsed)) {
-          throw new RpcFailure("invalid_params", "");
-        }
-        warnOnScenarioSchemaMismatch(params.file, parsed);
-        const loaded = await runFacadeOperation(() =>
-          chargePointService.loadScenario(id, connectorId, parsed),
-        );
-        // #314: a scenario loaded *from a path* is watchable; the inline
-        // `params.scenario` branch below has no file behind it and is not.
-        attachScenarioFile(fileReload, database, {
-          filePath: params.file,
-          cpId: id,
-          connectorId,
-          scenarioId: loaded.scenarioId,
-          loadedText,
-        });
-        return handled(loaded);
-      }
-      if (params.scenario) {
-        warnOnScenarioSchemaMismatch(
-          "load_scenario params.scenario",
-          params.scenario,
-        );
-        const loaded = await runFacadeOperation(() =>
-          chargePointService.loadScenario(
-            id,
-            connectorId,
-            params.scenario as unknown as ScenarioDefinition,
-          ),
-        );
-        // #314: an inline definition replaces whatever was under this id, file
-        // or not. Leaving an earlier `load_scenario { file }` watch in place
-        // would let the next edit of that file overwrite the definition the
-        // operator just installed by hand — and leaving its persisted row in
-        // place would let a later `--watch` restart do the same, which is why
-        // that goes whether or not this daemon is watching anything.
-        detachScenarioFile(
-          fileReload,
-          database,
-          id,
-          connectorId,
-          loaded.scenarioId,
-        );
-        return handled(loaded);
-      }
-      throw new Error("Either 'file' or 'scenario' parameter is required");
-    }
-    case "list_scenarios": {
-      const { params } = call;
-      return handled(
-        await runFacadeOperation(() =>
-          chargePointService.listScenarios(id, params.connector),
-        ),
-      );
-    }
-    case "run_scenario": {
-      const { params } = call;
-      const { strict, awaitArmed } = params;
-      await runFacadeOperation(() =>
-        chargePointService.runScenario(
-          id,
-          params.connector,
-          params.scenarioId,
-          strict !== undefined || awaitArmed !== undefined
-            ? { strict, awaitArmed }
-            : undefined,
-        ),
-      );
-      return handled(undefined);
-    }
-    case "scenario_status": {
-      const { params } = call;
-      return handled(
-        await runFacadeOperation(() =>
-          chargePointService.getScenarioStatus(
-            id,
-            params.connector,
-            params.scenarioId,
-          ),
-        ),
-      );
-    }
-    case "scenario_report": {
-      const { params } = call;
-      return handled(
-        await runFacadeOperation(() =>
-          chargePointService.getScenarioReport(
-            id,
-            params.connector,
-            params.scenarioId,
-            params.runId,
-          ),
-        ),
-      );
-    }
-    case "get_scenario": {
-      const { params } = call;
-      return handled(
-        await runFacadeOperation(() =>
-          chargePointService.getScenario(
-            id,
-            params.connector,
-            params.scenarioId,
-          ),
-        ),
-      );
-    }
-    case "stop_scenario": {
-      const { params } = call;
-      await runFacadeOperation(() =>
-        chargePointService.stopScenario(
-          id,
-          params.connector,
-          params.scenarioId,
-        ),
-      );
-      return handled(undefined);
-    }
-    case "scenario_reset": {
-      const { params } = call;
-      await runFacadeOperation(() =>
-        chargePointService.resetScenario(
-          id,
-          params.connector,
-          params.scenarioId,
-        ),
-      );
-      return handled(undefined);
-    }
-    case "step_scenario": {
-      const { params } = call;
-      await runFacadeOperation(() =>
-        chargePointService.stepScenario(
-          id,
-          params.connector,
-          params.scenarioId,
-          params.force === true,
-        ),
-      );
-      return handled(undefined);
-    }
-    case "extend_scenario_wait": {
-      const { params } = call;
-      await runFacadeOperation(() =>
-        chargePointService.extendScenarioWait(
-          id,
-          params.connector,
-          params.scenarioId,
-          params.seconds,
-        ),
-      );
-      return handled(undefined);
-    }
-    case "retry_scenario_wait": {
-      const { params } = call;
-      await runFacadeOperation(() =>
-        chargePointService.retryScenarioWait(
-          id,
-          params.connector,
-          params.scenarioId,
-        ),
-      );
-      return handled(undefined);
-    }
-    case "continue_scenario_wait": {
-      const { params } = call;
-      await runFacadeOperation(() =>
-        chargePointService.continueScenarioWait(
-          id,
-          params.connector,
-          params.scenarioId,
-        ),
-      );
-      return handled(undefined);
-    }
-    case "stop_all_scenarios": {
-      const { params } = call;
-      await runFacadeOperation(() =>
-        chargePointService.stopAllScenarios(id, params.connector),
-      );
-      return handled(undefined);
-    }
-    case "remove_scenario": {
-      const { params } = call;
-      const connectorId = params.connector;
-      const scenarioId = params.scenarioId;
-      const before = await runFacadeOperation(() =>
-        chargePointService.listScenarios(id, connectorId),
-      );
-      await runFacadeOperation(() =>
-        chargePointService.removeScenario(id, connectorId, scenarioId),
-      );
-      const after = await chargePointService.listScenarios(id, connectorId);
-      // #314: the file behind a removed scenario stops being watched, or the
-      // next edit would re-create the scenario that was just deleted. The
-      // persisted row goes unconditionally — it is a fact about stored state,
-      // not about `--watch`, and a daemon running without the flag would
-      // otherwise leave it for a later watched restart to reattach.
-      detachScenarioFile(fileReload, database, id, connectorId, scenarioId);
-      return handled({
-        removed:
-          before.some((scenario) => scenario.scenarioId === scenarioId) &&
-          !after.some((scenario) => scenario.scenarioId === scenarioId),
-      });
-    }
-    case "run_scenario_file": {
-      const { params } = call;
-      const filePath = params.file;
-      const connectorId = params.connector;
-      let loadedText: string | undefined;
-      const started = await runFacadeOperation(() =>
-        chargePointService.runScenarioFile(id, filePath, {
-          connectorId,
-          strict: params.strict,
-          onSourceText: (text) => {
-            loadedText = text;
-          },
-        }),
-      );
-      attachScenarioFile(fileReload, database, {
-        filePath,
-        cpId: id,
-        connectorId,
-        scenarioId: started.scenarioId,
-        loadedText,
-      });
-      return handled(started);
-    }
-    case "run_scenario_template": {
-      const { params } = call;
-      const once = params.once;
-      return handled(
-        await runFacadeOperation(() =>
-          chargePointService.runScenarioTemplate(id, params.templateId, {
-            connectorId: params.connector,
-            evSettings: params.evSettings as Partial<EVSettings> | undefined,
-            strict: params.strict,
-            ...(once === undefined ? {} : { once }),
-          }),
-        ),
-      );
-    }
-    default:
-      return { handled: false };
-  }
-}
-
 async function subscribeSocket(
   socket: SocketIoSocket,
   state: SocketRpcState,
@@ -1999,10 +892,6 @@ async function captureSubscribeSnapshot(
   };
 }
 
-function handled(value: unknown): FacadeDispatchResult {
-  return { handled: true, value };
-}
-
 function isValidSubscribeScope(registry: CPRegistry, scope: string): boolean {
   return (
     scope === "*" ||
@@ -2025,59 +914,6 @@ function rawParamsAsRecord(rawParams: unknown): Record<string, unknown> {
   return rawParams && typeof rawParams === "object" && !Array.isArray(rawParams)
     ? (rawParams as Record<string, unknown>)
     : {};
-}
-
-function readStatusNotificationOptions({
-  errorCode,
-  info,
-  vendorErrorCode,
-  vendorId,
-  timestamp,
-  suppressChargingStateTransactionEvent,
-  allowInvalidTransition,
-}: Params<"update_connector_status">): StatusNotificationOptions | undefined {
-  const opts: StatusNotificationOptions = stripUndefined({
-    errorCode,
-    info,
-    vendorErrorCode,
-    vendorId,
-    timestamp: timestamp === undefined ? undefined : new Date(timestamp),
-    suppressChargingStateTransactionEvent,
-    allowInvalidTransition,
-  });
-  return opts.allowInvalidTransition || hasStatusNotificationOptions(opts)
-    ? opts
-    : undefined;
-}
-
-function parseHistoryOptions(raw: unknown): HistoryOptions | undefined {
-  if (raw === undefined || raw === null) return undefined;
-  if (typeof raw !== "object" || Array.isArray(raw)) return undefined;
-  const src = raw as Record<string, unknown>;
-  const out: HistoryOptions = {};
-  if (typeof src.entity === "string") {
-    out.entity = src.entity as HistoryOptions["entity"];
-  }
-  if (typeof src.entityId === "number") {
-    out.entityId = src.entityId;
-  }
-  if (typeof src.transitionType === "string") {
-    out.transitionType = src.transitionType as HistoryOptions["transitionType"];
-  }
-  if (typeof src.limit === "number") {
-    out.limit = src.limit;
-  }
-  if (typeof src.fromTimestamp === "string") {
-    out.fromTimestamp = new Date(src.fromTimestamp);
-  } else if (src.fromTimestamp instanceof Date) {
-    out.fromTimestamp = src.fromTimestamp;
-  }
-  if (typeof src.toTimestamp === "string") {
-    out.toTimestamp = new Date(src.toTimestamp);
-  } else if (src.toTimestamp instanceof Date) {
-    out.toTimestamp = src.toTimestamp;
-  }
-  return out;
 }
 
 function consumeRpcToken(state: SocketRpcState): boolean {

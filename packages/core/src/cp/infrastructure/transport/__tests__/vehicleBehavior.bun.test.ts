@@ -183,6 +183,82 @@ describe("vehicle behavior on OCPP 2.0.1 (#835)", () => {
       csms.stop();
     }
   }, 15000);
+
+  const eventOf =
+    (eventType: string, triggerReason: string) => (f: OcppFrame) =>
+      callOf("TransactionEvent")(f) &&
+      (f[3] as TransactionEventRequestV201).eventType === eventType &&
+      (f[3] as TransactionEventRequestV201).triggerReason === triggerReason;
+
+  async function stopWhenDoneV201(id: string, txStopPoint?: string) {
+    const csms = startMockCsms();
+    const cp = await bootedChargePoint(csms, id, "OCPP-2.0.1");
+    cp.configuration.applyChange("AuthorizeBeforeLocalStart", "false");
+    if (txStopPoint) cp.configuration.applyChange("TxStopPoint", txStopPoint);
+    const stop = answerEverythingElse(csms, []);
+    const connector = cp.getConnector(1)!;
+    connector.applyEvSettingsOverride({
+      vehicleBehavior: {
+        preset: "target-soc",
+        intent: { targetSoc: 60 },
+        stopWhenDone: true,
+      },
+    });
+    cp.evPlugIn(1);
+    await cp.startTransaction("TAG-VB-STOP", 1);
+    cp.updateConnectorStatus(1, OCPPStatus.Charging);
+    connector.soc = 70;
+    return { csms, cp, stop, connector };
+  }
+
+  // E15.FR.04: a stop the EV asks for is an Ended event with triggerReason
+  // StopAuthorized and stoppedReason StoppedByEV (#871).
+  it("stopWhenDone ends the transaction with StopAuthorized / StoppedByEV", async () => {
+    const { csms, cp, stop } = await stopWhenDoneV201("CP201-VB-STOP");
+    try {
+      const ended = await csms.waitForFrame(
+        (f) =>
+          callOf("TransactionEvent")(f) &&
+          (f[3] as TransactionEventRequestV201).eventType === "Ended",
+        6000,
+      );
+      const request = ended[3] as TransactionEventRequestV201;
+      expect(request.triggerReason).toBe("StopAuthorized");
+      expect(request.transactionInfo.stoppedReason).toBe("StoppedByEV");
+    } finally {
+      stop();
+      cp.dispose();
+      csms.stop();
+    }
+  }, 15000);
+
+  // E15.FR.05: with a TxStopPoint lacking Authorized, the EV's stop ends the
+  // authorization only: one Updated StopAuthorized, the transaction stays.
+  it("stopWhenDone under TxStopPoint EVConnected sends one Updated StopAuthorized", async () => {
+    const { csms, cp, stop, connector } = await stopWhenDoneV201(
+      "CP201-VB-STOP-EVC",
+      "EVConnected",
+    );
+    try {
+      await csms.waitForFrame(eventOf("Updated", "StopAuthorized"), 6000);
+      // The vehicle keeps asking on every tick; nothing more goes out.
+      await new Promise((r) => setTimeout(r, 2500));
+      const updates = callsOf(csms, "TransactionEvent").filter(
+        eventOf("Updated", "StopAuthorized"),
+      );
+      expect(updates).toHaveLength(1);
+      expect(
+        callsOf(csms, "TransactionEvent").filter(
+          (f) => (f[3] as TransactionEventRequestV201).eventType === "Ended",
+        ),
+      ).toHaveLength(0);
+      expect(connector.hasRunningTransaction).toBe(true);
+    } finally {
+      stop();
+      cp.dispose();
+      csms.stop();
+    }
+  }, 15000);
 });
 
 describe("power sharing on a station (#608)", () => {

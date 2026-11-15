@@ -329,7 +329,7 @@ transactions, persistence and resume. Decisions the design left open:
   transaction default; `ctx.unplug` calls `evDisconnected` (a running transaction is stopped or suspended per
   `StopTransactionOnEVSideDisconnect`) instead of forcing `Available`. Test: `physical.bun.test.ts`.
 - **Persistence.** The `connector_runtime` row format is unchanged (`transaction_json` is the record shape,
-  so earlier rows load). `snapshotRuntime` reads the connector's record; the restore write carries the
+  so earlier rows load). `snapshotRuntime` (`connectorRuntimeSnapshot.ts`) reads the connector's record; the restore write carries the
   transaction into the engine state; `restoreConnectorRuntimeFromDatabase` ends with `engine.resume()`, so
   `onResume` runs once, after the state is back. Only connector rows persist; the `ctx.state` of behaviors and
   the notification statuses do not (a new table is needed; stage D).

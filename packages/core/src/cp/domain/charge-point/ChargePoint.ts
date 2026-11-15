@@ -11,7 +11,12 @@ import type {
 import {
   createCollaborators,
   type ChargePointCollaborators,
+  type StationContext,
 } from "./ChargePointCollaborators";
+import {
+  completeConstruction,
+  createStationAuthorization,
+} from "./ChargePointSetup";
 import { CapabilityGate } from "./CapabilityGate";
 import { IdTagSource } from "./IdTagSource";
 import { EventEmitter } from "../../shared/EventEmitter";
@@ -82,7 +87,7 @@ import type {
   BootReason,
   ChargePointStatus,
 } from "../types/OcppTypes";
-import { isOcpp2Version, isSoapVersion } from "../types/OcppVersion";
+import { isSoapVersion } from "../types/OcppVersion";
 import { DeviceModelTargets } from "./DeviceModelTargets";
 import { OCPPStatus } from "../types/OcppTypes";
 import type {
@@ -96,10 +101,9 @@ import {
 } from "../connector/MeterValueBuilder";
 import { ReservationManager } from "../reservation/Reservation";
 import { LocalAuthListManager } from "../auth/LocalAuthList";
-import { idTokenMaxLength } from "../auth/AuthorizationCacheSeed";
-import { AuthorizationCache } from "../auth/AuthorizationCache";
+import type {
+  StationAuthorization} from "../auth/StationAuthorization";
 import {
-  StationAuthorization,
   type CsmsAuthorizationResult,
 } from "../auth/StationAuthorization";
 import {
@@ -228,54 +232,54 @@ export class ChargePoint {
   private readonly _messageHandler: IChargePointMessageHandler;
   private readonly _transportUrl: string;
   /** The collaborators; their hosts read this charge point through `ctx`. */
+  private readonly _ctx: StationContext = {
+    authorization: () => this._authorization,
+    callCatalog: () => this._callCatalog,
+    cellular: () => this._cellular,
+    certificateStore: () => this._certificateStore,
+    clock: () => this._clock,
+    clockAligned: () => this._clockAligned,
+    configuration: () => this._configuration,
+    connectors: () => this._connectors,
+    deviceModelTargets: () => this._deviceModelTargets,
+    engine: () => this._engine,
+    events: () => this._events,
+    heartbeat: () => this._heartbeat,
+    localAuthListManager: () => this._localAuthListManager,
+    logSink: () => this._logSink,
+    logger: () => this._logger,
+    mainMeter: () => this._mainMeter,
+    monitoring: () => this._monitoring,
+    monitorEvaluation: () => this._monitorEvaluation,
+    networkProfiles: () => this._networkProfiles,
+    nowDate: () => this._nowDate(),
+    ocppVersion: () => this._ocppVersion,
+    outbox: () => this._outbox,
+    rawFrames: () => this._rawFrames,
+    reconnectPolicy: () => this._reconnectPolicy,
+    repositories: () => this._repositories,
+    reservationManager: () => this._reservationManager,
+    stateManager: () => this._stateManager,
+    stationProfiles: () => this._stationProfiles,
+    status: () => this._status,
+    setStatus: (status) => {
+      this._status = status;
+    },
+    timelineProjector: () => this._timelineProjector,
+    topology: () => this._topology,
+    txEndedAligned: () => this._txEndedAligned,
+    vehicleDrivers: () => this._vehicleDrivers,
+    webSocket: () => this._webSocket,
+    assertPowered: () => this.assertPowered(),
+    evseIdOf: (connectorId) => this.evseIdOf(connectorId),
+    loadAvailability: (connectorId) => this.loadAvailability(connectorId),
+    warnCapabilityProfileConflicts: () => this._capabilityGate.warnConflicts(),
+    writeConnector: (connectorId, write) =>
+      this.writeConnector(connectorId, write),
+  };
   private readonly _parts: ChargePointCollaborators = createCollaborators(
     this,
-    {
-      authorization: () => this._authorization,
-      callCatalog: () => this._callCatalog,
-      cellular: () => this._cellular,
-      certificateStore: () => this._certificateStore,
-      clock: () => this._clock,
-      clockAligned: () => this._clockAligned,
-      configuration: () => this._configuration,
-      connectors: () => this._connectors,
-      deviceModelTargets: () => this._deviceModelTargets,
-      engine: () => this._engine,
-      events: () => this._events,
-      heartbeat: () => this._heartbeat,
-      localAuthListManager: () => this._localAuthListManager,
-      logSink: () => this._logSink,
-      logger: () => this._logger,
-      mainMeter: () => this._mainMeter,
-      monitoring: () => this._monitoring,
-      monitorEvaluation: () => this._monitorEvaluation,
-      networkProfiles: () => this._networkProfiles,
-      nowDate: () => this._nowDate(),
-      ocppVersion: () => this._ocppVersion,
-      outbox: () => this._outbox,
-      rawFrames: () => this._rawFrames,
-      reconnectPolicy: () => this._reconnectPolicy,
-      repositories: () => this._repositories,
-      reservationManager: () => this._reservationManager,
-      stateManager: () => this._stateManager,
-      stationProfiles: () => this._stationProfiles,
-      status: () => this._status,
-      setStatus: (status) => {
-        this._status = status;
-      },
-      timelineProjector: () => this._timelineProjector,
-      topology: () => this._topology,
-      txEndedAligned: () => this._txEndedAligned,
-      vehicleDrivers: () => this._vehicleDrivers,
-      webSocket: () => this._webSocket,
-      assertPowered: () => this.assertPowered(),
-      evseIdOf: (connectorId) => this.evseIdOf(connectorId),
-      loadAvailability: (connectorId) => this.loadAvailability(connectorId),
-      warnCapabilityProfileConflicts: () =>
-        this._capabilityGate.warnConflicts(),
-      writeConnector: (connectorId, write) =>
-        this.writeConnector(connectorId, write),
-    },
+    this._ctx,
   );
   private readonly _certSwitch = this._parts.certSwitch;
   /** Tests read the pending wait's canceller through this name. */
@@ -611,24 +615,12 @@ export class ChargePoint {
     // #452: the policy is read on every decision, so ChangeConfiguration
     // applies at once. `_configuration` is assigned further down; nothing
     // reads the policy before the constructor returns.
-    this._authorization = new StationAuthorization({
-      cache: new AuthorizationCache(this._repositories.authorizationCache, {
-        clock: this._clock,
-      }),
-      localList: this._localAuthListManager,
-      policy: () => ({
-        cacheEnabled: this._configuration.authorizationCacheEnabled(),
-        localListEnabled: this._configuration.localAuthListEnabled(),
-        localPreAuthorize: this._configuration.localPreAuthorize(),
-        localAuthorizeOffline: this._configuration.localAuthorizeOffline(),
-        allowOfflineTxForUnknownId:
-          this._configuration.allowOfflineTxForUnknownId(),
-        // 2.x AuthCacheCtrlr.LifeTime; a 1.6 store has no such key → null.
-        cacheLifetimeSeconds: this._configuration.authCacheLifeTimeSeconds(),
-        localListChecksExpiry: true,
-      }),
-      idTokenMaxLength: idTokenMaxLength(this._ocppVersion),
+    this._authorization = createStationAuthorization({
       clock: this._clock,
+      configuration: () => this._configuration,
+      localList: this._localAuthListManager,
+      ocppVersion: this._ocppVersion,
+      repositories: this._repositories,
     });
 
     this._stateManager = deps.createStateManager({
@@ -658,63 +650,12 @@ export class ChargePoint {
       this,
       this._repositories.configuration,
     );
-    if (securityProfile !== undefined) {
-      this._configuration.applyChange(
-        "SecurityProfile",
-        String(securityProfile),
-      );
-    }
-    if (authorizationKey !== undefined) {
-      this._configuration.applyChange("AuthorizationKey", authorizationKey);
-    }
-    if (cpoName !== undefined) {
-      this._configuration.applyChange("CpoName", cpoName);
-    }
-    this._configWiring.wireConfigurationListeners();
-    this._configWiring.wirePowerSharing(
-      transportOptions.chargerCapabilities?.powerSharing,
-    );
-    if (isOcpp2Version(this._ocppVersion)) {
-      // 2.x: only the BasicAuthPassword (AuthorizationKey) guard; the
-      // SecurityProfile prerequisites are the 1.6 ChangeConfiguration's (#704).
-      this._configWiring.wireAuthorizationKeyGuard();
-    } else if (this._webSocket) {
-      this._configWiring.wireSecurityConfiguration();
-    }
-    // §5.2: a CP-level Unavailable set previously must survive a reboot.
-    // We don't actually transition status here (no WebSocket yet); the
-    // saved flag is reapplied when ChangeAvailability runs or when the
-    // operator inspects the persisted state. Read before the 2.x runtime
-    // values are first published, so ChargingStation.AvailabilityState
-    // starts from it (#538).
-    const persistedCp = this.loadAvailability(0);
-    if (persistedCp === "Inoperative") {
-      this._status = OCPPStatus.Unavailable;
-    }
-    if (isOcpp2Version(this._ocppVersion)) {
-      this._deviceModel.wireVariableMonitoring();
-      this._configWiring.wireCertificateEntries();
-      this._configWiring.wireClockAndLocalList();
-      this.wireRenewedClientIdentity();
-    }
-    // A persisted override never fires onChange; the scheduler only runs
-    // once a boot is Accepted (#454).
-    this._clockAligned.setIntervalSeconds(
-      this._configuration.clockAlignedDataInterval(),
-    );
-    if (isOcpp2Version(this._ocppVersion)) {
-      this._configWiring.applyRetryBackOff();
-      this._txEndedAligned.setIntervalSeconds(
-        this._configuration.alignedDataTxEndedInterval(),
-      );
-    }
-    // A value persisted with --state-db is in force from the first open.
-    this._webSocket?.setPingInterval(
-      this._configuration.webSocketPingInterval(),
-    );
-    // #930: a suspended SIM on a cellular station keeps the link down from
-    // the very first connect, also after a restart.
-    this._cellular.reevaluateCellularLink();
+    completeConstruction(this._parts, this._ctx, {
+      securityProfile,
+      authorizationKey,
+      cpoName,
+      powerSharing: transportOptions.chargerCapabilities?.powerSharing,
+    });
   }
 
   /** Read a persisted Operative/Inoperative flag from the DB for the given
@@ -791,18 +732,6 @@ export class ChargePoint {
    *  running without --state-db (no SQLite to read from). */
   getInMemoryLogs(): import("../../shared/Logger").LogEntry[] {
     return this._logger.getLogEntries();
-  }
-
-  /**
-   * #537: the transport presents a renewed Charging Station certificate
-   * only while the store holds its key. Once the store's current chain has
-   * none (replaced by a chain signed for a caller-supplied CSR, removed),
-   * the transport forgets every renewed identity and presents the
-   * configured `--tls-cert` again. A new keyed chain is switched to by
-   * {@link useRenewedClientCertificate}, not here.
-   */
-  private wireRenewedClientIdentity(): void {
-    this._certSwitch.watchClientIdentity();
   }
 
   /** #724 A05.FR.06-08: reconnect with the upgraded security profile.

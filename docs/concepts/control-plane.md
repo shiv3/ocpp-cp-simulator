@@ -929,8 +929,13 @@ and waits for the answers before it closes it:
   the simulated station away is neither. Name either one if your CSMS should see it.
 - The wait ends when every stop is answered (CALLRESULT or CALLERROR) or after the daemon's `--shutdown-wait-ms`
   (default 5000), whichever comes first; a transaction opened during the wait is stopped too. Then the charge
-  point is removed or disconnected, answered or not. A stop of an offline charge point is queued and not waited
-  for; on `cp.delete` it is removed with the charge point.
+  point is removed or disconnected, answered or not. Only the answers to the stops this call sent count; a stop
+  sent meanwhile by something else (a scenario, a replayed queue) does not end the wait. A stop of an offline
+  charge point is queued and not waited for; on `cp.delete` it is removed with the charge point. A stop of an
+  OCPP-S (SOAP) charge point is sent but not waited for: its answer is not observed.
+- The wait and the close apply to the charge point registered when the call started. When a `cp.update` of the
+  same `cpId` replaces it during the wait, the replacement is left as is (not stopped, removed or disconnected)
+  and the call fails with `unavailable`.
 - `--shutdown-stop-transactions` does not apply: per charge point the stop is asked for on each call.
 
 `cp.bulk` with `action: "disconnect"` has no such option.

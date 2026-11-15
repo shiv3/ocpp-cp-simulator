@@ -142,7 +142,10 @@ version when the update ends in `Installed`.
 The version is set when the update reaches `Installed`, and with `reboot: beforeInstalled` just before the reboot's
 BootNotification, so that boot carries it. It is never set on a failure path (`DownloadFailed`,
 `InvalidSignature`, `InstallationFailed`, `InstallVerificationFailed`), on an update that was replaced or
-cancelled, or on the 2.x acknowledge-only path (`train: false`), where the control plane reports the statuses.
+cancelled before that point, or on the 2.x acknowledge-only path (`train: false`), where the control plane reports
+the statuses. One exception to "replaced": with `reboot: beforeInstalled` the version is set (and persisted) before
+the reboot, so a request that replaces the train while it waits for the reboot's answer leaves the station on the
+version the old train already set; `Installed` is then not sent for it.
 
 The new version (`deriveFirmwareVersion` in
 [`firmwareVersion.ts`](../../packages/core/src/cp/application/engine/behaviors/firmwareVersion.ts)):

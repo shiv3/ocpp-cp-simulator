@@ -3,20 +3,25 @@
 // Line ratchet for non-test source files (#877). ESLint `max-lines` caps every
 // file under packages/ and apps/ at MAX_LINES, and caps each file listed in
 // scripts/file-size-allowlist.json at the size recorded there, so a file that
-// is over the limit today may not grow. ESLint cannot see an entry that is
-// looser than its file, so this check does:
+// is over the limit today may not grow. This check also fails on:
 //
-//   (a) an entry names a file that does not exist,
-//   (b) an entry is larger than the file's actual line count,
-//   (c) the file is at or under MAX_LINES and the entry is still there.
+//   (a) an entry that names a file that does not exist,
+//   (b) a file over MAX_LINES that has no entry,
+//   (c) a file larger than its entry (growth).
 //
-//   bun run scripts/check-file-size.ts            # exit 1 on any problem
+// An entry that is larger than the file (slack), or still present for a file
+// now at or under MAX_LINES, is only a warning, so a PR that shrinks a file
+// does not have to touch the allowlist:
+//   slack: <file> entry N > actual M; run --update to tighten
+//
+//   bun run scripts/check-file-size.ts            # exit 1 on any failure
 //   bun run scripts/check-file-size.ts --update   # lower entries to the actual
 //                                                 # size, drop the ones that fit;
 //                                                 # never raises an entry
 //
 // Lines are counted like `wc -l` (newline characters).
 
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -38,12 +43,22 @@ export function countLines(text: string): number {
   return n;
 }
 
-/** `lines` maps a repo-relative path to its line count, or null when missing. */
+export interface Evaluation {
+  problems: string[];
+  warnings: string[];
+}
+
+/**
+ * `lines` maps a repo-relative path to its line count, or null when missing.
+ * `sourceFiles` are the capped (non-test) files; those over MAX_LINES need an entry.
+ */
 export function evaluate(
   allowlist: Allowlist,
   lines: (file: string) => number | null,
-): string[] {
+  sourceFiles: string[] = [],
+): Evaluation {
   const problems: string[] = [];
+  const warnings: string[] = [];
   for (const [file, max] of Object.entries(allowlist)) {
     const actual = lines(file);
     if (actual === null) {
@@ -51,16 +66,29 @@ export function evaluate(
         `${file}: listed in file-size-allowlist.json but does not exist`,
       );
     } else if (actual <= MAX_LINES) {
+      warnings.push(
+        `slack: ${file} entry ${max} > actual ${actual}; run --update to tighten`,
+      );
+    } else if (actual > max) {
       problems.push(
-        `${file}: ${actual} lines is within ${MAX_LINES}; remove the entry (--update)`,
+        `${file}: ${actual} lines is larger than its entry ${max}; split it instead of growing it`,
       );
     } else if (max > actual) {
-      problems.push(
-        `${file}: entry ${max} is larger than the actual ${actual} lines; lower it (--update)`,
+      warnings.push(
+        `slack: ${file} entry ${max} > actual ${actual}; run --update to tighten`,
       );
     }
   }
-  return problems;
+  for (const file of sourceFiles) {
+    if (file in allowlist) continue;
+    const actual = lines(file);
+    if (actual !== null && actual > MAX_LINES) {
+      problems.push(
+        `${file}: ${actual} lines is over ${MAX_LINES} and has no allowlist entry`,
+      );
+    }
+  }
+  return { problems, warnings };
 }
 
 /** Lower entries to the actual size; drop missing files and files within the cap. */
@@ -90,13 +118,37 @@ const readLines = (file: string): number | null => {
   return existsSync(path) ? countLines(readFileSync(path, "utf8")) : null;
 };
 
+/** Same scope as the ESLint max-lines block in eslint.config.js. */
+export function isCappedSource(file: string): boolean {
+  return (
+    /^(packages|apps)\/.*\.(ts|tsx)$/.test(file) &&
+    !file.startsWith("packages/ocpp/src/") &&
+    !file.includes("/__tests__/") &&
+    !/\.test\.(ts|tsx)$/.test(file)
+  );
+}
+
+const listSourceFiles = (): string[] =>
+  execFileSync("git", ["ls-files", "packages", "apps"], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+  })
+    .split("\n")
+    .filter(isCappedSource);
+
 if (import.meta.main) {
   const allowlist: Allowlist = JSON.parse(readFileSync(ALLOWLIST_PATH, "utf8"));
   if (process.argv.includes("--update")) {
     writeFileSync(ALLOWLIST_PATH, serialize(update(allowlist, readLines)));
     console.log("file-size-allowlist.json updated");
   } else {
-    const problems = evaluate(allowlist, readLines);
+    const { problems, warnings } = evaluate(
+      allowlist,
+      readLines,
+      listSourceFiles(),
+    );
+    if (warnings.length > 0) console.warn(warnings.join("\n"));
     if (problems.length > 0) {
       console.error(problems.join("\n"));
       process.exit(1);

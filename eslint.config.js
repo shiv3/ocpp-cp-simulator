@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 
 // Line ratchet (#877): new files stay under MAX_LINES; the files listed in
 // scripts/file-size-allowlist.json may not grow past their recorded size.
-// scripts/check-file-size.ts fails when an entry is looser than the file.
+// scripts/check-file-size.ts fails on growth, a missing file or an unlisted over-limit file.
 const MAX_LINES = 800;
 const fileSizeAllowlist = JSON.parse(
   readFileSync(

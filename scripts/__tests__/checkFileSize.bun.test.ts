@@ -5,6 +5,7 @@ import {
   MAX_LINES,
   countLines,
   evaluate,
+  isCappedSource,
   serialize,
   update,
 } from "../check-file-size";
@@ -27,19 +28,50 @@ describe("countLines", () => {
 
 describe("evaluate", () => {
   it("accepts entries equal to the actual size", () => {
-    expect(evaluate({ "a.ts": 1000, "b.ts": 900 }, lines)).toEqual([]);
+    expect(evaluate({ "a.ts": 1000, "b.ts": 900 }, lines)).toEqual({
+      problems: [],
+      warnings: [],
+    });
   });
 
   it("fails on a missing file", () => {
-    expect(evaluate({ "gone.ts": 900 }, lines)).toHaveLength(1);
+    expect(evaluate({ "gone.ts": 900 }, lines).problems).toHaveLength(1);
   });
 
-  it("fails on an entry larger than the file", () => {
-    expect(evaluate({ "a.ts": 1200 }, lines)).toHaveLength(1);
+  it("warns, without failing, on an entry larger than the file", () => {
+    const r = evaluate({ "a.ts": 1200 }, lines);
+    expect(r.problems).toEqual([]);
+    expect(r.warnings).toEqual([
+      "slack: a.ts entry 1200 > actual 1000; run --update to tighten",
+    ]);
   });
 
-  it("fails on an entry for a file within the cap", () => {
-    expect(evaluate({ "c.ts": 700 }, lines)).toHaveLength(1);
+  it("warns, without failing, on an entry for a file within the cap", () => {
+    const r = evaluate({ "c.ts": 900 }, lines);
+    expect(r.problems).toEqual([]);
+    expect(r.warnings).toEqual([
+      "slack: c.ts entry 900 > actual 700; run --update to tighten",
+    ]);
+  });
+
+  it("fails on a file larger than its entry", () => {
+    expect(evaluate({ "a.ts": 900 }, lines).problems).toHaveLength(1);
+  });
+
+  it("fails on a file over the cap with no entry", () => {
+    const r = evaluate({}, lines, ["a.ts", "c.ts"]);
+    expect(r.problems).toHaveLength(1);
+    expect(r.problems[0]).toContain("a.ts");
+  });
+});
+
+describe("isCappedSource", () => {
+  it("matches the ESLint scope", () => {
+    expect(isCappedSource("packages/core/src/x.ts")).toBe(true);
+    expect(isCappedSource("packages/core/src/__tests__/x.ts")).toBe(false);
+    expect(isCappedSource("apps/web/src/x.test.tsx")).toBe(false);
+    expect(isCappedSource("packages/ocpp/src/x.ts")).toBe(false);
+    expect(isCappedSource("scripts/x.ts")).toBe(false);
   });
 });
 

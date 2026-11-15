@@ -246,7 +246,7 @@ in both directions in arrival order, normalizes it, and compares it with a commi
   list, smart charging, disconnect and reconnect, transactions stopped offline). `scenarioCases.ts` runs
   the 54 built-in scenario templates on OCPP 1.6 with the fake CSMS playing the operator the
   [scenario README](../../packages/core/src/utils/scenarios/README.md) describes.
-  `regressionCases.ts` holds 178 more: 175 **recorded on ca01d302 (the commit before the charger engine),
+  `regressionCases.ts` (the cases live in `regressionCases/*.ts`) holds 178 more: 175 **recorded on ca01d302 (the commit before the charger engine),
   never on the branch**, and 3 `Reset` `OnIdle` cases recorded on `c099aac9` (#635) (a fixture that a later commit of main changes is re-recorded on a worktree at
   that commit, still never on the branch; five were after #635),
   after a review found 29 of 63 mutants of the engine survived the first set

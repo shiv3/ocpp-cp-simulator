@@ -5,7 +5,7 @@ summary: A power loss is neither a network loss nor an OCPP Reset — the socket
 sources:
   - packages/core/src/cp/domain/charge-point/ChargePoint.ts (powerLoss, restorePower, runPowerRecovery)
   - packages/contracts/src/methods.ts (power.loss, power.restore)
-  - packages/core/src/test/goldenWire/regressionCases.ts (power-loss-*)
+  - packages/core/src/test/goldenWire/regressionCases/securityAndPower.ts (power-loss-*)
   - "issue #455"
 related:
   - network-simulation.md
@@ -15,7 +15,7 @@ related:
   - ocpp-versions-and-transports.md
   - ../entities/scenario-templates.md
   - ../entities/mcp-endpoint.md
-updated: 2026-11-08
+updated: 2026-11-15
 ---
 
 # Power loss and transaction recovery

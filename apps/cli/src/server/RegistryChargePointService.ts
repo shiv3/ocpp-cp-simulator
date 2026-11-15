@@ -120,10 +120,7 @@ import type {
 } from "./CPRegistry";
 import type { StopReason } from "@ocpp-cp-simulator/contracts/transactionVocabulary";
 import { RpcFailure } from "@ocpp-cp-simulator/contracts/errors";
-import {
-  stopChargePointTransactionsAndWait,
-  type ShutdownStopReport,
-} from "./gracefulShutdown";
+import { stopChargePointTransactionsAndWait } from "./gracefulShutdown";
 
 /** `--shutdown-wait-ms`'s default. */
 const DEFAULT_STOP_WAIT_MS = 5000;
@@ -209,10 +206,10 @@ export class RegistryChargePointService implements ChargePointService {
     id: string,
     close: "remove" | "disconnect",
     reason?: StopReason,
-  ): Promise<ShutdownStopReport> {
+  ): Promise<void> {
     const service = this.requireService(id);
     const stillRegistered = () => this.registry.get(id) === service;
-    const report = await stopChargePointTransactionsAndWait(
+    await stopChargePointTransactionsAndWait(
       {
         list: () => [id],
         get: (cpId) => (cpId === id && stillRegistered() ? service : undefined),
@@ -232,7 +229,6 @@ export class RegistryChargePointService implements ChargePointService {
     }
     if (close === "remove") this.registry.remove(id);
     else service.disconnect();
-    return report;
   }
 
   async removeChargePoint(id: string): Promise<void> {

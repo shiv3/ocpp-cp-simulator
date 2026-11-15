@@ -16,6 +16,7 @@ export const waitForRemoteStart = (
   tagId: string;
   remoteStartId?: number;
   idTokenType?: IdTokenTypeName;
+  groupIdToken?: string;
 }> => {
   // §4.9 S3: fail-fast if the charge point cannot receive RemoteStartTransaction
   if (!chargePoint.canReceiveCsmsCall("RemoteStartTransaction")) {
@@ -66,6 +67,7 @@ export const waitForRemoteStart = (
     tagId: string;
     remoteStartId?: number;
     idTokenType?: IdTokenTypeName;
+    groupIdToken?: string;
   }>((resolve, reject) => {
     let settled = false;
 
@@ -84,6 +86,7 @@ export const waitForRemoteStart = (
       tagId: string;
       remoteStartId?: number;
       idTokenType?: IdTokenTypeName;
+      groupIdToken?: string;
     }) => {
       if (data.connectorId !== connector.id) return;
       cleanup();
@@ -94,6 +97,9 @@ export const waitForRemoteStart = (
           : {}),
         ...(data.idTokenType !== undefined
           ? { idTokenType: data.idTokenType }
+          : {}),
+        ...(data.groupIdToken !== undefined
+          ? { groupIdToken: data.groupIdToken }
           : {}),
       });
     };

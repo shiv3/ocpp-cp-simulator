@@ -57,6 +57,10 @@ export async function executeRemoteStartTrigger(
       ...(answer.idTokenType !== undefined
         ? { idTokenType: answer.idTokenType }
         : {}),
+      // The group the request named (F01.FR.21/22, #839).
+      ...(answer.groupIdToken !== undefined
+        ? { groupIdToken: answer.groupIdToken }
+        : {}),
     };
   }
 }

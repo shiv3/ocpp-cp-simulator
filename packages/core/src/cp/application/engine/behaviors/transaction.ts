@@ -278,6 +278,7 @@ async function remoteStart(
       idTag,
       remoteStartId,
       idTokenType,
+      groupIdToken,
     );
     return;
   }

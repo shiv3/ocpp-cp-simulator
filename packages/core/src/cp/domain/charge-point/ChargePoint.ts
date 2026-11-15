@@ -970,11 +970,9 @@ export class ChargePoint {
     );
   }
 
-  /**
-   * Remove the profiles matching `criteria` from the station store and/or the
-   * connectors; returns the non-empty scopes.
-   * @see ChargingProfileControl.clearChargingProfiles
-   */
+  /** Remove the profiles matching `criteria` from the station store and/or
+   *  the connectors; returns the non-empty scopes.
+   *  @see ChargingProfileControl.clearChargingProfiles */
   clearChargingProfiles(
     connectorId: number | undefined,
     criteria: ProfileRemoveCriteria,
@@ -1013,12 +1011,14 @@ export class ChargePoint {
     tagId: string,
     remoteStartId?: number,
     idTokenType?: IdTokenTypeName,
+    groupIdToken?: string,
   ): void {
     this._parts.notifications.notifyRemoteStartReceived(
       connectorId,
       tagId,
       remoteStartId,
       idTokenType,
+      groupIdToken,
     );
   }
 

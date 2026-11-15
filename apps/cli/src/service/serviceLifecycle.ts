@@ -2,18 +2,18 @@ import type { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point
 import type { AutoTrafficRunner } from "@ocpp-cp-simulator/core/cp/application/services/AutoTrafficRunner";
 import type { AutoTrafficIdTagPicker } from "@ocpp-cp-simulator/core/cp/domain/connector/AutoTraffic";
 import type { ChargePointInitOptions } from "../types";
-import { ScenarioExecutor } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioExecutor";
+import type { ScenarioExecutor } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioExecutor";
 import type {
   ScenarioDefinition,
   ScenarioExecutionContext,
 } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
-import { ChargingSessionRecorder } from "@ocpp-cp-simulator/core/cp/application/services/ChargingSessionRecorder";
+import type { ChargingSessionRecorder } from "@ocpp-cp-simulator/core/cp/application/services/ChargingSessionRecorder";
 import {
   type ConnectorRuntimeRepository,
   type ScenarioPositionSnapshot,
 } from "@ocpp-cp-simulator/core/cp/domain/persistence/ConnectorRuntimeRepository";
 import type { StateHistoryEntry } from "@ocpp-cp-simulator/core/cp/domain/services/StateSnapshot";
-import { ScenarioRunRecorder } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunRecorder";
+import type { ScenarioRunRecorder } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunRecorder";
 import { redactSensitiveText } from "@ocpp-cp-simulator/core/cp/shared/redaction";
 import type {
   CLIEvent,

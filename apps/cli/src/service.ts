@@ -45,11 +45,9 @@ import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Dat
 import type {
   BootNotification,
   StatusNotificationOptions,
-} from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
-import {
-  hasStatusNotificationOptions,
   OCPPStatus,
 } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
+import { hasStatusNotificationOptions } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
 import {
   readConfigurationKeys,
   writeConfigurationKey,
@@ -90,7 +88,7 @@ import type {
   ChargePointInitOptions,
   ChargePointStatus,
 } from "./types";
-import { ScenarioExecutor } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioExecutor";
+import type { ScenarioExecutor } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioExecutor";
 import { normalizeLabels } from "@ocpp-cp-simulator/contracts/labels";
 import type {
   ScenarioDefinition,
@@ -202,22 +200,24 @@ import {
 import {
   scenarioPositionIsOwnedBy,
   shouldReleaseEvSettingsOverride,
+  notifySessionSettled,
+  runScenario,
+  type ScenarioRunHost,
+} from "./service/scenarioRun";
+import {
   continueScenarioWait,
   extendScenarioWait,
   getScenario,
   getScenarioReport,
   getScenarioRunResult,
   getScenarioStatus,
-  notifySessionSettled,
   resetScenario,
   retryScenarioWait,
-  runScenario,
   stepScenario,
   stopAllScenarios,
   stopScenario,
   waitForScenarioArmed,
-  type ScenarioRunHost,
-} from "./service/scenarioRun";
+} from "./service/scenarioControl";
 
 export type { CLIEvent, SessionSettledInfo };
 export { scenarioPositionIsOwnedBy, shouldReleaseEvSettingsOverride };

@@ -10,7 +10,7 @@
   "apps/cli/src/server/socketServer.ts": 3532,
   "apps/cli/src/server/startServer.ts": 1125,
   "apps/cli/src/server/startupScenario.ts": 843,
-  "apps/cli/src/service.ts": 3966,
+  "apps/cli/src/service.ts": 1915,
   "apps/web/src/components/ChargePointConfigForm.tsx": 951,
   "apps/web/src/components/Settings.tsx": 807,
   "apps/web/src/components/scenario/forms/nodeFormRegistry.ts": 1349,

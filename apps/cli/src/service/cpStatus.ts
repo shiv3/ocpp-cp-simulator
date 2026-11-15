@@ -4,7 +4,6 @@ import type {
   ChargePointStatus,
   ConnectorStatus,
 } from "../types";
-import { attachEventForwarders } from "./eventForwarders";
 
 /** What the status / credential-change functions need from `CLIChargePointService`. */
 export interface CpStatusHost {

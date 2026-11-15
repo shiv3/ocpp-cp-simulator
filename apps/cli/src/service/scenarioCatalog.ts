@@ -1,7 +1,7 @@
 import type { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
 import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
 import { OCPPStatus } from "@ocpp-cp-simulator/core/cp/domain/types/OcppTypes";
-import { ScenarioExecutor } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioExecutor";
+import type { ScenarioExecutor } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioExecutor";
 import type {
   ScenarioDefinition,
   ScenarioExecutionContext,
@@ -17,7 +17,7 @@ import {
   getTemplateById,
 } from "@ocpp-cp-simulator/core/utils/scenarioTemplates";
 import { scenarioInstanceId } from "../scenarioInstanceId";
-import { ScenarioRunRecorder } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunRecorder";
+import type { ScenarioRunRecorder } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunRecorder";
 import {
   assertLoadableScenario,
   validateLoadableScenario,

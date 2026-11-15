@@ -505,6 +505,8 @@ describe("inbound request validation (#285)", () => {
     sendDiagnosticsStatusNotification: () => {},
     getConfiguration: () => [],
     setConfiguration: () => "Accepted",
+    // GetDiagnostics reads the opt-in bundle switch (#925).
+    configuration: { getBoolean: () => undefined },
     connectors: new Map(),
     getConnector: () => undefined,
     status: "Available",

@@ -9,6 +9,7 @@ describe("diagnosticsBehavior upload (#575)", () => {
     const cp = {
       logger: { info: vi.fn(), warn: vi.fn(), getLogs: () => ["a line"] },
       fileUploader,
+      configuration: { getBoolean: () => undefined },
     } as unknown as ChargePoint;
     const statuses: string[] = [];
     const ctx = {

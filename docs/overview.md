@@ -5,7 +5,7 @@ summary: Master summary of the OCPP CP Simulator — what it is, how the pieces 
 sources:
   - scripts/check-package-boundaries.ts
   - "issue #578"
-updated: 2026-11-14
+updated: 2026-11-15
 ---
 
 # OCPP CP Simulator — overview
@@ -108,6 +108,7 @@ has. It also runs [`scripts/check-single-writer.ts`](../scripts/check-single-wri
 only `packages/core/src/cp/application/engine/` may assign a connector's `status`,
 `availability`, `scheduledAvailability`, `currentErrorCode`, `errorInfo` or
 `vendorErrorCode`, `transaction`, `transactionId` or a transaction's fields ([Charger engine](concepts/charger-engine.md#the-engine)).
+Last, [`scripts/check-file-size.ts`](../scripts/check-file-size.ts) backs ESLint's `max-lines` ratchet: non-test files stay under 800 lines, and the files already over (listed in `scripts/file-size-allowlist.json`) may not grow; the script fails on an entry that is larger than its file or names a file that fits (`--update` only lowers entries).
 
 | Package (`@ocpp-cp-simulator/<dir>`) | Holds                                                                                                                                                                                                   | May depend on                               |
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |

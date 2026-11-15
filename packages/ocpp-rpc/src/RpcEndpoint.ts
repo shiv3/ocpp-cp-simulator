@@ -30,7 +30,9 @@ export interface RpcEndpointOptions {
   /** Writes one text frame to the peer. A throw rejects the call being sent,
    *  or is reported as `reply-send-failed` for an answer. */
   readonly send: (frame: string) => void;
-  /** The id of the next outgoing CALL; unique among the calls in flight. */
+  /** The id of the next outgoing CALL; never reused for the endpoint's
+   *  lifetime, timed-out calls included, so a late answer to an old call
+   *  cannot settle a newer one. */
   readonly nextMessageId: () => string;
   /** The version's error codes. */
   readonly dialect: RpcDialect;

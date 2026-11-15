@@ -16,6 +16,7 @@ sources:
   - packages/core/src/cp/infrastructure/transport/handlers/call/CertificateManagementHandlers.ts (1.6 DeleteCertificate M04.FR.06, issue #537)
   - packages/core/src/cp/domain/security/get15118EVCertificate.ts (Get15118EVCertificate relay, issue #537)
   - packages/core/src/cp/infrastructure/transport/OCPPWebSocket.ts (renewed client certificate, A02.FR.08 / A02.FR.28, issue #537)
+  - packages/core/src/cp/infrastructure/transport/ws/clientCertificateState.ts (renewed client certificate state, A02.FR.08 / A02.FR.28)
   - packages/core/src/cp/infrastructure/transport/wsUrlWithBasic.ts (scheme rule, issue #277; TLS options, issue #289)
   - https://gist.github.com/juherr/2c5ca12a562a07f7a0da7ccbbb46b160 (profile 2 behind a TLS-terminating edge, measured on 0.7.8; issue #289)
 related:

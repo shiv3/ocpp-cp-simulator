@@ -782,6 +782,92 @@ const updateParamsSchema = cpParamsBaseSchema.extend({
 });
 
 /**
+ * The blueprint format version this build reads and writes (#331).
+ *
+ * `schemaVersion` is optional on the wire: a blueprint without one — every
+ * row stored before the field existed, and the built-in catalogue — *is*
+ * version 1. Making it required would make `blueprintSchema` reject every
+ * pre-versioned row, and `BlueprintRepository` skips rows that fail it, so
+ * stored blueprints would vanish from `blueprint.list` on upgrade. A later
+ * version is refused by `z.literal`, and the repository reports such a row at
+ * startup rather than dropping it silently.
+ */
+export const BLUEPRINT_SCHEMA_VERSION = 1;
+
+/**
+ * Provenance of a blueprint (#331, #241): which public documents its values
+ * were taken from, and what those documents say that the blueprint cannot
+ * express yet.
+ *
+ * Shared by hand-written examples (`format: "manual"`, e.g. the files under
+ * `docs/examples/blueprints/`) and a future importer of machine-readable
+ * charger descriptions (`format: "oecs"`), so both produce the same kind of
+ * artefact. A document is identified by the SHA-256 of the bytes that were
+ * read, not by its URL, which can change under it. The documents themselves
+ * are never stored: `blueprint.list` must not become a document dump.
+ */
+export const blueprintSourceSchema = z
+  .object({
+    format: z
+      .enum(["manual", "oecs"])
+      .describe(
+        "manual: written by hand from public documentation; oecs: imported from a machine-readable charger description",
+      ),
+    citations: STR_1K.optional().describe(
+      "Repository-relative path of the per-value sources file, e.g. docs/examples/blueprints/<id>.sources.json",
+    ),
+    documents: z
+      .array(
+        z
+          .object({
+            id: STR_256.min(1).describe(
+              "Name the sources file and unmapped entries refer to",
+            ),
+            title: STR_1K.min(1),
+            publisher: STR_256.min(1),
+            uri: STR_1K.min(1).describe(
+              "Where the document was retrieved; informative, not its identity",
+            ),
+            revision: STR_256.optional().describe(
+              "Document revision / firmware version it describes",
+            ),
+            sha256: z
+              .string()
+              .regex(/^[0-9a-f]{64}$/, "sha256 must be 64 lowercase hex digits")
+              .describe("SHA-256 of the retrieved bytes"),
+            retrievedAt: z
+              .string()
+              .max(64)
+              .describe("ISO 8601 date of retrieval; audit only"),
+          })
+          .strict(),
+      )
+      .max(50),
+    unmapped: z
+      .array(
+        z
+          .object({
+            what: STR_1K.min(1).describe(
+              "A documented fact this blueprint does not (yet) express",
+            ),
+            documentId: STR_256.min(1),
+            locator: STR_256.min(1).describe(
+              'Where in the document, e.g. "p.9"',
+            ),
+          })
+          .strict(),
+      )
+      .max(500)
+      .optional(),
+    mapperRevision: STR_256.optional().describe(
+      "oecs: revision of the importer that produced the blueprint",
+    ),
+  })
+  .strict();
+
+export type BlueprintSource = z.infer<typeof blueprintSourceSchema>;
+
+/**
  * A named, reusable charge point description — the *hardware* half, where a
  * scenario is the *behaviour* half. The two compose: instantiate a blueprint,
  * then load a scenario onto a connector; neither needs to know about the other.
@@ -792,6 +878,13 @@ const updateParamsSchema = cpParamsBaseSchema.extend({
  * how many of them to make.
  */
 export const blueprintSchema = z.object({
+  // Optional, absent = 1: see `BLUEPRINT_SCHEMA_VERSION`. Not `.default(1)`,
+  // which would add the field to every parsed row and change what
+  // `blueprint.list` returns for blueprints stored before it existed.
+  schemaVersion: z
+    .literal(BLUEPRINT_SCHEMA_VERSION)
+    .optional()
+    .describe("Blueprint format version; absent means 1"),
   // `.min(1)`: an empty id would store a blueprint that `blueprint.delete`
   // refuses to accept, leaving it undeletable through the API.
   id: STR_256.min(1).describe("Blueprint identifier, unique within the daemon"),
@@ -812,6 +905,11 @@ export const blueprintSchema = z.object({
   scenarioTemplateId: STR_256.optional().describe(
     "Scenario template loaded onto each connector after creation",
   ),
+  source: blueprintSourceSchema
+    .optional()
+    .describe(
+      "Provenance: the public documents the values come from, and what they say that the blueprint cannot express",
+    ),
 });
 
 export type Blueprint = z.infer<typeof blueprintSchema>;

@@ -36,6 +36,8 @@ export {
   hasIdPatternPlaceholder,
   MAX_GENERATED_CP_ID_LENGTH,
   blueprintSchema,
+  blueprintSourceSchema,
+  BLUEPRINT_SCHEMA_VERSION,
   FLEET_TEMPLATE_MAX_CPS,
   fleetCreateParamsSchema,
   fleetGroupSchema,
@@ -55,6 +57,7 @@ export {
 } from "./methods";
 export type {
   Blueprint,
+  BlueprintSource,
   CpBulkResult,
   FleetGroup,
   FleetMember,

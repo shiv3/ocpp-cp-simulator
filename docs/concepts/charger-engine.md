@@ -4,6 +4,8 @@ type: concept
 summary: The contract of the charger engine as shipped — one owner of charge point state, behaviors as TypeScript modules behind a narrow ctx port, one inbound gate, an injectable clock — with the behavior API, its stability, the delivery timings, the security line and the limits.
 sources:
   - packages/core/src/cp/application/engine/ChargerEngine.ts
+  - packages/core/src/cp/application/engine/behaviorContext.ts
+  - packages/core/src/cp/application/engine/scope.ts
   - packages/core/src/cp/application/engine/ChargerState.ts
   - packages/core/src/cp/application/behavior/BehaviorRegistry.ts
   - packages/core/src/cp/domain/engine/ChargerState.ts

@@ -5,6 +5,8 @@ import {
 } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import type { NodeFormData } from "../types";
 import {
+  baseFromForm,
+  baseToForm,
   compactDefined,
   optionalNumber,
   CERT_SIGNATURE_ALGORITHMS_SET,

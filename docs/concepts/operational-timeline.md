@@ -7,7 +7,7 @@ sources:
   - packages/core/src/cp/application/services/OperationalTimelineProjector.ts
   - packages/core/src/cp/domain/services/ChargePointTimeline.ts
   - apps/cli/src/service.ts (recordScenarioOnTimeline)
-  - packages/contracts/src/methods.ts (timeline.get)
+  - packages/contracts/src/methods/daemonMethods.ts (timeline.get)
   - packages/core/src/cp/domain/charge-point/ChargePoint.ts (applyChargingProfile, clearChargingProfiles)
   - "issue #448"
   - "issue #469"
@@ -23,7 +23,7 @@ related:
   - local-authorization.md
   - ocpp-versions-and-transports.md
   - power-loss.md
-updated: 2026-11-14
+updated: 2026-11-15
 ---
 
 # Operational timeline

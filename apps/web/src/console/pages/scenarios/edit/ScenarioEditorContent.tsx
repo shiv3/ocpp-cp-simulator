@@ -11,18 +11,8 @@ import CollapsibleSide from "../../../components/CollapsibleSide";
 import { sidePanelGrid, useCollapsedPanel } from "../../../lib/collapsedPanel";
 
 import { Link, useSearchParams } from "react-router-dom";
-import {
-  ChevronDown,
-  ChevronUp,
-  GitBranch,
-  Maximize2,
-  Repeat,
-  RepeatOff,
-  Trash2,
-  X,
-} from "lucide-react";
+import { X } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { t as tNow } from "../../../../i18n";
 import { saveEditorScenario } from "../../../../components/scenario/scenarioPersistence";
@@ -31,44 +21,17 @@ import ScenarioEvSettingsFields from "../../../../components/scenario/ScenarioEv
 import { compactScenarioEvSettings } from "../../../../components/scenario/compactScenarioEvSettings";
 import {
   ScenarioNodeType,
-  type AnyScenarioNodeType,
   type ScenarioDefinition,
-  type ScenarioNodeData,
 } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import { useDataContext } from "../../../../data/providers/DataProvider";
 import EmptyState from "../../../components/EmptyState";
 import InlineConfirm from "../../../components/InlineConfirm";
 import SegmentedControl from "../../../components/SegmentedControl";
-import { updateStepData } from "../../../lib/scenarioSteps";
 import {
-  addLane,
-  canMoveStep,
   editCapabilities,
-  insertForkBlock,
-  insertStep,
-  insertStepIntoNewLoop,
-  setLaneExit,
-  canSetLaneExit,
-  canSetLoopBounds,
-  canWrapInLoop,
-  canMoveStepTo,
-  moveStepTo,
-  moveStep,
   recognizeBlockTree,
-  removeLane,
-  removeStep,
   seqAt,
-  firstNodeOf,
-  setLink,
-  treeNodes,
-  setLoopBounds,
-  unwrapLoop,
-  wrapInLoop,
-  type Capability,
-  type SeqPath,
 } from "../../../lib/blockTree";
-import { collectStateKeys } from "../../../../components/scenario/forms/scenarioValue";
-import type { LoopBoundsEditing } from "../run/loopBoundsUi";
 import { isDrawableTree, stepNumbers, treeSteps } from "../../../lib/stepTree";
 import { graphEdgeIds } from "../../../lib/treeGraphLayout";
 import StepsGraphView from "../run/StepsGraphView";
@@ -77,13 +40,14 @@ import { laneLetter, nodeTitle } from "../run/stepVisuals";
 import ScenarioMetaBar from "./ScenarioMetaBar";
 import GraphIssues from "./GraphIssues";
 import { useScenarioIssues, type ViewIssues } from "./issueMarkUi";
-import StepInspector from "./StepInspector";
-import { requiredSchemaVersion } from "@ocpp-cp-simulator/core/scenario/scenarioGraphValidator";
 import UnsupportedOutline from "./UnsupportedOutline";
+import type { EditorView, LibraryEditorBinding } from "./editorTypes";
+import { InspectorPanelBody } from "./InspectorPanelBody";
+import { LibraryUsedBy } from "./LibraryUsedBy";
+import { PanelActions } from "./PanelActions";
+import { useScenarioEditing } from "./useScenarioEditing";
 
 const INSPECTOR_COLLAPSED_KEY = "ocpp-cp.console.scenario.inspector.collapsed";
-
-type EditorView = "steps" | "graph";
 
 /** JSON snapshot used for dirty-tracking: deep-compares the *serialized*
  *  def (runtime-only node/edge fields stripped, same as what
@@ -100,20 +64,7 @@ function serializedSnapshot(def: ScenarioDefinition): string {
 const connectorCount = (n: number) =>
   tNow("scenarios.count.connector", { count: n });
 
-/** A connector that uses the Library scenario being edited. */
-export interface LibraryEditorUser {
-  cpId: string;
-  connectorId: number | null;
-  /** A run of the scenario is live there (a save stops it). */
-  running: boolean;
-}
-
-/** What the Library editor adds to the plain editor: who uses the scenario,
- *  and a save that re-pushes it to them. */
-export interface LibraryEditorBinding {
-  users: LibraryEditorUser[];
-  save: (scenario: ScenarioDefinition) => Promise<void>;
-}
+export type { LibraryEditorUser, LibraryEditorBinding } from "./editorTypes";
 
 export interface ScenarioEditorContentProps {
   /** The definition's scope (`LIBRARY_SCOPE` and null for a Library entry). */
@@ -377,275 +328,37 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
     (caps.setLink.ok ||
       caps.setLink.reason === "scenarios.editor.cannot.insideLoop");
 
-  /** Applies an edit; an edit that adds a construct newer than the declared
-   *  schema version raises the declaration to the version that introduced it
-   *  (never lowers it), so the editor's own change is not flagged as newer. */
-  const setEdited = (next: ScenarioDefinition) => {
-    const version = requiredSchemaVersion(next);
-    setScenario(
-      version !== next.schemaVersion
-        ? { ...next, schemaVersion: version as string }
-        : next,
-    );
-  };
-
-  const handleMetaChange = (patch: Partial<ScenarioDefinition>) => {
-    setScenario((prev) => (prev ? { ...prev, ...patch } : prev));
-  };
-
-  /** Selects the step a change added (the one id `next` has that the
-   *  scenario had not). */
-  const applyAndSelectNew = (next: ScenarioDefinition) => {
-    if (!scenario) return;
-    const before = new Set(scenario.nodes.map((n) => n.id));
-    setEdited(next);
-    setSelectedStepId(next.nodes.find((n) => !before.has(n.id))?.id ?? null);
-  };
-
-  const numberOf = (nodeId: string) => numbers.get(nodeId) ?? "";
-  /** Says why an edit asked for is refused (`cap`), or runs it. */
-  const unlessRefused = (
-    nodeId: string,
-    cap: Capability,
-    run: () => void,
-  ): void => {
-    if (cap.ok) {
-      setNotice(null);
-      run();
-      return;
-    }
-    setNotice(
-      t("scenarios.editor.refused", {
-        n: numberOf(nodeId),
-        reason: t(cap.reason),
-      }),
-    );
-  };
-
-  /** A step type picked for slot `index` of the sequence at `path`: a
-   *  switch or choice comes with one lane per case / option. */
-  const handleInsertStep = (
-    path: SeqPath,
-    index: number,
-    type: AnyScenarioNodeType,
-  ) => {
-    if (!scenario || !tree) return;
-    const kind =
-      type === ScenarioNodeType.SWITCH
-        ? "switch"
-        : type === ScenarioNodeType.CHOICE
-          ? "choice"
-          : null;
-    applyAndSelectNew(
-      kind
-        ? insertForkBlock(scenario, tree, path, index, kind)
-        : insertStep(scenario, tree, path, index, type),
-    );
-  };
-
-  /** The steps the inspector's "Repeat from this step" would repeat, shown
-   *  in both views while the pointer or focus is on that button. */
-  const [rangeHint, setRangeHint] = useState<readonly string[] | null>(null);
-  const showRangeOf = (nodeId: string | null) => {
-    const place = nodeId && tree ? tree.nodePath.get(nodeId) : undefined;
-    const seq = place && tree ? seqAt(tree, place.path) : null;
-    if (!place || !seq) {
-      setRangeHint(null);
-      return;
-    }
-    setRangeHint(
-      treeNodes({
-        root: { ...seq, blocks: seq.blocks.slice(place.index) },
-        detached: [],
-        origin: null,
-      }).map((n) => n.id),
-    );
-  };
-
-  /** Graph view: steps `from`..`to` of the sequence at `path` become a loop. */
-  const handleWrapInLoopRange = (path: SeqPath, from: number, to: number) => {
-    if (!scenario || !tree) return;
-    const cap = canWrapInLoop(tree, path, from, to);
-    const first = seqAt(tree, path)?.blocks[from];
-    unlessRefused(first ? firstNodeOf(first).id : "", cap, () =>
-      setEdited(wrapInLoop(scenario, tree, path, from, to)),
-    );
-  };
-
-  /** Graph view: a lane continues at a later step. */
-  const handleSetLaneExit = (lanePath: SeqPath, target: string) => {
-    if (!scenario || !tree) return;
-    unlessRefused(target, canSetLaneExit(tree, lanePath, target), () =>
-      setEdited(setLaneExit(scenario, tree, lanePath, target)),
-    );
-  };
-
-  /** The first step of an empty Repeat block: the repeat is written around it. */
-  const handleInsertStepIntoLoop = (
-    path: SeqPath,
-    index: number,
-    type: AnyScenarioNodeType,
-  ) => {
-    if (!scenario || !tree) return;
-    applyAndSelectNew(insertStepIntoNewLoop(scenario, tree, path, index, type));
-  };
-
-  /** A step dropped in another sequence, or into a new Repeat block. */
-  const handleMoveStepTo = (
-    nodeId: string,
-    path: SeqPath,
-    index: number,
-    loop: boolean,
-  ) => {
-    if (!scenario || !tree) return;
-    unlessRefused(nodeId, canMoveStepTo(tree, nodeId, path, index, loop), () =>
-      setEdited(moveStepTo(scenario, tree, nodeId, path, index, loop)),
-    );
-  };
-
-  /** Moves a step `delta` places within its sequence. */
-  const handleMove = (nodeId: string, delta: number) => {
-    if (!scenario || !tree) return;
-    const place = tree.nodePath.get(nodeId);
-    if (!place) return;
-    // Keys and drags alike: a refused move says why.
-    unlessRefused(
-      nodeId,
-      canMoveStep(tree, place.path, place.index, place.index + delta),
-      () =>
-        setEdited(
-          moveStep(
-            scenario,
-            tree,
-            place.path,
-            place.index,
-            place.index + delta,
-          ),
-        ),
-    );
-  };
-
-  const removeCap = (nodeId: string): Capability =>
-    tree
-      ? editCapabilities(tree, { kind: "node", nodeId }).removeStep
-      : { ok: false, reason: "scenarios.editor.cannot.notInTree" };
-
-  const handleDelete = (nodeId: string) => {
-    if (!scenario || !tree) return;
-    unlessRefused(nodeId, removeCap(nodeId), () => {
-      setEdited(removeStep(scenario, tree, nodeId));
-      setSelectedStepId((sel) => (sel === nodeId ? null : sel));
-    });
-    setPendingDelete(null);
-  };
-
-  /** The keyboard's Delete asks first (one key away from losing a step);
-   *  the ✕ and the inspector's bin are deliberate clicks. */
-  const handleDeleteRequest = (
-    nodeId: string,
-    { confirm }: { confirm: boolean },
-  ) => {
-    if (!confirm) handleDelete(nodeId);
-    else
-      unlessRefused(nodeId, removeCap(nodeId), () => setPendingDelete(nodeId));
-  };
-
-  const handleAddLane = (nodeId: string) => {
-    if (!scenario || !tree) return;
-    unlessRefused(
-      nodeId,
-      editCapabilities(tree, { kind: "node", nodeId }).addLane,
-      () => applyAndSelectNew(addLane(scenario, tree, nodeId)),
-    );
-  };
-
-  const doRemoveLane = (nodeId: string, laneIndex: number) => {
-    if (!scenario || !tree) return;
-    setPendingLane(null);
-    unlessRefused(
-      nodeId,
-      editCapabilities(tree, { kind: "lane", nodeId, laneIndex }).removeLane,
-      () => setEdited(removeLane(scenario, tree, nodeId, laneIndex)),
-    );
-  };
-
-  /** Removing a lane with steps asks first: its steps go with it. */
-  const handleRemoveLane = (nodeId: string, laneIndex: number) => {
-    if (!tree) return;
-    const place = tree.nodePath.get(nodeId);
-    const block = place
-      ? seqAt(tree, place.path)?.blocks[place.index]
-      : tree.root.blocks[0];
-    const lane = block?.kind === "fork" ? block.lanes[laneIndex] : undefined;
-    const count = lane
-      ? treeNodes({ root: lane.body, detached: [], origin: null }).length
-      : 0;
-    if (count > 0) setPendingLane({ nodeId, laneIndex, count });
-    else doRemoveLane(nodeId, laneIndex);
-  };
-
-  const handleWrapInLoop = (nodeId: string) => {
-    if (!scenario || !tree) return;
-    const place = tree.nodePath.get(nodeId);
-    const seq = place ? seqAt(tree, place.path) : null;
-    if (!place || !seq) return;
-    unlessRefused(
-      nodeId,
-      editCapabilities(tree, { kind: "node", nodeId }).wrapInLoop,
-      () =>
-        setEdited(
-          wrapInLoop(
-            scenario,
-            tree,
-            place.path,
-            place.index,
-            seq.blocks.length - 1,
-          ),
-        ),
-    );
-  };
-
-  /** "Stop repeating": the innermost loop around `nodeId` goes; its steps
-   *  run once and go on where the loop went on. */
-  /** Both views: the bounds of the loop whose first step is `headerId`. */
-  const loopBoundsEditing = useMemo<LoopBoundsEditing | undefined>(
-    () =>
-      scenario && tree
-        ? {
-            canSet: (headerId, bounds) =>
-              canSetLoopBounds(tree, headerId, bounds),
-            onSet: (headerId, bounds) =>
-              unlessRefused(
-                headerId,
-                canSetLoopBounds(tree, headerId, bounds),
-                () =>
-                  setEdited(setLoopBounds(scenario, tree, headerId, bounds)),
-              ),
-            stateKeys: collectStateKeys(scenario.nodes),
-          }
-        : undefined,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [scenario, tree],
-  );
-
-  const handleUnwrapLoop = (nodeId: string) => {
-    if (!scenario || !tree) return;
-    unlessRefused(
-      nodeId,
-      editCapabilities(tree, { kind: "node", nodeId }).unwrapLoop,
-      () => setEdited(unwrapLoop(scenario, tree, nodeId)),
-    );
-  };
-
-  const handleStepDataChange = (nodeId: string, data: ScenarioNodeData) => {
-    if (!scenario) return;
-    setEdited(updateStepData(scenario, nodeId, data));
-  };
-
-  const handleLink = (nodeId: string, targetId: string | null) => {
-    if (!scenario || !tree) return;
-    setEdited(setLink(scenario, tree, nodeId, targetId));
-  };
+  const {
+    handleMetaChange,
+    numberOf,
+    handleInsertStep,
+    rangeHint,
+    showRangeOf,
+    handleWrapInLoopRange,
+    handleSetLaneExit,
+    handleInsertStepIntoLoop,
+    handleMoveStepTo,
+    handleMove,
+    handleDelete,
+    handleDeleteRequest,
+    handleAddLane,
+    doRemoveLane,
+    handleRemoveLane,
+    handleWrapInLoop,
+    loopBoundsEditing,
+    handleUnwrapLoop,
+    handleStepDataChange,
+    handleLink,
+  } = useScenarioEditing({
+    scenario,
+    tree,
+    numbers,
+    setScenario,
+    setSelectedStepId,
+    setNotice,
+    setPendingDelete,
+    setPendingLane,
+  });
 
   const setView = (view: EditorView) => {
     setSearchParams(
@@ -718,44 +431,13 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
   }, [cancelRef]);
 
   const panelActions = isPanel ? (
-    <>
-      {onCancel && (
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          onClick={handleCancel}
-        >
-          {t("scenarios.common.cancel")}
-        </Button>
-      )}
-      {expand && (
-        <Button
-          asChild
-          variant="outline"
-          size="sm"
-          className="px-2"
-          title={expand.label}
-        >
-          <Link to={expand.to} aria-label={expand.label}>
-            <Maximize2 className="h-3.5 w-3.5" />
-          </Link>
-        </Button>
-      )}
-      {onClose && (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="px-2"
-          aria-label={t("scenarios.panel.closeAria")}
-          title={t("scenarios.panel.closeTitle")}
-          onClick={handleClose}
-        >
-          <X className="h-3.5 w-3.5" />
-        </Button>
-      )}
-    </>
+    <PanelActions
+      onCancel={onCancel}
+      expand={expand}
+      onClose={onClose}
+      handleCancel={handleCancel}
+      handleClose={handleClose}
+    />
   ) : null;
 
   const backControl = onBack ? (
@@ -851,45 +533,7 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
         />
       )}
 
-      {library && (
-        <div
-          data-testid="library-used-by"
-          className="mb-4 flex flex-wrap items-center gap-1.5"
-        >
-          <span className="mr-1 text-[11px] font-medium uppercase tracking-wide text-cx-muted">
-            {t("scenarios.editor.usedBy")}
-          </span>
-          {users.length === 0 ? (
-            <span className="text-sm text-cx-muted">
-              {t("scenarios.editor.noConnectorUses")}
-            </span>
-          ) : (
-            users.map((user) => (
-              <Link
-                key={`${user.cpId}:${user.connectorId ?? "cp"}`}
-                to={
-                  user.connectorId === null
-                    ? `/cp/${encodeURIComponent(user.cpId)}`
-                    : `/cp/${encodeURIComponent(user.cpId)}?connector=${user.connectorId}`
-                }
-                title={user.running ? t("scenarios.editor.running") : undefined}
-                className="inline-flex items-center gap-1.5 rounded-md border border-cx-border bg-cx-card px-2 py-0.5 font-mono text-xs text-cx-fg2 hover:border-cx-border-strong hover:text-cx-fg"
-              >
-                {user.running && (
-                  <span
-                    aria-label={t("scenarios.editor.running")}
-                    className="h-[7px] w-[7px] rounded-full bg-cx-blue"
-                  />
-                )}
-                {user.cpId}
-                {user.connectorId === null
-                  ? ` · ${t("scenarios.editor.chargePoint")}`
-                  : ` #${user.connectorId}`}
-              </Link>
-            ))
-          )}
-        </div>
-      )}
+      {library && <LibraryUsedBy users={users} />}
 
       {/* The rest of the scenario's settings: description and EV
           settings (#424). */}
@@ -1066,144 +710,28 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
               className="@[860px]:sticky @[860px]:top-4"
               contentClassName="p-4"
             >
-              {selectedNode ? (
-                <>
-                  <div className="mb-3 flex items-center gap-2 border-b border-cx-border pb-3">
-                    <span
-                      className="min-w-0 flex-1 text-xs text-cx-muted"
-                      title={nodeTitle(selectedNode)}
-                    >
-                      {selectedNumber !== null ? (
-                        <>
-                          {t("scenarios.editor.step")}{" "}
-                          <span className="font-mono">{selectedNumber}</span>
-                        </>
-                      ) : (
-                        nodeTitle(selectedNode)
-                      )}
-                    </span>
-                    {caps && selectedNumber !== null && (
-                      <>
-                        {(caps.addLane.ok ||
-                          caps.addLane.reason !==
-                            "scenarios.editor.cannot.cannotFork") && (
-                          <InspectorAction
-                            label={t("scenarios.editor.addBranch")}
-                            cap={caps.addLane}
-                            onClick={() => handleAddLane(selectedNode.id)}
-                          >
-                            <GitBranch className="h-3.5 w-3.5" />
-                          </InspectorAction>
-                        )}
-                        <InspectorAction
-                          label={t("scenarios.editor.wrapInLoop")}
-                          cap={caps.wrapInLoop}
-                          onClick={() => handleWrapInLoop(selectedNode.id)}
-                          onHint={(on) =>
-                            showRangeOf(on ? selectedNode.id : null)
-                          }
-                        >
-                          <Repeat className="h-3.5 w-3.5" />
-                        </InspectorAction>
-                        {(caps.unwrapLoop.ok ||
-                          caps.unwrapLoop.reason !==
-                            "scenarios.editor.cannot.notInLoop") && (
-                          <InspectorAction
-                            label={t("scenarios.editor.unwrapLoop")}
-                            cap={caps.unwrapLoop}
-                            onClick={() => handleUnwrapLoop(selectedNode.id)}
-                          >
-                            <RepeatOff className="h-3.5 w-3.5" />
-                          </InspectorAction>
-                        )}
-                        <InspectorAction
-                          label={t("scenarios.editor.moveUp", {
-                            n: selectedNumber,
-                          })}
-                          cap={caps.moveUp}
-                          onClick={() => handleMove(selectedNode.id, -1)}
-                        >
-                          <ChevronUp className="h-3.5 w-3.5" />
-                        </InspectorAction>
-                        <InspectorAction
-                          label={t("scenarios.editor.moveDown", {
-                            n: selectedNumber,
-                          })}
-                          cap={caps.moveDown}
-                          onClick={() => handleMove(selectedNode.id, 1)}
-                        >
-                          <ChevronDown className="h-3.5 w-3.5" />
-                        </InspectorAction>
-                        <InspectorAction
-                          label={t("scenarios.editor.deleteStep", {
-                            n: selectedNumber,
-                          })}
-                          cap={caps.removeStep}
-                          danger
-                          onClick={() => handleDelete(selectedNode.id)}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </InspectorAction>
-                      </>
-                    )}
-                  </div>
-                  {caps && showLink && (
-                    <label className="mb-3 flex flex-col gap-1 text-xs text-cx-muted">
-                      {t("scenarios.editor.afterStep")}
-                      <select
-                        aria-label={t("scenarios.editor.afterStep")}
-                        value={selectedExit}
-                        disabled={!caps.setLink.ok}
-                        title={
-                          caps.setLink.ok ? undefined : t(caps.setLink.reason)
-                        }
-                        onChange={(e) =>
-                          handleLink(
-                            selectedNode.id,
-                            e.target.value === "" ? null : e.target.value,
-                          )
-                        }
-                        className="rounded-md border border-cx-border-strong bg-cx-card px-2 py-1.5 text-sm text-cx-fg disabled:opacity-60"
-                      >
-                        <option value="">
-                          {t("scenarios.editor.endOfScenario")}
-                        </option>
-                        {allSteps.map((step) => (
-                          <option key={step.id} value={step.id}>
-                            {t(
-                              reachesSelected.has(step.id)
-                                ? "scenarios.editor.loopBackTo"
-                                : "scenarios.editor.goToStep",
-                              {
-                                n: numberOf(step.id),
-                                title: nodeTitle(step),
-                              },
-                            )}
-                          </option>
-                        ))}
-                      </select>
-                      {!caps.setLink.ok && (
-                        <span>{t(caps.setLink.reason)}</span>
-                      )}
-                    </label>
-                  )}
-                  <StepInspector
-                    focusLane={laneFocus}
-                    node={selectedNode}
-                    onChange={(data) =>
-                      handleStepDataChange(selectedNode.id, data)
-                    }
-                    scenario={scenario}
-                    onScenarioChange={setScenario}
-                    stepNumbers={numbers}
-                  />
-                </>
-              ) : (
-                <EmptyState
-                  title={t("scenarios.inspector.selectStep")}
-                  hint={t("scenarios.inspector.selectStepHint")}
-                />
-              )}
+              <InspectorPanelBody
+                selectedNode={selectedNode}
+                selectedNumber={selectedNumber}
+                caps={caps}
+                showLink={showLink}
+                selectedExit={selectedExit}
+                allSteps={allSteps}
+                reachesSelected={reachesSelected}
+                numbers={numbers}
+                numberOf={numberOf}
+                laneFocus={laneFocus}
+                scenario={scenario}
+                onScenarioChange={setScenario}
+                handleAddLane={handleAddLane}
+                handleWrapInLoop={handleWrapInLoop}
+                handleUnwrapLoop={handleUnwrapLoop}
+                handleMove={handleMove}
+                handleDelete={handleDelete}
+                handleLink={handleLink}
+                handleStepDataChange={handleStepDataChange}
+                showRangeOf={showRangeOf}
+              />
             </CollapsibleSide>
           </div>
         </div>
@@ -1211,41 +739,5 @@ const ScenarioEditorContent: React.FC<ScenarioEditorContentProps> = ({
     </div>
   );
 };
-
-/** An inspector button, disabled with the reason as title when `cap`
- *  refuses (and its note in the title when it has one). */
-const InspectorAction: React.FC<{
-  label: string;
-  cap: Capability;
-  danger?: boolean;
-  onClick: () => void;
-  /** Pointer or focus on / off the button (what it would affect is shown). */
-  onHint?: (on: boolean) => void;
-  children: React.ReactNode;
-}> = ({ label, cap, danger, onClick, onHint, children }) => (
-  <button
-    type="button"
-    aria-label={label}
-    title={
-      !cap.ok
-        ? `${label}: ${tNow(cap.reason)}`
-        : cap.note
-          ? `${label} — ${tNow(cap.note)}`
-          : label
-    }
-    disabled={!cap.ok}
-    onClick={onClick}
-    onPointerEnter={onHint && (() => onHint(true))}
-    onPointerLeave={onHint && (() => onHint(false))}
-    onFocus={onHint && (() => onHint(true))}
-    onBlur={onHint && (() => onHint(false))}
-    className={cn(
-      "rounded p-1 text-cx-faint disabled:opacity-30",
-      danger ? "hover:bg-cx-rose/10 hover:text-cx-rose" : "hover:bg-cx-sub",
-    )}
-  >
-    {children}
-  </button>
-);
 
 export default ScenarioEditorContent;

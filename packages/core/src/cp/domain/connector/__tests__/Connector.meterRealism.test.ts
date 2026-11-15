@@ -1,7 +1,12 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { Connector } from "../Connector";
 import { Logger, LogLevel } from "../../../shared/Logger";
-import { OCPPStatus } from "../../types/OcppTypes";
+import {
+  ChargingProfileKindType,
+  ChargingProfilePurposeType,
+  ChargingRateUnitType,
+  OCPPStatus,
+} from "../../types/OcppTypes";
 import {
   applySampledValueOverrides,
   buildSampledValues,
@@ -116,6 +121,40 @@ describe("seeded fluctuation (#614)", () => {
       expect(p).toBeGreaterThanOrEqual(11_000 * 0.95 - 1);
       vi.advanceTimersByTime(1_000);
     }
+  });
+
+  it("keeps Current.Import within an A-unit profile's amperes (#846)", () => {
+    vi.useFakeTimers();
+    const connector = chargingConnector(
+      { seed: 42, fluctuation: { voltagePct: 5 } },
+      { currentType: "AC", phases: 1, voltageV: 230, maxChargingPowerKw: 22 },
+    );
+    connector.chargingProfile = {
+      chargingProfileId: 846,
+      connectorId: 1,
+      stackLevel: 0,
+      chargingProfilePurpose: ChargingProfilePurposeType.TxProfile,
+      chargingProfileKind: ChargingProfileKindType.Relative,
+      chargingRateUnit: ChargingRateUnitType.A,
+      chargingSchedulePeriods: [{ startPeriod: 0, limit: 32 }],
+    };
+    let sagged = 0;
+    for (let i = 0; i < 60; i++) {
+      const s = buildSampledValues(
+        connector,
+        ["Voltage", "Current.Import", ...POWER],
+        "Other",
+      );
+      const volts = Number(sample(s, "Voltage")?.value);
+      const amps = Number(sample(s, "Current.Import")?.value);
+      const watts = Number(sample(s, "Power.Active.Import")?.value);
+      if (volts < 229) sagged++;
+      expect(amps).toBeLessThanOrEqual(32);
+      // The power is what the current carries, not the bound in watts.
+      expect(Math.abs(watts - volts * amps)).toBeLessThanOrEqual(volts * 0.1);
+      vi.advanceTimersByTime(1_000);
+    }
+    expect(sagged).toBeGreaterThan(10);
   });
 
   it("draws uniformly in [-1, 1) and purely", () => {

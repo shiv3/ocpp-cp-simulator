@@ -1083,6 +1083,10 @@ one operating point per sample, so a sample describes one instant (#327).
   4th, …), never the first (the `Transaction.Begin` sample) nor the newest:
   the history keeps its whole span at half the density (E06.FR.13,
   J02.FR.20; #846).
+- **1.6 reads the two lists when `StopTransaction` is sent**: with both
+  `StopTxnSampledData` and `StopTxnAlignedData` emptied during the
+  transaction, the history taken before stays out of `transactionData`
+  (§3.16.5; #846). Signed OCMF entries are not affected.
 - Not covered: SOAP (1.2 / 1.5 / 1.6S) keeps its `StopTransaction` without
   `transactionData` samples, and records no history (#846).
 

@@ -217,6 +217,36 @@ describe("OCPP 1.6 transaction-end meter data (#607)", () => {
     }
   });
 
+  // #846, 1.6 §3.16.5: with both keys empty, no meter values go in
+  // StopTransaction.req — judged at send time, so a history recorded before
+  // both keys were emptied stays out too.
+  it("both StopTxn keys emptied mid-transaction: transactionData is left out", async () => {
+    const csms = startMockCsms();
+    const stop = answerEverythingElse(csms, ["StartTransaction"]);
+    try {
+      const cp = await charging16(csms, "CP846-emptied");
+      cp.configuration.applyChange("StopTxnSampledData", REGISTER);
+      cp.configuration.applyChange("StopTxnAlignedData", REGISTER);
+      await startAndCharge16(csms, cp);
+      cp.sendScheduledMeterValue(1);
+      (
+        cp as unknown as { emitClockAlignedSamples(ms: number): void }
+      ).emitClockAlignedSamples(Date.UTC(2030, 0, 1, 0, 15, 0));
+      expect(
+        cp.getConnector(1)!.transaction!.txEndedSamples!.length,
+      ).toBeGreaterThan(0);
+      cp.configuration.applyChange("StopTxnSampledData", "");
+      cp.configuration.applyChange("StopTxnAlignedData", "");
+      cp.stopTransaction(1);
+      await csms.waitForCall("StopTransaction");
+      expect(stopTx16(csms).transactionData).toBeUndefined();
+      cp.disconnect();
+    } finally {
+      stop();
+      await csms.stop();
+    }
+  });
+
   it("SOAP records no history: its StopTransaction never carries one", () => {
     const csms = startMockCsms();
     try {

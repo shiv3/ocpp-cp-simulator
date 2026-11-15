@@ -18,18 +18,12 @@ import type {
 } from "../../domain/connector/ConnectorRecord";
 import { isAllowedConnectorStatusTransition } from "../../domain/connector/ConnectorTransitions";
 import { isOcpp2Version } from "../../domain/types/OcppVersion";
-import {
-  RESERVED_PREFIX,
-  behaviorFitProblem,
-  behaviorShapeProblem,
-} from "./behaviorFit";
+import { RESERVED_PREFIX } from "./behaviorFit";
 import { LogType } from "../../shared/Logger";
 import type { SimClock } from "../../shared/clock";
 import { csmsActionAliases } from "../../domain/types/csmsActionNames";
-import { ruleKey, ruleOwnerKey } from "../behavior/BehaviorRegistry";
 import type {
   BehaviorCall,
-  BehaviorRule,
   HeldExchange,
   RuleOwner,
 } from "../behavior/BehaviorRegistry";
@@ -50,8 +44,8 @@ import type {
   LoadBehaviorOptions,
 } from "../../domain/engine/ChargePointEngine";
 import { registerDefaultBehaviors } from "./behaviors";
-import { EMPTY_PARAMS, mergeParams } from "../behavior/paramsSchema";
-import { cannedResponse, responseProblems } from "./responseValidation";
+import { EMPTY_PARAMS } from "../behavior/paramsSchema";
+import { responseProblems } from "./responseValidation";
 import {
   BehaviorStopped,
   BehaviorTimeout,
@@ -62,6 +56,7 @@ import {
   jsonCopy,
   type CallEnv,
 } from "./scope";
+import { BehaviorLifecycle } from "./behaviorLifecycle";
 import {
   makeBehaviorContext,
   snapshotChargerOf,
@@ -149,6 +144,34 @@ export class ChargerEngine implements ChargePointEngine {
   >();
 
   constructor(private readonly host: ChargePoint) {
+    this.lifecycle = new BehaviorLifecycle({
+      host: this.host,
+      loaded: this.loaded,
+      dormant: this.dormant,
+      holders: this.holders,
+      mainScopes: this.mainScopes,
+      resumeScopes: this.resumeScopes,
+      mainRuns: this.mainRuns,
+      pendingMains: this.pendingMains,
+      callScopes: this.callScopes,
+      defaultsById: this.defaultsById,
+      selectionParams: this.selectionParams,
+      paramLayers: this.paramLayers,
+      hookContexts: this.hookContexts,
+      orphans: () => this.orphans,
+      disposed: () => this.disposed,
+      dispatch: (event) => this.dispatch(event),
+      warn: (message) => this.warn(message),
+      hasDefaultFor: (action) => this.hasDefaultFor(action),
+      isIdle: (id) => this.isIdle(id),
+      refreshHooked: () => this.refreshHooked(),
+      adoptState: (id, data) => this.adoptState(id, data),
+      endScope: (scope) => this.endScope(scope),
+      endHookContext: (id) => this.endHookContext(id),
+      runDetached: (id, scope, run) => this.runDetached(id, scope, run),
+      runCall: (behavior, call, callInfo, exchange) =>
+        this.runCall(behavior, call, callInfo, exchange),
+    });
     registerDefaultBehaviors(this, host);
   }
 
@@ -792,18 +815,13 @@ export class ChargerEngine implements ChargePointEngine {
     this.hookContexts.delete(id);
   }
 
-  // ---- code behaviors -----------------------------------------------------
+  // ---- code behaviors (see behaviorLifecycle.ts) --------------------------
+
+  private readonly lifecycle: BehaviorLifecycle;
 
   /** Throws if this station cannot run `behavior`. */
   assertLoadable(behavior: Behavior): void {
-    const shape = behaviorShapeProblem(behavior, (action) =>
-      this.hasDefaultFor(action),
-    );
-    if (shape) throw new Error(shape);
-    const problem = behaviorFitProblem(behavior, {
-      ocppVersion: this.host.ocppVersion,
-    });
-    if (problem) throw new Error(problem);
+    this.lifecycle.assertLoadable(behavior);
   }
 
   /**
@@ -812,42 +830,11 @@ export class ChargerEngine implements ChargePointEngine {
    * this station cannot meet; nothing is registered then.
    */
   loadBehavior(behavior: Behavior, options: LoadBehaviorOptions = {}): void {
-    this.assertLoadable(behavior);
-    if (this.loaded.has(behavior.id)) {
-      throw new Error(`Behavior ${behavior.id} is already loaded`);
-    }
-    if (options.params !== undefined) {
-      // Refuse before anything is registered or started.
-      mergeParams(behavior.id, behavior.params, [options.params]);
-    }
-    if (!options.dormant) {
-      this.registerRules(behavior, { kind: "code", behaviorId: behavior.id });
-    }
-    // Only now that nothing can throw any more: a failed load leaves no entry.
-    if (options.params !== undefined) {
-      this.selectionParams.set(behavior.id, options.params);
-    }
-    this.loaded.set(behavior.id, behavior);
-    if (options.dormant) this.dormant.add(behavior.id);
-    this.refreshHooked();
-    this.dispatch({ type: "behavior.loaded", behaviorId: behavior.id });
-    const orphan = this.orphans[behavior.id];
-    if (orphan) {
-      delete this.orphans[behavior.id];
-      this.adoptState(behavior.id, orphan);
-    }
-    if (behavior.main && !options.dormant) {
-      const scope = new Scope(behavior.id, false);
-      this.mainScopes.set(behavior.id, scope);
-      this.mainRuns.set(
-        behavior.id,
-        this.runDetached(behavior.id, scope, (ctx) => behavior.main!(ctx)),
-      );
-    }
+    this.lifecycle.loadBehavior(behavior, options);
   }
 
   /** How long a running `main` gets to finish once a reload asked it to stop. */
-  static readonly RELOAD_GRACE_MS = 5_000;
+  static readonly RELOAD_GRACE_MS = BehaviorLifecycle.RELOAD_GRACE_MS;
 
   /**
    * Replace a loaded behavior with a new version of the same id (a reload).
@@ -863,91 +850,7 @@ export class ChargerEngine implements ChargePointEngine {
    * has returned or the grace time is over, whichever is first.
    */
   replaceBehavior(next: Behavior): void {
-    const previous = this.loaded.get(next.id);
-    if (!previous) {
-      throw new Error(
-        `No behavior with id "${next.id}" is loaded on this station`,
-      );
-    }
-    this.assertLoadable(next);
-    // The params in force must fit the new version's schema, or it is refused
-    // and the old version keeps running.
-    mergeParams(next.id, next.params, this.layersOf(next.id));
-    const dormant = this.dormant.has(next.id);
-    if (!dormant) {
-      // Register the new rules in place of the old ones; the exchanges the old
-      // rules hold open are left to finish (their closures keep the old code).
-      const owned = (owner: RuleOwner): boolean =>
-        owner.kind === "code" && owner.behaviorId === next.id;
-      // The new rules take the place of the old ones in the ranking: a reload
-      // must not make this behavior win or lose against another one.
-      const ranks = this.host.behaviors.ranks(owned);
-      this.host.behaviors.release(owned);
-      try {
-        this.registerRules(next, { kind: "code", behaviorId: next.id }, ranks);
-      } catch (error) {
-        this.host.behaviors.release(owned);
-        this.registerRules(
-          previous,
-          { kind: "code", behaviorId: next.id },
-          ranks,
-        );
-        throw error;
-      }
-    }
-    this.loaded.set(next.id, next);
-    this.refreshHooked();
-    // The hooks of the old version wind down like its main.
-    const oldHooks = this.hookContexts.get(next.id);
-    this.hookContexts.delete(next.id);
-    const oldMain = this.mainScopes.get(next.id);
-    this.mainScopes.delete(next.id);
-    const oldRun = this.mainRuns.get(next.id);
-    this.mainRuns.delete(next.id);
-    const oldResume = this.resumeScopes.get(next.id);
-    this.resumeScopes.delete(next.id);
-    this.pendingMains.get(next.id)?.();
-    this.pendingMains.delete(next.id);
-
-    let startedNew = false;
-    const startNew = (): void => {
-      if (startedNew) return;
-      startedNew = true;
-      if (this.isIdle(next.id) || !next.main || this.disposed) return;
-      if (this.loaded.get(next.id) !== next) return;
-      const scope = new Scope(next.id, false);
-      this.mainScopes.set(next.id, scope);
-      this.mainRuns.set(
-        next.id,
-        this.runDetached(next.id, scope, (ctx) => next.main!(ctx)),
-      );
-    };
-    const winding = [oldMain, oldResume, oldHooks?.scope].filter(
-      (scope): scope is Scope => scope !== undefined,
-    );
-    for (const scope of winding) scope.requestStop();
-    if (winding.length === 0) {
-      startNew();
-    } else {
-      const clock = this.host.clock;
-      const endGrace = (): void => {
-        clock.clearTimeout(timer);
-        this.pendingMains.delete(next.id);
-        for (const scope of winding) scope.cancel();
-        startNew();
-      };
-      const timer = clock.setTimeout(endGrace, ChargerEngine.RELOAD_GRACE_MS);
-      // Unload, dispose or another reload before the grace time is over: cut
-      // the old work off now, and the new main (if not started) never starts.
-      this.pendingMains.set(next.id, () => {
-        clock.clearTimeout(timer);
-        for (const scope of winding) scope.cancel();
-        startedNew = true;
-      });
-      if (oldRun) void oldRun.then(startNew);
-      else startNew();
-    }
-    this.dispatch({ type: "behavior.loaded", behaviorId: next.id });
+    this.lifecycle.replaceBehavior(next);
   }
 
   /**
@@ -963,34 +866,7 @@ export class ChargerEngine implements ChargePointEngine {
    * `default.*` behavior always answers: selecting one only sets its params.
    */
   activateBehavior(id: string, owner: RuleOwner, params?: JsonObject): void {
-    const builtin = this.defaultsById.get(id);
-    const behavior = builtin ?? this.loaded.get(id);
-    if (!behavior) {
-      throw new Error(`No behavior with id "${id}" is loaded on this station`);
-    }
-    const key = ruleOwnerKey(owner);
-    // Selecting a behavior again under the same owner (a `useBehavior` node
-    // in a loop) replaces its params and rules instead of stacking them.
-    this.setParamLayer(id, behavior, owner, params);
-    if (builtin || !this.dormant.has(id)) return;
-    this.host.behaviors.release((held) => ruleOwnerKey(held) === key);
-    this.registerRules(behavior, owner);
-    const held = this.holders.get(id) ?? new Map<string, RuleOwner>();
-    const first = held.size === 0;
-    held.set(key, owner);
-    this.holders.set(id, held);
-    if (!first) return;
-    // The first owner switches the whole behavior on: `main` starts, hooks
-    // and `beforeSend` are delivered.
-    this.refreshHooked();
-    if (behavior.main && !this.mainScopes.has(id) && !this.disposed) {
-      const scope = new Scope(id, false);
-      this.mainScopes.set(id, scope);
-      this.mainRuns.set(
-        id,
-        this.runDetached(id, scope, (ctx) => behavior.main!(ctx)),
-      );
-    }
+    this.lifecycle.activateBehavior(id, owner, params);
   }
 
   /**
@@ -1003,67 +879,11 @@ export class ChargerEngine implements ChargePointEngine {
    * station cannot take scenario rules.
    */
   disableBehavior(id: string, owner: RuleOwner): void {
-    const behavior = this.defaultsById.get(id) ?? this.loaded.get(id);
-    if (!behavior) {
-      throw new Error(`No behavior with id "${id}" is loaded on this station`);
-    }
-    const answers: Array<[string, Record<string, unknown>]> = [];
-    for (const action of Object.keys(behavior.onCall ?? {})) {
-      try {
-        answers.push([
-          action,
-          cannedResponse(action, this.host.ocppVersion, "accepted"),
-        ]);
-      } catch {
-        // Not an action of this station's version, or no plain acceptance.
-      }
-    }
-    if (answers.length === 0) {
-      throw new Error(
-        `useBehavior disable: ${id} answers no CALL on ${this.host.ocppVersion} that has an Accepted answer, so there is nothing to disable`,
-      );
-    }
-    const key = ruleOwnerKey(owner);
-    this.host.behaviors.release((held) => ruleOwnerKey(held) === key);
-    const unregister: Array<() => void> = [];
-    try {
-      for (const [action, response] of answers) {
-        unregister.push(
-          this.host.behaviors.register({
-            owner,
-            action,
-            mode: "replace",
-            take: (_call, exchange) => {
-              this.warn(
-                `${action}: answered Accepted without acting (${id} is disabled by the running scenario)`,
-              );
-              exchange.reply({ ...response });
-            },
-          } satisfies BehaviorRule),
-        );
-      }
-    } catch (error) {
-      for (const off of unregister) off();
-      throw error;
-    }
+    this.lifecycle.disableBehavior(id, owner);
   }
 
-  // ---- params -------------------------------------------------------------
-
-  /** The behavior with this id, built-in or loaded. */
   private declaredBehavior(id: string): Behavior | undefined {
-    return this.defaultsById.get(id) ?? this.loaded.get(id);
-  }
-
-  /** The params layers of `id` over its defaults, oldest first. */
-  private layersOf(id: string): JsonObject[] {
-    const layers: JsonObject[] = [];
-    const selected = this.selectionParams.get(id);
-    if (selected) layers.push(selected);
-    for (const layer of this.paramLayers.get(id)?.values() ?? []) {
-      layers.push(layer.params);
-    }
-    return layers;
+    return this.lifecycle.declaredBehavior(id);
   }
 
   /**
@@ -1072,8 +892,7 @@ export class ChargerEngine implements ChargePointEngine {
    * Throws when they do not fit the schema.
    */
   effectiveParams(id: string): JsonObject {
-    const behavior = this.declaredBehavior(id);
-    return mergeParams(id, behavior?.params, this.layersOf(id));
+    return this.lifecycle.effectiveParams(id);
   }
 
   /**
@@ -1082,20 +901,7 @@ export class ChargerEngine implements ChargePointEngine {
    * nothing on a mismatch. Applies to the contexts made from now on.
    */
   setSelectionParams(id: string, params: JsonObject | undefined): void {
-    const behavior = this.declaredBehavior(id);
-    if (!behavior) {
-      throw new Error(`No behavior with id "${id}" is loaded on this station`);
-    }
-    const layers: JsonObject[] = params ? [params] : [];
-    for (const layer of this.paramLayers.get(id)?.values() ?? []) {
-      layers.push(layer.params);
-    }
-    mergeParams(id, behavior.params, layers);
-    if (params && Object.keys(params).length > 0) {
-      this.selectionParams.set(id, params);
-    } else {
-      this.selectionParams.delete(id);
-    }
+    this.lifecycle.setSelectionParams(id, params);
   }
 
   /**
@@ -1106,51 +912,12 @@ export class ChargerEngine implements ChargePointEngine {
    * nothing when the params do not fit the schema.
    */
   reselectBehaviorParams(id: string, params: JsonObject | undefined): void {
-    const behavior = this.loaded.get(id);
-    if (!behavior) {
-      throw new Error(`No behavior with id "${id}" is loaded on this station`);
-    }
-    const before = this.selectionParams.get(id);
-    this.setSelectionParams(id, params);
-    try {
-      this.replaceBehavior(behavior);
-    } catch (error) {
-      if (before) this.selectionParams.set(id, before);
-      else this.selectionParams.delete(id);
-      throw error;
-    }
+    this.lifecycle.reselectBehaviorParams(id, params);
   }
 
   /** The params the station's selection gave each behavior, a copy. */
   get selectedParams(): Record<string, JsonObject> {
-    return Object.fromEntries(this.selectionParams);
-  }
-
-  private setParamLayer(
-    id: string,
-    behavior: Behavior,
-    owner: RuleOwner,
-    params: JsonObject | undefined,
-  ): void {
-    const key = ruleOwnerKey(owner);
-    const held = this.paramLayers.get(id);
-    const others = [...(held ?? [])]
-      .filter(([otherKey]) => otherKey !== key)
-      .map(([, layer]) => layer.params);
-    const selected = this.selectionParams.get(id);
-    mergeParams(id, behavior.params, [
-      ...(selected ? [selected] : []),
-      ...others,
-      ...(params ? [params] : []),
-    ]);
-    if (!params || Object.keys(params).length === 0) {
-      held?.delete(key);
-      return;
-    }
-    const layers = held ?? new Map();
-    layers.delete(key);
-    layers.set(key, { owner, params });
-    this.paramLayers.set(id, layers);
+    return this.lifecycle.selectedParams;
   }
 
   /**
@@ -1159,90 +926,13 @@ export class ChargerEngine implements ChargePointEngine {
    * Rules are released with `BehaviorRegistry.release`, which the caller does.
    */
   deactivateBehaviors(owned: (owner: RuleOwner) => boolean): void {
-    for (const [id, layers] of [...this.paramLayers]) {
-      for (const [key, layer] of [...layers]) {
-        if (owned(layer.owner)) layers.delete(key);
-      }
-      if (layers.size === 0) this.paramLayers.delete(id);
-    }
-    for (const [id, held] of [...this.holders]) {
-      for (const [key, owner] of [...held]) if (owned(owner)) held.delete(key);
-      if (held.size > 0) continue;
-      this.holders.delete(id);
-      this.pendingMains.get(id)?.();
-      this.pendingMains.delete(id);
-      this.mainScopes.get(id)?.cancel();
-      this.mainScopes.delete(id);
-      this.mainRuns.delete(id);
-      this.endHookContext(id);
-    }
-    this.refreshHooked();
-  }
-
-  private registerRules(
-    behavior: Behavior,
-    owner: RuleOwner,
-    ranks?: ReadonlyMap<string, number>,
-  ): void {
-    const unregister: Array<() => void> = [];
-    try {
-      for (const [action, call] of Object.entries(behavior.onCall ?? {})) {
-        const rank = ranks?.get(ruleKey(owner, action));
-        unregister.push(
-          this.host.behaviors.register(
-            {
-              owner,
-              action,
-              ...(call.match ? { match: call.match } : {}),
-              mode: call.mode,
-              ...(call.onBusy ? { onBusy: call.onBusy } : {}),
-              take: (callInfo, exchange) =>
-                this.runCall(behavior, call, callInfo, exchange),
-            } satisfies BehaviorRule,
-            rank === undefined ? undefined : { rank },
-          ),
-        );
-      }
-    } catch (error) {
-      for (const off of unregister) off();
-      throw error;
-    }
+    this.lifecycle.deactivateBehaviors(owned);
   }
 
   /** Unload a behavior: stop its waits, release its rules, settle its open CALLs. */
   unloadBehavior(id: string): boolean {
-    const behavior = this.loaded.get(id);
-    if (!behavior) return false;
-    this.loaded.delete(id);
-    this.dormant.delete(id);
-    this.holders.delete(id);
-    this.selectionParams.delete(id);
-    this.paramLayers.delete(id);
-    this.refreshHooked();
-    this.endHookContext(id);
-    this.pendingMains.get(id)?.();
-    this.pendingMains.delete(id);
-    this.mainScopes.get(id)?.cancel();
-    this.mainScopes.delete(id);
-    this.resumeScopes.get(id)?.cancel();
-    this.resumeScopes.delete(id);
-    for (const scope of [...this.callScopes]) {
-      if (scope.behaviorId === id) this.endScope(scope);
-    }
-    const open = this.host.behaviors.release(
-      (owner) => owner.kind === "code" && owner.behaviorId === id,
-    );
-    for (const exchange of open) {
-      this.warn(
-        `Behavior ${id} was unloaded while ${exchange.action} was unanswered; answering InternalError`,
-      );
-      exchange.replyError("InternalError", `Behavior ${id} was unloaded`);
-    }
-    this.dispatch({ type: "behavior.unloaded", behaviorId: id });
-    return true;
+    return this.lifecycle.unloadBehavior(id);
   }
-
-  private resumeWaiting = false;
 
   /**
    * Run `onResume` once the CSMS has accepted the next BootNotification: the
@@ -1251,25 +941,17 @@ export class ChargerEngine implements ChargePointEngine {
    * changed by waiting.
    */
   resumeAfterBoot(): void {
-    this.resumeWaiting = true;
+    this.lifecycle.resumeAfterBoot();
   }
 
   /** The station's boot was accepted: run the `onResume` that was waiting for it. */
   bootAccepted(): void {
-    if (!this.resumeWaiting) return;
-    this.resumeWaiting = false;
-    this.resume();
+    this.lifecycle.bootAccepted();
   }
 
   /** Run `onResume` of every loaded behavior now; call it after state was restored. */
   resume(): void {
-    for (const behavior of this.loaded.values()) {
-      if (!behavior.onResume || this.dormant.has(behavior.id)) continue;
-      this.resumeScopes.get(behavior.id)?.cancel();
-      const scope = new Scope(behavior.id, false);
-      this.resumeScopes.set(behavior.id, scope);
-      this.runDetached(behavior.id, scope, (ctx) => behavior.onResume!(ctx));
-    }
+    this.lifecycle.resume();
   }
 
   private runDetached(

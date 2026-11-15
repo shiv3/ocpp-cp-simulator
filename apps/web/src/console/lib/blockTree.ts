@@ -91,388 +91,59 @@ import {
   isLoopEdge,
   isTerminal,
   isTimeoutEdge,
-  loopBounds,
   loopStep,
   lowerScenario,
   nextStep,
   pickableHandles,
-  type ReadLoopBounds,
-  type ScenarioProgram,
   timeoutStep,
-  waitTimeoutSeconds,
 } from "@ocpp-cp-simulator/core/scenario/scenarioGraph";
 
 import type { MessageKey } from "../../i18n";
 import { createDefaultNode, updateStepData } from "./scenarioSteps";
+import {
+  conditionOf,
+  handleOf,
+  isEndSink,
+  isLive,
+  type LaneEdge,
+  type NodeOut,
+  structuralOut,
+} from "./blockTree/structural";
+import { immediateDominators } from "./blockTree/dominators";
+import {
+  hasBounds,
+  type Block,
+  type BlockTree,
+  type Def,
+  type ForkBlock,
+  type ForkKind,
+  type Lane,
+  type LaneCondition,
+  type LinkEdge,
+  type LoopBlock,
+  type Program,
+  type Seq,
+  type SeqExit,
+  type SeqPath,
+  type StepBlock,
+} from "./blockTree/types";
 
-// ---------------------------------------------------------------------------
-// Types (design §1)
-
-/** A stable key of a sequence: `root`, `detached/<k>`, then per level
- *  `/<block index>/lanes/<lane index>` or `/<block index>/body`. */
-export type SeqPath = string;
-
-export interface Seq {
-  path: SeqPath;
-  blocks: Block[];
-  exit: SeqExit;
-}
-
-export type SeqExit =
-  /** To END (`edgeId` null: a new edge to END is made). */
-  | { kind: "end"; edgeId: string | null }
-  /** The branch ends: no edge, only edges to missing nodes, a step that
-   *  ends its branch, or a last block that ends every path itself. */
-  | {
-      kind: "stop";
-      reason: "noEdge" | "dangling" | "terminalStep" | "blockEnds";
-      edgeId?: string;
-    }
-  /** On to the parent's merge, a loop's header or a loop's continuation
-   *  (the parent draws that node). */
-  | { kind: "fallthrough"; to: string; edgeId?: string | null }
-  /** A goto: a join into a step placed elsewhere, a loop back edge that is
-   *  not structured, an edge into START. */
-  | { kind: "link"; edgeId: string; target: string };
-
-export type Block = StepBlock | ForkBlock | LoopBlock;
-
-export interface StepBlock {
-  kind: "step";
-  node: ScenarioNode;
-  /** The edge from the previous step (or the lane / START) into it; null
-   *  when several edges join here (a merge) or it starts a detached island. */
-  edgeIn: string | null;
-}
-
-/** `timeout` (a wait's event / timeout lanes, schema 1.7) and `parallel`
- *  (a parallel node with a join) are extension points: nothing recognizes
- *  them until the core has them. */
-export type ForkKind =
-  "start" | "parallel" | "switch" | "choice" | "timeout" | "extra";
-
-export type LaneCondition =
-  | { kind: "case"; index: number; value: unknown }
-  | { kind: "default" }
-  | { kind: "option"; index: number; weight: number; label?: string }
-  | { kind: "all" }
-  | { kind: "first" }
-  | { kind: "event" }
-  | { kind: "timeout"; seconds: number }
-  | { kind: "ignored" }
-  | { kind: "unpickable"; handle: string | null };
-
-export interface Lane {
-  edgeId: string;
-  handle: string | null;
-  condition: LaneCondition;
-  body: Seq;
-}
-
-export interface ForkBlock {
-  kind: "fork";
-  forkKind: ForkKind;
-  node: ScenarioNode;
-  edgeIn: string | null;
-  lanes: Lane[];
-  /** Where the lanes meet again (the next block of the parent sequence, or
-   *  the node the parent falls through to); null when they never do.
-   *  `join` is the parallel extension point. */
-  merge:
-    | { kind: "node"; nodeId: string }
-    | { kind: "join"; nodeId: string; mode: "all" | "any" }
-    | null;
-}
-
-export interface LoopBlock {
-  kind: "loop";
-  /** The loop's first node: `body.blocks[0]`'s node. */
-  headerId: string;
-  body: Seq;
-  backEdgeIds: string[];
-  /** A loop drawn by a loop edge (schema 1.10): its id and `loop` bounds as
-   *  the file has them. Null: a plain back edge (repeats until the run
-   *  stops). */
-  loopEdge: LoopEdgeRef | null;
-}
-
-/** The loop edge of a bounded {@link LoopBlock}. */
-export interface LoopEdgeRef {
-  edgeId: string;
-  /** The edge's `loop`, unvalidated; undefined: none (loops forever). */
-  loop: unknown;
-}
-
-/** The bounds of a loop as the editor shows them: `null` when the loop
- *  repeats forever (a plain back edge, or a loop edge without bounds),
- *  `{ problem }` when its `loop` is malformed. */
-export function loopBlockBounds(
-  loop: Pick<LoopBlock, "loopEdge">,
-): ReadLoopBounds | null | { problem: string } {
-  if (!loop.loopEdge) return null;
-  const read = loopBounds({
-    id: loop.loopEdge.edgeId,
-    source: "",
-    target: "",
-    loop: loop.loopEdge.loop,
-  });
-  if ("problem" in read) return read;
-  return hasBounds(read.bounds) ? read.bounds : null;
-}
-
-/** Whether `bounds` has at least one bound (else the loop never exits). */
-export function hasBounds(bounds: ReadLoopBounds | null | undefined): boolean {
-  return (
-    !!bounds &&
-    (bounds.times !== undefined ||
-      bounds.forSeconds !== undefined ||
-      bounds.until !== undefined)
-  );
-}
-
-export interface LinkEdge {
-  edge: Edge;
-  role:
-    | "back"
-    | "join"
-    | "dead"
-    | "dangling"
-    | "intoStart"
-    | "outOfEnd"
-    | "timeoutDead"
-    /** A loop edge (`kind: "loop"`, schema 1.10): not an ordinary edge, so no
-     *  block draws it yet (the Steps view has no bounds form). It stays in
-     *  the file exactly as it is while the steps around it are edited. */
-    | "loopEdge";
-}
-
-export interface BlockTree {
-  root: Seq;
-  detached: Seq[];
-  links: LinkEdge[];
-  /** Every edge the tree draws structurally, by id. */
-  drawnEdges: ReadonlyMap<string, { source: string; target: string }>;
-  /** Where each placed node is: its sequence and block index. A loop
-   *  header is at index 0 of its loop's body. */
-  nodePath: ReadonlyMap<string, { path: SeqPath; index: number }>;
-  /** The node a run starts from; null without one. */
-  origin: ScenarioNode | null;
-}
-
-type Def = Pick<ScenarioDefinition, "nodes" | "edges">;
-type Program = ScenarioProgram<ScenarioNode, Edge>;
-
-const handleOf = (edge: Edge): string | null =>
-  typeof edge.sourceHandle === "string" ? edge.sourceHandle : null;
-
-/** A node of type END that is not the origin: never placed, an exit. */
-function isEndSink(node: ScenarioNode, origin: ScenarioNode | undefined) {
-  return node !== origin && node.type === ScenarioNodeType.END;
-}
-
-// ---------------------------------------------------------------------------
-// Structural successors (design §2)
-
-interface LaneEdge {
-  edge: Edge;
-  condition: LaneCondition;
-}
-
-interface NodeOut {
-  /** The edges the tree structures out of the node, in lane order. One
-   *  edge: a chain; two or more: a fork of `forkKind`. */
-  lanes: LaneEdge[];
-  forkKind: ForkKind;
-}
-
-function conditionOf(node: ScenarioNode, handle: string): LaneCondition {
-  const data = node.data as Partial<SwitchNodeData & ChoiceNodeData>;
-  if (handle === "default") return { kind: "default" };
-  const caseMatch = /^case-(\d+)$/.exec(handle);
-  if (caseMatch) {
-    const index = Number(caseMatch[1]);
-    return {
-      kind: "case",
-      index,
-      value: Array.isArray(data.cases) ? data.cases[index] : undefined,
-    };
-  }
-  const index = Number(/^option-(\d+)$/.exec(handle)?.[1] ?? 0);
-  const option = Array.isArray(data.options) ? data.options[index] : undefined;
-  return {
-    kind: "option",
-    index,
-    weight: typeof option?.weight === "number" ? option.weight : 1,
-    ...(typeof option?.label === "string" ? { label: option.label } : {}),
-  };
-}
-
-/**
- * A trigger wait with a live timeout edge (schema 1.8) is a "timeout" fork:
- * the event lane (the wait's first ordinary edge) and the timeout lane (its
- * first timeout edge, taken only when `data.timeout` seconds pass). `null`
- * when the wait has no timeout that can expire, no timeout edge to an
- * existing node, or no event edge: its timeout edges are `timeoutDead`
- * links (the executor never takes them, or the wait has no other way on).
- */
-function timeoutLanes(program: Program, node: ScenarioNode): NodeOut | null {
-  const seconds = waitTimeoutSeconds(node);
-  if (seconds === null || seconds <= 0) return null;
-  const timeout = timeoutStep(program, node);
-  if (!timeout) return null;
-  const event = nextStep(program, node, null);
-  if (event.kind !== "edge") return null;
-  return {
-    lanes: [
-      { edge: event.edge, condition: { kind: "event" } },
-      { edge: timeout.edge, condition: { kind: "timeout", seconds } },
-      ...(program.outgoing.get(node.id) ?? [])
-        .filter((e) => e !== event.edge)
-        .map((edge) => ({ edge, condition: { kind: "ignored" } as const })),
-    ],
-    forkKind: "timeout",
-  };
-}
-
-function structuralOut(program: Program, node: ScenarioNode): NodeOut {
-  const existing = program.outgoing.get(node.id) ?? [];
-  if (node === program.origin) {
-    return {
-      lanes: existing.map((edge) => ({ edge, condition: { kind: "all" } })),
-      forkKind: "start",
-    };
-  }
-  if (isTerminal(node)) return { lanes: [], forkKind: "extra" };
-  const timeout = timeoutLanes(program, node);
-  if (timeout) return timeout;
-  const out = connectionRule(node.type).out;
-  if (out === "select") {
-    const handles = pickableHandles(node) ?? [];
-    const lanes: LaneEdge[] = [];
-    const taken = new Set<Edge>();
-    for (const handle of handles) {
-      const first = existing.find((e) => handleOf(e) === handle);
-      if (!first) continue;
-      taken.add(first);
-      lanes.push({ edge: first, condition: conditionOf(node, handle) });
-    }
-    for (const edge of existing) {
-      if (taken.has(edge)) continue;
-      const handle = handleOf(edge);
-      lanes.push({
-        edge,
-        condition:
-          handle !== null && handles.includes(handle)
-            ? { kind: "ignored" }
-            : { kind: "unpickable", handle },
-      });
-    }
-    return {
-      lanes,
-      forkKind: node.type === ScenarioNodeType.CHOICE ? "choice" : "switch",
-    };
-  }
-  // A `parallel` node (schema 1.9, `out: "fork"`) runs every ordinary edge,
-  // each as its own branch, like the origin. A START that is not the origin
-  // runs as a step, so `out === "parallel"` never matches here.
-  if (
-    out === "fork" ||
-    (out === "parallel" && node.type !== ScenarioNodeType.START)
-  ) {
-    return {
-      lanes: existing.map((edge) => ({ edge, condition: { kind: "all" } })),
-      forkKind: "parallel",
-    };
-  }
-  // `next` (and unknown types): the first edge to an existing node runs; the
-  // others never do but stay lanes so no edge disappears.
-  // A wait's `kind: "timeout"` edges are not in `program.outgoing`: they are
-  // the timeout fork's own lanes (`timeoutLanes` above) or `timeoutDead`
-  // links, never an "extra" fork's.
-  // TODO(parallel): a parallel node's lanes are matched above; none of its
-  // edges may reach this branch.
-  // TODO(bounded loops, schema 1.7): on a latch with a `kind: "loop"` edge
-  // and an ordinary exit edge, the loop edge is the back-edge lane and the
-  // exit the step's chain edge (first-edge-wins among non-loop, non-timeout
-  // edges), not an "extra" fork of two lanes.
-  const step = nextStep(program, node, null);
-  if (step.kind !== "edge") return { lanes: [], forkKind: "extra" };
-  return {
-    lanes: [
-      { edge: step.edge, condition: { kind: "first" } },
-      ...existing
-        .filter((e) => e !== step.edge)
-        .map((edge) => ({ edge, condition: { kind: "ignored" } as const })),
-    ],
-    forkKind: "extra",
-  };
-}
-
-const isLive = (condition: LaneCondition): boolean =>
-  condition.kind !== "ignored" && condition.kind !== "unpickable";
-
-// ---------------------------------------------------------------------------
-// Dominators and post-dominators (Cooper, Harvey, Kennedy)
-
-/** Immediate dominators over `succ` from a virtual root `entry`. Every
- *  vertex must be reachable from `entry`. */
-function immediateDominators(
-  entry: string,
-  succ: (v: string) => readonly string[],
-): Map<string, string> {
-  const order: string[] = [];
-  const seen = new Set<string>([entry]);
-  // Iterative DFS post-order.
-  const stack: Array<{ v: string; i: number }> = [{ v: entry, i: 0 }];
-  while (stack.length > 0) {
-    const top = stack[stack.length - 1];
-    const next = succ(top.v);
-    if (top.i < next.length) {
-      const w = next[top.i++];
-      if (!seen.has(w)) {
-        seen.add(w);
-        stack.push({ v: w, i: 0 });
-      }
-    } else {
-      order.push(top.v);
-      stack.pop();
-    }
-  }
-  const rpo = order.reverse();
-  const index = new Map(rpo.map((v, i) => [v, i]));
-  const preds = new Map<string, string[]>();
-  for (const v of rpo) {
-    for (const w of succ(v)) {
-      const list = preds.get(w);
-      if (list) list.push(v);
-      else preds.set(w, [v]);
-    }
-  }
-  const idom = new Map<string, string>([[entry, entry]]);
-  const intersect = (a: string, b: string): string => {
-    while (a !== b) {
-      while (index.get(a)! > index.get(b)!) a = idom.get(a)!;
-      while (index.get(b)! > index.get(a)!) b = idom.get(b)!;
-    }
-    return a;
-  };
-  for (let changed = true; changed;) {
-    changed = false;
-    for (const v of rpo) {
-      if (v === entry) continue;
-      let candidate: string | undefined;
-      for (const p of preds.get(v) ?? []) {
-        if (!idom.has(p)) continue;
-        candidate = candidate === undefined ? p : intersect(p, candidate);
-      }
-      if (candidate !== undefined && idom.get(v) !== candidate) {
-        idom.set(v, candidate);
-        changed = true;
-      }
-    }
-  }
-  return idom;
-}
+export { hasBounds, loopBlockBounds } from "./blockTree/types";
+export type {
+  Block,
+  BlockTree,
+  ForkBlock,
+  ForkKind,
+  Lane,
+  LaneCondition,
+  LinkEdge,
+  LoopBlock,
+  LoopEdgeRef,
+  Seq,
+  SeqExit,
+  SeqPath,
+  StepBlock,
+} from "./blockTree/types";
 
 const ENTRY = "\u0000entry";
 /** A lane body's exit until its (deferred) walk replaces the body. */

@@ -1,6 +1,5 @@
 import type {
   Behavior,
-  BehaviorCapability,
   BehaviorEvents,
   BehaviorContext,
   CallBehavior,
@@ -9,7 +8,6 @@ import type {
   ConnectorSnapshot,
   JsonObject,
   JsonValue,
-  RandomStream,
   TransactionEvent,
 } from "@ocpp-cp-simulator/contracts/behavior";
 import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
@@ -19,7 +17,6 @@ import type {
   ConnectorWrite,
 } from "../../domain/connector/ConnectorRecord";
 import { isAllowedConnectorStatusTransition } from "../../domain/connector/ConnectorTransitions";
-import type { OCPPStatus } from "../../domain/types/OcppTypes";
 import { isOcpp2Version } from "../../domain/types/OcppVersion";
 import {
   RESERVED_PREFIX,
@@ -27,7 +24,7 @@ import {
   behaviorShapeProblem,
 } from "./behaviorFit";
 import { LogType } from "../../shared/Logger";
-import type { SimClock, TimerHandle } from "../../shared/clock";
+import type { SimClock } from "../../shared/clock";
 import { csmsActionAliases } from "../../domain/types/csmsActionNames";
 import { ruleKey, ruleOwnerKey } from "../behavior/BehaviorRegistry";
 import type {
@@ -53,109 +50,27 @@ import type {
   LoadBehaviorOptions,
 } from "../../domain/engine/ChargePointEngine";
 import { registerDefaultBehaviors } from "./behaviors";
-import {
-  EMPTY_PARAMS,
-  freezeParams,
-  mergeParams,
-} from "../behavior/paramsSchema";
+import { EMPTY_PARAMS, mergeParams } from "../behavior/paramsSchema";
 import { cannedResponse, responseProblems } from "./responseValidation";
+import {
+  BehaviorStopped,
+  BehaviorTimeout,
+  CONNECTION_BOUND_DEFAULTS,
+  Scope,
+  describe,
+  isThenable,
+  jsonCopy,
+  type CallEnv,
+} from "./scope";
+import {
+  makeBehaviorContext,
+  snapshotChargerOf,
+  snapshotConnectorOf,
+} from "./behaviorContext";
+
+export { BehaviorStopped, BehaviorTimeout };
 
 /** Ids with this prefix belong to the built-in behaviors; none can be loaded. */
-
-/** Thrown into a behavior's waits when it is unloaded or its connection ends. */
-export class BehaviorStopped extends Error {
-  constructor(message = "The behavior was stopped") {
-    super(message);
-    this.name = "BehaviorStopped";
-  }
-}
-
-/** A `ctx.until` whose time ran out. */
-export class BehaviorTimeout extends Error {
-  constructor(ms: number) {
-    super(`Timed out after ${ms}ms`);
-    this.name = "BehaviorTimeout";
-  }
-}
-
-/**
- * A set of waits that is cancelled together. A behavior's `main` has one for
- * the life of the behavior; each CALL a behavior or a default behavior answers
- * has one that also ends when the connection does.
- */
-class Scope {
-  /** `ctx.stopping`: the owner asked the work to wind down. */
-  stopping = false;
-  /** Waits reject: the work is cut off. A scope can be stopping a while before. */
-  cancelled = false;
-  private readonly cancels = new Map<TimerHandle, () => void>();
-
-  constructor(
-    readonly behaviorId: string,
-    public connectionBound: boolean,
-  ) {}
-
-  track(handle: TimerHandle, cancel: () => void): void {
-    this.cancels.set(handle, cancel);
-  }
-
-  untrack(handle: TimerHandle): void {
-    this.cancels.delete(handle);
-  }
-
-  /** Ask the work to finish (`ctx.stopping` turns true); its waits keep working. */
-  requestStop(): void {
-    this.stopping = true;
-  }
-
-  cancel(): void {
-    this.stopping = true;
-    this.cancelled = true;
-    for (const cancel of [...this.cancels.values()]) cancel();
-    this.cancels.clear();
-  }
-}
-
-/**
- * Default behaviors whose follow-up stops when the connection closes: the
- * firmware status trains, whose timers `ChargePoint` cleared on a close before
- * the engine. The log and diagnostics uploads were not tied to the socket and
- * go on across a reconnect. Rule 4 of docs/concepts/charger-engine.md: this is
- * the behavior of ca01d302, kept as it was.
- */
-const CONNECTION_BOUND_DEFAULTS: ReadonlySet<string> = new Set([
-  "default.firmware",
-  "default.signedFirmware",
-]);
-
-/** Per-CALL data a context needs. */
-interface CallEnv {
-  readonly action: string;
-  readonly mode: CallBehavior["mode"] | "default";
-  /** Effects of default behaviors run through `ctx.defaultBehavior`. */
-  readonly defaultEffects: Array<() => void>;
-}
-
-function isThenable(value: unknown): value is PromiseLike<unknown> {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    typeof (value as { then?: unknown }).then === "function"
-  );
-}
-
-function jsonCopy(value: unknown): unknown {
-  if (value === undefined) return undefined;
-  try {
-    return JSON.parse(JSON.stringify(value));
-  } catch {
-    return value;
-  }
-}
-
-function describe(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 /**
  * One per charge point (docs/concepts/charger-engine.md, "Charger engine").
@@ -1618,227 +1533,25 @@ export class ChargerEngine implements ChargePointEngine {
     scope: Scope,
     env?: CallEnv,
   ): BehaviorContext {
-    const touch = (): void => this.touch();
-    const warn = (message: string): void => this.warn(message);
-    const readState = (): ChargerState => this._state;
-    const runDefault = (action: string, req: unknown): DefaultResult =>
-      this.runDefault(action, req);
-    const host = this.host;
-    const snapshotCharger = (): ChargerSnapshot => this.snapshotCharger();
-    const clock = host.clock;
-    const behavior = this.loaded.get(behaviorId);
-    const requires = new Set(behavior?.requires ?? []);
-    // Fixed for the life of the context: a CALL and its follow-up see the
-    // params the CALL arrived with.
-    const params = freezeParams(this.paramsForContext(behaviorId));
-    const needs = (capability: BehaviorCapability, what: string): void => {
-      if (!requires.has(capability) && !behaviorId.startsWith("default.")) {
-        throw new Error(
-          `Behavior ${behaviorId} uses ${what} but does not list "${capability}" in requires`,
-        );
-      }
-    };
-    const stopped = (): Promise<never> => Promise.reject(new BehaviorStopped());
-    // A context outlives its scope in a closure the behavior kept: once the
-    // scope was cut off (unload, a grace time over, a closed connection for a
-    // CALL's handler) it may no longer act on the station.
-    const live = (): void => {
-      if (scope.cancelled) throw new BehaviorStopped();
-    };
-    const connectorSnapshot = (id: number): ConnectorSnapshot | undefined =>
-      this.snapshotConnector(id);
-    const ctx: BehaviorContext = {
-      now: () => clock.now(),
-      sleep: (ms: number): Promise<void> => {
-        touch();
-        if (scope.cancelled) return stopped();
-        return new Promise<void>((resolve, reject) => {
-          const handle = clock.setTimeout(() => {
-            scope.untrack(handle);
-            resolve();
-          }, ms);
-          scope.track(handle, () => {
-            clock.clearTimeout(handle);
-            reject(new BehaviorStopped());
-          });
-        });
+    return makeBehaviorContext(
+      {
+        host: this.host,
+        touch: () => this.touch(),
+        warn: (message) => this.warn(message),
+        readState: () => this._state,
+        runDefault: (action, req) => this.runDefault(action, req),
+        snapshotCharger: () => this.snapshotCharger(),
+        snapshotConnector: (id) => this.snapshotConnector(id),
+        loadedBehavior: (id) => this.loaded.get(id),
+        paramsForContext: (id) => this.paramsForContext(id),
+        interceptDepth: () => this.interceptDepth,
+        notifyStatus: (kind, status, requestId) =>
+          this.notifyStatus(kind, status, requestId),
       },
-      until: <T>(promise: Promise<T>, opts: { ms: number }): Promise<T> => {
-        touch();
-        if (scope.cancelled) return stopped();
-        return new Promise<T>((resolve, reject) => {
-          const handle = clock.setTimeout(() => {
-            scope.untrack(handle);
-            reject(new BehaviorTimeout(opts.ms));
-          }, opts.ms);
-          scope.track(handle, () => {
-            clock.clearTimeout(handle);
-            reject(new BehaviorStopped());
-          });
-          promise.then(
-            (value) => {
-              clock.clearTimeout(handle);
-              scope.untrack(handle);
-              resolve(value);
-            },
-            (error: unknown) => {
-              clock.clearTimeout(handle);
-              scope.untrack(handle);
-              reject(error);
-            },
-          );
-        });
-      },
-      random(stream: string): RandomStream {
-        const rng = host.rng(`${behaviorId}/${stream}`);
-        // The contract's int() is inclusive at both ends; the core stream's
-        // is [min, max).
-        return {
-          next: () => rng.next(),
-          int: (minInclusive, maxInclusive) =>
-            rng.int(minInclusive, maxInclusive + 1),
-          pick: (items) => rng.pick(items),
-          uuid: () => rng.uuid(),
-        };
-      },
-      get stopping(): boolean {
-        return scope.stopping;
-      },
-      get state(): Record<string, JsonValue> {
-        const all = readState().behaviors;
-        // A context kept past the unload of its behavior must not bring the
-        // entry back (it would be stored again): it gets a loose object.
-        if (
-          scope.cancelled &&
-          !behaviorId.startsWith(RESERVED_PREFIX) &&
-          all[behaviorId] === undefined
-        ) {
-          return {};
-        }
-        return (all[behaviorId] ??= {});
-      },
-      send: async (action, payload, opts) => {
-        touch();
-        live();
-        // From inside a beforeSend the CALL waits for its turn, so it goes
-        // out after the CALL being intercepted.
-        if (this.interceptDepth > 0) await Promise.resolve();
-        live();
-        const request = host.sendOcppCall({
-          action,
-          payload: payload as Record<string, unknown>,
-        });
-        if (opts?.fireAndForget) {
-          request.catch((error: unknown) =>
-            warn(
-              `Behavior ${behaviorId}: ${action} failed: ${describe(error)}`,
-            ),
-          );
-          return undefined;
-        }
-        const outcome = await request;
-        if (outcome.kind === "callError") {
-          throw new Error(
-            `${action} was answered with ${outcome.errorCode}: ${outcome.errorDescription}`,
-          );
-        }
-        return outcome.payload;
-      },
-      raw: (frame) => {
-        needs("raw-frames", "ctx.raw");
-        live();
-        host
-          .sendRawFrame({ frame })
-          .catch((error: unknown) =>
-            warn(
-              `Behavior ${behaviorId}: raw frame failed: ${describe(error)}`,
-            ),
-          );
-      },
-      plugIn: (connectorId) => {
-        needs("physical", "ctx.plugIn");
-        live();
-        // The cable model (#453): an idle Available connector reports
-        // Preparing; in any other state the cable is only recorded.
-        host.evPlugIn(connectorId);
-      },
-      unplug: (connectorId) => {
-        needs("physical", "ctx.unplug");
-        live();
-        // The EV side of the cable: a running transaction is stopped or
-        // suspended per StopTransactionOnEVSideDisconnect, as for any unplug.
-        host.evDisconnected(connectorId);
-      },
-      authorize: (idTag) => {
-        needs("physical", "ctx.authorize");
-        live();
-        host.authorize(idTag);
-      },
-      startCharging: (connectorId, idTag) => {
-        needs("physical", "ctx.startCharging");
-        live();
-        host
-          .startTransaction(host.resolveIdTag(idTag, connectorId), connectorId)
-          .catch((error: unknown) =>
-            warn(
-              `Behavior ${behaviorId}: startCharging failed: ${describe(error)}`,
-            ),
-          );
-      },
-      stopCharging: (connectorId, reason) => {
-        needs("physical", "ctx.stopCharging");
-        live();
-        const connector = host.getConnector(connectorId);
-        if (connector?.transaction) {
-          host.stopTransaction(connector, (reason ?? "Local") as never);
-        }
-      },
-      setConnectorStatus: (connectorId, status) => {
-        needs("physical", "ctx.setConnectorStatus");
-        live();
-        host.updateConnectorStatus(connectorId, status as OCPPStatus);
-      },
-      notify: {
-        firmwareStatus: (status, opts) => {
-          live();
-          this.notifyStatus("firmware", status, opts?.requestId);
-        },
-        signedFirmwareStatus: (status, requestId) => {
-          live();
-          this.notifyStatus("signedFirmware", status, requestId);
-        },
-        logStatus: (status, opts) => {
-          live();
-          this.notifyStatus("log", status, opts?.requestId);
-        },
-        diagnosticsStatus: (status) => {
-          live();
-          this.notifyStatus("diagnostics", status);
-        },
-      },
-      defaultBehavior: (req) => {
-        if (!env || env.mode !== "extend") {
-          throw new Error(
-            "ctx.defaultBehavior is only available in an extend handler",
-          );
-        }
-        const result = runDefault(env.action, req);
-        if (result.effect) env.defaultEffects.push(result.effect);
-        return result.response;
-      },
-      accepted: (action) =>
-        cannedResponse(action, host.ocppVersion, "accepted"),
-      rejected: (action) =>
-        cannedResponse(action, host.ocppVersion, "rejected"),
-      connector: connectorSnapshot,
-      params,
-      get charger(): ChargerSnapshot {
-        return snapshotCharger();
-      },
-      log: (message) =>
-        host.logger.info(`[behavior ${behaviorId}] ${message}`, LogType.OCPP),
-    };
-    return ctx;
+      behaviorId,
+      scope,
+      env,
+    );
   }
 
   /**
@@ -1846,34 +1559,12 @@ export class ChargerEngine implements ChargePointEngine {
    * what the scenario `$from` root `connector` reads (#654).
    */
   snapshotConnector(id: number): ConnectorSnapshot | undefined {
-    const connector = this.host.getConnector(id);
-    if (!connector) return undefined;
-    const point = connector.operatingPoint();
-    return {
-      id: connector.id,
-      status: connector.status,
-      availability: connector.availability,
-      transactionId: connector.transaction
-        ? (connector.transaction.cpTransactionId ?? connector.transaction.id)
-        : null,
-      idTag: connector.transaction?.tagId ?? null,
-      power: {
-        acceptedW: point.acceptedW,
-        offeredW: point.offeredW,
-        soc: point.soc,
-        limitedBy: point.limitedBy,
-      },
-    };
+    return snapshotConnectorOf(this.host, id);
   }
 
   /** A read-only view of the station: `ctx.charger`, and the `$from` root `charger`. */
   snapshotCharger(): ChargerSnapshot {
-    return {
-      id: this.host.id,
-      ocppVersion: this.host.ocppVersion,
-      status: String(this.host.status),
-      connectorIds: [...this.host.connectors.keys()],
-    };
+    return snapshotChargerOf(this.host);
   }
 
   /**

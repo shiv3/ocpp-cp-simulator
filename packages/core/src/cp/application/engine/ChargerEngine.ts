@@ -3,7 +3,6 @@ import type {
   BehaviorEvents,
   BehaviorContext,
   CallBehavior,
-  CallOutcome,
   ChargerSnapshot,
   ConnectorSnapshot,
   JsonObject,
@@ -22,11 +21,7 @@ import { RESERVED_PREFIX } from "./behaviorFit";
 import { LogType } from "../../shared/Logger";
 import type { SimClock } from "../../shared/clock";
 import { csmsActionAliases } from "../../domain/types/csmsActionNames";
-import type {
-  BehaviorCall,
-  HeldExchange,
-  RuleOwner,
-} from "../behavior/BehaviorRegistry";
+import type { RuleOwner } from "../behavior/BehaviorRegistry";
 import {
   assertJsonSerializable,
   initialChargerState,
@@ -45,11 +40,9 @@ import type {
 } from "../../domain/engine/ChargePointEngine";
 import { registerDefaultBehaviors } from "./behaviors";
 import { EMPTY_PARAMS } from "../behavior/paramsSchema";
-import { responseProblems } from "./responseValidation";
 import {
   BehaviorStopped,
   BehaviorTimeout,
-  CONNECTION_BOUND_DEFAULTS,
   Scope,
   describe,
   isThenable,
@@ -57,6 +50,7 @@ import {
   type CallEnv,
 } from "./scope";
 import { BehaviorLifecycle } from "./behaviorLifecycle";
+import { CallRunner } from "./callRunner";
 import {
   makeBehaviorContext,
   snapshotChargerOf,
@@ -170,7 +164,16 @@ export class ChargerEngine implements ChargePointEngine {
       endHookContext: (id) => this.endHookContext(id),
       runDetached: (id, scope, run) => this.runDetached(id, scope, run),
       runCall: (behavior, call, callInfo, exchange) =>
-        this.runCall(behavior, call, callInfo, exchange),
+        this.calls.runCall(behavior, call, callInfo, exchange),
+    });
+    this.calls = new CallRunner({
+      host: this.host,
+      callScopes: this.callScopes,
+      defaults: this.defaults,
+      touch: () => this.touch(),
+      warn: (message) => this.warn(message),
+      endScope: (scope) => this.endScope(scope),
+      makeContext: (id, scope, env) => this.makeContext(id, scope, env),
     });
     registerDefaultBehaviors(this, host);
   }
@@ -818,6 +821,7 @@ export class ChargerEngine implements ChargePointEngine {
   // ---- code behaviors (see behaviorLifecycle.ts) --------------------------
 
   private readonly lifecycle: BehaviorLifecycle;
+  private readonly calls: CallRunner;
 
   /** Throws if this station cannot run `behavior`. */
   assertLoadable(behavior: Behavior): void {
@@ -969,174 +973,6 @@ export class ChargerEngine implements ChargePointEngine {
       .finally(() => this.touch());
   }
 
-  // ---- answering a CALL ---------------------------------------------------
-
-  /** A rule of a code behavior took the CALL. */
-  private runCall(
-    behavior: Behavior,
-    call: CallBehavior,
-    info: BehaviorCall,
-    exchange: HeldExchange,
-  ): void {
-    const scope = new Scope(behavior.id, true);
-    this.callScopes.add(scope);
-    const env: CallEnv = {
-      action: info.action,
-      mode: call.mode,
-      defaultEffects: [],
-    };
-    const ctx = this.makeContext(behavior.id, scope, env);
-    const fail = (error: unknown): void => {
-      this.touch();
-      this.endScope(scope);
-      const stopped = error instanceof BehaviorStopped;
-      if (!stopped) {
-        this.warn(
-          `Behavior ${behavior.id} failed on ${info.action}: ${describe(error)}`,
-        );
-      }
-      // A handler cut off while its CALL is still open (the behavior was
-      // unloaded after a reload had let go of the rule that held the CALL)
-      // answers InternalError, as an unload with the rule in place does.
-      if (exchange.state === "open") {
-        exchange.replyError(
-          "InternalError",
-          stopped
-            ? `Behavior ${behavior.id} was stopped`
-            : describe(error).slice(0, 255),
-        );
-      }
-    };
-    const finish = (outcome: CallOutcome): void => {
-      this.touch();
-      try {
-        this.answer(behavior.id, scope, ctx, env, info, exchange, outcome);
-      } catch (error) {
-        fail(error);
-      }
-    };
-    let handled: CallOutcome | Promise<CallOutcome>;
-    try {
-      handled = call.handle(info.payload, ctx);
-    } catch (error) {
-      fail(error);
-      return;
-    }
-    // Only a real promise defers the answer: a synchronous handler answers in
-    // the turn the CALL arrived (#456).
-    if (isThenable(handled)) {
-      Promise.resolve(handled).then(finish, fail);
-    } else {
-      finish(handled);
-    }
-  }
-
-  private answer(
-    behaviorId: string,
-    scope: Scope,
-    ctx: BehaviorContext,
-    env: CallEnv,
-    info: BehaviorCall,
-    exchange: HeldExchange,
-    outcome: CallOutcome,
-  ): void {
-    if (exchange.state !== "open" && exchange.state !== "abandoned") {
-      this.endScope(scope);
-      return;
-    }
-    const afterUser = outcome.after;
-    const effect = (settled?: string): void => {
-      // The follow-up the default behaviors of ctx.defaultBehavior started
-      // keeps the rules of the response queue (as before the engine). The
-      // follow-up of the behavior itself needs its answer on the wire.
-      for (const defaultEffect of env.defaultEffects) defaultEffect();
-      if (afterUser && (settled === undefined || settled === "written")) {
-        this.runAfter(behaviorId, scope, ctx, afterUser);
-      } else {
-        if (afterUser) {
-          this.warn(
-            `Behavior ${behaviorId}: the answer to ${info.action} was not delivered (${settled}); its follow-up is skipped`,
-          );
-        }
-        this.endScope(scope);
-      }
-    };
-    const dropped = (reason: string): void => {
-      this.warn(
-        `Behavior ${behaviorId}: the answer to ${info.action} was not delivered (${reason}); its follow-up is skipped`,
-      );
-      this.endScope(scope);
-    };
-    if ("noResponse" in outcome) {
-      if (exchange.state !== "open") {
-        // The CALL was abandoned (the connection closed) while the handler
-        // ran: nothing was suppressed, so nothing follows.
-        dropped("the connection closed");
-        return;
-      }
-      void exchange.suppress();
-      effect();
-      return;
-    }
-    if ("error" in outcome) {
-      exchange.replyError(outcome.error.code, outcome.error.description, {
-        effect,
-        onEffectDropped: dropped,
-      });
-      return;
-    }
-    if (!outcome.skipValidation) {
-      const problems = responseProblems(
-        info.action,
-        this.host.ocppVersion,
-        outcome.response,
-      );
-      if (problems.length > 0) {
-        this.warn(
-          `Behavior ${behaviorId} produced an invalid ${info.action} response: ${problems.join("; ")}`,
-        );
-        this.endScope(scope);
-        exchange.replyError(
-          "InternalError",
-          `Invalid ${info.action} response from behavior ${behaviorId}`.slice(
-            0,
-            255,
-          ),
-        );
-        return;
-      }
-    }
-    exchange.reply(outcome.response, { effect, onEffectDropped: dropped });
-  }
-
-  private runAfter(
-    behaviorId: string,
-    scope: Scope,
-    ctx: BehaviorContext,
-    after: () => Promise<void>,
-  ): void {
-    // Started in the turn the response settled (as the effects it replaces
-    // were), up to its first wait.
-    let running: Promise<void>;
-    try {
-      running = Promise.resolve(after());
-    } catch (error) {
-      running = Promise.reject(error);
-    }
-    void running
-      .catch((error: unknown) => {
-        if (error instanceof BehaviorStopped) return;
-        this.warn(
-          `Behavior ${behaviorId}: follow-up failed: ${describe(error)}`,
-        );
-      })
-      .finally(() => {
-        this.touch();
-        this.endScope(scope);
-      });
-    void ctx;
-  }
-
   // ---- default behaviors --------------------------------------------------
 
   /** Register the behaviors that answer when no user behavior does. */
@@ -1164,48 +1000,7 @@ export class ChargerEngine implements ChargePointEngine {
    * starts the follow-up once the response settled.
    */
   runDefault(action: string, payload: unknown): DefaultResult {
-    const entry = this.defaults.get(action);
-    if (!entry) throw new Error(`No default behavior answers ${action}`);
-    // Not connection-bound while the answer is in the pipeline: a close before
-    // the follow-up starts cancels nothing (the follow-up then runs, as the
-    // old code ran it). See `CONNECTION_BOUND_DEFAULTS` for what binds it once
-    // it runs.
-    const scope = new Scope(entry.behavior.id, false);
-    this.callScopes.add(scope);
-    const env: CallEnv = { action, mode: "default", defaultEffects: [] };
-    const ctx = this.makeContext(entry.behavior.id, scope, env);
-    let outcome: CallOutcome | Promise<CallOutcome>;
-    try {
-      outcome = entry.call.handle(payload, ctx);
-    } catch (error) {
-      this.endScope(scope);
-      throw error;
-    }
-    if (isThenable(outcome)) {
-      this.endScope(scope);
-      throw new Error(
-        `Default behavior of ${action} must answer synchronously`,
-      );
-    }
-    if (!("response" in outcome)) {
-      this.endScope(scope);
-      throw new Error(
-        `Default behavior of ${action} did not produce a response`,
-      );
-    }
-    const after = outcome.after;
-    if (!after) {
-      this.endScope(scope);
-      return { response: outcome.response };
-    }
-    const effect = (): void => {
-      scope.connectionBound = CONNECTION_BOUND_DEFAULTS.has(entry.behavior.id);
-      this.runAfter(entry.behavior.id, scope, ctx, after);
-    };
-    // The response queue drops an effect on a close the station made, a stale
-    // generation or a dispose: nothing would end this scope then.
-    effect.onDropped = (): void => this.endScope(scope);
-    return { response: outcome.response, effect };
+    return this.calls.runDefault(action, payload);
   }
 
   // ---- the context --------------------------------------------------------

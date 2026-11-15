@@ -95,7 +95,6 @@ import type {
   ResolvedNetworkSimConfig,
 } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/network-sim/config";
 import {
-  RPC_TIMEOUT_MS,
   RpcFailure,
   type EventEnvelope,
   type Labels,
@@ -115,8 +114,9 @@ import {
   type ScenarioStatusRequest,
 } from "./RemoteSubscriptions";
 import { RemoteConnectorRpc } from "./RemoteConnectorRpc";
+import { RemoteRpcTransport } from "./RemoteRpcTransport";
 import { RemoteScenarioRpc } from "./RemoteScenarioRpc";
-import { publicFailure, toVehicleCatalogError } from "./rpcErrors";
+import { toVehicleCatalogError } from "./rpcErrors";
 import { cpListItemToSnapshot, toChargePointSnapshot } from "./snapshotMapping";
 
 export { mapServerEventToChargePointEvent };
@@ -143,25 +143,6 @@ export type RemoteRegistrySubscriptionEvent =
       cp?: ChargePointSnapshot;
     };
 
-interface PendingRpc {
-  reject: (failure: RpcFailure) => void;
-}
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null;
-}
-
-function isRpcAck<R>(ack: unknown): ack is RpcAck<R> {
-  return (
-    isRecord(ack) &&
-    typeof ack.ok === "boolean" &&
-    (ack.ok === true ||
-      (isRecord(ack.error) &&
-        typeof ack.error.code === "string" &&
-        typeof ack.error.message === "string"))
-  );
-}
-
 function authFromUrl(
   serverUrl: string,
 ): { username: string; password: string } | undefined {
@@ -182,7 +163,7 @@ function authFromUrl(
 
 export class RemoteChargePointService implements ChargePointService {
   private readonly socket: Socket;
-  private readonly pendingRpc = new Map<number, PendingRpc>();
+  private readonly transport: RemoteRpcTransport;
   private readonly connectionHandlers = new Set<
     (state: RemoteConnectionState) => void
   >();
@@ -231,7 +212,6 @@ export class RemoteChargePointService implements ChargePointService {
     setBounded: (map, key, value) => this.setBounded(map, key, value),
     activeScenarioStatus: this.activeScenarioStatus,
   });
-  private nextRpcId = 1;
   private connectionState: RemoteConnectionState = "connecting";
   private hasConnected = false;
 
@@ -258,6 +238,7 @@ export class RemoteChargePointService implements ChargePointService {
       // immaterial for a status console.
       transports: ["polling"],
     });
+    this.transport = new RemoteRpcTransport(this.socket);
     this.connectionState = this.socket.connected ? "connected" : "connecting";
 
     this.socket.on("event", this.subscriptions.handleEnvelope);
@@ -1221,79 +1202,15 @@ export class RemoteChargePointService implements ChargePointService {
     params: Params<M>,
     cpId?: string,
   ): Promise<Result<M>> {
-    const request: RpcRequest = {
-      ...(cpId ? { cpId } : {}),
-      method,
-      params,
-    };
-
-    return this.emitRpcRequest(request, (ack) => {
-      if (!ack.ok) {
-        throw new RpcFailure(ack.error.code, ack.error.message, {
-          retryAfterSeconds: ack.error.retryAfterSeconds,
-        });
-      }
-      return ack.result as Result<M>;
-    });
+    return this.transport.rpc(method, params, cpId);
   }
 
   private emitRpcAck(request: RpcRequest): Promise<RpcAck> {
-    return this.emitRpcRequest(request, (ack) => ack);
-  }
-
-  private emitRpcRequest<T>(
-    request: RpcRequest,
-    mapAck: (ack: RpcAck) => T,
-  ): Promise<T> {
-    const id = this.nextRpcId++;
-
-    return new Promise<T>((resolve, reject) => {
-      let settled = false;
-      const settle = (fn: () => void) => {
-        if (settled) return;
-        settled = true;
-        this.pendingRpc.delete(id);
-        fn();
-      };
-
-      this.pendingRpc.set(id, {
-        reject: (failure) => settle(() => reject(failure)),
-      });
-
-      if (!this.socket.connected) this.socket.connect();
-
-      void this.socket
-        .timeout(RPC_TIMEOUT_MS)
-        .emitWithAck("rpc", request)
-        .then(
-          (ack: unknown) => {
-            if (!isRpcAck(ack)) {
-              settle(() =>
-                reject(new RpcFailure("internal", "invalid rpc ack")),
-              );
-              return;
-            }
-            settle(() => {
-              try {
-                resolve(mapAck(ack));
-              } catch (err) {
-                reject(err);
-              }
-            });
-          },
-          () => {
-            this.rejectPending("timeout");
-          },
-        );
-    });
+    return this.transport.emitRpcAck(request);
   }
 
   private rejectPending(code: RpcErrorCode): void {
-    if (this.pendingRpc.size === 0) return;
-    const failure = publicFailure(code);
-    const pending = [...this.pendingRpc.values()];
-    this.pendingRpc.clear();
-    pending.forEach((entry) => entry.reject(failure));
+    this.transport.rejectPending(code);
   }
 
   private setConnectionState(state: RemoteConnectionState): void {

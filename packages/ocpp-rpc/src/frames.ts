@@ -6,11 +6,17 @@
  * CALLERROR without details carries `{}`.
  */
 
-/** The message type id, the first element of every OCPP-J frame. */
+/** The message type id, the first element of every OCPP-J frame. `decodeFrame`
+ *  and `RpcEndpoint` handle 2-4 only; the OCPP 2.1 types are listed for the
+ *  encoders that write them. */
 export enum OCPPMessageType {
   CALL = 2,
   CALLRESULT = 3,
   CALLERROR = 4,
+  /** OCPP 2.1 CALLRESULTERROR: a caller's answer to a CALLRESULT it cannot accept. */
+  CALLRESULTERROR = 5,
+  /** OCPP 2.1 SEND: an unconfirmed message, never answered. */
+  SEND = 6,
 }
 
 /** `[2, messageId, action, payload]`. */

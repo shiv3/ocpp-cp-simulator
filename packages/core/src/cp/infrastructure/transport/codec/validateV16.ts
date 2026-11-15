@@ -4,7 +4,8 @@ import {
   validationErrors,
 } from "@ocpp-cp-simulator/ocpp/index";
 import { strictValidationIssues } from "@ocpp-cp-simulator/ocpp/validate";
-import { OCPPErrorCodeV16 } from "@ocpp-cp-simulator/ocpp/enums";
+import type { OCPPErrorCodeV16 } from "@ocpp-cp-simulator/ocpp/enums";
+import { OCPP16_RPC_DIALECT } from "@ocpp-cp-simulator/ocpp-rpc/index";
 import { requestSchemaKey } from "./requestSchemaKey";
 import { violationKind, type ViolationKind } from "./violationKind";
 
@@ -13,12 +14,8 @@ export interface V16ValidationResult {
   errors: string[];
 }
 
-const V16_CODE_OF_KIND: Record<ViolationKind, OCPPErrorCodeV16> = {
-  format: OCPPErrorCodeV16.FormationViolation,
-  occurrence: OCPPErrorCodeV16.OccurenceConstraintViolation,
-  type: OCPPErrorCodeV16.TypeConstraintViolation,
-  property: OCPPErrorCodeV16.PropertyConstraintViolation,
-};
+const V16_CODE_OF_KIND: Readonly<Record<ViolationKind, OCPPErrorCodeV16>> =
+  OCPP16_RPC_DIALECT.violationCodes;
 
 const v16Schemas = schemas.v16 as Record<string, unknown>;
 

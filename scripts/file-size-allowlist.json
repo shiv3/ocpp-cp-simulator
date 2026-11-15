@@ -14,8 +14,6 @@
   "apps/web/src/console/lib/blockTree.ts": 909,
   "apps/web/src/console/lib/scenarioSteps.ts": 1390,
   "apps/web/src/console/lib/treeGraphLayout.ts": 1281,
-  "apps/web/src/console/pages/scenarios/run/StepsGraphView.tsx": 1537,
-  "apps/web/src/console/pages/scenarios/run/StepsView.tsx": 1402,
   "apps/web/src/data/local/LocalChargePointService.ts": 1292,
   "packages/client/src/remote/RemoteChargePointService.ts": 2083,
   "packages/contracts/src/redaction.ts": 820,

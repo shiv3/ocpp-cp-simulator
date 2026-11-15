@@ -303,12 +303,13 @@ export class OutageLifecycle {
     cp.error = "";
 
     // A link loss is not a reboot: the reservations survive it (B01.FR.13
-    // keeps Reserved even across a reboot), with their expiry timer.
+    // keeps Reserved even across a reboot), with their expiry timer. Those
+    // that expired meanwhile end after the status reports below (#839).
+    const { restored, lapsed } = host
+      .reservationManager()
+      .restore(reservations);
     const reserved = new Set(
-      host
-        .reservationManager()
-        .restore(reservations)
-        .map((reservation) => reservation.connectorId),
+      restored.map((reservation) => reservation.connectorId),
     );
 
     // Likewise the station-level charging profiles (ChargingStationMaxProfile,
@@ -365,6 +366,9 @@ export class OutageLifecycle {
         cp.updateConnectorStatus(connector.id, target);
       }
     });
+    // H04 steps 4-6 / Figure 84: the EVSE is reported Available (above),
+    // then ReservationStatusUpdate(Expired) (H04.FR.01).
+    host.reservationManager().expireLapsed(lapsed);
 
     // The interval in force (the CSMS's, or one set since) survives the
     // teardown, which only stopped the timer; re-arm it.

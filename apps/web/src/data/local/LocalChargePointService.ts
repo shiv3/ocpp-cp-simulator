@@ -15,7 +15,6 @@ import type { VehicleProfile } from "@ocpp-cp-simulator/core/cp/domain/vehicle/V
 import {
   DIAGNOSTICS_STATUSES,
   FIRMWARE_STATUSES,
-  isOneOf,
   UPLOAD_LOG_STATUSES,
   type DiagnosticsStatus,
   type FirmwareStatus,
@@ -41,7 +40,6 @@ import type {
   Get15118EVCertificateRequest,
   Get15118EVCertificateResult,
 } from "@ocpp-cp-simulator/core/cp/domain/security/get15118EVCertificate";
-import { RpcFailure } from "@ocpp-cp-simulator/contracts/errors";
 import {
   PowerStateError,
   type PowerLossOptions,
@@ -68,6 +66,11 @@ import type { ScenarioManager } from "@ocpp-cp-simulator/core/cp/application/sce
 import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
 import { behaviorsOfModule } from "@ocpp-cp-simulator/core/cp/application/engine/behaviorModule";
 import { LocalScenarioRuntime } from "./LocalScenarioRuntime";
+import {
+  attachLocalEventForwarders,
+  type LocalEventForwardersHost,
+} from "./localEventForwarders";
+import { requireStatus, toChargePointSnapshot } from "./snapshotMapping";
 import { ScenarioRunRecorder } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunRecorder";
 import type { ScenarioRunRepository } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunRepository";
 import { createScenarioRunRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/createScenarioRunRepository";
@@ -89,7 +92,6 @@ import type {
   ChargePointEvent,
   ChargePointService,
   ChargePointSnapshot,
-  ConnectorSnapshot,
   ScenarioRunOptions,
   ScenarioListItem,
   ScenarioTemplateInfo,
@@ -109,11 +111,6 @@ import type {
   OcppSecurityProfile,
   OcppTlsOptions,
 } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/wsUrlWithBasic";
-import type { LogEntry } from "@ocpp-cp-simulator/core/cp/shared/Logger";
-import type {
-  LogLevel,
-  LogType,
-} from "@ocpp-cp-simulator/core/cp/shared/Logger";
 import {
   getDefaultEVSettings,
   type EVSettings,
@@ -139,7 +136,6 @@ import type {
   TimelinePage,
   TimelineQuery,
 } from "@ocpp-cp-simulator/core/cp/application/services/OperationalTimeline";
-import { ChargingSessionRecorder } from "@ocpp-cp-simulator/core/cp/application/services/ChargingSessionRecorder";
 import type {
   ChargingSessionPage,
   ChargingSessionQuery,
@@ -167,54 +163,6 @@ import type {
   WireSimulatorConfig,
 } from "@ocpp-cp-simulator/contracts/index";
 import { mergeWriteOnlyConfigSecrets } from "@ocpp-cp-simulator/client/configPort";
-
-function toConnectorSnapshot(
-  connector: ReturnType<ChargePoint["getConnector"]>,
-): ConnectorSnapshot | null {
-  if (!connector) return null;
-  const tx = connector.transaction;
-  return {
-    id: connector.id,
-    status: connector.status as OCPPStatus,
-    availability: connector.availability,
-    meterValue: connector.meterValue,
-    transactionId: tx?.id ?? null,
-    soc: connector.soc,
-    mode: connector.mode,
-    autoResetToAvailable: connector.autoResetToAvailable,
-    autoMeterValueConfig: connector.autoMeterValueConfig,
-    evSettings: connector.evSettings,
-    chargingProfile: connector.chargingProfile,
-    chargingProfiles: [...connector.chargingProfiles],
-    transactionStartTime: tx?.startTime ?? null,
-    transactionTagId: tx?.tagId ?? null,
-    transactionBatteryCapacityKwh: tx?.batteryCapacityKwh ?? null,
-    evConnection: connector.evConnection,
-  };
-}
-
-function toChargePointSnapshot(cp: ChargePoint): ChargePointSnapshot {
-  const connectors: ConnectorSnapshot[] = [];
-  cp.connectors.forEach((connector) => {
-    const snapshot = toConnectorSnapshot(connector);
-    if (snapshot) connectors.push(snapshot);
-  });
-
-  return {
-    id: cp.id,
-    status: cp.status,
-    error: cp.error,
-    connectors,
-    heartbeat: {
-      intervalSeconds: cp.heartbeat.intervalSeconds,
-      lastSentAt: cp.heartbeat.lastSentAt
-        ? cp.heartbeat.lastSentAt.toISOString()
-        : null,
-    },
-    networkSim: cp.networkSimSummary(),
-    ...(cp.modemState() ? { modem: cp.modemState()! } : {}),
-  };
-}
 
 export interface LocalChargePointDefinition {
   id: string;
@@ -250,21 +198,6 @@ function assertBrowserLocalTlsSupported(
   }
 }
 
-/**
- * Browser mode has no control-plane schema in front of it, so this adapter
- * is where an untyped caller's status is narrowed (#377). It refuses an
- * unknown value with the `invalid_params` failure the daemon path surfaces,
- * instead of letting it reach the wire.
- */
-function requireStatus(status: string, allowed: readonly string[]): void {
-  if (!isOneOf(status, allowed)) {
-    throw new RpcFailure(
-      "invalid_params",
-      `Invalid parameter: status (expected one of ${allowed.join(", ")})`,
-    );
-  }
-}
-
 export class LocalChargePointService implements ChargePointService {
   private readonly chargePoints = new Map<string, ChargePoint>();
   private readonly listeners = new Map<
@@ -285,6 +218,7 @@ export class LocalChargePointService implements ChargePointService {
   private readonly chargingSessions: ChargingSessionRepository;
   /** #394: the browser's sql.js `scenario_runs` table, or in memory. */
   private readonly scenarioRuns: ScenarioRunRepository;
+  private readonly forwardersHost: LocalEventForwardersHost;
 
   constructor(
     private readonly database: Database | null = null,
@@ -298,6 +232,11 @@ export class LocalChargePointService implements ChargePointService {
     this.vehicleProfiles = new VehicleProfileRepository(database);
     this.chargingSessions = createChargingSessionRepository(database);
     this.scenarioRuns = createScenarioRunRepository(database);
+    this.forwardersHost = {
+      database,
+      chargingSessions: this.chargingSessions,
+      emit: (id, event) => this.emit(id, event),
+    };
 
     // Subscribe to networkSim atom changes for live re-apply
     this.store.sub(networkSimAtom, () => {
@@ -1802,245 +1741,10 @@ export class LocalChargePointService implements ChargePointService {
   }
 
   private attachEventForwarders(chargePoint: ChargePoint): void {
-    const unsubscribes: Array<() => void> = [];
-
-    unsubscribes.push(
-      chargePoint.timeline.onRecord((entry) => {
-        this.emit(chargePoint.id, { type: "timeline-entry", entry });
-      }),
+    this.eventSubscriptions.set(
+      chargePoint.id,
+      attachLocalEventForwarders(this.forwardersHost, chargePoint),
     );
-
-    // #447: a browser reload restores no transaction, so the reconcile marks
-    // what the previous page left running interrupted.
-    const sessionRecorder = new ChargingSessionRecorder(
-      chargePoint,
-      this.chargingSessions,
-    );
-    sessionRecorder.onChange((session) => {
-      this.emit(chargePoint.id, { type: "charging-session", session });
-    });
-    sessionRecorder.reconcile();
-    unsubscribes.push(() => sessionRecorder.dispose());
-
-    unsubscribes.push(
-      chargePoint.events.on("statusChange", ({ status }) => {
-        this.emit(chargePoint.id, { type: "status", status });
-      }),
-    );
-
-    unsubscribes.push(
-      chargePoint.events.on("error", ({ error }) => {
-        this.emit(chargePoint.id, { type: "error", error });
-      }),
-    );
-
-    unsubscribes.push(
-      chargePoint.events.on(
-        "connectorStatusChange",
-        ({ connectorId, status, previousStatus }) => {
-          this.emit(chargePoint.id, {
-            type: "connector-status",
-            connectorId,
-            status,
-            previousStatus,
-          });
-        },
-      ),
-    );
-
-    unsubscribes.push(
-      chargePoint.events.on(
-        "connectorAvailabilityChange",
-        ({ connectorId, availability }) => {
-          this.emit(chargePoint.id, {
-            type: "connector-availability",
-            connectorId,
-            availability,
-          });
-        },
-      ),
-    );
-
-    unsubscribes.push(
-      chargePoint.events.on(
-        "connectorTransactionChange",
-        ({ connectorId, transactionId }) => {
-          this.emit(chargePoint.id, {
-            type: "connector-transaction",
-            connectorId,
-            transactionId,
-          });
-        },
-      ),
-    );
-
-    unsubscribes.push(
-      chargePoint.events.on(
-        "connectorMeterValueChange",
-        ({ connectorId, meterValue }) => {
-          this.emit(chargePoint.id, {
-            type: "connector-meter",
-            connectorId,
-            meterValue,
-          });
-        },
-      ),
-    );
-
-    chargePoint.connectors.forEach((connector) => {
-      // The ChargePoint never emits connectorMeterValueChange itself —
-      // only Connector.meterValueChange fires when set_meter_value /
-      // auto-meter scheduler run, so subscribe per-connector here.
-      unsubscribes.push(
-        connector.events.on("meterValueChange", ({ meterValue }) => {
-          this.emit(chargePoint.id, {
-            type: "connector-meter",
-            connectorId: connector.id,
-            meterValue,
-          });
-        }),
-      );
-      unsubscribes.push(
-        connector.events.on("autoMeterValueChange", ({ config }) => {
-          this.emit(chargePoint.id, {
-            type: "connector-auto-meter",
-            connectorId: connector.id,
-            config,
-          });
-        }),
-      );
-
-      unsubscribes.push(
-        connector.events.on("modeChange", ({ mode }) => {
-          this.emit(chargePoint.id, {
-            type: "connector-mode",
-            connectorId: connector.id,
-            mode,
-          });
-        }),
-      );
-
-      unsubscribes.push(
-        connector.events.on("autoResetToAvailableChange", ({ enabled }) => {
-          this.emit(chargePoint.id, {
-            type: "connector-auto-reset-to-available",
-            connectorId: connector.id,
-            enabled,
-          });
-        }),
-      );
-
-      unsubscribes.push(
-        connector.events.on("socChange", ({ soc }) => {
-          this.emit(chargePoint.id, {
-            type: "connector-soc",
-            connectorId: connector.id,
-            soc,
-          });
-        }),
-      );
-
-      unsubscribes.push(
-        connector.events.on("evSettingsChange", ({ settings }) => {
-          this.emit(chargePoint.id, {
-            type: "connector-ev-settings",
-            connectorId: connector.id,
-            settings,
-          });
-        }),
-      );
-
-      unsubscribes.push(
-        connector.events.on("chargingProfileChange", ({ profile }) => {
-          this.emit(chargePoint.id, {
-            type: "connector-charging-profile",
-            connectorId: connector.id,
-            profile,
-          });
-        }),
-      );
-
-      unsubscribes.push(
-        connector.events.on("chargingProfilesChange", ({ profiles }) => {
-          // Persist via the SQLite repo so the next CP build picks them up.
-          if (this.database) {
-            this.database.run(
-              "DELETE FROM charging_profiles WHERE cp_id = ? AND connector_id = ?",
-              [chargePoint.id, connector.id],
-            );
-            for (const profile of profiles) {
-              this.database.run(
-                "INSERT INTO charging_profiles " +
-                  "(cp_id, connector_id, charging_profile_id, stack_level, purpose, profile) " +
-                  "VALUES (?, ?, ?, ?, ?, ?)",
-                [
-                  chargePoint.id,
-                  connector.id,
-                  profile.chargingProfileId,
-                  profile.stackLevel,
-                  profile.chargingProfilePurpose,
-                  JSON.stringify(profile),
-                ],
-              );
-            }
-          }
-          this.emit(chargePoint.id, {
-            type: "connector-charging-profiles",
-            connectorId: connector.id,
-            profiles,
-          });
-        }),
-      );
-
-      connector.setOnMeterValueSend((id) => {
-        chargePoint.sendScheduledMeterValue(id);
-      });
-    });
-
-    unsubscribes.push(
-      chargePoint.events.on("connectorRemoved", ({ connectorId }) => {
-        this.emit(chargePoint.id, { type: "connector-removed", connectorId });
-      }),
-    );
-
-    unsubscribes.push(
-      chargePoint.events.on("connected", () => {
-        this.emit(chargePoint.id, { type: "connected" });
-      }),
-    );
-
-    unsubscribes.push(
-      chargePoint.events.on("disconnected", ({ code, reason }) => {
-        this.emit(chargePoint.id, { type: "disconnected", code, reason });
-      }),
-    );
-
-    unsubscribes.push(
-      chargePoint.heartbeat.events.on(
-        "stateChange",
-        ({ intervalSeconds, lastSentAt }) => {
-          this.emit(chargePoint.id, {
-            type: "heartbeat",
-            intervalSeconds,
-            lastSentAt: lastSentAt ? lastSentAt.toISOString() : null,
-          });
-        },
-      ),
-    );
-
-    unsubscribes.push(
-      chargePoint.events.on("log", (entry) => {
-        const logEntry: LogEntry = {
-          timestamp: entry.timestamp,
-          level: entry.level as LogLevel,
-          type: entry.type as LogType,
-          message: entry.message,
-        };
-        this.emit(chargePoint.id, { type: "log", entry: logEntry });
-      }),
-    );
-
-    this.eventSubscriptions.set(chargePoint.id, unsubscribes);
   }
 
   private emit(id: string, event: ChargePointEvent): void {

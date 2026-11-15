@@ -28,7 +28,7 @@ related:
   - ../analyses/scenario-or-behavior.md
   - ../analyses/charger-engine-migration.md
   - ../analyses/testing-strategy.md
-updated: 2026-11-09
+updated: 2026-11-15
 ---
 
 # Charger engine
@@ -376,7 +376,7 @@ composition root binds to `ChargerEngine` (#575). The
 transition table `ALLOWED_CONNECTOR_STATUS_TRANSITIONS` (`domain/connector/ConnectorTransitions.ts`) is
 the 53 transitions of the OCPP 1.6 section 4.9 table (cell codes A2…I8 in the source, checked cell by cell in
 `ConnectorTransitions.test.ts`; B6 comes from errata v3.0, I1–I8 mean a resolved fault returns to the pre-fault
-status, Preparing → Unavailable is not in it). It is enforced only as a warning on `full` writes, so that scenarios can force transitions. `StateManager` only
+status, Preparing → Unavailable is not in it). By default it is enforced only as a warning on `full` writes, so that scenarios can force transitions; a 1.6J charge point whose capability profile sets `statusTransitions: "enforce"` applies the write but keeps its StatusNotification off the wire unless the write carries `allowInvalidTransition` (`performConnectorWrite`, #618; see [Status transitions](call-precedence.md#status-transitions-statustransitions)). `StateManager` only
 records `StateHistory`.
 
 **Delivery timings.** One table, because the four timings below are each justified by rule 4 and are easy to

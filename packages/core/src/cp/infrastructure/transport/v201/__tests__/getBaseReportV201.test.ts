@@ -70,6 +70,9 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])("%s GetBaseReport", (ocppVersion) => {
     expect(parts).toHaveLength(1);
     expect(isValidNotifyReportRequestV201(parts[0])).toBe(true);
     for (const def of DEVICE_MODEL.variables) {
+      // SimulatorCtrlr (#927) has values only on a station with a scenario
+      // runtime; this mock station has none, so it reports none of them.
+      if (def.component === "SimulatorCtrlr") continue;
       const id = (evse?: number) =>
         `${def.component}${evse ? `/${evse}` : ""}.${def.variable}${def.instance ? `[${def.instance}]` : ""}`;
       if (DEVICE_MODEL.isEvseScoped(def.component)) {

@@ -4,7 +4,7 @@ import {
 } from "../../shared/redaction";
 import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
 import { createStoredZip, type ZipEntry } from "./zip";
-import { summarizeScenarios } from "./scenarioReadModel";
+import { summarizeScenarios } from "../../domain/charge-point/scenarioReadModel";
 import { collectLogLines } from "./logLines";
 
 /** Version of the bundle layout (`manifest.json` `schemaVersion`). */

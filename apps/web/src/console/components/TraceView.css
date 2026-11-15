@@ -160,3 +160,30 @@
 .cx-trace .oot-filter button.oot-filter-reset {
   margin: 10px 12px;
 }
+
+/* Folded from the toolbar: the list takes the detail panel's width. */
+.cx-trace.cx-trace--no-details .oot-viewer__detail {
+  display: none;
+}
+
+/* Payload syntax highlighting (JsonHighlight), in the console's palette. */
+.cx-trace .cx-json-key {
+  color: var(--cx-blue);
+}
+
+.cx-trace .cx-json-string {
+  color: var(--cx-emerald);
+}
+
+.cx-trace .cx-json-number {
+  color: var(--cx-amber);
+}
+
+.cx-trace .cx-json-boolean,
+.cx-trace .cx-json-null {
+  color: var(--cx-purple);
+}
+
+.cx-trace .cx-json-punct {
+  color: var(--cx-muted);
+}

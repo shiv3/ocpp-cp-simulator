@@ -15,6 +15,8 @@
   "dashboard.logs.tabs.log": "ログ",
   "dashboard.logs.tabs.trace": "トレース",
   "dashboard.logs.trace.note": "トレースはログ内の OCPP-J フレームを Open OCPP Trace レコードとして表示します。その他のログ行と SOAP のやり取りは「ログ」タブに残ります。",
+  "dashboard.logs.trace.hideDetails": "詳細を隠す",
+  "dashboard.logs.trace.showDetails": "詳細を表示",
   "dashboard.logs.trace.viewer.listLabel": "トレースのエントリ",
   "dashboard.logs.trace.viewer.columns.timestamp": "タイムスタンプ",
   "dashboard.logs.trace.viewer.columns.chargePoint": "充電器",

@@ -842,6 +842,14 @@ opens), in
   stays open.
 - **Export.** **Export selection** and **Export filtered** download the
   records as `ocpp-trace-<scope>-<timestamp>.jsonl`, in the trace format.
+- **Detail panel.** The inspector shows the selected entry; its payload is
+  syntax-highlighted
+  ([`jsonHighlight.ts`](../../apps/web/src/console/lib/jsonHighlight.ts),
+  lenient: a cut or redacted payload stays readable). The raw frame, error
+  details and meta are not: viewer-react 0.1.0 hands the host the payload
+  only. **Hide details** / **Show details** in the toolbar folds the panel
+  so the list takes its width; the choice is kept in `localStorage`
+  (`ocpp-cp.console.trace.detailsHidden`).
 - **Look and language.** The viewer follows the console's dark mode, its
   `cx-*` colors and fonts, and its controls are restyled like the console's
   buttons, inputs and section labels

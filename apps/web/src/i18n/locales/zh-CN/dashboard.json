@@ -15,6 +15,8 @@
   "dashboard.logs.tabs.log": "日志",
   "dashboard.logs.tabs.trace": "跟踪",
   "dashboard.logs.trace.note": "跟踪将日志中的 OCPP-J 帧显示为 Open OCPP Trace 记录。其他日志行和 SOAP 交互仍在“日志”标签页中。",
+  "dashboard.logs.trace.hideDetails": "隐藏详情",
+  "dashboard.logs.trace.showDetails": "显示详情",
   "dashboard.logs.trace.viewer.listLabel": "跟踪条目",
   "dashboard.logs.trace.viewer.columns.timestamp": "时间戳",
   "dashboard.logs.trace.viewer.columns.chargePoint": "充电桩",

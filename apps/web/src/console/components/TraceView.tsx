@@ -18,11 +18,13 @@ import {
   TraceViewer,
   type ExportScope,
   type JsonlExport,
+  type ToolbarAction,
   type ViewerTheme,
 } from "@open-ocpp-trace/viewer-react";
 
 import { useDarkMode } from "../../contexts/DarkModeContext";
 import { downloadText } from "../../utils/downloadJson";
+import { JsonHighlight } from "./JsonHighlight";
 import type { GlobalLogEntry } from "../lib/globalLogsContext";
 import { createTraceFeed } from "../lib/traceFeed";
 import { createViewerTranslate } from "../lib/traceViewerTranslate";
@@ -50,6 +52,30 @@ const TOKENS: ViewerTheme["tokens"] = {
   focusColor: "var(--cx-accent)",
   fontFamily: "var(--font-sans)",
 };
+
+const DETAILS_HIDDEN_KEY = "ocpp-cp.console.trace.detailsHidden";
+
+function readStoredDetailsHidden(): boolean {
+  try {
+    return window.localStorage.getItem(DETAILS_HIDDEN_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function storeDetailsHidden(hidden: boolean): void {
+  try {
+    if (hidden) {
+      window.localStorage.setItem(DETAILS_HIDDEN_KEY, "1");
+    } else {
+      window.localStorage.removeItem(DETAILS_HIDDEN_KEY);
+    }
+  } catch {
+    // storage unavailable (private window): the state just isn't kept
+  }
+}
+
+const renderPayload = (text: string) => <JsonHighlight text={text} />;
 
 function sameIds(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((id, i) => id === b[i]);
@@ -121,6 +147,24 @@ const TraceView: React.FC<TraceViewProps> = ({
   );
   const translate = useMemo(() => createViewerTranslate(t), [t]);
 
+  // The detail panel folds away from the toolbar, to give the list the width.
+  const [detailsHidden, setDetailsHidden] = useState(readStoredDetailsHidden);
+  const toolbarActions = useMemo<ToolbarAction[]>(
+    () => [
+      {
+        id: "toggle-details",
+        label: detailsHidden
+          ? t("dashboard.logs.trace.showDetails")
+          : t("dashboard.logs.trace.hideDetails"),
+        run: () => {
+          storeDetailsHidden(!detailsHidden);
+          setDetailsHidden(!detailsHidden);
+        },
+      },
+    ],
+    [detailsHidden, t],
+  );
+
   const handleExport = useCallback(
     (exported: JsonlExport, scope: ExportScope) => {
       const stamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -138,13 +182,17 @@ const TraceView: React.FC<TraceViewProps> = ({
       <p className="text-[12px] text-cx-muted">
         {t("dashboard.logs.trace.note")}
       </p>
-      <div className="cx-trace min-h-0 flex-1">
+      <div
+        className={`cx-trace min-h-0 flex-1${detailsHidden ? " cx-trace--no-details" : ""}`}
+      >
         <TraceViewer
           store={store}
           correlator={correlator}
           filter={filter}
           onFilterChange={handleFilterChange}
           onExport={handleExport}
+          renderPayload={renderPayload}
+          toolbarActions={toolbarActions}
           theme={theme}
           translate={translate}
           className="h-full"

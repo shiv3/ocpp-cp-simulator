@@ -116,6 +116,7 @@ describe("LogsPage trace view", () => {
       });
     }
     document.body.innerHTML = "";
+    localStorage.clear();
   });
 
   async function mount(
@@ -217,6 +218,65 @@ describe("LogsPage trace view", () => {
       "1.6 (1): false",
       "2.0.1 (1): false",
     ]);
+  });
+
+  it("highlights the payload of the selected entry", async () => {
+    const { container, service } = await mount("/logs?view=trace");
+    await flush(10);
+    await pushEvent(
+      service,
+      "CP-A",
+      logEvent('Received: [2,"a-1","Reset",{"type":"Soft"}]'),
+    );
+    await flush(10);
+
+    // jsdom lays out nothing, so the virtualized list renders no row to
+    // click: select the first entry from the keyboard.
+    const grid = container.querySelector<HTMLElement>(".oot-grid");
+    if (!grid) throw new Error("expected the trace grid");
+    await act(async () => {
+      grid.focus();
+      grid.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Home", bubbles: true }),
+      );
+    });
+    await flush();
+    expect(container.querySelector(".oot-inspector")?.textContent).toContain(
+      '"Soft"',
+    );
+
+    const highlighted = Array.from(
+      container.querySelectorAll(".oot-inspector [class^='cx-json-']"),
+    ).map((span) => `${span.className}:${span.textContent}`);
+    expect(highlighted).toContain('cx-json-key:"type"');
+    expect(highlighted).toContain('cx-json-string:"Soft"');
+  });
+
+  it("hides and shows the detail panel from the toolbar, and remembers the choice", async () => {
+    const { container } = await mount("/logs?view=trace");
+    await flush(10);
+    const button = (label: string) =>
+      Array.from(container.querySelectorAll("button")).find(
+        (el) => el.textContent?.trim() === label,
+      );
+    const trace = () => container.querySelector(".cx-trace");
+
+    expect(trace()?.classList.contains("cx-trace--no-details")).toBe(false);
+    await act(async () => {
+      button("Hide details")?.click();
+    });
+    expect(trace()?.classList.contains("cx-trace--no-details")).toBe(true);
+    expect(localStorage.getItem("ocpp-cp.console.trace.detailsHidden")).toBe(
+      "1",
+    );
+
+    await act(async () => {
+      button("Show details")?.click();
+    });
+    expect(trace()?.classList.contains("cx-trace--no-details")).toBe(false);
+    expect(localStorage.getItem("ocpp-cp.console.trace.detailsHidden")).toBe(
+      null,
+    );
   });
 
   it("writes a charge point picked in the trace view to the URL", async () => {

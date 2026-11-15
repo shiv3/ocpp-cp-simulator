@@ -15,6 +15,8 @@
   "dashboard.logs.tabs.log": "Log",
   "dashboard.logs.tabs.trace": "Trace",
   "dashboard.logs.trace.note": "The trace shows the OCPP-J frames of the log as Open OCPP Trace records. Other log lines and SOAP exchanges stay in the Log tab.",
+  "dashboard.logs.trace.hideDetails": "Hide details",
+  "dashboard.logs.trace.showDetails": "Show details",
   "dashboard.logs.trace.viewer.listLabel": "Trace entries",
   "dashboard.logs.trace.viewer.columns.timestamp": "Timestamp",
   "dashboard.logs.trace.viewer.columns.chargePoint": "Charge point",

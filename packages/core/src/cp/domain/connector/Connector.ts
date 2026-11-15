@@ -240,9 +240,11 @@ export class Connector {
     setSocPercent: (v) => {
       this.socPercent = v;
     },
+    socAwaitsNextTransaction: () => this.socAwaitsNextTransaction,
     setSocAwaitsNextTransaction: (v) => {
       this.socAwaitsNextTransaction = v;
     },
+    patchTransaction: (fields) => this.patchTransaction(fields),
     exportWh: () => this.exportWh,
     exportRegisterWh: () => this.exportRegisterWh,
     setExportWh: (v) => {
@@ -1195,96 +1197,9 @@ export class Connector {
     this.eventsEmitter.emit("transactionChange", { transaction });
   }
 
-  /**
-   * Replace a SoC left over from the previous session with this session's
-   * opening value, before the meter scheduler's first interval runs.
-   *
-   * `stopTransaction` intentionally leaves `socPercent` alone, so a connector
-   * that finished at 82% still reads 82% when the next car plugs in. Every
-   * other part of the domain already treats
-   * `transaction.initialSoc ?? evSettings.initialSoc` as the new session's
-   * starting point — `socFromMeterValue` computes exactly that on the first
-   * meter tick — so the curve was being evaluated against the wrong battery
-   * for precisely one interval, the one that sets the opening power (#301).
-   * This does the same reset one tick earlier, and does it whether or not
-   * meter/SoC sync is on: with sync off nothing would ever have corrected it.
-   *
-   * A `"pending"` SoC is kept and claimed for this session: it was set while
-   * the connector was idle, so it describes the car plugged in now — typed
-   * into the side panel before pressing Start, or handed to
-   * `startTransaction` as `initialSoc`, which the ChargePoint writes through
-   * the `soc` setter just before this runs. Everything else belongs to a
-   * session that has ended and is replaced. That is what closes the leak an
-   * explicit `initialSoc` used to have: it arrives `"pending"`, becomes
-   * `"session"` here, and the *next* `beginTransaction` therefore treats it as
-   * the leftover it has become rather than as a fresh statement about a new
-   * car.
-   */
+  /** See {@link ConnectorEnergy.openSessionSoc}. */
   private openSessionSoc(transaction: Transaction): void {
-    if (this.socAwaitsNextTransaction) {
-      this.socAwaitsNextTransaction = false;
-      // Keeping the value is not enough: it also has to become what this
-      // session computes from. `socFromMeterValue` derives SoC as
-      // `transaction.initialSoc ?? evSettings.initialSoc` plus delivered
-      // energy, so with meter/SoC sync on — the default — the very first meter
-      // update recomputed from the EV default and overwrote the operator's
-      // number. Owning the value and being the baseline are different
-      // questions, and answering only the first left the curve and the
-      // auto-stop running on a figure nobody entered (#301). Adopting it here
-      // makes every derivation agree by construction, and it rides along in
-      // the persisted transaction so a restart keeps the same answer.
-      // Unconditionally, not only when the transaction named none: a claimed
-      // pending value *is* this session's opening SoC, so the two must not be
-      // able to disagree. On the real path they never do —
-      // `ChargePoint.startTransaction` writes its `initialSoc` through the
-      // `soc` setter moments before this runs, so the assignment is a no-op —
-      // and where they could, the connector's own value is the later statement
-      // and the one the operator can see.
-      if (this.socPercent !== null) {
-        this.patchTransaction({ initialSoc: this.socPercent });
-      }
-      return;
-    }
-    const opening = resolveSessionIntent(
-      transaction,
-      this._evSettings,
-    ).initialSoc;
-    if (opening === undefined) {
-      // No opening value anywhere, and the SoC on hand belongs to a session
-      // that has ended — so there is nothing to replace it *with*, and keeping
-      // it would open the transaction on the previous session's battery, which
-      // is exactly what this method exists to prevent. Every other derivation
-      // already treats the absent case as `0`: `socFromMeterValue` computes
-      // `transaction.initialSoc ?? evSettings.initialSoc ?? 0`, and
-      // `resolveSocForCurve` falls back the same way. Clearing to `null` makes
-      // the curve and the auto-stop read that same fallback from the first
-      // tick instead of the leftover — with meter/SoC sync on the leftover
-      // survived exactly one interval, the one that sets the opening power,
-      // and with sync off it survived the whole session (#301).
-      //
-      // `null`, not `0`: "not reported" is what we know, and every reader
-      // already resolves it to `0`. This also makes the `undefined` case agree
-      // with a JSON `null` `initialSoc`, which reaches the assignment below
-      // and clears the value already.
-      //
-      // `EVSettings.initialSoc` is typed `number`, so TypeScript believes this
-      // is unreachable. Until #333 it was not: `applyDefaultEvSettings`
-      // replaced the settings wholesale, so an `ev_settings.apply_default`
-      // that omitted `initialSoc` landed here. Both entry points now merge
-      // (`applyEvSettingsOverride` onto the current settings,
-      // `applyDefaultEvSettings` onto `defaultEVSettings`), so no known write
-      // drops it. The branch stays as the guard for settings cast past the
-      // type: the `evSettings` setter refuses a `null` required field, not an
-      // absent one.
-      if (this.socPercent !== null) {
-        this.socPercent = null;
-        this.eventsEmitter.emit("socChange", { soc: null });
-      }
-      return;
-    }
-    if (this.socPercent === opening) return;
-    this.socPercent = opening;
-    this.eventsEmitter.emit("socChange", { soc: opening });
+    this.energy.openSessionSoc(transaction);
   }
 
   stopTransaction(): void {

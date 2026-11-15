@@ -1,6 +1,9 @@
 // Split out of OCPPWebSocket (#877): reaches the socket only through `host`.
 import { encodeCallFrame } from "../callFrame";
-import { OCPPMessageType } from "../../../domain/types/OcppTypes";
+import {
+  encodeCallError,
+  encodeCallResult,
+} from "@ocpp-cp-simulator/ocpp-rpc/index";
 import { type GenerationToken, type Settlement } from "../network-sim";
 import { type OcppMessageErrorPayload } from "../OCPPWebSocket";
 import type { OcppWebSocketHost } from "./socketHost";
@@ -58,11 +61,7 @@ export class FrameSender {
       return;
     }
 
-    const message = JSON.stringify([
-      OCPPMessageType.CALLRESULT,
-      messageId,
-      payload,
-    ]);
+    const message = encodeCallResult(messageId, payload);
     const accepted = this.host.controller.sendUpstream(message, onSettled);
 
     // If sendUpstream returns false (overflow/stopped), settle immediately with queue_overflow
@@ -103,13 +102,12 @@ export class FrameSender {
     }
 
     // OCPP 1.6J CALLERROR: [4, messageId, errorCode, errorDescription, errorDetails]
-    const message = JSON.stringify([
-      OCPPMessageType.CALLERROR,
+    const message = encodeCallError(
       messageId,
       payload.errorCode,
       payload.errorDescription,
-      payload.errorDetails ?? {},
-    ]);
+      payload.errorDetails,
+    );
     const accepted = this.host.controller.sendUpstream(message, onSettled);
 
     // If sendUpstream returns false (overflow/stopped), settle immediately with queue_overflow

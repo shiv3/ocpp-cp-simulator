@@ -9,7 +9,7 @@ import { FILTER_INPUT_CLASS } from "../filterStyles";
 import { OED_KEY_HELP_URL, type CatalogAccess } from "../../lib/vehicleCatalog";
 
 /** Fills `{name}` slots of a message with elements (a <code> or a link). */
-export function fillSlots(
+function fillSlots(
   text: string,
   slots: Record<string, React.ReactNode>,
 ): React.ReactNode[] {

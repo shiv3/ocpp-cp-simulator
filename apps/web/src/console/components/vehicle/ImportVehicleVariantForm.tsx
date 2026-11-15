@@ -18,18 +18,17 @@ import { cn } from "@/lib/utils";
 
 import { FILTER_INPUT_CLASS } from "../filterStyles";
 import CurvePreview from "./CurvePreview";
+import { NO_CURVE } from "./importVehicleConsts";
 import { t as translate, type MessageKey, type TFunction } from "@/i18n";
 
-export const shown = (value: number | null) =>
+const shown = (value: number | null) =>
   value == null ? translate("consoleShared.vehicle.missing") : String(value);
-
-export const NO_CURVE = "__none__";
 
 /**
  * The values typed for what the picked record lacks, as its inputs show; a
  * value typed for another record the user then left is not kept.
  */
-export function filledOverrides(
+function filledOverrides(
   picked: VehicleProfile,
   filled: Partial<Record<EditableSpecField, string>>,
 ): VehicleProfile["overrides"] {
@@ -45,7 +44,7 @@ export function filledOverrides(
 }
 
 /** What still stops the import, or null when it can be saved. */
-export function blockerOf(
+function blockerOf(
   t: TFunction,
   recordPicked: boolean,
   curvePicked: boolean,
@@ -280,7 +279,7 @@ export const VariantForm: React.FC<{
   );
 };
 
-export const QUALITY_KEYS: Record<CatalogCurve["quality"], MessageKey> = {
+const QUALITY_KEYS: Record<CatalogCurve["quality"], MessageKey> = {
   MEASURED: "consoleShared.import.quality.MEASURED",
   DERIVED: "consoleShared.import.quality.DERIVED",
   ESTIMATED: "consoleShared.import.quality.ESTIMATED",

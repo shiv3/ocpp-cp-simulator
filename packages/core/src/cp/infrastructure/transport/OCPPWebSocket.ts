@@ -63,9 +63,11 @@ import {
   type ClientIdentity,
 } from "./ws/clientCertificateState";
 import {
+  classifyFailedAttempt,
+  describeConnectError,
   GenerationTokenImpl,
-  neverReachedCsms,
   SUPERSEDED_CLOSE,
+  type ConnectErrorDetail,
 } from "./ws/closeClassification";
 import { UpgradeRefusalDiagnostic } from "./ws/upgradeRefusalDiagnostic";
 import {
@@ -73,7 +75,7 @@ import {
   writeUpstreamPhysical,
 } from "./ws/wsNetworkSim";
 
-export { neverReachedCsms };
+export { neverReachedCsms } from "./ws/closeClassification";
 
 /**
  * #393: sees every well-shaped incoming frame (an array of 3 to 5 elements)
@@ -492,7 +494,14 @@ export class OCPPWebSocket implements ChargePointSocket {
     const onmessageHandler = (ev: MessageEvent) => {
       this._controller.receiveDownstream(ev.data.toString());
     };
-    const onerrorHandler = this.handleError.bind(this);
+    // #1034: the first error of this attempt, before it opened. Bun 1.4.4
+    // puts the cause there and closes with a blank 1006. Closure-local, so a
+    // superseded socket's late error cannot speak for this attempt.
+    let firstError: ConnectErrorDetail | undefined;
+    const onerrorHandler = (ev: Event) => {
+      if (!opened) firstError ??= describeConnectError(ev);
+      this.handleError(ev);
+    };
 
     // Capture the current generation for this socket connection
     const socketGeneration = this._generationCounter;
@@ -518,7 +527,8 @@ export class OCPPWebSocket implements ChargePointSocket {
         }
         // Only a failed connection attempt counts, not one the station
         // closed itself before it opened, nor one no CSMS ever saw.
-        if (!opened && closeCause === "network" && !neverReachedCsms(ev)) {
+        const kind = opened ? null : classifyFailedAttempt(ev, firstError);
+        if (kind && closeCause === "network" && kind !== "unreached") {
           this._clientCerts.onFailed(attempt.renewed);
         }
         this.handleClose(ev, closeCause);

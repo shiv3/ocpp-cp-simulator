@@ -14,6 +14,7 @@ import type { Logger } from "../../../shared/Logger";
 class FakeWebSocket {
   readyState = 0;
   onopen: (() => void) | null = null;
+  onerror: ((ev: Event) => void) | null = null;
   onclose: ((ev: CloseEvent) => void) | null = null;
 
   send(): void {}
@@ -36,6 +37,21 @@ class FakeWebSocket {
     this.readyState = 3;
     this.onclose?.(new CloseEvent("close", { ...close, wasClean: false }));
   }
+
+  /** Bun 1.4.4: the cause rides on `error`, the close is a blank 1006. */
+  failWith(error: Event, close: { code: number; reason: string } = NO_REASON) {
+    this.onerror?.(error);
+    this.fail(close);
+  }
+}
+
+/** A Bun 1.4.4 error event, as repro/bun-1.4.x/ws-failure-causes.ts prints it. */
+function bunError(tail: string, code?: string): Event {
+  const error = new Error(
+    `WebSocket connection to 'wss://csms' failed: ${tail}`,
+  );
+  if (code !== undefined) Object.assign(error, { code });
+  return { type: "error", message: error.message, error } as unknown as Event;
 }
 
 const NO_REASON = { code: 1006, reason: "" };
@@ -48,6 +64,7 @@ vi.mock("../wsUrlWithBasic", () => ({
     const opts = options as {
       tls?: OcppTlsOptions;
       onopen?: () => void;
+      onerror?: (ev: Event) => void;
       onclose?: (ev: CloseEvent) => void;
       onConnectOptions?: (o: unknown) => void;
     };
@@ -61,6 +78,7 @@ vi.mock("../wsUrlWithBasic", () => ({
     });
     const ws = new FakeWebSocket();
     if (opts.onopen) ws.onopen = opts.onopen;
+    if (opts.onerror) ws.onerror = opts.onerror;
     if (opts.onclose) ws.onclose = opts.onclose;
     sockets.push(ws);
     return ws;
@@ -262,6 +280,60 @@ describe("OCPPWebSocket renewed client certificate (#537)", () => {
       switchToFirst();
       lastSocket().fail(close);
       expect(nextAttempt()).toBe(CONFIGURED.cert);
+    });
+
+    // #1034: Bun 1.4.4 closes every failed attempt with a blank 1006 and
+    // puts the cause on the error event before it.
+    it.each([
+      ["ECONNREFUSED", bunError("Failed to connect", "ECONNREFUSED")],
+      ["ENOTFOUND", bunError("Failed to connect", "ENOTFOUND")],
+    ])(
+      "keeps the renewed certificate after %s on Bun 1.4.4",
+      (_name, error) => {
+        switchToFirst();
+        lastSocket().failWith(error);
+        expect(nextAttempt()).toBe(FIRST.cert);
+        lastSocket().failWith(error);
+        expect(nextAttempt()).toBe(FIRST.cert);
+      },
+    );
+
+    it.each([
+      [
+        "an untrusted server certificate",
+        bunError(
+          "TLS handshake failed: self signed certificate",
+          "DEPTH_ZERO_SELF_SIGNED_CERT",
+        ),
+      ],
+      [
+        "a missing client certificate",
+        bunError("TLS handshake failed", "EPROTO"),
+      ],
+      // The CSMS refusing the client certificate.
+      ["ECONNRESET", bunError("Connection ended", "ECONNRESET")],
+      ["a refused upgrade", bunError("Expected 101 status code: 401")],
+    ])("still alternates after %s on Bun 1.4.4 (A02.FR.28)", (_name, error) => {
+      switchToFirst();
+      lastSocket().failWith(error);
+      expect(nextAttempt()).toBe(CONFIGURED.cert);
+    });
+
+    it("reads each attempt's own error, not a superseded socket's", () => {
+      switchToFirst();
+      const stale = lastSocket();
+      // A second connect() while the first attempt is still pending.
+      ws.connect();
+      expect(presented(attempts[attempts.length - 1])).toBe(FIRST.cert);
+      const current = lastSocket();
+
+      // The old socket fails late, in a way that counts against a certificate.
+      stale.failWith(bunError("Connection ended", "ECONNRESET"));
+      // The current attempt never reached a server.
+      current.failWith(bunError("Failed to connect", "ECONNREFUSED"));
+
+      expect(nextAttempt()).toBe(FIRST.cert);
+      expect(discarded).toBe(0);
     });
   });
 

@@ -6,6 +6,7 @@ import * as x509 from "@peculiar/x509";
 import type { Logger } from "../../../shared/Logger";
 import { neverReachedCsms, OCPPWebSocket } from "../OCPPWebSocket";
 import { openOcppWebSocket } from "../wsUrlWithBasic";
+import { describeConnectError } from "../ws/closeClassification";
 import { canBindBunServe } from "../../../../test/bunServe";
 
 x509.cryptoProvider.set(globalThis.crypto);
@@ -321,19 +322,31 @@ describe.skipIf(!canBindBunServe(getAvailablePort()))(
     });
 
     // #537: what the renewed certificate's A02.FR.28 fallback relies on.
+    // Bun 1.4.3 says it in the close; 1.4.4 closes with a blank 1006 and
+    // says it in the error event before it (#1034), so both are read.
     describe("the close of a failed connection", () => {
-      function closeOf(
+      function neverReached(
         url: string,
         tls: { ca: string; serverName: string },
-      ): Promise<CloseEvent> {
+      ): Promise<{ close: CloseEvent; neverReached: boolean }> {
         return new Promise((resolve) => {
+          let error: Event | undefined;
           openOcppWebSocket({
             baseUrl: url,
             chargePointId: "CP-CLOSE",
             basicAuth: null,
             tls,
-            onerror: () => {},
-            onclose: resolve,
+            onerror: (ev) => {
+              error ??= ev;
+            },
+            onclose: (close) =>
+              resolve({
+                close,
+                neverReached: neverReachedCsms(
+                  close,
+                  error ? describeConnectError(error) : undefined,
+                ),
+              }),
           });
         });
       }
@@ -347,12 +360,12 @@ describe.skipIf(!canBindBunServe(getAvailablePort()))(
         });
         await server.stop();
 
-        const close = await closeOf(server.url, {
+        const result = await neverReached(server.url, {
           ca: certs.caCert,
           serverName: "localhost",
         });
 
-        expect(neverReachedCsms(close)).toBe(true);
+        expect(result.neverReached).toBe(true);
       });
 
       it("does not say so when the CSMS refuses the client certificate", async () => {
@@ -364,13 +377,13 @@ describe.skipIf(!canBindBunServe(getAvailablePort()))(
           port: getAvailablePort(),
         });
 
-        const close = await closeOf(server.url, {
+        const result = await neverReached(server.url, {
           ca: certs.caCert,
           serverName: "localhost",
         });
 
-        expect(close.wasClean).toBe(false);
-        expect(neverReachedCsms(close)).toBe(false);
+        expect(result.close.wasClean).toBe(false);
+        expect(result.neverReached).toBe(false);
       });
     });
 

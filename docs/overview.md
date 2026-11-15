@@ -167,7 +167,13 @@ bullet above, not repeated here.
   `domain/charge-point/ChargePointTypes.ts` holds the option, outcome and
   policy types and `PowerStateError` of `ChargePoint`; `ChargePoint.ts`
   re-exports them, so imports do not change
-  ([#877](https://github.com/shiv3/ocpp-cp-simulator/issues/877)).
+  ([#877](https://github.com/shiv3/ocpp-cp-simulator/issues/877)). The
+  rest of the class is split into collaborators beside it (cellular link,
+  client certificate switch, call overrides, authorization flow, meter
+  sampling, device model publisher, configuration wiring, power loss,
+  Reset OnIdle, connection timeouts, plug-in flow, connector wiring, boot
+  lifecycle), each taking an explicit host interface; `ChargePoint.ts` keeps
+  the public members as thin delegates.
 - `cp/application/` — the use cases that drive the domain: the charger engine
   and its behaviors, services (state history, heartbeat, operational
   timeline), the scenario engine (`application/scenario/`) and run

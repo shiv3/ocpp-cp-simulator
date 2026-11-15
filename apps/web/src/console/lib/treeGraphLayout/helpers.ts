@@ -1,4 +1,5 @@
 import { type Seq } from "../blockTree";
+import type { Point } from "./geometry";
 
 /** Whether a sequence holds a branch point, at any depth. */
 export function hasFork(seq: Seq): boolean {

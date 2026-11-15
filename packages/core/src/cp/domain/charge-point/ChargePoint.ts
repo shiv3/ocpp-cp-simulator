@@ -13,6 +13,7 @@ import {
   type ChargePointCollaborators,
 } from "./ChargePointCollaborators";
 import { CapabilityGate } from "./CapabilityGate";
+import { IdTagSource } from "./IdTagSource";
 import { EventEmitter } from "../../shared/EventEmitter";
 import { realClock } from "../../shared/clock";
 import type { SimClock, TimerHandle } from "../../shared/clock";
@@ -283,7 +284,7 @@ export class ChargePoint {
   private get _cancelClientCertificateSwitchTimer(): (() => void) | null {
     return this._certSwitch.pendingCancel;
   }
-  private readonly _idTagPool: IdTagPool | null;
+  private readonly _idTags: IdTagSource;
   private readonly _outbox: Outbox;
   private readonly _heartbeat: ChargePointHeartbeat;
   private readonly _clockAligned: ClockAlignedMeterScheduler;
@@ -589,14 +590,16 @@ export class ChargePoint {
 
     // #299: a charge point that draws from a pool when a call names no tag.
     // An explicit tagId always wins, so this only ever fills a gap.
-    this._idTagPool =
+    this._idTags = new IdTagSource(
       transportOptions.idTags && transportOptions.idTags.length > 0
         ? new IdTagPool(
             transportOptions.idTags,
             transportOptions.idTagDistribution,
             this._id,
           )
-        : null;
+        : null,
+      { chargePoint: this },
+    );
 
     this._reservationManager = new ReservationManager(
       this._logger,
@@ -988,31 +991,19 @@ export class ChargePoint {
     return this._topology.evseOf(connectorId) ?? connectorId;
   }
 
-  /**
-   * The idTag to present when the caller named none.
-   *
-   * `null` when this charge point has no pool, so every existing call site
-   * keeps its own fallback rather than inheriting one.
-   */
+  /** The idTag to present when the caller named none; `null` without a pool.
+   *  @see IdTagSource.nextIdTag */
   nextIdTag(connectorId = 0): string | null {
-    return this._idTagPool?.next(connectorId) ?? null;
+    return this._idTags.nextIdTag(connectorId);
   }
 
-  /**
-   * The pool's tags and distribution (#603), for traffic that keeps its own
-   * seeded cursor instead of advancing the one `nextIdTag` shares. `null`
-   * without a pool.
-   */
+  /** The pool's tags and distribution (#603), `null` without a pool.
+   *  @see IdTagSource.idTagPoolInfo */
   idTagPoolInfo(): {
     tags: readonly string[];
     distribution: IdTagDistribution;
   } | null {
-    return this._idTagPool
-      ? {
-          tags: this._idTagPool.list(),
-          distribution: this._idTagPool.distributionPolicy,
-        }
-      : null;
+    return this._idTags.idTagPoolInfo();
   }
 
   /**
@@ -1025,24 +1016,16 @@ export class ChargePoint {
     return tagId ?? this.nextIdTag(connectorId) ?? DEFAULT_ID_TAG;
   }
 
-  /**
-   * Replace the pool's tags after an `idTagPool.file` was edited (#314).
-   *
-   * `false` when this charge point has no pool: it was created without one, and
-   * conjuring one here would make a `--watch` daemon behave differently from
-   * the `cp.create` that produced the charge point.
-   */
-  /** Whether a pool exists to replace — the same condition
-   *  {@link replaceIdTags} refuses on, asked without mutating anything, so a
-   *  caller can persist before it changes the live charge point (#314). */
+  /** Whether a pool exists to replace (#314).
+   *  @see IdTagSource.canReplaceIdTags */
   canReplaceIdTags(tags: readonly string[]): boolean {
-    return this._idTagPool !== null && tags.length > 0;
+    return this._idTags.canReplaceIdTags(tags);
   }
 
+  /** Replace the pool's tags after an `idTagPool.file` was edited (#314).
+   *  @see IdTagSource.replaceIdTags */
   replaceIdTags(tags: readonly string[]): boolean {
-    if (!this._idTagPool || !this.canReplaceIdTags(tags)) return false;
-    this._idTagPool.replaceTags(tags);
-    return true;
+    return this._idTags.replaceIdTags(tags);
   }
 
   /** The PEM bundle that validates the current CSMS connection (#537), as

@@ -232,20 +232,18 @@ function build(input: BuildInput): BehaviorRecording {
     }
     if (frame.dir === "CP>" && frame.id === callId && frame.kind === "error") {
       answered = true;
-      const e = frame.payload as {
-        errorCode?: string;
-        errorDescription?: string;
-      };
+      // FakeCsms records a CALLERROR as { code, description, details }.
+      const e = frame.payload as { code?: string; description?: string };
       steps.push({
         type: "callResponse",
         label: `Answer ${trigger.action} with an error`,
         data: {
           kind: "error",
-          errorCode: e.errorCode ?? "GenericError",
-          errorDescription: e.errorDescription ?? "",
+          errorCode: e.code ?? "GenericError",
+          errorDescription: e.description ?? "",
         },
       });
-      say("CP", "CSMS", `${trigger.action} error ${e.errorCode ?? ""}`);
+      say("CP", "CSMS", `${trigger.action} error ${e.code ?? ""}`);
       last = at;
       continue;
     }

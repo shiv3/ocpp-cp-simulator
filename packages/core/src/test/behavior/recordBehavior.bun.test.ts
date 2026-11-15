@@ -3,7 +3,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import type { Behavior } from "@ocpp-cp-simulator/contracts/behavior";
 import { validateScenarioSchema } from "../../scenario/scenarioSchemaValidator";
 import { validateScenarioGraph } from "../../scenario/scenarioGraphValidator";
-import { recordBehavior } from "./recordBehavior";
+import { recordBehavior, type BehaviorRecording } from "./recordBehavior";
 import { runBehavior, type BehaviorRun } from "./runBehavior";
 import { startScenario } from "./runScenario";
 
@@ -21,6 +21,15 @@ const stamp = { commit: "abc1234", simulatorVersion: "0.0.0-test" };
 
 const types = (r: { scenario: { nodes: Array<{ type?: string }> } }) =>
   r.scenario.nodes.map((n) => n.type);
+
+const dataOf = (rec: BehaviorRecording) =>
+  rec.scenario.nodes.map((n) => n.data as unknown as Record<string, unknown>);
+
+/** Every recording is a valid scenario file and a valid graph. */
+function expectValid(rec: BehaviorRecording): void {
+  expect(validateScenarioSchema(rec.scenario).errors).toEqual([]);
+  expect(validateScenarioGraph(rec.scenario)).toEqual([]);
+}
 
 describe("recordBehavior", () => {
   test("default.firmware: a run becomes csmsCallTrigger, callResponse, delay and notify nodes", async () => {
@@ -77,9 +86,7 @@ describe("recordBehavior", () => {
     expect(rec.diagram).toContain(
       "FirmwareStatusNotification InstallationFailed",
     );
-    // The output is a valid scenario file and a valid graph.
-    expect(validateScenarioSchema(rec.scenario).errors).toEqual([]);
-    expect(validateScenarioGraph(rec.scenario)).toEqual([]);
+    expectValid(rec);
   }, 60_000);
 
   test("without a commit, recordedFrom.commit falls back to the version label", async () => {
@@ -98,6 +105,7 @@ describe("recordBehavior", () => {
       seed: "s2",
       version: "0.0.0-test",
     });
+    expectValid(rec);
   }, 60_000);
 
   test("the recording replays to the same wire as the behavior", async () => {
@@ -108,6 +116,7 @@ describe("recordBehavior", () => {
       params: { stepMs: 5000 },
       ...stamp,
     });
+    expectValid(rec);
     run = await runBehavior({ version: "1.6" });
     // Only the scenario answers and paces: 5 s steps, where the default
     // behavior would have finished its 2 s steps by now.
@@ -142,6 +151,7 @@ describe("recordBehavior", () => {
         ...stamp,
       });
     const [a, b, c] = [await record("x"), await record("x"), await record("y")];
+    for (const rec of [a, b, c]) expectValid(rec);
     expect(b.scenario).toEqual(a.scenario);
     expect(c.scenario.nodes).not.toEqual(a.scenario.nodes);
   }, 120_000);
@@ -199,5 +209,67 @@ describe("recordBehavior", () => {
     expect(
       reset.scenario.nodes.find((n) => n.type === "callResponse")?.data,
     ).toMatchObject({ kind: "rejected" });
+    expectValid(log);
+    expectValid(reset);
+  }, 60_000);
+
+  // A behavior for the answers and follow-ups the built-ins never produce.
+  const probe: Behavior = {
+    api: 1,
+    id: "probe",
+    onCall: {
+      // A CALLERROR answer.
+      ClearCache: {
+        mode: "replace",
+        handle: () => ({
+          error: { code: "NotImplemented", description: "not here" },
+        }),
+      },
+      // No answer: what the behavior sends next is still "before the answer".
+      UnlockConnector: {
+        mode: "replace",
+        handle: (_req, ctx) => ({
+          noResponse: true,
+          after: async () => {
+            await ctx.send("DataTransfer", { vendorId: "early" });
+          },
+        }),
+      },
+      // Accepted, then a Heartbeat and a CALL no notify node stands for.
+      ChangeAvailability: {
+        mode: "replace",
+        handle: (_req, ctx) => ({
+          response: { status: "Accepted" },
+          after: async () => {
+            await ctx.send("Heartbeat", {});
+            await ctx.sleep(2000);
+            await ctx.send("DataTransfer", { vendorId: "v", data: "d" });
+          },
+        }),
+      },
+    },
+  };
+
+  test("an error answer becomes callResponse kind error with its code and description", async () => {
+    const rec = await recordBehavior({
+      behavior: probe,
+      version: "1.6",
+      trigger: { action: "ClearCache", payload: {} },
+      ...stamp,
+    });
+    expect(types(rec)).toEqual([
+      "start",
+      "csmsCallTrigger",
+      "callResponse",
+      "end",
+    ]);
+    expect(dataOf(rec)[2]).toMatchObject({
+      kind: "error",
+      errorCode: "NotImplemented",
+      errorDescription: "not here",
+    });
+    expect(rec.diagram).toContain("ClearCache error NotImplemented");
+    expect(rec.skipped).toEqual([]);
+    expectValid(rec);
   }, 60_000);
 });

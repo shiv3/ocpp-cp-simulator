@@ -4,6 +4,7 @@ type: concept
 summary: Implementation-independent JSON/JSONL record for one OCPP message exchange — the contract between traffic producers (this simulator, via `--trace-output` or the log adapter) and analyzers (OCPP DebugKit).
 sources:
   - packages/trace/src/logEntryToTrace.ts
+  - packages/trace/src/TraceCorrelator.ts
   - apps/cli/src/trace/TraceWriter.ts
   - package.json (@open-ocpp-trace/core, @open-ocpp-trace/jsonl)
   - "issue #188"
@@ -14,7 +15,7 @@ related:
   - log-format.md
   - scenario-format.md
   - ../entities/cli.md
-updated: 2026-11-09
+updated: 2026-11-15
 ---
 
 # OCPP Trace Format (v1.1)
@@ -160,6 +161,31 @@ sent: malformed OCPP-J frames from fault injection (#393) keep a
 byte-identical `raw`, and an inbound CALL whose payload breaks the schema
 keeps its `meta.validation` (#593). The `--trace-output` writer warns about
 a record the SDK rejects and skips it, as it does on an I/O failure.
+
+### `connectorId`
+
+Since #999 the adapter stamps `connectorId` (right after `chargePointId`)
+on every record whose connector it can tell; every producer above shares
+it, so `--trace-output` files, `analyze --from-daemon` and the web console
+carry the same value. Only an integer `0` or greater is stamped; a
+missing, negative, fractional or non-numeric value leaves the field out.
+
+| Record                                                                                                 | `connectorId`                                                                                                                                                                                                   |
+| ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CALL with a top-level `payload.connectorId`                                                            | That value: every 1.6 request that names a `connectorId` (StatusNotification, MeterValues, StartTransaction, UnlockConnector, …), and 2.0.1 / 2.1 StatusNotification and UnlockConnector. `0` is stamped as is. |
+| CALL with a top-level `payload.evse.connectorId`                                                       | That value: 2.0.1 / 2.1 TransactionEvent, ChangeAvailability, TriggerMessage. EVSE objects nested deeper (GetVariables, NotifyReport, …) are ignored.                                                           |
+| 1.6 StopTransaction / RemoteStopTransaction (only `transactionId`)                                     | The connector of the StartTransaction CALL whose CALLRESULT returned that `transactionId`, on the same charge point.                                                                                            |
+| CALLRESULT / CALLERROR                                                                                 | The connector of the CALL it answers (same `messageId`, same charge point), as for `action`. A `connectorId` in its own payload (GetCompositeSchedule.conf) is ignored.                                         |
+| Anything else (BootNotification, Heartbeat, 2.x RequestStartTransaction, which names only `evseId`, …) | None.                                                                                                                                                                                                           |
+
+`logLineToTraceRecord` sees one line at a time, so it only stamps the first
+two rows; the back-filled rows need `logLinesToTrace` or a `TraceCorrelator`
+(the `--trace-output` writer uses one per run). A transaction learned from a
+StartTransaction is kept until the correlator holds 10,000 of them, then the
+oldest is dropped, like pending CALLs. 2.x transactions are not correlated:
+a TransactionEvent without `evse` carries no `connectorId`.
+[`analyze --split-by connector`](../entities/analyze.md#splitting-by-connector---split-by-connector)
+reads the field for the actions it splits by.
 
 ## JSON Schema
 

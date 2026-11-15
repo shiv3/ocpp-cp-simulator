@@ -661,4 +661,98 @@ describe("splitTraceRecords (splitBy: 'connector')", () => {
       "CP-B-connector1",
     ]);
   });
+
+  describe("record connectorId (#999)", () => {
+    const base = {
+      ocppVersion: "1.6",
+      chargePointId: "CP-A",
+      messageType: "CALL",
+    };
+
+    it("routes a StopTransaction by its record connectorId when its StartTransaction is not in the trace", async () => {
+      const lines = [
+        ...session(1, "s1", 1001, "e1"),
+        line({
+          ...base,
+          connectorId: 2,
+          messageId: "e2",
+          action: "StopTransaction",
+          payload: { transactionId: 2002, meterStop: 5 },
+        }),
+        line({
+          ...base,
+          connectorId: 2,
+          messageType: "CALLRESULT",
+          direction: "csms-to-cp",
+          messageId: "e2",
+          payload: {},
+        }),
+      ];
+
+      const split = await splitText(lines.join("\n") + "\n", "connector");
+
+      expect(Array.from(split.byChargePoint.keys())).toEqual([
+        "CP-A-connector1",
+        "CP-A-connector2",
+      ]);
+      expect(split.byChargePoint.get("CP-A-connector1")).not.toContain(
+        '"messageId":"e2"',
+      );
+      expect(split.byChargePoint.get("CP-A-connector2")).toContain(
+        '"messageId":"e2"',
+      );
+    });
+
+    it("prefers the record connectorId of a StatusNotification over its payload", async () => {
+      const lines = [
+        line({
+          ...base,
+          connectorId: 2,
+          messageId: "n1",
+          action: "StatusNotification",
+          payload: { status: "Available", errorCode: "NoError" },
+        }),
+      ];
+
+      const split = await splitText(lines.join("\n") + "\n", "connector");
+
+      expect(Array.from(split.byChargePoint.keys())).toEqual([
+        "CP-A-connector2",
+      ]);
+    });
+
+    it("keeps record connectorId 0 and actions it does not split by as station-level", async () => {
+      const lines = [
+        ...session(1, "s1", 1001, "e1"),
+        line({
+          ...base,
+          connectorId: 0,
+          messageId: "n0",
+          action: "StatusNotification",
+          payload: {
+            connectorId: 0,
+            status: "Available",
+            errorCode: "NoError",
+          },
+        }),
+        line({
+          ...base,
+          connectorId: 2,
+          direction: "csms-to-cp",
+          messageId: "u2",
+          action: "UnlockConnector",
+          payload: { connectorId: 2 },
+        }),
+      ];
+
+      const split = await splitText(lines.join("\n") + "\n", "connector");
+
+      expect(Array.from(split.byChargePoint.keys())).toEqual([
+        "CP-A-connector1",
+      ]);
+      const group = split.byChargePoint.get("CP-A-connector1") ?? "";
+      expect(group).toContain('"messageId":"n0"');
+      expect(group).toContain('"messageId":"u2"');
+    });
+  });
 });

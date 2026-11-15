@@ -82,12 +82,17 @@
  *
  * Deriving a record's connector:
  * - `StatusNotification`, `MeterValues`, `StartTransaction`,
- *   `RemoteStartTransaction` carry `payload.connectorId` directly.
+ *   `RemoteStartTransaction` carry `payload.connectorId` directly. The
+ *   record's own `connectorId` (stamped by this simulator's trace producers
+ *   since #999) wins over the payload when present. Other actions that
+ *   carry a connector (`UnlockConnector`, `ChangeAvailability`, ...) stay
+ *   station-level here, even when the record names their connector.
  * - `StopTransaction` / `RemoteStopTransaction` carry only
- *   `transactionId` — resolved by first correlating each `StartTransaction`
- *   CALL's `messageId` to the `transactionId` in its CALLRESULT, then
- *   mapping that transaction back to the StartTransaction's connector.
- * - A CALLRESULT/CALLERROR itself carries no connectorId at all; it
+ *   `transactionId` — resolved by the record's own `connectorId` when
+ *   present, else by first correlating each `StartTransaction` CALL's
+ *   `messageId` to the `transactionId` in its CALLRESULT, then mapping that
+ *   transaction back to the StartTransaction's connector.
+ * - A CALLRESULT/CALLERROR's payload carries no connectorId at all; it
  *   inherits the connector of the CALL it answers (matched by messageId).
  *   Without this, e.g. StartTransaction's own CALLRESULT — which carries
  *   the transactionId the StopTransaction correlation above depends on —
@@ -189,13 +194,18 @@ function getPayloadObject(
     : undefined;
 }
 
-/** A positive (>0) connectorId from a payload, or undefined if absent,
- *  non-numeric, or 0 (0 is station-level, see module docstring). */
-function positiveConnectorId(
-  payload: Record<string, unknown> | undefined,
-): number | undefined {
-  const value = payload?.connectorId;
+/** A positive (>0) connectorId, or undefined if absent, non-numeric, or 0
+ *  (0 is station-level, see module docstring). */
+function positive(value: unknown): number | undefined {
   return typeof value === "number" && value > 0 ? value : undefined;
+}
+
+/** The record's own `connectorId` when it carries one (#999), else its
+ *  `payload.connectorId`; positive only, see {@link positive}. */
+function positiveConnectorId(record: TraceRecord): number | undefined {
+  return positive(
+    record.connectorId ?? getPayloadObject(record.payload)?.connectorId,
+  );
 }
 
 /** "station" is a distinct sentinel from `undefined`: `undefined` means "we
@@ -225,7 +235,7 @@ function resolveConnectorsByMessageId(
       continue;
     const { messageId } = record;
     if (messageId === undefined) continue;
-    const connectorId = positiveConnectorId(getPayloadObject(record.payload));
+    const connectorId = positiveConnectorId(record);
     if (connectorId !== undefined)
       startTxMessageIdToConnector.set(messageId, connectorId);
   }
@@ -260,14 +270,17 @@ function resolveConnectorsByMessageId(
         startTxMessageIdToConnector.get(messageId) ?? "station",
       );
     } else if (CONNECTOR_ID_ACTIONS.has(action)) {
-      const connectorId = positiveConnectorId(getPayloadObject(record.payload));
+      const connectorId = positiveConnectorId(record);
       messageIdToConnector.set(messageId, connectorId ?? "station");
     } else if (TRANSACTION_ID_ACTIONS.has(action)) {
+      // The record's own connectorId (#999) wins, so a stop whose
+      // StartTransaction fell outside the trace still finds its connector.
       const transactionId = getPayloadObject(record.payload)?.transactionId;
       const resolved =
-        typeof transactionId === "number"
+        positive(record.connectorId) ??
+        (typeof transactionId === "number"
           ? txIdToConnector.get(transactionId)
-          : undefined;
+          : undefined);
       messageIdToConnector.set(messageId, resolved ?? "station");
     }
     // Any other action (BootNotification, Heartbeat, Authorize, ...) is not

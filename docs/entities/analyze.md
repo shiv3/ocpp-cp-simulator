@@ -13,7 +13,7 @@ related:
   - ocpp-debugkit.md
   - ../concepts/trace-format.md
   - ../concepts/log-format.md
-updated: 2026-11-09
+updated: 2026-11-15
 ---
 
 # `analyze` subcommand
@@ -172,8 +172,14 @@ connector before analysis, so each connector gets its own report:
   carry only `transactionId`; their connector is resolved by correlating
   each `StartTransaction` CALL's `messageId` to the `transactionId` in its
   CALLRESULT, then mapping that transaction back to the StartTransaction's
-  connector. A CALLRESULT/CALLERROR itself carries no connector and
-  inherits whichever connector the CALL it answers resolved to.
+  connector. A CALLRESULT/CALLERROR's payload carries no connector; it
+  inherits whichever connector the CALL it answers resolved to. For these
+  six actions, the record's own `connectorId`
+  ([trace format](../concepts/trace-format.md#connectorid), stamped by
+  this simulator since #999) wins over the payload and the transaction
+  correlation, so a stop whose `StartTransaction` is outside the trace still
+  finds its connector. Other actions stay station-level even when their
+  record names a connector (`UnlockConnector`, `ChangeAvailability`, …).
   `connectorId: 0` is station-level per OCPP 1.6 (the "whole station"
   pseudo-connector), never connector 1.
 - Records with no derivable connector at all — `BootNotification`,

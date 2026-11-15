@@ -10,6 +10,7 @@ sources:
   - apps/cli/src/server/startServer.ts
   - apps/cli/src/server/startupScenario.ts
   - apps/cli/src/service.ts
+  - apps/cli/src/service/scenarioRun.ts (runScenario, session-settled notification)
   - GitHub issue #314
   - GitHub issue #338
 related:

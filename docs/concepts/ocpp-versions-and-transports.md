@@ -743,6 +743,15 @@ the gate while `Pending`. Anything not triggered (transaction messages, status
 changes, heartbeats) stays suppressed, and a `Rejected` station sends nothing
 even when triggered.
 
+Inbound CALLs are gated too (#726). §4.2: "While Rejected, the Charge Point
+SHALL NOT respond to any Central System initiated message", so from a
+`Rejected` answer until the retry interval has passed the station sends no
+CALLRESULT or CALLERROR for a CSMS CALL and runs nothing (a `Reset` does not
+reboot). The CALL is announced, logged (`Boot Rejected (§4.2): ignored …`) and
+shown on the timeline as unanswered. When the retry BootNotification is due the
+station answers again. Pending and Accepted answer as usual. There is no
+opt-out.
+
 Known gap (#839): while the boot is `Pending` or `Rejected` a MeterValues.req is
 dropped, not queued (§3.7 asks for transaction-related messages to be queued),
 so a restored transaction loses one sample per interval until the boot is
@@ -755,22 +764,6 @@ logged, and a write to `AuthorizationKey` / `SecurityProfile` does not
 reconnect or apply the A05.FR.08 fallback. Chosen over `bypassGuard: true`
 (#839) because a scenario that skips the guard could leave the station with
 credentials it cannot connect with.
-
-## OCPP-J 1.6 boot gate (§4.2)
-
-Outgoing CALLs follow the status of the last `BootNotification.conf`
-(`BootGate`): `Accepted` lets everything out; before the first answer and while
-`Pending` only `BootNotification` goes out, and while `Rejected` nothing does
-until the retry interval has passed.
-
-Inbound CALLs are gated too (#726). §4.2: "While Rejected, the Charge Point
-SHALL NOT respond to any Central System initiated message", so from a
-`Rejected` answer until the retry interval has passed the station sends no
-CALLRESULT or CALLERROR for a CSMS CALL and runs nothing (a `Reset` does not
-reboot). The CALL is announced, logged (`Boot Rejected (§4.2): ignored …`) and
-shown on the timeline as unanswered. When the retry BootNotification is due the
-station answers again. Pending and Accepted answer as usual. There is no
-opt-out.
 
 ## OCPP 2.x Reset OnIdle
 

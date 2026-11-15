@@ -1,4 +1,3 @@
-import type { CellularPolicySet } from "@ocpp-cp-simulator/core/cp/domain/modem/cellularLink";
 import type { ModemCommand as ModemCommandInput } from "@ocpp-cp-simulator/contracts/modem";
 import { describeDefaultBehaviors } from "@ocpp-cp-simulator/core/cp/application/engine/behaviors/index";
 import { runtime, type RuntimeServer, type SocketIoEngine } from "../runtime";
@@ -8,7 +7,6 @@ import {
   type Socket as SocketIoSocket,
 } from "socket.io";
 import { handleJsonCommand } from "../jsonMode";
-import { runCpBatch, runCpBulk } from "./cpBulk";
 import {
   INFLIGHT_CAP,
   MAX_HTTP_BUFFER,
@@ -17,44 +15,26 @@ import {
   RPC_RATE_PER_SEC,
   RPC_TIMEOUT_MS,
   RpcFailure,
-  ARRAY_MAX_ITEMS,
-  CP_BULK_WAIT_MS,
-  type CpBulkResult,
-  type CpScenarioRunResult,
   isRpcMethod,
-  redactSimulatorConfig,
   registryCpToWire,
   rpcRequestSchema,
-  SCENARIO_RUNS_PAGE_DEFAULT,
-  CHARGING_SESSIONS_PAGE_DEFAULT,
   subscribeResultSchema,
-  type CpListItem,
   type Params,
   type RpcAck,
   type RpcCall,
   type RpcErrorCode,
-  type Result,
   type ServerInfo,
   type SimulatorConfigInput,
   type StatusWire,
   type SubscribeResult,
 } from "@ocpp-cp-simulator/contracts/index";
-import type { ScenarioRunPage } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunSummary";
-import { TIMELINE_FORMAT_VERSION } from "@ocpp-cp-simulator/core/cp/application/services/OperationalTimeline";
 import type { ConnectorSettingsRepository } from "@ocpp-cp-simulator/client/interfaces/ConnectorSettingsRepository";
 import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
 import { FleetTemplateRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/FleetTemplateRepository";
 import type { ScenarioRepository } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioRepository";
-import type { AutoMeterValueConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/MeterValueCurve";
-import {
-  type EVSettings,
-  type EVSettingsPatch,
-} from "@ocpp-cp-simulator/core/cp/domain/connector/EVSettings";
 import { redactSensitiveText } from "@ocpp-cp-simulator/core/cp/shared/redaction";
 import { DEFAULT_SOAP_PATH } from "../soapPath";
 import { appVersion } from "../appVersion";
-import { type NetworkSimLayerConfig } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/network-sim/config";
-import type { AutoTrafficConfig } from "@ocpp-cp-simulator/core/cp/domain/connector/AutoTraffic";
 import { createScenarioRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/createScenarioRepository";
 import { SqliteConnectorSettingsRepository } from "@ocpp-cp-simulator/client/sqlite/SqliteConnectorSettingsRepository";
 import { BlueprintRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/BlueprintRepository";
@@ -76,14 +56,9 @@ import {
   runFacadeOperation,
   type RpcTarget,
 } from "./rpc/facadeErrors";
-import {
-  snapshotToFullCp,
-  snapshotToRegistryCpWire,
-  snapshotToWireStatus,
-} from "./rpc/wireSnapshot";
+import { snapshotToFullCp, snapshotToWireStatus } from "./rpc/wireSnapshot";
 import { registerSocketAuth } from "./rpc/socketAuth";
 import {
-  batchFailureReason,
   createCp,
   createFleet,
   createManyCps,
@@ -99,9 +74,39 @@ import {
   updateCp,
 } from "./rpc/cpProvisioning";
 import { dispatchFacadeCpCommand } from "./rpc/facadeCpCommands";
+import {
+  getConfig,
+  saveConfig,
+  getNetworkSimGlobal,
+  saveNetworkSimGlobal,
+  getNetworkSimCp,
+  saveNetworkSimCp,
+  saveCellularPolicies,
+  triggerNetworkSimDisconnect,
+  applyDefaultEVSettingsRpc,
+  listScenarioRuns,
+  getTimeline,
+  listChargingSessions,
+  getConfigKeys,
+  setConfigKey,
+  getAutoMeterConfig,
+  saveAutoMeterConfig,
+  getAutoTrafficSetting,
+  saveAutoTrafficSetting,
+  getSocMeterSync,
+  saveSocMeterSync,
+} from "./rpc/settingsRpcs";
+import {
+  listCps,
+  bulkCps,
+  runScenarioOnSelector,
+  deleteCp,
+  getLogs,
+  clearLogs,
+  resetState,
+} from "./rpc/cpRpcs";
 import type { CPRegistry } from "./CPRegistry";
 import type { EventBus } from "./eventBus";
-import { selectLogWindow } from "@ocpp-cp-simulator/core/cp/shared/window";
 import { getGlobalMetricsRecorder } from "./metrics/MetricsRecorder";
 import {
   createRegistryEventBridge,
@@ -118,7 +123,6 @@ import {
   RegistryChargePointService,
   type RegistryConfigRepository,
 } from "./RegistryChargePointService";
-
 export const SOCKET_IO_PATH = "/socket.io/";
 export const SOCKET_IO_PING_INTERVAL_MS = 25_000;
 export const SOCKET_IO_PING_TIMEOUT_MS = 20_000;
@@ -717,414 +721,6 @@ export async function runRpc(
     recorder?.countRpc(label, "error");
     throw err;
   }
-}
-
-async function listCps(
-  chargePointService: RegistryChargePointService,
-  params: Params<"cp.list">,
-): Promise<CpListItem[]> {
-  // #470: the selector is applied before any status snapshot is built.
-  return runFacadeOperation(async () =>
-    (await chargePointService.listChargePoints(params.labels)).map(
-      snapshotToRegistryCpWire,
-    ),
-  );
-}
-
-/**
- * `cp.bulk` (#470): one lifecycle action on every charge point a label
- * selector matches, each through the same facade call — and so the same error
- * classification — as the per-CP method of that name.
- */
-async function bulkCps(
-  deps: RuntimeSocketIoDeps,
-  { labels, action }: Params<"cp.bulk">,
-): Promise<CpBulkResult> {
-  const service = deps.chargePointService;
-  const cpIds = service.selectChargePointIds(labels);
-  // Refused before acting: nothing caps the registry, and a match the result
-  // arrays cannot hold would fail result validation after every action ran.
-  if (cpIds.length > ARRAY_MAX_ITEMS) {
-    throw new RpcFailure(
-      "invalid_params",
-      `the selector matches ${cpIds.length} charge points, more than ${ARRAY_MAX_ITEMS}; narrow it`,
-    );
-  }
-  // Each action is named after the facade method that runs it.
-  return runCpBulk(
-    cpIds,
-    (cpId) => runFacadeOperation(() => service[action](cpId)),
-    {
-      waitMs: deps.cpBulkWaitMs ?? CP_BULK_WAIT_MS,
-      failureReason: batchFailureReason,
-    },
-  );
-}
-
-/**
- * `cp.scenario.run` (#486): `run_scenario_template` on every charge point a
- * label selector matches, through the same facade call as the per-CP method.
- * Each entry reports the scenario id its charge point started, to follow with
- * `scenario_status` / `scenario.runs.list`. Selection, the over-1,000 refusal
- * and the fan-out are `cp.bulk`'s.
- */
-async function runScenarioOnSelector(
-  deps: RuntimeSocketIoDeps,
-  params: Params<"cp.scenario.run">,
-): Promise<CpScenarioRunResult> {
-  const service = deps.chargePointService;
-  const cpIds = service.selectChargePointIds(params.labels);
-  if (cpIds.length > ARRAY_MAX_ITEMS) {
-    throw new RpcFailure(
-      "invalid_params",
-      `the selector matches ${cpIds.length} charge points, more than ${ARRAY_MAX_ITEMS}; narrow it`,
-    );
-  }
-  const { once } = params;
-  const batch = await runCpBatch(
-    cpIds,
-    (cpId) =>
-      runFacadeOperation(() =>
-        service.runScenarioTemplate(cpId, params.templateId, {
-          connectorId: params.connector,
-          evSettings: params.evSettings as Partial<EVSettings> | undefined,
-          strict: params.strict,
-          ...(once === undefined ? {} : { once }),
-        }),
-      ),
-    {
-      waitMs: deps.cpBulkWaitMs ?? CP_BULK_WAIT_MS,
-      failureReason: batchFailureReason,
-    },
-  );
-  return {
-    matched: batch.matched,
-    started: batch.succeeded.map(({ cpId, value }) => ({
-      cpId,
-      scenarioId: value.scenarioId,
-    })),
-    failed: batch.failed,
-  };
-}
-
-async function deleteCp(
-  deps: RuntimeSocketIoDeps,
-  { cpId, stopTransactions, reason }: Params<"cp.delete">,
-): Promise<{ ok: true }> {
-  await runFacadeOperation(() =>
-    stopTransactions === true
-      ? deps.chargePointService.stopTransactionsThenClose(
-          cpId,
-          "remove",
-          reason,
-        )
-      : deps.chargePointService.removeChargePoint(cpId),
-  );
-  return { ok: true };
-}
-
-async function getLogs(
-  deps: RuntimeSocketIoDeps,
-  params: Params<"logs.get">,
-): Promise<ReadonlyArray<unknown>> {
-  const entries = await runFacadeOperation(() =>
-    deps.chargePointService.listStoredLogs(params.cpId),
-  );
-  // `limit` selects the NEWEST n (see selectLogWindow). It used to take the
-  // oldest n, which made the parameter useless on a long-running charge point:
-  // no limit could reach recent activity.
-  return selectLogWindow(entries, {
-    limit: params.limit,
-    offset: params.offset,
-    order: params.order ?? "asc",
-  });
-}
-
-async function clearLogs(
-  deps: RuntimeSocketIoDeps,
-  { cpId }: Params<"logs.clear">,
-): Promise<{ ok: true }> {
-  await runFacadeOperation(() => deps.chargePointService.clearStoredLogs(cpId));
-  return { ok: true };
-}
-
-async function resetState(deps: RuntimeSocketIoDeps): Promise<{ ok: true }> {
-  await runFacadeOperation(() => deps.chargePointService.resetAllState());
-  // The table is truncated with the others; without --state-db the profiles
-  // live in the repository's memory, which only the repository can empty.
-  deps.vehicleProfiles.clear();
-  deps.registryEvents?.emitReset();
-  return { ok: true };
-}
-
-async function getConfig(
-  chargePointService: RegistryChargePointService,
-): Promise<unknown> {
-  const config = await runFacadeOperation(() =>
-    chargePointService.loadConfig(),
-  );
-  return config ? redactSimulatorConfig(config) : null;
-}
-
-async function saveConfig(
-  deps: RuntimeSocketIoDeps,
-  params: Params<"config.save">,
-): Promise<{ ok: true }> {
-  const saved = await runFacadeOperation(async () => {
-    await deps.chargePointService.saveConfig(params.config);
-    return deps.chargePointService.loadConfig();
-  });
-  deps.registryEvents?.emitConfigChanged(saved);
-  return { ok: true };
-}
-
-async function getNetworkSimGlobal(
-  deps: RuntimeSocketIoDeps,
-): Promise<unknown> {
-  const config = await runFacadeOperation(() =>
-    deps.chargePointService.getNetworkSimGlobal(),
-  );
-  return { config };
-}
-
-async function saveNetworkSimGlobal(
-  deps: RuntimeSocketIoDeps,
-  params: Params<"network_sim.global.save">,
-): Promise<{ ok: true }> {
-  try {
-    await runFacadeOperation(() =>
-      deps.chargePointService.saveNetworkSimGlobal(
-        params.config as NetworkSimLayerConfig | null,
-      ),
-    );
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    throw new RpcFailure("invalid_params", message);
-  }
-  return { ok: true };
-}
-
-async function getNetworkSimCp(
-  deps: RuntimeSocketIoDeps,
-  params: Params<"network_sim.cp.get">,
-): Promise<unknown> {
-  return runFacadeOperation(() =>
-    deps.chargePointService.getNetworkSimCp(params.cpId),
-  );
-}
-
-async function saveNetworkSimCp(
-  deps: RuntimeSocketIoDeps,
-  params: Params<"network_sim.cp.save">,
-): Promise<{ ok: true }> {
-  try {
-    await runFacadeOperation(() =>
-      deps.chargePointService.saveNetworkSimCp(
-        params.cpId,
-        params.config as NetworkSimLayerConfig | null,
-      ),
-    );
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    throw new RpcFailure("invalid_params", message);
-  }
-  return { ok: true };
-}
-
-async function saveCellularPolicies(
-  deps: RuntimeSocketIoDeps,
-  params: Params<"network_sim.cellular.save">,
-): Promise<{ ok: true }> {
-  try {
-    await runFacadeOperation(() =>
-      deps.chargePointService.saveCellularPolicies(
-        params.policies as CellularPolicySet | null,
-      ),
-    );
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    throw new RpcFailure("invalid_params", message);
-  }
-  return { ok: true };
-}
-
-async function triggerNetworkSimDisconnect(
-  deps: RuntimeSocketIoDeps,
-  params: Params<"network_sim.disconnect.trigger">,
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  return runFacadeOperation(() =>
-    deps.chargePointService.triggerNetworkSimDisconnect(
-      params.cpId,
-      params.ruleId,
-    ),
-  );
-}
-
-async function applyDefaultEVSettingsRpc(
-  deps: RuntimeSocketIoDeps,
-  params: Params<"ev_settings.apply_default">,
-): Promise<undefined> {
-  // Possibly partial (#333): the connector merges it onto
-  // `defaultEVSettings`, so nothing here asserts a complete `EVSettings`.
-  await runFacadeOperation(() =>
-    deps.chargePointService.applyDefaultEVSettings(
-      params.settings as unknown as EVSettingsPatch,
-    ),
-  );
-  return undefined;
-}
-
-async function listScenarioRuns(
-  deps: RuntimeSocketIoDeps,
-  params: Params<"scenario.runs.list">,
-): Promise<ScenarioRunPage> {
-  return deps.chargePointService.listScenarioRuns({
-    ...params,
-    limit: params.limit ?? SCENARIO_RUNS_PAGE_DEFAULT,
-  });
-}
-
-/** #448: an unknown cpId is `not_found` — the registry throws, unlike the
- *  stored-logs read behind `logs.get`. */
-async function getTimeline(
-  deps: RuntimeSocketIoDeps,
-  { cpId, ...query }: Params<"timeline.get">,
-): Promise<Result<"timeline.get">> {
-  const page = await runFacadeOperation(() =>
-    deps.chargePointService.getOperationalTimeline(cpId, query),
-  );
-  return { version: TIMELINE_FORMAT_VERSION, ...page };
-}
-
-/**
- * #447: an unknown cpId is `not_found`, like `timeline.get`. #489: without
- * `cpId` the listing spans the fleet, `labels` narrowing it.
- */
-async function listChargingSessions(
-  deps: RuntimeSocketIoDeps,
-  { cpId, labels, startedFrom, startedTo, ...query }: Params<"sessions.list">,
-): Promise<Result<"sessions.list">> {
-  const page = {
-    ...query,
-    // Normalised to the form `startedAt` is stored in, so a zone offset in
-    // the request compares correctly as text.
-    ...(startedFrom === undefined
-      ? {}
-      : { startedFrom: new Date(startedFrom).toISOString() }),
-    ...(startedTo === undefined
-      ? {}
-      : { startedTo: new Date(startedTo).toISOString() }),
-    limit: query.limit ?? CHARGING_SESSIONS_PAGE_DEFAULT,
-  };
-  if (cpId !== undefined) {
-    if (labels !== undefined) {
-      throw new RpcFailure(
-        "invalid_params",
-        "labels selects charge points; it cannot be combined with cpId",
-      );
-    }
-    return runFacadeOperation(() =>
-      deps.chargePointService.listChargingSessions(cpId, page),
-    );
-  }
-  return runFacadeOperation(() =>
-    deps.chargePointService.listFleetChargingSessions({ ...page, labels }),
-  );
-}
-
-/** #612: an unknown cpId is `not_found`, like `sessions.list`. */
-async function getConfigKeys(
-  deps: RuntimeSocketIoDeps,
-  { cpId, keys }: Params<"cp.config_keys.get">,
-): Promise<Result<"cp.config_keys.get">> {
-  const list = await runFacadeOperation(() =>
-    deps.chargePointService.getConfigurationKeys(cpId, keys),
-  );
-  return { keys: [...list.keys], unknown: [...list.unknown] };
-}
-
-/** #612: unknown key → `not_found`; read-only key or refused value →
- *  `invalid_params` (see {@link classifyFacadeError}). */
-async function setConfigKey(
-  deps: RuntimeSocketIoDeps,
-  { cpId, key, value }: Params<"cp.config_keys.set">,
-): Promise<Result<"cp.config_keys.set">> {
-  const status = await runFacadeOperation(() =>
-    deps.chargePointService.setConfigurationKey(cpId, key, value),
-  );
-  return { key, status };
-}
-
-async function getAutoMeterConfig(
-  deps: RuntimeSocketIoDeps,
-  params: Params<"connector_settings.auto_meter.get">,
-): Promise<AutoMeterValueConfig | null> {
-  return runFacadeOperation(() =>
-    deps.chargePointService.getAutoMeterConfig(params.cpId, params.connectorId),
-  );
-}
-
-async function saveAutoMeterConfig(
-  deps: RuntimeSocketIoDeps,
-  params: Params<"connector_settings.auto_meter.save">,
-): Promise<{ ok: true }> {
-  await runFacadeOperation(() =>
-    deps.chargePointService.saveAutoMeterConfig(
-      params.cpId,
-      params.connectorId,
-      params.config as unknown as AutoMeterValueConfig,
-    ),
-  );
-  return { ok: true };
-}
-
-async function getAutoTrafficSetting(
-  deps: RuntimeSocketIoDeps,
-  params: Params<"connector_settings.auto_traffic.get">,
-): Promise<AutoTrafficConfig | null> {
-  return runFacadeOperation(() =>
-    deps.chargePointService.getAutoTrafficConfig(
-      params.cpId,
-      params.connectorId,
-    ),
-  );
-}
-
-async function saveAutoTrafficSetting(
-  deps: RuntimeSocketIoDeps,
-  params: Params<"connector_settings.auto_traffic.save">,
-): Promise<{ ok: true }> {
-  await runFacadeOperation(() =>
-    deps.chargePointService.saveAutoTrafficConfig(
-      params.cpId,
-      params.connectorId,
-      params.config as unknown as AutoTrafficConfig,
-    ),
-  );
-  return { ok: true };
-}
-
-async function getSocMeterSync(
-  deps: RuntimeSocketIoDeps,
-  params: Params<"connector_settings.soc_meter_sync.get">,
-): Promise<boolean> {
-  return runFacadeOperation(() =>
-    deps.chargePointService.getSocMeterSync(params.cpId, params.connectorId),
-  );
-}
-
-async function saveSocMeterSync(
-  deps: RuntimeSocketIoDeps,
-  params: Params<"connector_settings.soc_meter_sync.save">,
-): Promise<{ ok: true }> {
-  await runFacadeOperation(() =>
-    deps.chargePointService.saveSocMeterSync(
-      params.cpId,
-      params.connectorId,
-      params.enabled,
-    ),
-  );
-  return { ok: true };
 }
 
 function shutdownServer(deps: RuntimeSocketIoDeps): { ok: true } {

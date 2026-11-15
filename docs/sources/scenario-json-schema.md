@@ -4,6 +4,8 @@ type: source
 summary: The published JSON Schema (Draft 2020-12) for scenario files v1.11 — strict on known fields, permissive on unknown keys, advisory at load time; mirrors `ScenarioTypes.ts`.
 sources:
   - packages/core/schema/scenario.schema.json
+  - packages/core/src/cp/application/scenario/types/nodeData.ts
+  - packages/core/src/cp/application/scenario/types/graph.ts
 related:
   - ../concepts/scenario-format.md
   - ../entities/scenario-templates.md
@@ -40,7 +42,7 @@ fields the schema deliberately does not reject.
   [Library](../entities/web-console.md#scenario-library) scenario with that
   scenario's `id`; `templateId` likewise names the built-in template an
   instance came from.
-- Mirrors `packages/core/src/cp/application/scenario/ScenarioTypes.ts`; the closed
+- Mirrors `packages/core/src/cp/application/scenario/ScenarioTypes.ts` (node and graph types in `types/nodeData.ts` and `types/graph.ts`); the closed
   vocabularies (node `type`, `OCPPStatus`, …) are enumerated here.
 - Validation is **advisory**: the simulator warns on mismatch but never
   refuses to load — except that the `required` top-level fields (`id`,

@@ -19,6 +19,7 @@ import {
   type SerializedLogLine,
 } from "@ocpp-cp-simulator/trace/logEntryToTrace";
 import { TraceCorrelator } from "@ocpp-cp-simulator/trace/TraceCorrelator";
+import { toTraceOcppVersion } from "@ocpp-cp-simulator/trace/traceOcppVersion";
 import type { GlobalLogEntry } from "./globalLogsContext";
 
 /** The producer named in the metadata of every entry. */
@@ -59,6 +60,9 @@ function traceEntry(seq: number, record: TraceRecord): TraceEntry {
 export interface TraceFeedOptions {
   /** Receives the entries of each delivery that has any, oldest first. */
   push: (entries: readonly ViewerEntry[]) => void;
+  /** The OcppVersion constant of a charge point (e.g. "OCPP-1.6J"), stamped
+   *  on its records as TraceWriter does; undefined leaves it out. */
+  ocppVersionOf?: (cpId: string) => string | undefined;
 }
 
 export interface TraceFeed {
@@ -82,7 +86,10 @@ export interface TraceFeed {
  * as TraceWriter does, when both lines arrive in the same delivery (they
  * are logged one after the other).
  */
-export function createTraceFeed({ push }: TraceFeedOptions): TraceFeed {
+export function createTraceFeed({
+  push,
+  ocppVersionOf,
+}: TraceFeedOptions): TraceFeed {
   // One correlator for every charge point: it keys by charge point, so a
   // CALL on one never back-fills a response on another.
   const correlator = new TraceCorrelator();
@@ -120,7 +127,13 @@ export function createTraceFeed({ push }: TraceFeedOptions): TraceFeed {
           }
           continue;
         }
-        const record = logLineToTraceRecord(line);
+        const ocppVersion = ocppVersionOf?.(item.cpId);
+        const record = logLineToTraceRecord(
+          line,
+          ocppVersion === undefined
+            ? {}
+            : { ocppVersion: toTraceOcppVersion(ocppVersion) },
+        );
         if (!record) continue;
         correlator.observe(record);
         if (

@@ -1,6 +1,12 @@
 import "@open-ocpp-trace/viewer-react/styles.css";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import {
   createCorrelator,
@@ -26,6 +32,9 @@ export interface TraceViewProps {
   /** The charge point filter, shared with the log view (`?cp=`). */
   selectedCpIds: readonly string[];
   onCpFilterChange: (ids: string[]) => void;
+  /** The OcppVersion constant of each charge point (e.g. "OCPP-1.6J"); a
+   *  frame of a charge point missing here has no OCPP version. */
+  ocppVersions: ReadonlyMap<string, string>;
 }
 
 /** The console's `cx-*` colors, which follow its dark mode on their own. */
@@ -54,9 +63,14 @@ const TraceView: React.FC<TraceViewProps> = ({
   entries,
   selectedCpIds,
   onCpFilterChange,
+  ocppVersions,
 }) => {
   const { t } = useTranslation();
   const { isDark } = useDarkMode();
+
+  // Read at ingest time: the feed is created once, the versions change.
+  const ocppVersionsRef = useRef(ocppVersions);
+  ocppVersionsRef.current = ocppVersions;
 
   // Created once: the store and the feed's position must survive renders.
   // The correlator is never disconnected: it lives as long as the store.
@@ -67,6 +81,7 @@ const TraceView: React.FC<TraceViewProps> = ({
     const feed = createTraceFeed({
       push: (added) =>
         store.apply(added.map((entry) => ({ type: "add", entry }))),
+      ocppVersionOf: (cpId) => ocppVersionsRef.current.get(cpId),
     });
     return { store, correlator, feed };
   });

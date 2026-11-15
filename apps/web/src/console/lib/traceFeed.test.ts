@@ -105,6 +105,36 @@ describe("createTraceFeed", () => {
     });
   });
 
+  it("stamps each record with the OCPP version of its charge point, as TraceWriter does", () => {
+    const versions = new Map([
+      ["CP16", "OCPP-1.6J"],
+      ["CP201", "OCPP-2.0.1"],
+    ]);
+    const batches: ViewerEntry[][] = [];
+    const feed = createTraceFeed({
+      push: (entries) => batches.push([...entries]),
+      ocppVersionOf: (cpId) => versions.get(cpId),
+    });
+    feed.ingest(
+      newestFirst([
+        sent(0, "CP16", [2, "a-1", "Heartbeat", {}]),
+        sent(1, "CP201", [2, "b-1", "Heartbeat", {}]),
+        sent(2, "CP-UNKNOWN", [2, "c-1", "Heartbeat", {}]),
+      ]),
+    );
+
+    const records = (batches.flat() as TraceEntry[]).map(
+      (entry) => entry.record,
+    );
+    expect(records.map((record) => record.ocppVersion)).toEqual([
+      "1.6",
+      "2.0.1",
+      undefined,
+    ]);
+    // An unknown version is left out rather than guessed.
+    expect(records[2]).not.toHaveProperty("ocppVersion");
+  });
+
   it("pushes only the lines it has not seen, oldest first, whatever the re-delivery", () => {
     const { feed, batches } = collect();
     const first = [

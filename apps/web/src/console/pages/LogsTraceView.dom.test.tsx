@@ -25,6 +25,18 @@ function snapshot(id: string): ChargePointSnapshot {
   };
 }
 
+/** A remote-mode snapshot carries the config the daemon built the charge
+ *  point with, its OCPP version included. */
+function withVersion(
+  cp: ChargePointSnapshot,
+  ocppVersion: string,
+): ChargePointSnapshot {
+  return {
+    ...cp,
+    config: { ocppVersion } as ChargePointSnapshot["config"],
+  };
+}
+
 const logEvent = (
   message: string,
   type: LogType = LogType.WEBSOCKET,
@@ -106,8 +118,10 @@ describe("LogsPage trace view", () => {
     document.body.innerHTML = "";
   });
 
-  async function mount(path: string) {
-    const cps = [snapshot("CP-A"), snapshot("CP-B")];
+  async function mount(
+    path: string,
+    cps: ChargePointSnapshot[] = [snapshot("CP-A"), snapshot("CP-B")],
+  ) {
     const service = createFakeChargePointService({ snapshots: cps });
     const locations: ReportedLocation[] = [];
     const rendered = await renderConsole(path, {
@@ -178,6 +192,31 @@ describe("LogsPage trace view", () => {
         ),
       ).toBe(true);
     }
+  });
+
+  it("stamps each frame with the OCPP version of its charge point", async () => {
+    const { container, service } = await mount("/logs?view=trace", [
+      withVersion(snapshot("CP-A"), "OCPP-1.6J"),
+      withVersion(snapshot("CP-B"), "OCPP-2.0.1"),
+    ]);
+    await flush(10);
+
+    await pushEvent(
+      service,
+      "CP-A",
+      logEvent('Sent: [2,"a-1","Heartbeat",{}]'),
+    );
+    await pushEvent(
+      service,
+      "CP-B",
+      logEvent('Sent: [2,"b-1","Heartbeat",{}]'),
+    );
+    await flush(10);
+
+    expect(filterOptions(container, "OCPP versions")).toEqual([
+      "1.6 (1): false",
+      "2.0.1 (1): false",
+    ]);
   });
 
   it("writes a charge point picked in the trace view to the URL", async () => {

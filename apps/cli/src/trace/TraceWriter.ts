@@ -19,6 +19,7 @@ import {
 } from "@ocpp-cp-simulator/trace/logEntryToTrace";
 import type { TraceRecord } from "@open-ocpp-trace/core";
 import { TraceCorrelator } from "@ocpp-cp-simulator/trace/TraceCorrelator";
+import { toTraceOcppVersion } from "@ocpp-cp-simulator/trace/traceOcppVersion";
 import { serializeRecord } from "@open-ocpp-trace/jsonl/writer";
 
 export interface TraceWriterAttachContext {
@@ -27,26 +28,6 @@ export interface TraceWriterAttachContext {
   /** OcppVersion constant, e.g. "OCPP-1.6J" (undefined ⇒ treated as 1.6J). */
   ocppVersion?: string;
   logger: Logger;
-}
-
-/** Map an {@link OcppVersion} constant to the plain protocol number the
- *  trace format wants (docs/concepts/trace-format.md), e.g. "OCPP-1.6J" -> "1.6".
- *  Undefined falls back to "1.6", matching `parseOcppVersion`'s fallback. */
-export function toTraceOcppVersion(ocppVersion: string | undefined): string {
-  switch (ocppVersion) {
-    case "OCPP-1.2":
-      return "1.2";
-    case "OCPP-1.5":
-      return "1.5";
-    case "OCPP-2.0.1":
-      return "2.0.1";
-    case "OCPP-2.1":
-      return "2.1";
-    case "OCPP-1.6S":
-    case "OCPP-1.6J":
-    default:
-      return "1.6";
-  }
 }
 
 export class TraceWriter {

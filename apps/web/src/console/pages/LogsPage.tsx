@@ -46,7 +46,7 @@ const LogsPage: React.FC = () => {
   const { config, isLoading } = useConfig();
   const { chargePoints } = useChargePoints(config, { isLoading });
   const { entries, paused, setPaused, clear } = useGlobalLogs();
-  const { chargePointService } = useDataContext();
+  const { chargePointService, mode } = useDataContext();
 
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedCpIds = useMemo(
@@ -86,6 +86,20 @@ const LogsPage: React.FC = () => {
       }),
     [entries, viewerEntries],
   );
+
+  // The trace view stamps each frame with its charge point's OCPP version.
+  // Local-mode snapshots carry no `config`: the browser's shared config
+  // holds the version of every local charge point.
+  const ocppVersions = useMemo(() => {
+    const versions = new Map<string, string>();
+    for (const cp of chargePoints) {
+      const version =
+        cp.config?.ocppVersion ??
+        (mode === "local" ? config?.ocppVersion : undefined);
+      if (version) versions.set(cp.id, version);
+    }
+    return versions;
+  }, [chargePoints, mode, config?.ocppVersion]);
 
   // Whose persisted rows Download and Clear screen + DB reach.
   const scopeIds =
@@ -188,6 +202,7 @@ const LogsPage: React.FC = () => {
               entries={entries}
               selectedCpIds={selectedCpIds}
               onCpFilterChange={setSelectedCpIds}
+              ocppVersions={ocppVersions}
             />
           </Suspense>
         </TabsContent>

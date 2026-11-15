@@ -47,8 +47,9 @@ export class UpgradeRefusalDiagnostic {
    * `evt.type` is the constant string "error".
    *
    * `httpStatus` is present only on the `ws` path, which is handed the whole
-   * HTTP reply before it errors. Under Bun the status is not knowable here at
-   * all — {@link probe} asks for it instead.
+   * HTTP reply before it errors. Bun carries no status field: 1.4.3 says
+   * nothing of it, 1.4.4 quotes it in the message (`Expected 101 status code:
+   * 401`) without the redirect target, so {@link probe} asks for it instead.
    */
   reportError(evt: Event): boolean {
     const detail = evt as {

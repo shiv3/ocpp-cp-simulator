@@ -11,9 +11,11 @@ import { LOOPBACK, tcpPort } from "../../../../test/bunServe";
 /**
  * #288 — a refused upgrade must say which refusal it was.
  *
- * Bun's native WebSocket reports 401, 404 and 301 identically
- * (`code=1002, Expected 101 status code`), and the daemon runs under Bun, so
- * the status is fetched after the fact. These tests pin the three operator
+ * Bun's native WebSocket reports 401, 404 and 301 without the status: 1.4.3
+ * closes with `code=1002, Expected 101 status code`, 1.4.4 puts
+ * `Expected 101 status code: 401` on the error event and closes with a blank
+ * 1006 (#1033). The daemon runs under Bun, so the status and the redirect
+ * target are fetched after the fact. These tests pin the three operator
  * outcomes and, just as importantly, the gating: the diagnostic must not
  * multiply the CSMS's request rate while the reconnect loop runs.
  */
@@ -286,15 +288,18 @@ describe("OCPPWebSocket handshake refusal (#288)", () => {
     // The old line was `WebSocket error type: error`, which is the same string
     // for every failure there is.
     expect(lines.some((l) => l.includes("WebSocket error type:"))).toBe(false);
-    expect(lines.some((l) => l.includes("Expected 101 status code"))).toBe(
-      true,
-    );
+    // The error line itself, not the close log: Bun 1.4.4 closes with no
+    // reason, and both versions say it in the error's message.
+    const error = lines.find((l) => l.includes("WebSocket error:")) ?? "";
+    expect(error).toContain("Expected 101 status code");
   });
 
   it("stays quiet when the failure is not a refused upgrade", async () => {
     // Nothing listens on this port, so the socket never gets an HTTP reply to
-    // ask about: close code 1006, not 1002. Probing here would put a request
-    // on the network for a server that is not there.
+    // ask about: a refused connection (1006 `Failed to connect` on Bun 1.4.3,
+    // ECONNREFUSED then a blank 1006 on 1.4.4), not a refused upgrade.
+    // Probing here would put a request on the network for a server that is
+    // not there.
     const lines: string[] = [];
     const socket = new OCPPWebSocket(
       "ws://127.0.0.1:1/ocpp/",

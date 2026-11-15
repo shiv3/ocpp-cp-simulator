@@ -176,9 +176,6 @@ export class OCPPWebSocket implements ChargePointSocket {
   private _lastConnectOptions: OcppWebSocketConnectOptions | null = null;
   /** #288: the attempt's error log and the refusal probe. */
   private readonly _refusal: UpgradeRefusalDiagnostic;
-  /** Set when the client itself reported the HTTP status (the `ws` path),
-   *  so the probe does not ask a question already answered. */
-  private _refusalStatusReported: boolean = false;
   // Extra HTTP headers + Sec-WebSocket-Protocol tokens attached on each
   // upgrade. Both are CLI-only — DOM WebSocket ignores extraHeaders, but
   // the runtime fallback in openOcppWebSocket handles that.
@@ -496,11 +493,13 @@ export class OCPPWebSocket implements ChargePointSocket {
     };
     // #1034: the first error of this attempt, before it opened. Bun 1.4.4
     // puts the cause there and closes with a blank 1006. Closure-local, so a
-    // superseded socket's late error cannot speak for this attempt.
+    // superseded socket's late error cannot speak for this attempt, nor
+    // silence its refusal probe by reporting a status of its own (#1033).
     let firstError: ConnectErrorDetail | undefined;
+    let statusReported = false;
     const onerrorHandler = (ev: Event) => {
       if (!opened) firstError ??= describeConnectError(ev);
-      this.handleError(ev);
+      if (this._refusal.reportError(ev)) statusReported = true;
     };
 
     // Capture the current generation for this socket connection
@@ -531,7 +530,9 @@ export class OCPPWebSocket implements ChargePointSocket {
         if (kind && closeCause === "network" && kind !== "unreached") {
           this._clientCerts.onFailed(attempt.renewed);
         }
-        this.handleClose(ev, closeCause);
+        // #288: ask the CSMS why it refused, unless the client said so.
+        const probe = kind === "upgrade-refused" && !statusReported;
+        this.handleClose(closeCause, probe);
       }
       this.reportClose(socketToken, ev);
       // #448: announced once the charge point has handled the close, so an
@@ -569,7 +570,6 @@ export class OCPPWebSocket implements ChargePointSocket {
         warn: (message) => this._logger.warn(message, LogType.WEBSOCKET),
         onConnectOptions: (options) => {
           this._lastConnectOptions = options;
-          this._refusalStatusReported = false;
         },
         onopen: onopenHandler,
         onmessage: onmessageHandler,
@@ -1035,24 +1035,6 @@ export class OCPPWebSocket implements ChargePointSocket {
     this.observers.emit("closed", { cause: closeCause });
   }
 
-  /** #288 — say what the error was, not merely that there was one. */
-  private handleError(evt: Event): void {
-    if (this._refusal.reportError(evt)) this._refusalStatusReported = true;
-  }
-
-  /**
-   * #288 — Bun's native WebSocket reports every refused upgrade identically
-   * (`code=1002, Expected 101 status code`), and the daemon runs under Bun.
-   * So on that close, and only that close, ask the CSMS why. Never once the
-   * `ws` path has reported the status, nor after a manual disconnect.
-   */
-  private maybeProbeRefusal(ev: CloseEvent): void {
-    if (this._isManualDisconnect || this._disposed) return;
-    if (this._refusalStatusReported) return;
-    if (ev.code !== 1002 || !/expected 101/i.test(ev.reason ?? "")) return;
-    this._refusal.probe(this._lastConnectOptions, this._generationCounter);
-  }
-
   /**
    * Who closed a generation's socket: the cause it latched, else what
    * handleClose would latch now. dispose() latches nothing; a close after it
@@ -1070,8 +1052,12 @@ export class OCPPWebSocket implements ChargePointSocket {
     this._onCloseCallback?.(ev, this.closeCauseOf(token));
   }
 
-  private handleClose(ev: CloseEvent, closeCause: CloseCause): void {
-    this.maybeProbeRefusal(ev);
+  /** @param probeRefusal a refused upgrade whose status the client hid:
+   *  ask the CSMS (#288), never after a manual disconnect. */
+  private handleClose(closeCause: CloseCause, probeRefusal: boolean): void {
+    if (probeRefusal && !this._isManualDisconnect && !this._disposed) {
+      this._refusal.probe(this._lastConnectOptions, this._generationCounter);
+    }
     this.stopPingInterval();
 
     if (this._disposed) {

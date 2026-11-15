@@ -62,6 +62,10 @@ export type ConnectorWrite =
       readonly kind: "status";
       readonly status: OCPPStatus;
       readonly scope: StatusScope;
+      /** `full` scope: send the StatusNotification even when the station
+       *  enforces the OCPP 1.6 §4.9 transition table and this change is not
+       *  in it (#618). */
+      readonly allowInvalidTransition?: boolean;
     }
   | { readonly kind: "availability"; readonly availability: OCPPAvailability }
   | {

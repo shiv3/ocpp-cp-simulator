@@ -434,13 +434,23 @@ export class ChargerEngine implements ChargePointEngine {
     const { write } = event;
     this.emitWriteHooks(event.connectorId, previous, write);
     if (write.kind !== "status" || write.scope === "local") return;
+    // OCPP 1.6 §4.9: a change the transition table does not list. By default
+    // only a warning: scenarios and tests may force any transition. Under
+    // `statusTransitions: "enforce"` (#618, 1.6J) the connector still changes
+    // (the simulated hardware did) but the StatusNotification stays off the
+    // wire, so the CSMS under test only ever sees a conformant peer, unless
+    // the write asked for it explicitly (`allowInvalidTransition`).
+    let suppress = false;
     if (
       write.scope === "full" &&
       !isAllowedConnectorStatusTransition(previous.status, write.status)
     ) {
-      // Only a warning: scenarios and tests may force any transition.
+      suppress =
+        this.host.enforcesStatusTransitions && !write.allowInvalidTransition;
       this.warn(
-        `Connector ${event.connectorId} status ${previous.status} → ${write.status} is not an expected transition`,
+        suppress
+          ? `Connector ${event.connectorId} status ${previous.status} → ${write.status} is not an OCPP 1.6 §4.9 transition; StatusNotification not sent (statusTransitions: enforce)`
+          : `Connector ${event.connectorId} status ${previous.status} → ${write.status} is not an expected transition`,
       );
     }
     this.host.events.emit("connectorStatusChange", {
@@ -448,8 +458,20 @@ export class ChargerEngine implements ChargePointEngine {
       status: write.status,
       previousStatus: previous.status,
     });
+    if (suppress) {
+      this.host.events.emit("statusNotificationSuppressed", {
+        connectorId: event.connectorId,
+        from: previous.status,
+        to: write.status,
+        reason: "invalidTransition",
+      });
+    }
     if (write.scope === "full") {
-      this.host.afterConnectorStatus(event.connectorId, write.status);
+      this.host.afterConnectorStatus(
+        event.connectorId,
+        write.status,
+        !suppress,
+      );
     }
   }
 

@@ -78,6 +78,20 @@ describe("NODE_FORM_REGISTRY", () => {
     );
   });
 
+  it("keeps a statusChange allowInvalidTransition, and adds none (schema 1.11, #618)", () => {
+    expectFormRoundTrip(ScenarioNodeType.STATUS_CHANGE, {
+      label: "S",
+      status: OCPPStatus.Finishing,
+      allowInvalidTransition: true,
+    });
+    const entry = NODE_FORM_REGISTRY[ScenarioNodeType.STATUS_CHANGE];
+    expect(
+      entry.formToNodeData(
+        entry.nodeDataToForm({ label: "S", status: OCPPStatus.Charging }),
+      ),
+    ).toEqual({ label: "S", status: OCPPStatus.Charging });
+  });
+
   it("round-trips hidden Transaction fields and drops runtime fields", () => {
     const formData: NodeFormData = {
       label: "Start Tx",

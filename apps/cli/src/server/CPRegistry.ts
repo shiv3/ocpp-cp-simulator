@@ -1,6 +1,12 @@
 import * as fs from "fs";
 
-import type { ChargePointCapabilityProfile } from "@ocpp-cp-simulator/core/cp/domain/charge-point/CapabilityProfile";
+import {
+  DISABLED_ACTION_ERROR_CODES,
+  STATUS_TRANSITION_MODES,
+  type ChargePointCapabilityProfile,
+  type DisabledActionErrorCode,
+  type StatusTransitionMode,
+} from "@ocpp-cp-simulator/core/cp/domain/charge-point/CapabilityProfile";
 import {
   chargerCapabilitiesProblem,
   type ChargerCapabilities,
@@ -1473,10 +1479,12 @@ function restoreCapabilityProfile(
 ): { capabilityProfile: ChargePointCapabilityProfile } | Record<string, never> {
   const parsed = safeJsonParse<unknown>(raw);
   if (typeof parsed !== "object" || parsed === null) return {};
-  const { disabledActions, triggerMessageTargets } = parsed as Record<
-    string,
-    unknown
-  >;
+  const {
+    disabledActions,
+    triggerMessageTargets,
+    disabledActionErrorCode,
+    statusTransitions,
+  } = parsed as Record<string, unknown>;
   const names = (value: unknown): string[] | undefined =>
     Array.isArray(value) && value.every((v) => typeof v === "string")
       ? (value as string[])
@@ -1490,6 +1498,20 @@ function restoreCapabilityProfile(
   const targets = names(triggerMessageTargets);
   if (disabled) profile.disabledActions = disabled;
   if (targets) profile.triggerMessageTargets = targets;
+  // A value this build does not know restores as absent (the default).
+  if (
+    (DISABLED_ACTION_ERROR_CODES as readonly unknown[]).includes(
+      disabledActionErrorCode,
+    )
+  ) {
+    profile.disabledActionErrorCode =
+      disabledActionErrorCode as DisabledActionErrorCode;
+  }
+  if (
+    (STATUS_TRANSITION_MODES as readonly unknown[]).includes(statusTransitions)
+  ) {
+    profile.statusTransitions = statusTransitions as StatusTransitionMode;
+  }
   return { capabilityProfile: profile };
 }
 

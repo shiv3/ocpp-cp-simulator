@@ -1,14 +1,14 @@
 ---
 title: "Source: packages/core/schema/scenario.schema.json"
 type: source
-summary: The published JSON Schema (Draft 2020-12) for scenario files v1.10 — strict on known fields, permissive on unknown keys, advisory at load time; mirrors `ScenarioTypes.ts`.
+summary: The published JSON Schema (Draft 2020-12) for scenario files v1.11 — strict on known fields, permissive on unknown keys, advisory at load time; mirrors `ScenarioTypes.ts`.
 sources:
   - packages/core/schema/scenario.schema.json
 related:
   - ../concepts/scenario-format.md
   - ../entities/scenario-templates.md
   - example-scenarios.md
-updated: 2026-11-09
+updated: 2026-11-15
 ---
 
 # Source: `packages/core/schema/scenario.schema.json`
@@ -23,13 +23,13 @@ fields the schema deliberately does not reject.
 
 **Key facts.**
 
-- Version `1.10` (edge `kind: "loop"` with a `loop` object `{ times, forSeconds, until }`, `#/$defs/edge`; `until.cases` and `switch.cases` share `#/$defs/switchCase`; parallel and `join` nodes in 1.9; edge `kind: "timeout"` in 1.8; the `$from` root `response`, and `$match` matchers in `switch.cases`: `#/$defs/matcher`,
+- Version `1.11` (`statusChange` `allowInvalidTransition`, #618; edge `kind: "loop"` with a `loop` object `{ times, forSeconds, until }`, `#/$defs/edge`; `until.cases` and `switch.cases` share `#/$defs/switchCase`; parallel and `join` nodes in 1.9; edge `kind: "timeout"` in 1.8; the `$from` root `response`, and `$match` matchers in `switch.cases`: `#/$defs/matcher`,
   applied to a case through an `if`/`then` on objects whose only key is `$match`; issue #214 introduced 1.0; issue #240 added the
   `connectionTrigger` node and the `csmsCallTrigger` `payload` condition in
   1.1; issue #301 the charging-curve and electrical `evSettings` fields in
   1.2; issue #389 the `ocppCall` node in 1.3; the web console's Library the
   optional `libraryId` in 1.4; issue #566 the `callResponse` and `useBehavior` nodes and
-  `csmsCallTrigger` `behavior` / `onBusy` in 1.5; issue #654 `useBehavior` `params` and `mode`, then the `notify`, `switch`, `choice` and `setState` nodes, `callResponse` `accepted` / `rejected`, `delay` `until` / `jitterSeconds` and the `$from` roots `charger`, `connector`, `state`, in 1.6; the edge `kind: "timeout"` in 1.8; the `parallel` and `join` nodes in 1.9 — the version history is the
+  `csmsCallTrigger` `behavior` / `onBusy` in 1.5; issue #654 `useBehavior` `params` and `mode`, then the `notify`, `switch`, `choice` and `setState` nodes, `callResponse` `accepted` / `rejected`, `delay` `until` / `jitterSeconds` and the `$from` roots `charger`, `connector`, `state`, in 1.6; the edge `kind: "timeout"` in 1.8; the `parallel` and `join` nodes in 1.9; the loop edge in 1.10; issue #618 the `statusChange` `allowInvalidTransition` in 1.11 — the version history is the
   [changelog](../concepts/scenario-format.md#changelog)).
 - `evSettings.attribution` (optional array, #458) carries the credit owed for
   data copied from an imported vehicle profile — source, attribution text,

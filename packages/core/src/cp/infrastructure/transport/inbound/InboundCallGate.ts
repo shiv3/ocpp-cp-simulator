@@ -13,8 +13,9 @@ import type { CallExchange } from "./CallExchange";
  * 2. `inboundPolicy` (sticky): reply with a CALLERROR, or stay silent
  * 3. `responseOverride` (one-shot): reply `{ status }`
  * 3b. the static capability profile (#618): reply CALLERROR `NotImplemented`
- *    for a disabled action, and `{ status: "NotImplemented" }` to a
- *    TriggerMessage / ExtendedTriggerMessage whose target it leaves out
+ *    (or the profile's `disabledActionErrorCode`) for a disabled action, and
+ *    `{ status: "NotImplemented" }` to a TriggerMessage /
+ *    ExtendedTriggerMessage whose target it leaves out
  * 4. `BehaviorRegistry.resolve()`, synchronous
  * 5. otherwise: the default path, which the caller runs
  *
@@ -48,6 +49,9 @@ export interface InboundCallGatePorts {
   takeOverride(action: string): { status: string } | "unhonoured" | null;
   /** Step 3b: does the station's capability profile disable `action`? */
   isDisabled?(action: string): boolean;
+  /** Step 3b: the CALLERROR code for a disabled action. Absent:
+   *  `NotImplemented`. */
+  disabledErrorCode?(): string;
   /** Step 3b: may TriggerMessage / ExtendedTriggerMessage request `target`
    *  under the capability profile? */
   isTriggerTargetSupported?(target: string): boolean;
@@ -146,10 +150,13 @@ export class InboundCallGate {
       // #618: the station is declared as lacking this feature. Below the
       // sticky policy and the one-shot override (a scenario keeps
       // precedence), above rules and handlers, which never see the CALL.
+      // The code is the profile's choice of the two OCPP-J §4.2.3 codes
+      // (`NotImplemented` unless `disabledActionErrorCode` says otherwise).
+      const errorCode = ports.disabledErrorCode?.() ?? "NotImplemented";
       this.options.warn(
-        `${this.prefix}Capability profile: ${action} is not implemented, replied CallError(NotImplemented)`,
+        `${this.prefix}Capability profile: ${action} is not implemented, replied CallError(${errorCode})`,
       );
-      exchange.replyError("NotImplemented", "This action is not supported");
+      exchange.replyError(errorCode, "This action is not supported");
       return { kind: "settled" };
     }
 
@@ -221,9 +228,12 @@ export function ports16(chargePoint: {
   consumeResponseOverride(action: string): string | null;
   isActionDisabled?(action: string): boolean;
   isTriggerTargetSupported?(target: string): boolean;
+  disabledActionErrorCode?(): string;
 }): InboundCallGatePorts {
   return {
     isDisabled: (action) => chargePoint.isActionDisabled?.(action) ?? false,
+    disabledErrorCode: () =>
+      chargePoint.disabledActionErrorCode?.() ?? "NotImplemented",
     isTriggerTargetSupported: (target) =>
       chargePoint.isTriggerTargetSupported?.(target) ?? true,
     notifyReceived: (action, payload, messageId) =>
@@ -254,11 +264,14 @@ export function portsAliased(
     clearResponseOverride(action: string): void;
     isActionDisabled?(action: string): boolean;
     isTriggerTargetSupported?(target: string): boolean;
+    disabledActionErrorCode?(): string;
   },
   statusless: ReadonlySet<string>,
 ): InboundCallGatePorts {
   return {
     isDisabled: (action) => chargePoint.isActionDisabled?.(action) ?? false,
+    disabledErrorCode: () =>
+      chargePoint.disabledActionErrorCode?.() ?? "NotImplemented",
     isTriggerTargetSupported: (target) =>
       chargePoint.isTriggerTargetSupported?.(target) ?? true,
     notifyReceived: (action, payload, messageId) =>

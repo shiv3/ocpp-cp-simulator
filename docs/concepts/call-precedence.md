@@ -14,12 +14,15 @@ sources:
   - "issue #618"
   - packages/core/src/cp/domain/charge-point/CapabilityProfile.ts
   - packages/core/src/cp/infrastructure/transport/__tests__/capabilityProfile.bun.test.ts
+  - packages/core/src/cp/infrastructure/transport/__tests__/strictModes.bun.test.ts
+  - packages/core/src/cp/application/engine/ChargerEngine.ts
+  - packages/core/src/cp/domain/connector/ConnectorTransitions.ts
 related:
   - charger-engine.md
   - scenario-format.md
   - ../analyses/scenario-or-behavior.md
   - ../entities/default-behaviors.md
-updated: 2026-11-08
+updated: 2026-11-15
 ---
 
 # Who answers an inbound CALL
@@ -67,7 +70,7 @@ A charge point can be declared as lacking features (#618) with `capabilityProfil
 blueprint's `params`, so `cp.create_many { blueprintId }` yields the partial station fleet-wide):
 
 - `disabledActions`: CSMS→CP action names. An inbound CALL for one is answered with a CALLERROR
-  `NotImplemented` ("This action is not supported"), the same answer an action with no handler gets
+  `NotImplemented` ("This action is not supported"; `disabledActionErrorCode` below can make it `NotSupported`), the same answer an action with no handler gets
   (OCPP-J 1.6 §4.2.3). On OCPP 2.x an action is matched under its 1.6 spelling too, for the one-to-one pairs only
   (`RemoteStartTransaction` disables `RequestStartTransaction`; likewise `RemoteStopTransaction`,
   `ChangeConfiguration` / `GetConfiguration` for `SetVariables` / `GetVariables`). The folded pairs stay apart:
@@ -80,15 +83,89 @@ blueprint's `params`, so `cp.create_many { blueprintId }` yields the partial sta
   none; absent leaves every target as it is. On 2.x the renamed targets match under both spellings
   (`DiagnosticsStatusNotification` / `LogStatusNotification`, `SignChargePointCertificate` /
   `SignChargingStationCertificate`); on 1.6 they are distinct targets and match exactly.
+- `disabledActionErrorCode`: `NotImplemented` (default) or `NotSupported`, the CALLERROR code a disabled action
+  is answered with. OCPP-J 1.6 §4.2.3 defines `NotImplemented` as "Requested Action is not known by receiver" and
+  `NotSupported` as "Requested Action is recognized but not supported by the receiver": a station that knows a
+  message but lacks the feature arguably answers the latter, so the tester picks the answer the CSMS under test
+  must handle. Applies on every OCPP-J version (2.x RPC defines both codes too); the description stays "This
+  action is not supported". Any other value is refused by `cp.create` / `cp.update` (`invalid_params`).
+- `statusTransitions`: `warn` (default) or `enforce`; OCPP 1.6J only. Not about inbound CALLs: see
+  [Status transitions](#status-transitions-statustransitions) below.
 
 The profile is step 2b: below the sticky policy and the one-shot override, so **a scenario keeps precedence**
 (a policy refuses with its own error code, an override answers its status), and above scenario rules, code
 behaviors and handlers, which never see a disabled CALL. The `incomingCallReceived` event still fires. The
 profile is static: a scenario cannot change it. It is not consulted for OCPP-S 1.6 (SOAP), which does not pass
-through the gate either, so `cp.create` / `cp.update` refuse a profile for an OCPP SOAP version instead of ignoring it. `triggerMessageTargets` is checked in the gate too, not in the handlers, so a scenario rule or a code behavior cannot accept a target the profile excludes (a one-shot override or a policy still wins). The profile does not change what the station reports: a 1.6 station with `ReserveNow` disabled still lists `Reservation` in `GetConfiguration` `SupportedFeatureProfiles`. No profile is the behavior before #618. It persists with `--state-db`
+through the gate either, so `cp.create` / `cp.update` refuse a profile for an OCPP SOAP version instead of ignoring it. `triggerMessageTargets` is checked in the gate too, not in the handlers, so a scenario rule or a code behavior cannot accept a target the profile excludes (a one-shot override or a policy still wins). The profile does not change what the station reports: a 1.6 station with `ReserveNow` disabled still lists `Reservation` in `GetConfiguration` `SupportedFeatureProfiles` (the mismatch is logged, see [below](#consistency-with-supportedfeatureprofiles-ocpp-16)). No profile is the behavior before #618. It persists with `--state-db`
 (`charge_points.capability_profile`).
 
-Test: `packages/core/src/cp/infrastructure/transport/__tests__/capabilityProfile.bun.test.ts`.
+Test: `packages/core/src/cp/infrastructure/transport/__tests__/capabilityProfile.bun.test.ts`,
+`packages/core/src/cp/infrastructure/transport/__tests__/strictModes.bun.test.ts`.
+
+#### Consistency with SupportedFeatureProfiles (OCPP 1.6)
+
+A 1.6 station that lists a feature profile in its `SupportedFeatureProfiles` configuration key claims every
+message of that profile (OCPP 1.6 §3). When a 1.6J station connects, `capabilityProfileConflicts`
+(`CapabilityProfile.ts`) compares the capability profile with the key and logs one `warn` (type `SYSTEM`) per
+conflict:
+
+- a disabled action belongs to a feature profile the key lists (`capabilityProfile disables ReserveNow, but
+SupportedFeatureProfiles lists Reservation, which includes it (OCPP 1.6 §3)`);
+- `triggerMessageTargets` names at least one target, but `TriggerMessage` is disabled, or the key does not list
+  `RemoteTrigger`.
+
+Nothing is refused or changed: existing setups keep working, and a deliberately inconsistent station stays
+possible (that may be the CSMS behaviour under test). Without the key there is nothing to compare and nothing is
+logged; `[]` targets (no target supported) is not a conflict. The CSMS-initiated messages of each 1.6 feature
+profile (OCPP 1.6 edition 2, §3; the table is `OCPP16_FEATURE_PROFILE_CSMS_ACTIONS`):
+
+| Feature profile           | CSMS-initiated messages                                                                                                                                                      |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Core`                    | `ChangeAvailability`, `ChangeConfiguration`, `ClearCache`, `DataTransfer`, `GetConfiguration`, `RemoteStartTransaction`, `RemoteStopTransaction`, `Reset`, `UnlockConnector` |
+| `FirmwareManagement`      | `GetDiagnostics`, `UpdateFirmware`                                                                                                                                           |
+| `LocalAuthListManagement` | `GetLocalListVersion`, `SendLocalList`                                                                                                                                       |
+| `Reservation`             | `CancelReservation`, `ReserveNow`                                                                                                                                            |
+| `SmartCharging`           | `ClearChargingProfile`, `GetCompositeSchedule`, `SetChargingProfile`                                                                                                         |
+| `RemoteTrigger`           | `TriggerMessage`                                                                                                                                                             |
+
+The Security Whitepaper messages (`ExtendedTriggerMessage`, `SignedUpdateFirmware`, `GetLog`, the certificate
+messages) belong to no feature profile and never conflict. Where 1.6 itself defines the answer for an unlisted
+profile, the station gives it without any capability profile: `SetChargingProfile`, `ClearChargingProfile` and
+`GetCompositeSchedule` answer CALLERROR `NotSupported` when `SupportedFeatureProfiles` does not list
+`SmartCharging` (#594, `SmartChargingHandlers.ts`).
+
+#### Status transitions (`statusTransitions`)
+
+OCPP 1.6 §4.9 lists which connector status transitions are possible (53 of the 72 ordered pairs;
+`ALLOWED_CONNECTOR_STATUS_TRANSITIONS`, see [Charger engine](charger-engine.md)). By default (`warn`, and without
+a profile) a status change outside the table is logged as a warning and still reported: scenarios and tests may
+force any transition. A CSMS developer often wants the opposite — a charge point that never emits an illegal
+transition, to test the CSMS against a conformant peer. With `statusTransitions: "enforce"`, on a status change
+the table does not list (a `full` write: `ChargePoint.updateConnectorStatus` and everything built on it):
+
+- the connector record **still changes** (the simulated hardware did), and `connectorStatusChange` /
+  `connector_status` is still emitted, as are the local side effects (the ConnectionTimeOut timer, ending a
+  reservation of a Faulted or Unavailable connector);
+- the StatusNotification is **not sent**; the station logs a `warn` (`... is not an OCPP 1.6 §4.9 transition;
+StatusNotification not sent (statusTransitions: enforce)`) and emits `statusNotificationSuppressed`
+  (`connectorId`, `from`, `to`, `reason: "invalidTransition"`), forwarded on the control plane as the
+  [`status_notification_suppressed`](../entities/cli.md#events) event.
+
+Each change is checked against the connector's local status, not against the status the CSMS last saw: after a
+suppressed change the CSMS keeps the older status until a later change is sent, and that later change is a listed
+transition from the local status, which may not be one from the CSMS's. A change requested explicitly is always
+sent:
+`allowInvalidTransition: true` on [`update_connector_status`](control-plane.md#cp-command-methods) (and the MCP
+`set_connector_status`), or on a `statusChange` scenario node ([schema 1.11](scenario-format.md)). Not affected,
+because they do not change the connector through the engine: the `statusNotification` scenario node and
+`update_connector_status` with any StatusNotification field (`errorCode`, `info`, `vendorErrorCode`,
+`vendorId`, `timestamp`, `suppressChargingStateTransactionEvent`), which send the message as given without
+updating the connector, a raw `ocppCall` node or `ocpp.call` request, and connector 0 (the table is for
+`connectorId > 0`).
+
+OCPP 1.6J only: the table is written in the 1.6 status vocabulary, and 2.x reports connectors through a
+different `ConnectorStatusEnumType` (`Occupied` for several 1.6 statuses) with no equivalent table, so on 2.0.1 /
+2.1 `enforce` behaves as `warn`. OCPP SOAP versions do not accept a capability profile at all.
 
 ### Within a step
 

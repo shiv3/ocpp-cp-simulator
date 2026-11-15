@@ -1114,6 +1114,7 @@ export class RemoteChargePointService implements ChargePointService {
       ...(opts?.timestamp !== undefined
         ? { timestamp: opts.timestamp.toISOString() }
         : {}),
+      ...(opts?.allowInvalidTransition ? { allowInvalidTransition: true } : {}),
       ...(opts?.suppressChargingStateTransactionEvent !== undefined
         ? {
             suppressChargingStateTransactionEvent:

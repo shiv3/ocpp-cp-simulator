@@ -25,7 +25,6 @@ import {
 } from "./CapabilityProfile";
 import { translatesCsmsActionNames } from "../types/csmsActionNames";
 import { EventEmitter } from "../../shared/EventEmitter";
-import { setTimeoutAt } from "../../shared/timers";
 import { realClock } from "../../shared/clock";
 import type { SimClock, TimerHandle } from "../../shared/clock";
 import { RngStreams, systemRngStreams } from "../../shared/rng";
@@ -61,6 +60,7 @@ import type {
 import type { RawFrameSink } from "../transport/RawFrameSink";
 import { CellularModem, type RedactedModemState } from "../modem/CellularModem";
 import { CellularLinkController } from "./CellularLinkController";
+import { ClientCertificateSwitch } from "./ClientCertificateSwitch";
 import { bootNotificationFor } from "../modem/bootIdentifiers";
 import {
   type CellularLinkState,
@@ -76,7 +76,6 @@ import type {
 import type { FileUploader } from "./FileUploader";
 import type {
   CloseCause,
-  GenerationToken,
   ResolvedNetworkSimConfig,
 } from "../transport/networkSim";
 import type { OcppSecurityProfile } from "@ocpp-cp-simulator/contracts/securityProfile";
@@ -217,7 +216,6 @@ import { StationTopology } from "../topology/StationTopology";
 import {
   DEFAULT_INBOUND_VALIDATION,
   PowerStateError,
-  RENEWED_CERTIFICATE_RECONNECT_MAX_DEFER_MS,
   type BasicAuthSettings,
   type AutoMeterValueSetting,
   type StartTransactionOptions,
@@ -262,8 +260,6 @@ export type {
 
 /** RFC 6455 Normal Closure, and No Status Received (a close without a code). */
 const NORMAL_CLOSE_CODES: ReadonlySet<number> = new Set([1000, 1005]);
-/** How often that wait checks again. */
-const RENEWED_CERTIFICATE_RECONNECT_POLL_MS = 500;
 
 type ChargePointResetSource = "ocpp-call" | "ocpp15-soap";
 
@@ -319,18 +315,19 @@ export class ChargePoint {
   private readonly _receivesCsmsCall: ChargePointTransport["receivesCsmsCall"];
   private readonly _messageHandler: IChargePointMessageHandler;
   private readonly _transportUrl: string;
-  /** #537: waits for the transaction messages in flight before reconnecting
-   *  with a renewed certificate (A02.FR.08). */
-  private _cancelClientCertificateSwitchTimer: (() => void) | null = null;
-  /** #537: bumped by every switch request and every cancel, so a request
-   *  still reading the store when a newer one (or a cancel) arrives does
-   *  nothing once it resumes. */
-  private _clientCertificateSwitchSeq = 0;
-  /** #537: set by {@link releaseRenewedClientCertificate} (and dispose):
-   *  no switch is started any more. */
-  private _clientCertificateSwitchReleased = false;
-  /** #537: stops following the certificate store (dispose). */
-  private _unwatchClientIdentity: (() => void) | null = null;
+  private readonly _certSwitch = new ClientCertificateSwitch({
+    logger: () => this._logger,
+    clock: () => this._clock,
+    webSocket: () => this._webSocket,
+    certificateStore: () => this._certificateStore,
+    outbox: () => this._outbox,
+    reset: () => this.reset(),
+  });
+  /** Tests read the pending wait's canceller through this name. */
+  // @ts-expect-error TS6133: read by tests through a cast, not by this class
+  private get _cancelClientCertificateSwitchTimer(): (() => void) | null {
+    return this._certSwitch.pendingCancel;
+  }
   private readonly _idTagPool: IdTagPool | null;
   private _bootAccepted = false;
   private readonly _outbox: Outbox;
@@ -1338,13 +1335,7 @@ export class ChargePoint {
    * {@link useRenewedClientCertificate}, not here.
    */
   private wireRenewedClientIdentity(): void {
-    const webSocket = this._webSocket;
-    if (!webSocket?.usesClientCertificate()) return;
-    this._unwatchClientIdentity = this._certificateStore.onChange(() => {
-      if (!this._certificateStore.hasTlsClientIdentity()) {
-        webSocket.clearRenewedClientCertificate();
-      }
-    });
+    this._certSwitch.watchClientIdentity();
   }
 
   /** A configuration value as a monitor sees it: GetVariables' rendering
@@ -2779,7 +2770,7 @@ export class ChargePoint {
    * supersedes it.
    */
   async useRenewedClientCertificate(): Promise<void> {
-    await this.switchClientCertificate(true);
+    await this._certSwitch.switchClientCertificate(true);
   }
 
   /**
@@ -2794,77 +2785,7 @@ export class ChargePoint {
    * runs on a connect, so no connection reconnects for it again.
    */
   async adoptRenewedClientCertificate(): Promise<void> {
-    await this.switchClientCertificate(false);
-  }
-
-  private async switchClientCertificate(reconnect: boolean): Promise<void> {
-    if (this._clientCertificateSwitchReleased) return;
-    this.cancelClientCertificateSwitch();
-    const request = this._clientCertificateSwitchSeq;
-    const webSocket = this._webSocket;
-    if (!webSocket?.usesClientCertificate()) return;
-    const identity = await this._certificateStore.tlsClientIdentity();
-    // Superseded by a newer request, or cancelled (dispose, cp.update),
-    // while the store was read: that one decides, this one does nothing.
-    if (request !== this._clientCertificateSwitchSeq) return;
-    if (!identity) {
-      webSocket.clearRenewedClientCertificate();
-      return;
-    }
-    // No wait for `notBefore` (A02.FR.08): CertificateSigned refuses a leaf
-    // that is not valid yet (A02.FR.06/07, #587), so a stored identity is
-    // valid when it is handed over.
-    webSocket.useRenewedClientCertificate(identity);
-    if (!reconnect) return;
-    // A station that is not connected (back-off, simulated outage, manual
-    // disconnect) presents it at its next connection, on that one's timing.
-    if (!webSocket.isOpenOrConnecting()) {
-      this._logger.info(
-        "Renewed Charging Station certificate presented at the next connection (A02.FR.08)",
-        LogType.WEBSOCKET,
-      );
-      return;
-    }
-    this.reconnectWithRenewedCertificate(
-      webSocket.currentGeneration(),
-      this._clock.now() + RENEWED_CERTIFICATE_RECONNECT_MAX_DEFER_MS,
-      identity.cert,
-    );
-  }
-
-  /** Reconnects once no transaction message awaits its write, an answer
-   *  or a resend, or at `deadline`. A connection that closed meanwhile is
-   *  not reconnected: the next one presents the renewed certificate. */
-  private reconnectWithRenewedCertificate(
-    generation: GenerationToken,
-    deadline: number,
-    cert: string,
-  ): void {
-    this._cancelClientCertificateSwitchTimer = null;
-    const webSocket = this._webSocket;
-    if (!webSocket?.isOpenOrConnecting()) return;
-    if (webSocket.currentGeneration() !== generation) return;
-    // Opened with it meanwhile (#564): nothing to switch.
-    if (webSocket.presentsClientCertificate(cert)) return;
-    if (
-      this._outbox.hasTransactionMessagesInFlight() &&
-      this._clock.now() < deadline
-    ) {
-      this._cancelClientCertificateSwitchTimer = setTimeoutAt(
-        Math.min(
-          this._clock.now() + RENEWED_CERTIFICATE_RECONNECT_POLL_MS,
-          deadline,
-        ),
-        () => this.reconnectWithRenewedCertificate(generation, deadline, cert),
-        { clock: this._clock },
-      );
-      return;
-    }
-    this._logger.info(
-      "Reconnecting with the renewed Charging Station certificate (A02.FR.08)",
-      LogType.WEBSOCKET,
-    );
-    this.reset();
+    await this._certSwitch.switchClientCertificate(false);
   }
 
   /**
@@ -2876,18 +2797,7 @@ export class ChargePoint {
    * `--tls-cert`, as after a restart.
    */
   releaseRenewedClientCertificate(): void {
-    this._clientCertificateSwitchReleased = true;
-    this.cancelClientCertificateSwitch();
-    this._unwatchClientIdentity?.();
-    this._unwatchClientIdentity = null;
-    this._webSocket?.clearRenewedClientCertificate();
-    this._certificateStore.forgetPrivateKeys();
-  }
-
-  private cancelClientCertificateSwitch(): void {
-    this._clientCertificateSwitchSeq++;
-    this._cancelClientCertificateSwitchTimer?.();
-    this._cancelClientCertificateSwitchTimer = null;
+    this._certSwitch.release();
   }
 
   /** Programmatic trigger for SecurityEventNotification; see
@@ -3813,7 +3723,7 @@ export class ChargePoint {
       this._clock.clearTimeout(this._powerRestoreTimer);
       this._powerRestoreTimer = null;
     }
-    this.releaseRenewedClientCertificate();
+    this._certSwitch.release();
     for (const connectorId of [...this._periodicSamplers.keys()]) {
       this.stopPeriodicSampling(connectorId);
     }

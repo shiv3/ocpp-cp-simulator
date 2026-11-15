@@ -12,19 +12,13 @@ import type { ProtocolCodec } from "../profile/ProtocolProfile";
 import { behaviorTapOf } from "../behaviorTap";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import type { Transaction } from "../../../domain/connector/Transaction";
-import { isRunningTransactionStartedBy } from "../../../domain/connector/Transaction";
 import type { PendingMessageQueue } from "../../../domain/transport/PendingMessageQueue";
 import type { BootGate } from "../../../application/state/machines/BootGate";
-import { MAX_TIMER_MS } from "../../../shared/timers";
-import { clockOf, unrefTimerHandle } from "../../../shared/clock";
+import { clockOf } from "../../../shared/clock";
 import type { SimClock, TimerHandle } from "../../../shared/clock";
 import type { Logger } from "../../../shared/Logger";
 import { LogType } from "../../../shared/Logger";
-import {
-  OCPPAction,
-  OCPPMessageType,
-  OCPPStatus,
-} from "../../../domain/types/OcppTypes";
+import { OCPPAction, OCPPMessageType } from "../../../domain/types/OcppTypes";
 import {
   UNKNOWN_TRANSACTION_ID,
   isCriticalSecurityEventCall,
@@ -37,6 +31,7 @@ import {
   type SerialEntry,
   type StartRef,
 } from "./outboundRequestsV16";
+import { TransactionCallErrorV16 } from "./transactionCallErrorV16";
 
 /** What the delivery needs from the 1.6 handler: never the handler itself. */
 export interface SerialCallQueueV16Context {
@@ -122,6 +117,9 @@ export class SerialCallQueueV16 {
    *  MeterValues.req of that transaction is sent; the Stop removes it. */
   private readonly _startOutcomes: Map<string, number>;
 
+  /** #527: the §3.7.1 resend after a CALLERROR and its discard limits. */
+  private readonly callErrors: TransactionCallErrorV16;
+
   constructor(context: SerialCallQueueV16Context) {
     this._chargePoint = context.chargePoint;
     this._webSocket = context.webSocket;
@@ -132,6 +130,29 @@ export class SerialCallQueueV16 {
     this._requests = context.requests;
     this._startOutcomes = context.startOutcomes;
     this._generateMessageId = context.generateMessageId;
+    this.callErrors = new TransactionCallErrorV16({
+      chargePoint: this._chargePoint,
+      webSocket: this._webSocket,
+      logger: this._logger,
+      clock: () => this.clock,
+      transactionMessageRetries: this._transactionMessageRetries,
+      serialQueue: () => this._serialQueue,
+      setSerialQueue: (queue) => {
+        this._serialQueue = queue;
+      },
+      ensureHeld: () => (this._held ??= []),
+      isCallAllowed: (action) => this.isCallAllowed(action),
+      salvageOrDiscard: (entry, reason) => this.salvageOrDiscard(entry, reason),
+      holdToOfflineQueue: (reason) => this.holdToOfflineQueue(reason),
+      interceptOutgoing: (action, payload, onDropped) =>
+        this.interceptOutgoing(action, payload, onDropped),
+      pumpSerialQueue: () => this.pumpSerialQueue(),
+      generateMessageId: () => this.generateMessageId(),
+      releaseHold: () => this.releaseHold(),
+      hasMessageWaitingOn: (ref) => this.hasMessageWaitingOn(ref),
+      recordStartOutcome: (start, connectorId, transactionId) =>
+        this.recordStartOutcome(start, connectorId, transactionId),
+    });
   }
 
   public sendRequest(
@@ -456,7 +477,7 @@ export class SerialCallQueueV16 {
     // moves), which pumps too.
     while (!this._serialInFlight && this._serialQueue.length > 0) {
       const head = this._serialQueue.shift()!;
-      if (this.discardResendPastLimit(head)) continue;
+      if (this.callErrors.discardResendPastLimit(head)) continue;
       if (!this.isCallAllowed(head.action)) {
         // Boot gate currently blocks this action — leave it at the front
         // of the queue. `setBootStatus` re-pumps us when the gate opens.
@@ -614,10 +635,10 @@ export class SerialCallQueueV16 {
     ) {
       const start = request.payload as StartTransactionRequestV16;
       const connectorId = requestConnectorId(request);
-      this.discardedStart(start, connectorId);
+      this.callErrors.discardedStart(start, connectorId);
       // Like a discard after a CALLERROR (#527): the transaction goes on
       // without a StartTransaction.conf.
-      this.proceedWithoutStartConf(connectorId, start);
+      this.callErrors.proceedWithoutStartConf(connectorId, start);
     }
     // 1.6 does not retry a timeout: a resend that timed out is settled.
     if (request?.attempt !== undefined && request.attempt > 1) {
@@ -749,257 +770,12 @@ export class SerialCallQueueV16 {
       );
     }
   }
-
-  /**
-   * #527, OCPP 1.6 Part 2 §3.7.1: a CALLERROR answering StartTransaction.req,
-   * StopTransaction.req or a MeterValues.req of a transaction is a failure to
-   * process it. The station sends the same message again under a new message
-   * id, through the serial queue, waiting `TransactionMessageRetryInterval`
-   * seconds times the number of transmissions so far, until
-   * `TransactionMessageAttempts` transmissions failed; then it discards the
-   * message and carries on. The transaction stays as it is either way,
-   * running or ended, as on 2.x (#490).
-   *
-   * A discarded StartTransaction.req leaves the transaction without a CSMS
-   * id: its MeterValues.req and StopTransaction.req then carry `-1` (1.6
-   * errata 3.18), and a connector still in Preparing goes
-   * to Charging, as when StopTransactionOnInvalidId=false keeps a rejected
-   * start running.
-   *
-   * §3.7 asks for chronological delivery ("The delivery of new
-   * transaction-related messages SHALL wait until the queue has been
-   * emptied"), so the transaction-related messages that follow a failed one
-   * wait for it (#565): `_held`, released when the resend is answered,
-   * discarded, dropped or timed out (`releaseHold`), moved behind it to the
-   * offline queue when it leaves for there (`holdToOfflineQueue`). A
-   * StartTransaction.req resend is sent even if its transaction stopped
-   * meanwhile: the StopTransaction.req follows it, with the id its conf
-   * assigns or `-1` once it is discarded (1.6 errata 3.18,
-   * `applyStartOutcome`). Both settings are read here, so a
-   * ChangeConfiguration applies to the next failure; `discardResendPastLimit`
-   * applies the limit to a resend already waiting too.
-   */
+  /** #527, §3.7.1: see {@link TransactionCallErrorV16.onTransactionMessageCallError}. */
   public onTransactionMessageCallError(
     request: OCPPRequest,
     errorCode: string,
   ): void {
-    const attempt = request.attempt ?? 1;
-    const payload = request.payload as { transactionId?: number };
-    const connectorId = requestConnectorId(request);
-    const report = {
-      connectorId,
-      // StartTransaction.req has no id yet: the 1.6 placeholder stands in.
-      transactionId: String(payload.transactionId ?? 0),
-      action: request.action as
-        "StartTransaction" | "StopTransaction" | "MeterValues",
-      reason: "callError" as const,
-      errorCode,
-    };
-    // The transaction this StartTransaction.req started, if it still runs:
-    // its `0` placeholder is now one the CSMS failed to process (#491).
-    let startedTransaction: Transaction | null = null;
-    if (request.action === OCPPAction.StartTransaction) {
-      const connector = this._chargePoint.getConnector(connectorId);
-      const current = connector?.transaction;
-      const start = request.payload as StartTransactionRequestV16;
-      if (connector && isRunningTransactionStartedBy(current, start)) {
-        startedTransaction = current;
-        connector.markStartCallError();
-      }
-    }
-    const config = this._chargePoint.configuration;
-    const attempts = Math.max(1, config.transactionMessageAttempts());
-    if (attempt >= attempts) {
-      this._chargePoint.notifyTransactionMessageRejected({
-        ...report,
-        attempt,
-      });
-      this._logger.warn(
-        `${request.action} of transaction ${report.transactionId} discarded after ${attempt} attempt(s): ${errorCode}`,
-        LogType.TRANSACTION,
-      );
-      this._chargePoint.notifyTransactionMessageDiscarded({
-        ...report,
-        attempts: attempt,
-      });
-      if (request.action === OCPPAction.StartTransaction) {
-        this.discardedStart(
-          request.payload as StartTransactionRequestV16,
-          connectorId,
-        );
-      }
-      if (startedTransaction) {
-        this.proceedWithoutStartConf(
-          connectorId,
-          request.payload as StartTransactionRequestV16,
-        );
-      }
-      // The last attempt failed: what waited behind it goes on (§3.7.1: "the
-      // Charge Point SHOULD discard the message and continue with the next
-      // transaction-related message").
-      this.releaseHold();
-      return;
-    }
-    const delayMs = Math.min(
-      Math.max(0, config.transactionMessageRetryInterval()) * attempt * 1000,
-      MAX_TIMER_MS,
-    );
-    this._logger.warn(
-      `${request.action} of transaction ${report.transactionId} answered with CALLERROR ${errorCode}; attempt ${attempt + 1}/${attempts} in ${delayMs / 1000}s`,
-      LogType.TRANSACTION,
-    );
-    const resend: SerialEntry = {
-      action: request.action,
-      id: request.id,
-      payload: request.payload as OcppMessageRequestPayload,
-      ...(request.connectorId != null && { connectorId: request.connectorId }),
-      attempt: attempt + 1,
-      lastErrorCode: errorCode,
-      ...(request.startRef && { startRef: request.startRef }),
-    };
-    // #565, §3.7: the messages after this one wait for it. Those already
-    // queued behind it in the serial queue join them, in order.
-    const held = (this._held ??= []);
-    const queued = this._serialQueue.filter(isRetriedOnCallError);
-    if (queued.length > 0) {
-      this._serialQueue = this._serialQueue.filter(
-        (entry) => !isRetriedOnCallError(entry),
-      );
-      held.push(...queued);
-    }
-    const timer = this.clock.setTimeout(() => {
-      this._transactionMessageRetries.delete(timer);
-      // The boot gate closed meanwhile (a BootNotification answered
-      // Pending): sendRequest would drop the resend. It waits in the
-      // offline queue for the next Accepted instead, as on a close.
-      if (!this.isCallAllowed(resend.action)) {
-        this.salvageOrDiscard(resend, "boot gate");
-        this.holdToOfflineQueue("boot gate");
-        return;
-      }
-      // A resend is a new transmission: the behaviors see it again, starting
-      // from the payload as built (the same rule as a replay from the offline
-      // queue, and as on 2.x).
-      let wire: OcppMessageRequestPayload | undefined;
-      if (this._webSocket.isConnected()) {
-        const decision = this.interceptOutgoing(resend.action, resend.payload);
-        if (decision === "dropped") {
-          this._logger.warn(
-            `${resend.action} resend dropped by a behavior's beforeSend; the message is not sent again`,
-            LogType.TRANSACTION,
-          );
-          this.releaseHold();
-          return;
-        }
-        wire = decision;
-      }
-      this._serialQueue.push({
-        ...resend,
-        ...(wire !== undefined && { wire }),
-        id: this.generateMessageId(),
-        intercepted: this._webSocket.isConnected(),
-      });
-      this.pumpSerialQueue();
-    }, delayMs);
-    unrefTimerHandle(timer);
-    this._transactionMessageRetries.set(timer, resend);
-    // After the timer is tracked: a listener closing the link must find it
-    // in `_transactionMessageRetries`, or it would fire after the close.
-    this._chargePoint.notifyTransactionMessageRejected({ ...report, attempt });
-  }
-
-  /** #565: a StartTransaction.req was discarded: the messages of its
-   *  transaction that follow carry `-1` (1.6 errata 3.18: "SHALL send any
-   *  Transaction related messages for this transaction ... with a
-   *  transactionId = -1"). */
-  private discardedStart(
-    start: StartTransactionRequestV16,
-    connectorId: number,
-  ): void {
-    // Recorded only for a queued, held or waiting message that takes its id
-    // from this Start (#847): a message built after the discard already
-    // carries `-1` (`wireTransactionId`) and has no `startRef`, so nothing
-    // would ever consume the entry.
-    if (
-      !this.hasMessageWaitingOn({
-        connectorId,
-        idTag: start.idTag,
-        startedAt: start.timestamp,
-      })
-    ) {
-      return;
-    }
-    this.recordStartOutcome(start, connectorId, UNKNOWN_TRANSACTION_ID);
-  }
-
-  /**
-   * #527, §3.7.1 resends a message only until it "encountered as many
-   * failures" as `TransactionMessageAttempts`. This resend already did, the
-   * limit having been lowered while it waited: on its interval, in the serial
-   * queue or in the offline queue. It ends as after a last attempt, and a
-   * replay carries no last error, which is not persisted. A first
-   * transmission (no `attempt` above 1) always goes out.
-   */
-  private discardResendPastLimit(entry: SerialEntry): boolean {
-    const attempt = entry.attempt ?? 1;
-    if (attempt <= 1) return false;
-    const limit = Math.max(
-      1,
-      this._chargePoint.configuration.transactionMessageAttempts(),
-    );
-    if (attempt <= limit) return false;
-    const attempts = attempt - 1;
-    const connectorId = requestConnectorId(entry);
-    const { transactionId } = entry.payload as { transactionId?: number };
-    const report = {
-      connectorId,
-      // StartTransaction.req has no id yet: the 1.6 placeholder stands in.
-      transactionId: String(transactionId ?? 0),
-      action: entry.action as
-        "StartTransaction" | "StopTransaction" | "MeterValues",
-      reason: "callError" as const,
-    };
-    this._logger.warn(
-      `${entry.action} of transaction ${report.transactionId} discarded after ${attempts} attempt(s): TransactionMessageAttempts is now ${limit}`,
-      LogType.TRANSACTION,
-    );
-    this._chargePoint.notifyTransactionMessageDiscarded({
-      ...report,
-      ...(entry.lastErrorCode !== undefined && {
-        errorCode: entry.lastErrorCode,
-      }),
-      attempts,
-    });
-    if (entry.action === OCPPAction.StartTransaction) {
-      this.discardedStart(
-        entry.payload as StartTransactionRequestV16,
-        connectorId,
-      );
-      this.proceedWithoutStartConf(
-        connectorId,
-        entry.payload as StartTransactionRequestV16,
-      );
-    }
-    this.releaseHold();
-    return true;
-  }
-
-  /** #527: the StartTransaction.req was discarded; the transaction it
-   *  started, still running on the connector, goes on without a
-   *  StartTransaction.conf. Checked here, after the discard's listeners ran:
-   *  one may have stopped that transaction or started another, which waits
-   *  for its own conf. */
-  private proceedWithoutStartConf(
-    connectorId: number,
-    start: StartTransactionRequestV16,
-  ): void {
-    const connector = this._chargePoint.getConnector(connectorId);
-    if (
-      connector?.status === OCPPStatus.Preparing &&
-      isRunningTransactionStartedBy(connector.transaction, start)
-    ) {
-      this._chargePoint.updateConnectorStatus(connectorId, OCPPStatus.Charging);
-    }
+    this.callErrors.onTransactionMessageCallError(request, errorCode);
   }
 
   /** The charge point's clock (the platform clock for a stand-in without one). */

@@ -3,7 +3,7 @@ import { describe, expect, it } from "bun:test";
 import { CLIChargePointService } from "../service";
 import { BunSqliteDatabase } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/BunSqliteDatabase";
 import type { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
-import { summarizeScenarios } from "@ocpp-cp-simulator/core/cp/application/diagnostics/scenarioReadModel";
+import { summarizeScenarios } from "@ocpp-cp-simulator/core/cp/domain/charge-point/scenarioReadModel";
 import {
   type ScenarioDefinition,
   ScenarioNodeType,
@@ -118,6 +118,26 @@ describe("daemon scenario introspection", () => {
     // A finished run is only ever `lastRun`, never active.
     expect(s.lastRun).toMatchObject({ outcome: "stopped" });
     expect([a, b]).toContain(s.lastRun!.scenarioId);
+  });
+
+  it("the OCPP keys read the same model (1.6 GetConfiguration keys, #927)", async () => {
+    const { service, cp } = newService();
+    const key = (k: string) => cp.configuration.get(k)?.value;
+    expect(key("SimScenarioStatus")).toBe("idle");
+    const a = service.loadScenario(1, scenario("a", 1, 600));
+    service.runScenario(1, a);
+    await settle();
+    expect(["running", "waiting"]).toContain(
+      key("SimScenarioStatus") as string,
+    );
+    expect(key("SimScenarioRunCount")).toBe("1");
+    expect(key("SimScenarioRunId")).toBeTruthy();
+    expect(key("SimScenarioConnectorId")).toBe("1");
+    service.stopScenario(1, a);
+    await settle();
+    expect(key("SimScenarioStatus")).toBe("idle");
+    expect(key("SimScenarioRunId")).toBe("");
+    expect(key("SimScenarioLastStatus")).toBe("stopped");
   });
 
   it("a scenario that finishes on its own is a passed last run", async () => {

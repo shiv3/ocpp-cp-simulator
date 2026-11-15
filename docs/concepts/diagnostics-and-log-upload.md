@@ -1,7 +1,7 @@
 ---
 title: Diagnostics and log upload
 type: concept
-summary: How the station answers GetDiagnostics (1.6) and GetLog (1.6 Security Whitepaper, 2.x) — the default simulated GetLog train, the opt-in real upload (`RealLogUpload`, HTTP PUT, destination checks, retries, statuses, cancellation), the opt-in versioned diagnostic bundle (`DiagnosticBundle`, diagnostics.zip) and the decisions behind them.
+summary: How the station answers GetDiagnostics (1.6) and GetLog (1.6 Security Whitepaper, 2.x) — the default simulated GetLog train, the opt-in real upload (`RealLogUpload`, HTTP PUT, destination checks, retries, statuses, cancellation), the opt-in versioned diagnostic bundle (`DiagnosticBundle`, diagnostics.zip), the read-only scenario introspection keys and the decisions behind them.
 sources:
   - packages/core/src/cp/application/engine/behaviors/logs.ts
   - packages/core/src/cp/application/engine/behaviors/diagnostics.ts
@@ -11,7 +11,7 @@ sources:
   - packages/core/src/cp/infrastructure/fileUpload.ts
   - packages/core/src/cp/application/diagnostics/DiagnosticBundle.ts
   - packages/core/src/cp/application/diagnostics/zip.ts
-  - packages/core/src/cp/application/diagnostics/scenarioReadModel.ts
+  - packages/core/src/cp/domain/charge-point/scenarioReadModel.ts
   - packages/core/src/cp/domain/charge-point/DiagnosticsSources.ts
   - packages/core/src/test/behavior/diagnosticBundle.bun.test.ts
   - packages/core/src/test/behavior/getLogUpload.bun.test.ts
@@ -196,3 +196,54 @@ diagnostics.zip
   the simulator applies every accepted change at once.
 - **Stored ZIP, no compression**: a pure-TypeScript writer without a
   dependency; the 1 MiB bounds keep the archive small.
+
+## Scenario introspection over OCPP (#927)
+
+A CSMS can tell what the simulator has installed from what is running with the
+normal configuration read path, without Socket.IO or MCP. The values come from
+the same read model as `scenario-run.json` in the bundle
+(`summarizeScenarios`), so a transport copies no scenario state. They are
+read-only strings, bounded, and never carry a scenario definition, a path or a
+secret (the definition is only in the bundle, redacted).
+
+| 1.6 `GetConfiguration` key | 2.x `SimulatorCtrlr` variable | Value                                                                                                                                                        |
+| -------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `SimScenarioId`            | `ScenarioId`                  | Selected scenario: `""`, the simulator has no selection yet (#569)                                                                                           |
+| `SimScenarioStatus`        | `ScenarioStatus`              | `idle` (no run in progress), `running`, `waiting` (parked on a wait node), `paused`, `stepping` (exactly one run), `multiple` (more than one), `unavailable` |
+| `SimScenarioRunCount`      | `ScenarioRunCount`            | Number of runs in progress                                                                                                                                   |
+| `SimScenarioRunId`         | `ScenarioRunId`               | The run's id when exactly one runs, else `""`                                                                                                                |
+| `SimScenarioStep`          | `ScenarioStep`                | Node being executed or waited on when exactly one runs, else `""`                                                                                            |
+| `SimScenarioConnectorId`   | `ScenarioConnectorId`         | Connector of that run, else `""`                                                                                                                             |
+| `SimScenarioRuns`          | `ScenarioRuns`                | `connector:runId:state` of every run in progress, comma separated, ordered by connector, cut at 500 characters on an entry boundary                          |
+| `SimScenarioLastRunId`     | `ScenarioLastRunId`           | The most recent finished run, else `""`                                                                                                                      |
+| `SimScenarioLastStatus`    | `ScenarioLastStatus`          | `none`, `passed`, `failed`, `error` (also a blocked verdict), `stopped` (cancelled by the operator)                                                          |
+
+- **Lifecycle.** The status follows the runs as the daemon has them: start
+  → `running`; a parked wait → `waiting`; resume → `running`; completion,
+  failure or cancellation → the run leaves the active set and becomes
+  `SimScenarioLast*`, so a finished run's id is never reported as active.
+  A disconnect does not change a run by itself (a run that fails because of it
+  ends as `error`); a daemon restart starts with no run in progress.
+- **Per-connector runs.** A station-level aggregate plus the `Runs` list; there
+  are no per-connector or per-EVSE instances, so no run is picked arbitrarily.
+- **Errors.** Writing any of them: 1.6 `ChangeConfiguration` `Rejected` (the
+  key is read-only), 2.x `SetVariables` `Rejected` (ReadOnly). A 2.x variable
+  not in the list is `UnknownVariable`.
+- **Only with a scenario runtime.** The keys exist on a station the daemon
+  hosts. A bare core station and the browser's local mode have none: 1.6 lists
+  them as `unknownKey`, 2.x `GetVariables` answers `Rejected` with
+  `MissingDevModelInfo`, and `GetConfiguration` / `GetBaseReport` listings of
+  those stations are unchanged.
+
+### Decisions (#927)
+
+- **Station-level aggregate plus a bounded `Runs` list** [per-connector
+  instances: more keys and 2.x EVSE-scoped variables for no gain].
+- **`SimScenarioId` is a read-only empty string now**: writing it belongs to
+  #569 and no selection exists to read [inventing "selected" from the armed or
+  only installed scenario].
+- **Keys only where a scenario runtime is attached**, so existing golden
+  `GetConfiguration` transcripts and 2.x reports are unchanged [always
+  publishing `unavailable`].
+- **String values everywhere** (the live-key mechanism is string-typed); the
+  count is a decimal string.

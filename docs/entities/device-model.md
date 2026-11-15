@@ -22,7 +22,7 @@ related:
   - ../concepts/local-authorization.md
   - default-behaviors.md
   - ../sources/github-issues.md
-updated: 2026-11-14
+updated: 2026-11-15
 ---
 
 # Device Model registry
@@ -113,7 +113,7 @@ measurand list against the station version's `MeasurandEnumType` and answers
 
 `OCPPCommCtrlr`, `TxCtrlr`, `SampledDataCtrlr`, `AlignedDataCtrlr`, `DeviceDataCtrlr`,
 `LocalAuthListCtrlr`, `AuthCtrlr`, `AuthCacheCtrlr`, `ReservationCtrlr`, `MonitoringCtrlr`,
-`ChargingStation`, `SecurityCtrlr`, and the EVSE-scoped `EVSE` and `Connector`
+`ChargingStation`, `SecurityCtrlr`, `SimulatorCtrlr` (read-only scenario read model on a station with a scenario runtime, #927), and the EVSE-scoped `EVSE` and `Connector`
 (which need `component.evse`). `ClockCtrlr` publishes `DateTime` and `TimeSource` (#704). `TariffCostCtrlr` and `ISO15118Ctrlr` exist with no variable yet: a request for
 one of their variables answers `UnknownVariable`, not `UnknownComponent`.
 

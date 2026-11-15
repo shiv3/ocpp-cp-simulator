@@ -302,6 +302,11 @@ const COMPONENTS: readonly DeviceModelComponentDef[] = [
     summary: "The one connector of an EVSE.",
   },
   { name: "DeviceDataCtrlr", summary: "Device model reporting." },
+  {
+    name: "SimulatorCtrlr",
+    summary:
+      "Simulator-specific read-only values: the scenario runtime (#927). Present on a station with a scenario runtime.",
+  },
   // Components the station has but that publish no variable yet: a request
   // for one of their variables is UnknownVariable, not UnknownComponent.
   // Variables are added with the behavior that backs them (#605, #607, #612).
@@ -991,6 +996,46 @@ const VARIABLES: readonly DeviceModelVariableDef[] = [
   runtime("Connector", "AvailabilityState", RUNTIME_VALUE_KEYS.connectorState, {
     dataType: "OptionList",
     valuesList: V2_CONNECTOR_STATUSES,
+  }),
+  // #927: the scenario read model; `SimScenarioX` is `SimulatorCtrlr.ScenarioX`.
+  // Station-level aggregate: idle | running | waiting | paused | stepping |
+  // multiple | unavailable; "" where a value does not apply.
+  runtime("SimulatorCtrlr", "ScenarioId", "SimScenarioId", {
+    dataType: "string",
+  }),
+  runtime("SimulatorCtrlr", "ScenarioStatus", "SimScenarioStatus", {
+    dataType: "OptionList",
+    valuesList: [
+      "idle",
+      "running",
+      "waiting",
+      "paused",
+      "stepping",
+      "multiple",
+      "unavailable",
+    ],
+  }),
+  runtime("SimulatorCtrlr", "ScenarioRunCount", "SimScenarioRunCount", {
+    dataType: "string",
+  }),
+  runtime("SimulatorCtrlr", "ScenarioRunId", "SimScenarioRunId", {
+    dataType: "string",
+  }),
+  runtime("SimulatorCtrlr", "ScenarioStep", "SimScenarioStep", {
+    dataType: "string",
+  }),
+  runtime("SimulatorCtrlr", "ScenarioConnectorId", "SimScenarioConnectorId", {
+    dataType: "string",
+  }),
+  runtime("SimulatorCtrlr", "ScenarioRuns", "SimScenarioRuns", {
+    dataType: "string",
+  }),
+  runtime("SimulatorCtrlr", "ScenarioLastRunId", "SimScenarioLastRunId", {
+    dataType: "string",
+  }),
+  runtime("SimulatorCtrlr", "ScenarioLastStatus", "SimScenarioLastStatus", {
+    dataType: "OptionList",
+    valuesList: ["none", "passed", "failed", "error", "stopped"],
   }),
 ];
 

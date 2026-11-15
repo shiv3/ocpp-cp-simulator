@@ -81,6 +81,11 @@ import type {
 } from "./ChargePointDeps";
 import type { FileUploader } from "./FileUploader";
 import type { DiagnosticsSources } from "./DiagnosticsSources";
+import {
+  SCENARIO_CONFIG_KEYS,
+  scenarioConfigValues,
+  summarizeScenarios,
+} from "./scenarioReadModel";
 import type {
   CloseCause,
   GenerationToken,
@@ -2005,6 +2010,26 @@ export class ChargePoint {
 
   setDiagnosticsSources(sources: DiagnosticsSources): void {
     this._diagnosticsSources = sources;
+    if (sources.scenarios) this.wireScenarioIntrospection();
+  }
+
+  /**
+   * #927: publish the read-only scenario read model as live configuration
+   * keys (1.6 `GetConfiguration`, 2.x `SimulatorCtrlr` variables). Only a
+   * station with a scenario runtime has them; the values are asked of the
+   * read model on every read, so they never go stale.
+   */
+  private wireScenarioIntrospection(): void {
+    for (const key of SCENARIO_CONFIG_KEYS) {
+      if (this._configuration.get(key)) continue;
+      this._configuration.defineLiveKey(
+        key,
+        () =>
+          scenarioConfigValues(
+            summarizeScenarios(this._diagnosticsSources.scenarios),
+          )[key],
+      );
+    }
   }
 
   /** Uploads the GetLog file when `RealLogUpload` is on (#926). */

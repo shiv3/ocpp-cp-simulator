@@ -33,6 +33,8 @@ import { MeterSampling } from "./MeterSampling";
 
 import { PowerLossController } from "./PowerLossController";
 
+import { ConnectionTimeouts } from "./ConnectionTimeouts";
+import { ResetOnIdle } from "./ResetOnIdle";
 import { EventEmitter } from "../../shared/EventEmitter";
 
 import { realClock } from "../../shared/clock";
@@ -423,7 +425,6 @@ export class ChargePoint {
   /** Parent id / groupIdToken of the tags the CSMS authorized (reservations). */
   private readonly _authorizedParents = new Map<string, string>();
   /** #597: Reset OnIdle requests answered `Scheduled`, each run once its transactions end. */
-  private _pendingResetsOnIdle: { evseId?: number }[] = [];
   /** Reason of the next BootNotification (2.x B01.FR.09); see {@link boot}. */
   private _bootReason: BootReason = "PowerUp";
   /** #455: set while the station is without power. */
@@ -468,6 +469,17 @@ export class ChargePoint {
     },
     teardownAfterClose: () => this.teardownAfterClose(),
     webSocket: () => this._webSocket,
+  });
+  private readonly _resetOnIdle = new ResetOnIdle({
+    chargePoint: this,
+    connectors: () => this._connectors,
+  });
+  private readonly _connectionTimeouts = new ConnectionTimeouts({
+    chargePoint: this,
+    clock: () => this._clock,
+    configuration: () => this._configuration,
+    logger: () => this._logger,
+    ocppVersion: () => this._ocppVersion,
   });
   private readonly _configWiring = new ConfigurationWiring({
     chargePoint: () => this,
@@ -520,11 +532,6 @@ export class ChargePoint {
     clock: () => this._clock,
   });
   private readonly _callOverrides = new CallOverrides();
-  // §4.9 B6: per-connector ConnectionTimeOut watchdog. Started when a
-  // connector enters Preparing, cleared on any other transition. If the
-  // timer fires we auto-transition the connector to Finishing.
-  private readonly _connectionTimeoutTimers: Map<number, TimerHandle> =
-    new Map();
   // §4.9 S3: whether this SOAP CP has a soapCallbackUrl (server-hosted) vs
   // send-only (browser local mode). For non-SOAP versions, always false.
   private readonly _hasSoapCallbackUrl: boolean;
@@ -2771,8 +2778,7 @@ export class ChargePoint {
     this._callOverrides.clearResponseOverrides();
     // Cancel all ConnectionTimeOut watchdogs so the timer doesn't fire
     // against a disconnected CP.
-    this._connectionTimeoutTimers.forEach((t) => this._clock.clearTimeout(t));
-    this._connectionTimeoutTimers.clear();
+    this._connectionTimeouts.clearAll();
     // §4.1.1 serializer: drop the in-flight CALL + queued CALLs since the
     // WebSocket they target is gone. Transaction-related ones go to the
     // PendingMessageQueue (1.6 §3.7; 2.x E11 TransactionEvents, #528).
@@ -2994,11 +3000,7 @@ export class ChargePoint {
    * transaction ends (see {@link runPendingResetOnIdle}).
    */
   scheduleResetOnIdle(evseId?: number): void {
-    this._pendingResetsOnIdle.push({ evseId });
-    // The transaction can end after the handler decided to answer Scheduled
-    // but before this callback runs. Recheck after enqueueing to avoid leaving
-    // an already-runnable reset stranded until a later transaction ends.
-    this.runPendingResetOnIdle();
+    this._resetOnIdle.scheduleResetOnIdle(evseId);
   }
 
   /**
@@ -3007,12 +3009,7 @@ export class ChargePoint {
    * again on a later transaction end.
    */
   cancelPendingResetsOnIdle(evseId?: number): void {
-    this._pendingResetsOnIdle =
-      evseId === undefined
-        ? []
-        : this._pendingResetsOnIdle.filter(
-            (pending) => pending.evseId !== evseId,
-          );
+    this._resetOnIdle.cancelPendingResetsOnIdle(evseId);
   }
 
   /**
@@ -3023,27 +3020,7 @@ export class ChargePoint {
    * boots once if any of them became runnable.
    */
   runPendingResetOnIdle(): void {
-    if (this._pendingResetsOnIdle.length === 0) return;
-    const isBusy = (pending: { evseId?: number }): boolean =>
-      [...this._connectors.values()].some(
-        (connector) =>
-          (pending.evseId === undefined || connector.id === pending.evseId) &&
-          connector.hasRunningTransaction,
-      );
-    const remaining = this._pendingResetsOnIdle.filter(isBusy);
-    if (remaining.length === this._pendingResetsOnIdle.length) return;
-    const runnable = this._pendingResetsOnIdle.filter(
-      (pending) => !remaining.includes(pending),
-    );
-    this._pendingResetsOnIdle = remaining;
-    // A station-wide reset reboots everything and subsumes EVSE resets.
-    if (runnable.some((pending) => pending.evseId === undefined)) {
-      this.boot("ScheduledReset");
-      return;
-    }
-    for (const evseId of new Set(runnable.map((pending) => pending.evseId))) {
-      if (evseId !== undefined) this.resetEvse(evseId);
-    }
+    this._resetOnIdle.runPendingResetOnIdle();
   }
 
   /**
@@ -3204,7 +3181,7 @@ export class ChargePoint {
       // E03.FR.12 / E02.FR.17: Updated, CablePluggedIn, chargingState
       // EVConnected; the EVConnectionTimeOut is over (E03.FR.05 applies only
       // when no EV connects); the energy offer then starts (Charging).
-      this.clearConnectionTimeout(connectorId);
+      this._connectionTimeouts.clear(connectorId);
       this._outbox.sendTransactionUpdate(connectorId, {
         triggerReason: "CablePluggedIn",
         chargingState: "EVConnected",
@@ -3308,7 +3285,7 @@ export class ChargePoint {
   private readonly transactionPorts: TransactionPorts = {
     sendTransactionEvent: (event) => this._outbox.sendTransactionEvent(event),
     startConnectionTimeout: (connectorId) =>
-      this.startConnectionTimeout(connectorId),
+      this._connectionTimeouts.start(connectorId),
   };
 
   startHeartbeat(period: number): void {
@@ -3557,9 +3534,9 @@ export class ChargePoint {
     // start a timer; if it doesn't progress before the timeout, auto-
     // transition to Finishing (= user didn't present an idTag in time).
     if (status === OCPPStatus.Preparing) {
-      this.startConnectionTimeout(connectorId);
+      this._connectionTimeouts.start(connectorId);
     } else {
-      this.clearConnectionTimeout(connectorId);
+      this._connectionTimeouts.clear(connectorId);
     }
 
     // Faulted state propagates the connector's currentErrorCode; warning-grade
@@ -3582,66 +3559,6 @@ export class ChargePoint {
       this.terminateReservationsOf(connectorId);
     }
     syncUnspecifiedReservations(this);
-  }
-
-  /** OCPP 1.x (#527): a connector whose transaction runs is past
-   *  ConnectionTimeOut. It waits in Preparing for StartTransaction.conf,
-   *  which a CALLERROR resend can hold back for longer than the timeout.
-   *  On 2.x the setting is TxCtrlr/EVConnectionTimeOut, which targets
-   *  exactly a transaction started before the cable is plugged in, so a
-   *  running transaction does not hold it back there. */
-  private holdsConnectionTimeout(connectorId: number): boolean {
-    return (
-      !isOcpp2Version(this._ocppVersion) &&
-      !!this.getConnector(connectorId)?.hasRunningTransaction
-    );
-  }
-
-  private startConnectionTimeout(connectorId: number): void {
-    this.clearConnectionTimeout(connectorId);
-    const timeoutSec = this._configuration?.connectionTimeOut();
-    if (timeoutSec <= 0 || this.holdsConnectionTimeout(connectorId)) return;
-    const handle = this._clock.setTimeout(() => {
-      this._connectionTimeoutTimers.delete(connectorId);
-      if (this._power.poweredOff) return; // no power: nothing ends or changes (#798)
-      const connector = this.getConnector(connectorId);
-      if (!connector || connector.status !== OCPPStatus.Preparing) return;
-      // E03.FR.05: on 2.x a transaction already started without the EV
-      // connecting in time is ended (stoppedReason Timeout, triggerReason
-      // EVConnectTimeout). 1.6 keeps the B6 Preparing → Finishing move.
-      if (
-        isOcpp2Version(this._ocppVersion) &&
-        connector.hasRunningTransaction
-      ) {
-        this._logger.info(
-          `Connector ${connectorId} EVConnectionTimeOut elapsed; ending the transaction (E03.FR.05)`,
-          LogType.TRANSACTION,
-        );
-        this.stopTransaction(connector, undefined, {
-          triggerReason: "EVConnectTimeout",
-          stoppedReason: "Timeout",
-        });
-        if (connector.status === OCPPStatus.Preparing) {
-          this.updateConnectorStatus(connectorId, OCPPStatus.Finishing);
-        }
-        return;
-      }
-      if (this.holdsConnectionTimeout(connectorId)) return;
-      this._logger.info(
-        `Connector ${connectorId} ConnectionTimeOut elapsed; transitioning Preparing → Finishing (§4.9 B6)`,
-        LogType.OCPP,
-      );
-      this.updateConnectorStatus(connectorId, OCPPStatus.Finishing);
-    }, timeoutSec * 1000);
-    this._connectionTimeoutTimers.set(connectorId, handle);
-  }
-
-  private clearConnectionTimeout(connectorId: number): void {
-    const handle = this._connectionTimeoutTimers.get(connectorId);
-    if (handle) {
-      this._clock.clearTimeout(handle);
-      this._connectionTimeoutTimers.delete(connectorId);
-    }
   }
 
   /**

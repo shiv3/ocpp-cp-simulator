@@ -35,6 +35,11 @@ sources:
   - packages/core/src/cp/application/scenario/ScenarioRuntime.ts
   - packages/core/src/cp/application/scenario/resolveFrom.ts
   - packages/core/src/cp/application/scenario/ScenarioExecutor.ts
+  - packages/core/src/cp/application/scenario/waits.ts
+  - packages/core/src/cp/application/scenario/nodes/context.ts
+  - packages/core/src/cp/application/scenario/nodes/policies.ts
+  - packages/core/src/cp/application/scenario/nodes/meterValue.ts
+  - packages/core/src/cp/application/scenario/nodes/branching.ts
   - apps/web/src/console/lib/scenarioLibrary.ts
 related:
   - meter-realism.md
@@ -586,7 +591,7 @@ Two kinds of rule are real. **How a node is left** (`out`):
 Every row above counts ordinary edges only: a [timeout edge](#timeout-edges-schema-18) (`kind: "timeout"`,
 schema 1.8) is never a next step, a Start branch or a `switch` / `choice` handle. It runs only out of a node whose
 rule `waits` — the six trigger waits `remoteStartTrigger`, `remoteStopTrigger`, `statusTrigger`,
-`reservationTrigger`, `csmsCallTrigger` and `connectionTrigger`, the nodes that park in `runTriggerWait` — and only
+`reservationTrigger`, `csmsCallTrigger` and `connectionTrigger`, the nodes that park in `runTriggerWait` (`scenario/waits.ts`) — and only
 when that wait's timeout expires (`timeoutStep` in `scenarioGraph.ts`). A [loop edge](#loop-edges-schema-110) (`kind: "loop"`, schema 1.10) is
 likewise never a next step, a Start branch or a handle: it is followed out of its source after a round, and only by a
 node whose `out` is `next` (`loopStep` in `scenarioGraph.ts`). A node's ordinary next edge is its first edge that is

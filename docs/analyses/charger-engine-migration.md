@@ -8,6 +8,11 @@ sources:
   - packages/core/src/cp/infrastructure/transport/OCPPMessageHandlerV201.ts
   - packages/core/src/cp/infrastructure/transport/network-sim/ResponseEffectQueue.ts
   - packages/core/src/cp/application/scenario/ScenarioExecutor.ts
+  - packages/core/src/cp/application/scenario/waits.ts
+  - packages/core/src/cp/application/scenario/nodes/context.ts
+  - packages/core/src/cp/application/scenario/nodes/policies.ts
+  - packages/core/src/cp/application/scenario/nodes/meterValue.ts
+  - packages/core/src/cp/application/scenario/nodes/branching.ts
   - packages/k6-runtime/src/interpreter.ts
   - packages/k6-runtime/src/behaviorHost.ts
   - apps/cli/src/exportK6/runExportK6Behavior.ts

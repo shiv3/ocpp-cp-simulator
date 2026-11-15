@@ -29,7 +29,6 @@
   "packages/contracts/src/redaction.ts": 820,
   "packages/core/src/cp/application/engine/ChargerEngine.ts": 1279,
   "packages/core/src/cp/application/engine/behaviors/transaction.ts": 903,
-  "packages/core/src/cp/application/scenario/ScenarioExecutor.ts": 1539,
   "packages/core/src/cp/application/scenario/ScenarioRuntime.ts": 1038,
   "packages/core/src/cp/domain/charge-point/ChargePoint.ts": 5132,
   "packages/core/src/cp/domain/charge-point/Configuration.ts": 946,

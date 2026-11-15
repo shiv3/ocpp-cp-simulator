@@ -10,119 +10,43 @@ import {
   bytesEqual,
   certificateHashDataEquals,
   computeCertificateHashData,
-  normalizeSerialNumber,
   ocspResponderUrl,
   type CertificateHashData,
   type OcspRequestData,
 } from "./certificateHash";
-import {
-  isRootCertificateUse,
-  isSignedCertificateUse,
-  type InstalledCertificateQuery,
-  type RootCertificateUse,
-  type SignedCertificateUse,
+import type {
+  InstalledCertificateQuery,
+  RootCertificateUse,
+  SignedCertificateUse,
 } from "./certificateUse";
 import { checkSignedChain } from "./signedChainChecks";
 import { generateCsr, type CsrGenerationOptions } from "./csr";
 import { realClock } from "../../shared/clock";
 import type { SimClock } from "../../shared/clock";
+import type {
+  ApplySignedChainOutcome,
+  CachedOcspResponse,
+  CertificateHashDataLike,
+  CertificateStoreJson,
+  DeleteCertificateOutcome,
+  InstallRootCertificateOptions,
+  InstallRootCertificateOutcome,
+  InstalledCertificateIds,
+  InstalledRootCertificate,
+  StoredCertificateChain,
+  TlsClientIdentity,
+} from "./certificateStoreTypes";
+import {
+  hierarchyRootUse,
+  isPromiseLike,
+  rowToEntry,
+  subjectOf,
+  type Entry,
+} from "./certificateStoreRows";
 
 x509.cryptoProvider.set(globalThis.crypto as Crypto);
 
-/** Hash data as a CSMS sends it: any algorithm name, any hex casing. */
-export interface CertificateHashDataLike {
-  hashAlgorithm: string;
-  issuerNameHash: string;
-  issuerKeyHash: string;
-  serialNumber: string;
-}
-
-/** A trust anchor installed through InstallCertificate (M05). */
-export interface InstalledRootCertificate {
-  readonly use: RootCertificateUse;
-  /** Trimmed PEM, as received. */
-  readonly pem: string;
-  /** Computed once at install time, so lookups stay synchronous. */
-  readonly hashData: CertificateHashData;
-  readonly installedAt: string;
-}
-
-/** A certificate chain received through CertificateSigned (A02 / A03). */
-export interface StoredCertificateChain {
-  readonly use: SignedCertificateUse;
-  /** Leaf first, then its sub-CAs, each trimmed. */
-  readonly pems: readonly string[];
-  /** One entry per `pems` element, hashed against that element's issuer. */
-  readonly hashData: readonly CertificateHashData[];
-  readonly storedAt: string;
-}
-
-/** One GetInstalledCertificateIds entry, version-neutral (M03). */
-export interface InstalledCertificateIds {
-  readonly use: InstalledCertificateQuery;
-  readonly hashData: CertificateHashData;
-  /** Sub-CA hash data under a V2G leaf (M03.FR.05); empty for roots. */
-  readonly childHashData: readonly CertificateHashData[];
-}
-
-export type InstallRootCertificateOutcome =
-  | { status: "Installed"; certificate: InstalledRootCertificate }
-  | { status: "Malformed" }
-  | { status: "StoreFull"; limit: number }
-  /** The database refused the row; nothing was installed. */
-  | { status: "PersistFailed" };
-
-export interface InstallRootCertificateOptions {
-  /** Roots the store may hold (signed chains do not count). */
-  maxEntries: number;
-  /**
-   * Replace an installed root with the same hash data instead of adding a
-   * second copy (2.x M05.FR.17). The replaced root does not count against
-   * `maxEntries`. Off by default: 1.6 keeps duplicates.
-   */
-  replaceDuplicate?: boolean;
-}
-
-export type DeleteCertificateOutcome =
-  | { status: "Deleted"; use: RootCertificateUse | SignedCertificateUse }
-  | { status: "NotFound" }
-  /** M04.FR.06 (2.x) / M04.FR.05 (1.6 whitepaper): never deletable. */
-  | { status: "ChargingStationCertificate" };
-
-/** An OCSP response cached for one certificate (2.x M06, #537). */
-export interface CachedOcspResponse {
-  /** Base64 DER OCSPResponse, as the CSMS sent it. */
-  readonly ocspResult: string;
-  readonly cachedAt: string;
-}
-
-export type ApplySignedChainOutcome =
-  | { status: "Accepted"; chain: StoredCertificateChain }
-  | { status: "Malformed" }
-  | { status: "NoPendingCsr" }
-  | { status: "PublicKeyMismatch" }
-  /** A chain member's `notAfter` has passed (A02.FR.06, #587); `reason`
-   *  names the member. */
-  | { status: "Expired"; reason: string }
-  /** A chain member's `notBefore` is in the future (2.0.1 and 2.1
-   *  A02.FR.06, #587). */
-  | { status: "NotYetValid"; reason: string }
-  /** The key or subject breaks the Certificate Properties (A02.FR.06,
-   *  A00.FR.501-511, #587). */
-  | { status: "InvalidProperties"; reason: string }
-  /** The chain is not part of the operator hierarchy (A02.FR.06, #587). */
-  | { status: "OutsideHierarchy"; reason: string };
-
-/**
- * Safe snapshot of the store. Holds public material only (certificates and
- * CSRs): the private keys the store holds in memory (#537) are left out.
- */
-export interface CertificateStoreJson {
-  pendingCsrs: { use: SignedCertificateUse; pem: string }[];
-  rootCerts: InstalledRootCertificate[];
-  /** PEMs of each stored chain, leaf first (kept for the 1.6 tests). */
-  signedChains: string[][];
-}
+export * from "./certificateStoreTypes";
 
 interface PendingCsr {
   readonly pem: string;
@@ -132,21 +56,6 @@ interface PendingCsr {
    *  Memory-only; absent for a CSR forwarded by the caller. */
   readonly privateKey?: CryptoKey;
 }
-
-/** A signed Charging Station certificate the station can present as its
- *  TLS client identity (#537, A02.FR.08). */
-export interface TlsClientIdentity {
-  /** The stored chain, leaf first, as PEM. */
-  readonly cert: string;
-  /** The leaf's PKCS#8 private key, as PEM. */
-  readonly key: string;
-  /** The leaf's `notBefore`: the station switches once it has passed. */
-  readonly notBefore: Date;
-}
-
-type Entry =
-  | { kind: "root"; seq: number; value: InstalledRootCertificate }
-  | { kind: "chain"; seq: number; value: StoredCertificateChain };
 
 /**
  * The station's certificate state (OCPP 1.6 Security Whitepaper, 2.0.1 and
@@ -783,98 +692,4 @@ export class CertificateStore {
       return false;
     }
   }
-}
-
-function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
-  return typeof (value as { then?: unknown } | null)?.then === "function";
-}
-
-/**
- * The subject of an installed root, or undefined when it no longer parses:
- * @peculiar/x509 2 accepted DER with trailing bytes, so a state database
- * written by an older release may hold a root that version 3 rejects. Such a
- * root never issues a chain member, and DeleteCertificate still removes it by
- * its stored hash data.
- */
-/** The trust anchor of the hierarchy a signed certificate belongs to. */
-function hierarchyRootUse(use: SignedCertificateUse): RootCertificateUse {
-  return use === "ChargingStationCertificate"
-    ? "CsmsRootCertificate"
-    : "V2GRootCertificate";
-}
-
-function subjectOf(pem: string): string | undefined {
-  try {
-    return new x509.X509Certificate(pem).subject;
-  } catch {
-    return undefined;
-  }
-}
-
-function rowToEntry(row: StoredCertificate): Entry | null {
-  let body: Record<string, unknown>;
-  try {
-    const parsed: unknown = JSON.parse(row.body);
-    if (typeof parsed !== "object" || parsed === null) return null;
-    body = parsed as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-  if (row.kind === "root" && isRootCertificateUse(row.use)) {
-    if (typeof body.pem !== "string" || !isHashData(body.hashData)) return null;
-    return {
-      kind: "root",
-      seq: row.seq,
-      value: {
-        use: row.use,
-        pem: body.pem,
-        hashData: normalizeHashData(body.hashData),
-        installedAt: row.installedAt,
-      },
-    };
-  }
-  if (row.kind === "chain" && isSignedCertificateUse(row.use)) {
-    const { pems, hashData } = body;
-    if (
-      !Array.isArray(pems) ||
-      pems.length === 0 ||
-      !pems.every((p) => typeof p === "string") ||
-      !Array.isArray(hashData) ||
-      hashData.length !== pems.length ||
-      !hashData.every(isHashData)
-    ) {
-      return null;
-    }
-    return {
-      kind: "chain",
-      seq: row.seq,
-      value: {
-        use: row.use,
-        pems: pems as string[],
-        hashData: (hashData as CertificateHashData[]).map(normalizeHashData),
-        storedAt: row.installedAt,
-      },
-    };
-  }
-  return null;
-}
-
-/**
- * Rows written before #537 hold the serialNumber with its leading zero;
- * they are read back in the current form, so GetInstalledCertificateIds
- * reports one form whatever the row's age.
- */
-function normalizeHashData(hash: CertificateHashData): CertificateHashData {
-  return { ...hash, serialNumber: normalizeSerialNumber(hash.serialNumber) };
-}
-
-function isHashData(value: unknown): value is CertificateHashData {
-  if (typeof value !== "object" || value === null) return false;
-  const v = value as Record<string, unknown>;
-  return (
-    v.hashAlgorithm === "SHA256" &&
-    typeof v.issuerNameHash === "string" &&
-    typeof v.issuerKeyHash === "string" &&
-    typeof v.serialNumber === "string"
-  );
 }

@@ -22,6 +22,9 @@ sources:
   - scripts/verify/browser/run.ts
   - scripts/bench/engineScale.ts
   - "issues #566, #569, #575, #600, #618"
+  - packages/core/src/cp/application/engine/behaviors/transactionStart.ts
+  - packages/core/src/cp/application/engine/behaviors/transactionStop.ts
+  - packages/core/src/cp/application/scenario/csmsCallWaits.ts
 related:
   - ../concepts/charger-engine.md
   - ../entities/default-behaviors.md
@@ -147,7 +150,7 @@ Status (stage B): all of the above is implemented, and the schema is 1.5
 Decisions the design left open:
 
 - **Where the rule lives.** A `csmsCallTrigger` with `behavior: "replace"` registers a scenario rule with the
-  station's `BehaviorRegistry` when the node arms (`ScenarioRuntime.waitForCsmsCallReplacing`). The rule's
+  station's `BehaviorRegistry` when the node arms (`waitForCsmsCallReplacing` in `application/scenario/csmsCallWaits.ts`, called from `ScenarioRuntime`). The rule's
   `connectorId` is the run's connector and only **ranks** (exact connector first, then oldest registration);
   filtering is `match`, i.e. the node's `payload` condition. A CALL that names no connector matches every
   rule. The rule ends when the exchange it took is answered (or abandoned), when the wait is withdrawn
@@ -312,7 +315,8 @@ transactions, persistence and resume. Decisions the design left open:
   does the same for a `Transaction` that may be detached.
 - **`default.transaction`** (`application/engine/behaviors/transaction.ts`) holds `startTransaction`,
   `stopTransaction` and `cleanTransaction` (moved out of `ChargePoint`, which keeps one-line facades with
-  its public API), and answers `RemoteStartTransaction`, `RemoteStopTransaction` (1.6) and
+  its public API; since #877 their bodies live in `behaviors/transactionStart.ts` and
+  `behaviors/transactionStop.ts`, re-exported by `transaction.ts`), and answers `RemoteStartTransaction`, `RemoteStopTransaction` (1.6) and
   `RequestStartTransaction`, `RequestStopTransaction` (2.x) with the `AuthorizeRemoteTxRequests` and scenario
   delegation behavior of before. The handlers translate. `ChargePoint` hands the module a `TransactionPorts`
   (`sendTransactionEvent`, `startConnectionTimeout`) for the two things it keeps private; since #575 the type
@@ -784,7 +788,7 @@ What remains: the accepted limits of the two source checks; a partial reload is 
   `connector.hasRunningTransaction` (a closed transaction object does not count) and, once the answer
   settled, calls `ChargePoint.scheduleResetOnIdle(evseId)`. An `Immediate` or `OnIdle`-now reset that stops
   transactions first calls `cancelPendingResetsOnIdle(evseId)`. The default `stopTransaction`
-  (`behaviors/transaction.ts`) ends with `ChargePoint.runPendingResetOnIdle()`, as does `removeConnector`;
+  (`behaviors/transactionStop.ts`) ends with `ChargePoint.runPendingResetOnIdle()`, as does `removeConnector`;
   the pending list is `ChargePoint._pendingResetsOnIdle`.
 - **Decision:** the pending list stays on `ChargePoint`, not in `ChargerState`. It is not persisted (as on
   main: a restart forgets a `Scheduled` reset), and a behavior that replaces `Reset` simply never fills it.

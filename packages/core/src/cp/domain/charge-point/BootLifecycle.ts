@@ -27,6 +27,25 @@ export interface BootState {
   bootUnanswered: boolean;
 }
 
+/** The storage of {@link BootState}; the charge point holds one and hands it
+ *  to the boot and outage lifecycles. */
+export class BootStateStore implements BootState {
+  /** Whether the CSMS's latest BootNotification answer was `Accepted` and the
+   *  connection has not closed since (#603). */
+  bootAccepted = false;
+  /** Reason of the next BootNotification (2.x B01.FR.09); see
+   *  {@link ChargePoint.boot}. */
+  bootReason: BootReason = "PowerUp";
+  /** #702: the payload of the last BootNotification the CSMS Accepted; null
+   *  while the last one was Pending or Rejected, or none was sent. */
+  bootedWith: string | null = null;
+  /** #702: the BootNotification payload last sent, as JSON. */
+  bootSentFingerprint: string | null = null;
+  /** #702: a BootNotification was sent and not answered yet; a close in
+   *  between loses it, so the next open sends one again. */
+  bootUnanswered = false;
+}
+
 /** What the boot lifecycle needs from its charge point. */
 export interface BootLifecycleHost {
   /** Public members go through it so spies on the charge point still see

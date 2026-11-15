@@ -22,7 +22,7 @@ import { ConnectionTimeouts } from "./ConnectionTimeouts";
 import { ResetOnIdle } from "./ResetOnIdle";
 import { PlugInFlow } from "./PlugInFlow";
 import { ConnectorWiring } from "./ConnectorWiring";
-import { BootLifecycle, type BootState } from "./BootLifecycle";
+import { BootLifecycle, BootStateStore } from "./BootLifecycle";
 import { OutageLifecycle } from "./OutageLifecycle";
 import { StationMessaging } from "./StationMessaging";
 import { ConnectorStatusControl } from "./ConnectorStatusControl";
@@ -259,7 +259,6 @@ export class ChargePoint {
     return this._certSwitch.pendingCancel;
   }
   private readonly _idTagPool: IdTagPool | null;
-  private _bootAccepted = false;
   private readonly _outbox: Outbox;
   private readonly _heartbeat: ChargePointHeartbeat;
   private readonly _clockAligned: ClockAlignedMeterScheduler;
@@ -271,14 +270,6 @@ export class ChargePoint {
   /** Applies each connector's vehicle behavior to the station (#835). */
   private readonly _vehicleDrivers: Map<number, VehicleBehaviorDriver> =
     new Map();
-  /** #702: a BootNotification was sent and not answered yet; a close in
-   *  between loses it, so the next open sends one again. */
-  private _bootUnanswered = false;
-  /** #702: the BootNotification payload last sent, as JSON. */
-  private _bootSentFingerprint: string | null = null;
-  /** #702: the payload of the last BootNotification the CSMS Accepted; null
-   *  while the last one was Pending or Rejected, or none was sent. */
-  private _bootedWith: string | null = null;
   private readonly _stateManager: ChargePointStateManager;
   private readonly _timeline: ChargePointTimeline;
   private readonly _timelineProjector: ChargePointTimelineProjector;
@@ -288,8 +279,6 @@ export class ChargePoint {
   private readonly _fileUploader: FileUploader;
   private readonly _reservationManager: ReservationManager;
   /** #597: Reset OnIdle requests answered `Scheduled`, each run once its transactions end. */
-  /** Reason of the next BootNotification (2.x B01.FR.09); see {@link boot}. */
-  private _bootReason: BootReason = "PowerUp";
   /** #455: set while the station is without power. */
   private readonly _localAuthListManager: LocalAuthListManager;
   private readonly _authorization: StationAuthorization;
@@ -403,42 +392,7 @@ export class ChargePoint {
     writeConnector: (connectorId, write) =>
       this.writeConnector(connectorId, write),
   });
-  private readonly _bootState: BootState = (() => {
-    // eslint-disable-next-line @typescript-eslint/no-this-alias
-    const cp = this;
-    return {
-      get bootAccepted() {
-        return cp._bootAccepted;
-      },
-      set bootAccepted(value) {
-        cp._bootAccepted = value;
-      },
-      get bootReason() {
-        return cp._bootReason;
-      },
-      set bootReason(value) {
-        cp._bootReason = value;
-      },
-      get bootedWith() {
-        return cp._bootedWith;
-      },
-      set bootedWith(value) {
-        cp._bootedWith = value;
-      },
-      get bootSentFingerprint() {
-        return cp._bootSentFingerprint;
-      },
-      set bootSentFingerprint(value) {
-        cp._bootSentFingerprint = value;
-      },
-      get bootUnanswered() {
-        return cp._bootUnanswered;
-      },
-      set bootUnanswered(value) {
-        cp._bootUnanswered = value;
-      },
-    };
-  })();
+  private readonly _bootState = new BootStateStore();
   private readonly _boot: BootLifecycle = new BootLifecycle({
     chargePoint: this,
     state: this._bootState,
@@ -1122,7 +1076,7 @@ export class ChargePoint {
   /** Whether the Central System's latest BootNotification answer was
    *  `Accepted` and the connection has not closed since (#603). */
   get bootAccepted(): boolean {
-    return this._bootAccepted;
+    return this._bootState.bootAccepted;
   }
 
   /** Whether the OCPP WebSocket is currently open OR mid-handshake. Used
@@ -1865,18 +1819,21 @@ export class ChargePoint {
    */
   boot(reason?: BootReason): void {
     this.assertPowered();
-    if (reason) this._bootReason = reason;
+    if (reason) this._bootState.bootReason = reason;
     // A boot asked for while the socket is down (a Reset, a retry timer) is
     // lost on the wire: the next open must send it (#702).
     if (!this.isOnline()) this._outage.bootOnNextOpen = true;
-    this._bootUnanswered = true;
+    this._bootState.bootUnanswered = true;
     this._outage.ackedStatus = new Map();
-    this._bootSentFingerprint = JSON.stringify(this.bootPayload());
+    this._bootState.bootSentFingerprint = JSON.stringify(this.bootPayload());
     // OCPP 1.6J §4.2: the CP MUST NOT send any other CALL message until
     // BootNotification has been Accepted. The connector-level
     // StatusNotification fan-out happens in BootNotificationResultHandler
     // after we get the Accepted response.
-    this._outbox.sendBootNotification(this.bootPayload(), this._bootReason);
+    this._outbox.sendBootNotification(
+      this.bootPayload(),
+      this._bootState.bootReason,
+    );
     this.error = "";
   }
 

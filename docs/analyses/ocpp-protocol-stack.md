@@ -57,8 +57,10 @@ Two constraints hold across every step:
 - **Determinism.** Outgoing message ids come from the charge point's seeded
   `rng("message-id")` stream (`OCPPMessageHandler.ts`, `OCPPMessageHandlerV201.ts`),
   and timers from its `SimClock` ([Charger engine](../concepts/charger-engine.md#clock-and-random)).
-  An extracted primitive takes both as injected dependencies; it never draws its
-  own ids or reads the platform clock.
+  An extracted primitive never draws its own ids: the caller supplies them
+  (`nextMessageId` has no default). Its timers are an injected clock that
+  falls back to the platform timers when none is given, so it is deterministic
+  only when the caller injects one, as the simulator does with its `SimClock`.
 - **Byte-identical wire.** The golden-wire suite pins the frames the simulator
   writes; an extraction changes no byte and re-records no fixture.
 

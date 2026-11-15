@@ -307,6 +307,53 @@ describe("AutoTraffic vehicle pool on a charge point (#627)", () => {
     expect(total).toBe(counters.started);
   });
 
+  // #846: a start that does not begin leaves the connector the vehicle it was,
+  // and a later Default EV Settings propagation is not blocked by an override
+  // the traffic claimed for a session that never was.
+  it.each([
+    ["is refused", async () => ({ started: false })],
+    [
+      "throws",
+      async () => {
+        throw new Error("boom");
+      },
+    ],
+  ])(
+    "restores the connector's vehicle when the start %s",
+    async (_label, failingStart) => {
+      const { svc } = station();
+      const cp = (
+        svc as unknown as {
+          _chargePoint: {
+            getConnector(id: number): {
+              evSettings: { modelName: string; batteryCapacityKwh: number };
+              applyDefaultEvSettings(settings: { modelName: string }): void;
+            };
+            startTransaction: () => Promise<{ started: boolean }>;
+          };
+        }
+      )._chargePoint;
+      const connector = cp.getConnector(1);
+      const before = { ...connector.evSettings };
+      let attempts = 0;
+      cp.startTransaction = () => {
+        attempts++;
+        return failingStart();
+      };
+      const config: AutoTrafficConfig = {
+        ...CONFIG,
+        vehiclePool: [POOL[0]!],
+      };
+      svc.setAutoTrafficConfig(1, config);
+      await wait(300);
+      svc.setAutoTrafficConfig(1, { ...config, enabled: false });
+      expect(attempts).toBeGreaterThan(0);
+      expect(connector.evSettings).toEqual(before);
+      connector.applyDefaultEvSettings({ modelName: "Default after" });
+      expect(connector.evSettings.modelName).toBe("Default after");
+    },
+  );
+
   it("refuses an invalid pool", () => {
     const { svc } = station();
     expect(() =>

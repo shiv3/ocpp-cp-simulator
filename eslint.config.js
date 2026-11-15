@@ -5,6 +5,27 @@ import reactHooks from "eslint-plugin-react-hooks";
 import reactRefresh from "eslint-plugin-react-refresh";
 import prettier from "eslint-config-prettier";
 import globals from "globals";
+import { readFileSync } from "node:fs";
+
+// Line ratchet (#877): new files stay under MAX_LINES; the files listed in
+// scripts/file-size-allowlist.json may not grow past their recorded size.
+// scripts/check-file-size.ts fails on growth, a missing file or an unlisted over-limit file.
+const MAX_LINES = 800;
+const fileSizeAllowlist = JSON.parse(
+  readFileSync(
+    new URL("./scripts/file-size-allowlist.json", import.meta.url),
+    "utf8",
+  ),
+);
+const maxLines = (max) => [
+  "error",
+  { max, skipBlankLines: false, skipComments: false },
+];
+const sizeIgnores = [
+  "packages/ocpp/src/**",
+  "**/__tests__/**",
+  "**/*.test.{ts,tsx}",
+];
 
 // Flat config (ESLint 9). Port of the old .eslintrc.cjs: same recommended sets,
 // same custom rules, same per-path overrides.
@@ -118,4 +139,13 @@ export default tseslint.config(
     ],
     rules: { "react-refresh/only-export-components": "off" },
   },
+  {
+    files: ["packages/**/*.{ts,tsx}", "apps/**/*.{ts,tsx}"],
+    ignores: sizeIgnores,
+    rules: { "max-lines": maxLines(MAX_LINES) },
+  },
+  ...Object.entries(fileSizeAllowlist).map(([file, max]) => ({
+    files: [file],
+    rules: { "max-lines": maxLines(max) },
+  })),
 );

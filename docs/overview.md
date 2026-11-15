@@ -108,6 +108,7 @@ has. It also runs [`scripts/check-single-writer.ts`](../scripts/check-single-wri
 only `packages/core/src/cp/application/engine/` may assign a connector's `status`,
 `availability`, `scheduledAvailability`, `currentErrorCode`, `errorInfo` or
 `vendorErrorCode`, `transaction`, `transactionId` or a transaction's fields ([Charger engine](concepts/charger-engine.md#the-engine)).
+Last, [`scripts/check-file-size.ts`](../scripts/check-file-size.ts) backs ESLint's `max-lines` ratchet: non-test files stay under 800 lines, and the files already over (listed in `scripts/file-size-allowlist.json`) may not grow; the script fails on an entry for a missing file, a file over 800 lines without an entry, or a file larger than its entry, and only warns (`slack: …`) when an entry is larger than its file or still lists a file that now fits, so a split PR need not touch the allowlist (`--update` lowers or drops those entries and never raises one).
 
 | Package (`@ocpp-cp-simulator/<dir>`) | Holds                                                                                                                                                                                                   | May depend on                               |
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |

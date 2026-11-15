@@ -248,6 +248,13 @@ export interface AutoMeterValueSetting {
 }
 
 export interface StartTransactionOptions {
+  /** #697 (2.x, internal): the cable starts the transaction before any
+   *  idToken is authorized (`TxStartPoint` `EVConnected`). */
+  awaitAuthorization?: boolean;
+  /** #697 (2.x, internal): the idToken was authorized already (while the
+   *  cable was out, `TxStartPoint` `EVConnected`); the plug-in applies it
+   *  without a second Authorize. */
+  preAuthorized?: boolean;
   triggerReason?: TransactionStartTriggerReason;
   remoteStartId?: number;
   /** OCPP 2.x Started-event chargingState (#335); `Charging` when absent. */
@@ -492,6 +499,12 @@ export class ChargePoint {
   private readonly _engine: ChargePointEngine;
   /** #575: the default transaction behavior, see `deps.transactions`. */
   private readonly _transactions: ChargePointTransactions;
+  /** #697: an idToken authorized before the cable was in, per connector;
+   *  `TxStartPoint` `EVConnected` starts the transaction at the plug-in. */
+  private readonly _tokenAwaitingPlugIn = new Map<
+    number,
+    { tagId: string; options: StartTransactionOptions }
+  >();
   /** #393: level C expert sends; null on SOAP. */
   private readonly _rawFrames: RawFrameSink | null;
   /** #389: null on SOAP. */
@@ -1267,7 +1280,7 @@ export class ChargePoint {
   }
 
   /**
-   * The registry's constants (#604), such as `TxCtrlr.TxStartPoint`, as
+   * The registry's constants (#604), such as `ClockCtrlr.TimeSource`, as
    * read-only runtime keys, so reads, reports and monitors see them.
    */
   private publishDeviceModelConstants(): void {
@@ -4138,6 +4151,7 @@ export class ChargePoint {
     }
 
     connector.markEvUnplugged();
+    this._tokenAwaitingPlugIn.delete(connectorId);
     if (!connector.hasRunningTransaction) {
       // Only the states that exist because a cable is plugged in fall back
       // to Available (#453); an unplug does not lift an Unavailable, Faulted
@@ -4265,8 +4279,48 @@ export class ChargePoint {
       !connector.hasRunningTransaction &&
       connector.status === OCPPStatus.Available
     ) {
+      // #697: TxStartPoint EVConnected starts the transaction at the
+      // plug-in (Started, CablePluggedIn, EVConnected); the idToken that
+      // follows is an Updated event. The start puts the connector in
+      // Preparing itself.
+      if (
+        isOcpp2Version(this._ocppVersion) &&
+        connector.availability === "Operative" &&
+        this._configuration.txStartPoint().includes("EVConnected")
+      ) {
+        const waiting = this._tokenAwaitingPlugIn.get(connectorId);
+        this._tokenAwaitingPlugIn.delete(connectorId);
+        void (async () => {
+          await this.startTransaction("", connectorId, undefined, undefined, {
+            awaitAuthorization: true,
+            triggerReason: "CablePluggedIn",
+            chargingState: "EVConnected",
+          });
+          // The token authorized before the plug-in joins the transaction
+          // the cable just started (Updated Authorized / RemoteStart).
+          if (waiting) {
+            await this.startTransaction(
+              waiting.tagId,
+              connectorId,
+              undefined,
+              undefined,
+              { ...waiting.options, preAuthorized: true },
+            );
+          }
+        })();
+        return;
+      }
       this.updateConnectorStatus(connectorId, OCPPStatus.Preparing);
     }
+  }
+
+  /** #697: hold an authorized idToken until the cable is plugged in. */
+  deferStartUntilPlugIn(
+    connectorId: number,
+    tagId: string,
+    options: StartTransactionOptions,
+  ): void {
+    this._tokenAwaitingPlugIn.set(connectorId, { tagId, options });
   }
 
   /**

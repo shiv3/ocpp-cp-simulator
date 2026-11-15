@@ -121,8 +121,18 @@ export function transactionBehavior(cp: ChargePoint): Behavior {
           const decision = decideRemoteStart(cp, req);
           if (!decision.ok) return { response: decision.rejection };
           const connectorId = decision.connectorId;
+          // F01.FR.xx / #697: a transaction the cable already started is the
+          // one this request authorizes; the response names it.
+          const awaiting = cp.getConnector(connectorId)?.transaction;
+          const startedId =
+            awaiting?.awaitingAuthorization && awaiting.stopTime === null
+              ? awaiting.cpTransactionId
+              : undefined;
           return {
-            response: { status: "Accepted" },
+            response: {
+              status: "Accepted",
+              ...(startedId !== undefined ? { transactionId: startedId } : {}),
+            },
             after: async () => {
               await remoteStart(
                 cp,
@@ -203,7 +213,13 @@ function remoteStartable(
   const connector = cp.getConnector(connectorId);
   if (!connector || connector.availability !== "Operative") return false;
   if (connector.status === OCPPStatus.Faulted) return false;
-  if (connector.hasRunningTransaction) return false;
+  // #697: a transaction the cable started waits for its idToken.
+  if (
+    connector.hasRunningTransaction &&
+    !connector.transaction?.awaitingAuthorization
+  ) {
+    return false;
+  }
   return (
     startRefusalByReservation(
       cp,
@@ -341,6 +357,12 @@ export async function startTransaction(
   }
 
   if (connector.transaction && connector.transaction.stopTime === null) {
+    if (
+      connector.transaction.awaitingAuthorization &&
+      options.awaitAuthorization !== true
+    ) {
+      return authorizeAwaitingTransaction(cp, connector, tagId, options);
+    }
     // Only a NOT-yet-stopped transaction blocks a new start. A closed one
     // still attached (cleanTransaction sets stopTime without detaching; a
     // snapshot persisted before #491 restores one) must NOT block a retry.
@@ -348,6 +370,44 @@ export async function startTransaction(
       `Connector ${connectorId} already has an active transaction; ignoring duplicate start`,
       LogType.TRANSACTION,
     );
+    return { started: false };
+  }
+
+  // #697: TxStartPoint without Authorized (EVConnected alone): the
+  // authorization does not start the transaction, the plug-in does. The
+  // token is authorized now and held until the cable is in.
+  if (
+    isOcpp2Version(cp.ocppVersion) &&
+    options.awaitAuthorization !== true &&
+    options.preAuthorized !== true &&
+    connector.availability === "Operative" &&
+    connector.evConnection === "disconnected" &&
+    !cp.configuration.txStartPoint().includes("Authorized")
+  ) {
+    if (
+      options.triggerReason !== "RemoteStart" &&
+      options.idTokenType !== "NoAuthorization" &&
+      cp.configuration.authorizeBeforeLocalStart()
+    ) {
+      const status = await cp.authorizeAndWait(
+        tagId,
+        undefined,
+        options.idTokenType,
+      );
+      if (status !== "Accepted") {
+        logger.warn(
+          `Authorize.conf ${status} for ${tagId}; refusing local transaction start on connector ${connectorId}`,
+          LogType.TRANSACTION,
+        );
+        cp.events.emit("authorizeDenied", { connectorId, tagId, status });
+        return { started: false, denialStatus: status };
+      }
+    }
+    logger.info(
+      `TxStartPoint is EVConnected: ${tagId} is authorized; the transaction on connector ${connectorId} starts at the plug-in`,
+      LogType.TRANSACTION,
+    );
+    cp.deferStartUntilPlugIn(connectorId, tagId, options);
     return { started: false };
   }
 
@@ -367,6 +427,7 @@ export async function startTransaction(
   const isLocalStart = options.triggerReason !== "RemoteStart";
   // NoAuthorization has no token to authorize (IdTokenEnumType, #599).
   const authorizedBeforeStart =
+    options.awaitAuthorization !== true &&
     isLocalStart &&
     options.idTokenType !== "NoAuthorization" &&
     cp.configuration.authorizeBeforeLocalStart();
@@ -402,6 +463,7 @@ export async function startTransaction(
   if (
     isLocalStart &&
     !authorizedBeforeStart &&
+    options.awaitAuthorization !== true &&
     mayMatchThroughParent(cp, connectorId, tagId)
   ) {
     await cp.authorizeAndWait(tagId);
@@ -455,6 +517,9 @@ export async function startTransaction(
       : {}),
     startTriggerReason: options.triggerReason,
     startChargingState: options.chargingState,
+    ...(options.awaitAuthorization === true
+      ? { awaitingAuthorization: true }
+      : {}),
     // #727: the `0` id is a placeholder until StartTransaction.conf (1.x).
     ...(isOcpp2Version(cp.ocppVersion) ? {} : { startUnanswered: true }),
     batteryCapacityKwh,
@@ -542,6 +607,150 @@ export async function startTransaction(
   return { started: true };
 }
 
+/**
+ * #697: the idToken of a transaction the cable started (`TxStartPoint`
+ * `EVConnected`). A local one is authorized first, as a local start is; a
+ * denial leaves the transaction waiting. Then the transaction takes the
+ * token and reports it in an Updated event (triggerReason `Authorized`, or
+ * `RemoteStart` with the request's remoteStartId), and the energy starts.
+ */
+async function authorizeAwaitingTransaction(
+  cp: ChargePoint,
+  connector: Connector,
+  tagId: string,
+  options: StartTransactionOptions,
+): Promise<StartTransactionOutcome> {
+  const remote = options.triggerReason === "RemoteStart";
+  if (
+    !remote &&
+    options.preAuthorized !== true &&
+    options.idTokenType !== "NoAuthorization" &&
+    cp.configuration.authorizeBeforeLocalStart()
+  ) {
+    const status = await cp.authorizeAndWait(
+      tagId,
+      undefined,
+      options.idTokenType,
+    );
+    if (status !== "Accepted") {
+      cp.logger.warn(
+        `Authorize.conf ${status} for ${tagId}; the transaction on connector ${connector.id} keeps waiting for an idToken`,
+        LogType.TRANSACTION,
+      );
+      cp.events.emit("authorizeDenied", {
+        connectorId: connector.id,
+        tagId,
+        status,
+      });
+      return { started: false, denialStatus: status };
+    }
+  }
+  // The wait for the Authorize may have outlived the transaction.
+  const live = connector.transaction;
+  if (!live || live.stopTime !== null || !live.awaitingAuthorization) {
+    return { started: false };
+  }
+  connector.patchTransaction({
+    tagId,
+    awaitingAuthorization: false,
+    ...(options.idTokenType !== undefined
+      ? { idTokenType: options.idTokenType }
+      : {}),
+    ...(options.remoteStartId !== undefined
+      ? { remoteStartId: options.remoteStartId }
+      : {}),
+  });
+  cp.sendTransactionUpdate(connector.id, {
+    triggerReason: remote ? "RemoteStart" : "Authorized",
+    chargingState: "Charging",
+    idToken: {
+      tagId,
+      ...(options.idTokenType !== undefined
+        ? { type: options.idTokenType }
+        : {}),
+    },
+    ...(options.remoteStartId !== undefined
+      ? { remoteStartId: options.remoteStartId }
+      : {}),
+  });
+  if (connector.status === OCPPStatus.Preparing) {
+    cp.updateConnectorStatus(connector.id, OCPPStatus.Charging);
+  }
+  cp.events.emit("transactionStarted", {
+    connectorId: connector.id,
+    transactionId: 0,
+    tagId,
+  });
+  return { started: true };
+}
+
+/** The stop causes that are an authorization ending (#697): with
+ *  `TxStopPoint` lacking `Authorized` they give an Updated event, not Ended. */
+const AUTHORIZATION_STOP_TRIGGERS: ReadonlySet<string> = new Set([
+  "StopAuthorized",
+  "RemoteStop",
+  "Deauthorized",
+]);
+
+/** The stop reasons that are an authorization ending; any other reason
+ *  (EVDisconnected, EnergyLimitReached, PowerLoss, ...) ends the transaction. */
+const AUTHORIZATION_STOP_REASONS: ReadonlySet<string> = new Set([
+  "Local",
+  "Remote",
+  "DeAuthorized",
+]);
+
+/**
+ * #697: whether a stop is the end of the authorization only. Applies on 2.x
+ * when `TxStopPoint` does not contain `Authorized` and the stop is caused by
+ * the idToken (a tag, a RequestStopTransaction, a deauthorization).
+ */
+function endsAuthorizationOnly(
+  cp: ChargePoint,
+  options: StopTransactionOptions,
+  reason: StopTransactionReason | undefined,
+): boolean {
+  return (
+    isOcpp2Version(cp.ocppVersion) &&
+    !cp.configuration.txStopPoint().includes("Authorized") &&
+    AUTHORIZATION_STOP_TRIGGERS.has(
+      options.triggerReason ?? "StopAuthorized",
+    ) &&
+    (reason === undefined || AUTHORIZATION_STOP_REASONS.has(reason))
+  );
+}
+
+/** #697: report an authorization that ended while the stop point is the
+ *  cable: an Updated event, the energy stopped, the transaction still open. */
+function updateInsteadOfEnding(
+  cp: ChargePoint,
+  connector: Connector,
+  options: StopTransactionOptions,
+): void {
+  const transaction = connector.transaction;
+  if (!transaction) return;
+  if (transaction.authorizationEnded) {
+    cp.logger.info(
+      `Connector ${connector.id} authorization already ended; the transaction ends at the cable unplug (TxStopPoint)`,
+      LogType.TRANSACTION,
+    );
+    return;
+  }
+  connector.patchTransaction({ authorizationEnded: true });
+  connector.holdEnergyForInvalidId(0);
+  cp.sendTransactionUpdate(connector.id, {
+    triggerReason: options.triggerReason ?? "StopAuthorized",
+    chargingState: "SuspendedEVSE",
+  });
+  if (
+    connector.status === OCPPStatus.Charging ||
+    connector.status === OCPPStatus.Preparing ||
+    connector.status === OCPPStatus.SuspendedEV
+  ) {
+    cp.updateConnectorStatus(connector.id, OCPPStatus.SuspendedEVSE);
+  }
+}
+
 /** #727: connectors whose StartTransaction.req (1.x) is not queued yet, with
  *  the stops requested meanwhile. */
 const startsInProgress = new WeakMap<Connector, Array<() => void>>();
@@ -581,6 +790,13 @@ export function stopTransaction(
       `No active transaction for connector ${connector.id} when stopping`,
       LogType.TRANSACTION,
     );
+    return;
+  }
+
+  // #697: TxStopPoint without Authorized: the authorization ending is an
+  // Updated event; the cable ends the transaction.
+  if (endsAuthorizationOnly(cp, options, reason)) {
+    updateInsteadOfEnding(cp, connector, options);
     return;
   }
 

@@ -10,49 +10,62 @@ import { handleSetVariableMonitoringV201 } from "../variableMonitoringV201";
 const cpFor = (ocppVersion: string) => makeChargePoint({ ocppVersion });
 
 describe.each(["OCPP-2.0.1", "OCPP-2.1"])("Device Model registry (%s)", (v) => {
-  it("publishes TxStartPoint / TxStopPoint as read-only values", () => {
+  it("publishes TxStartPoint / TxStopPoint as read-write member lists (#697)", () => {
     const cp = cpFor(v);
-    const get = handleGetVariablesV201(
-      {
-        getVariableData: [
-          {
-            component: { name: "TxCtrlr" },
-            variable: { name: "TxStartPoint" },
-          },
-          { component: { name: "TxCtrlr" }, variable: { name: "TxStopPoint" } },
-        ],
-      },
-      cp.configuration,
-    );
-    expect(get.getVariableResult.map((r) => r.attributeValue)).toEqual([
-      "Authorized",
-      "Authorized,EVConnected",
-    ]);
-    const set = handleSetVariablesV201(
-      {
-        setVariableData: [
-          {
-            component: { name: "TxCtrlr" },
-            variable: { name: "TxStartPoint" },
-            attributeValue: "EVConnected",
-          },
-        ],
-      },
-      cp.configuration,
-    );
-    expect(set.setVariableResult[0].attributeStatus).toBe("Rejected");
-    expect(cp.configuration.get("TxStartPoint")?.value).toBe("Authorized");
+    const read = () =>
+      handleGetVariablesV201(
+        {
+          getVariableData: [
+            {
+              component: { name: "TxCtrlr" },
+              variable: { name: "TxStartPoint" },
+            },
+            {
+              component: { name: "TxCtrlr" },
+              variable: { name: "TxStopPoint" },
+            },
+          ],
+        },
+        cp.configuration,
+      ).getVariableResult.map((r) => r.attributeValue);
+    const set = (variable: string, attributeValue: string) =>
+      handleSetVariablesV201(
+        {
+          setVariableData: [
+            {
+              component: { name: "TxCtrlr" },
+              variable: { name: variable },
+              attributeValue,
+            },
+          ],
+        },
+        cp.configuration,
+      ).setVariableResult[0].attributeStatus;
+    expect(read()).toEqual(["Authorized", "Authorized,EVConnected"]);
+    expect(set("TxStartPoint", "EVConnected")).toBe("Accepted");
+    expect(set("TxStopPoint", "EVConnected")).toBe("Accepted");
+    expect(read()).toEqual(["EVConnected", "EVConnected"]);
+    // A set the simulator does not implement, a member it does not know,
+    // and the empty set are Rejected and change nothing.
+    expect(set("TxStartPoint", "PowerPathClosed")).toBe("Rejected");
+    expect(set("TxStopPoint", "Authorized")).toBe("Rejected");
+    expect(set("TxStopPoint", "")).toBe("Rejected");
+    expect(read()).toEqual(["EVConnected", "EVConnected"]);
+    expect(set("TxStartPoint", "EVConnected,Authorized")).toBe("Accepted");
   });
 
-  it("reports them with ReadOnly mutability and the registry's data type", () => {
+  it("reports them ReadWrite with the registry's data type and values", () => {
     const data = buildBaseReportData(cpFor(v).configuration);
     const start = data.find((d) => d.variable.name === "TxStartPoint");
     expect(start?.component).toEqual({ name: "TxCtrlr" });
     expect(start?.variableAttribute[0]).toMatchObject({
       value: "Authorized",
-      mutability: "ReadOnly",
+      mutability: "ReadWrite",
     });
-    expect(start?.variableCharacteristics?.dataType).toBe("MemberList");
+    expect(start?.variableCharacteristics).toMatchObject({
+      dataType: "MemberList",
+      valuesList: "Authorized,EVConnected",
+    });
   });
 
   it("keeps variable monitoring on the registered variables", () => {

@@ -15,7 +15,8 @@ sources:
   - "issue #528"
   - "issue #549"
   - "issue #527"
-  - packages/core/src/cp/domain/charge-point/ChargePoint.ts (evDisconnected)
+  - packages/core/src/cp/domain/charge-point/ChargePoint.ts (evDisconnected delegate)
+  - packages/core/src/cp/domain/charge-point/PlugInFlow.ts (evDisconnected, evPlugIn, evSetReady)
   - packages/core/src/cp/domain/connector/EvConnection.ts
   - "issue #453"
 related:
@@ -30,7 +31,7 @@ related:
   - local-authorization.md
   - power-loss.md
   - smart-charging.md
-updated: 2026-11-14
+updated: 2026-11-15
 ---
 
 # Charging sessions

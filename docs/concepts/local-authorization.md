@@ -8,7 +8,8 @@ sources:
   - packages/core/src/cp/infrastructure/persistence/SqliteAuthorizationCacheRepository.ts (`authorization_cache` table, issue #878)
   - packages/core/src/cp/domain/auth/StationAuthorization.ts
   - packages/core/src/cp/domain/auth/LocalAuthList.ts
-  - packages/core/src/cp/domain/charge-point/ChargePoint.ts (authorizeAndWait, startTransaction)
+  - packages/core/src/cp/domain/charge-point/ChargePoint.ts (authorizeAndWait delegate, startTransaction)
+  - packages/core/src/cp/domain/charge-point/AuthorizationFlow.ts (authorizeAndWait)
   - packages/core/src/cp/infrastructure/transport/handlers/callresult/TransactionResultHandlers.ts
   - packages/core/src/cp/infrastructure/transport/handlers/call/OtherCallHandlers.ts (ClearCacheHandler)
   - packages/core/src/cp/infrastructure/transport/v201/deviceModelMap.ts
@@ -27,7 +28,7 @@ related:
   - control-plane.md
   - ../entities/mcp-endpoint.md
   - operational-timeline.md
-updated: 2026-11-14
+updated: 2026-11-15
 ---
 
 # Local authorization

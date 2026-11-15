@@ -5,6 +5,9 @@ import type { MonitorEvaluation } from "../monitoring/MonitorEvaluation";
 import type { Outbox } from "../transport/Outbox";
 import { OCPPStatus } from "../types/OcppTypes";
 import type { BootReason } from "../types/OcppTypes";
+import { bootNotificationFor } from "../modem/bootIdentifiers";
+import type { BootNotification } from "../types/OcppTypes";
+import type { CellularLinkController } from "./CellularLinkController";
 import type { ChargePoint } from "./ChargePoint";
 import type {
   BootNotificationResult,
@@ -62,6 +65,7 @@ export interface BootLifecycleHost {
   >;
   readonly state: BootState;
   readonly clearOutage: () => void;
+  readonly cellular: () => CellularLinkController;
   readonly clock: () => SimClock;
   readonly clockAligned: () => ClockAlignedMeterScheduler;
   readonly configuration: () => ConfigurationStore;
@@ -89,7 +93,51 @@ export class BootLifecycle {
   /** A boot give-up waiting for its `bootNotificationResult` to be emitted. */
   private _bootGaveUp: number | null = null;
 
+  /** The static boot data the station was built with; set by the charge
+   *  point constructor. Replaced, never mutated, by `setFirmwareVersion`. */
+  bootNotification!: BootNotification;
+
   constructor(private readonly host: BootLifecycleHost) {}
+
+  /**
+   * The BootNotification as it would be sent now (#929): the static boot
+   * data, with `iccid` / `imsi` taken from the installed SIM when a modem
+   * model is configured. Read at the moment of every boot and of the 2.x
+   * "did the boot data change" comparison on reconnect (#702); a SIM change
+   * therefore shows up in the next real or triggered BootNotification and
+   * never causes one by itself.
+   */
+  bootPayload(): BootNotification {
+    return bootNotificationFor(
+      this.bootNotification,
+      this.host.cellular().modem,
+    );
+  }
+
+  /**
+   * The firmware the station runs from now on: the `firmwareVersion` of
+   * every later BootNotification (OCPP 1.6 §4.2, 2.0.1 B01). Set by a
+   * simulated firmware update that ended in Installed with `bumpVersion`
+   * (OCPP 1.6 §5.19, 2.0.1 L01), before the reboot's BootNotification. Sends
+   * nothing by itself; emits `firmwareVersionChanged` when the value changed,
+   * so a host can persist it. The boot data object is replaced, never
+   * mutated: it may be shared with the caller that built the station.
+   */
+  setFirmwareVersion(firmwareVersion: string): void {
+    const previous = this.bootNotification.firmwareVersion;
+    if (previous === firmwareVersion) return;
+    this.bootNotification = { ...this.bootNotification, firmwareVersion };
+    this.host
+      .logger()
+      .info(
+        `Firmware version ${String(previous)} -> ${firmwareVersion}`,
+        LogType.OCPP,
+      );
+    this.host.events().emit("firmwareVersionChanged", {
+      firmwareVersion,
+      ...(previous === undefined ? {} : { previous }),
+    });
+  }
 
   /** Boot-notification gate accessors used by BootNotificationResultHandler. */
   markBootAccepted(): void {

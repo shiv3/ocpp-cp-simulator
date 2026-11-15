@@ -126,6 +126,8 @@
     "@eslint/js": "^10.0.1",
     "@open-ocpp-trace/core": "0.1.0",
     "@open-ocpp-trace/jsonl": "0.1.0",
+    "@open-ocpp-trace/viewer-core": "0.1.0",
+    "@open-ocpp-trace/viewer-react": "0.1.0",
     "@tailwindcss/postcss": "^4.3.5",
     "@tauri-apps/cli": "^2.12.4",
     "@testing-library/jest-dom": "^7.0.1",

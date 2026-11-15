@@ -222,8 +222,9 @@ export class TransactionMessagesV201 {
     const seqNo = transaction.cpNextSeqNo ?? 0;
     this.patchTx(connectorId, transaction, { cpNextSeqNo: seqNo + 1 });
     // #335: a driven start may name the state the transaction opens in
-    // (e.g. `EVConnected` for a cable-first session); `Charging` is the
-    // historical default and stays so for every existing caller.
+    // (e.g. `EVConnected` for a cable-first session); otherwise the start
+    // derives it from the cable (#846). `Charging` covers a transaction
+    // that carries no start state.
     const chargingState = transaction.startChargingState ?? "Charging";
     this.patchTx(connectorId, transaction, {
       cpLastTransactionEventChargingState: chargingState,

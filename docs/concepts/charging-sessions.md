@@ -283,6 +283,10 @@ Rules:
   a transaction restored after a restart, show `connected-ready`. On 2.x a start
   without a prior plug-in records no cable (idToken first, E03); only a restored
   transaction infers one.
+- On 2.x a start that names no `chargingState` takes it from the cable (#846):
+  `Started` reports `Idle` without one (ChargingStateEnumType: "no connection
+  between EV and EVSE"; E02.FR.13 gives every `Started` a state), `Charging`
+  with one in. The plug-in that follows reports `EVConnected`, then `Charging`.
 - The cable goes with the EV: the auto-reset to `Available` after a stop clears it,
   and whatever frees a connector with a cable in (ChangeAvailability back to
   Operative, a reservation that ends, the firmware hold) shows `Preparing` (2.x

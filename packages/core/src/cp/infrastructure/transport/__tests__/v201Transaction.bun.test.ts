@@ -288,6 +288,8 @@ describe("OCPP 2.0.1 transaction events", () => {
             .connectorId === 1,
       );
 
+      // #846: the cable is in, so the transaction starts Charging.
+      cp.evPlugIn(1);
       cp.startTransaction("TAG-201", 1);
       const startedFrame = await csms.waitForFrame(
         transactionEventFrame("Started"),

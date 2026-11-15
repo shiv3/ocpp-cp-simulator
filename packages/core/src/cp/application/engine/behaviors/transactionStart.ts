@@ -7,6 +7,7 @@ import type {
 } from "../../../domain/charge-point/ChargePoint";
 import type { Connector } from "../../../domain/connector/Connector";
 import type { Transaction } from "../../../domain/connector/Transaction";
+import { startChargingStateOf } from "../../../domain/connector/EvConnection";
 import { OCPPStatus } from "../../../domain/types/OcppTypes";
 import { isOcpp2Version } from "../../../domain/types/OcppVersion";
 import type { TransactionPorts } from "../../../domain/engine/ChargePointEngine";
@@ -194,6 +195,8 @@ export async function startTransaction(
     parentOfTag,
   );
   const reservationId = reservation?.reservationId;
+  const evConnection = connector.evConnection;
+  const ocpp2 = isOcpp2Version(cp.ocppVersion);
 
   const transaction: Transaction = {
     id: 0,
@@ -212,7 +215,10 @@ export async function startTransaction(
       ? { idTokenType: options.idTokenType }
       : {}),
     startTriggerReason: options.triggerReason,
-    startChargingState: options.chargingState,
+    // #846: without an explicit state, the cable decides (Idle before it is in).
+    startChargingState:
+      options.chargingState ??
+      (ocpp2 ? startChargingStateOf(evConnection) : undefined),
     ...(options.awaitAuthorization === true
       ? { awaitingAuthorization: true }
       : {}),
@@ -238,7 +244,7 @@ export async function startTransaction(
     cp.reservationManager.cancelReservation(reservation.reservationId);
   }
 
-  const cablePluggedBefore = connector.evConnection !== "disconnected";
+  const cablePluggedBefore = evConnection !== "disconnected";
   connector.beginTransaction(transaction);
   // 2.x idToken-first (E03): a transaction started before the cable is in does
   // not put one there. The plug-in that follows is a cable event of its own

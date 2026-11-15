@@ -89,6 +89,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
         expect(cp.configuration.transactionMessageAttempts()).toBe(2);
         expect(cp.configuration.transactionMessageRetryInterval()).toBe(0);
 
+        cp.evPlugIn(1); // #846: the EV is plugged in and draws power
         void cp.startTransaction("TAG-490", 1);
         const first = await csms.waitForFrame(started);
         // The EV draws power: the rejection must not move it off Charging.
@@ -155,6 +156,7 @@ describe.each(["OCPP-2.0.1", "OCPP-2.1"])(
         await setVariables(csms, {
           MessageAttemptInterval: "0",
         });
+        cp.evPlugIn(1); // #846: the EV is plugged in and draws power
         void cp.startTransaction("TAG-490", 1);
         const first = await csms.waitForFrame(started);
         // The EV draws power: the rejection must not move it off Charging.

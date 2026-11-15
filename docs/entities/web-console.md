@@ -1252,7 +1252,10 @@ Underneath both views sits one model of the graph, the **block tree**
 `recognizeBlockTree`, now in
 [`blockTree/recognize.ts`](../../apps/web/src/console/lib/blockTree/recognize.ts);
 its types, structural successors, dominator computation and tree helpers
-(`treeNodes`, `assertTreeCovers`, in `blockTree/treeHelpers.ts`) live in
+(`treeNodes`, `assertTreeCovers`, in `blockTree/treeHelpers.ts`), the
+write-back (`rebuildFromTree`, in `blockTree/rebuild.ts`) and the edit
+primitives (`cloneTree`, `seqAt`, `insertBlockAt`, in
+`blockTree/edit/primitives.ts`) live in
 [`blockTree/`](../../apps/web/src/console/lib/blockTree/) and are re-exported
 by `blockTree.ts`): nested sequences of steps, forks and loops, recovered
 from the graph the way the executor reads it (`lowerScenario`,

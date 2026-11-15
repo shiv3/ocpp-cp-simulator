@@ -382,8 +382,10 @@ model](charging-sessions.md#ev-and-cable-model) (#453), the same operations the
 control plane's `ev_plug_in` and `ev_disconnected` call; the node no longer
 needs a status node beside it. A plug-in on an idle `Available` connector
 reports `Preparing` (2.x `Occupied`) once; the `transaction` start that follows
-finds the connector already there and sends no second one (#176, #496). In any
-other state the cable is recorded and the status stays. A plug-out **during a
+finds the connector already there and sends no second one (#176, #496). A
+plug-in on a transaction an EV-side disconnect suspended resumes `Charging`
+(#846). In any other state the cable is recorded and the status stays. A
+plug-out **during a
 transaction** is an EV-side disconnect (`ChargePoint.evDisconnected`, #488):
 `StopTransactionOnEVSideDisconnect` (2.x `TxCtrlr.StopTxOnEVSideDisconnect`,
 default `true`) stops the transaction with `EVDisconnected`, or with `false`

@@ -160,10 +160,12 @@ export class PlugInFlow {
    * second plug-in changes nothing. An idle `Available` connector reports
    * `Preparing` (1.6 §4.9 transition A2, "insert plug"; 2.x StatusNotification
    * `Occupied`, the cable plugged in before the driver authorizes), which starts the
-   * ConnectionTimeOut and allows the authorize / start that follows. In any
-   * other state (a running transaction, Unavailable, Faulted, Reserved,
-   * power lost) the cable is recorded and the status stays: the plug-in
-   * does not lift them. Unplug with {@link evDisconnected}.
+   * ConnectionTimeOut and allows the authorize / start that follows. A
+   * transaction suspended by an EV-side disconnect resumes `Charging` (1.6
+   * §4.10; 2.x E10, after the Updated `CablePluggedIn`). In any other state
+   * (another running transaction, Unavailable, Faulted, Reserved, power
+   * lost) the cable is recorded and the status stays: the plug-in does not
+   * lift them. Unplug with {@link evDisconnected}.
    */
   evPlugIn(connectorId: number): void {
     const connector = this.host.chargePoint.getConnector(connectorId);
@@ -189,21 +191,29 @@ export class PlugInFlow {
       return;
     }
     connector.markEvPluggedIn();
-    if (
-      isOcpp2Version(this.host.ocppVersion()) &&
-      connector.hasRunningTransaction &&
-      !this.host.chargePoint.poweredOff
-    ) {
-      // E03 (idToken first): the cable arrives after the transaction began.
-      // E03.FR.12 / E02.FR.17: Updated, CablePluggedIn, chargingState
-      // EVConnected; the EVConnectionTimeOut is over (E03.FR.05 applies only
-      // when no EV connects); the energy offer then starts (Charging).
-      this.host.connectionTimeouts().clear(connectorId);
-      this.host.outbox().sendTransactionUpdate(connectorId, {
-        triggerReason: "CablePluggedIn",
-        chargingState: "EVConnected",
-      });
-      if (connector.status === OCPPStatus.Preparing) {
+    if (connector.hasRunningTransaction && !this.host.chargePoint.poweredOff) {
+      // The cable comes back to a transaction an EV-side disconnect
+      // suspended (StopTransactionOnEVSideDisconnect=false): 1.6 §4.10, "If
+      // the EV is reconnected, energy transfer is allowed again"; 2.0.1 E10,
+      // "If the EV Driver plugs the cable back in, the transaction is
+      // resumed".
+      const resumes =
+        connector.status === OCPPStatus.SuspendedEV &&
+        connector.energyOfferSuspended;
+      const ocpp2 = isOcpp2Version(this.host.ocppVersion());
+      if (ocpp2) {
+        // E03 (idToken first): the cable arrives after the transaction began.
+        // E03.FR.12 / E02.FR.17 (and E10 A1 for a re-plug): Updated,
+        // CablePluggedIn, chargingState EVConnected; the EVConnectionTimeOut
+        // is over (E03.FR.05 applies only when no EV connects); the energy
+        // offer then starts (Charging).
+        this.host.connectionTimeouts().clear(connectorId);
+        this.host.outbox().sendTransactionUpdate(connectorId, {
+          triggerReason: "CablePluggedIn",
+          chargingState: "EVConnected",
+        });
+      }
+      if (resumes || (ocpp2 && connector.status === OCPPStatus.Preparing)) {
         this.host.chargePoint.updateConnectorStatus(
           connectorId,
           OCPPStatus.Charging,

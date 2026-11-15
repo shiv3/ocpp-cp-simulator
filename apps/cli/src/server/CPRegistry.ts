@@ -4,10 +4,8 @@ import type {
   Behavior,
   JsonObject,
 } from "@ocpp-cp-simulator/contracts/behavior";
-import { behaviorFitProblem } from "@ocpp-cp-simulator/core/cp/application/engine/behaviorFit";
 import {
   BehaviorLibrary,
-  BehaviorNotLoadableError,
   type ReplaceOutcome,
 } from "../behavior/BehaviorLibrary";
 import type { ChargePointInitOptions } from "../types";
@@ -16,11 +14,6 @@ import type { EventBus } from "./eventBus";
 import { SqliteModemRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/SqliteModemRepository";
 import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
 import type { NetworkSimManager } from "./NetworkSimManager";
-import { OcppSecurityProfileConfigError } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/wsUrlWithBasic";
-import type { OcppTlsOptions } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/wsUrlWithBasic";
-import { buildSoapCallbackUrl } from "../soapCallbackUrl";
-import { DEFAULT_SOAP_PATH } from "../soapPath";
-import { isSoapVersion } from "@ocpp-cp-simulator/core/cp/domain/types/OcppVersion";
 import {
   matchesLabelSelector,
   type Labels,
@@ -34,7 +27,17 @@ import {
   type ScenarioRepository,
 } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioRepository";
 import { createScenarioRepository } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/createScenarioRepository";
-import { readTlsFromPaths } from "./registry/tlsPaths";
+import { replaceBehaviorsEverywhere } from "./registry/behaviors";
+import {
+  notifyInitChange,
+  notifyRegistryMembership,
+  notifySessionSettled,
+} from "./registry/notify";
+import {
+  checkFit,
+  prepareInit,
+  withDerivedSoapCallback,
+} from "./registry/initPrep";
 import {
   persistBootNotification,
   persistCreate,
@@ -42,11 +45,7 @@ import {
   persistSecurityCredentials,
 } from "./registry/persistence";
 import { restoreFromDatabase, type RestoreContext } from "./registry/restore";
-import {
-  labelsColumn,
-  mergeTlsOptions,
-  preserveOmittedInit,
-} from "./registry/rowMapping";
+import { labelsColumn, preserveOmittedInit } from "./registry/rowMapping";
 
 /**
  * `updated`: a registered charge point's config changed — rebuilt by
@@ -325,16 +324,7 @@ export class CPRegistry {
   }
 
   private notifySessionSettled(cpId: string, info: SessionSettledInfo): void {
-    for (const sink of this.runSettledSinks) {
-      try {
-        sink(cpId, info);
-      } catch (err) {
-        console.error(
-          `[CPRegistry] session-settled sink error for "${cpId}":`,
-          err,
-        );
-      }
-    }
+    notifySessionSettled(this.runSettledSinks, cpId, info);
   }
 
   /**
@@ -434,12 +424,7 @@ export class CPRegistry {
     ocppVersion: string | undefined,
     behaviors: readonly Behavior[],
   ): void {
-    for (const behavior of behaviors) {
-      const problem = behaviorFitProblem(behavior, {
-        ocppVersion: ocppVersion ?? "OCPP-1.6J",
-      });
-      if (problem) throw new BehaviorNotLoadableError(problem);
-    }
+    checkFit(ocppVersion, behaviors);
   }
 
   /**
@@ -450,22 +435,7 @@ export class CPRegistry {
   private replaceBehaviorsEverywhere(
     behaviors: readonly Behavior[],
   ): ReplaceOutcome {
-    let applied = 0;
-    const failures: string[] = [];
-    for (const [cpId, svc] of this.services) {
-      const running = svc.behaviorIds();
-      const mine = behaviors.filter((b) => running.includes(b.id));
-      if (mine.length === 0) continue;
-      try {
-        svc.replaceBehaviors(mine);
-        applied++;
-      } catch (error) {
-        failures.push(
-          `${cpId} keeps the old version of ${mine.map((b) => b.id).join(", ")}: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    }
-    return { applied, failures };
+    return replaceBehaviorsEverywhere(this.services, behaviors);
   }
 
   /**
@@ -748,82 +718,14 @@ export class CPRegistry {
     persistSecurityCredentials(this.database, cpId, change);
   }
 
-  /**
-   * Fill in the SOAP callback URL from the daemon's public base when the
-   * charge point has none. Done at instantiation — after create()/update()
-   * have persisted the operator's own init — so the derived value never
-   * reaches the DB row (a free-tier tunnel URL changes between runs) and a
-   * restore re-derives it from whatever base the daemon has *now*.
-   */
   private withDerivedSoapCallback(
     init: ChargePointInitOptions,
   ): ChargePointInitOptions {
-    if (init.soapCallbackUrl) return init;
-    const base = this.options.soapPublicBaseUrl;
-    if (!base || !isSoapVersion(init.ocppVersion)) return init;
-    return {
-      ...init,
-      soapCallbackUrl: buildSoapCallbackUrl(
-        base,
-        init.cpId,
-        init.soapPath ?? this.options.soapPath ?? DEFAULT_SOAP_PATH,
-      ),
-      soapCallbackUrlDerived: true,
-    };
+    return withDerivedSoapCallback(this.options, init);
   }
 
-  /**
-   * Validate config-dependent security-profile requirements eagerly, before
-   * create()/update() persist or mutate anything, so a bad request fails
-   * atomically. Thrown as OcppSecurityProfileConfigError (rather than a
-   * plain Error) so the RPC layer (socketServer.ts runFacadeOperation) can
-   * map it to `invalid_params` with the human-readable message intact,
-   * instead of it falling through to an opaque, unlogged "internal error".
-   */
   private prepareInit(init: ChargePointInitOptions): ChargePointInitOptions {
-    // Ids only: an id that names no loaded behavior is refused here, before
-    // anything is persisted, with the loaded ids in the message.
-    if (init.behaviors !== undefined) this.library.check(init.behaviors);
-    const selected = this.library.select(init.behaviors);
-    this.checkFit(init.ocppVersion, selected);
-    this.library.checkParams(selected, init.behaviorParams);
-    if (
-      (init.securityProfile === 1 || init.securityProfile === 2) &&
-      !init.authorizationKey
-    ) {
-      throw new OcppSecurityProfileConfigError(
-        `securityProfile ${init.securityProfile} requires authorizationKey.`,
-      );
-    }
-    if (
-      init.securityProfile === 3 &&
-      !(init.tls?.cert && init.tls?.key) &&
-      !(init.tlsCertPath && init.tlsKeyPath)
-    ) {
-      throw new OcppSecurityProfileConfigError(
-        "securityProfile 3 requires client certificate and key TLS material.",
-      );
-    }
-    const tlsFromPaths = this.readTlsFromInitPaths(init);
-    if (!tlsFromPaths) return init;
-    return {
-      ...init,
-      tls: init.tls ? mergeTlsOptions(init.tls, tlsFromPaths) : tlsFromPaths,
-    };
-  }
-
-  private readTlsFromInitPaths(
-    init: ChargePointInitOptions,
-  ): OcppTlsOptions | undefined {
-    if (!init.tlsCaPath && !init.tlsCertPath && !init.tlsKeyPath) {
-      return undefined;
-    }
-    return this.readTlsFromPaths({
-      cpId: init.cpId,
-      tlsCaPath: init.tlsCaPath ?? null,
-      tlsCertPath: init.tlsCertPath ?? null,
-      tlsKeyPath: init.tlsKeyPath ?? null,
-    });
+    return prepareInit({ library: this.library, options: this.options }, init);
   }
 
   /**
@@ -837,15 +739,6 @@ export class CPRegistry {
     paramsColumn?: string | null,
   ): void {
     persistCreate(this.database, init, behaviorsColumn, paramsColumn);
-  }
-
-  private readTlsFromPaths(paths: {
-    readonly cpId: string;
-    readonly tlsCaPath: string | null;
-    readonly tlsCertPath: string | null;
-    readonly tlsKeyPath: string | null;
-  }): OcppTlsOptions | undefined {
-    return readTlsFromPaths(this.options, paths);
   }
 
   private persistRemove(cpId: string): void {
@@ -905,22 +798,10 @@ export class CPRegistry {
   }
 
   private notifyInitChange(): void {
-    for (const sink of this.initChangeSinks) {
-      try {
-        sink();
-      } catch {
-        process.stderr.write("[CPRegistry] init change sink error\n");
-      }
-    }
+    notifyInitChange(this.initChangeSinks);
   }
 
   private notifyRegistryMembership(event: RegistryMembershipEvent): void {
-    for (const sink of this.registrySinks) {
-      try {
-        sink(event);
-      } catch {
-        process.stderr.write("[CPRegistry] registry membership sink error\n");
-      }
-    }
+    notifyRegistryMembership(this.registrySinks, event);
   }
 }

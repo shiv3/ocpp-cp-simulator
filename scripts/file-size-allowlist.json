@@ -1,7 +1,7 @@
 {
   "apps/cli/src/jsonMode.ts": 898,
   "apps/cli/src/main.ts": 2532,
-  "apps/cli/src/server/CPRegistry.ts": 1618,
+  "apps/cli/src/server/CPRegistry.ts": 807,
   "apps/cli/src/server/FileReloadManager.ts": 1455,
   "apps/cli/src/server/RegistryChargePointService.ts": 1301,
   "apps/cli/src/server/httpServer.ts": 1264,
@@ -24,7 +24,7 @@
   "apps/web/src/console/pages/scenarios/run/StepsGraphView.tsx": 1537,
   "apps/web/src/console/pages/scenarios/run/StepsView.tsx": 1402,
   "apps/web/src/data/local/LocalChargePointService.ts": 1292,
-  "packages/client/src/remote/RemoteChargePointService.ts": 2083,
+  "packages/client/src/remote/RemoteChargePointService.ts": 1250,
   "packages/contracts/src/methods.ts": 1975,
   "packages/contracts/src/redaction.ts": 820,
   "packages/core/src/cp/application/engine/ChargerEngine.ts": 1279,

@@ -90,6 +90,14 @@ export interface NodeRunContext {
   remoteStartOptions: StartTransactionOptions | null;
   remoteStopReason: string | null;
   remoteStopOptions: StopTransactionOptions | null;
+  /** Step / force-skip plumbing of the wait helpers (waits.ts). */
+  stepResolve: (() => void) | null;
+  pendingSteps: number;
+  forceSkipResolve: (() => void) | null;
+  /** The state name of the run's machine (`idle`, `running`, `paused`, `stepping`, …). */
+  stateName(): string;
+  /** Send the machine its `STEP` event. */
+  sendStep(): void;
   markCertificateQuirksArmed(): void;
   unpark(control: WaitControl): void;
   notifyStateChange(): void;

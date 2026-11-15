@@ -90,7 +90,13 @@ import {
   executeReserveNow,
   executeStatusTrigger,
 } from "./nodes/triggers";
-import { waitWithProgress } from "./waits";
+import {
+  sleep,
+  waitForStep,
+  waitIfPaused,
+  waitWithOptionalForceSkip,
+  waitWithProgress,
+} from "./waits";
 import { ScenarioRunStateError } from "../../domain/errors/ScenarioRunStateError";
 import type { EventEmitter } from "../../shared/EventEmitter";
 import { realClock } from "../../shared/clock";
@@ -274,7 +280,7 @@ export class ScenarioExecutor {
   private createNodeContext(): NodeRunContext {
     // eslint-disable-next-line @typescript-eslint/no-this-alias -- the getters read the live fields
     const host = this;
-    return {
+    const ctx: NodeRunContext = {
       get scenario() {
         return host.scenario;
       },
@@ -329,6 +335,28 @@ export class ScenarioExecutor {
       set remoteStopOptions(value) {
         host.remoteStopOptions = value;
       },
+      get stepResolve() {
+        return host.stepResolve;
+      },
+      set stepResolve(value) {
+        host.stepResolve = value;
+      },
+      get pendingSteps() {
+        return host.pendingSteps;
+      },
+      set pendingSteps(value) {
+        host.pendingSteps = value;
+      },
+      get forceSkipResolve() {
+        return host.forceSkipResolve;
+      },
+      set forceSkipResolve(value) {
+        host.forceSkipResolve = value;
+      },
+      stateName: () => getScenarioStateName(host.service),
+      sendStep: () => {
+        host.service.send({ type: "STEP" });
+      },
       markCertificateQuirksArmed: () => {
         host.armedCertificateQuirks = true;
       },
@@ -337,11 +365,12 @@ export class ScenarioExecutor {
       program: () => host.program(),
       fromScope: (flow) => host.fromScope(flow),
       waitWithOptionalForceSkip: (waitPromise, scope) =>
-        host.waitWithOptionalForceSkip(waitPromise, scope),
-      sleep: (ms, scope) => host.sleep(ms, scope),
+        waitWithOptionalForceSkip(ctx, waitPromise, scope),
+      sleep: (ms, scope) => sleep(ctx, ms, scope),
       waitWithProgress: (nodeId, totalSeconds, scope) =>
-        host.waitWithProgress(nodeId, totalSeconds, scope),
+        waitWithProgress(ctx, nodeId, totalSeconds, scope),
     };
+    return ctx;
   }
 
   /**
@@ -680,7 +709,7 @@ export class ScenarioExecutor {
 
       // If the node finished while paused, do not make the next node visible
       // until the run has been resumed. Stop/abort can also land while parked.
-      await this.waitIfPaused(flow.scope);
+      await waitIfPaused(this.nodeCtx, flow.scope);
       if (this.aborted || getScenarioStateName(this.service) === "idle") {
         break;
       }
@@ -953,7 +982,7 @@ export class ScenarioExecutor {
 
     // Do not make the node visible while paused. This protects the boundary
     // after an in-flight wait resolves under pause.
-    await this.waitIfPaused(flow.scope);
+    await waitIfPaused(this.nodeCtx, flow.scope);
     if (
       this.aborted ||
       flow.scope.cancelled ||
@@ -966,7 +995,7 @@ export class ScenarioExecutor {
     // exactly one more node.
     const stateName = getScenarioStateName(this.service);
     if (stateName === "stepping") {
-      await this.waitForStep(flow.scope);
+      await waitForStep(this.nodeCtx, flow.scope);
       if (
         this.aborted ||
         flow.scope.cancelled ||
@@ -1239,14 +1268,6 @@ export class ScenarioExecutor {
     }
   }
 
-  private async waitWithProgress(
-    nodeId: string,
-    totalSeconds: number,
-    scope: BranchScope,
-  ): Promise<void> {
-    await waitWithProgress(this.nodeCtx, nodeId, totalSeconds, scope);
-  }
-
   /**
    * Pause execution
    */
@@ -1441,88 +1462,10 @@ export class ScenarioExecutor {
   }
 
   /**
-   * Wait if execution is paused
-   */
-  private async waitIfPaused(scope: BranchScope): Promise<void> {
-    while (
-      getScenarioStateName(this.service) === "paused" &&
-      !scope.cancelled
-    ) {
-      await this.sleep(100, scope);
-    }
-  }
-
-  /**
-   * Wait for step command
-   */
-  private async waitForStep(scope: BranchScope): Promise<void> {
-    const stateName = getScenarioStateName(this.service);
-    if (stateName !== "stepping") return;
-
-    if (this.pendingSteps > 0) {
-      this.pendingSteps -= 1;
-      this.service.send({ type: "STEP" });
-      return;
-    }
-
-    let localResolve: (() => void) | null = null;
-    const stepPromise = new Promise<void>((resolve) => {
-      localResolve = () => resolve();
-      this.stepResolve = localResolve;
-    });
-
-    try {
-      await Promise.race([stepPromise, scope.ended]);
-    } finally {
-      if (this.stepResolve === localResolve) {
-        this.stepResolve = null;
-      }
-    }
-  }
-
-  private async waitWithOptionalForceSkip(
-    waitPromise: Promise<unknown>,
-    scope: BranchScope,
-  ): Promise<void> {
-    const stateName = getScenarioStateName(this.service);
-    if (stateName !== "stepping") {
-      await Promise.race([waitPromise, scope.ended]);
-      return;
-    }
-
-    let localResolve: (() => void) | null = null;
-    const forcePromise = new Promise<void>((resolve) => {
-      localResolve = resolve;
-    });
-    this.forceSkipResolve = localResolve;
-
-    try {
-      await Promise.race([waitPromise, forcePromise, scope.ended]);
-    } finally {
-      if (this.forceSkipResolve === localResolve) {
-        this.forceSkipResolve = null;
-      }
-    }
-  }
-
-  /**
    * Notify state change
    */
   private notifyStateChange(): void {
     this.callbacks.onStateChange?.(this.getContext());
-  }
-
-  /**
-   * Sleep utility
-   */
-  private sleep(ms: number, scope: BranchScope): Promise<void> {
-    if (this.aborted || scope.cancelled) {
-      return Promise.resolve();
-    }
-    return Promise.race([
-      new Promise<void>((resolve) => this.clock.setTimeout(resolve, ms)),
-      scope.ended,
-    ]);
   }
 
   /** What a `$from` of this branch can read (schema 1.5, 1.6). */

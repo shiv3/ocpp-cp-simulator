@@ -148,7 +148,8 @@ function isDomainRepresentablePeriod(period: unknown): boolean {
 
 function v201ProfileToDomain(
   chargingProfile: IncomingChargingProfile,
-  evseId: number,
+  /** The domain connector that holds it (`profileHolderId`). */
+  connectorId: number,
 ): ActiveChargingProfile | null {
   const purpose = purposeToDomain(chargingProfile.chargingProfilePurpose);
   const kind = kindToDomain(chargingProfile.chargingProfileKind);
@@ -172,7 +173,7 @@ function v201ProfileToDomain(
 
   return {
     chargingProfileId: chargingProfile.id,
-    connectorId: evseId,
+    connectorId,
     stackLevel: chargingProfile.stackLevel,
     chargingProfilePurpose: purpose,
     chargingProfileKind: kind,
@@ -215,6 +216,38 @@ function domainProfileToV201(
   };
 }
 
+/**
+ * The connectors of EVSE `evseId` (> 0) that the station still has, through
+ * the station topology (#628). The 2.x profiles name an EVSE (K01); the
+ * domain keeps them on connectors.
+ */
+function evseConnectors(ctx: V201InboundContext, evseId: number): Connector[] {
+  const connectors: Connector[] = [];
+  for (const id of ctx.chargePoint.topology.connectorsOf(evseId)) {
+    const connector = ctx.chargePoint.getConnector(id);
+    if (connector) connectors.push(connector);
+  }
+  return connectors;
+}
+
+/**
+ * The domain connector that holds the profiles of EVSE `evseId`: the
+ * station (0) for EVSE 0, else the EVSE's first connector, which on the 1:1
+ * station is its only one. An EVSE the topology does not know keeps its id,
+ * so the domain refuses it as an unknown connector as before. EVSE-level
+ * profile sets come with multi-connector EVSEs (#628).
+ */
+function profileHolderId(ctx: V201InboundContext, evseId: number): number {
+  if (evseId === 0) return 0;
+  return ctx.chargePoint.topology.connectorsOf(evseId)[0] ?? evseId;
+}
+
+/** The 2.x evseId of the profiles held by domain connector `connectorId`. */
+function evseIdOfHolder(ctx: V201InboundContext, connectorId: number): number {
+  if (connectorId === 0) return 0;
+  return ctx.chargePoint.topology.evseOf(connectorId) ?? connectorId;
+}
+
 function affectedConnectors(
   ctx: V201InboundContext,
   evseId: number | undefined,
@@ -222,8 +255,7 @@ function affectedConnectors(
   if (evseId === undefined || evseId === 0) {
     return [...ctx.chargePoint.connectors.values()];
   }
-  const connector = ctx.chargePoint.getConnector(evseId);
-  return connector ? [connector] : [];
+  return evseConnectors(ctx, evseId);
 }
 
 function applyProfileStatusV201(
@@ -287,11 +319,11 @@ function txProfileRejection(
   evseId: number,
   transactionId: string | undefined,
 ): string | null {
-  const connector = ctx.chargePoint.getConnector(evseId);
   // A closed transaction can stay attached: only a running one counts.
-  const transaction = connector?.hasRunningTransaction
-    ? connector.transaction
-    : null;
+  const connector = evseConnectors(ctx, evseId).find(
+    (c) => c.hasRunningTransaction,
+  );
+  const transaction = connector?.transaction ?? null;
   if (!transaction) return "TxNotFound";
   if (
     transactionId !== undefined &&
@@ -331,7 +363,10 @@ export function handleSetChargingProfileV201(
 ): V201HandlerResult {
   const req = payload as SetChargingProfileRequestV201;
   const incoming = req.chargingProfile as unknown as IncomingChargingProfile;
-  const domain = v201ProfileToDomain(incoming, req.evseId);
+  const domain = v201ProfileToDomain(
+    incoming,
+    profileHolderId(ctx, req.evseId),
+  );
   if (!domain || !isCoherentProfileTarget(domain, req.evseId)) {
     return { response: rejected() };
   }
@@ -391,7 +426,7 @@ export function handleClearChargingProfileV201(
   };
   const evseId = criteria?.evseId;
   const cleared = ctx.chargePoint.clearChargingProfiles(
-    evseId,
+    evseId === undefined ? undefined : profileHolderId(ctx, evseId),
     removeCriteria,
     "ClearChargingProfile",
   );
@@ -450,24 +485,25 @@ function getCandidateProfiles(
       profiles.push(...connector.chargingProfiles);
     }
   } else if (evseId > 0) {
-    const connector = ctx.chargePoint.getConnector(evseId);
-    if (connector) {
-      profiles.push(...connector.chargingProfiles);
-    }
+    const holder = ctx.chargePoint.getConnector(profileHolderId(ctx, evseId));
+    if (holder) profiles.push(...holder.chargingProfiles);
   }
   return profiles;
 }
 
-function groupByConnectorId(
+/** The profiles grouped by the 2.x EVSE they are installed on. */
+function groupByEvseId(
+  ctx: V201InboundContext,
   profiles: ActiveChargingProfile[],
 ): Map<number, ActiveChargingProfile[]> {
   const groups = new Map<number, ActiveChargingProfile[]>();
   for (const profile of profiles) {
-    const group = groups.get(profile.connectorId);
+    const evseId = evseIdOfHolder(ctx, profile.connectorId);
+    const group = groups.get(evseId);
     if (group) {
       group.push(profile);
     } else {
-      groups.set(profile.connectorId, [profile]);
+      groups.set(evseId, [profile]);
     }
   }
   return groups;
@@ -508,7 +544,7 @@ export function handleGetChargingProfilesV201(
     afterResult: () => {
       // One report per EVSE; K09.FR.02: every report but the last says more
       // follow, so the CSMS can tell when the answer is complete.
-      const groups = [...groupByConnectorId(matches)];
+      const groups = [...groupByEvseId(ctx, matches)];
       groups.forEach(([evseId, profiles], index) => {
         const chargingProfile = profiles.map(domainProfileToV201) as [
           ReportChargingProfileType,
@@ -535,7 +571,9 @@ export function handleGetCompositeScheduleV201(
   let txProfile: ActiveChargingProfile | null = null;
 
   if (req.evseId > 0) {
-    const connector = ctx.chargePoint.getConnector(req.evseId);
+    const connector = ctx.chargePoint.getConnector(
+      profileHolderId(ctx, req.evseId),
+    );
     if (!connector) {
       return {
         response: {

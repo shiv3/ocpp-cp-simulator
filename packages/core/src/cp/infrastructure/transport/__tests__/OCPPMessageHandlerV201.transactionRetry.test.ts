@@ -7,6 +7,7 @@ import type { ChargePointEvents } from "../../../domain/charge-point/ChargePoint
 import type { Transaction } from "../../../domain/connector/Transaction";
 import { OCPPMessageType } from "../../../domain/types/OcppTypes";
 import type { TransactionEventRequestV201 } from "@ocpp-cp-simulator/ocpp/index";
+import { StationTopology } from "../../../domain/topology/StationTopology";
 
 /**
  * #490, OCPP 2.0.1 / 2.1 E13.FR.02-04: a CALLERROR answering a
@@ -103,6 +104,7 @@ function setup(config: { attempts?: number; interval?: number } = {}) {
   const rejected: Array<ChargePointEvents["transactionMessageRejected"]> = [];
   const discarded: Array<ChargePointEvents["transactionMessageDiscarded"]> = [];
   const cp = {
+    topology: StationTopology.identity(1),
     connectors: new Map([[1, connector]]),
     getConnector: vi.fn(() => connector),
     notifyOutgoingCall: vi.fn(),

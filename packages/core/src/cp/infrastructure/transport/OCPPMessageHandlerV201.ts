@@ -317,6 +317,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     this._gate = new InboundCallGate({
       ports: portsAliased(chargePoint, V201_ACTIONS_WITHOUT_STATUS_RESPONSE),
       registry: chargePoint.behaviors,
+      topology: chargePoint.topology,
       logPrefix: "[v2.0.1] ",
       info: (message) => this._logger.info(message, LogType.OCPP),
       warn: (message) => this._logger.warn(message, LogType.OCPP),
@@ -803,7 +804,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       return;
     }
     const messageId = this.generateMessageId();
-    const ev = v201StatusEvse(connectorId);
+    const ev = v201StatusEvse(this._chargePoint.topology, connectorId);
     const payload: StatusNotificationRequestV201 = {
       timestamp: (opts?.timestamp ?? new Date(this.clock.now())).toISOString(),
       connectorStatus: toV2ConnectorStatus(status),

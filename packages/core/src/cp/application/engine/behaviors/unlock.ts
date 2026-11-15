@@ -53,9 +53,11 @@ export function unlockBehavior(cp: ChargePoint): Behavior {
         handle: (request, ctx) => {
           const outcome = ctx.params.outcome as string;
           if (isOcpp2Version(cp.ocppVersion)) {
-            const connector = cp.getConnector(
-              (request as { evseId: number }).evseId,
-            );
+            const { evseId } = request as { evseId: number };
+            // The EVSE's connector through the station topology (#628).
+            const id = cp.topology.connectorsOf(evseId)[0];
+            const connector =
+              id === undefined ? undefined : cp.getConnector(id);
             if (!connector) return { response: { status: "UnknownConnector" } };
             if (connector.transaction) {
               return {

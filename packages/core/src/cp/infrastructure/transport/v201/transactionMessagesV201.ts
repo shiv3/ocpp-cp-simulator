@@ -60,6 +60,7 @@ export interface TransactionMessagesContext {
     | "recordTxEndedSample"
     | "signedMeterFor"
     | "stopTransaction"
+    | "topology"
   >;
   readonly logger: Logger;
   rng(name: string): Rng;
@@ -263,7 +264,7 @@ export class TransactionMessagesV201 {
               transaction.idTokenType,
             ),
           }),
-      evse: v201TransactionEvse(connectorId),
+      evse: v201TransactionEvse(this._chargePoint.topology, connectorId),
       meterValue: [
         {
           timestamp: transaction.startTime.toISOString(),
@@ -338,7 +339,7 @@ export class TransactionMessagesV201 {
       ...(transaction.reservationId !== undefined
         ? { reservationId: transaction.reservationId }
         : {}),
-      evse: v201TransactionEvse(connectorId),
+      evse: v201TransactionEvse(this._chargePoint.topology, connectorId),
     };
     this.sendTransactionEventCall(connectorId, payload);
   }
@@ -411,7 +412,7 @@ export class TransactionMessagesV201 {
             ),
           }
         : {}),
-      evse: v201TransactionEvse(connectorId),
+      evse: v201TransactionEvse(this._chargePoint.topology, connectorId),
       meterValue:
         transaction.meterStop !== null
           ? ([
@@ -578,7 +579,7 @@ export class TransactionMessagesV201 {
             ),
           }
         : {}),
-      evse: v201TransactionEvse(connectorId),
+      evse: v201TransactionEvse(this._chargePoint.topology, connectorId),
       ...(meterValue ? { meterValue } : {}),
     };
     this.sendTransactionEventCall(connectorId, payload);
@@ -766,7 +767,7 @@ export class TransactionMessagesV201 {
     }
 
     const payload: MeterValuesRequestV201 = {
-      evseId: v201MeterEvseId(connectorId),
+      evseId: v201MeterEvseId(this._chargePoint.topology, connectorId),
       meterValue: [
         {
           timestamp: timestamp.toISOString(),

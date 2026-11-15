@@ -109,9 +109,9 @@ function change16(cp: ChargePoint, req: ChangeAvailability16Request) {
 
 function change2(cp: ChargePoint, req: ChangeAvailability2Request) {
   const target = req.operationalStatus;
-  const connectorId = req.evse?.id;
+  const evseId = req.evse?.id;
 
-  if (connectorId === undefined) {
+  if (evseId === undefined) {
     // G03.FR.03 / G04.FR.04: a request for the state the EVSE is already in is
     // Accepted; Scheduled applies only to a change that is really pending
     // (G03.FR.05, G04.FR.06). A busy EVSE already in the target state just
@@ -150,7 +150,9 @@ function change2(cp: ChargePoint, req: ChangeAvailability2Request) {
     };
   }
 
-  const connector = cp.getConnector(connectorId);
+  // The EVSE's connector through the station topology (#628).
+  const id = cp.topology.connectorsOf(evseId)[0];
+  const connector = id === undefined ? undefined : cp.getConnector(id);
   if (!connector) return { response: { status: "Rejected" } };
   if (connector.transaction) {
     // Already in the requested state: Accepted, and a pending opposite
@@ -174,7 +176,10 @@ function change2(cp: ChargePoint, req: ChangeAvailability2Request) {
     response: { status: "Accepted" },
     after: async () => {
       connector.availability = target;
-      cp.updateConnectorStatus(connectorId, statusOf(cp, target, connectorId));
+      cp.updateConnectorStatus(
+        connector.id,
+        statusOf(cp, target, connector.id),
+      );
       cp.persistAvailability();
     },
   };

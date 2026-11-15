@@ -15,6 +15,7 @@ import {
 import { strictValidationErrors } from "@ocpp-cp-simulator/ocpp/validate";
 import { v201Schemas } from "@ocpp-cp-simulator/ocpp/v201/schemas";
 import { v21Schemas } from "@ocpp-cp-simulator/ocpp/v21/schemas";
+import { StationTopology } from "../../../domain/topology/StationTopology";
 
 /**
  * #552, OCPP 2.0.1 / 2.1 A04.FR.02 on the E11 queue (#528): a critical
@@ -118,6 +119,7 @@ function setup(ocppVersion: string) {
   const cp = {
     id: `CP-552-${ocppVersion}`,
     ocppVersion,
+    topology: StationTopology.identity(1),
     connectors: new Map([[1, connector]]),
     getConnector: () => connector,
     notifyOutgoingCall: vi.fn(),

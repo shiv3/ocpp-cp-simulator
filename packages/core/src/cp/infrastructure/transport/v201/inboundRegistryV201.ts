@@ -280,7 +280,12 @@ export type V201InboundRegistry = ReadonlyMap<string, V201InboundHandler>;
 /** The charge point's EVSEs and Targets, for a device-model lookup. */
 function deviceModelContext(ctx: V201InboundContext): DeviceModelContext {
   return {
-    evseExists: (evse) => v201EvseExists(evse, ctx.chargePoint.connectors),
+    evseExists: (evse) =>
+      v201EvseExists(
+        ctx.chargePoint.topology,
+        evse,
+        ctx.chargePoint.connectors,
+      ),
     targets: ctx.chargePoint.deviceModelTargets,
     ocppVersion: ctx.chargePoint.ocppVersion,
   };
@@ -310,11 +315,22 @@ function logSetVariables(
   });
 }
 
+/** The EVSEs of the station's topology that still have a connector (#628);
+ *  a connector removed at run time takes its EVSE out of the report. */
+function presentEvseIds(
+  chargePoint: Pick<ChargePoint, "connectors" | "topology">,
+): number[] {
+  const { connectors, topology } = chargePoint;
+  return topology.evseIds.filter((evseId) =>
+    topology.connectorsOf(evseId).some((id) => connectors.has(id)),
+  );
+}
+
 /** Every variable of the charge point's device model, as reported. */
 function fullReportData(ctx: V201InboundContext): ReportDataType[] {
   return buildBaseReportData(
     ctx.chargePoint.configuration,
-    ctx.chargePoint.connectors.keys(),
+    presentEvseIds(ctx.chargePoint),
     ctx.chargePoint.deviceModelTargets,
   );
 }

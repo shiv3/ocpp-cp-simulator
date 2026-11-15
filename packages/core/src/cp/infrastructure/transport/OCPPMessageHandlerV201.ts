@@ -3,7 +3,6 @@ import {
   type DataTransferData,
   type DataTransferResult,
 } from "../../domain/types/DataTransfer";
-import { inboundV2xViolation } from "./codec/validateV2x";
 import { behaviorTapOf } from "./behaviorTap";
 import type {
   DiagnosticsStatus,
@@ -14,28 +13,16 @@ import { V201_ACTIONS_WITHOUT_STATUS_RESPONSE } from "../../domain/types/csmsAct
 import type {
   BootNotificationRequestV201,
   HeartbeatRequestV201,
-  HeartbeatResponseV201,
-  BootNotificationResponseV201,
   DataTransferRequestV201,
-  DataTransferResponseV201,
   FirmwareStatusNotificationRequestV201,
   LogStatusNotificationRequestV201,
   StatusNotificationRequestV201,
-  StatusNotificationResponseV201,
-  TransactionEventRequestV201,
-  TransactionEventResponseV201,
-  MeterValuesResponseV201,
   AuthorizeRequestV201,
-  AuthorizeResponseV201,
-  GetCertificateStatusRequestV201,
-  GetCertificateStatusResponseV201,
-  SignCertificateRequestV201,
-  SignCertificateResponseV201,
 } from "@ocpp-cp-simulator/ocpp/index";
 import type { OCPPWebSocket } from "./OCPPWebSocket";
 import type { ProtocolCodec } from "./profile/ProtocolProfile";
 import { CallWaiters } from "./CallWaiters";
-import { ExpertCalls, type CallErrorFields } from "./ExpertCalls";
+import { ExpertCalls } from "./ExpertCalls";
 import {
   type OcppCallOutcome,
   type OcppCallRequest,
@@ -51,15 +38,11 @@ import type {
   BootReason,
   ChargePointErrorCode,
 } from "../../domain/types/OcppTypes";
-import {
-  type OCPPErrorCode,
-  OCPPMessageType,
-  OCPPStatus,
-} from "../../domain/types/OcppTypes";
+import { OCPPMessageType } from "../../domain/types/OcppTypes";
+import type { OCPPStatus } from "../../domain/types/OcppTypes";
 import {
   DEFAULT_ID_TOKEN_TYPE,
   type IdTokenTypeName,
-  type TransactionChargingState,
   type TransactionUpdateOptions,
 } from "../../domain/connector/Transaction";
 import type {
@@ -80,7 +63,6 @@ import type {
 } from "../../domain/transport/IChargePointMessageHandler";
 import { DataTransferHandler } from "./handlers";
 import { v201StatusEvse } from "./v201/topologyWireV201";
-import { recordIdTokenInfo } from "./v201/authorizationCacheV201";
 import { TransactionMessagesV201 } from "./v201/transactionMessagesV201";
 import { CertificateSigningV201 } from "./v201/certificateSigningV201";
 import {
@@ -97,43 +79,18 @@ import {
 import {
   buildV201InboundRegistry,
   type V201Action,
-  type V201HandlerResult,
-  type V201InboundContext,
   type V201InboundRegistry,
   type V201RequestPayload,
 } from "./v201/inboundRegistryV201";
-import { ResponseEffectQueue, type GenerationToken } from "./network-sim";
+import { ResponseEffectQueue } from "./network-sim";
 import { PendingMessageQueue } from "../../domain/transport/PendingMessageQueue";
-import { CallExchange } from "./inbound/CallExchange";
 import { InboundCallGate, portsAliased } from "./inbound/InboundCallGate";
-
-type V201ResponsePayload =
-  | BootNotificationResponseV201
-  | HeartbeatResponseV201
-  | StatusNotificationResponseV201
-  | TransactionEventResponseV201
-  | MeterValuesResponseV201
-  | AuthorizeResponseV201;
-
-/** True for a promise or any other thenable a handler may return. */
-function isThenable<T>(value: T | PromiseLike<T>): value is PromiseLike<T> {
-  return typeof (value as { then?: unknown } | null)?.then === "function";
-}
-
-function ocppStatusToTransactionChargingState(
-  status: OCPPStatus,
-): TransactionChargingState | null {
-  switch (status) {
-    case OCPPStatus.Charging:
-      return "Charging";
-    case OCPPStatus.SuspendedEV:
-      return "SuspendedEV";
-    case OCPPStatus.SuspendedEVSE:
-      return "SuspendedEVSE";
-    default:
-      return null;
-  }
-}
+import { ocppStatusToTransactionChargingState } from "./v201/chargingStateV201";
+import { InboundCallsV201 } from "./v201/inboundCallV201";
+import {
+  CallAnswersV201,
+  type V201ResponsePayload,
+} from "./v201/callAnswersV201";
 
 export {
   MAX_QUEUED_NOTIFY_EVENTS,
@@ -207,6 +164,10 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
   private readonly _gate: InboundCallGate;
   /** Outbound certificate signing and OCSP status requests (#877). */
   private readonly _certificates: CertificateSigningV201;
+  /** Inbound CSMS CALLs: gate, registry, validation, answer (#877). */
+  private readonly _inboundCalls: InboundCallsV201;
+  /** CALLRESULT / CALLERROR answers to the station's CALLs (#877). */
+  private readonly _answers: CallAnswersV201;
   private _bootStatus:
     | { status: "Idle" }
     | { status: "Accepted" }
@@ -342,6 +303,35 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       this._responseEffectQueue.flushAfterCloseFinalization(finalized);
     });
 
+    this._inboundCalls = new InboundCallsV201({
+      chargePoint,
+      webSocket,
+      logger,
+      inbound: this._inbound,
+      gate: this._gate,
+      responseEffectQueue: this._responseEffectQueue,
+      certificates: this._certificates,
+      host: {
+        send: (action, messageId, payload) =>
+          this.send(action, messageId, payload),
+        generateMessageId: () => this.generateMessageId(),
+        hasTransactionEventsToDeliver: (id) =>
+          this.hasTransactionEventsToDeliver(id),
+        bootAccepted: () => this._bootStatus.status === "Accepted",
+      },
+    });
+    this._answers = new CallAnswersV201({
+      chargePoint,
+      logger,
+      pendingRequests: this._pendingRequests,
+      statusAcks: this._statusAcks,
+      expertCalls: this._expertCalls,
+      dataTransferWaiters: this._dataTransferWaiters,
+      transactionEvents: this._transactionEvents,
+      transactionMessages: this._transactionMessages,
+      certificates: this._certificates,
+    });
+
     this._webSocket.setMessageHandler(this.handleIncomingMessage.bind(this));
 
     // `?.`: the socket doubles of the handler's unit tests have no observers.
@@ -371,44 +361,6 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     return this.rng("message-id").uuid();
   }
 
-  /** The exchange of one inbound CALL, bound to this socket's generation. */
-  private openExchange(
-    messageId: string,
-    action: string,
-    generation: GenerationToken,
-  ): CallExchange {
-    const exchange = new CallExchange({
-      action,
-      messageId,
-      generation,
-      isGenerationCurrent: (g) =>
-        g.gen === this._webSocket.currentGeneration().gen,
-      announce: (completion) =>
-        this._chargePoint.notifyIncomingCallCompleted(completion),
-      writeResult: (payload, gen, onSettled) =>
-        this._webSocket.sendResult(messageId, payload, gen, onSettled),
-      writeError: (errorCode, errorDescription, gen, onSettled) =>
-        this._webSocket.sendError(
-          messageId,
-          {
-            errorCode: errorCode as OCPPErrorCode,
-            errorDescription,
-            errorDetails: {},
-          },
-          gen,
-          onSettled,
-        ),
-      effects: this._responseEffectQueue,
-      warn: (message) =>
-        this._logger.warn(
-          message.startsWith("[v2.0.1]") ? message : `[v2.0.1] ${message}`,
-          LogType.OCPP,
-        ),
-    });
-    this._gate.track(exchange);
-    return exchange;
-  }
-
   private send(
     action: V201Action,
     messageId: string,
@@ -436,115 +388,14 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
     payload: unknown,
   ): void {
     if (messageType === OCPPMessageType.CALL) {
-      // #349: the scenario mechanisms the 1.6 handler consults at this point —
-      // the csmsCallTrigger event, inbound policies and one-shot response
-      // overrides — apply on 2.0.1 too, through the one gate both handlers
-      // share. Scenarios spell actions in either version's vocabulary; a
-      // 2.0.1 CALL is looked up under its own name and its 1.6 alias
-      // (RequestStartTransaction ← RemoteStartTransaction, …).
-      // #396: the control plane announces the CALL under its wire name;
-      // every answer below reports itself through the exchange.
-      behaviorTapOf(this._chargePoint).observe({
-        type: "callReceived",
-        action,
-        messageId,
-        payload,
-      });
-      const gen = this._webSocket.currentGeneration();
-      const exchange = this.openExchange(messageId, action, gen);
-      if (this._gate.admit(exchange, payload).kind === "settled") return;
-
-      const entry = this._inbound.get(action);
-      if (entry) {
-        if (!entry.validate(payload)) {
-          // Part 4 §4.3 Table 8: the code names the kind of violation.
-          const violation = inboundV2xViolation(
-            action,
-            payload,
-            this._chargePoint.ocppVersion,
-          );
-          exchange.replyError(violation.errorCode, violation.description);
-          return;
-        }
-
-        const ctx: V201InboundContext = {
-          chargePoint: this._chargePoint,
-          logger: this._logger,
-          sendCall: (a, p) => this.send(a, this.generateMessageId(), p),
-          hasTransactionEventsToDeliver: (id) =>
-            this.hasTransactionEventsToDeliver(id),
-          certificateSigning: this._certificates.certificateSigning,
-          bootAccepted: () => this._bootStatus.status === "Accepted",
-        };
-        const fail = (error: unknown): void => {
-          // The exchange refuses an answer on a connection that changed (and
-          // runs no afterResult); that case needs no CALLERROR.
-          if (exchange.state !== "open") return;
-          // Same answer as the 1.6J handler: a failing handler is the
-          // station's fault, so the CSMS gets InternalError instead of
-          // waiting for its timeout (#399).
-          this._logger.error(
-            `[v2.0.1] Error handling ${action}: ${error}`,
-            LogType.OCPP,
-          );
-          exchange.replyError(
-            "InternalError",
-            // OCPP-J 2.0.1 / 2.1 Part 4 §4.2.3: ErrorDescription is
-            // string[255].
-            (error instanceof Error ? error.message : String(error)).slice(
-              0,
-              255,
-            ),
-          );
-        };
-        const finish = ({
-          response,
-          afterResult,
-          callError,
-        }: V201HandlerResult): void => {
-          if (callError) {
-            exchange.replyError(callError.code, callError.description);
-            return;
-          }
-          exchange.reply(response, {
-            ...(afterResult ? { effect: afterResult } : {}),
-          });
-        };
-        let handled: ReturnType<typeof entry.handle>;
-        try {
-          handled = entry.handle(payload, ctx);
-        } catch (error) {
-          fail(error);
-          return;
-        }
-        // #456: await only a real thenable. An unconditional await would
-        // defer every CALLRESULT by a microtask and reorder it against the
-        // follow-up CALLs other code sends meanwhile. `Promise.resolve`
-        // adopts any thenable, including one whose `then` returns nothing.
-        if (isThenable(handled)) {
-          Promise.resolve(handled)
-            .then(finish, fail)
-            .catch((error: unknown) =>
-              this._logger.error(
-                `[v2.0.1] Error answering ${action}: ${error}`,
-                LogType.OCPP,
-              ),
-            );
-          return;
-        }
-        finish(handled);
-        return;
-      }
-
-      this._logger.warn(
-        `[v2.0.1] Unsupported CSMS action ${action}`,
-        LogType.OCPP,
-      );
-      exchange.replyError("NotImplemented", "This action is not supported");
+      this._inboundCalls.handleCall(messageId, action, payload);
     } else if (messageType === OCPPMessageType.CALLRESULT) {
       try {
-        this.observeAnswer(messageId, "result", payload);
-        this.handleCallResult(messageId, payload as V201ResponsePayload);
+        this._answers.observeAnswer(messageId, "result", payload);
+        this._answers.handleCallResult(
+          messageId,
+          payload as V201ResponsePayload,
+        );
       } finally {
         this.settleDelivery(messageId);
         // The answer frees the §4.1.1 slot (#708), whatever handling it did.
@@ -552,200 +403,11 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
       }
     } else if (messageType === OCPPMessageType.CALLERROR) {
       try {
-        this.handleCallError(messageId, payload);
+        this._answers.handleCallError(messageId, payload);
       } finally {
         this.settleDelivery(messageId);
         this._calls.releaseCall(messageId);
       }
-    }
-  }
-
-  private handleCallError(messageId: string, payload: unknown): void {
-    this.observeAnswer(messageId, "error", payload);
-    const pending = this._pendingRequests.get(messageId);
-    this._pendingRequests.delete(messageId);
-    this._logger.warn(`[v2.0.1] CALLERROR for ${messageId}`, LogType.OCPP);
-    const error = payload as CallErrorFields;
-    if (this._expertCalls.claimError(messageId, error)) return;
-    if (pending?.transactionEvent) {
-      this._transactionEvents.endTransmission(
-        messageId,
-        pending.transactionEvent,
-        pending.timeout,
-      );
-      this._transactionEvents.onTransactionEventFailure(
-        pending.transactionEvent,
-        {
-          reason: "callError",
-          errorCode: error.errorCode ?? "GenericError",
-        },
-      );
-      return;
-    }
-    if (pending?.action === "DataTransfer") {
-      this._dataTransferWaiters.reject(
-        messageId,
-        new Error(
-          `DataTransfer ${messageId} answered with CALLERROR ${error.errorCode ?? "?"}: ${error.errorDescription ?? ""}`,
-        ),
-      );
-    }
-
-    // Issue #181: a CALLERROR answering Authorize.req is a definite
-    // protocol failure, unlike the authorizeAndWait paths where the CSMS
-    // said nothing at all (#452: a disconnect applies the offline
-    // rules; a timeout refuses a tag known locally as NOT valid and
-    // otherwise proceeds as "Accepted"). Here the CSMS *did* respond,
-    // and what it said was "I couldn't process this" — so treat it as
-    // fail-CLOSED:
-    // synthesize a denial ("Invalid") rather than let authorizeAndWait
-    // burn its full timeout waiting for a CALLRESULT that will never
-    // arrive.
-    if (pending?.action === "Authorize") {
-      const authorizeRequest = pending.payload as AuthorizeRequestV201;
-      this._chargePoint.notifyAuthorizeResult(
-        authorizeRequest.idToken.idToken,
-        "Invalid",
-      );
-    }
-  }
-
-  /** Tell the behaviors' `callResult` hooks the CSMS answered one of our CALLs. */
-  private observeAnswer(
-    messageId: string,
-    outcome: "result" | "error",
-    payload: unknown,
-  ): void {
-    const pending = this._pendingRequests.get(messageId);
-    if (!pending) return;
-    behaviorTapOf(this._chargePoint).observe({
-      type: "callResult",
-      action: pending.action,
-      messageId,
-      outcome,
-      payload,
-    });
-  }
-
-  private handleCallResult(
-    messageId: string,
-    payload: V201ResponsePayload,
-  ): void {
-    const pending = this._pendingRequests.get(messageId);
-    this._pendingRequests.delete(messageId);
-
-    const statusAck = this._statusAcks.get(messageId);
-    if (statusAck) {
-      this._statusAcks.delete(messageId);
-      this._chargePoint.noteStatusAcknowledged(
-        statusAck.connectorId,
-        statusAck.status,
-      );
-    }
-
-    if (this._expertCalls.claimResult(messageId, payload)) return;
-
-    if (pending?.action === "DataTransfer") {
-      const answer = payload as DataTransferResponseV201;
-      this._logger.info(
-        `[v2.0.1] DataTransfer response: ${JSON.stringify(answer)}`,
-        LogType.OCPP,
-      );
-      this._dataTransferWaiters.resolve(messageId, {
-        status: answer.status,
-        ...(answer.data !== undefined ? { data: answer.data } : {}),
-      });
-      return;
-    }
-
-    // Issue #181: correlate Authorize.conf back to the idToken from the
-    // original Authorize.req (AuthorizeResponseV201 itself carries none)
-    // and fan it out via the same `authorizeResult` event/notify path the
-    // v16 AuthorizeResultHandler uses, so `ChargePoint.authorizeAndWait`
-    // (the #181 local-authorize gate) resolves promptly for v2.0.1/2.1
-    // local starts instead of always timing out.
-    if (pending?.action === "Authorize") {
-      const authorizeResult = payload as AuthorizeResponseV201;
-      const authorizeRequest = pending.payload as AuthorizeRequestV201;
-      const status = authorizeResult.idTokenInfo?.status;
-      recordIdTokenInfo(
-        this._chargePoint,
-        authorizeRequest.idToken,
-        authorizeResult.idTokenInfo,
-      );
-      if (status !== undefined) {
-        this._logger.info(
-          `[v2.0.1] Authorize response: ${status}`,
-          LogType.OCPP,
-        );
-        this._chargePoint.notifyAuthorizeResult(
-          authorizeRequest.idToken.idToken,
-          status,
-        );
-      }
-      return;
-    }
-
-    if (pending?.action === "GetCertificateStatus") {
-      this._certificates.applyCertificateStatusResult(
-        pending.payload as GetCertificateStatusRequestV201,
-        payload as GetCertificateStatusResponseV201,
-      );
-      return;
-    }
-
-    if (pending?.action === "SignCertificate") {
-      this._certificates.applySignCertificateResult(
-        pending.payload as SignCertificateRequestV201,
-        payload as SignCertificateResponseV201,
-      );
-      return;
-    }
-
-    if (pending?.transactionEvent) {
-      // #529: the first CALLRESULT for any transmission settles the
-      // message. Its other transmissions are forgotten, so a second answer
-      // finds no pending entry and is ignored like any unknown CALLRESULT.
-      // One written only after that (it sat in the socket's queue) finds
-      // the message done, and its answer is ignored too.
-      const { message } = pending.transactionEvent;
-      this._transactionEvents.endTransmission(
-        messageId,
-        pending.transactionEvent,
-        pending.timeout,
-      );
-      if (message.done) return;
-      this._transactionEvents.forgetTransactionEvent(message);
-      this._transactionMessages.applyTransactionEventResult(
-        message.payload,
-        payload as TransactionEventResponseV201,
-      );
-      return;
-    }
-
-    if (pending?.action === "TransactionEvent") {
-      this._transactionMessages.applyTransactionEventResult(
-        pending.payload as TransactionEventRequestV201,
-        payload as TransactionEventResponseV201,
-      );
-      return;
-    }
-
-    const bootResult = payload as BootNotificationResponseV201;
-    if (
-      bootResult.status !== undefined &&
-      bootResult.currentTime !== undefined &&
-      bootResult.interval !== undefined
-    ) {
-      this._logger.info(
-        `[v2.0.1] BootNotification response: ${bootResult.status}`,
-        LogType.OCPP,
-      );
-      this._chargePoint.onBootNotificationResult({
-        status: bootResult.status,
-        interval: bootResult.interval,
-        currentTime: bootResult.currentTime,
-      });
     }
   }
 

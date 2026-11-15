@@ -58,11 +58,11 @@ on the _format_, not on either service.
 
 ## The boundary the issue asks us to document
 
-| Layer           | Owns                                                          | Lives in                                                                                |
-| --------------- | ------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| **OECS**        | What a charger model _is_, as the manufacturer specifies it   | External document, imported once                                                        |
-| **Blueprint**   | The simulator's reusable hardware description                 | [`blueprintSchema`](../../packages/contracts/src/methods.ts), `blueprints` SQLite table |
-| **ChargePoint** | A running instance: identity, CSMS link, configuration, state | `cp.create` / `cp.create_many`                                                          |
+| Layer           | Owns                                                          | Lives in                                                                                      |
+| --------------- | ------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| **OECS**        | What a charger model _is_, as the manufacturer specifies it   | External document, imported once                                                              |
+| **Blueprint**   | The simulator's reusable hardware description                 | [`blueprintSchema`](../../packages/contracts/src/schemas/fleet.ts), `blueprints` SQLite table |
+| **ChargePoint** | A running instance: identity, CSMS link, configuration, state | `cp.create` / `cp.create_many`                                                                |
 
 Scenarios stay the behaviour half and are untouched by this — see
 [`packages/core/src/utils/blueprints/README.md`](../../packages/core/src/utils/blueprints/README.md).

@@ -21,7 +21,7 @@ related:
   - open-ev-directory.md
   - ../concepts/operational-timeline.md
   - ../concepts/charging-sessions.md
-updated: 2026-11-15
+updated: 2026-11-17
 ---
 
 # Web console (browser UI)
@@ -1690,13 +1690,13 @@ The console draws its icons from two libraries (#823):
 - [EVIcons](https://evicons.dev/icons) (`@evicons/react`) for EV-charging
   concepts, where an icon names a domain entity:
 
-| Where                                                 | EVIcons icon      | Stands for                  |
-| ----------------------------------------------------- | ----------------- | --------------------------- |
-| Sidebar **Charge Points** link, dashboard empty state | `ChargingStation` | the charge points           |
-| Dashboard Hierarchy row head, colored by status       | `ChargingStation` | the charge point            |
-| [Connector card](#connector-card) header              | `ChargingPlug`    | a connector                 |
-| Step tile, **Transaction** category                   | `ChargingBolt`    | Transaction, Unlock Outcome |
-| Step tile, **Meter & EV** category                    | `CarPlugged`      | Meter Value, Connector Plug |
+| Where                                                 | EVIcons icon      | Stands for               |
+| ----------------------------------------------------- | ----------------- | ------------------------ |
+| Sidebar **Charge Points** link, dashboard empty state | `ChargingStation` | the charge points        |
+| Dashboard Hierarchy row head, colored by status       | `ChargingStation` | the charge point         |
+| [Connector card](#connector-card) header              | `ChargingPlug`    | a connector              |
+| Step tile, **Transaction** step                       | `ChargingBolt`    | a transaction            |
+| Step tile, **Connector Plug** step                    | `CarPlugged`      | the EV plugged in or out |
 
 Rules:
 
@@ -1705,10 +1705,15 @@ Rules:
   `ChargingSocket` ("no tethered cable") and the connector-standard icons
   (`PlugType2`, `PlugCcs2`, …) are not used: OCPP data does not tell the
   physical connector, and the console never infers it from a connector id or
-  status. A category tile names every step type of its category, so it takes
-  a general icon: `ChargingBolt` ("charging or electricity in general") for
-  Transaction, which also holds Unlock Outcome, rather than `ChargingSession`
-  ("a live session").
+  status. Each step type has its own tile icon (#884, the map in
+  [`stepVisuals.ts`](../../apps/web/src/console/pages/scenarios/run/stepVisuals.ts));
+  the other step types draw Lucide icons. The Transaction step starts and
+  stops a session, so it takes the general `ChargingBolt` ("charging or
+  electricity in general") rather than `ChargingSession` ("a live session").
+  `EnergyKwh` (0.11.0, "energy in kilowatt-hours") matches the Meter Value
+  step, which seeds and increments the energy register, but it is not used:
+  its "kWh" letters fill a third of the 14 px tile and blur at 1x, so the
+  step keeps Lucide `Gauge` (#1071).
 - Domain icons are decorative (`aria-hidden`) and sit beside a text label.
   One exception: in the collapsed sidebar the **Charge Points** icon stands
   alone, and the link keeps its label as accessible name and tooltip. A status

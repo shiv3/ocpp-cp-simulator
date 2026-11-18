@@ -1,6 +1,7 @@
 import type {
   Behavior,
   BehaviorEvents,
+  BehaviorParamsProjection,
   BehaviorContext,
   CallBehavior,
   ChargerSnapshot,
@@ -886,15 +887,7 @@ export class ChargerEngine implements ChargePointEngine {
     this.lifecycle.disableBehavior(id, owner);
   }
 
-  private declaredBehavior(id: string): Behavior | undefined {
-    return this.lifecycle.declaredBehavior(id);
-  }
-
-  /**
-   * The params `ctx.params` hands out for `id` now: defaults, the station's
-   * selection, then each running scenario's layer (the newest on top).
-   * Throws when they do not fit the schema.
-   */
+  /** The params `ctx.params` hands out for `id` now (see the lifecycle). */
   effectiveParams(id: string): JsonObject {
     return this.lifecycle.effectiveParams(id);
   }
@@ -917,6 +910,11 @@ export class ChargerEngine implements ChargePointEngine {
    */
   reselectBehaviorParams(id: string, params: JsonObject | undefined): void {
     this.lifecycle.reselectBehaviorParams(id, params);
+  }
+
+  /** Resolved behavior params, read-only (#654). */
+  behaviorParamsProjection(): BehaviorParamsProjection {
+    return this.lifecycle.projectParams();
   }
 
   /** The params the station's selection gave each behavior, a copy. */
@@ -1064,7 +1062,9 @@ export class ChargerEngine implements ChargePointEngine {
       return this.effectiveParams(id);
     } catch (error) {
       this.warn(`${describe(error)}; running ${id} with its defaults`);
-      return this.declaredBehavior(id)?.params?.defaults ?? EMPTY_PARAMS;
+      return (
+        this.lifecycle.declaredBehavior(id)?.params?.defaults ?? EMPTY_PARAMS
+      );
     }
   }
 

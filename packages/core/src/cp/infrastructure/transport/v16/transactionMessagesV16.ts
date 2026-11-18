@@ -291,7 +291,6 @@ export class TransactionMessagesV16 {
         ? mainMeter.sampledValues(measurands, context)
         : buildSampledValues(connector!, measurands, context),
     );
-    if (mainMeter && sampledValue.length === 0) return;
     // The sender is the tick owner: announce a schedule crossing after the
     // read, so this sample describes the state before the status flip (#327).
     connector?.announceScheduleCrossingNow();
@@ -318,6 +317,9 @@ export class TransactionMessagesV16 {
       );
       if (signed) sampledValue.push(toOcpp16SampledValue(signed.ocmf, context));
     }
+    // 1.6 requires sampledValue 1..*, which the OCA schema leaves unchecked
+    // (#1064): an empty request is worse than no request.
+    if (sampledValue.length === 0) return;
 
     const payload: MeterValuesRequestV16 = {
       transactionId:

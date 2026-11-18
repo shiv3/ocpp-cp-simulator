@@ -175,4 +175,25 @@ describe("OCPPMessageHandler.sendMeterValue phase passthrough (1.6-J, #301)", ()
       ],
     });
   });
+
+  // #1064: 1.6 requires `sampledValue` 1..*, which the OCA schema does not
+  // enforce, so an empty sample is dropped here, as on SOAP 1.5 (#301).
+  it("sends nothing rather than a MeterValues with no sampled value", () => {
+    const actions: string[] = [];
+    fakeSocket.sendAction = (
+      _id: string,
+      action: string,
+      _payload: unknown,
+      _gen?: GenerationToken,
+      onSettled?: (s: Settlement) => void,
+    ): boolean => {
+      actions.push(action);
+      onSettled?.({ outcome: "written" });
+      return true;
+    };
+
+    handler.sendMeterValue(undefined, 1, undefined, { measurands: [] });
+
+    expect(actions).not.toContain("MeterValues");
+  });
 });

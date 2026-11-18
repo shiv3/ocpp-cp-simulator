@@ -224,7 +224,7 @@ maintainer can still ask for a change on that pull request.
    are version- and role-specific.
 3. **Clients: both.** One generic `RpcEndpoint`, because CALL / CALLRESULT /
    CALLERROR are generic, plus thin typed clients per OCPP version, generated
-   from the schemas next to the types (`scripts/generate-ocpp.ts`). Typing is a
+   from the schemas next to the types (`scripts/generate-ocpp.ts`, #1074). Typing is a
    requirement: anything that knows an action name is typed per version.
 4. **Smallest API: what the proof uses now, role wrappers once stable.** Today
    that is `RpcEndpoint` + a dialect + a validator + a transport that supplies
@@ -259,6 +259,7 @@ All are sub-issues of #978.
 | 2 — protocol primitives | #1060                                                           | Spec-conformant replies to malformed frames                                                            |
 | 2 — protocol primitives | [#1062](https://github.com/shiv3/ocpp-cp-simulator/issues/1062) | Mock CSMS helpers and the `wsNetworkSim` inline CALLERROR on the ocpp-rpc codec                        |
 | 2 — protocol primitives | #1059                                                           | Inbound dispatch on ocpp-rpc handler registration (the `ocpp-toolkit` station API)                     |
+| 2 — protocol primitives | #1074                                                           | Typed per-version clients over `RpcEndpoint`, generated from the schemas (decision 3)                  |
 | 3 — transports          | #1056                                                           | Network faults as an injected link decorator; `ChargePointSocket` split                                |
 | 3 — transports          | #1057                                                           | Extract `ocpp-transport-ws`                                                                            |
 | 3 — transports          | #1058                                                           | Extract `ocpp-transport-soap`                                                                          |

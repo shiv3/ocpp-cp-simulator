@@ -1,7 +1,7 @@
 ---
 title: Reusable OCPP protocol stack
 type: analysis
-summary: Design for #978 — where the OCPP-J/SOAP protocol code lives today and what ties it to the simulator, the target modules (model, rpc, transports, toolkit), the seams to cut, what the new domain-free packages/ocpp-rpc proves and does not, recommendations on the RFC's open questions, and the phase → issue plan.
+summary: Design for #978 — where the OCPP-J/SOAP protocol code lives today and what ties it to the simulator, the target modules (model, rpc, transports, toolkit), the seams to cut, what the new domain-free packages/ocpp-rpc proves and does not, decisions on the RFC's open questions, and the phase → issue plan.
 sources:
   - "issue #978"
   - packages/ocpp-rpc/src/index.ts
@@ -20,7 +20,7 @@ related:
   - ../concepts/network-simulation.md
   - ../concepts/trace-format.md
   - ../concepts/charger-engine.md
-updated: 2026-11-15
+updated: 2026-11-18
 ---
 
 # Reusable OCPP protocol stack
@@ -204,34 +204,45 @@ station and CSMS examples installed from packed tarballs). No SOAP exchange and
 no 2.1 exchange is covered, and the WebSocket test is a test, not a transport:
 it wires a raw socket to `send` / `receive` by hand.
 
-## Open questions
+## Decisions
 
-Each answer is a **recommendation, pending maintainer decision**.
+The RFC's six open questions, decided by the RFC's author in #1066. The
+maintainer can still ask for a change on that pull request.
 
-1. **Separate npm packages?** Yes, eventually, and only once an external consumer
-   (the gateway or the TCK) has used the boundaries. Start with `ocpp` and
-   `ocpp-rpc` (#1053), which have no runtime dependencies beyond `ajv`; transports
-   follow once extracted.
-2. **Generic connection management or simulator policy?** The toolkit owns the
-   primitives: open, close, ping, and a reconnect with backoff driven by an
-   injected clock. The simulator owns the policies: the `RetryBackOff*` variables,
-   offline queues and their replay, and every fault simulation.
-3. **Version-specific clients or a generic one?** Version-specific clients
-   (typed actions per version) over one thin shared `RpcEndpoint`. The endpoint
-   stays generic because CALL / CALLRESULT / CALLERROR are; anything that knows an
-   action name is per version.
-4. **Smallest useful API, both roles?** `RpcEndpoint` + a dialect + a validator +
-   a transport that calls `receive` and supplies `send`. That is what the proof
-   uses for both roles; a station-side or CSMS-side wrapper adds connection
-   lifecycle, not protocol.
-5. **SOAP and JSON sharing concepts?** Through the model package and the handler
-   signatures (action, typed payload → typed response), not through a common
-   transport abstraction: SOAP pairs a request with its HTTP response, not with a
-   message id on a shared socket, and forcing it into `RpcEndpoint` would be the over-generalization the RFC warns
-   against.
-6. **An independent repository?** Only after the packages are published and
-   consumed outside this repository, as the RFC's non-goals already say. Until
-   then the simulator's golden-wire and e2e suites are the stack's best guard.
+1. **Separate npm packages: yes, one package per module, published when it is
+   mature.** The goal is to be ready to ship a module as soon as it is stable
+   enough, not to publish everything at once. `ocpp` and `ocpp-rpc` come first
+   (#1053), as they have no runtime dependencies beyond `ajv`. The transports
+   follow once they are extracted. A single package with subpath exports was
+   rejected: every consumer would install every transport's dependencies.
+2. **Connection management: the toolkit owns the technical base, the product
+   owns the policies.** The toolkit gives what a charging-station or CSMS product
+   needs to be built: open, close, ping, and a reconnect with backoff driven by
+   an injected clock. The product (here, the simulator) owns the policies: the
+   `RetryBackOff*` variables, offline queues and their replay, and every fault
+   simulation. Offline queues stay out of the toolkit because their semantics
+   are version- and role-specific.
+3. **Clients: both.** One generic `RpcEndpoint`, because CALL / CALLRESULT /
+   CALLERROR are generic, plus thin typed clients per OCPP version, generated
+   from the schemas next to the types (`scripts/generate-ocpp.ts`). Typing is a
+   requirement: anything that knows an action name is typed per version.
+4. **Smallest API: what the proof uses now, role wrappers once stable.** Today
+   that is `RpcEndpoint` + a dialect + a validator + a transport that supplies
+   `send` and calls `receive`, for both roles. Station and CSMS wrappers
+   (connection lifecycle, boot gating, one endpoint per connection on the
+   server, connection identity and authentication) come with #1063, once the
+   API is stable.
+5. **SOAP and JSON: a transparent transport is the target, shared handlers
+   first.** The aim is that a product does not care which transport carries a
+   call. In the short term SOAP and JSON share the model package and the handler
+   signature (action, typed payload → typed response or error), each with its
+   own transport, because SOAP pairs a request with its HTTP response rather than
+   with a message id on a shared socket, and the SOAP versions (1.2, 1.5, 1.6)
+   are no longer current. The SOAP extraction (#1058) evaluates whether
+   `RpcEndpoint` can sit over SOAP without forcing its semantics.
+6. **An independent repository: once stable.** The packages move out only after
+   they are published and their API has held. Until then the simulator's
+   golden-wire and e2e suites are the stack's best guard.
 
 ## Phases and issues
 

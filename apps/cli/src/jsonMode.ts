@@ -51,8 +51,9 @@ const VALID_SCENARIO_MODES: ReadonlyArray<ScenarioMode> = SCENARIO_MODES;
 
 const VALID_STATUSES = new Set(Object.values(OCPPStatus));
 
+// Only `console` writes stdout here: mixed with process.stdout, Bun cuts large lines (#1076).
 function writeLine(obj: unknown): void {
-  process.stdout.write(`${JSON.stringify(obj)}\n`);
+  console.log(JSON.stringify(obj));
 }
 
 export async function startJsonMode(
@@ -65,7 +66,6 @@ export async function startJsonMode(
 
   const rl = readline.createInterface({
     input: process.stdin,
-    output: process.stdout,
     terminal: false,
   });
 

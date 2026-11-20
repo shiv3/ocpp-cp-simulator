@@ -566,8 +566,7 @@ export class CLIChargePointService {
         model: options.model,
         ocppVersion: options.ocppVersion,
         soapCallbackUrl: options.soapCallbackUrl ?? undefined,
-        // parseArgs resolved it from --soap-public-base-url: same status as
-        // a registry-derived URL, so the console treats both alike.
+        // From --soap-public-base-url: same status as a registry-derived URL.
         soapCallbackUrlDerived:
           !options.soapCallbackUrlExplicit && options.soapCallbackUrl != null,
         soapPath: options.soapPath,
@@ -592,6 +591,7 @@ export class CLIChargePointService {
         ...(options.chargerCapabilities
           ? { chargerCapabilities: options.chargerCapabilities }
           : {}),
+        ...(options.transport ? { transport: options.transport } : {}),
         tls: options.tls,
         tlsCaPath: options.tlsCaPath,
         tlsCertPath: options.tlsCertPath,

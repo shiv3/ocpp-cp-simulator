@@ -4,20 +4,30 @@
   "description": "Auto-increment MeterValue when Charging, stop when Finishing",
   "targetType": "connector",
   "targetId": 1,
-  "trigger": { "type": "manual" },
+  "trigger": {
+    "type": "manual"
+  },
   "defaultExecutionMode": "oneshot",
   "enabled": true,
   "nodes": [
     {
       "id": "start-1",
       "type": "start",
-      "position": { "x": 400, "y": 50 },
-      "data": { "label": "Start" }
+      "position": {
+        "x": 400,
+        "y": 50
+      },
+      "data": {
+        "label": "Start"
+      }
     },
     {
       "id": "trigger-charging",
       "type": "statusTrigger",
-      "position": { "x": 400, "y": 150 },
+      "position": {
+        "x": 400,
+        "y": 150
+      },
       "data": {
         "label": "Wait for Charging",
         "targetStatus": "Charging",
@@ -25,9 +35,23 @@
       }
     },
     {
+      "id": "fork-1",
+      "type": "parallel",
+      "position": {
+        "x": 400,
+        "y": 250
+      },
+      "data": {
+        "label": "Fork"
+      }
+    },
+    {
       "id": "meter-auto",
       "type": "meterValue",
-      "position": { "x": 400, "y": 250 },
+      "position": {
+        "x": 250,
+        "y": 350
+      },
       "data": {
         "label": "Start Auto MeterValue",
         "value": 0,
@@ -42,7 +66,10 @@
     {
       "id": "trigger-finish",
       "type": "statusTrigger",
-      "position": { "x": 400, "y": 350 },
+      "position": {
+        "x": 550,
+        "y": 350
+      },
       "data": {
         "label": "Wait for Finishing",
         "targetStatus": "Finishing",
@@ -50,10 +77,27 @@
       }
     },
     {
+      "id": "join-1",
+      "type": "join",
+      "position": {
+        "x": 400,
+        "y": 550
+      },
+      "data": {
+        "label": "Join (all)",
+        "mode": "all"
+      }
+    },
+    {
       "id": "end-1",
       "type": "end",
-      "position": { "x": 400, "y": 450 },
-      "data": { "label": "End" }
+      "position": {
+        "x": 400,
+        "y": 650
+      },
+      "data": {
+        "label": "End"
+      }
     }
   ],
   "edges": [
@@ -63,15 +107,34 @@
       "target": "trigger-charging"
     },
     {
-      "id": "e-charging-meter",
+      "id": "e-charging-fork",
       "source": "trigger-charging",
+      "target": "fork-1"
+    },
+    {
+      "id": "e-fork-meter",
+      "source": "fork-1",
       "target": "meter-auto"
     },
     {
-      "id": "e-meter-finish",
-      "source": "meter-auto",
+      "id": "e-fork-finish",
+      "source": "fork-1",
       "target": "trigger-finish"
     },
-    { "id": "e-finish-end", "source": "trigger-finish", "target": "end-1" }
+    {
+      "id": "e-meter-join",
+      "source": "meter-auto",
+      "target": "join-1"
+    },
+    {
+      "id": "e-finish-join",
+      "source": "trigger-finish",
+      "target": "join-1"
+    },
+    {
+      "id": "e-join-end",
+      "source": "join-1",
+      "target": "end-1"
+    }
   ]
 }

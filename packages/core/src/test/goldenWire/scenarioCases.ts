@@ -39,7 +39,7 @@ export const NOT_UNATTENDED: Readonly<Record<string, string>> = {
   "full-charging-cycle":
     "its Auto MeterValue node runs until 25000 Wh or 300 s, about five minutes",
   "essential-cp-behavior":
-    "its Auto MeterValue node (stopMode evSettings) never ends on its own, so the RemoteStop wait after it is unreachable",
+    "its Auto MeterValue node (stopMode evSettings) runs until the EV's target SoC, about 75 s, and the RemoteStop wait comes after it",
   "smart-charging":
     "its Auto MeterValue node runs until 30000 Wh (300 s), and the wait for Finishing comes after it",
   "multi-status-monitor":

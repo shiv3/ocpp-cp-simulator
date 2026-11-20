@@ -8,10 +8,10 @@
   "defaultExecutionMode": "oneshot",
   "enabled": true,
   "evSettings": {
-    "modelName": "Generic EV",
-    "batteryCapacityKwh": 75,
-    "maxChargingPowerKw": 150,
-    "initialSoc": 20,
+    "modelName": "Compact EV",
+    "batteryCapacityKwh": 10,
+    "maxChargingPowerKw": 50,
+    "initialSoc": 70,
     "targetSoc": 80
   },
   "nodes": [

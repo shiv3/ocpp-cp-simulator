@@ -40,7 +40,14 @@ const SESSION_TARGET_WH = 600;
 const scenario = (() => {
   const def = structuredClone(essentialCpBehavior) as any;
   def.id = "essential-cp-behavior-367";
-  def.evSettings = { ...def.evSettings, batteryCapacityKwh: 1 };
+  // The template ships a short 70 % -> 80 % session (#1078); this test pins
+  // the 20 % -> 80 % arithmetic of a 1 kWh battery.
+  def.evSettings = {
+    ...def.evSettings,
+    batteryCapacityKwh: 1,
+    initialSoc: 20,
+    targetSoc: 80,
+  };
   for (const node of def.nodes) {
     if (node.type === "delay") node.data.delaySeconds = 1;
     if (node.type === "meterValue") {

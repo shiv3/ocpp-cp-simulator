@@ -99,25 +99,40 @@ export function setAutoTrafficConfig(
       // #627: the drawn vehicle becomes the connector's, before the start,
       // so the transaction (battery capacity, opening SoC) and every
       // MeterValues of the session read the vehicle the traffic drew.
+      let restore: (() => void) | null = null;
       if (vehicle) {
-        host
-          .requireConnector(id)
-          .applyEvSettingsOverride(autoTrafficVehiclePatch(vehicle));
+        const connector = host.requireConnector(id);
+        const previous = connector.evSettings;
+        const wasOverridden = connector.applyEvSettingsOverride(
+          autoTrafficVehiclePatch(vehicle),
+        );
+        // #846: a start that does not begin gives the connector back the
+        // vehicle it had, and the override only if it had one.
+        restore = () => {
+          connector.evSettings = previous;
+          if (!wasOverridden) connector.clearEvSettingsOverride();
+        };
         host.chargePoint.logger.info(
           `[auto-traffic] ${host.init.cpId}/${id} vehicle ${autoTrafficVehicleLabel(vehicle)}`,
           LogType.TRANSACTION,
         );
       }
-      const outcome = await host.chargePoint.startTransaction(
-        idTag,
-        id,
-        undefined,
-        intent?.initialSoc,
-        intent
-          ? { targetSoc: intent.targetSoc, stopAtTarget: true }
-          : undefined,
-      );
-      return outcome.started;
+      let started = false;
+      try {
+        const outcome = await host.chargePoint.startTransaction(
+          idTag,
+          id,
+          undefined,
+          intent?.initialSoc,
+          intent
+            ? { targetSoc: intent.targetSoc, stopAtTarget: true }
+            : undefined,
+        );
+        started = outcome.started;
+      } finally {
+        if (!started) restore?.();
+      }
+      return started;
     },
     sessionRunning: (id) =>
       host.chargePoint.getConnector(id)?.hasRunningTransaction ?? false,

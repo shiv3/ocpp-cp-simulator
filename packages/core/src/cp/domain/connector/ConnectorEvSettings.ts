@@ -52,16 +52,19 @@ export class ConnectorEvSettings {
    * Explicit/scenario set (#105): merges `partial` into the current EV
    * settings and marks the connector as overridden, so a later Default EV
    * Settings propagation (`applyDefaultEvSettings`) no-ops until
-   * {@link clearEvSettingsOverride} runs.
+   * {@link clearEvSettingsOverride} runs. Returns whether an override was
+   * already active, so a caller undoing its write can leave it as it was.
    */
-  applyEvSettingsOverride(partial: EVSettingsPatch): void {
+  applyEvSettingsOverride(partial: EVSettingsPatch): boolean {
     // Refused before the override is claimed: a rejected write changes
     // nothing, the ownership included.
     assertRequiredFieldsKept(partial);
+    const wasOverridden = this.overridden;
     this.overridden = true;
     // A merge patch: absent keys keep their value, `null` removes the key
     // (the setter drops it).
     this.set({ ...this.host.evSettings(), ...partial } as EVSettings);
+    return wasOverridden;
   }
 
   /**

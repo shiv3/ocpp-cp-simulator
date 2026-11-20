@@ -63,7 +63,7 @@ export const CP_COMMAND_METHODS = {
         .enum(TRANSACTION_CHARGING_STATES)
         .optional()
         .describe(
-          "OCPP 2.x TransactionEvent(Started) chargingState; default Charging",
+          "OCPP 2.x TransactionEvent(Started) chargingState; default from the cable: Idle without one, SuspendedEV for a not-ready EV (#871), else Charging (#846)",
         ),
       idTokenType: z
         .enum(ID_TOKEN_TYPES)
@@ -312,7 +312,8 @@ export const CP_COMMAND_METHODS = {
     result: ANY,
   },
   // #453: a cable was plugged into the EV side. An idle Available connector
-  // reports Preparing; any other state is unchanged. Idempotent.
+  // reports Preparing; a transaction suspended by an EV-side disconnect
+  // resumes Charging (#846); any other state is unchanged. Idempotent.
   ev_plug_in: {
     params: z.object({ connector: CONN_POS }),
     result: ANY,

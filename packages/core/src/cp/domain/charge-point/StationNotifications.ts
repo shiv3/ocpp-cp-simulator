@@ -24,12 +24,14 @@ export class StationNotifications {
     tagId: string,
     remoteStartId?: number,
     idTokenType?: IdTokenTypeName,
+    groupIdToken?: string,
   ): void {
     this.host.events().emit("remoteStartReceived", {
       connectorId,
       tagId,
       ...(remoteStartId !== undefined ? { remoteStartId } : {}),
       ...(idTokenType !== undefined ? { idTokenType } : {}),
+      ...(groupIdToken !== undefined ? { groupIdToken } : {}),
     });
   }
 

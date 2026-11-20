@@ -6,7 +6,10 @@ import type {
 } from "@ocpp-cp-simulator/ocpp/index";
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import { createChargePoint } from "../../charge-point/createChargePoint";
-import { DefaultBootNotification } from "../../../domain/types/OcppTypes";
+import {
+  DefaultBootNotification,
+  OCPPStatus,
+} from "../../../domain/types/OcppTypes";
 import { startMockCsms, type MockCsms, type OcppFrame } from "./mockCsms";
 
 function callResultFrame(messageId: string): (frame: OcppFrame) => boolean {
@@ -271,6 +274,65 @@ describe("OCPP 2.0.1 reservations", () => {
       );
       expect(started.reservationId).toBe(7);
       expect(started.transactionInfo.remoteStartId).toBeUndefined();
+    } finally {
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
+
+  // #839, E03.FR.03 / H01.FR.15: only the next TransactionEventRequest
+  // after the reservation ends carries its id, so the Updated and Ended
+  // events of the same transaction leave it out.
+  it("sends reservationId on the first TransactionEvent only", async () => {
+    const { csms, cp } = newChargePoint("CP201-RESERVATION-FIRST-ONLY");
+
+    try {
+      cp.connect();
+      await bootAccepted(csms);
+
+      const reserveResult = await sendReserveNow(csms, "reserve-tx-8", {
+        id: 8,
+        evseId: 1,
+        expiryDateTime: "2030-01-01T00:00:00Z",
+        idToken: { idToken: "TAG", type: "ISO14443" },
+      });
+      expect(reserveResult[2]).toEqual({ status: "Accepted" });
+
+      cp.startTransaction("TAG", 1);
+      const startedFrame = await csms.waitForFrame(
+        transactionEventFrame("Started"),
+      );
+      expect(
+        (startedFrame[3] as TransactionEventRequestV201).reservationId,
+      ).toBe(8);
+      csms.replyCallResult(startedFrame[1] as string, {});
+
+      cp.updateConnectorStatus(1, OCPPStatus.SuspendedEVSE);
+      const stateChanged = await csms.waitForFrame(
+        (frame) =>
+          transactionEventFrame("Updated")(frame) &&
+          (frame[3] as TransactionEventRequestV201).triggerReason ===
+            "ChargingStateChanged",
+      );
+      csms.replyCallResult(stateChanged[1] as string, {});
+      cp.sendTransactionUpdate(1, { triggerReason: "MeterValuePeriodic" });
+      const driven = await csms.waitForFrame(
+        (frame) =>
+          transactionEventFrame("Updated")(frame) &&
+          (frame[3] as TransactionEventRequestV201).triggerReason ===
+            "MeterValuePeriodic",
+      );
+      csms.replyCallResult(driven[1] as string, {});
+      cp.stopTransaction(1);
+      const ended = await csms.waitForFrame(transactionEventFrame("Ended"));
+
+      for (const frame of [stateChanged, driven, ended]) {
+        const payload = frame[3] as TransactionEventRequestV201;
+        expect([payload.triggerReason, payload.reservationId]).toEqual([
+          payload.triggerReason,
+          undefined,
+        ]);
+      }
     } finally {
       cp.disconnect();
       await csms.stop();

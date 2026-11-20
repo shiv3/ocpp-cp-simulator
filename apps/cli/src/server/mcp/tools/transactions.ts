@@ -37,7 +37,7 @@ export function registerTransactionTools(
         .enum(TRANSACTION_CHARGING_STATES)
         .optional()
         .describe(
-          "OCPP 2.x TransactionEvent(Started) chargingState (#335); default Charging. Ignored on OCPP 1.6",
+          "OCPP 2.x TransactionEvent(Started) chargingState (#335); default from the cable: Idle without one, SuspendedEV for a not-ready EV (#871), else Charging (#846). Ignored on OCPP 1.6",
         ),
       idTokenType: z
         .enum(ID_TOKEN_TYPE_VALUES)

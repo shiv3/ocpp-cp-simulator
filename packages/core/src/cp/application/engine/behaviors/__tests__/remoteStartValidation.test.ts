@@ -68,6 +68,33 @@ describe("decideRemoteStart without evseId (#839)", () => {
   });
 });
 
+describe("decideRemoteStart with evseId (#839)", () => {
+  // F01.FR.23: an Unavailable or Faulted EVSE SHALL be Rejected.
+  it("rejects a Faulted EVSE", () => {
+    const cp = station();
+    for (const c of cp.connectors.values()) c.status = OCPPStatus.Available;
+    const faulted = cp.getConnector(1);
+    if (!faulted) throw new Error("connector 1 missing");
+    faulted.status = OCPPStatus.Faulted;
+
+    expect(decideRemoteStart(cp, { ...request("ME"), evseId: 1 })).toEqual({
+      ok: false,
+      rejection: {
+        status: "Rejected",
+        statusInfo: {
+          reasonCode: "Unspecified",
+          additionalInfo: "EVSE 1 is faulted",
+        },
+      },
+    });
+    expect(decideRemoteStart(cp, { ...request("ME"), evseId: 2 })).toEqual({
+      ok: true,
+      connectorId: 2,
+    });
+    cp.dispose();
+  });
+});
+
 describe("1.6 RemoteStartTransaction without connectorId (#839)", () => {
   it("tries the tag's own reserved connector first", async () => {
     const { pickRemoteStartConnector } = await import("../transaction");

@@ -86,7 +86,21 @@ export class StartTransactionResultHandler implements CallResultHandler<StartTra
         const evHoldsOffer =
           connector.status === OCPPStatus.SuspendedEV &&
           connector.energyOfferSuspended;
-        if (connector.status !== OCPPStatus.Charging && !evHoldsOffer) {
+        // #871, §4.9 B4: an EV not ready when the transaction starts goes
+        // to SuspendedEV directly, its offer held until it is ready.
+        if (
+          connector.status !== OCPPStatus.Charging &&
+          !evHoldsOffer &&
+          connector.evConnection === "connected-not-ready"
+        ) {
+          connector.suspendEnergyOffer();
+          if (connector.status !== OCPPStatus.SuspendedEV) {
+            context.chargePoint.updateConnectorStatus(
+              this.connectorId,
+              OCPPStatus.SuspendedEV,
+            );
+          }
+        } else if (connector.status !== OCPPStatus.Charging && !evHoldsOffer) {
           context.logger.info(
             `StartTransaction accepted for connector ${this.connectorId}, transitioning to Charging`,
             LogType.TRANSACTION,

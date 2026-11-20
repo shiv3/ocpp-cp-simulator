@@ -34,7 +34,7 @@ exports[`OCPP 2.0.1 transaction events sends TransactionEvent and MeterValues wi
       "seqNo": 0,
       "timestamp": "<ts>",
       "transactionInfo": {
-        "chargingState": "Charging",
+        "chargingState": "Idle",
         "transactionId": "<uuid>",
       },
       "triggerReason": "Authorized",

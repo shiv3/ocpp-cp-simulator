@@ -38,6 +38,7 @@
   "fleets.editor.problems": "Problems",
   "fleets.editor.cancel": "Cancel",
   "fleets.editor.save": "Save",
+  "fleets.editor.idChanged": "This template is stored as \"{{id}}\"; editing keeps that id. To save it as \"{{newId}}\", create a new template instead.",
   "fleets.create.title": "Create a fleet from {{name}}",
   "fleets.create.hint": "Creates independent charge points, in the template's order.",
   "fleets.create.wsUrl": "CSMS URL (optional)",

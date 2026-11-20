@@ -22,7 +22,7 @@ related:
   - meter-realism.md
   - control-plane.md
   - ../overview.md
-updated: 2026-11-09
+updated: 2026-11-15
 ---
 
 # Vehicle behavior
@@ -121,16 +121,29 @@ evSettings.targetSoc`) is the intent unless `intent` overrides it; progress is
   reacts after the event that caused it, never inside it, so the wire order is
   that of the events. While a behavior is set it owns the readiness: a manual
   `evSetReady` is overwritten on the next look.
+- **A transaction that starts for a not-ready EV** goes straight to
+  `SuspendedEV`, never `Charging` first (1.6 §4.9 B4, "All prerequisites for
+  charging are met but EV does not start charging"; #871), with the energy
+  offer withheld so that the vehicle's readiness resumes `Charging`. On 1.6
+  the `StartTransaction.conf` moves `Preparing` to `SuspendedEV`; on 2.x the
+  `Started` event (or, with `TxStartPoint` `EVConnected`, the `Updated` that
+  carries the idToken) reports `chargingState` `SuspendedEV`.
 - **2.x and an energy offer that has not started.** The driver suspends and
-  resumes a connector the EVSE is energizing. On 2.0.1 a transaction can sit in
-  `Preparing` until something starts the energy offer (the simulator does not
-  start it by itself); there the driver only records the vehicle as not ready,
-  and the `SuspendedEV` update follows once the connector is `Charging`.
+  resumes a connector the EVSE is energizing. On 2.0.1 a transaction of a
+  ready EV can sit in `Preparing` until something starts the energy offer (the
+  simulator does not start it by itself); a vehicle that stops asking there
+  is only recorded as not ready, and the `SuspendedEV` update follows once the
+  connector is `Charging`.
 - **StartTransaction.conf.** An EV that already is `SuspendedEV` with its energy
   offer withheld stays so when the CSMS accepts the transaction (1.6 §4.8); it
   was driven to `Charging` before.
-- **Stop.** With `stopWhenDone` the driver ends the transaction like the
-  target-SoC auto-stop does (`triggerReason` `EnergyLimitReached` on 2.x).
+- **Stop.** With `stopWhenDone` the driver ends the transaction as a stop the
+  EV asked for (#871): on 2.x the Ended event carries `triggerReason`
+  `StopAuthorized` and `stoppedReason` `StoppedByEV` (E15.FR.04); with a
+  `TxStopPoint` lacking `Authorized` it is one Updated `StopAuthorized` and the
+  transaction ends at the cable (E15.FR.05). OCPP 1.6 has no such `Reason`
+  (`EVDisconnected` is the cable leaving), so its StopTransaction.req carries
+  none, which reads as `Local`.
 - **Protocol honesty.** OCPP 1.6 cannot carry charging intent, and nothing here
   pretends it can. ISO 15118 charging needs, V2G and battery physics are out of
   scope.

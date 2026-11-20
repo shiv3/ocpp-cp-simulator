@@ -40,6 +40,7 @@
   "fleets.editor.problems": "Problèmes",
   "fleets.editor.cancel": "Annuler",
   "fleets.editor.save": "Enregistrer",
+  "fleets.editor.idChanged": "Ce modèle est enregistré sous \"{{id}}\" ; la modification garde cet identifiant. Pour l'enregistrer sous \"{{newId}}\", créez plutôt un nouveau modèle.",
   "fleets.create.title": "Créer une flotte depuis {{name}}",
   "fleets.create.hint": "Crée des bornes indépendantes, dans l'ordre du modèle.",
   "fleets.create.wsUrl": "URL du CSMS (facultatif)",

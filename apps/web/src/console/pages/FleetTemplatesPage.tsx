@@ -33,7 +33,8 @@ const FleetTemplatesPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [viewed, setViewed] = useState<FleetTemplate | null>(null);
   const [editor, setEditor] = useState<{
-    mode: "new" | "edit";
+    /** The edited template's id; absent for a new one. */
+    originalId?: string;
     text: string;
   } | null>(null);
   const [creating, setCreating] = useState<FleetTemplate | null>(null);
@@ -81,7 +82,10 @@ const FleetTemplatesPage: React.FC = () => {
   const edit = async (id: string): Promise<void> => {
     try {
       const template = await service.getFleetTemplate!(id);
-      setEditor({ mode: "edit", text: JSON.stringify(template, null, 2) });
+      setEditor({
+        originalId: id,
+        text: JSON.stringify(template, null, 2),
+      });
       setError(null);
     } catch (e) {
       setError(message(e));
@@ -115,7 +119,7 @@ const FleetTemplatesPage: React.FC = () => {
         actions={
           <Button
             size="sm"
-            onClick={() => setEditor({ mode: "new", text: NEW_TEMPLATE_JSON })}
+            onClick={() => setEditor({ text: NEW_TEMPLATE_JSON })}
           >
             {t("fleets.new")}
           </Button>
@@ -233,7 +237,7 @@ const FleetTemplatesPage: React.FC = () => {
       )}
       {editor && (
         <FleetTemplateEditorDialog
-          mode={editor.mode}
+          originalId={editor.originalId}
           initialText={editor.text}
           onSave={save}
           onClose={() => setEditor(null)}

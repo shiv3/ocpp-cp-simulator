@@ -36,6 +36,7 @@
   "fleets.editor.problems": "問題点",
   "fleets.editor.cancel": "キャンセル",
   "fleets.editor.save": "保存",
+  "fleets.editor.idChanged": "このテンプレートは \"{{id}}\" として保存されています。編集では ID は変わりません。\"{{newId}}\" として保存するには、新規テンプレートを作成してください。",
   "fleets.create.title": "{{name}} からフリートを作成",
   "fleets.create.hint": "テンプレートの順に、独立した充電器を作成します。",
   "fleets.create.wsUrl": "CSMS の URL（任意）",

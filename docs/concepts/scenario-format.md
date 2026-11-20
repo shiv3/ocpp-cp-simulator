@@ -368,8 +368,10 @@ model](charging-sessions.md#ev-and-cable-model) (#453), the same operations the
 control plane's `ev_plug_in` and `ev_disconnected` call; the node no longer
 needs a status node beside it. A plug-in on an idle `Available` connector
 reports `Preparing` (2.x `Occupied`) once; the `transaction` start that follows
-finds the connector already there and sends no second one (#176, #496). In any
-other state the cable is recorded and the status stays. A plug-out **during a
+finds the connector already there and sends no second one (#176, #496). A
+plug-in on a transaction an EV-side disconnect suspended resumes `Charging`
+(#846). In any other state the cable is recorded and the status stays. A
+plug-out **during a
 transaction** is an EV-side disconnect (`ChargePoint.evDisconnected`, #488):
 `StopTransactionOnEVSideDisconnect` (2.x `TxCtrlr.StopTxOnEVSideDisconnect`,
 default `true`) stops the transaction with `EVDisconnected`, or with `false`
@@ -1422,7 +1424,8 @@ one supported measurand is configured, the request goes out with it.
 **A `limit: 0` period moves the connector to `SuspendedEVSE`, once per
 crossing.** A charging profile whose active period allows nothing pauses
 delivery, and the connector reports that by moving between `Charging` and
-`SuspendedEVSE`; resuming moves it back. The transition is edge-triggered, so
+`SuspendedEVSE`; resuming moves it back, or to `SuspendedEV` when the EV
+stopped asking for energy meanwhile (#871). The transition is edge-triggered, so
 repeated samples at one limit report it once — but it is announced from the
 first resolve made in a state that can act on it, not from the first resolve of
 any kind. A crossing seen while the connector is still `Preparing`, which is

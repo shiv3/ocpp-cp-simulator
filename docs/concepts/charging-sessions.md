@@ -18,6 +18,7 @@ sources:
   - packages/core/src/cp/domain/charge-point/ChargePoint.ts (evDisconnected delegate)
   - packages/core/src/cp/domain/charge-point/PlugInFlow.ts (evDisconnected, evPlugIn, evSetReady)
   - packages/core/src/cp/domain/connector/EvConnection.ts
+  - packages/core/src/cp/domain/charge-point/resumeAfterEvseSuspension.ts
   - "issue #453"
 related:
   - operational-timeline.md
@@ -270,7 +271,7 @@ handlers already own. They are reached by the `ev_plug_in`, `ev_ready` and
 
 | Operation                            | Idle `Available` connector                                                                                      | Running transaction                                                                                                                                                                                                                   | Other states (`Unavailable`, `Faulted`, `Reserved`, no power) |
 | ------------------------------------ | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| `evPlugIn` (`ev_plug_in`)            | `Preparing` (1.6 §4.9 A2; 2.x `Occupied`), ConnectionTimeOut starts                                             | 1.x: cable already recorded, nothing sent. 2.x idToken first (E03, the transaction began before the cable): `TransactionEvent(Updated)` `CablePluggedIn` / `EVConnected`, the EVConnectionTimeOut ends, the offer starts (`Charging`) | Cable recorded, the status stays                              |
+| `evPlugIn` (`ev_plug_in`)            | `Preparing` (1.6 §4.9 A2; 2.x `Occupied`), ConnectionTimeOut starts                                             | 1.x: `Charging` again after an EV-side disconnect (§4.10), else nothing sent. 2.x: `TransactionEvent(Updated)` `CablePluggedIn` / `EVConnected`, the EVConnectionTimeOut ends, the offer starts (`Charging`; E03, idToken first; E10) | Cable recorded, the status stays                              |
 | `evSetReady(false)` (`ev_ready`)     | Recorded                                                                                                        | `Charging` → `SuspendedEV` (1.6 §4.9 C4), the energy offer stops (2.x: `TransactionEvent(Updated)`, `chargingState` `SuspendedEV`, `triggerReason` `ChargingStateChanged`, E01.FR.19)                                                 | Recorded                                                      |
 | `evSetReady(true)`                   | Recorded                                                                                                        | `SuspendedEV` → `Charging` (1.6 §4.9 D3; 2.x: `Updated`, `chargingState` `Charging`, `ChargingStateChanged`)                                                                                                                          | Recorded                                                      |
 | `evDisconnected` (`ev_disconnected`) | `Preparing`, `Finishing`, `SuspendedEV`, `SuspendedEVSE` → `Available` (1.6 §4.9 B1); `Available` sends nothing | [EV-side disconnect](#ev-side-disconnect-and-connection-loss)                                                                                                                                                                         | Status stays                                                  |
@@ -283,6 +284,18 @@ Rules:
   a transaction restored after a restart, show `connected-ready`. On 2.x a start
   without a prior plug-in records no cable (idToken first, E03); only a restored
   transaction infers one.
+- On 2.x a start that names no `chargingState` takes it from the cable (#846):
+  `Started` reports `Idle` without one (ChargingStateEnumType: "no connection
+  between EV and EVSE"; E02.FR.13 gives every `Started` a state), `Charging`
+  with one in, `SuspendedEV` when the EV is not ready (#871, also on 1.6:
+  `Preparing` to `SuspendedEV`, §4.9 B4). The plug-in that follows an `Idle`
+  start reports `EVConnected`, then `Charging`.
+- `ev_ready(false)` during `SuspendedEVSE` is only recorded: "SuspendedEVSE
+  SHALL have precedence over status SuspendedEV" (1.6 §4.9). When the charging
+  limit then lifts from 0 (a schedule period crossing, or Set/Clear
+  ChargingProfile on 1.6 and 2.x) the connector goes to `SuspendedEV`, not
+  `Charging`, with the offer held so that `ev_ready(true)` resumes `Charging`
+  (#871).
 - The cable goes with the EV: the auto-reset to `Available` after a stop clears it,
   and whatever frees a connector with a cable in (ChangeAvailability back to
   Operative, a reservation that ends, the firmware hold) shows `Preparing` (2.x
@@ -340,7 +353,11 @@ WebSocket closes ([#488](https://github.com/shiv3/ocpp-cp-simulator/issues/488))
   With `false` the session stays `active` and the energy offer stops: the
   energy register no longer rises, while the periodic MeterValues keep going
   out, and the derived power is zero outside `Charging`. A second unplug
-  while so suspended sends nothing. The connector lock is not
+  while so suspended sends nothing. Plugging the cable back in resumes the
+  transaction: the connector goes `Charging` again (1.6 §4.10, "If the EV is
+  reconnected, energy transfer is allowed again"; 2.x E10, after the
+  `Updated` with `triggerReason` `CablePluggedIn`, then `chargingState`
+  `Charging` with `ChargingStateChanged`, #846). The connector lock is not
   modelled. Without a running transaction an unplug (the console's
   **Unplug**, a scenario plug-out) returns a `Preparing` or `Finishing`
   connector to `Available`; a connector in another state keeps its status (#453).
@@ -382,10 +399,6 @@ WebSocket closes ([#488](https://github.com/shiv3/ocpp-cp-simulator/issues/488))
 
 ## Limits
 
-- The E10 resume is not modelled: plugging the cable back in during a
-  transaction suspended by an EV-side disconnect records the cable and sends
-  nothing (the transaction stays `SuspendedEV`), instead of a TransactionEvent
-  `Updated` with `triggerReason` `CablePluggedIn` followed by `Charging`.
 - On 1.6, an Unplug while StartTransaction.conf is still pending stops the
   transaction; the StopTransaction.req takes the id of that conf when it is
   written (`-1` if the request is discarded, #565). This predates #488

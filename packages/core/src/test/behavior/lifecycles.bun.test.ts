@@ -265,19 +265,19 @@ describe("OCPP 2.x firmware train (#600)", () => {
   });
 });
 
-/** A session on connector 1: plug in at 0.5 s, charge, stop after `chargeMs`. */
-const session = (chargeMs: number): Behavior => ({
+/** A session on `connector` (default 1): plug in at 0.5 s, charge, stop after `chargeMs`. */
+const session = (chargeMs: number, connector = 1): Behavior => ({
   api: 1,
-  id: "session",
+  id: connector === 1 ? "session" : `session-${connector}`,
   requires: ["physical"],
   main: async (ctx) => {
-    ctx.plugIn(1);
+    ctx.plugIn(connector);
     await ctx.sleep(500);
-    ctx.startCharging(1, "TAG-1");
+    ctx.startCharging(connector, `TAG-${connector}`);
     await ctx.sleep(chargeMs);
-    ctx.stopCharging(1, "Local");
+    ctx.stopCharging(connector, "Local");
     await ctx.sleep(500);
-    ctx.unplug(1);
+    ctx.unplug(connector);
   },
 });
 
@@ -342,6 +342,67 @@ describe("transactions and connectors during an update (#600)", () => {
     expect(statuses(run).at(-1)).toBe("Installed");
     expect(run.cp.getConnector(1)?.status).toBe(OCPPStatus.Available);
   });
+
+  // #846 / #822: the release gives back what the hold took, not a change the
+  // CSMS made meanwhile, even when that change wrote the same Inoperative.
+  test.each([
+    [
+      "1.6 connector 2",
+      "1.6",
+      () => ({}),
+      fw16,
+      { connectorId: 2, type: "Inoperative" },
+      [2],
+    ],
+    [
+      "1.6 station",
+      "1.6",
+      () => ({}),
+      fw16,
+      { connectorId: 0, type: "Inoperative" },
+      [1, 2],
+    ],
+    [
+      "2.0.1 EVSE 2",
+      "2.0.1",
+      () => ({ train: true }),
+      fw2(22),
+      { operationalStatus: "Inoperative", evse: { id: 2 } },
+      [2],
+    ],
+    [
+      "2.0.1 station",
+      "2.0.1",
+      () => ({ train: true }),
+      fw2(23),
+      { operationalStatus: "Inoperative" },
+      [1, 2],
+    ],
+  ] as const)(
+    "a connector the CSMS made Inoperative during the hold stays so after the update (%s)",
+    async (_label, version, extra, request, change, kept) => {
+      run = await runBehavior({ version, connectors: 2 });
+      select(run, { ...extra(), stepMs: 1000, connectorsUnavailable: true });
+      await run.call("UpdateFirmware", request);
+      await run.advance(2500); // held while installing
+      expect(run.cp.getConnector(2)?.availability).toBe("Inoperative");
+      expect(reply(await run.call("ChangeAvailability", change))).toBe(
+        "Accepted",
+      );
+      await run.advance(3000);
+      expect(statuses(run).at(-1)).toBe("Installed");
+      for (const id of [1, 2]) {
+        const connector = run.cp.getConnector(id);
+        if ((kept as readonly number[]).includes(id)) {
+          expect(connector?.availability).toBe("Inoperative");
+          expect(connector?.status).toBe(OCPPStatus.Unavailable);
+        } else {
+          expect(connector?.availability).toBe("Operative");
+          expect(connector?.status).toBe(OCPPStatus.Available);
+        }
+      }
+    },
+  );
 
   test("a failed update gives the connectors back", async () => {
     run = await runBehavior({ version: "1.6", connectors: 2 });
@@ -443,6 +504,38 @@ describe("reboot after the update (#600)", () => {
     await run.advance(3000);
     expect(run.callsOf("BootNotification")).toHaveLength(0);
     expect(run.cp.getConnector(2)?.availability).toBe("Inoperative");
+  });
+
+  // L01.FR.07 (#871, #956): an EVSE whose session ends while the reboot still
+  // waits for another one is held too, and given back after the reboot.
+  test("2.x reboot wait holds an EVSE that becomes idle during the wait", async () => {
+    run = await runBehavior({
+      version: "2.0.1",
+      connectors: 2,
+      behaviors: [session(8000), session(3000, 2)],
+    });
+    select(run, {
+      train: true,
+      stepMs: 100,
+      reboot: "afterInstalled",
+      connectorsUnavailable: true,
+    });
+    await run.advance(2000);
+    expect(run.cp.getConnector(2)?.transaction).toBeTruthy();
+    await run.call("UpdateFirmware", fw2(35));
+    await run.advance(1000);
+    expect(statuses(run).at(-1)).toBe("Installed");
+    expect(run.cp.getConnector(2)?.availability).toBe("Operative");
+
+    await run.advance(2000); // session 2 ends at about 4 s
+    expect(run.cp.getConnector(1)?.transaction).toBeTruthy();
+    expect(run.callsOf("BootNotification")).toHaveLength(0);
+    expect(run.cp.getConnector(2)?.availability).toBe("Inoperative");
+    expect(run.cp.getConnector(2)?.status).toBe(OCPPStatus.Unavailable);
+
+    await run.advance(6000); // session 1 ends at about 9.5 s
+    expect(run.callsOf("BootNotification")).toHaveLength(1);
+    expect(run.cp.getConnector(2)?.availability).toBe("Operative");
   });
 
   // B01.FR.09 (#846): the reboot after a firmware update says so.

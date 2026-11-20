@@ -870,11 +870,9 @@ export class ChargePoint {
     return this._reservationManager;
   }
 
-  /**
-   * The parent id (1.6) or groupIdToken the station knows for `idTag`
-   * (reservation matching, 1.6 §5.13, H03.FR.04/07); it never asks the CSMS.
-   * @see AuthorizationFlow.knownParentIdOf
-   */
+  /** The parent id (1.6) or groupIdToken the station knows for `idTag`
+   *  (reservation matching, 1.6 §5.13, H03.FR.04/07); it never asks the CSMS.
+   *  @see AuthorizationFlow.knownParentIdOf */
   knownParentIdOf(idTag: string): string | undefined {
     return this._parts.authorizationFlow.knownParentIdOf(idTag);
   }
@@ -972,11 +970,9 @@ export class ChargePoint {
     );
   }
 
-  /**
-   * Remove the profiles matching `criteria` from the station store and/or the
-   * connectors; returns the non-empty scopes.
-   * @see ChargingProfileControl.clearChargingProfiles
-   */
+  /** Remove the profiles matching `criteria` from the station store and/or
+   *  the connectors; returns the non-empty scopes.
+   *  @see ChargingProfileControl.clearChargingProfiles */
   clearChargingProfiles(
     connectorId: number | undefined,
     criteria: ProfileRemoveCriteria,
@@ -1015,12 +1011,14 @@ export class ChargePoint {
     tagId: string,
     remoteStartId?: number,
     idTokenType?: IdTokenTypeName,
+    groupIdToken?: string,
   ): void {
     this._parts.notifications.notifyRemoteStartReceived(
       connectorId,
       tagId,
       remoteStartId,
       idTokenType,
+      groupIdToken,
     );
   }
 
@@ -1426,6 +1424,7 @@ export class ChargePoint {
   }
 
   reset(reason: BootReason = "LocalReset"): void {
+    this._parts.authorizationFlow.forgetAuthorizedParents();
     this._parts.outage.reset(reason);
   }
 

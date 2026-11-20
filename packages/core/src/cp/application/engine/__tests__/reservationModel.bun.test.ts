@@ -139,7 +139,9 @@ describe.each(["2.0.1", "2.1"] as const)("OCPP %s reservations", (version) => {
     expect(r.cp.reservationManager.getReservation(9)).toBeUndefined();
   });
 
-  test("expiry sends ReservationStatusUpdate(Expired), then the Available status (H04.FR.01/03)", async () => {
+  // 2.0.1 H04 steps 4-6 / Figure 84, 2.1 Figure 98: the Available status
+  // first, then ReservationStatusUpdate(Expired).
+  test("expiry sends the Available status, then ReservationStatusUpdate(Expired) (H04.FR.01/03)", async () => {
     const r = await rigFor(version);
     await r.csms.call("ReserveNow", {
       id: 10,
@@ -153,14 +155,14 @@ describe.each(["2.0.1", "2.1"] as const)("OCPP %s reservations", (version) => {
       .filter((f) => f.dir === "CP>" && f.kind === "call")
       .slice(-2);
     expect(tail.map((f) => f.action)).toEqual([
-      "ReservationStatusUpdate",
       "StatusNotification",
+      "ReservationStatusUpdate",
     ]);
-    expect(tail[0].payload).toEqual({
+    expect(tail[0].payload).toMatchObject({ connectorStatus: "Available" });
+    expect(tail[1].payload).toEqual({
       reservationId: 10,
       reservationUpdateStatus: "Expired",
     });
-    expect(tail[1].payload).toMatchObject({ connectorStatus: "Available" });
   });
 
   test("a reserved EVSE that turns Faulted or Unavailable reports Removed (H01.FR.16/17)", async () => {

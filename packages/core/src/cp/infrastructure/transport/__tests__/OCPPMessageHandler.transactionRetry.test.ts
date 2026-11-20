@@ -131,6 +131,7 @@ function setup(config: { attempts?: number; interval?: number } = {}) {
       transactionMessageAttempts: vi.fn(() => config.attempts ?? 3),
       transactionMessageRetryInterval: vi.fn(() => config.interval ?? 60),
       stopTxnSampledData: vi.fn(() => []),
+      stopTxnAlignedData: vi.fn(() => []),
     },
   };
   const codec: ProtocolCodec = { outgoingWarning: () => null };

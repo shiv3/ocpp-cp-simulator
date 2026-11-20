@@ -40,6 +40,7 @@ import {
 } from "../../../../domain/types/OcppTypes";
 import { LogType } from "../../../../shared/Logger";
 import { defaultConfiguration } from "../../../../domain/charge-point/Configuration";
+import { resumeAfterEvseSuspension } from "../../../../domain/charge-point/resumeAfterEvseSuspension";
 import {
   buildCompositeWattsSchedule,
   compositeLimitInUnit,
@@ -193,7 +194,7 @@ function applyProfileStatus(
     !connector.energyHeld &&
     connector.transaction != null
   ) {
-    chargePoint.updateConnectorStatus(connector.id, OCPPStatus.Charging);
+    resumeAfterEvseSuspension(chargePoint, connector);
   }
 }
 

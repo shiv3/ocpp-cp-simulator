@@ -311,6 +311,27 @@ export function resolveOperatingPoint(
           ...vehicle.electrical,
           voltageV: effectiveVoltageV(vehicle.electrical) * voltageFactor,
         };
+  // Per-phase voltages of a 3-phase connector with phase detail (#615).
+  const phaseVoltages = phaseVoltagesOf(
+    realism,
+    electrical,
+    activePhases,
+    seed,
+    bucket,
+  );
+  // The bound is resolved at the nominal voltage, and the line current it
+  // allows (the amperes of an A-unit profile, #846) is what the wire is
+  // limited to: a sagging voltage carries less power through those amperes,
+  // never more current. A raised voltage leaves the bound in watts as is.
+  const nominalV = effectiveVoltageV(vehicle.electrical);
+  const sagFactor = Math.min(
+    1,
+    (phaseVoltages
+      ? (phaseVoltages[0] + phaseVoltages[1] + phaseVoltages[2]) / 3
+      : effectiveVoltageV(electrical)) / nominalV,
+  );
+  const lineBoundW = sagFactor < 1 ? boundW * sagFactor : boundW;
+  const limitA = currentAmpsFor(boundW, vehicle.electrical, activePhases);
   const ramp =
     realism?.rampUp && meter.sessionStartedAt !== undefined
       ? rampFactor(realism.rampUp, at - meter.sessionStartedAt)
@@ -350,10 +371,10 @@ export function resolveOperatingPoint(
   // Ramp and fluctuation never carry the report past the bound (the CSMS
   // allocation narrowed by the hardware) or the vehicle's own ceiling, so a
   // fluctuating load at full power dips below it and never rises above.
-  const ceilingW = Math.min(boundW, evMaxW, demandW);
+  const ceilingW = Math.min(lineBoundW, evMaxW, demandW);
   const acceptedW =
     deliveryFactor === 1
-      ? baseAcceptedW
+      ? Math.min(baseAcceptedW, lineBoundW)
       : Math.min(baseAcceptedW * deliveryFactor, ceilingW);
   const exportW = exporting ? Math.min(exportConfigW, chargerCapW, evMaxW) : 0;
   // The curve describes battery acceptance, not EVSE capability: a 100 kW
@@ -363,7 +384,7 @@ export function resolveOperatingPoint(
         evMaxW,
         curve: undefined,
         socPercent: null,
-        scheduleLimitWatts: boundW,
+        scheduleLimitWatts: lineBoundW,
       })
     : 0;
 
@@ -385,6 +406,8 @@ export function resolveOperatingPoint(
   }
   if (deliveryFactor !== 1 && Number.isFinite(accumulationCapW)) {
     accumulationCapW = Math.min(accumulationCapW * deliveryFactor, ceilingW);
+  } else if (sagFactor < 1) {
+    accumulationCapW = Math.min(accumulationCapW, lineBoundW);
   }
 
   // Jitter of the current as a meter reads it, on top of the load (#614).
@@ -403,10 +426,13 @@ export function resolveOperatingPoint(
     activePhases,
     acceptedW,
     offeredW,
-    currentA:
+    // The meter's jitter reads the load, it does not carry it past the limit.
+    currentA: Math.min(
       currentAmpsFor(acceptedW, electrical, activePhases) * currentFactor,
+      limitA,
+    ),
     offeredCurrentA: currentAmpsFor(offeredW, electrical, activePhases),
-    limitA: currentAmpsFor(boundW, electrical, activePhases),
+    limitA,
     voltageV: effectiveVoltageV(electrical),
     powerFactor: effectivePowerFactor(electrical),
     soc: inputs.soc,
@@ -419,8 +445,9 @@ export function resolveOperatingPoint(
     phaseDetail: phaseDetailOf(
       realism,
       electrical,
-      activePhases,
+      phaseVoltages,
       acceptedW,
+      limitA,
       seed,
       bucket,
     ),
@@ -462,41 +489,77 @@ function limitedByOf(
   return Number.isFinite(capW) ? capBy : "none";
 }
 
-/** The independent per-phase quantities (#615), or `null` when not
- *  configured or not all three phases are in use (the same rule as the
- *  per-phase samples: a subset of L1/L2/L3 would invent an allocation). */
-function phaseDetailOf(
+/** The phase swing of channel `channel`: 1 ± `halfWidthPct` percent. */
+function phaseSwing(
+  seed: number,
+  bucket: number,
+  channel: number,
+  halfWidthPct: number | undefined,
+): number {
+  return 1 + ((halfWidthPct ?? 0) / 100) * seededUnit(seed, bucket, channel);
+}
+
+/** The L1-N, L2-N, L3-N volts when per-phase detail applies (#615), or
+ *  `null` when not configured or not all three phases are in use (the same
+ *  rule as the per-phase samples: a subset of L1/L2/L3 would invent an
+ *  allocation). */
+function phaseVoltagesOf(
   realism: MeterRealism | undefined,
   electrical: Partial<EVSettings>,
   activePhases: number,
-  acceptedW: number,
   seed: number,
   bucket: number,
-): PhaseDetail | null {
+): [number, number, number] | null {
   const config = realism?.phases;
   if (!config || activePhases !== 3 || electrical.currentType === "DC") {
     return null;
   }
   const nominalV = effectiveVoltageV(electrical);
+  const pct = config.voltageImbalancePct;
+  return [
+    nominalV * phaseSwing(seed, bucket, 11, pct),
+    nominalV * phaseSwing(seed, bucket, 12, pct),
+    nominalV * phaseSwing(seed, bucket, 13, pct),
+  ];
+}
+
+/** The independent per-phase quantities (#615), or `null` without
+ *  {@link phaseVoltagesOf}. A phase the load imbalance would carry past
+ *  `limitA` is held at it and the rest goes to the other phases by weight
+ *  (#846), so the phases still add up to `acceptedW`. */
+function phaseDetailOf(
+  realism: MeterRealism | undefined,
+  electrical: Partial<EVSettings>,
+  voltageV: [number, number, number] | null,
+  acceptedW: number,
+  limitA: number,
+  seed: number,
+  bucket: number,
+): PhaseDetail | null {
+  const config = realism?.phases;
+  if (!config || !voltageV) return null;
   const powerFactor = effectivePowerFactor(electrical);
-  const swing = (channel: number, halfWidthPct: number | undefined): number =>
-    1 + ((halfWidthPct ?? 0) / 100) * seededUnit(seed, bucket, channel);
-  const voltageV: [number, number, number] = [
-    nominalV * swing(11, config.voltageImbalancePct),
-    nominalV * swing(12, config.voltageImbalancePct),
-    nominalV * swing(13, config.voltageImbalancePct),
-  ];
-  const weights = [
-    swing(21, config.loadImbalancePct),
-    swing(22, config.loadImbalancePct),
-    swing(23, config.loadImbalancePct),
-  ];
-  const weightSum = weights[0] + weights[1] + weights[2];
-  const powerW = weights.map((w) => (acceptedW * w) / weightSum) as [
-    number,
-    number,
-    number,
-  ];
+  const weights = [21, 22, 23].map((channel) =>
+    phaseSwing(seed, bucket, channel, config.loadImbalancePct),
+  );
+  const capW = voltageV.map((v) => limitA * v * powerFactor);
+  const powerW: [number, number, number] = [0, 0, 0];
+  let free = [0, 1, 2];
+  let remainingW = acceptedW;
+  while (free.length > 0) {
+    const weightSum = free.reduce((sum, i) => sum + weights[i], 0);
+    const share = (i: number) => (remainingW * weights[i]) / weightSum;
+    const over = free.filter((i) => share(i) > capW[i]);
+    if (over.length === 0) {
+      for (const i of free) powerW[i] = share(i);
+      break;
+    }
+    for (const i of over) {
+      powerW[i] = capW[i];
+      remainingW -= capW[i];
+    }
+    free = free.filter((i) => !over.includes(i));
+  }
   const currentA = powerW.map((p, i) =>
     p > 0 ? p / (voltageV[i] * powerFactor) : 0,
   ) as [number, number, number];

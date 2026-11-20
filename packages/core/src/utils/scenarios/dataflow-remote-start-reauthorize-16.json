@@ -1,7 +1,7 @@
 {
   "id": "dataflow-remote-start-reauthorize-16",
   "name": "Data flow: Remote start, re-authorize the tag (OCPP 1.6)",
-  "description": "Owns the CSMS's RemoteStartTransaction (csmsCallTrigger replace), answers it Accepted with a callResponse, then sends Authorize with the tag read from the CALL ($from call.payload.idTag) and branches on response.payload.idTagInfo.status. Accepted starts a short session; anything else unplugs without charging. Plug in first; the CSMS sends RemoteStartTransaction (timeout 5 min). The session itself starts with the station's own idTag. OCPP 1.6 payloads.",
+  "description": "Owns the CSMS's RemoteStartTransaction (csmsCallTrigger replace), answers it Accepted with a callResponse, then sends Authorize with the tag read from the CALL ($from call.payload.idTag) and branches on response.payload.idTagInfo.status. Accepted starts a short session; anything else unplugs without charging. Plug in first; the CSMS sends RemoteStartTransaction (timeout 5 min). The session starts with the tag the CSMS sent (the one just authorized). OCPP 1.6 payloads.",
   "targetType": "connector",
   "targetId": 1,
   "trigger": {

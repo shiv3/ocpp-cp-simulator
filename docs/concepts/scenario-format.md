@@ -783,7 +783,7 @@ run's captured OCPP transcript once a scenario finishes (see
 `evaluateAssertions` in
 [`ScenarioAssertions.ts`](../../packages/core/src/cp/application/verification/ScenarioAssertions.ts)).
 A run is not finished when its last node returns: the executor first waits until every CALL the station sent
-has been answered and the wire has been quiet for 250 ms (at most 5 s; skipped while the link is down and
+has been answered and the wire has been quiet for 250 ms (at most 2 s; skipped while the link is down and
 cut short by a stop), so the frames that node caused (a fire-and-forget `dataTransfer`, the
 StopTransaction.conf and status changes after a stop) are in the transcript the assertions read (#1077).
 Each entry has `id` and `type` (one of `ocpp_sent`, `ocpp_received`,

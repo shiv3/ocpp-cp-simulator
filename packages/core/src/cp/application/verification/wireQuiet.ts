@@ -1,5 +1,5 @@
 import type { ChargePoint } from "../../domain/charge-point/ChargePoint";
-import { clockOf } from "../../shared/clock";
+import { clockOf, realClock } from "../../shared/clock";
 import type { TimerHandle } from "../../shared/clock";
 import { LogType } from "../../shared/Logger";
 import type { LogEntry } from "../../shared/Logger";
@@ -13,7 +13,7 @@ export interface WireQuietOptions {
 }
 
 export const WIRE_QUIET_MS = 250;
-export const WIRE_QUIET_MAX_MS = 5_000;
+export const WIRE_QUIET_MAX_MS = 2_000;
 
 /**
  * Resolves once the charge point's WebSocket has gone quiet: every CALL it
@@ -36,6 +36,10 @@ export function whenWireQuiet(
   const clock = clockOf(chargePoint);
   // Nothing goes out on a link that is down.
   if (!chargePoint.isOnline()) return Promise.resolve();
+  // A virtual clock only moves when its owner advances it: waiting on it here
+  // would park the run until someone does, and such stations are driven step
+  // by step anyway.
+  if (clock !== realClock) return Promise.resolve();
   return new Promise<void>((resolve) => {
     const awaiting = new Set<string>();
     let quietTimer: TimerHandle | null = null;

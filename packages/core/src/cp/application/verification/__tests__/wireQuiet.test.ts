@@ -28,6 +28,7 @@ describe("whenWireQuiet", () => {
 
       await vi.advanceTimersByTimeAsync(200);
       sent(logger, "a", "DataTransfer"); // queued behind another CALL
+
       await vi.advanceTimersByTimeAsync(1_000);
       // Unanswered: not quiet however long the silence.
       expect(settled).toBe(false);

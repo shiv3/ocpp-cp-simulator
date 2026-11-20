@@ -46,6 +46,7 @@ import ts from "typescript";
 
 export const PACKAGE_NAMES = [
   "ocpp",
+  "ocpp-rpc",
   "contracts",
   "trace",
   "k6-runtime",
@@ -71,6 +72,7 @@ export interface MapEntry {
 /** Workspace directory of each package. */
 export const PACKAGE_DIRS: Readonly<Record<PackageName, string>> = {
   ocpp: "packages/ocpp",
+  "ocpp-rpc": "packages/ocpp-rpc",
   contracts: "packages/contracts",
   trace: "packages/trace",
   vehicle: "packages/vehicle",
@@ -96,6 +98,8 @@ export function packageNameOf(pkg: PackageName): string {
  * What lives where (the reasons the files were placed this way):
  * - packages/ocpp: generated message types, validators and the vendored OCA
  *   schemas.
+ * - packages/ocpp-rpc: the OCPP-J frame codec and a role-agnostic RPC
+ *   endpoint (#978), with no simulator domain: it may import only ocpp.
  * - packages/contracts: the wire/RPC vocabulary shared by daemon and clients.
  * - packages/trace: the trace format reader/writer.
  * - packages/vehicle: the vehicle behavior domain (#835): what the vehicle
@@ -114,6 +118,7 @@ export function packageNameOf(pkg: PackageName): string {
  */
 export const PACKAGE_MAP: readonly MapEntry[] = [
   { match: "packages/ocpp/", pkg: "ocpp" },
+  { match: "packages/ocpp-rpc/", pkg: "ocpp-rpc" },
   { match: "packages/contracts/", pkg: "contracts" },
   { match: "packages/trace/", pkg: "trace" },
   { match: "packages/k6-runtime/", pkg: "k6-runtime" },
@@ -129,11 +134,12 @@ export const ALLOWED_DEPENDENCIES: Readonly<
   Record<PackageName, readonly PackageName[]>
 > = {
   ocpp: [],
+  "ocpp-rpc": ["ocpp"],
   contracts: [],
   trace: [],
   "k6-runtime": [],
   vehicle: [],
-  core: ["ocpp", "contracts", "trace", "k6-runtime", "vehicle"],
+  core: ["ocpp", "ocpp-rpc", "contracts", "trace", "k6-runtime", "vehicle"],
   client: ["core", "contracts", "ocpp", "trace"],
   "apps/cli": ["ocpp", "contracts", "trace", "k6-runtime", "core", "client"],
   "apps/web": ["ocpp", "contracts", "trace", "k6-runtime", "core", "client"],
@@ -146,6 +152,7 @@ export const ALLOWED_DEPENDENCIES: Readonly<
 /** Packages that must run in both Bun and the browser. */
 export const PORTABLE_PACKAGES: ReadonlySet<PackageName> = new Set([
   "ocpp",
+  "ocpp-rpc",
   "contracts",
   "trace",
   "k6-runtime",

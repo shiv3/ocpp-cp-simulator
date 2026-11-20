@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "../../node_modules/.tmp/tsconfig.ocpp-rpc.tsbuildinfo",
+    "outDir": "../../node_modules/.tmp/out/ocpp-rpc",
+    "types": ["bun-types"]
+  },
+  "include": ["src"],
+  "references": [
+    {
+      "path": "../ocpp"
+    }
+  ]
+}

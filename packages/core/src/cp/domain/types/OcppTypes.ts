@@ -12,11 +12,8 @@ import { OCPPStatus } from "@ocpp-cp-simulator/contracts/connectorStatus";
 // Defined in `packages/contracts/src` (#578); re-exported for the existing import sites.
 export { OCPPStatus };
 
-export enum OCPPMessageType {
-  CALL = 2,
-  CALLRESULT = 3,
-  CALLERROR = 4,
-}
+// The OCPP-J frame codec lives in ocpp-rpc (#978); re-exported for the existing import sites.
+export { OCPPMessageType } from "@ocpp-cp-simulator/ocpp-rpc/index";
 
 /**
  * Subset of `OCPPStatus` valid for `connectorId = 0` (the Charge Point main

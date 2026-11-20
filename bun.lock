@@ -140,6 +140,7 @@
         "@ocpp-cp-simulator/contracts": "workspace:*",
         "@ocpp-cp-simulator/k6-runtime": "workspace:*",
         "@ocpp-cp-simulator/ocpp": "workspace:*",
+        "@ocpp-cp-simulator/ocpp-rpc": "workspace:*",
         "@ocpp-cp-simulator/vehicle": "workspace:*",
       },
     },
@@ -150,6 +151,13 @@
     "packages/ocpp": {
       "name": "@ocpp-cp-simulator/ocpp",
       "version": "0.0.0",
+    },
+    "packages/ocpp-rpc": {
+      "name": "@ocpp-cp-simulator/ocpp-rpc",
+      "version": "0.0.0",
+      "dependencies": {
+        "@ocpp-cp-simulator/ocpp": "workspace:*",
+      },
     },
     "packages/trace": {
       "name": "@ocpp-cp-simulator/trace",
@@ -292,6 +300,8 @@
     "@ocpp-cp-simulator/k6-runtime": ["@ocpp-cp-simulator/k6-runtime@workspace:packages/k6-runtime"],
 
     "@ocpp-cp-simulator/ocpp": ["@ocpp-cp-simulator/ocpp@workspace:packages/ocpp"],
+
+    "@ocpp-cp-simulator/ocpp-rpc": ["@ocpp-cp-simulator/ocpp-rpc@workspace:packages/ocpp-rpc"],
 
     "@ocpp-cp-simulator/trace": ["@ocpp-cp-simulator/trace@workspace:packages/trace"],
 

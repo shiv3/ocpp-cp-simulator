@@ -12,3 +12,9 @@
 {"d":"CSMS>","k":"result","id":"id-6","p":{"transactionId":1,"idTagInfo":{"status":"Accepted"}}}
 {"d":"CP>","k":"call","id":"id-7","a":"StatusNotification","p":{"connectorId":1,"errorCode":"NoError","status":"Charging"}}
 {"d":"CSMS>","k":"result","id":"id-7","p":{}}
+{"d":"CP>","k":"call","id":"id-8","a":"StopTransaction","p":{"transactionId":1,"idTag":"CERT003","meterStop":2500,"timestamp":"<ts>"}}
+{"d":"CSMS>","k":"result","id":"id-8","p":{"idTagInfo":{"status":"Accepted"}}}
+{"d":"CP>","k":"call","id":"id-9","a":"StatusNotification","p":{"connectorId":1,"errorCode":"NoError","status":"Finishing"}}
+{"d":"CSMS>","k":"result","id":"id-9","p":{}}
+{"d":"CP>","k":"call","id":"id-10","a":"StatusNotification","p":{"connectorId":1,"errorCode":"NoError","status":"Available"}}
+{"d":"CSMS>","k":"result","id":"id-10","p":{}}

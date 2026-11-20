@@ -314,6 +314,13 @@ export interface ScenarioExecutorCallbacks {
     messageId?: string,
     data?: string,
   ) => void;
+  /**
+   * Awaited once the flow has returned, before the run is marked completed:
+   * resolves when the frames the last nodes caused have gone out and been
+   * answered, so the run's transcript (and its assertions) see them. Ignored
+   * when the run is stopped meanwhile.
+   */
+  onRunEnding?: () => Promise<void>;
 }
 
 /**

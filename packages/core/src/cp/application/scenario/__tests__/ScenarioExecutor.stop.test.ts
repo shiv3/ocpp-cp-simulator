@@ -86,3 +86,62 @@ describe("ScenarioExecutor stop during auto-meter", () => {
     expect(onStopTransaction).not.toHaveBeenCalled();
   });
 });
+
+// A run's last node may leave frames still going out (a fire-and-forget
+// DataTransfer queued behind another CALL): the executor waits for
+// `onRunEnding` before it reports the run completed, so the transcript the
+// recorder closes then holds them. A stop ends the wait.
+describe("ScenarioExecutor onRunEnding", () => {
+  function twoNodeScenario(): ScenarioDefinition {
+    return {
+      id: "run-ending",
+      name: "Run ending",
+      targetType: "connector",
+      targetId: 1,
+      nodes: [
+        {
+          id: "start",
+          type: ScenarioNodeType.START,
+          position: { x: 0, y: 0 },
+          data: { label: "Start" },
+        },
+        {
+          id: "end",
+          type: ScenarioNodeType.END,
+          position: { x: 0, y: 100 },
+          data: { label: "End" },
+        },
+      ],
+      edges: [{ id: "e1", source: "start", target: "end" }],
+    } as ScenarioDefinition;
+  }
+
+  it("does not complete before onRunEnding resolves", async () => {
+    let release: () => void = () => undefined;
+    const ending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const executor = new ScenarioExecutor(twoNodeScenario(), {
+      onRunEnding: () => ending,
+    });
+    let finished = false;
+    const run = executor.start().then(() => {
+      finished = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(finished).toBe(false);
+    release();
+    await run;
+    expect(finished).toBe(true);
+  });
+
+  it("stop() ends the wait", async () => {
+    const executor = new ScenarioExecutor(twoNodeScenario(), {
+      onRunEnding: () => new Promise<void>(() => undefined),
+    });
+    const run = executor.start();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    executor.stop();
+    await run;
+  });
+});

@@ -12,6 +12,7 @@ import type {
 import type { RuleOwner } from "../behavior/BehaviorRegistry";
 import { clockOf } from "../../shared/clock";
 import { rngOf } from "../../shared/rng";
+import { whenWireQuiet } from "../verification/wireQuiet";
 import { waitForRemoteStart, waitForRemoteStop } from "./remoteTriggerWaits";
 import { waitForCsmsCall, waitForCsmsCallReplacing } from "./csmsCallWaits";
 import {
@@ -398,6 +399,7 @@ export const createScenarioExecutorCallbacks = (
         chargePoint.sendDataTransfer(vendorId, messageId, data),
       ).catch(() => undefined);
     },
+    onRunEnding: () => whenWireQuiet(chargePoint),
   };
 
   return callbacks;

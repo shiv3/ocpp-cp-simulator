@@ -81,6 +81,10 @@ Auto MeterValue node reaches the target in about 75 s and the run gets to its
 RemoteStopTransaction trigger in reasonable time; the original 75 kWh, 20 % → 80 %
 session took about 54 minutes (#1078).
 
+`smart-charging` waits for Finishing in a branch beside its Auto MeterValue node (`parallel` /
+`join`), not after it: a stop during the meter takes the connector through Finishing to
+Available at once, so a wait armed only after the meter returned would never see it (#1080).
+
 ## Certification templates (`cert16-*`)
 
 47 templates (46 `cert16-tcNNN-*` files plus `cert16-reservation-basic` for

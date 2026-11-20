@@ -362,6 +362,16 @@ export class ScenarioExecutor {
 
     try {
       await executeFlow(this.nodeCtx, opts);
+      // The last nodes' frames may still be queued or unanswered: let them
+      // reach the transcript before the run is reported complete. A stop
+      // during the wait ends it.
+      if (this.callbacks.onRunEnding && !this.aborted) {
+        try {
+          await Promise.race([this.callbacks.onRunEnding(), this.abortPromise]);
+        } catch {
+          // Best effort: a run that did its work is not failed by the wait.
+        }
+      }
 
       // Check if we were stopped during execution
       const stateName = getScenarioStateName(this.service);

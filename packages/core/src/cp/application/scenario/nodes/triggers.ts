@@ -8,6 +8,7 @@ import type {
   ReserveNowNodeData,
   StatusTriggerNodeData,
 } from "../ScenarioTypes";
+import type { IdTokenTypeName } from "../../../domain/connector/Transaction";
 import { runTriggerWait } from "../waits";
 import type { Flow, NodeRunContext } from "./context";
 
@@ -225,7 +226,43 @@ export async function executeCsmsCallTrigger(
       // The branch owns the CALL from here on.
       flow.exchange = result.value.exchange;
       flow.answered = false;
+      // A remote start the scenario owns is still a remote start: the next
+      // Start Transaction carries the tag the CSMS sent, as after a
+      // `remoteStartTrigger`, not the station's own default.
+      captureOwnedRemoteStart(ctx, result.value.action, result.value.payload);
     }
+  }
+}
+/** Remembers the tag (and 2.x remote start id / token type) of an owned
+ *  RemoteStartTransaction (1.6) or RequestStartTransaction (2.x) for the next
+ *  Start Transaction node. Other actions, or a payload without a tag, leave the
+ *  capture alone. */
+function captureOwnedRemoteStart(
+  ctx: NodeRunContext,
+  action: string,
+  payload: unknown,
+): void {
+  if (typeof payload !== "object" || payload === null) return;
+  const body = payload as Record<string, unknown>;
+  if (action === "RemoteStartTransaction") {
+    if (typeof body.idTag !== "string" || body.idTag === "") return;
+    ctx.remoteStartTagId = body.idTag;
+    ctx.remoteStartOptions = { triggerReason: "RemoteStart" };
+  } else if (action === "RequestStartTransaction") {
+    const token = body.idToken;
+    if (typeof token !== "object" || token === null) return;
+    const { idToken, type } = token as Record<string, unknown>;
+    if (typeof idToken !== "string" || idToken === "") return;
+    ctx.remoteStartTagId = idToken;
+    ctx.remoteStartOptions = {
+      triggerReason: "RemoteStart",
+      ...(typeof body.remoteStartId === "number"
+        ? { remoteStartId: body.remoteStartId }
+        : {}),
+      ...(typeof type === "string"
+        ? { idTokenType: type as IdTokenTypeName }
+        : {}),
+    };
   }
 }
 /** Issue #240: park until the WebSocket reaches data.event. */

@@ -55,7 +55,7 @@ related:
   - ../entities/cli.md
   - vehicle-profiles.md
   - charger-engine.md
-updated: 2026-11-15
+updated: 2026-11-20
 ---
 
 # Scenario File Format (v1.11)
@@ -311,6 +311,10 @@ true })`, or any loaded behavior). A dormant behavior is all or none: while a ru
   reached the node is alive it has its `onCall` rules, `main`, `on` hooks and `beforeSend`; when the last such run
   ends it has none of them. Data only: a scenario never carries code. The run fails if no behavior has that
   id. Schema 1.6 adds `params` and `mode`, see [below](#usebehavior-params-and-disable-schema-16).
+
+A `replace` node that takes a `RemoteStartTransaction` (1.6, `idTag`) or `RequestStartTransaction` (2.x,
+`idToken`, with its `type` and `remoteStartId`) is still a remote start: the next Start Transaction node carries
+that tag, exactly as after a `remoteStartTrigger`, and not the station's own default (#1079).
 
 The CALL is **branch-scoped**: parallel branches from Start each own the CALL their own `csmsCallTrigger`
 took, and a `callResponse` answers the nearest one of its branch. The rule ends when its CALL is answered, so

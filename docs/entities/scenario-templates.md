@@ -16,7 +16,7 @@ related:
   - ../sources/cert16-templates-readme.md
   - ../sources/steve-verify-readme.md
   - cli.md
-updated: 2026-11-09
+updated: 2026-11-20
 ---
 
 # Built-in scenario templates
@@ -117,7 +117,7 @@ shape (OCPP 1.6 `idTag` / `idTagInfo` against 2.0.1 `idToken` / `idTokenInfo`).
 | `dataflow-authorize-branch-16` / `-201`         | `ocppCall` Authorize, then a `switch` on `response.payload.idTagInfo.status` (`idTokenInfo` on 2.0.1): Accepted starts a session, `$match in` Blocked / Invalid / Expired, ConcurrentTx, and `default`.                                                        |
 | `dataflow-call-error-handling`                  | `ocppCall` DataTransfer, then `response.kind`; on a result `response.payload.status`, on a CALLERROR `response.errorCode` with `$match` `in` / `endsWith` / `startsWith`. Each outcome reports itself with its own DataTransfer `messageId`. Version-agnostic. |
 | `dataflow-charge-to-soc`                        | A bounded loop edge (schema 1.10): the `meter` step (7 s a pass) loops back to itself until `connector.power.soc` matches `$match gte 80` (`until`) or 2 hours (`forSeconds: 7200`) have passed, then stops the transaction. No `switch` node.                 |
-| `dataflow-remote-start-reauthorize-16` / `-201` | `csmsCallTrigger` with `behavior: "replace"`, a `callResponse` Accepted, then Authorize with the tag read from the CALL (`$from call.payload.idTag`) and a `switch` on the answer.                                                                             |
+| `dataflow-remote-start-reauthorize-16` / `-201` | `csmsCallTrigger` with `behavior: "replace"`, a `callResponse` Accepted, then Authorize with the tag read from the CALL (`$from call.payload.idTag`) and a `switch` on the answer. The session that follows starts with that same tag (#1079).                 |
 
 The `cert16-tc023-*` templates are untouched: their ids are part of the TCK contract and
 their golden frames pin them. `dataflow-authorize-branch-*` covers the same ground (one

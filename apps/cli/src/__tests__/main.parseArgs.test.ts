@@ -51,6 +51,7 @@ function runParseArgs(args: string[]) {
     "  securityProfile: options.securityProfile ?? null,",
     "  authorizationKey: options.authorizationKey ?? null,",
     "  cpoName: options.cpoName ?? null,",
+    "  timeScale: options.timeScale ?? null,",
     "  tls: options.tls ?? null,",
     "  tlsCaPath: options.tlsCaPath ?? null,",
     "  tlsCertPath: options.tlsCertPath ?? null,",
@@ -286,6 +287,30 @@ describe("parseArgs OCPP 1.6 security flags", () => {
     ]);
     expect(bad.status).toBe(1);
     expect(bad.stderr).toContain("--inbound-validation must be");
+  });
+
+  const TIME_SCALE_BASE = [
+    "--cp-id",
+    "CP-TS",
+    "--ws-url",
+    "ws://csms.example.test/ocpp/",
+  ];
+
+  it("--time-scale carries the clock speed-up", () => {
+    const fast = runParseArgs([...TIME_SCALE_BASE, "--time-scale", "20"]);
+    expect(fast.status).toBe(0);
+    expect(JSON.parse(fast.stdout)).toMatchObject({ timeScale: 20 });
+  });
+
+  it("leaves --time-scale unset by default", () => {
+    const unset = runParseArgs(TIME_SCALE_BASE);
+    expect(JSON.parse(unset.stdout)).toMatchObject({ timeScale: null });
+  });
+
+  it("refuses a --time-scale that is not a number above 0", () => {
+    const bad = runParseArgs([...TIME_SCALE_BASE, "--time-scale", "0"]);
+    expect(bad.status).toBe(1);
+    expect(bad.stderr).toContain("--time-scale must be");
   });
 
   // One runParseArgs per test (#783): an "on" and an "off" case in one test

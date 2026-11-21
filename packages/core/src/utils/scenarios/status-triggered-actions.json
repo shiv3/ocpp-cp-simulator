@@ -75,7 +75,7 @@
   "ocppVersions": ["1.6"],
   "csmsExpectations": {
     "calls": [],
-    "note": "No CSMS action; the scenario starts when the connector becomes Available."
+    "note": "No CSMS action; the scenario starts when the connector becomes Available. Ends after 60 s of station time (maxDurationSeconds): the Available trigger re-fires on every Available, so the Heartbeat loop has no end of its own."
   },
   "assertions": [
     {
@@ -84,5 +84,6 @@
       "action": "Heartbeat",
       "description": "Heartbeat sent while Available"
     }
-  ]
+  ],
+  "maxDurationSeconds": 60
 }

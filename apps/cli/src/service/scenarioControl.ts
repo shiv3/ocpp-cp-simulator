@@ -11,6 +11,7 @@ import {
   recordTerminalScenarioStatus,
   releaseConnectorArtifacts,
   notifySessionSettled,
+  resolveScenarioId,
   type ScenarioRunHost,
 } from "./scenarioRun";
 
@@ -146,6 +147,7 @@ export function getScenario(
   connectorId: number,
   scenarioId: string,
 ): ScenarioDefinition | null {
+  scenarioId = resolveScenarioId(host, connectorId, scenarioId);
   const entry = host.scenarios.get(scenarioId);
   if (!entry || entry.connectorId !== connectorId) return null;
   return entry.definition;
@@ -160,16 +162,36 @@ export function getScenario(
  */
 export function getScenarioStatus(
   host: ScenarioRunHost,
-  _connectorId: number,
+  connectorId: number,
   scenarioId: string,
 ): ScenarioExecutionContext | null {
+  scenarioId = resolveScenarioId(host, connectorId, scenarioId);
   const executor = host.executors.get(scenarioId);
   if (!executor) {
     return host.lastRunStatusByScenario.get(scenarioId) ?? null;
   }
   // #179: echo the run id so a poller can tie this status to a specific run.
   const runId = host.runIdByScenario.get(scenarioId);
-  return { ...executor.getContext(), runId };
+  // The transaction a CSMS-side harness needs (RemoteStopTransaction, a
+  // TxProfile): the one running on the connector now, else the last the run
+  // started.
+  const transactionIds = host.recorder.transactionIdsOf(
+    scenarioId,
+    connectorId,
+  );
+  const tx = host.chargePoint.connectors.get(connectorId)?.transaction;
+  const current =
+    typeof tx?.cpTransactionId === "string" && tx.cpTransactionId.length > 0
+      ? tx.cpTransactionId
+      : tx && typeof tx.id === "number" && tx.id > 0
+        ? tx.id
+        : null;
+  return {
+    ...executor.getContext(),
+    runId,
+    transactionId: current ?? transactionIds.at(-1) ?? null,
+    transactionIds,
+  };
 }
 
 /**
@@ -203,11 +225,14 @@ export function getScenarioRunResult(
  */
 export function getScenarioReport(
   host: ScenarioRunHost,
-  _connectorId: number,
+  connectorId: number,
   scenarioId: string,
   runId?: string,
 ): ScenarioRunResult | null {
-  return host.getScenarioRunResult(scenarioId, runId);
+  return host.getScenarioRunResult(
+    resolveScenarioId(host, connectorId, scenarioId),
+    runId,
+  );
 }
 
 export function stopScenario(
@@ -215,6 +240,7 @@ export function stopScenario(
   connectorId: number,
   scenarioId: string,
 ): void {
+  scenarioId = resolveScenarioId(host, connectorId, scenarioId);
   const executor = host.executors.get(scenarioId);
   if (!executor) {
     throw new ScenarioRunStateError(`Scenario ${scenarioId} is not running`);
@@ -238,6 +264,7 @@ export function resetScenario(
   connectorId: number,
   scenarioId: string,
 ): void {
+  scenarioId = resolveScenarioId(host, connectorId, scenarioId);
   const stoppedRun = host.executors.has(scenarioId);
   if (stoppedRun) {
     host.stopScenario(connectorId, scenarioId);

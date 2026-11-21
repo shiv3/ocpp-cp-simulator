@@ -209,3 +209,44 @@ describe("a run driven by the declared expectations passes its assertions", () =
     );
   }
 });
+
+describe("open-ended templates are bounded (maxDurationSeconds)", () => {
+  const BOUNDED = [
+    "status-triggered-actions",
+    "multi-status-monitor",
+    "smart-charging",
+    "full-charging-cycle",
+    "remote-start-auto-meter",
+  ];
+
+  test("each declares a bound and says what ends it", () => {
+    for (const id of BOUNDED) {
+      const def = scenarioTemplates
+        .find((t) => t.id === id)!
+        .createScenario("CP", 1);
+      expect(def.maxDurationSeconds, id).toBeGreaterThan(0);
+      expect(def.csmsExpectations?.note, id).toMatch(/maxDurationSeconds/);
+    }
+  });
+
+  test("status-triggered-actions, a Heartbeat loop with no end of its own, ends at its bound", async () => {
+    const rig = await Rig.create({ version: "1.6" });
+    try {
+      const started = Date.now();
+      // Without the bound this run never completes: runTemplate fails after 80 s.
+      await runTemplate(rig, "status-triggered-actions", {
+        windowMs: null,
+        edit: (def) => {
+          def.maxDurationSeconds = 3;
+        },
+      });
+      expect(Date.now() - started).toBeLessThan(20_000);
+      const heartbeats = rig.csms.frames.filter(
+        (f) => f.dir === "CP>" && f.action === "Heartbeat",
+      );
+      expect(heartbeats.length).toBeGreaterThan(0);
+    } finally {
+      await rig.dispose();
+    }
+  }, 60_000);
+});

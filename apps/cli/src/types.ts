@@ -97,6 +97,11 @@ export interface CLIOptions {
    * public base URL.
    */
   readonly soapTunnel: SoapTunnelConfig | null;
+  /**
+   * `--time-scale <N>`: the charge points of this process run on a clock N
+   * times faster than the wall clock. Absent: 1. Process-wide, not persisted.
+   */
+  readonly timeScale?: number;
   /** Serve `GET /metrics` (Prometheus text exposition) in server mode. */
   readonly metrics: boolean;
   /**

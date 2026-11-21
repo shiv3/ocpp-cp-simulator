@@ -82,6 +82,33 @@ declaration alone and requires every assertion to pass, so the metadata cannot d
 Assertions look at what the charge point and the CSMS exchange, not at meter registers: whether `MeterValues` frames go
 out depends on the station's configuration, so no template asserts on them.
 
+## Open-ended templates and their end
+
+Five general-purpose templates have no end of their own that an unattended run can count on, so each carries a
+`maxDurationSeconds` (schema 1.13) and says in its `csmsExpectations.note` what ends it. The bound is station-clock time
+(it shrinks with [`--time-scale`](cli.md#time-scale)); when it passes the run ends **normally** (state `completed`,
+`endedBy: "maxDuration"`, assertions evaluated), not as a stop.
+
+| Template id                | Ends when                                                                                                       | Bound |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------- | ----- |
+| `status-triggered-actions` | never by itself: the Available trigger re-fires on every Available, so the Heartbeat loop repeats               | 60 s  |
+| `multi-status-monitor`     | never by itself: three status triggers wait for the connector, the Charging branch meters up to 20 kWh          | 120 s |
+| `smart-charging`           | the connector reaches Finishing (the Charging branch meters up to 30 kWh until then)                            | 120 s |
+| `full-charging-cycle`      | its Auto MeterValue node has metered 25 kWh or 300 s (500 Wh per 5 s), then the transaction stops               | 330 s |
+| `remote-start-auto-meter`  | the transaction is stopped (RemoteStopTransaction or locally): the Auto MeterValue node has no limit of its own | 120 s |
+
+`run_scenario_template { "maxDurationSeconds": N }` overrides the bound per run (`0` removes it).
+
+## Instance ids
+
+`run_scenario_template` and `load_scenario_template` answer `{ scenarioId }` with the **instance id**
+`<templateId>-c<connector>`, e.g. `cert16-tc010-remote-start-c1`: one stable instance per template and connector, replaced
+when the template is loaded again (see [Template instances](#template-instances)). Pass it, or the plain template id
+together with the `connector` of the call, to `scenario_status`, `scenario_report`, `get_scenario`, `run_scenario`,
+`stop_scenario` and `scenario_reset`; an id that names a scenario of its own always wins. `scenario_status` and the report
+also carry `transactionId` / `transactionIds`, so a harness that has to answer with a `transactionId`
+(RemoteStopTransaction, a TxProfile) reads it there.
+
 ## General-purpose templates
 
 | Template id                | Name                             | Description (from the file)                                                                                                            |

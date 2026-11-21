@@ -16,6 +16,7 @@ import {
   type ScenarioRunResult,
   type ScenarioStateSnapshot,
 } from "./ScenarioAssertions";
+import { transactionIdsOf } from "./ocpp";
 import { TranscriptBuffer } from "./TranscriptBuffer";
 
 /**
@@ -55,6 +56,8 @@ export interface ScenarioRunFinish {
   readonly errors: string[];
   readonly timeout: { nodeId: string; expectation?: unknown } | null;
   readonly stopped?: boolean;
+  /** Schema 1.13: the run ended at the scenario's `maxDurationSeconds`. */
+  readonly endedBy?: "maxDuration";
 }
 
 /** A stable, human-legible run id: `scenarioId#<epochMs>-<rand>`. */
@@ -133,6 +136,18 @@ export class ScenarioRunRecorder {
 
   isOpen(scenarioId: string, connectorId: number): boolean {
     return this.open.has(openKey(connectorId, scenarioId));
+  }
+
+  /**
+   * The ids of the transactions the open run of `scenarioId` has seen start,
+   * in order (see {@link transactionIdsOf}); empty when no run is open.
+   */
+  transactionIdsOf(
+    scenarioId: string,
+    connectorId: number,
+  ): Array<number | string> {
+    const run = this.open.get(openKey(connectorId, scenarioId));
+    return run ? transactionIdsOf(run.transcript.frames) : [];
   }
 
   /** #240: an operator extended, retried or continued a parked wait. */
@@ -234,6 +249,8 @@ export class ScenarioRunRecorder {
       ),
       executionState: finish.executionState,
       stopped,
+      transactionIds: transactionIdsOf(run.transcript.frames),
+      ...(finish.endedBy ? { endedBy: finish.endedBy } : {}),
       verdict: verdictSummary.verdict,
       conformanceVerdict: verdictSummary.conformanceVerdict,
       compatibilityVerdict: verdictSummary.compatibilityVerdict,

@@ -9,6 +9,7 @@ import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Dat
 import { setGlobalLogFormat } from "@ocpp-cp-simulator/core/cp/shared/Logger";
 import { setGlobalTraceWriter } from "./trace/globalTraceWriter";
 import { loadTraceFeature } from "./trace/loadTraceFeature";
+import { setProcessTimeScale } from "./timeScale";
 import { parseAnalyzeArgs } from "./analyze/parseAnalyzeArgs";
 import { buildBehaviorFile, parseBehaviorArgs } from "./behavior/buildBehavior";
 import { parseExportK6Args } from "./exportK6/parseExportK6Args";
@@ -119,6 +120,10 @@ async function main(): Promise<void> {
     );
     process.exit(1);
   }
+
+  // --time-scale: set before any charge point is built; each one reads the
+  // process clock in its constructor.
+  if (options.timeScale !== undefined) setProcessTimeScale(options.timeScale);
 
   // --trace-output (#188): construct the global TraceWriter before any CP is
   // built (CLIChargePointService.attach()es to it in its constructor, so

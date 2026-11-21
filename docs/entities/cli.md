@@ -793,6 +793,33 @@ and through the browser UI. `stopTransactions` on `disconnect` and `cp.delete` i
 the standalone JSON Lines and REPL `disconnect` ignore it. How the client authenticates to a protected
 daemon is covered in [Access control](../concepts/access-control.md#authenticating-to-a-protected-daemon).
 
+### Time scale
+
+`--time-scale <N>` (every mode, daemon included) makes the charge points of the process read a clock that runs N times
+faster than the wall clock (a `ScaledClock`: timers fire after `ms / N` real milliseconds, `now()` advances N times faster
+from the wall-clock time the process started at). A scenario with a 5-minute Auto MeterValue node finishes in 5 / N
+minutes against a **real** CSMS, which the in-process `VirtualClock` of the tests cannot do (it only moves when told to
+and keeps real I/O out).
+
+```bash
+ocpp-cp-sim --ws-url ws://localhost:9000/ocpp --cp-id CP001 --json --time-scale 20
+```
+
+Limits, all consequences of only the charge point's clock being accelerated:
+
+- **Wire timestamps run ahead of the wall clock** (`StartTransaction.timestamp`, `MeterValues` sampled times, a
+  reservation's expiry the charge point computes): after 60 s of real time at N = 20 they are 20 minutes ahead. A CSMS that
+  validates timestamps against its own clock may reject or flag them.
+- **The CSMS sees N times the traffic**: Heartbeats, MeterValues and retries come N times as often, and the energy a
+  meter node adds per interval is unchanged, so a transaction accrues N times the energy per real second. A CSMS that
+  rate-limits or disconnects a chatty station will react.
+- **CSMS-side timeouts do not accelerate**, the charge point's do: its own wait for an answer (the call timeout of the
+  serial CALL queue, retry intervals, reconnect back-off) shrinks to `ms / N` real milliseconds, so a CSMS that answers
+  slowly looks unresponsive at a high N. Keep N small (20 or less) against a real CSMS; a local mock tolerates more.
+- Scenario `forSeconds` loops, `delay` nodes, wait timeouts and `maxDurationSeconds` count station time, so they speed up
+  with it. The run history's `startedAt` / `endedAt` and `durationMs` are wall-clock.
+- It is read once at startup; there is no command to change it while the process runs.
+
 ## Subcommands
 
 ### analyze
@@ -1244,6 +1271,7 @@ the OCPP answer are unchanged.
 | `--shutdown-wait-ms <ms>`                   | No       | `5000`                                  | Longest wait for those answers. A second signal ends the wait. Also the wait of `cp.delete` / `disconnect` with `stopTransactions: true` ([Control plane](../concepts/control-plane.md#stopping-transactions-on-close)), which needs no `--shutdown-stop-transactions`.                                                                                                                                                                                                                       |
 | `--no-connect-restored`                     | No       | off                                     | Restore the charge points of `--state-db` without dialling them; connect with `cp.connect` / `cp.bulk`.                                                                                                                                                                                                                                                                                                                                                                                       |
 | `--cp-bulk-wait-ms <ms>`                    | No       | `10000`                                 | Per-charge-point wait of `cp.bulk` and `cp.scenario.run` ([Control plane](../concepts/control-plane.md#charge-point-labels)).                                                                                                                                                                                                                                                                                                                                                                 |
+| `--time-scale <N>`                          | No       | `1`                                     | Run every charge point's clock N times faster than the wall clock (0 < N <= 10000; process-wide, not persisted): a 5-minute scenario takes 5 / N minutes. See [Time scale](#time-scale).                                                                                                                                                                                                                                                                                                      |
 | `--trace-output <path>`                     | No       | -                                       | Append each OCPP-J (WebSocket) wire message as a JSONL trace record ([Trace format](../concepts/trace-format.md)) in REPL, JSON, and daemon modes; SOAP transport is not captured yet.                                                                                                                                                                                                                                                                                                        |
 | `--health-path <path>`                      | No       | `/v1/healthz`                           | Absolute path for the unauthenticated health-check JSON. The browser UI build must use matching `VITE_HEALTH_PATH` when this changes.                                                                                                                                                                                                                                                                                                                                                         |
 | `--metrics`                                 | No       | off                                     | Server mode: serve `GET /metrics` (Prometheus text exposition). See [Daemon → Metrics](daemon.md#metrics)                                                                                                                                                                                                                                                                                                                                                                                     |

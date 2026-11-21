@@ -157,7 +157,7 @@
         "node": "trigger-finish"
       }
     ],
-    "note": "No CSMS action; the Charging / Finishing status triggers are driven by simulator commands."
+    "note": "No CSMS action; the Charging / Finishing status triggers are driven by simulator commands. Ends when the connector reaches Finishing, or after 120 s of station time (maxDurationSeconds)."
   },
   "assertions": [
     {
@@ -178,5 +178,6 @@
       "action": "StopTransaction",
       "description": "StopTransaction sent"
     }
-  ]
+  ],
+  "maxDurationSeconds": 120
 }

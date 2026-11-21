@@ -260,6 +260,16 @@ Options:
   --log-format <fmt>       "plain" (default) or "json" — output one JSON
                            object per stderr line for structured-log
                            collectors (Loki, jq, etc.).
+  --time-scale <N>         Run every charge point's clock N times faster
+                           than the wall clock (N > 0, at most 10000): a
+                           scenario that waits 5 minutes finishes in 5 / N
+                           minutes. Timers fire N times sooner and
+                           timestamps on the wire advance N times faster, so
+                           Heartbeats and MeterValues reach the CSMS N times
+                           more often and wire times run ahead of the wall
+                           clock; CSMS-side timeouts do not accelerate. Keep
+                           N modest (about 20 at most) against a real CSMS.
+                           Process-wide; not persisted. Default 1.
   --trace-output <path>    Append every OCPP wire message as a JSONL trace
                            record (docs/concepts/trace-format.md) — works in REPL,
                            JSON, and daemon modes.

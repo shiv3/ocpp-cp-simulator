@@ -731,6 +731,7 @@ export async function dispatchFacadeCpCommand(
     case "run_scenario_template": {
       const { params } = call;
       const once = params.once;
+      const maxDurationSeconds = params.maxDurationSeconds;
       return handled(
         await runFacadeOperation(() =>
           chargePointService.runScenarioTemplate(id, params.templateId, {
@@ -738,6 +739,7 @@ export async function dispatchFacadeCpCommand(
             evSettings: params.evSettings as Partial<EVSettings> | undefined,
             strict: params.strict,
             ...(once === undefined ? {} : { once }),
+            ...(maxDurationSeconds === undefined ? {} : { maxDurationSeconds }),
           }),
         ),
       );

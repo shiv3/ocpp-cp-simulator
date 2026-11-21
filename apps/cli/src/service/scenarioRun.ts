@@ -1,4 +1,5 @@
 import type { ChargePoint } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
+import { scenarioInstanceId } from "../scenarioInstanceId";
 import { ScenarioExecutor } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioExecutor";
 import type { ScenarioEvents } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioTypes";
 import { createScenarioExecutorCallbacks } from "@ocpp-cp-simulator/core/cp/application/scenario/ScenarioRuntime";
@@ -174,6 +175,31 @@ export function scenarioPositionHeldByOtherLiveRun(
   return host.executors.has(held.scenarioKey);
 }
 
+/**
+ * The scenario id a command means. `run_scenario_template` answers with the
+ * instance id `<templateId>-c<connector>` (stable per template and connector,
+ * see `scenarioInstanceId`); a caller that remembers only the template id and
+ * the connector may pass the template id to the commands that take a
+ * `scenarioId`. An id that names a scenario, a run or a recorded report of its
+ * own always wins; only an unknown one is read as a template id.
+ */
+export function resolveScenarioId(
+  host: ScenarioRunHost,
+  connectorId: number,
+  scenarioId: string,
+): string {
+  const known = (id: string): boolean =>
+    host.scenarios.has(id) ||
+    host.executors.has(id) ||
+    host.lastRunStatusByScenario.has(id);
+  if (known(scenarioId)) return scenarioId;
+  const instance = scenarioInstanceId(scenarioId, connectorId);
+  if (known(instance) || host.runs.latest(host.chargePoint.id, instance)) {
+    return instance;
+  }
+  return scenarioId;
+}
+
 export function clearScenarioPositionIfOwned(
   host: ScenarioRunHost,
   connectorId: number,
@@ -190,6 +216,7 @@ export function runScenario(
   scenarioId: string,
   options?: { strict?: boolean },
 ): void {
+  scenarioId = resolveScenarioId(host, connectorId, scenarioId);
   const entry = host.scenarios.get(scenarioId);
   if (!entry) {
     throw new Error(`Scenario ${scenarioId} not found`);
@@ -509,6 +536,8 @@ export function runScenario(
       // for. The stop-path methods below capture it BEFORE stop()
       // clears it, which is the case that can be non-null.
       null,
+      false,
+      executor.getContext().endedBy,
     );
     // Last, deliberately: #314's held-reload drain calls loadScenario, which
     // can auto-start a fresh run of the same scenario. Announcing the settle
@@ -635,8 +664,17 @@ export function recordTerminalScenarioStatus(
   context: ScenarioExecutionContext,
   errors: ReadonlyArray<string>,
 ): void {
+  // The transcript is still open here: read the transactions the run started
+  // before finalizing closes it, so the frozen status keeps answering.
+  const connectorId = host.scenarios.get(scenarioId)?.connectorId;
+  const transactionIds =
+    connectorId === undefined
+      ? []
+      : host.recorder.transactionIdsOf(scenarioId, connectorId);
   host.lastRunStatusByScenario.set(scenarioId, {
     ...context,
+    transactionId: transactionIds.at(-1) ?? null,
+    transactionIds,
     scenarioId,
     state: executionState === "error" ? "error" : "completed",
     // The run is over: nothing is parked and no node is mid-execution.
@@ -672,8 +710,10 @@ export function finalizeScenarioRun(
   errors: string[],
   timeout: { nodeId: string; expectation?: unknown } | null,
   stopped = false,
+  endedBy?: "maxDuration",
 ): void {
   host.recorder.finalize({
+    ...(endedBy ? { endedBy } : {}),
     scenarioId,
     connectorId,
     runId,

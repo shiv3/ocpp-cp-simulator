@@ -77,7 +77,7 @@ export async function runScenarioOnSelector(
       `the selector matches ${cpIds.length} charge points, more than ${ARRAY_MAX_ITEMS}; narrow it`,
     );
   }
-  const { once } = params;
+  const { once, maxDurationSeconds } = params;
   const batch = await runCpBatch(
     cpIds,
     (cpId) =>
@@ -87,6 +87,7 @@ export async function runScenarioOnSelector(
           evSettings: params.evSettings as Partial<EVSettings> | undefined,
           strict: params.strict,
           ...(once === undefined ? {} : { once }),
+          ...(maxDurationSeconds === undefined ? {} : { maxDurationSeconds }),
         }),
       ),
     {

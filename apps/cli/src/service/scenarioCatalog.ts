@@ -81,21 +81,25 @@ export function seedDefaultScenarios(
   }
 }
 
+export interface ScenarioTemplateLoadOptions {
+  /** Forwarded to {@link loadScenario}: `false` keeps the auto-start gate
+   *  out of a "load it and start it now" caller's way (#318). */
+  readonly autoStart?: boolean;
+  /** `false` loads the instance disabled: the auto-start walker skips it
+   *  at every connect, so the only run is the explicit `run_scenario` the
+   *  caller makes — a template that runs once, not on every reconnect
+   *  (#352). */
+  readonly enabled?: boolean;
+  /** Overrides the template's `maxDurationSeconds` (schema 1.13); 0 removes the bound. */
+  readonly maxDurationSeconds?: number;
+}
+
 export function loadScenarioTemplate(
   host: ScenarioCatalogHost,
   templateId: string,
   connectorId: number,
   evSettingsOverride?: Partial<EVSettings>,
-  options: {
-    /** Forwarded to {@link loadScenario}: `false` keeps the auto-start gate
-     *  out of a "load it and start it now" caller's way (#318). */
-    readonly autoStart?: boolean;
-    /** `false` loads the instance disabled: the auto-start walker skips it
-     *  at every connect, so the only run is the explicit `run_scenario` the
-     *  caller makes — a template that runs once, not on every reconnect
-     *  (#352). */
-    readonly enabled?: boolean;
-  } = {},
+  options: ScenarioTemplateLoadOptions = {},
 ): string {
   const template = getTemplateById(templateId);
   if (!template) {
@@ -130,6 +134,13 @@ export function loadScenarioTemplate(
   // a different key, removed by the daemon's one startup prune.
   definition.id = scenarioInstanceId(templateId, connectorId);
   if (options.enabled === false) definition.enabled = false;
+  if (options.maxDurationSeconds !== undefined) {
+    if (options.maxDurationSeconds > 0) {
+      definition.maxDurationSeconds = options.maxDurationSeconds;
+    } else {
+      delete definition.maxDurationSeconds;
+    }
+  }
   // The instance an older build minted for the same template on this
   // connector (`<templateId>-<cpId>-c<n>-<epoch>-<suffix>`) is the one this
   // load replaces, as those builds removed it: left in place it would run

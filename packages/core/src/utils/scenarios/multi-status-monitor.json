@@ -165,7 +165,7 @@
         "node": "trigger-faulted"
       }
     ],
-    "note": "No CSMS action; the connector status triggers are driven by simulator commands."
+    "note": "No CSMS action; the connector status triggers are driven by simulator commands. Ends after 120 s of station time (maxDurationSeconds): the three status triggers wait for the connector and the Charging branch meters up to 20 kWh."
   },
   "assertions": [
     {
@@ -182,5 +182,6 @@
       "description": "StatusNotification carries the expected payload",
       "occurrence": "any"
     }
-  ]
+  ],
+  "maxDurationSeconds": 120
 }

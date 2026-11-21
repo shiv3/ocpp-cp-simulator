@@ -105,6 +105,54 @@ export class RealClock implements SimClock {
   }
 }
 
+/**
+ * The platform clock, sped up (or slowed down) by a constant factor: a timer of
+ * `ms` fires after `ms / scale` real milliseconds and `now()` advances `scale`
+ * times faster than the wall clock, starting from the wall-clock time the clock
+ * was made at. It is what `--time-scale` gives a charge point so a long scenario
+ * runs in a fraction of its time against a real CSMS. Unlike
+ * {@link VirtualClock} it is real time, so real I/O (a socket, a CSMS that
+ * answers) works; the price is that everything outside the charge point stays
+ * on the wall clock (see docs/entities/cli.md).
+ */
+export class ScaledClock implements SimClock {
+  private readonly origin: number;
+  private readonly start: number;
+
+  constructor(
+    readonly scale: number,
+    private readonly base: SimClock = realClock,
+  ) {
+    if (!Number.isFinite(scale) || scale <= 0) {
+      throw new RangeError(
+        `ScaledClock: the scale must be a finite number above 0, got ${String(scale)}`,
+      );
+    }
+    this.origin = base.now();
+    this.start = this.origin;
+  }
+
+  now(): number {
+    return this.start + (this.base.now() - this.origin) * this.scale;
+  }
+
+  setTimeout(fn: () => void, ms: number): TimerHandle {
+    return this.base.setTimeout(fn, ms / this.scale);
+  }
+
+  clearTimeout(handle: TimerHandle): void {
+    this.base.clearTimeout(handle);
+  }
+
+  setInterval(fn: () => void, ms: number): TimerHandle {
+    return this.base.setInterval(fn, ms / this.scale);
+  }
+
+  clearInterval(handle: TimerHandle): void {
+    this.base.clearInterval(handle);
+  }
+}
+
 /** The shared platform clock; the default of everything that takes a clock. */
 export const realClock: SimClock = new RealClock();
 

@@ -257,9 +257,9 @@ describe("withScenarioSchemaVersion", () => {
 
   it("keeps a newer schemaVersion and raises an older one", () => {
     expect(
-      withScenarioSchemaVersion(createValidScenario({ schemaVersion: "1.12" }))
+      withScenarioSchemaVersion(createValidScenario({ schemaVersion: "1.13" }))
         .schemaVersion,
-    ).toBe("1.12");
+    ).toBe("1.13");
     expect(
       withScenarioSchemaVersion(createValidScenario({ schemaVersion: "2.0" }))
         .schemaVersion,
@@ -272,7 +272,7 @@ describe("withScenarioSchemaVersion", () => {
     }
   });
 
-  it("is at the current v1.12 schema version", () => {
+  it("is at the current v1.13 schema version", () => {
     // Each additive schema version bumps the stamp: the v1.2 evSettings
     // fields (#301) once shipped with the stamp left at "1.1", and a browser
     // export could not be told apart from one written before them. v1.3
@@ -281,8 +281,8 @@ describe("withScenarioSchemaVersion", () => {
     // v1.6 useBehavior params and the decision nodes (#654), v1.7 the `$from`
     // root "response" and `$match` switch cases, v1.8 timeout edges, v1.9 the
     // parallel and join nodes, v1.10 loop bounds, v1.11 statusChange
-    // allowInvalidTransition (#618), v1.12 ocppVersions / csmsExpectations.
-    expect(SCENARIO_SCHEMA_VERSION).toBe("1.12");
+    // allowInvalidTransition (#618), v1.12 ocppVersions / csmsExpectations, v1.13 maxDurationSeconds.
+    expect(SCENARIO_SCHEMA_VERSION).toBe("1.13");
   });
 
   it("produces a scenario that still validates against packages/core/schema/scenario.schema.json", () => {

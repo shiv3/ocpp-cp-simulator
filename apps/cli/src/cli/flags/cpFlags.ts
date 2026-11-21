@@ -3,7 +3,8 @@ import {
   labelValueSchema,
 } from "@ocpp-cp-simulator/contracts/labels";
 import { isOcppVersion } from "@ocpp-cp-simulator/core/cp/domain/types/OcppVersion";
-import { OCPP_VERSION_VALUES } from "../flagValues";
+import { OCPP_VERSION_VALUES, requireFlagValue } from "../flagValues";
+import { MAX_TIME_SCALE } from "../../timeScale";
 import type { ParseState } from "./parseState";
 
 /**
@@ -102,6 +103,18 @@ export function parseCpFlag(
         process.exit(1);
       }
       s.labelEntries.push([key, value]);
+      cur.i++;
+      break;
+    }
+    case "--time-scale": {
+      const value = Number(requireFlagValue("--time-scale", next));
+      if (!Number.isFinite(value) || value <= 0 || value > MAX_TIME_SCALE) {
+        process.stderr.write(
+          `Error: --time-scale must be a number above 0 and at most ${MAX_TIME_SCALE}\n`,
+        );
+        process.exit(1);
+      }
+      s.timeScale = value;
       cur.i++;
       break;
     }

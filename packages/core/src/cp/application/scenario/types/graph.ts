@@ -56,7 +56,7 @@ export interface ScenarioTrigger {
  * See `packages/core/schema/scenario.schema.json` (Draft 2020-12) and
  * `docs/concepts/scenario-format.md`.
  */
-export const SCENARIO_SCHEMA_VERSION = "1.12";
+export const SCENARIO_SCHEMA_VERSION = "1.13";
 
 /** Where a recorded scenario came from (schema 1.6, #654 step 2). */
 export interface ScenarioRecordedFrom {
@@ -147,6 +147,14 @@ export interface ScenarioDefinition {
    * needs. Informational: the runtime ignores it.
    */
   csmsExpectations?: CsmsExpectations;
+
+  /**
+   * Upper bound on the run, in seconds of the station's clock (schema 1.13).
+   * When it has passed since the run started, the run ends normally (not
+   * stopped): the flow is cut short, assertions are evaluated, and the
+   * status and report carry `endedBy: "maxDuration"`. Absent or 0: no bound.
+   */
+  maxDurationSeconds?: number;
 
   /**
    * Promotes warning-severity assertion failures to run failures (strict

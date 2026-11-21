@@ -163,7 +163,8 @@ export class RpcEndpoint {
   /** Take one text frame from the peer. */
   receive(raw: string): void {
     if (this.closed !== null) return;
-    const frame = decodeFrame(raw);
+    // Types 2-4 only until the endpoint speaks OCPP 2.1.
+    const frame = decodeFrame(raw, { ocpp21: false });
     switch (frame.kind) {
       case "invalid":
         this.problem(frame);

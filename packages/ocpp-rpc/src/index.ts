@@ -9,12 +9,17 @@ export {
   encodeCall,
   encodeCallError,
   encodeCallResult,
+  encodeCallResultError,
+  encodeSend,
+  type DecodeFrameOptions,
   type RpcCallErrorFrame,
   type RpcCallFrame,
+  type RpcCallResultErrorFrame,
   type RpcCallResultFrame,
   type RpcDecodeError,
   type RpcDecodeErrorReason,
   type RpcFrame,
+  type RpcSendFrame,
 } from "./frames";
 export { CallWaiters } from "./CallWaiters";
 export { platformClock, type RpcClock } from "./platformClock";

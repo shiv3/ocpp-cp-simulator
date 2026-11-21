@@ -7,6 +7,7 @@ sources:
   - packages/ocpp-rpc/src/index.ts
   - packages/ocpp-rpc/src/RpcEndpoint.ts
   - packages/ocpp-rpc/src/frames.ts
+  - packages/ocpp-rpc/src/dialects.ts
   - packages/ocpp-rpc/src/__tests__/RpcEndpoint.test.ts
   - packages/ocpp-rpc/src/__tests__/webSocket.bun.test.ts
   - scripts/check-package-boundaries.ts
@@ -20,7 +21,7 @@ related:
   - ../concepts/network-simulation.md
   - ../concepts/trace-format.md
   - ../concepts/charger-engine.md
-updated: 2026-11-18
+updated: 2026-11-21
 ---
 
 # Reusable OCPP protocol stack
@@ -120,15 +121,19 @@ manifest still exports `"./*"`, so every consumer imports
 | Export                                                                                            | What it does                                                                                                                                                                                 |
 | ------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `OCPPMessageType`, `encodeCall`, `encodeCallResult`, `encodeCallError`                            | Write the simulator's exact bytes: same key order, CALLERROR `details` default to `{}`                                                                                                       |
-| `decodeFrame(raw)`                                                                                | A typed `RpcFrame` or an `RpcDecodeError` (`not-json`, `not-array`, `unknown-message-type`, `invalid-message-id`, `invalid-action`, `invalid-error`, `wrong-length`); never throws           |
+| `encodeCallResultError`, `encodeSend`                                                             | OCPP 2.1 CALLRESULTERROR (`details` default to `{}`) and SEND frames                                                                                                                         |
+| `decodeFrame(raw, { ocpp21? })`                                                                   | A typed `RpcFrame` or an `RpcDecodeError` (`not-json`, `not-array`, `unknown-message-type`, `invalid-message-id`, `invalid-action`, `invalid-error`, `wrong-length`); never throws           |
+| `decodeFrame` and the OCPP 2.1 types                                                              | Decodes the 2.1 SEND and CALLRESULTERROR too, unless `ocpp21: false` (a 1.6 or 2.0.1 reader), which reads them as `unknown-message-type`                                                     |
 | `CallWaiters`, `RpcClock`, `platformClock`                                                        | Pending-call registry with timeouts on a minimal `{ setTimeout, clearTimeout }` clock; defaults to the platform timers                                                                       |
 | `RpcEndpoint`                                                                                     | One side of an OCPP-J link, station or CSMS alike: `handle(action, handler)`, `call(action, payload)`, `receive(raw)`, `close(reason)`; it owns no socket, `send` and `receive` are the link |
-| `OCPP16_RPC_DIALECT`, `OCPP2X_RPC_DIALECT`, `violationKind`                                       | Each version's error codes (`FormationViolation` in 1.6, `FormatViolation` in 2.x, …), kept separate rather than generalized                                                                 |
+| `RpcEndpoint` on OCPP 2.1, `RpcUnsupportedMessageTypeError`                                       | `send(action, payload)`, `sendCallResultError(…)`, `handleSend(action, handler)`, the `onCallResultError` option; on 1.6 and 2.0.1 the two writes throw the error                            |
+| `OCPP16_RPC_DIALECT`, `OCPP2X_RPC_DIALECT`, `OCPP21_RPC_DIALECT`, `violationKind`                 | Each version's error codes (`FormationViolation` in 1.6, `FormatViolation` in 2.x, …), kept separate rather than generalized; only the 2.1 dialect has SEND and CALLRESULTERROR              |
 | `ocppSchemaValidator(version)`                                                                    | Adapts `@ocpp-cp-simulator/ocpp`'s validators to the endpoint's `validate` hook                                                                                                              |
 | `RpcCallError`, `RpcTimeoutError`, `RpcClosedError`, `RpcInvalidResponseError`, `RpcHandlerError` | The typed outcomes of `call`, and the error a handler throws to choose its CALLERROR                                                                                                         |
 
 `RpcEndpoint` takes `send`, `nextMessageId`, `dialect` and optionally `clock`,
-`callTimeoutMs` (default 30 s), `validate` and `onProtocolError`. Its contract:
+`callTimeoutMs` (default 30 s), `validate`, `onProtocolError` and
+`onCallResultError`. Its contract:
 
 - `nextMessageId` must never return an id twice for the endpoint's lifetime,
   timed-out calls included: a reused id lets a late answer to the old call
@@ -150,6 +155,24 @@ manifest still exports `"./*"`, so every consumer imports
   go to `onProtocolError` and are **never answered**. The spec-conformant replies
   (`RpcFrameworkError`, `MessageTypeNotSupported`, `ProtocolError`) are
   [#1060](https://github.com/shiv3/ocpp-cp-simulator/issues/1060).
+- OCPP 2.1 message types ([#1118](https://github.com/shiv3/ocpp-cp-simulator/issues/1118))
+  exist only on `OCPP21_RPC_DIALECT`. On the 1.6 and 2.0.1 dialects, an inbound
+  type 5 or 6 stays an unanswered `unknown-message-type`, and `send` and
+  `sendCallResultError` throw `RpcUnsupportedMessageTypeError` before an id is
+  taken. On 2.1:
+  - `send` writes a SEND under the next `nextMessageId` id, shared with CALLs
+    (Part 4 §4.1.2). Nothing waits for it, so it may go while a CALL is in
+    flight.
+  - An inbound SEND goes to its `handleSend` handler, never to a CALL handler,
+    and is **never answered** (§4.2.4). A missing handler, an invalid payload or
+    a failed handler only reach `onProtocolError` (`unhandled-send`,
+    `invalid-send`, `send-handler-failed`, with the violation or the error as
+    `cause`).
+  - An inbound CALLRESULTERROR goes to `onCallResultError` and settles no
+    pending call: its id is the one of the peer's CALL.
+  - A CALLRESULT that fails `validate` is **not** answered on its own (decided on
+    #1066). `sendCallResultError` sends one on request, with the code the call's
+    `RpcInvalidResponseError` carries.
 - `close(reason)` rejects every pending call with `RpcClosedError`, and the endpoint
   then ignores frames and does not answer handlers that finish later.
 - `ocppSchemaValidator` admits a payload on the lenient check (no `format`
@@ -254,6 +277,7 @@ All are sub-issues of #978.
 | 1 — model package       | [#1052](https://github.com/shiv3/ocpp-cp-simulator/issues/1052) | OCA (CC BY-ND) attribution missing from the CLI and web third-party notices                            |
 | 1 — model package       | #1053                                                           | Publishable `packages/ocpp`: build, curated exports, declared ajv, tarball install check               |
 | 2 — protocol primitives | done here                                                       | `packages/ocpp-rpc`: codec, `CallWaiters`, `RpcEndpoint`, dialects, validator                          |
+| 2 — protocol primitives | [#1118](https://github.com/shiv3/ocpp-cp-simulator/issues/1118) | OCPP 2.1 SEND and CALLRESULTERROR in the codec and the endpoint; core's inline copies removed          |
 | 2 — protocol primitives | #1054                                                           | Generic correlator under `SerialCallQueueV16` / `RequestHistory`, `CallPipelineV201`, `RawFrameSender` |
 | 2 — protocol primitives | #1055                                                           | Frame-observer port replacing log-line parsing in trace                                                |
 | 2 — protocol primitives | #1060                                                           | Spec-conformant replies to malformed frames                                                            |

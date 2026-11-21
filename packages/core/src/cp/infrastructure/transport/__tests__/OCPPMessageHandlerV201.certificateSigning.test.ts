@@ -166,6 +166,7 @@ function setup(version: Version) {
     getInboundCallPolicy: vi.fn(() => undefined),
     hasResponseOverride: vi.fn(() => false),
     consumeResponseOverride: vi.fn(() => null),
+    consumeResponse: vi.fn(() => null),
     clearResponseOverride: vi.fn(),
     adoptRenewedClientCertificate: vi.fn(() => Promise.resolve()),
     useRenewedClientCertificate: vi.fn(() => Promise.resolve()),

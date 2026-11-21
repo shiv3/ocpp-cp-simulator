@@ -64,10 +64,7 @@ function dataMatches(
   );
 }
 
-export function eventMatches(
-  evt: CLIEvent,
-  request: WaitForRequest,
-): boolean {
+export function eventMatches(evt: CLIEvent, request: WaitForRequest): boolean {
   if (request.scenario) {
     if (evt.event !== "scenario_state_changed") return false;
     const d = evt.data;

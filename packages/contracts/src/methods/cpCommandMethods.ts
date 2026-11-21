@@ -255,7 +255,9 @@ export const CP_COMMAND_METHODS = {
           .min(1)
           .max(25_000)
           .optional()
-          .describe("Give up after this many milliseconds (default 20000, at most 25000: an RPC is answered within 30 s, so repeat the wait for longer)"),
+          .describe(
+            "Give up after this many milliseconds (default 20000, at most 25000: an RPC is answered within 30 s, so repeat the wait for longer)",
+          ),
       })
       .refine((v) => (v.event !== undefined) !== (v.scenario !== undefined), {
         message: "wait_for needs exactly one of event or scenario",
@@ -291,7 +293,9 @@ export const CP_COMMAND_METHODS = {
         .min(1)
         .max(25_000)
         .optional()
-        .describe("Give up after this many milliseconds (default 10000, at most 25000)"),
+        .describe(
+          "Give up after this many milliseconds (default 10000, at most 25000)",
+        ),
     }),
     result: z.object({
       quiet: z.boolean(),

@@ -162,6 +162,52 @@ export type InboundCallPolicy =
   | { kind: "ignore" };
 
 /**
+ * What a response override answers an inbound CSMS CALL with. The one-shot
+ * `{ status }` override of issue #110 is `mode: "status"`; the other modes are
+ * for tests that need the station to misbehave on the wire, so none of them is
+ * validated against the action's response schema.
+ *
+ * - `status`: CALLRESULT `{ status }`
+ * - `callError`: CALLERROR with the given code, description and details
+ * - `callResult`: CALLRESULT with `payload` as given (schema-valid or not)
+ * - `raw`: `frame` written to the socket as given instead of an answer
+ * - `callResultError`: an OCPP 2.1 CALLRESULTERROR frame (type 5) carrying
+ *   the CALL's message id, in place of the answer
+ * - `delay`: the normal answer, written `delayMs` later
+ * - `noAnswer`: the CALL is left unanswered
+ *
+ * Every mode but `delay` and `noAnswer` may also carry `delayMs`: the answer
+ * is then written that long after the decision.
+ */
+export type ResponseOverrideSpec =
+  | { mode: "status"; status: string; delayMs?: number }
+  | {
+      mode: "callError";
+      errorCode: string;
+      errorDescription?: string;
+      errorDetails?: Record<string, unknown>;
+      delayMs?: number;
+    }
+  | { mode: "callResult"; payload: unknown; delayMs?: number }
+  | { mode: "raw"; frame: string; delayMs?: number }
+  | {
+      mode: "callResultError";
+      errorCode: string;
+      errorDescription?: string;
+      errorDetails?: Record<string, unknown>;
+      delayMs?: number;
+    }
+  | { mode: "delay"; delayMs: number }
+  | { mode: "noAnswer" };
+
+/** How often a {@link ResponseOverrideSpec} fires: `times` CALLs (default 1),
+ *  or until cleared with `persistent`. */
+export interface ResponseOverrideRepeat {
+  times?: number;
+  persistent?: boolean;
+}
+
+/**
  * Certificate quirks for CSR generation and acceptance (issue #247).
  * Used to emulate OCPP conformance tool behavior and test edge cases.
  * All fields are optional; unset fields revert to default behavior.

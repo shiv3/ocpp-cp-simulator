@@ -893,11 +893,30 @@
           "then": {
             "properties": {
               "data": {
-                "$comment": "Valid `status` values depend on `action` (see RESPONSE_OVERRIDE_STATUSES in ScenarioTypes.ts). Not schema-enforced here — advisory only.",
-                "required": ["action", "status"],
+                "$comment": "Valid `status` values depend on `action` (see RESPONSE_OVERRIDE_STATUSES in ScenarioTypes.ts). Not schema-enforced here — advisory only. `mode` (default `status`) picks the answer; the fields each mode needs (`status`; `errorCode`; `payload`; `frame`; `delayMs`) are checked when the node runs, not here.",
+                "required": ["action"],
                 "properties": {
                   "action": { "type": "string" },
-                  "status": { "type": "string" }
+                  "status": { "type": "string" },
+                  "mode": {
+                    "enum": [
+                      "status",
+                      "callError",
+                      "callResult",
+                      "raw",
+                      "callResultError",
+                      "delay",
+                      "noAnswer"
+                    ]
+                  },
+                  "errorCode": { "type": "string" },
+                  "errorDescription": { "type": "string" },
+                  "errorDetails": { "type": "object" },
+                  "payload": {},
+                  "frame": { "type": "string" },
+                  "delayMs": { "type": "number", "minimum": 0 },
+                  "times": { "type": "integer", "minimum": 1 },
+                  "persistent": { "type": "boolean" }
                 }
               }
             }

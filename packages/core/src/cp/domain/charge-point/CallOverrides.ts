@@ -1,4 +1,9 @@
-import type { CertificateQuirks, InboundCallPolicy } from "./ChargePointTypes";
+import type {
+  CertificateQuirks,
+  InboundCallPolicy,
+  ResponseOverrideRepeat,
+  ResponseOverrideSpec,
+} from "./ChargePointTypes";
 
 /**
  * Small registries that change how the charge point answers CSMS calls:
@@ -7,9 +12,14 @@ import type { CertificateQuirks, InboundCallPolicy } from "./ChargePointTypes";
  * methods as thin delegates.
  */
 export class CallOverrides {
-  /** One-shot canned `{ status }` responses per incoming action,
-   *  armed by a scenario responseOverride node (issue #110). */
-  private readonly _responseOverrides = new Map<string, string>();
+  /** Armed response overrides per incoming action: the one-shot canned
+   *  `{ status }` of a scenario responseOverride node (issue #110), and the
+   *  richer answers a test arms through the control plane. One per action;
+   *  arming again replaces it. */
+  private readonly _responseOverrides = new Map<
+    string,
+    { spec: ResponseOverrideSpec; remaining: number }
+  >();
   /** Sticky per-action inbound call policies (issue #247). When a CSMS-initiated
    *  CALL arrives for an action with a policy, reply with CALLERROR or stay silent
    *  instead of processing normally. Survive reconnects until explicitly cleared. */
@@ -19,14 +29,40 @@ export class CallOverrides {
   private _certificateQuirks: CertificateQuirks = {};
 
   armResponseOverride(action: string, status: string): void {
-    this._responseOverrides.set(action, status);
+    this.armResponse(action, { mode: "status", status });
   }
 
+  /**
+   * Arm `spec` for the next `times` CALLs of `action` (default 1), or until
+   * cleared with `persistent`.
+   */
+  armResponse(
+    action: string,
+    spec: ResponseOverrideSpec,
+    repeat: ResponseOverrideRepeat = {},
+  ): void {
+    const remaining = repeat.persistent
+      ? Number.POSITIVE_INFINITY
+      : Math.max(1, Math.floor(repeat.times ?? 1));
+    this._responseOverrides.set(action, { spec, remaining });
+  }
+
+  /** The armed override for `action`, one use spent; null when none. */
+  consumeResponse(action: string): ResponseOverrideSpec | null {
+    const armed = this._responseOverrides.get(action);
+    if (armed === undefined) return null;
+    armed.remaining -= 1;
+    if (armed.remaining <= 0) this._responseOverrides.delete(action);
+    return armed.spec;
+  }
+
+  /** Returns and clears the armed status of a `status` override; null for
+   *  none. Another mode is not consumed: its answer is not a status. */
   consumeResponseOverride(action: string): string | null {
-    const status = this._responseOverrides.get(action);
-    if (status === undefined) return null;
-    this._responseOverrides.delete(action);
-    return status;
+    const armed = this._responseOverrides.get(action);
+    if (armed?.spec.mode !== "status") return null;
+    this.consumeResponse(action);
+    return armed.spec.status;
   }
 
   hasResponseOverride(action: string): boolean {
@@ -38,8 +74,10 @@ export class CallOverrides {
   }
 
   /** Drop every armed response override (connection closed, issue #110). */
-  clearResponseOverrides(): void {
+  clearResponseOverrides(): number {
+    const cleared = this._responseOverrides.size;
     this._responseOverrides.clear();
+    return cleared;
   }
 
   setInboundCallPolicy(action: string, policy: InboundCallPolicy): void {

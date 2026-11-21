@@ -166,7 +166,7 @@ shape depends on `type`).
 | `configSet`          | `key`, `value`                                                               |                                                                                                                                                                                                                                         |
 | `dataTransfer`       | `vendorId`                                                                   | `messageId`, `data`                                                                                                                                                                                                                     |
 | `csmsCallTrigger`    | `action`                                                                     | `timeout`, `payload`, `behavior`, `onBusy`. See [payload condition](#csmscalltrigger-payload-condition) and [replace](#csmscalltrigger-replace-callresponse-from-and-usebehavior-schema-15).                                            |
-| `responseOverride`   | `action`, `status`                                                           | See [note](#responseoverride-notes) below.                                                                                                                                                                                              |
+| `responseOverride`   | `action`, and `status` (the default `mode`)                                  | `mode`, `errorCode`, `errorDescription`, `errorDetails`, `payload`, `frame`, `delayMs`, `times`, `persistent`. See [note](#responseoverride-notes) below.                                                                               |
 | `inboundPolicy`      | `action`, `policy` (`"answer"` \| `"callerror"` \| `"ignore"`)               | `errorCode`, `errorDescription`. See [note](#inboundpolicy-and-certificate-quirks-notes) below.                                                                                                                                         |
 | `certQuirks`         | `mode` (`"set"` \| `"clear"`)                                                | `preset`, `csrKeyAlgorithm`, `csrPemLineEndings`, `requiredCertificateSignatureAlgorithms`, `hiddenConfigurationKeys`. See [note](#inboundpolicy-and-certificate-quirks-notes) below.                                                   |
 | `connectionTrigger`  | `event` (`"connected"` \| `"disconnected"`)                                  | `timeout`. See [note](#connectiontrigger-notes) below.                                                                                                                                                                                  |
@@ -237,6 +237,13 @@ action → status constraint — encoding the full per-action status matrix
 into JSON Schema would make the schema harder to read for little benefit
 over the existing editor-side check. This is called out as a `$comment` in
 the schema itself.
+
+A node with no `mode` is the original one-shot `{ status }` override. `mode` (#1095) is one of `status`,
+`callError`, `callResult`, `raw`, `callResultError`, `delay` and `noAnswer`, with the fields the mode needs;
+`times` / `persistent` repeat it. The modes are described under
+[response override modes](call-precedence.md#response-override-modes). The schema only requires `action`: a mode missing its
+field fails when the node runs. The k6 export knows only the `{ status }` form. The console form of the node edits `status`
+only; the other fields are written in the scenario JSON.
 
 ### `inboundPolicy` and certificate quirks notes
 

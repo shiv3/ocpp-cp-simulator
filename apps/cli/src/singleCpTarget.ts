@@ -1,3 +1,4 @@
+import type { ResponseOverrideRequest } from "@ocpp-cp-simulator/core/cp/domain/charge-point/responseOverrideRequest";
 import type { StartTransactionOutcome } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
 import * as fs from "fs";
 import type {
@@ -9,6 +10,8 @@ import type {
   OcppCallRequest,
   RawFrameOutcome,
   RawFrameRequest,
+  CallResultErrorOutcome,
+  CallResultErrorRequest,
 } from "@ocpp-cp-simulator/core/cp/domain/types/OcppCall";
 import type {
   Get15118EVCertificateRequest,
@@ -124,6 +127,13 @@ export interface SingleCpCommandOps {
   ): Promise<DataTransferResult>;
   sendOcppCall(request: OcppCallRequest): Promise<OcppCallOutcome>;
   sendRawFrame(request: RawFrameRequest): Promise<RawFrameOutcome>;
+  setResponseOverride(
+    request: ResponseOverrideRequest,
+  ): Promise<{ action: string; mode: string }>;
+  clearResponseOverrides(action?: string): Promise<number>;
+  sendCallResultError(
+    request: CallResultErrorRequest,
+  ): Promise<CallResultErrorOutcome>;
   get15118EVCertificate(
     request: Get15118EVCertificateRequest,
   ): Promise<Get15118EVCertificateResult>;
@@ -327,6 +337,9 @@ function legacyCommandOps(service: CLIChargePointService): SingleCpCommandOps {
       service.sendDataTransfer(vendorId, messageId, data),
     sendOcppCall: (request) => service.sendOcppCall(request),
     sendRawFrame: (request) => service.sendRawFrame(request),
+    setResponseOverride: (request) => service.setResponseOverride(request),
+    clearResponseOverrides: (action) => service.clearResponseOverrides(action),
+    sendCallResultError: (request) => service.sendCallResultError(request),
     get15118EVCertificate: (request) => service.get15118EVCertificate(request),
     getAuthorizationCache: async () => service.getAuthorizationCache(),
     seedAuthorizationCache: async (entries) =>
@@ -488,6 +501,12 @@ function facadeCommandOps(target: FacadeSingleCpTarget): SingleCpCommandOps {
       service.sendDataTransfer(cpId, vendorId, messageId, data),
     sendOcppCall: (request) => service.sendOcppCall(cpId, request),
     sendRawFrame: (request) => service.sendRawFrame(cpId, request),
+    setResponseOverride: (request) =>
+      service.setResponseOverride(cpId, request),
+    clearResponseOverrides: (action) =>
+      service.clearResponseOverrides(cpId, action),
+    sendCallResultError: (request) =>
+      service.sendCallResultError(cpId, request),
     get15118EVCertificate: (request) =>
       service.get15118EVCertificate(cpId, request),
     getAuthorizationCache: () => service.getAuthorizationCache(cpId),

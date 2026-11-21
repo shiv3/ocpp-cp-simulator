@@ -322,6 +322,9 @@ describe("MCP curated tool schema parity (general, #299)", () => {
     { tool: "authorize", method: "authorize" },
     { tool: "send_ocpp_call", method: "send_ocpp_call" },
     { tool: "send_raw_frame", method: "send_raw_frame" },
+    { tool: "set_response_override", method: "set_response_override" },
+    { tool: "clear_response_overrides", method: "clear_response_overrides" },
+    { tool: "send_call_result_error", method: "send_call_result_error" },
     { tool: "auth_cache_get", method: "get_auth_cache" },
     { tool: "auth_cache_seed", method: "seed_auth_cache" },
     {

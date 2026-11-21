@@ -316,6 +316,22 @@ export async function handleJsonCommand(
       // #393: same schema as the control plane's.
       return ops.sendRawFrame(methodParams("send_raw_frame", params));
 
+    case "set_response_override":
+      // #1090: same schema as the control plane's.
+      return ops.setResponseOverride(
+        methodParams("set_response_override", params),
+      );
+
+    case "clear_response_overrides": {
+      const { action } = methodParams("clear_response_overrides", params);
+      return { cleared: await ops.clearResponseOverrides(action) };
+    }
+
+    case "send_call_result_error":
+      return ops.sendCallResultError(
+        methodParams("send_call_result_error", params),
+      );
+
     case "get_15118_ev_certificate":
       // #537: the station relays the EXI request as the EV would; the
       // CSMS's answers are the result line. Validated against the daemon's

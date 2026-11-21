@@ -1,3 +1,4 @@
+import type { ResponseOverrideRequest } from "@ocpp-cp-simulator/core/cp/domain/charge-point/responseOverrideRequest";
 import type { CellularPolicySet } from "@ocpp-cp-simulator/core/cp/domain/modem/cellularLink";
 import type { ModemCommand as ModemCommandInput } from "@ocpp-cp-simulator/contracts/modem";
 import type { StartTransactionOutcome } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
@@ -18,6 +19,8 @@ import type {
   OcppCallRequest,
   RawFrameOutcome,
   RawFrameRequest,
+  CallResultErrorOutcome,
+  CallResultErrorRequest,
 } from "@ocpp-cp-simulator/core/cp/domain/types/OcppCall";
 import type {
   Get15118EVCertificateRequest,
@@ -376,6 +379,24 @@ export class RegistryChargePointService implements ChargePointService {
     request: RawFrameRequest,
   ): Promise<RawFrameOutcome> {
     return this.requireService(id).sendRawFrame(request);
+  }
+
+  async setResponseOverride(
+    id: string,
+    request: ResponseOverrideRequest,
+  ): Promise<{ action: string; mode: string }> {
+    return this.requireService(id).setResponseOverride(request);
+  }
+
+  async clearResponseOverrides(id: string, action?: string): Promise<number> {
+    return this.requireService(id).clearResponseOverrides(action);
+  }
+
+  async sendCallResultError(
+    id: string,
+    request: CallResultErrorRequest,
+  ): Promise<CallResultErrorOutcome> {
+    return this.requireService(id).sendCallResultError(request);
   }
 
   async get15118EVCertificate(

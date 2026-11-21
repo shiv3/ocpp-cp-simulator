@@ -2,6 +2,7 @@ import type { OCPPStatus } from "../../../domain/types/OcppTypes";
 import type { EVSettings } from "../../../domain/connector/EVSettings";
 import type { TransactionStopTriggerReason } from "../../../domain/connector/Transaction";
 import type { StartTransactionOutcome } from "../../../domain/charge-point/ChargePoint";
+import type { ResponseOverrideRequest } from "../../../domain/charge-point/responseOverrideRequest";
 import type {
   OcppCallOutcome,
   OcppCallRequest,
@@ -269,6 +270,9 @@ export interface ScenarioExecutorCallbacks {
   /** Issue #110: arm a one-shot `{ status }` response override for the
    *  next incoming CALL of the given action. */
   onArmResponseOverride?: (action: string, status: string) => void;
+  /** #1090: arm a response override of any mode (a CALLERROR, a raw payload
+   *  or frame, a CALLRESULTERROR, a delay, silence), once or repeatedly. */
+  onSetResponseOverride?: (request: ResponseOverrideRequest) => void;
   /** Issue #110: clear an armed response override. Called when a scenario
    *  run ends (both normal completion and stop()) to clean up any overrides
    *  armed during the run. */

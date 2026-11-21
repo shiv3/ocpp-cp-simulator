@@ -167,13 +167,22 @@ export class InboundCallsV16 {
         this._chargePoint.notifyIncomingCallCompleted(completion),
       writeResult: (payload, gen, onSettled) =>
         this._webSocket.sendResult(messageId, payload, gen, onSettled),
-      writeError: (errorCode, errorDescription, gen, onSettled) =>
+      writeError: (errorCode, errorDescription, gen, onSettled, details) =>
         this._webSocket.sendError(
           messageId,
-          { errorCode: errorCode as OCPPErrorCode, errorDescription },
+          {
+            errorCode: errorCode as OCPPErrorCode,
+            errorDescription,
+            ...(details === undefined ? {} : { errorDetails: details }),
+          },
           gen,
           onSettled,
         ),
+      writeRaw: (frame, gen, onSettled) =>
+        this._webSocket.sendRaw(frame, gen, onSettled),
+      schedule: (delayMs, callback) => {
+        this._chargePoint.clock.setTimeout(callback, delayMs);
+      },
       effects: this._responseEffectQueue,
       warn: (message) => this._logger.warn(message, LogType.OCPP),
     });

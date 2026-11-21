@@ -1,3 +1,4 @@
+import type { ResponseOverrideRequest } from "@ocpp-cp-simulator/core/cp/domain/charge-point/responseOverrideRequest";
 import type {
   ConfigurationKeyList,
   ConfigurationSetStatus,
@@ -15,6 +16,8 @@ import type {
   OcppCallRequest,
   RawFrameOutcome,
   RawFrameRequest,
+  CallResultErrorOutcome,
+  CallResultErrorRequest,
 } from "@ocpp-cp-simulator/core/cp/domain/types/OcppCall";
 import type {
   Get15118EVCertificateRequest,
@@ -294,6 +297,22 @@ export interface ChargePointService {
   /** Expert raw frame (#393): one text frame as given, valid OCPP-J or
    *  not. See `ChargePoint.sendRawFrame`. */
   sendRawFrame(id: string, request: RawFrameRequest): Promise<RawFrameOutcome>;
+  /** Arm what the station answers a CSMS CALL of an action with (#1090): a
+   *  CALLERROR, a raw payload or frame, a CALLRESULTERROR, a delay or
+   *  silence, for the next CALL(s) of it. See `ChargePoint.setResponseOverride`. */
+  setResponseOverride(
+    id: string,
+    request: ResponseOverrideRequest,
+  ): Promise<{ action: string; mode: string }>;
+  /** Drop the armed response overrides, or only the one for `action`;
+   *  resolves with how many were dropped (#1090). */
+  clearResponseOverrides(id: string, action?: string): Promise<number>;
+  /** OCPP 2.1 CALLRESULTERROR (message type 5) for a CALLRESULT the station
+   *  received (#1090). See `ChargePoint.sendCallResultError`. */
+  sendCallResultError(
+    id: string,
+    request: CallResultErrorRequest,
+  ): Promise<CallResultErrorOutcome>;
   /** 2.0.1 / 2.1 Get15118EVCertificate relay (#537): sends the EXI request
    *  as the EV would and resolves with the CSMS's answers. See
    *  `ChargePoint.get15118EVCertificate`. */

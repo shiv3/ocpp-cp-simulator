@@ -110,6 +110,7 @@ function setup(entries: Record<string, V201InboundHandler>) {
     getInboundCallPolicy: vi.fn(() => undefined),
     hasResponseOverride: vi.fn(() => false),
     consumeResponseOverride: vi.fn(() => null),
+    consumeResponse: vi.fn(() => null),
     clearResponseOverride: vi.fn(),
     certificateStore: { recordPendingCsr: vi.fn(() => true) },
   } as unknown as ChargePoint;

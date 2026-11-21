@@ -81,4 +81,23 @@ export type RawFrameOutcome = {
   readonly closed: string | null;
 };
 
+/**
+ * An OCPP 2.1 CALLRESULTERROR (RPC framework message type 5, Part 2 §3
+ * FR.06): the station's answer to a CALLRESULT it cannot accept, e.g. one that
+ * fails the response schema. `messageId` is the id of the CALL the CSMS
+ * answered. `errorCode` defaults to `FormatViolation`.
+ */
+export type CallResultErrorRequest = {
+  readonly messageId: string;
+  readonly errorCode?: string;
+  readonly errorDescription?: string;
+  readonly errorDetails?: Record<string, unknown>;
+};
+
+/** The frame a CALLRESULTERROR was sent as. */
+export type CallResultErrorOutcome = {
+  readonly sentFrame: string;
+  readonly messageId: string;
+};
+
 export const RAW_FRAME_DEFAULT_WAIT_MS = 5_000;

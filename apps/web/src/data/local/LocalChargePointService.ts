@@ -1,3 +1,4 @@
+import type { ResponseOverrideRequest } from "@ocpp-cp-simulator/core/cp/domain/charge-point/responseOverrideRequest";
 import {
   type ConfigurationKeyList,
   type ConfigurationSetStatus,
@@ -28,6 +29,8 @@ import type {
   OcppCallRequest,
   RawFrameOutcome,
   RawFrameRequest,
+  CallResultErrorOutcome,
+  CallResultErrorRequest,
 } from "@ocpp-cp-simulator/core/cp/domain/types/OcppCall";
 import type {
   Get15118EVCertificateRequest,
@@ -143,6 +146,9 @@ import {
   sendDataTransfer,
   sendOcppCall,
   sendRawFrame,
+  setResponseOverride,
+  clearResponseOverrides,
+  sendCallResultError,
   get15118EVCertificate,
   getAuthorizationCache,
   seedAuthorizationCache,
@@ -555,6 +561,24 @@ export class LocalChargePointService implements ChargePointService {
     request: RawFrameRequest,
   ): Promise<RawFrameOutcome> {
     return sendRawFrame(this.localHost, id, request);
+  }
+
+  async setResponseOverride(
+    id: string,
+    request: ResponseOverrideRequest,
+  ): Promise<{ action: string; mode: string }> {
+    return setResponseOverride(this.localHost, id, request);
+  }
+
+  async clearResponseOverrides(id: string, action?: string): Promise<number> {
+    return clearResponseOverrides(this.localHost, id, action);
+  }
+
+  async sendCallResultError(
+    id: string,
+    request: CallResultErrorRequest,
+  ): Promise<CallResultErrorOutcome> {
+    return sendCallResultError(this.localHost, id, request);
   }
 
   async get15118EVCertificate(

@@ -15,13 +15,19 @@ import type {
   UploadLogStatus,
 } from "../types/FirmwareLogStatus";
 import type {
+  CallResultErrorOutcome,
+  CallResultErrorRequest,
   OcppCallOutcome,
   OcppCallRequest,
   RawFrameOutcome,
   RawFrameRequest,
 } from "../types/OcppCall";
 import type { TransactionUpdateOptions } from "../connector/Transaction";
-import { isSoapVersion } from "../types/OcppVersion";
+import {
+  isSoapVersion,
+  OCPP_2_1,
+  parseOcppVersion,
+} from "../types/OcppVersion";
 import type { ChargePoint } from "./ChargePoint";
 import type { ChargePointTransport } from "./ChargePointDeps";
 
@@ -156,6 +162,39 @@ export class StationMessaging {
       );
     }
     return rawFrames.send(request);
+  }
+
+  /**
+   * Answer a CALLRESULT the station received with a CALLRESULTERROR (OCPP 2.1
+   * Part 2 FR.06, RPC framework message type 5): `[5, messageId, errorCode,
+   * errorDescription, errorDetails]`. OCPP-J 2.1 only: no other version has
+   * the message type. Written as a raw frame, so the CSMS's reaction (if any)
+   * is not awaited.
+   */
+  async sendCallResultError(
+    request: CallResultErrorRequest,
+  ): Promise<CallResultErrorOutcome> {
+    if (parseOcppVersion(this.host.ocppVersion()) !== OCPP_2_1) {
+      throw new OcppCallRejectedError(
+        "unsupported_action",
+        `CALLRESULTERROR is an OCPP 2.1 message type; this station speaks ${this.host.ocppVersion()}`,
+      );
+    }
+    if (request.messageId === "") {
+      throw new OcppCallRejectedError(
+        "invalid_payload",
+        "A CALLRESULTERROR needs the id of the CALL that was answered",
+      );
+    }
+    const frame = JSON.stringify([
+      5,
+      request.messageId,
+      request.errorCode ?? "FormatViolation",
+      request.errorDescription ?? "",
+      request.errorDetails ?? {},
+    ]);
+    await this.sendRawFrame({ frame, waitMs: 0 });
+    return { sentFrame: frame, messageId: request.messageId };
   }
 
   /**

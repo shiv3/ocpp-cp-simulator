@@ -1,3 +1,4 @@
+import type { ResponseOverrideRequest } from "@ocpp-cp-simulator/core/cp/domain/charge-point/responseOverrideRequest";
 import type { ModemWire } from "@ocpp-cp-simulator/contracts/events";
 import type { ModemCommand as ModemCommandInput } from "@ocpp-cp-simulator/contracts/modem";
 import type {
@@ -29,6 +30,8 @@ import type {
   OcppCallRequest,
   RawFrameOutcome,
   RawFrameRequest,
+  CallResultErrorOutcome,
+  CallResultErrorRequest,
 } from "@ocpp-cp-simulator/core/cp/domain/types/OcppCall";
 import type {
   Get15118EVCertificateRequest,
@@ -373,6 +376,36 @@ export class RemoteChargePointService implements ChargePointService {
       "send_raw_frame",
       request,
     )) as RawFrameOutcome;
+  }
+
+  async setResponseOverride(
+    id: string,
+    request: ResponseOverrideRequest,
+  ): Promise<{ action: string; mode: string }> {
+    return (await this.runCpRpc(id, "set_response_override", {
+      ...request,
+      mode: request.mode ?? "status",
+    })) as { action: string; mode: string };
+  }
+
+  async clearResponseOverrides(id: string, action?: string): Promise<number> {
+    const { cleared } = (await this.runCpRpc(
+      id,
+      "clear_response_overrides",
+      action === undefined ? {} : { action },
+    )) as { cleared: number };
+    return cleared;
+  }
+
+  async sendCallResultError(
+    id: string,
+    request: CallResultErrorRequest,
+  ): Promise<CallResultErrorOutcome> {
+    return (await this.runCpRpc(
+      id,
+      "send_call_result_error",
+      request,
+    )) as CallResultErrorOutcome;
   }
 
   async get15118EVCertificate(

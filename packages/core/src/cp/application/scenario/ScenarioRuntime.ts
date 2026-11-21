@@ -347,6 +347,9 @@ export const createScenarioExecutorCallbacks = (
     onArmResponseOverride: (action, status) => {
       chargePoint.armResponseOverride(action, status);
     },
+    onSetResponseOverride: (request) => {
+      chargePoint.setResponseOverride(request);
+    },
     onClearResponseOverride: (action) => {
       chargePoint.clearResponseOverride(action);
     },

@@ -75,6 +75,7 @@ function setup() {
     notifyOutgoingCall: vi.fn(),
     getInboundCallPolicy: vi.fn(() => undefined),
     consumeResponseOverride: vi.fn(() => null),
+    consumeResponse: vi.fn(() => null),
   } as unknown as ChargePoint;
   const handler = new OCPPMessageHandler(
     chargePoint,

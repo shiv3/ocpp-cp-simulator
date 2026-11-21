@@ -43,6 +43,8 @@ export interface AnswerOptions {
   readonly effect?: (outcome: Settlement["outcome"]) => void;
   /** Told once if `effect` will not run. */
   readonly onEffectDropped?: EffectDroppedHandler;
+  /** The `errorDetails` of a CALLERROR (default `{}`); ignored by a CALLRESULT. */
+  readonly errorDetails?: Record<string, unknown>;
 }
 
 /** A default behavior's effect carries the hook that ends its scope when dropped. */
@@ -72,7 +74,18 @@ export interface CallExchangeDeps {
     errorDescription: string,
     generation: GenerationToken,
     onSettled: ((settlement: Settlement) => void) | undefined,
+    errorDetails?: Record<string, unknown>,
   ): void;
+  /** Hand an arbitrary text frame to the transport, as given. Absent where
+   *  the transport cannot write one. */
+  writeRaw?(
+    frame: string,
+    generation: GenerationToken,
+    onSettled: ((settlement: Settlement) => void) | undefined,
+  ): void;
+  /** Run `callback` after `delayMs` on the station's clock. Absent: the
+   *  global timer. */
+  schedule?(delayMs: number, callback: () => void): void;
   readonly effects: ResponseEffectQueue;
   warn(message: string): void;
 }
@@ -102,6 +115,7 @@ export interface CallExchangeDeps {
 export class CallExchange {
   private _state: ExchangeState = "open";
   private readonly closedListeners: Array<() => void> = [];
+  private _delayMs = 0;
   private resolveSettled!: (settlement: ExchangeSettlement) => void;
   /**
    * How the exchange ended: the outcome of an observed answer (`respond`,
@@ -159,6 +173,40 @@ export class CallExchange {
     return this.answerError(errorCode, errorDescription, options, true);
   }
 
+  /**
+   * Hold the write of the answer back by `delayMs` (a response override of
+   * mode `delay`). The answer is still decided, announced and counted as the
+   * one answer at once; only the frame is late.
+   */
+  delayAnswer(delayMs: number): void {
+    this._delayMs = Math.max(0, delayMs);
+  }
+
+  /**
+   * Answer with `frame` written as given, valid OCPP-J or not (a response
+   * override of mode `raw` or `callResultError`). Announced as a CALLERROR
+   * when the frame is a type 4 array, as a CALLRESULT otherwise. Not
+   * observed.
+   */
+  replyRaw(
+    frame: string,
+    completion?: { outcome: "CallResult" },
+    options: AnswerOptions = {},
+  ): void {
+    const writeRaw = this.deps.writeRaw;
+    if (!writeRaw) {
+      throw new CallExchangeError(
+        `${this.deps.action}: this transport cannot write a raw answer`,
+      );
+    }
+    void this.answer(
+      completion ?? completionOfFrame(frame),
+      options,
+      false,
+      (onSettled) => writeRaw(frame, this.deps.generation, onSettled),
+    );
+  }
+
   /** Answer with a CALLRESULT without observing it (see the class comment). */
   reply(payload: unknown, options: AnswerOptions = {}): void {
     void this.answerResult(payload, options, false);
@@ -203,6 +251,7 @@ export class CallExchange {
           errorDescription,
           this.deps.generation,
           onSettled,
+          options.errorDetails,
         ),
     );
   }
@@ -310,6 +359,26 @@ export class CallExchange {
             }
           }
         : undefined;
+    if (this._delayMs > 0) {
+      // Decided and announced now, written later. The transport checks the
+      // connection generation again when the frame is written, and settles a
+      // stale one as a closed socket.
+      const hold = this._delayMs;
+      const later = (): void => {
+        try {
+          write(onSettled);
+        } catch (error) {
+          this.deps.warn(
+            `${this.deps.action} delayed answer not written: ${String(error)}`,
+          );
+          effectSettled?.({ outcome: "write_failed" } as Settlement);
+          onSettled?.({ outcome: "write_failed" } as Settlement);
+        }
+      };
+      if (this.deps.schedule) this.deps.schedule(hold, later);
+      else setTimeout(later, hold);
+      return this.settled;
+    }
     try {
       write(onSettled);
     } catch (error) {
@@ -323,4 +392,20 @@ export class CallExchange {
     }
     return this.settled;
   }
+}
+
+/** What a raw answer counts as in `incomingCallCompleted`: a CALLERROR when it
+ *  is a type 4 array, a CALLRESULT otherwise. */
+function completionOfFrame(
+  frame: string,
+): { outcome: "CallResult" } | { outcome: "CallError"; errorCode: string } {
+  try {
+    const parsed: unknown = JSON.parse(frame);
+    if (Array.isArray(parsed) && parsed[0] === 4) {
+      return { outcome: "CallError", errorCode: String(parsed[2] ?? "") };
+    }
+  } catch {
+    // Not JSON: still the answer the test chose.
+  }
+  return { outcome: "CallResult" };
 }

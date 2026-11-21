@@ -192,6 +192,96 @@ export const CP_COMMAND_METHODS = {
     }),
     result: rawFrameOutcomeSchema,
   },
+  // #1090: control what the station answers a CSMS CALL with. A test arms an
+  // override for an action; the next `times` CALLs of it (default 1), or every
+  // one with `persistent`, get that answer instead of the engine's. Armed
+  // overrides are answered before the station's own handlers, so any of them
+  // can own a malformed CALL. `mode` picks the answer; the fields each mode
+  // needs are checked when it is armed (invalid_params).
+  set_response_override: {
+    params: z.object({
+      action: NON_EMPTY_STR.describe(
+        "CSMS-initiated action, in the 1.6 or the 2.x spelling, e.g. Reset or RequestStartTransaction",
+      ),
+      mode: z
+        .enum([
+          "status",
+          "callError",
+          "callResult",
+          "raw",
+          "callResultError",
+          "delay",
+          "noAnswer",
+        ])
+        .describe(
+          "status: CALLRESULT { status }; callError: CALLERROR errorCode/errorDescription/errorDetails; callResult: CALLRESULT with `payload` as given (schema-valid or not); raw: `frame` written as given; callResultError: an OCPP 2.1 CALLRESULTERROR frame (type 5) with the CALL's id; delay: the normal answer, `delayMs` late; noAnswer: never answer",
+        ),
+      status: NON_EMPTY_STR.optional().describe("Mode status"),
+      errorCode: NON_EMPTY_STR.optional().describe(
+        "Modes callError and callResultError; any string, e.g. NotSupported, InternalError, FormatViolation",
+      ),
+      errorDescription: STR_64K.optional().describe(
+        "Modes callError and callResultError (default empty)",
+      ),
+      errorDetails: OBJ()
+        .optional()
+        .describe("Modes callError and callResultError (default {})"),
+      payload: z
+        .unknown()
+        .optional()
+        .describe(
+          "Mode callResult: the CALLRESULT payload, any JSON value, written as given",
+        ),
+      frame: STR_64K.optional().describe(
+        "Mode raw: the text frame written instead of an answer (use the CALL's message id yourself)",
+      ),
+      delayMs: z
+        .number()
+        .int()
+        .min(0)
+        .max(600_000)
+        .optional()
+        .describe(
+          "Mode delay: how late the normal answer is written; any other mode but noAnswer: how long the answer is held back",
+        ),
+      times: z
+        .number()
+        .int()
+        .min(1)
+        .optional()
+        .describe("How many CALLs of the action get this answer (default 1)"),
+      persistent: z
+        .boolean()
+        .optional()
+        .describe(
+          "Answer every CALL of the action until clear_response_overrides (or a reset); overrides times",
+        ),
+    }),
+    result: z.object({ action: NON_EMPTY_STR, mode: NON_EMPTY_STR }),
+  },
+  clear_response_overrides: {
+    params: z.object({
+      action: NON_EMPTY_STR.optional().describe(
+        "Only the override armed for this action; default all of them",
+      ),
+    }),
+    result: z.object({ cleared: z.number().int() }),
+  },
+  // #1090: OCPP 2.1 CALLRESULTERROR (RPC message type 5): the station's
+  // answer to a CALLRESULT it cannot accept. OCPP 2.1 stations only.
+  send_call_result_error: {
+    params: z.object({
+      messageId: NON_EMPTY_STR.describe(
+        "Id of the CALL the CSMS answered (a send_ocpp_call result carries it)",
+      ),
+      errorCode: NON_EMPTY_STR.optional().describe(
+        "Default FormatViolation; any string is sent",
+      ),
+      errorDescription: STR_64K.optional().describe("Default empty"),
+      errorDetails: OBJ().optional().describe("Default {}"),
+    }),
+    result: z.object({ sentFrame: z.string(), messageId: z.string() }),
+  },
   // #452: the charge point's Authorization Cache, a test seam. Seed and
   // clear act whatever AuthorizationCacheEnabled / AuthCacheCtrlr.Enabled
   // says (get reports the switch); nothing goes on the wire.

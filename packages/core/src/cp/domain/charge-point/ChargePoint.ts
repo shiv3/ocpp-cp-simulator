@@ -70,11 +70,18 @@ import type { ResolvedNetworkSimConfig } from "../transport/networkSim";
 import type { OcppSecurityProfile } from "@ocpp-cp-simulator/contracts/securityProfile";
 import type { OcppTlsOptions } from "../transport/ConnectionSecurity";
 import { Outbox } from "../transport/Outbox";
+import { csmsActionAliases } from "../types/csmsActionNames";
+import {
+  buildResponseOverride,
+  type ResponseOverrideRequest,
+} from "./responseOverrideRequest";
 import {
   type OcppCallOutcome,
   type OcppCallRequest,
   type RawFrameOutcome,
   type RawFrameRequest,
+  type CallResultErrorRequest,
+  type CallResultErrorOutcome,
 } from "../types/OcppCall";
 import {
   type Get15118EVCertificateRequest,
@@ -155,6 +162,8 @@ import {
   type PowerLossOptions,
   type PowerRestoreResult,
   type InboundCallPolicy,
+  type ResponseOverrideSpec,
+  type ResponseOverrideRepeat,
   type CertificateQuirks,
   type ChargePointSimulationOptions,
   type ChargePointResetType,
@@ -178,6 +187,8 @@ export type {
   PowerLossOptions,
   PowerRestoreResult,
   InboundCallPolicy,
+  ResponseOverrideSpec,
+  ResponseOverrideRepeat,
   CertificateQuirks,
   ChargePointSimulationOptions,
   ChargePointResetType,
@@ -1157,6 +1168,51 @@ export class ChargePoint {
     this._parts.callOverrides.armResponseOverride(action, status);
   }
 
+  /**
+   * Arm a response override of any mode for the next `times` CALLs of
+   * `action` (default 1), or until cleared with `persistent`. Replaces an
+   * override armed for the same action.
+   */
+  armResponse(
+    action: string,
+    spec: ResponseOverrideSpec,
+    repeat?: ResponseOverrideRepeat,
+  ): void {
+    this._parts.callOverrides.armResponse(action, spec, repeat);
+  }
+
+  /** Returns the armed override of any mode for `action`, spending one use. */
+  consumeResponse(action: string): ResponseOverrideSpec | null {
+    return this._parts.callOverrides.consumeResponse(action);
+  }
+
+  /**
+   * Arm a response override from its flat request form (`set_response_override`,
+   * the `responseOverride` scenario node). Refuses a mode without the field it
+   * needs with an `invalid_payload` {@link OcppCallRejectedError}.
+   */
+  setResponseOverride(request: ResponseOverrideRequest): ResponseOverrideSpec {
+    const { spec, repeat } = buildResponseOverride(request);
+    this.armResponse(request.action, spec, repeat);
+    return spec;
+  }
+
+  /** Drop every armed response override, or only the one armed for `action`
+   *  (under either spelling on 2.x). Returns how many were dropped. */
+  clearResponseOverrides(action?: string): number {
+    if (action === undefined) {
+      return this._parts.callOverrides.clearResponseOverrides();
+    }
+    let cleared = 0;
+    for (const name of csmsActionAliases(action)) {
+      if (this.hasResponseOverride(name)) {
+        this.clearResponseOverride(name);
+        cleared += 1;
+      }
+    }
+    return cleared;
+  }
+
   /** Returns and clears the armed status for `action`, or null. */
   consumeResponseOverride(action: string): string | null {
     return this._parts.callOverrides.consumeResponseOverride(action);
@@ -1251,6 +1307,16 @@ export class ChargePoint {
    */
   async sendOcppCall(request: OcppCallRequest): Promise<OcppCallOutcome> {
     return this._parts.messaging.sendOcppCall(request);
+  }
+
+  /**
+   * Answer a CALLRESULT with a CALLRESULTERROR (OCPP 2.1, message type 5).
+   * @see StationMessaging.sendCallResultError
+   */
+  sendCallResultError(
+    request: CallResultErrorRequest,
+  ): Promise<CallResultErrorOutcome> {
+    return this._parts.messaging.sendCallResultError(request);
   }
 
   /**

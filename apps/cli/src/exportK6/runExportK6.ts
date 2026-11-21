@@ -203,6 +203,17 @@ function validateExportability(scenario: ScenarioJson): string[] {
         `delay "until" and "jitterSeconds" (schema 1.6) are not supported by export-k6 (node ${node.id}): the k6 runtime waits for delaySeconds only`,
       );
     }
+    if (
+      node.type === "responseOverride" &&
+      ((data.mode !== undefined && data.mode !== "status") ||
+        data.times !== undefined ||
+        data.persistent !== undefined ||
+        data.delayMs !== undefined)
+    ) {
+      problems.push(
+        `responseOverride modes other than { status }, and "times" / "persistent" / "delayMs" (#1095), are not supported by export-k6 (node ${node.id}): the k6 runtime arms a one-shot status only`,
+      );
+    }
     if (node.type === "ocppCall" && containsFrom(data.payload)) {
       problems.push(
         `ocppCall payload uses "$from", which needs a CALL taken over by a csmsCallTrigger with behavior "replace"; export-k6 does not support it (node ${node.id})`,

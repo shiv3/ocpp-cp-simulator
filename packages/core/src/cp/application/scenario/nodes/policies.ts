@@ -5,25 +5,62 @@ import type {
 } from "../ScenarioTypes";
 import type { NodeRunContext } from "./context";
 
-/** Issue #110: pre-arm a one-shot `{ status }` response override. */
+/**
+ * Issue #110: pre-arm a one-shot `{ status }` response override. #1090: any
+ * other `mode` (a CALLERROR, a raw payload or frame, a CALLRESULTERROR, a
+ * delay, silence) and `times` / `persistent` arm through the same node.
+ */
 export async function executeResponseOverride(
   ctx: NodeRunContext,
   data: ResponseOverrideNodeData,
 ): Promise<void> {
-  if (!ctx.callbacks.onArmResponseOverride) {
-    ctx.callbacks.log?.(
-      "ResponseOverride: no onArmResponseOverride callback wired",
-      "warn",
-    );
-    return;
+  const plain =
+    (data.mode === undefined || data.mode === "status") &&
+    data.times === undefined &&
+    data.persistent === undefined &&
+    data.delayMs === undefined &&
+    typeof data.status === "string";
+  if (plain) {
+    if (!ctx.callbacks.onArmResponseOverride) {
+      ctx.callbacks.log?.(
+        "ResponseOverride: no onArmResponseOverride callback wired",
+        "warn",
+      );
+      return;
+    }
+    ctx.callbacks.onArmResponseOverride(data.action, data.status as string);
+  } else {
+    if (!ctx.callbacks.onSetResponseOverride) {
+      ctx.callbacks.log?.(
+        "ResponseOverride: no onSetResponseOverride callback wired",
+        "warn",
+      );
+      return;
+    }
+    const { action, mode, status, errorCode, errorDescription, errorDetails } =
+      data;
+    ctx.callbacks.onSetResponseOverride({
+      action,
+      ...(mode === undefined ? {} : { mode }),
+      ...(status === undefined ? {} : { status }),
+      ...(errorCode === undefined ? {} : { errorCode }),
+      ...(errorDescription === undefined ? {} : { errorDescription }),
+      ...(errorDetails === undefined ? {} : { errorDetails }),
+      ...(data.payload === undefined ? {} : { payload: data.payload }),
+      ...(data.frame === undefined ? {} : { frame: data.frame }),
+      ...(data.delayMs === undefined ? {} : { delayMs: data.delayMs }),
+      ...(data.times === undefined ? {} : { times: data.times }),
+      ...(data.persistent === undefined ? {} : { persistent: data.persistent }),
+    });
   }
-  ctx.callbacks.onArmResponseOverride(data.action, data.status);
   // Issue #110: track this action so we can clear it when the run ends.
   if (!ctx.armedOverrideActions.includes(data.action)) {
     ctx.armedOverrideActions.push(data.action);
   }
   ctx.callbacks.log?.(
-    `Armed response override: ${data.action} → ${data.status}`,
+    `Armed response override: ${data.action} → ${data.mode ?? "status"}${
+      data.status !== undefined ? ` ${data.status}` : ""
+    }`,
     "info",
   );
 }

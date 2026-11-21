@@ -343,11 +343,12 @@ export function normalizeTranscript(frames: OcppFrame[]): OcppFrame[] {
   return frames.map((frame) => normalizeValue(frame) as OcppFrame);
 }
 
-/** A 2.0.1 charge point connected to `csms`, booted and past its first
- *  StatusNotification. */
+/** A 2.0.1 (or, with `version`, 2.1) charge point connected to `csms`, booted
+ *  and past its first StatusNotification. */
 export async function bootedV201ChargePoint(
   csms: MockCsms,
   id: string,
+  version: "OCPP-2.0.1" | "OCPP-2.1" = "OCPP-2.0.1",
 ): Promise<ChargePoint> {
   const cp = createChargePoint(
     id,
@@ -359,7 +360,7 @@ export async function bootedV201ChargePoint(
     null,
     {},
     [],
-    "OCPP-2.0.1",
+    version,
     {},
   );
   cp.events.on("error", () => undefined);

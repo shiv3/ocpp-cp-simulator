@@ -1,4 +1,5 @@
 /** Commands that act on one registered charge point (connection, OCPP calls, transactions, notifications, meter values): split out of LocalChargePointService (#877). */
+import type { ResponseOverrideRequest } from "@ocpp-cp-simulator/core/cp/domain/charge-point/responseOverrideRequest";
 import type {
   AuthorizationCacheSeedEntry,
   AuthorizationCacheView,
@@ -20,6 +21,8 @@ import type {
   OcppCallRequest,
   RawFrameOutcome,
   RawFrameRequest,
+  CallResultErrorOutcome,
+  CallResultErrorRequest,
 } from "@ocpp-cp-simulator/core/cp/domain/types/OcppCall";
 import type {
   Get15118EVCertificateRequest,
@@ -116,6 +119,40 @@ export async function sendRawFrame(
   return getExistingChargePointOrThrow(host.chargePoints, id).sendRawFrame(
     request,
   );
+}
+
+export async function setResponseOverride(
+  host: LocalServiceHost,
+  id: string,
+  request: ResponseOverrideRequest,
+): Promise<{ action: string; mode: string }> {
+  const spec = getExistingChargePointOrThrow(
+    host.chargePoints,
+    id,
+  ).setResponseOverride(request);
+  return { action: request.action, mode: spec.mode };
+}
+
+export async function clearResponseOverrides(
+  host: LocalServiceHost,
+  id: string,
+  action?: string,
+): Promise<number> {
+  return getExistingChargePointOrThrow(
+    host.chargePoints,
+    id,
+  ).clearResponseOverrides(action);
+}
+
+export async function sendCallResultError(
+  host: LocalServiceHost,
+  id: string,
+  request: CallResultErrorRequest,
+): Promise<CallResultErrorOutcome> {
+  return getExistingChargePointOrThrow(
+    host.chargePoints,
+    id,
+  ).sendCallResultError(request);
 }
 
 export async function get15118EVCertificate(

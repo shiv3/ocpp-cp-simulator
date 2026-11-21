@@ -179,6 +179,66 @@ export function registerTransactionTools(
     },
   });
 
+  mcp.tool("set_response_override", {
+    description:
+      "Control what the charge point answers a CSMS CALL with (#1090), instead of its engine's answer. Arms an override for `action`; the next `times` CALLs of it (default 1), or every one with persistent, get it. mode: status (CALLRESULT { status }), callError (errorCode/errorDescription/errorDetails), callResult (`payload` written as given, schema-valid or not), raw (`frame` written as given), callResultError (an OCPP 2.1 CALLRESULTERROR frame with the CALL's id), delay (the normal answer, delayMs late) or noAnswer (never answer). delayMs also holds back any other answer. The override answers before the station's own handlers and before inbound validation. Arming again replaces the one for the action; cleared by clear_response_overrides or a reset.",
+    inputSchema: METHODS.set_response_override.params.extend({
+      cpId: z.string().describe("Charge point identifier"),
+    }),
+    handler: async ({ cpId, ...params }) => {
+      try {
+        const result = await runRpc(deps, {
+          cpId,
+          method: "set_response_override",
+          params,
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("clear_response_overrides", {
+    description:
+      "Drop the response overrides armed with set_response_override (#1090): all of them, or only the one for `action`. Returns how many were dropped.",
+    inputSchema: METHODS.clear_response_overrides.params.extend({
+      cpId: z.string().describe("Charge point identifier"),
+    }),
+    handler: async ({ cpId, ...params }) => {
+      try {
+        const result = await runRpc(deps, {
+          cpId,
+          method: "clear_response_overrides",
+          params,
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("send_call_result_error", {
+    description:
+      "Send an OCPP 2.1 CALLRESULTERROR (RPC message type 5, #1090): the charge point's answer to a CALLRESULT it cannot accept, for the CALL with `messageId` (send_ocpp_call results carry it). errorCode defaults to FormatViolation. OCPP 2.1 charge points only; nothing is awaited.",
+    inputSchema: METHODS.send_call_result_error.params.extend({
+      cpId: z.string().describe("Charge point identifier"),
+    }),
+    handler: async ({ cpId, ...params }) => {
+      try {
+        const result = await runRpc(deps, {
+          cpId,
+          method: "send_call_result_error",
+          params,
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
   mcp.tool("security_event_notification", {
     description:
       "Send a SecurityEventNotification (#537): OCPP 1.6 Security Whitepaper, 2.0.1 and 2.1 A04. type is the security event (e.g. FirmwareUpdated, TamperDetectionActivated), techInfo optional free text. SOAP charge points only log it. Success means written, not answered; a 2.x CALL dropped before that answers disconnected, except that a critical event sent while offline is queued (A04.FR.02) and succeeds once queued.",

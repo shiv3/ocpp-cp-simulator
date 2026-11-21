@@ -183,6 +183,31 @@ export async function dispatchFacadeCpCommand(
         ),
       );
     }
+    case "set_response_override": {
+      const { params } = call;
+      // #1090: the mode's own fields are checked when it is armed
+      // (invalid_params).
+      return handled(
+        await runFacadeOperation(() =>
+          chargePointService.setResponseOverride(id, params),
+        ),
+      );
+    }
+    case "clear_response_overrides": {
+      const { params } = call;
+      const cleared = await runFacadeOperation(() =>
+        chargePointService.clearResponseOverrides(id, params.action),
+      );
+      return handled({ cleared });
+    }
+    case "send_call_result_error": {
+      const { params } = call;
+      return handled(
+        await runFacadeOperation(() =>
+          chargePointService.sendCallResultError(id, params),
+        ),
+      );
+    }
     case "get_15118_ev_certificate": {
       const { params } = call;
       // #537: the CSMS's answers (a CALLERROR included) are the result.

@@ -24,7 +24,7 @@ related:
   - scenario-format.md
   - ../analyses/scenario-or-behavior.md
   - ../entities/default-behaviors.md
-updated: 2026-11-15
+updated: 2026-11-21
 ---
 
 # Who answers an inbound CALL
@@ -41,22 +41,22 @@ always, and a scenario never has to be told about a fleet-wide `--behavior` file
 
 ## The order
 
-| #   | Step                      | Set by                                                                                                        | Lives                                          | Wins over        |
-| --- | ------------------------- | ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | ---------------- |
-| 1   | Inbound policy            | `inboundPolicy` scenario node, control plane                                                                  | Until cleared (sticky, survives a reconnect)   | everything below |
-| 2   | Response override         | `responseOverride` scenario node, control plane                                                               | One CALL (one-shot)                            | 3 to 6           |
-| 2b  | Capability profile        | `capabilityProfile` of `cp.create` / a blueprint (#618)                                                       | The charge point's life (static)               | 3 to 6           |
-| 3   | Scenario rule             | `csmsCallTrigger` with `behavior: "replace"` (schema 1.5)                                                     | Until its exchange is answered or the run ends | 4 to 6           |
-| 4   | Code behavior rule        | `onCall` of a loaded `Behavior` (mode `replace` or `extend`)                                                  | While the behavior is loaded                   | 5, 6             |
-| 5   | Default behavior          | [`default.*`](../entities/default-behaviors.md)                                                               | Always                                         | —                |
-| 6   | Handler without a default | The OCPP handler itself ([actions with no default](../entities/default-behaviors.md#actions-with-no-default)) | Always                                         | —                |
+| #   | Step                      | Set by                                                                                                        | Lives                                               | Wins over        |
+| --- | ------------------------- | ------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- | ---------------- |
+| 1   | Inbound policy            | `inboundPolicy` scenario node, control plane                                                                  | Until cleared (sticky, survives a reconnect)        | everything below |
+| 2   | Response override         | `responseOverride` scenario node, `set_response_override` of the control plane                                | One CALL (one-shot), `times` CALLs or until cleared | 3 to 6           |
+| 2b  | Capability profile        | `capabilityProfile` of `cp.create` / a blueprint (#618)                                                       | The charge point's life (static)                    | 3 to 6           |
+| 3   | Scenario rule             | `csmsCallTrigger` with `behavior: "replace"` (schema 1.5)                                                     | Until its exchange is answered or the run ends      | 4 to 6           |
+| 4   | Code behavior rule        | `onCall` of a loaded `Behavior` (mode `replace` or `extend`)                                                  | While the behavior is loaded                        | 5, 6             |
+| 5   | Default behavior          | [`default.*`](../entities/default-behaviors.md)                                                               | Always                                              | —                |
+| 6   | Handler without a default | The OCPP handler itself ([actions with no default](../entities/default-behaviors.md#actions-with-no-default)) | Always                                              | —                |
 
 Before step 1, an OCPP 1.6J station whose last BootNotification was answered `Rejected` leaves every
 CALL unanswered and without effect until the retry interval has passed (§4.2, #726; the CALL is still announced,
 logged and visible on the timeline). Pending and Accepted are unchanged.
 
 Steps 1 and 2 are looked up under the action's own name and, on 2.x, its 1.6 alias, and they answer with a
-CALLERROR / silence (1) or `{ status }` (2). Steps 3 and 4 run in `BehaviorRegistry.resolve()`, which the
+CALLERROR / silence (1) or what the override's [mode](#response-override-modes) says (2: by default `{ status }`). Steps 3 and 4 run in `BehaviorRegistry.resolve()`, which the
 gate calls synchronously and before the payload is validated, so a rule can own a malformed CALL. Step 5
 is the gate's "default path" for the actions that have a default behavior; step 6 is the same path for the
 rest.
@@ -65,6 +65,35 @@ On OCPP 1.6J the payload of a CALL that reaches steps 5 and 6 is then validated 
 (`off` / `warn` / `enforce`, default `warn`; see
 [Inbound CALL validation on OCPP-J 1.6](ocpp-versions-and-transports.md#inbound-call-validation-on-ocpp-j-16)).
 Policies and overrides are consulted before validation, as on 2.x, so a policy can answer a malformed CALL.
+
+### Response override modes
+
+The one-shot `{ status }` override of #110 is the `status` mode of a response override. A test that needs the
+station to misbehave on the wire arms another mode, from the `responseOverride` scenario node or from
+`set_response_override` of the control plane, CLI JSON mode and MCP (#1095). None of them is validated against
+the action's response schema: the point is to send what the engine would not.
+
+| `mode`            | The station answers the CALL with                                                                                                                                                     |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `status`          | CALLRESULT `{ status }` (default). Not honoured where the response is not `{ status }` (`SetVariables`, `GetVariables`): the engine answers and the override is spent, with a warning |
+| `callError`       | CALLERROR `errorCode`, `errorDescription` (default empty), `errorDetails` (default `{}`)                                                                                              |
+| `callResult`      | CALLRESULT with `payload` exactly as given (any JSON value)                                                                                                                           |
+| `raw`             | `frame` written as given; announced as a CALLERROR when it is a type 4 array, as a CALLRESULT otherwise                                                                               |
+| `callResultError` | an OCPP 2.1 CALLRESULTERROR frame `[5, <the CALL's id>, errorCode, errorDescription, errorDetails]` in place of the answer                                                            |
+| `delay`           | the engine's own answer, written `delayMs` later (the rest of the gate runs as usual)                                                                                                 |
+| `noAnswer`        | nothing: the CALL stays unanswered, like an `ignore` policy but for `times` CALLs                                                                                                     |
+
+- `delayMs` (0 to 600000) on any mode but `noAnswer` holds the answer back; the answer is decided, counted as the
+  CALL's one answer and announced at once, and only its write is late. A connection that changed meanwhile settles it
+  as a closed socket.
+- `times` (default 1) answers that many CALLs; `persistent` answers every CALL of the action until
+  `clear_response_overrides`, the end of the scenario run that armed it, or a `reset` or power loss. One override per
+  action: arming again replaces it, and an override armed under both spellings of a renamed action is spent by one CALL
+  when it is one-shot.
+- An inbound policy (step 1) still wins over an override. Compare `inboundPolicy`: sticky and CALLERROR / silence only.
+- Code: `packages/core/src/cp/domain/charge-point/CallOverrides.ts`, `responseOverrideRequest.ts`,
+  `packages/core/src/cp/infrastructure/transport/inbound/InboundCallGate.ts`; test
+  `packages/core/src/cp/infrastructure/transport/__tests__/responseOverrideModes.bun.test.ts`.
 
 ### Capability profile
 

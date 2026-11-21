@@ -1,3 +1,4 @@
+import type { ResponseOverrideRequest } from "@ocpp-cp-simulator/core/cp/domain/charge-point/responseOverrideRequest";
 import type { StartTransactionOutcome } from "@ocpp-cp-simulator/core/cp/domain/charge-point/ChargePoint";
 import type {
   Behavior,
@@ -29,6 +30,8 @@ import type {
   OcppCallRequest,
   RawFrameOutcome,
   RawFrameRequest,
+  CallResultErrorOutcome,
+  CallResultErrorRequest,
 } from "@ocpp-cp-simulator/core/cp/domain/types/OcppCall";
 import type {
   Get15118EVCertificateRequest,
@@ -1013,6 +1016,26 @@ export class CLIChargePointService {
   /** Expert raw frame (#393); see `ChargePoint.sendRawFrame`. */
   sendRawFrame(request: RawFrameRequest): Promise<RawFrameOutcome> {
     return this._chargePoint.sendRawFrame(request);
+  }
+
+  /** Arm a response override (#1090); see `ChargePoint.setResponseOverride`. */
+  setResponseOverride(
+    request: ResponseOverrideRequest,
+  ): Promise<{ action: string; mode: string }> {
+    const spec = this._chargePoint.setResponseOverride(request);
+    return Promise.resolve({ action: request.action, mode: spec.mode });
+  }
+
+  /** Drop armed response overrides (#1090); returns how many. */
+  clearResponseOverrides(action?: string): Promise<number> {
+    return Promise.resolve(this._chargePoint.clearResponseOverrides(action));
+  }
+
+  /** OCPP 2.1 CALLRESULTERROR (#1090); see `ChargePoint.sendCallResultError`. */
+  sendCallResultError(
+    request: CallResultErrorRequest,
+  ): Promise<CallResultErrorOutcome> {
+    return this._chargePoint.sendCallResultError(request);
   }
 
   /** Get15118EVCertificate relay (#537); see

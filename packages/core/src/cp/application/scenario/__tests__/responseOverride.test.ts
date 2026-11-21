@@ -179,4 +179,57 @@ describe("responseOverride node (issue #110)", () => {
     // After stop, the executor's finally block should have cleared the armed override
     expect(cp.consumeResponseOverride("RemoteStartTransaction")).toBeNull();
   });
+  it("a callError / persistent node arms the richer override and the run's end clears it (#1095)", async () => {
+    const cp = newChargePoint("CP-OVERRIDE-MODE");
+    const connector = cp.getConnector(1)!;
+    const parked = overrideScenario();
+    parked.nodes = parked.nodes.map((node) =>
+      node.id === "arm-override"
+        ? {
+            ...node,
+            data: {
+              label: "Refuse every Reset",
+              action: "Reset",
+              mode: "callError",
+              errorCode: "NotSupported",
+              errorDescription: "scenario",
+              persistent: true,
+            },
+          }
+        : node.id === "end-1"
+          ? {
+              id: "park",
+              type: ScenarioNodeType.CSMS_CALL_TRIGGER,
+              position: { x: 0, y: 200 },
+              data: {
+                label: "Wait for RemoteStop",
+                action: "RemoteStopTransaction",
+                timeout: 30,
+              },
+            }
+          : node,
+    ) as ScenarioDefinition["nodes"];
+    parked.edges = [
+      { id: "e1", source: "start-1", target: "arm-override" },
+      { id: "e2", source: "arm-override", target: "park" },
+    ];
+    const executor = new ScenarioExecutor(
+      parked,
+      createScenarioExecutorCallbacks({ chargePoint: cp, connector }),
+    );
+    const startPromise = executor.start();
+    await waitUntil(() => cp.events.listenerCount("incomingCallReceived") > 0);
+
+    expect(cp.consumeResponse("Reset")).toEqual({
+      mode: "callError",
+      errorCode: "NotSupported",
+      errorDescription: "scenario",
+    });
+    // persistent: still armed after the CALL it answered
+    expect(cp.hasResponseOverride("Reset")).toBe(true);
+
+    executor.stop();
+    await timeout(startPromise, 1000);
+    expect(cp.hasResponseOverride("Reset")).toBe(false);
+  });
 });

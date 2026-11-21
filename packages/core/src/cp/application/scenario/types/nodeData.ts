@@ -497,8 +497,33 @@ export type ResponseOverrideNodeData = BaseNodeData & {
   /** Action whose next incoming call gets the canned response, in the 1.6
    *  or the 2.0.1 spelling (#349). */
   action: string;
-  /** Status string returned as `{ status }` for that call. */
-  status: string;
+  /** Status string returned as `{ status }` for that call (mode `status`, the
+   *  default). */
+  status?: string;
+  /** How the call is answered; default `status`. See
+   *  `ResponseOverrideSpec` (#1090). */
+  mode?:
+    | "status"
+    | "callError"
+    | "callResult"
+    | "raw"
+    | "callResultError"
+    | "delay"
+    | "noAnswer";
+  /** `callError` / `callResultError`. */
+  errorCode?: string;
+  errorDescription?: string;
+  errorDetails?: Record<string, unknown>;
+  /** `callResult`: the CALLRESULT payload, written as given. */
+  payload?: unknown;
+  /** `raw`: the text frame written as the answer. */
+  frame?: string;
+  /** `delay`, or the hold before any other answer, in milliseconds. */
+  delayMs?: number;
+  /** How many CALLs the override answers (default 1). */
+  times?: number;
+  /** Answer every CALL of the action until the run ends. */
+  persistent?: boolean;
 };
 
 /**

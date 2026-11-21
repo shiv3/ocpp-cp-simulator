@@ -19,7 +19,7 @@ related:
   - ocpp-versions-and-transports.md
   - ../entities/web-console.md
   - ../entities/mcp-endpoint.md
-updated: 2026-11-15
+updated: 2026-11-21
 ---
 
 # Expert OCPP calls
@@ -181,6 +181,17 @@ do not expose it yet.
 - **Observability.** The frame appears in the log as `Sent: <frame>`. The
   trace export, the scenario verification transcript and `/metrics` read
   well-formed OCPP-J arrays only and skip a malformed frame.
+
+## CALLRESULTERROR (2.1)
+
+OCPP 2.1 adds the RPC framework message type 5, CALLRESULTERROR (Part 2 FR.06): the answer of the caller of a CALL to a
+CALLRESULT it cannot accept (one that fails the response schema). `send_call_result_error`
+(`{ messageId, errorCode?, errorDescription?, errorDetails? }`; control plane, CLI JSON mode, MCP, #1095) writes
+`[5, messageId, errorCode, errorDescription, errorDetails]` for the CALL `messageId` (the result of `send_ocpp_call`
+carries the id); `errorCode` defaults to `FormatViolation`, any string is sent. It is a raw frame under the hood: it
+goes through the same pipeline as [`send_raw_frame`](#raw-frames-level-c-393) but waits for no reply. Other versions
+have no type 5: `invalid_params`. To answer a CSMS CALL with such a frame, arm a `callResultError`
+[response override](call-precedence.md#response-override-modes).
 
 ## Independence from the other fault-injection features
 

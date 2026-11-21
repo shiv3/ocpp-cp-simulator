@@ -259,6 +259,18 @@ describe("runExportK6", () => {
       expect(message).toContain("onBusy");
     });
 
+    it("a responseOverride in another mode (#1095)", async () => {
+      const message = await refuse(
+        withNode("responseOverride", {
+          action: "Reset",
+          mode: "callError",
+          errorCode: "NotSupported",
+        }),
+      );
+      expect(message).toContain("responseOverride modes");
+      expect(message).toContain("node x");
+    });
+
     it("an ocppCall payload that reads $from", async () => {
       const message = await refuse(
         withNode("ocppCall", {

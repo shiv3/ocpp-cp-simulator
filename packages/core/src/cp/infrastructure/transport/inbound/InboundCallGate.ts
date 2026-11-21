@@ -1,6 +1,9 @@
 import type { ChargePointBehaviorRegistry } from "../../../domain/engine/behaviorRules";
 import { BehaviorRegistry as DefaultBehaviorRegistry } from "../../../application/behavior/BehaviorRegistry";
-import type { InboundCallPolicy } from "../../../domain/charge-point/ChargePoint";
+import type {
+  InboundCallPolicy,
+  ResponseOverrideSpec,
+} from "../../../domain/charge-point/ChargePoint";
 import { csmsActionAliases } from "../../../domain/types/csmsActionNames";
 import type { CallExchange } from "./CallExchange";
 import type { StationTopology } from "../../../domain/topology/StationTopology";
@@ -12,7 +15,9 @@ import type { StationTopology } from "../../../domain/topology/StationTopology";
  *
  * 1. `incomingCallReceived`, announced to the scenario layer and the control plane
  * 2. `inboundPolicy` (sticky): reply with a CALLERROR, or stay silent
- * 3. `responseOverride` (one-shot): reply `{ status }`
+ * 3. `responseOverride` (one-shot, or repeated / persistent from the control
+ *    plane): reply `{ status }`, or whatever else its mode says (a CALLERROR, a
+ *    raw payload or frame, a CALLRESULTERROR, a delay, silence)
  * 3b. the static capability profile (#618): reply CALLERROR `NotImplemented`
  *    (or the profile's `disabledActionErrorCode`) for a disabled action, and
  *    `{ status: "NotImplemented" }` to a TriggerMessage /
@@ -47,7 +52,7 @@ export interface InboundCallGatePorts {
    * `unhonoured`: one was armed (and is consumed) but the action's answer is
    * not a `{ status }`, so the real handler answers.
    */
-  takeOverride(action: string): { status: string } | "unhonoured" | null;
+  takeOverride(action: string): ResponseOverrideSpec | "unhonoured" | null;
   /** Step 3b: does the station's capability profile disable `action`? */
   isDisabled?(action: string): boolean;
   /** Step 3b: the CALLERROR code for a disabled action. Absent:
@@ -144,13 +149,16 @@ export class InboundCallGate {
         `${this.prefix}Response override armed for ${action} cannot be honoured (its response is not { status }); answering normally`,
       );
     } else if (override !== null) {
-      this.options.info(
-        `${this.prefix}Response override: ${action} → { status: "${override.status}" }`,
-      );
-      // The caller chose the status, and every other action the
-      // responseOverride node lists answers `{ status }` too.
-      exchange.reply({ status: override.status });
-      return { kind: "settled" };
+      if (override.mode === "delay") {
+        // The handler answers as it would; only the write is held back.
+        this.options.info(
+          `${this.prefix}Response override: ${action} answer delayed ${override.delayMs} ms`,
+        );
+        exchange.delayAnswer(override.delayMs);
+      } else {
+        this.answerWithOverride(exchange, action, override);
+        return { kind: "settled" };
+      }
     }
 
     if (ports.isDisabled?.(action)) {
@@ -199,6 +207,63 @@ export class InboundCallGate {
       return { kind: "settled" };
     }
     return { kind: "default" };
+  }
+
+  /** Answer `exchange` the way a non-`delay` override says. */
+  private answerWithOverride(
+    exchange: CallExchange,
+    action: string,
+    override: Exclude<ResponseOverrideSpec, { mode: "delay" }>,
+  ): void {
+    const { info, warn } = this.options;
+    const prefix = `${this.prefix}Response override: ${action} → `;
+    if (override.mode === "noAnswer") {
+      warn(`${prefix}no answer`);
+      exchange.suppress();
+      return;
+    }
+    if (override.delayMs !== undefined && override.delayMs > 0) {
+      exchange.delayAnswer(override.delayMs);
+    }
+    switch (override.mode) {
+      case "status":
+        // The caller chose the status, and every other action the
+        // responseOverride node lists answers `{ status }` too.
+        info(`${prefix}{ status: "${override.status}" }`);
+        exchange.reply({ status: override.status });
+        return;
+      case "callError":
+        warn(`${prefix}CallError(${override.errorCode})`);
+        exchange.replyError(
+          override.errorCode,
+          override.errorDescription ?? "",
+          override.errorDetails === undefined
+            ? {}
+            : { errorDetails: override.errorDetails },
+        );
+        return;
+      case "callResult":
+        warn(`${prefix}CALLRESULT with the given payload (not validated)`);
+        exchange.reply(override.payload);
+        return;
+      case "raw":
+        warn(`${prefix}raw frame (not validated)`);
+        exchange.replyRaw(override.frame);
+        return;
+      case "callResultError":
+        warn(`${prefix}CALLRESULTERROR(${override.errorCode})`);
+        exchange.replyRaw(
+          JSON.stringify([
+            5,
+            exchange.messageId,
+            override.errorCode,
+            override.errorDescription ?? "",
+            override.errorDetails ?? {},
+          ]),
+          { outcome: "CallResult" },
+        );
+        return;
+    }
   }
 }
 
@@ -257,7 +322,7 @@ export function ports16(chargePoint: {
     messageId?: string,
   ): void;
   getInboundCallPolicy(action: string): InboundCallPolicy | undefined;
-  consumeResponseOverride(action: string): string | null;
+  consumeResponse(action: string): ResponseOverrideSpec | null;
   isActionDisabled?(action: string): boolean;
   isTriggerTargetSupported?(target: string): boolean;
   disabledActionErrorCode?(): string;
@@ -271,10 +336,7 @@ export function ports16(chargePoint: {
     notifyReceived: (action, payload, messageId) =>
       chargePoint.notifyIncomingCall(action, payload, messageId),
     policyFor: (action) => chargePoint.getInboundCallPolicy(action),
-    takeOverride: (action) => {
-      const status = chargePoint.consumeResponseOverride(action);
-      return status === null ? null : { status };
-    },
+    takeOverride: (action) => chargePoint.consumeResponse(action),
   };
 }
 
@@ -292,7 +354,7 @@ export function portsAliased(
     ): void;
     getInboundCallPolicy(action: string): InboundCallPolicy | undefined;
     hasResponseOverride(action: string): boolean;
-    consumeResponseOverride(action: string): string | null;
+    consumeResponse(action: string): ResponseOverrideSpec | null;
     clearResponseOverride(action: string): void;
     isActionDisabled?(action: string): boolean;
     isTriggerTargetSupported?(target: string): boolean;
@@ -326,10 +388,18 @@ export function portsAliased(
       // One CALL consumes the one-shot under every spelling it was armed
       // with, so a copy left under the other name cannot fire on a later,
       // unrelated call.
-      const status = chargePoint.consumeResponseOverride(armedUnder);
-      for (const name of aliases) chargePoint.clearResponseOverride(name);
-      if (statusless.has(action)) return "unhonoured";
-      return status === null ? null : { status };
+      const spec = chargePoint.consumeResponse(armedUnder);
+      // A one-shot arm is spent by the consume above; the copy under the
+      // other spelling goes too. A repeated or persistent arm stays, with the
+      // one spelling it was armed under.
+      if (!chargePoint.hasResponseOverride(armedUnder)) {
+        for (const name of aliases) chargePoint.clearResponseOverride(name);
+      }
+      if (spec === null) return null;
+      // `{ status }` is not the answer of these actions; every other mode
+      // names its own answer.
+      if (spec.mode === "status" && statusless.has(action)) return "unhonoured";
+      return spec;
     },
   };
 }

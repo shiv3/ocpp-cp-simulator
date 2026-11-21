@@ -105,6 +105,21 @@ Options:
                            within <ms>; the reconnect policy then applies.
                            All runtimes.
   --ws-no-compression      Do not offer permessage-deflate. Bun and Node.
+  --ws-offer-subprotocol <name>
+                           Handshake: offer exactly this Sec-WebSocket-Protocol
+                           instead of the one the OCPP version implies, sent as
+                           given (case variants, unknown names). Repeat to offer
+                           several. (--ws-subprotocol adds one to the default.)
+  --ws-no-subprotocol      Handshake: offer no subprotocol at all.
+  --ws-path-suffix <s>     Append <s> to the URL after the charge point id,
+                           as given: /, /extra, ?token=x.
+  --ws-cp-id-raw           Put the charge point id in the path as given instead
+                           of percent-encoding it (a pre-encoded id, or one the
+                           CSMS must reject).
+  --ws-ping-interval <s>   Send a WebSocket ping every <s> seconds, like a real
+                           charger. Sets the OCPP key WebSocketPingInterval
+                           (0 = no ping, the default); ChangeConfiguration
+                           changes it later. Bun and Node.
   --ws-max-payload <bytes> Largest incoming message; a bigger one closes the
                            socket. Node only (Bun ignores it, so the start is
                            refused).

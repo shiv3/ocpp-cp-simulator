@@ -10,6 +10,11 @@
  * | `maxPayloadBytes`      | ignored    | yes         | no      |
  * | `proxy`                | yes        | no (no agent bundled) | no |
  * | `localAddress`         | ignored    | yes         | no      |
+ * | `subprotocols`         | yes        | yes         | yes     |
+ * | `headers`              | yes        | yes         | no      |
+ * | `pathSuffix`           | yes        | yes         | yes     |
+ * | `chargePointIdEncoding`| yes        | yes         | yes     |
+ * | `pingIntervalSeconds`  | yes        | yes         | no      |
  *
  * "transport" = enforced by `OCPPWebSocket` itself with a timer, so it holds
  * everywhere. An option the runtime would ignore is **refused** when the
@@ -29,6 +34,24 @@ export interface WsClientOptions {
   readonly proxy?: string;
   /** Local IP address the outgoing connection binds to. */
   readonly localAddress?: string;
+  /** Handshake control (#1092): the `Sec-WebSocket-Protocol` list offered,
+   *  replacing the one derived from the OCPP version. `[]` offers none. Any
+   *  spelling is sent as given (`OCPP1.6`, `ocpp1.6, ocpp2.0.1`). */
+  readonly subprotocols?: string[];
+  /** Extra headers on the upgrade request. `Authorization` is still owned by
+   *  the security profile and Basic Auth settings. */
+  readonly headers?: Record<string, string>;
+  /** Appended to the URL after the charge point id, as given: `/`, `/extra`,
+   *  `?token=x`. */
+  readonly pathSuffix?: string;
+  /** How the charge point id goes into the path: `uri-component` (default,
+   *  percent-encoded as OCPP-J requires) or `raw` (as given, so a caller can
+   *  send an id that is already encoded, or one the CSMS must reject). */
+  readonly chargePointIdEncoding?: "uri-component" | "raw";
+  /** Initial `WebSocketPingInterval` in seconds (#1093): the client sends a
+   *  WebSocket ping this often; 0 sends none. The OCPP key stays the one
+   *  source of truth afterwards (ChangeConfiguration changes it). */
+  readonly pingIntervalSeconds?: number;
 }
 
 export type WsRuntime = "bun" | "node" | "browser";
@@ -39,6 +62,11 @@ export const WS_CLIENT_OPTION_NAMES = [
   "maxPayloadBytes",
   "proxy",
   "localAddress",
+  "subprotocols",
+  "headers",
+  "pathSuffix",
+  "chargePointIdEncoding",
+  "pingIntervalSeconds",
 ] as const satisfies readonly (keyof WsClientOptions)[];
 
 /** The runtimes that honour each option. */
@@ -48,6 +76,11 @@ const SUPPORT: Record<keyof WsClientOptions, readonly WsRuntime[]> = {
   maxPayloadBytes: ["node"],
   proxy: ["bun"],
   localAddress: ["node"],
+  subprotocols: ["bun", "node", "browser"],
+  headers: ["bun", "node"],
+  pathSuffix: ["bun", "node", "browser"],
+  chargePointIdEncoding: ["bun", "node", "browser"],
+  pingIntervalSeconds: ["bun", "node"],
 };
 
 export class UnsupportedWsOptionError extends Error {
@@ -102,6 +135,28 @@ export function validateWsClientOptions(
   }
   if (localAddress !== undefined && localAddress.length === 0) {
     return "ws.localAddress must not be empty";
+  }
+  for (const [name, value] of Object.entries(options.headers ?? {})) {
+    if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name) || /[\r\n]/.test(value)) {
+      return `ws.headers: "${name}" is not a valid header`;
+    }
+  }
+  if (
+    options.subprotocols?.some((p) => !/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(p))
+  ) {
+    return "ws.subprotocols entries must be tokens (no spaces or commas; offer several as separate entries)";
+  }
+  if (options.pathSuffix !== undefined && /[\s]/.test(options.pathSuffix)) {
+    return "ws.pathSuffix must not contain whitespace";
+  }
+  if (
+    options.pingIntervalSeconds !== undefined &&
+    !(
+      Number.isInteger(options.pingIntervalSeconds) &&
+      options.pingIntervalSeconds >= 0
+    )
+  ) {
+    return "ws.pingIntervalSeconds must be an integer >= 0";
   }
   return undefined;
 }

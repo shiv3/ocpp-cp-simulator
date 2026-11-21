@@ -68,6 +68,8 @@ export function completeConstruction(
     readonly authorizationKey: string | undefined;
     readonly cpoName: string | undefined;
     readonly powerSharing: PowerSharingConfig | undefined;
+    /** #1093: the initial `WebSocketPingInterval`. */
+    readonly webSocketPingIntervalSeconds?: number;
   },
 ): void {
   const configuration = ctx.configuration();
@@ -82,6 +84,16 @@ export function completeConstruction(
   }
   if (options.cpoName !== undefined) {
     configuration.applyChange("CpoName", options.cpoName);
+  }
+  if (options.webSocketPingIntervalSeconds !== undefined) {
+    // Through the key, so GetConfiguration reports it and the ping timer (set
+    // below from the stored value) runs from the first open (#1093). A value
+    // already stored by --state-db or ChangeConfiguration is replaced: the
+    // operator asked for this one at start.
+    configuration.applyChange(
+      "WebSocketPingInterval",
+      String(options.webSocketPingIntervalSeconds),
+    );
   }
   parts.configWiring.wireConfigurationListeners();
   parts.configWiring.wirePowerSharing(options.powerSharing);

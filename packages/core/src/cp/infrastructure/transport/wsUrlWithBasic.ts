@@ -72,6 +72,10 @@ export function buildOcppWebSocketUrl(params: {
   chargePointId: string;
   basicAuth: BasicAuthSettings | null;
   securityProfile?: OcppSecurityProfile;
+  /** #1092: appended after the identity, as given (`/`, `/x`, `?token=1`). */
+  pathSuffix?: string;
+  /** #1092: `raw` puts the identity in the path as given. */
+  chargePointIdEncoding?: "uri-component" | "raw";
   warn?: (message: string) => void;
 }): string {
   const url = new URL(params.baseUrl);
@@ -120,7 +124,23 @@ export function buildOcppWebSocketUrl(params: {
   // path segment; the URL parser would leave a `/` as a separator and a `%`
   // raw. The Basic Auth username stays the unencoded identity.
   if (!url.pathname.endsWith("/")) url.pathname += "/";
-  url.pathname += encodeURIComponent(params.chargePointId);
+  // #1092: handshake tests may send the identity as given (already encoded, or
+  // one the CSMS must reject) and a suffix after it. The URL parser still
+  // normalizes what it cannot carry (spaces, `?`, `#` in a path).
+  url.pathname +=
+    params.chargePointIdEncoding === "raw"
+      ? params.chargePointId
+      : encodeURIComponent(params.chargePointId);
+  const suffix = params.pathSuffix ?? "";
+  if (suffix !== "") {
+    const query = suffix.indexOf("?");
+    const pathPart = query === -1 ? suffix : suffix.slice(0, query);
+    url.pathname += pathPart;
+    if (query !== -1) {
+      const extra = suffix.slice(query + 1);
+      url.search = url.search ? `${url.search}&${extra}` : `?${extra}`;
+    }
+  }
   return url.toString();
 }
 
@@ -328,20 +348,27 @@ export function buildOcppWebSocketConnectOptions(params: {
     chargePointId: params.chargePointId,
     basicAuth,
     securityProfile: params.securityProfile,
+    pathSuffix: params.ws?.pathSuffix,
+    chargePointIdEncoding: params.ws?.chargePointIdEncoding,
     warn: params.warn,
   });
   const versionProtocol = ocppVersionToSubprotocol(params.ocppVersion ?? "");
-  const protocols = [
+  // #1092: `ws.subprotocols` replaces the list, `[]` offers none.
+  const protocols: readonly string[] = params.ws?.subprotocols ?? [
     versionProtocol,
     ...(params.extraSubprotocols ?? []),
-  ] as const;
+  ];
   const mustControlAuthorization =
     params.securityProfile === 1 ||
     params.securityProfile === 2 ||
     params.securityProfile === 3;
+  const mergedHeaders = {
+    ...(params.extraHeaders ?? {}),
+    ...(params.ws?.headers ?? {}),
+  };
   const headers: Record<string, string> = mustControlAuthorization
-    ? stripAuthorizationHeader(params.extraHeaders ?? {})
-    : { ...(params.extraHeaders ?? {}) };
+    ? stripAuthorizationHeader(mergedHeaders)
+    : { ...mergedHeaders };
   if (!isBrowserRuntime() && basicAuth?.password) {
     for (const key of Object.keys(headers)) {
       if (key.toLowerCase() === "authorization") delete headers[key];

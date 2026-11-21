@@ -5,7 +5,7 @@ import { isSoapVersion } from "@ocpp-cp-simulator/core/cp/domain/types/OcppVersi
 
 export function parseTransportFlags(
   reconnect: Record<string, number | string>,
-  ws: Record<string, number | string | boolean>,
+  ws: Record<string, unknown>,
   ocppVersion: string | undefined,
 ): TransportConfig {
   const parsed = transportConfigSchema.safeParse({

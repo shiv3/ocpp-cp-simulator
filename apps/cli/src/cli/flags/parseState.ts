@@ -116,7 +116,7 @@ export interface ParseState {
   // #609: reconnect flags collect here and are validated as one object below.
   readonly reconnect: Record<string, number | string>;
   // #611: `--ws-*` flags, validated with the reconnect ones.
-  readonly wsFlags: Record<string, number | string | boolean>;
+  readonly wsFlags: Record<string, unknown>;
   traceOutput: string | null;
 }
 

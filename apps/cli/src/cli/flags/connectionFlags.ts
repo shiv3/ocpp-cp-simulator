@@ -73,6 +73,31 @@ export function parseConnectionFlag(
       s.wsFlags.localAddress = requireFlagValue(arg, next);
       cur.i++;
       break;
+    // Handshake control (#1092) and the client ping (#1093).
+    case "--ws-offer-subprotocol": {
+      const list = (s.wsFlags.subprotocols as string[] | undefined) ?? [];
+      list.push(requireFlagValue(arg, next));
+      s.wsFlags.subprotocols = list;
+      cur.i++;
+      break;
+    }
+    case "--ws-no-subprotocol":
+      s.wsFlags.subprotocols = [];
+      break;
+    case "--ws-path-suffix":
+      s.wsFlags.pathSuffix = requireFlagValue(arg, next);
+      cur.i++;
+      break;
+    case "--ws-cp-id-raw":
+      s.wsFlags.chargePointIdEncoding = "raw";
+      break;
+    case "--ws-ping-interval":
+      s.wsFlags.pingIntervalSeconds = requireNumberFlag(arg, next, {
+        integer: true,
+        min: 0,
+      });
+      cur.i++;
+      break;
     case "--boot-retry-limit":
       s.reconnect.bootRetryLimit = requireNumberFlag(arg, next, {
         integer: true,

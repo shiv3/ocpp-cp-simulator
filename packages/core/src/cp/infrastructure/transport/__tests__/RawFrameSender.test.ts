@@ -64,6 +64,8 @@ describe("RawFrameSender (#393 review)", () => {
       sentFrame: "[]",
       messageId: null,
       reply: null,
+      replies: [],
+      correlationToken: "raw-1",
       closed: null,
     });
     // Written afterwards: nothing is left waiting for it.

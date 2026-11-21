@@ -49,6 +49,8 @@ describe("raw frames (#393)", () => {
           sentFrame: raw,
           messageId: "raw-1",
           reply: error,
+          replies: [error],
+          correlationToken: expect.stringMatching(/^raw-\d+$/),
           closed: null,
         });
 
@@ -85,6 +87,35 @@ describe("raw frames (#393)", () => {
     }
   });
 
+  it("collectMs returns duplicate replies, each command gets its own token (#1094)", async () => {
+    const csms = startMockCsms();
+    const cp = await bootedChargePoint(csms, "CP-RAW-DUP", "OCPP-1.6J");
+    const stopAnswering = answerEverythingElse(csms, (f) => f[1] === "raw-d");
+    try {
+      const raw = '[2,"raw-d","Heartbeat",{}]';
+      const sending = cp.sendRawFrame({
+        frame: raw,
+        waitMs: 3000,
+        collectMs: 300,
+      });
+      await waitForRaw(csms, raw);
+      const first = [3, "raw-d", { currentTime: "2026-01-01T00:00:00Z" }];
+      const second = [4, "raw-d", "GenericError", "again", {}];
+      csms.send(first);
+      csms.send(second);
+      const outcome = await sending;
+      expect(outcome.reply).toEqual(first);
+      expect(outcome.replies).toEqual([first, second]);
+
+      const again = await cp.sendRawFrame({ frame: '[9,"x",{}]', waitMs: 50 });
+      expect(again.correlationToken).not.toBe(outcome.correlationToken);
+    } finally {
+      stopAnswering();
+      cp.disconnect();
+      await csms.stop();
+    }
+  });
+
   it("no reply within waitMs is a result with reply null", async () => {
     const csms = startMockCsms();
     const cp = await bootedChargePoint(csms, "CP-RAW-QUIET", "OCPP-2.0.1");
@@ -98,6 +129,8 @@ describe("raw frames (#393)", () => {
         sentFrame: '[9,"raw-q",{}]',
         messageId: "raw-q",
         reply: null,
+        replies: [],
+        correlationToken: expect.stringMatching(/^raw-\d+$/),
         closed: null,
       });
     } finally {

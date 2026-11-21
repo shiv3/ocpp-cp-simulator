@@ -91,6 +91,10 @@ export type RawFrameRequest = {
    *  {@link RAW_FRAME_DEFAULT_WAIT_MS}, at most
    *  {@link OCPP_CALL_RESPONSE_TIMEOUT_MS}. */
   readonly waitMs?: number;
+  /** After the first reply keep listening this many more milliseconds (within
+   *  `waitMs`) so duplicate replies to the same id are returned too (#1094).
+   *  Default 0: return at the first reply. */
+  readonly collectMs?: number;
 };
 
 /**
@@ -105,6 +109,13 @@ export type RawFrameOutcome = {
   readonly sentFrame: string;
   readonly messageId: string | null;
   readonly reply: unknown[] | null;
+  /** Every reply matching the frame's id (or an unreadable-frame CALLERROR)
+   *  that arrived before the call returned, in order: duplicates show here
+   *  when `collectMs` allowed them (#1094). `reply` is the first. */
+  readonly replies: unknown[][];
+  /** Unique per command on this charge point, so a result can be tied to the
+   *  command that produced it (#1094). */
+  readonly correlationToken: string;
   readonly closed: string | null;
 };
 

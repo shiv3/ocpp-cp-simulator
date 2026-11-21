@@ -42,9 +42,25 @@ export function redactUrl(url: string): string {
 export function redactTransport(
   transport: TransportConfigWire,
 ): TransportConfigWire {
-  const proxy = transport.ws?.proxy;
-  if (proxy === undefined || !transport.ws) return transport;
-  return { ...transport, ws: { ...transport.ws, proxy: redactUrl(proxy) } };
+  const ws = transport.ws;
+  if (!ws) return transport;
+  // #1092: header values and a `?token=` in the path suffix are credentials as
+  // often as not; the names and the shape stay visible.
+  const redacted = {
+    ...ws,
+    ...(ws.proxy !== undefined ? { proxy: redactUrl(ws.proxy) } : {}),
+    ...(ws.headers
+      ? {
+          headers: Object.fromEntries(
+            Object.keys(ws.headers).map((name) => [name, "[redacted]"]),
+          ),
+        }
+      : {}),
+    ...(ws.pathSuffix?.includes("?")
+      ? { pathSuffix: `${ws.pathSuffix.split("?")[0]}?[redacted]` }
+      : {}),
+  };
+  return { ...transport, ws: redacted };
 }
 
 interface FullBootNotification {

@@ -217,6 +217,15 @@ export const CP_COMMAND_METHODS = {
         .describe(
           "How long to wait for a reply, in milliseconds (default 5000)",
         ),
+      collectMs: z
+        .number()
+        .int()
+        .min(0)
+        .max(25_000)
+        .optional()
+        .describe(
+          "After the first reply keep listening this long (within waitMs) so duplicate replies to the same id are returned in `replies` (default 0: return at the first reply)",
+        ),
     }),
     result: rawFrameOutcomeSchema,
   },

@@ -319,6 +319,8 @@ describe("send_raw_frame (#393)", () => {
       sentFrame: "not json",
       messageId: null,
       reply: null,
+      replies: [],
+      correlationToken: "raw-1",
       closed: "network",
     };
     const sendRawFrame = vi.fn().mockResolvedValue(outcome);

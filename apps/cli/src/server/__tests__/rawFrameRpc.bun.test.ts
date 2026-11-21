@@ -128,6 +128,8 @@ describe("send_raw_frame over the daemon's surfaces (#393)", () => {
       sentFrame: '[2,"raw-rpc","Heartbeat"]',
       messageId: "raw-rpc",
       reply: expectedReply("raw-rpc"),
+      replies: [expectedReply("raw-rpc")],
+      correlationToken: expect.stringMatching(/^raw-\d+$/),
       closed: null,
     });
 
@@ -141,6 +143,8 @@ describe("send_raw_frame over the daemon's surfaces (#393)", () => {
       sentFrame: "not json at all",
       messageId: null,
       reply: null,
+      replies: [],
+      correlationToken: expect.stringMatching(/^raw-\d+$/),
       closed: null,
     });
 

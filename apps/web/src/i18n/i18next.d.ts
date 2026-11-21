@@ -23,6 +23,13 @@ declare module "i18next" {
     ];
     keySeparator: false;
     nsSeparator: false;
-    resources: typeof enResources;
+    // The template texts (`templates.<id>.name` / `.description`, one pair per
+    // built-in template) are looked up by an id only known at runtime
+    // (`useTemplateText`), so no typed key is ever written for them. Left out of
+    // the typed keys, they stay out of the way of the compiler: with them the
+    // key union is big enough for `tsc` to give up on the unrelated `t` calls.
+    resources: Omit<typeof enResources, "templates"> & {
+      templates: Record<never, string>;
+    };
   }
 }

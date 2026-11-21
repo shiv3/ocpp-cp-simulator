@@ -1,7 +1,7 @@
 {
   "id": "remote-start-auto-meter-201",
   "name": "Remote Start + Auto MeterValue (OCPP 2.0.1 / 2.1)",
-  "description": "Wait RemoteStartTransaction → Start charging → AutoMeterValue. OCPP 2.0.1 / 2.1 variant: same flow, 2.x payloads and assertions.",
+  "description": "Wait RequestStartTransaction → Start charging → AutoMeterValue. OCPP 2.0.1 / 2.1 variant of Remote Start + Auto MeterValue.",
   "targetType": "connector",
   "targetId": 1,
   "trigger": {

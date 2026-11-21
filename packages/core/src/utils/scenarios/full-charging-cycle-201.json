@@ -1,7 +1,7 @@
 {
   "id": "full-charging-cycle-201",
   "name": "Full Charging Cycle (OCPP 2.0.1 / 2.1)",
-  "description": "Complete charging cycle with AutoMeterValue. OCPP 2.0.1 / 2.1 variant: same flow, 2.x payloads and assertions.",
+  "description": "Complete charging cycle with AutoMeterValue. OCPP 2.0.1 / 2.1 variant of Full Charging Cycle.",
   "targetType": "connector",
   "targetId": 1,
   "trigger": {

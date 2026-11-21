@@ -1,7 +1,7 @@
 {
   "id": "resilience-temporary-unavailable-recovery-201",
   "name": "Resilience: Temporary Unavailable Recovery (OCPP 2.0.1 / 2.1)",
-  "description": "Operator-driven. Send ChangeAvailability(Inoperative) then ChangeAvailability(Operative) for the connector. Passes when both calls arrived and the connector reported Unavailable and then Available (OCPP 1.6 payload checks for the statuses). OCPP 2.0.1 / 2.1 variant: same flow, 2.x payloads and assertions.",
+  "description": "Operator-driven. Send ChangeAvailability(Inoperative) then ChangeAvailability(Operative) for the connector. Passes when both calls were accepted and the connector reported Unavailable and then Available. OCPP 2.0.1 / 2.1 variant.",
   "targetType": "connector",
   "targetId": 1,
   "trigger": {

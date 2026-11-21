@@ -1,7 +1,7 @@
 {
   "id": "resilience-connector-fault-recovery-201",
   "name": "Resilience: Connector Fault Recovery (OCPP 2.0.1 / 2.1)",
-  "description": "Self-contained (OCPP 1.6 payload checks). Reports a Faulted connector with errorCode GroundFailure, holds it for 3 s, clears it with Available/NoError, and passes when both StatusNotifications were sent in that order. OCPP 2.0.1 / 2.1 variant: same flow, 2.x payloads and assertions.",
+  "description": "Self-contained. Reports a Faulted connector, holds it for 3 s, clears it with Available, and passes when both StatusNotifications were sent in that order. OCPP 2.0.1 / 2.1 variant (connectorStatus payload checks).",
   "targetType": "connector",
   "targetId": 1,
   "trigger": {

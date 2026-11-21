@@ -1,7 +1,7 @@
 {
   "id": "resilience-authorization-rejected-201",
   "name": "Resilience: Authorization Rejected (OCPP 2.0.1 / 2.1)",
-  "description": "Operator-prepared: the idTag RESIL-BLK must be Blocked on the CSMS. Plugs in, tries to start with it, and passes when Authorize was answered Blocked, no transaction started, and the connector is Available again after the cable was pulled (the run waits for it; OCPP 1.6 shape for the idTagInfo check). OCPP 2.0.1 / 2.1 variant: same flow, 2.x payloads and assertions.",
+  "description": "Operator-prepared: the token RESIL-BLK must be Blocked on the CSMS. Plugs in, tries to start with it, and passes when Authorize was answered Blocked (idTokenInfo), no TransactionEvent was sent, and the connector is Available again after the cable was pulled. OCPP 2.0.1 / 2.1 variant.",
   "targetType": "connector",
   "targetId": 1,
   "trigger": {

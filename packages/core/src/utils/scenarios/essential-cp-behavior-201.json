@@ -1,7 +1,7 @@
 {
   "id": "essential-cp-behavior-201",
   "name": "Essential CP Behavior (OCPP 2.0.1 / 2.1)",
-  "description": "Auto-start on connect: plug in, wait for RemoteStart, run a transaction with auto-meter (stops at the EV's target SoC), then plug out. OCPP 2.0.1 / 2.1 variant: same flow, 2.x payloads and assertions.",
+  "description": "Auto-start on connect: plug in, wait for RequestStartTransaction, run a transaction with auto-meter (stops at the EV's target SoC), wait for RequestStopTransaction, then plug out. OCPP 2.0.1 / 2.1 variant of Essential CP Behavior.",
   "targetType": "connector",
   "targetId": 1,
   "trigger": {

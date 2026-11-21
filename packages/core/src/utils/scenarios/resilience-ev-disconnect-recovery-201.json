@@ -1,7 +1,7 @@
 {
   "id": "resilience-ev-disconnect-recovery-201",
   "name": "Resilience: EV Disconnect Recovery (OCPP 2.0.1 / 2.1)",
-  "description": "Self-contained (OCPP 1.6 payload checks). Starts a session, pulls the cable mid-charge and passes when the transaction stopped with reason EVDisconnected (StopTransactionOnEVSideDisconnect=true, 1.6 §4.10) and the connector came back to Available. OCPP 2.0.1 / 2.1 variant: same flow, 2.x payloads and assertions.",
+  "description": "Self-contained. Starts a session, pulls the cable mid-charge and passes when the transaction ended with stoppedReason EVDisconnected (TransactionEvent Ended) and the connector came back to Available. OCPP 2.0.1 / 2.1 variant.",
   "targetType": "connector",
   "targetId": 1,
   "trigger": {

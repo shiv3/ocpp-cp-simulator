@@ -1,4 +1,5 @@
 {
+  "apps/cli/src/jsonMode.ts": 804,
   "apps/cli/src/server/CPRegistry.ts": 807,
   "apps/cli/src/server/RegistryChargePointService.ts": 1089,
   "apps/cli/src/server/rpc/cpProvisioning.ts": 822,

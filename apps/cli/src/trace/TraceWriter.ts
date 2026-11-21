@@ -131,12 +131,7 @@ export class TraceWriter {
   }
 }
 
-let globalTraceWriter: TraceWriter | null = null;
-
-export function setGlobalTraceWriter(writer: TraceWriter | null): void {
-  globalTraceWriter = writer;
-}
-
-export function getGlobalTraceWriter(): TraceWriter | null {
-  return globalTraceWriter;
-}
+export {
+  setGlobalTraceWriter,
+  getGlobalTraceWriter,
+} from "./globalTraceWriter";

@@ -82,6 +82,7 @@ export interface ParseState {
   logFile: string | null;
   logMaxBytes: number | null;
   logRotateDaily: boolean;
+  logToStderr: boolean;
   logKeep: number;
   shutdownStopTransactions: boolean;
   shutdownWaitMs: number;
@@ -183,6 +184,7 @@ export function createParseState(): ParseState {
     logFile: null,
     logMaxBytes: null,
     logRotateDaily: false,
+    logToStderr: false,
     logKeep: 5,
     shutdownStopTransactions: false,
     shutdownWaitMs: 5000,

@@ -8,7 +8,7 @@ import {
   type Get15118EVCertificateResult,
 } from "../security/get15118EVCertificate";
 import type { Outbox } from "../transport/Outbox";
-import { encodeSendFrame } from "../../infrastructure/transport/callFrame";
+import { OCPPMessageType } from "../types/OcppTypes";
 import type { OcppCallActions } from "../transport/OcppCallActions";
 import type { RawFrameSink } from "../transport/RawFrameSink";
 import type {
@@ -39,7 +39,10 @@ import type { ChargePointTransport } from "./ChargePointDeps";
 export interface StationMessagingHost {
   /** Public members go through it so spies on the charge point still see
    *  them. */
-  readonly chargePoint: Pick<ChargePoint, "getConnector" | "sendOcppCall">;
+  readonly chargePoint: Pick<
+    ChargePoint,
+    "getConnector" | "sendOcppCall" | "rng"
+  >;
   readonly callCatalog: () => OcppCallActions | null;
   readonly clock: () => SimClock;
   readonly engine: () => ChargePointEngine;
@@ -199,8 +202,14 @@ export class StationMessaging {
       const warning = catalog.validate(request.action, payload);
       if (warning) throw new OcppCallRejectedError("invalid_payload", warning);
     }
-    const messageId = globalThis.crypto.randomUUID();
-    const frame = encodeSendFrame(messageId, request.action, payload);
+    const messageId = this.host.chargePoint.rng("expert-send").uuid();
+    // `[6, messageId, action, payload]`, the frame callFrame.encodeSendFrame builds.
+    const frame = JSON.stringify([
+      OCPPMessageType.SEND,
+      messageId,
+      request.action,
+      payload,
+    ]);
     await this.sendRawFrame({ frame, waitMs: 0 });
     return { messageId, sentFrame: frame };
   }

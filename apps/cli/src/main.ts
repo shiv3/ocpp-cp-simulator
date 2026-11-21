@@ -1,14 +1,15 @@
 #!/usr/bin/env bun
 import { startRepl } from "./repl";
 import { startJsonMode } from "./jsonMode";
+import { routeLogsToStderr } from "./jsonLines";
 import { resolveClientLocation } from "./clientLocation";
 import { openSqliteDatabase } from "@ocpp-cp-simulator/core/cp/infrastructure/persistence/openSqliteDatabase";
 import { isMainModule } from "./runtime";
 import type { Database } from "@ocpp-cp-simulator/core/cp/domain/persistence/Database";
 import { setGlobalLogFormat } from "@ocpp-cp-simulator/core/cp/shared/Logger";
-import { TraceWriter, setGlobalTraceWriter } from "./trace/TraceWriter";
+import { setGlobalTraceWriter } from "./trace/globalTraceWriter";
+import { loadTraceFeature } from "./trace/loadTraceFeature";
 import { parseAnalyzeArgs } from "./analyze/parseAnalyzeArgs";
-import { runAnalyze } from "./analyze/runAnalyze";
 import { buildBehaviorFile, parseBehaviorArgs } from "./behavior/buildBehavior";
 import { parseExportK6Args } from "./exportK6/parseExportK6Args";
 import { runExportK6 } from "./exportK6/runExportK6";
@@ -54,6 +55,10 @@ async function main(): Promise<void> {
       process.stderr.write(`${parsed.message}\n`);
       process.exit(1);
     }
+    const { runAnalyze } = await loadTraceFeature(
+      "analyze",
+      () => import("./analyze/runAnalyze"),
+    );
     const code = await runAnalyze(parsed.args);
     process.exit(code);
   }
@@ -93,6 +98,8 @@ async function main(): Promise<void> {
   // every line that follows respects it — including "[server] xxx" setup
   // chatter via serverLog.
   setGlobalLogFormat(options.logFormat);
+  // --json --log-to-stderr: stdout carries only JSON Lines (#1088).
+  if (options.jsonMode && options.logToStderr) routeLogsToStderr();
   // --log-level / --log-file (#621). Wraps the console only when asked for.
   try {
     installLogSink({
@@ -120,6 +127,10 @@ async function main(): Promise<void> {
   // loudly at startup rather than silently losing every trace record.
   if (options.traceOutput) {
     try {
+      const { TraceWriter } = await loadTraceFeature(
+        "--trace-output",
+        () => import("./trace/TraceWriter"),
+      );
       const traceWriter = new TraceWriter(options.traceOutput);
       setGlobalTraceWriter(traceWriter);
     } catch (err) {

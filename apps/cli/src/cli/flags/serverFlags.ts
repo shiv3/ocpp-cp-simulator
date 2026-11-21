@@ -179,6 +179,9 @@ export function parseServerFlag(
       cur.i++;
       break;
     }
+    case "--log-to-stderr":
+      s.logToStderr = true;
+      break;
     case "--log-rotate-daily":
       s.logRotateDaily = true;
       break;

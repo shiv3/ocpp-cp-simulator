@@ -196,6 +196,8 @@ export interface CLIOptions {
   readonly logFile: string | null;
   /** `--log-max-size`: rotate the log file past this many bytes (#621). */
   readonly logMaxBytes: number | null;
+  /** `--log-to-stderr`: with `--json`, print log lines on stderr so stdout is pure JSON Lines (#1088). */
+  readonly logToStderr: boolean;
   /** `--log-rotate-daily`: rotate the log file when the date changes (#621). */
   readonly logRotateDaily: boolean;
   /** `--log-keep`: rotated log files to keep (#621). */

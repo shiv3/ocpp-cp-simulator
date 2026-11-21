@@ -72,5 +72,45 @@
     { "id": "e3", "source": "trigger-remote-start", "target": "tx-start" },
     { "id": "e4", "source": "tx-start", "target": "meter-auto" },
     { "id": "e5", "source": "meter-auto", "target": "end-1" }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "RemoteStartTransaction",
+        "node": "trigger-remote-start",
+        "example": { "connectorId": 1, "idTag": "CERT010" },
+        "expectedStatus": "Accepted"
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "id": "remote-start-received",
+      "type": "ocpp_received",
+      "action": "RemoteStartTransaction",
+      "description": "RemoteStartTransaction received from the CSMS"
+    },
+    {
+      "id": "remote-start-accepted",
+      "type": "response_status",
+      "action": "RemoteStartTransaction",
+      "status": "Accepted",
+      "description": "RemoteStartTransaction answered Accepted"
+    },
+    {
+      "id": "started",
+      "type": "payload_match",
+      "action": "StartTransaction",
+      "payload": { "idTag": "CERT010" },
+      "description": "StartTransaction carries idTag CERT010"
+    },
+    {
+      "id": "start-after-remote-start",
+      "type": "message_after",
+      "before": { "action": "RemoteStartTransaction", "direction": "received" },
+      "after": { "action": "StartTransaction" },
+      "description": "StartTransaction after RemoteStartTransaction"
+    }
   ]
 }

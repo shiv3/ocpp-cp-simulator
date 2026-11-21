@@ -78,5 +78,40 @@
     { "id": "e5", "source": "meter-auto", "target": "trigger-remote-stop" },
     { "id": "e6", "source": "trigger-remote-stop", "target": "tx-stop" },
     { "id": "e7", "source": "tx-stop", "target": "end-1" }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "RemoteStopTransaction",
+        "node": "trigger-remote-stop",
+        "example": { "transactionId": "<transactionId>" },
+        "expectedStatus": "Accepted"
+      }
+    ],
+    "note": "The scenario starts the transaction itself (tag CERT012); the CSMS stops it."
+  },
+  "assertions": [
+    {
+      "id": "started",
+      "type": "payload_match",
+      "action": "StartTransaction",
+      "payload": { "idTag": "CERT012" },
+      "description": "StartTransaction carries idTag CERT012"
+    },
+    {
+      "id": "remote-stop-accepted",
+      "type": "response_status",
+      "action": "RemoteStopTransaction",
+      "status": "Accepted",
+      "description": "RemoteStopTransaction answered Accepted"
+    },
+    {
+      "id": "stop-after-remote-stop",
+      "type": "message_after",
+      "before": { "action": "RemoteStopTransaction", "direction": "received" },
+      "after": { "action": "StopTransaction" },
+      "description": "StopTransaction after RemoteStopTransaction"
+    }
   ]
 }

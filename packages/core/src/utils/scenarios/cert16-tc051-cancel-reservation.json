@@ -52,5 +52,62 @@
     { "id": "e2", "source": "trigger-reservation", "target": "trigger-cancel" },
     { "id": "e3", "source": "trigger-cancel", "target": "status-available" },
     { "id": "e4", "source": "status-available", "target": "end-1" }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "ReserveNow",
+        "node": "trigger-reservation",
+        "example": {
+          "connectorId": 1,
+          "expiryDate": "<now+3600s>",
+          "idTag": "CERT-RES01",
+          "reservationId": 7
+        },
+        "expectedStatus": "Accepted"
+      },
+      {
+        "action": "CancelReservation",
+        "node": "trigger-cancel",
+        "example": { "reservationId": 7 },
+        "expectedStatus": "Accepted"
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "id": "reserve-accepted",
+      "type": "response_status",
+      "action": "ReserveNow",
+      "status": "Accepted",
+      "description": "ReserveNow answered Accepted"
+    },
+    {
+      "id": "reserved",
+      "type": "state_transition",
+      "targetStatus": "Reserved",
+      "description": "connector reaches Reserved"
+    },
+    {
+      "id": "cancel-accepted",
+      "type": "response_status",
+      "action": "CancelReservation",
+      "status": "Accepted",
+      "description": "CancelReservation answered Accepted"
+    },
+    {
+      "id": "cancel-after-reserve",
+      "type": "message_order",
+      "before": { "action": "ReserveNow", "direction": "received" },
+      "after": { "action": "CancelReservation", "direction": "received" },
+      "description": "CancelReservation after ReserveNow"
+    },
+    {
+      "id": "available-again",
+      "type": "state_transition",
+      "targetStatus": "Available",
+      "description": "connector reaches Available"
+    }
   ]
 }

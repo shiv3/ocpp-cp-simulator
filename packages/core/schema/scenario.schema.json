@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/shiv3/ocpp-cp-simulator/schema/scenario.schema.json",
-  "title": "ScenarioDefinition (scenario schema v1.11)",
-  "$comment": "Scenario file format v1.11 (statusChange allowInvalidTransition added in v1.11 by issue #618; edge kind \"loop\" with loop bounds added in v1.10; parallel and join nodes added in v1.9; edge kind \"timeout\" added in v1.8; $from root \"response\" and $match switch cases added in v1.7; useBehavior params and mode disable added by issue #654; csmsCallTrigger behavior / onBusy, callResponse and useBehavior nodes and the $from payload reference added by issue #566; issue #214; connectionTrigger node and csmsCallTrigger payload condition added by issue #240; evSettings charging curve and electrical fields added by issue #301; ocppCall node added by issue #389; libraryId added by the web console Library). Mirrors packages/core/src/cp/application/scenario/ScenarioTypes.ts. See docs/concepts/scenario-format.md for the field overview and versioning rules. This is a first published contract: it is STRICT on known fields (types, required-ness, closed-vocabulary enums) but PERMISSIVE on unknown keys at every object level (additionalProperties: true) — real editor exports carry xyflow UI fields (width/height/selected/style/...) that this schema deliberately does not reject. Validation against this schema is advisory only in this version: the simulator warns on a mismatch but never refuses to load a file.",
+  "title": "ScenarioDefinition (scenario schema v1.12)",
+  "$comment": "Scenario file format v1.12 (ocppVersions and csmsExpectations added in v1.12 by the template metadata work; statusChange allowInvalidTransition added in v1.11 by issue #618; edge kind \"loop\" with loop bounds added in v1.10; parallel and join nodes added in v1.9; edge kind \"timeout\" added in v1.8; $from root \"response\" and $match switch cases added in v1.7; useBehavior params and mode disable added by issue #654; csmsCallTrigger behavior / onBusy, callResponse and useBehavior nodes and the $from payload reference added by issue #566; issue #214; connectionTrigger node and csmsCallTrigger payload condition added by issue #240; evSettings charging curve and electrical fields added by issue #301; ocppCall node added by issue #389; libraryId added by the web console Library). Mirrors packages/core/src/cp/application/scenario/ScenarioTypes.ts. See docs/concepts/scenario-format.md for the field overview and versioning rules. This is a first published contract: it is STRICT on known fields (types, required-ness, closed-vocabulary enums) but PERMISSIVE on unknown keys at every object level (additionalProperties: true) — real editor exports carry xyflow UI fields (width/height/selected/style/...) that this schema deliberately does not reject. Validation against this schema is advisory only in this version: the simulator warns on a mismatch but never refuses to load a file.",
   "type": "object",
   "additionalProperties": true,
   "required": ["id", "name", "targetType", "nodes", "edges"],
@@ -77,7 +77,13 @@
     "assertions": {
       "type": "array",
       "items": { "$ref": "#/$defs/assertion" }
-    }
+    },
+    "ocppVersions": {
+      "type": "array",
+      "items": { "type": "string", "enum": ["1.6", "2.0.1", "2.1"] },
+      "description": "v1.12. OCPP versions the scenario's wire shapes are written for. Informational; loading a built-in template on a charge point speaking another version logs a warning."
+    },
+    "csmsExpectations": { "$ref": "#/$defs/csmsExpectations" }
   },
   "$defs": {
     "ocppStatus": {
@@ -228,6 +234,61 @@
         }
       }
     },
+    "csmsExpectations": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "v1.12. What the scenario needs from the CSMS to take its intended path. Informational: the runtime ignores it. Payload examples may hold the placeholders <transactionId>, <now+Ns>, <uploadUrl> and <firmwareUrl>.",
+      "properties": {
+        "calls": {
+          "type": "array",
+          "description": "CSMS-initiated calls the scenario waits for, in order.",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["action"],
+            "properties": {
+              "action": { "type": "string" },
+              "node": { "type": "string" },
+              "example": { "type": "object" },
+              "expectedStatus": { "type": "string" },
+              "optional": { "type": "boolean" },
+              "note": { "type": "string" }
+            }
+          }
+        },
+        "answers": {
+          "type": "array",
+          "description": "Answers the CSMS must give to calls the charge point makes.",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["action", "respond"],
+            "properties": {
+              "action": { "type": "string" },
+              "when": { "type": "object" },
+              "respond": { "type": "object" },
+              "note": { "type": "string" }
+            }
+          }
+        },
+        "simulatorSteps": {
+          "type": "array",
+          "description": "Charge-point-side steps outside the CSMS (simulator commands).",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["command"],
+            "properties": {
+              "command": { "type": "string" },
+              "params": { "type": "object" },
+              "node": { "type": "string" },
+              "note": { "type": "string" }
+            }
+          }
+        },
+        "note": { "type": "string" }
+      }
+    },
     "assertion": {
       "type": "object",
       "additionalProperties": true,
@@ -258,7 +319,10 @@
         "action": { "type": "string" },
         "direction": { "type": "string", "enum": ["sent", "received"] },
         "status": { "type": "string" },
-        "occurrence": { "type": "number" },
+        "occurrence": {
+          "description": "Nth (0-indexed) occurrence of the action. payload_match also takes \"any\" (v1.12): any CALL of the action may match.",
+          "oneOf": [{ "type": "number" }, { "const": "any" }]
+        },
         "payload": { "type": "object" },
         "targetStatus": { "type": "string" },
         "actions": { "type": "array", "items": { "type": "string" } },

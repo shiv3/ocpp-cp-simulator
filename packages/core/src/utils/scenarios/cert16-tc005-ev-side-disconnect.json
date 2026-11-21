@@ -75,5 +75,30 @@
     { "id": "e4", "source": "meter-auto", "target": "plug-out" },
     { "id": "e5", "source": "plug-out", "target": "tx-stop" },
     { "id": "e6", "source": "tx-stop", "target": "end-1" }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": { "calls": [], "note": "No CSMS action." },
+  "assertions": [
+    {
+      "id": "started",
+      "type": "payload_match",
+      "action": "StartTransaction",
+      "payload": { "idTag": "CERT005" },
+      "description": "StartTransaction carries idTag CERT005"
+    },
+    {
+      "id": "stopped-by-ev",
+      "type": "payload_match",
+      "action": "StopTransaction",
+      "payload": { "reason": "EVDisconnected" },
+      "description": "StopTransaction carries the expected payload"
+    },
+    {
+      "id": "stop-after-start",
+      "type": "message_after",
+      "before": { "action": "StartTransaction" },
+      "after": { "action": "StopTransaction" },
+      "description": "StopTransaction after StartTransaction"
+    }
   ]
 }

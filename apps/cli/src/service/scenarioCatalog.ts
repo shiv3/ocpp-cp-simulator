@@ -15,6 +15,8 @@ import { getDefaultEVSettings } from "@ocpp-cp-simulator/core/cp/domain/connecto
 import {
   scenarioTemplates,
   getTemplateById,
+  summarizeTemplate,
+  type ScenarioTemplateSummary,
 } from "@ocpp-cp-simulator/core/utils/scenarioTemplates";
 import { scenarioInstanceId } from "../scenarioInstanceId";
 import type { ScenarioRunRecorder } from "@ocpp-cp-simulator/core/cp/application/verification/ScenarioRunRecorder";
@@ -50,16 +52,8 @@ export interface ScenarioCatalogHost extends Pick<
   ): void;
 }
 
-export function getScenarioTemplates(): ReadonlyArray<{
-  readonly id: string;
-  readonly name: string;
-  readonly description: string;
-}> {
-  return scenarioTemplates.map((t) => ({
-    id: t.id,
-    name: t.name,
-    description: t.description,
-  }));
+export function getScenarioTemplates(): ReadonlyArray<ScenarioTemplateSummary> {
+  return scenarioTemplates.map(summarizeTemplate);
 }
 
 /**
@@ -108,6 +102,16 @@ export function loadScenarioTemplate(
     throw new Error(`Unknown template: ${templateId}`);
   }
   const definition = template.createScenario(host.chargePoint.id, connectorId);
+  // Informational (schema 1.12): the template's wire shapes are written for
+  // other OCPP versions than this charge point speaks. It still loads: some
+  // flows work across versions, and refusing would break existing callers.
+  const wireVersion = host.chargePoint.ocppVersion.replace(/^OCPP-/, "");
+  const shortVersion = wireVersion.replace(/[JS]$/, "");
+  if (!template.ocppVersions.includes(shortVersion)) {
+    process.stderr.write(
+      `[CLI] template ${templateId} is written for OCPP ${template.ocppVersions.join(" / ")}; this charge point speaks ${shortVersion}, so its wire shapes and assertions may not apply\n`,
+    );
+  }
   // Let callers pin e.g. maxChargingPowerKw without authoring a custom
   // scenario; otherwise the template's own evSettings clobber a prior
   // set_ev_settings when the scenario starts.

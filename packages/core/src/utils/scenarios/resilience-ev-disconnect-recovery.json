@@ -180,5 +180,7 @@
       },
       "description": "StopTransaction follows StartTransaction"
     }
-  ]
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": { "calls": [], "note": "No CSMS action." }
 }

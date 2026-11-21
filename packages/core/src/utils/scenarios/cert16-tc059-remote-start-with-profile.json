@@ -67,5 +67,55 @@
     { "id": "e3", "source": "tx-start", "target": "meter-auto" },
     { "id": "e4", "source": "meter-auto", "target": "tx-stop" },
     { "id": "e5", "source": "tx-stop", "target": "end-1" }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "RemoteStartTransaction",
+        "node": "remote-start-trigger",
+        "example": {
+          "connectorId": 1,
+          "idTag": "CERT059",
+          "chargingProfile": {
+            "chargingProfileId": 12,
+            "stackLevel": 0,
+            "chargingProfilePurpose": "TxProfile",
+            "chargingProfileKind": "Relative",
+            "chargingSchedule": {
+              "chargingRateUnit": "W",
+              "chargingSchedulePeriod": [{ "startPeriod": 0, "limit": 7000 }]
+            }
+          }
+        },
+        "expectedStatus": "Accepted"
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "id": "profile-in-remote-start",
+      "type": "payload_match",
+      "action": "RemoteStartTransaction",
+      "direction": "received",
+      "payload": {
+        "chargingProfile": { "chargingProfilePurpose": "TxProfile" }
+      },
+      "description": "RemoteStartTransaction from the CSMS carries the expected payload"
+    },
+    {
+      "id": "remote-start-accepted",
+      "type": "response_status",
+      "action": "RemoteStartTransaction",
+      "status": "Accepted",
+      "description": "RemoteStartTransaction answered Accepted"
+    },
+    {
+      "id": "started",
+      "type": "payload_match",
+      "action": "StartTransaction",
+      "payload": { "idTag": "CERT059" },
+      "description": "StartTransaction carries idTag CERT059"
+    }
   ]
 }

@@ -363,6 +363,40 @@ export interface ScenarioTemplateInfo {
   id: string;
   name: string;
   description: string;
+  /** `"connector"` templates run on one connector; `"chargePoint"` on the station. */
+  targetType?: "chargePoint" | "connector";
+  /** OCPP versions the template's wire shapes are written for (`"1.6"`, `"2.0.1"`, `"2.1"`). */
+  ocppVersions?: string[];
+  /**
+   * What the template needs from the CSMS to take its intended path: the
+   * CSMS-initiated calls it waits for (with example payloads), the answers it
+   * needs, and any simulator steps (see scenario format 1.12).
+   */
+  csmsExpectations?: {
+    calls?: Array<{
+      action: string;
+      node?: string;
+      example?: Record<string, unknown>;
+      expectedStatus?: string;
+      optional?: boolean;
+      note?: string;
+    }>;
+    answers?: Array<{
+      action: string;
+      when?: Record<string, unknown>;
+      respond: Record<string, unknown>;
+      note?: string;
+    }>;
+    simulatorSteps?: Array<{
+      command: string;
+      params?: Record<string, unknown>;
+      node?: string;
+      note?: string;
+    }>;
+    note?: string;
+  };
+  /** The assertions a run of the template is judged by. */
+  assertions?: Array<{ id: string; type: string; description: string }>;
 }
 
 export interface ScenarioRunOptions {

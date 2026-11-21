@@ -42,5 +42,38 @@
     { "id": "e1", "source": "start-1", "target": "send-data-transfer" },
     { "id": "e3", "source": "send-data-transfer", "target": "delay-1" },
     { "id": "e4", "source": "delay-1", "target": "end-1" }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [],
+    "answers": [
+      {
+        "action": "DataTransfer",
+        "when": { "vendorId": "com.example.cert16" },
+        "respond": { "status": "Accepted" }
+      }
+    ],
+    "note": "No CSMS call; the CSMS answers the charge point's DataTransfer Accepted."
+  },
+  "assertions": [
+    {
+      "id": "data-transfer-sent",
+      "type": "payload_match",
+      "action": "DataTransfer",
+      "payload": {
+        "vendorId": "com.example.cert16",
+        "messageId": "certTest",
+        "data": "hello-csms"
+      },
+      "description": "DataTransfer carries the expected payload"
+    },
+    {
+      "id": "data-transfer-accepted",
+      "type": "response_status",
+      "action": "DataTransfer",
+      "status": "Accepted",
+      "description": "DataTransfer answered Accepted",
+      "direction": "sent"
+    }
   ]
 }

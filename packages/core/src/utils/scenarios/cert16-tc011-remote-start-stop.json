@@ -71,5 +71,52 @@
     { "id": "e4", "source": "meter-auto", "target": "trigger-remote-stop" },
     { "id": "e5", "source": "trigger-remote-stop", "target": "tx-stop" },
     { "id": "e6", "source": "tx-stop", "target": "end-1" }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "RemoteStartTransaction",
+        "node": "trigger-remote-start",
+        "example": { "connectorId": 1, "idTag": "CERT011" },
+        "expectedStatus": "Accepted"
+      },
+      {
+        "action": "RemoteStopTransaction",
+        "node": "trigger-remote-stop",
+        "example": { "transactionId": "<transactionId>" },
+        "expectedStatus": "Accepted"
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "id": "remote-start-accepted",
+      "type": "response_status",
+      "action": "RemoteStartTransaction",
+      "status": "Accepted",
+      "description": "RemoteStartTransaction answered Accepted"
+    },
+    {
+      "id": "started",
+      "type": "payload_match",
+      "action": "StartTransaction",
+      "payload": { "idTag": "CERT011" },
+      "description": "StartTransaction carries idTag CERT011"
+    },
+    {
+      "id": "remote-stop-accepted",
+      "type": "response_status",
+      "action": "RemoteStopTransaction",
+      "status": "Accepted",
+      "description": "RemoteStopTransaction answered Accepted"
+    },
+    {
+      "id": "stop-after-remote-stop",
+      "type": "message_after",
+      "before": { "action": "RemoteStopTransaction", "direction": "received" },
+      "after": { "action": "StopTransaction" },
+      "description": "StopTransaction after RemoteStopTransaction"
+    }
   ]
 }

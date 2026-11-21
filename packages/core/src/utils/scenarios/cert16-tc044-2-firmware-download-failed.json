@@ -78,5 +78,38 @@
       "target": "delay-firmware-sequence"
     },
     { "id": "e5", "source": "delay-firmware-sequence", "target": "end-1" }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "UpdateFirmware",
+        "node": "trigger-firmware-update",
+        "example": { "location": "<firmwareUrl>", "retrieveDate": "<now+0s>" }
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "id": "update-firmware-received",
+      "type": "ocpp_received",
+      "action": "UpdateFirmware",
+      "description": "UpdateFirmware received from the CSMS"
+    },
+    {
+      "id": "firmware-0",
+      "type": "payload_match",
+      "action": "FirmwareStatusNotification",
+      "payload": { "status": "Downloading" },
+      "description": "FirmwareStatusNotification #1 is Downloading"
+    },
+    {
+      "id": "firmware-1",
+      "type": "payload_match",
+      "action": "FirmwareStatusNotification",
+      "payload": { "status": "DownloadFailed" },
+      "description": "FirmwareStatusNotification #2 is DownloadFailed",
+      "occurrence": 1
+    }
   ]
 }

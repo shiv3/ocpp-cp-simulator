@@ -49,5 +49,32 @@
       "target": "trigger-message"
     },
     { "id": "e4", "source": "trigger-message", "target": "end-1" }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "TriggerMessage",
+        "node": "trigger-message",
+        "example": { "requestedMessage": "Heartbeat" },
+        "expectedStatus": "Rejected",
+        "note": "The scenario arms a Rejected answer."
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "id": "trigger-received",
+      "type": "ocpp_received",
+      "action": "TriggerMessage",
+      "description": "TriggerMessage received from the CSMS"
+    },
+    {
+      "id": "trigger-rejected",
+      "type": "response_status",
+      "action": "TriggerMessage",
+      "status": "Rejected",
+      "description": "TriggerMessage answered Rejected"
+    }
   ]
 }

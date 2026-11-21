@@ -86,5 +86,26 @@
       "source": "transaction-stop",
       "target": "end-1"
     }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [],
+    "note": "No CSMS action; the tag USER001 must be authorized (the default answer)."
+  },
+  "assertions": [
+    {
+      "id": "started",
+      "type": "payload_match",
+      "action": "StartTransaction",
+      "payload": { "idTag": "USER001" },
+      "description": "StartTransaction carries idTag USER001"
+    },
+    {
+      "id": "stop-after-start",
+      "type": "message_after",
+      "before": { "action": "StartTransaction" },
+      "after": { "action": "StopTransaction" },
+      "description": "StopTransaction after StartTransaction"
+    }
   ]
 }

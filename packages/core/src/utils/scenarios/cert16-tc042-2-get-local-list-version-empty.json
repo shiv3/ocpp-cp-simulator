@@ -60,5 +60,24 @@
       "target": "trigger-get-local-list"
     },
     { "id": "e4", "source": "trigger-get-local-list", "target": "end-1" }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "GetLocalListVersion",
+        "node": "trigger-get-local-list",
+        "example": {},
+        "note": "The answer is listVersion -1 when the list is disabled, 0 when it is enabled and empty."
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "id": "get-local-list-version-received",
+      "type": "ocpp_received",
+      "action": "GetLocalListVersion",
+      "description": "GetLocalListVersion received from the CSMS"
+    }
   ]
 }

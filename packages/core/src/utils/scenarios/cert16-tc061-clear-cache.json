@@ -34,5 +34,31 @@
   "edges": [
     { "id": "e1", "source": "start-1", "target": "trigger-clear-cache" },
     { "id": "e3", "source": "trigger-clear-cache", "target": "end-1" }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "ClearCache",
+        "node": "trigger-clear-cache",
+        "example": {},
+        "expectedStatus": "Accepted"
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "id": "clear-cache-received",
+      "type": "ocpp_received",
+      "action": "ClearCache",
+      "description": "ClearCache received from the CSMS"
+    },
+    {
+      "id": "clear-cache-accepted",
+      "type": "response_status",
+      "action": "ClearCache",
+      "status": "Accepted",
+      "description": "ClearCache answered Accepted"
+    }
   ]
 }

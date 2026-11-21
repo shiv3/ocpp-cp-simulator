@@ -91,5 +91,39 @@
     { "id": "e6", "source": "unlock-arm", "target": "delay-unlock-window" },
     { "id": "e7", "source": "delay-unlock-window", "target": "tx-stop" },
     { "id": "e8", "source": "tx-stop", "target": "end-1" }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "UnlockConnector",
+        "node": "delay-unlock-window",
+        "example": { "connectorId": 1 },
+        "expectedStatus": "UnlockFailed",
+        "note": "Within the 10 s window after the transaction started."
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "id": "started",
+      "type": "payload_match",
+      "action": "StartTransaction",
+      "payload": { "idTag": "CERT018" },
+      "description": "StartTransaction carries idTag CERT018"
+    },
+    {
+      "id": "unlock-received",
+      "type": "ocpp_received",
+      "action": "UnlockConnector",
+      "description": "UnlockConnector received from the CSMS"
+    },
+    {
+      "id": "unlock-failed",
+      "type": "response_status",
+      "action": "UnlockConnector",
+      "status": "UnlockFailed",
+      "description": "UnlockConnector answered UnlockFailed"
+    }
   ]
 }

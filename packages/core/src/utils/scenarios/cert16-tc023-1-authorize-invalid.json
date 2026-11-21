@@ -55,5 +55,39 @@
     { "id": "e3", "source": "tx-start", "target": "delay-1" },
     { "id": "e4", "source": "delay-1", "target": "plug-out" },
     { "id": "e5", "source": "plug-out", "target": "end-1" }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [],
+    "answers": [
+      {
+        "action": "Authorize",
+        "when": { "idTag": "CERT023-INV" },
+        "respond": { "idTagInfo": { "status": "Invalid" } }
+      }
+    ],
+    "note": "No CSMS call; the CSMS must answer Authorize for CERT023-INV with Invalid."
+  },
+  "assertions": [
+    {
+      "id": "authorize-tag",
+      "type": "payload_match",
+      "action": "Authorize",
+      "payload": { "idTag": "CERT023-INV" },
+      "description": "Authorize carries the expected payload"
+    },
+    {
+      "id": "authorize-invalid",
+      "type": "idtag_info_status",
+      "action": "Authorize",
+      "status": "Invalid",
+      "description": "Authorize answered Invalid"
+    },
+    {
+      "id": "no-start",
+      "type": "ocpp_absent",
+      "action": "StartTransaction",
+      "description": "No transaction after a denied Authorize"
+    }
   ]
 }

@@ -224,5 +224,46 @@
       "source": "join-1",
       "target": "end-1"
     }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "RemoteStartTransaction",
+        "node": "trigger-remote-start",
+        "example": { "connectorId": 1, "idTag": "PARALLEL-TAG" },
+        "expectedStatus": "Accepted"
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "id": "heartbeat-first",
+      "type": "ocpp_sent",
+      "action": "Heartbeat",
+      "description": "Heartbeat sent"
+    },
+    {
+      "id": "heartbeat-third",
+      "type": "payload_match",
+      "action": "Heartbeat",
+      "payload": {},
+      "description": "Three Heartbeats sent",
+      "occurrence": 2
+    },
+    {
+      "id": "remote-start-accepted",
+      "type": "response_status",
+      "action": "RemoteStartTransaction",
+      "status": "Accepted",
+      "description": "RemoteStartTransaction answered Accepted"
+    },
+    {
+      "id": "started",
+      "type": "payload_match",
+      "action": "StartTransaction",
+      "payload": { "idTag": "PARALLEL-TAG" },
+      "description": "StartTransaction carries idTag PARALLEL-TAG"
+    }
   ]
 }

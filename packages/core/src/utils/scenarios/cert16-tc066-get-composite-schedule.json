@@ -48,5 +48,68 @@
       "target": "csms-get-composite-schedule"
     },
     { "id": "e4", "source": "csms-get-composite-schedule", "target": "end-1" }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "SetChargingProfile",
+        "node": "csms-set-charging-profile",
+        "example": {
+          "connectorId": 0,
+          "csChargingProfiles": {
+            "chargingProfileId": 11,
+            "stackLevel": 0,
+            "chargingProfilePurpose": "TxDefaultProfile",
+            "chargingProfileKind": "Absolute",
+            "chargingSchedule": {
+              "chargingRateUnit": "W",
+              "chargingSchedulePeriod": [{ "startPeriod": 0, "limit": 11000 }],
+              "duration": 3600
+            }
+          }
+        },
+        "expectedStatus": "Accepted"
+      },
+      {
+        "action": "GetCompositeSchedule",
+        "node": "csms-get-composite-schedule",
+        "example": {
+          "connectorId": 1,
+          "duration": 600,
+          "chargingRateUnit": "W"
+        },
+        "expectedStatus": "Accepted"
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "id": "profile-accepted",
+      "type": "response_status",
+      "action": "SetChargingProfile",
+      "status": "Accepted",
+      "description": "SetChargingProfile answered Accepted"
+    },
+    {
+      "id": "composite-schedule-received",
+      "type": "ocpp_received",
+      "action": "GetCompositeSchedule",
+      "description": "GetCompositeSchedule received from the CSMS"
+    },
+    {
+      "id": "composite-accepted",
+      "type": "response_status",
+      "action": "GetCompositeSchedule",
+      "status": "Accepted",
+      "description": "GetCompositeSchedule answered Accepted"
+    },
+    {
+      "id": "schedule-after-profile",
+      "type": "message_order",
+      "before": { "action": "SetChargingProfile", "direction": "received" },
+      "after": { "action": "GetCompositeSchedule", "direction": "received" },
+      "description": "GetCompositeSchedule after SetChargingProfile"
+    }
   ]
 }

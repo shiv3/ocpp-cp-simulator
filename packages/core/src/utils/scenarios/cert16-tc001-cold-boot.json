@@ -33,5 +33,18 @@
   "edges": [
     { "id": "e1", "source": "start-1", "target": "delay-idle" },
     { "id": "e3", "source": "delay-idle", "target": "end-1" }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [],
+    "note": "No CSMS action; the scenario idles for 10 s after the cold boot."
+  },
+  "assertions": [
+    {
+      "id": "idle-no-transaction",
+      "type": "no_unexpected",
+      "actions": ["StartTransaction", "StopTransaction"],
+      "description": "No transaction while idling"
+    }
   ]
 }

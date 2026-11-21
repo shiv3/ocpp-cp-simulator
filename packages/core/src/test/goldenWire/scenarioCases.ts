@@ -196,40 +196,55 @@ function callPayload(
   );
 }
 
-function operatorFor(templateId: string): Operator {
+function operatorFor(templateId: string, payloadFor?: PayloadSource): Operator {
   const nth = new Map<string, number>();
+  const payload = (rig: Rig, action: string, n: number): unknown =>
+    payloadFor
+      ? payloadFor(rig, action, n)
+      : callPayload(rig, templateId, action, n);
   return async (rig, node) => {
-    const send = async (action: string, payload: unknown) => {
+    const send = async (action: string, body: unknown) => {
       await new Promise((r) => setTimeout(r, OPERATOR_DELAY_MS));
-      await rig.csms.call(action, payload);
+      await rig.csms.call(action, body);
+    };
+    // The nth call of an action, counting every trigger kind that sends it.
+    const next = (action: string): number => {
+      const n = nth.get(action) ?? 0;
+      nth.set(action, n + 1);
+      return n;
     };
     switch (node.type) {
       case "csmsCallTrigger": {
         const action = String(node.data.action);
-        const n = nth.get(action) ?? 0;
-        nth.set(action, n + 1);
-        await send(action, callPayload(rig, templateId, action, n));
+        await send(action, payload(rig, action, next(action)));
         return;
       }
       case "remoteStartTrigger":
         await send(
           "RemoteStartTransaction",
-          callPayload(rig, templateId, "RemoteStartTransaction", 0),
+          payload(
+            rig,
+            "RemoteStartTransaction",
+            next("RemoteStartTransaction"),
+          ),
         );
         return;
       case "remoteStopTrigger":
         await send(
           "RemoteStopTransaction",
-          callPayload(rig, templateId, "RemoteStopTransaction", 0),
+          payload(rig, "RemoteStopTransaction", next("RemoteStopTransaction")),
         );
         return;
       case "reservationTrigger":
-        await send("ReserveNow", callPayload(rig, templateId, "ReserveNow", 0));
+        await send(
+          "ReserveNow",
+          payload(rig, "ReserveNow", next("ReserveNow")),
+        );
         return;
       case "unlockOutcome":
         await send(
           "UnlockConnector",
-          callPayload(rig, templateId, "UnlockConnector", 0),
+          payload(rig, "UnlockConnector", next("UnlockConnector")),
         );
         return;
       default:
@@ -280,7 +295,18 @@ export const SIDE_STEPS: Readonly<Record<string, (rig: Rig) => Promise<void>>> =
     },
   };
 
+/** Where the operator takes the body of a CSMS call from (default: the table above). */
+export type PayloadSource = (rig: Rig, action: string, nth: number) => unknown;
+
 export interface RunTemplateOptions {
+  /** Payload of each CSMS call, by action and occurrence. */
+  readonly payloadFor?: PayloadSource;
+  /**
+   * How long to run before stopping the scenario. Default: the window of
+   * {@link WINDOWED_MS} for a template in it, else until it ends. `null`
+   * runs to the end whatever the template.
+   */
+  readonly windowMs?: number | null;
   /** Change the instantiated definition before it runs (shorter waits). */
   readonly edit?: (def: ScenarioDefinition) => void;
   /** Receives the id of every node the executor runs, in order, repeats included. */
@@ -328,7 +354,7 @@ export async function runTemplate(
   events.on("execution.error", (info) =>
     finished(new Error(String(JSON.stringify(info)))),
   );
-  const operator = operatorFor(templateId);
+  const operator = operatorFor(templateId, opts.payloadFor);
   let chain: Promise<void> = Promise.resolve();
   const seen = new Set<string>();
   events.on("node.execute", (data) => {
@@ -344,9 +370,10 @@ export async function runTemplate(
   const executor = new ScenarioExecutor(def, callbacks, events);
   const side = SIDE_STEPS[templateId]?.(rig);
   const running = executor.start();
-  const windowMs = WINDOWED_MS[templateId];
+  const windowMs =
+    opts.windowMs === undefined ? WINDOWED_MS[templateId] : opts.windowMs;
   try {
-    if (windowMs !== undefined) {
+    if (windowMs !== undefined && windowMs !== null) {
       await new Promise((r) => setTimeout(r, windowMs));
     } else {
       await Promise.race([

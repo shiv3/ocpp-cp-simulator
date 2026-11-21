@@ -10,7 +10,8 @@ export function registerScenarioTools(
   deps: RuntimeSocketIoDeps,
 ): void {
   mcp.tool("scenario_templates", {
-    description: "List available scenario templates",
+    description:
+      "List available scenario templates with their OCPP versions, what the CSMS must do for the intended path (csmsExpectations: calls to send with example payloads, answers to give, simulator steps) and the assertions each run is judged by",
     inputSchema: z.object({}),
     handler: async () => {
       try {

@@ -29,6 +29,7 @@ import type { ScenarioRunResult } from "@ocpp-cp-simulator/core/cp/application/v
 import {
   scenarioTemplates,
   getTemplateById,
+  summarizeTemplate,
 } from "@ocpp-cp-simulator/core/utils/scenarioTemplates";
 import {
   requireConnector,
@@ -40,11 +41,7 @@ import {
 export async function getScenarioTemplates(
   _host: LocalServiceHost,
 ): Promise<ScenarioTemplateInfo[]> {
-  return scenarioTemplates.map((t) => ({
-    id: t.id,
-    name: t.name,
-    description: t.description,
-  }));
+  return scenarioTemplates.map(summarizeTemplate);
 }
 
 export async function listScenarioDefinitions(

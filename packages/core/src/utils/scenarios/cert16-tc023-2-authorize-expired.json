@@ -55,5 +55,39 @@
     { "id": "e3", "source": "tx-start", "target": "delay-1" },
     { "id": "e4", "source": "delay-1", "target": "plug-out" },
     { "id": "e5", "source": "plug-out", "target": "end-1" }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [],
+    "answers": [
+      {
+        "action": "Authorize",
+        "when": { "idTag": "CERT023-EXP" },
+        "respond": { "idTagInfo": { "status": "Expired" } }
+      }
+    ],
+    "note": "No CSMS call; the CSMS must answer Authorize for CERT023-EXP with Expired."
+  },
+  "assertions": [
+    {
+      "id": "authorize-tag",
+      "type": "payload_match",
+      "action": "Authorize",
+      "payload": { "idTag": "CERT023-EXP" },
+      "description": "Authorize carries the expected payload"
+    },
+    {
+      "id": "authorize-expired",
+      "type": "idtag_info_status",
+      "action": "Authorize",
+      "status": "Expired",
+      "description": "Authorize answered Expired"
+    },
+    {
+      "id": "no-start",
+      "type": "ocpp_absent",
+      "action": "StartTransaction",
+      "description": "No transaction after a denied Authorize"
+    }
   ]
 }

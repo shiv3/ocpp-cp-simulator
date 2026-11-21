@@ -79,5 +79,33 @@
       "kind": "timeout"
     },
     { "id": "e6", "source": "status-available", "target": "end-timeout" }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "RemoteStartTransaction",
+        "node": "trigger-remote-start",
+        "example": { "connectorId": 1, "idTag": "TIMEOUT-TAG" },
+        "expectedStatus": "Accepted",
+        "note": "Send it within 30 s for the ok path. Sending nothing takes the timeout edge, which the ok-path assertions below report as a failure."
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "id": "remote-start-accepted",
+      "type": "response_status",
+      "action": "RemoteStartTransaction",
+      "status": "Accepted",
+      "description": "RemoteStartTransaction answered Accepted"
+    },
+    {
+      "id": "started",
+      "type": "payload_match",
+      "action": "StartTransaction",
+      "payload": { "idTag": "TIMEOUT-TAG" },
+      "description": "StartTransaction carries idTag TIMEOUT-TAG"
+    }
   ]
 }

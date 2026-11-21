@@ -70,5 +70,29 @@
     { "id": "e6", "source": "delay-2", "target": "plug-out" },
     { "id": "e7", "source": "plug-out", "target": "status-available" },
     { "id": "e8", "source": "status-available", "target": "end-1" }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": { "calls": [], "note": "No CSMS action." },
+  "assertions": [
+    {
+      "id": "lock-failure-reported",
+      "type": "payload_match",
+      "action": "StatusNotification",
+      "payload": { "status": "Faulted", "errorCode": "ConnectorLockFailure" },
+      "description": "StatusNotification carries the expected payload",
+      "occurrence": "any"
+    },
+    {
+      "id": "no-start",
+      "type": "ocpp_absent",
+      "action": "StartTransaction",
+      "description": "no StartTransaction sent"
+    },
+    {
+      "id": "available-again",
+      "type": "state_transition",
+      "targetStatus": "Available",
+      "description": "connector reaches Available"
+    }
   ]
 }

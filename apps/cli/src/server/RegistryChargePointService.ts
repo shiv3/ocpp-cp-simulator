@@ -98,7 +98,10 @@ import type {
   SimulatorConfigInput,
   WireSimulatorConfig,
 } from "@ocpp-cp-simulator/contracts/index";
-import { scenarioTemplates } from "@ocpp-cp-simulator/core/utils/scenarioTemplates";
+import {
+  scenarioTemplates,
+  summarizeTemplate,
+} from "@ocpp-cp-simulator/core/utils/scenarioTemplates";
 import type { CLIChargePointService } from "../service";
 import type { ChargePointStatus } from "../types";
 import type { Labels } from "@ocpp-cp-simulator/contracts/labels";
@@ -776,11 +779,7 @@ export class RegistryChargePointService implements ChargePointService {
   }
 
   async getScenarioTemplates(): Promise<ScenarioTemplateInfo[]> {
-    return scenarioTemplates.map((template) => ({
-      id: template.id,
-      name: template.name,
-      description: template.description,
-    }));
+    return scenarioTemplates.map(summarizeTemplate);
   }
 
   async loadScenarioTemplate(

@@ -8,31 +8,13 @@ import { evaluateAssertions } from "../../cp/application/verification/ScenarioAs
 import type { AssertionSpec } from "../../cp/application/scenario/ScenarioTypes";
 import type { Frame } from "../../cp/application/verification/ocpp";
 import { scenarioTemplates } from "../../utils/scenarioTemplates";
-import type { WireFrame } from "./FakeCsms";
+import { toFrames } from "./toFrames";
 import { Rig } from "./rig";
 import { runTemplate } from "./scenarioCases";
 
 const IDS = scenarioTemplates
   .map((t) => t.id)
   .filter((id) => id.startsWith("resilience-"));
-
-function toFrames(frames: readonly WireFrame[]): Frame[] {
-  return frames.flatMap((f, i): Frame[] => {
-    const direction = f.dir === "CP>" ? "sent" : "received";
-    const base = {
-      direction,
-      uniqueId: f.id,
-      payload: f.payload,
-      timestamp: new Date(i * 1000).toISOString(),
-      raw: JSON.stringify(f),
-    } as const;
-    if (f.kind === "call") {
-      return [{ kind: "call", action: f.action ?? "", ...base }];
-    }
-    if (f.kind === "result") return [{ kind: "callresult", ...base }];
-    return [];
-  });
-}
 
 function assertionsOf(id: string): AssertionSpec[] {
   const def = scenarioTemplates

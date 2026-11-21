@@ -41,8 +41,11 @@ export interface AssertionSpec {
   direction?: "sent" | "received";
   /** Expected status for response_status / idtag_info_status. */
   status?: string;
-  /** Nth (0-indexed) occurrence of `action`. Default 0. */
-  occurrence?: number;
+  /**
+   * Nth (0-indexed) occurrence of `action`. Default 0. `payload_match` also
+   * takes `"any"` (schema 1.12): it passes when any CALL of `action` matches.
+   */
+  occurrence?: number | "any";
   /** Partial subset match against the matched CALL's payload (payload_match). */
   payload?: Record<string, unknown>;
   /** Expected connector status for state_transition. */
@@ -54,6 +57,71 @@ export interface AssertionSpec {
   after?: { action: string; direction?: "sent" | "received" };
   /** How an assertion failure affects the run verdict. Default "failure". */
   severity?: AssertionSeverity;
+}
+
+/**
+ * What a scenario needs from the CSMS to run its intended path (schema 1.12).
+ * Machine-readable twin of the template description: an operator, a CSMS test
+ * harness or an MCP client reads it to know which CSMS-initiated calls to send
+ * and which answers to give, without opening the scenario graph.
+ *
+ * Payload examples may hold placeholders written as strings: `<transactionId>`
+ * (the id the CSMS gave the running transaction), `<now+Ns>` (an ISO-8601
+ * time N seconds from now), `<uploadUrl>` / `<firmwareUrl>` (a URL the CSMS
+ * operator hosts). Everything else is literal.
+ */
+export interface CsmsExpectations {
+  /**
+   * CSMS-initiated calls the scenario waits for, in the order it waits for
+   * them. Empty or absent: the scenario needs no CSMS-initiated call.
+   */
+  calls?: CsmsExpectedCall[];
+  /**
+   * Answers the CSMS must give to a call the charge point makes (an
+   * Authorize outcome, a DataTransfer status). A call matching none of them
+   * is answered the usual way (accepted).
+   */
+  answers?: CsmsExpectedAnswer[];
+  /**
+   * Charge-point-side steps outside the CSMS that a status-triggered scenario
+   * waits for (plug in, start a transaction, ...), as simulator commands.
+   */
+  simulatorSteps?: CsmsSimulatorStep[];
+  /** Free text: what is optional, what the run does when nothing is sent. */
+  note?: string;
+}
+
+export interface CsmsExpectedCall {
+  /** OCPP action the CSMS sends (e.g. `RemoteStartTransaction`). */
+  action: string;
+  /** Id of the scenario node that waits for this call. */
+  node?: string;
+  /** A payload that takes the intended path (version-specific wire shape). */
+  example?: Record<string, unknown>;
+  /** The status the charge point answers with when it takes the intended path. */
+  expectedStatus?: string;
+  /** The scenario does not need this call: without it a timeout edge runs. */
+  optional?: boolean;
+  note?: string;
+}
+
+export interface CsmsExpectedAnswer {
+  /** OCPP action the charge point sends (e.g. `Authorize`). */
+  action: string;
+  /** Partial match on the request payload that selects this rule. */
+  when?: Record<string, unknown>;
+  /** Payload of the CALLRESULT the CSMS must answer with. */
+  respond: Record<string, unknown>;
+  note?: string;
+}
+
+export interface CsmsSimulatorStep {
+  /** Control-plane command (e.g. `ev_plug_in`, `start_transaction`). */
+  command: string;
+  params?: Record<string, unknown>;
+  /** Node the step unblocks, when there is one. */
+  node?: string;
+  note?: string;
 }
 
 /** Outcome of evaluating one {@link AssertionSpec} against a run's transcript. */

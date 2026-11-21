@@ -127,5 +127,18 @@
       },
       "description": "The probe went out after the connection was lost and came back (no BootNotification is required: OCPP-J 1.6 \u00a75.4, 2.x Part 4 \u00a75.4)"
     }
-  ]
+  ],
+  "ocppVersions": ["1.6", "2.0.1", "2.1"],
+  "csmsExpectations": {
+    "calls": [],
+    "simulatorSteps": [
+      {
+        "command": "disconnect",
+        "node": "wait-down",
+        "note": "or drop the WebSocket from the CSMS side"
+      },
+      { "command": "connect", "node": "wait-up" }
+    ],
+    "note": "No CSMS call; the connection must drop and come back."
+  }
 }

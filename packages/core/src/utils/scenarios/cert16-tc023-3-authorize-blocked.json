@@ -55,5 +55,39 @@
     { "id": "e3", "source": "tx-start", "target": "delay-1" },
     { "id": "e4", "source": "delay-1", "target": "plug-out" },
     { "id": "e5", "source": "plug-out", "target": "end-1" }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [],
+    "answers": [
+      {
+        "action": "Authorize",
+        "when": { "idTag": "CERT023-BLK" },
+        "respond": { "idTagInfo": { "status": "Blocked" } }
+      }
+    ],
+    "note": "No CSMS call; the CSMS must answer Authorize for CERT023-BLK with Blocked."
+  },
+  "assertions": [
+    {
+      "id": "authorize-tag",
+      "type": "payload_match",
+      "action": "Authorize",
+      "payload": { "idTag": "CERT023-BLK" },
+      "description": "Authorize carries the expected payload"
+    },
+    {
+      "id": "authorize-blocked",
+      "type": "idtag_info_status",
+      "action": "Authorize",
+      "status": "Blocked",
+      "description": "Authorize answered Blocked"
+    },
+    {
+      "id": "no-start",
+      "type": "ocpp_absent",
+      "action": "StartTransaction",
+      "description": "No transaction after a denied Authorize"
+    }
   ]
 }

@@ -1,4 +1,8 @@
-import type { ScenarioDefinition } from "../cp/application/scenario/ScenarioTypes";
+import type {
+  AssertionType,
+  CsmsExpectations,
+  ScenarioDefinition,
+} from "../cp/application/scenario/ScenarioTypes";
 
 import essentialCpBehaviorJson from "./scenarios/essential-cp-behavior.json";
 import fullChargingCycleJson from "./scenarios/full-charging-cycle.json";
@@ -102,10 +106,51 @@ export interface ScenarioTemplate {
   name: string;
   description: string;
   targetType: "chargePoint" | "connector";
+  /** OCPP versions the template's wire shapes are written for (schema 1.12). */
+  ocppVersions: string[];
+  /** What the template needs from the CSMS to take its intended path (schema 1.12). */
+  csmsExpectations?: CsmsExpectations;
+  /** One line per assertion the template's run is judged by. */
+  assertions: ScenarioTemplateAssertionInfo[];
   createScenario: (
     chargePointId: string,
     connectorId: number | null,
   ) => ScenarioDefinition;
+}
+
+export interface ScenarioTemplateAssertionInfo {
+  id: string;
+  type: AssertionType;
+  description: string;
+}
+
+/**
+ * What the template catalogue (`list_scenario_templates`, `scenario.templates`,
+ * the MCP `scenario_templates` tool, the web console) reports for one template.
+ */
+export interface ScenarioTemplateSummary {
+  id: string;
+  name: string;
+  description: string;
+  targetType: "chargePoint" | "connector";
+  ocppVersions: string[];
+  csmsExpectations?: CsmsExpectations;
+  assertions: ScenarioTemplateAssertionInfo[];
+}
+
+/** The catalogue entry of a template (see {@link ScenarioTemplateSummary}). */
+export function summarizeTemplate(
+  t: ScenarioTemplate,
+): ScenarioTemplateSummary {
+  return {
+    id: t.id,
+    name: t.name,
+    description: t.description,
+    targetType: t.targetType,
+    ocppVersions: t.ocppVersions,
+    ...(t.csmsExpectations ? { csmsExpectations: t.csmsExpectations } : {}),
+    assertions: t.assertions,
+  };
 }
 
 /**
@@ -129,6 +174,13 @@ function templateFromJson(json: ScenarioDefinition): ScenarioTemplate {
     name: json.name,
     description: json.description ?? "",
     targetType: json.targetType,
+    ocppVersions: json.ocppVersions ?? ["1.6"],
+    csmsExpectations: json.csmsExpectations,
+    assertions: (json.assertions ?? []).map((a) => ({
+      id: a.id,
+      type: a.type,
+      description: a.description ?? a.id,
+    })),
     createScenario: (chargePointId, connectorId) => {
       const now = new Date().toISOString();
       const suffix = Math.random().toString(36).slice(2, 8);
@@ -162,126 +214,208 @@ function templateFromJson(json: ScenarioDefinition): ScenarioTemplate {
  * the template picker and as the seed in CPRegistry.create.
  */
 export const scenarioTemplates: ScenarioTemplate[] = [
-  templateFromJson(essentialCpBehaviorJson as ScenarioDefinition),
-  templateFromJson(fullChargingCycleJson as ScenarioDefinition),
-  templateFromJson(smartChargingJson as ScenarioDefinition),
-  templateFromJson(multiStatusMonitorJson as ScenarioDefinition),
-  templateFromJson(statusTriggeredActionsJson as ScenarioDefinition),
-  templateFromJson(remoteStartAutoMeterJson as ScenarioDefinition),
-  templateFromJson(remoteStartTimeoutFallbackJson as ScenarioDefinition),
-  templateFromJson(parallelHeartbeatSessionJson as ScenarioDefinition),
+  templateFromJson(essentialCpBehaviorJson as unknown as ScenarioDefinition),
+  templateFromJson(fullChargingCycleJson as unknown as ScenarioDefinition),
+  templateFromJson(smartChargingJson as unknown as ScenarioDefinition),
+  templateFromJson(multiStatusMonitorJson as unknown as ScenarioDefinition),
+  templateFromJson(statusTriggeredActionsJson as unknown as ScenarioDefinition),
+  templateFromJson(remoteStartAutoMeterJson as unknown as ScenarioDefinition),
+  templateFromJson(
+    remoteStartTimeoutFallbackJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    parallelHeartbeatSessionJson as unknown as ScenarioDefinition,
+  ),
 
   // OCPP 1.6 Core certification scenarios (issue #110, first slice) —
   // grouped together so they surface as a block in the template picker.
-  templateFromJson(cert16Tc001ColdBootJson as ScenarioDefinition),
-  templateFromJson(cert16Tc003ChargingPluginFirstJson as ScenarioDefinition),
-  templateFromJson(cert16Tc004ChargingIdFirstJson as ScenarioDefinition),
-  templateFromJson(cert16Tc005EvSideDisconnectJson as ScenarioDefinition),
-  templateFromJson(cert16Tc010RemoteStartJson as ScenarioDefinition),
-  templateFromJson(cert16Tc011RemoteStartStopJson as ScenarioDefinition),
-  templateFromJson(cert16Tc012RemoteStopJson as ScenarioDefinition),
-  templateFromJson(cert16Tc013HardResetJson as ScenarioDefinition),
-  templateFromJson(cert16Tc014SoftResetJson as ScenarioDefinition),
-  templateFromJson(cert16Tc017UnlockOccupiedJson as ScenarioDefinition),
-  templateFromJson(cert16Tc018UnlockFailureJson as ScenarioDefinition),
-  templateFromJson(cert16Tc019GetConfigAllJson as ScenarioDefinition),
-  templateFromJson(cert16Tc019GetConfigKeyJson as ScenarioDefinition),
-  templateFromJson(cert16Tc021ChangeConfigJson as ScenarioDefinition),
-  templateFromJson(cert16Tc024LockFailureJson as ScenarioDefinition),
-  templateFromJson(cert16Tc026RemoteStartRejectedJson as ScenarioDefinition),
-  templateFromJson(cert16Tc028RemoteStopRejectedJson as ScenarioDefinition),
-  templateFromJson(cert16Tc031UnlockUnknownJson as ScenarioDefinition),
-  templateFromJson(cert16Tc061ClearCacheJson as ScenarioDefinition),
-  templateFromJson(cert16Tc064DataTransferJson as ScenarioDefinition),
-  templateFromJson(cert16ReservationBasicJson as ScenarioDefinition),
+  templateFromJson(cert16Tc001ColdBootJson as unknown as ScenarioDefinition),
+  templateFromJson(
+    cert16Tc003ChargingPluginFirstJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    cert16Tc004ChargingIdFirstJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    cert16Tc005EvSideDisconnectJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(cert16Tc010RemoteStartJson as unknown as ScenarioDefinition),
+  templateFromJson(
+    cert16Tc011RemoteStartStopJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(cert16Tc012RemoteStopJson as unknown as ScenarioDefinition),
+  templateFromJson(cert16Tc013HardResetJson as unknown as ScenarioDefinition),
+  templateFromJson(cert16Tc014SoftResetJson as unknown as ScenarioDefinition),
+  templateFromJson(
+    cert16Tc017UnlockOccupiedJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    cert16Tc018UnlockFailureJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    cert16Tc019GetConfigAllJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    cert16Tc019GetConfigKeyJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    cert16Tc021ChangeConfigJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(cert16Tc024LockFailureJson as unknown as ScenarioDefinition),
+  templateFromJson(
+    cert16Tc026RemoteStartRejectedJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    cert16Tc028RemoteStopRejectedJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    cert16Tc031UnlockUnknownJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(cert16Tc061ClearCacheJson as unknown as ScenarioDefinition),
+  templateFromJson(
+    cert16Tc064DataTransferJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(cert16ReservationBasicJson as unknown as ScenarioDefinition),
 
   // OCPP 1.6 LocalList certification scenarios (issue #110, PR 3) —
   // grouped together so they surface as a block in the template picker.
   templateFromJson(
-    cert16Tc042_1GetLocalListVersionNotSupportedJson as ScenarioDefinition,
+    cert16Tc042_1GetLocalListVersionNotSupportedJson as unknown as ScenarioDefinition,
   ),
   templateFromJson(
-    cert16Tc042_2GetLocalListVersionEmptyJson as ScenarioDefinition,
+    cert16Tc042_2GetLocalListVersionEmptyJson as unknown as ScenarioDefinition,
   ),
   templateFromJson(
-    cert16Tc043_1SendLocalListNotSupportedJson as ScenarioDefinition,
+    cert16Tc043_1SendLocalListNotSupportedJson as unknown as ScenarioDefinition,
   ),
-  templateFromJson(cert16Tc043_3SendLocalListFailedJson as ScenarioDefinition),
-  templateFromJson(cert16Tc043_4SendLocalListFullJson as ScenarioDefinition),
   templateFromJson(
-    cert16Tc043_5SendLocalListDifferentialJson as ScenarioDefinition,
+    cert16Tc043_3SendLocalListFailedJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    cert16Tc043_4SendLocalListFullJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    cert16Tc043_5SendLocalListDifferentialJson as unknown as ScenarioDefinition,
   ),
 
   // OCPP 1.6 Reservation certification scenarios (issue #110, PR 3) —
   // grouped together so they surface as a block in the template picker.
-  templateFromJson(cert16Tc048_1ReserveNowFaultedJson as ScenarioDefinition),
-  templateFromJson(cert16Tc048_2ReserveNowOccupiedJson as ScenarioDefinition),
   templateFromJson(
-    cert16Tc048_3ReserveNowUnavailableJson as ScenarioDefinition,
+    cert16Tc048_1ReserveNowFaultedJson as unknown as ScenarioDefinition,
   ),
-  templateFromJson(cert16Tc048_4ReserveNowRejectedJson as ScenarioDefinition),
-  templateFromJson(cert16Tc051CancelReservationJson as ScenarioDefinition),
   templateFromJson(
-    cert16Tc052CancelReservationRejectedJson as ScenarioDefinition,
+    cert16Tc048_2ReserveNowOccupiedJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    cert16Tc048_3ReserveNowUnavailableJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    cert16Tc048_4ReserveNowRejectedJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    cert16Tc051CancelReservationJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    cert16Tc052CancelReservationRejectedJson as unknown as ScenarioDefinition,
   ),
 
   // OCPP 1.6 RemoteTrigger certification scenarios (issue #110, PR 4) —
   // grouped together so they surface as a block in the template picker.
-  templateFromJson(cert16Tc054TriggerMessageJson as ScenarioDefinition),
-  templateFromJson(cert16Tc055TriggerMessageRejectedJson as ScenarioDefinition),
+  templateFromJson(
+    cert16Tc054TriggerMessageJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    cert16Tc055TriggerMessageRejectedJson as unknown as ScenarioDefinition,
+  ),
 
   // OCPP 1.6 SmartCharging certification scenarios (issue #110, PR 4) —
   // grouped together so they surface as a block in the template picker.
   templateFromJson(
-    cert16Tc056CentralSmartChargingTxDefaultJson as ScenarioDefinition,
+    cert16Tc056CentralSmartChargingTxDefaultJson as unknown as ScenarioDefinition,
   ),
   templateFromJson(
-    cert16Tc057CentralSmartChargingTxProfileJson as ScenarioDefinition,
+    cert16Tc057CentralSmartChargingTxProfileJson as unknown as ScenarioDefinition,
   ),
-  templateFromJson(cert16Tc059RemoteStartWithProfileJson as ScenarioDefinition),
-  templateFromJson(cert16Tc066GetCompositeScheduleJson as ScenarioDefinition),
-  templateFromJson(cert16Tc067ClearChargingProfileJson as ScenarioDefinition),
+  templateFromJson(
+    cert16Tc059RemoteStartWithProfileJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    cert16Tc066GetCompositeScheduleJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    cert16Tc067ClearChargingProfileJson as unknown as ScenarioDefinition,
+  ),
 
   // OCPP 1.6 Firmware certification scenarios (issue #110, PR 5) —
   // grouped together so they surface as a block in the template picker.
-  templateFromJson(cert16Tc044_1FirmwareUpdateJson as ScenarioDefinition),
   templateFromJson(
-    cert16Tc044_2FirmwareDownloadFailedJson as ScenarioDefinition,
+    cert16Tc044_1FirmwareUpdateJson as unknown as ScenarioDefinition,
   ),
   templateFromJson(
-    cert16Tc044_3FirmwareInstallFailedJson as ScenarioDefinition,
+    cert16Tc044_2FirmwareDownloadFailedJson as unknown as ScenarioDefinition,
   ),
-  templateFromJson(cert16Tc045_1GetDiagnosticsJson as ScenarioDefinition),
+  templateFromJson(
+    cert16Tc044_3FirmwareInstallFailedJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    cert16Tc045_1GetDiagnosticsJson as unknown as ScenarioDefinition,
+  ),
 
   // OCPP 1.6 Authorize outcome certification scenarios (issue #181) —
   // grouped together so they surface as a block in the template picker.
-  templateFromJson(cert16Tc023_1AuthorizeInvalidJson as ScenarioDefinition),
-  templateFromJson(cert16Tc023_2AuthorizeExpiredJson as ScenarioDefinition),
-  templateFromJson(cert16Tc023_3AuthorizeBlockedJson as ScenarioDefinition),
+  templateFromJson(
+    cert16Tc023_1AuthorizeInvalidJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    cert16Tc023_2AuthorizeExpiredJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    cert16Tc023_3AuthorizeBlockedJson as unknown as ScenarioDefinition,
+  ),
 
   // OCPP 1.6 Certificate quirks scenarios (issue #247 Phase 3) —
   // emulate certification-tool behaviors.
-  templateFromJson(cert16OcttStrictnessProbeJson as ScenarioDefinition),
+  templateFromJson(
+    cert16OcttStrictnessProbeJson as unknown as ScenarioDefinition,
+  ),
 
   // Operational failure / recovery scenarios (issue #444).
   templateFromJson(
-    resilienceCommunicationLossRecoveryJson as ScenarioDefinition,
+    resilienceCommunicationLossRecoveryJson as unknown as ScenarioDefinition,
   ),
-  templateFromJson(resilienceConnectorFaultRecoveryJson as ScenarioDefinition),
-  templateFromJson(resilienceEvDisconnectRecoveryJson as ScenarioDefinition),
   templateFromJson(
-    resilienceTemporaryUnavailableRecoveryJson as ScenarioDefinition,
+    resilienceConnectorFaultRecoveryJson as unknown as ScenarioDefinition,
   ),
-  templateFromJson(resilienceAuthorizationRejectedJson as ScenarioDefinition),
-  templateFromJson(resiliencePowerLossRecoveryJson as ScenarioDefinition),
+  templateFromJson(
+    resilienceEvDisconnectRecoveryJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    resilienceTemporaryUnavailableRecoveryJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    resilienceAuthorizationRejectedJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    resiliencePowerLossRecoveryJson as unknown as ScenarioDefinition,
+  ),
 
   // Data-flow showcase templates (schema 1.7).
-  templateFromJson(dataflowAuthorizeBranch16Json as ScenarioDefinition),
-  templateFromJson(dataflowAuthorizeBranch201Json as ScenarioDefinition),
-  templateFromJson(dataflowRemoteStartReauthorize16Json as ScenarioDefinition),
-  templateFromJson(dataflowRemoteStartReauthorize201Json as ScenarioDefinition),
-  templateFromJson(dataflowCallErrorHandlingJson as ScenarioDefinition),
-  templateFromJson(dataflowChargeToSocJson as ScenarioDefinition),
+  templateFromJson(
+    dataflowAuthorizeBranch16Json as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    dataflowAuthorizeBranch201Json as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    dataflowRemoteStartReauthorize16Json as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    dataflowRemoteStartReauthorize201Json as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    dataflowCallErrorHandlingJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(dataflowChargeToSocJson as unknown as ScenarioDefinition),
 ];
 
 export function getTemplateById(

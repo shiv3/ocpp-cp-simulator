@@ -260,5 +260,49 @@
       "source": "plug-out",
       "target": "end-1"
     }
+  ],
+  "ocppVersions": ["2.0.1", "2.1"],
+  "csmsExpectations": {
+    "calls": [],
+    "answers": [
+      {
+        "action": "Authorize",
+        "when": { "idToken": { "idToken": "DEMO-TAG-1" } },
+        "respond": { "idTokenInfo": { "status": "Accepted" } }
+      }
+    ],
+    "note": "No CSMS call; the Authorize answer picks the branch. Accepted (the default) starts a session; any other status takes another branch and the Accepted-path assertions fail."
+  },
+  "assertions": [
+    {
+      "id": "authorize-token",
+      "type": "payload_match",
+      "action": "Authorize",
+      "payload": { "idToken": { "idToken": "DEMO-TAG-1" } },
+      "description": "Authorize carries the expected payload"
+    },
+    {
+      "id": "authorize-accepted",
+      "type": "idtag_info_status",
+      "action": "Authorize",
+      "status": "Accepted",
+      "description": "Authorize answered Accepted"
+    },
+    {
+      "id": "started",
+      "type": "payload_match",
+      "action": "TransactionEvent",
+      "payload": { "eventType": "Started" },
+      "description": "TransactionEvent carries the expected payload",
+      "occurrence": "any"
+    },
+    {
+      "id": "ended",
+      "type": "payload_match",
+      "action": "TransactionEvent",
+      "payload": { "eventType": "Ended" },
+      "description": "TransactionEvent Ended sent",
+      "occurrence": "any"
+    }
   ]
 }

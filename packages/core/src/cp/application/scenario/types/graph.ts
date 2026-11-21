@@ -2,7 +2,7 @@ import type { Node, Edge } from "@xyflow/react";
 import type { OCPPStatus } from "../../../domain/types/OcppTypes";
 import type { EVSettings } from "../../../domain/connector/EVSettings";
 import type { ScenarioNodeData, ScenarioExecutionMode } from "./nodeData";
-import type { AssertionSpec } from "./assertions";
+import type { AssertionSpec, CsmsExpectations } from "./assertions";
 
 /**
  * Scenario node with typed data
@@ -56,7 +56,7 @@ export interface ScenarioTrigger {
  * See `packages/core/schema/scenario.schema.json` (Draft 2020-12) and
  * `docs/concepts/scenario-format.md`.
  */
-export const SCENARIO_SCHEMA_VERSION = "1.11";
+export const SCENARIO_SCHEMA_VERSION = "1.12";
 
 /** Where a recorded scenario came from (schema 1.6, #654 step 2). */
 export interface ScenarioRecordedFrom {
@@ -133,6 +133,20 @@ export interface ScenarioDefinition {
    * before (no behavior change).
    */
   assertions?: AssertionSpec[];
+
+  /**
+   * OCPP versions this scenario's wire shapes are written for, as `"1.6"`,
+   * `"2.0.1"`, `"2.1"` (schema 1.12). Informational: a template loaded on a
+   * charge point speaking another version still loads, and the daemon logs a warning. Absent: not declared.
+   */
+  ocppVersions?: string[];
+
+  /**
+   * What the scenario needs from the CSMS to take its intended path (schema
+   * 1.12): the calls it waits for, with example payloads, and the answers it
+   * needs. Informational: the runtime ignores it.
+   */
+  csmsExpectations?: CsmsExpectations;
 
   /**
    * Promotes warning-severity assertion failures to run failures (strict

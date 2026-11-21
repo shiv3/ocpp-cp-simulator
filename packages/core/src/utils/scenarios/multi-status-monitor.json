@@ -144,5 +144,43 @@
       "source": "notify-faulted",
       "target": "end-faulted"
     }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [],
+    "simulatorSteps": [
+      {
+        "command": "ev_plug_in",
+        "params": { "connector": 1 },
+        "node": "trigger-charging"
+      },
+      {
+        "command": "start_transaction",
+        "params": { "connector": 1, "tagId": "MSM-TAG" },
+        "node": "trigger-charging"
+      },
+      {
+        "command": "update_connector_status",
+        "params": { "connector": 1, "status": "Faulted" },
+        "node": "trigger-faulted"
+      }
+    ],
+    "note": "No CSMS action; the connector status triggers are driven by simulator commands."
+  },
+  "assertions": [
+    {
+      "id": "heartbeat",
+      "type": "ocpp_sent",
+      "action": "Heartbeat",
+      "description": "Heartbeat sent on Available"
+    },
+    {
+      "id": "faulted-reported",
+      "type": "payload_match",
+      "action": "StatusNotification",
+      "payload": { "status": "Faulted" },
+      "description": "StatusNotification carries the expected payload",
+      "occurrence": "any"
+    }
   ]
 }

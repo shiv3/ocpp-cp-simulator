@@ -34,5 +34,31 @@
   "edges": [
     { "id": "e1", "source": "start-1", "target": "trigger-change-config" },
     { "id": "e3", "source": "trigger-change-config", "target": "end-1" }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "ChangeConfiguration",
+        "node": "trigger-change-config",
+        "example": { "key": "MeterValueSampleInterval", "value": "10" },
+        "expectedStatus": "Accepted"
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "id": "change-configuration-received",
+      "type": "ocpp_received",
+      "action": "ChangeConfiguration",
+      "description": "ChangeConfiguration received from the CSMS"
+    },
+    {
+      "id": "change-configuration-accepted",
+      "type": "response_status",
+      "action": "ChangeConfiguration",
+      "status": "Accepted",
+      "description": "ChangeConfiguration answered Accepted"
+    }
   ]
 }

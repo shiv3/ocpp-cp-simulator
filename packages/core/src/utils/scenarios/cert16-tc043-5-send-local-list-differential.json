@@ -79,5 +79,88 @@
       "source": "trigger-send-local-list-differential",
       "target": "end-1"
     }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "SendLocalList",
+        "node": "trigger-send-local-list-full",
+        "example": {
+          "listVersion": 1,
+          "updateType": "Full",
+          "localAuthorizationList": [
+            {
+              "idTag": "LIST-A",
+              "idTagInfo": {
+                "status": "Accepted",
+                "expiryDate": "<now+86400s>"
+              }
+            },
+            {
+              "idTag": "LIST-B",
+              "idTagInfo": {
+                "status": "Accepted",
+                "expiryDate": "<now+86400s>"
+              }
+            }
+          ]
+        },
+        "expectedStatus": "Accepted"
+      },
+      {
+        "action": "SendLocalList",
+        "node": "trigger-send-local-list-differential",
+        "example": {
+          "listVersion": 2,
+          "updateType": "Differential",
+          "localAuthorizationList": [
+            {
+              "idTag": "LIST-C",
+              "idTagInfo": {
+                "status": "Accepted",
+                "expiryDate": "<now+86400s>"
+              }
+            },
+            { "idTag": "LIST-A" }
+          ]
+        },
+        "expectedStatus": "Accepted"
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "id": "full-update",
+      "type": "payload_match",
+      "action": "SendLocalList",
+      "direction": "received",
+      "payload": { "updateType": "Full" },
+      "description": "SendLocalList from the CSMS carries the expected payload"
+    },
+    {
+      "id": "full-accepted",
+      "type": "response_status",
+      "action": "SendLocalList",
+      "status": "Accepted",
+      "description": "SendLocalList answered Accepted"
+    },
+    {
+      "id": "differential-update",
+      "type": "payload_match",
+      "action": "SendLocalList",
+      "direction": "received",
+      "payload": { "updateType": "Differential" },
+      "description": "SendLocalList from the CSMS carries the expected payload",
+      "occurrence": 1
+    },
+    {
+      "id": "differential-accepted",
+      "type": "response_status",
+      "action": "SendLocalList",
+      "status": "Accepted",
+      "description": "SendLocalList answered Accepted",
+      "occurrence": 1
+    }
   ]
 }

@@ -48,5 +48,39 @@
       "target": "delay-diagnostics-upload"
     },
     { "id": "e4", "source": "delay-diagnostics-upload", "target": "end-1" }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "GetDiagnostics",
+        "node": "trigger-get-diagnostics",
+        "example": { "location": "<uploadUrl>" },
+        "note": "The upload URL must accept the file the simulator uploads."
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "id": "get-diagnostics-received",
+      "type": "ocpp_received",
+      "action": "GetDiagnostics",
+      "description": "GetDiagnostics received from the CSMS"
+    },
+    {
+      "id": "diagnostics-0",
+      "type": "payload_match",
+      "action": "DiagnosticsStatusNotification",
+      "payload": { "status": "Uploading" },
+      "description": "DiagnosticsStatusNotification #1 is Uploading"
+    },
+    {
+      "id": "diagnostics-1",
+      "type": "payload_match",
+      "action": "DiagnosticsStatusNotification",
+      "payload": { "status": "Uploaded" },
+      "description": "DiagnosticsStatusNotification #2 is Uploaded",
+      "occurrence": 1
+    }
   ]
 }

@@ -55,5 +55,38 @@
     { "id": "e3", "source": "arm-override", "target": "trigger-remote-start" },
     { "id": "e4", "source": "trigger-remote-start", "target": "delay-verify" },
     { "id": "e5", "source": "delay-verify", "target": "end-1" }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "RemoteStartTransaction",
+        "node": "trigger-remote-start",
+        "example": { "connectorId": 1, "idTag": "CERT026" },
+        "expectedStatus": "Rejected",
+        "note": "The scenario arms a Rejected answer."
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "id": "remote-start-received",
+      "type": "ocpp_received",
+      "action": "RemoteStartTransaction",
+      "description": "RemoteStartTransaction received from the CSMS"
+    },
+    {
+      "id": "remote-start-rejected",
+      "type": "response_status",
+      "action": "RemoteStartTransaction",
+      "status": "Rejected",
+      "description": "RemoteStartTransaction answered Rejected"
+    },
+    {
+      "id": "no-start",
+      "type": "ocpp_absent",
+      "action": "StartTransaction",
+      "description": "no StartTransaction sent"
+    }
   ]
 }

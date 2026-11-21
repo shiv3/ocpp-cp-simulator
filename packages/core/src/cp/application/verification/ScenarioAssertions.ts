@@ -130,11 +130,21 @@ function evaluateResponseStatus(
     );
   }
 
+  // `idTagInfo.status` is the 1.6 shape; 2.x answers carry `idTokenInfo.status`.
   const actualStatus =
     statusPath === "status"
       ? (response.payload as { status?: unknown } | null)?.status
-      : (response.payload as { idTagInfo?: { status?: unknown } } | null)
-          ?.idTagInfo?.status;
+      : ((
+          response.payload as {
+            idTagInfo?: { status?: unknown };
+            idTokenInfo?: { status?: unknown };
+          } | null
+        )?.idTagInfo?.status ??
+        (
+          response.payload as {
+            idTokenInfo?: { status?: unknown };
+          } | null
+        )?.idTokenInfo?.status);
   if (actualStatus === expectedStatus) {
     return makeResult(spec, "passed", description, undefined, refs);
   }
@@ -145,6 +155,11 @@ function evaluateResponseStatus(
     `expected ${statusPath}=${expectedStatus}, got ${statusPath}=${String(actualStatus)} (uniqueId=${call.uniqueId})`,
     refs,
   );
+}
+
+/** The occurrence index of a spec; `"any"` only means something to payload_match. */
+function numericOccurrence(spec: AssertionSpec): number {
+  return typeof spec.occurrence === "number" ? spec.occurrence : 0;
 }
 
 /** Evaluates a single {@link AssertionSpec}. A malformed spec (missing a
@@ -250,7 +265,7 @@ function evaluateOne(
         spec.action,
         spec.status,
         spec.direction ?? "received",
-        spec.occurrence ?? 0,
+        numericOccurrence(spec),
         "status",
       );
     }
@@ -270,7 +285,7 @@ function evaluateOne(
         spec.action,
         spec.status,
         spec.direction ?? "sent",
-        spec.occurrence ?? 0,
+        numericOccurrence(spec),
         "idTagInfo.status",
       );
     }
@@ -285,8 +300,32 @@ function evaluateOne(
         );
       }
       const direction = spec.direction ?? "sent";
-      const occurrence = spec.occurrence ?? 0;
       const description = `${spec.action} payload matches`;
+      if (spec.occurrence === "any") {
+        const calls = findAllCalls(frames, direction, spec.action);
+        const hit = calls.find((c) =>
+          deepPartialMatch(spec.payload, c.payload),
+        );
+        if (hit) {
+          return makeResult(
+            spec,
+            "passed",
+            description,
+            undefined,
+            frameIndices(frames, hit),
+          );
+        }
+        return makeResult(
+          spec,
+          "failed",
+          description,
+          calls.length === 0
+            ? `no ${direction} CALL found for action=${spec.action}`
+            : `none of the ${calls.length} ${direction} ${spec.action} CALL(s) matched the expected subset`,
+          frameIndices(frames, ...calls),
+        );
+      }
+      const occurrence = numericOccurrence(spec);
       const call = findCall(frames, direction, spec.action, occurrence);
       if (!call) {
         return makeResult(
@@ -392,9 +431,14 @@ function evaluateOne(
       }
       const description = `StatusNotification -> ${spec.targetStatus}`;
       const matched = findAllCalls(frames, "sent", "StatusNotification").find(
-        (f) =>
-          (f.payload as { status?: unknown } | null)?.status ===
-          spec.targetStatus,
+        (f) => {
+          // 1.6 carries the connector state in `status`, 2.x in `connectorStatus`.
+          const p = f.payload as {
+            status?: unknown;
+            connectorStatus?: unknown;
+          } | null;
+          return (p?.status ?? p?.connectorStatus) === spec.targetStatus;
+        },
       );
       return matched
         ? makeResult(

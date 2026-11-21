@@ -243,5 +243,61 @@
       "source": "plug-out",
       "target": "end-1"
     }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "RemoteStartTransaction",
+        "node": "wait",
+        "example": { "connectorId": 1, "idTag": "DEMO-TAG-2" },
+        "expectedStatus": "Accepted",
+        "note": "The scenario answers the call itself (behavior replace), then authorizes the tag from the call."
+      }
+    ],
+    "answers": [
+      {
+        "action": "Authorize",
+        "when": { "idTag": "DEMO-TAG-2" },
+        "respond": { "idTagInfo": { "status": "Accepted" } }
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "id": "remote-start-accepted",
+      "type": "response_status",
+      "action": "RemoteStartTransaction",
+      "status": "Accepted",
+      "description": "RemoteStartTransaction answered Accepted"
+    },
+    {
+      "id": "authorize-call-tag",
+      "type": "payload_match",
+      "action": "Authorize",
+      "payload": { "idTag": "DEMO-TAG-2" },
+      "description": "Authorize carries the expected payload"
+    },
+    {
+      "id": "authorize-accepted",
+      "type": "idtag_info_status",
+      "action": "Authorize",
+      "status": "Accepted",
+      "description": "Authorize answered Accepted"
+    },
+    {
+      "id": "started",
+      "type": "payload_match",
+      "action": "StartTransaction",
+      "payload": { "idTag": "DEMO-TAG-2" },
+      "description": "StartTransaction carries idTag DEMO-TAG-2"
+    },
+    {
+      "id": "stop-after-start",
+      "type": "message_after",
+      "before": { "action": "StartTransaction" },
+      "after": { "action": "StopTransaction" },
+      "description": "StopTransaction after StartTransaction"
+    }
   ]
 }

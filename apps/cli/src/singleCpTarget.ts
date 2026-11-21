@@ -187,7 +187,11 @@ export interface SingleCpCommandOps {
     connectorId: number,
     templateId: string,
     evSettings?: Partial<EVSettings>,
-    options?: { readonly strict?: boolean; readonly once?: boolean },
+    options?: {
+      readonly strict?: boolean;
+      readonly once?: boolean;
+      readonly maxDurationSeconds?: number;
+    },
   ): Promise<{ scenarioId: string }>;
   getScenarioStatus(
     connectorId: number,
@@ -393,7 +397,13 @@ function legacyCommandOps(service: CLIChargePointService): SingleCpCommandOps {
         templateId,
         connectorId,
         evSettings,
-        { autoStart: false, ...(options?.once ? { enabled: false } : {}) },
+        {
+          autoStart: false,
+          ...(options?.once ? { enabled: false } : {}),
+          ...(options?.maxDurationSeconds === undefined
+            ? {}
+            : { maxDurationSeconds: options.maxDurationSeconds }),
+        },
       );
       if (options?.strict === undefined) {
         service.runScenario(connectorId, scenarioId);
@@ -556,6 +566,9 @@ function facadeCommandOps(target: FacadeSingleCpTarget): SingleCpCommandOps {
         evSettings,
         ...(options?.strict === undefined ? {} : { strict: options.strict }),
         ...(options?.once === undefined ? {} : { once: options.once }),
+        ...(options?.maxDurationSeconds === undefined
+          ? {}
+          : { maxDurationSeconds: options.maxDurationSeconds }),
       }),
     getScenarioStatus: (connectorId, scenarioId) =>
       service.getScenarioStatus(cpId, connectorId, scenarioId),

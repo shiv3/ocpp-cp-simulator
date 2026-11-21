@@ -90,7 +90,7 @@
   "ocppVersions": ["1.6"],
   "csmsExpectations": {
     "calls": [],
-    "note": "No CSMS action; the tag USER001 must be authorized (the default answer)."
+    "note": "No CSMS action; the tag USER001 must be authorized (the default answer). Its Auto MeterValue node is configured to meter up to 25 kWh or 300 s (500 Wh per 5 s) before the transaction stops; maxDurationSeconds 330 is the safety bound. Use --time-scale to run it faster."
   },
   "assertions": [
     {
@@ -107,5 +107,6 @@
       "after": { "action": "StopTransaction" },
       "description": "StopTransaction after StartTransaction"
     }
-  ]
+  ],
+  "maxDurationSeconds": 330
 }

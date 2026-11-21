@@ -645,6 +645,7 @@ export function parseArgs(argv: string[]): CLIOptions {
     fleetTemplateFiles: s.fleetTemplateFiles,
     bootstrapPacing,
     labels,
+    ...(s.timeScale === undefined ? {} : { timeScale: s.timeScale }),
     metrics: s.metrics,
     metricsNoAuth: s.metricsNoAuth,
     watch: s.watch,

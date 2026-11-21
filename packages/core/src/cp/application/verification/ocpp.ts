@@ -233,3 +233,42 @@ export function findResponseFor(
   }
   return undefined;
 }
+
+/**
+ * The ids of the transactions a transcript shows the charge point starting, in
+ * order: OCPP 1.6 takes the `transactionId` the CSMS answered a
+ * StartTransaction with; 2.x takes the `transactionInfo.transactionId` the
+ * charge point put in a `TransactionEvent` of type `Started`. A start the CSMS
+ * has not answered yet (1.6) is not listed.
+ */
+export function transactionIdsOf(
+  frames: readonly Frame[],
+): Array<number | string> {
+  const ids: Array<number | string> = [];
+  const add = (id: unknown): void => {
+    if (
+      (typeof id === "number" || (typeof id === "string" && id.length > 0)) &&
+      !ids.includes(id)
+    ) {
+      ids.push(id);
+    }
+  };
+  for (const call of findAllCalls(frames, "sent", "StartTransaction")) {
+    const response = findResponseFor(frames, call);
+    if (response?.kind === "callresult") {
+      add(
+        (response.payload as { transactionId?: unknown } | null)?.transactionId,
+      );
+    }
+  }
+  for (const call of findAllCalls(frames, "sent", "TransactionEvent")) {
+    const payload = call.payload as {
+      eventType?: unknown;
+      transactionInfo?: { transactionId?: unknown };
+    } | null;
+    if (payload?.eventType === "Started") {
+      add(payload.transactionInfo?.transactionId);
+    }
+  }
+  return ids;
+}

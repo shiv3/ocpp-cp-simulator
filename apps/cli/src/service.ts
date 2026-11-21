@@ -68,6 +68,7 @@ import { soapDialectForVersion } from "@ocpp-cp-simulator/core/cp/infrastructure
 import { OCPPSoapServer } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/soap/OCPPSoapServer";
 import type { ResolvedNetworkSimConfig } from "@ocpp-cp-simulator/core/cp/infrastructure/transport/network-sim/config";
 import { getGlobalTraceWriter } from "./trace/globalTraceWriter";
+import { processSimulationOptions } from "./timeScale";
 import {
   splitStopReason,
   type MeterReadingContext,
@@ -201,6 +202,7 @@ import {
   snapshotScenarios,
   syncConnectorRuntimeScenarios,
   type ScenarioCatalogHost,
+  type ScenarioTemplateLoadOptions,
 } from "./service/scenarioCatalog";
 import type { ScenarioTemplateSummary } from "@ocpp-cp-simulator/core/utils/scenarioTemplates";
 import {
@@ -494,6 +496,7 @@ export class CLIChargePointService {
       init.authorizationKey,
       init.cpoName,
       init.tls,
+      processSimulationOptions(),
     );
     this._chargePoint.txUpdatedMeterValues =
       init.txUpdatedMeterValues !== false;
@@ -1249,16 +1252,7 @@ export class CLIChargePointService {
     templateId: string,
     connectorId: number,
     evSettingsOverride?: Partial<EVSettings>,
-    options: {
-      /** Forwarded to {@link loadScenario}: `false` keeps the auto-start gate
-       *  out of a "load it and start it now" caller's way (#318). */
-      readonly autoStart?: boolean;
-      /** `false` loads the instance disabled: the auto-start walker skips it
-       *  at every connect, so the only run is the explicit `run_scenario` the
-       *  caller makes — a template that runs once, not on every reconnect
-       *  (#352). */
-      readonly enabled?: boolean;
-    } = {},
+    options: ScenarioTemplateLoadOptions = {},
   ): string {
     return loadScenarioTemplate(
       this.scenarioCatalogHost(),

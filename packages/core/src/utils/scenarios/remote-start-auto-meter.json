@@ -75,7 +75,8 @@
         "example": { "connectorId": 1, "idTag": "REMOTE001" },
         "expectedStatus": "Accepted"
       }
-    ]
+    ],
+    "note": "Ends when the transaction is stopped (RemoteStopTransaction or locally) or after 120 s of station time (maxDurationSeconds): the Auto MeterValue node has no limit of its own."
   },
   "assertions": [
     {
@@ -92,5 +93,6 @@
       "payload": { "idTag": "REMOTE001" },
       "description": "StartTransaction carries idTag REMOTE001"
     }
-  ]
+  ],
+  "maxDurationSeconds": 120
 }

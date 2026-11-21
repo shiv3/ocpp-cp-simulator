@@ -86,7 +86,13 @@ export class RegistryScenarioRuns {
       templateId,
       connectorId,
       opts.evSettings,
-      { autoStart: false, ...(opts.once ? { enabled: false } : {}) },
+      {
+        autoStart: false,
+        ...(opts.once ? { enabled: false } : {}),
+        ...(opts.maxDurationSeconds === undefined
+          ? {}
+          : { maxDurationSeconds: opts.maxDurationSeconds }),
+      },
     );
     if (opts.strict === undefined) {
       service.runScenario(connectorId, scenarioId);

@@ -20,6 +20,8 @@ export interface ParseState {
   readonly labelEntries: Array<[string, string]>;
   metrics: boolean;
   metricsNoAuth: boolean;
+  /** `--time-scale` (process-wide clock speed-up); undefined = 1. */
+  timeScale: number | undefined;
   watch: boolean;
   connectors: number;
   jsonMode: boolean;
@@ -133,6 +135,7 @@ export function createParseState(): ParseState {
     labelEntries: [],
     metrics: false,
     metricsNoAuth: false,
+    timeScale: undefined,
     watch: false,
     connectors: 1,
     jsonMode: false,

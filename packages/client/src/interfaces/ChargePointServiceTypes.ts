@@ -412,6 +412,12 @@ export interface ScenarioRunOptions {
    */
   once?: boolean;
   /**
+   * `run_scenario_template` only (schema 1.13). Overrides the template's own
+   * `maxDurationSeconds`: seconds of the station clock after which the run
+   * ends normally (`endedBy: "maxDuration"`). 0 removes the bound.
+   */
+  maxDurationSeconds?: number;
+  /**
    * Handed the exact text a scenario file was read from, for `--watch`'s reload
    * baseline (#314).
    *

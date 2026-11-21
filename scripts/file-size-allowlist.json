@@ -1,11 +1,10 @@
 {
-  "apps/cli/src/jsonMode.ts": 915,
   "apps/cli/src/server/CPRegistry.ts": 807,
   "apps/cli/src/server/RegistryChargePointService.ts": 1070,
   "apps/cli/src/server/rpc/cpProvisioning.ts": 822,
   "apps/cli/src/server/rpc/facadeCpCommands.ts": 805,
   "apps/cli/src/server/socketServer.ts": 1022,
-  "apps/cli/src/service.ts": 1942,
+  "apps/cli/src/service.ts": 1936,
   "apps/web/src/components/Settings.tsx": 807,
   "apps/web/src/components/ui/log-viewer.tsx": 833,
   "apps/web/src/console/lib/treeGraphLayout.ts": 859,

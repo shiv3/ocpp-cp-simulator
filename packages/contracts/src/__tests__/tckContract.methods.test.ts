@@ -11,7 +11,7 @@ import { METHODS } from "../methods";
 // parameter turning required fails here. The rule (#346): required keys and
 // existing keys must not change; a NEW key must be optional. Adding an
 // OPTIONAL parameter is allowed: add it to the entry and docs/entities/cli.md
-// (`idTokenType` of authorize / start_transaction came in with #672). Do not
+// (`idTokenType` of authorize / start_transaction came in with #672, `maxDurationSeconds` of run_scenario_template with #1101). Do not
 // edit an entry to make a rename or a removal pass; add an alias and keep the
 // old key (cli.md rules).
 
@@ -67,6 +67,7 @@ const TCK_COMMANDS = {
   run_scenario_template: [
     ["connector", "required"],
     ["evSettings", "optional"],
+    ["maxDurationSeconds", "optional"],
     ["once", "optional"],
     ["strict", "optional"],
     ["templateId", "required"],

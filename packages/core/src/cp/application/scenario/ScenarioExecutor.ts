@@ -115,6 +115,9 @@ export class ScenarioExecutor {
   // Issue #247 Phase 3: track whether certificate quirks were armed during this
   // run, so they can be cleared when the run ends (both normal completion and stop()).
   private armedCertificateQuirks = false;
+  // Schema 1.13: the run reached its `maxDurationSeconds` and was ended by it
+  // (not stopped by an operator).
+  private endedByMaxDuration = false;
   private readonly clock: SimClock;
   private readonly rng: Rng;
   /** The state of the run (schema 1.6 `setState`); fresh for every start. */
@@ -327,8 +330,10 @@ export class ScenarioExecutor {
     });
     this.rootScope = BranchScope.root(this.abortPromise);
     // Dispatch START event to transition to running state
+    this.endedByMaxDuration = false;
     this.service.send({ type: "START", mode });
     this.notifyStateChange();
+    const stopBound = this.armMaxDuration();
 
     // Emit execution started events
     const startedData = {
@@ -365,9 +370,17 @@ export class ScenarioExecutor {
       // The last nodes' frames may still be queued or unanswered: let them
       // reach the transcript before the run is reported complete. A stop
       // during the wait ends it.
-      if (this.callbacks.onRunEnding && !this.aborted) {
+      if (
+        this.callbacks.onRunEnding &&
+        (!this.aborted || this.endedByMaxDuration)
+      ) {
         try {
-          await Promise.race([this.callbacks.onRunEnding(), this.abortPromise]);
+          // A run ended by its bound still lets the frames of its last nodes
+          // reach the transcript; only an operator stop cuts the wait short.
+          await Promise.race([
+            this.callbacks.onRunEnding(),
+            ...(this.endedByMaxDuration ? [] : [this.abortPromise]),
+          ]);
         } catch {
           // Best effort: a run that did its work is not failed by the wait.
         }
@@ -413,6 +426,7 @@ export class ScenarioExecutor {
         "error",
       );
     } finally {
+      stopBound();
       // Issue #110: clear any response overrides armed during this run,
       // both on normal completion and on stop(). Iterate through the
       // tracking list (which was populated by executeResponseOverride)
@@ -443,6 +457,34 @@ export class ScenarioExecutor {
 
       this.notifyStateChange();
     }
+  }
+
+  /**
+   * Schema 1.13: when the scenario declares `maxDurationSeconds`, end the run
+   * normally once that much station-clock time has passed since it started.
+   * The flow is cut short as a stop would cut it, but the run completes (it is
+   * not stopped), its assertions are evaluated and the context reports
+   * `endedBy: "maxDuration"`. Returns the function that disarms the timer.
+   */
+  private armMaxDuration(): () => void {
+    const seconds = this.scenario.maxDurationSeconds;
+    if (typeof seconds !== "number" || !(seconds > 0)) return () => undefined;
+    const handle = this.clock.setTimeout(() => {
+      if (this.aborted) return;
+      this.endedByMaxDuration = true;
+      this.callbacks.log?.(
+        `[${this.scenario.name}] Reached maxDurationSeconds (${seconds}); ending the run`,
+        "info",
+      );
+      this.aborted = true;
+      this.currentNodeId = null;
+      this.currentNodeStartedAt = null;
+      for (const wait of this.parkedWaits) wait.control.dispose();
+      this.parkedWaits = [];
+      this.abortResolve?.();
+      this.callbacks.onStopAutoMeterValue?.();
+    }, seconds * 1000);
+    return () => this.clock.clearTimeout(handle);
   }
 
   /**
@@ -597,6 +639,7 @@ export class ScenarioExecutor {
       expectation: parked?.expectation ?? null,
       currentNodeStartedAt: parked?.startedAt ?? this.currentNodeStartedAt,
       waitDeadlineAt: parked?.control.deadlineAt ?? null,
+      ...(this.endedByMaxDuration ? { endedBy: "maxDuration" as const } : {}),
     };
   }
 

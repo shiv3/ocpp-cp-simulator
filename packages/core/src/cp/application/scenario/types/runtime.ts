@@ -74,6 +74,18 @@ export interface ScenarioExecutionContext {
    *  parked or it waits forever. Moves when an operator extends or retries
    *  the wait, so prefer it over expectation.timeoutMs for a countdown. */
   waitDeadlineAt?: number | null;
+  /** Schema 1.13: set when the run was ended by the scenario's
+   *  `maxDurationSeconds` rather than by reaching its end or being stopped. */
+  endedBy?: "maxDuration";
+  /**
+   * The id of the transaction running on the scenario's connector now (OCPP
+   * 1.6: the CSMS's `transactionId`; 2.x: the charge point's transaction
+   * UUID); when none runs, the last one the run started; `null` when the run
+   * has seen none. Set by the daemon's `scenario_status`.
+   */
+  transactionId?: number | string | null;
+  /** Ids of every transaction the run has seen start, in order. */
+  transactionIds?: Array<number | string>;
 }
 
 /** #240: an operator action taken on a parked wait. */

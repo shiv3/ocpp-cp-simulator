@@ -521,6 +521,14 @@ export const cpScenarioRunParamsSchema = z
       .describe(
         "Run once: the instance is loaded disabled, so it does not re-arm on the next reconnect",
       ),
+    maxDurationSeconds: z
+      .number()
+      .min(0)
+      .max(86_400)
+      .optional()
+      .describe(
+        "Upper bound on the run in seconds of the station clock; the run then ends normally (endedBy maxDuration) and its assertions are evaluated. Overrides the template's own bound; 0 removes it",
+      ),
   })
   .strict();
 

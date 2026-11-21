@@ -168,6 +168,9 @@ export class RemoteScenarioRpc {
         : {}),
       ...(opts.strict !== undefined ? { strict: opts.strict } : {}),
       ...(opts.once !== undefined ? { once: opts.once } : {}),
+      ...(opts.maxDurationSeconds !== undefined
+        ? { maxDurationSeconds: opts.maxDurationSeconds }
+        : {}),
     });
     return (data as { scenarioId: string }) ?? { scenarioId: "" };
   }

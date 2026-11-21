@@ -1,7 +1,6 @@
 import {
   DIAGNOSTICS_STATUSES,
   FIRMWARE_STATUSES,
-  isOneOf,
   UPLOAD_LOG_STATUSES,
 } from "@ocpp-cp-simulator/core/cp/domain/types/FirmwareLogStatus";
 import type { DataTransferData } from "@ocpp-cp-simulator/core/cp/domain/types/DataTransfer";
@@ -21,6 +20,19 @@ import {
   type Params,
   type RpcMethod,
 } from "@ocpp-cp-simulator/contracts/index";
+import {
+  requirePositiveInt,
+  requireNonNegativeInt,
+  optionalNonNegativeNumber,
+  requireNumber,
+  optionalString,
+  requireString,
+  optionalEnum,
+  requireEnum,
+  optionalBoolean,
+  requireBoolean,
+  requireObject,
+} from "./jsonModeParams";
 import { toJsonResponse, toJsonEvent } from "./output";
 import { writeLine } from "./jsonLines";
 import type { JsonCommand } from "./types";
@@ -504,9 +516,14 @@ export async function handleJsonCommand(
       // declares them; before, this surface silently dropped `strict`.
       const strict = optionalBoolean(params, "strict");
       const once = optionalBoolean(params, "once");
+      const maxDurationSeconds = optionalNonNegativeNumber(
+        params,
+        "maxDurationSeconds",
+      );
       return ops.runScenarioTemplate(connectorId, templateId, evSettings, {
         ...(strict === undefined ? {} : { strict }),
         ...(once === undefined ? {} : { once }),
+        ...(maxDurationSeconds === undefined ? {} : { maxDurationSeconds }),
       });
     }
 
@@ -617,105 +634,6 @@ export async function handleJsonCommand(
   }
 }
 
-export function requirePositiveInt(
-  params: Record<string, unknown>,
-  key: string,
-): number {
-  const val = params[key];
-  if (typeof val !== "number" || !Number.isInteger(val) || val < 1) {
-    throw new Error(
-      `Missing or invalid parameter: ${key} (expected positive integer)`,
-    );
-  }
-  return val;
-}
-
-export function requireNonNegativeInt(
-  params: Record<string, unknown>,
-  key: string,
-): number {
-  const val = params[key];
-  if (typeof val !== "number" || !Number.isInteger(val) || val < 0) {
-    throw new Error(
-      `Missing or invalid parameter: ${key} (expected non-negative integer)`,
-    );
-  }
-  return val;
-}
-
-export function requireNumber(
-  params: Record<string, unknown>,
-  key: string,
-): number {
-  const val = params[key];
-  if (typeof val !== "number" || isNaN(val)) {
-    throw new Error(`Missing or invalid parameter: ${key} (expected number)`);
-  }
-  return val;
-}
-
-/**
- * A string parameter that may be absent, but must be a non-empty string when
- * present. Used where the domain has its own fallback — `tagId`, which a
- * charge point with an idTag pool fills in itself (#299).
- */
-export function optionalString(
-  params: Record<string, unknown>,
-  key: string,
-): string | undefined {
-  const val = params[key];
-  if (val === undefined || val === null) return undefined;
-  if (typeof val !== "string" || val.length === 0) {
-    throw new Error(`Invalid parameter: ${key} (expected non-empty string)`);
-  }
-  return val;
-}
-
-export function requireString(
-  params: Record<string, unknown>,
-  key: string,
-): string {
-  const val = params[key];
-  if (typeof val !== "string" || val.length === 0) {
-    throw new Error(`Missing or invalid parameter: ${key} (expected string)`);
-  }
-  return val;
-}
-
-/**
- * A string parameter that must be one of `allowed` when present. The error
- * names the vocabulary so a caller who misspelt an OCPP enum value sees the
- * spelling that would have worked (#335).
- */
-export function optionalEnum<T extends string>(
-  params: Record<string, unknown>,
-  key: string,
-  allowed: readonly T[],
-): T | undefined {
-  const val = params[key];
-  if (val === undefined || val === null) return undefined;
-  if (!isOneOf(val, allowed)) {
-    throw new Error(
-      `Invalid parameter: ${key} (expected one of ${allowed.join(", ")})`,
-    );
-  }
-  return val;
-}
-
-export function requireEnum<T extends string>(
-  params: Record<string, unknown>,
-  key: string,
-  allowed: readonly T[],
-): T {
-  const val = optionalEnum(params, key, allowed);
-  if (val === undefined) {
-    throw new Error(
-      `Missing or invalid parameter: ${key} (expected one of ${allowed.join(", ")})`,
-    );
-  }
-  return val;
-}
-
 /**
  * `data_transfer`'s `data` (#348): validated against the daemon's own schema
  * (`dataTransferDataSchema`), so standalone JSON mode admits exactly what the
@@ -784,40 +702,6 @@ export function requireWaitExtensionSeconds(
     );
   }
   return parsed.data;
-}
-
-export function optionalBoolean(
-  params: Record<string, unknown>,
-  key: string,
-): boolean | undefined {
-  const val = params[key];
-  if (val === undefined || val === null) return undefined;
-  if (typeof val !== "boolean") {
-    throw new Error(`Invalid parameter: ${key} (expected boolean)`);
-  }
-  return val;
-}
-
-export function requireBoolean(
-  params: Record<string, unknown>,
-  key: string,
-): boolean {
-  const val = params[key];
-  if (typeof val !== "boolean") {
-    throw new Error(`Missing or invalid parameter: ${key} (expected boolean)`);
-  }
-  return val;
-}
-
-export function requireObject(
-  params: Record<string, unknown>,
-  key: string,
-): Record<string, unknown> {
-  const val = params[key];
-  if (typeof val !== "object" || val === null || Array.isArray(val)) {
-    throw new Error(`Missing or invalid parameter: ${key} (expected object)`);
-  }
-  return val as Record<string, unknown>;
 }
 
 function readStatusNotificationOptions(

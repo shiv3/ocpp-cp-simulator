@@ -631,6 +631,13 @@ export interface ScenarioRunResult {
    *  than it reaching an end node or failing. Absent on reports recorded
    *  before the field existed, which reads as not stopped. */
   stopped?: boolean;
+  /** Schema 1.13: `"maxDuration"` when the scenario's `maxDurationSeconds`
+   *  ended the run (a normal end, not a stop). Absent otherwise. */
+  endedBy?: "maxDuration";
+  /** Ids of the transactions the run saw start, in order (1.6: the
+   *  `transactionId` the CSMS assigned; 2.x: the charge point's UUID). Absent
+   *  on reports recorded before the field existed. */
+  transactionIds?: Array<number | string>;
   /** Overall verdict combining conformance and compatibility axes. */
   verdict: ScenarioVerdict;
   /** Verdict for failure-severity assertions only (conformance). */

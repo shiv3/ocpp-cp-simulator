@@ -68,6 +68,8 @@ export const SCENARIO_METHODS = {
       // #352: run once — the instance is loaded disabled, so it does not
       // re-arm on the next reconnect. Default: re-arms on every connect.
       once: z.boolean().optional(),
+      // Schema 1.13: overrides the template's own maxDurationSeconds.
+      maxDurationSeconds: z.number().min(0).max(86_400).optional(),
     }),
     result: ANY,
   },

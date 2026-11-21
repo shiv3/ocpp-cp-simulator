@@ -1,12 +1,62 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   RealClock,
+  ScaledClock,
   VirtualClock,
   drainMicrotasks,
   realClock,
   type SimClock,
 } from "../clock";
 import { RngStreams, systemRngStreams } from "../rng";
+
+describe("ScaledClock", () => {
+  it("refuses a scale that is not a number above 0", () => {
+    for (const scale of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => new ScaledClock(scale)).toThrow(RangeError);
+    }
+  });
+
+  it("runs timers and now() at the scale of the base clock", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2031-02-03T04:05:06.000Z"));
+      const clock = new ScaledClock(10);
+      const start = clock.now();
+      expect(start).toBe(Date.parse("2031-02-03T04:05:06.000Z"));
+      const fn = vi.fn();
+      clock.setTimeout(fn, 1000); // 100 real ms
+      vi.advanceTimersByTime(99);
+      expect(fn).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
+      expect(fn).toHaveBeenCalledTimes(1);
+      expect(clock.now() - start).toBe(1000);
+      const tick = vi.fn();
+      const handle = clock.setInterval(tick, 500); // every 50 real ms
+      vi.advanceTimersByTime(160);
+      clock.clearInterval(handle);
+      vi.advanceTimersByTime(500);
+      expect(tick).toHaveBeenCalledTimes(3);
+      const cancelled = vi.fn();
+      clock.clearTimeout(clock.setTimeout(cancelled, 100));
+      vi.advanceTimersByTime(100);
+      expect(cancelled).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("is the wall clock at scale 1", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2031-02-03T04:05:06.000Z"));
+      const clock = new ScaledClock(1);
+      vi.advanceTimersByTime(2500);
+      expect(clock.now()).toBe(realClock.now());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
 
 describe("RealClock", () => {
   it("reads the globals at call time, so fake timers steer it", () => {

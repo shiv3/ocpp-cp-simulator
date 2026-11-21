@@ -1,4 +1,4 @@
-import { encodeCall, OCPPMessageType } from "@ocpp-cp-simulator/ocpp-rpc/index";
+import { encodeCall } from "@ocpp-cp-simulator/ocpp-rpc/index";
 
 /** An OCPP-J CALL frame, `[2, messageId, action, payload]`, exactly as it is
  *  written to the socket. The codec is ocpp-rpc's (#978). */
@@ -8,14 +8,4 @@ export function encodeCallFrame(
   payload: unknown,
 ): string {
   return encodeCall(messageId, action, payload);
-}
-
-/** An OCPP 2.1 SEND frame, `[6, messageId, action, payload]` (Part 2 FR.07):
- *  an unconfirmed message the CSMS never answers. */
-export function encodeSendFrame(
-  messageId: string,
-  action: string,
-  payload: unknown,
-): string {
-  return JSON.stringify([OCPPMessageType.SEND, messageId, action, payload]);
 }

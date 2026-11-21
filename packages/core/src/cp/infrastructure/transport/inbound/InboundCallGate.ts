@@ -1,3 +1,4 @@
+import { encodeCallResultError } from "@ocpp-cp-simulator/ocpp-rpc/index";
 import type { ChargePointBehaviorRegistry } from "../../../domain/engine/behaviorRules";
 import { BehaviorRegistry as DefaultBehaviorRegistry } from "../../../application/behavior/BehaviorRegistry";
 import type {
@@ -253,13 +254,12 @@ export class InboundCallGate {
       case "callResultError":
         warn(`${prefix}CALLRESULTERROR(${override.errorCode})`);
         exchange.replyRaw(
-          JSON.stringify([
-            5,
+          encodeCallResultError(
             exchange.messageId,
             override.errorCode,
             override.errorDescription ?? "",
-            override.errorDetails ?? {},
-          ]),
+            override.errorDetails,
+          ),
           { outcome: "CallResult" },
         );
         return;

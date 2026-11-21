@@ -212,10 +212,15 @@ Tests in `packages/ocpp-rpc/src/__tests__/` import only the public entries of
   an invalid CALLRESULT;
 - a timeout on an injected fake clock, a late answer reported as unmatched, close,
   and `send` failures on both sides;
+- on an OCPP 2.1 dialect, in memory: a SEND sent while a CALL is in flight and
+  never answered, whatever happens to it on the other side; an inbound
+  CALLRESULTERROR that leaves a pending call with the same id alone; an explicit
+  `sendCallResultError` after an invalid CALLRESULT; and on 1.6 and 2.0.1, types
+  5 and 6 refused on the way out and unknown on the way in;
 - `webSocket.bun.test.ts` runs a `Bun.serve` CSMS and a `WebSocket` station on
   `127.0.0.1` (its own constant: core's `LOOPBACK` is out of bounds for the package)
   and exchanges a 1.6J `BootNotification` over a real socket;
-- `frames.test.ts` pins the encoded bytes of all three frame types and each
+- `frames.test.ts` pins the encoded bytes of all five frame types and each
   decode error.
 
 **What it does not prove.** Nothing is installed outside the monorepo: the
@@ -223,8 +228,9 @@ package resolves through workspace links, and `packages/ocpp` is not publishable
 yet. The RFC's Phase 4 box "verify consumption from an independently installed
 package" stays unchecked until #1053 and
 [#1063](https://github.com/shiv3/ocpp-cp-simulator/issues/1063) (standalone
-station and CSMS examples installed from packed tarballs). No SOAP exchange and
-no 2.1 exchange is covered, and the WebSocket test is a test, not a transport:
+station and CSMS examples installed from packed tarballs). No SOAP exchange is
+covered, the 2.1 message types are exchanged in memory only, and the WebSocket
+test is a test, not a transport:
 it wires a raw socket to `send` / `receive` by hand.
 
 ## Decisions

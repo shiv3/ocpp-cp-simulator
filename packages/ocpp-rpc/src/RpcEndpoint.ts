@@ -64,7 +64,8 @@ export interface RpcEndpointOptions {
   readonly callTimeoutMs?: number;
   /** Checks inbound CALL requests and CALLRESULT responses. */
   readonly validate?: RpcValidator;
-  /** Told about every malformed or unmatched frame. */
+  /** Told about every malformed or unmatched frame, every answer `send`
+   *  could not write, and every SEND that went nowhere. */
   readonly onProtocolError?: (problem: RpcProtocolProblem) => void;
   /** OCPP 2.1: the peer could not process a CALLRESULT this side sent. Its
    *  message id is the one of the peer's CALL, so no pending call of this
@@ -147,8 +148,9 @@ export class RpcClosedError extends Error {
 /**
  * One side of an OCPP-J connection, charging station or CSMS alike: it sends
  * CALLs and correlates their answers, and answers the CALLs it receives with
- * the registered handlers. It owns no socket: `send` and `receive` are the
- * whole link.
+ * the registered handlers. On an OCPP 2.1 dialect it also sends and takes
+ * SENDs and CALLRESULTERRORs. It owns no socket: `send` and `receive` are
+ * the whole link.
  */
 export class RpcEndpoint {
   private readonly handlers = new Map<string, RpcHandler>();

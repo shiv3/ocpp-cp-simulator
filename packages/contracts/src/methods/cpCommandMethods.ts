@@ -154,7 +154,11 @@ export const CP_COMMAND_METHODS = {
       action: NON_EMPTY_STR.describe(
         "Station-initiated OCPP action, e.g. Heartbeat or StatusNotification",
       ),
-      payload: OBJ().describe("The CALL payload, sent as given"),
+      payload: OBJ()
+        .optional()
+        .describe(
+          "The CALL payload, sent as given; left out, the schema-valid default payload of the action (#1097)",
+        ),
       skipValidation: z
         .boolean()
         .optional()
@@ -169,6 +173,30 @@ export const CP_COMMAND_METHODS = {
         ),
     }),
     result: ocppCallOutcomeSchema,
+  },
+  // #1096: OCPP 2.1 SEND (RPC message type 6, Part 2 FR.07): an unconfirmed
+  // station-initiated message, today NotifyPeriodicEventStream. The CSMS never
+  // answers, so the result is the frame that went out. Refusals (not a 2.1
+  // station, not a SEND action, schema-invalid payload without skipValidation,
+  // closed socket) are invalid_params.
+  send_ocpp_send: {
+    params: z.object({
+      action: NON_EMPTY_STR.describe(
+        "Station-initiated SEND action; OCPP 2.1: NotifyPeriodicEventStream",
+      ),
+      payload: OBJ()
+        .optional()
+        .describe(
+          "The message payload, sent as given; left out, the schema-valid default payload of the action",
+        ),
+      skipValidation: z
+        .boolean()
+        .optional()
+        .describe(
+          "Send even if the payload fails the outgoing OCPP schema check (this message only)",
+        ),
+    }),
+    result: z.object({ messageId: z.string(), sentFrame: z.string() }),
   },
   // #393: expert raw frame (level C of #389): one text frame written to the
   // WebSocket as given, valid OCPP-J or not. SOAP stations and a closed

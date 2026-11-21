@@ -1,7 +1,7 @@
 import {
   OCPP_CALL_RESPONSE_TIMEOUT_MS,
   type OcppCallOutcome,
-  type OcppCallRequest,
+  type ResolvedOcppCallRequest,
 } from "../../domain/types/OcppCall";
 import { OcppCallNoAnswerError } from "../../domain/errors/OcppCallErrors";
 import { realClock } from "../../shared/clock";
@@ -54,7 +54,10 @@ export class ExpertCalls {
 
   /** Track a CALL about to be sent under `messageId`; resolves with the
    *  CSMS's answer. */
-  start(messageId: string, request: OcppCallRequest): Promise<OcppCallOutcome> {
+  start(
+    messageId: string,
+    request: ResolvedOcppCallRequest,
+  ): Promise<OcppCallOutcome> {
     const sentFrame = encodeCallFrame(
       messageId,
       request.action,

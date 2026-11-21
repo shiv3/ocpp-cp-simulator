@@ -25,7 +25,7 @@ import { CallWaiters } from "./CallWaiters";
 import { ExpertCalls } from "./ExpertCalls";
 import {
   type OcppCallOutcome,
-  type OcppCallRequest,
+  type ResolvedOcppCallRequest,
 } from "../../domain/types/OcppCall";
 import {
   OcppCallNoAnswerError,
@@ -568,7 +568,7 @@ export class OCPPMessageHandlerV201 implements IChargePointMessageHandler {
    *  caller, and through the normal response handling only when
    *  `applyResponse` is set. */
   public async sendOcppCall(
-    originalRequest: OcppCallRequest,
+    originalRequest: ResolvedOcppCallRequest,
   ): Promise<OcppCallOutcome> {
     let request = originalRequest;
     const warning =

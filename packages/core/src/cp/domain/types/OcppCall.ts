@@ -6,7 +6,9 @@
  */
 export type OcppCallRequest = {
   readonly action: string;
-  readonly payload: Record<string, unknown>;
+  /** Left out, the station sends the schema-valid default payload of the
+   *  action (the catalog's `defaultPayload`). */
+  readonly payload?: Record<string, unknown>;
   /** Send even when the payload fails the outgoing schema check. Applies to
    *  this CALL only; normal traffic keeps its own check. */
   readonly skipValidation?: boolean;
@@ -14,6 +16,31 @@ export type OcppCallRequest = {
    *  (boot, transaction, authorize…). Off by default: the answer is only
    *  logged and returned. */
   readonly applyResponse?: boolean;
+};
+
+/** An {@link OcppCallRequest} whose payload is settled: what the transport
+ *  sends. */
+export type ResolvedOcppCallRequest = OcppCallRequest & {
+  readonly payload: Record<string, unknown>;
+};
+
+/**
+ * An OCPP 2.1 SEND (RPC message type 6, Part 2 FR.07): an unconfirmed
+ * station-initiated message, e.g. NotifyPeriodicEventStream. The CSMS never
+ * answers it, so there is nothing to wait for.
+ */
+export type OcppSendRequest = {
+  readonly action: string;
+  /** Left out, the schema-valid default payload of the action. */
+  readonly payload?: Record<string, unknown>;
+  /** Send even when the payload fails the schema check. */
+  readonly skipValidation?: boolean;
+};
+
+/** What a SEND went out as. */
+export type OcppSendOutcome = {
+  readonly messageId: string;
+  readonly sentFrame: string;
 };
 
 /** The CSMS's answer. A CALLERROR is an answer too, not a failure: provoking
@@ -44,7 +71,7 @@ export type OcppCallRejection =
   | "invalid_payload"
   /** OCPP 1.6 §4.2: BootNotification not yet Accepted. */
   | "boot_gate"
-  /** #393: a raw frame needs an open socket. */
+  /** #393: a raw frame (or a SEND) needs an open socket. */
   | "not_connected";
 
 /** How long an expert call waits for the answer. Kept under the Socket.IO

@@ -170,7 +170,7 @@ shape depends on `type`).
 | `inboundPolicy`      | `action`, `policy` (`"answer"` \| `"callerror"` \| `"ignore"`)               | `errorCode`, `errorDescription`. See [note](#inboundpolicy-and-certificate-quirks-notes) below.                                                                                                                                         |
 | `certQuirks`         | `mode` (`"set"` \| `"clear"`)                                                | `preset`, `csrKeyAlgorithm`, `csrPemLineEndings`, `requiredCertificateSignatureAlgorithms`, `hiddenConfigurationKeys`. See [note](#inboundpolicy-and-certificate-quirks-notes) below.                                                   |
 | `connectionTrigger`  | `event` (`"connected"` \| `"disconnected"`)                                  | `timeout`. See [note](#connectiontrigger-notes) below.                                                                                                                                                                                  |
-| `ocppCall`           | `action`, `payload`                                                          | `skipValidation`, `applyResponse`. See [note](#ocppcall-notes) below.                                                                                                                                                                   |
+| `ocppCall`           | `action`, `payload`                                                          | `skipValidation`, `applyResponse`, `messageType` (`"call"` \| `"send"`). See [note](#ocppcall-notes) below.                                                                                                                             |
 | `callResponse`       | `kind` (`"result"` \| `"error"` \| `"none"` \| `"accepted"` \| `"rejected"`) | `payload`, `errorCode`, `errorDescription`, `skipValidation`. See [note](#csmscalltrigger-replace-callresponse-from-and-usebehavior-schema-15).                                                                                         |
 | `useBehavior`        | `behaviorId`                                                                 | `mode` (`"use"` \| `"disable"`), `params` (1.6). See [note](#usebehavior-params-and-disable-schema-16).                                                                                                                                 |
 | `notify`             | `kind`, `status`                                                             | `requestId` (a number or a `$from`). 1.6. See [note](#the-schema-16-nodes).                                                                                                                                                             |
@@ -526,6 +526,11 @@ any station-initiated CALL of the station's OCPP-J version (`action`), with
   `Heartbeat` and `StatusNotification` (and reads only `payload.status` of the
   latter). `export-k6` sends both nodes as authored and, for `ocppCall`,
   carries on after a CALLERROR too.
+
+**Issue #1096**: `messageType: "send"` sends an OCPP 2.1 SEND (RPC message type 6, e.g. `NotifyPeriodicEventStream`;
+see [SEND messages](expert-ocpp-calls.md#send-messages-ocpp-21)) instead of a CALL. A SEND is unconfirmed, so the node
+waits for nothing, records no `response` for `$from`, and `applyResponse` does not apply; the schema check and
+`skipValidation` do. A station that is not 2.1 refuses it and fails the run. `export-k6` refuses the node.
 
 ### Controls on a parked wait
 

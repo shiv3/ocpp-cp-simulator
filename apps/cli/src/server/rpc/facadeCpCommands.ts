@@ -174,6 +174,15 @@ export async function dispatchFacadeCpCommand(
         ),
       );
     }
+    case "send_ocpp_send": {
+      const { params } = call;
+      // #1096: a SEND is never answered; the result is the frame written.
+      return handled(
+        await runFacadeOperation(() =>
+          chargePointService.sendOcppSend(id, params),
+        ),
+      );
+    }
     case "send_raw_frame": {
       const { params } = call;
       // #393: no reply is a result too (reply null), as is a close.

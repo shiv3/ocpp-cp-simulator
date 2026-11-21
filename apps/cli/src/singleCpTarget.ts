@@ -12,6 +12,8 @@ import type {
   RawFrameRequest,
   CallResultErrorOutcome,
   CallResultErrorRequest,
+  OcppSendOutcome,
+  OcppSendRequest,
 } from "@ocpp-cp-simulator/core/cp/domain/types/OcppCall";
 import type {
   Get15118EVCertificateRequest,
@@ -126,6 +128,7 @@ export interface SingleCpCommandOps {
     data?: DataTransferData,
   ): Promise<DataTransferResult>;
   sendOcppCall(request: OcppCallRequest): Promise<OcppCallOutcome>;
+  sendOcppSend(request: OcppSendRequest): Promise<OcppSendOutcome>;
   sendRawFrame(request: RawFrameRequest): Promise<RawFrameOutcome>;
   setResponseOverride(
     request: ResponseOverrideRequest,
@@ -336,6 +339,7 @@ function legacyCommandOps(service: CLIChargePointService): SingleCpCommandOps {
     sendDataTransfer: (vendorId, messageId, data) =>
       service.sendDataTransfer(vendorId, messageId, data),
     sendOcppCall: (request) => service.sendOcppCall(request),
+    sendOcppSend: (request) => service.sendOcppSend(request),
     sendRawFrame: (request) => service.sendRawFrame(request),
     setResponseOverride: (request) => service.setResponseOverride(request),
     clearResponseOverrides: (action) => service.clearResponseOverrides(action),
@@ -500,6 +504,7 @@ function facadeCommandOps(target: FacadeSingleCpTarget): SingleCpCommandOps {
     sendDataTransfer: (vendorId, messageId, data) =>
       service.sendDataTransfer(cpId, vendorId, messageId, data),
     sendOcppCall: (request) => service.sendOcppCall(cpId, request),
+    sendOcppSend: (request) => service.sendOcppSend(cpId, request),
     sendRawFrame: (request) => service.sendRawFrame(cpId, request),
     setResponseOverride: (request) =>
       service.setResponseOverride(cpId, request),

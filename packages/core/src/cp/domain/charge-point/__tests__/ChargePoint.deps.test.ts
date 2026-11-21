@@ -135,7 +135,14 @@ describe("ChargePoint deps.createTransport (#575)", () => {
   it("checks expert calls against the transport's call catalog", async () => {
     const { cp } = build("OCPP-1.6J", (t) => ({
       ...t,
-      callCatalog: { actions: ["OnlyThis"], isSupported: () => false },
+      callCatalog: {
+        actions: ["OnlyThis"],
+        sendActions: [],
+        isSupported: () => false,
+        isSendSupported: () => false,
+        validate: () => null,
+        defaultPayload: () => ({}),
+      },
     }));
     await expect(
       cp.sendOcppCall({ action: "Heartbeat", payload: {} } as never),

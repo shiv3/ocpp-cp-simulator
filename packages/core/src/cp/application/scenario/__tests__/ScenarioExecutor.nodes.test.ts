@@ -844,6 +844,41 @@ describe("ocppCall node (#389)", () => {
     );
   });
 
+  it("a messageType send node sends an OCPP 2.1 SEND and awaits no answer (#1096)", async () => {
+    const onSendOcppCall = vi.fn();
+    const onSendOcppSend = vi
+      .fn()
+      .mockResolvedValue({ messageId: "s1", sentFrame: '[6,"s1"]' });
+    const log = vi.fn();
+    const sendRequest = {
+      action: "NotifyPeriodicEventStream",
+      payload: { id: 1 },
+    };
+    const executor = new ScenarioExecutor(
+      scenarioWithMiddleNodes("ocpp-send", [
+        node("send", ScenarioNodeType.OCPP_CALL, {
+          label: "OCPP send",
+          messageType: "send",
+          ...sendRequest,
+        }),
+      ]),
+      { onSendOcppCall, onSendOcppSend, log },
+    );
+
+    await executor.start();
+
+    expect(onSendOcppCall).not.toHaveBeenCalled();
+    expect(onSendOcppSend).toHaveBeenCalledWith({
+      ...sendRequest,
+      skipValidation: undefined,
+    });
+    expect(executor.getContext().state).toBe("completed");
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining("OCPP send NotifyPeriodicEventStream"),
+      "info",
+    );
+  });
+
   it("fails the run when the call is refused or gets no answer", async () => {
     const onSendOcppCall = vi
       .fn()

@@ -23,6 +23,8 @@ import type {
   RawFrameRequest,
   CallResultErrorOutcome,
   CallResultErrorRequest,
+  OcppSendOutcome,
+  OcppSendRequest,
 } from "@ocpp-cp-simulator/core/cp/domain/types/OcppCall";
 import type {
   Get15118EVCertificateRequest,
@@ -107,6 +109,16 @@ export async function sendOcppCall(
   request: OcppCallRequest,
 ): Promise<OcppCallOutcome> {
   return getExistingChargePointOrThrow(host.chargePoints, id).sendOcppCall(
+    request,
+  );
+}
+
+export async function sendOcppSend(
+  host: LocalServiceHost,
+  id: string,
+  request: OcppSendRequest,
+): Promise<OcppSendOutcome> {
+  return getExistingChargePointOrThrow(host.chargePoints, id).sendOcppSend(
     request,
   );
 }

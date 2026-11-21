@@ -24,7 +24,7 @@ import type {
 import type { ChargePoint } from "../../../domain/charge-point/ChargePoint";
 import {
   type OcppCallOutcome,
-  type OcppCallRequest,
+  type ResolvedOcppCallRequest,
 } from "../../../domain/types/OcppCall";
 import { OcppCallRejectedError } from "../../../domain/errors/OcppCallErrors";
 import type {
@@ -306,7 +306,7 @@ export class OCPPSoapHandler implements IChargePointMessageHandler {
    *  path (#389). `ChargePoint.sendOcppCall` refuses first; this is the
    *  handler's own answer. */
   public async sendOcppCall(
-    _request: OcppCallRequest,
+    _request: ResolvedOcppCallRequest,
   ): Promise<OcppCallOutcome> {
     throw new OcppCallRejectedError(
       "unsupported_transport",

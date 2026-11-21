@@ -851,7 +851,11 @@
                   "action": { "type": "string", "minLength": 1 },
                   "payload": { "type": "object" },
                   "skipValidation": { "type": "boolean" },
-                  "applyResponse": { "type": "boolean" }
+                  "applyResponse": { "type": "boolean" },
+                  "messageType": {
+                    "enum": ["call", "send"],
+                    "description": "#1096. `send`: an OCPP 2.1 SEND (message type 6, e.g. NotifyPeriodicEventStream); unconfirmed, nothing is awaited and `applyResponse` does not apply. Default `call`."
+                  }
                 }
               }
             }

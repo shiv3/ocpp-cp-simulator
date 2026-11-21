@@ -3,7 +3,10 @@ import type {
   DataTransferResponder,
   DataTransferResult,
 } from "../types/DataTransfer";
-import type { OcppCallOutcome, OcppCallRequest } from "../types/OcppCall";
+import type {
+  OcppCallOutcome,
+  ResolvedOcppCallRequest,
+} from "../types/OcppCall";
 import type {
   DiagnosticsStatus,
   FirmwareStatus,
@@ -98,7 +101,7 @@ export interface IChargePointMessageHandler {
    * `OcppCallNoAnswerError` on a drop, a close or after
    * {@link OCPP_CALL_RESPONSE_TIMEOUT_MS}.
    */
-  sendOcppCall(request: OcppCallRequest): Promise<OcppCallOutcome>;
+  sendOcppCall(request: ResolvedOcppCallRequest): Promise<OcppCallOutcome>;
   /**
    * Security event (#537). On 2.x, resolves once the CALL is written, not
    * answered, and rejects with `OcppCallNoAnswerError` when it is dropped.

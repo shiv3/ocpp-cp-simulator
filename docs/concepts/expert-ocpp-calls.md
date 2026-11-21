@@ -1,7 +1,7 @@
 ---
 title: Expert OCPP calls
 type: concept
-summary: Send any station-initiated OCPP-J CALL with an edited payload through the normal transport — per-version action lists, the schema check and its per-call bypass, `applyResponse`, errors, and the SOAP boundary; one API behind the console, the control plane and the `ocppCall` node.
+summary: Send any station-initiated OCPP-J CALL (or, on 2.1, SEND) with an edited or default payload through the normal transport — per-version action lists, the schema check and its per-call bypass, `applyResponse`, errors, and the SOAP boundary; one API behind the console, the control plane and the `ocppCall` node.
 sources:
   - packages/core/src/cp/domain/types/OcppCall.ts
   - packages/core/src/cp/domain/errors/OcppCallErrors.ts
@@ -10,9 +10,11 @@ sources:
   - packages/core/src/cp/infrastructure/transport/ExpertCalls.ts
   - apps/web/src/console/pages/cp/ExpertCallPanel.tsx
   - packages/core/src/cp/infrastructure/transport/RawFrameSender.ts
-  - packages/core/src/cp/domain/charge-point/StationMessaging.ts (sendOcppCall, sendRawFrame)
+  - packages/core/src/cp/domain/charge-point/StationMessaging.ts (sendOcppCall, sendOcppSend, sendRawFrame)
   - "issue #389"
   - "issue #393"
+  - "issue #1096"
+  - "issue #1097"
 related:
   - control-plane.md
   - scenario-format.md
@@ -69,11 +71,19 @@ Only **station-initiated** actions of the station's own version are accepted:
   NotifyPriorityCharging, NotifySettlement, OpenPeriodicEventStream,
   PullDynamicScheduleUpdate, ReportDERControl, VatNumberValidation.
 
+The 2.1-only messages are all sent as CALLs the CSMS answers; their answers are
+returned as for any expert call (and, without `applyResponse`, kept away from the
+station's state). `payload` may be left out (#1097): the station then sends the
+**schema-valid default payload** of the action — only the required properties, each
+at its smallest valid value (the first enum value, `0` or the schema minimum, the
+current time for a `date-time`) — which a test pins for every action of every
+version. Edit it before sending when the CSMS under test needs real values.
+
 A test pins these lists to the vendored request schemas and to the inbound
 (CSMS → station) handlers: every request schema of a version is either one the
 station answers or one it sends, DataTransfer both. 2.1's
-NotifyPeriodicEventStream is an OCPP-J SEND, not a CALL, and is not offered.
-Any other action — a CSMS-initiated one such as `Reset`, or an unknown name —
+NotifyPeriodicEventStream is an OCPP-J SEND, not a CALL: it is sent through
+[`send_ocpp_send`](#send-messages-ocpp-21), not here. Any other action — a CSMS-initiated one such as `Reset`, or an unknown name —
 is refused.
 
 **SOAP** stations (OCPP 1.2, 1.5, 1.6S) are refused: their envelopes are built
@@ -138,6 +148,23 @@ one. On OCPP-J the wait starts when the call is queued: a call still waiting
 behind an unanswered CALL when its 25 s are up is withdrawn and never sent, so
 a caller told "no answer" never sees it go out later. A dropped call is never re-queued, including on OCPP 1.6, where a normal
 StartTransaction / StopTransaction / MeterValues would be kept for a retry.
+
+## SEND messages (OCPP 2.1)
+
+OCPP 2.1 adds the RPC framework message type **SEND**, `[6, <messageId>, <action>, <payload>]` (Part 2 FR.07):
+unconfirmed, so the CSMS never answers it and the sender never knows whether it was processed. The one
+station-initiated SEND the schemas define is `NotifyPeriodicEventStream` (an open periodic event stream's data,
+`id`, `pending`, `basetime`, `data[{ t, v }]`). `send_ocpp_send` ([control-plane](control-plane.md#cp-command-methods)
+method, [MCP tool](../entities/mcp-endpoint.md), JSON-Lines command) and the `ocppCall` scenario node with
+`messageType: "send"` (#1096) send one:
+
+- It is **refused** (`invalid_params`) on a station that is not OCPP 2.1 (`unsupported_action`), on SOAP
+  (`unsupported_transport`), for an action that is not a SEND (a CALL such as `Heartbeat`: use `send_ocpp_call`), on a
+  closed socket (`not_connected`), and for a schema-invalid payload unless `skipValidation` is set.
+- It goes out as a raw frame (same network simulation, `Sent:` log line and open-socket rule as
+  [raw frames](#raw-frames-level-c-393)), outside the 1.6 CALL queue; nothing is waited for. The result is
+  `{ messageId, sentFrame }`; the message id is a fresh UUID.
+- Whether the CSMS received a SEND cannot be told from the station: look at the CSMS.
 
 ## Raw frames (level C, #393)
 

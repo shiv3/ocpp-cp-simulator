@@ -159,6 +159,26 @@ export function registerTransactionTools(
     },
   });
 
+  mcp.tool("send_ocpp_send", {
+    description:
+      "Send an OCPP 2.1 SEND message (RPC message type 6, #1096): an unconfirmed station-initiated message the CSMS never answers, i.e. NotifyPeriodicEventStream. payload is checked against the action's schema unless skipValidation is set; left out, it is the schema-valid default payload. Returns the messageId and the frame written. OCPP 2.1 JSON charge points only.",
+    inputSchema: METHODS.send_ocpp_send.params.extend({
+      cpId: z.string().describe("Charge point identifier"),
+    }),
+    handler: async ({ cpId, ...params }) => {
+      try {
+        const result = await runRpc(deps, {
+          cpId,
+          method: "send_ocpp_send",
+          params,
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
   mcp.tool("send_raw_frame", {
     description:
       'Expert raw frame (#393): write one text frame to the charge point\'s WebSocket exactly as given, valid OCPP-J or not (wrong message type id, missing or extra element, non-string id, invalid JSON, any text), to see how the CSMS reacts. Returns the reply correlated best effort (a CALLRESULT/CALLERROR with the frame\'s id, or a CALLERROR with id "" or "-1") within waitMs, or reply null, and the close cause if the CSMS closed the socket. Bypasses the OCPP 1.6 one-CALL-in-flight queue. SOAP charge points are refused.',

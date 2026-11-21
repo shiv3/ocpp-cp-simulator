@@ -9,3 +9,13 @@ export function encodeCallFrame(
 ): string {
   return JSON.stringify([OCPPMessageType.CALL, messageId, action, payload]);
 }
+
+/** An OCPP 2.1 SEND frame, `[6, messageId, action, payload]` (Part 2 FR.07):
+ *  an unconfirmed message the CSMS never answers. */
+export function encodeSendFrame(
+  messageId: string,
+  action: string,
+  payload: unknown,
+): string {
+  return JSON.stringify([OCPPMessageType.SEND, messageId, action, payload]);
+}

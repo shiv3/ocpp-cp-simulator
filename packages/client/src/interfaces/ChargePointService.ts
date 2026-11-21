@@ -18,6 +18,8 @@ import type {
   RawFrameRequest,
   CallResultErrorOutcome,
   CallResultErrorRequest,
+  OcppSendOutcome,
+  OcppSendRequest,
 } from "@ocpp-cp-simulator/core/cp/domain/types/OcppCall";
 import type {
   Get15118EVCertificateRequest,
@@ -294,6 +296,10 @@ export interface ChargePointService {
    *  resolves with the CALLRESULT or CALLERROR. See
    *  `ChargePoint.sendOcppCall`. */
   sendOcppCall(id: string, request: OcppCallRequest): Promise<OcppCallOutcome>;
+  /** OCPP 2.1 SEND (message type 6, #1096), e.g. NotifyPeriodicEventStream:
+   *  unconfirmed, so it resolves once the frame is written. See
+   *  `ChargePoint.sendOcppSend`. */
+  sendOcppSend(id: string, request: OcppSendRequest): Promise<OcppSendOutcome>;
   /** Expert raw frame (#393): one text frame as given, valid OCPP-J or
    *  not. See `ChargePoint.sendRawFrame`. */
   sendRawFrame(id: string, request: RawFrameRequest): Promise<RawFrameOutcome>;

@@ -377,6 +377,7 @@ export const createScenarioExecutorCallbacks = (
       chargePoint.configuration.applyChange(key, value, { operator: true });
     },
     onSendOcppCall: (request) => chargePoint.sendOcppCall(request),
+    onSendOcppSend: (request) => chargePoint.sendOcppSend(request),
     onNotify: (kind, status, requestId) => {
       const engineKind =
         kind === "firmwareStatus"

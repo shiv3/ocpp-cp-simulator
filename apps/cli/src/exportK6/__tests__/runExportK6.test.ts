@@ -271,6 +271,18 @@ describe("runExportK6", () => {
       expect(message).toContain("node x");
     });
 
+    it("an ocppCall that sends an OCPP 2.1 SEND (#1096)", async () => {
+      const message = await refuse(
+        withNode("ocppCall", {
+          action: "NotifyPeriodicEventStream",
+          payload: {},
+          messageType: "send",
+        }),
+      );
+      expect(message).toContain('messageType "send"');
+      expect(message).toContain("node x");
+    });
+
     it("an ocppCall payload that reads $from", async () => {
       const message = await refuse(
         withNode("ocppCall", {

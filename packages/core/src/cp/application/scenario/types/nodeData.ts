@@ -600,7 +600,13 @@ export type DataTransferNodeData = BaseNodeData & {
  * as authored, and the two per-call expert switches. A CALLERROR answer is
  * logged and the flow goes on; a refused call or no answer fails the run.
  */
-export type OcppCallNodeData = BaseNodeData & OcppCallRequest;
+export type OcppCallNodeData = BaseNodeData &
+  OcppCallRequest & {
+    /** `send` (#1096): an OCPP 2.1 SEND (message type 6, e.g.
+     *  NotifyPeriodicEventStream), unconfirmed: nothing is awaited and no
+     *  answer is recorded for `$from: "response"`. Default `call`. */
+    messageType?: "call" | "send";
+  };
 
 /**
  * Connection Trigger Node Data — waits for the charge point's WebSocket to

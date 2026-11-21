@@ -8,6 +8,7 @@ import {
   type Get15118EVCertificateResult,
 } from "../security/get15118EVCertificate";
 import type { Outbox } from "../transport/Outbox";
+import { encodeSendFrame } from "../../infrastructure/transport/callFrame";
 import type { OcppCallActions } from "../transport/OcppCallActions";
 import type { RawFrameSink } from "../transport/RawFrameSink";
 import type {
@@ -19,6 +20,8 @@ import type {
   CallResultErrorRequest,
   OcppCallOutcome,
   OcppCallRequest,
+  OcppSendOutcome,
+  OcppSendRequest,
   RawFrameOutcome,
   RawFrameRequest,
 } from "../types/OcppCall";
@@ -125,7 +128,19 @@ export class StationMessaging {
     }
     // Checked here, not by the schema, so skipValidation cannot waive it:
     // the scenario editor can store unparsed JSON text as the payload.
-    const { payload } = request;
+    // Left out, the payload is the action's schema-valid default.
+    const unsupported = (): OcppCallRejectedError =>
+      new OcppCallRejectedError(
+        "unsupported_action",
+        `${request.action} is not a station-initiated call on ${this.host.ocppVersion()}; expected one of ${catalog.actions.join(", ")}`,
+      );
+    if (request.payload === undefined && !catalog.isSupported(request.action)) {
+      throw unsupported();
+    }
+    const payload =
+      request.payload === undefined
+        ? catalog.defaultPayload(request.action)
+        : request.payload;
     if (
       typeof payload !== "object" ||
       payload === null ||
@@ -136,13 +151,58 @@ export class StationMessaging {
         "The payload of an OCPP call must be a JSON object",
       );
     }
-    if (!catalog.isSupported(request.action)) {
+    if (!catalog.isSupported(request.action)) throw unsupported();
+    return this.host.outbox().sendOcppCall({ ...request, payload });
+  }
+
+  /**
+   * OCPP 2.1 SEND (RPC message type 6, Part 2 FR.07): an unconfirmed
+   * station-initiated message, `[6, messageId, action, payload]`, of which
+   * NotifyPeriodicEventStream is the one the schemas define. The CSMS never
+   * answers a SEND, so nothing is awaited: the call resolves once the frame is
+   * handed to the transport. The payload is checked against the action's
+   * schema unless `skipValidation` is set, and left out it is the schema-valid
+   * default. Goes out as a raw frame (network simulation, the `Sent:` log line
+   * and the open-socket requirement are shared), outside the 1.6 CALL queue.
+   */
+  async sendOcppSend(request: OcppSendRequest): Promise<OcppSendOutcome> {
+    const catalog = this.host.callCatalog();
+    if (!catalog) {
       throw new OcppCallRejectedError(
-        "unsupported_action",
-        `${request.action} is not a station-initiated call on ${this.host.ocppVersion()}; expected one of ${catalog.actions.join(", ")}`,
+        "unsupported_transport",
+        `SEND messages need an OCPP-J station; ${this.host.ocppVersion()} is SOAP`,
       );
     }
-    return this.host.outbox().sendOcppCall(request);
+    if (!catalog.isSendSupported(request.action)) {
+      throw new OcppCallRejectedError(
+        "unsupported_action",
+        catalog.sendActions.length === 0
+          ? `${request.action}: the SEND message type is OCPP 2.1 only; this station speaks ${this.host.ocppVersion()}`
+          : `${request.action} is not a station-initiated SEND message on ${this.host.ocppVersion()}; expected one of ${catalog.sendActions.join(", ")}`,
+      );
+    }
+    const payload =
+      request.payload === undefined
+        ? catalog.defaultPayload(request.action)
+        : request.payload;
+    if (
+      typeof payload !== "object" ||
+      payload === null ||
+      Array.isArray(payload)
+    ) {
+      throw new OcppCallRejectedError(
+        "invalid_payload",
+        "The payload of an OCPP message must be a JSON object",
+      );
+    }
+    if (!request.skipValidation) {
+      const warning = catalog.validate(request.action, payload);
+      if (warning) throw new OcppCallRejectedError("invalid_payload", warning);
+    }
+    const messageId = globalThis.crypto.randomUUID();
+    const frame = encodeSendFrame(messageId, request.action, payload);
+    await this.sendRawFrame({ frame, waitMs: 0 });
+    return { messageId, sentFrame: frame };
   }
 
   /**

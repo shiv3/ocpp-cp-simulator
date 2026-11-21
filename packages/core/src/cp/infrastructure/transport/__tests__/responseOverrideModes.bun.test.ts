@@ -184,6 +184,9 @@ describe("response override modes on the wire (#1090)", () => {
         errorDetails: { path: "status" },
       });
       expect(sent.messageId).toBe("m-9");
+      expect(sent.sentFrame).toBe(
+        '[5,"m-9","FormatViolation","bad response",{"path":"status"}]',
+      );
       expect(await csms.waitForFrame((f) => f[0] === 5)).toEqual([
         5,
         "m-9",

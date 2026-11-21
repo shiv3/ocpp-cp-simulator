@@ -7,16 +7,12 @@
 // the deliberate "nothing happens" ones).
 import { describe, expect, test } from "bun:test";
 import { evaluateAssertions } from "../../cp/application/verification/ScenarioAssertions";
-import type {
-  AssertionSpec,
-  CsmsExpectations,
-  ScenarioDefinition,
-} from "../../cp/application/scenario/ScenarioTypes";
+import type { AssertionSpec } from "../../cp/application/scenario/ScenarioTypes";
 import { validateScenarioGraph } from "../../scenario/scenarioGraphValidator";
 import { scenarioTemplates } from "../../utils/scenarioTemplates";
-import type { CsmsResponder } from "./FakeCsms";
+import { payloadSourceOf, respondersOf, shorten } from "./expectationDriver";
 import { Rig } from "./rig";
-import { runTemplate, type PayloadSource } from "./scenarioCases";
+import { runTemplate } from "./scenarioCases";
 import { toFrames } from "./toFrames";
 
 const CSMS_TRIGGER_ACTIONS: Record<string, string> = {
@@ -26,81 +22,17 @@ const CSMS_TRIGGER_ACTIONS: Record<string, string> = {
   unlockOutcome: "UnlockConnector",
 };
 
-/** Resolve the placeholders of an example payload (see {@link CsmsExpectations}). */
-function resolve(rig: Rig, value: unknown): unknown {
-  if (typeof value === "string") {
-    if (value === "<transactionId>") return rig.transactionId(1);
-    if (value === "<uploadUrl>") return rig.uploadUrl();
-    if (value === "<firmwareUrl>") return "https://fw.example.test/fw.bin";
-    const now = /^<now\+(\d+)s>$/.exec(value);
-    if (now) return new Date(Date.now() + Number(now[1]) * 1000).toISOString();
-    return value;
-  }
-  if (Array.isArray(value)) return value.map((v) => resolve(rig, v));
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value).map(([k, v]) => [k, resolve(rig, v)]),
-    );
-  }
-  return value;
-}
-
-function subset(want: unknown, got: unknown): boolean {
-  if (want && typeof want === "object" && !Array.isArray(want)) {
-    return (
-      !!got &&
-      typeof got === "object" &&
-      Object.entries(want).every(([k, v]) =>
-        subset(v, (got as Record<string, unknown>)[k]),
-      )
-    );
-  }
-  return JSON.stringify(want) === JSON.stringify(got);
-}
-
-function respondersOf(exp: CsmsExpectations): Record<string, CsmsResponder> {
-  const out: Record<string, CsmsResponder> = {};
-  for (const action of new Set((exp.answers ?? []).map((a) => a.action))) {
-    const rules = (exp.answers ?? []).filter((a) => a.action === action);
-    out[action] = (payload) => {
-      const hit = rules.find((r) => !r.when || subset(r.when, payload));
-      if (hit) return hit.respond;
-      if (action === "Authorize") {
-        return "idToken" in payload
-          ? { idTokenInfo: { status: "Accepted" } }
-          : { idTagInfo: { status: "Accepted" } };
-      }
-      return { status: "Accepted" };
-    };
-  }
-  return out;
-}
-
-/** Templates that run long: shortened so a run ends in seconds. */
-function shorten(def: ScenarioDefinition): void {
-  if (def.templateId === "essential-cp-behavior") {
-    def.evSettings = {
-      ...def.evSettings,
-      batteryCapacityKwh: 1,
-      initialSoc: 78,
-      targetSoc: 80,
-    };
-  }
-  if (def.templateId === "full-charging-cycle") {
-    for (const node of def.nodes) {
-      const data = node.data as Record<string, unknown>;
-      if (node.type === "meterValue") {
-        data.incrementInterval = 1;
-        data.maxTime = 2;
-      }
-      if (node.type === "delay") data.delaySeconds = 0.2;
-    }
-  }
-}
+/** The 1.6 spelling of an action, so a 2.x expectation and a graph compare. */
+const CANON: Record<string, string> = {
+  RequestStartTransaction: "RemoteStartTransaction",
+  RequestStopTransaction: "RemoteStopTransaction",
+};
+const canon = (action: string): string => CANON[action] ?? action;
 
 /** Templates run for a window, then stopped: they never end on their own, or the run does not report its end. */
 const WINDOW_MS: Record<string, number> = {
   "full-charging-cycle": 6000,
+  "full-charging-cycle-201": 6000,
   "status-triggered-actions": 1500,
   "multi-status-monitor": 3000,
   "smart-charging": 3500,
@@ -140,13 +72,13 @@ describe("template metadata", () => {
       }
       const triggers = def.nodes.flatMap((n) => {
         const data = n.data as Record<string, unknown>;
-        if (n.type === "csmsCallTrigger") return [String(data.action)];
+        if (n.type === "csmsCallTrigger") return [canon(String(data.action))];
         const dedicated = CSMS_TRIGGER_ACTIONS[String(n.type)];
         return dedicated ? [dedicated] : [];
       });
       const listed = (def.csmsExpectations?.calls ?? [])
         .filter((c) => !c.optional)
-        .map((c) => c.action);
+        .map((c) => canon(c.action));
       if (def.templateId !== "cert16-octt-strictness-probe") {
         // The graph's CSMS-waiting nodes and the metadata's calls name the same
         // actions (RequestStartTransaction for 2.x is a csmsCallTrigger).
@@ -161,52 +93,58 @@ describe("template metadata", () => {
 describe("a run driven by the declared expectations passes its assertions", () => {
   for (const t of scenarioTemplates) {
     const def0 = t.createScenario("CP", 1);
-    const version = def0.ocppVersions?.includes("1.6") ? "1.6" : "2.0.1";
-    test.concurrent(
-      `${t.id} (${version})`,
-      async () => {
-        const exp = def0.csmsExpectations ?? {};
-        const rig = await Rig.create({
-          version,
-          responders: respondersOf(exp),
-        });
-        try {
-          const first = rig.csms.frames.length;
-          const queue = new Map<string, unknown[]>();
-          for (const c of exp.calls ?? []) {
-            if (c.example === undefined) continue;
-            queue.set(c.action, [...(queue.get(c.action) ?? []), c.example]);
-          }
-          const payloadFor: PayloadSource = (r, action, nth) => {
-            const example = queue.get(action)?.[nth];
-            if (example === undefined) {
-              throw new Error(`${t.id}: no example for ${action} #${nth}`);
-            }
-            return resolve(r, example);
-          };
-          await runTemplate(rig, t.id, {
-            edit: shorten,
-            payloadFor,
-            windowMs: WINDOW_MS[t.id] ?? null,
+    // A 1.6 template runs on 1.6 (the agnostic ones also run on 2.x in the
+    // resilience test); a 2.x-only one runs on every 2.x version it declares.
+    const versions = (
+      def0.ocppVersions?.includes("1.6") ? ["1.6"] : (def0.ocppVersions ?? [])
+    ) as Array<"1.6" | "2.0.1" | "2.1">;
+    for (const version of versions) {
+      test.concurrent(
+        `${t.id} (${version})`,
+        async () => {
+          const exp = def0.csmsExpectations ?? {};
+          const rig = await Rig.create({
+            version,
+            responders: respondersOf(exp),
           });
-          await new Promise((resolveTimer) => setTimeout(resolveTimer, 0));
-          await rig.csms.settle(400);
-          const frames = toFrames(rig.csms.frames.slice(first));
-          const specs = (def0.assertions ?? []) as AssertionSpec[];
-          const results = evaluateAssertions(specs, frames);
-          expect(results.filter((r) => r.status !== "passed")).toEqual([]);
-          const empty = evaluateAssertions(specs, []);
-          const vacuous = specs.filter(
-            (s, i) =>
-              empty[i].status === "passed" && !MAY_HOLD_WHEN_EMPTY.has(s.type),
-          );
-          expect(vacuous).toEqual([]);
-        } finally {
-          await rig.dispose();
-        }
-      },
-      120_000,
-    );
+          try {
+            const first = rig.csms.frames.length;
+            await runTemplate(rig, t.id, {
+              edit: shorten,
+              payloadFor: payloadSourceOf(def0),
+              windowMs: WINDOW_MS[t.id] ?? null,
+            });
+            await new Promise((resolveTimer) => setTimeout(resolveTimer, 0));
+            await rig.csms.settle(400);
+            const frames = toFrames(rig.csms.frames.slice(first));
+            const specs = (def0.assertions ?? []) as AssertionSpec[];
+            const results = evaluateAssertions(specs, frames);
+            const failed = results.filter((r) => r.status !== "passed");
+            if (failed.length > 0) {
+              const seen = frames
+                .filter((f) => f.kind === "call")
+                .map(
+                  (f) =>
+                    `${f.direction === "sent" ? "CP>" : "CSMS>"}${(f as { action: string }).action} ${JSON.stringify(f.payload).slice(0, 160)}`,
+                );
+              throw new Error(
+                `${JSON.stringify(failed.map((r) => [r.id, r.detail]))}\n${seen.join("\n")}`,
+              );
+            }
+            const empty = evaluateAssertions(specs, []);
+            const vacuous = specs.filter(
+              (s, i) =>
+                empty[i].status === "passed" &&
+                !MAY_HOLD_WHEN_EMPTY.has(s.type),
+            );
+            expect(vacuous).toEqual([]);
+          } finally {
+            await rig.dispose();
+          }
+        },
+        120_000,
+      );
+    }
   }
 });
 

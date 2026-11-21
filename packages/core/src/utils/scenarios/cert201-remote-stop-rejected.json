@@ -1,0 +1,214 @@
+{
+  "id": "cert201-remote-stop-rejected",
+  "name": "OCPP 2.x CP: Remote Stop — Rejected",
+  "description": "CP-side flow for OCPP 2.0.1 / 2.1: Remote Stop — Rejected. The graph of cert16-tc028-remote-stop-rejected with 2.x payloads, CSMS expectations and assertions.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": {
+    "type": "manual"
+  },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": {
+        "x": 400,
+        "y": 50
+      },
+      "data": {
+        "label": "Start",
+        "triggerOn": "connect"
+      }
+    },
+    {
+      "id": "plug-in",
+      "type": "connectorPlug",
+      "position": {
+        "x": 400,
+        "y": 150
+      },
+      "data": {
+        "label": "Plug In",
+        "action": "plugin"
+      }
+    },
+    {
+      "id": "tx-start",
+      "type": "transaction",
+      "position": {
+        "x": 400,
+        "y": 350
+      },
+      "data": {
+        "label": "Start Transaction",
+        "action": "start",
+        "tagId": "CERT028"
+      }
+    },
+    {
+      "id": "meter-auto",
+      "type": "meterValue",
+      "position": {
+        "x": 400,
+        "y": 550
+      },
+      "data": {
+        "label": "Auto MeterValue (unbounded background)",
+        "value": 0,
+        "sendMessage": true,
+        "autoIncrement": true,
+        "incrementInterval": 5,
+        "incrementAmount": 500,
+        "maxTime": 0,
+        "maxValue": 0
+      }
+    },
+    {
+      "id": "arm-override",
+      "type": "responseOverride",
+      "position": {
+        "x": 400,
+        "y": 650
+      },
+      "data": {
+        "label": "Arm Rejected response for RemoteStopTransaction",
+        "action": "RequestStopTransaction",
+        "status": "Rejected"
+      }
+    },
+    {
+      "id": "trigger-remote-stop",
+      "type": "csmsCallTrigger",
+      "position": {
+        "x": 400,
+        "y": 750
+      },
+      "data": {
+        "label": "Wait for RemoteStopTransaction (will be Rejected)",
+        "action": "RequestStopTransaction",
+        "timeout": 0
+      }
+    },
+    {
+      "id": "delay-continue",
+      "type": "delay",
+      "position": {
+        "x": 400,
+        "y": 850
+      },
+      "data": {
+        "label": "Charging continues after rejection",
+        "delaySeconds": 5
+      }
+    },
+    {
+      "id": "tx-stop",
+      "type": "transaction",
+      "position": {
+        "x": 400,
+        "y": 950
+      },
+      "data": {
+        "label": "Stop Transaction (Local)",
+        "action": "stop",
+        "stopReason": "Local"
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": {
+        "x": 400,
+        "y": 1250
+      },
+      "data": {
+        "label": "End"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "start-1",
+      "target": "plug-in"
+    },
+    {
+      "id": "e2",
+      "source": "plug-in",
+      "target": "tx-start"
+    },
+    {
+      "id": "e3",
+      "source": "tx-start",
+      "target": "meter-auto"
+    },
+    {
+      "id": "e4",
+      "source": "meter-auto",
+      "target": "arm-override"
+    },
+    {
+      "id": "e5",
+      "source": "arm-override",
+      "target": "trigger-remote-stop"
+    },
+    {
+      "id": "e6",
+      "source": "trigger-remote-stop",
+      "target": "delay-continue"
+    },
+    {
+      "id": "e7",
+      "source": "delay-continue",
+      "target": "tx-stop"
+    },
+    {
+      "id": "e8",
+      "source": "tx-stop",
+      "target": "end-1"
+    }
+  ],
+  "ocppVersions": ["2.0.1", "2.1"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "RequestStopTransaction",
+        "node": "trigger-remote-stop",
+        "example": {
+          "transactionId": "<transactionId>"
+        },
+        "expectedStatus": "Rejected"
+      }
+    ],
+    "note": "The scenario arms a Rejected answer; it then stops the transaction itself."
+  },
+  "assertions": [
+    {
+      "id": "remote-stop-received",
+      "type": "ocpp_received",
+      "action": "RequestStopTransaction",
+      "description": "RequestStopTransaction received from the CSMS"
+    },
+    {
+      "id": "remote-stop-rejected",
+      "type": "response_status",
+      "action": "RequestStopTransaction",
+      "status": "Rejected",
+      "description": "RequestStopTransaction answered Rejected"
+    },
+    {
+      "id": "ended-after-refusal",
+      "type": "message_after",
+      "before": {
+        "action": "RequestStopTransaction",
+        "direction": "received"
+      },
+      "after": {
+        "action": "TransactionEvent"
+      },
+      "description": "TransactionEvent follows RequestStopTransaction"
+    }
+  ]
+}

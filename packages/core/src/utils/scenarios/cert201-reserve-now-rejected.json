@@ -1,0 +1,114 @@
+{
+  "id": "cert201-reserve-now-rejected",
+  "name": "OCPP 2.x CP: Reserve Now — Rejected",
+  "description": "CP-side flow for OCPP 2.0.1 / 2.1: Reserve Now — Rejected. The graph of cert16-tc048-4-reserve-now-rejected with 2.x payloads, CSMS expectations and assertions.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": {
+    "type": "manual"
+  },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": {
+        "x": 400,
+        "y": 50
+      },
+      "data": {
+        "label": "Start",
+        "triggerOn": "connect"
+      }
+    },
+    {
+      "id": "arm-rejected-response",
+      "type": "responseOverride",
+      "position": {
+        "x": 400,
+        "y": 250
+      },
+      "data": {
+        "label": "Arm Rejected response for ReserveNow",
+        "action": "ReserveNow",
+        "status": "Rejected"
+      }
+    },
+    {
+      "id": "trigger-reserve-now",
+      "type": "csmsCallTrigger",
+      "position": {
+        "x": 400,
+        "y": 350
+      },
+      "data": {
+        "label": "Wait for ReserveNow (will be Rejected)",
+        "action": "ReserveNow",
+        "timeout": 0
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": {
+        "x": 400,
+        "y": 450
+      },
+      "data": {
+        "label": "End"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "start-1",
+      "target": "arm-rejected-response"
+    },
+    {
+      "id": "e3",
+      "source": "arm-rejected-response",
+      "target": "trigger-reserve-now"
+    },
+    {
+      "id": "e4",
+      "source": "trigger-reserve-now",
+      "target": "end-1"
+    }
+  ],
+  "ocppVersions": ["2.0.1", "2.1"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "ReserveNow",
+        "node": "trigger-reserve-now",
+        "example": {
+          "id": 7,
+          "expiryDateTime": "<now+3600s>",
+          "idToken": {
+            "idToken": "CERT-RES01",
+            "type": "ISO14443"
+          },
+          "evseId": 1
+        },
+        "expectedStatus": "Rejected"
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "id": "reserve-received",
+      "type": "ocpp_received",
+      "action": "ReserveNow",
+      "description": "ReserveNow received from the CSMS"
+    },
+    {
+      "id": "reserve-rejected",
+      "type": "response_status",
+      "action": "ReserveNow",
+      "status": "Rejected",
+      "description": "ReserveNow answered Rejected"
+    }
+  ]
+}

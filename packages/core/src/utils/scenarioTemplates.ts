@@ -118,6 +118,41 @@ export interface ScenarioTemplate {
   ) => ScenarioDefinition;
 }
 
+// OCPP 2.0.1 / 2.1 variants of the core flows, the OCA-style CP-side cases and the
+// resilience scenarios: the graph of the 1.6 template with 2.x payloads, expectations and assertions.
+import cert201AuthorizeBlockedJson from "./scenarios/cert201-authorize-blocked.json";
+import cert201AuthorizeExpiredJson from "./scenarios/cert201-authorize-expired.json";
+import cert201AuthorizeInvalidJson from "./scenarios/cert201-authorize-invalid.json";
+import cert201CancelReservationJson from "./scenarios/cert201-cancel-reservation.json";
+import cert201CancelReservationRejectedJson from "./scenarios/cert201-cancel-reservation-rejected.json";
+import cert201ChargingIdFirstJson from "./scenarios/cert201-charging-id-first.json";
+import cert201ChargingPluginFirstJson from "./scenarios/cert201-charging-plugin-first.json";
+import cert201ClearCacheJson from "./scenarios/cert201-clear-cache.json";
+import cert201ColdBootJson from "./scenarios/cert201-cold-boot.json";
+import cert201DataTransferJson from "./scenarios/cert201-data-transfer.json";
+import cert201EvSideDisconnectJson from "./scenarios/cert201-ev-side-disconnect.json";
+import cert201RemoteStartJson from "./scenarios/cert201-remote-start.json";
+import cert201RemoteStartRejectedJson from "./scenarios/cert201-remote-start-rejected.json";
+import cert201RemoteStartStopJson from "./scenarios/cert201-remote-start-stop.json";
+import cert201RemoteStopJson from "./scenarios/cert201-remote-stop.json";
+import cert201RemoteStopRejectedJson from "./scenarios/cert201-remote-stop-rejected.json";
+import cert201ReserveNowFaultedJson from "./scenarios/cert201-reserve-now-faulted.json";
+import cert201ReserveNowOccupiedJson from "./scenarios/cert201-reserve-now-occupied.json";
+import cert201ReserveNowRejectedJson from "./scenarios/cert201-reserve-now-rejected.json";
+import cert201ReserveNowUnavailableJson from "./scenarios/cert201-reserve-now-unavailable.json";
+import cert201ResetImmediateJson from "./scenarios/cert201-reset-immediate.json";
+import cert201ResetOnidleJson from "./scenarios/cert201-reset-onidle.json";
+import cert201TriggerMessageJson from "./scenarios/cert201-trigger-message.json";
+import cert201TriggerMessageRejectedJson from "./scenarios/cert201-trigger-message-rejected.json";
+import cert201UnlockOngoingTransactionJson from "./scenarios/cert201-unlock-ongoing-transaction.json";
+import essentialCpBehavior201Json from "./scenarios/essential-cp-behavior-201.json";
+import fullChargingCycle201Json from "./scenarios/full-charging-cycle-201.json";
+import remoteStartAutoMeter201Json from "./scenarios/remote-start-auto-meter-201.json";
+import resilienceAuthorizationRejected201Json from "./scenarios/resilience-authorization-rejected-201.json";
+import resilienceConnectorFaultRecovery201Json from "./scenarios/resilience-connector-fault-recovery-201.json";
+import resilienceEvDisconnectRecovery201Json from "./scenarios/resilience-ev-disconnect-recovery-201.json";
+import resilienceTemporaryUnavailableRecovery201Json from "./scenarios/resilience-temporary-unavailable-recovery-201.json";
+
 export interface ScenarioTemplateAssertionInfo {
   id: string;
   type: AssertionType;
@@ -416,6 +451,80 @@ export const scenarioTemplates: ScenarioTemplate[] = [
     dataflowCallErrorHandlingJson as unknown as ScenarioDefinition,
   ),
   templateFromJson(dataflowChargeToSocJson as unknown as ScenarioDefinition),
+
+  // OCPP 2.0.1 / 2.1 variants.
+  templateFromJson(
+    cert201AuthorizeBlockedJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    cert201AuthorizeExpiredJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    cert201AuthorizeInvalidJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    cert201CancelReservationJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    cert201CancelReservationRejectedJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(cert201ChargingIdFirstJson as unknown as ScenarioDefinition),
+  templateFromJson(
+    cert201ChargingPluginFirstJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(cert201ClearCacheJson as unknown as ScenarioDefinition),
+  templateFromJson(cert201ColdBootJson as unknown as ScenarioDefinition),
+  templateFromJson(cert201DataTransferJson as unknown as ScenarioDefinition),
+  templateFromJson(
+    cert201EvSideDisconnectJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(cert201RemoteStartJson as unknown as ScenarioDefinition),
+  templateFromJson(
+    cert201RemoteStartRejectedJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(cert201RemoteStartStopJson as unknown as ScenarioDefinition),
+  templateFromJson(cert201RemoteStopJson as unknown as ScenarioDefinition),
+  templateFromJson(
+    cert201RemoteStopRejectedJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    cert201ReserveNowFaultedJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    cert201ReserveNowOccupiedJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    cert201ReserveNowRejectedJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    cert201ReserveNowUnavailableJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(cert201ResetImmediateJson as unknown as ScenarioDefinition),
+  templateFromJson(cert201ResetOnidleJson as unknown as ScenarioDefinition),
+  templateFromJson(cert201TriggerMessageJson as unknown as ScenarioDefinition),
+  templateFromJson(
+    cert201TriggerMessageRejectedJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    cert201UnlockOngoingTransactionJson as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(essentialCpBehavior201Json as unknown as ScenarioDefinition),
+  templateFromJson(fullChargingCycle201Json as unknown as ScenarioDefinition),
+  templateFromJson(
+    remoteStartAutoMeter201Json as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    resilienceAuthorizationRejected201Json as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    resilienceConnectorFaultRecovery201Json as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    resilienceEvDisconnectRecovery201Json as unknown as ScenarioDefinition,
+  ),
+  templateFromJson(
+    resilienceTemporaryUnavailableRecovery201Json as unknown as ScenarioDefinition,
+  ),
 ];
 
 export function getTemplateById(

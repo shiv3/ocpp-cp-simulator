@@ -1,0 +1,213 @@
+{
+  "id": "cert201-remote-start-stop",
+  "name": "OCPP 2.x CP: Remote Start + Remote Stop Transaction",
+  "description": "CP-side flow for OCPP 2.0.1 / 2.1: Remote Start + Remote Stop Transaction. The graph of cert16-tc011-remote-start-stop with 2.x payloads, CSMS expectations and assertions.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": {
+    "type": "manual"
+  },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": {
+        "x": 400,
+        "y": 50
+      },
+      "data": {
+        "label": "Start",
+        "triggerOn": "connect"
+      }
+    },
+    {
+      "id": "trigger-remote-start",
+      "type": "remoteStartTrigger",
+      "position": {
+        "x": 400,
+        "y": 150
+      },
+      "data": {
+        "label": "Wait for RemoteStartTransaction",
+        "timeout": 0
+      }
+    },
+    {
+      "id": "tx-start",
+      "type": "transaction",
+      "position": {
+        "x": 400,
+        "y": 350
+      },
+      "data": {
+        "label": "Start Transaction",
+        "action": "start",
+        "tagId": "CERT011"
+      }
+    },
+    {
+      "id": "meter-auto",
+      "type": "meterValue",
+      "position": {
+        "x": 400,
+        "y": 550
+      },
+      "data": {
+        "label": "Auto MeterValue (until Remote Stop)",
+        "value": 0,
+        "sendMessage": true,
+        "autoIncrement": true,
+        "incrementInterval": 5,
+        "incrementAmount": 500,
+        "maxTime": 0,
+        "maxValue": 0
+      }
+    },
+    {
+      "id": "trigger-remote-stop",
+      "type": "remoteStopTrigger",
+      "position": {
+        "x": 400,
+        "y": 650
+      },
+      "data": {
+        "label": "Wait for RemoteStopTransaction",
+        "timeout": 0
+      }
+    },
+    {
+      "id": "tx-stop",
+      "type": "transaction",
+      "position": {
+        "x": 400,
+        "y": 750
+      },
+      "data": {
+        "label": "Stop Transaction",
+        "action": "stop"
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": {
+        "x": 400,
+        "y": 1050
+      },
+      "data": {
+        "label": "End"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "start-1",
+      "target": "trigger-remote-start"
+    },
+    {
+      "id": "e2",
+      "source": "trigger-remote-start",
+      "target": "tx-start"
+    },
+    {
+      "id": "e3",
+      "source": "tx-start",
+      "target": "meter-auto"
+    },
+    {
+      "id": "e4",
+      "source": "meter-auto",
+      "target": "trigger-remote-stop"
+    },
+    {
+      "id": "e5",
+      "source": "trigger-remote-stop",
+      "target": "tx-stop"
+    },
+    {
+      "id": "e6",
+      "source": "tx-stop",
+      "target": "end-1"
+    }
+  ],
+  "ocppVersions": ["2.0.1", "2.1"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "RequestStartTransaction",
+        "node": "trigger-remote-start",
+        "example": {
+          "idToken": {
+            "idToken": "CERT011",
+            "type": "ISO14443"
+          },
+          "remoteStartId": 1,
+          "evseId": 1
+        },
+        "expectedStatus": "Accepted"
+      },
+      {
+        "action": "RequestStopTransaction",
+        "node": "trigger-remote-stop",
+        "example": {
+          "transactionId": "<transactionId>"
+        },
+        "expectedStatus": "Accepted"
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "id": "remote-start-accepted",
+      "type": "response_status",
+      "action": "RequestStartTransaction",
+      "status": "Accepted",
+      "description": "RequestStartTransaction answered Accepted"
+    },
+    {
+      "id": "started",
+      "type": "payload_match",
+      "action": "TransactionEvent",
+      "payload": {
+        "eventType": "Started",
+        "idToken": {
+          "idToken": "CERT011"
+        }
+      },
+      "description": "TransactionEvent Started carries idToken CERT011",
+      "occurrence": "any"
+    },
+    {
+      "id": "remote-stop-accepted",
+      "type": "response_status",
+      "action": "RequestStopTransaction",
+      "status": "Accepted",
+      "description": "RequestStopTransaction answered Accepted"
+    },
+    {
+      "id": "ended-after-request",
+      "type": "message_after",
+      "before": {
+        "action": "RequestStopTransaction",
+        "direction": "received"
+      },
+      "after": {
+        "action": "TransactionEvent"
+      },
+      "description": "TransactionEvent after RequestStopTransaction"
+    },
+    {
+      "id": "ended",
+      "type": "payload_match",
+      "action": "TransactionEvent",
+      "payload": {
+        "eventType": "Ended"
+      },
+      "description": "TransactionEvent Ended sent",
+      "occurrence": "any"
+    }
+  ]
+}

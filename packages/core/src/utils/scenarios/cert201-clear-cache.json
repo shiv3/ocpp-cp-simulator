@@ -1,0 +1,81 @@
+{
+  "id": "cert201-clear-cache",
+  "name": "OCPP 2.x CP: Clear Authorization Cache",
+  "description": "CP-side flow for OCPP 2.0.1 / 2.1: Clear Authorization Cache. The graph of cert16-tc061-clear-cache with 2.x payloads, CSMS expectations and assertions.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": {
+    "type": "manual"
+  },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": {
+        "x": 400,
+        "y": 50
+      },
+      "data": {
+        "label": "Start",
+        "triggerOn": "connect"
+      }
+    },
+    {
+      "id": "trigger-clear-cache",
+      "type": "csmsCallTrigger",
+      "position": {
+        "x": 400,
+        "y": 250
+      },
+      "data": {
+        "label": "Wait for ClearCache",
+        "action": "ClearCache",
+        "timeout": 0
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": {
+        "x": 400,
+        "y": 350
+      },
+      "data": {
+        "label": "End"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "start-1",
+      "target": "trigger-clear-cache"
+    },
+    {
+      "id": "e3",
+      "source": "trigger-clear-cache",
+      "target": "end-1"
+    }
+  ],
+  "ocppVersions": ["2.0.1", "2.1"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "ClearCache",
+        "node": "trigger-clear-cache",
+        "example": {},
+        "note": "The charge point answers Accepted when its authorization cache is enabled, else Rejected."
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "id": "clear-cache-received",
+      "type": "ocpp_received",
+      "action": "ClearCache",
+      "description": "ClearCache received from the CSMS"
+    }
+  ]
+}

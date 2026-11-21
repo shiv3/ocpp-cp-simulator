@@ -1,0 +1,213 @@
+{
+  "id": "cert201-unlock-ongoing-transaction",
+  "name": "OCPP 2.x CP: Unlock Connector (Ongoing Authorized Transaction)",
+  "description": "Unlock the connector during an authorized transaction: the charge point answers OngoingAuthorizedTransaction.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": {
+    "type": "manual"
+  },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": {
+        "x": 400,
+        "y": 50
+      },
+      "data": {
+        "label": "Start",
+        "triggerOn": "connect"
+      }
+    },
+    {
+      "id": "delay-connect",
+      "type": "delay",
+      "position": {
+        "x": 400,
+        "y": 150
+      },
+      "data": {
+        "label": "Wait 2s",
+        "delaySeconds": 2
+      }
+    },
+    {
+      "id": "plug-in",
+      "type": "connectorPlug",
+      "position": {
+        "x": 400,
+        "y": 250
+      },
+      "data": {
+        "label": "Plug In",
+        "action": "plugin"
+      }
+    },
+    {
+      "id": "tx-start",
+      "type": "transaction",
+      "position": {
+        "x": 400,
+        "y": 450
+      },
+      "data": {
+        "label": "Start Transaction",
+        "action": "start",
+        "tagId": "CERT017"
+      }
+    },
+    {
+      "id": "meter-auto",
+      "type": "meterValue",
+      "position": {
+        "x": 400,
+        "y": 650
+      },
+      "data": {
+        "label": "Bounded Auto MeterValue",
+        "value": 0,
+        "sendMessage": true,
+        "autoIncrement": true,
+        "incrementInterval": 5,
+        "incrementAmount": 500,
+        "maxTime": 15,
+        "maxValue": 0
+      }
+    },
+    {
+      "id": "unlock-arm",
+      "type": "unlockOutcome",
+      "position": {
+        "x": 400,
+        "y": 750
+      },
+      "data": {
+        "label": "Pre-arm UnlockConnector response: Unlocked",
+        "outcome": "Unlocked"
+      }
+    },
+    {
+      "id": "delay-unlock-window",
+      "type": "delay",
+      "position": {
+        "x": 400,
+        "y": 850
+      },
+      "data": {
+        "label": "Window for CSMS UnlockConnector.req",
+        "delaySeconds": 10
+      }
+    },
+    {
+      "id": "tx-stop",
+      "type": "transaction",
+      "position": {
+        "x": 400,
+        "y": 950
+      },
+      "data": {
+        "label": "Stop Transaction",
+        "action": "stop"
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": {
+        "x": 400,
+        "y": 1250
+      },
+      "data": {
+        "label": "End"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "start-1",
+      "target": "delay-connect"
+    },
+    {
+      "id": "e2",
+      "source": "delay-connect",
+      "target": "plug-in"
+    },
+    {
+      "id": "e3",
+      "source": "plug-in",
+      "target": "tx-start"
+    },
+    {
+      "id": "e4",
+      "source": "tx-start",
+      "target": "meter-auto"
+    },
+    {
+      "id": "e5",
+      "source": "meter-auto",
+      "target": "unlock-arm"
+    },
+    {
+      "id": "e6",
+      "source": "unlock-arm",
+      "target": "delay-unlock-window"
+    },
+    {
+      "id": "e7",
+      "source": "delay-unlock-window",
+      "target": "tx-stop"
+    },
+    {
+      "id": "e8",
+      "source": "tx-stop",
+      "target": "end-1"
+    }
+  ],
+  "ocppVersions": ["2.0.1", "2.1"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "UnlockConnector",
+        "node": "delay-unlock-window",
+        "example": {
+          "evseId": 1,
+          "connectorId": 1
+        },
+        "expectedStatus": "OngoingAuthorizedTransaction",
+        "note": "Within the 10 s window after the transaction started. OCPP 2.x refuses to unlock a connector with an authorized transaction (the 1.6 Unlocked / UnlockFailed outcomes do not exist here)."
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "id": "started",
+      "type": "payload_match",
+      "action": "TransactionEvent",
+      "payload": {
+        "eventType": "Started",
+        "idToken": {
+          "idToken": "CERT017"
+        }
+      },
+      "description": "TransactionEvent Started carries idToken CERT017",
+      "occurrence": "any"
+    },
+    {
+      "id": "unlock-received",
+      "type": "ocpp_received",
+      "action": "UnlockConnector",
+      "description": "UnlockConnector received from the CSMS"
+    },
+    {
+      "id": "unlock-refused",
+      "type": "response_status",
+      "action": "UnlockConnector",
+      "status": "OngoingAuthorizedTransaction",
+      "description": "UnlockConnector answered OngoingAuthorizedTransaction"
+    }
+  ]
+}

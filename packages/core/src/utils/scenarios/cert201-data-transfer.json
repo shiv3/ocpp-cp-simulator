@@ -1,0 +1,117 @@
+{
+  "id": "cert201-data-transfer",
+  "name": "OCPP 2.x CP: Data Transfer to CSMS",
+  "description": "CP-side flow for OCPP 2.0.1 / 2.1: Data Transfer to CSMS. The graph of cert16-tc064-data-transfer with 2.x payloads, CSMS expectations and assertions.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": {
+    "type": "manual"
+  },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": {
+        "x": 400,
+        "y": 50
+      },
+      "data": {
+        "label": "Start",
+        "triggerOn": "connect"
+      }
+    },
+    {
+      "id": "send-data-transfer",
+      "type": "dataTransfer",
+      "position": {
+        "x": 400,
+        "y": 250
+      },
+      "data": {
+        "label": "Send DataTransfer",
+        "vendorId": "com.example.cert16",
+        "messageId": "certTest",
+        "data": "hello-csms"
+      }
+    },
+    {
+      "id": "delay-1",
+      "type": "delay",
+      "position": {
+        "x": 400,
+        "y": 350
+      },
+      "data": {
+        "label": "Wait 1s",
+        "delaySeconds": 1
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": {
+        "x": 400,
+        "y": 450
+      },
+      "data": {
+        "label": "End"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "start-1",
+      "target": "send-data-transfer"
+    },
+    {
+      "id": "e3",
+      "source": "send-data-transfer",
+      "target": "delay-1"
+    },
+    {
+      "id": "e4",
+      "source": "delay-1",
+      "target": "end-1"
+    }
+  ],
+  "ocppVersions": ["2.0.1", "2.1"],
+  "csmsExpectations": {
+    "calls": [],
+    "answers": [
+      {
+        "action": "DataTransfer",
+        "when": {
+          "vendorId": "com.example.cert16"
+        },
+        "respond": {
+          "status": "Accepted"
+        }
+      }
+    ],
+    "note": "No CSMS call; the CSMS answers the charge point's DataTransfer Accepted."
+  },
+  "assertions": [
+    {
+      "id": "data-transfer-sent",
+      "type": "payload_match",
+      "action": "DataTransfer",
+      "payload": {
+        "vendorId": "com.example.cert16",
+        "messageId": "certTest",
+        "data": "hello-csms"
+      },
+      "description": "DataTransfer carries the expected payload"
+    },
+    {
+      "id": "data-transfer-accepted",
+      "type": "response_status",
+      "action": "DataTransfer",
+      "status": "Accepted",
+      "description": "DataTransfer answered Accepted",
+      "direction": "sent"
+    }
+  ]
+}

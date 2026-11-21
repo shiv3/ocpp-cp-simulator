@@ -1,0 +1,153 @@
+{
+  "id": "cert201-reset-onidle",
+  "name": "OCPP 2.x CP: Reset (OnIdle)",
+  "description": "CP-side flow for OCPP 2.0.1 / 2.1: Reset (OnIdle). The graph of cert16-tc014-soft-reset with 2.x payloads, CSMS expectations and assertions.",
+  "targetType": "connector",
+  "targetId": 1,
+  "trigger": {
+    "type": "manual"
+  },
+  "defaultExecutionMode": "oneshot",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": {
+        "x": 400,
+        "y": 50
+      },
+      "data": {
+        "label": "Start",
+        "triggerOn": "connect"
+      }
+    },
+    {
+      "id": "plug-in",
+      "type": "connectorPlug",
+      "position": {
+        "x": 400,
+        "y": 150
+      },
+      "data": {
+        "label": "Plug In",
+        "action": "plugin"
+      }
+    },
+    {
+      "id": "tx-start",
+      "type": "transaction",
+      "position": {
+        "x": 400,
+        "y": 350
+      },
+      "data": {
+        "label": "Start Transaction",
+        "action": "start",
+        "tagId": "CERT014"
+      }
+    },
+    {
+      "id": "meter-auto",
+      "type": "meterValue",
+      "position": {
+        "x": 400,
+        "y": 550
+      },
+      "data": {
+        "label": "Auto MeterValue (unbounded background)",
+        "value": 0,
+        "sendMessage": true,
+        "autoIncrement": true,
+        "incrementInterval": 5,
+        "incrementAmount": 500,
+        "maxTime": 0,
+        "maxValue": 0
+      }
+    },
+    {
+      "id": "trigger-reset",
+      "type": "csmsCallTrigger",
+      "position": {
+        "x": 400,
+        "y": 650
+      },
+      "data": {
+        "label": "Wait for Reset (Soft)",
+        "action": "Reset",
+        "timeout": 0
+      }
+    },
+    {
+      "id": "end-1",
+      "type": "end",
+      "position": {
+        "x": 400,
+        "y": 750
+      },
+      "data": {
+        "label": "End"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "start-1",
+      "target": "plug-in"
+    },
+    {
+      "id": "e2",
+      "source": "plug-in",
+      "target": "tx-start"
+    },
+    {
+      "id": "e3",
+      "source": "tx-start",
+      "target": "meter-auto"
+    },
+    {
+      "id": "e4",
+      "source": "meter-auto",
+      "target": "trigger-reset"
+    },
+    {
+      "id": "e5",
+      "source": "trigger-reset",
+      "target": "end-1"
+    }
+  ],
+  "ocppVersions": ["2.0.1", "2.1"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "Reset",
+        "node": "trigger-reset",
+        "example": {
+          "type": "OnIdle"
+        },
+        "expectedStatus": "Scheduled"
+      }
+    ],
+    "note": "Sent while a transaction runs: the reset waits for the transaction to end, so the answer is Scheduled."
+  },
+  "assertions": [
+    {
+      "id": "reset-on-idle",
+      "type": "payload_match",
+      "action": "Reset",
+      "direction": "received",
+      "payload": {
+        "type": "OnIdle"
+      },
+      "description": "Reset from the CSMS carries the expected payload"
+    },
+    {
+      "id": "reset-scheduled",
+      "type": "response_status",
+      "action": "Reset",
+      "status": "Scheduled",
+      "description": "Reset answered Scheduled"
+    }
+  ]
+}

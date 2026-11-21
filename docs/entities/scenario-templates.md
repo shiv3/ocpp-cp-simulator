@@ -1,7 +1,7 @@
 ---
 title: Built-in scenario templates
 type: entity
-summary: The scenario JSON files shipped inside the package — six general-purpose flows, six `dataflow-*` showcases of the schema 1.7 data-flow features and the 1.10 loop edge, six `resilience-*` failure / recovery scenarios, the 47 `cert16-*` OCPP 1.6 certification test-case templates and the OCTT strictness probe — and how template instances behave.
+summary: The scenario JSON files shipped inside the package — six general-purpose flows, six `dataflow-*` showcases of the schema 1.7 data-flow features and the 1.10 loop edge, six `resilience-*` failure / recovery scenarios, 32 OCPP 2.0.1 / 2.1 variants of the core flows, the CP-side certification-style cases and the resilience scenarios, the 47 `cert16-*` OCPP 1.6 certification test-case templates and the OCTT strictness probe — and how template instances behave.
 sources:
   - packages/core/src/utils/scenarioTemplates.ts
   - packages/core/src/utils/scenarios/*.json
@@ -167,6 +167,35 @@ legal in OCPP 1.6 but known to break OCTT certification runs — see
 The [steve-verify](../sources/steve-verify-readme.md) harness drives all 47
 `cert16-*` templates against a real SteVe CSMS.
 
+## OCPP 2.0.1 / 2.1 variants
+
+Until the variants existed only the two `dataflow-*-201` templates targeted 2.x: the `cert16-*` set speaks 1.6 (its
+assertions read `StartTransaction`, `idTagInfo`, `StatusNotification.status`) and the `resilience-*` assertions read 1.6
+payloads. 32 templates copy the graph of a 1.6 template, which the engine runs unchanged on either version
+([version-agnostic scenarios](../concepts/ocpp-versions-and-transports.md#version-agnostic-scenarios)), and swap what is
+version specific: the `csmsExpectations` payloads (2.x `RequestStartTransaction`, `Reset` `Immediate` / `OnIdle`,
+`ReserveNow` with `id` / `idToken` / `evseId`, `ChangeAvailability` `operationalStatus`), the Authorize answer
+(`idTokenInfo`) and the assertions (`TransactionEvent` `Started` / `Ended` with `stoppedReason`, `connectorStatus`
+`Occupied` / `Reserved` / `Unavailable`). All declare `ocppVersions: ["2.0.1", "2.1"]`: the wire shapes are the same in both,
+and `templateExpectations.bun.test.ts` runs each of them on both versions against the fake CSMS, every assertion passing.
+The golden wire fixtures pin the 2.0.1 run.
+
+| Group (ids)                                                                                                                                    | Variant of                                         | What changes on 2.x                                                                                                                                                                                                                   |
+| ---------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `essential-cp-behavior-201`, `remote-start-auto-meter-201`, `full-charging-cycle-201`                                                          | the 1.6 general-purpose template                   | `RequestStartTransaction` / `RequestStopTransaction`; transactions are `TransactionEvent`s.                                                                                                                                           |
+| `cert201-cold-boot`, `-charging-plugin-first`, `-charging-id-first`, `-ev-side-disconnect`                                                     | `cert16-tc001`, `tc003`, `tc004`, `tc005`          | `Occupied` instead of `Preparing` / `Charging`; `stoppedReason: EVDisconnected`.                                                                                                                                                      |
+| `cert201-remote-start`, `-remote-start-stop`, `-remote-stop`, `-remote-start-rejected`, `-remote-stop-rejected`                                | `cert16-tc010`, `tc011`, `tc012`, `tc026`, `tc028` | `RequestStartTransaction` carries an `idToken`, a `remoteStartId` and an `evseId`; the transaction id is the charge point's UUID.                                                                                                     |
+| `cert201-reset-immediate`, `-reset-onidle`                                                                                                     | `cert16-tc013`, `tc014`                            | `Immediate` ends the running transaction; `OnIdle` with one running is answered `Scheduled`.                                                                                                                                          |
+| `cert201-unlock-ongoing-transaction`                                                                                                           | `cert16-tc017`                                     | An unlock during an authorized transaction is answered `OngoingAuthorizedTransaction`; the 1.6 `Unlocked` / `UnlockFailed` outcomes (`unlockOutcome`) do not exist, so `tc018` has no variant.                                        |
+| `cert201-authorize-invalid`, `-authorize-expired`, `-authorize-blocked`                                                                        | `cert16-tc023-*`                                   | Answered with `idTokenInfo.status`; no `TransactionEvent` follows.                                                                                                                                                                    |
+| `cert201-reserve-now-faulted`, `-occupied`, `-unavailable`, `-rejected`, `-cancel-reservation`, `-cancel-reservation-rejected`                 | `cert16-tc048-*`, `tc051`, `tc052`                 | `ReserveNow` with `id`, `expiryDateTime`, `idToken`, `evseId`.                                                                                                                                                                        |
+| `cert201-trigger-message`, `-trigger-message-rejected`, `-clear-cache`, `-data-transfer`                                                       | `cert16-tc054`, `tc055`, `tc061`, `tc064`          | `TriggerMessage` names an `evse`; `ClearCache` is answered `Rejected` unless the authorization cache is enabled, so only its arrival is asserted.                                                                                     |
+| `resilience-authorization-rejected-201`, `-connector-fault-recovery-201`, `-ev-disconnect-recovery-201`, `-temporary-unavailable-recovery-201` | the four 1.6 resilience templates                  | `connectorStatus`, `TransactionEvent` and `idTokenInfo` assertions; `ChangeAvailability` carries `operationalStatus` and an `evse`. `resilience-communication-loss-recovery` and `-power-loss-recovery` already ran on every version. |
+
+The `cert201-*` ids carry no OCA test-case number: they are CP-side cases in the style of the 1.6 set, not a claim of
+coverage of a numbered Part 6 case, and they are not part of the TCK id contract above. Cases whose 1.6 graph needs a 1.6-only
+mechanism (the local list, firmware and diagnostics, smart-charging profiles, `unlockOutcome`) have no variant yet.
+
 ## Data-flow templates (`dataflow-*`)
 
 Six templates that show off what a scenario can read and branch on (schema 1.7):
@@ -232,6 +261,7 @@ Like the `cert16-*` templates they auto-start on connect; use
 | `resilience-power-loss-recovery`            | Operator calls `power.loss`, then `power.restore`, during a session | A BootNotification and then a StatusNotification went out after the power came back. Independent of resume / end.                                                                                                                                                                                                                                          |
 
 Their `csmsExpectations` say what the operator injects (`simulatorSteps`: `disconnect` / `connect` for the two link cuts).
+The four that read 1.6 payloads have `-201` variants (see [OCPP 2.0.1 / 2.1 variants](#ocpp-201--21-variants)).
 Assertions on the 1.6 payload shape (`StatusNotification.status`,
 `StopTransaction.reason`, `idTagInfo`) make those templates 1.6 scenarios; the
 communication-loss and power-loss ones only look at action names. Checks run

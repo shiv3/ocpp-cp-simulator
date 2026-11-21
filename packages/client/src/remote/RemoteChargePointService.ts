@@ -380,6 +380,26 @@ export class RemoteChargePointService implements ChargePointService {
     )) as OcppSendOutcome;
   }
 
+  /** `wait_for` (#1090): blocks on the daemon until the condition holds. */
+  async waitFor(
+    id: string,
+    request: Params<"wait_for">,
+  ): Promise<Result<"wait_for">> {
+    return (await this.runCpRpc(id, "wait_for", request)) as Result<"wait_for">;
+  }
+
+  /** `wait_quiet` (#1091). */
+  async waitQuiet(
+    id: string,
+    request: Params<"wait_quiet">,
+  ): Promise<Result<"wait_quiet">> {
+    return (await this.runCpRpc(
+      id,
+      "wait_quiet",
+      request,
+    )) as Result<"wait_quiet">;
+  }
+
   async sendRawFrame(
     id: string,
     request: RawFrameRequest,

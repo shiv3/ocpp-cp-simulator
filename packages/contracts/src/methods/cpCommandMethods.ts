@@ -220,6 +220,85 @@ export const CP_COMMAND_METHODS = {
     }),
     result: rawFrameOutcomeSchema,
   },
+  // #1090: block until something happens on this charge point. Either a CLI
+  // event (`event`, optionally narrowed by `match`: every key must equal the
+  // event data's) or a scenario state (`scenario`). A condition that already
+  // holds when the command arrives answers at once for `scenario`; an `event`
+  // is only matched by events that arrive after the command. A timeout is a
+  // result (`timedOut: true`), not an error.
+  wait_for: {
+    params: z
+      .object({
+        event: NON_EMPTY_STR.optional().describe(
+          "CLI event name to wait for, e.g. connector_status, boot_notification, scenario_state_changed",
+        ),
+        match: OBJ()
+          .optional()
+          .describe(
+            "With `event`: keys the event's data must carry with these values (shallow, deep-equal per key)",
+          ),
+        scenario: z
+          .object({
+            connector: CONN_POS,
+            scenarioId: NON_EMPTY_STR,
+            state: NON_EMPTY_STR.describe(
+              "Execution state to wait for: idle, running, waiting, paused, completed, error, ...",
+            ),
+          })
+          .optional()
+          .describe(
+            "Wait until the scenario's state is this one (checked now, then on every scenario_state_changed)",
+          ),
+        timeoutMs: z
+          .number()
+          .int()
+          .min(1)
+          .max(25_000)
+          .optional()
+          .describe("Give up after this many milliseconds (default 20000, at most 25000: an RPC is answered within 30 s, so repeat the wait for longer)"),
+      })
+      .refine((v) => (v.event !== undefined) !== (v.scenario !== undefined), {
+        message: "wait_for needs exactly one of event or scenario",
+      })
+      .refine((v) => v.match === undefined || v.event !== undefined, {
+        message: "match needs event",
+      }),
+    result: z.object({
+      matched: z.boolean(),
+      timedOut: z.boolean(),
+      event: z.string().optional(),
+      data: z.unknown().optional(),
+      timestamp: z.string().optional(),
+      scenarioStatus: z.unknown().optional(),
+    }),
+  },
+  // #1091: resolve when the wire is quiet: every CALL the station sent has
+  // been answered and no frame crossed the socket for `quietMs`. `quiet:
+  // false` (with `reason`) when `timeoutMs` passes first, the link is down, or
+  // the station runs on a virtual clock.
+  wait_quiet: {
+    params: z.object({
+      quietMs: z
+        .number()
+        .int()
+        .min(1)
+        .max(60_000)
+        .optional()
+        .describe("No frame for this long counts as quiet (default 250)"),
+      timeoutMs: z
+        .number()
+        .int()
+        .min(1)
+        .max(25_000)
+        .optional()
+        .describe("Give up after this many milliseconds (default 10000, at most 25000)"),
+    }),
+    result: z.object({
+      quiet: z.boolean(),
+      reason: z.enum(["quiet", "timeout", "offline", "virtual_clock"]),
+      outstandingCalls: z.number().int(),
+    }),
+  },
   // #1090: control what the station answers a CSMS CALL with. A test arms an
   // override for an action; the next `times` CALLs of it (default 1), or every
   // one with `persistent`, get that answer instead of the engine's. Armed
@@ -267,7 +346,7 @@ export const CP_COMMAND_METHODS = {
         .number()
         .int()
         .min(0)
-        .max(600_000)
+        .max(25_000)
         .optional()
         .describe(
           "Mode delay: how late the normal answer is written; any other mode but noAnswer: how long the answer is held back",

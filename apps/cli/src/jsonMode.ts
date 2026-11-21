@@ -325,6 +325,14 @@ export async function handleJsonCommand(
       // plane's.
       return ops.sendOcppSend(methodParams("send_ocpp_send", params));
 
+    case "wait_for":
+      // #1090: blocks this command only; later lines keep being handled.
+      return ops.waitFor(methodParams("wait_for", params));
+
+    case "wait_quiet":
+      // #1091
+      return ops.waitQuiet(methodParams("wait_quiet", params));
+
     case "send_raw_frame":
       // #393: same schema as the control plane's.
       return ops.sendRawFrame(methodParams("send_raw_frame", params));

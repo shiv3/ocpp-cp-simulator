@@ -199,6 +199,56 @@ export function registerTransactionTools(
     },
   });
 
+  mcp.tool("wait_for", {
+    description:
+      "Block until something happens on the charge point (#1090): a CLI event (`event`, e.g. connector_status, boot_notification, scenario_state_changed; `match` narrows it by data keys, deep-equal per key) or a scenario state (`scenario`: connector, scenarioId, state; true at once if the scenario is already in it). Only events arriving after the call match an `event`. Returns { matched, timedOut, event?, data? }; a timeout is a result, not an error. timeoutMs default 20000, at most 25000 (repeat the call to wait longer).",
+    inputSchema: z.object({
+      cpId: z.string().describe("Charge point identifier"),
+      event: z.string().min(1).optional(),
+      match: z.record(z.string(), z.unknown()).optional(),
+      scenario: z
+        .object({
+          connector: z.number().int().min(1),
+          scenarioId: z.string().min(1),
+          state: z.string().min(1),
+        })
+        .optional(),
+      timeoutMs: z.number().int().min(1).max(25_000).optional(),
+    }),
+    handler: async ({ cpId, ...params }) => {
+      try {
+        const result = await runRpc(deps, {
+          cpId,
+          method: "wait_for",
+          params,
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
+  mcp.tool("wait_quiet", {
+    description:
+      "Resolve when the charge point's wire is quiet (#1091): every CALL it sent has been answered and no frame crossed the WebSocket for quietMs (default 250). Returns { quiet, reason (quiet | timeout | offline | virtual_clock), outstandingCalls }; timeoutMs default 10000.",
+    inputSchema: METHODS.wait_quiet.params.extend({
+      cpId: z.string().describe("Charge point identifier"),
+    }),
+    handler: async ({ cpId, ...params }) => {
+      try {
+        const result = await runRpc(deps, {
+          cpId,
+          method: "wait_quiet",
+          params,
+        });
+        return successResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  });
+
   mcp.tool("set_response_override", {
     description:
       "Control what the charge point answers a CSMS CALL with (#1090), instead of its engine's answer. Arms an override for `action`; the next `times` CALLs of it (default 1), or every one with persistent, get it. mode: status (CALLRESULT { status }), callError (errorCode/errorDescription/errorDetails), callResult (`payload` written as given, schema-valid or not), raw (`frame` written as given), callResultError (an OCPP 2.1 CALLRESULTERROR frame with the CALL's id), delay (the normal answer, delayMs late) or noAnswer (never answer). delayMs also holds back any other answer. The override answers before the station's own handlers and before inbound validation. Arming again replaces the one for the action; cleared by clear_response_overrides or a reset.",

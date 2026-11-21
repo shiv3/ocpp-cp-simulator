@@ -59,5 +59,64 @@
       "target": "delay-2"
     },
     { "id": "e5", "source": "delay-2", "target": "end-1" }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "SetChargingProfile",
+        "node": "csms-set-charging-profile",
+        "example": {
+          "connectorId": 0,
+          "csChargingProfiles": {
+            "chargingProfileId": 11,
+            "stackLevel": 0,
+            "chargingProfilePurpose": "TxDefaultProfile",
+            "chargingProfileKind": "Absolute",
+            "chargingSchedule": {
+              "chargingRateUnit": "W",
+              "chargingSchedulePeriod": [{ "startPeriod": 0, "limit": 11000 }],
+              "duration": 3600
+            }
+          }
+        },
+        "expectedStatus": "Accepted"
+      },
+      {
+        "action": "ClearChargingProfile",
+        "node": "csms-clear-charging-profile",
+        "example": { "id": 11 },
+        "expectedStatus": "Accepted"
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "id": "profile-accepted",
+      "type": "response_status",
+      "action": "SetChargingProfile",
+      "status": "Accepted",
+      "description": "SetChargingProfile answered Accepted"
+    },
+    {
+      "id": "clear-received",
+      "type": "ocpp_received",
+      "action": "ClearChargingProfile",
+      "description": "ClearChargingProfile received from the CSMS"
+    },
+    {
+      "id": "clear-accepted",
+      "type": "response_status",
+      "action": "ClearChargingProfile",
+      "status": "Accepted",
+      "description": "ClearChargingProfile answered Accepted"
+    },
+    {
+      "id": "clear-after-set",
+      "type": "message_order",
+      "before": { "action": "SetChargingProfile", "direction": "received" },
+      "after": { "action": "ClearChargingProfile", "direction": "received" },
+      "description": "ClearChargingProfile after SetChargingProfile"
+    }
   ]
 }

@@ -246,5 +246,67 @@
       "source": "plug-out",
       "target": "end-1"
     }
+  ],
+  "ocppVersions": ["2.0.1", "2.1"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "RequestStartTransaction",
+        "node": "wait",
+        "example": {
+          "idToken": { "idToken": "DEMO-TAG-2", "type": "ISO14443" },
+          "remoteStartId": 1,
+          "evseId": 1
+        },
+        "expectedStatus": "Accepted",
+        "note": "The scenario answers the call itself (behavior replace), then authorizes the token from the call."
+      }
+    ],
+    "answers": [
+      {
+        "action": "Authorize",
+        "when": { "idToken": { "idToken": "DEMO-TAG-2" } },
+        "respond": { "idTokenInfo": { "status": "Accepted" } }
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "id": "remote-start-accepted",
+      "type": "response_status",
+      "action": "RequestStartTransaction",
+      "status": "Accepted",
+      "description": "RequestStartTransaction answered Accepted"
+    },
+    {
+      "id": "authorize-call-token",
+      "type": "payload_match",
+      "action": "Authorize",
+      "payload": { "idToken": { "idToken": "DEMO-TAG-2" } },
+      "description": "Authorize carries the expected payload"
+    },
+    {
+      "id": "authorize-accepted",
+      "type": "idtag_info_status",
+      "action": "Authorize",
+      "status": "Accepted",
+      "description": "Authorize answered Accepted"
+    },
+    {
+      "id": "started",
+      "type": "payload_match",
+      "action": "TransactionEvent",
+      "payload": { "eventType": "Started" },
+      "description": "TransactionEvent carries the expected payload",
+      "occurrence": "any"
+    },
+    {
+      "id": "ended",
+      "type": "payload_match",
+      "action": "TransactionEvent",
+      "payload": { "eventType": "Ended" },
+      "description": "TransactionEvent Ended sent",
+      "occurrence": "any"
+    }
   ]
 }

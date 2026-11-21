@@ -48,5 +48,54 @@
       "target": "delay-firmware-sequence"
     },
     { "id": "e4", "source": "delay-firmware-sequence", "target": "end-1" }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "UpdateFirmware",
+        "node": "trigger-firmware-update",
+        "example": { "location": "<firmwareUrl>", "retrieveDate": "<now+0s>" }
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "id": "update-firmware-received",
+      "type": "ocpp_received",
+      "action": "UpdateFirmware",
+      "description": "UpdateFirmware received from the CSMS"
+    },
+    {
+      "id": "firmware-0",
+      "type": "payload_match",
+      "action": "FirmwareStatusNotification",
+      "payload": { "status": "Downloading" },
+      "description": "FirmwareStatusNotification #1 is Downloading"
+    },
+    {
+      "id": "firmware-1",
+      "type": "payload_match",
+      "action": "FirmwareStatusNotification",
+      "payload": { "status": "Downloaded" },
+      "description": "FirmwareStatusNotification #2 is Downloaded",
+      "occurrence": 1
+    },
+    {
+      "id": "firmware-2",
+      "type": "payload_match",
+      "action": "FirmwareStatusNotification",
+      "payload": { "status": "Installing" },
+      "description": "FirmwareStatusNotification #3 is Installing",
+      "occurrence": 2
+    },
+    {
+      "id": "firmware-3",
+      "type": "payload_match",
+      "action": "FirmwareStatusNotification",
+      "payload": { "status": "Installed" },
+      "description": "FirmwareStatusNotification #4 is Installed",
+      "occurrence": 3
+    }
   ]
 }

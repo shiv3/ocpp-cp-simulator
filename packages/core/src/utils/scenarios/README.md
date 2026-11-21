@@ -8,6 +8,8 @@ These built-in JSON templates implement the Charge Point side of OCPP 1.6 certif
 4. The scenario starts automatically once the connector reaches Available (each template's Start node defaults to `triggerOn: "connect"`) — no manual "Play" control is required.
 5. Follow the CSMS-side operator actions listed below to complete the test case.
 
+Since schema 1.12 every template also declares `ocppVersions`, `csmsExpectations` (the CSMS calls to send, with example payloads, and the answers to give — the "CSMS-Side Operator Action" column below in machine-readable form) and `assertions` (so a run on the intended path reports PASS, not SKIPPED). `list_scenario_templates` returns them; see `docs/entities/scenario-templates.md`.
+
 ## Scenario Mapping
 
 | Scenario ID                                         | TC       | Title                                     | Profile       | CSMS-Side Operator Action                                                                                                                                                                                                                      |

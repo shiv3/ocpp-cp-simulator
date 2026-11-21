@@ -49,5 +49,36 @@
       "target": "trigger-reserve-now"
     },
     { "id": "e4", "source": "trigger-reserve-now", "target": "end-1" }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "ReserveNow",
+        "node": "trigger-reserve-now",
+        "example": {
+          "connectorId": 1,
+          "expiryDate": "<now+3600s>",
+          "idTag": "CERT-RES01",
+          "reservationId": 7
+        },
+        "expectedStatus": "Rejected"
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "id": "reserve-received",
+      "type": "ocpp_received",
+      "action": "ReserveNow",
+      "description": "ReserveNow received from the CSMS"
+    },
+    {
+      "id": "reserve-rejected",
+      "type": "response_status",
+      "action": "ReserveNow",
+      "status": "Rejected",
+      "description": "ReserveNow answered Rejected"
+    }
   ]
 }

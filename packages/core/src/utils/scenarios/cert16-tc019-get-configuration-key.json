@@ -34,5 +34,25 @@
   "edges": [
     { "id": "e1", "source": "start-1", "target": "trigger-get-config" },
     { "id": "e3", "source": "trigger-get-config", "target": "end-1" }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "GetConfiguration",
+        "node": "trigger-get-config",
+        "example": { "key": ["HeartbeatInterval"] }
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "id": "key-requested",
+      "type": "payload_match",
+      "action": "GetConfiguration",
+      "direction": "received",
+      "payload": { "key": ["HeartbeatInterval"] },
+      "description": "GetConfiguration from the CSMS carries the expected payload"
+    }
   ]
 }

@@ -1,7 +1,7 @@
 ---
-title: Scenario file format (v1.11)
+title: Scenario file format (v1.12)
 type: concept
-summary: The node-graph JSON format for scripted charge-point behavior — 32 node types, edges, triggers, EV settings, assertions with a two-axis verdict, `useBehavior` params and disable, the 1.6 decision and notify nodes with the read-only `$from` roots, the 1.8 timeout edges, the 1.9 parallel and join nodes, the 1.10 loop edges, the 1.11 `statusChange` `allowInvalidTransition`, and the limits of the format — as exported by the editor and accepted by the CLI, daemon and MCP; JSON Schema is the source of truth.
+summary: The node-graph JSON format for scripted charge-point behavior — 32 node types, edges, triggers, EV settings, assertions with a two-axis verdict, `useBehavior` params and disable, the 1.6 decision and notify nodes with the read-only `$from` roots, the 1.8 timeout edges, the 1.9 parallel and join nodes, the 1.10 loop edges, the 1.11 `statusChange` `allowInvalidTransition`, the 1.12 `ocppVersions` / `csmsExpectations` template metadata, and the limits of the format — as exported by the editor and accepted by the CLI, daemon and MCP; JSON Schema is the source of truth.
 sources:
   - packages/core/schema/scenario.schema.json
   - packages/core/src/cp/application/scenario/ScenarioTypes.ts
@@ -55,10 +55,10 @@ related:
   - ../entities/cli.md
   - vehicle-profiles.md
   - charger-engine.md
-updated: 2026-11-20
+updated: 2026-11-21
 ---
 
-# Scenario File Format (v1.11)
+# Scenario File Format (v1.12)
 
 A **node-graph JSON file** describing a scripted charge-point behavior: a
 directed graph of typed nodes (status changes, transactions, meter values,
@@ -76,7 +76,7 @@ that schema, not a replacement for it.
 
 ## Status & scope
 
-- **Version `1.11`** (`schemaVersion`). Files stamped `1.0` to `1.10` remain valid — 1.x
+- **Version `1.12`** (`schemaVersion`). Files stamped `1.0` to `1.11` remain valid — 1.x
   is purely additive (see [Versioning](#versioning)).
 - Covers the full 32-node discriminated union the scenario engine supports
   (see [Node types](#node-types) below).
@@ -104,26 +104,28 @@ Mirrors the [OCPP trace format](./trace-format.md#versioning)'s rules:
 
 ## Top-level fields
 
-| Field                   | Type                                                                            | Required | Notes                                                                                                                                                                                                                |
-| ----------------------- | ------------------------------------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schemaVersion`         | string                                                                          | No       | e.g. `"1.11"` (current); `"1.10"`, `"1.9"`, `"1.8"`, `"1.7"`, `"1.6"`, `"1.5"`, `"1.4"`, `"1.3"`, `"1.2"`, `"1.1"` and `"1.0"` remain valid — additive. Absent on files predating issue #214 — still valid.          |
-| `id`                    | string                                                                          | Yes      | Stable scenario identifier.                                                                                                                                                                                          |
-| `templateId`            | string                                                                          | No       | Set automatically when a built-in template is instantiated; absent on hand-authored scenarios. See [Template instances](#template-instances).                                                                        |
-| `libraryId`             | string                                                                          | No       | Set by the web console on a connector's copy of a [Library](../entities/web-console.md#scenario-library) scenario: that scenario's `id` (v1.4). Absent on Library entries and on scenarios loaded by hand.           |
-| `recordedFrom`          | object                                                                          | No       | `{ behaviorId, commit, seed, version }` (all required): set on a scenario made by [recording a behavior run](../analyses/scenario-or-behavior.md#record-a-run-as-a-scenario). Informational; the runtime ignores it. |
-| `name`                  | string                                                                          | Yes      |                                                                                                                                                                                                                      |
-| `description`           | string                                                                          | No       |                                                                                                                                                                                                                      |
-| `targetType`            | `"chargePoint"` \| `"connector"`                                                | Yes      |                                                                                                                                                                                                                      |
-| `targetId`              | number                                                                          | No       | Connector id if `targetType` is `"connector"`.                                                                                                                                                                       |
-| `nodes`                 | [Node](#node-shape)`[]`                                                         | Yes      |                                                                                                                                                                                                                      |
-| `edges`                 | [Edge](#edge-shape)`[]`                                                         | Yes      |                                                                                                                                                                                                                      |
-| `createdAt`/`updatedAt` | string (ISO-8601)                                                               | No       | Most shipped templates omit these — kept optional so they still validate.                                                                                                                                            |
-| `trigger`               | `{ type: "manual" \| "statusChange", conditions?: { fromStatus?, toStatus? } }` | No       | Auto-execution trigger (default: manual).                                                                                                                                                                            |
-| `defaultExecutionMode`  | `"oneshot"` \| `"step"`                                                         | No       | Default: `oneshot`.                                                                                                                                                                                                  |
-| `enabled`               | boolean                                                                         | No       | Default: `true`.                                                                                                                                                                                                     |
-| `evSettings`            | `Partial<EVSettings>`                                                           | No       | `modelName`, `batteryCapacityKwh`, `maxChargingPowerKw`, `initialSoc`, `targetSoc`, plus the v1.2 curve fields — see [Charging curve](#charging-curve-v12).                                                          |
-| `strictCompatibility`   | boolean                                                                         | No       | Promote warning-severity assertion failures to run failures (default: `false`). Per-run `strict` option overrides.                                                                                                   |
-| `assertions`            | [Assertion](#assertions--verdicts)`[]`                                          | No       | Declarative pass/fail checks against the run's OCPP transcript.                                                                                                                                                      |
+| Field                   | Type                                                                            | Required | Notes                                                                                                                                                                                                                 |
+| ----------------------- | ------------------------------------------------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schemaVersion`         | string                                                                          | No       | e.g. `"1.12"` (current); `"1.11"`, `"1.10"`, `"1.9"`, `"1.8"`, `"1.7"`, `"1.6"`, `"1.5"`, `"1.4"`, `"1.3"`, `"1.2"`, `"1.1"` and `"1.0"` remain valid — additive. Absent on files predating issue #214 — still valid. |
+| `id`                    | string                                                                          | Yes      | Stable scenario identifier.                                                                                                                                                                                           |
+| `templateId`            | string                                                                          | No       | Set automatically when a built-in template is instantiated; absent on hand-authored scenarios. See [Template instances](#template-instances).                                                                         |
+| `libraryId`             | string                                                                          | No       | Set by the web console on a connector's copy of a [Library](../entities/web-console.md#scenario-library) scenario: that scenario's `id` (v1.4). Absent on Library entries and on scenarios loaded by hand.            |
+| `recordedFrom`          | object                                                                          | No       | `{ behaviorId, commit, seed, version }` (all required): set on a scenario made by [recording a behavior run](../analyses/scenario-or-behavior.md#record-a-run-as-a-scenario). Informational; the runtime ignores it.  |
+| `name`                  | string                                                                          | Yes      |                                                                                                                                                                                                                       |
+| `description`           | string                                                                          | No       |                                                                                                                                                                                                                       |
+| `targetType`            | `"chargePoint"` \| `"connector"`                                                | Yes      |                                                                                                                                                                                                                       |
+| `targetId`              | number                                                                          | No       | Connector id if `targetType` is `"connector"`.                                                                                                                                                                        |
+| `nodes`                 | [Node](#node-shape)`[]`                                                         | Yes      |                                                                                                                                                                                                                       |
+| `edges`                 | [Edge](#edge-shape)`[]`                                                         | Yes      |                                                                                                                                                                                                                       |
+| `createdAt`/`updatedAt` | string (ISO-8601)                                                               | No       | Most shipped templates omit these — kept optional so they still validate.                                                                                                                                             |
+| `trigger`               | `{ type: "manual" \| "statusChange", conditions?: { fromStatus?, toStatus? } }` | No       | Auto-execution trigger (default: manual).                                                                                                                                                                             |
+| `defaultExecutionMode`  | `"oneshot"` \| `"step"`                                                         | No       | Default: `oneshot`.                                                                                                                                                                                                   |
+| `enabled`               | boolean                                                                         | No       | Default: `true`.                                                                                                                                                                                                      |
+| `evSettings`            | `Partial<EVSettings>`                                                           | No       | `modelName`, `batteryCapacityKwh`, `maxChargingPowerKw`, `initialSoc`, `targetSoc`, plus the v1.2 curve fields — see [Charging curve](#charging-curve-v12).                                                           |
+| `strictCompatibility`   | boolean                                                                         | No       | Promote warning-severity assertion failures to run failures (default: `false`). Per-run `strict` option overrides.                                                                                                    |
+| `assertions`            | [Assertion](#assertions--verdicts)`[]`                                          | No       | Declarative pass/fail checks against the run's OCPP transcript.                                                                                                                                                       |
+| `ocppVersions`          | `("1.6" \| "2.0.1" \| "2.1")[]`                                                 | No       | v1.12. OCPP versions the scenario's wire shapes are written for. Informational: loading a built-in template on a charge point speaking another version logs a warning and still loads.                                |
+| `csmsExpectations`      | [CsmsExpectations](#csms-expectations-schema-112)                               | No       | v1.12. What the scenario needs from the CSMS to take its intended path. Informational; the runtime ignores it.                                                                                                        |
 
 ## Node shape
 
@@ -342,7 +344,7 @@ behavior?](../analyses/scenario-or-behavior.md).
 
 **The scenario editor.** The browser Scenario Editor authors all of schema 1.5 and 1.6 (the 1.6 nodes of [this section](#the-schema-16-nodes) included): a `csmsCallTrigger` form
 with `behavior` (`observe` / `replace`) and `onBusy`, a `callResponse` node and a `useBehavior` node (with its
-mode and a params form), and it exports `schemaVersion: "1.11"`. A `switch` `value`, a `notify` `requestId` and a
+mode and a params form), and it exports `schemaVersion: "1.12"`. A `switch` `value`, a `notify` `requestId` and a
 `setState` `value` are edited as a typed constant or **Read from…** a `$from` root and path (the inspector's value
 field, [web console](../entities/web-console.md#the-switch-and-choice-inspectors)); in an `ocppCall` / `callResponse`
 payload a `$from` is typed in the payload JSON. The `useBehavior` id is free text.
@@ -790,7 +792,10 @@ Each entry has `id` and `type` (one of `ocpp_sent`, `ocpp_received`,
 `ocpp_absent`, `response_status`, `idtag_info_status`, `payload_match`,
 `message_order`, `message_after`, `state_transition`, `no_unexpected`), plus
 type-dependent fields (`action`, `direction`, `status`, `occurrence`,
-`payload`, `targetStatus`, `actions`, `before`, `after`).
+`payload`, `targetStatus`, `actions`, `before`, `after`). `occurrence` is a 0-based index; on
+`payload_match` it may also be `"any"` (v1.12): the assertion passes when any CALL of the action matches.
+`idtag_info_status` reads `idTagInfo.status` (1.6) or `idTokenInfo.status` (2.x), and `state_transition` reads
+the `status` (1.6) or `connectorStatus` (2.x) of the StatusNotification, so those two assertions hold on either version.
 
 ### Severity: conformance vs. compatibility
 
@@ -817,6 +822,41 @@ Each entry in the report's `assertions` array also carries `frameRefs` (#240): t
 ```
 
 A scenario with no `assertions` produces a `SKIPPED` verdict and runs exactly as before.
+
+### CSMS expectations (schema 1.12)
+
+`csmsExpectations` is the machine-readable twin of a template's description: what the CSMS has to do for the scenario to
+take its intended path. A CSMS test harness, an operator or an MCP client reads it instead of opening the graph.
+
+```json
+"csmsExpectations": {
+  "calls": [
+    { "action": "RemoteStartTransaction", "node": "trigger-remote-start",
+      "example": { "connectorId": 1, "idTag": "CERT010" }, "expectedStatus": "Accepted" }
+  ],
+  "answers": [
+    { "action": "Authorize", "when": { "idTag": "CERT023-INV" },
+      "respond": { "idTagInfo": { "status": "Invalid" } } }
+  ],
+  "simulatorSteps": [{ "command": "ev_plug_in", "params": { "connector": 1 } }],
+  "note": "free text"
+}
+```
+
+- `calls` — the CSMS-initiated calls the scenario waits for, in order: `action`, the waiting `node`, an `example` payload
+  that takes the intended path, the `expectedStatus` the charge point answers with, `optional` (the scenario has a timeout
+  edge) and a `note`. An empty list means the scenario needs no CSMS-initiated call.
+- `answers` — answers the CSMS must give to a call the charge point makes (an Authorize outcome, a DataTransfer status):
+  `action`, a partial-match `when` on the request payload, and the `respond` payload. Anything else is answered the usual
+  way (accepted).
+- `simulatorSteps` — charge-point-side steps outside the CSMS that a status-triggered scenario waits for, as control-plane
+  commands (`ev_plug_in`, `start_transaction`, …).
+- Example payloads may hold the placeholders `<transactionId>` (the id of the running transaction), `<now+Ns>` (an ISO-8601 time N
+  seconds ahead), `<uploadUrl>` and `<firmwareUrl>` (a URL the operator hosts). Everything else is literal.
+
+The built-in templates all declare it, and `templateExpectations.bun.test.ts` drives each one from its declaration alone:
+the run must end with every assertion passed. [`list_scenario_templates`](control-plane.md#cp-command-methods) returns it
+with each template.
 
 ### OCTT strictness probe
 
@@ -1875,6 +1915,10 @@ event handlers between branches (the run's `setState` state was already shared).
 [Scenario or behavior?](../analyses/scenario-or-behavior.md#node--ctx-parity).
 
 ## Changelog
+
+- **v1.12**: A scenario may carry `ocppVersions` and `csmsExpectations` (see [CSMS expectations](#csms-expectations-schema-112));
+  `payload_match` accepts `occurrence: "any"`. Purely additive — absent means what it always meant, and `1.11` and
+  older files remain valid. `idtag_info_status` and `state_transition` also read the 2.x payload shapes.
 
 - **v1.11**: A `statusChange` node may carry `allowInvalidTransition: true` (#618): its status change is
   reported even when the charge point's [capability profile](call-precedence.md#status-transitions-statustransitions)

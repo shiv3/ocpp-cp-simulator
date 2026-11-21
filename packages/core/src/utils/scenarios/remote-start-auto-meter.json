@@ -65,5 +65,32 @@
       "target": "meter-auto"
     },
     { "id": "e-meter-end", "source": "meter-auto", "target": "end-1" }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "RemoteStartTransaction",
+        "node": "trigger-remote",
+        "example": { "connectorId": 1, "idTag": "REMOTE001" },
+        "expectedStatus": "Accepted"
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "id": "remote-start-accepted",
+      "type": "response_status",
+      "action": "RemoteStartTransaction",
+      "status": "Accepted",
+      "description": "RemoteStartTransaction answered Accepted"
+    },
+    {
+      "id": "started",
+      "type": "payload_match",
+      "action": "StartTransaction",
+      "payload": { "idTag": "REMOTE001" },
+      "description": "StartTransaction carries idTag REMOTE001"
+    }
   ]
 }

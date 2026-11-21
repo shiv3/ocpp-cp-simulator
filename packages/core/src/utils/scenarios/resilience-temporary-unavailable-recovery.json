@@ -134,5 +134,22 @@
       "targetStatus": "Available",
       "description": "Connector reported Available again"
     }
-  ]
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "ChangeAvailability",
+        "node": "wait-inop",
+        "example": { "connectorId": 1, "type": "Inoperative" },
+        "expectedStatus": "Accepted"
+      },
+      {
+        "action": "ChangeAvailability",
+        "node": "wait-op",
+        "example": { "connectorId": 1, "type": "Operative" },
+        "expectedStatus": "Accepted"
+      }
+    ]
+  }
 }

@@ -60,5 +60,49 @@
       "target": "trigger-send-local-list"
     },
     { "id": "e4", "source": "trigger-send-local-list", "target": "end-1" }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "SendLocalList",
+        "node": "trigger-send-local-list",
+        "example": {
+          "listVersion": 1,
+          "updateType": "Full",
+          "localAuthorizationList": [
+            {
+              "idTag": "LIST-A",
+              "idTagInfo": {
+                "status": "Accepted",
+                "expiryDate": "<now+86400s>"
+              }
+            },
+            {
+              "idTag": "LIST-B",
+              "idTagInfo": { "status": "Blocked", "expiryDate": "<now+86400s>" }
+            }
+          ]
+        },
+        "expectedStatus": "Accepted"
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "id": "full-update",
+      "type": "payload_match",
+      "action": "SendLocalList",
+      "direction": "received",
+      "payload": { "updateType": "Full" },
+      "description": "SendLocalList from the CSMS carries the expected payload"
+    },
+    {
+      "id": "accepted",
+      "type": "response_status",
+      "action": "SendLocalList",
+      "status": "Accepted",
+      "description": "SendLocalList answered Accepted"
+    }
   ]
 }

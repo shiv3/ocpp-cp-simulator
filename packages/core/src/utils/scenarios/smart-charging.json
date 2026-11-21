@@ -136,5 +136,47 @@
       "source": "join-1",
       "target": "end-1"
     }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [],
+    "simulatorSteps": [
+      {
+        "command": "ev_plug_in",
+        "params": { "connector": 1 },
+        "node": "trigger-charging"
+      },
+      {
+        "command": "start_transaction",
+        "params": { "connector": 1, "tagId": "SC-TAG" },
+        "node": "trigger-charging"
+      },
+      {
+        "command": "stop_transaction",
+        "params": { "connector": 1 },
+        "node": "trigger-finish"
+      }
+    ],
+    "note": "No CSMS action; the Charging / Finishing status triggers are driven by simulator commands."
+  },
+  "assertions": [
+    {
+      "id": "charging",
+      "type": "state_transition",
+      "targetStatus": "Charging",
+      "description": "connector reaches Charging"
+    },
+    {
+      "id": "finishing",
+      "type": "state_transition",
+      "targetStatus": "Finishing",
+      "description": "connector reaches Finishing"
+    },
+    {
+      "id": "stopped",
+      "type": "ocpp_sent",
+      "action": "StopTransaction",
+      "description": "StopTransaction sent"
+    }
   ]
 }

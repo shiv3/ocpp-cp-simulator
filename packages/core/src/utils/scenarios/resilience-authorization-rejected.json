@@ -167,5 +167,17 @@
       "action": "StartTransaction",
       "description": "No StartTransaction for a rejected idTag"
     }
-  ]
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [],
+    "answers": [
+      {
+        "action": "Authorize",
+        "when": { "idTag": "RESIL-BLK" },
+        "respond": { "idTagInfo": { "status": "Blocked" } }
+      }
+    ],
+    "note": "No CSMS call; the CSMS must answer Authorize for RESIL-BLK with Blocked."
+  }
 }

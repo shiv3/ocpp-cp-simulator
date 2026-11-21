@@ -41,5 +41,41 @@
     { "id": "e1", "source": "start-1", "target": "trigger-message" },
     { "id": "e3", "source": "trigger-message", "target": "delay-cp-sends" },
     { "id": "e4", "source": "delay-cp-sends", "target": "end-1" }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "TriggerMessage",
+        "node": "trigger-message",
+        "example": {
+          "requestedMessage": "StatusNotification",
+          "connectorId": 1
+        },
+        "expectedStatus": "Accepted"
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "id": "trigger-received",
+      "type": "ocpp_received",
+      "action": "TriggerMessage",
+      "description": "TriggerMessage received from the CSMS"
+    },
+    {
+      "id": "trigger-accepted",
+      "type": "response_status",
+      "action": "TriggerMessage",
+      "status": "Accepted",
+      "description": "TriggerMessage answered Accepted"
+    },
+    {
+      "id": "status-after-trigger",
+      "type": "message_after",
+      "before": { "action": "TriggerMessage", "direction": "received" },
+      "after": { "action": "StatusNotification" },
+      "description": "StatusNotification after TriggerMessage"
+    }
   ]
 }

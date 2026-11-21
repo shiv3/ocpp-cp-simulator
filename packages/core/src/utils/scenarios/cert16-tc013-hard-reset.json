@@ -68,5 +68,41 @@
     { "id": "e3", "source": "tx-start", "target": "meter-auto" },
     { "id": "e4", "source": "meter-auto", "target": "trigger-reset" },
     { "id": "e5", "source": "trigger-reset", "target": "end-1" }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "Reset",
+        "node": "trigger-reset",
+        "example": { "type": "Hard" },
+        "expectedStatus": "Accepted"
+      }
+    ],
+    "note": "Sent while a transaction runs."
+  },
+  "assertions": [
+    {
+      "id": "reset-hard",
+      "type": "payload_match",
+      "action": "Reset",
+      "direction": "received",
+      "payload": { "type": "Hard" },
+      "description": "Reset from the CSMS carries the expected payload"
+    },
+    {
+      "id": "reset-accepted",
+      "type": "response_status",
+      "action": "Reset",
+      "status": "Accepted",
+      "description": "Reset answered Accepted"
+    },
+    {
+      "id": "stopped-by-reset",
+      "type": "payload_match",
+      "action": "StopTransaction",
+      "payload": { "reason": "HardReset" },
+      "description": "StopTransaction carries the expected payload"
+    }
   ]
 }

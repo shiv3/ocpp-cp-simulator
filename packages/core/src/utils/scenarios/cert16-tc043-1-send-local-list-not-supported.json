@@ -60,5 +60,43 @@
       "target": "trigger-send-local-list"
     },
     { "id": "e4", "source": "trigger-send-local-list", "target": "end-1" }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "SendLocalList",
+        "node": "trigger-send-local-list",
+        "example": {
+          "listVersion": 1,
+          "updateType": "Full",
+          "localAuthorizationList": [
+            {
+              "idTag": "LIST-A",
+              "idTagInfo": {
+                "status": "Accepted",
+                "expiryDate": "<now+86400s>"
+              }
+            }
+          ]
+        },
+        "expectedStatus": "NotSupported"
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "id": "send-local-list-received",
+      "type": "ocpp_received",
+      "action": "SendLocalList",
+      "description": "SendLocalList received from the CSMS"
+    },
+    {
+      "id": "not-supported",
+      "type": "response_status",
+      "action": "SendLocalList",
+      "status": "NotSupported",
+      "description": "SendLocalList answered NotSupported"
+    }
   ]
 }

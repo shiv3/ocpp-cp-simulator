@@ -340,5 +340,43 @@
       "source": "rep-other-error",
       "target": "end-1"
     }
+  ],
+  "ocppVersions": ["1.6", "2.0.1", "2.1"],
+  "csmsExpectations": {
+    "calls": [],
+    "answers": [
+      {
+        "action": "DataTransfer",
+        "when": { "vendorId": "org.example.dataflow" },
+        "respond": { "status": "Accepted" },
+        "note": "Any other answer (UnknownVendorId, Rejected, a CALLERROR) takes another branch."
+      }
+    ],
+    "note": "No CSMS call; the DataTransfer answer picks the branch."
+  },
+  "assertions": [
+    {
+      "id": "probe-sent",
+      "type": "payload_match",
+      "action": "DataTransfer",
+      "payload": { "vendorId": "org.example.dataflow", "messageId": "probe" },
+      "description": "DataTransfer carries the expected payload"
+    },
+    {
+      "id": "probe-accepted",
+      "type": "response_status",
+      "action": "DataTransfer",
+      "status": "Accepted",
+      "description": "DataTransfer answered Accepted",
+      "direction": "sent"
+    },
+    {
+      "id": "ok-branch",
+      "type": "payload_match",
+      "action": "DataTransfer",
+      "payload": { "vendorId": "org.example.dataflow", "messageId": "ok" },
+      "description": "The result / Accepted branch reported itself",
+      "occurrence": 1
+    }
   ]
 }

@@ -64,5 +64,54 @@
     { "id": "e3", "source": "tx-start", "target": "meter-auto" },
     { "id": "e4", "source": "meter-auto", "target": "tx-stop" },
     { "id": "e5", "source": "tx-stop", "target": "end-1" }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [],
+    "answers": [
+      {
+        "action": "Authorize",
+        "when": { "idTag": "CERT004" },
+        "respond": { "idTagInfo": { "status": "Accepted" } }
+      }
+    ],
+    "note": "No CSMS action; the tag CERT004 must be authorized (the default answer)."
+  },
+  "assertions": [
+    {
+      "id": "authorize-tag",
+      "type": "payload_match",
+      "action": "Authorize",
+      "payload": { "idTag": "CERT004" },
+      "description": "Authorize carries the expected payload"
+    },
+    {
+      "id": "authorize-accepted",
+      "type": "idtag_info_status",
+      "action": "Authorize",
+      "status": "Accepted",
+      "description": "Authorize answered Accepted"
+    },
+    {
+      "id": "started",
+      "type": "payload_match",
+      "action": "StartTransaction",
+      "payload": { "idTag": "CERT004" },
+      "description": "StartTransaction carries idTag CERT004"
+    },
+    {
+      "id": "authorize-first",
+      "type": "message_order",
+      "before": { "action": "Authorize" },
+      "after": { "action": "StartTransaction" },
+      "description": "StartTransaction after Authorize"
+    },
+    {
+      "id": "stop-after-start",
+      "type": "message_after",
+      "before": { "action": "StartTransaction" },
+      "after": { "action": "StopTransaction" },
+      "description": "StopTransaction after StartTransaction"
+    }
   ]
 }

@@ -149,5 +149,18 @@
       },
       "description": "Connector status reported after the reboot"
     }
-  ]
+  ],
+  "ocppVersions": ["1.6", "2.0.1", "2.1"],
+  "csmsExpectations": {
+    "calls": [],
+    "simulatorSteps": [
+      {
+        "command": "disconnect",
+        "node": "wait-down",
+        "note": "after the transaction started; or cut the link from the CSMS side"
+      },
+      { "command": "connect", "node": "wait-up" }
+    ],
+    "note": "No CSMS call; the connection must drop and come back while the transaction runs."
+  }
 }

@@ -75,5 +75,58 @@
     { "id": "e5", "source": "tx-start", "target": "meter-auto" },
     { "id": "e6", "source": "meter-auto", "target": "tx-stop" },
     { "id": "e7", "source": "tx-stop", "target": "end-1" }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "ReserveNow",
+        "node": "trigger-reservation",
+        "example": {
+          "connectorId": 1,
+          "expiryDate": "<now+3600s>",
+          "idTag": "CERT-RES01",
+          "reservationId": 1
+        },
+        "expectedStatus": "Accepted",
+        "note": "idTag must be CERT-RES01: the template starts with that tag."
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "id": "reserve-received",
+      "type": "ocpp_received",
+      "action": "ReserveNow",
+      "description": "ReserveNow received from the CSMS"
+    },
+    {
+      "id": "reserve-accepted",
+      "type": "response_status",
+      "action": "ReserveNow",
+      "status": "Accepted",
+      "description": "ReserveNow answered Accepted"
+    },
+    {
+      "id": "started-with-reserved-tag",
+      "type": "payload_match",
+      "action": "StartTransaction",
+      "payload": { "idTag": "CERT-RES01" },
+      "description": "StartTransaction carries idTag CERT-RES01"
+    },
+    {
+      "id": "start-after-reserve",
+      "type": "message_after",
+      "before": { "action": "ReserveNow", "direction": "received" },
+      "after": { "action": "StartTransaction" },
+      "description": "StartTransaction after ReserveNow"
+    },
+    {
+      "id": "stop-after-start",
+      "type": "message_after",
+      "before": { "action": "StartTransaction" },
+      "after": { "action": "StopTransaction" },
+      "description": "StopTransaction after StartTransaction"
+    }
   ]
 }

@@ -197,6 +197,7 @@ import {
   syncConnectorRuntimeScenarios,
   type ScenarioCatalogHost,
 } from "./service/scenarioCatalog";
+import type { ScenarioTemplateSummary } from "@ocpp-cp-simulator/core/utils/scenarioTemplates";
 import {
   scenarioPositionIsOwnedBy,
   shouldReleaseEvSettingsOverride,
@@ -1206,11 +1207,7 @@ export class CLIChargePointService {
     return connector;
   }
 
-  getScenarioTemplates(): ReadonlyArray<{
-    readonly id: string;
-    readonly name: string;
-    readonly description: string;
-  }> {
+  getScenarioTemplates(): ReadonlyArray<ScenarioTemplateSummary> {
     return getScenarioTemplates();
   }
 

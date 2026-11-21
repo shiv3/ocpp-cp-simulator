@@ -114,5 +114,25 @@
       "severity": "warning",
       "description": "Valid per OCPP, but GetDiagnostics has been observed to break OCTT certification scenarios"
     }
-  ]
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "GetDiagnostics",
+        "node": "wait-for-config",
+        "example": { "location": "<uploadUrl>" },
+        "optional": true,
+        "note": "Optional: sending it makes the diagnostics assertion fail (warning), as intended."
+      },
+      {
+        "action": "GetConfiguration",
+        "node": "wait-for-config",
+        "example": {},
+        "optional": true,
+        "note": "Optional: sending it inside the 15 s window makes the GetConfiguration assertion fail (warning)."
+      }
+    ],
+    "note": "The default path sends nothing; both ocpp_absent assertions then hold."
+  }
 }

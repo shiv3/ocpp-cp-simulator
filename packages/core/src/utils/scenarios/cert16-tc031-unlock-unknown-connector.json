@@ -34,5 +34,33 @@
   "edges": [
     { "id": "e1", "source": "start-1", "target": "trigger-unlock" },
     { "id": "e3", "source": "trigger-unlock", "target": "end-1" }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "UnlockConnector",
+        "node": "trigger-unlock",
+        "example": { "connectorId": 99 },
+        "expectedStatus": "NotSupported"
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "id": "unknown-connector",
+      "type": "payload_match",
+      "action": "UnlockConnector",
+      "direction": "received",
+      "payload": { "connectorId": 99 },
+      "description": "UnlockConnector from the CSMS carries the expected payload"
+    },
+    {
+      "id": "unlock-not-supported",
+      "type": "response_status",
+      "action": "UnlockConnector",
+      "status": "NotSupported",
+      "description": "UnlockConnector answered NotSupported"
+    }
   ]
 }

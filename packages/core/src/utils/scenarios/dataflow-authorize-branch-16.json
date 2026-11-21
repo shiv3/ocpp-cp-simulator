@@ -257,5 +257,47 @@
       "source": "plug-out",
       "target": "end-1"
     }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [],
+    "answers": [
+      {
+        "action": "Authorize",
+        "when": { "idTag": "DEMO-TAG-1" },
+        "respond": { "idTagInfo": { "status": "Accepted" } }
+      }
+    ],
+    "note": "No CSMS call; the Authorize answer picks the branch. Accepted (the default) starts a session; Blocked, Invalid, Expired, ConcurrentTx or anything else takes another branch and the Accepted-path assertions fail."
+  },
+  "assertions": [
+    {
+      "id": "authorize-tag",
+      "type": "payload_match",
+      "action": "Authorize",
+      "payload": { "idTag": "DEMO-TAG-1" },
+      "description": "Authorize carries the expected payload"
+    },
+    {
+      "id": "authorize-accepted",
+      "type": "idtag_info_status",
+      "action": "Authorize",
+      "status": "Accepted",
+      "description": "Authorize answered Accepted"
+    },
+    {
+      "id": "started",
+      "type": "payload_match",
+      "action": "StartTransaction",
+      "payload": { "idTag": "DEMO-TAG-1" },
+      "description": "StartTransaction carries idTag DEMO-TAG-1"
+    },
+    {
+      "id": "stop-after-start",
+      "type": "message_after",
+      "before": { "action": "StartTransaction" },
+      "after": { "action": "StopTransaction" },
+      "description": "StopTransaction after StartTransaction"
+    }
   ]
 }

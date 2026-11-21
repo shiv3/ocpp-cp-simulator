@@ -100,5 +100,39 @@
     { "id": "e6", "source": "trigger-remote-stop", "target": "delay-continue" },
     { "id": "e7", "source": "delay-continue", "target": "tx-stop" },
     { "id": "e8", "source": "tx-stop", "target": "end-1" }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "RemoteStopTransaction",
+        "node": "trigger-remote-stop",
+        "example": { "transactionId": "<transactionId>" },
+        "expectedStatus": "Rejected"
+      }
+    ],
+    "note": "The scenario arms a Rejected answer; it then stops the transaction itself with reason Local."
+  },
+  "assertions": [
+    {
+      "id": "remote-stop-received",
+      "type": "ocpp_received",
+      "action": "RemoteStopTransaction",
+      "description": "RemoteStopTransaction received from the CSMS"
+    },
+    {
+      "id": "remote-stop-rejected",
+      "type": "response_status",
+      "action": "RemoteStopTransaction",
+      "status": "Rejected",
+      "description": "RemoteStopTransaction answered Rejected"
+    },
+    {
+      "id": "stop-after-refusal",
+      "type": "message_after",
+      "before": { "action": "RemoteStopTransaction", "direction": "received" },
+      "after": { "action": "StopTransaction" },
+      "description": "StopTransaction after RemoteStopTransaction"
+    }
   ]
 }

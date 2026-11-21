@@ -92,5 +92,36 @@
       "source": "plug-out",
       "target": "end-1"
     }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "ReserveNow",
+        "node": "trigger-reserve-now",
+        "example": {
+          "connectorId": 1,
+          "expiryDate": "<now+3600s>",
+          "idTag": "CERT-RES01",
+          "reservationId": 7
+        },
+        "expectedStatus": "Occupied"
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "id": "reserve-received",
+      "type": "ocpp_received",
+      "action": "ReserveNow",
+      "description": "ReserveNow received from the CSMS"
+    },
+    {
+      "id": "reserve-occupied",
+      "type": "response_status",
+      "action": "ReserveNow",
+      "status": "Occupied",
+      "description": "ReserveNow answered Occupied"
+    }
   ]
 }

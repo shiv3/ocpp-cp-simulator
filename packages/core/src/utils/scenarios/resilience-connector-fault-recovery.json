@@ -155,5 +155,10 @@
       "targetStatus": "Available",
       "description": "StatusNotification Available sent after the fault"
     }
-  ]
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [],
+    "note": "No CSMS action; the scenario injects and clears the fault itself."
+  }
 }

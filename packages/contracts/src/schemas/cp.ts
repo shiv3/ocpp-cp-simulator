@@ -216,6 +216,48 @@ export const scenarioTemplateInfoSchema = z.object({
   id: STR_64K,
   name: STR_64K,
   description: STR_64K,
+  targetType: z.enum(["chargePoint", "connector"]).optional(),
+  ocppVersions: z.array(STR_64K).optional(),
+  csmsExpectations: z
+    .object({
+      calls: z
+        .array(
+          z.object({
+            action: STR_64K,
+            node: STR_64K.optional(),
+            example: z.record(z.string(), z.unknown()).optional(),
+            expectedStatus: STR_64K.optional(),
+            optional: z.boolean().optional(),
+            note: STR_64K.optional(),
+          }),
+        )
+        .optional(),
+      answers: z
+        .array(
+          z.object({
+            action: STR_64K,
+            when: z.record(z.string(), z.unknown()).optional(),
+            respond: z.record(z.string(), z.unknown()),
+            note: STR_64K.optional(),
+          }),
+        )
+        .optional(),
+      simulatorSteps: z
+        .array(
+          z.object({
+            command: STR_64K,
+            params: z.record(z.string(), z.unknown()).optional(),
+            node: STR_64K.optional(),
+            note: STR_64K.optional(),
+          }),
+        )
+        .optional(),
+      note: STR_64K.optional(),
+    })
+    .optional(),
+  assertions: z
+    .array(z.object({ id: STR_64K, type: STR_64K, description: STR_64K }))
+    .optional(),
 });
 
 export const connectorSettingsParamsSchema = z.object({

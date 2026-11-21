@@ -106,5 +106,53 @@
     { "id": "e8", "source": "trigger-remote-stop", "target": "tx-stop" },
     { "id": "e9", "source": "tx-stop", "target": "plug-out" },
     { "id": "e10", "source": "plug-out", "target": "end-1" }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "RemoteStartTransaction",
+        "node": "trigger-remote-start",
+        "example": { "connectorId": 1, "idTag": "TAG001" },
+        "expectedStatus": "Accepted"
+      },
+      {
+        "action": "RemoteStopTransaction",
+        "node": "trigger-remote-stop",
+        "example": { "transactionId": "<transactionId>" },
+        "expectedStatus": "Accepted"
+      }
+    ],
+    "note": "The RemoteStop comes after the Auto MeterValue node has reached the EV's target SoC (about 75 s with the bundled EV)."
+  },
+  "assertions": [
+    {
+      "id": "remote-start-accepted",
+      "type": "response_status",
+      "action": "RemoteStartTransaction",
+      "status": "Accepted",
+      "description": "RemoteStartTransaction answered Accepted"
+    },
+    {
+      "id": "started",
+      "type": "payload_match",
+      "action": "StartTransaction",
+      "payload": { "idTag": "TAG001" },
+      "description": "StartTransaction carries idTag TAG001"
+    },
+    {
+      "id": "remote-stop-accepted",
+      "type": "response_status",
+      "action": "RemoteStopTransaction",
+      "status": "Accepted",
+      "description": "RemoteStopTransaction answered Accepted"
+    },
+    {
+      "id": "stop-after-remote-stop",
+      "type": "message_after",
+      "before": { "action": "RemoteStopTransaction", "direction": "received" },
+      "after": { "action": "StopTransaction" },
+      "description": "StopTransaction after RemoteStopTransaction"
+    }
   ]
 }

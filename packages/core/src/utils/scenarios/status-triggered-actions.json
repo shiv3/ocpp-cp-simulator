@@ -71,5 +71,18 @@
       "source": "delay-10s",
       "target": "notification-heartbeat"
     }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [],
+    "note": "No CSMS action; the scenario starts when the connector becomes Available."
+  },
+  "assertions": [
+    {
+      "id": "heartbeat",
+      "type": "ocpp_sent",
+      "action": "Heartbeat",
+      "description": "Heartbeat sent while Available"
+    }
   ]
 }

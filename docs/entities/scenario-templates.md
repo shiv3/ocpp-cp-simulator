@@ -6,6 +6,7 @@ sources:
   - packages/core/src/utils/scenarioTemplates.ts
   - packages/core/src/utils/scenarios/*.json
   - packages/core/src/utils/scenarios/README.md
+  - packages/core/src/test/goldenWire/templateExpectations.bun.test.ts
   - packages/core/src/utils/tckContract.templateIds.test.ts
   - "issue #346"
 related:
@@ -16,7 +17,7 @@ related:
   - ../sources/cert16-templates-readme.md
   - ../sources/steve-verify-readme.md
   - cli.md
-updated: 2026-11-20
+updated: 2026-11-21
 ---
 
 # Built-in scenario templates
@@ -54,6 +55,32 @@ entries in #817.
 | [CLI](cli.md#startup-scenarios) startup                          | `--scenario-template <id> --scenario-connector <list>`                                                                              |
 | [Control plane](../concepts/control-plane.md#cp-command-methods) | `list_scenario_templates`, `load_scenario_template`, `run_scenario_template`                                                        |
 | [MCP endpoint](mcp-endpoint.md)                                  | `scenario_templates`, `run_scenario_template`                                                                                       |
+
+## What a template declares
+
+Every template carries three things next to its graph, so a headless run (CLI `--json`, MCP, a CSMS test harness)
+needs no knowledge of the graph and ends in a verdict (schema 1.12):
+
+- **`ocppVersions`** — the OCPP versions its wire shapes are written for (`["1.6"]` for the `cert16-*` set,
+  `["2.0.1", "2.1"]` for the `-201` ones, all three for the version-agnostic ones). Loading a template on a charge point
+  that speaks another version still works but logs a warning.
+- **`csmsExpectations`** — what the CSMS must do for the intended path: the CSMS-initiated `calls` in the order the
+  scenario waits for them (action, example payload, the status the charge point answers with), the `answers` it must give
+  to a call the charge point makes (an Authorize outcome, a DataTransfer status), and, for the status-triggered
+  templates, the `simulatorSteps` that drive them. See
+  [Scenario format → CSMS expectations](../concepts/scenario-format.md#csms-expectations-schema-112).
+- **`assertions`** — the checks the run is judged by, so a run on the intended path reports `PASS` and a run that went
+  elsewhere reports `FAIL` instead of `SKIPPED`. A template with a deliberate alternative path
+  (`remote-start-timeout-fallback`, `dataflow-authorize-branch-*`) asserts the primary one; the others are reached by
+  answering differently and then fail the primary assertions on purpose.
+
+`list_scenario_templates` (and the daemon-level `scenario.templates`, the MCP `scenario_templates` tool) returns all of it
+per template: `id`, `name`, `description`, `targetType`, `ocppVersions`, `csmsExpectations` and `assertions` (id, type,
+description). The test `templateExpectations.bun.test.ts` runs every template against the fake CSMS driven by its
+declaration alone and requires every assertion to pass, so the metadata cannot drift from the graph.
+
+Assertions look at what the charge point and the CSMS exchange, not at meter registers: whether `MeterValues` frames go
+out depends on the station's configuration, so no template asserts on them.
 
 ## General-purpose templates
 
@@ -177,6 +204,7 @@ Like the `cert16-*` templates they auto-start on connect; use
 | `resilience-authorization-rejected`         | The idTag `RESIL-BLK` is Blocked on the CSMS (operator prepares it) | `Authorize` was answered `Blocked` and no `StartTransaction` followed (1.6 payload).                                                                                                                                                                                                                                                                       |
 | `resilience-power-loss-recovery`            | Operator calls `power.loss`, then `power.restore`, during a session | A BootNotification and then a StatusNotification went out after the power came back. Independent of resume / end.                                                                                                                                                                                                                                          |
 
+Their `csmsExpectations` say what the operator injects (`simulatorSteps`: `disconnect` / `connect` for the two link cuts).
 Assertions on the 1.6 payload shape (`StatusNotification.status`,
 `StopTransaction.reason`, `idTagInfo`) make those templates 1.6 scenarios; the
 communication-loss and power-loss ones only look at action names. Checks run

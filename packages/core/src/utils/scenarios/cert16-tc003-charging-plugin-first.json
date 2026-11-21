@@ -85,5 +85,38 @@
     { "id": "e6", "source": "meter-auto", "target": "tx-stop" },
     { "id": "e7", "source": "tx-stop", "target": "plug-out" },
     { "id": "e8", "source": "plug-out", "target": "end-1" }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [],
+    "note": "No CSMS action; the tag CERT003 must be authorized (the default answer)."
+  },
+  "assertions": [
+    {
+      "id": "preparing",
+      "type": "state_transition",
+      "targetStatus": "Preparing",
+      "description": "connector reaches Preparing"
+    },
+    {
+      "id": "started",
+      "type": "payload_match",
+      "action": "StartTransaction",
+      "payload": { "idTag": "CERT003" },
+      "description": "StartTransaction carries idTag CERT003"
+    },
+    {
+      "id": "charging",
+      "type": "state_transition",
+      "targetStatus": "Charging",
+      "description": "connector reaches Charging"
+    },
+    {
+      "id": "stop-after-start",
+      "type": "message_after",
+      "before": { "action": "StartTransaction" },
+      "after": { "action": "StopTransaction" },
+      "description": "StopTransaction after StartTransaction"
+    }
   ]
 }

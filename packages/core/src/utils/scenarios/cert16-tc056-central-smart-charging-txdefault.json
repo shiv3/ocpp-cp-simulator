@@ -89,5 +89,56 @@
     { "id": "e5", "source": "csms-set-charging-profile", "target": "delay-10" },
     { "id": "e6", "source": "delay-10", "target": "tx-stop" },
     { "id": "e7", "source": "tx-stop", "target": "end-1" }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "SetChargingProfile",
+        "node": "csms-set-charging-profile",
+        "example": {
+          "connectorId": 1,
+          "csChargingProfiles": {
+            "chargingProfileId": 11,
+            "stackLevel": 0,
+            "chargingProfilePurpose": "TxDefaultProfile",
+            "chargingProfileKind": "Absolute",
+            "chargingSchedule": {
+              "chargingRateUnit": "W",
+              "chargingSchedulePeriod": [{ "startPeriod": 0, "limit": 11000 }],
+              "duration": 3600
+            }
+          }
+        },
+        "expectedStatus": "Accepted"
+      }
+    ],
+    "note": "Sent while the transaction runs."
+  },
+  "assertions": [
+    {
+      "id": "started",
+      "type": "payload_match",
+      "action": "StartTransaction",
+      "payload": { "idTag": "CERT056" },
+      "description": "StartTransaction carries idTag CERT056"
+    },
+    {
+      "id": "txdefault-profile",
+      "type": "payload_match",
+      "action": "SetChargingProfile",
+      "direction": "received",
+      "payload": {
+        "csChargingProfiles": { "chargingProfilePurpose": "TxDefaultProfile" }
+      },
+      "description": "SetChargingProfile from the CSMS carries the expected payload"
+    },
+    {
+      "id": "profile-accepted",
+      "type": "response_status",
+      "action": "SetChargingProfile",
+      "status": "Accepted",
+      "description": "SetChargingProfile answered Accepted"
+    }
   ]
 }

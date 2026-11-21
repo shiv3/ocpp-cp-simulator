@@ -71,5 +71,36 @@
       "target": "status-available"
     },
     { "id": "e5", "source": "status-available", "target": "end-1" }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "ReserveNow",
+        "node": "trigger-reserve-now",
+        "example": {
+          "connectorId": 1,
+          "expiryDate": "<now+3600s>",
+          "idTag": "CERT-RES01",
+          "reservationId": 7
+        },
+        "expectedStatus": "Unavailable"
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "id": "reserve-received",
+      "type": "ocpp_received",
+      "action": "ReserveNow",
+      "description": "ReserveNow received from the CSMS"
+    },
+    {
+      "id": "reserve-unavailable",
+      "type": "response_status",
+      "action": "ReserveNow",
+      "status": "Unavailable",
+      "description": "ReserveNow answered Unavailable"
+    }
   ]
 }

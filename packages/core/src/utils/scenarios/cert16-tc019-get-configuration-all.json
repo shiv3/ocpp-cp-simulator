@@ -34,5 +34,23 @@
   "edges": [
     { "id": "e1", "source": "start-1", "target": "trigger-get-config" },
     { "id": "e3", "source": "trigger-get-config", "target": "end-1" }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [
+      {
+        "action": "GetConfiguration",
+        "node": "trigger-get-config",
+        "example": {}
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "id": "get-configuration-received",
+      "type": "ocpp_received",
+      "action": "GetConfiguration",
+      "description": "GetConfiguration received from the CSMS"
+    }
   ]
 }

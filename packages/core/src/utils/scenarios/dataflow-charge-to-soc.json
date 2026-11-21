@@ -162,5 +162,33 @@
       "source": "plug-out",
       "target": "end-1"
     }
+  ],
+  "ocppVersions": ["1.6"],
+  "csmsExpectations": {
+    "calls": [],
+    "answers": [
+      {
+        "action": "Authorize",
+        "when": { "idTag": "DEMO-TAG-1" },
+        "respond": { "idTagInfo": { "status": "Accepted" } }
+      }
+    ],
+    "note": "No CSMS action; the transaction runs until the SoC reaches 80 % (about 15 s of simulated metering) or 2 hours pass."
+  },
+  "assertions": [
+    {
+      "id": "started",
+      "type": "payload_match",
+      "action": "StartTransaction",
+      "payload": { "idTag": "DEMO-TAG-1" },
+      "description": "StartTransaction carries idTag DEMO-TAG-1"
+    },
+    {
+      "id": "stop-after-start",
+      "type": "message_after",
+      "before": { "action": "StartTransaction" },
+      "after": { "action": "StopTransaction" },
+      "description": "StopTransaction after StartTransaction"
+    }
   ]
 }
